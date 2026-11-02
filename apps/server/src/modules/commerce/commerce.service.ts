@@ -16,7 +16,7 @@ import { Service, Prisma, Payment } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isLegalTransition, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
 import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -653,8 +653,17 @@ export class CommerceService {
   }
 
   /**
-   * Undo an AI-created invoice. If it is still a draft, soft-delete it;
-   * otherwise revert it to DRAFT so a human can review.
+   * Undo an AI-created invoice. If it is still a draft, soft-delete it.
+   *
+   * V1-42-DM-LIFECYCLE-OWNER-CAS (CF-39): every status move goes through the
+   * workflow. An issued invoice nothing has been paid on (SENT, PENDING,
+   * OVERDUE, FAILED: VOID is reachable) is voided through
+   * InvoiceWorkflowService.transition, which reverses its accrual receivable
+   * and emits invoice.void; the base reverted it to DRAFT with a raw write and
+   * left the receivable open. An invoice money or credit has touched (PAID,
+   * PARTIALLY_PAID, the credit statuses) still returns to DRAFT for a human to
+   * review, now compare-and-set in the workflow (returnToDraftOnUndo). VOID
+   * is terminal: undoing it is a 409.
    */
   async undoInvoice(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
@@ -671,10 +680,12 @@ export class CommerceService {
       });
       return { id: invoiceId, status: 'deleted' };
     }
-    const reverted = await this.prisma.client.invoice.update({
-      where: { id: invoiceId },
-      data: { status: 'DRAFT' },
-    });
+    if (isLegalTransition(invoice.status as InvoiceStatus, 'VOID')) {
+      const voided = await this.invoiceWorkflow.transition(invoiceId, 'VOID');
+      this.statsCache.invalidateCache(businessId);
+      return { id: invoiceId, status: 'voided', invoice: voided };
+    }
+    const reverted = await this.invoiceWorkflow.returnToDraftOnUndo(invoiceId);
     this.statsCache.invalidateCache(businessId);
     return { id: invoiceId, status: 'reverted_to_draft', invoice: reverted };
   }
@@ -1443,7 +1454,7 @@ export class CommerceService {
   }) {
     const existingInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: params.invoiceId },
-      select: { businessId: true },
+      select: { businessId: true, status: true },
     });
     if (!existingInvoice) {
       throw new NotFoundException('Invoice not found');
@@ -1466,6 +1477,28 @@ export class CommerceService {
       if (!membership) {
         throw new ForbiddenException('Not authorized to update this invoice');
       }
+    }
+    if (existingInvoice.status === params.status) {
+      // V1-42-DM-LIFECYCLE-OWNER-CAS: asking for the status the invoice already
+      // holds is answered idempotently (the send-email of a DRAFT that another
+      // send issued meanwhile, a KEY compensation voiding a VOID invoice): no
+      // status write, no posting, no invoice.* event, no timeline entry. The
+      // workflow refuses a same-status transition 409 so that of two racing
+      // moves exactly one wins and emits; this route only answers the
+      // request. A sentAt / dueDate it carries is still applied, as the
+      // transition applied it before.
+      const fields: { sentAt?: Date; dueDate?: Date } = {};
+      if (params.sentAt) fields.sentAt = new Date(params.sentAt);
+      if (params.dueDate) fields.dueDate = new Date(params.dueDate);
+      if (Object.keys(fields).length > 0) {
+        await this.prisma.client.invoice.update({ where: { id: params.invoiceId }, data: fields });
+      }
+      const current = await this.prisma.client.invoice.findUnique({
+        where: { id: params.invoiceId },
+        include: { items: true, contact: true, booking: true },
+      });
+      if (!current) throw new NotFoundException('Invoice not found');
+      return current;
     }
     // Route through the workflow so transitions like PAID -> SENT throw
     // 409 instead of silently corrupting the row.

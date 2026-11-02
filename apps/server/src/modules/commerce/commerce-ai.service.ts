@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { CommerceService } from './commerce.service';
 import {
   buildCommerceCommandPrompt,
   buildRevenueAnalysisPrompt,
@@ -27,6 +28,9 @@ export class CommerceAiService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(CommerceStatsService) private readonly stats: CommerceStatsService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
+    // V1-42-DM-LIFECYCLE-OWNER-CAS: invoice status commands go through the
+    // operator paths (recordPayment, the workflow), never a raw status write.
+    @Inject(CommerceService) private readonly commerce: CommerceService,
   ) {}
 
   private get db() {
@@ -805,7 +809,22 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
     }
   }
 
-  async executeCommand(businessId: string, action: string, params: Record<string, any> = {}) {
+  /**
+   * @param actorId The authenticated caller (the route's `req.user.id`): the
+   *   member the payment and the status change are recorded against.
+   *
+   * V1-42-DM-LIFECYCLE-OWNER-CAS (CF-39): mark_paid and void_invoice wrote the
+   * status raw. mark_paid set PAID with no payment row and no posting (and on
+   * any status, VOID included); void_invoice set VOID on any status (PAID
+   * included) and left the accrual receivable open. They now take the
+   * operator paths: mark_paid is CommerceService.markInvoicePaid (the
+   * remaining balance recorded through recordPayment: one payment, its
+   * posting, the reconcile to PAID, invoice.paid), and void_invoice is
+   * CommerceService.updateInvoiceStatus (the workflow's compare-and-set VOID,
+   * the AR reversal, invoice.void). A move the workflow refuses is the 409 it
+   * answers.
+   */
+  async executeCommand(businessId: string, action: string, params: Record<string, any> = {}, actorId: string | null = null) {
     this.logger.log(`Executing commerce command: ${action} for business ${businessId}`);
     const start = Date.now();
 
@@ -814,10 +833,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         case 'mark_paid': {
           const invoice = await this.findInvoice(businessId, params);
           if (!invoice) return { success: false, error: `Invoice not found` };
-          await this.db.invoice.update({
-            where: { id: invoice.id },
-            data: { status: 'PAID', paidAt: new Date() },
-          });
+          await this.commerce.markInvoicePaid(invoice.id, actorId, businessId);
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Invoice #${invoice.invoiceNumber} marked as paid`, invoiceId: invoice.id };
         }
@@ -825,10 +841,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         case 'void_invoice': {
           const invoice = await this.findInvoice(businessId, params);
           if (!invoice) return { success: false, error: `Invoice not found` };
-          await this.db.invoice.update({
-            where: { id: invoice.id },
-            data: { status: 'VOID' },
-          });
+          await this.commerce.updateInvoiceStatus({ invoiceId: invoice.id, status: 'VOID', actorId, businessId });
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Invoice #${invoice.invoiceNumber} voided`, invoiceId: invoice.id };
         }

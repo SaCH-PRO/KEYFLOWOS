@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, Optional, OnModuleInit, OnModuleDestroy, NotFoundException, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, OnModuleInit, OnModuleDestroy, NotFoundException, ConflictException, forwardRef } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiOversightService } from '../ai/ai-oversight.service';
@@ -9,6 +9,7 @@ import { ClientMomentumService } from '../momentum/client-momentum.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CrmTimelineService } from '../crm/crm-timeline.service';
 import { CommerceService } from '../commerce/commerce.service';
+import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
 
 const MOMENTUM_SWEEP_HOUR = 6;
@@ -116,6 +117,11 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
 
   private getCommerce(): CommerceService {
     return this.moduleRef.get(CommerceService, { strict: false });
+  }
+
+  /** V1-42: the invoice lifecycle owner, resolved at call time like CommerceService. */
+  private getInvoiceWorkflow(): InvoiceWorkflowService {
+    return this.moduleRef.get(InvoiceWorkflowService, { strict: false });
   }
 
   /**
@@ -579,18 +585,25 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
       if (existingForMilestone && !deferred) continue;
 
       if (invoice.status === 'SENT' && daysPastDue >= graceDays) {
-        await this.prisma.client.invoice.update({
-          where: { id: invoice.id },
-          data: { status: 'OVERDUE' },
-        });
-
-        this.events.emit('invoice.overdue', {
-          businessId,
-          invoiceId: invoice.id,
-          invoiceNumber: invoice.invoiceNumber,
-          daysPastDue,
-          source: 'delegation_loop',
-        });
+        // V1-42-DM-LIFECYCLE-OWNER-CAS (CF-39): the move goes through the
+        // workflow, which writes it compare-and-set and emits invoice.overdue
+        // with the InvoiceStatusPayload ({ invoice, businessId, status }) every
+        // listener reads. This raw-wrote OVERDUE and emitted a flat
+        // { invoiceId, invoiceNumber, daysPastDue, source } payload, and it
+        // overwrote whatever another writer committed after the read above.
+        try {
+          await this.getInvoiceWorkflow().transition(invoice.id, 'OVERDUE');
+        } catch (err) {
+          if (!(err instanceof ConflictException)) throw err;
+          // Another writer moved the invoice after the read: the overdue
+          // scheduler (already OVERDUE: its event stands, the reminder below
+          // still applies) or a payment (nothing to chase: skip it).
+          const now = await this.prisma.client.invoice.findFirst({
+            where: { id: invoice.id, businessId },
+            select: { status: true },
+          });
+          if (now?.status !== 'OVERDUE') continue;
+        }
       }
 
       result.itemsMatched++;

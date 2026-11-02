@@ -1,8 +1,9 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { CommerceAiService } from './commerce-ai.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from '../crm/guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from '../crm/guards/feature-flag.guard';
 import { checkAiRateLimit } from '../crm/ai-rate-limit.util';
@@ -149,19 +150,29 @@ export class CommerceAiController {
     return this.commerceAi.interpretCommand(businessId, body.command);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  /**
+   * V1-42-DM-LIFECYCLE-OWNER-CAS: executes revenue writes (mark an invoice
+   * paid, void it, products, quotes), so it requires revenue:write like every
+   * other revenue write route. It carried AuthGuard and BusinessGuard only, so
+   * a member whose revenue scope is none could mark an invoice paid. The
+   * caller is the actor the payment and the status change are recorded
+   * against.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'write')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-execute')
   aiExecute(
     @Param('businessId') businessId: string,
     @Body() body: { action: string; params?: Record<string, any> },
+    @Req() req: { user?: { id?: string } },
   ) {
     if (!body.action || typeof body.action !== 'string') {
       throw new BadRequestException('action is required');
     }
     checkAiRateLimit(businessId);
-    return this.commerceAi.executeCommand(businessId, body.action, body.params ?? {});
+    return this.commerceAi.executeCommand(businessId, body.action, body.params ?? {}, req?.user?.id ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)

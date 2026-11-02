@@ -12,6 +12,9 @@
  *         the other is refused 409; invoice.overdue is emitted once (base: both succeed, two events)
  *   LC-02 RED-BEFORE a repeated transition to the status the invoice already has is a 409 with no event
  *         (the loser of a race that read after the winner committed; base: success and a second event)
+ *   LC-02b RED-BEFORE the operator status route answers a request for the status the invoice already
+ *         holds idempotently: 200, no write, no second event (the send-email of a DRAFT another send
+ *         issued meanwhile relies on it: optional-services-fail-visibly SEC-CMF4-3)
  *   LC-03 RED-BEFORE a writer that moved the invoice while a transition was in flight wins: the
  *         transition that read SENT is refused 409 and does not overwrite PAID with OVERDUE (base: it did)
  *   DL-01 RED-BEFORE DelegationLoop payment recovery moves SENT -> OVERDUE through the workflow and the
@@ -211,24 +214,30 @@ async function interleave(
 ): Promise<PromiseSettledResult<unknown>[]> {
   let release!: () => void;
   const gate = new Promise<void>((r) => { release = r; });
-  let locked!: () => void;
-  const isLocked = new Promise<void>((r) => { locked = r; });
+  let locked!: (pid: number) => void;
+  const isLocked = new Promise<number>((r) => { locked = r; });
   const holder = db.$transaction(
     async (tx: any) => {
+      const [me] = await tx.$queryRawUnsafe(`SELECT pg_backend_pid()::int AS pid`);
       await tx.$queryRawUnsafe(`SELECT id FROM invoices WHERE id = $1 FOR UPDATE`, invoiceId);
-      locked();
+      locked(me.pid);
       await gate;
       if (during) await during(tx);
     },
     { timeout: 30_000, maxWait: 10_000 },
   );
-  await isLocked;
+  const holderPid = await isLocked;
   const started = calls();
   const deadline = Date.now() + 10_000;
   let seen = 0;
   while (Date.now() < deadline) {
+    // Backends waiting on the holder, directly or behind a waiter queued on the same row
+    // (other suites' lock waits on this database are not counted).
     const [row] = await db.$queryRawUnsafe(
-      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+      `WITH w AS (SELECT pid, pg_blocking_pids(pid) AS b FROM pg_stat_activity WHERE datname = current_database())
+       SELECT count(*)::int AS n FROM w
+        WHERE $1 = ANY(w.b) OR EXISTS (SELECT 1 FROM w w2 WHERE w2.pid = ANY(w.b) AND $1 = ANY(w2.b))`,
+      holderPid,
     );
     seen = row.n;
     if (seen >= waiters) break;
@@ -389,6 +398,18 @@ describe('CAS: one transition wins, the other is refused 409 with no event (CF-3
   it('LC-02 RED-BEFORE: transition to the status the invoice already holds -> 409, no event, nothing written', async () => {
     const inv = await seedInvoice('lc02', 'OVERDUE');
     await expect(workflow.transition(inv, 'OVERDUE')).rejects.toMatchObject({ status: 409 });
+    expect((await invoiceRow(inv)).status).toBe('OVERDUE');
+    expect(eventsFor(inv)).toHaveLength(0);
+  }, 60_000);
+
+  it('LC-02b RED-BEFORE: PATCH status/overdue on an invoice already OVERDUE -> 200, answered idempotently: no second invoice.overdue', async () => {
+    const inv = await seedInvoice('lc02b', 'OVERDUE');
+    const res = await agent()
+      .patch(`/commerce/invoices/${inv}/status/overdue`)
+      .set(HEADER, ID.owner)
+      .send({ businessId: ID.biz, status: 'OVERDUE' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: inv, status: 'OVERDUE' });
     expect((await invoiceRow(inv)).status).toBe('OVERDUE');
     expect(eventsFor(inv)).toHaveLength(0);
   }, 60_000);

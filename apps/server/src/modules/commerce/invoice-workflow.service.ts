@@ -74,6 +74,25 @@ const ALLOWED_TRANSITIONS: Record<InvoiceStatus, ReadonlySet<InvoiceStatus>> = {
  */
 const REFUND_REOPENS_TO_SENT: ReadonlySet<InvoiceStatus> = new Set<InvoiceStatus>(['PAID', 'PARTIALLY_PAID']);
 
+/**
+ * V1-42-DM-LIFECYCLE-OWNER-CAS: the statuses the AI undo
+ * (CommerceService.undoInvoice) returns to DRAFT. An issued invoice nothing
+ * has been paid on (SENT, PENDING, OVERDUE, FAILED) is voided instead, through
+ * transition(), so its receivable is reversed; DRAFT is soft-deleted; VOID is
+ * terminal and is not undone. What is left are the statuses money or credit
+ * has touched, which cannot be voided: the undo has always put those back to
+ * DRAFT for a person to review (payments-mark-paid MP-16, payments-manual
+ * PM-20), and it now does so here, compare-and-set, rather than by a raw
+ * write in CommerceService.
+ */
+const UNDO_RETURNS_TO_DRAFT: ReadonlySet<string> = new Set<string>([
+  'PAID',
+  'PARTIALLY_PAID',
+  'PARTIALLY_CREDITED',
+  'FULLY_CREDITED',
+  'PARTIAL',
+]);
+
 export interface PaymentLike {
   amount: number;
   status: string; // 'SUCCESSFUL' | 'PENDING' | 'FAILED' | 'REFUNDED'
@@ -227,6 +246,22 @@ export function deriveStatusAfterPayment(
   if (balance.net > 0) return 'PARTIALLY_PAID';
   if (balance.refunded > 0 && REFUND_REOPENS_TO_SENT.has(currentStatus)) return 'SENT';
   return currentStatus;
+}
+
+/**
+ * V1-42-DM-LIFECYCLE-OWNER-CAS: run a status write whose `where` carries the
+ * status the caller read (`{ id, status: <read> }`). When that row no longer
+ * holds that status (another writer committed in between), Prisma finds no
+ * record to update (P2025) and the move is refused 409: nothing is written,
+ * the caller's transaction rolls back, and no event or posting follows.
+ */
+async function compareAndSet<T>(write: () => Promise<T>, conflict: string): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    if ((err as { code?: string } | null)?.code === 'P2025') throw new ConflictException(conflict);
+    throw err;
+  }
 }
 
 export function isLegalTransition(from: InvoiceStatus, to: InvoiceStatus): boolean {
@@ -416,6 +451,17 @@ export class InvoiceWorkflowService {
    * Generic transition entry-point used by callers that already know the
    * target status (UI mark-paid, void, send, mark-overdue scheduler, etc).
    * Enforces the allowed-transitions map and emits the matching event.
+   *
+   * V1-42-DM-LIFECYCLE-OWNER-CAS (CF-39): one caller wins a move. The status
+   * is written compare-and-set on the status this call read
+   * (`UPDATE ... WHERE id = $1 AND status = <read>`): a concurrent writer that
+   * committed in between (a second transition, a payment's reconcile) leaves
+   * nothing to update, and this call is refused 409 with no write, posting or
+   * event. A move to the status the invoice already holds is refused 409 too
+   * (the loser of a race that read after the winner committed), except the
+   * map's explicit self-moves (PARTIALLY_PAID -> PARTIALLY_PAID). So of two
+   * transition(id, 'OVERDUE') calls exactly one succeeds and invoice.overdue
+   * is emitted once, whatever the interleaving.
    */
   async transition(
     invoiceId: string,
@@ -442,18 +488,27 @@ export class InvoiceWorkflowService {
         select: { id: true, status: true, businessId: true },
       });
       if (!existing) throw new NotFoundException('Invoice not found');
-      this.assertLegalTransition(existing.status as InvoiceStatus, to);
+      const from = existing.status as InvoiceStatus;
+      this.assertLegalTransition(from, to);
+      if (from === to && !ALLOWED_TRANSITIONS[from]?.has(to)) {
+        throw new ConflictException(`Invoice is already ${to}`);
+      }
 
       const data: Record<string, unknown> = { status: to };
       if (extra.sentAt) data.sentAt = extra.sentAt;
       if (extra.dueDate !== undefined) data.dueDate = extra.dueDate;
       if (to === 'PAID') data.paidAt = extra.paidAt ?? new Date();
 
-      const updated = await db.invoice.update({
-        where: { id: invoiceId },
-        data,
-        include: { items: true, contact: true, booking: true },
-      });
+      // V1-42: compare-and-set on the status read above (see the doc comment).
+      const updated = await compareAndSet(
+        () =>
+          db.invoice.update({
+            where: { id: invoiceId, status: existing.status },
+            data,
+            include: { items: true, contact: true, booking: true },
+          }),
+        `Invoice status changed while ${from} -> ${to} was in flight; reload it and try again`,
+      );
 
       // FIN2 — accrual recognition: post AR/Revenue when an invoice goes
       // SENT (or PENDING, which is the awaiting-confirmation flavour of
@@ -509,6 +564,29 @@ export class InvoiceWorkflowService {
       });
     }
     return updated;
+  }
+
+  /**
+   * V1-42: the AI undo's return of an invoice to DRAFT, for the statuses in
+   * UNDO_RETURNS_TO_DRAFT only (money or credit is on it, so it cannot be
+   * voided). Compare-and-set like transition(); writes the status alone, with
+   * no posting and no event, exactly as the undo did before it moved here.
+   * Any other status is a 409: CommerceService.undoInvoice voids an issued
+   * unpaid invoice through transition() and soft-deletes a DRAFT, and VOID is
+   * terminal.
+   */
+  async returnToDraftOnUndo(invoiceId: string) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const existing = await tx.invoice.findUnique({ where: { id: invoiceId }, select: { status: true } });
+      if (!existing) throw new NotFoundException('Invoice not found');
+      if (!UNDO_RETURNS_TO_DRAFT.has(existing.status)) {
+        throw new ConflictException(`A ${existing.status} invoice cannot be undone to DRAFT`);
+      }
+      return compareAndSet(
+        () => tx.invoice.update({ where: { id: invoiceId, status: existing.status }, data: { status: 'DRAFT' } }),
+        'Invoice status changed while it was being undone; reload it and try again',
+      );
+    });
   }
 
   /**
