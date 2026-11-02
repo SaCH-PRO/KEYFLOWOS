@@ -1,4 +1,20 @@
-import { Body, Controller, Get, Inject, Param, Post, Query, Req, UseGuards, UnauthorizedException, BadRequestException } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Inject,
+  Logger,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+  UnauthorizedException,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BusinessGraphService } from './business-graph.service';
@@ -13,9 +29,100 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
 import { ActionExecutedPayload, ActionBlockedPayload } from '../../core/event-bus/events.types';
+import { CanonicalModule, LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { getToolByName } from './flow-tool-registry';
+import type { BusinessRole } from './role-engine.service';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
+}
+
+/**
+ * V1-31b-KEY-ACTION-ROUTES-BIND (V1-31 review SEC-V131-1, M46). The module scope
+ * a tool executed from POST actions/businesses/:businessId/execute needs, by
+ * tool-name prefix (an entry ending in '_') or exact name; the first match
+ * wins. The executing member must hold it as ModuleScopeGuard computes scopes
+ * (a 'read' family tool needs read, every other tool write). A tool that
+ * matches nothing is refused: deny by default, so a tool added to the
+ * registry is not executable from this route until it is mapped here.
+ */
+export const GRAPH_ACTION_TOOL_MODULES: ReadonlyArray<readonly [string, CanonicalModule]> = [
+  ['fetch_', 'analytics'],
+  ['reports_', 'analytics'],
+  ['crm_', 'crm'],
+  ['deals_', 'crm'],
+  ['call_', 'crm'],
+  ['sequence_', 'crm'],
+  ['segment_contacts', 'crm'],
+  ['tag_contact', 'crm'],
+  ['create_followup_queue', 'crm'],
+  ['draft_followup_message', 'crm'],
+  ['commerce_', 'revenue'],
+  ['payments_', 'revenue'],
+  ['finance_', 'revenue'],
+  ['reconcile_', 'revenue'],
+  ['retainers_', 'revenue'],
+  ['draft_payment_reminder', 'revenue'],
+  ['expenses_', 'expenses'],
+  ['bookings_', 'bookings'],
+  ['calendar_', 'bookings'],
+  ['projects_', 'projects'],
+  ['time_', 'projects'],
+  ['goals_', 'projects'],
+  ['draft_project_update', 'projects'],
+  ['content_', 'content'],
+  ['social_', 'content'],
+  ['marketing_', 'content'],
+  ['assets_', 'content'],
+  ['comms_', 'content'],
+  ['community_', 'content'],
+  ['seo_', 'content'],
+  ['sync_seo_pages', 'content'],
+  ['queue_campaign', 'content'],
+  ['draft_campaign_bundle', 'content'],
+  ['generate_content_brief', 'content'],
+  ['automations_', 'automations'],
+  ['delegation_', 'automations'],
+  ['enable_flow_with_approval', 'automations'],
+  ['store_', 'storefront'],
+  ['inventory_', 'storefront'],
+  ['suppliers_', 'storefront'],
+  ['marketplace_', 'storefront'],
+  ['apply_storefront_recommendation', 'storefront'],
+  ['draft_storefront_copy', 'storefront'],
+  ['structure_', 'team'],
+  ['people_', 'team'],
+  ['performance_', 'team'],
+  ['payroll_', 'operations'],
+  ['contracts_', 'operations'],
+  ['contract_', 'operations'],
+  ['helpdesk_', 'operations'],
+  ['inbox_', 'operations'],
+  ['approval_', 'operations'],
+  ['command_', 'operations'],
+  ['procurement_', 'operations'],
+  ['governance_', 'operations'],
+  ['evidence_', 'operations'],
+  ['documents_', 'operations'],
+  ['drive_', 'operations'],
+];
+
+/** The module scope a graph action needs, or null when the tool is mapped to none (refused). */
+export function graphActionModuleScope(toolName: string): { module: CanonicalModule; minLevel: 'read' | 'write' } | null {
+  const entry = GRAPH_ACTION_TOOL_MODULES.find(([key]) => (key.endsWith('_') ? toolName.startsWith(key) : toolName === key));
+  if (!entry) return null;
+  return { module: entry[1], minLevel: getToolByName(toolName)?.family === 'read' ? 'read' : 'write' };
+}
+
+/** The plan states whose pending steps this route may still execute. */
+const OPEN_PLAN_STATUSES = new Set(['draft', 'pending', 'approved', 'executing']);
+
+/** What a caller is told when it sends a tool name and arguments instead of a stored step. */
+const UNBOUND_GRAPH_ACTION =
+  'An action is executed only as a plan step the server holds: send planId and planStepId (from POST actions/businesses/:businessId/plan). A tool name and arguments sent by the client are not executed.';
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function safeInt(val: string | undefined, fallback: number): number {
@@ -27,6 +134,8 @@ function safeInt(val: string | undefined, fallback: number): number {
 @Controller()
 @UseGuards(CrmRateLimitGuard)
 export class GraphActionsController {
+  private readonly logger = new Logger(GraphActionsController.name);
+
   constructor(
     @Inject(BusinessGraphService) private readonly businessGraph: BusinessGraphService,
     @Inject(IntentParserService) private readonly intentParser: IntentParserService,
@@ -75,7 +184,10 @@ export class GraphActionsController {
     if (intent.clarificationNeeded) {
       return { intent, plan: null, clarificationNeeded: true };
     }
-    const plan = await this.planner.createPlan(businessId, intent, userId);
+    const created = await this.planner.createPlan(businessId, intent, userId);
+    // V1-31b: the stored plan, with the step ids POST .../execute takes
+    // (createPlan answers its steps without ids).
+    const plan = (await this.planner.getPlan(created.id, businessId)) ?? created;
 
     const snapshot = await this.businessGraph.getSnapshot(businessId);
     const affectedModules = intent.modules;
@@ -89,44 +201,103 @@ export class GraphActionsController {
     return { intent, plan, clarificationNeeded: false, riskAssessment };
   }
 
+  /**
+   * V1-31b-KEY-ACTION-ROUTES-BIND (V1-31 review SEC-V131-1, M46). Executes one
+   * plan step the server holds, looked up by planId and planStepId inside the
+   * guarded business: the step's own tool and stored arguments, never a tool
+   * name or arguments the client sends (those are ignored beside the ids, and
+   * refused 400 without them). A step of another business, of another plan
+   * or that does not exist is the same 404. The executing member must hold the
+   * tool's module scope (graphActionModuleScope; an unmapped tool is refused).
+   * The step is claimed pending -> executing (or awaiting_approval) by one
+   * compare-and-set, so a replay or a concurrent call is 409 and runs nothing.
+   * Confirming a stored step by its id is the quick confirmation; a step that
+   * needs formal approval is queued once, with the stored payload, requested
+   * by the caller.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('actions/businesses/:businessId/execute')
   async executeAction(
     @Param('businessId') businessId: string,
-    @Body() body: { toolName: string; args: Record<string, any>; planId?: string; planStepId?: string },
+    @Body() body: { planId?: unknown; planStepId?: unknown; toolName?: unknown; args?: unknown },
     @Req() req: AuthenticatedRequest,
   ) {
-    const userId = req?.user?.id;
-    if (!userId) throw new UnauthorizedException('Authenticated user required');
-    if (!body.toolName?.trim()) throw new BadRequestException('toolName is required');
+    const user = req?.user;
+    const userId = user?.id;
+    if (!user || !userId) throw new UnauthorizedException('Authenticated user required');
+    const planId = typeof body?.planId === 'string' && body.planId.length > 0 ? body.planId : null;
+    const planStepId = typeof body?.planStepId === 'string' && body.planStepId.length > 0 ? body.planStepId : null;
+    if (!planId || !planStepId) throw new BadRequestException(UNBOUND_GRAPH_ACTION);
 
-    const decision = await this.governance.evaluate(businessId, body.toolName);
+    const step = await this.prisma.client.aiPlanStep.findFirst({
+      where: { id: planStepId, planId, plan: { businessId } },
+      include: { plan: { select: { status: true, role: true } } },
+    });
+    if (!step) throw new NotFoundException('Plan step not found');
+    if (body.toolName !== undefined || body.args !== undefined) {
+      this.logger.warn(`Plan step ${step.id} was sent with a client tool name or arguments; only the stored step is considered`);
+    }
+    const toolName = step.toolName;
+    if (!toolName) throw new BadRequestException('This plan step has no action to execute');
+    if (!OPEN_PLAN_STATUSES.has(step.plan.status)) {
+      throw new ConflictException(`This plan is ${step.plan.status}; its steps are not executed`);
+    }
+    const scope = graphActionModuleScope(toolName);
+    if (!scope) {
+      throw new ForbiddenException(`Tool "${toolName}" is mapped to no module scope, so it is not executed from this route`);
+    }
+    await this.requireModuleScope(businessId, { id: userId, role: user.role }, scope.module, scope.minLevel);
+
+    const spent = () => new ConflictException('This plan step was already executed or is being executed');
+    if (step.status !== 'pending') throw spent();
+
+    const args: Record<string, unknown> = isJsonObject(step.inputPayload) ? { ...step.inputPayload } : {};
+    const role = (step.role ?? step.plan.role ?? undefined) as BusinessRole | undefined;
+    const decision = await this.governance.evaluate(businessId, toolName, undefined, role);
+    /** The claim: true when this call moved the step out of 'pending'. */
+    const claim = async (status: string) => {
+      const { count } = await this.prisma.client.aiPlanStep.updateMany({
+        where: { id: step.id, planId, status: 'pending' },
+        data: { status, ...(status === 'executing' ? { startedAt: new Date() } : {}) },
+      });
+      return count === 1;
+    };
 
     if (!decision.allowed) {
+      // Nothing is claimed: the step can run once policy allows it.
       const blockedPayload: ActionBlockedPayload = {
         businessId,
-        toolName: body.toolName,
+        toolName,
         reason: decision.reason ?? 'Governance policy',
         riskTier: decision.tier,
       };
       this.eventEmitter.emit('action.blocked', blockedPayload);
-      return {
-        success: false,
-        blocked: true,
-        reason: decision.reason,
-        tier: decision.tier,
-      };
+      return { success: false, blocked: true, reason: decision.reason, tier: decision.tier };
     }
 
     if (decision.requiresFormalApproval || decision.requiresAdminApproval) {
-      const approval = await this.governance.createApprovalItem(businessId, {
-        toolName: body.toolName,
-        title: `Execute ${body.toolName}`,
-        description: `User-initiated action execution`,
-        inputPayload: body.args,
-        planId: body.planId,
-        planStepId: body.planStepId,
-      });
+      if (!(await claim('awaiting_approval'))) throw spent();
+      let approval: { id: string };
+      try {
+        approval = await this.governance.createApprovalItem(businessId, {
+          toolName,
+          title: step.action || `Execute ${toolName}`,
+          description: step.description ?? `Plan step ${step.order}`,
+          inputPayload: args,
+          planId,
+          planStepId: step.id,
+        });
+      } catch (err: unknown) {
+        // Nothing was queued: give the step back so it can be asked again.
+        await this.prisma.client.aiPlanStep
+          .updateMany({ where: { id: step.id, planId, status: 'awaiting_approval' }, data: { status: 'pending' } })
+          .catch(() => undefined);
+        throw err;
+      }
+      // createApprovalItem takes no requester; name the member who asked (as V1-31 does for Flow).
+      await this.prisma.client.aiApprovalItem
+        .updateMany({ where: { id: approval.id, businessId }, data: { userId } })
+        .catch((e: unknown) => this.logger.warn(`Could not name the requester of approval item ${approval.id}: ${e instanceof Error ? e.message : String(e)}`));
       return {
         success: false,
         requiresApproval: true,
@@ -136,19 +307,22 @@ export class GraphActionsController {
       };
     }
 
+    if (!(await claim('executing'))) throw spent();
+    const startedAt = Date.now();
     try {
       const result = await this.orchestrator.executeToolDirect(
         businessId,
-        body.toolName,
-        body.args,
-        body.planId,
-        body.planStepId,
+        toolName,
+        args,
+        planId,
+        step.id,
         // KF-EXEC-ACTION-001: the authenticated caller is the principal.
-        { surface: 'GRAPH_ACTION', principalUserId: userId, planId: body.planId ?? null, planStepId: body.planStepId ?? null },
+        { surface: 'GRAPH_ACTION', principalUserId: userId, planId, planStepId: step.id },
       );
       if (result.notCleared) {
         // The action boundary recorded the action and is waiting for it to be
         // confirmed or approved by its server-issued id. Nothing ran.
+        await this.planner.updateStepStatus(step.id, 'awaiting_approval');
         return {
           success: false,
           requiresConfirmation: result.notCleared.disposition === 'AWAITING_CONFIRMATION',
@@ -158,10 +332,17 @@ export class GraphActionsController {
           tier: decision.tier,
         };
       }
+      await this.planner.updateStepStatus(
+        step.id,
+        result.success ? 'completed' : 'failed',
+        result.success && isJsonObject(result.result) ? result.result : null,
+        result.success ? undefined : result.error,
+        Date.now() - startedAt,
+      );
       const executedPayload: ActionExecutedPayload = {
         businessId,
-        toolName: body.toolName,
-        module: this.inferModule(body.toolName),
+        toolName,
+        module: this.inferModule(toolName),
         riskTier: decision.tier,
         success: result.success,
         changedEntities: result.changedEntities,
@@ -174,10 +355,14 @@ export class GraphActionsController {
         followOnSuggestions: result.followOnSuggestions,
         tier: decision.tier,
       };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      await this.planner
+        .updateStepStatus(step.id, 'failed', null, message, Date.now() - startedAt)
+        .catch((e: unknown) => this.logger.warn(`Could not record the failure of plan step ${step.id}: ${e instanceof Error ? e.message : String(e)}`));
       const failPayload: ActionExecutedPayload = {
         businessId,
-        toolName: body.toolName,
+        toolName,
         module: null,
         riskTier: decision.tier,
         success: false,
@@ -185,9 +370,35 @@ export class GraphActionsController {
       this.eventEmitter.emit('action.executed', failPayload);
       return {
         success: false,
-        error: (err as Error).message,
+        error: message,
         tier: decision.tier,
       };
+    }
+  }
+
+  /**
+   * The member's scope on `module`, as ModuleScopeGuard computes it: SUPER_ADMIN
+   * passes; otherwise the membership's explicit scope map, else its role's
+   * defaults. A non-member, or a level below `minLevel`, is 403.
+   */
+  private async requireModuleScope(
+    businessId: string,
+    user: { id: string; role?: string },
+    module: CanonicalModule,
+    minLevel: 'read' | 'write',
+  ): Promise<void> {
+    if (user.role === 'SUPER_ADMIN') return;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: user.id, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) throw new ForbiddenException('Not a member of this business');
+    const scopes: Record<string, string> = isJsonObject(membership.permissionScopes)
+      ? (membership.permissionScopes as Record<string, string>)
+      : defaultScopesForRole(membership.role);
+    const level = scopes[module] || 'none';
+    if (rankOf(level) < LEVEL_RANK[minLevel]) {
+      throw new ForbiddenException(`Insufficient permissions: ${module} requires ${minLevel} access (you have ${level})`);
     }
   }
 

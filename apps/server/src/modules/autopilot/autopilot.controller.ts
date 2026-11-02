@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Inject, Req, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, Query, UseGuards, Inject, Req, Logger, GoneException, UnauthorizedException } from '@nestjs/common';
 import { AutopilotService } from './autopilot.service';
 import { AutopilotAiService } from './autopilot-ai.service';
 import { DelegationLoopService } from './delegation-loop.service';
@@ -6,6 +6,15 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+
+/** The authenticated member resolving an approval (V1-31b); 401 without one. */
+function resolvingUserId(req: { user?: { id?: string } } | undefined): string {
+  const userId = req?.user?.id;
+  if (typeof userId !== 'string' || userId.length === 0) {
+    throw new UnauthorizedException('Authenticated user required');
+  }
+  return userId;
+}
 
 @Controller('autopilot/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -77,20 +86,27 @@ export class AutopilotController {
     return this.autopilotService.updateTaskStatus(taskId, businessId, body.status, body.executedBy);
   }
 
+  /**
+   * V1-31b-KEY-ACTION-ROUTES-BIND: the approver is the authenticated caller.
+   * `approvedBy` came from the request body, so any member could record the
+   * approval in anyone's name; a body value is no longer read.
+   */
   @Post('tasks/:taskId/approve')
   async approveTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
-    @Body() body: { approvedBy: string }
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.autopilotService.approveTask(taskId, businessId, body.approvedBy);
+    return this.autopilotService.approveTask(taskId, businessId, resolvingUserId(req));
   }
 
   @Post('tasks/:taskId/deny')
   async denyTask(
     @Param('businessId') businessId: string,
-    @Param('taskId') taskId: string
+    @Param('taskId') taskId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    resolvingUserId(req);
     return this.autopilotService.denyTask(taskId, businessId);
   }
 
@@ -135,22 +151,21 @@ export class AutopilotController {
     });
   }
 
+  /**
+   * V1-31b-KEY-ACTION-ROUTES-BIND: refused (410). Every KEY "execute action"
+   * route executes only a proposal the server holds, by id. These action ids
+   * (auto_, pending_, overdue_inv_, checkin_, nudge_, postbooking_,
+   * autowelcome_, stalenudge_) are computed on each read by
+   * CrmActionsService and never stored, so there is nothing to bind: the
+   * route took the contact, channel and message from the body and wrote a
+   * "WhatsApp sent" / "email sent" / autopilot timeline row on that contact,
+   * attributed to AI, for a message the server never sent. A member records a
+   * message they sent themselves through the CRM timeline routes.
+   */
   @Post('actions/:actionId/execute')
-  async executeAction(
-    @Param('businessId') businessId: string,
-    @Param('actionId') actionId: string,
-    @Body() body: {
-      contactId: string;
-      channel: string;
-      message: string;
-    }
-  ) {
-    return this.autopilotService.executeAction(
-      businessId,
-      actionId,
-      body.contactId,
-      body.channel,
-      body.message,
+  async executeAction(): Promise<never> {
+    throw new GoneException(
+      'Autopilot suggestions are not stored, so they are not executed here. Record a message you sent yourself on the contact timeline.',
     );
   }
 
