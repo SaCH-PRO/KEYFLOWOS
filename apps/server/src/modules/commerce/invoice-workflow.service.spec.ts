@@ -142,10 +142,13 @@ describe('V1-22 computeBalance in integer cents', () => {
     expect(b).toMatchObject({ total: 1.01, net: 1.01, remaining: 0, isFullyPaid: true, isOverpaid: false });
   });
 
-  it('RED-BEFORE: a legacy total of 1.015 (7 x 0.145) is 1.02 in cents, as a new write stores it; 1.01 paid leaves 0.01', () => {
+  it('a legacy total of 1.015 (7 x 0.145) reads 1.02 in cents, as a new write stores it; 1.01, what the base settled it with, still settles it (CR-V22-1)', () => {
     // The float 1.015 is 1.01499999999999990...: Math.round(1.015 * 100) / 100 read it as 1.01 and settled it with 1.01.
     const b = computeBalance(1.015, [ok(1.01)]);
-    expect(b).toMatchObject({ total: 1.02, remaining: 0.01, isFullyPaid: false, isOverpaid: false });
+    expect(b).toMatchObject({ total: 1.02, paid: 1.01, remaining: 0, isFullyPaid: true, isOverpaid: false });
+    expect(deriveStatusAfterPayment('PAID', b)).toBe('PAID');
+    // 1.00 settles neither reading.
+    expect(computeBalance(1.015, [ok(1)])).toMatchObject({ total: 1.02, remaining: 0.02, isFullyPaid: false });
   });
 
   it('a legacy unrounded total (0.1 + 0.2 at 12.5% stored as 0.3375) paid with 0.34 stays PAID, not overpaid', () => {
@@ -182,6 +185,116 @@ describe('V1-22 computeBalance in integer cents', () => {
     expect(roundMoney(2.675, 'USD')).toBe(2.68);
   });
 });
+
+/**
+ * V1-22 review (CR-V22-1): a stored PAID invoice stays PAID. A legacy total
+ * that is not a whole cent has two cent readings (money.ts readTotalCents):
+ * its decimal half away from zero, which is shown, and the base's
+ * Math.round(total * 100), which every pre-V1-22 payment, mark-paid amount and
+ * status was computed against. Either settles it; only above both overpays.
+ */
+describe('V1-22 review CR-V22-1: legacy sub-cent totals keep the statuses the base gave them', () => {
+  const ok = (amount: number) => ({ amount, status: 'SUCCESSFUL' });
+  /** The base computeBalance (f5c93ba0), verbatim, as the oracle for what a stored row's status was. */
+  const baseRound = (x: number) => Math.round(x * 100) / 100;
+  const baseBalance = (total: number, paidRows: number[]) => {
+    const net = baseRound(paidRows.reduce((s, a) => s + a, 0));
+    const t = baseRound(total);
+    return {
+      isFullyPaid: net + 0.005 >= t && t > 0,
+      isOverpaid: net - 0.005 > t,
+      remaining: Math.max(0, baseRound(t - net)),
+    };
+  };
+
+  it('RED-BEFORE (HEAD be6195d6): 8.36 + 12.5% stored as 9.405, paid 9.40 by the base mark-paid: PAID, nothing remaining, a reconcile keeps PAID', () => {
+    const total = 8.36 + (8.36 * 12.5) / 100;
+    expect(total).toBe(9.405);
+    const b = computeBalance(total, [ok(9.4)]);
+    expect(b).toEqual({ total: 9.41, paid: 9.4, refunded: 0, net: 9.4, remaining: 0, isFullyPaid: true, isOverpaid: false });
+    expect(deriveStatusAfterPayment('PAID', b)).toBe('PAID');
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', b)).toBe('PAID');
+  });
+
+  it('the same 9.405: 9.41 (the decimal reading, what mark-paid records now) settles it too and is not an overpayment; 9.42 is', () => {
+    expect(computeBalance(9.405, [ok(9.41)])).toMatchObject({ remaining: 0, isFullyPaid: true, isOverpaid: false });
+    expect(computeBalance(9.405, [ok(9.42)])).toMatchObject({ remaining: 0, isFullyPaid: true, isOverpaid: true });
+  });
+
+  it('the same 9.405 short of both readings stays PARTIALLY_PAID with total - net remaining', () => {
+    const b = computeBalance(9.405, [ok(9.39)]);
+    expect(b).toMatchObject({ total: 9.41, net: 9.39, remaining: 0.02, isFullyPaid: false, isOverpaid: false });
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', b)).toBe('PARTIALLY_PAID');
+  });
+
+  it('the pure rule the other way: a total of 0.40499999999999997 (decimal 0.40, base 0.41) paid 0.41 is PAID and not overpaid', () => {
+    // Not a stored row: Prisma writes a model float with 15 significant digits and reads this back as 0.405
+    // (both readings 0.41). computeBalance is pure, so the band holds whichever reading is the higher.
+    const total = 0.36 + (0.36 * 12.5) / 100;
+    expect(total).toBe(0.40499999999999997);
+    const b = computeBalance(total, [ok(0.41)]);
+    expect(b).toMatchObject({ total: 0.4, paid: 0.41, remaining: 0, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('the band is the two readings, never wider: a legacy 0.3375 reads 0.34 both ways, so 0.33 does not settle it (PARTIALLY_PAID stays)', () => {
+    const total = 0.1 + 0.2 + ((0.1 + 0.2) * 12.5) / 100;
+    const b = computeBalance(total, [ok(0.33)]);
+    expect(b).toMatchObject({ total: 0.34, remaining: 0.01, isFullyPaid: false, isOverpaid: false });
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', b)).toBe('PARTIALLY_PAID');
+    expect(computeBalance(total, [ok(0.35)])).toMatchObject({ isOverpaid: true });
+  });
+
+  it('a whole-cent total has one reading: 100.00 is not settled by 99.99 and is overpaid by 100.01', () => {
+    expect(computeBalance(100, [ok(99.99)])).toMatchObject({ remaining: 0.01, isFullyPaid: false });
+    expect(computeBalance(100, [ok(100.01)])).toMatchObject({ isOverpaid: true });
+    expect(computeBalance(0, [])).toMatchObject({ isFullyPaid: false, remaining: 0 });
+    expect(computeBalance(0, [ok(1)])).toMatchObject({ isFullyPaid: false, isOverpaid: true });
+  });
+
+  it('property: over every legacy taxed total 0.01..250.00 at 5 rates, a row the base settled is settled, not overpaid, nothing remaining', () => {
+    const divergent: string[] = [];
+    let readingsDiffer = 0;
+    for (const rate of [12.5, 10, 7, 8.25, 15]) {
+      for (let s = 1; s <= 25_000; s++) {
+        const subtotal = s / 100;
+        const total = subtotal + (subtotal * rate) / 100;
+        const paidRows = [baseRound(total)]; // what the base mark-paid recorded
+        const before = baseBalance(total, paidRows);
+        const after = computeBalance(total, paidRows.map(ok));
+        if (!before.isFullyPaid) continue;
+        if (toCentsRound(total) !== Math.round(total * 100)) readingsDiffer += 1;
+        if (after.isFullyPaid !== true || after.isOverpaid !== false || after.remaining !== 0) {
+          divergent.push(`${subtotal}@${rate}: ${JSON.stringify(after)}`);
+        }
+      }
+    }
+    // The scan reaches the rows CR-V22-1 is about (the two readings differ on a few hundred of them).
+    expect(readingsDiffer).toBeGreaterThan(100);
+    expect(divergent.slice(0, 5)).toEqual([]);
+  });
+
+  it('property: over the same totals, a status the base did not settle at one cent below both readings is not settled now either', () => {
+    const flipped: string[] = [];
+    for (const rate of [12.5, 10, 7, 8.25, 15]) {
+      for (let s = 1; s <= 25_000; s++) {
+        const subtotal = s / 100;
+        const total = subtotal + (subtotal * rate) / 100;
+        const low = Math.min(toCentsRound(total), Math.round(total * 100)) - 1;
+        if (low <= 0) continue;
+        const paidRows = [low / 100];
+        const before = baseBalance(total, paidRows);
+        const after = computeBalance(total, paidRows.map(ok));
+        if (before.isFullyPaid !== after.isFullyPaid) flipped.push(`${subtotal}@${rate}`);
+      }
+    }
+    expect(flipped.slice(0, 5)).toEqual([]);
+  });
+});
+
+/** The decimal reading of a number in cents, half away from zero (money.ts toCents), via roundMoney. */
+function toCentsRound(x: number): number {
+  return Math.round(roundMoney(x) * 100);
+}
 
 describe('deriveStatusAfterPayment', () => {
   it('keeps VOID locked', () => {

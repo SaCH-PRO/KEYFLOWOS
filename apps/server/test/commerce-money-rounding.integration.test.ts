@@ -29,7 +29,15 @@
  *   L1 RED-BEFORE LEDGER (ACCRUAL): posted Decimal amounts equal the rounded document amounts; AR per invoice nets to
  *                 zero after full payment; debits == credits per invoice
  *   L2 LEDGER control: the B1 invoice's AR nets to zero after 33.33 x 3 + 0.01
- *   E1 existing rows (legacy unrounded Floats) keep their statuses on reconcile
+ *   E1 existing rows (legacy unrounded Floats) keep their statuses on reconcile, including (V1-22 review
+ *      CR-V22-1) rows whose two cent readings differ: 8.36 + 12.5% stored 9.405 and paid 9.40 by the base
+ *      mark-paid stays PAID with nothing due (HEAD be6195d6 read 0.01 due and reconciled it to PARTIALLY_PAID);
+ *      8.44 + 12.5% stored 9.495 and paid 9.50 (its decimal reading) is PAID and not overpaid; 0.3375 paid
+ *      0.33 stays PARTIALLY_PAID (the band is the two readings, not the floor cent). Prisma stores a float
+ *      written through a model with 15 significant digits (0.40499999999999997 is stored and read back as
+ *      0.405), so on a stored row the decimal reading is the higher one
+ *   E2 RED-BEFORE (HEAD) a legacy 9.405 invoice with 9.00 paid: recording 0.40 (the base's remaining) through
+ *      the route settles it: PAID, response / list / detail / payment-link remaining 0, audit overPaid 0
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed), CommerceService,
@@ -71,12 +79,17 @@ const ID = {
   legPaidThree: `${P}legPaidThree`,
   legSent: `${P}legSent`,
   legPaidTenths: `${P}legPaidTenths`,
+  legPaidHalfDown: `${P}legPaidHalfDown`,
+  legPaidHalfTop: `${P}legPaidHalfTop`,
+  legPartialBand: `${P}legPartialBand`,
+  legPartialDiv: `${P}legPartialDiv`,
 };
 
 let db: any;
 let app: any;
 let redis: any;
 let workflow: InvoiceWorkflowService;
+let commerce: any;
 
 const emitted: Array<{ name: string; payload: any }> = [];
 const eventStub = {
@@ -282,6 +295,7 @@ beforeAll(async () => {
     ],
   }).compile();
   workflow = moduleRef.get(InvoiceWorkflowService);
+  commerce = moduleRef.get(CommerceService);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -330,12 +344,20 @@ beforeAll(async () => {
   });
 
   // Existing rows written before this packet, with the unrounded Floats the old arithmetic stored.
-  const legacy: Array<{ id: string; status: string; subtotal: number; taxAmount: number; total: number; payments: number[] }> = [
+  const legacy: Array<{ id: string; status: string; subtotal: number; taxRate?: number; taxAmount: number; total: number; payments: number[] }> = [
     { id: ID.legPaid0375, status: 'PAID', subtotal: 0.1 + 0.2, taxAmount: ((0.1 + 0.2) * 12.5) / 100, total: 0.1 + 0.2 + ((0.1 + 0.2) * 12.5) / 100, payments: [0.34] },
     { id: ID.legPartial, status: 'PARTIALLY_PAID', subtotal: 100, taxAmount: 0, total: 100, payments: [33.33, 33.33, 33.33] },
     { id: ID.legPaidThree, status: 'PAID', subtotal: 0.1 * 3, taxAmount: 0, total: 0.1 * 3, payments: [0.3] },
     { id: ID.legSent, status: 'SENT', subtotal: 10.05, taxAmount: (10.05 * 10) / 100, total: 10.05 + (10.05 * 10) / 100, payments: [] },
     { id: ID.legPaidTenths, status: 'PAID', subtotal: 1, taxAmount: 0, total: 1, payments: Array.from({ length: 10 }, () => 0.1) },
+    // V1-22 review (CR-V22-1): rows where the base's Math.round(total * 100) and the decimal reading differ by a cent.
+    // 9.405: the base read 9.40 and its mark-paid recorded 9.40 (decimal reading 9.41).
+    { id: ID.legPaidHalfDown, status: 'PAID', subtotal: 8.36, taxRate: 12.5, taxAmount: (8.36 * 12.5) / 100, total: 8.36 + (8.36 * 12.5) / 100, payments: [9.4] },
+    // 9.495: the base read 9.49 (and flagged 9.50 paid as overpaid); its decimal reading 9.50 settles it, not overpaid.
+    { id: ID.legPaidHalfTop, status: 'PAID', subtotal: 8.44, taxRate: 12.5, taxAmount: (8.44 * 12.5) / 100, total: 8.44 + (8.44 * 12.5) / 100, payments: [9.5] },
+    // 0.3375 reads 0.34 both ways: 0.33 left 0.01 due at the base and still does.
+    { id: ID.legPartialBand, status: 'PARTIALLY_PAID', subtotal: 0.1 + 0.2, taxRate: 12.5, taxAmount: ((0.1 + 0.2) * 12.5) / 100, total: 0.1 + 0.2 + ((0.1 + 0.2) * 12.5) / 100, payments: [0.33] },
+    { id: ID.legPartialDiv, status: 'PARTIALLY_PAID', subtotal: 8.36, taxRate: 12.5, taxAmount: (8.36 * 12.5) / 100, total: 8.36 + (8.36 * 12.5) / 100, payments: [9] },
   ];
   let n = 0;
   for (const l of legacy) {
@@ -346,6 +368,7 @@ beforeAll(async () => {
         invoiceNumber: `${P}LEG-${n}`,
         status: l.status,
         subtotal: l.subtotal,
+        ...(l.taxRate != null ? { taxRate: l.taxRate } : {}),
         taxAmount: l.taxAmount,
         total: l.total,
         currency: 'TTD',
@@ -591,6 +614,11 @@ describe('V1-22 existing rows keep their statuses', () => {
     [ID.legPaidThree, 'PAID', { total: 0.3, paid: 0.3, remaining: 0, isFullyPaid: true, isOverpaid: false }],
     [ID.legSent, 'SENT', { total: 11.06, paid: 0, remaining: 11.06, isFullyPaid: false, isOverpaid: false }],
     [ID.legPaidTenths, 'PAID', { total: 1, paid: 1, remaining: 0, isFullyPaid: true, isOverpaid: false }],
+    // CR-V22-1 RED-BEFORE (HEAD be6195d6: remaining 0.01, isFullyPaid false, reconciled to PARTIALLY_PAID)
+    [ID.legPaidHalfDown, 'PAID', { total: 9.41, paid: 9.4, remaining: 0, isFullyPaid: true, isOverpaid: false }],
+    // control: the top of the band is not an overpayment
+    [ID.legPaidHalfTop, 'PAID', { total: 9.5, paid: 9.5, remaining: 0, isFullyPaid: true, isOverpaid: false }],
+    [ID.legPartialBand, 'PARTIALLY_PAID', { total: 0.34, paid: 0.33, remaining: 0.01, isFullyPaid: false, isOverpaid: false }],
   ];
   for (const [id, status, balance] of cases) {
     it(`E1 ${id.slice(P.length)} (${status}): a reconcile keeps ${status} and writes nothing`, async () => {
@@ -603,4 +631,40 @@ describe('V1-22 existing rows keep their statuses', () => {
       expect(after.total).toBe(before.total);
     });
   }
+});
+
+describe('V1-22 review CR-V22-1: a legacy total the base settled shows nothing due on every surface (real rows)', () => {
+  it('E1b RED-BEFORE (HEAD be6195d6): the PAID 9.405 row paid 9.40: operator detail, payment list and payment-link balance say 0 due', async () => {
+    const id = ID.legPaidHalfDown;
+    expect((await db.invoice.findUnique({ where: { id } })).total).toBe(9.405);
+    const det = await detail(id);
+    expect(det.status, JSON.stringify(det.body)).toBe(200);
+    expect(det.body).toMatchObject({ status: 'PAID', paidAmount: 9.4, remaining: 0 });
+    const list = await listPayments(id);
+    expect(list.status).toBe(200);
+    expect(list.body).toMatchObject({ paidAmount: 9.4, remaining: 0 });
+    expect(await commerce.getPaymentLinkBalance(id, ID.biz)).toMatchObject({ amountPaid: 9.4, amountDue: 0 });
+  });
+
+  it('E2 RED-BEFORE (HEAD be6195d6): a legacy 9.405 invoice with 9.00 paid is settled by 0.40, the base remaining: PAID, 0 due everywhere, not overpaid', async () => {
+    const id = ID.legPartialDiv;
+    const before = await workflow.getBalance(id);
+    expect(before).toMatchObject({ total: 9.41, paid: 9, remaining: 0.41, isFullyPaid: false });
+
+    const r = await pay(id, 0.4);
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body).toMatchObject({ paidAmount: 9.4, remaining: 0 });
+    expect(r.body.invoice.status).toBe('PAID');
+    const audit = contactEvents.filter((e) => e.type === 'invoice.payment_recorded' && e.data?.invoiceId === id);
+    expect(audit.at(-1)?.data).toMatchObject({ amount: 0.4, totalPaid: 9.4, newStatus: 'PAID', overPaid: 0 });
+    expect(emitted.filter((e) => e.name === 'invoice.paid' && e.payload?.invoice?.id === id)).toHaveLength(1);
+
+    expect((await listPayments(id)).body).toMatchObject({ paidAmount: 9.4, remaining: 0 });
+    expect((await detail(id)).body).toMatchObject({ status: 'PAID', paidAmount: 9.4, remaining: 0 });
+    expect(await commerce.getPaymentLinkBalance(id, ID.biz)).toMatchObject({ amountPaid: 9.4, amountDue: 0 });
+    expect(await workflow.getBalance(id)).toEqual({
+      total: 9.41, paid: 9.4, refunded: 0, net: 9.4, remaining: 0, isFullyPaid: true, isOverpaid: false,
+    });
+    expect(await workflow.reconcileFromPayments(id)).toMatchObject({ status: 'PAID', changed: false });
+  });
 });

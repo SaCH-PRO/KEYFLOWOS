@@ -129,6 +129,68 @@ export function lineAmount(quantity: number, unitPrice: number): number {
   return fromCents(centsNumber(scaleRounded(q.m * p.m, q.e + p.e + 2)));
 }
 
+/**
+ * V1-22 review (CR-V22-1): how a stored document total is read in cents.
+ *
+ * Every total written since V1-22 is a whole number of cents and has one
+ * reading. A legacy total written before it may not be: 8.36 + 12.5% VAT was
+ * stored as 9.405. Such a total has two cent readings:
+ *  - `cents`, its decimal rounded half away from zero (9.41): how V1-22 reads
+ *    it and what the numeric(18,4) ledger holds. This is the total shown.
+ *  - the reading the base took, Math.round(total * 100) on the binary value
+ *    (9.40). Every payment, mark-paid amount and status written before V1-22
+ *    was computed against it: mark-paid recorded 9.40 and the invoice became
+ *    PAID.
+ * Either reading settles the total (`settleCents` is the lower positive one),
+ * so a stored PAID invoice stays PAID; only an amount above both overpays it
+ * (`maxCents`). The two readings differ by one cent at most, and only on a
+ * legacy total that is not a whole cent; a band of one cent is not widened
+ * further (a legacy 0.3375 reads 0.34 both ways, and 0.33 does not settle it).
+ */
+export interface TotalCents {
+  /** The total in cents: its decimal value rounded half away from zero. */
+  cents: number;
+  /** The fewest cents that settle it; +Infinity when no reading is positive (nothing settles a zero total). */
+  settleCents: number;
+  /** The most cents that do not overpay it. */
+  maxCents: number;
+}
+
+export function readTotalCents(total: number): TotalCents {
+  const cents = toCents(total);
+  // A whole-cent total (every V1-22 write) has the one reading.
+  const legacy = Number.isFinite(cents) && fromCents(cents) !== total ? Math.round(total * 100) : cents;
+  const positive = [cents, legacy].filter((c) => c > 0);
+  return {
+    cents,
+    settleCents: positive.length > 0 ? Math.min(...positive) : Number.POSITIVE_INFINITY,
+    maxCents: Math.max(cents, legacy),
+  };
+}
+
+/**
+ * What is still owed on a stored total after `paid`, in currency units: 0 once
+ * `paid` settles the total (readTotalCents), otherwise total - paid in cents.
+ * For a whole-cent total this is max(0, total - paid).
+ */
+export function remainingMoney(total: number, paid: number): number {
+  const t = readTotalCents(total);
+  const p = toCents(paid);
+  if (p >= t.settleCents) return 0;
+  return fromCents(Math.max(0, t.cents - p));
+}
+
+/**
+ * How far `paid` is above a stored total, in currency units: 0 unless it is
+ * above every reading of the total (readTotalCents), then the amount above the
+ * higher one. For a whole-cent total this is max(0, paid - total).
+ */
+export function overpaidMoney(total: number, paid: number): number {
+  const t = readTotalCents(total);
+  const p = toCents(paid);
+  return p > t.maxCents ? fromCents(p - t.maxCents) : 0;
+}
+
 /** `rate` percent of an amount, exact, rounded to cents: percentOf(0.3, 12.5) === 0.04. */
 export function percentOf(amount: number, rate: number): number {
   return fromCents(percentOfCents(toCents(amount), rate));

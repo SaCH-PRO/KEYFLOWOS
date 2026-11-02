@@ -17,7 +17,7 @@ import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
-import { computeDocumentAmounts, fromCents, lineAmount, moneyEquals, percentOf, subtractMoney, sumMoney, toCents } from './money';
+import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
@@ -678,11 +678,12 @@ export class CommerceService {
     });
     if (!invoice) return null;
     // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
+    // CR-V22-1: remaining is 0 once the paid sum settles the stored total (remainingMoney).
     const paidAmount = sumMoney(invoice.payments.filter((p) => p.status === 'SUCCESSFUL').map((p) => Number(p.amount)));
     return {
       ...withLegacySubtotal(invoice),
       paidAmount,
-      remaining: Math.max(0, subtractMoney(Number(invoice.total), paidAmount)),
+      remaining: remainingMoney(Number(invoice.total), paidAmount),
     };
   }
 
@@ -2333,9 +2334,12 @@ export class CommerceService {
     // would contradict newStatus and never flag an overpayment. `paid` is the
     // sum of SUCCESSFUL rows, the formula this route and its replay use.
     const newPaidTotal = reconciled.balance.paid;
-    const invoiceTotal = reconciled.balance.total;
     // V1-22: in cents (the remaining after 33.33 x 3 on 100.00 read 0.010000000000005116).
-    const overPaid = fromCents(Math.max(0, toCents(newPaidTotal) - toCents(invoiceTotal)));
+    // CR-V22-1: against the stored total (the one the audit reports), so a
+    // legacy sub-cent total is settled and overpaid by the same rule as the
+    // reconcile (readTotalCents); a payment never changes the total.
+    const invoiceTotal = Number(invoice.total);
+    const overPaid = overpaidMoney(invoiceTotal, newPaidTotal);
     const newStatus = reconciled.status;
     const updatedInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
@@ -2373,7 +2377,7 @@ export class CommerceService {
       payment,
       invoice: updatedInvoice,
       paidAmount: newPaidTotal,
-      remaining: Math.max(0, subtractMoney(invoiceTotal, newPaidTotal)),
+      remaining: remainingMoney(invoiceTotal, newPaidTotal),
     };
   }
 
@@ -2536,7 +2540,7 @@ export class CommerceService {
       payment: existing,
       invoice: updatedInvoice,
       paidAmount,
-      remaining: Math.max(0, subtractMoney(Number(updatedInvoice?.total ?? 0), paidAmount)),
+      remaining: remainingMoney(Number(updatedInvoice?.total ?? 0), paidAmount),
     };
   }
 
@@ -3031,11 +3035,12 @@ export class CommerceService {
       orderBy: { createdAt: 'desc' },
     });
     // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
+    // CR-V22-1: remaining is 0 once the paid sum settles the stored total (remainingMoney).
     const paidAmount = sumMoney(payments.filter((p) => p.status === 'SUCCESSFUL').map((p) => Number(p.amount)));
     return {
       payments,
       paidAmount,
-      remaining: Math.max(0, subtractMoney(Number(invoice.total), paidAmount)),
+      remaining: remainingMoney(Number(invoice.total), paidAmount),
       invoiceTotal: invoice.total,
     };
   }

@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
-import { fromCents, sumMoney, toCents } from './money';
+import { fromCents, readTotalCents, sumMoney, toCents } from './money';
 
 /**
  * Currency-aware rounding to cents, half away from zero on the decimal value
@@ -92,6 +92,14 @@ export interface BalanceSummary {
  * (sumMoney), the total is rounded to cents half away from zero, and PAID /
  * overpaid are exact cent comparisons: no float sum, no +/-0.005 tolerance.
  * Three payments of 33.33 and one of 0.01 settle 100.00 exactly.
+ *
+ * V1-22 review (CR-V22-1): the total is read by readTotalCents. A whole-cent
+ * total (every V1-22 write) has one reading. A legacy total that is not a
+ * whole cent (8.36 + 12.5% stored as 9.405) is shown as its decimal rounded
+ * half away from zero (9.41) but is settled by the reading the base settled it
+ * with too (9.40, what mark-paid recorded), so a stored PAID invoice stays PAID
+ * with nothing remaining; it is overpaid only above both readings.
+ * `remaining` is 0 exactly when `isFullyPaid`, otherwise total - net.
  */
 export function computeBalance(total: number, payments: PaymentLike[], currency = 'TTD'): BalanceSummary {
   void currency; // every currency in scope (D-13: TTD, USD) has 2 decimals
@@ -99,16 +107,17 @@ export function computeBalance(total: number, payments: PaymentLike[], currency 
   const refunded = sumMoney(
     payments.filter((p) => p.status === 'REFUNDED').map((p) => Math.abs(Number(p.amount) || 0)),
   );
-  const totalCents = toCents(total);
+  const t = readTotalCents(total);
   const netCents = toCents(paid) - toCents(refunded);
+  const isFullyPaid = netCents >= t.settleCents;
   return {
-    total: fromCents(totalCents),
+    total: fromCents(t.cents),
     paid,
     refunded,
     net: fromCents(netCents),
-    remaining: fromCents(Math.max(0, totalCents - netCents)),
-    isFullyPaid: totalCents > 0 && netCents >= totalCents,
-    isOverpaid: netCents > totalCents,
+    remaining: isFullyPaid ? 0 : fromCents(Math.max(0, t.cents - netCents)),
+    isFullyPaid,
+    isOverpaid: netCents > t.maxCents,
   };
 }
 

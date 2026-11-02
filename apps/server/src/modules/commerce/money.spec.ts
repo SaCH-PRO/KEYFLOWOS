@@ -19,7 +19,10 @@ import {
   fromCents,
   lineAmount,
   moneyEquals,
+  overpaidMoney,
   percentOf,
+  readTotalCents,
+  remainingMoney,
   roundMoney,
   subtractMoney,
   sumMoney,
@@ -102,6 +105,48 @@ describe('sumMoney / subtractMoney / moneyEquals', () => {
     expect(moneyEquals(0.1 + 0.2, 0.3)).toBe(true);
     expect(moneyEquals(100, 100.01)).toBe(false);
     expect(moneyEquals(99.99, 100)).toBe(false);
+  });
+});
+
+describe('V1-22 review CR-V22-1: readTotalCents / remainingMoney / overpaidMoney', () => {
+  it('a whole-cent total (every V1-22 write) has one reading', () => {
+    expect(readTotalCents(100)).toEqual({ cents: 10000, settleCents: 10000, maxCents: 10000 });
+    expect(readTotalCents(0.34)).toEqual({ cents: 34, settleCents: 34, maxCents: 34 });
+    expect(readTotalCents(1.15)).toEqual({ cents: 115, settleCents: 115, maxCents: 115 }); // 1.15 * 100 is 114.99999999999999
+  });
+
+  it('nothing settles a zero total', () => {
+    expect(readTotalCents(0)).toEqual({ cents: 0, settleCents: Number.POSITIVE_INFINITY, maxCents: 0 });
+    expect(remainingMoney(0, 0)).toBe(0);
+  });
+
+  it('a legacy sub-cent total is settled by the lower of its decimal and base readings, overpaid only above the higher', () => {
+    // 8.36 + 12.5% stored 9.405: decimal 9.41, base Math.round(940.4999999999999) 9.40
+    expect(readTotalCents(8.36 + (8.36 * 12.5) / 100)).toEqual({ cents: 941, settleCents: 940, maxCents: 941 });
+    // 0.36 + 12.5% stored 0.40499999999999997: decimal 0.40, base Math.round(40.5) 0.41
+    expect(readTotalCents(0.36 + (0.36 * 12.5) / 100)).toEqual({ cents: 40, settleCents: 40, maxCents: 41 });
+    // 0.1 + 0.2 at 12.5% stored 0.3375: both readings 0.34, the band is not widened to 0.33
+    expect(readTotalCents(0.30000000000000004 + 0.037500000000000006)).toEqual({ cents: 34, settleCents: 34, maxCents: 34 });
+    expect(readTotalCents(1.005)).toEqual({ cents: 101, settleCents: 100, maxCents: 101 });
+  });
+
+  it('remainingMoney is 0 once paid settles the total, else total - paid in cents', () => {
+    expect(remainingMoney(100, 99.99)).toBe(0.01);
+    expect(remainingMoney(100, 100)).toBe(0);
+    expect(remainingMoney(100, 120)).toBe(0);
+    expect(remainingMoney(9.405, 9.4)).toBe(0); // HEAD be6195d6: 0.01 on a PAID invoice
+    expect(remainingMoney(9.405, 9.39)).toBe(0.02);
+    expect(remainingMoney(0.3375, 0.33)).toBe(0.01);
+    expect(remainingMoney(100, sumMoney([0.01, 33.33, 33.33, 33.33]))).toBe(0);
+  });
+
+  it('overpaidMoney is 0 within the readings, else the amount above the higher one', () => {
+    expect(overpaidMoney(100, 100)).toBe(0);
+    expect(overpaidMoney(100, 100.01)).toBe(0.01);
+    expect(overpaidMoney(0.40499999999999997, 0.41)).toBe(0); // HEAD be6195d6: 0.01
+    expect(overpaidMoney(0.40499999999999997, 0.42)).toBe(0.01);
+    expect(overpaidMoney(1.005, 1.01)).toBe(0);
+    expect(overpaidMoney(9.405, 9.42)).toBe(0.01);
   });
 });
 
