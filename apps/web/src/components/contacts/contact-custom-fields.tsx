@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import { motion } from "framer-motion";
 import { Type, Hash, Calendar, List, CheckSquare, Link, Mail, Text, Loader2 } from "lucide-react";
 import {
   fetchCustomFieldDefinitions,
   type CustomFieldDefinition,
 } from "@/lib/client";
-import { getStoredBusinessId } from "@/lib/workspace";
+import { BUSINESS_CHANGED_EVENT, getStoredBusinessId } from "@/lib/workspace";
 
 const TYPE_ICONS: Record<string, React.ElementType> = {
   TEXT: Type,
@@ -44,22 +44,43 @@ interface ContactCustomFieldsProps {
 const NO_VALUES: Record<string, unknown> = {};
 
 /**
+ * Follow the member's selected business while the screen is mounted: a switch in
+ * this tab (selectBusiness announces BUSINESS_CHANGED_EVENT) and a sign-in or
+ * switch in another tab (`storage`) re-render the reader. The stored id is also
+ * read again at every render, so a write that announces nothing (refreshWorkspace
+ * correcting a stale id) is followed from the next render on.
+ */
+function subscribeToSelectedBusiness(onChange: () => void) {
+  window.addEventListener(BUSINESS_CHANGED_EVENT, onChange);
+  window.addEventListener("storage", onChange);
+  return () => {
+    window.removeEventListener(BUSINESS_CHANGED_EVENT, onChange);
+    window.removeEventListener("storage", onChange);
+  };
+}
+
+/** The server renders no selection; the client reads it once hydrated. */
+const NO_SELECTION_ON_SERVER = () => null;
+
+/**
  * The custom-field definitions of the business the screen works in: the
  * businessId it is handed, else the member's selected business (kf_business_id,
- * as the rest of the contact screens read it). Never the demo tenant:
- * fetchCustomFieldDefinitions defaults to DEFAULT_BUSINESS_ID ("biz_demo"),
- * which BusinessGuard refuses for a real member (M09), so with no business there
- * is no request and no definitions.
+ * as the rest of the contact screens read it), followed while mounted. Never the
+ * demo tenant: fetchCustomFieldDefinitions defaults to DEFAULT_BUSINESS_ID
+ * ("biz_demo"), which BusinessGuard refuses for a real member (M09), so with no
+ * business there is no request and no definitions.
  */
 export function useCustomFieldDefinitions(businessId?: string | null) {
-  // What was read, and for which `businessId` argument: while a new business is
-  // being read the hook reports loading and never another business's fields.
+  const selected = useSyncExternalStore(subscribeToSelectedBusiness, getStoredBusinessId, NO_SELECTION_ON_SERVER);
+  // The business actually read: the one handed, else the one selected now.
+  const tenant = businessId || selected || null;
+  // What was read, and for which business. While another business is being read
+  // the hook reports loading, never the previous business's fields, and an
+  // answer for a business the screen has moved away from is dropped.
   const [read, setRead] = useState<{ for: string | null; definitions: CustomFieldDefinition[] } | null>(null);
-  const key = businessId || null;
 
   useEffect(() => {
     let cancelled = false;
-    const tenant = key ?? getStoredBusinessId();
     const load: Promise<CustomFieldDefinition[]> = tenant
       ? fetchCustomFieldDefinitions(tenant).then((res) =>
           (res.data ?? []).filter((d) => !d.archivedAt).sort((a, b) => a.order - b.order),
@@ -68,12 +89,12 @@ export function useCustomFieldDefinitions(businessId?: string | null) {
     load
       .catch(() => [] as CustomFieldDefinition[])
       .then((definitions) => {
-        if (!cancelled) setRead({ for: key, definitions });
+        if (!cancelled) setRead({ for: tenant, definitions });
       });
     return () => { cancelled = true; };
-  }, [key]);
+  }, [tenant]);
 
-  const loading = read === null || read.for !== key;
+  const loading = read === null || read.for !== tenant;
   return { definitions: loading ? [] : read.definitions, loading };
 }
 

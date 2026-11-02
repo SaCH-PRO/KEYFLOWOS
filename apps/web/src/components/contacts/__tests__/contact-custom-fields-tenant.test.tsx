@@ -18,11 +18,13 @@
  * demo tenant can never pass for a read of the member's own business.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
+import { Profiler, type ReactNode, type ReactElement } from "react";
+import { render, screen, waitFor, cleanup, fireEvent, act } from "@testing-library/react";
 import { ContactCustomFields } from "../contact-custom-fields";
 import { ContactDetailInfo } from "../contact-detail-info";
 import { ContactForm } from "../contact-form";
 import type { ContactDetailData } from "../contact-detail";
+import { selectBusiness, setStoredBusinessId } from "@/lib/workspace";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -88,11 +90,20 @@ function jsonResponse(status: number, body: unknown, statusText = "OK"): Respons
 const forbidden = () =>
   jsonResponse(403, { statusCode: 403, message: "No access to this business", error: "Forbidden" }, "Forbidden");
 
+type Definition = (typeof DEFINITIONS)[number];
+
+interface StubOptions {
+  /** The definitions a business answers with (default: DEFINITIONS, the same label for every business). */
+  definitionsOf?: (businessId: string) => Array<Omit<Definition, "options"> & { options: unknown }>;
+  /** Businesses whose definitions answer only once their gate opens (a read still in flight). */
+  held?: Record<string, Promise<void>>;
+}
+
 /**
  * Stub the API as the guards answer it for a member of `memberOf`. Returns
  * every pathname the browser asked for.
  */
-function stubApi(memberOf: string[] = [SELECTED, HANDED]) {
+function stubApi(memberOf: string[] = [SELECTED, HANDED], options: StubOptions = {}) {
   const requested: string[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
@@ -101,7 +112,10 @@ function stubApi(memberOf: string[] = [SELECTED, HANDED]) {
     const tenant = pathname.match(/\/businesses\/([^/]+)\//)?.[1];
     if (tenant && !memberOf.includes(decodeURIComponent(tenant))) return forbidden();
     if (tenant && pathname.endsWith(`/crm/businesses/${tenant}/custom-field-definitions`)) {
-      return jsonResponse(200, DEFINITIONS.map((d) => ({ ...d, businessId: decodeURIComponent(tenant) })));
+      const business = decodeURIComponent(tenant);
+      await options.held?.[business];
+      const definitions = options.definitionsOf?.(business) ?? DEFINITIONS;
+      return jsonResponse(200, definitions.map((d) => ({ ...d, businessId: business })));
     }
     return jsonResponse(404, { message: "Not stubbed" }, "Not Found");
   });
@@ -114,6 +128,44 @@ function stubApi(memberOf: string[] = [SELECTED, HANDED]) {
 }
 
 const definitionsPath = (businessId: string) => `/crm/businesses/${businessId}/custom-field-definitions`;
+
+/** A label per business, so the screen shows WHICH business's definitions it holds. */
+const fieldOf = (businessId: string) => `Tier of ${businessId}`;
+const labelledPerBusiness = (businessId: string) => [
+  { ...DEFINITIONS[0], id: `cfd_${businessId}`, name: `tier_${businessId}`, label: fieldOf(businessId) },
+];
+
+/** A read held in flight until `open()`. */
+function gate() {
+  let open!: () => void;
+  const opened = new Promise<void>((resolve) => { open = resolve; });
+  return { opened, open: () => act(async () => { open(); }) };
+}
+
+/**
+ * More commits than any settled mount of the fields needs (a handful: mount,
+ * the read answering, a switch). A render loop crosses it at once.
+ */
+const COMMIT_BOUND = 50;
+
+/**
+ * Render with a loop guard. Under act a loop of effect-driven updates never
+ * yields, so no test timeout can interrupt it and the file hangs instead of
+ * failing. The Profiler counts the subtree's commits and, past the bound,
+ * throws: React tears the root down (which ends the loop) and act rethrows, so
+ * the test that rendered the loop FAILS, by name.
+ */
+function renderFields(ui: ReactElement) {
+  let commits = 0;
+  const onRender = () => {
+    commits += 1;
+    if (commits > COMMIT_BOUND) throw new Error(`render loop: ContactCustomFields committed ${commits} times`);
+  };
+  const wrapper = ({ children }: { children: ReactNode }) => (
+    <Profiler id="contact-custom-fields" onRender={onRender}>{children}</Profiler>
+  );
+  return { ...render(ui, { wrapper }), commits: () => commits };
+}
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -130,7 +182,7 @@ afterEach(() => {
 describe("ContactCustomFields reads the selected business, never biz_demo", () => {
   it("control: a businessId it is handed is the business it reads", async () => {
     const api = stubApi();
-    render(<ContactCustomFields businessId={HANDED} />);
+    renderFields(<ContactCustomFields businessId={HANDED} />);
 
     expect(await screen.findByText("Membership tier")).toBeInTheDocument();
     expect(api.definitionReads()).toEqual([definitionsPath(HANDED)]);
@@ -140,7 +192,7 @@ describe("ContactCustomFields reads the selected business, never biz_demo", () =
   it("mounted without a businessId, it reads the business the member selected", async () => {
     window.localStorage.setItem("kf_business_id", SELECTED);
     const api = stubApi();
-    render(<ContactCustomFields />);
+    renderFields(<ContactCustomFields />);
 
     await waitFor(() => expect(api.definitionReads()).toEqual([definitionsPath(SELECTED)]));
     expect(await screen.findByText("Membership tier")).toBeInTheDocument();
@@ -149,7 +201,7 @@ describe("ContactCustomFields reads the selected business, never biz_demo", () =
 
   it("with no business selected at all, it sends no request (no demo-tenant fallback) and does not spin forever", async () => {
     const api = stubApi();
-    render(<ContactCustomFields />);
+    renderFields(<ContactCustomFields />);
 
     await waitFor(() => expect(screen.queryByText("Loading custom fields...")).not.toBeInTheDocument());
     expect(api.requested).toEqual([]);
@@ -164,16 +216,22 @@ describe("ContactCustomFields reads the selected business, never biz_demo", () =
     // never yields, and the run hangs instead of failing.
     const errors = vi.spyOn(console, "error");
     stubApi();
-    render(<ContactCustomFields businessId={HANDED} />);
+    const view = renderFields(<ContactCustomFields businessId={HANDED} />);
 
     expect(await screen.findByText("Membership tier")).toBeInTheDocument();
     const loops = errors.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("Maximum update depth"));
     expect(loops).toEqual([]);
+    // The loop itself, counted rather than inferred from a warning: once the
+    // read has answered, time passing commits nothing more.
+    const settled = view.commits();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(view.commits()).toBe(settled);
+    expect(settled).toBeLessThanOrEqual(COMMIT_BOUND);
   });
 
   it("control: switching the business re-reads the new one and only ever names a selected business", async () => {
     const api = stubApi();
-    const { rerender } = render(<ContactCustomFields businessId={SELECTED} />);
+    const { rerender } = renderFields(<ContactCustomFields businessId={SELECTED} />);
     await waitFor(() => expect(api.definitionReads()).toEqual([definitionsPath(SELECTED)]));
 
     rerender(<ContactCustomFields businessId={HANDED} />);
@@ -181,6 +239,97 @@ describe("ContactCustomFields reads the selected business, never biz_demo", () =
       expect(api.definitionReads()).toEqual([definitionsPath(SELECTED), definitionsPath(HANDED)]),
     );
     expect(api.namingDemo()).toEqual([]);
+  });
+});
+
+/**
+ * Review findings SEC-R015c-1 and SEC-R015c-2. Every production screen mounts
+ * the fields WITHOUT a businessId (contact-detail.tsx, pipeline-tab-content.tsx),
+ * so the business read is the stored selection, and that selection can move
+ * while the panel or form stays mounted. Each business answers with its own
+ * label here, so the screen shows WHICH business's definitions it holds.
+ */
+describe("ContactCustomFields follows the business while mounted and never shows the previous one's fields", () => {
+  it("while a newly handed business is read, the previous business's fields are hidden (the stale guard)", async () => {
+    const handedRead = gate();
+    const api = stubApi(undefined, { definitionsOf: labelledPerBusiness, held: { [HANDED]: handedRead.opened } });
+    const { rerender } = renderFields(<ContactCustomFields businessId={SELECTED} />);
+    expect(await screen.findByText(fieldOf(SELECTED))).toBeInTheDocument();
+
+    rerender(<ContactCustomFields businessId={HANDED} />);
+    await waitFor(() =>
+      expect(api.definitionReads()).toEqual([definitionsPath(SELECTED), definitionsPath(HANDED)]),
+    );
+    expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
+    expect(screen.getByText("Loading custom fields...")).toBeInTheDocument();
+
+    await handedRead.open();
+    expect(await screen.findByText(fieldOf(HANDED))).toBeInTheDocument();
+    expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
+  });
+
+  it("mounted without a businessId, a switch of the selected business (selectBusiness) re-reads it and hides the previous fields meanwhile", async () => {
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const switchedRead = gate();
+    const api = stubApi(undefined, { definitionsOf: labelledPerBusiness, held: { [HANDED]: switchedRead.opened } });
+    renderFields(<ContactCustomFields />);
+    expect(await screen.findByText(fieldOf(SELECTED))).toBeInTheDocument();
+
+    act(() => { selectBusiness(HANDED); });
+    await waitFor(() =>
+      expect(api.definitionReads()).toEqual([definitionsPath(SELECTED), definitionsPath(HANDED)]),
+    );
+    expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
+
+    await switchedRead.open();
+    expect(await screen.findByText(fieldOf(HANDED))).toBeInTheDocument();
+    expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
+    expect(api.namingDemo()).toEqual([]);
+  });
+
+  it("a sign-in or switch in another tab (a `storage` event) is followed", async () => {
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const api = stubApi(undefined, { definitionsOf: labelledPerBusiness });
+    renderFields(<ContactCustomFields />);
+    expect(await screen.findByText(fieldOf(SELECTED))).toBeInTheDocument();
+
+    act(() => {
+      window.localStorage.setItem("kf_business_id", HANDED);
+      window.dispatchEvent(new StorageEvent("storage", { key: "kf_business_id", oldValue: SELECTED, newValue: HANDED }));
+    });
+    expect(await screen.findByText(fieldOf(HANDED))).toBeInTheDocument();
+    expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
+    expect(api.definitionReads()).toEqual([definitionsPath(SELECTED), definitionsPath(HANDED)]);
+  });
+
+  it("a rewrite of the stored business that announces nothing (refreshWorkspace correcting a stale id) is followed at the next render", async () => {
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const api = stubApi(undefined, { definitionsOf: labelledPerBusiness });
+    const { rerender } = renderFields(<ContactCustomFields />);
+    expect(await screen.findByText(fieldOf(SELECTED))).toBeInTheDocument();
+
+    setStoredBusinessId(HANDED);
+    rerender(<ContactCustomFields />);
+    expect(await screen.findByText(fieldOf(HANDED))).toBeInTheDocument();
+    expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
+    expect(api.definitionReads()).toEqual([definitionsPath(SELECTED), definitionsPath(HANDED)]);
+  });
+
+  it("an answer for the business the screen moved away from arrives late and is dropped", async () => {
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const previousRead = gate();
+    const api = stubApi(undefined, { definitionsOf: labelledPerBusiness, held: { [SELECTED]: previousRead.opened } });
+    renderFields(<ContactCustomFields />);
+    await waitFor(() => expect(api.definitionReads()).toEqual([definitionsPath(SELECTED)]));
+
+    act(() => { selectBusiness(HANDED); });
+    expect(await screen.findByText(fieldOf(HANDED))).toBeInTheDocument();
+
+    // The previous business's read answers only now.
+    await previousRead.open();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
+    expect(screen.getByText(fieldOf(HANDED))).toBeInTheDocument();
   });
 });
 
@@ -252,4 +401,55 @@ describe("the contact form (ContactForm) reads custom fields from the selected b
     expect(await screen.findByText("Membership tier")).toBeInTheDocument();
     expect(api.namingDemo()).toEqual([]);
   });
+
+  it("editing keeps the contact's stored typed values: they show, and changing one field submits the others unchanged (R015c-CR-1)", async () => {
+    // Once the fields render (they read the right business now), the form must
+    // hand them the stored values. Without them every stored value showed blank,
+    // and one click on a MULTI_SELECT option submitted only that option: the
+    // server upserts per key, so the stored selection was overwritten.
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const interests = {
+      ...DEFINITIONS[0],
+      id: "cfd_2",
+      name: "interests",
+      label: "Interests",
+      type: "MULTI_SELECT",
+      order: 2,
+      options: { options: [{ label: "Alpha", value: "a" }, { label: "Beta", value: "b" }, { label: "Gamma", value: "c" }] },
+    };
+    stubApi(undefined, { definitionsOf: () => [DEFINITIONS[0], interests] });
+    const onSubmit = vi.fn(async (_data: unknown, _customFieldValues?: Record<string, unknown>) => {});
+    render(
+      <ContactForm
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+        initialValues={editing}
+        initialCustomFieldValues={{ membershipTier: "Gold", interests: ["a", "b"] }}
+      />,
+    );
+
+    expect(await screen.findByDisplayValue("Gold")).toBeInTheDocument();
+    const option = (label: string) => screen.getByText(label).closest("button") as HTMLButtonElement;
+    expect(option("Alpha")).toHaveClass("bg-primary");
+    expect(option("Beta")).toHaveClass("bg-primary");
+    expect(option("Gamma")).not.toHaveClass("bg-primary");
+
+    fireEvent.click(option("Gamma"));
+    fireEvent.click(screen.getByText("Save Changes").closest("button") as HTMLButtonElement);
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0][1]).toEqual({ membershipTier: "Gold", interests: ["a", "b", "c"] });
+  });
+});
+
+describe("follow-ups outside this web write set", () => {
+  // SEC-R015c-3 (review, confirmed against a real database): the form now sends
+  // typed customFieldValues keyed by the selected business's definition NAMES,
+  // and ContactCustomFieldValueService.setValuesForContact
+  // (apps/server/src/modules/crm/contact-custom-field-value.service.ts) resolves
+  // those names with no businessId, while names are unique only per business.
+  // A contact can be bound to another business's definition (label, description
+  // and options then disclosed on the contact's detail). The fix scopes that
+  // lookup to the contact's business: a server packet, not this web one.
+  it.todo("server: a contact's typed custom-field names resolve only against its own business's definitions (SEC-R015c-3)");
 });

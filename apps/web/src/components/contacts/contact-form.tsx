@@ -750,6 +750,10 @@ function ContactFormInner({ onSubmit, onCancel, loading, initialValues, initialC
           {sections.typedCustomFields && (
             <ContactCustomFields
               businessId={businessId}
+              // The values the form will submit, seeded with the contact's stored
+              // ones: a change is merged into them, so editing one field (adding a
+              // MULTI_SELECT option) never submits the others blank.
+              values={customFieldValues}
               onChange={setCustomFieldValues}
             />
           )}
