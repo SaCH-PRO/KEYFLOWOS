@@ -112,9 +112,10 @@ export function validatePosting(input: PostingInput): void {
  *
  * V1-15 (CF-40): post() and reverse() refuse, with 409, a transaction dated
  * inside a CLOSED accounting period of the posting business, checked inside
- * the posting transaction under the business's period lock (held shared, so
- * a concurrent close waits for the posting and stamps it; V1-15 review
- * SEC-V15-3). A period can be closed only once it has ended, so what is dated
+ * the posting transaction under the period lock of its date's month (held
+ * shared, so a concurrent close of that month waits for the posting and
+ * stamps it; V1-15 review SEC-V15-3, scoped to the month by repair2 LC-1).
+ * A period can be closed only once it has ended, so what is dated
  * now (payments, provider settlements, refunds, every reversal) is never
  * refused (SEC-V15-1). AccountingPeriodService is @Optional only so that
  * hand-built instances in hermetic unit specs keep working; every Nest module

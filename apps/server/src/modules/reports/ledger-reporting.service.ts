@@ -112,6 +112,29 @@ const CASH_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR', 'CREDIT_CARD']);
  */
 const BOOKED_TRANSACTION_STATUSES = ['POSTED', 'REVERSED'];
 
+/**
+ * packages/db's defaultTakeExtension caps every findMany at 1000 rows, so a
+ * report read that can pass 1000 pages by id instead (V1-15b repair2, review
+ * LC-3: past the 1000th cash transaction of a range, a REVERSAL was silently
+ * dropped and the cash-basis P&L counted its original alone).
+ */
+const READ_PAGE = 1000;
+
+/**
+ * Every row of a paged read. `page(cursor)` reads at most READ_PAGE rows in id
+ * order, after `cursor` when it is set; a short page is the last one.
+ */
+async function readAllPages<T extends { id: string }>(page: (cursor: string | undefined) => Promise<T[]>): Promise<T[]> {
+  const rows: T[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    const batch = await page(cursor);
+    rows.push(...batch);
+    if (batch.length < READ_PAGE) return rows;
+    cursor = batch[batch.length - 1].id;
+  }
+}
+
 function toNum(d: Prisma.Decimal | number | string | null | undefined): number {
   if (d == null) return 0;
   return Number(typeof d === 'object' && 'toString' in d ? d.toString() : d);
@@ -207,7 +230,8 @@ export class LedgerReportingService {
     operatingCashIn: number;
     operatingCashOut: number;
   }> {
-    const txns = await this.prisma.client.financialTransaction.findMany({
+    // Every cash transaction of the range, paged past the 1000-row read cap (review LC-3).
+    const txns = await readAllPages((cursor) => this.prisma.client.financialTransaction.findMany({
       where: {
         businessId,
         // POSTED and REVERSED: a reversed original and its REVERSAL net to zero (V1-15 review CR-1).
@@ -215,7 +239,10 @@ export class LedgerReportingService {
         AND: [{ status: { in: BOOKED_TRANSACTION_STATUSES } }],
         date: { gte: from, lte: to },
         entries: { some: { account: { systemKey: { in: Array.from(CASH_KEYS) } } } },
+        ...(cursor ? { id: { gt: cursor } } : {}),
       },
+      orderBy: { id: 'asc' },
+      take: READ_PAGE,
       select: {
         id: true,
         sourceType: true,
@@ -230,7 +257,7 @@ export class LedgerReportingService {
           },
         },
       },
-    });
+    }));
 
     type Bucket = Map<string, { name: string; systemKey: string | null; amount: number }>;
     const income: Bucket = new Map();
@@ -261,25 +288,29 @@ export class LedgerReportingService {
       m.set(accountId, cur);
     };
 
-    // Pre-fetch source rows for tracing settlements.
-    const paymentIds = txns
+    // Pre-fetch source rows for tracing settlements. Both reads page past the
+    // 1000-row read cap too (review LC-3): a range with more payments, or more
+    // invoice / bill postings, than one read returns must trace them all.
+    const paymentIds = Array.from(new Set(txns
       .filter((t) => t.sourceType === 'Payment' && !!t.sourceId)
-      .map((t) => t.sourceId as string);
-    const billIds = txns
+      .map((t) => t.sourceId as string)));
+    const billIds = Array.from(new Set(txns
       .filter((t) => t.sourceType === 'Expense' && !!t.sourceId)
-      .map((t) => t.sourceId as string);
+      .map((t) => t.sourceId as string)));
     const payments = paymentIds.length
-      ? await this.prisma.client.payment.findMany({
-          where: { id: { in: paymentIds } },
+      ? await readAllPages((cursor) => this.prisma.client.payment.findMany({
+          where: { id: cursor ? { in: paymentIds, gt: cursor } : { in: paymentIds } },
+          orderBy: { id: 'asc' },
+          take: READ_PAGE,
           select: { id: true, invoiceId: true },
-        })
+        }))
       : [];
     const paymentToInvoice = new Map(payments.map((p) => [p.id, p.invoiceId]));
     const invoiceIds = Array.from(new Set(payments.map((p) => p.invoiceId).filter(Boolean) as string[]));
 
     type SourceTxn = { sourceType: string | null; sourceId: string | null; entries: typeof txns[number]['entries'] };
     const sourceTxns: SourceTxn[] = (invoiceIds.length || billIds.length)
-      ? await this.prisma.client.financialTransaction.findMany({
+      ? await readAllPages((cursor) => this.prisma.client.financialTransaction.findMany({
           where: {
             businessId,
             // The document's own composition: its reversals would net it to
@@ -289,8 +320,12 @@ export class LedgerReportingService {
               ...(invoiceIds.length ? [{ sourceType: 'Invoice', sourceId: { in: invoiceIds } }] : []),
               ...(billIds.length ? [{ sourceType: 'Expense', sourceId: { in: billIds } }] : []),
             ],
+            ...(cursor ? { id: { gt: cursor } } : {}),
           },
+          orderBy: { id: 'asc' },
+          take: READ_PAGE,
           select: {
+            id: true,
             sourceType: true,
             sourceId: true,
             entries: {
@@ -302,7 +337,7 @@ export class LedgerReportingService {
               },
             },
           },
-        })
+        }))
       : [];
     const sourceByKey = new Map<string, SourceTxn[]>();
     for (const st of sourceTxns) {
