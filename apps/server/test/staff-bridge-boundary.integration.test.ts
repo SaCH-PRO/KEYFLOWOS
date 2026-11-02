@@ -763,7 +763,8 @@ describe("V1-21c — a project's task includes read only the business's own task
     await db.projectTask.create({ data: { id: own, businessId: ID.bizB, projectId: ID.projectB, title: 'B-OWN-PTASK', trackedHours: 2 } });
   });
   afterAll(async () => {
-    await db.projectTask.deleteMany({ where: { id: { in: [planted, own] } } });
+    // Raw SQL: ProjectTask is soft-deleted, so deleteMany would only set deletedAt and leave the rows.
+    await db.$executeRaw`DELETE FROM project_tasks WHERE id IN (${planted}, ${own})`;
   });
 
   it('getProject, listProjects and updateProject return the project with its own tasks only', async () => {
