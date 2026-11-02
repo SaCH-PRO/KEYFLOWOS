@@ -54,8 +54,12 @@ type ProviderRefund = { providerPaymentId: string; provider: string; currency: s
 /**
  * V1-29c (BR-08): the id of a Stripe refund row recorded from a
  * charge.refunded event without refunds.data, which carries only the
- * charge's cumulative amount_refunded: re_synth_<charge>_<amount_refunded>
- * (re_synth_<charge> before V1-29c).
+ * charge's cumulative amount_refunded:
+ * re_synth_<original Payment.id>_<charge>_<amount_refunded> (re_synth_<charge>
+ * before V1-29c). Review SEC-V29C-3: the id names the payment it refunds
+ * (a server-built id no tenant can guess), so a row another tenant writes for
+ * the same charge id never takes the id of this tenant's refund; a refund id
+ * a provider event supplies with this prefix is refused.
  */
 const SYNTHETIC_REFUND_ID_PREFIX = 're_synth_';
 /** The providerPaymentId prefix of a manual refund row (CommerceService.markPaymentRefunded). */
@@ -115,11 +119,19 @@ export class PaymentsService {
    * original's providerPaymentId (the link V1-29's readers match exactly,
    * SEC-V29-1), and RevenuePostingService.onPaymentRefunded posts the amount
    * refunded, not the whole payment (BR-07).
+   *
+   * Review SEC-V29C-2: never more than what is left of the payment
+   * (leftToRefundCents: its amount less every refund row linked to it, the
+   * manual refund's included), so a refund another door already recorded
+   * (a manual refund, then the provider's event for the same money) is not
+   * recorded twice, whichever arrives first: the manual refund answers 409
+   * in the other order (CommerceService.refundableOf).
    */
   private async createRefundWithPosting(
     original: RefundOriginal,
     refund: ProviderRefund,
     amountToRecord: (tx: Prisma.TransactionClient) => Promise<number>,
+    alsoLinkedBy: string[] = [],
   ) {
     return this.prisma.client.$transaction(async (tx) => {
       const txClient = tx as unknown as Prisma.TransactionClient;
@@ -129,7 +141,12 @@ export class PaymentsService {
         select: { id: true },
       });
       if (recorded) return null;
-      const amount = await amountToRecord(txClient);
+      const amount = this.cappedAtWhatIsLeft(
+        await amountToRecord(txClient),
+        await PaymentsService.leftToRefundCents(txClient, original, alsoLinkedBy),
+        original,
+        refund,
+      );
       if (!(toCents(amount) > 0)) return null;
       const created = await tx.payment.create({
         data: {
@@ -153,17 +170,61 @@ export class PaymentsService {
   }
 
   /**
+   * V1-29c review (SEC-V29C-2): what is left of `original` to refund, in
+   * cents (0 or less: nothing), read under the invoice lock: its amount less
+   * every negative REFUNDED row of its invoice and tenant linked to it, by
+   * reference = its providerPaymentId (the manual refund, payments-ops
+   * refundCharge and the provider refund door all link so) or by
+   * `alsoLinkedBy` (the Stripe charge id, the reference Stripe refund rows
+   * carried before V1-29c).
+   */
+  private static async leftToRefundCents(
+    tx: Prisma.TransactionClient,
+    original: RefundOriginal,
+    alsoLinkedBy: string[],
+  ): Promise<number> {
+    const rows = await tx.payment.findMany({
+      where: {
+        businessId: original.businessId,
+        invoiceId: original.invoiceId,
+        status: 'REFUNDED',
+        amount: { lt: 0 },
+        reference: { in: [original.providerPaymentId, ...alsoLinkedBy] },
+      },
+      select: { amount: true },
+    });
+    const refunded = rows.reduce((s, r) => s + Math.abs(toCents(Number(r.amount))), 0);
+    return toCents(Number(original.amount)) - refunded;
+  }
+
+  /** V1-29c review (SEC-V29C-2): `amount`, never more than `leftCents`; a cut is logged. */
+  private cappedAtWhatIsLeft(amount: number, leftCents: number, original: RefundOriginal, refund: ProviderRefund): number {
+    const wanted = toCents(amount);
+    if (!(wanted > 0)) return 0;
+    const cents = Math.min(wanted, Math.max(leftCents, 0));
+    if (cents < wanted) {
+      this.logger.warn(
+        `${refund.provider} refund ${refund.providerPaymentId} of ${fromCents(wanted)} exceeds what is left of payment ${original.id} ` +
+          `(${fromCents(Math.max(leftCents, 0))}, its other refunds already recorded); ` +
+          `${cents > 0 ? `recording ${fromCents(cents)}` : 'nothing recorded'}`,
+      );
+    }
+    return cents > 0 ? fromCents(cents) : 0;
+  }
+
+  /**
    * Refund variant used when the original capture id is unavailable (e.g.
    * a PayPal refund webhook with no `supplementary_data.related_ids`). The
    * original is resolved on the invoice, under its lock: the most recent
    * SUCCESSFUL payment of the refund's provider (any provider when the
    * invoice has none), and the refund row links to it (V1-29c: reference =
-   * its providerPaymentId) and posts the amount refunded in the same commit.
+   * its providerPaymentId) and posts the amount refunded in the same commit,
+   * never more than what is left of it (review SEC-V29C-2).
    */
   private async createRefundWithPostingByInvoice(
     invoice: { invoiceId: string; businessId: string },
     refund: ProviderRefund,
-    amount: number,
+    requested: number,
   ) {
     return this.prisma.client.$transaction(async (tx) => {
       const txClient = tx as unknown as Prisma.TransactionClient;
@@ -172,19 +233,24 @@ export class PaymentsService {
         where: { providerPaymentId: refund.providerPaymentId },
         select: { id: true },
       });
-      if (recorded || !(toCents(amount) > 0)) return null;
+      if (recorded || !(toCents(requested) > 0)) return null;
       const candidates = { invoiceId: invoice.invoiceId, businessId: invoice.businessId, status: 'SUCCESSFUL' };
-      const original =
+      const select = { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true };
+      const original: RefundOriginal | null =
         (await tx.payment.findFirst({
           where: { ...candidates, provider: refund.provider },
           orderBy: { createdAt: 'desc' },
-          select: { id: true, providerPaymentId: true },
+          select,
         })) ??
         (await tx.payment.findFirst({
           where: candidates,
           orderBy: { createdAt: 'desc' },
-          select: { id: true, providerPaymentId: true },
+          select,
         }));
+      const amount = original
+        ? this.cappedAtWhatIsLeft(requested, await PaymentsService.leftToRefundCents(txClient, original, []), original, refund)
+        : requested;
+      if (!(toCents(amount) > 0)) return null;
       const created = await tx.payment.create({
         data: {
           provider: refund.provider,
@@ -227,7 +293,9 @@ export class PaymentsService {
    *   refund that arrives ahead of the charge.refunded naming it is caught up
    *   by that cumulative.
    *
-   * Never more than the payment.
+   * Never more than the payment: the door (createRefundWithPosting) caps the
+   * result at what is left after every refund linked to the payment, the
+   * manual refund's included (review SEC-V29C-2).
    */
   private async stripeRefundToRecord(
     tx: Prisma.TransactionClient,
@@ -836,12 +904,13 @@ export class PaymentsService {
       }
       // Without refunds.data (Stripe API 2022-11-15 and later omit
       // Charge.refunds) the charge's cumulative amount_refunded is all there
-      // is. V1-29c (BR-08): the row is keyed by charge and cumulative, and the
-      // door records only what that cumulative adds to the refunds already
-      // recorded for the charge (stripeRefundToRecord).
+      // is. V1-29c (BR-08): the row is keyed by the payment, charge and
+      // cumulative (its id is built once the payment is found, review
+      // SEC-V29C-3), and the door records only what that cumulative adds to
+      // the refunds already recorded for the charge (stripeRefundToRecord).
       if (refunds.length === 0 && typeof obj.amount_refunded === 'number') {
         refunds.push({
-          id: `${SYNTHETIC_REFUND_ID_PREFIX}${obj.id}_${obj.amount_refunded}`,
+          id: undefined,
           amount: obj.amount_refunded,
           currency: obj.currency,
           charge: obj.id,
@@ -864,15 +933,17 @@ export class PaymentsService {
     }
 
     for (const refund of refunds) {
-      if (!refund.id || !refund.charge) continue;
-      const refundId = refund.id;
+      if (!refund.charge || (!refund.cumulative && !refund.id)) continue;
       const charge = refund.charge;
+      // Review SEC-V29C-3: the synthetic ids are the door's own; a refund id
+      // an event supplies under that prefix is refused.
+      if (!refund.cumulative && refund.id?.startsWith(SYNTHETIC_REFUND_ID_PREFIX)) {
+        this.logger.warn(`Stripe ${eventType} names refund id ${refund.id}, a synthetic refund id the door builds itself; skipping`);
+        continue;
+      }
       // Idempotent: skip if we already recorded this refund (checked again
       // inside the refund transaction, under the invoice lock).
-      const existing = await this.prisma.client.payment.findUnique({
-        where: { providerPaymentId: refundId },
-      }).catch(() => null);
-      if (existing) continue;
+      if (refund.id && (await this.paymentRecorded(refund.id).catch(() => false))) continue;
 
       // Locate the original payment row to get invoiceId/businessId. The
       // original may have been stored as: the charge id (charge.succeeded
@@ -886,16 +957,17 @@ export class PaymentsService {
       // V1-29c: only a SUCCESSFUL payment is an original; a refund row
       // carries its original's id in reference and must never match.
       const lookupIds = [charge, refund.paymentIntent].filter((v): v is string => !!v);
+      const originalWhere = {
+        provider: 'stripe',
+        status: 'SUCCESSFUL',
+        ...(signedForBusinessId ? { businessId: signedForBusinessId } : {}),
+        OR: [
+          { providerPaymentId: { in: lookupIds } },
+          { reference: { in: lookupIds } },
+        ],
+      };
       const original = await this.prisma.client.payment.findFirst({
-        where: {
-          provider: 'stripe',
-          status: 'SUCCESSFUL',
-          ...(signedForBusinessId ? { businessId: signedForBusinessId } : {}),
-          OR: [
-            { providerPaymentId: { in: lookupIds } },
-            { reference: { in: lookupIds } },
-          ],
-        },
+        where: originalWhere,
         orderBy: { createdAt: 'asc' },
         select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
       }).catch(() => null);
@@ -908,6 +980,35 @@ export class PaymentsService {
         continue;
       }
 
+      // Review SEC-V29C-1: a delivery the deployment's own secret verified is
+      // looked up across every tenant. When its ids match payments of more
+      // than one business, the event does not say which one it refunds: a
+      // tenant can store any payment_intent id in the reference of a payment
+      // it signs for itself with its own secret. Nothing is written and the
+      // refusal is logged; taking one of them (the oldest) could write one
+      // tenant's refund into another tenant's books. Not caught: a failed
+      // read fails the delivery (its claim is released) rather than letting
+      // an ambiguous refund through.
+      if (!signedForBusinessId) {
+        const other = await this.prisma.client.payment.findFirst({
+          where: { ...originalWhere, businessId: { not: original.businessId } },
+          select: { id: true, businessId: true },
+        });
+        if (other && other.businessId !== original.businessId) {
+          this.logger.warn(
+            `Stripe ${eventType} for charge ${charge} (pi=${refund.paymentIntent ?? 'none'}) matches payments of more than one business ` +
+              `(${original.businessId}, ${other.businessId}); refusing to record it against either`,
+          );
+          continue;
+        }
+      }
+
+      // The synthetic id names the payment it refunds (review SEC-V29C-3).
+      const refundId = refund.cumulative
+        ? `${SYNTHETIC_REFUND_ID_PREFIX}${original.id}_${charge}_${refund.amount}`
+        : (refund.id as string);
+      if (refund.cumulative && (await this.paymentRecorded(refundId).catch(() => false))) continue;
+
       const persisted = await this.createRefundWithPosting(
         original,
         {
@@ -917,6 +1018,8 @@ export class PaymentsService {
           notes: refund.reason ?? null,
         },
         (tx) => this.stripeRefundToRecord(tx, original, { amountMinor: refund.amount ?? 0, charge, cumulative: refund.cumulative }),
+        // Stripe refund rows written before V1-29c reference the charge id.
+        [charge],
       ).catch(this.refundAlreadyRecorded('Stripe', refundId));
       // Reopen the invoice if the refund moves the balance below total.
       if (persisted) {

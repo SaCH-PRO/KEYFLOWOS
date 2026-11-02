@@ -58,6 +58,7 @@ describe('RevenuePostingService recipe semantics', () => {
     existingFinancialTx,
     partialRefunds = [],
     linkedRefund,
+    linkedRows = [],
   }: {
     basis: 'CASH' | 'ACCRUAL';
     invoice?: any;
@@ -67,6 +68,8 @@ describe('RevenuePostingService recipe semantics', () => {
     partialRefunds?: Array<{ id: string; amount: number; refundPaymentId: string }>;
     /** V1-29c: the newest refund row linked to the payment (what the manual refund wrote). */
     linkedRefund?: { id: string; amount: number };
+    /** V1-29c review (CRR-V29C-1): every refund row linked to the payment, posted or not (negative amounts). */
+    linkedRows?: Array<{ amount: number }>;
   }) {
     const posted: Posted[] = [];
     const reversed: ReverseCall[] = [];
@@ -91,6 +94,7 @@ describe('RevenuePostingService recipe semantics', () => {
         payment: {
           findUnique: vi.fn().mockResolvedValue(payment ?? null),
           findFirst: vi.fn().mockResolvedValue(linkedRefund ?? null),
+          findMany: vi.fn().mockResolvedValue(linkedRows),
         },
         financialTransaction: {
           findUnique: findTransaction,
@@ -301,7 +305,7 @@ describe('RevenuePostingService recipe semantics', () => {
     ]);
   });
 
-  it('V1-29c (BR-07): the second partial refund is numbered after the first; the refund that leaves nothing reverses the recording once and folds the partials back', async () => {
+  it('V1-29c (BR-07): the second partial refund is numbered after the first; the refund that leaves nothing reverses the recording once and reverses each partial refund posting (review CRR-V29C-2: no ADJUSTMENT folding them back)', async () => {
     const second = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING, partialRefunds: [{ id: 'rf-1', amount: 30, refundPaymentId: 'r1' }] });
     await second.svc.onPaymentRefunded('p1', { refund: { paymentId: 'r2', amount: 20 } });
     expect(second.posted.map((p) => [p.type, p.kind, p.amount])).toEqual([['REFUND', 'payment_refunded:2', 20]]);
@@ -313,13 +317,37 @@ describe('RevenuePostingService recipe semantics', () => {
       partialRefunds: [{ id: 'rf-1', amount: 30, refundPaymentId: 'r1' }, { id: 'rf-2', amount: 20, refundPaymentId: 'r2' }],
     });
     await last.svc.onPaymentRefunded('p1', { refund: { paymentId: 'r3', amount: 50 } });
-    expect(last.reversed).toEqual([{ businessId: 'b1', transactionId: 'txn-orig' }]);
-    expect(last.posted).toHaveLength(1);
-    expect(last.posted[0]).toMatchObject({ type: 'ADJUSTMENT', kind: 'payment_refunds_folded', amount: 50 });
-    expect(last.posted[0]!.entries).toEqual([
-      expect.objectContaining({ accountId: ACCOUNTS.PAYMENT_PROCESSOR, debit: 50 }),
-      expect.objectContaining({ accountId: ACCOUNTS.REVENUE, credit: 50 }),
+    expect(last.reversed).toEqual([
+      { businessId: 'b1', transactionId: 'txn-orig' },
+      { businessId: 'b1', transactionId: 'rf-1' },
+      { businessId: 'b1', transactionId: 'rf-2' },
     ]);
+    expect(last.posted).toHaveLength(0);
+    const audit = last.timeline.recordEvent.mock.calls[0]![0];
+    expect(audit.data).toMatchObject({ amount: 50, ledgerReversed: true, ledgerPartialRefundsReversed: 2 });
+  });
+
+  it('V1-29c review (CRR-V29C-1): whether a refund completes the payment is read from its linked refund rows, posted or not: after an unposted -30 row (payments-ops refundCharge), the refund of 70 reverses the recording instead of posting a partial', async () => {
+    const { svc, posted, reversed, prisma } = make({
+      basis: 'CASH',
+      payment: PAYMENT,
+      existingFinancialTx: RECORDING,
+      linkedRows: [{ amount: -30 }, { amount: -70 }],
+    });
+    await svc.onPaymentRefunded('p1', { refund: { paymentId: 'r2', amount: 70 } });
+    expect(posted).toHaveLength(0);
+    expect(reversed).toEqual([{ businessId: 'b1', transactionId: 'txn-orig' }]);
+    expect(prisma.client.payment.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ businessId: 'b1', invoiceId: 'inv1', reference: 'pi_1', status: 'REFUNDED', amount: { lt: 0 } }),
+      }),
+    );
+
+    // Linked rows below the payment: a partial is posted for this refund's amount only.
+    const partial = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING, linkedRows: [{ amount: -30 }, { amount: -20 }] });
+    await partial.svc.onPaymentRefunded('p1', { refund: { paymentId: 'r2', amount: 20 } });
+    expect(partial.reversed).toHaveLength(0);
+    expect(partial.posted.map((p) => [p.type, p.kind, p.amount])).toEqual([['REFUND', 'payment_refunded:1', 20]]);
   });
 
   it('V1-29c: a refund already posted under its refund row is not posted again', async () => {
@@ -330,11 +358,11 @@ describe('RevenuePostingService recipe semantics', () => {
     expect(posting.reverse).not.toHaveBeenCalled();
   });
 
-  it('V1-29c: a call that names no refund refunds all that is left: the recording reversed and the partials folded back', async () => {
+  it('V1-29c: a call that names no refund refunds all that is left: the recording reversed and the partials reversed', async () => {
     const { svc, posted, reversed } = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING, partialRefunds: [{ id: 'rf-1', amount: 40, refundPaymentId: 'r1' }] });
     await svc.onPaymentRefunded('p1');
-    expect(reversed).toHaveLength(1);
-    expect(posted.map((p) => [p.type, p.amount])).toEqual([['ADJUSTMENT', 40]]);
+    expect(reversed.map((r) => r.transactionId)).toEqual(['txn-orig', 'rf-1']);
+    expect(posted).toHaveLength(0);
   });
 
   it('V1-29c (SEC-V29-2): the manual refund (auditInTransaction) posts and audits the refund row it wrote: amount 60 of a 100 payment after a posted partial of 40 completes it', async () => {
@@ -346,13 +374,13 @@ describe('RevenuePostingService recipe semantics', () => {
       linkedRefund: { id: 'r-manual', amount: -60 },
     });
     await svc.onPaymentRefunded('p1', { auditInTransaction: true, createdById: 'u1' });
-    expect(reversed).toHaveLength(1);
-    expect(posted.map((p) => [p.type, p.amount])).toEqual([['ADJUSTMENT', 40]]);
+    expect(reversed.map((r) => r.transactionId)).toEqual(['txn-orig', 'rf-1']);
+    expect(posted).toHaveLength(0);
     expect(prisma.client.payment.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ reference: 'pi_1', status: 'REFUNDED', amount: { lt: 0 } }) }),
     );
     const audit = prisma.client.activity.create.mock.calls[0]![0].data;
-    expect(audit.data).toMatchObject({ amount: 60, paymentAmount: 100, refundPaymentId: 'r-manual', ledgerReversed: true, refundedBy: 'u1' });
+    expect(audit.data).toMatchObject({ amount: 60, paymentAmount: 100, refundPaymentId: 'r-manual', ledgerReversed: true, ledgerPartialRefundsReversed: 1, refundedBy: 'u1' });
   });
 
   it('invoice void reverses the finalized accrual posting', async () => {

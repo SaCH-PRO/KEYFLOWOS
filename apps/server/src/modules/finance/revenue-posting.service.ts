@@ -42,8 +42,6 @@ interface RefundPostingOpts extends PostingOpts {
  * never taken twice; a racing duplicate would fail on the unique key.
  */
 const PARTIAL_REFUND_KIND = 'payment_refunded';
-/** V1-29c: the partial refunds of a payment folded back into its full reversal. */
-const FOLDED_REFUNDS_KIND = 'payment_refunds_folded';
 
 /** A ledger amount (Decimal, number or string) in integer cents. */
 function centsOf(value: unknown): number {
@@ -406,15 +404,24 @@ export class RevenuePostingService {
    * posting records nothing.
    *
    * V1-29c-REFUND-WRITE-DOOR (BR-07): a refund posts the amount it refunds.
-   * One that leaves part of the payment (the earlier partial refunds plus
-   * this one stay below its amount) posts a REFUND transaction for that
+   * One that leaves part of the payment posts a REFUND transaction for that
    * amount, the recording's credit account debited and its deposit account
    * credited, and the recording stays POSTED. One that refunds what is left
    * (or a call that names no refund) reverses the recording once, as before,
-   * and folds the earlier partial refunds back with one ADJUSTMENT, so the
-   * payment's transactions net to zero exactly once. SEC-V29-2: the audit
-   * entry names the amount refunded (`amount`), the refund row
-   * (`refundPaymentId`) and the payment's own amount (`paymentAmount`).
+   * and reverses each earlier partial REFUND posting (PostingService.reverse),
+   * so the payment's transactions net to zero exactly once and every reader
+   * that nets an original against its REVERSAL (the cash-basis P&L and
+   * operating cash flow, ledger-reporting computeCashBasisPnl) reads a fully
+   * refunded payment as nothing received (review CRR-V29C-2: the V1-29c
+   * ADJUSTMENT that folded the partials back read as a new collection on an
+   * ACCRUAL business). Whether a refund leaves part of the payment is read
+   * from the payment's linked refund rows, this one included, not from the
+   * partial postings alone (review CRR-V29C-1): a linked refund row that was
+   * never posted (payments-ops refundCharge) still refunds its part, and the
+   * refund of what is left after it reverses the recording.
+   * SEC-V29-2: the audit entry names the amount refunded (`amount`), the
+   * refund row (`refundPaymentId`) and the payment's own amount
+   * (`paymentAmount`).
    */
   async onPaymentRefunded(paymentId: string, opts: RefundPostingOpts = {}) {
     const db = this.db(opts);
@@ -447,15 +454,22 @@ export class RevenuePostingService {
     let result: PostingResult | null = null;
     let reversed = false;
     let partlyPosted = false;
+    let partialsReversed = 0;
     if (original?.status === 'REVERSED') {
       result = { transactionId: original.id, externalRef, alreadyPosted: true };
     } else if (original) {
       const earlier = await this.partialRefundsOf(db, payment.businessId, payment.id);
       const replayed = refund ? earlier.find((p) => p.refundPaymentId === refund.paymentId) : undefined;
       const postedCents = earlier.reduce((s, p) => s + p.cents, 0);
+      // Review CRR-V29C-1: what the payment's refunds add up to is read from
+      // its linked refund rows (the row of this refund included, written in
+      // the caller's transaction), and never less than what is posted.
+      const refundedCents = refund
+        ? Math.max(await this.linkedRefundCents(db, payment), postedCents + toCents(refund.amount))
+        : 0;
       if (replayed) {
         result = { transactionId: replayed.id, externalRef: replayed.externalRef, alreadyPosted: true };
-      } else if (refund && postedCents + toCents(refund.amount) < toCents(Number(payment.amount ?? 0))) {
+      } else if (refund && refundedCents < toCents(Number(payment.amount ?? 0))) {
         const accounts = await this.refundAccounts(payment, original.entries, opts);
         result = await this.posting.post(
           {
@@ -488,31 +502,18 @@ export class RevenuePostingService {
           opts.tx,
         );
         reversed = true;
-        if (postedCents > 0) {
-          const accounts = await this.refundAccounts(payment, original.entries, opts);
-          const folded = fromCents(postedCents);
-          await this.posting.post(
-            {
-              businessId: payment.businessId,
-              type: 'ADJUSTMENT',
-              date: new Date(),
-              amount: folded,
-              currency: payment.currency,
-              description: `Partial refunds folded into the reversal of a payment for invoice ${payment.invoice?.invoiceNumber ?? payment.invoiceId}`,
-              contactId: payment.invoice?.contactId ?? null,
-              sourceType: 'Payment',
-              sourceId: payment.id,
-              kind: FOLDED_REFUNDS_KIND,
-              reference: payment.invoice?.invoiceNumber ?? payment.invoiceId,
-              metadata: { partialRefundTransactionIds: earlier.map((p) => p.id) },
-              createdById: opts.createdById ?? null,
-              entries: [
-                { accountId: accounts.depositId, debit: folded, memo: 'Partial refunds folded into the reversal' },
-                { accountId: accounts.creditId, credit: folded, memo: 'Partial refunds folded into the reversal' },
-              ],
-            },
+        // Review CRR-V29C-2: the partial refunds are taken back by their own
+        // REVERSALs (each original then REVERSED), so the recording, the
+        // partials and their reversals net to zero in every reader.
+        for (const partial of earlier) {
+          if (partial.status === 'REVERSED') continue;
+          await this.posting.reverse(
+            payment.businessId,
+            partial.id,
+            { reason: 'Payment refunded in full', createdById: opts.createdById ?? null },
             opts.tx,
           );
+          partialsReversed += 1;
         }
       }
     }
@@ -538,6 +539,7 @@ export class RevenuePostingService {
         currency: payment.currency,
         ledgerReversed: reversed,
         ledgerRefundPosted: partlyPosted,
+        ledgerPartialRefundsReversed: partialsReversed,
         refundedBy,
       },
       // KEY is a SYSTEM actor, a person is USER; with no actor none is named.
@@ -577,23 +579,47 @@ export class RevenuePostingService {
     db: Prisma.TransactionClient,
     businessId: string,
     paymentId: string,
-  ): Promise<Array<{ id: string; externalRef: string; cents: number; refundPaymentId: string | null }>> {
-    const found: Array<{ id: string; externalRef: string; cents: number; refundPaymentId: string | null }> = [];
+  ): Promise<Array<{ id: string; externalRef: string; status: string | null; cents: number; refundPaymentId: string | null }>> {
+    const found: Array<{ id: string; externalRef: string; status: string | null; cents: number; refundPaymentId: string | null }> = [];
     for (let n = 1; ; n += 1) {
       const externalRef = `${buildExternalRef('Payment', paymentId, PARTIAL_REFUND_KIND)}:${n}`;
       const row = await db.financialTransaction.findUnique({
         where: { businessId_externalRef: { businessId, externalRef } },
-        select: { id: true, amount: true, metadata: true },
+        select: { id: true, status: true, amount: true, metadata: true },
       });
       if (!row) return found;
       const meta = row.metadata as { refundPaymentId?: unknown } | null;
       found.push({
         id: row.id,
         externalRef,
+        status: row.status ?? null,
         cents: centsOf(row.amount),
         refundPaymentId: typeof meta?.refundPaymentId === 'string' ? meta.refundPaymentId : null,
       });
     }
+  }
+
+  /**
+   * V1-29c review (CRR-V29C-1): what a payment's linked refund rows refund,
+   * in cents: its negative REFUNDED rows of its invoice and tenant whose
+   * reference is its providerPaymentId (the manual refund, the provider
+   * refund door and payments-ops refundCharge all link so), posted or not.
+   */
+  private async linkedRefundCents(
+    db: Prisma.TransactionClient,
+    payment: { businessId: string; invoiceId: string; providerPaymentId: string },
+  ): Promise<number> {
+    const rows = await db.payment.findMany({
+      where: {
+        businessId: payment.businessId,
+        invoiceId: payment.invoiceId,
+        status: 'REFUNDED',
+        amount: { lt: 0 },
+        reference: payment.providerPaymentId,
+      },
+      select: { amount: true },
+    });
+    return rows.reduce((s, r) => s + Math.abs(centsOf(r.amount)), 0);
   }
 
   /**

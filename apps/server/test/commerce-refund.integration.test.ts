@@ -789,10 +789,11 @@ describe('V1-29 review: refunds that do not link to their payment (SEC-V29-1 / C
     expect(again.status, JSON.stringify(again.body)).toBe(409);
     expect(again.body.message).toMatch(/already refunded/i);
     // V1-29c: the webhook posted its 20 as a partial refund, the manual rest (30) reversed the intent's posting
-    // and folded the 20 back; the manual refund reversed the session's. One reversal each, nothing twice.
+    // and (review CRR-V29C-2) the partial refund posting; the manual refund reversed the session's. Each posting
+    // reversed once, nothing twice: the intent's recording and its partial refund, the session's recording.
     expect(await reversalsFor(intent.id)).toHaveLength(1);
     expect(await reversalsFor(session.id)).toHaveLength(1);
-    await expectLedgerAgrees(inv, { net: 0, reversals: 2 });
+    await expectLedgerAgrees(inv, { net: 0, reversals: 3 });
   });
 
   it('RF-13: a refund never takes the invoice below nothing received: a cash 100 beside a stray -100 refund row of another provider that links to no payment -> 409 "already refunded"; nothing written', async () => {
@@ -874,7 +875,8 @@ describe('V1-29 review findings outside the V1-29 write set (owner decision; it.
     expect(audit).toHaveLength(1);
     // RED-BEFORE (int/trial-I 7f4b81a2): data.amount 100 and no refund row named.
     expect(audit[0].data).toMatchObject({ amount: 60, paymentAmount: 100, refundPaymentId: res.body.id, refundedBy: ID.ownerA });
-    await expectLedgerAgrees(inv, { net: 0, reversals: 1 });
+    // The recording and (review CRR-V29C-2) the provider's partial refund posting are each reversed once.
+    await expectLedgerAgrees(inv, { net: 0, reversals: 2 });
   });
   it.todo(
     'CR-V29-1: the invoice / reminder email context states paid = computeBalance.paid (gross) and amountRemaining = total - gross, so a reminder for a refunded invoice reads "TT$0.00 awaiting payment"; the evidence-match candidates sum SUCCESSFUL rows the same way (commerce/commerce.controller.ts buildInvoiceEmailContext and extractPaymentEvidence, outside the write set)',

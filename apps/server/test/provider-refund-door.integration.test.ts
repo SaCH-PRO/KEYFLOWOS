@@ -36,7 +36,7 @@
  *           REFUND of 40 (the payment posting stays POSTED): ledger cash net 60
  *           = balance net 60, PARTIALLY_PAID; the second refund (60) completes
  *           it: the payment posting is REVERSED once and the partial refund is
- *           folded back, ledger cash net 0, SENT
+ *           reversed (review CRR-V29C-2), ledger cash net 0, SENT
  *   PRD-03  (BR-08) charge.refunded {amount_refunded 4000, no refunds list}, then
  *           refund.created for the same refund -> ONE -40 row; the same event
  *           redelivered, a new charge.refunded with the same cumulative and
@@ -58,6 +58,32 @@
  *           the second (70) completes it; a PayPal refund without the capture
  *           id is linked to the invoice's PayPal payment (reference = its
  *           capture id) and posts its amount
+ *
+ *   Review repairs (V1-29c-REFUND-WRITE-DOOR review):
+ *
+ *   PRD-08  (SEC-V29C-1) a refund verified by the deployment's own secret whose
+ *           ids match payments of two businesses (tenant A stored tenant B's
+ *           pi_ in the reference of a payment it signed for itself) is refused:
+ *           nothing written on either tenant; matching one business it is
+ *           recorded (control)
+ *   PRD-09  (SEC-V29C-2) never more than the payment: a manual refund of the
+ *           whole payment, then Stripe's refund.created and charge.refunded of
+ *           the same money write nothing; a second refund.created beyond the
+ *           payment writes nothing; a manual refund of 30, then Stripe's 70,
+ *           records the 70; PayPal after a manual refund writes nothing; the
+ *           ledger agrees after each step
+ *   PRD-10  (SEC-V29C-3) a charge.refunded tenant A signs naming tenant B's
+ *           charge id (with A's own payment_intent) does not take the id of B's
+ *           own charge.refunded of that charge: B's refund is recorded; a refund
+ *           id an event supplies under the re_synth_ prefix writes nothing
+ *   PRD-11  (CRR-V29C-1) a linked refund row that was never posted (the row
+ *           payments-ops refundCharge writes) counts: the refund of what is left
+ *           after it (manual, or Stripe refund.created) reverses the recording,
+ *           ledger cash net 0 = balance net 0
+ *   PRD-12  (CRR-V29C-2) ACCRUAL business, cash-basis P&L: a payment refunded in
+ *           full in two parts (provider, or provider then manual) reads revenue
+ *           0 and operating cash in 100 / out 100 at the end; the partial REFUND
+ *           postings are reversed, not folded back with an ADJUSTMENT
  *
  *   LEDGER after every step: each transaction balances, the ledger cash net of
  *          the invoice's Payment-sourced transactions = balanceOfStoredRows.net,
@@ -97,6 +123,7 @@ const P = 'v29c_';
 const HEADER = 'x-v29c-user';
 const SECRET_A = `whsec_${P}a`;
 const SECRET_B = `whsec_${P}b`;
+const SECRET_C = `whsec_${P}c`;
 
 const ID = {
   ownerA: `${P}ownerA`,
@@ -113,9 +140,30 @@ const ID = {
   invAudit: `${P}invAudit`,
   invPaypal: `${P}invPaypal`,
   invPaypalNoCap: `${P}invPaypalNoCap`,
+  // review repairs (tenant A)
+  invAmbig: `${P}invAmbig`,
+  invPlatformOk: `${P}invPlatformOk`,
+  invManualFirst: `${P}invManualFirst`,
+  invManualFirstCh: `${P}invManualFirstCh`,
+  invManualPart: `${P}invManualPart`,
+  invOverRefund: `${P}invOverRefund`,
+  invPaypalManual: `${P}invPaypalManual`,
+  invSynthOwn: `${P}invSynthOwn`,
+  invOpsManual: `${P}invOpsManual`,
+  invOpsStripe: `${P}invOpsStripe`,
   // tenant B
   invVictim: `${P}invVictim`,
+  invAmbigVictim: `${P}invAmbigVictim`,
+  invSynthVictim: `${P}invSynthVictim`,
+  // business C (ACCRUAL)
+  ownerC: `${P}ownerC`,
+  bizC: `${P}bizC`,
+  contactC: `${P}contactC`,
+  invAccrual: `${P}invAccrual`,
+  invAccrualManual: `${P}invAccrualManual`,
 };
+const TENANT_B_INVOICES = new Set([ID.invVictim, ID.invAmbigVictim, ID.invSynthVictim]);
+const BUSINESS_C_INVOICES = new Set([ID.invAccrual, ID.invAccrualManual]);
 
 const TOTAL = 100;
 const DEPOSIT_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
@@ -124,6 +172,8 @@ let db: any;
 let app: any;
 let redis: any;
 let paymentsSvc: any;
+let revenuePostingSvc: any;
+let ledgerReporting: any;
 let storedBalanceFn: (total: number, rows: Array<{ amount: number; status: string }>, currency?: string) => any;
 
 const eventStub = {
@@ -172,10 +222,10 @@ function payByIntent(inv: string, n: string, amount: number, secret = SECRET_A) 
 }
 
 /** A Checkout Session payment of `amount` (stored as cs_, its pi_ in reference). */
-function payBySession(inv: string, n: string, amount: number) {
+function payBySession(inv: string, n: string, amount: number, secret = SECRET_A) {
   return stripe(`evt_cs_${n}`, 'checkout.session.completed', {
     id: `${P}cs_${n}`, client_reference_id: inv, amount_total: amount * 100, currency: 'ttd', payment_intent: `${P}pi_${n}`, metadata: { invoiceId: inv },
-  });
+  }, secret);
 }
 
 /** refund.created: the Refund object itself. */
@@ -195,11 +245,42 @@ function chargeRefunded(evt: string, inv: string, n: string, amountRefunded: num
   }, secret);
 }
 
-function refund(paymentId: string, reason = 'v29c refund') {
+function refund(paymentId: string, reason = 'v29c refund', business = ID.bizA, owner = ID.ownerA) {
   return request(app.getHttpServer())
-    .post(`/commerce/businesses/${ID.bizA}/payments/${paymentId}/refund`)
-    .set(HEADER, ID.ownerA)
+    .post(`/commerce/businesses/${business}/payments/${paymentId}/refund`)
+    .set(HEADER, owner)
     .send({ reason });
+}
+
+/** With the deployment's own Stripe webhook secret configured (Stripe's alone; no tenant binding). */
+async function withPlatformSecret<T>(secret: string, fn: () => Promise<T>): Promise<T> {
+  const prev = process.env.STRIPE_WEBHOOK_SECRET;
+  process.env.STRIPE_WEBHOOK_SECRET = secret;
+  try {
+    return await fn();
+  } finally {
+    if (prev === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
+    else process.env.STRIPE_WEBHOOK_SECRET = prev;
+  }
+}
+
+/** The row payments-ops refundCharge writes: provider 'stripe', its re_ id, reference = the payment's providerPaymentId, no posting. */
+async function refundChargeRow(original: any, re: string, amount: number) {
+  return db.payment.create({
+    data: {
+      businessId: original.businessId, invoiceId: original.invoiceId, amount: -amount, currency: 'TTD', status: 'REFUNDED',
+      provider: 'stripe', providerPaymentId: `${P}${re}`, reference: original.providerPaymentId, notes: 'refundCharge',
+    },
+  });
+}
+
+/** Cash-basis revenue and operating cash of a business over the whole test window. */
+async function cashBasis(businessId: string) {
+  const from = new Date(Date.now() - 400 * 24 * 3600 * 1000);
+  const to = new Date(Date.now() + 24 * 3600 * 1000);
+  const pnl = await ledgerReporting.getPnl(businessId, from, to, 'cash');
+  const cash = await ledgerReporting.computeCashBasisPnl(businessId, from, to);
+  return { revenue: pnl.revenue.total, cashIn: cash.operatingCashIn, cashOut: cash.operatingCashOut };
 }
 
 async function invoiceRow(id: string): Promise<any> {
@@ -359,6 +440,9 @@ beforeAll(async () => {
   const commerce = moduleRef.get(CommerceService);
   const workflow = moduleRef.get(workflowMod.InvoiceWorkflowService);
   paymentsSvc = new PaymentsService(moduleRef.get(PrismaService), commerce, workflow, moduleRef.get(RevenuePostingService));
+  revenuePostingSvc = moduleRef.get(RevenuePostingService);
+  const { LedgerReportingService } = await import('../src/modules/reports/ledger-reporting.service');
+  ledgerReporting = new LedgerReportingService(moduleRef.get(PrismaService), {} as any, {} as any);
 
   app = moduleRef.createNestApplication();
   app.use(async (req: any, _res: any, next: any) => {
@@ -376,12 +460,13 @@ beforeAll(async () => {
 
   await cleanup();
 
-  for (const [user, biz, contact, secret, name, email, contactEmail] of [
-    [ID.ownerA, ID.bizA, ID.contactA, SECRET_A, 'V29C Biz A', `${P}owner_a@test.local`, `${P}c_a@test.local`],
-    [ID.ownerB, ID.bizB, ID.contactB, SECRET_B, 'V29C Biz B', `${P}owner_b@test.local`, `${P}c_b@test.local`],
+  for (const [user, biz, contact, secret, name, email, contactEmail, accountingBasis] of [
+    [ID.ownerA, ID.bizA, ID.contactA, SECRET_A, 'V29C Biz A', `${P}owner_a@test.local`, `${P}c_a@test.local`, 'CASH'],
+    [ID.ownerB, ID.bizB, ID.contactB, SECRET_B, 'V29C Biz B', `${P}owner_b@test.local`, `${P}c_b@test.local`, 'CASH'],
+    [ID.ownerC, ID.bizC, ID.contactC, SECRET_C, 'V29C Biz C', `${P}owner_c@test.local`, `${P}c_c@test.local`, 'ACCRUAL'],
   ] as const) {
     await db.user.create({ data: { id: user, email, role: 'USER' } });
-    await db.business.create({ data: { id: biz, name, ownerId: user, currency: 'TTD', accountingBasis: 'CASH', metaData: { stripeWebhookSecret: secret } } });
+    await db.business.create({ data: { id: biz, name, ownerId: user, currency: 'TTD', accountingBasis, metaData: { stripeWebhookSecret: secret } } });
     await db.membership.create({ data: { id: `${user}_m`, userId: user, businessId: biz, role: 'OWNER' } });
     await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(biz);
     await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V29c', lastName: name, email: contactEmail } });
@@ -390,7 +475,8 @@ beforeAll(async () => {
   let n = 0;
   for (const id of Object.values(ID).filter((v) => v.startsWith(`${P}inv`))) {
     n += 1;
-    const tenantB = id === ID.invVictim;
+    const tenantB = TENANT_B_INVOICES.has(id);
+    const businessC = BUSINESS_C_INVOICES.has(id);
     await db.invoice.create({
       data: {
         id,
@@ -399,8 +485,8 @@ beforeAll(async () => {
         subtotal: TOTAL,
         total: TOTAL,
         currency: 'TTD',
-        businessId: tenantB ? ID.bizB : ID.bizA,
-        contactId: tenantB ? ID.contactB : ID.contactA,
+        businessId: tenantB ? ID.bizB : businessC ? ID.bizC : ID.bizA,
+        contactId: tenantB ? ID.contactB : businessC ? ID.contactC : ID.contactA,
         items: { create: [{ id: `${id}_item1`, description: `V29C item ${n}`, quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
       },
     });
@@ -445,8 +531,9 @@ describe('SEC-V29-1 / CR-V29-5: a Stripe refund row links to the payment it refu
     expect(rest.body).toMatchObject({ amount: -10, refundOfPaymentId: a.id, invoiceStatus: 'SENT' });
     expect((await refundRowsOf(a)).map((r) => Number(r.amount)).sort((x, y) => x - y)).toEqual([-40, -10]);
     expect((await invoiceRow(inv)).paidAt).toBeNull();
-    // cs_A: its partial refund posted 40, the manual rest reversed the posting once and folded the 40 back.
-    expect(await postingsOf(a.id)).toEqual(['INCOME:REVERSED:50', 'REFUND:POSTED:40', 'REVERSAL:POSTED:50', 'ADJUSTMENT:POSTED:40']);
+    // cs_A: its partial refund posted 40, the manual rest reversed the posting once and reversed the partial
+    // refund (review CRR-V29C-2: an ADJUSTMENT folding it back read as a new collection in the cash-basis P&L).
+    expect(await postingsOf(a.id)).toEqual(['INCOME:REVERSED:50', 'REFUND:REVERSED:40', 'REVERSAL:POSTED:50', 'REVERSAL:POSTED:40']);
     expect(await postingsOf(b.id)).toEqual(['INCOME:REVERSED:50', 'REVERSAL:POSTED:50']);
     await expectLedgerAgrees(inv, 0);
 
@@ -458,7 +545,7 @@ describe('SEC-V29-1 / CR-V29-5: a Stripe refund row links to the payment it refu
 });
 
 describe('BR-07: a partial provider refund posts the refunded amount, not the whole payment', () => {
-  it('PRD-02: refund.created 40 of a 100 PaymentIntent payment posts a REFUND of 40 (ledger cash net 60 = balance net 60, PARTIALLY_PAID); refund.created 60 completes it: the payment posting is REVERSED once and the partial refund folded back (ledger cash net 0, SENT)', async () => {
+  it('PRD-02: refund.created 40 of a 100 PaymentIntent payment posts a REFUND of 40 (ledger cash net 60 = balance net 60, PARTIALLY_PAID); refund.created 60 completes it: the payment posting is REVERSED once and the partial refund reversed (ledger cash net 0, SENT)', async () => {
     const inv = ID.invIntent;
     await payByIntent(inv, 'X', 100);
     const pi = await paymentBy(`${P}pi_X`);
@@ -478,7 +565,7 @@ describe('BR-07: a partial provider refund posts the refunded amount, not the wh
     const row = await invoiceRow(inv);
     expect(row.status).toBe('SENT');
     expect(row.paidAt).toBeNull();
-    expect(await postingsOf(pi.id)).toEqual(['INCOME:REVERSED:100', 'REFUND:POSTED:40', 'REVERSAL:POSTED:100', 'ADJUSTMENT:POSTED:40']);
+    expect(await postingsOf(pi.id)).toEqual(['INCOME:REVERSED:100', 'REFUND:REVERSED:40', 'REVERSAL:POSTED:100', 'REVERSAL:POSTED:40']);
     await expectLedgerAgrees(inv, 0);
   });
 });
@@ -590,7 +677,7 @@ describe('SEC-V29-2: the manual refund audit row names the amount refunded and t
     // RED-BEFORE: data.amount 100 (the original's amount), and no refund row named.
     expect(audit[0].data).toMatchObject({ invoiceId: inv, amount: 60, refundPaymentId: res.body.id, currency: 'TTD', ledgerReversed: true, refundedBy: ID.ownerA });
     expect(audit[0].actorId).toBe(ID.ownerA);
-    expect(await postingsOf(pi.id)).toEqual(['INCOME:REVERSED:100', 'REFUND:POSTED:40', 'REVERSAL:POSTED:100', 'ADJUSTMENT:POSTED:40']);
+    expect(await postingsOf(pi.id)).toEqual(['INCOME:REVERSED:100', 'REFUND:REVERSED:40', 'REVERSAL:POSTED:100', 'REVERSAL:POSTED:40']);
     await expectLedgerAgrees(inv, 0);
   });
 });
@@ -611,7 +698,7 @@ describe('BR-07 (PayPal): PayPal refunds post their amount and link to the captu
     // A redelivery of the same refund writes nothing.
     await paymentsSvc.processPaypalRefund({ id: `${P}RF_P1`, amount: { value: '30.00', currency_code: 'TTD' }, supplementary_data: { related_ids: { capture_id: `${P}CAP_P` } } });
     await paymentsSvc.processPaypalRefund({ id: `${P}RF_P2`, amount: { value: '70.00', currency_code: 'TTD' }, supplementary_data: { related_ids: { capture_id: `${P}CAP_P` } } });
-    expect(await postingsOf(cap.id)).toEqual(['INCOME:REVERSED:100', 'REFUND:POSTED:30', 'REVERSAL:POSTED:100', 'ADJUSTMENT:POSTED:30']);
+    expect(await postingsOf(cap.id)).toEqual(['INCOME:REVERSED:100', 'REFUND:REVERSED:30', 'REVERSAL:POSTED:100', 'REVERSAL:POSTED:30']);
     expect((await invoiceRow(inv)).status).toBe('SENT');
     await expectLedgerAgrees(inv, 0);
 
@@ -624,5 +711,190 @@ describe('BR-07 (PayPal): PayPal refunds post their amount and link to the captu
     expect(await refundRowsOf(q)).toHaveLength(1);
     expect(await postingsOf(q.id)).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:25']);
     await expectLedgerAgrees(noCap, 75);
+  });
+});
+
+describe('Review SEC-V29C-1: a refund verified by the deployment secret whose ids match payments of two businesses is refused', () => {
+  it("PRD-08: tenant A stores tenant B's pi_ in the reference of a payment it signs for itself; B's platform-verified refund.created and charge.refunded then match both tenants and write nothing on either; a platform-verified refund matching one business is recorded (control)", async () => {
+    const PLATFORM = `whsec_${P}platform`;
+    await withPlatformSecret(PLATFORM, async () => {
+      // Tenant A, with its own secret, forges a 1.00 session on its own invoice whose payment_intent is B's pi_AMB.
+      await stripe('evt_forge_cs', 'checkout.session.completed', {
+        id: `${P}cs_FAKE`, client_reference_id: ID.invAmbig, amount_total: 100, currency: 'ttd', payment_intent: `${P}pi_AMB`, metadata: { invoiceId: ID.invAmbig },
+      }, SECRET_A);
+      expect(await rowsOf(ID.invAmbig)).toEqual([`stripe:${P}cs_FAKE:SUCCESSFUL:1:${P}pi_AMB`]);
+      // B's genuine payment, verified by the deployment's secret (after A's row: A's is the oldest match).
+      await payByIntent(ID.invAmbigVictim, 'AMB', 100, PLATFORM);
+      const victim = await paymentBy(`${P}pi_AMB`);
+      expect(victim).toMatchObject({ businessId: ID.bizB, amount: 100, status: 'SUCCESSFUL' });
+      const aBefore = await rowsOf(ID.invAmbig);
+      const bBefore = await rowsOf(ID.invAmbigVictim);
+
+      expect(await refundCreated('evt_re_AMB', ID.invAmbigVictim, 'AMB', 're_AMB', 25, PLATFORM)).toEqual({ ok: true, received: true, processed: 'refund.created' });
+      // RED-BEFORE: A's row re_AMB -25 (reference cs_FAKE) written into A's books; B's books never show the refund.
+      expect(await paymentBy(`${P}re_AMB`)).toBeNull();
+      await chargeRefunded('evt_chr_AMB', ID.invAmbigVictim, 'AMB', 25, undefined, PLATFORM);
+      expect(await rowsOf(ID.invAmbig)).toEqual(aBefore);
+      expect(await rowsOf(ID.invAmbigVictim)).toEqual(bBefore);
+      expect(await postingsOf(victim.id)).toEqual(['INCOME:POSTED:100']);
+      await expectLedgerAgrees(ID.invAmbigVictim, 100);
+      await expectLedgerAgrees(ID.invAmbig, 1);
+
+      // Control: a platform-verified refund whose ids match one business only is recorded there.
+      await payByIntent(ID.invPlatformOk, 'PO', 100, PLATFORM);
+      await refundCreated('evt_re_PO', ID.invPlatformOk, 'PO', 're_PO', 30, PLATFORM);
+      expect(await paymentBy(`${P}re_PO`)).toMatchObject({ businessId: ID.bizA, amount: -30, reference: `${P}pi_PO` });
+      await expectLedgerAgrees(ID.invPlatformOk, 70);
+    });
+  });
+});
+
+describe('Review SEC-V29C-2: a refund is never recorded beyond the payment, whichever door records it first', () => {
+  it("PRD-09: a manual refund of the whole payment, then Stripe's refund.created (or charge.refunded) of the same money writes nothing; a second Stripe refund beyond the payment writes nothing; PayPal's refund after a manual refund writes nothing; the ledger agrees after each step", async () => {
+    // The manual refund records only; the operator refunded in the Stripe dashboard, whose event arrives after.
+    const inv = ID.invManualFirst;
+    await payByIntent(inv, 'MF', 100);
+    const pi = await paymentBy(`${P}pi_MF`);
+    const manual = await refund(pi.id, 'refunded in the Stripe dashboard');
+    expect(manual.status, JSON.stringify(manual.body)).toBe(201);
+    expect(manual.body).toMatchObject({ amount: -100, invoiceStatus: 'SENT' });
+    const rows = await rowsOf(inv);
+    expect(await refundCreated('evt_re_MF', inv, 'MF', 're_MF', 100)).toEqual({ ok: true, received: true, processed: 'refund.created' });
+    // RED-BEFORE: a second -100 row (re_MF): refunded 200 of paid 100, net -100, remaining 200.
+    expect(await rowsOf(inv)).toEqual(rows);
+    expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
+    expect(await postingsOf(pi.id)).toEqual(['INCOME:REVERSED:100', 'REVERSAL:POSTED:100']);
+    await expectLedgerAgrees(inv, 0);
+
+    const ch = ID.invManualFirstCh;
+    await payByIntent(ch, 'MC', 100);
+    const pic = await paymentBy(`${P}pi_MC`);
+    expect((await refund(pic.id, 'refunded in the Stripe dashboard')).status).toBe(201);
+    const chRows = await rowsOf(ch);
+    await chargeRefunded('evt_chr_MC', ch, 'MC', 100);
+    // RED-BEFORE: re_synth_..._10000 -100 beside the manual -100.
+    expect(await rowsOf(ch)).toEqual(chRows);
+    expect(await balanceOf(ch)).toMatchObject({ refunded: 100, net: 0 });
+    await expectLedgerAgrees(ch, 0);
+
+    // Two Stripe refunds of one 100 payment adding up to 130: the second writes nothing.
+    const over = ID.invOverRefund;
+    await payByIntent(over, 'OV', 100);
+    await refundCreated('evt_re_OVa', over, 'OV', 're_OVa', 100);
+    await refundCreated('evt_re_OVb', over, 'OV', 're_OVb', 30);
+    // RED-BEFORE: re_OVb -30 written too: refunded 130, net -30.
+    expect(await paymentBy(`${P}re_OVb`)).toBeNull();
+    expect(await balanceOf(over)).toMatchObject({ refunded: 100, net: 0 });
+    await expectLedgerAgrees(over, 0);
+
+    // PayPal: a manual refund of the capture, then PayPal's refund event for the same money.
+    const pp = ID.invPaypalManual;
+    await paymentsSvc.processPaypalCaptureCompleted({ id: `${P}CAP_M`, custom_id: pp, amount: { value: '100.00', currency_code: 'TTD' } });
+    const cap = await paymentBy(`${P}CAP_M`);
+    expect((await refund(cap.id, 'refunded in PayPal')).status).toBe(201);
+    const ppRows = await rowsOf(pp);
+    await paymentsSvc.processPaypalRefund({ id: `${P}RF_M`, amount: { value: '100.00', currency_code: 'TTD' }, supplementary_data: { related_ids: { capture_id: `${P}CAP_M` } } });
+    // RED-BEFORE: RF_M -100 beside the manual -100.
+    expect(await rowsOf(pp)).toEqual(ppRows);
+    await expectLedgerAgrees(pp, 0);
+  });
+});
+
+describe("Review SEC-V29C-3: one tenant cannot take the synthetic id of another tenant's refund", () => {
+  it("PRD-10: a charge.refunded tenant A signs naming tenant B's charge (with A's own payment_intent) refunds A's payment only, and B's own charge.refunded of that charge with the same cumulative is still recorded in B's books; a refund id an event supplies under re_synth_ writes nothing", async () => {
+    await payByIntent(ID.invSynthVictim, 'SV', 100, SECRET_B);
+    await payByIntent(ID.invSynthOwn, 'SO', 100, SECRET_A);
+    const victim = await paymentBy(`${P}pi_SV`);
+    await stripe('evt_forge_synth', 'charge.refunded', {
+      id: `${P}ch_SV`, payment_intent: `${P}pi_SO`, amount: 10000, amount_refunded: 2500, currency: 'ttd', metadata: { invoiceId: ID.invSynthOwn },
+    }, SECRET_A);
+    // A's own payment (pi_SO) is what A's secret can refund: in A's books.
+    expect((await paymentsOf(ID.invSynthOwn)).map((r) => [r.businessId, r.status, Number(r.amount)])).toEqual([
+      [ID.bizA, 'SUCCESSFUL', 100],
+      [ID.bizA, 'REFUNDED', -25],
+    ]);
+
+    expect(await chargeRefunded('evt_synth_victim', ID.invSynthVictim, 'SV', 25, undefined, SECRET_B)).toEqual({ ok: true, received: true, processed: 'charge.refunded' });
+    // RED-BEFORE: acked 'processed' with nothing written: A's row had taken re_synth_<ch_SV>_2500.
+    expect(await refundRowsOf(victim)).toHaveLength(1);
+    expect(await balanceOf(ID.invSynthVictim)).toMatchObject({ refunded: 25, net: 75 });
+    expect(await postingsOf(victim.id)).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:25']);
+    await expectLedgerAgrees(ID.invSynthVictim, 75);
+    await expectLedgerAgrees(ID.invSynthOwn, 75);
+
+    // A refund id under the door's synthetic prefix, supplied by an event, is refused.
+    const before = await rowsOf(ID.invSynthOwn);
+    await stripe('evt_forge_synth_id', 'refund.created', {
+      id: `re_synth_${P}forged`, amount: 1000, currency: 'ttd', charge: `${P}ch_SO`, payment_intent: `${P}pi_SO`, status: 'succeeded', metadata: { invoiceId: ID.invSynthOwn },
+    }, SECRET_A);
+    // RED-BEFORE: recorded as a -10 refund under that id.
+    expect(await paymentBy(`re_synth_${P}forged`)).toBeNull();
+    expect(await rowsOf(ID.invSynthOwn)).toEqual(before);
+    await expectLedgerAgrees(ID.invSynthOwn, 75);
+  });
+});
+
+describe('Review CRR-V29C-1: a linked refund row that was never posted counts towards refunding the payment', () => {
+  it('PRD-11: after the unposted row payments-ops refundCharge writes (-30, reference = the payment), the manual refund of what is left (70), or Stripe\'s refund.created of 70, reverses the recording: ledger cash net 0 = balance net 0', async () => {
+    const inv = ID.invOpsManual;
+    await payByIntent(inv, 'OM', 100);
+    const pi = await paymentBy(`${P}pi_OM`);
+    await refundChargeRow(pi, 're_ops_OM', 30);
+    const rest = await refund(pi.id, 'rest');
+    expect(rest.status, JSON.stringify(rest.body)).toBe(201);
+    expect(rest.body).toMatchObject({ amount: -70, refundOfPaymentId: pi.id, invoiceStatus: 'SENT' });
+    // RED-BEFORE: ['INCOME:POSTED:100', 'REFUND:POSTED:70']: ledger cash net 30 against a balance net of 0, for good.
+    expect(await postingsOf(pi.id)).toEqual(['INCOME:REVERSED:100', 'REVERSAL:POSTED:100']);
+    await expectLedgerAgrees(inv, 0);
+
+    const inv2 = ID.invOpsStripe;
+    await payByIntent(inv2, 'OS', 100);
+    const pi2 = await paymentBy(`${P}pi_OS`);
+    await refundChargeRow(pi2, 're_ops_OS', 30);
+    await refundCreated('evt_re_OS', inv2, 'OS', 're_OS', 70);
+    expect(await paymentBy(`${P}re_OS`)).toMatchObject({ amount: -70, reference: `${P}pi_OS`, status: 'REFUNDED' });
+    expect(await postingsOf(pi2.id)).toEqual(['INCOME:REVERSED:100', 'REVERSAL:POSTED:100']);
+    await expectLedgerAgrees(inv2, 0);
+  });
+});
+
+describe('Review CRR-V29C-2: a payment refunded in full in parts reads as nothing received in the cash-basis P&L of an ACCRUAL business', () => {
+  it('PRD-12: ACCRUAL: pay 100, refund.created 40, refund.created 60 -> cash-basis revenue +0 and operating cash in 100 / out 100 at the end; the partial REFUND is reversed (no ADJUSTMENT); the same with a manual refund of the rest', async () => {
+    const inv = ID.invAccrual;
+    await revenuePostingSvc.onInvoiceFinalized(inv);
+    const before = await cashBasis(ID.bizC);
+    await payByIntent(inv, 'AC', 100, SECRET_C);
+    const pi = await paymentBy(`${P}pi_AC`);
+    expect(pi).toMatchObject({ businessId: ID.bizC, amount: 100 });
+    await expectLedgerAgrees(inv, 100);
+    expect(money((await cashBasis(ID.bizC)).revenue - before.revenue)).toBe(100);
+
+    await refundCreated('evt_re_AC1', inv, 'AC', 're_AC1', 40, SECRET_C);
+    expect(await postingsOf(pi.id)).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:40']);
+    await expectLedgerAgrees(inv, 60);
+    await refundCreated('evt_re_AC2', inv, 'AC', 're_AC2', 60, SECRET_C);
+    expect(await postingsOf(pi.id)).toEqual(['INCOME:REVERSED:100', 'REFUND:REVERSED:40', 'REVERSAL:POSTED:100', 'REVERSAL:POSTED:40']);
+    await expectLedgerAgrees(inv, 0);
+    const end = await cashBasis(ID.bizC);
+    // RED-BEFORE: revenue +40 (the ADJUSTMENT folding the partial back read as a new collection), cash in 140 / out 100.
+    expect(money(end.revenue - before.revenue), 'cash-basis revenue of a fully refunded payment').toBe(0);
+    expect(money(end.cashIn - before.cashIn)).toBe(100);
+    expect(money(end.cashOut - before.cashOut)).toBe(100);
+
+    const m = ID.invAccrualManual;
+    await revenuePostingSvc.onInvoiceFinalized(m);
+    const b2 = await cashBasis(ID.bizC);
+    await payBySession(m, 'ACM', 100, SECRET_C);
+    const cs = await paymentBy(`${P}cs_ACM`);
+    await refundCreated('evt_re_ACM', m, 'ACM', 're_ACM', 40, SECRET_C);
+    const rest = await refund(cs.id, 'rest', ID.bizC, ID.ownerC);
+    expect(rest.status, JSON.stringify(rest.body)).toBe(201);
+    expect(rest.body).toMatchObject({ amount: -60, refundOfPaymentId: cs.id });
+    expect(await postingsOf(cs.id)).toEqual(['INCOME:REVERSED:100', 'REFUND:REVERSED:40', 'REVERSAL:POSTED:100', 'REVERSAL:POSTED:40']);
+    await expectLedgerAgrees(m, 0);
+    const e2 = await cashBasis(ID.bizC);
+    // RED-BEFORE: +40.
+    expect(money(e2.revenue - b2.revenue), 'cash-basis revenue after the manual refund of the rest').toBe(0);
+    expect(money(e2.cashIn - b2.cashIn)).toBe(money(e2.cashOut - b2.cashOut));
   });
 });
