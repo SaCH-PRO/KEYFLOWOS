@@ -36,7 +36,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import { createElement, useEffect } from "react";
-import { render, screen, waitFor, cleanup, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent, act, within } from "@testing-library/react";
 import * as client from "@/lib/client";
 import * as approvals from "@/lib/api/approvals";
 import * as productCost from "@/lib/api/product-cost";
@@ -209,15 +209,16 @@ describe(`census: ${SITES.length} web call sites of a /businesses/:businessId ro
 
   it("in the helper layer a missing business resolves to the selection, never to a literal: no business-id default or fallback is a string", () => {
     const offenders: string[] = [];
-    const defaultParam = new RegExp(String.raw`\b${BUSINESS_VAR}\??\s*:\s*string\s*=\s*([^,)\n]+)`, "g");
+    const defaultParam = new RegExp(String.raw`\b${BUSINESS_VAR}\??\s*:\s*string\s*=\s*`, "g");
     const fallback = new RegExp(String.raw`\b${BUSINESS_VAR}\b[^;\n]{0,40}(\?\?|\|\|)\s*([^;\n]+)`, "g");
-    for (const module of HELPER_MODULES) {
-      const code = CODE.get(path.join(WEB_SRC, module)) ?? "";
+    for (const helperModule of HELPER_MODULES) {
+      const code = CODE.get(path.join(WEB_SRC, helperModule)) ?? "";
       for (const m of code.matchAll(defaultParam)) {
-        if (m[1].trim() !== "selectedBusinessId()") offenders.push(`${module}: default ${m[0].trim()}`);
+        const value = code.slice(m.index + m[0].length, m.index + m[0].length + 40);
+        if (!value.startsWith("selectedBusinessId()")) offenders.push(`${helperModule}: default ${m[0]}${value.split(/[,\n]/)[0]}`);
       }
       for (const m of code.matchAll(fallback)) {
-        if (/^\s*["'`]/.test(m[2])) offenders.push(`${module}: fallback ${m[0].trim()}`);
+        if (/^\s*["'`]/.test(m[2])) offenders.push(`${helperModule}: fallback ${m[0].trim()}`);
       }
     }
     expect(offenders).toEqual([]);
@@ -244,15 +245,17 @@ describe(`census: ${SITES.length} web call sites of a /businesses/:businessId ro
 // 2. Runtime census of the business-scoped helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Every exported function of a module's source that names a /businesses/ route
- * or resolves a business for its caller.
- */
-function businessScopedFunctions(source: string): string[] {
+/** A function that resolves a business for a caller that names none. */
+const RESOLVES_A_BUSINESS = /DEFAULT_BUSINESS_ID|selectedBusinessId\(|getStoredBusinessId\(/;
+/** A function that names a business route, or resolves a business. */
+const NAMES_OR_RESOLVES_A_BUSINESS = /\/businesses\/|DEFAULT_BUSINESS_ID|selectedBusinessId\(|getStoredBusinessId\(/;
+
+/** Every exported function of a module's source whose body matches `selects`. */
+function businessScopedFunctions(source: string, selects: RegExp = NAMES_OR_RESOLVES_A_BUSINESS): string[] {
   const names: string[] = [];
   let current: { name: string; body: string } | null = null;
   const flush = () => {
-    if (current && /\/businesses\/|DEFAULT_BUSINESS_ID|selectedBusinessId\(|getStoredBusinessId\(/.test(current.body)) names.push(current.name);
+    if (current && selects.test(current.body)) names.push(current.name);
   };
   for (const line of source.split("\n")) {
     const fn = /^export (?:async )?function (\w+)/.exec(line);
@@ -309,23 +312,41 @@ async function settle(call: () => unknown): Promise<unknown> {
   ]);
 }
 
-/** The business named by a request: its /businesses/ segment, else its businessId query. */
+/**
+ * The business named by a request: its /businesses/ segment (a route word such
+ * as /businesses/system/ names none), else its businessId query.
+ */
 function businessOf(url: string): string | null {
   const u = new URL(url, "http://localhost");
   const segment = /\/businesses\/([^/?#]*)/.exec(u.pathname)?.[1];
-  if (segment !== undefined) return decodeURIComponent(segment);
+  if (segment !== undefined) return segment !== "" && ROUTE_WORDS.has(segment) ? null : decodeURIComponent(segment);
   return u.searchParams.get("businessId");
 }
 
+/**
+ * The helper layer: every business-route function of lib/client.ts (all of
+ * them go through its guarded transports), and the functions of
+ * lib/api/approvals.ts and lib/api/product-cost.ts that resolve a business for
+ * their caller (they defaulted to the demo tenant too). The other functions of
+ * lib/api/* take a required businessId and send through lib/api.ts directly;
+ * see the follow-up below.
+ */
 const CLIENT_SOURCE = readText(CLIENT_FILE);
 const HELPERS: Array<{ module: string; name: string; fn: AnyFn }> = [
   ...businessScopedFunctions(CLIENT_SOURCE).map((name) => ({ module: "lib/client.ts", name, fn: (client as unknown as Record<string, AnyFn>)[name] })),
-  ...businessScopedFunctions(readText(path.join(WEB_SRC, "lib", "api", "approvals.ts"))).map((name) => ({ module: "lib/api/approvals.ts", name, fn: (approvals as unknown as Record<string, AnyFn>)[name] })),
-  ...businessScopedFunctions(readText(path.join(WEB_SRC, "lib", "api", "product-cost.ts"))).map((name) => ({ module: "lib/api/product-cost.ts", name, fn: (productCost as unknown as Record<string, AnyFn>)[name] })),
+  ...businessScopedFunctions(readText(path.join(WEB_SRC, "lib", "api", "approvals.ts")), RESOLVES_A_BUSINESS).map((name) => ({ module: "lib/api/approvals.ts", name, fn: (approvals as unknown as Record<string, AnyFn>)[name] })),
+  ...businessScopedFunctions(readText(path.join(WEB_SRC, "lib", "api", "product-cost.ts")), RESOLVES_A_BUSINESS).map((name) => ({ module: "lib/api/product-cost.ts", name, fn: (productCost as unknown as Record<string, AnyFn>)[name] })),
 ].filter((h) => typeof h.fn === "function");
 
+/**
+ * An input object for the helpers that take one (`input.businessId ?? ...`).
+ * Used as an id instead it spells nothing (an empty id), so it can never name a
+ * business by accident ("[object Object]").
+ */
+const EMPTY_INPUT = { toString: () => "" };
+
 /** The argument shapes a helper is tried with: nothing at all, then an empty input object. */
-const ARG_SHAPES: unknown[][] = [[], [{}]];
+const ARG_SHAPES: unknown[][] = [[], [EMPTY_INPUT]];
 
 describe(`runtime census: the ${HELPERS.length} exported helpers that name a business route`, () => {
   beforeEach(() => {
@@ -388,7 +409,8 @@ describe(`runtime census: the ${HELPERS.length} exported helpers that name a bus
         const before = requests.length;
         await settle(() => helper.fn(...args));
         for (const r of requests.slice(before)) {
-          if (businessOf(r.url) !== null || r.url.includes("/businesses/")) {
+          // Any request naming a business (a route word such as /businesses/system/ names none).
+          if (businessOf(r.url) !== null) {
             sentWithout.push(`${helper.module} ${helper.name}(${JSON.stringify(args).slice(1, -1)}) -> ${r.via} ${new URL(r.url, "http://localhost").pathname}`);
           }
         }
@@ -609,7 +631,8 @@ describe("the mounts read and write the business they are bound to", () => {
     await waitFor(() => expect(api.requested).toContain(`POST /crm/businesses/${SELECTED}/custom-field-definitions/cfd_${SELECTED}/archive`));
 
     fireEvent.click(screen.getAllByTitle("Delete")[0]);
-    fireEvent.click(await screen.findByRole("button", { name: /^Delete$/ }));
+    const confirm = (await screen.findByText("Delete Permanently?")).closest("div.space-y-4") as HTMLElement;
+    fireEvent.click(within(confirm).getByRole("button", { name: /^Delete$/ }));
     await waitFor(() => expect(api.requested).toContain(`DELETE /crm/businesses/${SELECTED}/custom-field-definitions/cfd_${SELECTED}`));
 
     expect(api.definitionCalls().every((r) => r.includes(`/crm/businesses/${SELECTED}/`))).toBe(true);
@@ -637,6 +660,23 @@ describe("the mounts read and write the business they are bound to", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
     expect(api.requested).toEqual([]);
   });
+});
+
+describe("follow-ups outside this write set", () => {
+  // The census above proves every site of the helper layer (lib/client.ts, and
+  // the resolving functions of lib/api/approvals.ts and product-cost.ts) refuses
+  // an empty, null or undefined id, and that no site anywhere resolves to the
+  // demo tenant or another literal. It does not prove the rest: the other
+  // lib/api/* modules (business-genome, finance, structure, approvals'
+  // required-id functions, ...) take a required businessId and send through the
+  // lib/api.ts helpers directly, and about 60 screens pass
+  // `getStoredBusinessId() ?? ""` into them, so with no business selected they
+  // send /businesses//... (the server answers 403/404; nothing resolves to
+  // another tenant). The fix is one guard in lib/api.ts (apiGet, apiPost,
+  // apiPatch, apiPut, apiDelete, fetchWithAuthRetry refuse a URL for which
+  // _defaults.ts namesNoBusiness is true), plus the screens' raw fetch() sites:
+  // lib/api.ts is outside this packet's write set.
+  it.todo("lib/api.ts refuses a request whose /businesses/ segment is empty, undefined or null, so no lib/api/* module or screen can send an empty business id");
 });
 
 // ---------------------------------------------------------------------------

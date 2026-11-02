@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { Button, Card, Input, Badge } from "@keyflow/ui";
 import { apiPost, API_BASE } from "@/lib/api";
-import { DEFAULT_BUSINESS_ID } from "@/lib/client";
 import { motion } from "framer-motion";
 import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
@@ -17,7 +16,8 @@ const staffOptions = [
 ];
 
 export default function PublicBookPage() {
-  const [businessId, setBusinessId] = useState(DEFAULT_BUSINESS_ID);
+  // R0-15d: the visitor names the business; there is no demo-tenant default.
+  const [businessId, setBusinessId] = useState("");
   const [serviceId, setServiceId] = useState(serviceOptions[0]?.id ?? "");
   const [staffId, setStaffId] = useState(staffOptions[0]?.id ?? "");
   const [startTime, setStartTime] = useState("");

@@ -402,6 +402,9 @@ export function ContactDetail({
               onSelectRelatedContact={onSelectRelatedContact}
               onAddTask={onAddTask}
               customFieldValues={customFieldValues}
+              // SEC-R015c-1 (R0-15d): the panel reads the custom fields of the
+              // business this contact is shown in, not whatever kf_business_id says.
+              businessId={businessId}
             />
           </div>
 
