@@ -57,10 +57,22 @@ const ALLOWED_TRANSITIONS: Record<InvoiceStatus, ReadonlySet<InvoiceStatus>> = {
   FAILED: new Set<InvoiceStatus>(['SENT', 'PARTIALLY_PAID', 'PAID', 'VOID']),
   // PAID can be re-opened to PARTIALLY_PAID by a refund (driven by
   // reconcileFromPayments after a refund row lands). All other transitions
-  // out of PAID are terminal.
+  // out of PAID are terminal for transition() callers; a full refund's
+  // return to SENT is the reconcile's alone (REFUND_REOPENS_TO_SENT, V1-29).
   PAID: new Set<InvoiceStatus>(['PARTIALLY_PAID']),
   VOID: new Set<InvoiceStatus>([]),
 };
+
+/**
+ * V1-29-DM-REFUND-CONVENTION (D-14): the statuses a refund returns to SENT
+ * once nothing net is left received. There is no REFUNDED invoice state (the
+ * InvoiceStatus enum has none; adding one would be a migration): a fully
+ * refunded invoice is owed again, so it is SENT with paidAt cleared. Only the
+ * payment rows can drive this move (reconcileFromPayments); the generic
+ * transition map above keeps PAID -> SENT illegal, so no UI or status route
+ * can un-pay an invoice whose money is still recorded as received.
+ */
+const REFUND_REOPENS_TO_SENT: ReadonlySet<InvoiceStatus> = new Set<InvoiceStatus>(['PAID', 'PARTIALLY_PAID']);
 
 export interface PaymentLike {
   amount: number;
@@ -83,6 +95,15 @@ export interface BalanceSummary {
  * - REFUNDED contributes negatively (refund rows are stored with negative
  *   `amount` by convention; we abs them so the sign convention is irrelevant)
  * - PENDING / FAILED are ignored
+ *
+ * V1-29 (M28, D-14): every refund, manual or provider, is a separate negative
+ * REFUNDED row beside the SUCCESSFUL original, which stays SUCCESSFUL, so the
+ * refunded money is in `paid` once and in `refunded` once: 100 paid and 100
+ * refunded is net 0, remaining 100. A row written before V1-29 by the manual
+ * refund flipped its original to REFUNDED (a positive REFUNDED row with no
+ * SUCCESSFUL twin) and is still read sign-agnostically here, i.e. subtracted
+ * twice; mark-paid refuses an invoice carrying one (CommerceService
+ * .markPaidRemaining). Nothing writes such a row any more.
  *
  * `remaining` is clamped at zero (overpayments don't drive remaining negative).
  * `isOverpaid` flags overpayment for downstream surfacing.
@@ -124,6 +145,12 @@ export function computeBalance(total: number, payments: PaymentLike[], currency 
 /**
  * Compute the resulting invoice status after a payment is applied. Pure
  * function — no DB. Used by `applyPayment` and by tests.
+ *
+ * V1-29 (D-14): a refund that leaves nothing net received (net <= 0 with a
+ * refund on the invoice) returns a PAID or PARTIALLY_PAID invoice to SENT.
+ * The base reopened only on a positive net, so a full refund left the
+ * invoice PAID. SENT, OVERDUE and the statuses outside the payment flow keep
+ * their status; with no refund a non-positive net changes nothing.
  */
 export function deriveStatusAfterPayment(
   currentStatus: InvoiceStatus,
@@ -133,12 +160,21 @@ export function deriveStatusAfterPayment(
   if (balance.isFullyPaid) return 'PAID';
   // Refund reopening: PAID drops below total -> PARTIALLY_PAID.
   if (balance.net > 0) return 'PARTIALLY_PAID';
+  if (balance.refunded > 0 && REFUND_REOPENS_TO_SENT.has(currentStatus)) return 'SENT';
   return currentStatus;
 }
 
 export function isLegalTransition(from: InvoiceStatus, to: InvoiceStatus): boolean {
   if (from === to) return true;
   return ALLOWED_TRANSITIONS[from]?.has(to) ?? false;
+}
+
+/**
+ * The moves reconcileFromPayments may make: the transition map, plus a
+ * refund's return to SENT (V1-29, D-14), which only the payment rows drive.
+ */
+export function isLegalReconcileTransition(from: InvoiceStatus, to: InvoiceStatus): boolean {
+  return isLegalTransition(from, to) || (to === 'SENT' && REFUND_REOPENS_TO_SENT.has(from));
 }
 
 @Injectable()
@@ -259,13 +295,19 @@ export class InvoiceWorkflowService {
     if (next === current) {
       return { status: current, balance, changed: false };
     }
-    if (extra.onIllegalTransition === 'keep' && !isLegalTransition(current, next)) {
-      this.logger.warn(
-        `reconcileFromPayments: invoice ${invoiceId} kept at ${current}; ${current} -> ${next} is not a legal transition (net ${balance.net} of ${balance.total})`,
-      );
-      return { status: current, balance, changed: false };
+    if (!isLegalReconcileTransition(current, next)) {
+      if (extra.onIllegalTransition === 'keep') {
+        this.logger.warn(
+          `reconcileFromPayments: invoice ${invoiceId} kept at ${current}; ${current} -> ${next} is not a legal transition (net ${balance.net} of ${balance.total})`,
+        );
+        return { status: current, balance, changed: false };
+      }
+      this.assertLegalTransition(current, next);
     }
-    this.assertLegalTransition(current, next);
+    // V1-29 (D-14): paidAt says when the invoice was settled. A refund that
+    // reopens it (PAID -> PARTIALLY_PAID, or back to SENT) clears it, and
+    // the next settlement stamps it again.
+    const paidAt = next === 'PAID' ? { paidAt: new Date() } : current === 'PAID' || next === 'SENT' ? { paidAt: null } : {};
     // FIN3 — wrap status update + COGS posting in a single $transaction
     // so a posting failure rolls back the PAID write. Listeners only see
     // PAID after the ledger entries have been committed alongside it.
@@ -274,7 +316,7 @@ export class InvoiceWorkflowService {
         where: { id: invoiceId },
         data: {
           status: next,
-          ...(next === 'PAID' ? { paidAt: new Date() } : {}),
+          ...paidAt,
         },
         include: { items: true, contact: true, booking: true },
       });

@@ -120,8 +120,8 @@
  *   TB-02   accrual AR net per invoice = computeBalance(...).remaining, for every
  *           invoice whose payments were not refunded; the AR account holds
  *           nothing that is not attributable to an invoice
- *   TB-03   (todo) the same equality for a refunded invoice: blocked by M28,
- *           see the case.
+ *   TB-03   the same equality for a refunded invoice (was blocked by M28;
+ *           closed by V1-29-DM-REFUND-CONVENTION, see the case).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
@@ -867,8 +867,12 @@ describe('review SEC-V15-1: a period closes only once it has ended, so what is d
     // The refunded payment's original is REVERSED, its REVERSAL POSTED; the rest are settled.
     const early = await paymentPostings(earlyPaymentId);
     expect(early.map((t: any) => `${t.type}:${t.status}`)).toEqual(['INCOME:REVERSED', 'REVERSAL:POSTED']);
-    const settled = (await db.payment.findMany({ where: { businessId: ID.bizPay, status: 'SUCCESSFUL' } }))
-      .reduce((s: number, p: any) => s + Number(p.amount), 0);
+    // V1-29 (D-14): the refunded original stays SUCCESSFUL beside a separate
+    // negative REFUNDED row, so what is settled is the SUCCESSFUL rows less the
+    // refund rows (computeBalance's net).
+    const rows = await db.payment.findMany({ where: { businessId: ID.bizPay, status: { in: ['SUCCESSFUL', 'REFUNDED'] } } });
+    expect(rows.filter((p: any) => p.status === 'REFUNDED').map((p: any) => Number(p.amount))).toEqual([-40]);
+    const settled = rows.reduce((s: number, p: any) => s + (p.status === 'REFUNDED' ? -Math.abs(Number(p.amount)) : Number(p.amount)), 0);
     expect(settled).toBe(280);
 
     const cash = await reporting.getPnl(ID.bizPay, from, to, 'cash');
@@ -1875,9 +1879,11 @@ describe('M30: real-database trial balance after payment, refund and void', () =
       expect(await remainingOf(inv), `computeBalance.remaining of ${inv}`).toBe(value);
     }
     // The refunded invoice: the ledger is right (the reversal restores the receivable).
+    // V1-29 (D-14): the original stays SUCCESSFUL beside a separate negative
+    // REFUNDED row; what is settled is their net.
     const refunded = await db.invoice.findUnique({ where: { id: ID.invRefund }, include: { payments: true } });
-    const settled = refunded.payments.filter((p: any) => p.status === 'SUCCESSFUL').reduce((s: number, p: any) => s + p.amount, 0);
-    expect(refunded.payments.map((p: any) => p.status)).toEqual(['REFUNDED']);
+    expect(refunded.payments.map((p: any) => p.status).sort()).toEqual(['REFUNDED', 'SUCCESSFUL']);
+    const settled = refunded.payments.reduce((s: number, p: any) => s + (p.status === 'REFUNDED' ? -Math.abs(p.amount) : p.amount), 0);
     expect(await arNet(ID.invRefund)).toBe(Number(refunded.total) - settled);
 
     // Every AR posting is attributable to one of the invoices above.
@@ -1892,10 +1898,14 @@ describe('M30: real-database trial balance after payment, refund and void', () =
     expect(Number(total.net)).toBe(sum);
   });
 
-  // M28 (owned by V1-29, invoice-workflow.service.ts is outside this packet's
-  // write set): a refund flips the payment row to REFUNDED and computeBalance
-  // both drops it from `paid` and subtracts it again as `refunded`, so for the
-  // refunded invoice above remaining = 140 while the ledger AR is 100. The
-  // ledger side is pinned in TB-02; the equality is owed by V1-29.
-  it.todo('TB-03: AR net equals computeBalance.remaining for a refunded invoice (blocked by M28 / V1-29: computeBalance subtracts a REFUNDED payment twice)');
+  // M28, closed by V1-29-DM-REFUND-CONVENTION (D-14): a refund used to flip the
+  // payment row to REFUNDED, and computeBalance both dropped it from `paid` and
+  // subtracted it again as `refunded` (remaining 140 while the ledger AR was
+  // 100). The refund is now a separate negative row, counted once.
+  it('TB-03: AR net equals computeBalance.remaining for a refunded invoice (V1-29)', async () => {
+    const remaining = await remainingOf(ID.invRefund);
+    expect(await arNet(ID.invRefund)).toBe(remaining);
+    const inv = await db.invoice.findUnique({ where: { id: ID.invRefund }, include: { payments: true } });
+    expect(computeBalance(Number(inv.total), inv.payments, inv.currency)).toMatchObject({ net: 0, remaining: Number(inv.total) });
+  });
 });

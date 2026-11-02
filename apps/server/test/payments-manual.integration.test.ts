@@ -586,10 +586,13 @@ describe('G12: refund preconditions and the refund reconcile', () => {
     const res = await refund(paymentId, 'reconcile fails');
     expect(res.status, JSON.stringify(res.body)).toBe(500);
 
-    // Defined state: nothing of the refund committed.
+    // Defined state: nothing of the refund committed. Since V1-29 (D-14) a
+    // refund keeps the original SUCCESSFUL and adds a negative REFUNDED row,
+    // so the rollback is the absence of that row.
     const row = await db.payment.findUnique({ where: { id: paymentId } });
     expect(row.status).toBe('SUCCESSFUL');
     expect(row.notes ?? '').not.toMatch(/Refunded:/);
+    expect(await db.payment.count({ where: { invoiceId: ID.invRefundFail, status: 'REFUNDED' } })).toBe(0);
     expect(await reversalsFor(paymentId)).toHaveLength(0);
     expect((await invoiceRow(ID.invRefundFail)).status).toBe('PAID');
     expect(invoiceEventsFor(ID.invRefundFail)).toHaveLength(0);

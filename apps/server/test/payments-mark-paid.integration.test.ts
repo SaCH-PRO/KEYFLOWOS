@@ -41,8 +41,10 @@
  *              -> mark-paid still records its own balancing payment and ends PAID (no replay of the client row)
  *   ST-PL04-2  a FAILED row the public WiPay callback wrote on the old predictable mark-paid slot
  *              -> mark-paid still ends PAID (its slot is random, server-built, never a client-key slot)
- *   CR-PL04-1  a manual refund (flipped REFUNDED row) on the invoice -> 409; nothing written, nothing posted
- *              (computeBalance counts the flipped row twice, V1-29; a provider refund row does not block)
+ *   CR-PL04-1  a row the manual refund flipped to REFUNDED before V1-29 on the invoice -> 409; nothing written,
+ *              nothing posted (computeBalance counts the flipped row twice; a provider refund row does not block).
+ *              V1-29 (D-14): a manual refund is now a separate negative row, so mark-paid after one records
+ *              the true remaining and ends PAID (MP-12c)
  *   CR-PL04-2  paid, undone to DRAFT, total edited, re-issued, marked paid again -> 200 PAID with a second payment
  *   either     the write leaves the invoice short of PAID -> 409; no invoice.paid timeline entry
  *
@@ -134,6 +136,8 @@ const ID = {
   invSquat: `${P}invSquat`,
   invManualRefund: `${P}invManualRefund`,
   invManualRefundPart: `${P}invManualRefundPart`,
+  // V1-29-DM-REFUND-CONVENTION: MP-12c, mark-paid after a refund through the route
+  invManualRefundV129: `${P}invManualRefundV129`,
   invProviderRefund: `${P}invProviderRefund`,
   invReissue: `${P}invReissue`,
   invShort: `${P}invShort`,
@@ -169,6 +173,7 @@ const LEDGER_EXCLUDED: Record<string, string> = {
   [ID.invRefund]: 'refund (M28, V1-29)',
   [ID.invManualRefund]: 'refund (M28, V1-29)',
   [ID.invManualRefundPart]: 'refund (M28, V1-29)',
+  [ID.invManualRefundV129]: 'refund (V1-29: cash net = computeBalance.net, not sum(SUCCESSFUL); asserted inline in MP-12c)',
 };
 /** The deposit-side system accounts a payment posting debits (RevenuePostingService.depositSystemKey). */
 const DEPOSIT_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
@@ -674,14 +679,12 @@ describe('mark-paid records the remaining balance as a posted payment (G2)', () 
     expect(timelineFor(ID.invDraft)).toHaveLength(0);
   });
 
-  // MP-12 (CR-PL04-1): mark-paid after a MANUAL refund is refused (409) and
-  // writes nothing; proven in 'review repairs' below (MP-12a / MP-12b).
-  it.todo(
-    'MP-12 (V1-29, out of scope): settling an invoice by mark-paid after a MANUAL refund. computeBalance counts the flipped '
-      + 'REFUNDED row twice (paid excludes it, refunded subtracts it), so no amount both matches the money and reconciles to PAID '
-      + '(160 over-posts; the true 100 leaves PARTIALLY_PAID). Mark-paid refuses until the refund/balance convention is fixed '
-      + '(V1-29: invoice-workflow.service.ts computeBalance / markPaymentRefunded), outside this write set.',
-  );
+  // MP-12 (CR-PL04-1): settling an invoice by mark-paid after a MANUAL refund.
+  // V1-29-DM-REFUND-CONVENTION (D-14) closed it: a manual refund is a separate
+  // negative REFUNDED row counted once, so mark-paid records the true
+  // remaining and ends PAID (MP-12c below; test/commerce-refund.integration
+  // RF-08). A row flipped to REFUNDED before V1-29 is still refused (MP-12a,
+  // MP-12b).
 
   it('MP-05: a refund of the mark-paid payment reverses its posting and records the refunder on the reversal', async () => {
     const res = await markPaid(ID.owner, ID.invRefund);
@@ -868,14 +871,19 @@ describe('review repairs (R0-PL-04 review)', () => {
     expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
   });
 
+  // MP-12a / MP-12b titles are bound by manifests/mark-paid-convergence.json.
+  // Since V1-29 (D-14) the refund route writes a separate negative row (MP-12c),
+  // so the manual flip these cases name is seeded directly, as legacy data.
   it('MP-12a (CR-PL04-1): 60 paid then refunded (manual flip) on a 100 invoice -> mark-paid 409; no payment, no posting, status unchanged, no event or timeline entry', async () => {
     const inv = ID.invManualRefund;
     const paid = await pay(ID.owner, inv, { amount: 60, method: 'cash', reference: 'PMP-MR-1' });
     expect(paid.status, JSON.stringify(paid.body)).toBe(201);
-    const refunded = await refund(ID.owner, paid.body.payment.id);
-    expect(refunded.status, JSON.stringify(refunded.body)).toBe(201);
-    // The operator's own projection reads remaining 100; computeBalance reads 160 (V1-29).
-    expect(await commerce.getInvoiceForBusiness(inv, ID.biz)).toMatchObject({ paidAmount: 0, remaining: INVOICE_TOTAL });
+    // The pre-V1-29 manual flip, seeded directly (the route no longer writes it).
+    await db.payment.update({ where: { id: paid.body.payment.id }, data: { status: 'REFUNDED' } });
+    // Characterization (legacy rows only): computeBalance reads a flipped row
+    // sign-agnostically, so it is dropped from paid AND subtracted again; the
+    // operator read now serves computeBalance's figures too (V1-29, CF-17).
+    expect(await commerce.getInvoiceForBusiness(inv, ID.biz)).toMatchObject({ paidAmount: -60, remaining: 160 });
     const statusBefore = (await invoiceRow(inv)).status;
     const postingsBefore = (await paymentPostingsOf(inv)).map((t) => t.id).sort();
     emitted.length = 0;
@@ -898,8 +906,8 @@ describe('review repairs (R0-PL-04 review)', () => {
     expect(a.status, JSON.stringify(a.body)).toBe(201);
     const b = await pay(ID.owner, inv, { amount: 50, method: 'cash', reference: 'PMP-MRP-B' });
     expect(b.status, JSON.stringify(b.body)).toBe(201);
-    const refunded = await refund(ID.owner, a.body.payment.id);
-    expect(refunded.status, JSON.stringify(refunded.body)).toBe(201);
+    // The pre-V1-29 manual flip of the 30, seeded directly (the route no longer writes it).
+    await db.payment.update({ where: { id: a.body.payment.id }, data: { status: 'REFUNDED' } });
     const statusBefore = (await invoiceRow(inv)).status;
     const postingsBefore = (await paymentPostingsOf(inv)).map((t) => t.id).sort();
     emitted.length = 0;
@@ -913,6 +921,48 @@ describe('review repairs (R0-PL-04 review)', () => {
     expect((await invoiceRow(inv)).status).toBe(statusBefore);
     expect(invoiceEventsFor(inv)).toHaveLength(0);
     expect(timelineFor(inv)).toHaveLength(0);
+  });
+
+  it('MP-12c (V1-29, D-14): 30 + 50 paid, the 30 refunded through the route (a separate -30 row) -> mark-paid records the true remaining 50 with one posting and ends PAID; the ledger cash net equals computeBalance.net', async () => {
+    const inv = ID.invManualRefundV129;
+    const a = await pay(ID.owner, inv, { amount: 30, method: 'cash', reference: 'PMP-MRC-A' });
+    expect(a.status, JSON.stringify(a.body)).toBe(201);
+    const b = await pay(ID.owner, inv, { amount: 50, method: 'cash', reference: 'PMP-MRC-B' });
+    expect(b.status, JSON.stringify(b.body)).toBe(201);
+    const refunded = await refund(ID.owner, a.body.payment.id);
+    expect(refunded.status, JSON.stringify(refunded.body)).toBe(201);
+    expect(refunded.body).toMatchObject({ status: 'REFUNDED', amount: -30, refundOfPaymentId: a.body.payment.id });
+    // computeBalance: paid 80, refunded 30, net 50, remaining 50 (the base read remaining 80).
+    expect(await commerce.getInvoiceForBusiness(inv, ID.biz)).toMatchObject({ paidAmount: 50, remaining: 50 });
+    emitted.length = 0;
+    contactEvents.length = 0;
+
+    const res = await markPaid(ID.owner, inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: inv, status: 'PAID' });
+
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(4);
+    const marked = rows.find((r) => r.providerPaymentId.includes('_markpaid_'));
+    expectMarkPaidRow(marked, inv, 50, ID.owner);
+    await expectPostedOnce(marked.id, 50, ID.owner);
+    expect(await reversalsFor(a.body.payment.id)).toHaveLength(1);
+    const row = await invoiceRow(inv);
+    expect(row.status).toBe('PAID');
+    expect(row.paidAt).not.toBeNull();
+    expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
+
+    // LEDGER (V1-29): every posting balances and the cash net of the invoice's
+    // payment postings (30 + 50 + 50 - 30 reversed) equals computeBalance.net.
+    const { rows: ledgerRows, txns } = await ledgerOf(inv);
+    for (const t of txns) expect(money(sum(t.entries, 'debit')), `${t.externalRef}: debits = credits`).toBe(money(sum(t.entries, 'credit')));
+    const cashNet = money(
+      txns.flatMap((t) => t.entries).filter((e: any) => DEPOSIT_KEYS.has(e.account?.systemKey))
+        .reduce((s: number, e: any) => s + Number(e.debit ?? 0) - Number(e.credit ?? 0), 0),
+    );
+    const balance = computeBalanceFn(INVOICE_TOTAL, ledgerRows.map((r) => ({ amount: Number(r.amount), status: r.status })), 'TTD');
+    expect(balance).toMatchObject({ paid: 130, refunded: 30, net: 100, remaining: 0, isFullyPaid: true, isOverpaid: false });
+    expect(cashNet).toBe(balance.net);
   });
 
   it('MP-15 (CR-PL04-1, narrow): a provider refund (a separate negative REFUNDED row beside a SUCCESSFUL original) does not block: mark-paid records the 40 net balance and ends PAID', async () => {

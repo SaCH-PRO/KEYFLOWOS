@@ -17,7 +17,7 @@ import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
-import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, sumMoney, toCents } from './money';
+import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
@@ -678,12 +678,13 @@ export class CommerceService {
     });
     if (!invoice) return null;
     // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
-    // CR-V22-1: remaining is 0 once the paid sum settles the stored total (remainingMoney).
-    const paidAmount = sumMoney(invoice.payments.filter((p) => p.status === 'SUCCESSFUL').map((p) => Number(p.amount)));
+    // CR-V22-1: remaining is 0 once the paid sum settles the stored total.
+    // V1-29 (CF-17): computeBalance's net and remaining, so a refund row counts.
+    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
     return {
       ...withLegacySubtotal(invoice),
-      paidAmount,
-      remaining: remainingMoney(Number(invoice.total), paidAmount),
+      paidAmount: balance.net,
+      remaining: balance.remaining,
     };
   }
 
@@ -2331,9 +2332,12 @@ export class CommerceService {
     // under the invoice lock (this payment included), the same read that
     // derived newStatus. A total computed from the pre-transaction read would
     // miss a payment committed while this one waited for the lock: the audit
-    // would contradict newStatus and never flag an overpayment. `paid` is the
-    // sum of SUCCESSFUL rows, the formula this route and its replay use.
-    const newPaidTotal = reconciled.balance.paid;
+    // would contradict newStatus and never flag an overpayment. V1-29 (CF-17):
+    // the total paid is computeBalance's net (SUCCESSFUL rows less refund
+    // rows), the figure the status was derived from and the one the replay,
+    // listPayments and the operator invoice read serve; the gross SUCCESSFUL
+    // sum would ignore a refund row and understate `remaining`.
+    const newPaidTotal = reconciled.balance.net;
     // V1-22: in cents (the remaining after 33.33 x 3 on 100.00 read 0.010000000000005116).
     // CR-V22-1: against the stored total (the one the audit reports), so a
     // legacy sub-cent total is settled and overpaid by the same rule as the
@@ -2396,18 +2400,19 @@ export class CommerceService {
   /**
    * R0-PL-04 review (CR-PL04-1): the amount mark-paid records, or a 409 when
    * no amount would be true. The amount is computeBalance's remaining, the
-   * figure the reconcile settles against. A manual refund
-   * (markPaymentRefunded) flips the original row to REFUNDED and keeps its
-   * positive amount, and computeBalance then both drops it from `paid` and
-   * subtracts it as `refunded` (V1-29): 60 paid and refunded on a 100 invoice
-   * reads remaining 160. Recording 160 would post an invented 60
-   * over-payment; recording the true 100 would leave the reconcile
-   * PARTIALLY_PAID. Until V1-29 settles that convention, mark-paid refuses
-   * such an invoice and writes nothing. Provider refunds are separate rows
-   * with a negative amount beside a SUCCESSFUL original, counted once, so they
-   * do not block. A remaining above the total (refunds exceeding payments) is
-   * refused the same way. Run on the pre-transaction read and again under the
-   * invoice lock.
+   * figure the reconcile settles against.
+   *
+   * V1-29 (D-14): every refund is now a separate negative REFUNDED row beside
+   * its SUCCESSFUL original, counted once, so after a refund mark-paid records
+   * the true remaining (60 + 40 paid, 40 refunded: 40). What still blocks is a
+   * row the manual refund flipped to REFUNDED before V1-29 (a positive
+   * REFUNDED row with no SUCCESSFUL twin): computeBalance both drops it from
+   * `paid` and subtracts it as `refunded` (60 paid and refunded on a 100
+   * invoice reads remaining 160), so recording 160 would post an invented 60
+   * over-payment and recording the true 100 would leave the reconcile
+   * PARTIALLY_PAID; mark-paid refuses such an invoice and writes nothing. A
+   * remaining above the total (refunds exceeding payments) is refused the same
+   * way. Run on the pre-transaction read and again under the invoice lock.
    */
   private static markPaidRemaining(
     total: number,
@@ -2520,27 +2525,36 @@ export class CommerceService {
     // that key/reference permanently dead on this invoice while the API
     // reports success and writes nothing; answer 409 so the operator records
     // the new receipt under a new key/reference.
+    //
+    // V1-29: a refund no longer flips the payment; it stays SUCCESSFUL beside
+    // a linked refund row, so a refund against it is looked up as well.
+    const slot = keyedOn === 'key' ? 'idempotency key' : 'reference and amount';
+    const fresh = keyedOn === 'key' ? 'idempotency key' : 'reference';
     if (existing.status !== 'SUCCESSFUL') {
-      const slot = keyedOn === 'key' ? 'idempotency key' : 'reference and amount';
-      const fresh = keyedOn === 'key' ? 'idempotency key' : 'reference';
       throw new ConflictException(
         `A payment with this ${slot} was already recorded on this invoice and is now ${existing.status}` +
           (existing.status === 'REFUNDED' ? ' (refunded)' : '') +
           `; use a new ${fresh} to record another payment`,
       );
     }
+    const refunded = await CommerceService.refundedAgainst(this.prisma.client as unknown as Prisma.TransactionClient, existing);
+    if (toCents(refunded) > 0) {
+      throw new ConflictException(
+        `A payment with this ${slot} was already recorded on this invoice and was refunded; use a new ${fresh} to record another payment`,
+      );
+    }
     const updatedInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
       include: { payments: true, contact: true, items: true },
     });
-    const paidAmount = sumMoney(
-      (updatedInvoice?.payments ?? []).filter((p) => p.status === 'SUCCESSFUL').map((p) => Number(p.amount)),
-    );
+    // V1-29 (CF-17): the figures every balance reader serves (computeBalance):
+    // paidAmount is what is received net of refunds, remaining is total - net.
+    const balance = computeBalance(Number(updatedInvoice?.total ?? 0), updatedInvoice?.payments ?? [], updatedInvoice?.currency);
     return {
       payment: existing,
       invoice: updatedInvoice,
-      paidAmount,
-      remaining: remainingMoney(Number(updatedInvoice?.total ?? 0), paidAmount),
+      paidAmount: balance.net,
+      remaining: balance.remaining,
     };
   }
 
@@ -2600,19 +2614,63 @@ export class CommerceService {
   }
 
   /**
-   * Mark a payment refunded (no provider call — local bookkeeping only).
+   * V1-29 (D-14): how much has been refunded against a payment, in currency
+   * units: the sum of its linked refund rows. A refund row is linked by the
+   * provider convention: a negative REFUNDED row on the same invoice and
+   * tenant whose `reference` is the original's providerPaymentId (Stripe and
+   * PayPal refund webhooks, refundCharge, and the manual refund since V1-29).
+   * Payment sits outside the tenant extension (M31), so the tenant is in the
+   * filter.
+   */
+  private static async refundedAgainst(
+    db: Prisma.TransactionClient,
+    payment: { businessId: string; invoiceId: string; providerPaymentId: string },
+  ): Promise<number> {
+    const rows = await db.payment.findMany({
+      where: {
+        businessId: payment.businessId,
+        invoiceId: payment.invoiceId,
+        status: 'REFUNDED',
+        amount: { lt: 0 },
+        reference: payment.providerPaymentId,
+      },
+      select: { amount: true },
+    });
+    return sumMoney(rows.map((r) => Math.abs(Number(r.amount))));
+  }
+
+  /**
+   * Refund a payment (no provider call — local bookkeeping only).
+   *
+   * V1-29-DM-REFUND-CONVENTION (M28, CF-11, D-14): the refund is a separate
+   * negative REFUNDED Payment row, the convention the provider refunds already
+   * use: the SUCCESSFUL original is kept as it was, and the refund row carries
+   * `-amount`, the original's currency, provider and method, `reference` =
+   * the original's providerPaymentId (the link), the reason in its notes and
+   * the refunder in `recordedBy`. computeBalance then counts the money once
+   * in `paid` and once in `refunded`. The base flipped the original to
+   * REFUNDED instead, which computeBalance subtracted twice (a full refund of
+   * 100 read net -100, remaining 200, status still PAID). What is refunded is
+   * what is left of the payment after its earlier refunds (a provider partial
+   * refund included); a payment with nothing left answers 409 "already
+   * refunded" and writes nothing, which makes a replay of the same refund a
+   * no-op. The original's payment_recorded posting is reversed once
+   * (RevenuePostingService.onPaymentRefunded, idempotent), and the reconcile
+   * reopens the invoice: PARTIALLY_PAID while something net is still
+   * received, SENT with paidAt cleared once nothing is (D-14). The response
+   * is the refund row, plus `refundOfPaymentId`, the reconciled
+   * `invoiceStatus` and its `balance`, so a status the reconcile kept (see
+   * onIllegalTransition below) is visible to the caller.
    *
    * R0-PL-07: `actorId` (the refunding user) is written to the reversal
-   * FinancialTransaction.createdById. The manual refund flips the original
-   * Payment row rather than writing a refund row, and Payment has no
-   * refunded-by column, so Payment.recordedBy keeps the original recorder.
+   * FinancialTransaction.createdById and, since V1-29, to the refund row's
+   * recordedBy. The original's recordedBy keeps the original recorder.
    *
    * R0-PL-07 review (PL07-ST-1): only a SUCCESSFUL payment can be refunded.
-   * An already REFUNDED payment, or a PENDING / FAILED one, answers 409 and
-   * changes nothing, so a second refund can no longer rewrite the notes and
-   * report success while recording no refunder. The SUCCESSFUL -> REFUNDED
-   * flip is conditional on the status, so two concurrent refunds of the same
-   * payment produce one refund and one 409.
+   * A PENDING / FAILED payment, a refund row, or a row flipped to REFUNDED
+   * before V1-29 answers 409 and changes nothing. The checks run again under
+   * the invoice lock, so two concurrent refunds of the same payment produce
+   * one refund and one 409.
    *
    * R0-CMF2-PAYMENT-ACTOR-GAPS (ST-R011-2): every refund, posted or not,
    * writes one FINANCE payment_refunded activity row naming the refunder
@@ -2621,72 +2679,87 @@ export class CommerceService {
    * The row is written inside the refund transaction (R0-CMF2 review
    * SEC-CMF2-1 / CR-CMF2-1): a committed refund always has it, a refund that
    * rolls back leaves none, and a failed insert fails the refund rather than
-   * committing a REFUNDED payment that names nobody.
+   * committing a refund that names nobody.
    */
   async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null) {
     const payment = await this.prisma.client.payment.findFirst({
       where: { id: paymentId, businessId },
     });
     if (!payment) throw new NotFoundException('Payment not found');
-    const refusal = (status: string) =>
+    const refusal = (row: { status: string; amount: number }) =>
       new ConflictException(
-        status === 'REFUNDED'
-          ? 'Payment is already refunded'
-          : `Only a successful payment can be refunded (this payment is ${status})`,
+        row.status !== 'REFUNDED'
+          ? `Only a successful payment can be refunded (this payment is ${row.status})`
+          : Number(row.amount) < 0
+            ? 'A refund cannot itself be refunded'
+            : 'Payment is already refunded',
       );
-    if (payment.status !== 'SUCCESSFUL') throw refusal(payment.status);
-    // FIN2 — flip the row + reverse the original posting in one tx so the
-    // refunded state and the offsetting ledger entries commit together.
+    if (payment.status !== 'SUCCESSFUL') throw refusal(payment);
+    // FIN2 — write the refund row + reverse the original posting in one tx so
+    // the refund and the offsetting ledger entries commit together.
     //
     // R0-PL-03 (G12): the invoice reconcile runs in the same transaction. A
-    // reconcile error is no longer swallowed: it rolls the refund back and is
-    // the caller's response, so the payment, the ledger and the invoice
+    // reconcile error is not swallowed: it rolls the refund back and is the
+    // caller's response, so the payment rows, the ledger and the invoice
     // status never disagree. Invoice events are emitted after commit.
     const pendingEvents: Array<{ name: string; payload: unknown }> = [];
-    const updated = await this.prisma.client.$transaction(async (tx) => {
+    const { refund, reconciled } = await this.prisma.client.$transaction(async (tx) => {
       const txClient = tx as unknown as Prisma.TransactionClient;
-      if (payment.invoiceId) await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
-      const flipped = await tx.payment.updateMany({
-        where: { id: paymentId, businessId, status: 'SUCCESSFUL' },
+      // Serialized with payments and other refunds of this invoice
+      // (R0-PL-03): the reads below see every refund committed before ours.
+      await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
+      const current = await tx.payment.findFirst({ where: { id: paymentId, businessId } });
+      if (!current) throw new NotFoundException('Payment not found');
+      if (current.status !== 'SUCCESSFUL') throw refusal(current);
+      const refundable = subtractMoney(Number(current.amount), await CommerceService.refundedAgainst(txClient, current));
+      if (!(toCents(refundable) > 0)) throw new ConflictException('Payment is already refunded');
+      const created = await tx.payment.create({
         data: {
+          amount: subtractMoney(0, refundable),
+          currency: current.currency,
           status: 'REFUNDED',
-          notes: reason ? `${payment.notes ? payment.notes + ' | ' : ''}Refunded: ${reason}` : payment.notes,
+          provider: current.provider,
+          method: current.method,
+          // Unique and server-built; the link to the original is `reference`.
+          providerPaymentId: `manual_refund_${current.id}_${randomBytes(8).toString('hex')}`,
+          reference: current.providerPaymentId,
+          notes: reason ? `Refunded: ${reason}` : null,
+          recordedBy: actorId ?? null,
+          businessId,
+          invoiceId: current.invoiceId,
         },
       });
-      if (flipped.count === 0) {
-        // Lost a race with another refund (or a status change) after the read above.
-        const current = await tx.payment.findUnique({ where: { id: paymentId }, select: { status: true } });
-        throw refusal(current?.status ?? 'missing');
-      }
-      const next = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
-      await this.revenuePosting.onPaymentRefunded(paymentId, {
+      await this.revenuePosting.onPaymentRefunded(current.id, {
         tx: txClient,
         createdById: actorId ?? null,
         // The refund's audit row (posted or not) names the refunder and
         // commits or rolls back with the refund.
         auditInTransaction: true,
       });
-      if (payment.invoiceId) {
-        await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId, {
-          tx: txClient,
-          eventBuffer: pendingEvents,
-          // R0-PL-03 review (ST-PL03-3 / CR-1): reversing money must not be
-          // blocked by invoice status bookkeeping. When the status the rows
-          // now imply is not reachable from the current one (a DRAFT invoice
-          // holding payments, e.g. after undoInvoice or from pre-G3 data, or
-          // a credit-note status outside the transition map), the status is
-          // left as it is, as before this packet, and the refund commits.
-          // Any other reconcile failure still rolls the refund back (G12).
-          onIllegalTransition: 'keep',
-        });
-      }
-      return next;
+      const r = await this.invoiceWorkflow.reconcileFromPayments(current.invoiceId, {
+        tx: txClient,
+        eventBuffer: pendingEvents,
+        // R0-PL-03 review (ST-PL03-3 / CR-1): reversing money must not be
+        // blocked by invoice status bookkeeping. When the status the rows
+        // now imply is not reachable from the current one (a DRAFT invoice
+        // holding payments, e.g. after undoInvoice or from pre-G3 data, or
+        // a credit-note status outside the transition map), the status is
+        // left as it is and the refund commits; the response says so.
+        // Any other reconcile failure still rolls the refund back (G12).
+        onIllegalTransition: 'keep',
+      });
+      return { refund: created, reconciled: r };
     });
     for (const evt of pendingEvents) {
       this.events.emit(evt.name, evt.payload);
     }
     this.statsCache.invalidateCache(businessId);
-    return updated;
+    return {
+      ...refund,
+      refundOfPaymentId: payment.id,
+      invoiceStatus: reconciled.status,
+      balance: reconciled.balance,
+    };
   }
 
   /** Retry a failed payment by flipping it to PENDING and emitting an event. */
@@ -3035,12 +3108,15 @@ export class CommerceService {
       orderBy: { createdAt: 'desc' },
     });
     // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
-    // CR-V22-1: remaining is 0 once the paid sum settles the stored total (remainingMoney).
-    const paidAmount = sumMoney(payments.filter((p) => p.status === 'SUCCESSFUL').map((p) => Number(p.amount)));
+    // CR-V22-1: remaining is 0 once the paid sum settles the stored total.
+    // V1-29 (CF-17): computeBalance's net and remaining, the figures the
+    // reconcile derives the status from, so a refund row counts here too
+    // (summing SUCCESSFUL rows alone read a refunded invoice as still paid).
+    const balance = computeBalance(Number(invoice.total), payments, invoice.currency);
     return {
       payments,
-      paidAmount,
-      remaining: remainingMoney(Number(invoice.total), paidAmount),
+      paidAmount: balance.net,
+      remaining: balance.remaining,
       invoiceTotal: invoice.total,
     };
   }
@@ -3531,10 +3607,11 @@ export class CommerceService {
    * tenant's businessId is not this invoice's money. No row, reference or
    * amount per payment leaves here. `paidAt` only when the invoice is PAID.
    *
-   * A manually refunded row is counted twice by computeBalance (M28): it is
-   * dropped from `paid` and subtracted as `refunded`, so `amountDue` can
-   * exceed total - paid until V1-29 settles that convention. This mirrors it
-   * rather than diverging from every other balance reader.
+   * V1-29: a refund is a separate negative row (D-14), so `amountDue` is
+   * total - net. `amountPaid` stays computeBalance's gross `paid`, the figure
+   * the receipt and the status route serve too; with a refund on the invoice
+   * amountPaid + amountDue exceeds the total by the refunded amount. One
+   * public read contract for both is V1-36.
    */
   async getPaymentLinkBalance(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
@@ -3734,8 +3811,9 @@ export class CommerceService {
         select: { total: true, currency: true, payments: { select: { amount: true, status: true } } },
       });
       const balance = computeBalance(Number(current?.total ?? 0), current?.payments ?? [], current?.currency ?? undefined);
-      // A manually refunded row is counted twice by computeBalance (V1-29), so
-      // `remaining` can exceed the total; an intent never asks for more than either.
+      // A row the manual refund flipped to REFUNDED before V1-29 is counted
+      // twice by computeBalance, so `remaining` can exceed the total; an
+      // intent never asks for more than either.
       const remaining = Math.min(balance.remaining, balance.total);
       if (remaining <= 0) throw new ConflictException('Invoice is already paid');
 

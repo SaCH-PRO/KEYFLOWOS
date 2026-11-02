@@ -81,11 +81,12 @@ type Inventory = Record<string, { ops: Record<string, number>; why: string }>;
  */
 export const MONEY_STATE_WRITERS: Inventory = {
   'apps/server/src/modules/commerce/commerce.service.ts': {
-    ops: { create: 2, update: 2, updateMany: 1 },
+    ops: { create: 3, update: 2 },
     why:
       'recordPayment (manual payment + posting + reconcile in one transaction, R0-PL-03); markPaymentRefunded ' +
-      '(compare-and-set flip to REFUNDED + reversal); retryPayment (FAILED -> PENDING); recordPublicPaymentIntent ' +
-      '(PENDING intent row: create, or amount update on the existing intent)',
+      '(V1-29, D-14: a separate negative REFUNDED row linked to the kept SUCCESSFUL original + reversal + reconcile ' +
+      'in one transaction; the compare-and-set flip to REFUNDED it replaced is gone); retryPayment (FAILED -> PENDING); ' +
+      'recordPublicPaymentIntent (PENDING intent row: create, or amount update on the existing intent)',
   },
   'apps/server/src/modules/payments/payments.service.ts': {
     ops: { create: 8 },
