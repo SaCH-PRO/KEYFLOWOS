@@ -48,8 +48,10 @@ import { createHmac } from "node:crypto";
  *     npx playwright test e2e/release0-live.spec.ts
  *
  * The config starts the web pointed at E2E_API_URL (or set E2E_NO_SERVER=1 and
- * E2E_BASE_URL for a web server already running). With the API stopped the
- * spec fails at its first step (the negative control).
+ * E2E_BASE_URL for a web server already running): the dev server, or with
+ * E2E_WEB_COMMAND=standalone the production standalone server on a build made
+ * with NEXT_PUBLIC_API_BASE_URL=<E2E_API_URL> (playwright.config.ts). With the
+ * API stopped the spec fails at its first step (the negative control).
  *
  * FIXTURES: every user id, user email and business name embeds the prefix
  * `k25a_` (the k<NN><a-z>_ head for R0-25) and a per-run stamp. The prefix is
@@ -152,18 +154,6 @@ function callsNamingAnotherBusiness(w: Watch, businessId: string): string[] {
   }
   return [...new Set(out)];
 }
-
-/**
- * KNOWN DEFECT, recorded rather than hidden (M09, owned by R0-15, outside this
- * packet's write set): the contact panel and the contact form mount
- * ContactCustomFields without a businessId (components/contacts/
- * contact-detail-info.tsx and contact-form.tsx), so fetchCustomFieldDefinitions
- * (lib/client.ts) falls back to DEFAULT_BUSINESS_ID "biz_demo". The API refuses
- * it (403), so nothing leaks, but the structured custom fields never load. Only
- * this exact call, refused, is let through; any other call naming a business
- * that is not the selected one fails the run.
- */
-const KNOWN_FOREIGN_CALLS = new Set(["403 GET /crm/businesses/biz_demo/custom-field-definitions"]);
 
 async function seedOwner(request: APIRequestContext, label: string): Promise<Owner> {
   const sub = `${RUN}_${label}`;
@@ -554,15 +544,17 @@ test.describe(LIVE ? "Release 0 live journey (R0-25)" : "Release 0 live journey 
       expect(apiAnswered.length, `the browser talked to the live API at ${API_URL}`).toBeGreaterThan(10);
       expect([...watchA.offHost, ...watchB.offHost], "requests that left localhost").toEqual([]);
       expect([...watchA.serverErrors, ...watchB.serverErrors], "5xx responses").toEqual([]);
-      const foreign = callsNamingAnotherBusiness(watchA, ownerA.businessId);
-      expect(foreign.filter((c) => !KNOWN_FOREIGN_CALLS.has(c)), "tenant A's browser named another business").toEqual([]);
-      record(
-        testInfo,
-        "known-defect",
-        foreign.length
-          ? `M09 (R0-15): the selected business was bypassed by ${foreign.join("; ")} (ContactCustomFields without businessId falls back to biz_demo; refused by the API)`
-          : "M09 (R0-15) biz_demo fallback not observed in this run",
-      );
+      // No allowance: any call naming a business that is not the selected one
+      // fails the run. (R0-25 let one through, M09: the contact form's custom
+      // fields read biz_demo and were refused. R0-15c binds them to the
+      // selected business.)
+      expect(callsNamingAnotherBusiness(watchA, ownerA.businessId), "tenant A's browser named another business").toEqual([]);
+      // ... and the edit form's custom fields did read tenant A's own business.
+      const ownDefinitions = `/crm/businesses/${encodeURIComponent(ownerA.businessId)}/custom-field-definitions`;
+      expect(
+        watchA.apiCalls.filter((c) => c.method === "GET" && new URL(c.url).pathname === ownDefinitions).map((c) => c.status),
+        "the contact form's custom-field definitions, read from tenant A's business",
+      ).toContain(200);
       const optional = [...watchA.optionalUnavailable, ...watchB.optionalUnavailable];
       record(
         testInfo,

@@ -68,6 +68,8 @@ interface ContactDetailInfoProps {
   onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
   onContactUpdated?: () => void;
   customFieldValues?: Array<{ id: string; definitionId: string; value?: unknown; definition: { name: string; label: string; type: string; description: string | null; placeholder: string | null } }>;
+  /** The business the contact belongs to; without it, the member's selected business (never biz_demo). */
+  businessId?: string | null;
 }
 
 export function ContactDetailInfo({
@@ -77,6 +79,7 @@ export function ContactDetailInfo({
   onAddTask,
   onContactUpdated,
   customFieldValues,
+  businessId,
 }: ContactDetailInfoProps) {
   const { open: openComposer } = useCompose();
   const router = useRouter();
@@ -498,7 +501,7 @@ export function ContactDetailInfo({
               )}
               {customFieldValues && customFieldValues.length > 0 && (
                 <div className="space-y-2">
-                  <ContactCustomFields values={typedValuesRecord} readOnly />
+                  <ContactCustomFields businessId={businessId} values={typedValuesRecord} readOnly />
                 </div>
               )}
               {arbitraryCustomFields.length > 0 && (
