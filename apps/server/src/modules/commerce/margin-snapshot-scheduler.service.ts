@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy } from '@nest
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { LandedCostEngine } from './landed-cost-engine.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 const SNAPSHOT_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const SNAPSHOT_REASON = 'periodic';
@@ -17,6 +18,11 @@ export class MarginSnapshotSchedulerService implements OnModuleInit, OnModuleDes
   ) {}
 
   onModuleInit() {
+    // V1-24: DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test stops it.
+    if (schedulersDisabled()) {
+      this.logger.log('[MarginSnapshotScheduler] Disabled via env');
+      return;
+    }
     this.logger.log('[MarginSnapshotScheduler] Starting — capturing daily margin snapshots');
     this.intervalRef = safeInterval('MarginSnapshotSchedulerService', SNAPSHOT_INTERVAL_MS, () => this.runSnapshots(), this.logger);
   }

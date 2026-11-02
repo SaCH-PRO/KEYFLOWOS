@@ -17,7 +17,12 @@
  *   6. a second tenant's owner is denied on every step-2..5 resource, by
  *      business-prefixed route and by bare id (403/404, never 200, never 500);
  *      its own cockpit counts none of the first tenant's rows
- *   7. no step needed an external provider (AI_DISABLED=1, no provider keys)
+ *   7. no step needed an external provider (AI_DISABLED=1, no provider keys),
+ *      and the server ran with KEY switched off (KEY_DISABLED=1) and its
+ *      schedulers switched off (DISABLE_SCHEDULERS=1, NODE_ENV=test): it logged
+ *      the KEY_DISABLED boot line, each V1-24 interval scheduler logged that it
+ *      is disabled, and no gated scheduler or cortex cron logged a start or a
+ *      run (V1-24-KEY-KILL-SWITCHES)
  *
  * It began as a CHARACTERIZATION: every step asserts the product's intended
  * behaviour, the first step that could not pass was left failing on purpose
@@ -128,6 +133,32 @@ const ID = {
   bizBName: `${P}bizB`,
   bizStaffName: `${P}bizStaff`,
 };
+
+/**
+ * V1-24-KEY-KILL-SWITCHES: the interval schedulers that ignored DISABLE_SCHEDULERS and
+ * NODE_ENV=test before V1-24. Each now logs `[<name>] Disabled via env` instead of starting.
+ */
+const V124_SCHEDULERS = ['MarginSnapshotScheduler', 'FinancialBriefingScheduler', 'BestChannelScheduler', 'CrmSequenceScheduler'];
+
+/**
+ * A line any of these prints means a gated scheduler started or ran: the four V1-24
+ * interval schedulers' start, arm and run lines, and the run lines of the cortex @Cron
+ * handlers (which return before logging when KEY_DISABLED or DISABLE_SCHEDULERS is set).
+ */
+const GATED_SCHEDULER_LINES = [
+  /\[MarginSnapshotScheduler\] (Starting|Running|Completed)/,
+  /\[FinancialBriefingScheduler\] (Starting|Generating|Briefing saved|Email sent)/,
+  /Nightly best-channel recompute (armed|complete|failed)/,
+  /Sequence scheduler started/,
+  /\[refreshAll\] Refreshing business mental models/,
+  /\[Creativity\] .*Starting daily creative exploration/,
+  /\[intuition\] scheduled scan complete/,
+  /Scheduled (churn analysis|reflection|dream|synthesis|maintenance) failed/,
+  /\[(cerebellum|homeostasis|salience)\] \S+ failed/,
+  /\[consolidation\] \S+(:| failed)/,
+  /\[(morningBrief|weeklyDigest|endOfDay)\] /,
+  /\[proactive\] Evaluating signals/,
+];
 
 const IDLE_MS = 90_000;      // silence from the child counts; slow-but-talking does not
 const HARD_CAP_MS = 240_000; // backstop for a child that chatters forever
@@ -274,6 +305,9 @@ function bootServer(port: number): Promise<void> {
       NODE_ENV: 'test',
       PORT: String(port),
       AI_DISABLED: '1',
+      // V1-24-KEY-KILL-SWITCHES (D-17): the server-side KEY off switch. Gateway
+      // dispatch answers 503 and the cortex crons return before reading anything.
+      KEY_DISABLED: '1',
       DISABLE_SCHEDULERS: '1',
       SUPABASE_JWT_SECRET: JWT_SECRET,
       RATE_LIMIT_MAX_REQUESTS: '100000',
@@ -1025,6 +1059,41 @@ describe('step 7 — no step required an external provider', () => {
     expect(providerFree.filter((r) => r.status >= 500).map((r) => `${r.status} ${r.method} ${r.path}`)).toEqual([]);
     // No outbound connection was attempted and refused: the failures above are "not configured", not "unreachable".
     expect(attemptedOutbound.filter((l) => !/redis/i.test(l))).toEqual([]);
+
+    // V1-24-KEY-KILL-SWITCHES. The title above is pinned by release0-journey.json and
+    // payments-actor.json, so the kill-switch proof extends this case instead of adding one.
+    // (a) The switch reached the server: the gateway logs one boot line per process when KEY_DISABLED is set.
+    const keyBootLines = serverLog.filter((l) => /KEY_DISABLED is set: KEY is switched off on this server/.test(l));
+    expect(
+      keyBootLines,
+      'the gateway never logged the KEY_DISABLED boot line, so the journey did not run with KEY switched off',
+    ).toHaveLength(1);
+    // V1-24 review (SEC-V124-1, V124-CR-1): the line claims gateway dispatch only and names
+    // the direct provider paths the switch does not cover yet, never "no AI provider is called".
+    expect(keyBootLines[0]).toMatch(/Every model-gateway dispatch answers 503 and reaches no AI provider/);
+    expect(keyBootLines[0]).toMatch(/NOT covered yet/);
+    expect(keyBootLines[0]).not.toMatch(/no AI provider is called/i);
+    // Every gateway dispatch the journey triggered (listeners and fallbacks that try AI) was refused by
+    // the switch, before any provider check: the gateway's two other refusals never appear.
+    const keyRefusals = serverLog.filter((l) => /No AI providers available: KEY is switched off on this server \(KEY_DISABLED\)/.test(l));
+    const otherGatewayRefusals = serverLog.filter((l) =>
+      /No AI providers available: (no AI provider is configured|every configured AI provider is temporarily unavailable)/.test(l),
+    );
+    expect(otherGatewayRefusals).toEqual([]);
+    // (b) The four V1-24 interval schedulers were loaded and declined to start (positive control:
+    //     their absence from (c) is then not an unloaded module).
+    const declined = V124_SCHEDULERS.filter((name) => serverLog.some((l) => l.includes(`[${name}] Disabled via env`)));
+    expect(declined).toEqual(V124_SCHEDULERS);
+    // (c) No gated scheduler or cortex cron logged a start or a run.
+    const gated = serverLog.filter((l) => GATED_SCHEDULER_LINES.some((re) => re.test(l)));
+    note(
+      7,
+      'gated scheduler lines (V1-24)',
+      'server log',
+      gated.length,
+      `${declined.length}/4 schedulers declined; KEY_DISABLED boot line seen; ${keyRefusals.length} gateway dispatch(es) refused by KEY_DISABLED`,
+    );
+    expect(gated).toEqual([]);
   });
 });
 

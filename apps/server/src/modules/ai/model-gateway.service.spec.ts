@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
-import { ModelGatewayService, SELECTABLE_PROVIDERS, type GatewayRequest, type AiProvider, type AiMode, type TaskCategory } from './model-gateway.service';
+import { Logger } from '@nestjs/common';
+import { ModelGatewayService, SELECTABLE_PROVIDERS, KEY_DISABLED_NOT_COVERED, keyDisabledBootLine, type GatewayRequest, type AiProvider, type AiMode, type TaskCategory } from './model-gateway.service';
 import { LLMCostService } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
 
@@ -1055,5 +1056,176 @@ describe('ModelGatewayService', () => {
       expect((svc as any).isProviderAvailable('openai', { aiMode: 'balanced' })).toBe(true);
       expect((svc as any).isProviderAvailable('openai', { aiMode: 'balanced', byokOpenai: 'tenant-E-revoked-key' })).toBe(false);
     });
+  });
+
+  // V1-24-KEY-KILL-SWITCHES (D-17, M47, PRS-M05): KEY_DISABLED is the
+  // server-side KEY off switch, distinct from the storefront-only AI_DISABLED.
+  // With it on, dispatch is refused before anything is read or called: no
+  // preferences read, no routing load, no provider method, no SDK client, no
+  // fetch. The refusal is the R0-07 structured 503 (code
+  // provider_not_configured, so every existing consumer that passes that code
+  // through or declines to retry it keeps doing so), carrying reason
+  // 'key_disabled' so it is distinguishable from a missing key.
+  describe('KEY_DISABLED switches gateway dispatch off (V1-24)', () => {
+    const PROVIDER_METHODS = ['callOpenAi', 'callAnthropic', 'callXai', 'callKimi', 'callGoogle', 'callNative', 'callOpensource'];
+    const STREAM_METHODS = ['streamOpenAi', 'streamAnthropic', 'streamXai', 'streamKimi', 'streamGoogle', 'streamNative', 'streamOpensource'];
+
+    /** Every road to a provider, instrumented. Every provider is configured (setTestEnv). */
+    function instrument(svc: ModelGatewayService) {
+      const touched: string[] = [];
+      for (const method of [...PROVIDER_METHODS, 'callProvider', 'executeWithRetries', 'loadRoutingConfig', 'getPreferences']) {
+        const original = (svc as any)[method];
+        (svc as any)[method] = vi.fn(async (...args: unknown[]) => {
+          touched.push(method);
+          if (PROVIDER_METHODS.includes(method)) {
+            return { content: `${method} answered`, usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, estimatedCost: 0 } };
+          }
+          return original.apply(svc, args);
+        });
+      }
+      for (const method of [...STREAM_METHODS, 'callProviderStream']) {
+        const original = (svc as any)[method];
+        (svc as any)[method] = vi.fn(function (this: unknown, ...args: unknown[]) {
+          touched.push(method);
+          return original.apply(svc, args);
+        });
+      }
+      const create = vi.spyOn((svc as any).openai.chat.completions, 'create').mockImplementation((() => {
+        touched.push('openai.chat.completions.create');
+        throw new Error('the OpenAI client must not be called');
+      }) as any);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async () => {
+        touched.push('fetch');
+        throw new Error('no outbound request may be made');
+      }) as any);
+      (svc as any).delay = vi.fn().mockResolvedValue(undefined);
+      return { touched, create, fetchSpy };
+    }
+
+    async function refusal(promise: Promise<unknown>): Promise<any> {
+      try {
+        await promise;
+      } catch (err) {
+        return err;
+      }
+      throw new Error('expected the dispatch to be refused');
+    }
+
+    it('complete() with KEY_DISABLED=1 rejects with the structured 503 {code: provider_not_configured, reason: key_disabled, service: ai} and touches no provider client, routing load, preference read or fetch', async () => {
+      const svc = createService({ KEY_DISABLED: '1' });
+      const { touched } = instrument(svc);
+
+      const err = await refusal(svc.complete(baseRequest({ taskCategory: 'general' })));
+
+      expect(typeof err.getStatus).toBe('function');
+      expect(err.getStatus()).toBe(503);
+      expect(err.getResponse()).toMatchObject({ code: 'provider_not_configured', reason: 'key_disabled', service: 'ai' });
+      expect(err.message).toMatch(/KEY is switched off on this server \(KEY_DISABLED\)/);
+      expect(touched).toEqual([]);
+      expect(mockPrismaClient.aiMemory.findUnique).not.toHaveBeenCalled();
+      expect(mockLLMCostService.recordCost).not.toHaveBeenCalled();
+    });
+
+    it('streamComplete() with KEY_DISABLED=1 yields exactly one error chunk carrying code provider_not_configured and reason key_disabled, and streams from no provider', async () => {
+      const svc = createService({ KEY_DISABLED: 'true' });
+      const { touched } = instrument(svc);
+
+      const chunks: any[] = [];
+      for await (const chunk of svc.streamComplete(baseRequest({ taskCategory: 'general' }))) chunks.push(chunk);
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toMatchObject({ type: 'error', code: 'provider_not_configured', reason: 'key_disabled' });
+      expect(chunks[0].error).toMatch(/KEY is switched off on this server \(KEY_DISABLED\)/);
+      expect(touched).toEqual([]);
+      expect(mockPrismaClient.aiMemory.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('control: with KEY_DISABLED unset the same instrumented service dispatches to a provider, so the empty lists above are a real answer', async () => {
+      const svc = createService({ KEY_DISABLED: null });
+      const { touched } = instrument(svc);
+
+      const res = await svc.complete(baseRequest({ taskCategory: 'general' }));
+
+      expect(res.content).toBe('callOpenAi answered');
+      expect(touched).toContain('callOpenAi');
+      expect(touched).toContain('getPreferences');
+    });
+
+    it('AI_DISABLED=1, the storefront-only switch, does not turn gateway dispatch off; KEY_DISABLED=0 is off', async () => {
+      for (const env of [{ AI_DISABLED: '1', KEY_DISABLED: null }, { AI_DISABLED: null, KEY_DISABLED: '0' }]) {
+        const svc = createService(env);
+        const { touched } = instrument(svc);
+        const res = await svc.complete(baseRequest({ taskCategory: 'general' }));
+        expect(res.content).toBe('callOpenAi answered');
+        expect(touched).toContain('callOpenAi');
+      }
+    });
+
+    it('the switch is read at dispatch time: set after construction it refuses, cleared it dispatches again', async () => {
+      const svc = createService({ KEY_DISABLED: null });
+      const { touched } = instrument(svc);
+
+      process.env.KEY_DISABLED = '1';
+      const err = await refusal(svc.complete(baseRequest({ taskCategory: 'general' })));
+      expect(err.getResponse()).toMatchObject({ reason: 'key_disabled' });
+      expect(touched).toEqual([]);
+
+      delete process.env.KEY_DISABLED;
+      const res = await svc.complete(baseRequest({ taskCategory: 'general' }));
+      expect(res.content).toBe('callOpenAi answered');
+    });
+
+    it('construction with KEY_DISABLED set logs one warning naming the switch, once per process however many gateways the module graph builds (the boot line the Release 0 journey looks for)', () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      const keyLines = () => warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('KEY_DISABLED'));
+
+      (ModelGatewayService as any).keyDisabledAnnounced = false;
+      createService({ KEY_DISABLED: null });
+      expect(keyLines()).toEqual([]);
+
+      createService({ KEY_DISABLED: '1' });
+      createService({ KEY_DISABLED: '1' });
+      createService({ KEY_DISABLED: '1' });
+      expect(keyLines()).toHaveLength(1);
+      expect(keyLines()[0]).toMatch(/KEY is switched off on this server/);
+    });
+
+    // V1-24 review (SEC-V124-1, V124-CR-1): the boot line used to end "no AI provider
+    // is called", which is false while the direct paths in KEY_DISABLED_NOT_COVERED
+    // (KEY voice, embeddings, vision, audio, phone realtime, ElevenLabs) skip the
+    // gateway. The operator must be told exactly what the switch stops and what it
+    // does not, and how to stop the rest.
+    it('the boot line claims only gateway dispatch, never "no AI provider is called", and names every path KEY_DISABLED does not cover yet and the keys that stop them', () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      (ModelGatewayService as any).keyDisabledAnnounced = false;
+      createService({ KEY_DISABLED: '1' });
+      const lines = warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('KEY_DISABLED'));
+      expect(lines).toEqual([keyDisabledBootLine()]);
+      const line = lines[0];
+
+      expect(line).toMatch(/^KEY_DISABLED is set: KEY is switched off on this server\b/);
+      expect(line).toMatch(/Every model-gateway dispatch answers 503 and reaches no AI provider/);
+      expect(line).not.toMatch(/no AI provider is called/i);
+      expect(line).toMatch(/NOT covered yet/);
+      // The direct paths the review found, each named (and the list is the census-pinned one).
+      expect(KEY_DISABLED_NOT_COVERED.length).toBeGreaterThanOrEqual(5);
+      const missing = KEY_DISABLED_NOT_COVERED.filter((p) => !line.includes(p.path)).map((p) => p.file);
+      expect(missing).toEqual([]);
+      for (const named of ['KEY voice speak/listen', 'embedding', 'vision', 'audio', 'phone realtime bridge', 'ElevenLabs']) {
+        expect(line, `boot line does not name ${named}`).toContain(named);
+      }
+      // ...and what an operator can do about them today.
+      for (const key of ['AI_INTEGRATIONS_OPENAI_API_KEY', 'OPENAI_API_KEY', 'ELEVENLABS_API_KEY']) expect(line).toContain(key);
+    });
+
+    // V1-24 review (SEC-V124-2): confirmed by the reviewer, outside the V1-24 write set.
+    // AiUsageService.trackAndStream persists a credited, billable aiUsageLog row naming
+    // provider 'openai' / model 'gpt-4o' even when the stream is this one refusal chunk
+    // (inherited from the R0-07 provider_not_configured chunk). Fixing it means changing
+    // ai-usage.service.ts (no credited row for a stream that ends on a coded error chunk
+    // with no usage chunk), which this packet may not touch.
+    it.todo(
+      'a streamed dispatch refused by KEY_DISABLED (one error chunk, reason key_disabled, no usage chunk) writes no credited aiUsageLog row: needs AiUsageService.trackAndStream (ai-usage.service.ts), outside the V1-24 write set (follow-up)',
+    );
   });
 });

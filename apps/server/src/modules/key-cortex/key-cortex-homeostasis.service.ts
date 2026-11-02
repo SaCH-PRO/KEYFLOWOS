@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexEndocrineService, type EndocrineSignal } from './key-cortex-endocrine.service';
 import { KeyCortexInteroceptionService } from './key-cortex-interoception.service';
+import { keyCronsDisabled } from '../../core/config/env';
 
 /**
  * Homeostasis — the control loop KEY did not have.
@@ -150,6 +151,8 @@ export class KeyCortexHomeostasisService {
    */
   @Cron(CronExpression.EVERY_30_MINUTES)
   async scheduledHomeostasis(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
       try {

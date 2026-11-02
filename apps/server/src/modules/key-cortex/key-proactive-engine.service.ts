@@ -26,6 +26,7 @@ import {
 } from './watchers';
 import { KeyCortexDigestService } from './key-cortex-digest.service';
 import { KeyCortexCircadianService } from './key-cortex-circadian.service';
+import { keyCronsDisabled } from '../../core/config/env';
 
 interface SignalSummary {
   dnaTrend: 'improving' | 'stable' | 'declining';
@@ -71,6 +72,8 @@ export class KeyProactiveEngineService {
    */
   @Cron(CronExpression.EVERY_HOUR)
   async generateMorningBriefs(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const due = this.circadian ? await this.circadian.businessesAtLocalHour(8) : [];
     if (this.circadian && due.length === 0) return;
 
@@ -112,6 +115,8 @@ export class KeyProactiveEngineService {
   /** Hourly; acts where it is locally Monday 9AM. */
   @Cron(CronExpression.EVERY_HOUR)
   async generateWeeklyDigests(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const due = this.circadian ? await this.circadian.businessesAtLocalTime(9, 1) : [];
     if (this.circadian && due.length === 0) return;
 
@@ -137,6 +142,8 @@ export class KeyProactiveEngineService {
   /** Hourly; acts where it is locally 6PM. */
   @Cron(CronExpression.EVERY_HOUR)
   async generateEndOfDayReports(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const dueEod = this.circadian ? await this.circadian.businessesAtLocalHour(18) : [];
     if (this.circadian && dueEod.length === 0) return;
 
@@ -169,6 +176,8 @@ export class KeyProactiveEngineService {
 
   @Cron('*/15 * * * *')
   async evaluateProactiveActions(): Promise<ProactiveTrigger[]> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return [];
     this.logger.debug('[proactive] Evaluating signals...');
 
     const activeBusinesses = await this.getActiveBusinesses();

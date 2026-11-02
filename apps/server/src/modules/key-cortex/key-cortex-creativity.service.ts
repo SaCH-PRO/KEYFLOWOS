@@ -36,6 +36,7 @@ import { KeyCortexInsightService } from './key-cortex-insight.service';
 // randomUUID returns a v4 UUID string, and every call site here is a bare
 // uuidv4() with no arguments, so this is a true drop-in.
 import { randomUUID as uuidv4 } from 'node:crypto';
+import { keyCronsDisabled } from '../../core/config/env';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
 
@@ -515,6 +516,8 @@ Return JSON:
   /** Daily creative exploration — 5:00 AM */
   @Cron('0 5 * * *')
   async scheduledCreativeExploration(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     this.logger.log('[Creativity] 🌅 Starting daily creative exploration');
 
     const businesses = await this.findAllActiveBusinesses();

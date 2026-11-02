@@ -19,6 +19,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { InvoiceStatus, DealStatus } from '@prisma/client';
 import { subDays, startOfMonth, subMonths } from 'date-fns';
+import { keyCronsDisabled } from '../../core/config/env';
 
 export interface BusinessRiskItem {
   type: 'cashflow' | 'churn' | 'pipeline' | 'operations' | 'genome';
@@ -88,6 +89,8 @@ export class KeyBiEngineService {
 
   @Cron('*/15 * * * *')
   async refreshAll(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     this.logger.log('[refreshAll] Refreshing business mental models...');
 
     const businessIds = await this.getActiveBusinesses();

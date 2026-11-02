@@ -2,6 +2,7 @@ import { Injectable, Logger, Optional, Inject } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiMemoryService } from '../ai/ai-memory.service';
+import { keyCronsDisabled } from '../../core/config/env';
 
 /**
  * The cerebellum — compare intended against actual, and correct the error.
@@ -101,6 +102,8 @@ export class KeyCortexCerebellumService {
    */
   @Cron(CronExpression.EVERY_6_HOURS)
   async scheduledConsolidation(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const businesses = await this.findAllActiveBusinesses();
     for (const businessId of businesses) {
       try {

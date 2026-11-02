@@ -233,6 +233,68 @@ export function ensureValidServerEnv(env: NodeJS.ProcessEnv = process.env): void
   }
 }
 
+// ---------------------------------------------------------------------------
+// Kill switches (V1-24-KEY-KILL-SWITCHES; M47, M52, PRS-M05; owner ruling D-17)
+//
+// Read from process.env at the moment of the decision, not cached at import,
+// so a spec can flip them and a scheduler or dispatch reads the current value.
+// ---------------------------------------------------------------------------
+
+/** An on/off env flag is on when it is '1' or 'true' (any case, surrounding space ignored). */
+export function envFlagOn(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const v = value.trim().toLowerCase();
+  return v === '1' || v === 'true';
+}
+
+/**
+ * The unified scheduler kill switch, for OnModuleInit interval schedulers:
+ * true when DISABLE_SCHEDULERS or KF_DISABLE_SCHEDULERS is on, or NODE_ENV is
+ * 'test' (the repo convention since invoice-overdue.scheduler.ts, now in one
+ * place). KF_DISABLE_SCHEDULERS is the older spelling calendar-sync and
+ * crm-data-quality read; it is honoured here so either name stops every
+ * scheduler that calls this. A scheduler's own *_SCHEDULER_DISABLED flag stays
+ * its own and is checked beside this, not replaced by it.
+ */
+export function schedulersDisabled(): boolean {
+  return (
+    envFlagOn(process.env.DISABLE_SCHEDULERS) ||
+    envFlagOn(process.env.KF_DISABLE_SCHEDULERS) ||
+    process.env.NODE_ENV === 'test'
+  );
+}
+
+/**
+ * The server-side KEY off switch (D-17): KEY_DISABLED. With it on, the model
+ * gateway refuses every dispatch with the R0-07 structured 503 (reason
+ * 'key_disabled') before reading anything, so no gateway dispatch reaches a
+ * provider, and every cortex @Cron handler returns before it scans a business.
+ * It does NOT yet stop the AI calls that bypass the gateway (KEY voice
+ * speak/listen, embeddings, vision, audio, the phone realtime bridge,
+ * ElevenLabs TTS): those are listed in KEY_DISABLED_NOT_COVERED
+ * (model-gateway.service.ts), named in the boot warning, and pinned by
+ * scheduler-kill-switch.spec.ts. Distinct from AI_DISABLED, which only the
+ * storefront reads and which does not stop KEY.
+ */
+export function keyDisabled(): boolean {
+  return envFlagOn(process.env.KEY_DISABLED);
+}
+
+/**
+ * The guard every cortex @Cron handler runs first: KEY is off, or schedulers
+ * are switched off by env (DISABLE_SCHEDULERS / KF_DISABLE_SCHEDULERS).
+ * NODE_ENV=test is deliberately not part of it: @Cron jobs only fire in a
+ * running server (a spawned test server sets DISABLE_SCHEDULERS), while the
+ * cortex specs call these handlers directly under vitest and must reach them.
+ */
+export function keyCronsDisabled(): boolean {
+  return (
+    keyDisabled() ||
+    envFlagOn(process.env.DISABLE_SCHEDULERS) ||
+    envFlagOn(process.env.KF_DISABLE_SCHEDULERS)
+  );
+}
+
 /**
  * Hard-fail guard for the removed KEYFLOW_DEV_AUTH_BYPASS escape hatch.
  *
