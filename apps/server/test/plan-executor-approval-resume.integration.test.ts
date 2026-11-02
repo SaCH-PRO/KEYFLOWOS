@@ -288,13 +288,21 @@ afterAll(async () => {
 }, 60_000);
 
 describe('harness isolation (V1-19 review, CR-V19-3)', () => {
-  it("the plan and cron queues, the plan worker and its event stream run under this run's own BullMQ prefix, so no other app on REDIS_URL takes this run's jobs", () => {
+  it("the plan and cron queues, the plan worker and its event stream run under this run's own BullMQ prefix, so no other app on REDIS_URL takes this run's jobs; no cron worker runs under NODE_ENV=test (V1-24b)", () => {
     expect(BULL.prefix).not.toBe('bull');
     expect(queue.planQueue.name).toBe('ai-plan-steps');
     expect(queue.planQueue.opts.prefix).toBe(BULL.prefix);
     expect(queue.cronQueue.opts.prefix).toBe(BULL.prefix);
     expect(queue.planWorker?.opts?.prefix, 'the plan worker shares the prefix').toBe(BULL.prefix);
-    expect(queue.cronWorker?.opts?.prefix, 'the cron worker shares the prefix').toBe(BULL.prefix);
+    // V1-24b (SEC-V124b-1): with schedulers off (NODE_ENV=test here) the
+    // ai-cron-triggers worker is not started at all, so it cannot take any
+    // app's cron jobs; if it ever runs in this harness it must share the prefix.
+    if (queue.cronWorker) {
+      expect(queue.cronWorker.opts?.prefix, 'the cron worker shares the prefix').toBe(BULL.prefix);
+    } else {
+      expect(process.env.NODE_ENV).toBe('test');
+      expect(process.env.ENABLE_SCHEDULERS_IN_TEST ?? '').toBe('');
+    }
     expect(queue.planEvents?.opts?.prefix, 'the event stream shares the prefix').toBe(BULL.prefix);
   });
 });

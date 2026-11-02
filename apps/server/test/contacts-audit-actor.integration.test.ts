@@ -56,7 +56,12 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+
+// Many cases here make a dozen HTTP calls and real-DB reads each; under the one
+// parallel run of every bound suite (run-manifests) the default 5s budget times
+// out with no assertion failing. The assertions are unchanged.
+vi.setConfig({ testTimeout: 30_000 });
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
