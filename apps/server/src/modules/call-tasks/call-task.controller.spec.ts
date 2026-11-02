@@ -7,10 +7,10 @@ describe('CallTaskController', () => {
   function createMockService(): CallLogService {
     return {
       createCallLog: vi.fn(async (input) => ({ id: 'cl_1', ...input, createdAt: new Date() })),
-      getCallLog: vi.fn(async (id) => ({ id, businessId: 'biz_1', callerId: 'user_1', contactId: 'c1', createdAt: new Date() })),
+      getCallLog: vi.fn(async (businessId, id) => ({ id, businessId, callerId: 'user_1', contactId: 'c1', createdAt: new Date() })),
       listCalls: vi.fn(async () => ({ items: [], total: 0, offset: 0, limit: 50 })),
-      updateCallLog: vi.fn(async (id, data) => ({ id, ...data, createdAt: new Date() })),
-      completeCall: vi.fn(async (id, data) => ({ id, ...data, completedAt: new Date() })),
+      updateCallLog: vi.fn(async (_businessId, id, data) => ({ id, ...data, createdAt: new Date() })),
+      completeCall: vi.fn(async (_businessId, id, data) => ({ id, ...data, completedAt: new Date() })),
       getScheduledCalls: vi.fn(async () => []),
       createFollowUpTask: vi.fn(async () => ({ id: 'ct_1', title: 'Follow up', status: 'OPEN' })),
       createFromContactNextAction: vi.fn(async () => ({ id: 'cl_2', contactId: 'c1', createdAt: new Date() })),
@@ -61,8 +61,9 @@ describe('CallTaskController', () => {
     const scriptSvc = createMockScriptService();
     const ctrl = new CallTaskController(svc, scriptSvc);
 
-    const result = await ctrl.getById('cl_1');
+    const result = await ctrl.getById('biz_1', 'cl_1');
     expect(result.id).toBe('cl_1');
+    expect(svc.getCallLog).toHaveBeenCalledWith('biz_1', 'cl_1');
   });
 
   it('updates a call', async () => {
@@ -70,8 +71,8 @@ describe('CallTaskController', () => {
     const scriptSvc = createMockScriptService();
     const ctrl = new CallTaskController(svc, scriptSvc);
 
-    const result = await ctrl.update('cl_1', { notes: 'Updated' });
-    expect(svc.updateCallLog).toHaveBeenCalledWith('cl_1', { notes: 'Updated' });
+    const result = await ctrl.update('biz_1', 'cl_1', { notes: 'Updated' });
+    expect(svc.updateCallLog).toHaveBeenCalledWith('biz_1', 'cl_1', { notes: 'Updated' });
   });
 
   it('completes a call', async () => {
@@ -79,12 +80,12 @@ describe('CallTaskController', () => {
     const scriptSvc = createMockScriptService();
     const ctrl = new CallTaskController(svc, scriptSvc);
 
-    const result = await ctrl.complete('cl_1', {
+    const result = await ctrl.complete('biz_1', 'cl_1', {
       outcome: 'reached',
       duration: 120,
     } as any, { user: { id: 'user_1' } } as any);
 
-    expect(svc.completeCall).toHaveBeenCalledWith('cl_1', expect.any(Object), 'user_1');
+    expect(svc.completeCall).toHaveBeenCalledWith('biz_1', 'cl_1', expect.any(Object), 'user_1');
   });
 
   it('creates follow-up task', async () => {
@@ -92,11 +93,11 @@ describe('CallTaskController', () => {
     const scriptSvc = createMockScriptService();
     const ctrl = new CallTaskController(svc, scriptSvc);
 
-    const result = await ctrl.createFollowUp('cl_1', {
+    const result = await ctrl.createFollowUp('biz_1', 'cl_1', {
       title: 'Send email',
     } as any, { user: { id: 'user_1' } } as any);
 
-    expect(svc.createFollowUpTask).toHaveBeenCalledWith('cl_1', expect.any(Object), 'user_1');
+    expect(svc.createFollowUpTask).toHaveBeenCalledWith('biz_1', 'cl_1', expect.any(Object), 'user_1');
   });
 
   it('deletes a call', async () => {
@@ -104,8 +105,9 @@ describe('CallTaskController', () => {
     const scriptSvc = createMockScriptService();
     const ctrl = new CallTaskController(svc, scriptSvc);
 
-    const result = await ctrl.delete('cl_1');
+    const result = await ctrl.delete('biz_1', 'cl_1');
     expect(result.success).toBe(true);
+    expect(svc.deleteCallLog).toHaveBeenCalledWith('biz_1', 'cl_1');
   });
 
   it('gets scheduled calls for today', async () => {
@@ -132,6 +134,7 @@ describe('CallTaskController', () => {
     const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.generateScript('biz_1', 'cl_1', { user: { id: 'user_1' } } as any);
+    expect(svc.getCallLog).toHaveBeenCalledWith('biz_1', 'cl_1');
     expect(scriptSvc.generateScript).toHaveBeenCalledWith('biz_1', 'cl_1', 'c1');
     expect(result.greeting).toBe('Hi there!');
   });

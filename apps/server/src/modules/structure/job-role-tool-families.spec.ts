@@ -51,6 +51,19 @@
  *     route fixes so that it does not stand in for the method in general (POST
  *     /drive/.../email-content mails only the caller a fixed notice, so it is not a route to
  *     TransactionalEmailService.send to a customer; review 7 DRV5-2).
+ *  2b. A route call bound only by the ambient tenant does not stand in for a dispatcher call
+ *     made with none (review 8 DD8-1). On HTTP, TenantInterceptor arms the Prisma tenant
+ *     extension for the request's business, which binds every where on a tenant model
+ *     (packages/db BUSINESS_ID_MODELS) to it, so a handler that passes a bare id
+ *     (completeCall(callId)) still stays in its business. The KEY dispatcher also runs on the
+ *     WhatsApp/SMS staff bridge, inside a provider webhook, with no tenant context. A dispatcher
+ *     call that reaches a tenant row by an id the model chose (an `args` value, followed through
+ *     the services and own-class helpers it is handed to) is AMBIENT-BOUND unless the first such
+ *     where on that model also names the business (one the model did not choose), or the code
+ *     compares the row's businessId with its own and refuses, or a dispatcher helper proved the
+ *     id first (assetWithinBusiness). An AMBIENT-BOUND call is UNKNOWN: its routes are only a
+ *     floor, so a governed tool that makes one is GOVERNED_UNGRANTED, and an ungoverned one is
+ *     TENANT_UNBOUND_TOOLS, which no key reaches (not a legacy family, not the baseline).
  *  3. A tool is governed by the union of its calls' modules, at the highest level any of its
  *     governed calls needs. A tool governed by nothing is UNGOVERNED.
  *  4. Module M grants tool T, BY EXACT NAME, at level L exactly when M is the only module
@@ -197,7 +210,8 @@ function dispatcherCases(): Map<string, string> {
  * tool name -> `Service.method` calls in its dispatcher case, and in the orchestrator's own
  * helpers the case calls (`this.assetWithinBusiness(`), followed through helper to helper.
  */
-function dispatcherCalls(): Map<string, string[]> {
+/** The orchestrator's lazy `this.getX()` getters (getter -> service class) and injected fields. */
+function orchestratorServices(): { getters: Map<string, string>; fields: Map<string, string> } {
   const src = read(ORCHESTRATOR);
   const getters = new Map<string, string>();
   for (const m of src.matchAll(/private (get[A-Za-z0-9]+)\(\)[^{]*\{\s*(?:try\s*\{\s*)?return this\.moduleRef\.get\(([A-Za-z0-9]+)/g)) {
@@ -205,6 +219,12 @@ function dispatcherCalls(): Map<string, string[]> {
   }
   const fields = new Map<string, string>();
   for (const m of src.matchAll(/private readonly ([a-zA-Z0-9]+): ([A-Z][A-Za-z0-9]+)/g)) fields.set(m[1], m[2]);
+  return { getters, fields };
+}
+
+function dispatcherCalls(): Map<string, string[]> {
+  const src = read(ORCHESTRATOR);
+  const { getters, fields } = orchestratorServices();
 
   const serviceCalls = (text: string, out: Set<string>) => {
     for (const m of text.matchAll(/this\.(get[A-Za-z0-9]+)\(\)\s*\.\s*([a-zA-Z0-9]+)\(/g)) {
@@ -602,6 +622,358 @@ function toolCalls(): Map<string, string[]> {
   return calls;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Rule 2b — tenant binding (review 8 DD8-1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** packages/db/src/client.ts: the Prisma tenant extension and the models it scopes. */
+const DB_CLIENT = join(SRC, '..', '..', '..', 'packages', 'db', 'src', 'client.ts');
+
+/**
+ * The models the Prisma tenant extension scopes (BUSINESS_ID_MODELS), as client delegate names
+ * (`CallLog` -> `callLog`). The extension ANDs the ambient tenant onto every where of these
+ * models, and forces it onto every create, only while a tenant context is live: TenantInterceptor
+ * installs one for an authenticated HTTP request; the WhatsApp/SMS staff bridge runs inside a
+ * provider webhook (no AuthGuard, no user) with none.
+ */
+const TENANT_MODELS: ReadonlySet<string> = (() => {
+  const src = readFileSync(DB_CLIENT, 'utf8');
+  const at = src.indexOf('const BUSINESS_ID_MODELS = new Set([');
+  const end = src.indexOf(']);', at);
+  if (at < 0 || end < 0) throw new Error('BUSINESS_ID_MODELS not found in packages/db/src/client.ts');
+  const names = [...src.slice(at, end).replace(/\/\/[^\n]*/g, '').matchAll(/'([A-Z][A-Za-z0-9]*)'/g)].map((m) => m[1]);
+  return new Set(names.map((n) => n[0].toLowerCase() + n.slice(1)));
+})();
+
+/** Prisma operations that reach existing rows through a where. */
+const ROW_OPS = new Set(['findUnique', 'findUniqueOrThrow', 'findFirst', 'findFirstOrThrow', 'findMany', 'count', 'update', 'updateMany', 'delete', 'deleteMany', 'upsert']);
+
+/**
+ * What a caller hands a parameter: a value the model chose (true: an `args.*` value of the tool
+ * call, or one copied from it), an object of which the model chose exactly these keys, or
+ * nothing the model chose (false: the dispatcher's own businessId, a literal, a row it read).
+ */
+type Seed = boolean | ReadonlySet<string>;
+
+/** A where on a tenant model that names a row by an id the model chose. */
+interface Touch {
+  model: string;
+  op: string;
+  /** The where also names the business (not one the model chose), or the code compares the row's businessId. */
+  bound: boolean;
+  /** The dispatcher call it is reached through (`Service.method`, or `prisma.<model>` for the case's own read). */
+  via: string;
+}
+
+interface ClassCtx {
+  cls: string;
+  src: string;
+  fields: ReadonlyMap<string, string>;
+  getters: ReadonlyMap<string, string>;
+}
+
+function classCtx(cls: string, src: string): ClassCtx {
+  const fields = new Map<string, string>();
+  for (const m of src.matchAll(/(?:private|public|protected)\s+(?:readonly\s+)?([a-zA-Z0-9_$]+)\s*[?]?:\s*([A-Z][A-Za-z0-9_]*)/g)) fields.set(m[1], m[2]);
+  const getters = new Map<string, string>();
+  for (const m of src.matchAll(/private (get[A-Za-z0-9]+)\(\)[^{]*\{\s*(?:try\s*\{\s*)?return this\.moduleRef\.get\(([A-Za-z0-9]+)/g)) getters.set(m[1], m[2]);
+  return { cls, src, fields, getters };
+}
+
+const unwrapExpr = (e: ts.Expression): ts.Expression =>
+  ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e) || ts.isTypeAssertionExpression(e) ? unwrapExpr(e.expression) : e;
+
+/**
+ * A comparison of a row's businessId with the business the code was given, followed by a
+ * refusal (`if (!asset || asset.businessId !== businessId) { throw ...`): it binds whatever the
+ * code reached before it.
+ */
+const COMPARES_TENANT = /\.businessId !== (?:[\w.]+\.)?businessId\)?\s*\{?\s*(?:\/\/[^\n]*\n\s*)*throw /;
+
+/**
+ * The tenant-model rows a function body reaches by an id the model chose, in source order,
+ * following the own-class helpers and injected services it hands such a value. `roots` seeds
+ * the body's free identifiers (a method's parameters; a dispatcher case's `args`). A dispatcher
+ * helper that proves ownership (`this.assetWithinBusiness(businessId, args.assetId)`) binds the
+ * value it proved for the rest of the body; a body that compares the row's businessId with its
+ * own binds what it reached.
+ */
+function chosenTouches(ctx: ClassCtx, fn: ts.Node, roots: ReadonlyMap<string, Seed>, seen: Set<string>, opts: { dispatcher?: boolean; ignoreProofs?: boolean } = {}): Touch[] {
+  const decls = new Map<string, ts.Expression>();
+  const picked = new Map<string, { from: ts.Expression; key: string }>();
+  const collect = (n: ts.Node) => {
+    if (ts.isVariableDeclaration(n) && n.initializer) {
+      if (ts.isIdentifier(n.name)) decls.set(n.name.text, n.initializer);
+      else if (ts.isObjectBindingPattern(n.name)) {
+        for (const el of n.name.elements) {
+          if (ts.isIdentifier(el.name)) picked.set(el.name.text, { from: n.initializer, key: (el.propertyName ?? el.name).getText() });
+        }
+      }
+    }
+    ts.forEachChild(n, collect);
+  };
+  collect(fn);
+
+  /** A value the code read itself (awaited, or a call on `this`): whatever bound that read binds it. */
+  const readsRow = (e: ts.Expression): boolean => {
+    const x = unwrapExpr(e);
+    if (ts.isAwaitExpression(x)) return true;
+    if (!ts.isCallExpression(x)) return false;
+    let c: ts.Expression = x.expression;
+    while (ts.isPropertyAccessExpression(c) || ts.isCallExpression(c) || ts.isElementAccessExpression(c) || ts.isNonNullExpression(c)) c = c.expression;
+    return c.kind === ts.SyntaxKind.ThisKeyword;
+  };
+  const union = (a: Seed, b: Seed): Seed => {
+    if (a === true || b === true) return true;
+    if (a === false) return b;
+    if (b === false) return a;
+    return new Set([...a, ...b]);
+  };
+  const seedOf = (e: ts.Expression, depth = 0): Seed => {
+    if (depth > 8) return false;
+    const x = unwrapExpr(e);
+    if (ts.isIdentifier(x)) {
+      if (roots.has(x.text)) return roots.get(x.text)!;
+      const p = picked.get(x.text);
+      if (p) return readsRow(p.from) ? false : keyOf(seedOf(p.from, depth + 1), p.key);
+      const d = decls.get(x.text);
+      return d && !readsRow(d) ? seedOf(d, depth + 1) : false;
+    }
+    if (ts.isPropertyAccessExpression(x)) return keyOf(seedOf(x.expression, depth + 1), x.name.text);
+    if (ts.isElementAccessExpression(x)) return seedOf(x.expression, depth + 1) === true;
+    if (ts.isObjectLiteralExpression(x)) {
+      const keys = new Set<string>();
+      for (const p of x.properties) {
+        if (ts.isSpreadAssignment(p)) {
+          const s = seedOf(p.expression, depth + 1);
+          if (s === true) return true;
+          if (s) for (const k of s) keys.add(k);
+          continue;
+        }
+        const v = ts.isPropertyAssignment(p) ? p.initializer : ts.isShorthandPropertyAssignment(p) ? p.name : null;
+        if (v && p.name && seedOf(v, depth + 1) === true) keys.add(p.name.getText());
+      }
+      return keys.size ? keys : false;
+    }
+    if (ts.isArrayLiteralExpression(x)) return x.elements.some((el) => seedOf(el as ts.Expression, depth + 1) === true);
+    if (ts.isConditionalExpression(x)) return union(seedOf(x.whenTrue, depth + 1), seedOf(x.whenFalse, depth + 1));
+    if (ts.isBinaryExpression(x) && [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.AmpersandAmpersandToken].includes(x.operatorToken.kind)) {
+      return union(seedOf(x.left, depth + 1), seedOf(x.right, depth + 1));
+    }
+    if (ts.isTemplateExpression(x)) return x.templateSpans.some((s) => seedOf(s.expression, depth + 1) === true);
+    if (ts.isCallExpression(x) && !readsRow(x)) {
+      // String(args.id), args.ids.map(...): a value computed from what the model chose
+      return [x.expression, ...x.arguments].some((a) => seedOf(a, depth + 1) === true);
+    }
+    return false;
+  };
+
+  const classifyWhere = (w: ts.Expression, depth = 0): { chosenId: boolean; bound: boolean; idText?: string } => {
+    const none = { chosenId: false, bound: false };
+    if (depth > 6) return none;
+    const x = unwrapExpr(w);
+    if (ts.isIdentifier(x)) {
+      const d = decls.get(x.text);
+      return d ? classifyWhere(d, depth + 1) : none;
+    }
+    if (ts.isCallExpression(x)) {
+      // contactWhereWithId(input.businessId, input.contactId)
+      return {
+        chosenId: x.arguments.some((a) => seedOf(a) === true),
+        bound: x.arguments.some((a) => /\bbusinessId\b/.test(a.getText()) && seedOf(a) !== true),
+      };
+    }
+    if (!ts.isObjectLiteralExpression(x)) return none;
+    let chosenId = false;
+    let bound = false;
+    let idText: string | undefined;
+    for (const p of x.properties) {
+      if (ts.isSpreadAssignment(p)) {
+        const inner = classifyWhere(p.expression, depth + 1);
+        chosenId ||= inner.chosenId;
+        bound ||= inner.bound;
+        idText ??= inner.idText;
+        continue;
+      }
+      const k = p.name?.getText();
+      const v = ts.isPropertyAssignment(p) ? p.initializer : ts.isShorthandPropertyAssignment(p) ? p.name : undefined;
+      if (!v) continue;
+      if (k === 'id') {
+        const u = unwrapExpr(v);
+        const inList = ts.isObjectLiteralExpression(u) ? u.properties.find((q) => q.name?.getText() === 'in') : undefined;
+        const idValue = inList && ts.isPropertyAssignment(inList) ? inList.initializer : u;
+        if (!proven.has(idValue.getText()) && seedOf(idValue) === true) {
+          chosenId = true;
+          idText = idValue.getText();
+        }
+      } else if (k === 'businessId') {
+        // a tenant the model chose binds nothing
+        if (seedOf(v) !== true) bound = true;
+      } else if (ts.isObjectLiteralExpression(unwrapExpr(v)) && /\bbusinessId\b/.test(v.getText())) {
+        // a relation filter that names the tenant: { project: { businessId } }
+        bound = true;
+      }
+    }
+    return { chosenId, bound, idText };
+  };
+
+  const ownershipHelper = (name: string) => opts.dispatcher && COMPARES_TENANT.test(memberBody(ctx.src, name) ?? '');
+  const proven = new Set<string>();
+  const touches: Touch[] = [];
+  const visit = (n: ts.Node, via: string | null) => {
+    let nextVia = via;
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)) {
+      const method = n.expression.name.text;
+      const target = unwrapExpr(n.expression.expression);
+      if (ROW_OPS.has(method) && ts.isPropertyAccessExpression(target) && TENANT_MODELS.has(target.name.text)) {
+        const arg = n.arguments[0] && unwrapExpr(n.arguments[0]);
+        const whereProp = arg && ts.isObjectLiteralExpression(arg) ? arg.properties.find((p) => p.name?.getText() === 'where') : undefined;
+        const w = whereProp && ts.isPropertyAssignment(whereProp) ? whereProp.initializer : whereProp && ts.isShorthandPropertyAssignment(whereProp) ? whereProp.name : undefined;
+        const c = w ? classifyWhere(w) : null;
+        if (c?.chosenId) touches.push({ model: target.name.text, op: method, bound: c.bound, via: via ?? `prisma.${target.name.text}` });
+        // a where that names the business proves the id it names for the rest of the body
+        if (c?.chosenId && c.bound && c.idText) proven.add(c.idText);
+      } else {
+        let callee: string | null = null;
+        if (target.kind === ts.SyntaxKind.ThisKeyword && memberBody(ctx.src, method)) callee = `${ctx.cls}.${method}`;
+        else if (ts.isCallExpression(target) && ts.isPropertyAccessExpression(target.expression) && target.expression.expression.kind === ts.SyntaxKind.ThisKeyword) {
+          const svc = ctx.getters.get(target.expression.name.text);
+          if (svc) callee = `${svc}.${method}`;
+        } else if (ts.isPropertyAccessExpression(target) && target.expression.kind === ts.SyntaxKind.ThisKeyword) {
+          const svc = ctx.fields.get(target.name.text);
+          if (svc && svc !== 'PrismaService' && CLASS_FILES.has(svc)) callee = `${svc}.${method}`;
+        }
+        if (callee) {
+          if (callee.startsWith(`${ctx.cls}.`) && ownershipHelper(method) && !opts.ignoreProofs) {
+            // the helper proves the row is the business's: what it was handed is bound from here on
+            for (const a of n.arguments) proven.add(a.getText());
+          } else {
+            const seeds = n.arguments.map((a) => (proven.has(a.getText()) ? false : seedOf(a)));
+            const at = via ?? (callee.startsWith(`${ctx.cls}.`) && opts.dispatcher ? null : callee);
+            if (seeds.some((s) => s !== false)) touches.push(...methodTouches(callee, seeds, seen, at, opts.dispatcher ? opts : {}));
+            nextVia = at;
+          }
+        }
+      }
+    }
+    ts.forEachChild(n, (c) => visit(c, nextVia));
+  };
+  ts.forEachChild(fn, (c) => visit(c, null));
+  if (COMPARES_TENANT.test(fn.getText())) for (const t of touches) t.bound = true;
+  return touches;
+}
+
+/** Classes the rule's own cases below are written in (class name -> source). */
+const SYNTHETIC_CLASSES = new Map<string, string>();
+
+/** The rows `Class.method` reaches by an id the model chose, given what its caller handed each parameter. */
+function methodTouches(call: string, seeds: Seed[], seen: Set<string>, via: string | null, opts: { dispatcher?: boolean; ignoreProofs?: boolean } = {}): Touch[] {
+  const key = `${call}(${seeds.map((s) => (s === true ? '*' : s === false ? '-' : [...s].sort().join('|'))).join(',')})`;
+  if (seen.has(key)) return [];
+  seen.add(key);
+  const [cls, method] = call.split('.');
+  const file = CLASS_FILES.get(cls);
+  const src = SYNTHETIC_CLASSES.get(cls) ?? (file ? readFileSync(file, 'utf8') : null);
+  if (!src) return [];
+  const body = memberBody(src, method);
+  if (!body) return [];
+  const sf = ts.createSourceFile('m.ts', `class M {\n${body}\n}`, ts.ScriptTarget.Latest, true);
+  let decl: ts.MethodDeclaration | undefined;
+  const find = (n: ts.Node) => {
+    if (!decl && ts.isMethodDeclaration(n)) decl = n;
+    else ts.forEachChild(n, find);
+  };
+  find(sf);
+  if (!decl?.body) return [];
+  const roots = new Map<string, Seed>();
+  decl.parameters.forEach((p, i) => {
+    const s = seeds[i] ?? false;
+    if (ts.isIdentifier(p.name)) roots.set(p.name.text, s);
+    else if (ts.isObjectBindingPattern(p.name)) {
+      for (const el of p.name.elements) if (ts.isIdentifier(el.name)) roots.set(el.name.text, keyOf(s, (el.propertyName ?? el.name).getText()));
+    }
+  });
+  const ctx = classCtx(cls, src);
+  return chosenTouches(ctx, decl.body, roots, seen, { dispatcher: cls === 'FlowOrchestratorService' && opts.dispatcher, ignoreProofs: opts.ignoreProofs }).map((t) => ({
+    ...t,
+    via: via ?? t.via,
+  }));
+}
+
+function keyOf(s: Seed, key: string): Seed {
+  return s === true ? true : s === false ? false : s.has(key);
+}
+
+/** A dispatcher case's text as a parseable body: `args` is the model's, `businessId` the dispatcher's own. */
+function caseBody(caseText: string): ts.Node {
+  const sf = ts.createSourceFile('case.ts', `class D {\n  async c(businessId: string, args: any, toolName: string) {\n    switch (toolName) {\n${caseText}\n    }\n  }\n}`, ts.ScriptTarget.Latest, true);
+  let body: ts.Node | undefined;
+  const find = (n: ts.Node) => {
+    if (!body && ts.isMethodDeclaration(n) && n.body) body = n.body;
+    else ts.forEachChild(n, find);
+  };
+  find(sf);
+  return body!;
+}
+
+/**
+ * tool -> the tenant rows its dispatcher case reaches by an id the model chose. A bridged tool
+ * runs the cortex organ's handler `(ctx, input) => ...`: `input` is the model's, `ctx.businessId`
+ * the session's.
+ */
+function dispatcherTouches(opts: { ignoreProofs?: boolean } = {}): Map<string, Touch[]> {
+  const ctx = classCtx('FlowOrchestratorService', read(ORCHESTRATOR));
+  const out = new Map<string, Touch[]>();
+  for (const [tool, text] of dispatcherCases()) {
+    out.set(tool, chosenTouches(ctx, caseBody(text), new Map([['args', true]]), new Set(), { dispatcher: true, ignoreProofs: opts.ignoreProofs }));
+  }
+  const organSrc = read('modules/key-cortex/organs/key-inbox-adapter.service.ts');
+  const organ = classCtx('KeyInboxAdapterService', organSrc);
+  const handlers = new Map<string, ts.ArrowFunction | ts.FunctionExpression>();
+  const sf = ts.createSourceFile('organ.ts', organSrc, ts.ScriptTarget.Latest, true);
+  const find = (n: ts.Node) => {
+    if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'makeTool' && n.arguments[0] && ts.isStringLiteral(n.arguments[0])) {
+      const h = n.arguments[n.arguments.length - 1];
+      if (ts.isArrowFunction(h) || ts.isFunctionExpression(h)) handlers.set(n.arguments[0].text, h);
+    }
+    ts.forEachChild(n, find);
+  };
+  find(sf);
+  for (const [tool, target] of Object.entries(CORTEX_TOOL_BRIDGE)) {
+    const h = handlers.get(target);
+    if (!h) throw new Error(`organ handler ${target} not found`);
+    const roots = new Map<string, Seed>();
+    h.parameters.forEach((p, i) => ts.isIdentifier(p.name) && roots.set(p.name.text, i === 1));
+    out.set(tool, chosenTouches(organ, h.body, roots, new Set()));
+  }
+  return out;
+}
+
+/**
+ * Rule 2b: tool -> its dispatcher calls that are AMBIENT-BOUND — calls that reach a tenant row
+ * by an id the model chose, where the first such where on that model names no business (not the
+ * model's) and nothing compares the row's businessId. Over HTTP that same where is bound by the
+ * ambient tenant alone; on the staff bridge it reaches any business's row.
+ */
+function ambientCalls(touches: Map<string, Touch[]>): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const [tool, list0] of touches) {
+    const byVia = new Map<string, Touch[]>();
+    for (const t of list0) byVia.set(t.via, [...(byVia.get(t.via) ?? []), t]);
+    const bad: string[] = [];
+    for (const [via, list] of byVia) {
+      const first = new Map<string, Touch>();
+      for (const t of list) if (!first.has(t.model)) first.set(t.model, t);
+      if ([...first.values()].some((t) => !t.bound)) bad.push(via);
+    }
+    if (bad.length) out.set(tool, bad.sort());
+  }
+  return out;
+}
+
+const DISPATCHER_TOUCHES = dispatcherTouches();
+const AMBIENT: ReadonlyMap<string, readonly string[]> = ambientCalls(DISPATCHER_TOUCHES);
+
 interface Derivation {
   /** canonical module -> exact tool name -> the level its by-hand routes require */
   mapping: Record<string, Record<string, Level>>;
@@ -609,7 +981,7 @@ interface Derivation {
   familyModules: Map<string, Set<string>>;
   /** tool -> governing module -> level (empty = ungoverned) */
   toolLevels: Map<string, Map<string, Level>>;
-  /** tool -> its UNKNOWN calls (no member route, not a wrapper, not incidental) */
+  /** tool -> its UNKNOWN calls (no member route, not a wrapper, not incidental; or AMBIENT-BOUND, rule 2b) */
   unknownCalls: Map<string, string[]>;
   /** governed tools no module grants (rule 4) */
   governedUngranted: string[];
@@ -619,7 +991,7 @@ interface Derivation {
   guardedBy: Map<string, Route[]>;
 }
 
-function derive(calls: Map<string, string[]>, routes: Route[]): Derivation {
+function derive(calls: Map<string, string[]>, routes: Route[], ambient: ReadonlyMap<string, readonly string[]> = AMBIENT): Derivation {
   const byMethod = new Map<string, Route[]>();
   const guardedBy = new Map<string, Route[]>();
   for (const r of routes) {
@@ -674,6 +1046,9 @@ function derive(calls: Map<string, string[]>, routes: Route[]): Derivation {
         if (!cur || rank(l) > rank(cur)) lv.set(m, l);
       }
     }
+    // Rule 2b: a call that reaches a tenant row by an id the model chose, bound over HTTP only by
+    // the ambient tenant, has no by-hand equivalent on the bridge: its routes are only a floor.
+    for (const c of ambient.get(tool) ?? []) if (!unknown.includes(c)) unknown.push(c);
     toolLevels.set(tool, lv);
     unknownCalls.set(tool, unknown);
   }
@@ -1468,6 +1843,198 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     });
   });
 
+  /**
+   * Review 8 DD8-1: call_log_outcome, call_schedule_followup and call_generate_script, which
+   * crm:write grants, completed another business's call log, planted a task in its CRM and read
+   * its contact into a call script over the WhatsApp staff bridge. The dispatcher passed bare ids
+   * (completeCall(callLogId), createFollowUpTask(callLogId)) and CallScriptService looked both
+   * rows up by findUnique({ id }). The governing routes pass only callId as well: what keeps them
+   * in the tenant is the Prisma tenant extension, which TenantInterceptor arms for an
+   * authenticated HTTP request. The bridge runs inside a provider webhook, with no tenant context,
+   * so the derivation took a route call bound by the ambient tenant for a dispatcher call bound
+   * by nothing (rule 2b).
+   */
+  describe('review 8 DD8-1 — a route call bound only by the ambient tenant does not stand in for a dispatcher call made with none', () => {
+    const TENANT_UNBOUND = ((policyModule as Record<string, unknown>).TENANT_UNBOUND_TOOLS ?? {}) as Record<string, string>;
+
+    it('reads the models the tenant extension scopes from packages/db, and the extension binds only while a tenant is live (guards the guard)', () => {
+      expect(TENANT_MODELS.size).toBeGreaterThan(300);
+      for (const m of ['callLog', 'contact', 'contactTask', 'asset', 'contentRequest', 'procurementRequest', 'staffMember']) expect(TENANT_MODELS.has(m), m).toBe(true);
+      for (const m of ['user', 'business']) expect(TENANT_MODELS.has(m), m).toBe(false);
+      const db = readFileSync(DB_CLIENT, 'utf8');
+      expect(db).toMatch(/return !!businessId && BUSINESS_ID_MODELS\.has\(model\);/);
+      expect(db).toMatch(/return _tenantContextProvider\?\.getCurrentBusinessId\(\);/);
+    });
+
+    it('the staff bridge runs the dispatcher with no tenant context: its webhooks run no AuthGuard, and TenantInterceptor arms a tenant only for a user', () => {
+      for (const path of ['/whatsapp/webhook', '/whatsapp/webhook/:businessId', '/communications/inbound/sms']) {
+        const hit = routes.find((r) => r.verb === 'POST' && r.path === path);
+        expect(hit, path).toBeDefined();
+        expect(hit!.authGuard, path).toBe(false);
+      }
+      expect(read('core/tenant/tenant.interceptor.ts')).toMatch(/if \(!userId \|\| !namesTenant\) \{\s*return next\.handle\(\);/);
+      // and the bridge does not arm one itself: its holder is known by the phone only, and the
+      // ambient user is read as an authenticated actor (onboarding completion, cortex audit)
+      expect(read('modules/structure/staff-chat-bridge.service.ts')).not.toMatch(/runWithTenant/);
+    });
+
+    describe('the rule, on handlers written to its shape', () => {
+      const SYN = [
+        'export class SynService {',
+        '  constructor(private readonly prisma: PrismaService) {}',
+        '',
+        '  async bare(id: string, input: { outcome: string }) {',
+        '    const row = await this.prisma.client.callLog.findUnique({ where: { id } });',
+        '    return this.prisma.client.callLog.update({ where: { id }, data: { outcome: input.outcome } });',
+        '  }',
+        '',
+        '  async bound(businessId: string, id: string) {',
+        '    const row = await this.prisma.client.callLog.findFirst({ where: { id, businessId } });',
+        '    return this.prisma.client.callLog.update({ where: { id }, data: {} });',
+        '  }',
+        '',
+        '  async compared(businessId: string, id: string) {',
+        '    const row = await this.prisma.client.callLog.findUnique({ where: { id } });',
+        '    if (!row || row.businessId !== businessId) {',
+        "      throw new NotFoundException('Call log not found');",
+        '    }',
+        '    return row;',
+        '  }',
+        '',
+        '  async viaHelper(id: string) {',
+        '    return this.load(id);',
+        '  }',
+        '',
+        '  async load(id: string) {',
+        '    return this.prisma.client.callLog.findUnique({ where: { id } });',
+        '  }',
+        '',
+        '  async picksKey(input: { businessId: string; title: string; assigneeId?: string }) {',
+        '    return this.prisma.client.staffMember.findUnique({ where: { id: input.assigneeId } });',
+        '  }',
+        '',
+        '  async rowItRead(businessId: string, id: string) {',
+        '    const booking = await this.prisma.client.booking.findFirst({ where: { id, businessId } });',
+        '    return this.prisma.client.service.findUnique({ where: { id: booking.serviceId } });',
+        '  }',
+        '',
+        '  async tenantFromInput(input: { businessId: string; id: string }) {',
+        '    return this.prisma.client.callLog.findFirst({ where: { id: input.id, businessId: input.businessId } });',
+        '  }',
+        '',
+        '  async notATenantModel(id: string) {',
+        '    return this.prisma.client.user.findUnique({ where: { id } });',
+        '  }',
+        '}',
+      ].join('\n');
+      SYNTHETIC_CLASSES.set('SynService', SYN);
+      const ambientOf = (method: string, seeds: Seed[]) =>
+        ambientCalls(new Map([['t', methodTouches(`SynService.${method}`, seeds, new Set(), `SynService.${method}`)]])).get('t') ?? [];
+
+      it.each<[string, string, Seed[], boolean]>([
+        ['a bare id the model chose is AMBIENT-BOUND', 'bare', [true, new Set(['outcome'])], true],
+        ['a where that names the business binds the row (and the write after it)', 'bound', [false, true], false],
+        ["a comparison of the row's businessId, then a refusal, binds it", 'compared', [false, true], false],
+        ['an own-class helper that reaches the row by the bare id is followed', 'viaHelper', [true], true],
+        ['a key the caller does not hand over is not chosen', 'picksKey', [new Set(['businessId', 'title'])], false],
+        ['a key the caller does hand over is', 'picksKey', [new Set(['title', 'assigneeId'])], true],
+        ['an id read from a row the method bound is bound by that read', 'rowItRead', [false, true], false],
+        ['a tenant the model chose binds nothing', 'tenantFromInput', [new Set(['businessId', 'id'])], true],
+        ['...while the tenant its caller gave does', 'tenantFromInput', [new Set(['id'])], false],
+        ['a model the extension does not scope is not this rule (HTTP binds it no better)', 'notATenantModel', [true], false],
+      ])('%s', (_label, method, seeds, isAmbient) => {
+        expect(ambientOf(method, seeds)).toEqual(isAmbient ? [`SynService.${method}`] : []);
+      });
+    });
+
+    it('no granted tool reaches a tenant row by an id the model chose without binding it to the business KEY acts in', () => {
+      const offenders = [...AMBIENT].filter(([t]) => granted.has(t)).map(([t, cs]) => `${t}: ${cs.join(', ')}`);
+      expect(offenders).toEqual([]);
+    });
+
+    it('the call tools hand CallLogService / CallScriptService the business, and both look the rows up within it', () => {
+      const cases = dispatcherCases();
+      expect(cases.get('call_log_outcome')).toMatch(/this\.getCallLog\(\)\.completeCall\(businessId, args\.callLogId, \{/);
+      expect(cases.get('call_schedule_followup')).toMatch(/this\.getCallLog\(\)\.createFollowUpTask\(businessId, args\.callLogId, \{/);
+      expect(cases.get('call_generate_script')).toMatch(/this\.getCallScript\(\)\.generateScript\(businessId, args\.callLogId, args\.contactId\)/);
+      const callLog = read('modules/call-tasks/call-log.service.ts');
+      expect(memberBody(callLog, 'getCallLog')).toMatch(/this\.prisma\.client\.callLog\.findFirst\(\{\s*where: \{ id, businessId \},/);
+      expect(memberBody(callLog, 'completeCall')).toMatch(/await this\.getCallLog\(businessId, id\);/);
+      expect(memberBody(callLog, 'createFollowUpTask')).toMatch(/await this\.getCallLog\(businessId, callLogId\);/);
+      const script = memberBody(read('modules/call-tasks/call-script.service.ts'), 'generateScript')!;
+      expect(script).toMatch(/this\.prisma\.client\.contact\.findFirst\(\{\s*where: \{ id: contactId, businessId \},/);
+      expect(script).toMatch(/this\.prisma\.client\.callLog\.findFirst\(\{\s*where: \{ id: callLogId, businessId \},/);
+      for (const t of ['call_log_outcome', 'call_schedule_followup', 'call_generate_script']) {
+        expect(AMBIENT.has(t), t).toBe(false);
+        expect(derived.mapping.crm[t], t).toBe('write');
+      }
+    });
+
+    it('drift guard: a dispatcher call that reaches the row by a bare id again is only a floor (crm:write would not grant it)', () => {
+      const d = derive(calls, routes, new Map([...AMBIENT, ['call_log_outcome', ['CallLogService.completeCall']]]));
+      expect([...d.toolLevels.get('call_log_outcome')!]).toEqual([['crm', 'write']]);
+      expect(d.unknownCalls.get('call_log_outcome')).toEqual(['CallLogService.completeCall']);
+      expect(d.mapping.crm.call_log_outcome).toBeUndefined();
+      expect(d.governedUngranted).toContain('call_log_outcome');
+    });
+
+    it("assets_* reach AssetService by a bare id only after the dispatcher proved the asset is the business's (assetWithinBusiness)", () => {
+      const cases = dispatcherCases();
+      expect(memberBody(read(ORCHESTRATOR), 'assetWithinBusiness')).toMatch(COMPARES_TENANT);
+      const proofless = ambientCalls(dispatcherTouches({ ignoreProofs: true }));
+      for (const [t, call] of [
+        ['assets_tag', 'AssetService.tagAsset'],
+        ['assets_untag', 'AssetService.untagAsset'],
+        ['assets_update', 'AssetService.updateAsset'],
+        ['assets_delete', 'AssetService.deleteAsset'],
+      ]) {
+        expect(cases.get(t), t).toContain('this.assetWithinBusiness(businessId, args.assetId)');
+        expect(AMBIENT.has(t), t).toBe(false);
+        expect(proofless.get(t), t).toEqual([call]);
+      }
+    });
+
+    it('the tenant rows each AMBIENT-BOUND tool reaches by an id the model chose (pinned: a change here is a reviewed change)', () => {
+      const rows: string[] = [];
+      for (const [tool, vias] of AMBIENT) {
+        for (const via of vias) {
+          const first = new Map<string, Touch>();
+          for (const t of DISPATCHER_TOUCHES.get(tool)!) if (t.via === via && !first.has(t.model)) first.set(t.model, t);
+          for (const t of first.values()) if (!t.bound) rows.push(`${tool} -> ${via} -> ${t.model}.${t.op}`);
+        }
+      }
+      expect(rows.sort()).toEqual(
+        [
+          'approval_decide_step -> ApprovalRequestService.decideStep -> approvalRequest.findFirst',
+          'bookings_offer_waitlist_slot -> BookingWaitlistService.offerSlot -> bookingWaitlistEntry.findFirst',
+          'content_assign_request -> ContentRequestService.assignRequest -> contentRequest.findUnique',
+          'content_deliver_request -> ContentRequestService.deliverRequest -> contentRequest.findUnique',
+          'content_get_request -> ContentRequestService.getById -> contentRequest.findUnique',
+          'content_submit_for_review -> ContentRequestService.submitForReview -> contentRequest.findUnique',
+          'content_transition_status -> ContentRequestService.transitionStatus -> contentRequest.findUnique',
+          'content_upload_deliverables -> ContentRequestService.uploadDeliverables -> contentRequest.findUnique',
+          'evidence_verify -> EvidenceService.verify -> evidence.findFirst',
+          'people_assign_task -> TaskAssignmentService.assign -> contactTask.findUnique',
+          'people_assign_task -> TaskAssignmentService.assign -> projectTask.findUnique',
+          'people_assign_task -> TaskAssignmentService.assign -> staffMember.findUnique',
+          'procurement_acknowledge_vendor -> ProcurementService.acknowledgeVendor -> procurementRequest.update',
+          'procurement_mark_fulfilled -> ProcurementService.markFulfilled -> procurementRequest.update',
+          'procurement_mark_invoiced -> ProcurementService.markInvoiced -> procurementRequest.update',
+          'projects_update_task -> ProjectsService.updateTask -> staffMember.findUnique',
+        ].sort(),
+      );
+    });
+
+    it('TENANT_UNBOUND_TOOLS is exactly the ungoverned tools with an AMBIENT-BOUND call: no key reaches them, the legacy families and the baseline included', () => {
+      const ungoverned = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) === 0).sort();
+      const governed = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) > 0);
+      // a governed one is GOVERNED_UNGRANTED by rule 4 instead (none today)
+      expect(governed).toEqual([]);
+      expect(Object.keys(TENANT_UNBOUND).sort()).toEqual(ungoverned);
+      for (const [t, why] of Object.entries(TENANT_UNBOUND)) expect(why, t).toMatch(new RegExp(AMBIENT.get(t)![0].replace('.', '\\.')));
+    });
+  });
+
   it('every registry family either has a granted tool or is listed as unmapped with a reason', () => {
     const grantingFamilies = new Set([...granted.keys()].map(family));
     const registryFamilies = [...new Set(FLOW_TOOLS.map((t) => family(t.name)))].sort();
@@ -1500,3 +2067,4 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     }
   });
 });
+

@@ -38,7 +38,10 @@
  * level that forces a brief (DRV-BRIEF / DRV5-1) and commerce_send_invoice granted by no key
  * (DRV5-2). The seventh's client-forged envelope (ENV-FORGE / INP5-2 / DRV5-3) is pinned in
  * ai/flow-chat-envelope.spec.ts; every bridge harness here reads the envelope from chat()'s
- * server-only argument, never from the client-shaped pageContext.
+ * server-only argument, never from the client-shaped pageContext. The eighth (DD8-1: tools that
+ * find their row by a bare id, which on the bridge, with no tenant context, is any business's) is
+ * pinned last, beside ai/call-tools-tenant.spec.ts; its forged webhook (FB-1) is pinned in
+ * whatsapp/whatsapp-shared-webhook.spec.ts.
  */
 import { describe, it, expect } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
@@ -139,8 +142,10 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     read: ['assets_list', 'assets_list_folders', 'content_list_requests', 'assets_get'],
     // assets_tag / assets_untag are tier 1, but POST .../tag and .../untag need content:write
     write: ['assets_tag', 'assets_untag', 'assets_update', 'content_create_request'],
-    admin: ['assets_delete', 'content_deliver_request'],
-    deny: ['social_publish_post', 'marketing_send_campaign', 'commerce_create_invoice'],
+    admin: ['assets_delete'],
+    // content_deliver_request finds its request by a bare id, which on the staff bridge is any
+    // business's (TENANT_UNBOUND_TOOLS, review 8 DD8-1)
+    deny: ['social_publish_post', 'marketing_send_campaign', 'commerce_create_invoice', 'content_deliver_request'],
   },
   expenses: {
     // expenses_list reads what GET .../expenses (expenses:read) lists (review 2 C2)
@@ -2747,5 +2752,91 @@ describe('V1-21b review 7 — KEY is capped by the membership HTTP reads for who
       expect(passes(admin, 'commerce_create_invoice')).toBe(true);
       expect(passes(admin, 'commerce_delete_invoice')).toBe(true);
     });
+  });
+});
+
+/**
+ * V1-21b review 8 DD8-1. A dispatcher call that finds its row by an id the model chose, with no
+ * business in the where, is bound over HTTP only by the ambient Prisma tenant TenantInterceptor
+ * arms; the WhatsApp/SMS staff bridge runs with none, so on it the call reaches any business's
+ * row. The governed ones the review found (call_log_outcome, call_schedule_followup,
+ * call_generate_script, granted by crm:write) now bind the row to the business KEY acts in; the
+ * ungoverned ones the same rule finds (job-role-tool-families.spec.ts rule 2b) are
+ * TENANT_UNBOUND_TOOLS, which no key reaches: not a canonical key, not a legacy family (content_*,
+ * bookings_*, projects_*, procurement_*), not the baseline.
+ */
+describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare id on the bridge (DD8-1)', () => {
+  const UNBOUND = ((policyExports as Record<string, unknown>).TENANT_UNBOUND_TOOLS ?? {}) as Record<string, string>;
+  const oversight = new AiOversightService({ client: {} } as any, {} as any, {} as any, {} as any, {} as any, policy);
+  const reader = (autonomyLevel: number): AutonomySettingsReader => ({
+    autopilotSettings: { findUnique: async () => ({ autonomyLevel, blockedTools: [], approvedTools: [], approvalTimeoutHours: 24 }) },
+    aiMemory: { findUnique: async () => null },
+  });
+  const CONTENT = ['content_assign_request', 'content_deliver_request', 'content_get_request', 'content_submit_for_review', 'content_transition_status', 'content_upload_deliverables'];
+
+  it('lists exactly the tools the derivation finds (job-role-tool-families.spec.ts rule 2b)', () => {
+    expect(Object.keys(UNBOUND).sort()).toEqual(
+      [
+        ...CONTENT,
+        'approval_decide_step',
+        'bookings_offer_waitlist_slot',
+        'evidence_verify',
+        'people_assign_task',
+        'procurement_acknowledge_vendor',
+        'procurement_mark_fulfilled',
+        'procurement_mark_invoiced',
+        'projects_update_task',
+      ].sort(),
+    );
+    for (const t of Object.keys(UNBOUND)) expect(REGISTRY, t).toContain(t);
+  });
+
+  it.each<[Record<string, string>, string[]]>([
+    [{ content: 'admin' }, CONTENT],
+    [{ marketing: 'admin' }, CONTENT],
+    [{ bookings: 'admin' }, ['bookings_offer_waitlist_slot']],
+    [{ procurement: 'admin' }, ['procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced']],
+    [{ projects: 'admin' }, ['projects_update_task']],
+  ])('%j matches them by family, and reaches none of them', (permissions, tools) => {
+    const env = envelope(permissions);
+    expect(env.maxRiskTier).toBe(3);
+    for (const t of tools) {
+      expect(env.blockedTools, t).toContain(t);
+      expect(allows(env, t), t).toBe(false);
+      expect(passes(env, t), t).toBe(false);
+    }
+  });
+
+  it('every key at admin at once reaches none of them, and neither does the baseline', () => {
+    const everything = Object.fromEntries([...CANONICAL_MODULES, ...Object.keys(policyExports.MODULE_TOOL_FAMILIES)].map((k) => [k, 'admin']));
+    for (const t of Object.keys(UNBOUND)) {
+      expect(allows(envelope(everything), t), t).toBe(false);
+      expect(allows(envelope({}), t), t).toBe(false);
+    }
+  });
+
+  it('through the real AiOversightService.evaluate at autonomy 5: refused as outside the position', async () => {
+    for (const [permissions, tool] of [
+      [{ content: 'admin' }, 'content_transition_status'],
+      [{ content: 'admin' }, 'content_deliver_request'],
+      [{ bookings: 'admin' }, 'bookings_offer_waitlist_slot'],
+      [{ procurement: 'admin' }, 'procurement_mark_fulfilled'],
+      [{ projects: 'admin' }, 'projects_update_task'],
+    ] as const) {
+      const d = await oversight.evaluate('biz_1', tool, undefined, [], envelope(permissions), reader(5));
+      expect(d.allowed, tool).toBe(false);
+      expect(d.reason, tool).toMatch(/outside the Position position's scope/);
+    }
+  });
+
+  it('negative control: the same keys still reach the sibling tools that bind their rows, and crm:write the call tools', () => {
+    expect(passes(envelope({ content: 'write' }), 'content_create_request')).toBe(true);
+    expect(passes(envelope({ content: 'read' }), 'content_list_requests')).toBe(true);
+    expect(passes(envelope({ bookings: 'write' }), 'bookings_create_booking')).toBe(true);
+    expect(passes(envelope({ projects: 'write' }), 'projects_create_task')).toBe(true);
+    expect(passes(envelope({ procurement: 'write' }), 'procurement_create_request')).toBe(true);
+    expect(passes(envelope({ procurement: 'read' }), 'procurement_get_request')).toBe(true);
+    const crm = envelope({ crm: 'write' });
+    for (const t of ['call_log_outcome', 'call_schedule_followup', 'call_generate_script', 'call_create_task']) expect(passes(crm, t), t).toBe(true);
   });
 });
