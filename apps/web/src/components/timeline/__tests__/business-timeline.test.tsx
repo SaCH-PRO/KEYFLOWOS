@@ -278,7 +278,8 @@ describe('V1-25: BusinessTimeline reads the tenant timeline and shows amounts', 
       requested = [];
       serve([timelineRoute({ message: 'nope' }, status)]);
       render(<BusinessTimeline businessId={BIZ} />);
-      const unavailable = await screen.findByTestId('business-timeline-unavailable');
+      // A 503 is retried by fetchWithRetry (about 2 s of backoff) before it settles.
+      const unavailable = await screen.findByTestId('business-timeline-unavailable', {}, { timeout: 10_000 });
       expect(unavailable.textContent, `status ${status}`).toContain('Activity unavailable');
       expect(screen.queryByText('No activity yet'), `status ${status}`).toBeNull();
       cleanup();
@@ -288,7 +289,7 @@ describe('V1-25: BusinessTimeline reads the tenant timeline and shows amounts', 
     render(<BusinessTimeline businessId={BIZ} />);
     expect(await screen.findByText('No activity yet')).toBeTruthy();
     expect(screen.queryByTestId('business-timeline-unavailable')).toBeNull();
-  });
+  }, 30_000);
 
   it('BT-05: amounts are cents-safe (0.1 + 0.2 reads 0.30), thousands are grouped, and a row with no amount shows none', async () => {
     serve([

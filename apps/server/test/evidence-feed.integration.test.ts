@@ -841,6 +841,11 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
       title: 'Payment received',
       data: { invoiceId: ID.invA, total: INVOICE_A_TOTAL, currency: 'TTD' },
     });
+
+    // minRevenueImpact is read as a number: only the paid row (revenueImpact 250) clears 200.
+    const big = await feed(ID.ownerA, ID.bizA, `limit=${COCKPIT_LIMIT}&minRevenueImpact=200`);
+    expect(big.status, JSON.stringify(big.body)).toBe(200);
+    expect(big.body.map((row: any) => [row.action, row.entityId])).toEqual([['paid', ID.invA]]);
   });
 
   it('EF-12 LEDGER: each feed amount equals its Payment row and its posting (balanced entries), in integer cents; the paid row total equals the invoice, the two payments and the two postings', async () => {

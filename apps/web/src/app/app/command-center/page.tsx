@@ -30,8 +30,10 @@ import {
   Settings,
   Receipt,
   CreditCard,
+  History,
   type LucideIcon,
 } from "lucide-react";
+import { BusinessTimeline } from "@/components/timeline/business-timeline";
 import { EmptyState } from "@/components/ui/empty-state";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { getStoredBusinessId, ensureWorkspace } from "@/lib/workspace";
@@ -411,6 +413,14 @@ export default function CommandCenterPage() {
             onSnooze={handleSnooze}
             onReopen={handleReopen}
           />
+        </CommandSection>
+
+        {/* V1-25-EVT-BUSINESS-FEED (M49): what happened in the business, newest
+            first: payments recorded, invoices paid, contacts, bookings. Read from
+            the tenant-guarded /timeline/businesses/:id/events (Activity rows,
+            D-08); a feed that could not be read says so, never "no activity". */}
+        <CommandSection icon={History} title="Business activity">
+          <BusinessTimeline businessId={businessId} compact />
         </CommandSection>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
