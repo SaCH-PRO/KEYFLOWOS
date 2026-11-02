@@ -53,11 +53,29 @@ class CrmPrismaMock {
   memberships: MembershipSeed[] = [];
   businesses: BusinessSeed[] = [];
   teamActivityLogs: any[] = [];
+  // The V1-08 visibility gate's lookups: the member's User row and the contact
+  // row it may open. The mock returns a seeded contact by id and tenant; the
+  // visibility clause itself is proven on the real database
+  // (contacts-visibility.integration.test.ts), here only that it is sent.
+  users: Array<{ id: string; role: string }> = [];
+  contacts: Array<{ id: string; businessId: string }> = [];
   client: any;
 
   constructor() {
     const self = this;
     self.client = {
+      user: {
+        findUnique: vi.fn(({ where }: any) =>
+          Promise.resolve(self.users.find((u) => u.id === where.id) ?? null),
+        ),
+      },
+      contact: {
+        findFirst: vi.fn(({ where }: any) =>
+          Promise.resolve(
+            self.contacts.find((c) => c.id === where.id && c.businessId === where.businessId) ?? null,
+          ),
+        ),
+      },
       membership: {
         findUnique: vi.fn(({ where }: any) => {
           const composite = where.userId_businessId;
@@ -99,6 +117,8 @@ const crmServiceMock = {
   softDeleteContact: vi.fn(),
   mergeContacts: vi.fn(),
   addTask: vi.fn(),
+  listContactEvents: vi.fn(),
+  listContactNotes: vi.fn(),
 };
 
 const flowServiceMock = {
@@ -124,13 +144,52 @@ const journeyMock = {
   getContactCrossJourney: vi.fn(),
   generateAiInsight: vi.fn(),
   getContactHealthMetrics: vi.fn(),
+  getContactJourney: vi.fn(),
+  getConversationContext: vi.fn(),
 };
 
 // The unread-counts handler's collaborator. Recording stub: the claim under
 // test is which handler a request reaches, not what it counts.
 const communicationMock = {
   unreadCounts: vi.fn(),
+  list: vi.fn(),
 };
+
+// The other collaborators of the V1-08 contact-scoped sibling reads. Recording
+// stubs: the claim under test is that the visibility gate runs before them and
+// that a refused read never reaches them.
+const revenueMock = { getContactRevenueSummary: vi.fn() };
+const networkMock = { listForContact: vi.fn(), getNeighbourhood: vi.fn() };
+const dataQualityMock = { getContactIssues: vi.fn() };
+const playbookMock = { getOrCreatePlaybook: vi.fn() };
+const bestChannelMock = { explain: vi.fn() };
+
+/**
+ * The fourteen contact-scoped sibling reads (M13, PRS-M12) for contact_1 of
+ * biz_1: the path below contacts/:contactId, the collaborator each reaches, the
+ * arguments it receives, and the handler called directly (guards bypassed).
+ */
+const SIBLING_READS: Array<{
+  route: string;
+  collaborator: () => ReturnType<typeof vi.fn>;
+  args: unknown[];
+  direct: (controller: any, req: unknown) => unknown;
+}> = [
+  { route: 'events', collaborator: () => crmServiceMock.listContactEvents, args: [{ businessId: 'biz_1', contactId: 'contact_1' }], direct: (c, req) => c.contactEvents('biz_1', 'contact_1', req) },
+  { route: 'notes', collaborator: () => crmServiceMock.listContactNotes, args: [{ businessId: 'biz_1', contactId: 'contact_1' }], direct: (c, req) => c.contactNotes('biz_1', 'contact_1', req) },
+  { route: 'journey', collaborator: () => journeyMock.getContactJourney, args: ['biz_1', 'contact_1'], direct: (c, req) => c.getContactJourney('biz_1', 'contact_1', req) },
+  { route: 'cross-journey', collaborator: () => journeyMock.getContactCrossJourney, args: ['biz_1', 'contact_1'], direct: (c, req) => c.getContactCrossJourney('biz_1', 'contact_1', req) },
+  { route: 'story', collaborator: () => journeyMock.getContactCrossJourney, args: ['biz_1', 'contact_1'], direct: (c, req) => c.getContactStory('biz_1', 'contact_1', req) },
+  { route: 'revenue-summary', collaborator: () => revenueMock.getContactRevenueSummary, args: ['biz_1', 'contact_1'], direct: (c, req) => c.getContactRevenueSummary('biz_1', 'contact_1', req) },
+  { route: 'health-metrics', collaborator: () => journeyMock.getContactHealthMetrics, args: ['biz_1', 'contact_1'], direct: (c, req) => c.getContactHealthMetrics('biz_1', 'contact_1', req) },
+  { route: 'relationships', collaborator: () => networkMock.listForContact, args: ['biz_1', 'contact_1'], direct: (c, req) => c.listContactRelationships('biz_1', 'contact_1', req) },
+  { route: 'network', collaborator: () => networkMock.getNeighbourhood, args: ['biz_1', 'contact_1', 2], direct: (c, req) => c.getContactNetwork('biz_1', 'contact_1', req) },
+  { route: 'data-quality', collaborator: () => dataQualityMock.getContactIssues, args: ['biz_1', 'contact_1'], direct: (c, req) => c.dqContactIssues('biz_1', 'contact_1', req) },
+  { route: 'playbook', collaborator: () => playbookMock.getOrCreatePlaybook, args: [{ businessId: 'biz_1', contactId: 'contact_1' }], direct: (c, req) => c.getPlaybook('biz_1', 'contact_1', req) },
+  { route: 'conversations', collaborator: () => communicationMock.list, args: [expect.objectContaining({ businessId: 'biz_1', contactId: 'contact_1' })], direct: (c, req) => c.listConversations('biz_1', 'contact_1', req) },
+  { route: 'conversation-context', collaborator: () => journeyMock.getConversationContext, args: ['biz_1', 'contact_1'], direct: (c, req) => c.getConversationContext('biz_1', 'contact_1', req) },
+  { route: 'best-channel', collaborator: () => bestChannelMock.explain, args: ['biz_1', 'contact_1'], direct: (c, req) => c.bestChannelExplain('biz_1', 'contact_1', req) },
+];
 
 const subscriptionsMock = {
   checkLimit: vi.fn().mockResolvedValue({ allowed: true, current: 0, limit: 1000, upgradeTo: 'PRO' }),
@@ -156,19 +215,19 @@ describe('CRM e2e', () => {
         { provide: CrmTimelineService, useValue: { addTask: vi.fn().mockResolvedValue({ id: 'task_1' }) } },
         { provide: CrmStatsService, useValue: crmStatsMock },
         { provide: CrmImportService, useValue: {} },
-        { provide: CrmPlaybookService, useValue: {} },
+        { provide: CrmPlaybookService, useValue: playbookMock },
         { provide: CrmFlowService, useValue: flowServiceMock },
         { provide: CrmActionsService, useValue: {} },
-        { provide: CrmRevenueService, useValue: {} },
+        { provide: CrmRevenueService, useValue: revenueMock },
         { provide: CrmJourneyService, useValue: journeyMock },
         { provide: CrmDuplicateDetectionService, useValue: {} },
-        { provide: CrmDataQualityService, useValue: {} },
+        { provide: CrmDataQualityService, useValue: dataQualityMock },
         { provide: CrmSavedViewsService, useValue: {} },
         { provide: CrmRelationshipHealthService, useValue: {} },
         { provide: CrmCommunicationService, useValue: communicationMock },
-        { provide: BestChannelService, useValue: {} },
+        { provide: BestChannelService, useValue: bestChannelMock },
         { provide: ConversationAiService, useValue: {} },
-        { provide: CrmNetworkService, useValue: {} },
+        { provide: CrmNetworkService, useValue: networkMock },
         { provide: ContactInsightService, useValue: {} },
       ],
     })
@@ -209,6 +268,19 @@ describe('CRM e2e', () => {
     journeyMock.generateAiInsight.mockResolvedValue(null);
     journeyMock.getContactHealthMetrics.mockResolvedValue({ score: 1 });
     communicationMock.unreadCounts.mockResolvedValue({});
+    crmServiceMock.listContactEvents.mockResolvedValue([{ id: 'event_1' }]);
+    crmServiceMock.listContactNotes.mockResolvedValue([{ id: 'note_1' }]);
+    journeyMock.getContactJourney.mockResolvedValue([{ id: 'milestone_1' }]);
+    journeyMock.getConversationContext.mockResolvedValue({ lastDiscussed: 'context_1' });
+    communicationMock.list.mockResolvedValue({ items: [{ id: 'message_1' }], nextCursor: null });
+    revenueMock.getContactRevenueSummary.mockResolvedValue({ contactId: 'contact_1', lifetimeRevenue: 1 });
+    networkMock.listForContact.mockResolvedValue({ outgoing: [{ id: 'rel_1' }], incoming: [] });
+    networkMock.getNeighbourhood.mockResolvedValue({ nodes: [{ id: 'contact_1' }], edges: [] });
+    dataQualityMock.getContactIssues.mockResolvedValue({ items: [{ id: 'issue_1' }] });
+    playbookMock.getOrCreatePlaybook.mockResolvedValue({ id: 'playbook_1' });
+    bestChannelMock.explain.mockResolvedValue({ channel: 'email', confidence: 1, perChannel: [] });
+    prisma.users = [{ id: 'user_1', role: 'USER' }];
+    prisma.contacts = [{ id: 'contact_1', businessId: 'biz_1' }];
     subscriptionsMock.checkLimit.mockResolvedValue({
       allowed: true,
       current: 0,
@@ -680,6 +752,84 @@ describe('CRM e2e', () => {
         .expect(403);
       expect(crmStatsMock.contactDetail).not.toHaveBeenCalled();
       expect(journeyMock.getContactCrossJourney).not.toHaveBeenCalled();
+    });
+  });
+
+  // V1-08-CT-SIBLING-VISIBILITY (M13, PRS-M12): the fourteen contact-scoped
+  // sibling reads took no caller, so their collaborators checked the tenant
+  // only. Each now resolves the session member's CRM access and finds the
+  // contact under the visibility clause GET detail applies before its
+  // collaborator runs. Mocked collaborators; the real rule, the real services
+  // and the model-access proof are contacts-visibility.integration.test.ts.
+  describe('contact-scoped sibling reads (V1-08, guarded controller regressions)', () => {
+    it('each of the 14 sibling reads finds the contact under the session member\'s CRM access before its collaborator runs, then hands the collaborator the request unchanged', async () => {
+      for (const read of SIBLING_READS) {
+        vi.clearAllMocks();
+        const res = await request(app.getHttpServer()).get(`/crm/businesses/biz_1/contacts/contact_1/${read.route}`);
+        expect(res.status, read.route).toBe(200);
+        expect(prisma.client.user.findUnique, read.route).toHaveBeenCalledWith({ where: { id: 'user_1' } });
+        expect(prisma.client.contact.findFirst, read.route).toHaveBeenCalledTimes(1);
+        expect(prisma.client.contact.findFirst.mock.calls[0][0].where, read.route).toMatchObject({
+          id: 'contact_1',
+          businessId: 'biz_1',
+          deletedAt: null,
+        });
+        const collaborator = read.collaborator();
+        expect(collaborator, read.route).toHaveBeenCalledTimes(1);
+        expect(collaborator, read.route).toHaveBeenCalledWith(...read.args);
+        expect(prisma.client.contact.findFirst.mock.invocationCallOrder[0], `${read.route}: gate before collaborator`)
+          .toBeLessThan(collaborator.mock.invocationCallOrder[0]);
+      }
+    });
+
+    it('a sibling read whose contact the gate does not find answers the detail 404 body and never reaches its collaborator', async () => {
+      prisma.contacts = [];
+      for (const read of SIBLING_READS) {
+        const res = await request(app.getHttpServer()).get(`/crm/businesses/biz_1/contacts/contact_private/${read.route}`);
+        expect(res.status, read.route).toBe(404);
+        expect(res.body, read.route).toEqual({ statusCode: 404, message: 'Contact not found', error: 'Not Found' });
+        expect(read.collaborator(), read.route).not.toHaveBeenCalled();
+      }
+    });
+
+    it("a STAFF member's gate carries the PRIVATE visibility clause naming that member, and crm_view owned narrows it to owned and shared rows", async () => {
+      for (const [scopes, clause] of [
+        [{ crm: 'read' }, { OR: [{ visibility: { in: ['TEAM', 'SHARED'] } }, { ownerId: 'user_1' }, { shares: { some: { userId: 'user_1' } } }] }],
+        [{ crm: 'read', crm_view: 'owned' }, { OR: [{ ownerId: 'user_1' }, { shares: { some: { userId: 'user_1' } } }] }],
+      ] as const) {
+        prisma.memberships = [{ userId: 'user_1', businessId: 'biz_1', role: 'STAFF', permissionScopes: { ...scopes } }];
+        for (const read of SIBLING_READS) {
+          vi.clearAllMocks();
+          await request(app.getHttpServer()).get(`/crm/businesses/biz_1/contacts/contact_1/${read.route}`).expect(200);
+          expect(prisma.client.contact.findFirst.mock.calls[0][0].where.AND, `${read.route} ${JSON.stringify(scopes)}`).toEqual([clause]);
+        }
+      }
+    });
+
+    it('a request with no identity reaches none of the 14 collaborators', async () => {
+      for (const read of SIBLING_READS) {
+        const res = await request(app.getHttpServer())
+          .get(`/crm/businesses/biz_1/contacts/contact_1/${read.route}`)
+          .set('x-test-anonymous', '1');
+        expect([401, 403], read.route).toContain(res.status);
+        expect(read.collaborator(), read.route).not.toHaveBeenCalled();
+      }
+      expect(prisma.client.contact.findFirst).not.toHaveBeenCalled();
+    });
+
+    it('the 14 sibling handlers themselves refuse a request that carries no user id (401) before any lookup, even if every guard were bypassed', async () => {
+      const controller = app.get(CrmController);
+      for (const read of SIBLING_READS) {
+        for (const req of [{ user: undefined }, { user: {} }]) {
+          await expect(
+            Promise.resolve().then(() => read.direct(controller, req)),
+            `${read.route} ${JSON.stringify(req)}`,
+          ).rejects.toMatchObject({ status: 401 });
+        }
+        expect(read.collaborator(), read.route).not.toHaveBeenCalled();
+      }
+      expect(prisma.client.user.findUnique).not.toHaveBeenCalled();
+      expect(prisma.client.contact.findFirst).not.toHaveBeenCalled();
     });
   });
 });
