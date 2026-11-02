@@ -3,9 +3,22 @@ import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard'
 import { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
-import { FlowOrchestratorService, FlowAttachment, FlowPageContext } from './flow-orchestrator.service';
-import { BusinessRole } from './role-engine.service';
+import { FlowOrchestratorService, type FlowPageContext } from './flow-orchestrator.service';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
+import { FlowChatDto, FlowChatStreamDto } from './dto/flow-chat.dto';
+
+/**
+ * The page context as a member's client may send it: never a position envelope (V1-21b review 7
+ * ENV-FORGE). The class DTOs already make the global ValidationPipe strip one; this drops it
+ * again for a handler reached without the pipe, and FlowOrchestratorService ignores one in any
+ * case (it takes an envelope only as its separate server-only argument).
+ */
+function clientPageContext(ctx: FlowPageContext | undefined): FlowPageContext | undefined {
+  if (!ctx || typeof ctx !== 'object') return undefined;
+  const rest: Record<string, unknown> = { ...ctx };
+  delete rest.jobRoleEnvelope;
+  return rest as FlowPageContext;
+}
 
 @Controller('ai')
 @UseGuards(CrmRateLimitGuard)
@@ -19,20 +32,7 @@ export class AiFlowController {
   @Post('businesses/:businessId/flow/chat')
   async flowChat(
     @Param('businessId') businessId: string,
-    @Body() body: {
-      message: string;
-      history?: any[];
-      sessionId?: string;
-      pageContext?: FlowPageContext;
-      attachments?: FlowAttachment[];
-      pendingConfirmation?: {
-        toolCallId: string;
-        confirmed: boolean;
-        toolName?: string;
-        toolArgs?: Record<string, any>;
-        confirmationId?: string;
-      };
-    },
+    @Body() body: FlowChatDto,
     @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
     const history = body.history || [];
@@ -41,7 +41,8 @@ export class AiFlowController {
       body.message,
       history,
       body.pendingConfirmation,
-      body.pageContext,
+      clientPageContext(body.pageContext),
+      // No role and no position envelope from the client (V1-21b review 7 ENV-FORGE).
       undefined,
       body.attachments,
       body.sessionId,
@@ -56,14 +57,7 @@ export class AiFlowController {
   async flowChatStream(
     @Param('businessId') businessId: string,
     @CurrentUser() user: AuthenticatedUser | undefined,
-    @Body() body: {
-      message: string;
-      history?: any[];
-      pageContext?: FlowPageContext;
-      attachments?: FlowAttachment[];
-      sessionId?: string;
-      role?: string;
-    },
+    @Body() body: FlowChatStreamDto,
     @Res() res: Response,
   ) {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -73,10 +67,13 @@ export class AiFlowController {
     res.flushHeaders();
 
     const history = body.history || [];
-    const role = body.role as BusinessRole | undefined;
+    // The crew KEY governs the turn with is resolved on the server: a role from the client is
+    // not read (FlowChatStreamDto does not declare one), nor a position envelope (V1-21b review 7
+    // ENV-FORGE / INP5-2).
+    const pageContext = clientPageContext(body.pageContext);
 
     try {
-      const stream = this.flow.streamChat(businessId, body.message, history, body.pageContext, role, body.attachments, body.sessionId, user?.id);
+      const stream = this.flow.streamChat(businessId, body.message, history, pageContext, undefined, body.attachments, body.sessionId, user?.id);
 
       for await (const chunk of stream) {
         if (res.destroyed) break;

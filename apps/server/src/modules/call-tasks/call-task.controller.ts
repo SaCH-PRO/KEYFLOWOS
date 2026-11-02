@@ -72,29 +72,35 @@ export class CallTaskController {
   @Get('businesses/:businessId/calls/:callId')
   @RateLimit(60, 60_000)
   @RequireModuleScope('crm', 'read')
-  async getById(@Param('callId') callId: string) {
-    return this.callLogs.getCallLog(callId);
+  async getById(
+    @Param('businessId') businessId: string,
+    @Param('callId') callId: string,
+  ) {
+    return this.callLogs.getCallLog(businessId, callId);
   }
 
   @Patch('businesses/:businessId/calls/:callId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('crm', 'write')
   async update(
+    @Param('businessId') businessId: string,
     @Param('callId') callId: string,
     @Body() body: UpdateCallLogDto,
   ) {
-    return this.callLogs.updateCallLog(callId, body);
+    return this.callLogs.updateCallLog(businessId, callId, body);
   }
 
   @Post('businesses/:businessId/calls/:callId/complete')
   @RateLimit(20, 60_000)
   @RequireModuleScope('crm', 'write')
   async complete(
+    @Param('businessId') businessId: string,
     @Param('callId') callId: string,
     @Body() body: CompleteCallDto,
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
     return this.callLogs.completeCall(
+      businessId,
       callId,
       body,
       req.user?.id ?? 'system',
@@ -105,11 +111,13 @@ export class CallTaskController {
   @RateLimit(20, 60_000)
   @RequireModuleScope('crm', 'write')
   async createFollowUp(
+    @Param('businessId') businessId: string,
     @Param('callId') callId: string,
     @Body() body: CreateFollowUpDto,
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
     return this.callLogs.createFollowUpTask(
+      businessId,
       callId,
       body,
       req.user?.id ?? 'system',
@@ -119,8 +127,11 @@ export class CallTaskController {
   @Delete('businesses/:businessId/calls/:callId')
   @RateLimit(20, 60_000)
   @RequireModuleScope('crm', 'write')
-  async delete(@Param('callId') callId: string) {
-    return this.callLogs.deleteCallLog(callId);
+  async delete(
+    @Param('businessId') businessId: string,
+    @Param('callId') callId: string,
+  ) {
+    return this.callLogs.deleteCallLog(businessId, callId);
   }
 
   @Get('businesses/:businessId/calls/scheduled/today')
@@ -141,7 +152,7 @@ export class CallTaskController {
     @Param('callId') callId: string,
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
-    const callLog = await this.callLogs.getCallLog(callId);
+    const callLog = await this.callLogs.getCallLog(businessId, callId);
     if (!callLog.contactId) {
       throw new BadRequestException('Call log has no contact');
     }
@@ -174,7 +185,7 @@ export class CallTaskController {
           callLog.id,
           callLog.contactId,
         );
-        const updated = await this.callLogs.getCallLog(callLog.id);
+        const updated = await this.callLogs.getCallLog(businessId, callLog.id);
         return updated;
       } catch {
         // Auto-generation failed, return the call log without script

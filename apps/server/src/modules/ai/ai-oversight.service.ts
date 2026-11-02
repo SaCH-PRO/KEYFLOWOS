@@ -5,7 +5,8 @@ import { AiMemoryService } from './ai-memory.service';
 import { getToolByName } from './flow-tool-registry';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
 import { ApprovalRoutingService } from './approval-routing.service';
-import { JobRolePolicyService, JobRoleEnvelope } from '../structure/job-role-policy.service';
+import { JobRolePolicyService, JobRoleEnvelope, approvalTierForPosition } from '../structure/job-role-policy.service';
+import { HOLDER_ACCOUNT, holderMembershipHere, membersByPhone } from '../structure/position-holders';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 
 export type RiskTier = 1 | 2 | 3 | 4;
@@ -594,10 +595,17 @@ export class AiOversightService {
 
   /**
    * Reply-based approval for a staff position resolved as the item's approver
-   * (see ApprovalRoutingService). Unlike resolveApproval, this does NOT
-   * require a Membership — contact-only positions (no login) authorize
-   * purely off their JobRole.defaultApprovalTier, gated on autoApprovalViaReply
-   * being explicitly on for that position.
+   * (see ApprovalRoutingService), gated on autoApprovalViaReply being explicitly
+   * on for that position. A contact-only position (no login) with no member on
+   * its phone authorizes off its JobRole.defaultApprovalTier.
+   *
+   * K2 (V1-21b review 9 WB-1 / FB-3): a reply may not approve what the holder
+   * could not approve over HTTP. The tier is the JobRole's capped by the
+   * membership HTTP reads for the holder in this business and by each member
+   * whose account phone is the position's (approvalTierForPosition, read from
+   * the same rows as the position's KEY envelope); a holder who is banned,
+   * deleted, or not a member here approves nothing. This method reads those
+   * rows itself, so no caller can hand it a position that skips the cap.
    */
   async resolveApprovalByAssignment(
     approvalId: string,
@@ -618,14 +626,20 @@ export class AiOversightService {
 
     const assignment = await this.prisma.client.orgAssignment.findFirst({
       where: { id: assignmentId, businessId, endedAt: null },
-      include: { jobRole: true },
+      include: { jobRole: true, membership: { include: { user: { select: HOLDER_ACCOUNT } } } },
     });
     if (!assignment) throw new NotFoundException('Approver assignment not found or ended');
     if (!assignment.autoApprovalViaReply) {
       throw new ForbiddenException('This position is not authorized for reply-based approval');
     }
 
-    const effectiveTier = assignment.jobRole?.defaultApprovalTier ?? 0;
+    const [membership, phoneMembers] = await Promise.all([
+      holderMembershipHere(this.prisma, businessId, assignment),
+      membersByPhone(this.prisma, businessId, assignment.contactPhone),
+    ]);
+    const cap = approvalTierForPosition({ ...assignment, businessId, membership, phoneMembers });
+    if (cap.refusal) throw new ForbiddenException(cap.refusal);
+    const effectiveTier = cap.tier;
     if (item.riskTier > effectiveTier) {
       throw new ForbiddenException(`Tier ${item.riskTier} approvals require approval tier ${item.riskTier} or higher (position has tier ${effectiveTier})`);
     }

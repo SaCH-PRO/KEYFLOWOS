@@ -35,7 +35,7 @@ import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
 import { isMcpToolName } from '../mcp/mcp.types';
 import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
-import { JobRolePolicyService } from '../structure/job-role-policy.service';
+import { JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
 import { PayrollService } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
 import { CrmSequenceService } from '../crm/crm-sequence.service';
@@ -264,8 +264,30 @@ export interface FlowPageContext {
   recent?: Array<{ label: string; href?: string; at?: string }>;
   notes?: Array<{ title?: string; body: string }>;
   hints?: string[];
-  /** Position-scoped governance envelope (staff positions talking to KEY). */
-  jobRoleEnvelope?: JobRoleEnvelope;
+}
+
+/**
+ * What only server code may hand a turn (V1-21b review 7 ENV-FORGE / INP5-2 / DRV5-3).
+ *
+ * A position envelope used to ride in FlowPageContext, the shape a member's client sends to
+ * POST flow/chat and flow/chat/stream; their inline-typed bodies were never whitelisted, so a
+ * member could send { approvedTools: ['*'], maxRiskTier: 4 } and skip the crew check. chat()
+ * and streamChat() now take an envelope only as this separate argument, which no controller
+ * passes (StaffChatBridgeService does), and only one JobRolePolicyService issued; a
+ * jobRoleEnvelope inside pageContext is dropped.
+ */
+export interface FlowServerContext {
+  /** The staff position's envelope, as JobRolePolicyService.envelopeForPosition issued it. */
+  jobRoleEnvelope: JobRoleEnvelope;
+}
+
+/** The page context without any position envelope a caller put in it (V1-21b review 7 ENV-FORGE). */
+function withoutClientEnvelope(ctx: FlowPageContext | undefined): FlowPageContext | undefined {
+  if (!ctx || typeof ctx !== 'object') return ctx;
+  if (!('jobRoleEnvelope' in ctx)) return ctx;
+  const rest: Record<string, unknown> = { ...ctx };
+  delete rest.jobRoleEnvelope;
+  return rest as FlowPageContext;
 }
 
 function formatPageContextSection(ctx?: FlowPageContext): string {
@@ -736,6 +758,20 @@ export class FlowOrchestratorService {
   }
   private getJobRolePolicy() {
     return this.moduleRef.get(JobRolePolicyService, { strict: false });
+  }
+
+  /**
+   * The position envelope a turn is governed by (V1-21b review 7 ENV-FORGE): only one passed
+   * as chat()'s / streamChat()'s server-only argument, and only one JobRolePolicyService
+   * issued. Any other envelope there fails closed to the baseline a position with no JobRole
+   * gets, never to the text-detected crew.
+   */
+  private serverEnvelope(server: FlowServerContext | undefined): JobRoleEnvelope | undefined {
+    if (!server) return undefined;
+    const policy = this.getJobRolePolicy();
+    if (policy.isIssued(server.jobRoleEnvelope)) return server.jobRoleEnvelope;
+    this.logger.warn('Ignored a position envelope JobRolePolicyService did not issue; the turn keeps the baseline');
+    return policy.envelopeForJobRole(NO_JOB_ROLE);
   }
   private getPayroll() {
     return this.moduleRef.get(PayrollService, { strict: false });
@@ -1573,8 +1609,12 @@ export class FlowOrchestratorService {
     /** Owner of the conversation. A session created without one is private to
      *  nobody and will not appear in any listing — see saveConversationHistory. */
     userId?: string,
+    /** Server-only: a staff position's envelope (FlowServerContext). Never from a client. */
+    server?: FlowServerContext,
   ): Promise<FlowResponse> {
     this.aiUsage.checkRateLimit(businessId);
+    pageContext = withoutClientEnvelope(pageContext);
+    const envelope = this.serverEnvelope(server);
 
     // Enrich message with any uploaded document/PDF/image context so role detection
     // and the LLM prompt both see the attachment contents.
@@ -1640,7 +1680,7 @@ export class FlowOrchestratorService {
       businessId,
       crew,
       `${enrichedMessage}\n${pageContext?.route ?? ''}`,
-      pageContext?.jobRoleEnvelope,
+      envelope,
     );
 
     let systemPrompt: string;
@@ -1717,7 +1757,7 @@ ${triage.standingContext}`;
         return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
       }
       if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
-        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, crew, pageContext?.jobRoleEnvelope);
+        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, crew, envelope);
         if (!confirmDecision.allowed) {
           return {
             reply: `This action is blocked: ${confirmDecision.reason}`,
@@ -1830,7 +1870,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, pageContext?.jobRoleEnvelope);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
           return this.governToolCall(businessId, tc, decision, {
             surface: 'CHAT',
             principalUserId: userId ?? null,
@@ -1980,7 +2020,11 @@ ${triage.standingContext}`;
     sessionId?: string,
     /** Owner of the conversation — see saveConversationHistory. */
     userId?: string,
+    /** Server-only: a staff position's envelope (FlowServerContext). Never from a client. */
+    server?: FlowServerContext,
   ): AsyncGenerator<FlowStreamChunk> {
+    pageContext = withoutClientEnvelope(pageContext);
+    const envelope = this.serverEnvelope(server);
     // Enrich message with uploaded document/image context.
     const effectiveSessionId = sessionId || randomUUID();
     const attachmentContext = await this.buildAttachmentContext(businessId, attachments);
@@ -2049,7 +2093,7 @@ ${triage.standingContext}`;
       businessId,
       crew,
       `${enrichedMessage}\n${pageContext?.route ?? ''}`,
-      pageContext?.jobRoleEnvelope,
+      envelope,
     );
 
     let systemPrompt: string;
@@ -2315,7 +2359,7 @@ ${triage.standingContext}`;
 
       const governanceChecks = await Promise.all(
         toolCalls.map(async (tc) => {
-          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, pageContext?.jobRoleEnvelope);
+          const decision = await this.governance.evaluate(businessId, tc.name, undefined, crew, envelope);
           return this.governToolCall(businessId, tc, decision, {
             surface: 'CHAT_STREAM',
             principalUserId: userId ?? null,
@@ -2750,6 +2794,24 @@ ${triage.standingContext}`;
     action?: ActionContext,
   ): Promise<unknown> {
     return this.executeToolAction(businessId, toolName, args, action);
+  }
+
+  /**
+   * A contact id the model chose, refused unless it is a live contact of `businessId` (V1-21b
+   * review 9 TD9-4). CommerceService.createInvoice / createQuote store contactId as given on this
+   * base (R0-27's assertContactInBusiness is not on it): on the staff bridge, with no tenant
+   * context, commerce_create_invoice bound another business's contact and echoed its row, and
+   * commerce_create_quote wrote the quote before logContactEvent refused it. An absent id is left
+   * to the service, as before.
+   */
+  private async contactWithinBusiness(businessId: string, contactId: unknown): Promise<void> {
+    if (contactId === undefined || contactId === null) return;
+    if (typeof contactId !== 'string' || !contactId) throw new BadRequestException('contactId must be a non-empty string');
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
   }
 
   private async executeToolAction(
@@ -3328,6 +3390,8 @@ ${triage.standingContext}`;
       }
 
       case 'commerce_create_invoice': {
+        // the contact is this business's (V1-21b review 9 TD9-4), before anything is written
+        await this.contactWithinBusiness(businessId, args.contactId);
         const items = args.items ?? [];
         const invoiceCount = await this.prisma.client.invoice.count({ where: { businessId } });
         const invoiceNumber = `INV-${String(invoiceCount + 1).padStart(4, '0')}`;
@@ -3366,6 +3430,8 @@ ${triage.standingContext}`;
       }
 
       case 'commerce_create_quote': {
+        // as commerce_create_invoice: no quote is written for another business's contact (TD9-4)
+        await this.contactWithinBusiness(businessId, args.contactId);
         const items = args.items ?? [];
         const quoteCount = await this.prisma.client.quote.count({ where: { businessId } });
         const quoteNumber = `QT-${String(quoteCount + 1).padStart(4, '0')}`;
@@ -4829,8 +4895,10 @@ ${triage.standingContext}`;
         // `completed` used to be assigned and dropped, and the return echoed the
         // arguments back. completeCall throws if the call was already completed
         // and computes completedAt itself, so the echo could report an outcome
-        // that was never written.
-        const completed = await this.getCallLog().completeCall(args.callLogId, {
+        // that was never written. The business is handed over: CallLogService looks the call log
+        // up within it, since on the staff bridge no ambient tenant binds a bare id (V1-21b
+        // review 8 DD8-1).
+        const completed = await this.getCallLog().completeCall(businessId, args.callLogId, {
           outcome: args.outcome,
           duration: args.duration ?? undefined,
           notes: args.notes ?? undefined,
@@ -4854,7 +4922,8 @@ ${triage.standingContext}`;
         };
       }
       case 'call_schedule_followup': {
-        const task = await this.getCallLog().createFollowUpTask(args.callLogId, {
+        // within the business, as call_log_outcome (V1-21b review 8 DD8-1)
+        const task = await this.getCallLog().createFollowUpTask(businessId, args.callLogId, {
           title: args.title,
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           priority: args.priority ?? 'NORMAL',
@@ -5950,6 +6019,10 @@ ${triage.standingContext}`;
           include: { contact: { select: { firstName: true, lastName: true, email: true } } },
         });
         if (!invoice) throw new Error('Invoice not found');
+        // V1-21b review 7 DRV5-2: the only route that emails an invoice by hand (POST
+        // send-email) refuses a VOID one; KEY emailed the pay link and only then failed the
+        // VOID -> SENT transition. Refused before any mail.
+        if (invoice.status === 'VOID') throw new Error('Cannot email a voided invoice');
         if (!invoice.contact?.email) throw new Error('Contact has no email address');
         // ACTUALLY SEND IT.
         //

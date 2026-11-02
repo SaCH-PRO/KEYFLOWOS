@@ -13,6 +13,7 @@ import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 import { CreateDelegationRuleDto } from './dto/create-delegation-rule.dto';
 import { UpdateDelegationRuleDto } from './dto/update-delegation-rule.dto';
 import { normalizePhone } from '../crm/crm-duplicate.util';
+import { HOLDER_ACCOUNT, holderMembershipHere, membersByPhone } from './position-holders';
 
 /**
  * V1-21-AUTH-JOBROLE-CEILING (CF-27; CR-1 in identity-boundary.integration.test.ts).
@@ -78,6 +79,10 @@ const REACH_FIELDS = ['contactPhone', 'contactEmail', 'preferredChannel', 'autoA
 
 /** A JobRole as it confers authority on a position. */
 type JobRoleGrant = { permissions: unknown; defaultApprovalTier: number };
+
+/** createAssignment / updateAssignment: a contact-only position on a member's phone (V1-21b review 7 INP4-3). */
+const REFUSED_MEMBER_PHONE =
+  'A member of this business uses this phone number; give the position to their membership instead of a contact-only position';
 
 function isPlainMap(value: unknown): value is Prisma.InputJsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -819,6 +824,12 @@ export class StructureService {
         throw new BadRequestException('Another active position already uses this phone number');
       }
     }
+    // V1-21b review 7 INP4-3: KEY knows a staff sender only by the phone, and a contact-only
+    // position has no membership to bound it. On a member's own phone it would outlive any
+    // narrowing of that member over HTTP; their position belongs on their membership.
+    if (isContactOnly && normalizedPhone && (await this.membersByPhone(businessId, normalizedPhone)).length) {
+      throw new BadRequestException(REFUSED_MEMBER_PHONE);
+    }
 
     await this.assertAssignmentRefs(businessId, dto);
 
@@ -871,15 +882,55 @@ export class StructureService {
    * Resolve an inbound WhatsApp/SMS phone number to the staff position it belongs
    * to, so a message from that number can be routed to KEY as a staff command
    * instead of the customer-contact intake pipeline. Returns null for unmatched
-   * numbers (the normal case — most inbound messages are from customers).
+   * numbers (the normal case — most inbound messages are from customers). The
+   * holder's membership comes with it: on the membership path its scopes, not
+   * the JobRole map, are what HTTP enforces, and they bound the position's KEY
+   * envelope (JobRolePolicyService.envelopeForPosition, V1-21b review 4 IC3-1), and so
+   * does its user's account state: AuthMiddleware refuses a soft-deleted or banned user
+   * every route, and the envelope then keeps the baseline only (review 5 INP4-1).
+   *
+   * `membership` is the holder's row in this business, the (user, business) row
+   * ModuleScopeGuard reads (review 7 INP4-2): an assignment written before
+   * assertAssignmentRefs can name the holder's membership in another business, and that row
+   * is looked up again here instead of being handed on. `phoneMembers` are the memberships of
+   * this business's members whose account phone is this phone (review 7 INP4-3): KEY knows the
+   * sender only by the phone, so the envelope is bounded by each of them too.
    */
   async resolveStaffByPhone(businessId: string, phone: string) {
     const normalized = normalizePhone(phone);
     if (!normalized) return null;
-    return this.prisma.client.orgAssignment.findFirst({
+    const assignment = await this.prisma.client.orgAssignment.findFirst({
       where: { businessId, contactPhone: normalized, endedAt: null },
-      include: { jobRole: true, orgUnit: true },
+      include: {
+        jobRole: true,
+        orgUnit: true,
+        membership: { include: { user: { select: HOLDER_ACCOUNT } } },
+      },
     });
+    if (!assignment) return null;
+    const [membership, phoneMembers] = await Promise.all([
+      this.holderMembershipHere(businessId, assignment),
+      this.membersByPhone(businessId, normalized),
+    ]);
+    return { ...assignment, membership, phoneMembers };
+  }
+
+  /**
+   * The membership HTTP reads for the holder of `assignment` in `businessId` (V1-21b review 7
+   * INP4-2): see position-holders.ts, which AiOversightService.resolveApprovalByAssignment reads
+   * too, so a reply approval is capped by the same row as the envelope (review 9 WB-1).
+   */
+  private holderMembershipHere(businessId: string, assignment: Parameters<typeof holderMembershipHere>[2]) {
+    return holderMembershipHere(this.prisma, businessId, assignment);
+  }
+
+  /**
+   * The memberships of `businessId` whose user's account phone is `phone`, however either is
+   * spelled (V1-21b review 7 INP4-3; review 9 FB-2: '868-555-0122' is '+18685550122'). Every
+   * member with a phone is read: a cap on the number of rows could leave the matching one out.
+   */
+  private membersByPhone(businessId: string, phone: string) {
+    return membersByPhone(this.prisma, businessId, phone);
   }
 
   /** Persist the KEY chat session id for a position's WhatsApp/SMS conversation. */
@@ -927,6 +978,10 @@ export class StructureService {
           where: { businessId, contactPhone: normalizedPhone, endedAt: null, id: { not: id } },
         });
         if (clash) throw new BadRequestException('Another active position already uses this phone number');
+        // V1-21b review 7 INP4-3, as on create.
+        if (existing.isContactOnly && (await this.membersByPhone(businessId, normalizedPhone)).length) {
+          throw new BadRequestException(REFUSED_MEMBER_PHONE);
+        }
       }
     }
 

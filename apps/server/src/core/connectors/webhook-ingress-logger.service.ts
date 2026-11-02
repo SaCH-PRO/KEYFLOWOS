@@ -32,6 +32,9 @@ const SENSITIVE_HEADER_KEYS = new Set([
   'x-api-key',
   'x-hub-signature',
   'x-hub-signature-256',
+  // V1-21b review 9 WB-3: Twilio's signature covers the URL and the form fields, all of which this
+  // log keeps, so a stored one let anyone who reads the table replay the request (a staff 'YES').
+  'x-twilio-signature',
   'stripe-signature',
   'x-webhook-signature',
   'x-signature',

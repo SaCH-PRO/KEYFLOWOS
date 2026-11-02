@@ -62,7 +62,25 @@ export class CallLogService {
     @Inject(EventEmitter2) private readonly emitter: EventEmitter2,
   ) {}
 
+  /**
+   * A call log's contact is the business's own (V1-21b review 9 TD9-2). createCallLog and
+   * updateCallLog stored any contactId: a call log of A then named B's contact, getCallLog(A, id)
+   * passed, and createFollowUpTask wrote a ContactTask { businessId A, contactId <B's> } whose
+   * title reached B's call script. On the staff bridge no tenant context binds anything, and over
+   * HTTP the tenant extension binds wheres, not a foreign key. Another business's contact answers
+   * as an unknown one.
+   */
+  private async assertContactInBusiness(businessId: string, contactId: string | null | undefined) {
+    if (contactId === undefined || contactId === null) return;
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+  }
+
   async createCallLog(input: CreateCallLogInput) {
+    await this.assertContactInBusiness(input.businessId, input.contactId);
     const scheduledAt = input.scheduledAt
       ? new Date(input.scheduledAt)
       : undefined;
@@ -90,9 +108,17 @@ export class CallLogService {
     return callLog;
   }
 
-  async getCallLog(id: string) {
-    const callLog = await this.prisma.client.callLog.findUnique({
-      where: { id },
+  /**
+   * The call log `id` of `businessId`, or 404. Every method below that takes a call log id looks
+   * it up here, within the business it is given (V1-21b review 8 DD8-1): a bare findUnique({ id })
+   * stays in the tenant only while TenantInterceptor's ambient tenant is armed, which it is for an
+   * HTTP request and is not on the WhatsApp/SMS staff bridge, where the KEY dispatcher completed
+   * another business's call log and planted a task in its CRM. Another business's id answers as
+   * an unknown one.
+   */
+  async getCallLog(businessId: string, id: string) {
+    const callLog = await this.prisma.client.callLog.findFirst({
+      where: { id, businessId },
     });
     if (!callLog) {
       throw new NotFoundException('Call log not found');
@@ -142,12 +168,13 @@ export class CallLogService {
     return { items, total, offset: filters?.offset ?? 0, limit: filters?.limit ?? 50 };
   }
 
-  async updateCallLog(id: string, input: UpdateCallLogInput) {
-    const existing = await this.getCallLog(id);
+  async updateCallLog(businessId: string, id: string, input: UpdateCallLogInput) {
+    const existing = await this.getCallLog(businessId, id);
 
     if (existing.completedAt) {
       throw new BadRequestException('Cannot update a completed call log');
     }
+    await this.assertContactInBusiness(businessId, input.contactId);
 
     const updated = await this.prisma.client.callLog.update({
       where: { id },
@@ -170,8 +197,8 @@ export class CallLogService {
     return updated;
   }
 
-  async completeCall(id: string, input: CompleteCallInput, completedBy: string) {
-    const existing = await this.getCallLog(id);
+  async completeCall(businessId: string, id: string, input: CompleteCallInput, completedBy: string) {
+    const existing = await this.getCallLog(businessId, id);
 
     if (existing.completedAt) {
       throw new BadRequestException('Call is already completed');
@@ -225,11 +252,12 @@ export class CallLogService {
   }
 
   async createFollowUpTask(
+    businessId: string,
     callLogId: string,
     input: CreateFollowUpInput,
     createdBy: string,
   ) {
-    const callLog = await this.getCallLog(callLogId);
+    const callLog = await this.getCallLog(businessId, callLogId);
 
     if (!callLog.contactId) {
       throw new BadRequestException(
@@ -313,8 +341,8 @@ export class CallLogService {
     return callLog;
   }
 
-  async deleteCallLog(id: string) {
-    const existing = await this.getCallLog(id);
+  async deleteCallLog(businessId: string, id: string) {
+    const existing = await this.getCallLog(businessId, id);
 
     if (existing.completedAt) {
       throw new BadRequestException('Cannot delete a completed call log');

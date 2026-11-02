@@ -123,7 +123,7 @@ export class WhatsAppService {
     // Staff members (full account or contact-only) can talk to KEY directly
     // over WhatsApp — check that before treating this as a customer inquiry.
     if (payload.body?.trim()) {
-      const staffResult = await this.staffChat.routeInboundMessage(businessId, payload.from, payload.body, 'whatsapp');
+      const staffResult = await this.staffChat.routeInboundMessage(businessId, payload.from, payload.body, 'whatsapp', payload.externalId);
       if (staffResult.handled) {
         if (staffResult.reply) {
           await this.sendMessage(businessId, { to: payload.from, body: staffResult.reply });

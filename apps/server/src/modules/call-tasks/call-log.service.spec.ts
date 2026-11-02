@@ -5,7 +5,12 @@ function createMockPrisma() {
   const store = {
     callLogs: new Map<string, any>(),
     contactTasks: new Map<string, any>(),
-    contacts: new Map<string, any>(),
+    // the contacts the cases name, each in its business (createCallLog checks it, review 9 TD9-2)
+    contacts: new Map<string, any>([
+      ['contact_1', { id: 'contact_1', businessId: 'biz_1' }],
+      ['contact_2', { id: 'contact_2', businessId: 'biz_1' }],
+      ['contact_t', { id: 'contact_t', businessId: 'biz_theirs' }],
+    ]),
   };
   let idCounter = 0;
 
@@ -18,9 +23,16 @@ function createMockPrisma() {
           store.callLogs.set(id, record);
           return record;
         }),
+        // findUnique answers by id alone, as Prisma does with no tenant context (the staff bridge)
         findUnique: vi.fn(async (args: any) =>
           store.callLogs.get(args.where.id) ?? null,
         ),
+        findFirst: vi.fn(async (args: any) => {
+          const row = store.callLogs.get(args.where.id);
+          if (!row) return null;
+          if (args.where.businessId !== undefined && row.businessId !== args.where.businessId) return null;
+          return row;
+        }),
         findMany: vi.fn(async (args: any) => {
           const items = Array.from(store.callLogs.values()).filter(
             (log: any) => {
@@ -93,6 +105,12 @@ function createMockPrisma() {
         findUnique: vi.fn(async (args: any) =>
           store.contacts.get(args.where.id) ?? null,
         ),
+        findFirst: vi.fn(async (args: any) => {
+          const row = store.contacts.get(args.where.id);
+          if (!row) return null;
+          if (args.where.businessId !== undefined && row.businessId !== args.where.businessId) return null;
+          return row;
+        }),
       },
     },
     store,
@@ -162,7 +180,7 @@ describe('CallLogService', () => {
       contactId: 'contact_1',
     });
 
-    const result = await svc.completeCall(created.id, {
+    const result = await svc.completeCall('biz_1', created.id, {
       outcome: 'reached',
       duration: 120,
       notes: 'Customer is interested',
@@ -187,10 +205,10 @@ describe('CallLogService', () => {
       callerId: 'user_1',
     });
 
-    await svc.completeCall(created.id, { outcome: 'reached' }, 'user_1');
+    await svc.completeCall('biz_1', created.id, { outcome: 'reached' }, 'user_1');
 
     await expect(
-      svc.completeCall(created.id, { outcome: 'no_answer' }, 'user_1'),
+      svc.completeCall('biz_1', created.id, { outcome: 'no_answer' }, 'user_1'),
     ).rejects.toThrow('Call is already completed');
   });
 
@@ -206,6 +224,7 @@ describe('CallLogService', () => {
     });
 
     const task = await svc.createFollowUpTask(
+      'biz_1',
       created.id,
       { title: 'Send proposal', priority: 'HIGH' },
       'user_1',
@@ -232,7 +251,7 @@ describe('CallLogService', () => {
     });
 
     await expect(
-      svc.createFollowUpTask(created.id, { title: 'Test' }, 'user_1'),
+      svc.createFollowUpTask('biz_1', created.id, { title: 'Test' }, 'user_1'),
     ).rejects.toThrow('Cannot create follow-up task for a call without a contact');
   });
 
@@ -290,7 +309,7 @@ describe('CallLogService', () => {
       callerId: 'user_1',
     });
 
-    const result = await svc.deleteCallLog(created.id);
+    const result = await svc.deleteCallLog('biz_1', created.id);
     expect(result.success).toBe(true);
     expect(emitter.emit).toHaveBeenCalledWith(
       'call_log.deleted',
@@ -308,9 +327,9 @@ describe('CallLogService', () => {
       callerId: 'user_1',
     });
 
-    await svc.completeCall(created.id, { outcome: 'reached' }, 'user_1');
+    await svc.completeCall('biz_1', created.id, { outcome: 'reached' }, 'user_1');
 
-    await expect(svc.deleteCallLog(created.id)).rejects.toThrow(
+    await expect(svc.deleteCallLog('biz_1', created.id)).rejects.toThrow(
       'Cannot delete a completed call log',
     );
   });
@@ -336,5 +355,60 @@ describe('CallLogService', () => {
 
     const result = await svc.getScheduledCalls('biz_1', 'user_1', today);
     expect(result.length).toBe(2);
+  });
+
+  /**
+   * V1-21b review 8 DD8-1: every CallLogService method that takes a call log id looks it up within
+   * the business it is given. The KEY dispatcher calls completeCall / createFollowUpTask on the
+   * WhatsApp/SMS staff bridge, where no tenant context binds a bare-id lookup, so a call log id
+   * from another business completed that business's call and planted a task in its CRM.
+   */
+  describe("another business's call log is not found (review 8 DD8-1)", () => {
+    async function seeded() {
+      const prisma = createMockPrisma();
+      const emitter = createMockEmitter();
+      const svc = new CallLogService(prisma as any, emitter as any);
+      const theirs = await svc.createCallLog({ businessId: 'biz_theirs', callerId: 'user_t', contactId: 'contact_t' });
+      return { prisma, emitter, svc, theirs };
+    }
+
+    it('getCallLog', async () => {
+      const { svc, theirs } = await seeded();
+      await expect(svc.getCallLog('biz_1', theirs.id)).rejects.toThrow('Call log not found');
+      expect((await svc.getCallLog('biz_theirs', theirs.id)).id).toBe(theirs.id);
+    });
+
+    it('completeCall writes nothing and emits nothing', async () => {
+      const { prisma, emitter, svc, theirs } = await seeded();
+      emitter.emit.mockClear();
+      await expect(svc.completeCall('biz_1', theirs.id, { outcome: 'not_interested' }, 'key_ai')).rejects.toThrow('Call log not found');
+      expect(prisma.client.callLog.update).not.toHaveBeenCalled();
+      expect(prisma.store.callLogs.get(theirs.id).completedAt).toBeNull();
+      expect(emitter.emit).not.toHaveBeenCalled();
+    });
+
+    it('createFollowUpTask plants no task', async () => {
+      const { prisma, svc, theirs } = await seeded();
+      await expect(svc.createFollowUpTask('biz_1', theirs.id, { title: 'planted' }, 'key_ai')).rejects.toThrow('Call log not found');
+      expect(prisma.client.contactTask.create).not.toHaveBeenCalled();
+      expect(prisma.store.contactTasks.size).toBe(0);
+    });
+
+    it('updateCallLog and deleteCallLog', async () => {
+      const { prisma, svc, theirs } = await seeded();
+      await expect(svc.updateCallLog('biz_1', theirs.id, { notes: 'x' })).rejects.toThrow('Call log not found');
+      await expect(svc.deleteCallLog('biz_1', theirs.id)).rejects.toThrow('Call log not found');
+      expect(prisma.client.callLog.update).not.toHaveBeenCalled();
+      expect(prisma.client.callLog.delete).not.toHaveBeenCalled();
+      expect(prisma.store.callLogs.has(theirs.id)).toBe(true);
+    });
+
+    it('the follow-up task of its own call log lands in its own business', async () => {
+      const { svc, prisma } = await seeded();
+      const mine = await svc.createCallLog({ businessId: 'biz_1', callerId: 'user_1', contactId: 'contact_1' });
+      const task = await svc.createFollowUpTask('biz_1', mine.id, { title: 'mine' }, 'key_ai');
+      expect(task.businessId).toBe('biz_1');
+      expect(prisma.store.callLogs.get(mine.id).followUpTaskId).toBe(task.id);
+    });
   });
 });

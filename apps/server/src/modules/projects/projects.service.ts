@@ -151,6 +151,17 @@ export class ProjectsService {
     estimatedHours?: number;
     trackedHours?: number;
   }) {
+    // V1-21b review 9 TD9-1: the task is the project's, so the project must be this business's.
+    // The row was written as { businessId, projectId } with the project never looked up, and
+    // relation includes do not filter by business, so another business saw the task in its
+    // project and KEY's projects_list_tasks read that project's name back. On the staff bridge no
+    // tenant context binds anything; over HTTP the tenant extension binds wheres, not a foreign key.
+    const project = await this.prisma.client.project.findFirst({
+      where: { id: projectId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!project) throw new NotFoundException('Project not found');
+
     const maxSort = await this.prisma.client.projectTask.aggregate({
       where: { projectId, businessId, deletedAt: null },
       _max: { sortOrder: true },
