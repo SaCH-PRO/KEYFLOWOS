@@ -545,3 +545,127 @@ describe('GmailService — the Gmail connection is bound to the owner who starte
     expect(commerce.activity).toEqual([]);
   });
 });
+
+/**
+ * R0-CMF6c: getValidAccessToken's refresh write is a compare-and-set. A fake
+ * client whose business reads answer from a script (outside the transaction:
+ * the read that decides to refresh; inside it: the re-read under the business
+ * row lock), recording every call; Google's refresh_token grant answers
+ * `acc_for_<refresh token>`.
+ */
+function refreshFake(script: { outer: any[]; locked: any[] }) {
+  const calls: Call[] = [];
+  let inTx = false;
+  const client: any = {
+    business: {
+      findUnique: async (args: any) => {
+        calls.push({ model: 'business', method: inTx ? 'findUnique:locked' : 'findUnique', args });
+        const next = (inTx ? script.locked : script.outer).shift();
+        if (next === undefined) throw new Error(`unit: unscripted business read (${inTx ? 'locked' : 'outer'})`);
+        return next;
+      },
+      update: async (args: any) => {
+        calls.push({ model: 'business', method: 'update', args });
+        return { id: args.where.id, ...args.data };
+      },
+      updateMany: async (args: any) => {
+        calls.push({ model: 'business', method: 'updateMany', args });
+        return { count: 1 };
+      },
+    },
+  };
+  client.$transaction = async (fn: (tx: any) => Promise<unknown>) => {
+    calls.push({ model: '$transaction', method: 'begin', args: null });
+    inTx = true;
+    try {
+      return await fn(client);
+    } finally {
+      inTx = false;
+    }
+  };
+  client.$queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    calls.push({ model: '$queryRaw', method: 'raw', args: { sql: strings.join('?'), values } });
+    return [];
+  };
+  return { prisma: { client } as any, calls, writes: () => calls.filter((c) => WRITE_METHODS.has(c.method)) };
+}
+
+const refreshGrants: string[] = [];
+function stubRefreshGrant() {
+  vi.stubGlobal('fetch', async (input: any, init?: any) => {
+    const url = String(input);
+    const body = new URLSearchParams(String(init?.body ?? ''));
+    if (url === 'https://oauth2.googleapis.com/token' && body.get('grant_type') === 'refresh_token') {
+      refreshGrants.push(String(body.get('refresh_token')));
+      return new Response(JSON.stringify({ access_token: `acc_for_${body.get('refresh_token')}`, expires_in: 3600 }), { status: 200 });
+    }
+    throw new Error(`unit: unexpected fetch ${url}`);
+  });
+}
+
+describe('GmailService — a refreshed Gmail access token is written back only onto the connection it was refreshed for (R0-CMF6c)', () => {
+  const expired = (email: string | null, refresh: string | null) => ({
+    gmailEmail: email, gmailAccessToken: 'acc_stale', gmailRefreshToken: refresh, gmailTokenExpiry: new Date(Date.now() - 60 * 60 * 1000),
+  });
+  const live = (email: string, refresh: string, access: string) => ({
+    gmailEmail: email, gmailAccessToken: access, gmailRefreshToken: refresh, gmailTokenExpiry: new Date(Date.now() + 60 * 60 * 1000),
+  });
+
+  beforeEach(() => {
+    refreshGrants.length = 0;
+    stubRefreshGrant();
+  });
+
+  it('[R0-CMF6c-U19] the write is made in a transaction whose first statement is the business row lock, after a re-read showing the refresh token and mailbox the refresh used, through business.update (the token-encryption extension encrypts it; never updateMany)', async () => {
+    const f = refreshFake({ outer: [expired('a@gmail.test', 'ref_a')], locked: [{ gmailEmail: 'a@gmail.test', gmailRefreshToken: 'ref_a' }] });
+    const gmail = new GmailService(f.prisma) as any;
+    await expect(gmail.getValidAccessToken(BIZ)).resolves.toBe('acc_for_ref_a');
+    expect(refreshGrants).toEqual(['ref_a']);
+    const begin = f.calls.findIndex((c) => c.model === '$transaction');
+    expect(begin).toBeGreaterThan(0);
+    expect(f.calls[begin + 1]).toMatchObject({ model: '$queryRaw' });
+    expect(f.calls[begin + 1].args.sql).toMatch(/FROM\s+businesses\s+WHERE\s+id\s*=\s*\?\s+FOR\s+NO\s+KEY\s+UPDATE/i);
+    expect(f.calls[begin + 1].args.values).toEqual([BIZ]);
+    expect(f.calls[begin + 2]).toMatchObject({ model: 'business', method: 'findUnique:locked', args: { where: { id: BIZ } } });
+    expect(f.writes()).toEqual([f.calls[begin + 3]]);
+    expect(f.writes()[0]).toMatchObject({
+      method: 'update',
+      args: { where: { id: BIZ }, data: { gmailAccessToken: 'acc_for_ref_a', gmailTokenExpiry: expect.any(Date) } },
+    });
+  });
+
+  it('[R0-CMF6c-U20] a lost race writes nothing and reads again, once: a disconnect is 503 "Gmail not connected"; another mailbox (or a re-consent) with a live token gives that token; two lost races in a row are "Gmail not connected" after two refreshes and no write', async () => {
+    const notConnected = { response: { code: 'provider_not_configured', service: 'gmail', message: 'Gmail not connected' } };
+
+    const off = refreshFake({ outer: [expired('a@gmail.test', 'ref_a'), expired(null, null)], locked: [{ gmailEmail: null, gmailRefreshToken: null }] });
+    await expect((new GmailService(off.prisma) as any).getValidAccessToken(BIZ)).rejects.toMatchObject(notConnected);
+    expect(off.writes()).toEqual([]);
+    expect(refreshGrants).toEqual(['ref_a']);
+
+    refreshGrants.length = 0;
+    const swapped = refreshFake({
+      outer: [expired('a@gmail.test', 'ref_a'), live('b@gmail.test', 'ref_b', 'acc_b')],
+      locked: [{ gmailEmail: 'b@gmail.test', gmailRefreshToken: 'ref_b' }],
+    });
+    await expect((new GmailService(swapped.prisma) as any).getValidAccessToken(BIZ)).resolves.toBe('acc_b');
+    expect(swapped.writes()).toEqual([]);
+    expect(refreshGrants).toEqual(['ref_a']);
+
+    refreshGrants.length = 0;
+    const reconsented = refreshFake({
+      outer: [expired('a@gmail.test', 'ref_a'), live('a@gmail.test', 'ref_a2', 'acc_a2')],
+      locked: [{ gmailEmail: 'a@gmail.test', gmailRefreshToken: 'ref_a2' }],
+    });
+    await expect((new GmailService(reconsented.prisma) as any).getValidAccessToken(BIZ)).resolves.toBe('acc_a2');
+    expect(reconsented.writes()).toEqual([]);
+
+    refreshGrants.length = 0;
+    const churn = refreshFake({
+      outer: [expired('a@gmail.test', 'ref_a'), expired('b@gmail.test', 'ref_b')],
+      locked: [{ gmailEmail: 'b@gmail.test', gmailRefreshToken: 'ref_b' }, { gmailEmail: 'c@gmail.test', gmailRefreshToken: 'ref_c' }],
+    });
+    await expect((new GmailService(churn.prisma) as any).getValidAccessToken(BIZ)).rejects.toMatchObject(notConnected);
+    expect(churn.writes()).toEqual([]);
+    expect(refreshGrants).toEqual(['ref_a', 'ref_b']);
+  });
+});
