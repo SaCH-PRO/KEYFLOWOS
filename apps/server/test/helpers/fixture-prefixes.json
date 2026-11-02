@@ -283,6 +283,11 @@
       "legacy": true
     },
     {
+      "prefix": "v02b_",
+      "owner": "apps/server/test/key-cortex-legacy-gate-audit.integration.test.ts",
+      "packet": "V1-02 (V1-02b-KEY-LEGACY-GATE)"
+    },
+    {
       "prefix": "v03a_",
       "owner": "apps/server/test/autonomy-profile-authority.integration.test.ts",
       "packet": "V1-03-KEY-CORTEX-PRINCIPAL"
