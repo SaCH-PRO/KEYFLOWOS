@@ -9,6 +9,7 @@ import {
   UseGuards,
   Request,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -21,6 +22,23 @@ import { DecideApprovalStepDto } from './dto/decide-approval-step.dto';
 import { DelegateApprovalStepDto } from './dto/delegate-approval-step.dto';
 import { ListApprovalsQueryDto } from './dto/list-approvals-query.dto';
 
+type PrincipalRequest = ExpressRequest & { user?: { id?: string } };
+
+/**
+ * The authenticated caller (V1-31). These routes used to fall back to
+ * 'system' when the request carried no user, so a request, a decision, a
+ * delegation or a cancellation could be recorded against a principal nobody
+ * authenticated as. AuthGuard sets req.user on every route here; a request
+ * that reaches a handler without one is refused, before any lookup or write.
+ */
+function principalOf(req: PrincipalRequest | undefined): string {
+  const id = req?.user?.id;
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new UnauthorizedException('An authenticated user is required');
+  }
+  return id;
+}
+
 @Controller()
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard)
 export class ApprovalController {
@@ -31,11 +49,12 @@ export class ApprovalController {
   async create(
     @Param('businessId') businessId: string,
     @Body() body: CreateApprovalRequestDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: PrincipalRequest,
   ) {
+    const requesterId = principalOf(req);
     return this.approvals.createRequest({
       businessId,
-      requesterId: req.user?.id ?? 'system',
+      requesterId,
       requestType: body.requestType,
       title: body.title,
       description: body.description,
@@ -73,9 +92,9 @@ export class ApprovalController {
   @RateLimit(60, 60_000)
   async pendingForMe(
     @Param('businessId') businessId: string,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: PrincipalRequest,
   ) {
-    return this.approvals.getPendingForUser(businessId, req.user?.id ?? 'system');
+    return this.approvals.getPendingForUser(businessId, principalOf(req));
   }
 
   /**
@@ -109,12 +128,13 @@ export class ApprovalController {
     @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
     @Body() body: DecideApprovalStepDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: PrincipalRequest,
   ) {
+    const approverId = principalOf(req);
     await this.requestInBusiness(businessId, approvalId);
     return this.approvals.decideStep({
       approvalRequestId: approvalId,
-      approverId: req.user?.id ?? 'system',
+      approverId,
       decision: 'approve',
       comment: body.comment,
     });
@@ -126,12 +146,13 @@ export class ApprovalController {
     @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
     @Body() body: DecideApprovalStepDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: PrincipalRequest,
   ) {
+    const approverId = principalOf(req);
     await this.requestInBusiness(businessId, approvalId);
     return this.approvals.decideStep({
       approvalRequestId: approvalId,
-      approverId: req.user?.id ?? 'system',
+      approverId,
       decision: 'reject',
       comment: body.comment,
     });
@@ -143,12 +164,13 @@ export class ApprovalController {
     @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
     @Body() body: DelegateApprovalStepDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: PrincipalRequest,
   ) {
+    const approverId = principalOf(req);
     await this.requestInBusiness(businessId, approvalId);
     return this.approvals.delegateStep({
       approvalRequestId: approvalId,
-      approverId: req.user?.id ?? 'system',
+      approverId,
       delegatedTo: body.delegatedTo,
       comment: body.comment,
     });
@@ -159,10 +181,11 @@ export class ApprovalController {
   async cancel(
     @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: PrincipalRequest,
   ) {
+    const actorId = principalOf(req);
     await this.requestInBusiness(businessId, approvalId);
-    return this.approvals.cancelRequest(approvalId, req.user?.id ?? 'system');
+    return this.approvals.cancelRequest(approvalId, actorId);
   }
 
   @Post('businesses/:businessId/approvals/:approvalId/escalate')

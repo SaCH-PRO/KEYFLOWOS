@@ -1,6 +1,7 @@
 import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CommerceService } from '../commerce/commerce.service';
@@ -111,6 +112,7 @@ import {
   KeyActionBoundaryService,
   type ActionContext,
 } from '../key-autonomy/action-boundary/key-action-boundary.service';
+import { canonicalJson } from '../key-autonomy/action-boundary/action-envelope';
 
 
 export interface FlowAttachment {
@@ -279,6 +281,82 @@ export interface FlowPageContext {
 export interface FlowServerContext {
   /** The staff position's envelope, as JobRolePolicyService.envelopeForPosition issued it. */
   jobRoleEnvelope: JobRoleEnvelope;
+}
+
+/**
+ * V1-31 KEY-CONFIRM-BIND (M46). A Flow quick-confirmation for a tool the action boundary has not
+ * adopted is bound on the server when it is issued: one `idempotency_keys` row, keyed
+ * `flow-confirm:<id>` under the business, holds the call (tool, arguments, tool call id), the
+ * member it was issued to and the crew it was proposed under, with a sha256 over all of it. The
+ * client gets only the id. A confirmation executes what that row holds, once: the row moves
+ * pending -> claimed by compare-and-set, so a replay or a concurrent confirmation finds it gone.
+ * A tool name and arguments sent back beside the id are never read, and a confirmation without
+ * a bound id executes nothing (KF-EXEC-ACTION-001 already held this for the boundary's own
+ * capability). Flow ids carry their own prefix, so they never reach the boundary and a boundary
+ * id never reaches this store.
+ */
+const FLOW_CONFIRMATION_ID_PREFIX = 'flowc_';
+const FLOW_CONFIRMATION_KEY_PREFIX = 'flow-confirm:';
+/** How long a bound confirmation can be confirmed after it is issued. */
+export const FLOW_CONFIRMATION_TTL_MS = 24 * 60 * 60 * 1000;
+/** What a confirmation that carries no server-bound call is told. */
+const UNBOUND_CONFIRMATION_REPLY =
+  'This action was not executed. It has to be confirmed with the confirmation issued for it; a tool name and arguments sent back by the client are not a confirmation. Please ask again.';
+
+/** The call a Flow confirmation id is bound to, as stored in idempotency_keys.response. */
+interface FlowBoundConfirmation {
+  kind: 'flow_confirmation';
+  toolName: string;
+  /**
+   * The arguments as JSON text, exactly as proposed. Text, not a JSON object: jsonb and the
+   * Prisma engine round numbers past 15 significant digits, which would change both the
+   * arguments executed and the hash over them.
+   */
+  argsJson: string;
+  toolCallId: string;
+  requestedBy: string;
+  crew: BusinessRole[];
+  role: BusinessRole | null;
+  surface: 'CHAT' | 'CHAT_STREAM';
+  sessionId: string | null;
+  issuedAt: string;
+  expiresAt: string;
+}
+
+/** A confirmation id the Flow issued (as opposed to one the action boundary issued). */
+export function isFlowConfirmationId(id: unknown): id is string {
+  return typeof id === 'string' && id.startsWith(FLOW_CONFIRMATION_ID_PREFIX) && id.length > FLOW_CONFIRMATION_ID_PREFIX.length;
+}
+
+function flowConfirmationKey(confirmationId: string): string {
+  return `${FLOW_CONFIRMATION_KEY_PREFIX}${confirmationId}`;
+}
+
+/** sha256 over the business and every field of the bound call. */
+function flowConfirmationHash(businessId: string, bound: FlowBoundConfirmation): string {
+  return createHash('sha256').update(canonicalJson({ v: 1, businessId, bound })).digest('hex');
+}
+
+/** The stored call and its parsed arguments, or null when the row does not hold one this code wrote. */
+function readFlowBoundConfirmation(value: unknown): { bound: FlowBoundConfirmation; args: Record<string, unknown> } | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const v = value as Record<string, unknown>;
+  const isText = (x: unknown): x is string => typeof x === 'string' && x.length > 0;
+  if (v.kind !== 'flow_confirmation') return null;
+  if (!isText(v.toolName) || !isText(v.toolCallId) || !isText(v.requestedBy) || !isText(v.issuedAt) || !isText(v.expiresAt)) return null;
+  if (!isText(v.argsJson)) return null;
+  if (!Array.isArray(v.crew) || !v.crew.every((r) => typeof r === 'string')) return null;
+  if (v.surface !== 'CHAT' && v.surface !== 'CHAT_STREAM') return null;
+  if (v.role !== null && typeof v.role !== 'string') return null;
+  if (v.sessionId !== null && typeof v.sessionId !== 'string') return null;
+  let args: unknown;
+  try {
+    args = JSON.parse(v.argsJson);
+  } catch {
+    return null;
+  }
+  if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
+  return { bound: v as unknown as FlowBoundConfirmation, args: args as Record<string, unknown> };
 }
 
 /** The page context without any position envelope a caller put in it (V1-21b review 7 ENV-FORGE). */
@@ -1753,12 +1831,22 @@ ${triage.standingContext}`;
       const boundaryConfirmation = await this.confirmThroughBoundary(businessId, pendingConfirmation, userId);
       if (boundaryConfirmation) return boundaryConfirmation;
 
-      if (!pendingConfirmation.confirmed) {
-        return { reply: 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.' };
-      }
+      // V1-31: every other confirmation is the call the Flow bound on the
+      // server under its id, claimed once, by the member it was issued to.
+      // This path used to re-evaluate only the tool NAME and then execute (or
+      // file as an approval item) the name and arguments the client sent, so a
+      // member could confirm a call KEY never proposed. From here on
+      // `pendingConfirmation` is the bound call; the client's name and
+      // arguments are never read again.
+      const claim = await this.claimFlowConfirmation(businessId, pendingConfirmation, userId, crew, envelope);
+      if (claim.kind === 'answered') return claim.response;
+      pendingConfirmation = claim.confirmation;
+
       if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
-        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, crew, envelope);
+        // Governed again now, on the bound tool and the crew it was proposed under.
+        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, claim.crew, envelope);
         if (!confirmDecision.allowed) {
+          await claim.settle('refused', confirmDecision.reason);
           return {
             reply: `This action is blocked: ${confirmDecision.reason}`,
             usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
@@ -1782,6 +1870,7 @@ ${triage.standingContext}`;
             rationale: `Chat confirmation routed to approval queue — Tier ${confirmDecision.tier} requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
             success: true,
           });
+          await claim.settle('completed');
           return {
             reply: confirmDecision.requiresAdminApproval
               ? `This is a high-impact action (Tier ${confirmDecision.tier}) that requires admin approval. It has been added to your approval queue for an admin to review.`
@@ -1789,7 +1878,14 @@ ${triage.standingContext}`;
             usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
           };
         }
-        const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, undefined, { planId: '', planStepId: '', role: detectedRole ?? undefined });
+        let result: FlowToolResult;
+        try {
+          result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, pendingConfirmation.toolCallId, { planId: '', planStepId: '', role: claim.role ?? detectedRole ?? undefined });
+        } catch (err: unknown) {
+          await claim.settle('failed', err instanceof Error ? err.message : String(err));
+          throw err;
+        }
+        await claim.settle(result.success ? 'completed' : 'failed', result.success ? undefined : (result.error ?? 'Unknown error'));
         return {
           reply: result.success
             ? `Done! ${this.formatToolSuccess(pendingConfirmation.toolName, result.result)}`
@@ -1798,6 +1894,9 @@ ${triage.standingContext}`;
           usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 2 },
         };
       }
+      // Unreachable for a call this code bound (it always has both).
+      await claim.settle('failed', 'No call was bound to this confirmation');
+      return { reply: UNBOUND_CONFIRMATION_REPLY, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 } };
     }
 
     messages.push({ role: 'user', content: enrichedMessage });
@@ -1918,14 +2017,13 @@ ${triage.standingContext}`;
       }
 
       if (needsQuickConfirm.length > 0) {
-        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc, confirmationId }) => ({
-          toolCallId: tc.id,
-          name: tc.name,
-          arguments: tc.arguments,
-          description: this.describeToolCall(tc.name, tc.arguments),
-          riskLevel: tc.riskLevel,
-          ...(confirmationId ? { confirmationId } : {}),
-        }));
+        const pendingConfirmations = await this.issuePendingConfirmations(businessId, needsQuickConfirm, {
+          userId,
+          crew,
+          role: detectedRole ?? null,
+          surface: 'CHAT',
+          sessionId: effectiveSessionId,
+        });
 
         return {
           reply: assistantMessage.content || 'I need your quick confirmation before proceeding with this action.',
@@ -2433,14 +2531,13 @@ ${triage.standingContext}`;
       }
 
       if (needsQuickConfirm.length > 0) {
-        const pendingConfirmations: PendingConfirmation[] = needsQuickConfirm.map(({ tc, confirmationId }) => ({
-          toolCallId: tc.id,
-          name: tc.name,
-          arguments: tc.arguments,
-          description: this.describeToolCall(tc.name, tc.arguments),
-          riskLevel: tc.riskLevel,
-          ...(confirmationId ? { confirmationId } : {}),
-        }));
+        const pendingConfirmations = await this.issuePendingConfirmations(businessId, needsQuickConfirm, {
+          userId,
+          crew,
+          role: detectedRole ?? null,
+          surface: 'CHAT_STREAM',
+          sessionId: effectiveSessionId,
+        });
 
         yield {
           type: 'confirmation_required',
@@ -2598,13 +2695,15 @@ ${triage.standingContext}`;
    * and the boundary executes the action recorded under it. A resubmitted name
    * and arguments execute nothing.
    *
-   * Returns null when the confirmation is not the boundary's to answer.
+   * Returns null when the confirmation is not the boundary's to answer,
+   * including every id the Flow itself issued (V1-31, claimFlowConfirmation).
    */
   private async confirmThroughBoundary(
     businessId: string,
     pending: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, any>; confirmationId?: string },
     userId?: string,
   ): Promise<FlowResponse | null> {
+    if (isFlowConfirmationId(pending.confirmationId)) return null;
     const boundary = this.getActionBoundary();
     const noUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 };
 
@@ -2650,13 +2749,221 @@ ${triage.standingContext}`;
     }
 
     if (pending.confirmed && boundary.adopts(pending.toolName)) {
-      return {
-        reply:
-          'This action was not executed. It has to be confirmed with the confirmation issued for it; a tool name and arguments sent back by the client are not a confirmation. Please ask again.',
-        usage: noUsage,
-      };
+      return { reply: UNBOUND_CONFIRMATION_REPLY, usage: noUsage };
     }
     return null;
+  }
+
+  /**
+   * The pending confirmations a quick-confirm turn hands the client (V1-31).
+   *
+   * A call the action boundary recorded keeps the boundary's id. Every other
+   * call is bound here, on the server, and the client is given only the id it
+   * is bound under. When nothing could be bound (no authenticated requester,
+   * or the store refused the row) the confirmation carries no id, and a
+   * confirmation without one executes nothing.
+   */
+  private async issuePendingConfirmations(
+    businessId: string,
+    calls: GovernedToolCall[],
+    ctx: {
+      userId?: string;
+      crew: readonly BusinessRole[];
+      role: BusinessRole | null;
+      surface: FlowBoundConfirmation['surface'];
+      sessionId: string;
+    },
+  ): Promise<PendingConfirmation[]> {
+    const boundary = this.getActionBoundary();
+    return Promise.all(
+      calls.map(async ({ tc, confirmationId }) => {
+        const id = confirmationId ?? (boundary.adopts(tc.name) ? undefined : await this.bindFlowConfirmation(businessId, tc, ctx));
+        return {
+          toolCallId: tc.id,
+          name: tc.name,
+          arguments: tc.arguments,
+          description: this.describeToolCall(tc.name, tc.arguments),
+          riskLevel: tc.riskLevel,
+          ...(id ? { confirmationId: id } : {}),
+        };
+      }),
+    );
+  }
+
+  /** Record the call on the server and return the id it is bound under, or undefined. */
+  private async bindFlowConfirmation(
+    businessId: string,
+    tc: FlowToolCall,
+    ctx: {
+      userId?: string;
+      crew: readonly BusinessRole[];
+      role: BusinessRole | null;
+      surface: FlowBoundConfirmation['surface'];
+      sessionId: string;
+    },
+  ): Promise<string | undefined> {
+    // Nobody could ever confirm it: a confirmation needs the member it was
+    // issued to (the staff bridge and the support desk pass no member).
+    if (!ctx.userId) return undefined;
+    const confirmationId = `${FLOW_CONFIRMATION_ID_PREFIX}${randomUUID()}`;
+    const issuedAt = new Date();
+    const bound: FlowBoundConfirmation = {
+      kind: 'flow_confirmation',
+      toolName: tc.name,
+      argsJson: JSON.stringify(tc.arguments ?? {}),
+      toolCallId: tc.id,
+      requestedBy: ctx.userId,
+      crew: [...ctx.crew],
+      role: ctx.role,
+      surface: ctx.surface,
+      sessionId: ctx.sessionId,
+      issuedAt: issuedAt.toISOString(),
+      expiresAt: new Date(issuedAt.getTime() + FLOW_CONFIRMATION_TTL_MS).toISOString(),
+    };
+    try {
+      await this.prisma.client.idempotencyKey.create({
+        data: {
+          businessId,
+          idempotencyKey: flowConfirmationKey(confirmationId),
+          status: 'pending',
+          requestHash: flowConfirmationHash(businessId, bound),
+          response: bound as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return confirmationId;
+    } catch (err: unknown) {
+      this.logger.warn(
+        `Could not bind a confirmation for ${tc.name}; it cannot be confirmed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return undefined;
+    }
+  }
+
+  /**
+   * Claim the call a confirmation is bound to (V1-31), or answer it.
+   *
+   * Only an id the Flow issued is a confirmation here (the boundary answered
+   * its own ids first). The call is the one stored under the id; whatever
+   * name and arguments came with it are not read. The id belongs to its
+   * business and to the member it was issued to, expires, and is spent by the
+   * first confirmation that claims it (pending -> claimed, compare-and-set).
+   * A confirmation with no Flow id executes nothing; a tool governance
+   * refuses anyway is still named as refused, as before.
+   *
+   * `claimed` hands back the bound call, the crew it was proposed under and
+   * `settle`, which records the outcome on the claimed row.
+   */
+  private async claimFlowConfirmation(
+    businessId: string,
+    pending: { toolCallId: string; confirmed: boolean; toolName?: string; toolArgs?: Record<string, unknown>; confirmationId?: string },
+    userId: string | undefined,
+    turnCrew: readonly BusinessRole[],
+    envelope: JobRoleEnvelope | undefined,
+  ): Promise<
+    | { kind: 'answered'; response: FlowResponse }
+    | {
+        kind: 'claimed';
+        confirmation: { toolCallId: string; confirmed: true; toolName: string; toolArgs: Record<string, unknown>; confirmationId: string };
+        crew: BusinessRole[];
+        role: BusinessRole | null;
+        settle: (to: 'completed' | 'failed' | 'refused', error?: string) => Promise<boolean>;
+      }
+  > {
+    const noUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 };
+    const answer = (reply: string, withUsage = true) => ({ kind: 'answered' as const, response: withUsage ? { reply, usage: noUsage } : { reply } });
+    const notExecuted = (why: string) => answer(`This action was not executed: ${why}`);
+    const cancelled = 'Got it — I cancelled that action. Let me know if there\'s anything else you\'d like to do.';
+    // A claimed row may also be one whose run was interrupted: at most once, so never run again.
+    const alreadyDone = answer('That confirmation was already used; the action is not run again.');
+
+    const confirmationId = pending.confirmationId;
+    if (!isFlowConfirmationId(confirmationId)) {
+      if (!pending.confirmed) return answer(cancelled, false);
+      if (pending.toolName) {
+        const decision = await this.governance.evaluate(businessId, pending.toolName, undefined, turnCrew, envelope);
+        if (!decision.allowed) return answer(`This action is blocked: ${decision.reason}`);
+      }
+      return answer(UNBOUND_CONFIRMATION_REPLY);
+    }
+    if (!userId) return notExecuted('an authenticated user is required to confirm it.');
+
+    const idempotencyKey = flowConfirmationKey(confirmationId);
+    const store = this.prisma.client.idempotencyKey;
+    /** Compare-and-set on the row's status: true when this call moved it. */
+    const transition = async (from: string, to: string, error?: string): Promise<boolean> => {
+      const { count } = await store.updateMany({
+        where: { businessId, idempotencyKey, status: from },
+        data: { status: to, ...(error !== undefined ? { error } : {}) },
+      });
+      return count === 1;
+    };
+
+    let row: { status: string; requestHash: string | null; response: unknown } | null;
+    try {
+      row = await store.findUnique({ where: { businessId_idempotencyKey: { businessId, idempotencyKey } } });
+    } catch (err: unknown) {
+      this.logger.warn(`Could not read confirmation ${confirmationId}: ${err instanceof Error ? err.message : String(err)}`);
+      return notExecuted('the confirmation could not be checked. Please try again.');
+    }
+    const stored = row ? readFlowBoundConfirmation(row.response) : null;
+    if (!row || !stored || row.requestHash !== flowConfirmationHash(businessId, stored.bound)) return answer(UNBOUND_CONFIRMATION_REPLY);
+    const { bound, args } = stored;
+    if (bound.requestedBy !== userId) return notExecuted('this confirmation was issued to someone else.');
+    // Never bound for one (issuePendingConfirmations), and never honoured: the boundary owns those.
+    if (this.getActionBoundary().adopts(bound.toolName)) return answer(UNBOUND_CONFIRMATION_REPLY);
+
+    if (!pending.confirmed) {
+      let moved: boolean;
+      try {
+        moved = await transition('pending', 'cancelled');
+      } catch (err: unknown) {
+        this.logger.warn(`Could not cancel confirmation ${confirmationId}: ${err instanceof Error ? err.message : String(err)}`);
+        return answer('I could not cancel that confirmation. Please try again.');
+      }
+      if (!moved) {
+        // Spent, refused, expired or cancelled already; say so when it was used.
+        const current = await store.findUnique({ where: { businessId_idempotencyKey: { businessId, idempotencyKey } } }).catch(() => null);
+        if (current?.status === 'completed' || current?.status === 'claimed') {
+          return answer('That confirmation was already used, so there is nothing to cancel.');
+        }
+      }
+      return answer(cancelled, false);
+    }
+
+    if (row.status === 'completed' || row.status === 'claimed') return alreadyDone;
+    if (row.status !== 'pending') return notExecuted(`this confirmation is ${row.status}. Please ask again.`);
+    if (!(Date.parse(bound.expiresAt) > Date.now())) {
+      await transition('pending', 'expired').catch(() => undefined);
+      return notExecuted('this confirmation has expired. Please ask again.');
+    }
+    if (
+      (pending.toolName !== undefined && pending.toolName !== bound.toolName) ||
+      (pending.toolArgs !== undefined && canonicalJson(pending.toolArgs) !== canonicalJson(args))
+    ) {
+      this.logger.warn(`Confirmation ${confirmationId} came with a different call than the one bound to it; only the bound call is considered`);
+    }
+
+    // The claim. Exactly one confirmation moves the row out of 'pending'.
+    let claimed: boolean;
+    try {
+      claimed = await transition('pending', 'claimed');
+    } catch (err: unknown) {
+      this.logger.warn(`Could not claim confirmation ${confirmationId}: ${err instanceof Error ? err.message : String(err)}`);
+      return notExecuted('the confirmation could not be claimed. Please try again.');
+    }
+    if (!claimed) return alreadyDone;
+
+    return {
+      kind: 'claimed',
+      confirmation: { toolCallId: bound.toolCallId, confirmed: true, toolName: bound.toolName, toolArgs: args, confirmationId },
+      crew: bound.crew,
+      role: bound.role,
+      settle: (to, error) =>
+        transition('claimed', to, error).catch((e: unknown) => {
+          this.logger.warn(`Could not record the outcome of confirmation ${confirmationId}: ${e instanceof Error ? e.message : String(e)}`);
+          return false;
+        }),
+    };
   }
 
   async executeToolDirectly(

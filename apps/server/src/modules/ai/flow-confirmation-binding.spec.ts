@@ -168,10 +168,10 @@ function makeHarness(opts: HarnessOptions = {}) {
   }) as FlowOrchestratorService;
 
   /** An ordinary turn in which the model calls state.toolCall. */
-  const ask = (userId: string | undefined = OWNER, businessId = BIZ) =>
-    orchestrator.chat(businessId, 'invoice the client for two hours', [], undefined, undefined, undefined, undefined, 's_1', userId);
+  const ask = (userId: string | null = OWNER, businessId = BIZ) =>
+    orchestrator.chat(businessId, 'invoice the client for two hours', [], undefined, undefined, undefined, undefined, 's_1', userId ?? undefined);
   /** POST flow/confirm, as AiFlowController.confirmAction calls chat(). */
-  const confirm = (pending: Record<string, unknown>, userId: string | undefined = OWNER, businessId = BIZ) =>
+  const confirm = (pending: Record<string, unknown>, userId: string | null = OWNER, businessId = BIZ) =>
     orchestrator.chat(
       businessId,
       pending.confirmed === false ? 'No, cancel.' : 'Yes, proceed.',
@@ -181,10 +181,10 @@ function makeHarness(opts: HarnessOptions = {}) {
       undefined,
       undefined,
       undefined,
-      userId,
+      userId ?? undefined,
     );
   /** The id the server hands the client with a quick-confirm turn. */
-  const issue = async (userId: string | undefined = OWNER, businessId = BIZ) => {
+  const issue = async (userId: string | null = OWNER, businessId = BIZ) => {
     const turn = await ask(userId, businessId);
     expect(turn.requiresConfirmation).toBe(true);
     expect(turn.pendingConfirmations).toHaveLength(1);
@@ -263,7 +263,7 @@ describe('V1-31 — a quick-confirm turn binds the call on the server and hands 
       response: {
         kind: 'flow_confirmation',
         toolName: TOOL,
-        args: ARGS,
+        argsJson: JSON.stringify(ARGS),
         toolCallId: 'tc_1',
         requestedBy: OWNER,
         crew: ['finance'],
@@ -283,7 +283,7 @@ describe('V1-31 — a quick-confirm turn binds the call on the server and hands 
     const id = required.pendingConfirmations[0].confirmationId;
     expect(id).toEqual(expect.stringMatching(/^flowc_/));
     expect(h.store.all()).toMatchObject([
-      { businessId: BIZ, idempotencyKey: `flow-confirm:${id}`, status: 'pending', response: { toolName: TOOL, args: ARGS, requestedBy: OWNER, surface: 'CHAT_STREAM' } },
+      { businessId: BIZ, idempotencyKey: `flow-confirm:${id}`, status: 'pending', response: { toolName: TOOL, argsJson: JSON.stringify(ARGS), requestedBy: OWNER, surface: 'CHAT_STREAM' } },
     ]);
     expect(h.executeTool).not.toHaveBeenCalled();
 
@@ -295,7 +295,7 @@ describe('V1-31 — a quick-confirm turn binds the call on the server and hands 
 
   it('a turn with no authenticated requester binds nothing, so nothing it shows can be confirmed', async () => {
     const h = makeHarness();
-    const turn = await h.ask(undefined);
+    const turn = await h.ask(null);
     expect(turn.pendingConfirmations![0].confirmationId).toBeUndefined();
     expect(h.store.all()).toEqual([]);
   });
@@ -362,7 +362,7 @@ describe('V1-31 — confirming by id executes the bound call and nothing else', 
   it('a confirmation with no authenticated user executes nothing', async () => {
     const h = makeHarness();
     const confirmationId = await h.issue();
-    const response = await h.confirm({ confirmationId }, undefined);
+    const response = await h.confirm({ confirmationId }, null);
     expect(response.reply).toMatch(/authenticated user is required/);
     expect(h.executeTool).not.toHaveBeenCalled();
     expect(h.store.all()[0]).toMatchObject({ status: 'pending' });
@@ -419,7 +419,7 @@ describe('V1-31 — confirming by id executes the bound call and nothing else', 
     const h = makeHarness();
     const confirmationId = await h.issue();
     const [row] = h.store.rows.values();
-    row.response.args = FORGED_ARGS;
+    row.response.argsJson = JSON.stringify(FORGED_ARGS);
 
     const response = await h.confirm({ confirmationId });
     expect(response.reply).toMatch(/was not executed/);
