@@ -23,7 +23,7 @@ import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
-import { KeyIdempotencyService } from './key-idempotency.service';
+import { KeyIdempotencyService, fingerprintToolRequest } from './key-idempotency.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
@@ -112,6 +112,18 @@ export interface KeyCortexToolMetadata {
   riskTier: KeyCortexToolDefinition['riskTier'];
   requiresApproval: boolean;
   tags?: string[];
+}
+
+/**
+ * The idempotency claim an execute() call holds (check() answered it 'new'):
+ * complete(), fail() and release() name it, so only this call settles or
+ * frees the key (V1-19b, SEC-V19-1).
+ */
+interface OpenClaim {
+  businessId: string;
+  idempotencyKey: string;
+  requestHash: string;
+  claimId?: string;
 }
 
 export interface KeyCortexToolScore {
@@ -289,30 +301,66 @@ export class KeyCortexToolRegistryService {
       return { success: false, error: `Tool "${name}" not found in canonical registry` };
     }
 
-    // Phase 0: idempotency gate — return cached outcome for duplicate keys.
+    // Phase 0: idempotency gate. check() is a claim (V1-19): only the caller
+    // answered 'new' runs the tool, and it alone settles the key, by the
+    // claimId and request hash it claimed under. A settled key replays its
+    // outcome; a key another caller holds ('pending') or claimed for another
+    // request ('conflict') is refused without running anything (V1-19b,
+    // SEC-V19-2 / CR-V19-1: both used to fall through and run the tool).
+    let claim: OpenClaim | undefined;
     if (ctx.idempotencyKey) {
-      const cached = await this.idempotency.check({
+      let requestHash: string;
+      try {
+        requestHash = fingerprintToolRequest(name, input);
+      } catch (err) {
+        // No fingerprint, nothing to tell this request from another: claiming
+        // the key for it would make it every such request's key (SEC-V19-3).
+        return { success: false, notExecuted: true, error: (err as Error).message };
+      }
+      const answer = await this.idempotency.check({
         businessId: ctx.businessId,
         idempotencyKey: ctx.idempotencyKey,
-        requestHash: this.hashRequest(name, input),
+        requestHash,
       });
-      if (cached.status === 'completed') {
-        return { success: true, data: cached.response as any };
+      if (answer.status === 'completed') {
+        return { success: true, data: answer.response as any };
       }
-      if (cached.status === 'failed') {
-        return { success: false, error: cached.error ?? 'Duplicate request failed previously' };
+      if (answer.status === 'failed') {
+        return { success: false, error: answer.error ?? 'Duplicate request failed previously' };
       }
+      if (answer.status !== 'new') {
+        return {
+          success: false,
+          notExecuted: true,
+          error: answer.error ?? `Idempotency key ${ctx.idempotencyKey} is ${answer.status}`,
+        };
+      }
+      claim = { businessId: ctx.businessId, idempotencyKey: ctx.idempotencyKey, requestHash, claimId: answer.claimId };
     }
+
+    // Every path from here that returns without running the tool gives the
+    // claim up, so a retry of the key (an approved re-execution included)
+    // reaches the tool again (V1-19b, CR-V19-2).
+    const notRun = async (result: KeyCortexToolResult): Promise<KeyCortexToolResult> => {
+      await this.releaseClaim(claim);
+      return result;
+    };
 
     // Phase 0: global autonomy kill switch, safety limits, and tier enforcement
     // are the first gate.
-    const safetyCheck = await this.safety.check({
-      businessId: ctx.businessId,
-      toolName: name,
-      riskTier: tool.riskTier,
-      mode: ctx.autonomyLevel && ctx.autonomyLevel >= 2 ? 'auto' : 'manual',
-      estimatedCostTtd: 0,
-    });
+    let safetyCheck: Awaited<ReturnType<KeyAutonomySafetyService['check']>>;
+    try {
+      safetyCheck = await this.safety.check({
+        businessId: ctx.businessId,
+        toolName: name,
+        riskTier: tool.riskTier,
+        mode: ctx.autonomyLevel && ctx.autonomyLevel >= 2 ? 'auto' : 'manual',
+        estimatedCostTtd: 0,
+      });
+    } catch (err) {
+      await this.releaseClaim(claim);
+      throw err;
+    }
     if (!safetyCheck.allowed) {
       this.logger.warn(`[execute][${ctx.businessId}] Safety gate blocked ${name}: ${safetyCheck.reason}`);
       const blocked: KeyCortexToolResult = {
@@ -323,12 +371,12 @@ export class KeyCortexToolRegistryService {
       await this.emitBusinessEvent(ctx, name, input, blocked, 0).catch((err) => {
         this.logger.warn(`Tool business-event emit failed: ${(err as Error).message}`);
       });
-      return blocked;
+      return notRun(blocked);
     }
 
     const validation = this.validateInput(tool, input);
     if (!validation.valid) {
-      return { success: false, error: validation.error };
+      return notRun({ success: false, error: validation.error });
     }
 
     // An approved action skips the autonomy threshold — a human already
@@ -352,15 +400,15 @@ export class KeyCortexToolRegistryService {
       if (tool.riskTier < 4) {
         const proposalId = await this.proposeForApproval(tool, ctx, input, riskCheck.reason);
         if (proposalId) {
-          return {
+          return notRun({
             success: false,
             requiresApproval: true,
             error: `${riskCheck.reason} — sent for approval`,
             data: { proposalId } as KeyCortexToolResult['data'],
-          };
+          });
         }
       }
-      return { success: false, error: riskCheck.reason, requiresApproval: tool.riskTier < 4 };
+      return notRun({ success: false, error: riskCheck.reason, requiresApproval: tool.riskTier < 4 });
     }
 
     const startMs = Date.now();
@@ -394,7 +442,7 @@ export class KeyCortexToolRegistryService {
             this.logger.warn(`Saga step failure logging failed: ${(err as Error).message}`);
           });
         }
-        return result;
+        return notRun(result);
       }
 
       this.recordToolOutcome(name, result.success, durationMs, ctx.businessId);
@@ -423,11 +471,8 @@ export class KeyCortexToolRegistryService {
           });
       }
 
-      if (ctx.idempotencyKey) {
-        await this.idempotency.complete(
-          { businessId: ctx.businessId, idempotencyKey: ctx.idempotencyKey },
-          result,
-        );
+      if (claim) {
+        await this.idempotency.complete(claim, result);
       }
 
       await this.audit(ctx, name, input, result, durationMs).catch((err) => {
@@ -458,11 +503,8 @@ export class KeyCortexToolRegistryService {
         }
       }
 
-      if (ctx.idempotencyKey) {
-        await this.idempotency.fail(
-          { businessId: ctx.businessId, idempotencyKey: ctx.idempotencyKey },
-          err.message,
-        );
+      if (claim) {
+        await this.idempotency.fail(claim, err.message);
       }
 
       await this.audit(ctx, name, input, result, durationMs).catch((auditErr) => {
@@ -730,18 +772,21 @@ export class KeyCortexToolRegistryService {
     };
   }
 
-  private hashRequest(name: string, input: Record<string, unknown>): string {
+  /**
+   * Give an open idempotency claim up without an outcome: the call returns
+   * without running the tool (V1-19b, CR-V19-2). Only a claim check() answered
+   * 'new' with a claimId can be released. A failed release is logged, not
+   * thrown: the caller's own answer stands, and the claim stays open (refusing
+   * retries of the key) rather than freed by a guess.
+   */
+  private async releaseClaim(claim: OpenClaim | undefined): Promise<void> {
+    if (!claim?.claimId) return;
     try {
-      const payload = JSON.stringify({ name, input });
-      let hash = 0;
-      for (let i = 0; i < payload.length; i++) {
-        const char = payload.charCodeAt(i);
-        hash = (hash << 5) - hash + char;
-        hash |= 0;
-      }
-      return hash.toString(16);
-    } catch {
-      return '0';
+      await this.idempotency.release({ ...claim, claimId: claim.claimId });
+    } catch (err) {
+      this.logger.warn(
+        `[execute][${claim.businessId}] could not release idempotency claim ${claim.idempotencyKey}: ${(err as Error).message}`,
+      );
     }
   }
 

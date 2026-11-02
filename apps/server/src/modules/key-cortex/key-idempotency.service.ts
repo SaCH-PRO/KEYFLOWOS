@@ -1,6 +1,34 @@
+import { createHash } from 'crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { canonicalJson } from '../key-autonomy/action-boundary/action-envelope';
+
+/**
+ * The request hash a tool call claims its idempotency key under (V1-19b,
+ * SEC-V19-3): sha256 over the canonical JSON (object keys sorted at every
+ * depth, as the KEY action boundary fingerprints) of the tool name and its
+ * input. The input is taken in its JSON form first, so a Date is its ISO
+ * string and an undefined field is absent: two requests that serialize alike
+ * are one request to the claim, and two that do not are a 'conflict'.
+ *
+ * It replaces the tool registry's own hash, a 32-bit string hash of
+ * key-order-sensitive JSON.stringify ({to:'Aa'} and {to:'BB'} hashed alike;
+ * {a,b} and {b,a} did not) that answered '0' for every input it could not
+ * serialize. An input with no JSON form (a circular reference, a BigInt) has
+ * no fingerprint: this throws, and the caller must not claim a key for it.
+ */
+export function fingerprintToolRequest(toolName: string, input: unknown): string {
+  let jsonForm: unknown;
+  try {
+    jsonForm = JSON.parse(JSON.stringify({ name: toolName, input: input ?? null }));
+  } catch (err) {
+    throw new Error(`Request cannot be fingerprinted: ${err instanceof Error ? err.message : String(err)}`, {
+      cause: err,
+    });
+  }
+  return createHash('sha256').update(canonicalJson(jsonForm)).digest('hex');
+}
 
 export interface IdempotencyCheckResult<T = unknown> {
   /**
@@ -70,17 +98,19 @@ function isRecordNotFound(err: unknown): boolean {
  * request_hash is now compared: a key presented with a different request hash
  * is a 'conflict', not the stored outcome of the other request. That holds
  * only as far as the caller's request hash tells two requests apart: requests
- * the caller hashes alike are, to this service, the same request.
+ * the caller hashes alike are, to this service, the same request. The tool
+ * registry hashes with fingerprintToolRequest() above (V1-19b).
  *
  * Settling is bound to the claim (V1-19 review, SEC-V19-1): complete() and
  * fail() write only a key that is still 'pending', only for the caller's
  * request hash when it presents one, and only for the caller's claimId when it
  * presents that. A settled key is never settled again, and a caller answered
  * 'conflict' cannot overwrite the holder's outcome. Each answers whether it
- * settled the claim. A caller that presents no claimId (the tool registry
- * today) is bound by status and hash only. release() gives an open claim up
- * without an outcome (V1-19 review, CR-V19-2), so a claimant that decides not
- * to run need not hold the key for good.
+ * settled the claim. A caller that presents no claimId is bound by status and
+ * hash only; the tool registry presents both (V1-19b). release() gives an
+ * open claim up without an outcome (V1-19 review, CR-V19-2), so a claimant
+ * that decides not to run need not hold the key for good; the tool registry
+ * releases on every path that returns without running the tool (V1-19b).
  */
 @Injectable()
 export class KeyIdempotencyService {
