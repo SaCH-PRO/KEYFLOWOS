@@ -8,6 +8,7 @@ import {
   type AccessLevel,
   type CanonicalModule,
 } from '../../core/authority/module-vocabulary';
+import { membershipApprovalTier } from '../../core/authority/approval-tier';
 
 /**
  * Position-scoped governance envelope: what a specific JobRole (position)
@@ -49,7 +50,8 @@ import {
  * each member whose account phone it carries (review 7 INP4-3). Only an envelope this service
  * issued governs a KEY turn (isIssued; review 7 ENV-FORGE). No grant reaches a tool whose
  * dispatcher call finds its row by a bare id, which on the staff bridge, with no tenant context,
- * is any business's row (TENANT_UNBOUND_TOOLS, review 8 DD8-1). A registry tool some
+ * is any business's row (TENANT_UNBOUND_TOOLS, review 8 DD8-1). A reply approval is capped by
+ * the same rows (approvalTierForPosition, review 9 WB-1 / FB-3). A registry tool some
  * pattern matches but no grant covers is
  * listed in `blockedTools`, which `isToolAllowed` checks first, so
  * AiOversightService.evaluate refuses it and the chat never advertises it.
@@ -347,7 +349,7 @@ export type HolderUser = Pick<User, 'deletedAt' | 'bannedAt'>;
  * `userId` in `businessId`), with the membership's user as AuthMiddleware reads it.
  */
 export type HolderMembership = Pick<Membership, 'role' | 'permissionScopes'> &
-  Partial<Pick<Membership, 'businessId' | 'userId'>> & { user?: HolderUser | null };
+  Partial<Pick<Membership, 'businessId' | 'userId' | 'maxApprovalTier'>> & { user?: HolderUser | null };
 
 /**
  * A staff position as StructureService.resolveStaffByPhone returns it: the OrgAssignment's
@@ -363,6 +365,44 @@ export interface StaffPosition {
   userId?: string | null;
   membership?: HolderMembership | null;
   phoneMembers?: readonly HolderMembership[] | null;
+}
+
+/**
+ * The tier a staff position may approve by replying YES to a pending item routed to it
+ * (StaffChatBridgeService -> AiOversightService.resolveApprovalByAssignment; V1-21b review 9
+ * WB-1 / FB-3). Over HTTP an approval needs an account AuthMiddleware lets in, a membership in
+ * the item's business (BusinessGuard) and membershipApprovalTier at or above the item's tier
+ * (AiOversightService.resolveApproval). The reply path checked JobRole.defaultApprovalTier alone,
+ * so a holder narrowed to tier 0, banned, or a member of another business only, approved a tier-3
+ * item by WhatsApp. The tier is now the JobRole's, capped as envelopeForPosition caps the tools:
+ *  - a membership-backed position by the membership HTTP reads for its holder in the position's
+ *    business, whose account must be active; any other membership, or none, is refused;
+ *  - every position by each member whose account phone is the position's (INP4-3), whose account
+ *    must be active and whose row must be in the position's business; otherwise refused.
+ * A contact-only position with no member on its phone keeps its JobRole tier, as before. A
+ * refusal carries a reason and tier 0; `tier` is the highest risk tier the reply may approve.
+ */
+export function approvalTierForPosition(
+  position: StaffPosition & { jobRole?: (Pick<JobRole, 'id' | 'name' | 'permissions'> & { defaultApprovalTier?: number | null }) | null },
+): { tier: number; refusal?: string } {
+  let tier = position.jobRole?.defaultApprovalTier ?? 0;
+  if (position.membershipId || position.userId || position.membership) {
+    const membership = position.membership;
+    if (!membership || !isHoldersMembershipHere(position, membership)) {
+      return { tier: 0, refusal: "This position's holder is not a member of this business" };
+    }
+    if (!holderMayAuthenticate(membership)) {
+      return { tier: 0, refusal: "This position's holder cannot sign in, so cannot approve" };
+    }
+    tier = Math.min(tier, membershipApprovalTier({ role: membership.role, maxApprovalTier: membership.maxApprovalTier, permissionScopes: membership.permissionScopes }));
+  }
+  for (const member of position.phoneMembers ?? []) {
+    if (!isMembershipHere(position, member) || !holderMayAuthenticate(member)) {
+      return { tier: 0, refusal: 'A member who uses this phone number cannot approve in this business' };
+    }
+    tier = Math.min(tier, membershipApprovalTier({ role: member.role, maxApprovalTier: member.maxApprovalTier, permissionScopes: member.permissionScopes }));
+  }
+  return { tier };
 }
 
 /**

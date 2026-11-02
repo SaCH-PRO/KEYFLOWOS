@@ -17,6 +17,7 @@ interface WhatsAppWebhookBody {
   WaId?: string;
   ProfileName?: string;
   SmsMessageSid?: string;
+  MessageSid?: string;
   entry?: Array<{
     changes?: Array<{
       value?: {
@@ -202,9 +203,7 @@ export class WhatsAppController {
       return { success: false, error: 'Unrecognized WhatsApp webhook payload' };
     }
 
-    const phoneNumberId = (body as unknown as {
-      entry?: Array<{ changes?: Array<{ value?: { metadata?: { phone_number_id?: string } } }> }>;
-    }).entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+    const phoneNumberId = this.metaPhoneNumberId(body);
     if (!phoneNumberId) {
       return { success: true, routed: false, reason: 'no phone_number_id in payload' };
     }
@@ -290,6 +289,11 @@ export class WhatsAppController {
 
     if (parsed.provider === 'meta') {
       this.assertMetaSignature(req);
+      // V1-21b review 9 WB-2: Meta signs every business's messages with the one app secret, so
+      // the signature says Meta sent the body, not that it is this business's. The body names the
+      // number it was sent to; a number this business has not connected runs nothing here (POST
+      // /whatsapp/webhook routes the same body to the business that owns the number).
+      await this.assertMetaNumberIsBusiness(businessId, body);
     } else if (parsed.provider === 'twilio') {
       this.assertTwilioSignature(req, body as unknown as Record<string, unknown>);
     }
@@ -328,6 +332,29 @@ export class WhatsAppController {
         errorMessage: message,
       });
       return { success: false, error: message };
+    }
+  }
+
+  /** The phone_number_id of Meta's envelope: the business number the message was sent to. */
+  private metaPhoneNumberId(body: WhatsAppWebhookBody): string | undefined {
+    const id = (body as unknown as {
+      entry?: Array<{ changes?: Array<{ value?: { metadata?: { phone_number_id?: unknown } } }> }>;
+    }).entry?.[0]?.changes?.[0]?.value?.metadata?.phone_number_id;
+    return typeof id === 'string' || typeof id === 'number' ? String(id) : undefined;
+  }
+
+  /** A Meta body is taken on /whatsapp/webhook/:businessId only for a number that business connected. */
+  private async assertMetaNumberIsBusiness(businessId: string, body: WhatsAppWebhookBody) {
+    const phoneNumberId = this.metaPhoneNumberId(body);
+    if (!phoneNumberId) {
+      throw new ForbiddenException('Meta webhook payload names no phone_number_id');
+    }
+    const owner = await this.prisma.client.business.findFirst({
+      where: { id: businessId, metaData: { path: ['whatsapp', 'phoneNumberId'], equals: phoneNumberId } },
+      select: { id: true },
+    });
+    if (!owner) {
+      throw new ForbiddenException('This WhatsApp number is not connected to this business');
     }
   }
 
@@ -409,7 +436,7 @@ export class WhatsAppController {
         from: body.From,
         body: body.Body ?? '',
         senderName: body.ProfileName,
-        externalId: body.SmsMessageSid,
+        externalId: body.SmsMessageSid ?? body.MessageSid,
         provider: 'twilio',
       };
     }

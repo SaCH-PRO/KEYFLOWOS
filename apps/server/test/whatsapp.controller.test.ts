@@ -35,7 +35,18 @@ describe('WhatsAppController webhook signatures', () => {
     receiveInbound: vi.fn(async () => ({ contactId: 'c1', isNew: false })),
   };
   const webhookLogger: any = { log: vi.fn() };
-  const controller = new WhatsAppController(service, webhookLogger);
+  // V1-21b review 9 WB-2: a Meta body is taken on /whatsapp/webhook/:businessId only for a number
+  // that business connected
+  const prisma: any = {
+    client: {
+      business: {
+        findFirst: vi.fn(async ({ where }: any) =>
+          where.id === 'biz_1' && where.metaData?.equals === 'pn_biz_1' ? { id: 'biz_1' } : null,
+        ),
+      },
+    },
+  };
+  const controller = new WhatsAppController(service, webhookLogger, prisma);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -59,7 +70,7 @@ describe('WhatsAppController webhook signatures', () => {
   });
 
   it('accepts a Meta payload with a valid signature', async () => {
-    const body = { object: 'whatsapp_business_account', entry: [{ changes: [{ value: { messages: [{ from: '123', id: 'm1', timestamp: '1700000000', text: { body: 'hi' } }] } }] }] };
+    const body = { object: 'whatsapp_business_account', entry: [{ changes: [{ value: { metadata: { phone_number_id: 'pn_biz_1' }, messages: [{ from: '123', id: 'm1', timestamp: '1700000000', text: { body: 'hi' } }] } }] }] };
     const raw = JSON.stringify(body);
     const res = await controller.webhook(
       'biz_1',
@@ -70,6 +81,17 @@ describe('WhatsAppController webhook signatures', () => {
       makeReq({ headers: { 'x-hub-signature-256': metaSignature(raw, SECRET) }, rawBody: raw }),
     );
     expect(res).toMatchObject({ success: true, contactId: 'c1', isNew: false });
+  });
+
+  it("refuses a validly signed Meta payload for a number the business has not connected (V1-21b review 9 WB-2)", async () => {
+    for (const metadata of [{ phone_number_id: 'pn_biz_2' }, {}]) {
+      const body = { object: 'whatsapp_business_account', entry: [{ changes: [{ value: { metadata, messages: [{ from: '123', id: 'm2', text: { body: 'YES' } }] } }] }] };
+      const raw = JSON.stringify(body);
+      await expect(
+        controller.webhook('biz_1', body as any, undefined, undefined, undefined, makeReq({ headers: { 'x-hub-signature-256': metaSignature(raw, SECRET) }, rawBody: raw })),
+      ).rejects.toThrow(/not connected to this business|names no phone_number_id/);
+    }
+    expect(service.receiveInbound).not.toHaveBeenCalled();
   });
 
   it('rejects a Twilio payload with a bad signature', async () => {

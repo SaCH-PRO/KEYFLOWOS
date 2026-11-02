@@ -8,11 +8,16 @@ interface PrismaMockOptions {
   businessHours?: Record<string, { open: string; close: string; closed: boolean }> | null;
   storeEnabled?: boolean;
   services?: Array<any>;
+  // createBooking refuses a contact or staff member outside the business (V1-21b review 9 TD9-3)
+  contacts?: Array<{ id: string; businessId: string }>;
+  staff?: Array<{ id: string; businessId: string }>;
 }
 
 class PrismaMock {
   bookings: any[] = [];
   services!: any[];
+  contacts!: Array<{ id: string; businessId: string; deletedAt: null }>;
+  staff!: Array<{ id: string; businessId: string; deletedAt: null }>;
   availabilities!: PrismaMockOptions['availabilities'];
   businessHours!: PrismaMockOptions['businessHours'];
   storeEnabled!: boolean;
@@ -23,6 +28,14 @@ class PrismaMock {
     self.services = opts.services ?? [
       { id: 'service_1', businessId: 'biz_1', duration: 60, price: 100, name: 'Consult', deletedAt: null, leadTimeMins: 0, bufferMins: 0 },
     ];
+    self.contacts = (opts.contacts ?? [
+      { id: 'contact_1', businessId: 'biz_1' },
+      { id: 'contact_2', businessId: 'biz_2' },
+    ]).map((c) => ({ ...c, deletedAt: null }));
+    self.staff = (opts.staff ?? [
+      { id: 'staff_1', businessId: 'biz_1' },
+      { id: 'staff_2', businessId: 'biz_2' },
+    ]).map((m) => ({ ...m, deletedAt: null }));
     self.availabilities = opts.availabilities ?? [];
     self.businessHours = opts.businessHours ?? null;
     self.storeEnabled = opts.storeEnabled ?? true;
@@ -69,8 +82,14 @@ class PrismaMock {
         }),
       },
       contact: {
-        findFirst: vi.fn(() => null),
+        // by id within the business (createBooking's check); any other lookup finds none, as before
+        findFirst: vi.fn(({ where }: any = {}) =>
+          where?.id ? self.contacts.find((c) => c.id === where.id && c.businessId === where.businessId) ?? null : null,
+        ),
         create: vi.fn(),
+      },
+      staffMember: {
+        findFirst: vi.fn(({ where }: any) => self.staff.find((m) => m.id === where.id && m.businessId === where.businessId) ?? null),
       },
       business: {
         findFirstOrThrow: vi.fn(() => ({
@@ -150,7 +169,13 @@ describe('BookingsService', () => {
 
   it('lists bookings per business', async () => {
     const events = { emit: vi.fn() } as unknown as EventEmitter2;
-    const prisma = new PrismaMock() as unknown as PrismaService;
+    // each business books its own service (createBooking refuses another's, V1-21b review 9 TD9-3)
+    const prisma = new PrismaMock({
+      services: [
+        { id: 'service_1', businessId: 'biz_1', duration: 60, price: 100, name: 'Consult', deletedAt: null, leadTimeMins: 0, bufferMins: 0 },
+        { id: 'service_2', businessId: 'biz_2', duration: 60, price: 100, name: 'Consult', deletedAt: null, leadTimeMins: 0, bufferMins: 0 },
+      ],
+    }) as unknown as PrismaService;
     const crm = { findOrCreateContact: vi.fn(), logContactEvent: vi.fn() };
     const service = new BookingsService(
       prisma,

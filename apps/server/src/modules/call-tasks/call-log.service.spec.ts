@@ -5,7 +5,12 @@ function createMockPrisma() {
   const store = {
     callLogs: new Map<string, any>(),
     contactTasks: new Map<string, any>(),
-    contacts: new Map<string, any>(),
+    // the contacts the cases name, each in its business (createCallLog checks it, review 9 TD9-2)
+    contacts: new Map<string, any>([
+      ['contact_1', { id: 'contact_1', businessId: 'biz_1' }],
+      ['contact_2', { id: 'contact_2', businessId: 'biz_1' }],
+      ['contact_t', { id: 'contact_t', businessId: 'biz_theirs' }],
+    ]),
   };
   let idCounter = 0;
 
@@ -100,6 +105,12 @@ function createMockPrisma() {
         findUnique: vi.fn(async (args: any) =>
           store.contacts.get(args.where.id) ?? null,
         ),
+        findFirst: vi.fn(async (args: any) => {
+          const row = store.contacts.get(args.where.id);
+          if (!row) return null;
+          if (args.where.businessId !== undefined && row.businessId !== args.where.businessId) return null;
+          return row;
+        }),
       },
     },
     store,

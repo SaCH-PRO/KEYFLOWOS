@@ -38,16 +38,19 @@ export class CallScriptService {
   ): Promise<CallScriptResult> {
     const contact = await this.prisma.client.contact.findFirst({
       where: { id: contactId, businessId },
+      // Relation includes are not filtered by business: a row another business wrote onto this
+      // contact (a ContactTask planted through its own call log, review 9 TD9-2) would reach the
+      // prompt. Each is read within the business.
       include: {
         deals: {
-          where: { status: 'OPEN' },
+          where: { businessId, status: 'OPEN' },
           take: 5,
           include: { stage: true },
         },
-        invoices: { orderBy: { issueDate: 'desc' }, take: 5 },
-        bookings: { orderBy: { startTime: 'desc' }, take: 5 },
+        invoices: { where: { businessId }, orderBy: { issueDate: 'desc' }, take: 5 },
+        bookings: { where: { businessId }, orderBy: { startTime: 'desc' }, take: 5 },
         tasks: {
-          where: { status: 'OPEN' },
+          where: { businessId, status: 'OPEN' },
           orderBy: { dueDate: 'asc' },
           take: 5,
         },

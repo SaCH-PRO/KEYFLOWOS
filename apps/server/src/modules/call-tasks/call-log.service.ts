@@ -62,7 +62,25 @@ export class CallLogService {
     @Inject(EventEmitter2) private readonly emitter: EventEmitter2,
   ) {}
 
+  /**
+   * A call log's contact is the business's own (V1-21b review 9 TD9-2). createCallLog and
+   * updateCallLog stored any contactId: a call log of A then named B's contact, getCallLog(A, id)
+   * passed, and createFollowUpTask wrote a ContactTask { businessId A, contactId <B's> } whose
+   * title reached B's call script. On the staff bridge no tenant context binds anything, and over
+   * HTTP the tenant extension binds wheres, not a foreign key. Another business's contact answers
+   * as an unknown one.
+   */
+  private async assertContactInBusiness(businessId: string, contactId: string | null | undefined) {
+    if (contactId === undefined || contactId === null) return;
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+  }
+
   async createCallLog(input: CreateCallLogInput) {
+    await this.assertContactInBusiness(input.businessId, input.contactId);
     const scheduledAt = input.scheduledAt
       ? new Date(input.scheduledAt)
       : undefined;
@@ -156,6 +174,7 @@ export class CallLogService {
     if (existing.completedAt) {
       throw new BadRequestException('Cannot update a completed call log');
     }
+    await this.assertContactInBusiness(businessId, input.contactId);
 
     const updated = await this.prisma.client.callLog.update({
       where: { id },

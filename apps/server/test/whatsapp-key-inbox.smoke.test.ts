@@ -136,6 +136,9 @@ describe('WhatsApp KEYInbox webhook smoke (B.5)', () => {
           changes: [
             {
               value: {
+                // Meta names the business number it was sent to; the per-business route takes it
+                // only for a number that business connected (V1-21b review 9 WB-2)
+                metadata: { phone_number_id: 'pn_smoke' },
                 messages: [
                   {
                     id: 'wamid.smoke002',

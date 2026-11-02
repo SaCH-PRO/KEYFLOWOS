@@ -868,6 +868,31 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
       select: { bufferMins: true },
     });
+    // V1-21b review 9 TD9-3: every row the booking names is the business's own. The service
+    // lookup above only read a buffer and never refused, so a booking of A pointed at B's service
+    // (and B's staff member), and KEY's bookings_list_bookings read the service's name back. On
+    // the staff bridge no tenant context binds anything; over HTTP the tenant extension binds
+    // wheres, not a foreign key. Another business's row answers as an unknown one.
+    if (!bookedService) throw new NotFoundException('Service not found');
+    if (input.staffId) {
+      const staff = await this.prisma.client.staffMember.findFirst({
+        where: { id: input.staffId, businessId: input.businessId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!staff) throw new NotFoundException('Staff member not found');
+    }
+    const bookedContact = await this.prisma.client.contact.findFirst({
+      where: { id: input.contactId, businessId: input.businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!bookedContact) throw new NotFoundException('Contact not found');
+    if (input.orgUnitId) {
+      const unit = await this.prisma.client.orgUnit.findFirst({
+        where: { id: input.orgUnitId, businessId: input.businessId },
+        select: { id: true },
+      });
+      if (!unit) throw new NotFoundException('Org unit not found');
+    }
     await this.assertSlotFree({
       businessId: input.businessId,
       serviceId: input.serviceId,

@@ -655,6 +655,22 @@ const ROW_OPS = new Set(['findUnique', 'findUniqueOrThrow', 'findFirst', 'findFi
  */
 type Seed = boolean | ReadonlySet<string>;
 
+/**
+ * What a caller's argument is, beyond whether the model chose it (review 9 TD9-5): 'absent' when
+ * nothing is handed over (an argument not passed, or `undefined` / `null`), the keys of an object
+ * literal it hands over, or null when that is not known (the value is present). Prisma drops a
+ * `businessId: undefined`, so a where whose businessId is absent names no business.
+ */
+type Shape = 'absent' | ReadonlySet<string> | null;
+
+/** The roots of a body whose value is absent, and the object parameters whose keys are known. */
+interface Absence {
+  absent: ReadonlySet<string>;
+  supplied: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+const NO_ABSENCE: Absence = { absent: new Set(), supplied: new Map() };
+
 /** A where on a tenant model that names a row by an id the model chose. */
 interface Touch {
   model: string;
@@ -698,7 +714,14 @@ const COMPARES_TENANT = /\.businessId !== (?:[\w.]+\.)?businessId\)?\s*\{?\s*(?:
  * value it proved for the rest of the body; a body that compares the row's businessId with its
  * own binds what it reached.
  */
-function chosenTouches(ctx: ClassCtx, fn: ts.Node, roots: ReadonlyMap<string, Seed>, seen: Set<string>, opts: { dispatcher?: boolean; ignoreProofs?: boolean } = {}): Touch[] {
+function chosenTouches(
+  ctx: ClassCtx,
+  fn: ts.Node,
+  roots: ReadonlyMap<string, Seed>,
+  seen: Set<string>,
+  opts: { dispatcher?: boolean; ignoreProofs?: boolean } = {},
+  absence: Absence = NO_ABSENCE,
+): Touch[] {
   const decls = new Map<string, ts.Expression>();
   const picked = new Map<string, { from: ts.Expression; key: string }>();
   const collect = (n: ts.Node) => {
@@ -768,6 +791,35 @@ function chosenTouches(ctx: ClassCtx, fn: ts.Node, roots: ReadonlyMap<string, Se
     return false;
   };
 
+  /**
+   * Whether `e` is a value its caller never handed over (review 9 TD9-5): `undefined`, `null`, a
+   * parameter not passed, a key left out of the object literal handed over, or a copy of one.
+   */
+  const isAbsent = (e: ts.Expression, depth = 0): boolean => {
+    if (depth > 8) return false;
+    const x = unwrapExpr(e);
+    if (x.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(x)) return true;
+    if (ts.isIdentifier(x)) {
+      if (x.text === 'undefined' || absence.absent.has(x.text)) return true;
+      if (roots.has(x.text)) return false;
+      const p = picked.get(x.text);
+      if (p) return !readsRow(p.from) && isAbsentKey(p.from, p.key, depth + 1);
+      const d = decls.get(x.text);
+      return d && !readsRow(d) ? isAbsent(d, depth + 1) : false;
+    }
+    if (ts.isPropertyAccessExpression(x)) return isAbsentKey(x.expression, x.name.text, depth + 1);
+    return false;
+  };
+  const isAbsentKey = (obj: ts.Expression, key: string, depth: number): boolean => {
+    const o = unwrapExpr(obj);
+    if (isAbsent(o, depth)) return true;
+    if (ts.isIdentifier(o) && !decls.has(o.text) && !picked.has(o.text)) {
+      const keys = absence.supplied.get(o.text);
+      if (keys) return !keys.has(key);
+    }
+    return false;
+  };
+
   const classifyWhere = (w: ts.Expression, depth = 0): { chosenId: boolean; bound: boolean; idText?: string } => {
     const none = { chosenId: false, bound: false };
     if (depth > 6) return none;
@@ -780,7 +832,7 @@ function chosenTouches(ctx: ClassCtx, fn: ts.Node, roots: ReadonlyMap<string, Se
       // contactWhereWithId(input.businessId, input.contactId)
       return {
         chosenId: x.arguments.some((a) => seedOf(a) === true),
-        bound: x.arguments.some((a) => /\bbusinessId\b/.test(a.getText()) && seedOf(a) !== true),
+        bound: x.arguments.some((a) => /\bbusinessId\b/.test(a.getText()) && seedOf(a) !== true && !isAbsent(a)),
       };
     }
     if (!ts.isObjectLiteralExpression(x)) return none;
@@ -807,14 +859,34 @@ function chosenTouches(ctx: ClassCtx, fn: ts.Node, roots: ReadonlyMap<string, Se
           idText = idValue.getText();
         }
       } else if (k === 'businessId') {
-        // a tenant the model chose binds nothing
-        if (seedOf(v) !== true) bound = true;
+        // a tenant the model chose binds nothing, nor one the caller never handed over (TD9-5)
+        if (seedOf(v) !== true && !isAbsent(v)) bound = true;
       } else if (ts.isObjectLiteralExpression(unwrapExpr(v)) && /\bbusinessId\b/.test(v.getText())) {
         // a relation filter that names the tenant: { project: { businessId } }
-        bound = true;
+        if (classifyWhere(v, depth + 1).bound) bound = true;
       }
     }
     return { chosenId, bound, idText };
+  };
+
+  /** What an argument hands over: nothing, an object literal's keys, or a value (TD9-5). */
+  const shapeOf = (a: ts.Expression, depth = 0): Shape => {
+    if (isAbsent(a)) return 'absent';
+    const x = unwrapExpr(a);
+    if (ts.isObjectLiteralExpression(x)) {
+      const keys = new Set<string>();
+      for (const p of x.properties) {
+        if (ts.isSpreadAssignment(p)) return null;
+        const v = ts.isPropertyAssignment(p) ? p.initializer : ts.isShorthandPropertyAssignment(p) ? p.name : undefined;
+        if (p.name && !(v && isAbsent(v))) keys.add(p.name.getText());
+      }
+      return keys;
+    }
+    if (ts.isIdentifier(x) && depth < 8) {
+      const d = decls.get(x.text);
+      if (d && !readsRow(d) && ts.isObjectLiteralExpression(unwrapExpr(d))) return shapeOf(d, depth + 1);
+    }
+    return null;
   };
 
   const ownershipHelper = (name: string) => opts.dispatcher && COMPARES_TENANT.test(memberBody(ctx.src, name) ?? '');
@@ -849,8 +921,9 @@ function chosenTouches(ctx: ClassCtx, fn: ts.Node, roots: ReadonlyMap<string, Se
             for (const a of n.arguments) proven.add(a.getText());
           } else {
             const seeds = n.arguments.map((a) => (proven.has(a.getText()) ? false : seedOf(a)));
+            const shapes = n.arguments.map((a) => shapeOf(a));
             const at = via ?? (callee.startsWith(`${ctx.cls}.`) && opts.dispatcher ? null : callee);
-            if (seeds.some((s) => s !== false)) touches.push(...methodTouches(callee, seeds, seen, at, opts.dispatcher ? opts : {}));
+            if (seeds.some((s) => s !== false)) touches.push(...methodTouches(callee, seeds, seen, at, opts.dispatcher ? opts : {}, shapes));
             nextVia = at;
           }
         }
@@ -867,8 +940,19 @@ function chosenTouches(ctx: ClassCtx, fn: ts.Node, roots: ReadonlyMap<string, Se
 const SYNTHETIC_CLASSES = new Map<string, string>();
 
 /** The rows `Class.method` reaches by an id the model chose, given what its caller handed each parameter. */
-function methodTouches(call: string, seeds: Seed[], seen: Set<string>, via: string | null, opts: { dispatcher?: boolean; ignoreProofs?: boolean } = {}): Touch[] {
-  const key = `${call}(${seeds.map((s) => (s === true ? '*' : s === false ? '-' : [...s].sort().join('|'))).join(',')})`;
+function methodTouches(
+  call: string,
+  seeds: Seed[],
+  seen: Set<string>,
+  via: string | null,
+  opts: { dispatcher?: boolean; ignoreProofs?: boolean } = {},
+  shapes: readonly Shape[] = [],
+): Touch[] {
+  const shapeKey = (i: number) => {
+    const sh = shapes[i] ?? null;
+    return sh === 'absent' ? '~' : sh ? `{${[...sh].sort().join('|')}}` : '';
+  };
+  const key = `${call}(${seeds.map((s, i) => (s === true ? '*' : s === false ? '-' : [...s].sort().join('|')) + shapeKey(i)).join(',')})`;
   if (seen.has(key)) return [];
   seen.add(key);
   const [cls, method] = call.split('.');
@@ -886,15 +970,35 @@ function methodTouches(call: string, seeds: Seed[], seen: Set<string>, via: stri
   find(sf);
   if (!decl?.body) return [];
   const roots = new Map<string, Seed>();
+  // review 9 TD9-5: a parameter its caller did not pass (or passed as undefined / null) is absent,
+  // and so is a key left out of the object literal it handed over: Prisma drops such a businessId
+  const absent = new Set<string>();
+  const supplied = new Map<string, ReadonlySet<string>>();
   decl.parameters.forEach((p, i) => {
     const s = seeds[i] ?? false;
-    if (ts.isIdentifier(p.name)) roots.set(p.name.text, s);
-    else if (ts.isObjectBindingPattern(p.name)) {
-      for (const el of p.name.elements) if (ts.isIdentifier(el.name)) roots.set(el.name.text, keyOf(s, (el.propertyName ?? el.name).getText()));
+    const shape: Shape = i >= seeds.length ? 'absent' : (shapes[i] ?? null);
+    if (ts.isIdentifier(p.name)) {
+      roots.set(p.name.text, s);
+      if (shape === 'absent') absent.add(p.name.text);
+      else if (shape) supplied.set(p.name.text, shape);
+    } else if (ts.isObjectBindingPattern(p.name)) {
+      for (const el of p.name.elements) {
+        if (!ts.isIdentifier(el.name)) continue;
+        const k = (el.propertyName ?? el.name).getText();
+        roots.set(el.name.text, keyOf(s, k));
+        if (shape === 'absent' || (shape && !shape.has(k))) absent.add(el.name.text);
+      }
     }
   });
   const ctx = classCtx(cls, src);
-  return chosenTouches(ctx, decl.body, roots, seen, { dispatcher: cls === 'FlowOrchestratorService' && opts.dispatcher, ignoreProofs: opts.ignoreProofs }).map((t) => ({
+  return chosenTouches(
+    ctx,
+    decl.body,
+    roots,
+    seen,
+    { dispatcher: cls === 'FlowOrchestratorService' && opts.dispatcher, ignoreProofs: opts.ignoreProofs },
+    { absent, supplied },
+  ).map((t) => ({
     ...t,
     via: via ?? t.via,
   }));
@@ -2111,7 +2215,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         // content_get_request, half-fixed: getById(args.requestId, businessId)
         expect(ambientOf('getById', [true, false])).toEqual([]);
         for (const method of ['assignRequest', 'deliverRequest', 'submitForReview', 'transitionStatus', 'uploadDeliverables']) {
-          expect(memberBody(mutated, method), method).toMatch(/await this\.getById\(requestId\);/);
+          expect(memberBody(mutated, method), method).toMatch(/this\.(?:getById|transitionStatus)\(requestId\b/);
           expect(ambientOf(method, [true, true, true, true]), method).toEqual([`ContentRequestService.${method}`]);
         }
       } finally {
@@ -2144,7 +2248,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
 
     it('TD9-3: BookingsService.createBooking refuses a service, staff member, contact or unit outside the business before the booking is written', () => {
       const body = memberBody(read('modules/bookings/bookings.service.ts'), 'createBooking')!;
-      const write = body.indexOf('booking.create');
+      const write = body.indexOf('this.prisma.client.booking.create');
       for (const refusal of [
         "throw new NotFoundException('Service not found')",
         "throw new NotFoundException('Staff member not found')",

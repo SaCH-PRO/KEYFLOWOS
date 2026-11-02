@@ -2776,6 +2776,24 @@ ${triage.standingContext}`;
     return this.executeToolAction(businessId, toolName, args, action);
   }
 
+  /**
+   * A contact id the model chose, refused unless it is a live contact of `businessId` (V1-21b
+   * review 9 TD9-4). CommerceService.createInvoice / createQuote store contactId as given on this
+   * base (R0-27's assertContactInBusiness is not on it): on the staff bridge, with no tenant
+   * context, commerce_create_invoice bound another business's contact and echoed its row, and
+   * commerce_create_quote wrote the quote before logContactEvent refused it. An absent id is left
+   * to the service, as before.
+   */
+  private async contactWithinBusiness(businessId: string, contactId: unknown): Promise<void> {
+    if (contactId === undefined || contactId === null) return;
+    if (typeof contactId !== 'string' || !contactId) throw new BadRequestException('contactId must be a non-empty string');
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!contact) throw new NotFoundException('Contact not found');
+  }
+
   private async executeToolAction(
     businessId: string,
     toolName: string,
@@ -3352,6 +3370,8 @@ ${triage.standingContext}`;
       }
 
       case 'commerce_create_invoice': {
+        // the contact is this business's (V1-21b review 9 TD9-4), before anything is written
+        await this.contactWithinBusiness(businessId, args.contactId);
         const items = args.items ?? [];
         const invoiceCount = await this.prisma.client.invoice.count({ where: { businessId } });
         const invoiceNumber = `INV-${String(invoiceCount + 1).padStart(4, '0')}`;
@@ -3390,6 +3410,8 @@ ${triage.standingContext}`;
       }
 
       case 'commerce_create_quote': {
+        // as commerce_create_invoice: no quote is written for another business's contact (TD9-4)
+        await this.contactWithinBusiness(businessId, args.contactId);
         const items = args.items ?? [];
         const quoteCount = await this.prisma.client.quote.count({ where: { businessId } });
         const quoteNumber = `QT-${String(quoteCount + 1).padStart(4, '0')}`;

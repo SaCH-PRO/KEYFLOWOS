@@ -13,6 +13,7 @@ import { UpdateAssignmentDto } from './dto/update-assignment.dto';
 import { CreateDelegationRuleDto } from './dto/create-delegation-rule.dto';
 import { UpdateDelegationRuleDto } from './dto/update-delegation-rule.dto';
 import { normalizePhone } from '../crm/crm-duplicate.util';
+import { HOLDER_ACCOUNT, holderMembershipHere, membersByPhone } from './position-holders';
 
 /**
  * V1-21-AUTH-JOBROLE-CEILING (CF-27; CR-1 in identity-boundary.integration.test.ts).
@@ -79,20 +80,9 @@ const REACH_FIELDS = ['contactPhone', 'contactEmail', 'preferredChannel', 'autoA
 /** A JobRole as it confers authority on a position. */
 type JobRoleGrant = { permissions: unknown; defaultApprovalTier: number };
 
-/** The holder's account, as AuthMiddleware reads it (V1-21b review 5 INP4-1). */
-const HOLDER_ACCOUNT = { deletedAt: true, bannedAt: true } as const;
-
-/** A membership with its user's account state, as resolveStaffByPhone hands it to the bridge. */
-type HolderMembershipRow = Prisma.MembershipGetPayload<{ include: { user: { select: typeof HOLDER_ACCOUNT } } }>;
-
 /** createAssignment / updateAssignment: a contact-only position on a member's phone (V1-21b review 7 INP4-3). */
 const REFUSED_MEMBER_PHONE =
   'A member of this business uses this phone number; give the position to their membership instead of a contact-only position';
-
-/** A phone number's digits, the form two spellings of one number share ('+1 (868) 555-1904' and '+18685551904'). */
-function phoneDigits(phone: string | null | undefined): string {
-  return (phone ?? '').replace(/\D/g, '');
-}
 
 function isPlainMap(value: unknown): value is Prisma.InputJsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -927,39 +917,20 @@ export class StructureService {
 
   /**
    * The membership HTTP reads for the holder of `assignment` in `businessId` (V1-21b review 7
-   * INP4-2): ModuleScopeGuard and resolveCrmAccess look it up by (user, business). The row the
-   * assignment names is that row when it is in this business; when it is in another, the holder
-   * is its user and their row here is looked up (none: no membership, and the envelope keeps
-   * the baseline). The holder is not known, and no row is read, when the assignment names no
-   * membership or names one of a user other than its own userId (JobRolePolicyService then
-   * fails closed).
+   * INP4-2): see position-holders.ts, which AiOversightService.resolveApprovalByAssignment reads
+   * too, so a reply approval is capped by the same row as the envelope (review 9 WB-1).
    */
-  private async holderMembershipHere(
-    businessId: string,
-    assignment: { userId: string | null; membership: HolderMembershipRow | null },
-  ): Promise<HolderMembershipRow | null> {
-    const named = assignment.membership;
-    if (!named || named.businessId === businessId) return named;
-    if (assignment.userId && assignment.userId !== named.userId) return null;
-    return this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: named.userId, businessId } },
-      include: { user: { select: HOLDER_ACCOUNT } },
-    });
+  private holderMembershipHere(businessId: string, assignment: Parameters<typeof holderMembershipHere>[2]) {
+    return holderMembershipHere(this.prisma, businessId, assignment);
   }
 
   /**
-   * The memberships of `businessId` whose user's account phone is `phone`, compared by digits so
-   * that two spellings of one number match (V1-21b review 7 INP4-3). Every member with a phone
-   * is read: a cap on the number of rows could leave the matching one out.
+   * The memberships of `businessId` whose user's account phone is `phone`, however either is
+   * spelled (V1-21b review 7 INP4-3; review 9 FB-2: '868-555-0122' is '+18685550122'). Every
+   * member with a phone is read: a cap on the number of rows could leave the matching one out.
    */
-  private async membersByPhone(businessId: string, phone: string) {
-    const digits = phoneDigits(phone);
-    if (!digits) return [];
-    const members = await this.prisma.client.membership.findMany({
-      where: { businessId, user: { phone: { not: null } } },
-      include: { user: { select: { phone: true, ...HOLDER_ACCOUNT } } },
-    });
-    return members.filter((m) => phoneDigits(m.user?.phone) === digits);
+  private membersByPhone(businessId: string, phone: string) {
+    return membersByPhone(this.prisma, businessId, phone);
   }
 
   /** Persist the KEY chat session id for a position's WhatsApp/SMS conversation. */
