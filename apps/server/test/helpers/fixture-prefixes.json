@@ -348,6 +348,11 @@
       "packet": "V1-34-DM-CASH-POSITION"
     },
     {
+      "prefix": "v36a_",
+      "owner": "apps/server/test/invoice-refund-balance.integration.test.ts",
+      "packet": "V1-36-DM-BALANCE-READ-CONTRACT"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"
