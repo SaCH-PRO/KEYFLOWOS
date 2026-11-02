@@ -61,9 +61,14 @@
  * is enforced (`await this.isOwner(); write()` would pass), and it cannot see a
  * call made through an untyped receiver or a dynamic dispatch other than
  * moduleRef. The enforcement is proven on a real database by
- * test/identity-business-config, d11-sibling-writes, d11-genesis-templates,
+ * test/identity-business-config, d11-sibling-writes (the document templates
+ * PATCH since R0-09g, cases D11-D*), d11-genesis-templates,
  * d11-finance-settings and onboarding-manual-complete. This file is what makes
  * a NEW writer visible.
+ *
+ * R0-09g-D11-DOCUMENT-TEMPLATES closed the one writer this sweep had pinned as
+ * kind open (CommerceController.setDocumentTemplate); no entry is open now,
+ * and W05 keeps the rule for the next one.
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
@@ -149,9 +154,10 @@ const OWNER_WRITES: Record<string, Entry> = {
     why: "R0-09f: PATCH /finance/businesses/:id/settings writes Business.defaultTaxRate; FinanceController.patchSettings runs FinanceSettingsService.assertTaxRateOwner first. The route's other settings (basis, fiscal year, default accounts, accountant email) are not owner-only.",
   },
   'modules/commerce/commerce.controller.ts#CommerceController.setDocumentTemplate': {
-    kind: 'open',
+    kind: 'owner',
     writes: ['invoiceTemplate', 'quoteTemplate'],
-    why: 'Found by this sweep (R0-09f): PATCH /commerce/businesses/:id/document-templates writes Business.invoiceTemplate and quoteTemplate (UpdateBusinessDto fields) behind revenue:write, not the owner rule. commerce/** belongs to another running packet; tracked by the it.todo in identity-boundary.integration.test.ts, "OPEN DEFECTS — D-11 sibling write paths".',
+    guards: ['isProfileOwner'],
+    why: 'Found by this sweep (R0-09f), closed by R0-09g-D11-DOCUMENT-TEMPLATES: PATCH /commerce/businesses/:id/document-templates writes Business.invoiceTemplate and quoteTemplate (UpdateBusinessDto fields). The handler runs FinanceSettingsService.isProfileOwner (the R0-09f owner test) first and refuses a non-owner 403 BUSINESS_PROFILE_OWNER_ONLY before anything is read or written.',
   },
   'core/connectors/google-suite.service.ts#GoogleSuiteService.handleCallback': {
     kind: 'not-profile',
@@ -569,9 +575,9 @@ describe('R0-09f D-11 static guard: every write of an owner-only Business field 
     expect(guards.filter((g) => !implementsOwnerRule(g)), 'an owner check that is missing or does not apply the owner rule').toEqual([]);
   });
 
-  it('[D11W-05] the open writers are still unguarded (pinned: when one is fixed this fails, and the fix moves its entry to kind owner and removes its it.todo)', () => {
+  it('[D11W-05] no writer is left open (R0-09g closed the last one, setDocumentTemplate), and an entry of kind open is still unguarded (pinned: when one is fixed this fails, and the fix moves its entry to kind owner and removes its it.todo)', () => {
     const open = Object.entries(OWNER_WRITES).filter(([, e]) => e.kind === 'open');
-    expect(open.map(([fn]) => fn)).toEqual(['modules/commerce/commerce.controller.ts#CommerceController.setDocumentTemplate']);
+    expect(open.map(([fn]) => fn), 'R0-09g moved the last open writer (setDocumentTemplate) to kind owner').toEqual([]);
     for (const [fn] of open) {
       const { paths } = unguardedPaths(fn, ['assertBusinessOwner', 'assertProfileOwner', 'isProfileOwner']);
       expect(paths.length, `${fn} now passes an owner check: move it to kind 'owner'`).toBeGreaterThan(0);
@@ -646,5 +652,19 @@ describe('R0-09f D-11 static guard: every write of an owner-only Business field 
     expect(ids).toEqual(expect.arrayContaining(['D11W-01', 'D11W-07', 'D11F-X01', 'D11F-F01', 'D11G-T01', 'D11-X01']));
     expect(unbound, 'required cases whose suite the manifest does not bind').toEqual([]);
     expect(suites.filter((s) => !supplied.has(s)), 'bound suites that supply no required case').toEqual([]);
+  });
+
+  // R0-09g-D11-DOCUMENT-TEMPLATES: the last writer the R0-09f sweep pinned as
+  // kind open. Its enforcement is proven on a real database by the D11-D cases
+  // of test/d11-sibling-writes.integration.test.ts.
+  it('[D11W-08] RED-BEFORE (R0-09g): CommerceController.setDocumentTemplate (PATCH /commerce/businesses/:id/document-templates) is an owner entry whose writes of invoiceTemplate and quoteTemplate each follow an isProfileOwner call in the handler, with no unguarded path', () => {
+    const fn = 'modules/commerce/commerce.controller.ts#CommerceController.setDocumentTemplate';
+    const entry = OWNER_WRITES[fn];
+    expect(entry?.kind).toBe('owner');
+    const sites = A.writes.filter((w) => w.fn === fn);
+    expect(sites.length, 'the handler still writes the Business row itself').toBeGreaterThan(0);
+    expect(sites.flatMap((w) => w.keys).sort()).toEqual(['invoiceTemplate', 'quoteTemplate']);
+    expect(sites.filter((w) => !guardedAt(fn, w.call, ['isProfileOwner'])).map((w) => `line ${w.line}`), 'a write not preceded by isProfileOwner').toEqual([]);
+    expect(unguardedPaths(fn, ['isProfileOwner']).paths).toEqual([]);
   });
 });

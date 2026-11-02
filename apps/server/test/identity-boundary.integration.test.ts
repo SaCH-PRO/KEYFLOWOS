@@ -392,6 +392,8 @@ const routes = {
   orgUnits: (id: string) => `/structure/businesses/${id}/org-units`,
   jobRoles: (id: string) => `/structure/businesses/${id}/job-roles`,
   assignments: (id: string) => `/structure/businesses/${id}/assignments`,
+  /** The business document templates (R0-09g: the PATCH is OWNER only, D-11). */
+  documentTemplates: (id: string) => `/commerce/businesses/${id}/document-templates`,
 };
 
 /** An admin token from the PRODUCTION issuer (buildAdminToken), as AdminAuthService.generateToken mints it. */
@@ -1639,18 +1641,23 @@ describe('ST-3 (fixed, R0-09-ID-HARDEN, owner ruling D-11) — PATCH /identity/b
   });
 });
 
-// OPEN DEFECTS — D-11 sibling write paths (R0-09-ID-HARDEN review R09-ST-2,
-// R09-ST-3, R09-ST-4, CR-3; R0-09b review SEC-1; R0-09d sweep; R0-09f sweep).
-// The generic PATCH above is closed, but other routes still write the
-// owner-only profile fields without the owner rule. Each fix is in source
-// outside the R0-09, R0-09b, R0-09d and R0-09f write sets; each it.todo names
-// the required behaviour for its follow-up packet. Since R0-09f the sweep is a
-// static spec run on every test run (src/core/config/d11-owner-writes.spec.ts:
-// every business.update/updateMany/upsert in apps/server/src that writes an
+// D-11 sibling write paths (R0-09-ID-HARDEN review R09-ST-2, R09-ST-3,
+// R09-ST-4, CR-3; R0-09b review SEC-1; R0-09d sweep; R0-09f sweep). The
+// generic PATCH above was closed first; the other routes that wrote the
+// owner-only profile fields without the owner rule were closed one packet at
+// a time, and this block was where each waited as an it.todo. Since R0-09f the
+// sweep is a static spec run on every test run
+// (src/core/config/d11-owner-writes.spec.ts: every
+// business.update/updateMany/upsert in apps/server/src that writes an
 // UpdateBusinessDto field, archetype, onboardingComplete or a setup key of
-// metaData is allow-listed with the owner check it sits behind); it found the
-// one route below besides those already fixed, and pins it as kind 'open'.
-describe('OPEN DEFECTS — D-11 sibling write paths still change owner-only profile fields', () => {
+// metaData is allow-listed with the owner check it sits behind). The one route
+// it found besides those already fixed, PATCH
+// /commerce/businesses/:id/document-templates, is FIXED by
+// R0-09g-D11-DOCUMENT-TEMPLATES: its it.todo is gone and the cases below assert
+// the required behaviour on the built server (the full matrix, STAFF with
+// revenue:write and the distinguished owner included, is the D11-D block of
+// d11-sibling-writes.integration.test.ts). No sibling it.todo is left.
+describe('D-11 sibling write paths (fixed: R0-09b, R0-09d, R0-09f, R0-09g) — no sibling route changes an owner-only profile field for a non-owner', () => {
   // R09-ST-2 (presence draft/publish slug), R09-ST-3 (concierge auto-configure)
   // and the concierge chat intake (R0-09b review SEC-2) are FIXED by
   // R0-09b-D11-SIBLING-WRITES; their cases assert the required behaviour on a
@@ -1664,14 +1671,48 @@ describe('OPEN DEFECTS — D-11 sibling write paths still change owner-only prof
   // Business.defaultTaxRate for any member) is FIXED by
   // R0-09f-D11-FINANCE-TAX-AND-WEB; its cases assert the required behaviour on
   // a real database in d11-finance-settings.integration.test.ts.
-  it.todo(
-    'REQUIRED (follow-up; commerce/commerce.controller.ts setDocumentTemplate — outside the R0-09f write set, commerce/** belongs to ' +
-      'another packet; found by the R0-09f static sweep, d11-owner-writes.spec.ts kind open): PATCH /commerce/businesses/:id/document-templates ' +
-      'writes Business.invoiceTemplate and quoteTemplate (UpdateBusinessDto fields, so part of the owner-only profile the PATCH ' +
-      '/identity/businesses/:id writes) for any member holding revenue:write — the route has AuthGuard, BusinessGuard and ModuleScopeGuard ' +
-      'only; a non-owner answers 403 BUSINESS_PROFILE_OWNER_ONLY with the Business row unchanged, or the owner rules that the document ' +
-      'templates leave the owner-only profile',
-  );
+  // The R0-09f sweep's finding (PATCH /commerce/businesses/:id/document-templates
+  // writing Business.invoiceTemplate and quoteTemplate for any member holding
+  // revenue:write) is FIXED by R0-09g-D11-DOCUMENT-TEMPLATES; these two cases
+  // replace its it.todo. adminS holds ADMIN defaults (revenue:admin) plus
+  // settings:write; staffD holds STAFF defaults (revenue:read).
+  it('R0-09g: an ADMIN holding revenue:admin and settings:write is refused the document templates PATCH (403 BUSINESS_PROFILE_OWNER_ONLY, the Business row byte-identical), a STAFF member (revenue:read) is refused with the same code, and both still read the stored templates', async () => {
+    const before = await businessRowText(ID.bizD);
+    for (const id of [ID.adminS, ID.staffD]) {
+      const t = T[id];
+      for (const body of [{ invoiceTemplate: 'modern', quoteTemplate: 'minimal' }, { invoiceTemplate: 'minimal' }, { quoteTemplate: 'modern' }]) {
+        const res = await call('patch', routes.documentTemplates(ID.bizD), t, body);
+        expect(await businessRowText(ID.bizD), `${id} ${JSON.stringify(body)} -> ${res.status}: the Business row is byte-identical`).toBe(before);
+        expect(res.status, `${id}: ${JSON.stringify(res.body)}`).toBe(403);
+        expect(res.body?.code, `${id}: refusal code`).toBe('BUSINESS_PROFILE_OWNER_ONLY');
+        expectNoBusinessData(res);
+        for (const key of ['success', 'invoiceTemplate', 'quoteTemplate']) expect(res.body).not.toHaveProperty(key);
+      }
+      const read = await call('get', routes.documentTemplates(ID.bizD), t);
+      expect(read.status, `${id} GET: ${JSON.stringify(read.body)}`).toBe(200);
+      const stored = await db.business.findUnique({ where: { id: ID.bizD }, select: { invoiceTemplate: true, quoteTemplate: true } });
+      const defaults = (read.body?.templates ?? []).filter((x: { isDefault: boolean }) => x.isDefault).map((x: { type: string; id: string }) => `${x.type}:${x.id}`);
+      expect(defaults.sort(), `${id}: GET marks the stored templates`).toEqual([`invoice:${stored?.invoiceTemplate}`, `quote:${stored?.quoteTemplate}`].sort());
+    }
+  });
+
+  it('R0-09g positive control: the OWNER sets the document templates (200) and GET reflects them; the OWNER then puts the column defaults back (200)', async () => {
+    const t = T[ID.ownerD];
+    const res = await call('patch', routes.documentTemplates(ID.bizD), t, { invoiceTemplate: 'modern', quoteTemplate: 'minimal' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toEqual({ success: true, invoiceTemplate: 'modern', quoteTemplate: 'minimal' });
+    expect(await db.business.findUnique({ where: { id: ID.bizD }, select: { invoiceTemplate: true, quoteTemplate: true } }))
+      .toEqual({ invoiceTemplate: 'modern', quoteTemplate: 'minimal' });
+    const read = await call('get', routes.documentTemplates(ID.bizD), t);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    const defaults = (read.body?.templates ?? []).filter((x: { isDefault: boolean }) => x.isDefault).map((x: { type: string; id: string }) => `${x.type}:${x.id}`);
+    expect(defaults.sort()).toEqual(['invoice:modern', 'quote:minimal']);
+
+    const back = await call('patch', routes.documentTemplates(ID.bizD), t, { invoiceTemplate: 'classic', quoteTemplate: 'classic' });
+    expect(back.status, JSON.stringify(back.body)).toBe(200);
+    expect(await db.business.findUnique({ where: { id: ID.bizD }, select: { invoiceTemplate: true, quoteTemplate: true } }))
+      .toEqual({ invoiceTemplate: 'classic', quoteTemplate: 'classic' });
+  });
   // R09-ST-4 and CR-3 — FIXED by R0-09c-KEY-ACTOR-BINDING; proven in test/key-cortex-actor-binding.integration.test.ts.
 });
 
