@@ -201,6 +201,14 @@ function prefixes(name: string): string[] {
 
 const THIRTY = "ada.lovelace_analytical-engine";
 
+/**
+ * Every keystroke is a render under act(); the ceiling case types some 230 of
+ * them and takes about four seconds alone, past vitest's 5 s default on a busy
+ * machine. A case that times out keeps running after its afterEach, so the
+ * budget is set well clear of it.
+ */
+const JOURNEY_TIMEOUT_MS = 60_000;
+
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-11-02T09:00:00.000Z"));
@@ -228,8 +236,9 @@ describe("signup under the check-username throttle (V1-56)", () => {
 
     await fillStepOne(prefixes(THIRTY), 350);
     // One check per keystroke from the second (one character is below the
-    // format minimum and is never sent): 29.
+    // format minimum and is never sent): 29, none refused.
     expect(server.checks).toHaveLength(29);
+    expect(server.checks.filter((c) => c.status !== 200)).toEqual([]);
 
     await continueAndSubmit();
 
@@ -244,7 +253,7 @@ describe("signup under the check-username throttle (V1-56)", () => {
     expect(server.signups[0]).toMatchObject({ username: THIRTY, email: "ada@example.com" });
     expect(screen.getByText("Check your inbox")).toBeInTheDocument();
     expect(screen.queryByText(/unable to verify username/i)).not.toBeInTheDocument();
-  });
+  }, JOURNEY_TIMEOUT_MS);
 
   it("typing without pause at the debounce for longer than a whole window never reaches the limit", async () => {
     const rule = serverRule();
@@ -263,6 +272,7 @@ describe("signup under the check-username throttle (V1-56)", () => {
     await fillStepOne(keystrokes, debounce + 1);
 
     expect(server.checks).toHaveLength(keystrokes.length);
+    expect(server.checks.filter((c) => c.status !== 200)).toEqual([]);
     await continueAndSubmit();
 
     const busiest = maxInAnyWindow(server.checks, rule.windowMs);
@@ -272,7 +282,7 @@ describe("signup under the check-username throttle (V1-56)", () => {
     expect(server.checks.filter((c) => c.status !== 200)).toEqual([]);
     expect(server.signups).toHaveLength(1);
     expect(screen.getByText("Check your inbox")).toBeInTheDocument();
-  });
+  }, JOURNEY_TIMEOUT_MS);
 
   it("control: a limit sized to the keystrokes alone refuses the submit check and blocks signup", async () => {
     const server = serve({ limit: 29, windowMs: 60_000 });
@@ -287,5 +297,5 @@ describe("signup under the check-username throttle (V1-56)", () => {
     expect(screen.getByText(/unable to verify username/i)).toBeInTheDocument();
     expect(server.signups).toHaveLength(0);
     expect(screen.queryByText("Check your inbox")).not.toBeInTheDocument();
-  });
+  }, JOURNEY_TIMEOUT_MS);
 });

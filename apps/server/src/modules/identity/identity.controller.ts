@@ -18,7 +18,7 @@ import {
 import type { Request } from 'express';
 import { IdentityService } from './identity.service';
 import { IdentitySignupService, isEmailVerificationRequired } from './identity-signup.service';
-import { AuthSecurityService } from './auth-security.service';
+import { AuthSecurityService, type RateLimitRule } from './auth-security.service';
 import { IdentityPasswordService } from './identity-password.service';
 import { allowedCorsOrigins } from '../../core/config/runtime-urls';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -50,6 +50,37 @@ import { CurrentUser, AuthenticatedUser } from '../../core/decorators/current-us
 import { OptionalAuthGuard } from '../../core/auth/optional-auth.guard';
 import { generateDocumentRecommendations } from './document-guidance.util';
 import { PROFILE_COMPLETENESS_FIELDS, COMPLETENESS_TIERS } from './profile-completeness.constants';
+
+/**
+ * Throttle for GET /identity/check-username (V1-56-AUTH-USERNAME-THROTTLE).
+ * The route is unauthenticated and says whether a username exists, so without
+ * a limit it is an enumeration oracle.
+ *
+ * The bound comes from what the signup form sends, because the form cannot
+ * tell a refusal from a failure: any non-2xx answer becomes 'unknown', and
+ * 'unknown' blocks signup ("Unable to verify username", signup/page.tsx).
+ * A limit the form can reach is a signup outage, not a throttle.
+ *
+ * The form checks once per keystroke after a 300 ms debounce
+ * (apps/web/src/hooks/use-username-availability.ts) and once more on submit.
+ * A debounced check fires only after 300 ms without a keystroke, so two of
+ * them are at least 300 ms apart and one 60 s window holds at most
+ * 60_000 / 300 + 1 = 201. The submit check comes on top, one per click, with
+ * the button disabled while it is in flight. 240 leaves 39 above that ceiling
+ * for submits and for requests arriving closer together than they were sent.
+ * It still cuts a script from thousands of probes a second to four. Both
+ * numbers are pinned by apps/server/test/identity-signup.e2e.test.ts, and
+ * apps/web/src/app/auth/signup/__tests__/signup-username-throttle.test.tsx
+ * reads them from here and drives the real form against them.
+ *
+ * Keyed by client IP (req.ip, so TRUST_PROXY decides the hops) and enforced by
+ * AuthSecurityService like every other limit in this controller. That store
+ * fails open, so signup gains no dependency it lacked: this handler reads the
+ * user table anyway. The Redis-backed PublicRateLimitGuard fails closed, and
+ * would make a Redis outage a signup outage, which AuthMiddleware deliberately
+ * avoids.
+ */
+export const USERNAME_CHECK_RULE = { scope: 'check_username:ip', limit: 240, windowMs: 60_000 } as const satisfies RateLimitRule;
 
 @Controller('identity')
 export class IdentityController {
@@ -667,9 +698,16 @@ export class IdentityController {
   /**
    * Username availability check — public, no auth required.
    * Checks whether the given username is already taken in the local User table.
+   *
+   * Throttled per client IP by USERNAME_CHECK_RULE before anything is read; see
+   * the rule for why its numbers sit above what the signup form can send. A
+   * refusal is NOT written to the audit log, unlike the other limits here: a
+   * script refused thousands of times a minute would write thousands of rows,
+   * which is the work this limit exists to bound.
    */
   @Get('check-username')
-  async checkUsernameAvailability(@Query('username') username?: string) {
+  async checkUsernameAvailability(@Req() req: Request, @Query('username') username?: string) {
+    await this.authSec.enforce(USERNAME_CHECK_RULE, this.clientIp(req));
     if (!username || username.trim().length === 0) {
       return { available: false, reason: 'Username is required' };
     }
