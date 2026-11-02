@@ -268,6 +268,9 @@ async function cleanup() {
     `DELETE FROM key_cortex_trigger_rules WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_goals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // V1-03 review CR-V103-R2-1: every admitted PATCH autonomy-profile writes an
+    // audit row, and team_activity_logs has no foreign key to businesses.
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_autonomy_profiles WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
