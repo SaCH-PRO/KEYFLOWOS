@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PostingService } from './posting.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 const VALID_FREQUENCIES = ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'] as const;
 
@@ -41,6 +42,10 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.timer = safeInterval('RecurringJournalEntryService', 60 * 60 * 1000, () => this.tick(), this.logger); // hourly
   }
 

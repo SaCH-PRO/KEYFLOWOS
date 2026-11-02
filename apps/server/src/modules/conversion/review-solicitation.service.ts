@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { BookingCompletedPayload, InvoicePaidPayload } from '../../core/event-bus/events.types';
+import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
 export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy {
@@ -15,6 +16,10 @@ export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy 
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.interval = setInterval(() => {
       this.processPendingJobs().catch((e) =>
         this.logger.error(`Review solicitation poller error: ${(e as Error).message}`),

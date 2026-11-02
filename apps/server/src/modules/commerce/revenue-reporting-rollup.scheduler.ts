@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RevenueReportingService } from './revenue-reporting.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_MS = 24 * 60 * 60 * 1000;
 
@@ -15,7 +16,7 @@ export class RevenueReportingRollupScheduler implements OnModuleInit, OnModuleDe
   ) {}
 
   onModuleInit(): void {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[RevenueReportingRollup] Scheduler disabled via env');
       return;
     }

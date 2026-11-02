@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinanceIntelligenceService } from './finance-intelligence.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_MS = 15 * 60 * 1000;
 
@@ -21,7 +22,7 @@ export class FinanceIntelligenceSchedulerService implements OnModuleInit, OnModu
   ) {}
 
   onModuleInit() {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[FIN8] scheduler disabled via env');
       return;
     }

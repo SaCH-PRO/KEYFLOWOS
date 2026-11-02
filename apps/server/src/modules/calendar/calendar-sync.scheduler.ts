@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { CalendarSyncService } from './calendar-sync.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_INTERVAL_MS = 60 * 60 * 1000; // hourly
 const STARTUP_DELAY_MS = 90 * 1000;
@@ -24,8 +25,8 @@ export class CalendarSyncScheduler implements OnModuleInit, OnModuleDestroy {
   constructor(@Inject(CalendarSyncService) private readonly sync: CalendarSyncService) {}
 
   onModuleInit(): void {
-    if (process.env.KF_DISABLE_SCHEDULERS === '1' || process.env.KF_DISABLE_SCHEDULERS === 'true') {
-      this.logger.log('Calendar sync scheduler disabled via KF_DISABLE_SCHEDULERS');
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
       return;
     }
     this.startupTimer = setTimeout(() => {

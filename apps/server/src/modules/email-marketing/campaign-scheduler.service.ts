@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { EmailMarketingService } from './email-marketing.service';
 import { CampaignIntelligenceService } from './campaign-intelligence.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
 export class CampaignSchedulerService implements OnModuleInit, OnModuleDestroy {
@@ -17,6 +18,10 @@ export class CampaignSchedulerService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.intervalRef = safeInterval('CampaignSchedulerService', 60_000, () => this.tick(), this.logger);
     this.briefingIntervalRef = safeInterval('CampaignSchedulerService.briefing', 10 * 60_000, () => this.briefingTick(), this.logger);
     this.logger.log('Campaign scheduler started (60s interval, 10min briefing check)');

@@ -6,6 +6,7 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
 import { KeyCortexApprovalOrchestratorService } from '../key-cortex/key-cortex-approval-orchestrator.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 export type InsightSeverity = 'critical' | 'warning' | 'info' | 'opportunity';
 export type InsightCategory =
@@ -81,6 +82,10 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.intervalRef = setInterval(() => {
       this.runPeriodicScan().catch(err =>
         this.logger.error(`Periodic monitoring scan failed: ${(err as Error).message}`),

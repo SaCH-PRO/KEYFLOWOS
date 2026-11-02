@@ -6,6 +6,7 @@ import { SignalsService } from './signals.service';
 import { CommandBridgeService } from './command-bridge.service';
 import { HealthScoreService } from './health-score.service';
 import { runGuarded } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
 export class ScheduledScansService implements OnModuleInit {
@@ -31,6 +32,7 @@ export class ScheduledScansService implements OnModuleInit {
   // empirically, not assumed.) The work stays in runAllScans() so callers and
   // tests are unchanged; only the scheduled entry point is guarded.
   runAllScansTick(): void {
+    if (schedulersDisabled()) return;
     runGuarded('ScheduledScansService', () => this.runAllScans(), this.logger);
   }
 

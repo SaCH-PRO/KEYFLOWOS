@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpensesService } from './expenses.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 /**
  * FIN3 — RecurringExpense scheduler. Mirrors the RecurringInvoice
@@ -24,6 +25,10 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.intervalRef = setInterval(() => {
       this.processDueRecurringExpenses().catch((err) => {
         this.logger.error('Error processing recurring expenses', err);

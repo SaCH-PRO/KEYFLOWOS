@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PresenceStatsService } from './presence-stats.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_MS = 60 * 60 * 1000; // hourly probe; only runs at the configured UTC hour
 const AGG_HOUR_UTC = parseInt(process.env.PRESENCE_AGG_HOUR_UTC ?? '2', 10);
@@ -22,7 +23,7 @@ export class PresenceAggregatorScheduler implements OnModuleInit, OnModuleDestro
   constructor(@Inject(PresenceStatsService) private readonly stats: PresenceStatsService) {}
 
   onModuleInit() {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[PresenceAggregatorScheduler] Disabled via env');
       return;
     }

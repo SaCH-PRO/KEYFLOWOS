@@ -10,6 +10,7 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { UndoService } from './undo.service';
 import { AgentStateMachineService } from './agent-state-machine.service';
 import { ActionDispatcherService } from './action-dispatcher.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 export interface PlanStepJob {
   planId: string;
@@ -76,14 +77,23 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       },
     );
 
-    this.cronWorker = new Worker<CronTriggerJob>(
-      'ai-cron-triggers',
-      async (job) => this.processCronTrigger(job),
-      {
-        connection: this.redis,
-        concurrency: 3,
-      },
-    );
+    // V1-24b review (SEC-V124b-1): the ai-cron-triggers queue holds only the
+    // tenants' repeatable AgentTrigger schedules (CronSchedulerService), which
+    // stay in Redis across restarts. With schedulers off this process runs none
+    // of them, so the cron worker is not started. Plan steps are enqueued on
+    // demand and keep their worker.
+    if (schedulersDisabled()) {
+      this.logger.log('Cron trigger worker not started (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+    } else {
+      this.cronWorker = new Worker<CronTriggerJob>(
+        'ai-cron-triggers',
+        async (job) => this.processCronTrigger(job),
+        {
+          connection: this.redis,
+          concurrency: 3,
+        },
+      );
+    }
 
     this.planEvents = new QueueEvents('ai-plan-steps', { connection: this.redis });
     this.planEvents.on('failed', ({ jobId, failedReason }) => {

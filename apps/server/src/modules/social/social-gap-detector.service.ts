@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // once per day
 const GAP_DAYS = 14;
@@ -16,6 +17,10 @@ export class SocialGapDetectorService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     // Run immediately on startup, then every 24h
     this.checkGaps().catch((e) => this.logger.error(`Initial gap check failed: ${(e as Error).message}`));
     this.timer = setInterval(() => {

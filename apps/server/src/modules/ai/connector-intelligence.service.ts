@@ -11,6 +11,7 @@ import { ConversationalAIService } from './conversational-ai.service';
 import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { ConnectorRegistryService } from '../../core/connectors/connector-registry.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 interface ScannedFile {
   id: string;
@@ -52,6 +53,10 @@ export class ConnectorIntelligenceService implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.scanInterval = safeInterval('ConnectorIntelligenceService', this.SCAN_INTERVAL_MS, () => this.scanAllConnectors(), this.logger);
     this.logger.log(`Connector intelligence scanning every ${this.SCAN_INTERVAL_MS}ms`);
     setTimeout(() => this.scanAllConnectors(), 30_000);

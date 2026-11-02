@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import OpenAI from 'openai';
 import { AiUsageService, directOpenAiKey, directOpenAiNotConfigured } from '../ai/ai-usage.service';
+import { keyDisabledRefusal } from '../ai/model-gateway.service';
+import { keyDisabled } from '../../core/config/env';
 import {
   CortexVoiceRequest,
   CortexVoiceResponse,
@@ -192,8 +194,11 @@ const VOICE_PREVIEW_PHRASES: Record<CortexPersona, string> = {
 @Injectable()
 export class KeyCortexVoiceService {
   private readonly logger = new Logger(KeyCortexVoiceService.name);
-  /** Null when no OpenAI key is configured: no client is built with a placeholder key. */
-  private readonly openai: OpenAI | null;
+  /**
+   * Null when no OpenAI key is configured (never a placeholder key), or while
+   * KEY_DISABLED is set at boot (V1-24b; then built on first use once KEY is on).
+   */
+  private openai: OpenAI | null = null;
 
   constructor(
     private readonly aiUsageService: AiUsageService,
@@ -210,18 +215,31 @@ export class KeyCortexVoiceService {
     // transcription answers the structured 503 provider_not_configured before
     // any provider call, instead of going out with a placeholder key and
     // failing at OpenAI with a 401.
+    //
+    // V1-24b (SEC-V124-1): a server booted with KEY_DISABLED builds no client
+    // here (client() builds it on first use once KEY is on), and the switch is
+    // read on every call.
     const apiKey = directOpenAiKey();
     if (!apiKey) {
       this.logger.warn(
         'Neither AI_INTEGRATIONS_OPENAI_API_KEY nor OPENAI_API_KEY is set. Voice synthesis and transcription answer 503 provider_not_configured.',
       );
     }
-    this.openai = apiKey ? new OpenAI({ apiKey }) : null;
+    if (apiKey && !keyDisabled()) this.openai = new OpenAI({ apiKey });
   }
 
-  /** The configured client, or the structured 503 (R0-07a) when no OpenAI key is configured. */
+  /**
+   * The client, or a structured 503 before any client is built: the
+   * KEY-disabled one (reason key_disabled) while KEY_DISABLED is set (V1-24b),
+   * else provider_not_configured (R0-07a) when no OpenAI key is configured.
+   */
   private client(): OpenAI {
-    if (!this.openai) throw directOpenAiNotConfigured();
+    if (keyDisabled()) throw keyDisabledRefusal();
+    if (!this.openai) {
+      const apiKey = directOpenAiKey();
+      if (!apiKey) throw directOpenAiNotConfigured();
+      this.openai = new OpenAI({ apiKey });
+    }
     return this.openai;
   }
 

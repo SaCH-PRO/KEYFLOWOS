@@ -16,11 +16,22 @@
  * actually run (the failure it is fixing is never running), and it must not run
  * on a business that is awake, or hourly all night on one that is not.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { MemoryConsolidationService } from './memory-consolidation.service';
 import { KeyCortexCircadianService } from './key-cortex-circadian.service';
+
+// V1-24b: this file calls a @Cron handler directly. Under NODE_ENV=test the
+// handlers return first (keyCronsDisabled() includes schedulersDisabled()),
+// so the file opts in explicitly; without it the sweep assertions would pass
+// without the sweep ever running.
+beforeEach(() => {
+  vi.stubEnv('ENABLE_SCHEDULERS_IN_TEST', '1');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 /** Restful for Trinidad (UTC-4): 06:00Z is 02:00 local. */
 const NIGHT = new Date('2026-08-04T06:00:00Z');

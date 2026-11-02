@@ -154,29 +154,54 @@ export type AiDisabledReason = 'key_disabled';
 
 /**
  * V1-24 review (SEC-V124-1, V124-CR-1): what KEY_DISABLED does NOT stop yet.
- * The switch covers model-gateway dispatch (and the cortex crons). These
- * paths reach an AI provider without the gateway and do not read the switch,
- * so with a provider key configured they keep sending content while KEY is
- * off. The boot warning names every entry so the operator is not told "no
- * provider is called"; scheduler-kill-switch.spec.ts pins the list against a
- * census of direct provider calls in apps/server/src, so a new path fails there
- * and a path that starts reading keyDisabled() must leave this list (and the
- * boot line). Gating them is a follow-up packet: every file is outside V1-24.
+ * The paths that reach an AI provider without the gateway, each with the file
+ * that holds it. scheduler-kill-switch.spec.ts pins this list against a census
+ * of direct provider calls in apps/server/src: a new direct path that ignores
+ * the switch fails there, and a path that reads keyDisabled() must leave this
+ * list (and the boot line).
+ *
+ * V1-24b-KEY-OFF-SWITCH-COVERAGE: EMPTY. Every direct path now reads the
+ * switch before it builds a provider client: KEY voice speak/listen and KEY
+ * document embeddings (key-cortex-voice / key-cortex-document), the
+ * embedding, vision and audio helpers (ai-usage.service.ts), the phone
+ * realtime bridge, ElevenLabs text-to-speech, and the diagnostics OpenAI key
+ * check.
+ *
+ * V1-24b review (SEC-V124b-2): and the indirect path. A LiveKit KEY voice
+ * session (livekit.service.ts) dispatches the KEY voice agent, which streams
+ * the member's audio to OpenAI Realtime from another process; it is refused
+ * before any room, dispatch or token. That worker (apps/voice-agent) reads
+ * KEY_DISABLED from its own environment and rejects every job while it is set.
  */
-export const KEY_DISABLED_NOT_COVERED: ReadonlyArray<{ file: string; path: string }> = [
-  { file: 'src/modules/key-cortex/key-cortex-voice.service.ts', path: 'KEY voice speak/listen (OpenAI TTS and Whisper)' },
-  { file: 'src/modules/ai/ai-usage.service.ts', path: 'the embedding, vision and audio helpers (OpenAI)' },
-  { file: 'src/modules/key-cortex/key-cortex-document.service.ts', path: 'KEY document embeddings (OpenAI)' },
-  { file: 'src/modules/phone-voice/realtime-bridge.service.ts', path: 'the phone realtime bridge (OpenAI Realtime)' },
-  { file: 'src/modules/voice/elevenlabs-voice.provider.ts', path: 'ElevenLabs text-to-speech' },
-  { file: 'src/modules/diagnostics/diagnostics.service.ts', path: 'the diagnostics OpenAI key check (no tenant content)' },
-];
+export const KEY_DISABLED_NOT_COVERED: ReadonlyArray<{ file: string; path: string }> = [];
 
-/** The boot warning KEY_DISABLED produces: what it stops, and what it does not stop yet. */
+/**
+ * V1-24 (D-17), V1-24b: the refusal of an AI call made while KEY_DISABLED is
+ * set, for the gateway and for every path that calls a provider directly. The
+ * R0-07 structured 503 with code provider_not_configured (see AiDisabledReason
+ * for why the code is reused) and reason 'key_disabled'; the message keeps the
+ * 'No AI providers available' prefix for log readers.
+ */
+export function keyDisabledRefusal(): ServiceUnavailableException {
+  const code: AiUnavailableCode = 'provider_not_configured';
+  const reason: AiDisabledReason = 'key_disabled';
+  const message = 'No AI providers available: KEY is switched off on this server (KEY_DISABLED)';
+  return new ServiceUnavailableException({ code, reason, service: 'ai', message, error: 'Service Unavailable' });
+}
+
+/** The boot warning KEY_DISABLED produces: what it stops, and anything it does not stop yet. */
 export function keyDisabledBootLine(): string {
-  return (
+  const stops =
     'KEY_DISABLED is set: KEY is switched off on this server. Every model-gateway dispatch answers 503 and reaches no AI provider, ' +
-    'and the KEY cortex crons do not run. NOT covered yet (they call their provider directly whenever its key is configured; ' +
+    'and the KEY cortex crons do not run. The direct provider paths (KEY voice speak/listen, the embedding, vision and audio helpers, ' +
+    'KEY document embeddings, the phone realtime bridge, ElevenLabs text-to-speech, the diagnostics OpenAI check) refuse before they build a client, ' +
+    'and a LiveKit KEY voice session is refused before any room, agent dispatch or join token. ' +
+    'The KEY voice agent worker (apps/voice-agent, OpenAI Realtime) is a separate process: it rejects every job only while KEY_DISABLED is set ' +
+    'in its own environment (the repo-root .env it loads at start), so set it there too.';
+  if (KEY_DISABLED_NOT_COVERED.length === 0) return stops;
+  return (
+    stops +
+    ' NOT covered yet (they call their provider directly whenever its key is configured; ' +
     'unset AI_INTEGRATIONS_OPENAI_API_KEY, OPENAI_API_KEY and ELEVENLABS_API_KEY to stop them): ' +
     KEY_DISABLED_NOT_COVERED.map((p) => p.path).join('; ')
   );
@@ -940,10 +965,7 @@ export class ModelGatewayService {
    * 'No AI providers available' prefix for log readers.
    */
   private keyDisabledRefusal(): ServiceUnavailableException {
-    const code: AiUnavailableCode = 'provider_not_configured';
-    const reason: AiDisabledReason = 'key_disabled';
-    const message = 'No AI providers available: KEY is switched off on this server (KEY_DISABLED)';
-    return new ServiceUnavailableException({ code, reason, service: 'ai', message, error: 'Service Unavailable' });
+    return keyDisabledRefusal();
   }
 
   private async recordCostFromResponse(
@@ -1032,10 +1054,8 @@ export class ModelGatewayService {
 
   async *streamComplete(request: GatewayRequest): AsyncGenerator<StreamChunk> {
     // V1-24 (D-17): the same refusal complete() throws, as one error chunk, before
-    // anything is read or called. Known gap (SEC-V124-2, follow-up outside V1-24):
-    // AiUsageService.trackAndStream still writes a credited aiUsageLog row naming
-    // 'openai' for a stream that ends on this chunk, as it already did for the
-    // R0-07 provider_not_configured chunk (pinned as an it.todo in the spec).
+    // anything is read or called. AiUsageService.trackAndStream writes no usage
+    // row for a stream that ends on a coded refusal chunk (V1-24b, SEC-V124-2).
     if (keyDisabled()) {
       const refusal = this.keyDisabledRefusal();
       const body = refusal.getResponse() as { code: AiUnavailableCode; reason: AiDisabledReason };

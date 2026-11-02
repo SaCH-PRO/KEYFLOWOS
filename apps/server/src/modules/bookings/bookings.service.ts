@@ -25,6 +25,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 interface DayHours {
   open: string;
@@ -192,6 +193,10 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.reminderInterval = setInterval(() => {
       this.processBookingReminders().catch((e) =>
         this.logger.error(`Booking reminder check failed: ${(e as Error).message}`),

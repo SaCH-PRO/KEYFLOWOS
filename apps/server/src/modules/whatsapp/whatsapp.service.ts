@@ -8,6 +8,7 @@ import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { KEY_INBOX_CHANNELS } from '../key-inbox/key-inbox.constants';
 import type { ResolvedEntity } from '../../core/connectors/entity-resolution.service';
 import { StaffChatBridgeService } from '../structure/staff-chat-bridge.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 export interface WhatsAppMessage {
   to: string;
@@ -852,6 +853,14 @@ export class WhatsAppService {
    * does nothing, which is the failure mode this module already had once.
    */
   @Cron(CronExpression.EVERY_MINUTE)
+  // V1-24b: the scheduled entry point. It returns first when schedulers are
+  // off (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS, or NODE_ENV=test without
+  // ENABLE_SCHEDULERS_IN_TEST); the work below stays callable directly.
+  async dispatchScheduledTick(): Promise<void> {
+    if (schedulersDisabled()) return;
+    await this.dispatchScheduled();
+  }
+
   async dispatchScheduled(): Promise<void> {
     const due = await this.prisma.client.whatsAppMessage.findMany({
       where: { status: 'SCHEDULED', scheduledAt: { lte: new Date() } },

@@ -20,10 +20,21 @@
  *   SENSITISATION  three overdue invoices in a business that normally has none
  *                  IS the urgent fact, and a pure count ranks it last.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KeyCortexSalienceService } from './key-cortex-salience.service';
+
+// V1-24b: this file calls a @Cron handler directly. Under NODE_ENV=test the
+// handlers return first (keyCronsDisabled() includes schedulersDisabled()),
+// so the file opts in explicitly; without it the sweep assertions would pass
+// without the sweep ever running.
+beforeEach(() => {
+  vi.stubEnv('ENABLE_SCHEDULERS_IN_TEST', '1');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 type Ev = { eventType: string; createdAt: Date; subjectId: string };
 
