@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { roundMoney } from '../commerce/money';
+import { normalizeCurrency } from './posting.service';
 
 /**
  * The chart-of-account system keys that hold cash: cash on hand, bank, and
@@ -35,12 +36,30 @@ export const OPENING_BALANCE_POSTING = { type: 'OPENING_BALANCE', sourceType: 'F
  */
 const BOOKED_TRANSACTION_STATUSES = ['POSTED', 'REVERSED'];
 
+/** The currency a business with none recorded keeps (the column default). */
+const DEFAULT_CURRENCY = 'TTD';
+
+/**
+ * V1-37b review RV37b-CR-01, as FinanceAccountsService.backfillOpeningBalances
+ * applies it: before V1-37b account create stored this literal whenever no
+ * currency was sent, so on a business that keeps another currency a legacy row
+ * holding it is read as that default (the backfill posts it in the business
+ * currency and corrects the row).
+ */
+const LEGACY_DEFAULT_ACCOUNT_CURRENCY = 'TTD';
+
 export interface CashPositionAccount {
   /** ChartOfAccount.id */
   accountId: string;
   systemKey: string | null;
   name: string;
-  /** Net debit - credit of the account's booked entries, rounded to cents. */
+  /**
+   * V1-37c: the normalized currency of `balance`. One row per (account,
+   * currency); an account with no booked entries reads one zero row in the
+   * business currency.
+   */
+  currency: string;
+  /** Net debit - credit of the account's booked entries in `currency`, rounded to cents. */
   balance: number;
 }
 
@@ -50,24 +69,53 @@ export interface UnpostedOpeningBalance {
   financialAccountId: string;
   name: string;
   type: string;
+  /** V1-37c: the currency the opening is bridged in (the one the backfill posts it in). */
+  currency: string;
   /** FinancialAccount.openingBalance, rounded to cents. */
   amount: number;
 }
 
 export interface CashPosition {
   /**
-   * The business's cash: the sum of `accounts` plus `unpostedOpeningBalances`,
-   * rounded to cents once.
+   * The business's cash IN ITS OWN CURRENCY (`currency`): the `accounts` rows
+   * plus the `unpostedOpeningBalances` in that currency, rounded to cents
+   * once. V1-37c (D-13): cash held in another currency is never added to it;
+   * it is in `byCurrency`.
    */
   cashBalance: number;
+  /** V1-37c: the business currency (normalized), the currency of cashBalance. */
+  currency: string;
+  /**
+   * V1-37c: the cash in each currency it is held in (normalized code -> cent-
+   * rounded figure), the business currency always among them. No figure adds
+   * two currencies; none is converted.
+   */
+  byCurrency: Record<string, number>;
   /**
    * Always 'ledger': derived from LedgerEntry rows (plus, until it is posted,
    * an account's recorded opening balance), never from FinancialAccount.currentBalance.
    */
   basis: 'ledger';
   accounts: CashPositionAccount[];
-  /** Opening balances on active cash-class accounts not yet posted (bridged into cashBalance). */
+  /** Opening balances on active cash-class accounts not yet posted (bridged into their currency's figure). */
   unpostedOpeningBalances: UnpostedOpeningBalance[];
+}
+
+/** V1-37c: cash held in a currency other than the business currency (never part of cashBalance). */
+export interface OtherCurrencyCash {
+  currency: string;
+  amount: number;
+}
+
+/**
+ * V1-37c: the non-zero cash a position holds outside its business currency,
+ * by currency code; what a reader of cashBalance says is held apart.
+ */
+export function otherCurrencyCash(position: Pick<CashPosition, 'currency' | 'byCurrency'>): OtherCurrencyCash[] {
+  return Object.entries(position.byCurrency ?? {})
+    .filter(([code, amount]) => code !== position.currency && amount !== 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([currency, amount]) => ({ currency, amount }));
 }
 
 const D = Prisma.Decimal;
@@ -76,6 +124,18 @@ const ZERO = new D(0);
 /** A ledger Decimal (numeric(18,4)) as a cent-rounded number (D-13). */
 function toMoney(value: Prisma.Decimal): number {
   return roundMoney(Number(value.toString()));
+}
+
+/**
+ * The currency an unposted opening is bridged in: the one
+ * FinanceAccountsService.backfillOpeningBalances posts it in, so the backfill
+ * never moves a figure. The row's normalized currency, except the pre-V1-37b
+ * literal default on a business that keeps another currency (RV37b-CR-01).
+ */
+function openingCurrency(stored: string | null | undefined, businessCurrency: string): string {
+  const code = normalizeCurrency(stored);
+  if (code === LEGACY_DEFAULT_ACCOUNT_CURRENCY && businessCurrency !== LEGACY_DEFAULT_ACCOUNT_CURRENCY) return businessCurrency;
+  return code || businessCurrency;
 }
 
 /**
@@ -106,41 +166,67 @@ function toMoney(value: Prisma.Decimal): number {
  *
  * Every cockpit reader of cash (safe-to-spend, the OS command center and the
  * Finance overview) consumes this one figure.
+ *
+ * V1-37c-CURRENCY-NORMALIZE-CASH (VL-05; D-13: one currency per business, no
+ * heterogeneous sums): the entries were grouped by account only, so a TTD
+ * business's USD cash was added to its TTD cash into one unlabelled figure
+ * (TTD 100 + USD 550 read 650). The entries are now grouped by account and
+ * currency, each code normalized (trimmed, upper-case: a legacy 'ttd' row is
+ * TTD), and each unposted opening is bridged in its own currency. cashBalance
+ * is the business currency's figure, labelled by `currency`; every currency's
+ * figure is in `byCurrency`; nothing is summed across currencies or converted.
  */
 @Injectable()
 export class CashPositionService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async getCashPosition(businessId: string): Promise<CashPosition> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { currency: true },
+    });
+    const currency = normalizeCurrency(business?.currency) || DEFAULT_CURRENCY;
     const [ledgerAccounts, unposted] = await Promise.all([
-      this.ledgerAccounts(businessId),
-      this.unpostedOpenings(businessId),
+      this.ledgerAccounts(businessId, currency),
+      this.unpostedOpenings(businessId, currency),
     ]);
 
-    let total = ZERO;
-    for (const a of ledgerAccounts) total = total.add(a.net);
-    for (const o of unposted) total = total.add(o.amount);
+    // Per currency, never across currencies; the business currency always present.
+    const totals = new Map<string, Prisma.Decimal>([[currency, ZERO]]);
+    const add = (code: string, amount: Prisma.Decimal) => totals.set(code, (totals.get(code) ?? ZERO).add(amount));
+    for (const a of ledgerAccounts) add(a.currency, a.net);
+    for (const o of unposted) add(o.currency, o.amount);
+    const byCurrency: Record<string, number> = {};
+    for (const code of [...totals.keys()].sort()) byCurrency[code] = toMoney(totals.get(code) ?? ZERO);
 
     return {
-      cashBalance: toMoney(total),
+      cashBalance: byCurrency[currency],
+      currency,
+      byCurrency,
       basis: 'ledger',
       accounts: ledgerAccounts.map((a) => ({
         accountId: a.accountId,
         systemKey: a.systemKey,
         name: a.name,
+        currency: a.currency,
         balance: toMoney(a.net),
       })),
       unpostedOpeningBalances: unposted.map((o) => ({
         financialAccountId: o.financialAccountId,
         name: o.name,
         type: o.type,
+        currency: o.currency,
         amount: toMoney(o.amount),
       })),
     };
   }
 
-  /** The booked net (debit - credit) of each of the business's cash-class chart rows. */
-  private async ledgerAccounts(businessId: string) {
+  /**
+   * The booked net (debit - credit) of each of the business's cash-class chart
+   * rows, per normalized currency (V1-37c). An idle row reads one zero in the
+   * business currency.
+   */
+  private async ledgerAccounts(businessId: string, businessCurrency: string) {
     const cashAccounts = await this.prisma.client.chartOfAccount.findMany({
       where: { businessId, systemKey: { in: [...CASH_POSITION_SYSTEM_KEYS] } },
       select: { id: true, name: true, systemKey: true },
@@ -148,7 +234,7 @@ export class CashPositionService {
     if (cashAccounts.length === 0) return [];
 
     const grouped = await this.prisma.client.ledgerEntry.groupBy({
-      by: ['accountId'],
+      by: ['accountId', 'currency'],
       where: {
         businessId,
         accountId: { in: cashAccounts.map((a) => a.id) },
@@ -156,23 +242,30 @@ export class CashPositionService {
       },
       _sum: { debit: true, credit: true },
     });
-    const netById = new Map<string, Prisma.Decimal>(
-      grouped.map((g) => [
-        g.accountId,
-        new D(String(g._sum.debit ?? 0)).sub(new D(String(g._sum.credit ?? 0))),
-      ]),
-    );
+    // account -> normalized currency -> net: 'ttd' and 'TTD' groups fold into one.
+    const netById = new Map<string, Map<string, Prisma.Decimal>>();
+    for (const g of grouped) {
+      const code = normalizeCurrency(g.currency) || businessCurrency;
+      const perAccount = netById.get(g.accountId) ?? new Map<string, Prisma.Decimal>();
+      const net = new D(String(g._sum.debit ?? 0)).sub(new D(String(g._sum.credit ?? 0)));
+      perAccount.set(code, (perAccount.get(code) ?? ZERO).add(net));
+      netById.set(g.accountId, perAccount);
+    }
 
-    return cashAccounts.map((a) => ({
-      accountId: a.id,
-      systemKey: a.systemKey ?? null,
-      name: a.name,
-      net: netById.get(a.id) ?? ZERO,
-    }));
+    return cashAccounts.flatMap((a) => {
+      const nets = [...(netById.get(a.id)?.entries() ?? [])].sort(([x], [y]) => x.localeCompare(y));
+      return (nets.length > 0 ? nets : [[businessCurrency, ZERO] as const]).map(([code, net]) => ({
+        accountId: a.id,
+        systemKey: a.systemKey ?? null,
+        name: a.name,
+        currency: code,
+        net,
+      }));
+    });
   }
 
   /** Opening balances on the business's active cash-class accounts with no booked opening posting. */
-  private async unpostedOpenings(businessId: string) {
+  private async unpostedOpenings(businessId: string, businessCurrency: string) {
     const rows = await this.prisma.client.financialAccount.findMany({
       where: {
         businessId,
@@ -180,13 +273,15 @@ export class CashPositionService {
         type: { in: [...CASH_POSITION_ACCOUNT_TYPES] },
         openingBalance: { not: 0 },
       },
-      select: { id: true, name: true, type: true, openingBalance: true },
+      select: { id: true, name: true, type: true, currency: true, openingBalance: true },
     });
     const withOpening = rows
       .map((r) => ({
         financialAccountId: r.id,
         name: r.name,
         type: r.type,
+        // V1-37c: bridged in the currency the backfill posts it in.
+        currency: openingCurrency(r.currency, businessCurrency),
         amount: new D(String(r.openingBalance ?? 0)),
       }))
       .filter((r) => r.financialAccountId && !r.amount.isZero());

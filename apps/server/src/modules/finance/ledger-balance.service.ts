@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { normalizeCurrency } from './posting.service';
 
 export interface AccountBalance {
   accountId: string;
@@ -10,7 +11,8 @@ export interface AccountBalance {
   /**
    * V1-37 (CF-38): the currency of this row's debits and credits. An account
    * with entries in two currencies has one row per currency; one with no
-   * activity has one zero row in the business currency.
+   * activity has one zero row in the business currency. V1-37c: always the
+   * normalized (trimmed, upper-case) code.
    */
   currency: string;
   debit: Prisma.Decimal;
@@ -68,6 +70,14 @@ export class LedgerBalanceService {
    * within each currency sum(debit) = sum(credit) (every posting is balanced
    * in its one currency, PostingService). Idle accounts read once, zero, in
    * the business currency.
+   *
+   * V1-37c (VR-03): grouped by the NORMALIZED code. Rows written before the
+   * door normalized hold the code as their writer spelled it ('ttd'), and
+   * Postgres groups 'ttd' apart from 'TTD', so one account read two rows and
+   * the balance sheet's business-currency sheet dropped the legacy one. The
+   * groups are folded by normalizeCurrency (the door's own rule), and the
+   * business currency is normalized too (a business stored as 'ttd' reads
+   * TTD). Nothing is rewritten in storage: the readers normalize on read.
    */
   async getTrialBalance(businessId: string, asOf?: Date): Promise<AccountBalance[]> {
     const where: Prisma.LedgerEntryWhereInput = { businessId };
@@ -85,20 +95,27 @@ export class LedgerBalanceService {
       }),
       this.prisma.client.business.findUnique({ where: { id: businessId }, select: { currency: true } }),
     ]);
-    const businessCurrency = business?.currency ?? 'TTD';
+    const businessCurrency = normalizeCurrency(business?.currency) || 'TTD';
 
-    const byId = new Map<string, typeof grouped>();
-    for (const g of grouped) byId.set(g.accountId, [...(byId.get(g.accountId) ?? []), g]);
+    // (account, normalized currency) -> summed debit and credit.
+    type Sum = { currency: string; debit: Prisma.Decimal; credit: Prisma.Decimal };
+    const byId = new Map<string, Map<string, Sum>>();
+    for (const g of grouped) {
+      const code = normalizeCurrency(g.currency) || businessCurrency;
+      const perAccount = byId.get(g.accountId) ?? new Map<string, Sum>();
+      const sum = perAccount.get(code) ?? { currency: code, debit: ZERO, credit: ZERO };
+      sum.debit = sum.debit.add(new D(((g._sum.debit as Prisma.Decimal | null) ?? ZERO).toString()));
+      sum.credit = sum.credit.add(new D(((g._sum.credit as Prisma.Decimal | null) ?? ZERO).toString()));
+      perAccount.set(code, sum);
+      byId.set(g.accountId, perAccount);
+    }
 
     return allAccounts
       .flatMap((account): AccountBalance[] => {
-        const groups = byId.get(account.id) ?? [];
-        const sums = groups.length > 0
-          ? groups.map((g) => ({ currency: g.currency, debit: g._sum.debit as Prisma.Decimal | null, credit: g._sum.credit as Prisma.Decimal | null }))
-          : [{ currency: businessCurrency, debit: null, credit: null }];
+        const groups = [...(byId.get(account.id)?.values() ?? [])];
+        const sums = groups.length > 0 ? groups : [{ currency: businessCurrency, debit: ZERO, credit: ZERO }];
         return sums.map((g) => {
-          const debit = new D((g.debit ?? ZERO).toString());
-          const credit = new D((g.credit ?? ZERO).toString());
+          const { debit, credit } = g;
           return {
             accountId: account.id,
             systemKey: account.systemKey ?? null,

@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { LedgerBalanceService, type AccountBalance } from '../finance/ledger-balance.service';
+import { normalizeCurrency } from '../finance/posting.service';
 import { ReceivablesService, AgingReport } from '../finance/receivables.service';
 
 export type ReportBasis = 'cash' | 'accrual';
@@ -185,12 +186,18 @@ export class LedgerReportingService {
 
   // ---- helpers --------------------------------------------------------
 
+  /**
+   * The business currency every report is labelled with. V1-37c (VR-03):
+   * normalized, as the door and the trial balance read it, so a business
+   * stored as 'ttd' labels its reports TTD and its balance sheet's top level
+   * is the sheet the door-posted TTD rows are in.
+   */
   private async getCurrency(businessId: string): Promise<string> {
     const biz = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: { currency: true },
     });
-    return biz?.currency ?? 'TTD';
+    return normalizeCurrency(biz?.currency) || 'TTD';
   }
 
   private async cashTouchingTxIds(businessId: string, from: Date, to: Date): Promise<Set<string>> {
@@ -747,6 +754,10 @@ export class LedgerReportingService {
    * one sheet per currency the books hold, each line labelled, each balancing
    * on its own (every posting balances in its one currency, PostingService).
    * Other currencies are shown beside the business currency, never converted.
+   *
+   * V1-37c (VR-03): keyed on the NORMALIZED code. Keyed on the raw row
+   * currency, legacy 'ttd' rows made a separate 'ttd' sheet and the TTD sheet
+   * dropped them. Rows of one account that normalize to one code are one line.
    */
   async getBalanceSheet(businessId: string, asOf: Date): Promise<BalanceSheetReport> {
     const currency = await this.getCurrency(businessId);
@@ -755,8 +766,17 @@ export class LedgerReportingService {
     // A row that names no currency (a reader older than V1-37) is the business currency's.
     const rowsByCurrency = new Map<string, AccountBalance[]>([[currency, []]]);
     for (const row of trial) {
-      const code = row.currency || currency;
-      rowsByCurrency.set(code, [...(rowsByCurrency.get(code) ?? []), row]);
+      const code = normalizeCurrency(row.currency) || currency;
+      const rows = rowsByCurrency.get(code) ?? [];
+      const same = rows.find((r) => r.accountId === row.accountId);
+      if (same) {
+        const debit = new D(String(same.debit ?? 0)).add(new D(String(row.debit ?? 0)));
+        const credit = new D(String(same.credit ?? 0)).add(new D(String(row.credit ?? 0)));
+        rows[rows.indexOf(same)] = { ...same, debit, credit, net: debit.sub(credit) };
+      } else {
+        rows.push({ ...row, currency: code });
+      }
+      rowsByCurrency.set(code, rows);
     }
 
     const byCurrency: Record<string, BalanceSheetCurrencySheet> = {};
