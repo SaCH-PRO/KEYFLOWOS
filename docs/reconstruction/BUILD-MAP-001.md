@@ -969,6 +969,22 @@ Counts: ADOPTED 1, CONTROL 15, DEFER 8, DOCS 10, EVIDENCE 3, NONE 9, PORT 9, STA
 | D-13 | Cents-safe integer-cents arithmetic at every write and balance boundary on the existing Float columns (no migration; Decimal staged later). One currency per business, defaulting to the business currency; TTD and USD supported. | V1-22 and V1-37 run without a migration; the chain V1-22, V1-29, V1-34, V1-36, V1-37, V1-42 is unblocked. |
 | D-14 | Manual refunds are separate negative REFUNDED rows (the provider convention). A fully refunded invoice returns to SENT with paidAt cleared; no new invoice state, no enum migration. | V1-29 runs without its stop rule; V1-36 follows. |
 | D-17 | Keep both KEY pipelines (Flow for member chat, Cortex for plans) and harden each as its packet specifies. A server-side `KEY_DISABLED` off switch, distinct from the storefront-only `AI_DISABLED`. Port the #155 and #182 hunks as specified. Run the KEY packets now. | V1-02, V1-03, V1-09, V1-24, V1-32 run now (with V1-04); V1-31 follows V1-03. |
+| D-15 | Invoice and quote numbers are sequential per business, continuing from its current highest number; existing numbers are never renumbered. A retried create carries an `Idempotency-Key` HTTP header (the existing IdempotencyKey table, no migration). | V1-43 and V1-45 run after the money chain (V1-42). |
+| D-27 | Payments extracted from evidence or Drive intake are recorded PENDING and move no balance until a member confirms them. | V1-41 runs after the money chain. |
+| D-28 | FULLY_CREDITED and PARTIALLY_CREDITED stay as real invoice states, driven by credit notes that post to the ledger. No enum migration. | V1-44 runs after V1-42. |
+| D-26 | A deposit is forfeit when the customer cancels after paying it. The owner may refund it manually (a negative refund row, D-14). Nothing moves automatically. | V1-28 (cancel part) is released. |
+| D-22 | The secret scan and the native DAST become required, blocking CI checks; the agent gate runs on `pkt/*` branches; the owner owns the trust-census list. Ruled by the owner directly (the item was routed to ChatGPT via #80, which this worker does not post to). | V1-01, V1-30, V1-40, then V1-20, V1-26 and V1-39 are released. |
+| D-21 | CI and `engines` pin Node 22.x LTS (Node 20 reached end-of-life in April 2026; every proof in this build ran on Node 22). | V1-39 is released (after V1-20, V1-30, V1-26). |
+| D-16 | The isolated SQL-only partial unique index for contact email and phone (ignoring soft-deleted rows, `bank_transactions` precedent) is authorized. It is a migration, proven on the local database only. | V1-17 is released. |
+| D-19 | WiPay callbacks are verified against WiPay's published hash documentation (read, never called); any callback that does not verify is refused. | V1-05 is released. |
+| D-18 | Storefront product checkout is in scope and is hardened, not retired. | V1-18 and V1-33 are released. |
+| D-25 | The GDPR purge is in v1: it erases personal fields and keeps a retained-basis audit row. Every contact write records a ContactAuditEntry. | V1-38 is released. |
+| D-29 | The cross-module job poller is fixed now as its own packet. | V1-35 is released. |
+| D-08 | Activity rows power the user feed; BusinessEvent is the audit trail. | V1-55 runs after V1-25. |
+| D-05 | Operator mark-paid without an amount records the remaining balance as one payment. The bounded change to the legacy `/webhooks/stripe` handler is authorized, so provider-paid invoices go through the same audited mark-paid door (RA-G16-01 leaves deferral). | A follow-up packet routes the legacy webhook through the door. |
+| D-46 | A platform SUPER_ADMIN who is not a member stays refused on tenant invoice writes. | No change. |
+| D-40 | Command-centre and procurement routes are gated under the existing `operations` module scope (OWNER and ADMIN keep access). No new module key. | A follow-up packet adds the gate. |
+| D-41..D-45, D-47..D-52 | Kept as built: a period closes only after it ends (D-41); the Gmail owner-only and refresh-token rules (D-42, D-43); no client role on KEY chat (D-44); no staff invoice send by message (D-45); the stricter of the two autonomy settings wins (D-47); termsVersion is mandatory on public accept (D-48); KEY convert_quote only accepts (D-49); OWNER/ADMIN period edits (D-50); stranded idempotency claims are released manually (D-51); message approvals need a provider message id (D-52). | No change. |
 
 ---
 
