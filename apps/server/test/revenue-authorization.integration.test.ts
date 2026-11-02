@@ -222,6 +222,40 @@ async function postingsFor(invoiceId: string): Promise<Array<{ id: string; exter
   });
 }
 
+/**
+ * R0-02 review repair SEC-R002-2: every FinancialTransaction of business A,
+ * whatever its source. postingsFor() sees only the invoice's own postings
+ * (externalRef Invoice:<id>: or sourceId = the invoice id); a mark-paid posts
+ * with sourceType Payment, sourceId = the payment id and externalRef
+ * Payment:<paymentId>:payment_recorded, which only this count and
+ * paymentPostingsFor() observe. The cases of this file run one at a time and
+ * rva_bizA is this suite's own tenant, so a change in the count is the case's
+ * own write.
+ */
+async function ledgerCountA(): Promise<number> {
+  return db.financialTransaction.count({ where: { businessId: ID.bizA } });
+}
+
+/** The postings of the invoice's payment rows (sourceType Payment), which postingsFor() cannot see. */
+async function paymentPostingsFor(invoiceId: string): Promise<Array<{ id: string; externalRef: string | null; status: string; type: string }>> {
+  const payments: Array<{ id: string }> = await db.payment.findMany({ where: { invoiceId }, select: { id: true } });
+  if (payments.length === 0) return [];
+  return db.financialTransaction.findMany({
+    where: { businessId: ID.bizA, sourceType: 'Payment', sourceId: { in: payments.map((p) => p.id) } },
+    select: { id: true, externalRef: true, status: true, type: true },
+  });
+}
+
+/** The error a refused service call rejects with (undefined when it resolves). */
+async function rejectionOf(call: Promise<unknown>): Promise<unknown> {
+  try {
+    await call;
+    return undefined;
+  } catch (err) {
+    return err;
+  }
+}
+
 function eventsFor(name: string, invoiceId: string) {
   return recordedEvents.filter((e) => e.name === name && e.payload?.invoice?.id === invoiceId);
 }
@@ -537,11 +571,17 @@ describe('List A: pre-fix failures', () => {
   describe('G1 — PAID without a payment through the path parameter', () => {
     it('RA-G1-01: status comes from the validated body, never the URL (path paid, body SENT -> 400, nothing changes)', async () => {
       const copy = await createCopy('g1_01', { status: 'SENT' });
+      const ledgerBefore = await ledgerCountA();
       const res = await setStatus(ID.ownerA, copy, 'paid', { businessId: ID.bizA, status: 'SENT' });
       expect(res.status).toBe(400);
       expect(await invoiceStatus(copy)).toBe('SENT');
+      // The cogs filter alone cannot fail: the copy's line has no productId, so
+      // a PAID transition posts no COGS leg (invoice-workflow.service.ts
+      // postCogsForPaidInvoice returns early). The ledger observation is
+      // business A's FinancialTransaction count (R0-02 review SEC-R002-2).
       const cogs = (await postingsFor(copy)).filter((t) => /cogs/i.test(t.externalRef ?? ''));
       expect(cogs).toHaveLength(0);
+      expect(await ledgerCountA()).toBe(ledgerBefore);
       expect(eventsFor('invoice.paid', copy)).toHaveLength(0);
     });
 
@@ -602,10 +642,12 @@ describe('List A: pre-fix failures', () => {
 
     it('RA-G4-06: revenue:read cannot send (403; no FinancialTransaction is created)', async () => {
       const copy = await createCopy('g4_06', { status: 'DRAFT' });
+      const ledgerBefore = await ledgerCountA();
       const res = await setStatus(ID.staffReadA, copy, 'sent', { businessId: ID.bizA, status: 'SENT' });
       expect(res.status).toBe(403);
       expect(await invoiceStatus(copy)).toBe('DRAFT');
       expect(await postingsFor(copy)).toHaveLength(0);
+      expect(await ledgerCountA()).toBe(ledgerBefore);
     });
   });
 
@@ -826,12 +868,22 @@ describe('List B: regression controls', () => {
       expect(await invoiceStatus(copy)).toBe('SENT');
     });
 
+    // Kept as a visible todo with its CONTRADICTION text (R0-02 review
+    // CR-R002-1). The packet allows conversion only "per decision D-11", and
+    // D-11 is not ruled on this question: the question is BUILD-MAP-001.md 910
+    // ("should the service admit SUPER_ADMIN instead?"), the 2026-10-31 ruling
+    // (BUILD-MAP-001.md 950, BUILD-QUEUE-001.json R0-09 "ruling") covers
+    // business-profile editing only. Pinning either answer for SUPER_ADMIN here
+    // would decide it. The guard half is required at L1; the service membership
+    // check itself is pinned for every write route, without deciding the
+    // SUPER_ADMIN question, by RR-R002-01..03 below.
     it.todo(
       'RA-G4-13: SUPER_ADMIN still passes (matrix: 200 before and after). CONTRADICTION measured on main b1948d27: ' +
         'both guards bypass SUPER_ADMIN, but CommerceService.markInvoicePaid then requires a Membership row for every ' +
         'non-system actor (service 482-489) and rva_superAdmin has none, so the request answers 500 on main and 403 after ' +
         'the error-mapping fix. Admitting SUPER_ADMIN inside the service is an authority widening outside the released ' +
-        'scope of KF-REVENUE-AUTH-PROJECTION-001; the guard half is pinned at L1 (commerce-authorization.e2e.test.ts).',
+        'scope of KF-REVENUE-AUTH-PROJECTION-001; the guard half is pinned at L1 (commerce-authorization.e2e.test.ts). ' +
+        'AWAITING an owner ruling on the D-11 RA-G4-13 question (the 2026-10-31 D-11 ruling covers business-profile editing only).',
     );
   });
 
@@ -894,6 +946,10 @@ describe('List B: regression controls', () => {
   });
 
   describe('G16 — deferred service-level tightening', () => {
+    // Skipped by design (matrix ruling 4), not a pass. 'KF-REVENUE-FINANCIAL-INTEGRITY'
+    // is not a queue id: it maps to R0-20 if owner decision D-05 authorizes the
+    // webhooks.controller.ts 86-91 change, otherwise to the INGRESS-001 row of
+    // the V1+ backlog. D-05's webhook half is not authorized (R0-02-REV-AUTH-CONFORM).
     it.todo(
       'RA-G16-01: a caller with no actor and no tenant cannot mark paid through the service. ' +
         'DEFERRED: KF-REVENUE-FINANCIAL-INTEGRITY (webhooks.controller.ts 86-91) — the deprecated Stripe handler calls ' +
@@ -1369,4 +1425,101 @@ describe('V1-46b: the anonymous bare-id branch closes behind revoked links (D-07
       expect(await invoiceStatus(copy)).toBe('SENT');
     }
   });
+});
+
+// =============================================================================
+// Review repairs — R0-02-REV-AUTH-CONFORM review of 108fc253.
+// =============================================================================
+describe('Review repairs (R0-02): the service membership check holds on all three bare-id write routes (SEC-R002-1, SEC-R002-2)', () => {
+  // SUPER_ADMIN bypasses BusinessGuard and ModuleScopeGuard on mark-paid,
+  // payment-failed and the status route (L1 'RA-G4-13 (L1 guard half)'), so
+  // over HTTP the service's membership check is that role's only barrier, and
+  // at 108fc253 no required case failed when the payment-failed and status
+  // checks were removed. Whether the service should admit SUPER_ADMIN is the
+  // unruled D-11 RA-G4-13 question (see the RA-G4-13 it.todo), so these cases
+  // pin the check itself without answering it: the real service is called
+  // with a real USER who holds no membership in A (rva_noMember) and the
+  // invoice's own tenant, the arguments the controller forwards (RA-G4-12),
+  // and must refuse before anything is written. The owner's identical call
+  // then succeeds on the same copy, so the refusal is the membership check's
+  // and each ledger observation is shown to see the write it guards.
+  it('RR-R002-01 (SEC-R002-1, SEC-R002-2): markInvoicePaid refuses an actor with no membership in the invoice\'s tenant even when handed that tenant (ForbiddenException Not authorized to update this invoice): no payment, no invoice.paid, business A\'s ledger unchanged; the owner\'s identical call then records the payment and its Payment:<id>:payment_recorded posting', async () => {
+    const copy = await createCopy('rr_r002_01', { status: 'SENT' });
+    const ledgerBefore = await ledgerCountA();
+    const err = await rejectionOf(commerce.markInvoicePaid(copy, ID.noMember, ID.bizA));
+    expect(err).toBeInstanceOf(ForbiddenExceptionCtor);
+    expect((err as Error).message).toMatch(/Not authorized to update this invoice/);
+    expect(await invoiceStatus(copy)).toBe('SENT');
+    expect(await paymentCount(copy)).toBe(0);
+    expect(await postingsFor(copy)).toHaveLength(0);
+    expect(await ledgerCountA()).toBe(ledgerBefore);
+    expect(eventsFor('invoice.paid', copy)).toHaveLength(0);
+
+    await commerce.markInvoicePaid(copy, ID.ownerA, ID.bizA);
+    expect(await invoiceStatus(copy)).toBe('PAID');
+    const payments: Array<{ id: string }> = await db.payment.findMany({ where: { invoiceId: copy }, select: { id: true } });
+    expect(payments).toHaveLength(1);
+    expect((await paymentPostingsFor(copy)).map((t) => t.externalRef)).toContain(`Payment:${payments[0]!.id}:payment_recorded`);
+    // postingsFor() alone cannot see that write; the business-wide count does.
+    expect(await ledgerCountA()).toBeGreaterThan(ledgerBefore);
+    expect(eventsFor('invoice.paid', copy)).toHaveLength(1);
+  });
+
+  it('RR-R002-02 (SEC-R002-1): markInvoicePaymentFailed refuses the same actor with the same tenant (ForbiddenException Not authorized to update this invoice; status SENT, no invoice.payment_failed, business A\'s ledger unchanged); the owner\'s identical call moves the invoice to FAILED', async () => {
+    const copy = await createCopy('rr_r002_02', { status: 'SENT' });
+    const ledgerBefore = await ledgerCountA();
+    const err = await rejectionOf(commerce.markInvoicePaymentFailed(copy, ID.noMember, 'x', ID.bizA));
+    expect(err).toBeInstanceOf(ForbiddenExceptionCtor);
+    expect((err as Error).message).toMatch(/Not authorized to update this invoice/);
+    expect(await invoiceStatus(copy)).toBe('SENT');
+    expect(eventsFor('invoice.payment_failed', copy)).toHaveLength(0);
+    expect(await ledgerCountA()).toBe(ledgerBefore);
+
+    await commerce.markInvoicePaymentFailed(copy, ID.ownerA, 'x', ID.bizA);
+    expect(await invoiceStatus(copy)).toBe('FAILED');
+    expect(eventsFor('invoice.payment_failed', copy)).toHaveLength(1);
+  });
+
+  it('RR-R002-03 (SEC-R002-1, SEC-R002-2): updateInvoiceStatus refuses the same actor with the same tenant on void and on send (ForbiddenException Not authorized to update this invoice; no void, no REVERSAL, no AR posting, business A\'s ledger unchanged); the owner\'s identical calls void with the REVERSAL and send with the Invoice:<copy>:invoice_finalized posting', async () => {
+    const voidCopy = await createCopy('rr_r002_03v', { status: 'SENT', viaWorkflow: true });
+    const sendCopy = await createCopy('rr_r002_03s', { status: 'DRAFT' });
+    const ledgerBefore = await ledgerCountA();
+    for (const [copy, status] of [[voidCopy, 'VOID'], [sendCopy, 'SENT']] as const) {
+      const err = await rejectionOf(commerce.updateInvoiceStatus({ invoiceId: copy, status, actorId: ID.noMember, businessId: ID.bizA }));
+      expect(err, status).toBeInstanceOf(ForbiddenExceptionCtor);
+      expect((err as Error).message, status).toMatch(/Not authorized to update this invoice/);
+    }
+    expect(await invoiceStatus(voidCopy)).toBe('SENT');
+    expect(await invoiceStatus(sendCopy)).toBe('DRAFT');
+    expect(eventsFor('invoice.void', voidCopy)).toHaveLength(0);
+    expect(eventsFor('invoice.sent', sendCopy)).toHaveLength(0);
+    const voidPostings = await postingsFor(voidCopy);
+    expect(voidPostings.find((t) => t.externalRef === `Invoice:${voidCopy}:invoice_finalized`)?.status).not.toBe('REVERSED');
+    expect(voidPostings.some((t) => t.type === 'REVERSAL')).toBe(false);
+    expect(await postingsFor(sendCopy)).toHaveLength(0);
+    expect(await ledgerCountA()).toBe(ledgerBefore);
+
+    await commerce.updateInvoiceStatus({ invoiceId: voidCopy, status: 'VOID', actorId: ID.ownerA, businessId: ID.bizA });
+    expect(await invoiceStatus(voidCopy)).toBe('VOID');
+    expect((await postingsFor(voidCopy)).some((t) => t.type === 'REVERSAL')).toBe(true);
+    await commerce.updateInvoiceStatus({ invoiceId: sendCopy, status: 'SENT', actorId: ID.ownerA, businessId: ID.bizA });
+    expect(await invoiceStatus(sendCopy)).toBe('SENT');
+    expect((await postingsFor(sendCopy)).filter((t) => t.externalRef === `Invoice:${sendCopy}:invoice_finalized`)).toHaveLength(1);
+    expect(await ledgerCountA()).toBeGreaterThan(ledgerBefore);
+  });
+});
+
+describe('Review repairs (R0-02): invoice write responses and the linked booking (SEC-R002-3)', () => {
+  // Confirmed by the reviewer's probe on mark-paid. The fix is in
+  // commerce.service.ts / commerce.controller.ts, outside this packet's write
+  // set and outside the contract, so it is a visible todo for a follow-up
+  // packet (the SEC-CMF1-2 class, for the booking relation).
+  it.todo(
+    'RR-R002-04 (SEC-R002-3): an invoice write response carries no linked Booking row. DEFERRED: follow-up packet ' +
+      '(outside the R0-02 write set) — CommerceService.markInvoicePaid reloads the invoice with booking: true ' +
+      '(commerce.service.ts 958-962; InvoiceWorkflowService.transition, behind payment-failed and the status route, returns ' +
+      'the same include at invoice-workflow.service.ts 341) and toInvoiceWriteResponse (commerce.controller.ts 88-99) projects only the ' +
+      'contact, so PATCH /commerce/invoices/:id/paid hands a revenue:write member with no bookings scope the whole Booking ' +
+      'row (notes, location, calendarEventId, staffId, orgUnitId), which the operator invoice read does not disclose.',
+  );
 });
