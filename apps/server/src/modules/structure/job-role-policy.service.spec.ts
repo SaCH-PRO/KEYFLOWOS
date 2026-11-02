@@ -33,7 +33,12 @@
  * StaffChatBridgeService and the real RoleEngineService crews. The fourth (DRV-1, IC3-1) and
  * fifth (INP4-1: a soft-deleted or banned holder, through the real AuthMiddleware) follow, then
  * the sixth (INP5-1: an assignment naming a membership in another business or of another user,
- * through the real BusinessGuard and ModuleScopeGuard).
+ * through the real BusinessGuard and ModuleScopeGuard), then the seventh: the membership looked
+ * up as the guard does (INP4-2), a position on a member's own phone (INP4-3), inbox_brief at the
+ * level that forces a brief (DRV-BRIEF / DRV5-1) and commerce_send_invoice granted by no key
+ * (DRV5-2). The seventh's client-forged envelope (ENV-FORGE / INP5-2 / DRV5-3) is pinned in
+ * ai/flow-chat-envelope.spec.ts; every bridge harness here reads the envelope from chat()'s
+ * server-only argument, never from the client-shaped pageContext.
  */
 import { describe, it, expect } from 'vitest';
 import { NotFoundException } from '@nestjs/common';
@@ -101,8 +106,10 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     // commerce_mark_invoice_paid: PATCH invoices/:id/paid needs revenue:write; the Stripe
     // webhook that also calls it is not a member route (review 2 C1)
     write: ['commerce_create_invoice', 'commerce_create_quote', 'commerce_convert_quote', 'commerce_update_invoice', 'payments_create_link', 'payments_revoke_link', 'commerce_mark_invoice_paid'],
-    admin: ['commerce_send_invoice', 'commerce_delete_invoice', 'payments_refund_charge'],
+    admin: ['commerce_delete_invoice', 'payments_refund_charge'],
     deny: [
+      // mails the customer through a call no member route makes for a customer: GOVERNED_UNGRANTED (review 7 DRV5-2)
+      'commerce_send_invoice',
       // reached unscoped (catalog.controller)
       'commerce_create_product',
       'finance_post_journal_entry',
@@ -185,9 +192,10 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     deny: ['reports_generate', 'finance_profit_and_loss', 'commerce_create_invoice'],
   },
   operations: {
-    read: ['contracts_list', 'contracts_get', 'contract_list_tags', 'inbox_list_threads', 'inbox_read_thread', 'inbox_brief', 'payroll_list_rates', 'payroll_get_run', 'performance_scorecard'],
+    read: ['contracts_list', 'contracts_get', 'contract_list_tags', 'inbox_list_threads', 'inbox_read_thread', 'payroll_list_rates', 'payroll_get_run', 'performance_scorecard'],
     // contracts_acknowledge_alert / inbox_mark_resolved are tier 1, but their routes need operations:write
-    write: ['contracts_acknowledge_alert', 'inbox_mark_resolved', 'contracts_create', 'contract_create_tag', 'inbox_update_thread_status', 'performance_take_snapshot'],
+    // inbox_brief: GET brief generates only on a cache miss; POST brief/generate needs write (review 7 DRV-BRIEF)
+    write: ['contracts_acknowledge_alert', 'inbox_mark_resolved', 'contracts_create', 'contract_create_tag', 'inbox_update_thread_status', 'performance_take_snapshot', 'inbox_brief'],
     admin: ['contracts_delete', 'inbox_reply_thread', 'payroll_approve_run', 'payroll_mark_paid'],
     // PayrollService.setRate / generateRun and ContractClauseService.extractClauses back no route
     deny: ['payroll_set_rate', 'payroll_generate_run', 'contract_extract_clauses', 'procurement_create_request', 'helpdesk_create_ticket', 'commerce_create_invoice', 'structure_get_org_tree'],
@@ -859,7 +867,6 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
           'operations:payroll_approve_run',
           'operations:payroll_mark_paid',
           'revenue:commerce_delete_invoice',
-          'revenue:commerce_send_invoice',
           'revenue:payments_refund_charge',
           'team:structure_create_delegation_rule',
           'team:structure_update_delegation_rule',
@@ -1099,9 +1106,12 @@ describe('V1-21b review 3 — KEY never exceeds HTTP on the same scope map (IC-1
         activeFlowSessionId: null,
       };
       let pageContext: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
+      /** Review 7 ENV-FORGE: the envelope is a server-only argument of chat(), never in pageContext. */
+      let trusted: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
       const orchestrator = {
         getConversationHistory: async () => [],
-        chat: async (_b: string, _m: string, _h: unknown, _a: unknown, ctx: typeof pageContext) => {
+        chat: async (_b: string, _m: string, _h: unknown, _a: unknown, ctx: typeof pageContext, _r?: unknown, _at?: unknown, _s?: unknown, _u?: unknown, server?: typeof trusted) => {
+          trusted = server;
           pageContext = ctx;
           return { reply: 'ok', sessionId: 's_1' };
         },
@@ -1119,7 +1129,8 @@ describe('V1-21b review 3 — KEY never exceeds HTTP on the same scope map (IC-1
       const structure = { resolveStaffByPhone: async () => assignment, setActiveFlowSession: async () => undefined };
       const bridge = new StaffChatBridgeService(structure as any, { client: {} } as any, moduleRef as any);
       expect(await bridge.routeInboundMessage('biz_1', PHONE, MESSAGE, 'whatsapp')).toMatchObject({ handled: true });
-      return pageContext;
+      expect(pageContext?.jobRoleEnvelope, 'no envelope in the client-shaped pageContext').toBeUndefined();
+      return trusted;
     };
 
     it('OrgAssignment.jobRole is SetNull on delete, so deleting a JobRole leaves its holders with none', () => {
@@ -1402,13 +1413,18 @@ describe('V1-21b review 4 — KEY never exceeds HTTP for the same holder (DRV-1,
             },
             update: async () => ({}),
           },
+          // review 7 INP4-3: no member's account phone is this phone
+          membership: { findMany: async () => [] },
         },
       };
       const structure = new StructureService(prisma as any);
       let pageContext: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
+      /** Review 7 ENV-FORGE: the envelope is a server-only argument of chat(), never in pageContext. */
+      let trusted: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
       const orchestrator = {
         getConversationHistory: async () => [],
-        chat: async (_b: string, _m: string, _h: unknown, _a: unknown, ctx: typeof pageContext) => {
+        chat: async (_b: string, _m: string, _h: unknown, _a: unknown, ctx: typeof pageContext, _r?: unknown, _at?: unknown, _s?: unknown, _u?: unknown, server?: typeof trusted) => {
+          trusted = server;
           pageContext = ctx;
           return { reply: 'ok', sessionId: 's_1' };
         },
@@ -1419,8 +1435,9 @@ describe('V1-21b review 4 — KEY never exceeds HTTP for the same holder (DRV-1,
       };
       const bridge = new StaffChatBridgeService(structure, { client: {} } as any, moduleRef as any);
       expect(await bridge.routeInboundMessage('biz_1', PHONE, MESSAGE, 'whatsapp')).toMatchObject({ handled: true });
-      expect(pageContext?.jobRoleEnvelope, 'the bridge passes an envelope').toBeDefined();
-      return { env: pageContext!.jobRoleEnvelope!, include };
+      expect(pageContext?.jobRoleEnvelope, 'no envelope in the client-shaped pageContext').toBeUndefined();
+      expect(trusted?.jobRoleEnvelope, 'the bridge passes an envelope, as a server-only argument').toBeDefined();
+      return { env: trusted!.jobRoleEnvelope!, include };
     };
     const MEMBER: Position = { membershipId: 'm_1', userId: 'u_1', jobRole: SALES_LEAD };
     const reachedBy = (env: JobRoleEnvelope) => REGISTRY.filter((t) => passes(env, t)).sort();
@@ -1690,13 +1707,18 @@ describe('V1-21b review 5 — a deleted or banned holder reaches over KEY nothin
           },
           update: async () => ({}),
         },
+        // review 7 INP4-3: no member's account phone is this phone
+        membership: { findMany: async () => [] },
       },
     };
     const structure = new StructureService(prisma as any);
     let pageContext: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
+    /** Review 7 ENV-FORGE: the envelope is a server-only argument of chat(), never in pageContext. */
+    let trusted: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
     const orchestrator = {
       getConversationHistory: async () => [],
-      chat: async (_b: string, _m: string, _h: unknown, _a: unknown, ctx: typeof pageContext) => {
+      chat: async (_b: string, _m: string, _h: unknown, _a: unknown, ctx: typeof pageContext, _r?: unknown, _at?: unknown, _s?: unknown, _u?: unknown, server?: typeof trusted) => {
+        trusted = server;
         pageContext = ctx;
         return { reply: 'ok', sessionId: 's_1' };
       },
@@ -1707,8 +1729,9 @@ describe('V1-21b review 5 — a deleted or banned holder reaches over KEY nothin
     };
     const bridge = new StaffChatBridgeService(structure, { client: {} } as any, moduleRef as any);
     expect(await bridge.routeInboundMessage('biz_1', PHONE, MESSAGE, 'whatsapp')).toMatchObject({ handled: true });
-    expect(pageContext?.jobRoleEnvelope, 'the bridge passes an envelope').toBeDefined();
-    return { env: pageContext!.jobRoleEnvelope!, include };
+    expect(pageContext?.jobRoleEnvelope, 'no envelope in the client-shaped pageContext').toBeUndefined();
+    expect(trusted?.jobRoleEnvelope, 'the bridge passes an envelope, as a server-only argument').toBeDefined();
+    return { env: trusted!.jobRoleEnvelope!, include };
   };
 
   const REPRO_TOOLS = ['commerce_create_invoice', 'deals_mark_won', 'crm_list_contacts', 'payments_list_transactions', 'payments_refund_charge'];
@@ -1930,7 +1953,11 @@ describe("V1-21b review 6 — a position is capped only by the membership HTTP r
    * StaffChatBridgeService. Returns the envelope KEY chat was given, the business it acts in
    * and the query resolveStaffByPhone made.
    */
-  const routeThroughBridge = async (assignment: { userId: string | null; membership: Member | null }) => {
+  /**
+   * `world`: every membership row (default: the one the assignment names), for the lookup by
+   * (user, business) the guard makes (review 7 INP4-2).
+   */
+  const routeThroughBridge = async (assignment: { userId: string | null; membership: Member | null; world?: Member[] }) => {
     let query: { where?: Record<string, any>; include?: Record<string, any> } = {};
     const prisma = {
       client: {
@@ -1968,14 +1995,29 @@ describe("V1-21b review 6 — a position is capped only by the membership HTTP r
           },
           update: async () => ({}),
         },
+        // review 7 INP4-2: the membership HTTP reads, looked up by (user, business); and the members whose account phone this is (INP4-3: none)
+        membership: {
+          findUnique: async (args: { where: { userId_businessId: { userId: string; businessId: string } }; include?: Record<string, any> }) => {
+            const key = args.where.userId_businessId;
+            const row = (assignment.world ?? [assignment.membership]).find((m) => m && m.userId === key.userId && m.businessId === key.businessId);
+            const userInclude = args.include?.user;
+            const select: Record<string, boolean> | undefined = userInclude === true ? undefined : userInclude?.select;
+            const userRow: Record<string, unknown> = { id: key.userId, role: 'USER', ...ACTIVE };
+            return row ? { ...row, ...(userInclude ? { user: select ? Object.fromEntries(Object.entries(userRow).filter(([k]) => select[k])) : userRow } : {}) } : null;
+          },
+          findMany: async () => [],
+        },
       },
     };
     const structure = new StructureService(prisma as any);
     let pageContext: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
+    /** Review 7 ENV-FORGE: the envelope is a server-only argument of chat(), never in pageContext. */
+    let trusted: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
     let actsIn: string | undefined;
     const orchestrator = {
       getConversationHistory: async () => [],
-      chat: async (b: string, _m: string, _h: unknown, _a: unknown, ctx: typeof pageContext) => {
+      chat: async (b: string, _m: string, _h: unknown, _a: unknown, ctx: typeof pageContext, _r?: unknown, _at?: unknown, _s?: unknown, _u?: unknown, server?: typeof trusted) => {
+        trusted = server;
         actsIn = b;
         pageContext = ctx;
         return { reply: 'ok', sessionId: 's_1' };
@@ -1987,8 +2029,9 @@ describe("V1-21b review 6 — a position is capped only by the membership HTTP r
     };
     const bridge = new StaffChatBridgeService(structure, { client: {} } as any, moduleRef as any);
     expect(await bridge.routeInboundMessage(BIZ_A, PHONE, MESSAGE, 'whatsapp')).toMatchObject({ handled: true });
-    expect(pageContext?.jobRoleEnvelope, 'the bridge passes an envelope').toBeDefined();
-    return { env: pageContext!.jobRoleEnvelope!, actsIn, query };
+    expect(pageContext?.jobRoleEnvelope, 'no envelope in the client-shaped pageContext').toBeUndefined();
+    expect(trusted?.jobRoleEnvelope, 'the bridge passes an envelope, as a server-only argument').toBeDefined();
+    return { env: trusted!.jobRoleEnvelope!, actsIn, query };
   };
 
   /** Every refusal KEY must make for `tools`, under the seeded autopilot row, for every crew. */
@@ -2034,10 +2077,15 @@ describe("V1-21b review 6 — a position is capped only by the membership HTTP r
     expect(await httpAnswer(world, HOLDER, BIZ_A, { module: 'crm', minLevel: 'write' })).toBe(
       'Insufficient permissions: crm requires write access (you have read)',
     );
-    // the assignment still names the B membership: it is not the one HTTP reads, so KEY keeps the baseline (fail closed)
-    const { env } = await routeThroughBridge({ userId: HOLDER, membership: IN_B });
+    // the assignment still names the B membership, which is not the one HTTP reads. Review 7 INP4-2: the bridge looks the
+    // holder's membership up as the guard does, (holder, A), and caps the position by that one; before review 7 it kept the
+    // baseline here (fail closed, also K2-safe, but below what HTTP gives the holder)
+    const { env } = await routeThroughBridge({ userId: HOLDER, membership: IN_B, world });
     expect(env.maxRiskTier).toBe(1);
-    expect(reachedBy(env)).toEqual(reachedBy(envelope({})));
+    expect(reachedBy(env)).toEqual(
+      reachedBy(policy.envelopeForPosition({ jobRole: SALES_LEAD, businessId: BIZ_A, membershipId: IN_A_READ.id, userId: HOLDER, membership: { ...IN_A_READ, user: ACTIVE } } as any)),
+    );
+    expect(passes(env, 'deals_list'), 'crm:read as HTTP reads it in A').toBe(true);
     for (const [tool, module, level] of ROUTED) {
       if (passes(env, tool)) expect(await httpAnswer(world, HOLDER, BIZ_A, { module, minLevel: level }), tool).toBe(true);
     }
@@ -2159,5 +2207,545 @@ describe("V1-21b review 6 — a position is capped only by the membership HTTP r
     }
     expect(reached, 'the property is not vacuous').toBeGreaterThan(100);
     expect(violations.length, violations.slice(0, 20).join('\n')).toBe(0);
+  });
+});
+
+/**
+ * V1-21b review 7 (INP4-2, INP4-3, DRV-BRIEF / DRV5-1, DRV5-2; the client-forged envelope,
+ * ENV-FORGE / INP5-2 / DRV5-3, is pinned in ai/flow-chat-envelope.spec.ts). The bridge cases
+ * run the real StructureService (resolveStaffByPhone, createAssignment, updateAssignment) and
+ * the real StaffChatBridgeService over a fake Prisma that answers the queries they make from
+ * one world of users, memberships and assignments; the HTTP answer is the real AuthMiddleware,
+ * BusinessGuard and ModuleScopeGuard over the same world; KEY's answer is the real
+ * AiOversightService.evaluate.
+ *
+ * INP4-2: the IC3-1 cap read the membership OrgAssignment.membershipId names, not the
+ * (user, business) row ModuleScopeGuard reads, and an assignment written before
+ * assertAssignmentRefs can name a membership in another business. Review 6 kept such a
+ * position at the baseline; the bridge now looks the holder's membership up as the guard does,
+ * so a foreign OWNER membership with no scope map never uncaps the position, and the holder's
+ * own row in the business KEY acts in caps it.
+ *
+ * INP4-3: a contact-only position on a member's own phone had no membership to cap it, so
+ * narrowing the member over HTTP left KEY where it was, and the same when a contact is later
+ * invited with their phone. A position is now bounded by every member of its business whose
+ * account phone it carries, and createAssignment / updateAssignment refuse a contact-only
+ * position on a member's phone.
+ */
+describe('V1-21b review 7 — KEY is capped by the membership HTTP reads for whoever holds the phone (INP4-2, INP4-3, DRV-BRIEF, DRV5-2)', () => {
+  const roleEngine = new RoleEngineService({} as never, {} as never, {} as never);
+  const oversight = new AiOversightService({ client: {} } as any, {} as any, {} as any, roleEngine, {} as any, policy);
+
+  const BIZ_A = 'biz_A';
+  const BIZ_B = 'biz_B';
+  const SALES_LEAD = { id: 'jr_sales', businessId: BIZ_A, name: 'Sales Lead', permissions: { revenue: 'admin', crm: 'admin' }, defaultApprovalTier: 2 };
+  type AccountState = { deletedAt: Date | null; bannedAt: Date | null };
+  const ACTIVE: AccountState = { deletedAt: null, bannedAt: null };
+  const BANNED: AccountState = { deletedAt: null, bannedAt: new Date('2026-10-30T12:00:00Z') };
+  const DELETED: AccountState = { deletedAt: new Date('2026-10-30T12:00:00Z'), bannedAt: null };
+
+  type UserRow = { id: string; email: string; phone: string | null; role: string } & AccountState;
+  type MemberRow = { id: string; userId: string; businessId: string; role: string; permissionScopes: unknown; maxApprovalTier: number | null };
+  type AssignmentRow = {
+    id: string;
+    businessId: string;
+    contactPhone: string | null;
+    contactName: string | null;
+    contactEmail: string | null;
+    isContactOnly: boolean;
+    membershipId: string | null;
+    userId: string | null;
+    jobRoleId: string | null;
+    orgUnitId: string;
+    reportsToId: string | null;
+    autoApprovalViaReply: boolean;
+    activeFlowSessionId: string | null;
+    endedAt: Date | null;
+    isPrimary: boolean;
+  };
+  interface World {
+    users: UserRow[];
+    memberships: MemberRow[];
+    assignments: AssignmentRow[];
+  }
+
+  const user = (id: string, phone: string | null, state: AccountState = ACTIVE): UserRow => ({ id, email: `${id}@example.com`, phone, role: 'USER', ...state });
+  const member = (id: string, userId: string, businessId: string, role: string, permissionScopes: unknown): MemberRow => ({
+    id,
+    userId,
+    businessId,
+    role,
+    permissionScopes,
+    maxApprovalTier: null,
+  });
+  const position = (over: Partial<AssignmentRow>): AssignmentRow => ({
+    id: 'as_1',
+    businessId: BIZ_A,
+    contactPhone: null,
+    contactName: null,
+    contactEmail: null,
+    isContactOnly: false,
+    membershipId: null,
+    userId: null,
+    jobRoleId: SALES_LEAD.id,
+    orgUnitId: 'ou_A',
+    reportsToId: null,
+    autoApprovalViaReply: false,
+    activeFlowSessionId: null,
+    endedAt: null,
+    isPrimary: true,
+    ...over,
+  });
+  const OWNER_A = 'u_ownerA';
+  const BUSINESSES = [
+    { id: BIZ_A, ownerId: OWNER_A },
+    { id: BIZ_B, ownerId: 'u_ownerB' },
+  ];
+  const ORG_UNITS = [{ id: 'ou_A', businessId: BIZ_A }];
+  const JOB_ROLES = [SALES_LEAD];
+
+  type Query = { model: string; op: string; args: any };
+
+  /** A Prisma client over `w`: the queries StructureService, AuthMiddleware and the guards make, answered from the world. */
+  const prismaOver = (w: World, log: Query[] = []) => {
+    const rel = (row: Record<string, any>, key: string): any => {
+      if (key === 'user') return w.users.find((u) => u.id === row.userId) ?? null;
+      if (key === 'jobRole') return JOB_ROLES.find((j) => j.id === row.jobRoleId) ?? null;
+      if (key === 'orgUnit') return ORG_UNITS.find((o) => o.id === row.orgUnitId) ?? null;
+      if (key === 'membership') return w.memberships.find((m) => m.id === row.membershipId) ?? null;
+      if (key === 'reportsTo') return null;
+      throw new Error(`relation ${key} is not modelled`);
+    };
+    const matches = (row: Record<string, any> | null, where: Record<string, any> = {}): boolean => {
+      if (!row) return false;
+      for (const [k, v] of Object.entries(where)) {
+        if (k === 'userId_businessId') {
+          if (row.userId !== v.userId || row.businessId !== v.businessId) return false;
+        } else if (v === null) {
+          if (row[k] != null) return false;
+        } else if (typeof v === 'object' && !(v instanceof Date)) {
+          if ('not' in v) {
+            if (v.not === null ? row[k] == null : row[k] === v.not) return false;
+          } else if (!matches(rel(row, k), v)) {
+            return false;
+          }
+        } else if (row[k] !== v) {
+          return false;
+        }
+      }
+      return true;
+    };
+    const shape = (row: Record<string, any> | null, args: { select?: Record<string, any>; include?: Record<string, any> } | undefined): any => {
+      if (!row) return null;
+      if (args?.select) {
+        const out: Record<string, any> = {};
+        for (const [k, s] of Object.entries(args.select)) if (s) out[k] = typeof s === 'object' ? shape(rel(row, k), s) : row[k];
+        return out;
+      }
+      const out: Record<string, any> = { ...row };
+      for (const [k, s] of Object.entries(args?.include ?? {})) if (s) out[k] = shape(rel(row, k), s === true ? undefined : s);
+      return out;
+    };
+    const model = <T extends Record<string, any>>(name: string, rows: () => T[]) => ({
+      findFirst: async (args: any) => {
+        log.push({ model: name, op: 'findFirst', args });
+        return shape(rows().find((r) => matches(r, args?.where)) ?? null, args);
+      },
+      findUnique: async (args: any) => {
+        log.push({ model: name, op: 'findUnique', args });
+        return shape(rows().find((r) => matches(r, args?.where)) ?? null, args);
+      },
+      findMany: async (args: any) => {
+        log.push({ model: name, op: 'findMany', args });
+        return rows()
+          .filter((r) => matches(r, args?.where))
+          .map((r) => shape(r, args));
+      },
+    });
+    return {
+      client: {
+        user: model('user', () => w.users),
+        membership: {
+          ...model('membership', () => w.memberships),
+          update: async (args: any) => {
+            log.push({ model: 'membership', op: 'update', args });
+            const row = w.memberships.find((m) => m.id === args.where.id)!;
+            Object.assign(row, args.data);
+            return row;
+          },
+        },
+        jobRole: model('jobRole', () => JOB_ROLES),
+        orgUnit: model('orgUnit', () => ORG_UNITS),
+        orgAssignment: {
+          ...model('orgAssignment', () => w.assignments),
+          create: async (args: any) => {
+            log.push({ model: 'orgAssignment', op: 'create', args });
+            const row = position({ id: `as_new_${w.assignments.length + 1}`, ...args.data });
+            w.assignments.push(row);
+            return shape(row, args);
+          },
+          update: async (args: any) => {
+            log.push({ model: 'orgAssignment', op: 'update', args });
+            const row = w.assignments.find((a) => a.id === args.where.id)!;
+            for (const [k, v] of Object.entries(args.data)) if (v !== undefined) (row as Record<string, unknown>)[k] = v;
+            return shape(row, args);
+          },
+        },
+        business: {
+          findFirst: async (args: { where: { id: string; OR: [{ ownerId: string }, { members: { some: { userId: string } } }] } }) => {
+            const b = BUSINESSES.find((x) => x.id === args.where.id);
+            const uid = args.where.OR[0].ownerId;
+            return b && (b.ownerId === uid || w.memberships.some((m) => m.businessId === b.id && m.userId === uid)) ? b : null;
+          },
+        },
+        teamActivityLog: { create: async () => ({}) },
+      },
+    } as any;
+  };
+
+  /**
+   * The HTTP answer for `userId` on a route of `businessId` over the world: the real
+   * AuthMiddleware (a token Supabase verifies as that user), then the real BusinessGuard (unless
+   * `moduleScopeOnly`) and, for a scoped route, the real ModuleScopeGuard. True, or the refusal.
+   */
+  const httpAnswer = async (w: World, userId: string, businessId: string, scope?: { module: string; minLevel: Level }, moduleScopeOnly = false): Promise<true | string> => {
+    const prisma = prismaOver(w);
+    const supabase = { getUserFromToken: async () => ({ id: userId, email: `${userId}@example.com` }) } as any;
+    const redis = { get: async () => null, pttl: async () => -2 } as any;
+    const req: Record<string, any> = { headers: { authorization: `Bearer token-of-${userId}` }, params: { businessId } };
+    await new AuthMiddleware(supabase, prisma, redis).use(req as any, {} as any, () => undefined);
+    const ctx = { getHandler: () => ({}), switchToHttp: () => ({ getRequest: () => req }) } as any;
+    try {
+      if (!moduleScopeOnly) await new BusinessGuard(prisma).canActivate(ctx);
+      if (!scope) return true;
+      const reflector = { get: (key: string) => (key === MODULE_SCOPE_KEY ? scope : undefined) } as any;
+      return (await new ModuleScopeGuard(prisma, reflector).canActivate(ctx)) as true;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  };
+
+  /**
+   * The real StructureService.resolveStaffByPhone and StaffChatBridgeService over the world, for
+   * an inbound message from `phone` to business A. Returns the envelope KEY chat was given (the
+   * server-only argument; before review 7 the bridge passed it in pageContext, and the argument
+   * itself is pinned in ai/flow-chat-envelope.spec.ts) and every query Prisma answered.
+   */
+  const routeThroughBridge = async (w: World, phone: string) => {
+    const log: Query[] = [];
+    const structure = new StructureService(prismaOver(w, log));
+    let pageContext: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
+    let trusted: { jobRoleEnvelope?: JobRoleEnvelope } | undefined;
+    const orchestrator = {
+      getConversationHistory: async () => [],
+      chat: async (_b: string, _m: string, _h: unknown, _a: unknown, ctx: typeof pageContext, _r?: unknown, _at?: unknown, _s?: unknown, _u?: unknown, server?: typeof trusted) => {
+        pageContext = ctx;
+        trusted = server;
+        return { reply: 'ok', sessionId: 's_1' };
+      },
+    };
+    const moduleRef = {
+      get: (token: unknown) =>
+        token === FlowOrchestratorService ? orchestrator : token === JobRolePolicyService ? policy : token === AiOversightService ? oversight : undefined,
+    };
+    const bridge = new StaffChatBridgeService(structure, { client: {} } as any, moduleRef as any);
+    expect(await bridge.routeInboundMessage(BIZ_A, phone, 'invoice the client 500, mark the deal won and refund the deposit', 'whatsapp')).toMatchObject({ handled: true });
+    const env = trusted?.jobRoleEnvelope ?? pageContext?.jobRoleEnvelope;
+    expect(env, 'the bridge passes an envelope').toBeDefined();
+    return { env: env!, log };
+  };
+
+  const reader = (autonomyLevel: number): AutonomySettingsReader => ({
+    autopilotSettings: { findUnique: async () => ({ autonomyLevel, approvedTools: [], blockedTools: [], approvalTimeoutHours: 24 }) as any },
+    aiMemory: { findUnique: async () => null },
+  });
+  const ROUTED = Object.entries(CANONICAL_MODULE_TOOLS).flatMap(([m, tools]) => Object.entries(tools).map(([t, l]) => [t, m, l] as [string, string, Level]));
+  const reachedBy = (env: JobRoleEnvelope) => REGISTRY.filter((t) => passes(env, t)).sort();
+  const scopesOf = (m: MemberRow) => (m.permissionScopes && typeof m.permissionScopes === 'object' ? m.permissionScopes : defaultScopesForRole(m.role));
+  /** What the Sales Lead position reaches bounded by each of `ms` (as HTTP reads each): the precise answer. */
+  const capped = (...ms: MemberRow[]) =>
+    REGISTRY.filter((t) => passes(policy.envelopeForJobRole(SALES_LEAD), t) && ms.every((m) => passes(envelope(scopesOf(m)), t))).sort();
+  const BASELINE_REACH = reachedBy(envelope({}));
+
+  /** K2: every governed tool KEY reaches is one HTTP gives each of `holders` in business A. */
+  const expectWithinHttp = async (w: World, env: JobRoleEnvelope, holders: string[]) => {
+    const violations: string[] = [];
+    for (const [tool, module, level] of ROUTED) {
+      if (!passes(env, tool)) continue;
+      for (const h of holders) {
+        const a = await httpAnswer(w, h, BIZ_A, { module, minLevel: level });
+        if (a !== true) violations.push(`${tool} for ${h}: ${a}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  };
+
+  describe('INP4-2 — the membership is the (user, business) row HTTP reads, not the row the assignment names', () => {
+    const PHONE = '+18685551902';
+    const X = 'u_x';
+    const OWNER_IN_B = member('m_xB', X, BIZ_B, 'OWNER', null);
+    const naming = (m: MemberRow, userId: string | null = X) => position({ contactPhone: PHONE, membershipId: m.id, userId });
+
+    it("the repro: an assignment in A names X's OWNER membership in B (no scope map); HTTP gives X nothing in A, and KEY keeps the baseline", async () => {
+      const w: World = { users: [user(X, null)], memberships: [OWNER_IN_B], assignments: [naming(OWNER_IN_B)] };
+      expect(await httpAnswer(w, X, BIZ_A)).toBe('No access to this business');
+      for (const [module, minLevel] of [['revenue', 'write'], ['crm', 'read']] as Array<[string, Level]>) {
+        expect(await httpAnswer(w, X, BIZ_A, { module, minLevel }, true), `${module}:${minLevel}`).toBe('Not a member of this business');
+      }
+      const { env } = await routeThroughBridge(w, PHONE);
+      expect(env.maxRiskTier).toBe(1);
+      expect(reachedBy(env)).toEqual(BASELINE_REACH);
+      for (const tool of ['commerce_create_invoice', 'deals_mark_won', 'payments_refund_charge', 'deals_list']) {
+        const d = await oversight.evaluate(BIZ_A, tool, undefined, ['general'], env, reader(4));
+        expect(d.allowed, `${tool}: ${d.reason}`).toBe(false);
+        expect(d.reason).toMatch(/Sales Lead position's (scope|tier)/);
+      }
+    });
+
+    it("the bridge looks the holder's membership up as the guard does, by (X, A): X's own STAFF row in A caps the position, the OWNER row in B never uncaps it", async () => {
+      const IN_A = member('m_xA', X, BIZ_A, 'STAFF', { crm: 'read' });
+      const w: World = { users: [user(X, null)], memberships: [OWNER_IN_B, IN_A], assignments: [naming(OWNER_IN_B)] };
+      expect(await httpAnswer(w, X, BIZ_A, { module: 'crm', minLevel: 'read' })).toBe(true);
+      expect(await httpAnswer(w, X, BIZ_A, { module: 'revenue', minLevel: 'write' })).toBe('Insufficient permissions: revenue requires write access (you have none)');
+      const { env, log } = await routeThroughBridge(w, PHONE);
+      expect(log.filter((q) => q.model === 'membership' && q.op === 'findUnique').map((q) => q.args.where)).toContainEqual({
+        userId_businessId: { userId: X, businessId: BIZ_A },
+      });
+      expect(reachedBy(env)).toEqual(capped(IN_A));
+      expect(passes(env, 'deals_list')).toBe(true);
+      await expectWithinHttp(w, env, [X]);
+      for (const tool of ['commerce_create_invoice', 'deals_mark_won', 'payments_refund_charge']) {
+        const d = await oversight.evaluate(BIZ_A, tool, undefined, ['general'], env, reader(4));
+        expect(d.allowed, `${tool}: ${d.reason}`).toBe(false);
+      }
+      expect(await oversight.evaluate(BIZ_A, 'deals_list', undefined, ['general'], env, reader(4))).toMatchObject({ allowed: true });
+    });
+
+    it("K2 property: over the named membership x the holder's own row in A x the assignment's user, KEY reaches exactly the position capped by the row HTTP reads, and nothing HTTP refuses", async () => {
+      const OTHER = 'u_other';
+      const named: MemberRow[] = [
+        OWNER_IN_B,
+        member('m_xB_admin', X, BIZ_B, 'ADMIN', null),
+        member('m_xB_full', X, BIZ_B, 'STAFF', Object.fromEntries(CANONICAL_MODULES.map((m) => [m, 'admin']))),
+        member('m_oB', OTHER, BIZ_B, 'OWNER', null),
+        member('m_oA', OTHER, BIZ_A, 'STAFF', { crm: 'admin', revenue: 'admin' }),
+      ];
+      const own: Array<MemberRow | null> = [
+        null,
+        member('m_xA_none', X, BIZ_A, 'STAFF', {}),
+        member('m_xA_crm', X, BIZ_A, 'STAFF', { crm: 'read' }),
+        member('m_xA_rev', X, BIZ_A, 'STAFF', { revenue: 'write', crm: 'write' }),
+        member('m_xA_admin', X, BIZ_A, 'ADMIN', null),
+        member('m_xA_owner', X, BIZ_A, 'OWNER', null),
+      ];
+      let reached = 0;
+      for (const n of named) {
+        for (const o of own) {
+          for (const assignmentUser of [X, null, OTHER]) {
+            const memberships = [n, ...(o && !(o.userId === n.userId && o.businessId === n.businessId) ? [o] : [])];
+            const w: World = { users: [user(X, null), user(OTHER, null)], memberships, assignments: [naming(n, assignmentUser)] };
+            const at = `named ${n.id} / own ${o?.id ?? 'none'} / assignment user ${assignmentUser}`;
+            const { env } = await routeThroughBridge(w, PHONE);
+            const holders = [...new Set([assignmentUser, n.userId].filter((u): u is string => !!u))];
+            const row = holders.length === 1 ? w.memberships.find((m) => m.userId === holders[0] && m.businessId === BIZ_A) : undefined;
+            expect(reachedBy(env), at).toEqual(row ? capped(row) : BASELINE_REACH);
+            reached += reachedBy(env).length;
+            for (const h of holders) await expectWithinHttp(w, env, [h]);
+          }
+        }
+      }
+      expect(reached, 'the property is not vacuous').toBeGreaterThan(BASELINE_REACH.length * 90);
+    });
+  });
+
+  describe("INP4-3 — a position on a member's own phone is capped by that member's membership", () => {
+    const PHONE = '+18685551904';
+    const ADMIN = 'u_admin';
+    const ADMIN_USER = user(ADMIN, PHONE);
+    const ADMIN_FULL = member('m_admin', ADMIN, BIZ_A, 'ADMIN', null);
+    const ADMIN_NARROWED = { ...ADMIN_FULL, permissionScopes: { crm: 'read' } };
+    const OWNER_ROW = member('m_ownerA', OWNER_A, BIZ_A, 'OWNER', null);
+    const CONTACT_ONLY = { isContactOnly: true, contactName: 'Night desk', contactPhone: PHONE, orgUnitId: 'ou_A', jobRoleId: SALES_LEAD.id };
+    const contactOnly = (phone: string, id = 'as_c') => position({ id, isContactOnly: true, contactName: 'Night desk', contactPhone: phone });
+    const REFUSED = /A member of this business uses this phone number/;
+
+    it("the repro, at the door: createAssignment refuses a contact-only position on a member's own phone (in any format), and writes nothing", async () => {
+      const w: World = { users: [ADMIN_USER, user(OWNER_A, null)], memberships: [ADMIN_FULL, OWNER_ROW], assignments: [] };
+      const structure = new StructureService(prismaOver(w));
+      await expect(structure.createAssignment(BIZ_A, CONTACT_ONLY as any, ADMIN)).rejects.toThrow(REFUSED);
+      await expect(structure.createAssignment(BIZ_A, { ...CONTACT_ONLY, contactPhone: '+1 (868) 555-1904' } as any, OWNER_A)).rejects.toThrow(REFUSED);
+      expect(w.assignments).toEqual([]);
+    });
+
+    it("and on update: moving a contact-only position onto a member's phone is refused", async () => {
+      const w: World = { users: [ADMIN_USER, user(OWNER_A, null)], memberships: [ADMIN_FULL, OWNER_ROW], assignments: [contactOnly('+18685550000')] };
+      const structure = new StructureService(prismaOver(w));
+      await expect(structure.updateAssignment(BIZ_A, 'as_c', { contactPhone: '+1 868 555 1904' } as any, OWNER_A)).rejects.toThrow(REFUSED);
+      expect(w.assignments[0].contactPhone).toBe('+18685550000');
+    });
+
+    it("controls: a contact-only position on a phone no member of the business has, and the member's own position on their phone, are still created", async () => {
+      const w: World = {
+        users: [ADMIN_USER, user(OWNER_A, null), user('u_elsewhere', '+18685550001')],
+        memberships: [ADMIN_FULL, OWNER_ROW, member('m_elsewhere', 'u_elsewhere', BIZ_B, 'STAFF', null)],
+        assignments: [],
+      };
+      const structure = new StructureService(prismaOver(w));
+      await expect(structure.createAssignment(BIZ_A, { ...CONTACT_ONLY, contactPhone: '+18685550001' } as any, OWNER_A)).resolves.toMatchObject({
+        isContactOnly: true,
+        membershipId: null,
+        contactPhone: '+18685550001',
+      });
+      await expect(
+        structure.createAssignment(BIZ_A, { membershipId: ADMIN_FULL.id, userId: ADMIN, contactPhone: PHONE, orgUnitId: 'ou_A', jobRoleId: SALES_LEAD.id } as any, OWNER_A),
+      ).resolves.toMatchObject({ isContactOnly: false, membershipId: ADMIN_FULL.id, contactPhone: PHONE });
+    });
+
+    it("the repro, at run time: a contact-only position already on the ADMIN's phone (filed before the door was shut) follows the ADMIN's narrowing", async () => {
+      const before: World = { users: [ADMIN_USER], memberships: [ADMIN_FULL], assignments: [contactOnly(PHONE)] };
+      expect(await httpAnswer(before, ADMIN, BIZ_A, { module: 'revenue', minLevel: 'write' })).toBe(true);
+      expect(reachedBy((await routeThroughBridge(before, PHONE)).env)).toEqual(capped(ADMIN_FULL));
+
+      const w: World = { users: [ADMIN_USER], memberships: [ADMIN_NARROWED], assignments: [contactOnly(PHONE)] };
+      expect(await httpAnswer(w, ADMIN, BIZ_A, { module: 'revenue', minLevel: 'write' })).toBe('Insufficient permissions: revenue requires write access (you have none)');
+      expect(await httpAnswer(w, ADMIN, BIZ_A, { module: 'crm', minLevel: 'write' })).toBe('Insufficient permissions: crm requires write access (you have read)');
+      const { env } = await routeThroughBridge(w, PHONE);
+      expect(reachedBy(env)).toEqual(capped(ADMIN_NARROWED));
+      for (const tool of ['commerce_create_invoice', 'deals_mark_won', 'payments_create_link']) {
+        const d = await oversight.evaluate(BIZ_A, tool, undefined, [], env, reader(2));
+        expect(d.allowed, `${tool}: ${d.reason}`).toBe(false);
+        expect(d.reason).toMatch(/Sales Lead position's (scope|tier)/);
+      }
+      expect(await oversight.evaluate(BIZ_A, 'deals_list', undefined, [], env, reader(2))).toMatchObject({ allowed: true });
+      await expectWithinHttp(w, env, [ADMIN]);
+    });
+
+    it('a contact later invited with their phone (stored in another format) caps the position by their membership', async () => {
+      const INVITED = 'u_invited';
+      const STAFF_ROW = member('m_inv', INVITED, BIZ_A, 'STAFF', null);
+      const w: World = { users: [user(INVITED, '+1 (868) 555-1905')], memberships: [STAFF_ROW], assignments: [contactOnly('+18685551905')] };
+      expect(await httpAnswer(w, INVITED, BIZ_A, { module: 'revenue', minLevel: 'write' })).toBe('Insufficient permissions: revenue requires write access (you have read)');
+      const { env } = await routeThroughBridge(w, '+18685551905');
+      expect(reachedBy(env)).toEqual(capped(STAFF_ROW));
+      expect((await oversight.evaluate(BIZ_A, 'commerce_create_invoice', undefined, [], env, reader(2))).allowed).toBe(false);
+      await expectWithinHttp(w, env, [INVITED]);
+    });
+
+    it('two members on the phone bound it by both; a banned or deleted member on it leaves the baseline; a member of another business, or a user who is no member, does not cap it', async () => {
+      const A1 = member('m_1', 'u_1', BIZ_A, 'STAFF', { crm: 'admin', revenue: 'read' });
+      const A2 = member('m_2', 'u_2', BIZ_A, 'STAFF', { crm: 'read', revenue: 'admin' });
+      const both: World = { users: [user('u_1', PHONE), user('u_2', '+1-868-555-1904')], memberships: [A1, A2], assignments: [contactOnly(PHONE)] };
+      const env = (await routeThroughBridge(both, PHONE)).env;
+      expect(reachedBy(env)).toEqual(capped(A1, A2));
+      await expectWithinHttp(both, env, ['u_1', 'u_2']);
+
+      for (const state of [BANNED, DELETED]) {
+        const w: World = { users: [user('u_1', PHONE, state)], memberships: [A1], assignments: [contactOnly(PHONE)] };
+        expect(reachedBy((await routeThroughBridge(w, PHONE)).env), JSON.stringify(state)).toEqual(BASELINE_REACH);
+      }
+
+      const elsewhere: World = {
+        users: [user('u_b', PHONE), user('u_nomember', PHONE)],
+        memberships: [member('m_b', 'u_b', BIZ_B, 'STAFF', {})],
+        assignments: [contactOnly(PHONE)],
+      };
+      expect(reachedBy((await routeThroughBridge(elsewhere, PHONE)).env)).toEqual(capped());
+    });
+
+    it('K2 property: over positions on the phone x the members whose account phone it is, a governed tool KEY reaches is one HTTP gives every one of them', async () => {
+      const scopeSets: Array<[string, unknown]> = [
+        ['STAFF', {}],
+        ['STAFF', { crm: 'read' }],
+        ['STAFF', null],
+        ['ADMIN', { crm: 'write', revenue: 'read' }],
+        ['ADMIN', null],
+        ['OWNER', null],
+      ];
+      const memberSets: MemberRow[][] = [[]];
+      scopeSets.forEach(([role, s], i) => memberSets.push([member(`m_${i}`, `u_${i}`, BIZ_A, role, s)]));
+      memberSets.push([member('m_p', 'u_p', BIZ_A, 'STAFF', { revenue: 'admin' }), member('m_q', 'u_q', BIZ_A, 'STAFF', { crm: 'admin' })]);
+      const positions: Array<Partial<AssignmentRow>> = [
+        { isContactOnly: true, contactName: 'Night desk' },
+        { membershipId: 'm_holder', userId: 'u_holder' },
+      ];
+      const HOLDER_ROW = member('m_holder', 'u_holder', BIZ_A, 'ADMIN', null);
+      let reached = 0;
+      for (const ms of memberSets) {
+        for (const p of positions) {
+          const w: World = {
+            users: [user('u_holder', null), ...ms.map((m) => user(m.userId, PHONE))],
+            memberships: [HOLDER_ROW, ...ms],
+            assignments: [position({ id: 'as_p', contactPhone: PHONE, ...p })],
+          };
+          const { env } = await routeThroughBridge(w, PHONE);
+          const holders = [...ms.map((m) => m.userId), ...(p.userId ? [p.userId] : [])];
+          const expected = p.userId ? capped(HOLDER_ROW, ...ms) : capped(...ms);
+          expect(reachedBy(env), `${JSON.stringify(p)} / ${ms.map((m) => m.id).join(',')}`).toEqual(expected);
+          reached += expected.length;
+          await expectWithinHttp(w, env, holders);
+        }
+      }
+      expect(reached, 'the property is not vacuous').toBeGreaterThan(200);
+    });
+
+    it('policy: phoneMembers bound a position; one not shown to be in the position business with an active account caps it to the baseline (fail closed)', () => {
+      const row = { role: 'STAFF', permissionScopes: { crm: 'read' }, businessId: BIZ_A, userId: 'u_1', user: ACTIVE };
+      const base = { jobRole: SALES_LEAD, businessId: BIZ_A, membershipId: null, userId: null };
+      expect(reachedBy(policy.envelopeForPosition({ ...base, phoneMembers: [] } as any))).toEqual(capped());
+      expect(reachedBy(policy.envelopeForPosition({ ...base, phoneMembers: [row] } as any))).toEqual(capped(member('m', 'u_1', BIZ_A, 'STAFF', { crm: 'read' })));
+      for (const [label, m] of [
+        ['in another business', { ...row, businessId: BIZ_B }],
+        ['business not given', { ...row, businessId: undefined }],
+        ['user not given', { ...row, userId: undefined }],
+        ['account not given', { ...row, user: undefined }],
+        ['banned', { ...row, user: BANNED }],
+      ] as Array<[string, unknown]>) {
+        expect(reachedBy(policy.envelopeForPosition({ ...base, phoneMembers: [m] } as any)), label).toEqual(BASELINE_REACH);
+      }
+      expect(reachedBy(policy.envelopeForPosition({ ...base, businessId: undefined, phoneMembers: [row] } as any)), 'position business not given').toEqual(BASELINE_REACH);
+    });
+  });
+
+  describe('DRV-BRIEF / DRV5-1 — inbox_brief needs the level that forces a brief by hand', () => {
+    const http = async (scopes: unknown, module: string, minLevel: Level) => {
+      const w: World = { users: [user('u_1', null)], memberships: [member('m_1', 'u_1', BIZ_A, 'STAFF', scopes)], assignments: [] };
+      return httpAnswer(w, 'u_1', BIZ_A, { module, minLevel });
+    };
+
+    it('{ operations: read } reaches the brief GET serves, not the one KEY generates; { operations: write } does, as POST brief/generate', async () => {
+      const read = envelope({ operations: 'read' });
+      expect(allows(read, 'inbox_brief')).toBe(false);
+      expect(read.maxRiskTier).toBe(1);
+      const refused = await oversight.evaluate(BIZ_A, 'inbox_brief', undefined, [], read, reader(1));
+      expect(refused.allowed).toBe(false);
+      expect(refused.reason).toMatch(/outside the Position position's scope/);
+      // HTTP for the same map: GET brief (operations:read) yes, POST brief/generate (operations:write) no
+      expect(await http({ operations: 'read' }, 'operations', 'read')).toBe(true);
+      expect(await http({ operations: 'read' }, 'operations', 'write')).toBe('Insufficient permissions: operations requires write access (you have read)');
+
+      const write = envelope({ operations: 'write' });
+      expect(await http({ operations: 'write' }, 'operations', 'write')).toBe(true);
+      expect(await oversight.evaluate(BIZ_A, 'inbox_brief', undefined, [], write, reader(1))).toMatchObject({ allowed: true, requiresQuickConfirm: false });
+      // the other inbox reads stay at read
+      expect(passes(read, 'inbox_list_threads')).toBe(true);
+      expect(passes(read, 'inbox_read_thread')).toBe(true);
+    });
+  });
+
+  describe('DRV5-2 — commerce_send_invoice is granted by no key', () => {
+    it('{ revenue: admin } at autonomy 5 is refused it, and no canonical map, legacy key or the baseline reaches it', async () => {
+      const admin = envelope({ revenue: 'admin' });
+      expect(allows(admin, 'commerce_send_invoice')).toBe(false);
+      const d = await oversight.evaluate(BIZ_A, 'commerce_send_invoice', undefined, [], admin, reader(5));
+      expect(d.allowed).toBe(false);
+      expect(d.reason).toMatch(/outside the Position position's scope/);
+      const everything = Object.fromEntries([...CANONICAL_MODULES, ...Object.keys(policyExports.MODULE_TOOL_FAMILIES)].map((k) => [k, 'admin']));
+      expect(allows(envelope(everything), 'commerce_send_invoice')).toBe(false);
+      expect(allows(envelope({}), 'commerce_send_invoice')).toBe(false);
+      expect(policyExports.GOVERNED_UNGRANTED.commerce_send_invoice).toBeDefined();
+      // the tools beside it stay where the derivation puts them
+      expect(passes(admin, 'commerce_create_invoice')).toBe(true);
+      expect(passes(admin, 'commerce_delete_invoice')).toBe(true);
+    });
   });
 });

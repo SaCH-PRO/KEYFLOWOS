@@ -39,6 +39,18 @@
  *     WRAPPER (it only forwards to a method a route calls, which then decides; CrmService
  *     .addNote / addTask -> CrmTimelineService, review 2 ESC-1) or a reviewed INCIDENTAL
  *     side effect (an activity-feed row), which is FREE.
+ *     A route counts for a method only where the member can make it run (review 7 DRV-BRIEF
+ *     / DRV5-1). A call the handler makes only under a guard on server state (a value it read
+ *     through a service or Prisma: `if (insights.length > 0) return insights[0]` before
+ *     generateBrief, a catch block, a branch on a row's status) is STATE-GUARDED: the member
+ *     cannot force it, so that route neither lowers the method's level nor makes it FREE. A
+ *     branch on the caller's own input (a query parameter, the body) is not a guard: the
+ *     member picks it. A method only state-guarded routes call is governed by their modules
+ *     but has no by-hand level, so it counts as UNKNOWN beside them (its tools are
+ *     GOVERNED_UNGRANTED). A reviewed ARGUMENT_BOUND route call is one whose arguments the
+ *     route fixes so that it does not stand in for the method in general (POST
+ *     /drive/.../email-content mails only the caller a fixed notice, so it is not a route to
+ *     TransactionalEmailService.send to a customer; review 7 DRV5-2).
  *  3. A tool is governed by the union of its calls' modules, at the highest level any of its
  *     governed calls needs. A tool governed by nothing is UNGOVERNED.
  *  4. Module M grants tool T, BY EXACT NAME, at level L exactly when M is the only module
@@ -117,10 +129,13 @@
  *  kept alongside the table for the tools no route governs (see
  *  job-role-policy.service.spec.ts).
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import * as ts from 'typescript';
 import { FLOW_TOOLS, CORTEX_TOOL_BRIDGE } from '../ai/flow-tool-registry';
+import { KeyInboxController } from '../key-inbox/key-inbox.controller';
+import { KeyInboxAdapterService } from '../key-cortex/organs/key-inbox-adapter.service';
 import { CANONICAL_MODULES, LEVEL_RANK, type CanonicalModule } from '../../core/authority/module-vocabulary';
 import * as policyModule from './job-role-policy.service';
 
@@ -235,7 +250,128 @@ interface Route {
   /** The handler (or its class) runs AuthGuard. */
   authGuard: boolean;
   calls: Set<string>;
+  /** Of `calls`, those the handler makes only under a guard on server state (rule 2). */
+  guarded: Map<string, string>;
   body: string;
+}
+
+/**
+ * The service calls a handler makes only under a guard on server state, each with the guard
+ * (review 7 DRV-BRIEF / DRV5-1). A state value is a local the handler read through `this.`
+ * (a service or Prisma) or an `await`, or one derived from such a value; a guard on it is an
+ * if / ternary / && || ?? / switch around the call, a catch block, or an earlier
+ * `if (...) return` in an enclosing block (the cache-hit shape: a different result returned
+ * instead of doing the work). An early `throw` is a refusal, not an alternative, and does not
+ * make a later call guarded; a guard on the caller's own input (parameters) does not either,
+ * since the member chooses it. A call made at least once unguarded is unguarded.
+ */
+function stateGuardedCalls(body: string, fields: ReadonlyMap<string, string>): Map<string, string> {
+  const sf = ts.createSourceFile('handler.ts', `class Handler {\n${body}\n}`, ts.ScriptTarget.Latest, true);
+  const guarded = new Map<string, string>();
+  const unguarded = new Set<string>();
+  const visitMethods = (node: ts.Node) => {
+    if (ts.isMethodDeclaration(node) && node.body) analyse(node);
+    else ts.forEachChild(node, visitMethods);
+  };
+  const analyse = (method: ts.MethodDeclaration) => {
+    const state = new Set<string>();
+    const readsState = (n: ts.Node): boolean => {
+      let hit = false;
+      const v = (x: ts.Node) => {
+        if (hit) return;
+        if (ts.isAwaitExpression(x)) hit = true;
+        else if (ts.isIdentifier(x) && state.has(x.text)) hit = true;
+        else if (ts.isCallExpression(x)) {
+          let e: ts.Expression = x.expression;
+          while (ts.isPropertyAccessExpression(e) || ts.isElementAccessExpression(e) || ts.isNonNullExpression(e) || ts.isCallExpression(e)) e = e.expression;
+          if (e.kind === ts.SyntaxKind.ThisKeyword) hit = true;
+        }
+        if (!hit) ts.forEachChild(x, v);
+      };
+      v(n);
+      return hit;
+    };
+    const names = (b: ts.BindingName, out: string[]) => {
+      if (ts.isIdentifier(b)) out.push(b.text);
+      else for (const el of b.elements) if (!ts.isOmittedExpression(el)) names(el.name, out);
+    };
+    for (let changed = true; changed; ) {
+      changed = false;
+      const v = (x: ts.Node) => {
+        const add = (n: string) => {
+          if (!state.has(n)) {
+            state.add(n);
+            changed = true;
+          }
+        };
+        if (ts.isVariableDeclaration(x) && x.initializer && readsState(x.initializer)) {
+          const ns: string[] = [];
+          names(x.name, ns);
+          ns.forEach(add);
+        }
+        if (ts.isBinaryExpression(x) && x.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(x.left) && readsState(x.right)) add(x.left.text);
+        ts.forEachChild(x, v);
+      };
+      v(method.body!);
+    }
+    const returns = (s: ts.Node): boolean => {
+      let r = false;
+      const v = (n: ts.Node) => {
+        if (ts.isReturnStatement(n)) r = true;
+        else if (!ts.isFunctionLike(n)) ts.forEachChild(n, v);
+      };
+      v(s);
+      return r;
+    };
+    const guardOf = (node: ts.Node): string | null => {
+      let cur: ts.Node = node;
+      while (cur.parent && cur !== method) {
+        const p = cur.parent;
+        if (ts.isIfStatement(p) && p.expression !== cur && readsState(p.expression)) return `if (${p.expression.getText()})`;
+        if (ts.isConditionalExpression(p) && p.condition !== cur && readsState(p.condition)) return `${p.condition.getText()} ?`;
+        if (
+          ts.isBinaryExpression(p) &&
+          p.right === cur &&
+          [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken].includes(p.operatorToken.kind) &&
+          readsState(p.left)
+        ) {
+          return `${p.left.getText()} ${p.operatorToken.getText()}`;
+        }
+        if (ts.isCatchClause(p)) return 'catch';
+        if ((ts.isCaseClause(p) || ts.isDefaultClause(p)) && readsState(p.parent.parent.expression)) return `switch (${p.parent.parent.expression.getText()})`;
+        if (ts.isBlock(p)) {
+          for (const s of p.statements.slice(0, p.statements.indexOf(cur as ts.Statement))) {
+            if (ts.isIfStatement(s) && readsState(s.expression) && (returns(s.thenStatement) || (!!s.elseStatement && returns(s.elseStatement)))) {
+              return `after if (${s.expression.getText()}) return`;
+            }
+          }
+        }
+        cur = p;
+      }
+      return null;
+    };
+    const visitCalls = (n: ts.Node) => {
+      if (
+        ts.isCallExpression(n) &&
+        ts.isPropertyAccessExpression(n.expression) &&
+        ts.isPropertyAccessExpression(n.expression.expression) &&
+        n.expression.expression.expression.kind === ts.SyntaxKind.ThisKeyword
+      ) {
+        const svc = fields.get(n.expression.expression.name.text);
+        if (svc && svc !== 'PrismaService') {
+          const call = `${svc}.${n.expression.name.text}`;
+          const guard = guardOf(n);
+          if (guard === null) unguarded.add(call);
+          else if (!guarded.has(call)) guarded.set(call, guard);
+        }
+      }
+      ts.forEachChild(n, visitCalls);
+    };
+    visitCalls(method.body!);
+  };
+  visitMethods(sf);
+  for (const c of unguarded) guarded.delete(c);
+  return guarded;
 }
 
 function controllerFiles(dir: string): string[] {
@@ -304,6 +440,7 @@ function controllerRoutes(): Route[] {
         scope: scopeM && enforced ? `${scopeM[1]}:${scopeM[2] ?? 'read'}` : null,
         authGuard: classAuth || /@UseGuards\([^)]*\bAuthGuard\b/.test(deco),
         calls,
+        guarded: stateGuardedCalls(body, fields),
         body,
       });
     }
@@ -406,6 +543,31 @@ const routeKey = (r: { file: string; verb: string; path: string }) => `${r.file}
 const SIGNED = new Set(SIGNED_PROVIDER_ROUTES.map(routeKey));
 
 /**
+ * Route calls whose arguments the route fixes so that it does not stand in for the method in
+ * general (rule 2, review 7 DRV5-2). `proof` must appear in the handler. POST
+ * /drive/.../email-content mails the caller (or, without one, the business's first member) a
+ * fixed 'document_generated' notice: it is not a route by which a member mails a customer, so
+ * it does not make TransactionalEmailService.send FREE for commerce_send_invoice, which mails
+ * the invoice's customer an 'invoice_sent' pay link.
+ */
+const ARGUMENT_BOUND: Array<{ file: string; verb: string; path: string; call: string; proof: RegExp[]; why: string }> = [
+  {
+    file: 'modules/google-drive/google-drive.controller.ts',
+    verb: 'POST',
+    path: '/drive/businesses/:businessId/email-content',
+    call: 'TransactionalEmailService.send',
+    proof: [
+      /user = await this\.prisma\.client\.user\.findUnique\(\{\s*where: \{ id: req\.user\.id \}/,
+      /user = business\.members\[0\]\.user;/,
+      /type: 'document_generated',/,
+      /recipientEmail: user\.email,/,
+    ],
+    why: "mails the caller (or the business's first member) a fixed document_generated notice, never a customer",
+  },
+];
+const BOUND = new Set(ARGUMENT_BOUND.map((b) => `${routeKey(b)} ${b.call}`));
+
+/**
  * Service methods no route calls that only forward to one that a route does (rule 2): the
  * forwarded-to method's routes decide. `via` is the field the wrapper forwards through.
  */
@@ -451,30 +613,51 @@ interface Derivation {
   unknownCalls: Map<string, string[]>;
   /** governed tools no module grants (rule 4) */
   governedUngranted: string[];
-  /** method -> the member routes whose handlers call it */
+  /** method -> the member routes whose handlers make it run whenever the member asks */
   byMethod: Map<string, Route[]>;
+  /** method -> the member routes whose handlers call it only under a guard on server state */
+  guardedBy: Map<string, Route[]>;
 }
 
 function derive(calls: Map<string, string[]>, routes: Route[]): Derivation {
   const byMethod = new Map<string, Route[]>();
+  const guardedBy = new Map<string, Route[]>();
   for (const r of routes) {
     if (SIGNED.has(routeKey(r))) continue;
-    for (const c of r.calls) byMethod.set(c, [...(byMethod.get(c) ?? []), r]);
+    for (const c of r.calls) {
+      if (BOUND.has(`${routeKey(r)} ${c}`)) continue;
+      const into = r.guarded.has(c) ? guardedBy : byMethod;
+      into.set(c, [...(into.get(c) ?? []), r]);
+    }
   }
 
-  /** Rule 2: 'unknown', or module -> lowest level among its handlers (empty = FREE). */
-  const classify = (call: string): Map<string, Level> | 'unknown' => {
+  /**
+   * Rule 2: module -> lowest level among the handlers that make it run (empty = FREE), and
+   * whether the method has no by-hand level (UNKNOWN). A method only state-guarded handlers
+   * call is UNKNOWN, governed by those handlers' modules at their highest level: they keep
+   * the legacy keys and the baseline off it, and no module grants it.
+   */
+  const classify = (call: string): { levels: Map<string, Level>; unknown: boolean } => {
     let rs = byMethod.get(call) ?? [];
     if (!rs.length && WRAPPERS[call]) rs = byMethod.get(WRAPPERS[call].to) ?? [];
-    const out = new Map<string, Level>();
-    if (!rs.length) return INCIDENTAL[call] ? out : 'unknown';
-    if (rs.some((r) => r.scope === null)) return out;
+    const levels = new Map<string, Level>();
+    if (!rs.length) {
+      if (INCIDENTAL[call]) return { levels, unknown: false };
+      for (const r of guardedBy.get(call) ?? []) {
+        if (!r.scope) continue;
+        const [m, l] = r.scope.split(':') as [string, Level];
+        const cur = levels.get(m);
+        if (!cur || rank(l) > rank(cur)) levels.set(m, l);
+      }
+      return { levels, unknown: true };
+    }
+    if (rs.some((r) => r.scope === null)) return { levels, unknown: false };
     for (const r of rs) {
       const [m, l] = r.scope!.split(':') as [string, Level];
-      const cur = out.get(m);
-      if (!cur || rank(l) < rank(cur)) out.set(m, l);
+      const cur = levels.get(m);
+      if (!cur || rank(l) < rank(cur)) levels.set(m, l);
     }
-    return out;
+    return { levels, unknown: false };
   };
 
   /** Rule 3: union of modules, highest level any governed call needs. */
@@ -485,11 +668,8 @@ function derive(calls: Map<string, string[]>, routes: Route[]): Derivation {
     const unknown: string[] = [];
     for (const c of cs) {
       const k = classify(c);
-      if (k === 'unknown') {
-        unknown.push(c);
-        continue;
-      }
-      for (const [m, l] of k) {
+      if (k.unknown) unknown.push(c);
+      for (const [m, l] of k.levels) {
         const cur = lv.get(m);
         if (!cur || rank(l) > rank(cur)) lv.set(m, l);
       }
@@ -520,7 +700,7 @@ function derive(calls: Map<string, string[]>, routes: Route[]): Derivation {
     for (const m of lv.keys()) mods.add(m);
     familyModules.set(family(tool), mods);
   }
-  return { mapping, familyModules, toolLevels, unknownCalls, governedUngranted, byMethod };
+  return { mapping, familyModules, toolLevels, unknownCalls, governedUngranted, byMethod, guardedBy };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -626,6 +806,8 @@ const UNMAPPED_GOVERNED: Record<string, string[]> = {
  */
 const UNGRANTED: Record<string, string> = {
   calendar_check_conflicts: 'reads Prisma directly; no service call (baseline read for every position)',
+  commerce_send_invoice:
+    "mails the invoice's customer through TransactionalEmailService.send, which no member route makes run for a customer (drive email-content mails only the caller: ARGUMENT_BOUND), so revenue:write (updateInvoiceStatus) is only a floor (review 7 DRV5-2)",
   commerce_create_product: 'CatalogService.createProduct is reached by catalog.controller, which is unscoped',
   commerce_update_product: 'CatalogService.updateProduct is reached by catalog.controller and trash restore, both unscoped',
   contract_extract_clauses: 'ContractClauseService.extractClauses backs no route',
@@ -649,10 +831,11 @@ const UNGRANTED: Record<string, string> = {
 };
 
 /** Why the derivation leaves a tool ungranted, in the words UNGRANTED uses. */
-function ungrantedKind(d: Derivation, calls: Map<string, string[]>, tool: string): 'no service call' | 'no route' | 'unscoped' | 'split' {
+function ungrantedKind(d: Derivation, calls: Map<string, string[]>, tool: string): 'no service call' | 'no route' | 'unscoped' | 'split' | 'floor' {
   const cs = calls.get(tool) ?? [];
   if (!cs.length) return 'no service call';
   if ((d.toolLevels.get(tool)?.size ?? 0) > 1) return 'split';
+  if ((d.toolLevels.get(tool)?.size ?? 0) === 1 && (d.unknownCalls.get(tool) ?? []).length) return 'floor';
   return cs.some((c) => (d.byMethod.get(c) ?? []).length > 0) ? 'unscoped' : 'no route';
 }
 
@@ -714,7 +897,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
   });
 
   it('GOVERNED_UNGRANTED is exactly the governed tools no module grants (rule 4)', () => {
-    expect(derived.governedUngranted).toEqual(['execute_custom_logic', 'send_message_with_approval', 'update_status_with_confirmation']);
+    // commerce_send_invoice: review 7 DRV5-2 (TransactionalEmailService.send backs no member route to a customer)
+    expect(derived.governedUngranted).toEqual(['commerce_send_invoice', 'execute_custom_logic', 'send_message_with_approval', 'update_status_with_confirmation']);
     expect(Object.keys(GOVERNED_UNGRANTED).sort()).toEqual(derived.governedUngranted);
   });
 
@@ -761,7 +945,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         commerce_delete_invoice: 'write',
         commerce_list_invoices: 'read',
         commerce_mark_invoice_paid: 'write',
-        commerce_send_invoice: 'write',
+        // commerce_send_invoice: GOVERNED_UNGRANTED (review 7 DRV5-2)
         commerce_update_invoice: 'write',
         payments_create_link: 'write',
         payments_list_gateways: 'read',
@@ -819,7 +1003,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         contracts_list: 'read',
         contracts_stats: 'read',
         contracts_update: 'write',
-        inbox_brief: 'read',
+        // GET brief calls generateBrief only on a cache miss; POST brief/generate needs write (review 7 DRV-BRIEF)
+        inbox_brief: 'write',
         inbox_list_threads: 'read',
         inbox_mark_resolved: 'write',
         inbox_read_thread: 'read',
@@ -1138,6 +1323,151 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     });
   });
 
+  /**
+   * Review 7 DRV-BRIEF / DRV5-1: GET /key-inbox/.../brief calls KeyInboxService.generateBrief
+   * only when listInsights finds no brief (`if (insights.length > 0) return insights[0]`), so
+   * a read holder cannot make a new brief by hand; POST brief/generate, which always does,
+   * needs operations:write. The organ handler KEY reaches (key_inbox.generate_brief) generates
+   * every time: a new KeyInboxInsight row, a metered AI call, a temporal event, and the brief
+   * GET then serves the whole team. The derivation took the lowest level among every route
+   * that calls the method and so granted inbox_brief at operations:read.
+   */
+  describe('review 7 DRV-BRIEF / DRV5-1 — a route that calls a method only on a cache miss does not lower its level', () => {
+    const relevant = new Set([...calls.values()].flat());
+    const brief = (verb: string, path: string) =>
+      routes.find((r) => r.file === 'modules/key-inbox/key-inbox.controller.ts' && r.verb === verb && r.path === `/key-inbox/businesses/:businessId/${path}`)!;
+
+    it('reads which calls of a KEY tool method a handler makes only under a guard on server state (pinned: a new one is a reviewed change)', () => {
+      const guarded = routes
+        .flatMap((r) => [...r.guarded].filter(([c]) => relevant.has(c)).map(([c, guard]) => `${r.verb} ${r.path} ${c} <- ${guard}`))
+        .sort();
+      expect(guarded).toEqual(
+        [
+          'POST /actions/businesses/:businessId/plan BusinessGraphService.getSnapshot <- after if (intent.clarificationNeeded) return',
+          'POST /businesses/:businessId/contacts/:contactId/calls/from-next-action CallScriptService.generateScript <- if (body.autoGenerateScript && callLog.contactId)',
+          "POST /commerce/businesses/:businessId/invoices/:invoiceId/send-email CommerceService.updateInvoiceStatus <- if (invoice.status === 'DRAFT')",
+          'POST /drive/businesses/:businessId/email-content TransactionalEmailService.send <- after if (!user || !user.email) return',
+          'GET /key-inbox/businesses/:businessId/brief KeyInboxService.generateBrief <- after if (insights.length > 0) return',
+          'POST /webhooks/stripe CommerceService.markInvoicePaid <- if (invoiceId)',
+        ].sort(),
+      );
+    });
+
+    it('GET brief generates only when no brief exists, POST brief/generate always: inbox_brief needs operations:write', () => {
+      const get = brief('GET', 'brief');
+      const post = brief('POST', 'brief/generate');
+      expect(get.scope).toBe('operations:read');
+      expect(post.scope).toBe('operations:write');
+      expect(get.body).toMatch(/const insights = await this\.keyInbox\.listInsights\(businessId, scope, 1\);\s*if \(insights\.length > 0\) return insights\[0\];/);
+      expect(get.guarded.get('KeyInboxService.generateBrief')).toBe('after if (insights.length > 0) return');
+      expect(post.guarded.has('KeyInboxService.generateBrief')).toBe(false);
+      expect((derived.byMethod.get('KeyInboxService.generateBrief') ?? []).map((r) => `${r.verb} ${r.path} ${r.scope}`)).toEqual([
+        'POST /key-inbox/businesses/:businessId/brief/generate operations:write',
+      ]);
+      expect(calls.get('inbox_brief')).toEqual(['KeyInboxService.generateBrief']);
+      expect([...derived.toolLevels.get('inbox_brief')!]).toEqual([['operations', 'write']]);
+      expect(derived.mapping.operations.inbox_brief).toBe('write');
+      expect(CANONICAL_MODULE_TOOLS?.operations.inbox_brief).toBe('write');
+    });
+
+    it('drift guard: were GET brief to generate unconditionally, operations:read would grant inbox_brief (the rule is what decides)', () => {
+      const unguarded = routes.map((r) => (r === brief('GET', 'brief') ? { ...r, guarded: new Map<string, string>() } : r));
+      expect(derive(calls, unguarded).mapping.operations.inbox_brief).toBe('read');
+    });
+
+    it('a method only state-guarded routes call is governed by them but granted by none', () => {
+      const onlyGuarded = routes.map((r) => (r === brief('POST', 'brief/generate') ? { ...r, calls: new Set<string>() } : r));
+      const d = derive(calls, onlyGuarded);
+      expect([...d.toolLevels.get('inbox_brief')!]).toEqual([['operations', 'read']]);
+      expect(d.unknownCalls.get('inbox_brief')).toEqual(['KeyInboxService.generateBrief']);
+      expect(d.mapping.operations.inbox_brief).toBeUndefined();
+      expect(d.governedUngranted).toContain('inbox_brief');
+    });
+
+    it("a branch on the caller's own input is not a guard: GET payments/transactions (if (q)) still grants the read tools at revenue:read", () => {
+      const tx = routes.find((r) => r.file === 'modules/payments/payments-ops.controller.ts' && r.verb === 'GET' && r.path === '/payments/businesses/:businessId/transactions')!;
+      expect(tx.body).toMatch(/if \(q\) return this\.ops\.searchCharges\(/);
+      expect(tx.guarded.size).toBe(0);
+      expect(derived.mapping.revenue.payments_list_transactions).toBe('read');
+      expect(derived.mapping.revenue.payments_search_transactions).toBe('read');
+    });
+
+    it('an early throw is a refusal, not an alternative: it does not guard the calls after it', () => {
+      const g = stateGuardedCalls(
+        `  async m(@Param('id') id: string) {\n    const row = await this.svc.get(id);\n    if (!row) throw new NotFoundException();\n    return this.svc.update(row);\n  }`,
+        new Map([['svc', 'Svc']]),
+      );
+      expect([...g]).toEqual([]);
+      const cached = stateGuardedCalls(
+        `  async m(@Param('id') id: string) {\n    const row = await this.svc.get(id);\n    if (row) return row;\n    return this.svc.make(id);\n  }`,
+        new Map([['svc', 'Svc']]),
+      );
+      expect([...cached]).toEqual([['Svc.make', 'after if (row) return']]);
+    });
+
+    it('the handler is what the derivation reads: with a brief cached, GET returns it and generates nothing; POST and the KEY organ generate every time', async () => {
+      const cached = { id: 'ins_old', scope: 'DAILY' };
+      const make = (insights: unknown[]) => {
+        const inbox = { listInsights: vi.fn(async () => insights), generateBrief: vi.fn(async () => ({ id: 'ins_new' })) };
+        return { inbox, controller: new KeyInboxController(inbox as any, {} as any, {} as any, {} as any) };
+      };
+      const withBrief = make([cached]);
+      expect(await withBrief.controller.getBrief('biz_1', 'DAILY')).toBe(cached);
+      expect(await withBrief.controller.getBrief('biz_1', 'DAILY')).toBe(cached);
+      expect(withBrief.inbox.generateBrief).not.toHaveBeenCalled();
+      const empty = make([]);
+      expect(await empty.controller.getBrief('biz_1', 'DAILY')).toEqual({ id: 'ins_new' });
+      expect(empty.inbox.generateBrief).toHaveBeenCalledTimes(1);
+      await withBrief.controller.generateBrief('biz_1', {});
+      expect(withBrief.inbox.generateBrief).toHaveBeenCalledTimes(1);
+
+      const organ = Object.assign(Object.create(KeyInboxAdapterService.prototype), { inbox: withBrief.inbox }) as KeyInboxAdapterService;
+      expect(CORTEX_TOOL_BRIDGE.inbox_brief).toBe('key_inbox.generate_brief');
+      await organ.executeTool('key_inbox.generate_brief', { businessId: 'biz_1' } as any, {});
+      await organ.executeTool('key_inbox.generate_brief', { businessId: 'biz_1' } as any, {});
+      expect(withBrief.inbox.generateBrief).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  /**
+   * Review 7 DRV5-2: the derivation counted POST /drive/.../email-content, which mails the
+   * caller a fixed 'document_generated' notice, as an unscoped route to
+   * TransactionalEmailService.send, so the send was FREE and commerce_send_invoice was granted
+   * through updateInvoiceStatus (revenue:write) alone. KEY mails the customer the 'invoice_sent'
+   * pay link before the status change and never checks for VOID; the only route that mails an
+   * invoice by hand (send-email) refuses a VOID one.
+   */
+  describe('review 7 DRV5-2 — commerce_send_invoice mails a customer, which no member route does through the same call', () => {
+    it.each(ARGUMENT_BOUND)('$verb $path calls $call with arguments it fixes ($why)', ({ file, verb, path, call, proof }) => {
+      const hit = routes.find((r) => r.file === file && r.verb === verb && r.path === path);
+      expect(hit, `${verb} ${path}`).toBeDefined();
+      expect(hit!.calls.has(call)).toBe(true);
+      for (const p of proof) expect(hit!.body, String(p)).toMatch(p);
+      // no other member route calls the same method
+      expect((derived.byMethod.get(call) ?? []).map((r) => `${r.verb} ${r.path}`)).toEqual([]);
+      expect((derived.guardedBy.get(call) ?? []).map((r) => `${r.verb} ${r.path}`)).toEqual([]);
+    });
+
+    it("commerce_send_invoice mails the invoice's customer an invoice_sent pay link, and is governed by revenue but granted by none", () => {
+      const body = dispatcherCases().get('commerce_send_invoice')!;
+      expect(body).toMatch(/this\.getTransactionalEmail\(\)\.send\(\{[\s\S]*type: 'invoice_sent',\s*recipientEmail: invoice\.contact\.email,/);
+      expect(calls.get('commerce_send_invoice')!.sort()).toEqual(
+        ['ActivityLogService.createActivity', 'CommerceService.updateInvoiceStatus', 'TransactionalEmailService.send'].sort(),
+      );
+      expect([...derived.toolLevels.get('commerce_send_invoice')!]).toEqual([['revenue', 'write']]);
+      expect(derived.unknownCalls.get('commerce_send_invoice')).toEqual(['TransactionalEmailService.send']);
+      expect(granted.get('commerce_send_invoice')).toBeUndefined();
+      expect(GOVERNED_UNGRANTED.commerce_send_invoice).toMatch(/TransactionalEmailService\.send/);
+    });
+
+    it('drift guard: even were the drive route to send unconditionally, it does not stand in for mailing a customer', () => {
+      const unguarded = routes.map((r) => (r.path === '/drive/businesses/:businessId/email-content' ? { ...r, guarded: new Map<string, string>() } : r));
+      const d = derive(calls, unguarded);
+      expect(d.mapping.revenue.commerce_send_invoice).toBeUndefined();
+      expect(d.governedUngranted).toContain('commerce_send_invoice');
+    });
+  });
+
   it('every registry family either has a granted tool or is listed as unmapped with a reason', () => {
     const grantingFamilies = new Set([...granted.keys()].map(family));
     const registryFamilies = [...new Set(FLOW_TOOLS.map((t) => family(t.name)))].sort();
@@ -1165,6 +1495,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       if (kind === 'no service call') expect(reason, t).toMatch(/no service call/);
       else if (kind === 'no route') expect(reason, t).toMatch(/backs no route/);
       else if (kind === 'split') expect(reason, t).toMatch(/needs .* AND /);
+      else if (kind === 'floor') expect(reason, t).toMatch(/is only a floor/);
       else expect(reason, t).toMatch(/unscoped/);
     }
   });
