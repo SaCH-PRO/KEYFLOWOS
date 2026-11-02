@@ -364,12 +364,13 @@ export class AiOversightService {
       );
     }
 
-    // Fallback to AiMemory
+    // Legacy policy is authoritative only after a confirmed absence of the
+    // typed row. A successful legacy read cannot resolve a failed typed read.
     try {
       const memory = await client.aiMemory.findUnique({
         where: { businessId_category_key: { businessId, category: 'settings', key: 'autonomy' } },
       });
-      if (memory?.value) {
+      if (!readFailed && memory?.value) {
         const parsed = JSON.parse(memory.value);
         return { ...DEFAULT_AUTONOMY, ...parsed };
       }
@@ -387,7 +388,8 @@ export class AiOversightService {
       // reason (:151), which surfaces as a blocked action rather than as an
       // unpoliced one.
       //
-      // Reaching here means both stores threw — not that neither had a row.
+      // At least one required read failed; a legacy row cannot clear that
+      // uncertainty about a potentially more restrictive typed policy.
       // A business that has genuinely never configured governance still falls
       // through to DEFAULT_AUTONOMY below, exactly as before.
       return { ...DEFAULT_AUTONOMY, mode: 'restricted', maxAutoTier: 1, degraded: true };
