@@ -3,6 +3,7 @@ import { Interval } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 import { runGuarded } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 const PATTERNS = [
   {
@@ -152,6 +153,7 @@ export class TemporalFlowGenomeBridgeService implements OnModuleInit {
   // empirically, not assumed.) The work stays in detectPatternsForAll() so callers and
   // tests are unchanged; only the scheduled entry point is guarded.
   detectPatternsForAllTick(): void {
+    if (schedulersDisabled()) return;
     runGuarded('TemporalFlowGenomeBridgeService', () => this.detectPatternsForAll(), this.logger);
   }
 

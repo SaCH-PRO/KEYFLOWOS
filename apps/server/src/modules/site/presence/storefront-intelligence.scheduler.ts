@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { StorefrontIntelligenceService } from './storefront-intelligence.service';
+import { schedulersDisabled } from '../../../core/config/env';
 
 const TICK_MS = 60 * 60 * 1000; // hourly probe; only acts at the configured UTC hour
 const RUN_HOUR_UTC = parseInt(process.env.PRESENCE_INSIGHTS_HOUR_UTC ?? '3', 10);
@@ -22,7 +23,7 @@ export class StorefrontIntelligenceScheduler implements OnModuleInit, OnModuleDe
   ) {}
 
   onModuleInit() {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[StorefrontIntelligenceScheduler] Disabled via env');
       return;
     }

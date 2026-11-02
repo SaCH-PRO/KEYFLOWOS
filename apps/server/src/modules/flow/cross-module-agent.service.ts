@@ -16,6 +16,7 @@ import {
   BookingCancelledPayload,
   BookingRescheduledPayload,
 } from '../../core/event-bus/events.types';
+import { schedulersDisabled } from '../../core/config/env';
 
 export interface WorkflowDefinition {
   key: string;
@@ -231,6 +232,11 @@ export class CrossModuleAgentService implements OnModuleDestroy {
   }
 
   private startJobPoller() {
+    // V1-24b: a DB poller armed in the constructor is a scheduler like any other.
+    if (schedulersDisabled()) {
+      this.logger.log('[CrossModule] Scheduled job poller disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     const POLL_INTERVAL_MS = 60_000;
     this.jobPollerInterval = setInterval(() => {
       this.processScheduledJobs().catch((e) =>

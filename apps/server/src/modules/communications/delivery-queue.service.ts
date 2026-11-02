@@ -13,6 +13,7 @@ import {
   ResendEffectSnapshot,
 } from './adapters/resend-effect';
 import { resolveSystemEmailFrom } from '../notifications/system-email.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_BATCH_SIZE = 20;
@@ -131,6 +132,10 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.pollInterval = safeInterval('DeliveryQueueService', POLL_INTERVAL_MS, () => this.tick(), this.logger);
     this.logger.log('Delivery queue scheduler started (30s interval)');
   }

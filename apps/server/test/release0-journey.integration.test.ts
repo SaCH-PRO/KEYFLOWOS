@@ -1068,10 +1068,12 @@ describe('step 7 — no step required an external provider', () => {
       keyBootLines,
       'the gateway never logged the KEY_DISABLED boot line, so the journey did not run with KEY switched off',
     ).toHaveLength(1);
-    // V1-24 review (SEC-V124-1, V124-CR-1): the line claims gateway dispatch only and names
-    // the direct provider paths the switch does not cover yet, never "no AI provider is called".
+    // V1-24 review (SEC-V124-1, V124-CR-1): the line claims only what the switch stops, never
+    // "no AI provider is called". V1-24b gated every direct provider path, so the line names
+    // them as refusing and has no "NOT covered yet" tail (KEY_DISABLED_NOT_COVERED is empty).
     expect(keyBootLines[0]).toMatch(/Every model-gateway dispatch answers 503 and reaches no AI provider/);
-    expect(keyBootLines[0]).toMatch(/NOT covered yet/);
+    expect(keyBootLines[0]).toMatch(/direct provider paths .* refuse before they build a client/);
+    expect(keyBootLines[0]).not.toMatch(/NOT covered yet/);
     expect(keyBootLines[0]).not.toMatch(/no AI provider is called/i);
     // Every gateway dispatch the journey triggered (listeners and fallbacks that try AI) was refused by
     // the switch, before any provider check: the gateway's two other refusals never appear.

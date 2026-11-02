@@ -5,6 +5,7 @@ import type { Redis } from 'ioredis';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 import { TemporalFlowGenomeBridgeService } from './temporal-flow-genome-bridge.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 export interface TemporalFlowMemoryJob {
   businessId: string;
@@ -58,6 +59,15 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
       const match = existing.find((r) => r.id === 'temporal-flow-memory-periodic-compact');
       if (match) {
         await this.queue.removeRepeatableByKey(match.key);
+      }
+
+      // V1-24b: a repeatable job registered at boot is a scheduler. With
+      // schedulers off it is not (re)registered, and the removal above clears
+      // one an earlier boot left in Redis. The worker still runs enqueued jobs.
+      if (schedulersDisabled()) {
+        this.logger.log('Periodic compaction not scheduled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+        this.logger.log('TemporalFlowMemory worker initialized');
+        return;
       }
 
       await this.queue.add(

@@ -3,9 +3,11 @@ import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SystemEmailService } from '../notifications/system-email.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const SCHEDULER_DISABLED = process.env.AI_USAGE_ALERT_SCHEDULER_DISABLED === '1' || process.env.NODE_ENV === 'test';
+/** Its own flag, read when onModuleInit runs (NODE_ENV=test is handled by schedulersDisabled(), V1-24b). */
+const schedulerFlagDisabled = (): boolean => process.env.AI_USAGE_ALERT_SCHEDULER_DISABLED === '1';
 
 @Injectable()
 export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestroy {
@@ -23,7 +25,11 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit() {
-    if (SCHEDULER_DISABLED) {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
+    if (schedulerFlagDisabled()) {
       this.logger.log('AI usage alert scheduler disabled via env');
       return;
     }

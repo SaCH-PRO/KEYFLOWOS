@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { CrmRelationshipHealthService } from './crm-relationship-health.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_INTERVAL_MS = 60 * 60 * 1000; // re-check the wall clock once per hour
 const DEFAULT_TARGET_HOUR_UTC = 3; // run the daily sweep at 03:00 UTC
@@ -28,6 +29,10 @@ export class CrmRelationshipHealthSchedulerService implements OnModuleInit, OnMo
   }
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     if (process.env.CRM_HEALTH_SCHEDULER_DISABLED === '1') {
       this.logger.log('Relationship-health scheduler disabled via env');
       return;

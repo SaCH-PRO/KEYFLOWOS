@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { StorefrontConversionService } from './storefront-conversion.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const HOURLY_MS = 60 * 60 * 1000;
@@ -24,6 +25,10 @@ export class StorefrontConversionScheduler implements OnModuleInit, OnModuleDest
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     // Fire once a few seconds after boot so the first day's row exists
     // without waiting an hour.
     setTimeout(() => this.run().catch((e) => this.logger.error(`initial aggregation failed: ${(e as Error).message}`)), 15_000);

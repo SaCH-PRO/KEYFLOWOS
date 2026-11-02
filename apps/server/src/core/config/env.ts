@@ -248,20 +248,38 @@ export function envFlagOn(value: string | undefined): boolean {
 }
 
 /**
- * The unified scheduler kill switch, for OnModuleInit interval schedulers:
- * true when DISABLE_SCHEDULERS or KF_DISABLE_SCHEDULERS is on, or NODE_ENV is
- * 'test' (the repo convention since invoice-overdue.scheduler.ts, now in one
- * place). KF_DISABLE_SCHEDULERS is the older spelling calendar-sync and
- * crm-data-quality read; it is honoured here so either name stops every
- * scheduler that calls this. A scheduler's own *_SCHEDULER_DISABLED flag stays
- * its own and is checked beside this, not replaced by it.
+ * The unified scheduler kill switch, for every scheduler in the server: the
+ * OnModuleInit interval schedulers, timers armed elsewhere, and every @Cron,
+ * @Interval and @Timeout handler (V1-24b). True when DISABLE_SCHEDULERS or
+ * KF_DISABLE_SCHEDULERS is on, or NODE_ENV is 'test' (the repo convention since
+ * invoice-overdue.scheduler.ts, now in one place) unless the test opted in with
+ * ENABLE_SCHEDULERS_IN_TEST. KF_DISABLE_SCHEDULERS is the older spelling
+ * calendar-sync and crm-data-quality read; it is honoured here so either name
+ * stops every scheduler that calls this. A scheduler's own *_SCHEDULER_DISABLED
+ * flag stays its own and is checked beside this, not replaced by it.
+ *
+ * Why NODE_ENV=test: integration suites share one database. A scheduler that
+ * ticks inside one suite's app (in-process, or a spawned dist/main.js) stamps
+ * rows another suite is asserting on (crm-data-quality's
+ * data_quality_last_run_at, the connector nightly sync's connector rows).
  */
 export function schedulersDisabled(): boolean {
   return (
     envFlagOn(process.env.DISABLE_SCHEDULERS) ||
     envFlagOn(process.env.KF_DISABLE_SCHEDULERS) ||
-    process.env.NODE_ENV === 'test'
+    (process.env.NODE_ENV === 'test' && !schedulersOptedInForTest())
   );
+}
+
+/**
+ * V1-24b: the explicit opt-in a spec sets (1 or true) to run a scheduler, or
+ * call a scheduled handler directly, under NODE_ENV=test. It only lifts the
+ * NODE_ENV=test default: DISABLE_SCHEDULERS and KF_DISABLE_SCHEDULERS still
+ * win, and outside NODE_ENV=test it changes nothing. Never set it for an
+ * integration app that shares the database with other suites.
+ */
+export function schedulersOptedInForTest(): boolean {
+  return envFlagOn(process.env.ENABLE_SCHEDULERS_IN_TEST);
 }
 
 /**
@@ -269,12 +287,14 @@ export function schedulersDisabled(): boolean {
  * gateway refuses every dispatch with the R0-07 structured 503 (reason
  * 'key_disabled') before reading anything, so no gateway dispatch reaches a
  * provider, and every cortex @Cron handler returns before it scans a business.
- * It does NOT yet stop the AI calls that bypass the gateway (KEY voice
- * speak/listen, embeddings, vision, audio, the phone realtime bridge,
- * ElevenLabs TTS): those are listed in KEY_DISABLED_NOT_COVERED
- * (model-gateway.service.ts), named in the boot warning, and pinned by
- * scheduler-kill-switch.spec.ts. Distinct from AI_DISABLED, which only the
- * storefront reads and which does not stop KEY.
+ * Since V1-24b the AI calls that bypass the gateway read it too (KEY voice
+ * speak/listen, the embedding, vision and audio helpers, KEY document
+ * embeddings, the phone realtime bridge, ElevenLabs TTS, the diagnostics
+ * OpenAI check): each refuses before it builds a provider client.
+ * KEY_DISABLED_NOT_COVERED (model-gateway.service.ts) is empty, and
+ * scheduler-kill-switch.spec.ts fails if a new direct path ignores the switch.
+ * Distinct from AI_DISABLED, which only the storefront reads and which does not
+ * stop KEY.
  */
 export function keyDisabled(): boolean {
   return envFlagOn(process.env.KEY_DISABLED);
@@ -282,17 +302,16 @@ export function keyDisabled(): boolean {
 
 /**
  * The guard every cortex @Cron handler runs first: KEY is off, or schedulers
- * are switched off by env (DISABLE_SCHEDULERS / KF_DISABLE_SCHEDULERS).
- * NODE_ENV=test is deliberately not part of it: @Cron jobs only fire in a
- * running server (a spawned test server sets DISABLE_SCHEDULERS), while the
- * cortex specs call these handlers directly under vitest and must reach them.
+ * are switched off (schedulersDisabled(): DISABLE_SCHEDULERS,
+ * KF_DISABLE_SCHEDULERS, or NODE_ENV=test without ENABLE_SCHEDULERS_IN_TEST).
+ * V1-24 left NODE_ENV=test out because the cortex specs call these handlers
+ * directly; but a spawned test server that does not set DISABLE_SCHEDULERS
+ * (app-module-boots spreads the runner's env) then ran every cortex cron
+ * against the shared database. V1-24b includes it; a spec that calls a handler
+ * directly opts in with ENABLE_SCHEDULERS_IN_TEST.
  */
 export function keyCronsDisabled(): boolean {
-  return (
-    keyDisabled() ||
-    envFlagOn(process.env.DISABLE_SCHEDULERS) ||
-    envFlagOn(process.env.KF_DISABLE_SCHEDULERS)
-  );
+  return keyDisabled() || schedulersDisabled();
 }
 
 /**

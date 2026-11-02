@@ -15,6 +15,7 @@ import type {
   RevenueActionCompletedPayload,
   StoreOrderRoutingFailedPayload,
 } from '../../core/event-bus/events.types';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_MS = 5 * 60 * 1000;
 
@@ -69,7 +70,7 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[RevenueActionService] Scheduler disabled via env');
       return;
     }

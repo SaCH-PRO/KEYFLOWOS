@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../../core/prisma/prisma.service';
+import { schedulersDisabled } from '../../../core/config/env';
 
 /**
  * Facts older than this (without re-verification) are marked STALE so the
@@ -18,6 +19,7 @@ export class GenomeDecayService {
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async markStaleFacts(): Promise<void> {
+    if (schedulersDisabled()) return;
     const cutoff = new Date(Date.now() - STALE_AFTER_DAYS * 24 * 60 * 60 * 1000);
     try {
       const result = await this.prisma.client.genomeFact.updateMany({

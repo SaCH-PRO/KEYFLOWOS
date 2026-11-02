@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SocialPublishingService } from './social-publishing.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_INTERVAL_MS = 60_000;
 const MAX_BATCH = 25;
@@ -19,6 +20,10 @@ export class SocialSchedulerService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.timer = setInterval(() => {
       this.tick().catch((e) => this.logger.error(`Scheduler tick failed: ${(e as Error).message}`));
     }, TICK_INTERVAL_MS);

@@ -23,6 +23,7 @@ import {
 } from './contact-audit.service';
 import { buildZip, sha256Hex } from './contact-zip.util';
 import { safeInterval } from '../../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../../core/config/env';
 
 const DEFAULT_PURGE_INTERVAL_MS = 30 * 60_000;
 const DEFAULT_GRACE_DAYS = 7;
@@ -62,6 +63,10 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     if (process.env.DISABLE_FORGET_SCHEDULER === 'true') {
       this.logger.log('[ContactPrivacy] forget purge scheduler disabled via env');
       return;

@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nest
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { appUrl } from '../../core/config/runtime-urls';
+import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
 export class AbandonedCartRecoveryService implements OnModuleInit, OnModuleDestroy {
@@ -16,6 +17,10 @@ export class AbandonedCartRecoveryService implements OnModuleInit, OnModuleDestr
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.interval = setInterval(() => {
       this.scanAndSchedule().catch((e) =>
         this.logger.error(`Abandoned cart scan failed: ${(e as Error).message}`),

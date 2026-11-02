@@ -27,6 +27,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinancialCopilotService } from '../commerce/financial-copilot.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
 export class FlowListener implements OnModuleInit, OnModuleDestroy {
@@ -67,6 +68,10 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.reminderInterval = setInterval(() => {
       this.handleBookingReminders().catch((e) =>
         this.logger.error(`Booking reminder cron failed: ${(e as Error).message}`),

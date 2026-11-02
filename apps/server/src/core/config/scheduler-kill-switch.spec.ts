@@ -654,6 +654,27 @@ describe('census: intervals armed outside onModuleInit (constructors, helpers)',
     expect(Object.keys(IN_PROCESS_TIMERS).filter((f) => !found.some((t) => t.file === f)), 'listed but no longer arms a timer').toEqual([]);
   });
 
+  // Found while implementing V1-24b (added after the tests-first commit): a BullMQ
+  // repeatable job registered in onModuleInit is a scheduler too, kept in Redis
+  // and run by any worker. temporal-flow-memory registered a 6-hourly compaction.
+  it('a BullMQ repeatable job registered in onModuleInit reads schedulersDisabled() first (temporal-flow-memory periodic compaction)', () => {
+    const registering = sourceFiles(SRC)
+      .map((abs) => {
+        const src = stripComments(readFileSync(abs, 'utf8'));
+        const m = ON_MODULE_INIT.exec(src);
+        return m ? { file: posix(abs), init: braceBlock(src, m.index) } : undefined;
+      })
+      .filter((r): r is { file: string; init: string } => r !== undefined && /\brepeat\s*:/.test(r.init));
+    expect(registering.map((r) => r.file)).toContain('src/modules/temporal-flow/temporal-flow-memory.queue.service.ts');
+    const ungated = registering
+      .filter((r) => {
+        const guard = r.init.search(/\bschedulersDisabled\s*\(/);
+        return guard < 0 || guard > r.init.search(/\brepeat\s*:/);
+      })
+      .map((r) => r.file);
+    expect(ungated).toEqual([]);
+  });
+
   it('behaviourally, the cross-module agent job poller (armed in its constructor) arms nothing under NODE_ENV=test or DISABLE_SCHEDULERS, and arms with the opt-in (control)', async () => {
     const cls = (await exportedClassWith(join(SRC, 'modules/flow/cross-module-agent.service.ts'), 'onModuleDestroy')) as unknown as new (
       ...a: unknown[]

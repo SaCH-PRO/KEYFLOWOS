@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 /** lastError of a schedule whose contact belongs to another business (V1-12 review ST-12-3). */
 const CONTACT_OUTSIDE_BUSINESS = "the schedule's contact does not belong to its business; not billed";
@@ -32,6 +33,10 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.intervalRef = setInterval(() => {
       this.processRecurringInvoices().catch((err) => {
         this.logger.error('Error processing recurring invoices', err);

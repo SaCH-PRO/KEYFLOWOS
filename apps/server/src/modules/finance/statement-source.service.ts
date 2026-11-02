@@ -41,6 +41,7 @@ import { GoogleDriveService } from '../google-drive/google-drive.service';
 import { GmailService } from '../commerce/gmail.service';
 import { BankImportService, type BankImportResult } from './bank-import.service';
 import { detectFormat } from './bank-statement-parsers';
+import { schedulersDisabled } from '../../core/config/env';
 
 /** Where an account's statements come from, if anywhere. */
 export interface StatementSources {
@@ -387,6 +388,14 @@ export class StatementSourceService {
    * heuristic is a choice someone should be able to see they made.
    */
   @Cron('0 5 * * *')
+  // V1-24b: the scheduled entry point. It returns first when schedulers are
+  // off (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS, or NODE_ENV=test without
+  // ENABLE_SCHEDULERS_IN_TEST); the work below stays callable directly.
+  async scheduledSweepAll(): Promise<void> {
+    if (schedulersDisabled()) return;
+    await this.sweepAll();
+  }
+
   async sweepAll(): Promise<{ swept: number; imported: number }> {
     const accounts = await this.configuredAccounts();
     let imported = 0;

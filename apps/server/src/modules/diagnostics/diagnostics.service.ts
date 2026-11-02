@@ -5,6 +5,7 @@ import { tokenEncryptionKeySource } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { QueueService } from '../ai/queue.service';
 import { BusinessEventQueueService } from '../business-events/business-event.queue';
+import { keyDisabled } from '../../core/config/env';
 
 export type CheckStatus = 'pass' | 'warn' | 'fail';
 
@@ -354,6 +355,16 @@ export class DiagnosticsService {
 
   async checkOpenAI(): Promise<CheckResult> {
     const start = Date.now();
+    // V1-24b (SEC-V124-1): with KEY switched off the check sends nothing to OpenAI.
+    if (keyDisabled()) {
+      return {
+        name: 'OpenAI API',
+        status: 'warn',
+        latencyMs: Date.now() - start,
+        checkedAt: new Date().toISOString(),
+        message: 'KEY is switched off on this server (KEY_DISABLED): OpenAI not checked',
+      };
+    }
     const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
 
     if (!apiKey) {

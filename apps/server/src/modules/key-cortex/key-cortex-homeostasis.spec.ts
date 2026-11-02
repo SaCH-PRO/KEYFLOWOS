@@ -21,8 +21,19 @@
  *   - DEAD LOOP: measuring deviation and never converting it to a response —
  *     this repo's signature defect.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { KeyCortexHomeostasisService } from './key-cortex-homeostasis.service';
+
+// V1-24b: this file calls a @Cron handler directly. Under NODE_ENV=test the
+// handlers return first (keyCronsDisabled() includes schedulersDisabled()),
+// so the file opts in explicitly; without it the sweep assertions would pass
+// without the sweep ever running.
+beforeEach(() => {
+  vi.stubEnv('ENABLE_SCHEDULERS_IN_TEST', '1');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 class PrismaStub {
   logs: Array<{ success: boolean; durationMs: number | null }> = [];

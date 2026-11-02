@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CalendarInsightService } from './calendar-insight.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const REFRESH_INTERVAL_MS = 60 * 60 * 1000; // hourly
 const MAX_BUSINESSES_PER_TICK = 50;
@@ -26,7 +27,10 @@ export class CalendarInsightSchedulerService
   ) {}
 
   onModuleInit(): void {
-    if (process.env.NODE_ENV === 'test') return;
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     if (process.env.DISABLE_CALENDAR_INSIGHT_SCHEDULER === '1') return;
     this.timer = setInterval(() => {
       void this.tick().catch((err) => {

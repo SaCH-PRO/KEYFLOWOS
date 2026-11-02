@@ -10,6 +10,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CrmTimelineService } from '../crm/crm-timeline.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
+import { schedulersDisabled } from '../../core/config/env';
 
 const MOMENTUM_SWEEP_HOUR = 6;
 
@@ -139,6 +140,10 @@ export class DelegationLoopService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.intervalRef = setInterval(() => {
       this.processDueLoops().catch(err =>
         this.logger.error(`Loop processing failed: ${(err as Error).message}`),
