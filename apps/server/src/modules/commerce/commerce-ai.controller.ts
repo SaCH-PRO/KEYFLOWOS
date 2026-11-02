@@ -8,6 +8,14 @@ import { CrmRateLimitGuard, CrmRateLimit } from '../crm/guards/rate-limit.guard'
 import { FeatureFlagGuard, RequireFeature } from '../crm/guards/feature-flag.guard';
 import { checkAiRateLimit } from '../crm/ai-rate-limit.util';
 
+/**
+ * V1-37b (V1-37 review ST-V37-2): every business-scoped route here reads
+ * revenue data (invoices, quotes, payments, products, revenue figures), so each
+ * requires revenue:read through ModuleScopeGuard, and ai-execute, which writes,
+ * revenue:write. A member whose revenue scope is none is refused with 403
+ * before CommerceAiService or CommerceStatsService is reached. The health
+ * route reads no tenant data.
+ */
 @Controller('commerce')
 @UseGuards(CrmRateLimitGuard)
 export class CommerceAiController {
@@ -18,7 +26,13 @@ export class CommerceAiController {
     @Inject(CommerceStatsService) private readonly stats: CommerceStatsService,
   ) {}
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * V1-37b (V1-37 review ST-V37-2): revenue figures, so revenue:read like every
+   * other revenue read. It carried AuthGuard and BusinessGuard only, so a
+   * member whose revenue scope is none read every invoice total.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/stats')
   getStats(@Param('businessId') businessId: string) {
@@ -39,7 +53,8 @@ export class CommerceAiController {
     };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-analyze')
@@ -48,7 +63,8 @@ export class CommerceAiController {
     return this.commerceAi.analyzeRevenue(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/invoices/:invoiceId/ai-reminder')
@@ -60,7 +76,8 @@ export class CommerceAiController {
     return this.commerceAi.generateInvoiceReminder(businessId, invoiceId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/products/:productId/ai-pricing')
@@ -72,7 +89,8 @@ export class CommerceAiController {
     return this.commerceAi.suggestPricing(businessId, productId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-cashflow')
@@ -81,7 +99,8 @@ export class CommerceAiController {
     return this.commerceAi.cashFlowForecast(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-search')
@@ -99,7 +118,8 @@ export class CommerceAiController {
     return this.commerceAi.naturalLanguageSearch(businessId, body.query);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-product-health')
@@ -108,7 +128,8 @@ export class CommerceAiController {
     return this.commerceAi.productHealthScan(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-client-intelligence')
@@ -123,7 +144,8 @@ export class CommerceAiController {
     return this.commerceAi.clientPaymentIntelligence(businessId, body.contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-quote-analysis')
@@ -132,7 +154,8 @@ export class CommerceAiController {
     return this.commerceAi.quoteWinAnalysis(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-command')
@@ -185,7 +208,8 @@ export class CommerceAiController {
     return this.commerceAi.executeCommand(businessId, body.action, body.params ?? {}, req?.user?.id ?? null);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-collections-score')
@@ -194,7 +218,8 @@ export class CommerceAiController {
     return this.commerceAi.predictiveCollectionsScore(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/invoices/:invoiceId/ai-payment-plan')
@@ -206,7 +231,8 @@ export class CommerceAiController {
     return this.commerceAi.suggestPaymentPlan(businessId, invoiceId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/quotes/:quoteId/ai-follow-up')
@@ -218,7 +244,8 @@ export class CommerceAiController {
     return this.commerceAi.smartQuoteFollowUp(businessId, quoteId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-churn-risk')
@@ -227,7 +254,8 @@ export class CommerceAiController {
     return this.commerceAi.churnRiskAlerts(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-revenue-journey')
@@ -236,7 +264,8 @@ export class CommerceAiController {
     return this.commerceAi.revenueJourney(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('revenue', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(5, 60_000)
   @Post('businesses/:businessId/ai-quote-from-conversation')

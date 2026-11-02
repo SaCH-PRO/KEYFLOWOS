@@ -200,23 +200,62 @@ function CashflowBlock({ r }: { r: LedgerCashflowReport }) {
   );
 }
 
-function BalanceSheetBlock({ r }: { r: LedgerBalanceSheet }) {
+/**
+ * V1-37b (V1-37 review RV37-02): the server's balance sheet is the business
+ * currency's sheet at the top level, plus one sheet per currency the books
+ * hold under `byCurrency`, every line labelled with its currency. The
+ * business-currency sheet is shown first, then each other currency's sheet on
+ * its own; nothing is converted or added across currencies.
+ */
+type BalanceSheetLine = LedgerBalanceSheet["assets"]["lines"][number] & { currency?: string };
+type BalanceSheetWithCurrencies = LedgerBalanceSheet & { byCurrency?: Record<string, LedgerBalanceSheet> };
+
+function BalanceSheetBlock({ r }: { r: BalanceSheetWithCurrencies }) {
+  const others = Object.entries(r.byCurrency ?? {})
+    .filter(([code]) => code !== r.currency)
+    .sort(([a], [b]) => a.localeCompare(b));
   return (
-    <div className="space-y-2 text-sm">
-      <div className="text-xs text-muted-foreground mb-2">As of {new Date(r.asOf).toLocaleDateString()}</div>
+    <div className="space-y-4 text-sm">
+      <div className="text-xs text-muted-foreground">As of {new Date(r.asOf).toLocaleDateString()}</div>
+      <CurrencyBalanceSheet r={r} />
+      {others.length > 0 && (
+        <div className="space-y-4">
+          <div className="text-xs text-muted-foreground">
+            Balances in other currencies are shown on their own; they are not converted or added to the {r.currency} figures above.
+          </div>
+          {others.map(([code, sheet]) => (
+            <div key={code} className="rounded-lg border p-3" style={{ borderColor: "hsl(var(--border))" }}>
+              <div className="font-semibold mb-2">{code} balances</div>
+              <CurrencyBalanceSheet r={{ ...sheet, currency: code }} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One currency's sheet: every line and total in `r.currency`. */
+function CurrencyBalanceSheet({ r }: { r: LedgerBalanceSheet }) {
+  const lineRow = (l: BalanceSheetLine) => {
+    const currency = l.currency ?? r.currency;
+    return <Row key={`${l.accountId}:${currency}`} label={l.name} amount={l.amount} currency={currency} />;
+  };
+  return (
+    <div className="space-y-2" data-testid={`balance-sheet-${r.currency}`}>
       <div>
         <div className="font-semibold">Assets</div>
-        {r.assets.lines.map((l) => <Row key={l.accountId} label={l.name} amount={l.amount} currency={r.currency} />)}
+        {r.assets.lines.map(lineRow)}
         <Row label="Total Assets" amount={r.assets.total} currency={r.currency} bold />
       </div>
       <div>
         <div className="font-semibold mt-3">Liabilities</div>
-        {r.liabilities.lines.map((l) => <Row key={l.accountId} label={l.name} amount={l.amount} currency={r.currency} />)}
+        {r.liabilities.lines.map(lineRow)}
         <Row label="Total Liabilities" amount={r.liabilities.total} currency={r.currency} bold />
       </div>
       <div>
         <div className="font-semibold mt-3">Equity</div>
-        {r.equity.lines.map((l) => <Row key={l.accountId} label={l.name} amount={l.amount} currency={r.currency} />)}
+        {r.equity.lines.map(lineRow)}
         <Row label="Period Net Income" amount={r.netEquityFromIncome} currency={r.currency} />
         <Row label="Total Equity (with retained)" amount={r.equity.total + r.netEquityFromIncome} currency={r.currency} bold />
       </div>

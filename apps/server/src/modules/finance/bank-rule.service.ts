@@ -1,11 +1,30 @@
-import { Injectable, Inject, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import type { BankRule as BankRuleModel } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { PostingService, type PostingResult } from './posting.service';
+import { PostingService, resolvePostingCurrency, type PostingResult } from './posting.service';
 import { FinanceAuditService } from './finance-audit.service';
 
 const D = Prisma.Decimal;
+
+/** The sourceType of a bank-rule posting (its sourceId is the rule's id). */
+const BANK_RULE_SOURCE_TYPE = 'BankRule';
+
+/**
+ * V1-37b (V1-37 review RV37-04): why the posting door would refuse a rule
+ * posting in `currency` for a business that keeps `businessCurrency`, or null
+ * when it would accept it. Asks the door's own D-13 policy
+ * (resolvePostingCurrency) with the same inputs post() is given below.
+ */
+export function bankRuleCurrencyRefusal(currency: string | null | undefined, ruleId: string, businessCurrency: string): string | null {
+  try {
+    resolvePostingCurrency({ currency: currency ?? undefined, sourceType: BANK_RULE_SOURCE_TYPE, sourceId: ruleId }, businessCurrency);
+    return null;
+  } catch (err) {
+    if (err instanceof BadRequestException) return err.message;
+    throw err;
+  }
+}
 
 export type BankRuleMatchType = 'contains' | 'starts_with' | 'equals' | 'regex';
 
@@ -139,6 +158,16 @@ export class BankRuleService {
    * its posting, so two concurrent applies of one row post once and both
    * succeed (SEC-V15b-3 / CRR-1); a re-link is refused when the earlier
    * posting was reversed or another bank row claims it (SEC-V15b-4).
+   *
+   * V1-37b (V1-37 review RV37-04): since V1-37 the door also refuses, with
+   * 400, a posting in a currency D-13 does not support (a EUR bank account on
+   * a TTD business). Only a 409 was skipped, so that 400 aborted the whole run
+   * after the rows before it had posted. A row whose account currency the door
+   * would refuse is now skipped like a 409, before it is claimed: it stays
+   * UNMATCHED with nothing posted, is listed in `skipped` with the door's
+   * reason and audited, and the other rows are applied. A supported currency
+   * other than the business's (USD on a TTD business) is the rule's source
+   * document currency and posts, as the door allows.
    */
   async applyRules(
     businessId: string,
@@ -153,10 +182,15 @@ export class BankRuleService {
     });
     if (rules.length === 0) return { scanned: 0, matched: 0, createdTransactions: 0, skipped: [] };
 
-    const bankRows = await this.prisma.client.bankTransaction.findMany({
-      where: { id: { in: bankTransactionIds }, businessId, status: 'UNMATCHED' },
-      include: { account: { select: { chartOfAccountId: true, currency: true } } },
-    });
+    const [bankRows, business] = await Promise.all([
+      this.prisma.client.bankTransaction.findMany({
+        where: { id: { in: bankTransactionIds }, businessId, status: 'UNMATCHED' },
+        include: { account: { select: { chartOfAccountId: true, currency: true } } },
+      }),
+      this.prisma.client.business.findUnique({ where: { id: businessId }, select: { currency: true } }),
+    ]);
+    // The schema default, as the door reads a business that names none.
+    const businessCurrency = business?.currency ?? 'TTD';
 
     let matched = 0;
     let createdTransactions = 0;
@@ -177,6 +211,13 @@ export class BankRuleService {
       if (!bankCoaId) {
         console.warn(`[BankRule] Skipping bank transaction ${bank.id}: account has no chartOfAccountId`);
         skipped.push({ bankTransactionId: bank.id, ruleId: rule.id, reason: 'The bank account is not linked to a chart-of-account' });
+        continue;
+      }
+
+      // V1-37b (RV37-04): a currency the door refuses (400) skips the row, as a 409 does.
+      const currencyRefusal = bankRuleCurrencyRefusal(bank.account.currency, rule.id, businessCurrency);
+      if (currencyRefusal) {
+        await this.recordSkip(businessId, opts.userId ?? null, bank.id, rule, currencyRefusal, skipped);
         continue;
       }
 
@@ -214,7 +255,7 @@ export class BankRuleService {
               currency: bank.account.currency,
               description: `${isDeposit ? 'Deposit' : 'Withdrawal'}: ${bank.description}`.slice(0, 255),
               reference: bank.reference ?? null,
-              sourceType: 'BankRule',
+              sourceType: BANK_RULE_SOURCE_TYPE,
               sourceId: rule.id,
               // One posting per bank row: the rule alone would key every row it matches the same.
               kind: bank.id,
@@ -234,18 +275,7 @@ export class BankRuleService {
         });
       } catch (err) {
         if (!(err instanceof ConflictException)) throw err;
-        const reason = err.message;
-        skipped.push({ bankTransactionId: bank.id, ruleId: rule.id, reason });
-        await this.audit.log({
-          businessId,
-          userId: opts.userId ?? null,
-          action: 'BANK_TRANSACTION_UNMATCHED',
-          entityType: 'BankTransaction',
-          entityId: bank.id,
-          title: 'Bank rule not applied',
-          detail: `Rule "${rule.name}" matched but was not applied: ${reason}`,
-          meta: { ruleId: rule.id, ruleName: rule.name, reason },
-        });
+        await this.recordSkip(businessId, opts.userId ?? null, bank.id, rule, err.message, skipped);
         continue;
       }
       // Matched meanwhile (a concurrent apply, or a manual match): not this call's row.
@@ -291,6 +321,28 @@ export class BankRuleService {
     }
     const rows = await this.prisma.client.bankTransaction.findMany({ where, select: { id: true } });
     return this.applyRules(businessId, rows.map((r) => r.id), opts);
+  }
+
+  /** A matched row the rule could not apply: listed in `skipped` and audited; the row stays UNMATCHED. */
+  private async recordSkip(
+    businessId: string,
+    userId: string | null,
+    bankTransactionId: string,
+    rule: BankRuleModel,
+    reason: string,
+    skipped: ApplyRulesSkip[],
+  ) {
+    skipped.push({ bankTransactionId, ruleId: rule.id, reason });
+    await this.audit.log({
+      businessId,
+      userId,
+      action: 'BANK_TRANSACTION_UNMATCHED',
+      entityType: 'BankTransaction',
+      entityId: bankTransactionId,
+      title: 'Bank rule not applied',
+      detail: `Rule "${rule.name}" matched but was not applied: ${reason}`,
+      meta: { ruleId: rule.id, ruleName: rule.name, reason },
+    });
   }
 
   /**

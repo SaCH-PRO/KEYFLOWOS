@@ -167,12 +167,17 @@ export class FinanceController {
   ) {
     await this.ensureAccess((req as any).user.id, businessId);
     const result = await this.ledgerBalance.getTrialBalance(businessId, asOf ? (() => { const d = new Date(asOf); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid asOf date'); return d; })() : undefined);
+    // V1-37b (V1-37 review ST-V37-3 / RV37-01): the service answers one row per
+    // (account, currency). Each item carries its currency, so an account that
+    // saw TTD and USD is two labelled items, never two unlabelled ones a
+    // client keys or totals by account alone.
     return {
       items: result.map((r) => ({
         accountId: r.accountId,
         systemKey: r.systemKey,
         name: r.name,
         type: r.type,
+        currency: r.currency,
         debit: r.debit.toString(),
         credit: r.credit.toString(),
         net: r.net.toString(),
@@ -333,7 +338,9 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.accounts.create(businessId, body);
+    // V1-37b (V1-34 review CR-34-01): create posts the opening balance through
+    // the ledger door; the caller is recorded as its author.
+    return this.accounts.create(businessId, body, { userId: req.user.id });
   }
   @Patch('accounts/:id')
   async updateAccount(
