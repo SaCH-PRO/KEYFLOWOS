@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MessageCircle, Send, Plus, Loader2, Calendar, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { MessageCircle, Send, Plus, Loader2, Calendar, AlertCircle, CheckCircle2, Clock, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { Button, Badge } from "@keyflow/ui";
 import { apiGet, apiPostSimple } from "@/lib/api";
@@ -52,9 +52,14 @@ interface CrmContact {
   whatsappNumber?: string | null;
 }
 
+/**
+ * GET /whatsapp/businesses/:businessId/status, masked since R0-SEC2: platformId
+ * is the phoneNumberId only for the config owner; any other reader gets the
+ * sending number there, or an empty string. Nothing here reads it.
+ */
 interface ConnectionStatus {
   connected: boolean;
-  destination?: { id: string; platformId: string; displayName: string | null };
+  destination?: { id: string; platformId?: string; displayName: string | null };
 }
 
 function formatTime(iso: string | null): string {
@@ -69,6 +74,9 @@ function formatTime(iso: string | null): string {
 
 export function WhatsAppManageDrawer({ businessId }: { businessId: string }) {
   const [status, setStatus] = useState<ConnectionStatus | null>(null);
+  // R0-SEC2b (review CR-SEC2-2): GET status answers 403 to a member without
+  // operations: read. That is no access, not "not connected".
+  const [denied, setDenied] = useState(false);
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [conversation, setConversation] = useState<ConversationDetail | null>(null);
@@ -91,6 +99,7 @@ export function WhatsAppManageDrawer({ businessId }: { businessId: string }) {
       apiGet<ConversationItem[]>(`/whatsapp/businesses/${businessId}/conversations`),
       apiGet<{ templates: WhatsAppTemplate[]; error?: string }>(`/whatsapp/businesses/${businessId}/templates`),
     ]);
+    setDenied(s.status === 403);
     setStatus(s.data ?? { connected: false });
     setConversations(c.data ?? []);
     setTemplates(t.data?.templates ?? []);
@@ -202,6 +211,18 @@ export function WhatsAppManageDrawer({ businessId }: { businessId: string }) {
     return (
       <div className="flex items-center justify-center h-96">
         <Loader2 className="w-6 h-6 animate-spin text-neutral-400" />
+      </div>
+    );
+  }
+
+  if (denied) {
+    return (
+      <div role="status" className="flex flex-col h-full p-6 text-center bg-white">
+        <Lock className="w-10 h-10 mx-auto text-neutral-400 mb-3" />
+        <h3 className="text-base font-semibold mb-1">You don&rsquo;t have access to the WhatsApp inbox</h3>
+        <p className="text-sm text-neutral-600">
+          Your role in this business does not include the WhatsApp inbox. Ask the business owner for access.
+        </p>
       </div>
     );
   }

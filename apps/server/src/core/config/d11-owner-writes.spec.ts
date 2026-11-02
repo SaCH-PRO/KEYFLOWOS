@@ -19,8 +19,23 @@
  * written by the owner-only completion path). Business.metaData is not
  * owner-only as a bag (R0-09b review CR-2: gamification, SEO, storefront and
  * concierge display state live there and stay open to their routes); its
- * owner-only keys are the setup configuration auto-configure writes
+ * owner-only keys are the setup configuration auto-configure writes, and
+ * (R0-SEC2b) the WhatsApp sending identity, metaData.whatsapp, which
+ * WhatsAppService.saveConfig writes behind assertConfigOwner
  * (OWNER_ONLY_META_KEYS).
+ *
+ * R0-SEC2b-WHATSAPP-SECRET-READS (review SEC2-R1, second writer):
+ * IdentityService.updateBusiness merged the CALLER's metaData bag
+ * (PATCH /identity/businesses/:businessId), which let an owner write
+ * metaData.whatsapp past saveConfig's refusals. D11W-09 pins both halves:
+ * saveConfig is the one writer of metaData.whatsapp the reader finds, and
+ * updateBusiness consults PROFILE_PATCH_RESERVED_META_KEYS (which lists
+ * whatsapp) before its write; test/whatsapp-config-authority (SEC2-T02, T06)
+ * proves the refusal on a real database. Review SEC2b-R2: the reader used to
+ * take every identifier spread inside metaData to copy the stored metaData and
+ * skipped any other non-literal spread, so a new caller-bag merge anywhere was
+ * invisible; it now reports one as opaque metaData (OPAQUE_META), which needs
+ * an allow-list entry (D11W-02), and D11W-10 pins the rule.
  *
  * WHAT IS READ (typescript AST, every non-test .ts file under apps/server/src):
  *   - every `<x>.business.update|updateMany|upsert(...)` call, and the keys of
@@ -30,10 +45,15 @@
  *     `name['key'] =` assignment). A computed key, a parameter or any other
  *     expression the reader cannot see into is OPAQUE: the writer must be in
  *     the allow-list with a reason.
- *   - inside `metaData`, literal keys only (object literals, resolved
- *     initializers and assignments); a spread of an identifier is taken to copy
- *     the stored metaData (the pattern of every metaData writer today) and a
- *     computed metaData key is not read.
+ *   - inside `metaData`, literal keys (object literals, resolved initializers
+ *     and assignments). A spread, or a metaData value that is not a literal, is
+ *     followed to where it comes from: a `.metaData` read off a value that is
+ *     not the caller's (a database read), or a call over such reads only
+ *     (`parseMetaData(business?.metaData)`), copies the stored metaData and adds
+ *     no key; a parameter, a name destructured from one, a property of either,
+ *     a local holding one, a computed key or anything else the reader cannot
+ *     follow is OPAQUE_META (R0-SEC2b review SEC2b-R2): the writer must be in
+ *     the allow-list.
  *   - the call graph through `this.method(...)` and `this.<injected>.method(...)`
  *     where the injected property's declared type is a class in apps/server/src.
  *
@@ -77,19 +97,39 @@ import * as ts from 'typescript';
 
 const SRC = resolve(__dirname, '../..');
 const DTO_FILE = join(SRC, 'modules/identity/dto/update-business.dto.ts');
+const IDENTITY_SERVICE_FILE = join(SRC, 'modules/identity/identity.service.ts');
 
 /** Owner-only Business columns that are not (or no longer) UpdateBusinessDto properties. */
 const EXTRA_OWNER_COLUMNS = ['archetype', 'onboardingComplete', 'onboardingCompletedAt'];
 /** UpdateBusinessDto properties that are not owner-only as a whole (R0-09b review CR-2). */
 const NOT_OWNER_ONLY_AS_A_BAG = ['metaData'];
-/** The setup configuration auto-configure keeps in Business.metaData (R0-09b, case D11-C02). */
-const OWNER_ONLY_META_KEYS = ['conciergeTemplateId', 'conciergeSetupAt', 'paymentMethodsConfigured', 'paymentRecommendations', 'setupMilestones'];
+/**
+ * The setup configuration auto-configure keeps in Business.metaData (R0-09b,
+ * case D11-C02), and the WhatsApp sending identity (R0-SEC2b: D-11 names the
+ * business's sending identity; WhatsAppService.saveConfig is its writer).
+ */
+const OWNER_ONLY_META_KEYS = ['conciergeTemplateId', 'conciergeSetupAt', 'paymentMethodsConfigured', 'paymentRecommendations', 'setupMilestones', 'whatsapp'];
+/** R0-SEC2b: the metaData.whatsapp writer, the only one (the WhatsApp config route). */
+const WHATSAPP_CONFIG_WRITER = 'modules/whatsapp/whatsapp.service.ts#WhatsAppService.saveConfig';
 /** The marker the reader writes for data it cannot see into. */
 const OPAQUE = '<opaque>';
+/**
+ * R0-SEC2b review SEC2b-R2: the marker for metaData keys the reader cannot see
+ * (a caller's bag spread into metaData, a computed key): any key, so any
+ * owner-only one, metaData.whatsapp included.
+ */
+const OPAQUE_META = 'metaData.<opaque>';
+/** The writer that merges the caller's metaData bag (PATCH /identity/businesses/:id, the KEY settings adapter). */
+const PROFILE_PATCH_WRITER = 'modules/identity/identity.service.ts#IdentityService.updateBusiness';
 
 type OwnerEntry = { kind: 'owner'; writes: string[]; guards: string[]; why: string };
 type OpenEntry = { kind: 'open'; writes: string[]; why: string };
-type NotProfileEntry = { kind: 'not-profile'; writes: string[]; why: string };
+/**
+ * `storedMetaParam` (R0-SEC2b review SEC2b-R2): the parameter a not-profile
+ * writer spreads into metaData (OPAQUE_META to the reader); D11W-10 checks that
+ * every resolved caller passes the stored metaData for it.
+ */
+type NotProfileEntry = { kind: 'not-profile'; writes: string[]; why: string; storedMetaParam?: string };
 type Entry = OwnerEntry | OpenEntry | NotProfileEntry;
 
 /**
@@ -99,11 +139,11 @@ type Entry = OwnerEntry | OpenEntry | NotProfileEntry;
  * keys, and '<opaque>' when some of the data cannot be read.
  */
 const OWNER_WRITES: Record<string, Entry> = {
-  'modules/identity/identity.service.ts#IdentityService.updateBusiness': {
+  [PROFILE_PATCH_WRITER]: {
     kind: 'owner',
-    writes: [OPAQUE, 'acceptingWork', 'budgetFit', 'currentCapacity', 'interests', 'lastHealthCheck', 'leadTime', 'positioningStatement', 'preferredProjectTypes', 'skills'],
+    writes: [OPAQUE, OPAQUE_META, 'acceptingWork', 'budgetFit', 'currentCapacity', 'interests', 'lastHealthCheck', 'leadTime', 'positioningStatement', 'preferredProjectTypes', 'skills'],
     guards: ['assertBusinessOwner', 'assertProfileOwner'],
-    why: 'The owner-only profile PATCH (R0-09): the rest of UpdateBusinessDto is copied by key (opaque). PATCH /identity/businesses/:id runs IdentityService.assertBusinessOwner; the KEY settings adapter runs assertProfileOwner (R0-09c).',
+    why: "The owner-only profile PATCH (R0-09): the rest of UpdateBusinessDto is copied by key (opaque), and the caller's metaData bag is merged over the stored one (opaque metaData: R0-SEC2b, it refuses a PROFILE_PATCH_RESERVED_META_KEYS key first, D11W-09). PATCH /identity/businesses/:id runs IdentityService.assertBusinessOwner; the KEY settings adapter runs assertProfileOwner (R0-09c).",
   },
   'modules/site/presence/presence.service.ts#PresenceService.publish': {
     kind: 'owner',
@@ -131,9 +171,9 @@ const OWNER_WRITES: Record<string, Entry> = {
   },
   'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.awardSetupMilestone': {
     kind: 'owner',
-    writes: ['metaData.setupMilestones'],
+    writes: [OPAQUE_META, 'metaData.setupMilestones'],
     guards: ['assertProfileOwner', 'resolveCompletionActor'],
-    why: 'Setup milestones are awarded by auto-configure (assertProfileOwner) and completion (resolveCompletionActor) only.',
+    why: "Setup milestones are awarded by auto-configure (assertProfileOwner) and completion (resolveCompletionActor) only. The computed key `${milestone}At` is opaque metaData (R0-SEC2b review SEC2b-R2); its two callers pass the literals 'conciergeSetupComplete' and 'onboardingComplete'.",
   },
   'modules/business-genesis/business-genesis.service.ts#BusinessGenesisService.submitAnswers': {
     kind: 'owner',
@@ -159,6 +199,12 @@ const OWNER_WRITES: Record<string, Entry> = {
     guards: ['isProfileOwner'],
     why: 'Found by this sweep (R0-09f), closed by R0-09g-D11-DOCUMENT-TEMPLATES: PATCH /commerce/businesses/:id/document-templates writes Business.invoiceTemplate and quoteTemplate (UpdateBusinessDto fields). The handler runs FinanceSettingsService.isProfileOwner (the R0-09f owner test) first and refuses a non-owner 403 BUSINESS_PROFILE_OWNER_ONLY before anything is read or written.',
   },
+  [WHATSAPP_CONFIG_WRITER]: {
+    kind: 'owner',
+    writes: ['metaData.whatsapp'],
+    guards: ['assertConfigOwner'],
+    why: 'R0-SEC2 (D-11 sending identity), listed by R0-SEC2b: PATCH /whatsapp/businesses/:businessId/config runs WhatsAppService.assertConfigOwner (isConfigOwner: OWNER membership, Business.ownerId, SUPER_ADMIN) before saveConfig, which re-encrypts the credentials and refuses foreign ciphertext and a phoneNumberId another business holds. PATCH /identity/businesses/:id refuses the key (PROFILE_PATCH_RESERVED_META_KEYS, D11W-09).',
+  },
   'core/connectors/google-suite.service.ts#GoogleSuiteService.handleCallback': {
     kind: 'not-profile',
     writes: [OPAQUE],
@@ -168,6 +214,12 @@ const OWNER_WRITES: Record<string, Entry> = {
     kind: 'not-profile',
     writes: [OPAQUE],
     why: "Token refresh: the access-token and expiry columns named by the caller's TokenFields (computed keys).",
+  },
+  'modules/site/case-study.service.ts#CaseStudyService.saveMeta': {
+    kind: 'not-profile',
+    writes: [OPAQUE_META],
+    storedMetaParam: 'meta',
+    why: 'Found by R0-SEC2b review SEC2b-R2 (a metaData spread of a parameter is opaque): the private helper spreads its `meta` parameter and sets caseStudies. Its callers (generateDraft, publish, unpublish) pass the `meta` loadMeta read from the stored row (checked by D11W-10), so it adds metaData.caseStudies only.',
   },
 };
 
@@ -220,27 +272,55 @@ function forEachDeep(node: ts.Node, cb: (n: ts.Node) => void) {
   ts.forEachChild(node, visit);
 }
 
-/** Collects the Business keys a `data` expression writes (columns, `metaData.<key>`, OPAQUE). */
-function dataKeys(expr: ts.Expression, scopes: ts.FunctionLikeDeclaration[]): Set<string> {
+/** Whether a binding name (an identifier, or a destructuring pattern at any depth) binds `name`. */
+function binds(b: ts.BindingName, name: string): boolean {
+  if (ts.isIdentifier(b)) return b.text === name;
+  return b.elements.some((el) => !ts.isOmittedExpression(el) && binds(el.name, name));
+}
+
+const LOGICAL_OPERATORS: ts.SyntaxKind[] = [
+  ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.AmpersandAmpersandToken,
+];
+
+/**
+ * Collects the Business keys a `data` expression writes (columns, `metaData.<key>`, OPAQUE,
+ * OPAQUE_META). With `asMetaData`, `expr` is read as a metaData value (its `metaData.<key>`
+ * entries and OPAQUE_META only).
+ */
+function dataKeys(expr: ts.Expression, scopes: ts.FunctionLikeDeclaration[], asMetaData = false): Set<string> {
   const out = new Set<string>();
   const seen = new Set<string>();
 
-  const resolveIdentifier = (name: string, onValue: (v: ts.Expression) => void, onKey: (k: string, v: ts.Expression) => void, onOpaque: () => void) => {
+  const resolveIdentifier = (
+    name: string,
+    onValue: (v: ts.Expression) => void,
+    onKey: (k: string, v: ts.Expression) => void,
+    onOpaque: () => void,
+    onDestructured?: (from: ts.Expression) => void,
+  ) => {
     if (name === 'undefined') return;
     if (seen.has(name)) return;
     seen.add(name);
     let found = false;
     for (const scope of scopes) {
-      if (scope.parameters.some((p) => ts.isIdentifier(p.name) && p.name.text === name)) { onOpaque(); return; }
+      if (scope.parameters.some((p) => binds(p.name, name))) { onOpaque(); return; }
       if (!scope.body) continue;
       forEachDeep(scope.body, (n) => {
         if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name) {
           found = true;
           if (n.initializer) onValue(n.initializer);
+        } else if (onDestructured && ts.isVariableDeclaration(n) && !ts.isIdentifier(n.name) && binds(n.name, name)) {
+          // `const { name } = from`: the value is a part of `from`.
+          found = true;
+          if (n.initializer) onDestructured(n.initializer);
+          else onOpaque();
         }
         if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
           const left = n.left;
-          if (ts.isPropertyAccessExpression(left) && ts.isIdentifier(left.expression) && left.expression.text === name) {
+          if (ts.isIdentifier(left) && left.text === name) {
+            found = true;
+            onValue(n.right);
+          } else if (ts.isPropertyAccessExpression(left) && ts.isIdentifier(left.expression) && left.expression.text === name) {
             found = true;
             onKey(left.name.text, n.right);
           } else if (ts.isElementAccessExpression(left) && ts.isIdentifier(left.expression) && left.expression.text === name) {
@@ -262,26 +342,110 @@ function dataKeys(expr: ts.Expression, scopes: ts.FunctionLikeDeclaration[]): Se
     if (!found) onOpaque();
   };
 
+  /**
+   * Whether a value comes from a parameter of an enclosing function: the
+   * parameter itself, a name destructured from it, a property of it, or a
+   * local initialised from any of those. A call's result (a database read),
+   * `this` and a module-level name are not the caller's.
+   */
+  const fromCaller = (e: ts.Expression, depth = 0): boolean => {
+    if (depth > 8) return true;
+    let x = unwrap(e);
+    while (ts.isAwaitExpression(x) || ts.isPropertyAccessExpression(x) || ts.isElementAccessExpression(x)) x = unwrap(x.expression);
+    if (ts.isConditionalExpression(x)) return fromCaller(x.whenTrue, depth + 1) || fromCaller(x.whenFalse, depth + 1);
+    if (ts.isBinaryExpression(x) && LOGICAL_OPERATORS.includes(x.operatorToken.kind)) {
+      return fromCaller(x.left, depth + 1) || fromCaller(x.right, depth + 1);
+    }
+    if (!ts.isIdentifier(x)) return false;
+    const name = x.text;
+    for (const scope of scopes) {
+      if (scope.parameters.some((p) => binds(p.name, name))) return true;
+      if (!scope.body) continue;
+      let declared = false;
+      let init: ts.Expression | undefined;
+      forEachDeep(scope.body, (n) => {
+        if (!declared && ts.isVariableDeclaration(n) && binds(n.name, name)) { declared = true; init = n.initializer; }
+      });
+      if (declared) return init ? fromCaller(init, depth + 1) : false;
+    }
+    return false;
+  };
+
+  /**
+   * Whether a property read takes `.metaData` off a value that is not the
+   * caller's: the stored metaData, which every metaData writer copies to keep
+   * the other keys. A caller's bag (`input.extra`, `dto.metaData`) is not.
+   */
+  const readsStoredMeta = (x: ts.PropertyAccessExpression | ts.ElementAccessExpression): boolean => {
+    let readsMetaData = false;
+    for (let r: ts.Expression = x; ;) {
+      r = unwrap(r);
+      if (ts.isPropertyAccessExpression(r)) {
+        if (r.name.text === 'metaData') readsMetaData = true;
+        r = r.expression;
+      } else if (ts.isElementAccessExpression(r)) {
+        const a = r.argumentExpression;
+        if ((ts.isStringLiteral(a) || ts.isNoSubstitutionTemplateLiteral(a)) && a.text === 'metaData') readsMetaData = true;
+        r = r.expression;
+      } else break;
+    }
+    return readsMetaData && !fromCaller(x);
+  };
+
+  /**
+   * Whether a call parses or copies the stored metaData
+   * (`parseMetaData(business?.metaData)`): some argument is a stored read (or
+   * such a call) and every other argument is a literal.
+   */
+  const callCopiesStored = (x: ts.CallExpression): boolean => {
+    let reads = false;
+    for (const a of x.arguments) {
+      const u = unwrap(a);
+      const stored = ts.isCallExpression(u)
+        ? callCopiesStored(u)
+        : (ts.isPropertyAccessExpression(u) || ts.isElementAccessExpression(u)) && readsStoredMeta(u);
+      if (stored) reads = true;
+      else if (!(u.kind === ts.SyntaxKind.NullKeyword || ts.isLiteralExpression(u))) return false;
+    }
+    return reads;
+  };
+
+  /**
+   * The metaData keys an expression writes. An object literal is read key by
+   * key; a spread, and a metaData value that is not a literal, is followed to
+   * where it comes from (R0-SEC2b review SEC2b-R2): the stored metaData adds no
+   * key, and a parameter, a name destructured from one, a property of either, a
+   * computed key or anything else the reader cannot follow is OPAQUE_META (a
+   * caller's bag can carry any key, metaData.whatsapp included).
+   */
   const meta = (e: ts.Expression) => {
     const x = unwrap(e);
     if (ts.isObjectLiteralExpression(x)) {
       for (const p of x.properties) {
-        if (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) {
-          const k = propName(p.name);
-          if (k) out.add(`metaData.${k}`);
-        } else if (ts.isSpreadAssignment(p)) {
-          const s = unwrap(p.expression);
-          if (!ts.isIdentifier(s)) meta(s); // an identifier spread copies the stored metaData
+        if (ts.isSpreadAssignment(p)) {
+          meta(p.expression);
+        } else {
+          const k = p.name ? propName(p.name) : undefined;
+          out.add(k ? `metaData.${k}` : OPAQUE_META);
         }
       }
     } else if (ts.isConditionalExpression(x)) { meta(x.whenTrue); meta(x.whenFalse); }
     else if (ts.isBinaryExpression(x) && x.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) meta(x.right);
+    else if (ts.isBinaryExpression(x) && LOGICAL_OPERATORS.includes(x.operatorToken.kind)) { meta(x.left); meta(x.right); }
     else if (ts.isIdentifier(x)) {
-      resolveIdentifier(x.text, (v) => {
-        const u = unwrap(v);
-        if (ts.isObjectLiteralExpression(u)) meta(u);
-      }, (k) => out.add(`metaData.${k}`), () => { /* not read: see the header */ });
-    }
+      resolveIdentifier(
+        x.text,
+        (v) => meta(v),
+        (k) => out.add(`metaData.${k}`),
+        () => out.add(OPAQUE_META),
+        (from) => { if (fromCaller(from)) out.add(OPAQUE_META); },
+      );
+    } else if (ts.isPropertyAccessExpression(x) || ts.isElementAccessExpression(x)) {
+      if (!readsStoredMeta(x)) out.add(OPAQUE_META);
+    } else if (ts.isCallExpression(x)) {
+      if (!callCopiesStored(x)) out.add(OPAQUE_META);
+    } else if (x.kind === ts.SyntaxKind.NullKeyword || ts.isLiteralExpression(x)) { /* no key */ }
+    else out.add(OPAQUE_META);
   };
 
   const columns = (e: ts.Expression) => {
@@ -311,7 +475,46 @@ function dataKeys(expr: ts.Expression, scopes: ts.FunctionLikeDeclaration[]): Se
     }
   };
 
-  columns(expr);
+  if (asMetaData) meta(expr);
+  else columns(expr);
+  return out;
+}
+
+/** The Business keys a `<x>.business.update|updateMany|upsert(...)` call writes, or undefined for any other call. */
+function businessWriteKeys(n: ts.CallExpression): string[] | undefined {
+  const e = n.expression;
+  if (!ts.isPropertyAccessExpression(e) || !['update', 'updateMany', 'upsert'].includes(e.name.text)) return undefined;
+  const target = e.expression;
+  const last = ts.isPropertyAccessExpression(target) ? target.name.text : ts.isIdentifier(target) ? target.text : undefined;
+  if (last !== 'business') return undefined;
+  const arg = n.arguments[0] ? unwrap(n.arguments[0]) : undefined;
+  const keys = new Set<string>();
+  if (arg && ts.isObjectLiteralExpression(arg)) {
+    for (const p of arg.properties) {
+      if (ts.isPropertyAssignment(p) && ['data', 'update', 'create'].includes(propName(p.name) ?? '')) {
+        for (const k of dataKeys(p.initializer, scopesOf(n))) keys.add(k);
+      } else if (ts.isShorthandPropertyAssignment(p) && p.name.text === 'data') {
+        for (const k of dataKeys(p.name, scopesOf(n))) keys.add(k);
+      }
+    }
+  } else {
+    keys.add(OPAQUE);
+  }
+  return [...keys];
+}
+
+/** The Business keys each method of in-memory source writes (the reader on code outside the tree). */
+function probeWrites(source: string): Record<string, string[]> {
+  const sf = ts.createSourceFile('zz-review-probe.service.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const out: Record<string, string[]> = {};
+  forEachDeep(sf, (n) => {
+    if (!ts.isCallExpression(n)) return;
+    const keys = businessWriteKeys(n);
+    if (!keys) return;
+    const method = scopesOf(n).find((f): f is ts.MethodDeclaration => ts.isMethodDeclaration(f));
+    const name = method && ts.isIdentifier(method.name) ? method.name.text : '?';
+    out[name] = [...new Set([...(out[name] ?? []), ...keys])].sort();
+  });
   return out;
 }
 
@@ -403,26 +606,10 @@ function analyse() {
       if (!ts.isPropertyAccessExpression(e)) return;
       const method = e.name.text;
       // Business writes.
-      if (['update', 'updateMany', 'upsert'].includes(method)) {
-        const target = e.expression;
-        const last = ts.isPropertyAccessExpression(target) ? target.name.text : ts.isIdentifier(target) ? target.text : undefined;
-        if (last === 'business') {
-          const arg = n.arguments[0] ? unwrap(n.arguments[0]) : undefined;
-          const keys = new Set<string>();
-          if (arg && ts.isObjectLiteralExpression(arg)) {
-            for (const p of arg.properties) {
-              if (ts.isPropertyAssignment(p) && ['data', 'update', 'create'].includes(propName(p.name) ?? '')) {
-                for (const k of dataKeys(p.initializer, scopesOf(n))) keys.add(k);
-              } else if (ts.isShorthandPropertyAssignment(p) && p.name.text === 'data') {
-                for (const k of dataKeys(p.name, scopesOf(n))) keys.add(k);
-              }
-            }
-          } else {
-            keys.add(OPAQUE);
-          }
-          const sf = n.getSourceFile();
-          writes.push({ fn: fn.key, line: sf.getLineAndCharacterOfPosition(n.getStart()).line + 1, call: n, keys: [...keys] });
-        }
+      const keys = businessWriteKeys(n);
+      if (keys) {
+        const sf = n.getSourceFile();
+        writes.push({ fn: fn.key, line: sf.getLineAndCharacterOfPosition(n.getStart()).line + 1, call: n, keys });
       }
       // Call edges: this.m(...) and this.<prop>.m(...).
       if (fn.className) {
@@ -470,7 +657,7 @@ const OWNER_META = new Set(OWNER_ONLY_META_KEYS.map((k) => `metaData.${k}`));
 function ownerWritesByFn(): Map<string, string[]> {
   const by = new Map<string, Set<string>>();
   for (const w of A.writes) {
-    const owned = w.keys.filter((k) => k === OPAQUE || OWNER_COLUMNS.has(k) || OWNER_META.has(k));
+    const owned = w.keys.filter((k) => k === OPAQUE || k === OPAQUE_META || OWNER_COLUMNS.has(k) || OWNER_META.has(k));
     if (owned.length === 0) continue;
     const s = by.get(w.fn) ?? new Set<string>();
     for (const k of owned) s.add(k);
@@ -666,5 +853,153 @@ describe('R0-09f D-11 static guard: every write of an owner-only Business field 
     expect(sites.flatMap((w) => w.keys).sort()).toEqual(['invoiceTemplate', 'quoteTemplate']);
     expect(sites.filter((w) => !guardedAt(fn, w.call, ['isProfileOwner'])).map((w) => `line ${w.line}`), 'a write not preceded by isProfileOwner').toEqual([]);
     expect(unguardedPaths(fn, ['isProfileOwner']).paths).toEqual([]);
+  });
+
+  // R0-SEC2b-WHATSAPP-SECRET-READS: the enforcement is proven on a real
+  // database by SEC2-T02/T06 of test/whatsapp-config-authority.integration.test.ts.
+  it('[D11W-09] RED-BEFORE (R0-SEC2b): metaData.whatsapp is an owner-only key whose one writer is WhatsAppService.saveConfig behind assertConfigOwner, and IdentityService.updateBusiness (which merges the caller\'s metaData bag, opaque metaData to the reader) consults PROFILE_PATCH_RESERVED_META_KEYS, listing whatsapp, before its write', () => {
+    expect(OWNER_META.has('metaData.whatsapp'), 'OWNER_ONLY_META_KEYS lists whatsapp').toBe(true);
+    // The one writer the reader finds, guarded on every resolved path.
+    const writers = [...ownerWritesByFn()].filter(([, w]) => w.includes('metaData.whatsapp')).map(([fn]) => fn);
+    expect(writers, 'writers of metaData.whatsapp').toEqual([WHATSAPP_CONFIG_WRITER]);
+    const entry = OWNER_WRITES[WHATSAPP_CONFIG_WRITER];
+    expect(entry?.kind).toBe('owner');
+    expect(unguardedPaths(WHATSAPP_CONFIG_WRITER, ['assertConfigOwner']).paths, 'a path to saveConfig with no assertConfigOwner').toEqual([]);
+    expect(implementsOwnerRule('assertConfigOwner')).toBe(true);
+
+    // The caller-bag writer refuses the key: the reserved list names whatsapp ...
+    const text = readFileSync(IDENTITY_SERVICE_FILE, 'utf8');
+    const sf = ts.createSourceFile(IDENTITY_SERVICE_FILE, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    let reserved: string[] | undefined;
+    const find = (n: ts.Node) => {
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'PROFILE_PATCH_RESERVED_META_KEYS' && n.initializer) {
+        const init = unwrap(n.initializer);
+        if (ts.isArrayLiteralExpression(init)) {
+          reserved = init.elements.filter((e): e is ts.StringLiteral => ts.isStringLiteral(e)).map((e) => e.text);
+        }
+      }
+      ts.forEachChild(n, find);
+    };
+    find(sf);
+    expect(reserved, 'identity.service.ts declares PROFILE_PATCH_RESERVED_META_KEYS as a string array literal').toBeDefined();
+    expect(reserved).toContain('whatsapp');
+    // ... the reader sees updateBusiness merge the caller's bag (review SEC2b-R2) ...
+    const fnKey = PROFILE_PATCH_WRITER;
+    expect(ownerWritesByFn().get(fnKey), 'updateBusiness writes opaque metaData').toContain(OPAQUE_META);
+    // ... and updateBusiness reads the reserved list before its business.update.
+    const fn = A.fns.get(fnKey);
+    expect(fn, 'IdentityService.updateBusiness').toBeDefined();
+    const sites = A.writes.filter((w) => w.fn === fnKey);
+    expect(sites.length).toBeGreaterThan(0);
+    const firstWrite = Math.min(...sites.map((w) => w.call.getStart()));
+    let consulted = false;
+    forEachDeep(fn!.node, (n) => {
+      if (ts.isIdentifier(n) && n.text === 'PROFILE_PATCH_RESERVED_META_KEYS' && n.getStart() < firstWrite) consulted = true;
+    });
+    expect(consulted, 'updateBusiness consults PROFILE_PATCH_RESERVED_META_KEYS before it writes').toBe(true);
+  });
+
+  // R0-SEC2b review SEC2b-R2: the reader took every identifier spread inside
+  // metaData to copy the stored metaData and skipped any spread that was not an
+  // object literal, so a new caller-bag merge (the shape of SEC2-R1) in any
+  // service wrote metaData.whatsapp unseen: the review's probe service with
+  // `{ ...meta, ...extra }` (extra a parameter) and `{ ...meta, ...input.extra }`
+  // left D11W-01..09 green. The probe is reproduced here on source the reader
+  // parses in memory, beside the stored-metaData shapes it must keep reading.
+  it('[D11W-10] RED-BEFORE (R0-SEC2b review SEC2b-R2): a caller\'s bag merged into metaData (a parameter, a property of one, a name destructured from one, a local holding one, the whole value, a computed key) is opaque metaData, so its writer must be allow-listed; the stored metaData copied (directly or parsed) is not; in the tree, each not-profile writer of opaque metaData spreads a private parameter every caller fills with the stored metaData', () => {
+    const write = (body: string) => `await this.prisma.client.business.update({ where: { id }, data: ${body} });`;
+    const stored = 'const biz = await this.prisma.client.business.findUnique({ where: { id } });';
+    const probe = probeWrites(`
+      function parseMetaData(raw: unknown) { return (raw ?? {}) as Record<string, unknown>; }
+      class ZzReviewProbeService {
+        constructor(private readonly prisma: any) {}
+        async paramSpread(id: string, extra: Record<string, unknown>) {
+          ${stored} const meta = (biz?.metaData as Record<string, unknown>) ?? {};
+          ${write('{ metaData: { ...meta, ...extra } }')}
+        }
+        async propertySpread(id: string, input: { extra: Record<string, unknown> }) {
+          ${stored} const meta = (biz?.metaData as Record<string, unknown>) ?? {};
+          ${write('{ metaData: { ...meta, ...input.extra } }')}
+        }
+        async callerMetaData(id: string, dto: { metaData: Record<string, unknown> }) {
+          ${stored}
+          ${write('{ metaData: { ...(biz?.metaData as object), ...dto.metaData } }')}
+        }
+        async destructured(id: string, input: { metaData?: Record<string, unknown>; tagline?: string }) {
+          const { metaData, tagline } = input;
+          ${stored}
+          ${write('{ tagline, metaData: { ...(biz?.metaData as object), ...metaData } }')}
+        }
+        async destructuredParam(id: string, { extra }: { extra: object }) {
+          ${write('{ metaData: { ...extra } }')}
+        }
+        async viaLocal(id: string, body: { extra: object }) {
+          const extra = body.extra;
+          ${write('{ metaData: { ...extra } }')}
+        }
+        async wholeBag(id: string, bag: Record<string, unknown>) {
+          ${write('{ metaData: bag }')}
+        }
+        async computedKey(id: string, key: string) {
+          ${stored} const meta = parseMetaData(biz?.metaData);
+          ${write('{ metaData: { ...meta, [key]: true } }')}
+        }
+        async callOverCaller(id: string, extra: object) {
+          ${write('{ metaData: Object.assign({}, extra) }')}
+        }
+        async storedCopy(id: string) {
+          ${stored} const meta = (biz?.metaData as Record<string, unknown>) ?? {};
+          ${write('{ metaData: { ...meta, seoScore: 1 } }')}
+        }
+        async parsedCopy(id: string) {
+          ${stored} const meta = parseMetaData(biz?.metaData);
+          meta.whatsapp = { provider: 'mock' };
+          ${write('{ metaData: meta }')}
+        }
+      }
+    `);
+    const opaque = ['metaData', OPAQUE_META];
+    expect(probe).toEqual({
+      paramSpread: opaque,
+      propertySpread: opaque,
+      callerMetaData: opaque,
+      destructured: [...opaque, 'tagline'],
+      destructuredParam: opaque,
+      viaLocal: opaque,
+      wholeBag: opaque,
+      computedKey: opaque,
+      callOverCaller: opaque,
+      storedCopy: ['metaData', 'metaData.seoScore'],
+      parsedCopy: ['metaData', 'metaData.whatsapp'],
+    });
+
+    // The tree: every writer of opaque metaData is allow-listed with it (D11W-02).
+    const PROFILE_MILESTONES = 'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.awardSetupMilestone';
+    const CASE_STUDIES = 'modules/site/case-study.service.ts#CaseStudyService.saveMeta';
+    const opaqueMeta = [...ownerWritesByFn()].filter(([, w]) => w.includes(OPAQUE_META)).map(([fn]) => fn).sort();
+    expect(opaqueMeta).toEqual([PROFILE_PATCH_WRITER, PROFILE_MILESTONES, CASE_STUDIES].sort());
+    expect(opaqueMeta.filter((fn) => !OWNER_WRITES[fn]?.writes.includes(OPAQUE_META))).toEqual([]);
+    // A not-profile writer's opaque metaData is a private method's parameter
+    // that every resolved caller fills with the stored metaData.
+    const notProfile = opaqueMeta.filter((fn) => OWNER_WRITES[fn]?.kind === 'not-profile');
+    expect(notProfile).toEqual([CASE_STUDIES]);
+    for (const fn of notProfile) {
+      const entry = OWNER_WRITES[fn] as NotProfileEntry;
+      const decl = A.fns.get(fn)?.node;
+      expect(decl && ts.isMethodDeclaration(decl), `${fn} is a method`).toBe(true);
+      const method = decl as ts.MethodDeclaration;
+      expect((ts.getModifiers(method) ?? []).some((m) => m.kind === ts.SyntaxKind.PrivateKeyword), `${fn} is private: no caller outside its class`).toBe(true);
+      const index = method.parameters.findIndex((p) => ts.isIdentifier(p.name) && p.name.text === entry.storedMetaParam);
+      expect(index, `${fn} has the parameter ${entry.storedMetaParam}`).toBeGreaterThanOrEqual(0);
+      const callers = A.edges.filter((e) => e.to === fn);
+      expect(callers.length, `${fn} has resolved callers`).toBeGreaterThan(0);
+      const bad = callers.flatMap((e) => {
+        const arg = e.call.arguments[index];
+        const keys = arg ? [...dataKeys(arg, scopesOf(e.call), true)] : [OPAQUE_META];
+        const owned = keys.filter((k) => k === OPAQUE_META || OWNER_META.has(k));
+        return owned.length > 0 ? [`${e.from} passes ${arg?.getText() ?? 'nothing'} (${owned.join(', ')})`] : [];
+      });
+      expect(bad, `${fn}: a caller that passes something other than the stored metaData`).toEqual([]);
+    }
   });
 });

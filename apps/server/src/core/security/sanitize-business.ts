@@ -30,9 +30,36 @@ export const BUSINESS_SECRET_FIELDS = [
 export type BusinessSecretField = (typeof BUSINESS_SECRET_FIELDS)[number];
 
 /**
+ * R0-SEC2b-WHATSAPP-SECRET-READS (review SEC2-R2): what a Business read answers
+ * for metaData.whatsapp. The stored value carries the WhatsApp credentials
+ * (accessToken, authToken, accountSid, as token-crypto ciphertext that one
+ * platform key decrypts for every business) and the phoneNumberId the shared
+ * webhook routes inbound messages by. None of it leaves through a Business
+ * read, for any reader, the owner included: whether a config is stored is all
+ * these reads say. The owner reads phoneNumberId and each credential's last 4
+ * characters from GET /whatsapp/businesses/:businessId/config, the one view
+ * that knows its reader.
+ */
+export interface MaskedWhatsAppMeta {
+  configured: boolean;
+}
+
+/** metaData with its whatsapp entry masked; any other value is returned as it is. */
+function maskMetaData(metaData: unknown): unknown {
+  if (metaData === null || typeof metaData !== 'object' || Array.isArray(metaData)) return metaData;
+  if (!Object.prototype.hasOwnProperty.call(metaData, 'whatsapp')) return metaData;
+  const meta = metaData as Record<string, unknown>;
+  const whatsapp: MaskedWhatsAppMeta = { configured: Boolean(meta.whatsapp) };
+  return { ...meta, whatsapp };
+}
+
+/**
  * Return a shallow copy of a Business record with all secret token columns
- * removed. Preserves every other field (non-breaking for legitimate consumers).
- * Passes through null/undefined so it can wrap optional lookups directly.
+ * removed and metaData.whatsapp masked (MaskedWhatsAppMeta; R0-SEC2b). The
+ * input is not modified, so a caller that writes the row back writes what it
+ * read from the database. Preserves every other field (non-breaking for
+ * legitimate consumers). Passes through null/undefined so it can wrap optional
+ * lookups directly.
  */
 export function sanitizeBusiness<T extends Record<string, unknown>>(
   business: T,
@@ -48,5 +75,6 @@ export function sanitizeBusiness<T extends Record<string, unknown>>(
   for (const field of BUSINESS_SECRET_FIELDS) {
     delete clone[field];
   }
+  if ('metaData' in clone) clone.metaData = maskMetaData(clone.metaData);
   return clone as Omit<T, BusinessSecretField>;
 }
