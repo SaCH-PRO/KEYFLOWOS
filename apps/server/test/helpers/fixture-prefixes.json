@@ -79,6 +79,11 @@
       "packet": "R0-09 / R0-09d-D11-GENESIS-TEMPLATES"
     },
     {
+      "prefix": "k09f_",
+      "owner": "apps/server/test/d11-finance-settings.integration.test.ts",
+      "packet": "R0-09 / R0-09f-D11-FINANCE-TAX-AND-WEB"
+    },
+    {
       "prefix": "k12a_",
       "owner": "apps/server/test/contact-scoped-tenancy.integration.test.ts",
       "packet": "R0-12-CT-TENANT-ROUTES"

@@ -1,5 +1,12 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+
+/**
+ * R0-09f (owner ruling D-11): the refusal a non-owner gets on
+ * PATCH /finance/businesses/:businessId/settings for a defaultTaxRate change;
+ * the code the concierge, genesis and template refusals answer (R0-09b, R0-09d).
+ */
+export const BUSINESS_PROFILE_OWNER_ONLY = 'BUSINESS_PROFILE_OWNER_ONLY';
 
 export interface FinanceSettings {
   accountingBasis: 'CASH' | 'ACCRUAL';
@@ -63,6 +70,78 @@ export class FinanceSettingsService {
     };
   }
 
+  /**
+   * R0-09f-D11-FINANCE-TAX-AND-WEB, owner ruling D-11 (2026-10-31: editing the
+   * business profile is OWNER only, regardless of granted scopes; found by the
+   * R0-09d sweep). update writes Business.defaultTaxRate, the tax rate the
+   * owner-only profile PATCH (PATCH /identity/businesses/:businessId, R0-09,
+   * UpdateBusinessDto) writes, so a non-owner — STAFF or ADMIN, settings:write
+   * included — who CHANGES it is refused the whole submission: 403
+   * BUSINESS_PROFILE_OWNER_ONLY before anything is validated or written.
+   *
+   * Gated by field, not as a route: accountingBasis, fiscalYearStartMonth, the
+   * four default account ids and accountantEmail are not owner-only fields and
+   * keep the route's rule (ensureAccess: any member). The finance settings page
+   * saves the whole form with the rate GET returned (get answers a stored NULL
+   * as 0), so a non-owner's submission that carries the current rate is not a
+   * change: it goes through with defaultTaxRate removed, and a non-owner never
+   * writes the column. Returns the input update may write.
+   *
+   * The owner test is isProfileOwner.
+   */
+  async assertTaxRateOwner(
+    businessId: string,
+    input: UpdateFinanceSettingsInput,
+    actor: { id?: string; role?: string } | undefined,
+  ): Promise<UpdateFinanceSettingsInput> {
+    if (input.defaultTaxRate == null) return input;
+    if (await this.isProfileOwner(businessId, actor)) return input;
+    const current = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { defaultTaxRate: true },
+    });
+    if (current && Number(input.defaultTaxRate) === (current.defaultTaxRate ?? 0)) {
+      const rest: UpdateFinanceSettingsInput = { ...input };
+      delete rest.defaultTaxRate;
+      return rest;
+    }
+    throw new ForbiddenException({
+      code: BUSINESS_PROFILE_OWNER_ONLY,
+      message: 'Only the business owner can change the default tax rate.',
+      fields: ['defaultTaxRate'],
+    });
+  }
+
+  /**
+   * Whether the actor is the business owner for owner ruling D-11
+   * (R0-09f-D11-FINANCE-TAX-AND-WEB): the OWNER membership or the distinguished
+   * owner (Business.ownerId), the two arms IdentityService.assertBusinessOwner
+   * and BusinessGuard admit an owner by, both looked up on the route's
+   * business; a SUPER_ADMIN keeps the platform bypass BusinessGuard grants.
+   * The actor is the authenticated user AuthMiddleware attached (req.user);
+   * none is not the owner (fails closed). The rule is restated rather than
+   * imported, as R0-08c, R0-09b and R0-09d did (PresenceService.isSlugOwner,
+   * OnboardingConciergeService, BusinessGenesisService and
+   * TemplatesService.isProfileOwner): injecting IdentityService would need
+   * FinanceModule to import IdentityModule, and finance.module.ts is outside
+   * the R0-09f write set.
+   */
+  async isProfileOwner(businessId: string, actor: { id?: string; role?: string } | undefined): Promise<boolean> {
+    if (!actor?.id) return false;
+    if (actor.role === 'SUPER_ADMIN') return true;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actor.id, businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return true;
+    const owned = await this.prisma.client.business.findFirst({
+      where: { id: businessId, ownerId: actor.id },
+      select: { id: true },
+    });
+    return !!owned;
+  }
+
+  /** Owner-only (D-11) for defaultTaxRate: the controller runs assertTaxRateOwner first. */
   async update(businessId: string, input: UpdateFinanceSettingsInput): Promise<FinanceSettings> {
     if (input.accountingBasis && input.accountingBasis !== 'CASH' && input.accountingBasis !== 'ACCRUAL') {
       throw new BadRequestException('Accounting basis must be CASH or ACCRUAL');
