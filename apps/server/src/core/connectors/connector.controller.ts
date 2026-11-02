@@ -42,6 +42,22 @@ export class ConnectorController {
     await gmail.disconnectGmail(businessId, req.user);
   }
 
+  /**
+   * R0-CMF6 / D-11: for the gmail connector, the routes that send from the
+   * business mailbox (smoke: a marked self-test email) or read it (sync: the
+   * inbox into Key Inbox) follow the Gmail owner rule,
+   * GmailService.assertConnectAuthority: 403 GMAIL_OWNER_ONLY before the
+   * registry is reached, outside the handlers' error mapping. test (the Gmail
+   * profile check: it sends nothing and reads no message), health, statuses,
+   * dashboard and authenticate (status reads) are unchanged, as is every other
+   * connector.
+   */
+  private async assertBusinessMailboxAuthority(businessId: string, type: string, req: ConnectorRequest): Promise<void> {
+    if (type !== 'gmail') return;
+    const gmail = await resolveGmailService(this.moduleRef);
+    await gmail.assertConnectAuthority(businessId, req.user);
+  }
+
   @Get('businesses/:businessId/dashboard')
   async getDashboard(@Param('businessId') businessId: string) {
     return this.registry.getDashboard(businessId);
@@ -71,7 +87,9 @@ export class ConnectorController {
   async sync(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    await this.assertBusinessMailboxAuthority(businessId, type, req);
     try {
       return await this.registry.syncConnector(type as ConnectorType, businessId);
     } catch (err: unknown) {
@@ -141,7 +159,9 @@ export class ConnectorController {
   async smoke(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    await this.assertBusinessMailboxAuthority(businessId, type, req);
     try {
       return await this.registry.smokeTestConnector(type as ConnectorType, businessId);
     } catch (err: unknown) {

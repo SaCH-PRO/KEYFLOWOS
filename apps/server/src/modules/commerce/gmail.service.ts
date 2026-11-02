@@ -424,6 +424,21 @@ export class GmailService {
   }
 
   /**
+   * R0-CMF6: the gmail connector row (written connected by a Google Suite
+   * confirmation, CMF5R-1, or by the connector routes) follows the mailbox: a
+   * disconnect marks it disconnected in the disconnect's transaction, so the
+   * nightly sync stops trying a mailbox that is gone ("Gmail not connected").
+   * One UPDATE: no row is written when there is none, and only this business's
+   * gmail row is touched.
+   */
+  private async markGmailConnectorDisconnected(tx: PrismaTx, businessId: string): Promise<void> {
+    await tx.$queryRaw`
+      UPDATE connector_statuses SET status = 'disconnected', updated_at = NOW()
+       WHERE business_id = ${businessId} AND connector_type = 'gmail'
+       RETURNING id`;
+  }
+
+  /**
    * R0-CMF5 review ST-CMF5-5: pending rows past their window are removed
    * whenever this business's connection is staged, previewed, confirmed,
    * read or disconnected, so an unconfirmed consent's refresh token does not
@@ -764,7 +779,8 @@ export class GmailService {
    * R0-CMF5 / D-11: OWNER only (the rule is applied here, so every route that
    * disconnects goes through it). Clears Business.gmail*, removes every PENDING
    * Gmail connection of the business (ST-CMF5-5: a consent staged before the
-   * disconnect cannot be confirmed after it), and writes the audit row naming
+   * disconnect cannot be confirmed after it), marks the gmail connector row
+   * disconnected when there is one (R0-CMF6), and writes the audit row naming
    * the actor (ST-CMF5-4), in one transaction.
    */
   async disconnectGmail(businessId: string, actor: GmailConnectActor | undefined): Promise<void> {
@@ -784,6 +800,7 @@ export class GmailService {
         },
       });
       const removed = await tx.connectorAccount.deleteMany({ where: { businessId, ...PENDING_ROW } });
+      await this.markGmailConnectorDisconnected(tx, businessId);
       const previousEmail = previous?.gmailEmail ?? null;
       await this.auditMailboxChange(tx, businessId, actorId, standing, {
         action: 'gmail_disconnected',
