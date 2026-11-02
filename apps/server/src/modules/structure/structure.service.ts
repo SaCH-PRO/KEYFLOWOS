@@ -79,6 +79,21 @@ const REACH_FIELDS = ['contactPhone', 'contactEmail', 'preferredChannel', 'autoA
 /** A JobRole as it confers authority on a position. */
 type JobRoleGrant = { permissions: unknown; defaultApprovalTier: number };
 
+/** The holder's account, as AuthMiddleware reads it (V1-21b review 5 INP4-1). */
+const HOLDER_ACCOUNT = { deletedAt: true, bannedAt: true } as const;
+
+/** A membership with its user's account state, as resolveStaffByPhone hands it to the bridge. */
+type HolderMembershipRow = Prisma.MembershipGetPayload<{ include: { user: { select: typeof HOLDER_ACCOUNT } } }>;
+
+/** createAssignment / updateAssignment: a contact-only position on a member's phone (V1-21b review 7 INP4-3). */
+const REFUSED_MEMBER_PHONE =
+  'A member of this business uses this phone number; give the position to their membership instead of a contact-only position';
+
+/** A phone number's digits, the form two spellings of one number share ('+1 (868) 555-1904' and '+18685551904'). */
+function phoneDigits(phone: string | null | undefined): string {
+  return (phone ?? '').replace(/\D/g, '');
+}
+
 function isPlainMap(value: unknown): value is Prisma.InputJsonObject {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -819,6 +834,12 @@ export class StructureService {
         throw new BadRequestException('Another active position already uses this phone number');
       }
     }
+    // V1-21b review 7 INP4-3: KEY knows a staff sender only by the phone, and a contact-only
+    // position has no membership to bound it. On a member's own phone it would outlive any
+    // narrowing of that member over HTTP; their position belongs on their membership.
+    if (isContactOnly && normalizedPhone && (await this.membersByPhone(businessId, normalizedPhone)).length) {
+      throw new BadRequestException(REFUSED_MEMBER_PHONE);
+    }
 
     await this.assertAssignmentRefs(businessId, dto);
 
@@ -877,18 +898,68 @@ export class StructureService {
    * envelope (JobRolePolicyService.envelopeForPosition, V1-21b review 4 IC3-1), and so
    * does its user's account state: AuthMiddleware refuses a soft-deleted or banned user
    * every route, and the envelope then keeps the baseline only (review 5 INP4-1).
+   *
+   * `membership` is the holder's row in this business, the (user, business) row
+   * ModuleScopeGuard reads (review 7 INP4-2): an assignment written before
+   * assertAssignmentRefs can name the holder's membership in another business, and that row
+   * is looked up again here instead of being handed on. `phoneMembers` are the memberships of
+   * this business's members whose account phone is this phone (review 7 INP4-3): KEY knows the
+   * sender only by the phone, so the envelope is bounded by each of them too.
    */
   async resolveStaffByPhone(businessId: string, phone: string) {
     const normalized = normalizePhone(phone);
     if (!normalized) return null;
-    return this.prisma.client.orgAssignment.findFirst({
+    const assignment = await this.prisma.client.orgAssignment.findFirst({
       where: { businessId, contactPhone: normalized, endedAt: null },
       include: {
         jobRole: true,
         orgUnit: true,
-        membership: { include: { user: { select: { deletedAt: true, bannedAt: true } } } },
+        membership: { include: { user: { select: HOLDER_ACCOUNT } } },
       },
     });
+    if (!assignment) return null;
+    const [membership, phoneMembers] = await Promise.all([
+      this.holderMembershipHere(businessId, assignment),
+      this.membersByPhone(businessId, normalized),
+    ]);
+    return { ...assignment, membership, phoneMembers };
+  }
+
+  /**
+   * The membership HTTP reads for the holder of `assignment` in `businessId` (V1-21b review 7
+   * INP4-2): ModuleScopeGuard and resolveCrmAccess look it up by (user, business). The row the
+   * assignment names is that row when it is in this business; when it is in another, the holder
+   * is its user and their row here is looked up (none: no membership, and the envelope keeps
+   * the baseline). The holder is not known, and no row is read, when the assignment names no
+   * membership or names one of a user other than its own userId (JobRolePolicyService then
+   * fails closed).
+   */
+  private async holderMembershipHere(
+    businessId: string,
+    assignment: { userId: string | null; membership: HolderMembershipRow | null },
+  ): Promise<HolderMembershipRow | null> {
+    const named = assignment.membership;
+    if (!named || named.businessId === businessId) return named;
+    if (assignment.userId && assignment.userId !== named.userId) return null;
+    return this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: named.userId, businessId } },
+      include: { user: { select: HOLDER_ACCOUNT } },
+    });
+  }
+
+  /**
+   * The memberships of `businessId` whose user's account phone is `phone`, compared by digits so
+   * that two spellings of one number match (V1-21b review 7 INP4-3). Every member with a phone
+   * is read: a cap on the number of rows could leave the matching one out.
+   */
+  private async membersByPhone(businessId: string, phone: string) {
+    const digits = phoneDigits(phone);
+    if (!digits) return [];
+    const members = await this.prisma.client.membership.findMany({
+      where: { businessId, user: { phone: { not: null } } },
+      include: { user: { select: { phone: true, ...HOLDER_ACCOUNT } } },
+    });
+    return members.filter((m) => phoneDigits(m.user?.phone) === digits);
   }
 
   /** Persist the KEY chat session id for a position's WhatsApp/SMS conversation. */
@@ -936,6 +1007,10 @@ export class StructureService {
           where: { businessId, contactPhone: normalizedPhone, endedAt: null, id: { not: id } },
         });
         if (clash) throw new BadRequestException('Another active position already uses this phone number');
+        // V1-21b review 7 INP4-3, as on create.
+        if (existing.isContactOnly && (await this.membersByPhone(businessId, normalizedPhone)).length) {
+          throw new BadRequestException(REFUSED_MEMBER_PHONE);
+        }
       }
     }
 

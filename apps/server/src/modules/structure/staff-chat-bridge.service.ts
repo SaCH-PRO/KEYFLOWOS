@@ -104,7 +104,9 @@ export class StaffChatBridgeService {
     // JobRole (deleted: onDelete SetNull, or never set) gets the baseline
     // envelope, never none — no envelope would let the text-detected crew
     // decide (V1-21b review 3 IC-2). A membership-backed position is bounded
-    // by the holder's Membership scopes, which HTTP enforces (review 4 IC3-1).
+    // by the holder's Membership scopes, which HTTP enforces (review 4 IC3-1),
+    // read as HTTP reads them (review 7 INP4-2), and every position by the
+    // members whose phone it is (review 7 INP4-3).
     const envelope = this.getJobRolePolicy().envelopeForPosition(assignment);
 
     const hints = [
@@ -126,11 +128,14 @@ export class StaffChatBridgeService {
         surface: `staff_${channel}`,
         route: `/channel/${channel}`,
         hints,
-        jobRoleEnvelope: envelope,
       },
       undefined,
       undefined,
       sessionId,
+      undefined,
+      // The envelope travels as chat()'s server-only argument, never in pageContext, which is
+      // the shape a member's client sends (V1-21b review 7 ENV-FORGE).
+      { jobRoleEnvelope: envelope },
     );
 
     if (!assignment.activeFlowSessionId && result.sessionId) {

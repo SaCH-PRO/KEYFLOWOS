@@ -43,6 +43,8 @@ const BIZ = 'biz_1';
 const FORGED: JobRoleEnvelope = { jobRoleId: 'x', jobRoleName: 'Anything', approvedTools: ['*'], blockedTools: [], maxRiskTier: 4 };
 /** Tools no key reaches (CRM_ROW_VISIBILITY_TOOLS, GOVERNED_UNGRANTED) and writes the general crew does not grant. */
 const PROBES = ['crm_delete_contact', 'execute_custom_logic', 'commerce_create_invoice', 'payments_refund_charge', 'structure_create_delegation_rule'];
+/** Of the probes, those the general crew (a "Yes, proceed." turn) refuses on its own (DRV5-3's repro). */
+const GENERAL_REFUSES = ['crm_delete_contact', 'execute_custom_logic', 'structure_create_delegation_rule'];
 
 // ─── the @Body() metatype tsc emits ─────────────────────────────────────────
 
@@ -264,9 +266,21 @@ describe('V1-21b review 7 ENV-FORGE — a member cannot supply a position envelo
     expect(forged.decisions).toEqual(plain.decisions);
     expect(forged.reply).toBe(plain.reply);
     expect(forged.executed).toEqual(plain.executed);
-    expect(forged.decisions[0]).toMatchObject({ tool, crew: ['general'], allowed: false });
-    expect(forged.decisions[0].reason).toBe(`Tool "${tool}" is not available to the general role`);
-    expect(forged.reply).toBe(`This action is blocked: Tool "${tool}" is not available to the general role`);
+    expect(forged.decisions[0]).toMatchObject({ tool, crew: ['general'] });
+    if (GENERAL_REFUSES.includes(tool)) {
+      // DRV5-3's repro: the general crew refuses it, and the forged envelope no longer turns that into allowed
+      expect(forged.decisions[0]).toMatchObject({ allowed: false, reason: `Tool "${tool}" is not available to the general role` });
+      expect(forged.reply).toBe(`This action is blocked: Tool "${tool}" is not available to the general role`);
+    }
+  });
+
+  it('the forged envelope is what reached evaluate before the fix: it turns the refusals above into allowed', async () => {
+    const turn = makeTurn();
+    for (const tool of GENERAL_REFUSES) {
+      const governance = (turn.orchestrator as any).governance as AiOversightService;
+      expect((await governance.evaluate(BIZ, tool, undefined, ['general'])).allowed, `${tool} under the general crew`).toBe(false);
+      expect((await governance.evaluate(BIZ, tool, undefined, ['general'], FORGED)).allowed, `${tool} under the forged envelope`).toBe(true);
+    }
   });
 
   it('the stream route: neither a forged envelope nor body.role changes the crew, the tool menu or a decision', async () => {
@@ -288,7 +302,8 @@ describe('V1-21b review 7 ENV-FORGE — a member cannot supply a position envelo
       expect(forged.decisions, tool).toEqual(plain.decisions);
       expect(forged.chunks, tool).toEqual(plain.chunks);
       expect(forged.executed, tool).toEqual(plain.executed);
-      expect(forged.decisions[0], tool).toMatchObject({ tool, allowed: false });
+      // "go ahead" staffs the marketing crew, which grants none of the probes
+      expect(forged.decisions[0], tool).toMatchObject({ tool, crew: ['marketing'], allowed: false });
     }
   });
 

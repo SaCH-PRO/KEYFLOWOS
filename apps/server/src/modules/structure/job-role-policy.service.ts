@@ -45,7 +45,9 @@ import {
  * A position with no JobRole gets the baseline envelope, never none, and a
  * membership-backed position is bounded by its holder's Membership scopes in the
  * assignment's business, the row HTTP reads (envelopeForPosition, review 3 IC-2,
- * review 4 IC3-1, review 6 INP5-1). A registry tool some
+ * review 4 IC3-1, review 6 INP5-1, review 7 INP4-2), and every position by the membership of
+ * each member whose account phone it carries (review 7 INP4-3). Only an envelope this service
+ * issued governs a KEY turn (isIssued; review 7 ENV-FORGE). A registry tool some
  * pattern matches but no grant covers is
  * listed in `blockedTools`, which `isToolAllowed` checks first, so
  * AiOversightService.evaluate refuses it and the chat never advertises it.
@@ -125,7 +127,7 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     commerce_convert_quote: 'write', commerce_create_invoice: 'write',
     commerce_create_quote: 'write', commerce_delete_invoice: 'write',
     commerce_list_invoices: 'read', commerce_mark_invoice_paid: 'write',
-    commerce_send_invoice: 'write', commerce_update_invoice: 'write', payments_create_link: 'write',
+    commerce_update_invoice: 'write', payments_create_link: 'write',
     payments_list_gateways: 'read', payments_list_links: 'read', payments_list_transactions: 'read',
     payments_refund_charge: 'write', payments_revoke_link: 'write',
     payments_search_transactions: 'read',
@@ -157,7 +159,7 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     contract_create_tag: 'write', contract_extract_terms: 'write', contract_list_tags: 'read',
     contracts_acknowledge_alert: 'write', contracts_create: 'write', contracts_delete: 'write',
     contracts_get: 'read', contracts_list: 'read', contracts_stats: 'read',
-    contracts_update: 'write', inbox_brief: 'read', inbox_list_threads: 'read',
+    contracts_update: 'write', inbox_brief: 'write', inbox_list_threads: 'read',
     inbox_mark_resolved: 'write', inbox_read_thread: 'read', inbox_reply_thread: 'write',
     inbox_update_thread_status: 'write', payroll_approve_run: 'write', payroll_get_run: 'read',
     payroll_list_rates: 'read', payroll_list_runs: 'read', payroll_mark_paid: 'write',
@@ -174,6 +176,8 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
  * not a canonical key, not a legacy family, not the baseline.
  */
 export const GOVERNED_UNGRANTED: Readonly<Record<string, string>> = {
+  commerce_send_invoice:
+    "revenue:write (CommerceService.updateInvoiceStatus) beside TransactionalEmailService.send to the invoice's customer, which no member route does (review 7 DRV5-2)",
   execute_custom_logic: 're-enters the dispatcher for any tool (innerToolExecutor -> executeToolByName)',
   send_message_with_approval: 'crm:write (CrmService.addNote) beside AiMessageSenderService.sendMessage, which backs no route',
   update_status_with_confirmation: 'needs crm AND revenue',
@@ -312,8 +316,10 @@ export type HolderMembership = Pick<Membership, 'role' | 'permissionScopes'> &
 
 /**
  * A staff position as StructureService.resolveStaffByPhone returns it: the OrgAssignment's
- * business, its JobRole and, on the membership path (membershipId / userId set), the
- * Membership the assignment names.
+ * business, its JobRole, on the membership path (membershipId / userId set) the holder's
+ * membership in that business, the (user, business) row HTTP reads (review 7 INP4-2), and the
+ * memberships of the business's members whose account phone is the position's phone (review 7
+ * INP4-3).
  */
 export interface StaffPosition {
   businessId?: string | null;
@@ -321,6 +327,21 @@ export interface StaffPosition {
   membershipId?: string | null;
   userId?: string | null;
   membership?: HolderMembership | null;
+  phoneMembers?: readonly HolderMembership[] | null;
+}
+
+/**
+ * The envelopes this service issued (V1-21b review 7 ENV-FORGE). FlowOrchestratorService governs
+ * a turn by an envelope only when it is one of these, so an object shaped like an envelope (one
+ * a client sent, or a copy) never stands in for a position. Issued envelopes are frozen.
+ */
+const ISSUED = new WeakSet<object>();
+
+function issue(envelope: JobRoleEnvelope): JobRoleEnvelope {
+  Object.freeze(envelope.approvedTools);
+  Object.freeze(envelope.blockedTools);
+  ISSUED.add(Object.freeze(envelope));
+  return envelope;
 }
 
 /**
@@ -356,10 +377,15 @@ function holderMayAuthenticate(membership: HolderMembership): boolean {
  * or one whose business or user is not given, is not (fail closed).
  */
 function isHoldersMembershipHere(position: StaffPosition, membership: HolderMembership): boolean {
+  if (!isMembershipHere(position, membership)) return false;
+  return !position.userId || position.userId === membership.userId;
+}
+
+/** Whether `membership` is a member's row in the position's business, with its user given (fail closed otherwise). */
+function isMembershipHere(position: StaffPosition, membership: HolderMembership): boolean {
   const businessId = position.businessId;
   if (typeof businessId !== 'string' || !businessId || membership.businessId !== businessId) return false;
-  if (typeof membership.userId !== 'string' || !membership.userId) return false;
-  return !position.userId || position.userId === membership.userId;
+  return typeof membership.userId === 'string' && !!membership.userId;
 }
 
 /** Both envelope checks AiOversightService.evaluate applies: the tool is allowed and its tier within the cap. */
@@ -434,13 +460,13 @@ export class JobRolePolicyService {
       (t) => matches(approved, t.name) && !grants.some((g) => covers(g, t.name, t.riskTier)),
     ).map((t) => t.name);
 
-    return {
+    return issue({
       jobRoleId: jobRole.id,
       jobRoleName: jobRole.name,
       approvedTools: approved,
       blockedTools: blocked,
       maxRiskTier,
-    };
+    });
   }
 
   /**
@@ -468,28 +494,47 @@ export class JobRolePolicyService {
    * (V1-21b review 6 INP5-1): an older assignment can name the holder's membership in another
    * business, where its scopes give nothing here, or another user's. Such a membership, or one
    * whose business or user is not given, caps the position to the baseline (fail closed), as
-   * no membership does; this holds even when the holder has a membership of their own here,
-   * which the assignment does not name.
+   * no membership does. StructureService.resolveStaffByPhone hands over the holder's row in the
+   * assignment's business, looked up by (user, business) as ModuleScopeGuard does, in place of
+   * a row the assignment names elsewhere (review 7 INP4-2), so a foreign OWNER membership with
+   * no scope map never caps, nor uncaps, the position.
+   *
+   * The bridge knows the sender only by the phone (review 7 INP4-3). A position on the phone of
+   * a member of its business, contact-only included, is further bounded by that member's
+   * membership as HTTP reads it (by each, when several members carry the phone), so a member
+   * who files a contact-only position on their own phone, or a contact later invited with it,
+   * is narrowed over KEY when HTTP narrows them. A phone member not shown to be a member of the
+   * position's business with an active account caps it to the baseline (fail closed).
    */
   envelopeForPosition(position: StaffPosition | null | undefined): JobRoleEnvelope {
     const scoped = this.envelopeForJobRole(position?.jobRole ?? NO_JOB_ROLE);
     if (!position) return scoped;
-    const membershipBacked = !!(position.membershipId || position.userId || position.membership);
-    if (!membershipBacked) return scoped;
-    const membership = position.membership;
-    const held =
-      membership && isHoldersMembershipHere(position, membership) && holderMayAuthenticate(membership)
-        ? effectiveScopes(membership)
-        : {};
-    return boundBy(
-      scoped,
-      this.envelopeForJobRole({ id: scoped.jobRoleId, name: scoped.jobRoleName, permissions: held as JobRole['permissions'] }),
-    );
+    const caps: Array<Record<string, unknown>> = [];
+    if (position.membershipId || position.userId || position.membership) {
+      const membership = position.membership;
+      caps.push(membership && isHoldersMembershipHere(position, membership) && holderMayAuthenticate(membership) ? effectiveScopes(membership) : {});
+    }
+    for (const member of position.phoneMembers ?? []) {
+      caps.push(isMembershipHere(position, member) && holderMayAuthenticate(member) ? effectiveScopes(member) : {});
+    }
+    let envelope = scoped;
+    for (const held of caps) {
+      envelope = boundBy(
+        envelope,
+        this.envelopeForJobRole({ id: scoped.jobRoleId, name: scoped.jobRoleName, permissions: held as JobRole['permissions'] }),
+      );
+    }
+    return envelope === scoped ? scoped : issue(envelope);
   }
 
   /** Same wildcard semantics as RoleEngine: exact match or trailing-* prefix. */
   isToolAllowed(envelope: JobRoleEnvelope, toolName: string): boolean {
     if (envelope.blockedTools.includes(toolName)) return false;
     return matches(envelope.approvedTools, toolName);
+  }
+
+  /** Whether this service issued `envelope` (V1-21b review 7 ENV-FORGE); a copy or a lookalike was not. */
+  isIssued(envelope: unknown): envelope is JobRoleEnvelope {
+    return typeof envelope === 'object' && envelope !== null && ISSUED.has(envelope);
   }
 }
