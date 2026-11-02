@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
 
@@ -214,10 +215,25 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * Bill every due schedule once for its current period.
+   *
+   * V1-12 (#174 REL-03 / PRS-M15): the overlap flag is released in `finally`.
+   * It used to be reset only on the last line, so one rejected scan (a
+   * transient DB error) left it set and every later run of this process
+   * returned [] without reading a schedule.
+   */
   async processRecurringInvoices() {
     if (this.running) return [];
     this.running = true;
+    try {
+      return await this.runDueSchedules();
+    } finally {
+      this.running = false;
+    }
+  }
 
+  private async runDueSchedules() {
     const now = new Date();
     const dueInvoices = await this.prisma.client.recurringInvoice.findMany({
       where: {
@@ -246,55 +262,85 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
           nextRunDate: recurring.nextRunDate,
         });
 
-        const invoice = await this.prisma.client.invoice.create({
-          data: {
-            businessId: recurring.businessId,
-            contactId: recurring.contactId,
-            invoiceNumber: `INV-${Date.now()}`,
-            status: 'DRAFT',
-            issueDate: new Date(),
-            subtotal: recurring.amount,
-            taxRate: 0,
-            taxAmount: 0,
-            discountType: null,
-            discountValue: null,
-            discountAmount: 0,
-            total: recurring.amount,
-            currency: recurring.currency,
-            notes: recurring.description,
-            recurringInvoiceId: recurring.id,
-            items: {
-              create: [
-                {
-                  description: recurring.description || recurring.name,
-                  quantity: 1,
-                  unitPrice: recurring.amount,
-                  total: recurring.amount,
-                },
-              ],
-            },
-          },
-          include: { items: true, contact: true },
-        });
-
-        const sentInvoice = await this.invoiceWorkflow.transition(invoice.id, 'SENT', {
-          sentAt: new Date(),
-        });
-
         const nextRunDate = this.calculateNextRunDate(recurring.nextRunDate, recurring.frequency);
 
-        await this.prisma.client.recurringInvoice.update({
-          where: { id: recurring.id },
-          data: {
-            lastGeneratedAt: now,
-            nextRunDate,
-            generatedCount: { increment: 1 },
-            failureCount: 0,
-            lastError: null,
-            lastFailureAt: null,
-          },
+        // V1-12 (#174 REL-04 / PRS-M16): one transaction for the period. The
+        // schedule advance, the invoice create and the SENT transition (with
+        // its ACCRUAL posting) commit together or not at all, so a failure
+        // anywhere leaves the period due and nothing billed, and the retry
+        // bills it once. They used to run separately with the advance last:
+        // a failure after SENT left a posted invoice behind a schedule still
+        // due, and the next run billed the customer again.
+        //
+        // The advance runs first and is a compare-and-set on the nextRunDate
+        // this run read: a second runner (another instance) that read the
+        // same period waits on the row lock, then matches no row and skips.
+        // Invoice events are buffered and emitted only after the commit.
+        const pendingEvents: Array<{ name: string; payload: unknown }> = [];
+        const sentInvoice = await this.prisma.client.$transaction(async (tx) => {
+          const claimed = await tx.recurringInvoice.updateMany({
+            where: {
+              id: recurring.id,
+              nextRunDate: recurring.nextRunDate,
+              status: 'ACTIVE',
+              deletedAt: null,
+            },
+            data: {
+              lastGeneratedAt: now,
+              nextRunDate,
+              generatedCount: { increment: 1 },
+              failureCount: 0,
+              lastError: null,
+              lastFailureAt: null,
+            },
+          });
+          if (claimed.count === 0) return null;
+
+          const invoice = await tx.invoice.create({
+            data: {
+              businessId: recurring.businessId,
+              contactId: recurring.contactId,
+              invoiceNumber: `INV-${Date.now()}`,
+              status: 'DRAFT',
+              issueDate: new Date(),
+              subtotal: recurring.amount,
+              taxRate: 0,
+              taxAmount: 0,
+              discountType: null,
+              discountValue: null,
+              discountAmount: 0,
+              total: recurring.amount,
+              currency: recurring.currency,
+              notes: recurring.description,
+              recurringInvoiceId: recurring.id,
+              items: {
+                create: [
+                  {
+                    description: recurring.description || recurring.name,
+                    quantity: 1,
+                    unitPrice: recurring.amount,
+                    total: recurring.amount,
+                  },
+                ],
+              },
+            },
+          });
+
+          return this.invoiceWorkflow.transition(invoice.id, 'SENT', {
+            sentAt: new Date(),
+            tx: tx as unknown as Prisma.TransactionClient,
+            eventBuffer: pendingEvents,
+          });
         });
 
+        if (!sentInvoice) {
+          this.logger.log(
+            `Recurring invoice ${recurring.id}: this period was already billed by another run; skipped`,
+          );
+          continue;
+        }
+
+        for (const event of pendingEvents) this.events.emit(event.name, event.payload);
         this.events.emit('recurring_invoice.generated', {
           recurringInvoice: { ...recurring, lastGeneratedAt: now, nextRunDate, generatedCount: recurring.generatedCount + 1 },
           invoice: sentInvoice,
@@ -341,7 +387,6 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    this.running = false;
     return results;
   }
 

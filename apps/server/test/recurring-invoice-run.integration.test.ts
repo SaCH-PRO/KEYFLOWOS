@@ -256,6 +256,12 @@ async function finalizedPostings(invoiceIds: string[]): Promise<Array<{ external
   });
 }
 
+/** invoice_finalized postings written since `before` (a snapshot from allFinalizedPostings()). */
+async function postingsSince(before: Array<{ externalRef: string }>): Promise<string[]> {
+  const seen = new Set(before.map((p) => p.externalRef));
+  return (await allFinalizedPostings()).map((p) => p.externalRef).filter((ref) => !seen.has(ref));
+}
+
 /** Every invoice_finalized posting of the suite's business. */
 async function allFinalizedPostings(): Promise<Array<{ externalRef: string; sourceId: string }>> {
   return db.financialTransaction.findMany({
@@ -390,12 +396,13 @@ describe('ONE-TX: schedule advance and invoice creation in one transaction (REL-
   it('the schedule advance fails during the run: the next run bills the period once, and the failed attempt leaves nothing behind', async () => {
     const schedule = await seedDueSchedule('advance');
     const svc = newRunner();
+    const postingsBefore = await allFinalizedPostings();
 
     faults.advanceThrows = 1;
     const failedRun = await svc.processRecurringInvoices();
     const left = {
       invoices: await invoicesOf(schedule.id),
-      postings: await allFinalizedPostings(),
+      postings: await postingsSince(postingsBefore),
       row: await scheduleRow(schedule.id),
       events: events.map((e) => e.name),
     };
@@ -450,12 +457,13 @@ describe('ONE-TX: schedule advance and invoice creation in one transaction (REL-
   it('the SENT step fails (its ACCRUAL posting throws): the create and the advance roll back with it; the retry bills once', async () => {
     const schedule = await seedDueSchedule('posting');
     const svc = newRunner();
+    const postingsBefore = await allFinalizedPostings();
 
     faults.postingThrows = 1;
     const failedRun = await svc.processRecurringInvoices();
     const left = {
       invoices: await invoicesOf(schedule.id),
-      postings: await allFinalizedPostings(),
+      postings: await postingsSince(postingsBefore),
       row: await scheduleRow(schedule.id),
     };
 
