@@ -46,6 +46,37 @@
  *   CR-PL04-2  paid, undone to DRAFT, total edited, re-issued, marked paid again -> 200 PAID with a second payment
  *   either     the write leaves the invoice short of PAID -> 409; no invoice.paid timeline entry
  *
+ * R0-20-MARKPAID-CONVERGENCE (conformance of the landed R0-PL-04 behaviour to
+ * the R0-20 proof; bound by scripts/proof-admission/manifests/mark-paid-convergence.json):
+ *   MP-18  100 paid of 250, then mark-paid -> one 150 balancing payment recorded THROUGH recordPayment
+ *          (server-built slot manual_<inv>_markpaid_<hex>, ST-PL04-1/2; not the markpaid_<inv> key
+ *          the packet text predates), one Payment:<id>:payment_recorded posting; reconcile keeps PAID
+ *   MP-19  TENANT: tenant B's owner marks tenant A's invoice paid -> 404 (businessId B) / 403
+ *          (businessId A, BusinessGuard); the Payment table (outside the tenant extension, M31) is
+ *          read directly: no row for A's invoice and none in B; no posting, status, event or timeline
+ *   MP-19b TENANT on an invoice of A that is already PAID: the idempotent PAID return runs only after
+ *          the tenant and membership checks -> 404 under B (same as an unknown id, no invoice body),
+ *          403 naming A, the service shapes refused; nothing written
+ *   MP-08b KEY without a tenant on an already PAID invoice -> 403 too (and KEY naming B -> 404)
+ *   MP-20a an injected posting failure AFTER the payment's ledger rows were written -> 500; payment
+ *          and posting rolled back. The reconcile runs after the posting, so the status was never
+ *          written here: it stays SENT, which proves no status rollback (MP-20c does)
+ *   MP-20b the same failure before writing on a PARTIALLY_PAID invoice -> status and rows as they were
+ *   MP-20c an injected posting failure AFTER the status write (the COGS posting step of the
+ *          in-transaction reconcile, once PAID, the payment and its posting exist inside the
+ *          transaction) -> 500; payment, posting AND status roll back to SENT; a retry is clean
+ *   MP-L1  LEDGER: for every refund-free fixture invoice whose rows were all written by the service,
+ *          the deposit-side (cash) ledger net = sum(SUCCESSFUL) = computeBalance.paid (each case owns
+ *          its invoice, so the end state is the state after that case)
+ *   MP-L2  LEDGER: every FinancialTransaction of both tenants balances (debits = credits)
+ *
+ * KNOWN DEFECT, not admitted as conforming (RA-G16-01, deferred; it.todo below MP-08b): the
+ * legacy Stripe webhook shape markInvoicePaid(invoiceId) records provider 'manual' / method
+ * 'MANUAL', so RevenuePostingService.depositSystemKey posts a Stripe checkout receipt Dr CASH
+ * instead of Dr PAYMENT_PROCESSOR. MP-06 pins only that the caller takes the posted path; MP-L1
+ * checks the deposit side as the union CASH | BANK | PAYMENT_PROCESSOR and does not judge the
+ * account. Passing the provider needs the webhooks.controller.ts:86 half D-05 does not authorize.
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
  * RevenuePostingService, PostingService and ChartOfAccountsSeederService write
@@ -106,9 +137,41 @@ const ID = {
   invProviderRefund: `${P}invProviderRefund`,
   invReissue: `${P}invReissue`,
   invShort: `${P}invShort`,
+  // R0-20-MARKPAID-CONVERGENCE
+  invPartial250: `${P}invPartial250`,
+  invForeign: `${P}invForeign`,
+  invPostFail: `${P}invPostFail`,
+  invPostFailPartial: `${P}invPostFailPartial`,
+  // R0-20-MARKPAID-CONVERGENCE review repairs: the PAID short-circuit behind
+  // the tenant demand (SEC4-1) and a failure after the status write (CR-R020-1)
+  invForeignPaid: `${P}invForeignPaid`,
+  invKeyNoTenantPaid: `${P}invKeyNoTenantPaid`,
+  invStatusFail: `${P}invStatusFail`,
+  // tenant B (R0-20 TENANT): a second business with its own owner; it owns no invoice
+  ownerB: `${P}ownerB`,
+  bizB: `${P}bizB`,
 };
 
 const INVOICE_TOTAL = 100;
+/** Fixture invoices whose total is not INVOICE_TOTAL (R0-20's 100 of 250). */
+const INVOICE_TOTALS: Record<string, number> = { [ID.invPartial250]: 250 };
+const totalOf = (id: string) => INVOICE_TOTALS[id] ?? INVOICE_TOTAL;
+/**
+ * R0-20 LEDGER: the fixture invoices left out of the cash-net invariant, and why.
+ * Their competing or provider rows are direct db writes standing in for another
+ * writer, with no posting (MP-10, MP-11, MP-15), or they carry a refund (M28:
+ * refund semantics are V1-29; the R0-20 claim is over refund-free fixtures).
+ */
+const LEDGER_EXCLUDED: Record<string, string> = {
+  [ID.invRaceSettled]: 'direct competing write, no posting',
+  [ID.invRaceMoved]: 'direct competing write, no posting',
+  [ID.invProviderRefund]: 'direct provider charge and refund rows, no posting',
+  [ID.invRefund]: 'refund (M28, V1-29)',
+  [ID.invManualRefund]: 'refund (M28, V1-29)',
+  [ID.invManualRefundPart]: 'refund (M28, V1-29)',
+};
+/** The deposit-side system accounts a payment posting debits (RevenuePostingService.depositSystemKey). */
+const DEPOSIT_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
 const DRAFT_INVOICES = new Set<string>([ID.invDraft]);
 const INVOICE_EVENTS = new Set(['invoice.paid', 'invoice.payment_recorded']);
 
@@ -122,6 +185,10 @@ let workflow: InvoiceWorkflowService;
 /** Real PaymentsService: the public WiPay callback is the squatter in ST-PL04-2. */
 let payments: any;
 let systemActorId: string;
+/** The real PostingService instance RevenuePostingService posts through (R0-20 failure injection). */
+let posting: any;
+/** invoice-workflow.service computeBalance (imported after dotenv, like every src module here). */
+let computeBalanceFn: (total: number, rows: Array<{ amount: number; status: string }>, currency?: string) => any;
 
 /**
  * Recording EventEmitter2. For the two invoice payment events it also starts a
@@ -251,6 +318,53 @@ function expectMarkPaidRow(row: any, invoiceId: string, amount: number, actor: s
     method: 'MANUAL',
   });
   expect(row.recordedBy, 'recordedBy').toBe(actor);
+}
+
+const money = (n: number) => Math.round(n * 100) / 100;
+
+/** Payment rows of an invoice read straight from the table by raw SQL (Payment is outside the tenant extension, M31). */
+async function rawPaymentRows(where: 'invoice_id' | 'business_id', value: string): Promise<any[]> {
+  return db.$queryRawUnsafe(`SELECT id, business_id, invoice_id, status::text AS status, amount FROM payments WHERE ${where} = $1`, value);
+}
+
+/** Every FinancialTransaction (with entries and their accounts) a payment of this invoice sourced, reversals included. */
+async function ledgerOf(invoiceId: string, businessId = ID.biz): Promise<{ rows: any[]; txns: any[] }> {
+  const rows = await paymentsOf(invoiceId);
+  const txns = rows.length === 0
+    ? []
+    : await db.financialTransaction.findMany({
+        where: { businessId, sourceType: 'Payment', sourceId: { in: rows.map((r) => r.id) } },
+        include: { entries: { include: { account: { select: { systemKey: true } } } } },
+      });
+  return { rows, txns };
+}
+
+/**
+ * R0-20 LEDGER: every transaction the invoice's payments sourced balances, and
+ * the deposit-side (cash) ledger net = sum(SUCCESSFUL) = computeBalance.paid.
+ * Returns the figures so a caller can pin the amount.
+ */
+async function expectLedgerConverged(invoiceId: string, businessId = ID.biz) {
+  const { rows, txns } = await ledgerOf(invoiceId, businessId);
+  for (const t of txns) {
+    expect(money(sum(t.entries, 'debit')), `${invoiceId} ${t.externalRef}: debits = credits`).toBe(money(sum(t.entries, 'credit')));
+  }
+  const cashNet = money(
+    txns
+      .flatMap((t) => t.entries)
+      .filter((e: any) => DEPOSIT_KEYS.has(e.account?.systemKey))
+      .reduce((s: number, e: any) => s + Number(e.debit ?? 0) - Number(e.credit ?? 0), 0),
+  );
+  const successful = money(rows.filter((r) => r.status === 'SUCCESSFUL').reduce((s, r) => s + Number(r.amount), 0));
+  const inv = await invoiceRow(invoiceId);
+  const balance = computeBalanceFn(
+    Number(inv.total),
+    rows.map((r) => ({ amount: Number(r.amount), status: r.status })),
+    inv.currency,
+  );
+  expect(cashNet, `${invoiceId}: ledger cash net = sum(SUCCESSFUL)`).toBe(successful);
+  expect(successful, `${invoiceId}: sum(SUCCESSFUL) = computeBalance.paid`).toBe(balance.paid);
+  return { cashNet, successful, paid: balance.paid, rows, txns };
 }
 
 /** Each event was emitted after its transaction committed: a fresh read at emit time already saw its status and payment. */
@@ -393,6 +507,8 @@ beforeAll(async () => {
   commerce = moduleRef.get(CommerceService);
   CommerceServiceClass = CommerceService;
   workflow = moduleRef.get(InvoiceWorkflowService);
+  posting = moduleRef.get(PostingService);
+  computeBalanceFn = (await import('../src/modules/commerce/invoice-workflow.service')).computeBalance;
   // Constructed directly with the real collaborators (no connectors: the WiPay
   // failure path only writes the FAILED row).
   const { PaymentsService } = await import('../src/modules/payments/payments.service');
@@ -426,21 +542,28 @@ beforeAll(async () => {
   });
   await db.contact.create({ data: { id: ID.contact, businessId: ID.biz, firstName: 'Pmp', lastName: 'Customer', email: `${P}c@test.local` } });
   await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(ID.biz);
+  // R0-20 TENANT: tenant B, a real business with its own owner and chart of
+  // accounts, so a refusal is the tenant boundary and never a missing account.
+  await db.user.create({ data: { id: ID.ownerB, email: `${P}ownerB@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: ID.bizB, name: 'PMP Biz B', ownerId: ID.ownerB, currency: 'TTD' } });
+  await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
+  await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizB);
 
   let n = 0;
   for (const id of Object.values(ID).filter((v) => v.startsWith(`${P}inv`))) {
     n += 1;
+    const total = totalOf(id);
     await db.invoice.create({
       data: {
         id,
         invoiceNumber: `PMP-${String(n).padStart(3, '0')}`,
         status: DRAFT_INVOICES.has(id) ? 'DRAFT' : 'SENT',
-        subtotal: INVOICE_TOTAL,
-        total: INVOICE_TOTAL,
+        subtotal: total,
+        total,
         currency: 'TTD',
         businessId: ID.biz,
         contactId: ID.contact,
-        items: { create: [{ id: `${id}_item1`, description: `PMP item ${n}`, quantity: 1, unitPrice: INVOICE_TOTAL, total: INVOICE_TOTAL }] },
+        items: { create: [{ id: `${id}_item1`, description: `PMP item ${n}`, quantity: 1, unitPrice: total, total }] },
       },
     });
   }
@@ -609,6 +732,38 @@ describe('every caller of markInvoicePaid takes the same posted path', () => {
     await expect(commerce.markInvoicePaid(ID.invKeyNoTenant, systemActorId)).rejects.toBeInstanceOf(ForbiddenException);
     await expectUntouched(ID.invKeyNoTenant, 'SENT');
   });
+
+  it('MP-08b: KEY without a tenant is refused (403) on an invoice that is already PAID too, and KEY naming another tenant gets 404: the idempotent PAID return is no way around the tenant demand; nothing written', async () => {
+    const { ForbiddenException, NotFoundException } = await import('@nestjs/common');
+    const inv = ID.invKeyNoTenantPaid;
+    const first = await markPaid(ID.owner, inv);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    const rowsBefore = (await paymentsOf(inv)).map((r) => r.id);
+    const postingsBefore = (await paymentPostingsOf(inv)).map((t) => t.id).sort();
+    const paidAtBefore = (await invoiceRow(inv)).paidAt;
+    expect(rowsBefore).toHaveLength(1);
+    expect(postingsBefore).toHaveLength(1);
+    emitted.length = 0;
+    contactEvents.length = 0;
+
+    await expect(commerce.markInvoicePaid(inv, systemActorId)).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(commerce.markInvoicePaid(inv, systemActorId, ID.bizB)).rejects.toBeInstanceOf(NotFoundException);
+
+    expect((await paymentsOf(inv)).map((r) => r.id)).toEqual(rowsBefore);
+    expect((await paymentPostingsOf(inv)).map((t) => t.id).sort()).toEqual(postingsBefore);
+    const after = await invoiceRow(inv);
+    expect(after.status).toBe('PAID');
+    expect(after.paidAt).toEqual(paidAtBefore);
+    expect(invoiceEventsFor(inv)).toHaveLength(0);
+    expect(timelineFor(inv)).toHaveLength(0);
+  });
+
+  it.todo(
+    'MP-06 KNOWN DEFECT (RA-G16-01, deferred; not admitted as conforming): the legacy Stripe webhook shape markInvoicePaid(invoiceId) '
+      + "records provider 'manual' / method 'MANUAL', so RevenuePostingService.depositSystemKey posts the Stripe checkout receipt "
+      + 'Dr CASH / Cr REVENUE instead of Dr PAYMENT_PROCESSOR. Fixing it needs the caller to name its provider '
+      + '(webhooks.controller.ts:86, the webhook half D-05 does not authorize).',
+  );
 });
 
 describe('concurrency: the remaining balance is the one under the invoice lock', () => {
@@ -834,5 +989,297 @@ describe('review repairs (R0-PL-04 review)', () => {
     expect((await invoiceRow(inv)).status).toBe('SENT');
     expect(timelineFor(inv)).toHaveLength(0);
     expect(invoiceEventsFor(inv)).toHaveLength(0);
+  });
+});
+
+describe('R0-20-MARKPAID-CONVERGENCE: the R0-20 proof against the landed mark-paid', () => {
+  /** Mark-paid's own slot (R0-PL-04 review ST-PL04-1 / ST-PL04-2): random, server-built. */
+  const markPaidSlot = (inv: string) => new RegExp(`^manual_${inv}_markpaid_[0-9a-f]{32}$`);
+
+  it('MP-18: 100 paid of 250, then mark-paid -> one 150 balancing payment recorded through recordPayment on the server-built markpaid slot, one Payment:<id>:payment_recorded posting, PAID; a later reconcile keeps PAID', async () => {
+    const inv = ID.invPartial250;
+    const partial = await pay(ID.owner, inv, { amount: 100, method: 'cash', reference: 'PMP-250-1' });
+    expect(partial.status, JSON.stringify(partial.body)).toBe(201);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_PAID');
+    expect((await expectLedgerConverged(inv)).cashNet).toBe(100);
+    emitted.length = 0;
+    contactEvents.length = 0;
+
+    // Installed after the partial (which also goes through recordPayment): it calls through.
+    const through = vi.spyOn(commerce, 'recordPayment');
+    const res = await markPaid(ID.owner, inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: inv, status: 'PAID' });
+    expect(through).toHaveBeenCalledTimes(1);
+    expect(through).toHaveBeenCalledWith(
+      inv,
+      ID.biz,
+      { amount: 150, method: 'MANUAL' },
+      expect.objectContaining({
+        actorId: ID.owner,
+        provider: 'manual',
+        expectRemaining: 150,
+        providerPaymentId: expect.stringMatching(markPaidSlot(inv)),
+      }),
+    );
+
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(2);
+    const balancing = rows.find((r) => r.id !== partial.body.payment.id);
+    expectMarkPaidRow(balancing, inv, 150, ID.owner);
+    expect(balancing.providerPaymentId).toMatch(markPaidSlot(inv));
+    await expectPostedOnce(balancing.id, 150, ID.owner);
+    const after = await invoiceRow(inv);
+    expect(after.status).toBe('PAID');
+    expect(after.paidAt).toBeTruthy();
+    expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
+
+    // No flip-back to PARTIALLY_PAID (invoice-workflow allows PAID -> PARTIALLY_PAID).
+    const again = await workflow.reconcileFromPayments(inv);
+    expect(again).toMatchObject({ status: 'PAID', changed: false });
+    expect(again.balance).toMatchObject({ paid: 250, net: 250, remaining: 0, isFullyPaid: true });
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    expect((await expectLedgerConverged(inv)).cashNet).toBe(250);
+  });
+
+  it("MP-19 TENANT: tenant B's owner cannot mark tenant A's invoice paid (404 under B, 403 naming A, 403 with no tenant); the Payment table read directly holds no row for A's invoice and none in B; nothing posted; status, event and timeline unchanged", async () => {
+    const { NotFoundException, ForbiddenException } = await import('@nestjs/common');
+    const inv = ID.invForeign;
+    const ledgerA = await db.financialTransaction.count({ where: { businessId: ID.biz } });
+    const ledgerB = await db.financialTransaction.count({ where: { businessId: ID.bizB } });
+
+    // Under its own tenant: indistinguishable from an unknown id.
+    const own = await markPaid(ID.ownerB, inv, { businessId: ID.bizB });
+    expect(own.status, JSON.stringify(own.body)).toBe(404);
+    const unknown = await markPaid(ID.ownerB, `${P}invNoSuch`, { businessId: ID.bizB });
+    expect(unknown.status, JSON.stringify(unknown.body)).toBe(404);
+    expect(own.body.message).toEqual(unknown.body.message);
+    // Naming tenant A: B's owner is no member of A (BusinessGuard).
+    const named = await markPaid(ID.ownerB, inv, { businessId: ID.biz });
+    expect(named.status, JSON.stringify(named.body)).toBe(403);
+    // Service shapes: tenant-bound (KEY / flow orchestrator) -> 404; actor only, no tenant -> 403 (membership).
+    await expect(commerce.markInvoicePaid(inv, ID.ownerB, ID.bizB)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(commerce.markInvoicePaid(inv, ID.ownerB)).rejects.toBeInstanceOf(ForbiddenException);
+
+    // M31: Payment is outside the tenant extension, so read the table itself.
+    expect(await rawPaymentRows('invoice_id', inv)).toEqual([]);
+    expect(await rawPaymentRows('business_id', ID.bizB)).toEqual([]);
+    expect(await db.financialTransaction.count({ where: { businessId: ID.biz } })).toBe(ledgerA);
+    expect(await db.financialTransaction.count({ where: { businessId: ID.bizB } })).toBe(ledgerB);
+    await expectUntouched(inv, 'SENT');
+    expect((await invoiceRow(inv)).paidAt).toBeNull();
+    expect(timelineFor(inv)).toHaveLength(0);
+    expect((await expectLedgerConverged(inv)).cashNet).toBe(0);
+  });
+
+  it("MP-19b TENANT on an already PAID invoice: the idempotent PAID return runs only after the tenant and membership checks, so tenant B's owner gets the unknown-id 404 under B (no invoice body), 403 naming A, and the service shapes are refused; A's payment, posting, paidAt, events and timeline unchanged", async () => {
+    const { NotFoundException, ForbiddenException } = await import('@nestjs/common');
+    const inv = ID.invForeignPaid;
+    const first = await markPaid(ID.owner, inv);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    const rowsBefore = (await paymentsOf(inv)).map((r) => r.id);
+    const postingsBefore = (await paymentPostingsOf(inv)).map((t) => t.id).sort();
+    const paidAtBefore = (await invoiceRow(inv)).paidAt;
+    expect(rowsBefore).toHaveLength(1);
+    expect(postingsBefore).toHaveLength(1);
+    const ledgerA = await db.financialTransaction.count({ where: { businessId: ID.biz } });
+    const ledgerB = await db.financialTransaction.count({ where: { businessId: ID.bizB } });
+    emitted.length = 0;
+    contactEvents.length = 0;
+
+    // Under its own tenant: the same 404 as an unknown id, and none of A's invoice in the body.
+    const own = await markPaid(ID.ownerB, inv, { businessId: ID.bizB });
+    expect(own.status, JSON.stringify(own.body)).toBe(404);
+    const unknown = await markPaid(ID.ownerB, `${P}invNoSuch`, { businessId: ID.bizB });
+    expect(unknown.status, JSON.stringify(unknown.body)).toBe(404);
+    expect(own.body.message).toEqual(unknown.body.message);
+    for (const leaked of ['id', 'invoiceNumber', 'total', 'items', 'contact', 'businessId', 'paidAt']) {
+      expect(own.body, `404 body carries no ${leaked}`).not.toHaveProperty(leaked);
+    }
+    // Naming tenant A: B's owner is no member of A (BusinessGuard).
+    const named = await markPaid(ID.ownerB, inv, { businessId: ID.biz });
+    expect(named.status, JSON.stringify(named.body)).toBe(403);
+    expect(named.body).not.toHaveProperty('invoiceNumber');
+    // Service shapes: tenant-bound -> 404; actor only, no tenant -> 403 (membership).
+    await expect(commerce.markInvoicePaid(inv, ID.ownerB, ID.bizB)).rejects.toBeInstanceOf(NotFoundException);
+    await expect(commerce.markInvoicePaid(inv, ID.ownerB)).rejects.toBeInstanceOf(ForbiddenException);
+
+    // M31: the Payment table read directly.
+    expect((await rawPaymentRows('invoice_id', inv)).map((r) => r.id)).toEqual(rowsBefore);
+    expect(await rawPaymentRows('business_id', ID.bizB)).toEqual([]);
+    expect((await paymentPostingsOf(inv)).map((t) => t.id).sort()).toEqual(postingsBefore);
+    expect(await db.financialTransaction.count({ where: { businessId: ID.biz } })).toBe(ledgerA);
+    expect(await db.financialTransaction.count({ where: { businessId: ID.bizB } })).toBe(ledgerB);
+    const after = await invoiceRow(inv);
+    expect(after.status).toBe('PAID');
+    expect(after.paidAt).toEqual(paidAtBefore);
+    expect(invoiceEventsFor(inv)).toHaveLength(0);
+    expect(timelineFor(inv)).toHaveLength(0);
+    expect((await expectLedgerConverged(inv)).cashNet).toBe(INVOICE_TOTAL);
+  });
+
+  // The payment posting runs before the reconcile inside recordPayment's
+  // transaction, so a failure of the posting itself (MP-20a, MP-20b) strikes
+  // before the status is written: the status assertions there show it never
+  // moved, not that it rolled back. MP-20c fails after the status write.
+  it('MP-20a: an injected posting failure after the ledger rows were written rolls back the payment and the posting (500); the status, not yet written, stays SENT; a retry records exactly one payment and one posting', async () => {
+    const inv = ID.invPostFail;
+    const original = posting.post;
+    const seenInTx: Array<{ paymentId: string; postedInTx: number; paymentInTx: number }> = [];
+    const spy = vi.spyOn(posting, 'post').mockImplementation(async (input: any, tx: any) => {
+      await original.call(posting, input, tx);
+      seenInTx.push({
+        paymentId: input.sourceId,
+        postedInTx: await tx.financialTransaction.count({
+          where: { businessId: input.businessId, externalRef: `Payment:${input.sourceId}:payment_recorded` },
+        }),
+        paymentInTx: await tx.payment.count({ where: { id: input.sourceId } }),
+      });
+      throw new Error('pmp injected posting failure');
+    });
+
+    const res = await markPaid(ID.owner, inv);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(res.status, JSON.stringify(res.body)).toBe(500);
+    // The failure struck once the payment and its posting existed inside the transaction ...
+    expect(seenInTx).toEqual([{ paymentId: expect.any(String), postedInTx: 1, paymentInTx: 1 }]);
+    // ... and none of it committed (the Payment table read directly).
+    expect(await rawPaymentRows('invoice_id', inv)).toEqual([]);
+    expect(await db.payment.findUnique({ where: { id: seenInTx[0].paymentId } })).toBeNull();
+    expect(await postingsFor(seenInTx[0].paymentId)).toHaveLength(0);
+    expect(await db.ledgerEntry.count({ where: { businessId: ID.biz, transaction: { sourceId: seenInTx[0].paymentId } } })).toBe(0);
+    await expectUntouched(inv, 'SENT');
+    expect((await invoiceRow(inv)).paidAt).toBeNull();
+    expect(timelineFor(inv)).toHaveLength(0);
+
+    spy.mockRestore();
+    const retry = await markPaid(ID.owner, inv);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(200);
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(1);
+    expectMarkPaidRow(rows[0], inv, INVOICE_TOTAL, ID.owner);
+    await expectPostedOnce(rows[0].id, INVOICE_TOTAL, ID.owner);
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
+    expect((await expectLedgerConverged(inv)).cashNet).toBe(INVOICE_TOTAL);
+  });
+
+  it('MP-20b: the same failure before anything is posted, on a PARTIALLY_PAID invoice -> 500; the partial row, its posting and PARTIALLY_PAID stand as they were', async () => {
+    const inv = ID.invPostFailPartial;
+    const partial = await pay(ID.owner, inv, { amount: 60, method: 'cash', reference: 'PMP-PF-1' });
+    expect(partial.status, JSON.stringify(partial.body)).toBe(201);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_PAID');
+    const postingsBefore = (await paymentPostingsOf(inv)).map((t) => t.id).sort();
+    expect(postingsBefore).toHaveLength(1);
+    emitted.length = 0;
+    contactEvents.length = 0;
+
+    const spy = vi.spyOn(posting, 'post').mockRejectedValue(new Error('pmp injected posting failure'));
+    const res = await markPaid(ID.owner, inv);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(res.status, JSON.stringify(res.body)).toBe(500);
+
+    expect((await rawPaymentRows('invoice_id', inv)).map((r) => [r.id, Number(r.amount), r.status])).toEqual([
+      [partial.body.payment.id, 60, 'SUCCESSFUL'],
+    ]);
+    expect((await paymentPostingsOf(inv)).map((t) => t.id).sort()).toEqual(postingsBefore);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_PAID');
+    expect(invoiceEventsFor(inv)).toHaveLength(0);
+    expect(timelineFor(inv)).toHaveLength(0);
+    expect((await expectLedgerConverged(inv)).cashNet).toBe(60);
+  });
+
+  it('MP-20c: an injected posting failure after the status write (the COGS posting step of the in-transaction reconcile, once PAID, paidAt, the payment and its posting exist inside the transaction) -> 500; payment, posting and status all roll back to SENT; a retry records exactly one payment and one posting', async () => {
+    const inv = ID.invStatusFail;
+    // The reconcile writes the status, then posts COGS through the same
+    // transaction client (invoice-workflow.service reconcileFromPayments ->
+    // postCogsForPaidInvoice). Call through, look inside the transaction, then fail.
+    // postCogsForPaidInvoice is private: reach it through a structural view of the instance.
+    const target = workflow as unknown as { postCogsForPaidInvoice: (...args: unknown[]) => Promise<void> };
+    const original = target.postCogsForPaidInvoice;
+    const originalReconcile = workflow.reconcileFromPayments.bind(workflow);
+    const seenInTx: Array<{ status: string; paidAt: boolean; payments: number; postings: number; sameTx: boolean }> = [];
+    // The transaction client recordPayment handed the reconcile (undefined if the reconcile ran outside it).
+    let reconcileTx: unknown;
+    const reconcileSpy = vi.spyOn(workflow, 'reconcileFromPayments').mockImplementation(async (invoiceId, extra) => {
+      reconcileTx = extra?.tx;
+      return originalReconcile(invoiceId, extra);
+    });
+    const spy = vi.spyOn(target, 'postCogsForPaidInvoice').mockImplementation(async (...args: unknown[]) => {
+      const invoiceId = args[0] as string;
+      // The transaction client the reconcile wrote the status through (same shape as the shared client).
+      const tx = args[4] as typeof db;
+      await original.apply(target, args);
+      const row = await tx.invoice.findUnique({ where: { id: invoiceId }, select: { status: true, paidAt: true } });
+      const paymentRows: Array<{ id: string }> = await tx.payment.findMany({ where: { invoiceId }, select: { id: true } });
+      const postings = paymentRows.length === 0
+        ? 0
+        : await tx.financialTransaction.count({
+            where: { businessId: ID.biz, externalRef: { in: paymentRows.map((p) => `Payment:${p.id}:payment_recorded`) } },
+          });
+      seenInTx.push({
+        status: row?.status,
+        paidAt: Boolean(row?.paidAt),
+        payments: paymentRows.length,
+        postings,
+        sameTx: tx !== undefined && tx === reconcileTx,
+      });
+      throw new Error('pmp injected COGS posting failure after the status write');
+    });
+
+    const res = await markPaid(ID.owner, inv);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(reconcileSpy).toHaveBeenCalledTimes(1);
+    expect(res.status, JSON.stringify(res.body)).toBe(500);
+    // Inside the transaction the status was written: PAID with paidAt, the payment and its posting present ...
+    expect(seenInTx).toEqual([{ status: 'PAID', paidAt: true, payments: 1, postings: 1, sameTx: true }]);
+    // ... and none of it committed: the status rolled back with the payment and the posting.
+    expect(await rawPaymentRows('invoice_id', inv)).toEqual([]);
+    await expectUntouched(inv, 'SENT');
+    expect((await invoiceRow(inv)).paidAt).toBeNull();
+    expect(timelineFor(inv)).toHaveLength(0);
+
+    spy.mockRestore();
+    reconcileSpy.mockRestore();
+    const retry = await markPaid(ID.owner, inv);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(200);
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(1);
+    expectMarkPaidRow(rows[0], inv, INVOICE_TOTAL, ID.owner);
+    await expectPostedOnce(rows[0].id, INVOICE_TOTAL, ID.owner);
+    const after = await invoiceRow(inv);
+    expect(after.status).toBe('PAID');
+    expect(after.paidAt).toBeTruthy();
+    expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
+    expect((await expectLedgerConverged(inv)).cashNet).toBe(INVOICE_TOTAL);
+  });
+});
+
+describe('R0-20 LEDGER: the ledger converges with the payment rows after every case', () => {
+  it('MP-L1: for every refund-free fixture invoice whose rows the service wrote, ledger cash net = sum(SUCCESSFUL) = computeBalance.paid', async () => {
+    const swept = Object.values(ID).filter((v) => v.startsWith(`${P}inv`) && !(v in LEDGER_EXCLUDED));
+    let successfulRows = 0;
+    let paidInvoices = 0;
+    for (const inv of swept) {
+      const r = await expectLedgerConverged(inv);
+      expect(r.rows.filter((row) => row.status === 'REFUNDED'), `${inv}: refund-free`).toHaveLength(0);
+      successfulRows += r.rows.filter((row) => row.status === 'SUCCESSFUL').length;
+      if ((await invoiceRow(inv)).status === 'PAID') paidInvoices += 1;
+    }
+    // Not vacuous: each case owns its invoice, so these are the states the cases above left.
+    expect(successfulRows).toBeGreaterThanOrEqual(10);
+    expect(paidInvoices).toBeGreaterThanOrEqual(10);
+  });
+
+  it('MP-L2: every FinancialTransaction of both tenants balances (debits = credits), reversals included', async () => {
+    const txns = await db.financialTransaction.findMany({
+      where: { businessId: { in: [ID.biz, ID.bizB] } },
+      include: { entries: true },
+    });
+    expect(txns.length).toBeGreaterThan(0);
+    for (const t of txns) {
+      expect(t.entries.length, `${t.externalRef}: entries`).toBeGreaterThanOrEqual(2);
+      expect(money(sum(t.entries, 'debit')), `${t.externalRef}: debits = credits`).toBe(money(sum(t.entries, 'credit')));
+    }
   });
 });
