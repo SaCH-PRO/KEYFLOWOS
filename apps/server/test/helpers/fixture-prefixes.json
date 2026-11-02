@@ -363,6 +363,11 @@
       "packet": "V1-32-KEY-PROPOSAL-CLAIM"
     },
     {
+      "prefix": "v35a_",
+      "owner": "apps/server/test/cross-module-job-poller.integration.test.ts",
+      "packet": "V1-35-DM-POLLER-CLAIM"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"
