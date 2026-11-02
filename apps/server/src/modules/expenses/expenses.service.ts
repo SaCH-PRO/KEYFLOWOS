@@ -294,9 +294,11 @@ export class ExpensesService {
    *
    * V1-15 (CF-40): every reversal goes through PostingService.reverse, the
    * ledger's one write door, so a void obeys what the door enforces: a
-   * reconciliation-locked entry is refused (409), so is a reversal dated in a
-   * CLOSED period (409), the original is marked REVERSED and the reversal
-   * carries `<externalRef>:reversal`. Any refusal rolls the whole void back,
+   * reconciliation-locked entry is refused (409), the reversal takes the
+   * period check and lock (it is dated now, and a period closes only after it
+   * ends, so a void of an expense in a closed past month posts in the open
+   * one), the original is marked REVERSED and the reversal carries
+   * `<externalRef>:reversal`. Any refusal rolls the whole void back,
    * the status claim included. Voiding twice, in sequence or concurrently,
    * returns the voided expense and writes one reversal per posting: the
    * status flip is a compare-and-set taken first, so a second void waits on

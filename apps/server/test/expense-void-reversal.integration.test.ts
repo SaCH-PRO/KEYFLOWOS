@@ -27,14 +27,20 @@
  *   EVR-04  void twice concurrently        -> both 201; still one REVERSAL per posting
  *   EVR-05  void a reconciliation-locked expense -> 409; nothing written: no
  *                                             reversal, original POSTED, expense PAID
- *   EVR-06  void while the current period is CLOSED -> 409; nothing written;
- *                                             reopening lets the void through
+ *   EVR-06  (V1-15 review SEC-V15-1) a void is dated now, and a period closes
+ *           only once it has ended: closing the current period -> 400 and
+ *           nothing changes; a CLOSED current period left by a close made
+ *           before that rule is not enforced, so the void posts (201); a foreign
+ *           tenant's CLOSED month never blocks a bill dated in it, nor its void
  *   EVR-07  POST a bill dated inside a CLOSED period -> 409; no Expense row, no posting
  *   EVR-08  void an expense whose own (past) period is CLOSED, current period
  *           open                           -> 201; the reversal is dated today
  *   EVR-09  another tenant's expense id on this tenant's route -> 404; untouched
  *   EVR-10  trial balance of the tenant afterwards: sum(debit) = sum(credit) per
  *           currency; every transaction balanced
+ *   (todo)  review CR-1: a voided PAID expense nets to zero in the cash-basis
+ *           P&L. Blocked outside this packet's write set (the P&L reader), see
+ *           the case.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, TeamAuditInterceptor, BillsController, ExpensesService,
@@ -175,9 +181,17 @@ function currentPeriod(): { year: number; month: number } {
   return { year: now.getUTCFullYear(), month: now.getUTCMonth() + 1 };
 }
 
-async function openAndClose(businessId: string, year: number, month: number) {
+/** The UTC month `offset` months from the current one (-1 = last month, which has ended). */
+function monthFromNow(offset: number): { year: number; month: number } {
+  const now = new Date();
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + offset, 1));
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 };
+}
+
+/** Create and close a period as `closedById`, who must be the business's owner or an admin (review SEC-V15-2). */
+async function openAndClose(businessId: string, year: number, month: number, closedById: string = ID.owner) {
   const period = await periods.create(businessId, { year, month });
-  return periods.close(businessId, period.id, { closedById: ID.owner });
+  return periods.close(businessId, period.id, { closedById });
 }
 
 beforeAll(async () => {
@@ -387,30 +401,35 @@ describe('CF-40: the expense void reverses through PostingService', () => {
   });
 });
 
-describe('CF-40: a void is a posting, so a CLOSED current period refuses it', () => {
-  it('EVR-06: void while the current period is CLOSED -> 409, nothing written; reopening lets it through; a foreign closed period never blocks', async () => {
-    const exp = await paidExpense(ID.bizNow, 'void in closed now', 45);
+describe('CF-40 + review SEC-V15-1: a void is dated now, and a period closes only once it has ended', () => {
+  it('EVR-06: closing the current period -> 400, nothing changes; a CLOSED current period left by an earlier close is not enforced, the void posts; a foreign closed month never blocks', async () => {
+    const exp = await paidExpense(ID.bizNow, 'void beside the current period', 45);
     const { year, month } = currentPeriod();
-    const closed = await openAndClose(ID.bizNow, year, month);
+    const current = await periods.create(ID.bizNow, { year, month });
     const before = await ledgerCounts(ID.bizNow);
-
-    const refused = await voidBill(exp.id, ID.bizNow);
-    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
-    expect(refused.body.message).toMatch(/closed/i);
+    await expect(periods.close(ID.bizNow, current.id, { closedById: ID.owner })).rejects.toMatchObject({
+      status: 400,
+      message: expect.stringMatching(/has not ended/),
+    });
+    const period = await db.accountingPeriod.findUnique({ where: { id: current.id } });
+    expect(`${period.status}:${period.closedById}:${period.lockedTransactionStamp}`).toBe('OPEN:null:null');
     expect(await ledgerCounts(ID.bizNow)).toEqual(before);
-    const row = await db.expense.findUnique({ where: { id: exp.id } });
-    expect(row.status).toBe('PAID');
-    expect(row.deletedAt).toBeNull();
 
-    // The foreign tenant closes its current period too; it has no bearing on ID.biz.
-    await openAndClose(ID.bizF, year, month);
-    const mine = await paidExpense(ID.biz, 'void beside a foreign closed period', 5);
-    expect((await voidBill(mine.id)).status).toBe(201);
-
-    await periods.reopen(ID.bizNow, closed.id);
+    // Closing was metadata only before V1-15 and any month could be closed, so
+    // such a row can exist: it does not refuse what is dated now.
+    await db.accountingPeriod.update({ where: { id: current.id }, data: { status: 'CLOSED', closedAt: new Date(), closedById: ID.owner } });
     const res = await voidBill(exp.id, ID.bizNow);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expectReversedThroughDoor(await txnsOf(exp.id), 1);
+
+    // The foreign tenant closes last month; it has no bearing on ID.biz, nor on a bill ID.biz dates in it.
+    const last = monthFromNow(-1);
+    expect((await openAndClose(ID.bizF, last.year, last.month, ID.ownerF)).status).toBe('CLOSED');
+    const billDate = new Date(Date.UTC(last.year, last.month - 1, 15, 12, 0, 0)).toISOString();
+    const bill = await createBill({ description: `${P}bill in a month only bizF closed`, amount: 5, date: billDate });
+    expect(bill.status, JSON.stringify(bill.body)).toBe(201);
+    expect((await voidBill(bill.body.id)).status).toBe(201);
+    expectReversedThroughDoor(await txnsOf(bill.body.id), 1);
   });
 });
 
@@ -432,4 +451,13 @@ describe('M30: trial balance after the voids', () => {
       expect(unbalanced, biz).toEqual([]);
     }
   });
+
+  // Review CR-1. The ledger nets a void to zero (EVR-02, EVR-10); the cash-basis
+  // P&L does not: LedgerReportingService.computeCashBasisPnl
+  // (reports/ledger-reporting.service.ts:190) reads only status POSTED, so once
+  // PostingService.reverse marks the original REVERSED it drops out and the POSTED
+  // reversal counts as a negative expense (a payment refunded through the same
+  // door already shows as negative income there). The reader is outside the
+  // V1-15 write set; the fix is to read POSTED and REVERSED.
+  it.todo('CR-1: a voided PAID expense nets to zero in the cash-basis P&L over a range covering both (blocked: computeCashBasisPnl reads status POSTED only; ledger-reporting.service.ts is outside the V1-15 write set)');
 });

@@ -112,7 +112,11 @@ export function validatePosting(input: PostingInput): void {
  *
  * V1-15 (CF-40): post() and reverse() refuse, with 409, a transaction dated
  * inside a CLOSED accounting period of the posting business, checked inside
- * the posting transaction. AccountingPeriodService is @Optional only so that
+ * the posting transaction under the business's period lock (held shared, so
+ * a concurrent close waits for the posting and stamps it; V1-15 review
+ * SEC-V15-3). A period can be closed only once it has ended, so what is dated
+ * now (payments, provider settlements, refunds, every reversal) is never
+ * refused (SEC-V15-1). AccountingPeriodService is @Optional only so that
  * hand-built instances in hermetic unit specs keep working; every Nest module
  * that provides PostingService must provide it too (pinned by
  * ledger-writer-integrity.spec.ts, LWI-04), so the running app always checks.
@@ -296,9 +300,10 @@ export class PostingService {
         );
       }
 
-      // The reversal is dated now, so it is the current period that must be
-      // open (V1-15). The original may sit in a closed period: it is offset in
-      // the open one, never edited.
+      // The reversal is dated now (V1-15). The original may sit in a closed
+      // period: it is offset in the open one, never edited. A period closes
+      // only after it ends, so "now" never lies in an enforced closed period;
+      // the check stays so every write through the door takes the period lock.
       const reversalDate = new Date();
       await this.periods?.assertOpenForPosting(original.businessId, reversalDate, tx);
 
