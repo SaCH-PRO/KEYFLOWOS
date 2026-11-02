@@ -891,8 +891,10 @@ describe('R0-SEC2b PATCH /identity/businesses/:businessId never writes metaData.
       .sort();
 
   it('[SEC2-T02] RED-BEFORE (review SEC2-R1): an owner cannot write metaData.whatsapp through the profile PATCH: the owner of bizO sends bizW\'s stored config (credential ciphertext and phoneNumberId), only the phoneNumberId, null, the masked read echoed back, and each beside a profile field and another metaData key: 400 BUSINESS_METADATA_KEY_RESERVED, bizO byte-identical, the webhook predicate still matches bizW alone, no provider traffic', async () => {
+    // Only bizW holds PHONE_NUMBER_ID here (the default fixture config gives it to every business).
     await reset(ID.bizW);
-    await reset(ID.bizO, { provider: 'mock', fromNumber: '+18685550600' });
+    for (const biz of [ID.bizO, ID.bizL, ID.bizX]) await reset(biz, { provider: 'mock', fromNumber: '+18685550600' });
+    expect(await routedTo(PHONE_NUMBER_ID)).toEqual([ID.bizW]);
     const victim = await storedWhatsApp(ID.bizW);
     expect(String(victim?.accessToken).startsWith('enc:v1:')).toBe(true);
     const before = await businessRowText(ID.bizO);
@@ -914,7 +916,7 @@ describe('R0-SEC2b PATCH /identity/businesses/:businessId never writes metaData.
     }
     expect(await routedTo(PHONE_NUMBER_ID)).toEqual([ID.bizW]);
     expect(fetchCalls).toEqual([]);
-    await reset(ID.bizO);
+    for (const biz of [ID.bizO, ID.bizL, ID.bizX]) await reset(biz);
   });
 
   it('[SEC2-T06] RED-BEFORE (review SEC2-R1): the owner of bizW cannot overwrite or erase its own metaData.whatsapp through the profile PATCH either (saveConfig is the only writer): 400, bizW byte-identical; the same PATCH without the key is accepted and keeps the stored config', async () => {

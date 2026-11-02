@@ -37,6 +37,22 @@ const ROLE_RANK: Readonly<Record<string, number>> = { STAFF: 0, ADMIN: 1, OWNER:
 const roleRank = (role: string) => ROLE_RANK[role] ?? 0;
 
 /**
+ * R0-SEC2b-WHATSAPP-SECRET-READS (R0-SEC2 review SEC2-R1, second writer):
+ * Business.metaData keys the profile PATCH never writes, because another route
+ * is their only writer. updateBusiness merges the caller's metaData bag over
+ * the stored one, so without this an owner could write metaData.whatsapp (the
+ * WhatsApp sending identity) directly: another business's credential
+ * ciphertext, which one platform key decrypts, or a phoneNumberId another
+ * business holds (the shared webhook's routing key), past every refusal
+ * WhatsAppService.saveConfig (PATCH /whatsapp/businesses/:businessId/config)
+ * applies. The d11-owner-writes static guard (D11W-09) reads this list.
+ */
+export const PROFILE_PATCH_RESERVED_META_KEYS = ['whatsapp'] as const;
+
+/** The 400 code updateBusiness answers a metaData bag naming a reserved key with. */
+export const BUSINESS_METADATA_KEY_RESERVED = 'BUSINESS_METADATA_KEY_RESERVED';
+
+/**
  * The CRM ownership authority a membership's scope map confers (level, crm_view,
  * crm_edit, crm_reassign, crm_delete), by `resolveCrmAccess` itself — the rule every
  * CRM read and write enforces — evaluated on an in-memory membership rather than a
@@ -378,6 +394,19 @@ export class IdentityService {
     budgetFit?: string;
     positioningStatement?: string;
   }) {
+    // R0-SEC2b: a reserved metaData key (present at all, null included) refuses
+    // the whole PATCH before anything is read or written.
+    if (input.metaData && typeof input.metaData === 'object') {
+      for (const key of PROFILE_PATCH_RESERVED_META_KEYS) {
+        if (Object.prototype.hasOwnProperty.call(input.metaData, key)) {
+          throw new BadRequestException({
+            code: BUSINESS_METADATA_KEY_RESERVED,
+            message: `metaData.${key} cannot be written through the business profile; it is saved through its own settings route.`,
+          });
+        }
+      }
+    }
+
     if (input.slug) {
       const existing = await this.prisma.client.business.findFirst({
         where: { slug: input.slug.trim(), NOT: { id: businessId } },
