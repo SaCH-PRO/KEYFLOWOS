@@ -28,6 +28,29 @@
  *     slip (EF-09), the payment keeps exactly one payment.record row, actorId =
  *     the owner, agreeing with Payment.recordedBy and the ContactEvent
  *
+ * V1-25-EVT-BUSINESS-FEED (M49; D-08: Activity rows power the user feed), the
+ * read the cockpit's business feed makes, GET /timeline/businesses/:id/events:
+ *   EF-10a CONTROL  the harness gives queryEvents the parameter types tsc emits
+ *     ([String, QueryTimelineDto]), so the ValidationPipe applies the DTO here as
+ *     it does in the built server (esbuild emits none, and without them no query
+ *     was validated at all)
+ *   EF-10  the page size is bounded: limit 10000, 201, 0, -1, 2.5 and 'abc' answer
+ *     400 with no row
+ *   EF-10b limit 200, 50 and 1 are read as numbers and answer at most that many
+ *     rows; minRevenueImpact is read as a number too
+ *   EF-11  after the partial and the final payment, A's feed (as the cockpit
+ *     reads it, limit 50) holds one FINANCE payment_recorded row per payment
+ *     with its amount and currency, and the commerce paid row with the invoice
+ *     total. The paid row's writer is ActivityEventListener.onInvoicePaid, which
+ *     the full app's EventEmitter drives from invoice.paid; this harness's bus is
+ *     a recorder, so the one invoice.paid payload it recorded for A (EF-02) is
+ *     delivered to the real listener (real ActivityService, real rows) here
+ *   EF-12 LEDGER  each feed amount equals its Payment row and its posting (and
+ *     the posting's balanced entries), in integer cents (D-13); the paid row's
+ *     total equals the invoice total, the two payments and the two postings
+ *   EF-13  tenant B's feed, read the same way, holds none of A's rows (the paid
+ *     row included), and owner A on B's feed is refused
+ *
  * CHARACTERIZATION ONLY (not a contract; V1-55 / D-08 own the dedupe):
  *   the Activity rows each payment writes in this harness, and the domain events
  *   it puts on the bus (which, in the full app, also drive the listener writers
@@ -351,6 +374,14 @@ beforeAll(async () => {
   // What tsc emits for `constructor(private readonly timeline: TimelineService)`.
   if (!Reflect.getMetadata('design:paramtypes', TimelineController)) {
     Reflect.defineMetadata('design:paramtypes', [TimelineService], TimelineController);
+  }
+  // V1-25: what tsc emits for queryEvents(@Param() businessId: string,
+  // @Query() query: QueryTimelineDto). Without it the ValidationPipe sees no
+  // metatype and never applies the DTO, so this harness would read a query the
+  // built server refuses (and the reverse). EF-10a pins it against tsc.
+  const { QueryTimelineDto } = await import('../src/modules/timeline/dto/query-timeline.dto');
+  if (!Reflect.getMetadata('design:paramtypes', TimelineController.prototype, 'queryEvents')) {
+    Reflect.defineMetadata('design:paramtypes', [String, QueryTimelineDto], TimelineController.prototype, 'queryEvents');
   }
 
   // BullMQ refuses a connection whose maxRetriesPerRequest is not null
@@ -710,5 +741,155 @@ describe('idempotent replay of a recorded payment (R0-D2) is not audited (R0-19 
     await expectSilentReplay(ID.adminA, `${P}${RUN}-partial`, S.partialId!);
     const byAdmin = await db.businessEvent.findMany({ where: { businessId: ID.bizA, actorId: ID.adminA } });
     expect(byAdmin, 'audit rows attributed to the ADMIN').toEqual([]);
+  });
+});
+
+describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)', () => {
+  /** The page size the cockpit's BusinessTimeline asks for. */
+  const COCKPIT_LIMIT = 50;
+  /** The server's bound on one page of the feed. */
+  const MAX_LIMIT = 200;
+
+  /** Integer cents (D-13): the comparison unit for every amount below. */
+  const cents = (v: unknown) => Math.round(Number(v) * 100);
+
+  function feed(user: string, biz: string, query = `limit=${COCKPIT_LIMIT}`) {
+    return agent().get(`/timeline/businesses/${biz}/events?${query}`).set(HEADER, user);
+  }
+
+  /** The cockpit's read of `biz`, as `user`; asserts it answered 200 with an array. */
+  async function cockpitRead(user: string, biz: string): Promise<any[]> {
+    const res = await feed(user, biz);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(Array.isArray(res.body)).toBe(true);
+    return res.body;
+  }
+
+  it('EF-10a CONTROL: queryEvents validates its query against QueryTimelineDto, with the parameter types tsc emits', async () => {
+    const ts = await import('typescript');
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(path.resolve(__dirname, '../src/modules/timeline/timeline.controller.ts'), 'utf8');
+    const emitted = ts.transpileModule(source, {
+      compilerOptions: { experimentalDecorators: true, emitDecoratorMetadata: true, target: ts.ScriptTarget.ES2021, module: ts.ModuleKind.CommonJS },
+    }).outputText;
+    const end = emitted.indexOf('], TimelineController.prototype, "queryEvents", null)');
+    expect(end).toBeGreaterThan(0);
+    const decorators = emitted.slice(emitted.lastIndexOf('__decorate([', end), end);
+    // A single-file transpile cannot see that the imported DTO is a class, so it
+    // emits a guarded reference to it; reduce that to the class name.
+    const types = decorators
+      .match(/design:paramtypes", \[([^\]]*)\]/)?.[1]
+      ?.replace(/typeof \(_\w+ = typeof \w+\.(\w+) !== "undefined" && \w+\.\1\) === "function" \? _\w+ : Object/g, '$1');
+    expect(types).toBe('String, QueryTimelineDto');
+    const { TimelineController } = await import('../src/modules/timeline/timeline.controller');
+    const { QueryTimelineDto } = await import('../src/modules/timeline/dto/query-timeline.dto');
+    expect(Reflect.getMetadata('design:paramtypes', TimelineController.prototype, 'queryEvents')).toEqual([String, QueryTimelineDto]);
+  }, 30_000); // loading the TypeScript compiler alone can pass 5 s on a loaded machine
+
+  it('EF-10: the page size is bounded: limit 10000, 201, 0, -1, 2.5 and abc answer 400 with no row', async () => {
+    for (const limit of ['10000', String(MAX_LIMIT + 1), '0', '-1', '2.5', 'abc']) {
+      const res = await feed(ID.ownerA, ID.bizA, `limit=${limit}`);
+      expect(res.status, `limit=${limit}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(Array.isArray(res.body), `limit=${limit} answered rows`).toBe(false);
+      expect(JSON.stringify(res.body)).not.toContain(S.partialId!);
+    }
+  });
+
+  it('EF-10b: a limit within the bound (200, 50, 1) is read as a number and answers at most that many rows; minRevenueImpact is read as a number', async () => {
+    const total = (await activityRows(ID.bizA)).length;
+    expect(total, 'A has more than one feed row').toBeGreaterThan(1);
+    for (const limit of [MAX_LIMIT, COCKPIT_LIMIT, 1]) {
+      const res = await feed(ID.ownerA, ID.bizA, `limit=${limit}`);
+      expect(res.status, `limit=${limit}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect(res.body).toHaveLength(Math.min(limit, total));
+      expect(res.body.every((row: any) => row.businessId === ID.bizA)).toBe(true);
+    }
+    const minImpact = await feed(ID.ownerA, ID.bizA, `limit=${COCKPIT_LIMIT}&minRevenueImpact=1`);
+    expect(minImpact.status, JSON.stringify(minImpact.body)).toBe(200);
+    expect(minImpact.body.every((row: any) => Number(row.revenueImpact) >= 1)).toBe(true);
+  });
+
+  it("EF-11: A's feed, read as the cockpit reads it, holds one FINANCE payment_recorded row per payment with its amount and the commerce paid row with the invoice total", async () => {
+    // invoice.paid is recorded once for A, by the final payment (EF-02); the
+    // full app's EventEmitter hands it to ActivityEventListener.onInvoicePaid.
+    const paid = bus.filter((e) => e.name === 'invoice.paid');
+    expect(paid.map((e) => [e.payload.businessId, e.payload.invoice?.id])).toEqual([[ID.bizA, ID.invA]]);
+    const { ActivityEventListener } = await import('../src/modules/flow/activity-event.listener');
+    const { ActivityService } = await import('../src/modules/flow/activity.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const listener = new ActivityEventListener(new ActivityService(app.get(PrismaService)));
+    await listener.onInvoicePaid(paid[0].payload);
+
+    const rows = await cockpitRead(ID.ownerA, ID.bizA);
+    expect(rows.every((row) => row.businessId === ID.bizA)).toBe(true);
+    // Newest first.
+    const times = rows.map((row) => new Date(row.occurredAt).getTime());
+    expect(times).toEqual([...times].sort((a, b) => b - a));
+
+    const payments = rows.filter((row) => row.module === 'FINANCE' && row.action === 'payment_recorded');
+    expect(payments.map((row) => row.entityId).sort()).toEqual([S.partialId, S.fullId].sort());
+    const byPayment = new Map(payments.map((row) => [row.entityId, row]));
+    expect(byPayment.get(S.partialId)).toMatchObject({ entityType: 'payment', data: { amount: 100, currency: 'TTD' } });
+    expect(byPayment.get(S.fullId)).toMatchObject({ entityType: 'payment', data: { amount: 150, currency: 'TTD' } });
+
+    const paidRows = rows.filter((row) => row.action === 'paid');
+    expect(paidRows).toHaveLength(1);
+    expect(paidRows[0]).toMatchObject({
+      module: 'commerce',
+      entityType: 'invoice',
+      entityId: ID.invA,
+      title: 'Payment received',
+      data: { invoiceId: ID.invA, total: INVOICE_A_TOTAL, currency: 'TTD' },
+    });
+  });
+
+  it('EF-12 LEDGER: each feed amount equals its Payment row and its posting (balanced entries), in integer cents; the paid row total equals the invoice, the two payments and the two postings', async () => {
+    const rows = await cockpitRead(ID.ownerA, ID.bizA);
+    let paymentCents = 0;
+    let postingCents = 0;
+    for (const [paymentId, expected] of [[S.partialId!, 10_000], [S.fullId!, 15_000]] as const) {
+      const row = rows.find((r) => r.action === 'payment_recorded' && r.entityId === paymentId);
+      expect(row, `feed row for ${paymentId}`).toBeTruthy();
+      const payment = await db.payment.findUnique({ where: { id: paymentId } });
+      const postings = await postingsFor(ID.bizA, paymentId);
+      expect(postings).toHaveLength(1);
+      const entries = await db.ledgerEntry.findMany({ where: { transactionId: postings[0].id } });
+      const debit = entries.reduce((s: number, e: any) => s + cents(e.debit ?? 0), 0);
+      const credit = entries.reduce((s: number, e: any) => s + cents(e.credit ?? 0), 0);
+
+      expect(cents(row.data.amount), 'feed amount').toBe(expected);
+      expect(cents(payment.amount), 'Payment.amount').toBe(expected);
+      expect(cents(postings[0].amount), 'posting amount').toBe(expected);
+      expect(debit, 'posting debits').toBe(expected);
+      expect(credit, 'posting credits').toBe(expected);
+      expect(row.data.currency).toBe(payment.currency);
+      expect(postings[0].currency).toBe(payment.currency);
+      paymentCents += cents(payment.amount);
+      postingCents += cents(postings[0].amount);
+    }
+    const paid = rows.find((r) => r.action === 'paid' && r.entityId === ID.invA);
+    const invoice = await db.invoice.findUnique({ where: { id: ID.invA } });
+    expect(cents(paid.data.total), 'paid row total').toBe(cents(invoice.total));
+    expect(cents(invoice.total)).toBe(cents(INVOICE_A_TOTAL));
+    expect(paymentCents, 'the two payments').toBe(cents(invoice.total));
+    expect(postingCents, 'the two postings').toBe(cents(invoice.total));
+  });
+
+  it("EF-13: tenant B's feed, read as the cockpit reads it, holds none of A's rows (the paid row included); owner A on B's feed is refused", async () => {
+    const rows = await cockpitRead(ID.ownerB, ID.bizB);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((row) => row.businessId === ID.bizB)).toBe(true);
+    const aIds = new Set((await activityRows(ID.bizA)).map((a) => a.id));
+    expect(rows.filter((row) => aIds.has(row.id)), "A's rows in B's feed").toEqual([]);
+    expect(rows.filter((row) => row.action === 'paid'), "B's invoice is not paid; A's paid row is not B's").toEqual([]);
+    const text = JSON.stringify(rows);
+    for (const leak of [ID.bizA, ID.invA, ID.contactA, S.partialId!, S.fullId!]) {
+      expect(text.includes(leak), `B's feed mentions ${leak}`).toBe(false);
+    }
+
+    const refused = await feed(ID.ownerA, ID.bizB);
+    expect(refused.status).toBe(403);
+    expect(Array.isArray(refused.body)).toBe(false);
+    expect(JSON.stringify(refused.body)).not.toContain(S.bPaymentId!);
   });
 });
