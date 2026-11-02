@@ -23,8 +23,11 @@ import {
   ChevronUp,
   History,
   Circle,
+  Lock,
 } from "lucide-react";
+import { getContactEventLabel } from "@keyflow/shared";
 import { apiGet } from "@/lib/api";
+import type { CommandCenterResults } from "@/lib/api/business-command-center";
 import { cn } from "@/lib/utils";
 
 /**
@@ -52,6 +55,8 @@ interface ActivityItem {
  * V1-25-EVT-BUSINESS-FEED: the business feed reads the tenant-guarded timeline
  * (AuthGuard + BusinessGuard, proven on a real database by
  * evidence-feed.integration.test.ts), not the legacy /api/flows activity route.
+ * The read is tenant-guarded only, not scope-filtered: the cockpit mounts it
+ * through BusinessActivityFeed (below), which gates it on the caller's access.
  * The server refuses a page larger than TIMELINE_MAX_LIMIT
  * (apps/server/src/modules/timeline/dto/query-timeline.dto.ts), so the limit
  * sent is clamped to it: a caller asking for more gets the largest page, never
@@ -97,6 +102,92 @@ function moduleKey(item: ActivityItem): string {
 /** The feed is ordered by occurredAt; older rows without it fall back to createdAt. */
 function occurredAt(item: ActivityItem): string {
   return item.occurredAt ?? item.createdAt;
+}
+
+/**
+ * CR-V125-1: one domain event, two Activity rows. flow.module.ts registers both
+ * ActivityEventListener and AutomationExecutorService, and each writes a feed
+ * row (same module, action and entity) for each of these events: invoice.paid,
+ * invoice.sent, invoice.overdue, booking.created, booking.confirmed,
+ * contact.created, contact.updated. Until the writers are deduplicated at the
+ * source (V1-55 / D-08), the feed shows such a pair once: the first row of it
+ * in feed order (newest first).
+ */
+const DOUBLE_WRITTEN = new Set([
+  "commerce:paid:invoice",
+  "commerce:sent:invoice",
+  "commerce:overdue:invoice",
+  "bookings:created:booking",
+  "bookings:confirmed:booking",
+  "crm:created:contact",
+  "crm:updated:contact",
+]);
+/** The two listeners handle the same emit, so their rows land milliseconds apart; a genuine repeat (a re-send) is minutes or days later. */
+const DOUBLE_WRITE_WINDOW_MS = 10_000;
+
+/**
+ * CR-V125-2: CrmTimelineService mirrors every contact event into Activity
+ * (module 'crm', entityType 'contact') with the raw event name as the title
+ * ('invoice.payment_recorded') and JSON.stringify(data) as the detail.
+ */
+function isContactEventMirror(item: ActivityItem): boolean {
+  return moduleKey(item) === "crm" && item.entityType === "contact" && item.title === item.action && /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$/.test(item.action);
+}
+
+/**
+ * Contact events the business feed already shows as their own row: every
+ * payment has its FINANCE payment_recorded row (written with it, R0-19
+ * EF-01/EF-02), so its contact mirror is a second copy of the same payment.
+ */
+const MIRRORED_AS_OWN_ROW = new Set(["invoice.payment_recorded"]);
+
+/**
+ * The rows the business feed shows: contact mirrors of events that have their
+ * own row are left out, and a double-written pair is shown once.
+ */
+function feedRows(items: ActivityItem[]): ActivityItem[] {
+  const kept: ActivityItem[] = [];
+  const seen = new Map<string, number[]>();
+  for (const item of items) {
+    if (isContactEventMirror(item) && MIRRORED_AS_OWN_ROW.has(item.action)) continue;
+    const kind = `${moduleKey(item)}:${item.action}:${item.entityType}`;
+    if (DOUBLE_WRITTEN.has(kind) && item.entityId) {
+      const key = `${kind}:${item.entityId}`;
+      const at = new Date(occurredAt(item)).getTime();
+      const times = seen.get(key) ?? [];
+      if (Number.isFinite(at) && times.some((t) => Math.abs(t - at) <= DOUBLE_WRITE_WINDOW_MS)) continue;
+      seen.set(key, [...times, at]);
+    }
+    kept.push(item);
+  }
+  return kept;
+}
+
+/** A contact mirror's title is its event name; it shows the event's label instead ('Payment recorded', not 'invoice.payment_recorded'). */
+function displayTitle(item: ActivityItem): string {
+  if (!isContactEventMirror(item)) return item.title;
+  const label = getContactEventLabel(item.action);
+  if (label && label !== item.action) return label;
+  const words = item.action.replace(/[._]+/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * A detail that is a serialized object (a contact mirror's JSON.stringify(data),
+ * carrying references and user ids) is data, not a sentence: it is not shown.
+ */
+function displayDetail(item: ActivityItem): string | null {
+  const detail = typeof item.detail === "string" ? item.detail.trim() : "";
+  if (!detail) return null;
+  if (detail.startsWith("{") || detail.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(detail);
+      if (parsed !== null && typeof parsed === "object") return null;
+    } catch {
+      // Not JSON: an ordinary sentence that starts with a bracket.
+    }
+  }
+  return detail;
 }
 
 type ModuleFilter = "all" | "commerce" | "finance" | "bookings" | "crm";
@@ -234,7 +325,7 @@ export function BusinessTimeline({ businessId, compact = false, limit = DEFAULT_
   // Loading until the read for the current business, page size and retry has settled.
   const loading = feed?.key !== requestKey;
   const failed = !loading && feed !== null && feed.failed;
-  const items = !loading && feed !== null ? feed.items : NO_ITEMS;
+  const items = useMemo(() => (!loading && feed !== null ? feedRows(feed.items) : NO_ITEMS), [loading, feed]);
 
   const filtered = useMemo(
     () => (filter === "all" ? items : items.filter((i) => moduleKey(i) === filter)),
@@ -342,6 +433,7 @@ export function BusinessTimeline({ businessId, compact = false, limit = DEFAULT_
                     const Icon = getIcon(item);
                     const style = getToneStyle(item);
                     const amount = formatAmount(item);
+                    const detail = displayDetail(item);
                     return (
                       <motion.div
                         key={item.id}
@@ -362,7 +454,7 @@ export function BusinessTimeline({ businessId, compact = false, limit = DEFAULT_
                         <div className="flex-1 ml-2 p-2 rounded-xl bg-muted/20 border border-border/40 hover:border-border/60 transition-colors">
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-1.5 min-w-0">
-                              <span className="text-xs font-medium truncate">{item.title}</span>
+                              <span className="text-xs font-medium truncate">{displayTitle(item)}</span>
                               <span
                                 className="text-[9px] px-1.5 py-0.5 rounded-full whitespace-nowrap"
                                 style={{ background: style.bg, color: style.color }}
@@ -381,8 +473,8 @@ export function BusinessTimeline({ businessId, compact = false, limit = DEFAULT_
                               </span>
                             </div>
                           </div>
-                          {item.detail && (
-                            <p className="text-[11px] text-muted-foreground mt-0.5">{item.detail}</p>
+                          {detail && (
+                            <p data-testid="business-timeline-detail" className="text-[11px] text-muted-foreground mt-0.5">{detail}</p>
                           )}
                         </div>
                       </motion.div>
@@ -407,4 +499,58 @@ export function BusinessTimeline({ businessId, compact = false, limit = DEFAULT_
   }
 
   return <div data-testid="business-timeline">{body}</div>;
+}
+
+/**
+ * Whether the cockpit may show the business feed to this caller.
+ *
+ * SEC-V125-1 / SEC-V125-2: GET /timeline/businesses/:id/events is guarded by
+ * AuthGuard + BusinessGuard only. It answers every Activity row of the business
+ * to any member, with no module scope and no contact visibility: payment
+ * amounts, invoice totals and numbers, and contact names. The server-side row
+ * filter belongs to the timeline controller and service, outside this packet
+ * (recorded as it.todo in evidence-feed.integration.test.ts). Until it lands,
+ * the cockpit shows the feed only to a caller whom the V1-47 snapshot, which
+ * resolves module scopes on the server (ModuleScopeGuard's rule), reports able
+ * to read both revenue (open invoices, payments) and CRM (contacts). A tile
+ * that says RESTRICTED means no feed; a snapshot that cannot say (no results,
+ * or a tile that FAILED) means no feed either: never a guess.
+ */
+export type BusinessFeedAccess = "allowed" | "restricted" | "unknown";
+
+export function businessFeedAccess(results: Partial<CommandCenterResults> | null | undefined): BusinessFeedAccess {
+  if (!results) return "unknown";
+  const tiles = [results.contacts, results.openInvoices, results.payments];
+  if (tiles.some((tile) => tile?.status === "RESTRICTED")) return "restricted";
+  if (tiles.every((tile) => tile?.status === "OK")) return "allowed";
+  return "unknown";
+}
+
+interface BusinessActivityFeedProps extends BusinessTimelineProps {
+  /** The V1-47 snapshot's result tiles for this caller (absent from a server that predates V1-47). */
+  results: Partial<CommandCenterResults> | null | undefined;
+}
+
+/** The cockpit's business feed: BusinessTimeline behind the access gate above. The feed is not read unless access is confirmed. */
+export function BusinessActivityFeed({ results, ...timeline }: BusinessActivityFeedProps) {
+  const access = businessFeedAccess(results);
+  if (access === "allowed") return <BusinessTimeline {...timeline} />;
+  const restricted = access === "restricted";
+  return (
+    <div
+      data-testid={restricted ? "business-timeline-restricted" : "business-timeline-unavailable"}
+      role="status"
+      className="text-center py-8 space-y-2"
+    >
+      <div className="mx-auto w-10 h-10 rounded-full bg-muted/30 flex items-center justify-center">
+        {restricted ? <Lock className="w-5 h-5 text-muted-foreground/60" /> : <AlertTriangle className="w-5 h-5 text-muted-foreground/60" />}
+      </div>
+      <p className="text-sm text-muted-foreground">{restricted ? "No access" : "Activity unavailable"}</p>
+      <p className="text-xs text-muted-foreground/60">
+        {restricted
+          ? "Business activity includes payments and contacts; it needs read access to revenue and CRM."
+          : "Access to business activity could not be confirmed; this is not an empty feed."}
+      </p>
+    </div>
+  );
 }

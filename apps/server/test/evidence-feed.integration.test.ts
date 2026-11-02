@@ -50,12 +50,23 @@
  *     total equals the invoice total, the two payments and the two postings
  *   EF-13  tenant B's feed, read the same way, holds none of A's rows (the paid
  *     row included), and owner A on B's feed is refused
+ *   V1-25 review repairs:
+ *   EF-11b (CR-V125-1) the second invoice.paid writer the full app registers
+ *     (AutomationExecutorService.onInvoicePaid) is delivered the same payload:
+ *     the feed then holds two paid rows for the invoice, same module, action
+ *     and entity, milliseconds apart: the pair the cockpit reader shows once
+ *   EF-11c (CR-V125-2) each payment's CRM contact mirror row (raw event name
+ *     as title, JSON detail with reference and recordedBy) as the reader sees it
+ *   EF-14..EF-16 it.todo: the scope filter (SEC-V125-1), CRM scope and contact
+ *     visibility (SEC-V125-2) and the sibling-route bounds (SEC-V125-3) are
+ *     server changes outside V1-25's write set
  *
  * CHARACTERIZATION ONLY (not a contract; V1-55 / D-08 own the dedupe):
  *   the Activity rows each payment writes in this harness, and the domain events
  *   it puts on the bus (which, in the full app, also drive the listener writers
  *   activity-event.listener.ts and automation-executor.service.ts; those are not
- *   wired here).
+ *   wired here, except that EF-11 and EF-11b hand the one invoice.paid payload
+ *   to each of the two).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CrmRateLimitGuard, CommerceService, InvoiceWorkflowService,
@@ -848,6 +859,51 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     expect(big.body.map((row: any) => [row.action, row.entityId])).toEqual([['paid', ID.invA]]);
   });
 
+  it("EF-11b (CR-V125-1): in the full app invoice.paid also drives AutomationExecutorService.onInvoicePaid, so A's feed holds TWO paid rows for the invoice: same module, action and entity, written milliseconds apart, the same total; the cockpit reader shows the pair once (BT-08)", async () => {
+    // flow.module.ts registers both listeners of invoice.paid; EF-11 delivered
+    // the payload to the first, this delivers the same payload to the second
+    // (real ActivityService and Prisma; its CRM task, e-mail, adapter and flow
+    // runner collaborators are off the feed and stubbed).
+    const paid = bus.filter((e) => e.name === 'invoice.paid');
+    expect(paid).toHaveLength(1);
+    const { AutomationExecutorService } = await import('../src/modules/flow/automation-executor.service');
+    const { ActivityService } = await import('../src/modules/flow/activity.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const prisma = app.get(PrismaService);
+    const crmStub = { addTask: async () => undefined, logContactEvent: async () => undefined };
+    const executor = new AutomationExecutorService(prisma, new ActivityService(prisma), crmStub as never, {} as never, null, null);
+    await executor.onInvoicePaid(paid[0].payload);
+
+    const rows = await cockpitRead(ID.ownerA, ID.bizA);
+    const paidRows = rows.filter((row) => row.action === 'paid' && row.entityId === ID.invA);
+    expect(paidRows, 'one invoice.paid, two feed rows (V1-55 / D-08 own the writer dedupe)').toHaveLength(2);
+    // The facts the cockpit's reader dedupe (business-timeline.tsx DOUBLE_WRITTEN) relies on.
+    for (const row of paidRows) {
+      expect(row).toMatchObject({ businessId: ID.bizA, module: 'commerce', action: 'paid', entityType: 'invoice', entityId: ID.invA });
+      expect(cents(row.data.total)).toBe(cents(INVOICE_A_TOTAL));
+      expect(row.data.currency).toBe('TTD');
+    }
+    expect(paidRows.map((row) => row.title).sort()).toEqual(['Invoice paid', 'Payment received']);
+    const [t1, t2] = paidRows.map((row) => new Date(row.occurredAt).getTime());
+    expect(Math.abs(t1 - t2), 'the two rows land within the reader dedupe window (10 s)').toBeLessThanOrEqual(10_000);
+  });
+
+  it("EF-11c (CR-V125-2): each payment's contact mirror in A's feed is the shape the cockpit reader leaves out (BT-09): module crm, entity the contact, title = action = 'invoice.payment_recorded', detail a JSON object carrying the reference and recordedBy", async () => {
+    const rows = await cockpitRead(ID.ownerA, ID.bizA);
+    const mirrors = rows.filter((row) => row.module === 'crm' && row.action === 'invoice.payment_recorded');
+    expect(mirrors, 'one mirror per payment (EF-01, EF-02)').toHaveLength(2);
+    for (const row of mirrors) {
+      expect(row).toMatchObject({ entityType: 'contact', entityId: ID.contactA, contactId: ID.contactA, title: 'invoice.payment_recorded' });
+      const detail = JSON.parse(row.detail);
+      expect(detail).toMatchObject({ invoiceId: ID.invA, recordedBy: ID.ownerA });
+      expect(String(detail.reference)).toContain(`${P}${RUN}-`);
+    }
+    // Each is a second copy of a payment the feed already shows as its FINANCE row.
+    expect(mirrors.map((row) => cents(JSON.parse(row.detail).amount)).sort()).toEqual([10_000, 15_000]);
+    const finance = rows.filter((row) => row.module === 'FINANCE' && row.action === 'payment_recorded');
+    expect(finance.map((row) => cents(row.data.amount)).sort()).toEqual([10_000, 15_000]);
+  });
+
   it('EF-12 LEDGER: each feed amount equals its Payment row and its posting (balanced entries), in integer cents; the paid row total equals the invoice, the two payments and the two postings', async () => {
     const rows = await cockpitRead(ID.ownerA, ID.bizA);
     let paymentCents = 0;
@@ -897,4 +953,15 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     expect(Array.isArray(refused.body)).toBe(false);
     expect(JSON.stringify(refused.body)).not.toContain(S.bPaymentId!);
   });
+
+  // V1-25 review findings whose fix is server-side in files outside this
+  // packet's write set (timeline.controller.ts, timeline.service.ts,
+  // flow.controller.ts). Kept as todo, never as a test pinning today's answer.
+  // Meanwhile the cockpit does not read the feed for a member whom the V1-47
+  // snapshot reports without revenue or CRM read (BusinessActivityFeed, BT-06;
+  // the snapshot's RESTRICTED tiles for such a member are proven on a real
+  // database by release0-journey.integration.test.ts).
+  it.todo("EF-14 (SEC-V125-1): a STAFF member with revenue 'none' gets no FINANCE / commerce / PAYMENT row (no amount, invoice total or number) from GET /timeline/businesses/:id/events, or a 403, as every revenue list route refuses that member: needs a module-scope row filter in TimelineController.queryEvents / TimelineService.queryTimeline (outside V1-25's write set)");
+  it.todo("EF-15 (SEC-V125-2): a member with crm 'none' gets no contact-bearing row (?contactId= included), and a member without CRM view-all gets no row naming a PRIVATE or unshared contact it cannot list (visibilityClause, M7): needs the CRM scope and visibility filter in TimelineService.queryTimeline (outside V1-25's write set)");
+  it.todo('EF-16 (SEC-V125-3): GET /timeline/businesses/:id/upcoming?limit=100000 and the legacy GET /api/flows/businesses/:id/activity?limit=100000 are bounded like /events (400 above TIMELINE_MAX_LIMIT): needs timeline.controller.ts and flow.controller.ts (outside V1-25\'s write set)');
 });

@@ -6,6 +6,13 @@ import { Type } from 'class-transformer';
  * serves. The cockpit's business feed asks for 50; a larger page is a 400, not
  * an unbounded read of a business's whole Activity table. Paging further back
  * uses `cursor`.
+ *
+ * This bounds this one route only (SEC-V125-3). Two sibling reads of the same
+ * table take their limit as a bare parseInt with no cap and are not covered by
+ * this DTO: GET /timeline/businesses/:id/upcoming (timeline.controller.ts) and
+ * the legacy GET /api/flows/businesses/:id/activity (flow.controller.ts, still
+ * called by fetchActivityFeed in apps/web/src/lib/client.ts). Both are outside
+ * V1-25's write set; evidence-feed.integration.test.ts records them as it.todo.
  */
 export const TIMELINE_MAX_LIMIT = 200;
 
