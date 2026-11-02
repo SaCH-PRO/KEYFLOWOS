@@ -6,6 +6,11 @@ import {
   CalendarSourceType,
 } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  assertBookingSlotFree,
+  bookingHoldsSlot,
+  withBookingSlotLock,
+} from '../bookings/booking-waitlist.service';
 
 type CalendarStatus = 'SCHEDULED' | 'TENTATIVE' | 'CONFIRMED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'OVERDUE' | 'FAILED';
 
@@ -179,18 +184,18 @@ export class CalendarProjectionService {
           });
           return;
         }
+        const next = {
+          startTime: patch.startAt || undefined,
+          endTime: patch.endAt || undefined,
+          status: patch.status ? mapEventStatusToBooking(patch.status) : undefined,
+        };
         const data: Record<string, unknown> = {};
-        if (patch.startAt) data.startTime = patch.startAt;
-        if (patch.endAt) data.endTime = patch.endAt;
-        if (patch.status) {
-          data.status = mapEventStatusToBooking(patch.status);
-        }
+        if (next.startTime) data.startTime = next.startTime;
+        if (next.endTime) data.endTime = next.endTime;
+        if (next.status) data.status = next.status;
         if (patch.description !== undefined) data.notes = patch.description;
         if (Object.keys(data).length) {
-          await client.booking.updateMany({
-            where: { id: sourceId, businessId, deletedAt: null },
-            data,
-          });
+          await this.writeBookingFromCalendar(businessId, sourceId, data, next);
         }
         return;
       }
@@ -300,6 +305,59 @@ export class CalendarProjectionService {
           `Source type "${sourceType}" cannot be edited from the calendar surface`,
         );
     }
+  }
+
+  /**
+   * V1-27 (M41): the booking write-back is a slot claim whenever it leaves the
+   * booking holding a slot it did not hold: moved to another window, or
+   * brought back from CANCELLED or NO_SHOW. It was a bare updateMany, so a
+   * calendar drag put a second live booking on an occupied staff slot.
+   *
+   * It runs under the calendar's slot lock (the one BookingsService.claimSlot
+   * takes) and reads the booking again inside it, then checks the new window
+   * with the shared overlap guard, excluding the booking itself, and is
+   * refused with its message. A write that keeps the booking in the window it
+   * already holds (notes, PENDING -> CONFIRMED, COMPLETED) is not a claim and
+   * is not checked, so legacy rows that already overlap stay editable, as
+   * BookingsService.writeBookingStatus keeps them. A write that leaves the
+   * booking CANCELLED gives the slot back and is not checked either.
+   */
+  private async writeBookingFromCalendar(
+    businessId: string,
+    bookingId: string,
+    data: Record<string, unknown>,
+    next: { startTime?: Date; endTime?: Date; status?: string },
+  ): Promise<void> {
+    const where = { id: bookingId, businessId, deletedAt: null };
+    const target = await this.prisma.client.booking.findFirst({
+      where,
+      select: { serviceId: true, staffId: true, service: { select: { bufferMins: true } } },
+    });
+    if (!target) return; // the update below would match nothing either
+    const resource = { businessId, serviceId: target.serviceId, staffId: target.staffId };
+
+    await withBookingSlotLock(this.prisma.client, resource, async (tx) => {
+      const current = await tx.booking.findFirst({
+        where,
+        select: { status: true, startTime: true, endTime: true },
+      });
+      if (!current) return;
+      const start = next.startTime ?? current.startTime;
+      const end = next.endTime ?? current.endTime;
+      const status = next.status ?? current.status;
+      const moves =
+        start.getTime() !== current.startTime.getTime() || end.getTime() !== current.endTime.getTime();
+      if (bookingHoldsSlot(status) && (moves || !bookingHoldsSlot(current.status))) {
+        await assertBookingSlotFree(tx, {
+          ...resource,
+          start,
+          end,
+          bufferMins: target.service?.bufferMins,
+          excludeBookingId: bookingId,
+        });
+      }
+      await tx.booking.updateMany({ where, data });
+    });
   }
 
   /**

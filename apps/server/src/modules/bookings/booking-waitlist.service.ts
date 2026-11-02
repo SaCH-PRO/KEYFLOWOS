@@ -2,6 +2,116 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException } fr
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
+type PrismaClientLike = PrismaService['client'];
+type PrismaTx = Parameters<Parameters<PrismaClientLike['$transaction']>[0]>[0];
+
+/**
+ * V1-27 (M41, M06): the slot claim for booking writers outside
+ * BookingsService. A booking on a calendar is the staff member's (else the
+ * service's) time, and every writer that puts one there must check and take it
+ * the way BookingsService.claimSlot does (V1-16): under the calendar's advisory
+ * transaction lock, re-reading the overlap guard inside that transaction. The
+ * waitlist offer's placeholder and the calendar PATCH write-back wrote booking
+ * rows with no check at all, so an occupied slot got a second live booking.
+ *
+ * These mirror BookingsService (bookings.service.ts: SLOT_LOCK_NAMESPACE,
+ * assertSlotFree, claimSlot) to the byte: the same lock key, so a claim here
+ * and a claim there serialize on one calendar; the same overlap rule and
+ * buffer; the same messages, so a refusal reads the same whichever door it
+ * came through. They are copies only because bookings.service.ts is outside
+ * this packet's write set (V1-28 holds it): folding BookingsService's private
+ * pair onto these is the follow-up. booking-slot-writers.integration.test.ts
+ * pins the parity (message against BookingsService's own refusal; lock against
+ * a claim holding BookingsService's key; a race of all four doors).
+ */
+const BOOKING_SLOT_LOCK_NAMESPACE = 'booking-slot:';
+const BOOKING_SLOT_CLAIM_TX_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
+const SLOT_RELEASING_BOOKING_STATUSES = ['CANCELLED', 'NO_SHOW'];
+
+/** A booking's claim on a calendar: the resource (staff member, else service) and the window. */
+export interface BookingSlotClaim {
+  businessId: string;
+  serviceId: string;
+  staffId?: string | null;
+  start: Date;
+  end: Date;
+  bufferMins?: number | null;
+  /** The booking being moved or reinstated, which does not block itself. */
+  excludeBookingId?: string;
+}
+
+/** Whether a booking in `status` holds its slot (CANCELLED and NO_SHOW give it back). */
+export function bookingHoldsSlot(status: string): boolean {
+  return !SLOT_RELEASING_BOOKING_STATUSES.includes(status);
+}
+
+/**
+ * Run `work` in a transaction holding the slot lock of one calendar: the
+ * business and the staff member, else the service (BookingsService.claimSlot's
+ * key). Postgres releases it at commit or rollback.
+ */
+export function withBookingSlotLock<T>(
+  client: PrismaClientLike,
+  slot: Pick<BookingSlotClaim, 'businessId' | 'serviceId' | 'staffId'>,
+  work: (tx: PrismaTx) => Promise<T>,
+): Promise<T> {
+  const key = `${BOOKING_SLOT_LOCK_NAMESPACE}${slot.businessId}:${slot.staffId || slot.serviceId}`;
+  return client.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    return work(tx);
+  }, BOOKING_SLOT_CLAIM_TX_OPTIONS);
+}
+
+/**
+ * BookingsService.assertSlotFree: refuse when a live booking of the same
+ * resource overlaps the window widened by the service's buffer. Called with the
+ * lock's transaction, so it sees every claim committed before the lock was
+ * granted. A window that does not move forward cannot be checked for overlap,
+ * so it is refused with the in-app create's message for it.
+ */
+export async function assertBookingSlotFree(db: Pick<PrismaTx, 'booking'>, slot: BookingSlotClaim): Promise<void> {
+  if (!(slot.end.getTime() > slot.start.getTime())) {
+    throw new BadRequestException('The end time must be after the start time.');
+  }
+  const bufferMins = slot.bufferMins ?? 0;
+  const bufferMs = bufferMins * 60000;
+
+  const clash = await db.booking.findFirst({
+    where: {
+      businessId: slot.businessId,
+      status: { notIn: ['CANCELLED', 'NO_SHOW'] },
+      deletedAt: null,
+      startTime: { lt: new Date(slot.end.getTime() + bufferMs) },
+      endTime: { gt: new Date(slot.start.getTime() - bufferMs) },
+      ...(slot.excludeBookingId ? { id: { not: slot.excludeBookingId } } : {}),
+      // Without a staff member the service itself is the resource being
+      // consumed; with one, that person is.
+      ...(slot.staffId ? { staffId: slot.staffId } : { serviceId: slot.serviceId }),
+    },
+    select: { id: true },
+  });
+
+  if (clash) {
+    throw new BadRequestException(
+      bufferMins > 0
+        ? `This time slot is unavailable due to a ${bufferMins}-minute buffer between appointments.`
+        : 'That time slot has already been booked. Please choose another.',
+    );
+  }
+}
+
+/** BookingsService.claimSlot: lock the calendar, check the slot again, write. */
+export function claimBookingSlot<T>(
+  client: PrismaClientLike,
+  slot: BookingSlotClaim,
+  write: (tx: PrismaTx) => Promise<T>,
+): Promise<T> {
+  return withBookingSlotLock(client, slot, async (tx) => {
+    await assertBookingSlotFree(tx, slot);
+    return write(tx);
+  });
+}
+
 export interface AddToWaitlistInput {
   businessId: string;
   contactId: string;
@@ -226,7 +336,7 @@ export class BookingWaitlistService {
       include: {
         business: { select: { id: true } },
         contact: { select: { id: true, firstName: true, lastName: true } },
-        service: { select: { id: true, name: true, duration: true } },
+        service: { select: { id: true, name: true, duration: true, bufferMins: true } },
         preferredStaff: { select: { id: true, name: true } },
       },
     });
@@ -239,23 +349,41 @@ export class BookingWaitlistService {
     const businessId = entry.businessId;
     const staffId = entry.preferredStaffId ?? slot.staffId ?? null;
 
-    const placeholder = await this.prisma.client.booking.create({
-      data: {
+    // V1-27: the placeholder holds the slot (UNCONFIRMED does not give it
+    // back), so writing it is a claim like any create: a freed slot booked
+    // again before the offer, or an occupied one handed in by the REST route
+    // or KEY, is refused with the overlap message and nothing is written.
+    const startTime = new Date(slot.startTime);
+    const endTime = new Date(slot.endTime);
+    const placeholder = await claimBookingSlot(
+      this.prisma.client,
+      {
         businessId,
-        contactId: entry.contactId,
         serviceId: entry.serviceId,
         staffId,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-        status: 'UNCONFIRMED',
-        notes: entry.notes ? `Waitlist request: ${entry.notes}` : 'Hold for waitlisted contact',
+        start: startTime,
+        end: endTime,
+        bufferMins: entry.service?.bufferMins,
       },
-      include: {
-        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-        service: { select: { id: true, name: true } },
-        staff: { select: { id: true, name: true } },
-      },
-    });
+      (tx) =>
+        tx.booking.create({
+          data: {
+            businessId,
+            contactId: entry.contactId,
+            serviceId: entry.serviceId,
+            staffId,
+            startTime,
+            endTime,
+            status: 'UNCONFIRMED',
+            notes: entry.notes ? `Waitlist request: ${entry.notes}` : 'Hold for waitlisted contact',
+          },
+          include: {
+            contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+            service: { select: { id: true, name: true } },
+            staff: { select: { id: true, name: true } },
+          },
+        }),
+    );
 
     const updated = await this.prisma.client.bookingWaitlistEntry.update({
       where: { id: entryId },
