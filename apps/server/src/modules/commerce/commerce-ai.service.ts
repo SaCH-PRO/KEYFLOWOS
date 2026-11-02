@@ -4,7 +4,6 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { CommerceService } from './commerce.service';
 import { CatalogService } from '../catalog/catalog.service';
-import { CommerceService } from './commerce.service';
 import {
   buildCommerceCommandPrompt,
   buildRevenueAnalysisPrompt,

@@ -2803,12 +2803,13 @@ export class CommerceService {
     // updateQuote therefore converts to its accepted total to the cent, and
     // subtotal + tax - discount = total exactly. The quote's stored line totals
     // (legacy rows may hold the raw float product) are read in cents.
-    const { subtotal, taxAmount, discountAmount, total } = computeDocumentAmounts({
+    const amounts = computeDocumentAmounts({
       lines: quote.items.map((item) => item.total),
       taxRate,
       discountType,
       discountValue,
     });
+    const { subtotal, taxAmount, discountAmount, total } = amounts;
     // R0-27 review (ST-27-3): the converted invoice obeys the same amount rules
     // as a created one (no FIXED discount above the subtotal, no amount the
     // ledger cannot hold).
@@ -2817,7 +2818,7 @@ export class CommerceService {
     // posts no AR for a total that is not positive, so a negative invoice could
     // be issued with no ledger entry. A stored quote can still sum below zero
     // (quote lines carry no price floor).
-    if (totalCents < 0) {
+    if (total < 0) {
       throw new BadRequestException('Invoice total cannot be negative');
     }
     // R0-27 review (ST-27-2): the invoice inherits the quote's contact. A quote
