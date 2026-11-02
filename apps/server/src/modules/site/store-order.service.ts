@@ -356,8 +356,13 @@ export class StoreOrderService {
       include: { items: true },
     });
 
+    // CONFIRMED is the merchant's fulfilment status, not money (V1-18, CF-45).
+    // `store_order.paid` is emitted only by completeCheckout, after the
+    // invoice, the payment and its posting commit, and it carries that
+    // invoiceId. Mapping CONFIRMED to it told every paid listener that an
+    // UNPAID order had been paid.
     const eventMap: Record<string, string> = {
-      CONFIRMED: 'store_order.paid',
+      CONFIRMED: 'store_order.confirmed',
       SHIPPED: 'store_order.shipped',
       DELIVERED: 'store_order.delivered',
       CANCELLED: 'store_order.cancelled',

@@ -36,7 +36,9 @@
  *           checked-out order creates no second invoice
  *   V18-05  a paid event for an UNPAID storefront order (what CONFIRMED emitted
  *           at the base; a queued or forged one) creates no invoice, no payment
- *           and no posting
+ *           and no posting, and tells nobody the order was paid: no
+ *           "payment received" notification, no store_order.paid timeline
+ *           event (assertion added with the fix; red on the base source too)
  *   V18-06  Confirm after checkout (the merchant's button on a paid order)
  *           emits `store_order.confirmed` and leaves one invoice, one payment
  *           and one posting
@@ -90,6 +92,8 @@ let storedBalanceFn: (total: number, rows: Array<{ amount: number; status: strin
 let seen: Array<{ name: string; payload: any }> = [];
 /** Listener work started by an emit, awaited by settle(). */
 const inflight: Promise<unknown>[] = [];
+/** Contact timeline events the listener asked CrmService to log. */
+const contactEvents: Array<{ type: string; orderId?: string }> = [];
 
 async function settle() {
   while (inflight.length > 0) {
@@ -237,7 +241,10 @@ beforeAll(async () => {
       input?.email
         ? db.contact.findFirst({ where: { businessId, emailNormalized: input.email.toLowerCase() }, select: { id: true } })
         : null,
-    logContactEvent: async () => null,
+    logContactEvent: async (input: { type: string; data?: { orderId?: string } }) => {
+      contactEvents.push({ type: input.type, orderId: input.data?.orderId });
+      return null;
+    },
   };
 
   const moduleRef = await Test.createTestingModule({
@@ -386,6 +393,9 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
 
     expect(await invoicesOf(order), 'no invoice for an unpaid order').toEqual([]);
     expect(await counts(), 'no invoice, payment or FinancialTransaction written').toEqual(before);
+    const notified = await db.notification.findMany({ where: { businessId: ID.biz, type: 'store_order.paid' } });
+    expect(notified.filter((n: any) => n.data?.orderId === order.id), 'no "payment received" notification').toEqual([]);
+    expect(contactEvents.filter((e) => e.orderId === order.id && e.type === 'store_order.paid'), 'no paid timeline event').toEqual([]);
   });
 
   it('V18-06 Confirm after checkout emits store_order.confirmed and leaves one invoice, payment and posting', async () => {
