@@ -46,7 +46,15 @@ import type { Prisma } from '@prisma/client';
 import { PickType } from '@nestjs/mapped-types';
 import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { assertContactVisible, resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import {
+  assertContactVisible,
+  contactVisibilityFilter,
+  resolveCrmAccess,
+  visibilityClause,
+  visibleNeighbourhood,
+  visibleRelationshipGraph,
+  type CrmAccess,
+} from './crm-permissions.helper';
 import { contactWhereBase } from './crm.helpers';
 
 /**
@@ -141,15 +149,19 @@ export class CrmController {
    * must be able to open the contact itself, by the rule GET
    * contacts/:contactId applies. A contact outside that rule answers that
    * route's 404 for an unknown id and no child row is read; a request without
-   * a member is 401 (V1-08, M13).
+   * a member is 401 (V1-08, M13). It also gates both ends of a relationship
+   * write (POST relationships, POST refer). It returns the member and their
+   * CRM access, which the relationship and network reads use to drop the
+   * neighbours the member cannot open (review ST-1).
    */
   private async assertVisibleContact(
     businessId: string,
     contactId: string,
     req: { user?: { id?: string } } | undefined,
-  ): Promise<void> {
+  ): Promise<{ actorUserId: string; access: CrmAccess }> {
     const actorUserId = this.requireActorUserId(req);
-    await assertContactVisible(this.prisma, businessId, contactId, actorUserId);
+    const access = await assertContactVisible(this.prisma, businessId, contactId, actorUserId);
+    return { actorUserId, access };
   }
 
   // ---------------------------------------------------------------------------
@@ -165,8 +177,20 @@ export class CrmController {
     @Param('contactId') contactId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    await this.assertVisibleContact(businessId, contactId, req);
-    return this.network.listForContact(businessId, contactId);
+    const { actorUserId, access } = await this.assertVisibleContact(businessId, contactId, req);
+    const relationships = await this.network.listForContact(businessId, contactId);
+    // Each row carries the other contact's full row: keep only the rows whose
+    // other contact the member may open (review ST-1).
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, [
+      ...relationships.outgoing.map((r) => r.toContactId),
+      ...relationships.incoming.map((r) => r.fromContactId),
+    ]);
+    if (!canOpen) return relationships;
+    return {
+      ...relationships,
+      outgoing: relationships.outgoing.filter((r) => canOpen(r.toContactId)),
+      incoming: relationships.incoming.filter((r) => canOpen(r.fromContactId)),
+    };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -179,42 +203,68 @@ export class CrmController {
     @Req() req: { user?: { id?: string } },
     @Query('depth') depth?: string,
   ) {
-    await this.assertVisibleContact(businessId, contactId, req);
+    const { actorUserId, access } = await this.assertVisibleContact(businessId, contactId, req);
     const d = depth ? Math.max(1, Math.min(2, Number(depth) || 2)) : 2;
-    return this.network.getNeighbourhood(businessId, contactId, d);
+    const graph = await this.network.getNeighbourhood(businessId, contactId, d);
+    // Neighbours the member cannot open leave the graph with their edges and
+    // what is reached only through them (review ST-1).
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, [
+      ...graph.nodes.map((n) => n.id),
+      ...graph.edges.flatMap((e) => [e.fromContactId, e.toContactId]),
+    ].filter((id) => id !== contactId));
+    return canOpen ? visibleNeighbourhood(graph, d, canOpen) : graph;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/network')
-  getNetworkGraph(
+  async getNetworkGraph(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('type') type?: string,
     @Query('relationshipHealth') relationshipHealth?: string,
     @Query('minDealValue') minDealValue?: string,
     @Query('search') search?: string,
   ) {
-    return this.network.listGraphForBusiness(businessId, {
+    // The business graph names every related contact: it shows only the ones
+    // the session member may open, by the rule GET detail applies (review ST-3).
+    const actorUserId = this.requireActorUserId(req);
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const graph = await this.network.listGraphForBusiness(businessId, {
       type: type as ContactRelationshipEdgeType | undefined,
       relationshipHealth: relationshipHealth || undefined,
       minDealValue: minDealValue ? Number(minDealValue) : undefined,
       search: search || undefined,
     });
+    const canOpen = await contactVisibilityFilter(
+      this.prisma,
+      businessId,
+      access,
+      actorUserId,
+      graph.nodes.map((n) => n.id),
+    );
+    return canOpen ? visibleRelationshipGraph(graph, canOpen) : graph;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/relationships')
-  createContactRelationship(
+  async createContactRelationship(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Body() body: { toContactId: string; type: string; since?: string | null; note?: string | null },
   ) {
-    if (!body?.toContactId || !body?.type) {
+    if (!body?.toContactId || typeof body.toContactId !== 'string' || !body?.type) {
       throw new BadRequestException('toContactId and type are required');
     }
+    // Both ends: a member relates only contacts they may open. A hidden end
+    // answers GET detail's 404 for an unknown id and nothing is written, not
+    // even the inverse edge on the hidden contact (review ST-2).
+    await this.assertVisibleContact(businessId, contactId, req);
+    await this.assertVisibleContact(businessId, body.toContactId, req);
     return this.network.createRelationship({
       businessId,
       fromContactId: contactId,
@@ -240,9 +290,10 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/refer')
-  referContact(
+  async referContact(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Body() body: {
       contactId?: string;
       firstName?: string;
@@ -255,6 +306,15 @@ export class CrmController {
     if (!body?.contactId && !body?.firstName && !body?.lastName && !body?.email && !body?.phone) {
       throw new BadRequestException('Provide an existing contactId or referral details (name/email/phone)');
     }
+    if (body.contactId != null && typeof body.contactId !== 'string') {
+      throw new BadRequestException('contactId must be a string');
+    }
+    // The other relationship write, gated like POST relationships (review
+    // ST-2): the referrer and an existing target must be contacts the member
+    // may open. Otherwise it would bump a hidden referrer's lead score, log on
+    // its timeline and copy its name into a new contact's sourceDetail.
+    await this.assertVisibleContact(businessId, contactId, req);
+    if (body.contactId) await this.assertVisibleContact(businessId, body.contactId, req);
     return this.network.referContact({
       businessId,
       referrerContactId: contactId,

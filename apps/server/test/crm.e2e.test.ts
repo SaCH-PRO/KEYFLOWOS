@@ -54,8 +54,10 @@ class CrmPrismaMock {
   businesses: BusinessSeed[] = [];
   teamActivityLogs: any[] = [];
   // The V1-08 visibility gate's lookups: the member's User row and the contact
-  // row it may open. The mock returns a seeded contact by id and tenant; the
-  // visibility clause itself is proven on the real database
+  // row it may open (findFirst), and, for the relationship and network reads,
+  // which of the contacts an answer names the member may open (findMany). The
+  // mock returns the seeded contacts by id and tenant; the visibility clause
+  // itself is proven on the real database
   // (contacts-visibility.integration.test.ts), here only that it is sent.
   users: Array<{ id: string; role: string }> = [];
   contacts: Array<{ id: string; businessId: string }> = [];
@@ -73,6 +75,13 @@ class CrmPrismaMock {
         findFirst: vi.fn(({ where }: any) =>
           Promise.resolve(
             self.contacts.find((c) => c.id === where.id && c.businessId === where.businessId) ?? null,
+          ),
+        ),
+        findMany: vi.fn(({ where }: any) =>
+          Promise.resolve(
+            self.contacts
+              .filter((c) => where.id.in.includes(c.id) && c.businessId === where.businessId)
+              .map((c) => ({ id: c.id })),
           ),
         ),
       },
@@ -159,7 +168,13 @@ const communicationMock = {
 // stubs: the claim under test is that the visibility gate runs before them and
 // that a refused read never reaches them.
 const revenueMock = { getContactRevenueSummary: vi.fn() };
-const networkMock = { listForContact: vi.fn(), getNeighbourhood: vi.fn() };
+const networkMock = {
+  listForContact: vi.fn(),
+  getNeighbourhood: vi.fn(),
+  listGraphForBusiness: vi.fn(),
+  createRelationship: vi.fn(),
+  referContact: vi.fn(),
+};
 const dataQualityMock = { getContactIssues: vi.fn() };
 const playbookMock = { getOrCreatePlaybook: vi.fn() };
 const bestChannelMock = { explain: vi.fn() };
@@ -832,6 +847,208 @@ describe('CRM e2e', () => {
       expect(prisma.client.contact.findFirst).not.toHaveBeenCalled();
     });
   });
+
+  // V1-08 review repairs (ST-1, ST-2, ST-3, CR-1). relationships and network
+  // answer for a contact the member may open but name its neighbours (the
+  // relationship rows carry the neighbour's full row, the graph its nodes and
+  // edge notes), and the business network names every related contact, so each
+  // keeps only the contacts the gate's lookup returns for the member; the
+  // relationship writes gate both ends. Mocked collaborators and a mocked
+  // lookup (prisma.contacts stands for the contacts the member may open); the
+  // real rule over real rows is contacts-visibility.integration.test.ts.
+  describe('relationship reads and writes apply visibility to every contact they name (V1-08 review, guarded controller regressions)', () => {
+    const STAFF_READ = { userId: 'user_1', businessId: 'biz_1', role: 'STAFF', permissionScopes: { crm: 'read' } };
+    const STAFF_WRITE = { userId: 'user_1', businessId: 'biz_1', role: 'STAFF', permissionScopes: { crm: 'write' } };
+    const STAFF_CLAUSE = { OR: [{ visibility: { in: ['TEAM', 'SHARED'] } }, { ownerId: 'user_1' }, { shares: { some: { userId: 'user_1' } } }] };
+    const NOT_FOUND = { statusCode: 404, message: 'Contact not found', error: 'Not Found' };
+    const seen = (...ids: string[]) => ids.map((id) => ({ id, businessId: 'biz_1' }));
+    const edge = (id: string, fromContactId: string, toContactId: string) => ({ id, fromContactId, toContactId, type: 'colleague_of', since: null, note: `${id}-note` });
+
+    it("relationships: a STAFF member's answer keeps only the rows whose other contact the lookup returns; the owner's is the collaborator's, unchanged, with no lookup", async () => {
+      const rows = {
+        outgoing: [
+          { id: 'rel_out_open', toContactId: 'contact_open', toContact: { id: 'contact_open' } },
+          { id: 'rel_out_hidden', toContactId: 'contact_hidden', toContact: { id: 'contact_hidden', email: 'hidden@example.test' } },
+        ],
+        incoming: [
+          { id: 'rel_in_hidden', fromContactId: 'contact_hidden', fromContact: { id: 'contact_hidden', email: 'hidden@example.test' } },
+          { id: 'rel_in_open', fromContactId: 'contact_open', fromContact: { id: 'contact_open' } },
+        ],
+      };
+      networkMock.listForContact.mockResolvedValue(rows);
+      prisma.contacts = seen('contact_1', 'contact_open');
+
+      const owner = await request(app.getHttpServer()).get('/crm/businesses/biz_1/contacts/contact_1/relationships').expect(200);
+      expect(owner.body).toEqual(rows);
+      expect(prisma.client.contact.findMany).not.toHaveBeenCalled();
+
+      prisma.memberships = [STAFF_READ];
+      vi.clearAllMocks();
+      const staff = await request(app.getHttpServer()).get('/crm/businesses/biz_1/contacts/contact_1/relationships').expect(200);
+      expect(staff.body.outgoing.map((r: any) => r.id)).toEqual(['rel_out_open']);
+      expect(staff.body.incoming.map((r: any) => r.id)).toEqual(['rel_in_open']);
+      expect(staff.text).not.toContain('contact_hidden');
+      expect(prisma.client.contact.findMany).toHaveBeenCalledTimes(1);
+      expect(prisma.client.contact.findMany.mock.calls[0][0]).toEqual({
+        where: { businessId: 'biz_1', deletedAt: null, id: { in: ['contact_open', 'contact_hidden'] }, AND: [STAFF_CLAUSE] },
+        select: { id: true },
+      });
+      expect(prisma.client.contact.findFirst.mock.invocationCallOrder[0]).toBeLessThan(networkMock.listForContact.mock.invocationCallOrder[0]);
+    });
+
+    it("network: a STAFF member's graph drops a neighbour the lookup does not return, its edges, and a contact reached only through it; one reached another way stays, at the requested depth", async () => {
+      // contact_far is two steps away only through contact_hidden; contact_far2
+      // also through contact_open.
+      const graph = {
+        rootId: 'contact_1',
+        nodes: ['contact_1', 'contact_hidden', 'contact_far', 'contact_open', 'contact_far2'].map((id) => ({ id })),
+        edges: [
+          edge('e_root_hidden', 'contact_1', 'contact_hidden'),
+          edge('e_hidden_far', 'contact_hidden', 'contact_far'),
+          edge('e_root_open', 'contact_open', 'contact_1'),
+          edge('e_open_far2', 'contact_open', 'contact_far2'),
+          edge('e_hidden_far2', 'contact_far2', 'contact_hidden'),
+        ],
+      };
+      networkMock.getNeighbourhood.mockResolvedValue(graph);
+      prisma.contacts = seen('contact_1', 'contact_open', 'contact_far', 'contact_far2');
+
+      const owner = await request(app.getHttpServer()).get('/crm/businesses/biz_1/contacts/contact_1/network').expect(200);
+      expect(owner.body).toEqual(graph);
+      expect(prisma.client.contact.findMany).not.toHaveBeenCalled();
+
+      prisma.memberships = [STAFF_READ];
+      vi.clearAllMocks();
+      const staff = await request(app.getHttpServer()).get('/crm/businesses/biz_1/contacts/contact_1/network').expect(200);
+      expect(networkMock.getNeighbourhood).toHaveBeenCalledWith('biz_1', 'contact_1', 2);
+      expect(staff.body).toEqual({
+        rootId: 'contact_1',
+        nodes: [{ id: 'contact_1' }, { id: 'contact_open' }, { id: 'contact_far2' }],
+        edges: [edge('e_root_open', 'contact_open', 'contact_1'), edge('e_open_far2', 'contact_open', 'contact_far2')],
+      });
+      expect(staff.text).not.toContain('contact_hidden');
+      expect(staff.text).not.toContain('contact_far"');
+      expect(prisma.client.contact.findMany.mock.calls[0][0].where.AND).toEqual([STAFF_CLAUSE]);
+      expect(prisma.client.contact.findMany.mock.calls[0][0].where.id.in).not.toContain('contact_1');
+
+      // depth=1: the first ring only, still without the hidden neighbour.
+      networkMock.getNeighbourhood.mockResolvedValue({
+        rootId: 'contact_1',
+        nodes: ['contact_1', 'contact_hidden', 'contact_open'].map((id) => ({ id })),
+        edges: [edge('e_root_hidden', 'contact_1', 'contact_hidden'), edge('e_root_open', 'contact_open', 'contact_1'), edge('e_hidden_open', 'contact_hidden', 'contact_open')],
+      });
+      const ring = await request(app.getHttpServer()).get('/crm/businesses/biz_1/contacts/contact_1/network?depth=1').expect(200);
+      expect(networkMock.getNeighbourhood).toHaveBeenLastCalledWith('biz_1', 'contact_1', 1);
+      expect(ring.body).toEqual({
+        rootId: 'contact_1',
+        nodes: [{ id: 'contact_1' }, { id: 'contact_open' }],
+        edges: [edge('e_root_open', 'contact_open', 'contact_1')],
+      });
+    });
+
+    it("business network: a STAFF member sees only the contacts the lookup returns, no edge with a hidden end, and no contact shown only for its edges to hidden ones; the owner's graph is unchanged", async () => {
+      // contact_c is related only to the hidden contact_h; contact_iso has no
+      // edge in the answer (its other end was filtered out by the service).
+      const graph = {
+        nodes: ['contact_a', 'contact_b', 'contact_h', 'contact_c', 'contact_iso'].map((id) => ({ id })),
+        edges: [edge('e_ab', 'contact_a', 'contact_b'), edge('e_ah', 'contact_a', 'contact_h'), edge('e_ch', 'contact_h', 'contact_c')],
+      };
+      networkMock.listGraphForBusiness.mockResolvedValue(graph);
+      prisma.contacts = seen('contact_a', 'contact_b', 'contact_c', 'contact_iso');
+
+      const owner = await request(app.getHttpServer()).get('/crm/businesses/biz_1/network?type=colleague_of').expect(200);
+      expect(owner.body).toEqual(graph);
+      expect(networkMock.listGraphForBusiness).toHaveBeenCalledWith('biz_1', { type: 'colleague_of', relationshipHealth: undefined, minDealValue: undefined, search: undefined });
+      expect(prisma.client.contact.findMany).not.toHaveBeenCalled();
+
+      prisma.memberships = [STAFF_READ];
+      vi.clearAllMocks();
+      const staff = await request(app.getHttpServer()).get('/crm/businesses/biz_1/network').expect(200);
+      expect(staff.body).toEqual({
+        nodes: [{ id: 'contact_a' }, { id: 'contact_b' }, { id: 'contact_iso' }],
+        edges: [edge('e_ab', 'contact_a', 'contact_b')],
+      });
+      expect(prisma.client.contact.findMany.mock.calls[0][0].where).toEqual({
+        businessId: 'biz_1', deletedAt: null, id: { in: ['contact_a', 'contact_b', 'contact_h', 'contact_c', 'contact_iso'] }, AND: [STAFF_CLAUSE],
+      });
+      expect(prisma.client.user.findUnique.mock.invocationCallOrder[0]).toBeLessThan(networkMock.listGraphForBusiness.mock.invocationCallOrder[0]);
+    });
+
+    it('the business network handler itself refuses a request that carries no user id (401) before reading the graph', async () => {
+      const controller = app.get(CrmController);
+      for (const req of [{ user: undefined }, { user: {} }]) {
+        await expect(Promise.resolve().then(() => controller.getNetworkGraph('biz_1', req as any))).rejects.toMatchObject({ status: 401 });
+      }
+      expect(networkMock.listGraphForBusiness).not.toHaveBeenCalled();
+    });
+
+    it('POST relationships gates both ends before createRelationship: a hidden or absent end answers the detail 404 and nothing is written; a non-string toContactId is 400', async () => {
+      prisma.memberships = [STAFF_WRITE];
+      prisma.contacts = seen('contact_1', 'contact_2');
+      networkMock.createRelationship.mockResolvedValue({ id: 'rel_new' });
+      const post = (contactId: string, body: unknown) =>
+        request(app.getHttpServer()).post(`/crm/businesses/biz_1/contacts/${contactId}/relationships`).send(body as object);
+
+      await post('contact_1', { toContactId: 'contact_2', type: 'colleague_of' }).expect(201);
+      expect(prisma.client.contact.findFirst.mock.calls.map((c: any[]) => c[0].where.id)).toEqual(['contact_1', 'contact_2']);
+      expect(prisma.client.contact.findFirst.mock.calls[1][0].where.AND).toEqual([STAFF_CLAUSE]);
+      expect(networkMock.createRelationship).toHaveBeenCalledWith({
+        businessId: 'biz_1', fromContactId: 'contact_1', toContactId: 'contact_2', type: 'colleague_of', since: null, note: null,
+      });
+      expect(prisma.client.contact.findFirst.mock.invocationCallOrder[1]).toBeLessThan(networkMock.createRelationship.mock.invocationCallOrder[0]);
+
+      vi.clearAllMocks();
+      const toHidden = await post('contact_1', { toContactId: 'contact_hidden', type: 'colleague_of' });
+      const fromHidden = await post('contact_hidden', { toContactId: 'contact_2', type: 'colleague_of' });
+      for (const res of [toHidden, fromHidden]) {
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual(NOT_FOUND);
+      }
+      await post('contact_1', { toContactId: { not: 'x' }, type: 'colleague_of' }).expect(400);
+      expect(networkMock.createRelationship).not.toHaveBeenCalled();
+
+      const controller = app.get(CrmController);
+      await expect(Promise.resolve().then(() => controller.createContactRelationship('biz_1', 'contact_1', { user: undefined }, { toContactId: 'contact_2', type: 'colleague_of' }))).rejects.toMatchObject({ status: 401 });
+      expect(networkMock.createRelationship).not.toHaveBeenCalled();
+    });
+
+    it('POST refer gates the referrer and an existing target before referContact: a hidden one answers the detail 404 and nothing is written', async () => {
+      prisma.memberships = [STAFF_WRITE];
+      prisma.contacts = seen('contact_1', 'contact_2');
+      networkMock.referContact.mockResolvedValue({ relationship: { id: 'rel_ref' }, targetContactId: 'contact_2' });
+      const refer = (contactId: string, body: unknown) =>
+        request(app.getHttpServer()).post(`/crm/businesses/biz_1/contacts/${contactId}/refer`).send(body as object);
+
+      await refer('contact_1', { contactId: 'contact_2' }).expect(201);
+      expect(prisma.client.contact.findFirst.mock.calls.map((c: any[]) => c[0].where.id)).toEqual(['contact_1', 'contact_2']);
+      expect(networkMock.referContact).toHaveBeenCalledTimes(1);
+
+      vi.clearAllMocks();
+      await refer('contact_1', { firstName: 'New' }).expect(201);
+      expect(prisma.client.contact.findFirst.mock.calls.map((c: any[]) => c[0].where.id)).toEqual(['contact_1']);
+
+      vi.clearAllMocks();
+      for (const [contactId, body] of [['contact_hidden', { firstName: 'New' }], ['contact_1', { contactId: 'contact_hidden' }]] as const) {
+        const res = await refer(contactId, body);
+        expect(res.status, `${contactId} ${JSON.stringify(body)}`).toBe(404);
+        expect(res.body).toEqual(NOT_FOUND);
+      }
+      await refer('contact_1', { contactId: { not: 'x' } }).expect(400);
+      expect(networkMock.referContact).not.toHaveBeenCalled();
+    });
+  });
+
+  // Review ST-4 (hand-off, not fixed here: outside V1-08's write set or its 14
+  // routes). Correction to the V1-08 return: the CRM controller is not the only
+  // REST caller of the gated collaborators; BestChannelService.explain is also
+  // reached through GET contacts/:contactId/insight-card
+  // (contact-insight.service.ts), which checks the tenant only. These
+  // contact-scoped routes still take no caller and check the tenant only (or,
+  // for audit, not even the contact); each needs the same gate in its own
+  // controller.
+  it.todo("contact-scoped reads outside crm.controller.ts apply the caller's CRM record visibility: insight-card and its recompute (crm-ai.controller.ts, also BestChannelService.explain, open task titles, LTV, AI call), ai-insight (crm-ai.controller.ts, AI call, no ModuleScopeGuard), contacts/:contactId/audit (privacy/contact-privacy.controller.ts), deals (crm-deals.controller.ts), account-suggestion (crm-accounts.controller.ts), custom-field-values (crm-custom-fields.controller.ts), order-history (marketplace.controller.ts), referral-stats (conversion.controller.ts), people-flow contacts/:contactId/health and momentum contacts/:contactId[/history] (review ST-4, follow-up packet)");
+  it.todo("the remaining contact-scoped routes of crm.controller.ts apply the caller's CRM record visibility: GET conversations/summary and conversations/insights, and the contact-scoped writes (notes, tasks, events, log-communication, favorite, playbook, next-action, merge, data-quality mark-verified, conversations read/reply/summary regenerate/suggest-replies) (review ST-4, follow-up packet)");
+  it.todo('DELETE relationships/:relationshipId refuses an edge with an end the member cannot open, like POST relationships (review ST-2 residual, follow-up packet)');
 });
 
 // V1-54-CT-ROUTE-ORDER-CALLER: a call log's caller is the session member. POST

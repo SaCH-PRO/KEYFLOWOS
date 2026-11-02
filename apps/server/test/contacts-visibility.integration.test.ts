@@ -128,6 +128,11 @@ async function cleanup() {
     `DELETE FROM contact_notes WHERE contact_id LIKE '${P}%'`,
     `DELETE FROM contact_events WHERE contact_id LIKE '${P}%'`,
     `DELETE FROM contact_tasks WHERE contact_id LIKE '${P}%'`,
+    // V1-08 review ST-2: rows a relationship write would leave on the tcv_
+    // tenants under generated ids (POST refer creates a contact and logs on it).
+    `DELETE FROM contact_relationships WHERE business_id IN ('${ID.bizA}', '${ID.bizB}')`,
+    `DELETE FROM contact_events WHERE business_id IN ('${ID.bizA}', '${ID.bizB}')`,
+    `DELETE FROM contacts WHERE business_id IN ('${ID.bizA}', '${ID.bizB}')`,
     `DELETE FROM contacts WHERE id LIKE '${P}%'`,
     `DELETE FROM memberships WHERE id LIKE '${P}%'`,
     `DELETE FROM businesses WHERE id LIKE '${P}%'`,
@@ -649,6 +654,12 @@ describe('CrmStatsService.contactDetail (real database, model-access recorder)',
 // Here the real services run over a model-access recorder: a refused read must
 // answer the detail's 404, byte-identical to an absent id, having read no model
 // beyond the guards' and the visibility gate's own lookups.
+//
+// Review repairs (ST-1, ST-2, ST-3, CR-1): relationships and network answer for
+// a contact the member may open but name its neighbours, and the business
+// network names every related contact, so each now keeps only the contacts GET
+// detail opens for that member; POST relationships and POST refer gate both
+// ends, so a member cannot relate (and so read back) a contact hidden from them.
 // ---------------------------------------------------------------------------
 
 const SIBLING_READS = [
@@ -710,6 +721,33 @@ describe('contact-scoped sibling reads through the real guard path (V1-08)', () 
   }
 
   /** Refused: the detail's 404 on every route, the same bytes as an absent id, no child read. */
+  /** The tcv_ contacts a response body names (by quoted id, so no id matches inside another). */
+  const namedContacts = (text: string) =>
+    [...bizAContacts, ID.cDeleted, ID.cB].filter((id) => text.includes(`"${id}"`));
+
+  /**
+   * Whether GET detail opens `contactId` for `actor`: the service that route
+   * calls with the session member (CrmStatsService.contactDetail, the real
+   * rule), called directly so the review cases stay clear of the detail
+   * route's per-handler rate limit, which the cases above already load.
+   */
+  async function detailOpens(actor: string, contactId: string): Promise<boolean> {
+    try {
+      await statsRecorder.contactDetail({ businessId: ID.bizA, contactId, actorUserId: actor });
+      return true;
+    } catch (err: any) {
+      if (err?.status === 404) return false;
+      throw err;
+    }
+  }
+
+  /** Every contact `text` names opens on GET detail for `actor`. */
+  async function expectNamesOnlyOpenable(actor: string, label: string, text: string) {
+    for (const named of namedContacts(text)) {
+      expect(await detailOpens(actor, named), `${actor}: ${label} names ${named}`).toBe(true);
+    }
+  }
+
   async function expectRefusedEverywhere(actor: string, contactId: string) {
     const refused = await outcomes(actor, contactId);
     const absent = await outcomes(actor, ABSENT_ID);
@@ -942,12 +980,19 @@ describe('contact-scoped sibling reads through the real guard path (V1-08)', () 
     }
   });
 
-  it('sibling reads and detail agree for every scoped actor: each sibling read answers 200 if and only if GET detail opens the contact, and 404 otherwise', async () => {
+  it('sibling reads and detail agree for every scoped actor: each sibling read answers 200 if and only if GET detail opens the contact, and 404 otherwise; relationships and network name no contact GET detail does not open (review ST-1)', async () => {
     for (const actor of [ID.admin, ID.staffAll, ID.staffOwned]) {
+      const opens = new Map<string, boolean>();
+      for (const contactId of bizAContacts) opens.set(contactId, (await detail(actor, contactId)).status === 200);
       for (const contactId of bizAContacts) {
-        const opens = (await detail(actor, contactId)).status === 200;
         const sib = await outcomes(actor, contactId);
-        expect(byRoute(sib, 'status'), `actor ${actor} contact ${contactId} (detail opens: ${opens})`).toEqual(every(opens ? 200 : 404));
+        expect(byRoute(sib, 'status'), `actor ${actor} contact ${contactId} (detail opens: ${opens.get(contactId)})`).toEqual(every(opens.get(contactId) ? 200 : 404));
+        // Review ST-1: the status alone cannot see a neighbour in a 200 body.
+        for (const route of ['relationships', 'network'] as const) {
+          for (const named of namedContacts(sib[route].text)) {
+            expect(opens.get(named) === true, `actor ${actor}: ${route} of ${contactId} names ${named}`).toBe(true);
+          }
+        }
       }
     }
   }, 300_000);
@@ -966,6 +1011,181 @@ describe('contact-scoped sibling reads through the real guard path (V1-08)', () 
     expect(priv.text).toBe(absent.text);
     for (const contactId of [ID.cTeamOwner, ID.cPrivOwner]) {
       expect((await db.contact.findUnique({ where: { id: contactId }, select: { ownerId: true } })).ownerId).toBe(ID.owner);
+    }
+  });
+  it('NEGATIVE CONTROL (review ST-1): relationships and network of a contact the member may open name no neighbour GET detail hides from them (no row, node, edge or note), nor a contact reached only through one; the owner still sees every neighbour', async () => {
+    // Two edges for this case only: cPrivOwner -> cTeamUnowned puts the TEAM
+    // contact two steps from cTeamOwner through the owner's PRIVATE contact,
+    // and cTeamUnowned -> cPrivSharedToOwned gives the shared contact a
+    // neighbour the owned-view member cannot open.
+    const TMP_MID = `${P}rel_tmp_mid`;
+    const TMP_IN = `${P}rel_tmp_in`;
+    const TMP_MID_NOTE = 'tcv-temp-relationship-note-a83e10';
+    const TMP_IN_NOTE = 'tcv-temp-relationship-note-5bd7c2';
+    await db.contactRelationship.create({ data: { id: TMP_MID, businessId: ID.bizA, fromContactId: ID.cPrivOwner, toContactId: ID.cTeamUnowned, type: 'colleague_of', note: TMP_MID_NOTE } });
+    await db.contactRelationship.create({ data: { id: TMP_IN, businessId: ID.bizA, fromContactId: ID.cTeamUnowned, toContactId: ID.cPrivSharedToOwned, type: 'colleague_of', note: TMP_IN_NOTE } });
+    try {
+      const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id).sort();
+      // View-all STAFF and ADMIN open cTeamOwner and cTeamUnowned, but not the
+      // owner's PRIVATE cPrivOwner nor cPrivSharedToOwned (shared with someone else).
+      for (const actor of [ID.staffAll, ID.admin]) {
+        for (const hidden of [ID.cPrivOwner, ID.cPrivSharedToOwned]) {
+          expect(await detailOpens(actor, hidden), `${actor} detail ${hidden}`).toBe(false);
+        }
+        const rel = await sibling(actor, ID.cTeamOwner, 'relationships');
+        const net = await sibling(actor, ID.cTeamOwner, 'network');
+        const relUnowned = await sibling(actor, ID.cTeamUnowned, 'relationships');
+        const netUnowned = await sibling(actor, ID.cTeamUnowned, 'network');
+        for (const res of [rel, net, relUnowned, netUnowned]) expect(res.status, actor).toBe(200);
+        expect(rel.body, actor).toEqual({ outgoing: [], incoming: [] });
+        expect(relUnowned.body, actor).toEqual({ outgoing: [], incoming: [] });
+        // cTeamUnowned opens for them but is reached from cTeamOwner only through cPrivOwner.
+        expect(net.body.rootId, actor).toBe(ID.cTeamOwner);
+        expect(ids(net.body.nodes), actor).toEqual([ID.cTeamOwner]);
+        expect(net.body.edges, actor).toEqual([]);
+        // cTeamOwner opens for them but is reached from cTeamUnowned only through cPrivOwner.
+        expect(ids(netUnowned.body.nodes), actor).toEqual([ID.cTeamUnowned]);
+        expect(netUnowned.body.edges, actor).toEqual([]);
+        for (const res of [rel, net, relUnowned, netUnowned]) {
+          for (const marker of [ID.cPrivOwner, ID.cPrivSharedToOwned, SENSITIVE_REL_NOTE, TMP_MID_NOTE, TMP_IN_NOTE]) {
+            expect(res.text, `${actor}: ${marker}`).not.toContain(marker);
+          }
+          await expectNamesOnlyOpenable(actor, res.req.path, res.text);
+        }
+      }
+
+      // The owned-view member opens the PRIVATE contact shared with them and their
+      // own cPrivStaffOwned, but not the unowned TEAM cTeamUnowned.
+      expect(await detailOpens(ID.staffOwned, ID.cTeamUnowned)).toBe(false);
+      const relShared = await sibling(ID.staffOwned, ID.cPrivSharedToOwned, 'relationships');
+      const netShared = await sibling(ID.staffOwned, ID.cPrivSharedToOwned, 'network');
+      expect(relShared.status).toBe(200);
+      expect(relShared.body.outgoing.map((r: any) => r.toContactId)).toEqual([ID.cPrivStaffOwned]);
+      expect(relShared.body.incoming).toEqual([]);
+      expect(relShared.text).toContain(SHARED_REL_NOTE);
+      expect(netShared.status).toBe(200);
+      expect(ids(netShared.body.nodes)).toEqual([ID.cPrivSharedToOwned, ID.cPrivStaffOwned].sort());
+      expect(netShared.body.edges.map((e: any) => e.id)).toEqual([SIB.sharedRel]);
+      for (const res of [relShared, netShared]) {
+        for (const marker of [ID.cTeamUnowned, ID.cPrivOwner, ID.cTeamOwner, SENSITIVE_REL_NOTE, TMP_MID_NOTE, TMP_IN_NOTE]) {
+          expect(res.text, `staffOwned: ${marker}`).not.toContain(marker);
+        }
+        await expectNamesOnlyOpenable(ID.staffOwned, res.req.path, res.text);
+      }
+
+      // The owner opens every contact: nothing is dropped.
+      const ownerRel = await sibling(ID.owner, ID.cTeamOwner, 'relationships');
+      expect(ownerRel.body.incoming.map((r: any) => r.fromContactId)).toEqual([ID.cPrivOwner]);
+      expect(ownerRel.text).toContain(SENSITIVE_REL_NOTE);
+      const ownerNet = await sibling(ID.owner, ID.cTeamOwner, 'network');
+      expect(ids(ownerNet.body.nodes)).toEqual([ID.cTeamOwner, ID.cPrivOwner, ID.cTeamUnowned].sort());
+      expect(ownerNet.body.edges.map((e: any) => e.id).sort()).toEqual([SIB.rel, TMP_MID].sort());
+      expect(ownerNet.text).toContain(SENSITIVE_REL_NOTE);
+      expect(ownerNet.text).toContain(TMP_MID_NOTE);
+    } finally {
+      await db.contactRelationship.deleteMany({ where: { id: { in: [TMP_MID, TMP_IN] } } });
+    }
+  });
+
+  it('NEGATIVE CONTROL (review ST-3): the business network shows a member only contacts GET detail opens for them, with no edge or note naming one it hides and no contact shown only for such an edge; the owner sees every edge', async () => {
+    const graph = (actor: string) =>
+      request(siblingApp.getHttpServer()).get(`/crm/businesses/${ID.bizA}/network`).set('x-test-user', actor);
+    const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id).sort();
+
+    // Owned-view STAFF: only the edge between the PRIVATE contact shared with
+    // them and their own PRIVATE contact.
+    const owned = await graph(ID.staffOwned);
+    expect(owned.status).toBe(200);
+    expect(owned.body.edges.map((e: any) => e.id)).toEqual([SIB.sharedRel]);
+    expect(ids(owned.body.nodes)).toEqual([ID.cPrivSharedToOwned, ID.cPrivStaffOwned].sort());
+    expect(owned.text).toContain(SHARED_REL_NOTE);
+    for (const marker of [ID.cPrivOwner, ID.cTeamOwner, SENSITIVE_REL_NOTE]) expect(owned.text).not.toContain(marker);
+    await expectNamesOnlyOpenable(ID.staffOwned, 'the business network', owned.text);
+
+    // View-all STAFF and ADMIN: every edge has an end hidden from them, and
+    // cTeamOwner (which opens for them) is related only to the hidden cPrivOwner.
+    for (const actor of [ID.staffAll, ID.admin]) {
+      expect(await detailOpens(actor, ID.cTeamOwner), actor).toBe(true);
+      const res = await graph(actor);
+      expect(res.status, actor).toBe(200);
+      expect(res.body, actor).toEqual({ nodes: [], edges: [] });
+    }
+
+    // The owner: both edges, both notes, all four contacts.
+    const owner = await graph(ID.owner);
+    expect(owner.status).toBe(200);
+    expect(owner.body.edges.map((e: any) => e.id).sort()).toEqual([SIB.rel, SIB.sharedRel].sort());
+    expect(ids(owner.body.nodes)).toEqual([ID.cPrivOwner, ID.cTeamOwner, ID.cPrivSharedToOwned, ID.cPrivStaffOwned].sort());
+    expect(owner.text).toContain(SENSITIVE_REL_NOTE);
+    expect(owner.text).toContain(SHARED_REL_NOTE);
+    await expectNamesOnlyOpenable(ID.owner, 'the business network', owner.text);
+  });
+
+  it("NEGATIVE CONTROL (review ST-2): POST relationships and POST refer refuse a contact the member cannot open at either end with GET detail's 404, byte-identical to an absent id, and write nothing; two contacts the member may open are still related (201)", async () => {
+    const post = (path: string, body: Record<string, unknown>) =>
+      request(siblingApp.getHttpServer())
+        .post(`/crm/businesses/${ID.bizA}/contacts/${path}`)
+        .set('x-test-user', SIB.staffWrite)
+        .send(body);
+    // staffWrite (crm 'write', view-all) opens the TEAM contacts but not staffAll's PRIVATE one.
+    expect(await detailOpens(SIB.staffWrite, ID.cPrivStaffAll)).toBe(false);
+    expect(await detailOpens(SIB.staffWrite, ID.cTeamUnowned)).toBe(true);
+    expect(await detailOpens(SIB.staffWrite, ID.cTeamStaffAll)).toBe(true);
+    const touchingHidden = () =>
+      db.contactRelationship.count({ where: { OR: [{ fromContactId: ID.cPrivStaffAll }, { toContactId: ID.cPrivStaffAll }] } });
+    const hiddenRow = () =>
+      db.contact.findUnique({ where: { id: ID.cPrivStaffAll }, select: { updatedAt: true, leadScore: true, ownerId: true } });
+    const hiddenBefore = await hiddenRow();
+    const contactsBefore = await db.contact.count({ where: { businessId: ID.bizA } });
+    const eventsBefore = await db.contactEvent.count({ where: { businessId: ID.bizA } });
+    const edgesBefore = await db.contactRelationship.count({ where: { businessId: ID.bizA } });
+
+    const cases: Array<{ label: string; refused: [string, Record<string, unknown>]; absent: [string, Record<string, unknown>] }> = [
+      {
+        label: 'relationships to a hidden contact',
+        refused: [`${ID.cTeamUnowned}/relationships`, { toContactId: ID.cPrivStaffAll, type: 'colleague_of' }],
+        absent: [`${ID.cTeamUnowned}/relationships`, { toContactId: ABSENT_ID, type: 'colleague_of' }],
+      },
+      {
+        label: 'relationships from a hidden contact',
+        refused: [`${ID.cPrivStaffAll}/relationships`, { toContactId: ID.cTeamUnowned, type: 'colleague_of' }],
+        absent: [`${ABSENT_ID}/relationships`, { toContactId: ID.cTeamUnowned, type: 'colleague_of' }],
+      },
+      {
+        label: 'refer a hidden contact',
+        refused: [`${ID.cTeamUnowned}/refer`, { contactId: ID.cPrivStaffAll }],
+        absent: [`${ID.cTeamUnowned}/refer`, { contactId: ABSENT_ID }],
+      },
+      {
+        label: 'refer from a hidden contact (would copy its name into a new contact)',
+        refused: [`${ID.cPrivStaffAll}/refer`, { firstName: `${P}refer_probe` }],
+        absent: [`${ABSENT_ID}/refer`, { firstName: `${P}refer_probe` }],
+      },
+    ];
+    for (const c of cases) {
+      const refused = await post(...c.refused);
+      const absent = await post(...c.absent);
+      expect(refused.status, c.label).toBe(404);
+      expect(JSON.parse(refused.text), c.label).toEqual(NOT_FOUND_BODY);
+      expect(refused.text, `${c.label}: vs an absent id`).toBe(absent.text);
+    }
+    expect(await touchingHidden()).toBe(0);
+    expect(await hiddenRow()).toEqual(hiddenBefore);
+    expect(await db.contact.count({ where: { businessId: ID.bizA } })).toBe(contactsBefore);
+    expect(await db.contactEvent.count({ where: { businessId: ID.bizA } })).toBe(eventsBefore);
+    expect(await db.contactRelationship.count({ where: { businessId: ID.bizA } })).toBe(edgesBefore);
+
+    // Positive control: two TEAM contacts the member opens are related, with the inverse edge.
+    const pair = { OR: [
+      { fromContactId: ID.cTeamUnowned, toContactId: ID.cTeamStaffAll },
+      { fromContactId: ID.cTeamStaffAll, toContactId: ID.cTeamUnowned },
+    ] };
+    try {
+      const ok = await post(`${ID.cTeamUnowned}/relationships`, { toContactId: ID.cTeamStaffAll, type: 'colleague_of' });
+      expect(ok.status).toBe(201);
+      expect(await db.contactRelationship.count({ where: pair })).toBe(2);
+    } finally {
+      await db.contactRelationship.deleteMany({ where: pair });
     }
   });
 });
