@@ -293,6 +293,16 @@
       "packet": "V1-12-DM-RECURRING-GUARD"
     },
     {
+      "prefix": "v19a_",
+      "owner": "apps/server/test/key-idempotency-claim.integration.test.ts",
+      "packet": "V1-19-KEY-IDEMPOTENCY-CLAIM"
+    },
+    {
+      "prefix": "v19b_",
+      "owner": "apps/server/test/plan-executor-approval-resume.integration.test.ts",
+      "packet": "V1-19-KEY-IDEMPOTENCY-CLAIM"
+    },
+    {
       "prefix": "v21a_",
       "owner": "apps/server/test/structure-authority-ceiling.integration.test.ts",
       "packet": "V1-21-AUTH-JOBROLE-CEILING"
