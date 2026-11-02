@@ -382,3 +382,72 @@ describe('LedgerReportingService — reconciliation integration', () => {
     expect(tax.invoiceTaxes.ledgerToInvoiceDelta).toBeCloseTo(0, 2);
   });
 });
+
+/**
+ * V1-15b repair2, review LC-3: packages/db's defaultTakeExtension caps every
+ * findMany at 1000 rows. The cash-basis P&L reads three lists (the range's
+ * cash transactions, the payments they settle, and the invoice postings those
+ * payments are traced to) and each can pass 1000 in a busy range. Here the
+ * stub enforces the same cap (and the id cursor a paged read sends) on 1001
+ * invoices, each collected once: every collection must be counted.
+ */
+describe('LedgerReportingService — cash basis reads past the 1000-row findMany cap (review LC-3)', () => {
+  const N = 1001;
+  const pad = (i: number) => String(i).padStart(5, '0');
+  const fx: Fixture = { accounts: makeFixture().accounts, transactions: [], entries: [], payments: [] };
+  for (let i = 0; i < N; i++) {
+    const invDate = new Date('2026-02-02');
+    const payDate = new Date('2026-02-10');
+    fx.transactions.push({ id: `tx_inv_${pad(i)}`, businessId: 'biz', status: 'POSTED', date: invDate, sourceType: 'Invoice', sourceId: `inv_${pad(i)}` });
+    fx.entries.push({ transactionId: `tx_inv_${pad(i)}`, businessId: 'biz', accountId: 'ar', debit: 10, credit: 0, date: invDate });
+    fx.entries.push({ transactionId: `tx_inv_${pad(i)}`, businessId: 'biz', accountId: 'rev', debit: 0, credit: 10, date: invDate });
+    fx.transactions.push({ id: `tx_pay_${pad(i)}`, businessId: 'biz', status: 'POSTED', date: payDate, sourceType: 'Payment', sourceId: `pay_${pad(i)}` });
+    fx.entries.push({ transactionId: `tx_pay_${pad(i)}`, businessId: 'biz', accountId: 'bank', debit: 10, credit: 0, date: payDate });
+    fx.entries.push({ transactionId: `tx_pay_${pad(i)}`, businessId: 'biz', accountId: 'ar', debit: 0, credit: 10, date: payDate });
+    fx.payments.push({ id: `pay_${pad(i)}`, invoiceId: `inv_${pad(i)}` });
+  }
+
+  /** The defaultTakeExtension's cap on every findMany, plus the `id > cursor` a paged read sends (rows in id order). */
+  function capped(stub: any) {
+    for (const model of ['financialTransaction', 'payment']) {
+      const inner = stub[model].findMany;
+      stub[model].findMany = vi.fn(async (args: any) => {
+        let rows: Array<{ id: string }> = await inner(args);
+        rows = [...rows].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+        const gt: string | undefined = args?.where?.id?.gt;
+        if (gt !== undefined) rows = rows.filter((r) => r.id > gt);
+        return rows.slice(0, Math.min(args?.take ?? 1000, 1000));
+      });
+    }
+    return stub;
+  }
+
+  let svc: LedgerReportingService;
+  let client: any;
+
+  beforeAll(async () => {
+    client = capped(makePrismaStub(fx));
+    const moduleRef: TestingModule = await Test.createTestingModule({
+      providers: [
+        LedgerReportingService,
+        { provide: PrismaService, useValue: { client } },
+        { provide: LedgerBalanceService, useValue: balancesStub(fx) },
+        { provide: ReceivablesService, useValue: receivablesStub() },
+      ],
+    }).compile();
+    svc = moduleRef.get(LedgerReportingService);
+  });
+
+  it('LRS-LC3-01: 1001 collections, each traced to its own invoice, are all cash-basis revenue (P&L and cashflow)', async () => {
+    const from = new Date('2026-02-01');
+    const to = new Date('2026-02-28');
+    const accrual = await svc.getPnl('biz', from, to, 'accrual');
+    expect(accrual.revenue.total).toBeCloseTo(N * 10, 2);
+    const cash = await svc.getPnl('biz', from, to, 'cash');
+    // At f366085e: 10000 (the 1001st collection was never read).
+    expect(cash.revenue.total).toBeCloseTo(N * 10, 2);
+    const flow = await svc.getCashflow('biz', from, to, 'cash');
+    expect(flow.cashIn).toBeCloseTo(N * 10, 2);
+    expect(flow.accrualAdjustments.netIncome).toBeCloseTo(N * 10, 2);
+  });
+});

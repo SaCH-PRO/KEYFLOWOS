@@ -89,6 +89,31 @@
  *           not once another bank row claims it or it was reversed: the row stays
  *           UNMATCHED and is skipped with the reason
  *
+ *   V1-15b repair2 (review SEC9-1, LC-1, LC-3):
+ *
+ *   LWD-18  (SEC9-1) a PATCH of a period that read it OPEN and writes after an
+ *           admin's close committed -> 400: the CLOSED period keeps its month
+ *           and that month stays shut (at f366085e the PATCH moved the CLOSED
+ *           row to a future month, so the closed month took postings again,
+ *           with no PERIOD_REOPENED)
+ *   LWD-19  (SEC9-1) the same race on DELETE -> 400; the CLOSED period stays
+ *   LWD-20  (SEC9-1) PATCH / DELETE of a period is the owner's or an admin's
+ *           (STAFF -> 403, nothing changes; unauthenticated -> 401); a CLOSED
+ *           period is refused to them too
+ *   LWD-21  (LC-1) a signed Stripe checkout.session.completed dated now,
+ *           arriving while a close stamps last month slowly (~6ms a row, a
+ *           hosted database's round trip), is recorded and posted at once; a
+ *           posting dated in that month still waits for the close and is
+ *           refused; the redelivery is a duplicate. At f366085e the settlement
+ *           queued behind the close's business-wide lock, its transaction
+ *           expired (P2028) after its dedupe row committed, and the redelivery
+ *           was acked as a duplicate: the payment was lost
+ *   LWD-22  (LC-1) close stamps every transaction of its month (1100, past the
+ *           1000-row read cap), keeping their own metadata; reopen clears every
+ *           stamp; the audit rows count them all
+ *   LWD-23  (LC-3) with 1001 cash transactions in range, the REVERSAL past the
+ *           1000th is read: cash P&L and cash cashflow equal the accrual figures
+ *
  *   TB-01   trial balance after payments (two currencies), a refund and an
  *           expense void: sum(debit) = sum(credit) per currency, every
  *           transaction balanced, entry currency = transaction currency
@@ -121,7 +146,7 @@ import path from 'path';
 import { createHash, createHmac } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 import type { PostingService, PostingInput } from '../src/modules/finance/posting.service';
 import type { AccountingPeriodService } from '../src/modules/finance/accounting-period.service';
@@ -171,6 +196,12 @@ const ID = {
   bizAssetR: `${P}bizAssetR`, // fixed-asset lifecycle after the review
   bizBankR: `${P}bizBankR`, // bank-rule concurrency and re-link after the review
   bankAcctR: `${P}bankAcctR`,
+  // V1-15b repair2 (review SEC9-1, LC-1, LC-3)
+  bizEdit: `${P}bizEdit`, // PATCH / DELETE of a period racing its close (HTTP)
+  bizSlow: `${P}bizSlow`, // a close stamping a large month while a provider settlement dated now arrives
+  contactSlow: `${P}contactSlow`,
+  invSlow: `${P}invSlow`,
+  bizMany: `${P}bizMany`, // more cash transactions in a report range than one read returns
 };
 
 const TB_INVOICES: Array<{ id: string; total: number; currency: string }> = [
@@ -191,7 +222,6 @@ let workflow: InvoiceWorkflowService;
 let expenses: ExpensesService;
 let payments: PaymentsService;
 let reporting: LedgerReportingService;
-let periodLockNamespace = '';
 let computeBalance: (total: number, payments: Array<{ amount: unknown; status: string }>, currency?: string) => { remaining: number };
 
 const eventStub = {
@@ -203,8 +233,13 @@ const eventStub = {
   removeListener: () => undefined,
 };
 
+/** Review LC-1's emulated hosted-database cost per stamped row (a trigger on bizSlow's rows only). */
+const SLOW_STAMP_TRIGGER = 'v15a_slow_stamp';
+
 async function cleanup() {
   for (const sql of [
+    `DROP TRIGGER IF EXISTS ${SLOW_STAMP_TRIGGER} ON financial_transactions`,
+    `DROP FUNCTION IF EXISTS ${SLOW_STAMP_TRIGGER}()`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM accounting_periods WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -296,25 +331,50 @@ function monthFromNow(offset: number): { year: number; month: number } {
 }
 
 /**
- * Resolves once some transaction is queued, not granted, on `businessId`'s
- * period lock (ACCOUNTING_PERIOD_LOCK_NAMESPACE, a one-key advisory lock: its
- * low 32 bits are pg_locks.objid). Throws if none queues in time.
+ * Resolves once some transaction is queued, not granted, on an advisory lock
+ * (the period lock, ACCOUNTING_PERIOD_LOCK_NAMESPACE) that the backend
+ * `holderPid` holds: pg_blocking_pids of the waiter names the holder. Named
+ * by the holder rather than by the key, so it does not depend on how the
+ * period lock's key is built (review LC-1 scoped it to the month). Throws if
+ * none queues in time.
  */
-async function waitForPeriodLockWaiter(businessId: string, timeoutMs = 10_000): Promise<void> {
-  const key = periodLockNamespace + businessId;
+async function waitForPeriodLockWaiter(holderPid: number, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const [row] = await db.$queryRawUnsafe(
       `SELECT count(*)::int AS n FROM pg_locks
         WHERE locktype = 'advisory' AND NOT granted
           AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
-          AND objid::bigint = (hashtext($1)::bigint & 4294967295)`,
-      key,
+          AND $1::int = ANY(pg_blocking_pids(pid))`,
+      holderPid,
     );
     if (row.n > 0) return;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  throw new Error(`no transaction queued on the period lock of ${businessId} within ${timeoutMs}ms`);
+  throw new Error(`no transaction queued on a period lock held by backend ${holderPid} within ${timeoutMs}ms`);
+}
+
+/** The server backend running a transaction client (its pg_backend_pid). */
+async function backendPid(tx: any): Promise<number> {
+  const [row] = await tx.$queryRawUnsafe('SELECT pg_backend_pid() AS pid');
+  return Number(row.pid);
+}
+
+/**
+ * Resolves once some backend of this database sleeps in pg_sleep (the slow
+ * stamp trigger of review LC-1's case, so: a close is stamping). Throws if
+ * none does in time.
+ */
+async function waitForSleepingStamp(timeoutMs = 15_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const [row] = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event = 'PgSleep'`,
+    );
+    if (row.n > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`no backend started stamping within ${timeoutMs}ms`);
 }
 
 /** Finance audit rows (team_activity_logs, module 'finance') recorded for one accounting period. */
@@ -481,7 +541,6 @@ beforeAll(async () => {
   const { LedgerBalanceService } = await import('../src/modules/finance/ledger-balance.service');
   const { ReceivablesService } = await import('../src/modules/finance/receivables.service');
   computeBalance = workflowMod.computeBalance as typeof computeBalance;
-  periodLockNamespace = PeriodMod.ACCOUNTING_PERIOD_LOCK_NAMESPACE;
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
@@ -690,20 +749,20 @@ describe('review SEC-V15-3: a close and a posting in flight are serialized by th
     const input = await probe(ID.bizA, `${P}race_in_flight`, date);
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
-    let announce!: (id: string) => void;
-    const postedId = new Promise<string>((resolve) => { announce = resolve; });
+    let announce!: (posted: { id: string; pid: number }) => void;
+    const postedId = new Promise<{ id: string; pid: number }>((resolve) => { announce = resolve; });
     // The posting passes its period check (OPEN) and stays uncommitted until released.
     const inFlight = db.$transaction(async (tx: any) => {
       const res = await posting.post(input, tx);
-      announce(res.transactionId);
+      announce({ id: res.transactionId, pid: await backendPid(tx) });
       await held;
       return res;
     }, { maxWait: 10_000, timeout: 60_000 });
     try {
-      const txnId = await postedId;
+      const { id: txnId, pid } = await postedId;
       const closing = periods.close(ID.bizA, june.id, { closedById: ID.owner });
       // At a5d73ff6 the close committed here, and the posting then landed inside the CLOSED period unstamped.
-      await waitForPeriodLockWaiter(ID.bizA);
+      await waitForPeriodLockWaiter(pid);
       expect((await db.accountingPeriod.findUnique({ where: { id: june.id } })).status, 'the close waits for the posting').toBe('OPEN');
       release();
       await inFlight;
@@ -751,7 +810,8 @@ describe('review SEC-V15-1: a period closes only once it has ended, so what is d
       expect(row.lockedTransactionStamp).toBeNull();
       expect(await periodAudit(id)).toEqual([]);
     }
-    await periods.remove(ID.bizPay, next.id);
+    // Deleting a period is the owner's or an admin's call (review SEC9-1).
+    await periods.remove(ID.bizPay, next.id, { actorId: ID.owner });
 
     const res = await pay(ID.bizPay, ID.invPayClosed, { amount: 40, method: 'cash', reference: `${P}beside-closed` });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -1397,6 +1457,337 @@ describe('review CR-2 / CR-3: callers that write their own row and post (fixed a
     expect(audit.map((r: any) => r.title)).toEqual(['Unmatched bank row', 'Unmatched bank row', 'Bank rule not applied', 'Bank rule not applied']);
     expect(audit.slice(2).map((r: any) => r.meta.reason)).toEqual([expect.stringMatching(/another bank row/i), expect.stringMatching(/no longer POSTED/)]);
     await expectBalanced(biz);
+  }, 60_000);
+});
+
+describe('review SEC9-1: a PATCH or DELETE of a period never lands on it once it is CLOSED, and only the owner or an admin changes a period', () => {
+  let financeApp: any;
+  let routeService: any; // the AccountingPeriodService instance behind financeApp's routes
+
+  function route(method: 'patch' | 'delete', path: string, actor: string | null, body?: Record<string, unknown>) {
+    let req = request(financeApp.getHttpServer())[method](`/finance/businesses/${ID.bizEdit}/accounting-periods${path}`);
+    if (actor) req = req.set(HEADER, actor);
+    return body ? req.send(body) : req;
+  }
+
+  /**
+   * Holds the route service's next get() (the PATCH / DELETE route's read of
+   * the period) after it returns, until released: the repro's pause, which
+   * only widens the read-then-write window the route already has.
+   */
+  function pauseNextRead() {
+    let readDone!: () => void;
+    const read = new Promise<void>((resolve) => { readDone = resolve; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const original = routeService.get.bind(routeService);
+    const spy = vi.spyOn(routeService, 'get').mockImplementationOnce(async (...args: any[]) => {
+      const row = await original(...args);
+      readDone();
+      await gate;
+      return row;
+    });
+    return { read, release, restore: () => spy.mockRestore() };
+  }
+
+  function midMonth(m: { year: number; month: number }): Date {
+    return new Date(Date.UTC(m.year, m.month - 1, 15, 12, 0, 0));
+  }
+
+  beforeAll(async () => {
+    await seedTenant(ID.bizEdit, 'CASH');
+    await db.membership.create({ data: { id: `${ID.bizEdit}_staff`, userId: ID.staff, businessId: ID.bizEdit, role: 'STAFF' } });
+    await db.membership.create({ data: { id: `${ID.bizEdit}_admin`, userId: ID.admin, businessId: ID.bizEdit, role: 'ADMIN' } });
+    const PeriodMod = await import('../src/modules/finance/accounting-period.service');
+    financeApp = await buildFinanceApp([PeriodMod.AccountingPeriodService]);
+    routeService = financeApp.get(PeriodMod.AccountingPeriodService);
+  }, 120_000);
+
+  afterAll(async () => {
+    if (financeApp) await financeApp.close();
+  });
+
+  it('LWD-18 (review SEC9-1): a PATCH that read the period OPEN and writes after its close committed -> 400; the CLOSED period keeps its month, and that month stays shut, with no reopen', async () => {
+    const shut = monthFromNow(-4);
+    const period = await periods.create(ID.bizEdit, shut);
+    const pause = pauseNextRead();
+    try {
+      // An admin moves the period three months ahead; the move reads it OPEN, then waits.
+      const patching = route('patch', `/${period.id}`, ID.admin, monthFromNow(3)).then((r: any) => r);
+      await pause.read;
+      expect((await periods.close(ID.bizEdit, period.id, { closedById: ID.owner })).status).toBe('CLOSED');
+      await expect(posting.post(await probe(ID.bizEdit, `${P}edit_patch_before`, midMonth(shut)))).rejects.toMatchObject({ status: 409 });
+      pause.release();
+      const res = await patching;
+      // At f366085e: 200, the CLOSED row covered a month three months ahead (CLOSED but not ended,
+      // so not enforced), and the formerly closed month took postings again, with no PERIOD_REOPENED.
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      const row = await db.accountingPeriod.findUnique({ where: { id: period.id } });
+      expect(row).toMatchObject({ status: 'CLOSED', year: shut.year, month: shut.month, closedById: ID.owner });
+      expect(row.startDate.toISOString()).toBe(new Date(period.startDate).toISOString());
+      expect(row.endDate.toISOString()).toBe(new Date(period.endDate).toISOString());
+      const before = await ledgerCounts(ID.bizEdit);
+      await expect(posting.post(await probe(ID.bizEdit, `${P}edit_patch_after`, midMonth(shut)))).rejects.toMatchObject({ status: 409 });
+      expect(await ledgerCounts(ID.bizEdit)).toEqual(before);
+      expect((await periodAudit(period.id)).map((a: any) => `${a.action}:${a.userId}`)).toEqual([`PERIOD_CLOSED:${ID.owner}`]);
+    } finally {
+      pause.release();
+      pause.restore();
+    }
+  }, 60_000);
+
+  it('LWD-19 (review SEC9-1): a DELETE that read the period OPEN and writes after its close committed -> 400; the CLOSED period stays, and its month stays shut', async () => {
+    const shut = monthFromNow(-5);
+    const period = await periods.create(ID.bizEdit, shut);
+    const pause = pauseNextRead();
+    try {
+      const deleting = route('delete', `/${period.id}`, ID.admin).then((r: any) => r);
+      await pause.read;
+      expect((await periods.close(ID.bizEdit, period.id, { closedById: ID.owner })).status).toBe('CLOSED');
+      pause.release();
+      const res = await deleting;
+      // At f366085e: 200, the CLOSED row was gone, and its month took postings again, with no audit row.
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      expect(await db.accountingPeriod.findUnique({ where: { id: period.id } })).toMatchObject({ status: 'CLOSED', closedById: ID.owner });
+      const before = await ledgerCounts(ID.bizEdit);
+      await expect(posting.post(await probe(ID.bizEdit, `${P}edit_delete_after`, midMonth(shut)))).rejects.toMatchObject({ status: 409 });
+      expect(await ledgerCounts(ID.bizEdit)).toEqual(before);
+      expect((await periodAudit(period.id)).map((a: any) => a.action)).toEqual(['PERIOD_CLOSED']);
+    } finally {
+      pause.release();
+      pause.restore();
+    }
+  }, 60_000);
+
+  it('LWD-20 (review SEC9-1): a STAFF PATCH or DELETE of a period -> 403 and nothing changes; the owner and an admin edit and delete an OPEN period; a CLOSED one is refused to them too; unauthenticated -> 401', async () => {
+    const open = await periods.create(ID.bizEdit, monthFromNow(-7));
+    const shape = async (id: string) => {
+      const row = await db.accountingPeriod.findUnique({ where: { id } });
+      return row ? `${row.status}:${row.year}-${row.month}` : 'gone';
+    };
+    const original = `OPEN:${open.year}-${open.month}`;
+
+    // Changing a period is the same authority as closing and reopening it (safer
+    // product choice, listed with the repair: create stays open to members).
+    const staffPatch = await route('patch', `/${open.id}`, ID.staff, monthFromNow(2));
+    expect(staffPatch.status, JSON.stringify(staffPatch.body)).toBe(403);
+    expect(await shape(open.id)).toBe(original);
+    const staffDelete = await route('delete', `/${open.id}`, ID.staff);
+    expect(staffDelete.status, JSON.stringify(staffDelete.body)).toBe(403);
+    expect(await shape(open.id)).toBe(original);
+    expect((await route('patch', `/${open.id}`, null, monthFromNow(2))).status).toBe(401);
+    expect((await route('delete', `/${open.id}`, null)).status).toBe(401);
+    expect(await shape(open.id)).toBe(original);
+
+    const moved = monthFromNow(-8);
+    const ownerPatch = await route('patch', `/${open.id}`, ID.owner, moved);
+    expect(ownerPatch.status, JSON.stringify(ownerPatch.body)).toBe(200);
+    expect(ownerPatch.body).toMatchObject({ id: open.id, status: 'OPEN', year: moved.year, month: moved.month });
+    expect(new Date(ownerPatch.body.startDate).toISOString()).toBe(new Date(Date.UTC(moved.year, moved.month - 1, 1)).toISOString());
+
+    const shut = await periods.create(ID.bizEdit, monthFromNow(-9));
+    await periods.close(ID.bizEdit, shut.id, { closedById: ID.owner });
+    const closedShape = await shape(shut.id);
+    const ownerPatchClosed = await route('patch', `/${shut.id}`, ID.owner, monthFromNow(2));
+    expect(ownerPatchClosed.status, JSON.stringify(ownerPatchClosed.body)).toBe(400);
+    const adminDeleteClosed = await route('delete', `/${shut.id}`, ID.admin);
+    expect(adminDeleteClosed.status, JSON.stringify(adminDeleteClosed.body)).toBe(400);
+    expect(await shape(shut.id)).toBe(closedShape);
+
+    const adminDelete = await route('delete', `/${open.id}`, ID.admin);
+    expect(adminDelete.status, JSON.stringify(adminDelete.body)).toBe(200);
+    expect(await shape(open.id)).toBe('gone');
+  }, 60_000);
+});
+
+describe('review LC-1: a close shuts only its own month, so a settlement dated now never waits on it; and it stamps every row of the month', () => {
+  const SLOW_SECRET = `whsec_${P}slow`;
+  const ROWS = 1100;
+
+  /** ROWS history transactions of bizSlow dated across month `m`; every third carries metadata of its own. */
+  async function seedMonth(m: { year: number; month: number }, tag: string) {
+    const days = new Date(Date.UTC(m.year, m.month, 0)).getUTCDate();
+    await db.financialTransaction.createMany({
+      data: Array.from({ length: ROWS }, (_, i) => ({
+        businessId: ID.bizSlow,
+        type: 'INCOME',
+        status: 'POSTED',
+        date: new Date(Date.UTC(m.year, m.month - 1, 1 + (i % days), 12, 0, 0)),
+        amount: 1,
+        currency: 'TTD',
+        description: `v15a ${tag} history ${i}`,
+        sourceType: 'V15Seed',
+        sourceId: `${P}${tag}_${i}`,
+        ...(i % 3 === 0 ? { metadata: { seed: i } } : {}),
+      })),
+    });
+  }
+
+  /** bizSlow transactions dated in month `m`: how many carry `stamp` (any stamp when null), and how many kept their own `seed`. */
+  async function monthRows(m: { year: number; month: number }, stamp: string | null): Promise<{ stamped: number; seeded: number; total: number }> {
+    const from = new Date(Date.UTC(m.year, m.month - 1, 1));
+    const to = new Date(Date.UTC(m.year, m.month, 1));
+    const [row] = await db.$queryRawUnsafe(
+      `SELECT count(*) FILTER (WHERE metadata->>'lockedByPeriod' IS NOT NULL AND ($4::text IS NULL OR metadata->>'lockedByPeriod' = $4))::int AS stamped,
+              count(*) FILTER (WHERE metadata->>'seed' IS NOT NULL)::int AS seeded,
+              count(*)::int AS total
+         FROM financial_transactions WHERE business_id = $1 AND date >= $2::timestamp AND date < $3::timestamp`,
+      ID.bizSlow,
+      from.toISOString().slice(0, 23).replace('T', ' '),
+      to.toISOString().slice(0, 23).replace('T', ' '),
+      stamp,
+    );
+    return row;
+  }
+
+  beforeAll(async () => {
+    await db.business.create({
+      data: { id: ID.bizSlow, name: `V15A ${ID.bizSlow}`, ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH', metaData: { stripeWebhookSecret: SLOW_SECRET } },
+    });
+    await db.membership.create({ data: { id: `${ID.bizSlow}_m`, userId: ID.owner, businessId: ID.bizSlow, role: 'OWNER' } });
+    await coa.ensureDefaults(ID.bizSlow);
+    await db.contact.create({ data: { id: ID.contactSlow, businessId: ID.bizSlow, firstName: 'V15A', lastName: 'Slow', email: `${P}slow@test.local` } });
+    await seedInvoice(ID.invSlow, ID.bizSlow, ID.contactSlow, 40, 100, 'TTD', 'SENT');
+    await seedMonth(monthFromNow(-1), 'slow');
+    await seedMonth(monthFromNow(-2), 'stamp');
+  }, 120_000);
+
+  it('LWD-21 (review LC-1): a Stripe checkout.session.completed dated now, arriving while a close stamps last month at ~6ms a row, is recorded and posted at once; a posting dated in that month waits and is refused; the redelivery is a duplicate', async () => {
+    const last = monthFromNow(-1);
+    const period = await periods.create(ID.bizSlow, last);
+    // The repro's emulation of a hosted database's cost per stamped row, on bizSlow's rows only.
+    await db.$executeRawUnsafe(
+      `CREATE OR REPLACE FUNCTION ${SLOW_STAMP_TRIGGER}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(0.006); RETURN NEW; END $$`,
+    );
+    await db.$executeRawUnsafe(
+      `CREATE TRIGGER ${SLOW_STAMP_TRIGGER} BEFORE UPDATE ON financial_transactions FOR EACH ROW
+         WHEN (OLD.business_id = '${ID.bizSlow}') EXECUTE FUNCTION ${SLOW_STAMP_TRIGGER}()`,
+    );
+    let closeSettled = false;
+    let closing: Promise<any> | undefined;
+    let inMonth: Promise<unknown> | undefined;
+    try {
+      closing = periods.close(ID.bizSlow, period.id, { closedById: ID.owner }).finally(() => { closeSettled = true; });
+      await waitForSleepingStamp();
+      // A posting dated inside the month being closed starts now: it must wait for the close, then be
+      // refused. (In a transaction that outlives the slow close, so its refusal is the period's, not a timeout.)
+      let inMonthSettled = false;
+      const inMonthInput = await probe(ID.bizSlow, `${P}slow_in_month`, new Date(Date.UTC(last.year, last.month - 1, 20, 12)));
+      inMonth = db
+        .$transaction((tx: any) => posting.post(inMonthInput, tx), { maxWait: 10_000, timeout: 60_000 })
+        .finally(() => { inMonthSettled = true; });
+      inMonth.catch(() => undefined);
+
+      const event = {
+        id: `${P}evt_slow`,
+        type: 'checkout.session.completed',
+        data: { object: { id: `${P}cs_slow`, metadata: { invoiceId: ID.invSlow }, amount_total: 10000, currency: 'ttd' } },
+      };
+      const raw = JSON.stringify(event);
+      const t = Math.floor(Date.now() / 1000);
+      const signature = `t=${t},v1=${createHmac('sha256', SLOW_SECRET).update(`${t}.${raw}`).digest('hex')}`;
+      // At f366085e the settlement queued behind the close's business-wide lock, its payment
+      // transaction expired (P2028) after its dedupe row had committed, and the redelivery
+      // below was acked as a duplicate: the payment was never recorded.
+      expect(await payments.handleStripeWebhook(raw, signature)).toEqual({ ok: true, received: true, processed: 'checkout.session.completed' });
+      expect(closeSettled, 'the settlement waited for the close of another month').toBe(false);
+      expect(inMonthSettled, 'a posting dated inside the month being closed did not wait for the close').toBe(false);
+
+      const closed = await closing;
+      expect(closed.status).toBe('CLOSED');
+      await expect(inMonth).rejects.toMatchObject({ status: 409 });
+      expect(await db.financialTransaction.count({ where: { businessId: ID.bizSlow, sourceId: `${P}slow_in_month` } })).toBe(0);
+
+      expect(await payments.handleStripeWebhook(raw, signature)).toEqual({ ok: true, received: true });
+      const rows = await db.payment.findMany({ where: { invoiceId: ID.invSlow } });
+      expect(rows.map((p: any) => `${p.provider}:${p.status}:${Number(p.amount)}`)).toEqual(['stripe:SUCCESSFUL:100']);
+      const postings = await paymentPostings(rows[0].id);
+      expect(postings.map((x: any) => `${x.type}:${x.status}`)).toEqual(['INCOME:POSTED']);
+      expect(postings[0].metadata?.lockedByPeriod, 'dated now: not inside the closed month').toBeUndefined();
+      expect((await db.invoice.findUnique({ where: { id: ID.invSlow } })).status).toBe('PAID');
+      expect((await monthRows(last, closed.lockedTransactionStamp)).stamped).toBe(ROWS);
+      await expectBalanced(ID.bizSlow);
+    } finally {
+      await closing?.catch(() => undefined);
+      await inMonth?.catch(() => undefined);
+      await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${SLOW_STAMP_TRIGGER} ON financial_transactions`);
+      await db.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${SLOW_STAMP_TRIGGER}()`);
+    }
+  }, 120_000);
+
+  it('LWD-22 (review LC-1): close stamps every transaction dated in its month (1100, past the 1000-row read cap) and keeps their own metadata; reopen clears every stamp; the audit rows count them all', async () => {
+    const m = monthFromNow(-2);
+    expect((await monthRows(m, null)).total).toBe(ROWS);
+    const period = await periods.create(ID.bizSlow, m);
+    const closed = await periods.close(ID.bizSlow, period.id, { closedById: ID.owner });
+    const stamp: string = closed.lockedTransactionStamp;
+    // At f366085e: 1000 (close read the month's rows through a findMany capped at 1000).
+    expect(await monthRows(m, stamp)).toEqual({ stamped: ROWS, seeded: Math.ceil(ROWS / 3), total: ROWS });
+    const [{ n: stampedAnywhere }] = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM financial_transactions WHERE metadata->>'lockedByPeriod' = $1`,
+      stamp,
+    );
+    expect(stampedAnywhere, 'only the month\'s own rows carry its stamp').toBe(ROWS);
+
+    await periods.reopen(ID.bizSlow, period.id, { reopenedById: ID.owner });
+    expect(await monthRows(m, null)).toEqual({ stamped: 0, seeded: Math.ceil(ROWS / 3), total: ROWS });
+    const audit = await periodAudit(period.id);
+    expect(audit.map((a: any) => a.action)).toEqual(['PERIOD_CLOSED', 'PERIOD_REOPENED']);
+    expect(audit[0].meta).toMatchObject({ stamp, transactionsStamped: ROWS });
+    expect(audit[1].meta).toMatchObject({ previousStamp: stamp, transactionsUnstamped: ROWS });
+  }, 120_000);
+});
+
+describe('review LC-3: the cash-basis P&L and cashflow read every cash transaction in the range, past the 1000-row read cap', () => {
+  const SALES = 1000;
+  const from = new Date(Date.UTC(2000, 0, 1));
+
+  beforeAll(async () => {
+    await seedTenant(ID.bizMany, 'CASH');
+    const cash = await accountId(ID.bizMany, 'CASH');
+    const revenue = await accountId(ID.bizMany, 'REVENUE');
+    const date = new Date(Date.now() - 86_400_000);
+    const sale = (i: number): PostingInput => ({
+      businessId: ID.bizMany,
+      type: 'INCOME',
+      date,
+      amount: 10,
+      currency: 'TTD',
+      description: `v15a many ${i}`,
+      sourceType: 'V15Probe',
+      sourceId: `${P}many_${i}`,
+      kind: 'probe',
+      entries: [
+        { accountId: cash, debit: 10 },
+        { accountId: revenue, credit: 10 },
+      ],
+    });
+    // The repro: a cash sale, 999 more, then the first reversed through the door (1001 transactions).
+    const first = await posting.post(sale(0));
+    for (let i = 1; i < SALES; i += 10) {
+      await Promise.all(Array.from({ length: Math.min(10, SALES - i) }, (_, k) => posting.post(sale(i + k))));
+    }
+    await posting.reverse(ID.bizMany, first.transactionId, { reason: 'v15a LC-3 reversal' });
+  }, 180_000);
+
+  it('LWD-23 (review LC-3): a REVERSAL past the 1000th cash transaction of the range is read: the cash P&L and cash cashflow equal the accrual figures', async () => {
+    const to = new Date(Date.now() + 86_400_000);
+    expect(await db.financialTransaction.count({ where: { businessId: ID.bizMany } })).toBe(SALES + 1);
+    const accrual = await reporting.getPnl(ID.bizMany, from, to, 'accrual');
+    const cash = await reporting.getPnl(ID.bizMany, from, to, 'cash');
+    expect(accrual.revenue.total, 'accrual revenue').toBe((SALES - 1) * 10);
+    // At f366085e: 10000, the REVERSAL (the 1001st row read) was dropped by the 1000-row read cap.
+    expect(cash.revenue.total, 'cash-basis revenue').toBe(accrual.revenue.total);
+    expect(cash.netProfit).toBe(accrual.netProfit);
+
+    const cashFlow = await reporting.getCashflow(ID.bizMany, from, to, 'cash');
+    const accrualFlow = await reporting.getCashflow(ID.bizMany, from, to, 'accrual');
+    expect(accrualFlow.netMovement, 'every cash movement').toBe((SALES - 1) * 10);
+    expect(cashFlow.netMovement, 'cash-basis operating cash').toBe(accrualFlow.netMovement);
+    expect(cashFlow.cashIn).toBe(SALES * 10);
+    expect(cashFlow.cashOut).toBe(10);
+    expect(cashFlow.accrualAdjustments.netIncome).toBe((SALES - 1) * 10);
+    await expectBalanced(ID.bizMany);
   }, 60_000);
 });
 
