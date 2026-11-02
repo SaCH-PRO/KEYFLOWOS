@@ -37,15 +37,35 @@
  *   H  The webhooks (GET/POST webhook and webhook/:businessId) are unchanged:
  *      no session, the provider handshake and signature checks as before.
  *
+ * R0-SEC2b-WHATSAPP-SECRET-READS (review SEC2-R2, SEC2-R1 second writer,
+ * CR-SEC2-2), cases SEC2-T*:
+ *   T  The Business reads (GET /identity/businesses/:businessId, GET
+ *      /identity/businesses and the PATCH response, all through
+ *      sanitizeBusiness) answered metaData.whatsapp as stored: phoneNumberId
+ *      and the three credential ciphertexts, to any member (operations: none
+ *      included). They now answer it as { configured } and nothing else, to
+ *      every reader, the owner included (the owner reads phoneNumberId and the
+ *      last 4 characters from GET whatsapp/.../config). PATCH
+ *      /identity/businesses/:businessId merged any metaData key, so an owner
+ *      could write metaData.whatsapp (another business's ciphertext or
+ *      phoneNumberId) past saveConfig's refusals; it now refuses the key (400
+ *      BUSINESS_METADATA_KEY_RESERVED) with nothing written: the WhatsApp
+ *      config route is its only writer. The web half of CR-SEC2-2 (a 403 from
+ *      GET status rendered as "not connected") is proven in jsdom by
+ *      apps/web/src/app/app/whatsapp/__tests__/whatsapp-status-access.test.tsx.
+ *
  * NO PROVIDER TRAFFIC: sends run against a 'mock' provider config, global
  * fetch is replaced by a recorder that fails, WHATSAPP_BUSINESS_ACCOUNT_ID is
  * unset (templates never reach Meta), and every send case asserts the recorder
  * was not called.
  *
  * HOW THE APP IS COMPOSED (the contacts-visibility model): a real Nest app with
- * the real WhatsAppController, WhatsAppService, PrismaService, AuthGuard,
- * BusinessGuard, ModuleScopeGuard and the production GlobalHttpExceptionFilter,
- * against the database at DATABASE_URL. The one stand-in on the authorization
+ * the real WhatsAppController, WhatsAppService, IdentityController (R0-SEC2b),
+ * IdentityService, PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard
+ * and the production GlobalHttpExceptionFilter, against the database at
+ * DATABASE_URL. IdentityController collaborators the business GET and PATCH
+ * paths never reach are empty stand-ins (BlueprintService a no-op: its mirror
+ * is best-effort and asynchronous). The one stand-in on the authorization
  * path is identity attachment: a test middleware reads `x-test-user`, loads
  * that seeded User row and attaches `{ id, email, role }` exactly as
  * AuthMiddleware does after token verification. WhatsAppService collaborators
@@ -119,8 +139,15 @@ const SEEDED_MOCK = { provider: 'mock', fromNumber: FROM_NUMBER };
 /** The refusal code every D-11 owner-only writer answers. */
 const PROFILE_CODE = 'BUSINESS_PROFILE_OWNER_ONLY';
 
+/** R0-SEC2b: what every Business read answers for a stored metaData.whatsapp. */
+const MASKED_WHATSAPP = { configured: true };
+/** R0-SEC2b: PATCH /identity/businesses/:businessId refuses a metaData.whatsapp write (400). */
+const RESERVED_META_CODE = 'BUSINESS_METADATA_KEY_RESERVED';
+
 let db: any;
 let app: any;
+let ValidationPipeClass: any;
+let UpdateBusinessDtoClass: any;
 let encryptToken: (s: string) => string | null;
 let decryptToken: (s: string) => string | null;
 const fetchCalls: string[] = [];
@@ -242,20 +269,48 @@ beforeAll(async () => {
   const { EntityResolutionService } = await import('../src/core/connectors/entity-resolution.service');
   const { KeyInboxService } = await import('../src/modules/key-inbox/key-inbox.service');
   const { StaffChatBridgeService } = await import('../src/modules/structure/staff-chat-bridge.service');
+  // R0-SEC2b: the identity business routes (GET one, GET list, PATCH).
+  const common = await import('@nestjs/common');
+  ValidationPipeClass = common.ValidationPipe;
+  const { OptionalAuthGuard } = await import('../src/core/auth/optional-auth.guard');
+  const { SupabaseAdminService } = await import('../src/core/auth/supabase-admin.service');
+  const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
+  const { IdentityController } = await import('../src/modules/identity/identity.controller');
+  const { IdentityService } = await import('../src/modules/identity/identity.service');
+  const { IdentitySignupService } = await import('../src/modules/identity/identity-signup.service');
+  const { BusinessContextService } = await import('../src/modules/identity/business-context.service');
+  const { AuthSecurityService } = await import('../src/modules/identity/auth-security.service');
+  const { IdentityPasswordService } = await import('../src/modules/identity/identity-password.service');
+  const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
+  const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
+  const { DefaultTriggersService } = await import('../src/modules/ai/default-triggers.service');
+  ({ UpdateBusinessDto: UpdateBusinessDtoClass } = await import('../src/modules/identity/dto/update-business.dto'));
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [WhatsAppController],
+    controllers: [WhatsAppController, IdentityController],
     providers: [
       PrismaService,
       AuthGuard,
       BusinessGuard,
       ModuleScopeGuard,
+      OptionalAuthGuard,
       WhatsAppService,
+      IdentityService,
       { provide: EventEmitter2, useValue: { emit: () => true } },
       { provide: WebhookIngressLoggerService, useValue: { log: async () => undefined } },
       { provide: EntityResolutionService, useValue: {} },
       { provide: KeyInboxService, useValue: {} },
       { provide: StaffChatBridgeService, useValue: {} },
+      // Not on the business GET or PATCH authorization path.
+      { provide: BlueprintService, useValue: { inferFromOnboarding: async () => null } },
+      { provide: DefaultTriggersService, useValue: {} },
+      { provide: IdentitySignupService, useValue: {} },
+      { provide: BusinessContextService, useValue: {} },
+      { provide: AiUsageService, useValue: {} },
+      { provide: AuthSecurityService, useValue: {} },
+      { provide: IdentityPasswordService, useValue: {} },
+      { provide: SupabaseAdminService, useValue: {} },
+      { provide: REDIS_CLIENT, useValue: {} },
     ],
   }).compile();
 
@@ -756,12 +811,146 @@ describe('R0-SEC2 the webhooks are unchanged (no session, provider checks only)'
 });
 
 /**
- * Review findings this packet cannot close inside its write set
- * (whatsapp.controller.ts, whatsapp.service.ts and these suites). Kept as
- * todos so the gap stays visible in every run of this suite.
+ * R0-SEC2b-WHATSAPP-SECRET-READS: the R0-SEC2 follow-ups SEC2-T01 (review
+ * SEC2-R2) and SEC2-T02 (review SEC2-R1, second writer), real cases now.
+ * SEC2-T03 (review CR-SEC2-2, the web page and drawer) is a jsdom case:
+ * apps/web/src/app/app/whatsapp/__tests__/whatsapp-status-access.test.tsx.
  */
-describe('R0-SEC2 follow-ups outside the write set', () => {
-  it.todo('[SEC2-T01] (review SEC2-R2) GET /identity/businesses/:businessId and GET /identity/businesses answer metaData.whatsapp (phoneNumberId and the credential ciphertexts) to any member, operations:none included: IdentityService.sanitizeBusiness / getBusiness / listBusinesses must strip or mask metaData.whatsapp, and the d11-owner-writes static guard should list it (identity module, outside this write set)');
-  it.todo('[SEC2-T02] (review SEC2-R1, second writer) PATCH /identity/businesses/:businessId merges any metaData key, so an owner can still write metaData.whatsapp (another business\'s credential ciphertext or phoneNumberId) past WhatsAppService.saveConfig\'s refusals: IdentityService.updateBusiness must refuse or drop metaData.whatsapp (identity module, outside this write set)');
-  it.todo('[SEC2-T03] (review CR-SEC2-2) the web WhatsApp page (apps/web/src/app/app/whatsapp/page.tsx) and the manage drawer render a 403 from GET status as "not connected" with a Connect CTA; they must render it as no access (web, outside this write set; after the CR-SEC2-1 repair it reaches only members with operations: none)');
+const getBusinessRoute = (actor: string, b: string) => as(http().get(`/identity/businesses/${b}`), actor);
+const listBusinessesRoute = (actor: string) => as(http().get('/identity/businesses'), actor);
+const patchBusinessRoute = (actor: string, b: string, body: Record<string, unknown>) =>
+  as(http().patch(`/identity/businesses/${b}`), actor).send(body);
+
+/** A Business read: no credential (plaintext or ciphertext), no phoneNumberId, metaData.whatsapp masked, the other keys kept. */
+function expectMaskedBusiness(body: any, label: string) {
+  expectNoSecret(body, label);
+  expect(JSON.stringify(body).includes(PHONE_NUMBER_ID), `${label}: phoneNumberId in ${JSON.stringify(body?.metaData)}`).toBe(false);
+  expect(body?.metaData?.whatsapp, `${label}: metaData.whatsapp`).toEqual(MASKED_WHATSAPP);
+  expect(body?.metaData?.otherKey, `${label}: the other metaData keys are kept`).toBe(`${P}keep-me`);
+}
+
+describe('R0-SEC2b business reads never carry the WhatsApp config (review SEC2-R2)', () => {
+  it('[SEC2-T01] RED-BEFORE (review SEC2-R2): GET /identity/businesses/:businessId answers metaData.whatsapp as {configured:true} only to every reader (STAFF with operations:none, STAFF on role defaults, ADMIN, the owner, the co-owner, the distinguished owner of bizL, SUPER_ADMIN): no credential plaintext or ciphertext, no phoneNumberId, the other metaData keys kept', async () => {
+    await reset(ID.bizW);
+    await reset(ID.bizL);
+    const readers: Array<[string, string]> = [
+      [ID.staffNoOps, ID.bizW], [ID.staff, ID.bizW], [ID.admin, ID.bizW], [ID.owner, ID.bizW],
+      [ID.coOwner, ID.bizW], [ID.legacyOwner, ID.bizL], [ID.superAdmin, ID.bizW],
+    ];
+    for (const [actor, biz] of readers) {
+      const res = await getBusinessRoute(actor, biz);
+      expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect(res.body.id).toBe(biz);
+      expectMaskedBusiness(res.body, `${actor} GET /identity/businesses/${biz}`);
+    }
+    // The read masks the answer only: the stored config is untouched.
+    const stored = await storedWhatsApp(ID.bizW);
+    expect(stored?.phoneNumberId).toBe(PHONE_NUMBER_ID);
+    expect(decryptToken(stored?.accessToken)).toBe(SECRET.accessToken);
+  });
+
+  it('[SEC2-T04] RED-BEFORE (review SEC2-R2): GET /identity/businesses (the workspace list) answers every business\'s metaData.whatsapp masked, to a member with operations:none and to the owner of two businesses; a business with no WhatsApp config has no whatsapp key', async () => {
+    await reset(ID.bizW);
+    await reset(ID.bizO, null);
+    for (const actor of [ID.staffNoOps, ID.owner, ID.staffOwner]) {
+      const res = await listBusinessesRoute(actor);
+      expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(200);
+      expectNoSecret(res.body, `${actor} GET /identity/businesses`);
+      expect(JSON.stringify(res.body).includes(PHONE_NUMBER_ID), `${actor}: phoneNumberId in the list`).toBe(false);
+      const w = (res.body as any[]).find((b) => b.id === ID.bizW);
+      expect(w, `${actor} lists bizW`).toBeTruthy();
+      expectMaskedBusiness(w, `${actor} list bizW`);
+    }
+    const two = await listBusinessesRoute(ID.staffOwner);
+    const o = (two.body as any[]).find((b) => b.id === ID.bizO);
+    expect(o, 'the staff owner lists bizO').toBeTruthy();
+    expect(o.metaData).not.toHaveProperty('whatsapp');
+    expect(o.metaData.otherKey).toBe(`${P}keep-me`);
+    await reset(ID.bizO);
+  });
+
+  it('[SEC2-T05] RED-BEFORE (review SEC2-R2): the owner\'s ordinary metaData edit through PATCH /identity/businesses/:businessId answers 200 with metaData.whatsapp masked, and the stored config stays byte-identical (the mask is never written back)', async () => {
+    await reset(ID.bizW);
+    const before = await storedWhatsApp(ID.bizW);
+    const res = await patchBusinessRoute(ID.owner, ID.bizW, { metaData: { sec2bNote: `${P}note` } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expectNoSecret(res.body, 'owner PATCH response');
+    expect(JSON.stringify(res.body).includes(PHONE_NUMBER_ID), 'phoneNumberId in the PATCH response').toBe(false);
+    expect(res.body.metaData.whatsapp).toEqual(MASKED_WHATSAPP);
+    expect(res.body.metaData.sec2bNote).toBe(`${P}note`);
+    expect(await storedWhatsApp(ID.bizW), 'the stored config is byte-identical').toEqual(before);
+    await reset(ID.bizW);
+  });
+});
+
+describe('R0-SEC2b PATCH /identity/businesses/:businessId never writes metaData.whatsapp (review SEC2-R1, second writer)', () => {
+  /** The shared webhook's routing predicate, over this suite's businesses. */
+  const routedTo = async (id: string) =>
+    (await db.business.findMany({ where: { id: { startsWith: P }, metaData: { path: ['whatsapp', 'phoneNumberId'], equals: id } }, select: { id: true } }))
+      .map((b: { id: string }) => b.id)
+      .sort();
+
+  it('[SEC2-T02] RED-BEFORE (review SEC2-R1): an owner cannot write metaData.whatsapp through the profile PATCH: the owner of bizO sends bizW\'s stored config (credential ciphertext and phoneNumberId), only the phoneNumberId, null, the masked read echoed back, and each beside a profile field and another metaData key: 400 BUSINESS_METADATA_KEY_RESERVED, bizO byte-identical, the webhook predicate still matches bizW alone, no provider traffic', async () => {
+    await reset(ID.bizW);
+    await reset(ID.bizO, { provider: 'mock', fromNumber: '+18685550600' });
+    const victim = await storedWhatsApp(ID.bizW);
+    expect(String(victim?.accessToken).startsWith('enc:v1:')).toBe(true);
+    const before = await businessRowText(ID.bizO);
+    const hostile: Array<[string, Record<string, unknown>]> = [
+      ['bizW stored config', { whatsapp: victim }],
+      ['phoneNumberId only', { whatsapp: { provider: 'meta', phoneNumberId: PHONE_NUMBER_ID } }],
+      ['ciphertext token only', { whatsapp: { provider: 'meta', accessToken: victim?.accessToken } }],
+      ['null (erase)', { whatsapp: null }],
+      ['masked read echoed', { whatsapp: MASKED_WHATSAPP }],
+    ];
+    for (const [label, metaData] of hostile) {
+      for (const body of [{ metaData }, { tagline: `${P}tagline`, metaData: { ...metaData, sec2bNote: `${P}note` } }]) {
+        const res = await patchBusinessRoute(ID.staffOwner, ID.bizO, body);
+        expect(await businessRowText(ID.bizO), `${label}: patch ${res.status}: bizO byte-identical`).toBe(before);
+        expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body?.code, `${label}: refusal code`).toBe(RESERVED_META_CODE);
+        expectNoSecret(res.body, `${label} refusal`);
+      }
+    }
+    expect(await routedTo(PHONE_NUMBER_ID)).toEqual([ID.bizW]);
+    expect(fetchCalls).toEqual([]);
+    await reset(ID.bizO);
+  });
+
+  it('[SEC2-T06] RED-BEFORE (review SEC2-R1): the owner of bizW cannot overwrite or erase its own metaData.whatsapp through the profile PATCH either (saveConfig is the only writer): 400, bizW byte-identical; the same PATCH without the key is accepted and keeps the stored config', async () => {
+    await reset(ID.bizW);
+    const before = await businessRowText(ID.bizW);
+    for (const whatsapp of [{ provider: 'meta', phoneNumberId: '919191919191919', accessToken: `${P}PLAIN_VIA_PROFILE` }, null]) {
+      const res = await patchBusinessRoute(ID.owner, ID.bizW, { metaData: { whatsapp } });
+      expect(await businessRowText(ID.bizW), `patch ${res.status}: bizW byte-identical`).toBe(before);
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      expect(res.body?.code).toBe(RESERVED_META_CODE);
+    }
+    const stored = await storedWhatsApp(ID.bizW);
+    const ok = await patchBusinessRoute(ID.owner, ID.bizW, { metaData: { sec2bNote: `${P}note` } });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    expect(await storedWhatsApp(ID.bizW)).toEqual(stored);
+    await reset(ID.bizW);
+  });
+
+  it('[SEC2-T07] a non-owner (STAFF, ADMIN) sending metaData.whatsapp is refused by the D-11 owner check first (403), the Business row byte-identical', async () => {
+    await reset(ID.bizW);
+    for (const actor of [ID.staff, ID.admin, ID.staffOwner]) {
+      const before = await businessRowText(ID.bizW);
+      const res = await patchBusinessRoute(actor, ID.bizW, { metaData: { whatsapp: { provider: 'meta', phoneNumberId: '929292929292929' } } });
+      expect(await businessRowText(ID.bizW), `${actor}: patch ${res.status}: bizW byte-identical`).toBe(before);
+      expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(403);
+      expectNoSecret(res.body, `${actor} refusal`);
+    }
+  });
+
+  it('[SEC2-T08] the production body pipe (whitelist) keeps metaData.whatsapp inside UpdateBusinessDto.metaData (a nested key of an @IsObject bag is not stripped), so the service refusal is the layer that stops it', async () => {
+    const pipe = new ValidationPipeClass({ whitelist: true, transform: true });
+    const out = await pipe.transform(
+      { metaData: { whatsapp: { phoneNumberId: PHONE_NUMBER_ID } } },
+      { type: 'body', metatype: UpdateBusinessDtoClass, data: undefined },
+    );
+    expect(out).toBeInstanceOf(UpdateBusinessDtoClass);
+    expect(out.metaData).toEqual({ whatsapp: { phoneNumberId: PHONE_NUMBER_ID } });
+  });
 });

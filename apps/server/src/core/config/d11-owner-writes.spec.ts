@@ -19,8 +19,20 @@
  * written by the owner-only completion path). Business.metaData is not
  * owner-only as a bag (R0-09b review CR-2: gamification, SEO, storefront and
  * concierge display state live there and stay open to their routes); its
- * owner-only keys are the setup configuration auto-configure writes
+ * owner-only keys are the setup configuration auto-configure writes, and
+ * (R0-SEC2b) the WhatsApp sending identity, metaData.whatsapp, which
+ * WhatsAppService.saveConfig writes behind assertConfigOwner
  * (OWNER_ONLY_META_KEYS).
+ *
+ * R0-SEC2b-WHATSAPP-SECRET-READS (review SEC2-R1, second writer): the reader
+ * takes a spread identifier inside metaData to copy the stored metaData, so it
+ * cannot see IdentityService.updateBusiness spreading the CALLER's metaData bag
+ * (PATCH /identity/businesses/:businessId). That bag let an owner write
+ * metaData.whatsapp past saveConfig's refusals. D11W-09 pins both halves:
+ * saveConfig is the one writer of metaData.whatsapp the reader finds, and
+ * updateBusiness consults PROFILE_PATCH_RESERVED_META_KEYS (which lists
+ * whatsapp) before its write; test/whatsapp-config-authority (SEC2-T02, T06)
+ * proves the refusal on a real database.
  *
  * WHAT IS READ (typescript AST, every non-test .ts file under apps/server/src):
  *   - every `<x>.business.update|updateMany|upsert(...)` call, and the keys of
@@ -77,13 +89,20 @@ import * as ts from 'typescript';
 
 const SRC = resolve(__dirname, '../..');
 const DTO_FILE = join(SRC, 'modules/identity/dto/update-business.dto.ts');
+const IDENTITY_SERVICE_FILE = join(SRC, 'modules/identity/identity.service.ts');
 
 /** Owner-only Business columns that are not (or no longer) UpdateBusinessDto properties. */
 const EXTRA_OWNER_COLUMNS = ['archetype', 'onboardingComplete', 'onboardingCompletedAt'];
 /** UpdateBusinessDto properties that are not owner-only as a whole (R0-09b review CR-2). */
 const NOT_OWNER_ONLY_AS_A_BAG = ['metaData'];
-/** The setup configuration auto-configure keeps in Business.metaData (R0-09b, case D11-C02). */
-const OWNER_ONLY_META_KEYS = ['conciergeTemplateId', 'conciergeSetupAt', 'paymentMethodsConfigured', 'paymentRecommendations', 'setupMilestones'];
+/**
+ * The setup configuration auto-configure keeps in Business.metaData (R0-09b,
+ * case D11-C02), and the WhatsApp sending identity (R0-SEC2b: D-11 names the
+ * business's sending identity; WhatsAppService.saveConfig is its writer).
+ */
+const OWNER_ONLY_META_KEYS = ['conciergeTemplateId', 'conciergeSetupAt', 'paymentMethodsConfigured', 'paymentRecommendations', 'setupMilestones', 'whatsapp'];
+/** R0-SEC2b: the metaData.whatsapp writer, the only one (the WhatsApp config route). */
+const WHATSAPP_CONFIG_WRITER = 'modules/whatsapp/whatsapp.service.ts#WhatsAppService.saveConfig';
 /** The marker the reader writes for data it cannot see into. */
 const OPAQUE = '<opaque>';
 
@@ -158,6 +177,12 @@ const OWNER_WRITES: Record<string, Entry> = {
     writes: ['invoiceTemplate', 'quoteTemplate'],
     guards: ['isProfileOwner'],
     why: 'Found by this sweep (R0-09f), closed by R0-09g-D11-DOCUMENT-TEMPLATES: PATCH /commerce/businesses/:id/document-templates writes Business.invoiceTemplate and quoteTemplate (UpdateBusinessDto fields). The handler runs FinanceSettingsService.isProfileOwner (the R0-09f owner test) first and refuses a non-owner 403 BUSINESS_PROFILE_OWNER_ONLY before anything is read or written.',
+  },
+  [WHATSAPP_CONFIG_WRITER]: {
+    kind: 'owner',
+    writes: ['metaData.whatsapp'],
+    guards: ['assertConfigOwner'],
+    why: 'R0-SEC2 (D-11 sending identity), listed by R0-SEC2b: PATCH /whatsapp/businesses/:businessId/config runs WhatsAppService.assertConfigOwner (isConfigOwner: OWNER membership, Business.ownerId, SUPER_ADMIN) before saveConfig, which re-encrypts the credentials and refuses foreign ciphertext and a phoneNumberId another business holds. PATCH /identity/businesses/:id refuses the key (PROFILE_PATCH_RESERVED_META_KEYS, D11W-09).',
   },
   'core/connectors/google-suite.service.ts#GoogleSuiteService.handleCallback': {
     kind: 'not-profile',
@@ -666,5 +691,47 @@ describe('R0-09f D-11 static guard: every write of an owner-only Business field 
     expect(sites.flatMap((w) => w.keys).sort()).toEqual(['invoiceTemplate', 'quoteTemplate']);
     expect(sites.filter((w) => !guardedAt(fn, w.call, ['isProfileOwner'])).map((w) => `line ${w.line}`), 'a write not preceded by isProfileOwner').toEqual([]);
     expect(unguardedPaths(fn, ['isProfileOwner']).paths).toEqual([]);
+  });
+
+  // R0-SEC2b-WHATSAPP-SECRET-READS: the enforcement is proven on a real
+  // database by SEC2-T02/T06 of test/whatsapp-config-authority.integration.test.ts.
+  it('[D11W-09] RED-BEFORE (R0-SEC2b): metaData.whatsapp is an owner-only key whose one writer is WhatsAppService.saveConfig behind assertConfigOwner, and IdentityService.updateBusiness (which spreads the caller\'s metaData bag, invisible to the reader) consults PROFILE_PATCH_RESERVED_META_KEYS, listing whatsapp, before its write', () => {
+    expect(OWNER_META.has('metaData.whatsapp'), 'OWNER_ONLY_META_KEYS lists whatsapp').toBe(true);
+    // The one writer the reader finds, guarded on every resolved path.
+    const writers = [...ownerWritesByFn()].filter(([, w]) => w.includes('metaData.whatsapp')).map(([fn]) => fn);
+    expect(writers, 'writers of metaData.whatsapp').toEqual([WHATSAPP_CONFIG_WRITER]);
+    const entry = OWNER_WRITES[WHATSAPP_CONFIG_WRITER];
+    expect(entry?.kind).toBe('owner');
+    expect(unguardedPaths(WHATSAPP_CONFIG_WRITER, ['assertConfigOwner']).paths, 'a path to saveConfig with no assertConfigOwner').toEqual([]);
+    expect(implementsOwnerRule('assertConfigOwner')).toBe(true);
+
+    // The caller-bag writer refuses the key: the reserved list names whatsapp ...
+    const text = readFileSync(IDENTITY_SERVICE_FILE, 'utf8');
+    const sf = ts.createSourceFile(IDENTITY_SERVICE_FILE, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    let reserved: string[] | undefined;
+    const find = (n: ts.Node) => {
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'PROFILE_PATCH_RESERVED_META_KEYS' && n.initializer) {
+        const init = unwrap(n.initializer);
+        if (ts.isArrayLiteralExpression(init)) {
+          reserved = init.elements.filter((e): e is ts.StringLiteral => ts.isStringLiteral(e)).map((e) => e.text);
+        }
+      }
+      ts.forEachChild(n, find);
+    };
+    find(sf);
+    expect(reserved, 'identity.service.ts declares PROFILE_PATCH_RESERVED_META_KEYS as a string array literal').toBeDefined();
+    expect(reserved).toContain('whatsapp');
+    // ... and updateBusiness reads it before its business.update.
+    const fnKey = 'modules/identity/identity.service.ts#IdentityService.updateBusiness';
+    const fn = A.fns.get(fnKey);
+    expect(fn, 'IdentityService.updateBusiness').toBeDefined();
+    const sites = A.writes.filter((w) => w.fn === fnKey);
+    expect(sites.length).toBeGreaterThan(0);
+    const firstWrite = Math.min(...sites.map((w) => w.call.getStart()));
+    let consulted = false;
+    forEachDeep(fn!.node, (n) => {
+      if (ts.isIdentifier(n) && n.text === 'PROFILE_PATCH_RESERVED_META_KEYS' && n.getStart() < firstWrite) consulted = true;
+    });
+    expect(consulted, 'updateBusiness consults PROFILE_PATCH_RESERVED_META_KEYS before it writes').toBe(true);
   });
 });
