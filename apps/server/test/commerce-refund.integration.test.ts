@@ -588,7 +588,9 @@ describe('D-14: a manual refund is a separate negative REFUNDED row beside the S
     expect(reversals[0]).toMatchObject({ type: 'REVERSAL', status: 'POSTED', createdById: ID.ownerA });
     await expectLedgerAgrees(inv, { net: 0, reversals: 1 });
     // A refund reopening to SENT emits no invoice.sent (no customer email) and no paid event.
-    expect(emitted.filter((e) => e.payload?.invoice?.id === inv).map((e) => e.name)).toEqual([]);
+    // V1-42c-INVOICE-STATUS-EVENTS (VR-05): it emits invoice.reopened, the status event the
+    // calendar projection reads (it was nothing, which left the due item COMPLETED).
+    expect(emitted.filter((e) => e.payload?.invoice?.id === inv).map((e) => e.name)).toEqual(['invoice.reopened']);
   });
 
   it('RF-02: 60 + 40 paid (PAID), the 40 refunded -> PARTIALLY_PAID, remaining 40, paidAt cleared; listPayments.remaining and paidAmount agree with computeBalance', async () => {

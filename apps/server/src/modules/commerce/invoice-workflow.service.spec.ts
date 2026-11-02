@@ -601,7 +601,7 @@ describe('V1-29 refund convention (D-14)', () => {
     payments,
   });
 
-  it('RED-BEFORE: the refund reconcile moves a fully refunded PAID invoice to SENT, clears paidAt, posts no COGS and queues no event (no invoice.sent email, no paid event)', async () => {
+  it('RED-BEFORE: the refund reconcile moves a fully refunded PAID invoice to SENT, clears paidAt, posts no COGS and queues only invoice.reopened (no invoice.sent email, no paid event; V1-42c)', async () => {
     const h = build(paidInvoice([ok(100), refunded(100)]));
     const buffer: Array<{ name: string; payload: unknown }> = [];
     const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: buffer, onIllegalTransition: 'keep' });
@@ -609,8 +609,13 @@ describe('V1-29 refund convention (D-14)', () => {
     expect(h.update).toHaveBeenCalledTimes(1);
     expect(h.update.mock.calls[0][0].data).toEqual({ status: 'SENT', paidAt: null });
     expect(h.expensePosting.onProductSold).not.toHaveBeenCalled();
-    expect(buffer).toEqual([]);
-    expect(h.events.emit).not.toHaveBeenCalled();
+    // V1-42c-INVOICE-STATUS-EVENTS (VR-05): the reopen is a status event its
+    // listeners read (the calendar projection), never invoice.sent or a paid
+    // event. It was queued as nothing, which left the calendar's due item
+    // COMPLETED; the real-database proof is test/invoice-status-events.
+    expect(buffer.map((e) => e.name)).toEqual(['invoice.reopened']);
+    expect(buffer[0].payload).toMatchObject({ status: 'SENT', previousStatus: 'PAID', businessId: 'biz_1', eventName: 'invoice.reopened' });
+    expect(h.events.emit, 'buffered for the caller to emit after commit').not.toHaveBeenCalled();
   });
 
   it('the same reopen without onIllegalTransition (provider refund webhooks) also reaches SENT, not a 409', async () => {

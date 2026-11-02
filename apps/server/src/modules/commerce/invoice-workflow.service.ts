@@ -375,9 +375,10 @@ export class InvoiceWorkflowService {
    * the caller's transaction, so the caller's payment write and this
    * reconcile commit or roll back together (an illegal transition, e.g. a
    * payment on a DRAFT invoice, rolls the payment back). With `eventBuffer`,
-   * invoice.paid / invoice.payment_recorded are pushed to the buffer and the
-   * caller emits them after its commit. Without options the behaviour is
-   * unchanged: own $transaction, immediate emit.
+   * invoice.paid / invoice.payment_recorded / invoice.reopened (a refund's
+   * return to SENT, V1-42c) are pushed to the buffer and the caller emits
+   * them after its commit. Without options the behaviour is unchanged: own
+   * $transaction, immediate emit.
    *
    * R0-PL-03 review (ST-PL03-3 / CR-1): `onIllegalTransition` says what to do
    * when the status derived from the payment rows is not reachable from the
@@ -458,6 +459,22 @@ export class InvoiceWorkflowService {
         businessId: updated.businessId,
         balance,
         eventName: 'invoice.payment_recorded',
+      });
+    } else if (next === 'SENT') {
+      // V1-42c-INVOICE-STATUS-EVENTS (VR-05): a refund's D-14 reopen to SENT
+      // (REFUND_REOPENS_TO_SENT, the only way the reconcile reaches SENT) is
+      // a status change its listeners must see: the calendar projection kept
+      // a fully refunded invoice's due item COMPLETED. It is invoice.reopened,
+      // never invoice.sent, so the customer is not emailed or notified again;
+      // it is queued on the same post-commit path as invoice.paid and
+      // invoice.payment_recorded.
+      queue('invoice.reopened', {
+        invoice: updated,
+        businessId: updated.businessId,
+        status: next,
+        previousStatus: current,
+        balance,
+        eventName: 'invoice.reopened',
       });
     }
     return { status: next, balance, changed: true };

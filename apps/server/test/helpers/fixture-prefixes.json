@@ -425,7 +425,7 @@
     {
       "prefix": "v42c_",
       "owner": "apps/server/test/invoice-status-events.integration.test.ts",
-      "packet": "V1-42c-INVOICE-STATUS-EVENTS"
+      "packet": "V1-42 / V1-42c-INVOICE-STATUS-EVENTS"
     },
     {
       "prefix": "v46a_",
