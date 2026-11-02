@@ -26,23 +26,34 @@
  * were indistinguishable. `degraded` distinguishes them.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { ServiceUnavailableException } from '@nestjs/common';
+import { ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { AiOversightService } from './ai-oversight.service';
 
 /** A prisma double whose settings reads throw, or return a real policy. */
-function makePrisma(opts: { readThrows?: boolean; policy?: unknown } = {}) {
+function makePrisma(opts: {
+  readThrows?: boolean;
+  typedReadThrows?: boolean;
+  legacyReadThrows?: boolean;
+  typedPolicy?: unknown;
+  policy?: unknown;
+  legacyValue?: string;
+} = {}) {
   const boom = () => {
     throw new Error('Connection terminated unexpectedly');
   };
   return {
     client: {
       autopilotSettings: {
-        findUnique: opts.readThrows ? vi.fn(boom) : vi.fn(async () => null),
+        findUnique: opts.readThrows || opts.typedReadThrows
+          ? vi.fn(boom)
+          : vi.fn(async () => opts.typedPolicy ?? null),
       },
       aiMemory: {
-        findUnique: opts.readThrows
+        findUnique: opts.readThrows || opts.legacyReadThrows
           ? vi.fn(boom)
-          : vi.fn(async () => (opts.policy ? { value: JSON.stringify(opts.policy) } : null)),
+          : vi.fn(async () => opts.legacyValue !== undefined
+            ? { value: opts.legacyValue }
+            : (opts.policy ? { value: JSON.stringify(opts.policy) } : null)),
         upsert: vi.fn(async () => ({})),
       },
       user: { findUnique: vi.fn(async () => ({ id: 'u1', role: 'SUPER_ADMIN' })) },
@@ -64,6 +75,70 @@ function makeService(prisma: ReturnType<typeof makePrisma>) {
 }
 
 describe('a governance read that fails does not become a permissive policy', () => {
+  it('does not promote permissive legacy after an unresolved typed-policy read failure', async () => {
+    const prisma = makePrisma({
+      typedReadThrows: true,
+      policy: { mode: 'pro_auto', maxAutoTier: 4, autonomyLevel: 4, degraded: false },
+    });
+
+    const settings = await makeService(prisma).getAutonomySettings('biz_1');
+
+    expect(settings.mode).toBe('restricted');
+    expect(settings.degraded).toBe(true);
+    expect(settings.maxAutoTier).toBe(1);
+  });
+
+  it('keeps typed policy authoritative over a permissive legacy record', async () => {
+    const prisma = makePrisma({
+      typedPolicy: {
+        autonomyLevel: 0,
+        blockedTools: ['payments_refund_charge'],
+        approvedTools: [],
+        approvalTimeoutHours: 36,
+      },
+      policy: { mode: 'pro_auto', blockedTools: [] },
+    });
+
+    const settings = await makeService(prisma).getAutonomySettings('biz_1');
+
+    expect(settings.mode).toBe('advisory');
+    expect(settings.blockedTools).toEqual(['payments_refund_charge']);
+    expect(settings.approvalTimeoutHours).toBe(36);
+    expect(settings.degraded).toBeFalsy();
+    expect(prisma.client.aiMemory.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('keeps a failed legacy read degraded after confirmed typed absence', async () => {
+    const settings = await makeService(makePrisma({ legacyReadThrows: true }))
+      .getAutonomySettings('biz_1');
+
+    expect(settings.mode).toBe('restricted');
+    expect(settings.degraded).toBe(true);
+  });
+
+  it('keeps malformed legacy policy degraded after confirmed typed absence', async () => {
+    const settings = await makeService(makePrisma({ legacyValue: '{broken' }))
+      .getAutonomySettings('biz_1');
+
+    expect(settings.mode).toBe('restricted');
+    expect(settings.degraded).toBe(true);
+  });
+
+  it('applies the same failure rule to an explicit transaction reader', async () => {
+    const shared = makePrisma({ policy: { mode: 'pro_auto', maxAutoTier: 4 } });
+    const transaction = makePrisma({
+      typedReadThrows: true,
+      policy: { mode: 'pro_auto', maxAutoTier: 4 },
+    });
+
+    const settings = await makeService(shared).getAutonomySettings('biz_1', transaction.client as never);
+
+    expect(settings.mode).toBe('restricted');
+    expect(settings.degraded).toBe(true);
+    expect(shared.client.autopilotSettings.findUnique).not.toHaveBeenCalled();
+    expect(shared.client.aiMemory.findUnique).not.toHaveBeenCalled();
+  });
+
   it('returns restricted mode when the settings cannot be read', async () => {
     const service = makeService(makePrisma({ readThrows: true }));
 
@@ -98,7 +173,75 @@ describe('a governance read that fails does not become a permissive policy', () 
   });
 });
 
+describe('a caller-supplied mode cannot lift a degraded read', () => {
+  // flow-orchestrator autoExecuteToolForMonitoring calls
+  // evaluate(businessId, toolName, 'pro_auto'). The degraded object has empty
+  // blocklists, so if the explicit mode replaced the degraded 'restricted' the
+  // tool would be auto-approved by a policy nobody could read.
+  for (const tool of ['draft_followup_message', 'payments_refund_charge']) {
+    it(`denies ${tool} under 'pro_auto' when the typed read fails and legacy bans it`, async () => {
+      const prisma = makePrisma({
+        typedReadThrows: true,
+        policy: { mode: 'pro_auto', maxAutoTier: 4, blockedTools: [tool], blockedModules: ['payments', 'crm'] },
+      });
+
+      const decision = await makeService(prisma).evaluate('biz_1', tool, 'pro_auto');
+
+      expect(decision.allowed, decision.reason).toBe(false);
+      expect(decision.reason).toMatch(/could not be read/);
+    });
+  }
+
+  it("denies under 'pro_auto' when both settings reads fail", async () => {
+    const decision = await makeService(makePrisma({ readThrows: true }))
+      .evaluate('biz_1', 'draft_followup_message', 'pro_auto');
+
+    expect(decision.allowed, decision.reason).toBe(false);
+    expect(decision.reason).toMatch(/could not be read/);
+  });
+
+  it("still lets 'pro_auto' auto-approve a tier-1 tool when the read succeeded with no policy", async () => {
+    // Positive control: the refusal is about the failed read, not the mode.
+    const service = makeService(makePrisma());
+    expect(service.getToolTier('draft_followup_message')).toBe(1);
+
+    const decision = await service.evaluate('biz_1', 'draft_followup_message', 'pro_auto');
+
+    expect(decision.allowed, decision.reason).toBe(true);
+    expect(decision.requiresQuickConfirm).toBe(false);
+  });
+});
+
 describe('a settings save never overwrites a policy it could not read', () => {
+  it('refuses policy and audit writes even when legacy succeeds after a typed read failure', async () => {
+    const prisma = makePrisma({
+      typedReadThrows: true,
+      policy: { mode: 'pro_auto', blockedTools: [], blockedModules: [], degraded: false },
+    });
+
+    await expect(
+      makeService(prisma).updateAutonomySettings('biz_1', { approvalTimeoutHours: 12 }, 'u1'),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+
+    expect(prisma.client.aiMemory.upsert).not.toHaveBeenCalled();
+    expect(prisma.client.teamActivityLog.create).not.toHaveBeenCalled();
+  });
+
+  it('still refuses non-admin updates before reading or writing policy', async () => {
+    const prisma = makePrisma({ policy: { mode: 'advisory', blockedTools: ['x'] } });
+    prisma.client.user.findUnique.mockResolvedValue({ id: 'u1', role: 'USER' });
+    prisma.client.membership.findFirst.mockResolvedValue({ role: 'MEMBER' });
+
+    await expect(
+      makeService(prisma).updateAutonomySettings('biz_1', { approvalTimeoutHours: 12 }, 'u1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.client.autopilotSettings.findUnique).not.toHaveBeenCalled();
+    expect(prisma.client.aiMemory.findUnique).not.toHaveBeenCalled();
+    expect(prisma.client.aiMemory.upsert).not.toHaveBeenCalled();
+    expect(prisma.client.teamActivityLog.create).not.toHaveBeenCalled();
+  });
+
   it('refuses the update instead of persisting defaults', async () => {
     const prisma = makePrisma({ readThrows: true });
     const service = makeService(prisma);
@@ -128,5 +271,9 @@ describe('a settings save never overwrites a policy it could not read', () => {
     );
     expect(written.blockedTools, 'an unrelated edit must not drop the blocklist').toContain('x');
     expect(written.degraded, 'the marker describes one read, not the policy').toBeUndefined();
+    expect(prisma.client.teamActivityLog.create).toHaveBeenCalledTimes(1);
+    expect(prisma.client.teamActivityLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ businessId: 'biz_1', userId: 'u1', action: 'ai_governance_updated' }),
+    });
   });
 });
