@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException, ForbiddenException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { Booking, BookingStatus, Prisma } from '@prisma/client';
+import { Booking, BookingStatus, Invoice, Prisma } from '@prisma/client';
 import {
   BookingCompletedPayload,
   BookingConfirmedPayload,
@@ -96,6 +96,54 @@ const holdsSlot = (status: BookingStatus) => !SLOT_RELEASING_STATUSES.includes(s
 
 /** What a status write needs to know about the booking to decide whether it claims a slot. */
 type StatusWriteTarget = Pick<Booking, 'id' | 'businessId' | 'serviceId' | 'staffId' | 'startTime' | 'endTime' | 'status'>;
+
+/**
+ * V1-28 (M42): the statuses a paid invoice confirms. Both hold the slot, as
+ * CONFIRMED does, so the move is a conditional update and never a claim.
+ */
+const AWAITING_CONFIRMATION: BookingStatus[] = ['PENDING', 'UNCONFIRMED'];
+
+/**
+ * V1-28 (CF-43): one booking's final invoice is drawn up under this lock, so
+ * two completions (or a completion and the Create-invoice button) racing for
+ * it draw up one; the second waits and finds it.
+ */
+const FINAL_INVOICE_LOCK_NAMESPACE = 'booking-final-invoice:';
+
+/** D-26: Booking.paymentStatus once a customer cancel has forfeited a paid deposit. */
+const DEPOSIT_FORFEITED = 'DEPOSIT_FORFEITED';
+
+/** D-13: money compared and subtracted in integer cents on the Float columns. */
+const toCents = (amount: number | null | undefined) => Math.round(Number(amount ?? 0) * 100);
+
+/**
+ * V1-28 (CF-43): what drawing up a booking's final invoice did. The final
+ * invoice bills the price LESS the booking's live deposit invoice (not VOID,
+ * not deleted, paid or not: an unpaid deposit is still owed on its own
+ * invoice), so deposit + final == price. NOT_REQUIRED: nothing is owed beyond
+ * the deposit, or there is nothing to bill (free service, no contact).
+ */
+export type FinalInvoiceOutcome =
+  | {
+      status: 'CREATED' | 'EXISTING';
+      invoiceId: string;
+      invoiceNumber: string | null;
+      amount: number;
+      depositInvoiceId: string | null;
+      depositAmount: number;
+    }
+  | { status: 'NOT_REQUIRED'; invoiceId: null; reason: string; depositInvoiceId: string | null; depositAmount: number };
+
+/** The completion response's invoicing outcome: FAILED is explicit, never swallowed (V1-28). */
+export type CompletionInvoicing = FinalInvoiceOutcome | { status: 'FAILED'; invoiceId: null; error: string };
+
+/** D-26: the forfeit recorded on a booking cancelled after its deposit was paid. */
+export interface DepositForfeit {
+  depositInvoiceId: string;
+  invoiceNumber: string;
+  amount: number;
+  currency: string;
+}
 
 /** An instant as a wall clock reads it: calendar day, weekday (0 = Sunday), minutes past midnight. */
 interface WallClock {
@@ -420,6 +468,20 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }),
     );
 
+    // D-26: a cancel after the deposit was paid forfeits it, recorded on the
+    // booking; a booking brought back from CANCELLED holds its deposit again.
+    let depositForfeit: DepositForfeit | null = null;
+    if (status === 'CANCELLED') {
+      depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
+      if (depositForfeit) updated.paymentStatus = DEPOSIT_FORFEITED;
+    } else if (booking.status === 'CANCELLED' && booking.paymentStatus === DEPOSIT_FORFEITED) {
+      const restored = await this.prisma.client.booking.updateMany({
+        where: { id: booking.id, businessId, paymentStatus: DEPOSIT_FORFEITED },
+        data: { paymentStatus: 'DEPOSIT_PAID' },
+      });
+      if (restored.count > 0) updated.paymentStatus = 'DEPOSIT_PAID';
+    }
+
     if (status === 'CONFIRMED' && booking.contactId) {
       this.events.emit('booking.confirmed', {
         booking: updated,
@@ -437,6 +499,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       });
     }
 
+    // V1-28 (CF-43): the invoicing outcome is part of the completion answer.
+    // A failure leaves the booking COMPLETED and says so (invoiceError); it
+    // was logged and swallowed, so the operator could not tell an invoiced
+    // booking from one that was not.
+    let invoicing: CompletionInvoicing | null = null;
     if (status === 'COMPLETED' && booking.contactId) {
       this.events.emit('booking.completed', {
         booking: updated,
@@ -452,7 +519,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         source: 'bookings',
       });
       this.raiseRebookObligation(businessId, updated);
-      await this.autoGenerateInvoiceForCompletedBooking(updated, businessId);
+      invoicing = await this.autoGenerateInvoiceForCompletedBooking(updated, businessId);
     }
 
     if (status === 'CANCELLED' && booking.contactId) {
@@ -484,7 +551,63 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       this.events.emit('booking.no_show', payload);
     }
 
+    if (invoicing) {
+      return {
+        ...updated,
+        invoiceId: invoicing.invoiceId ?? updated.invoiceId,
+        invoicing,
+        invoiceError: invoicing.status === 'FAILED' ? invoicing.error : null,
+      };
+    }
+    if (status === 'CANCELLED') return { ...updated, depositForfeit };
     return updated;
+  }
+
+  /**
+   * D-26: a deposit is forfeit when the customer cancels after paying it. The
+   * forfeit is recorded on the booking (paymentStatus DEPOSIT_FORFEITED) and
+   * on the contact's timeline; nothing moves automatically: the deposit
+   * invoice stays PAID, and no refund, credit note or posting is written. The
+   * owner may refund it by hand through the refund path (a negative refund
+   * row, D-14). The deposit counts as paid when its invoice is PAID in the
+   * table, so a booking whose paymentStatus was never written (before V1-28)
+   * is covered too. Cancelling again records nothing new.
+   */
+  private async forfeitPaidDeposit(
+    businessId: string,
+    booking: Pick<Booking, 'id' | 'contactId' | 'depositInvoiceId'>,
+  ): Promise<DepositForfeit | null> {
+    if (!booking.depositInvoiceId) return null;
+    const deposit = await this.prisma.client.invoice.findFirst({
+      where: { id: booking.depositInvoiceId, businessId, deletedAt: null, status: 'PAID' },
+      select: { id: true, invoiceNumber: true, total: true, currency: true },
+    });
+    if (!deposit) return null;
+    const forfeit: DepositForfeit = {
+      depositInvoiceId: deposit.id,
+      invoiceNumber: deposit.invoiceNumber,
+      amount: toCents(deposit.total) / 100,
+      currency: deposit.currency,
+    };
+    const recorded = await this.prisma.client.booking.updateMany({
+      where: { id: booking.id, businessId, paymentStatus: { in: ['UNPAID', 'DEPOSIT_PAID'] } },
+      data: { paymentStatus: DEPOSIT_FORFEITED },
+    });
+    if (recorded.count === 0) {
+      const current = await this.prisma.client.booking.findUnique({ where: { id: booking.id }, select: { paymentStatus: true } });
+      return current?.paymentStatus === DEPOSIT_FORFEITED ? forfeit : null;
+    }
+    if (booking.contactId) {
+      await this.crm.logContactEvent({
+        businessId,
+        contactId: booking.contactId,
+        type: 'booking.deposit_forfeited',
+        data: { bookingId: booking.id, ...forfeit },
+        actorType: 'USER',
+        source: 'bookings',
+      });
+    }
+    return forfeit;
   }
 
   /**
@@ -496,64 +619,118 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
   async createInvoiceFromBooking(businessId: string, bookingId: string) {
     const booking = await this.prisma.client.booking.findFirst({
       where: { id: bookingId, businessId, deletedAt: null },
-      include: {
-        service: true,
-        contact: { select: { id: true, firstName: true, lastName: true, email: true } },
-      },
+      select: { id: true },
     });
     if (!booking) {
       throw new BadRequestException('Booking not found');
     }
-    if (booking.invoiceId) {
-      const existing = await this.prisma.client.invoice.findUnique({
-        where: { id: booking.invoiceId },
-        select: { id: true, invoiceNumber: true },
-      });
-      if (existing) {
-        return {
-          invoiceId: existing.id,
-          invoiceNumber: existing.invoiceNumber,
-          alreadyExisted: true,
-        };
-      }
+    // V1-28 (CF-43): the same final invoice completion draws up, net of the
+    // deposit; it billed the full price again.
+    const outcome = await this.issueFinalInvoice(businessId, bookingId);
+    if (outcome.status === 'NOT_REQUIRED') {
+      throw new BadRequestException(outcome.reason);
     }
-    if (!booking.contactId || !booking.serviceId || !booking.service) {
-      throw new BadRequestException('Booking is missing a contact or service');
-    }
-    if ((booking.service.price ?? 0) <= 0) {
-      throw new BadRequestException('Service has no price configured');
-    }
-
-    const invoice = await this.commerce.createInvoiceForService(
-      businessId,
-      booking.contactId,
-      booking.service,
-    );
-    if (!invoice) {
-      throw new BadRequestException('Failed to create invoice');
-    }
-    await this.prisma.client.booking.update({
-      where: { id: booking.id },
-      data: { invoiceId: invoice.id },
-    });
-
-    const invoiceWithNumber = invoice as typeof invoice & { invoiceNumber: string };
-    const payload: BookingInvoiceCreatedPayload = {
-      booking: { ...booking, invoiceId: invoice.id },
-      invoice,
-      businessId,
-    };
-    // Single source of truth: RevenueEventListener subscribes to
-    // `booking.invoice_created` and writes the canonical
-    // `invoice.from_booking` row on the contact timeline. Do NOT also
-    // call this.crm.logContactEvent here — that would bypass the bus
-    // and risk duplicate timeline rows.
-    this.events.emit('booking.invoice_created', payload);
     return {
-      invoiceId: invoice.id,
-      invoiceNumber: invoiceWithNumber.invoiceNumber,
-      alreadyExisted: false,
+      invoiceId: outcome.invoiceId,
+      invoiceNumber: outcome.invoiceNumber,
+      alreadyExisted: outcome.status === 'EXISTING',
+      amount: outcome.amount,
+      depositInvoiceId: outcome.depositInvoiceId,
     };
+  }
+
+  /**
+   * V1-28 (CF-43): the booking's final invoice, drawn up once. It bills the
+   * service price less the booking's live deposit invoice (integer cents,
+   * D-13), and its line names the deposit invoice, so deposit + final ==
+   * price; it billed the full price again, so a 100 service with a 25 deposit
+   * was billed 125. A deposit that covers the price leaves nothing to bill.
+   *
+   * Under the booking's advisory lock: the booking is re-read inside it, so of
+   * two callers racing (two completions, or a completion and the Create-invoice
+   * button) one draws the invoice up and the other finds it. The invoice is
+   * created through CommerceService (its own connection, committed); if the
+   * link to the booking then fails, that DRAFT is withdrawn.
+   */
+  private async issueFinalInvoice(businessId: string, bookingId: string): Promise<FinalInvoiceOutcome> {
+    const key = `${FINAL_INVOICE_LOCK_NAMESPACE}${bookingId}`;
+    // Assigned inside the transaction callback; declared through a cast so
+    // the compiler does not narrow them to their initial undefined.
+    let drawn = undefined as string | undefined;
+    let created = undefined as { invoice: Invoice; booking: Booking } | undefined;
+    let outcome: FinalInvoiceOutcome;
+    try {
+      outcome = await this.prisma.client.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+        const booking = await tx.booking.findFirst({ where: { id: bookingId, businessId, deletedAt: null } });
+        if (!booking) throw new NotFoundException('Booking not found');
+        const deposit = booking.depositInvoiceId
+          ? await tx.invoice.findFirst({
+              where: { id: booking.depositInvoiceId, businessId, deletedAt: null, status: { not: 'VOID' } },
+              select: { id: true, invoiceNumber: true, total: true },
+            })
+          : null;
+        const depositCents = deposit ? toCents(deposit.total) : 0;
+        const depositPart = { depositInvoiceId: deposit?.id ?? null, depositAmount: depositCents / 100 };
+
+        if (booking.invoiceId) {
+          const existing = await tx.invoice.findFirst({
+            where: { id: booking.invoiceId, businessId },
+            select: { id: true, invoiceNumber: true, total: true },
+          });
+          if (existing) {
+            return {
+              status: 'EXISTING' as const,
+              invoiceId: existing.id,
+              invoiceNumber: existing.invoiceNumber,
+              amount: toCents(existing.total) / 100,
+              ...depositPart,
+            };
+          }
+        }
+        const notRequired = (reason: string): FinalInvoiceOutcome => ({ status: 'NOT_REQUIRED', invoiceId: null, reason, ...depositPart });
+        if (!booking.contactId || !booking.serviceId) return notRequired('Booking is missing a contact or service');
+        const service = await tx.service.findFirst({ where: { id: booking.serviceId, businessId, deletedAt: null } });
+        if (!service) return notRequired('Booking is missing a contact or service');
+        if ((service.price ?? 0) <= 0) return notRequired('Service has no price configured');
+        const finalCents = toCents(service.price) - depositCents;
+        if (finalCents <= 0) return notRequired('The deposit covers the price; there is no balance to invoice');
+
+        const amount = finalCents / 100;
+        const invoice = await this.commerce.createInvoiceForService(
+          businessId,
+          booking.contactId,
+          service,
+          deposit
+            ? { kind: 'FULL', amountOverride: amount, descriptionSuffix: ` (balance after deposit ${deposit.invoiceNumber})` }
+            : undefined,
+        );
+        if (!invoice) throw new BadRequestException('Failed to create invoice');
+        drawn = invoice.id;
+        await tx.booking.update({ where: { id: booking.id }, data: { invoiceId: invoice.id } });
+        created = { invoice, booking: { ...booking, invoiceId: invoice.id } };
+        return {
+          status: 'CREATED' as const,
+          invoiceId: invoice.id,
+          invoiceNumber: invoice.invoiceNumber,
+          amount,
+          ...depositPart,
+        };
+      }, SLOT_CLAIM_TX_OPTIONS);
+    } catch (err) {
+      await this.withdrawDraftInvoices(businessId, [drawn]);
+      throw err;
+    }
+    if (created) {
+      // Single source of truth: RevenueEventListener subscribes to
+      // `booking.invoice_created` and writes the canonical
+      // `invoice.from_booking` row on the contact timeline. Do NOT also
+      // call this.crm.logContactEvent here — that would bypass the bus
+      // and risk duplicate timeline rows.
+      const payload: BookingInvoiceCreatedPayload = { ...created, businessId };
+      this.events.emit('booking.invoice_created', payload);
+    }
+    return outcome;
   }
 
   async updateBookingNotes(businessId: string, bookingId: string, notes: string) {
@@ -1338,6 +1515,47 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const booking = current
       ? await this.writeBookingStatus(current, 'CONFIRMED', write)
       : await write(this.prisma.client, { id: bookingId });
+    await this.announceConfirmed(booking);
+    return booking;
+  }
+
+  /**
+   * V1-28 (M42): invoice.paid confirms the booking the invoice pays for: the
+   * booking whose final invoice (Booking.invoiceId) or deposit invoice
+   * (Booking.depositInvoiceId) it is, under the event's business, with that
+   * invoice PAID in the table. Only a booking still waiting for confirmation
+   * (PENDING, UNCONFIRMED) moves, by a conditional update, so a completed,
+   * cancelled or no-show booking is never brought back by a payment and a
+   * replay confirms nothing twice. Returns the confirmed booking, or null.
+   */
+  async confirmBookingForPaidInvoice(businessId: string, invoiceId: string) {
+    if (!businessId || !invoiceId) return null;
+    const target = await this.prisma.client.booking.findFirst({
+      where: {
+        businessId,
+        deletedAt: null,
+        status: { in: AWAITING_CONFIRMATION },
+        OR: [
+          { invoiceId, invoice: { is: { businessId, status: 'PAID' } } },
+          { depositInvoiceId: invoiceId, depositInvoice: { is: { businessId, status: 'PAID' } } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (!target) return null;
+    const moved = await this.prisma.client.booking.updateMany({
+      where: { id: target.id, businessId, status: { in: AWAITING_CONFIRMATION } },
+      data: { status: 'CONFIRMED' },
+    });
+    if (moved.count === 0) return null;
+    const booking = await this.prisma.client.booking.findUnique({ where: { id: target.id }, include: { contact: true } });
+    if (!booking) return null;
+    await this.announceConfirmed(booking);
+    return booking;
+  }
+
+  /** booking.confirmed on the bus and on the contact's timeline, for a booking just confirmed by the system. */
+  private async announceConfirmed(booking: Booking & { contact?: BookingConfirmedPayload['contact'] | null }) {
     const payload: BookingConfirmedPayload = {
       booking,
       contact: booking.contact ?? undefined,
@@ -1362,8 +1580,6 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         source: 'bookings',
       });
     }
-    
-    return booking;
   }
 
   async publicCreateBooking(input: {
@@ -1564,46 +1780,62 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       occurredAt: booking.createdAt,
     });
 
+    // V1-28 (D-07: token links only): the customer's own link to the invoice
+    // this booking drew up, /public/invoice/<token>, where its payment state
+    // and receipt are (V1-48, V1-49). The confirmation pages opened the
+    // operator's authenticated receipt, which answers a customer 401.
+    const invoiceUrl = invoice ? await this.customerInvoiceUrl(input.businessId, invoice.id) : undefined;
+    const depositInvoiceUrl = depositInvoice ? await this.customerInvoiceUrl(input.businessId, depositInvoice.id) : undefined;
+
     return {
       success: true,
       bookingId: booking.id,
       invoiceId: invoice?.id,
       depositInvoiceId: depositInvoice?.id,
       depositAmount: depositInvoice?.total ?? 0,
+      invoiceUrl,
+      depositInvoiceUrl,
     };
   }
 
-  private async autoGenerateInvoiceForCompletedBooking(booking: any, businessId: string) {
+  /**
+   * The customer's pay-link URL for an invoice the public create just drew
+   * up, through CommerceService.publicInvoiceUrl (the one place such a URL is
+   * built). Best effort: the booking is written, so a link that cannot be
+   * issued leaves the answer without one rather than failing it.
+   */
+  private async customerInvoiceUrl(businessId: string, invoiceId: string): Promise<string | undefined> {
     try {
-      if (booking.invoiceId) {
-        this.logger.log(`Booking ${booking.id} already has invoice ${booking.invoiceId}, skipping auto-invoice`);
-        return;
-      }
-      if (!booking.contactId || !booking.serviceId) return;
+      return (await this.commerce.publicInvoiceUrl(invoiceId, businessId)) ?? undefined;
+    } catch (e) {
+      this.logger.warn(`No customer link for invoice ${invoiceId}: ${(e as Error).message}`);
+      return undefined;
+    }
+  }
 
-      const service = await this.prisma.client.service.findFirst({
-        where: { id: booking.serviceId, businessId, deletedAt: null },
-      });
-      if (!service || service.price <= 0) return;
-
-      const invoice = await this.commerce.createInvoiceForService(businessId, booking.contactId, service);
-      if (invoice) {
-        await this.prisma.client.booking.update({
-          where: { id: booking.id },
-          data: { invoiceId: invoice.id },
-        });
-        // Emit on the bus so RevenueEventListener writes the canonical
-        // `invoice.from_booking` timeline row exactly once.
-        const payload: BookingInvoiceCreatedPayload = {
-          booking: { ...booking, invoiceId: invoice.id },
-          invoice,
-          businessId,
-        };
-        this.events.emit('booking.invoice_created', payload);
-        this.logger.log(`Auto-generated invoice ${invoice.id} for completed booking ${booking.id}`);
+  /**
+   * The final invoice of a booking just completed (issueFinalInvoice, net of
+   * the deposit), as an outcome: a failure is FAILED with its reason, which
+   * the status route returns as invoiceError (V1-28). It was swallowed.
+   */
+  private async autoGenerateInvoiceForCompletedBooking(
+    booking: { id: string },
+    businessId: string,
+  ): Promise<CompletionInvoicing> {
+    try {
+      const outcome = await this.issueFinalInvoice(businessId, booking.id);
+      if (outcome.status === 'CREATED') {
+        this.logger.log(`Auto-generated invoice ${outcome.invoiceId} for completed booking ${booking.id}`);
       }
-    } catch (err: any) {
-      this.logger.error(`Failed to auto-generate invoice for booking ${booking.id}: ${(err as Error).message}`);
+      return outcome;
+    } catch (err) {
+      const reason = (err as Error)?.message || 'Unknown error';
+      this.logger.error(`Failed to auto-generate invoice for booking ${booking.id}: ${reason}`);
+      return {
+        status: 'FAILED',
+        invoiceId: null,
+        error: `The booking is completed, but its invoice could not be created: ${reason}`,
+      };
     }
   }
 
