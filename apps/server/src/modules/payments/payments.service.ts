@@ -27,6 +27,15 @@ interface GatewayInfo {
 /** What a provider webhook answers. */
 type WebhookAck = { ok: true; received?: boolean; processed?: string };
 
+/**
+ * V1-15c review (SEC-V15C-2, CR-V15C-1): the aborts of a payment transaction
+ * that a second attempt can get past (P2028: the transaction expired or was
+ * closed, typically behind a lock; P2034: a write conflict or deadlock), and
+ * how many attempts recording a completed PayPal capture makes.
+ */
+const TRANSIENT_TX_ABORTS = new Set(['P2028', 'P2034']);
+const PAYPAL_CAPTURE_RECORD_ATTEMPTS = 3;
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -145,14 +154,35 @@ export class PaymentsService {
   }
 
   /**
+   * V1-15c review (SEC-V15C-1, CR-V15C-2) — whether a Payment row with this
+   * provider id is committed. A unique violation alone does not say so: the
+   * payment transaction also writes financial_transactions, whose
+   * (business_id, external_ref) and reversal_of_id are unique too, and a
+   * violation of either rolls the Payment row back with it.
+   */
+  private async paymentRecorded(providerPaymentId: string | undefined): Promise<boolean> {
+    if (!providerPaymentId) return false;
+    const row = await this.prisma.client.payment.findUnique({
+      where: { providerPaymentId },
+      select: { id: true },
+    });
+    return !!row;
+  }
+
+  /**
    * V1-15c — a provider refund whose row another delivery already recorded
    * (unique providerPaymentId) is done; any other failure aborted the refund
    * transaction, so it fails the delivery (and releases its claim) instead of
-   * being acked as processed with nothing recorded.
+   * being acked as processed with nothing recorded. Review (SEC-V15C-1,
+   * CR-V15C-2): the P2002 is tolerated only when the refund's own row is
+   * committed. Two partial refunds of one capture processed together both
+   * reverse the same original posting; the loser fails on
+   * financial_transactions.reversal_of_id and its refund row is rolled back,
+   * so its delivery fails and the provider's redelivery records it.
    */
   private refundAlreadyRecorded(provider: string, refundId: string | undefined) {
-    return (e: unknown): null => {
-      if ((e as { code?: string } | null)?.code !== 'P2002') throw e;
+    return async (e: unknown): Promise<null> => {
+      if ((e as { code?: string } | null)?.code !== 'P2002' || !(await this.paymentRecorded(refundId))) throw e;
       this.logger.warn(`${provider} refund ${refundId} was already recorded by another delivery`);
       return null;
     };
@@ -474,6 +504,11 @@ export class PaymentsService {
 
     const envSecret = process.env.STRIPE_WEBHOOK_SECRET;
     let signatureOk = false;
+    // V1-15c review (SEC-V15C-3): the business whose own secret verified the
+    // delivery. A tenant sets that secret itself (Settings > Payments), so such
+    // a delivery speaks for that tenant only; null when the deployment's
+    // secret (Stripe's alone) verified it.
+    let signedForBusinessId: string | null = null;
     if (envSecret && signatureHeader && this.verifyStripeSignature(rawPayload, signatureHeader, envSecret)) {
       signatureOk = true;
     } else if (candidateInvoiceId) {
@@ -482,8 +517,9 @@ export class PaymentsService {
         include: { business: { select: { metaData: true } } },
       }).catch(() => null);
       const businessSecret = (inv?.business.metaData as Record<string, any> | null)?.stripeWebhookSecret as string | undefined;
-      if (businessSecret && signatureHeader && this.verifyStripeSignature(rawPayload, signatureHeader, businessSecret)) {
+      if (inv && businessSecret && signatureHeader && this.verifyStripeSignature(rawPayload, signatureHeader, businessSecret)) {
         signatureOk = true;
+        signedForBusinessId = inv.businessId;
       }
     }
 
@@ -527,7 +563,7 @@ export class PaymentsService {
         case 'charge.refunded':
         case 'refund.created':
         case 'charge.refund.updated':
-          await this.processStripeRefund(eventType, obj);
+          await this.processStripeRefund(eventType, obj, signedForBusinessId);
           return { ok: true, received: true, processed: eventType };
         default:
           return { ok: true, received: true };
@@ -622,7 +658,7 @@ export class PaymentsService {
     });
   }
 
-  private async processStripeRefund(eventType: string, obj: any): Promise<void> {
+  private async processStripeRefund(eventType: string, obj: any, signedForBusinessId: string | null): Promise<void> {
     // For charge.refunded the object is a Charge with refunds.data[]. For
     // refund.created / charge.refund.updated the object is a Refund itself.
     const refunds: Array<{
@@ -684,10 +720,15 @@ export class PaymentsService {
       // path), the session id with payment_intent stashed in reference
       // (checkout.session.completed path), or the payment_intent id
       // (payment_intent.succeeded path). Try every linkable identifier.
+      // Review (SEC-V15C-3): Payment is outside the tenant extension (M31), so
+      // this lookup spans every tenant. A delivery verified by a tenant's own
+      // secret refunds that tenant's payments only: a charge id of another
+      // tenant is not found, and nothing is written or reversed.
       const lookupIds = [refund.charge, refund.paymentIntent].filter((v): v is string => !!v);
       const original = await this.prisma.client.payment.findFirst({
         where: {
           provider: 'stripe',
+          ...(signedForBusinessId ? { businessId: signedForBusinessId } : {}),
           OR: [
             { providerPaymentId: { in: lookupIds } },
             { reference: { in: lookupIds } },
@@ -697,7 +738,8 @@ export class PaymentsService {
 
       if (!original) {
         this.logger.warn(
-          `Stripe ${eventType} could not locate original payment for charge ${refund.charge} (pi=${refund.paymentIntent ?? 'none'}); skipping`,
+          `Stripe ${eventType} could not locate original payment for charge ${refund.charge} (pi=${refund.paymentIntent ?? 'none'})` +
+            `${signedForBusinessId ? ` of business ${signedForBusinessId}, whose secret signed it` : ''}; skipping`,
         );
         continue;
       }
@@ -1647,47 +1689,15 @@ export class PaymentsService {
     // V1-46b review (SEC-V46B-3): before anything is captured or written.
     await this.assertPaypalOrderForInvoice(paypal.ordersController, orderId, invoice);
 
+    // Review (SEC-V15C-2, CR-V15C-1): this try covers PayPal's capture call
+    // alone. Only a capture that did not happen is recorded FAILED and
+    // announced as failed; recording a capture PayPal completed is below.
+    let result: Awaited<ReturnType<OrdersController['captureOrder']>>['result'];
     try {
-      const { result } = await paypal.ordersController.captureOrder({
+      ({ result } = await paypal.ordersController.captureOrder({
         id: orderId,
         prefer: 'return=representation',
-      });
-
-      if (result.status === 'COMPLETED') {
-        const captureId = result.purchaseUnits?.[0]?.payments?.captures?.[0]?.id || orderId;
-
-        // V1-15c: the captured payment and its posting commit together (the
-        // door every provider settlement uses); payment.create left it unposted.
-        await this.createPaymentWithPosting({
-          provider: 'paypal',
-          providerPaymentId: captureId,
-          amount: invoice.total,
-          currency: invoice.currency,
-          status: 'SUCCESSFUL',
-          invoiceId,
-          businessId: invoice.businessId,
-        });
-
-        await this.invoiceWorkflow.reconcileFromPayments(invoiceId).catch((e) => {
-          this.logger.warn(`PayPal capture reconcile failed for invoice ${invoiceId}: ${e instanceof Error ? e.message : e}`);
-        });
-
-        const payer = result.payer as { emailAddress?: string; name?: { givenName?: string; surname?: string } } | undefined;
-        this.paypalConnector?.emitPaymentReceived(invoice.businessId, {
-          amount: Number(invoice.total),
-          currency: invoice.currency,
-          invoiceId,
-          payerEmail: payer?.emailAddress,
-          payerName: payer?.name ? `${payer.name.givenName ?? ''} ${payer.name.surname ?? ''}`.trim() : undefined,
-          externalId: captureId,
-        }).catch((e) => this.logger.warn(`PayPal connector event emission failed: ${e.message}`));
-      }
-
-      return {
-        id: result.id,
-        status: result.status,
-        payer: result.payer,
-      };
+      }));
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : 'Unknown error';
       this.logger.error(`PayPal capture failed for order ${orderId}: ${errMsg}`);
@@ -1719,6 +1729,73 @@ export class PaymentsService {
 
       throw new Error('Failed to capture PayPal order', { cause: error });
     }
+
+    if (result.status === 'COMPLETED') {
+      const captureId = result.purchaseUnits?.[0]?.payments?.captures?.[0]?.id || orderId;
+
+      // PayPal has taken the money: from here nothing is recorded FAILED,
+      // nothing is announced as failed and the payer is not told to pay again.
+      // V1-15c: the captured payment and its posting commit together (the
+      // door every provider settlement uses); payment.create left it unposted.
+      // Review (SEC-V15C-2, CR-V15C-1): that transaction can abort. An abort
+      // that PayPal's own PAYMENT.CAPTURE.COMPLETED delivery caused by
+      // recording this capture first (P2002) leaves it recorded; a transient
+      // abort (P2028 behind a lock, P2034 a deadlock) is retried; when the
+      // retries are spent the capture is left to that delivery, whose claim a
+      // failure releases, so PayPal's redelivery records it (V1-15c).
+      let recorded: 'here' | 'elsewhere' | 'not' = 'not';
+      for (let attempt = 1; recorded === 'not'; attempt += 1) {
+        try {
+          await this.createPaymentWithPosting({
+            provider: 'paypal',
+            providerPaymentId: captureId,
+            amount: invoice.total,
+            currency: invoice.currency,
+            status: 'SUCCESSFUL',
+            invoiceId,
+            businessId: invoice.businessId,
+          });
+          recorded = 'here';
+        } catch (e: unknown) {
+          if (await this.paymentRecorded(captureId).catch(() => false)) {
+            recorded = 'elsewhere';
+            break;
+          }
+          const code = (e as { code?: string } | null)?.code;
+          if (attempt < PAYPAL_CAPTURE_RECORD_ATTEMPTS && code && TRANSIENT_TX_ABORTS.has(code)) continue;
+          this.logger.error(
+            `PayPal captured order ${orderId} (capture ${captureId}, invoice ${invoiceId}) but it could not be recorded after ` +
+              `${attempt} attempt(s): ${e instanceof Error ? e.message : e}. PayPal's PAYMENT.CAPTURE.COMPLETED delivery records it.`,
+          );
+          break;
+        }
+      }
+
+      if (recorded !== 'not') {
+        await this.invoiceWorkflow.reconcileFromPayments(invoiceId).catch((e) => {
+          this.logger.warn(`PayPal capture reconcile failed for invoice ${invoiceId}: ${e instanceof Error ? e.message : e}`);
+        });
+      }
+
+      // Announced once, by whichever writer recorded it (the webhook announces its own).
+      if (recorded === 'here') {
+        const payer = result.payer as { emailAddress?: string; name?: { givenName?: string; surname?: string } } | undefined;
+        this.paypalConnector?.emitPaymentReceived(invoice.businessId, {
+          amount: Number(invoice.total),
+          currency: invoice.currency,
+          invoiceId,
+          payerEmail: payer?.emailAddress,
+          payerName: payer?.name ? `${payer.name.givenName ?? ''} ${payer.name.surname ?? ''}`.trim() : undefined,
+          externalId: captureId,
+        }).catch((e) => this.logger.warn(`PayPal connector event emission failed: ${e.message}`));
+      }
+    }
+
+    return {
+      id: result.id,
+      status: result.status,
+      payer: result.payer,
+    };
   }
 
   /**

@@ -121,7 +121,20 @@
  *           one SUCCESSFUL row and its INCOME posting; the invoice is PAID. At
  *           cb50b388 it wrote the row with payment.create and posted nothing
  *   LWD-25  the capture's row and posting commit together: when the posting
- *           aborts, no SUCCESSFUL row is left unposted
+ *           aborts, no SUCCESSFUL row is left unposted. Review (SEC-V15C-2,
+ *           CR-V15C-1): PayPal has already taken the money, so the abort is
+ *           not a failed capture: the call answers COMPLETED with no FAILED row
+ *           and no payment.failed event (at 1504b037: 'Failed to capture PayPal
+ *           order', a FAILED row for the whole total and emitPaymentFailed);
+ *           the transient abort is retried a bounded number of times, then
+ *           PayPal's PAYMENT.CAPTURE.COMPLETED delivery records the capture
+ *           once, and a second payment of the invoice is refused
+ *   LWD-25b a transient abort of the first recording attempt is retried: the
+ *           capture is recorded and posted once and announced once
+ *   LWD-25c PayPal's own PAYMENT.CAPTURE.COMPLETED delivery records the capture
+ *           between the capture call and its recording (P2002 on the capture
+ *           id): the call answers COMPLETED, nothing FAILED, one row posted
+ *           once, announced once (by the delivery)
  *   LWD-26  the dimension breakdowns read every ledger row past the 1000-row
  *           read cap: with 1001 invoice postings, revenue by customer and by
  *           product count all 1001; with 1001 bills, expense by vendor and by
@@ -222,6 +235,8 @@ const ID = {
   contactCapture: `${P}contactCapture`,
   invCapture: `${P}invCapture`,
   invCaptureAbort: `${P}invCaptureAbort`,
+  invCaptureRetry: `${P}invCaptureRetry`, // review CR-V15C-1: a transient abort of the recording is retried
+  invCaptureRace: `${P}invCaptureRace`, // review SEC-V15C-2: PayPal's webhook records the capture first
   bizBreak: `${P}bizBreak`, // more ledger rows in a dimension breakdown than one read returns
   customerBreak: `${P}customerBreak`,
   vendorBreak: `${P}vendorBreak`,
@@ -1819,17 +1834,69 @@ describe('review LC-3: the cash-basis P&L and cashflow read every cash transacti
 });
 
 describe('V1-15c: a PayPal capture records its payment through the posting door', () => {
-  /** The PayPal SDK client, stubbed at getPaypalClient: the order is this invoice's, and it captures. */
-  function stubPaypal(invoiceId: string, orderId: string, captureId: string) {
+  /**
+   * The PayPal SDK client, stubbed at getPaypalClient: the order is this
+   * invoice's, and it captures. `duringCapture` runs inside the capture call,
+   * after PayPal has taken the money and before it answers.
+   */
+  function stubPaypal(invoiceId: string, orderId: string, captureId: string, duringCapture?: () => Promise<void>) {
     return vi.spyOn(payments as any, 'getPaypalClient').mockReturnValue({
       client: {},
       ordersController: {
         getOrder: async () => ({ result: { purchaseUnits: [{ customId: invoiceId, amount: { value: '100.00' } }] } }),
-        captureOrder: async () => ({
-          result: { id: orderId, status: 'COMPLETED', purchaseUnits: [{ payments: { captures: [{ id: captureId }] } }], payer: {} },
-        }),
+        captureOrder: async () => {
+          await duringCapture?.();
+          return {
+            result: { id: orderId, status: 'COMPLETED', purchaseUnits: [{ payments: { captures: [{ id: captureId }] } }], payer: {} },
+          };
+        },
       },
     });
+  }
+
+  /** The PayPal connector, a recorder of the events a capture announces (the harness builds PaymentsService without one). */
+  function recordConnector() {
+    const connector = {
+      emitPaymentReceived: vi.fn(async () => undefined),
+      emitPaymentFailed: vi.fn(async () => undefined),
+    };
+    (payments as any).paypalConnector = connector;
+    return { connector, restore: () => ((payments as any).paypalConnector = undefined) };
+  }
+
+  /** PayPal's PAYMENT.CAPTURE.COMPLETED delivery for `captureId` (its signature verification, a network call, stubbed). */
+  async function captureWebhook(eventId: string, captureId: string, invoiceId: string) {
+    const verify = vi.spyOn(payments as any, 'verifyPaypalSignature').mockResolvedValue(true);
+    try {
+      return await payments.handlePaypalWebhook(
+        JSON.stringify({
+          id: eventId,
+          event_type: 'PAYMENT.CAPTURE.COMPLETED',
+          resource: { id: captureId, custom_id: invoiceId, amount: { value: '100.00', currency_code: 'TTD' } },
+        }),
+        {},
+      );
+    } finally {
+      verify.mockRestore();
+    }
+  }
+
+  async function captureRows(invoiceId: string): Promise<string[]> {
+    const rows = await db.payment.findMany({ where: { invoiceId }, orderBy: { createdAt: 'asc' } });
+    return rows.map((p: any) => `${p.provider}:${p.providerPaymentId}:${p.status}:${Number(p.amount)}`);
+  }
+
+  async function capturePostings(invoiceId: string): Promise<string[]> {
+    const rows = await db.payment.findMany({ where: { invoiceId }, select: { id: true } });
+    const txns = await db.financialTransaction.findMany({
+      where: { sourceType: 'Payment', sourceId: { in: rows.map((p: any) => p.id) } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return txns.map((t: any) => `${t.type}:${t.status}:${Number(t.amount)}`);
+  }
+
+  function p2028(): Error {
+    return Object.assign(new Error('Transaction already closed (injected by V1-15c)'), { code: 'P2028' });
   }
 
   beforeAll(async () => {
@@ -1837,6 +1904,8 @@ describe('V1-15c: a PayPal capture records its payment through the posting door'
     await db.contact.create({ data: { id: ID.contactCapture, businessId: ID.bizCapture, firstName: 'V15A', lastName: 'Capture', email: `${P}capture@test.local` } });
     await seedInvoice(ID.invCapture, ID.bizCapture, ID.contactCapture, 50, 100, 'TTD', 'SENT');
     await seedInvoice(ID.invCaptureAbort, ID.bizCapture, ID.contactCapture, 51, 100, 'TTD', 'SENT');
+    await seedInvoice(ID.invCaptureRetry, ID.bizCapture, ID.contactCapture, 52, 100, 'TTD', 'SENT');
+    await seedInvoice(ID.invCaptureRace, ID.bizCapture, ID.contactCapture, 53, 100, 'TTD', 'SENT');
   }, 60_000);
 
   it('LWD-24 (V1-15c): capturePaypalOrder records one SUCCESSFUL row and posts it once; the invoice is PAID', async () => {
@@ -1854,23 +1923,94 @@ describe('V1-15c: a PayPal capture records its payment through the posting door'
     await expectBalanced(ID.bizCapture);
   });
 
-  it('LWD-25 (V1-15c): when the capture\'s posting aborts, no SUCCESSFUL row is left unposted', async () => {
+  it("LWD-25 (V1-15c; review SEC-V15C-2, CR-V15C-1): when the captured payment's transaction aborts, no SUCCESSFUL row is left unposted, nothing is recorded FAILED or announced as failed for money PayPal took, PayPal's capture delivery records it once, and the invoice is not paid twice", async () => {
     const revenuePosting = (payments as any).revenuePosting;
-    const abort = vi.spyOn(revenuePosting, 'onPaymentRecorded').mockRejectedValue(
-      Object.assign(new Error('Transaction already closed (injected by V1-15c)'), { code: 'P2028' }),
-    );
+    const { connector, restore } = recordConnector();
+    const abort = vi.spyOn(revenuePosting, 'onPaymentRecorded').mockRejectedValue(p2028());
     const spy = stubPaypal(ID.invCaptureAbort, `${P}order_abort`, `${P}cap_abort`);
     try {
-      await expect(payments.capturePaypalOrder(`${P}order_abort`, ID.invCaptureAbort)).rejects.toThrow(/Failed to capture PayPal order/);
+      // At 1504b037: rejected 'Failed to capture PayPal order', a FAILED row for the whole total and emitPaymentFailed.
+      expect(await payments.capturePaypalOrder(`${P}order_abort`, ID.invCaptureAbort)).toMatchObject({ id: `${P}order_abort`, status: 'COMPLETED' });
+      expect(abort, 'the transient abort is retried, a bounded number of times').toHaveBeenCalledTimes(3);
     } finally {
       spy.mockRestore();
       abort.mockRestore();
     }
-    const rows = await db.payment.findMany({ where: { invoiceId: ID.invCaptureAbort } });
     // At cb50b388: one SUCCESSFUL row with no posting (the posting was never attempted).
-    expect(rows.filter((p: any) => p.status === 'SUCCESSFUL')).toEqual([]);
-    expect(await db.financialTransaction.count({ where: { sourceType: 'Payment', sourceId: { in: rows.map((p: any) => p.id) } } })).toBe(0);
+    expect(await captureRows(ID.invCaptureAbort), 'no SUCCESSFUL row left unposted, and no FAILED row for money PayPal took').toEqual([]);
+    expect(connector.emitPaymentFailed, 'no payment.failed for a capture PayPal completed').not.toHaveBeenCalled();
+    expect(connector.emitPaymentReceived).not.toHaveBeenCalled();
     expect((await db.invoice.findUnique({ where: { id: ID.invCaptureAbort } })).status).toBe('SENT');
+
+    // PayPal's own delivery of the capture records it, once and posted (its claim is released when it fails: WDD-02).
+    expect(await captureWebhook(`${P}WH-cap_abort`, `${P}cap_abort`, ID.invCaptureAbort)).toEqual({
+      ok: true,
+      received: true,
+      processed: 'PAYMENT.CAPTURE.COMPLETED',
+    });
+    restore();
+    expect(await captureRows(ID.invCaptureAbort)).toEqual([`paypal:${P}cap_abort:SUCCESSFUL:100`]);
+    expect(await capturePostings(ID.invCaptureAbort)).toEqual(['INCOME:POSTED:100']);
+    expect((await db.invoice.findUnique({ where: { id: ID.invCaptureAbort } })).status).toBe('PAID');
+
+    // CR-V15C-1's double charge: at 1504b037 the invoice stayed SENT after the FAILED capture and a second capture was taken.
+    const again = stubPaypal(ID.invCaptureAbort, `${P}order_abort2`, `${P}cap_abort2`);
+    try {
+      await expect(payments.capturePaypalOrder(`${P}order_abort2`, ID.invCaptureAbort)).rejects.toThrow(/already paid/);
+    } finally {
+      again.mockRestore();
+    }
+    expect(await captureRows(ID.invCaptureAbort)).toEqual([`paypal:${P}cap_abort:SUCCESSFUL:100`]);
+    await expectBalanced(ID.bizCapture);
+  });
+
+  it('LWD-25b (review CR-V15C-1): a transient abort of the first recording attempt is retried: the capture is recorded and posted once, announced once, nothing FAILED', async () => {
+    const revenuePosting = (payments as any).revenuePosting;
+    const { connector, restore } = recordConnector();
+    const real = revenuePosting.onPaymentRecorded.bind(revenuePosting);
+    let calls = 0;
+    const abort = vi.spyOn(revenuePosting, 'onPaymentRecorded').mockImplementation(async (...args: unknown[]) => {
+      calls += 1;
+      if (calls === 1) throw p2028();
+      return real(...args);
+    });
+    const spy = stubPaypal(ID.invCaptureRetry, `${P}order_retry`, `${P}cap_retry`);
+    try {
+      expect(await payments.capturePaypalOrder(`${P}order_retry`, ID.invCaptureRetry)).toMatchObject({ id: `${P}order_retry`, status: 'COMPLETED' });
+    } finally {
+      spy.mockRestore();
+      abort.mockRestore();
+      restore();
+    }
+    expect(calls).toBe(2);
+    expect(await captureRows(ID.invCaptureRetry)).toEqual([`paypal:${P}cap_retry:SUCCESSFUL:100`]);
+    expect(await capturePostings(ID.invCaptureRetry)).toEqual(['INCOME:POSTED:100']);
+    expect(connector.emitPaymentReceived).toHaveBeenCalledTimes(1);
+    expect(connector.emitPaymentFailed).not.toHaveBeenCalled();
+    expect((await db.invoice.findUnique({ where: { id: ID.invCaptureRetry } })).status).toBe('PAID');
+    await expectBalanced(ID.bizCapture);
+  });
+
+  it("LWD-25c (review SEC-V15C-2): PayPal's capture delivery records the capture before the capture call does (P2002 on the capture id): the call answers COMPLETED, nothing FAILED, one row posted once, announced once", async () => {
+    const { connector, restore } = recordConnector();
+    let delivered: unknown;
+    const spy = stubPaypal(ID.invCaptureRace, `${P}order_race`, `${P}cap_race`, async () => {
+      delivered = await captureWebhook(`${P}WH-cap_race`, `${P}cap_race`, ID.invCaptureRace);
+    });
+    try {
+      // At 1504b037: rejected 'Failed to capture PayPal order' with a FAILED row and emitPaymentFailed, though the capture is recorded.
+      expect(await payments.capturePaypalOrder(`${P}order_race`, ID.invCaptureRace)).toMatchObject({ id: `${P}order_race`, status: 'COMPLETED' });
+    } finally {
+      spy.mockRestore();
+      restore();
+    }
+    expect(delivered).toEqual({ ok: true, received: true, processed: 'PAYMENT.CAPTURE.COMPLETED' });
+    expect(await captureRows(ID.invCaptureRace)).toEqual([`paypal:${P}cap_race:SUCCESSFUL:100`]);
+    expect(await capturePostings(ID.invCaptureRace)).toEqual(['INCOME:POSTED:100']);
+    expect(connector.emitPaymentFailed).not.toHaveBeenCalled();
+    expect(connector.emitPaymentReceived, 'announced by the delivery that recorded it, not again by the capture').toHaveBeenCalledTimes(1);
+    expect((await db.invoice.findUnique({ where: { id: ID.invCaptureRace } })).status).toBe('PAID');
+    await expectBalanced(ID.bizCapture);
   });
 });
 

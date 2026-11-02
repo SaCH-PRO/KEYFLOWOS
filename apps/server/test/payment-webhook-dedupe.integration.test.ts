@@ -34,7 +34,23 @@
  *           original posting once
  *   WDD-06  (control) two concurrent deliveries of one Stripe event record and
  *           post the payment once, and both are answered 201
- *   WDD-07  the ledger of the tenant balances, and every claim left is one whose
+ *
+ *   Review repairs (SEC-V15C-1, CR-V15C-2, SEC-V15C-3):
+ *
+ *   WDD-08  two partial Stripe refunds of one charge delivered together: both
+ *           refund transactions reverse the same original posting, the loser
+ *           fails on financial_transactions.reversal_of_id (a P2002 that is not
+ *           its own refund row) and its row is rolled back. That delivery is a
+ *           500 with its claim released (it was acked as processed and the
+ *           refund was never recorded); its redelivery records it
+ *   WDD-09  the same for two PayPal PAYMENT.CAPTURE.REFUNDED deliveries of one
+ *           capture (PayPal sends no cumulative event that would heal it)
+ *   WDD-10  a Stripe refund signed with a tenant's OWN webhook secret refunds
+ *           that tenant's payments only: one naming its own invoice and another
+ *           tenant's charge writes nothing on the victim and reverses nothing;
+ *           the victim's own signed refund of that charge is recorded (control)
+ *
+ *   WDD-07  the ledger of each tenant balances, and every claim left is one whose
  *           event was handled
  *
  * Nothing on the boundary is mocked: PrismaService, PublicRateLimitGuard (on a
@@ -68,6 +84,8 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 const P = 'v15c_';
 /** The business's own Stripe webhook secret (business.metaData.stripeWebhookSecret), so no global env is touched. */
 const STRIPE_SECRET = `whsec_${P}stripe`;
+/** Another tenant's own Stripe webhook secret (WDD-10). */
+const STRIPE_SECRET_B = `whsec_${P}stripeB`;
 const PREVIOUS_RATE_LIMIT_NS = process.env.RATE_LIMIT_KEY_NAMESPACE;
 
 const ID = {
@@ -80,6 +98,14 @@ const ID = {
   invWipay: `${P}invWipay`,
   invRefund: `${P}invRefund`,
   invRace: `${P}invRace`,
+  // Review repairs (SEC-V15C-1, CR-V15C-2, SEC-V15C-3)
+  invStripeSplit: `${P}invStripeSplit`, // two partial Stripe refunds of one charge, together
+  invPaypalSplit: `${P}invPaypalSplit`, // two partial PayPal refunds of one capture, together
+  invForge: `${P}invForge`, // the invoice a forged refund names in its metadata (biz's own)
+  ownerB: `${P}ownerB`,
+  bizB: `${P}bizB`, // the tenant whose charge the forged refund names
+  contactB: `${P}contactB`,
+  invVictim: `${P}invVictim`,
 };
 
 let db: any;
@@ -123,11 +149,11 @@ function agent() {
   return request(app.getHttpServer());
 }
 
-/** A Stripe delivery of `event`, signed with the business's webhook secret as Stripe signs it. */
-function stripe(event: Record<string, unknown>) {
+/** A Stripe delivery of `event`, signed with a business's webhook secret (biz's by default) as Stripe signs it. */
+function stripe(event: Record<string, unknown>, secret = STRIPE_SECRET) {
   const raw = JSON.stringify(event);
   const t = Math.floor(Date.now() / 1000);
-  const signature = `t=${t},v1=${createHmac('sha256', STRIPE_SECRET).update(`${t}.${raw}`).digest('hex')}`;
+  const signature = `t=${t},v1=${createHmac('sha256', secret).update(`${t}.${raw}`).digest('hex')}`;
   return agent().post('/payments/stripe/webhook').set('content-type', 'application/json').set('stripe-signature', signature).send(raw);
 }
 
@@ -167,6 +193,34 @@ function abortPostingCall(method: 'onPaymentRecorded' | 'onPaymentRefunded', nth
   return () => spy.mockRestore();
 }
 
+/**
+ * Hold the first `n` calls of RevenuePostingService.onPaymentRefunded (each
+ * made inside a refund transaction, after its refund row is written) until all
+ * `n` have arrived, or `ms` passed; then each runs the real posting. The `n`
+ * refund transactions reach the reversal of one original together.
+ */
+function refundBarrier(n = 2, ms = 3_000): () => void {
+  const real = (revenuePosting as any).onPaymentRefunded.bind(revenuePosting);
+  let arrived = 0;
+  let release: () => void = () => undefined;
+  const together = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const timer = setTimeout(() => release(), ms);
+  const spy = vi.spyOn(revenuePosting as any, 'onPaymentRefunded').mockImplementation(async (...args: unknown[]) => {
+    arrived += 1;
+    if (arrived <= n) {
+      if (arrived === n) release();
+      await together;
+    }
+    return real(...args);
+  });
+  return () => {
+    clearTimeout(timer);
+    spy.mockRestore();
+  };
+}
+
 async function rowsOf(invoiceId: string): Promise<string[]> {
   const rows = await db.payment.findMany({ where: { invoiceId }, orderBy: { createdAt: 'asc' } });
   return rows.map((p: any) => `${p.provider}:${p.providerPaymentId}:${p.status}:${Number(p.amount)}`);
@@ -189,7 +243,7 @@ async function invoiceStatus(id: string): Promise<string> {
   return (await db.invoice.findUnique({ where: { id }, select: { status: true } })).status;
 }
 
-async function seedInvoice(id: string, n: number, total: number) {
+async function seedInvoice(id: string, n: number, total: number, businessId: string = ID.biz, contactId: string = ID.contact) {
   await db.invoice.create({
     data: {
       id,
@@ -198,8 +252,8 @@ async function seedInvoice(id: string, n: number, total: number) {
       subtotal: total,
       total,
       currency: 'TTD',
-      businessId: ID.biz,
-      contactId: ID.contact,
+      businessId,
+      contactId,
       items: { create: [{ id: `${id}_item1`, description: `v15c item ${n}`, quantity: 1, unitPrice: total, total }] },
     },
   });
@@ -272,10 +326,30 @@ beforeAll(async () => {
   await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(ID.biz);
   await db.contact.create({ data: { id: ID.contact, businessId: ID.biz, firstName: 'V15C', lastName: 'Payer', email: `${P}payer@test.local` } });
   let n = 0;
-  for (const id of [ID.invStripe, ID.invPaypal, ID.invPaypalOrder, ID.invWipay, ID.invRefund, ID.invRace]) {
+  for (const id of [
+    ID.invStripe,
+    ID.invPaypal,
+    ID.invPaypalOrder,
+    ID.invWipay,
+    ID.invRefund,
+    ID.invRace,
+    ID.invStripeSplit,
+    ID.invPaypalSplit,
+    ID.invForge,
+  ]) {
     n += 1;
     await seedInvoice(id, n, 100);
   }
+
+  // Another tenant with its own Stripe webhook secret (WDD-10).
+  await db.user.create({ data: { id: ID.ownerB, email: `${P}ownerB@test.local`, role: 'USER' } });
+  await db.business.create({
+    data: { id: ID.bizB, name: 'V15C Biz B', ownerId: ID.ownerB, currency: 'TTD', accountingBasis: 'CASH', metaData: { stripeWebhookSecret: STRIPE_SECRET_B } },
+  });
+  await db.membership.create({ data: { id: `${ID.bizB}_m`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
+  await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizB);
+  await db.contact.create({ data: { id: ID.contactB, businessId: ID.bizB, firstName: 'V15C', lastName: 'Victim', email: `${P}victim@test.local` } });
+  await seedInvoice(ID.invVictim, 50, 100, ID.bizB, ID.contactB);
 }, 120_000);
 
 afterAll(async () => {
@@ -288,10 +362,12 @@ afterAll(async () => {
 });
 
 describe('fixture sanity (real rows)', () => {
-  it('seeded one tenant with a chart of accounts and six SENT invoices, with no payment and no claim', async () => {
+  it('seeded two tenants with a chart of accounts and SENT invoices (nine and one), with no payment and no claim', async () => {
     expect(await db.chartOfAccount.count({ where: { businessId: ID.biz } })).toBeGreaterThan(5);
-    expect(await db.invoice.count({ where: { businessId: ID.biz, status: 'SENT' } })).toBe(6);
-    expect(await db.payment.count({ where: { businessId: ID.biz } })).toBe(0);
+    expect(await db.chartOfAccount.count({ where: { businessId: ID.bizB } })).toBeGreaterThan(5);
+    expect(await db.invoice.count({ where: { businessId: ID.biz, status: 'SENT' } })).toBe(9);
+    expect(await db.invoice.count({ where: { businessId: ID.bizB, status: 'SENT' } })).toBe(1);
+    expect(await db.payment.count({ where: { businessId: { in: [ID.biz, ID.bizB] } } })).toBe(0);
     expect(await db.webhookEvent.count({ where: { providerEventId: { startsWith: P } } })).toBe(0);
   });
 });
@@ -477,20 +553,159 @@ describe('V1-15c: a provider delivery whose payment transaction aborts is not ac
     expect(await claims('stripe', event.id)).toBe(1);
   });
 
-  it('WDD-07: the tenant ledger balances, and every claim left belongs to an event whose payment is recorded', async () => {
-    const unbalanced = await db.$queryRawUnsafe(
-      `SELECT transaction_id FROM ledger_entries WHERE business_id = $1 GROUP BY transaction_id HAVING SUM(debit) <> SUM(credit)`,
-      ID.biz,
+  it('WDD-08 (review SEC-V15C-1, CR-V15C-2): two partial Stripe refunds of one charge delivered together: the one whose reversal loses is a 500 with its claim released, not acked; its redelivery records it', async () => {
+    const charge = { id: `${P}ch_split`, metadata: { invoiceId: ID.invStripeSplit }, amount: 10000, currency: 'ttd' };
+    const paid = await stripe({ id: `${P}evt_charge_split`, type: 'charge.succeeded', data: { object: charge } });
+    expect(paid.body, JSON.stringify(paid.body)).toEqual({ ok: true, received: true, processed: 'charge.succeeded' });
+
+    const refundEvent = (n: string, amount: number) => ({
+      id: `${P}evt_refund_${n}`,
+      type: 'refund.created',
+      data: {
+        object: { id: `${P}re_split_${n}`, amount, currency: 'ttd', charge: charge.id, status: 'succeeded', metadata: { invoiceId: ID.invStripeSplit } },
+      },
+    });
+    const events = [refundEvent('a', 3000), refundEvent('b', 2000)];
+    const restore = refundBarrier();
+    let together: Array<{ status: number; body: any }>;
+    try {
+      together = await Promise.all(events.map((e) => stripe(e)));
+    } finally {
+      restore();
+    }
+    // Before the review repair: [201, 201], both { processed: 'refund.created' }, one refund row missing and both claims kept
+    // (the loser's P2002 was on financial_transactions.reversal_of_id, not on its own refund row).
+    expect(together.map((r) => r.status).sort(), JSON.stringify(together.map((r) => r.body))).toEqual([201, 500]);
+    const won = events[together.findIndex((r) => r.status === 201)];
+    const lost = events[together.findIndex((r) => r.status === 500)];
+    expect(together.find((r) => r.status === 201)!.body).toEqual({ ok: true, received: true, processed: 'refund.created' });
+    expect(await rowsOf(ID.invStripeSplit)).toEqual([
+      `stripe:${charge.id}:SUCCESSFUL:100`,
+      `stripe:${won.data.object.id}:REFUNDED:${-won.data.object.amount / 100}`,
+    ]);
+    expect(await claims('stripe', won.id)).toBe(1);
+    expect(await claims('stripe', lost.id), 'the delivery whose refund was rolled back released its claim').toBe(0);
+
+    const again = await stripe(lost);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body).toEqual({ ok: true, received: true, processed: 'refund.created' });
+    expect((await rowsOf(ID.invStripeSplit)).sort()).toEqual(
+      [`stripe:${charge.id}:SUCCESSFUL:100`, `stripe:${P}re_split_a:REFUNDED:-30`, `stripe:${P}re_split_b:REFUNDED:-20`].sort(),
     );
-    expect(unbalanced).toEqual([]);
+    // The original posting is reversed once: a refund reverses the whole capture's posting (partial refunds are V1-29-DM-REFUND-CONVENTION's).
+    expect(await postingsOf(ID.invStripeSplit)).toEqual(['INCOME:REVERSED:100', 'REVERSAL:POSTED:100']);
+    expect(await claims('stripe', lost.id)).toBe(1);
+
+    expect((await stripe(lost)).body).toEqual({ ok: true, received: true });
+    expect(await rowsOf(ID.invStripeSplit)).toHaveLength(3);
+  });
+
+  it('WDD-09 (review SEC-V15C-1): two partial PayPal refunds of one capture delivered together: the one whose reversal loses is a 500 with its claim released, not acked; its redelivery records it', async () => {
+    const capture = `${P}CAP_SPLIT`;
+    const paid = await paypal({
+      id: `${P}WH-capture-split`,
+      event_type: 'PAYMENT.CAPTURE.COMPLETED',
+      resource: { id: capture, custom_id: ID.invPaypalSplit, amount: { value: '100.00', currency_code: 'TTD' } },
+    });
+    expect(paid.body, JSON.stringify(paid.body)).toEqual({ ok: true, received: true, processed: 'PAYMENT.CAPTURE.COMPLETED' });
+
+    const refundEvent = (n: string, value: string) => ({
+      id: `${P}WH-refund-${n}`,
+      event_type: 'PAYMENT.CAPTURE.REFUNDED',
+      resource: { id: `${P}RF_${n}`, amount: { value, currency_code: 'TTD' }, supplementary_data: { related_ids: { capture_id: capture } } },
+    });
+    const events = [refundEvent('A', '30.00'), refundEvent('B', '20.00')];
+    const restore = refundBarrier();
+    let together: Array<{ status: number; body: any }>;
+    try {
+      together = await Promise.all(events.map((e) => paypal(e)));
+    } finally {
+      restore();
+    }
+    // Before the review repair: [201, 201], both { processed: 'PAYMENT.CAPTURE.REFUNDED' }, one refund row missing, both claims kept.
+    expect(together.map((r) => r.status).sort(), JSON.stringify(together.map((r) => r.body))).toEqual([201, 500]);
+    const won = events[together.findIndex((r) => r.status === 201)];
+    const lost = events[together.findIndex((r) => r.status === 500)];
+    expect(await rowsOf(ID.invPaypalSplit)).toEqual([
+      `paypal:${capture}:SUCCESSFUL:100`,
+      `paypal:${won.resource.id}:REFUNDED:${-Number(won.resource.amount.value)}`,
+    ]);
+    expect(await claims('paypal', won.id)).toBe(1);
+    expect(await claims('paypal', lost.id), 'the delivery whose refund was rolled back released its claim').toBe(0);
+
+    const again = await paypal(lost);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body).toEqual({ ok: true, received: true, processed: 'PAYMENT.CAPTURE.REFUNDED' });
+    expect((await rowsOf(ID.invPaypalSplit)).sort()).toEqual(
+      [`paypal:${capture}:SUCCESSFUL:100`, `paypal:${P}RF_A:REFUNDED:-30`, `paypal:${P}RF_B:REFUNDED:-20`].sort(),
+    );
+    expect(await postingsOf(ID.invPaypalSplit)).toEqual(['INCOME:REVERSED:100', 'REVERSAL:POSTED:100']);
+    expect(await claims('paypal', lost.id)).toBe(1);
+
+    expect((await paypal(lost)).body).toEqual({ ok: true, received: true });
+    expect(await rowsOf(ID.invPaypalSplit)).toHaveLength(3);
+  });
+
+  it("WDD-10 (review SEC-V15C-3): a Stripe refund signed with a tenant's own secret, naming its own invoice and another tenant's charge, writes nothing on the victim and reverses nothing; the victim's own signed refund of that charge is recorded", async () => {
+    const chargeB = { id: `${P}ch_victim`, metadata: { invoiceId: ID.invVictim }, amount: 10000, currency: 'ttd' };
+    const paidB = await stripe({ id: `${P}evt_charge_victim`, type: 'charge.succeeded', data: { object: chargeB } }, STRIPE_SECRET_B);
+    expect(paidB.body, JSON.stringify(paidB.body)).toEqual({ ok: true, received: true, processed: 'charge.succeeded' });
+    expect(await rowsOf(ID.invVictim)).toEqual([`stripe:${chargeB.id}:SUCCESSFUL:100`]);
+    expect(await postingsOf(ID.invVictim)).toEqual(['INCOME:POSTED:100']);
+    expect(await invoiceStatus(ID.invVictim)).toBe('PAID');
+
+    // biz signs with ITS OWN secret: its own invoice in metadata (so its secret is the one tried), bizB's charge.
+    const forged = {
+      id: `${P}evt_refund_forged`,
+      type: 'refund.created',
+      data: { object: { id: `${P}re_forged`, amount: 10000, currency: 'ttd', charge: chargeB.id, status: 'succeeded', metadata: { invoiceId: ID.invForge } } },
+    };
+    const res = await stripe(forged, STRIPE_SECRET);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    // Before the review repair: bizB's rows [ch_victim SUCCESSFUL 100, re_forged REFUNDED -100], its posting reversed, its invoice still PAID.
+    expect(await rowsOf(ID.invVictim)).toEqual([`stripe:${chargeB.id}:SUCCESSFUL:100`]);
+    expect(await postingsOf(ID.invVictim)).toEqual(['INCOME:POSTED:100']);
+    expect(await invoiceStatus(ID.invVictim)).toBe('PAID');
+    expect(await rowsOf(ID.invForge)).toEqual([]);
+    expect(await db.payment.count({ where: { providerPaymentId: `${P}re_forged` } })).toBe(0);
+
+    // Control: bizB's own secret, its own invoice and its own charge: the refund is recorded and reverses the posting.
+    const own = {
+      id: `${P}evt_refund_victim`,
+      type: 'refund.created',
+      data: { object: { id: `${P}re_victim`, amount: 10000, currency: 'ttd', charge: chargeB.id, status: 'succeeded', metadata: { invoiceId: ID.invVictim } } },
+    };
+    const ownRes = await stripe(own, STRIPE_SECRET_B);
+    expect(ownRes.body, JSON.stringify(ownRes.body)).toEqual({ ok: true, received: true, processed: 'refund.created' });
+    expect(await rowsOf(ID.invVictim)).toEqual([`stripe:${chargeB.id}:SUCCESSFUL:100`, `stripe:${P}re_victim:REFUNDED:-100`]);
+    expect(await postingsOf(ID.invVictim)).toEqual(['INCOME:REVERSED:100', 'REVERSAL:POSTED:100']);
+  });
+
+  it('WDD-07: each tenant ledger balances, and every claim left belongs to an event that was handled (its payment or refund recorded, or refused: WDD-10)', async () => {
+    for (const biz of [ID.biz, ID.bizB]) {
+      const unbalanced = await db.$queryRawUnsafe(
+        `SELECT transaction_id FROM ledger_entries WHERE business_id = $1 GROUP BY transaction_id HAVING SUM(debit) <> SUM(credit)`,
+        biz,
+      );
+      expect(unbalanced, biz).toEqual([]);
+    }
     const left = await db.webhookEvent.findMany({ where: { providerEventId: { startsWith: P } } });
     expect(left.map((c: any) => `${c.provider}:${c.providerEventId}`).sort()).toEqual([
       `paypal:${P}WH-capture`,
+      `paypal:${P}WH-capture-split`,
       `paypal:${P}WH-order`,
+      `paypal:${P}WH-refund-A`,
+      `paypal:${P}WH-refund-B`,
       `stripe:${P}evt_charge`,
+      `stripe:${P}evt_charge_split`,
+      `stripe:${P}evt_charge_victim`,
       `stripe:${P}evt_cs`,
       `stripe:${P}evt_race`,
       `stripe:${P}evt_refund`,
+      `stripe:${P}evt_refund_a`,
+      `stripe:${P}evt_refund_b`,
+      `stripe:${P}evt_refund_forged`,
+      `stripe:${P}evt_refund_victim`,
       `wipay:${P}wipay_txn`,
     ]);
   });

@@ -213,7 +213,10 @@ describe('V1-15 money-state writer inventory (Payment rows)', () => {
  *           each class is checked against the source; a stale entry fails
  *   MSW-05  capturePaypalOrder records a captured payment through the door
  *           (createPaymentWithPosting); its only direct write is the FAILED
- *           record of a capture that failed
+ *           record of a capture that failed, and it sits before the door call
+ *           (in the capture call's catch), so a recording that aborts after
+ *           PayPal completed the capture never reaches it (review SEC-V15C-2;
+ *           the behaviour is LWD-25 / LWD-25c)
  *   MSW-06  every todo names an owning packet that is in the build map
  */
 const PAYMENTS_MODULE = 'apps/server/src/modules/payments/';
@@ -242,7 +245,9 @@ export const PAYMENTS_MODULE_WRITERS: Record<string, WriterClass> = {
   },
   'apps/server/src/modules/payments/payments.service.ts#capturePaypalOrder': {
     kind: 'no-money',
-    why: 'the FAILED record of a PayPal capture that failed; a COMPLETED capture goes through createPaymentWithPosting (V1-15c)',
+    why:
+      'the FAILED record of a PayPal capture call that failed (PayPal took nothing); a COMPLETED capture goes through ' +
+      'createPaymentWithPosting (V1-15c) and is never recorded FAILED, even when that transaction aborts (review SEC-V15C-2, CR-V15C-1)',
   },
   'apps/server/src/modules/payments/payments.service.ts#createStorePayment': {
     kind: 'no-money',
@@ -411,8 +416,13 @@ describe('V1-15c Payment writers of the payments module, by function (no silent 
   it('MSW-05: capturePaypalOrder records a COMPLETED capture through createPaymentWithPosting; its only direct write is the FAILED record', () => {
     const file = `${PAYMENTS_MODULE}payments.service.ts`;
     const source = MODULE_FILES[file];
-    expect(memberSource(source, 'capturePaypalOrder')).toMatch(/this\.createPaymentWithPosting\(/);
+    const body = memberSource(source, 'capturePaypalOrder');
+    expect(body).toMatch(/this\.createPaymentWithPosting\(/);
     expect(writeSites(file, source).filter((s) => s.fn === 'capturePaypalOrder').map((s) => s.statuses)).toEqual([['FAILED']]);
+    // Review SEC-V15C-2: at 1504b037 the door call sat inside the capture's try, so its abort fell into the catch that writes FAILED.
+    const failedWrite = body.search(/\.payment\s*\.\s*create\s*\(/);
+    expect(failedWrite, 'the FAILED write (the capture call failed) comes before the door call (the capture completed)').toBeGreaterThan(-1);
+    expect(failedWrite).toBeLessThan(body.search(/this\.createPaymentWithPosting\(/));
   });
 
   it('MSW-06: every todo names an owning packet that is in the build map, and every unposted writer has one', () => {
