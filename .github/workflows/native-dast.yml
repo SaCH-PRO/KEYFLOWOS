@@ -1,0 +1,177 @@
+# Native dynamic security proof for KEYFLOW OS (V1-13-SEC-NATIVE-DAST, ported
+# from #114).
+#
+# hawkscan.yml is dark without its StackHawk API key: its guard step skips
+# every heavy step and the job goes green having scanned nothing (PRS-M08).
+# This workflow needs no third-party account and no repository credential. It
+# builds the API, boots it against the job's own Postgres and Redis, and sends
+# the probes in scripts/security/native-dast-manifest.json. Every probed
+# protected route is AuthGuard-first: an anonymous call and a credential
+# authentication must refuse (malformed bearer, alg none, wrong key, expired,
+# wrong audience, foreign issuer) must answer 401, and a valid token for a
+# caller who is no member must answer 403. A 404 (route gone), a 5xx, a
+# 2xx/3xx, a 403 to a refused credential, a leaked stack or Prisma marker, or a
+# server that cannot be reached fails the job. Nothing is skipped.
+#
+# NOT A REQUIRED CHECK YET. REQUIRED_WORKFLOWS in
+# scripts/agent-control/lib/events.mjs still names 'DAST (HawkScan)'; swapping
+# the admission gate to this workflow is V1-30.
+name: DAST (Native)
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: native-dast-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '20.18.1'
+  PNPM_VERSION: '9.15.0'
+
+jobs:
+  # The evaluator's own proof runs first, in its own job, so a broken judge
+  # can never produce a green probe run.
+  evaluator-spec:
+    name: Native DAST evaluator spec
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Native DAST evaluator spec
+        run: node --test scripts/security/tests/native-dast.spec.mjs
+
+  native-dast:
+    name: Native dynamic security proof
+    needs: evaluator-spec
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    # Same topology as ci-cd.yml's test job: the app needs a real database and
+    # Redis to boot. pgvector/pg16 matches docker-compose.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: keyflow
+          POSTGRES_DB: keyflowos
+          # Trust auth, so the repository carries no connection-string
+          # password literal. CI-only, localhost-only.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U keyflow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://keyflow@localhost:5432/keyflowos
+      DIRECT_URL: postgresql://keyflow@localhost:5432/keyflowos
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: test
+      # Loopback only: the harness refuses any other host.
+      NATIVE_DAST_BASE_URL: http://127.0.0.1:3001
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
+
+      - name: Build server
+        run: cd apps/server && pnpm run build
+
+      - name: Apply migrations
+        run: pnpm db:deploy
+
+      - name: Start the API
+        env:
+          PORT: '3001'
+        run: |
+          # Ephemeral keys generated per run; nothing secret-shaped is
+          # committed, and a fresh CI database holds no encrypted data.
+          # JWT_SECRET is only the encryption-key fallback; no auth code
+          # reads it.
+          export JWT_SECRET="$(openssl rand -hex 24)"
+          export BYOK_ENCRYPTION_SECRET="$(openssl rand -hex 24)"
+          export CREDENTIALS_ENCRYPTION_KEY="$(openssl rand -hex 24)"
+          # The token verifiers. Without these, SupabaseAuthService.verifyLocal
+          # and verifyAdminToken return null before they read a token, so no
+          # probe would reach the alg, signature, exp, iss or aud checks
+          # (review SEC-DAST-2). No Supabase project URL or anon key is set:
+          # there is no identity provider, the server verifies every token
+          # itself, and no probe leaves this machine.
+          export ADMIN_JWT_SECRET="$(openssl rand -hex 32)"
+          SUPABASE_JWT_SECRET="$(openssl rand -hex 32)"
+          echo "::add-mask::$SUPABASE_JWT_SECRET"
+          export SUPABASE_JWT_SECRET
+          # The probe step signs its expired, wrong-audience, foreign-issuer
+          # and valid non-member tokens with the server's own key.
+          echo "SUPABASE_JWT_SECRET=$SUPABASE_JWT_SECRET" >> "$GITHUB_ENV"
+          node apps/server/dist/main.js > native-dast-server.log 2>&1 &
+          echo "SERVER_PID=$!" >> "$GITHUB_ENV"
+
+      - name: Wait for /healthz
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS "$NATIVE_DAST_BASE_URL/healthz" >/dev/null 2>&1; then
+              echo "API is up."; exit 0
+            fi
+            sleep 2
+          done
+          cat native-dast-server.log || true
+          echo "::error::API did not become healthy for native DAST"
+          exit 1
+
+      - name: Run native DAST probes
+        run: node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json
+
+      - name: Server log on failure
+        if: failure()
+        run: cat native-dast-server.log || true
+
+      - name: Stop the API
+        if: always()
+        run: |
+          if [ -n "${SERVER_PID:-}" ]; then kill "$SERVER_PID" || true; fi
