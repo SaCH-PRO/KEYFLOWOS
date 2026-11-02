@@ -1,0 +1,42 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-16-PROOF-BINDING:RELEASE0-JOURNEY",
+  "proofScope": "release0-journey-real-built-server",
+  "description": "The Release 0 journey (issue #186 step C) on the real built server against a real database: owner and business, contact, invoice DRAFT -> SENT, offline payments to PAID with the ledger, a simulated refresh, the second tenant's denials and no external provider. Every case of test/release0-journey.integration.test.ts is required and allowAdditionalCases is false, so a skipped, renamed or added journey case rejects the verdict: a packet that edits the journey suite (V1-47-COCKPIT-TRUTH, V1-24-KEY-KILL-SWITCHES) edits this manifest in the same change. R0-16-PROOF-BINDING retitled the step-4 case that was titled 'FIRST FAILING STEP ... dies with 500' to the behaviour it now proves (R0-D1-COA-SEED-RACE fixed the lazy chart-of-accounts race) and removed the 'recovery (harness, not product behaviour)' case, leaving no it.fails and no skip. The suite spawns dist/main.js, so needsDist is set and scripts/proof-admission/run-manifests.mjs builds the server first. Run from the repo root: node scripts/proof-admission/run-manifests.mjs --only release0-journey.json (or pnpm test:local -- --suite release0 for every manifest). The step-4 ledger cases are also required by payments-actor.json.",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": false,
+  "suites": [
+    {
+      "path": "test/release0-journey.integration.test.ts",
+      "needsDist": true
+    }
+  ],
+  "requiredCases": [
+    "harness — the real built server is serving dist/main.js exists (build before running this)",
+    "harness — the real built server is serving reached /readyz on a free port, against DATABASE_URL, with no provider keys in its environment",
+    "harness — the real built server is serving the real AuthMiddleware verifies the minted HS256 token locally and refuses anything else",
+    "step 1 — owner identity and business with a founding membership (tenant root) POST /identity/bootstrap creates the User row, the business and exactly one founding OWNER membership",
+    "step 1 — owner identity and business with a founding membership (tenant root) the owner discovers and opens the business through the identity routes (selected tenant)",
+    "step 1 — owner identity and business with a founding membership (tenant root) bootstrap is idempotent: a second call returns the same business and adds no membership",
+    "step 1 — owner identity and business with a founding membership (tenant root) the second tenant (r0_other / r0_bizB) comes into existence the same way, disjoint from the first",
+    "step 2 — contact: create, edit, reload by id POST /crm/businesses/:bizA/contacts creates the contact in the tenant",
+    "step 2 — contact: create, edit, reload by id PATCH edits it and GET reloads the edited row by id",
+    "step 3 — invoice with line items, issued DRAFT -> SENT POST /commerce/businesses/:bizA/invoices creates a DRAFT invoice with two line items for the contact",
+    "step 3 — invoice with line items, issued DRAFT -> SENT PATCH /commerce/invoices/:id/status/sent issues it; reload shows SENT with number, total and sentAt",
+    "step 3 — invoice with line items, issued DRAFT -> SENT AR posting on issue follows the accounting basis (CASH by default: no AR entry until payment)",
+    "step 4 — offline payment through POST /commerce/businesses/:bizA/invoices/:id/payments the first manual payment on a fresh tenant is recorded (201) with exactly one Payment row: the lazily seeded chart of accounts no longer races (R0-D1-COA-SEED-RACE)",
+    "step 4 — offline payment through POST /commerce/businesses/:bizA/invoices/:id/payments the Payment row, the invoice balance and the ledger agree: 100 paid, 150 remaining, PARTIALLY_PAID, balanced entries",
+    "step 4 — offline payment through POST /commerce/businesses/:bizA/invoices/:id/payments a duplicate submit of the same offline payment (same reference) is absorbed: the first payment is returned, one row, balance unchanged",
+    "step 4 — offline payment through POST /commerce/businesses/:bizA/invoices/:id/payments settling the remainder through the same route turns the invoice PAID with paidAt and a second ledger posting",
+    "step 5 — simulated refresh: the tenant list routes agree with steps 2-4 GET contacts, invoices, invoice payments and tenant payments reflect the edited contact, the PAID invoice and every payment",
+    "step 6 — the second tenant's owner is denied on every step-2..5 resource business-prefixed routes under bizA answer 403 to r0_other (BusinessGuard), never 200, never 500",
+    "step 6 — the second tenant's owner is denied on every step-2..5 resource bizA's contact id under bizB's own path answers 404 (not found, not disclosed) for read and write",
+    "step 6 — the second tenant's owner is denied on every step-2..5 resource bizA's invoice id under bizB's own path answers 404 on payments list/record, update and delete",
+    "step 6 — the second tenant's owner is denied on every step-2..5 resource bare-id receipt route with bizB's businessId answers 404 for bizA's invoice; anonymous answers 401",
+    "step 6 — the second tenant's owner is denied on every step-2..5 resource bare-id status/paid routes with bizB's businessId answer 404: the guard-validated businessId is bound to the invoice and a foreign tenant is indistinguishable from an unknown id (KF-REVENUE-AUTH-PROJECTION-001)",
+    "step 6 — the second tenant's owner is denied on every step-2..5 resource bare-id public reads answer with the redacted projection for a non-member and for anonymous callers: no payment rows, no payment references, no customer email; the status route carries exactly five keys (KF-REVENUE-AUTH-PROJECTION-001; the pay-link token policy is a separate decision)",
+    "step 6 — the second tenant's owner is denied on every step-2..5 resource after every denial attempt the tenant state of steps 2-5 is byte-for-byte what the owner left",
+    "step 7 — no step required an external provider ran with AI_DISABLED=1 and no provider keys; optional services that logged failures are recorded, none blocked a step",
+    "incidental — seen while driving the journey, not part of its path creating a second contact with an email already in the tenant answers 409 (fixed by R0-D7-CONTACT-EMAIL-409)"
+  ]
+}

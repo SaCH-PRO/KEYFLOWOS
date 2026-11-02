@@ -4,6 +4,12 @@
   "proofScope": "onboarding-manual-complete-real-database",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    {
+      "path": "test/onboarding-manual-complete.integration.test.ts",
+      "needsDist": true
+    }
+  ],
   "requiredCases": [
     "harness — the real built server is serving with AI off dist/main.js exists (build before running this)",
     "harness — the real built server is serving with AI off reached /readyz on a free port, against DATABASE_URL, with AI_DISABLED=1 and no AI provider key",

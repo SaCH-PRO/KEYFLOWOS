@@ -13,12 +13,22 @@
  *      business-prefixed route and by bare id (403/404, never 200, never 500)
  *   7. no step needed an external provider (AI_DISABLED=1, no provider keys)
  *
- * It is a CHARACTERIZATION: every step asserts the product's intended
- * behaviour, the first step that cannot pass is left failing on purpose and
- * named "FIRST FAILING STEP", and the steps after it that are known to fail on
- * this base are `it.fails` with the reason in their title, so the suite stays
- * informative instead of red noise. When a fix packet lands, the `it.fails`
- * case it fixes turns red and must be flipped back to `it`.
+ * It began as a CHARACTERIZATION: every step asserts the product's intended
+ * behaviour, the first step that could not pass was left failing on purpose
+ * and named "FIRST FAILING STEP", and later steps known to fail were
+ * `it.fails`. As of R0-16-PROOF-BINDING every step passes: the fix packets
+ * flipped their `it.fails` back to `it`, the step-4 case is titled for the
+ * behaviour it now proves (R0-D1-COA-SEED-RACE fixed the lazy chart-of-accounts
+ * race that made the first payment answer 500), and the harness-only
+ * "recovery" case that retried around that race is gone. There is no
+ * `it.fails`, `it.skip` or `it.todo` here.
+ *
+ * PROOF BINDING: scripts/proof-admission/manifests/release0-journey.json
+ * requires every case of this file by its full title and allows no other
+ * (payments-actor.json also requires the step-4 ledger cases). Renaming,
+ * adding, skipping or removing a case here means editing that manifest in the
+ * same change, or the CI step that runs scripts/proof-admission/run-manifests.mjs
+ * rejects the head.
  *
  * WHAT IS REAL
  * ------------
@@ -188,21 +198,6 @@ async function call(
   const res = await req;
   journeyResponses.push({ step, method: method.toUpperCase(), path: routePath, status: res.status });
   return { status: res.status, body: res.body };
-}
-
-/** Wait until the lazily-seeded chart of accounts for a business stops growing. */
-async function waitForCoaToSettle(businessId: string, maxMs = 15_000) {
-  const started = Date.now();
-  let last = -1;
-  let stable = 0;
-  while (Date.now() - started < maxMs) {
-    const count = await db.chartOfAccount.count({ where: { businessId } });
-    stable = count === last ? stable + 1 : 0;
-    last = count;
-    if (count > 0 && stable >= 4) return count;
-    await new Promise((r) => setTimeout(r, 250));
-  }
-  return last;
 }
 
 /** Hard-delete every r0_ row, children first, by raw SQL (bypasses soft delete). */
@@ -586,39 +581,31 @@ describe('step 3 — invoice with line items, issued DRAFT -> SENT', () => {
 describe('step 4 — offline payment through POST /commerce/businesses/:bizA/invoices/:id/payments', () => {
   const firstPayment = { amount: 100, method: 'cash', reference: `${P}ref-001`, notes: 'cash at counter' };
 
-  it('FIRST FAILING STEP: the first manual payment on a fresh tenant is recorded (201) — it is not: lazy chart-of-accounts seeding races and the request dies with 500', async () => {
+  // This case was 'FIRST FAILING STEP: ... dies with 500' while
+  // RevenuePostingService.onPaymentRecorded resolved the deposit and credit
+  // accounts with Promise.all: two concurrent ensureDefaults collided on
+  // (business_id, system_key) with P2002, the posting threw inside the payment
+  // transaction and the first payment a tenant ever recorded rolled back with a
+  // 500. R0-D1-COA-SEED-RACE serialized the seeding
+  // (finance-coa-seed-concurrency.integration.test.ts), so the first submit is
+  // the one that lands, and the harness "recovery" retry that waited for the
+  // chart of accounts to settle is gone (R0-16-PROOF-BINDING).
+  it('the first manual payment on a fresh tenant is recorded (201) with exactly one Payment row: the lazily seeded chart of accounts no longer races (R0-D1-COA-SEED-RACE)', async () => {
     requireServer();
     expect(S.invoiceId).toBeTruthy();
+    const coaBefore = await db.chartOfAccount.count({ where: { businessId: S.bizA } });
     const res = await call(4, 'post', `/commerce/businesses/${S.bizA}/invoices/${S.invoiceId}/payments`, { token: OWNER, body: firstPayment });
-    const payments = await db.payment.findMany({ where: { invoiceId: S.invoiceId } });
+    const payments = await db.payment.findMany({ where: { invoiceId: S.invoiceId }, orderBy: { createdAt: 'asc' } });
     const coa = await db.chartOfAccount.count({ where: { businessId: S.bizA } });
-    note(4, 'record first payment', 'POST /commerce/businesses/:bizA/invoices/:id/payments', res.status, `payments=${payments.length} chart_of_accounts=${coa} body=${JSON.stringify(res.body).slice(0, 120)}`);
-    // Observed on this base: 500 INTERNAL_SERVER_ERROR. RevenuePostingService.onPaymentRecorded resolves the
-    // deposit and credit accounts with Promise.all -> two concurrent ChartOfAccountsSeederService.getBySystemKey
-    // -> two concurrent ensureDefaults -> chartOfAccount.upsert collides on (business_id, system_key) with
-    // P2002, the posting throws inside the payment transaction, the Payment row rolls back, and the seeding
-    // keeps running outside that transaction, so a later retry succeeds. The user sees a 500 on the first
-    // payment they ever record.
+    note(4, 'record first payment', 'POST /commerce/businesses/:bizA/invoices/:id/payments', res.status, `payments=${payments.length} chart_of_accounts ${coaBefore}->${coa} body=${JSON.stringify(res.body).slice(0, 120)}`);
     expect(res.status, `expected 201, got ${res.status}: ${JSON.stringify(res.body)}`).toBe(201);
     expect(res.body.payment?.id).toBeTruthy();
     expect(payments).toHaveLength(1);
-  });
-
-  it('recovery (harness, not product behaviour): once the lazily-seeded chart of accounts has settled, the same payment is accepted', async () => {
-    requireServer();
-    expect(S.invoiceId).toBeTruthy();
-    const existing = await db.payment.findMany({ where: { invoiceId: S.invoiceId } });
-    let res: Resp | null = null;
-    if (existing.length === 0) {
-      const coa = await waitForCoaToSettle(S.bizA!);
-      expect(coa, 'the chart of accounts never appeared, so the retry below would fail for a different reason').toBeGreaterThan(0);
-      res = await call(4, 'post', `/commerce/businesses/${S.bizA}/invoices/${S.invoiceId}/payments`, { token: OWNER, body: firstPayment });
-      expect(res.status, JSON.stringify(res.body)).toBe(201);
-    }
-    const payments = await db.payment.findMany({ where: { invoiceId: S.invoiceId }, orderBy: { createdAt: 'asc' } });
-    expect(payments).toHaveLength(1);
+    expect(payments[0].id).toBe(res.body.payment.id);
+    // The chart of accounts the posting needed exists once the request has answered: it was seeded inside the
+    // request, not by a retry.
+    expect(coa).toBeGreaterThan(0);
     S.firstPaymentId = payments[0].id;
-    note(4, 'first payment (after settle)', 'POST .../payments (retry)', res?.status ?? 'already recorded', `payments=1 id=${S.firstPaymentId}`);
   });
 
   it('the Payment row, the invoice balance and the ledger agree: 100 paid, 150 remaining, PARTIALLY_PAID, balanced entries', async () => {

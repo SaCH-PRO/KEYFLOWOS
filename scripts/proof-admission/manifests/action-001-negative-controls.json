@@ -40,6 +40,20 @@
       ]
     }
   },
+  "suites": [
+    "src/modules/key-autonomy/action-boundary/action-envelope.spec.ts",
+    "src/modules/key-autonomy/action-boundary/control-clearance.spec.ts",
+    "src/modules/key-autonomy/action-boundary/shadow-parity.spec.ts",
+    "src/modules/key-autonomy/action-boundary/surface-inventory.spec.ts",
+    "src/modules/key-autonomy/key-action-proposal.service.spec.ts",
+    "src/modules/key-cortex/key-cortex-tool-registry.not-executed.spec.ts",
+    "src/modules/ai/queue-step-awaiting-approval.spec.ts",
+    "src/modules/key-cortex/key-cortex-tool-registry.service.spec.ts",
+    "src/modules/key-cortex/__tests__/key-cortex-tool-registry.service.spec.ts",
+    "src/modules/ai/cortex-tool-bridge.spec.ts",
+    "test/key-action-boundary.integration.test.ts",
+    "test/key-action-boundary-surfaces.integration.test.ts"
+  ],
   "controls": [
     {
       "id": "NC-P1-WRAPPER-IDENTITY",

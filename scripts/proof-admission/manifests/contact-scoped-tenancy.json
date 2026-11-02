@@ -4,6 +4,9 @@
   "proofScope": "contact-scoped-tenancy-real-database",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "test/contact-scoped-tenancy.integration.test.ts"
+  ],
   "requiredCases": [
     "R0-12 fixture sanity (real rows) [R0-12-X01] seeded both tenants with a contact value and a run step each",
     "R0-12 contact custom-field values are bound to the path tenant [R0-12-C01] RED-BEFORE: a member of A naming B's contact under A's path is not found (404) and gets none of B's values",

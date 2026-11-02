@@ -26,6 +26,11 @@
  * the one in that row; and KF_WT_PACKET (the provisioner writes it into .env)
  * must name the packet. So a worktree cannot be admitted under another packet's
  * id, and two packets cannot both be admitted on one Redis index.
+ *
+ * In every mode a URL whose query string overrides its own connection target
+ * (Postgres ?host=, ?hostaddr=, ?port=, ?user=, ...; Redis ?host=, ?port=,
+ * ?path=, ?db=) is REJECTED KF_PROOF_RESOURCE_TARGET_OVERRIDE: the host, port,
+ * user and database judged here must be the ones the client connects to.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
@@ -118,6 +123,29 @@ function effectivePort(url) {
   if (['postgres:', 'postgresql:'].includes(url.protocol)) return 5432;
   if (url.protocol === 'redis:') return 6379;
   return null;
+}
+
+/**
+ * Query parameters a client reads in place of what the URL itself names, so
+ * that a URL judged by its host, port, user and database would connect to a
+ * target nobody judged (R0-16-PROOF-BINDING review SEC-R016-4). node-postgres
+ * (pg-connection-string) takes ?host=, ?port= and ?user= over the URL's own,
+ * and Prisma ?host=: postgresql://keyflow@localhost:5432/keyflowos?host=<remote>
+ * names localhost and connects to <remote>. hostaddr, dbname, service,
+ * servicefile and options are the libpq spellings (psql) of the same moves.
+ * ioredis fills what the URL leaves out from its query (redis://localhost?db=5,
+ * ?port=, ?host=), and ?path= turns it into a Unix socket connection.
+ */
+const TARGET_OVERRIDES = Object.freeze({
+  postgres: Object.freeze(['host', 'hostaddr', 'port', 'user', 'dbname', 'service', 'servicefile', 'options']),
+  redis: Object.freeze(['host', 'port', 'path', 'db']),
+});
+
+/** The names (never the values) of the query parameters of `url` that override its connection target. */
+export function targetOverrides(kind, url) {
+  const refused = TARGET_OVERRIDES[kind] ?? [];
+  const names = [...url.searchParams.keys()].filter((key) => refused.includes(key.toLowerCase()));
+  return [...new Set(names)];
 }
 
 function resourceIdentity(rule, url) {
@@ -233,6 +261,12 @@ export function admitResources(manifest, env = process.env, options = {}) {
 
     if (!rule.allowedProtocols?.includes(url.protocol)) {
       return verdict('REJECTED', ['KF_PROOF_RESOURCE_PROTOCOL_UNSAFE'], identity);
+    }
+    // Every check below judges what the URL names; a query parameter that a
+    // client reads in its place would go unjudged. Names only, never values.
+    const overrides = targetOverrides(rule.kind, url);
+    if (overrides.length > 0) {
+      return verdict('REJECTED', ['KF_PROOF_RESOURCE_TARGET_OVERRIDE'], { ...identity, parameters: overrides });
     }
     if (!rule.allowedHosts?.includes(url.hostname)) {
       return verdict('REJECTED', ['KF_PROOF_RESOURCE_HOST_UNSAFE'], identity);

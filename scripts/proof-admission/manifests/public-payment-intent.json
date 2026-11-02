@@ -4,6 +4,10 @@
   "proofScope": "public-payment-intent-real-database-and-revenue-authorization-pc-08",
   "requireReportSuccess": true,
   "allowAdditionalCases": true,
+  "suites": [
+    "test/public-payment-intent.integration.test.ts",
+    "test/revenue-authorization.integration.test.ts"
+  ],
   "requiredCases": [
     "fixture sanity (real rows) two tenants with a system chart of accounts; payable, unpayable and settled invoices as seeded; the operator payments posted to the ledger",
     "CF-12: an intent never changes the invoice status (R0-22) PI-01: an anonymous bank_transfer intent on a SENT invoice answers success; the invoice stays SENT and the public projection still answers after reload",
