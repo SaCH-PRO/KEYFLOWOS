@@ -320,6 +320,88 @@ jobs:
           NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001' }}
           NEXT_PUBLIC_SITE_URL: ${{ secrets.NEXT_PUBLIC_SITE_URL || 'http://localhost:5000' }}
 
+  # R0-25-PLAYWRIGHT-R0. The Playwright specs under apps/web/e2e had never run
+  # in CI. This job runs the non-live ones with the API mocked at the network
+  # edge (page.route on http://api.test.local): E2E_NO_SERVER is unset, so
+  # playwright.config.ts starts the web server itself, here `next start` on a
+  # build made with NEXT_PUBLIC_API_BASE_URL=http://api.test.local (a dev
+  # server compiles each route on first visit, past the mocked specs' 15 s
+  # navigation timeout). The live specs (release0-live, live-journey) need a
+  # real stack and run in e2e-live.yml, by hand.
+  #
+  # THE SPEC LIST IS EXPLICIT: the files green at this head. The other 15 files
+  # are stale and were reported by R0-25, not fixed (outside its scope). With
+  # this job's setup, all 20 files at the R0-25 base gave 43 failed, 29 passed,
+  # 3 skipped:
+  #   - every /app/* spec seeds kf_token=test-token-e2e (e2e/helpers/
+  #     workspace.ts), which is not a JWT, so src/middleware.ts sends the page
+  #     to /auth/login before it renders (calendar-event-drawer,
+  #     connect-business-profile, connect-contacts, connect-forms,
+  #     inventory-xlsx-import; the post-login steps of auth-callback,
+  #     auth-login, auth-signup);
+  #   - business-genesis-legal, business-genesis-market and key-connect-smoke
+  #     throw "ADMIN_JWT_SECRET not set" before the page opens;
+  #   - event-drawer-allday, event-drawer-timed, upload-presigned-put,
+  #     upload-real-surfaces and two auth-signup / auth-login banner cases do
+  #     not find the elements they wait for.
+  # A spec joins this list when it is green here; nothing is skipped silently.
+  e2e-mocked:
+    name: E2E (Playwright, mocked API)
+    runs-on: ubuntu-latest
+    needs: [lint-and-typecheck]
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      # Each job checks out fresh, so the workspace packages must be built here
+      # too — see the note in lint-and-typecheck.
+      - name: Build workspace packages
+        run: pnpm --filter @keyflow/shared --filter @keyflow/db --filter @keyflow/api build
+
+      - name: Build web against the mocked API host
+        run: cd apps/web && pnpm run build
+        env:
+          NEXT_PUBLIC_API_BASE_URL: http://api.test.local
+
+      - name: Install Playwright Chromium
+        run: cd apps/web && pnpm exec playwright install --with-deps chromium
+
+      - name: Run Playwright specs (mocked API)
+        run: >-
+          cd apps/web && pnpm exec playwright test
+          e2e/onboarding-loop-regression.spec.ts
+          e2e/auth-helpers.spec.ts
+          e2e/public-flows.spec.ts
+        env:
+          E2E_WEB_COMMAND: pnpm exec next start -H 0.0.0.0 -p 5000
+
+      - name: Upload Playwright traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-mocked-traces
+          path: apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
   test:
     name: Run Tests
     runs-on: ubuntu-latest
