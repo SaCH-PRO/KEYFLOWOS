@@ -958,7 +958,10 @@ export default function QuotesPanel({
                 overflowMenu={
                   <OverflowMenu>
                     <OverflowMenuItem icon={Eye} label="View details" onClick={() => setSelectedQuote(quote)} />
-                    <OverflowMenuItem icon={Pencil} label="Edit" onClick={() => openEditQuote(quote)} />
+                    {/* V1-51 review (SEC-V51-2): an accepted or converted quote is final (the server answers 409); Duplicate makes a new offer. */}
+                    {quote.status !== "ACCEPTED" && !quote.invoiceId && (
+                      <OverflowMenuItem icon={Pencil} label="Edit" onClick={() => openEditQuote(quote)} />
+                    )}
                     <OverflowMenuItem icon={Files} label="Duplicate" onClick={() => duplicateQuote(quote)} />
                     <OverflowMenuItem icon={Sparkles} label="AI Follow-up" onClick={() => setFollowUpFor(quote)} />
                     <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareQuoteViaWhatsApp(quote)} />

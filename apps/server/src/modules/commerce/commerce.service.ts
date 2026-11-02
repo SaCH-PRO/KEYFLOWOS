@@ -25,6 +25,7 @@ import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/u
 import {
   decideQuoteBulkMove,
   decideQuoteTransition,
+  isConvertedQuote,
   mintQuoteViewToken,
   needsViewTokenRepair,
   quoteBulkRefusalCode,
@@ -233,6 +234,29 @@ function quoteAlreadyConverted(): ConflictException {
     code: 'quote_converted',
     message: 'This quote has already been converted to an invoice.',
   });
+}
+
+/**
+ * V1-51 review (SEC-V51-2): the 409 an edit of an ACCEPTED quote answers. The
+ * customer accepted its terms; convert {} invoices the quote's stored tax and
+ * discount, so an edit after acceptance would invoice terms nobody accepted.
+ * V1-50: a decision is final, a changed offer is a new quote.
+ */
+function quoteAlreadyAccepted(): ConflictException {
+  return new ConflictException({
+    code: 'quote_accepted',
+    message: 'This quote has been accepted and can no longer be edited. A changed offer is a new quote.',
+  });
+}
+
+/**
+ * V1-51 review (SEC-V51-1 / CR51-1): the discount type a quote is priced with.
+ * createQuote and updateQuote price any discount that is not FIXED as a
+ * percentage, a stored discount with no type included, so that is the type its
+ * value is checked (and carried by convert) as.
+ */
+function quotePricedDiscountType(discountType: string | null | undefined): 'PERCENT' | 'FIXED' {
+  return discountType === 'FIXED' ? 'FIXED' : 'PERCENT';
 }
 
 @Injectable()
@@ -1970,7 +1994,10 @@ export class CommerceService {
     notes?: string;
     quoteNumber?: string;
   }) {
-    this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
+    // V1-51 review (SEC-V51-1): the discount is checked as it is priced below
+    // (no type = a percentage). A typeless discountValue 150 passed the check,
+    // which caps only an explicit PERCENT, and stored a quote of -50.
+    this.validateTaxAndDiscount(input.taxRate, input.discountValue, quotePricedDiscountType(input.discountType));
     // R0-27 review (ST-27-2): the contact was bound with no tenant check, so
     // bizA's contactId under bizB's path created bizB's quote linked to (and
     // echoing) bizA's contact, and converting it created an Invoice bound to
@@ -2049,10 +2076,17 @@ export class CommerceService {
       throw new Error('Quote not found');
     }
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
-    if (quote.status === 'ACCEPTED' && quote.invoiceId) {
-      throw new Error('Cannot edit a quote that has been converted to an invoice');
+    // V1-51 review (SEC-V51-2): a converted quote, and an accepted one, are
+    // final (409, nothing written). Only ACCEPTED with an invoice was refused
+    // (as a plain Error, 500), so an operator could change an accepted quote's
+    // tax or discount and convert {} invoiced terms the customer never saw.
+    if (isConvertedQuote(quote)) {
+      throw quoteAlreadyConverted();
     }
-    
+    if (quote.status === 'ACCEPTED') {
+      throw quoteAlreadyAccepted();
+    }
+
     const updateData: any = {};
     // R0-27 review (ST-27-2): same tenant check as quote create, before any write.
     if (input.contactId) updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
@@ -2070,7 +2104,11 @@ export class CommerceService {
     const taxRate = input.taxRate ?? quote.taxRate ?? 0;
     const discountType = input.discountType ?? quote.discountType;
     const discountValue = input.discountValue ?? quote.discountValue ?? 0;
-    
+    // V1-51 review (CR51-1): the resolved values are checked as they are priced,
+    // before anything is written. A PATCH of { discountType: 'PERCENT' } alone
+    // turned a stored FIXED 150 into an uncapped PERCENT 150 (a negative quote).
+    this.validateTaxAndDiscount(taxRate, discountValue, quotePricedDiscountType(discountType));
+
     const taxAmount = subtotal * taxRate / 100;
     const discountAmount = discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
     const total = subtotal + taxAmount - discountAmount;
@@ -2179,28 +2217,47 @@ export class CommerceService {
     const discountValue = bodyDiscount ? input.discountValue ?? null : quote.discountValue ?? null;
     const discountType: 'PERCENT' | 'FIXED' | null = bodyDiscount
       ? input.discountType ?? null
-      : quote.discountType === 'FIXED'
-        ? 'FIXED'
-        : discountValue
-          ? 'PERCENT'
-          : null;
+      : discountValue
+        ? quotePricedDiscountType(quote.discountType)
+        : null;
+    // V1-51 review (SEC-V51-1 / CR51-1): the values carried from the quote are
+    // checked like the body's. A stored discount with no type (priced as an
+    // uncapped percentage before the repair) reached the invoice as PERCENT 150,
+    // a negative total that issues with no AR (RR27-DISC, ST-27-3).
+    this.validateTaxAndDiscount(taxRate, discountValue ?? undefined, discountType ?? undefined);
     // D-13: integer cents at this write boundary (the columns stay Float).
+    // CR51-2: the total is rounded once, from the same formula the quote's
+    // total was priced with, so it is the accepted total to the cent. Rounding
+    // tax and discount separately could move it by one cent (100.04 @ 12.5%
+    // less 5%: quote 107.543, invoice 107.55). The tax is rounded on its own
+    // and the discount takes the remainder; with no discount it is exactly 0,
+    // and it never goes below 0 (round(t) >= round(t - d) for d >= 0).
     const subtotalCents = quote.items.reduce((sum, item) => sum + Math.round(item.total * 100), 0);
-    const taxCents = Math.round((subtotalCents * taxRate) / 100);
-    let discountCents = 0;
+    const exactTaxCents = (subtotalCents * taxRate) / 100;
+    let exactDiscountCents = 0;
     if (discountType === 'PERCENT' && discountValue) {
-      discountCents = Math.round((subtotalCents * discountValue) / 100);
+      exactDiscountCents = (subtotalCents * discountValue) / 100;
     } else if (discountType === 'FIXED' && discountValue) {
-      discountCents = Math.round(discountValue * 100);
+      exactDiscountCents = discountValue * 100;
     }
+    const taxCents = Math.round(exactTaxCents);
+    const totalCents = Math.round(subtotalCents + exactTaxCents - exactDiscountCents);
+    const discountCents = subtotalCents + taxCents - totalCents;
     const subtotal = subtotalCents / 100;
     const taxAmount = taxCents / 100;
     const discountAmount = discountCents / 100;
-    const total = (subtotalCents + taxCents - discountCents) / 100;
+    const total = totalCents / 100;
     // R0-27 review (ST-27-3): the converted invoice obeys the same amount rules
     // as a created one (no FIXED discount above the subtotal, no amount the
     // ledger cannot hold).
     this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+    // V1-51 review (SEC-V51-1): no invoice total is negative. RevenuePostingService
+    // posts no AR for a total that is not positive, so a negative invoice could
+    // be issued with no ledger entry. A stored quote can still sum below zero
+    // (quote lines carry no price floor).
+    if (totalCents < 0) {
+      throw new BadRequestException('Invoice total cannot be negative');
+    }
     // R0-27 review (ST-27-2): the invoice inherits the quote's contact. A quote
     // written before quote create/update checked the tenant can still hold a
     // foreign (or since deleted) contact; it must not become an Invoice bound

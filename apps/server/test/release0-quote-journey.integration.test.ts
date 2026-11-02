@@ -31,6 +31,19 @@
  *              of 112.50 makes it PAID; every transaction balances; the deposit-side ledger net
  *              equals computeBalance.paid (= 112.50); ACCRUAL AR nets to zero
  *
+ * Review repairs (V1-51 review) pinned here as well:
+ *   RV-DISC    SEC-V51-1 / CR51-1: the discount convert carries from the quote is checked as the
+ *              quote priced it (no type = a percentage, capped at 100%), and a negative total is
+ *              refused, so convert never writes an invoice that issues with no AR (RR27-DISC,
+ *              ST-27-3). Quote create and edit check the discount as they price it too.
+ *   RV-EDIT    SEC-V51-2: an ACCEPTED quote's terms cannot be edited (409 quote_accepted), so
+ *              convert {} invoices the total the customer accepted; a converted quote -> 409
+ *              quote_converted
+ *   RV-CENTS   CR51-2: the total is rounded once (tax to the cent, the discount takes the
+ *              remainder), so a discounted sub-cent quote converts to its accepted total to the cent
+ *   todo       SEC-V51-3: the convert response's whole Contact row (the projection belongs in
+ *              commerce.controller.ts, outside this packet's write set)
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PublicRateLimitGuard (on this suite's Redis index),
  * CommerceService, InvoiceWorkflowService and the real ledger chain
@@ -590,4 +603,178 @@ describe('conversion carries the accepted quote, overrides are honoured (V1-51)'
     expect((await quoteRow(quote.id)).invoiceId).toBe(winner.body.id);
     expect(Number((await invoiceRow(winner.body.id)).total)).toBe(112.5);
   });
+});
+
+let legacySeq = 0;
+
+/**
+ * An ACCEPTED, unconverted quote written straight to the table, priced the way
+ * createQuote/updateQuote priced it before the review repair (a discount with
+ * no type is a percentage, uncapped): the shape a stored row can already have.
+ */
+async function legacyAcceptedQuote(
+  businessId: string,
+  contactId: string,
+  q: { unitPrice: number; taxRate?: number; discountType?: 'PERCENT' | 'FIXED' | null; discountValue?: number },
+) {
+  legacySeq += 1;
+  const subtotal = q.unitPrice;
+  const taxRate = q.taxRate ?? 0;
+  const taxAmount = (subtotal * taxRate) / 100;
+  const discountValue = q.discountValue ?? 0;
+  const discountAmount = q.discountType === 'FIXED' ? discountValue : (subtotal * discountValue) / 100;
+  const id = `${P}legacy_${legacySeq}`;
+  await db.quote.create({
+    data: {
+      id,
+      businessId,
+      contactId,
+      quoteNumber: `${P}LEG-${String(legacySeq).padStart(3, '0')}`,
+      status: 'ACCEPTED',
+      subtotal,
+      taxRate,
+      taxAmount,
+      discountType: q.discountType ?? null,
+      discountValue,
+      discountAmount,
+      total: subtotal + taxAmount - discountAmount,
+      currency: 'TTD',
+      items: { create: [{ description: `V51A legacy line ${legacySeq}`, quantity: 1, unitPrice: q.unitPrice, total: q.unitPrice }] },
+    },
+  });
+  return id;
+}
+
+/** Every row a convert could write for the tenant. */
+async function writesOf(businessId: string) {
+  return {
+    invoices: await db.invoice.count({ where: { businessId } }),
+    transactions: await db.financialTransaction.count({ where: { businessId } }),
+  };
+}
+
+function patchQuote(owner: string, businessId: string, quoteId: string, body: Record<string, unknown>) {
+  return agent().patch(`/commerce/businesses/${businessId}/quotes/${quoteId}`).set(HEADER, owner).send(body);
+}
+
+describe('V1-51 review repairs: convert never writes a negative invoice (SEC-V51-1, CR51-1)', () => {
+  it("RV-DISC-1: a stored quote discount above 100% (no type, or PERCENT) -> convert {} answers 400 'Percentage discount cannot exceed 100%'; no Invoice, no FinancialTransaction, the quote stays unconverted, no event", async () => {
+    for (const discountType of [null, 'PERCENT'] as const) {
+      const id = await legacyAcceptedQuote(ID.bizAcc, ID.contactAcc, { unitPrice: 100, discountType, discountValue: 150 });
+      expect(Number((await quoteRow(id)).total), 'the stored quote is negative').toBe(-50);
+      const before = await writesOf(ID.bizAcc);
+      recordedEvents.length = 0;
+      const res = await convert(ID.ownerAcc, ID.bizAcc, id);
+      expect(res.status, `${discountType}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.body.message).toBe('Percentage discount cannot exceed 100%');
+      expect(await writesOf(ID.bizAcc)).toEqual(before);
+      expect(await invoicesOfQuote(id)).toEqual([]);
+      expect((await quoteRow(id)).invoiceId).toBeNull();
+      expect(recordedEvents).toEqual([]);
+    }
+  });
+
+  it('RV-DISC-2 (control): the operator can still convert such a quote by naming a valid discount in the body; issuing it on ACCRUAL posts AR for its positive total', async () => {
+    const id = await legacyAcceptedQuote(ID.bizAcc, ID.contactAcc, { unitPrice: 100, discountValue: 150 });
+    const res = await convert(ID.ownerAcc, ID.bizAcc, id, { discountType: 'PERCENT', discountValue: 10 });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const invoice = await invoiceRow(res.body.id);
+    expect([invoice.discountType, Number(invoice.discountAmount), Number(invoice.total)]).toEqual(['PERCENT', 10, 90]);
+    const issued = await agent().patch(`/commerce/invoices/${res.body.id}/status/sent`).set(HEADER, ID.ownerAcc).send({ businessId: ID.bizAcc, status: 'SENT' });
+    expect(issued.status, JSON.stringify(issued.body)).toBe(200);
+    const txns = await db.financialTransaction.findMany({ where: { businessId: ID.bizAcc, sourceType: 'Invoice', sourceId: res.body.id } });
+    expect(txns).toHaveLength(1);
+    expect(Number(txns[0].amount)).toBe(90);
+  });
+
+  it("RV-DISC-3: a stored quote whose lines sum below zero -> convert {} answers 400 'Invoice total cannot be negative'; nothing is written", async () => {
+    const id = await legacyAcceptedQuote(ID.bizAcc, ID.contactAcc, { unitPrice: -100, taxRate: 12.5 });
+    const before = await writesOf(ID.bizAcc);
+    const res = await convert(ID.ownerAcc, ID.bizAcc, id);
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.message).toBe('Invoice total cannot be negative');
+    expect(await writesOf(ID.bizAcc)).toEqual(before);
+    expect((await quoteRow(id)).invoiceId).toBeNull();
+  });
+
+  it("RV-DISC-4: quote create and edit check the discount as they price it: a typeless discountValue 150 on create, and a PATCH that turns a FIXED 150 into a PERCENT 150, answer 400 'Percentage discount cannot exceed 100%'; no quote row written or changed", async () => {
+    const quotesBefore = await db.quote.count({ where: { businessId: ID.bizCash } });
+    const created = await agent()
+      .post(`/commerce/businesses/${ID.bizCash}/quotes`)
+      .set(HEADER, ID.ownerCash)
+      .send({ contactId: ID.contactCash, quoteNumber: `${P}Q-typeless`, items: [{ description: 'V51A typeless', quantity: 1, unitPrice: 100 }], discountValue: 150 });
+    expect(created.status, JSON.stringify(created.body)).toBe(400);
+    expect(created.body.message).toBe('Percentage discount cannot exceed 100%');
+    expect(await db.quote.count({ where: { businessId: ID.bizCash } })).toBe(quotesBefore);
+
+    const fixed = await createQuote(ID.ownerCash, ID.bizCash, ID.contactCash, {
+      discountType: 'FIXED',
+      discountValue: 150,
+      items: [{ description: 'V51A fixed 150', quantity: 1, unitPrice: 200 }],
+    });
+    expect(Number(fixed.total)).toBe(50);
+    const before = await quoteRow(fixed.id);
+    const flipped = await patchQuote(ID.ownerCash, ID.bizCash, fixed.id, { discountType: 'PERCENT' });
+    expect(flipped.status, JSON.stringify(flipped.body)).toBe(400);
+    expect(flipped.body.message).toBe('Percentage discount cannot exceed 100%');
+    expect(await quoteRow(fixed.id)).toEqual(before);
+  });
+});
+
+describe('V1-51 review repairs: an accepted quote is final (SEC-V51-2)', () => {
+  it('RV-EDIT-1: PATCH on an ACCEPTED quote answers 409 quote_accepted and changes nothing; convert {} then invoices the accepted 112.50; PATCH on the converted quote answers 409 quote_converted', async () => {
+    const { quote } = await acceptedQuote(ID.ownerAcc, ID.bizAcc, ID.contactAcc, { taxRate: 12.5 });
+    const before = await quoteRow(quote.id);
+    expect(Number(before.total)).toBe(112.5);
+    recordedEvents.length = 0;
+    const edited = await patchQuote(ID.ownerAcc, ID.bizAcc, quote.id, { taxRate: 50, discountType: 'FIXED', discountValue: 0 });
+    expect(edited.status, JSON.stringify(edited.body)).toBe(409);
+    expect(edited.body.code).toBe('quote_accepted');
+    expect(await quoteRow(quote.id)).toEqual(before);
+    expect(recordedEvents).toEqual([]);
+
+    const res = await convert(ID.ownerAcc, ID.bizAcc, quote.id);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(Number((await invoiceRow(res.body.id)).total)).toBe(112.5);
+
+    const afterConvert = await quoteRow(quote.id);
+    const again = await patchQuote(ID.ownerAcc, ID.bizAcc, quote.id, { notes: 'too late' });
+    expect(again.status, JSON.stringify(again.body)).toBe(409);
+    expect(again.body.code).toBe('quote_converted');
+    expect(await quoteRow(quote.id)).toEqual(afterConvert);
+  });
+
+  it('RV-EDIT-2 (control): a SENT quote stays editable (200, total recomputed)', async () => {
+    const quote = await createQuote(ID.ownerAcc, ID.bizAcc, ID.contactAcc, { taxRate: 12.5 });
+    const sent = await setQuoteStatus(ID.ownerAcc, ID.bizAcc, quote.id, 'sent');
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+    const edited = await patchQuote(ID.ownerAcc, ID.bizAcc, quote.id, { taxRate: 15 });
+    expect(edited.status, JSON.stringify(edited.body)).toBe(200);
+    expect(Number((await quoteRow(quote.id)).total)).toBe(115);
+  });
+});
+
+describe('V1-51 review repairs: a discounted sub-cent quote converts to its accepted total to the cent (CR51-2)', () => {
+  it('RV-CENTS-1: 1 x 100.04 @ 12.5% less 5% (quote total 107.543, shown as 107.54) -> invoice 107.54 from convert {} and from the quotes-panel body; subtotal + tax - discount = total', async () => {
+    const quoteBody: QuoteBody = { taxRate: 12.5, discountType: 'PERCENT', discountValue: 5, items: [{ description: 'V51A cents discount', quantity: 1, unitPrice: 100.04 }] };
+    for (const body of [{}, { taxRate: 12.5, discountType: 'PERCENT', discountValue: 5 }]) {
+      const { quote } = await acceptedQuote(ID.ownerCash, ID.bizCash, ID.contactCash, quoteBody);
+      const accepted = money(Number((await quoteRow(quote.id)).total));
+      expect(accepted).toBe(107.54);
+      const res = await convert(ID.ownerCash, ID.bizCash, quote.id, body);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      const invoice = await invoiceRow(res.body.id);
+      const [subtotal, taxAmount, discountAmount, total] = [invoice.subtotal, invoice.taxAmount, invoice.discountAmount, invoice.total].map(Number);
+      expect(total, `${JSON.stringify(body)}: invoice total = the accepted total to the cent`).toBe(accepted);
+      expect(taxAmount).toBe(12.51);
+      expect(Math.round(subtotal * 100) + Math.round(taxAmount * 100) - Math.round(discountAmount * 100)).toBe(Math.round(total * 100));
+    }
+  });
+
+  it.todo(
+    'SEC-V51-3 (follow-up, outside the V1-51 write set): POST .../quotes/:id/convert returns the invoice with the whole Contact row ' +
+      '(phone, notesInternal, visibility, ownerId of a PRIVATE contact) to a revenue:write member; the body must be projected through ' +
+      'toInvoiceWriteResponse in commerce.controller.ts like the other invoice write routes (R0-CMF1 SEC-CMF1-2). Predates V1-51; ' +
+      'commerce.controller.ts is in the V1-52 / V1-53 write sets.',
+  );
 });
