@@ -4,6 +4,10 @@
   "proofScope": "evidence-feed-real-database-and-business-event-interceptor",
   "requireReportSuccess": true,
   "allowAdditionalCases": true,
+  "suites": [
+    "test/evidence-feed.integration.test.ts",
+    "src/modules/business-events/business-event.interceptor.spec.ts"
+  ],
   "requiredCases": [
     "harness isolation (R0-19 review, CR-R19-1) the audit queue and its worker run under this run's own BullMQ prefix, so no other app on REDIS_URL takes this run's jobs",
     "fixture sanity (real rows) two tenants, each with an OWNER, a system chart of accounts and one SENT invoice; no payment, posting, audit or Activity row yet",

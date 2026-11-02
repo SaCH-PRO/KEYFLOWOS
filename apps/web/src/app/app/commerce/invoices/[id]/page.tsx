@@ -45,6 +45,7 @@ import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
 import { formatAmount, getDaysUntilDue } from "../../utils/commerce-utils";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { attemptIdempotencyKey, newPaymentAttempt, type PaymentAttempt } from "../../../finance/components/payment-record-modal";
 
 const STATUS_ORDER = ["DRAFT", "SENT", "PAID", "OVERDUE", "VOID"];
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
@@ -126,9 +127,25 @@ export default function InvoiceDetailPage() {
 
   useEffect(() => { if (activeTab === "payments" && payments.length === 0) void loadPayments(); }, [activeTab, loadPayments, payments.length]);
 
-  const paidAmount = (invoice?.payments ?? []).filter(p => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
-  const remaining = Math.max(0, Number(invoice?.total ?? 0) - paidAmount);
+  // R0-21 (M29): the server's status-aware figures (tenant detail route, and
+  // after a record the payments route's response). The SUCCESSFUL rows are
+  // only a fallback for a response that carries no figures.
+  const serverFigures = typeof invoice?.paidAmount === "number" && typeof invoice?.remaining === "number"
+    ? { paidAmount: invoice.paidAmount, remaining: invoice.remaining }
+    : null;
+  const paidAmount = serverFigures
+    ? serverFigures.paidAmount
+    : (invoice?.payments ?? []).filter(p => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
+  const remaining = serverFigures ? serverFigures.remaining : Math.max(0, Number(invoice?.total ?? 0) - paidAmount);
   const dueInfo = invoice ? getDaysUntilDue(invoice.dueDate) : null;
+
+  // R0-21 (M26, CF-08): one payment attempt per open of the payment form. Its
+  // key is made on the first submit and reused by every retry; closing drops
+  // it. A submit with a reference is keyed by the server's reference slot
+  // instead (attemptIdempotencyKey, review R021-ST-1).
+  const paymentAttemptRef = useRef<PaymentAttempt | null>(null);
+  const recordingPaymentRef = useRef(false);
+  useEffect(() => { if (!showPaymentForm) paymentAttemptRef.current = null; }, [showPaymentForm]);
 
   const withLoading = async (key: string, fn: () => Promise<void>) => {
     setActionLoading(prev => ({ ...prev, [key]: true }));
@@ -178,20 +195,25 @@ export default function InvoiceDetailPage() {
   };
 
   const handleRecordPayment = async () => {
-    if (!businessId || !invoice || recordingPayment) return;
+    if (!businessId || !invoice || recordingPayment || recordingPaymentRef.current) return;
     const amount = parseFloat(paymentForm.amount);
     if (isNaN(amount) || amount <= 0) { toast.error("Enter a valid amount"); return; }
-    if (amount > remaining + 0.005) { if (!window.confirm(`Amount exceeds remaining balance. Continue?`)) return; }
+    if (amount > remaining + 0.005) {
+      if (!window.confirm(`Over-payment of ${formatAmount(amount - remaining, invoice.currency)}: this invoice has ${formatAmount(remaining, invoice.currency)} remaining. Record it anyway? It will need a refund.`)) return;
+    }
+    if (!paymentAttemptRef.current) paymentAttemptRef.current = newPaymentAttempt();
+    recordingPaymentRef.current = true;
     setRecordingPayment(true);
     try {
-      const { data, error } = await recordInvoicePayment(businessId, invoice.id, { amount, method: paymentForm.method, reference: paymentForm.reference || undefined, notes: paymentForm.notes || undefined });
+      const { data, error } = await recordInvoicePayment(businessId, invoice.id, { amount, method: paymentForm.method, reference: paymentForm.reference || undefined, notes: paymentForm.notes || undefined, idempotencyKey: attemptIdempotencyKey(paymentAttemptRef.current, paymentForm.reference) });
       if (!error && data) {
-        setInvoice(prev => prev ? { ...data.invoice, payments: data.invoice.payments } : prev);
-        setPayments(prev => [data.payment, ...prev]);
+        setInvoice(prev => prev ? { ...data.invoice, payments: data.invoice.payments, paidAmount: data.paidAmount, remaining: data.remaining } : prev);
+        // A keyed retry answers the payment already recorded: list it once.
+        setPayments(prev => [data.payment, ...prev.filter(p => p.id !== data.payment.id)]);
         toast.success(data.invoice.status === "PAID" ? "Fully paid!" : `Payment recorded`);
         setShowPaymentForm(false); setPaymentForm({ amount: "", method: "Cash", reference: "", notes: "" });
       } else toast.error(error ?? "Failed");
-    } finally { setRecordingPayment(false); }
+    } finally { recordingPaymentRef.current = false; setRecordingPayment(false); }
   };
 
   const handleSendReminder = () => {
@@ -209,6 +231,20 @@ export default function InvoiceDetailPage() {
         toast.success("Reminder sent");
       },
     });
+  };
+
+  // V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the token link
+  // or an error. The fallback was the retired bare-id /pay/:id page, so a
+  // paid or void invoice copied a dead link.
+  const copyPaymentLink = async () => {
+    if (!businessId || !invoice) return;
+    const { data, error: linkError } = await createInvoicePaymentLink(businessId, invoice.id);
+    if (!data?.token) {
+      toast.error(linkError ?? "Could not create a payment link for this invoice");
+      return;
+    }
+    await navigator.clipboard.writeText(`${window.location.origin}/public/invoice/${data.token}`);
+    toast.success("Copied");
   };
 
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>;
@@ -255,7 +291,7 @@ export default function InvoiceDetailPage() {
           <div className="relative group">
             <button className="inline-flex items-center gap-1.5 px-3 h-9 text-xs font-medium rounded-lg border border-border hover:bg-muted transition-colors"><MoreHorizontal className="w-3.5 h-3.5" /></button>
             <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] rounded-xl border border-border bg-popover shadow-lg py-1 hidden group-hover:block">
-              <DropdownItem icon={LinkIcon} label="Copy payment link" show onClick={async () => { if (!businessId) return; const res = await createInvoicePaymentLink(businessId, invoice.id); const url = res.data?.token ? window.location.origin + "/public/invoice/" + res.data.token : window.location.origin + "/pay/" + invoice.id; navigator.clipboard.writeText(url); toast.success("Copied"); }} />
+              <DropdownItem icon={LinkIcon} label="Copy payment link" show onClick={copyPaymentLink} />
               <DropdownItem icon={Printer} label="Print / PDF" show onClick={() => window.print()} />
               {invoice.status === "PAID" && <DropdownItem icon={Receipt} label="Resend receipt" show onClick={() => resendInvoiceReceipt(businessId!, invoice.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} />}
               {canEdit && <DropdownItem icon={CheckCircle} label="Mark paid" show onClick={handleMarkPaid} loading={actionLoading.paid} />}
@@ -419,7 +455,7 @@ export default function InvoiceDetailPage() {
             {canSend && <ActionButton icon={Send} label="Send invoice" onClick={handleSend} loading={actionLoading.send} primary />}
             {canRemind && <ActionButton icon={Bell} label="Send reminder" onClick={handleSendReminder} />}
             {canRecordPayment && <ActionButton icon={DollarSign} label="Record payment" onClick={() => setShowPaymentForm(true)} />}
-            <ActionButton icon={LinkIcon} label="Copy payment link" onClick={async () => { if (!businessId) return; const { data } = await createInvoicePaymentLink(businessId, invoice.id); const url = data?.token ? window.location.origin + "/public/invoice/" + data.token : window.location.origin + "/pay/" + invoice.id; navigator.clipboard.writeText(url); toast.success("Copied"); }} />
+            <ActionButton icon={LinkIcon} label="Copy payment link" onClick={copyPaymentLink} />
             <ActionButton icon={Printer} label="Print / PDF" onClick={() => window.print()} />
             {canEdit && <ActionButton icon={CheckCircle} label="Mark paid" onClick={handleMarkPaid} loading={actionLoading.paid} />}
             {canVoid && <ActionButton icon={Ban} label="Void invoice" onClick={handleVoid} loading={actionLoading.void} />}

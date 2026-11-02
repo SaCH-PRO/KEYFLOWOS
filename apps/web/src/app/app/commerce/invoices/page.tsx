@@ -211,11 +211,15 @@ export default function InvoicesHubPage() {
     router.push("/app/commerce/invoices/new");
   };
 
-  const buildPublicUrl = async (inv: Invoice) => {
-    if (!businessId) return "";
+  // V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the token link
+  // or nothing. The fallback was the retired bare-id /pay/:id page.
+  const buildPublicUrl = async (inv: Invoice): Promise<string | null> => {
+    if (!businessId) return null;
     const origin = typeof window !== "undefined" ? window.location.origin : "";
     const { data } = await createInvoicePaymentLink(businessId, inv.id);
-    return data?.token ? `${origin}/public/invoice/${data.token}` : `${origin}/pay/${inv.id}`;
+    if (data?.token) return `${origin}/public/invoice/${data.token}`;
+    toast.error("Could not create a payment link for this invoice");
+    return null;
   };
 
   return (
@@ -352,7 +356,7 @@ export default function InvoicesHubPage() {
                                 <DropdownItem icon={CheckCircle2} label="Mark paid" onClick={() => handleMarkPaid(inv.id)} show={inv.status === "DRAFT" || inv.status === "SENT"} loading={actionLoading[inv.id] === "paid"} />
                                 <DropdownItem icon={Receipt} label="Resend receipt" onClick={() => resendInvoiceReceipt(businessId!, inv.id, {}).then(r => r.data?.success ? toast.success("Resent") : toast.error(r.error ?? "Failed"))} show={!!(inv.status === "PAID" && gmailStatus?.connected)} />
                                 <DropdownItem icon={Files} label="Duplicate" onClick={() => handleDuplicate(inv)} show />
-                                <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => buildPublicUrl(inv).then(url => window.open(`https://wa.me/?text=${encodeURIComponent(`Your invoice: ${url}`)}`, "_blank"))} show />
+                                <DropdownItem icon={MessageCircle} label="Share WhatsApp" onClick={() => buildPublicUrl(inv).then(url => { if (url) window.open(`https://wa.me/?text=${encodeURIComponent(`Your invoice: ${url}`)}`, "_blank"); })} show />
                                 <DropdownItem icon={Ban} label="Void" onClick={() => handleVoid(inv.id)} show={inv.status !== "VOID" && inv.status !== "PAID"} loading={actionLoading[inv.id] === "void"} />
                                 <div className="border-t border-border my-1" />
                                 <DropdownItem icon={Trash2} label="Delete" destructive onClick={() => handleDelete(inv.id)} show={inv.status === "DRAFT" || inv.status === "VOID"} />

@@ -4,6 +4,9 @@
   "proofScope": "contacts-write-contract-real-database",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "test/contacts-persistence.integration.test.ts"
+  ],
   "requiredCases": [
     "fixture sanity (real rows) seeded one tenant with an owner, four STAFF members, two live contacts and one linked invoice",
     "HARNESS: the body DTO the ValidationPipe validates against is the one crm.controller.ts declares the design:paramtypes in effect for createContact and updateContact are the ones tsc emits from the controller source, binding CreateContactDto and UpdateContactDto",

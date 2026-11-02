@@ -4,6 +4,10 @@
   "proofScope": "cortex-audit-tenant-real-database-and-route-binding",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "test/cortex-audit-tenant.integration.test.ts",
+    "src/modules/key-cortex/key-cortex-audit.controller.spec.ts"
+  ],
   "requiredCases": [
     "fixture sanity (real rows) seeded verdicts and value constraints in two tenants",
     "cortex audit routes refuse callers the guard does not admit a request with no identity is 401 on every audit route",

@@ -4,6 +4,10 @@
   "proofScope": "invoice-create-contract-real-database-and-l1-http",
   "requireReportSuccess": true,
   "allowAdditionalCases": true,
+  "suites": [
+    "test/commerce-invoice-errors.integration.test.ts",
+    "test/commerce-authorization.e2e.test.ts"
+  ],
   "requiredCases": [
     "Commerce authorization e2e (L1: real guards, mocked service) List A: pre-fix failures RA-G1-01: path paid with body SENT is refused with 400 before the service is called",
     "Commerce authorization e2e (L1: real guards, mocked service) List A: pre-fix failures RA-G1-02: every path value outside the DTO set is refused with 400 before the service is called",

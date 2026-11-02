@@ -153,6 +153,94 @@ export class PaymentsService {
     return { client, ordersController };
   }
 
+  /**
+   * V1-46b-TOKEN-PAY-COMPLETE (M34, review ST-1; D-07: token links only) —
+   * the invoice a customer pay-link token opens, resolved ONLY through an
+   * active, unexpired PaymentLink of the invoice's own tenant: the resolver
+   * the token pay read and intent use (CommerceService.getPaymentLinkByToken,
+   * V1-48/V1-46). Behind it, the same shareable gate as that read: a DRAFT,
+   * VOID, FAILED, PENDING or soft-deleted invoice reads as absent. Every
+   * refusal is one 404 body, the one an unknown token gets, and nothing
+   * downstream (no provider, no row) is reached.
+   */
+  private async payLinkInvoice(token: string): Promise<{ invoiceId: string; businessId: string }> {
+    const link = await this.commerceService.getPaymentLinkByToken(token);
+    if (!link) throw new NotFoundException('Invoice not found');
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: link.invoiceId, businessId: link.businessId, deletedAt: null },
+      select: { status: true },
+    });
+    if (!invoice || !isShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Invoice not found');
+    return { invoiceId: link.invoiceId, businessId: link.businessId };
+  }
+
+  /**
+   * V1-46b (ST-1): the anonymous bare-id routes (status, gateway list, the
+   * generic checkout's invoice payables) answer like an unknown id once every
+   * link of the invoice is revoked or expired (CommerceService.
+   * isBareIdPublicAccessOpen). Unknown and closed share one 404 body.
+   */
+  private async assertBareIdInvoiceOpen(invoiceId: string): Promise<void> {
+    if (!(await this.commerceService.isBareIdPublicAccessOpen(invoiceId))) {
+      throw new NotFoundException('Invoice not found');
+    }
+  }
+
+  /** V1-46b: the pay page's status poll, by the token (the five keys of getInvoicePaymentStatus). */
+  async getInvoicePaymentStatusByToken(token: string) {
+    const { invoiceId } = await this.payLinkInvoice(token);
+    return this.invoicePaymentStatus(invoiceId);
+  }
+
+  /** V1-46b: the gateways the token's business accepts. */
+  async getGatewaysByToken(token: string): Promise<GatewayInfo[]> {
+    const { businessId } = await this.payLinkInvoice(token);
+    return this.getAvailableGateways(businessId);
+  }
+
+  /**
+   * V1-46b: the bare-id gateway list (GET invoice/:invoiceId/gateways). It
+   * answered a plain Error (500) for an unknown id; unknown and a closed id
+   * now answer one 404 (assertBareIdInvoiceOpen).
+   */
+  async getGatewaysForInvoice(invoiceId: string): Promise<GatewayInfo[]> {
+    await this.assertBareIdInvoiceOpen(invoiceId);
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { businessId: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    return this.getAvailableGateways(invoice.businessId);
+  }
+
+  /**
+   * V1-46b: a Stripe, WiPay or PayPal checkout for the token's invoice. The
+   * per-provider work is createInvoiceCheckout, unchanged (payable gate,
+   * return-URL allow-list, provider request); only the invoice comes from the
+   * token instead of a bare id in the path.
+   */
+  async createCheckoutByToken(
+    token: string,
+    input: { gateway: 'stripe' | 'paypal' | 'wipay'; returnUrl?: string; successUrl?: string; cancelUrl?: string },
+  ) {
+    const { invoiceId } = await this.payLinkInvoice(token);
+    return this.createInvoiceCheckout(invoiceId, input.gateway, input.returnUrl, input.successUrl, input.cancelUrl);
+  }
+
+  /**
+   * V1-46b: the PayPal capture for the token's invoice. The invoice is the
+   * token's, never one named by the caller (the bare route took
+   * `body.invoiceId`, so any order could be captured against any invoice).
+   * The token alone does not bind the ORDER to that invoice: capturePaypalOrder
+   * reads the order first and refuses one created for another invoice, order
+   * or tenant, or for another amount (V1-46b review SEC-V46B-3,
+   * assertPaypalOrderForInvoice).
+   */
+  async capturePaypalOrderByToken(token: string, orderId: string) {
+    const { invoiceId } = await this.payLinkInvoice(token);
+    return this.capturePaypalOrder(orderId, invoiceId);
+  }
+
   async getAvailableGateways(businessId: string): Promise<GatewayInfo[]> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
@@ -963,8 +1051,23 @@ export class PaymentsService {
    * unknown id answered 404 — the distinction and the amount were both new
    * disclosures (main answered `[]` for either). Non-shareable now answers
    * exactly like unknown.
+   *
+   * V1-46b (ST-1): and so does an invoice whose links are all revoked or
+   * expired (assertBareIdInvoiceOpen). The pay page polls the token route
+   * (getInvoicePaymentStatusByToken), which serves the same five keys.
    */
   async getInvoicePaymentStatus(invoiceId: string): Promise<{
+    status: string;
+    paid: number;
+    remaining: number;
+    currency: string;
+    lastPaymentAt: Date | null;
+  }> {
+    await this.assertBareIdInvoiceOpen(invoiceId);
+    return this.invoicePaymentStatus(invoiceId);
+  }
+
+  private async invoicePaymentStatus(invoiceId: string): Promise<{
     status: string;
     paid: number;
     remaining: number;
@@ -1486,6 +1589,9 @@ export class PaymentsService {
     const paypal = this.getPaypalClient(paypalClientId, paypalClientSecret);
     if (!paypal) throw new Error('PayPal is not configured');
 
+    // V1-46b review (SEC-V46B-3): before anything is captured or written.
+    await this.assertPaypalOrderForInvoice(paypal.ordersController, orderId, invoice);
+
     try {
       const { result } = await paypal.ordersController.captureOrder({
         id: orderId,
@@ -1560,6 +1666,40 @@ export class PaymentsService {
     }
   }
 
+  /**
+   * V1-46b review (SEC-V46B-3): the order a capture names must be the one
+   * createPaypalOrder made for this invoice: exactly one purchase unit, its
+   * custom_id this invoice's id and its amount this invoice's total. The
+   * PayPal credentials may be shared by every tenant (the env pair), so an
+   * order id alone could name another invoice's, a storefront order's or
+   * another tenant's order, and the capture recorded it as a SUCCESSFUL
+   * payment of this invoice's whole total. An order that does not match, or
+   * cannot be read, is refused (400) before it is captured; nothing is written
+   * and no FAILED row is left behind.
+   */
+  private async assertPaypalOrderForInvoice(
+    ordersController: OrdersController,
+    orderId: string,
+    invoice: { id: string; total: number },
+  ): Promise<void> {
+    const refusal = 'This PayPal order does not belong to this invoice';
+    let units: Array<{ customId?: string; amount?: { value?: string } }> | undefined;
+    try {
+      const { result } = await ordersController.getOrder({ id: orderId });
+      units = result.purchaseUnits;
+    } catch (error: unknown) {
+      const errMsg = error instanceof Error ? error.message : 'Unknown error';
+      this.logger.warn(`PayPal order ${orderId} could not be read for invoice ${invoice.id}: ${errMsg}`);
+      throw new BadRequestException(refusal);
+    }
+    const unit = units?.length === 1 ? units[0] : undefined;
+    const value = Number(unit?.amount?.value);
+    if (!unit || unit.customId !== invoice.id || !Number.isFinite(value) || value.toFixed(2) !== Number(invoice.total).toFixed(2)) {
+      this.logger.warn(`PayPal order ${orderId} is not an order for invoice ${invoice.id}; capture refused`);
+      throw new BadRequestException(refusal);
+    }
+  }
+
   private async createInvoiceCheckout(
     invoiceId: string,
     gateway: 'stripe' | 'paypal' | 'wipay',
@@ -1619,6 +1759,8 @@ export class PaymentsService {
         input.payableType === 'mass_comm'
           ? await this.resolveMassCommInvoiceId(input.payableId)
           : input.payableId;
+      // V1-46b (ST-1): an anonymous bare-id invoice checkout closes with the invoice's links.
+      await this.assertBareIdInvoiceOpen(invoiceId);
       return this.createInvoiceCheckout(
         invoiceId,
         input.gateway,
@@ -1663,6 +1805,7 @@ export class PaymentsService {
       if (!attendee.paymentId) {
         throw new BadRequestException('Attendee does not have a payable invoice');
       }
+      await this.assertBareIdInvoiceOpen(attendee.paymentId);
       return this.createInvoiceCheckout(
         attendee.paymentId,
         input.gateway,

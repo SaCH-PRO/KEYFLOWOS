@@ -4,6 +4,10 @@
   "proofScope": "proof-admission-evaluator-self-test",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "src/core/config/proof-admission.spec.ts",
+    "src/core/config/proof-resource-admission.spec.ts"
+  ],
   "requiredCases": [
     "proof admission evaluator [K12-P01] accepts exact passing required cases",
     "proof admission evaluator [K12-P02] rejects a missing required case",
@@ -20,7 +24,35 @@
     "proof resource admission [K12-P13] rejects an unexpected database name",
     "proof resource admission [K12-P14] rejects a nonlocal redis host",
     "proof resource admission [K12-P15] rejects an untrusted execution environment",
-    "proof resource admission [K12-P16] never emits resource credentials in its receipt"
+    "proof resource admission [K12-P16] never emits resource credentials in its receipt",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P17] the verdict carries the evaluated head, and the exact --expect-head is satisfied",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P18] NEGATIVE CONTROL: a wrong --expect-head is REJECTED (KF_PROOF_HEAD_MISMATCH) although every case passed",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P19] NEGATIVE CONTROL: a malformed --expect-head is refused as an invalid argument",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P20] NEGATIVE CONTROL: a misspelled required case gives KF_PROOF_REQUIRED_CASE_MISSING in a combined report",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P21] NEGATIVE CONTROL: a skipped required case in a combined report is rejected",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P22] NEGATIVE CONTROL: a strict manifest rejects an unexpected case in a suite it binds",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P23] a strict manifest ignores the cases of a suite it does not bind in the same combined report",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P24] a failing suite the manifest does not bind leaves it satisfied; a failing suite it binds rejects it",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P25] NEGATIVE CONTROL: a manifest with neither suites nor a description command is KF_PROOF_MANIFEST_UNBOUND",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P26] a manifest with no suites field binds the files of its description's npx vitest run command",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P27] NEGATIVE CONTROL: a declared suite that is absent from the report is KF_PROOF_BOUND_SUITE_MISSING",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P28] NEGATIVE CONTROL: a suites entry that is not a plain relative path is an untrusted manifest",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P29] NEGATIVE CONTROL: a required case reported only by a suite the manifest does not bind does not satisfy it",
+    "proof admission evaluator: exact head and suite binding (R0-16-PROOF-BINDING) [K12-P30] a duplicate case identity is rejected inside the bound suites and ignored outside them",
+    "proof manifest runner (R0-16-PROOF-BINDING) [K12-P31] evaluates every case manifest against one report at HEAD, one line each, skipping resource manifests by type",
+    "proof manifest runner (R0-16-PROOF-BINDING) [K12-P32] NEGATIVE CONTROL: exits non-zero and names each manifest that is not satisfied, with its reason",
+    "proof manifest runner (R0-16-PROOF-BINDING) [K12-P33] NEGATIVE CONTROL: a negative-controls manifest whose named test is skipped or renamed fails the run",
+    "proof manifest runner (R0-16-PROOF-BINDING) [K12-P34] NEGATIVE CONTROL: an unbound case manifest or a file of unknown type fails the run",
+    "proof manifest runner (R0-16-PROOF-BINDING) [K12-P35] --plan unions the suites of every case manifest, marks the ones that need dist/main.js, and runs nothing",
+    "proof manifest runner (R0-16-PROOF-BINDING) [K12-P36] every committed case manifest declares the suites it binds, and every declared suite file exists",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P37] NEGATIVE CONTROL: a manifest with more than one of requiredCases, controls and resources is KF_PROOF_MANIFEST_TYPE_AMBIGUOUS",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P38] every `vitest run` command in a one-line description binds its files, and a prose mention before the command binds nothing",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P39] NEGATIVE CONTROL: receipts judged from --report or another manifests directory are labelled NOT-EXACT-HEAD, with the reasons",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P40] the tree is clean only with no modified tracked file and no untracked source file; node_modules and .proof output are not source",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P41] NEGATIVE CONTROL: a bound suite that passes its assertions but leaks an unhandled rejection fails the run, and its untracked file is NOT-EXACT-HEAD",
+    "proof manifest runner: review repairs (R0-16-PROOF-BINDING) [K12-P42] an incremental build that re-emitted only the edited file is fresh; a source edit after the newest build output is not",
+    "proof resource admission [K12-P43] NEGATIVE CONTROL: a local URL whose query string overrides its connection target is REJECTED, naming the parameter and never its value",
+    "proof resource admission [K12-P44] query parameters that do not move the connection target are still admitted"
   ],
   "maxReportAgeSeconds": 600
 }

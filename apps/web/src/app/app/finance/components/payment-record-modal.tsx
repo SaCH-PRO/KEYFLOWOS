@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   DollarSign,
   CreditCard,
@@ -18,7 +18,7 @@ import {
 import { SideSheet } from "../../commerce/components/side-sheet";
 import { formatCurrency } from "@/lib/currency";
 import type { Invoice } from "@/lib/client";
-import { recordPaymentFromEvidence } from "@/lib/client";
+import { getInvoice, recordPaymentFromEvidence } from "@/lib/client";
 import { useUpload } from "@/hooks/use-upload";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -35,11 +35,81 @@ const ACCENT = "rgb(16,185,129)";
 const ACCENT_BG = "rgba(16,185,129,0.15)";
 const ACCENT_BORDER = "rgba(16,185,129,0.3)";
 
+/**
+ * R0-21: the idempotency key for one payment attempt (one form open), sent as
+ * RecordPaymentDto.idempotencyKey. crypto.randomUUID exists only in secure
+ * contexts (https, localhost); getRandomValues exists everywhere, so it backs
+ * a plain-http origin with the same RFC 4122 v4 shape.
+ */
+export function newPaymentAttemptKey(): string {
+  const c = globalThis.crypto;
+  if (typeof c?.randomUUID === "function") return c.randomUUID();
+  const b = c.getRandomValues(new Uint8Array(16));
+  b[6] = ((b[6] ?? 0) & 0x0f) | 0x40;
+  b[8] = ((b[8] ?? 0) & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/**
+ * R0-21: one payment attempt (one form open). `keySent` records that a submit
+ * of this open already went out under `key`.
+ */
+export interface PaymentAttempt {
+  key: string;
+  keySent: boolean;
+}
+
+export function newPaymentAttempt(): PaymentAttempt {
+  return { key: newPaymentAttemptKey(), keySent: false };
+}
+
+/**
+ * R0-21 review (R021-ST-1, CR-R021-1): the idempotencyKey one submit of
+ * `attempt` sends, given the reference that submit carries.
+ *
+ * On the HTTP route the server (R0-D2) keys a manual payment on the client key
+ * whenever one is sent, and then never checks its reference slot (same invoice
+ * + same non-empty reference + same amount = the same slip). A key made per
+ * open would make one slip entered in two opens two payments: a lost response,
+ * Cancel, reopen and re-enter; or two staff entering it from two forms. So a
+ * submit that carries a reference sends no key, and the server's reference slot
+ * identifies the slip across every open and every form. A blank-reference
+ * submit has nothing else to key on (CF-08), so it sends the open's key; once
+ * it has, every later retry of that open keeps sending it (even with a
+ * reference added meanwhile), so the retry still finds what the first recorded.
+ */
+export function attemptIdempotencyKey(attempt: PaymentAttempt, reference: string | null | undefined): string | undefined {
+  const hasReference = typeof reference === "string" && reference.trim().length > 0;
+  if (hasReference && !attempt.keySent) return undefined;
+  attempt.keySent = true;
+  return attempt.key;
+}
+
+/** Status-aware: only SUCCESSFUL rows are collected cash (PENDING, FAILED and REFUNDED are not). */
+function successfulPaid(invoice: Invoice): number {
+  return (invoice.payments ?? [])
+    .filter((p) => p.status === "SUCCESSFUL")
+    .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+}
+
+export interface PaymentRecordForm {
+  amount: string;
+  method: string;
+  reference: string;
+  notes: string;
+  /**
+   * R0-21: the open's key, reused by every retry of that open; absent when the
+   * submit carries a reference (attemptIdempotencyKey).
+   */
+  idempotencyKey?: string;
+}
+
 interface PaymentRecordModalProps {
   invoice: Invoice | null;
   businessId: string | null;
   onClose: () => void;
-  onSubmit: (invoice: Invoice, form: { amount: string; method: string; reference: string; notes: string }) => void;
+  onSubmit: (invoice: Invoice, form: PaymentRecordForm) => void;
   loading?: boolean;
 }
 
@@ -63,13 +133,59 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
 
   const { uploadFile, isUploading, progress } = useUpload();
 
-  const paidSoFar = useMemo(() =>
-    (invoice?.payments ?? []).reduce((s, p) => s + (p.amount ?? 0), 0),
-  [invoice]);
+  // R0-21 (M29): paid and remaining are the server's figures from the tenant
+  // detail route (R0-QI-01: paidAmount = SUCCESSFUL rows, remaining = total -
+  // paidAmount), read on every open. Summing the list row's payments counted
+  // PENDING and FAILED rows as collected cash. Only when that read fails does
+  // the modal fall back to the row's SUCCESSFUL payments.
+  const openInvoiceId = invoice?.id ?? null;
+  const [serverBalance, setServerBalance] = useState<{ invoiceId: string; paidAmount: number; remaining: number } | null>(null);
+  const [balanceFailedFor, setBalanceFailedFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!openInvoiceId || !businessId) return;
+    let live = true;
+    void getInvoice(businessId, openInvoiceId).then((res) => {
+      if (!live) return;
+      const d = res.data;
+      if (d && typeof d.paidAmount === "number" && typeof d.remaining === "number") {
+        setServerBalance({ invoiceId: openInvoiceId, paidAmount: d.paidAmount, remaining: d.remaining });
+      } else {
+        setBalanceFailedFor(openInvoiceId);
+      }
+    });
+    return () => {
+      // A close (or another invoice) ends this read; the next open reads afresh.
+      live = false;
+      setServerBalance(null);
+      setBalanceFailedFor(null);
+    };
+  }, [openInvoiceId, businessId]);
 
-  const remaining = useMemo(() =>
-    invoice ? Math.max(0, Number(invoice.total) - paidSoFar) : 0,
-  [invoice, paidSoFar]);
+  const balance = useMemo(() => {
+    if (!invoice) return null;
+    if (serverBalance && serverBalance.invoiceId === invoice.id) return serverBalance;
+    if (balanceFailedFor === invoice.id || !businessId) {
+      const paidAmount = successfulPaid(invoice);
+      return { paidAmount, remaining: Math.max(0, Number(invoice.total) - paidAmount) };
+    }
+    return null; // the server read is still in flight
+  }, [invoice, serverBalance, balanceFailedFor, businessId]);
+  const paidSoFar = balance?.paidAmount ?? 0;
+  const remaining = balance?.remaining ?? 0;
+
+  // R0-21 (M26, CF-08): one payment attempt per open. Its key is made on the
+  // first submit of this open and reused by every retry, so a resubmit after a
+  // lost response returns the payment already recorded (R0-D2). A close, or
+  // another invoice, drops it: the next open is a new payment attempt. A submit
+  // with a reference is keyed by the server's reference slot instead
+  // (attemptIdempotencyKey).
+  const attemptRef = useRef<PaymentAttempt | null>(null);
+  useEffect(() => {
+    attemptRef.current = null;
+  }, [openInvoiceId]);
+
+  // R0-21 (M29): an amount above the remaining balance is confirmed explicitly.
+  const [overpay, setOverpay] = useState<{ amount: number; remaining: number } | null>(null);
 
   const handleClose = () => {
     setAmount("");
@@ -79,6 +195,7 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
     setEvidenceFile(null);
     setScanError(null);
     setShowDrivePicker(false);
+    setOverpay(null);
     onClose();
   };
 
@@ -141,9 +258,21 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
     }
   };
 
-  const handleSubmit = () => {
+  const submit = () => {
     if (!invoice) return;
-    onSubmit(invoice, { amount, method, reference, notes });
+    setOverpay(null);
+    if (!attemptRef.current) attemptRef.current = newPaymentAttempt();
+    onSubmit(invoice, { amount, method, reference, notes, idempotencyKey: attemptIdempotencyKey(attemptRef.current, reference) });
+  };
+
+  const handleSubmit = () => {
+    if (!invoice || !balance) return;
+    const value = parseFloat(amount);
+    if (Number.isFinite(value) && value > balance.remaining + 0.005) {
+      setOverpay({ amount: value, remaining: balance.remaining });
+      return;
+    }
+    submit();
   };
 
   if (!invoice) return null;
@@ -164,10 +293,44 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
         </div>
       }
       footer={
+        overpay ? (
+          <div
+            role="alertdialog"
+            aria-labelledby="payment-overpay-title"
+            aria-describedby="payment-overpay-detail"
+            className="space-y-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3"
+          >
+            <p id="payment-overpay-title" className="flex items-center gap-2 text-sm font-semibold text-amber-300">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              Over-payment of {formatCurrency(overpay.amount - overpay.remaining, invoice.currency)}
+            </p>
+            <p id="payment-overpay-detail" className="text-xs text-muted-foreground">
+              This invoice has {formatCurrency(overpay.remaining, invoice.currency)} remaining. Recording{" "}
+              {formatCurrency(overpay.amount, invoice.currency)} leaves an over-payment that will need a refund.
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setOverpay(null)}
+                className="px-4 py-2.5 rounded-xl text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-white/[0.05] transition-colors border border-border/40"
+              >
+                Change amount
+              </button>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={loading}
+                className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-50 border border-amber-500/40 text-amber-300 bg-amber-500/15"
+              >
+                Record over-payment
+              </button>
+            </div>
+          </div>
+        ) : (
         <div className="flex items-center justify-between gap-3">
           <div className="text-xs text-muted-foreground">
             <span className="block">Remaining</span>
-            <span className="font-semibold text-amber-400">{formatCurrency(remaining, invoice.currency)}</span>
+            <span className="font-semibold text-amber-400">{balance ? formatCurrency(remaining, invoice.currency) : "…"}</span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -178,7 +341,7 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
             </button>
             <button
               onClick={handleSubmit}
-              disabled={loading || !amount}
+              disabled={loading || !amount || !balance}
               className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors disabled:opacity-50"
               style={{
                 background: ACCENT_BG,
@@ -190,6 +353,7 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
             </button>
           </div>
         </div>
+        )
       }
     >
       <div className="space-y-5">
@@ -262,11 +426,11 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
           </div>
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground">Already paid</span>
-            <span className="text-emerald-400">{formatCurrency(paidSoFar, invoice.currency)}</span>
+            <span className="text-emerald-400">{balance ? formatCurrency(paidSoFar, invoice.currency) : "…"}</span>
           </div>
           <div className="flex items-center justify-between text-xs border-t border-border/30 pt-1">
             <span className="text-muted-foreground">Remaining</span>
-            <span className="font-semibold text-amber-400">{formatCurrency(remaining, invoice.currency)}</span>
+            <span className="font-semibold text-amber-400">{balance ? formatCurrency(remaining, invoice.currency) : "…"}</span>
           </div>
         </div>
 
@@ -277,8 +441,8 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
             type="number"
             step="0.01"
             value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder={String(remaining)}
+            onChange={(e) => { setAmount(e.target.value); setOverpay(null); }}
+            placeholder={balance ? String(remaining) : ""}
             className="w-full px-3 py-2.5 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))]/40"
           />
         </div>

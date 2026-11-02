@@ -24,6 +24,7 @@ import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
 import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/update-invoice.dto';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { appUrl } from '../../core/config/runtime-urls';
 
 /**
  * The customer fields an operator invoice read discloses: the customer's name
@@ -702,12 +703,52 @@ export class CommerceService {
    * The shareable gate is the same for both readers: on main the route
    * answered null for DRAFT/VOID to everyone, and this packet does not widen
    * what the route serves.
+   *
+   * V1-46b-TOKEN-PAY-COMPLETE (M34, D-07: token links only): the projection
+   * branch also passes the bare-id link gate (`isBareIdPublicAccessOpen`), so
+   * once every link of the invoice is revoked or expired the id no longer
+   * opens it: the same null, so the same 404 as an unknown id. The operator
+   * branch is unchanged.
    */
   async getInvoiceForViewer(invoiceId: string, viewer?: { id?: string; role?: string } | null) {
     if (viewer?.id && (await this.viewerMayReadInvoiceAsOperator(invoiceId, viewer.id, viewer.role))) {
       return this.getInvoiceWithBusiness(invoiceId, true);
     }
-    return this.getInvoicePublicView(invoiceId);
+    const view = await this.getInvoicePublicView(invoiceId);
+    if (!view || !(await this.isBareIdPublicAccessOpen(invoiceId))) return null;
+    return view;
+  }
+
+  /**
+   * V1-46b-TOKEN-PAY-COMPLETE (M34, review ST-1; D-07: token links only) —
+   * the gate every anonymous bare-id invoice route passes: the public read
+   * (GET /commerce/invoices/:id, non-operator branch), the status poll and
+   * gateway list of payments.controller.ts, and the generic checkout's
+   * invoice payables. The customer pays through the token routes; the id
+   * alone must not outlive the link the business revoked.
+   *
+   * Closed (false) for an unknown invoice and for one whose own-tenant links
+   * are ALL inactive or past their expiry: revoking or letting the link lapse
+   * then stops the bare-id routes too, not only the token routes. Open while
+   * the invoice has a live link, and for an invoice that never had a link,
+   * which keeps the KF-REVENUE-AUTH-PROJECTION-001 answer pinned by
+   * release0-journey step 6 (a separate decision; no link was revoked there).
+   * A link row of another tenant (M31: no FK ties the two) is not one of this
+   * invoice's links in either direction.
+   */
+  async isBareIdPublicAccessOpen(invoiceId: string): Promise<boolean> {
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { businessId: true },
+    });
+    if (!invoice) return false;
+    const links = await this.prisma.client.paymentLink.findMany({
+      where: { invoiceId, businessId: invoice.businessId },
+      select: { active: true, expiresAt: true },
+    });
+    if (links.length === 0) return true;
+    const now = new Date();
+    return links.some((l) => l.active && (!l.expiresAt || l.expiresAt > now));
   }
 
   /**
@@ -762,6 +803,12 @@ export class CommerceService {
    *
    * Same shareable-status gate as the token route; null otherwise, which the
    * controller turns into the same 404 as an unknown id.
+   *
+   * V1-46: the bare-id pay page is retired (D-07); the customer pay page at
+   * /pay/link/[token] reads this same projection, less the invoice id,
+   * through `getPayPageByToken`. V1-46b: the bare-id route serves it only
+   * while `isBareIdPublicAccessOpen` holds (getInvoiceForViewer), and
+   * widgets/pay/[invoiceId] no longer reads it (retired).
    */
   async getInvoicePublicView(invoiceId: string) {
     const invoice = await this.prisma.client.invoice.findUnique({
@@ -1063,6 +1110,21 @@ export class CommerceService {
      * asking, not which quote it may touch.
      */
     businessId?: string;
+    /**
+     * R0-CMF4 review (SEC-CMF4-1): a compare-and-set. The move is written only
+     * while the quote is still in this status (and, with `viewToken`, has no
+     * view token or that one). Otherwise nothing is written: a quote another
+     * request already moved to the same status with the same token is
+     * returned as it is, with no event, and any other state is a 409
+     * `quote_status_changed`. Without it the move overwrites whatever the
+     * quote became meanwhile.
+     */
+    ifStatus?: 'DRAFT';
+    /**
+     * R0-CMF4: with `ifStatus`, the view token the send-email route put in
+     * the message Gmail accepted (sendQuoteWithViewToken). The move stores it.
+     */
+    viewToken?: string;
   }) {
     const existingQuote = await this.prisma.client.quote.findUnique({
       where: { id: params.quoteId },
@@ -1090,7 +1152,9 @@ export class CommerceService {
     if (params.status === 'SENT') {
       data.sentAt = now;
       // Make sure a public-link token exists so the email URL works.
-      if (!existingQuote.viewToken) {
+      if (params.ifStatus && params.viewToken) {
+        data.viewToken = params.viewToken;
+      } else if (!existingQuote.viewToken) {
         data.viewToken = this.generateQuoteToken();
       }
     } else if (params.status === 'ACCEPTED') {
@@ -1102,18 +1166,48 @@ export class CommerceService {
     // the public accept/reject all land here. A legacy quote can still point
     // at another tenant's contact: the returned quote reads contact null, and
     // the events and the timeline write carry neither that contact nor its id.
-    const row = await this.prisma.client.quote.update({
-      where: { id: params.quoteId },
-      data,
-      include: { contact: true },
-    });
+    // R0-CMF4: with ifStatus the move is a compare-and-set.
+    if (params.ifStatus) {
+      const moved = await this.prisma.client.quote.updateMany({
+        where: {
+          id: params.quoteId,
+          status: params.ifStatus,
+          ...(params.viewToken ? { OR: [{ viewToken: null }, { viewToken: params.viewToken }] } : {}),
+        },
+        data,
+      });
+      if (moved.count === 0) {
+        const current = await this.prisma.client.quote.findUnique({
+          where: { id: params.quoteId },
+          include: { contact: true },
+        });
+        if (!current) throw new NotFoundException('Quote not found');
+        if (current.status === params.status && (!params.viewToken || current.viewToken === params.viewToken)) {
+          return withTenantContact(current);
+        }
+        throw new ConflictException({
+          code: 'quote_status_changed',
+          message: `The quote is ${current.status}, not ${params.ifStatus}: it was not moved to ${params.status}.`,
+          quoteStatus: current.status,
+        });
+      }
+    }
+    const row = params.ifStatus
+      ? await this.prisma.client.quote.findUniqueOrThrow({ where: { id: params.quoteId }, include: { contact: true } })
+      : await this.prisma.client.quote.update({
+          where: { id: params.quoteId },
+          data,
+          include: { contact: true },
+        });
     const quote = withTenantContact(row);
     const eventQuote = forQuoteEvent(row, quote);
+    // The status the move was made from: with ifStatus, the compare-and-set proved it.
+    const priorStatus = params.ifStatus ?? existingQuote.status;
     const source = params.source ?? 'internal';
-    if (params.status === 'SENT' && existingQuote.status !== 'SENT') {
+    if (params.status === 'SENT' && priorStatus !== 'SENT') {
       this.events.emit('quote.sent', { quote: eventQuote, businessId: quote.businessId } as QuoteSentPayload);
     }
-    if (params.status === 'ACCEPTED' && existingQuote.status !== 'ACCEPTED') {
+    if (params.status === 'ACCEPTED' && priorStatus !== 'ACCEPTED') {
       this.events.emit('quote.accepted', {
         quote: eventQuote,
         businessId: quote.businessId,
@@ -1121,7 +1215,7 @@ export class CommerceService {
         source,
       } as QuoteAcceptedPayload);
     }
-    if (params.status === 'REJECTED' && existingQuote.status !== 'REJECTED') {
+    if (params.status === 'REJECTED' && priorStatus !== 'REJECTED') {
       this.events.emit('quote.rejected', {
         quote: eventQuote,
         businessId: quote.businessId,
@@ -1157,6 +1251,80 @@ export class CommerceService {
 
   private generateQuoteToken(): string {
     return randomBytes(24).toString('base64url');
+  }
+
+  /**
+   * R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 2) and its
+   * review (SEC-CMF4-1, SEC-CMF4-2, CR-CMF4-1): the operator's quote
+   * send-email. `send` gets the view token to put in the accept/reject link
+   * and resolves once Gmail accepted the message.
+   *
+   * - A quote with a view token sends that one. A non-DRAFT quote with none
+   *   cannot be sent ('Quote view token missing').
+   * - A DRAFT with none reserves one first: a compare-and-set on
+   *   (DRAFT, no token), so of two overlapping sends one writes it and the
+   *   other mails the same token, and a "mark sent" made meanwhile keeps it
+   *   (updateQuoteStatus keeps a stored token). The public accept/reject
+   *   routes refuse a DRAFT, and only the message being sent carries it.
+   * - A send Gmail did not accept (503, transport error, Gmail's refusal)
+   *   clears the token it reserved while the quote is still that DRAFT, so
+   *   the DRAFT is left with no token (R2), no sentAt and no event.
+   * - An accepted send moves the DRAFT to SENT with that token as a
+   *   compare-and-set (updateQuoteStatus ifStatus). A quote another request
+   *   moved to SENT with the same token is left as it is (one quote.sent);
+   *   a quote rejected, accepted or given another token meanwhile is not
+   *   overwritten, and the route answers 409 quote_changed_during_send,
+   *   saying the email went out.
+   */
+  async sendQuoteWithViewToken<T>(quoteId: string, send: (viewToken: string) => Promise<T>): Promise<T> {
+    const quote = await this.prisma.client.quote.findUnique({
+      where: { id: quoteId },
+      select: { status: true, viewToken: true },
+    });
+    if (!quote) throw new NotFoundException('Quote not found');
+    let viewToken = quote.viewToken;
+    let reserved = false;
+    if (!viewToken && quote.status === 'DRAFT') {
+      const token = this.generateQuoteToken();
+      const won = await this.prisma.client.quote.updateMany({
+        where: { id: quoteId, status: 'DRAFT', viewToken: null },
+        data: { viewToken: token },
+      });
+      reserved = won.count === 1;
+      viewToken = reserved
+        ? token
+        : ((await this.prisma.client.quote.findUnique({ where: { id: quoteId }, select: { viewToken: true } }))?.viewToken ?? null);
+    }
+    if (!viewToken) {
+      throw new Error('Quote view token missing — cannot send email.');
+    }
+
+    let result: T;
+    try {
+      result = await send(viewToken);
+    } catch (err) {
+      if (reserved) {
+        await this.prisma.client.quote.updateMany({
+          where: { id: quoteId, status: 'DRAFT', viewToken },
+          data: { viewToken: null },
+        });
+      }
+      throw err;
+    }
+    if (quote.status !== 'DRAFT') return result;
+    try {
+      await this.updateQuoteStatus({ quoteId, status: 'SENT', actorId: undefined, ifStatus: 'DRAFT', viewToken });
+    } catch (err) {
+      if (!(err instanceof ConflictException)) throw err;
+      const quoteStatus = (err.getResponse() as { quoteStatus?: string }).quoteStatus ?? null;
+      throw new ConflictException({
+        code: 'quote_changed_during_send',
+        message: `The email was sent, but the quote changed while it was with Gmail (it is ${quoteStatus ?? 'gone'} now), so this send left it as it is.`,
+        emailSent: true,
+        quoteStatus,
+      });
+    }
+    return result;
   }
 
   private isStaleQuote(quote: {
@@ -3091,6 +3259,131 @@ export class CommerceService {
   }
 
   /**
+   * The customer's public invoice URL, `<app>/public/invoice/<token>`: the
+   * invoice's live pay link, minted when it has none (createPaymentLink). A
+   * PAID or VOID invoice cannot get a new link, so the most recent one it was
+   * given is handed out again (findAnyPaymentLink), or null when it never had
+   * one. Any other refusal (unknown invoice, another tenant's) is thrown.
+   *
+   * V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): the single
+   * place a customer-facing invoice URL is built. The operator's invoice
+   * emails (send-email, reminder, resend-receipt in commerce.controller.ts)
+   * use it directly (send-email through sendWithPublicInvoiceUrl, which
+   * hands out the same link and removes one it wrote when the send did not
+   * go out, R0-CMF4); the automated producers (overdue, due-soon and
+   * payment-failed emails, KEY's invoice_sent, autopilot payment recovery)
+   * go through automatedInvoiceUrl, which never mints a link for an invoice
+   * whose links were all revoked or expired (V1-46b review SEC-V46B-1/2).
+   * None of them emits a bare /pay/<invoiceId> URL any more.
+   */
+  async publicInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
+    try {
+      const link = await this.createPaymentLink(invoiceId, businessId);
+      return `${appUrl()}/public/invoice/${link.token}`;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Only the known "paid or voided" refusal is swallowed; the three callers
+      // that match on this text are unchanged (R0-D3).
+      if (!/paid or voided/i.test(msg)) throw err;
+      const existing = await this.findAnyPaymentLink(invoiceId, businessId);
+      return existing ? `${appUrl()}/public/invoice/${existing.token}` : null;
+    }
+  }
+
+  /**
+   * V1-46b review (SEC-V46B-1, SEC-V46B-2, CR-V46B-01): the customer invoice
+   * URL for a message no operator asked for at that moment: the overdue,
+   * due-soon and payment-failed emails (flow.listener), KEY's invoice_sent
+   * (flow-orchestrator) and autopilot payment recovery (delegation-loop).
+   *
+   * It reuses the invoice's live link, and mints one only for an invoice that
+   * has never had a link of its own tenant (publicInvoiceUrl). When every link
+   * the invoice has is revoked or past its expiry it answers null: the
+   * message goes without a pay button. Minting there would undo the
+   * operator's revocation or expiry with a link that never expires, reopen
+   * the bare-id routes (isBareIdPublicAccessOpen) and mail the new token,
+   * and an anonymous WiPay failure callback (payment.failed) could trigger
+   * it. Only the operator's own send-email, reminder and payment-link routes
+   * issue a new link for such an invoice (publicInvoiceUrl).
+   */
+  async automatedInvoiceUrl(invoiceId: string, businessId: string): Promise<string | null> {
+    const links = await this.prisma.client.paymentLink.findMany({
+      where: { invoiceId, businessId },
+      select: { active: true, expiresAt: true },
+    });
+    const now = new Date();
+    if (links.length > 0 && !links.some((l) => l.active && (!l.expiresAt || l.expiresAt > now))) return null;
+    return this.publicInvoiceUrl(invoiceId, businessId);
+  }
+
+  /**
+   * R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 3): the
+   * operator's invoice send-email, with the pay link publicInvoiceUrl would
+   * hand out (D-07), where a send the provider did not accept leaves no new
+   * PaymentLink row. `send` gets the URL to put in the message and resolves
+   * once the provider accepted it.
+   *
+   * - The invoice has a live link (or is PAID or VOID, or unknown):
+   *   publicInvoiceUrl, unchanged. It reuses that link (a live pre-V1-48
+   *   token is still rotated before it goes out, ST-V48-1), surfaces the
+   *   latest one, or throws its 404. No row is created, so a failed send
+   *   leaves no new one.
+   * - It has none: the row is written before the send, with the pending
+   *   expiry PENDING_SEND_EXPIRY (R0-CMF4 review SEC-CMF4-3). It is live, so
+   *   any request made while the message is with the provider (a second
+   *   send-email, a reminder, POST payment-link, an automated email) hands
+   *   out this one link instead of writing another, and reissueLink clears
+   *   the pending expiry when it does. An accepted send clears it too
+   *   (expiresAt null: exactly one live link, the one the message carries;
+   *   a resend reuses it). A refused (503) or failed send deletes the row
+   *   only while it is still pending and active, so it leaves no new
+   *   PaymentLink unless another request handed the link out meanwhile
+   *   (then it is that request's link too) or the operator revoked it.
+   */
+  async sendWithPublicInvoiceUrl<T>(
+    invoiceId: string,
+    businessId: string,
+    send: (paymentUrl: string | null) => Promise<T>,
+  ): Promise<T> {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: invoiceId, businessId, deletedAt: null },
+      select: { status: true },
+    });
+    const mintable = !!invoice && invoice.status !== 'PAID' && invoice.status !== 'VOID';
+    const live = mintable
+      ? await this.prisma.client.paymentLink.findFirst({
+          where: { invoiceId, businessId, ...CommerceService.liveLinkWhere() },
+          select: { id: true },
+        })
+      : null;
+    if (!mintable || live) return send(await this.publicInvoiceUrl(invoiceId, businessId));
+
+    const link = await this.prisma.client.paymentLink.create({
+      data: { invoiceId, businessId, token: CommerceService.newPaymentLinkToken(), expiresAt: CommerceService.PENDING_SEND_EXPIRY },
+    });
+    const pending = { id: link.id, expiresAt: CommerceService.PENDING_SEND_EXPIRY };
+    let result: T;
+    try {
+      result = await send(`${appUrl()}/public/invoice/${link.token}`);
+    } catch (err) {
+      await this.prisma.client.paymentLink.deleteMany({ where: { ...pending, active: true } });
+      throw err;
+    }
+    await this.prisma.client.paymentLink.updateMany({ where: pending, data: { expiresAt: null } });
+    return result;
+  }
+
+  /**
+   * R0-CMF4 review (SEC-CMF4-3): the expiry of a pay link sendWithPublicInvoiceUrl
+   * wrote for a send that is still with the provider. It is in the future, so
+   * the link is live and every other caller hands out this one; a value no
+   * expiresInDays produces, so reissueLink knows the row is still only that
+   * send's to remove. The send, or the first other caller to hand the link
+   * out, sets it back to null (no expiry).
+   */
+  private static readonly PENDING_SEND_EXPIRY = new Date('9999-12-31T23:59:59.999Z');
+
+  /**
    * V1-48-PUBLIC-TOKEN-VIEW (M34): the pay-link token is the customer's whole
    * credential, so it is 24 crypto-random bytes (32 base64url characters),
    * the same as a quote's view token. It is passed explicitly on create; the
@@ -3118,11 +3411,26 @@ export class CommerceService {
    * one rotates and the other reads that row back: both hand out one token.
    * A dead link and a token of any other shape are left as they are; the
    * customer view never rotates (it would break the URL being opened).
+   *
+   * R0-CMF4 review (SEC-CMF4-3): a live link whose send-email is still with
+   * the provider (PENDING_SEND_EXPIRY) is claimed first: its pending expiry
+   * is cleared, so a send that fails afterwards no longer removes the link
+   * this caller hands out. It is read back; if that send already removed it,
+   * the 409 asks the caller to try again rather than hand out a dead link.
    */
   private async reissueLink<T extends { id: string; token: string; active: boolean; expiresAt: Date | null }>(
     link: T,
     expiresAt?: Date,
   ) {
+    if (link.active && link.expiresAt?.getTime() === CommerceService.PENDING_SEND_EXPIRY.getTime()) {
+      await this.prisma.client.paymentLink.updateMany({
+        where: { id: link.id, expiresAt: CommerceService.PENDING_SEND_EXPIRY },
+        data: { expiresAt: null },
+      });
+      const claimed = await this.prisma.client.paymentLink.findUnique({ where: { id: link.id } });
+      if (!claimed) throw new ConflictException('The pay link was withdrawn while it was being handed out; try again.');
+      link = { ...link, ...claimed };
+    }
     const live = link.active && (!link.expiresAt || link.expiresAt > new Date());
     if (!live || !CommerceService.LEGACY_LINK_TOKEN.test(link.token)) {
       if (!expiresAt) return link;
@@ -3257,6 +3565,57 @@ export class CommerceService {
     return { ...link, invoice };
   }
 
+  /**
+   * V1-46-PUB-PAY-LINK-TOKEN-GATE (M34, D-07: token links only, the bare-id
+   * pay page is retired): the customer pay page's read, keyed by the pay-link
+   * token. The projection is `getInvoicePublicView`, the one the bare-id
+   * public read serves an anonymous caller (KF-REVENUE-AUTH-PROJECTION-001),
+   * so the token page renders what the retired /pay/:invoiceId page rendered
+   * and discloses nothing more. A link that is unknown, inactive, expired or
+   * of another tenant, and an invoice the projection does not share (DRAFT,
+   * VOID, FAILED, PENDING, deleted), read as absent.
+   *
+   * V1-46b-TOKEN-PAY-COMPLETE (review ST-1, TG-16): the read no longer
+   * carries the invoice `id`. The page needed it only for the provider
+   * checkouts, the gateway list and the PayPal capture, which are now keyed
+   * by the token too (payments.controller.ts, public/invoice-link/:token/...),
+   * so no JSON answer of the pay page or its token routes carries the id; the
+   * bare-id routes close behind a revoked link as well
+   * (isBareIdPublicAccessOpen). `businessId` stays: the tenant key is public
+   * and the page's presence tracker reads it.
+   *
+   * Review SEC-V46B-4: this is not "the customer never learns the id". A
+   * WiPay checkout hands it to WiPay as `order_id` (WiPay's hosted page and
+   * callback are keyed by it), so it is in the WiPay redirect and comes back
+   * on the return URL. Holding it gives nothing after the link is revoked or
+   * expires: the bare-id routes answer 404 and no automated producer mints a
+   * new link (automatedInvoiceUrl). The unsigned WiPay callback keyed by it is
+   * TG-22 (M35, V1-05).
+   */
+  async getPayPageByToken(token: string) {
+    const link = await this.getPaymentLinkByToken(token);
+    if (!link) return null;
+    const view = await this.getInvoicePublicView(link.invoiceId);
+    if (!view || view.businessId !== link.businessId) return null;
+    const projection: Omit<NonNullable<typeof view>, 'id'> & { id?: string } = { ...view };
+    delete projection.id;
+    return projection;
+  }
+
+  /**
+   * V1-46 (M34): the customer's payment intent, keyed by the pay-link token.
+   * The link is resolved before anything else, so a deactivated or expired
+   * link answers 404 whatever the body says; behind a live link the intent is
+   * exactly the R0-22 contract of `recordPublicPaymentIntent` (one PENDING
+   * row on the invoice's own tenant, no status change, no posting). The 404
+   * is the same body that method gives a non-payable invoice.
+   */
+  async recordPaymentIntentByToken(token: string, method: string, amount?: unknown) {
+    const link = await this.getPaymentLinkByToken(token);
+    if (!link) throw new NotFoundException('Invoice not found');
+    return this.recordPublicPaymentIntent(link.invoiceId, method, amount);
+  }
+
   async listPaymentLinks(businessId: string) {
     return this.prisma.client.paymentLink.findMany({
       where: { businessId, active: true },
@@ -3281,8 +3640,10 @@ export class CommerceService {
   private static readonly INTENT_PAYABLE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID']);
 
   /**
-   * A customer's anonymous "I will pay by <method>" from the public pay page
-   * (POST /commerce/invoices/:invoiceId/payment-intent).
+   * A customer's anonymous "I will pay by <method>" from the public pay page.
+   * V1-46: reached only through `recordPaymentIntentByToken` (POST
+   * /commerce/public/invoice-link/:token/payment-intent); the bare-id route
+   * POST /commerce/invoices/:invoiceId/payment-intent is retired (D-07).
    *
    * R0-22-PUBLIC-INTENT-HARDEN (CF-12): the caller holds only a bare invoice
    * id, so this writes nothing but one PENDING Payment row on the invoice's

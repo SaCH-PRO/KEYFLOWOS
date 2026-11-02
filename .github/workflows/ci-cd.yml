@@ -443,6 +443,26 @@ jobs:
       - name: Run server tests
         run: cd apps/server && pnpm test:ci
 
+      # R0-16-PROOF-BINDING. A green `test:ci` cannot show that a required case
+      # ran: a skipped, renamed or deleted case leaves the aggregate green.
+      # This step judges EVERY case manifest under
+      # scripts/proof-admission/manifests/ against one vitest JSON report of the
+      # suites those manifests bind (their `suites` field), at this exact head
+      # (--expect-head = HEAD). Resource manifests (ci-resources.json,
+      # local-worktree-resources.json) are skipped by type. A packet binds its
+      # suites by adding one manifest; nobody edits this workflow to add a
+      # proof. --skip-build: "Build server" above built dist/main.js at this
+      # head, and the runner refuses a dist older than apps/server/src. Same
+      # Postgres and Redis services as the server tests.
+      - name: Evaluate every proof manifest at this head
+        run: node scripts/proof-admission/run-manifests.mjs --skip-build
+
+      # The one-command local runner (scripts/test-local.sh) runs in a sandbox
+      # with stand-ins for docker and pnpm: plan order, resource admission
+      # refusals, step selection. It touches no database.
+      - name: Self-test the local test runner
+        run: bash scripts/ci/test-local.selftest.sh
+
       # K12 proof admission is deliberately separate from the main Vitest exit
       # code. It consumes a native JSON report and an accepted case manifest so
       # missing/skipped/duplicated required cases cannot hide behind a green
