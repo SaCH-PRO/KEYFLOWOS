@@ -299,3 +299,174 @@ describe('V1-37 PostingService.post() currency at the door (hermetic)', () => {
     expect(h.created[0].entries.create.map((e: any) => e.currency)).toEqual(['USD', 'USD']);
   });
 });
+
+/**
+ * V1-37d-LEGACY-CURRENCY-PAYMENTS (verify-money VR-04, a V1-37 regression; D-13).
+ *
+ * V1-37 refused every posting in a currency outside D-13 (TTD, USD) that is
+ * not the business currency, so money against an invoice stored BEFORE D-13 in
+ * another currency (a TTD business's JMD invoice) could no longer be recorded:
+ * the payment answered 400 and nothing was written. The base recorded and
+ * posted it in the invoice's currency.
+ *
+ * Contract pinned here:
+ *   - money that follows a stored document posts in that document's own
+ *     currency: a posting sourced by a Payment (its recording, a partial
+ *     refund) is accepted in the currency its invoice is stored in, read by
+ *     the door from the payment row of the posting business (never a caller's
+ *     word), when the payment and the invoice agree on it (a void and a full
+ *     refund are reversals, which copy the original's currency);
+ *   - everything else keeps the D-13 refusal: a sourceless posting, one sourced
+ *     by any other document (an expense, an invoice's own receivable), a payment
+ *     of another business or whose invoice is in another currency;
+ *   - a posting in the business currency or a D-13 currency never reads the
+ *     payment (the hot path is unchanged).
+ */
+describe('V1-37d money that follows a stored legacy-currency document (resolvePostingCurrency)', () => {
+  const resolve = (
+    input: { currency?: string | null; sourceType?: string | null; sourceId?: string | null },
+    business: string,
+    followed?: string | null,
+  ) => (door as any).resolvePostingCurrency(input, business, followed);
+
+  it('LP-01 RED-BEFORE: a payment-sourced posting in the currency of the document it follows (JMD) is accepted, upper-case', () => {
+    expect(resolve({ currency: 'JMD', sourceType: 'Payment', sourceId: 'pay_1' }, 'TTD', 'JMD')).toBe('JMD');
+    expect(resolve({ currency: 'jmd', sourceType: 'Payment', sourceId: 'pay_1' }, 'TTD', ' jmd ')).toBe('JMD');
+  });
+
+  it('LP-02: the followed document must be in the requested currency; otherwise the D-13 refusal stands (400)', () => {
+    expect(() => resolve({ currency: 'JMD', sourceType: 'Payment', sourceId: 'pay_1' }, 'TTD', 'TTD')).toThrow(BadRequestException);
+    expect(() => resolve({ currency: 'JMD', sourceType: 'Payment', sourceId: 'pay_1' }, 'TTD', null)).toThrow(/JMD/);
+    expect(() => resolve({ currency: 'JMD', sourceType: 'Payment', sourceId: 'pay_1' }, 'TTD', '')).toThrow(/JMD/);
+    expect(() => resolve({ currency: 'JMD', sourceType: 'Payment', sourceId: 'pay_1' }, 'TTD')).toThrow(/JMD/);
+  });
+
+  it('LP-03: a free-standing posting is held to D-13 even when a followed currency is passed', () => {
+    expect(() => resolve({ currency: 'JMD' }, 'TTD', 'JMD')).toThrow(BadRequestException);
+    expect(() => resolve({ currency: 'JMD', sourceType: 'Payment' }, 'TTD', 'JMD')).toThrow(BadRequestException);
+  });
+
+  it('LP-04 control: the business currency and the D-13 rules are unchanged by a followed currency', () => {
+    expect(resolve({}, 'TTD', 'JMD')).toBe('TTD');
+    expect(resolve({ currency: 'USD', sourceType: 'Payment', sourceId: 'pay_1' }, 'TTD', 'JMD')).toBe('USD');
+    expect(() => resolve({ currency: 'EUR', sourceType: 'Expense', sourceId: 'exp_1' }, 'TTD', null)).toThrow(/EUR/);
+  });
+});
+
+describe('V1-37d PostingService.post(): a payment posts in its stored invoice currency (hermetic)', () => {
+  type PaymentRow = { currency: string; invoice: { businessId: string; currency: string; deletedAt: Date | null } | null } | null;
+  function harness(businessCurrency: string, payment: PaymentRow) {
+    const created: any[] = [];
+    const tx = {
+      financialTransaction: {
+        findUnique: vi.fn(async () => null),
+        create: vi.fn(async (args: any) => {
+          created.push(args.data);
+          return { id: `txn_${created.length}` };
+        }),
+      },
+      chartOfAccount: {
+        findMany: vi.fn(async (args: any) =>
+          (args.where.id.in as string[]).map((id) => ({ id, businessId: 'biz_ttd', business: { currency: businessCurrency } })),
+        ),
+      },
+      contact: { findUnique: vi.fn(async () => ({ businessId: 'biz_ttd' })) },
+      payment: { findFirst: vi.fn(async (_args: any) => payment) },
+    };
+    const prisma = { client: { $transaction: async (cb: any) => cb(tx) } } as any;
+    return { svc: new door.PostingService(prisma), created, tx };
+  }
+  const legacyPayment = (over: Partial<NonNullable<PaymentRow>> = {}): PaymentRow => ({
+    currency: 'JMD',
+    invoice: { businessId: 'biz_ttd', currency: 'JMD', deletedAt: null },
+    ...over,
+  });
+  const input = (over: Partial<door.PostingInput> = {}): door.PostingInput => ({
+    businessId: 'biz_ttd',
+    type: 'INCOME',
+    date: new Date('2026-10-01'),
+    amount: 50,
+    currency: 'JMD',
+    sourceType: 'Payment',
+    sourceId: 'pay_jmd',
+    kind: 'payment_recorded',
+    entries: [
+      { accountId: 'acc_cash', debit: 50 },
+      { accountId: 'acc_ar', credit: 50 },
+    ],
+    ...over,
+  });
+
+  it('LD-01 RED-BEFORE (VR-04): a JMD payment on a stored JMD invoice of a TTD business is written in JMD (transaction and every entry), read from the payment of the posting business', async () => {
+    const h = harness('TTD', legacyPayment());
+    const res = await h.svc.post(input());
+    expect(res.alreadyPosted).toBe(false);
+    expect(h.created).toHaveLength(1);
+    expect(h.created[0].currency).toBe('JMD');
+    expect(h.created[0].entries.create.map((e: any) => e.currency)).toEqual(['JMD', 'JMD']);
+    expect(h.tx.payment.findFirst).toHaveBeenCalledTimes(1);
+    expect(h.tx.payment.findFirst.mock.calls[0][0].where).toEqual({ id: 'pay_jmd', businessId: 'biz_ttd' });
+  });
+
+  it('LD-02 RED-BEFORE: a partial refund of that payment (Payment-sourced REFUND) is written in JMD', async () => {
+    const h = harness('TTD', legacyPayment());
+    await h.svc.post(input({
+      type: 'REFUND',
+      kind: 'payment_refunded:1',
+      amount: 20,
+      entries: [
+        { accountId: 'acc_ar', debit: 20 },
+        { accountId: 'acc_cash', credit: 20 },
+      ],
+    }));
+    expect(h.created[0].currency).toBe('JMD');
+    expect(h.created[0].entries.create.map((e: any) => e.currency)).toEqual(['JMD', 'JMD']);
+  });
+
+  it('LD-03: a payment whose invoice is stored in another currency, or that disagrees with its invoice, is refused (400), nothing written', async () => {
+    for (const row of [
+      legacyPayment({ invoice: { businessId: 'biz_ttd', currency: 'TTD', deletedAt: null } }),
+      legacyPayment({ currency: 'TTD' }),
+    ]) {
+      const h = harness('TTD', row);
+      await expect(h.svc.post(input())).rejects.toBeInstanceOf(BadRequestException);
+      expect(h.tx.financialTransaction.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it('LD-04: a payment the posting business does not hold (unknown, another tenant, a deleted invoice) is refused (400), nothing written', async () => {
+    for (const row of [
+      null,
+      legacyPayment({ invoice: null }),
+      legacyPayment({ invoice: { businessId: 'biz_other', currency: 'JMD', deletedAt: null } }),
+      legacyPayment({ invoice: { businessId: 'biz_ttd', currency: 'JMD', deletedAt: new Date('2026-09-01') } }),
+    ]) {
+      const h = harness('TTD', row);
+      await expect(h.svc.post(input())).rejects.toThrow(/JMD/);
+      expect(h.tx.financialTransaction.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it('LD-05: postings not sourced by a payment keep the D-13 refusal and never read a payment (sourceless, expense, the invoice receivable, a fixture document)', async () => {
+    for (const over of [
+      { sourceType: null, sourceId: null, kind: null },
+      { sourceType: 'Expense', sourceId: 'exp_jmd', kind: 'paid' },
+      { sourceType: 'Invoice', sourceId: 'inv_jmd', kind: 'invoice_finalized' },
+      { sourceType: 'V37dFixture', sourceId: 'doc_jmd', kind: 'adj' },
+    ]) {
+      const h = harness('TTD', legacyPayment());
+      await expect(h.svc.post(input(over))).rejects.toBeInstanceOf(BadRequestException);
+      expect(h.tx.financialTransaction.create).not.toHaveBeenCalled();
+      expect(h.tx.payment.findFirst).not.toHaveBeenCalled();
+    }
+  });
+
+  it('LD-06 control: a payment in the business currency or a D-13 currency is posted without reading the payment row', async () => {
+    for (const currency of ['TTD', 'usd', undefined]) {
+      const h = harness('TTD', legacyPayment());
+      await h.svc.post(input({ currency }));
+      expect(h.created[0].currency).toBe(currency ? currency.toUpperCase() : 'TTD');
+      expect(h.tx.payment.findFirst).not.toHaveBeenCalled();
+    }
+  });
+});
