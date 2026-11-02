@@ -37,6 +37,13 @@
 -- full index and bring M12 back), and never run `prisma migrate dev` against
 -- this schema without `--create-only` and a review of the generated SQL: a
 -- Prisma that learns to read partial indexes would propose dropping these.
+-- Never sync a database with `prisma db push` (pnpm db:push) either: on a
+-- database this migration has not reached it drops both full *_key indexes and
+-- creates nothing in their place, and on a fresh database it creates no
+-- identity unique at all, so two live contacts could share an email or phone.
+-- Apply migrations with `prisma migrate deploy` (pnpm db:deploy);
+-- scripts/post-merge.sh and scripts/start-cloud-app.sh still run db push and
+-- must move to migrate deploy.
 -- The MIGRATE-001 drift gate must allowlist both names.
 
 CREATE UNIQUE INDEX "contacts_business_id_email_normalized_live_key"

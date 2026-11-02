@@ -135,6 +135,20 @@ const CONTACT_IDENTITY_UNIQUE: Record<'email' | 'phone', readonly string[]> = {
   phone: ['phone_normalized', 'contacts_business_id_phone_normalized_live_key', 'contacts_business_id_phone_normalized_key'],
 };
 
+/**
+ * The identity field a Prisma P2002 landed on ('email' or 'phone'), or null
+ * when `err` is not a P2002 on a contact identity unique.
+ */
+function contactIdentityViolation(err: unknown): 'email' | 'phone' | null {
+  const known = err as { code?: unknown; meta?: { target?: unknown } } | null;
+  if (!known || typeof known !== 'object' || known.code !== 'P2002') return null;
+  const target = known.meta?.target;
+  const names = Array.isArray(target) ? target.map(String) : [String(target ?? '')];
+  return names.some((n) => CONTACT_IDENTITY_UNIQUE.email.includes(n)) ? 'email'
+    : names.some((n) => CONTACT_IDENTITY_UNIQUE.phone.includes(n)) ? 'phone'
+      : null;
+}
+
 @Injectable()
 export class CrmService {
   private readonly logger = new Logger(CrmService.name);
@@ -467,13 +481,7 @@ export class CrmService {
     identity: { emailNormalized?: string | null; phoneNormalized?: string | null },
     actorUserId?: string | null,
   ): Promise<never> {
-    const known = err as { code?: unknown; meta?: { target?: unknown } } | null;
-    if (!known || typeof known !== 'object' || known.code !== 'P2002') throw err;
-    const target = known.meta?.target;
-    const names = Array.isArray(target) ? target.map(String) : [String(target ?? '')];
-    const field = names.some((n) => CONTACT_IDENTITY_UNIQUE.email.includes(n)) ? 'email'
-      : names.some((n) => CONTACT_IDENTITY_UNIQUE.phone.includes(n)) ? 'phone'
-        : null;
+    const field = contactIdentityViolation(err);
     if (!field) throw err;
 
     const value = field === 'email' ? identity.emailNormalized : identity.phoneNormalized;
@@ -1863,10 +1871,31 @@ export class CrmService {
     try {
       await c.contact.update({ where: { id: op.duplicateId }, data: restoreData as Prisma.ContactUpdateInput });
       restored.contact = 1;
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Failing to restore the surviving "duplicate" row is the only true blocker:
       // the rest of the revert depends on this row existing as a contact.
-      throw new BadRequestException(`Failed to restore duplicate contact: ${reasonOf(err)}`);
+      // Since D-16 the merged duplicate releases its email and phone during the
+      // undo window, so another live contact may hold one of them by now; the
+      // un-delete is then a P2002 on an identity unique and answers like every
+      // other identity conflict: 409 contact_email_taken / contact_phone_taken
+      // naming the live holder the actor may see. Nothing has been restored or
+      // stamped yet, so the merge stays revertable once the conflict is
+      // resolved. Any other failure is a 400 that carries no database text
+      // (Prisma's message names server paths, source lines and columns); the
+      // cause goes to the log.
+      if (contactIdentityViolation(err)) {
+        await this.rejectContactIdentityTaken(
+          err,
+          input.businessId,
+          {
+            emailNormalized: typeof restoreData.emailNormalized === 'string' ? restoreData.emailNormalized : null,
+            phoneNormalized: typeof restoreData.phoneNormalized === 'string' ? restoreData.phoneNormalized : null,
+          },
+          input.actorType === 'USER' ? input.actorId : null,
+        );
+      }
+      this.logger.warn(`revertMerge ${op.id}: restoring duplicate contact ${op.duplicateId} failed: ${reasonOf(err)}`);
+      throw new BadRequestException('Failed to restore duplicate contact');
     }
 
     // 2. Move every previously-repointed row back to the duplicate, table by

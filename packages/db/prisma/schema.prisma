@@ -2640,8 +2640,15 @@ model Contact {
   // Prisma 6 does not read partial indexes, so `prisma migrate diff` is silent
   // about these two. Never run `prisma migrate dev` on this schema without
   // `--create-only` and a review of the generated SQL: a Prisma that reads
-  // partial indexes would propose dropping them. The MIGRATE-001 drift gate
-  // must allowlist both names.
+  // partial indexes would propose dropping them. Never sync a database with
+  // `prisma db push` (pnpm db:push) either: on a database the migration has
+  // not reached it drops both full *_key indexes and creates nothing in their
+  // place, and on a fresh database it creates no identity unique at all, so
+  // two live contacts could share an email or phone and the 409 contract is
+  // lost. Apply migrations with `prisma migrate deploy` (pnpm db:deploy).
+  // scripts/post-merge.sh and scripts/start-cloud-app.sh still run db push
+  // and must move to migrate deploy. The MIGRATE-001 drift gate must
+  // allowlist both names.
   @@index([businessId])
   @@index([businessId, createdAt])
   @@index([businessId, status])
