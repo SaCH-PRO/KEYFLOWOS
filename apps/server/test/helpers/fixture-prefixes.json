@@ -298,6 +298,11 @@
       "packet": "V1-09-KEY-COMMAND-GOVERNED"
     },
     {
+      "prefix": "v09b_",
+      "owner": "apps/server/test/key-commands-read-scope.integration.test.ts",
+      "packet": "V1-09 / V1-09b-KEY-COMMANDS-READ-SCOPE"
+    },
+    {
       "prefix": "v10a_",
       "owner": "apps/server/test/key-cortex-plan-execution.integration.test.ts",
       "packet": "V1-10-KEY-PLANNER-CLAIM"
