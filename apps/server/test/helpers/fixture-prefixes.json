@@ -343,6 +343,11 @@
       "packet": "V1-29-DM-REFUND-CONVENTION"
     },
     {
+      "prefix": "v34a_",
+      "owner": "apps/server/test/cash-position.integration.test.ts",
+      "packet": "V1-34-DM-CASH-POSITION"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"
