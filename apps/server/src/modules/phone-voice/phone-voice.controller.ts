@@ -15,6 +15,7 @@ import type { Request, Response } from 'express';
 import twilio from 'twilio';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { mintPhoneStreamToken, PHONE_STREAM_TOKEN_PARAM } from './phone-voice.service';
 
 const STREAM_PATH = '/api/v1/cortex/phone/stream';
@@ -70,23 +71,39 @@ export class PhoneVoiceController {
   /**
    * Place an outbound call whose audio is handled by the voice bridge.
    * Requires TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_PHONE_NUMBER.
+   *
+   * V1-14 review (SEC-V14-1): the inbound URL built here is what Twilio signs
+   * and the inbound webhook then mints a stream token for, so it must name
+   * only the tenant BusinessGuard verified. It used to interpolate the raw
+   * `dto.businessId`, which the guard never checked when it was not a string:
+   * `?businessId=<own>` with body `{businessId:["<victim>"]}` passed the guard
+   * on <own> and `encodeURIComponent(["<victim>"])` put <victim> in the URL.
+   * The tenant now comes from @GuardedBusinessId() (the guard's own resolver),
+   * and a body businessId that is not a string is refused outright.
    */
   @Post('outbound')
   @UseGuards(AuthGuard, BusinessGuard)
-  async outbound(@Body() dto: { to: string; purpose?: string; businessId: string }) {
+  async outbound(
+    @Body() dto: { to?: unknown; purpose?: string; businessId?: unknown },
+    @GuardedBusinessId() businessId: string | undefined,
+  ) {
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const token = process.env.TWILIO_AUTH_TOKEN;
     const from = process.env.TWILIO_PHONE_NUMBER;
     if (!sid || !token || !from) {
       throw new ServiceUnavailableException('Twilio is not configured (TWILIO_ACCOUNT_SID/AUTH_TOKEN/PHONE_NUMBER)');
     }
-    if (!dto.to) throw new BadRequestException('to is required');
-    if (!dto.businessId) throw new BadRequestException('businessId is required');
+    const to = dto?.to;
+    if (typeof to !== 'string' || !to) throw new BadRequestException('to is required');
+    if (dto?.businessId !== undefined && typeof dto.businessId !== 'string') {
+      throw new BadRequestException('businessId must be a string');
+    }
+    if (!businessId) throw new BadRequestException('businessId is required');
 
-    const url = `${baseUrl()}${INBOUND_PATH}?businessId=${encodeURIComponent(dto.businessId)}`;
+    const url = `${baseUrl()}${INBOUND_PATH}?businessId=${encodeURIComponent(businessId)}`;
     const client = twilio(sid, token);
-    const call = await client.calls.create({ to: dto.to, from, url });
-    return { callSid: call.sid, status: call.status, to: dto.to };
+    const call = await client.calls.create({ to, from, url });
+    return { callSid: call.sid, status: call.status, to };
   }
 
   /**

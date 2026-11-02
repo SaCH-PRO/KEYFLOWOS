@@ -52,7 +52,17 @@ function makeService() {
   return { svc, executeToolByName };
 }
 
-/** Mirrors the handler's parse-and-refuse branch, then delegates as it does. */
+type ToolEntry = (b: string, n: string, a: Record<string, unknown>, c: unknown) => Promise<unknown>;
+
+/**
+ * Mirrors the handler's parse-and-refuse branch, then delegates as it does.
+ *
+ * V1-14 review (CR-V114-1): the shipped handler hands off to dispatchVoiceTool
+ * (the phone stream's tool gate), not to executeVoiceTool. This reconstruction
+ * called executeVoiceTool directly, so it kept "executing" a booking the shipped
+ * gate refuses. It now delegates to the same method, and the hand-off itself is
+ * checked against the source below.
+ */
 function onFunctionCall(svc: PhoneVoiceService, name: string, argsJson: string) {
   const ctx = { callSid: 'CA_test' };
   let args: Record<string, unknown>;
@@ -65,12 +75,19 @@ function onFunctionCall(svc: PhoneVoiceService, name: string, argsJson: string) 
   } catch {
     return Promise.resolve({ error: `Could not read the arguments for ${name}. Nothing was done.` });
   }
-  return (svc as unknown as {
-    executeVoiceTool: (b: string, n: string, a: Record<string, unknown>, c: unknown) => Promise<unknown>;
-  }).executeVoiceTool('biz_1', name, args, ctx);
+  return (svc as unknown as { dispatchVoiceTool: ToolEntry }).dispatchVoiceTool('biz_1', name, args, ctx);
 }
 
 describe('the shipped handler refuses unparseable arguments', () => {
+  it('hands parsed arguments to dispatchVoiceTool, the method this file reconstructs', () => {
+    // Without this, the handler could switch to another entry point (it once
+    // called executeVoiceTool, which has no phone-stream gate) and every
+    // behavioural test below would keep grading the old hand-off.
+    const block = SOURCE.slice(SOURCE.indexOf('onFunctionCall:'), SOURCE.indexOf('onError:'));
+    expect(block).toMatch(/return this\.dispatchVoiceTool\(businessId, name, args, ctx as CallContext\);/);
+    expect(block, 'the handler bypasses the phone-stream tool gate').not.toMatch(/this\.executeVoiceTool\(/);
+  });
+
   it('does not pre-seed args to an empty object', () => {
     // The exact shape of the bug. If this line comes back, the tool runs empty
     // again and every behavioural test below still passes, because they
@@ -150,11 +167,30 @@ describe('behaviour: nothing is executed when the arguments cannot be read', () 
     );
   });
 
-  it('still executes a booking with real arguments', async () => {
-    await onFunctionCall(
+  it('refuses a booking with real arguments on the phone stream while its tenant binding is untrusted (V1-14)', async () => {
+    // What the shipped handler does today. Readable arguments are not the
+    // reason: bookings_create_booking is not behind the action boundary, so
+    // dispatchVoiceTool refuses it on PHONE_STREAM and tells the model nothing
+    // was done. The two negative controls on either side of this case still
+    // prove the handler does not refuse every call.
+    const out = (await onFunctionCall(
       svc,
       'bookings_create_booking',
       '{"contactName":"Ada","start":"2026-03-01T10:00:00Z"}',
+    )) as { error?: string };
+    expect(out.error).toMatch(/nothing was done/i);
+    expect(out.error).not.toMatch(/could not read the arguments/i);
+    expect(executeToolByName).not.toHaveBeenCalled();
+  });
+
+  it('still maps a booking with real arguments once the gate admits it', async () => {
+    // executeVoiceTool is what dispatchVoiceTool hands an admitted call to. Its
+    // booking mapping still ships and still carries the model's arguments.
+    await (svc as unknown as { executeVoiceTool: ToolEntry }).executeVoiceTool(
+      'biz_1',
+      'bookings_create_booking',
+      { contactName: 'Ada', start: '2026-03-01T10:00:00Z' },
+      { callSid: 'CA_test' },
     );
     const [, name, mapped] = executeToolByName.mock.calls[0] as unknown as [
       string,

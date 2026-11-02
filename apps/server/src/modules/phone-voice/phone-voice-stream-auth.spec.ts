@@ -40,12 +40,17 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { Logger } from '@nestjs/common';
+import { INestApplication, Logger, ValidationPipe } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import request from 'supertest';
 import twilio from 'twilio';
 import WebSocket from 'ws';
 import { PhoneVoiceController } from './phone-voice.controller';
 import * as voiceService from './phone-voice.service';
 import { PhoneVoiceService } from './phone-voice.service';
+import { AuthGuard } from '../../core/auth/auth.guard';
+import { BusinessGuard } from '../../core/auth/business.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
 
 const STREAM_PATH = '/api/v1/cortex/phone/stream';
 const INBOUND_PATH = '/api/v1/cortex/phone/inbound';
@@ -423,5 +428,120 @@ describe('tools on the phone stream', () => {
     const out = (await events.onFunctionCall('helpdesk_create_ticket', 'fc_bad', '{"title":')) as { error?: string };
     expect(out.error).toMatch(/nothing was done/i);
     expect(executeToolByName).not.toHaveBeenCalled();
+  });
+});
+
+// ------------------------------------------------------------- the outbound route
+
+/**
+ * V1-14 review SEC-V14-1. The inbound webhook mints a stream token for whatever
+ * tenant its Twilio-signed URL names, and the outbound route is the one place
+ * a member decides that URL. It used to interpolate the raw body businessId,
+ * which BusinessGuard never checked when it was not a string (the shared
+ * resolver skips it and falls through to ?businessId). A member of A sending
+ * ?businessId=A with body {businessId:["<victim>"]} passed the guard on A, and
+ * encodeURIComponent(["<victim>"]) told Twilio to call inbound?businessId=<victim>.
+ *
+ * Real here: the controller, BusinessGuard and its access predicate, the
+ * production ValidationPipe, the twilio client up to its HTTP layer. Fakes:
+ * AuthGuard (the caller is a member of BIZ_A only), Prisma's business lookup,
+ * and twilio's RequestClient.request, which records what would have been sent.
+ */
+describe('the outbound route names only the tenant BusinessGuard verified', () => {
+  const MEMBER = 'u_v14_member_of_a';
+  let app: INestApplication;
+  const sent: Array<{ uri: string; data: Record<string, unknown> }> = [];
+  const spyOnTwilioHttp = () =>
+    vi.spyOn(twilio.RequestClient.prototype, 'request').mockImplementation((async (opts: {
+      uri: string;
+      data?: Record<string, unknown>;
+    }) => {
+      sent.push({ uri: opts.uri, data: opts.data ?? {} });
+      return { statusCode: 201, body: { sid: 'CA_v14_outbound', status: 'queued' }, headers: {} };
+    }) as never);
+  let twilioRequest: ReturnType<typeof spyOnTwilioHttp>;
+
+  beforeAll(async () => {
+    twilioRequest = spyOnTwilioHttp();
+    const prisma = {
+      client: {
+        business: {
+          // BusinessGuard's predicate: the caller owns or is a member of exactly BIZ_A.
+          findFirst: vi.fn(async ({ where }: { where: { id: string } }) => (where.id === BIZ_A ? { id: BIZ_A } : null)),
+        },
+      },
+    };
+    const moduleRef = await Test.createTestingModule({
+      controllers: [PhoneVoiceController],
+      providers: [BusinessGuard, { provide: PrismaService, useValue: prisma }],
+    })
+      .overrideGuard(AuthGuard)
+      .useValue({
+        canActivate: (ctx: { switchToHttp: () => { getRequest: () => Record<string, unknown> } }) => {
+          ctx.switchToHttp().getRequest().user = { id: MEMBER, role: 'MEMBER' };
+          return true;
+        },
+      })
+      .compile();
+    app = moduleRef.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await app.init();
+  });
+
+  afterAll(async () => {
+    twilioRequest?.mockRestore();
+    await app?.close();
+  });
+
+  beforeEach(() => {
+    process.env.TWILIO_ACCOUNT_SID = 'ACv14fixedtestaccountsid00000000';
+    process.env.TWILIO_PHONE_NUMBER = '+15550000000';
+    sent.length = 0;
+    twilioRequest.mockClear();
+  });
+
+  const post = (query: string) => request(app.getHttpServer()).post(`/api/v1/cortex/phone/outbound${query}`);
+
+  it('NEGATIVE CONTROL (pre-fix FAIL expected): a non-string body businessId is refused and Twilio is never called', async () => {
+    for (const forged of [[BIZ_VICTIM], [BIZ_VICTIM, BIZ_A], { id: BIZ_VICTIM }, 42]) {
+      const res = await post(`?businessId=${BIZ_A}`).send({ to: '+15551112222', businessId: forged });
+      expect(res.status, JSON.stringify(forged)).toBe(400);
+    }
+    expect(twilioRequest, 'a call was placed with an unverified tenant in its URL').not.toHaveBeenCalled();
+    expect(JSON.stringify(sent)).not.toContain(BIZ_VICTIM);
+  });
+
+  it('control: a string body businessId for a tenant the caller is not in is refused by the guard', async () => {
+    const res = await post('').send({ to: '+15551112222', businessId: BIZ_VICTIM });
+    expect(res.status).toBe(403);
+    expect(twilioRequest).not.toHaveBeenCalled();
+  });
+
+  async function expectCallPlacedFor(res: request.Response, businessId: string) {
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ callSid: 'CA_v14_outbound', status: 'queued', to: '+15551112222' });
+    expect(sent).toHaveLength(1);
+    expect(sent[0].data.To).toBe('+15551112222');
+    expect(sent[0].data.Url).toBe(`${PUBLIC_BASE}${INBOUND_PATH}?businessId=${businessId}`);
+
+    // Second hop: the Twilio-signed inbound at that exact URL mints a token
+    // for that tenant and nothing else.
+    const tenant = new URL(String(sent[0].data.Url)).searchParams.get('businessId') ?? '';
+    const { params } = inboundTwiml(tenant, CALL_1);
+    expect(voiceService.verifyPhoneStreamToken(params.tenantToken, { callSid: CALL_1 })?.businessId).toBe(businessId);
+  }
+
+  it('positive control: a string body businessId the caller belongs to is the tenant Twilio is told and the stream binds', async () => {
+    await expectCallPlacedFor(await post('').send({ to: '+15551112222', businessId: BIZ_A }), BIZ_A);
+  });
+
+  it('the guard-verified ?businessId is used when the body names none (it answered 400 before)', async () => {
+    await expectCallPlacedFor(await post(`?businessId=${BIZ_A}`).send({ to: '+15551112222' }), BIZ_A);
+  });
+
+  it('NEGATIVE CONTROL (pre-fix FAIL expected): a non-string destination number is refused before Twilio is called', async () => {
+    const res = await post('').send({ to: ['+15551112222'], businessId: BIZ_A });
+    expect(res.status).toBe(400);
+    expect(twilioRequest).not.toHaveBeenCalled();
   });
 });
