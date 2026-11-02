@@ -11,6 +11,10 @@
   ],
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "test/gmail-connect-binding.integration.test.ts",
+    "src/modules/commerce/gmail.service.spec.ts"
+  ],
   "requiredCases": [
     "R0-CMF5 fixture sanity (real rows) [R0-CMF5-X01] seeded three businesses, nine users and seven memberships; no business has a mailbox or a pending Gmail connection",
     "R0-CMF5 starting a Gmail connection is OWNER only (ST-3, D-11) [R0-CMF5-A01] RED-BEFORE: a STAFF member with role-default scopes (revenue: read) asks for the auth URL: 403 GMAIL_OWNER_ONLY, no Google URL",
