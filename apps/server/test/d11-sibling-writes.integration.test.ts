@@ -76,7 +76,14 @@
  * membership row, whom the route's revenue:write ModuleScopeGuard used to
  * refuse) and a SUPER_ADMIN set the templates; GET .../document-templates
  * stays open to every member (revenue:read included) and a foreign business
- * id writes nothing.
+ * id writes nothing. The owner check is bound to the route's business (case
+ * D11-D09, R0-09g review SEC-R09G-1, the R0-09d review SEC-T1 fixture): a
+ * STAFF member of bizP granted every scope who owns another business, bizO,
+ * by both arms (OWNER membership and Business.ownerId) is refused on bizP,
+ * also when the x-business-id header, ?businessId= and the body's businessId
+ * name bizO, and sets bizO's templates as its owner. That fixture (staffOwner,
+ * bizO) is seeded by the D11-D block's own beforeAll, after the fixture sanity
+ * case D11-X01 has counted the shared fixtures.
  *
  * HOW THE APP IS COMPOSED (the contacts-visibility model): a real Nest app with
  * the real PresenceController, PresenceService, OnboardingConciergeController,
@@ -134,6 +141,9 @@ const ID = {
   bizQ: `${P}bizQ`,               // concierge: the non-owner refusals, then the OWNER control
   bizS: `${P}bizS`,               // the SUPER_ADMIN controls (presence and concierge)
   bizL: `${P}bizL`,               // the distinguished-owner controls (presence and concierge)
+  // Seeded by the D11-D block's beforeAll (R0-09g review SEC-R09G-1), not counted by D11-X01:
+  staffOwner: `${P}staffOwner`,   // STAFF on bizP granted every scope admin; OWNER membership and Business.ownerId of bizO
+  bizO: `${P}bizO`,               // the staff owner's own business (both owner arms)
 };
 const USERS = [ID.owner, ID.staff, ID.staffAll, ID.admin, ID.adminW, ID.superAdmin, ID.legacyOwner];
 const NON_OWNERS: Array<{ id: string; label: string }> = [
@@ -327,6 +337,25 @@ function patchDocumentTemplates(actor: string, businessId: string, body: Record<
     .patch(`/commerce/businesses/${businessId}/document-templates`)
     .set('x-test-user', actor)
     .send(body);
+}
+
+/**
+ * The document-templates PATCH on the route's business, with another business
+ * named where a request can carry one: the x-business-id header, the
+ * ?businessId= query and the body's businessId (each optional).
+ */
+function patchDocumentTemplatesNaming(
+  actor: string,
+  businessId: string,
+  elsewhere: string,
+  body: Record<string, unknown>,
+  via: { header?: boolean; query?: boolean; body?: boolean },
+) {
+  const req = request(app.getHttpServer())
+    .patch(`/commerce/businesses/${businessId}/document-templates${via.query ? `?businessId=${elsewhere}` : ''}`)
+    .set('x-test-user', actor);
+  if (via.header) req.set('x-business-id', elsewhere);
+  return req.send(via.body ? { ...body, businessId: elsewhere } : body);
 }
 
 function getDocumentTemplates(actor: string, businessId: string) {
@@ -743,6 +772,22 @@ describe('R0-09b onboarding concierge auto-configure cannot change the business 
 describe('R0-09g commerce document templates cannot change the business profile for a non-owner (D-11, R0-09f sweep)', () => {
   const CHANGE = { invoiceTemplate: 'modern', quoteTemplate: 'minimal' };
 
+  // R0-09g review SEC-R09G-1 (the R0-09d review SEC-T1 fixture): a non-owner
+  // of bizP who owns another business by both arms, so an owner check that
+  // ignores which business it is asked about admits them. Seeded here, after
+  // D11-X01 counted the shared fixtures; the prefix cleanup removes it.
+  beforeAll(async () => {
+    const { ROLE_DEFAULT_SCOPES } = await import('../src/core/authority/module-vocabulary');
+    await db.user.create({ data: { id: ID.staffOwner, email: emailOf(ID.staffOwner), name: ID.staffOwner, role: 'USER' } });
+    await db.business.create({ data: { id: ID.bizO, name: `${ID.bizO}-name`, ownerId: ID.staffOwner, slug: slugOf('bizo-live') } });
+    for (const m of [
+      { businessId: ID.bizP, role: 'STAFF', permissionScopes: { ...ROLE_DEFAULT_SCOPES.OWNER } },
+      { businessId: ID.bizO, role: 'OWNER' },
+    ]) {
+      await db.membership.create({ data: { id: `${P}m_${ID.staffOwner.slice(P.length)}_${m.businessId.slice(P.length)}`, userId: ID.staffOwner, ...m } });
+    }
+  }, 60_000);
+
   it('[D11-D01] RED-BEFORE: STAFF granted every scope admin (revenue:admin) is refused (403 BUSINESS_PROFILE_OWNER_ONLY) changing both templates, either one alone, or sending no field at all; the Business row is byte-identical', async () => {
     await resetDocumentTemplates(ID.bizP);
     const before = await businessRowText(ID.bizP);
@@ -834,5 +879,41 @@ describe('R0-09g commerce document templates cannot change the business profile 
     expect([403, 404], JSON.stringify(res.body)).toContain(res.status);
     expect(res.body).not.toHaveProperty('success');
     expect(await db.business.count({ where: { id: unknown } })).toBe(0);
+  });
+
+  it("[D11-D09] the owner check is bound to the route's business (R0-09g review SEC-R09G-1): a STAFF member of bizP granted every scope admin who owns bizO by both arms (OWNER membership and Business.ownerId) is refused on bizP (403 BUSINESS_PROFILE_OWNER_ONLY) with the route only and when the x-business-id header, ?businessId= or the body's businessId (each alone, then all three) name bizO; both Business rows byte-identical; on bizO itself the same change is the owner's (200)", async () => {
+    // The fixture: a member, not an owner, of bizP; an owner of bizO by both arms.
+    const roles = await db.membership.findMany({ where: { userId: ID.staffOwner }, select: { businessId: true, role: true }, orderBy: { businessId: 'asc' } });
+    expect(roles).toEqual([{ businessId: ID.bizO, role: 'OWNER' }, { businessId: ID.bizP, role: 'STAFF' }]);
+    expect((await db.business.findUnique({ where: { id: ID.bizO }, select: { ownerId: true } }))?.ownerId).toBe(ID.staffOwner);
+    expect((await db.business.findUnique({ where: { id: ID.bizP }, select: { ownerId: true } }))?.ownerId).toBe(ID.owner);
+
+    for (const [variant, via] of [
+      ['route only', {}],
+      ['x-business-id names bizO', { header: true }],
+      ['?businessId= names bizO', { query: true }],
+      ['body businessId names bizO', { body: true }],
+      ['header, query and body name bizO', { header: true, query: true, body: true }],
+    ] as const) {
+      await resetDocumentTemplates(ID.bizP);
+      await resetDocumentTemplates(ID.bizO);
+      const beforeP = await businessRowText(ID.bizP);
+      const beforeO = await businessRowText(ID.bizO);
+      const res = await patchDocumentTemplatesNaming(ID.staffOwner, ID.bizP, ID.bizO, CHANGE, via);
+      expect(await businessRowText(ID.bizP), `${variant}: PATCH ${res.status}: bizP byte-identical`).toBe(beforeP);
+      expect(await businessRowText(ID.bizO), `${variant}: PATCH ${res.status}: bizO byte-identical`).toBe(beforeO);
+      expectTemplateRefusal(res, `staff owner of bizO on bizP, ${variant}`);
+    }
+
+    // The fixture really makes them an owner: on their own business the change is admitted, and bizP is untouched.
+    await resetDocumentTemplates(ID.bizP);
+    await resetDocumentTemplates(ID.bizO);
+    const beforeP = await businessRowText(ID.bizP);
+    const own = await patchDocumentTemplates(ID.staffOwner, ID.bizO, CHANGE);
+    expect(own.status, JSON.stringify(own.body)).toBe(200);
+    expect(own.body).toEqual({ success: true, ...CHANGE });
+    expect(await documentTemplateColumns(ID.bizO)).toEqual(CHANGE);
+    expect(await businessRowText(ID.bizP), "the owner's write on bizO leaves bizP byte-identical").toBe(beforeP);
+    await resetDocumentTemplates(ID.bizO);
   });
 });
