@@ -75,6 +75,7 @@ import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useCompose } from "@/components/email/compose-context";
+import { quoteConvertDefaults, quoteConvertRequest, type QuoteConvertForm } from "../../finance/components/quote-convert-modal";
 import { ArrowRightLeft, Eye } from "lucide-react";
 
 interface QuotesPanelProps {
@@ -221,9 +222,10 @@ export default function QuotesPanel({
   const [extendDate, setExtendDate] = useState("");
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [showAcceptPrompt, setShowAcceptPrompt] = useState(false);
-  const [convertForm, setConvertForm] = useState({
-    taxRate: "12.5",
-    discountType: "PERCENT" as "PERCENT" | "FIXED",
+  // V1-51 (M20): every open seeds this from the quote (quoteConvertDefaults); no 12.5 default.
+  const [convertForm, setConvertForm] = useState<QuoteConvertForm>({
+    taxRate: "",
+    discountType: "PERCENT",
     discountValue: "",
     notes: "",
     dueDate: "",
@@ -514,13 +516,7 @@ export default function QuotesPanel({
         setSelectedQuote(res.data);
         emitEvent("commerce:quote_created", "commerce", { quoteId: quote.id, action: "accepted" });
         if (autoConvertToInvoice) {
-          setConvertForm({
-            taxRate: String(res.data.taxRate ?? 12.5),
-            discountType: (res.data.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-            discountValue: res.data.discountValue ? String(res.data.discountValue) : "",
-            notes: res.data.notes ?? "",
-            dueDate: "",
-          });
+          setConvertForm(quoteConvertDefaults(res.data));
           setShowConvertModal(true);
         } else {
           setShowAcceptPrompt(true);
@@ -608,14 +604,12 @@ export default function QuotesPanel({
 
   async function handleConvert() {
     if (!businessId || !selectedQuote) return;
+    // V1-51: tax and discount are sent explicitly (a cleared discount as 0);
+    // the server carries the quote's own values only when the body names none.
     const res = await convertQuoteToInvoice({
       businessId,
       quoteId: selectedQuote.id,
-      taxRate: parseFloat(convertForm.taxRate) || 0,
-      discountType: convertForm.discountValue ? convertForm.discountType : undefined,
-      discountValue: parseFloat(convertForm.discountValue) || undefined,
-      notes: convertForm.notes || undefined,
-      dueDate: convertForm.dueDate || undefined,
+      ...quoteConvertRequest(convertForm),
     });
     if (res.data) {
       setInvoices((inv) => [res.data!, ...inv]);
@@ -624,7 +618,7 @@ export default function QuotesPanel({
       );
       setShowConvertModal(false);
       setSelectedQuote(null);
-      setConvertForm({ taxRate: "12.5", discountType: "PERCENT", discountValue: "", notes: "", dueDate: "" });
+      setConvertForm({ taxRate: "", discountType: "PERCENT", discountValue: "", notes: "", dueDate: "" });
       onSwitchToInvoices?.();
       toast.success("Quote converted to invoice");
       emitEvent("commerce:quote_converted", "commerce", { quoteId: selectedQuote.id, invoiceId: res.data.id });
@@ -865,13 +859,7 @@ export default function QuotesPanel({
                   break;
                 case "convert":
                   setSelectedQuote(quote);
-                  setConvertForm({
-                    taxRate: String(quote.taxRate ?? 12.5),
-                    discountType: (quote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                    discountValue: quote.discountValue ? String(quote.discountValue) : "",
-                    notes: quote.notes ?? "",
-                    dueDate: "",
-                  });
+                  setConvertForm(quoteConvertDefaults(quote));
                   setShowConvertModal(true);
                   break;
                 case "view":
@@ -1004,13 +992,7 @@ export default function QuotesPanel({
                     {quote.status === "ACCEPTED" && !quote.invoiceId && (
                       <OverflowMenuItem icon={ArrowRightLeft} label="Convert to invoice" onClick={() => {
                         setSelectedQuote(quote);
-                        setConvertForm({
-                          taxRate: String(quote.taxRate ?? 12.5),
-                          discountType: (quote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                          discountValue: quote.discountValue ? String(quote.discountValue) : "",
-                          notes: quote.notes ?? "",
-                          dueDate: "",
-                        });
+                        setConvertForm(quoteConvertDefaults(quote));
                         setShowConvertModal(true);
                       }} />
                     )}
@@ -1172,13 +1154,7 @@ export default function QuotesPanel({
               <div className="flex flex-col gap-2">
                 <Button
                   onClick={() => {
-                    setConvertForm({
-                      taxRate: String(selectedQuote.taxRate ?? 12.5),
-                      discountType: (selectedQuote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                      discountValue: selectedQuote.discountValue ? String(selectedQuote.discountValue) : "",
-                      notes: selectedQuote.notes ?? "",
-                      dueDate: "",
-                    });
+                    setConvertForm(quoteConvertDefaults(selectedQuote));
                     setShowAcceptPrompt(false);
                     setShowConvertModal(true);
                   }}
@@ -1300,13 +1276,7 @@ export default function QuotesPanel({
                 )}
                 {selectedQuote.status === "ACCEPTED" && !selectedQuote.invoiceId && (
                   <Button size="sm" className="gap-1.5 w-full" onClick={() => {
-                    setConvertForm({
-                      taxRate: String(selectedQuote.taxRate ?? 12.5),
-                      discountType: (selectedQuote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                      discountValue: selectedQuote.discountValue ? String(selectedQuote.discountValue) : "",
-                      notes: selectedQuote.notes ?? "",
-                      dueDate: "",
-                    });
+                    setConvertForm(quoteConvertDefaults(selectedQuote));
                     setShowConvertModal(true);
                   }}>
                     Convert to Invoice

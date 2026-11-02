@@ -117,6 +117,16 @@ async function cleanup() {
   }
 }
 
+/**
+ * The public accept route allows 20 calls a minute per IP. This suite's windows
+ * live under its own namespace (P), reset before every case so back-to-back runs
+ * of the suite do not spill into each other; other suites' windows are untouched.
+ */
+async function clearOwnRateLimits() {
+  const keys: string[] = await redis.keys(`pub_rate_limit:${P}:*`);
+  if (keys.length) await redis.del(...keys);
+}
+
 function agent() {
   return request(app.getHttpServer());
 }
@@ -352,8 +362,9 @@ afterAll(async () => {
   else process.env.RATE_LIMIT_KEY_NAMESPACE = previousNamespace;
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   recordedEvents.length = 0;
+  await clearOwnRateLimits();
 });
 
 describe('fixture sanity (real rows)', () => {

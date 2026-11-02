@@ -222,6 +222,19 @@ function withLegacySubtotal<
   return invoice;
 }
 
+/**
+ * V1-51: the 409 a convert answers for a quote already converted to an
+ * invoice (a repeat, or the loser of two concurrent converts). It used to be a
+ * plain Error (500). `quote_converted` is the code the V1-50 status route
+ * answers for the same stored state.
+ */
+function quoteAlreadyConverted(): ConflictException {
+  return new ConflictException({
+    code: 'quote_converted',
+    message: 'This quote has already been converted to an invoice.',
+  });
+}
+
 @Injectable()
 export class CommerceService {
   private readonly logger = new Logger(CommerceService.name);
@@ -2146,24 +2159,48 @@ export class CommerceService {
       throw new Error('Only accepted quotes can be converted to invoices');
     }
     if (quote.invoiceId) {
-      throw new Error('Quote has already been converted to an invoice');
+      // V1-51: a repeated convert is a conflict with the stored state (409),
+      // not a server error; same code as the status route's refusal (V1-50).
+      throw quoteAlreadyConverted();
     }
 
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
-    const subtotal = quote.items.reduce((sum, item) => sum + item.total, 0);
-    const taxRate = input.taxRate ?? 0;
-    const taxAmount = (subtotal * taxRate) / 100;
-    let discountAmount = 0;
-    if (input.discountType === 'PERCENT' && input.discountValue) {
-      discountAmount = (subtotal * input.discountValue) / 100;
-    } else if (input.discountType === 'FIXED' && input.discountValue) {
-      discountAmount = input.discountValue;
+    // V1-51 (M20, IV-P08): by default the invoice carries the tax and the
+    // discount of the quote the customer accepted. The rate used to be
+    // `input.taxRate ?? 0` and the discount came from the body only, so an
+    // empty body (KEY's commerce_convert_quote, any API caller) invoiced an
+    // accepted 112.50 (100 + 12.5%) at 100.00. A body value still overrides:
+    // taxRate on its own (an explicit 0 is honoured), the discount as a pair
+    // (a body that names either discountType or discountValue replaces the
+    // quote's discount; discountValue 0 clears it). The quote's discount is
+    // read as createQuote/updateQuote priced it: FIXED, else a percentage.
+    const taxRate = input.taxRate ?? quote.taxRate ?? 0;
+    const bodyDiscount = input.discountType !== undefined || input.discountValue !== undefined;
+    const discountValue = bodyDiscount ? input.discountValue ?? null : quote.discountValue ?? null;
+    const discountType: 'PERCENT' | 'FIXED' | null = bodyDiscount
+      ? input.discountType ?? null
+      : quote.discountType === 'FIXED'
+        ? 'FIXED'
+        : discountValue
+          ? 'PERCENT'
+          : null;
+    // D-13: integer cents at this write boundary (the columns stay Float).
+    const subtotalCents = quote.items.reduce((sum, item) => sum + Math.round(item.total * 100), 0);
+    const taxCents = Math.round((subtotalCents * taxRate) / 100);
+    let discountCents = 0;
+    if (discountType === 'PERCENT' && discountValue) {
+      discountCents = Math.round((subtotalCents * discountValue) / 100);
+    } else if (discountType === 'FIXED' && discountValue) {
+      discountCents = Math.round(discountValue * 100);
     }
-    const total = subtotal + taxAmount - discountAmount;
+    const subtotal = subtotalCents / 100;
+    const taxAmount = taxCents / 100;
+    const discountAmount = discountCents / 100;
+    const total = (subtotalCents + taxCents - discountCents) / 100;
     // R0-27 review (ST-27-3): the converted invoice obeys the same amount rules
     // as a created one (no FIXED discount above the subtotal, no amount the
     // ledger cannot hold).
-    this.assertInvoiceAmounts({ subtotal, total, discountType: input.discountType, discountValue: input.discountValue });
+    this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
     // R0-27 review (ST-27-2): the invoice inherits the quote's contact. A quote
     // written before quote create/update checked the tenant can still hold a
     // foreign (or since deleted) contact; it must not become an Invoice bound
@@ -2173,6 +2210,9 @@ export class CommerceService {
     // R2: do the invoice insert + the quote.invoiceId backlink in a single
     // transaction so we never end up with a quote that thinks it was
     // converted but no invoice (or an invoice that has no parent quote).
+    // V1-51: two concurrent converts both pass the invoiceId check above; the
+    // loser's insert hits the unique Invoice.quoteId once the winner commits,
+    // and answers the same 409 as a sequential repeat.
     const invoice = await this.prisma.client.$transaction(async (tx) => {
       const created = await tx.invoice.create({
         data: {
@@ -2185,8 +2225,8 @@ export class CommerceService {
           subtotal,
           taxRate,
           taxAmount,
-          discountType: input.discountType ?? null,
-          discountValue: input.discountValue ?? null,
+          discountType,
+          discountValue,
           discountAmount,
           total,
           currency: quote.currency,
@@ -2209,6 +2249,12 @@ export class CommerceService {
         data: { invoiceId: created.id },
       });
       return created;
+    }).catch(async (err: unknown) => {
+      if ((err as { code?: string } | null)?.code === 'P2002') {
+        const now = await this.prisma.client.quote.findFirst({ where: { id: quote.id }, select: { invoiceId: true } });
+        if (now?.invoiceId) throw quoteAlreadyConverted();
+      }
+      throw err;
     });
 
     this.events.emit('quote.converted', { quote, invoice, businessId: quote.businessId } as QuoteConvertedPayload);
