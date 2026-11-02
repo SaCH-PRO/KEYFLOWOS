@@ -109,18 +109,17 @@ const stub = (): any =>
   );
 
 async function cleanup() {
-  const like = sqlLikePrefix(P);
-  const byBiz = (table: string) => `DELETE FROM ${table} WHERE business_id LIKE ${like}`;
+  const byBiz = (table: string) => `DELETE FROM ${table} WHERE business_id LIKE ${sqlLikePrefix(P)}`;
   for (const sql of [
-    `DELETE FROM approval_steps WHERE approval_request_id IN (SELECT id FROM approval_requests WHERE business_id LIKE ${like})`,
+    `DELETE FROM approval_steps WHERE approval_request_id IN (SELECT id FROM approval_requests WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     byBiz('approval_requests'),
     byBiz('evidence'),
     byBiz('content_requests'),
     byBiz('booking_waitlist_entries'),
-    `DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${like})`,
-    `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${like})`,
+    `DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
+    `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     byBiz('invoices'),
-    `DELETE FROM quote_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_id LIKE ${like})`,
+    `DELETE FROM quote_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     byBiz('quotes'),
     byBiz('bookings'),
     byBiz('support_tickets'),
@@ -134,8 +133,8 @@ async function cleanup() {
     byBiz('idempotency_keys'),
     byBiz('contacts'),
     byBiz('memberships'),
-    `DELETE FROM businesses WHERE id LIKE ${like}`,
-    `DELETE FROM users WHERE id LIKE ${like}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try {
       await db.$executeRawUnsafe(sql);
@@ -322,7 +321,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (db) await cleanup();
-});
+}, 60_000);
 
 // ─── INCLUDES: relation reads over rows cross-linked before the TD9 repairs ───
 
@@ -370,7 +369,8 @@ describe("V1-21d INCLUDES — a dispatcher read never hands KEY another business
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).toContain('B-OWN-TASK');
     expect(prompts[0]).not.toContain(SECRET.planted);
-    expect(prompts[0]).toContain('1/1 tasks');
+    // B's one open task, not "0/2" with A's planted task counted
+    expect(prompts[0]).toContain('0/1 tasks done');
   });
 
   it("commerce_list_invoices and store_list_recent_orders: an A invoice naming B's contact reads no contact", async () => {
@@ -396,7 +396,7 @@ describe("V1-21d INCLUDES — a dispatcher read never hands KEY another business
     expect(leaks(prompts, [SECRET.contactB, SECRET.contactBEmail])).toEqual([]);
   });
 
-  it("commerce_send_invoice: an A invoice naming B's contact is emailed to no one, and stays SENT as it was", async () => {
+  it("commerce_send_invoice: an A invoice naming B's contact is emailed to no one, and its status is left as it was (DRAFT)", async () => {
     sent.length = 0;
     await db.invoice.update({ where: { id: ID.invCrossSent }, data: { status: 'DRAFT' } });
     const { error } = await outcome(ID.bizA, 'commerce_send_invoice', { invoiceId: ID.invCrossSent });

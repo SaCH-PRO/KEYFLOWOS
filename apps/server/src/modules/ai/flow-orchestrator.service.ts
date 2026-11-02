@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
-import { CommerceService } from '../commerce/commerce.service';
+import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT } from '../commerce/commerce.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { BookingWaitlistService } from '../bookings/booking-waitlist.service';
 import { ProjectsService } from '../projects/projects.service';
@@ -518,6 +518,78 @@ function withEvidenceDiscipline(systemPrompt: string): string {
   if (systemPrompt.includes(discipline)) return systemPrompt;
   return `${systemPrompt}\n\n=== EVIDENCE DISCIPLINE ===\n${discipline}`;
 }
+
+/**
+ * V1-21d-KEY-DISPATCHER-TENANT-INCLUDES (V1-21c review ST-1, the TD9 class): a dispatcher read's
+ * to-one relations, each kept only when the related row is `businessId`'s.
+ *
+ * Prisma cannot put a where on a to-one include, and neither the tenant extension nor the
+ * soft-delete extension filters a nested read. A row cross-linked before the TD9 repairs (an A task
+ * filed on B's project, an A booking naming B's service and contact, an A invoice naming B's
+ * contact) therefore handed the model another business's row. Each such relation is read with its
+ * businessId and replaced by null here when that is not the caller's business (null included: a row
+ * of no business is not this one's). The row itself stays: it is the caller's own.
+ *
+ * A relation read without businessId is kept as read; the census in flow-dispatcher-tenant.spec.ts
+ * fails on a dispatcher read whose to-one relation does not select businessId or does not pass
+ * through here.
+ */
+export function ownRelations<T extends object, K extends keyof T & string>(
+  businessId: string,
+  row: T,
+  relations: readonly K[],
+): Omit<T, K> & { [P in K]: T[P] | null } {
+  const out = { ...row } as unknown as Record<string, unknown>;
+  for (const key of relations) {
+    const related = out[key];
+    if (related && typeof related === 'object' && 'businessId' in related && (related as { businessId: unknown }).businessId !== businessId) {
+      out[key] = null;
+    }
+  }
+  return out as Omit<T, K> & { [P in K]: T[P] | null };
+}
+
+/**
+ * The contact keys a KEY commerce write hands the model: what the HTTP write routes answer
+ * (toInvoiceWriteResponse / toQuoteWriteResponse in commerce.controller.ts), the operator read's
+ * customer fields plus `id` and `businessId`, which repeat the row's own contactId and tenant.
+ */
+const KEY_INVOICE_CONTACT_KEYS: readonly string[] = ['id', 'businessId', ...Object.keys(OPERATOR_INVOICE_CONTACT_SELECT)];
+const KEY_QUOTE_CONTACT_KEYS: readonly string[] = ['id', 'businessId', ...Object.keys(OPERATOR_QUOTE_CONTACT_SELECT)];
+
+function withWriteContact(businessId: string, row: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  const contact = row.contact as Record<string, unknown> | null | undefined;
+  if (!contact) return row;
+  // a contact of another business (a row cross-linked before TD9-4) is not the caller's to read
+  if ('businessId' in contact && contact.businessId !== businessId) return { ...row, contact: null };
+  return { ...row, contact: Object.fromEntries(keys.map((key) => [key, contact[key]])) };
+}
+
+/**
+ * V1-21d (R0-SEC3 review SEC3-ST-2): what a KEY invoice write hands the model. markInvoicePaid
+ * reloads the invoice with `booking: true` and `contact: true` (the invoice listeners need both),
+ * createInvoice with `contact: true`, and the dispatcher returned those rows as they came: the
+ * model (and through it the chat response and the FlowSession) received a PRIVATE contact's
+ * internal notes, phone, owner and visibility, and the booking's notes, location and calendar id.
+ * The HTTP routes answer the same writes through toInvoiceWriteResponse; this is that projection:
+ * no booking, the contact's KEY_INVOICE_CONTACT_KEYS only. A row without a loaded contact passes
+ * through with only the booking dropped.
+ */
+export function toKeyInvoiceResult(businessId: string, invoice: object): Record<string, unknown> {
+  const rest = Object.fromEntries(Object.entries(invoice).filter(([key]) => key !== 'booking'));
+  return withWriteContact(businessId, rest, KEY_INVOICE_CONTACT_KEYS);
+}
+
+/** V1-21d (SEC3-ST-2): what a KEY quote write hands the model, as toQuoteWriteResponse answers it. */
+export function toKeyQuoteResult(businessId: string, quote: object): Record<string, unknown> {
+  return withWriteContact(businessId, { ...quote }, KEY_QUOTE_CONTACT_KEYS);
+}
+
+/**
+ * The tenant models whose model-supplied ids the dispatcher resolves itself (V1-21d), because the
+ * service it hands them to looks them up by id alone.
+ */
+type DispatcherTenantModel = 'contentRequest' | 'evidence' | 'approvalRequest' | 'bookingWaitlistEntry' | 'service' | 'staffMember';
 
 @Injectable()
 export class FlowOrchestratorService {
@@ -3179,6 +3251,45 @@ ${triage.standingContext}`;
     if (!contact) throw new NotFoundException('Contact not found');
   }
 
+  /**
+   * V1-21d: a model-supplied id, refused unless it names a row of `businessId`, before it reaches a
+   * service that looks it up by id alone (ContentRequestService.getById, EvidenceService.verify,
+   * ApprovalRequestService.decideStep, BookingWaitlistService.offerSlot). On the staff bridge, a
+   * plan or a monitor there is no tenant context, so nothing else binds the id: KEY in A read and
+   * moved B's content request, verified B's evidence, decided B's approval request and booked a
+   * slot in B. NotFound, as for an unknown id, so the answer confirms nothing about another
+   * business's ids.
+   */
+  private async idWithinBusiness(model: DispatcherTenantModel, businessId: string, id: unknown, label: string): Promise<string> {
+    if (typeof id !== 'string' || !id) throw new BadRequestException(`${label} id must be a non-empty string`);
+    const delegate = this.prisma.client[model] as unknown as {
+      findFirst(args: { where: { id: string; businessId: string }; select: { id: true } }): Promise<{ id: string } | null>;
+    };
+    const row = await delegate.findFirst({ where: { id, businessId }, select: { id: true } });
+    if (!row) throw new NotFoundException(`${label} not found`);
+    return row.id;
+  }
+
+  /**
+   * V1-21d: user ids the model chose to assign work to, refused unless every one is a member of
+   * `businessId`. content_assign_request stored them as given, and the chaser then notifies each
+   * assignee about the business's content request.
+   */
+  private async membersWithinBusiness(businessId: string, userIds: unknown): Promise<string[]> {
+    if (!Array.isArray(userIds) || userIds.some((u) => typeof u !== 'string' || !u)) {
+      throw new BadRequestException('teamMemberIds must be an array of user ids');
+    }
+    const wanted = [...new Set(userIds as string[])];
+    const members = await this.prisma.client.membership.findMany({
+      where: { businessId, userId: { in: wanted } },
+      select: { userId: true },
+    });
+    const found = new Set(members.map((mm) => mm.userId));
+    const missing = wanted.filter((u) => !found.has(u));
+    if (missing.length) throw new NotFoundException(`Team member not found: ${missing.join(', ')}`);
+    return userIds as string[];
+  }
+
   private async executeToolAction(
     businessId: string,
     toolName: string,
@@ -3745,12 +3856,14 @@ ${triage.standingContext}`;
       }
 
       case 'commerce_list_invoices': {
-        const invoices = await this.prisma.client.invoice.findMany({
+        // V1-21d: an invoice cross-linked to another business's contact (before TD9-4) reads no contact
+        const rows = await this.prisma.client.invoice.findMany({
           where: { businessId, deletedAt: null },
-          include: { contact: { select: { firstName: true, lastName: true, email: true } } },
+          include: { contact: { select: { businessId: true, firstName: true, lastName: true, email: true } } },
           take: args.limit ?? 10,
           orderBy: { createdAt: 'desc' },
         });
+        const invoices = rows.map((invoice) => ownRelations(businessId, invoice, ['contact']));
         return { invoices, count: invoices.length };
       }
 
@@ -3773,12 +3886,15 @@ ${triage.standingContext}`;
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           notes: args.notes ?? undefined,
         });
-        return { invoice, id: invoice.id, invoiceNumber: invoice.invoiceNumber };
+        // V1-21d (SEC3-ST-2): the write projection, not createInvoice's row with the whole Contact
+        return { invoice: toKeyInvoiceResult(businessId, invoice), id: invoice.id, invoiceNumber: invoice.invoiceNumber };
       }
 
       case 'commerce_mark_invoice_paid': {
         const invoice = await this.getCommerce().markInvoicePaid(args.invoiceId, KEY_SYSTEM_ACTOR_ID, businessId);
-        return { invoice, id: invoice.id };
+        // V1-21d (R0-SEC3 review SEC3-ST-2): markInvoicePaid reloads with booking: true and
+        // contact: true; the model gets what PATCH .../paid answers (toInvoiceWriteResponse).
+        return { invoice: toKeyInvoiceResult(businessId, invoice), id: invoice.id };
       }
 
       case 'commerce_create_product': {
@@ -3812,7 +3928,8 @@ ${triage.standingContext}`;
           currency: args.currency ?? 'TTD',
           expiryDate: args.expiryDate ? new Date(args.expiryDate) : undefined,
         });
-        return { quote, id: quote.id, quoteNumber: quote.quoteNumber };
+        // V1-21d (SEC3-ST-2): the write projection, as POST .../quotes answers (toQuoteWriteResponse)
+        return { quote: toKeyQuoteResult(businessId, quote), id: quote.id, quoteNumber: quote.quoteNumber };
       }
 
       case 'commerce_delete_invoice': {
@@ -3821,15 +3938,18 @@ ${triage.standingContext}`;
       }
 
       case 'bookings_list_bookings': {
-        const bookings = await this.prisma.client.booking.findMany({
+        // V1-21d: a booking cross-linked to another business's service or contact (before TD9-3)
+        // reads neither; binding the where on one relation would leave the other leaking.
+        const rows = await this.prisma.client.booking.findMany({
           where: { businessId, deletedAt: null },
           include: {
-            contact: { select: { firstName: true, lastName: true, email: true } },
-            service: { select: { name: true } },
+            contact: { select: { businessId: true, firstName: true, lastName: true, email: true } },
+            service: { select: { businessId: true, name: true } },
           },
           take: args.limit ?? 10,
           orderBy: { startTime: 'asc' },
         });
+        const bookings = rows.map((booking) => ownRelations(businessId, booking, ['contact', 'service']));
         return { bookings, count: bookings.length };
       }
 
@@ -3942,6 +4062,11 @@ ${triage.standingContext}`;
       }
 
       case 'bookings_offer_waitlist_slot': {
+        // V1-21d: offerSlot reads the entry by id alone and books in the entry's business, with
+        // the slot's staff member when the entry names none: each id is this business's first.
+        await this.idWithinBusiness('bookingWaitlistEntry', businessId, args.entryId, 'Waitlist entry');
+        await this.idWithinBusiness('service', businessId, args.serviceId, 'Service');
+        if (args.staffId != null) await this.idWithinBusiness('staffMember', businessId, args.staffId, 'Staff member');
         const result = await this.getWaitlist().offerSlot(args.entryId, {
           startTime: new Date(args.startTime),
           endTime: new Date(args.endTime),
@@ -4322,7 +4447,8 @@ ${triage.standingContext}`;
           where: projectWhere,
           include: {
             tasks: {
-              where: { deletedAt: null },
+              // V1-21d: the project's own tasks, not another business's task filed on it (before TD9-1)
+              where: { deletedAt: null, businessId },
               select: { id: true, title: true, isCompleted: true, dueDate: true, priority: true },
             },
           },
@@ -4472,14 +4598,16 @@ ${triage.standingContext}`;
       }
 
       case 'draft_payment_reminder': {
-        const invoice = await this.prisma.client.invoice.findFirst({
+        const found = await this.prisma.client.invoice.findFirst({
           where: { id: args.invoiceId, businessId, deletedAt: null },
           include: {
-            contact: { select: { firstName: true, lastName: true, email: true } },
+            contact: { select: { businessId: true, firstName: true, lastName: true, email: true } },
             business: { select: { name: true } },
           },
         });
-        if (!invoice) throw new Error('Invoice not found');
+        if (!found) throw new Error('Invoice not found');
+        // V1-21d: another business's contact (an invoice cross-linked before TD9-4) never reaches the prompt
+        const invoice = ownRelations(businessId, found, ['contact']);
 
         const contactName = invoice.contact ? `${invoice.contact.firstName ?? ''} ${invoice.contact.lastName ?? ''}`.trim() || invoice.contact.email || 'Customer' : 'Customer';
         const now = new Date();
@@ -4539,7 +4667,8 @@ ${triage.standingContext}`;
           where: { id: args.projectId, businessId, deletedAt: null },
           include: {
             tasks: {
-              where: { deletedAt: null },
+              // V1-21d: another business's task filed on this project (before TD9-1) is not in the update
+              where: { deletedAt: null, businessId },
               select: { title: true, isCompleted: true, dueDate: true },
               orderBy: { sortOrder: 'asc' },
             },
@@ -4814,7 +4943,8 @@ ${triage.standingContext}`;
         if (args.status) where.status = args.status;
         const projects = await this.prisma.client.project.findMany({
           where,
-          include: { _count: { select: { tasks: { where: { deletedAt: null } } } } },
+          // V1-21d: counts the project's own tasks, not another business's task filed on it (before TD9-1)
+          include: { _count: { select: { tasks: { where: { deletedAt: null, businessId } } } } },
           orderBy: { createdAt: 'desc' },
           take: limit,
         });
@@ -4834,12 +4964,15 @@ ${triage.standingContext}`;
         const where: any = { businessId, deletedAt: null };
         if (args.projectId) where.projectId = args.projectId;
         if (args.onlyOpen) where.isCompleted = false;
-        const tasks = await this.prisma.client.projectTask.findMany({
+        // V1-21d (V1-21c review ST-1): a task of this business filed on another business's
+        // project (before TD9-1) is listed without that project
+        const rows = await this.prisma.client.projectTask.findMany({
           where,
-          include: { project: { select: { id: true, name: true } } },
+          include: { project: { select: { businessId: true, id: true, name: true } } },
           orderBy: [{ isCompleted: 'asc' }, { dueDate: 'asc' }],
           take: 100,
         });
+        const tasks = rows.map((task) => ownRelations(businessId, task, ['project']));
         return { tasks };
       }
 
@@ -4976,12 +5109,14 @@ ${triage.standingContext}`;
       }
 
       case 'store_list_recent_orders': {
-        const orders = await this.prisma.client.invoice.findMany({
+        // V1-21d: an order cross-linked to another business's contact (before TD9-4) reads no contact
+        const rows = await this.prisma.client.invoice.findMany({
           where: { businessId, deletedAt: null, status: 'PAID' },
           orderBy: { paidAt: 'desc' },
           take: args.limit ?? 25,
-          include: { contact: { select: { id: true, firstName: true, lastName: true } } },
+          include: { contact: { select: { businessId: true, id: true, firstName: true, lastName: true } } },
         });
+        const orders = rows.map((order) => ownRelations(businessId, order, ['contact']));
         return { orders };
       }
 
@@ -5168,7 +5303,10 @@ ${triage.standingContext}`;
         });
         return { items: result.items, total: result.total };
       }
+      // V1-21d: ContentRequestService reads and writes a request by id alone (getById), so each
+      // content tool below resolves the request inside the business first.
       case 'content_get_request': {
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
         const request = await this.getContentRequest().getById(args.requestId);
         return { request };
       }
@@ -5195,6 +5333,9 @@ ${triage.standingContext}`;
       // content_transition_status raised BadRequestException — KEY reporting a
       // step it had just completed and then being unable to act on it.
       case 'content_assign_request': {
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
+        // V1-21d: only members of the business are assigned (the chaser notifies each assignee)
+        await this.membersWithinBusiness(businessId, args.teamMemberIds);
         const assigned = await this.getContentRequest().assignRequest(args.requestId, args.teamMemberIds, 'key_ai');
         return {
           requestId: assigned.id,
@@ -5203,16 +5344,19 @@ ${triage.standingContext}`;
         };
       }
       case 'content_transition_status': {
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
         const moved = await this.getContentRequest().transitionStatus(args.requestId, args.newStatus, 'key_ai', args.comment);
         return { requestId: moved.id, newStatus: moved.status };
       }
       case 'content_submit_for_review': {
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
         const submitted = await this.getContentRequest().submitForReview(args.requestId, 'key_ai', args.comment);
         return { requestId: submitted.id, status: submitted.status };
       }
       case 'content_upload_deliverables': {
         // `uploaded: args.fileIds.length` was the count KEY asked for, not the
         // count that persisted.
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
         const uploaded = await this.getContentRequest().uploadDeliverables(args.requestId, args.fileIds, args.folderId, 'key_ai');
         return {
           requestId: uploaded.id,
@@ -5221,6 +5365,7 @@ ${triage.standingContext}`;
         };
       }
       case 'content_deliver_request': {
+        await this.idWithinBusiness('contentRequest', businessId, args.requestId, 'Content request');
         const delivered = await this.getContentRequest().deliverRequest(args.requestId, 'key_ai');
         if (delivered.invoiceRequested && !delivered.deliveryInvoiceId) {
           throw new Error(
@@ -5323,6 +5468,8 @@ ${triage.standingContext}`;
         // `verified: true` was hardcoded — the tool asserted success rather than
         // reporting it. verify() returns the updated row with verifiedAt set, so
         // the flag can be derived from what was actually written.
+        // V1-21d: EvidenceService.verify finds the evidence by id alone; this business's first.
+        await this.idWithinBusiness('evidence', businessId, args.evidenceId, 'Evidence');
         const verified = await this.getEvidence().verify({
           evidenceId: args.evidenceId,
           verifierId: 'key_ai',
@@ -5359,6 +5506,8 @@ ${triage.standingContext}`;
         return { id: approval.id, status: approval.status };
       }
       case 'approval_decide_step': {
+        // V1-21d: ApprovalRequestService.decideStep finds the request by id alone; this business's first.
+        await this.idWithinBusiness('approvalRequest', businessId, args.approvalRequestId, 'Approval request');
         const decision = await this.getApprovalRequest().decideStep({
           approvalRequestId: args.approvalRequestId,
           approverId: 'key_ai',
@@ -5494,12 +5643,14 @@ ${triage.standingContext}`;
         const where: any = { businessId, deletedAt: null };
         if (args.status) where.status = args.status;
         if (args.priority) where.priority = args.priority;
-        const tickets = await this.prisma.client.supportTicket.findMany({
+        // V1-21d: a ticket naming another business's contact reads no contact
+        const rows = await this.prisma.client.supportTicket.findMany({
           where,
           orderBy: { createdAt: 'desc' },
           take: args.limit ?? 25,
-          include: { contact: { select: { firstName: true, lastName: true, email: true } } },
+          include: { contact: { select: { businessId: true, firstName: true, lastName: true, email: true } } },
         });
+        const tickets = rows.map((ticket) => ownRelations(businessId, ticket, ['contact']));
         return { tickets, count: tickets.length };
       }
       case 'helpdesk_create_ticket': {
@@ -6043,11 +6194,13 @@ ${triage.standingContext}`;
         return { id: message.id, ticketId: args.ticketId };
       }
       case 'helpdesk_draft_reply': {
-        const ticket = await this.prisma.client.supportTicket.findFirst({
+        const found = await this.prisma.client.supportTicket.findFirst({
           where: { id: args.ticketId, businessId, deletedAt: null },
-          include: { contact: { select: { firstName: true, lastName: true, companyName: true } } },
+          include: { contact: { select: { businessId: true, firstName: true, lastName: true, companyName: true } } },
         });
-        if (!ticket) throw new Error('Ticket not found');
+        if (!found) throw new Error('Ticket not found');
+        // V1-21d: another business's contact on the ticket never reaches the prompt
+        const ticket = ownRelations(businessId, found, ['contact']);
         const thread = await this.getHelpdeskService().listTicketMessages(businessId, args.ticketId);
         const threadCtx = thread
           .slice(-10)
@@ -6379,11 +6532,14 @@ ${triage.standingContext}`;
         return { id: product.id, name: product.name, fieldsUpdated: Object.keys(updateData) };
       }
       case 'commerce_send_invoice': {
-        const invoice = await this.prisma.client.invoice.findFirst({
+        const found = await this.prisma.client.invoice.findFirst({
           where: { id: args.invoiceId, businessId },
-          include: { contact: { select: { firstName: true, lastName: true, email: true } } },
+          include: { contact: { select: { businessId: true, firstName: true, lastName: true, email: true } } },
         });
-        if (!invoice) throw new Error('Invoice not found');
+        if (!found) throw new Error('Invoice not found');
+        // V1-21d: an invoice cross-linked to another business's contact (before TD9-4) is emailed
+        // to no one: that contact is not this business's to write to.
+        const invoice = ownRelations(businessId, found, ['contact']);
         // V1-21b review 7 DRV5-2: the only route that emails an invoice by hand (POST
         // send-email) refuses a VOID one; KEY emailed the pay link and only then failed the
         // VOID -> SENT transition. Refused before any mail.
