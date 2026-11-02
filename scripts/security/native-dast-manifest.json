@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "description": "Native DAST probes (V1-13-SEC-NATIVE-DAST). Unauthenticated calls to protected routes must answer 401 or 403 and nothing else; a 404 means the route is absent and proves nothing. Run against a locally started server only: node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json with NATIVE_DAST_BASE_URL set to a loopback URL.",
+  "base_url_env": "NATIVE_DAST_BASE_URL",
+  "probes": [
+    {
+      "id": "public.healthz",
+      "method": "GET",
+      "path": "/healthz",
+      "expected_status": [200],
+      "body_must_include": ["\"status\":\"ok\""]
+    },
+    {
+      "id": "r0.contacts.list",
+      "method": "GET",
+      "path": "/crm/businesses/native-dast-business/contacts",
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "r0.contacts.list_malformed_bearer",
+      "method": "GET",
+      "path": "/crm/businesses/native-dast-business/contacts",
+      "headers": { "authorization": "Bearer definitely-not-a-valid-token" },
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "r0.invoices.list",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/invoices",
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "r0.invoices.list_malformed_bearer",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/invoices",
+      "headers": { "authorization": "Bearer definitely-not-a-valid-token" },
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "r0.invoices.detail",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/invoices/native-dast-invoice",
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "r0.invoices.detail_malformed_bearer",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/invoices/native-dast-invoice",
+      "headers": { "authorization": "Bearer definitely-not-a-valid-token" },
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "r0.payments.record",
+      "method": "POST",
+      "path": "/commerce/businesses/native-dast-business/invoices/native-dast-invoice/payments",
+      "headers": { "content-type": "application/json" },
+      "body": { "amount": 1, "method": "CASH", "reference": "native-dast-probe" },
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "r0.payments.record_malformed_bearer",
+      "method": "POST",
+      "path": "/commerce/businesses/native-dast-business/invoices/native-dast-invoice/payments",
+      "headers": { "content-type": "application/json", "authorization": "Bearer definitely-not-a-valid-token" },
+      "body": { "amount": 1, "method": "CASH", "reference": "native-dast-probe" },
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "r0.payments.tenant_list",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/payments",
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "r0.payments.tenant_list_malformed_bearer",
+      "method": "GET",
+      "path": "/commerce/businesses/native-dast-business/payments",
+      "headers": { "authorization": "Bearer definitely-not-a-valid-token" },
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "protected.admin_risc.erase",
+      "method": "POST",
+      "path": "/admin/risc/users/native-dast-user/erase",
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "protected.business_genome.constitution_latest",
+      "method": "GET",
+      "path": "/business-genome/businesses/native-dast-business/constitution/latest",
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "protected.connectors.dashboard",
+      "method": "GET",
+      "path": "/connectors/businesses/native-dast-business/dashboard",
+      "expected_status": [401, 403],
+      "protected": true
+    },
+    {
+      "id": "protected.connectors.dashboard_malformed_bearer",
+      "method": "GET",
+      "path": "/connectors/businesses/native-dast-business/dashboard",
+      "headers": { "authorization": "Bearer definitely-not-a-valid-token" },
+      "expected_status": [401, 403],
+      "protected": true
+    }
+  ],
+  "forbidden_body_patterns": [
+    "PrismaClientKnownRequestError",
+    "PrismaClientValidationError",
+    "node_modules/",
+    "node_modules\\\\",
+    "at processTicksAndRejections",
+    "UnhandledPromiseRejection",
+    "TypeError:"
+  ]
+}
