@@ -2843,3 +2843,89 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
     for (const t of ['call_log_outcome', 'call_schedule_followup', 'call_generate_script', 'call_create_task']) expect(passes(crm, t), t).toBe(true);
   });
 });
+
+/**
+ * V1-21b review 9 WB-1 / FB-3 — a reply approval is capped as the envelope is.
+ *
+ * StaffChatBridgeService resolves a pending approval on a 'YES' (AiOversightService
+ * .resolveApprovalByAssignment) before any envelope is built, and that checked the item's tier
+ * against JobRole.defaultApprovalTier alone. A holder HTTP narrows (tier 0), bans, or knows only
+ * as a member of another business approved a tier-3 refund by WhatsApp (confirmed on a real
+ * database: test/staff-bridge-boundary.integration.test.ts). approvalTierForPosition is the tier
+ * a position may approve by reply: its JobRole's, capped by the membership HTTP reads for its
+ * holder in the position's business (membershipApprovalTier, the rule resolveApproval applies)
+ * and by each member whose account phone is the position's; a holder HTTP would refuse every
+ * route, or one not shown to be a member here, approves nothing (fail closed, as the envelope).
+ */
+describe('V1-21b review 9 — a reply approval needs the tier the holder has over HTTP (WB-1, FB-3)', () => {
+  type TierResult = { tier: number; refusal?: string };
+  const approvalTierForPosition = (policyExports as Record<string, unknown>).approvalTierForPosition as (p: unknown) => TierResult;
+  const BIZ = 'biz_a';
+  const ACTIVE = { deletedAt: null, bannedAt: null };
+  const member = (over: Record<string, unknown> = {}) => ({
+    businessId: BIZ,
+    userId: 'u_holder',
+    role: 'ADMIN',
+    permissionScopes: null,
+    maxApprovalTier: 3,
+    user: ACTIVE,
+    ...over,
+  });
+  const position = (over: Record<string, unknown> = {}) => ({
+    businessId: BIZ,
+    jobRole: { id: 'jr', name: 'Ownerish', permissions: {}, defaultApprovalTier: 3 },
+    membershipId: 'm_holder',
+    userId: 'u_holder',
+    membership: member(),
+    phoneMembers: [],
+    ...over,
+  });
+  const contactOnly = { membershipId: null, userId: null, membership: null };
+
+  it('is exported', () => {
+    expect(typeof approvalTierForPosition).toBe('function');
+  });
+
+  it.each<[string, Record<string, unknown>, number, boolean]>([
+    ['a holder at tier 3 holds the JobRole tier 3', {}, 3, false],
+    [
+      'a holder narrowed by PATCH .../permissions ({ crm: read }, tier 0) approves nothing above tier 0',
+      { membership: member({ role: 'STAFF', permissionScopes: { crm: 'read' }, maxApprovalTier: 0 }) },
+      0,
+      false,
+    ],
+    ['the lower of the JobRole tier and the membership tier', { jobRole: { id: 'jr', name: 'Low', permissions: {}, defaultApprovalTier: 1 } }, 1, false],
+    ['a STAFF holder on role defaults is tier 0 (DEFAULT_APPROVAL_TIERS)', { membership: member({ role: 'STAFF', maxApprovalTier: 0 }) }, 0, false],
+    ['a banned holder is refused', { membership: member({ user: { deletedAt: null, bannedAt: new Date() } }) }, 0, true],
+    ['a soft-deleted holder is refused', { membership: member({ user: { deletedAt: new Date(), bannedAt: null } }) }, 0, true],
+    ['a holder whose account is not given is refused (fail closed)', { membership: member({ user: undefined }) }, 0, true],
+    ['a membership-backed position with no membership here is refused', { membership: null }, 0, true],
+    [
+      "a membership in another business is refused (FB-3: HTTP reads the holder's row in this one)",
+      { membership: member({ businessId: 'biz_b', role: 'OWNER', maxApprovalTier: 4 }) },
+      0,
+      true,
+    ],
+    ["another user's membership is refused", { membership: member({ userId: 'u_other' }) }, 0, true],
+    ['a contact-only position with no member on its phone keeps its JobRole tier', contactOnly, 3, false],
+    [
+      "a contact-only position on a narrowed member's phone is capped by that member",
+      { ...contactOnly, phoneMembers: [member({ userId: 'u_phone', role: 'STAFF', permissionScopes: { crm: 'read' }, maxApprovalTier: 0 })] },
+      0,
+      false,
+    ],
+    [
+      "a contact-only position on a banned member's phone is refused",
+      { ...contactOnly, phoneMembers: [member({ userId: 'u_phone', user: { deletedAt: null, bannedAt: new Date() } })] },
+      0,
+      true,
+    ],
+    ["a phone member of another business is refused (fail closed)", { ...contactOnly, phoneMembers: [member({ userId: 'u_phone', businessId: 'biz_b' })] }, 0, true],
+    ['every phone member caps it (the lowest wins)', { phoneMembers: [member({ userId: 'u_p1', maxApprovalTier: 2 }), member({ userId: 'u_p2', maxApprovalTier: 1 })] }, 1, false],
+    ['a position without a JobRole approves nothing', { jobRole: null }, 0, false],
+  ])('%s', (_label, over, tier, refused) => {
+    const out = approvalTierForPosition(position(over));
+    expect(out.tier).toBe(tier);
+    expect(!!out.refusal).toBe(refused);
+  });
+});

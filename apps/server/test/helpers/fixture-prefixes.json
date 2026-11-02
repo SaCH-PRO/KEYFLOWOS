@@ -223,6 +223,11 @@
       "packet": "V1-21-AUTH-JOBROLE-CEILING"
     },
     {
+      "prefix": "v21b_",
+      "owner": "apps/server/test/staff-bridge-boundary.integration.test.ts",
+      "packet": "V1-21 (V1-21b-JOBROLE-TOOL-FAMILIES)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

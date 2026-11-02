@@ -1925,6 +1925,42 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         '  async notATenantModel(id: string) {',
         '    return this.prisma.client.user.findUnique({ where: { id } });',
         '  }',
+        '',
+        '  async optionalTenant(id: string, businessId?: string) {',
+        '    return this.prisma.client.contentRequest.findFirst({ where: { id, businessId } });',
+        '  }',
+        '',
+        '  async passesNoTenant(id: string) {',
+        '    return this.optionalTenant(id);',
+        '  }',
+        '',
+        '  async passesUndefinedTenant(id: string) {',
+        '    return this.optionalTenant(id, undefined);',
+        '  }',
+        '',
+        '  async passesTenant(businessId: string, id: string) {',
+        '    return this.optionalTenant(id, businessId);',
+        '  }',
+        '',
+        '  async optionalTenantKey(input: { id: string; businessId?: string }) {',
+        '    return this.prisma.client.contentRequest.findFirst({ where: { id: input.id, businessId: input.businessId } });',
+        '  }',
+        '',
+        '  async omitsTenantKey(id: string) {',
+        '    return this.optionalTenantKey({ id });',
+        '  }',
+        '',
+        '  async handsTenantKey(businessId: string, id: string) {',
+        '    return this.optionalTenantKey({ id, businessId });',
+        '  }',
+        '',
+        '  async destructuresTenant({ id, businessId }: { id: string; businessId?: string }) {',
+        '    return this.prisma.client.contentRequest.findFirst({ where: { id, businessId } });',
+        '  }',
+        '',
+        '  async omitsDestructuredTenant(id: string) {',
+        '    return this.destructuresTenant({ id });',
+        '  }',
         '}',
       ].join('\n');
       SYNTHETIC_CLASSES.set('SynService', SYN);
@@ -1942,6 +1978,15 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         ['a tenant the model chose binds nothing', 'tenantFromInput', [new Set(['businessId', 'id'])], true],
         ['...while the tenant its caller gave does', 'tenantFromInput', [new Set(['id'])], false],
         ['a model the extension does not scope is not this rule (HTTP binds it no better)', 'notATenantModel', [true], false],
+        // review 9 TD9-5: Prisma drops `businessId: undefined`, so a where whose businessId its
+        // caller never handed over names no business at all
+        ['a businessId parameter no caller hands over binds nothing', 'optionalTenant', [true], true],
+        ['...nor through the own-class helper that leaves it out', 'passesNoTenant', [true], true],
+        ['...nor one handed over as `undefined`', 'passesUndefinedTenant', [true], true],
+        ['...while the business its caller hands over does', 'passesTenant', [false, true], false],
+        ['a businessId key the caller leaves out of the object it hands over binds nothing', 'omitsTenantKey', [true], true],
+        ['...while the key it puts in does', 'handsTenantKey', [false, true], false],
+        ['a destructured businessId the caller leaves out binds nothing', 'omitsDestructuredTenant', [true], true],
       ])('%s', (_label, method, seeds, isAmbient) => {
         expect(ambientOf(method, seeds)).toEqual(isAmbient ? [`SynService.${method}`] : []);
       });
@@ -2032,6 +2077,97 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       expect(governed).toEqual([]);
       expect(Object.keys(TENANT_UNBOUND).sort()).toEqual(ungoverned);
       for (const [t, why] of Object.entries(TENANT_UNBOUND)) expect(why, t).toMatch(new RegExp(AMBIENT.get(t)![0].replace('.', '\\.')));
+    });
+  });
+
+  /**
+   * Review 9 TD9-5: the drift guard counted `where: { id, businessId }` as bound when no caller
+   * handed businessId over (a parameter not passed seeded as "not the model's"), but Prisma drops
+   * `businessId: undefined`, so that where names no business. The review's mutation: give
+   * ContentRequestService.getById an optional businessId and pass it only from
+   * content_get_request; the derivation then dropped the six content tools' AMBIENT rows while
+   * assignRequest, deliverRequest, submitForReview, transitionStatus and uploadDeliverables still
+   * called this.getById(requestId), which on a real database returns another business's row.
+   *
+   * TD9-1..4: rule 2b classifies where-by-id only. A model-chosen id written into create data as
+   * a foreign key (a task's projectId, a call log's contactId, a booking's serviceId and staffId,
+   * an invoice's or quote's contactId) is not a where, so it is pinned here at the sites the
+   * review found: each is looked up within the business before anything is written
+   * (test/staff-bridge-boundary.integration.test.ts proves them on a real database).
+   */
+  describe('review 9 — a businessId no caller handed over binds nothing; a chosen foreign key is checked before it is written', () => {
+    it("TD9-5: the review's half-fix (an optional businessId on getById, passed by content_get_request only) leaves the five other content tools AMBIENT-BOUND", () => {
+      const file = CLASS_FILES.get('ContentRequestService')!;
+      const real = readFileSync(file, 'utf8');
+      const mutated = real
+        .replace('async getById(requestId: string) {', 'async getById(requestId: string, businessId?: string) {')
+        .replace(/findUnique\(\{\s*where: \{ id: requestId \},/, 'findFirst({ where: { id: requestId, businessId },');
+      expect(mutated).not.toBe(real);
+      expect(memberBody(mutated, 'getById')).toMatch(/findFirst\(\{ where: \{ id: requestId, businessId \},/);
+      SYNTHETIC_CLASSES.set('ContentRequestService', mutated);
+      try {
+        const ambientOf = (method: string, seeds: Seed[]) =>
+          ambientCalls(new Map([['t', methodTouches(`ContentRequestService.${method}`, seeds, new Set(), `ContentRequestService.${method}`)]])).get('t') ?? [];
+        // content_get_request, half-fixed: getById(args.requestId, businessId)
+        expect(ambientOf('getById', [true, false])).toEqual([]);
+        for (const method of ['assignRequest', 'deliverRequest', 'submitForReview', 'transitionStatus', 'uploadDeliverables']) {
+          expect(memberBody(mutated, method), method).toMatch(/await this\.getById\(requestId\);/);
+          expect(ambientOf(method, [true, true, true, true]), method).toEqual([`ContentRequestService.${method}`]);
+        }
+      } finally {
+        SYNTHETIC_CLASSES.delete('ContentRequestService');
+      }
+    });
+
+    it('TD9-1: ProjectsService.addTask finds the project within the business before the task is written', () => {
+      const body = memberBody(read('modules/projects/projects.service.ts'), 'addTask')!;
+      const lookup = body.search(/this\.prisma\.client\.project\.findFirst\(\{\s*where: \{ id: projectId, businessId, deletedAt: null \},/);
+      expect(lookup).toBeGreaterThan(-1);
+      expect(body.slice(lookup)).toMatch(/if \(!project\) throw new NotFoundException\('Project not found'\);/);
+      expect(lookup).toBeLessThan(body.indexOf('projectTask.create'));
+    });
+
+    it("TD9-2: CallLogService checks a call log's contact within the business on create and update, and the call script reads only the business's own rows", () => {
+      const src = read('modules/call-tasks/call-log.service.ts');
+      expect(memberBody(src, 'assertContactInBusiness')).toMatch(/this\.prisma\.client\.contact\.findFirst\(\{\s*where: \{ id: contactId, businessId \},/);
+      const create = memberBody(src, 'createCallLog')!;
+      const createCheck = create.indexOf('await this.assertContactInBusiness(input.businessId, input.contactId);');
+      expect(createCheck).toBeGreaterThan(-1);
+      expect(createCheck).toBeLessThan(create.indexOf('callLog.create'));
+      const update = memberBody(src, 'updateCallLog')!;
+      const updateCheck = update.indexOf('await this.assertContactInBusiness(businessId, input.contactId);');
+      expect(updateCheck).toBeGreaterThan(-1);
+      expect(updateCheck).toBeLessThan(update.indexOf('callLog.update'));
+      const script = memberBody(read('modules/call-tasks/call-script.service.ts'), 'generateScript')!;
+      for (const rel of ['deals', 'invoices', 'bookings', 'tasks']) expect(script, rel).toMatch(new RegExp(`${rel}: \\{\\s*where: \\{ businessId[,\\s}]`));
+    });
+
+    it('TD9-3: BookingsService.createBooking refuses a service, staff member, contact or unit outside the business before the booking is written', () => {
+      const body = memberBody(read('modules/bookings/bookings.service.ts'), 'createBooking')!;
+      const write = body.indexOf('booking.create');
+      for (const refusal of [
+        "throw new NotFoundException('Service not found')",
+        "throw new NotFoundException('Staff member not found')",
+        "throw new NotFoundException('Contact not found')",
+        "throw new NotFoundException('Org unit not found')",
+      ]) {
+        expect(body.indexOf(refusal), refusal).toBeGreaterThan(-1);
+        expect(body.indexOf(refusal), refusal).toBeLessThan(write);
+      }
+      expect(body).toMatch(/staffMember\.findFirst\(\{\s*where: \{ id: input\.staffId, businessId: input\.businessId, deletedAt: null \},/);
+    });
+
+    it("TD9-4: the dispatcher finds an invoice's or a quote's contact within the business before CommerceService writes it", () => {
+      const cases = dispatcherCases();
+      for (const t of ['commerce_create_invoice', 'commerce_create_quote']) {
+        const text = cases.get(t)!;
+        const check = text.indexOf('await this.contactWithinBusiness(businessId, args.contactId);');
+        expect(check, t).toBeGreaterThan(-1);
+        expect(check, t).toBeLessThan(text.indexOf('this.getCommerce()'));
+      }
+      expect(memberBody(read(ORCHESTRATOR), 'contactWithinBusiness')).toMatch(
+        /this\.prisma\.client\.contact\.findFirst\(\{\s*where: \{ id: contactId, businessId, deletedAt: null \},/,
+      );
     });
   });
 
