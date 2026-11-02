@@ -103,6 +103,86 @@ describe('computeBalance', () => {
   });
 });
 
+/**
+ * V1-22-DM-MONEY-CENTS (M23, CF-54; D-13): the PAID / overpaid decisions are
+ * integer-cent comparisons. At the base they compared floats with a +/-0.005
+ * tolerance after a float `Math.round(x * 100) / 100`, which reads a half cent
+ * below the half (1.005 -> 1.00): a legacy total of 1.005 paid with 1.01 was
+ * flagged overpaid. Each balance figure is the exact decimal sum of the rows
+ * rounded once to cents; legacy sub-cent rows keep the status the old sum gave.
+ */
+describe('V1-22 computeBalance in integer cents', () => {
+  const ok = (amount: number) => ({ amount, status: 'SUCCESSFUL' });
+
+  it('three payments of 33.33 plus one of 0.01 on 100.00: PAID, remaining 0, not overpaid', () => {
+    const b = computeBalance(100, [ok(33.33), ok(33.33), ok(33.33), ok(0.01)], 'TTD');
+    expect(b).toEqual({ total: 100, paid: 100, refunded: 0, net: 100, remaining: 0, isFullyPaid: true, isOverpaid: false });
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', b)).toBe('PAID');
+  });
+
+  it('the same rows in another order give the same balance (no float order dependence)', () => {
+    const b = computeBalance(100, [ok(0.01), ok(33.33), ok(33.33), ok(33.33)], 'USD');
+    expect(b).toMatchObject({ paid: 100, net: 100, remaining: 0, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('three payments of 33.33 on 100.00 leave exactly 0.01, PARTIALLY_PAID', () => {
+    const b = computeBalance(100, [ok(33.33), ok(33.33), ok(33.33)]);
+    expect(b).toMatchObject({ paid: 99.99, net: 99.99, remaining: 0.01, isFullyPaid: false, isOverpaid: false });
+    expect(deriveStatusAfterPayment('SENT', b)).toBe('PARTIALLY_PAID');
+  });
+
+  it('one cent short is not paid; one cent over is overpaid; exact is neither short nor over', () => {
+    expect(computeBalance(100, [ok(99.99)])).toMatchObject({ isFullyPaid: false, isOverpaid: false, remaining: 0.01 });
+    expect(computeBalance(100, [ok(100.01)])).toMatchObject({ isFullyPaid: true, isOverpaid: true, remaining: 0 });
+    expect(computeBalance(100, [ok(100)])).toMatchObject({ isFullyPaid: true, isOverpaid: false, remaining: 0 });
+  });
+
+  it('RED-BEFORE: a legacy total of 1.005 is 1.01 in cents, so a payment of 1.01 settles it and is not an overpayment', () => {
+    const b = computeBalance(1.005, [ok(1.01)]);
+    expect(b).toMatchObject({ total: 1.01, net: 1.01, remaining: 0, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('RED-BEFORE: a legacy total of 1.015 (7 x 0.145) is 1.02 in cents, as a new write stores it; 1.01 paid leaves 0.01', () => {
+    // The float 1.015 is 1.01499999999999990...: Math.round(1.015 * 100) / 100 read it as 1.01 and settled it with 1.01.
+    const b = computeBalance(1.015, [ok(1.01)]);
+    expect(b).toMatchObject({ total: 1.02, remaining: 0.01, isFullyPaid: false, isOverpaid: false });
+  });
+
+  it('a legacy unrounded total (0.1 + 0.2 at 12.5% stored as 0.3375) paid with 0.34 stays PAID, not overpaid', () => {
+    const b = computeBalance(0.30000000000000004 + 0.037500000000000006, [ok(0.34)]);
+    expect(b).toMatchObject({ total: 0.34, net: 0.34, remaining: 0, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('a thousand payments of 0.10 settle 100.00 exactly', () => {
+    const b = computeBalance(100, Array.from({ length: 1000 }, () => ok(0.1)));
+    expect(b).toMatchObject({ paid: 100, remaining: 0, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('legacy sub-cent rows are summed exactly and rounded once (0.004 + 0.004 settles 0.01, as before)', () => {
+    const b = computeBalance(0.01, [ok(0.004), ok(0.004)]);
+    expect(b).toMatchObject({ paid: 0.01, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('refunds are summed in cents too, whatever their stored sign', () => {
+    const b = computeBalance(100, [ok(33.33), ok(33.33), ok(33.34), { amount: -0.1, status: 'REFUNDED' }, { amount: 0.2, status: 'REFUNDED' }]);
+    expect(b).toMatchObject({ paid: 100, refunded: 0.3, net: 99.7, remaining: 0.3, isFullyPaid: false });
+  });
+
+  it('every figure is a canonical cent value (what the Float columns store)', () => {
+    const b = computeBalance(0.3375, [ok(0.1), ok(0.2)]);
+    for (const v of [b.total, b.paid, b.refunded, b.net, b.remaining]) {
+      expect(Math.round(v * 100) / 100).toBe(v);
+    }
+    expect(b.remaining).toBe(0.04);
+  });
+
+  it('RED-BEFORE: roundMoney (re-exported for its callers) rounds a half cent by decimal value, symmetrically', () => {
+    expect(roundMoney(1.005)).toBe(1.01);
+    expect(roundMoney(-1.005)).toBe(-1.01);
+    expect(roundMoney(2.675, 'USD')).toBe(2.68);
+  });
+});
+
 describe('deriveStatusAfterPayment', () => {
   it('keeps VOID locked', () => {
     expect(deriveStatusAfterPayment('VOID', computeBalance(100, [{ amount: 100, status: 'SUCCESSFUL' }]))).toBe('VOID');

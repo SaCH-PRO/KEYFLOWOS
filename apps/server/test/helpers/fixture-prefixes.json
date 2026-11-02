@@ -328,6 +328,11 @@
       "packet": "V1-21 (V1-21b-JOBROLE-TOOL-FAMILIES)"
     },
     {
+      "prefix": "v22a_",
+      "owner": "apps/server/test/commerce-money-rounding.integration.test.ts",
+      "packet": "V1-22-DM-MONEY-CENTS"
+    },
+    {
       "prefix": "v23a_",
       "owner": "apps/server/test/public-catalog-projection.integration.test.ts",
       "packet": "V1-23-PUB-PUBLIC-PROJECTIONS"
