@@ -47,10 +47,16 @@ export class ConnectorController {
    * business mailbox (smoke: a marked self-test email) or read it (sync: the
    * inbox into Key Inbox) follow the Gmail owner rule,
    * GmailService.assertConnectAuthority: 403 GMAIL_OWNER_ONLY before the
-   * registry is reached, outside the handlers' error mapping. test (the Gmail
-   * profile check: it sends nothing and reads no message), health, statuses,
-   * dashboard and authenticate (status reads) are unchanged, as is every other
-   * connector.
+   * registry is reached, outside the handlers' error mapping. So does DELETE
+   * credentials/gmail (review SEC-CMF6-1): it marks the gmail connector row
+   * disconnected and clears its account, the state that follows the mailbox,
+   * so a member could otherwise stop the mailbox's nightly sync while the
+   * mailbox stays connected. test (the Gmail profile check: it sends nothing
+   * and reads no message), health, statuses, dashboard and authenticate
+   * (status reads) are unchanged, as is every other connector. PATCH
+   * inbox-config/gmail stays open to members, as for every connector: it
+   * writes Key Inbox processing settings only, never the row's status,
+   * account or connection time, and neither sends nor reads a message.
    */
   private async assertBusinessMailboxAuthority(businessId: string, type: string, req: ConnectorRequest): Promise<void> {
     if (type !== 'gmail') return;
@@ -314,7 +320,9 @@ export class ConnectorController {
   async deleteCredentials(
     @Param('businessId') businessId: string,
     @Param('type') type: string,
+    @Req() req: ConnectorRequest,
   ) {
+    await this.assertBusinessMailboxAuthority(businessId, type, req);
     const connector = this.registry.get(type as ConnectorType);
     if (!connector) throw new NotFoundException(`Connector ${type} not found`);
     await this.credentials.clearCredentials(businessId, type as ConnectorType);

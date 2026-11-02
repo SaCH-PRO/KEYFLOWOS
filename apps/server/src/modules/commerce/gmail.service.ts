@@ -439,6 +439,27 @@ export class GmailService {
   }
 
   /**
+   * R0-CMF6 review CR-CMF6-1: the other half of following the mailbox. A
+   * mailbox confirmed through the commerce Gmail flow is recorded on the gmail
+   * connector row when there is one (connected, the confirmed address, a fresh
+   * connection time and no error, as a Google Suite confirmation with a passing
+   * live check records it), so a mailbox disconnected (row marked
+   * disconnected) and connected again is selected by the nightly sync again.
+   * One UPDATE in the confirmation's transaction: no row is written when there
+   * is none (the commerce flow creates none, as on the base), intake and
+   * processing settings are left as they are, and only this business's gmail
+   * row is touched.
+   */
+  private async markGmailConnectorConnected(tx: PrismaTx, businessId: string, email: string): Promise<void> {
+    await tx.$queryRaw`
+      UPDATE connector_statuses
+         SET status = 'connected', connected_account = ${email}, connected_at = NOW(),
+             last_error = NULL, last_error_at = NULL, error_count = 0, updated_at = NOW()
+       WHERE business_id = ${businessId} AND connector_type = 'gmail'
+       RETURNING id`;
+  }
+
+  /**
    * R0-CMF5 review ST-CMF5-5: pending rows past their window are removed
    * whenever this business's connection is staged, previewed, confirmed,
    * read or disconnected, so an unconfirmed consent's refresh token does not
@@ -713,7 +734,8 @@ export class GmailService {
    * (SEC-CMF5-R4); a consent with no refresh token links only as a re-consent
    * of the stored mailbox, else 409 GMAIL_PENDING_NO_REFRESH_TOKEN and nothing
    * changes (SEC-CMF5-R3); a Google Suite staging also records the gmail
-   * connector (CMF5R-1).
+   * connector (CMF5R-1), and a commerce staging updates an existing gmail
+   * connector row to the confirmed mailbox (R0-CMF6 review CR-CMF6-1).
    */
   async confirmPendingConnection(
     businessId: string,
@@ -768,6 +790,8 @@ export class GmailService {
       });
       if (staged.origin === 'google-suite') {
         await this.recordSuiteGmailConnector(tx, businessId, email, staged.verification);
+      } else {
+        await this.markGmailConnectorConnected(tx, businessId, email);
       }
     });
 
