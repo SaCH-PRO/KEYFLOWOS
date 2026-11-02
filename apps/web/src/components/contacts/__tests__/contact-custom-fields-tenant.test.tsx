@@ -243,7 +243,8 @@ describe("ContactCustomFields reads the selected business, never biz_demo", () =
 });
 
 /**
- * Review findings SEC-R015c-1 and SEC-R015c-2. Every production screen mounts
+ * Review findings SEC-R015c-1 and SEC-R015c-2 of the first review round (the
+ * second round's findings of the same ids are at the end). Every production screen mounts
  * the fields WITHOUT a businessId (contact-detail.tsx, pipeline-tab-content.tsx),
  * so the business read is the stored selection, and that selection can move
  * while the panel or form stays mounted. Each business answers with its own
@@ -313,6 +314,25 @@ describe("ContactCustomFields follows the business while mounted and never shows
     expect(await screen.findByText(fieldOf(HANDED))).toBeInTheDocument();
     expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
     expect(api.definitionReads()).toEqual([definitionsPath(SELECTED), definitionsPath(HANDED)]);
+  });
+
+  it("control: a business handed by the parent stays the business read when the stored selection moves (the binding SEC-R015c-1 asks the parents to pass)", async () => {
+    // A screen bound to its own business (the pipeline writes to the business it
+    // captured at mount) hands it down; a later switch of kf_business_id, here or
+    // in another tab, must not move the fields to another business's definitions.
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const api = stubApi(undefined, { definitionsOf: labelledPerBusiness });
+    renderFields(<ContactCustomFields businessId={HANDED} />);
+    expect(await screen.findByText(fieldOf(HANDED))).toBeInTheDocument();
+
+    act(() => { selectBusiness(SELECTED); });
+    act(() => {
+      window.dispatchEvent(new StorageEvent("storage", { key: "kf_business_id", oldValue: HANDED, newValue: SELECTED }));
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(screen.getByText(fieldOf(HANDED))).toBeInTheDocument();
+    expect(screen.queryByText(fieldOf(SELECTED))).not.toBeInTheDocument();
+    expect(api.definitionReads()).toEqual([definitionsPath(HANDED)]);
   });
 
   it("an answer for the business the screen moved away from arrives late and is dropped", async () => {
@@ -452,4 +472,32 @@ describe("follow-ups outside this web write set", () => {
   // and options then disclosed on the contact's detail). The fix scopes that
   // lookup to the contact's business: a server packet, not this web one.
   it.todo("server: a contact's typed custom-field names resolve only against its own business's definitions (SEC-R015c-3)");
+
+  // SEC-R015c-1 (second review round, confirmed by running): the screens that know their
+  // business do not hand it down, so the fields read kf_business_id instead of
+  // the business the screen is bound to. ContactDetail receives businessId and
+  // passes it to ContactDetailTabs but not to ContactDetailInfo
+  // (contact-detail.tsx, the <ContactDetailInfo> mount); the pipeline mounts
+  // ContactForm without the businessId it captured at mount and submits to
+  // (pipeline-tab-content.tsx, the <ContactForm> mount; use-contacts-data.ts,
+  // use-contact-actions.ts handleSubmitContact). Once the stored selection moves
+  // (a sign-in in another tab), the form shows one business's definitions and
+  // submits their names to the other. Both components here already honour a
+  // handed businessId over the selection (the "given the business by its
+  // parent" cases and the control above); the missing line is in each parent,
+  // outside this write set.
+  it.todo("ContactDetail hands its businessId to ContactDetailInfo, so the panel reads the bound business's definitions, not kf_business_id (SEC-R015c-1)");
+  it.todo("the pipeline mounts ContactForm with the businessId its submit writes to, so the form never shows another business's definitions (SEC-R015c-1)");
+
+  // SEC-R015c-2 (second review round, confirmed by running): the page that manages the
+  // definitions (app/app/settings/custom-fields/page.tsx) calls
+  // fetchCustomFieldDefinitions(undefined) and create/update/archive/restore/
+  // delete without a businessId; lib/client.ts defaults every one of them to
+  // DEFAULT_BUSINESS_ID ("biz_demo"). A member gets 403 (so nobody can create the
+  // definitions these screens now read); a SUPER_ADMIN, whom BusinessGuard lets
+  // into any business, writes the demo tenant's definitions instead of the
+  // selected business's. The fix is in that page and in lib/client.ts (drop the
+  // biz_demo default so a missing business no longer compiles): outside this
+  // write set.
+  it.todo("settings/custom-fields reads and writes the selected business's definitions and never names biz_demo; the client's custom-field-definition functions require a businessId (SEC-R015c-2)");
 });
