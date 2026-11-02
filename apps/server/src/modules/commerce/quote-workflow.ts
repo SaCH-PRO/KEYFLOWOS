@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 
 /**
  * V1-50-QUOTE-STATE-MACHINE (M21, CF-15 state-machine half): the one quote
@@ -12,12 +12,11 @@ import { randomBytes } from 'crypto';
  * Every quote status writer in CommerceService now asks this module first:
  * the status route and the send-email move (updateQuoteStatus), the public
  * accept/reject (which then calls updateQuoteStatus) and bulkUpdateQuotes.
- * Writers outside CommerceService that still set Quote.status directly are not
- * covered here, so CF-15/M21 stays open for them: POST
- * /commerce/businesses/:businessId/ai-execute (commerce-ai.service.ts
- * send_quote and convert_quote, outside the V1-50 write set) can still re-open
- * a REJECTED quote to SENT, or mark a REJECTED or converted quote ACCEPTED,
- * with revenue:read and no event (review SEC-V50-4, a follow-up packet).
+ * V1-QUOTE-CHAIN-finish (review SEC-V50-4 / SEC-3): POST
+ * /commerce/businesses/:businessId/ai-execute send_quote and convert_quote
+ * wrote Quote.status directly, for any member (revenue:none included); they
+ * now need revenue:write and go through updateQuoteStatus, so through this
+ * table.
  */
 
 /** Every value of the QuoteStatus enum (packages/db/prisma/schema.prisma). */
@@ -181,11 +180,77 @@ export function mintQuoteViewToken(): string {
   return randomBytes(24).toString('base64url');
 }
 
+/** The fields of a quote that make up what its customer agrees to (quoteTermsVersion). */
+export interface QuoteTermsSubject {
+  subtotal?: unknown;
+  taxRate?: unknown;
+  taxAmount?: unknown;
+  discountType?: unknown;
+  discountValue?: unknown;
+  discountAmount?: unknown;
+  total?: unknown;
+  currency?: unknown;
+  notes?: unknown;
+  items?: ReadonlyArray<{ description?: unknown; quantity?: unknown; unitPrice?: unknown; total?: unknown; productId?: unknown }> | null;
+}
+
+/**
+ * V1-QUOTE-CHAIN-finish (review SEC-5): the version of the terms a customer
+ * agrees to when they accept a quote. The public accept carried nothing of
+ * what the customer saw, and a SENT quote stays editable, so an operator edit
+ * made between the customer's view and their click was recorded as accepted
+ * and convert {} invoiced it. The signed-token view serves this version and
+ * the accept must send it back (updateQuoteStatus refuses a mismatch).
+ *
+ * It is a hash of the prices and lines (amounts, currency, notes, and each
+ * line's text, quantity, price, total and product), so it changes with any
+ * change to them and with nothing else: not the line order or line ids (an
+ * edit rewrites the lines), not the expiry date, not a timestamp. Null and
+ * absent read alike, so a legacy row or a partial read still has one version.
+ */
+export function quoteTermsVersion(quote: QuoteTermsSubject): string {
+  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  const str = (v: unknown) => (v === null || v === undefined ? null : String(v));
+  const lines = (quote.items ?? [])
+    .map((line) => JSON.stringify([str(line.description), num(line.quantity), num(line.unitPrice), num(line.total), str(line.productId)]))
+    .sort();
+  const terms = [
+    num(quote.subtotal),
+    num(quote.taxRate),
+    num(quote.taxAmount),
+    str(quote.discountType),
+    num(quote.discountValue),
+    num(quote.discountAmount),
+    num(quote.total),
+    str(quote.currency),
+    str(quote.notes),
+    lines,
+  ];
+  return createHash('sha256').update(JSON.stringify(terms)).digest('base64url').slice(0, 32);
+}
+
+/** The 400 a public accept answers when it carries no terms version. */
+export function quoteTermsVersionRequired(): BadRequestException {
+  return new BadRequestException({
+    code: 'quote_terms_version_required',
+    message: 'Reload the quote and accept it again: the accept must name the version of the terms shown.',
+  });
+}
+
+/** The 409 a public accept answers when the quote's terms are no longer the ones the customer saw. */
+export function quoteTermsChanged(): ConflictException {
+  return new ConflictException({
+    code: 'quote_terms_changed',
+    message: 'This quote was updated after you opened it. Review the updated quote before accepting it.',
+  });
+}
+
 /**
  * V1-50 review CR-V150-2: a SENT quote with no view token has no public link,
- * so its customer can never accept it. Such rows are still written outside
- * this table (the ai-execute send_quote action sets SENT with no token).
- * Asking the status route for `sent` on one is otherwise a no-op; it mints the
+ * so its customer can never accept it. Such rows were written outside this
+ * table (the ai-execute send_quote action set SENT with no token until
+ * V1-QUOTE-CHAIN-finish routed it through updateQuoteStatus), and old rows
+ * remain. Asking the status route for `sent` on one is otherwise a no-op; it mints the
  * quote's one token instead (the repair the route made before V1-50). A
  * converted quote is never repaired: the table refuses it first.
  */

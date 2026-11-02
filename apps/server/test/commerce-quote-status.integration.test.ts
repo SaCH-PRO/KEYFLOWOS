@@ -58,6 +58,7 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { quoteTermsVersion } from '../src/modules/commerce/quote-workflow';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -204,6 +205,16 @@ async function quoteRow(id: string): Promise<any> {
     id,
   );
   return rows[0] ?? null;
+}
+
+/**
+ * V1-QUOTE-CHAIN-finish (SEC-5): the termsVersion the signed-token view serves
+ * for this token, which a public accept must carry. Read from the row, so no
+ * view is stamped and no quote.viewed is emitted.
+ */
+async function termsVersionOf(token: string): Promise<string> {
+  const quote = await db.quote.findUnique({ where: { viewToken: token }, include: { items: true } });
+  return quoteTermsVersion(quote);
 }
 
 async function tenantQuotes(businessId: string): Promise<string> {
@@ -780,7 +791,9 @@ describe('the view-token repair of a SENT quote without one (V1-50 review CR-V15
     expect(again.body.viewToken).toBe(row.viewToken);
     expect(await quoteRow(Q.sentNoToken)).toEqual(row);
 
-    const accepted = await agent().post(`/commerce/public/quotes/${row.viewToken}/accept`).send({});
+    const accepted = await agent()
+      .post(`/commerce/public/quotes/${row.viewToken}/accept`)
+      .send({ termsVersion: await termsVersionOf(row.viewToken) });
     expect([200, 201], JSON.stringify(accepted.body)).toContain(accepted.status);
     expect((await quoteRow(Q.sentNoToken)).status).toBe('ACCEPTED');
   });
@@ -869,7 +882,7 @@ describe('positive control: send, public accept by token, convert (V1-50)', () =
     const token = (await quoteRow(Q.journey)).viewToken;
     expect(typeof token).toBe('string');
 
-    const accepted = await agent().post(`/commerce/public/quotes/${token}/accept`).send({});
+    const accepted = await agent().post(`/commerce/public/quotes/${token}/accept`).send({ termsVersion: await termsVersionOf(token) });
     expect([200, 201], JSON.stringify(accepted.body)).toContain(accepted.status);
     expect(accepted.body).toMatchObject({ id: Q.journey, status: 'ACCEPTED' });
     expect((await quoteRow(Q.journey)).status).toBe('ACCEPTED');

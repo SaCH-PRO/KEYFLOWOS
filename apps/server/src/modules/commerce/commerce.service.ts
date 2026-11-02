@@ -30,11 +30,15 @@ import {
   needsViewTokenRepair,
   quoteBulkRefusalCode,
   quoteBulkTarget,
+  quoteTermsChanged,
+  quoteTermsVersion,
+  quoteTermsVersionRequired,
   quoteTransitionRefusal,
   requireQuoteBulkRequest,
   requireQuoteStatusTarget,
   type QuoteStatus,
   type QuoteStatusTarget,
+  type QuoteTermsSubject,
 } from './quote-workflow';
 import { getTenantContext } from '../../core/tenant/tenant-context';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
@@ -193,6 +197,13 @@ type OperatorQuoteContact = Prisma.ContactGetPayload<{ select: typeof OPERATOR_Q
 type QuoteWithContactRow = Prisma.QuoteGetPayload<{ include: { contact: true } }>;
 
 /**
+ * What moveQuoteStatus compares and sets on: the status, token and link the
+ * caller decided from, and (a terms-bound public accept) the updatedAt of the
+ * read whose terms the customer's version matched.
+ */
+type QuoteMoveSubject = { id: string; status: string; viewToken: string | null; invoiceId?: string | null; updatedAt?: Date };
+
+/**
  * The served contact of a quote read: only OPERATOR_QUOTE_CONTACT_SELECT (name
  * and email), and null when the contact belongs to another tenant. Neither the
  * businessId it was joined with for the check nor any other field of a whole
@@ -322,6 +333,18 @@ function quoteNumberTaken(): ConflictException {
  * conditional write and the V1-50 table cannot drift apart.
  */
 const CONVERTED_QUOTE_STATUSES = Object.values(StoredQuoteStatus).filter((status) => isConvertedQuote({ status }));
+
+/**
+ * V1-QUOTE-CHAIN-finish (review SEC-1): thrown inside the edit transaction
+ * when the quote row's compare-and-set matches no row (an accept, a convert,
+ * a delete or another edit committed after the quote was read). No line is
+ * written; the catch answers from the quote as it now stands.
+ */
+class QuoteEditRaceLost extends Error {
+  constructor() {
+    super('The quote changed while it was being edited');
+  }
+}
 
 /**
  * V1-53 review (SEC-V53-2): thrown inside the convert transaction when the
@@ -806,12 +829,37 @@ export class CommerceService {
     const request = requireQuoteBulkRequest(ids, action);
     const where = { id: { in: request.ids }, businessId, deletedAt: null };
     if (request.action === 'delete') {
-      const result = await this.prisma.client.quote.updateMany({
-        where: { ...where, status: { in: ['DRAFT', 'SENT', 'REJECTED', 'EXPIRED'] } },
-        data: { deletedAt: new Date() },
-      });
+      // V1-QUOTE-CHAIN-finish (review SEC-4 / CR-W10-1): bulk delete refuses
+      // what the single DELETE refuses (V1-53, 409 quote_converted): a quote
+      // converted to an invoice, whatever its stored status. It filtered on
+      // the status only, so a converted quote stored SENT (a legacy row, or one
+      // the old ai-execute send_quote re-opened) was soft-deleted with its
+      // invoice still linked. Each refused row is listed in `skipped`, as the
+      // status actions list theirs; the write carries the same conditions, so
+      // a quote converted after this read is not deleted either.
+      const deletable = new Set(['DRAFT', 'SENT', 'REJECTED', 'EXPIRED']);
+      const rows = await this.prisma.client.quote.findMany({ where, select: { id: true, status: true, invoiceId: true } });
+      const skipped: Array<{ id: string; quoteStatus: string; code: string }> = [];
+      const eligible: string[] = [];
+      for (const row of rows) {
+        if (isConvertedQuote(row)) skipped.push({ id: row.id, quoteStatus: row.status, code: 'quote_converted' });
+        else if (!deletable.has(row.status)) skipped.push({ id: row.id, quoteStatus: row.status, code: 'quote_bulk_not_eligible' });
+        else eligible.push(row.id);
+      }
+      const result = eligible.length
+        ? await this.prisma.client.quote.updateMany({
+            where: {
+              id: { in: eligible },
+              businessId,
+              deletedAt: null,
+              invoiceId: null,
+              status: { in: [...deletable] as QuoteStatus[] },
+            },
+            data: { deletedAt: new Date() },
+          })
+        : { count: 0 };
       this.statsCache.invalidateCache(businessId);
-      return { updated: result.count, action: request.action };
+      return { updated: result.count, action: request.action, skipped, skippedCount: skipped.length };
     }
     const bulkAction = request.action;
     const target = quoteBulkTarget(bulkAction);
@@ -1396,15 +1444,26 @@ export class CommerceService {
      * the message Gmail accepted (sendQuoteWithViewToken). The move stores it.
      */
     viewToken?: string;
+    /**
+     * V1-QUOTE-CHAIN-finish (review SEC-5): the quoteTermsVersion of the terms
+     * the customer saw (the public accept). The quote is read with its lines
+     * and a different version is a 409 quote_terms_changed; the move is then a
+     * compare-and-set on that read's updatedAt, so terms edited after the read
+     * are re-checked rather than accepted (moveQuoteStatus).
+     */
+    termsVersion?: string;
   }) {
     // V1-50: the route forwards its path segment upper-cased but unchecked. A
     // value that is not one of the four targets used to reach Prisma: a 500,
     // or (`/status/converted`) a write of that enum value. It is a 400 now.
     const target = requireQuoteStatusTarget(params.status);
-    const existingQuote = await this.prisma.client.quote.findUnique({
-      where: { id: params.quoteId },
-      select: { id: true, businessId: true, status: true, viewToken: true, invoiceId: true },
-    });
+    const termsBound = params.termsVersion !== undefined;
+    const existingQuote: (QuoteMoveSubject & QuoteTermsSubject & { businessId: string }) | null = termsBound
+      ? await this.prisma.client.quote.findUnique({ where: { id: params.quoteId }, include: { items: true } })
+      : await this.prisma.client.quote.findUnique({
+          where: { id: params.quoteId },
+          select: { id: true, businessId: true, status: true, viewToken: true, invoiceId: true },
+        });
     // R0-28: unknown, soft-deleted and foreign ids answer the same 404 (they
     // were plain Errors, so 500s): a different answer for "exists but is not
     // yours" would confirm the id belongs to someone. V1-50: this stays ahead
@@ -1483,9 +1542,13 @@ export class CommerceService {
       // token, no sentAt bump, no event, no timeline entry.
       const decision = decideQuoteTransition(existingQuote, target);
       if (decision.kind === 'refuse') throw quoteTransitionRefusal(existingQuote, target, decision.reason);
+      // V1-QUOTE-CHAIN-finish (SEC-5): the terms the customer saw, checked
+      // before a move and before a no-op answer alike.
+      if (termsBound && quoteTermsVersion(existingQuote) !== params.termsVersion) throw quoteTermsChanged();
       if (decision.kind === 'noop') {
         // V1-50 review CR-V150-2: the one exception. A SENT quote written
-        // without a view token (the ai-execute send_quote action writes one)
+        // without a view token (a legacy row: the ai-execute send_quote action
+        // wrote one until V1-QUOTE-CHAIN-finish routed it through here)
         // has no public link; `sent` on it mints the quote's one token,
         // compare-and-set on no token, so overlapping requests store one.
         // The status does not change, so nothing is emitted or logged.
@@ -1496,7 +1559,12 @@ export class CommerceService {
         if (!current) throw new NotFoundException('Quote not found');
         return withTenantContact(current);
       }
-      const moved = await this.moveQuoteStatus(existingQuote, target, now);
+      const moved = await this.moveQuoteStatus(
+        existingQuote,
+        target,
+        now,
+        termsBound ? { termsVersion: params.termsVersion as string } : undefined,
+      );
       if (!moved.moved) return withTenantContact(moved.row);
       row = moved.row;
       priorStatus = existingQuote.status;
@@ -1657,11 +1725,19 @@ export class CommerceService {
    * - the table now refuses the move: that 409;
    * - otherwise 409 quote_status_changed (the caller decided from a status the
    *   quote no longer has).
+   *
+   * V1-QUOTE-CHAIN-finish (review SEC-5): with `terms` (the public accept) the
+   * compare-and-set also holds the updatedAt of the row whose terms matched
+   * the customer's version, so an edit committed after that read (every edit
+   * writes the quote row, updateQuote) makes the write miss; the fresh row's
+   * terms are then checked again (409 quote_terms_changed when they moved),
+   * and a write that only touched something else is retried on the fresh row.
    */
   private async moveQuoteStatus(
-    seen: { id: string; status: string; viewToken: string | null; invoiceId?: string | null },
+    seen: QuoteMoveSubject,
     target: QuoteStatusTarget,
     now: Date,
+    terms?: { termsVersion: string },
   ): Promise<{ moved: boolean; row: QuoteWithContactRow }> {
     let current = seen;
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -1680,6 +1756,7 @@ export class CommerceService {
             id: current.id,
             status: current.status as QuoteStatus,
             deletedAt: null,
+            ...(terms ? { updatedAt: current.updatedAt } : {}),
             AND: [{ invoiceId: null }, ...(target === 'SENT' ? [{ viewToken: current.viewToken }] : [])],
           },
           data,
@@ -1690,8 +1767,11 @@ export class CommerceService {
         // P2025: no row matched the compare-and-set.
         if ((err as { code?: unknown } | null)?.code !== 'P2025') throw err;
       }
-      const fresh = await this.prisma.client.quote.findUnique({ where: { id: current.id }, include: { contact: true } });
+      const fresh = terms
+        ? await this.prisma.client.quote.findUnique({ where: { id: current.id }, include: { contact: true, items: true } })
+        : await this.prisma.client.quote.findUnique({ where: { id: current.id }, include: { contact: true } });
       if (!fresh) throw new NotFoundException('Quote not found');
+      if (terms && quoteTermsVersion(fresh) !== terms.termsVersion) throw quoteTermsChanged();
       const decision = decideQuoteTransition(fresh, target);
       if (decision.kind === 'noop') return { moved: false, row: fresh };
       if (decision.kind === 'refuse') throw quoteTransitionRefusal(fresh, target, decision.reason);
@@ -2110,7 +2190,9 @@ export class CommerceService {
       },
     });
     if (!quote || quote.deletedAt) return null;
-    return this.decorateQuote(toOperatorQuote(quote));
+    // V1-QUOTE-CHAIN-finish (review SEC-5): the version of the terms this view
+    // shows; the customer's accept sends it back (respondToQuoteByToken).
+    return { ...this.decorateQuote(toOperatorQuote(quote)), termsVersion: quoteTermsVersion(quote) };
   }
 
   async markQuoteViewedByToken(token: string, visitorId?: string | null) {
@@ -2171,11 +2253,21 @@ export class CommerceService {
     return this.getQuoteByToken(token);
   }
 
+  /**
+   * The customer's decision through the signed link. V1-QUOTE-CHAIN-finish
+   * (review SEC-5): an accept must carry `termsVersion`, the quoteTermsVersion
+   * the signed-token view served (400 quote_terms_version_required without
+   * one), and is recorded only while the quote's terms are still those (409
+   * quote_terms_changed otherwise, nothing written): acceptance means agreement
+   * to the stored terms, which convert {} then invoices (V1-51). A reject
+   * needs no version: refusing an offer binds the customer to nothing.
+   */
   async respondToQuoteByToken(
     token: string,
     decision: 'accept' | 'reject',
     reason?: string,
     visitorId?: string | null,
+    termsVersion?: unknown,
   ) {
     const quote = await this.prisma.client.quote.findUnique({
       where: { viewToken: token },
@@ -2207,12 +2299,16 @@ export class CommerceService {
     if (quote.expiryDate && new Date(quote.expiryDate).getTime() < Date.now()) {
       throw new BadRequestException('This quote has expired and can no longer be responded to.');
     }
+    if (decision === 'accept' && (typeof termsVersion !== 'string' || termsVersion.length === 0)) {
+      throw quoteTermsVersionRequired();
+    }
     const target: 'ACCEPTED' | 'REJECTED' = decision === 'accept' ? 'ACCEPTED' : 'REJECTED';
     const result = await this.updateQuoteStatus({
       quoteId: quote.id,
       status: target,
       source: 'public',
       reason: reason ?? null,
+      ...(decision === 'accept' ? { termsVersion: termsVersion as string } : {}),
     });
     // Stitch the public visitor cookie onto the quote's contact so first-touch
     // attribution (firstSource / utmMedium / utmCampaign / firstReferrer /
@@ -2387,31 +2483,65 @@ export class CommerceService {
     updateData.discountValue = discountValue;
     updateData.discountAmount = discountAmount;
     updateData.total = total;
-    
-    if (input.items) {
-      // V1-53: the old lines are deleted in the same write that creates the
-      // new ones. A separate deleteMany ran first, so an update that then
-      // failed (a NaN price, 500) left the quote with no lines.
-      updateData.items = {
-        deleteMany: {},
-        create: input.items.map((item) => ({
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          total: item.quantity * item.unitPrice,
-          productId: item.productId || null,
-        })),
-      };
-    }
-    
+    // Every edit writes the quote row, so its updatedAt moves with any change
+    // to its terms, lines included (the public accept compares it, SEC-5).
+    updateData.updatedAt = new Date();
+
+    // V1-QUOTE-CHAIN-finish (review SEC-1): the write is a compare-and-set on
+    // the quote as read above. It was by id alone, so an edit that read a SENT
+    // quote overwrote the price, tax and lines of a quote the customer accepted
+    // (or the operator converted) in between, and convert {} then invoiced
+    // terms nobody accepted. The quote row is written first, conditional on
+    // the status, no invoice, not deleted and the updatedAt it was read with:
+    // an UPDATE that waits on a concurrent accept, convert or delete re-reads
+    // the row once that commits and matches nothing, and the transaction
+    // writes no line. The lines are replaced in the same transaction, while
+    // the row lock is held (V1-53: never a quote left with no lines), and the
+    // answer for a miss is read from the quote as it now stands.
     // R0-04 review (ST-R004-1): a legacy quote can still point at another
     // tenant's contact; the response never carries that row, and the events
     // carry neither the row nor its id (R0-CMF3 review).
-    const row = await this.prisma.client.quote.update({
-      where: { id: input.quoteId },
-      data: updateData,
-      include: { items: true, contact: true },
-    });
+    const row = await this.prisma.client
+      .$transaction(async (tx) => {
+        const won = await tx.quote.updateMany({
+          where: {
+            id: input.quoteId,
+            businessId: input.businessId,
+            status: quote.status,
+            invoiceId: null,
+            deletedAt: null,
+            updatedAt: quote.updatedAt,
+          },
+          data: updateData as Prisma.QuoteUncheckedUpdateManyInput,
+        });
+        if (won.count !== 1) throw new QuoteEditRaceLost();
+        if (input.items) {
+          await tx.quoteItem.deleteMany({ where: { quoteId: input.quoteId } });
+          await tx.quoteItem.createMany({
+            data: input.items.map((item) => ({
+              quoteId: input.quoteId,
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              total: item.quantity * item.unitPrice,
+              productId: item.productId || null,
+            })),
+          });
+        }
+        return tx.quote.findUniqueOrThrow({ where: { id: input.quoteId }, include: { items: true, contact: true } });
+      })
+      .catch(async (err: unknown) => {
+        if (!(err instanceof QuoteEditRaceLost)) throw err;
+        const now = await this.prisma.client.quote.findFirst({ where: { id: input.quoteId, businessId: input.businessId } });
+        if (!now) throw quoteNotFound();
+        if (isConvertedQuote(now)) throw quoteAlreadyConverted();
+        if (now.status === 'ACCEPTED') throw quoteAlreadyAccepted();
+        throw new ConflictException({
+          code: 'quote_changed',
+          message: 'The quote changed while it was being edited. Reload it and edit it again.',
+          quoteStatus: now.status,
+        });
+      });
     const updated = withTenantContact(row);
     const eventQuote = forQuoteEvent(row, updated);
     const prevExp = quote.expiryDate ? new Date(quote.expiryDate).getTime() : null;

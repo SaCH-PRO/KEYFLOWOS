@@ -69,6 +69,7 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { quoteTermsVersion } from '../src/modules/commerce/quote-workflow';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -218,6 +219,16 @@ function publicView(token: string) {
 async function quoteRow(id: string): Promise<any> {
   const rows: any[] = await db.$queryRawUnsafe(`SELECT to_jsonb(q) AS row FROM quotes q WHERE id = $1`, id);
   return rows[0]?.row ?? null;
+}
+
+/**
+ * V1-QUOTE-CHAIN-finish (SEC-5): the termsVersion the signed-token view serves
+ * for this token, which a public accept must carry. Read from the row, so no
+ * view is stamped and no quote.viewed is emitted.
+ */
+async function termsVersionOf(token: string): Promise<string> {
+  const quote = await db.quote.findUnique({ where: { viewToken: token }, include: { items: true } });
+  return quoteTermsVersion(quote);
 }
 
 /** A tenant's commercial state, every column, as one string: quotes, their items, invoices, payments, ledger. */
@@ -528,7 +539,7 @@ describe('POST /commerce/businesses/:businessId/quotes/:quoteId/public-link (V1-
   it('PL-08: a converted quote answers 400 quote_converted; the quote and its invoice are unchanged', async () => {
     const quoteId = await sentQuote(ID.ownerA, ID.bizA, ID.contactA);
     const token = (await quoteRow(quoteId)).view_token;
-    const accepted = await agent().post(`/commerce/public/quotes/${token}/accept`).send({});
+    const accepted = await agent().post(`/commerce/public/quotes/${token}/accept`).send({ termsVersion: await termsVersionOf(token) });
     expect([200, 201], JSON.stringify(accepted.body)).toContain(accepted.status);
     const converted = await agent().post(`/commerce/businesses/${ID.bizA}/quotes/${quoteId}/convert`).set(HEADER, ID.ownerA).send({});
     expect([200, 201], JSON.stringify(converted.body)).toContain(converted.status);
@@ -571,7 +582,7 @@ describe('decided quotes (V1-52)', () => {
   it('PL-10: a sent quote the customer accepted (not yet converted) keeps its link, so they can reopen what they accepted; a decision the operator recorded on a never-sent DRAFT has no link (409 quote_link_unavailable) and none is minted', async () => {
     const quoteId = await sentQuote(ID.ownerA, ID.bizA, ID.contactA);
     const token = (await quoteRow(quoteId)).view_token;
-    const accepted = await agent().post(`/commerce/public/quotes/${token}/accept`).send({});
+    const accepted = await agent().post(`/commerce/public/quotes/${token}/accept`).send({ termsVersion: await termsVersionOf(token) });
     expect([200, 201], JSON.stringify(accepted.body)).toContain(accepted.status);
     const link = await publicLink(ID.ownerA, ID.bizA, quoteId);
     expect(link.status, JSON.stringify(link.body)).toBe(201);

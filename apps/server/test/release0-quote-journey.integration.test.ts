@@ -66,6 +66,7 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { quoteTermsVersion } from '../src/modules/commerce/quote-workflow';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -174,8 +175,14 @@ function setQuoteStatus(owner: string, businessId: string, quoteId: string, stat
   return agent().patch(`/commerce/quotes/${quoteId}/status/${status}`).set(HEADER, owner).send({ businessId });
 }
 
-function publicAccept(token: string) {
-  return agent().post(`/commerce/public/quotes/${token}/accept`).send({});
+/**
+ * The customer's accept through the signed link. V1-QUOTE-CHAIN-finish (SEC-5):
+ * it carries the termsVersion the signed-token view serves for the quote,
+ * read from the row so no view is stamped.
+ */
+async function publicAccept(token: string) {
+  const quote = await db.quote.findUnique({ where: { viewToken: token }, include: { items: true } });
+  return agent().post(`/commerce/public/quotes/${token}/accept`).send({ termsVersion: quote ? quoteTermsVersion(quote) : undefined });
 }
 
 function convert(owner: string, businessId: string, quoteId: string, body: Record<string, unknown> = {}) {
