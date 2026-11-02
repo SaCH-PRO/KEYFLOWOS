@@ -29,6 +29,7 @@ import { PlanLimitGuard } from '../src/modules/subscriptions/plan-limit.guard';
 import { TeamAuditInterceptor } from '../src/core/interceptors/team-audit.interceptor';
 import { PublicRateLimitGuard } from '../src/core/guards/public-rate-limit.guard';
 import { REDIS_CLIENT } from '../src/core/redis/redis.constants';
+import { quoteTermsVersion } from '../src/modules/commerce/quote-workflow';
 
 interface QuoteRow {
   id: string;
@@ -227,9 +228,12 @@ describe('Commerce public quote e2e', () => {
   });
 
   it('POST /commerce/public/quotes/:token/accept transitions to ACCEPTED and emits quote.accepted', async () => {
-    seedQuote();
+    const seeded = seedQuote();
+    // V1-QUOTE-CHAIN-finish (SEC-5): the accept names the version of the terms
+    // the view serves (the mock joins no lines).
     const res = await request(app.getHttpServer())
       .post('/commerce/public/quotes/tok_active/accept')
+      .send({ termsVersion: quoteTermsVersion({ ...seeded, items: [] }) })
       .expect(201);
 
     expect(res.body.status).toBe('ACCEPTED');

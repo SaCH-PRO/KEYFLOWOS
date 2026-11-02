@@ -363,6 +363,31 @@
       "packet": "V1-49-PUBLIC-RECEIPT"
     },
     {
+      "prefix": "v50a_",
+      "owner": "apps/server/test/commerce-quote-status.integration.test.ts",
+      "packet": "V1-50-QUOTE-STATE-MACHINE"
+    },
+    {
+      "prefix": "v51a_",
+      "owner": "apps/server/test/release0-quote-journey.integration.test.ts",
+      "packet": "V1-51-QUOTE-CONVERSION-JOURNEY"
+    },
+    {
+      "prefix": "v52a_",
+      "owner": "apps/server/test/quote-public-link.integration.test.ts",
+      "packet": "V1-52-QUOTE-PUBLIC-LINK"
+    },
+    {
+      "prefix": "v53a_",
+      "owner": "apps/server/test/commerce-quote-errors.integration.test.ts",
+      "packet": "V1-53-QUOTE-CREATE-ERRORS"
+    },
+    {
+      "prefix": "v53b_",
+      "owner": "apps/server/test/quote-chain-finish.integration.test.ts",
+      "packet": "V1-53-QUOTE-CHAIN-finish"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

@@ -6,19 +6,72 @@ import { X, ArrowRightLeft, Calendar, Percent, FileText } from "lucide-react";
 import { formatCurrency } from "@/lib/currency";
 import type { Quote } from "@/lib/client";
 
+/**
+ * V1-51 (M20, IV-P08): the Convert-to-Invoice form starts from the accepted
+ * quote. It used to seed the tax rate with a hard-coded 12.5 whatever the quote
+ * said, and the quotes panel fell back to 12.5 for a quote with no stored rate,
+ * so the invoice did not carry the total the customer accepted.
+ */
+export interface QuoteConvertForm {
+  taxRate: string;
+  discountType: "PERCENT" | "FIXED";
+  discountValue: string;
+  notes: string;
+  dueDate: string;
+}
+
+/**
+ * The form a quote converts with: its own tax rate (0 when it has none), its
+ * discount (a stored discount without a type is a percentage, as the server
+ * priced the quote) and its notes.
+ */
+export function quoteConvertDefaults(quote: Quote): QuoteConvertForm {
+  return {
+    taxRate: String(quote.taxRate ?? 0),
+    discountType: quote.discountType === "FIXED" ? "FIXED" : "PERCENT",
+    discountValue: quote.discountValue ? String(quote.discountValue) : "",
+    notes: quote.notes ?? "",
+    dueDate: "",
+  };
+}
+
+/**
+ * The convert request body of an editable form (the quotes panel). Tax and
+ * discount are always explicit: a cleared discount is sent as 0, because the
+ * server carries the quote's own discount when the body names none.
+ */
+export function quoteConvertRequest(form: QuoteConvertForm) {
+  const discountValue = parseFloat(form.discountValue) || 0;
+  return {
+    taxRate: parseFloat(form.taxRate) || 0,
+    discountType: discountValue > 0 ? form.discountType : undefined,
+    discountValue,
+    notes: form.notes || undefined,
+    dueDate: form.dueDate || undefined,
+  };
+}
+
 interface QuoteConvertModalProps {
   quote: Quote | null;
   onClose: () => void;
-  onSubmit: (quote: Quote, form: { taxRate: string; dueDate: string; notes: string }) => void;
+  onSubmit: (quote: Quote, form: QuoteConvertForm) => void;
   loading?: boolean;
 }
 
-export function QuoteConvertModal({ quote, onClose, onSubmit, loading }: QuoteConvertModalProps) {
-  const [taxRate, setTaxRate] = useState("12.5");
+/**
+ * finance-pipeline.tsx keeps this modal mounted and points it at the next
+ * quote, so the form is keyed by quote: each quote opens with its own values.
+ */
+export function QuoteConvertModal({ quote, ...rest }: QuoteConvertModalProps) {
+  if (!quote) return null;
+  return <QuoteConvertDialog key={quote.id} quote={quote} {...rest} />;
+}
+
+function QuoteConvertDialog({ quote, onClose, onSubmit, loading }: QuoteConvertModalProps & { quote: Quote }) {
+  const [defaults] = useState(() => quoteConvertDefaults(quote));
+  const [taxRate, setTaxRate] = useState(defaults.taxRate);
   const [dueDate, setDueDate] = useState("");
   const [notes, setNotes] = useState("");
-
-  if (!quote) return null;
 
   return (
     <AnimatePresence>
@@ -64,10 +117,11 @@ export function QuoteConvertModal({ quote, onClose, onSubmit, loading }: QuoteCo
             <div className="px-5 py-4 space-y-4">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1">
+                  <label htmlFor="quote-convert-tax-rate" className="text-xs text-muted-foreground mb-1.5 flex items-center gap-1">
                     <Percent className="w-3 h-3" /> Tax Rate
                   </label>
                   <input
+                    id="quote-convert-tax-rate"
                     type="number"
                     step="0.01"
                     value={taxRate}
@@ -84,6 +138,39 @@ export function QuoteConvertModal({ quote, onClose, onSubmit, loading }: QuoteCo
                     value={dueDate}
                     onChange={(e) => setDueDate(e.target.value)}
                     className="w-full px-3 py-2 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-foreground focus:outline-none focus:border-[hsl(var(--kf-accent1))]/40"
+                  />
+                </div>
+              </div>
+
+              {/* The quote's discount, carried as accepted. Read-only here: the
+                  pipeline's convert handler forwards tax, due date and notes,
+                  and the server keeps the quote's discount when none is sent. */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="quote-convert-discount-type" className="text-xs text-muted-foreground mb-1.5 block">
+                    Discount type
+                  </label>
+                  <select
+                    id="quote-convert-discount-type"
+                    value={defaults.discountType}
+                    disabled
+                    className="w-full px-3 py-2 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-muted-foreground disabled:opacity-70"
+                  >
+                    <option value="PERCENT">Percentage (%)</option>
+                    <option value="FIXED">Fixed ({quote.currency})</option>
+                  </select>
+                </div>
+                <div>
+                  <label htmlFor="quote-convert-discount-value" className="text-xs text-muted-foreground mb-1.5 block">
+                    Discount value
+                  </label>
+                  <input
+                    id="quote-convert-discount-value"
+                    type="number"
+                    value={defaults.discountValue}
+                    readOnly
+                    placeholder="0"
+                    className="w-full px-3 py-2 rounded-xl bg-white/[0.03] border border-border/40 text-sm text-muted-foreground placeholder:text-muted-foreground focus:outline-none"
                   />
                 </div>
               </div>
@@ -111,7 +198,15 @@ export function QuoteConvertModal({ quote, onClose, onSubmit, loading }: QuoteCo
                 Cancel
               </button>
               <button
-                onClick={() => onSubmit(quote, { taxRate, dueDate, notes })}
+                onClick={() =>
+                  onSubmit(quote, {
+                    taxRate,
+                    discountType: defaults.discountType,
+                    discountValue: defaults.discountValue,
+                    dueDate,
+                    notes,
+                  })
+                }
                 disabled={loading}
                 className="flex-1 px-4 py-2.5 rounded-xl text-xs font-medium bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-colors border border-violet-500/30 disabled:opacity-50"
               >

@@ -63,6 +63,7 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { quoteTermsVersion } from '../src/modules/commerce/quote-workflow';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
@@ -652,7 +653,11 @@ describe("the signed-token public quote routes serve and act on only a contact o
     await seedSentQuote(accepted, ID.contactA, { token: `${P}tok_accept_legacy_0123456789` });
     await seedSentQuote(rejected, ID.contactA, { token: `${P}tok_reject_legacy_0123456789` });
 
-    const acc = await agent().post(`/commerce/public/quotes/${P}tok_accept_legacy_0123456789/accept`).send({ visitorId: `${P}visitor_acc` });
+    // V1-QUOTE-CHAIN-finish (SEC-5): the accept names the terms version the view serves (read from the row: no view stamped).
+    const legacyTerms = quoteTermsVersion(await db.quote.findUnique({ where: { id: accepted }, include: { items: true } }));
+    const acc = await agent()
+      .post(`/commerce/public/quotes/${P}tok_accept_legacy_0123456789/accept`)
+      .send({ visitorId: `${P}visitor_acc`, termsVersion: legacyTerms });
     const rej = await agent().post(`/commerce/public/quotes/${P}tok_reject_legacy_0123456789/reject`).send({ reason: 'no', visitorId: `${P}visitor_rej` });
     for (const [res, id, status] of [[acc, accepted, 'ACCEPTED'], [rej, rejected, 'REJECTED']] as const) {
       expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -689,7 +694,9 @@ describe("the signed-token public quote routes serve and act on only a contact o
     expect(view.status, JSON.stringify(view.body)).toBe(200);
     expect(view.body.contact).toEqual(named);
 
-    const acc = await agent().post(`/commerce/public/quotes/${token}/accept`).send({ visitorId: `${P}visitor_own` });
+    // V1-QUOTE-CHAIN-finish (SEC-5): the accept names the terms version the view served.
+    expect(typeof view.body.termsVersion).toBe('string');
+    const acc = await agent().post(`/commerce/public/quotes/${token}/accept`).send({ visitorId: `${P}visitor_own`, termsVersion: view.body.termsVersion });
     expect(acc.status, JSON.stringify(acc.body)).toBe(201);
     expect(acc.body.status).toBe('ACCEPTED');
     expect(acc.body.contact).toEqual(named);

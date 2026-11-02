@@ -1,8 +1,9 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { CommerceAiService } from './commerce-ai.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CrmRateLimitGuard, CrmRateLimit } from '../crm/guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from '../crm/guards/feature-flag.guard';
 import { checkAiRateLimit } from '../crm/ai-rate-limit.util';
@@ -149,19 +150,31 @@ export class CommerceAiController {
     return this.commerceAi.interpretCommand(businessId, body.command);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  // V1-QUOTE-CHAIN-finish (review SEC-3 / SEC-V50-4): this route ran AuthGuard,
+  // BusinessGuard and FeatureFlagGuard only (FeatureFlagGuard allows by
+  // default), so any member, revenue:none included, could run its write
+  // actions: send_quote and convert_quote wrote Quote.status around the
+  // transition table (a customer-REJECTED quote marked ACCEPTED and then
+  // invoiced, a converted quote re-opened to SENT), and mark_paid / void_invoice
+  // write invoice status. Every action it executes is a revenue write (the
+  // navigation and AI-tool actions write nothing and have no web caller), so
+  // the route needs revenue:write like every other revenue write; the quote
+  // actions run as the authenticated member through CommerceService.
+  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-execute')
   aiExecute(
     @Param('businessId') businessId: string,
     @Body() body: { action: string; params?: Record<string, any> },
+    @Req() req: { user?: { id?: string } },
   ) {
     if (!body.action || typeof body.action !== 'string') {
       throw new BadRequestException('action is required');
     }
     checkAiRateLimit(businessId);
-    return this.commerceAi.executeCommand(businessId, body.action, body.params ?? {});
+    return this.commerceAi.executeCommand(businessId, body.action, body.params ?? {}, req?.user?.id ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)

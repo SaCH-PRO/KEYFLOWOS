@@ -28,6 +28,7 @@ import {
   CalendarClock,
   Clock,
   Sparkles,
+  Link2,
 } from "lucide-react";
 import nextDynamic from "next/dynamic";
 
@@ -43,6 +44,7 @@ import {
   deleteQuote,
   convertQuoteToInvoice,
   bulkUpdateQuotes,
+  createQuotePublicLink,
   Product,
   Quote,
   Contact,
@@ -75,6 +77,7 @@ import { useModuleEmit } from "@/hooks/use-module-events";
 import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-registry";
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useCompose } from "@/components/email/compose-context";
+import { quoteConvertDefaults, quoteConvertRequest, type QuoteConvertForm } from "../../finance/components/quote-convert-modal";
 import { ArrowRightLeft, Eye } from "lucide-react";
 
 interface QuotesPanelProps {
@@ -221,9 +224,10 @@ export default function QuotesPanel({
   const [extendDate, setExtendDate] = useState("");
   const [showConvertModal, setShowConvertModal] = useState(false);
   const [showAcceptPrompt, setShowAcceptPrompt] = useState(false);
-  const [convertForm, setConvertForm] = useState({
-    taxRate: "12.5",
-    discountType: "PERCENT" as "PERCENT" | "FIXED",
+  // V1-51 (M20): every open seeds this from the quote (quoteConvertDefaults); no 12.5 default.
+  const [convertForm, setConvertForm] = useState<QuoteConvertForm>({
+    taxRate: "",
+    discountType: "PERCENT",
     discountValue: "",
     notes: "",
     dueDate: "",
@@ -514,13 +518,7 @@ export default function QuotesPanel({
         setSelectedQuote(res.data);
         emitEvent("commerce:quote_created", "commerce", { quoteId: quote.id, action: "accepted" });
         if (autoConvertToInvoice) {
-          setConvertForm({
-            taxRate: String(res.data.taxRate ?? 12.5),
-            discountType: (res.data.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-            discountValue: res.data.discountValue ? String(res.data.discountValue) : "",
-            notes: res.data.notes ?? "",
-            dueDate: "",
-          });
+          setConvertForm(quoteConvertDefaults(res.data));
           setShowConvertModal(true);
         } else {
           setShowAcceptPrompt(true);
@@ -598,24 +596,71 @@ export default function QuotesPanel({
     setShowQuoteBuilder(true);
   }
 
-  function shareQuoteViaWhatsApp(quote: Quote) {
+  // V1-52-QUOTE-PUBLIC-LINK (CF-16): the customer link comes from the server
+  // (the quote's one token, on the /quote/<token> page), so it can be copied or
+  // shared with no email provider connected. A refusal (a DRAFT must be sent
+  // first; an expired or converted quote has no link to share) is shown to the
+  // operator, never replaced by a message without a link.
+  //
+  // V1-52 review (CR-V152-2): the link route is revenue:write and the quote
+  // reads no longer carry the token (SEC-V52-1), so a revenue:read member is
+  // refused the link (403). Their WhatsApp share used to open with the quote's
+  // number and amount and no link; it still does (shareMessage without a url),
+  // for a sent, unconverted quote, and says the link needs revenue write access.
+  async function fetchQuoteLink(quote: Quote): Promise<{ url: string | null; forbidden: boolean; error: string | null }> {
+    if (!businessId) return { url: null, forbidden: false, error: null };
+    const { data, error, status } = await createQuotePublicLink(businessId, quote.id);
+    if (data?.url) return { url: data.url, forbidden: false, error: null };
+    return { url: null, forbidden: status === 403, error: error ?? "Could not create a link for this quote" };
+  }
+
+  async function copyQuoteLink(quote: Quote) {
+    const { url, error } = await fetchQuoteLink(quote);
+    if (!url) {
+      if (error) toast.error(error);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Quote link copied");
+    } catch {
+      toast.info("Copy the quote link", { description: url });
+    }
+  }
+
+  function shareMessage(quote: Quote, url: string | null): string {
     const contactName = quote.contact
       ? `${quote.contact.firstName ?? ""} ${quote.contact.lastName ?? ""}`.trim()
       : "there";
-    const msg = `Hi ${contactName}, here is your quote ${quote.quoteNumber} for ${formatAmount(quote.total, quote.currency)}. Please review and let us know if you'd like to proceed!`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+    const intro = `Hi ${contactName}, here is your quote ${quote.quoteNumber} for ${formatAmount(quote.total, quote.currency)}.`;
+    return url
+      ? `${intro} You can view and accept it here: ${url}`
+      : `${intro} Please review and let us know if you'd like to proceed!`;
+  }
+
+  async function shareQuoteViaWhatsApp(quote: Quote) {
+    const { url, forbidden, error } = await fetchQuoteLink(quote);
+    if (!url) {
+      const shareable = quote.status !== "DRAFT" && !quote.invoiceId;
+      if (!forbidden || !shareable) {
+        if (error) toast.error(error);
+        return;
+      }
+      toast.info("Shared without the quote link", {
+        description: "Sharing the customer link needs revenue write access.",
+      });
+    }
+    window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage(quote, url))}`, "_blank", "noopener,noreferrer");
   }
 
   async function handleConvert() {
     if (!businessId || !selectedQuote) return;
+    // V1-51: tax and discount are sent explicitly (a cleared discount as 0);
+    // the server carries the quote's own values only when the body names none.
     const res = await convertQuoteToInvoice({
       businessId,
       quoteId: selectedQuote.id,
-      taxRate: parseFloat(convertForm.taxRate) || 0,
-      discountType: convertForm.discountValue ? convertForm.discountType : undefined,
-      discountValue: parseFloat(convertForm.discountValue) || undefined,
-      notes: convertForm.notes || undefined,
-      dueDate: convertForm.dueDate || undefined,
+      ...quoteConvertRequest(convertForm),
     });
     if (res.data) {
       setInvoices((inv) => [res.data!, ...inv]);
@@ -624,7 +669,7 @@ export default function QuotesPanel({
       );
       setShowConvertModal(false);
       setSelectedQuote(null);
-      setConvertForm({ taxRate: "12.5", discountType: "PERCENT", discountValue: "", notes: "", dueDate: "" });
+      setConvertForm({ taxRate: "", discountType: "PERCENT", discountValue: "", notes: "", dueDate: "" });
       onSwitchToInvoices?.();
       toast.success("Quote converted to invoice");
       emitEvent("commerce:quote_converted", "commerce", { quoteId: selectedQuote.id, invoiceId: res.data.id });
@@ -865,13 +910,7 @@ export default function QuotesPanel({
                   break;
                 case "convert":
                   setSelectedQuote(quote);
-                  setConvertForm({
-                    taxRate: String(quote.taxRate ?? 12.5),
-                    discountType: (quote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                    discountValue: quote.discountValue ? String(quote.discountValue) : "",
-                    notes: quote.notes ?? "",
-                    dueDate: "",
-                  });
+                  setConvertForm(quoteConvertDefaults(quote));
                   setShowConvertModal(true);
                   break;
                 case "view":
@@ -970,10 +1009,16 @@ export default function QuotesPanel({
                 overflowMenu={
                   <OverflowMenu>
                     <OverflowMenuItem icon={Eye} label="View details" onClick={() => setSelectedQuote(quote)} />
-                    <OverflowMenuItem icon={Pencil} label="Edit" onClick={() => openEditQuote(quote)} />
+                    {/* V1-51 review (SEC-V51-2): an accepted or converted quote is final (the server answers 409); Duplicate makes a new offer. */}
+                    {quote.status !== "ACCEPTED" && !quote.invoiceId && (
+                      <OverflowMenuItem icon={Pencil} label="Edit" onClick={() => openEditQuote(quote)} />
+                    )}
                     <OverflowMenuItem icon={Files} label="Duplicate" onClick={() => duplicateQuote(quote)} />
                     <OverflowMenuItem icon={Sparkles} label="AI Follow-up" onClick={() => setFollowUpFor(quote)} />
                     <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareQuoteViaWhatsApp(quote)} />
+                    {quote.status !== "DRAFT" && !quote.invoiceId && (
+                      <OverflowMenuItem icon={Link2} label="Copy link" onClick={() => copyQuoteLink(quote)} />
+                    )}
                     {(quote.status === "DRAFT" || quote.status === "SENT") && (
                       <OverflowMenuItem
                         icon={Mail}
@@ -1004,13 +1049,7 @@ export default function QuotesPanel({
                     {quote.status === "ACCEPTED" && !quote.invoiceId && (
                       <OverflowMenuItem icon={ArrowRightLeft} label="Convert to invoice" onClick={() => {
                         setSelectedQuote(quote);
-                        setConvertForm({
-                          taxRate: String(quote.taxRate ?? 12.5),
-                          discountType: (quote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                          discountValue: quote.discountValue ? String(quote.discountValue) : "",
-                          notes: quote.notes ?? "",
-                          dueDate: "",
-                        });
+                        setConvertForm(quoteConvertDefaults(quote));
                         setShowConvertModal(true);
                       }} />
                     )}
@@ -1172,13 +1211,7 @@ export default function QuotesPanel({
               <div className="flex flex-col gap-2">
                 <Button
                   onClick={() => {
-                    setConvertForm({
-                      taxRate: String(selectedQuote.taxRate ?? 12.5),
-                      discountType: (selectedQuote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                      discountValue: selectedQuote.discountValue ? String(selectedQuote.discountValue) : "",
-                      notes: selectedQuote.notes ?? "",
-                      dueDate: "",
-                    });
+                    setConvertForm(quoteConvertDefaults(selectedQuote));
                     setShowAcceptPrompt(false);
                     setShowConvertModal(true);
                   }}
@@ -1271,6 +1304,11 @@ export default function QuotesPanel({
                     <button onClick={() => shareQuoteViaWhatsApp(selectedQuote)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
                       <MessageCircle className="w-4 h-4 text-emerald-400" />
                     </button>
+                    {selectedQuote.status !== "DRAFT" && !selectedQuote.invoiceId && (
+                      <button onClick={() => copyQuoteLink(selectedQuote)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Copy link">
+                        <Link2 className="w-4 h-4 text-slate-400" />
+                      </button>
+                    )}
                     <button
                       onClick={() => openComposer({
                         to: selectedQuote.contact?.email || "",
@@ -1300,13 +1338,7 @@ export default function QuotesPanel({
                 )}
                 {selectedQuote.status === "ACCEPTED" && !selectedQuote.invoiceId && (
                   <Button size="sm" className="gap-1.5 w-full" onClick={() => {
-                    setConvertForm({
-                      taxRate: String(selectedQuote.taxRate ?? 12.5),
-                      discountType: (selectedQuote.discountType as "PERCENT" | "FIXED") ?? "PERCENT",
-                      discountValue: selectedQuote.discountValue ? String(selectedQuote.discountValue) : "",
-                      notes: selectedQuote.notes ?? "",
-                      dueDate: "",
-                    });
+                    setConvertForm(quoteConvertDefaults(selectedQuote));
                     setShowConvertModal(true);
                   }}>
                     Convert to Invoice

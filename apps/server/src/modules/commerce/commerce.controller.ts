@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Optional, Param, Patch, Post, Query, Req, Res, UseGuards, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, ForbiddenException, Get, Inject, Logger, NotFoundException, Optional, Param, Patch, Post, Query, Req, Res, SetMetadata, UseGuards, UseInterceptors, UploadedFile, ValidationPipe } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
@@ -15,6 +15,7 @@ import { appUrl } from '../../core/config/runtime-urls';
 import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import { ConvertQuoteDto, CreateQuoteDto, UpdateQuoteDto } from './dto/create-quote.dto';
 import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { sanitizeString } from '../../core/utils/sanitize';
@@ -27,9 +28,11 @@ import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
+import { assertQuoteStatusAgreement } from './quote-workflow';
 import { buildInvoiceEmailHtml } from './invoice-email.template';
 import type { InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { SKIP_BUSINESS_EVENT_KEY } from '../business-events/business-event.interceptor';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { BUSINESS_PROFILE_OWNER_ONLY, FinanceSettingsService } from '../finance/finance-settings.service';
 
@@ -45,6 +48,15 @@ const DOCUMENT_TEMPLATES_OWNER_ONLY_MESSAGE = 'Only the business owner can chang
  * twice with identical options, which is idempotent.
  */
 const CREATE_INVOICE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: CreateInvoiceDto });
+
+/**
+ * V1-53: the quote create, edit and convert bodies, bound the same way (see
+ * CREATE_INVOICE_BODY_PIPE) so the DTO contract holds wherever the controller
+ * runs.
+ */
+const CREATE_QUOTE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: CreateQuoteDto });
+const UPDATE_QUOTE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: UpdateQuoteDto });
+const CONVERT_QUOTE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: ConvertQuoteDto });
 
 type OperatorQuoteContactKey = keyof typeof OPERATOR_QUOTE_CONTACT_SELECT;
 
@@ -98,6 +110,41 @@ function toInvoiceWriteResponse<I extends { contact?: Record<InvoiceWriteContact
     contact: Object.fromEntries(INVOICE_WRITE_CONTACT_KEYS.map((key) => [key, contact[key]])) as Pick<
       NonNullable<I['contact']>,
       InvoiceWriteContactKey
+    >,
+  };
+}
+
+/**
+ * The contact keys a quote create or edit response carries: the operator
+ * quote detail's customer fields (OPERATOR_QUOTE_CONTACT_SELECT), plus `id`
+ * and `businessId`, which repeat the quote's own `contactId` and the path
+ * tenant and so disclose nothing new (as on invoice writes).
+ */
+type QuoteWriteContactKey = 'id' | 'businessId' | OperatorQuoteContactKey;
+const QUOTE_WRITE_CONTACT_KEYS: readonly QuoteWriteContactKey[] = [
+  'id',
+  'businessId',
+  ...(Object.keys(OPERATOR_QUOTE_CONTACT_SELECT) as OperatorQuoteContactKey[]),
+];
+
+/**
+ * V1-53 review (SEC-V53-1, the R28-ST-01 / SEC-CMF1-2 class, for quote
+ * create and edit): createQuote and updateQuote return the quote with its
+ * whole Contact row (`include: { contact: true }`, which the quote.created and
+ * quote.updated listeners read), and the routes handed it back: a
+ * revenue:write member with no CRM access received a PRIVATE contact's
+ * internal notes, phone, owner and visibility. The body now carries only
+ * QUOTE_WRITE_CONTACT_KEYS; a quote without a contact (a legacy row whose
+ * contact belongs to another tenant reads null) passes through unchanged.
+ */
+function toQuoteWriteResponse<Q extends { contact?: Record<QuoteWriteContactKey, unknown> | null }>(quote: Q) {
+  const contact = quote.contact;
+  if (!contact) return quote;
+  return {
+    ...quote,
+    contact: Object.fromEntries(QUOTE_WRITE_CONTACT_KEYS.map((key) => [key, contact[key]])) as Pick<
+      NonNullable<Q['contact']>,
+      QuoteWriteContactKey
     >,
   };
 }
@@ -658,6 +705,11 @@ export class CommerceController {
   // an unknown one. Path and `{ businessId }` body are unchanged for the web
   // client. No state machine here: transitions are V1-50 (D-04). The 200 body
   // is projected (R28-ST-01): the quote, with only the operator contact fields.
+  // V1-QUOTE-CHAIN-finish (QSM-15): a body `status` that disagrees with the
+  // path is a 400 quote_status_mismatch before anything is read, so a request
+  // never does something other than what its body says (the web client sends
+  // only `{ businessId }`, which passes). The body is bound to no DTO, so the
+  // global ValidationPipe strips nothing from it.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('quotes/:quoteId/status/:status')
@@ -665,9 +717,11 @@ export class CommerceController {
     @GuardedBusinessId() businessId: string | undefined,
     @Param('quoteId') quoteId: string,
     @Param('status') status: string,
+    @Body() body: Record<string, unknown> | undefined,
     @Req() req: any,
   ) {
     const tenant = this.requireGuardedTenant(businessId);
+    assertQuoteStatusAgreement(status, body?.status);
     try {
       this.logger.log(`Updating quote ${quoteId} to status ${status} by user ${req?.user?.id}`);
       const result = await this.commerce.updateQuoteStatus({
@@ -805,6 +859,11 @@ export class CommerceController {
   // card. Stamps lastFollowUpAt so the daily scan won't re-surface the
   // same quote tomorrow, and resolves any pending stale-quote approval
   // items for it as 'approved'.
+  // V1-QUOTE-CHAIN-finish (review SEC-6, the R28-ST-01 / SEC-V53-1 class):
+  // markQuoteFollowedUp returns the quote with its whole Contact row, and the
+  // route handed it back, so a revenue:write member with crm:none received a
+  // PRIVATE contact's internal notes, phone and owner. The quote's contact is
+  // projected like the quote create and edit responses (toQuoteWriteResponse).
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/quotes/:quoteId/follow-up')
@@ -839,7 +898,7 @@ export class CommerceController {
         },
       });
     }
-    return { success: true, quote, resolvedApprovals: matches.length };
+    return { success: true, quote: toQuoteWriteResponse(quote), resolvedApprovals: matches.length };
   }
 
   // R0-PC-01: the operator quote detail read. Declared after `quotes/stale`
@@ -887,18 +946,21 @@ export class CommerceController {
     return quote;
   }
 
+  // V1-QUOTE-CHAIN-finish (review SEC-5): the body names the termsVersion the
+  // signed-token view served, so the customer accepts the terms they saw (400
+  // without one, 409 quote_terms_changed when the quote was edited since).
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(20, 60_000)
   @Post('public/quotes/:token/accept')
   acceptPublicQuote(
     @Param('token') token: string,
-    @Body() body: { visitorId?: string } | undefined,
+    @Body() body: { visitorId?: string; termsVersion?: unknown } | undefined,
     @Req() req: Request,
   ) {
     const visitorId =
       (body?.visitorId ? sanitizeString(body.visitorId, 100) : null) ??
       readVisitorIdFromRequest(req);
-    return this.commerce.respondToQuoteByToken(token, 'accept', undefined, visitorId);
+    return this.commerce.respondToQuoteByToken(token, 'accept', undefined, visitorId, body?.termsVersion);
   }
 
   @UseGuards(PublicRateLimitGuard)
@@ -918,32 +980,43 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/quotes')
-  createQuote(
+  async createQuote(
     @Param('businessId') businessId: string,
-    @Body() body: {
-      contactId: string;
-      items: { description: string; quantity: number; unitPrice: number; productId?: string }[];
-      currency?: string;
-      expiryDate?: string;
-    },
+    @Body(CREATE_QUOTE_BODY_PIPE) body: CreateQuoteDto,
   ) {
-    return this.commerce.createQuote({ ...body, businessId });
+    // V1-53 (M19 quote half): the body is a validated DTO (it was an inline
+    // type the ValidationPipe could not see), and only its declared fields are
+    // forwarded. The service computes subtotal, tax, discount, total and every
+    // line total; the tenant is the guarded path param, never a body field.
+    // V1-53 review (SEC-V53-1): the 201 body's contact is projected.
+    const quote = await this.commerce.createQuote({
+      businessId,
+      contactId: body.contactId,
+      items: body.items.map(({ description, quantity, unitPrice, productId }) => ({ description, quantity, unitPrice, productId })),
+      currency: body.currency,
+      expiryDate: body.expiryDate,
+      taxRate: body.taxRate,
+      discountType: body.discountType,
+      discountValue: body.discountValue,
+      notes: body.notes,
+      quoteNumber: body.quoteNumber,
+    });
+    return toQuoteWriteResponse(quote);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/quotes/:quoteId')
-  updateQuote(
+  async updateQuote(
     @Param('businessId') businessId: string,
     @Param('quoteId') quoteId: string,
-    @Body() body: {
-      contactId?: string;
-      items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
-      currency?: string;
-      expiryDate?: string | null;
-    },
+    // V1-53: the edit contract (UpdateQuoteDto); unknown keys are stripped,
+    // replacement lines obey the create rules. The tenant stays after the spread.
+    @Body(UPDATE_QUOTE_BODY_PIPE) body: UpdateQuoteDto,
   ) {
-    return this.commerce.updateQuote({ ...body, quoteId, businessId });
+    // V1-53 review (SEC-V53-1): the 200 body's contact is projected.
+    const quote = await this.commerce.updateQuote({ ...body, quoteId, businessId });
+    return toQuoteWriteResponse(quote);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -959,18 +1032,53 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/quotes/:quoteId/convert')
-  convertQuoteToInvoice(
+  async convertQuoteToInvoice(
     @Param('businessId') businessId: string,
     @Param('quoteId') quoteId: string,
-    @Body() body: {
-      taxRate?: number;
-      discountType?: 'PERCENT' | 'FIXED';
-      discountValue?: number;
-      notes?: string;
-      dueDate?: string;
-    },
+    // V1-53: the convert contract (ConvertQuoteDto); every field optional.
+    @Body(CONVERT_QUOTE_BODY_PIPE) body: ConvertQuoteDto,
   ) {
-    return this.commerce.convertQuoteToInvoice({ ...body, quoteId, businessId });
+    // V1-QUOTE-CHAIN-finish (review SEC-2 / SEC-V51-3, the SEC-CMF1-2 class):
+    // convertQuoteToInvoice returns the invoice with its whole Contact row
+    // (the invoice.created listener reads it), and the route handed it back: a
+    // revenue:write member with crm:none received a PRIVATE contact's internal
+    // notes, phone, owner and visibility. The 201 body is the invoice write
+    // response every other invoice write route answers.
+    return toInvoiceWriteResponse(await this.commerce.convertQuoteToInvoice({ ...body, quoteId, businessId }));
+  }
+
+  // V1-52-QUOTE-PUBLIC-LINK (CF-16): the quote's customer link, { token, url },
+  // for the operator to copy or share on any channel, with no mail provider
+  // (the link used to reach a customer only inside the Gmail send-email
+  // message). Bound to the path tenant: a foreign or unknown id is a 404. It
+  // returns the quote's existing token and writes nothing, except minting the
+  // one token of a SENT quote stored without one, so it is revenue:write like
+  // send-email. A DRAFT is a 409, an expired or converted quote a 400
+  // (CommerceService.getQuotePublicLink).
+  //
+  // V1-52 review (CR-V152-1): the global BusinessEventInterceptor
+  // (APP_INTERCEPTOR) audits every successful POST that names a business. Here
+  // it labelled the call quote.create with subjectId 'unknown' (the body has no
+  // id) and stored the body as the after-snapshot: the redaction policy drops
+  // `token` but not `url`, so each call wrote the customer's bearer
+  // accept/reject link in plain text into the business event log, the KEY flow
+  // bridge and KEY episodic memory. Handing out a link is not a business
+  // event (it returns the stored token; its one write is the CR-V150-2 repair
+  // mint of a SENT quote stored without one), so the route is skipped, as the
+  // service contract says: nothing is emitted, logged or posted.
+  // SetMetadata, not @SkipBusinessEvent(): that decorator (Reflect.metadata)
+  // stores the flag on the prototype property, while the interceptor reads it
+  // from the handler function (Reflector.get), so it skips nothing;
+  // SetMetadata stores it on the handler.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @SetMetadata(SKIP_BUSINESS_EVENT_KEY, true)
+  @Post('businesses/:businessId/quotes/:quoteId/public-link')
+  createQuotePublicLink(
+    @Param('businessId') businessId: string,
+    @Param('quoteId') quoteId: string,
+  ) {
+    return this.commerce.getQuotePublicLink(quoteId, businessId);
   }
 
   // ========== GMAIL INTEGRATION ==========
@@ -1185,7 +1293,8 @@ export class CommerceController {
   ) {
     const existing = await this.commerce.getQuote(quoteId);
     if (!existing || existing.businessId !== businessId) {
-      throw new Error('Quote not found');
+      // V1-53: an unknown or foreign id is a 404 (a plain Error answered 500).
+      throw new NotFoundException('Quote not found');
     }
 
     // R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 2) and its
@@ -1247,7 +1356,7 @@ export class CommerceController {
     if (quote.status !== 'DRAFT') return { success: true, quote };
     const sent = await this.commerce.getQuote(quoteId);
     if (!sent) {
-      throw new Error('Quote not found');
+      throw new NotFoundException('Quote not found');
     }
     return { success: true, quote: sent };
   }

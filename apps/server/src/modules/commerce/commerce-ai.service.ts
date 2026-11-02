@@ -2,6 +2,7 @@ import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CommerceStatsService } from './commerce-stats.service';
+import { CommerceService } from './commerce.service';
 import { CatalogService } from '../catalog/catalog.service';
 import {
   buildCommerceCommandPrompt,
@@ -27,6 +28,9 @@ export class CommerceAiService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
     @Inject(CommerceStatsService) private readonly stats: CommerceStatsService,
     @Inject(CatalogService) private readonly catalog: CatalogService,
+    // V1-QUOTE-CHAIN-finish (SEC-V50-4): the quote actions go through the
+    // quote transition table (CommerceService.updateQuoteStatus).
+    @Inject(CommerceService) private readonly commerce: CommerceService,
   ) {}
 
   private get db() {
@@ -805,7 +809,12 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
     }
   }
 
-  async executeCommand(businessId: string, action: string, params: Record<string, any> = {}) {
+  /**
+   * Runs an interpreted commerce command. `actorId` is the authenticated
+   * member (the ai-execute route needs revenue:write); the quote actions are
+   * moves of the quote transition table made as that member.
+   */
+  async executeCommand(businessId: string, action: string, params: Record<string, any> = {}, actorId: string | null = null) {
     this.logger.log(`Executing commerce command: ${action} for business ${businessId}`);
     const start = Date.now();
 
@@ -848,7 +857,13 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
             where: { businessId, quoteNumber: { contains: String(quoteNumber) }, deletedAt: null },
           });
           if (!quote) return { success: false, error: `Quote "${quoteNumber}" not found` };
-          await this.db.quote.update({ where: { id: quote.id }, data: { status: 'ACCEPTED' } });
+          // V1-QUOTE-CHAIN-finish (review SEC-3 / SEC-V50-4): this wrote
+          // status ACCEPTED directly, so it marked a customer-REJECTED quote
+          // (or a converted one) ACCEPTED with no event. It is now the status
+          // route's operator-recorded acceptance: the transition table decides
+          // (409 for a REJECTED, EXPIRED or converted quote), and the move
+          // emits quote.accepted and names the member on the timeline.
+          await this.commerce.updateQuoteStatus({ quoteId: quote.id, status: 'ACCEPTED', actorId, businessId });
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Quote #${quote.quoteNumber} marked as accepted`, quoteId: quote.id };
         }
@@ -860,7 +875,12 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
             where: { businessId, quoteNumber: { contains: String(quoteNumber) }, deletedAt: null },
           });
           if (!quote) return { success: false, error: `Quote "${quoteNumber}" not found` };
-          await this.db.quote.update({ where: { id: quote.id }, data: { status: 'SENT' } });
+          // V1-QUOTE-CHAIN-finish (review SEC-3 / SEC-V50-4): this wrote
+          // status SENT directly, with no view token and no event, and re-opened
+          // a REJECTED or converted quote. It is now the status route's move:
+          // DRAFT -> SENT mints the quote's one view token and emits quote.sent;
+          // the table refuses anything else (409).
+          await this.commerce.updateQuoteStatus({ quoteId: quote.id, status: 'SENT', actorId, businessId });
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Quote #${quote.quoteNumber} marked as sent`, quoteId: quote.id };
         }

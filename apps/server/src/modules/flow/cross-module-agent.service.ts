@@ -16,6 +16,10 @@ import {
   BookingCancelledPayload,
   BookingRescheduledPayload,
 } from '../../core/event-bus/events.types';
+import { isConvertedQuote } from '../commerce/quote-workflow';
+
+/** The stored statuses of a quote still open to the customer (sent, not decided, not expired). */
+const FOLLOW_UP_OPEN_QUOTE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'VIEWED']);
 
 export interface WorkflowDefinition {
   key: string;
@@ -391,11 +395,17 @@ export class CrossModuleAgentService implements OnModuleDestroy {
 
     const quote = await this.prisma.client.quote.findFirst({
       where: { id: quoteId, businessId },
-      select: { status: true },
+      select: { status: true, invoiceId: true },
     });
 
-    if (!quote || quote.status === 'CONVERTED' || quote.status === 'ACCEPTED') {
-      this.logger.log(`[CrossModule] Quote ${p.quoteRef} already converted/accepted, skipping ${checkpoint} follow-up`);
+    // V1-QUOTE-CHAIN-finish (review CR-W10-2): only an open offer is followed
+    // up. The job skipped CONVERTED and ACCEPTED only, so a customer who had
+    // REJECTED the quote (final in the V1-50 table) still got "Following up on
+    // your quote" and the owner an "unconverted" task; so did a converted
+    // quote stored SENT (isConvertedQuote: an invoice linked). A deleted quote
+    // reads as absent.
+    if (!quote || isConvertedQuote(quote) || !FOLLOW_UP_OPEN_QUOTE_STATUSES.has(quote.status)) {
+      this.logger.log(`[CrossModule] Quote ${p.quoteRef} is no longer an open offer (${quote?.status ?? 'gone'}), skipping ${checkpoint} follow-up`);
       return;
     }
 
@@ -639,6 +649,29 @@ export class CrossModuleAgentService implements OnModuleDestroy {
       });
     } catch (e) {
       this.logger.error(`[CrossModule] quote.sent handler failed: ${(e as Error).message}`, (e as Error).stack);
+    }
+  }
+
+  /**
+   * V1-QUOTE-CHAIN-finish (review CR-W10-2): a rejected quote's pending
+   * follow-up checks are cancelled (a REJECTED quote is final), whether or not
+   * the follow-up workflow is still enabled. The job itself also skips any
+   * quote that is no longer an open offer.
+   */
+  @OnEvent('quote.rejected')
+  async handleQuoteRejected(payload: { quote?: { id?: string } | null; businessId?: string }) {
+    try {
+      const quoteId = payload?.quote?.id;
+      if (!quoteId || !payload.businessId) return;
+      const cancelled = await this.prisma.client.scheduledAgentJob.updateMany({
+        where: { businessId: payload.businessId, entityId: quoteId, jobType: 'quote_followup', status: 'PENDING' },
+        data: { status: 'CANCELLED' },
+      });
+      if (cancelled.count > 0) {
+        this.logger.log(`[CrossModule] Cancelled ${cancelled.count} pending follow-up jobs for rejected quote ${quoteId}`);
+      }
+    } catch (e) {
+      this.logger.error(`[CrossModule] quote.rejected handler failed: ${(e as Error).message}`, (e as Error).stack);
     }
   }
 

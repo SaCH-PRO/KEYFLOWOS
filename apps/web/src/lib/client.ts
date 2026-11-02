@@ -2649,6 +2649,9 @@ export type Quote = {
   invoice?: Invoice | null;
   createdAt: string;
   // R2 lifecycle fields.
+  // V1-52 review (SEC-V52-1): the operator quote reads (list, stale, detail)
+  // no longer serve the token; the customer link comes from
+  // createQuotePublicLink. Only the signed-token and write responses carry it.
   viewToken?: string | null;
   sentAt?: string | null;
   viewedAt?: string | null;
@@ -2658,6 +2661,9 @@ export type Quote = {
   isStale?: boolean;
   isExpired?: boolean;
   lifecycleStep?: "DRAFT" | "SENT" | "VIEWED" | "ACCEPTED" | "REJECTED" | "INVOICED" | "PAID";
+  // V1-QUOTE-CHAIN-finish (SEC-5): served by the signed-token view only; the
+  // version of the terms shown, which the customer's accept sends back.
+  termsVersion?: string;
 };
 
 export async function listQuotes(businessId?: string) {
@@ -2818,6 +2824,20 @@ export async function sendQuoteEmail(input: {
   });
 }
 
+/**
+ * V1-52-QUOTE-PUBLIC-LINK: the quote's customer link (`url` opens the
+ * /quote/<token> page), for copying or sharing without an email provider.
+ * Tenant-bound and revenue:write. The server answers 409 for a DRAFT (send it
+ * first), 400 for an expired or converted quote and 403 to a member without
+ * revenue write access; `error` carries its message and `status` the code.
+ */
+export async function createQuotePublicLink(businessId: string, quoteId: string) {
+  return apiPost<{ token: string; url: string }>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(quoteId)}/public-link`,
+    body: {},
+  });
+}
+
 // R2: stale-quote candidates for the Action Queue.
 export async function fetchStaleQuotes(businessId?: string, days?: number) {
   const bId = businessId ?? DEFAULT_BUSINESS_ID;
@@ -2841,10 +2861,17 @@ export async function fetchPublicQuote(token: string) {
   return apiGetSimple<Quote>(`/commerce/public/quotes/${encodeURIComponent(token)}`);
 }
 
-export async function acceptPublicQuote(token: string) {
+/**
+ * V1-QUOTE-CHAIN-finish (review SEC-5): the accept names the `termsVersion`
+ * the public view served, so the customer accepts the terms they saw. The
+ * server answers 400 quote_terms_version_required without one and 409
+ * quote_terms_changed (under `rawError.code`) when the quote was edited after
+ * it was loaded: reload it and let the customer review the new terms.
+ */
+export async function acceptPublicQuote(token: string, termsVersion: string | null | undefined) {
   return apiPost<Quote>({
     path: `/commerce/public/quotes/${encodeURIComponent(token)}/accept`,
-    body: {},
+    body: { termsVersion },
   });
 }
 
