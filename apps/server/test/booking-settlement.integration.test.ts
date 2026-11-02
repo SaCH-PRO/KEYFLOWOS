@@ -44,13 +44,26 @@
  *   L-01 RED      LEDGER: deposit + final revenue postings sum to the price; cash likewise
  *   L-02 CONTROL  LEDGER: every FinancialTransaction of both tenants balances (debits = credits)
  *
+ * V1-28 review repairs (red at the V1-28 head e8d1f172, green after):
+ *   S-02b CR-V28-2   a credited deposit nets only what it still bills (FULLY_CREDITED: nothing)
+ *   S-04  SEC-V28-1  the invoiceError is a fixed sentence plus a code, never the raw error text
+ *   S-04b SEC-V28-1  an invoice-number collision (INV-<Date.now()>) is retried; a persistent database
+ *                    failure answers the fixed sentence, never Prisma's text, paths or column names
+ *   S-05c CR-V28-1   the final paid while the deposit is still owed (SENT or DRAFT) is not PAID
+ *   S-07c SEC-V28-3  a refunded deposit (still PAID) forfeits nothing, is not restored as
+ *                    DEPOSIT_PAID on reinstatement, and is not netted from the final invoice
+ *   S-07d SEC-V28-2  the forfeit row names the member who cancelled; a call with no member is SYSTEM
+ *   TODO  CR-V28-4   a business-initiated cancel forfeits nothing (needs a cancel-initiator input)
+ *   TODO  CR-V28-3   the storefront passes the token link into the confirmation (book/[slug]/page.tsx)
+ *
  * Nothing on the money path is mocked: PrismaService, AuthGuard, BusinessGuard,
  * PlanLimitGuard, PublicRateLimitGuard (real Redis at REDIS_URL, this suite's
  * own key namespace), HoneypotGuard, BookingsController, BookingsService,
  * CommerceService, InvoiceWorkflowService, RevenuePostingService,
  * PostingService, ChartOfAccountsSeederService and CatalogService read and
- * write real rows behind the production GlobalHttpExceptionFilter and
- * ValidationPipe. Identity attachment is the one stand-in: a test middleware
+ * write real rows behind the production GlobalHttpExceptionFilter,
+ * ValidationPipe and TenantInterceptor (APP_INTERCEPTOR, as in AppModule).
+ * Identity attachment is the one stand-in: a test middleware
  * reads `x-v28a-user` and attaches the seeded user row as AuthMiddleware would.
  * EventEmitter2 is a recording bus: invoice.paid payloads the REAL workflow
  * emits are handed to the REAL BookingPaymentStatusListener and FlowListener
@@ -107,6 +120,7 @@ let prismaService: any;
 let commerce: any;
 let workflow: any;
 let flowListener: any;
+let bookingsService: any;
 /** null at the V1-16 head: the listener does not exist there. */
 let paymentStatusListener: any = null;
 
@@ -259,6 +273,8 @@ beforeAll(async () => {
   const { Test } = await import('@nestjs/testing');
   const { ValidationPipe, Logger } = await import('@nestjs/common');
   const { EventEmitter2 } = await import('@nestjs/event-emitter');
+  const { APP_INTERCEPTOR } = await import('@nestjs/core');
+  const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
   const IORedis = (await import('ioredis')).default;
   const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
@@ -306,6 +322,9 @@ beforeAll(async () => {
     controllers: [BookingsController],
     providers: [
       PrismaService,
+      // The production global interceptor: it binds the authenticated member
+      // and the guarded business for the request (the forfeit row's actor).
+      { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
       AuthGuard,
       BusinessGuard,
       PlanLimitGuard,
@@ -354,7 +373,7 @@ beforeAll(async () => {
   prismaService = moduleRef.get(PrismaService);
   commerce = moduleRef.get(CommerceService);
   workflow = moduleRef.get(InvoiceWorkflowService);
-  const bookingsService = moduleRef.get(BookingsService);
+  bookingsService = moduleRef.get(BookingsService);
   // The real listeners, built over the module's real services. FlowListener's
   // copilot and email collaborators are not reached by handleInvoicePaid.
   flowListener = new FlowListener(bookingsService, prismaService, {} as any, {} as any, commerce);
@@ -458,6 +477,30 @@ describe('V1-28 the completion invoice nets the deposit (CF-43)', () => {
     }
   });
 
+  it('S-02b CR-V28-2: a credited deposit nets only what it still bills (FULLY_CREDITED: nothing; an applied credit of 10: 15)', async () => {
+    // FULLY_CREDITED, the status CreditNoteService.apply writes once the credits reach the total.
+    const full = await book(ID.svcDep, 's02b_full');
+    await settle(full.depositInvoiceId!, 25);
+    await db.invoice.update({ where: { id: full.depositInvoiceId }, data: { status: 'FULLY_CREDITED' } });
+    const r1 = await setStatus(full.bookingId, 'COMPLETED');
+    expect(r1.status, JSON.stringify(r1.body)).toBe(201);
+    expect((await finalInvoicesOf(full.bookingId)).map((i) => money(i.total)), 'a fully credited deposit bills nothing').toEqual([100]);
+    expect(r1.body.invoicing).toMatchObject({ status: 'CREATED', amount: 100, depositAmount: 0, depositInvoiceId: null });
+
+    // An APPLIED credit note of 10 and PARTIALLY_CREDITED, as CreditNoteService.apply leaves them.
+    const part = await book(ID.svcDep, 's02b_part');
+    await settle(part.depositInvoiceId!, 25);
+    await db.creditNote.create({
+      data: { id: `${P}cn_part`, businessId: ID.biz, invoiceId: part.depositInvoiceId, creditNoteNumber: `${P}CN-1`, status: 'APPLIED', amount: 10, appliedAt: new Date() },
+    });
+    await db.invoice.update({ where: { id: part.depositInvoiceId }, data: { status: 'PARTIALLY_CREDITED' } });
+    const r2 = await setStatus(part.bookingId, 'COMPLETED');
+    expect(r2.status, JSON.stringify(r2.body)).toBe(201);
+    const finals = await finalInvoicesOf(part.bookingId);
+    expect(finals.map((i) => money(i.total)), 'the deposit still bills 15').toEqual([85]);
+    expect(r2.body.invoicing).toMatchObject({ status: 'CREATED', amount: 85, depositAmount: 15, depositInvoiceId: part.depositInvoiceId });
+  });
+
   it('S-03 RED-BEFORE: completing twice, in turn and at once, leaves ONE final invoice and both answers name it', async () => {
     const seq = await book(ID.svcDep, 's03_seq');
     const first = await setStatus(seq.bookingId, 'COMPLETED');
@@ -488,8 +531,12 @@ describe('V1-28 the completion invoice nets the deposit (CF-43)', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body.status).toBe('COMPLETED');
     expect(typeof res.body.invoiceError, 'invoiceError in the response').toBe('string');
-    expect(res.body.invoiceError).toContain('v28a injected invoice failure');
-    expect(res.body.invoicing).toMatchObject({ status: 'FAILED' });
+    expect(res.body.invoiceError).toContain('its invoice could not be created');
+    // SEC-V28-1: an unexpected error's own text is logged, never answered.
+    expect(res.body.invoiceError).not.toContain('v28a injected invoice failure');
+    expect(JSON.stringify(res.body.invoicing)).not.toContain('v28a injected invoice failure');
+    expect(res.body.invoiceErrorCode).toBe('INVOICE_NOT_CREATED');
+    expect(res.body.invoicing).toMatchObject({ status: 'FAILED', code: 'INVOICE_NOT_CREATED', error: res.body.invoiceError });
     expect(res.body.invoiceId ?? null).toBeNull();
     const row = await bookingRow(b.bookingId);
     expect(row.status).toBe('COMPLETED');
@@ -503,6 +550,62 @@ describe('V1-28 the completion invoice nets the deposit (CF-43)', () => {
     expect(finals.map((i) => money(i.total)), 'the button nets the deposit too').toEqual([75]);
     expect(retry.body).toMatchObject({ invoiceId: finals[0].id, alreadyExisted: false });
     expect((await bookingRow(b.bookingId)).invoiceId).toBe(finals[0].id);
+  });
+
+  it('S-04b SEC-V28-1: an invoice-number collision is retried; a persistent database failure answers a fixed invoiceError, never the database text', async () => {
+    // CommerceService numbers invoices INV-<Date.now()> under
+    // @@unique([businessId, invoiceNumber]): an invoice already holding
+    // INV-<T>, and Date.now() pinned to T while an attempt builds its row,
+    // is the collision two completions in one millisecond meet.
+    const T = 4102444800123;
+    await db.contact.create({ data: { id: `${P}c_collide`, businessId: ID.biz, firstName: 'Col', lastName: 'Lide' } });
+    await db.invoice.create({ data: { id: `${P}inv_collide`, businessId: ID.biz, contactId: `${P}c_collide`, invoiceNumber: `INV-${T}`, total: 1 } });
+    const real = commerce.createInvoiceForService.bind(commerce);
+    const pinned = (...args: unknown[]) => {
+      const now = vi.spyOn(Date, 'now').mockReturnValue(T);
+      try {
+        return real(...args);
+      } finally {
+        now.mockRestore();
+      }
+    };
+
+    // The first attempt collides; the retry draws the invoice up.
+    const once = await book(ID.svcDep, 's04b_once');
+    vi.spyOn(commerce, 'createInvoiceForService').mockImplementationOnce(pinned);
+    const ok = await setStatus(once.bookingId, 'COMPLETED');
+    vi.restoreAllMocks();
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body.invoiceError, JSON.stringify(ok.body.invoicing)).toBeNull();
+    expect(ok.body.invoicing).toMatchObject({ status: 'CREATED', amount: 75 });
+    expect((await finalInvoicesOf(once.bookingId)).map((i) => money(i.total))).toEqual([75]);
+
+    // Every attempt collides: FAILED, with a code and a sentence that carry
+    // none of Prisma's text (invocation, server path, source, columns).
+    const always = await book(ID.svcDep, 's04b_always');
+    vi.spyOn(commerce, 'createInvoiceForService').mockImplementation(pinned);
+    const res = await setStatus(always.bookingId, 'COMPLETED');
+    vi.restoreAllMocks();
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.status).toBe('COMPLETED');
+    expect(res.body.invoicing).toMatchObject({ status: 'FAILED', code: 'INVOICE_NOT_CREATED' });
+    expect(res.body.invoiceErrorCode).toBe('INVOICE_NOT_CREATED');
+    expect(res.body.invoiceError).toContain('its invoice could not be created');
+    const answered = `${res.body.invoiceError} ${JSON.stringify(res.body.invoicing)}`;
+    for (const leak of [/prisma/i, /invocation/i, /Unique constraint/i, /invoice_number/, /business_id/, /commerce\.service/, /\/home\//, /\.ts:\d+/]) {
+      expect(answered, `the answer discloses ${leak}`).not.toMatch(leak);
+    }
+    expect((await bookingRow(always.bookingId)).status).toBe('COMPLETED');
+    expect(await finalInvoicesOf(always.bookingId)).toHaveLength(0);
+
+    // A refusal meant for the caller (a 4xx HttpException) keeps its own words, as the global filter would answer it.
+    const { BadRequestException } = await import('@nestjs/common');
+    const refused = await book(ID.svcDep, 's04b_refused');
+    vi.spyOn(commerce, 'createInvoiceForService').mockRejectedValueOnce(new BadRequestException('v28a contact has no billing address'));
+    const r = await setStatus(refused.bookingId, 'COMPLETED');
+    vi.restoreAllMocks();
+    expect(r.body.invoiceError).toContain('v28a contact has no billing address');
+    expect(r.body.invoiceErrorCode).toBe('INVOICE_NOT_CREATED');
   });
 });
 
@@ -551,6 +654,24 @@ describe('V1-28 Booking.paymentStatus follows the invoices (M42: no writer)', ()
     await settle(b.invoiceId!, 60);
     expect((await bookingRow(b.bookingId)).paymentStatus).toBe('PAID');
   });
+
+  it('S-05c CR-V28-1: the final invoice paid while the deposit is still owed (SENT, or DRAFT) is not PAID; the deposit paid too makes it PAID', async () => {
+    for (const sendDeposit of [true, false]) {
+      const label = sendDeposit ? 'deposit SENT' : 'deposit DRAFT';
+      const b = await book(ID.svcDep, `s05c_${sendDeposit ? 'sent' : 'draft'}`);
+      if (sendDeposit) await workflow.transition(b.depositInvoiceId!, 'SENT');
+      expect((await setStatus(b.bookingId, 'COMPLETED')).status).toBe(201);
+      const finalId = (await bookingRow(b.bookingId)).invoiceId;
+      expect(money((await invoiceRow(finalId)).total), label).toBe(75);
+      await settle(finalId, 75);
+      expect((await invoiceRow(b.depositInvoiceId!)).status, label).toBe(sendDeposit ? 'SENT' : 'DRAFT');
+      expect((await bookingRow(b.bookingId)).paymentStatus, `${label}: 25 of 100 is still owed`).not.toBe('PAID');
+      expect((await bookingRow(b.bookingId)).paymentStatus, label).toBe('UNPAID');
+
+      await settle(b.depositInvoiceId!, 25);
+      expect((await bookingRow(b.bookingId)).paymentStatus, `${label}, then paid`).toBe('PAID');
+    }
+  });
 });
 
 describe('V1-28 invoice.paid confirms the booking it pays for (M42: dead hook)', () => {
@@ -589,7 +710,10 @@ describe('V1-28 invoice.paid confirms the booking it pays for (M42: dead hook)',
   });
 });
 
-describe('V1-28 D-26: a customer cancel after a paid deposit forfeits it', () => {
+describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
+  // D-26 rules on a CUSTOMER cancel. The server has no customer-cancel route:
+  // the operator's status route (here) records every cancel, so these cases
+  // prove the forfeit on a cancel recorded there, not on a customer's own.
   it('S-07 RED-BEFORE: the forfeit is recorded on the booking; the deposit stays PAID; nothing is refunded or credited', async () => {
     const b = await book(ID.svcDep, 's07');
     await settle(b.depositInvoiceId!, 25);
@@ -628,6 +752,58 @@ describe('V1-28 D-26: a customer cancel after a paid deposit forfeits it', () =>
     expect((await bookingRow(b.bookingId)).paymentStatus).toBe('UNPAID');
     expect(contactEvents.filter((e) => e.type === 'booking.deposit_forfeited')).toHaveLength(0);
   });
+
+  it('S-07c SEC-V28-3: a refunded deposit (still PAID) is not money held: not restored on reinstatement, not netted, not forfeit', async () => {
+    const refundDeposit = async (depositInvoiceId: string) => {
+      const payment = await db.payment.findFirst({ where: { invoiceId: depositInvoiceId, status: 'SUCCESSFUL' } });
+      await commerce.markPaymentRefunded(payment.id, ID.biz, 'goodwill', ID.owner);
+      expect((await invoiceRow(depositInvoiceId)).status, 'a refund leaves the deposit invoice PAID').toBe('PAID');
+    };
+
+    // Forfeited, then refunded by hand (D-26), then reinstated and completed.
+    const b = await book(ID.svcDep, 's07c');
+    await settle(b.depositInvoiceId!, 25);
+    expect((await setStatus(b.bookingId, 'CANCELLED')).body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    await refundDeposit(b.depositInvoiceId!);
+    const back = await setStatus(b.bookingId, 'CONFIRMED');
+    expect(back.status, JSON.stringify(back.body)).toBe(201);
+    expect((await bookingRow(b.bookingId)).paymentStatus, 'nothing is held for the booking').toBe('UNPAID');
+    const done = await setStatus(b.bookingId, 'COMPLETED');
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect((await finalInvoicesOf(b.bookingId)).map((i) => money(i.total)), 'the refunded deposit is not netted').toEqual([100]);
+    expect(done.body.invoicing).toMatchObject({ status: 'CREATED', amount: 100, depositAmount: 0, depositInvoiceId: null });
+
+    // Refunded before the cancel: there is nothing to forfeit.
+    const early = await book(ID.svcDep, 's07c_early');
+    await settle(early.depositInvoiceId!, 25);
+    await refundDeposit(early.depositInvoiceId!);
+    const cancel = await setStatus(early.bookingId, 'CANCELLED');
+    expect(cancel.status).toBe(201);
+    expect(cancel.body.depositForfeit ?? null).toBeNull();
+    expect((await bookingRow(early.bookingId)).paymentStatus).not.toBe('DEPOSIT_FORFEITED');
+    expect(contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === early.bookingId)).toHaveLength(0);
+  });
+
+  it('S-07d SEC-V28-2: the forfeit row names the member who cancelled; a call with no member (KEY tool, undo, compensation) is SYSTEM', async () => {
+    const viaRoute = await book(ID.svcDep, 's07d_route');
+    await settle(viaRoute.depositInvoiceId!, 25);
+    expect((await setStatus(viaRoute.bookingId, 'CANCELLED')).status).toBe(201);
+    const [byOwner] = contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === viaRoute.bookingId);
+    expect(byOwner).toMatchObject({ actorType: 'USER', actorId: ID.owner });
+
+    // As flow-orchestrator's bookings_cancel_booking, undo and compensation call it.
+    const direct = await book(ID.svcDep, 's07d_direct');
+    await settle(direct.depositInvoiceId!, 25);
+    await bookingsService.updateBookingStatus(ID.biz, direct.bookingId, 'CANCELLED');
+    const [bySystem] = contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === direct.bookingId);
+    expect(bySystem).toMatchObject({ actorType: 'SYSTEM' });
+    expect((bySystem as any).actorId).toBeUndefined();
+  });
+
+  it.todo(
+    'CR-V28-4: a cancel the BUSINESS initiates (operator, KEY bookings_cancel_booking, undo, saga compensation) forfeits nothing; ' +
+      'needs a cancel-initiator input on the status route (bookings.controller.ts) and its callers, all outside the V1-28 write set',
+  );
 });
 
 describe('V1-28 the confirmation pages link the token receipt (D-07)', () => {
@@ -649,13 +825,23 @@ describe('V1-28 the confirmation pages link the token receipt (D-07)', () => {
     expect(free.depositInvoiceUrl ?? null).toBeNull();
   });
 
-  it('S-08b RED-BEFORE: neither confirmation page opens the authenticated receipt; both link the token page', () => {
+  // A SOURCE check (CR-V28-3): it proves what these two files contain, not
+  // what a customer sees. The storefront page that renders OrderConfirmation
+  // does not pass invoiceUrl yet (todo below), so there the button is hidden.
+  it('S-08b RED-BEFORE (source check): neither confirmation page opens the authenticated receipt; each opens only an invoiceUrl token link', () => {
     for (const [name, file] of Object.entries(WEB_PAGES)) {
       const src = fs.readFileSync(file, 'utf8');
       expect(/commerce\/invoices\/\$\{[^}]+\}\/receipt/.test(src), `${name} opens /commerce/invoices/:id/receipt (401 for a customer)`).toBe(false);
-      expect(/invoiceUrl/.test(src), `${name} links the token page (invoiceUrl)`).toBe(true);
+      expect(/invoiceUrl/.test(src), `${name} reads the token link (invoiceUrl)`).toBe(true);
     }
+    // public/book reads the link from the create answer itself.
+    expect(fs.readFileSync(WEB_PAGES.publicBook, 'utf8')).toMatch(/data\?\.invoiceUrl \?\? data\?\.depositInvoiceUrl/);
   });
+
+  it.todo(
+    "CR-V28-3: the storefront /book/[slug] passes the create answer's invoiceUrl / depositInvoiceUrl into bookingResults, so its " +
+      'confirmation shows the token invoice button; book/[slug]/page.tsx is outside the V1-28 write set (it pushes only {bookingId, invoiceId})',
+  );
 });
 
 describe('V1-28 LEDGER', () => {
