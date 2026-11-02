@@ -501,7 +501,7 @@ async function waitForBusinessLockWaiters(n: number) {
   for (;;) {
     const rows = await db.$queryRawUnsafe(
       `SELECT count(*)::int AS n FROM pg_stat_activity
-        WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%businesses%'`,
+        WHERE datname = current_database() AND wait_event_type = 'Lock' AND position('businesses' in lower(query)) > 0`,
     );
     const seen = Number(rows[0]?.n ?? 0);
     if (seen >= n) return;
