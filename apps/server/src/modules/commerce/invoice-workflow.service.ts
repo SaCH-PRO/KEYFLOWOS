@@ -4,6 +4,14 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
+import { fromCents, sumMoney, toCents } from './money';
+
+/**
+ * Currency-aware rounding to cents, half away from zero on the decimal value
+ * (V1-22: 1.005 -> 1.01; the float `Math.round(x * 100) / 100` it replaces
+ * read 1.00). Lives in ./money; re-exported here for its existing importers.
+ */
+export { roundMoney } from './money';
 
 /**
  * Canonical invoice statuses. Mirrors the string-typed `Invoice.status`
@@ -54,14 +62,6 @@ const ALLOWED_TRANSITIONS: Record<InvoiceStatus, ReadonlySet<InvoiceStatus>> = {
   VOID: new Set<InvoiceStatus>([]),
 };
 
-/** Currency-aware rounding to 2 decimals. Avoids float drift on TTD/USD. */
-export function roundMoney(amount: number, currency = 'TTD'): number {
-  // No 0-decimal currencies in scope (TTD/USD/JMD/etc all 2dp). Centralised so
-  // adding JPY etc. only changes one place.
-  void currency;
-  return Math.round(amount * 100) / 100;
-}
-
 export interface PaymentLike {
   amount: number;
   status: string; // 'SUCCESSFUL' | 'PENDING' | 'FAILED' | 'REFUNDED'
@@ -86,29 +86,29 @@ export interface BalanceSummary {
  *
  * `remaining` is clamped at zero (overpayments don't drive remaining negative).
  * `isOverpaid` flags overpayment for downstream surfacing.
+ *
+ * V1-22-DM-MONEY-CENTS (M23, D-13): every figure is integer cents. `paid` and
+ * `refunded` are the exact decimal sums of their rows rounded once to cents
+ * (sumMoney), the total is rounded to cents half away from zero, and PAID /
+ * overpaid are exact cent comparisons: no float sum, no +/-0.005 tolerance.
+ * Three payments of 33.33 and one of 0.01 settle 100.00 exactly.
  */
 export function computeBalance(total: number, payments: PaymentLike[], currency = 'TTD'): BalanceSummary {
-  let paid = 0;
-  let refunded = 0;
-  for (const p of payments) {
-    if (p.status === 'SUCCESSFUL') paid += Number(p.amount) || 0;
-    else if (p.status === 'REFUNDED') refunded += Math.abs(Number(p.amount) || 0);
-  }
-  paid = roundMoney(paid, currency);
-  refunded = roundMoney(refunded, currency);
-  const net = roundMoney(paid - refunded, currency);
-  const totalRounded = roundMoney(total, currency);
-  // Tolerance ≈ half a cent — covers float drift in currency conversions.
-  const isFullyPaid = net + 0.005 >= totalRounded && totalRounded > 0;
-  const remaining = Math.max(0, roundMoney(totalRounded - net, currency));
+  void currency; // every currency in scope (D-13: TTD, USD) has 2 decimals
+  const paid = sumMoney(payments.filter((p) => p.status === 'SUCCESSFUL').map((p) => Number(p.amount) || 0));
+  const refunded = sumMoney(
+    payments.filter((p) => p.status === 'REFUNDED').map((p) => Math.abs(Number(p.amount) || 0)),
+  );
+  const totalCents = toCents(total);
+  const netCents = toCents(paid) - toCents(refunded);
   return {
-    total: totalRounded,
+    total: fromCents(totalCents),
     paid,
     refunded,
-    net,
-    remaining,
-    isFullyPaid,
-    isOverpaid: net - 0.005 > totalRounded,
+    net: fromCents(netCents),
+    remaining: fromCents(Math.max(0, totalCents - netCents)),
+    isFullyPaid: totalCents > 0 && netCents >= totalCents,
+    isOverpaid: netCents > totalCents,
   };
 }
 

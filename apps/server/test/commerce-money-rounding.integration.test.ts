@@ -93,22 +93,21 @@ const eventStub = {
 const contactEvents: any[] = [];
 
 async function cleanup() {
-  const biz = sqlLikePrefix(P);
   for (const sql of [
-    `DELETE FROM ledger_entries WHERE business_id LIKE ${biz}`,
-    `DELETE FROM financial_transactions WHERE business_id LIKE ${biz}`,
-    `DELETE FROM payments WHERE business_id LIKE ${biz} OR invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${biz})`,
-    `DELETE FROM payment_links WHERE business_id LIKE ${biz}`,
-    `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${biz})`,
-    `DELETE FROM invoices WHERE business_id LIKE ${biz}`,
-    `DELETE FROM quote_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_id LIKE ${biz})`,
-    `DELETE FROM quotes WHERE business_id LIKE ${biz}`,
-    `DELETE FROM contacts WHERE business_id LIKE ${biz}`,
-    `DELETE FROM memberships WHERE business_id LIKE ${biz} OR user_id LIKE ${biz}`,
-    `DELETE FROM chart_of_accounts WHERE business_id LIKE ${biz}`,
-    `DELETE FROM team_activity_logs WHERE business_id LIKE ${biz}`,
-    `DELETE FROM businesses WHERE id LIKE ${biz}`,
-    `DELETE FROM users WHERE id LIKE ${biz}`,
+    `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
+    `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
+    `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM quote_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)})`,
+    `DELETE FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }

@@ -17,6 +17,7 @@ import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
+import { computeDocumentAmounts, fromCents, lineAmount, moneyEquals, percentOf, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
@@ -292,7 +293,8 @@ export class CommerceService {
     options?: { kind?: 'FULL' | 'DEPOSIT'; amountOverride?: number; descriptionSuffix?: string },
   ) {
     const kind = options?.kind ?? 'FULL';
-    const total = options?.amountOverride ?? service.price;
+    // V1-22 (D-13): the one amount this invoice stores, in cents.
+    const total = roundMoney(options?.amountOverride ?? service.price);
     const description =
       kind === 'DEPOSIT'
         ? `Deposit — ${service.name}${options?.descriptionSuffix ?? ''}`
@@ -333,7 +335,8 @@ export class CommerceService {
     if (value <= 0) return 0;
     if (service.depositType === 'PERCENT') {
       const pct = Math.min(Math.max(value, 0), 100);
-      return Math.round(((service.price * pct) / 100) * 100) / 100;
+      // V1-22: exact, rounded to cents (the float form read 10.05 x 10% as 1.00).
+      return percentOf(service.price, pct);
     }
     if (service.depositType === 'FIXED') {
       return Math.min(value, service.price);
@@ -430,25 +433,27 @@ export class CommerceService {
     total?: number;
   }) {
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
-    const calculatedSubtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-    const subtotal = input.subtotal ?? calculatedSubtotal;
     const taxRate = input.taxRate ?? 0;
-    const calculatedTaxAmount = (calculatedSubtotal * taxRate) / 100;
-    const taxAmount = input.taxAmount ?? calculatedTaxAmount;
-    let discountAmount = 0;
-    if (input.discountType === 'PERCENT' && input.discountValue) {
-      discountAmount = (calculatedSubtotal * input.discountValue) / 100;
-    } else if (input.discountType === 'FIXED' && input.discountValue) {
-      discountAmount = input.discountValue;
-    }
-    const calculatedTotal = calculatedSubtotal + calculatedTaxAmount - discountAmount;
-    this.assertInvoiceAmounts({
-      subtotal: calculatedSubtotal,
-      total: calculatedTotal,
+    // V1-22-DM-MONEY-CENTS (M23, D-13): every amount is computed and stored in
+    // integer cents. The float form stored items 0.1 + 0.2 at 12.5% tax as
+    // subtotal 0.30000000000000004 and total 0.3375, and posted 0.3375.
+    const calculated = computeDocumentAmounts({
+      lines: input.items.map((item) => lineAmount(item.quantity, item.unitPrice)),
+      taxRate,
       discountType: input.discountType,
       discountValue: input.discountValue,
     });
-    const total = input.total ?? calculatedTotal;
+    const discountAmount = calculated.discountAmount;
+    this.assertInvoiceAmounts({
+      subtotal: calculated.subtotal,
+      total: calculated.total,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+    });
+    // The internal callers' overrides (document intelligence) are stored in cents too.
+    const subtotal = input.subtotal != null ? roundMoney(input.subtotal) : calculated.subtotal;
+    const taxAmount = input.taxAmount != null ? roundMoney(input.taxAmount) : calculated.taxAmount;
+    const total = input.total != null ? roundMoney(input.total) : calculated.total;
     const data: any = {
       businessId: input.businessId,
       invoiceNumber: input.invoiceNumber ?? `INV-${Date.now()}`,
@@ -465,11 +470,11 @@ export class CommerceService {
       currency: input.currency ?? 'TTD',
       notes: input.notes ?? null,
       items: {
-        create: input.items.map((item) => ({
+        create: input.items.map((item, i) => ({
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          total: item.total ?? item.quantity * item.unitPrice,
+          total: item.total != null ? roundMoney(item.total) : calculated.lineTotals[i],
         })),
       },
     };
@@ -672,13 +677,12 @@ export class CommerceService {
       include: OPERATOR_INVOICE_INCLUDE,
     });
     if (!invoice) return null;
-    const paidAmount = invoice.payments
-      .filter((p) => p.status === 'SUCCESSFUL')
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
+    const paidAmount = sumMoney(invoice.payments.filter((p) => p.status === 'SUCCESSFUL').map((p) => Number(p.amount)));
     return {
       ...withLegacySubtotal(invoice),
       paidAmount,
-      remaining: Math.max(0, Number(invoice.total) - paidAmount),
+      remaining: Math.max(0, subtractMoney(Number(invoice.total), paidAmount)),
     };
   }
 
@@ -1788,12 +1792,17 @@ export class CommerceService {
     // echoing) bizA's contact, and converting it created an Invoice bound to
     // that contact. Resolve it inside the tenant before anything is written.
     const contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
-    const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const taxRate = input.taxRate ?? 0;
-    const taxAmount = subtotal * taxRate / 100;
     const discountValue = input.discountValue ?? 0;
-    const discountAmount = input.discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
-    const total = subtotal + taxAmount - discountAmount;
+    // V1-22 (D-13): in integer cents. A discount type other than FIXED is a
+    // percentage here, as it was.
+    const amounts = computeDocumentAmounts({
+      lines: input.items.map((item) => lineAmount(item.quantity, item.unitPrice)),
+      taxRate,
+      discountType: input.discountType === 'FIXED' ? 'FIXED' : 'PERCENT',
+      discountValue,
+    });
+    const { subtotal, taxAmount, discountAmount, total } = amounts;
 
     // R2: viewToken is intentionally NOT generated at draft time. The
     // public accept/reject URL is minted only when the quote is sent so
@@ -1816,11 +1825,11 @@ export class CommerceService {
         currency: input.currency ?? 'TTD',
         notes: input.notes ?? null,
         items: {
-          create: input.items.map((item) => ({
+          create: input.items.map((item, i) => ({
             description: item.description,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            total: item.total ?? item.quantity * item.unitPrice,
+            total: item.total != null ? roundMoney(item.total) : amounts.lineTotals[i],
             productId: item.productId ?? null,
           })),
         },
@@ -1876,17 +1885,21 @@ export class CommerceService {
     
     // Get items for recalculating totals
     const currentItems = input.items ?? (await this.prisma.client.quoteItem.findMany({ where: { quoteId: input.quoteId } }));
-    const subtotal = currentItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-    
+    // V1-22 (D-13): each line is quantity x unitPrice in cents, as stored below.
+    const lineTotals = currentItems.map((item) => lineAmount(item.quantity, item.unitPrice));
+
     // Handle tax/discount updates
     const taxRate = input.taxRate ?? quote.taxRate ?? 0;
     const discountType = input.discountType ?? quote.discountType;
     const discountValue = input.discountValue ?? quote.discountValue ?? 0;
-    
-    const taxAmount = subtotal * taxRate / 100;
-    const discountAmount = discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
-    const total = subtotal + taxAmount - discountAmount;
-    
+
+    const { subtotal, taxAmount, discountAmount, total } = computeDocumentAmounts({
+      lines: lineTotals,
+      taxRate,
+      discountType: discountType === 'FIXED' ? 'FIXED' : 'PERCENT',
+      discountValue,
+    });
+
     updateData.subtotal = subtotal;
     updateData.taxRate = taxRate;
     updateData.taxAmount = taxAmount;
@@ -1898,11 +1911,11 @@ export class CommerceService {
     if (input.items) {
       await this.prisma.client.quoteItem.deleteMany({ where: { quoteId: input.quoteId } });
       updateData.items = {
-        create: input.items.map((item) => ({
+        create: input.items.map((item, i) => ({
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          total: item.quantity * item.unitPrice,
+          total: lineTotals[i],
           productId: item.productId ?? null,
         })),
       };
@@ -1975,16 +1988,17 @@ export class CommerceService {
     }
 
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
-    const subtotal = quote.items.reduce((sum, item) => sum + item.total, 0);
     const taxRate = input.taxRate ?? 0;
-    const taxAmount = (subtotal * taxRate) / 100;
-    let discountAmount = 0;
-    if (input.discountType === 'PERCENT' && input.discountValue) {
-      discountAmount = (subtotal * input.discountValue) / 100;
-    } else if (input.discountType === 'FIXED' && input.discountValue) {
-      discountAmount = input.discountValue;
-    }
-    const total = subtotal + taxAmount - discountAmount;
+    // V1-22 (D-13): the quote's stored line totals (legacy rows may hold the
+    // raw float product) are rounded to cents, and the invoice is computed and
+    // stored in cents from them.
+    const amounts = computeDocumentAmounts({
+      lines: quote.items.map((item) => item.total),
+      taxRate,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+    });
+    const { subtotal, taxAmount, discountAmount, total } = amounts;
     // R0-27 review (ST-27-3): the converted invoice obeys the same amount rules
     // as a created one (no FIXED discount above the subtotal, no amount the
     // ledger cannot hold).
@@ -2018,11 +2032,11 @@ export class CommerceService {
           notes: input.notes ?? null,
           quoteId: quote.id,
           items: {
-            create: quote.items.map((item) => ({
+            create: quote.items.map((item, i) => ({
               description: item.description,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
-              total: item.total,
+              total: amounts.lineTotals[i],
               productId: item.productId ?? null,
             })),
           },
@@ -2153,7 +2167,9 @@ export class CommerceService {
     if (typeof input.amount !== 'number' || !Number.isFinite(input.amount)) {
       throw new BadRequestException('Payment amount must be a number');
     }
-    if (input.amount <= 0) {
+    // V1-22 (D-13): the amount is stored in cents, so it must be at least one
+    // cent once rounded; a sub-cent amount (0.004) would be stored as 0.
+    if (toCents(input.amount) <= 0) {
       throw new BadRequestException('Payment amount must be positive');
     }
     if (typeof input.method !== 'string' || input.method.trim().length === 0) {
@@ -2194,7 +2210,8 @@ export class CommerceService {
     // ledger stays truthful. The UI presents an explicit confirm + warning
     // toast when amount > remaining and prompts the operator to issue a refund
     // from the Payments tab to settle the over-paid balance.
-    const paymentAmount = input.amount;
+    // V1-22 (D-13): stored, posted and compared in cents.
+    const paymentAmount = roundMoney(input.amount);
 
     // FIN2 — record the payment row and post the deposit-side ledger
     // entries in a single transaction so a posting failure rolls back the
@@ -2248,7 +2265,7 @@ export class CommerceService {
           // rows under the lock, so a manual refund that committed in the gap
           // refuses this call rather than being counted twice.
           const remaining = CommerceService.markPaidRemaining(Number(current?.total ?? 0), current?.payments ?? [], current?.currency);
-          if (Math.abs(remaining - options.expectRemaining) > 0.005) {
+          if (!moneyEquals(remaining, options.expectRemaining)) {
             throw new ConflictException('The invoice balance changed while it was being marked paid; reload it and try again');
           }
         }
@@ -2317,7 +2334,8 @@ export class CommerceService {
     // sum of SUCCESSFUL rows, the formula this route and its replay use.
     const newPaidTotal = reconciled.balance.paid;
     const invoiceTotal = reconciled.balance.total;
-    const overPaid = newPaidTotal > invoiceTotal + 0.005 ? Number((newPaidTotal - invoiceTotal).toFixed(2)) : 0;
+    // V1-22: in cents (the remaining after 33.33 x 3 on 100.00 read 0.010000000000005116).
+    const overPaid = fromCents(Math.max(0, toCents(newPaidTotal) - toCents(invoiceTotal)));
     const newStatus = reconciled.status;
     const updatedInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
@@ -2355,7 +2373,7 @@ export class CommerceService {
       payment,
       invoice: updatedInvoice,
       paidAmount: newPaidTotal,
-      remaining: Math.max(0, invoiceTotal - newPaidTotal),
+      remaining: Math.max(0, subtractMoney(invoiceTotal, newPaidTotal)),
     };
   }
 
@@ -2394,7 +2412,7 @@ export class CommerceService {
   ): number {
     const flippedRefund = rows.some((r) => r.status === 'REFUNDED' && Number(r.amount) > 0);
     const balance = computeBalance(total, rows, currency ?? undefined);
-    if (flippedRefund || balance.remaining > balance.total + 0.005) {
+    if (flippedRefund || toCents(balance.remaining) > toCents(balance.total)) {
       throw new ConflictException(
         'Cannot mark an invoice paid after one of its payments was refunded; record the payment received instead',
       );
@@ -2429,7 +2447,8 @@ export class CommerceService {
     }
     const reference = dedupeByReference && typeof input.reference === 'string' ? input.reference.trim() : '';
     if (reference.length > 0) {
-      return { value: `manual_${invoiceId}_ref_${digest(`${reference}\n${input.amount.toFixed(2)}`)}`, keyedOn: 'reference' };
+      // V1-22: the amount as stored (cents); for a cent amount this is the same text as before.
+      return { value: `manual_${invoiceId}_ref_${digest(`${reference}\n${roundMoney(input.amount).toFixed(2)}`)}`, keyedOn: 'reference' };
     }
     return { value: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, keyedOn: null };
   }
@@ -2488,7 +2507,7 @@ export class CommerceService {
    * longer SUCCESSFUL.
    */
   private async replayRecordedPayment(existing: Payment, invoiceId: string, amount: number, keyedOn: 'key' | 'reference') {
-    if (Math.abs(Number(existing.amount) - amount) > 0.005) {
+    if (!moneyEquals(Number(existing.amount), amount)) {
       throw new ConflictException('Idempotency key already used on this invoice with a different amount');
     }
     // R0-D2 review (ST-D2-2): once the operator refunded the payment in this
@@ -2510,14 +2529,14 @@ export class CommerceService {
       where: { id: invoiceId },
       include: { payments: true, contact: true, items: true },
     });
-    const paidAmount = (updatedInvoice?.payments ?? [])
-      .filter((p) => p.status === 'SUCCESSFUL')
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    const paidAmount = sumMoney(
+      (updatedInvoice?.payments ?? []).filter((p) => p.status === 'SUCCESSFUL').map((p) => Number(p.amount)),
+    );
     return {
       payment: existing,
       invoice: updatedInvoice,
       paidAmount,
-      remaining: Math.max(0, Number(updatedInvoice?.total ?? 0) - paidAmount),
+      remaining: Math.max(0, subtractMoney(Number(updatedInvoice?.total ?? 0), paidAmount)),
     };
   }
 
@@ -3011,13 +3030,12 @@ export class CommerceService {
       where: { invoiceId },
       orderBy: { createdAt: 'desc' },
     });
-    const paidAmount = payments
-      .filter((p) => p.status === 'SUCCESSFUL')
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
+    const paidAmount = sumMoney(payments.filter((p) => p.status === 'SUCCESSFUL').map((p) => Number(p.amount)));
     return {
       payments,
       paidAmount,
-      remaining: Math.max(0, Number(invoice.total) - paidAmount),
+      remaining: Math.max(0, subtractMoney(Number(invoice.total), paidAmount)),
       invoiceTotal: invoice.total,
     };
   }
@@ -3143,18 +3161,17 @@ export class CommerceService {
           throw new NotFoundException('Product not found');
         }
       }
-      const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
-      const taxAmount = (subtotal * taxRate) / 100;
-      let discountAmount = 0;
       const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
       const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
-      if (discountType === 'PERCENT' && discountValue) {
-        discountAmount = (subtotal * discountValue) / 100;
-      } else if (discountType === 'FIXED' && discountValue) {
-        discountAmount = discountValue;
-      }
-      const total = subtotal + taxAmount - discountAmount;
+      // V1-22 (D-13): in integer cents, the same rules as create.
+      const amounts = computeDocumentAmounts({
+        lines: input.items.map((item) => lineAmount(item.quantity, item.unitPrice)),
+        taxRate,
+        discountType,
+        discountValue,
+      });
+      const { subtotal, taxAmount, discountAmount, total } = amounts;
       // R0-27 review (ST-27-3): the same amount rules as create, checked before
       // the existing items are deleted, so a refused edit writes nothing.
       this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
@@ -3168,29 +3185,29 @@ export class CommerceService {
       updateData.discountAmount = discountAmount;
       updateData.total = total;
       updateData.items = {
-        create: input.items.map((item) => ({
+        create: input.items.map((item, i) => ({
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          total: item.quantity * item.unitPrice,
+          total: amounts.lineTotals[i],
           productId: item.productId || null,
         })),
       };
     } else if (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined) {
-      const subtotal = invoice.subtotal;
       const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
-      const taxAmount = (subtotal * taxRate) / 100;
-      let discountAmount = 0;
       const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
       const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
-      if (discountType === 'PERCENT' && discountValue) {
-        discountAmount = (subtotal * discountValue) / 100;
-      } else if (discountType === 'FIXED' && discountValue) {
-        discountAmount = discountValue;
-      }
-      const total = subtotal + taxAmount - discountAmount;
+      // V1-22 (D-13): recomputed in cents from the stored subtotal (a legacy
+      // row may hold the raw float sum; it is rewritten in cents with the rest).
+      const { subtotal, taxAmount, discountAmount, total } = computeDocumentAmounts({
+        lines: [invoice.subtotal],
+        taxRate,
+        discountType,
+        discountValue,
+      });
       // R0-27 review (ST-27-3): a FIXED discount above the stored subtotal is refused.
       this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+      updateData.subtotal = subtotal;
       updateData.taxRate = taxRate;
       updateData.taxAmount = taxAmount;
       updateData.discountType = discountType;
