@@ -393,6 +393,11 @@
       "packet": "V1-29 (V1-29c-REFUND-WRITE-DOOR)"
     },
     {
+      "prefix": "v29e_",
+      "owner": "apps/server/test/crm-revenue-net.integration.test.ts",
+      "packet": "V1-29 (V1-29e-CRM-REVENUE-NET)"
+    },
+    {
       "prefix": "v32a_",
       "owner": "apps/server/test/key-action-proposal-claim.integration.test.ts",
       "packet": "V1-32-KEY-PROPOSAL-CLAIM"

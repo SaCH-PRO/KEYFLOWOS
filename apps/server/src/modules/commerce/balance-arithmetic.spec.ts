@@ -48,6 +48,10 @@
  *          ownTenantReceiptBalance, which does) and never call computeBalance on them (it reads a
  *          pre-V1-29 flipped row as a refund twice); sumSuccessfulPayments, the last inventory
  *          entry of the commerce email path, has no production caller
+ *   BA-10  (V1-29e-CRM-REVENUE-NET, verification finding VR-02) the CRM contact revenue summary
+ *          (crm-revenue.service.ts, an inventory entry until V1-29e) holds no SUCCESSFUL-only or
+ *          status-blind sum, sums lifetime revenue over CASH_NET_PAYMENT_WHERE, reads each
+ *          payment through balanceOfStoredRows and never calls computeBalance
  *
  * The mirror is loaded by path from the tree this spec runs in (a worktree
  * resolves @keyflow/shared to the main tree's built dist).
@@ -358,6 +362,12 @@ const REFUND_READER_SURFACES = {
 const REFUND_READER_FILES = [...REFUND_READER_SURFACES.server, ...REFUND_READER_SURFACES.web];
 
 /**
+ * V1-29e-CRM-REVENUE-NET (VR-02): the CRM contact revenue summary. It left the inventory below
+ * when it moved onto the contract; no SUCCESSFUL-only or status-blind read may return to it.
+ */
+const CRM_REVENUE_READER = 'apps/server/src/modules/crm/crm-revenue.service.ts';
+
+/**
  * SUCCESSFUL-only and status-blind money reads outside the V1-36 and
  * V1-29b write sets. Exact counts; the list only shrinks: each is a surface
  * that still reads a refunded invoice as paid and moves onto the contract in
@@ -365,13 +375,11 @@ const REFUND_READER_FILES = [...REFUND_READER_SURFACES.server, ...REFUND_READER_
  * commerce.controller.ts (1, CR-V29-1), payment-record-modal.tsx (1),
  * invoices/[id]/page.tsx (1) and invoices/page.tsx (2) (V36-CR-1); the
  * status-blind form it added found payments-ops.service.ts (fixed here) and
- * the two entries marked V1-29b below.
+ * the two entries marked V1-29b below. V1-29e-CRM-REVENUE-NET removed
+ * crm-revenue.service.ts (1, VR-02: contact lifetime revenue and payment
+ * counts read refunded money as received; BA-10 now holds it).
  */
 const KNOWN_OUTSIDE_WRITE_SET: Record<string, { count: number; why: string }> = {
-  'apps/server/src/modules/crm/crm-revenue.service.ts': {
-    count: 1,
-    why: 'contact lifetime revenue and payment counts (successfulPayments); refunds not subtracted',
-  },
   'apps/server/src/modules/commerce/invoice-email.types.ts': {
     count: 1,
     why: 'sumSuccessfulPayments: no production caller since V1-49 (the email figures read ownTenantReceiptBalance; BA-09 keeps it uncalled)',
@@ -408,7 +416,8 @@ describe('BA-04: SUCCESSFUL-only money reads are ratcheted out', () => {
   });
 
   it('outside the write sets the SUCCESSFUL-only and status-blind readers are exactly the known inventory (a new one fails; one that disappears lowers the inventory)', () => {
-    const ownedElsewhere = (file: string) => CANONICAL.has(file) || WRITE_SET_SURFACES.includes(file) || REFUND_READER_FILES.includes(file);
+    const ownedElsewhere = (file: string) =>
+      CANONICAL.has(file) || WRITE_SET_SURFACES.includes(file) || REFUND_READER_FILES.includes(file) || file === CRM_REVENUE_READER;
     const actual: Record<string, number> = {};
     for (const [file, rs] of byFile) {
       if (ownedElsewhere(file)) continue;
@@ -567,6 +576,24 @@ describe('BA-09: the server balance readers outside the V1-29 / V1-36 write sets
       .filter((f) => /\bsumSuccessfulPayments\b/.test(stripComments(readFileSync(f, 'utf8'))))
       .map(repoPath);
     expect(callers).toEqual([]);
+  });
+});
+
+describe('BA-10: the CRM contact revenue summary reads the contract (V1-29e-CRM-REVENUE-NET, VR-02)', () => {
+  const src = stripComments(readFileSync(join(REPO, CRM_REVENUE_READER), 'utf8'));
+
+  it('holds no SUCCESSFUL-only or status-blind money read', () => {
+    // RED-BEFORE (int/trial-I bf5ca9fe): crm-revenue.service.ts:121 (filter), the lifetime revenue,
+    // last payment and reliability of the contact insight card and the contact money page.
+    const found = scanSuccessfulOnlyReads(CRM_REVENUE_READER, readFileSync(join(REPO, CRM_REVENUE_READER), 'utf8'));
+    expect(found.map((r) => `${r.line} (${r.form})`)).toEqual([]);
+  });
+
+  it('sums lifetime revenue over CASH_NET_PAYMENT_WHERE, reads each payment through balanceOfStoredRows and never calls computeBalance', () => {
+    expect(src).toMatch(/import\s*\{[^}]*\bCASH_NET_PAYMENT_WHERE\b[^}]*\}\s*from\s*["']\.\.\/commerce\/invoice-workflow\.service["']/);
+    expect(src).toMatch(/\.\.\.CASH_NET_PAYMENT_WHERE\b/);
+    expect(src).toMatch(/\bbalanceOfStoredRows\s*\(/);
+    expect(src.match(/\bcomputeBalance\s*\(/g) ?? []).toEqual([]);
   });
 });
 
