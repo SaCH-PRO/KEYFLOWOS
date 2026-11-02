@@ -69,6 +69,11 @@
       "packet": "R0-07 / R0-SEC2-WHATSAPP-CONFIG-AUTHORITY"
     },
     {
+      "prefix": "k07p_",
+      "owner": "apps/server/test/payment-secrets-write-only.integration.test.ts",
+      "packet": "R0-07 / R0-SEC2c-PAYMENT-SECRETS-WRITE-ONLY"
+    },
+    {
       "prefix": "k08c_",
       "owner": "apps/server/test/subscriptions-authority.integration.test.ts",
       "packet": "R0-08 / R0-08c-SUBSCRIPTION-AUTHORITY"
