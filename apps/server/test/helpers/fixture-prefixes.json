@@ -293,6 +293,11 @@
       "packet": "V1-06-BK-BASELINE-PARITY"
     },
     {
+      "prefix": "v09a_",
+      "owner": "apps/server/test/key-command-ask-governed.integration.test.ts",
+      "packet": "V1-09-KEY-COMMAND-GOVERNED"
+    },
+    {
       "prefix": "v10a_",
       "owner": "apps/server/test/key-cortex-plan-execution.integration.test.ts",
       "packet": "V1-10-KEY-PLANNER-CLAIM"
