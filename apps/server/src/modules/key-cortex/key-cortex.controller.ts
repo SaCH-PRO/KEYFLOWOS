@@ -44,6 +44,9 @@ import {
   UnauthorizedException,
   Logger,
   Inject,
+  Injectable,
+  type CanActivate,
+  type ExecutionContext,
 } from '@nestjs/common';
 import { KeyCortexSessionService } from './key-cortex-session.service';
 import {
@@ -122,7 +125,10 @@ import {
 
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard, type BusinessGuardedRequest } from '../../core/auth/business.guard';
-import { GuardedBusinessId } from '../../core/auth/request-business-id';
+import { GuardedBusinessId, resolveRequestBusinessId } from '../../core/auth/request-business-id';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { membershipApprovalTier } from '../../core/authority/approval-tier';
+import { DEFAULT_APPROVAL_TIERS, MAX_APPROVAL_TIER } from '../../core/authority/module-vocabulary';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
@@ -183,6 +189,97 @@ function requestActorId(user: AuthenticatedUser | undefined): string {
     throw new UnauthorizedException('Authenticated user required');
   }
   return id;
+}
+
+/** The membership roles that may write the KEY autonomy profile (V1-03). */
+const AUTONOMY_PROFILE_WRITER_ROLES = new Set(['OWNER', 'ADMIN']);
+
+/**
+ * V1-03-KEY-CORTEX-PRINCIPAL (build map CF-28, M47; owner ruling D-17): who
+ * may write the KEY autonomy profile, the global kill switch and the tier
+ * ceiling included.
+ *
+ * PATCH autonomy-profile sat behind AuthGuard and BusinessGuard only, so any
+ * member (STAFF included) could switch the kill switch off or raise
+ * maxTierWithoutApproval, the tier above which KEY always asks a human. Now:
+ *
+ *   - the writer is an OWNER or ADMIN membership of the tenant, the owner of
+ *     record (Business.ownerId, the second arm IdentityService.assertBusinessOwner
+ *     admits, at the OWNER tier), or SUPER_ADMIN (the platform bypass
+ *     BusinessGuard grants, at the maximum tier); everyone else is 403;
+ *   - nobody raises maxTierWithoutApproval above the approval tier they hold
+ *     themselves (the Membership rule in core/authority/approval-tier.ts: OWNER
+ *     4, ADMIN 3 by default), so an ADMIN cannot let KEY run tier-4 tools
+ *     unapproved; a value that is not a finite number is 400 here, before it
+ *     could slip past the comparison.
+ *
+ * The tenant is the one BusinessGuard checked (`guardedBusinessId`; for
+ * SUPER_ADMIN, whom the guard admits without one, the same resolver), which is
+ * the tenant @GuardedBusinessId() hands the handler, so a body businessId
+ * naming another tenant cannot borrow the caller's role there. It runs as a
+ * route guard, after the class guards, so the handler's signature (and the
+ * parameter types key-cortex-tenant-binding.spec.ts pins) is unchanged; it
+ * reads the raw body, which the ValidationPipe validates afterwards.
+ */
+@Injectable()
+export class AutonomyProfileWriteGuard implements CanActivate {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<BusinessGuardedRequest>();
+    const user = req?.user;
+    if (typeof user?.id !== 'string' || user.id.length === 0) {
+      throw new UnauthorizedException('Authenticated user required');
+    }
+    const guarded = req.guardedBusinessId;
+    const businessId = typeof guarded === 'string' && guarded.length > 0 ? guarded : resolveRequestBusinessId(req);
+    if (!businessId) {
+      throw new BadRequestException('businessId is required');
+    }
+
+    const tier = await this.writerTier(businessId, { id: user.id, role: user.role });
+    if (tier === null) {
+      throw new ForbiddenException('Only an owner or admin of this business can change the KEY autonomy profile');
+    }
+
+    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+    const requested = body.maxTierWithoutApproval;
+    if (requested !== undefined && requested !== null) {
+      if (typeof requested !== 'number' || !Number.isFinite(requested)) {
+        throw new BadRequestException('maxTierWithoutApproval must be a number');
+      }
+      if (requested > tier) {
+        throw new ForbiddenException(
+          `Setting maxTierWithoutApproval to ${requested} requires approval tier ${requested}; you have tier ${tier}`,
+        );
+      }
+    }
+    return true;
+  }
+
+  /** The approval tier of an autonomy-profile writer in `businessId`, or null for anyone else. */
+  private async writerTier(businessId: string, user: { id: string; role?: string }): Promise<number | null> {
+    if (user.role === 'SUPER_ADMIN') return MAX_APPROVAL_TIER;
+    try {
+      // Membership is not tenant-scoped by the Prisma extension: the compound
+      // key's businessId is what keeps this read inside the tenant.
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: user.id, businessId } },
+        select: { role: true, maxApprovalTier: true, permissionScopes: true },
+      });
+      if (membership && AUTONOMY_PROFILE_WRITER_ROLES.has(membership.role)) {
+        return membershipApprovalTier(membership);
+      }
+      const owned = await this.prisma.client.business.findFirst({
+        where: { id: businessId, ownerId: user.id },
+        select: { id: true },
+      });
+      return owned ? DEFAULT_APPROVAL_TIERS.OWNER : null;
+    } catch {
+      // Fail closed, as BusinessGuard does when its lookup fails.
+      throw new ForbiddenException('Unable to verify autonomy-profile authority');
+    }
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -1294,8 +1391,13 @@ export class KeyCortexController {
    * non-string `businessId` reached the service raw. The body is the class DTO
    * now (the pipe validates the fields and strips `businessId`, which the guard
    * read from the raw body first), and the tenant is the one the guard checked.
+   *
+   * V1-03 (CF-28): only an OWNER or ADMIN of that tenant (or its owner of
+   * record, or SUPER_ADMIN) may write it, and never above their own approval
+   * tier (AutonomyProfileWriteGuard). Any member still reads it (GET).
    */
   @Patch('autonomy-profile')
+  @UseGuards(AutonomyProfileWriteGuard)
   async updateAutonomyProfile(
     @Body() dto: UpdateAutonomyProfileDto,
     @GuardedBusinessId() businessId: string,
