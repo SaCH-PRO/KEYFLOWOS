@@ -20,6 +20,9 @@
  *   - GET /site/storefront/public/:slug (site.service.ts getPublicStorefront)
  *     honours storeEnabled (CF-56) but returns the same full product and
  *     service rows.
+ *   - GET /bookings/public/businesses/:id/slots (review repair SEC-V123-2)
+ *     answered a closed store's open times, derived from its business hours
+ *     and existing bookings, while its services and staff were a 404.
  *
  * Contract pinned here:
  *
@@ -31,8 +34,8 @@
  *   services                      -> exactly { id, name, description, duration, price }
  *   site storefront               -> the same product (no availability) and service projections
  *   storeEnabled=false            -> 404, the same body as a business that does not exist,
- *                                    on products, staff and services; a store that is
- *                                    on but lists nothing is still 200 []
+ *                                    on products, staff, services and slots; a store that
+ *                                    is on but lists nothing is still 200 []
  *   rate limit                    -> the catalog products route carries
  *                                    @PublicRateLimit(N <= 60, >= 60s); request N+1
  *                                    in the window is a 429. Staff and services were
@@ -43,10 +46,11 @@
  * Nothing on the boundary is mocked: PrismaService, PublicRateLimitGuard (real
  * Redis at REDIS_URL, this suite's own key namespace), CatalogController,
  * CatalogService, CommerceController + CommerceService (the /book products
- * route), BookingsController and SiteController + SiteService read real rows
- * behind the production GlobalHttpExceptionFilter and ValidationPipe. Every
- * request is anonymous. Collaborators the public reads never call (booking
- * engine, waitlist, calendar, ledger, AI, orders, promo codes...) are stubs.
+ * route), BookingsController + BookingsService (the slots read) and
+ * SiteController + SiteService read real rows behind the production
+ * GlobalHttpExceptionFilter and ValidationPipe. Every request is anonymous.
+ * Collaborators the public reads never call (waitlist, calendar, ledger, AI,
+ * orders, promo codes, e-mail, timeline...) are stubs.
  *
  * Fixtures: prefix `v23a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
@@ -91,6 +95,17 @@ const ID = {
 };
 const SLUG = { a: `${P}store-a`, off: `${P}store-off`, empty: `${P}store-empty` };
 const UNKNOWN_BIZ = `${P}nosuchbiz`;
+
+/** 09:00-17:00 every day, so any slot date has open times to offer. */
+const OPEN_EVERY_DAY = Object.fromEntries(
+  ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map((d) => [d, { open: '09:00', close: '17:00', closed: false }]),
+);
+/** A local date two weeks out (YYYY-MM-DD): past every lead time, never in the past. */
+const SLOT_DATE = (() => {
+  const d = new Date();
+  d.setDate(d.getDate() + 14);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+})();
 
 /** The /book product contract: CommerceProduct (web components/types.ts) plus compareAtPrice. */
 const PRODUCT_KEYS = [
@@ -149,6 +164,8 @@ const commerceProducts = (biz: string) => agent().get(`/commerce/public/business
 const publicStaff = (biz: string) => agent().get(`/bookings/public/businesses/${encodeURIComponent(biz)}/staff`);
 const publicServices = (biz: string) => agent().get(`/bookings/public/businesses/${encodeURIComponent(biz)}/services`);
 const siteStorefront = (slug: string) => agent().get(`/site/storefront/public/${encodeURIComponent(slug)}`);
+const publicSlots = (biz: string, serviceId: string) =>
+  agent().get(`/bookings/public/businesses/${encodeURIComponent(biz)}/slots`).query({ serviceId, date: SLOT_DATE });
 
 function sortedKeys(row: unknown): string[] {
   return Object.keys((row ?? {}) as Record<string, unknown>).sort();
@@ -227,6 +244,9 @@ beforeAll(async () => {
   const { BookingWaitlistService } = await import('../src/modules/bookings/booking-waitlist.service');
   const { CalendarService } = await import('../src/modules/bookings/calendar.service');
   const { BookingOptimizerService } = await import('../src/modules/bookings/booking-optimizer.service');
+  const { RevenueAttributionService } = await import('../src/modules/commerce/revenue-attribution.service');
+  const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
+  const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   // Site
   const { SiteController } = await import('../src/modules/site/site.controller');
   const { SiteService } = await import('../src/modules/site/site.service');
@@ -261,6 +281,8 @@ beforeAll(async () => {
       { provide: REDIS_CLIENT, useValue: redis },
       CatalogService,
       CommerceService,
+      // Real: the public slots read (getAvailableSlots) runs against real rows.
+      BookingsService,
       SiteService,
       {
         provide: EventEmitter2,
@@ -279,7 +301,9 @@ beforeAll(async () => {
       { provide: TimeEntryService, useValue: stub },
       { provide: PublicEventsService, useValue: stub },
       { provide: RevenuePostingService, useValue: stub },
-      { provide: BookingsService, useValue: stub },
+      { provide: RevenueAttributionService, useValue: { record: async () => undefined } },
+      { provide: TransactionalEmailService, useValue: { send: async () => undefined } },
+      { provide: TimelineService, useValue: { recordEvent: async () => null } },
       { provide: BookingWaitlistService, useValue: stub },
       { provide: CalendarService, useValue: stub },
       { provide: BookingOptimizerService, useValue: stub },
@@ -309,8 +333,8 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.ownerA, email: `${P}ownerA@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.ownerOff, email: `${P}ownerOff@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.ownerEmpty, email: `${P}ownerEmpty@test.local`, role: 'USER' } });
-  await db.business.create({ data: { id: ID.bizA, name: 'V23A Store', slug: SLUG.a, ownerId: ID.ownerA, currency: 'TTD', storeEnabled: true } });
-  await db.business.create({ data: { id: ID.bizOff, name: 'V23A Closed Store', slug: SLUG.off, ownerId: ID.ownerOff, currency: 'TTD', storeEnabled: false } });
+  await db.business.create({ data: { id: ID.bizA, name: 'V23A Store', slug: SLUG.a, ownerId: ID.ownerA, currency: 'TTD', storeEnabled: true, businessHours: OPEN_EVERY_DAY } });
+  await db.business.create({ data: { id: ID.bizOff, name: 'V23A Closed Store', slug: SLUG.off, ownerId: ID.ownerOff, currency: 'TTD', storeEnabled: false, businessHours: OPEN_EVERY_DAY } });
   await db.business.create({ data: { id: ID.bizEmpty, name: 'V23A Empty Store', slug: SLUG.empty, ownerId: ID.ownerEmpty, currency: 'TTD', storeEnabled: true } });
 
   // A paid digital resource: the file, its licence, the SKU and the execution
@@ -435,8 +459,14 @@ describe('V1-23 GET /commerce/public/businesses/:id/products (the route /book ca
     expectNoCanary(off.body);
   });
 
+  // Review findings SEC-V123-1 / V23-CR-1 (confirmed by running): this is the
+  // products route /book calls, it serves the same rows as the limited
+  // catalog route, and with no global throttler it keeps answering after the
+  // catalog route is a 429. The fix is @UseGuards(PublicRateLimitGuard)
+  // @PublicRateLimit(30, 60_000) on CommerceController.listPublicProducts; it
+  // cannot be enforced from CatalogService (no request, no client IP there).
   it.todo(
-    'is rate limited: the guard belongs on CommerceController.listPublicProducts (commerce.controller.ts), outside the V1-23 write set',
+    'is rate limited: the guard belongs on CommerceController.listPublicProducts (commerce.controller.ts), outside the V1-23 write set; follow-up packet (SEC-V123-1, V23-CR-1)',
   );
 });
 
@@ -492,6 +522,44 @@ describe('V1-23 GET /bookings/public/businesses/:id/services', () => {
     expect(statuses.slice(0, opts!.limit).every((s) => s === 200), statuses.join(',')).toBe(true);
     expect(statuses[opts!.limit]).toBe(429);
   });
+});
+
+// ---------------------------------------------------------------------------
+describe('V1-23 GET /bookings/public/businesses/:id/slots (review repair SEC-V123-2)', () => {
+  it('RED-BEFORE: storeEnabled=false is a 404 with the same body as an unknown business; no open times are disclosed', async () => {
+    const off = await publicSlots(ID.bizOff, ID.svcOff);
+    const unknown = await publicSlots(UNKNOWN_BIZ, ID.svcOff);
+    expect(off.status, `closed store answered ${off.status} ${JSON.stringify(off.body)}`).toBe(404);
+    expect(off.body).not.toHaveProperty('slots');
+    expect(unknown.status).toBe(404);
+    expect(stripVolatile(off.body)).toEqual(stripVolatile(unknown.body));
+    expectNoCanary(off.body);
+  });
+
+  it('CONTROL: an open store still answers its open times for the day', async () => {
+    const res = await publicSlots(ID.bizA, ID.svcA);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.date).toBe(SLOT_DATE);
+    expect(Array.isArray(res.body.slots)).toBe(true);
+    expect(res.body.slots.length, 'a 09:00-17:00 day offers times').toBeGreaterThan(0);
+    for (const s of res.body.slots) expect(Number.isNaN(Date.parse(s)), s).toBe(false);
+    expect(sortedKeys(res.body)).toEqual(['date', 'slots']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+describe('V1-23 sibling public product reads outside the write set', () => {
+  // Review finding SEC-V123-3 (confirmed by running): POST
+  // /site/storefront/public/:slugOrId/qualification-recommend
+  // (site.controller.ts -> qualification.service.ts scoreAndRecommend) never
+  // reads storeEnabled, lists a closed store's active products with
+  // executionMeta in allProducts, and writes a QualificationJourney row for
+  // it. Its sibling GET .../qualification-flow already 404s a closed store.
+  // Whether executionMeta is public at all is an owner ruling: the web
+  // guided selector reads it from this route.
+  it.todo(
+    'qualification-recommend 404s a closed store and returns the product projection: qualification.service.ts is outside the V1-23 write set; follow-up packet (SEC-V123-3)',
+  );
 });
 
 // ---------------------------------------------------------------------------

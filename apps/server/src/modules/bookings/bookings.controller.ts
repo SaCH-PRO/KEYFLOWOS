@@ -186,6 +186,10 @@ export class BookingsController {
    * Read-only, so no honeypot: that guard exists to catch bots submitting
    * forms, and refusing to answer "when are you open" would just push the
    * widget back to asking people to type an ISO timestamp.
+   *
+   * A closed or unknown storefront is a 404 (assertPublicStore), like the
+   * service and staff lists beside it (V1-23): a closed store's open times,
+   * derived from its business hours and existing bookings, are not public.
    */
   @UseGuards(PublicRateLimitGuard)
   @PublicRateLimit(60, 60_000)
@@ -205,6 +209,7 @@ export class BookingsController {
     if (!parts) throw new BadRequestException('date must be YYYY-MM-DD');
     const day = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]));
     if (Number.isNaN(day.getTime())) throw new BadRequestException('date must be a valid date');
+    await this.catalog.assertPublicStore(businessId);
     return this.bookings.getAvailableSlots({
       businessId,
       serviceId: sanitizeRequired(serviceId, 'serviceId', 200),
