@@ -56,16 +56,44 @@
  * idempotency service's sha256 fingerprint of the request's canonical JSON, and
  * a request with no fingerprint is refused before it claims anything.
  *
+ * V1-19b review repairs, pinned here too (measured on the V1-19b head, scratch
+ * suite and the review probes):
+ *   - SEC-V19b-1 / CR-V19b-1: a handler answering { success: false } without
+ *     throwing was settled 'completed', and every replay answered
+ *     { success: true, data: <the whole stored result> }, so a soft failure
+ *     replayed as a success, and a replay never had the first call's shape.
+ *     Required: such a key is settled 'failed'; a replay answers exactly as
+ *     the first call did; a row stored 'completed' with a failure answer
+ *     before this repair replays as the failure it is.
+ *   - SEC-V19b-2: the approval path released its claim, so every retry under
+ *     one key filed another proposal (3 retries, 3 proposals). Required: the
+ *     key settles with the proposal; a retry is answered with that proposal and
+ *     files none; the approved run (KeyCortexActionExecutorPlugin: preApproved,
+ *     no key) runs the tool once.
+ *   - SEC-V19b-3 / CR-V19b-2: a saga step that could not be recorded threw
+ *     inside the run's try, and its catch settled the key 'failed' though the
+ *     tool never ran (every retry replayed the saga error, runs=0). Required:
+ *     the claim is given up, and a retry runs the tool.
+ *   - SEC-V19b-4: the replay ran ahead of the safety gate and was bound to the
+ *     tool and input only, so another member at autonomy 0, with the kill
+ *     switch on, was handed the stored outcome; none of the gate's own answers
+ *     was audited. Required: the safety gate (kill switch) answers first; the
+ *     request is bound to the acting user, so another member's use of the key
+ *     is a 'conflict'; replays and refusals are recorded on the business-event
+ *     ledger with the actor and the key.
+ *
  * WHAT IS REAL: PrismaService and the Prisma client against DATABASE_URL (the
  * tenant-scope extension included: idempotency_keys is a tenant-scoped model),
  * KeyIdempotencyService, the idempotency_keys rows and their unique index;
  * in the consumer cases, KeyCortexToolRegistryService (execute, its Phase 0
- * gate, its request hash, its audit and score writes). Stand-ins there only:
- * the autonomy safety service (allows unless a case blocks it, records
- * nothing), the saga service (unused: no sagaId), the proposal service (hands
- * back an id, as filing a proposal does), and the registered tools, which
- * count their runs (one parks itself as the KEY action boundary would, one
- * throws, one needs a title, two are tier 3 and tier 4).
+ * gate, its request hash, its audit and score writes) and its audit sink,
+ * KeyCortexAuditService over BusinessEventService (business_events rows).
+ * Stand-ins there only: the autonomy safety service (allows unless a case
+ * blocks it, records nothing), the saga service (records nothing; a case makes
+ * addStep throw), the proposal service (hands back an id, as filing a proposal
+ * does), and the registered tools, which count their runs (one parks itself as
+ * the KEY action boundary would, one throws, one answers a failure without
+ * throwing, one needs a title, two are tier 3 and tier 4).
  *
  * Every seeded row carries the `v19a_` prefix (business ids, user ids and
  * emails, idempotency keys) and is hard-deleted by raw SQL with
@@ -85,6 +113,8 @@ const P = 'v19a_';
 
 const ID = {
   owner: `${P}owner`,
+  /** Another member of the same business (an actor id only: the registry takes it from ctx). */
+  member: `${P}member`,
   biz: `${P}biz`,
   otherBiz: `${P}biz_other`,
 };
@@ -94,7 +124,7 @@ let app: any;
 let service: any;
 let tenant: any;
 let registry: any;
-let fingerprint: (toolName: string, input: unknown) => string;
+let fingerprint: (toolName: string, input: unknown, actorId?: string) => string;
 
 /** The consumer cases' tool: each run it performed, and how long a run takes. */
 const TOOL = 'v19a.create_ticket';
@@ -107,15 +137,19 @@ const TOOL_TIER3 = 'v19a.tier3_ticket'; // sent for approval below preApproved
 const TOOL_TIER4 = 'v19a.tier4_ticket'; // refused outright below preApproved
 const TOOL_PARKED = 'v19a.parked_ticket'; // the handler answers notExecuted while parked
 const TOOL_FAILING = 'v19a.failing_ticket'; // the handler throws
+const TOOL_SOFT = 'v19a.soft_failing_ticket'; // the handler answers { success: false } without throwing
 
 /** Steered per case, reset in its finally. */
 const safetyGate: { answer: Record<string, unknown>; throws?: string } = { answer: { allowed: true } };
+const sagaGate: { throws?: string } = {};
 const boundary = { park: false };
 const proposalsFiled: string[] = [];
+const proposalsDown = { down: false };
 
 async function cleanup() {
   for (const sql of [
     `DELETE FROM idempotency_keys WHERE business_id LIKE ${sqlLikePrefix(P)} OR idempotency_key LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM business_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM cortex_action_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM tool_outcome_scores WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -165,8 +199,9 @@ beforeAll(async () => {
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
   const idempotencyMod: any = await import('../src/modules/key-cortex/key-idempotency.service');
   const { KeyIdempotencyService } = idempotencyMod;
-  // V1-19b: the request fingerprint the registry claims under (absent before).
-  fingerprint = (toolName, input) => idempotencyMod.fingerprintToolRequest(toolName, input);
+  // V1-19b: the request fingerprint the registry claims under (absent before);
+  // V1-19b review (SEC-V19b-4): the acting user is part of it.
+  fingerprint = (toolName, input, actorId) => idempotencyMod.fingerprintToolRequest(toolName, input, actorId);
 
   const moduleRef = await Test.createTestingModule({
     providers: [
@@ -194,14 +229,26 @@ beforeAll(async () => {
     },
     recordExecution: async () => undefined,
   };
-  const saga = {};
+  const saga = {
+    addStep: async () => {
+      if (sagaGate.throws) throw new Error(sagaGate.throws);
+    },
+    completeStep: async () => undefined,
+    failStep: async () => undefined,
+    compensate: async () => [],
+  };
   const proposals = {
     create: async () => {
+      if (proposalsDown.down) throw new Error('v19a: proposal store unreachable');
       const id = `${P}proposal_${proposalsFiled.length + 1}`;
       proposalsFiled.push(id);
       return { id };
     },
   };
+  // The registry's audit sink, real: KeyCortexAuditService over BusinessEventService (business_events rows).
+  const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
+  const { KeyCortexAuditService } = await import('../src/modules/key-cortex/key-cortex-audit.service');
+  const auditService = new KeyCortexAuditService(new BusinessEventService(moduleRef.get(PrismaService)));
   // Positionally: prisma, safety, idempotency, saga, learning, audit service, event bus, proposals.
   registry = new KeyCortexToolRegistryService(
     moduleRef.get(PrismaService),
@@ -209,7 +256,7 @@ beforeAll(async () => {
     service,
     saga as any,
     undefined,
-    undefined,
+    auditService,
     undefined,
     proposals as any,
   );
@@ -246,6 +293,15 @@ beforeAll(async () => {
       handler: async (_ctx: any, input: Record<string, unknown>) => {
         toolRuns.push(input);
         throw new Error('v19a: provider said no');
+      },
+    }),
+  );
+  registry.register(
+    toolDef(TOOL_SOFT, {
+      // As the efferent bridge answers a bridged tool that failed (key-cortex-efferent-bridge.service.ts).
+      handler: async (_ctx: any, input: Record<string, unknown>) => {
+        toolRuns.push(input);
+        return { success: false, error: 'v19a: provider declined' };
       },
     }),
   );
@@ -590,8 +646,8 @@ async function spySettles<T>(fn: () => Promise<T>) {
     settles.push({ op: 'complete', req: r, settled });
     return settled;
   };
-  service.fail = async (r: any, error: string) => {
-    const settled = await fail(r, error);
+  service.fail = async (r: any, error: string, response?: unknown) => {
+    const settled = await fail(r, error, response);
     settles.push({ op: 'fail', req: r, settled });
     return settled;
   };
@@ -639,8 +695,10 @@ describe('through the only consumer, KeyCortexToolRegistryService.execute (V1-19
     const other = await registry.execute(TOOL, ctxFor(key), { title: `${key}_B` });
     const replay = await registry.execute(TOOL, ctxFor(key), { title: `${key}_A` });
 
-    // The registry stores the whole tool result and replays it as `data`.
-    expect(replay).toEqual({ success: true, data: first });
+    // The registry stores the whole tool result and replays it as it was: the
+    // first call's own answer (V1-19b review, SEC-V19b-1: it was wrapped as
+    // the `data` of a new success, { success: true, data: first }).
+    expect(replay).toEqual(first);
     expect(runsOf(`${key}_A`)).toBe(1);
     const [row] = await rowsFor(ID.biz, key);
     expect(row).toMatchObject({ status: 'completed', response: first });
@@ -676,9 +734,9 @@ describe('through the only consumer, KeyCortexToolRegistryService.execute (V1-19
     expect(settles).toEqual([
       { op: 'complete', settled: true, req: { businessId: ID.biz, idempotencyKey: key, requestHash: row.requestHash, claimId: row.id } },
     ]);
-    expect(row.requestHash).toBe(fingerprint(TOOL, { title }));
+    expect(row.requestHash).toBe(fingerprint(TOOL, { title }, ID.owner));
 
-    expect(await registry.execute(TOOL, ctxFor(key), { title })).toEqual({ success: true, data: row.response });
+    expect(await registry.execute(TOOL, ctxFor(key), { title })).toEqual(row.response);
     expect(runsOf(title)).toBe(1);
   });
 });
@@ -692,7 +750,7 @@ describe("V1-19b: a 'pending' or 'conflict' answer never runs the tool (SEC-V19-
   it("a key whose claim another caller holds is answered 'pending': the tool does not run, nothing is settled, and the holder's claim stays open for the holder alone to settle", async () => {
     const key = freshKey('reg_pending');
     const input = { title: `${key}_T` };
-    const hash = fingerprint(TOOL, input);
+    const hash = fingerprint(TOOL, input, ID.owner);
     const holder = await service.check(req(key, hash));
     expect(holder.status).toBe('new');
 
@@ -753,7 +811,7 @@ describe('V1-19b: only the claim holder settles, by its claimId and request hash
     expect(settles).toEqual([
       { op: 'fail', settled: true, req: { businessId: ID.biz, idempotencyKey: key, requestHash: row.requestHash, claimId: row.id } },
     ]);
-    expect(row.requestHash).toBe(fingerprint(TOOL_FAILING, input));
+    expect(row.requestHash).toBe(fingerprint(TOOL_FAILING, input, ID.owner));
 
     expect(await registry.execute(TOOL_FAILING, ctxFor(key), input)).toEqual({ success: false, error: 'v19a: provider said no' });
     expect(runsOf(input.title)).toBe(1);
@@ -767,7 +825,10 @@ describe('V1-19b: only the claim holder settles, by its claimId and request hash
  * the approved re-execution of a proposal included.
  */
 describe('V1-19b: every path that returns without running the tool releases its claim (CR-V19-2)', () => {
-  it('the autonomy safety gate blocks the call: the claim is released, and the retry under the same key reaches the tool once the gate allows it', async () => {
+  // V1-19b review (SEC-V19b-4): the safety gate now answers ahead of the key,
+  // so a call it blocks has claimed nothing; the pins (no row, the retry runs)
+  // are unchanged.
+  it('the autonomy safety gate blocks the call: no claim is left, and the retry under the same key reaches the tool once the gate allows it', async () => {
     const key = freshKey('rel_safety');
     const input = { title: `${key}_S` };
     safetyGate.answer = { allowed: false, reason: 'v19a: autonomy kill switch active' };
@@ -786,7 +847,7 @@ describe('V1-19b: every path that returns without running the tool releases its 
     expect(runsOf(input.title)).toBe(1);
   });
 
-  it('the safety gate itself fails (throws): the error propagates as before, and the claim is released, not stranded', async () => {
+  it('the safety gate itself fails (throws): the error propagates as before, and no claim is stranded', async () => {
     const key = freshKey('rel_safety_throw');
     const input = { title: `${key}_E` };
     safetyGate.throws = 'v19a: safety store unreachable';
@@ -818,20 +879,67 @@ describe('V1-19b: every path that returns without running the tool releases its 
     expect(await rowsFor(ID.biz, key)).toEqual([]);
   });
 
-  it("a tier-3 tool is sent for approval: the claim is released, and the approved re-execution under the same key runs the tool once and becomes the key's outcome", async () => {
+  /**
+   * V1-19b review, SEC-V19b-2. This case pinned "the claim is released, and
+   * the approved re-execution under the same key runs the tool": a caller that
+   * does not exist (KeyCortexActionExecutorPlugin runs an approved proposal
+   * preApproved and WITHOUT a key), and a release that let every retry under
+   * the key file another proposal (measured on the V1-19b head: 3 retries, 3
+   * proposals, no row). The path that files a proposal is the one no-run path
+   * that keeps its key: it settles with the proposal.
+   */
+  it('a tier-3 tool is sent for approval: the key settles with the proposal; retries under the key, approved or not, are answered with that one proposal and file no other; the approved run, as KeyCortexActionExecutorPlugin makes it, runs the tool once', async () => {
     const key = freshKey('rel_proposal');
     const input = { title: `${key}_P` };
+    const filedBefore = proposalsFiled.length;
     const filed = await registry.execute(TOOL_TIER3, ctxFor(key), input);
-    expect(filed).toMatchObject({ success: false, requiresApproval: true, data: { proposalId: expect.stringMatching(/^v19a_proposal_/) } });
+    expect(filed).toEqual({
+      success: false,
+      requiresApproval: true,
+      error: `HIGH risk tool "${TOOL_TIER3}" requires explicit user approval — sent for approval`,
+      data: { proposalId: expect.stringMatching(/^v19a_proposal_/) },
+    });
     expect(runsOf(input.title)).toBe(0);
-    expect(await rowsFor(ID.biz, key)).toEqual([]);
+    expect(await rowsFor(ID.biz, key)).toEqual([
+      { status: 'failed', requestHash: fingerprint(TOOL_TIER3, input, ID.owner), response: filed, error: filed.error },
+    ]);
 
-    // As KeyCortexActionExecutorPlugin executes an approved proposal: preApproved.
-    const approved = await registry.execute(TOOL_TIER3, ctxFor(key, { preApproved: true }), input);
+    // Retries of the request: the same proposal, none filed, nothing run.
+    expect(await registry.execute(TOOL_TIER3, ctxFor(key), input)).toEqual(filed);
+    expect(await registry.execute(TOOL_TIER3, ctxFor(key), input)).toEqual(filed);
+    // Presenting the key again with preApproved is a retry of this request too.
+    expect(await registry.execute(TOOL_TIER3, ctxFor(key, { preApproved: true }), input)).toEqual(filed);
+    expect(proposalsFiled.length - filedBefore).toBe(1);
+    expect(runsOf(input.title)).toBe(0);
+
+    // The approved run is the proposal's own, as KeyCortexActionExecutorPlugin
+    // makes it (key-cortex-action-executor.plugin.ts): preApproved, no key.
+    const approvedCtx = { businessId: ID.biz, userId: ID.owner, autonomyLevel: 4, preApproved: true };
+    const approved = await registry.execute(TOOL_TIER3, approvedCtx, input);
     expect(approved).toMatchObject({ success: true, data: { ticket: input.title } });
     expect(runsOf(input.title)).toBe(1);
-    expect(await registry.execute(TOOL_TIER3, ctxFor(key, { preApproved: true }), input)).toEqual({ success: true, data: approved });
+    // The key still answers with its proposal; the approval ran nothing under it.
+    expect(await registry.execute(TOOL_TIER3, ctxFor(key), input)).toEqual(filed);
     expect(runsOf(input.title)).toBe(1);
+    expect(proposalsFiled.length - filedBefore).toBe(1);
+  });
+
+  it('a tier-3 tool whose proposal cannot be filed is refused as before: the claim is released (nothing was filed to answer with)', async () => {
+    const key = freshKey('rel_proposal_unfiled');
+    const input = { title: `${key}_U` };
+    proposalsDown.down = true;
+    let refused: any;
+    try {
+      refused = await registry.execute(TOOL_TIER3, ctxFor(key), input);
+    } finally {
+      proposalsDown.down = false;
+    }
+    expect(refused).toEqual({
+      success: false,
+      requiresApproval: true,
+      error: `HIGH risk tool "${TOOL_TIER3}" requires explicit user approval`,
+    });
+    expect(await rowsFor(ID.biz, key)).toEqual([]);
   });
 
   it('the handler answers notExecuted (the KEY action boundary filed it): the claim is released, and the retry under the same key reaches the tool', async () => {
@@ -874,7 +982,7 @@ describe('V1-19b: the request hash is the idempotency fingerprint of the request
     const row = await claimRow(ID.biz, key);
     expect(row).toMatchObject({ status: 'completed', response: first });
     expect(row.requestHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(row.requestHash).toBe(fingerprint(TOOL, { title, to: 'Aa' }));
+    expect(row.requestHash).toBe(fingerprint(TOOL, { title, to: 'Aa' }, ID.owner));
   });
 
   it('the same request with its keys in another order is the same request: replayed, not run again', async () => {
@@ -883,7 +991,7 @@ describe('V1-19b: the request hash is the idempotency fingerprint of the request
     const first = await registry.execute(TOOL, ctxFor(key), { title, priority: 'high' });
     expect(first).toMatchObject({ success: true });
 
-    expect(await registry.execute(TOOL, ctxFor(key), { priority: 'high', title })).toEqual({ success: true, data: first });
+    expect(await registry.execute(TOOL, ctxFor(key), { priority: 'high', title })).toEqual(first);
     expect(runsOf(title)).toBe(1);
   });
 
@@ -896,6 +1004,198 @@ describe('V1-19b: the request hash is the idempotency fingerprint of the request
     expect(result).toMatchObject({ success: false, notExecuted: true, error: expect.stringContaining('fingerprint') });
     expect(runsOf(input.title as string)).toBe(0);
     expect(await rowsFor(ID.biz, key)).toEqual([]);
+  });
+});
+
+/** The business-event ledger rows the registry wrote for one idempotency key (KeyCortexAuditService). */
+async function eventsFor(idempotencyKey: string) {
+  const rows = await db.businessEvent.findMany({
+    where: { businessId: ID.biz, metadata: { path: ['idempotency', 'key'], equals: idempotencyKey } },
+    select: { eventType: true, actorType: true, actorId: true, action: true, metadata: true, after: true },
+  });
+  return rows.map((r: any) => ({
+    eventType: r.eventType,
+    actorType: r.actorType,
+    actorId: r.actorId,
+    action: r.action,
+    idempotency: r.metadata?.idempotency,
+    status: r.after?.status,
+  }));
+}
+
+/**
+ * V1-19b review, SEC-V19b-1 / CR-V19b-1. Measured on the V1-19b head (review
+ * scratch suite R1 and the v19r_ probe): a handler answering
+ * { success: false, error } without throwing (as the efferent bridge answers
+ * every failed bridged tool) was settled 'completed', and the retry answered
+ * { success: true, data: { success: false, error } }; the tool ran once.
+ */
+describe('V1-19b review: a key settles with the outcome as it is, and a replay answers as the first call did (SEC-V19b-1 / CR-V19b-1)', () => {
+  it("a handler that answers { success: false } without throwing is settled 'failed' with its answer, and the retry replays that failure exactly, without running the tool", async () => {
+    const key = freshKey('soft_fail');
+    const input = { title: `${key}_F` };
+    const { result: first, settles } = await spySettles(() => registry.execute(TOOL_SOFT, ctxFor(key), input));
+
+    expect(first).toEqual({ success: false, error: 'v19a: provider declined' });
+    const row = await claimRow(ID.biz, key);
+    expect(row).toMatchObject({ status: 'failed', response: first, error: 'v19a: provider declined' });
+    expect(settles).toEqual([
+      { op: 'fail', settled: true, req: { businessId: ID.biz, idempotencyKey: key, requestHash: row.requestHash, claimId: row.id } },
+    ]);
+
+    const replay = await registry.execute(TOOL_SOFT, ctxFor(key), input);
+    expect(replay).toEqual(first);
+    expect(replay.success).toBe(false);
+    expect(runsOf(input.title)).toBe(1);
+  });
+
+  it("a row stored 'completed' with a failure answer (as soft failures were stored before this repair) replays as that failure, never as a success", async () => {
+    const key = freshKey('soft_fail_legacy');
+    const input = { title: `${key}_L` };
+    const holder = await service.check(req(key, fingerprint(TOOL_SOFT, input, ID.owner)));
+    const stored = { success: false, error: 'v19a: provider declined' };
+    expect(await service.complete({ ...req(key, fingerprint(TOOL_SOFT, input, ID.owner)), claimId: holder.claimId }, stored)).toBe(true);
+
+    expect(await registry.execute(TOOL_SOFT, ctxFor(key), input)).toEqual(stored);
+    expect(runsOf(input.title)).toBe(0);
+  });
+});
+
+/**
+ * V1-19b review, SEC-V19b-3 / CR-V19b-2. Measured on the V1-19b head (scratch
+ * suite R3, v19r_ probe): saga.addStep threw inside the run's try, ahead of the
+ * handler, and the catch settled the key 'failed'; every retry replayed the
+ * saga error and the tool never ran (runs=0).
+ */
+describe('V1-19b review: a saga step that cannot be recorded runs nothing and settles nothing (SEC-V19b-3 / CR-V19b-2)', () => {
+  it('saga.addStep throws before the tool runs: the call answers the error as before, the claim is given up (no row, no settle), and the retry under the same key runs the tool', async () => {
+    const key = freshKey('saga_down');
+    const input = { title: `${key}_S` };
+    const sagaId = `${P}saga_1`;
+    sagaGate.throws = 'v19a: saga store unreachable';
+    let spied: any;
+    try {
+      spied = await spySettles(() => registry.execute(TOOL, ctxFor(key, { sagaId }), input));
+    } finally {
+      sagaGate.throws = undefined;
+    }
+
+    expect(spied.result).toEqual({ success: false, error: 'v19a: saga store unreachable' });
+    expect(spied.settles).toEqual([]);
+    expect(runsOf(input.title)).toBe(0);
+    expect(await rowsFor(ID.biz, key)).toEqual([]);
+
+    const retry = await registry.execute(TOOL, ctxFor(key, { sagaId }), input);
+    expect(retry).toMatchObject({ success: true, data: { ticket: input.title } });
+    expect(runsOf(input.title)).toBe(1);
+    expect(await claimRow(ID.biz, key)).toMatchObject({ status: 'completed', response: retry });
+  });
+});
+
+/**
+ * V1-19b review, SEC-V19b-4. Measured on the V1-19b head (scratch suite R4):
+ * the owner ran the tier-3 tool preApproved under a key; with the safety gate
+ * refusing (kill switch), another member at autonomy 0 presented the key and
+ * input and was handed { success: true, data: <the owner's result> }, while
+ * the same member's call without the key got the kill switch. The replay, and
+ * the gate's pending / conflict / unfingerprintable refusals, left no record.
+ */
+describe('V1-19b review: a stored outcome answers only past the safety gate and only to the actor who made the request, and every gate answer is audited (SEC-V19b-4)', () => {
+  it("with the kill switch on, a settled key is not replayed: the owner's retry and another member's use of the key both get the kill switch's refusal", async () => {
+    const key = freshKey('replay_killed');
+    const input = { title: `${key}_K` };
+    const first = await registry.execute(TOOL_TIER3, ctxFor(key, { preApproved: true }), input);
+    expect(first).toMatchObject({ success: true, data: { ticket: input.title } });
+
+    safetyGate.answer = { allowed: false, reason: 'v19a: autonomy kill switch active' };
+    let ownerRetry: any;
+    let memberUse: any;
+    try {
+      ownerRetry = await registry.execute(TOOL_TIER3, ctxFor(key, { preApproved: true }), input);
+      memberUse = await registry.execute(TOOL_TIER3, { businessId: ID.biz, userId: ID.member, autonomyLevel: 0, idempotencyKey: key }, input);
+    } finally {
+      safetyGate.answer = { allowed: true };
+    }
+
+    for (const answer of [ownerRetry, memberUse]) {
+      expect(answer).toMatchObject({ success: false, error: 'v19a: autonomy kill switch active' });
+      expect(answer.data).toBeUndefined();
+    }
+    expect(runsOf(input.title)).toBe(1);
+    expect(await claimRow(ID.biz, key)).toMatchObject({ status: 'completed', response: first });
+  });
+
+  it("another member presenting the key with the same input is a 'conflict': not run, not handed the stored outcome, no proposal filed; the owner's own retry still replays it", async () => {
+    const key = freshKey('replay_member');
+    const input = { title: `${key}_M` };
+    const first = await registry.execute(TOOL_TIER3, ctxFor(key, { preApproved: true }), input);
+    expect(first).toMatchObject({ success: true });
+    const filedBefore = proposalsFiled.length;
+
+    // The reviewer's caller: another member, autonomy 0, not approved.
+    const memberUse = await registry.execute(TOOL_TIER3, { businessId: ID.biz, userId: ID.member, autonomyLevel: 0, idempotencyKey: key }, input);
+    expect(memberUse).toEqual({ success: false, notExecuted: true, error: CONFLICT });
+    expect(proposalsFiled.length).toBe(filedBefore);
+    // A system caller (no acting user) is not the owner either.
+    expect(await registry.execute(TOOL_TIER3, { businessId: ID.biz, autonomyLevel: 4, preApproved: true, idempotencyKey: key }, input)).toEqual({
+      success: false,
+      notExecuted: true,
+      error: CONFLICT,
+    });
+    expect(runsOf(input.title)).toBe(1);
+
+    expect(await registry.execute(TOOL_TIER3, ctxFor(key, { preApproved: true }), input)).toEqual(first);
+    expect(runsOf(input.title)).toBe(1);
+    expect(await claimRow(ID.biz, key)).toMatchObject({
+      status: 'completed',
+      response: first,
+      requestHash: fingerprint(TOOL_TIER3, input, ID.owner),
+    });
+  });
+
+  it('every answer the gate gives without running the tool is on the business-event ledger, naming the actor and the key: the replay (its own event type, not an execution), the conflict, the pending refusal and the unfingerprintable refusal', async () => {
+    const key = freshKey('audit_gate');
+    const input = { title: `${key}_A` };
+    await registry.execute(TOOL, ctxFor(key), input);
+    await registry.execute(TOOL, ctxFor(key), input);
+    await registry.execute(TOOL, { businessId: ID.biz, userId: ID.member, autonomyLevel: 2, idempotencyKey: key }, input);
+    expect(runsOf(input.title)).toBe(1);
+
+    const events = await eventsFor(key);
+    expect(events).toHaveLength(3);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        { eventType: 'ACTION_EXECUTED', actorType: 'human', actorId: ID.owner, action: TOOL, idempotency: { key }, status: 'success' },
+        { eventType: 'ACTION_REPLAYED', actorType: 'human', actorId: ID.owner, action: TOOL, idempotency: { key, answer: 'replayed' }, status: 'success' },
+        { eventType: 'ACTION_FAILED', actorType: 'human', actorId: ID.member, action: TOOL, idempotency: { key, answer: 'conflict' }, status: 'error' },
+      ]),
+    );
+
+    // A key another call holds.
+    const held = freshKey('audit_pending');
+    const heldInput = { title: `${held}_P` };
+    const holder = await service.check(req(held, fingerprint(TOOL, heldInput, ID.owner)));
+    expect(await registry.execute(TOOL, ctxFor(held), heldInput)).toEqual({ success: false, notExecuted: true, error: IN_FLIGHT });
+    expect(await eventsFor(held)).toEqual([
+      { eventType: 'ACTION_FAILED', actorType: 'human', actorId: ID.owner, action: TOOL, idempotency: { key: held, answer: 'pending' }, status: 'error' },
+    ]);
+    expect(await service.release({ ...req(held), claimId: holder.claimId })).toBe(true);
+
+    // A request with no fingerprint (the record carries no input: it has no JSON form).
+    const circularKey = freshKey('audit_unfingerprintable');
+    const circular: Record<string, unknown> = { title: `${circularKey}_C` };
+    circular.self = circular;
+    expect(await registry.execute(TOOL, ctxFor(circularKey), circular)).toMatchObject({ success: false, notExecuted: true });
+    expect(await eventsFor(circularKey)).toEqual([
+      {
+        eventType: 'ACTION_FAILED',
+        actorType: 'human',
+        actorId: ID.owner,
+        action: TOOL,
+        idempotency: { key: circularKey, answer: 'unfingerprintable' },
+        status: 'error',
+      },
+    ]);
   });
 });
 

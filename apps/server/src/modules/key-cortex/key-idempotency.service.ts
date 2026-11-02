@@ -12,16 +12,23 @@ import { canonicalJson } from '../key-autonomy/action-boundary/action-envelope';
  * string and an undefined field is absent: two requests that serialize alike
  * are one request to the claim, and two that do not are a 'conflict'.
  *
+ * The acting user is part of the request when there is one (V1-19b review,
+ * SEC-V19b-4): the same key and input presented by another member is another
+ * request, a 'conflict', and is never handed this member's stored outcome. A
+ * call with no acting user (a system caller) hashes as name and input alone.
+ *
  * It replaces the tool registry's own hash, a 32-bit string hash of
  * key-order-sensitive JSON.stringify ({to:'Aa'} and {to:'BB'} hashed alike;
  * {a,b} and {b,a} did not) that answered '0' for every input it could not
  * serialize. An input with no JSON form (a circular reference, a BigInt) has
  * no fingerprint: this throws, and the caller must not claim a key for it.
  */
-export function fingerprintToolRequest(toolName: string, input: unknown): string {
+export function fingerprintToolRequest(toolName: string, input: unknown, actorId?: string | null): string {
   let jsonForm: unknown;
   try {
-    jsonForm = JSON.parse(JSON.stringify({ name: toolName, input: input ?? null }));
+    jsonForm = JSON.parse(
+      JSON.stringify({ name: toolName, input: input ?? null, ...(actorId ? { actor: actorId } : {}) }),
+    );
   } catch (err) {
     throw new Error(`Request cannot be fingerprinted: ${err instanceof Error ? err.message : String(err)}`, {
       cause: err,
@@ -36,7 +43,8 @@ export interface IdempotencyCheckResult<T = unknown> {
    *             (or release, if it decides not to run).
    * pending   — another caller holds the claim and has not finished: do not run.
    * completed — settled: `response` is the stored outcome.
-   * failed    — settled: `error` is the stored error.
+   * failed    — settled: `error` is the stored error, and `response` the stored
+   *             outcome when the claimant stored one with it.
    * conflict  — the key was claimed for a different request (request hashes differ).
    */
   status: 'new' | 'pending' | 'completed' | 'failed' | 'conflict';
@@ -67,7 +75,9 @@ interface StoredIdempotencyKey {
   error: string | null;
 }
 
-type SettleData = { status: 'completed'; response: Prisma.InputJsonValue } | { status: 'failed'; error: string };
+type SettleData =
+  | { status: 'completed'; response: Prisma.InputJsonValue }
+  | { status: 'failed'; error: string; response?: Prisma.InputJsonValue };
 
 const IN_FLIGHT = 'Idempotency key is being processed by another request';
 
@@ -110,7 +120,10 @@ function isRecordNotFound(err: unknown): boolean {
  * hash only; the tool registry presents both (V1-19b). release() gives an
  * open claim up without an outcome (V1-19 review, CR-V19-2), so a claimant
  * that decides not to run need not hold the key for good; the tool registry
- * releases on every path that returns without running the tool (V1-19b).
+ * releases on every path that returns without running the tool (V1-19b),
+ * except the one that files an approval proposal, which settles the key with
+ * that proposal so a retry is answered with it instead of filing another
+ * (V1-19b review, SEC-V19b-2).
  */
 @Injectable()
 export class KeyIdempotencyService {
@@ -184,6 +197,7 @@ export class KeyIdempotencyService {
       return {
         status: 'failed',
         error: row.error ?? undefined,
+        ...(row.response ? { response: row.response as T } : {}),
       };
     }
 
@@ -202,10 +216,16 @@ export class KeyIdempotencyService {
 
   /**
    * Mark the open claim on an idempotency key as failed with its deterministic
-   * error. Answers whether this call settled it, as complete() does.
+   * error and, when given, the answer the claimant gave with it, so a replay
+   * answers as the first call did (V1-19b review, SEC-V19b-1). Answers whether
+   * this call settled it, as complete() does.
    */
-  async fail(req: IdempotencyRequest, error: string): Promise<boolean> {
-    return this.settle(req, 'fail', { status: 'failed', error });
+  async fail<T>(req: IdempotencyRequest, error: string, response?: T): Promise<boolean> {
+    return this.settle(req, 'fail', {
+      status: 'failed',
+      error,
+      ...(response !== undefined ? { response: response as Prisma.InputJsonValue } : {}),
+    });
   }
 
   /**

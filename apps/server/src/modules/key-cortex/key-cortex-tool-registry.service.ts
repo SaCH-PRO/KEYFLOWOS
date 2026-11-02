@@ -24,6 +24,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { KeyIdempotencyService, fingerprintToolRequest } from './key-idempotency.service';
+import type { IdempotencyCheckResult } from './key-idempotency.service';
 import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 import { KeyCortexLearningService } from './key-cortex-learning.service';
@@ -125,6 +126,13 @@ interface OpenClaim {
   requestHash: string;
   claimId?: string;
 }
+
+/**
+ * What the idempotency gate answered a call it did not let run: a replay of a
+ * settled key, or a refusal (held by another call, claimed for another
+ * request, or a request with no fingerprint). Recorded on its audit event.
+ */
+type IdempotencyGateAnswer = 'replayed' | 'pending' | 'conflict' | 'unfingerprintable';
 
 export interface KeyCortexToolScore {
   successRate: number;
@@ -301,66 +309,18 @@ export class KeyCortexToolRegistryService {
       return { success: false, error: `Tool "${name}" not found in canonical registry` };
     }
 
-    // Phase 0: idempotency gate. check() is a claim (V1-19): only the caller
-    // answered 'new' runs the tool, and it alone settles the key, by the
-    // claimId and request hash it claimed under. A settled key replays its
-    // outcome; a key another caller holds ('pending') or claimed for another
-    // request ('conflict') is refused without running anything (V1-19b,
-    // SEC-V19-2 / CR-V19-1: both used to fall through and run the tool).
-    let claim: OpenClaim | undefined;
-    if (ctx.idempotencyKey) {
-      let requestHash: string;
-      try {
-        requestHash = fingerprintToolRequest(name, input);
-      } catch (err) {
-        // No fingerprint, nothing to tell this request from another: claiming
-        // the key for it would make it every such request's key (SEC-V19-3).
-        return { success: false, notExecuted: true, error: (err as Error).message };
-      }
-      const answer = await this.idempotency.check({
-        businessId: ctx.businessId,
-        idempotencyKey: ctx.idempotencyKey,
-        requestHash,
-      });
-      if (answer.status === 'completed') {
-        return { success: true, data: answer.response as any };
-      }
-      if (answer.status === 'failed') {
-        return { success: false, error: answer.error ?? 'Duplicate request failed previously' };
-      }
-      if (answer.status !== 'new') {
-        return {
-          success: false,
-          notExecuted: true,
-          error: answer.error ?? `Idempotency key ${ctx.idempotencyKey} is ${answer.status}`,
-        };
-      }
-      claim = { businessId: ctx.businessId, idempotencyKey: ctx.idempotencyKey, requestHash, claimId: answer.claimId };
-    }
-
-    // Every path from here that returns without running the tool gives the
-    // claim up, so a retry of the key (an approved re-execution included)
-    // reaches the tool again (V1-19b, CR-V19-2).
-    const notRun = async (result: KeyCortexToolResult): Promise<KeyCortexToolResult> => {
-      await this.releaseClaim(claim);
-      return result;
-    };
-
     // Phase 0: global autonomy kill switch, safety limits, and tier enforcement
-    // are the first gate.
-    let safetyCheck: Awaited<ReturnType<KeyAutonomySafetyService['check']>>;
-    try {
-      safetyCheck = await this.safety.check({
-        businessId: ctx.businessId,
-        toolName: name,
-        riskTier: tool.riskTier,
-        mode: ctx.autonomyLevel && ctx.autonomyLevel >= 2 ? 'auto' : 'manual',
-        estimatedCostTtd: 0,
-      });
-    } catch (err) {
-      await this.releaseClaim(claim);
-      throw err;
-    }
+    // are the first gate, ahead of the idempotency gate too: a stored outcome
+    // is not handed out past a gate that refuses the call now (V1-19b review,
+    // SEC-V19b-4: a replay used to answer while the kill switch was on). A
+    // call it refuses has claimed nothing, so there is nothing to give up.
+    const safetyCheck = await this.safety.check({
+      businessId: ctx.businessId,
+      toolName: name,
+      riskTier: tool.riskTier,
+      mode: ctx.autonomyLevel && ctx.autonomyLevel >= 2 ? 'auto' : 'manual',
+      estimatedCostTtd: 0,
+    });
     if (!safetyCheck.allowed) {
       this.logger.warn(`[execute][${ctx.businessId}] Safety gate blocked ${name}: ${safetyCheck.reason}`);
       const blocked: KeyCortexToolResult = {
@@ -371,8 +331,61 @@ export class KeyCortexToolRegistryService {
       await this.emitBusinessEvent(ctx, name, input, blocked, 0).catch((err) => {
         this.logger.warn(`Tool business-event emit failed: ${(err as Error).message}`);
       });
-      return notRun(blocked);
+      return blocked;
     }
+
+    // Phase 0: idempotency gate. check() is a claim (V1-19): only the caller
+    // answered 'new' runs the tool, and it alone settles the key, by the
+    // claimId and request hash it claimed under. A settled key replays its
+    // outcome; a key another caller holds ('pending') or claimed for another
+    // request ('conflict') is refused without running anything (V1-19b,
+    // SEC-V19-2 / CR-V19-1: both used to fall through and run the tool). The
+    // request is the tool, its input and the acting user, so another member
+    // presenting the key is a 'conflict', never handed this member's outcome;
+    // and every answer given here without running the tool is audited, as
+    // the safety gate's refusal is (V1-19b review, SEC-V19b-4).
+    let claim: OpenClaim | undefined;
+    if (ctx.idempotencyKey) {
+      let requestHash: string;
+      try {
+        requestHash = fingerprintToolRequest(name, input, ctx.userId);
+      } catch (err) {
+        // No fingerprint, nothing to tell this request from another: claiming
+        // the key for it would make it every such request's key (SEC-V19-3).
+        const refused: KeyCortexToolResult = { success: false, notExecuted: true, error: (err as Error).message };
+        // The input has no JSON form, so the audit record carries none.
+        await this.auditGateAnswer(ctx, name, {}, refused, 'unfingerprintable');
+        return refused;
+      }
+      const answer = await this.idempotency.check({
+        businessId: ctx.businessId,
+        idempotencyKey: ctx.idempotencyKey,
+        requestHash,
+      });
+      if (answer.status === 'completed' || answer.status === 'failed') {
+        const replay = this.replayOf(answer);
+        await this.auditGateAnswer(ctx, name, input, replay, 'replayed');
+        return replay;
+      }
+      if (answer.status !== 'new') {
+        const refused: KeyCortexToolResult = {
+          success: false,
+          notExecuted: true,
+          error: answer.error ?? `Idempotency key ${ctx.idempotencyKey} is ${answer.status}`,
+        };
+        await this.auditGateAnswer(ctx, name, input, refused, answer.status);
+        return refused;
+      }
+      claim = { businessId: ctx.businessId, idempotencyKey: ctx.idempotencyKey, requestHash, claimId: answer.claimId };
+    }
+
+    // Every path from here that returns without running the tool gives the
+    // claim up, so a retry of the key reaches the tool again (V1-19b,
+    // CR-V19-2). The one exception files an approval proposal: see below.
+    const notRun = async (result: KeyCortexToolResult): Promise<KeyCortexToolResult> => {
+      await this.releaseClaim(claim);
+      return result;
+    };
 
     const validation = this.validateInput(tool, input);
     if (!validation.valid) {
@@ -400,12 +413,30 @@ export class KeyCortexToolRegistryService {
       if (tool.riskTier < 4) {
         const proposalId = await this.proposeForApproval(tool, ctx, input, riskCheck.reason);
         if (proposalId) {
-          return notRun({
+          const proposed: KeyCortexToolResult = {
             success: false,
             requiresApproval: true,
             error: `${riskCheck.reason} — sent for approval`,
             data: { proposalId } as KeyCortexToolResult['data'],
-          });
+          };
+          // The one no-run path that keeps its key: the key settles with this
+          // proposal, so a retry of the request is answered with the same
+          // proposal instead of filing another (V1-19b review, SEC-V19b-2: a
+          // released key filed one proposal per retry, and approving each ran
+          // the tool each time). The approved run is the proposal's own, by
+          // its id (KeyCortexActionExecutorPlugin calls execute() preApproved
+          // and without a key); a call that presents this key again, approved
+          // or not, is a retry of this request and gets this answer.
+          if (claim) {
+            // The proposal is filed either way; a key that cannot be settled
+            // stays claimed (a retry is refused, it files nothing).
+            await this.idempotency.fail(claim, proposed.error as string, proposed).catch((err) => {
+              this.logger.warn(
+                `[execute][${ctx.businessId}] could not settle idempotency key ${claim?.idempotencyKey} with proposal ${proposalId}: ${(err as Error).message}`,
+              );
+            });
+          }
+          return proposed;
         }
       }
       return notRun({ success: false, error: riskCheck.reason, requiresApproval: tool.riskTier < 4 });
@@ -413,6 +444,7 @@ export class KeyCortexToolRegistryService {
 
     const startMs = Date.now();
     let sagaStepIndex: number | undefined;
+    let handlerEntered = false;
     try {
       if (ctx.sagaId) {
         sagaStepIndex = Date.now();
@@ -425,6 +457,10 @@ export class KeyCortexToolRegistryService {
         );
       }
 
+      // From here the tool has been attempted. Before it (the saga step
+      // above), a throw means the tool never ran (V1-19b review, SEC-V19b-3 /
+      // CR-V19b-2): the catch below gives the claim up then, not settle it.
+      handlerEntered = true;
       const result = await tool.handler(ctx, validation.parsed);
       const durationMs = Date.now() - startMs;
 
@@ -471,8 +507,17 @@ export class KeyCortexToolRegistryService {
           });
       }
 
+      // The key settles with the outcome as it is: a handler that answered
+      // { success: false } without throwing failed, and its key is 'failed',
+      // not 'completed' (V1-19b review, SEC-V19b-1 / CR-V19b-1: it was stored
+      // 'completed' and replayed as a success). The whole answer is stored
+      // either way, so a replay answers exactly as this call does.
       if (claim) {
-        await this.idempotency.complete(claim, result);
+        if (result.success) {
+          await this.idempotency.complete(claim, result);
+        } else {
+          await this.idempotency.fail(claim, result.error ?? `Tool "${name}" failed`, result);
+        }
       }
 
       await this.audit(ctx, name, input, result, durationMs).catch((err) => {
@@ -504,7 +549,13 @@ export class KeyCortexToolRegistryService {
       }
 
       if (claim) {
-        await this.idempotency.fail(claim, err.message);
+        if (handlerEntered) {
+          await this.idempotency.fail(claim, err.message);
+        } else {
+          // The saga step could not be recorded and the tool never ran: no
+          // outcome to keep, so a retry of the key reaches the tool again.
+          await this.releaseClaim(claim);
+        }
       }
 
       await this.audit(ctx, name, input, result, durationMs).catch((auditErr) => {
@@ -790,6 +841,45 @@ export class KeyCortexToolRegistryService {
     }
   }
 
+  /**
+   * A settled key's answer, as the call that settled it answered (V1-19b
+   * review, SEC-V19b-1 / CR-V19b-1). The registry stores the whole tool
+   * result, so that is what is replayed: never wrapped as the `data` of a new
+   * success, and a stored { success: false } replays as a failure whatever
+   * status it was stored under. A stored response that is not a tool result
+   * (another writer's) answers as before: completed is its data, failed is its
+   * error.
+   */
+  private replayOf(answer: IdempotencyCheckResult): KeyCortexToolResult {
+    const stored = answer.response;
+    if (stored && typeof stored === 'object' && !Array.isArray(stored) && typeof (stored as KeyCortexToolResult).success === 'boolean') {
+      return stored as KeyCortexToolResult;
+    }
+    return answer.status === 'completed'
+      ? { success: true, data: stored }
+      : { success: false, error: answer.error ?? 'Duplicate request failed previously' };
+  }
+
+  /**
+   * Audit an answer the idempotency gate gave without running the tool: a
+   * replay of a settled key, or a refusal (the key is held, or was claimed for
+   * another request, or the request has no fingerprint). Recorded on the
+   * business-event ledger as the safety gate's refusal is, naming the actor
+   * and the key (V1-19b review, SEC-V19b-4: these answers left no record, and
+   * a key reused for another request only a log line). Never throws.
+   */
+  private async auditGateAnswer(
+    ctx: KeyCortexToolContext,
+    name: string,
+    input: Record<string, unknown>,
+    result: KeyCortexToolResult,
+    answer: IdempotencyGateAnswer,
+  ): Promise<void> {
+    await this.emitBusinessEvent(ctx, name, input, result, 0, answer).catch((err) => {
+      this.logger.warn(`Tool business-event emit failed: ${(err as Error).message}`);
+    });
+  }
+
   private validateInput(
     tool: KeyCortexToolDefinition,
     input: Record<string, unknown>,
@@ -846,8 +936,11 @@ export class KeyCortexToolRegistryService {
     input: Record<string, unknown>,
     result: KeyCortexToolResult,
     durationMs: number,
+    gateAnswer?: IdempotencyGateAnswer,
   ): Promise<void> {
     const actorId = ctx.userId ?? 'key_ai';
+    // A replay ran nothing: it is its own event, never counted as an execution.
+    const replayed = gateAnswer === 'replayed';
     const metadata: Record<string, unknown> = {
       module: toolName.split('.')[0] ?? 'cortex',
       input,
@@ -855,11 +948,14 @@ export class KeyCortexToolRegistryService {
       autonomyLevel: ctx.autonomyLevel,
       riskTier: this.tools.get(toolName)?.riskTier,
       requiresApproval: result.requiresApproval ?? false,
+      ...(ctx.idempotencyKey
+        ? { idempotency: { key: ctx.idempotencyKey, ...(gateAnswer ? { answer: gateAnswer } : {}) } }
+        : {}),
     };
 
     if (this.auditService) {
       await this.auditService.emit(
-        result.success ? 'ACTION_EXECUTED' : 'ACTION_FAILED',
+        replayed ? 'ACTION_REPLAYED' : result.success ? 'ACTION_EXECUTED' : 'ACTION_FAILED',
         toolName,
         'tool_execution',
         ctx.commandId ?? ctx.correlationId ?? ctx.sessionId ?? toolName,
@@ -902,7 +998,7 @@ export class KeyCortexToolRegistryService {
     if (this.eventBus) {
       this.eventBus.emit({
         source: 'key_cortex_tool_registry',
-        type: result.success ? 'tool.executed' : 'tool.failed',
+        type: replayed ? 'tool.replayed' : result.success ? 'tool.executed' : 'tool.failed',
         businessId: ctx.businessId,
         userId: actorId,
         payload: {

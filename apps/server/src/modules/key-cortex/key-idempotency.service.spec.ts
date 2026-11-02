@@ -123,6 +123,23 @@ describe('KeyIdempotencyService', () => {
     expect(client.rows).toHaveLength(0);
     expect((await service.check({ businessId: 'biz_1', idempotencyKey: 'req_1', requestHash: 'h1' })).status).toBe('new');
   });
+
+  // V1-19b review (SEC-V19b-1): a claimant that failed without throwing keeps
+  // its whole answer with the error, so a replay can answer exactly as it did.
+  it('fail() keeps the answer it is given with the error, and check() hands both back; without one, the failed answer is the error alone', async () => {
+    const holder = await service.check({ businessId: 'biz_1', idempotencyKey: 'req_1', requestHash: 'h1' });
+    const answer = { success: false, error: 'provider declined', requiresApproval: false };
+    expect(await service.fail({ businessId: 'biz_1', idempotencyKey: 'req_1', requestHash: 'h1', claimId: holder.claimId }, 'provider declined', answer)).toBe(true);
+    expect(await service.check({ businessId: 'biz_1', idempotencyKey: 'req_1', requestHash: 'h1' })).toEqual({
+      status: 'failed',
+      error: 'provider declined',
+      response: answer,
+    });
+
+    await service.check({ businessId: 'biz_1', idempotencyKey: 'req_2' });
+    await service.fail({ businessId: 'biz_1', idempotencyKey: 'req_2' }, 'Bad request');
+    expect(await service.check({ businessId: 'biz_1', idempotencyKey: 'req_2' })).toStrictEqual({ status: 'failed', error: 'Bad request' });
+  });
 });
 
 /**
@@ -171,5 +188,19 @@ describe('fingerprintToolRequest', () => {
     circular.self = circular;
     expect(() => fingerprintToolRequest('t', circular)).toThrow(/cannot be fingerprinted/);
     expect(() => fingerprintToolRequest('t', { n: BigInt(1) })).toThrow(/cannot be fingerprinted/);
+  });
+
+  // V1-19b review (SEC-V19b-4): the acting user is part of the request, so
+  // another member presenting a key is a 'conflict', never this member's replay.
+  it('covers the acting user: the same tool and input from another user, or from no user, is another request', () => {
+    const ann = fingerprintToolRequest('t', { x: 1 }, 'user_ann');
+    expect(fingerprintToolRequest('t', { x: 1 }, 'user_ann')).toBe(ann);
+    expect(fingerprintToolRequest('t', { x: 1 }, 'user_bob')).not.toBe(ann);
+    expect(fingerprintToolRequest('t', { x: 1 })).not.toBe(ann);
+    // No acting user (undefined or null) hashes as the tool and input alone.
+    expect(fingerprintToolRequest('t', { x: 1 }, null)).toBe(fingerprintToolRequest('t', { x: 1 }));
+    expect(fingerprintToolRequest('t', { x: 1 }, undefined)).toBe(fingerprintToolRequest('t', { x: 1 }));
+    // An input field named like the actor is not the actor.
+    expect(fingerprintToolRequest('t', { actor: 'user_ann', x: 1 })).not.toBe(fingerprintToolRequest('t', { x: 1 }, 'user_ann'));
   });
 });
