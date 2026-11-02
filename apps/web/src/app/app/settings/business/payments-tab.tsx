@@ -22,14 +22,54 @@ import { apiGet, apiPatch } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { InfoBadge } from "@/components/ui/info-badge";
 
+/**
+ * R0-SEC2c-PAYMENT-SECRETS-WRITE-ONLY: the payment provider secrets are
+ * write-only. A Business read answers each one as {configured: true} (absent
+ * when none is stored); the tab never holds a stored value, shows "Configured"
+ * with Replace and Remove, and on save sends a secret only when the user typed
+ * a new one (null for Remove). A secret it does not send stays as stored.
+ */
+const SECRET_KEYS = ["wipayApiKey", "paypalClientSecret", "stripeSecretKey", "stripeWebhookSecret"] as const;
+type SecretKey = (typeof SECRET_KEYS)[number];
+
+type SecretState = {
+  /** A secret is stored (the read's marker). */
+  configured: boolean;
+  /** What the user typed; never a stored value. */
+  draft: string;
+  /** The user asked to replace a configured secret: the input is shown. */
+  replacing: boolean;
+  /** The user asked to remove the stored secret: the save sends null. */
+  clearing: boolean;
+};
+
+const emptySecret: SecretState = { configured: false, draft: "", replacing: false, clearing: false };
+
+function emptySecrets(): Record<SecretKey, SecretState> {
+  return {
+    wipayApiKey: { ...emptySecret },
+    paypalClientSecret: { ...emptySecret },
+    stripeSecretKey: { ...emptySecret },
+    stripeWebhookSecret: { ...emptySecret },
+  };
+}
+
+/**
+ * Whether the read says a secret is stored: the {configured} marker, or (an
+ * older server) a non-blank value, which is read as "configured" and never
+ * shown or sent back.
+ */
+function readConfigured(value: unknown): boolean {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    return (value as { configured?: unknown }).configured === true;
+  }
+  return typeof value === "string" && value.trim() !== "";
+}
+
 type PaymentSettings = {
-  wipayApiKey: string;
   wipayAccountNumber: string;
   paypalClientId: string;
-  paypalClientSecret: string;
   stripePublishableKey: string;
-  stripeSecretKey: string;
-  stripeWebhookSecret: string;
   bankTransferEnabled: boolean;
   bankName: string;
   bankAccountNumber: string;
@@ -40,13 +80,9 @@ type PaymentSettings = {
 };
 
 const defaultSettings: PaymentSettings = {
-  wipayApiKey: "",
   wipayAccountNumber: "",
   paypalClientId: "",
-  paypalClientSecret: "",
   stripePublishableKey: "",
-  stripeSecretKey: "",
-  stripeWebhookSecret: "",
   bankTransferEnabled: false,
   bankName: "",
   bankAccountNumber: "",
@@ -98,6 +134,104 @@ function SecretField({
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * A payment secret the server never answers (R0-SEC2c). Configured: a
+ * "Configured" state with Replace and Remove. Replacing, or nothing stored: an
+ * empty input for a new value. Removing: the save sends null, Keep undoes it.
+ */
+function WriteOnlySecretField({
+  label,
+  state,
+  onDraft,
+  onReplace,
+  onCancelReplace,
+  onRemove,
+  onKeep,
+  placeholder,
+  hint,
+}: {
+  label: string;
+  state: SecretState;
+  onDraft: (v: string) => void;
+  onReplace: () => void;
+  onCancelReplace: () => void;
+  onRemove: () => void;
+  onKeep: () => void;
+  placeholder: string;
+  hint?: string;
+}) {
+  const [show, setShow] = useState(false);
+  const controlClass =
+    "rounded-lg border border-[hsl(var(--kf-border))]/60 px-2.5 py-1 text-xs font-medium text-[hsl(var(--kf-text-muted))] hover:text-[hsl(var(--kf-text))] hover:bg-[hsl(var(--kf-surface))]/60 transition-colors";
+  let body: React.ReactNode;
+  if (state.clearing) {
+    body = (
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-orange-400/40 bg-orange-400/[0.06] px-3 py-2.5 text-sm">
+        <span className="text-orange-300">Will be removed when you save</span>
+        <button type="button" aria-label={`Keep ${label}`} onClick={onKeep} className={controlClass}>
+          Keep
+        </button>
+      </div>
+    );
+  } else if (state.configured && !state.replacing) {
+    body = (
+      <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/[0.04] px-3 py-2.5 text-sm">
+        <span className="inline-flex items-center gap-1.5 text-emerald-300">
+          <CheckCircle2 className="w-4 h-4 shrink-0" />
+          <span>Configured</span>
+        </span>
+        <span className="flex items-center gap-2">
+          <button type="button" aria-label={`Replace ${label}`} onClick={onReplace} className={controlClass}>
+            Replace
+          </button>
+          <button type="button" aria-label={`Remove ${label}`} onClick={onRemove} className={controlClass}>
+            Remove
+          </button>
+        </span>
+      </div>
+    );
+  } else {
+    body = (
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <input
+            type={show ? "text" : "password"}
+            aria-label={label}
+            autoComplete="off"
+            value={state.draft}
+            onChange={(e) => onDraft(e.target.value)}
+            placeholder={state.configured ? "Enter a new value to replace the saved one" : placeholder}
+            className="w-full rounded-xl border border-[hsl(var(--kf-border))]/60 bg-[hsl(var(--kf-surface))]/50 px-3 py-2.5 text-sm pr-10 focus:outline-none focus:ring-2 focus:ring-[hsl(var(--kf-accent1))]/40 focus:border-[hsl(var(--kf-accent1))]/60 transition-all"
+          />
+          <button
+            type="button"
+            onClick={() => setShow((p) => !p)}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-[hsl(var(--kf-text-muted))] hover:text-[hsl(var(--kf-text))] transition-colors"
+          >
+            {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          </button>
+        </div>
+        {state.configured && (
+          <button type="button" aria-label={`Cancel replacing ${label}`} onClick={onCancelReplace} className={controlClass}>
+            Cancel
+          </button>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div>
+      <label className="text-xs text-[hsl(var(--kf-text-muted))] block mb-1.5 font-medium">
+        <span className="inline-flex items-center gap-1">
+          {label}
+          {hint && <InfoBadge title={label} body={hint} side="right" iconSize={11} />}
+        </span>
+      </label>
+      {body}
     </div>
   );
 }
@@ -319,6 +453,7 @@ function PaymentCard({
 
 export function PaymentsTab() {
   const [settings, setSettings] = useState<PaymentSettings>({ ...defaultSettings });
+  const [secrets, setSecrets] = useState<Record<SecretKey, SecretState>>(emptySecrets);
   const [businessAddress, setBusinessAddress] = useState("");
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -339,14 +474,14 @@ export function PaymentsTab() {
         const meta = (res.data.metaData || {}) as Record<string, unknown>;
         const str = (k: string) => (typeof meta[k] === "string" ? (meta[k] as string) : "");
         const bool = (k: string) => meta[k] === true;
+        // The secrets: whether one is stored, never its value.
+        const nextSecrets = emptySecrets();
+        for (const k of SECRET_KEYS) nextSecrets[k].configured = readConfigured(meta[k]);
+        setSecrets(nextSecrets);
         setSettings({
-          wipayApiKey: str("wipayApiKey"),
           wipayAccountNumber: str("wipayAccountNumber"),
           paypalClientId: str("paypalClientId"),
-          paypalClientSecret: str("paypalClientSecret"),
           stripePublishableKey: str("stripePublishableKey"),
-          stripeSecretKey: str("stripeSecretKey"),
-          stripeWebhookSecret: str("stripeWebhookSecret"),
           bankTransferEnabled: bool("bankTransferEnabled"),
           bankName: str("bankName"),
           bankAccountNumber: str("bankAccountNumber"),
@@ -366,15 +501,20 @@ export function PaymentsTab() {
     if (!businessId) return;
     setSaving(true);
     setStatus(null);
+    // A secret is sent only when the user typed a new one (or null to remove
+    // it); one left out stays as stored.
+    const secretWrites: Partial<Record<SecretKey, string | null>> = {};
+    for (const k of SECRET_KEYS) {
+      const s = secrets[k];
+      if (s.clearing) secretWrites[k] = null;
+      else if (s.draft.trim() !== "") secretWrites[k] = s.draft.trim();
+    }
     const res = await apiPatch(`/identity/businesses/${businessId}`, {
       metaData: {
-        wipayApiKey: settings.wipayApiKey || undefined,
+        ...secretWrites,
         wipayAccountNumber: settings.wipayAccountNumber || undefined,
         paypalClientId: settings.paypalClientId || undefined,
-        paypalClientSecret: settings.paypalClientSecret || undefined,
         stripePublishableKey: settings.stripePublishableKey || undefined,
-        stripeSecretKey: settings.stripeSecretKey || undefined,
-        stripeWebhookSecret: settings.stripeWebhookSecret || undefined,
         bankTransferEnabled: settings.bankTransferEnabled,
         bankName: settings.bankName || undefined,
         bankAccountNumber: settings.bankAccountNumber || undefined,
@@ -388,36 +528,63 @@ export function PaymentsTab() {
     if (res.error) {
       setStatus({ type: "error", message: res.error });
     } else {
+      // Saved: a typed secret is now stored, a removed one is gone, and no
+      // typed value stays in the form.
+      setSecrets(() => {
+        const next = emptySecrets();
+        for (const k of SECRET_KEYS) {
+          const write = secretWrites[k];
+          next[k].configured = write === undefined ? secrets[k].configured : write !== null;
+        }
+        return next;
+      });
       setStatus({ type: "success", message: "Payment settings saved successfully" });
     }
-  }, [settings]);
+  }, [settings, secrets]);
 
   const setField = <K extends keyof PaymentSettings>(field: K, value: PaymentSettings[K]) => {
     setSettings((prev) => ({ ...prev, [field]: value }));
   };
+
+  const updateSecret = (key: SecretKey, patch: Partial<SecretState>) => {
+    setSecrets((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+  };
+
+  /** Whether the saved settings will hold this secret. */
+  const hasSecret = (key: SecretKey) =>
+    secrets[key].draft.trim() !== "" || (secrets[key].configured && !secrets[key].clearing);
+
+  const secretFieldProps = (key: SecretKey) => ({
+    state: secrets[key],
+    onDraft: (v: string) => updateSecret(key, { draft: v }),
+    onReplace: () => updateSecret(key, { replacing: true, clearing: false }),
+    onCancelReplace: () => updateSecret(key, { replacing: false, draft: "" }),
+    onRemove: () => updateSecret(key, { clearing: true, replacing: false, draft: "" }),
+    onKeep: () => updateSecret(key, { clearing: false }),
+  });
 
   const toggleExpand = (key: string) => {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
   };
 
   const wipayStatus: "connected" | "partial" | "disabled" =
-    settings.wipayApiKey && settings.wipayAccountNumber
+    hasSecret("wipayApiKey") && settings.wipayAccountNumber
       ? "connected"
-      : settings.wipayApiKey || settings.wipayAccountNumber
+      : hasSecret("wipayApiKey") || settings.wipayAccountNumber
         ? "partial"
         : "disabled";
 
   const paypalStatus: "connected" | "partial" | "disabled" =
-    settings.paypalClientId && settings.paypalClientSecret
+    settings.paypalClientId && hasSecret("paypalClientSecret")
       ? "connected"
-      : settings.paypalClientId || settings.paypalClientSecret
+      : settings.paypalClientId || hasSecret("paypalClientSecret")
         ? "partial"
         : "disabled";
 
   const stripeStatus: "connected" | "partial" | "disabled" =
-    settings.stripePublishableKey && settings.stripeSecretKey && settings.stripeWebhookSecret
+    settings.stripePublishableKey && hasSecret("stripeSecretKey") && hasSecret("stripeWebhookSecret")
       ? "connected"
-      : settings.stripePublishableKey || settings.stripeSecretKey || settings.stripeWebhookSecret
+      : settings.stripePublishableKey || hasSecret("stripeSecretKey") || hasSecret("stripeWebhookSecret")
         ? "partial"
         : "disabled";
 
@@ -483,10 +650,9 @@ export function PaymentsTab() {
         }
       >
         <div className="grid gap-3">
-          <SecretField
+          <WriteOnlySecretField
             label="API Key (Developer ID)"
-            value={settings.wipayApiKey}
-            onChange={(v) => setField("wipayApiKey", v)}
+            {...secretFieldProps("wipayApiKey")}
             placeholder="Your WiPay API key"
             hint="Find this in your WiPay merchant dashboard under Developer Settings."
           />
@@ -530,10 +696,9 @@ export function PaymentsTab() {
             placeholder="PayPal client ID"
             hint="From PayPal Developer Portal → My Apps & Credentials → REST API app."
           />
-          <SecretField
+          <WriteOnlySecretField
             label="Client Secret"
-            value={settings.paypalClientSecret}
-            onChange={(v) => setField("paypalClientSecret", v)}
+            {...secretFieldProps("paypalClientSecret")}
             placeholder="PayPal client secret"
             hint="Keep this secret — it authenticates your app with PayPal's API."
           />
@@ -570,17 +735,15 @@ export function PaymentsTab() {
             showToggle={false}
             hint="Safe to expose. From Stripe Dashboard → Developers → API keys."
           />
-          <SecretField
+          <WriteOnlySecretField
             label="Secret Key"
-            value={settings.stripeSecretKey}
-            onChange={(v) => setField("stripeSecretKey", v)}
+            {...secretFieldProps("stripeSecretKey")}
             placeholder="sk_live_…"
             hint="Keep this secret — used server-side to create payment intents."
           />
-          <SecretField
+          <WriteOnlySecretField
             label="Webhook Signing Secret"
-            value={settings.stripeWebhookSecret}
-            onChange={(v) => setField("stripeWebhookSecret", v)}
+            {...secretFieldProps("stripeWebhookSecret")}
             placeholder="whsec_…"
             hint="From Stripe Dashboard → Developers → Webhooks. Required to securely confirm payments."
           />
@@ -696,7 +859,7 @@ export function PaymentsTab() {
       >
         <div className="flex items-center gap-2 text-xs text-[hsl(var(--kf-text-muted))]">
           <Shield className="w-4 h-4" />
-          <span>Credentials stored securely, never shared with third parties</span>
+          <span>Credentials stored securely, never shared with third parties. Saved secrets are never shown again.</span>
         </div>
         <Button onClick={handleSave} disabled={saving}>
           {saving ? "Saving..." : "Save Payment Settings"}
