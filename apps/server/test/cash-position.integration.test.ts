@@ -433,11 +433,11 @@ beforeAll(async () => {
     await db.membership.create({ data: { id: `${user}_m`, userId: user, businessId: biz, role: 'OWNER' } });
     await coaSeeder.ensureDefaults(biz);
   }
-  for (const [id, biz, inv, n, total] of [
-    [ID.contactA, ID.bizA, ID.invA, 'V34A-001', 100],
-    [ID.contactB, ID.bizB, ID.invB, 'V34A-002', 70],
+  for (const [id, biz, inv, n, total, email] of [
+    [ID.contactA, ID.bizA, ID.invA, 'V34A-001', 100, `${P}contact_a@test.local`],
+    [ID.contactB, ID.bizB, ID.invB, 'V34A-002', 70, `${P}contact_b@test.local`],
   ] as const) {
-    await db.contact.create({ data: { id, businessId: biz, firstName: 'V34a', lastName: 'Customer', email: `${id}@test.local` } });
+    await db.contact.create({ data: { id, businessId: biz, firstName: 'V34a', lastName: 'Customer', email } });
     await db.invoice.create({
       data: {
         id: inv,
