@@ -59,6 +59,11 @@
       "packet": "R0-07 / R0-07a-AI-DIRECT-503"
     },
     {
+      "prefix": "k07d_",
+      "owner": "apps/server/test/gmail-connect-binding.integration.test.ts",
+      "packet": "R0-07 / R0-CMF5-GMAIL-CONNECT-BINDING"
+    },
+    {
       "prefix": "k08c_",
       "owner": "apps/server/test/subscriptions-authority.integration.test.ts",
       "packet": "R0-08 / R0-08c-SUBSCRIPTION-AUTHORITY"

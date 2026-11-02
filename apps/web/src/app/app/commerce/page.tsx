@@ -26,6 +26,7 @@ import { KeyflowUnifiedShell } from "@/components/guide/keyflow-unified-shell";
 import { ListPageSkeleton } from "@/components/ui/skeleton";
 import { WorkspaceError } from "@/components/ui/workspace-error";
 import { MobileActionSheet, type MobileActionSheetItem } from "@/components/ui/mobile-action-sheet";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { type RecordDetailEntity } from "@/components/ui/record-detail-drawer";
 import { FlowQuickLauncher } from "@/components/layout/flow-quick-launcher";
 import type { ModuleLauncherSection } from "@/components/ui/module-launcher-sheet";
@@ -35,7 +36,7 @@ import { useModuleEvent } from "@/hooks/use-module-events";
 /* AI centralized in Cockpit */
 import { usePlan } from "@/hooks/use-plan";
 
-import { useCommerceShell } from "./hooks/use-commerce-shell";
+import { useCommerceShell, type UseCommerceShellReturn } from "./hooks/use-commerce-shell";
 import { useBillingWorkspace } from "./hooks/use-billing-workspace";
 import { useCommerceOverview } from "./hooks/use-commerce-overview";
 import { useActionQueue } from "./hooks/use-action-queue";
@@ -179,6 +180,33 @@ export default function CommercePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot mount-time deep-link read
   }, []);
+
+  // R0-CMF5-GMAIL-CONNECT-BINDING: Google consent (from Revenue, Marketing or
+  // the Google Suite sign-in) lands here with gmail=pending&pending=<id>. Nothing
+  // is linked yet: the owner is shown the mailbox the consent was completed with
+  // and connects it with one more click, or declines. gmail=error says why the
+  // sign-in did not get that far. The parameters are a one-time hand-off, so
+  // they leave the URL once read and a reload does not replay them.
+  const gmail = shell.integrations as UseCommerceShellReturn["integrations"] | undefined;
+  const loadPendingGmail = gmail?.loadPendingGmail;
+  const gmailParam = searchParams.get("gmail");
+  const gmailPendingParam = searchParams.get("pending");
+  const gmailReasonParam = searchParams.get("reason");
+  useEffect(() => {
+    if (!businessId || !gmailParam) return;
+    if (gmailParam === "pending" && gmailPendingParam && loadPendingGmail) {
+      void loadPendingGmail(gmailPendingParam);
+    } else if (gmailParam === "error") {
+      toast.error(
+        gmailReasonParam === "invalid_state"
+          ? "That Gmail sign-in expired or was already used. Connect Gmail again."
+          : "Gmail could not be connected. Try again.",
+      );
+    }
+    const url = new URL(window.location.href);
+    for (const key of ["gmail", "pending", "reason", "google", "services", "email"]) url.searchParams.delete(key);
+    window.history.replaceState({}, "", url.toString());
+  }, [businessId, gmailParam, gmailPendingParam, gmailReasonParam, loadPendingGmail]);
 
   useEffect(() => {
     if (billing.pendingPrefill?.targetSegment) {
@@ -461,6 +489,18 @@ export default function CommercePage() {
         open={paymentRecorderOpen}
         onClose={() => setPaymentRecorderOpen(false)}
       />
+
+      {gmail?.pendingGmail && (
+        <ConfirmDialog
+          open
+          title={`Connect ${gmail.pendingGmail.email}?`}
+          message={`Invoices, reminders, receipts and quotes will be sent from ${gmail.pendingGmail.email}. Connect it only if this is the mailbox you just signed in with.`}
+          confirmLabel={gmail.confirmingGmail ? "Connecting..." : "Connect mailbox"}
+          cancelLabel="Not this mailbox"
+          onConfirm={() => void gmail.handleConfirmPendingGmail()}
+          onCancel={gmail.handleCancelPendingGmail}
+        />
+      )}
 
       {/* Progressive prompts centralized in Cockpit */}
     </WorkspaceShell>

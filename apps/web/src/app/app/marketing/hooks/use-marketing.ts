@@ -23,6 +23,7 @@ import { getStoredBusinessId, refreshWorkspace } from "@/lib/workspace";
 import { toast } from "sonner";
 import { useModuleEmit, useModuleEvent } from "@/hooks/use-module-events";
 import { useRouter } from "next/navigation";
+import { gmailRefusalMessage } from "../../commerce/hooks/use-commerce-integrations";
 
 export interface MarketingStats {
   totalCampaigns: number;
@@ -236,7 +237,12 @@ export function useMarketing(): UseMarketingReturn {
   const handleGmailConnect = useCallback(async () => {
     if (!businessId) return;
     const res = await getGmailAuthUrl(businessId);
-    if (res?.data?.url) window.location.href = res.data.url;
+    if (res?.data?.url) {
+      window.location.href = res.data.url;
+      return;
+    }
+    // R0-CMF5: connecting the business mailbox is OWNER only; say so rather than do nothing.
+    toast.error(gmailRefusalMessage(res, "Could not start connecting Gmail"));
   }, [businessId]);
 
   const handleViewContact = useCallback(
