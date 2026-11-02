@@ -293,6 +293,11 @@
       "packet": "V1-12-DM-RECURRING-GUARD"
     },
     {
+      "prefix": "v14a_",
+      "owner": "apps/server/test/portal-boundary.integration.test.ts",
+      "packet": "V1-14-PUB-PORTAL-VOICE-BINDING"
+    },
+    {
       "prefix": "v21a_",
       "owner": "apps/server/test/structure-authority-ceiling.integration.test.ts",
       "packet": "V1-21-AUTH-JOBROLE-CEILING"
