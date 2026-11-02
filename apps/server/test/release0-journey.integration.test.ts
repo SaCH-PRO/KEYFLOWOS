@@ -10,7 +10,10 @@
  *      duplicate-submit idempotency / ledger rows, settle to PAID
  *   5. list contacts, invoices and payments again (simulated refresh), and read
  *      the cockpit snapshot: its Release 0 counts agree with those lists and
- *      the read writes no ledger row (V1-47-COCKPIT-TRUTH)
+ *      the read writes no ledger row (V1-47-COCKPIT-TRUTH); a STAFF member the
+ *      owner invites with crm read, crm_view=owned and revenue none sees only
+ *      what its own guarded lists disclose (owned-only contacts, before and
+ *      after a share; revenue counts RESTRICTED)
  *   6. a second tenant's owner is denied on every step-2..5 resource, by
  *      business-prefixed route and by bare id (403/404, never 200, never 500);
  *      its own cockpit counts none of the first tenant's rows
@@ -63,8 +66,9 @@
  * FIXTURES
  * --------
  * Every row the journey creates is reachable from the `r0_` prefix: user ids
- * `r0_owner` / `r0_other`, business names `r0_bizA` / `r0_bizB`, and every
- * child row hangs off those businesses. They are hard-deleted by raw SQL in FK
+ * `r0_owner` / `r0_other` / `r0_staff`, business names `r0_bizA` / `r0_bizB` /
+ * `r0_bizStaff` (the staff member's own bootstrap workspace), and every child
+ * row hangs off those businesses. They are hard-deleted by raw SQL in FK
  * order in beforeAll and afterAll. No $transaction wrapping: the server writes
  * from another process, so the test observes committed state only.
  *
@@ -110,10 +114,13 @@ const PROVIDER_KEYS = [
 const ID = {
   owner: `${P}owner`,
   other: `${P}other`,
+  staff: `${P}staff`,
   ownerEmail: `${P}owner@test.local`,
   otherEmail: `${P}other@test.local`,
+  staffEmail: `${P}staff@test.local`,
   bizAName: `${P}bizA`,
   bizBName: `${P}bizB`,
+  bizStaffName: `${P}bizStaff`,
 };
 
 const IDLE_MS = 90_000;      // silence from the child counts; slow-but-talking does not
@@ -161,6 +168,7 @@ function mintToken(sub: string, email: string, opts: { secret?: string; expiresI
 
 let OWNER = '';
 let OTHER = '';
+let STAFF = '';
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -328,6 +336,7 @@ beforeAll(async () => {
 
   OWNER = mintToken(ID.owner, ID.ownerEmail);
   OTHER = mintToken(ID.other, ID.otherEmail);
+  STAFF = mintToken(ID.staff, ID.staffEmail);
 
   if (!existsSync(ENTRY)) {
     bootDiagnosis = 'dist/main.js is missing — run `pnpm build` in apps/server first';
@@ -753,6 +762,60 @@ describe('step 5 — simulated refresh: the tenant list routes agree with steps 
     expect(cockpit.body.degraded).toBe(failedSources.length > 0);
     expect(ledgerAfter, 'the cockpit snapshot is a read: no FinancialTransaction or LedgerEntry row appears').toEqual(ledgerBefore);
     note(5, 'cockpit snapshot', 'GET /business-command-center/businesses/:bizA/snapshot', cockpit.status, `contacts=${cockpit.body.results.contacts.count} openInvoices=${cockpit.body.results.openInvoices.count} payments=${cockpit.body.results.payments.count} degraded=${cockpit.body.degraded} failed=[${failedSources.join(',')}] ledger ${ledgerBefore.join('/')}->${ledgerAfter.join('/')}`);
+
+    // V1-47 review repair SEC-V47-1: the within-tenant rule on the real database, not only on the spec's
+    // where-clause emulator. A STAFF member the owner invites through the real team route with crm read,
+    // crm_view=owned and revenue none reads the same cockpit. Its contacts count is what ITS contacts list
+    // returns: the M7 owned-only clause leaves the owner's contact out of its book, then counts it once the
+    // contact is shared with it (Prisma's shares.some against Postgres). Its revenue counts are RESTRICTED with
+    // no number while the revenue list routes answer it 403. The staff member signs up through the real
+    // bootstrap route (which also gives it its own r0_bizStaff workspace). The ContactShare row is written
+    // directly because no route writes one, and is removed again so step 6 sees the state the owner left.
+    // Folded into this case for the same reason as the owner's cockpit read above (release0-journey.json).
+    const STAFF_SCOPES = { crm: 'read', crm_view: 'owned', revenue: 'none' };
+    const staffBoot = await call(5, 'post', '/identity/bootstrap', { token: STAFF, body: { company: ID.bizStaffName, firstName: 'Sam' } });
+    expect(staffBoot.status, JSON.stringify(staffBoot.body)).toBe(201);
+    expect(staffBoot.body.user?.id).toBe(ID.staff);
+    expect(staffBoot.body.business?.id).not.toBe(S.bizA);
+    const invite = await call(5, 'post', `/identity/businesses/${S.bizA}/team`, { token: OWNER, body: { email: ID.staffEmail, role: 'STAFF', scopes: STAFF_SCOPES } });
+    expect(invite.status, JSON.stringify(invite.body)).toBe(201);
+    const staffMembership = await db.membership.findUnique({ where: { userId_businessId: { userId: ID.staff, businessId: S.bizA } } });
+    expect(staffMembership).toMatchObject({ role: 'STAFF', permissionScopes: STAFF_SCOPES });
+
+    const staffReads = async () => ({
+      list: await call(5, 'get', `/crm/businesses/${S.bizA}/contacts`, { token: STAFF, query: { take: '100' } }),
+      snap: await call(5, 'get', `/business-command-center/businesses/${S.bizA}/snapshot`, { token: STAFF }),
+    });
+    const staffRevenueResults = {
+      openInvoices: { label: 'Open invoices', count: null, status: 'RESTRICTED', href: '/app/commerce/invoices' },
+      payments: { label: 'Payments', count: null, status: 'RESTRICTED', href: '/app/payments' },
+    };
+
+    const unshared = await staffReads();
+    expect(unshared.list.status, JSON.stringify(unshared.list.body).slice(0, 400)).toBe(200);
+    expect(unshared.list.body.contacts.map((c: { id: string }) => c.id)).toEqual([]);
+    expect(unshared.snap.status, JSON.stringify(unshared.snap.body).slice(0, 400)).toBe(200);
+    expect(unshared.snap.body.results).toEqual({
+      contacts: { label: 'Contacts', count: unshared.list.body.contacts.length, status: 'OK', href: '/app/crm/contacts' },
+      ...staffRevenueResults,
+    });
+    const staffRevenueRoutes = [
+      await call(5, 'get', `/commerce/businesses/${S.bizA}/invoices`, { token: STAFF }),
+      await call(5, 'get', `/commerce/businesses/${S.bizA}/payments`, { token: STAFF }),
+    ];
+    expect(staffRevenueRoutes.map((r) => r.status), 'the revenue lists the RESTRICTED tiles stand for refuse this member').toEqual([403, 403]);
+
+    const share = await db.contactShare.create({ data: { businessId: S.bizA, contactId: S.contactId, userId: ID.staff, createdBy: ID.owner } });
+    // The share is removed whatever the reads answer, before anything is asserted on them.
+    const shared = await staffReads().finally(() => db.contactShare.delete({ where: { id: share.id } }));
+    expect(shared.list.status).toBe(200);
+    expect(shared.list.body.contacts.map((c: { id: string }) => c.id)).toEqual([S.contactId]);
+    expect(shared.snap.status).toBe(200);
+    expect(shared.snap.body.results).toEqual({
+      contacts: { label: 'Contacts', count: shared.list.body.contacts.length, status: 'OK', href: '/app/crm/contacts' },
+      ...staffRevenueResults,
+    });
+    note(5, 'cockpit snapshot as STAFF (crm_view=owned, revenue none)', 'GET /business-command-center/businesses/:bizA/snapshot', `${unshared.snap.status}/${shared.snap.status}; revenue lists ${staffRevenueRoutes.map((r) => r.status).join('/')}`, `contacts unshared ${unshared.snap.body.results.contacts.count} (list ${unshared.list.body.contacts.length}), shared ${shared.snap.body.results.contacts.count} (list ${shared.list.body.contacts.length}); openInvoices/payments RESTRICTED`);
   });
 });
 
