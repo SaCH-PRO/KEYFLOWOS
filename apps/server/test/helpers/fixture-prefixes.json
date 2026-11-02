@@ -293,6 +293,11 @@
       "packet": "V1-12-DM-RECURRING-GUARD"
     },
     {
+      "prefix": "v16a_",
+      "owner": "apps/server/test/booking-concurrency.integration.test.ts",
+      "packet": "V1-16-BK-SLOT-CONCURRENCY"
+    },
+    {
       "prefix": "v21a_",
       "owner": "apps/server/test/structure-authority-ceiling.integration.test.ts",
       "packet": "V1-21-AUTH-JOBROLE-CEILING"

@@ -231,3 +231,152 @@ describe('the free-slot API answers with the same rule the writes enforce', () =
     );
   });
 });
+
+/**
+ * V1-16: the race the header above left open.
+ *
+ * Every write path read the slot with assertSlotFree and wrote it several awaits
+ * later, so two requests could both pass the read before either wrote. The
+ * claim closes it without a migration: one transaction takes
+ * pg_advisory_xact_lock on the business and the resource (the staff member,
+ * else the service, which is what assertSlotFree compares), re-reads with the
+ * same guard and writes. The lock is released at commit or rollback.
+ *
+ * These cases run the real service against a Prisma stand-in that records the
+ * order of calls; booking-concurrency.integration.test.ts races real requests
+ * against Postgres.
+ */
+describe('V1-16: every booking write claims its slot under a transaction-scoped advisory lock', () => {
+  function claimHarness(opts: { clashInsideClaim?: boolean; deposit?: number } = {}) {
+    const calls: string[] = [];
+    const lockKeys: unknown[] = [];
+    const existing = {
+      id: 'bk_existing', businessId: BIZ, serviceId: SERVICE, staffId: null as string | null, contactId: 'contact_1',
+      status: 'CONFIRMED', startTime: START, endTime: new Date(START.getTime() + 3600_000), service: { duration: 60 },
+    };
+    const tx = {
+      $executeRaw: vi.fn(async (_sql: TemplateStringsArray, ...values: unknown[]) => {
+        calls.push('tx:lock');
+        lockKeys.push(...values);
+        return 1;
+      }),
+      booking: {
+        findFirst: vi.fn(async () => {
+          calls.push('tx:check');
+          return opts.clashInsideClaim ? { id: 'bk_winner' } : null;
+        }),
+        create: vi.fn(async ({ data }: any) => {
+          calls.push('tx:create');
+          return { id: 'bk_new', createdAt: new Date(), contact: null, ...data };
+        }),
+        update: vi.fn(async ({ data }: any) => {
+          calls.push('tx:update');
+          return { ...existing, ...data, contact: null, service: null, staff: null };
+        }),
+      },
+    };
+    const outsideWrite = vi.fn(async () => {
+      throw new Error('a booking write outside the claim');
+    });
+    const prisma = {
+      client: {
+        $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => {
+          calls.push('tx:begin');
+          const result = await fn(tx);
+          calls.push('tx:commit');
+          return result;
+        }),
+        business: {
+          findFirstOrThrow: vi.fn(async () => ({ id: BIZ, businessHours: null, timezone: 'America/Port_of_Spain' })),
+          findUnique: vi.fn(async () => ({ businessHours: null, timezone: 'America/Port_of_Spain' })),
+        },
+        service: {
+          findFirstOrThrow: vi.fn(async () => ({
+            id: SERVICE, businessId: BIZ, name: 'Cut', duration: 60, price: opts.deposit ? 100 : 0,
+            bufferMins: null, leadTimeMins: null, invoiceTiming: 'COMPLETION',
+          })),
+          findFirst: vi.fn(async () => ({ bufferMins: null, leadTimeMins: null })),
+          findUnique: vi.fn(async () => ({ bufferMins: null, leadTimeMins: null })),
+        },
+        staffMember: { findFirst: vi.fn(async () => ({ id: 'staff_1' })) },
+        contact: { findFirst: vi.fn(async () => ({ id: 'contact_1' })) },
+        availability: { findMany: vi.fn(async () => []) },
+        booking: {
+          // The reschedule's lookup names the booking; the overlap read does not.
+          findFirst: vi.fn(async ({ where }: any) => {
+            if (typeof where.id === 'string') return existing;
+            calls.push('check');
+            return null;
+          }),
+          create: outsideWrite,
+          update: outsideWrite,
+        },
+        invoice: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      },
+    };
+    const events = { emit: vi.fn() };
+    const commerce = {
+      computeServiceDeposit: vi.fn(() => opts.deposit ?? 0),
+      createInvoiceForService: vi.fn(async () => ({ id: 'inv_deposit', total: opts.deposit, currency: 'TTD' })),
+    };
+    const service = new BookingsService(
+      prisma as any,
+      events as any,
+      { findOrCreateContact: vi.fn(async () => ({ id: 'contact_1' })), logContactEvent: vi.fn() } as any,
+      commerce as any,
+      { record: vi.fn() } as any,
+      {} as any,
+      {} as any,
+      { logStorefrontEvent: vi.fn(), backstitchVisitor: vi.fn() } as any,
+      {} as any,
+    );
+    return { service, calls, lockKeys, prisma, events, existing };
+  }
+
+  const LOCKED_WRITE = ['tx:begin', 'tx:lock', 'tx:check'];
+
+  it('a public create reads, then locks the service, re-reads and inserts in one transaction', async () => {
+    const h = claimHarness();
+    const res = await h.service.publicCreateBooking({ businessId: BIZ, serviceId: SERVICE, startTime: START, contact: { email: 'a@example.com' } });
+    expect(res.bookingId).toBe('bk_new');
+    expect(h.calls).toEqual(['check', ...LOCKED_WRITE, 'tx:create', 'tx:commit']);
+    expect(h.lockKeys).toEqual([`booking-slot:${BIZ}:${SERVICE}`]);
+  });
+
+  it('with a staff member, the staff member is the locked resource', async () => {
+    const h = claimHarness();
+    await h.service.publicCreateBooking({ businessId: BIZ, serviceId: SERVICE, staffId: 'staff_1', startTime: START, contact: { email: 'a@example.com' } });
+    expect(h.lockKeys).toEqual([`booking-slot:${BIZ}:staff_1`]);
+  });
+
+  it('an in-app create writes through the same claim', async () => {
+    const h = claimHarness();
+    await h.service.createBooking({
+      businessId: BIZ, contactId: 'contact_1', serviceId: SERVICE, staffId: 'staff_1',
+      startTime: START, endTime: new Date(START.getTime() + 3600_000),
+    });
+    expect(h.calls).toEqual(['check', ...LOCKED_WRITE, 'tx:create', 'tx:commit']);
+    expect(h.lockKeys).toEqual([`booking-slot:${BIZ}:staff_1`]);
+  });
+
+  it('a reschedule moves the booking through the same claim', async () => {
+    const h = claimHarness();
+    await h.service.rescheduleBooking(BIZ, 'bk_existing', new Date(START.getTime() + 2 * 3600_000));
+    expect(h.calls).toEqual(['check', ...LOCKED_WRITE, 'tx:update', 'tx:commit']);
+    expect(h.lockKeys).toEqual([`booking-slot:${BIZ}:${SERVICE}`]);
+  });
+
+  it('losing the race is the overlap refusal, writes nothing, and withdraws the deposit invoice it drew up', async () => {
+    const h = claimHarness({ clashInsideClaim: true, deposit: 25 });
+    await expect(
+      h.service.publicCreateBooking({ businessId: BIZ, serviceId: SERVICE, startTime: START, contact: { email: 'a@example.com' } }),
+    ).rejects.toThrow('That time slot has already been booked. Please choose another.');
+    expect(h.calls).toEqual(['check', ...LOCKED_WRITE]);
+    expect(h.events.emit).not.toHaveBeenCalled();
+    // A DRAFT nobody has seen, for a booking that does not exist: soft-deleted.
+    expect(h.prisma.client.invoice.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ['inv_deposit'] }, businessId: BIZ, status: 'DRAFT', deletedAt: null },
+      data: { deletedAt: expect.any(Date) },
+    });
+  });
+});

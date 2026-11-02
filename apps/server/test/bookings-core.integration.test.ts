@@ -53,8 +53,10 @@
  * Fixtures: prefix `v06a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
  * $transaction wrapping. Literals in globally unique columns embed the prefix.
- * Times are LOCAL wall-clock times in January 2030, because the service reads
- * hours and weekdays in server-local time (timezone handling is V1-16).
+ * Times are LOCAL wall-clock times in January 2030. The service reads hours
+ * and weekdays in Business.timezone (V1-16), so businesses A, B and C carry the
+ * server's own zone and those wall-clock times mean the same thing to both;
+ * the CR-1 case gives a business another zone on purpose.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -113,7 +115,15 @@ const ID = {
   bkCompleted: `${P}bkCompleted`,
   bkTenantA: `${P}bkTenantA`,
   bkLedger: `${P}bkLedger`,
+  // V1-16 CR-1: a Port_of_Spain (UTC-4) business, read on a UTC server.
+  bizTz: `${P}bizTz`,
+  contactTz: `${P}contactTz`,
+  svcTz: `${P}svcTz`,
+  svcTz2: `${P}svcTz2`,
 };
+
+/** The zone this process reads local times in; businesses A, B and C carry it. */
+const SERVER_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** Twenty years: every 2030 time is inside it. */
 const LONG_LEAD_MINS = 20 * 365 * 24 * 60;
@@ -385,9 +395,9 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.ownerA, email: `${P}ownerA@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.ownerB, email: `${P}ownerB@test.local`, role: 'USER' } });
   await db.business.create({
-    data: { id: ID.bizA, name: 'V06A Biz A', ownerId: ID.ownerA, currency: 'TTD', businessHours: HOURS_A, accountingBasis: 'ACCRUAL' },
+    data: { id: ID.bizA, name: 'V06A Biz A', ownerId: ID.ownerA, currency: 'TTD', timezone: SERVER_TZ, businessHours: HOURS_A, accountingBasis: 'ACCRUAL' },
   });
-  await db.business.create({ data: { id: ID.bizB, name: 'V06A Biz B', ownerId: ID.ownerB, currency: 'TTD' } });
+  await db.business.create({ data: { id: ID.bizB, name: 'V06A Biz B', ownerId: ID.ownerB, currency: 'TTD', timezone: SERVER_TZ } });
   await db.membership.create({ data: { id: `${P}m_ownerA`, userId: ID.ownerA, businessId: ID.bizA, role: 'OWNER' } });
   await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
   await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizA);
@@ -422,10 +432,16 @@ beforeAll(async () => {
   await db.contact.create({ data: { id: ID.contactStaffOwned, businessId: ID.bizA, firstName: 'Sam', lastName: 'Mine', ownerId: ID.staffUser } });
   // C: a Monday row that is open but carries no open/close times.
   await db.business.create({
-    data: { id: ID.bizC, name: 'V06A Biz C', ownerId: ID.ownerA, currency: 'TTD', businessHours: { mon: { closed: false } } },
+    data: { id: ID.bizC, name: 'V06A Biz C', ownerId: ID.ownerA, currency: 'TTD', timezone: SERVER_TZ, businessHours: { mon: { closed: false } } },
   });
   await db.membership.create({ data: { id: `${P}m_ownerA_C`, userId: ID.ownerA, businessId: ID.bizC, role: 'OWNER' } });
   await db.contact.create({ data: { id: ID.contactC, businessId: ID.bizC, firstName: 'Cid', lastName: 'Client' } });
+  // V1-16 CR-1: weekdays 09:00-17:00 in Port_of_Spain (UTC-4 all year).
+  await db.business.create({
+    data: { id: ID.bizTz, name: 'V06A Biz Tz', ownerId: ID.ownerA, currency: 'TTD', timezone: 'America/Port_of_Spain', businessHours: HOURS_A },
+  });
+  await db.membership.create({ data: { id: `${P}m_ownerA_Tz`, userId: ID.ownerA, businessId: ID.bizTz, role: 'OWNER' } });
+  await db.contact.create({ data: { id: ID.contactTz, businessId: ID.bizTz, firstName: 'Tia', lastName: 'Client' } });
 
   // The lead time of svcSlotsLead ends between 11:30 and 12:00 on FRI, so the
   // picker must drop every earlier slot and keep 12:00 onward.
@@ -442,6 +458,8 @@ beforeAll(async () => {
   await service(ID.svcLedger, ID.bizA, { price: 100 });
   await service(ID.svcB, ID.bizB);
   await service(ID.svcC, ID.bizC);
+  await service(ID.svcTz, ID.bizTz);
+  await service(ID.svcTz2, ID.bizTz);
 
   // ---- seeded bookings (written directly: they are the state, not the act) ----
   const seed = (id: string, data: Record<string, unknown>) =>
@@ -821,10 +839,47 @@ describe('V1-06 review repairs', () => {
     expect(await bookingRow(pub.body.bookingId)).toMatchObject({ businessId: ID.bizC, serviceId: ID.svcC });
   });
 
-  // CR-1 is disclosed, not fixed here: both create paths and getAvailableSlots
-  // read hours and weekdays in the server's local time. Making only the create
-  // paths read Business.timezone would refuse the very slots the public picker
-  // offers, so the change belongs with the picker in V1-16 (depends on V1-06;
-  // its RED-BEFORE is defined at the V1-06 head).
-  it.todo('CR-1 (V1-16): in-app and public creates read business hours in Business.timezone, not the server timezone');
+  // CR-1 was disclosed here and left for V1-16: both create paths and
+  // getAvailableSlots read hours and weekdays in the server's local time.
+  // V1-16 moved all three to Business.timezone together (the picker's half is
+  // in booking-concurrency.integration.test.ts), so a slot the picker offers is
+  // never refused on submit.
+  it('CR-1 (V1-16): in-app and public creates read business hours in Business.timezone, not the server timezone', async () => {
+    // At the V1-06 head, with the server at UTC (production's TZ unset), bizTz's
+    // 09:00-17:00 was read as 09:00Z-17:00Z: 13:00 local (17:00Z) was refused
+    // as outside business hours and 08:00 local (12:00Z) was accepted.
+    const previousTz = process.env.TZ;
+    process.env.TZ = 'UTC';
+    try {
+      // Monday 2030-01-07. Port_of_Spain is UTC-4 all year.
+      const pub = await publicCreate({ businessId: ID.bizTz, serviceId: ID.svcTz, startTime: new Date('2030-01-07T17:00:00.000Z') }); // 13:00 local
+      expect(pub.status, pub.body?.message ?? pub.body?.bookingId).toBe(201);
+      const tzBody = (start: Date, over: Record<string, unknown> = {}) => ({
+        ...body(start, { contactId: ID.contactTz, serviceId: ID.svcTz2, ...over }),
+        staffId: undefined,
+      });
+      const inApp = await inAppCreate(ID.ownerA, ID.bizTz, tzBody(new Date('2030-01-07T20:00:00.000Z'))); // 16:00-17:00 local
+      expect(inApp.status, inApp.body?.message ?? inApp.body?.id).toBe(201);
+      expect(await bookingRow(inApp.body.id)).toMatchObject({ businessId: ID.bizTz, serviceId: ID.svcTz2 });
+
+      // 08:00 local is before opening on both paths, with the public message.
+      const early = new Date('2030-01-07T12:00:00.000Z');
+      const earlyPub = await publicCreate({ businessId: ID.bizTz, serviceId: ID.svcTz, startTime: early });
+      expect(earlyPub.status).toBe(400);
+      expect(earlyPub.body.message).toBe(MSG.hours);
+      const earlyInApp = await inAppCreate(ID.ownerA, ID.bizTz, tzBody(early));
+      expect(earlyInApp.status).toBe(400);
+      expect(earlyInApp.body.message).toBe(MSG.hours);
+
+      // Saturday 2030-01-12 at 02:00Z is still Friday 22:00 local: closed by
+      // the hour, not by the (UTC) weekday.
+      const lateFriday = await inAppCreate(ID.ownerA, ID.bizTz, tzBody(new Date('2030-01-12T02:00:00.000Z')));
+      expect(lateFriday.status).toBe(400);
+      expect(lateFriday.body.message).toBe(MSG.hours);
+      expect(await db.booking.count({ where: { businessId: ID.bizTz } }), 'only the two in-hours bookings').toBe(2);
+    } finally {
+      if (previousTz === undefined) delete process.env.TZ;
+      else process.env.TZ = previousTz;
+    }
+  });
 });
