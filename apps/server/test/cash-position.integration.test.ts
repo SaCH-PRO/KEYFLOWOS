@@ -96,6 +96,30 @@
  *          membership-only (every Books write is; no module key governs Books):
  *          a residual, reported with the repair
  *
+ * V1-37c-CURRENCY-NORMALIZE-CASH (VL-05, independent verification of
+ * int/trial-I; owner ruling D-13: one currency per business, TTD and USD
+ * supported, no heterogeneous sums). CashPositionService grouped the cash
+ * entries by account only, so a TTD business's USD cash was added to its TTD
+ * cash into one unlabelled figure (accounts CASH 150, BANK 500 -> cashBalance
+ * 650, while the per-currency sums are TTD 100 and USD 550):
+ *
+ *   CP-14  RED-BEFORE the cash position is the business currency's figure,
+ *          labelled with it (currency), with byCurrency for every currency the
+ *          cash holds, each equal to Postgres' own sum grouped by the
+ *          normalized code; every account row is labelled; safe-to-spend, the
+ *          OS command center and the overview serve the TTD figure (100), never
+ *          650; safe-to-spend and the OS status say USD 550 is held apart
+ *          (otherCurrencyCash, the explanation); a legacy lower-case 'ttd'
+ *          cash row joins TTD
+ *   CP-15  RED-BEFORE an unposted opening is bridged in its own currency: a
+ *          USD account's on a TTD business is held apart with the USD cash and
+ *          explained there; a legacy 'ttd' row's joins TTD; the backfill then
+ *          posts both and moves no figure in any currency
+ *   CP-16  RED-BEFORE on a USD business the cash is USD: a legacy row holding
+ *          the old literal 'TTD' default is bridged in USD, as the backfill
+ *          posts it (RV37b-CR-01), so the backfill moves nothing; TTD cash a
+ *          source document brought is held apart, never added
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
  * RevenuePostingService, PostingService, AccountingPeriodService,
@@ -152,6 +176,11 @@ const ID = {
   bizH: `${P}bizH`,
   // A STAFF member of H whose every module scope is none (CP-13).
   staffH: `${P}staffH`,
+  // V1-37c: I keeps TTD and holds USD cash too (CP-14, CP-15); J keeps USD (CP-16).
+  ownerI: `${P}ownerI`,
+  bizI: `${P}bizI`,
+  ownerJ: `${P}ownerJ`,
+  bizJ: `${P}bizJ`,
 };
 
 /** CP-13: every canonical module key (core/authority/module-vocabulary.ts) at none. */
@@ -174,6 +203,7 @@ let financeRedis: any; // the finance app's RedisService client (quit when the a
 let posting: any;
 let coaSeeder: any;
 let accounts: any;
+let cashPositionService: any; // the finance app's CashPositionService (V1-37c)
 let tillA: any; // A's cash account, opened with 1000
 let paymentA: any; // the 100 manual payment on A's invoice
 
@@ -210,7 +240,7 @@ async function cleanup() {
   }
   // The fixture businesses' overview cache entries (60s TTL).
   if (redis) {
-    for (const biz of [ID.bizA, ID.bizB, ID.bizC, ID.bizD, ID.bizE, ID.bizF, ID.bizFt, ID.bizG, ID.bizH]) {
+    for (const biz of [ID.bizA, ID.bizB, ID.bizC, ID.bizD, ID.bizE, ID.bizF, ID.bizFt, ID.bizG, ID.bizH, ID.bizI, ID.bizJ]) {
       await redis.del(overviewKey(biz)).catch(() => undefined);
     }
   }
@@ -247,6 +277,78 @@ async function ledgerCash(businessId: string): Promise<number> {
     businessId,
   );
   return money(Number(rows[0].net));
+}
+
+/**
+ * V1-37c LEDGER, per currency: the same independent sum grouped by the
+ * normalized code (UPPER(TRIM(currency))), never added across currencies.
+ */
+async function ledgerCashByCurrency(businessId: string): Promise<Record<string, number>> {
+  const rows: Array<{ currency: string; net: string }> = await db.$queryRawUnsafe(
+    `SELECT UPPER(TRIM(le.currency)) AS currency, COALESCE(SUM(le.debit - le.credit), 0)::text AS net
+       FROM ledger_entries le
+       JOIN chart_of_accounts coa ON coa.id = le.account_id
+      WHERE le.business_id = $1
+        AND coa.business_id = $1
+        AND coa.system_key IN ('CASH', 'BANK', 'PAYMENT_PROCESSOR')
+      GROUP BY 1
+      ORDER BY 1`,
+    businessId,
+  );
+  return Object.fromEntries(rows.map((r) => [r.currency, money(Number(r.net))]));
+}
+
+/** Every number reachable from `value`, with its path. */
+function numbersIn(value: any, at = '$'): Array<[string, number]> {
+  if (typeof value === 'number') return [[at, value]];
+  if (Array.isArray(value)) return value.flatMap((v, i) => numbersIn(v, `${at}[${i}]`));
+  if (value && typeof value === 'object') return Object.entries(value).flatMap(([k, v]) => numbersIn(v, `${at}.${k}`));
+  return [];
+}
+
+/** V1-37c: a balanced posting through the door in `currency` (sourced, so D-13 lets another supported currency through). */
+async function postIn(currency: string, businessId: string, kind: string, amount: number, debitKey: string, creditKey: string) {
+  const dr = await coaSeeder.getBySystemKey(businessId, debitKey);
+  const cr = await coaSeeder.getBySystemKey(businessId, creditKey);
+  return posting.post({
+    businessId,
+    type: 'ADJUSTMENT',
+    date: new Date(Date.now() - 60_000),
+    amount,
+    currency,
+    description: `v34a ${kind}`,
+    sourceType: 'V34aFixture',
+    sourceId: `${P}${kind}`,
+    kind,
+    entries: [
+      { accountId: dr.id, debit: amount },
+      { accountId: cr.id, credit: amount },
+    ],
+  });
+}
+
+/**
+ * V1-37c: a posting as a writer that predates the door's normalization left it,
+ * the transaction and its entries holding `currency` exactly as spelled
+ * (lower-case 'ttd'). Inserted directly: the door upper-cases every code.
+ */
+async function legacyPosting(businessId: string, key: string, currency: string, amount: number, debitKey: string, creditKey: string) {
+  const dr = await coaSeeder.getBySystemKey(businessId, debitKey);
+  const cr = await coaSeeder.getBySystemKey(businessId, creditKey);
+  const date = new Date(Date.now() - 60_000);
+  const id = `${P}${key}`;
+  await db.financialTransaction.create({
+    data: {
+      id, businessId, type: 'ADJUSTMENT', status: 'POSTED', date, amount, currency,
+      description: `v34a legacy ${key}`, sourceType: 'V34aLegacy', sourceId: id, externalRef: `V34aLegacy:${id}:legacy`,
+    },
+  });
+  await db.ledgerEntry.createMany({
+    data: [
+      { businessId, transactionId: id, accountId: dr.id, currency, date, debit: amount, credit: 0 },
+      { businessId, transactionId: id, accountId: cr.id, currency, date, debit: 0, credit: amount },
+    ],
+  });
 }
 
 async function safeToSpend(biz: string, as: string) {
@@ -552,6 +654,7 @@ beforeAll(async () => {
       ...collaborators.map((token) => ({ provide: token, useValue: {} })),
     ],
   }).compile();
+  cashPositionService = cashPositionToken ? financeRef.get(cashPositionToken) : null;
   financeApp = financeRef.createNestApplication();
   attachIdentity(financeApp);
   financeApp.useGlobalInterceptors(new TenantInterceptor(financeRef.get(PrismaService)));
@@ -590,9 +693,11 @@ beforeAll(async () => {
     [ID.ownerFt, ID.bizFt, 'V34A Biz Ft', `${P}owner_ft@test.local`],
     [ID.ownerG, ID.bizG, 'V34A Biz G', `${P}owner_g@test.local`],
     [ID.ownerH, ID.bizH, 'V34A Biz H', `${P}owner_h@test.local`],
+    [ID.ownerI, ID.bizI, 'V34A Biz I', `${P}owner_i@test.local`],
+    [ID.ownerJ, ID.bizJ, 'V34A Biz J', `${P}owner_j@test.local`],
   ] as const) {
     await db.user.create({ data: { id: user, email, role: 'USER' } });
-    await db.business.create({ data: { id: biz, name, ownerId: user, currency: biz === ID.bizF ? 'USD' : 'TTD' } });
+    await db.business.create({ data: { id: biz, name, ownerId: user, currency: biz === ID.bizF || biz === ID.bizJ ? 'USD' : 'TTD' } });
     await db.membership.create({ data: { id: `${user}_m`, userId: user, businessId: biz, role: 'OWNER' } });
     await coaSeeder.ensureDefaults(biz);
   }
@@ -1045,5 +1150,138 @@ describe('V1-37b review repairs: account opening balances', () => {
     expect(otherAudit).toHaveLength(1);
     expect(otherAudit[0]).toMatchObject({ userId: ID.staffH, action: 'ACCOUNT_CREATED' });
     expect(otherAudit[0].meta).toMatchObject({ openingBalance: '25', openingTransactionId: null, openingNotPosted: expect.stringMatching(/cash/i) });
+  }, 60_000);
+});
+
+/**
+ * V1-37c-CURRENCY-NORMALIZE-CASH (VL-05; D-13: no heterogeneous sums): the
+ * cash position is the business currency's figure, labelled, with every other
+ * currency held apart and never added to it.
+ */
+describe('V1-37c the cash position never adds currencies together (VL-05)', () => {
+  /** The cash position as the service serves it, every row reduced to what the cases pin. */
+  async function position(biz: string) {
+    const p = await cashPositionService.getCashPosition(biz);
+    return {
+      ...p,
+      rows: [...p.accounts]
+        .map((a: any) => [a.systemKey, a.currency, a.balance])
+        .sort((x: any[], y: any[]) => `${x[0]}|${x[1]}`.localeCompare(`${y[0]}|${y[1]}`)),
+    };
+  }
+
+  it('CP-14 (VL-05) RED-BEFORE: TTD 100 beside USD 550 -> cashBalance 100 (TTD) everywhere, byCurrency {TTD 100, USD 550}, never 650; a legacy lower-case ttd row joins TTD', async () => {
+    // The verifier's repro: CASH holds TTD 100 and USD 50, BANK holds USD 500.
+    await postIn('TTD', ID.bizI, 'i_cash_ttd', 100, 'CASH', 'OTHER_INCOME');
+    await postIn('USD', ID.bizI, 'i_cash_usd', 50, 'CASH', 'OTHER_INCOME');
+    await postIn('USD', ID.bizI, 'i_bank_usd', 500, 'BANK', 'OTHER_INCOME');
+    expect(await ledgerCashByCurrency(ID.bizI)).toEqual({ TTD: 100, USD: 550 });
+
+    // The reader: the business currency's figure, labelled; each currency apart.
+    const p = await position(ID.bizI);
+    expect(p).toMatchObject({ cashBalance: 100, currency: 'TTD', basis: 'ledger', byCurrency: { TTD: 100, USD: 550 } });
+    expect(Object.keys(p.byCurrency).sort()).toEqual(['TTD', 'USD']);
+    expect(p.byCurrency, 'each currency equals Postgres\' own per-currency sum').toEqual(await ledgerCashByCurrency(ID.bizI));
+    expect(p.rows, 'every account row is labelled; one per (account, currency)').toEqual([
+      ['BANK', 'USD', 500],
+      ['CASH', 'TTD', 100],
+      ['CASH', 'USD', 50],
+      ['PAYMENT_PROCESSOR', 'TTD', 0],
+    ]);
+
+    // Every surface serves the TTD figure, never the 650 sum.
+    const read = await expectSurfaces(ID.bizI, ID.ownerI, 100);
+    for (const [where, body] of [['safe-to-spend', read.safe], ['os', read.os], ['overview', read.overview]] as const) {
+      expect(numbersIn(body).filter(([, n]) => n === 650), `${where}: no figure adds TTD and USD`).toEqual([]);
+    }
+    expect(read.safe).toMatchObject({ currency: 'TTD', operatingBuffer: 500, safeToSpend: 0 });
+    expect(read.safe.otherCurrencyCash, 'safe-to-spend says USD is held apart').toEqual([{ currency: 'USD', amount: 550 }]);
+    expect(read.safe.explanation[0]).toBe('Cash balance: TTD 100.00 (ledger)');
+    expect(read.safe.explanation).toContain('Cash in USD, not included (never added to TTD): USD 550.00 (ledger)');
+    expect(read.os.flows.financial).toMatchObject({ cashBalance: 100, cashCurrency: 'TTD', otherCurrencyCash: [{ currency: 'USD', amount: 550 }] });
+
+    // A legacy row as a pre-normalizing writer left it, 'ttd': it is TTD cash.
+    await legacyPosting(ID.bizI, 'i_legacy_ttd', 'ttd', 30, 'CASH', 'OWNER_EQUITY');
+    const after = await position(ID.bizI);
+    expect(after).toMatchObject({ cashBalance: 130, currency: 'TTD', byCurrency: { TTD: 130, USD: 550 } });
+    expect(Object.keys(after.byCurrency).sort(), 'no lower-case currency').toEqual(['TTD', 'USD']);
+    expect(after.byCurrency).toEqual(await ledgerCashByCurrency(ID.bizI));
+    expect(after.rows.filter((r: any[]) => r[0] === 'CASH')).toEqual([['CASH', 'TTD', 130], ['CASH', 'USD', 50]]);
+    const again = await expectSurfaces(ID.bizI, ID.ownerI, 130);
+    expect(again.safe.explanation[0]).toBe('Cash balance: TTD 130.00 (ledger)');
+
+    // TENANT: I's cash, in either currency, never reaches A.
+    await expectCash(ID.bizA, ID.ownerA, 1025.05);
+  }, 60_000);
+
+  it('CP-15 RED-BEFORE: an unposted opening is bridged in its own currency (USD apart, legacy ttd into TTD); the backfill then moves no figure', async () => {
+    // A USD bank account recorded before V1-37b with its opening on the row only.
+    const dollar = await legacyAccount(ID.bizI, 'V34A Dollar I', 'BANK', 'BANK', 70, daysAgo(20), 'USD');
+    let p = await position(ID.bizI);
+    expect(p).toMatchObject({ cashBalance: 130, currency: 'TTD', byCurrency: { TTD: 130, USD: 620 } });
+    expect(p.unpostedOpeningBalances).toEqual([
+      expect.objectContaining({ financialAccountId: dollar.id, currency: 'USD', amount: 70 }),
+    ]);
+    let read = await expectSurfaces(ID.bizI, ID.ownerI, 130);
+    expect(read.safe.otherCurrencyCash).toEqual([{ currency: 'USD', amount: 620 }]);
+    expect(read.safe.explanation.slice(0, 3), 'the USD opening is explained with the USD cash, never as part of TTD').toEqual([
+      'Cash balance: TTD 130.00 (ledger)',
+      'Cash in USD, not included (never added to TTD): USD 620.00 (ledger)',
+      '  - includes V34A Dollar I opening balance not yet posted: USD 70.00',
+    ]);
+
+    // A legacy till whose row holds the lower-case 'ttd': its opening is TTD cash.
+    const till = await legacyAccount(ID.bizI, 'V34A Till I', 'CASH', 'CASH', 20, daysAgo(20), 'ttd');
+    p = await position(ID.bizI);
+    expect(p).toMatchObject({ cashBalance: 150, byCurrency: { TTD: 150, USD: 620 } });
+    expect(Object.keys(p.byCurrency).sort()).toEqual(['TTD', 'USD']);
+    read = await expectSurfaces(ID.bizI, ID.ownerI, 150);
+    expect(read.safe.explanation.slice(0, 2)).toEqual([
+      'Cash balance: TTD 150.00 (ledger)',
+      '  - includes V34A Till I opening balance not yet posted: TTD 20.00',
+    ]);
+
+    // The backfill posts both, each in the currency it was bridged in: no figure moves.
+    const result = await accounts.backfillOpeningBalances(ID.bizI);
+    expect(result.skipped).toEqual([]);
+    expect(result.posted.map((r: any) => [r.financialAccountId, r.currency]).sort()).toEqual([[dollar.id, 'USD'], [till.id, 'TTD']].sort());
+    p = await position(ID.bizI);
+    expect(p).toMatchObject({ cashBalance: 150, byCurrency: { TTD: 150, USD: 620 }, unpostedOpeningBalances: [] });
+    expect(p.byCurrency, 'the bridged figures are now the ledger\'s own').toEqual(await ledgerCashByCurrency(ID.bizI));
+    read = await expectSurfaces(ID.bizI, ID.ownerI, 150);
+    expect(read.safe.explanation.some((line: string) => line.includes('not yet posted'))).toBe(false);
+  }, 60_000);
+
+  it('CP-16 RED-BEFORE: on a USD business the cash is USD; a legacy row holding the old TTD default is bridged in USD as the backfill posts it; TTD cash is held apart', async () => {
+    // RV37b-CR-01: 'TTD' on a USD business's legacy row is the old literal default, not a choice.
+    const chase = await legacyAccount(ID.bizJ, 'V34A Chase J', 'BANK', 'BANK', 300, daysAgo(20), 'TTD');
+    let p = await position(ID.bizJ);
+    expect(p).toMatchObject({ cashBalance: 300, currency: 'USD', byCurrency: { USD: 300 } });
+    expect(Object.keys(p.byCurrency)).toEqual(['USD']);
+    let read = await expectSurfaces(ID.bizJ, ID.ownerJ, 300);
+    expect(read.safe).toMatchObject({ currency: 'USD', otherCurrencyCash: [] });
+    expect(read.safe.explanation.slice(0, 2)).toEqual([
+      'Cash balance: USD 300.00 (ledger)',
+      '  - includes V34A Chase J opening balance not yet posted: USD 300.00',
+    ]);
+    expect(read.os.flows.financial).toMatchObject({ cashCurrency: 'USD', otherCurrencyCash: [] });
+
+    // TTD a source document brought (a TTD invoice's receipt): held apart, never added.
+    await postIn('TTD', ID.bizJ, 'j_cash_ttd', 40, 'CASH', 'OTHER_INCOME');
+    p = await position(ID.bizJ);
+    expect(p).toMatchObject({ cashBalance: 300, currency: 'USD', byCurrency: { USD: 300, TTD: 40 } });
+    read = await expectSurfaces(ID.bizJ, ID.ownerJ, 300);
+    expect(read.safe.otherCurrencyCash).toEqual([{ currency: 'TTD', amount: 40 }]);
+    expect(read.safe.explanation).toContain('Cash in TTD, not included (never added to USD): TTD 40.00 (ledger)');
+    expect(read.os.flows.financial).toMatchObject({ cashBalance: 300, cashCurrency: 'USD', otherCurrencyCash: [{ currency: 'TTD', amount: 40 }] });
+    for (const body of [read.safe, read.os, read.overview]) expect(numbersIn(body).filter(([, n]) => n === 340)).toEqual([]);
+
+    // The backfill posts the opening in USD (and corrects the row): nothing moves.
+    const result = await accounts.backfillOpeningBalances(ID.bizJ);
+    expect(result.posted).toEqual([expect.objectContaining({ financialAccountId: chase.id, currency: 'USD', currencyCorrectedFrom: 'TTD' })]);
+    p = await position(ID.bizJ);
+    expect(p).toMatchObject({ cashBalance: 300, byCurrency: { USD: 300, TTD: 40 }, unpostedOpeningBalances: [] });
+    expect(p.byCurrency).toEqual(await ledgerCashByCurrency(ID.bizJ));
+    await expectSurfaces(ID.bizJ, ID.ownerJ, 300);
   }, 60_000);
 });

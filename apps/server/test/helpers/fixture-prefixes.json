@@ -413,6 +413,11 @@
       "packet": "V1-37-DM-CURRENCY"
     },
     {
+      "prefix": "v37c_",
+      "owner": "apps/server/test/ledger-currency-normalize.integration.test.ts",
+      "packet": "V1-37 / V1-37c-CURRENCY-NORMALIZE-CASH"
+    },
+    {
       "prefix": "v42a_",
       "owner": "apps/server/test/invoice-transition-concurrency.integration.test.ts",
       "packet": "V1-42-DM-LIFECYCLE-OWNER-CAS"
