@@ -53,6 +53,7 @@ const ID = {
   biz: `${P}biz`,
   contact: `${P}contact`,
   quote: `${P}quote`,
+  quoteB: `${P}quoteB`,
   order: `${P}order`,
 };
 
@@ -76,6 +77,8 @@ const calls: Call[] = [];
 /** Per-call delay inside the recorders: widens the window between a poller's read and its write. */
 const RECORDER_DELAY_MS = 25;
 let failAddTaskFor: string | null = null;
+/** Runs inside crm.addTask (after the recorder pause, before any refusal): a writer acting while a job executes. */
+let addTaskHook: ((input: any) => Promise<void>) | null = null;
 
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -83,6 +86,7 @@ const crmStub = {
   addTask: async (input: any) => {
     calls.push({ method: 'crm.addTask', input });
     await pause(RECORDER_DELAY_MS);
+    if (addTaskHook) await addTaskHook(input);
     if (failAddTaskFor && typeof input?.title === 'string' && input.title.includes(failAddTaskFor)) {
       throw new Error('v35a_ recorder: addTask refused');
     }
@@ -161,10 +165,10 @@ async function job(id: string, jobType: string, entityId: string, checkpoint: st
 }
 
 /** The Day-3 checkpoint ('day_first': a task and the reminder email); one per quote, as the writer's unique key allows. */
-function quoteFollowUpJob(id: string, offsetSeconds: number) {
-  return job(id, 'quote_followup', ID.quote, 'day_first', {
+function quoteFollowUpJob(id: string, offsetSeconds: number, quoteId: string = ID.quote, quoteRef = `${P}Q-001`) {
+  return job(id, 'quote_followup', quoteId, 'day_first', {
     contactId: ID.contact,
-    quoteRef: `${P}Q-001`,
+    quoteRef,
     days: 3,
     autoSendEmail: true,
     contactName: 'V35a Customer',
@@ -185,6 +189,12 @@ function reviewRequestJob(id: string, offsetSeconds: number) {
 
 async function row(id: string) {
   return db.scheduledAgentJob.findUnique({ where: { id: `${P}${id}` } });
+}
+
+/** The quote's writer re-sends it: CrossModuleAgentService.handleQuoteSent upserts its day_first/day_second jobs back to PENDING (+3 d / +7 d, new payload, executedAt null). */
+async function resendQuote(quoteId: string) {
+  const quote = await db.quote.findUnique({ where: { id: quoteId }, include: { contact: true } });
+  await agent.handleQuoteSent({ businessId: ID.biz, quote });
 }
 
 beforeAll(async () => {
@@ -226,6 +236,9 @@ beforeAll(async () => {
   await db.quote.create({
     data: { id: ID.quote, businessId: ID.biz, contactId: ID.contact, quoteNumber: `${P}Q-001`, status: 'SENT', total: 100, subtotal: 100, sentAt: new Date() },
   });
+  await db.quote.create({
+    data: { id: ID.quoteB, businessId: ID.biz, contactId: ID.contact, quoteNumber: `${P}Q-002`, status: 'SENT', total: 200, subtotal: 200, sentAt: new Date() },
+  });
 }, 120_000);
 
 afterAll(async () => {
@@ -236,6 +249,7 @@ afterAll(async () => {
 beforeEach(async () => {
   calls.length = 0;
   failAddTaskFor = null;
+  addTaskHook = null;
   await cleanJobsAndEffects();
 });
 
@@ -381,5 +395,63 @@ describe('REL-02: each job is claimed atomically before any effect', () => {
     expect((await row('review')).status).toBe('FAILED');
     expect(ownCalls('crm.addTask')).toHaveLength(1);
     expect(ownCalls('email.send')).toHaveLength(1);
+  }, 30_000);
+
+  it('V35-07 (review SEC-V35-1): a job re-armed by its writer after the read (quote B re-sent while job A executes: PENDING again, +3 days, new payload) is not claimed with the stale payload: no task or reminder for B, B stays PENDING, not executed, due in the future', async () => {
+    await quoteFollowUpJob('followupA', 1, ID.quote, `${P}Q-001`);
+    await quoteFollowUpJob('followupB', 2, ID.quoteB, `${P}Q-002`);
+    const before = await row('followupB');
+
+    let resent = false;
+    addTaskHook = async (input) => {
+      if (resent || !String(input?.title).includes(`${P}Q-001`)) return;
+      resent = true;
+      await resendQuote(ID.quoteB);
+    };
+
+    const startedAt = Date.now();
+    await agent.processScheduledJobs();
+    expect(resent).toBe(true);
+
+    // Non-vacuity: job A ran once with its effects.
+    const a = await row('followupA');
+    expect(a.status).toBe('COMPLETED');
+    expect(ownCalls('crm.addTask').filter((c) => String(c.input.title).includes(`${P}Q-001`))).toHaveLength(1);
+    expect(ownCalls('gmail.sendEmail').filter((c) => String(c.input.subject).includes(`${P}Q-001`))).toHaveLength(1);
+
+    // Job B: the re-armed version is the one that stands, not run now.
+    expect(ownCalls('crm.addTask').filter((c) => String(c.input.title).includes(`${P}Q-002`))).toEqual([]);
+    expect(ownCalls('gmail.sendEmail').filter((c) => String(c.input.subject).includes(`${P}Q-002`))).toEqual([]);
+    const b = await row('followupB');
+    expect(b.status).toBe('PENDING');
+    expect(b.executedAt).toBeNull();
+    expect(b.scheduledFor.getTime()).toBeGreaterThan(startedAt + 2 * 86400000);
+    expect(b.updatedAt.getTime()).toBeGreaterThan(before.updatedAt.getTime());
+    expect(b.payload).toMatchObject({ quoteRef: `${P}Q-002`, days: 3 });
+  }, 30_000);
+
+  it('V35-08 (review SEC-V35-2): a claimed job whose execution throws after its writer re-armed the row (quote re-sent mid-execution) is not overwritten FAILED: the re-armed follow-up stays PENDING, not executed, due in the future', async () => {
+    await quoteFollowUpJob('followup', 1);
+    failAddTaskFor = `${P}Q-001`;
+    let resent = false;
+    let midway: any = null;
+    addTaskHook = async () => {
+      if (resent) return;
+      resent = true;
+      await resendQuote(ID.quote);
+      midway = await row('followup');
+    };
+
+    const startedAt = Date.now();
+    await agent.processScheduledJobs();
+    expect(resent).toBe(true);
+    expect(ownCalls('crm.addTask')).toHaveLength(1);
+    // Mid-execution the writer had re-armed the row (the refusal came after).
+    expect({ status: midway?.status, executedAt: midway?.executedAt }).toEqual({ status: 'PENDING', executedAt: null });
+
+    const r = await row('followup');
+    expect(r.status).toBe('PENDING');
+    expect(r.executedAt).toBeNull();
+    expect(r.scheduledFor.getTime()).toBeGreaterThan(startedAt + 2 * 86400000);
   }, 30_000);
 });
