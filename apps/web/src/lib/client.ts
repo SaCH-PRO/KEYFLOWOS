@@ -2316,6 +2316,14 @@ export async function recordInvoicePayment(businessId: string, invoiceId: string
   notes?: string;
   evidenceUrl?: string;
   evidenceMimeType?: string;
+  /**
+   * R0-21: one key per payment-form open, reused on retry (RecordPaymentDto,
+   * R0-D2). The same key returns the payment already recorded instead of a
+   * second one. The server keys on it in preference to the reference, so the
+   * forms leave it out when the submit carries a reference
+   * (attemptIdempotencyKey in payment-record-modal.tsx).
+   */
+  idempotencyKey?: string;
 }): Promise<ApiResult<{ payment: PaymentRecord; invoice: Invoice; paidAmount: number; remaining: number }>> {
   return apiPost({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments`,
@@ -2473,6 +2481,58 @@ export interface PublicInvoicePayload {
 
 export async function getPublicInvoiceByToken(token: string): Promise<ApiResult<PublicInvoicePayload>> {
   return apiGet(`/commerce/public/invoice-link/${encodeURIComponent(token)}`);
+}
+
+// V1-46b-TOKEN-PAY-COMPLETE (M34; D-07: token links only): the customer pay
+// page's payment calls, keyed by the pay-link token. Each resolves the invoice
+// only through a live link, so a revoked or expired link answers 404 on every
+// one; none of them takes or returns the invoice id. They go through
+// lib/api.ts (apiGetSimple / apiPost), whose answers carry `rawError`, so the
+// page can tell a closed link (404) from any other failure.
+function payLinkPaymentsPath(token: string, suffix: string): string {
+  return `/payments/public/invoice-link/${encodeURIComponent(token)}/${suffix}`;
+}
+
+export interface PayLinkStatus {
+  status: string;
+  paid: number;
+  remaining: number;
+  currency: string;
+  lastPaymentAt: string | null;
+}
+
+export interface PayLinkGateway {
+  id: string;
+  name: string;
+  currencies: string[];
+}
+
+export type PayLinkCheckout =
+  | { type: "redirect"; redirectUrl: string }
+  | { type: "paypal_order"; orderId: string };
+
+export type PayLinkCheckoutBody =
+  | { gateway: "stripe"; successUrl: string; cancelUrl: string }
+  | { gateway: "wipay"; returnUrl: string }
+  | { gateway: "paypal" };
+
+export function getPayLinkStatus(token: string) {
+  return apiGetSimple<PayLinkStatus>(payLinkPaymentsPath(token, "status"));
+}
+
+export function getPayLinkGateways(token: string) {
+  return apiGetSimple<PayLinkGateway[]>(payLinkPaymentsPath(token, "gateways"));
+}
+
+export function createPayLinkCheckout(token: string, body: PayLinkCheckoutBody) {
+  return apiPost<PayLinkCheckout>({ path: payLinkPaymentsPath(token, "checkout"), body });
+}
+
+export function capturePayLinkPaypalOrder(token: string, orderId: string) {
+  return apiPost<{ id: string; status: string }>({
+    path: payLinkPaymentsPath(token, `paypal/capture/${encodeURIComponent(orderId)}`),
+    body: {},
+  });
 }
 
 export async function createInvoice(input: {

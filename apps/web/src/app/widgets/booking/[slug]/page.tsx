@@ -125,16 +125,18 @@ export default function BookingWidgetPage() {
             </div>
             <p className="font-medium">Booking confirmed!</p>
             {result.bookingId && <p className="text-xs opacity-60">Booking ID: {result.bookingId}</p>}
+            {/*
+              V1-46b-TOKEN-PAY-COMPLETE (CR-01; D-07: token links only): this
+              linked /pay/<invoiceId>, the retired bare-id page. The booking's
+              invoice is created as a DRAFT, which no pay surface shows, and
+              the anonymous booking answer carries no pay-link token; the
+              customer pays through the link the business sends with the
+              invoice.
+            */}
             {result.invoiceId && (
-              <a
-                href={`/pay/${result.invoiceId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-block mt-1 rounded-lg px-4 py-2 text-sm font-medium text-white"
-                style={{ backgroundColor: primary }}
-              >
-                Pay Now
-              </a>
+              <p className="text-xs opacity-60">
+                The business will send your invoice with a secure payment link.
+              </p>
             )}
           </div>
         )}

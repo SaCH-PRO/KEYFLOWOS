@@ -25,7 +25,27 @@
  * would post, runs only after a successful send). A refused reminder or receipt
  * logs no "sent" contact event. A refused AI dispatch writes no AiUsageLog row
  * and no LLM cost. No case makes an outbound HTTP call: globalThis.fetch is a
- * refusing recorder for the whole suite.
+ * refusing recorder for the whole suite (the two R0-CMF4 blocks alone answer
+ * Gmail's messages/send in process, below).
+ *
+ * R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 items 2 and 3): a send
+ * Gmail did not accept changes nothing. A refused (503) or failed quote
+ * send-email leaves a DRAFT quote DRAFT, with no viewToken, no sentAt and no
+ * quote.sent event; a refused or failed invoice send-email leaves no new
+ * PaymentLink row. A business connected to Gmail with a live access token
+ * (bizSend) drives the real GmailService into a stubbed Gmail transport that
+ * throws (a network failure), answers an error (Gmail refused it: the old 400)
+ * or accepts the message. Accepted, the quote is SENT with the viewToken the
+ * email carried, and the invoice gets exactly one live link, whose token link
+ * is in the email and the response (D-07); a resend reuses that link.
+ * RED-BEFORE (recorded in the R0-CMF4 tests-first commit): the quote was moved
+ * to SENT, and the link minted, before the send.
+ *
+ * R0-CMF4 review (SEC-CMF4-1/2/3, CR-CMF4-1): a second block drives another
+ * request while the first send is with Gmail (duringSend): an operator
+ * rejection is kept, a second click or "mark sent" leaves every emailed link
+ * working with one quote.sent, two invoice sends share one live link, and a
+ * failed first send does not take away what an accepted second send mailed.
  *
  * RED-BEFORE (recorded in the tests-first commit): on the unmodified code the
  * Gmail paths answer 400 BAD_REQUEST ('Gmail not connected' / 'Google OAuth not
@@ -79,7 +99,32 @@ const ID = {
   invPaid: `${P}invPaid`,
   invConnected: `${P}invConn`,
   quoteSent: `${P}quoteSent`,
+  /** R0-CMF4: a DRAFT quote and a DRAFT invoice with no pay link, of the business with no Gmail connection. */
+  quoteDraft: `${P}quoteDraft`,
+  invNoLink: `${P}invNoLink`,
+  /** R0-CMF4: a business connected to Gmail with a live access token; its sends reach the stubbed Gmail transport. */
+  bizSend: `${P}bizSend`,
+  contactSend: `${P}contactSend`,
+  quoteSendFail: `${P}quoteSendFail`,
+  quoteSendOk: `${P}quoteSendOk`,
+  invSendFail: `${P}invSendFail`,
+  invSendLinked: `${P}invSendLinked`,
+  invSendOk: `${P}invSendOk`,
+  linkSendLinked: `${P}linkSendLinked`,
+  /** R0-CMF4 review: DRAFT quotes and invoices of bizSend that another request changes while their first send is with Gmail. */
+  quoteRaceReject: `${P}qRaceReject`,
+  quoteRaceDouble: `${P}qRaceDouble`,
+  quoteRaceMark: `${P}qRaceMark`,
+  quoteRaceFail: `${P}qRaceFail`,
+  invRaceDouble: `${P}invRaceDouble`,
+  invRaceFail: `${P}invRaceFail`,
 };
+
+/** R0-CMF4: the live pay link invSendLinked already has (not the pre-V1-48 cuid shape, so it is never rotated). */
+const LINKED_TOKEN = `${P}live-link-token-0123456789abcdef`;
+/** A V1-48 pay-link token or quote view token: 24 crypto-random bytes, base64url. */
+const RANDOM_TOKEN = /^[A-Za-z0-9_-]{32,}$/;
+const GMAIL_SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
 
 /** Every variable GmailService or ModelGatewayService reads to decide a provider is configured. */
 const PROVIDER_ENV = [
@@ -133,6 +178,74 @@ const contactEvents: any[] = [];
 const llmCostWrites: any[] = [];
 /** Every outbound fetch attempted by the process during the suite (refused). */
 const outbound: string[] = [];
+
+/**
+ * R0-CMF4: what the stubbed Gmail transport does with a messages/send request.
+ * null (every block but the R0-CMF4 one) means it is off, and the request is
+ * refused and recorded like any other fetch.
+ */
+type GmailOutcome = 'throw' | 'reject' | 'accept';
+let gmailTransport: GmailOutcome | null = null;
+/** Every message the stubbed Gmail transport received, decoded, with what it answered. */
+const gmailSends: Array<{ to: string; subject: string; html: string; outcome: GmailOutcome }> = [];
+
+/** GmailService's base64url MIME message: its To and Subject headers and its (base64) HTML part. */
+function decodeGmailRaw(raw: string) {
+  const lines = Buffer.from(raw, 'base64url').toString('utf8').split('\r\n');
+  const header = (name: string) => lines.find((l) => l.startsWith(`${name}: `))?.slice(name.length + 2) ?? '';
+  const at = lines.indexOf('Content-Transfer-Encoding: base64');
+  const html = at >= 0 ? Buffer.from(lines[at + 2] ?? '', 'base64').toString('utf8') : '';
+  return { to: header('To'), subject: header('Subject'), html };
+}
+
+/**
+ * R0-CMF4 review: work another request does while a message is with Gmail,
+ * one hook per send, in order. The hook runs after the message was recorded
+ * and before Gmail answers, with the outcome of that send already fixed.
+ */
+const duringSend: Array<() => Promise<void>> = [];
+
+/** The stubbed Gmail messages/send: nothing leaves the process. */
+async function stubGmailSend(init: any): Promise<Response> {
+  const outcome = gmailTransport as GmailOutcome;
+  const { raw } = JSON.parse(String(init?.body ?? '{}'));
+  gmailSends.push({ ...decodeGmailRaw(String(raw ?? '')), outcome });
+  const hook = duringSend.shift();
+  if (hook) await hook();
+  if (outcome === 'throw') throw new Error('k07a: stubbed Gmail transport failure');
+  if (outcome === 'reject') {
+    return new Response(JSON.stringify({ error: { code: 500, message: 'k07a: Gmail backend error' } }), { status: 500 });
+  }
+  return new Response(JSON.stringify({ id: `${P}gmail_msg_${gmailSends.length}` }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+/** The token of the /quote/<token> link in a quote email. */
+function quoteTokenIn(text: string | null | undefined): string | undefined {
+  return /\/quote\/([A-Za-z0-9_-]+)/.exec(text ?? '')?.[1];
+}
+
+/** The token of the /public/invoice/<token> pay link in an invoice email or URL. */
+function linkTokenIn(text: string | null | undefined): string | undefined {
+  return /\/public\/invoice\/([A-Za-z0-9_-]+)/.exec(text ?? '')?.[1];
+}
+
+/** A quote's send state (fresh read). */
+async function quoteRow(quoteId: string) {
+  return db.quote.findUnique({ where: { id: quoteId }, select: { status: true, viewToken: true, sentAt: true } });
+}
+
+/** An invoice's pay links (fresh read), oldest first. */
+async function linksOf(invoiceId: string): Promise<any[]> {
+  return db.paymentLink.findMany({ where: { invoiceId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+}
+
+/** Names of the recorded events that carry this quote. */
+function quoteEventsIn(events: Array<{ name: string; payload: any }>, quoteId: string): string[] {
+  return events.filter((e) => (e.payload?.quote?.id ?? e.payload?.quoteId) === quoteId).map((e) => e.name);
+}
 
 async function cleanup() {
   for (const sql of [
@@ -351,15 +464,39 @@ beforeAll(async () => {
   await db.contact.create({ data: { id: ID.contact, businessId: ID.biz, firstName: 'K07a', lastName: 'Customer', email: `${P}c@test.local` } });
   await db.contact.create({ data: { id: ID.contactConnected, businessId: ID.bizConnected, firstName: 'K07a', lastName: 'Connected', email: `${P}cc@test.local` } });
 
+  // R0-CMF4: connected to Gmail with an access token that is still live, so a
+  // send reaches the (stubbed) Gmail transport with no refresh.
+  await db.business.create({
+    data: {
+      id: ID.bizSend,
+      name: 'K07A Send Biz',
+      ownerId: ID.owner,
+      currency: 'TTD',
+      gmailEmail: `${P}sender@test.local`,
+      gmailAccessToken: `${P}live-access-token`,
+      gmailRefreshToken: `${P}refresh-token-send`,
+      gmailTokenExpiry: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    },
+  });
+  await db.membership.create({ data: { id: `${P}m_owner_send`, userId: ID.owner, businessId: ID.bizSend, role: 'OWNER' } });
+  await db.contact.create({ data: { id: ID.contactSend, businessId: ID.bizSend, firstName: 'K07a', lastName: 'Recipient', email: `${P}cs@test.local` } });
+
   const seeder = moduleRef.get(ChartOfAccountsSeederService);
   await seeder.ensureDefaults(ID.biz);
   await seeder.ensureDefaults(ID.bizConnected);
+  await seeder.ensureDefaults(ID.bizSend);
 
   const invoices: Array<[string, string, string, string]> = [
     [ID.invDraft, ID.biz, ID.contact, 'DRAFT'],
     [ID.invSent, ID.biz, ID.contact, 'SENT'],
     [ID.invPaid, ID.biz, ID.contact, 'PAID'],
     [ID.invConnected, ID.bizConnected, ID.contactConnected, 'SENT'],
+    [ID.invNoLink, ID.biz, ID.contact, 'DRAFT'],
+    [ID.invSendFail, ID.bizSend, ID.contactSend, 'DRAFT'],
+    [ID.invSendLinked, ID.bizSend, ID.contactSend, 'SENT'],
+    [ID.invSendOk, ID.bizSend, ID.contactSend, 'DRAFT'],
+    [ID.invRaceDouble, ID.bizSend, ID.contactSend, 'DRAFT'],
+    [ID.invRaceFail, ID.bizSend, ID.contactSend, 'DRAFT'],
   ];
   let n = 0;
   for (const [id, businessId, contactId, status] of invoices) {
@@ -411,10 +548,61 @@ beforeAll(async () => {
       items: { create: [{ id: `${ID.quoteSent}_item1`, description: 'K07A quote item', quantity: 1, unitPrice: 100, total: 100 }] },
     },
   });
+  // R0-CMF4: DRAFT quotes, with no view token (R2: none is minted at draft time).
+  const drafts: Array<[string, string, string]> = [
+    [ID.quoteDraft, ID.biz, ID.contact],
+    [ID.quoteSendFail, ID.bizSend, ID.contactSend],
+    [ID.quoteSendOk, ID.bizSend, ID.contactSend],
+    [ID.quoteRaceReject, ID.bizSend, ID.contactSend],
+    [ID.quoteRaceDouble, ID.bizSend, ID.contactSend],
+    [ID.quoteRaceMark, ID.bizSend, ID.contactSend],
+    [ID.quoteRaceFail, ID.bizSend, ID.contactSend],
+  ];
+  let q = 1;
+  for (const [id, businessId, contactId] of drafts) {
+    q += 1;
+    await db.quote.create({
+      data: {
+        id,
+        quoteNumber: `K07A-Q-${String(q).padStart(3, '0')}`,
+        status: 'DRAFT',
+        subtotal: 100,
+        total: 100,
+        currency: 'TTD',
+        businessId,
+        contactId,
+        items: { create: [{ id: `${id}_item1`, description: `K07A draft quote item ${q}`, quantity: 1, unitPrice: 100, total: 100 }] },
+      },
+    });
+  }
+  // V1-49 (CR-V49-2): a receipt goes out only for a PAID invoice its own-tenant
+  // rows settle, so the PAID fixture carries the payment that settled it (with
+  // none, resend-receipt answers 403 'Invoice is not yet paid' before Gmail).
+  await db.payment.create({
+    data: {
+      id: `${P}pay_invPaid`,
+      invoiceId: ID.invPaid,
+      businessId: ID.biz,
+      amount: 100,
+      currency: 'TTD',
+      status: 'SUCCESSFUL',
+      provider: 'cash',
+      method: 'cash',
+      providerPaymentId: `${P}manual_invPaid`,
+    },
+  });
+  // R0-CMF4: the live pay link an earlier send gave invSendLinked.
+  await db.paymentLink.create({
+    data: { id: ID.linkSendLinked, invoiceId: ID.invSendLinked, businessId: ID.bizSend, token: LINKED_TOKEN },
+  });
 
-  // No case below may reach a real provider: every outbound fetch is recorded and refused.
-  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
-    outbound.push(typeof input === 'string' ? input : String(input?.url ?? input));
+  // No case below may reach a real provider: every outbound fetch is recorded
+  // and refused. Only while the R0-CMF4 block turns gmailTransport on is
+  // Gmail's messages/send answered, in process, by the stub.
+  vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any, init?: any) => {
+    const url = typeof input === 'string' ? input : String(input?.url ?? input);
+    if (gmailTransport && url === GMAIL_SEND_URL) return stubGmailSend(init);
+    outbound.push(url);
     throw new Error('k07a: outbound traffic is refused in this suite');
   });
 }, 180_000);
@@ -491,6 +679,28 @@ describe('Gmail send paths answer 503 provider_not_configured when Gmail is not 
     const res = await as(agent().post(`/commerce/businesses/${ID.biz}/quotes/${ID.quoteSent}/send-email`))
       .send({ recipientEmail: `${P}to@test.local` });
     expectNotConfigured(res, 'gmail');
+  });
+
+  it('R0-CMF4: a refused quote send-email (503) leaves the DRAFT quote DRAFT: no viewToken, no sentAt, no quote.sent event or contact event', async () => {
+    const eventsBefore = emitted.length;
+    const contactBefore = contactEvents.length;
+    expect(await quoteRow(ID.quoteDraft)).toEqual({ status: 'DRAFT', viewToken: null, sentAt: null });
+    const res = await as(agent().post(`/commerce/businesses/${ID.biz}/quotes/${ID.quoteDraft}/send-email`))
+      .send({ recipientEmail: `${P}to@test.local` });
+    expectNotConfigured(res, 'gmail');
+    expect(await quoteRow(ID.quoteDraft)).toEqual({ status: 'DRAFT', viewToken: null, sentAt: null });
+    expect(quoteEventsIn(emitted.slice(eventsBefore), ID.quoteDraft)).toEqual([]);
+    expect(contactEvents.slice(contactBefore).filter((e) => e.data?.quoteId === ID.quoteDraft)).toEqual([]);
+  });
+
+  it('R0-CMF4: a refused invoice send-email (503) leaves no new PaymentLink row, and the DRAFT invoice DRAFT', async () => {
+    expect(await linksOf(ID.invNoLink)).toEqual([]);
+    const res = await as(agent().post(`/commerce/businesses/${ID.biz}/invoices/${ID.invNoLink}/send-email`))
+      .send({ recipientEmail: `${P}to@test.local` });
+    expectNotConfigured(res, 'gmail');
+    expect(await linksOf(ID.invNoLink)).toEqual([]);
+    expect(await db.invoice.findUnique({ where: { id: ID.invNoLink }, select: { status: true, sentAt: true } }))
+      .toEqual({ status: 'DRAFT', sentAt: null });
   });
 
   it('POST /commerce/businesses/:b/gmail/messages/send answers 503 provider_not_configured', async () => {
@@ -661,4 +871,351 @@ describe('Gmail OAuth state (R0-07 review)', () => {
     'ST-4 / R07-CR-1: the web client hands a GET 503 {code: provider_not_configured} to its caller on the first response (body intact, no retry, no backend-unreachable warning) - ' +
       'apps/web/src/lib/fetch-with-retry.ts and api.ts retry every GET 503 three times and drop the body; outside the R0-07 write set',
   );
+});
+
+// R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 items 2 and 3). bizSend
+// is connected to Gmail with a live access token, so the real GmailService
+// builds the message and hands it to fetch, where the stubbed Gmail transport
+// throws (a network failure), answers an error (Gmail refused the message), or
+// accepts it. Nothing leaves the process.
+describe('R0-CMF4: with Gmail connected (stubbed transport), a failed send changes nothing; an accepted send marks the quote SENT and mints one pay link', () => {
+  const FAILURES = ['throw', 'reject'] as const;
+
+  afterAll(() => {
+    gmailTransport = null;
+  });
+
+  function sendQuote(quoteId: string) {
+    return as(agent().post(`/commerce/businesses/${ID.bizSend}/quotes/${quoteId}/send-email`))
+      .send({ recipientEmail: `${P}to@test.local` });
+  }
+
+  function sendInvoice(invoiceId: string) {
+    return as(agent().post(`/commerce/businesses/${ID.bizSend}/invoices/${invoiceId}/send-email`))
+      .send({ recipientEmail: `${P}to@test.local` });
+  }
+
+  /**
+   * A failed send keeps its existing error: Gmail's refusal is the old 400
+   * 'Failed to send email'; a transport that throws is a 5xx. Neither is the
+   * not-configured 503 (the business is connected).
+   */
+  function expectSendFailed(res: { status: number; body: any }, mode: (typeof FAILURES)[number]) {
+    if (mode === 'reject') {
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      expect(res.body.message).toBe('Failed to send email');
+    } else {
+      expect(res.status, JSON.stringify(res.body)).toBeGreaterThanOrEqual(500);
+      expect(res.body.code).not.toBe('provider_not_configured');
+    }
+  }
+
+  it('a failed quote send-email (the transport throws, or Gmail answers an error) leaves the DRAFT quote DRAFT: no viewToken, no sentAt, no quote.sent event or contact event', async () => {
+    const eventsBefore = emitted.length;
+    const contactBefore = contactEvents.length;
+    const sendsBefore = gmailSends.length;
+    expect(await quoteRow(ID.quoteSendFail)).toEqual({ status: 'DRAFT', viewToken: null, sentAt: null });
+    for (const mode of FAILURES) {
+      gmailTransport = mode;
+      const res = await sendQuote(ID.quoteSendFail);
+      expectSendFailed(res, mode);
+      expect(await quoteRow(ID.quoteSendFail), mode).toEqual({ status: 'DRAFT', viewToken: null, sentAt: null });
+    }
+    // Both attempts reached the transport, and the quote link each carried was never stored.
+    const attempts = gmailSends.slice(sendsBefore);
+    expect(attempts.map((m) => m.outcome)).toEqual(['throw', 'reject']);
+    for (const m of attempts) {
+      const token = quoteTokenIn(m.html);
+      expect(token).toMatch(RANDOM_TOKEN);
+      expect(await db.quote.count({ where: { viewToken: token } })).toBe(0);
+    }
+    expect(quoteEventsIn(emitted.slice(eventsBefore), ID.quoteSendFail)).toEqual([]);
+    expect(contactEvents.slice(contactBefore).filter((e) => e.data?.quoteId === ID.quoteSendFail)).toEqual([]);
+  });
+
+  it('a failed invoice send-email leaves no new PaymentLink row, the DRAFT invoice DRAFT and the ledger as it was', async () => {
+    const ledgerBefore = await ledgerCounts(ID.bizSend);
+    const sendsBefore = gmailSends.length;
+    expect(await linksOf(ID.invSendFail)).toEqual([]);
+    for (const mode of FAILURES) {
+      gmailTransport = mode;
+      const res = await sendInvoice(ID.invSendFail);
+      expectSendFailed(res, mode);
+      expect(await linksOf(ID.invSendFail), mode).toEqual([]);
+      expect(await db.invoice.findUnique({ where: { id: ID.invSendFail }, select: { status: true, sentAt: true } }), mode)
+        .toEqual({ status: 'DRAFT', sentAt: null });
+    }
+    // Each attempt carried a pay link (D-07), and its token was never stored.
+    const attempts = gmailSends.slice(sendsBefore);
+    expect(attempts.map((m) => m.outcome)).toEqual(['throw', 'reject']);
+    for (const m of attempts) {
+      const token = linkTokenIn(m.html);
+      expect(token).toMatch(RANDOM_TOKEN);
+      expect(await db.paymentLink.count({ where: { token } })).toBe(0);
+    }
+    expect(await ledgerCounts(ID.bizSend)).toEqual(ledgerBefore);
+  });
+
+  it('a failed send on an invoice that already has a live link reuses that link and leaves it as it was', async () => {
+    const before = await linksOf(ID.invSendLinked);
+    expect(before.map((l) => [l.id, l.token, l.active])).toEqual([[ID.linkSendLinked, LINKED_TOKEN, true]]);
+    for (const mode of FAILURES) {
+      gmailTransport = mode;
+      const res = await sendInvoice(ID.invSendLinked);
+      expectSendFailed(res, mode);
+      expect(linkTokenIn(gmailSends.at(-1)?.html), mode).toBe(LINKED_TOKEN);
+    }
+    expect(await linksOf(ID.invSendLinked)).toEqual(before);
+    expect((await db.invoice.findUnique({ where: { id: ID.invSendLinked } })).status).toBe('SENT');
+  });
+
+  it('a quote send-email Gmail accepted moves the DRAFT quote to SENT, stores the viewToken the email carried, emits quote.sent once, and the link opens the quote', async () => {
+    gmailTransport = 'accept';
+    const eventsBefore = emitted.length;
+    const sendsBefore = gmailSends.length;
+    const res = await sendQuote(ID.quoteSendOk);
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect(res.body.success).toBe(true);
+    expect(res.body.quote).toMatchObject({ id: ID.quoteSendOk, status: 'SENT' });
+    const row = await quoteRow(ID.quoteSendOk);
+    expect(row.status).toBe('SENT');
+    expect(row.sentAt).toBeInstanceOf(Date);
+    expect(row.viewToken).toMatch(RANDOM_TOKEN);
+    const sent = gmailSends.slice(sendsBefore);
+    expect(sent.map((m) => [m.outcome, m.to])).toEqual([['accept', `${P}to@test.local`]]);
+    expect(quoteTokenIn(sent[0]!.html)).toBe(row.viewToken);
+    expect(quoteEventsIn(emitted.slice(eventsBefore), ID.quoteSendOk)).toEqual(['quote.sent']);
+    const view = await agent().get(`/commerce/public/quotes/${row.viewToken}`);
+    expect(view.status, JSON.stringify(view.body)).toBe(200);
+    expect(view.body).toMatchObject({ quoteNumber: 'K07A-Q-004', status: 'SENT' });
+  });
+
+  it('an invoice send-email Gmail accepted mints exactly one live PaymentLink, puts its token link in the email and the response (D-07), and moves the DRAFT invoice to SENT', async () => {
+    gmailTransport = 'accept';
+    const sendsBefore = gmailSends.length;
+    expect(await linksOf(ID.invSendOk)).toEqual([]);
+    const res = await sendInvoice(ID.invSendOk);
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    const links = await linksOf(ID.invSendOk);
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ businessId: ID.bizSend, active: true, expiresAt: null });
+    expect(links[0].token).toMatch(RANDOM_TOKEN);
+    const sent = gmailSends.slice(sendsBefore);
+    expect(sent.map((m) => m.outcome)).toEqual(['accept']);
+    expect(linkTokenIn(sent[0]!.html)).toBe(links[0].token);
+    expect(linkTokenIn(res.body.paymentUrl)).toBe(links[0].token);
+    expect(res.body).toMatchObject({ success: true, messageId: `${P}gmail_msg_${gmailSends.length}` });
+    const invoice = await db.invoice.findUnique({ where: { id: ID.invSendOk }, select: { status: true, sentAt: true } });
+    expect(invoice.status).toBe('SENT');
+    expect(invoice.sentAt).toBeInstanceOf(Date);
+    const view = await agent().get(`/commerce/public/invoice-link/${links[0].token}`);
+    expect(view.status, JSON.stringify(view.body)).toBe(200);
+    expect(view.body).toMatchObject({ ok: true, token: links[0].token });
+  });
+
+  it('a second send-email (resend) reuses that link: still one row, the same token in the email and the response', async () => {
+    gmailTransport = 'accept';
+    const before = await linksOf(ID.invSendOk);
+    expect(before).toHaveLength(1);
+    const sendsBefore = gmailSends.length;
+    const res = await sendInvoice(ID.invSendOk);
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect(await linksOf(ID.invSendOk)).toEqual(before);
+    const sent = gmailSends.slice(sendsBefore);
+    expect(sent.map((m) => m.outcome)).toEqual(['accept']);
+    expect(linkTokenIn(sent[0]!.html)).toBe(before[0].token);
+    expect(linkTokenIn(res.body.paymentUrl)).toBe(before[0].token);
+  });
+
+  it('no case of this block made an outbound call: every message went to the stubbed Gmail transport', () => {
+    expect(gmailSends.length).toBeGreaterThan(0);
+    expect(outbound).toEqual([]);
+  });
+});
+
+/**
+ * R0-CMF4 review (SEC-CMF4-1, SEC-CMF4-2, SEC-CMF4-3, CR-CMF4-1): another
+ * request that lands while a first send is with Gmail (a duringSend hook) is
+ * kept, and every link an email carried opens what it names. The quote's view
+ * token and the invoice's new pay link are written before the send, the
+ * DRAFT -> SENT move after it is a compare-and-set, and a send Gmail did not
+ * accept removes only what no other request has handed out.
+ * RED-BEFORE (packet head 022f0604): a rejection made during the send was
+ * overwritten with SENT (quote.sent after quote.rejected) and the emailed link
+ * then accepted the quote; a second click or a "mark sent" during the send
+ * left the first email's link answering 403 and logged quote.sent twice; a
+ * second invoice send during the first left two live links.
+ */
+describe('R0-CMF4 review: a change made while the send is with Gmail is kept, and every emailed link works', () => {
+  afterAll(() => {
+    gmailTransport = null;
+    duringSend.length = 0;
+  });
+
+  function sendQuote(quoteId: string) {
+    return as(agent().post(`/commerce/businesses/${ID.bizSend}/quotes/${quoteId}/send-email`))
+      .send({ recipientEmail: `${P}to@test.local` });
+  }
+
+  function sendInvoice(invoiceId: string) {
+    return as(agent().post(`/commerce/businesses/${ID.bizSend}/invoices/${invoiceId}/send-email`))
+      .send({ recipientEmail: `${P}to@test.local` });
+  }
+
+  function setQuoteStatus(quoteId: string, status: 'sent' | 'rejected') {
+    return as(agent().patch(`/commerce/quotes/${quoteId}/status/${status}`)).send({ businessId: ID.bizSend });
+  }
+
+  function contactEventTypes(from: number, quoteId: string): string[] {
+    return contactEvents.slice(from).filter((e) => e.data?.quoteId === quoteId).map((e) => e.type);
+  }
+
+  it('SEC-CMF4-1: a rejection the operator makes while the first send is with Gmail is kept: no SENT overwrite, no quote.sent, a 409 that says the email went out, and the emailed link cannot accept it', async () => {
+    gmailTransport = 'accept';
+    const sendsBefore = gmailSends.length;
+    const eventsBefore = emitted.length;
+    const contactBefore = contactEvents.length;
+    let patch: any = null;
+    duringSend.push(async () => {
+      patch = await setQuoteStatus(ID.quoteRaceReject, 'rejected');
+    });
+    const res = await sendQuote(ID.quoteRaceReject);
+    expect(patch?.status, JSON.stringify(patch?.body)).toBe(200);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.code).toBe('quote_changed_during_send');
+    expect(res.body.details).toMatchObject({ emailSent: true, quoteStatus: 'REJECTED' });
+    const row = await quoteRow(ID.quoteRaceReject);
+    expect(row.status).toBe('REJECTED');
+    expect(row.sentAt).toBeNull();
+    expect(quoteEventsIn(emitted.slice(eventsBefore), ID.quoteRaceReject)).toEqual(['quote.rejected']);
+    expect(contactEventTypes(contactBefore, ID.quoteRaceReject)).toEqual(['quote.rejected']);
+    const token = quoteTokenIn(gmailSends.slice(sendsBefore)[0]?.html);
+    expect(token).toMatch(RANDOM_TOKEN);
+    const accept = await agent().post(`/commerce/public/quotes/${token}/accept`).send({});
+    expect(accept.status, JSON.stringify(accept.body)).toBe(400);
+    expect((await quoteRow(ID.quoteRaceReject)).status).toBe('REJECTED');
+    expect(emitted.slice(eventsBefore).map((e) => e.name)).not.toContain('quote.accepted');
+  });
+
+  it('SEC-CMF4-2 / CR-CMF4-1: a second send-email click made while the first is with Gmail: both emails carry the token the quote stores, the link opens it, and quote.sent is emitted and logged once', async () => {
+    gmailTransport = 'accept';
+    const sendsBefore = gmailSends.length;
+    const eventsBefore = emitted.length;
+    const contactBefore = contactEvents.length;
+    let inner: any = null;
+    duringSend.push(async () => {
+      inner = await sendQuote(ID.quoteRaceDouble);
+    });
+    const outer = await sendQuote(ID.quoteRaceDouble);
+    expect([200, 201], JSON.stringify(outer.body)).toContain(outer.status);
+    expect([200, 201], JSON.stringify(inner?.body)).toContain(inner?.status);
+    const row = await quoteRow(ID.quoteRaceDouble);
+    expect(row.status).toBe('SENT');
+    expect(row.sentAt).toBeInstanceOf(Date);
+    expect(row.viewToken).toMatch(RANDOM_TOKEN);
+    const tokens = gmailSends.slice(sendsBefore).map((m) => quoteTokenIn(m.html));
+    expect(tokens).toEqual([row.viewToken, row.viewToken]);
+    expect(outer.body.quote?.viewToken).toBe(row.viewToken);
+    expect(inner.body.quote?.viewToken).toBe(row.viewToken);
+    expect(quoteEventsIn(emitted.slice(eventsBefore), ID.quoteRaceDouble)).toEqual(['quote.sent']);
+    expect(contactEventTypes(contactBefore, ID.quoteRaceDouble)).toEqual(['quote.sent']);
+    const view = await agent().get(`/commerce/public/quotes/${row.viewToken}`);
+    expect(view.status, JSON.stringify(view.body)).toBe(200);
+  });
+
+  it('SEC-CMF4-2: "mark sent" while the first send is with Gmail keeps the token the email carried: the link opens the quote and the send answers that token', async () => {
+    gmailTransport = 'accept';
+    const sendsBefore = gmailSends.length;
+    const eventsBefore = emitted.length;
+    let patch: any = null;
+    duringSend.push(async () => {
+      patch = await setQuoteStatus(ID.quoteRaceMark, 'sent');
+    });
+    const res = await sendQuote(ID.quoteRaceMark);
+    expect(patch?.status, JSON.stringify(patch?.body)).toBe(200);
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    const token = quoteTokenIn(gmailSends.slice(sendsBefore)[0]?.html);
+    const row = await quoteRow(ID.quoteRaceMark);
+    expect(row.status).toBe('SENT');
+    expect(row.viewToken).toBe(token);
+    expect(res.body.quote?.viewToken).toBe(token);
+    expect(quoteEventsIn(emitted.slice(eventsBefore), ID.quoteRaceMark)).toEqual(['quote.sent']);
+    const view = await agent().get(`/commerce/public/quotes/${token}`);
+    expect(view.status, JSON.stringify(view.body)).toBe(200);
+  });
+
+  it('a first quote send that fails while a second send-email is accepted: the quote is SENT with the token both emails carried, and the link opens it', async () => {
+    gmailTransport = 'throw';
+    const sendsBefore = gmailSends.length;
+    const eventsBefore = emitted.length;
+    let inner: any = null;
+    duringSend.push(async () => {
+      gmailTransport = 'accept';
+      inner = await sendQuote(ID.quoteRaceFail);
+    });
+    const outer = await sendQuote(ID.quoteRaceFail);
+    expect(outer.status, JSON.stringify(outer.body)).toBeGreaterThanOrEqual(500);
+    expect([200, 201], JSON.stringify(inner?.body)).toContain(inner?.status);
+    const sent = gmailSends.slice(sendsBefore);
+    expect(sent.map((m) => m.outcome)).toEqual(['throw', 'accept']);
+    const row = await quoteRow(ID.quoteRaceFail);
+    expect(row.status).toBe('SENT');
+    expect(sent.map((m) => quoteTokenIn(m.html))).toEqual([row.viewToken, row.viewToken]);
+    expect(quoteEventsIn(emitted.slice(eventsBefore), ID.quoteRaceFail)).toEqual(['quote.sent']);
+    const view = await agent().get(`/commerce/public/quotes/${row.viewToken}`);
+    expect(view.status, JSON.stringify(view.body)).toBe(200);
+  });
+
+  it('SEC-CMF4-3: a second send-email of an invoice with no link, made while the first is with Gmail, reuses the link the first wrote: one live link with no expiry, both emails carry it, and revoking it closes both', async () => {
+    gmailTransport = 'accept';
+    const sendsBefore = gmailSends.length;
+    let inner: any = null;
+    duringSend.push(async () => {
+      inner = await sendInvoice(ID.invRaceDouble);
+    });
+    const outer = await sendInvoice(ID.invRaceDouble);
+    expect([200, 201], JSON.stringify(inner?.body)).toContain(inner?.status);
+    expect([200, 201], JSON.stringify(outer.body)).toContain(outer.status);
+    expect(linkTokenIn(outer.body.paymentUrl)).toBe(linkTokenIn(inner.body.paymentUrl));
+    const links = await linksOf(ID.invRaceDouble);
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ active: true, expiresAt: null });
+    const sent = gmailSends.slice(sendsBefore);
+    expect(sent.map((m) => linkTokenIn(m.html))).toEqual([links[0].token, links[0].token]);
+    expect(linkTokenIn(inner.body.paymentUrl)).toBe(links[0].token);
+    expect((await db.invoice.findUnique({ where: { id: ID.invRaceDouble }, select: { status: true } })).status).toBe('SENT');
+    const revoke = await as(agent().delete(`/commerce/businesses/${ID.bizSend}/payment-links/${links[0].id}`));
+    expect([200, 204], JSON.stringify(revoke.body)).toContain(revoke.status);
+    for (const m of sent) {
+      const open = await agent().get(`/commerce/public/invoice-link/${linkTokenIn(m.html)}`);
+      expect(open.body?.ok, JSON.stringify(open.body)).not.toBe(true);
+    }
+  });
+
+  it('a first invoice send that fails while a second send-email reuses its new link: the link the accepted email carries is kept, live with no expiry, and is the only one', async () => {
+    gmailTransport = 'throw';
+    const sendsBefore = gmailSends.length;
+    let inner: any = null;
+    duringSend.push(async () => {
+      gmailTransport = 'accept';
+      inner = await sendInvoice(ID.invRaceFail);
+    });
+    const outer = await sendInvoice(ID.invRaceFail);
+    expect(outer.status, JSON.stringify(outer.body)).toBeGreaterThanOrEqual(500);
+    expect([200, 201], JSON.stringify(inner?.body)).toContain(inner?.status);
+    const sent = gmailSends.slice(sendsBefore);
+    expect(sent.map((m) => m.outcome)).toEqual(['throw', 'accept']);
+    const links = await linksOf(ID.invRaceFail);
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ active: true, expiresAt: null });
+    expect(sent.map((m) => linkTokenIn(m.html))).toEqual([links[0].token, links[0].token]);
+    const open = await agent().get(`/commerce/public/invoice-link/${links[0].token}`);
+    expect(open.status, JSON.stringify(open.body)).toBe(200);
+    expect(open.body).toMatchObject({ ok: true, token: links[0].token });
+  });
+
+  it('no case of this block made an outbound call, and every hook ran', () => {
+    expect(duringSend).toEqual([]);
+    expect(outbound).toEqual([]);
+  });
 });
