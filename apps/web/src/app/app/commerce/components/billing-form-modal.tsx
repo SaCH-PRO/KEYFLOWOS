@@ -34,6 +34,23 @@ import { TEMPLATE_META } from "./invoice-templates/template-types";
 
 type DocType = "invoice" | "quote";
 
+/**
+ * R0-09g-D11-DOCUMENT-TEMPLATES: the default template is OWNER only (owner
+ * ruling D-11; PATCH .../document-templates answers a non-owner 403
+ * BUSINESS_PROFILE_OWNER_ONLY). A refused pick shows the server's refusal next
+ * to the picker (a 403 without a usable message names the owner-only rule) and
+ * the stored template stays selected.
+ */
+const TEMPLATE_OWNER_ONLY_FALLBACK_TEXT = "Only the business owner can change the default document templates.";
+const TEMPLATE_UPDATE_FAILED_TEXT = "Failed to update template";
+const GENERIC_FORBIDDEN = new Set(["forbidden", "forbidden resource", "request failed"]);
+
+function templateRefusalText(res: { error: string | null; status?: number }): string {
+  const message = res.error?.trim() ?? "";
+  if (res.status === 403 && (!message || GENERIC_FORBIDDEN.has(message.toLowerCase()))) return TEMPLATE_OWNER_ONLY_FALLBACK_TEXT;
+  return message || TEMPLATE_UPDATE_FAILED_TEXT;
+}
+
 interface BillingFormModalProps {
   open: boolean;
   onClose: () => void;
@@ -156,6 +173,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
   const [templates, setTemplates] = useState<Array<{ id: string; name: string; type: string; isDefault: boolean }> | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<string | null>(null);
   const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateRefusal, setTemplateRefusal] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [previewTemplate, setPreviewTemplate] = useState<TemplateId>("classic");
   const [previewView, setPreviewView] = useState<"desktop" | "mobile" | "print">("desktop");
@@ -165,6 +183,7 @@ export const BillingFormModal = React.memo(function BillingFormModal({
   useEffect(() => {
     if (!open) {
       setShowPreview(false);
+      setTemplateRefusal(null);
       return;
     }
     fetchDocumentTemplates(businessId ?? undefined).then((res) => {
@@ -219,20 +238,22 @@ export const BillingFormModal = React.memo(function BillingFormModal({
   const handleSelectTemplate = useCallback(async (templateId: string) => {
     if (savingTemplate || selectedTemplate === templateId) return;
     setSavingTemplate(true);
+    setTemplateRefusal(null);
     try {
       const body = docType === "invoice"
         ? { invoiceTemplate: templateId as 'classic' | 'modern' | 'minimal' }
         : { quoteTemplate: templateId as 'classic' | 'modern' | 'minimal' };
-      const res = await setDocumentTemplate(body, businessId ?? undefined);
+      const res: { data: unknown; error: string | null; status?: number } = await setDocumentTemplate(body, businessId ?? undefined);
       if (res.data) {
         setSelectedTemplate(templateId);
         setPreviewTemplate(templateId as TemplateId);
         toast.success("Template updated");
       } else {
-        toast.error("Failed to update template");
+        // The stored template stays selected: the selection changes only on success.
+        setTemplateRefusal(templateRefusalText(res));
       }
     } catch {
-      toast.error("Failed to update template");
+      setTemplateRefusal(TEMPLATE_UPDATE_FAILED_TEXT);
     } finally {
       setSavingTemplate(false);
     }
@@ -460,6 +481,11 @@ export const BillingFormModal = React.memo(function BillingFormModal({
                   savingTemplate={savingTemplate}
                   onSelectTemplate={handleSelectTemplate}
                 />
+                {templateRefusal && (
+                  <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200 mb-3">
+                    {templateRefusal}
+                  </div>
+                )}
               </div>
       </SideSheet>
 
