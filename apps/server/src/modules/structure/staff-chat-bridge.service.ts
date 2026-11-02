@@ -61,7 +61,10 @@ export class StaffChatBridgeService {
    * Claim a staff message by its provider message id, once (V1-21b review 9 WB-3). The provider
    * signature covers the message id, so a request replayed with its signature (from a delivery
    * log, a proxy log) carries the same id: it is acted on once. 'unidentified' is a message that
-   * came with no id, which cannot be shown not to be a replay.
+   * came with no id, which cannot be shown not to be a replay. A Twilio signature covers the
+   * parameter names and values run together, so a replay can move a name/value boundary and carry
+   * a new id (V1-21c WB3-SHIFT): WhatsAppController claims each Twilio delivery by its signature
+   * before it reaches here.
    */
   private async claimMessage(
     businessId: string,

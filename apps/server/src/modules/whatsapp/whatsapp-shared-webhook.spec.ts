@@ -38,8 +38,9 @@ const PNID = '1234567890';
 const STAFF_PHONE = '+18685550919';
 
 const metaSignature = (raw: string) => `sha256=${createHmac('sha256', APP_SECRET).update(raw).digest('hex')}`;
+// as Twilio signs: HMAC-SHA1 over the URL and the sorted params (V1-21c TW-SHA1)
 const twilioSignature = (url: string, params: Record<string, string>) =>
-  createHmac('sha256', TWILIO_TOKEN)
+  createHmac('sha1', TWILIO_TOKEN)
     .update(Object.keys(params).sort().reduce((acc, k) => acc + k + params[k], url))
     .digest('base64');
 

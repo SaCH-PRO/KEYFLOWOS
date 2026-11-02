@@ -5,6 +5,15 @@ import { TimelineService } from '../timeline/timeline.service';
 import { EvidenceService } from '../evidence/evidence.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 
+/**
+ * The goal a project names, only when it is `businessId`'s (V1-21c review ST-2). The goal include
+ * is to-one, which Prisma cannot filter by business, and a goalId written before createProject and
+ * updateProject looked the goal up may name another business's goal.
+ */
+function goalOfBusiness<G extends { businessId: string }>(businessId: string, goal: G | null): G | null {
+  return goal && goal.businessId === businessId ? goal : null;
+}
+
 @Injectable()
 export class ProjectsService {
   constructor(
@@ -15,26 +24,47 @@ export class ProjectsService {
     @Inject(TaskAssignmentService) private readonly assignments: TaskAssignmentService,
   ) {}
 
-  listProjects(businessId: string) {
-    return this.prisma.client.project.findMany({
+  // V1-21c: a relation include does not filter by business, so each task include names this
+  // business. A task another business filed on this project before TD9-1 (addTask, below) was
+  // read back as one of this project's tasks. The goal include is to-one, which Prisma cannot
+  // filter: goalOfBusiness drops a goal that is not this business's (review ST-2).
+  async listProjects(businessId: string) {
+    const projects = await this.prisma.client.project.findMany({
       where: { businessId, deletedAt: null },
       include: {
-        tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } },
-        goal: { select: { id: true, title: true, category: true } },
+        tasks: { where: { businessId, deletedAt: null }, orderBy: { sortOrder: 'asc' } },
+        goal: { select: { id: true, title: true, category: true, businessId: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
+    return projects.map((project) => {
+      const goal = goalOfBusiness(businessId, project.goal);
+      return { ...project, goal: goal && { id: goal.id, title: goal.title, category: goal.category } };
+    });
   }
 
-  getProject(businessId: string, projectId: string) {
-    return this.prisma.client.project.findFirst({
+  async getProject(businessId: string, projectId: string) {
+    const project = await this.prisma.client.project.findFirst({
       where: { id: projectId, businessId, deletedAt: null },
       include: {
-        tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } },
+        tasks: { where: { businessId, deletedAt: null }, orderBy: { sortOrder: 'asc' } },
         milestones: { orderBy: { dueDate: 'asc' } },
         goal: true,
       },
     });
+    return project && { ...project, goal: goalOfBusiness(businessId, project.goal) };
+  }
+
+  /**
+   * A goal a project is linked to must be this business's (V1-21c review ST-2). goalId was written
+   * as the body gave it (the controller's body is an inline type, which ValidationPipe does not
+   * strip), and the project then read the goal back through its to-one include: another
+   * business's goal, its title, category, target and actions. null unlinks; undefined leaves it.
+   */
+  private async assertGoalOfBusiness(businessId: string, goalId: string | null | undefined) {
+    if (goalId === undefined || goalId === null) return;
+    const goal = await this.prisma.client.businessGoal.findFirst({ where: { id: goalId, businessId }, select: { id: true } });
+    if (!goal) throw new NotFoundException('Goal not found');
   }
 
   async createProject(businessId: string, body: {
@@ -50,6 +80,7 @@ export class ProjectsService {
     hourlyRate?: number;
     goalId?: string;
   }) {
+    await this.assertGoalOfBusiness(businessId, body.goalId);
     const project = await this.prisma.client.project.create({
       data: {
         businessId,
@@ -96,6 +127,7 @@ export class ProjectsService {
     dueDate?: string | null;
     hourlyRate?: number | null;
   }) {
+    await this.assertGoalOfBusiness(businessId, body.goalId);
     const data: any = { ...body };
     if (body.dueDate !== undefined) {
       data.dueDate = body.dueDate ? new Date(body.dueDate) : null;
@@ -103,7 +135,7 @@ export class ProjectsService {
     const project = await this.prisma.client.project.update({
       where: { id: projectId, businessId },
       data,
-      include: { tasks: { where: { deletedAt: null }, orderBy: { sortOrder: 'asc' } } },
+      include: { tasks: { where: { businessId, deletedAt: null }, orderBy: { sortOrder: 'asc' } } },
     });
     await this.timeline.recordEvent({
       businessId,
@@ -340,7 +372,7 @@ export class ProjectsService {
     const project = await this.prisma.client.project.findFirst({
       where: { id: projectId, businessId },
       include: {
-        tasks: { where: { deletedAt: null } },
+        tasks: { where: { businessId, deletedAt: null } },
         timeEntries: { where: { billable: true, billed: false } },
         milestones: true,
       },
@@ -382,7 +414,7 @@ export class ProjectsService {
       where: { id: projectId, businessId },
       include: {
         tasks: {
-          where: { deletedAt: null },
+          where: { businessId, deletedAt: null },
           orderBy: [{ status: 'asc' }, { position: 'asc' }],
         },
         milestones: { orderBy: { dueDate: 'asc' } },

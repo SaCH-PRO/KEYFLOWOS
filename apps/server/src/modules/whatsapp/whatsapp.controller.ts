@@ -1,7 +1,8 @@
 import { BadRequestException, Body, Controller, ExecutionContext, ForbiddenException, Get, HttpException, Inject, Injectable, Logger, NotFoundException, Optional, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
+import twilio from 'twilio';
 import { WhatsAppService, type WhatsAppConfig } from './whatsapp.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
@@ -369,7 +370,11 @@ export class WhatsAppController {
       // /whatsapp/webhook routes the same body to the business that owns the number).
       await this.assertMetaNumberIsBusiness(businessId, body);
     } else if (parsed.provider === 'twilio') {
-      this.assertTwilioSignature(req, body as unknown as Record<string, unknown>);
+      const signature = this.assertTwilioSignature(req, body as unknown as Record<string, unknown>);
+      if (!(await this.claimTwilioDelivery(businessId, signature))) {
+        this.logger.warn(`Dropped a repeated Twilio delivery to business ${businessId}`);
+        return { success: true, duplicate: true };
+      }
     }
 
     const headers = (req?.headers ?? {}) as Record<string, unknown>;
@@ -455,7 +460,15 @@ export class WhatsAppController {
     }
   }
 
-  private assertTwilioSignature(req?: RawBodyRequest, body?: Record<string, unknown>) {
+  /**
+   * X-Twilio-Signature, verified as Twilio computes it (V1-21c TW-SHA1): HMAC-SHA1 under the auth
+   * token over the full URL followed by each POST parameter's name and value, sorted by name,
+   * base64-encoded. This used HMAC-SHA256, so every genuine Twilio delivery was refused (and a
+   * value Twilio never sends was taken). twilio.validateRequest is Twilio's own check, the one
+   * phone-voice.controller.ts runs; it also tries the URL with and without the standard port.
+   * Answers the verified signature.
+   */
+  private assertTwilioSignature(req?: RawBodyRequest, body?: Record<string, unknown>): string {
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     if (!authToken) {
       this.logger.error('TWILIO_AUTH_TOKEN not set; rejecting Twilio webhook');
@@ -466,10 +479,31 @@ export class WhatsAppController {
       throw new ForbiddenException('Missing Twilio webhook signature');
     }
     const url = this.buildTwilioUrl(req);
-    const raw = req?.rawBody?.toString('utf8') ?? '';
-    const isValid = this.verifyTwilioSignature(url, raw, body ?? {}, signature, authToken);
-    if (!isValid) {
+    if (!twilio.validateRequest(authToken, signature, url, body ?? {})) {
       throw new ForbiddenException('Invalid Twilio webhook signature');
+    }
+    return signature;
+  }
+
+  /**
+   * Claim a verified Twilio delivery by its signature, once (V1-21c WB3-SHIFT). Twilio signs the
+   * URL and the parameters as one string of names and values run together, so a captured request
+   * can be replayed with a name/value boundary moved ('MessageSid=SMx&SmsMessageSid=SMx' sent as
+   * 'MessageSid=SMxSmsMessageSidSMx'): the signature still verifies, and the message id the staff
+   * bridge's per-message claim keys on is new. The signature is the same, so it is the key here.
+   * Only its SHA-256 is stored: the signature itself would replay the request (V1-21b WB-3).
+   * Answers false for a delivery already claimed.
+   */
+  private async claimTwilioDelivery(businessId: string, signature: string): Promise<boolean> {
+    const digest = createHash('sha256').update(signature).digest('hex');
+    try {
+      await this.prisma.client.webhookEvent.create({
+        data: { provider: 'twilio_signature', providerEventId: `${businessId}:${digest}`, eventType: 'whatsapp_inbound', businessId },
+      });
+      return true;
+    } catch (err) {
+      if ((err as { code?: string })?.code === 'P2002') return false;
+      throw err;
     }
   }
 
@@ -478,29 +512,6 @@ export class WhatsAppController {
     const host = req?.headers.host || 'localhost';
     const path = req?.originalUrl || req?.url || '';
     return `${protocol}://${host}${path}`;
-  }
-
-  private verifyTwilioSignature(
-    url: string,
-    _rawBody: string,
-    body: Record<string, unknown>,
-    signature: string,
-    authToken: string,
-  ): boolean {
-    let payload = url;
-    const keys = Object.keys(body).sort();
-    for (const key of keys) {
-      const value = body[key];
-      if (typeof value === 'string') {
-        payload += key + value;
-      }
-    }
-    const expected = createHmac('sha256', authToken).update(payload).digest('base64');
-    try {
-      return timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
-    } catch {
-      return false;
-    }
   }
 
   private parseInboundPayload(body: WhatsAppWebhookBody): ParsedInbound | null {
