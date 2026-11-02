@@ -403,6 +403,11 @@
       "packet": "V1-32-KEY-PROPOSAL-CLAIM"
     },
     {
+      "prefix": "v33a_",
+      "owner": "apps/server/test/storefront-checkout-retry.integration.test.ts",
+      "packet": "V1-33-PUB-CHECKOUT-RETRY-OFFLINE"
+    },
+    {
       "prefix": "v34a_",
       "owner": "apps/server/test/cash-position.integration.test.ts",
       "packet": "V1-34-DM-CASH-POSITION"
