@@ -63,9 +63,20 @@ export const SYSTEM_PLAN_ACTOR = 'key_cortex';
  * not yet run ('draft', 'pending', 'approved') and one a member may run again
  * ('failed', 'waiting_approval'; the goals page offers Run on both). Never
  * 'running' (another execute holds it), 'completed', or the other executor's
- * 'executing'.
+ * 'executing'. A plan that stopped at an approval pause is claimed but never
+ * re-run (V1-10 review ST-2): see runClaimedPlan.
  */
 export const RUNNABLE_PLAN_STATUSES: readonly string[] = ['draft', 'pending', 'approved', 'failed', 'waiting_approval'];
+
+/**
+ * The status a plan's saga is closed with when its run stops at a step parked
+ * for approval (V1-10 review ST-1). Terminal, with completedAt set: an approval
+ * runs the parked step outside the saga, and nothing resumes it, so leaving it
+ * 'running' recorded work in flight that would never finish or be compensated.
+ * It is neither 'failed' nor compensated: a pause undoes none of the steps that
+ * ran.
+ */
+export const SAGA_STOPPED_FOR_APPROVAL = 'stopped_for_approval';
 
 export interface PlanGoal {
   objective: string;
@@ -427,8 +438,12 @@ export class KeyCortexPlannerService {
    * SYSTEM_PLAN_ACTOR. With no member (a system trigger or the query pipeline,
    * which call this directly): a member's plan runs as that member, and only a
    * plan no member created runs as SYSTEM_PLAN_ACTOR. On either path a plan
-   * runs only once it is claimed out of RUNNABLE_PLAN_STATUSES (409 otherwise:
-   * running, completed, or a concurrent execute claimed it first).
+   * runs only once it is claimed out of RUNNABLE_PLAN_STATUSES (409 'not
+   * claimable' otherwise: running, completed, or a concurrent execute claimed
+   * it first; V1-10, PRS-M24). `options.skipApproval` is honoured only for the
+   * business OWNER or SUPER_ADMIN (V1-10 review ST-3). A plan stopped at an
+   * approval pause runs none of its completed or parked steps again (review
+   * ST-2), and its saga is closed SAGA_STOPPED_FOR_APPROVAL (review ST-1).
    */
   async executePlan(planId: string, options: ExecuteOptions = {}, member?: PlanExecutionActor) {
     const plan = member
@@ -444,6 +459,19 @@ export class KeyCortexPlannerService {
     if (member) await this.assertMayExecutePlan(plan, member);
     const actorId = member ? member.userId : (plan.userId ?? SYSTEM_PLAN_ACTOR);
 
+    // V1-10 review ST-3: skipApproval skips the executor's whole approval
+    // policy (the business's aiAlwaysRequireApproval, a capability's
+    // requiresApproval flag, the spending threshold and the hourly cap), and
+    // POST plans/:planId/execute passed it from the request body. So a STAFF
+    // member who created a plan ran the steps the OWNER's policy parks. It is
+    // honoured only for the business OWNER or SUPER_ADMIN; for anyone else (and
+    // for a system caller, none of which sends it) the steps follow the policy.
+    let runOptions = options;
+    if (options.skipApproval && !(await this.mayOverrideApproval(plan.businessId, member))) {
+      this.logger.warn(`[plans] execute ${planId}: skipApproval ignored for ${member ? member.userId : 'a system caller'} (only the business OWNER or SUPER_ADMIN may skip approval)`);
+      runOptions = { ...options, skipApproval: false };
+    }
+
     // R0-09e repair (review ST-2): claim the plan atomically. This set the
     // status to 'running' unconditionally, so a 'completed' plan re-ran every
     // side-effecting step under a new saga, and two concurrent executes of one
@@ -455,11 +483,11 @@ export class KeyCortexPlannerService {
       data: { status: 'running', startedAt: new Date() },
     });
     if (claimed.count !== 1) {
-      throw new ConflictException('Plan is already running, completed or otherwise not runnable');
+      throw new ConflictException('Plan is not claimable: it is already running, completed or otherwise not runnable');
     }
 
     try {
-      return await this.runClaimedPlan(planId, plan, actorId, options);
+      return await this.runClaimedPlan(planId, plan, actorId, runOptions);
     } catch (err) {
       // An unexpected error while the plan is still 'running' must not leave it
       // so for ever (no execute could claim it again): it is released as
@@ -480,15 +508,39 @@ export class KeyCortexPlannerService {
     actorId: string,
     options: ExecuteOptions,
   ) {
-    const saga = await this.saga.start({
-      businessId: plan.businessId,
-      sagaType: 'ai_plan',
-      correlationId: options.traceId,
+    // V1-10 review ST-2: the steps as they are now that this run holds the
+    // claim. The rows executePlan loaded before claiming can be stale: another
+    // execute may have run the plan to an approval pause in between.
+    const current = await this.prisma.client.aiPlan.findUnique({
+      where: { id: planId },
+      include: { steps: true },
     });
+    const sorted = this.topologicalSort(current?.steps ?? plan.steps);
 
-    const sorted = this.topologicalSort(plan.steps);
+    // V1-10 review ST-2: a plan whose last run stopped at an approval pause (a
+    // step still 'waiting_approval'; recorded 'waiting_approval', or 'failed'
+    // by the V1 base) is never re-run from the top. That repeated every step
+    // that had completed (its external effect happened twice) and parked the
+    // paused step again (a second approval request, so two approvals ran it
+    // twice). A step that completed in that run is not run again, and a parked
+    // step is not parked again: the run stops there, still waiting. Only an
+    // approval runs it, outside the plan.
+    const resuming = sorted.some((s) => s.status === 'waiting_approval');
+
+    // A resumed run starts a saga only if it runs a step, so Run on a plan
+    // still waiting for approval leaves no saga behind.
+    let saga: Awaited<ReturnType<KeyCortexSagaService['start']>> | undefined = resuming
+      ? undefined
+      : await this.startPlanSaga(plan.businessId, options);
+
     const executed: ExecutionRecord[] = [];
     let stopped = false;
+    // V1-10 (PRS-M25): whether the run stopped at a step the executor parked
+    // for approval. The final status was read from `plan.steps`, the rows as
+    // loaded BEFORE the run (never 'waiting_approval'), so every pause was
+    // recorded as a failure: the plan 'failed', a failed plan result written
+    // and the saga failed.
+    let pausedForApproval = false;
 
     for (let i = 0; i < sorted.length; i++) {
       const step = sorted[i];
@@ -499,6 +551,13 @@ export class KeyCortexPlannerService {
         });
         continue;
       }
+      if (resuming && step.status === 'completed') continue;
+      if (resuming && step.status === 'waiting_approval') {
+        pausedForApproval = true;
+        stopped = true;
+        continue;
+      }
+      if (!saga) saga = await this.startPlanSaga(plan.businessId, options);
 
       await this.prisma.client.aiPlanStep.update({
         where: { id: step.id },
@@ -555,6 +614,21 @@ export class KeyCortexPlannerService {
           where: { id: step.id },
           data: { status: 'waiting_approval' },
         });
+        // V1-10 review ST-1: the saga step names the approval request that now
+        // holds it (the executor's record id is that request's id).
+        // KeyCortexSagaService has no write for a parked step, so it is made
+        // here, on this saga's own row.
+        await this.prisma.client.sagaStep.updateMany({
+          where: { sagaId: saga.id, stepIndex: i },
+          data: {
+            status: 'waiting_approval',
+            output: {
+              approvalStatus: (record.result.data as Record<string, unknown>).approvalStatus,
+              approvalId: record.id,
+            } as Prisma.InputJsonValue,
+          },
+        });
+        pausedForApproval = true;
         stopped = true;
       } else {
         await this.prisma.client.aiPlanStep.update({
@@ -576,11 +650,7 @@ export class KeyCortexPlannerService {
       }
     }
 
-    const finalStatus = stopped
-      ? plan.steps.some((s: any) => s.status === 'waiting_approval')
-        ? 'waiting_approval'
-        : 'failed'
-      : 'completed';
+    const finalStatus = pausedForApproval ? 'waiting_approval' : stopped ? 'failed' : 'completed';
 
     await this.prisma.client.aiPlan.update({
       where: { id: planId },
@@ -594,11 +664,32 @@ export class KeyCortexPlannerService {
       await this.recordPlanResult(planId, executed, finalStatus);
     }
 
-    await (finalStatus === 'completed'
-      ? this.saga.completeSaga(saga.id)
-      : this.saga.failSaga(saga.id));
+    // A plan waiting for approval has not failed: its saga is neither failed
+    // nor compensated (a pause undoes none of the steps that ran). V1-10 review
+    // ST-1: nor is it left 'running', since nothing resumes it; it is closed as
+    // SAGA_STOPPED_FOR_APPROVAL. KeyCortexSagaService has no write for that,
+    // so it is made here, on this run's own saga row and only while it is
+    // still running.
+    if (saga) {
+      if (finalStatus === 'completed') await this.saga.completeSaga(saga.id);
+      else if (finalStatus === 'failed') await this.saga.failSaga(saga.id);
+      else {
+        await this.prisma.client.sagaExecution.updateMany({
+          where: { id: saga.id, businessId: plan.businessId, status: 'running' },
+          data: { status: SAGA_STOPPED_FOR_APPROVAL, completedAt: new Date() },
+        });
+      }
+    }
 
-    return { planId, status: finalStatus, executed: executed.length, sagaId: saga.id };
+    return { planId, status: finalStatus, executed: executed.length, sagaId: saga?.id ?? null };
+  }
+
+  private startPlanSaga(businessId: string, options: ExecuteOptions) {
+    return this.saga.start({
+      businessId,
+      sagaType: 'ai_plan',
+      correlationId: options.traceId,
+    });
   }
 
   async getPlan(planId: string) {
@@ -641,17 +732,34 @@ export class KeyCortexPlannerService {
   ): Promise<void> {
     if (member.role === 'SUPER_ADMIN') return;
     if (plan.userId && plan.userId === member.userId) return;
+    if (await this.isBusinessOwner(plan.businessId, member.userId)) return;
+    throw new ForbiddenException("Only the plan's creator or the business owner can execute this plan");
+  }
+
+  /**
+   * Whether a run may skip the executor's approval policy (V1-10 review ST-3):
+   * only for the business OWNER (the OWNER membership or Business.ownerId) or
+   * SUPER_ADMIN, who hold authority over that policy. Never for a STAFF
+   * creator or a system caller.
+   */
+  private async mayOverrideApproval(businessId: string, member?: PlanExecutionActor): Promise<boolean> {
+    if (!member) return false;
+    if (member.role === 'SUPER_ADMIN') return true;
+    return this.isBusinessOwner(businessId, member.userId);
+  }
+
+  /** The two arms IdentityService.assertBusinessOwner admits: the OWNER membership or Business.ownerId. */
+  private async isBusinessOwner(businessId: string, userId: string): Promise<boolean> {
     const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: member.userId, businessId: plan.businessId } },
+      where: { userId_businessId: { userId, businessId } },
       select: { role: true },
     });
-    if (membership?.role === 'OWNER') return;
+    if (membership?.role === 'OWNER') return true;
     const owned = await this.prisma.client.business.findFirst({
-      where: { id: plan.businessId, ownerId: member.userId },
+      where: { id: businessId, ownerId: userId },
       select: { id: true },
     });
-    if (owned) return;
-    throw new ForbiddenException("Only the plan's creator or the business owner can execute this plan");
+    return !!owned;
   }
 
   /** Every step's command names `actorId`, which executePlan resolves (R0-09e). */
@@ -672,7 +780,7 @@ export class KeyCortexPlannerService {
     };
   }
 
-  private topologicalSort(steps: Array<{ id: string; order: number; dependsOn: string[]; module: string | null; action: string; inputPayload: unknown; toolName: string | null }>) {
+  private topologicalSort(steps: Array<{ id: string; order: number; dependsOn: string[]; module: string | null; action: string; inputPayload: unknown; toolName: string | null; status?: string | null }>) {
     const map = new Map(steps.map((s) => [s.id, s]));
     const visited = new Set<string>();
     const result: typeof steps = [];

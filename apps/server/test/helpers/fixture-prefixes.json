@@ -278,6 +278,11 @@
       "legacy": true
     },
     {
+      "prefix": "v10a_",
+      "owner": "apps/server/test/key-cortex-plan-execution.integration.test.ts",
+      "packet": "V1-10-KEY-PLANNER-CLAIM"
+    },
+    {
       "prefix": "v21a_",
       "owner": "apps/server/test/structure-authority-ceiling.integration.test.ts",
       "packet": "V1-21-AUTH-JOBROLE-CEILING"
