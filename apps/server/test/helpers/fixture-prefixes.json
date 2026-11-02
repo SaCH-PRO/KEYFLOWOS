@@ -343,6 +343,11 @@
       "packet": "V1-23-PUB-PUBLIC-PROJECTIONS"
     },
     {
+      "prefix": "v32a_",
+      "owner": "apps/server/test/key-action-proposal-claim.integration.test.ts",
+      "packet": "V1-32-KEY-PROPOSAL-CLAIM"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"
