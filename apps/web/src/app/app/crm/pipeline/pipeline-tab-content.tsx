@@ -404,6 +404,10 @@ function PipelineTabContentInner({ state, nextActions, autopilotActions, autopil
             initialValues={editingContact || undefined}
             initialCustomFieldValues={editingCustomFieldValues}
             checkDuplicates={handleCheckDuplicates}
+            // SEC-R015c-1 (R0-15d): the form shows the custom fields of the
+            // business its submit writes to (handleSubmitContact), not whatever
+            // kf_business_id says after a switch in another tab.
+            businessId={businessId}
           />
         )}
       </AnimatePresence>

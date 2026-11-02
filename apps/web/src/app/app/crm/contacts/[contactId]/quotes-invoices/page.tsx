@@ -48,9 +48,16 @@ export default function ContactQuotesInvoicesPage() {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+      // R0-15d: the selected business, never a literal "default" tenant; with
+      // none selected there is no request.
+      const businessId = getStoredBusinessId();
+      if (!businessId) {
+        setLoading(false);
+        return;
+      }
       const [invRes, quoRes] = await Promise.all([
-        apiGet<{ data: Invoice[] }>(`/commerce/businesses/${getStoredBusinessId() ?? "default"}/invoices?contactId=${contactId}`),
-        apiGet<{ data: Quote[] }>(`/commerce/businesses/${getStoredBusinessId() ?? "default"}/quotes?contactId=${contactId}`),
+        apiGet<{ data: Invoice[] }>(`/commerce/businesses/${encodeURIComponent(businessId)}/invoices?contactId=${contactId}`),
+        apiGet<{ data: Quote[] }>(`/commerce/businesses/${encodeURIComponent(businessId)}/quotes?contactId=${contactId}`),
       ]);
       setInvoices(invRes.data?.data ?? []);
       setQuotes(quoRes.data?.data ?? []);

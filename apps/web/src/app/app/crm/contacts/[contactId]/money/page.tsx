@@ -78,10 +78,17 @@ export default function ContactMoneyPage() {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+      // R0-15d: the selected business, never a literal "default" tenant; with
+      // none selected there is no request.
+      const businessId = getStoredBusinessId();
+      if (!businessId) {
+        setLoading(false);
+        return;
+      }
       const [sumRes, invRes, quoRes] = await Promise.all([
         fetchContactRevenueSummary(contactId as string),
-        apiGet<{ data: Invoice[] }>(`/commerce/businesses/${getStoredBusinessId() ?? "default"}/invoices?contactId=${contactId}`),
-        apiGet<{ data: Quote[] }>(`/commerce/businesses/${getStoredBusinessId() ?? "default"}/quotes?contactId=${contactId}`),
+        apiGet<{ data: Invoice[] }>(`/commerce/businesses/${encodeURIComponent(businessId)}/invoices?contactId=${contactId}`),
+        apiGet<{ data: Quote[] }>(`/commerce/businesses/${encodeURIComponent(businessId)}/quotes?contactId=${contactId}`),
       ]);
       setSummary(sumRes.data ?? null);
       setInvoices(invRes.data?.data ?? []);

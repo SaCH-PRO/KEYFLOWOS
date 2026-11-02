@@ -148,7 +148,10 @@ jobs:
         run: cd apps/web && pnpm exec playwright test e2e/release0-live.spec.ts
         env:
           E2E_LIVE: '1'
-          E2E_WEB_COMMAND: pnpm exec next start -H 127.0.0.1 -p 5000
+          # The standalone server the build above produced (next.config.ts
+          # `output: "standalone"`; `next start` does not serve it), on 0.0.0.0
+          # and E2E_PORT (5000): playwright.config.ts webServerCommand (R0-15d).
+          E2E_WEB_COMMAND: standalone
           E2E_BASE_URL: http://127.0.0.1:5000
 
       - name: Upload trace and API log

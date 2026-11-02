@@ -63,15 +63,23 @@ function subscribeToSelectedBusiness(onChange: () => void) {
 const NO_SELECTION_ON_SERVER = () => null;
 
 /**
+ * The member's selected business (kf_business_id), followed while mounted (see
+ * subscribeToSelectedBusiness); null when none is selected. Also read by the
+ * settings page that manages the definitions (R0-15d).
+ */
+export function useSelectedBusinessId(): string | null {
+  return useSyncExternalStore(subscribeToSelectedBusiness, getStoredBusinessId, NO_SELECTION_ON_SERVER);
+}
+
+/**
  * The custom-field definitions of the business the screen works in: the
  * businessId it is handed, else the member's selected business (kf_business_id,
  * as the rest of the contact screens read it), followed while mounted. Never the
- * demo tenant: fetchCustomFieldDefinitions defaults to DEFAULT_BUSINESS_ID
- * ("biz_demo"), which BusinessGuard refuses for a real member (M09), so with no
- * business there is no request and no definitions.
+ * demo tenant (M09): fetchCustomFieldDefinitions takes the business it reads,
+ * so with no business there is no request and no definitions.
  */
 export function useCustomFieldDefinitions(businessId?: string | null) {
-  const selected = useSyncExternalStore(subscribeToSelectedBusiness, getStoredBusinessId, NO_SELECTION_ON_SERVER);
+  const selected = useSelectedBusinessId();
   // The business actually read: the one handed, else the one selected now.
   const tenant = businessId || selected || null;
   // What was read, and for which business. While another business is being read

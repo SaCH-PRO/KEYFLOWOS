@@ -1,8 +1,6 @@
 'use client';
 
 import { PublicPageState } from "@/components/ui/public-page-state";
-import { DEFAULT_BUSINESS_ID } from "@/lib/client";
-import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 
 /**
  * Retired: "enter an invoice ID to pay".
@@ -17,7 +15,7 @@ import { PresenceTracker } from "@/app/_lib/PresenceTracker";
 export default function PublicPayPage() {
   return (
     <>
-      <PresenceTracker businessId={DEFAULT_BUSINESS_ID || null} />
+      {/* R0-15d: no business is known here, so no page view is attributed (it was the demo tenant's). */}
       <PublicPageState
         variant="empty"
         title="This payment address is no longer used"
