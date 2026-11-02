@@ -40,6 +40,16 @@ const GOOGLE_SERVICES = [
   { type: "google_business_profile", label: "Business" },
 ] as const;
 
+/**
+ * R0-CMF5 review 2 (CMF5R-2): the Google Suite services (the server's
+ * GoogleService names) other than Gmail. The business mailbox is connected by
+ * the business owner only (owner ruling D-11); everyone else can still sign in
+ * to these.
+ */
+const GOOGLE_SUITE_SERVICES_WITHOUT_GMAIL = ["calendar", "drive", "forms", "contacts", "business_profile"] as const;
+export const GOOGLE_SIGN_IN_WITHOUT_GMAIL_TEXT =
+  "Only the business owner can connect the business mailbox (Gmail). Signing you in to Calendar, Drive, Forms, Contacts and Business Profile.";
+
 function StatusDot({ connected }: { connected: boolean }) {
   return (
     <span
@@ -137,14 +147,26 @@ export function CoreChannelsSection({
   const isConnected = (type: string) => statusOf(type)?.status === "connected";
   const connectedGoogle = GOOGLE_SERVICES.filter((s) => isConnected(s.type));
 
+  const requestGoogleAuthUrl = (services?: readonly string[]) =>
+    apiPost<{ authUrl?: string }>({
+      path: `/connect/google-suite/businesses/${encodeURIComponent(businessId)}/auth-url`,
+      body: services ? { services } : {},
+    });
+
   const connectGoogle = async () => {
     setGoogleBusy(true);
-    const res = await apiPost<{ authUrl?: string }>({
-      path: `/connect/google-suite/businesses/${encodeURIComponent(businessId)}/auth-url`,
-      body: {},
-    });
+    // No services: the default set, Gmail included. A member who is not the
+    // business owner is refused that (403 GMAIL_OWNER_ONLY; R0-CMF5, D-11), so
+    // they are signed in to every other Google service instead (review 2 CMF5R-2).
+    let res = await requestGoogleAuthUrl();
+    let withoutGmail = false;
+    if (!res.data?.authUrl && res.rawError?.code === "GMAIL_OWNER_ONLY") {
+      withoutGmail = true;
+      res = await requestGoogleAuthUrl(GOOGLE_SUITE_SERVICES_WITHOUT_GMAIL);
+    }
     setGoogleBusy(false);
     if (res.data?.authUrl) {
+      if (withoutGmail) toast.info(GOOGLE_SIGN_IN_WITHOUT_GMAIL_TEXT);
       window.location.href = res.data.authUrl;
     } else {
       toast.error(res.error || "Could not start Google sign-in");

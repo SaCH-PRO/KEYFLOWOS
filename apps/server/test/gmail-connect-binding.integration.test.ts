@@ -60,6 +60,15 @@
  * connector disconnect/reconnect routes under the same owner rule and binding
  * (ST-CMF5-1).
  *
+ * REVIEW 2 REPAIRS (cases H05-H07, J01-J02): a Google Suite state is single-use
+ * (SEC-CMF5-R1) and names its purpose, and each callback accepts only its own
+ * (SEC-CMF5-R2); a Google Suite Gmail grant, once confirmed, is recorded as the
+ * gmail connector again (connector_statuses, after the live Gmail check the
+ * callback makes, and a connector activity row; CMF5R-1), for which the stub
+ * also answers gmail.googleapis.com/gmail/v1/users/me/profile; a confirmation
+ * never pairs a new mailbox with the replaced one's refresh token (SEC-CMF5-R3);
+ * confirm and disconnect sent together never deadlock (SEC-CMF5-R4).
+ *
  * Fixtures: prefix `k07d_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
  * $transaction wrapping.
@@ -98,6 +107,7 @@ const emailOf = (id: string) => `${id}@k07d.test.local`;
 const OWNER_ONLY = 'GMAIL_OWNER_ONLY';
 const PENDING_NOT_FOUND = 'GMAIL_PENDING_NOT_FOUND';
 const EMAIL_MISMATCH = 'GMAIL_PENDING_EMAIL_MISMATCH';
+const NO_REFRESH_TOKEN = 'GMAIL_PENDING_NO_REFRESH_TOKEN';
 
 const OAUTH_ENV: Record<string, string> = {
   GOOGLE_CLIENT_ID: `${P}client-id`,
@@ -113,6 +123,8 @@ const savedEnv: Record<string, string | undefined> = {};
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const USERINFO_URL = 'https://www.googleapis.com/oauth2/v2/userinfo';
+/** The Google Suite callback's live Gmail check (verifyServiceLive('gmail'); review 2 CMF5R-1). */
+const GMAIL_PROFILE_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/profile';
 /** The scopes the stubbed consent grants (the Google Suite callback provisions only granted services). */
 const GRANTED_SCOPES = [
   'https://www.googleapis.com/auth/gmail.modify',
@@ -131,19 +143,25 @@ const registry = {
   reconnectConnector: vi.fn(async () => ({ connected: false })),
 };
 
-/** A Google account the stubbed consent screen can sign in as: one code, one mailbox, one token pair. */
-interface GoogleAccount { code: string; email: string; access: string; refresh: string }
+/**
+ * A Google account the stubbed consent screen can sign in as: one code, one mailbox, one token pair.
+ * `noRefresh`: the token endpoint answers this consent without a refresh_token (review 2 SEC-CMF5-R3);
+ * `email`: another consent for a mailbox already known; `profileFails`: the live Gmail check answers
+ * 403 (review 2 CMF5R-1).
+ */
+interface GoogleAccount { code: string; email: string; access: string; refresh: string | null; profileFails?: boolean }
 const accountsByCode = new Map<string, GoogleAccount>();
 const accountsByAccess = new Map<string, GoogleAccount>();
 let accountSeq = 0;
-function googleAccount(label: string): GoogleAccount {
+function googleAccount(label: string, opts: { noRefresh?: boolean; email?: string; profileFails?: boolean } = {}): GoogleAccount {
   accountSeq += 1;
   const tag = `${label}_${accountSeq}`;
-  const account = {
+  const account: GoogleAccount = {
     code: `${P}code_${tag}`,
-    email: `${P}${tag}@gmail.test`,
+    email: opts.email ?? `${P}${tag}@gmail.test`,
     access: `${P}access_${tag}`,
-    refresh: `${P}refresh_${tag}`,
+    refresh: opts.noRefresh ? null : `${P}refresh_${tag}`,
+    ...(opts.profileFails ? { profileFails: true } : {}),
   };
   accountsByCode.set(account.code, account);
   accountsByAccess.set(account.access, account);
@@ -154,6 +172,8 @@ const REFUSED_CODE = `${P}code_refused`;
 
 /** Every authorization code the stubbed token endpoint was asked to exchange. */
 const exchanges: string[] = [];
+/** The mailbox behind every access token the stubbed live Gmail check was called with (review 2 CMF5R-1). */
+const profileChecks: string[] = [];
 /** Every other outbound fetch attempted during the suite (refused). */
 const outbound: string[] = [];
 
@@ -168,9 +188,28 @@ async function stubFetch(input: any, init?: any): Promise<Response> {
       return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400, headers: { 'content-type': 'application/json' } });
     }
     return new Response(
-      JSON.stringify({ access_token: account.access, refresh_token: account.refresh, expires_in: 3600, token_type: 'Bearer', scope: GRANTED_SCOPES }),
+      JSON.stringify({
+        access_token: account.access,
+        ...(account.refresh ? { refresh_token: account.refresh } : {}),
+        expires_in: 3600,
+        token_type: 'Bearer',
+        scope: GRANTED_SCOPES,
+      }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     );
+  }
+  if (url === GMAIL_PROFILE_URL) {
+    const auth = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '');
+    const account = accountsByAccess.get(auth.replace(/^Bearer /, ''));
+    profileChecks.push(account?.email ?? '(unknown token)');
+    if (!account) return new Response('{}', { status: 401 });
+    if (account.profileFails) {
+      return new Response(
+        JSON.stringify({ error: { message: 'k07d: Gmail API has not been used in this project', status: 'PERMISSION_DENIED' } }),
+        { status: 403, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return new Response(JSON.stringify({ emailAddress: account.email }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
   if (url === USERINFO_URL) {
     const auth = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '');
@@ -188,6 +227,8 @@ async function stubFetch(input: any, init?: any): Promise<Response> {
 async function cleanup() {
   for (const sql of [
     `DELETE FROM connector_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM connector_statuses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM connector_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)} OR owner_id LIKE ${sqlLikePrefix(P)}`,
@@ -282,6 +323,42 @@ function redirectOf(res: { status: number; headers: Record<string, any> }) {
     reason: location.searchParams.get('reason'),
     pending: location.searchParams.get('pending'),
   };
+}
+
+/** Where the Google Suite callback sent the browser: its google=, gmail=, reason= and pending= parameters. */
+function suiteRedirectOf(res: { status: number; headers: Record<string, any> }) {
+  expect([301, 302, 303, 307, 308], JSON.stringify(res.headers)).toContain(res.status);
+  const location = new URL(String(res.headers.location));
+  return {
+    path: location.pathname,
+    google: location.searchParams.get('google'),
+    gmail: location.searchParams.get('gmail'),
+    reason: location.searchParams.get('reason'),
+    pending: location.searchParams.get('pending'),
+  };
+}
+
+/** The gmail connector's status row of a business (raw SQL; what ConnectorSyncSchedulerService.runNightlySync selects on). */
+async function gmailConnectorStatusOf(businessId: string): Promise<any[]> {
+  return db.$queryRawUnsafe(
+    `SELECT status, connected_account, intake_enabled, last_error, connected_at FROM connector_statuses
+      WHERE business_id = $1 AND connector_type = 'gmail'`,
+    businessId,
+  );
+}
+
+/** The gmail connector's activity rows of a business (raw SQL). */
+async function gmailConnectorActivityOf(businessId: string): Promise<any[]> {
+  return db.$queryRawUnsafe(
+    `SELECT action, status, message FROM connector_activity_logs
+      WHERE business_id = $1 AND connector_type = 'gmail' ORDER BY created_at ASC`,
+    businessId,
+  );
+}
+
+async function clearGmailConnector(businessId: string) {
+  await db.$executeRawUnsafe(`DELETE FROM connector_statuses WHERE business_id = $1 AND connector_type = 'gmail'`, businessId);
+  await db.$executeRawUnsafe(`DELETE FROM connector_activity_logs WHERE business_id = $1 AND connector_type = 'gmail'`, businessId);
 }
 
 /** The business's mailbox columns as stored (raw SQL: what a database dump holds). */
@@ -1111,6 +1188,172 @@ describe('R0-CMF5 review: the Google Suite connect and the connector routes foll
       ['gmail_disconnected', ID.owner],
     ]);
   });
+});
+
+describe('R0-CMF5 review 2: the Google Suite state is single-use and purpose-bound, and its Gmail grant is still recorded as the gmail connector (SEC-CMF5-R1, SEC-CMF5-R2, CMF5R-1)', () => {
+  it('[R0-CMF5-H05] SEC-CMF5-R1: a Google Suite state is single-use: the owner\'s gmail state completed once stages the owner\'s mailbox; the same state replayed with another Google account redirects google=error, exchanges no code and leaves the owner\'s pending connection in place; a replayed calendar-only state is refused the same way', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    const mine = googleAccount('suite_once_owner');
+    const replayer = googleAccount('suite_once_replayer');
+    const own = await suiteAuthUrl(ID.biz, ID.owner, { services: ['gmail'] });
+    expect([200, 201], JSON.stringify(own.body)).toContain(own.status);
+    const state = stateOf(own.body.authUrl);
+
+    const first = suiteRedirectOf(await suiteCallback(state, mine.code));
+    expect(first).toMatchObject({ path: '/app/commerce', gmail: 'pending' });
+    const replay = suiteRedirectOf(await suiteCallback(state, replayer.code));
+    expect(replay).toMatchObject({ path: '/app/key-connect', google: 'error', gmail: null, pending: null });
+    expect(exchanges).not.toContain(replayer.code);
+
+    const rows = await pendingOf(ID.biz);
+    expect(rows.map((r) => r.id)).toEqual([first.pending]);
+    expect(rows[0]).toMatchObject({ account_email: mine.email });
+    expect(rows[0].settings).toMatchObject({ userId: ID.owner });
+    expect((await preview(ID.biz, first.pending as string, ID.owner)).body).toMatchObject({ email: mine.email });
+    expect((await mailboxOf(ID.biz)).email).toBeNull();
+
+    // Not only gmail states: a STAFF member's calendar-only state is good for one callback too.
+    const calendar = await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] });
+    expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
+    const calendarState = stateOf(calendar.body.authUrl);
+    const staffOnce = googleAccount('suite_once_staff');
+    expect(suiteRedirectOf(await suiteCallback(calendarState, staffOnce.code)).google).toBe('connected');
+    const staffAgain = googleAccount('suite_once_staff_again');
+    expect(suiteRedirectOf(await suiteCallback(calendarState, staffAgain.code))).toMatchObject({ google: 'error' });
+    expect(exchanges).not.toContain(staffAgain.code);
+    await clearPending(ID.biz);
+  });
+
+  it('[R0-CMF5-H06] SEC-CMF5-R2: a state is good only at the callback it was minted for: a STAFF member\'s calendar-only Google Suite state, or the owner\'s gmail one, at GET /commerce/gmail/callback redirects gmail=error reason=invalid_state and stages nothing; the owner\'s commerce state at the Google Suite callback redirects google=error with the generic invalid-state reason; no code is exchanged', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    const calendar = await suiteAuthUrl(ID.biz, ID.staff, { services: ['calendar'] });
+    expect([200, 201], JSON.stringify(calendar.body)).toContain(calendar.status);
+    const staffMailbox = googleAccount('cross_staff');
+    expect(redirectOf(await callback(stateOf(calendar.body.authUrl), staffMailbox.code)))
+      .toMatchObject({ gmail: 'error', reason: 'invalid_state', pending: null });
+
+    const ownSuite = await suiteAuthUrl(ID.biz, ID.owner, { services: ['gmail'] });
+    expect([200, 201], JSON.stringify(ownSuite.body)).toContain(ownSuite.status);
+    const ownerSuiteMailbox = googleAccount('cross_owner_suite');
+    expect(redirectOf(await callback(stateOf(ownSuite.body.authUrl), ownerSuiteMailbox.code)))
+      .toMatchObject({ gmail: 'error', reason: 'invalid_state', pending: null });
+
+    const commerce = await authUrl(ID.biz, ID.owner);
+    expect(commerce.status, JSON.stringify(commerce.body)).toBe(200);
+    const commerceMailbox = googleAccount('cross_owner_commerce');
+    const reverse = suiteRedirectOf(await suiteCallback(stateOf(commerce.body.url), commerceMailbox.code));
+    expect(reverse).toMatchObject({ path: '/app/key-connect', google: 'error', pending: null });
+    expect(reverse.reason).toBe('Invalid or expired OAuth state');
+
+    for (const code of [staffMailbox.code, ownerSuiteMailbox.code, commerceMailbox.code]) expect(exchanges).not.toContain(code);
+    expect(await pendingOf(ID.biz)).toEqual([]);
+    expect((await mailboxOf(ID.biz)).email).toBeNull();
+  });
+
+  it('[R0-CMF5-H07] CMF5R-1: a mailbox connected through the Google Suite sign-in and confirmed by the owner is recorded as the gmail connector again (connector_statuses connected with intake on, after the live Gmail check at the callback, and one connector activity row), so the nightly sync picks it up; a grant whose live check failed is recorded as error; staging alone records nothing', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    const mine = googleAccount('suite_status');
+    const own = await suiteAuthUrl(ID.biz, ID.owner, { services: ['gmail'] });
+    const back = suiteRedirectOf(await suiteCallback(stateOf(own.body.authUrl), mine.code));
+    expect(back.gmail).toBe('pending');
+    expect(profileChecks).toContain(mine.email);
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([]);
+    expect(await gmailConnectorActivityOf(ID.biz)).toEqual([]);
+
+    const ok = await confirm(ID.biz, back.pending, ID.owner, mine.email);
+    expect([200, 201], JSON.stringify(ok.body)).toContain(ok.status);
+    const statusRows = await gmailConnectorStatusOf(ID.biz);
+    expect(statusRows).toHaveLength(1);
+    expect(statusRows[0]).toMatchObject({ status: 'connected', connected_account: mine.email, intake_enabled: true, last_error: null });
+    expect(statusRows[0].connected_at).toBeTruthy();
+    const activity = await gmailConnectorActivityOf(ID.biz);
+    expect(activity.map((a) => [a.action, a.status])).toEqual([['connect', 'success']]);
+    expect(String(activity[0].message)).toContain(mine.email);
+    for (const secret of [mine.access, mine.refresh]) expect(JSON.stringify(activity)).not.toContain(secret);
+
+    // The live check failed at the callback: the owner can still confirm the mailbox, and the connector says why it is not syncing.
+    const broken = googleAccount('suite_status_broken', { profileFails: true });
+    const again = await suiteAuthUrl(ID.biz, ID.owner, { services: ['gmail'] });
+    const brokenBack = suiteRedirectOf(await suiteCallback(stateOf(again.body.authUrl), broken.code));
+    expect(brokenBack.gmail).toBe('pending');
+    const replaced = await confirm(ID.biz, brokenBack.pending, ID.owner, broken.email);
+    expect([200, 201], JSON.stringify(replaced.body)).toContain(replaced.status);
+    const errorRows = await gmailConnectorStatusOf(ID.biz);
+    expect(errorRows).toHaveLength(1);
+    expect(errorRows[0]).toMatchObject({ status: 'error', connected_account: broken.email });
+    expect(String(errorRows[0].last_error)).toContain('Gmail API 403');
+    expect((await gmailConnectorActivityOf(ID.biz)).map((a) => [a.action, a.status])).toEqual([['connect', 'success'], ['connect', 'failure']]);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+  });
+});
+
+describe('R0-CMF5 review 2: a confirmation links a whole mailbox and does not deadlock a disconnect (SEC-CMF5-R3, SEC-CMF5-R4)', () => {
+  const business = () => db.business.findUnique({
+    where: { id: ID.biz },
+    select: { gmailEmail: true, gmailAccessToken: true, gmailRefreshToken: true },
+  });
+
+  it('[R0-CMF5-J01] SEC-CMF5-R3: replacing mailbox A with a mailbox B whose consent returned no refresh token is refused (409 GMAIL_PENDING_NO_REFRESH_TOKEN): A stays whole (address, access and refresh token) and no audit row is written; a first connection without a refresh token is refused the same way; a new consent for the stored mailbox itself without one keeps its stored refresh token (control)', async () => {
+    await clearPending(ID.biz);
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+    const current = googleAccount('refresh_a');
+    await seedMailbox(ID.biz, current);
+    const next = googleAccount('refresh_b', { noRefresh: true });
+    const back = await startAndComplete(ID.biz, ID.owner, next);
+    expect(back.gmail).toBe('pending');
+    const refused = await confirm(ID.biz, back.pending, ID.owner, next.email);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+    expect(refused.body.code).toBe(NO_REFRESH_TOKEN);
+    expect(await business()).toEqual({ gmailEmail: current.email, gmailAccessToken: current.access, gmailRefreshToken: current.refresh });
+    expect((await status(ID.biz)).body).toEqual({ connected: true, email: current.email });
+    expect(await mailboxAuditOf(ID.biz)).toEqual([]);
+
+    // The stored mailbox itself, consented again without a refresh token: its refresh token stays with it (as before R0-CMF5).
+    await clearPending(ID.biz);
+    const same = googleAccount('refresh_a_again', { noRefresh: true, email: current.email });
+    const sameBack = await startAndComplete(ID.biz, ID.owner, same);
+    const renewed = await confirm(ID.biz, sameBack.pending, ID.owner, current.email);
+    expect([200, 201], JSON.stringify(renewed.body)).toContain(renewed.status);
+    expect(await business()).toEqual({ gmailEmail: current.email, gmailAccessToken: same.access, gmailRefreshToken: current.refresh });
+
+    // No mailbox stored: a consent without a refresh token could never send, so it is not linked either.
+    await clearMailbox(ID.biz);
+    await clearPending(ID.biz);
+    const first = googleAccount('refresh_first', { noRefresh: true });
+    const firstBack = await startAndComplete(ID.biz, ID.owner, first);
+    const none = await confirm(ID.biz, firstBack.pending, ID.owner, first.email);
+    expect(none.status, JSON.stringify(none.body)).toBe(409);
+    expect(none.body.code).toBe(NO_REFRESH_TOKEN);
+    expect(await mailboxOf(ID.biz)).toMatchObject({ email: null, access: null, refresh: null });
+    await clearPending(ID.biz);
+  });
+
+  it('[R0-CMF5-J02] SEC-CMF5-R4: the owner\'s confirm and disconnect sent together, 16 times: no deadlock and no 500; every disconnect succeeds, every confirm is 201 or 404, and after each pair no mailbox and no pending connection is left', async () => {
+    const trials: Array<{ confirm: number; disconnect: number; linked: string | null; pendingLeft: number }> = [];
+    for (let i = 0; i < 16; i += 1) {
+      await clearPending(ID.biz);
+      await clearMailbox(ID.biz);
+      const account = googleAccount(`race_${i}`);
+      const back = await startAndComplete(ID.biz, ID.owner, account);
+      expect(back.gmail).toBe('pending');
+      const [c, d] = await Promise.all([confirm(ID.biz, back.pending, ID.owner, account.email), disconnect(ID.biz, ID.owner)]);
+      trials.push({ confirm: c.status, disconnect: d.status, linked: (await mailboxOf(ID.biz)).email, pendingLeft: (await pendingOf(ID.biz)).length });
+    }
+    const seen = JSON.stringify(trials);
+    for (const trial of trials) {
+      expect([200, 201, 404], seen).toContain(trial.confirm);
+      expect([200, 204], seen).toContain(trial.disconnect);
+      expect(trial.linked, seen).toBeNull();
+      expect(trial.pendingLeft, seen).toBe(0);
+    }
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+  }, 120_000);
 });
 
 describe('R0-CMF5 harness invariant', () => {

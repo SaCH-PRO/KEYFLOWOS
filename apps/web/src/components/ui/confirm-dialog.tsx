@@ -11,6 +11,8 @@ type ConfirmDialogProps = {
   onConfirm: () => void;
   onCancel: () => void;
   variant?: "danger" | "default";
+  /** The confirmed action is in flight: the confirm button is disabled so it is not sent twice. */
+  busy?: boolean;
 };
 
 export function ConfirmDialog({
@@ -22,6 +24,7 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
   variant = "default",
+  busy = false,
 }: ConfirmDialogProps) {
   if (!open) return null;
 
@@ -42,6 +45,8 @@ export function ConfirmDialog({
           </Button>
           <Button
             onClick={onConfirm}
+            disabled={busy}
+            aria-busy={busy || undefined}
             className={
               variant === "danger"
                 ? "bg-red-600 hover:bg-red-700 text-white"

@@ -15,6 +15,11 @@
  * apiDelete's {error} and showed "Gmail disconnected" on a 403; the Revenue and
  * Marketing connect buttons showed nothing on a 403.
  *
+ * Review 2 (CMF5R-3, W08): the confirmation is sent once. RED-BEFORE on
+ * 97669ec8: handleConfirmPendingGmail had no in-flight guard and ConfirmDialog
+ * never disabled its button, so a second click POSTed confirm again and the
+ * owner saw "Gmail connected" next to the server's 404.
+ *
  * Mounted on the real hooks, the real commerce page and the real api client
  * (lib/api.ts); only `fetch`, the toast, the router and the page's unrelated
  * children are stubbed, so the error shapes are the ones apiGet/apiPost/apiDelete
@@ -262,5 +267,57 @@ describe("the owner finishes connecting Gmail in the app, seeing the mailbox fir
     render(<CommercePage />);
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("That Gmail sign-in expired or was already used. Connect Gmail again."));
     expect(new URLSearchParams(window.location.search).get("gmail")).toBeNull();
+  });
+
+  it("[R0-CMF5-W08] review 2 CMF5R-3: while the confirmation is in flight the Connect button is disabled and a second click (or a second call of the hook) sends nothing: one confirm POST, one success toast, no error toast", async () => {
+    const releases: Array<(res: Response) => void> = [];
+    const held = () => new Promise<Response>((resolve) => { releases.push(resolve); });
+    const calls = stubServer((method, pathname) => {
+      if (method === "GET" && pathname.endsWith(gmailPath(`/pending/${PENDING_ID}`))) {
+        return jsonResponse(200, { pendingId: PENDING_ID, email: STAGED_EMAIL, expiresAt: new Date(Date.now() + 600_000).toISOString() });
+      }
+      if (method === "POST" && pathname.endsWith(gmailPath("/confirm"))) return held() as unknown as Response;
+      return undefined;
+    });
+    const confirmPosts = () => calls.filter((c) => c.method === "POST" && c.pathname.endsWith(gmailPath("/confirm")));
+    const created = () => jsonResponse(201, { connected: true, email: STAGED_EMAIL }, "Created");
+
+    window.history.replaceState({}, "", `/app/commerce?gmail=pending&pending=${PENDING_ID}`);
+    const page = render(<CommercePage />);
+    await screen.findByText(`Connect ${STAGED_EMAIL}?`);
+    fireEvent.click(screen.getByRole("button", { name: "Connect mailbox" }));
+    const busy = (await screen.findByRole("button", { name: "Connecting..." })) as HTMLButtonElement;
+    expect(busy.disabled).toBe(true);
+    fireEvent.click(busy);
+    fireEvent.click(busy);
+    await waitFor(() => expect(releases.length).toBeGreaterThan(0));
+    await act(async () => { for (const release of releases) release(created()); });
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(`Gmail connected: ${STAGED_EMAIL}`));
+    expect(confirmPosts()).toHaveLength(1);
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.error).not.toHaveBeenCalled();
+    page.unmount();
+
+    // The hook's own guard: two calls while the first is in flight send one POST.
+    vi.clearAllMocks();
+    releases.length = 0;
+    calls.length = 0;
+    const { result } = renderHook(() => useCommerceIntegrations(BUSINESS));
+    await act(async () => { await result.current.loadPendingGmail(PENDING_ID); });
+    expect(result.current.pendingGmail?.email).toBe(STAGED_EMAIL);
+    let first: Promise<void> = Promise.resolve();
+    let second: Promise<void> = Promise.resolve();
+    act(() => {
+      first = result.current.handleConfirmPendingGmail();
+      second = result.current.handleConfirmPendingGmail();
+    });
+    await waitFor(() => expect(releases.length).toBeGreaterThan(0));
+    await act(async () => {
+      for (const release of releases) release(created());
+      await Promise.all([first, second]);
+    });
+    expect(confirmPosts()).toHaveLength(1);
+    expect(toast.success).toHaveBeenCalledTimes(1);
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

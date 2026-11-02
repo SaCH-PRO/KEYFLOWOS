@@ -24,6 +24,12 @@
  * business (ST-CMF5-3); confirm and disconnect write their audit row in the
  * change's transaction (ST-CMF5-4); expired pending rows are swept and a
  * disconnect removes every pending row (ST-CMF5-5).
+ *
+ * Review 2 repairs (U15-U18): verifyState accepts only a purpose gmail state
+ * (SEC-CMF5-R2); a consent with no refresh token never pairs a new mailbox with
+ * the replaced one's refresh token (SEC-CMF5-R3); confirm and disconnect lock
+ * the business row first (SEC-CMF5-R4); a Google Suite grant writes the gmail
+ * connector status and activity row on confirmation (CMF5R-1).
  */
 import 'reflect-metadata';
 import { createHmac } from 'crypto';
@@ -56,7 +62,7 @@ interface Call { model: string; method: string; args: any }
  * business.findFirst answer the owner rule from `state`; connectorAccount keeps
  * the rows it was given in memory, so a staged row can be confirmed.
  */
-function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: string; claimLoses?: boolean; currentEmail?: string } = {}) {
+function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: string; claimLoses?: boolean; currentEmail?: string; currentRefresh?: string } = {}) {
   const calls: Call[] = [];
   const pending: any[] = [];
   // Scalar equality on every key but OR; an OR of { settings: { path: ['userId'], equals } } and
@@ -86,7 +92,7 @@ function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: str
       },
       findUnique: async (args: any) => {
         calls.push({ model: 'business', method: 'findUnique', args });
-        return { id: args.where.id, gmailEmail: state.currentEmail ?? null, gmailRefreshToken: state.currentEmail ? 'ref' : null };
+        return { id: args.where.id, gmailEmail: state.currentEmail ?? null, gmailRefreshToken: state.currentEmail ? (state.currentRefresh ?? 'ref') : null };
       },
       update: async (args: any) => {
         calls.push({ model: 'business', method: 'update', args });
@@ -97,6 +103,19 @@ function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: str
       create: async (args: any) => {
         calls.push({ model: 'teamActivityLog', method: 'create', args });
         audit.push(args.data);
+        return args.data;
+      },
+    },
+    // Review 2 CMF5R-1: the gmail connector's status and activity rows.
+    connectorStatus: {
+      upsert: async (args: any) => {
+        calls.push({ model: 'connectorStatus', method: 'upsert', args });
+        return args.create;
+      },
+    },
+    connectorActivityLog: {
+      create: async (args: any) => {
+        calls.push({ model: 'connectorActivityLog', method: 'create', args });
         return args.data;
       },
     },
@@ -130,6 +149,11 @@ function fakePrisma(state: { memberships?: Record<string, string>; ownerId?: str
   client.$transaction = async (fn: (tx: any) => Promise<unknown>) => {
     calls.push({ model: '$transaction', method: 'begin', args: null });
     return fn(client);
+  };
+  // Review 2 SEC-CMF5-R4: a tagged-template raw query (the row lock), recorded with its SQL and values.
+  client.$queryRaw = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+    calls.push({ model: '$queryRaw', method: 'raw', args: { sql: strings.join('?'), values } });
+    return [];
   };
   const writes = () => calls.filter((c) => WRITE_METHODS.has(c.method));
   return { prisma: { client } as any, calls, pending, writes, audit };
@@ -414,5 +438,110 @@ describe('GmailService — the Gmail connection is bound to the owner who starte
     for (const c of calls.filter((x) => x.model === 'connectorAccount')) {
       expect(c.args.where.businessId, `${c.method} names the business`).toBe(BIZ);
     }
+  });
+
+  it('[R0-CMF5-U15] review 2 SEC-CMF5-R2: verifyState accepts only a state minted for this callback (purpose gmail): a correctly signed, unexpired, unused Google Suite state (purpose google-suite, or none) is refused even when it names a user', () => {
+    const { prisma } = fakePrisma();
+    const gmail = new GmailService(prisma);
+    const sign = (claims: object) => {
+      const payload = JSON.stringify(claims);
+      return Buffer.from(`${payload}.${createHmac('sha256', ENV.GOOGLE_STATE_SECRET).update(payload).digest('hex')}`).toString('base64');
+    };
+    const claims = { businessId: BIZ, userId: STAFF.id, exp: Date.now() + 60_000 };
+    expect(gmail.verifyState(sign({ ...claims, services: ['calendar'], nonce: 'n-u15-suite', purpose: 'google-suite' }))).toBeNull();
+    expect(gmail.verifyState(sign({ ...claims, services: ['calendar'], nonce: 'n-u15-none' }))).toBeNull();
+    expect(gmail.verifyState(sign({ ...claims, nonce: 'n-u15-other', purpose: 'crm' }))).toBeNull();
+    expect(gmail.verifyState(sign({ ...claims, nonce: 'n-u15-gmail', purpose: 'gmail' }))).toMatchObject({ businessId: BIZ, userId: STAFF.id, purpose: 'gmail' });
+  });
+
+  it('[R0-CMF5-U16] review 2 SEC-CMF5-R3: a pending connection whose consent returned no refresh token replaces nothing: with another mailbox stored, or none, confirm is 409 GMAIL_PENDING_NO_REFRESH_TOKEN with no claim and no Business write; for the stored mailbox itself the stored refresh token stays', async () => {
+    const noRefresh = { access_token: 'acc_tok_16', expires_in: 3600 };
+    const binding = { businessId: BIZ, userId: OWNER.id, nonce: 'n-u16' };
+
+    for (const currentEmail of ['current16@gmail.test', undefined]) {
+      const f = fakePrisma({ memberships: { [OWNER.id]: 'OWNER' }, currentEmail });
+      const gmail = new GmailService(f.prisma) as any;
+      const { pendingId } = await gmail.stagePendingTokens(binding, 'next16@gmail.test', noRefresh);
+      const before = f.writes().length;
+      const err = await gmail.confirmPendingConnection(BIZ, OWNER, pendingId, 'next16@gmail.test').catch((e: unknown) => e);
+      expect(err, `stored mailbox: ${String(currentEmail)}`).toBeInstanceOf(ConflictException);
+      expect((err as ConflictException).getResponse()).toMatchObject({ code: 'GMAIL_PENDING_NO_REFRESH_TOKEN' });
+      expect(f.writes().length).toBe(before);
+      expect(f.pending.map((r) => r.id)).toEqual([pendingId]);
+    }
+
+    const same = fakePrisma({ memberships: { [OWNER.id]: 'OWNER' }, currentEmail: 'Current16@gmail.test', currentRefresh: 'ref_stored_16' });
+    const gmail = new GmailService(same.prisma) as any;
+    const { pendingId } = await gmail.stagePendingTokens(binding, 'current16@gmail.test', noRefresh);
+    await expect(gmail.confirmPendingConnection(BIZ, OWNER, pendingId, 'current16@gmail.test')).resolves.toEqual({ connected: true, email: 'current16@gmail.test' });
+    const update = same.calls.find((c) => c.model === 'business' && c.method === 'update');
+    expect(update?.args.data).toMatchObject({ gmailEmail: 'current16@gmail.test', gmailAccessToken: 'acc_tok_16' });
+    expect([undefined, 'ref_stored_16']).toContain(update?.args.data.gmailRefreshToken);
+  });
+
+  it('[R0-CMF5-U17] review 2 SEC-CMF5-R4: confirm and disconnect each lock the business row first in their transaction (SELECT ... FOR NO KEY UPDATE on businesses), before they touch a pending row or the mailbox, so the two never take their locks in opposite orders', async () => {
+    stubGoogle();
+    const { prisma, calls } = fakePrisma({ memberships: { [OWNER.id]: 'OWNER' } });
+    const gmail = new GmailService(prisma) as any;
+    const { pendingId } = await gmail.stagePendingConnection(
+      { businessId: BIZ, userId: OWNER.id, nonce: 'n-u17', exp: Date.now() + 60_000, purpose: 'gmail' }, 'good-code');
+
+    const runs: Array<[string, () => Promise<unknown>]> = [
+      ['confirm', () => gmail.confirmPendingConnection(BIZ, OWNER, pendingId, 'mailbox@gmail.test')],
+      ['disconnect', () => gmail.disconnectGmail(BIZ, OWNER)],
+    ];
+    for (const [name, run] of runs) {
+      const from = calls.length;
+      await run();
+      const made = calls.slice(from);
+      const begin = made.findIndex((c) => c.model === '$transaction');
+      expect(begin, `${name} runs in a transaction`).toBeGreaterThanOrEqual(0);
+      const first = made[begin + 1];
+      expect(first, `${name}: the first statement in the transaction`).toMatchObject({ model: '$queryRaw' });
+      expect(first.args.sql).toMatch(/FROM\s+businesses\s+WHERE\s+id\s*=\s*\?\s+FOR\s+NO\s+KEY\s+UPDATE/i);
+      expect(first.args.values).toEqual([BIZ]);
+    }
+  });
+
+  it('[R0-CMF5-U18] review 2 CMF5R-1: a pending connection the Google Suite staged (origin google-suite, with its live Gmail check) writes the gmail connector status and one connector activity row in the confirmation\'s transaction (connected with intake on, or error with the check\'s message); one the commerce callback staged writes neither, as on the base', async () => {
+    const tokens = { access_token: 'acc_tok_18', refresh_token: 'ref_tok_18', expires_in: 3600 };
+    const binding = { businessId: BIZ, userId: OWNER.id, nonce: 'n-u18' };
+    const confirmStaged = async (origin: unknown) => {
+      const f = fakePrisma({ memberships: { [OWNER.id]: 'OWNER' } });
+      const gmail = new GmailService(f.prisma) as any;
+      const { pendingId } = await gmail.stagePendingTokens(binding, 'suite18@gmail.test', tokens, origin);
+      const settings = f.pending[0].settings;
+      await gmail.confirmPendingConnection(BIZ, OWNER, pendingId, 'suite18@gmail.test');
+      const begin = f.calls.findIndex((c) => c.model === '$transaction');
+      const upserts = f.calls.filter((c) => c.model === 'connectorStatus');
+      const activity = f.calls.filter((c) => c.model === 'connectorActivityLog');
+      return { f, settings, begin, upserts, activity };
+    };
+
+    const ok = await confirmStaged({ source: 'google-suite', verification: { ok: true, account: 'suite18@gmail.test', error: null } });
+    expect(ok.settings).toMatchObject({ origin: 'google-suite', verification: { ok: true } });
+    expect(JSON.stringify(ok.settings)).not.toContain('acc_tok_18');
+    expect(ok.upserts).toHaveLength(1);
+    expect(ok.f.calls.indexOf(ok.upserts[0])).toBeGreaterThan(ok.begin);
+    expect(ok.begin).toBeGreaterThanOrEqual(0);
+    expect(ok.upserts[0].args).toMatchObject({
+      where: { businessId_connectorType: { businessId: BIZ, connectorType: 'gmail' } },
+      create: { businessId: BIZ, connectorType: 'gmail', status: 'connected', connectedAccount: 'suite18@gmail.test', intakeEnabled: true, lastError: null },
+      update: { status: 'connected', connectedAccount: 'suite18@gmail.test', lastError: null },
+    });
+    expect(ok.activity).toHaveLength(1);
+    expect(ok.f.calls.indexOf(ok.activity[0])).toBeGreaterThan(ok.begin);
+    expect(ok.activity[0].args.data).toMatchObject({ businessId: BIZ, connectorType: 'gmail', action: 'connect', status: 'success' });
+    expect(JSON.stringify(ok.activity[0].args)).not.toContain('acc_tok_18');
+
+    const failed = await confirmStaged({ source: 'google-suite', verification: { ok: false, account: null, error: 'Gmail API 403: disabled' } });
+    expect(failed.upserts[0].args.create).toMatchObject({ status: 'error', connectedAccount: 'suite18@gmail.test', lastError: 'Gmail API 403: disabled' });
+    expect(failed.upserts[0].args.update).toMatchObject({ status: 'error', lastError: 'Gmail API 403: disabled' });
+    expect(failed.activity[0].args.data).toMatchObject({ connectorType: 'gmail', action: 'connect', status: 'failure' });
+
+    const commerce = await confirmStaged(undefined);
+    expect(commerce.settings.origin).toBeUndefined();
+    expect(commerce.upserts).toEqual([]);
+    expect(commerce.activity).toEqual([]);
   });
 });

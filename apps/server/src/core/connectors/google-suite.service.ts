@@ -20,6 +20,12 @@ interface OAuthState {
   userId?: string;
   nonce: string;
   exp: number;
+  /**
+   * R0-CMF5 review 2 SEC-CMF5-R2: the commerce Gmail callback (and other Google
+   * flows) sign states with the same secret and format; each callback accepts
+   * only its own purpose, so a state is good only where it was minted for.
+   */
+  purpose: 'google-suite';
 }
 
 /**
@@ -108,6 +114,14 @@ export class GoogleSuiteService {
     process.env.GOOGLE_SUITE_REDIRECT_URI ||
     process.env.GOOGLE_REDIRECT_URI?.replace(/\/[^/]+\/callback$/, '/google-suite/callback') ||
     '';
+  /**
+   * R0-CMF5 review 2 SEC-CMF5-R1: nonces of states this process has accepted,
+   * with their expiry. A signed state is good for one callback, as the commerce
+   * Gmail state is (R0-07): a gmail grant stages the owner's pending
+   * connection, so a replay with another Google account must not replace it.
+   * Entries leave when their state would have expired anyway. Per process.
+   */
+  private readonly acceptedStateNonces = new Map<string, number>();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -154,6 +168,7 @@ export class GoogleSuiteService {
       // guessable nonce makes distinct states guessable too.
       nonce: randomBytes(16).toString('hex'),
       exp: Date.now() + 10 * 60 * 1000,
+      purpose: 'google-suite',
     };
     const signed = this.signState(state);
 
@@ -263,14 +278,21 @@ export class GoogleSuiteService {
     }
 
     let gmailPendingId: string | null = null;
+    let gmailCheck: { ok: boolean; account: string | null; error: string | null } | null = null;
     if (gmailGranted && gmail) {
       if (!email) {
         this.logger.warn('Gmail granted but Google returned no mailbox address; nothing staged');
       } else {
+        // R0-CMF5 review 2 CMF5R-1: the live Gmail check this sign-in always made
+        // runs here, with the fresh token, and travels with the staged
+        // connection, so the owner's confirmation records the gmail connector
+        // (connected or error) the way this callback did when it linked directly.
+        gmailCheck = await this.verifyServiceLive('gmail', tokens.access_token);
         const staged = await gmail.stagePendingTokens(
           { businessId: state.businessId, userId: state.userId as string, nonce: state.nonce },
           email,
           tokens,
+          { source: 'google-suite', verification: gmailCheck },
         );
         gmailPendingId = staged.pendingId;
       }
@@ -339,7 +361,10 @@ export class GoogleSuiteService {
       enabledServices,
       /** R0-CMF5 review ST-CMF5-1: the PENDING Gmail connection the state's user confirms, if one was staged. */
       gmailPendingId,
-      verification: verified.map((v) => ({ service: v.svc, ok: v.ok, error: v.error })),
+      verification: [
+        ...(gmailCheck ? [{ service: 'gmail' as GoogleService, ok: gmailCheck.ok, error: gmailCheck.error }] : []),
+        ...verified.map((v) => ({ service: v.svc, ok: v.ok, error: v.error })),
+      ],
     };
   }
 
@@ -499,9 +524,33 @@ export class GoogleSuiteService {
       const sig = decoded.slice(i + 1);
       const expected = createHmac('sha256', this.stateSecret).update(payload).digest('hex');
       if (!timingSafeStringEqual(sig, expected)) return null;
-      const state: OAuthState = JSON.parse(payload);
-      if (state.exp < Date.now()) return null;
-      return state;
+      const state = JSON.parse(payload) as Partial<OAuthState>;
+      const now = Date.now();
+      if (typeof state.exp !== 'number' || state.exp < now) return null;
+      // R0-CMF5 review 2 SEC-CMF5-R2: only a state buildAuthUrl minted. A
+      // commerce Gmail state (no services) used to pass here, have its code
+      // exchanged, and fail later with "state.services is not iterable" in the
+      // redirect.
+      if (state.purpose !== 'google-suite') return null;
+      if (typeof state.businessId !== 'string' || state.businessId.length === 0) return null;
+      if (
+        !Array.isArray(state.services) ||
+        state.services.length === 0 ||
+        !state.services.every((s) => ALL_SERVICES.includes(s as GoogleService))
+      ) {
+        return null;
+      }
+      // R0-CMF5 review 2 SEC-CMF5-R1: single use.
+      if (typeof state.nonce !== 'string' || state.nonce.length === 0) return null;
+      for (const [nonce, exp] of this.acceptedStateNonces) {
+        if (exp < now) this.acceptedStateNonces.delete(nonce);
+      }
+      if (this.acceptedStateNonces.has(state.nonce)) {
+        this.logger.warn('Google Suite OAuth state already used');
+        return null;
+      }
+      this.acceptedStateNonces.set(state.nonce, state.exp);
+      return state as OAuthState;
     } catch {
       return null;
     }
