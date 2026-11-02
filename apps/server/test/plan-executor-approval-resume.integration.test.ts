@@ -44,6 +44,16 @@
  * unused on this path); the timeline and undo services (no-ops); the event
  * emitter (records).
  *
+ * Queue isolation (V1-19 review, CR-V19-3; the R0-19 CR-R19-1 pattern of
+ * evidence-feed.integration.test.ts): 'ai-plan-steps' and 'ai-cron-triggers'
+ * are global BullMQ queue names, and every app on the same REDIS_URL (a
+ * dist/main.js that a parallel test file spawns loads AiModule's QueueService)
+ * runs its own 'ai-plan-steps' worker, which would take this run's jobs and run
+ * them through the real flow orchestrator. BullMQ's real Queue, Worker and
+ * QueueEvents are therefore constructed with a BullMQ `prefix` of this run's
+ * own (vi.mock below adds only that option); QueueService itself is unchanged.
+ * This run's keys under that prefix are deleted in afterAll.
+ *
  * Every seeded row carries the `v19b_` prefix (user, business, plan and step
  * ids, the queue job ids) and is hard-deleted by raw SQL with sqlLikePrefix()
  * in beforeAll and afterAll, and this suite's BullMQ jobs are removed by id;
@@ -54,6 +64,36 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+
+/** CR-V19-3: this run's own BullMQ key prefix (no other app on REDIS_URL shares it). */
+const BULL = vi.hoisted(() => ({
+  prefix: `v19b-bull-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`,
+}));
+
+// The real BullMQ classes; only the key prefix is set, for every queue, worker
+// and event stream QueueService builds ('ai-plan-steps', 'ai-cron-triggers').
+vi.mock('bullmq', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('bullmq')>();
+  type QueueArgs = ConstructorParameters<typeof actual.Queue>;
+  type WorkerArgs = ConstructorParameters<typeof actual.Worker>;
+  type EventsArgs = ConstructorParameters<typeof actual.QueueEvents>;
+  class Queue extends actual.Queue {
+    constructor(name: string, opts?: QueueArgs[1], connection?: QueueArgs[2]) {
+      super(name, { ...opts, prefix: BULL.prefix } as QueueArgs[1], connection);
+    }
+  }
+  class Worker extends actual.Worker {
+    constructor(name: string, processor?: WorkerArgs[1], opts?: WorkerArgs[2], connection?: WorkerArgs[3]) {
+      super(name, processor, { ...opts, prefix: BULL.prefix } as WorkerArgs[2], connection);
+    }
+  }
+  class QueueEvents extends actual.QueueEvents {
+    constructor(name: string, opts?: EventsArgs[1], connection?: EventsArgs[2]) {
+      super(name, { ...opts, prefix: BULL.prefix } as EventsArgs[1], connection);
+    }
+  }
+  return { ...actual, Queue, Worker, QueueEvents };
+});
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
@@ -230,11 +270,34 @@ beforeAll(async () => {
 afterAll(async () => {
   await removeJobs().catch(() => undefined);
   if (queue) await queue.onModuleDestroy().catch(() => undefined);
-  if (redis) await redis.quit().catch(() => undefined);
+  if (redis) {
+    // CR-V19-3: drop this run's BullMQ keys (failed jobs are kept for seven days otherwise).
+    try {
+      let cursor = '0';
+      do {
+        const [next, keys] = await redis.scan(cursor, 'MATCH', `${BULL.prefix}:*`, 'COUNT', 500);
+        if (keys.length) await redis.del(...keys);
+        cursor = next;
+      } while (cursor !== '0');
+    } catch { /* best-effort */ }
+    await redis.quit().catch(() => undefined);
+  }
   if (db) await cleanup();
   const dbMod = await import('@keyflow/db');
   dbMod.setTenantContextProvider({ getCurrentBusinessId: () => undefined });
 }, 60_000);
+
+describe('harness isolation (V1-19 review, CR-V19-3)', () => {
+  it("the plan and cron queues, the plan worker and its event stream run under this run's own BullMQ prefix, so no other app on REDIS_URL takes this run's jobs", () => {
+    expect(BULL.prefix).not.toBe('bull');
+    expect(queue.planQueue.name).toBe('ai-plan-steps');
+    expect(queue.planQueue.opts.prefix).toBe(BULL.prefix);
+    expect(queue.cronQueue.opts.prefix).toBe(BULL.prefix);
+    expect(queue.planWorker?.opts?.prefix, 'the plan worker shares the prefix').toBe(BULL.prefix);
+    expect(queue.cronWorker?.opts?.prefix, 'the cron worker shares the prefix').toBe(BULL.prefix);
+    expect(queue.planEvents?.opts?.prefix, 'the event stream shares the prefix').toBe(BULL.prefix);
+  });
+});
 
 describe('fixture sanity (real rows, real Redis)', () => {
   it('biz and its owner exist, Redis answers, and the plan-queue worker is running', async () => {
