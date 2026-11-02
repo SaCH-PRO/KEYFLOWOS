@@ -51,7 +51,7 @@
 import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
@@ -84,6 +84,10 @@ const executions: Array<{ proposalId: string; executedBy: unknown }> = [];
 const temporalEvents: Array<{ type: string; entityId: string; payload: any }> = [];
 /** Runs inside the autonomy evaluation, i.e. after execute's status check and before its EXECUTING write. */
 let onEvaluate: ((proposalId: string) => Promise<void>) | null = null;
+/** Runs inside the executor stand-in, i.e. after the claim and before the outcome is written. */
+let onExecute: ((proposalId: string) => Promise<void>) | null = null;
+/** What the executor stand-in answers. */
+let executorFails = false;
 
 async function cleanup() {
   for (const sql of [
@@ -127,6 +131,30 @@ async function race<T>(calls: Array<() => Promise<T>>) {
 
 async function settle<T>(p: Promise<T>): Promise<{ ok?: T; err?: any }> {
   try { return { ok: await p }; } catch (err) { return { err }; }
+}
+
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * A row lock on the proposal (SELECT ... FOR UPDATE), held by a separate
+ * transaction until release(): every write to the row queues behind it, in the
+ * order the writers arrive, so a test can line writes up deterministically.
+ */
+async function holdRowLock(proposalId: string) {
+  let release!: () => void;
+  const released = new Promise<void>((r) => { release = r; });
+  let locked!: () => void;
+  const isLocked = new Promise<void>((r) => { locked = r; });
+  const done = db.$transaction(
+    async (tx: any) => {
+      await tx.$queryRawUnsafe(`SELECT id FROM key_action_proposals WHERE id = $1 FOR UPDATE`, proposalId);
+      locked();
+      await released;
+    },
+    { timeout: 15_000, maxWait: 5_000 },
+  );
+  await isLocked;
+  return async () => { release(); await done; };
 }
 
 /** A CREATE_TASK proposal in biz, proposed by KEY. */
@@ -207,6 +235,8 @@ beforeAll(async () => {
     execute: async (_businessId: string, proposal: { id: string }, executedBy?: string) => {
       executions.push({ proposalId: proposal.id, executedBy });
       await new Promise((r) => setTimeout(r, EXECUTOR_DELAY_MS));
+      if (onExecute) await onExecute(proposal.id);
+      if (executorFails) return { success: false, error: 'v32a: the executor failed' };
       return { success: true, result: { ran: proposal.id } };
     },
   };
@@ -260,6 +290,8 @@ beforeEach(async () => {
   executions.length = 0;
   temporalEvents.length = 0;
   onEvaluate = null;
+  onExecute = null;
+  executorFails = false;
 });
 
 afterAll(async () => {
@@ -480,5 +512,171 @@ describe('approvals recorded without an authority snapshot (rows approved before
     const id = await legacyApproved(null);
 
     await expectApprovalLapsed(id, await settle(execute(id, ID.owner)));
+  });
+});
+
+/**
+ * Review repair SEC-V32-1. cancel() and reject() read the status and then
+ * wrote CANCELLED / REJECTED unconditionally, and the outcome writes
+ * (EXECUTED / FAILED) had no condition either: a cancel that read APPROVED
+ * before the claim and wrote after it replaced EXECUTING with CANCELLED,
+ * answered 200 and emitted key.action.cancelled, while the executor still ran
+ * and the row ended EXECUTED. Required: each of these writes is conditional
+ * on the status it was decided on (the one cancel/reject read, EXECUTING for
+ * the outcome); a cancel or rejection whose write finds the proposal moved on
+ * is refused 409 and emits nothing.
+ */
+describe('a cancel or a rejection cannot land on a proposal that has moved on, and an outcome is written only over the claim', () => {
+  it('a cancel that read APPROVED before the claim and writes after it: refused 409, the execution runs once and the proposal ends EXECUTED, and no cancelled event is emitted', async () => {
+    const id = await approvedBy(ID.admin);
+    const releaseLock = await holdRowLock(id);
+
+    const executing = settle(execute(id, ID.owner));
+    await pause(300); // the claim's write is queued on the lock
+    const cancelling = settle(proposals.cancel(ID.biz, id));
+    await pause(300); // cancel has read APPROVED and its write is queued behind the claim
+    await releaseLock();
+    const [executed, cancelled] = await Promise.all([executing, cancelling]);
+
+    expect(executed.err, String(executed.err)).toBeUndefined();
+    expect(executed.ok).toMatchObject({ id, status: 'EXECUTED' });
+    expectConflict(cancelled.err);
+    expect(ran(id)).toHaveLength(1);
+    expect(eventsFor(id, 'key.action.cancelled')).toHaveLength(0);
+    expect(eventsFor(id, 'key.action.executed')).toHaveLength(1);
+    expect((await row(id)).status).toBe('EXECUTED');
+  });
+
+  it('control: a cancel whose write lands before the claim stops the execution: the claim is refused 409 and nothing runs', async () => {
+    const id = await approvedBy(ID.admin);
+    const releaseLock = await holdRowLock(id);
+
+    const cancelling = settle(proposals.cancel(ID.biz, id));
+    await pause(300); // cancel's write is queued on the lock
+    const executing = settle(execute(id, ID.owner));
+    await pause(300); // the claim has read APPROVED and its write is queued behind the cancel
+    await releaseLock();
+    const [cancelled, executed] = await Promise.all([cancelling, executing]);
+
+    expect(cancelled.err, String(cancelled.err)).toBeUndefined();
+    expect(cancelled.ok).toMatchObject({ id, status: 'CANCELLED' });
+    expectConflict(executed.err);
+    expect(ran(id)).toHaveLength(0);
+    expect(eventsFor(id, 'key.action.executing')).toHaveLength(0);
+    expect(eventsFor(id, 'key.action.cancelled')).toHaveLength(1);
+    expect((await row(id)).status).toBe('CANCELLED');
+  });
+
+  it('a rejection that read PENDING before the proposal was approved again and executed: refused 409, the executed proposal is not overwritten, and no rejected event is emitted', async () => {
+    const id = await approvedBy(ID.admin);
+    await db.$executeRawUnsafe(`DELETE FROM memberships WHERE id = $1`, ID.mAdmin);
+    await expectApprovalLapsed(id, await settle(execute(id, ID.owner)));
+
+    // The rejection reads PENDING; before it writes, the owner approves the
+    // proposal again and it is executed.
+    const read = proposals.get.bind(proposals);
+    const spy = vi.spyOn(proposals, 'get').mockImplementationOnce(async (...args: unknown[]) => {
+      const seen = await read(...args);
+      await proposals.approve(ID.biz, id, ID.owner);
+      await execute(id, ID.owner);
+      return seen;
+    });
+    let rejected: { ok?: any; err?: any };
+    try {
+      rejected = await settle(proposals.reject(ID.biz, id, ID.owner, 'v32a: not now'));
+    } finally {
+      spy.mockRestore();
+    }
+
+    expectConflict(rejected.err);
+    expect(ran(id)).toHaveLength(1);
+    expect(eventsFor(id, 'key.action.rejected')).toHaveLength(0);
+    const after = await row(id);
+    expect(after.status).toBe('EXECUTED');
+    expect(after.execution_result).toEqual({ ran: id });
+  });
+
+  it('a cancel that read PENDING before the proposal was approved: refused 409, the proposal stays APPROVED', async () => {
+    const id = await propose();
+    const read = proposals.get.bind(proposals);
+    const spy = vi.spyOn(proposals, 'get').mockImplementationOnce(async (...args: unknown[]) => {
+      const seen = await read(...args);
+      await proposals.approve(ID.biz, id, ID.owner);
+      return seen;
+    });
+    let cancelled: { ok?: any; err?: any };
+    try {
+      cancelled = await settle(proposals.cancel(ID.biz, id));
+    } finally {
+      spy.mockRestore();
+    }
+
+    expectConflict(cancelled.err);
+    expect(eventsFor(id, 'key.action.cancelled')).toHaveLength(0);
+    expect((await row(id)).status).toBe('APPROVED');
+  });
+
+  it.each([
+    ['EXECUTED', false],
+    ['FAILED', true],
+  ])('the %s outcome is written only over the claim: a proposal moved out of EXECUTING while the executor ran keeps the status it was moved to', async (_outcome, fails) => {
+    const id = await approvedBy(ID.admin);
+    executorFails = fails;
+    onExecute = async (proposalId) => {
+      await db.$executeRawUnsafe(`UPDATE key_action_proposals SET status = 'CANCELLED' WHERE id = $1`, proposalId);
+    };
+
+    const outcome = await settle(execute(id, ID.owner));
+
+    expect(outcome.err, String(outcome.err)).toBeUndefined();
+    expect(ran(id)).toHaveLength(1);
+    const after = await row(id);
+    expect(after.status).toBe('CANCELLED');
+    expect(after.executed_at).toBeNull();
+    expect(after.execution_result).toBeNull();
+    expect(after.failure_reason).toBeNull();
+    // What execute answers is the proposal as it is stored, not an outcome
+    // that was not recorded on it.
+    expect(outcome.ok).toMatchObject({ id, status: 'CANCELLED' });
+  });
+});
+
+/**
+ * Review repairs SEC-V32-2 / CR-V132-1. The lapse write records a
+ * failureReason; neither the re-approval nor the EXECUTED write cleared it, so
+ * a proposal that lapsed, was approved again and then ran was stored and
+ * returned EXECUTED with the lapse message (and that reached the
+ * ACTION_EXECUTED audit after-state and the cortex executor's
+ * {success: true, error}). Required: an approval clears it, and so does the
+ * EXECUTED write (as the action boundary's EXECUTED write does).
+ */
+describe('a lapse reason does not outlive the approval that replaced it', () => {
+  it('a lapsed proposal approved again and executed: the re-approval and the executed proposal carry no failure reason, in the response or the row', async () => {
+    const id = await approvedBy(ID.admin);
+    await db.$executeRawUnsafe(`DELETE FROM memberships WHERE id = $1`, ID.mAdmin);
+    await expectApprovalLapsed(id, await settle(execute(id, ID.owner)));
+
+    const reapproved = await proposals.approve(ID.biz, id, ID.owner);
+    expect(reapproved).toMatchObject({ status: 'APPROVED', approvedBy: ID.owner });
+    expect(reapproved.failureReason).toBeNull();
+    expect((await row(id)).failure_reason).toBeNull();
+
+    const executed = await execute(id, ID.owner);
+
+    expect(executed).toMatchObject({ status: 'EXECUTED', approvedBy: ID.owner });
+    expect(executed.failureReason).toBeNull();
+    const after = await row(id);
+    expect(after.status).toBe('EXECUTED');
+    expect(after.failure_reason).toBeNull();
+  });
+
+  it('control: a failed execution still records its failure reason', async () => {
+    const id = await approvedBy(ID.admin);
+    executorFails = true;
+
+    const failed = await execute(id, ID.owner);
+
+    expect(failed).toMatchObject({ id, status: 'FAILED', failureReason: 'v32a: the executor failed' });
+    expect((await row(id)).failure_reason).toBe('v32a: the executor failed');
   });
 });

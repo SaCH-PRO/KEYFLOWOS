@@ -189,7 +189,8 @@ export class KeyActionProposalService {
       // execution can tell an approver who has since been removed or
       // downgraded. The write is conditional on PENDING: an unconditional one
       // could put an executing proposal back to APPROVED and let it be claimed
-      // a second time.
+      // a second time. It clears a failure reason left by an approval that
+      // lapsed: the approval it described has been replaced by this one.
       const now = new Date();
       const authority = approvedBy
         ? await this.readApproverAuthority(this.prisma.client, businessId, approvedBy)
@@ -209,6 +210,7 @@ export class KeyActionProposalService {
           status: 'APPROVED',
           approvedBy: approvedBy ?? null,
           approvedAt: now,
+          failureReason: null,
           resolution: recorded as unknown as Prisma.InputJsonValue,
         },
       });
@@ -247,18 +249,19 @@ export class KeyActionProposalService {
     }
 
     // For an adopted capability a rejection takes the action's execution
-    // claim, so it cannot land beside an execution of the same action.
+    // claim, so it cannot land beside an execution of the same action. For
+    // any other proposal the write is conditional on the status just read
+    // (V1-32, SEC-V32-1): a proposal approved again and claimed in between is
+    // not overwritten.
     const row = this.boundary.governs(existing)
       ? await this.boundary.voidAction(businessId, proposalId, 'REJECTED', rejectedBy ?? null, reason)
-      : await this.prisma.client.keyActionProposal.update({
-          where: { id: proposalId },
-          data: {
-            status: 'REJECTED',
-            rejectedBy: rejectedBy ?? null,
-            rejectedAt: new Date(),
-            rejectionReason: reason ?? null,
-          },
+      : await this.writeIfStatus(businessId, proposalId, existing.status, {
+          status: 'REJECTED',
+          rejectedBy: rejectedBy ?? null,
+          rejectedAt: new Date(),
+          rejectionReason: reason ?? null,
         });
+    if (!row) throw new ConflictException('This proposal is no longer pending approval');
 
     await this.emitLifecycleEvent(
       businessId,
@@ -286,12 +289,17 @@ export class KeyActionProposalService {
       throw new NotFoundException('Proposal cannot be cancelled');
     }
 
+    // Conditional on the status just read (V1-32, SEC-V32-1): a cancel that
+    // read APPROVED and lost the race to an execution's claim is refused, not
+    // recorded over a proposal that is executing.
     const row = this.boundary.governs(existing)
       ? await this.boundary.voidAction(businessId, proposalId, 'CANCELLED', null)
-      : await this.prisma.client.keyActionProposal.update({
-          where: { id: proposalId },
-          data: { status: 'CANCELLED' },
-        });
+      : await this.writeIfStatus(businessId, proposalId, existing.status, { status: 'CANCELLED' });
+    if (!row) {
+      throw new ConflictException(
+        `This proposal is no longer ${existing.status.toLowerCase()}; it is being executed or has been resolved`,
+      );
+    }
 
     await this.emitLifecycleEvent(
       businessId,
@@ -427,14 +435,14 @@ export class KeyActionProposalService {
     const outcome = await this.executor.execute(businessId, proposal, executedBy);
 
     if (outcome.success) {
-      const row = await this.prisma.client.keyActionProposal.update({
-        where: { id: proposalId },
-        data: {
-          status: 'EXECUTED',
-          executedBy: executedBy ?? null,
-          executedAt: new Date(),
-          executionResult: outcome.result as Prisma.InputJsonValue,
-        },
+      const { row, recorded } = await this.recordOutcome(businessId, proposalId, {
+        status: 'EXECUTED',
+        executedBy: executedBy ?? null,
+        executedAt: new Date(),
+        executionResult: outcome.result as Prisma.InputJsonValue,
+        // As the action boundary's EXECUTED write does: no failure reason
+        // survives a successful execution.
+        failureReason: null,
       });
 
       await this.emitLifecycleEvent(
@@ -443,20 +451,17 @@ export class KeyActionProposalService {
         proposal.actionType,
         'key.action.executed',
         'HIGH',
-        { executedBy, executionResult: outcome.result },
+        { executedBy, executionResult: outcome.result, ...(recorded ? {} : { outcomeRecorded: false }) },
       );
 
       return this.serialize(row);
     }
 
-    const row = await this.prisma.client.keyActionProposal.update({
-      where: { id: proposalId },
-      data: {
-        status: 'FAILED',
-        executedBy: executedBy ?? null,
-        executedAt: new Date(),
-        failureReason: outcome.error ?? 'Execution failed',
-      },
+    const { row, recorded } = await this.recordOutcome(businessId, proposalId, {
+      status: 'FAILED',
+      executedBy: executedBy ?? null,
+      executedAt: new Date(),
+      failureReason: outcome.error ?? 'Execution failed',
     });
 
     await this.emitLifecycleEvent(
@@ -465,10 +470,50 @@ export class KeyActionProposalService {
       proposal.actionType,
       'key.action.failed',
       'HIGH',
-      { executedBy, failureReason: outcome.error },
+      { executedBy, failureReason: outcome.error, ...(recorded ? {} : { outcomeRecorded: false }) },
     );
 
     return this.serialize(row);
+  }
+
+  /**
+   * V1-32 (SEC-V32-1): a write conditional on the status the caller decided
+   * on. The row it wrote, or null when the proposal had moved on.
+   */
+  private async writeIfStatus(
+    businessId: string,
+    proposalId: string,
+    status: string,
+    data: Prisma.KeyActionProposalUpdateManyMutationInput,
+  ) {
+    const { count } = await this.prisma.client.keyActionProposal.updateMany({
+      where: { id: proposalId, businessId, status },
+      data,
+    });
+    if (count !== 1) return null;
+    return this.prisma.client.keyActionProposal.findFirst({ where: { id: proposalId, businessId } });
+  }
+
+  /**
+   * V1-32 (SEC-V32-1): an execution's outcome, written only over its own claim
+   * (status EXECUTING). Nothing in this service moves a claimed proposal on;
+   * if something else has, the status it was moved to stands, and the outcome
+   * is reported by the lifecycle event and the log, not written over it.
+   */
+  private async recordOutcome(
+    businessId: string,
+    proposalId: string,
+    data: Prisma.KeyActionProposalUpdateManyMutationInput & { status: 'EXECUTED' | 'FAILED' },
+  ) {
+    const written = await this.writeIfStatus(businessId, proposalId, 'EXECUTING', data);
+    if (written) return { row: written, recorded: true };
+    const current = await this.prisma.client.keyActionProposal.findFirst({ where: { id: proposalId, businessId } });
+    if (!current) throw new NotFoundException('Action proposal not found');
+    this.logger.error(
+      `[execute] proposal ${proposalId} was moved from EXECUTING to ${current.status} while it ran; ` +
+        `its ${data.status} outcome was not written over that`,
+    );
+    return { row: current, recorded: false };
   }
 
   /**
