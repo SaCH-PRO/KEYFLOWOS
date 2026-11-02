@@ -163,10 +163,13 @@ export class CommerceIntegrationService {
    * true only once StoreOrderService.completeCheckout has committed the
    * invoice, the SUCCESSFUL payment and its posting and set the order PAID;
    * that emission carries `invoiceId`. The stored order is read, not the
-   * payload: a paid event for an order of another business, or for a
+   * payload: a paid event for an order of another business, for a
    * storefront order that is not PAID (what CONFIRMED emitted before V1-18,
-   * a queued copy of it, or a forged one), writes nothing, so no invoice, no
-   * 'paid' tag and no "payment received" notification follow from it.
+   * a queued copy of it, or a forged one), or for a storefront order set
+   * PAID without completeCheckout's invoice (the marketplace fulfillOrder
+   * 'mark_paid' and PATCH .../status 'paid' routes, which record no invoice
+   * and no payment) writes nothing, so no invoice, no 'paid' tag, no paid
+   * timeline event and no "payment received" notification follow from it.
    */
   @OnEvent('store_order.paid')
   async handleOrderPaid(payload: StoreOrderPaidPayload & { invoiceId?: string | null }) {
@@ -176,17 +179,35 @@ export class CommerceIntegrationService {
 
       const stored = await this.prisma.client.marketplaceOrder.findFirst({
         where: { id: order.id, businessId: payload.businessId },
-        select: { type: true, paymentStatus: true },
+        select: { type: true, paymentStatus: true, orderNumber: true },
       });
       if (!stored) {
         this.logger.warn(`[CommerceIntegration] store_order.paid names order ${order.id}, not found in business ${payload.businessId}; ignored`);
         return;
       }
-      if (stored.type === STOREFRONT_ORDER_TYPE && stored.paymentStatus !== 'PAID') {
-        this.logger.warn(
-          `[CommerceIntegration] store_order.paid for storefront order ${order.id} whose payment status is ${stored.paymentStatus}; ignored (only completeCheckout settles a storefront order)`,
-        );
-        return;
+      if (stored.type === STOREFRONT_ORDER_TYPE) {
+        if (stored.paymentStatus !== 'PAID') {
+          this.logger.warn(
+            `[CommerceIntegration] store_order.paid for storefront order ${order.id} whose payment status is ${stored.paymentStatus}; ignored (only completeCheckout settles a storefront order)`,
+          );
+          return;
+        }
+        // Settled means completeCheckout's invoice for THIS order exists in
+        // this business (and is the one the event names, when it names one).
+        const settled = await this.prisma.client.invoice.findFirst({
+          where: {
+            businessId: payload.businessId,
+            invoiceNumber: `INV-${stored.orderNumber}`,
+            ...(payload.invoiceId ? { id: payload.invoiceId } : {}),
+          },
+          select: { id: true },
+        });
+        if (!settled) {
+          this.logger.warn(
+            `[CommerceIntegration] store_order.paid for storefront order ${order.id} with no completeCheckout invoice INV-${stored.orderNumber}${payload.invoiceId ? ` matching ${payload.invoiceId}` : ''}; ignored (set PAID outside completeCheckout: no invoice, no payment recorded)`,
+          );
+          return;
+        }
       }
 
       await this.createRevenueRecord(payload.businessId, order, stored.type, payload.invoiceId ?? null);
@@ -246,7 +267,8 @@ export class CommerceIntegrationService {
    *      business and write nothing, whether or not it is found.
    *   2. A storefront order is invoiced only by completeCheckout, in one
    *      transaction with its payment and posting: a paid event without an
-   *      invoiceId (the legacy shape, a replay) writes nothing.
+   *      invoiceId (the legacy shape, a replay) writes nothing. (handleOrderPaid
+   *      has already ignored a storefront order without that invoice.)
    *   3. Any other order with an invoice already (INV-<orderNumber>,
    *      INV-ORD-<orderNumber> or the notes marker): nothing.
    *   4. Otherwise (a marketplace order marked paid) the legacy record below.
@@ -793,11 +815,14 @@ export class CommerceIntegrationService {
     const linkedProjectId = orderLinks.projectId ?? null;
 
     const [invoices, expenses, contact, project] = await Promise.all([
+      // The order's revenue: the legacy listener invoice carries the notes
+      // marker; completeCheckout's invoice (a storefront order's only one
+      // since V1-18) is INV-<orderNumber> with no marker.
       this.prisma.client.invoice.findMany({
         where: {
           businessId,
           deletedAt: null,
-          notes: { contains: `order:${orderId}` },
+          OR: [{ notes: { contains: `order:${orderId}` } }, { invoiceNumber: `INV-${order.orderNumber}` }],
         },
         select: { id: true, invoiceNumber: true, total: true, currency: true, status: true, paidAt: true },
       }),

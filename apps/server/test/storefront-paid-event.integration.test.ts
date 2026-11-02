@@ -43,6 +43,30 @@
  *           emits `store_order.confirmed` and leaves one invoice, one payment
  *           and one posting
  *
+ * Review repairs (SEC-V18-1, SEC-V18-2 / CR-V18-2, CR-V18-1):
+ *
+ *   V18-07  a paid event that names another business (B) for an order of
+ *           business A writes nothing into B: no invoice, no "payment
+ *           received" notification, no paid timeline event, for a STANDARD
+ *           (marketplace) PAID order and for a checked-out storefront order.
+ *           Control: the same STANDARD event in A is acted on. At the base B
+ *           got an invoice, a notification and a timeline event; red when the
+ *           listener's stored-order read loses its businessId
+ *   V18-08  a storefront order set PAID outside completeCheckout (what the
+ *           marketplace fulfillOrder 'mark_paid' and PATCH .../status
+ *           {status:'paid'} do) has no invoice and no payment: its paid event
+ *           writes no invoice and tells nobody it was paid (no notification,
+ *           no paid timeline event), also when the event names another order's
+ *           checkout invoice. The marketplace routes themselves are outside
+ *           this packet (it.todo below)
+ *   V18-09  the order cross-links reader finds completeCheckout's invoice
+ *           (INV-<orderNumber>, no notes marker) as the order's revenue
+ *
+ * Outside the V1-18 write set (it.todo, follow-up packets): the marketplace
+ * routes that set a storefront order PAID without completeCheckout, the
+ * store_order.paid listeners that do not read the stored payment status, and
+ * CASH / MANUAL storefront completion (V1-33).
+ *
  * Nothing on the money path is mocked: PrismaService, StoreOrderService
  * (createOrder's server-side pricing, completeCheckout's transaction),
  * InvoiceWorkflowService, RevenueAttributionService, RevenuePostingService,
@@ -75,6 +99,9 @@ const ID = {
   biz: `${P}biz`,
   contact: `${P}contact`,
   product: `${P}product`,
+  /** A second tenant whose contact has the same email (SEC-V18-1). */
+  bizB: `${P}biz_b`,
+  contactB: `${P}contact_b`,
 };
 const CUSTOMER_EMAIL = `${P}customer@test.local`;
 const UNIT_PRICE = 40;
@@ -93,7 +120,7 @@ let seen: Array<{ name: string; payload: any }> = [];
 /** Listener work started by an emit, awaited by settle(). */
 const inflight: Promise<unknown>[] = [];
 /** Contact timeline events the listener asked CrmService to log. */
-const contactEvents: Array<{ type: string; orderId?: string }> = [];
+const contactEvents: Array<{ businessId: string; type: string; orderId?: string }> = [];
 
 async function settle() {
   while (inflight.length > 0) {
@@ -241,8 +268,8 @@ beforeAll(async () => {
       input?.email
         ? db.contact.findFirst({ where: { businessId, emailNormalized: input.email.toLowerCase() }, select: { id: true } })
         : null,
-    logContactEvent: async (input: { type: string; data?: { orderId?: string } }) => {
-      contactEvents.push({ type: input.type, orderId: input.data?.orderId });
+    logContactEvent: async (input: { businessId: string; type: string; data?: { orderId?: string } }) => {
+      contactEvents.push({ businessId: input.businessId, type: input.type, orderId: input.data?.orderId });
       return null;
     },
   };
@@ -305,7 +332,26 @@ beforeAll(async () => {
   await db.product.create({
     data: { id: ID.product, businessId: ID.biz, name: 'V18A Widget', price: UNIT_PRICE, currency: 'TTD', category: 'PRODUCT', isActive: true },
   });
+
+  await db.business.create({ data: { id: ID.bizB, name: 'V18A Other Tenant', ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' } });
+  await db.membership.create({ data: { id: `${ID.owner}_mb`, userId: ID.owner, businessId: ID.bizB, role: 'OWNER' } });
+  await db.contact.create({
+    data: { id: ID.contactB, businessId: ID.bizB, firstName: 'Vee', lastName: 'Eighteen', email: CUSTOMER_EMAIL, emailNormalized: CUSTOMER_EMAIL },
+  });
 }, 60_000);
+
+/** What one business holds about an order: its invoices, its "payment received" notifications and its paid timeline events. */
+async function paidTraces(businessId: string, orderId: string) {
+  const [invoices, notifications] = await Promise.all([
+    db.invoice.findMany({ where: { businessId }, select: { invoiceNumber: true, notes: true } }),
+    db.notification.findMany({ where: { businessId, type: 'store_order.paid' }, select: { data: true } }),
+  ]);
+  return {
+    invoices: invoices.length,
+    notifications: notifications.filter((n: any) => n.data?.orderId === orderId).length,
+    timeline: contactEvents.filter((e) => e.businessId === businessId && e.orderId === orderId && e.type === 'store_order.paid').length,
+  };
+}
 
 afterAll(async () => {
   await settle();
@@ -348,6 +394,11 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     expect(storeEvents()).toEqual(['store_order.paid']);
     const { invoice } = await expectOnePaidInvoice(order);
     expect(seen[0].payload.invoiceId).toBe(invoice.id);
+    // Control for V18-05/07/08: the settled order's paid event is acted on.
+    expect(await paidTraces(ID.biz, order.id), 'one "payment received" notification and one paid timeline event').toMatchObject({
+      notifications: 1,
+      timeline: 1,
+    });
   });
 
   it('V18-03 the paid event replayed with its invoiceId creates no second invoice, payment or posting', async () => {
@@ -412,4 +463,105 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     await expectOnePaidInvoice(order);
     expect(await counts()).toEqual(before);
   });
+
+  it('V18-07 a paid event naming another business writes nothing into it (STANDARD and storefront orders of A)', async () => {
+    // A STANDARD (marketplace) order of A, already PAID: the listener's legacy
+    // invoice path would write into whichever business the payload names.
+    const standard = await db.marketplaceOrder.create({
+      data: {
+        businessId: ID.biz,
+        orderNumber: `${P}std_07`,
+        type: 'STANDARD',
+        status: 'paid',
+        paymentStatus: 'PAID',
+        customerName: 'Vee Eighteen',
+        customerEmail: CUSTOMER_EMAIL,
+        subtotal: ORDER_TOTAL,
+        total: ORDER_TOTAL,
+        currency: 'TTD',
+        items: { create: [{ productId: ID.product, name: 'V18A Widget', quantity: QUANTITY, unitPrice: UNIT_PRICE, total: ORDER_TOTAL }] },
+      },
+      include: { items: true },
+    });
+    const storefront = await placeOrder();
+    seen = [];
+    await storeOrders.completeCheckout({ orderId: storefront.id, paymentRef: `${P}ref_07`, provider: 'stripe', method: 'card' });
+    await settle();
+    const [paidEvent] = seen.filter((e) => e.name === 'store_order.paid');
+    expect(paidEvent?.payload?.invoiceId).toBeTruthy();
+    const beforeA = await counts();
+    const beforeB = await paidTraces(ID.bizB, standard.id);
+    expect(beforeB).toEqual({ invoices: 0, notifications: 0, timeline: 0 });
+
+    await events.emitAsync('store_order.paid', { order: standard, businessId: ID.bizB });
+    await events.emitAsync('store_order.paid', { ...paidEvent.payload, businessId: ID.bizB });
+    await events.emitAsync('store_order.paid', { order: paidEvent.payload.order, businessId: ID.bizB });
+    await settle();
+
+    expect(await paidTraces(ID.bizB, standard.id), 'B: nothing for A\'s STANDARD order').toEqual({ invoices: 0, notifications: 0, timeline: 0 });
+    expect(await paidTraces(ID.bizB, storefront.id), 'B: nothing for A\'s storefront order').toEqual({ invoices: 0, notifications: 0, timeline: 0 });
+    expect(await counts(), 'A: nothing written either').toEqual(beforeA);
+    await expectOnePaidInvoice(storefront);
+
+    // Control: the same STANDARD event in its own business is acted on, so the
+    // refusal above is the tenant check and not a dead listener.
+    await events.emitAsync('store_order.paid', { order: standard, businessId: ID.biz });
+    await settle();
+    expect((await paidTraces(ID.biz, standard.id)).notifications, 'A is told about its own order').toBe(1);
+  });
+
+  it('V18-08 a storefront order set PAID outside completeCheckout: no invoice, and nobody is told it was paid', async () => {
+    const order = await placeOrder();
+    // What MarketplaceService.fulfillOrder('mark_paid') and PATCH .../orders/:id/status
+    // {status:'paid', paymentStatus:'PAID'} write: PAID, with no invoice and no payment.
+    const markedPaid = await db.marketplaceOrder.update({
+      where: { id: order.id },
+      data: { status: 'paid', paymentStatus: 'PAID' },
+      include: { items: true },
+    });
+    const other = await placeOrder();
+    seen = [];
+    await storeOrders.completeCheckout({ orderId: other.id, paymentRef: `${P}ref_08`, provider: 'stripe', method: 'card' });
+    await settle();
+    const [otherPaid] = seen.filter((e) => e.name === 'store_order.paid');
+    expect(otherPaid?.payload?.invoiceId).toBeTruthy();
+    const before = await counts();
+
+    // The marketplace emission (no invoiceId), and one naming another order's checkout invoice.
+    await events.emitAsync('store_order.paid', { order: markedPaid, businessId: ID.biz });
+    await events.emitAsync('store_order.paid', { order: markedPaid, businessId: ID.biz, invoiceId: otherPaid.payload.invoiceId });
+    await settle();
+
+    expect(await invoicesOf(order), 'no invoice for an order no payment settled').toEqual([]);
+    expect(await counts(), 'no invoice, payment or FinancialTransaction written').toEqual(before);
+    const traces = await paidTraces(ID.biz, order.id);
+    expect(traces.notifications, 'no "payment received" notification').toBe(0);
+    expect(traces.timeline, 'no paid timeline event').toBe(0);
+    await expectOnePaidInvoice(other);
+  });
+
+  it('V18-09 the order cross-links reader reports completeCheckout\'s invoice as the order\'s revenue', async () => {
+    const { CommerceIntegrationService } = await import('../src/modules/marketplace/commerce-integration.service');
+    const order = await placeOrder();
+    await storeOrders.completeCheckout({ orderId: order.id, paymentRef: `${P}ref_09`, provider: 'stripe', method: 'card' });
+    await settle();
+    const { invoice } = await expectOnePaidInvoice(order);
+
+    const links = await app.get(CommerceIntegrationService).getOrderCrossLinks(ID.biz, order.id);
+
+    expect(links.revenue.map((i: any) => `${i.invoiceNumber}:${i.status}:${Number(i.total)}`)).toEqual([`INV-${order.orderNumber}:PAID:${ORDER_TOTAL}`]);
+    expect(links.revenue[0].id).toBe(invoice.id);
+    expect(links.order.total).toBe(ORDER_TOTAL);
+    expect(links.margin).toBe(ORDER_TOTAL);
+  });
+
+  it.todo(
+    'V18-T1 MarketplaceService.fulfillOrder(mark_paid) and PATCH /marketplace/businesses/:id/orders/:orderId/status {status:"paid"} on a STOREFRONT order bypass completeCheckout (PAID with no invoice or payment; completeCheckout then no-ops): route through completeCheckout or refuse. marketplace.service.ts is outside the V1-18 write set (SEC-V18-2, SEC-V18-3)',
+  );
+  it.todo(
+    'V18-T2 store_order.paid listeners that do not read the stored paymentStatus (webhook-dispatcher.service.ts, revenue-event.listener.ts, store-order-routing.listener.ts) act on the marketplace emission for an UNPAID storefront order. Outside the V1-18 write set (SEC-V18-3)',
+  );
+  it.todo(
+    'V18-T3 CASH / MANUAL storefront orders (paymentStatus PENDING, no provider payment) have no reachable path to PAID now that CONFIRMED is not paid: offline completion through completeCheckout is V1-33 (CR-V18-3)',
+  );
 });
