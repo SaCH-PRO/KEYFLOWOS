@@ -41,6 +41,10 @@ class PrismaMock {
     self.storeEnabled = opts.storeEnabled ?? true;
 
     self.client = {
+      // V1-16: every booking write claims its slot in a transaction under an
+      // advisory lock. This stand-in runs the claim against itself.
+      $transaction: vi.fn((fn: (tx: any) => unknown) => fn(self.client)),
+      $executeRaw: vi.fn(() => 1),
       booking: {
         findMany: vi.fn(({ where }: any) =>
           self.bookings.filter((b) => b.businessId === where.businessId && b.deletedAt === null),

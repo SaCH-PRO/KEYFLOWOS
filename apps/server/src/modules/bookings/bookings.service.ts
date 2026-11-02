@@ -66,11 +66,111 @@ type BookingWithRelations = Prisma.BookingGetPayload<{
   include: { contact: true; service: true };
 }>;
 
+type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
+
+/** A booking's claim on a calendar: what assertSlotFree compares and claimSlot locks. */
+type SlotParams = {
+  businessId: string;
+  serviceId: string;
+  staffId?: string | null;
+  start: Date;
+  end: Date;
+  bufferMins?: number | null;
+  excludeBookingId?: string;
+};
+
+/**
+ * V1-16 (M41): the slot claim's advisory lock. One transaction-scoped lock per
+ * business and resource (the staff member, else the service: exactly what
+ * assertSlotFree compares), so claims on one calendar commit one after another
+ * and claims on different calendars do not wait for each other. Transaction
+ * scoped because the pooler runs in transaction mode: Postgres releases it at
+ * commit or rollback, on whichever connection the transaction had.
+ */
+const SLOT_LOCK_NAMESPACE = 'booking-slot:';
+const SLOT_CLAIM_TX_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
+
+/** An instant as a wall clock reads it: calendar day, weekday (0 = Sunday), minutes past midnight. */
+interface WallClock {
+  year: number;
+  month: number;
+  day: number;
+  weekday: number;
+  minutes: number;
+}
+
+const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const wallClockFormats = new Map<string, Intl.DateTimeFormat>();
+
+/** Throws RangeError for a zone this runtime does not know. */
+function wallClockFormat(timeZone: string): Intl.DateTimeFormat {
+  let format = wallClockFormats.get(timeZone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      weekday: 'short',
+      year: 'numeric',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+    });
+    wallClockFormats.set(timeZone, format);
+  }
+  return format;
+}
+
+/**
+ * V1-16 (CF-44): `instant` on the business's clock. Opening hours and staff
+ * hours are wall-clock times in Business.timezone; they were read with
+ * getHours/getDay, the SERVER's clock, which in production (TZ unset) is UTC,
+ * so a UTC-4 business's 13:00-17:00 was refused. No zone means the server's,
+ * as before, through the same Date getters.
+ */
+function wallClock(instant: Date, timeZone: string | undefined): WallClock {
+  if (!timeZone) {
+    return {
+      year: instant.getFullYear(),
+      month: instant.getMonth() + 1,
+      day: instant.getDate(),
+      weekday: instant.getDay(),
+      minutes: instant.getHours() * 60 + instant.getMinutes(),
+    };
+  }
+  const parts: Record<string, string> = {};
+  for (const part of wallClockFormat(timeZone).formatToParts(instant)) parts[part.type] = part.value;
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    weekday: WEEKDAY_NAMES.indexOf(parts.weekday),
+    minutes: (Number(parts.hour) % 24) * 60 + Number(parts.minute),
+  };
+}
+
+/**
+ * The instant at which the business's clock reads `minutes` past midnight on
+ * year-month-day: the UTC reading shifted by the zone's offset, taken twice so
+ * a day that changes offset (DST) lands on the offset in force at that time.
+ */
+function zonedInstant(year: number, month: number, day: number, minutes: number, timeZone: string | undefined): Date {
+  if (!timeZone) return new Date(year, month - 1, day, 0, minutes);
+  const asUtc = Date.UTC(year, month - 1, day, 0, minutes);
+  const offsetAt = (ms: number) => {
+    const clock = wallClock(new Date(ms), timeZone);
+    return Date.UTC(clock.year, clock.month - 1, clock.day, 0, clock.minutes) - (ms - (ms % 60_000));
+  };
+  const first = asUtc - offsetAt(asUtc);
+  return new Date(asUtc - offsetAt(first));
+}
+
 @Injectable()
 export class BookingsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BookingsService.name);
   private reminderInterval: ReturnType<typeof setInterval> | null = null;
   private emailWarnedBusinesses = new Set<string>();
+  private warnedZones = new Set<string>();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -553,7 +653,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * agree until they do not.
    *
    * Lead time, business hours and staff working hours are applied the same way
-   * the validator applies them.
+   * the validator applies them, on the same clock: Business.timezone (V1-16).
    */
   async getAvailableSlots(params: {
     businessId: string;
@@ -571,10 +671,24 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     });
     if (!service) throw new NotFoundException('Service not found');
 
-    const dayStart = new Date(params.date);
-    dayStart.setHours(0, 0, 0, 0);
+    // V1-16: the route hands over the day asked for as a server-local midnight,
+    // so its calendar date is read back on the server's clock; from there on,
+    // the weekday, the hours and every slot are the business's own clock
+    // (Business.timezone). The day was a server-local midnight moved with
+    // setHours, which shifted the hours by the server's offset and, east of
+    // UTC, reported the previous day.
+    const year = params.date.getFullYear();
+    const month = params.date.getMonth() + 1;
+    const dayOfMonth = params.date.getDate();
+    const date = `${year}-${String(month).padStart(2, '0')}-${String(dayOfMonth).padStart(2, '0')}`;
+    const weekday = new Date(Date.UTC(year, month - 1, dayOfMonth)).getUTCDay();
     const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const dayKey = dayKeys[dayStart.getDay()];
+    const dayKey = dayKeys[weekday];
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { businessHours: true, timezone: true },
+    });
+    const zone = this.businessZone(business?.timezone);
 
     // Staff working hours win over business hours when the staff member has
     // any configured, exactly as the booking validator decides it.
@@ -585,26 +699,22 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       });
       if (availability.length > 0) {
         windows = availability
-          .filter((a) => a.dayOfWeek === dayStart.getDay())
+          .filter((a) => a.dayOfWeek === weekday)
           .map((a) => {
             const [sh, sm] = a.startTime.split(':').map(Number);
             const [eh, em] = a.endTime.split(':').map(Number);
             return { openMin: sh * 60 + sm, closeMin: eh * 60 + em };
           });
         // Configured, but not for this day: the staff member does not work today.
-        if (windows.length === 0) return { date: dayStart.toISOString().slice(0, 10), slots: [] };
+        if (windows.length === 0) return { date, slots: [] };
       }
     }
 
     if (windows.length === 0) {
-      const business = await this.prisma.client.business.findUnique({
-        where: { id: businessId },
-        select: { businessHours: true },
-      });
       const hours = business?.businessHours as BusinessHoursMap | null;
       const dayHours = hours?.[dayKey];
       if (!dayHours || dayHours.closed || !dayHours.open || !dayHours.close) {
-        return { date: dayStart.toISOString().slice(0, 10), slots: [] };
+        return { date, slots: [] };
       }
       const [oh, om] = dayHours.open.split(':').map(Number);
       const [ch, cm] = dayHours.close.split(':').map(Number);
@@ -618,8 +728,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const slots: string[] = [];
     for (const w of windows) {
       for (let m = w.openMin; m + service.duration <= w.closeMin; m += interval) {
-        const start = new Date(dayStart);
-        start.setMinutes(m);
+        const start = zonedInstant(year, month, dayOfMonth, m, zone);
+        // A time the clocks skip that day (DST) is not a time anyone can book.
+        if (wallClock(start, zone).minutes !== m) continue;
         const end = new Date(start.getTime() + service.duration * 60000);
         if (start < earliest) continue;
 
@@ -641,22 +752,18 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    return { date: dayStart.toISOString().slice(0, 10), slots };
+    return { date, slots };
   }
 
-  private async assertSlotFree(params: {
-    businessId: string;
-    serviceId: string;
-    staffId?: string | null;
-    start: Date;
-    end: Date;
-    bufferMins?: number | null;
-    excludeBookingId?: string;
-  }): Promise<void> {
+  /**
+   * `db` is the claim's transaction when called from claimSlot (V1-16), so the
+   * re-read sees every booking committed before the lock was granted.
+   */
+  private async assertSlotFree(params: SlotParams, db: Pick<PrismaTx, 'booking'> = this.prisma.client): Promise<void> {
     const bufferMins = params.bufferMins ?? 0;
     const bufferMs = bufferMins * 60000;
 
-    const clash = await this.prisma.client.booking.findFirst({
+    const clash = await db.booking.findFirst({
       where: {
         businessId: params.businessId,
         status: { notIn: ['CANCELLED', 'NO_SHOW'] },
@@ -677,6 +784,67 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           ? `This time slot is unavailable due to a ${bufferMins}-minute buffer between appointments.`
           : 'That time slot has already been booked. Please choose another.',
       );
+    }
+  }
+
+  /**
+   * V1-16 (M41): the write half of assertSlotFree, and the race it left open.
+   *
+   * Every path read the slot with assertSlotFree and wrote it several awaits
+   * later, so concurrent requests all passed the read before any of them
+   * wrote: ten simultaneous public requests for one slot wrote seven bookings
+   * (booking-concurrency.integration.test.ts, at the V1-06 head). The callers
+   * keep their early read, which refuses a taken slot before contacts,
+   * invoices or events are touched; the write goes through here, which takes
+   * the calendar's advisory lock, reads again with the same guard inside the
+   * transaction and writes, so the second of two claims sees the first. No
+   * migration and no constraint: the table already holds overlapping rows.
+   */
+  private claimSlot<T>(slot: SlotParams, write: (tx: PrismaTx) => Promise<T>): Promise<T> {
+    const key = `${SLOT_LOCK_NAMESPACE}${slot.businessId}:${slot.staffId || slot.serviceId}`;
+    return this.prisma.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+      await this.assertSlotFree(slot, tx);
+      return write(tx);
+    }, SLOT_CLAIM_TX_OPTIONS);
+  }
+
+  /**
+   * The zone a business keeps its hours in (V1-16). Business.timezone is an
+   * IANA name with a default; a value this runtime cannot read is reported
+   * once and the server's zone is used, as it was for every business before.
+   */
+  private businessZone(timezone: string | null | undefined): string | undefined {
+    if (!timezone) return undefined;
+    try {
+      wallClockFormat(timezone);
+      return timezone;
+    } catch {
+      if (!this.warnedZones.has(timezone)) {
+        this.warnedZones.add(timezone);
+        this.logger.warn(`Unknown business timezone "${timezone}"; reading business hours in the server's zone.`);
+      }
+      return undefined;
+    }
+  }
+
+  /**
+   * Invoices drawn up for a public booking whose write then failed, most often
+   * because a concurrent claim took the slot (V1-16): DRAFTs nobody was sent,
+   * for a booking that does not exist. Soft-deleted so they do not stand as
+   * debts in the business's list. Best effort: the caller is already failing
+   * with the reason that matters.
+   */
+  private async withdrawDraftInvoices(businessId: string, ids: Array<string | undefined>): Promise<void> {
+    const drawn = ids.filter((id): id is string => !!id);
+    if (drawn.length === 0) return;
+    try {
+      await this.prisma.client.invoice.updateMany({
+        where: { id: { in: drawn }, businessId, status: 'DRAFT', deletedAt: null },
+        data: { deletedAt: new Date() },
+      });
+    } catch (e) {
+      this.logger.error(`Could not withdraw invoices ${drawn.join(', ')} of an unwritten booking: ${(e as Error).message}`);
     }
   }
 
@@ -737,8 +905,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * length, so a booking that runs past midnight (in-app, the client chooses
    * the end) is outside every day's hours rather than judged by the end's time
    * of day alone. A day row without open/close times sets no hours, as in
-   * rescheduleBooking. Server-local time, as everywhere in this service
-   * (timezone is V1-16).
+   * rescheduleBooking. Read on the business's clock, `timeZone` (V1-16): it
+   * was the server's, which put a UTC-4 business's afternoon outside its hours.
    */
   private async assertWithinSchedule(params: {
     businessId: string;
@@ -747,9 +915,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     start: Date;
     end: Date;
     bufferMins?: number | null;
+    timeZone?: string;
   }): Promise<void> {
     const { start, end } = params;
-    const startMinsOfDay = start.getHours() * 60 + start.getMinutes();
+    const startClock = wallClock(start, params.timeZone);
+    const startMinsOfDay = startClock.minutes;
     const durationMins = Math.round((end.getTime() - start.getTime()) / 60000);
     if (params.staffId) {
       const staffAvailabilities = await this.prisma.client.availability.findMany({
@@ -759,7 +929,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         },
       });
       if (staffAvailabilities.length > 0) {
-        const dayOfWeek = start.getDay();
+        const dayOfWeek = startClock.weekday;
         const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
         if (slotAvail.length === 0) {
           throw new BadRequestException('The selected staff member is not available on this day.');
@@ -781,7 +951,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const hours = params.hours;
     if (!hours) return;
     const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const dayHours = hours[dayKeys[start.getDay()]];
+    const dayHours = hours[dayKeys[startClock.weekday]];
     if (dayHours?.closed) {
       throw new BadRequestException('This business is closed on the selected day.');
     }
@@ -831,7 +1001,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    await this.assertSlotFree({
+    const slot: SlotParams = {
       businessId,
       serviceId: booking.serviceId,
       staffId: booking.staffId,
@@ -839,7 +1009,17 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       end,
       bufferMins: service?.bufferMins,
       excludeBookingId: booking.id,
+    };
+    await this.assertSlotFree(slot);
+
+    // Hours and weekdays on the business's clock, as the create paths read them (V1-16).
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { businessHours: true, timezone: true },
     });
+    const zone = this.businessZone(business?.timezone);
+    const startClock = wallClock(start, zone);
+    const endClock = wallClock(end, zone);
 
     let hasStaffSchedule = false;
     if (booking.staffId) {
@@ -851,13 +1031,13 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       });
       if (staffAvailabilities.length > 0) {
         hasStaffSchedule = true;
-        const dayOfWeek = start.getDay();
+        const dayOfWeek = startClock.weekday;
         const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
         if (slotAvail.length === 0) {
           throw new BadRequestException('The selected staff member is not available on this day.');
         }
-        const startMinsOfDay = start.getHours() * 60 + start.getMinutes();
-        const endMinsOfDay = (end.getHours() * 60 + end.getMinutes()) || 1440;
+        const startMinsOfDay = startClock.minutes;
+        const endMinsOfDay = endClock.minutes || 1440;
         const withinAny = slotAvail.some((a) => {
           const [sh, sm] = a.startTime.split(':').map(Number);
           const [eh, em] = a.endTime.split(':').map(Number);
@@ -869,15 +1049,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { businessHours: true },
-    });
     if (!hasStaffSchedule) {
       const hours = business?.businessHours as BusinessHoursMap | null;
       if (hours) {
         const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-        const dayKey = dayKeys[start.getDay()];
+        const dayKey = dayKeys[startClock.weekday];
         const dayHours = hours[dayKey];
         if (dayHours?.closed) {
           throw new BadRequestException('The business is closed on this day.');
@@ -887,8 +1063,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           const [ch, cm] = dayHours.close.split(':').map(Number);
           const openMin = oh * 60 + om;
           const closeMin = ch * 60 + cm;
-          const bookingStartMin = start.getHours() * 60 + start.getMinutes();
-          const bookingEndMin = (end.getHours() * 60 + end.getMinutes()) || 1440;
+          const bookingStartMin = startClock.minutes;
+          const bookingEndMin = endClock.minutes || 1440;
           if (bookingStartMin < openMin || bookingEndMin > closeMin) {
             throw new BadRequestException(
               `The selected time is outside business hours (${dayHours.open} – ${dayHours.close}).`,
@@ -898,15 +1074,17 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const updated = await this.prisma.client.booking.update({
-      where: { id: bookingId },
-      data: { startTime: start, endTime: end },
-      include: {
-        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-        service: { select: { id: true, name: true, duration: true, price: true } },
-        staff: { select: { id: true, name: true } },
-      },
-    });
+    const updated = await this.claimSlot(slot, (tx) =>
+      tx.booking.update({
+        where: { id: bookingId },
+        data: { startTime: start, endTime: end },
+        include: {
+          contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+          service: { select: { id: true, name: true, duration: true, price: true } },
+          staff: { select: { id: true, name: true } },
+        },
+      }),
+    );
 
     if (booking.contactId) {
       const payload: BookingRescheduledPayload = {
@@ -1015,17 +1193,18 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
 
     // The public path's rules, in its order and with its messages.
     this.assertLeadTime(bookedService.leadTimeMins, input.startTime);
-    await this.assertSlotFree({
+    const slot: SlotParams = {
       businessId: input.businessId,
       serviceId: input.serviceId,
       staffId: input.staffId,
       start: input.startTime,
       end: input.endTime,
       bufferMins: bookedService.bufferMins,
-    });
+    };
+    await this.assertSlotFree(slot);
     const business = await this.prisma.client.business.findUnique({
       where: { id: input.businessId },
-      select: { businessHours: true },
+      select: { businessHours: true, timezone: true },
     });
     await this.assertWithinSchedule({
       businessId: input.businessId,
@@ -1034,6 +1213,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       start: input.startTime,
       end: input.endTime,
       bufferMins: bookedService.bufferMins,
+      timeZone: this.businessZone(business?.timezone),
     });
 
     const createData: Prisma.BookingUncheckedCreateInput = {
@@ -1052,10 +1232,12 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
     if (input.orgUnitId) createData.orgUnitId = input.orgUnitId;
 
-    const booking = await this.prisma.client.booking.create({
-      data: createData,
-      include: { contact: true },
-    });
+    const booking = await this.claimSlot(slot, (tx) =>
+      tx.booking.create({
+        data: createData,
+        include: { contact: true },
+      }),
+    );
 
     const bookingWithContact = booking as typeof booking & { contact?: { id: string; firstName: string; lastName: string; email: string | null } };
 
@@ -1159,14 +1341,15 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
 
     this.assertLeadTime(service.leadTimeMins, start);
 
-    await this.assertSlotFree({
+    const slot: SlotParams = {
       businessId: input.businessId,
       serviceId: service.id,
       staffId: input.staffId,
       start,
       end,
       bufferMins: service.bufferMins,
-    });
+    };
+    await this.assertSlotFree(slot);
 
     await this.assertWithinSchedule({
       businessId: input.businessId,
@@ -1175,6 +1358,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       start,
       end,
       bufferMins: service.bufferMins,
+      timeZone: this.businessZone(business.timezone),
     });
 
     const sourceDetail = input.storefrontSlug
@@ -1260,9 +1444,15 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
     if (input.orgUnitId) bookingData.orgUnitId = input.orgUnitId;
 
-    const booking = await this.prisma.client.booking.create({
-      data: bookingData,
-    });
+    // The early read above refused a taken slot before the contact and invoices
+    // were touched; the claim settles the race with requests in flight. Losing
+    // it leaves the invoices drawn up above for a booking that was not written.
+    const booking = await this.claimSlot(slot, (tx) => tx.booking.create({ data: bookingData })).catch(
+      async (err: unknown) => {
+        await this.withdrawDraftInvoices(input.businessId, [invoice?.id, depositInvoice?.id]);
+        throw err;
+      },
+    );
 
     const payload: BookingCreatedPayload = {
       booking,

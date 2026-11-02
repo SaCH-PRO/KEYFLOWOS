@@ -20,10 +20,11 @@
  * overlap", which is what it always meant; the buffer only widens the window
  * the query looks in.
  *
- * The genuine race is still open and is called out in the commit: two
- * simultaneous requests can both pass this read before either writes. Closing
- * that needs a database constraint, and the table already holds overlapping
- * rows, so that migration needs a data decision first.
+ * The genuine race was left open and called out in the commit: two
+ * simultaneous requests can both pass this read before either writes. V1-16
+ * closed it without a constraint (the table already holds overlapping rows):
+ * every write now claims the slot under a transaction-scoped advisory lock and
+ * reads again inside it. See the last describe below.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { BookingsService } from './bookings.service';
