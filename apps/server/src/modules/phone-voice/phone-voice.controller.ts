@@ -15,6 +15,8 @@ import type { Request, Response } from 'express';
 import twilio from 'twilio';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { GuardedBusinessId } from '../../core/auth/request-business-id';
+import { mintPhoneStreamToken, PHONE_STREAM_TOKEN_PARAM } from './phone-voice.service';
 
 const STREAM_PATH = '/api/v1/cortex/phone/stream';
 const INBOUND_PATH = '/api/v1/cortex/phone/inbound';
@@ -33,6 +35,15 @@ export class PhoneVoiceController {
    * Twilio inbound-call webhook. Answers with TwiML that connects the call
    * to the realtime voice bridge. Configure the number's voice webhook to:
    *   {PUBLIC_BASE_URL}/api/v1/cortex/phone/inbound?businessId=<businessId>
+   *
+   * V1-14 (CF-47): the stream URL used to carry `?businessId=` as well, and
+   * the stream bound whatever tenant its upgrade URL named. This is the only
+   * place a tenant is proven (by Twilio's signature, checked first), so the
+   * tenant now leaves here inside a short-lived signed token, bound to the
+   * call's CallSid, as a <Parameter> of the <Stream> noun. Twilio delivers
+   * custom parameters in the stream's `start` frame (it does not forward a
+   * query string on the stream URL); the stream binds the tenant from that
+   * token only.
    */
   @Post('inbound')
   inbound(@Query('businessId') businessId: string, @Req() req: Request, @Res() res: Response) {
@@ -41,11 +52,17 @@ export class PhoneVoiceController {
     }
     this.assertValidTwilioSignature(req);
 
-    const wsUrl = `${baseUrl().replace(/^http/, 'ws')}${STREAM_PATH}?businessId=${encodeURIComponent(businessId)}`;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const callSid = typeof body.CallSid === 'string' && body.CallSid.length > 0 ? body.CallSid : undefined;
+    // base64url segments joined by '.': nothing in it needs XML escaping.
+    const tenantToken = mintPhoneStreamToken(businessId, { callSid });
+    const wsUrl = `${baseUrl().replace(/^http/, 'ws')}${STREAM_PATH}`;
     const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
-    <Stream url="${wsUrl}" />
+    <Stream url="${wsUrl}">
+      <Parameter name="${PHONE_STREAM_TOKEN_PARAM}" value="${tenantToken}" />
+    </Stream>
   </Connect>
 </Response>`;
     res.type('text/xml').send(twiml);
@@ -54,23 +71,39 @@ export class PhoneVoiceController {
   /**
    * Place an outbound call whose audio is handled by the voice bridge.
    * Requires TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_PHONE_NUMBER.
+   *
+   * V1-14 review (SEC-V14-1): the inbound URL built here is what Twilio signs
+   * and the inbound webhook then mints a stream token for, so it must name
+   * only the tenant BusinessGuard verified. It used to interpolate the raw
+   * `dto.businessId`, which the guard never checked when it was not a string:
+   * `?businessId=<own>` with body `{businessId:["<victim>"]}` passed the guard
+   * on <own> and `encodeURIComponent(["<victim>"])` put <victim> in the URL.
+   * The tenant now comes from @GuardedBusinessId() (the guard's own resolver),
+   * and a body businessId that is not a string is refused outright.
    */
   @Post('outbound')
   @UseGuards(AuthGuard, BusinessGuard)
-  async outbound(@Body() dto: { to: string; purpose?: string; businessId: string }) {
+  async outbound(
+    @Body() dto: { to?: unknown; purpose?: string; businessId?: unknown },
+    @GuardedBusinessId() businessId: string | undefined,
+  ) {
     const sid = process.env.TWILIO_ACCOUNT_SID;
     const token = process.env.TWILIO_AUTH_TOKEN;
     const from = process.env.TWILIO_PHONE_NUMBER;
     if (!sid || !token || !from) {
       throw new ServiceUnavailableException('Twilio is not configured (TWILIO_ACCOUNT_SID/AUTH_TOKEN/PHONE_NUMBER)');
     }
-    if (!dto.to) throw new BadRequestException('to is required');
-    if (!dto.businessId) throw new BadRequestException('businessId is required');
+    const to = dto?.to;
+    if (typeof to !== 'string' || !to) throw new BadRequestException('to is required');
+    if (dto?.businessId !== undefined && typeof dto.businessId !== 'string') {
+      throw new BadRequestException('businessId must be a string');
+    }
+    if (!businessId) throw new BadRequestException('businessId is required');
 
-    const url = `${baseUrl()}${INBOUND_PATH}?businessId=${encodeURIComponent(dto.businessId)}`;
+    const url = `${baseUrl()}${INBOUND_PATH}?businessId=${encodeURIComponent(businessId)}`;
     const client = twilio(sid, token);
-    const call = await client.calls.create({ to: dto.to, from, url });
-    return { callSid: call.sid, status: call.status, to: dto.to };
+    const call = await client.calls.create({ to, from, url });
+    return { callSid: call.sid, status: call.status, to };
   }
 
   /**

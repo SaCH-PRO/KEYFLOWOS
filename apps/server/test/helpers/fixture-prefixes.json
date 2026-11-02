@@ -298,6 +298,11 @@
       "packet": "V1-12-DM-RECURRING-GUARD"
     },
     {
+      "prefix": "v14a_",
+      "owner": "apps/server/test/portal-boundary.integration.test.ts",
+      "packet": "V1-14-PUB-PORTAL-VOICE-BINDING"
+    },
+    {
       "prefix": "v15a_",
       "owner": "apps/server/test/ledger-write-door.integration.test.ts",
       "packet": "V1-15-DM-LEDGER-WRITE-DOOR"

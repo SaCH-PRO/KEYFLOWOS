@@ -1,13 +1,137 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { WebSocketServer, WebSocket, RawData } from 'ws';
+import { createHmac, randomBytes } from 'crypto';
 import type { IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { RealtimeBridgeService, RealtimeToolDef } from './realtime-bridge.service';
 import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { timingSafeStringEqual } from '../../core/security/timing-safe-equal';
+import { tenantBindingOf, type ExecutionSurface } from '../key-autonomy/action-boundary/control-clearance';
 
 const STREAM_PATH = '/api/v1/cortex/phone/stream';
+
+// ------------------------------------------------- the stream's tenant token
+//
+// V1-14 (CF-47). The media stream used to bind its tenant from
+// `?businessId=` on an unauthenticated WebSocket upgrade, so anyone who could
+// reach the API host could open a receptionist session for any tenant: read
+// its blueprint into the prompt, query its calendar, write bookings into it
+// and overwrite its call transcripts by call sid.
+//
+// The tenant now travels in a short-lived HMAC token that only the inbound
+// webhook mints, after it has verified Twilio's signature (or under the
+// explicit, logged PHONE_VOICE_ALLOW_UNVERIFIED=1 dev bypass). The webhook
+// hands it to the stream as a <Parameter> of the <Stream> noun: Twilio does
+// not forward a query string on the stream URL, and custom parameters arrive
+// in the `start` frame as start.customParameters. The stream binds the tenant
+// from the token and nothing else, before any tenant row is read or any
+// realtime session is opened.
+
+/** The <Parameter> name the token travels under. */
+export const PHONE_STREAM_TOKEN_PARAM = 'tenantToken';
+/** Twilio connects the stream as soon as it reads the TwiML; five minutes is generous. */
+export const PHONE_STREAM_TOKEN_TTL_MS = 5 * 60_000;
+/** A socket that has not presented a valid token by then is closed. */
+export const PHONE_STREAM_AUTH_DEADLINE_MS = 10_000;
+
+const TOKEN_VERSION = 'v1';
+const TOKEN_CONTEXT = 'keyflow.phone-stream-tenant.v1';
+const TOKEN_MAX_LENGTH = 2048;
+/** WebSocket close code 1008: policy violation. */
+const CLOSE_NOT_AUTHORIZED = 1008;
+
+/**
+ * Last-resort key for a process with neither secret configured, which can only
+ * be the dev bypass: production cannot answer an inbound call without
+ * TWILIO_AUTH_TOKEN. It is never written anywhere, so a token signed with it
+ * verifies only in the process that minted it. That fails closed (a stream
+ * that lands on another instance is refused), never open.
+ */
+const PROCESS_LOCAL_SECRET = randomBytes(32).toString('hex');
+
+/**
+ * PHONE_STREAM_TOKEN_SECRET when set; otherwise TWILIO_AUTH_TOKEN, which
+ * every deployment that can answer a call already has. Read per call, so a
+ * rotation takes effect without a restart. The HMAC input is prefixed with
+ * TOKEN_CONTEXT, so a value computed here is never a valid Twilio signature
+ * (HMAC-SHA1 over the request URL) or the reverse.
+ */
+function phoneStreamSecret(): string {
+  return process.env.PHONE_STREAM_TOKEN_SECRET || process.env.TWILIO_AUTH_TOKEN || PROCESS_LOCAL_SECRET;
+}
+
+function signPhoneStreamPayload(payload: string): string {
+  return createHmac('sha256', phoneStreamSecret()).update(`${TOKEN_CONTEXT}.${payload}`).digest('base64url');
+}
+
+/**
+ * Mint the token the inbound webhook hands to the stream. `callSid`, when the
+ * webhook has one (Twilio always sends CallSid), binds the token to that call,
+ * so it cannot open a stream for any other.
+ */
+export function mintPhoneStreamToken(
+  businessId: string,
+  opts: { callSid?: string | null; now?: number } = {},
+): string {
+  if (typeof businessId !== 'string' || businessId.length === 0) {
+    throw new Error('A phone stream token needs a businessId');
+  }
+  const claims: { b: string; exp: number; c?: string } = {
+    b: businessId,
+    exp: (opts.now ?? Date.now()) + PHONE_STREAM_TOKEN_TTL_MS,
+  };
+  if (typeof opts.callSid === 'string' && opts.callSid.length > 0) claims.c = opts.callSid;
+  const payload = Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url');
+  return `${TOKEN_VERSION}.${payload}.${signPhoneStreamPayload(payload)}`;
+}
+
+/**
+ * The tenant a token proves, or null. Null for anything that is not a token
+ * this server signed under the current secret, that has expired, or that was
+ * bound to a different call than `callSid`.
+ */
+export function verifyPhoneStreamToken(
+  token: unknown,
+  opts: { callSid?: string | null; now?: number } = {},
+): { businessId: string; callSid: string | null } | null {
+  if (typeof token !== 'string' || token.length === 0 || token.length > TOKEN_MAX_LENGTH) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [version, payload, signature] = parts;
+  if (version !== TOKEN_VERSION || !payload || !signature) return null;
+  if (!timingSafeStringEqual(signature, signPhoneStreamPayload(payload))) return null;
+
+  let claims: unknown;
+  try {
+    claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+  if (!claims || typeof claims !== 'object' || Array.isArray(claims)) return null;
+  const { b, exp, c } = claims as Record<string, unknown>;
+  if (typeof b !== 'string' || b.length === 0) return null;
+  if (typeof exp !== 'number' || !Number.isFinite(exp) || exp <= (opts.now ?? Date.now())) return null;
+  if (c !== undefined && (typeof c !== 'string' || c !== opts.callSid)) return null;
+  return { businessId: b, callSid: typeof c === 'string' ? c : null };
+}
+
+// ------------------------------------------------------- the tool surface
+
+/** What the action boundary calls this entry point (KF-EXEC-ACTION-001, E4). */
+const PHONE_SURFACE: ExecutionSurface = 'PHONE_STREAM';
+
+/**
+ * Receptionist tools that write and are NOT behind the action boundary.
+ * helpdesk_create_ticket is: the boundary refuses it for this surface itself.
+ * bookings_create_booking is not, so nothing downstream would refuse it. While
+ * the boundary classifies PHONE_STREAM as an untrusted-tenant surface, these
+ * are refused here, before the executor, and the model is told nothing was
+ * done. (The signed token proves the tenant to this service; whether that is
+ * enough to trust the surface is the boundary's call, in control-clearance.)
+ */
+const PHONE_WRITES_OUTSIDE_THE_BOUNDARY: ReadonlySet<string> = new Set(['bookings_create_booking']);
 
 const RECEPTIONIST_TOOLS: RealtimeToolDef[] = [
   {
@@ -68,6 +192,8 @@ interface CallContext {
 export class PhoneVoiceService implements OnModuleInit {
   private readonly logger = new Logger(PhoneVoiceService.name);
   private wss: WebSocketServer | null = null;
+  /** How long an upgraded socket may stay open without a valid tenant token. */
+  private streamAuthDeadlineMs = PHONE_STREAM_AUTH_DEADLINE_MS;
 
   constructor(
     private readonly httpAdapterHost: HttpAdapterHost,
@@ -91,10 +217,29 @@ export class PhoneVoiceService implements OnModuleInit {
     this.logger.log(`Phone voice bridge listening at ${STREAM_PATH}`);
   }
 
-  private async handleClient(ws: WebSocket, req: IncomingMessage) {
-    const url = new URL(req.url ?? '', 'http://localhost');
-    const businessId = url.searchParams.get('businessId') ?? '';
-    const ctx: Partial<CallContext> = { businessId, transcript: [] };
+  /**
+   * One Twilio media stream. The upgrade request is deliberately not read: the
+   * tenant used to come from its `?businessId=` (V1-14, CF-47). It now comes
+   * only from the signed token in the `start` frame, and until that token
+   * verifies this socket has no tenant, reads no tenant row and has no
+   * realtime session. A missing, bad, expired or other-call token, or no
+   * `start` before the deadline, closes the socket with 1008.
+   */
+  private async handleClient(ws: WebSocket, _req: IncomingMessage) {
+    const ctx: Partial<CallContext> = { transcript: [] };
+    let binding: 'pending' | 'bound' | 'refused' = 'pending';
+
+    const refuse = (reason: string) => {
+      if (binding === 'refused') return;
+      binding = 'refused';
+      clearTimeout(deadline);
+      this.logger.warn(`Phone stream refused before any session: ${reason}`);
+      ws.close(CLOSE_NOT_AUTHORIZED, 'stream not authorized');
+    };
+    const deadline = setTimeout(() => {
+      if (binding === 'pending') refuse('no valid tenant token was presented in time');
+    }, this.streamAuthDeadlineMs);
+    deadline.unref?.();
 
     ws.on('message', async (raw: RawData) => {
       let msg: Record<string, unknown>;
@@ -106,14 +251,36 @@ export class PhoneVoiceService implements OnModuleInit {
 
       switch (msg.event) {
         case 'connected':
-          this.logger.debug(`Twilio stream connected (call business: ${businessId})`);
+          this.logger.debug('Twilio stream connected (tenant not yet bound)');
           break;
 
         case 'start': {
-          const start = msg.start as { streamSid: string; callSid: string };
-          ctx.streamSid = start.streamSid;
-          ctx.callSid = start.callSid;
-          this.logger.log(`Call started: ${start.callSid} (business ${businessId})`);
+          // One binding per socket. A second start must not rebind the tenant
+          // or open a second realtime session.
+          if (binding !== 'pending') {
+            this.logger.warn(`Ignoring a repeated start frame on ${ctx.callSid ?? 'an unbound stream'}`);
+            break;
+          }
+          const start = (msg.start && typeof msg.start === 'object' ? msg.start : {}) as Record<string, unknown>;
+          const callSid = typeof start.callSid === 'string' ? start.callSid : '';
+          const custom = (
+            start.customParameters && typeof start.customParameters === 'object' ? start.customParameters : {}
+          ) as Record<string, unknown>;
+          const claims = callSid
+            ? verifyPhoneStreamToken(custom[PHONE_STREAM_TOKEN_PARAM], { callSid })
+            : null;
+          if (!claims) {
+            refuse(`start frame for ${callSid || 'no call sid'} carried no valid tenant token`);
+            return;
+          }
+          binding = 'bound';
+          clearTimeout(deadline);
+
+          const businessId = claims.businessId;
+          ctx.businessId = businessId;
+          ctx.streamSid = typeof start.streamSid === 'string' ? start.streamSid : '';
+          ctx.callSid = callSid;
+          this.logger.log(`Call started: ${callSid} (business ${businessId}, token-bound)`);
 
           const instructions = await this.buildInstructions(businessId);
           const session = await this.bridge.openSession({
@@ -159,7 +326,7 @@ export class PhoneVoiceService implements OnModuleInit {
                     error: `Could not read the arguments for ${name}. Nothing was done. Please call it again with valid JSON.`,
                   };
                 }
-                return this.executeVoiceTool(businessId, name, args, ctx as CallContext);
+                return this.dispatchVoiceTool(businessId, name, args, ctx as CallContext);
               },
               onError: (message) => this.logger.warn(`Realtime error on ${ctx.callSid}: ${message}`),
               onClose: () => this.logger.debug(`Realtime session closed for ${ctx.callSid}`),
@@ -193,6 +360,7 @@ export class PhoneVoiceService implements OnModuleInit {
     });
 
     ws.on('close', () => {
+      clearTimeout(deadline);
       ctx.close?.();
       void this.persistTranscript(ctx as CallContext);
     });
@@ -228,6 +396,33 @@ export class PhoneVoiceService implements OnModuleInit {
     ].join(' ');
   }
 
+  /**
+   * The phone stream's tool gate: what the realtime session's onFunctionCall
+   * reaches once the arguments parse. A write that is not behind the action
+   * boundary is refused here while the boundary does not trust this surface's
+   * tenant binding, and the model is told nothing was done, so it does not
+   * tell the caller an appointment exists. Everything else goes to
+   * executeVoiceTool unchanged.
+   */
+  private async dispatchVoiceTool(
+    businessId: string,
+    name: string,
+    args: Record<string, unknown>,
+    ctx: CallContext,
+  ): Promise<unknown> {
+    if (PHONE_WRITES_OUTSIDE_THE_BOUNDARY.has(name) && tenantBindingOf(PHONE_SURFACE) === 'untrusted') {
+      this.logger.warn(
+        `${name} refused on ${ctx.callSid}: ${PHONE_SURFACE} is an untrusted-tenant surface and this write ` +
+          'is not behind the action boundary',
+      );
+      return {
+        error:
+          'An appointment could not be booked from this call. Nothing was done. Tell the caller the team will call them back to arrange a time.',
+      };
+    }
+    return this.executeVoiceTool(businessId, name, args, ctx);
+  }
+
   private async executeVoiceTool(
     businessId: string,
     name: string,
@@ -238,19 +433,22 @@ export class PhoneVoiceService implements OnModuleInit {
       case 'calendar_check_conflicts':
         return this.flow.executeToolByName(businessId, 'calendar_check_conflicts', args);
       case 'bookings_create_booking': {
+        // Reached only when dispatchVoiceTool admits it (see
+        // PHONE_WRITES_OUTSIDE_THE_BOUNDARY). Declares its surface, as every
+        // phone write does.
         const mapped = {
           contactName: args.contactName,
           startTime: args.start,
           notes: args.notes ?? `Phone booking via KEY receptionist${args.contactPhone ? ` (${args.contactPhone})` : ''}`,
         };
-        return this.flow.executeToolByName(businessId, 'bookings_create_booking', mapped);
+        return this.flow.executeToolByName(businessId, 'bookings_create_booking', mapped, { surface: PHONE_SURFACE });
       }
       case 'helpdesk_create_ticket':
-        // KF-EXEC-ACTION-001: declared as the phone stream, whose business id
-        // is a query-string value on an unauthenticated upgrade. The action
-        // boundary refuses it until stream authentication exists (D1, open
-        // under VOICE). The model is told nothing was done, so it does not
-        // tell the caller a ticket exists.
+        // KF-EXEC-ACTION-001: declared as the phone stream. Its business id now
+        // comes from the signed tenant token (V1-14), but the action boundary
+        // still classifies PHONE_STREAM as an untrusted-tenant surface (D1,
+        // open under VOICE) and refuses it. The model is told nothing was
+        // done, so it does not tell the caller a ticket exists.
         try {
           return await this.flow.executeToolByName(businessId, 'helpdesk_create_ticket', args, {
             surface: 'PHONE_STREAM',
@@ -270,10 +468,12 @@ export class PhoneVoiceService implements OnModuleInit {
   }
 
   private async persistTranscript(ctx: Partial<CallContext>) {
-    if (!ctx.callSid || !ctx.transcript?.length) return;
+    // Only a token-bound stream has a businessId. The write is scoped to it:
+    // a call sid alone named a row in any tenant (V1-14).
+    if (!ctx.callSid || !ctx.businessId || !ctx.transcript?.length) return;
     try {
       await (this.prisma.client as any).keyCallSession.updateMany({
-        where: { callSid: ctx.callSid },
+        where: { callSid: ctx.callSid, businessId: ctx.businessId },
         data: {
           transcript: ctx.transcript as unknown as object,
           endedAt: new Date(),
