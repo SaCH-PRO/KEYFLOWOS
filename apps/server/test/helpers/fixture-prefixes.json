@@ -283,6 +283,11 @@
       "legacy": true
     },
     {
+      "prefix": "v03a_",
+      "owner": "apps/server/test/autonomy-profile-authority.integration.test.ts",
+      "packet": "V1-03-KEY-CORTEX-PRINCIPAL"
+    },
+    {
       "prefix": "v06a_",
       "owner": "apps/server/test/bookings-core.integration.test.ts",
       "packet": "V1-06-BK-BASELINE-PARITY"
