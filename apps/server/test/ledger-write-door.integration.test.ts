@@ -47,9 +47,29 @@
  *           changes; the owner and an ADMIN may; every close and reopen leaves a
  *           finance audit row naming its actor (a reopen also the closer it
  *           undid); unauthenticated -> 401
- *   (todo)  callers that commit their own row before posting, outside one
- *           transaction (review CR-2 FixedAssetService, CR-3 BankRuleService):
- *           outside this packet's write set, see the cases
+ *
+ *   V1-15b-LEDGER-DOOR-COMPANIONS (the V1-15 review's CR-1..CR-3, whose fixes sat
+ *   outside V1-15's write set):
+ *
+ *   LWD-10  (CR-1) cash-basis tenant: a payment refunded through the door nets to
+ *           zero in the cash P&L (the REVERSED original is read beside its
+ *           REVERSAL); the accrual P&L agrees
+ *   LWD-11  (CR-1) accrual tenant, cash-basis view: a refunded collection traced to
+ *           its invoice, a voided paid expense and a voided paid bill each net to
+ *           zero in the cash P&L and the cash cashflow, and no reversal is counted
+ *           twice; the accrual P&L and the expense breakdowns agree
+ *   LWD-12  (CR-2) HTTP depreciate / dispose dated inside a CLOSED month -> 409
+ *           and nothing is written (asset row unchanged, no posting). In an open
+ *           month each run is one transaction with its posting: a second
+ *           depreciation run posts its own delta (the ledger keeps up with the
+ *           row), a disposal posts once, a second dispose -> 400, and an asset
+ *           with no depreciation disposed for nothing posts (no zero entry)
+ *   LWD-13  (CR-3) HTTP statement import with auto-match: a rule-matched row dated
+ *           inside a CLOSED month stays UNMATCHED with a visible reason (finance
+ *           audit row, and the skipped list of POST bank-rules/apply); the other
+ *           rows are matched, each to its own posting (externalRef
+ *           BankRule:<ruleId>:<bankTransactionId>); the import succeeds. After a
+ *           reopen the skipped row matches and posts once
  *
  *   TB-01   trial balance after payments (two currencies), a refund and an
  *           expense void: sum(debit) = sum(credit) per currency, every
@@ -63,8 +83,10 @@
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
  * RevenuePostingService, PostingService, AccountingPeriodService,
- * ChartOfAccountsSeederService, ExpensesService, ExpensePostingService and
- * PaymentsService (its WiPay / Stripe webhook handlers) write
+ * ChartOfAccountsSeederService, ExpensesService, ExpensePostingService,
+ * PaymentsService (its WiPay / Stripe webhook handlers), LedgerReportingService,
+ * and (behind FinanceController) FixedAssetService, BankImportService,
+ * BankMatchingService, BankRuleService and FinanceAuditService read and write
  * real rows, and the production GlobalHttpExceptionFilter + ValidationPipe are
  * installed. Identity attachment is the one stand-in: a test middleware reads
  * `x-v15a-user`, loads that seeded user row and attaches `{ id, email, role }`
@@ -89,6 +111,7 @@ import type { ChartOfAccountsSeederService } from '../src/modules/finance/chart-
 import type { InvoiceWorkflowService } from '../src/modules/commerce/invoice-workflow.service';
 import type { ExpensesService } from '../src/modules/expenses/expenses.service';
 import type { PaymentsService } from '../src/modules/payments/payments.service';
+import type { LedgerReportingService } from '../src/modules/reports/ledger-reporting.service';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -119,6 +142,13 @@ const ID = {
   invRefund: `${P}invRefund`,
   invOpen: `${P}invOpen`,
   invUsd: `${P}invUsd`,
+  // V1-15b (review CR-1..CR-3)
+  bizAR: `${P}bizAR`, // accrual tenant: a refunded collection and voids in the cash-basis reports
+  contactAR: `${P}contactAR`,
+  invAR: `${P}invAR`,
+  bizAsset: `${P}bizAsset`, // fixed assets around a closed month
+  bizBank: `${P}bizBank`, // statement import + bank rules around a closed month
+  bankAcct: `${P}bankAcct`,
 };
 
 const TB_INVOICES: Array<{ id: string; total: number; currency: string }> = [
@@ -138,6 +168,7 @@ let coa: ChartOfAccountsSeederService;
 let workflow: InvoiceWorkflowService;
 let expenses: ExpensesService;
 let payments: PaymentsService;
+let reporting: LedgerReportingService;
 let periodLockNamespace = '';
 let computeBalance: (total: number, payments: Array<{ amount: unknown; status: string }>, currency?: string) => { remaining: number };
 
@@ -155,6 +186,9 @@ async function cleanup() {
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM accounting_periods WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM fixed_assets WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bank_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bank_rules WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM expenses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM expense_categories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -289,6 +323,96 @@ async function seedInvoice(id: string, businessId: string, contactId: string, n:
   });
 }
 
+/** A tenant owned by ID.owner (an OWNER member too) with the default chart of accounts. */
+async function seedTenant(id: string, basis: 'CASH' | 'ACCRUAL') {
+  await db.business.create({ data: { id, name: `V15A ${id}`, ownerId: ID.owner, currency: 'TTD', accountingBasis: basis } });
+  await db.membership.create({ data: { id: `${id}_m`, userId: ID.owner, businessId: id, role: 'OWNER' } });
+  await coa.ensureDefaults(id);
+}
+
+/** Every posting of one business is balanced, and so is the business per currency. */
+async function expectBalanced(businessId: string) {
+  const perCurrency: Array<{ currency: string; debit: string; credit: string }> = await db.$queryRawUnsafe(
+    `SELECT currency, SUM(debit)::text AS debit, SUM(credit)::text AS credit FROM ledger_entries WHERE business_id = $1 GROUP BY currency`,
+    businessId,
+  );
+  for (const r of perCurrency) expect(Number(r.debit), `${businessId} ${r.currency} debits vs credits`).toBe(Number(r.credit));
+  const unbalanced = await db.$queryRawUnsafe(
+    `SELECT transaction_id FROM ledger_entries WHERE business_id = $1 GROUP BY transaction_id HAVING SUM(debit) <> SUM(credit)`,
+    businessId,
+  );
+  expect(unbalanced, businessId).toEqual([]);
+}
+
+/**
+ * FinanceController behind the real AuthGuard, BusinessGuard and the global
+ * TenantInterceptor, identity attached from HEADER. `real` providers are live;
+ * every other collaborator of the controller is a stub off the path under test.
+ */
+async function buildFinanceApp(real: any[]): Promise<any> {
+  const { Test } = await import('@nestjs/testing');
+  const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+  const { PrismaService } = await import('../src/core/prisma/prisma.service');
+  const { AuthGuard } = await import('../src/core/auth/auth.guard');
+  const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+  const { FinanceController } = await import('../src/modules/finance/finance.controller');
+  const collaborators = await Promise.all([
+    import('../src/modules/finance/receivables.service').then((m) => m.ReceivablesService),
+    import('../src/modules/finance/ledger-balance.service').then((m) => m.LedgerBalanceService),
+    import('../src/modules/finance/finance-overview.service').then((m) => m.FinanceOverviewService),
+    import('../src/modules/finance/finance-accounts.service').then((m) => m.FinanceAccountsService),
+    import('../src/modules/finance/finance-coa.service').then((m) => m.FinanceCoaService),
+    import('../src/modules/finance/finance-tax-rate.service').then((m) => m.FinanceTaxRateService),
+    import('../src/modules/finance/finance-settings.service').then((m) => m.FinanceSettingsService),
+    import('../src/modules/finance/bank-import.service').then((m) => m.BankImportService),
+    import('../src/modules/finance/statement-source.service').then((m) => m.StatementSourceService),
+    import('../src/modules/finance/bank-matching.service').then((m) => m.BankMatchingService),
+    import('../src/modules/finance/bank-rule.service').then((m) => m.BankRuleService),
+    import('../src/modules/finance/recurring-journal-entry.service').then((m) => m.RecurringJournalEntryService),
+    import('../src/modules/finance/reconciliation.service').then((m) => m.ReconciliationService),
+    import('../src/modules/finance/tax-liability.service').then((m) => m.TaxLiabilityService),
+    import('../src/modules/finance/accountant-export.service').then((m) => m.AccountantExportService),
+    import('../src/modules/finance/finance-intelligence.service').then((m) => m.FinanceIntelligenceService),
+    import('../src/modules/finance/accountant-export-email.service').then((m) => m.AccountantExportEmailService),
+    import('../src/modules/finance/posting.service').then((m) => m.PostingService),
+    import('../src/modules/finance/safe-to-spend.service').then((m) => m.SafeToSpendService),
+    import('../src/modules/finance/cashflow-forecast.service').then((m) => m.CashflowForecastService),
+    import('../src/modules/finance/money-moves.service').then((m) => m.MoneyMovesService),
+    import('../src/modules/finance/cash-reserve.service').then((m) => m.CashReserveService),
+    import('../src/modules/finance/credit-note.service').then((m) => m.CreditNoteService),
+    import('../src/modules/finance/bank-connection.service').then((m) => m.BankConnectionService),
+    import('../src/modules/finance/exchange-rate.service').then((m) => m.ExchangeRateService),
+    import('../src/modules/finance/fixed-asset.service').then((m) => m.FixedAssetService),
+  ]);
+  const moduleRef = await Test.createTestingModule({
+    controllers: [FinanceController],
+    providers: [
+      PrismaService,
+      AuthGuard,
+      BusinessGuard,
+      ...real,
+      ...collaborators.filter((token) => !real.includes(token)).map((token) => ({ provide: token, useValue: {} })),
+    ],
+  }).compile();
+  const financeApp = moduleRef.createNestApplication();
+  // Identity attachment only. No guard is overridden.
+  financeApp.use(async (req: any, _res: any, next: any) => {
+    const header = req.headers[HEADER];
+    const id = typeof header === 'string' ? header : undefined;
+    if (id && id.startsWith(P)) {
+      const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+      if (user) req.user = { id: user.id, email: user.email, role: user.role };
+    }
+    next();
+  });
+  // As app.module.ts registers it (APP_INTERCEPTOR): the reopen route passes no actor, this names it.
+  financeApp.useGlobalInterceptors(new TenantInterceptor(moduleRef.get(PrismaService)));
+  financeApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+  await financeApp.init();
+  return financeApp;
+}
+
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
@@ -331,6 +455,9 @@ beforeAll(async () => {
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const ExpensesMod = await import('../src/modules/expenses/expenses.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  const ReportingMod = await import('../src/modules/reports/ledger-reporting.service');
+  const { LedgerBalanceService } = await import('../src/modules/finance/ledger-balance.service');
+  const { ReceivablesService } = await import('../src/modules/finance/receivables.service');
   computeBalance = workflowMod.computeBalance as typeof computeBalance;
   periodLockNamespace = PeriodMod.ACCOUNTING_PERIOD_LOCK_NAMESPACE;
 
@@ -357,6 +484,10 @@ beforeAll(async () => {
       SeederMod.ChartOfAccountsSeederService,
       ExpensePostingService,
       ExpensesMod.ExpensesService,
+      // The report readers (review CR-1), on the same rows.
+      ReportingMod.LedgerReportingService,
+      LedgerBalanceService,
+      ReceivablesService,
       { provide: EventEmitter2, useValue: eventStub },
       { provide: CrmService, useValue: { logContactEvent: async () => null } },
       { provide: EvidenceService, useValue: {} },
@@ -380,6 +511,7 @@ beforeAll(async () => {
   coa = moduleRef.get(SeederMod.ChartOfAccountsSeederService);
   workflow = moduleRef.get(workflowMod.InvoiceWorkflowService);
   expenses = moduleRef.get(ExpensesMod.ExpensesService);
+  reporting = moduleRef.get(ReportingMod.LedgerReportingService);
   // The provider webhook handlers (review SEC-V15-1), on the same real chain:
   // payment row + posting in one transaction, the dedupe row committed first.
   const { PaymentsService: PaymentsCtor } = await import('../src/modules/payments/payments.service');
@@ -646,6 +778,26 @@ describe('review SEC-V15-1: a period closes only once it has ended, so what is d
       expect((await db.invoice.findUnique({ where: { id: invoiceId } })).status, invoiceId).toBe('PAID');
     }
   });
+
+  it('LWD-10 (review CR-1): the payment refunded through the door nets to zero in the cash-basis P&L; the accrual P&L agrees', async () => {
+    const from = new Date(Date.UTC(2000, 0, 1));
+    const to = new Date(Date.now() + 86_400_000);
+    // The refunded payment's original is REVERSED, its REVERSAL POSTED; the rest are settled.
+    const early = await paymentPostings(earlyPaymentId);
+    expect(early.map((t: any) => `${t.type}:${t.status}`)).toEqual(['INCOME:REVERSED', 'REVERSAL:POSTED']);
+    const settled = (await db.payment.findMany({ where: { businessId: ID.bizPay, status: 'SUCCESSFUL' } }))
+      .reduce((s: number, p: any) => s + Number(p.amount), 0);
+    expect(settled).toBe(280);
+
+    const cash = await reporting.getPnl(ID.bizPay, from, to, 'cash');
+    const accrual = await reporting.getPnl(ID.bizPay, from, to, 'accrual');
+    // At 2dd2eb65 the cash P&L read POSTED only: the REVERSED original dropped out
+    // and its REVERSAL counted as -40 of revenue (240).
+    expect(cash.revenue.total, 'cash-basis revenue').toBe(settled);
+    expect(accrual.revenue.total, 'accrual revenue').toBe(settled);
+    expect(cash.netProfit).toBe(accrual.netProfit);
+    await expectBalanced(ID.bizPay);
+  });
 });
 
 describe('review SEC-V15-2: only the owner or an admin opens and shuts the posting door, and every change is audited', () => {
@@ -657,68 +809,9 @@ describe('review SEC-V15-2: only the owner or an admin opens and shuts the posti
   }
 
   beforeAll(async () => {
-    const { Test } = await import('@nestjs/testing');
-    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
-    const { PrismaService } = await import('../src/core/prisma/prisma.service');
-    const { AuthGuard } = await import('../src/core/auth/auth.guard');
-    const { BusinessGuard } = await import('../src/core/auth/business.guard');
-    const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
-    const { FinanceController } = await import('../src/modules/finance/finance.controller');
     const PeriodMod = await import('../src/modules/finance/accounting-period.service');
     // FinanceController's other collaborators are off the period routes.
-    const offPath = await Promise.all([
-      import('../src/modules/finance/receivables.service').then((m) => m.ReceivablesService),
-      import('../src/modules/finance/ledger-balance.service').then((m) => m.LedgerBalanceService),
-      import('../src/modules/finance/finance-overview.service').then((m) => m.FinanceOverviewService),
-      import('../src/modules/finance/finance-accounts.service').then((m) => m.FinanceAccountsService),
-      import('../src/modules/finance/finance-coa.service').then((m) => m.FinanceCoaService),
-      import('../src/modules/finance/finance-tax-rate.service').then((m) => m.FinanceTaxRateService),
-      import('../src/modules/finance/finance-settings.service').then((m) => m.FinanceSettingsService),
-      import('../src/modules/finance/bank-import.service').then((m) => m.BankImportService),
-      import('../src/modules/finance/statement-source.service').then((m) => m.StatementSourceService),
-      import('../src/modules/finance/bank-matching.service').then((m) => m.BankMatchingService),
-      import('../src/modules/finance/bank-rule.service').then((m) => m.BankRuleService),
-      import('../src/modules/finance/recurring-journal-entry.service').then((m) => m.RecurringJournalEntryService),
-      import('../src/modules/finance/reconciliation.service').then((m) => m.ReconciliationService),
-      import('../src/modules/finance/tax-liability.service').then((m) => m.TaxLiabilityService),
-      import('../src/modules/finance/accountant-export.service').then((m) => m.AccountantExportService),
-      import('../src/modules/finance/finance-intelligence.service').then((m) => m.FinanceIntelligenceService),
-      import('../src/modules/finance/accountant-export-email.service').then((m) => m.AccountantExportEmailService),
-      import('../src/modules/finance/posting.service').then((m) => m.PostingService),
-      import('../src/modules/finance/safe-to-spend.service').then((m) => m.SafeToSpendService),
-      import('../src/modules/finance/cashflow-forecast.service').then((m) => m.CashflowForecastService),
-      import('../src/modules/finance/money-moves.service').then((m) => m.MoneyMovesService),
-      import('../src/modules/finance/cash-reserve.service').then((m) => m.CashReserveService),
-      import('../src/modules/finance/credit-note.service').then((m) => m.CreditNoteService),
-      import('../src/modules/finance/bank-connection.service').then((m) => m.BankConnectionService),
-      import('../src/modules/finance/exchange-rate.service').then((m) => m.ExchangeRateService),
-      import('../src/modules/finance/fixed-asset.service').then((m) => m.FixedAssetService),
-    ]);
-    const moduleRef = await Test.createTestingModule({
-      controllers: [FinanceController],
-      providers: [
-        PrismaService,
-        AuthGuard,
-        BusinessGuard,
-        PeriodMod.AccountingPeriodService,
-        ...offPath.map((token) => ({ provide: token, useValue: {} })),
-      ],
-    }).compile();
-    financeApp = moduleRef.createNestApplication();
-    // Identity attachment only. No guard is overridden.
-    financeApp.use(async (req: any, _res: any, next: any) => {
-      const header = req.headers[HEADER];
-      const id = typeof header === 'string' ? header : undefined;
-      if (id && id.startsWith(P)) {
-        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
-        if (user) req.user = { id: user.id, email: user.email, role: user.role };
-      }
-      next();
-    });
-    // As app.module.ts registers it (APP_INTERCEPTOR): the reopen route passes no actor, this names it.
-    financeApp.useGlobalInterceptors(new TenantInterceptor(moduleRef.get(PrismaService)));
-    financeApp.useGlobalFilters(new GlobalHttpExceptionFilter());
-    await financeApp.init();
+    financeApp = await buildFinanceApp([PeriodMod.AccountingPeriodService]);
   }, 120_000);
 
   afterAll(async () => {
@@ -776,13 +869,265 @@ describe('review SEC-V15-2: only the owner or an admin opens and shuts the posti
   });
 });
 
-describe('review CR-2 / CR-3: callers that commit their own row before they post (outside the V1-15 write set)', () => {
-  // These callers call post() after writing their own row, outside one transaction,
-  // so the door's 409 for a date inside a CLOSED period leaves split state. The fix
-  // belongs in each caller (fixed-asset.service.ts, bank-rule.service.ts), which this
-  // packet may not edit.
-  it.todo('CR-2: FixedAssetService.dispose / runDepreciation dated inside a CLOSED month answer 409 and write nothing (today the FixedAsset row is updated before post(), outside its transaction: the asset is DISPOSED with no disposal posting, or accumulated depreciation runs ahead of the ledger; fix: one transaction in fixed-asset.service.ts)');
-  it.todo('CR-3: bank auto-match leaves a rule-matched row dated inside a CLOSED month UNMATCHED and matches the rest (today the 409 escapes BankRuleService.applyRules, which posts per row with no catch, and fails the statement import after ingest; fix: bank-rule.service.ts, which also owns the pre-existing shared externalRef BankRule:<ruleId>:default)');
+describe('review CR-1: a reversed original and its REVERSAL net to zero in every report, and no reversal is counted twice', () => {
+  const from = new Date(Date.UTC(2000, 0, 1));
+  let to: Date;
+
+  beforeAll(async () => {
+    await seedTenant(ID.bizAR, 'ACCRUAL');
+    await db.contact.create({ data: { id: ID.contactAR, businessId: ID.bizAR, firstName: 'V15A', lastName: 'Receivable', email: `${P}receivable@test.local` } });
+    // Recognised in AR (Dr AR / Cr Revenue 100), collected 60 + 40, and the 40 refunded through the door.
+    await seedInvoice(ID.invAR, ID.bizAR, ID.contactAR, 30, 100, 'TTD', 'DRAFT');
+    await workflow.transition(ID.invAR, 'SENT');
+    const kept = await pay(ID.bizAR, ID.invAR, { amount: 60, method: 'cash', reference: `${P}ar-kept` });
+    expect(kept.status, JSON.stringify(kept.body)).toBe(201);
+    const refunded = await pay(ID.bizAR, ID.invAR, { amount: 40, method: 'cash', reference: `${P}ar-refunded` });
+    expect(refunded.status, JSON.stringify(refunded.body)).toBe(201);
+    const r = await refund(ID.bizAR, refunded.body.payment.id);
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    // A paid expense voided (direct Dr Expense / Cr Cash) and a bill paid then voided (AP, traced to the bill).
+    const paid = await expenses.createExpense({ businessId: ID.bizAR, description: `${P}ar paid expense`, amount: 25, currency: 'TTD', paymentMethod: 'cash', vendor: `${P}vendor` });
+    await expenses.voidExpense({ businessId: ID.bizAR, expenseId: paid.id, reason: 'v15a CR-1 void' });
+    const bill = await expenses.createExpense({ businessId: ID.bizAR, description: `${P}ar bill`, amount: 50, currency: 'TTD', status: 'BILL', vendor: `${P}vendor` });
+    await expenses.markBillPaid({ businessId: ID.bizAR, expenseId: bill.id, paymentMethod: 'cash' });
+    await expenses.voidExpense({ businessId: ID.bizAR, expenseId: bill.id, reason: 'v15a CR-1 bill void' });
+    to = new Date(Date.now() + 86_400_000);
+    const reversed = await db.financialTransaction.findMany({ where: { businessId: ID.bizAR, status: 'REVERSED' } });
+    expect(reversed, 'the refunded collection, the paid expense, the bill and its payment').toHaveLength(4);
+  }, 120_000);
+
+  it('LWD-11: cash-basis view of an accrual tenant: the refunded collection, the voided expense and the voided bill each net to zero in the cash P&L and the cash cashflow; the accrual P&L agrees on expenses', async () => {
+    const cash = await reporting.getPnl(ID.bizAR, from, to, 'cash');
+    const accrual = await reporting.getPnl(ID.bizAR, from, to, 'accrual');
+    // Cash: only the 60 still collected. A REVERSAL is read as the mirror of its
+    // original, traced the same way (a refunded collection is -40 of the invoice's
+    // revenue, a reversed bill payment -50 of the bill's expense), never twice.
+    // At 2dd2eb65 the voided expense's REVERSAL counted as -25 of expense (net profit 85).
+    expect(cash.revenue.total, 'cash-basis revenue').toBe(60);
+    expect(cash.operatingExpenses.total, 'cash-basis expenses').toBe(0);
+    expect(cash.netProfit).toBe(60);
+    // Accrual: revenue is the invoice (the refund restores the receivable), and the voids net to zero.
+    expect(accrual.revenue.total, 'accrual revenue').toBe(100);
+    expect(accrual.operatingExpenses.total, 'accrual expenses').toBe(0);
+    expect(accrual.netProfit).toBe(100);
+
+    const cashflow = await reporting.getCashflow(ID.bizAR, from, to, 'cash');
+    expect(cashflow.netMovement, 'cash-basis operating cash').toBe(60);
+    expect(cashflow.accrualAdjustments.netIncome).toBe(60);
+    const accrualFlow = await reporting.getCashflow(ID.bizAR, from, to, 'accrual');
+    expect(accrualFlow.netMovement, 'every cash movement').toBe(60);
+
+    expect(await reporting.getExpenseBy(ID.bizAR, 'category', from, to)).toEqual([]);
+    const byVendor = await reporting.getExpenseBy(ID.bizAR, 'vendor', from, to);
+    expect(byVendor.every((r) => r.total === 0), JSON.stringify(byVendor)).toBe(true);
+    await expectBalanced(ID.bizAR);
+  });
+});
+
+describe('review CR-2 / CR-3: callers that write their own row and post (fixed assets, bank rules) do both in one transaction or not at all', () => {
+  let financeApp: any;
+  const last = monthFromNow(-1);
+  const inClosedMonth = new Date(Date.UTC(last.year, last.month - 1, 15, 12, 0, 0)).toISOString();
+
+  function api(method: 'get' | 'post', path: string, businessId: string) {
+    return request(financeApp.getHttpServer())[method](`/finance/businesses/${businessId}${path}`).set(HEADER, ID.owner);
+  }
+
+  async function fixedAssetPostings(assetId: string): Promise<any[]> {
+    return db.financialTransaction.findMany({
+      where: { sourceType: 'FixedAsset', sourceId: assetId },
+      include: { entries: { include: { account: { select: { systemKey: true } } } } },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  beforeAll(async () => {
+    const real = await Promise.all([
+      import('../src/modules/finance/accounting-period.service').then((m) => m.AccountingPeriodService),
+      import('../src/modules/finance/posting.service').then((m) => m.PostingService),
+      import('../src/modules/finance/finance-audit.service').then((m) => m.FinanceAuditService),
+      import('../src/modules/finance/fixed-asset.service').then((m) => m.FixedAssetService),
+      import('../src/modules/finance/bank-import.service').then((m) => m.BankImportService),
+      import('../src/modules/finance/bank-matching.service').then((m) => m.BankMatchingService),
+      import('../src/modules/finance/bank-rule.service').then((m) => m.BankRuleService),
+    ]);
+    financeApp = await buildFinanceApp(real);
+    await seedTenant(ID.bizAsset, 'CASH');
+    await seedTenant(ID.bizBank, 'CASH');
+  }, 120_000);
+
+  afterAll(async () => {
+    if (financeApp) await financeApp.close();
+  });
+
+  it('LWD-12 (CR-2): depreciate / dispose dated inside a CLOSED month -> 409 and nothing is written; in an open month each run posts with its row, a second run posts its own delta, a dispose posts once', async () => {
+    const created = await api('post', '/fixed-assets', ID.bizAsset).send({
+      name: `${P}van`, category: 'vehicle', purchaseDate: '2024-01-15T12:00:00.000Z', purchaseCost: 1200, salvageValue: 0, usefulLifeMonths: 120,
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const assetId: string = created.body.id;
+    const row = async () => {
+      const a = await db.fixedAsset.findUnique({ where: { id: assetId } });
+      return `${a.status}:${Number(a.accumulatedDepreciation)}:${Number(a.netBookValue)}:${a.disposalDate?.toISOString() ?? null}:${a.disposalProceeds == null ? null : Number(a.disposalProceeds)}`;
+    };
+    expect(await row()).toBe('ACTIVE:0:1200:null:null');
+    expect((await openAndClose(ID.bizAsset, last.year, last.month)).status).toBe('CLOSED');
+    const before = await ledgerCounts(ID.bizAsset);
+
+    // At 2dd2eb65 both wrote the asset row first, outside the posting's transaction:
+    // the depreciation left accumulated ahead of the ledger, the disposal a DISPOSED asset with no posting.
+    const dep = await api('post', `/fixed-assets/${assetId}/depreciate`, ID.bizAsset).send({ asOf: inClosedMonth });
+    expect(dep.status, JSON.stringify(dep.body)).toBe(409);
+    expect(dep.body.message).toMatch(/closed/i);
+    expect(await row(), 'depreciation in a closed month writes nothing').toBe('ACTIVE:0:1200:null:null');
+    const disp = await api('post', `/fixed-assets/${assetId}/dispose`, ID.bizAsset).send({ proceeds: 300, disposalDate: inClosedMonth });
+    expect(disp.status, JSON.stringify(disp.body)).toBe(409);
+    expect(await row(), 'disposal in a closed month writes nothing').toBe('ACTIVE:0:1200:null:null');
+    expect(await fixedAssetPostings(assetId)).toEqual([]);
+    expect(await ledgerCounts(ID.bizAsset)).toEqual(before);
+
+    // Open months: the current one and two ahead (a month closes only once it has ended).
+    const now = new Date();
+    const asOf1 = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 15, 12, 0, 0));
+    const asOf2 = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 2, 15, 12, 0, 0));
+    const months1 = (asOf1.getUTCFullYear() - 2024) * 12 + asOf1.getUTCMonth();
+    const run1 = await api('post', `/fixed-assets/${assetId}/depreciate`, ID.bizAsset).send({ asOf: asOf1.toISOString() });
+    expect(run1.status, JSON.stringify(run1.body)).toBe(201);
+    expect(Number(run1.body.accumulatedDepreciation)).toBe(months1 * 10);
+    const run2 = await api('post', `/fixed-assets/${assetId}/depreciate`, ID.bizAsset).send({ asOf: asOf2.toISOString() });
+    expect(run2.status, JSON.stringify(run2.body)).toBe(201);
+    expect(Number(run2.body.accumulatedDepreciation)).toBe((months1 + 2) * 10);
+    // A replay of the second run has no delta and posts nothing.
+    expect((await api('post', `/fixed-assets/${assetId}/depreciate`, ID.bizAsset).send({ asOf: asOf2.toISOString() })).status).toBe(201);
+
+    const depPostings = await fixedAssetPostings(assetId);
+    // At 2dd2eb65 every run shared the externalRef FixedAsset:<id>:depreciation, so the
+    // second run's 20 was deduped away while the row moved on.
+    expect(depPostings.map((t: any) => `${Number(t.amount)}@${t.date.toISOString()}`)).toEqual([
+      `${months1 * 10}@${asOf1.toISOString()}`,
+      `20@${asOf2.toISOString()}`,
+    ]);
+    expect(new Set(depPostings.map((t: any) => t.externalRef)).size).toBe(2);
+    const accDepCredit = depPostings
+      .flatMap((t: any) => t.entries)
+      .filter((e: any) => e.account.systemKey === 'ACCUMULATED_DEPRECIATION')
+      .reduce((s: number, e: any) => s + Number(e.credit) - Number(e.debit), 0);
+    expect(accDepCredit, 'the ledger holds what the asset row says').toBe((months1 + 2) * 10);
+
+    const disposed = await api('post', `/fixed-assets/${assetId}/dispose`, ID.bizAsset).send({ proceeds: 900, disposalDate: asOf1.toISOString() });
+    expect(disposed.status, JSON.stringify(disposed.body)).toBe(201);
+    const acc = (months1 + 2) * 10;
+    expect(await row()).toBe(`DISPOSED:${acc}:${1200 - acc}:${asOf1.toISOString()}:900`);
+    const again = await api('post', `/fixed-assets/${assetId}/dispose`, ID.bizAsset).send({ proceeds: 900, disposalDate: asOf1.toISOString() });
+    expect(again.status, JSON.stringify(again.body)).toBe(400);
+    const disposal = (await fixedAssetPostings(assetId)).filter((t: any) => t.externalRef === `FixedAsset:${assetId}:disposal`);
+    expect(disposal).toHaveLength(1);
+    const lines = disposal[0].entries.map((e: any) => `${e.account.systemKey}:${Number(e.debit)}:${Number(e.credit)}`).sort();
+    const gain = 900 - (1200 - acc);
+    expect(lines).toEqual([
+      `ACCUMULATED_DEPRECIATION:${acc}:0`,
+      'BANK:900:0',
+      'FIXED_ASSET_EQUIPMENT:0:1200',
+      gain > 0 ? `GAIN_LOSS_ON_DISPOSAL:0:${gain}` : `GAIN_LOSS_ON_DISPOSAL:${-gain}:0`,
+    ].sort());
+
+    // An asset never depreciated, written off for nothing, disposed twice at once: one
+    // disposal posting with no zero entry (at 2dd2eb65 its zero proceeds / zero
+    // accumulated entries made post() refuse it with 400 after the row was DISPOSED).
+    const scrap = await api('post', '/fixed-assets', ID.bizAsset).send({
+      name: `${P}printer`, category: 'technology', purchaseDate: asOf1.toISOString(), purchaseCost: 500, salvageValue: 0, usefulLifeMonths: 60,
+    });
+    expect(scrap.status, JSON.stringify(scrap.body)).toBe(201);
+    const both = await Promise.all([0, 1].map(() =>
+      api('post', `/fixed-assets/${scrap.body.id}/dispose`, ID.bizAsset).send({ proceeds: 0, disposalDate: asOf1.toISOString() })));
+    expect(both.map((r) => r.status).sort(), JSON.stringify(both.map((r) => r.body))).toEqual([201, 400]);
+    const scrapPostings = await fixedAssetPostings(scrap.body.id);
+    expect(scrapPostings).toHaveLength(1);
+    expect(scrapPostings[0].entries.map((e: any) => `${e.account.systemKey}:${Number(e.debit)}:${Number(e.credit)}`).sort()).toEqual([
+      'FIXED_ASSET_EQUIPMENT:0:500',
+      'GAIN_LOSS_ON_DISPOSAL:500:0',
+    ]);
+    expect((await db.fixedAsset.findUnique({ where: { id: scrap.body.id } })).status).toBe('DISPOSED');
+
+    // Nothing is dated inside the closed month.
+    const closedFrom = new Date(Date.UTC(last.year, last.month - 1, 1));
+    const closedTo = new Date(Date.UTC(last.year, last.month, 1));
+    expect(await db.financialTransaction.count({ where: { businessId: ID.bizAsset, date: { gte: closedFrom, lt: closedTo } } })).toBe(0);
+    await expectBalanced(ID.bizAsset);
+  }, 60_000);
+
+  it('LWD-13 (CR-3): statement import with auto-match: the rule-matched row dated in a CLOSED month stays UNMATCHED with a visible reason; the other rows match, each to its own posting; the import succeeds', async () => {
+    const bankCoa = await accountId(ID.bizBank, 'BANK');
+    const expenseCoa = await accountId(ID.bizBank, 'EXPENSE_GENERAL');
+    await db.financialAccount.create({
+      data: { id: ID.bankAcct, businessId: ID.bizBank, chartOfAccountId: bankCoa, name: `${P}Operating account`, type: 'BANK', currency: 'TTD' },
+    });
+    const rule = await api('post', '/bank-rules', ID.bizBank).send({ name: `${P}coffee`, pattern: 'v15a coffee', matchType: 'contains', accountId: expenseCoa });
+    expect(rule.status, JSON.stringify(rule.body)).toBe(201);
+    const ruleId: string = rule.body.id;
+    const closed = await openAndClose(ID.bizBank, last.year, last.month);
+    expect(closed.status).toBe('CLOSED');
+
+    const today = new Date().toISOString().slice(0, 10);
+    const csv = [
+      'Date,Description,Amount,Reference',
+      `${inClosedMonth.slice(0, 10)},V15A COFFEE in the closed month,-15.00,V15A-R1`,
+      `${today},V15A COFFEE one,-20.00,V15A-R2`,
+      `${today},V15A COFFEE two,-25.00,V15A-R3`,
+    ].join('\n');
+    const imported = await api('post', `/accounts/${ID.bankAcct}/bank-transactions/import`, ID.bizBank)
+      .attach('file', Buffer.from(csv, 'utf8'), { filename: 'statement.csv', contentType: 'text/csv' });
+    // At 2dd2eb65 the closed-month row's 409 escaped applyRules and failed the import after ingest.
+    expect(imported.status, JSON.stringify(imported.body)).toBe(201);
+    expect(imported.body).toMatchObject({ parsed: 3, inserted: 3 });
+
+    const rows = await db.bankTransaction.findMany({ where: { businessId: ID.bizBank, accountId: ID.bankAcct } });
+    const byRef = Object.fromEntries(rows.map((r: any) => [r.reference, r]));
+    expect(byRef['V15A-R1'].status).toBe('UNMATCHED');
+    expect(byRef['V15A-R1'].matchedTransactionId).toBeNull();
+    for (const [ref, amount] of [['V15A-R2', 20], ['V15A-R3', 25]] as const) {
+      const bank = byRef[ref];
+      expect(bank.status, ref).toBe('MATCHED');
+      const txn = await db.financialTransaction.findUnique({ where: { id: bank.matchedTransactionId }, include: { entries: true } });
+      // At 2dd2eb65 both rows shared BankRule:<ruleId>:default: the second was linked to the first's posting.
+      expect(txn.externalRef, ref).toBe(`BankRule:${ruleId}:${bank.id}`);
+      expect(Number(txn.amount), ref).toBe(amount);
+      expect(txn.date.toISOString(), ref).toBe(bank.date.toISOString());
+      const label = (id: string) => (id === expenseCoa ? 'EXPENSE' : id === bankCoa ? 'BANK' : id);
+      expect(txn.entries.map((e: any) => `${label(e.accountId)}:${Number(e.debit)}:${Number(e.credit)}`).sort()).toEqual(
+        [`BANK:0:${amount}`, `EXPENSE:${amount}:0`],
+      );
+    }
+    expect(byRef['V15A-R2'].matchedTransactionId).not.toBe(byRef['V15A-R3'].matchedTransactionId);
+
+    // The reason is visible: a finance audit row on the skipped bank row ...
+    const audit = await db.teamActivityLog.findMany({ where: { businessId: ID.bizBank, module: 'finance', entityType: 'BankTransaction', entityId: byRef['V15A-R1'].id } });
+    expect(audit).toHaveLength(1);
+    expect(audit[0].action).toBe('BANK_TRANSACTION_UNMATCHED');
+    expect(audit[0].detail).toMatch(/closed/i);
+    expect(audit[0].meta).toMatchObject({ ruleId, reason: expect.stringMatching(/closed/i) });
+    // ... and the skipped list of a direct apply, which writes nothing either.
+    const before = await ledgerCounts(ID.bizBank);
+    const applied = await api('post', '/bank-rules/apply', ID.bizBank).send({ bankTransactionIds: [byRef['V15A-R1'].id] });
+    expect(applied.status, JSON.stringify(applied.body)).toBe(201);
+    expect(applied.body).toMatchObject({ scanned: 1, matched: 0, createdTransactions: 0 });
+    expect(applied.body.skipped).toEqual([{ bankTransactionId: byRef['V15A-R1'].id, ruleId, reason: expect.stringMatching(/closed/i) }]);
+    expect(await ledgerCounts(ID.bizBank)).toEqual(before);
+    expect((await db.bankTransaction.findUnique({ where: { id: byRef['V15A-R1'].id } })).status).toBe('UNMATCHED');
+
+    // Reopened, the row matches and posts once, dated in its own month.
+    await periods.reopen(ID.bizBank, closed.id, { reopenedById: ID.owner });
+    const reapplied = await api('post', '/bank-rules/apply', ID.bizBank).send({ bankTransactionIds: [byRef['V15A-R1'].id] });
+    expect(reapplied.status, JSON.stringify(reapplied.body)).toBe(201);
+    expect(reapplied.body).toMatchObject({ scanned: 1, matched: 1, createdTransactions: 1, skipped: [] });
+    const r1 = await db.bankTransaction.findUnique({ where: { id: byRef['V15A-R1'].id } });
+    expect(r1.status).toBe('MATCHED');
+    const r1Txn = await db.financialTransaction.findUnique({ where: { id: r1.matchedTransactionId } });
+    expect(r1Txn.externalRef).toBe(`BankRule:${ruleId}:${r1.id}`);
+    expect(r1Txn.date.toISOString()).toBe(r1.date.toISOString());
+    expect(await db.financialTransaction.count({ where: { businessId: ID.bizBank, sourceType: 'BankRule' } })).toBe(3);
+    await expectBalanced(ID.bizBank);
+  }, 60_000);
 });
 
 describe('M30: real-database trial balance after payment, refund and void', () => {

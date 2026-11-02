@@ -38,14 +38,16 @@
  *   EVR-09  another tenant's expense id on this tenant's route -> 404; untouched
  *   EVR-10  trial balance of the tenant afterwards: sum(debit) = sum(credit) per
  *           currency; every transaction balanced
- *   (todo)  review CR-1: a voided PAID expense nets to zero in the cash-basis
- *           P&L. Blocked outside this packet's write set (the P&L reader), see
- *           the case.
+ *   EVR-11  (V1-15 review CR-1, landed by V1-15b-LEDGER-DOOR-COMPANIONS) a voided
+ *           PAID expense and a voided paid BILL net to zero in the cash-basis P&L
+ *           and cashflow over a range covering both sides, and the accrual P&L
+ *           agrees; the original's month still shows the expense and the void's
+ *           month shows its reversal, on both bases
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, TeamAuditInterceptor, BillsController, ExpensesService,
- * ExpensePostingService, PostingService, AccountingPeriodService and
- * ChartOfAccountsSeederService write real rows, with the production
+ * ExpensePostingService, PostingService, AccountingPeriodService,
+ * ChartOfAccountsSeederService and LedgerReportingService read and write real rows, with the production
  * GlobalHttpExceptionFilter + ValidationPipe. Identity attachment is the one
  * stand-in (`x-v15b-user`, as the Supabase-verifying AuthMiddleware would).
  * EventEmitter2 and the timeline are recorders off the ledger path.
@@ -63,6 +65,7 @@ import { sqlLikePrefix } from './helpers/sql-like.js';
 import type { AccountingPeriodService } from '../src/modules/finance/accounting-period.service';
 import type { ChartOfAccountsSeederService } from '../src/modules/finance/chart-of-accounts-seeder.service';
 import type { ExpensesService } from '../src/modules/expenses/expenses.service';
+import type { LedgerReportingService } from '../src/modules/reports/ledger-reporting.service';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
@@ -75,6 +78,7 @@ const ID = {
   biz: `${P}biz`, // the tenant under test
   bizNow: `${P}bizNow`, // its current period gets closed
   bizF: `${P}bizF`, // a foreign tenant, current period closed
+  bizPnl: `${P}bizPnl`, // review CR-1: the reports over voided expenses
   finAccount: `${P}cashAccount`,
   recon: `${P}recon`,
 };
@@ -84,6 +88,7 @@ let app: any;
 let expenses: ExpensesService;
 let periods: AccountingPeriodService;
 let coa: ChartOfAccountsSeederService;
+let reporting: LedgerReportingService;
 
 const eventStub = {
   emit: () => true,
@@ -214,6 +219,9 @@ beforeAll(async () => {
   const PeriodMod = await import('../src/modules/finance/accounting-period.service');
   const SeederMod = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  const ReportingMod = await import('../src/modules/reports/ledger-reporting.service');
+  const { LedgerBalanceService } = await import('../src/modules/finance/ledger-balance.service');
+  const { ReceivablesService } = await import('../src/modules/finance/receivables.service');
 
   const moduleRef = await Test.createTestingModule({
     controllers: [BillsController],
@@ -228,6 +236,9 @@ beforeAll(async () => {
       PostingService,
       PeriodMod.AccountingPeriodService,
       SeederMod.ChartOfAccountsSeederService,
+      ReportingMod.LedgerReportingService,
+      LedgerBalanceService,
+      ReceivablesService,
       { provide: EventEmitter2, useValue: eventStub },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
     ],
@@ -235,6 +246,7 @@ beforeAll(async () => {
   expenses = moduleRef.get(ExpensesMod.ExpensesService);
   periods = moduleRef.get(PeriodMod.AccountingPeriodService);
   coa = moduleRef.get(SeederMod.ChartOfAccountsSeederService);
+  reporting = moduleRef.get(ReportingMod.LedgerReportingService);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -452,12 +464,57 @@ describe('M30: trial balance after the voids', () => {
     }
   });
 
-  // Review CR-1. The ledger nets a void to zero (EVR-02, EVR-10); the cash-basis
-  // P&L does not: LedgerReportingService.computeCashBasisPnl
-  // (reports/ledger-reporting.service.ts:190) reads only status POSTED, so once
-  // PostingService.reverse marks the original REVERSED it drops out and the POSTED
-  // reversal counts as a negative expense (a payment refunded through the same
-  // door already shows as negative income there). The reader is outside the
-  // V1-15 write set; the fix is to read POSTED and REVERSED.
-  it.todo('CR-1: a voided PAID expense nets to zero in the cash-basis P&L over a range covering both (blocked: computeCashBasisPnl reads status POSTED only; ledger-reporting.service.ts is outside the V1-15 write set)');
+  // Review CR-1. The ledger nets a void to zero (EVR-02, EVR-10). At 2dd2eb65 the
+  // cash-basis P&L did not: LedgerReportingService.computeCashBasisPnl read status
+  // POSTED only, so once PostingService.reverse marked the original REVERSED it
+  // dropped out while its POSTED reversal counted as a negative expense, and a
+  // reversed bill payment (Dr Cash / Cr AP) was skipped as a non-operating move.
+  it('EVR-11 (review CR-1): a voided PAID expense and a voided paid BILL net to zero in the cash-basis P&L and cashflow; the accrual P&L agrees; each month shows its own side', async () => {
+    await db.business.create({ data: { id: ID.bizPnl, name: `V15B ${ID.bizPnl}`, ownerId: ID.owner, currency: 'TTD' } });
+    await db.membership.create({ data: { id: `${ID.bizPnl}_m`, userId: ID.owner, businessId: ID.bizPnl, role: 'OWNER' } });
+    await coa.ensureDefaults(ID.bizPnl);
+    // May 2025 (open): a paid expense (30) and a bill (80) paid that month, both voided
+    // today; a paid expense (12) kept.
+    const voided = await paidExpense(ID.bizPnl, 'pnl voided expense', 30, new Date(Date.UTC(2025, 4, 10, 12, 0, 0)));
+    const bill = await expenses.createExpense({
+      businessId: ID.bizPnl, description: `${P}pnl voided bill`, amount: 80, currency: 'TTD', status: 'BILL', date: new Date(Date.UTC(2025, 4, 12, 12, 0, 0)),
+    });
+    await expenses.markBillPaid({ businessId: ID.bizPnl, expenseId: bill.id, paymentMethod: 'cash', paidAt: new Date(Date.UTC(2025, 4, 14, 12, 0, 0)) });
+    await paidExpense(ID.bizPnl, 'pnl kept expense', 12, new Date(Date.UTC(2025, 4, 20, 12, 0, 0)));
+    for (const id of [voided.id, bill.id]) expect((await voidBill(id, ID.bizPnl)).status, id).toBe(201);
+    expectReversedThroughDoor(await txnsOf(voided.id), 1);
+    expectReversedThroughDoor(await txnsOf(bill.id), 2);
+
+    const now = new Date();
+    const ranges: Array<[string, Date, Date, number]> = [
+      // Covering both sides: only the kept expense.
+      ['both sides', new Date(Date.UTC(2025, 4, 1)), new Date(now.getTime() + 86_400_000), 12],
+      // The original's month: what was paid then (the void does not rewrite a past month).
+      ['May 2025', new Date(Date.UTC(2025, 4, 1)), new Date(Date.UTC(2025, 4, 31, 23, 59, 59, 999)), 122],
+      // The void's month: the reversals, offset in the open period.
+      ['this month', new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)), new Date(now.getTime() + 86_400_000), -110],
+    ];
+    for (const [label, from, to, opex] of ranges) {
+      const cash = await reporting.getPnl(ID.bizPnl, from, to, 'cash');
+      const accrual = await reporting.getPnl(ID.bizPnl, from, to, 'accrual');
+      expect(cash.operatingExpenses.total, `cash-basis expenses, ${label}`).toBe(opex);
+      expect(accrual.operatingExpenses.total, `accrual expenses, ${label}`).toBe(opex);
+      expect(cash.netProfit, `cash-basis net profit, ${label}`).toBe(-opex);
+      expect(accrual.netProfit, `accrual net profit, ${label}`).toBe(-opex);
+      const flow = await reporting.getCashflow(ID.bizPnl, from, to, 'cash');
+      expect(flow.netMovement, `cash-basis operating cash, ${label}`).toBe(-opex);
+      expect(flow.accrualAdjustments.netIncome, `cash-basis net income, ${label}`).toBe(-opex);
+    }
+
+    const unbalanced = await db.$queryRawUnsafe(
+      `SELECT transaction_id FROM ledger_entries WHERE business_id = $1 GROUP BY transaction_id HAVING SUM(debit) <> SUM(credit)`,
+      ID.bizPnl,
+    );
+    expect(unbalanced).toEqual([]);
+    const [totals] = await db.$queryRawUnsafe(
+      `SELECT SUM(debit)::text AS debit, SUM(credit)::text AS credit FROM ledger_entries WHERE business_id = $1`,
+      ID.bizPnl,
+    );
+    expect(Number(totals.debit)).toBe(Number(totals.credit));
+  });
 });
