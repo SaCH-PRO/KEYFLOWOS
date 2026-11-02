@@ -1,8 +1,8 @@
-import { Injectable, Inject, NotFoundException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, ConflictException } from '@nestjs/common';
 import type { BankRule as BankRuleModel } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { PostingService } from './posting.service';
+import { PostingService, type PostingResult } from './posting.service';
 import { FinanceAuditService } from './finance-audit.service';
 
 const D = Prisma.Decimal;
@@ -29,10 +29,19 @@ export interface UpdateBankRuleInput {
   isActive?: boolean;
 }
 
+export interface ApplyRulesSkip {
+  bankTransactionId: string;
+  ruleId: string;
+  /** Why the matched rule was not applied; the row stays UNMATCHED. */
+  reason: string;
+}
+
 export interface ApplyRulesResult {
   scanned: number;
   matched: number;
   createdTransactions: number;
+  /** Rows a rule matched but could not post (e.g. dated inside a CLOSED accounting period). */
+  skipped: ApplyRulesSkip[];
 }
 
 /**
@@ -117,19 +126,32 @@ export class BankRuleService {
    * Apply active bank rules to a set of UNMATCHED bank transactions.
    * For each match, creates a categorized FinancialTransaction and links
    * the bank row to it. Returns counts for telemetry.
+   *
+   * V1-15b (V1-15 review CR-3): each row's posting and its MATCHED link are
+   * one transaction, keyed per row (`BankRule:<ruleId>:<bankTransactionId>`,
+   * so two rows one rule matches each post once, and re-applying a row
+   * re-links its own posting). A row the posting door refuses with 409
+   * (dated inside a CLOSED accounting period) stays UNMATCHED: it is listed
+   * in `skipped` with the reason and a finance audit row records it, and the
+   * other rows are still applied, so a statement import never fails on it.
+   *
+   * V1-15b review repairs: the row is claimed (UNMATCHED -> MATCHED) before
+   * its posting, so two concurrent applies of one row post once and both
+   * succeed (SEC-V15b-3 / CRR-1); a re-link is refused when the earlier
+   * posting was reversed or another bank row claims it (SEC-V15b-4).
    */
   async applyRules(
     businessId: string,
     bankTransactionIds: string[],
     opts: { userId?: string | null } = {},
   ): Promise<ApplyRulesResult> {
-    if (bankTransactionIds.length === 0) return { scanned: 0, matched: 0, createdTransactions: 0 };
+    if (bankTransactionIds.length === 0) return { scanned: 0, matched: 0, createdTransactions: 0, skipped: [] };
 
     const rules = await this.prisma.client.bankRule.findMany({
       where: { businessId, isActive: true },
       orderBy: [{ priority: 'desc' }, { createdAt: 'asc' }],
     });
-    if (rules.length === 0) return { scanned: 0, matched: 0, createdTransactions: 0 };
+    if (rules.length === 0) return { scanned: 0, matched: 0, createdTransactions: 0, skipped: [] };
 
     const bankRows = await this.prisma.client.bankTransaction.findMany({
       where: { id: { in: bankTransactionIds }, businessId, status: 'UNMATCHED' },
@@ -138,6 +160,7 @@ export class BankRuleService {
 
     let matched = 0;
     let createdTransactions = 0;
+    const skipped: ApplyRulesSkip[] = [];
 
     for (const bank of bankRows) {
       const text = `${bank.description} ${bank.reference ?? ''}`.trim();
@@ -153,6 +176,7 @@ export class BankRuleService {
       const bankCoaId = bank.account.chartOfAccountId;
       if (!bankCoaId) {
         console.warn(`[BankRule] Skipping bank transaction ${bank.id}: account has no chartOfAccountId`);
+        skipped.push({ bankTransactionId: bank.id, ruleId: rule.id, reason: 'The bank account is not linked to a chart-of-account' });
         continue;
       }
 
@@ -166,30 +190,68 @@ export class BankRuleService {
             { accountId: bankCoaId, debit: new D(0), credit: amount, memo: `Rule: ${rule.name}` },
           ];
 
-      const txn = await this.posting.post(
-        {
+      let txn: PostingResult | null;
+      try {
+        txn = await this.prisma.client.$transaction(async (rawTx) => {
+          const tx = rawTx as unknown as Prisma.TransactionClient;
+          // The row is claimed before anything is posted (V1-15b review
+          // SEC-V15b-3 / CRR-1). A concurrent apply of the same row waits on
+          // this claim, then finds the row MATCHED and leaves it, as if it had
+          // been MATCHED when the rows were read. Posting first let both reach
+          // the posting's key: the loser's insert failed inside this
+          // transaction, which aborted it, and the link after it answered 500.
+          const claimed = await tx.bankTransaction.updateMany({
+            where: { id: bank.id, businessId, status: 'UNMATCHED' },
+            data: { status: 'MATCHED' },
+          });
+          if (claimed.count !== 1) return null;
+          const posted = await this.posting.post(
+            {
+              businessId,
+              type: 'ADJUSTMENT',
+              date: bank.date,
+              amount: amount.toNumber(),
+              currency: bank.account.currency,
+              description: `${isDeposit ? 'Deposit' : 'Withdrawal'}: ${bank.description}`.slice(0, 255),
+              reference: bank.reference ?? null,
+              sourceType: 'BankRule',
+              sourceId: rule.id,
+              // One posting per bank row: the rule alone would key every row it matches the same.
+              kind: bank.id,
+              notes: `Auto-categorized by bank rule "${rule.name}"`,
+              entries,
+              createdById: opts.userId ?? null,
+            },
+            tx,
+          );
+          // A re-applied row re-links its own earlier posting on a manual match's terms.
+          if (posted.alreadyPosted) await this.assertRelinkable(tx, businessId, bank.id, posted.transactionId);
+          await tx.bankTransaction.updateMany({
+            where: { id: bank.id, businessId },
+            data: { matchedTransactionId: posted.transactionId },
+          });
+          return posted;
+        });
+      } catch (err) {
+        if (!(err instanceof ConflictException)) throw err;
+        const reason = err.message;
+        skipped.push({ bankTransactionId: bank.id, ruleId: rule.id, reason });
+        await this.audit.log({
           businessId,
-          type: 'ADJUSTMENT',
-          date: bank.date,
-          amount: amount.toNumber(),
-          currency: bank.account.currency,
-          description: `${isDeposit ? 'Deposit' : 'Withdrawal'}: ${bank.description}`.slice(0, 255),
-          reference: bank.reference ?? null,
-          sourceType: 'BankRule',
-          sourceId: rule.id,
-          notes: `Auto-categorized by bank rule "${rule.name}"`,
-          entries,
-          createdById: opts.userId ?? null,
-        },
-        undefined, // use own transaction
-      );
+          userId: opts.userId ?? null,
+          action: 'BANK_TRANSACTION_UNMATCHED',
+          entityType: 'BankTransaction',
+          entityId: bank.id,
+          title: 'Bank rule not applied',
+          detail: `Rule "${rule.name}" matched but was not applied: ${reason}`,
+          meta: { ruleId: rule.id, ruleName: rule.name, reason },
+        });
+        continue;
+      }
+      // Matched meanwhile (a concurrent apply, or a manual match): not this call's row.
+      if (!txn) continue;
 
-      createdTransactions += 1;
-
-      await this.prisma.client.bankTransaction.update({
-        where: { id: bank.id },
-        data: { matchedTransactionId: txn.transactionId, status: 'MATCHED' },
-      });
+      if (!txn.alreadyPosted) createdTransactions += 1;
 
       await this.audit.log({
         businessId,
@@ -205,7 +267,7 @@ export class BankRuleService {
       matched += 1;
     }
 
-    return { scanned: bankRows.length, matched, createdTransactions };
+    return { scanned: bankRows.length, matched, createdTransactions, skipped };
   }
 
   /**
@@ -229,6 +291,28 @@ export class BankRuleService {
     }
     const rows = await this.prisma.client.bankTransaction.findMany({ where, select: { id: true } });
     return this.applyRules(businessId, rows.map((r) => r.id), opts);
+  }
+
+  /**
+   * V1-15b review SEC-V15b-4: a row re-applied after an unmatch gets its own
+   * earlier rule posting back (the key dedupes, nothing new is posted), but
+   * only on the terms BankMatchingService.manualMatch sets for any link: the
+   * posting is still POSTED, and no other bank row has claimed it since, so
+   * one ledger transaction never reconciles two bank lines. Otherwise the row
+   * stays UNMATCHED and is skipped with the reason.
+   */
+  private async assertRelinkable(tx: Prisma.TransactionClient, businessId: string, bankTransactionId: string, transactionId: string) {
+    const txn = await tx.financialTransaction.findFirst({ where: { id: transactionId, businessId }, select: { status: true } });
+    if (txn?.status !== 'POSTED') {
+      throw new ConflictException('Its earlier rule posting is no longer POSTED (reversed or void); match the row manually');
+    }
+    const claim = await tx.bankTransaction.findFirst({
+      where: { businessId, matchedTransactionId: transactionId, status: 'MATCHED', id: { not: bankTransactionId } },
+      select: { id: true },
+    });
+    if (claim) {
+      throw new ConflictException(`Its earlier rule posting is already matched to another bank row (${claim.id})`);
+    }
   }
 
   private findMatchingRule(text: string, rules: BankRuleModel[]): BankRuleModel | null {

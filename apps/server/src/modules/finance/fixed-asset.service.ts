@@ -1,7 +1,8 @@
-import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { PostingService, type PostingInput } from './posting.service';
+import { AccountingPeriodService } from './accounting-period.service';
 
 export interface CreateFixedAssetInput {
   name: string;
@@ -28,6 +29,7 @@ export class FixedAssetService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(PostingService) private readonly posting: PostingService,
+    @Inject(AccountingPeriodService) private readonly periods: AccountingPeriodService,
   ) {}
 
   async list(businessId: string) {
@@ -138,47 +140,107 @@ export class FixedAssetService {
     };
   }
 
+  /**
+   * Bring the asset's accumulated depreciation up to `asOf` and post the
+   * increment.
+   *
+   * V1-15b (V1-15 review CR-2): the asset row and its posting are one
+   * transaction, so a posting the door refuses (409 for a date inside a
+   * CLOSED period) leaves the row as it was. The update is a compare-and-set
+   * on the accumulated figure and the status this run started from, so two
+   * concurrent runs cannot both apply it. Each increment is keyed by the
+   * accumulated figure it brings the asset to (`FixedAsset:<id>:depreciation:<to>`),
+   * so every run posts its own delta (one key for every run deduped all but
+   * the first and let the row run ahead of the ledger).
+   *
+   * V1-15b review repairs:
+   *  - SEC-V15b-1: the run's date is checked against the CLOSED periods first,
+   *    before anything is written and whether or not the run would post, so a
+   *    run dated inside a closed month is refused (409) and writes nothing.
+   *    Accumulated depreciation only moves forward: a run that would not raise
+   *    it (a replay, or an earlier asOf) writes nothing and returns the asset
+   *    as it is. Writing the figure down left the ledger above the row, and
+   *    the next run then posted the whole climb back a second time.
+   *  - SEC-V15b-2 / CRR-2: a DISPOSED asset is not depreciated (400). The
+   *    status is part of the compare-and-set, so a disposal that commits first
+   *    makes the run refuse instead of writing the asset back to ACTIVE or
+   *    posting depreciation the disposal already took off the books.
+   */
   async runDepreciation(businessId: string, id: string, asOf?: Date) {
     const asset = await this.get(businessId, id);
+    if (asset.status === 'DISPOSED') throw new BadRequestException('Cannot depreciate a disposed asset');
     const calc = await this.calculateDepreciation(businessId, id, asOf);
+    const date = asOf ?? new Date();
 
     const currentAccumulated = new D(String(asset.accumulatedDepreciation));
-    const delta = new D(String(calc.accumulatedDepreciation)).sub(currentAccumulated);
+    const target = new D(String(calc.accumulatedDepreciation));
+    const delta = target.sub(currentAccumulated);
+    // Resolved before anything is written: a missing account refuses the run whole.
+    const accounts = delta.greaterThan(0)
+      ? {
+          depExpense: await this.resolveCoa(businessId, 'DEPRECIATION_EXPENSE'),
+          accDep: await this.resolveCoa(businessId, 'ACCUMULATED_DEPRECIATION'),
+        }
+      : null;
 
-    const updated = await this.prisma.client.fixedAsset.update({
-      where: { id },
-      data: {
-        accumulatedDepreciation: calc.accumulatedDepreciation,
-        netBookValue: calc.netBookValue,
-        status: calc.status,
-      },
-    });
+    return this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      // Every run, under the business's period lock, before any write (SEC-V15b-1).
+      await this.periods.assertOpenForPosting(businessId, date, tx);
+      // Nothing to add: the figure is never written down.
+      if (!accounts) return tx.fixedAsset.findUniqueOrThrow({ where: { id } });
 
-    // Post incremental depreciation to the General Ledger
-    if (delta.greaterThan(0)) {
-      const depExpenseCoa = await this.resolveCoa(businessId, 'DEPRECIATION_EXPENSE');
-      const accDepCoa = await this.resolveCoa(businessId, 'ACCUMULATED_DEPRECIATION');
+      // From the figure and the status read above (never DISPOSED: refused above).
+      const updated = await tx.fixedAsset.updateMany({
+        where: { id, businessId, status: asset.status, accumulatedDepreciation: asset.accumulatedDepreciation },
+        data: {
+          accumulatedDepreciation: calc.accumulatedDepreciation,
+          netBookValue: calc.netBookValue,
+          status: calc.status,
+        },
+      });
+      if (updated.count !== 1) {
+        const current = await tx.fixedAsset.findFirst({ where: { id, businessId }, select: { status: true } });
+        if (current?.status === 'DISPOSED') throw new BadRequestException('Cannot depreciate a disposed asset');
+        throw new ConflictException('Fixed asset changed while its depreciation ran; retry');
+      }
 
+      // Post incremental depreciation to the General Ledger
       const posting: PostingInput = {
         businessId,
         type: 'ADJUSTMENT',
-        date: asOf ?? new Date(),
+        date,
         amount: delta,
         description: `Depreciation — ${asset.name}`,
         sourceType: 'FixedAsset',
         sourceId: asset.id,
-        kind: 'depreciation',
+        kind: `depreciation:${target.toFixed(4)}`,
         entries: [
-          { accountId: depExpenseCoa.id, debit: delta, memo: `Depreciation expense for ${asset.name}` },
-          { accountId: accDepCoa.id, credit: delta, memo: `Accumulated depreciation for ${asset.name}` },
+          { accountId: accounts.depExpense.id, debit: delta, memo: `Depreciation expense for ${asset.name}` },
+          { accountId: accounts.accDep.id, credit: delta, memo: `Accumulated depreciation for ${asset.name}` },
         ],
       };
-      await this.posting.post(posting);
-    }
+      await this.posting.post(posting, tx);
 
-    return updated;
+      return tx.fixedAsset.findUniqueOrThrow({ where: { id } });
+    });
   }
 
+  /**
+   * Dispose of the asset and post the disposal.
+   *
+   * V1-15b (V1-15 review CR-2): the DISPOSED row and the disposal posting are
+   * one transaction, so a posting the door refuses (409 for a date inside a
+   * CLOSED period, or any other refusal) leaves the asset as it was. The
+   * status flip is a compare-and-set, so of two concurrent disposals one
+   * posts and the other answers 400. A zero leg (no proceeds, no accumulated
+   * depreciation) is left out: the door refuses an entry with neither side.
+   *
+   * V1-15b review SEC-V15b-2: a disposal the ledger already holds for an asset
+   * whose row is not DISPOSED (a row a depreciation run wrote back before that
+   * repair) is refused (409) rather than replayed: the replay posted nothing,
+   * passed no period check, and rewrote proceeds and a date the ledger never had.
+   */
   async dispose(businessId: string, id: string, proceeds: number, disposalDate?: string) {
     const asset = await this.get(businessId, id);
     if (asset.status === 'DISPOSED') throw new BadRequestException('Already disposed');
@@ -192,16 +254,7 @@ export class FixedAssetService {
     const proceedsD = new D(String(proceeds));
     const gainLoss = proceedsD.sub(nbv);
 
-    const updated = await this.prisma.client.fixedAsset.update({
-      where: { id },
-      data: {
-        status: 'DISPOSED',
-        disposalDate: dDate,
-        disposalProceeds: proceedsD,
-      },
-    });
-
-    // Post disposal transaction to General Ledger
+    // Resolved before anything is written: a missing account refuses the disposal whole.
     const cashCoa = await this.resolveCoa(businessId, 'BANK');
     const accDepCoa = await this.resolveCoa(businessId, 'ACCUMULATED_DEPRECIATION');
     const assetCoa = await this.resolveCoa(businessId, 'FIXED_ASSET_EQUIPMENT');
@@ -218,20 +271,46 @@ export class FixedAssetService {
     } else if (gainLoss.lessThan(0)) {
       entries.push({ accountId: gainLossCoa.id, debit: gainLoss.abs(), memo: `Loss on disposal of ${asset.name}` });
     }
+    const legs = entries.filter((e) => !new D(String(e.debit ?? 0)).eq(0) || !new D(String(e.credit ?? 0)).eq(0));
 
-    await this.posting.post({
-      businessId,
-      type: 'ADJUSTMENT',
-      date: dDate,
-      amount: cost,
-      description: `Disposal — ${asset.name}`,
-      sourceType: 'FixedAsset',
-      sourceId: asset.id,
-      kind: 'disposal',
-      entries,
+    return this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      // From the accumulated figure the entries were built from, and only once.
+      const claimed = await tx.fixedAsset.updateMany({
+        where: { id, businessId, status: { not: 'DISPOSED' }, accumulatedDepreciation: asset.accumulatedDepreciation },
+        data: {
+          status: 'DISPOSED',
+          disposalDate: dDate,
+          disposalProceeds: proceedsD,
+        },
+      });
+      if (claimed.count !== 1) {
+        const current = await tx.fixedAsset.findFirst({ where: { id, businessId }, select: { status: true } });
+        if (current?.status === 'DISPOSED') throw new BadRequestException('Already disposed');
+        throw new ConflictException('Fixed asset changed while it was being disposed; retry');
+      }
+
+      // Post disposal transaction to General Ledger
+      const posted = await this.posting.post(
+        {
+          businessId,
+          type: 'ADJUSTMENT',
+          date: dDate,
+          amount: cost,
+          description: `Disposal — ${asset.name}`,
+          sourceType: 'FixedAsset',
+          sourceId: asset.id,
+          kind: 'disposal',
+          entries: legs,
+        },
+        tx,
+      );
+      if (posted.alreadyPosted) {
+        throw new ConflictException('A disposal is already posted for this asset but its row does not show it; nothing was changed');
+      }
+
+      return tx.fixedAsset.findUniqueOrThrow({ where: { id } });
     });
-
-    return updated;
   }
 
   async remove(businessId: string, id: string) {
