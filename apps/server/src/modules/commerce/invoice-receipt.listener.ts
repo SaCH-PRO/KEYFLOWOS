@@ -38,9 +38,11 @@ export class InvoiceReceiptListener {
       const recipient = invoice.contact?.email;
       if (!recipient) return;
       // V1-49 (M24): the receipt states what the rows say was received. The
-      // figures are computeBalance's over the invoice's own-tenant rows (M31:
+      // figures are the balance of the invoice's own-tenant rows (M31:
       // getInvoiceWithBusiness loads full Payment rows, and a row carrying
-      // another businessId is not this invoice's money). An invoice read back
+      // another businessId is not this invoice's money), read through
+      // balanceOfStoredRows (V1-29b-REFUND-READERS: a pre-V1-29 flipped row is
+      // its payment plus its refund, CR-V29-4). An invoice read back
       // as anything but PAID with nothing remaining (a refund reopened it
       // before this ran, rows short of the total, no row at all) gets no
       // receipt, rather than one claiming full settlement; nothing is written.
@@ -96,7 +98,10 @@ export class InvoiceReceiptListener {
         discountValue: invoice.discountValue != null ? Number(invoice.discountValue) : null,
         discountAmount: invoice.discountAmount != null ? Number(invoice.discountAmount) : null,
         total: Number(invoice.total),
-        amountPaid: balance.paid,
+        // V1-29b-REFUND-READERS (CR-V29-3): the money received net of refunds.
+        // `paid` counts refunded money too: an invoice paid, fully refunded
+        // and paid again read "received TT$200.00" on a TT$100 invoice.
+        amountPaid: balance.net,
         amountRemaining: balance.remaining,
         currency: invoice.currency,
         notes: invoice.notes,
