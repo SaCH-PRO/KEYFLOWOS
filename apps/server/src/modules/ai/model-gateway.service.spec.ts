@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { ModelGatewayService, SELECTABLE_PROVIDERS, type GatewayRequest, type AiProvider, type AiMode, type TaskCategory } from './model-gateway.service';
 import { LLMCostService } from './llm-cost.service';
 import { LangfuseService } from './langfuse.service';
@@ -1054,6 +1055,136 @@ describe('ModelGatewayService', () => {
       expect(platform.openUntil).toBeNull();
       expect((svc as any).isProviderAvailable('openai', { aiMode: 'balanced' })).toBe(true);
       expect((svc as any).isProviderAvailable('openai', { aiMode: 'balanced', byokOpenai: 'tenant-E-revoked-key' })).toBe(false);
+    });
+  });
+
+  // V1-24-KEY-KILL-SWITCHES (D-17, M47, PRS-M05): KEY_DISABLED is the
+  // server-side KEY off switch, distinct from the storefront-only AI_DISABLED.
+  // With it on, dispatch is refused before anything is read or called: no
+  // preferences read, no routing load, no provider method, no SDK client, no
+  // fetch. The refusal is the R0-07 structured 503 (code
+  // provider_not_configured, so every existing consumer that passes that code
+  // through or declines to retry it keeps doing so), carrying reason
+  // 'key_disabled' so it is distinguishable from a missing key.
+  describe('KEY_DISABLED switches gateway dispatch off (V1-24)', () => {
+    const PROVIDER_METHODS = ['callOpenAi', 'callAnthropic', 'callXai', 'callKimi', 'callGoogle', 'callNative', 'callOpensource'];
+    const STREAM_METHODS = ['streamOpenAi', 'streamAnthropic', 'streamXai', 'streamKimi', 'streamGoogle', 'streamNative', 'streamOpensource'];
+
+    /** Every road to a provider, instrumented. Every provider is configured (setTestEnv). */
+    function instrument(svc: ModelGatewayService) {
+      const touched: string[] = [];
+      for (const method of [...PROVIDER_METHODS, 'callProvider', 'executeWithRetries', 'loadRoutingConfig', 'getPreferences']) {
+        const original = (svc as any)[method];
+        (svc as any)[method] = vi.fn(async (...args: unknown[]) => {
+          touched.push(method);
+          if (PROVIDER_METHODS.includes(method)) {
+            return { content: `${method} answered`, usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2, estimatedCost: 0 } };
+          }
+          return original.apply(svc, args);
+        });
+      }
+      for (const method of [...STREAM_METHODS, 'callProviderStream']) {
+        const original = (svc as any)[method];
+        (svc as any)[method] = vi.fn(function (this: unknown, ...args: unknown[]) {
+          touched.push(method);
+          return original.apply(svc, args);
+        });
+      }
+      const create = vi.spyOn((svc as any).openai.chat.completions, 'create').mockImplementation((() => {
+        touched.push('openai.chat.completions.create');
+        throw new Error('the OpenAI client must not be called');
+      }) as any);
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async () => {
+        touched.push('fetch');
+        throw new Error('no outbound request may be made');
+      }) as any);
+      (svc as any).delay = vi.fn().mockResolvedValue(undefined);
+      return { touched, create, fetchSpy };
+    }
+
+    async function refusal(promise: Promise<unknown>): Promise<any> {
+      try {
+        await promise;
+      } catch (err) {
+        return err;
+      }
+      throw new Error('expected the dispatch to be refused');
+    }
+
+    it('complete() with KEY_DISABLED=1 rejects with the structured 503 {code: provider_not_configured, reason: key_disabled, service: ai} and touches no provider client, routing load, preference read or fetch', async () => {
+      const svc = createService({ KEY_DISABLED: '1' });
+      const { touched } = instrument(svc);
+
+      const err = await refusal(svc.complete(baseRequest({ taskCategory: 'general' })));
+
+      expect(typeof err.getStatus).toBe('function');
+      expect(err.getStatus()).toBe(503);
+      expect(err.getResponse()).toMatchObject({ code: 'provider_not_configured', reason: 'key_disabled', service: 'ai' });
+      expect(err.message).toMatch(/KEY is switched off on this server \(KEY_DISABLED\)/);
+      expect(touched).toEqual([]);
+      expect(mockPrismaClient.aiMemory.findUnique).not.toHaveBeenCalled();
+      expect(mockLLMCostService.recordCost).not.toHaveBeenCalled();
+    });
+
+    it('streamComplete() with KEY_DISABLED=1 yields exactly one error chunk carrying code provider_not_configured and reason key_disabled, and streams from no provider', async () => {
+      const svc = createService({ KEY_DISABLED: 'true' });
+      const { touched } = instrument(svc);
+
+      const chunks: any[] = [];
+      for await (const chunk of svc.streamComplete(baseRequest({ taskCategory: 'general' }))) chunks.push(chunk);
+
+      expect(chunks).toHaveLength(1);
+      expect(chunks[0]).toMatchObject({ type: 'error', code: 'provider_not_configured', reason: 'key_disabled' });
+      expect(chunks[0].error).toMatch(/KEY is switched off on this server \(KEY_DISABLED\)/);
+      expect(touched).toEqual([]);
+      expect(mockPrismaClient.aiMemory.findUnique).not.toHaveBeenCalled();
+    });
+
+    it('control: with KEY_DISABLED unset the same instrumented service dispatches to a provider, so the empty lists above are a real answer', async () => {
+      const svc = createService({ KEY_DISABLED: null });
+      const { touched } = instrument(svc);
+
+      const res = await svc.complete(baseRequest({ taskCategory: 'general' }));
+
+      expect(res.content).toBe('callOpenAi answered');
+      expect(touched).toContain('callOpenAi');
+      expect(touched).toContain('getPreferences');
+    });
+
+    it('AI_DISABLED=1, the storefront-only switch, does not turn gateway dispatch off; KEY_DISABLED=0 is off', async () => {
+      for (const env of [{ AI_DISABLED: '1', KEY_DISABLED: null }, { AI_DISABLED: null, KEY_DISABLED: '0' }]) {
+        const svc = createService(env);
+        const { touched } = instrument(svc);
+        const res = await svc.complete(baseRequest({ taskCategory: 'general' }));
+        expect(res.content).toBe('callOpenAi answered');
+        expect(touched).toContain('callOpenAi');
+      }
+    });
+
+    it('the switch is read at dispatch time: set after construction it refuses, cleared it dispatches again', async () => {
+      const svc = createService({ KEY_DISABLED: null });
+      const { touched } = instrument(svc);
+
+      process.env.KEY_DISABLED = '1';
+      const err = await refusal(svc.complete(baseRequest({ taskCategory: 'general' })));
+      expect(err.getResponse()).toMatchObject({ reason: 'key_disabled' });
+      expect(touched).toEqual([]);
+
+      delete process.env.KEY_DISABLED;
+      const res = await svc.complete(baseRequest({ taskCategory: 'general' }));
+      expect(res.content).toBe('callOpenAi answered');
+    });
+
+    it('construction with KEY_DISABLED set logs one warning naming the switch (the boot line the Release 0 journey looks for)', () => {
+      const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+      createService({ KEY_DISABLED: '1' });
+      const lines = warn.mock.calls.map((c) => String(c[0]));
+      expect(lines.filter((l) => l.includes('KEY_DISABLED'))).toHaveLength(1);
+      expect(lines.find((l) => l.includes('KEY_DISABLED'))).toMatch(/KEY is switched off on this server/);
+
+      warn.mockClear();
+      createService({ KEY_DISABLED: null });
+      expect(warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('KEY_DISABLED'))).toEqual([]);
     });
   });
 });
