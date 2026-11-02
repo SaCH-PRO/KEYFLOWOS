@@ -353,6 +353,11 @@
       "packet": "V1-36-DM-BALANCE-READ-CONTRACT"
     },
     {
+      "prefix": "v37a_",
+      "owner": "apps/server/test/commerce-currency.integration.test.ts",
+      "packet": "V1-37-DM-CURRENCY"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"
