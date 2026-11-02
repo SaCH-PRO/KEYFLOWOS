@@ -1,8 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { createHmac } from 'crypto';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
-import { WhatsAppController } from '../src/modules/whatsapp/whatsapp.controller';
-import { MODULE_SCOPE_KEY } from '../src/core/auth/module-scope.guard';
+import { WhatsAppController, WhatsAppOperationsScopeGuard } from '../src/modules/whatsapp/whatsapp.controller';
+import { MODULE_SCOPE_KEY, ModuleScopeGuard } from '../src/core/auth/module-scope.guard';
 
 function metaSignature(body: string, secret: string): string {
   const sig = createHmac('sha256', secret).update(body).digest('hex');
@@ -125,8 +125,9 @@ describe('WhatsAppController route guards (R0-SEC2)', () => {
   };
   const WEBHOOKS = ['verifySharedWebhook', 'sharedWebhook', 'verifyWebhook', 'webhook'];
   const proto = WhatsAppController.prototype as unknown as Record<string, unknown>;
-  const guardNames = (name: string) =>
-    ((Reflect.getMetadata(GUARDS_METADATA, proto[name] as object) ?? []) as Array<{ name: string }>).map((g) => g.name);
+  const guardClasses = (name: string) =>
+    (Reflect.getMetadata(GUARDS_METADATA, proto[name] as object) ?? []) as Array<{ name: string; prototype: object }>;
+  const guardNames = (name: string) => guardClasses(name).map((g) => g.name);
 
   it('[SEC2-G01] every operator route runs AuthGuard and BusinessGuard, and each scoped one ModuleScopeGuard with its operations level', () => {
     for (const [name, { scope }] of Object.entries(OPERATOR)) {
@@ -134,8 +135,40 @@ describe('WhatsAppController route guards (R0-SEC2)', () => {
       const guards = guardNames(name);
       expect(guards.slice(0, 2), `${name}: ${guards.join(',')}`).toEqual(['AuthGuard', 'BusinessGuard']);
       expect(Reflect.getMetadata(MODULE_SCOPE_KEY, proto[name] as object) ?? null, `${name} scope`).toEqual(scope);
-      if (scope) expect(guards, `${name}: ${guards.join(',')}`).toContain('ModuleScopeGuard');
+      // ModuleScopeGuard itself or WhatsAppOperationsScopeGuard, which extends it (review CR-SEC2-1).
+      const scoped = guardClasses(name).filter((g) => g === (ModuleScopeGuard as unknown) || g.prototype instanceof ModuleScopeGuard);
+      if (scope) expect(scoped.length, `${name}: ${guards.join(',')}`).toBe(1);
+      else expect(scoped, `${name}: ${guards.join(',')}`).toEqual([]);
     }
+  });
+
+  it('[SEC2-G04] WhatsAppOperationsScopeGuard admits the config owner of the route\'s business without a membership row, and gives everyone else ModuleScopeGuard\'s answer (review CR-SEC2-1)', async () => {
+    const requirement = { module: 'operations', minLevel: 'write' };
+    const reflector = { get: vi.fn((key: string) => (key === MODULE_SCOPE_KEY ? requirement : undefined)) };
+    const membership = { findUnique: vi.fn(async () => null) };
+    const prisma = { client: { membership } };
+    const isConfigOwner = vi.fn(async (businessId: string, actor?: { id?: string }) => businessId === 'bizL' && actor?.id === 'legacy');
+    const guard = new WhatsAppOperationsScopeGuard(prisma as any, reflector as any, { isConfigOwner } as any);
+    expect(guard).toBeInstanceOf(ModuleScopeGuard);
+    const ctx = (req: Record<string, unknown>) =>
+      ({ switchToHttp: () => ({ getRequest: () => req }), getHandler: () => ({}) }) as any;
+
+    // The owner of the route's business: admitted, no membership read.
+    await expect(guard.canActivate(ctx({ user: { id: 'legacy' }, params: { businessId: 'bizL' } }))).resolves.toBe(true);
+    expect(isConfigOwner).toHaveBeenLastCalledWith('bizL', { id: 'legacy' });
+    expect(membership.findUnique).not.toHaveBeenCalled();
+
+    // Bound to the route's business: naming bizL in the body or query does not admit on bizW.
+    await expect(
+      guard.canActivate(ctx({ user: { id: 'legacy' }, params: { businessId: 'bizW' }, body: { businessId: 'bizL' }, query: { businessId: 'bizL' } })),
+    ).rejects.toThrow('Not a member of this business');
+    expect(isConfigOwner).toHaveBeenLastCalledWith('bizW', { id: 'legacy' });
+
+    // Anyone else: ModuleScopeGuard's own answer (here a STAFF member on role defaults, operations: read < write).
+    membership.findUnique.mockResolvedValueOnce({ role: 'STAFF', permissionScopes: null } as any);
+    await expect(guard.canActivate(ctx({ user: { id: 'staff' }, params: { businessId: 'bizW' } }))).rejects.toThrow(
+      /operations requires write access/,
+    );
   });
 
   it('[SEC2-G02] the webhooks stay unauthenticated (no guards: the provider handshake and signature are their checks)', () => {

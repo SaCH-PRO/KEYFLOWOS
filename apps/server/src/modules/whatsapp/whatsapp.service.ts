@@ -1,9 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
-import { encryptToken, decryptToken } from '../../core/crypto/token-crypto';
+import { encryptToken, decryptToken, isTokenEncrypted } from '../../core/crypto/token-crypto';
 import { KeyInboxService } from '../key-inbox/key-inbox.service';
 import { KEY_INBOX_CHANNELS } from '../key-inbox/key-inbox.constants';
 import type { ResolvedEntity } from '../../core/connectors/entity-resolution.service';
@@ -93,6 +93,15 @@ type SensitiveField = (typeof SENSITIVE_FIELDS)[number];
  * BusinessGenesisService, FinanceSettingsService).
  */
 export const BUSINESS_PROFILE_OWNER_ONLY = 'BUSINESS_PROFILE_OWNER_ONLY';
+
+/** R0-SEC2 review SEC2-R1: PATCH .../config refuses a credential that is already ciphertext (400). */
+export const WHATSAPP_CREDENTIAL_CIPHERTEXT = 'WHATSAPP_CREDENTIAL_CIPHERTEXT';
+
+/** R0-SEC2 review SEC2-R3: PATCH .../config refuses a phoneNumberId another business holds (409). */
+export const WHATSAPP_PHONE_NUMBER_ID_IN_USE = 'WHATSAPP_PHONE_NUMBER_ID_IN_USE';
+
+/** Advisory-lock namespace serialising claims of one phoneNumberId (saveConfig). */
+const PHONE_NUMBER_ID_LOCK_NAMESPACE = 'whatsapp:phone-number-id:';
 
 /**
  * What GET .../config answers (R0-SEC2-WHATSAPP-CONFIG-AUTHORITY). Never a
@@ -387,28 +396,71 @@ export class WhatsAppService {
    * "•••• 1234" preview shape keeps the stored one (its ciphertext, unchanged:
    * encryptToken leaves an already-encrypted value as it is), so a form that
    * resubmits the masked view never wipes or overwrites a token.
+   *
+   * R0-SEC2 review repairs, both refused with nothing written:
+   *  - SEC2-R1: a submitted credential that is already ciphertext ("enc:v1:")
+   *    answers 400 WHATSAPP_CREDENTIAL_CIPHERTEXT. encryptToken would store it
+   *    as given, and one platform key decrypts every business's ciphertext, so
+   *    an owner could paste another business's stored token and send with it.
+   *    Only a plaintext credential or a kept one (this business's own stored
+   *    ciphertext) is ever written.
+   *  - SEC2-R3: a phoneNumberId another business already holds answers 409
+   *    WHATSAPP_PHONE_NUMBER_ID_IN_USE. The shared webhook routes inbound by
+   *    that id (business.findFirst on metaData.whatsapp.phoneNumberId, the
+   *    predicate checked here), so a second holder could receive the first
+   *    one's customer messages. Re-saving the id this business already stores
+   *    is never refused (a pre-existing duplicate does not lock its owner out).
+   *    The check and the write run in one transaction behind an advisory lock
+   *    on the id, so two concurrent claims of the same id cannot both pass.
    */
   async saveConfig(businessId: string, config: WhatsAppConfig): Promise<void> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-    const meta = (business?.metaData as Record<string, unknown> | null) ?? {};
-    const stored = (meta.whatsapp as Partial<WhatsAppConfig> | undefined) ?? {};
     const submitted = (config ?? {}) as unknown as Record<string, unknown>;
+    for (const field of SENSITIVE_FIELDS) {
+      const value = submitted[field];
+      if (!isKeptCredential(value) && isTokenEncrypted((value as string).trim())) {
+        throw new BadRequestException({
+          code: WHATSAPP_CREDENTIAL_CIPHERTEXT,
+          message: `${field} must be the credential itself; an encrypted value is not accepted.`,
+        });
+      }
+    }
     const plain = (v: unknown) => (typeof v === 'string' || typeof v === 'number' ? String(v) : undefined);
     const next = { provider: submitted.provider } as WhatsAppConfig;
     const phoneNumberId = plain(submitted.phoneNumberId);
     if (phoneNumberId !== undefined) next.phoneNumberId = phoneNumberId;
     const fromNumber = plain(submitted.fromNumber);
     if (fromNumber !== undefined) next.fromNumber = fromNumber;
-    for (const field of SENSITIVE_FIELDS) {
-      const value = isKeptCredential(submitted[field]) ? stored[field] : submitted[field];
-      if (typeof value === 'string' && value.length > 0) next[field] = value;
-    }
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { metaData: { ...meta, whatsapp: encryptConfig(next) } },
+
+    await this.prisma.client.$transaction(async (tx) => {
+      if (phoneNumberId) {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${PHONE_NUMBER_ID_LOCK_NAMESPACE + phoneNumberId}))`;
+      }
+      const business = await tx.business.findUnique({
+        where: { id: businessId },
+        select: { metaData: true },
+      });
+      const meta = (business?.metaData as Record<string, unknown> | null) ?? {};
+      const stored = (meta.whatsapp as Partial<WhatsAppConfig> | undefined) ?? {};
+      if (phoneNumberId && phoneNumberId !== plain(stored.phoneNumberId)) {
+        const holder = await tx.business.findFirst({
+          where: { id: { not: businessId }, metaData: { path: ['whatsapp', 'phoneNumberId'], equals: phoneNumberId } },
+          select: { id: true },
+        });
+        if (holder) {
+          throw new ConflictException({
+            code: WHATSAPP_PHONE_NUMBER_ID_IN_USE,
+            message: 'This WhatsApp phone number id is already connected to another business.',
+          });
+        }
+      }
+      for (const field of SENSITIVE_FIELDS) {
+        const value = isKeptCredential(submitted[field]) ? stored[field] : submitted[field];
+        if (typeof value === 'string' && value.length > 0) next[field] = value;
+      }
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: { ...meta, whatsapp: encryptConfig(next) } },
+      });
     });
   }
 

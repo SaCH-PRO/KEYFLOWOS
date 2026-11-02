@@ -1,13 +1,51 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, HttpException, Inject, Logger, NotFoundException, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ExecutionContext, ForbiddenException, Get, HttpException, Inject, Injectable, Logger, NotFoundException, Optional, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { WhatsAppService, type WhatsAppConfig } from './whatsapp.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { resolveRequestBusinessId, type TenantBearingRequest } from '../../core/auth/request-business-id';
+import { EffectiveAuthorityResolver } from '../../core/authority/effective-authority.resolver';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { WebhookIngressLoggerService } from '../../core/connectors/webhook-ingress-logger.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+
+/**
+ * ModuleScopeGuard for the WhatsApp send and inbox routes, plus the config
+ * owner (R0-SEC2 review CR-SEC2-1).
+ *
+ * ModuleScopeGuard reads the caller's membership row and refuses a
+ * distinguished owner (Business.ownerId) who has none ('Not a member of this
+ * business'). Before R0-SEC2 that owner sent from, and read the inbox of, its
+ * own business; and PATCH .../config still admits it (WhatsAppService
+ * .isConfigOwner). So whoever may replace the sending identity may also see
+ * it and send from it: WhatsAppService.isConfigOwner (OWNER membership,
+ * Business.ownerId, SUPER_ADMIN) for the business the guards resolve
+ * (resolveRequestBusinessId, the tenant BusinessGuard has already checked)
+ * passes; everyone else gets ModuleScopeGuard's answer, unchanged. The owner
+ * rule admits no one a role default would refuse (OWNER holds operations:
+ * admin); it only closes the missing-membership gap on these routes.
+ */
+@Injectable()
+export class WhatsAppOperationsScopeGuard extends ModuleScopeGuard {
+  constructor(
+    @Inject(PrismaService) prisma: PrismaService,
+    @Inject(Reflector) reflector: Reflector,
+    @Inject(WhatsAppService) private readonly whatsapp: WhatsAppService,
+    @Optional() @Inject(EffectiveAuthorityResolver) authority?: EffectiveAuthorityResolver,
+  ) {
+    super(prisma, reflector, authority);
+  }
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<TenantBearingRequest & { user?: { id?: string; role?: string } }>();
+    const businessId = resolveRequestBusinessId(req);
+    if (businessId && (await this.whatsapp.isConfigOwner(businessId, req.user))) return true;
+    return super.canActivate(context);
+  }
+}
 
 interface RawBodyRequest extends Request {
   rawBody?: Buffer;
@@ -67,7 +105,9 @@ export class WhatsAppController {
   // which would refuse a distinguished owner with no membership row; sending
   // needs operations:write and the inbox reads operations:read — `operations`
   // is the module key the KEY inbox routes (KeyInboxController) require, the
-  // surface these WhatsApp conversations are ingested into.
+  // surface these WhatsApp conversations are ingested into. Those scoped
+  // routes run WhatsAppOperationsScopeGuard (ModuleScopeGuard plus the config
+  // owner), so the owner the config write admits is never refused them.
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/config')
@@ -92,7 +132,7 @@ export class WhatsAppController {
     return { success: true };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, WhatsAppOperationsScopeGuard)
   @RequireModuleScope('operations', 'write')
   @Post('businesses/:businessId/send')
   async sendMessage(
@@ -103,7 +143,7 @@ export class WhatsAppController {
     return result;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, WhatsAppOperationsScopeGuard)
   @RequireModuleScope('operations', 'read')
   @Post('businesses/:businessId/test')
   async testConnection(@Param('businessId') businessId: string) {
@@ -119,7 +159,7 @@ export class WhatsAppController {
   // shapes below are the drawer's own interfaces — returning the array/object
   // directly, not wrapped in `{ data }`, because that is what it reads.
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, WhatsAppOperationsScopeGuard)
   @RequireModuleScope('operations', 'read')
   @Get('businesses/:businessId/status')
   async getStatus(
@@ -130,7 +170,7 @@ export class WhatsAppController {
     return this.service.getStatus(businessId, { writer });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, WhatsAppOperationsScopeGuard)
   @RequireModuleScope('operations', 'read')
   @Get('businesses/:businessId/conversations')
   async listConversations(
@@ -140,7 +180,7 @@ export class WhatsAppController {
     return this.service.listConversations(businessId, limit ? Number(limit) : undefined);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, WhatsAppOperationsScopeGuard)
   @RequireModuleScope('operations', 'read')
   @Get('businesses/:businessId/conversations/:conversationId')
   async getConversation(
@@ -152,14 +192,14 @@ export class WhatsAppController {
     return conversation;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, WhatsAppOperationsScopeGuard)
   @RequireModuleScope('operations', 'read')
   @Get('businesses/:businessId/templates')
   async listTemplates(@Param('businessId') businessId: string) {
     return this.service.listTemplates(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @UseGuards(AuthGuard, BusinessGuard, WhatsAppOperationsScopeGuard)
   @RequireModuleScope('operations', 'write')
   @Post('businesses/:businessId/messages')
   async sendFromDrawer(

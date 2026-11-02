@@ -514,6 +514,80 @@ describe('R0-SEC2 PATCH config is OWNER only (D-11 sending identity)', () => {
       await reset(biz);
     }
   });
+
+  it('[SEC2-W07] RED-BEFORE (review SEC2-R1): an owner cannot store another business\'s credential ciphertext as its own: the owner of bizO PATCHes bizO with each of bizW\'s stored credentials (also with surrounding blanks): 400 WHATSAPP_CREDENTIAL_CIPHERTEXT, bizO byte-identical, no provider traffic', async () => {
+    await reset(ID.bizW);
+    await reset(ID.bizO, { provider: 'meta', fromNumber: '+18685550600' });
+    const victim = await storedWhatsApp(ID.bizW);
+    const before = await businessRowText(ID.bizO);
+    for (const k of ['accessToken', 'authToken', 'accountSid'] as const) {
+      const ciphertext = String(victim?.[k]);
+      expect(ciphertext.startsWith('enc:v1:'), `bizW ${k} is ciphertext at rest`).toBe(true);
+      for (const value of [ciphertext, `  ${ciphertext}  `]) {
+        const res = await patchConfig(ID.staffOwner, ID.bizO, { provider: 'meta', fromNumber: '+18685550601', [k]: value });
+        expect(await businessRowText(ID.bizO), `${k}: patch ${res.status}: bizO byte-identical`).toBe(before);
+        expect(res.status, `${k}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body?.code, `${k}: refusal code`).toBe('WHATSAPP_CREDENTIAL_CIPHERTEXT');
+        expectNoSecret(res.body, `${k} ciphertext refusal`);
+      }
+    }
+    // The owner's own plaintext credential is still accepted and encrypted.
+    const ok = await patchConfig(ID.staffOwner, ID.bizO, { provider: 'meta', fromNumber: '+18685550601', accessToken: `${P}BIZO_OWN_TOKEN_wxyz` });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    const stored = await storedWhatsApp(ID.bizO);
+    expect(decryptToken(stored?.accessToken)).toBe(`${P}BIZO_OWN_TOKEN_wxyz`);
+    expect(fetchCalls).toEqual([]);
+    await reset(ID.bizO);
+  });
+
+  it('[SEC2-W08] RED-BEFORE (review SEC2-R3): a phoneNumberId another business holds cannot be claimed: the owner of bizO PATCHes bizW\'s phoneNumberId: 409 WHATSAPP_PHONE_NUMBER_ID_IN_USE, bizO byte-identical, the webhook\'s routing predicate still matches bizW alone; bizW re-saving its own id and bizO taking a free id are accepted', async () => {
+    // Only bizW holds PHONE_NUMBER_ID here (the default fixture config gives it to every business).
+    await reset(ID.bizW);
+    for (const biz of [ID.bizO, ID.bizL, ID.bizX]) await reset(biz, { provider: 'mock', fromNumber: '+18685550600' });
+    // The shared webhook's routing predicate, over this suite's businesses.
+    const routedTo = async (id: string) =>
+      (await db.business.findMany({ where: { id: { startsWith: P }, metaData: { path: ['whatsapp', 'phoneNumberId'], equals: id } }, select: { id: true } }))
+        .map((b: { id: string }) => b.id)
+        .sort();
+    const before = await businessRowText(ID.bizO);
+    for (const phoneNumberId of [PHONE_NUMBER_ID, Number(PHONE_NUMBER_ID)]) {
+      const res = await patchConfig(ID.staffOwner, ID.bizO, { provider: 'meta', phoneNumberId, fromNumber: '+18685550601', accessToken: `${P}BIZO_OWN_TOKEN_wxyz` });
+      expect(await businessRowText(ID.bizO), `patch ${res.status}: bizO byte-identical`).toBe(before);
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(res.body?.code).toBe('WHATSAPP_PHONE_NUMBER_ID_IN_USE');
+      expect(JSON.stringify(res.body).includes(ID.bizW), 'the holder is not named').toBe(false);
+    }
+    expect(await routedTo(PHONE_NUMBER_ID)).toEqual([ID.bizW]);
+
+    // The holder re-saving its own id is not a claim.
+    const own = await patchConfig(ID.owner, ID.bizW, { provider: 'meta', phoneNumberId: PHONE_NUMBER_ID, fromNumber: '+18685550602' });
+    expect(own.status, JSON.stringify(own.body)).toBe(200);
+    // A free id is accepted.
+    const free = await patchConfig(ID.staffOwner, ID.bizO, { provider: 'meta', phoneNumberId: '616161616161616', fromNumber: '+18685550603' });
+    expect(free.status, JSON.stringify(free.body)).toBe(200);
+    expect(await routedTo('616161616161616')).toEqual([ID.bizO]);
+
+    // A duplicate that predates the check does not lock its holder out of its own config.
+    await reset(ID.bizO, { provider: 'meta', phoneNumberId: PHONE_NUMBER_ID, fromNumber: '+18685550600' });
+    const legacyDup = await patchConfig(ID.owner, ID.bizW, { provider: 'meta', phoneNumberId: PHONE_NUMBER_ID, fromNumber: '+18685550604' });
+    expect(legacyDup.status, JSON.stringify(legacyDup.body)).toBe(200);
+    for (const biz of [ID.bizW, ID.bizO, ID.bizL, ID.bizX]) await reset(biz);
+  });
+
+  it('[SEC2-W09] two owners claiming the same free phoneNumberId at once: exactly one is stored, the other answers 409 (the claim is serialised)', async () => {
+    const id = '626262626262626';
+    await reset(ID.bizO, { provider: 'mock', fromNumber: '+18685550600' });
+    await reset(ID.bizL, { provider: 'mock', fromNumber: '+18685550700' });
+    const [a, b] = await Promise.all([
+      patchConfig(ID.staffOwner, ID.bizO, { provider: 'meta', phoneNumberId: id, fromNumber: '+18685550605' }),
+      patchConfig(ID.legacyOwner, ID.bizL, { provider: 'meta', phoneNumberId: id, fromNumber: '+18685550705' }),
+    ]);
+    expect([a.status, b.status].sort(), `${JSON.stringify(a.body)} / ${JSON.stringify(b.body)}`).toEqual([200, 409]);
+    const holders = await db.business.findMany({ where: { metaData: { path: ['whatsapp', 'phoneNumberId'], equals: id } }, select: { id: true } });
+    expect(holders.length, JSON.stringify(holders)).toBe(1);
+    await reset(ID.bizO);
+    await reset(ID.bizL);
+  });
 });
 
 describe('R0-SEC2 sending and the inbox reads need an operations scope', () => {
@@ -573,6 +647,47 @@ describe('R0-SEC2 sending and the inbox reads need an operations scope', () => {
     }
     expect(fetchCalls).toEqual([]);
     await resetConversations();
+    await reset(ID.bizW);
+  });
+
+  it('[SEC2-S05] RED-BEFORE (review CR-SEC2-1): the distinguished owner of bizL (Business.ownerId, no membership row), whom PATCH config admits, keeps every inbox read and sends (mock provider): status connected, conversations, templates, POST test, POST send and POST messages', async () => {
+    await reset(ID.bizL, SEEDED_MOCK);
+    const reads = READS.filter(({ label }) => label !== 'GET conversations/:id');
+    for (const { label, call } of reads) {
+      const res = await call(ID.legacyOwner, ID.bizL);
+      expect([200, 201], `${label}: ${JSON.stringify(res.body)}`).toContain(res.status);
+      expectNoSecret(res.body, label);
+    }
+    const status = await READS[0].call(ID.legacyOwner, ID.bizL);
+    expect(status.body.connected, JSON.stringify(status.body)).toBe(true);
+    const before = await messageCount(ID.bizL);
+    const a = await send(ID.legacyOwner, ID.bizL);
+    expect(a.status, `send: ${JSON.stringify(a.body)}`).toBe(201);
+    expect(a.body.success).toBe(true);
+    const b = await sendDrawer(ID.legacyOwner, ID.bizL);
+    expect(b.status, `messages: ${JSON.stringify(b.body)}`).toBe(201);
+    expect(b.body.status).toBe('SENT');
+    expect((await messageCount(ID.bizL)).messages - before.messages).toBe(2);
+    expect(fetchCalls).toEqual([]);
+    await db.$executeRawUnsafe('DELETE FROM whatsapp_messages WHERE business_id = $1', ID.bizL);
+    await db.$executeRawUnsafe('DELETE FROM whatsapp_contacts WHERE business_id = $1', ID.bizL);
+    await reset(ID.bizL);
+  });
+
+  it('[SEC2-S06] the owner arm is bound to the route\'s business: a STAFF member of bizW (operations: read) who owns bizO, naming bizO in x-business-id, ?businessId= and the body, is refused POST send and POST messages on bizW (403), nothing written', async () => {
+    await reset(ID.bizW, SEEDED_MOCK);
+    await resetConversations();
+    const before = await messageCount(ID.bizW);
+    const a = await as(http().post(`/whatsapp/businesses/${ID.bizW}/send?businessId=${ID.bizO}`), ID.staffOwner)
+      .set('x-business-id', ID.bizO)
+      .send({ to: '+18685550111', message: `${P}hello`, businessId: ID.bizO });
+    const b = await as(http().post(`/whatsapp/businesses/${ID.bizW}/messages?businessId=${ID.bizO}`), ID.staffOwner)
+      .set('x-business-id', ID.bizO)
+      .send({ toPhone: '+18685550122', body: `${P}drawer hello`, businessId: ID.bizO });
+    expect(await messageCount(ID.bizW), `send ${a.status} / messages ${b.status}: nothing written`).toEqual(before);
+    expect(a.status, JSON.stringify(a.body)).toBe(403);
+    expect(b.status, JSON.stringify(b.body)).toBe(403);
+    expect(fetchCalls).toEqual([]);
     await reset(ID.bizW);
   });
 });
@@ -638,4 +753,15 @@ describe('R0-SEC2 the webhooks are unchanged (no session, provider checks only)'
     expect(JSON.stringify(res.body)).toMatch(/signature/i);
     expect(await messageCount(ID.bizW)).toEqual(counts);
   });
+});
+
+/**
+ * Review findings this packet cannot close inside its write set
+ * (whatsapp.controller.ts, whatsapp.service.ts and these suites). Kept as
+ * todos so the gap stays visible in every run of this suite.
+ */
+describe('R0-SEC2 follow-ups outside the write set', () => {
+  it.todo('[SEC2-T01] (review SEC2-R2) GET /identity/businesses/:businessId and GET /identity/businesses answer metaData.whatsapp (phoneNumberId and the credential ciphertexts) to any member, operations:none included: IdentityService.sanitizeBusiness / getBusiness / listBusinesses must strip or mask metaData.whatsapp, and the d11-owner-writes static guard should list it (identity module, outside this write set)');
+  it.todo('[SEC2-T02] (review SEC2-R1, second writer) PATCH /identity/businesses/:businessId merges any metaData key, so an owner can still write metaData.whatsapp (another business\'s credential ciphertext or phoneNumberId) past WhatsAppService.saveConfig\'s refusals: IdentityService.updateBusiness must refuse or drop metaData.whatsapp (identity module, outside this write set)');
+  it.todo('[SEC2-T03] (review CR-SEC2-2) the web WhatsApp page (apps/web/src/app/app/whatsapp/page.tsx) and the manage drawer render a 403 from GET status as "not connected" with a Connect CTA; they must render it as no access (web, outside this write set; after the CR-SEC2-1 repair it reaches only members with operations: none)');
 });
