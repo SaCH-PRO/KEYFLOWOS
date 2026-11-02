@@ -2,6 +2,7 @@
   "$comment": [
     "R0-23-WEB-R0-SCREENS: server responses the Release 0 screens are rendered against in jsdom.",
     "journey.*: shaped from apps/server/test/release0-journey.integration.test.ts. Each body carries exactly the keys that suite asserts on that route, or on the same row elsewhere in the journey, and no other key. release0-journey.test.tsx holds the checked-in key list (JOURNEY_ASSERTED_SHAPES, with the line each key comes from) and asserts every body's key paths equal it, so a screen here can only read what the real-server journey proves.",
+    "The one exception is the tenant detail route GET /commerce/businesses/:b/invoices/:id (invoiceDraft, invoiceSent, invoicePartiallyPaid, invoicePaid): the journey never reads it (it reloads the row through the list route), and the server always adds paidAmount, remaining and the payment rows to that read (getInvoiceForBusiness, apps/server/src/modules/commerce/commerce.service.ts L669-683). Those bodies are the journey's row plus exactly the keys apps/server/test/commerce-invoice-detail.integration.test.ts asserts on that route (L225-227: payments, paidAmount, remaining on every read; L523-543: payments[].id, .amount, .status, and paidAmount = the SUCCESSFUL rows, remaining = total - paidAmount). The figures follow the journey: 0 paid on the DRAFT and SENT reads, the 100 cash payment (step 4), then the 150 settle (PAID).",
     "screenOnly.*: responses a screen reads that the journey does not drive. Each names why it is outside the journey and where its shape comes from.",
     "Ids carry the r023_ prefix; values mirror the journey (contact Ada Byron, CLIENT; INV-1001 with Consulting 2 x 100 and Setup 1 x 50 = 250 TTD; a 100 cash payment leaves 150)."
   ],
@@ -83,7 +84,10 @@
         "items": [
           { "description": "Consulting", "quantity": 2, "unitPrice": 100, "total": 200 },
           { "description": "Setup", "quantity": 1, "unitPrice": 50, "total": 50 }
-        ]
+        ],
+        "payments": [],
+        "paidAmount": 0,
+        "remaining": 250
       }
     },
     "invoiceSent": {
@@ -100,7 +104,32 @@
         "items": [
           { "description": "Consulting", "quantity": 2, "unitPrice": 100, "total": 200 },
           { "description": "Setup", "quantity": 1, "unitPrice": 50, "total": 50 }
-        ]
+        ],
+        "payments": [],
+        "paidAmount": 0,
+        "remaining": 250
+      }
+    },
+    "invoicePartiallyPaid": {
+      "route": "GET /commerce/businesses/:businessId/invoices/:invoiceId",
+      "status": 200,
+      "body": {
+        "id": "r023_inv_1",
+        "invoiceNumber": "INV-1001",
+        "status": "PARTIALLY_PAID",
+        "total": 250,
+        "subtotal": 250,
+        "currency": "TTD",
+        "contactId": "r023_contact_ada",
+        "items": [
+          { "description": "Consulting", "quantity": 2, "unitPrice": 100, "total": 200 },
+          { "description": "Setup", "quantity": 1, "unitPrice": 50, "total": 50 }
+        ],
+        "payments": [
+          { "id": "r023_pay_1", "amount": 100, "status": "SUCCESSFUL" }
+        ],
+        "paidAmount": 100,
+        "remaining": 150
       }
     },
     "invoicePaid": {
@@ -117,7 +146,13 @@
         "items": [
           { "description": "Consulting", "quantity": 2, "unitPrice": 100, "total": 200 },
           { "description": "Setup", "quantity": 1, "unitPrice": 50, "total": 50 }
-        ]
+        ],
+        "payments": [
+          { "id": "r023_pay_1", "amount": 100, "status": "SUCCESSFUL" },
+          { "id": "r023_pay_2", "amount": 150, "status": "SUCCESSFUL" }
+        ],
+        "paidAmount": 250,
+        "remaining": 0
       }
     },
     "paymentRecorded": {
@@ -186,6 +221,12 @@
       "status": 403,
       "why": "The journey asserts 403 on every business-prefixed route under another tenant (step 6) but not the body. Body: BusinessGuard's ForbiddenException('No access to this business') (apps/server/src/core/auth/business.guard.ts) through the global filter.",
       "body": { "statusCode": 403, "message": "No access to this business", "error": "Forbidden" }
+    },
+    "serverError": {
+      "route": "POST /commerce/businesses/:businessId/invoices/:invoiceId/payments (a transient failure)",
+      "status": 500,
+      "why": "The journey's payments all land, so it never sees a failed submit. Step 4's retry case answers the first submit with this to prove a retry of the same form open reuses its idempotency key (R0-21). Body: the 500 branch of GlobalHttpExceptionFilter (apps/server/src/core/filters/http-exception.filter.ts), volatile envelope fields (timestamp, path, correlationId) left out.",
+      "body": { "statusCode": 500, "code": "INTERNAL_SERVER_ERROR", "message": "Internal server error", "error": "Internal Server Error" }
     },
     "gmailNotConfigured": {
       "route": "POST /commerce/businesses/:businessId/invoices/:invoiceId/send-email | send-reminder | resend-receipt",

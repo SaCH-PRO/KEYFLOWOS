@@ -15,11 +15,14 @@
  *   step 2  Contacts quick-add (POST .../contacts, then the list is re-read)
  *   step 3  invoices/new (POST .../invoices) and invoices/[id] (a DRAFT, read
  *           from the tenant route GET /commerce/businesses/:b/invoices/:id)
- *   step 4  Record Payment on invoices/[id] (one POST on a double click)
- *   step 5  simulated refresh: unmount, re-render, same fixtures, same state
+ *   step 4  Record Payment on invoices/[id] (one POST on a double click; a
+ *           failed submit retried sends the same idempotency key, R0-21)
+ *   step 5  simulated refresh: unmount, re-render, read again from the server;
+ *           after a recorded payment the re-read shows that payment
  *   step 6  a 403 shows an error, never demo data
- *   step 7  optional services fail visibly: the onboarding chat answering the
- *           R0-07 AI 503 leaves the manual path (R0-06); a Gmail 503 on the
+ *   step 7  optional services fail visibly: a KEY chat turn on onboarding
+ *           answered with the R0-07 AI 503 shows the failure in the chat and
+ *           leaves the manual path (R0-06) usable; a Gmail 503 on the
  *           invoice's email door is shown, and the status stays
  *
  * SERVER-SHAPED FIXTURES. Every `journey.*` body carries exactly the keys the
@@ -27,7 +30,11 @@
  * the journey), and the first describe below holds that list, checked in with
  * the line each key comes from, and asserts the fixture equals it. A screen
  * that needs a key the journey does not prove therefore fails here, in jsdom,
- * instead of in the browser. This file does not import server code.
+ * instead of in the browser. The one route the journey does not read, the
+ * tenant invoice detail route, is held to the keys its own real-server suite
+ * (commerce-invoice-detail.integration.test.ts) asserts, since the server
+ * always adds paidAmount, remaining and the payment rows there. This file does
+ * not import server code.
  *
  * SUBSTITUTIONS (recorded, not hidden):
  * - Sign-in: the login form calls POST /identity/login, which proxies Supabase
@@ -97,9 +104,29 @@ const INVOICE_ROW = [
  * returns both, so the browser is fine today, but nothing on the server side
  * proves them: against this list the screen logs "schema validation failed:
  * nextCursor: Required, hasMore: Required" and renders the rows from the raw
- * body (apiGet's fallback). Asserting both in the journey closes it.
+ * body (apiGet's fallback). Asserting both in the journey closes it. That log
+ * is the only schema failure afterEach lets through (isRecordedContactsDrift),
+ * and the step-2 case asserts it is still logged, so closing the drift (or a
+ * new one) shows up here instead of in a silenced console.
  */
 const CONTACT_LIST = ["contacts", "contacts[]", "contacts[].id", "contacts[].lastName", "contacts[].status"];
+
+/**
+ * The tenant detail read (GET /commerce/businesses/:b/invoices/:id). The
+ * journey never reads this route; invoices/[id] does (R0-QI-01). The server
+ * always adds the payment rows and the payments-derived figures to it
+ * (getInvoiceForBusiness, apps/server/src/modules/commerce/commerce.service.ts
+ * L669-683), and invoices/[id] shows those figures in preference to anything
+ * else (page.tsx, R0-21). A read without them is a shape the server never
+ * sends: the screen falls back to summing rows and a PAID invoice shows 0 paid.
+ * So the body is the journey's row plus exactly what
+ * apps/server/test/commerce-invoice-detail.integration.test.ts asserts on this
+ * route: payments, paidAmount and remaining on every read (L225-227), and each
+ * payment row's id, amount and status (L523-543). An unpaid read has no rows,
+ * so it has no row keys.
+ */
+const DETAIL_READ = [...INVOICE_ROW, "paidAmount", "payments", "payments[]", "remaining"];
+const DETAIL_READ_WITH_PAYMENTS = [...DETAIL_READ, "payments[].amount", "payments[].id", "payments[].status"];
 
 const JOURNEY_ASSERTED_SHAPES: Record<string, { route: string; status: number; keys: string[] }> = {
   // Step 1, L403-408 and L436-440: user.id, business.id, business.name, isNewBusiness.
@@ -119,10 +146,13 @@ const JOURNEY_ASSERTED_SHAPES: Record<string, { route: string; status: number; k
   invoiceCreated: { route: "POST /commerce/businesses/:businessId/invoices", status: 201, keys: INVOICE_ROW },
   // The same row read back. The journey reloads it through the list route
   // (L550-555, L709-710); invoices/[id] reads the tenant detail route (R0-QI-01),
-  // which serves that row. DRAFT (L523), SENT (L544-547), PAID (L676-679).
-  invoiceDraft: { route: "GET /commerce/businesses/:businessId/invoices/:invoiceId", status: 200, keys: INVOICE_ROW },
-  invoiceSent: { route: "GET /commerce/businesses/:businessId/invoices/:invoiceId", status: 200, keys: INVOICE_ROW },
-  invoicePaid: { route: "GET /commerce/businesses/:businessId/invoices/:invoiceId", status: 200, keys: INVOICE_ROW },
+  // which serves that row with its figures (DETAIL_READ). DRAFT (L523), SENT
+  // (L544-547), PARTIALLY_PAID after the 100 payment (L619-624), PAID after the
+  // settle (L676-679).
+  invoiceDraft: { route: "GET /commerce/businesses/:businessId/invoices/:invoiceId", status: 200, keys: DETAIL_READ },
+  invoiceSent: { route: "GET /commerce/businesses/:businessId/invoices/:invoiceId", status: 200, keys: DETAIL_READ },
+  invoicePartiallyPaid: { route: "GET /commerce/businesses/:businessId/invoices/:invoiceId", status: 200, keys: DETAIL_READ_WITH_PAYMENTS },
+  invoicePaid: { route: "GET /commerce/businesses/:businessId/invoices/:invoiceId", status: 200, keys: DETAIL_READ_WITH_PAYMENTS },
   // Step 4: payment.id (L603, L656, L674), remaining and invoice.status
   // (L675-676); the invoice is the step-3 row with its payments by id (L713);
   // paidAmount is the figure the journey asserts for this state (L625, L658).
@@ -186,6 +216,10 @@ const P = {
   sendEmail: `/commerce/businesses/${BIZ}/invoices/${INVOICE.id}/send-email`,
   resendReceipt: `/commerce/businesses/${BIZ}/invoices/${INVOICE.id}/resend-receipt`,
   onboardingState: `/onboarding-concierge/businesses/${BIZ}/onboarding-state`,
+  /** Every AI route this tenant's screens may call starts here (R0-34b: KEY binds the guarded tenant). */
+  ai: `/ai/businesses/${BIZ}/`,
+  aiChatStream: `/ai/businesses/${BIZ}/flow/chat/stream`,
+  aiChat: `/ai/businesses/${BIZ}/flow/chat`,
 };
 
 let calls: Call[] = [];
@@ -213,7 +247,10 @@ function installFetch() {
     const hold = holds[key(method, path)];
     if (hold) await hold;
     let route: Route | undefined = routes[key(method, path)];
-    if (!route && path.startsWith("/ai/")) route = answer(S.aiNotConfigured);
+    // The AI is down for this tenant only: an /ai/* request that names another
+    // business (or none) is not stubbed, so a screen that drops the tenant from
+    // its AI call gets a 404, not the R0-07 answer the step-7 case looks for.
+    if (!route && path.startsWith(P.ai)) route = answer(S.aiNotConfigured);
     if (!route) route = { status: 404, body: { statusCode: 404, message: `not stubbed: ${method} ${path}` } };
     const resolved = typeof route === "function" ? route({ method, path, body, auth }) : route;
     return new Response(JSON.stringify(resolved.body), { status: resolved.status, headers: { "Content-Type": "application/json" } });
@@ -264,10 +301,11 @@ function renderScreen(ui: ReactNode, opts: { app?: boolean } = { app: true }) {
   );
 }
 
-function openInvoice(fixture: FixtureResponse) {
+/** Mounts invoices/[id]; `read` is the detail read, or what the server serves on each read. */
+function openInvoice(read: FixtureResponse | (() => FixtureResponse)) {
   nav.pathname = `/app/commerce/invoices/${INVOICE.id}`;
   nav.params = { id: INVOICE.id };
-  routes[key("GET", P.invoice)] = answer(fixture);
+  routes[key("GET", P.invoice)] = typeof read === "function" ? () => answer(read()) : answer(read);
   routes[key("GET", P.timeline)] = answer(S.timeline);
   return renderScreen(<InvoiceDetailPage />);
 }
@@ -281,6 +319,21 @@ function paymentSummary() {
   const valueOf = (label: string) => card.getByText(label).nextElementSibling?.textContent ?? "";
   return { total: valueOf("Total"), paid: valueOf("Paid"), remaining: valueOf("Remaining") };
 }
+
+/**
+ * Every "[apiGet] <path> schema validation failed" a test logged. console.error
+ * is silenced for the screens' noise, so without this a fixture that drifts
+ * from a web schema would be swallowed: afterEach fails a test that logs one
+ * the drift note on CONTACT_LIST does not record.
+ */
+function schemaFailures(): Array<{ path: string; issues: string }> {
+  return vi.mocked(console.error).mock.calls
+    .filter(([first]) => typeof first === "string" && first.includes("schema validation failed"))
+    .map(([first, issues]) => ({ path: String(first).replace(/^\[apiGet\] /, "").replace(/ schema validation failed:$/, ""), issues: String(issues) }));
+}
+/** The one recorded drift (see CONTACT_LIST): the contact list, missing exactly nextCursor and hasMore. */
+const isRecordedContactsDrift = (f: { path: string; issues: string }) =>
+  f.path.split("?")[0] === P.contacts && f.issues === "nextCursor: Required, hasMore: Required";
 
 beforeAll(() => {
   installFetch();
@@ -309,8 +362,10 @@ afterEach(async () => {
   // Let reads still in flight settle before the next test's routes go in.
   await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
   window.localStorage.clear();
+  const unrecorded = schemaFailures().filter((f) => !isRecordedContactsDrift(f));
   vi.mocked(console.warn).mockRestore();
   vi.mocked(console.error).mockRestore();
+  expect(unrecorded, "a fixture drifted from a web schema; record it or fix the fixture").toEqual([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -334,9 +389,28 @@ describe("fixtures: journey-responses.json is shaped from release0-journey.integ
     expect((J.invoiceSent.body as { status: string }).status).toBe("SENT");
     expect((J.invoicePaid.body as { status: string }).status).toBe("PAID");
     expect(J.paymentRecorded.body).toMatchObject({ paidAmount: 100, remaining: 150, invoice: { status: "PARTIALLY_PAID", total: 250 } });
+    expect((J.invoicePartiallyPaid.body as { status: string }).status).toBe("PARTIALLY_PAID");
     expect(J.bootstrap.body).toMatchObject({ isNewBusiness: true });
     const after = (J.contactsAfter.body as { contacts: Array<{ id: string }> }).contacts.map((c) => c.id);
     expect(after).toContain((J.contactCreated.body as { id: string }).id);
+  });
+
+  it("every detail read carries the server's figures for its row: paidAmount = the SUCCESSFUL payments, remaining = total - paidAmount (getInvoiceForBusiness)", () => {
+    type Detail = { id: string; status: string; total: number; paidAmount: number; remaining: number; payments: Array<{ id: string; amount: number; status: string }> };
+    const reads = ["invoiceDraft", "invoiceSent", "invoicePartiallyPaid", "invoicePaid"].map((name) => ({ name, body: J[name].body as Detail }));
+    for (const { name, body } of reads) {
+      const paid = body.payments.filter((p) => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
+      expect({ name, paidAmount: body.paidAmount, remaining: body.remaining }).toEqual({ name, paidAmount: paid, remaining: Math.max(0, body.total - paid) });
+      expect({ name, id: body.id }).toEqual({ name, id: INVOICE.id });
+    }
+    const [draft, sent, partial, settled] = reads.map((r) => r.body);
+    expect([draft, sent].map((b) => [b.paidAmount, b.remaining])).toEqual([[0, 250], [0, 250]]);
+    // After step 4 the read shows the payment the POST recorded, and after the settle both.
+    const recorded = J.paymentRecorded.body as { payment: { id: string }; paidAmount: number; remaining: number };
+    expect(partial.payments.map((p) => p.id)).toEqual([recorded.payment.id]);
+    expect([partial.paidAmount, partial.remaining]).toEqual([recorded.paidAmount, recorded.remaining]);
+    expect(settled.payments.map((p) => p.id)).toContain(recorded.payment.id);
+    expect([settled.paidAmount, settled.remaining]).toEqual([250, 0]);
   });
 
   it("every response outside the journey says why", () => {
@@ -409,6 +483,9 @@ describe("step 2 — Contacts quick-add", () => {
     expect(await screen.findByText(/hopper/i, {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.getByText(/byron/i)).toBeInTheDocument();
     expect(writes()).toEqual([key("POST", P.contacts)]);
+    // The recorded drift (CONTACT_LIST) is still what the screen logs, and the only schema failure.
+    expect(schemaFailures().length).toBeGreaterThan(0);
+    expect(schemaFailures().every(isRecordedContactsDrift)).toBe(true);
   });
 });
 
@@ -484,7 +561,7 @@ describe("step 3 — create and open the invoice", () => {
 // ---------------------------------------------------------------------------
 
 describe("step 4 — record an offline payment", () => {
-  it("Record Payment: a double click POSTs once, with one idempotency key, and the summary shows the server's paid and remaining", async () => {
+  it("Record Payment: a double click POSTs once, carrying an idempotency key, and the summary shows the server's paid and remaining", async () => {
     signedIn();
     let release: () => void = () => {};
     holds[key("POST", P.payments)] = new Promise<void>((r) => (release = r));
@@ -512,6 +589,41 @@ describe("step 4 — record an offline payment", () => {
     expect(header.getByText("Part-paid")).toBeInTheDocument();
     expect(writes()).toEqual([key("POST", P.payments)]);
   });
+
+  it("Record Payment: a submit the server fails (500) and the owner submits again goes out twice under ONE idempotency key, made on the first submit (R0-21)", async () => {
+    signedIn();
+    let submits = 0;
+    routes[key("POST", P.payments)] = () => (++submits === 1 ? answer(S.serverError) : answer(J.paymentRecorded));
+    openInvoice(J.invoiceSent);
+    expect(await invoiceHeading()).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /record payment/i })[0]);
+    const modal = within(screen.getByRole("heading", { name: "Record Payment" }).parentElement as HTMLElement);
+    fireEvent.change(modal.getByPlaceholderText("250.00"), { target: { value: "100" } });
+    const submit = modal.getByRole("button", { name: "Record Payment" });
+    fireEvent.click(submit);
+    await waitFor(() => expect(callsTo("POST", P.payments)).toHaveLength(1));
+    // The failure is shown, the form stays open with what was typed, and nothing changed on the invoice.
+    expect(await screen.findByText("Internal server error", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Record Payment" })).toBeInTheDocument();
+    expect(paymentSummary()).toEqual({ total: "TTD 250.00", paid: "TTD 0.00", remaining: "TTD 250.00" });
+    await waitFor(() => expect(submit).toBeEnabled());
+
+    fireEvent.click(submit);
+    await waitFor(() => expect(callsTo("POST", P.payments)).toHaveLength(2));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Record Payment" })).not.toBeInTheDocument());
+
+    const keys = callsTo("POST", P.payments).map((c) => (c.body as { idempotencyKey?: unknown }).idempotencyKey);
+    expect(typeof keys[0]).toBe("string");
+    expect((keys[0] as string).length).toBeGreaterThan(0);
+    expect(keys[1]).toBe(keys[0]);
+    expect(callsTo("POST", P.payments).map((c) => c.body)).toEqual([
+      expect.objectContaining({ amount: 100, method: "Cash" }),
+      expect.objectContaining({ amount: 100, method: "Cash" }),
+    ]);
+    expect(paymentSummary()).toEqual({ total: "TTD 250.00", paid: "TTD 100.00", remaining: "TTD 150.00" });
+    expect(writes()).toEqual([key("POST", P.payments), key("POST", P.payments)]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -534,6 +646,41 @@ describe("step 5 — simulated refresh", () => {
     expect(paymentSummary()).toEqual(before.summary);
     expect(callsTo("GET", P.invoice).length).toBe(readsBefore + 1);
     expect(writes()).toEqual([]);
+  });
+
+  it("after Record Payment, unmounting and re-reading invoices/[id] shows the recorded payment (100 paid, 150 remaining, Part-paid) from the server's detail read", async () => {
+    signedIn();
+    // The server: the detail read is SENT until the payment lands, then PARTIALLY_PAID with that payment.
+    let recorded = false;
+    routes[key("POST", P.payments)] = () => { recorded = true; return answer(J.paymentRecorded); };
+    const read = () => (recorded ? J.invoicePartiallyPaid : J.invoiceSent);
+    const header = () => within(screen.getByRole("heading", { name: `Invoice ${INVOICE.invoiceNumber}` }).parentElement as HTMLElement);
+
+    const first = openInvoice(read);
+    expect(await invoiceHeading()).toBeInTheDocument();
+    expect(paymentSummary()).toEqual({ total: "TTD 250.00", paid: "TTD 0.00", remaining: "TTD 250.00" });
+    fireEvent.click(screen.getAllByRole("button", { name: /record payment/i })[0]);
+    const modal = within(screen.getByRole("heading", { name: "Record Payment" }).parentElement as HTMLElement);
+    fireEvent.change(modal.getByPlaceholderText("250.00"), { target: { value: "100" } });
+    fireEvent.click(modal.getByRole("button", { name: "Record Payment" }));
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Record Payment" })).not.toBeInTheDocument());
+    // What the screen shows from the POST's response, in client memory.
+    const afterPayment = paymentSummary();
+    expect(afterPayment).toEqual({ total: "TTD 250.00", paid: "TTD 100.00", remaining: "TTD 150.00" });
+    expect(header().getByText("Part-paid")).toBeInTheDocument();
+    const readsBefore = callsTo("GET", P.invoice).length;
+    first.unmount();
+    expect(screen.queryByRole("heading", { name: `Invoice ${INVOICE.invoiceNumber}` })).not.toBeInTheDocument();
+
+    // The refresh: nothing survives in memory; the same state comes back from the server's read.
+    openInvoice(read);
+    expect(await invoiceHeading()).toBeInTheDocument();
+    expect(callsTo("GET", P.invoice).length).toBe(readsBefore + 1);
+    expect(paymentSummary()).toEqual(afterPayment);
+    expect(header().getByText("Part-paid")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /record payment/i }).length).toBeGreaterThan(0);
+    // The one write is the payment; the refresh wrote nothing.
+    expect(writes()).toEqual([key("POST", P.payments)]);
   });
 
   it("unmounting and re-rendering Contacts with the same fixtures shows the same rows, read again from the server", async () => {
@@ -582,7 +729,7 @@ describe("step 6 — a refused read is shown as refused", () => {
 // ---------------------------------------------------------------------------
 
 describe("step 7 — optional services fail visibly", () => {
-  it("onboarding: the KEY chat answering the R0-07 AI 503 leaves the manual path (R0-06), not a blank page or a spinner", async () => {
+  it("onboarding: a KEY chat turn answered with the R0-07 AI 503 shows the failure in the chat and leaves the manual path (R0-06) usable, not a blank page or a spinner", async () => {
     signedIn();
     nav.pathname = "/app/onboarding";
     routes[key("GET", P.onboardingState)] = answer(S.onboardingState);
@@ -591,15 +738,33 @@ describe("step 7 — optional services fail visibly", () => {
 
     const heading = await screen.findByRole("heading", { name: /set up manually/i }, { timeout: 3000 });
     const step = within((heading.closest("section") ?? heading.parentElement) as HTMLElement);
-    // The chat did ask the AI, and was answered with the R0-07 503.
-    await waitFor(() => expect(calls.some((c) => c.path.startsWith("/ai/"))).toBe(true), { timeout: 3000 });
-    expect(step.getByLabelText(/business name/i)).toBeInTheDocument();
+    // At the welcome step the chat seeds its greeting locally and sends no AI
+    // turn, so the owner sends one: KEY's stream route answers the 503, the
+    // chat falls back to the REST route, which answers it too.
+    const input = await screen.findByPlaceholderText("Message KEY...", {}, { timeout: 3000 });
+    fireEvent.change(input, { target: { value: "I run a bakery in Port of Spain" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    const aiMessage = (S.aiNotConfigured.body as { message: string }).message;
+    await waitFor(() => expect(callsTo("POST", P.aiChat)).toHaveLength(1), { timeout: 3000 });
+    expect((await screen.findAllByText(aiMessage, {}, { timeout: 3000 })).length).toBeGreaterThan(0);
+    expect(callsTo("POST", P.aiChatStream)).toHaveLength(1);
+    expect(callsTo("POST", P.aiChatStream)[0].body).toMatchObject({ message: "I run a bakery in Port of Spain" });
+    expect(callsTo("POST", P.aiChat)[0].body).toMatchObject({ message: "I run a bakery in Port of Spain" });
+    // Every AI request named this tenant (the 503 answers only those).
+    const aiCalls = calls.filter((c) => c.path.startsWith("/ai/"));
+    expect(aiCalls.filter((c) => !c.path.startsWith(P.ai))).toEqual([]);
+
+    // The manual path is still there and still takes input after the failure.
+    const name = step.getByLabelText(/business name/i) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "r023 Bakery" } });
+    expect(name.value).toBe("r023 Bakery");
     expect(step.getByLabelText(/currency/i)).toBeInTheDocument();
     expect(step.getByLabelText(/timezone/i)).toBeInTheDocument();
     expect(step.getByRole("button", { name: /finish setup/i })).toBeEnabled();
     expect(nav.router.replace).not.toHaveBeenCalledWith(expect.stringMatching(/^\/app\/(?!onboarding)/));
-    // Nothing was written while the AI was down.
-    expect(writes().filter((w) => !w.includes("/ai/"))).toEqual([]);
+    // The only writes are the one chat turn (stream, then its REST fallback); nothing else was written.
+    expect(writes()).toEqual([key("POST", P.aiChatStream), key("POST", P.aiChat)]);
   });
 
   it.todo(
@@ -615,12 +780,15 @@ describe("step 7 — optional services fail visibly", () => {
     expect(await invoiceHeading()).toBeInTheDocument();
     const header = () => within(screen.getByRole("heading", { name: `Invoice ${INVOICE.invoiceNumber}` }).parentElement as HTMLElement);
     expect(header().getByText("Paid")).toBeInTheDocument();
+    // The server's figures for the settled invoice (the 100 payment and the 150 settle).
+    expect(paymentSummary()).toEqual({ total: "TTD 250.00", paid: "TTD 250.00", remaining: "TTD 0.00" });
 
     fireEvent.click(screen.getByRole("button", { name: /resend receipt/i }));
 
     await waitFor(() => expect(callsTo("POST", P.resendReceipt)).toHaveLength(1));
     expect(await screen.findByText("Gmail not connected", {}, { timeout: 3000 })).toBeInTheDocument();
     expect(header().getByText("Paid")).toBeInTheDocument();
+    expect(paymentSummary()).toEqual({ total: "TTD 250.00", paid: "TTD 250.00", remaining: "TTD 0.00" });
     expect(writes()).toEqual([key("POST", P.resendReceipt)]);
     expect(callsTo("POST", P.sendEmail)).toHaveLength(0);
   });
