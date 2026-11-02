@@ -39,6 +39,9 @@ export interface CronTriggerJob {
   payload: Record<string, any>;
 }
 
+/** The job name a trigger's repeatable is registered under: stable across schedule changes, unique per AgentTrigger id. */
+const cronTriggerJobName = (triggerId: string) => `cron-trigger:${triggerId}`;
+
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QueueService.name);
@@ -128,19 +131,15 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async enqueueCronTrigger(job: CronTriggerJob, cronExpression: string): Promise<void> {
-    const jobId = `cron:${job.triggerId}`;
-    // Upsert repeatable job
-    const existing = await this.cronQueue.getRepeatableJobs();
-    const match = existing.find((r) => r.id === jobId);
-    if (match) {
-      await this.cronQueue.removeRepeatableByKey(match.key);
-    }
+    // Upsert: a changed schedule hashes to a new repeatable key, so every
+    // repeatable the trigger already has is removed first (V1-24c).
+    await this.removeCronTrigger(job.triggerId);
 
     await this.cronQueue.add(
-      `cron-trigger:${job.triggerId}`,
+      cronTriggerJobName(job.triggerId),
       job,
       {
-        jobId,
+        jobId: `cron:${job.triggerId}`,
         repeat: { pattern: cronExpression, tz: 'UTC' },
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 50 },
@@ -148,11 +147,19 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /**
+   * V1-24c: a trigger's repeatables are found by the job NAME they are
+   * registered under. bullmq 5's getRepeatableJobs() entries carry key (an md5
+   * of name:jobId:endDate:tz:pattern), name, tz, pattern and next, but no `id`,
+   * so the old lookup by id never matched: a removed trigger kept firing and a
+   * changed schedule added a second repeatable beside the old one. Every match
+   * is removed (duplicates that lookup left behind included), each with its
+   * next delayed run. An unknown trigger matches nothing.
+   */
   async removeCronTrigger(triggerId: string): Promise<void> {
-    const existing = await this.cronQueue.getRepeatableJobs();
-    const match = existing.find((r) => r.id === `cron:${triggerId}`);
-    if (match) {
-      await this.cronQueue.removeRepeatableByKey(match.key);
+    const name = cronTriggerJobName(triggerId);
+    for (const r of await this.cronQueue.getRepeatableJobs()) {
+      if (r.name === name) await this.cronQueue.removeRepeatableByKey(r.key);
     }
   }
 
