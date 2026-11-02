@@ -17,6 +17,10 @@
  * `fetch` is stubbed: GET answers the business, PATCH records its body.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+// UI02 types into eight secret fields and saves; under the full web run the
+// default 5s budget times out with no assertion failing. Assertions unchanged.
+vi.setConfig({ testTimeout: 20_000 });
 import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import { PaymentsTab } from "./payments-tab";
 
