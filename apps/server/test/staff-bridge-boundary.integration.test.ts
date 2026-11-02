@@ -258,8 +258,13 @@ const statusOf = async (id: string) => (await db.aiApprovalItem.findUnique({ whe
 
 // ─── HTTP: the provider webhooks ─────────────────────────────────────────────
 
-const twilioSignature = (url: string, params: Record<string, string>) =>
-  createHmac('sha256', TWILIO_TOKEN)
+/**
+ * X-Twilio-Signature as Twilio computes it (V1-21c TW-SHA1): HMAC-SHA1 under the auth token over
+ * the URL followed by each POST parameter's name and value, sorted by name, base64-encoded. This
+ * suite and the controller used HMAC-SHA256 before V1-21c, so a genuine Twilio delivery was refused.
+ */
+const twilioSignature = (url: string, params: Record<string, string>, algorithm: 'sha1' | 'sha256' = 'sha1') =>
+  createHmac(algorithm, TWILIO_TOKEN)
     .update(Object.keys(params).sort().reduce((acc, k) => acc + k + params[k], url))
     .digest('base64');
 const metaSignature = (raw: string) => `sha256=${createHmac('sha256', APP_SECRET).update(raw).digest('hex')}`;
@@ -530,6 +535,66 @@ describe('WB-3 — a signed staff message is acted on once', () => {
   });
 });
 
+describe('V1-21c TW-SHA1 — the per-business route verifies X-Twilio-Signature as Twilio signs it', () => {
+  it("a 'YES' signed with HMAC-SHA256 is refused (403) and decides nothing; the same message signed as Twilio signs (HMAC-SHA1) approves", async () => {
+    const item = await pendingItem(ID.posCtl, 3);
+    const params = { From: `whatsapp:${PHONE.ctl}`, Body: 'YES', MessageSid: 'SMv21csha1', SmsMessageSid: 'SMv21csha1' };
+    const url = `http://${HOST}/whatsapp/webhook/${ID.bizA}`;
+    const sha256 = await twilioPost(ID.bizA, params, twilioSignature(url, params, 'sha256'));
+    expect(sha256.status).toBe(403);
+    expect(await statusOf(item.id)).toMatchObject({ status: 'pending' });
+    const sha1 = await twilioPost(ID.bizA, params, twilioSignature(url, params, 'sha1'));
+    expect(sha1.status).toBe(201);
+    expect(await statusOf(item.id)).toMatchObject({ status: 'approved', resolvedBy: 'key_delegate' });
+  });
+
+  it('a field changed after signing is refused (403) and decides nothing', async () => {
+    const item = await pendingItem(ID.posCtl, 3);
+    const signed = { From: `whatsapp:${PHONE.ctl}`, Body: 'what is on today?', SmsMessageSid: 'SMv21ctamper' };
+    const sig = twilioSignature(`http://${HOST}/whatsapp/webhook/${ID.bizA}`, signed);
+    const res = await twilioPost(ID.bizA, { ...signed, Body: 'YES' }, sig);
+    expect(res.status).toBe(403);
+    expect(await statusOf(item.id)).toMatchObject({ status: 'pending' });
+    await db.aiApprovalItem.delete({ where: { id: item.id } });
+  });
+});
+
+describe('V1-21c WB3-SHIFT — a captured signature replayed with a key/value boundary moved is dropped', () => {
+  const url = `http://${HOST}/whatsapp/webhook/${ID.bizA}`;
+  // Twilio sends a message's id as both MessageSid and SmsMessageSid
+  const original = { From: `whatsapp:${PHONE.full}`, Body: 'YES', MessageSid: 'SMv21cshift', SmsMessageSid: 'SMv21cshift' };
+  // ...'MessageSidSMv21cshiftSmsMessageSidSMv21cshift' cut at another place: the signed string,
+  // and so the signature, is unchanged; the message id (SmsMessageSid ?? MessageSid) is new
+  const shifted = { From: `whatsapp:${PHONE.full}`, Body: 'YES', MessageSid: 'SMv21cshiftSmsMessageSidSMv21cshift' };
+  let signature: string;
+
+  it("the signed 'YES' approves the holder's pending item", async () => {
+    const first = await pendingItem(ID.posFull, 2);
+    signature = twilioSignature(url, original);
+    expect(twilioSignature(url, shifted)).toBe(signature);
+    const res = await twilioPost(ID.bizA, original, signature);
+    expect(res.status).toBe(201);
+    expect(await statusOf(first.id)).toMatchObject({ status: 'approved', resolvedByUserId: ID.full });
+  });
+
+  it('the same signature on the shifted fields does not approve a later pending item, and runs nothing', async () => {
+    const second = await pendingItem(ID.posFull, 2);
+    const res = await twilioPost(ID.bizA, shifted, signature);
+    expect(res.status).toBe(201);
+    expect(await statusOf(second.id)).toMatchObject({ status: 'pending', resolvedByUserId: null });
+    // no claim row keeps a replayable copy of the signature
+    const rows = await db.webhookEvent.findMany({ where: { businessId: ID.bizA } });
+    expect(JSON.stringify(rows)).not.toContain(signature);
+  });
+
+  it('control: a new message (its own id, freshly signed) approves it', async () => {
+    const second = (await db.aiApprovalItem.findFirst({ where: { businessId: ID.bizA, approverAssignmentId: ID.posFull, status: 'pending' } }))!;
+    const next = { ...original, MessageSid: 'SMv21cshift2', SmsMessageSid: 'SMv21cshift2' };
+    await twilioPost(ID.bizA, next);
+    expect(await statusOf(second.id)).toMatchObject({ status: 'approved', resolvedByUserId: ID.full });
+  });
+});
+
 // ─── The dispatcher, with no tenant context ──────────────────────────────────
 
 describe("TD9-1 — projects_create_task writes only into the business's own project", () => {
@@ -623,4 +688,46 @@ describe("TD9-4 — an invoice or a quote names only the business's own contact 
     const qt = await run(ID.bizA, 'commerce_create_quote', { contactId: ID.contactA, items });
     expect(qt.quote).toMatchObject({ businessId: ID.bizA, contactId: ID.contactA });
   });
+});
+
+// ─── V1-21c: relation includes, over rows written before the TD9 repairs ─────
+
+describe("V1-21c — a project's task includes read only the business's own tasks (a cross-linked row written before TD9-1)", () => {
+  const planted = `${P}planted_ptask`;
+  const own = `${P}own_ptask_b`;
+
+  beforeAll(async () => {
+    // A's task filed on B's project, as ProjectsService.addTask wrote it before TD9-1 looked the project up
+    await db.projectTask.create({ data: { id: planted, businessId: ID.bizA, projectId: ID.projectB, title: 'A-CROSSLINKED-PTASK', trackedHours: 99 } });
+    await db.projectTask.create({ data: { id: own, businessId: ID.bizB, projectId: ID.projectB, title: 'B-OWN-PTASK', trackedHours: 2 } });
+  });
+  afterAll(async () => {
+    await db.projectTask.deleteMany({ where: { id: { in: [planted, own] } } });
+  });
+
+  it('getProject, listProjects and updateProject return the project with its own tasks only', async () => {
+    const one = await projects.getProject(ID.bizB, ID.projectB);
+    expect(one.tasks.map((t: { id: string }) => t.id)).toEqual([own]);
+    const all = await projects.listProjects(ID.bizB);
+    expect(all.find((p: { id: string }) => p.id === ID.projectB).tasks.map((t: { id: string }) => t.id)).toEqual([own]);
+    expect(JSON.stringify(all)).not.toContain('A-CROSSLINKED-PTASK');
+    const updated = await projects.updateProject(ID.bizB, ID.projectB, { description: 'v21c' });
+    expect(updated.tasks.map((t: { id: string }) => t.id)).toEqual([own]);
+  });
+
+  it("getProjectTimeline and getProjectBudget neither (the planted task's 99 tracked hours are not B's)", async () => {
+    const timeline = await projects.getProjectTimeline(ID.projectB, ID.bizB);
+    expect(timeline.tasks.map((t: { id: string }) => t.id)).toEqual([own]);
+    const budget = await projects.getProjectBudget(ID.projectB, ID.bizB);
+    expect(budget.trackedHours).toBe(2);
+  });
+
+  // The KEY dispatcher reads these with its own queries (FlowOrchestratorService.executeToolAction,
+  // src/modules/ai/flow-orchestrator.service.ts), which V1-21c's write set does not include: on a
+  // row like `planted`, projects_list_tasks for A returns B's project name through the task's
+  // project include, and bookings_list_bookings for A returns B's service name through a booking's
+  // service include. Both are to-one includes, which Prisma cannot filter: the dispatcher's where
+  // has to bind the relation ({ project: { businessId } }, { service: { businessId } }).
+  it.todo("projects_list_tasks does not read another business's project through a task's project include (dispatcher outside the V1-21c write set)");
+  it.todo("bookings_list_bookings does not read another business's service through a booking's service include (dispatcher outside the V1-21c write set)");
 });

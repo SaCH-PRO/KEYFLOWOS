@@ -9,11 +9,17 @@ function metaSignature(body: string, secret: string): string {
   return `sha256=${sig}`;
 }
 
-function twilioSignature(url: string, params: Record<string, string>, authToken: string): string {
+/**
+ * X-Twilio-Signature as Twilio computes it: HMAC-SHA1 under the account's auth token over the full
+ * URL followed by every POST parameter's name and value, sorted by name, base64-encoded
+ * (https://www.twilio.com/docs/usage/security#validating-requests). Before V1-21c this helper, and
+ * the controller, used HMAC-SHA256, so a genuine Twilio delivery was refused.
+ */
+function twilioSignature(url: string, params: Record<string, string>, authToken: string, algorithm: 'sha1' | 'sha256' = 'sha1'): string {
   const payload = Object.keys(params)
     .sort()
     .reduce((acc, key) => acc + key + params[key], url);
-  return createHmac('sha256', authToken).update(payload).digest('base64');
+  return createHmac(algorithm, authToken).update(payload).digest('base64');
 }
 
 function makeReq(overrides: any = {}) {
@@ -39,6 +45,8 @@ describe('WhatsAppController webhook signatures', () => {
   const webhookLogger: any = { log: vi.fn() };
   // V1-21b review 9 WB-2: a Meta body is taken on /whatsapp/webhook/:businessId only for a number
   // that business connected
+  // webhook_events: @@unique([provider, providerEventId]), as the real table refuses a second claim
+  const claimed = new Set<string>();
   const prisma: any = {
     client: {
       business: {
@@ -46,12 +54,21 @@ describe('WhatsAppController webhook signatures', () => {
           where.id === 'biz_1' && where.metaData?.equals === 'pn_biz_1' ? { id: 'biz_1' } : null,
         ),
       },
+      webhookEvent: {
+        create: vi.fn(async ({ data }: any) => {
+          const key = `${data.provider}|${data.providerEventId}`;
+          if (claimed.has(key)) throw Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
+          claimed.add(key);
+          return { id: `we_${claimed.size}`, ...data };
+        }),
+      },
     },
   };
   const controller = new WhatsAppController(service, webhookLogger, prisma);
 
   beforeEach(() => {
     vi.clearAllMocks();
+    claimed.clear();
     process.env.WHATSAPP_APP_SECRET = SECRET;
     process.env.TWILIO_AUTH_TOKEN = TOKEN;
   });
@@ -123,6 +140,74 @@ describe('WhatsAppController webhook signatures', () => {
       makeReq({ headers: { 'x-twilio-signature': sig }, rawBody: '' }),
     );
     expect(res).toMatchObject({ success: true, contactId: 'c1', isNew: false });
+  });
+
+  // ─── V1-21c TW-SHA1: the scheme Twilio signs with ─────────────────────────
+
+  it("[TW-1] Twilio's published test vector is accepted (auth token '12345', HMAC-SHA1 over the URL and the sorted params)", async () => {
+    // The request of Twilio's security documentation and twilio-node's validateRequest spec.
+    process.env.TWILIO_AUTH_TOKEN = '12345';
+    const params = { CallSid: 'CA1234567890ABCDE', Caller: '+14158675309', Digits: '1234', From: '+14158675309', To: '+18005551212' };
+    const req = makeReq({
+      headers: { host: 'mycompany.com', 'x-twilio-signature': 'RSOYDt4T1cUTdK1PDd93/VVr8B8=' },
+      originalUrl: '/myapp.php?foo=1&bar=2',
+    });
+    // premise: the vector is this file's helper's output (so the helper signs as Twilio does)
+    expect(twilioSignature('https://mycompany.com/myapp.php?foo=1&bar=2', params, '12345')).toBe('RSOYDt4T1cUTdK1PDd93/VVr8B8=');
+    const res = await controller.webhook('biz_1', params as any, undefined, undefined, undefined, req);
+    expect(res).toMatchObject({ success: true });
+    expect(service.receiveInbound).toHaveBeenCalledWith('biz_1', expect.objectContaining({ from: '+14158675309', provider: 'twilio' }));
+  });
+
+  it('[TW-2] the same request signed with HMAC-SHA256 is refused, and reaches no service', async () => {
+    const body = { From: 'whatsapp:+123', Body: 'YES', SmsMessageSid: 'SM2', ProfileName: 'Test' };
+    const url = 'https://api.keyflow.test/whatsapp/webhook/biz_1';
+    const sha256 = twilioSignature(url, body, TOKEN, 'sha256');
+    await expect(
+      controller.webhook('biz_1', body as any, undefined, undefined, undefined, makeReq({ headers: { 'x-twilio-signature': sha256 } })),
+    ).rejects.toThrow(/Invalid Twilio webhook signature/);
+    expect(service.receiveInbound).not.toHaveBeenCalled();
+  });
+
+  it('[TW-3] a tampered request (a field changed after signing, or another business\'s URL) is refused', async () => {
+    const body = { From: 'whatsapp:+123', Body: 'hello', SmsMessageSid: 'SM3' };
+    const sig = twilioSignature('https://api.keyflow.test/whatsapp/webhook/biz_1', body, TOKEN);
+    await expect(
+      controller.webhook('biz_1', { ...body, Body: 'YES' } as any, undefined, undefined, undefined, makeReq({ headers: { 'x-twilio-signature': sig } })),
+    ).rejects.toThrow(/Invalid Twilio webhook signature/);
+    await expect(
+      controller.webhook('biz_2', body as any, undefined, undefined, undefined, makeReq({ headers: { 'x-twilio-signature': sig }, originalUrl: '/whatsapp/webhook/biz_2' })),
+    ).rejects.toThrow(/Invalid Twilio webhook signature/);
+    expect(service.receiveInbound).not.toHaveBeenCalled();
+  });
+
+  // ─── V1-21c WB3-SHIFT: a signed request is acted on once, however its fields are cut ──
+
+  it('[WB3-SHIFT] a captured signature replayed with a key/value boundary moved (a new message id) is dropped before the service', async () => {
+    const url = 'https://api.keyflow.test/whatsapp/webhook/biz_1';
+    const original = { From: 'whatsapp:+123', Body: 'YES', MessageSid: 'SMshift1', SmsMessageSid: 'SMshift1' };
+    const sig = twilioSignature(url, original, TOKEN);
+    const first = await controller.webhook('biz_1', original as any, undefined, undefined, undefined, makeReq({ headers: { 'x-twilio-signature': sig } }));
+    expect(first).toMatchObject({ success: true });
+    expect(service.receiveInbound).toHaveBeenCalledTimes(1);
+    expect(service.receiveInbound).toHaveBeenLastCalledWith('biz_1', expect.objectContaining({ externalId: 'SMshift1' }));
+
+    // 'MessageSidSMshift1SmsMessageSidSMshift1' cut as MessageSid='SMshift1SmsMessageSidSMshift1':
+    // the signed string is unchanged, so the captured signature is still valid, and the message
+    // id the per-message dedupe keys on is new.
+    const shifted = { From: 'whatsapp:+123', Body: 'YES', MessageSid: 'SMshift1SmsMessageSidSMshift1' };
+    expect(twilioSignature(url, shifted, TOKEN)).toBe(sig);
+    const replay = await controller.webhook('biz_1', shifted as any, undefined, undefined, undefined, makeReq({ headers: { 'x-twilio-signature': sig } }));
+    expect(replay).toMatchObject({ success: true, duplicate: true });
+    expect(service.receiveInbound).toHaveBeenCalledTimes(1);
+
+    // the claim keeps no replayable copy of the signature
+    expect(JSON.stringify(prisma.client.webhookEvent.create.mock.calls)).not.toContain(sig);
+
+    // control: a new message, freshly signed, is taken
+    const next = { From: 'whatsapp:+123', Body: 'YES', MessageSid: 'SMshift2', SmsMessageSid: 'SMshift2' };
+    await controller.webhook('biz_1', next as any, undefined, undefined, undefined, makeReq({ headers: { 'x-twilio-signature': twilioSignature(url, next, TOKEN) } }));
+    expect(service.receiveInbound).toHaveBeenCalledTimes(2);
   });
 });
 
