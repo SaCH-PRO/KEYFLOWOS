@@ -24,13 +24,20 @@ export class CallScriptService {
     @Inject(ModelGatewayService) private readonly gateway: ModelGatewayService,
   ) {}
 
+  /**
+   * Both rows are looked up within `businessId` (V1-21b review 8 DD8-1). KEY's
+   * call_generate_script hands over a call log id and a contact id the model chose; with
+   * findUnique({ id }) they stayed in the tenant only while TenantInterceptor's ambient tenant
+   * was armed, so on the WhatsApp/SMS staff bridge another business's contact went into the
+   * prompt and its call log took the script. Another business's id answers as an unknown one.
+   */
   async generateScript(
     businessId: string,
     callLogId: string,
     contactId: string,
   ): Promise<CallScriptResult> {
-    const contact = await this.prisma.client.contact.findUnique({
-      where: { id: contactId },
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId },
       include: {
         deals: {
           where: { status: 'OPEN' },
@@ -51,8 +58,8 @@ export class CallScriptService {
       throw new NotFoundException('Contact not found');
     }
 
-    const callLog = await this.prisma.client.callLog.findUnique({
-      where: { id: callLogId },
+    const callLog = await this.prisma.client.callLog.findFirst({
+      where: { id: callLogId, businessId },
     });
 
     if (!callLog) {

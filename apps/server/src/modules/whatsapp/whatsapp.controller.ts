@@ -187,12 +187,19 @@ export class WhatsAppController {
       return { error: 'Invalid verify token' };
     }
 
-    const parsed = this.parseInboundPayload(body);
+    // This is Meta's one callback URL, and it routes by the phone_number_id in Meta's envelope:
+    // nothing in the body is read until Meta's signature covers it, and only the Meta shape is
+    // read (V1-21b review 8 FB-1). It used to check a signature only for a body that parsed as
+    // Meta, while any body with a string `From` parsed as Twilio, so an unsigned body carrying a
+    // `From` and Meta's envelope was routed to the business and handed to the staff bridge, which
+    // answers a position by its phone with that position's KEY envelope (and resolves its pending
+    // approval on a 'YES'). A Twilio signature does not stand in: it covers the URL and the
+    // string fields, not the envelope this route routes by; Twilio posts to
+    // /whatsapp/webhook/:businessId.
+    this.assertMetaSignature(req);
+    const parsed = this.parseMetaPayload(body);
     if (!parsed?.from) {
       return { success: false, error: 'Unrecognized WhatsApp webhook payload' };
-    }
-    if (parsed.provider === 'meta') {
-      this.assertMetaSignature(req);
     }
 
     const phoneNumberId = (body as unknown as {
@@ -407,7 +414,11 @@ export class WhatsAppController {
       };
     }
 
-    // Meta Cloud API format
+    return this.parseMetaPayload(body);
+  }
+
+  /** The Meta Cloud API shape only: the sender is the message's, never a top-level `From`. */
+  private parseMetaPayload(body: WhatsAppWebhookBody): ParsedInbound | null {
     if (Array.isArray(body.entry) && body.entry.length > 0) {
       const change = body.entry[0]?.changes?.[0];
       const value = change?.value;

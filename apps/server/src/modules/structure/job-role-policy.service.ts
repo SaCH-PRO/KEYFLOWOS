@@ -47,7 +47,9 @@ import {
  * assignment's business, the row HTTP reads (envelopeForPosition, review 3 IC-2,
  * review 4 IC3-1, review 6 INP5-1, review 7 INP4-2), and every position by the membership of
  * each member whose account phone it carries (review 7 INP4-3). Only an envelope this service
- * issued governs a KEY turn (isIssued; review 7 ENV-FORGE). A registry tool some
+ * issued governs a KEY turn (isIssued; review 7 ENV-FORGE). No grant reaches a tool whose
+ * dispatcher call finds its row by a bare id, which on the staff bridge, with no tenant context,
+ * is any business's row (TENANT_UNBOUND_TOOLS, review 8 DD8-1). A registry tool some
  * pattern matches but no grant covers is
  * listed in `blockedTools`, which `isToolAllowed` checks first, so
  * AiOversightService.evaluate refuses it and the chat never advertises it.
@@ -211,6 +213,35 @@ export const CRM_SUBPERMISSION_TOOLS: Readonly<Record<'crm_edit' | 'crm_delete',
  */
 export const CRM_ROW_VISIBILITY_TOOLS: readonly string[] = ['crm_delete_contact', 'crm_update_contact', 'tag_contact'];
 
+/**
+ * Tools no route governs whose dispatcher call finds a row of a tenant-scoped model by an id the
+ * model chose, with no business in the where and no check of the row's businessId (V1-21b
+ * review 8 DD8-1). Over HTTP the same lookup stays in the tenant because TenantInterceptor arms
+ * the Prisma tenant extension for the request's business; the WhatsApp/SMS staff bridge runs the
+ * dispatcher inside a provider webhook with no tenant armed, so there it reaches another
+ * business's row. No key reaches these, not a canonical key, a legacy family (content_*,
+ * bookings_*, projects_*, procurement_*) or the baseline, until the dispatcher binds the row to
+ * the business KEY acts in, as it now does for the call tools (the governed ones the review
+ * found). Derived in job-role-tool-families.spec.ts (rule 2b), which fails if this list and the
+ * dispatcher disagree.
+ */
+export const TENANT_UNBOUND_TOOLS: Readonly<Record<string, string>> = {
+  approval_decide_step: 'ApprovalRequestService.decideStep finds the approval request by its bare id',
+  bookings_offer_waitlist_slot: 'BookingWaitlistService.offerSlot finds the waitlist entry by its bare id',
+  content_assign_request: 'ContentRequestService.assignRequest finds the content request by its bare id',
+  content_deliver_request: 'ContentRequestService.deliverRequest finds the content request by its bare id',
+  content_get_request: 'ContentRequestService.getById finds the content request by its bare id',
+  content_submit_for_review: 'ContentRequestService.submitForReview finds the content request by its bare id',
+  content_transition_status: 'ContentRequestService.transitionStatus finds the content request by its bare id',
+  content_upload_deliverables: 'ContentRequestService.uploadDeliverables finds the content request by its bare id',
+  evidence_verify: 'EvidenceService.verify finds the evidence by its bare id',
+  people_assign_task: 'TaskAssignmentService.assign finds the task and the staff assignee by bare ids',
+  procurement_acknowledge_vendor: 'ProcurementService.acknowledgeVendor updates the request by its bare id',
+  procurement_mark_fulfilled: 'ProcurementService.markFulfilled updates the request by its bare id',
+  procurement_mark_invoiced: 'ProcurementService.markInvoiced updates the request by its bare id',
+  projects_update_task: 'ProjectsService.updateTask finds the staff assignee (args.assigneeId) by its bare id',
+};
+
 /** Baseline reads every position keeps regardless of grants (tools no route governs). */
 export const BASELINE_READS: readonly string[] = ['fetch_*', 'calendar_check_conflicts', 'documents_list'];
 
@@ -253,8 +284,12 @@ interface Grant {
   withheld?: ReadonlySet<string>;
 }
 
-/** A grant reaches a tool only at a tier it covers, and a family grant only an ungoverned one. */
+/**
+ * A grant reaches a tool only at a tier it covers, and a family grant only an ungoverned one; no
+ * grant reaches a tool that finds its row by a bare id (TENANT_UNBOUND_TOOLS).
+ */
 function covers(grant: Grant, toolName: string, riskTier: number): boolean {
+  if (own(TENANT_UNBOUND_TOOLS, toolName) !== undefined) return false;
   if (!matches(grant.patterns, toolName) || riskTier > grant.tier) return false;
   if (grant.family) return !GOVERNED.has(toolName);
   return !grant.withheld?.has(toolName);

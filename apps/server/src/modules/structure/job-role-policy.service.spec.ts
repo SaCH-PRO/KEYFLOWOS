@@ -504,10 +504,13 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
     ...Object.keys(((policyExports as Record<string, unknown>).GOVERNED_UNGRANTED ?? {}) as Record<string, string>),
   ]);
 
+  /** Tools that find their row by a bare id, which on the staff bridge is any business's: no key reaches them (review 8 DD8-1). */
+  const TENANT_UNBOUND = new Set(Object.keys(((policyExports as Record<string, unknown>).TENANT_UNBOUND_TOOLS ?? {}) as Record<string, string>));
+
   for (const [key, families] of Object.entries(LEGACY).filter(([k]) => !(CANONICAL_MODULES as readonly string[]).includes(k))) {
-    it(`{ ${key}: <level> } reaches what it reached before the repair, less the tools a route governs`, () => {
+    it(`{ ${key}: <level> } reaches what it reached before the repair, less the tools a route governs and those that find their row by a bare id`, () => {
       for (const level of LEVELS) {
-        expect(reachedNow({ [key]: level }), level).toEqual(reachedBefore(families, level).filter((t) => !ROUTE_GOVERNED.has(t)));
+        expect(reachedNow({ [key]: level }), level).toEqual(reachedBefore(families, level).filter((t) => !ROUTE_GOVERNED.has(t) && !TENANT_UNBOUND.has(t)));
       }
     });
   }

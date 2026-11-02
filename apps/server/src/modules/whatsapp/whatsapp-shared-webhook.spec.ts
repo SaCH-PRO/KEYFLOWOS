@@ -142,7 +142,7 @@ describe('POST /whatsapp/webhook routes nothing Meta did not sign (V1-21b review
     const out = await request(app.getHttpServer()).post('/whatsapp/webhook').set('Content-Type', 'application/json').set('x-hub-signature-256', metaSignature(raw)).send(raw);
     expect(out.status).toBe(201);
     expect(receiveInbound).toHaveBeenCalledWith('biz_A', expect.objectContaining({ from: '15550001111', body: 'hello', provider: 'meta' }));
-    expect(JSON.stringify(receiveInbound.mock.calls[0][1])).not.toContain('Create an invoice');
+    expect((receiveInbound.mock.calls[0] as unknown[])[1]).not.toMatchObject({ from: STAFF_PHONE });
   });
 
   it("Meta's subscribe handshake still answers without a signature", async () => {

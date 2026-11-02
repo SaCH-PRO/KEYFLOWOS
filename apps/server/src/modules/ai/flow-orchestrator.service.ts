@@ -4853,8 +4853,10 @@ ${triage.standingContext}`;
         // `completed` used to be assigned and dropped, and the return echoed the
         // arguments back. completeCall throws if the call was already completed
         // and computes completedAt itself, so the echo could report an outcome
-        // that was never written.
-        const completed = await this.getCallLog().completeCall(args.callLogId, {
+        // that was never written. The business is handed over: CallLogService looks the call log
+        // up within it, since on the staff bridge no ambient tenant binds a bare id (V1-21b
+        // review 8 DD8-1).
+        const completed = await this.getCallLog().completeCall(businessId, args.callLogId, {
           outcome: args.outcome,
           duration: args.duration ?? undefined,
           notes: args.notes ?? undefined,
@@ -4878,7 +4880,8 @@ ${triage.standingContext}`;
         };
       }
       case 'call_schedule_followup': {
-        const task = await this.getCallLog().createFollowUpTask(args.callLogId, {
+        // within the business, as call_log_outcome (V1-21b review 8 DD8-1)
+        const task = await this.getCallLog().createFollowUpTask(businessId, args.callLogId, {
           title: args.title,
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           priority: args.priority ?? 'NORMAL',
