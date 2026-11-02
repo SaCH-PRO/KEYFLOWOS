@@ -338,6 +338,11 @@
       "packet": "V1-23-PUB-PUBLIC-PROJECTIONS"
     },
     {
+      "prefix": "v29a_",
+      "owner": "apps/server/test/commerce-refund.integration.test.ts",
+      "packet": "V1-29-DM-REFUND-CONVENTION"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"

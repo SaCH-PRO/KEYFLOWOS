@@ -510,3 +510,134 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
     expect(h.events.emit.mock.calls[0][0]).toBe('invoice.paid');
   });
 });
+
+/**
+ * V1-29-DM-REFUND-CONVENTION (M28, D-14): a manual refund is a separate
+ * negative REFUNDED row beside the SUCCESSFUL original (the provider
+ * convention), so computeBalance counts it once. A fully refunded invoice
+ * returns to SENT with paidAt cleared (no REFUNDED invoice state, no enum
+ * migration); a partial refund of a PAID invoice reopens it to
+ * PARTIALLY_PAID, also with paidAt cleared. Only the payment rows (the
+ * reconcile) may move an invoice out of PAID: the generic transition map
+ * still forbids PAID -> SENT for transition() callers. The real-database
+ * proof is test/commerce-refund.integration.test.ts.
+ */
+describe('V1-29 refund convention (D-14)', () => {
+  const ok = (amount: number) => ({ amount, status: 'SUCCESSFUL' });
+  const refunded = (amount: number) => ({ amount: -Math.abs(amount), status: 'REFUNDED' });
+
+  it('computeBalance counts a separate refund row once: 100 paid, -100 refunded -> paid 100, refunded 100, net 0, remaining 100', () => {
+    expect(computeBalance(100, [ok(100), refunded(100)])).toMatchObject({
+      paid: 100, refunded: 100, net: 0, remaining: 100, isFullyPaid: false, isOverpaid: false,
+    });
+  });
+
+  it('RED-BEFORE: a fully refunded PAID invoice derives SENT (the base kept PAID: it reopened only on a positive net)', () => {
+    expect(deriveStatusAfterPayment('PAID', computeBalance(100, [ok(100), refunded(100)]))).toBe('SENT');
+  });
+
+  it('RED-BEFORE: a fully refunded PARTIALLY_PAID invoice derives SENT', () => {
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', computeBalance(100, [ok(40), refunded(40)]))).toBe('SENT');
+  });
+
+  it('a partial refund of a PAID invoice derives PARTIALLY_PAID (60 + 40 paid, 40 refunded: remaining 40)', () => {
+    const b = computeBalance(100, [ok(60), ok(40), refunded(40)]);
+    expect(b).toMatchObject({ net: 60, remaining: 40 });
+    expect(deriveStatusAfterPayment('PAID', b)).toBe('PARTIALLY_PAID');
+  });
+
+  it('an overpaid invoice refunded down to the total stays PAID', () => {
+    expect(deriveStatusAfterPayment('PAID', computeBalance(100, [ok(150), refunded(50)]))).toBe('PAID');
+  });
+
+  it('net 0 with no refund leaves the status alone (nothing was refunded); SENT, OVERDUE and VOID are never moved by a full refund', () => {
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', computeBalance(100, [{ amount: 40, status: 'PENDING' }]))).toBe('PARTIALLY_PAID');
+    expect(deriveStatusAfterPayment('SENT', computeBalance(100, [ok(40), refunded(40)]))).toBe('SENT');
+    expect(deriveStatusAfterPayment('OVERDUE', computeBalance(100, [ok(40), refunded(40)]))).toBe('OVERDUE');
+    expect(deriveStatusAfterPayment('VOID', computeBalance(100, [ok(40), refunded(40)]))).toBe('VOID');
+  });
+
+  it('the generic transition map is unchanged: PAID -> SENT and PARTIALLY_PAID -> SENT stay illegal for transition() callers', () => {
+    expect(isLegalTransition('PAID', 'SENT')).toBe(false);
+    expect(isLegalTransition('PARTIALLY_PAID', 'SENT')).toBe(false);
+  });
+
+  type Inv = {
+    id: string;
+    status: string;
+    total: number;
+    currency: string;
+    businessId: string;
+    paidAt: Date | null;
+    payments: Array<{ amount: number; status: string }>;
+  };
+
+  function build(invoice: Inv) {
+    const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...invoice, ...data, items: [], contact: null, booking: null }));
+    const tx = {
+      invoice: { findUnique: vi.fn(async () => invoice), update },
+      invoiceItem: { findMany: vi.fn(async () => []) },
+    };
+    const events = { emit: vi.fn() };
+    const expensePosting = { onProductSold: vi.fn(async () => null) };
+    const service = new InvoiceWorkflowService(
+      { client: { $transaction: vi.fn() } } as never,
+      events as never,
+      {} as never,
+      expensePosting as never,
+    );
+    return { service, tx, update, events, expensePosting };
+  }
+
+  const paidInvoice = (payments: Inv['payments'], status = 'PAID'): Inv => ({
+    id: 'inv_1',
+    status,
+    total: 100,
+    currency: 'TTD',
+    businessId: 'biz_1',
+    paidAt: new Date('2026-10-01T00:00:00Z'),
+    payments,
+  });
+
+  it('RED-BEFORE: the refund reconcile moves a fully refunded PAID invoice to SENT, clears paidAt, posts no COGS and queues no event (no invoice.sent email, no paid event)', async () => {
+    const h = build(paidInvoice([ok(100), refunded(100)]));
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: buffer, onIllegalTransition: 'keep' });
+    expect(result).toMatchObject({ status: 'SENT', changed: true, balance: { net: 0, remaining: 100 } });
+    expect(h.update).toHaveBeenCalledTimes(1);
+    expect(h.update.mock.calls[0][0].data).toEqual({ status: 'SENT', paidAt: null });
+    expect(h.expensePosting.onProductSold).not.toHaveBeenCalled();
+    expect(buffer).toEqual([]);
+    expect(h.events.emit).not.toHaveBeenCalled();
+  });
+
+  it('the same reopen without onIllegalTransition (provider refund webhooks) also reaches SENT, not a 409', async () => {
+    const h = build(paidInvoice([ok(40), refunded(40)], 'PARTIALLY_PAID'));
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: [] });
+    expect(result).toMatchObject({ status: 'SENT', changed: true });
+    expect(h.update.mock.calls[0][0].data).toEqual({ status: 'SENT', paidAt: null });
+  });
+
+  it('RED-BEFORE: a partial refund reopening PAID -> PARTIALLY_PAID clears paidAt and queues invoice.payment_recorded with the balance', async () => {
+    const h = build(paidInvoice([ok(60), ok(40), refunded(40)]));
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: buffer, onIllegalTransition: 'keep' });
+    expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: true, balance: { net: 60, remaining: 40 } });
+    expect(h.update.mock.calls[0][0].data).toEqual({ status: 'PARTIALLY_PAID', paidAt: null });
+    expect(buffer.map((e) => e.name)).toEqual(['invoice.payment_recorded']);
+  });
+
+  it('a payment settling the invoice still stamps paidAt (PARTIALLY_PAID -> PAID)', async () => {
+    const h = build({ ...paidInvoice([ok(60), ok(40)], 'PARTIALLY_PAID'), paidAt: null });
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: [] });
+    expect(result).toMatchObject({ status: 'PAID', changed: true });
+    expect(h.update.mock.calls[0][0].data.paidAt).toBeInstanceOf(Date);
+  });
+
+  it('transition() (UI / mark-paid / void callers) still refuses PAID -> SENT with 409', async () => {
+    const h = build(paidInvoice([ok(100)]));
+    const tx = { invoice: { findUnique: vi.fn(async () => ({ id: 'inv_1', status: 'PAID', businessId: 'biz_1' })), update: vi.fn() } };
+    await expect(h.service.transition('inv_1', 'SENT', { tx: tx as never, eventBuffer: [] })).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.invoice.update).not.toHaveBeenCalled();
+  });
+});
