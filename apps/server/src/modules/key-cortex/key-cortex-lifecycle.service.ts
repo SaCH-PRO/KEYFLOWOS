@@ -12,6 +12,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { KeyCortexEventBusService } from './key-cortex-event-bus.service';
 import { KeyCortexConversationService } from './key-cortex-conversation.service';
+import { auditErrorText, auditResultText } from './key-cortex-tool-registry.service';
 import {
   CortexSession,
   CortexSessionStatus,
@@ -357,27 +358,14 @@ export class KeyCortexLifecycleService {
       },
     });
 
-    const actionLogPromise = (this.prisma.client as any).cortexActionLog.create({
-      data: {
-        sessionId: identity.sessionId,
-        businessId: identity.businessId,
-        userId: identity.userId ?? null,
-        commandId: identity.commandId,
-        correlationId: identity.correlationId,
-        actionType: input.toolName,
-        status: input.success ? 'success' : 'error',
-        description: `${input.module}.${input.toolName}`,
-        result: input.success ? JSON.stringify(input.output) : undefined,
-        error: input.error,
-        requiresApproval: input.requiresApproval,
-        startedAt: input.startedAt,
-        completedAt: input.completedAt,
-        durationMs: input.durationMs,
-        createdAt: now,
-      },
-    });
+    const actionLogPromise = this.recordActionLog(input, now);
 
-    await Promise.all([executionLogPromise, actionLogPromise]);
+    // Both writes settle before this answers (V1-19c): Promise.all rejected on
+    // the first failure while the other write was still in flight, so a caller
+    // could not know whether the CortexActionLog row had been written yet.
+    const settled = await Promise.allSettled([executionLogPromise, actionLogPromise]);
+    const failed = settled.find((s): s is PromiseRejectedResult => s.status === 'rejected');
+    if (failed) throw failed.reason;
 
     this.eventBus.emit({
       source: input.module,
@@ -400,6 +388,82 @@ export class KeyCortexLifecycleService {
         sessionId: identity.sessionId,
         entityType: 'AiExecutionLog',
         importance: input.success ? 'normal' : 'high',
+      },
+    });
+  }
+
+  /**
+   * The CortexActionLog row of a tool call the tool loop records, unless the
+   * registry already wrote it (V1-19c).
+   *
+   * KeyCortexToolLoopService calls this right after
+   * KeyCortexToolRegistryService.execute for the same call, and the registry
+   * writes the CortexActionLog row of every execution it runs, awaited before
+   * execute() answers. Writing here too would make every tool-loop execution
+   * two rows. So the row is written only when no registry row of this call
+   * exists: same business, tool and outcome, started inside this call's
+   * window, and the same command thread (correlationId). That keeps the
+   * record of a call the registry answered without running the tool (not
+   * found, refused, invalid input), which only this row records. A failed
+   * lookup writes the row: a duplicate is better than a lost record.
+   *
+   * A tool loop with no turn identity (lifecycle.startTurn threw) runs the
+   * tool with no command thread, so the registry's row has correlationId null
+   * and sessionId 'unknown', and then gives this record a correlationId it
+   * made up afterwards (V1-19c review, CR-V19c-1: the lookup missed and the
+   * call got two rows). A thread-less registry row of the same session (and
+   * the same user, when this record names one) is that call's row too.
+   *
+   * The stored answer and error get the registry row's treatment: the call's
+   * input taken out, bounded (auditResultText, auditErrorText; SEC-V19c-1).
+   */
+  private async recordActionLog(input: RecordExecutionInput, now: Date): Promise<void> {
+    const { identity } = input;
+    const status = input.success ? 'success' : 'error';
+    let auditedByRegistry = false;
+    try {
+      const existing = await this.prisma.client.cortexActionLog.findFirst({
+        where: {
+          businessId: identity.businessId,
+          actionType: input.toolName,
+          status,
+          startedAt: { gte: input.startedAt, lte: input.completedAt },
+          OR: [
+            { correlationId: identity.correlationId },
+            {
+              correlationId: null,
+              sessionId: identity.sessionId,
+              ...(identity.userId ? { userId: identity.userId } : {}),
+            },
+          ],
+        },
+        select: { id: true },
+      });
+      auditedByRegistry = Boolean(existing);
+    } catch (err) {
+      this.logger.warn(
+        `[recordExecution][${identity.businessId}] could not check for the registry's CortexActionLog row: ${(err as Error).message}`,
+      );
+    }
+    if (auditedByRegistry) return;
+
+    await this.prisma.client.cortexActionLog.create({
+      data: {
+        sessionId: identity.sessionId,
+        businessId: identity.businessId,
+        userId: identity.userId ?? null,
+        commandId: identity.commandId,
+        correlationId: identity.correlationId,
+        actionType: input.toolName,
+        status,
+        description: `${input.module}.${input.toolName}`,
+        result: input.success ? auditResultText(input.output, input.input) : null,
+        error: auditErrorText(input.error, input.input),
+        requiresApproval: input.requiresApproval,
+        startedAt: input.startedAt,
+        completedAt: input.completedAt,
+        durationMs: input.durationMs,
+        createdAt: now,
       },
     });
   }

@@ -358,6 +358,11 @@
       "packet": "V1-19-KEY-IDEMPOTENCY-CLAIM"
     },
     {
+      "prefix": "v19c_",
+      "owner": "apps/server/test/key-cortex-action-audit.integration.test.ts",
+      "packet": "V1-19 (V1-19c-CORTEX-ACTION-AUDIT-ROW)"
+    },
+    {
       "prefix": "v21a_",
       "owner": "apps/server/test/structure-authority-ceiling.integration.test.ts",
       "packet": "V1-21-AUTH-JOBROLE-CEILING"
