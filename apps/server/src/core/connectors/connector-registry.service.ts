@@ -206,7 +206,11 @@ export class ConnectorRegistryService {
 
     const startedAt = Date.now();
     let result: ConnectorSmokeResult;
+    // R0-CMF6b review (SEC-CMF6b-2): the gmail mailbox this smoke test acts on,
+    // bound before the connector reads its token.
+    let gmailMailbox: string | null = null;
     try {
+      if (type === 'gmail') gmailMailbox = await this.linkedGmailMailboxOf(businessId);
       if (typeof connector.smokeTest === 'function') {
         result = await connector.smokeTest(businessId);
       } else if (typeof connector.testConnection === 'function') {
@@ -254,7 +258,7 @@ export class ConnectorRegistryService {
         };
         if (type === 'gmail') {
           // R0-CMF6b: the gmail row follows the business mailbox (see writeWhileGmailMailboxLinked).
-          const recorded = await this.writeWhileGmailMailboxLinked(businessId, (tx) => tx.connectorStatus.upsert(args));
+          const recorded = await this.writeWhileGmailMailboxLinked(businessId, gmailMailbox, (tx) => tx.connectorStatus.upsert(args));
           if (!recorded) {
             this.logger.warn(`Gmail smoke test for ${businessId}: the mailbox was disconnected while it ran; status not written`);
           }
@@ -289,23 +293,39 @@ export class ConnectorRegistryService {
    * test that had started before it used to write the row connected again
    * afterwards (or create one), so the nightly sync selected a mailbox that was
    * gone. Its write now runs in a transaction that takes the same lock first
-   * and is made only while the business still has its mailbox
-   * (gmail_access_token, what GmailConnector.isConnected reads): a disconnect
-   * that committed first is seen and nothing is written; one that starts later
-   * waits for this write, then marks the row disconnected. Returns whether it
-   * wrote. GmailIngestionService.syncInbox applies the same rule.
+   * and is made only while the business still has the mailbox the smoke test
+   * acted on: a disconnect that committed first is seen and nothing is
+   * written; one that starts later waits for this write, then marks the row
+   * disconnected. Returns whether it wrote. GmailIngestionService.syncInbox
+   * applies the same rule.
+   *
+   * Review SEC-CMF6b-1 / SEC-CMF6b-2: "linked" is gmail_refresh_token and
+   * gmail_email set (as GmailService.getGmailStatus reads it), never
+   * gmail_access_token, which a token refresh writes back unlocked; and
+   * gmail_email is the mailbox bound before the connector read its token, so
+   * a disconnect followed by a new connection is not taken for it.
    */
   private async writeWhileGmailMailboxLinked(
     businessId: string,
+    mailbox: string | null,
     write: (tx: PrismaTx) => Promise<unknown>,
   ): Promise<boolean> {
     return this.prisma.client.$transaction(async (tx) => {
       const rows = (await tx.$queryRaw`
-        SELECT gmail_access_token IS NOT NULL AS linked FROM businesses WHERE id = ${businessId} FOR NO KEY UPDATE`) as Array<{ linked: boolean }>;
+        SELECT (gmail_refresh_token IS NOT NULL AND gmail_email IS NOT NULL AND lower(gmail_email) = lower(${mailbox}::text)) AS linked
+          FROM businesses WHERE id = ${businessId} FOR NO KEY UPDATE`) as Array<{ linked: boolean | null }>;
       if (rows[0]?.linked !== true) return false;
       await write(tx);
       return true;
     });
+  }
+
+  /** R0-CMF6b review (SEC-CMF6b-2): the business mailbox's address while it has a refresh token, else null. */
+  private async linkedGmailMailboxOf(businessId: string): Promise<string | null> {
+    const rows = (await this.prisma.client.$queryRaw`
+      SELECT gmail_email AS email FROM businesses
+       WHERE id = ${businessId} AND gmail_refresh_token IS NOT NULL AND gmail_email IS NOT NULL`) as Array<{ email: string | null }>;
+    return rows[0]?.email ?? null;
   }
 
   async reconnectConnector(type: ConnectorType, businessId: string): Promise<{ connected: boolean; authUrl?: string }> {

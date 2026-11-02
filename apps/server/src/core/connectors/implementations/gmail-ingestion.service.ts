@@ -84,13 +84,27 @@ export class GmailIngestionService {
 
   async syncInbox(businessId: string): Promise<ConnectorSyncResult> {
     const start = Date.now();
+    // R0-CMF6b review (SEC-CMF6b-2): the mailbox this sync reads, bound before
+    // its token is read, so a disconnect and a new connection during the sync
+    // are seen as a different mailbox.
+    let mailbox: string | null = null;
 
     try {
+      mailbox = await this.linkedMailboxOf(businessId);
+      if (!mailbox) throw new Error('Gmail not connected');
+
       const accessToken = await this.tokenHelper.getValidAccessToken(businessId, {
         access: 'gmailAccessToken',
         refresh: 'gmailRefreshToken',
         expiry: 'gmailTokenExpiry',
       }, 'Gmail');
+
+      // R0-CMF6b review (SEC-CMF6b-1, SEC-CMF6b-3): the token read may have
+      // refreshed while the owner disconnected; read nothing from a mailbox
+      // that is no longer linked.
+      if (!(await this.mailboxStillLinked(businessId, mailbox))) {
+        return await this.endSyncOfDisconnectedMailbox(businessId, mailbox, 0, [], start);
+      }
 
       const profile = await this.fetchProfile(accessToken);
       const connectedAccount = profile.emailAddress?.toLowerCase() ?? null;
@@ -105,6 +119,8 @@ export class GmailIngestionService {
 
       let ingested = 0;
       const errors: string[] = [];
+      // R0-CMF6b review (SEC-CMF6b-3): set when the mailbox was found no longer linked mid-sync.
+      let mailboxGone = false;
 
       for (const ref of refs) {
         try {
@@ -117,12 +133,24 @@ export class GmailIngestionService {
           });
           if (alreadyExists) continue;
 
+          // R0-CMF6b review (SEC-CMF6b-3): no message is read from a mailbox the owner has disconnected.
+          if (!(await this.mailboxStillLinked(businessId, mailbox))) {
+            mailboxGone = true;
+            break;
+          }
+
           const message = await this.fetchMessage(accessToken, ref.id);
           const parsed = this.parseMessage(message);
 
           // Skip messages sent from the connected account itself (e.g. smoke tests).
           if (connectedAccount && parsed.fromEmail?.toLowerCase() === connectedAccount) {
             continue;
+          }
+
+          // ...and none read while the disconnect committed is filed.
+          if (!(await this.mailboxStillLinked(businessId, mailbox))) {
+            mailboxGone = true;
+            break;
           }
 
           const resolved = parsed.fromEmail
@@ -182,9 +210,14 @@ export class GmailIngestionService {
         }
       }
 
+      // A sync that stopped part way stores no cursor (it would skip the unread messages).
+      if (mailboxGone) {
+        return await this.endSyncOfDisconnectedMailbox(businessId, mailbox, ingested, errors, start);
+      }
+
       // Persist sync cursor and health regardless of per-message errors, while
-      // the business still has its mailbox (R0-CMF6b).
-      const recorded = await this.writeStatusWhileMailboxLinked(businessId, (tx) => tx.connectorStatus.upsert({
+      // the business still has the mailbox this sync read (R0-CMF6b).
+      const recorded = await this.writeStatusWhileMailboxLinked(businessId, mailbox, (tx) => tx.connectorStatus.upsert({
         where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
         create: {
           businessId,
@@ -210,12 +243,7 @@ export class GmailIngestionService {
 
       if (!recorded) {
         this.logger.warn(`Gmail sync for ${businessId}: the mailbox was disconnected while it ran; status not written`);
-        return {
-          success: false,
-          itemsSynced: ingested,
-          errors: [...errors, DISCONNECTED_DURING_SYNC],
-          duration: Date.now() - start,
-        };
+        return this.disconnectedDuringSync(ingested, errors, start);
       }
 
       return {
@@ -229,7 +257,7 @@ export class GmailIngestionService {
       this.logger.error(`Gmail ingestion failed for ${businessId}: ${message}`);
 
       // R0-CMF6b: a failure after a disconnect leaves the row as the disconnect set it.
-      await this.writeStatusWhileMailboxLinked(businessId, (tx) => tx.connectorStatus.upsert({
+      await this.writeStatusWhileMailboxLinked(businessId, mailbox, (tx) => tx.connectorStatus.upsert({
         where: { businessId_connectorType: { businessId, connectorType: 'gmail' } },
         create: {
           businessId,
@@ -264,22 +292,89 @@ export class GmailIngestionService {
    * connected (or error) again afterwards, or create one, so the nightly sync
    * selected a mailbox that was gone. The write now runs in a transaction that
    * takes the same lock first and is made only while the business still has
-   * its mailbox (gmail_access_token, what GmailConnector.isConnected reads): a
-   * disconnect that committed first is seen and nothing is written; one that
-   * starts later waits for this write, then marks the row disconnected.
-   * Returns whether it wrote.
+   * the mailbox this sync read: a disconnect that committed first is seen and
+   * nothing is written; one that starts later waits for this write, then marks
+   * the row disconnected. Returns whether it wrote (a null write only settles).
+   *
+   * Review SEC-CMF6b-1 / CR-CMF6b-1 / SEC-CMF6b-2: "linked" is
+   * gmail_refresh_token and gmail_email set (as GmailService.getGmailStatus
+   * reads it), never gmail_access_token, which GoogleTokenHelper writes back
+   * unlocked when a refresh that was in flight over the disconnect returns; and
+   * gmail_email is the mailbox this sync bound before it read a token, so a
+   * disconnect followed by a new connection is not taken for this mailbox. An
+   * access token such a refresh left on a cleared mailbox (no refresh token, no
+   * address) is cleared here under the lock, so the connector's health does not
+   * report the disconnected mailbox as connected.
    */
   private async writeStatusWhileMailboxLinked(
     businessId: string,
-    write: (tx: PrismaTx) => Promise<unknown>,
+    mailbox: string | null,
+    write: ((tx: PrismaTx) => Promise<unknown>) | null,
   ): Promise<boolean> {
     return this.prisma.client.$transaction(async (tx) => {
       const rows = (await tx.$queryRaw`
-        SELECT gmail_access_token IS NOT NULL AS linked FROM businesses WHERE id = ${businessId} FOR NO KEY UPDATE`) as Array<{ linked: boolean }>;
-      if (rows[0]?.linked !== true) return false;
+        SELECT (gmail_refresh_token IS NOT NULL AND gmail_email IS NOT NULL AND lower(gmail_email) = lower(${mailbox}::text)) AS linked,
+               (gmail_access_token IS NOT NULL AND gmail_refresh_token IS NULL AND gmail_email IS NULL) AS orphaned
+          FROM businesses WHERE id = ${businessId} FOR NO KEY UPDATE`) as Array<{ linked: boolean | null; orphaned: boolean | null }>;
+      if (rows[0]?.orphaned === true) {
+        await tx.$executeRaw`
+          UPDATE businesses SET gmail_access_token = NULL, gmail_token_expiry = NULL
+           WHERE id = ${businessId} AND gmail_refresh_token IS NULL AND gmail_email IS NULL`;
+      }
+      if (rows[0]?.linked !== true || !write) return false;
       await write(tx);
       return true;
     });
+  }
+
+  /**
+   * R0-CMF6b review (SEC-CMF6b-2): the business mailbox a sync binds before it
+   * reads a token: its address while it has a refresh token, else null.
+   */
+  private async linkedMailboxOf(businessId: string): Promise<string | null> {
+    const rows = (await this.prisma.client.$queryRaw`
+      SELECT gmail_email AS email FROM businesses
+       WHERE id = ${businessId} AND gmail_refresh_token IS NOT NULL AND gmail_email IS NOT NULL`) as Array<{ email: string | null }>;
+    return rows[0]?.email ?? null;
+  }
+
+  /**
+   * R0-CMF6b review (SEC-CMF6b-1, SEC-CMF6b-3): whether the mailbox a sync
+   * bound is still the business mailbox (the predicate of the final write,
+   * read without the lock), checked after the token read and before every
+   * message read and filing.
+   */
+  private async mailboxStillLinked(businessId: string, mailbox: string | null): Promise<boolean> {
+    const rows = (await this.prisma.client.$queryRaw`
+      SELECT (gmail_refresh_token IS NOT NULL AND gmail_email IS NOT NULL AND lower(gmail_email) = lower(${mailbox}::text)) AS linked
+        FROM businesses WHERE id = ${businessId}`) as Array<{ linked: boolean | null }>;
+    return rows[0]?.linked === true;
+  }
+
+  /**
+   * R0-CMF6b review: a sync that found its mailbox disconnected (or replaced)
+   * part way writes no status and no cursor; it only settles under the lock (an
+   * access token a refresh left on the cleared mailbox is cleared).
+   */
+  private async endSyncOfDisconnectedMailbox(
+    businessId: string,
+    mailbox: string | null,
+    ingested: number,
+    errors: string[],
+    start: number,
+  ): Promise<ConnectorSyncResult> {
+    await this.writeStatusWhileMailboxLinked(businessId, mailbox, null);
+    this.logger.warn(`Gmail sync for ${businessId}: the mailbox was disconnected while it ran; it stopped reading and wrote no status`);
+    return this.disconnectedDuringSync(ingested, errors, start);
+  }
+
+  private disconnectedDuringSync(ingested: number, errors: string[], start: number): ConnectorSyncResult {
+    return {
+      success: false,
+      itemsSynced: ingested,
+      errors: [...errors, DISCONNECTED_DURING_SYNC],
+      duration: Date.now() - start,
+    };
   }
 
   /**
