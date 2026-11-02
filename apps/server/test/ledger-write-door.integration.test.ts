@@ -71,6 +71,24 @@
  *           BankRule:<ruleId>:<bankTransactionId>); the import succeeds. After a
  *           reopen the skipped row matches and posts once
  *
+ *   V1-15b review repairs:
+ *
+ *   LWD-14  (SEC-V15b-1) a depreciation run dated inside a CLOSED month -> 409
+ *           even when it would post nothing; a run that would lower the
+ *           accumulated figure (an earlier asOf) or a replay writes nothing; the
+ *           next run posts only its own delta, and the ledger holds the row's figure
+ *   LWD-15  (SEC-V15b-2 / CRR-2) depreciating a DISPOSED asset -> 400 and nothing
+ *           is posted (it stays DISPOSED; a second dispose stays 400, also dated
+ *           in a closed month); racing depreciation / disposal pairs never leave
+ *           a disposal on a live asset or a disposal built from a stale figure; a
+ *           disposal the ledger already holds is not replayed onto a row that
+ *           lost it (409, nothing changed)
+ *   LWD-16  (SEC-V15b-3 / CRR-1) two concurrent POST bank-rules/apply of one
+ *           UNMATCHED row both answer 201; the row is matched once, to one posting
+ *   LWD-17  (SEC-V15b-4) a re-applied row re-links its own earlier posting, but
+ *           not once another bank row claims it or it was reversed: the row stays
+ *           UNMATCHED and is skipped with the reason
+ *
  *   TB-01   trial balance after payments (two currencies), a refund and an
  *           expense void: sum(debit) = sum(credit) per currency, every
  *           transaction balanced, entry currency = transaction currency
@@ -149,6 +167,10 @@ const ID = {
   bizAsset: `${P}bizAsset`, // fixed assets around a closed month
   bizBank: `${P}bizBank`, // statement import + bank rules around a closed month
   bankAcct: `${P}bankAcct`,
+  // V1-15b review repairs (SEC-V15b-1..4, CRR-1, CRR-2)
+  bizAssetR: `${P}bizAssetR`, // fixed-asset lifecycle after the review
+  bizBankR: `${P}bizBankR`, // bank-rule concurrency and re-link after the review
+  bankAcctR: `${P}bankAcctR`,
 };
 
 const TB_INVOICES: Array<{ id: string; total: number; currency: string }> = [
@@ -941,6 +963,26 @@ describe('review CR-2 / CR-3: callers that write their own row and post (fixed a
     });
   }
 
+  /** The asset row, as one comparable line. */
+  async function assetRow(assetId: string): Promise<string> {
+    const a = await db.fixedAsset.findUnique({ where: { id: assetId } });
+    return `${a.status}:${Number(a.accumulatedDepreciation)}:${Number(a.netBookValue)}:${a.disposalDate?.toISOString() ?? null}:${a.disposalProceeds == null ? null : Number(a.disposalProceeds)}`;
+  }
+
+  /** Net credit the asset's own postings leave on ACCUMULATED_DEPRECIATION. */
+  function accumulatedOnLedger(postings: any[]): number {
+    return postings
+      .flatMap((t: any) => t.entries)
+      .filter((e: any) => e.account.systemKey === 'ACCUMULATED_DEPRECIATION')
+      .reduce((s: number, e: any) => s + Number(e.credit) - Number(e.debit), 0);
+  }
+
+  function newAsset(businessId: string, name: string, purchaseCost = 1200, usefulLifeMonths = 120) {
+    return api('post', '/fixed-assets', businessId).send({
+      name: `${P}${name}`, category: 'vehicle', purchaseDate: '2024-01-15T12:00:00.000Z', purchaseCost, salvageValue: 0, usefulLifeMonths,
+    });
+  }
+
   beforeAll(async () => {
     const real = await Promise.all([
       import('../src/modules/finance/accounting-period.service').then((m) => m.AccountingPeriodService),
@@ -954,6 +996,11 @@ describe('review CR-2 / CR-3: callers that write their own row and post (fixed a
     financeApp = await buildFinanceApp(real);
     await seedTenant(ID.bizAsset, 'CASH');
     await seedTenant(ID.bizBank, 'CASH');
+    await seedTenant(ID.bizAssetR, 'CASH');
+    await seedTenant(ID.bizBankR, 'CASH');
+    await db.financialAccount.create({
+      data: { id: ID.bankAcctR, businessId: ID.bizBankR, chartOfAccountId: await accountId(ID.bizBankR, 'BANK'), name: `${P}Repair account`, type: 'BANK', currency: 'TTD' },
+    });
   }, 120_000);
 
   afterAll(async () => {
@@ -1127,6 +1174,229 @@ describe('review CR-2 / CR-3: callers that write their own row and post (fixed a
     expect(r1Txn.date.toISOString()).toBe(r1.date.toISOString());
     expect(await db.financialTransaction.count({ where: { businessId: ID.bizBank, sourceType: 'BankRule' } })).toBe(3);
     await expectBalanced(ID.bizBank);
+  }, 60_000);
+
+  // ── V1-15b review repairs ────────────────────────────────────────────────
+
+  it('LWD-14 (review SEC-V15b-1): a depreciation run dated inside a CLOSED month -> 409 even when it would post nothing; an earlier asOf or a replay writes nothing; the next run posts only its own delta, and the ledger holds what the row says', async () => {
+    const biz = ID.bizAssetR;
+    expect((await openAndClose(biz, last.year, last.month)).status).toBe('CLOSED');
+    const created = await newAsset(biz, 'rewind');
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const assetId: string = created.body.id;
+
+    const now = new Date();
+    const asOf1 = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 15, 12, 0, 0));
+    const asOf2 = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 15, 12, 0, 0));
+    const months1 = (asOf1.getUTCFullYear() - 2024) * 12 + asOf1.getUTCMonth();
+    const run1 = await api('post', `/fixed-assets/${assetId}/depreciate`, biz).send({ asOf: asOf1.toISOString() });
+    expect(run1.status, JSON.stringify(run1.body)).toBe(201);
+    expect(Number(run1.body.accumulatedDepreciation)).toBe(months1 * 10);
+
+    const snapshot = async () => ({
+      row: await assetRow(assetId),
+      postings: (await fixedAssetPostings(assetId)).map((t: any) => `${t.externalRef}=${Number(t.amount)}`),
+      ledger: await ledgerCounts(biz),
+    });
+    const before = await snapshot();
+    expect(before.row).toBe(`ACTIVE:${months1 * 10}:${1200 - months1 * 10}:null:null`);
+
+    // At 0f080f4b: 201, and the row was written down to the closed month's figure with nothing posted.
+    const inClosed = await api('post', `/fixed-assets/${assetId}/depreciate`, biz).send({ asOf: inClosedMonth });
+    expect(inClosed.status, JSON.stringify(inClosed.body)).toBe(409);
+    expect(inClosed.body.message).toMatch(/closed/i);
+    expect(await snapshot(), 'a run dated in a closed month writes nothing').toEqual(before);
+
+    // An earlier asOf in an open month, and a replay: nothing to add, so nothing is written.
+    const earlier = await api('post', `/fixed-assets/${assetId}/depreciate`, biz).send({ asOf: '2024-06-15T12:00:00.000Z' });
+    expect(earlier.status, JSON.stringify(earlier.body)).toBe(201);
+    expect(Number(earlier.body.accumulatedDepreciation), 'the figure is never written down').toBe(months1 * 10);
+    const replay = await api('post', `/fixed-assets/${assetId}/depreciate`, biz).send({ asOf: asOf1.toISOString() });
+    expect(replay.status, JSON.stringify(replay.body)).toBe(201);
+    expect(await snapshot()).toEqual(before);
+
+    // The next run posts one month (at 0f080f4b, after the write-down, it posted the climb back again).
+    const run2 = await api('post', `/fixed-assets/${assetId}/depreciate`, biz).send({ asOf: asOf2.toISOString() });
+    expect(run2.status, JSON.stringify(run2.body)).toBe(201);
+    expect(Number(run2.body.accumulatedDepreciation)).toBe((months1 + 1) * 10);
+    const postings = await fixedAssetPostings(assetId);
+    expect(postings.map((t: any) => `${t.externalRef}=${Number(t.amount)}@${t.date.toISOString()}`)).toEqual([
+      `FixedAsset:${assetId}:depreciation:${(months1 * 10).toFixed(4)}=${months1 * 10}@${asOf1.toISOString()}`,
+      `FixedAsset:${assetId}:depreciation:${((months1 + 1) * 10).toFixed(4)}=10@${asOf2.toISOString()}`,
+    ]);
+    expect(accumulatedOnLedger(postings), 'the ledger holds what the asset row says').toBe((months1 + 1) * 10);
+    await expectBalanced(biz);
+  }, 60_000);
+
+  it('LWD-15 (review SEC-V15b-2 / CRR-2): a DISPOSED asset is not depreciated and stays DISPOSED; racing depreciation / disposal never leaves a disposal on a live asset or one built from a stale figure; a disposal the ledger already holds is not replayed', async () => {
+    const biz = ID.bizAssetR;
+    const now = new Date();
+    const thisMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 15, 12, 0, 0)).toISOString();
+    const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 15, 12, 0, 0)).toISOString();
+    const months = (new Date(thisMonth).getUTCFullYear() - 2024) * 12 + new Date(thisMonth).getUTCMonth();
+
+    const created = await newAsset(biz, 'disposed', 120, 12);
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const assetId: string = created.body.id;
+    // Purchased 2024-01: fully depreciated (120) as of this month.
+    expect((await api('post', `/fixed-assets/${assetId}/depreciate`, biz).send({ asOf: thisMonth })).status).toBe(201);
+    expect(await assetRow(assetId)).toBe(`FULLY_DEPRECIATED:${Math.min(120, months * 10)}:${120 - Math.min(120, months * 10)}:null:null`);
+    const disposed = await api('post', `/fixed-assets/${assetId}/dispose`, biz).send({ proceeds: 100, disposalDate: thisMonth });
+    expect(disposed.status, JSON.stringify(disposed.body)).toBe(201);
+    const snapshot = async () => ({
+      row: await assetRow(assetId),
+      postings: (await fixedAssetPostings(assetId)).map((t: any) => `${t.externalRef}=${Number(t.amount)}`),
+      ledger: await ledgerCounts(biz),
+    });
+    const before = await snapshot();
+    expect(before.row).toBe(`DISPOSED:120:0:${thisMonth}:100`);
+
+    // At 0f080f4b each run posted depreciation and wrote the row back to FULLY_DEPRECIATED;
+    // the second dispose then answered 201 and rewrote proceeds and date, also inside a closed month.
+    for (const asOf of [nextMonth, '2040-01-15T12:00:00.000Z']) {
+      const dep = await api('post', `/fixed-assets/${assetId}/depreciate`, biz).send({ asOf });
+      expect(dep.status, JSON.stringify(dep.body)).toBe(400);
+      expect(dep.body.message).toMatch(/disposed/i);
+    }
+    for (const disposalDate of [nextMonth, inClosedMonth]) {
+      const again = await api('post', `/fixed-assets/${assetId}/dispose`, biz).send({ proceeds: 5, disposalDate });
+      expect(again.status, JSON.stringify(again.body)).toBe(400);
+    }
+    expect(await snapshot(), 'nothing changed').toEqual(before);
+
+    // A disposal racing a depreciation run (at 0f080f4b some pairs ended 201/201 with the row
+    // ACTIVE beside a disposal posting, or DISPOSED with a disposal built from accumulated 0).
+    const outcomes: string[] = [];
+    for (let i = 0; i < 8; i += 1) {
+      const raced = await newAsset(biz, `race${i}`);
+      expect(raced.status, JSON.stringify(raced.body)).toBe(201);
+      const id: string = raced.body.id;
+      const [dep, disp] = await Promise.all([
+        api('post', `/fixed-assets/${id}/depreciate`, biz).send({ asOf: nextMonth }),
+        api('post', `/fixed-assets/${id}/dispose`, biz).send({ proceeds: 500, disposalDate: thisMonth }),
+      ]);
+      const label = `pair ${i}: ${dep.status} ${JSON.stringify(dep.body)} / ${disp.status} ${JSON.stringify(disp.body)}`;
+      expect([201, 400, 409], label).toContain(dep.status);
+      expect([201, 409], label).toContain(disp.status);
+      const row = await db.fixedAsset.findUnique({ where: { id } });
+      const postings = await fixedAssetPostings(id);
+      const disposals = postings.filter((t: any) => t.externalRef === `FixedAsset:${id}:disposal`);
+      const depreciations = postings.filter((t: any) => t.externalRef.startsWith(`FixedAsset:${id}:depreciation:`));
+      expect(depreciations.length, label).toBe(dep.status === 201 ? 1 : 0);
+      if (row.status === 'DISPOSED') {
+        expect(disp.status, label).toBe(201);
+        expect(disposals, label).toHaveLength(1);
+        const accDebit = disposals[0].entries
+          .filter((e: any) => e.account.systemKey === 'ACCUMULATED_DEPRECIATION')
+          .reduce((s: number, e: any) => s + Number(e.debit), 0);
+        expect(accDebit, `${label}: the disposal clears the figure the row holds`).toBe(Number(row.accumulatedDepreciation));
+        expect(accumulatedOnLedger(postings), label).toBe(0);
+      } else {
+        expect(disp.status, label).toBe(409);
+        expect(disposals, `${label}: no disposal on a live asset`).toEqual([]);
+        expect(accumulatedOnLedger(postings), label).toBe(Number(row.accumulatedDepreciation));
+      }
+      outcomes.push(`${dep.status}/${disp.status}:${row.status}`);
+    }
+    expect(outcomes.filter((o) => o.startsWith('201/201') && !o.endsWith('DISPOSED')), outcomes.join(' ')).toEqual([]);
+
+    // A row a depreciation run wrote back before the repair (status off DISPOSED, the
+    // disposal still in the ledger): a dispose is refused, dated now or in a closed month.
+    await db.fixedAsset.update({ where: { id: assetId }, data: { status: 'FULLY_DEPRECIATED' } });
+    const legacy = await snapshot();
+    for (const disposalDate of [thisMonth, inClosedMonth]) {
+      const replayed = await api('post', `/fixed-assets/${assetId}/dispose`, biz).send({ proceeds: 5, disposalDate });
+      expect(replayed.status, JSON.stringify(replayed.body)).toBe(409);
+      expect(replayed.body.message).toMatch(/already posted/i);
+    }
+    expect(await snapshot(), 'the replay rewrote nothing').toEqual(legacy);
+    await expectBalanced(biz);
+  }, 120_000);
+
+  it('LWD-16 (review SEC-V15b-3 / CRR-1): two concurrent applies of one UNMATCHED row both answer 201; the row is matched once, to one posting', async () => {
+    const biz = ID.bizBankR;
+    const expenseCoa = await accountId(biz, 'EXPENSE_GENERAL');
+    const rule = await api('post', '/bank-rules', biz).send({ name: `${P}tolls`, pattern: 'v15a toll', matchType: 'contains', accountId: expenseCoa });
+    expect(rule.status, JSON.stringify(rule.body)).toBe(201);
+    const ruleId: string = rule.body.id;
+    for (let i = 0; i < 8; i += 1) {
+      const row = await db.bankTransaction.create({
+        data: { id: `${P}toll${i}`, businessId: biz, accountId: ID.bankAcctR, date: new Date(), description: `V15A TOLL ${i}`, amount: -3, currency: 'TTD', status: 'UNMATCHED' },
+      });
+      const both = await Promise.all([0, 1].map(() => api('post', '/bank-rules/apply', biz).send({ bankTransactionIds: [row.id] })));
+      const label = both.map((r) => `${r.status} ${JSON.stringify(r.body)}`).join(' | ');
+      // At 0f080f4b one of each pair answered 500 (25P02: the posting's key collision aborted its transaction).
+      expect(both.map((r) => r.status), label).toEqual([201, 201]);
+      expect(both.map((r) => r.body.matched).sort(), label).toEqual([0, 1]);
+      expect(both.map((r) => r.body.createdTransactions).sort(), label).toEqual([0, 1]);
+      expect(both.map((r) => r.body.skipped), label).toEqual([[], []]);
+      const bank = await db.bankTransaction.findUnique({ where: { id: row.id } });
+      expect(bank.status, label).toBe('MATCHED');
+      const postings = await db.financialTransaction.findMany({ where: { businessId: biz, sourceType: 'BankRule', sourceId: ruleId, externalRef: `BankRule:${ruleId}:${row.id}` } });
+      expect(postings.map((t: any) => t.id), label).toEqual([bank.matchedTransactionId]);
+      const audit = await db.teamActivityLog.findMany({ where: { businessId: biz, module: 'finance', entityType: 'BankTransaction', entityId: row.id } });
+      expect(audit.map((a: any) => a.action), label).toEqual(['BANK_TRANSACTION_MATCHED']);
+    }
+    expect(await db.financialTransaction.count({ where: { businessId: biz, sourceType: 'BankRule', sourceId: ruleId } })).toBe(8);
+    await expectBalanced(biz);
+  }, 60_000);
+
+  it('LWD-17 (review SEC-V15b-4): a re-applied row re-links its own earlier posting, but not once another bank row claims it or it was reversed', async () => {
+    const biz = ID.bizBankR;
+    const expenseCoa = await accountId(biz, 'EXPENSE_GENERAL');
+    const rule = await api('post', '/bank-rules', biz).send({ name: `${P}fuel`, pattern: 'v15a fuel', matchType: 'contains', accountId: expenseCoa });
+    expect(rule.status, JSON.stringify(rule.body)).toBe(201);
+    const ruleId: string = rule.body.id;
+    const today = new Date();
+    const a = await db.bankTransaction.create({ data: { id: `${P}fuelA`, businessId: biz, accountId: ID.bankAcctR, date: today, description: 'V15A FUEL a', amount: -30, currency: 'TTD', status: 'UNMATCHED' } });
+    const b = await db.bankTransaction.create({ data: { id: `${P}fuelB`, businessId: biz, accountId: ID.bankAcctR, date: today, description: 'v15a other spend', amount: -30, currency: 'TTD', status: 'UNMATCHED' } });
+    const applyA = () => api('post', '/bank-rules/apply', biz).send({ bankTransactionIds: [a.id] });
+    const unmatch = (id: string) => api('post', `/bank-transactions/${id}/unmatch`, biz).send({});
+    const bankRow = (id: string) => db.bankTransaction.findUnique({ where: { id } });
+
+    const first = await applyA();
+    expect(first.body, JSON.stringify(first.body)).toMatchObject({ scanned: 1, matched: 1, createdTransactions: 1, skipped: [] });
+    const p: string = (await bankRow(a.id)).matchedTransactionId;
+    expect(p).toBeTruthy();
+
+    // Unmatched and re-applied: its own posting comes back, nothing new is posted.
+    expect((await unmatch(a.id)).status).toBe(201);
+    const relinked = await applyA();
+    expect(relinked.body, JSON.stringify(relinked.body)).toMatchObject({ scanned: 1, matched: 1, createdTransactions: 0, skipped: [] });
+    expect(await bankRow(a.id)).toMatchObject({ status: 'MATCHED', matchedTransactionId: p });
+
+    // Another bank row claims the posting meanwhile (at 0f080f4b the re-apply linked A as well: two lines, one transaction).
+    expect((await unmatch(a.id)).status).toBe(201);
+    const manual = await api('post', `/bank-transactions/${b.id}/match`, biz).send({ transactionId: p });
+    expect(manual.status, JSON.stringify(manual.body)).toBe(201);
+    const counts = await ledgerCounts(biz);
+    const claimed = await applyA();
+    expect(claimed.status, JSON.stringify(claimed.body)).toBe(201);
+    expect(claimed.body).toMatchObject({ scanned: 1, matched: 0, createdTransactions: 0 });
+    expect(claimed.body.skipped).toEqual([{ bankTransactionId: a.id, ruleId, reason: expect.stringMatching(/another bank row/i) }]);
+    expect(await bankRow(a.id)).toMatchObject({ status: 'UNMATCHED', matchedTransactionId: null });
+    const claims = await db.bankTransaction.findMany({ where: { businessId: biz, matchedTransactionId: p, status: 'MATCHED' }, select: { id: true } });
+    expect(claims.map((c: any) => c.id)).toEqual([b.id]);
+    expect(await ledgerCounts(biz)).toEqual(counts);
+
+    // The posting reversed: not re-linked either.
+    expect((await unmatch(b.id)).status).toBe(201);
+    await posting.reverse(biz, p, { reason: 'v15a reversed rule posting' });
+    const afterReversal = await ledgerCounts(biz);
+    const reversed = await applyA();
+    expect(reversed.body.skipped, JSON.stringify(reversed.body)).toEqual([{ bankTransactionId: a.id, ruleId, reason: expect.stringMatching(/no longer POSTED/) }]);
+    expect(reversed.body).toMatchObject({ matched: 0, createdTransactions: 0 });
+    expect(await bankRow(a.id)).toMatchObject({ status: 'UNMATCHED', matchedTransactionId: null });
+    expect(await ledgerCounts(biz)).toEqual(afterReversal);
+
+    // The two refusals are audited on A with their reasons (beside the two unmatch rows).
+    const audit = await db.teamActivityLog.findMany({
+      where: { businessId: biz, module: 'finance', entityType: 'BankTransaction', entityId: a.id, action: 'BANK_TRANSACTION_UNMATCHED' },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(audit.map((r: any) => r.title)).toEqual(['Unmatched bank row', 'Unmatched bank row', 'Bank rule not applied', 'Bank rule not applied']);
+    expect(audit.slice(2).map((r: any) => r.meta.reason)).toEqual([expect.stringMatching(/another bank row/i), expect.stringMatching(/no longer POSTED/)]);
+    await expectBalanced(biz);
   }, 60_000);
 });
 
