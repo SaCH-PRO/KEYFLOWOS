@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpenseCreatedPayload } from '../../core/event-bus/events.types';
 import { ExpensePostingService } from '../finance/expense-posting.service';
+import { PostingService } from '../finance/posting.service';
 import { TimelineService } from '../timeline/timeline.service';
 
 @Injectable()
@@ -13,6 +14,8 @@ export class ExpensesService {
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(ExpensePostingService) private readonly posting: ExpensePostingService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
+    // V1-15: the ledger door, for the void's reversals (FinanceModule exports it).
+    @Inject(PostingService) private readonly ledger: PostingService,
   ) {}
 
   async listExpenses(
@@ -288,65 +291,66 @@ export class ExpensesService {
   /**
    * Soft-void an expense by reversing its postings. Hard delete on a
    * posted Expense is forbidden — use this method instead.
+   *
+   * V1-15 (CF-40): every reversal goes through PostingService.reverse, the
+   * ledger's one write door, so a void obeys what the door enforces: a
+   * reconciliation-locked entry is refused (409), so is a reversal dated in a
+   * CLOSED period (409), the original is marked REVERSED and the reversal
+   * carries `<externalRef>:reversal`. Any refusal rolls the whole void back,
+   * the status claim included. Voiding twice, in sequence or concurrently,
+   * returns the voided expense and writes one reversal per posting: the
+   * status flip is a compare-and-set taken first, so a second void waits on
+   * the row and then finds it VOID.
    */
   async voidExpense(input: { businessId: string; expenseId: string; reason?: string }) {
     const existing = await this.prisma.client.expense.findFirst({
-      where: { id: input.expenseId, businessId: input.businessId, deletedAt: null },
+      where: { id: input.expenseId, businessId: input.businessId },
+      include: { category: true },
     });
     if (!existing) throw new NotFoundException('Expense not found');
     if (existing.status === 'VOID') return existing;
+    if (existing.deletedAt) throw new NotFoundException('Expense not found');
 
     return this.prisma.client.$transaction(async (rawTx) => {
       const tx = rawTx as unknown as import('@prisma/client').Prisma.TransactionClient;
-      // Reverse every posted financial transaction for this Expense.
-      const txs = await tx.financialTransaction.findMany({
-        where: { businessId: input.businessId, sourceType: 'Expense', sourceId: existing.id },
-        include: { entries: true },
-      });
-      for (const ft of txs) {
-        // Skip if already reversed.
-        const already = await tx.financialTransaction.findFirst({
-          where: { businessId: input.businessId, reversalOfId: ft.id },
-          select: { id: true },
-        });
-        if (already) continue;
-        const reversal = await tx.financialTransaction.create({
-          data: {
-            businessId: ft.businessId,
-            type: 'REVERSAL',
-            status: 'POSTED',
-            date: new Date(),
-            amount: ft.amount,
-            currency: ft.currency,
-            description: `VOID: ${ft.description ?? existing.description}`,
-            contactId: ft.contactId,
-            sourceType: ft.sourceType,
-            sourceId: ft.sourceId,
-            reversalOfId: ft.id,
-            reference: ft.reference,
-            notes: input.reason ?? `Voided expense ${existing.id}`,
-            postedAt: new Date(),
-          },
-        });
-        for (const e of ft.entries) {
-          await tx.ledgerEntry.create({
-            data: {
-              businessId: e.businessId,
-              transactionId: reversal.id,
-              accountId: e.accountId,
-              debit: e.credit,
-              credit: e.debit,
-              currency: e.currency,
-              date: reversal.date,
-            },
-          });
-        }
-      }
-      return tx.expense.update({
-        where: { id: existing.id },
+      const claimed = await tx.expense.updateMany({
+        where: { id: existing.id, businessId: input.businessId, status: { not: 'VOID' }, deletedAt: null },
         data: { status: 'VOID', deletedAt: new Date() },
-        include: { category: true },
       });
+      if (claimed.count === 0) {
+        // A concurrent void committed first (or the row went away meanwhile).
+        const current = await tx.expense.findFirst({
+          where: { id: existing.id, businessId: input.businessId },
+          include: { category: true },
+        });
+        if (current?.status === 'VOID') return current;
+        throw new NotFoundException('Expense not found');
+      }
+
+      // Reverse every posted, not yet reversed, original for this Expense.
+      // `reversedBy` also skips an original reversed before V1-15 by the old
+      // hand-written path, which left it POSTED with a linked reversal.
+      const originals = await tx.financialTransaction.findMany({
+        where: {
+          businessId: input.businessId,
+          sourceType: 'Expense',
+          sourceId: existing.id,
+          reversalOfId: null,
+          status: 'POSTED',
+          reversedBy: { is: null },
+        },
+        select: { id: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      for (const ft of originals) {
+        await this.ledger.reverse(
+          input.businessId,
+          ft.id,
+          { reason: input.reason ?? `Voided expense ${existing.id}` },
+          tx,
+        );
+      }
+      return tx.expense.findUniqueOrThrow({ where: { id: existing.id }, include: { category: true } });
     });
   }
 

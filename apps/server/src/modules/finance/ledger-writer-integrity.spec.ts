@@ -228,21 +228,25 @@ describe('V1-15 ledger write door: one INSERT path into the ledger (CF-40)', () 
       'PostingService does not take AccountingPeriodService: a CLOSED period is never consulted when posting',
     ).toContain(AccountingPeriodService);
 
-    // The dependency is optional so hand-built PostingService instances in unit
-    // specs keep working; this keeps it from being silently absent in the app.
+    // The dependency is optional (hand-built PostingService instances in the
+    // hermetic unit specs have no period ledger), so Nest would not complain
+    // if a module provided PostingService without it. Pin that none does.
     const optional: number[] = Reflect.getMetadata(OPTIONAL_DEPS_METADATA, PostingService) ?? [];
     const periodIndex = deps.find((d) => d.param === AccountingPeriodService)?.index;
-    if (periodIndex !== undefined && optional.includes(periodIndex)) {
-      const modules = FILES.filter((f) => f.endsWith('.module.ts'));
-      expect(modules.length).toBeGreaterThan(20);
-      const providing = modules.filter((f) => /providers\s*:\s*\[[^\]]*(?<![A-Za-z])PostingService\b/.test(readFileSync(f, 'utf8')));
-      expect(providing.map(rel), 'no module provides PostingService: the scan is broken').toContain(
-        'apps/server/src/modules/finance/finance.module.ts',
-      );
-      const missing = providing
-        .filter((f) => !/providers\s*:\s*\[[^\]]*\bAccountingPeriodService\b/.test(readFileSync(f, 'utf8')))
-        .map(rel);
-      expect(missing, 'a module provides PostingService without AccountingPeriodService: closed periods would not be enforced there').toEqual([]);
-    }
+    expect(optional, 'the period dependency is expected to be the optional one').toContain(periodIndex);
+    const modules = FILES.filter((f) => f.endsWith('.module.ts'));
+    expect(modules.length).toBeGreaterThan(20);
+    const providing = modules.filter((f) => /providers\s*:\s*\[[^\]]*(?<![A-Za-z])PostingService\b/.test(readFileSync(f, 'utf8')));
+    expect(providing.map(rel), 'no module provides PostingService: the scan is broken').toContain(
+      'apps/server/src/modules/finance/finance.module.ts',
+    );
+    const missing = providing
+      .filter((f) => !/providers\s*:\s*\[[^\]]*\bAccountingPeriodService\b/.test(readFileSync(f, 'utf8')))
+      .map(rel);
+    expect(missing, 'a module provides PostingService without AccountingPeriodService: closed periods would not be enforced there').toEqual([]);
+    // The scan bites: a module listing PostingService alone is reported.
+    const probe = 'providers: [PrismaService, PostingService, RevenuePostingService]';
+    expect(/providers\s*:\s*\[[^\]]*(?<![A-Za-z])PostingService\b/.test(probe)).toBe(true);
+    expect(/providers\s*:\s*\[[^\]]*\bAccountingPeriodService\b/.test(probe)).toBe(false);
   });
 });

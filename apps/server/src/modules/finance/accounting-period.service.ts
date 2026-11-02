@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -155,9 +155,14 @@ export class AccountingPeriodService {
     return this.prisma.client.accountingPeriod.delete({ where: { id } });
   }
 
-  /** Check whether a date falls inside a closed period. Returns the period if locked. */
-  async checkClosed(businessId: string, date: Date) {
-    return this.prisma.client.accountingPeriod.findFirst({
+  /**
+   * Check whether a date falls inside a closed period. Returns the period if
+   * locked. Pass `client` (the caller's transaction) to read the period inside
+   * the same transaction as the write it guards.
+   */
+  async checkClosed(businessId: string, date: Date, client?: Prisma.TransactionClient) {
+    const db = client ?? (this.prisma.client as unknown as Prisma.TransactionClient);
+    return db.accountingPeriod.findFirst({
       where: {
         businessId,
         status: 'CLOSED',
@@ -165,5 +170,22 @@ export class AccountingPeriodService {
         endDate: { gte: date },
       },
     });
+  }
+
+  /**
+   * V1-15 (CF-40): the posting door's closed-period control. PostingService
+   * calls this before it writes a transaction (post) or a reversal (reverse),
+   * so nothing is written with a date inside a CLOSED period of the posting
+   * business, by any recipe. Another business's periods never apply. Throws
+   * 409; reopen the period, or date the entry inside an open one.
+   */
+  async assertOpenForPosting(businessId: string, date: Date, client?: Prisma.TransactionClient): Promise<void> {
+    const closed = await this.checkClosed(businessId, date, client);
+    if (closed) {
+      throw new ConflictException(
+        `Accounting period ${closed.year}-${String(closed.month).padStart(2, '0')} is closed: ` +
+          `nothing can be posted dated ${date.toISOString().slice(0, 10)}. Reopen the period or post in an open one.`,
+      );
+    }
   }
 }

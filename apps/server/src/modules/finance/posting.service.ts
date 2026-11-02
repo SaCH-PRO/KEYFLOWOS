@@ -1,7 +1,8 @@
-import { Inject, Injectable, BadRequestException, ConflictException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ConflictException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { AccountingPeriodService } from './accounting-period.service';
 
 export interface PostingEntryInput {
   /** ChartOfAccount.id this entry posts against. */
@@ -107,10 +108,21 @@ export function validatePosting(input: PostingInput): void {
  * The single entry point for writing to the ledger. Direct INSERTs into
  * `LedgerEntry` from anywhere else are forbidden by FIN1 architectural
  * rules — every monetary movement must come through here.
+ * (V1-15: enforced by ledger-writer-integrity.spec.ts.)
+ *
+ * V1-15 (CF-40): post() and reverse() refuse, with 409, a transaction dated
+ * inside a CLOSED accounting period of the posting business, checked inside
+ * the posting transaction. AccountingPeriodService is @Optional only so that
+ * hand-built instances in hermetic unit specs keep working; every Nest module
+ * that provides PostingService must provide it too (pinned by
+ * ledger-writer-integrity.spec.ts, LWI-04), so the running app always checks.
  */
 @Injectable()
 export class PostingService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Optional() @Inject(AccountingPeriodService) private readonly periods?: AccountingPeriodService | null,
+  ) {}
 
   async post(input: PostingInput, txClient?: Prisma.TransactionClient): Promise<PostingResult> {
     validatePosting(input);
@@ -129,6 +141,12 @@ export class PostingService {
           return { transactionId: existing.id, externalRef, alreadyPosted: true };
         }
       }
+
+      // V1-15 (CF-40): nothing new is dated inside a CLOSED period. After the
+      // idempotency lookup on purpose: a replay of a posting that already
+      // exists writes nothing, so it returns that posting even once its
+      // period has closed.
+      await this.periods?.assertOpenForPosting(input.businessId, input.date, tx);
 
       // Verify every accountId belongs to the same businessId. Doing this
       // in one query (vs N round-trips) keeps the hot path fast.
@@ -278,12 +296,18 @@ export class PostingService {
         );
       }
 
+      // The reversal is dated now, so it is the current period that must be
+      // open (V1-15). The original may sit in a closed period: it is offset in
+      // the open one, never edited.
+      const reversalDate = new Date();
+      await this.periods?.assertOpenForPosting(original.businessId, reversalDate, tx);
+
       const reversal = await tx.financialTransaction.create({
         data: {
           businessId: original.businessId,
           type: 'REVERSAL',
           status: 'POSTED',
-          date: new Date(),
+          date: reversalDate,
           amount: original.amount,
           currency: original.currency,
           description: opts.reason ?? `Reversal of ${original.id}`,
@@ -304,7 +328,7 @@ export class PostingService {
               debit: e.credit,
               credit: e.debit,
               currency: e.currency,
-              date: new Date(),
+              date: reversalDate,
               memo: `Reversal of entry ${e.id}`,
             })),
           },
