@@ -358,7 +358,8 @@ describe('GET public slots: the business day is read in Business.timezone (V1-16
         { provide: CalendarService, useValue: {} },
         { provide: BookingOptimizerService, useValue: {} },
         { provide: SubscriptionsService, useValue: { checkLimit: vi.fn() } },
-        { provide: CatalogService, useValue: {} },
+        // V1-23: public slots first check the storefront is open (assertPublicStore); open here.
+        { provide: CatalogService, useValue: { assertPublicStore: async () => undefined } },
         { provide: REDIS_CLIENT, useValue: redis },
       ],
     }).compile();

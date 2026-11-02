@@ -2382,8 +2382,10 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     it('TD9-3: BookingsService.createBooking refuses a service, staff member, contact or unit outside the business before the booking is written', () => {
       const src = read('modules/bookings/bookings.service.ts');
       const body = memberBody(src, 'createBooking')!;
-      const write = body.indexOf('this.prisma.client.booking.create');
+      // V1-16: the write runs inside claimSlot's transaction (advisory slot lock), after every check.
+      const write = body.indexOf('this.claimSlot(slot, (tx) =>');
       expect(write).toBeGreaterThan(-1);
+      expect(body.indexOf('tx.booking.create', write)).toBeGreaterThan(write);
       const before = (re: RegExp, label: string) => {
         const at = body.search(re);
         expect(at, label).toBeGreaterThan(-1);
@@ -2429,7 +2431,10 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
             return ROWS[model].find((r) => Object.entries(where).every(([k, v]) => (r as Record<string, unknown>)[k] === v)) ?? null;
           });
         const create = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'bk_new', ...data, contact: null }));
-        const client = {
+        const client: Record<string, unknown> = {
+          // V1-16: createBooking writes inside claimSlot's transaction (advisory lock, then the overlap re-read)
+          $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(client)),
+          $executeRaw: vi.fn(async () => 0),
           service: { findFirst: lookup('service') },
           contact: { findFirst: lookup('contact') },
           staffMember: { findFirst: lookup('staffMember') },
