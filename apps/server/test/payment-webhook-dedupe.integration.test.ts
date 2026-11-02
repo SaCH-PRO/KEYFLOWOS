@@ -38,11 +38,13 @@
  *   Review repairs (SEC-V15C-1, CR-V15C-2, SEC-V15C-3):
  *
  *   WDD-08  two partial Stripe refunds of one charge delivered together: both
- *           refund transactions reverse the same original posting, the loser
- *           fails on financial_transactions.reversal_of_id (a P2002 that is not
- *           its own refund row) and its row is rolled back. That delivery is a
- *           500 with its claim released (it was acked as processed and the
- *           refund was never recorded); its redelivery records it
+ *           refund transactions reversed the same original posting, the loser
+ *           failed on financial_transactions.reversal_of_id (a P2002 that is not
+ *           its own refund row) and its row was rolled back while the delivery
+ *           was acked as processed. The review repair made it a 500 with its
+ *           claim released. Since V1-29c-REFUND-WRITE-DOOR the refunds are
+ *           serialized on the invoice lock and each posts its own amount, so
+ *           both are recorded and acked, and a redelivery writes nothing
  *   WDD-09  the same for two PayPal PAYMENT.CAPTURE.REFUNDED deliveries of one
  *           capture (PayPal sends no cumulative event that would heal it)
  *   WDD-10  a Stripe refund signed with a tenant's OWN webhook secret refunds
@@ -553,7 +555,7 @@ describe('V1-15c: a provider delivery whose payment transaction aborts is not ac
     expect(await claims('stripe', event.id)).toBe(1);
   });
 
-  it('WDD-08 (review SEC-V15C-1, CR-V15C-2): two partial Stripe refunds of one charge delivered together: the one whose reversal loses is a 500 with its claim released, not acked; its redelivery records it', async () => {
+  it('WDD-08 (review SEC-V15C-1, CR-V15C-2; V1-29c): two partial Stripe refunds of one charge delivered together: neither is acked unrecorded: both are recorded once, each posting its own amount; a redelivery of either writes nothing', async () => {
     const charge = { id: `${P}ch_split`, metadata: { invoiceId: ID.invStripeSplit }, amount: 10000, currency: 'ttd' };
     const paid = await stripe({ id: `${P}evt_charge_split`, type: 'charge.succeeded', data: { object: charge } });
     expect(paid.body, JSON.stringify(paid.body)).toEqual({ ok: true, received: true, processed: 'charge.succeeded' });
@@ -574,33 +576,25 @@ describe('V1-15c: a provider delivery whose payment transaction aborts is not ac
       restore();
     }
     // Before the review repair: [201, 201], both { processed: 'refund.created' }, one refund row missing and both claims kept
-    // (the loser's P2002 was on financial_transactions.reversal_of_id, not on its own refund row).
-    expect(together.map((r) => r.status).sort(), JSON.stringify(together.map((r) => r.body))).toEqual([201, 500]);
-    const won = events[together.findIndex((r) => r.status === 201)];
-    const lost = events[together.findIndex((r) => r.status === 500)];
-    expect(together.find((r) => r.status === 201)!.body).toEqual({ ok: true, received: true, processed: 'refund.created' });
-    expect(await rowsOf(ID.invStripeSplit)).toEqual([
-      `stripe:${charge.id}:SUCCESSFUL:100`,
-      `stripe:${won.data.object.id}:REFUNDED:${-won.data.object.amount / 100}`,
-    ]);
-    expect(await claims('stripe', won.id)).toBe(1);
-    expect(await claims('stripe', lost.id), 'the delivery whose refund was rolled back released its claim').toBe(0);
-
-    const again = await stripe(lost);
-    expect(again.status, JSON.stringify(again.body)).toBe(201);
-    expect(again.body).toEqual({ ok: true, received: true, processed: 'refund.created' });
+    // (the loser's P2002 was on financial_transactions.reversal_of_id, not on its own refund row). After the review
+    // repair and before V1-29c: [201, 500], the loser's claim released and its redelivery recording it, both partial
+    // refunds reversing the whole capture's posting (INCOME:REVERSED:100, REVERSAL:POSTED:100).
+    // V1-29c-REFUND-WRITE-DOOR: the two refund transactions are serialized on the invoice lock and each posts its own
+    // amount (BR-07), so neither loses: both are recorded and acked, and a redelivery of either writes nothing.
+    expect(together.map((r) => r.status).sort(), JSON.stringify(together.map((r) => r.body))).toEqual([201, 201]);
+    for (const r of together) expect(r.body).toEqual({ ok: true, received: true, processed: 'refund.created' });
     expect((await rowsOf(ID.invStripeSplit)).sort()).toEqual(
       [`stripe:${charge.id}:SUCCESSFUL:100`, `stripe:${P}re_split_a:REFUNDED:-30`, `stripe:${P}re_split_b:REFUNDED:-20`].sort(),
     );
-    // The original posting is reversed once: a refund reverses the whole capture's posting (partial refunds are V1-29-DM-REFUND-CONVENTION's).
-    expect(await postingsOf(ID.invStripeSplit)).toEqual(['INCOME:REVERSED:100', 'REVERSAL:POSTED:100']);
-    expect(await claims('stripe', lost.id)).toBe(1);
+    expect((await postingsOf(ID.invStripeSplit)).sort()).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:20', 'REFUND:POSTED:30']);
+    for (const e of events) expect(await claims('stripe', e.id)).toBe(1);
 
-    expect((await stripe(lost)).body).toEqual({ ok: true, received: true });
+    for (const e of events) expect((await stripe(e)).body).toEqual({ ok: true, received: true });
     expect(await rowsOf(ID.invStripeSplit)).toHaveLength(3);
+    expect(await postingsOf(ID.invStripeSplit)).toHaveLength(3);
   });
 
-  it('WDD-09 (review SEC-V15C-1): two partial PayPal refunds of one capture delivered together: the one whose reversal loses is a 500 with its claim released, not acked; its redelivery records it', async () => {
+  it('WDD-09 (review SEC-V15C-1; V1-29c): two partial PayPal refunds of one capture delivered together: neither is acked unrecorded: both are recorded once, each posting its own amount; a redelivery writes nothing', async () => {
     const capture = `${P}CAP_SPLIT`;
     const paid = await paypal({
       id: `${P}WH-capture-split`,
@@ -623,25 +617,17 @@ describe('V1-15c: a provider delivery whose payment transaction aborts is not ac
       restore();
     }
     // Before the review repair: [201, 201], both { processed: 'PAYMENT.CAPTURE.REFUNDED' }, one refund row missing, both claims kept.
-    expect(together.map((r) => r.status).sort(), JSON.stringify(together.map((r) => r.body))).toEqual([201, 500]);
-    const won = events[together.findIndex((r) => r.status === 201)];
-    const lost = events[together.findIndex((r) => r.status === 500)];
-    expect(await rowsOf(ID.invPaypalSplit)).toEqual([
-      `paypal:${capture}:SUCCESSFUL:100`,
-      `paypal:${won.resource.id}:REFUNDED:${-Number(won.resource.amount.value)}`,
-    ]);
-    expect(await claims('paypal', won.id)).toBe(1);
-    expect(await claims('paypal', lost.id), 'the delivery whose refund was rolled back released its claim').toBe(0);
-
-    const again = await paypal(lost);
-    expect(again.status, JSON.stringify(again.body)).toBe(201);
-    expect(again.body).toEqual({ ok: true, received: true, processed: 'PAYMENT.CAPTURE.REFUNDED' });
+    // After it and before V1-29c: [201, 500], the loser redelivered, the whole capture's posting reversed.
+    // V1-29c-REFUND-WRITE-DOOR: serialized on the invoice lock, each posting its own amount: both recorded and acked.
+    expect(together.map((r) => r.status).sort(), JSON.stringify(together.map((r) => r.body))).toEqual([201, 201]);
+    for (const r of together) expect(r.body).toEqual({ ok: true, received: true, processed: 'PAYMENT.CAPTURE.REFUNDED' });
     expect((await rowsOf(ID.invPaypalSplit)).sort()).toEqual(
       [`paypal:${capture}:SUCCESSFUL:100`, `paypal:${P}RF_A:REFUNDED:-30`, `paypal:${P}RF_B:REFUNDED:-20`].sort(),
     );
-    expect(await postingsOf(ID.invPaypalSplit)).toEqual(['INCOME:REVERSED:100', 'REVERSAL:POSTED:100']);
-    expect(await claims('paypal', lost.id)).toBe(1);
+    expect((await postingsOf(ID.invPaypalSplit)).sort()).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:20', 'REFUND:POSTED:30']);
+    for (const e of events) expect(await claims('paypal', e.id)).toBe(1);
 
+    const lost = events[1];
     expect((await paypal(lost)).body).toEqual({ ok: true, received: true });
     expect(await rowsOf(ID.invPaypalSplit)).toHaveLength(3);
   });

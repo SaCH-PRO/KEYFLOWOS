@@ -87,9 +87,11 @@
  *          a foreign REFUNDED -100 reads paid 100 / 0 owed (not 0 / 100), 60 paid + a foreign
  *          REFUNDED -60 reads 40 owed (not 100); each = the public receipt's figures
  *
- * Open (it.todo, outside the V1-29 write set; owner decision): SEC-V29-2 (the refund audit
- * names the payment's full amount). Outside the V1-29b write set (it.todo, queued follow-up):
- * CR-29b-1 (the public token view still states the gross paid beside the receipt's net).
+ * SEC-V29-2 (the refund audit named the payment's full amount) is a real case since
+ * V1-29c-REFUND-WRITE-DOOR, which also links the Stripe webhook's refund rows to their payment
+ * (RF-11, RF-12 assert reference = the original's providerPaymentId).
+ * Outside the V1-29b write set (it.todo, queued follow-up): CR-29b-1 (the public token view
+ * still states the gross paid beside the receipt's net).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
@@ -166,6 +168,7 @@ const ID = {
   invRecvForeignRefund: `${P}invRecvForeignRefund`,
   invOpsForeign: `${P}invOpsForeign`,
   invOpsForeignRefund: `${P}invOpsForeignRefund`,
+  invAuditLeft: `${P}invAuditLeft`,
 };
 
 /**
@@ -815,12 +818,13 @@ describe('V1-29 review: refunds that do not link to their payment (SEC-V29-1 / C
       refunds: { data: [{ id: `${P}re_full`, amount: 10000, currency: 'ttd', charge: `${P}ch_full`, payment_intent: `${P}pi_full`, status: 'succeeded' }] },
     });
     const afterWebhook = await paymentsOf(inv);
-    // The webhook's refund row does not link to the cs_ payment by reference.
+    // V1-29c-REFUND-WRITE-DOOR (SEC-V29-1 at the write door): the webhook's refund row links to the cs_ payment
+    // by reference (it carried the charge id, ch_full, before V1-29c).
     expect(afterWebhook.map((r) => [r.providerPaymentId, r.status, Number(r.amount), r.reference])).toEqual([
       [`${P}cs_full`, 'SUCCESSFUL', 100, `${P}pi_full`],
-      [`${P}re_full`, 'REFUNDED', -100, `${P}ch_full`],
+      [`${P}re_full`, 'REFUNDED', -100, `${P}cs_full`],
     ]);
-    expect(await refundRowsOf(original)).toHaveLength(0);
+    expect(await refundRowsOf(original)).toHaveLength(1);
     expect((await invoiceRow(inv)).status).toBe('SENT');
     const balanceBefore = await balanceOf(inv);
     expect(balanceBefore).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
@@ -862,7 +866,8 @@ describe('V1-29 review: refunds that do not link to their payment (SEC-V29-1 / C
     await paymentsSvc.processStripeRefund('refund.created', {
       id: `${P}re_mixed`, amount: 2000, currency: 'ttd', charge: `${P}ch_mixed`, payment_intent: `${P}pi_mixed`, status: 'succeeded',
     });
-    expect((await paymentsOf(inv)).find((r) => r.providerPaymentId === `${P}re_mixed`)).toMatchObject({ amount: -20, status: 'REFUNDED', reference: `${P}ch_mixed` });
+    // V1-29c-REFUND-WRITE-DOOR: the refund row links to the payment it refunds (reference = pi_mixed; ch_mixed before V1-29c).
+    expect((await paymentsOf(inv)).find((r) => r.providerPaymentId === `${P}re_mixed`)).toMatchObject({ amount: -20, status: 'REFUNDED', reference: `${P}pi_mixed` });
     expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 20, net: 80 });
 
     const whole = await refund(session.id, 'second stripe payment');
@@ -879,10 +884,12 @@ describe('V1-29 review: refunds that do not link to their payment (SEC-V29-1 / C
     const again = await refund(intent.id, 'again');
     expect(again.status, JSON.stringify(again.body)).toBe(409);
     expect(again.body.message).toMatch(/already refunded/i);
-    // The webhook reversed the intent's posting, the manual refund the session's; nothing twice.
+    // V1-29c: the webhook posted its 20 as a partial refund, the manual rest (30) reversed the intent's posting
+    // and (review CRR-V29C-2) the partial refund posting; the manual refund reversed the session's. Each posting
+    // reversed once, nothing twice: the intent's recording and its partial refund, the session's recording.
     expect(await reversalsFor(intent.id)).toHaveLength(1);
     expect(await reversalsFor(session.id)).toHaveLength(1);
-    await expectLedgerAgrees(inv, { net: 0, reversals: 2 });
+    await expectLedgerAgrees(inv, { net: 0, reversals: 3 });
   });
 
   it('RF-13: a refund never takes the invoice below nothing received: a cash 100 beside a stray -100 refund row of another provider that links to no payment -> 409 "already refunded"; nothing written', async () => {
@@ -1267,9 +1274,30 @@ describe('V1-29b-REFUND-READERS: the open payables (V1-22 residual)', () => {
 });
 
 describe('V1-29 review findings outside the V1-29 and V1-29b write sets (owner decision; it.todo)', () => {
-  it.todo(
-    'SEC-V29-2: the FINANCE payment_refunded audit row of a manual refund names the amount refunded and the refund row (a "what is left" refund of 60 after a provider -40 records data.amount 100, the original\'s amount): needs a refund amount / refund id option on RevenuePostingService.onPaymentRefunded (finance/revenue-posting.service.ts, outside the write set)',
-  );
+  // Was it.todo; made real by V1-29c-REFUND-WRITE-DOOR (RevenuePostingService.onPaymentRefunded names the refund row).
+  it('SEC-V29-2: the FINANCE payment_refunded audit row of a manual refund names the amount refunded and the refund row (a "what is left" refund of 60 after a provider -40 records data.amount 100, the original\'s amount): needs a refund amount / refund id option on RevenuePostingService.onPaymentRefunded (finance/revenue-posting.service.ts, outside the write set)', async () => {
+    const inv = ID.invAuditLeft;
+    await paymentsSvc.processStripeChargeOrSession(
+      'payment_intent.succeeded',
+      { id: `${P}pi_left`, amount_received: 10000, currency: 'ttd', latest_charge: `${P}ch_left`, metadata: { invoiceId: inv } },
+      `${P}evt_left_pi`,
+    );
+    const [intent] = await paymentsOf(inv);
+    await paymentsSvc.processStripeRefund('refund.created', {
+      id: `${P}re_left`, amount: 4000, currency: 'ttd', charge: `${P}ch_left`, payment_intent: `${P}pi_left`, status: 'succeeded',
+    });
+    await expectLedgerAgrees(inv, { net: 60, reversals: 0 });
+
+    const res = await refund(intent.id, 'what is left');
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ amount: -60, refundOfPaymentId: intent.id, invoiceStatus: 'SENT' });
+    const audit = await db.activity.findMany({ where: { businessId: ID.bizA, module: 'FINANCE', action: 'payment_refunded', entityId: intent.id } });
+    expect(audit).toHaveLength(1);
+    // RED-BEFORE (int/trial-I 7f4b81a2): data.amount 100 and no refund row named.
+    expect(audit[0].data).toMatchObject({ amount: 60, paymentAmount: 100, refundPaymentId: res.body.id, refundedBy: ID.ownerA });
+    // The recording and (review CRR-V29C-2) the provider's partial refund posting are each reversed once.
+    await expectLedgerAgrees(inv, { net: 0, reversals: 2 });
+  });
   it.todo(
     'CR-29b-1 (review of V1-29b): the public token view (GET public/invoice-link/:token, CommerceService.getPaymentLinkBalance) states the net received as amountPaid, the figure the public receipt states beside it on /public/invoice/[token] (60 for 60 + 40 paid with the 40 refunded; the token view reads the gross 100, the receipt 60): needs amountPaid: balance.net in getPaymentLinkBalance (commerce/commerce.service.ts) and public-invoice-link.integration L-14 (pins the gross 160), both outside the V1-29b write set; queued follow-up',
   );

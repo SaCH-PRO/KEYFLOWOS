@@ -42,6 +42,8 @@ class PrismaMock {
 
   client: any = {
     $transaction: vi.fn(async (fn: any) => fn(this.client)),
+    // V1-29c: the provider refund door takes the invoice row lock (SELECT ... FOR NO KEY UPDATE).
+    $queryRaw: vi.fn(async () => []),
     invoice: {
       findUnique: vi.fn(async ({ where }: any) => this.invoices.get(where.id) ?? null),
     },
@@ -72,6 +74,17 @@ class PrismaMock {
           return true;
         }) ?? null;
       }),
+      // V1-29c review (SEC-V29C-2): the refund door reads the refund rows linked to the original (what is left of it).
+      findMany: vi.fn(async ({ where }: any) =>
+        this.payments.filter((p) => {
+          if (where.businessId && p.businessId !== where.businessId) return false;
+          if (where.invoiceId && p.invoiceId !== where.invoiceId) return false;
+          if (where.status && p.status !== where.status) return false;
+          if (where.amount?.lt !== undefined && !(Number(p.amount) < where.amount.lt)) return false;
+          if (where.reference?.in && !(where.reference.in as any[]).includes(p.reference)) return false;
+          return true;
+        }),
+      ),
       create: vi.fn(async ({ data }: any) => {
         const row = { id: `pay_${this.payments.length + 1}`, ...data };
         this.payments.push(row);
