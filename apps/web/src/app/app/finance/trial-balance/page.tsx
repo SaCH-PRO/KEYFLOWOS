@@ -1,15 +1,34 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { Scale, Loader2 } from "lucide-react";
 import { UnifiedPageShell } from "@/components/layout/unified-page-shell";
 import { DataTable } from "@/components/ui/data-table";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { fetchTrialBalance, type TrialBalanceRow } from "@/lib/api/finance";
 
+/**
+ * V1-37b (V1-37 review ST-V37-3 / RV37-01): the server answers one row per
+ * (account, currency), each carrying its currency. A row is keyed by both, so
+ * an account that saw TTD and USD is two rows, and the totals are per
+ * currency, each balancing on its own: debits and credits of two currencies
+ * are never added into one figure.
+ */
+type CurrencyRow = TrialBalanceRow & { currency?: string; rowKey: string };
+
+interface CurrencyTotals {
+  currency: string;
+  debitCents: number;
+  creditCents: number;
+}
+
+/** A ledger amount (a decimal string) in integer cents, so totals carry no float residue. */
+const toCents = (value: string | number | null | undefined) => Math.round(Number(value || 0) * 100);
+const fromCents = (cents: number) => cents / 100;
+
 export default function TrialBalancePage() {
   const businessId = getStoredBusinessId() ?? "";
-  const [rows, setRows] = useState<TrialBalanceRow[]>([]);
+  const [items, setItems] = useState<TrialBalanceRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [asOf, setAsOf] = useState("");
@@ -20,7 +39,9 @@ export default function TrialBalancePage() {
     setError(null);
     try {
       const res = await fetchTrialBalance(businessId, asOf || undefined);
-      setRows(res.data?.items ?? []);
+      setItems(res.data?.items ?? []);
+      // V1-37b review SEC-V37b-1: a refused read (403, revenue:read required) says so, not an empty table.
+      if (res.error) setError(res.error);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load trial balance");
     } finally {
@@ -32,13 +53,30 @@ export default function TrialBalancePage() {
     load();
   }, [load]);
 
-  const totalDebit = rows.reduce((s, r) => s + Number(r.debit || 0), 0);
-  const totalCredit = rows.reduce((s, r) => s + Number(r.credit || 0), 0);
+  const rows = useMemo<CurrencyRow[]>(
+    () => items.map((r) => {
+      const currency = (r as TrialBalanceRow & { currency?: string }).currency ?? "";
+      return { ...r, currency, rowKey: `${r.accountId}:${currency}` };
+    }),
+    [items],
+  );
+
+  const totals = useMemo<CurrencyTotals[]>(() => {
+    const byCurrency = new Map<string, CurrencyTotals>();
+    for (const r of rows) {
+      const currency = r.currency ?? "";
+      const t = byCurrency.get(currency) ?? { currency, debitCents: 0, creditCents: 0 };
+      t.debitCents += toCents(r.debit);
+      t.creditCents += toCents(r.credit);
+      byCurrency.set(currency, t);
+    }
+    return [...byCurrency.values()].sort((a, b) => a.currency.localeCompare(b.currency));
+  }, [rows]);
 
   return (
     <UnifiedPageShell
       title="Trial Balance"
-      subtitle="Aggregated debits and credits by account."
+      subtitle="Aggregated debits and credits by account and currency."
       icon={Scale}
       maxWidth="5xl"
     >
@@ -66,41 +104,57 @@ export default function TrialBalancePage() {
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
-          <div className="kf-card p-3 text-center">
-            <p className="text-xs text-muted-foreground">Total Debits</p>
-            <p className="text-sm font-semibold text-emerald-600">{totalDebit.toLocaleString()}</p>
-          </div>
-          <div className="kf-card p-3 text-center">
-            <p className="text-xs text-muted-foreground">Total Credits</p>
-            <p className="text-sm font-semibold text-red-500">{totalCredit.toLocaleString()}</p>
-          </div>
-          <div className="kf-card p-3 text-center">
-            <p className="text-xs text-muted-foreground">Difference</p>
-            <p className={`text-sm font-semibold ${Math.abs(totalDebit - totalCredit) < 0.01 ? "text-emerald-600" : "text-red-500"}`}>
-              {(totalDebit - totalCredit).toLocaleString()}
-            </p>
-          </div>
-        </div>
+        {totals.length > 1 && (
+          <p className="text-xs text-muted-foreground">
+            Each currency is totalled on its own and must balance on its own; amounts in different currencies are never added together.
+          </p>
+        )}
+        {totals.map((t) => {
+          const differenceCents = t.debitCents - t.creditCents;
+          const balanced = differenceCents === 0;
+          return (
+            <div key={t.currency} data-testid={`trial-balance-totals-${t.currency}`} className="grid grid-cols-3 gap-3">
+              <div className="kf-card p-3 text-center">
+                <p className="text-xs text-muted-foreground">Total Debits{t.currency ? ` (${t.currency})` : ""}</p>
+                <p data-testid="total-debits" className="text-sm font-semibold text-emerald-600">{fromCents(t.debitCents).toLocaleString()}</p>
+              </div>
+              <div className="kf-card p-3 text-center">
+                <p className="text-xs text-muted-foreground">Total Credits{t.currency ? ` (${t.currency})` : ""}</p>
+                <p data-testid="total-credits" className="text-sm font-semibold text-red-500">{fromCents(t.creditCents).toLocaleString()}</p>
+              </div>
+              <div className="kf-card p-3 text-center">
+                <p className="text-xs text-muted-foreground">Difference</p>
+                <p
+                  data-testid="difference"
+                  data-balanced={balanced ? "true" : "false"}
+                  className={`text-sm font-semibold ${balanced ? "text-emerald-600" : "text-red-500"}`}
+                >
+                  {`${t.currency ? `${t.currency} ` : ""}${fromCents(differenceCents).toLocaleString()}`}
+                </p>
+              </div>
+            </div>
+          );
+        })}
 
         <DataTable
           data={rows as unknown as Record<string, unknown>[]}
-          keyField="accountId"
+          keyField="rowKey"
           pageSize={50}
           columns={[
-            { key: "systemKey", header: "Code", sortable: true, getValue: (r) => (r as unknown as TrialBalanceRow).systemKey ?? "—" },
-            { key: "name", header: "Account", sortable: true, getValue: (r) => (r as unknown as TrialBalanceRow).name },
-            { key: "type", header: "Type", sortable: true, getValue: (r) => (r as unknown as TrialBalanceRow).type },
+            { key: "systemKey", header: "Code", sortable: true, getValue: (r) => (r as unknown as CurrencyRow).systemKey ?? "—" },
+            { key: "name", header: "Account", sortable: true, getValue: (r) => (r as unknown as CurrencyRow).name },
+            { key: "type", header: "Type", sortable: true, getValue: (r) => (r as unknown as CurrencyRow).type },
+            { key: "currency", header: "Currency", sortable: true, render: (r) => <span className="text-xs">{(r as unknown as CurrencyRow).currency || "—"}</span> },
             { key: "debit", header: "Debit", sortable: true, render: (r) => {
-              const v = Number((r as unknown as TrialBalanceRow).debit);
+              const v = Number((r as unknown as CurrencyRow).debit);
               return v > 0 ? <span className="text-xs font-medium">{v.toLocaleString()}</span> : <span className="text-xs">—</span>;
             }},
             { key: "credit", header: "Credit", sortable: true, render: (r) => {
-              const v = Number((r as unknown as TrialBalanceRow).credit);
+              const v = Number((r as unknown as CurrencyRow).credit);
               return v > 0 ? <span className="text-xs font-medium">{v.toLocaleString()}</span> : <span className="text-xs">—</span>;
             }},
             { key: "net", header: "Net", sortable: true, render: (r) => {
-              const v = Number((r as unknown as TrialBalanceRow).net);
+              const v = Number((r as unknown as CurrencyRow).net);
               return <span className={`text-xs font-semibold ${v >= 0 ? "text-emerald-600" : "text-red-500"}`}>{v.toLocaleString()}</span>;
             }},
           ]}

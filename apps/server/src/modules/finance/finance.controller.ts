@@ -8,6 +8,7 @@ import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ReceivablesService } from './receivables.service';
 import { LedgerBalanceService } from './ledger-balance.service';
@@ -159,6 +160,15 @@ export class FinanceController {
     });
   }
 
+  /**
+   * V1-37b review SEC-V37b-1: the trial balance carries the REVENUE rows per
+   * currency, so it needs revenue:read (ModuleScopeGuard, the gate of the
+   * commerce revenue reads): a member whose revenue scope is none is refused
+   * with 403 before anything is read. The other Books reads here keep
+   * membership only (ensureAccess); no module key governs Books yet.
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('trial-balance')
   async getTrialBalance(
     @Param('businessId') businessId: string,
@@ -167,12 +177,17 @@ export class FinanceController {
   ) {
     await this.ensureAccess((req as any).user.id, businessId);
     const result = await this.ledgerBalance.getTrialBalance(businessId, asOf ? (() => { const d = new Date(asOf); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid asOf date'); return d; })() : undefined);
+    // V1-37b (V1-37 review ST-V37-3 / RV37-01): the service answers one row per
+    // (account, currency). Each item carries its currency, so an account that
+    // saw TTD and USD is two labelled items, never two unlabelled ones a
+    // client keys or totals by account alone.
     return {
       items: result.map((r) => ({
         accountId: r.accountId,
         systemKey: r.systemKey,
         name: r.name,
         type: r.type,
+        currency: r.currency,
         debit: r.debit.toString(),
         credit: r.credit.toString(),
         net: r.net.toString(),
@@ -333,7 +348,9 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.accounts.create(businessId, body);
+    // V1-37b (V1-34 review CR-34-01): create posts the opening balance through
+    // the ledger door; the caller is recorded as its author.
+    return this.accounts.create(businessId, body, { userId: req.user.id });
   }
   @Patch('accounts/:id')
   async updateAccount(

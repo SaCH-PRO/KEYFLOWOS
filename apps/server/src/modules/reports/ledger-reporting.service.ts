@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { LedgerBalanceService } from '../finance/ledger-balance.service';
+import { LedgerBalanceService, type AccountBalance } from '../finance/ledger-balance.service';
 import { ReceivablesService, AgingReport } from '../finance/receivables.service';
 
 export type ReportBasis = 'cash' | 'accrual';
@@ -63,15 +63,30 @@ export interface CashflowReport {
   upcomingPayables: { total: number; count: number };
 }
 
-export interface BalanceSheetReport {
+/** A balance-sheet line: one account in one currency (V1-37b). */
+export interface BalanceSheetLine extends PnlAccountLine {
+  currency: string;
+}
+
+/** The balance sheet of one currency's ledger rows. */
+export interface BalanceSheetCurrencySheet {
   asOf: string;
   currency: string;
-  assets: { total: number; lines: PnlAccountLine[]; cashAndBank: number; accountsReceivable: number; inventory: number };
-  liabilities: { total: number; lines: PnlAccountLine[]; accountsPayable: number; taxPayable: number; loans: number };
-  equity: { total: number; lines: PnlAccountLine[]; ownerEquity: number; retainedEarnings: number };
+  assets: { total: number; lines: BalanceSheetLine[]; cashAndBank: number; accountsReceivable: number; inventory: number };
+  liabilities: { total: number; lines: BalanceSheetLine[]; accountsPayable: number; taxPayable: number; loans: number };
+  equity: { total: number; lines: BalanceSheetLine[]; ownerEquity: number; retainedEarnings: number };
   netEquityFromIncome: number;
   identityHolds: boolean;
   identityDelta: number;
+}
+
+/**
+ * V1-37b (V1-37 review RV37-02): the top level is the business currency's
+ * sheet; `byCurrency` holds one sheet per currency the books hold (the
+ * business currency always among them). No figure adds two currencies.
+ */
+export interface BalanceSheetReport extends BalanceSheetCurrencySheet {
+  byCurrency: Record<string, BalanceSheetCurrencySheet>;
 }
 
 export interface TaxSummaryReport {
@@ -722,11 +737,38 @@ export class LedgerReportingService {
 
   // ---- Balance Sheet --------------------------------------------------
 
+  /**
+   * V1-37b (V1-37 review RV37-02): the trial balance is one row per (account,
+   * currency) since V1-37, and this summed every row into one sheet labelled
+   * with the business currency: a TTD business's USD receivable was added to
+   * its TTD assets and AR read as two unlabelled lines. The sheet is now built
+   * per currency and never sums across currencies. The top level is the
+   * business currency's sheet (every line labelled with it); `byCurrency` holds
+   * one sheet per currency the books hold, each line labelled, each balancing
+   * on its own (every posting balances in its one currency, PostingService).
+   * Other currencies are shown beside the business currency, never converted.
+   */
   async getBalanceSheet(businessId: string, asOf: Date): Promise<BalanceSheetReport> {
     const currency = await this.getCurrency(businessId);
     const trial = await this.balances.getTrialBalance(businessId, asOf);
 
-    type Bucket = { total: number; lines: PnlAccountLine[] };
+    // A row that names no currency (a reader older than V1-37) is the business currency's.
+    const rowsByCurrency = new Map<string, AccountBalance[]>([[currency, []]]);
+    for (const row of trial) {
+      const code = row.currency || currency;
+      rowsByCurrency.set(code, [...(rowsByCurrency.get(code) ?? []), row]);
+    }
+
+    const byCurrency: Record<string, BalanceSheetCurrencySheet> = {};
+    for (const code of [...rowsByCurrency.keys()].sort()) {
+      byCurrency[code] = this.balanceSheetOf(code, asOf, rowsByCurrency.get(code) ?? []);
+    }
+    return { ...byCurrency[currency], byCurrency };
+  }
+
+  /** The balance sheet of one currency's trial-balance rows. */
+  private balanceSheetOf(currency: string, asOf: Date, trial: AccountBalance[]): BalanceSheetCurrencySheet {
+    type Bucket = { total: number; lines: BalanceSheetLine[] };
     const mk = (): Bucket => ({ total: 0, lines: [] });
     const assets = mk();
     const liabilities = mk();
@@ -738,11 +780,12 @@ export class LedgerReportingService {
     for (const a of trial) {
       const debit = toNum(a.debit);
       const credit = toNum(a.credit);
-      const line: PnlAccountLine = {
+      const line: BalanceSheetLine = {
         accountId: a.accountId,
         systemKey: a.systemKey,
         name: a.name,
         amount: 0,
+        currency,
       };
       switch (a.type) {
         case 'ASSET': {
@@ -782,7 +825,7 @@ export class LedgerReportingService {
     const totalEquityWithRetained = +(equity.total + netEquityFromIncome).toFixed(2);
     const identityDelta = +(assets.total - liabilities.total - totalEquityWithRetained).toFixed(2);
 
-    const findBy = (lines: PnlAccountLine[], keys: string[]): number =>
+    const findBy = (lines: BalanceSheetLine[], keys: string[]): number =>
       +lines.filter((l) => l.systemKey && keys.includes(l.systemKey)).reduce((s, l) => s + l.amount, 0).toFixed(2);
 
     return {

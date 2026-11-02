@@ -32,22 +32,69 @@
  *          are never counted in A's figure, even with an A account linked to B's
  *          BANK chart-of-account row; B reads its own 5070; A's owner gets 403
  *          on B's safe-to-spend and command center
- *   CP-06  (review CR-34-01) an opening balance entered on an account through
- *          FinanceAccountsService.create (the Books > Accounts form), which
- *          writes the row only and posts nothing, still counts on all three
- *          surfaces (10000 -> safe 9000, OS money health Healthy); a card or an
- *          archived account's opening does not; once the opening is posted
- *          through the door (OPENING_BALANCE sourced from the FinancialAccount)
- *          it is never counted twice; it never reaches another tenant
+ *   CP-06  (review CR-34-01) an opening balance recorded on an account row and
+ *          not posted (an account FinanceAccountsService.create wrote before
+ *          V1-37b, which wrote the row only and posted nothing; inserted as
+ *          such a legacy row) still counts on all three surfaces (10000 -> safe
+ *          9000, OS money health Healthy); a card or an archived account's
+ *          opening does not; once the opening is posted through the door
+ *          (OPENING_BALANCE sourced from the FinancialAccount) it is never
+ *          counted twice; it never reaches another tenant
  *   CP-07  (review V34-SEC-01 / CR-34-02) the Finance overview's Redis cache
  *          (the finance app is composed with RedisService, as AppModule is)
  *          never serves a pre-posting cash figure: right after a posting, inside
  *          the 60s TTL, all three surfaces agree, and the cash-derived runway
  *          and the cache entry carry the new figure
  *
- * Open (it.todo, outside the V1-34 write set): FinanceAccountsService.create
- * records an opening balance on the account row only; it does not post it.
- * Until it does, CashPositionService bridges such an unposted opening (CP-06).
+ * V1-37b-CURRENCY-PROJECTIONS (review CR-34-01; was the it.todo here, outside
+ * the V1-34 write set):
+ *
+ *   CP-08  RED-BEFORE a new account's opening balance is posted once through the
+ *          door at create (the real POST /finance/businesses/:id/accounts route
+ *          and the service): OPENING_BALANCE sourced from the FinancialAccount,
+ *          DR the account's chart row / CR OWNER_EQUITY for an asset, CR the row
+ *          / DR OWNER_EQUITY for a liability (a card), in the account currency,
+ *          which defaults to the business currency; a zero opening posts
+ *          nothing; the cash every surface serves equals the independent ledger
+ *          sum with nothing bridged; the backfill finds nothing more to post;
+ *          an opening the door refuses (EUR; another tenant's chart row) writes
+ *          no account and posts nothing
+ *   CP-09  RED-BEFORE legacy accounts (opening on the row, nothing posted) are
+ *          backfilled by FinanceAccountsService.backfillOpeningBalances, an
+ *          explicit idempotent service method (no migration): each account's
+ *          opening is posted once, dated at the account; the active accounts'
+ *          cash after the backfill equals the bridged cash before it and the
+ *          independent ledger sum, with nothing left bridged (the V1-34 bridge
+ *          is proven equivalent: it now carries only openings that predate the
+ *          backfill); an archived account's opening, which the bridge dropped,
+ *          is posted too and reported as archived (review RV37b-CR-04: CP-12);
+ *          a second run posts nothing; no other tenant moves
+ *
+ * V1-37b review repairs:
+ *
+ *   CP-10  (RV37b-CR-01) RED-BEFORE on a USD business a legacy row holding the
+ *          old literal 'TTD' default (create stored it whenever no currency was
+ *          sent; the Books forms send none) is backfilled in USD and the row's
+ *          currency is corrected to USD, reported and audited; an explicit
+ *          currency (TTD chosen at create on the USD business; USD on a legacy
+ *          row of a TTD business) is kept
+ *   CP-11  (RV37b-CR-02) RED-BEFORE an opening is posted only where the account
+ *          type and its chart row agree on whether it is cash: an OTHER
+ *          account on the default CASH row (V1-34 never counted it) and a CASH
+ *          account on the inventory row (V1-34 counted it) keep the opening on
+ *          the row, at create and at the backfill, reported; the cash never
+ *          moves; an OTHER account on the inventory row posts (control)
+ *   CP-12  (RV37b-CR-04) RED-BEFORE an archived account's opening is in the
+ *          books whichever way the account was made: an account created (opening
+ *          posted) then archived keeps its opening in the cash, archiving moves
+ *          no money; the backfill posts an archived legacy opening, so a till
+ *          opened with 50, spent down by 50 and archived nets to zero (the
+ *          bridge alone read it 50 short)
+ *   CP-13  (SEC-V37b-2) RED-BEFORE an account create writes a finance audit row
+ *          (ACCOUNT_CREATED) naming the member, the opening posting and its
+ *          amount, or why the opening was not posted. The route stays
+ *          membership-only (every Books write is; no module key governs Books):
+ *          a residual, reported with the repair
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
@@ -89,7 +136,29 @@ const ID = {
   invB: `${P}invB`,
   ownerC: `${P}ownerC`,
   bizC: `${P}bizC`,
+  // V1-37b: D opens accounts through create; E holds legacy unposted openings.
+  ownerD: `${P}ownerD`,
+  bizD: `${P}bizD`,
+  ownerE: `${P}ownerE`,
+  bizE: `${P}bizE`,
+  // V1-37b review repairs: F keeps USD (CP-10); Ft, G (CP-11), H (CP-12, CP-13) keep TTD.
+  ownerF: `${P}ownerF`,
+  bizF: `${P}bizF`,
+  ownerFt: `${P}ownerFt`,
+  bizFt: `${P}bizFt`,
+  ownerG: `${P}ownerG`,
+  bizG: `${P}bizG`,
+  ownerH: `${P}ownerH`,
+  bizH: `${P}bizH`,
+  // A STAFF member of H whose every module scope is none (CP-13).
+  staffH: `${P}staffH`,
 };
+
+/** CP-13: every canonical module key (core/authority/module-vocabulary.ts) at none. */
+const ALL_SCOPES_NONE = Object.fromEntries(
+  ['crm', 'revenue', 'bookings', 'projects', 'content', 'expenses', 'automations', 'storefront', 'settings', 'ai', 'team', 'analytics', 'operations', 'connect']
+    .map((m) => [m, 'none']),
+);
 
 /** FinanceOverviewService's Redis key (finance-overview.service.ts cacheKey). */
 const overviewKey = (biz: string) => `finance:overview:${biz}`;
@@ -123,6 +192,7 @@ async function cleanup() {
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM revenue_actions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM expenses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -140,7 +210,9 @@ async function cleanup() {
   }
   // The fixture businesses' overview cache entries (60s TTL).
   if (redis) {
-    for (const biz of [ID.bizA, ID.bizB, ID.bizC]) await redis.del(overviewKey(biz)).catch(() => undefined);
+    for (const biz of [ID.bizA, ID.bizB, ID.bizC, ID.bizD, ID.bizE, ID.bizF, ID.bizFt, ID.bizG, ID.bizH]) {
+      await redis.del(overviewKey(biz)).catch(() => undefined);
+    }
   }
 }
 
@@ -264,11 +336,46 @@ async function postOpening(businessId: string, account: any, systemKey: string, 
   });
 }
 
-/** An account opened with `amount`, its opening balance posted through the door. */
+/**
+ * An account opened with `amount`, its opening balance posted through the door.
+ * Since V1-37b create posts it itself; postOpening uses the same idempotency
+ * key (FinancialAccount:<id>:opening_balance), so it then posts nothing more.
+ */
 async function openAccount(businessId: string, name: string, type: string, systemKey: string, amount: number) {
   const account = await accounts.create(businessId, { name, type, openingBalance: amount, currency: 'TTD' });
   await postOpening(businessId, account, systemKey, amount);
   return account;
+}
+
+const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 3600 * 1000);
+
+/**
+ * An account row as FinanceAccountsService.create wrote it before V1-37b: the
+ * opening recorded on the row (openingBalance and currentBalance) and nothing
+ * posted. Inserted directly, since create now posts the opening.
+ */
+async function legacyAccount(businessId: string, name: string, type: string, systemKey: string, amount: number, createdAt = daysAgo(45), currency = 'TTD') {
+  const chart = await coaSeeder.getBySystemKey(businessId, systemKey);
+  return db.financialAccount.create({
+    data: {
+      businessId, chartOfAccountId: chart.id, name, type, currency,
+      openingBalance: amount, currentBalance: amount, isActive: true, createdAt,
+    },
+  });
+}
+
+/** The OPENING_BALANCE postings sourced from `accountId`, entries as [systemKey, debit, credit]. */
+async function openingsOf(businessId: string, accountId: string) {
+  const rows = await db.financialTransaction.findMany({
+    where: { businessId, type: 'OPENING_BALANCE', sourceType: 'FinancialAccount', sourceId: accountId },
+    include: { entries: { include: { account: { select: { systemKey: true } } } } },
+  });
+  return rows.map((t: any) => ({
+    ...t,
+    legs: t.entries
+      .map((e: any) => [e.account.systemKey, Number(e.debit), Number(e.credit), e.currency])
+      .sort((a: any[], b: any[]) => String(a[0]).localeCompare(String(b[0]))),
+  }));
 }
 
 async function pay(biz: string, inv: string, as: string, amount: number, reference: string) {
@@ -323,6 +430,7 @@ beforeAll(async () => {
   const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { FinancialAccountSeederService } = await import('../src/modules/finance/financial-account-seeder.service');
   const { FinanceAccountsService } = await import('../src/modules/finance/finance-accounts.service');
+  const { FinanceAuditService } = await import('../src/modules/finance/finance-audit.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   const { NotificationsService } = await import('../src/modules/notifications/notifications.service');
@@ -366,6 +474,7 @@ beforeAll(async () => {
       ChartOfAccountsSeederService,
       FinancialAccountSeederService,
       FinanceAccountsService,
+      FinanceAuditService,
       { provide: ExpensePostingService, useValue: { onProductSold: async () => null } },
       { provide: EventEmitter2, useValue: eventStub },
       { provide: CrmService, useValue: { logContactEvent: async () => null } },
@@ -430,6 +539,7 @@ beforeAll(async () => {
       ReceivablesService,
       FinancialAccountSeederService,
       FinanceAccountsService,
+      FinanceAuditService,
       ChartOfAccountsSeederService,
       PostingService,
       AccountingPeriodService,
@@ -474,9 +584,15 @@ beforeAll(async () => {
     [ID.ownerA, ID.bizA, 'V34A Biz A', `${P}owner_a@test.local`],
     [ID.ownerB, ID.bizB, 'V34A Biz B', `${P}owner_b@test.local`],
     [ID.ownerC, ID.bizC, 'V34A Biz C', `${P}owner_c@test.local`],
+    [ID.ownerD, ID.bizD, 'V34A Biz D', `${P}owner_d@test.local`],
+    [ID.ownerE, ID.bizE, 'V34A Biz E', `${P}owner_e@test.local`],
+    [ID.ownerF, ID.bizF, 'V34A Biz F', `${P}owner_f@test.local`],
+    [ID.ownerFt, ID.bizFt, 'V34A Biz Ft', `${P}owner_ft@test.local`],
+    [ID.ownerG, ID.bizG, 'V34A Biz G', `${P}owner_g@test.local`],
+    [ID.ownerH, ID.bizH, 'V34A Biz H', `${P}owner_h@test.local`],
   ] as const) {
     await db.user.create({ data: { id: user, email, role: 'USER' } });
-    await db.business.create({ data: { id: biz, name, ownerId: user, currency: 'TTD' } });
+    await db.business.create({ data: { id: biz, name, ownerId: user, currency: biz === ID.bizF ? 'USD' : 'TTD' } });
     await db.membership.create({ data: { id: `${user}_m`, userId: user, businessId: biz, role: 'OWNER' } });
     await coaSeeder.ensureDefaults(biz);
   }
@@ -499,6 +615,11 @@ beforeAll(async () => {
       },
     });
   }
+
+  await db.user.create({ data: { id: ID.staffH, email: `${P}staff_h@test.local`, role: 'USER' } });
+  await db.membership.create({
+    data: { id: `${ID.staffH}_m`, userId: ID.staffH, businessId: ID.bizH, role: 'STAFF', permissionScopes: ALL_SCOPES_NONE },
+  });
 
   // A: one cash account opened with 1000. B: one bank account opened with 5000.
   tillA = await openAccount(ID.bizA, 'V34A Till', 'CASH', 'CASH', 1000);
@@ -607,9 +728,10 @@ describe('V1-34 cash position is ledger-derived (CF-41)', () => {
   }, 60_000);
 
   it('CP-06 an opening balance entered on an account but not posted (Books > Accounts) counts everywhere until posted, and never twice', async () => {
-    // The Books > Accounts 'Opening balance' path: create writes openingBalance
-    // and currentBalance on the row only; nothing reaches the ledger.
-    const bankC = await accounts.create(ID.bizC, { name: 'V34A Bank C', type: 'BANK', openingBalance: 10000, currency: 'TTD' });
+    // An account the Books > Accounts 'Opening balance' path created before
+    // V1-37b: openingBalance and currentBalance on the row only; nothing
+    // reached the ledger. (create now posts the opening: CP-08.)
+    const bankC = await legacyAccount(ID.bizC, 'V34A Bank C', 'BANK', 'BANK', 10000);
     expect(await ledgerCash(ID.bizC), 'nothing is posted for the opening').toBe(0);
 
     let read = await expectSurfaces(ID.bizC, ID.ownerC, 10000);
@@ -622,8 +744,8 @@ describe('V1-34 cash position is ledger-derived (CF-41)', () => {
     expect(read.os.health.money).toMatchObject({ score: 100, label: 'Healthy' });
 
     // Not cash: a credit card's opening (a liability) and an archived till's opening.
-    await accounts.create(ID.bizC, { name: 'V34A Card C', type: 'CREDIT_CARD', openingBalance: 300, currency: 'TTD' });
-    const oldTill = await accounts.create(ID.bizC, { name: 'V34A Old Till C', type: 'CASH', openingBalance: 50, currency: 'TTD' });
+    await legacyAccount(ID.bizC, 'V34A Card C', 'CREDIT_CARD', 'CREDIT_CARD', 300);
+    const oldTill = await legacyAccount(ID.bizC, 'V34A Old Till C', 'CASH', 'CASH', 50);
     await accounts.archive(ID.bizC, oldTill.id);
     await expectSurfaces(ID.bizC, ID.ownerC, 10000);
 
@@ -680,11 +802,248 @@ describe('V1-34 cash position is ledger-derived (CF-41)', () => {
     expect(hit.body.cashBalance).toBe(10350);
   }, 60_000);
 
-  it.todo(
-    'FinanceAccountsService.create posts an account opening balance through the ledger door (OPENING_BALANCE, DR the account chart row / CR OWNER_EQUITY): '
-      + 'today it writes openingBalance and currentBalance on the row only, so CashPositionService bridges an opening with no '
-      + 'OPENING_BALANCE posting sourced from its FinancialAccount (CP-06) until it is posted; finance-accounts.service.ts is outside '
-      + 'the V1-34 write set (follow-up: post at create, sourceType FinancialAccount / sourceId the account id, with a backfill for '
-      + 'accounts whose openingBalance has no posting; the bridge then stops contributing)',
-  );
+});
+
+/**
+ * V1-37b-CURRENCY-PROJECTIONS (review CR-34-01, the it.todo above in V1-34):
+ * an account opening balance reaches the ledger through the door, at create
+ * and, for accounts created before, by an explicit idempotent backfill.
+ */
+describe('V1-37b account opening balances are posted through the door (CR-34-01)', () => {
+  it('CP-08 (review CR-34-01) RED-BEFORE: create posts a new account opening once (real route); the cash is the ledger sum with nothing bridged', async () => {
+    // The Books > Accounts form: the real route, no currency named.
+    const res = await request(financeApp.getHttpServer())
+      .post(`/finance/businesses/${ID.bizD}/accounts`)
+      .set(HEADER, ID.ownerD)
+      .send({ name: 'V34A Bank D', type: 'BANK', openingBalance: 2500 });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const bankD = res.body;
+    expect(bankD.currency, 'the business currency, not a literal').toBe('TTD');
+
+    const [opening, ...extra] = await openingsOf(ID.bizD, bankD.id);
+    expect(extra, 'posted once').toEqual([]);
+    expect(opening).toMatchObject({
+      status: 'POSTED',
+      currency: 'TTD',
+      externalRef: `FinancialAccount:${bankD.id}:opening_balance`,
+      createdById: ID.ownerD,
+    });
+    expect(Number(opening.amount)).toBe(2500);
+    expect(opening.legs).toEqual([['BANK', 2500, 0, 'TTD'], ['OWNER_EQUITY', 0, 2500, 'TTD']]);
+    expect(new Date(opening.date).getTime()).toBe(new Date(bankD.createdAt).getTime());
+
+    // Every surface reads it from the ledger alone: nothing is bridged.
+    let read = await expectCash(ID.bizD, ID.ownerD, 2500);
+    expect(read.safe.explanation.some((line: string) => line.includes('not yet posted'))).toBe(false);
+
+    // A liability's opening is what is owed: CR the card / DR OWNER_EQUITY; cash
+    // is unchanged. A zero opening posts nothing.
+    const cardD = await accounts.create(ID.bizD, { name: 'V34A Card D', type: 'CREDIT_CARD', openingBalance: 300 });
+    expect((await openingsOf(ID.bizD, cardD.id)).map((t: any) => t.legs)).toEqual([[['CREDIT_CARD', 0, 300, 'TTD'], ['OWNER_EQUITY', 300, 0, 'TTD']]]);
+    const tillD = await accounts.create(ID.bizD, { name: 'V34A Till D', type: 'CASH' });
+    expect(await db.financialTransaction.count({ where: { businessId: ID.bizD, sourceId: tillD.id } })).toBe(0);
+    read = await expectCash(ID.bizD, ID.ownerD, 2500);
+
+    // Idempotent: the backfill finds nothing more to post for these accounts.
+    const backfill = await accounts.backfillOpeningBalances(ID.bizD);
+    expect(backfill.posted).toEqual([]);
+    expect(await db.financialTransaction.count({ where: { businessId: ID.bizD, type: 'OPENING_BALANCE' } })).toBe(2);
+    await expectCash(ID.bizD, ID.ownerD, 2500);
+
+    // Fails closed: an opening the door refuses writes no account and posts nothing.
+    const rowsBefore = await db.financialAccount.count({ where: { businessId: ID.bizD } });
+    const entriesBefore = await db.ledgerEntry.count({ where: { businessId: ID.bizD } });
+    await expect(accounts.create(ID.bizD, { name: 'V34A Euro D', type: 'BANK', currency: 'EUR', openingBalance: 40 }))
+      .rejects.toMatchObject({ status: 400 });
+    const bBank = await coaSeeder.getBySystemKey(ID.bizB, 'BANK');
+    await expect(accounts.create(ID.bizD, { name: 'V34A Foreign D', type: 'BANK', chartOfAccountId: bBank.id, openingBalance: 40 }))
+      .rejects.toMatchObject({ status: 400 });
+    expect(await db.financialAccount.count({ where: { businessId: ID.bizD } })).toBe(rowsBefore);
+    expect(await db.ledgerEntry.count({ where: { businessId: ID.bizD } })).toBe(entriesBefore);
+    // TENANT: B's book is untouched.
+    await expectCash(ID.bizB, ID.ownerB, 5070);
+  }, 60_000);
+
+  it('CP-09 (review CR-34-01) RED-BEFORE: backfillOpeningBalances posts each legacy opening once; the ledger cash equals the bridged cash; a rerun posts nothing', async () => {
+    // Accounts created before V1-37b: openings on the rows, nothing posted.
+    const bankE = await legacyAccount(ID.bizE, 'V34A Bank E', 'BANK', 'BANK', 4000, daysAgo(40));
+    const tillE = await legacyAccount(ID.bizE, 'V34A Till E', 'CASH', 'CASH', 150.25, daysAgo(35));
+    const cardE = await legacyAccount(ID.bizE, 'V34A Card E', 'CREDIT_CARD', 'CREDIT_CARD', 300, daysAgo(30));
+    const oldE = await legacyAccount(ID.bizE, 'V34A Old Till E', 'CASH', 'CASH', 50, daysAgo(60));
+    await accounts.archive(ID.bizE, oldE.id);
+    await post(ID.bizE, 'e_receipt', 100, 'BANK', 'OTHER_INCOME', 'INCOME');
+
+    // Before: the bridge carries the two active cash openings beside the ledger's 100.
+    const bridged = await expectSurfaces(ID.bizE, ID.ownerE, 4250.25);
+    expect(await ledgerCash(ID.bizE)).toBe(100);
+    expect(bridged.safe.explanation.filter((line: string) => line.includes('not yet posted'))).toHaveLength(2);
+
+    const result = await accounts.backfillOpeningBalances(ID.bizE);
+    expect(result.posted.map((p: any) => p.financialAccountId).sort()).toEqual([bankE.id, tillE.id, cardE.id, oldE.id].sort());
+    expect(result.skipped).toEqual([]);
+    // Review RV37b-CR-04: the archived account's opening is posted too, and reported as archived.
+    expect(result.posted.filter((p: any) => p.archived).map((p: any) => p.financialAccountId)).toEqual([oldE.id]);
+
+    // After: the active accounts' cash is the bridged cash, now the independent
+    // ledger sum, with nothing bridged; plus the archived till's 50, which the
+    // bridge dropped (it held no other movement, so it is still in the till).
+    const read = await expectCash(ID.bizE, ID.ownerE, 4300.25);
+    expect(read.safe.explanation.some((line: string) => line.includes('not yet posted'))).toBe(false);
+
+    // Each opening once, sourced from its account, dated at the account, by nature.
+    for (const [account, legs] of [
+      [bankE, [['BANK', 4000, 0, 'TTD'], ['OWNER_EQUITY', 0, 4000, 'TTD']]],
+      [tillE, [['CASH', 150.25, 0, 'TTD'], ['OWNER_EQUITY', 0, 150.25, 'TTD']]],
+      [cardE, [['CREDIT_CARD', 0, 300, 'TTD'], ['OWNER_EQUITY', 300, 0, 'TTD']]],
+      [oldE, [['CASH', 50, 0, 'TTD'], ['OWNER_EQUITY', 0, 50, 'TTD']]],
+    ] as const) {
+      const postings = await openingsOf(ID.bizE, account.id);
+      expect(postings.map((t: any) => t.legs), account.name).toEqual([legs]);
+      expect(postings[0].status).toBe('POSTED');
+      expect(postings[0].externalRef).toBe(`FinancialAccount:${account.id}:opening_balance`);
+      expect(new Date(postings[0].date).getTime(), `${account.name} dated at the account`).toBe(new Date(account.createdAt).getTime());
+    }
+
+    // Idempotent: a second run posts nothing and moves nothing.
+    const txns = await db.financialTransaction.count({ where: { businessId: ID.bizE } });
+    const again = await accounts.backfillOpeningBalances(ID.bizE);
+    expect(again.posted).toEqual([]);
+    expect(await db.financialTransaction.count({ where: { businessId: ID.bizE } })).toBe(txns);
+    await expectCash(ID.bizE, ID.ownerE, 4300.25);
+
+    // TENANT: E's backfill never touched another tenant's book.
+    await expectCash(ID.bizA, ID.ownerA, 1025.05);
+    await expectCash(ID.bizB, ID.ownerB, 5070);
+  }, 60_000);
+});
+
+/**
+ * V1-37b review repairs (RV37b-CR-01, RV37b-CR-02, RV37b-CR-04, SEC-V37b-2):
+ * the opening posting's currency, which openings are cash, archived accounts,
+ * and the audit trail of the write.
+ */
+describe('V1-37b review repairs: account opening balances', () => {
+  it('CP-10 (review RV37b-CR-01) RED-BEFORE: on a USD business the backfill posts a legacy opening held as the old literal TTD default in USD and corrects the row; an explicit currency is kept', async () => {
+    // Before V1-37b create stored the literal 'TTD' whenever no currency was
+    // sent, and the Books > Accounts forms never send one.
+    const chase = await legacyAccount(ID.bizF, 'V34A Chase F', 'BANK', 'BANK', 5000, daysAgo(20), 'TTD');
+    // An explicit TTD chosen at create since V1-37b: posted at create, in TTD.
+    const republic = await accounts.create(ID.bizF, { name: 'V34A Republic F', type: 'BANK', currency: 'TTD', openingBalance: 300 });
+    expect((await openingsOf(ID.bizF, republic.id)).map((t: any) => t.currency)).toEqual(['TTD']);
+
+    const result = await accounts.backfillOpeningBalances(ID.bizF, { userId: ID.ownerF });
+    expect(result.skipped).toEqual([]);
+    expect(result.posted).toEqual([
+      expect.objectContaining({ financialAccountId: chase.id, amount: '5000', currency: 'USD', currencyCorrectedFrom: 'TTD', archived: false }),
+    ]);
+    const [opening, ...extra] = await openingsOf(ID.bizF, chase.id);
+    expect(extra, 'posted once').toEqual([]);
+    expect(opening.currency).toBe('USD');
+    expect(opening.legs).toEqual([['BANK', 5000, 0, 'USD'], ['OWNER_EQUITY', 0, 5000, 'USD']]);
+    expect(opening.createdById).toBe(ID.ownerF);
+    // The row now names the currency its opening was posted in; the explicit TTD account is untouched.
+    expect((await db.financialAccount.findUnique({ where: { id: chase.id } })).currency).toBe('USD');
+    expect((await db.financialAccount.findUnique({ where: { id: republic.id } })).currency).toBe('TTD');
+    expect(await openingsOf(ID.bizF, republic.id)).toHaveLength(1);
+
+    // The backfilled opening is audited (SEC-V37b-2), naming who ran it and the correction.
+    const audit = await db.teamActivityLog.findMany({ where: { businessId: ID.bizF, module: 'finance', entityId: chase.id } });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ userId: ID.ownerF, action: 'TRANSACTION_POSTED', entityType: 'FinancialAccount' });
+    expect(audit[0].meta).toMatchObject({ transactionId: opening.id, amount: '5000', currency: 'USD', currencyCorrectedFrom: 'TTD', archived: false });
+
+    // A legacy row naming a currency other than the old default is kept: USD on the TTD business Ft.
+    const dollar = await legacyAccount(ID.bizFt, 'V34A Dollar Ft', 'BANK', 'BANK', 80, daysAgo(20), 'USD');
+    const ft = await accounts.backfillOpeningBalances(ID.bizFt);
+    expect(ft.posted).toEqual([expect.objectContaining({ financialAccountId: dollar.id, currency: 'USD', archived: false })]);
+    expect(ft.posted[0].currencyCorrectedFrom).toBeUndefined();
+    expect((await openingsOf(ID.bizFt, dollar.id))[0].legs).toEqual([['BANK', 80, 0, 'USD'], ['OWNER_EQUITY', 0, 80, 'USD']]);
+    expect((await db.financialAccount.findUnique({ where: { id: dollar.id } })).currency).toBe('USD');
+
+    // Idempotent: a second run posts and corrects nothing.
+    expect((await accounts.backfillOpeningBalances(ID.bizF)).posted).toEqual([]);
+  }, 60_000);
+
+  it('CP-11 (review RV37b-CR-02) RED-BEFORE: an opening whose account type and chart row disagree on cash stays on the row (create and backfill); the cash never moves', async () => {
+    await expectCash(ID.bizG, ID.ownerG, 0);
+
+    // create: OTHER resolves to the CASH chart row by default; V1-34 never
+    // counted an OTHER opening as cash, so posting it would move the cockpit.
+    const float = await accounts.create(ID.bizG, { name: 'V34A Float G', type: 'OTHER', openingBalance: 500 });
+    expect(await openingsOf(ID.bizG, float.id)).toEqual([]);
+    expect(Number((await db.financialAccount.findUnique({ where: { id: float.id } })).openingBalance)).toBe(500);
+    await expectCash(ID.bizG, ID.ownerG, 0);
+
+    // Legacy rows: OTHER on CASH (never bridged); CASH on the inventory row
+    // (bridged: its type is cash); OTHER on the inventory row (cash on neither
+    // reading: posts, the control).
+    const otherOnCash = await legacyAccount(ID.bizG, 'V34A Legacy Other G', 'OTHER', 'CASH', 700);
+    const cashOnStock = await legacyAccount(ID.bizG, 'V34A Stock Till G', 'CASH', 'INVENTORY_ASSET', 60);
+    const otherOnStock = await legacyAccount(ID.bizG, 'V34A Stock G', 'OTHER', 'INVENTORY_ASSET', 90);
+    await expectSurfaces(ID.bizG, ID.ownerG, 60);
+    expect(await ledgerCash(ID.bizG)).toBe(0);
+
+    const result = await accounts.backfillOpeningBalances(ID.bizG);
+    expect(result.posted.map((p: any) => p.financialAccountId)).toEqual([otherOnStock.id]);
+    expect(result.skipped.map((s: any) => s.financialAccountId).sort()).toEqual([float.id, otherOnCash.id, cashOnStock.id].sort());
+    for (const s of result.skipped) expect(s.reason, s.name).toMatch(/cash/i);
+    expect((await openingsOf(ID.bizG, otherOnStock.id)).map((t: any) => t.legs)).toEqual([[['INVENTORY_ASSET', 90, 0, 'TTD'], ['OWNER_EQUITY', 0, 90, 'TTD']]]);
+    for (const account of [float, otherOnCash, cashOnStock]) expect(await openingsOf(ID.bizG, account.id), account.name).toEqual([]);
+
+    // The cash after the backfill is the bridged cash before it.
+    await expectSurfaces(ID.bizG, ID.ownerG, 60);
+    expect(await ledgerCash(ID.bizG)).toBe(0);
+  }, 60_000);
+
+  it('CP-12 (review RV37b-CR-04) RED-BEFORE: an archived account opening is in the books whichever way the account was made; a spent-down archived till nets to zero', async () => {
+    // Through create: the opening is posted; archiving moves no money.
+    const till = await accounts.create(ID.bizH, { name: 'V34A Till H', type: 'CASH', openingBalance: 200 });
+    await expectCash(ID.bizH, ID.ownerH, 200);
+    await accounts.archive(ID.bizH, till.id);
+    await expectCash(ID.bizH, ID.ownerH, 200);
+
+    // The same history on a legacy row: opened with 50, spent down by 50, archived.
+    const oldTill = await legacyAccount(ID.bizH, 'V34A Old Till H', 'CASH', 'CASH', 50);
+    await expectSurfaces(ID.bizH, ID.ownerH, 250);
+    await post(ID.bizH, 'h_spend', 50, 'EXPENSE_GENERAL', 'CASH', 'EXPENSE');
+    await expectSurfaces(ID.bizH, ID.ownerH, 200);
+    await accounts.archive(ID.bizH, oldTill.id);
+    // The V1-34 bridge drops an archived opening while the ledger keeps its spend.
+    await expectSurfaces(ID.bizH, ID.ownerH, 150);
+
+    const result = await accounts.backfillOpeningBalances(ID.bizH);
+    expect(result.skipped).toEqual([]);
+    expect(result.posted).toEqual([expect.objectContaining({ financialAccountId: oldTill.id, archived: true, currency: 'TTD', amount: '50' })]);
+    expect((await openingsOf(ID.bizH, oldTill.id)).map((t: any) => t.legs)).toEqual([[['CASH', 50, 0, 'TTD'], ['OWNER_EQUITY', 0, 50, 'TTD']]]);
+    // The till's history nets to zero, as it does through create.
+    await expectCash(ID.bizH, ID.ownerH, 200);
+  }, 60_000);
+
+  it('CP-13 (review SEC-V37b-2) RED-BEFORE: an account create writes a finance audit row naming the member and the opening posting, or why it was not posted', async () => {
+    // A STAFF member whose every module scope is none: the route is membership-only (residual).
+    const res = await request(financeApp.getHttpServer())
+      .post(`/finance/businesses/${ID.bizH}/accounts`)
+      .set(HEADER, ID.staffH)
+      .send({ name: 'V34A Staff Bank H', type: 'BANK', openingBalance: 1000 });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const [opening, ...extra] = await openingsOf(ID.bizH, res.body.id);
+    expect(extra).toEqual([]);
+    expect(opening.createdById).toBe(ID.staffH);
+    const audit = await db.teamActivityLog.findMany({ where: { businessId: ID.bizH, module: 'finance', entityId: res.body.id } });
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ userId: ID.staffH, action: 'ACCOUNT_CREATED', entityType: 'FinancialAccount' });
+    expect(audit[0].meta).toMatchObject({ type: 'BANK', currency: 'TTD', openingBalance: '1000', openingTransactionId: opening.id });
+
+    // An opening that stays on the row is audited with why.
+    const other = await request(financeApp.getHttpServer())
+      .post(`/finance/businesses/${ID.bizH}/accounts`)
+      .set(HEADER, ID.staffH)
+      .send({ name: 'V34A Staff Float H', type: 'OTHER', openingBalance: 25 });
+    expect(other.status, JSON.stringify(other.body)).toBe(201);
+    expect(await openingsOf(ID.bizH, other.body.id)).toEqual([]);
+    const otherAudit = await db.teamActivityLog.findMany({ where: { businessId: ID.bizH, module: 'finance', entityId: other.body.id } });
+    expect(otherAudit).toHaveLength(1);
+    expect(otherAudit[0]).toMatchObject({ userId: ID.staffH, action: 'ACCOUNT_CREATED' });
+    expect(otherAudit[0].meta).toMatchObject({ openingBalance: '25', openingTransactionId: null, openingNotPosted: expect.stringMatching(/cash/i) });
+  }, 60_000);
 });

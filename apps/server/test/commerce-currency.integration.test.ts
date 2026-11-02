@@ -49,8 +49,34 @@
  *          its receivable closes in that currency
  *   CUR-09 (RV37-05) an expense in a currency the door refuses (EUR on a TTD business) fails
  *          closed: 400 and no expense row, no ledger row (the posting runs inside the create)
- *   it.todo: the findings whose repair lies outside the V1-37 write set (ST-V37-2, ST-V37-3 /
- *          RV37-01, RV37-02, RV37-04), each with its reason
+ *
+ * V1-37b-CURRENCY-PROJECTIONS (the V1-37 review residuals that lay outside the
+ * V1-37 write set; each was an it.todo here, each is now a real case):
+ *
+ *   ST-V37-2  RED-BEFORE GET stats and every commerce-ai read route (ai-cashflow, ai-analyze,
+ *             ai-reminder, ai-pricing, ai-search, ...) answer 403 to a member whose revenue scope
+ *             is none, the service is never reached and nothing is returned; a revenue:read
+ *             member and the owner still read (RED-BEFORE: 200/201 with the data)
+ *   ST-V37-3 / RV37-01  RED-BEFORE GET /finance/businesses/:id/trial-balance items carry `currency`,
+ *             one item per (account, currency), equal to the service rows; per currency the items
+ *             balance (the web page keys and totals by (accountId, currency): apps/web
+ *             finance/trial-balance/__tests__)
+ *   RV37-02   RED-BEFORE getBalanceSheet never sums across currencies: the top level is the
+ *             business currency's sheet (every line labelled with it); byCurrency carries one
+ *             sheet per currency the books hold, each line labelled, one line per account, each
+ *             total equal to Postgres' own per-(currency, account type) sums, each identity holding
+ *   RV37-04   RED-BEFORE applyRules skips (does not abort) a bank row whose currency the posting
+ *             door refuses (400, EUR on a TTD business), reports it in `skipped` and the finance
+ *             audit, leaves it UNMATCHED with nothing posted, and posts the other rows (TTD; USD,
+ *             a supported currency carried by the rule's source)
+ *
+ * V1-37b review repairs:
+ *
+ *   SEC-V37b-1 RED-BEFORE GET /finance/businesses/:id/trial-balance needs revenue:read
+ *             (ModuleScopeGuard, the commerce revenue reads' gate): a revenue:none member gets 403
+ *             and no rows; a revenue:read member and the owner still read it (RED-BEFORE: 200 with
+ *             the REVENUE rows). The balance-sheet route and its CSV / PDF export and GET
+ *             revenue-reports/:preset lie outside the V1-37b write set: it.todo below, each with why.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed), CommerceService,
@@ -63,7 +89,13 @@
  * Supabase-verifying AuthMiddleware would. EventEmitter2, the contact timeline
  * (CrmService), TimelineService, CommerceAiService and the AI / Gmail / Drive
  * services are stubs off the boundary; ExpensePostingService (COGS) is a no-op
- * stub (no product lines here).
+ * stub (no product lines here). The CommerceAiService stub records each call
+ * and answers a sentinel, so a refused route is proven never to reach it. The
+ * finance app (V1-37b) mounts the real FinanceController behind the real
+ * AuthGuard and BusinessGuard over the real LedgerBalanceService; its other
+ * collaborators are off the trial-balance path and stubbed. LedgerReportingService
+ * and BankRuleService (with the real FinanceAuditService and PostingService) run
+ * on real rows.
  *
  * Fixtures: prefix `v37a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL (patterns built by sqlLikePrefix) in dependency order
@@ -90,16 +122,41 @@ const ID = {
   contactU: `${P}contactU`,
   contactT: `${P}contactT`,
   campaign: `${P}campaign`,
+  // V1-37b (ST-V37-2): members of the TTD business by revenue scope.
+  memberNone: `${P}memberNone`,
+  memberRead: `${P}memberRead`,
 };
 
 let db: any;
 let app: any;
+let financeApp: any;
 let redis: any;
 let commerce: any;
 let posting: any;
 let coa: any;
 let ledgerBalance: any;
 let expenses: any;
+let reporting: any;
+let bankRules: any;
+
+/**
+ * V1-37b (ST-V37-2): the CommerceAiService stand-in. Every read the commerce-ai
+ * routes reach records its call and answers a sentinel, so a refused route is
+ * proven to reach nothing and return nothing.
+ */
+const AI_SENTINEL = 'v37a-ai-read';
+const AI_READS = [
+  'analyzeRevenue', 'generateInvoiceReminder', 'suggestPricing', 'cashFlowForecast', 'naturalLanguageSearch',
+  'productHealthScan', 'clientPaymentIntelligence', 'quoteWinAnalysis', 'interpretCommand', 'predictiveCollectionsScore',
+  'suggestPaymentPlan', 'smartQuoteFollowUp', 'churnRiskAlerts', 'revenueJourney', 'quoteFromConversation',
+] as const;
+const aiCalls: Array<{ method: string; businessId: string }> = [];
+const commerceAiStub = Object.fromEntries(
+  AI_READS.map((method) => [method, async (businessId: string) => {
+    aiCalls.push({ method, businessId });
+    return { sentinel: AI_SENTINEL, method };
+  }]),
+);
 
 const eventStub = {
   emit: () => true,
@@ -114,6 +171,9 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bank_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bank_rules WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM financial_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
@@ -229,6 +289,38 @@ beforeAll(async () => {
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   const { ExpensesService } = await import('../src/modules/expenses/expenses.service');
+  // V1-37b: the trial-balance route, the balance sheet and the bank rules.
+  const { FinanceController } = await import('../src/modules/finance/finance.controller');
+  const { LedgerReportingService } = await import('../src/modules/reports/ledger-reporting.service');
+  const { BankRuleService } = await import('../src/modules/finance/bank-rule.service');
+  const { FinanceAuditService } = await import('../src/modules/finance/finance-audit.service');
+  // FinanceController's collaborators off the trial-balance path (stubbed).
+  const financeStubs = await Promise.all([
+    import('../src/modules/finance/receivables.service').then((m) => m.ReceivablesService),
+    import('../src/modules/finance/finance-overview.service').then((m) => m.FinanceOverviewService),
+    import('../src/modules/finance/finance-accounts.service').then((m) => m.FinanceAccountsService),
+    import('../src/modules/finance/finance-coa.service').then((m) => m.FinanceCoaService),
+    import('../src/modules/finance/finance-tax-rate.service').then((m) => m.FinanceTaxRateService),
+    import('../src/modules/finance/finance-settings.service').then((m) => m.FinanceSettingsService),
+    import('../src/modules/finance/bank-import.service').then((m) => m.BankImportService),
+    import('../src/modules/finance/statement-source.service').then((m) => m.StatementSourceService),
+    import('../src/modules/finance/bank-matching.service').then((m) => m.BankMatchingService),
+    import('../src/modules/finance/bank-rule.service').then((m) => m.BankRuleService),
+    import('../src/modules/finance/recurring-journal-entry.service').then((m) => m.RecurringJournalEntryService),
+    import('../src/modules/finance/reconciliation.service').then((m) => m.ReconciliationService),
+    import('../src/modules/finance/tax-liability.service').then((m) => m.TaxLiabilityService),
+    import('../src/modules/finance/accountant-export.service').then((m) => m.AccountantExportService),
+    import('../src/modules/finance/finance-intelligence.service').then((m) => m.FinanceIntelligenceService),
+    import('../src/modules/finance/accountant-export-email.service').then((m) => m.AccountantExportEmailService),
+    import('../src/modules/finance/safe-to-spend.service').then((m) => m.SafeToSpendService),
+    import('../src/modules/finance/cashflow-forecast.service').then((m) => m.CashflowForecastService),
+    import('../src/modules/finance/money-moves.service').then((m) => m.MoneyMovesService),
+    import('../src/modules/finance/cash-reserve.service').then((m) => m.CashReserveService),
+    import('../src/modules/finance/credit-note.service').then((m) => m.CreditNoteService),
+    import('../src/modules/finance/bank-connection.service').then((m) => m.BankConnectionService),
+    import('../src/modules/finance/exchange-rate.service').then((m) => m.ExchangeRateService),
+    import('../src/modules/finance/fixed-asset.service').then((m) => m.FixedAssetService),
+  ]);
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
@@ -252,7 +344,7 @@ beforeAll(async () => {
       AccountingPeriodService,
       ChartOfAccountsSeederService,
       LedgerBalanceService,
-      { provide: CommerceAiService, useValue: {} },
+      { provide: CommerceAiService, useValue: commerceAiStub },
       { provide: ExpensePostingService, useValue: { onProductSold: async () => null } },
       { provide: EventEmitter2, useValue: eventStub },
       { provide: CrmService, useValue: { logContactEvent: async () => null } },
@@ -286,9 +378,14 @@ beforeAll(async () => {
     posting,
   );
 
-  app = moduleRef.createNestApplication();
-  // Identity attachment only. No guard is overridden.
-  app.use(async (req: any, _res: any, next: any) => {
+  // V1-37b: the balance sheet over the real trial balance (receivables are off
+  // the balance-sheet path), and the bank rules over the real door and audit.
+  const prismaService = moduleRef.get(PrismaService);
+  reporting = new LedgerReportingService(prismaService, ledgerBalance, {} as any);
+  bankRules = new BankRuleService(prismaService, posting, new FinanceAuditService(prismaService));
+
+  /** Identity attachment only. No guard is overridden. */
+  const attachIdentity = (target: any) => target.use(async (req: any, _res: any, next: any) => {
     const header = req.headers[HEADER];
     const id = typeof header === 'string' ? header : undefined;
     if (id && id.startsWith(P)) {
@@ -297,9 +394,32 @@ beforeAll(async () => {
     }
     next();
   });
+
+  app = moduleRef.createNestApplication();
+  attachIdentity(app);
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
+
+  // V1-37b (ST-V37-3 / RV37-01): the real trial-balance route.
+  const financeRef = await Test.createTestingModule({
+    controllers: [FinanceController],
+    providers: [
+      PrismaService,
+      AuthGuard,
+      BusinessGuard,
+      // V1-37b review SEC-V37b-1: the trial balance needs revenue:read.
+      ModuleScopeGuard,
+      LedgerBalanceService,
+      PostingService,
+      AccountingPeriodService,
+      ...financeStubs.map((token) => ({ provide: token, useValue: {} })),
+    ],
+  }).compile();
+  financeApp = financeRef.createNestApplication();
+  attachIdentity(financeApp);
+  financeApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+  await financeApp.init();
 
   await cleanup(); // in case a prior run aborted
 
@@ -314,6 +434,15 @@ beforeAll(async () => {
     await db.membership.create({ data: { id: `${user}_m`, userId: user, businessId: biz, role: 'OWNER' } });
     await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V37a', lastName: currency, email: `${P}contact-${tag}@test.local` } });
     await coa.ensureDefaults(biz);
+  }
+
+  // V1-37b (ST-V37-2): two STAFF members of the TTD business with explicit
+  // scope maps, one without revenue access, one that may read revenue.
+  for (const [user, revenue] of [[ID.memberNone, 'none'], [ID.memberRead, 'read']] as const) {
+    await db.user.create({ data: { id: user, email: `${user}@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${user}_m`, userId: user, businessId: ID.bizTtd, role: 'STAFF', permissionScopes: { revenue, crm: 'write' } },
+    });
   }
 
   // The TTD business's book: TTD 100 + 15 (last month) paid, USD 250 paid,
@@ -351,6 +480,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (app) await app.close();
+  if (financeApp) await financeApp.close();
   if (db) await cleanup();
   if (redis) await redis.quit().catch(() => undefined);
 }, 60_000);
@@ -659,21 +789,299 @@ describe('V1-37 review: an expense in a refused currency fails closed (RV37-05)'
   }, 30_000);
 });
 
-describe('V1-37 review findings whose repair lies outside the V1-37 write set', () => {
+/**
+ * V1-37b-CURRENCY-PROJECTIONS: the V1-37 review findings whose repair lay
+ * outside the V1-37 write set. Each was an it.todo here.
+ */
+describe('V1-37 review residuals (V1-37b): revenue scope on the commerce-ai reads (ST-V37-2)', () => {
+  const B = `/commerce/businesses/${ID.bizTtd}`;
+  /** Every business-scoped commerce-ai read route and the service read it reaches. */
+  const AI_READ_ROUTES: Array<{ method: 'get' | 'post'; path: string; body?: Record<string, unknown>; reaches: string }> = [
+    { method: 'get', path: `${B}/ai-cashflow`, reaches: 'cashFlowForecast' },
+    { method: 'post', path: `${B}/ai-analyze`, reaches: 'analyzeRevenue' },
+    { method: 'post', path: `${B}/invoices/${P}sT1/ai-reminder`, reaches: 'generateInvoiceReminder' },
+    { method: 'post', path: `${B}/products/${P}product/ai-pricing`, reaches: 'suggestPricing' },
+    { method: 'post', path: `${B}/ai-search`, body: { query: 'unpaid invoices' }, reaches: 'naturalLanguageSearch' },
+    { method: 'post', path: `${B}/ai-product-health`, reaches: 'productHealthScan' },
+    { method: 'post', path: `${B}/ai-client-intelligence`, body: { contactId: ID.contactT }, reaches: 'clientPaymentIntelligence' },
+    { method: 'post', path: `${B}/ai-quote-analysis`, reaches: 'quoteWinAnalysis' },
+    { method: 'post', path: `${B}/ai-command`, body: { command: 'show overdue invoices' }, reaches: 'interpretCommand' },
+    { method: 'post', path: `${B}/ai-collections-score`, reaches: 'predictiveCollectionsScore' },
+    { method: 'post', path: `${B}/invoices/${P}sT1/ai-payment-plan`, reaches: 'suggestPaymentPlan' },
+    { method: 'post', path: `${B}/quotes/${P}quote/ai-follow-up`, reaches: 'smartQuoteFollowUp' },
+    { method: 'post', path: `${B}/ai-churn-risk`, reaches: 'churnRiskAlerts' },
+    { method: 'post', path: `${B}/ai-revenue-journey`, reaches: 'revenueJourney' },
+    { method: 'post', path: `${B}/ai-quote-from-conversation`, body: { conversationText: 'v37a: two hours of consulting' }, reaches: 'quoteFromConversation' },
+  ];
+  function call(route: { method: 'get' | 'post'; path: string; body?: Record<string, unknown> }, as: string) {
+    const req = route.method === 'get' ? agent().get(route.path) : agent().post(route.path).send(route.body ?? {});
+    return req.set(HEADER, as);
+  }
+
+  it('ST-V37-2 RED-BEFORE: a revenue:none member gets 403 and nothing from GET stats and every commerce-ai read route; the service is never reached', async () => {
+    // The routes cover every read the stub answers: no read route is left out.
+    expect(AI_READ_ROUTES.map((r) => r.reaches).sort()).toEqual([...AI_READS].sort());
+    aiCalls.length = 0;
+
+    const stats = await agent().get(`${B}/stats`).set(HEADER, ID.memberNone);
+    expect(stats.status, JSON.stringify(stats.body)).toBe(403);
+    expect(JSON.stringify(stats.body)).toMatch(/revenue/);
+    expect(JSON.stringify(stats.body)).not.toMatch(/byCurrency|totalRevenue|invoiceStatusBreakdown/);
+
+    for (const route of AI_READ_ROUTES) {
+      const res = await call(route, ID.memberNone);
+      expect(res.status, `${route.method.toUpperCase()} ${route.path}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(JSON.stringify(res.body), `${route.path} returns nothing of the read`).not.toContain(AI_SENTINEL);
+    }
+    expect(aiCalls, 'no refused route reached CommerceAiService').toEqual([]);
+  }, 60_000);
+
+  it('ST-V37-2 control: a revenue:read member and the owner still read stats and the commerce-ai reads (tenant-bound)', async () => {
+    aiCalls.length = 0;
+    for (const as of [ID.memberRead, ID.ownerT]) {
+      const stats = await agent().get(`${B}/stats`).set(HEADER, as);
+      expect(stats.status, JSON.stringify(stats.body)).toBe(200);
+      expect(stats.body.byCurrency.TTD.totalRevenue).toBe(115);
+    }
+    // A few of the AI reads (the per-business AI rate limit is 10 a minute).
+    for (const route of AI_READ_ROUTES.filter((r) => ['cashFlowForecast', 'analyzeRevenue', 'quoteFromConversation'].includes(r.reaches))) {
+      const res = await call(route, ID.memberRead);
+      expect(res.status, `${route.path}: ${JSON.stringify(res.body)}`).toBe(route.method === 'get' ? 200 : 201);
+      expect(res.body).toEqual({ sentinel: AI_SENTINEL, method: route.reaches });
+    }
+    expect(aiCalls).toEqual([
+      { method: 'cashFlowForecast', businessId: ID.bizTtd },
+      { method: 'analyzeRevenue', businessId: ID.bizTtd },
+      { method: 'quoteFromConversation', businessId: ID.bizTtd },
+    ]);
+    // Revenue read on one business is no access to another.
+    const foreign = await agent().get(`/commerce/businesses/${ID.bizUsd}/ai-cashflow`).set(HEADER, ID.memberRead);
+    expect(foreign.status).toBe(403);
+    expect(aiCalls).toHaveLength(3);
+  }, 60_000);
+});
+
+describe('V1-37 review residuals (V1-37b): the trial-balance projection is per (account, currency) (ST-V37-3 / RV37-01)', () => {
+  it('ST-V37-3 / RV37-01 RED-BEFORE: GET trial-balance items carry currency, one per (account, currency), equal to the service rows; each currency balances', async () => {
+    const res = await request(financeApp.getHttpServer()).get(`/finance/businesses/${ID.bizUsd}/trial-balance`).set(HEADER, ID.owner);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const items: any[] = res.body.items;
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) expect(item.currency, `${item.name} carries its currency`).toMatch(/^(TTD|USD)$/);
+
+    // One item per (account, currency): nothing collapsed, nothing duplicated.
+    const keys = items.map((i) => `${i.accountId}:${i.currency}`);
+    expect(new Set(keys).size).toBe(items.length);
+
+    // The projection is the service's rows, field for field.
+    const rows: any[] = await ledgerBalance.getTrialBalance(ID.bizUsd);
+    expect(items).toEqual(rows.map((r) => ({
+      accountId: r.accountId,
+      systemKey: r.systemKey,
+      name: r.name,
+      type: r.type,
+      currency: r.currency,
+      debit: r.debit.toString(),
+      credit: r.credit.toString(),
+      net: r.net.toString(),
+    })));
+
+    // Per currency the items balance; the book holds both currencies.
+    const cents = (s: string) => Math.round(Number(s) * 100);
+    for (const currency of ['TTD', 'USD']) {
+      const mine = items.filter((i) => i.currency === currency);
+      const debit = mine.reduce((s, i) => s + cents(i.debit), 0);
+      const credit = mine.reduce((s, i) => s + cents(i.credit), 0);
+      expect(debit, `${currency} debits = credits`).toBe(credit);
+      expect(debit).toBeGreaterThan(0);
+    }
+    const ar = await coa.getBySystemKey(ID.bizUsd, 'ACCOUNTS_RECEIVABLE');
+    expect(items.filter((i) => i.accountId === ar.id).map((i) => i.currency).sort()).toEqual(['TTD', 'USD']);
+
+    // TENANT: the TTD business's owner cannot read the USD business's trial balance.
+    const foreign = await request(financeApp.getHttpServer()).get(`/finance/businesses/${ID.bizUsd}/trial-balance`).set(HEADER, ID.ownerT);
+    expect(foreign.status).toBe(403);
+  }, 30_000);
+});
+
+describe('V1-37b review (SEC-V37b-1): a revenue:none member reads no revenue through the trial balance', () => {
+  it('SEC-V37b-1 RED-BEFORE: GET trial-balance answers 403 and no rows to a revenue:none member; a revenue:read member and the owner read the REVENUE rows', async () => {
+    // A revenue posting on the TTD business, so its trial balance holds a REVENUE row.
+    const cash = await coa.getBySystemKey(ID.bizTtd, 'CASH');
+    const revenue = await coa.getBySystemKey(ID.bizTtd, 'REVENUE');
+    await posting.post({
+      businessId: ID.bizTtd,
+      type: 'INCOME',
+      date: new Date(Date.now() - 60_000),
+      amount: 777.77,
+      description: 'v37a revenue (SEC-V37b-1)',
+      entries: [
+        { accountId: cash.id, debit: 777.77 },
+        { accountId: revenue.id, credit: 777.77 },
+      ],
+    });
+    const trialBalance = (as: string) =>
+      request(financeApp.getHttpServer()).get(`/finance/businesses/${ID.bizTtd}/trial-balance`).set(HEADER, as);
+
+    const refused = await trialBalance(ID.memberNone);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(JSON.stringify(refused.body)).toMatch(/revenue/);
+    expect(JSON.stringify(refused.body), 'no row of the trial balance is returned').not.toMatch(/777\.77|"items"|REVENUE/);
+
+    for (const as of [ID.memberRead, ID.ownerT]) {
+      const res = await trialBalance(as);
+      expect(res.status, `${as}: ${JSON.stringify(res.body)}`).toBe(200);
+      const rows = res.body.items.filter((i: any) => i.accountId === revenue.id);
+      expect(rows.map((i: any) => i.currency), `${as} reads the TTD revenue row`).toEqual(['TTD']);
+      expect(Number(rows[0].credit)).toBeGreaterThanOrEqual(777.77);
+    }
+  }, 30_000);
+
   it.todo(
-    'ST-V37-2: GET /commerce/businesses/:id/stats answers 403 to a member whose revenue scope is none ' +
-      '(needs ModuleScopeGuard + @RequireModuleScope(revenue, read) on commerce-ai.controller.ts, outside the write set)',
+    'SEC-V37b-1 residual, outside the V1-37b write set: GET /businesses/:id/reports/balance-sheet (reports.controller.ts, '
+    + 'AuthGuard + BusinessGuard only) answers a revenue:none member 200 with accounts receivable per currency; it needs '
+    + 'revenue:read on the reports controller (with its CSV / PDF export and the P&L, the same class)',
   );
   it.todo(
-    'ST-V37-3 / RV37-01: GET /finance/businesses/:id/trial-balance items carry `currency`, and the web page keys and totals ' +
-      'by (accountId, currency) (finance.controller.ts:171 projection and web finance/trial-balance/page.tsx, outside the write set)',
+    'SEC-V37b-1 residual, outside the V1-37b write set: GET /commerce/businesses/:id/revenue-reports/:preset '
+    + '(revenue-reporting.controller.ts, AuthGuard + BusinessGuard only) answers a revenue:none member 200 with invoice '
+    + 'totals by contact; it needs ModuleScopeGuard + revenue:read like the commerce invoice reads',
   );
+});
+
+describe('V1-37 review residuals (V1-37b): the balance sheet never sums across currencies (RV37-02)', () => {
+  it('RV37-02 RED-BEFORE: the top level is the business currency (USD) sheet; byCurrency holds one labelled sheet per currency, each equal to Postgres and balanced', async () => {
+    const sheet = await reporting.getBalanceSheet(ID.bizUsd, new Date(Date.now() + 60_000));
+    expect(sheet.currency).toBe('USD');
+    const linesOf = (s: any) => [...s.assets.lines, ...s.liabilities.lines, ...s.equity.lines];
+
+    // The top level is the business currency's sheet: every line is labelled USD.
+    for (const l of linesOf(sheet)) expect(l.currency, `${l.name} is labelled`).toBe('USD');
+
+    // Postgres' own sums per (currency, account type) over the USD business's book.
+    const pg: Array<{ currency: string; type: string; d: string; c: string }> = await db.$queryRawUnsafe(
+      `SELECT le.currency, coa.type, SUM(le.debit)::text AS d, SUM(le.credit)::text AS c
+         FROM ledger_entries le JOIN chart_of_accounts coa ON coa.id = le.account_id
+        WHERE le.business_id = $1 AND coa.business_id = $1
+        GROUP BY le.currency, coa.type`,
+      ID.bizUsd,
+    );
+    const cur = [...new Set(pg.map((r) => r.currency))].sort();
+    expect(cur).toEqual(['TTD', 'USD']);
+    expect(Object.keys(sheet.byCurrency ?? {}).sort()).toEqual(cur);
+
+    const net = (currency: string, type: string, nature: 'debit' | 'credit') => {
+      const r = pg.find((x) => x.currency === currency && x.type === type);
+      if (!r) return 0;
+      const v = Number(r.d) - Number(r.c);
+      return Math.round((nature === 'debit' ? v : -v) * 100) / 100;
+    };
+    for (const currency of cur) {
+      const s = sheet.byCurrency[currency];
+      expect(s.currency).toBe(currency);
+      for (const l of linesOf(s)) expect(l.currency, `${currency}: ${l.name} is labelled`).toBe(currency);
+      // One line per account within a currency: never two unlabelled lines for one account.
+      for (const section of [s.assets, s.liabilities, s.equity]) {
+        const ids = section.lines.map((l: any) => l.accountId);
+        expect(new Set(ids).size, `${currency}: one line per account`).toBe(ids.length);
+      }
+      expect(s.assets.total, `${currency} assets`).toBe(net(currency, 'ASSET', 'debit'));
+      expect(s.liabilities.total, `${currency} liabilities`).toBe(net(currency, 'LIABILITY', 'credit'));
+      expect(s.equity.total, `${currency} equity`).toBe(net(currency, 'EQUITY', 'credit'));
+      const income = net(currency, 'INCOME', 'credit') - net(currency, 'COGS', 'debit') - net(currency, 'EXPENSE', 'debit');
+      expect(s.netEquityFromIncome, `${currency} period income`).toBe(Math.round(income * 100) / 100);
+      expect(s.identityHolds, `${currency}: assets = liabilities + equity`).toBe(true);
+    }
+
+    // The top level is exactly the business currency's section.
+    const { byCurrency, ...top } = sheet;
+    expect(top).toEqual(byCurrency.USD);
+
+    // AR saw both currencies: in each currency's sheet it is one line carrying
+    // that currency's own balance (absent when it nets to zero), never a sum.
+    const ar = await coa.getBySystemKey(ID.bizUsd, 'ACCOUNTS_RECEIVABLE');
+    const arNet: Array<{ currency: string; net: string }> = await db.$queryRawUnsafe(
+      `SELECT currency, SUM(debit - credit)::text AS net FROM ledger_entries
+        WHERE business_id = $1 AND account_id = $2 GROUP BY currency`,
+      ID.bizUsd, ar.id,
+    );
+    expect(arNet.map((r) => r.currency).sort()).toEqual(['TTD', 'USD']);
+    for (const { currency, net: n } of arNet) {
+      const lines = sheet.byCurrency[currency].assets.lines.filter((l: any) => l.accountId === ar.id);
+      const expected = Math.round(Number(n) * 100) / 100;
+      if (expected === 0) expect(lines, `${currency} AR nets to zero`).toHaveLength(0);
+      else expect(lines.map((l: any) => [l.currency, l.amount]), `${currency} AR`).toEqual([[currency, expected]]);
+    }
+  }, 30_000);
+
   it.todo(
-    'RV37-02: getBalanceSheet lines are one per (account, currency) with their currency, never two unlabelled lines per account ' +
-      '(reports/ledger-reporting.service.ts and BooksReportView.tsx, outside the write set)',
+    'RV37b-CR-03, outside the V1-37b write set: the balance-sheet CSV and PDF exports (report-formatters.ts '
+    + 'balanceSheetToCsv / balanceSheetToPdf, served by reports.controller.ts) read the top-level business-currency '
+    + 'sheet only and drop byCurrency; each other currency must be exported as its own labelled sheet, never summed. '
+    + 'Until then the Books view says beside the sheets that the export carries the business currency only',
   );
-  it.todo(
-    'RV37-04: applyRules skips (does not abort) a bank row whose currency the posting door refuses (400) and posts the rest ' +
-      '(finance/bank-rule.service.ts catch at :236, outside the write set)',
-  );
+});
+
+describe('V1-37 review residuals (V1-37b): bank rules skip a row the door refuses for currency (RV37-04)', () => {
+  it('RV37-04 RED-BEFORE: applyRules skips and reports the EUR row (400 at the door), posts the TTD and USD rows, never aborts', async () => {
+    const bank = await coa.getBySystemKey(ID.bizTtd, 'BANK');
+    const supplies = await coa.getBySystemKey(ID.bizTtd, 'EXPENSE_GENERAL');
+    const accountIds = { EUR: `${P}faEur`, TTD: `${P}faTtd`, USD: `${P}faUsd` } as const;
+    for (const [currency, id] of Object.entries(accountIds)) {
+      await db.financialAccount.create({
+        data: { id, businessId: ID.bizTtd, chartOfAccountId: bank.id, name: `V37A bank ${currency}`, type: 'BANK', currency },
+      });
+    }
+    const rule = await db.bankRule.create({
+      data: { id: `${P}rule`, businessId: ID.bizTtd, name: 'V37A supplies', pattern: 'v37a supplies', matchType: 'contains', accountId: supplies.id },
+    });
+    // The refused row first: before the repair its 400 aborted the run before the others.
+    const rows = [
+      { id: `${P}btEur`, accountId: accountIds.EUR, amount: -12.5, currency: 'EUR' },
+      { id: `${P}btTtd`, accountId: accountIds.TTD, amount: -20, currency: 'TTD' },
+      { id: `${P}btUsd`, accountId: accountIds.USD, amount: -7.25, currency: 'USD' },
+    ];
+    for (const [i, r] of rows.entries()) {
+      await db.bankTransaction.create({
+        data: {
+          id: r.id, businessId: ID.bizTtd, accountId: r.accountId, currency: r.currency,
+          date: new Date(Date.now() - (3 - i) * 60_000), description: `V37A supplies ${r.currency}`, amount: r.amount,
+        },
+      });
+    }
+    const before = await ledgerCount(ID.bizTtd);
+
+    const result = await bankRules.applyRules(ID.bizTtd, rows.map((r) => r.id), { userId: ID.ownerT });
+    expect(result.scanned).toBe(3);
+    expect(result.matched).toBe(2);
+    expect(result.createdTransactions).toBe(2);
+    expect(result.skipped).toHaveLength(1);
+    expect(result.skipped[0]).toMatchObject({ bankTransactionId: `${P}btEur`, ruleId: rule.id });
+    expect(result.skipped[0].reason).toMatch(/EUR/);
+
+    // The refused row: UNMATCHED, nothing posted for it, and the skip is audited.
+    const eur = await db.bankTransaction.findUnique({ where: { id: `${P}btEur` }, select: { status: true, matchedTransactionId: true } });
+    expect(eur).toEqual({ status: 'UNMATCHED', matchedTransactionId: null });
+    expect(await db.financialTransaction.count({ where: { businessId: ID.bizTtd, externalRef: `BankRule:${rule.id}:${P}btEur` } })).toBe(0);
+    const audit = await db.teamActivityLog.findFirst({ where: { businessId: ID.bizTtd, entityId: `${P}btEur`, action: 'BANK_TRANSACTION_UNMATCHED' } });
+    expect(audit?.detail).toMatch(/EUR/);
+
+    // The others posted, each in its own account's currency, and are linked.
+    for (const r of rows.slice(1)) {
+      const row = await db.bankTransaction.findUnique({ where: { id: r.id }, select: { status: true, matchedTransactionId: true } });
+      expect(row.status, `${r.id} matched`).toBe('MATCHED');
+      const txn = await db.financialTransaction.findUnique({ where: { id: row.matchedTransactionId }, include: { entries: true } });
+      expect(txn.externalRef).toBe(`BankRule:${rule.id}:${r.id}`);
+      expect(txn.currency).toBe(r.currency);
+      expect(new Set(txn.entries.map((e: any) => e.currency))).toEqual(new Set([r.currency]));
+      expect(Number(txn.amount)).toBe(Math.abs(r.amount));
+    }
+    expect(await ledgerCount(ID.bizTtd)).toEqual({ transactions: before.transactions + 2, entries: before.entries + 4 });
+
+    // Re-applying skips the refused row again and posts nothing new.
+    const again = await bankRules.applyRules(ID.bizTtd, rows.map((r) => r.id), { userId: ID.ownerT });
+    expect(again).toMatchObject({ scanned: 1, matched: 0, createdTransactions: 0 });
+    expect(again.skipped.map((s: any) => s.bankTransactionId)).toEqual([`${P}btEur`]);
+    expect(await ledgerCount(ID.bizTtd)).toEqual({ transactions: before.transactions + 2, entries: before.entries + 4 });
+  }, 60_000);
 });
