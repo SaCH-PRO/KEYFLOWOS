@@ -124,6 +124,17 @@ type ContactExtraAttributes = {
   archivedAt?: string | null;
 };
 
+/**
+ * What a Prisma P2002 `meta.target` may say when a contact write lands on an
+ * identity unique: the identity column, the SQL-only partial index over live
+ * rows (D-16), or the full index it replaced (a database the migration has not
+ * reached yet).
+ */
+const CONTACT_IDENTITY_UNIQUE: Record<'email' | 'phone', readonly string[]> = {
+  email: ['email_normalized', 'contacts_business_id_email_normalized_live_key', 'contacts_business_id_email_normalized_key'],
+  phone: ['phone_normalized', 'contacts_business_id_phone_normalized_live_key', 'contacts_business_id_phone_normalized_key'],
+};
+
 @Injectable()
 export class CrmService {
   private readonly logger = new Logger(CrmService.name);
@@ -424,13 +435,17 @@ export class CrmService {
   }
 
   /**
-   * Contact carries two tenant-scoped uniques, `(business_id, email_normalized)`
-   * and `(business_id, phone_normalized)`. A write that lands on one of them
-   * raises Prisma P2002, which left alone surfaces as an opaque 500. This turns
-   * it into a 409 that names the field and, when the actor may see it, the
-   * tenant's existing live holder, so a client can link to or merge with that
-   * contact. A violation of anything else, or any other error, is rethrown
-   * untouched.
+   * Contact carries two tenant-scoped uniques over live rows,
+   * `(business_id, email_normalized)` and `(business_id, phone_normalized)`,
+   * each `WHERE deleted_at IS NULL` (SQL-only partial indexes, D-16, migration
+   * 20261101000000_contact_partial_identity_uniques). A write that lands on one
+   * of them raises Prisma P2002, which left alone surfaces as an opaque 500.
+   * This turns it into a 409 that names the field and, when the actor may see
+   * it, the tenant's existing live holder, so a client can link to or merge
+   * with that contact. `meta.target` names the violated columns (the driver
+   * adapter reads them from the error detail) or, failing that, the index; both
+   * spellings are recognized. A violation of anything else, or any other error,
+   * is rethrown untouched.
    *
    * The holder is looked up after the failed transaction, through the
    * soft-delete-aware client and, when `actorUserId` is given, under the same
@@ -439,11 +454,12 @@ export class CrmService {
    * detail on the holder (a 'my book' STAFF, or a view-all STAFF against
    * another member's PRIVATE row) is not handed it here either. Whenever no
    * visible live holder exists, because the holder is outside the actor's
-   * visibility or because the only holder is soft-deleted (the index has no
-   * deleted_at term, so it stays occupied), the answer is still 409 with
-   * `existingContactId: null` and the same message as the visible case: the
-   * response never says which of those it is. Callers with no actor (internal
-   * jobs) are tenant-scoped only, as before.
+   * visibility or because it stopped being live between the failed write and
+   * this read, the answer is still 409 with `existingContactId: null` and the
+   * same message as the visible case: the response never says which of those
+   * it is. A soft-deleted contact no longer holds either value, so it never
+   * causes this 409. Callers with no actor (internal jobs) are tenant-scoped
+   * only, as before.
    */
   private async rejectContactIdentityTaken(
     err: unknown,
@@ -454,9 +470,9 @@ export class CrmService {
     const known = err as { code?: unknown; meta?: { target?: unknown } } | null;
     if (!known || typeof known !== 'object' || known.code !== 'P2002') throw err;
     const target = known.meta?.target;
-    const columns = Array.isArray(target) ? target.map(String) : [String(target ?? '')];
-    const field = columns.includes('email_normalized') ? 'email'
-      : columns.includes('phone_normalized') ? 'phone'
+    const names = Array.isArray(target) ? target.map(String) : [String(target ?? '')];
+    const field = names.some((n) => CONTACT_IDENTITY_UNIQUE.email.includes(n)) ? 'email'
+      : names.some((n) => CONTACT_IDENTITY_UNIQUE.phone.includes(n)) ? 'phone'
         : null;
     if (!field) throw err;
 

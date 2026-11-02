@@ -733,7 +733,10 @@ describe('V1-17 — a soft-deleted contact releases its email and phone: the ide
     const schema = fs.readFileSync(path.join(root, 'packages/db/prisma/schema.prisma'), 'utf8');
     const model = schema.match(/\nmodel Contact \{[\s\S]*?\n\}/)?.[0] ?? '';
     expect(model).toContain('@@map("contacts")');
-    expect(model).not.toMatch(/@@unique\(\[businessId, (emailNormalized|phoneNormalized)\]/);
+    const declarations = model.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n');
+    expect(declarations).toContain('@@index([businessId])');
+    expect(declarations).not.toMatch(/@@unique\(\[businessId, (emailNormalized|phoneNormalized)\]/);
+    expect(declarations).not.toMatch(/(emailNormalized|phoneNormalized)\s+String\?[^\n]*@unique/);
     for (const text of [EMAIL_INDEX, PHONE_INDEX, MIGRATION, 'migrate dev', '--create-only']) {
       expect(model).toContain(text);
     }
