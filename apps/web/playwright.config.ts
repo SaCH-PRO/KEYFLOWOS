@@ -22,6 +22,49 @@ const API_URL = process.env.E2E_API_URL ?? "http://localhost:3001";
  */
 const CHROMIUM_EXECUTABLE = process.env.PW_CHROMIUM_EXECUTABLE?.trim() || undefined;
 
+/**
+ * The production web server (R0-15c). next.config.ts builds with
+ * `output: "standalone"`, and `next start` does not serve that output (Next
+ * warns: "next start" does not work with "output: standalone" configuration;
+ * use "node .next/standalone/server.js"). The standalone server ships without
+ * the browser assets: Next leaves `.next/static` and `public/` for the deployer
+ * to copy next to it, and without them no page gets its CSS or client JS. In
+ * this monorepo (turbopack.root is the repo root) the server is at
+ * .next/standalone/apps/web/server.js.
+ *
+ * E2E_WEB_COMMAND=standalone serves it, and so does an E2E_WEB_COMMAND that
+ * runs `next start` (what ci-cd.yml and e2e-live.yml pass), on the host and
+ * port that command names (else 0.0.0.0 and E2E_PORT). Any other
+ * E2E_WEB_COMMAND runs as given; unset runs the dev server. The command copies
+ * the assets and starts the server; it does not build (`pnpm run build` first).
+ */
+const STANDALONE_DIR = ".next/standalone/apps/web";
+const COPY_STANDALONE_ASSETS = [
+  `const fs = require("node:fs"), dir = "${STANDALONE_DIR}";`,
+  `if (!fs.existsSync(dir + "/server.js")) {`,
+  ` console.error("[e2e] " + dir + "/server.js is missing: run pnpm run build first (next.config.ts output: standalone)");`,
+  ` process.exit(1);`,
+  `}`,
+  `fs.cpSync(".next/static", dir + "/.next/static", { recursive: true });`,
+  `if (fs.existsSync("public")) fs.cpSync("public", dir + "/public", { recursive: true });`,
+].join(" ");
+
+function webServerCommand(): { command: string; env: Record<string, string> } {
+  const given = process.env.E2E_WEB_COMMAND?.trim();
+  if (!given) return { command: `next dev -H 0.0.0.0 -p ${PORT}`, env: {} };
+  if (given !== "standalone" && !/(^|\s)next\s+start(\s|$)/.test(given)) return { command: given, env: {} };
+  const host = given.match(/(?:^|\s)(?:-H|--hostname)(?:\s+|=)(\S+)/)?.[1] ?? "0.0.0.0";
+  const port = given.match(/(?:^|\s)(?:-p|--port)(?:\s+|=)(\d+)/)?.[1] ?? String(PORT);
+  return {
+    command: `node -e '${COPY_STANDALONE_ASSETS}' && node ${STANDALONE_DIR}/server.js`,
+    // server.js reads HOSTNAME and PORT; HOSTNAME is set explicitly because a
+    // shell or container often exports the machine's own name under it.
+    env: { HOSTNAME: host, PORT: port },
+  };
+}
+
+const WEB_SERVER = webServerCommand();
+
 export default defineConfig({
   testDir: "./e2e",
   testMatch: /.*\.spec\.ts$/,
@@ -63,21 +106,25 @@ export default defineConfig({
   webServer: process.env.E2E_NO_SERVER
     ? undefined
     : {
-        // E2E_WEB_COMMAND serves a production build instead (e2e-live.yml runs
-        // `next start` on a build made with the same NEXT_PUBLIC_* values).
-        command: process.env.E2E_WEB_COMMAND ?? `next dev -H 0.0.0.0 -p ${PORT}`,
+        // E2E_WEB_COMMAND serves a production build instead: the standalone
+        // server (webServerCommand above) on a build made with the same
+        // NEXT_PUBLIC_* values (they are inlined at build time).
+        command: WEB_SERVER.command,
         url: BASE_URL,
         reuseExistingServer: true,
         timeout: LIVE ? 300_000 : 120_000,
-        env: LIVE
-          ? {
-              NEXT_PUBLIC_API_BASE_URL: API_URL,
-              NEXT_PUBLIC_SUPABASE_URL: "",
-              NEXT_PUBLIC_SUPABASE_ANON_KEY: "",
-              NEXT_PUBLIC_SITE_URL: "",
-            }
-          : {
-              NEXT_PUBLIC_API_BASE_URL: "http://api.test.local",
-            },
+        env: {
+          ...(LIVE
+            ? {
+                NEXT_PUBLIC_API_BASE_URL: API_URL,
+                NEXT_PUBLIC_SUPABASE_URL: "",
+                NEXT_PUBLIC_SUPABASE_ANON_KEY: "",
+                NEXT_PUBLIC_SITE_URL: "",
+              }
+            : {
+                NEXT_PUBLIC_API_BASE_URL: "http://api.test.local",
+              }),
+          ...WEB_SERVER.env,
+        },
       },
 });

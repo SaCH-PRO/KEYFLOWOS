@@ -111,6 +111,8 @@ interface ContactFormProps {
   initialValues?: Partial<ContactFormData>;
   initialCustomFieldValues?: Record<string, unknown>;
   checkDuplicates?: (data: ContactFormData) => Promise<DuplicateContact[]>;
+  /** The business the contact belongs to; without it, the member's selected business (never biz_demo). */
+  businessId?: string | null;
 }
 
 function SectionHeader({ label, icon: Icon, open, onToggle }: { label: string; icon: React.ElementType; open: boolean; onToggle: () => void }) {
@@ -132,7 +134,7 @@ function FieldError({ error }: { error?: string }) {
   return <p className="text-xs text-destructive mt-1">{error}</p>;
 }
 
-function ContactFormInner({ onSubmit, onCancel, loading, initialValues, initialCustomFieldValues, checkDuplicates }: ContactFormProps) {
+function ContactFormInner({ onSubmit, onCancel, loading, initialValues, initialCustomFieldValues, checkDuplicates, businessId }: ContactFormProps) {
   const isEditing = !!initialValues;
   const isMobile = useIsMobile();
   const modalRef = useRef<HTMLDivElement>(null);
@@ -747,6 +749,7 @@ function ContactFormInner({ onSubmit, onCancel, loading, initialValues, initialC
           <SectionHeader label="Structured Custom Fields" icon={Zap} open={sections.typedCustomFields} onToggle={() => toggle("typedCustomFields")} />
           {sections.typedCustomFields && (
             <ContactCustomFields
+              businessId={businessId}
               onChange={setCustomFieldValues}
             />
           )}

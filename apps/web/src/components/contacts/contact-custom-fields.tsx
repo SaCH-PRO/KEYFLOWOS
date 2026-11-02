@@ -7,6 +7,7 @@ import {
   fetchCustomFieldDefinitions,
   type CustomFieldDefinition,
 } from "@/lib/client";
+import { getStoredBusinessId } from "@/lib/workspace";
 
 const TYPE_ICONS: Record<string, React.ElementType> = {
   TEXT: Type,
@@ -27,34 +28,56 @@ export interface TypedFieldValue {
 }
 
 interface ContactCustomFieldsProps {
-  businessId?: string;
+  /** The business the screen works in; without it, the member's selected business. */
+  businessId?: string | null;
   values?: Record<string, unknown>;
   onChange?: (values: Record<string, unknown>) => void;
   readOnly?: boolean;
 }
 
-export function useCustomFieldDefinitions(businessId?: string) {
-  const [definitions, setDefinitions] = useState<CustomFieldDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
+/**
+ * The default for `values`. A `values = {}` parameter default is a new object
+ * on every render, and the effect below that copies `values` into local state
+ * depends on it, so each render scheduled the next one ("Maximum update depth
+ * exceeded"): the contact form mounts this component without values.
+ */
+const NO_VALUES: Record<string, unknown> = {};
+
+/**
+ * The custom-field definitions of the business the screen works in: the
+ * businessId it is handed, else the member's selected business (kf_business_id,
+ * as the rest of the contact screens read it). Never the demo tenant:
+ * fetchCustomFieldDefinitions defaults to DEFAULT_BUSINESS_ID ("biz_demo"),
+ * which BusinessGuard refuses for a real member (M09), so with no business there
+ * is no request and no definitions.
+ */
+export function useCustomFieldDefinitions(businessId?: string | null) {
+  // What was read, and for which `businessId` argument: while a new business is
+  // being read the hook reports loading and never another business's fields.
+  const [read, setRead] = useState<{ for: string | null; definitions: CustomFieldDefinition[] } | null>(null);
+  const key = businessId || null;
 
   useEffect(() => {
     let cancelled = false;
-    fetchCustomFieldDefinitions(businessId)
-      .then((res) => {
-        if (!cancelled && res.data) {
-          setDefinitions(res.data.filter((d) => !d.archivedAt).sort((a, b) => a.order - b.order));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+    const tenant = key ?? getStoredBusinessId();
+    const load: Promise<CustomFieldDefinition[]> = tenant
+      ? fetchCustomFieldDefinitions(tenant).then((res) =>
+          (res.data ?? []).filter((d) => !d.archivedAt).sort((a, b) => a.order - b.order),
+        )
+      : Promise.resolve([]);
+    load
+      .catch(() => [] as CustomFieldDefinition[])
+      .then((definitions) => {
+        if (!cancelled) setRead({ for: key, definitions });
       });
     return () => { cancelled = true; };
-  }, [businessId]);
+  }, [key]);
 
-  return { definitions, loading };
+  const loading = read === null || read.for !== key;
+  return { definitions: loading ? [] : read.definitions, loading };
 }
 
-export function ContactCustomFields({ businessId, values = {}, onChange, readOnly = false }: ContactCustomFieldsProps) {
+export function ContactCustomFields({ businessId, values = NO_VALUES, onChange, readOnly = false }: ContactCustomFieldsProps) {
   const { definitions, loading } = useCustomFieldDefinitions(businessId);
   const [localValues, setLocalValues] = useState<Record<string, unknown>>(values);
 
