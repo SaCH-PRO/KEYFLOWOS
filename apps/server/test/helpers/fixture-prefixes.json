@@ -368,6 +368,11 @@
       "packet": "V1-53-QUOTE-CREATE-ERRORS"
     },
     {
+      "prefix": "v53b_",
+      "owner": "apps/server/test/quote-chain-finish.integration.test.ts",
+      "packet": "V1-53-QUOTE-CHAIN-finish"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

@@ -30,13 +30,11 @@
  *   public accept by token, then convert                                   -> the positive control still passes
  *   LEDGER: no quote transition writes a FinancialTransaction or a LedgerEntry
  *
- * Not covered here (it.todo, outside the write set): a body `status` that
- * disagrees with the path. The handler (commerce.controller.ts, not in the
- * V1-50 write set) reads only the path segment and never forwards the body, so
- * the service cannot see the disagreement; quote-workflow.ts exports
- * assertQuoteStatusAgreement for the controller to call. And review
- * SEC-V50-4: the ai-execute route (commerce-ai.service.ts and its controller,
- * outside the write set) still writes Quote.status around the table.
+ * V1-QUOTE-CHAIN-finish (the two V1-50 it.todo cases, now real):
+ *   QSM-15  a body `status` that disagrees with the path status          -> 400 quote_status_mismatch; row unchanged
+ *   QSM-22  POST .../ai-execute send_quote / convert_quote (SEC-V50-4)   -> revenue:write (403 to revenue:none and
+ *           revenue:read, nothing written); for a member who has it, the same transition table as the status route
+ *           (409 on a REJECTED or converted quote, nothing written; a DRAFT sent gets its one view token and quote.sent)
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PublicRateLimitGuard (on this suite's Redis index),
@@ -74,6 +72,8 @@ const ID = {
   contactA: `${P}contactA`,
   contactB: `${P}contactB`,
   unknown: `${P}qNoSuchQuote`,
+  staffNoneA: `${P}staffNoneA`, // STAFF of bizA: revenue none
+  staffReadA: `${P}staffReadA`, // STAFF of bizA: revenue read
 };
 
 /** Quote ids, one per case. */
@@ -110,6 +110,11 @@ const Q = {
   auditRouteSent: `${P}qAuditRouteSent`,
   sentNoToken: `${P}qSentNoToken`,
   sentNoTokenRace: `${P}qSentNoTokenRace`,
+  mismatch: `${P}qMismatch`,
+  aiRejected: `${P}qAiRejected`,
+  aiConverted: `${P}qAiConverted`,
+  aiDraft: `${P}qAiDraft`,
+  aiSent: `${P}qAiSent`,
 };
 
 const SENT_AT = new Date('2026-10-01T10:00:00.000Z');
@@ -311,6 +316,10 @@ beforeAll(async () => {
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+  // QSM-22: the ai-execute route (its controller and service are real; the AI model is never called).
+  const { CommerceAiController } = await import('../src/modules/commerce/commerce-ai.controller');
+  const { CommerceAiService } = await import('../src/modules/commerce/commerce-ai.service');
+  const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
 
   // This suite's public rate-limit windows live under its own prefix (R0-00).
   previousNamespace = process.env.RATE_LIMIT_KEY_NAMESPACE;
@@ -318,8 +327,10 @@ beforeAll(async () => {
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController],
+    controllers: [CommerceController, CommerceAiController],
     providers: [
+      CommerceAiService,
+      { provide: AiUsageService, useValue: {} },
       PrismaService,
       AuthGuard,
       BusinessGuard,
@@ -380,6 +391,12 @@ beforeAll(async () => {
   await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
   await db.contact.create({ data: { id: ID.contactA, businessId: ID.bizA, firstName: 'V50a', lastName: 'CustomerA', email: `${P}contactA@test.local` } });
   await db.contact.create({ data: { id: ID.contactB, businessId: ID.bizB, firstName: 'V50a', lastName: 'CustomerB', email: `${P}contactB@test.local` } });
+  for (const [id, revenue] of [[ID.staffNoneA, 'none'], [ID.staffReadA, 'read']] as const) {
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${P}m_${id.slice(P.length)}`, userId: id, businessId: ID.bizA, role: 'STAFF', permissionScopes: { revenue } },
+    });
+  }
 
   // ---- one quote per case ---------------------------------------------------
   await seedQuote(Q.acceptedToDraft, 'ACCEPTED');
@@ -416,6 +433,11 @@ beforeAll(async () => {
   // A SENT quote written without a view token, as the ai-execute send_quote action writes one (review CR-V150-2).
   await seedQuote(Q.sentNoToken, 'SENT', { viewToken: null });
   await seedQuote(Q.sentNoTokenRace, 'SENT', { viewToken: null });
+  await seedQuote(Q.mismatch, 'DRAFT');
+  await seedQuote(Q.aiRejected, 'REJECTED');
+  await seedQuote(Q.aiConverted, 'ACCEPTED', { converted: true });
+  await seedQuote(Q.aiDraft, 'DRAFT');
+  await seedQuote(Q.aiSent, 'SENT');
 
   ledgerAtStart = { a: await ledgerCounts(ID.bizA), b: await ledgerCounts(ID.bizB) };
 }, 180_000);
@@ -435,7 +457,9 @@ beforeEach(() => {
 
 describe('fixture sanity (real rows)', () => {
   it('two tenants with an owner each and a system chart of accounts; every quote seeded in its status, the converted ones linked to an invoice', async () => {
-    expect(await db.membership.count({ where: { businessId: ID.bizA } })).toBe(1);
+    // The owner, and the revenue:none and revenue:read STAFF members QSM-22 calls ai-execute as.
+    expect(await db.membership.count({ where: { businessId: ID.bizA } })).toBe(3);
+    expect(await db.membership.count({ where: { businessId: ID.bizA, role: 'OWNER' } })).toBe(1);
     expect(await db.chartOfAccount.count({ where: { businessId: ID.bizA, isSystem: true } })).toBeGreaterThan(0);
     expect((await quoteRow(Q.acceptedToDraft)).status).toBe('ACCEPTED');
     expect((await quoteRow(Q.rejectedToAccepted)).status).toBe('REJECTED');
@@ -775,10 +799,67 @@ describe('the view-token repair of a SENT quote without one (V1-50 review CR-V15
   });
 });
 
-describe('writers outside the V1-50 write set (review SEC-V50-4)', () => {
-  it.todo(
-    'QSM-22: POST /commerce/businesses/:businessId/ai-execute send_quote and convert_quote go through the transition table and need revenue:write — BLOCKED outside the write set: commerce-ai.controller.ts runs AuthGuard, BusinessGuard and FeatureFlagGuard only (no ModuleScopeGuard), and commerce-ai.service.ts send_quote/convert_quote write Quote.status directly, so a revenue:read member can re-open a REJECTED quote to SENT or mark a REJECTED or converted quote ACCEPTED with no event; a follow-up packet must add revenue:write and route both actions through updateQuoteStatus',
-  );
+describe('ai-execute send_quote / convert_quote (review SEC-V50-4, V1-QUOTE-CHAIN-finish)', () => {
+  function aiExecute(actor: string, action: string, params: Record<string, unknown>) {
+    return agent().post(`/commerce/businesses/${ID.bizA}/ai-execute`).set(HEADER, actor).send({ action, params });
+  }
+
+  async function quoteNumberOf(id: string): Promise<string> {
+    const [row] = await db.$queryRawUnsafe(`SELECT quote_number AS n FROM quotes WHERE id = $1`, id);
+    return row.n as string;
+  }
+
+  it('QSM-22a: a revenue:none or revenue:read member is refused both actions (403) before anything is read or written: the REJECTED quote stays REJECTED, the converted one stays ACCEPTED and linked, nothing is emitted or logged', async () => {
+    const rejectedNumber = await quoteNumberOf(Q.aiRejected);
+    const convertedNumber = await quoteNumberOf(Q.aiConverted);
+    const before = await tenantQuotes(ID.bizA);
+    for (const actor of [ID.staffNoneA, ID.staffReadA]) {
+      for (const [action, quoteNumber] of [['convert_quote', rejectedNumber], ['send_quote', convertedNumber]]) {
+        const res = await aiExecute(actor, action, { quoteNumber });
+        expect(res.status, `${actor} ${action}: ${JSON.stringify(res.body)}`).toBe(403);
+      }
+    }
+    expect(await tenantQuotes(ID.bizA)).toBe(before);
+    expect(recordedEvents).toHaveLength(0);
+    expect(crmCalls).toHaveLength(0);
+  });
+
+  it('QSM-22b: for the owner the actions go through the transition table: convert_quote on a REJECTED quote answers 409 quote_transition_not_allowed and send_quote on a converted quote 409 quote_converted; neither row moves and nothing is emitted', async () => {
+    const before = await tenantQuotes(ID.bizA);
+    const accept = await aiExecute(ID.ownerA, 'convert_quote', { quoteNumber: await quoteNumberOf(Q.aiRejected) });
+    expect(accept.status, JSON.stringify(accept.body)).toBe(409);
+    expect(accept.body.code).toBe('quote_transition_not_allowed');
+    const reopen = await aiExecute(ID.ownerA, 'send_quote', { quoteNumber: await quoteNumberOf(Q.aiConverted) });
+    expect(reopen.status, JSON.stringify(reopen.body)).toBe(409);
+    expect(reopen.body.code).toBe('quote_converted');
+    expect(await tenantQuotes(ID.bizA)).toBe(before);
+    expect((await quoteRow(Q.aiConverted)).invoiceId).toBe(`${Q.aiConverted}_inv`);
+    expect(recordedEvents).toHaveLength(0);
+  });
+
+  it('QSM-22c: send_quote on a DRAFT moves it as the status route does (SENT, its one view token minted, quote.sent, a timeline entry naming the owner); convert_quote on a SENT quote records ACCEPTED with quote.accepted', async () => {
+    const sent = await aiExecute(ID.ownerA, 'send_quote', { quoteNumber: await quoteNumberOf(Q.aiDraft) });
+    expect(sent.status, JSON.stringify(sent.body)).toBe(201);
+    expect(sent.body).toMatchObject({ success: true, quoteId: Q.aiDraft });
+    const row = await quoteRow(Q.aiDraft);
+    expect(row.status).toBe('SENT');
+    expect(row.viewToken).toMatch(/^[A-Za-z0-9_-]{32}$/);
+    expect(row.sentAt).not.toBeNull();
+
+    const accepted = await aiExecute(ID.ownerA, 'convert_quote', { quoteNumber: await quoteNumberOf(Q.aiSent) });
+    expect(accepted.status, JSON.stringify(accepted.body)).toBe(201);
+    expect(accepted.body).toMatchObject({ success: true, quoteId: Q.aiSent });
+    expect((await quoteRow(Q.aiSent)).status).toBe('ACCEPTED');
+
+    expect(recordedEvents.map((e) => [e.name, e.payload.quote.id])).toEqual([
+      ['quote.sent', Q.aiDraft],
+      ['quote.accepted', Q.aiSent],
+    ]);
+    expect(crmCalls.map((c) => [c.type, c.actorId])).toEqual([
+      ['quote.sent', ID.ownerA],
+      ['quote.accepted', ID.ownerA],
+    ]);
+  });
 });
 
 describe('positive control: send, public accept by token, convert (V1-50)', () => {
@@ -809,10 +890,21 @@ describe('positive control: send, public accept by token, convert (V1-50)', () =
   });
 });
 
-describe('path and body disagreement (V1-50)', () => {
-  it.todo(
-    'QSM-15: a body `status` that disagrees with the path status answers 400 quote_status_mismatch — BLOCKED outside the write set: commerce.controller.ts (not in the V1-50 write set) reads only @Param(status) and never forwards the body; quote-workflow.ts exports assertQuoteStatusAgreement for the handler to call',
-  );
+describe('path and body disagreement (V1-50, V1-QUOTE-CHAIN-finish)', () => {
+  it('QSM-15: a body `status` that disagrees with the path status answers 400 quote_status_mismatch and the DRAFT stays byte-identical; a body status that agrees (any case) moves it', async () => {
+    const before = await quoteRow(Q.mismatch);
+    for (const status of ['accepted', 'REJECTED', 'bogus', 7]) {
+      const res = await agent().patch(`/commerce/quotes/${Q.mismatch}/status/sent`).set(HEADER, ID.ownerA).send({ businessId: ID.bizA, status });
+      expect(res.status, `${status}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(res.body.code).toBe('quote_status_mismatch');
+    }
+    expect(await quoteRow(Q.mismatch)).toEqual(before);
+    expect(recordedEvents).toHaveLength(0);
+
+    const agreed = await agent().patch(`/commerce/quotes/${Q.mismatch}/status/sent`).set(HEADER, ID.ownerA).send({ businessId: ID.bizA, status: 'SENT' });
+    expect(agreed.status, JSON.stringify(agreed.body)).toBe(200);
+    expect((await quoteRow(Q.mismatch)).status).toBe('SENT');
+  });
 });
 
 describe('LEDGER (V1-50)', () => {

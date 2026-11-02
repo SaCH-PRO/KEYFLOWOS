@@ -41,8 +41,8 @@
  *              quote_converted
  *   RV-CENTS   CR51-2: the total is rounded once (tax to the cent, the discount takes the
  *              remainder), so a discounted sub-cent quote converts to its accepted total to the cent
- *   todo       SEC-V51-3: the convert response's whole Contact row (the projection belongs in
- *              commerce.controller.ts, outside this packet's write set)
+ *   SEC-V51-3  (V1-QUOTE-CHAIN-finish) the convert response carries the projected contact
+ *              (toInvoiceWriteResponse), never the whole Contact row
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PublicRateLimitGuard (on this suite's Redis index),
@@ -771,10 +771,22 @@ describe('V1-51 review repairs: a discounted sub-cent quote converts to its acce
     }
   });
 
-  it.todo(
-    'SEC-V51-3 (follow-up, outside the V1-51 write set): POST .../quotes/:id/convert returns the invoice with the whole Contact row ' +
-      '(phone, notesInternal, visibility, ownerId of a PRIVATE contact) to a revenue:write member; the body must be projected through ' +
-      'toInvoiceWriteResponse in commerce.controller.ts like the other invoice write routes (R0-CMF1 SEC-CMF1-2). Predates V1-51; ' +
-      'commerce.controller.ts is in the V1-52 / V1-53 write sets.',
-  );
+  it('SEC-V51-3 (V1-QUOTE-CHAIN-finish): POST .../quotes/:id/convert answers with the invoice\'s contact projected to { id, businessId, firstName, lastName, email } (toInvoiceWriteResponse, as the other invoice write routes); nothing of a PRIVATE contact\'s internal note, phone, owner or visibility', async () => {
+    const contactId = `${P}contactPrivateAcc`;
+    const note = `${P}SECRET_NOTE`;
+    const phone = '+18685550151';
+    await db.contact.create({
+      data: { id: contactId, businessId: ID.bizAcc, firstName: 'V51aPrivate', lastName: 'Customer', email: `${P}private@test.local`, phone, visibility: 'PRIVATE', ownerId: ID.ownerAcc, notesInternal: note },
+    });
+    const { quote } = await acceptedQuote(ID.ownerAcc, ID.bizAcc, contactId, {});
+    const res = await convert(ID.ownerAcc, ID.bizAcc, quote.id);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(Object.keys(res.body.contact).sort()).toEqual(['businessId', 'email', 'firstName', 'id', 'lastName']);
+    expect(res.body.contact).toMatchObject({ id: contactId, businessId: ID.bizAcc, firstName: 'V51aPrivate' });
+    const raw = JSON.stringify(res.body);
+    expect(raw).not.toContain(note);
+    expect(raw).not.toContain(phone);
+    expect(raw).not.toContain('PRIVATE');
+    expect(res.body.items).toHaveLength(1);
+  });
 });

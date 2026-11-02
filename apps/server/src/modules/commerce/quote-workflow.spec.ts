@@ -42,6 +42,7 @@ import {
   type QuoteStatus,
   type QuoteStatusTarget,
 } from './quote-workflow';
+import * as workflow from './quote-workflow';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 
 /** Every value of the QuoteStatus enum in packages/db/prisma/schema.prisma. */
@@ -291,5 +292,61 @@ describe('the view-token repair of a SENT quote without one (V1-50 review CR-V15
     for (const status of ALL_STATUSES.filter((s) => s !== 'SENT')) {
       expect(needsViewTokenRepair({ status, viewToken: null }), status).toBe(false);
     }
+  });
+});
+
+describe('the terms version a public accept carries (V1-QUOTE-CHAIN-finish, review SEC-5)', () => {
+  // Read through the module namespace so a missing export fails these cases, not the file.
+  const termsVersion = (quote: Record<string, unknown>): string =>
+    (workflow as unknown as { quoteTermsVersion: (q: Record<string, unknown>) => string }).quoteTermsVersion(quote);
+  const base = {
+    subtotal: 100,
+    taxRate: 12.5,
+    taxAmount: 12.5,
+    discountType: null,
+    discountValue: 0,
+    discountAmount: 0,
+    total: 112.5,
+    currency: 'TTD',
+    notes: 'Net 30',
+    expiryDate: new Date('2026-12-01T00:00:00.000Z'),
+    updatedAt: new Date('2026-11-01T00:00:00.000Z'),
+    items: [
+      { id: 'i1', description: 'Labour', quantity: 1, unitPrice: 60, total: 60, productId: null },
+      { id: 'i2', description: 'Parts', quantity: 2, unitPrice: 20, total: 40, productId: 'p1' },
+    ],
+  };
+
+  it('QW-18: the version is a stable url-safe string; the line order, line ids, expiry and updatedAt do not change it', () => {
+    const v = termsVersion(base);
+    expect(v).toMatch(/^[A-Za-z0-9_-]{20,}$/);
+    expect(termsVersion({ ...base })).toBe(v);
+    expect(termsVersion({ ...base, items: [...base.items].reverse() })).toBe(v);
+    expect(termsVersion({ ...base, items: base.items.map((i) => ({ ...i, id: `x_${i.id}` })) })).toBe(v);
+    expect(termsVersion({ ...base, expiryDate: null, updatedAt: new Date() })).toBe(v);
+  });
+
+  it('QW-19: any change to what the customer agrees to changes it: a price, a quantity, a line text, a product, a line added or removed, tax, discount, total, currency or notes', () => {
+    const v = termsVersion(base);
+    const variants: Array<[string, Record<string, unknown>]> = [
+      ['unit price', { ...base, items: [{ ...base.items[0], unitPrice: 61 }, base.items[1]] }],
+      ['quantity', { ...base, items: [base.items[0], { ...base.items[1], quantity: 3 }] }],
+      ['line text', { ...base, items: [{ ...base.items[0], description: 'Labour (rush)' }, base.items[1]] }],
+      ['product', { ...base, items: [base.items[0], { ...base.items[1], productId: 'p2' }] }],
+      ['line removed', { ...base, items: [base.items[0]] }],
+      ['line added', { ...base, items: [...base.items, { id: 'i3', description: 'Extra', quantity: 1, unitPrice: 0, total: 0, productId: null }] }],
+      ['tax rate', { ...base, taxRate: 15 }],
+      ['discount', { ...base, discountType: 'FIXED', discountValue: 5, discountAmount: 5 }],
+      ['total', { ...base, total: 1350 }],
+      ['currency', { ...base, currency: 'USD' }],
+      ['notes', { ...base, notes: 'Net 60' }],
+    ];
+    for (const [label, variant] of variants) expect(termsVersion(variant), label).not.toBe(v);
+  });
+
+  it('QW-20: a row without lines or optional amounts (a legacy row, a mocked read) still has one version, and null and undefined read alike', () => {
+    const bare = { total: 100, currency: 'TTD' };
+    expect(termsVersion(bare)).toMatch(/^[A-Za-z0-9_-]{20,}$/);
+    expect(termsVersion({ ...bare, items: [], notes: null, taxRate: undefined })).toBe(termsVersion(bare));
   });
 });
