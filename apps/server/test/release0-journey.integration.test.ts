@@ -8,9 +8,12 @@
  *   3. create an invoice with line items, issue it (DRAFT -> SENT), reload
  *   4. record an offline payment, check the Payment row / invoice balance /
  *      duplicate-submit idempotency / ledger rows, settle to PAID
- *   5. list contacts, invoices and payments again (simulated refresh)
+ *   5. list contacts, invoices and payments again (simulated refresh), and read
+ *      the cockpit snapshot: its Release 0 counts agree with those lists and
+ *      the read writes no ledger row (V1-47-COCKPIT-TRUTH)
  *   6. a second tenant's owner is denied on every step-2..5 resource, by
- *      business-prefixed route and by bare id (403/404, never 200, never 500)
+ *      business-prefixed route and by bare id (403/404, never 200, never 500);
+ *      its own cockpit counts none of the first tenant's rows
  *   7. no step needed an external provider (AI_DISABLED=1, no provider keys)
  *
  * It began as a CHARACTERIZATION: every step asserts the product's intended

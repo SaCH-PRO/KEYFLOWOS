@@ -12,7 +12,12 @@ import { GenomeModuleReadinessService } from '../business-genome/key-genome/geno
 import { GenomeSignalService } from '../business-genome/key-genome/genome-signal.service';
 import { GenomeRecommendationService } from '../business-genome/key-genome/genome-recommendation.service';
 import { CommandCenterKeyGenomeBridgeService } from './command-center-key-genome-bridge.service';
-import type { BusinessAsset } from '@prisma/client';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { getTenantContext } from '../../core/tenant/tenant-context';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
+import { buildContactWhere } from '../crm/contact-filters.helper';
+import type { BusinessAsset, InvoiceStatus, Prisma } from '@prisma/client';
 import type { KeyGenomeScore, ModuleReadinessData } from '../business-genome/key-genome/key-genome.types';
 import type { KeyExecutiveMode, KeyExecutiveModeBrief } from '../intelligence/key-executive-mode.types';
 import type { BusinessExecutiveBrief } from '../intelligence/business-intelligence.types';
@@ -30,8 +35,38 @@ import type {
   CommandCenterKeyGenome,
   CommandCenterModuleReadiness,
   CommandCenterPriority,
+  CommandCenterResult,
+  CommandCenterResults,
+  CommandCenterSource,
+  CommandCenterSourceStatus,
   BusinessPulse,
 } from './business-command-center.types';
+
+/** Every source one snapshot read, keyed by label (V1-47). One map per snapshot call. */
+type SourceLog = Record<string, CommandCenterSource>;
+
+/**
+ * Release 0 results (V1-47). Each count is the list its tile links to, as that
+ * list's route shows it: contacts as GET /crm/businesses/:b/contacts with no
+ * filter (not deleted, not archived, the caller's M7 visibility), invoices the
+ * customer still owes on (the payable statuses CommerceService uses), and every
+ * Payment row as GET /commerce/businesses/:b/payments lists them.
+ */
+const RESULT_META: Record<keyof CommandCenterResults, { label: string; href: string }> = {
+  contacts: { label: 'Contacts', href: '/app/crm/contacts' },
+  openInvoices: { label: 'Open invoices', href: '/app/commerce/invoices' },
+  payments: { label: 'Payments', href: '/app/payments' },
+};
+const OPEN_INVOICE_STATUSES: InvoiceStatus[] = ['SENT', 'OVERDUE', 'PARTIALLY_PAID'];
+
+/** What the caller may read of the Release 0 lists, by the same rules their routes enforce. */
+interface ResultsAccess {
+  crmRead: boolean;
+  revenueRead: boolean;
+  /** The contacts list's M7 visibility clause for this caller; null when every row is visible. */
+  contactVisibility: Prisma.ContactWhereInput | null;
+}
+const NO_RESULTS_ACCESS: ResultsAccess = { crmRead: false, revenueRead: false, contactVisibility: null };
 
 const MODES: KeyExecutiveMode[] = [
   'STRATEGIST',
@@ -103,27 +138,104 @@ export class BusinessCommandCenterService {
     private readonly genomeRecommendation: GenomeRecommendationService,
     @Inject(CommandCenterKeyGenomeBridgeService)
     private readonly keyGenomeBridge: CommandCenterKeyGenomeBridgeService,
+    @Inject(PrismaService)
+    private readonly prisma: PrismaService,
   ) {}
 
-  private async safeResolve<T>(label: string, businessId: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  private recordSource(sources: SourceLog, label: string, status: CommandCenterSourceStatus): void {
+    sources[label] = { label, status, fetchedAt: new Date().toISOString() };
+  }
+
+  /**
+   * A source that throws still yields its fallback, so the snapshot is always
+   * returned, but it is recorded FAILED (V1-47, CF-19): the fallback is a
+   * stand-in, not an answer.
+   */
+  private async safeResolve<T>(sources: SourceLog, label: string, businessId: string, fn: () => Promise<T>, fallback: T): Promise<T> {
     try {
-      return await fn();
+      const value = await fn();
+      this.recordSource(sources, label, 'OK');
+      return value;
     } catch (err: unknown) {
       this.logger.warn(`snapshot ${label} failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
+      this.recordSource(sources, label, 'FAILED');
       return fallback;
     }
   }
 
-  private safeResolveSync<T>(label: string, businessId: string, fn: () => T, fallback: T): T {
+  private safeResolveSync<T>(sources: SourceLog, label: string, businessId: string, fn: () => T, fallback: T): T {
     try {
-      return fn();
+      const value = fn();
+      this.recordSource(sources, label, 'OK');
+      return value;
     } catch (err: unknown) {
       this.logger.warn(`snapshot ${label} failed for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
+      this.recordSource(sources, label, 'FAILED');
       return fallback;
     }
+  }
+
+  /**
+   * The caller is the member the TenantInterceptor bound to this request. With
+   * no caller for this business (an internal call, or a context for another
+   * tenant) nothing is counted: RESTRICTED, never a guess. The module-scope
+   * rule is ModuleScopeGuard's (an explicit scope map, else the role default);
+   * the contact visibility clause is the contacts list's (M7).
+   */
+  private async resolveResultsAccess(businessId: string): Promise<ResultsAccess> {
+    const ctx = getTenantContext();
+    if (!ctx?.userId || ctx.businessId !== businessId) return NO_RESULTS_ACCESS;
+    const crm = await resolveCrmAccess(this.prisma, businessId, ctx.userId);
+    if (crm.isSuperAdmin) return { crmRead: true, revenueRead: true, contactVisibility: null };
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: ctx.userId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) return NO_RESULTS_ACCESS;
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const canRead = (module: string) => rankOf(scopes[module] || 'none') >= LEVEL_RANK.read;
+    return {
+      crmRead: canRead('crm'),
+      revenueRead: canRead('revenue'),
+      contactVisibility: visibilityClause(crm, ctx.userId) as Prisma.ContactWhereInput | null,
+    };
+  }
+
+  /** Release 0 record counts (V1-47): a read-only projection over the tenant's own rows. */
+  private async buildResults(businessId: string, sources: SourceLog): Promise<CommandCenterResults> {
+    const access = await this.safeResolve<ResultsAccess | null>(
+      sources, 'callerAccess', businessId, () => this.resolveResultsAccess(businessId), null,
+    );
+    const count = async (
+      key: keyof CommandCenterResults,
+      allowed: (a: ResultsAccess) => boolean,
+      read: (a: ResultsAccess) => Promise<number>,
+    ): Promise<CommandCenterResult> => {
+      const meta = RESULT_META[key];
+      if (access === null) return { ...meta, count: null, status: 'FAILED' };
+      if (!allowed(access)) return { ...meta, count: null, status: 'RESTRICTED' };
+      const n = await this.safeResolve<number | null>(sources, key, businessId, () => read(access), null);
+      return n === null ? { ...meta, count: null, status: 'FAILED' } : { ...meta, count: n, status: 'OK' };
+    };
+    const [contacts, openInvoices, payments] = await Promise.all([
+      count('contacts', (a) => a.crmRead, (a) => {
+        const where: Prisma.ContactWhereInput = buildContactWhere(businessId, null);
+        if (a.contactVisibility) where.AND = [a.contactVisibility];
+        return this.prisma.client.contact.count({ where });
+      }),
+      count('openInvoices', (a) => a.revenueRead, () =>
+        this.prisma.client.invoice.count({ where: { businessId, deletedAt: null, status: { in: OPEN_INVOICE_STATUSES } } }),
+      ),
+      count('payments', (a) => a.revenueRead, () => this.prisma.client.payment.count({ where: { businessId } })),
+    ]);
+    return { contacts, openInvoices, payments };
   }
 
   async snapshot(businessId: string): Promise<BusinessCommandCenterSnapshot> {
+    const sources: SourceLog = {};
     const [
       executiveBrief,
       modeBriefs,
@@ -135,33 +247,36 @@ export class BusinessCommandCenterService {
       rawAssets,
       latestConstitution,
       constitutionStaleness,
+      results,
     ] = await Promise.all([
-      this.safeResolve('executiveBrief', businessId, () => this.intelligence.generateExecutiveBrief(businessId), { summary: '', topPriorities: [], insights: [], genomeIntegrity: 0, executiveReadinessScore: 0, genomeStage: '', businessId, generatedAt: new Date().toISOString() } as BusinessExecutiveBrief),
+      this.safeResolve(sources, 'executiveBrief', businessId, () => this.intelligence.generateExecutiveBrief(businessId), { summary: '', topPriorities: [], insights: [], genomeIntegrity: 0, executiveReadinessScore: 0, genomeStage: '', businessId, generatedAt: new Date().toISOString() } as BusinessExecutiveBrief),
       this.safeResolve(
+        sources,
         'modeBriefs',
         businessId,
         () => Promise.all(MODES.map((mode) => this.keyModes.generateModeBrief(businessId, mode))),
         [] as KeyExecutiveModeBrief[],
       ),
-      this.safeResolve('pendingApprovals', businessId, () => this.keyAutonomy.list(businessId, { status: 'PENDING' }), []),
-      this.safeResolve('approvedAwaitingExecution', businessId, () => this.keyAutonomy.list(businessId, { status: 'APPROVED' }), []),
-      this.safeResolve('temporalAnalysis', businessId, () => this.temporal.analyze(businessId), { summary: '', urgentItems: [], opportunities: [], risks: [], genomeProposalCandidates: [] } as TemporalFlowAnalysis),
-      this.safeResolve('genomeProposals', businessId, () => this.genomeEvolution.list(businessId, { status: 'PENDING' }), []),
-      this.safeResolve('genome', businessId, () => this.blueprint.calculateGenomeIntegrity(businessId), { genomeIntegrity: 0, threePillarMinimumMet: false, genomeDnaScores: {}, genomeDnaConfidence: {}, genomeStage: 'SEED', dnaSections: [], executiveReadinessScore: 0, readinessBreakdown: {} } as unknown as GenomeIntegrityResult),
-      this.safeResolve('rawAssets', businessId, () => this.assets.list(businessId), [] as BusinessAsset[]),
-      this.safeResolve('latestConstitution', businessId, () => this.constitution.latest(businessId), null),
-      this.safeResolve('constitutionStaleness', businessId, () => this.constitution.staleness(businessId), { stale: false, reason: '', currentGenomeIntegrity: 0, constitutionGenomeIntegrity: null } as ConstitutionStaleness),
+      this.safeResolve(sources, 'pendingApprovals', businessId, () => this.keyAutonomy.list(businessId, { status: 'PENDING' }), []),
+      this.safeResolve(sources, 'approvedAwaitingExecution', businessId, () => this.keyAutonomy.list(businessId, { status: 'APPROVED' }), []),
+      this.safeResolve(sources, 'temporalAnalysis', businessId, () => this.temporal.analyze(businessId), { summary: '', urgentItems: [], opportunities: [], risks: [], genomeProposalCandidates: [] } as TemporalFlowAnalysis),
+      this.safeResolve(sources, 'genomeProposals', businessId, () => this.genomeEvolution.list(businessId, { status: 'PENDING' }), []),
+      this.safeResolve(sources, 'genome', businessId, () => this.blueprint.calculateGenomeIntegrity(businessId), { genomeIntegrity: 0, threePillarMinimumMet: false, genomeDnaScores: {}, genomeDnaConfidence: {}, genomeStage: 'SEED', dnaSections: [], executiveReadinessScore: 0, readinessBreakdown: {} } as unknown as GenomeIntegrityResult),
+      this.safeResolve(sources, 'rawAssets', businessId, () => this.assets.list(businessId), [] as BusinessAsset[]),
+      this.safeResolve(sources, 'latestConstitution', businessId, () => this.constitution.latest(businessId), null),
+      this.safeResolve(sources, 'constitutionStaleness', businessId, () => this.constitution.staleness(businessId), { stale: false, reason: '', currentGenomeIntegrity: 0, constitutionGenomeIntegrity: null } as ConstitutionStaleness),
+      this.buildResults(businessId, sources),
     ]);
 
     const modeMap = new Map(modeBriefs.map((brief) => [brief.mode, brief]));
 
     // Compute KEY Genome scores and module readiness after the parallel block
     // so readiness uses freshly-scored facts rather than stale DB values.
-    const keyGenomeFacts = await this.safeResolve('keyGenomeFacts', businessId, () => this.genomeScoring.computeFactScores(businessId), []);
-    const keyGenomeScore = this.safeResolveSync('keyGenomeScore', businessId, () => this.genomeScoring.computeBusinessScore(businessId, keyGenomeFacts), { businessId, overall: 0, integrity: 0, readiness: 0, confidence: 0, sections: [], computedAt: new Date().toISOString() } as unknown as KeyGenomeScore);
-    const moduleReadiness = await this.safeResolve('moduleReadiness', businessId, () => this.genomeReadiness.computeReadiness(businessId, keyGenomeFacts), []);
+    const keyGenomeFacts = await this.safeResolve(sources, 'keyGenomeFacts', businessId, () => this.genomeScoring.computeFactScores(businessId), []);
+    const keyGenomeScore = this.safeResolveSync(sources, 'keyGenomeScore', businessId, () => this.genomeScoring.computeBusinessScore(businessId, keyGenomeFacts), { businessId, overall: 0, integrity: 0, readiness: 0, confidence: 0, sections: [], computedAt: new Date().toISOString() } as unknown as KeyGenomeScore);
+    const moduleReadiness = await this.safeResolve(sources, 'moduleReadiness', businessId, () => this.genomeReadiness.computeReadiness(businessId, keyGenomeFacts), []);
     const keyGenome = this.buildKeyGenome(keyGenomeScore);
-    keyGenome.crossDomain = await this.safeResolve('crossDomainBrief', businessId, () => this.keyGenomeBridge.buildCrossDomainBrief(businessId, moduleReadiness), undefined);
+    keyGenome.crossDomain = await this.safeResolve(sources, 'crossDomainBrief', businessId, () => this.keyGenomeBridge.buildCrossDomainBrief(businessId, moduleReadiness), undefined);
 
     const approvalItems = this.mapPendingApprovals(pendingApprovals);
     const approvedItems = this.mapApprovedAwaitingExecution(approvedAwaitingExecution);
@@ -174,8 +289,10 @@ export class BusinessCommandCenterService {
     const moduleReadinessItems = this.mapModuleReadinessItems(moduleReadiness);
     const missingFactItems = this.mapMissingFactItems(moduleReadiness);
     const weakSectionItems = this.mapWeakSectionItems(keyGenomeScore);
-    const genomeSignalItems = await this.mapGenomeSignalItems(businessId);
-    const genomeRecommendationItems = await this.mapGenomeRecommendationItems(businessId);
+    // These two were the only unguarded reads: a throwing signal or
+    // recommendation store rejected the whole snapshot (V1-47).
+    const genomeSignalItems = await this.safeResolve(sources, 'genomeSignals', businessId, () => this.mapGenomeSignalItems(businessId), [] as CommandCenterItem[]);
+    const genomeRecommendationItems = await this.safeResolve(sources, 'genomeRecommendations', businessId, () => this.mapGenomeRecommendationItems(businessId), [] as CommandCenterItem[]);
 
     const allItems: CommandCenterItem[] = [
       ...approvalItems,
@@ -213,6 +330,9 @@ export class BusinessCommandCenterService {
     return {
       businessId,
       generatedAt: new Date().toISOString(),
+      degraded: Object.values(sources).some((source) => source.status === 'FAILED'),
+      sources,
+      results,
       health,
       summary: this.buildSummary(health, executiveBrief.summary, keyGenome, moduleReadiness),
       pulse,
