@@ -16,9 +16,9 @@
 #      worktree with --packet.
 #   2b. A DATABASE_URL, DIRECT_URL or REDIS_URL whose query string overrides
 #      its connection target (?host=, ?hostaddr=, ?user=, ?port=, Redis ?db=)
-#      is refused (KF_PROOF_RESOURCE_TARGET_OVERRIDE) before admission, in
-#      every mode, without printing the value; ?schema= and other parameters
-#      that do not move the target are admitted.
+#      is refused by admit-resources.mjs (KF_PROOF_RESOURCE_TARGET_OVERRIDE)
+#      in every mode, without printing the value; ?schema= and other
+#      parameters that do not move the target are admitted.
 #   3. A worktree without --packet is refused.
 #   4. An admitted run executes the steps in order, and --suite picks the
 #      vitest step: release0 -> proof:manifests (every case manifest at HEAD),
@@ -173,7 +173,7 @@ else
   bad "worktree main-tree database (exit $status, ran: $(calls)): $(cat "$OUT")"
 fi
 
-# 2b. A query string that overrides the connection target is refused before admission.
+# 2b. A query string that overrides the connection target is refused by admission.
 # node-postgres and Prisma read ?host= in place of the URL's host (and pg ?user=
 # and ?port=), so each of these names localhost yet would connect elsewhere.
 run_sut "$MAIN" DATABASE_URL="$LOCAL_DB?host=db.example.com" DIRECT_URL=$LOCAL_DB REDIS_URL=$LOCAL_REDIS -- --suite release0
@@ -186,7 +186,7 @@ fi
 
 run_sut "$MAIN" "${CI_ENV[@]}" DATABASE_URL=$LOCAL_DB DIRECT_URL="$LOCAL_DB?sslmode=disable&hostaddr=192.0.2.10" REDIS_URL=$LOCAL_REDIS -- --suite release0
 if [[ $status -ne 0 ]] && grep -q 'KF_PROOF_RESOURCE_TARGET_OVERRIDE' "$OUT" && grep -q '"DIRECT_URL"' "$OUT" && grep -q '"hostaddr"' "$OUT" && nothing_ran; then
-  ok 'CI mode: DIRECT_URL with ?hostaddr= is refused before admission and nothing runs'
+  ok 'CI mode: DIRECT_URL with ?hostaddr= is refused by admission and nothing runs'
 else
   bad "CI mode ?hostaddr= override (exit $status, ran: $(calls)): $(cat "$OUT")"
 fi
@@ -194,7 +194,7 @@ fi
 WT_DB=postgresql://keyflow:keyflow@localhost:5432/kf_wt_r0_99
 run_sut "$WT" DATABASE_URL=$WT_DB DIRECT_URL="$WT_DB?user=postgres&port=6543" -- --packet R0-99 --suite release0
 if [[ $status -ne 0 ]] && grep -q 'KF_PROOF_RESOURCE_TARGET_OVERRIDE' "$OUT" && grep -q '"user"' "$OUT" && grep -q '"port"' "$OUT" && nothing_ran; then
-  ok 'worktree --packet: the packet database with ?user=&port= is refused before admission and nothing runs'
+  ok 'worktree --packet: the packet database with ?user=&port= is refused by admit-resources.mjs --packet and nothing runs'
 else
   bad "worktree ?user=&port= override (exit $status, ran: $(calls)): $(cat "$OUT")"
 fi

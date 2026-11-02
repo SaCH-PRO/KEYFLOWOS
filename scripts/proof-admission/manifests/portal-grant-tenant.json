@@ -5,6 +5,9 @@
   "description": "A portal access grant binds only a live contact of the path tenant. Run from apps/server: npx vitest run test/portal-grant-tenant.integration.test.ts --reporter=json --outputFile=.proof/r0-33-vitest.json against a migrated local database and REDIS_URL, then node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/portal-grant-tenant.json --report .proof/r0-33-vitest.json. Cases tagged NEGATIVE CONTROL, the soft-deleted case and the service case fail on the unmodified code (c2f6f46d and the R0 working branch before this packet). Review repairs: the ambient-tenant NEGATIVE CONTROL fails on the first fix (7a8a56b9), which bound the contact through where.businessId only; the two legacy-grant cases fail on a fix that checks the contact only before create.",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "test/portal-grant-tenant.integration.test.ts"
+  ],
   "requiredCases": [
     "fixture sanity (real rows) seeded two tenants, their contacts and one grant each",
     "POST /portal/businesses/:businessId/access binds only a contact of the path tenant NEGATIVE CONTROL (pre-fix FAIL expected): A's owner granting B's contact on A's path answers 404 and writes no row",

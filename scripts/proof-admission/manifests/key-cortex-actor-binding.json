@@ -13,6 +13,14 @@
   ],
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "test/key-cortex-actor-binding.integration.test.ts",
+    "src/modules/key-cortex/adapters/settings-adapter.service.spec.ts",
+    "src/modules/key-cortex/key-cortex.controller.spec.ts",
+    "src/modules/key-cortex/key-cortex-executor.service.spec.ts",
+    "src/modules/key-cortex/key-cortex-planner.service.spec.ts",
+    "src/modules/key-cortex/key-cortex-goals.controller.spec.ts"
+  ],
   "requiredCases": [
     "fixture sanity (real rows) A has an OWNER (membership and Business.ownerId), a STAFF member and an ADMIN granted settings:write; the outsider owns B with no membership of A",
     "fixture sanity (real rows) the real connector routes settings commands to the real settings adapter",

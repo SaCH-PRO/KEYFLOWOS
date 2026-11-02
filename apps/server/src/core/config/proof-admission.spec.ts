@@ -524,6 +524,9 @@ describe('proof manifest runner (R0-16-PROOF-BINDING)', () => {
     expect(caseManifests.length).toBeGreaterThan(25);
     for (const m of caseManifests) {
       expect(m.suites.length, `${m.file} binds no suite`).toBeGreaterThan(0);
+      // Declared, not parsed from the description's prose (review CR-R016-1):
+      // a later repair that adds a command to the prose cannot change what binds.
+      expect(m.suiteSource, `${m.file} has no "suites" field`).toBe('suites');
     }
     const resource = plan.manifests.filter((m: { type: string }) => m.type === 'resource').map((m: { file: string }) => m.file);
     expect(resource).toEqual(['ci-resources.json', 'local-worktree-resources.json']);

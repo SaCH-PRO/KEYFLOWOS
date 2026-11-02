@@ -11,6 +11,10 @@
   ],
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "test/subscriptions-authority.integration.test.ts",
+    "src/modules/subscriptions/subscriptions.controller.spec.ts"
+  ],
   "requiredCases": [
     "R0-08c fixture sanity (real rows) [R0-08c-X01] seeded four tenants, nine users and eleven memberships; bizPaid has one ACTIVE FLOW subscription and nothing else is billed or audited",
     "R0-08c a member who is not the owner cannot change the plan (ST-R008-1) [R0-08c-R01] RED-BEFORE: the review's reproduction — a STAFF member with every scope 'none' POSTs record-payment {plan:'KEYFLOW',currency:'USD',method:'manual'}: 403 SUBSCRIPTION_OWNER_ONLY, no Subscription change, no SubscriptionPayment row, no audit row",

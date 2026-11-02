@@ -177,6 +177,25 @@ describe('per-packet resource admission (R0-00)', () => {
     expect(r.result?.reasons, r.stdout).toContain('KF_PROOF_RESOURCE_HOST_UNSAFE');
   });
 
+  it('NEGATIVE CONTROL: rejects the packet database or Redis index when its query string overrides the target (R0-16 review SEC-R016-4)', () => {
+    // Each names kf_wt_r0_00 on localhost, or index 3, and was admitted before
+    // the repair; node-postgres/Prisma would connect to ?host= (pg as ?user=
+    // on ?port=), and ioredis to the Unix socket ?path= names.
+    const cases: Array<[vars: Record<string, string>, shell: Record<string, string>, env: string, parameters: string[]]> = [
+      [{ ...packetEnv, DATABASE_URL: `${OWN_DB}?host=db.prod-example.invalid` }, {}, 'DATABASE_URL', ['host']],
+      [packetEnv, { DIRECT_URL: `${OWN_DB}?user=postgres&port=6543` }, 'DIRECT_URL', ['user', 'port']],
+      [{ ...packetEnv, REDIS_URL: 'redis://localhost:6379/3?path=/tmp/prod-example.sock' }, {}, 'REDIS_URL', ['path']],
+    ];
+    for (const [vars, shell, env, parameters] of cases) {
+      const r = admit(['--packet', 'R0-00', ...provisioned(vars)], shell);
+      expect(r.status, r.stdout).toBe(2);
+      expect(r.result?.reasons, r.stdout).toEqual(['KF_PROOF_RESOURCE_TARGET_OVERRIDE']);
+      expect(r.result.env).toBe(env);
+      expect(r.result.parameters).toEqual(parameters);
+      expect(r.stdout).not.toMatch(/prod-example|6543|secret/);
+    }
+  });
+
   it('refuses the packet-scoped manifest without --packet, and a malformed packet id', () => {
     const missing = admit(['--manifest', MANIFEST, ...provisioned()]);
     expect(missing.status).toBe(2);

@@ -5,6 +5,10 @@
   "description": "PATCH /identity/businesses/:businessId is OWNER only regardless of granted scopes (owner ruling D-11; SUPER_ADMIN keeps the bypass BusinessGuard already grants), onboardingComplete is not writable through it, and SUPER_ADMIN promotion on boot is gated on SUPER_ADMIN_EMAIL. Run from apps/server against this packet's isolated, migrated database: npx vitest run test/identity-business-config.integration.test.ts src/core/seed/seed.service.spec.ts --reporter=json --outputFile=.proof/r0-09-vitest.json, then node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/identity-business-config.json --report .proof/r0-09-vitest.json. The seed cases promote a real User row, so they never run against a shared database. Cases tagged RED-BEFORE fail on the unmodified code (the R0 working branch at 8dd45935; P12, P13 and U11, added by the review repair, also fail on the first R0-09 commit d8024327); the spawned-server proof of the same rule is the ST-3 block of test/identity-boundary.integration.test.ts.",
   "requireReportSuccess": true,
   "allowAdditionalCases": false,
+  "suites": [
+    "test/identity-business-config.integration.test.ts",
+    "src/core/seed/seed.service.spec.ts"
+  ],
   "requiredCases": [
     "R0-09 fixture sanity (real rows) [R0-09-X01] seeded four tenants, eleven users and seven memberships; bizC has no membership and the super admin none",
     "R0-09 PATCH /identity/businesses/:businessId is OWNER only (D-11) [R0-09-P01] RED-BEFORE: a STAFF member with role-default scopes (settings:none) is refused (403) and the Business row is byte-identical",
