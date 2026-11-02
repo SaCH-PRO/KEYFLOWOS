@@ -70,6 +70,14 @@
  *             audit, leaves it UNMATCHED with nothing posted, and posts the other rows (TTD; USD,
  *             a supported currency carried by the rule's source)
  *
+ * V1-37b review repairs:
+ *
+ *   SEC-V37b-1 RED-BEFORE GET /finance/businesses/:id/trial-balance needs revenue:read
+ *             (ModuleScopeGuard, the commerce revenue reads' gate): a revenue:none member gets 403
+ *             and no rows; a revenue:read member and the owner still read it (RED-BEFORE: 200 with
+ *             the REVENUE rows). The balance-sheet route and its CSV / PDF export and GET
+ *             revenue-reports/:preset lie outside the V1-37b write set: it.todo below, each with why.
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed), CommerceService,
  * CommerceStatsService, InvoiceWorkflowService, RevenuePostingService,
@@ -400,6 +408,8 @@ beforeAll(async () => {
       PrismaService,
       AuthGuard,
       BusinessGuard,
+      // V1-37b review SEC-V37b-1: the trial balance needs revenue:read.
+      ModuleScopeGuard,
       LedgerBalanceService,
       PostingService,
       AccountingPeriodService,
@@ -894,6 +904,51 @@ describe('V1-37 review residuals (V1-37b): the trial-balance projection is per (
   }, 30_000);
 });
 
+describe('V1-37b review (SEC-V37b-1): a revenue:none member reads no revenue through the trial balance', () => {
+  it('SEC-V37b-1 RED-BEFORE: GET trial-balance answers 403 and no rows to a revenue:none member; a revenue:read member and the owner read the REVENUE rows', async () => {
+    // A revenue posting on the TTD business, so its trial balance holds a REVENUE row.
+    const cash = await coa.getBySystemKey(ID.bizTtd, 'CASH');
+    const revenue = await coa.getBySystemKey(ID.bizTtd, 'REVENUE');
+    await posting.post({
+      businessId: ID.bizTtd,
+      type: 'INCOME',
+      date: new Date(Date.now() - 60_000),
+      amount: 777.77,
+      description: 'v37a revenue (SEC-V37b-1)',
+      entries: [
+        { accountId: cash.id, debit: 777.77 },
+        { accountId: revenue.id, credit: 777.77 },
+      ],
+    });
+    const trialBalance = (as: string) =>
+      request(financeApp.getHttpServer()).get(`/finance/businesses/${ID.bizTtd}/trial-balance`).set(HEADER, as);
+
+    const refused = await trialBalance(ID.memberNone);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(JSON.stringify(refused.body)).toMatch(/revenue/);
+    expect(JSON.stringify(refused.body), 'no row of the trial balance is returned').not.toMatch(/777\.77|"items"|REVENUE/);
+
+    for (const as of [ID.memberRead, ID.ownerT]) {
+      const res = await trialBalance(as);
+      expect(res.status, `${as}: ${JSON.stringify(res.body)}`).toBe(200);
+      const rows = res.body.items.filter((i: any) => i.accountId === revenue.id);
+      expect(rows.map((i: any) => i.currency), `${as} reads the TTD revenue row`).toEqual(['TTD']);
+      expect(Number(rows[0].credit)).toBeGreaterThanOrEqual(777.77);
+    }
+  }, 30_000);
+
+  it.todo(
+    'SEC-V37b-1 residual, outside the V1-37b write set: GET /businesses/:id/reports/balance-sheet (reports.controller.ts, '
+    + 'AuthGuard + BusinessGuard only) answers a revenue:none member 200 with accounts receivable per currency; it needs '
+    + 'revenue:read on the reports controller (with its CSV / PDF export and the P&L, the same class)',
+  );
+  it.todo(
+    'SEC-V37b-1 residual, outside the V1-37b write set: GET /commerce/businesses/:id/revenue-reports/:preset '
+    + '(revenue-reporting.controller.ts, AuthGuard + BusinessGuard only) answers a revenue:none member 200 with invoice '
+    + 'totals by contact; it needs ModuleScopeGuard + revenue:read like the commerce invoice reads',
+  );
+});
+
 describe('V1-37 review residuals (V1-37b): the balance sheet never sums across currencies (RV37-02)', () => {
   it('RV37-02 RED-BEFORE: the top level is the business currency (USD) sheet; byCurrency holds one labelled sheet per currency, each equal to Postgres and balanced', async () => {
     const sheet = await reporting.getBalanceSheet(ID.bizUsd, new Date(Date.now() + 60_000));
@@ -958,6 +1013,13 @@ describe('V1-37 review residuals (V1-37b): the balance sheet never sums across c
       else expect(lines.map((l: any) => [l.currency, l.amount]), `${currency} AR`).toEqual([[currency, expected]]);
     }
   }, 30_000);
+
+  it.todo(
+    'RV37b-CR-03, outside the V1-37b write set: the balance-sheet CSV and PDF exports (report-formatters.ts '
+    + 'balanceSheetToCsv / balanceSheetToPdf, served by reports.controller.ts) read the top-level business-currency '
+    + 'sheet only and drop byCurrency; each other currency must be exported as its own labelled sheet, never summed. '
+    + 'Until then the Books view says beside the sheets that the export carries the business currency only',
+  );
 });
 
 describe('V1-37 review residuals (V1-37b): bank rules skip a row the door refuses for currency (RV37-04)', () => {

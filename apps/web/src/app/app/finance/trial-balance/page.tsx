@@ -40,6 +40,8 @@ export default function TrialBalancePage() {
     try {
       const res = await fetchTrialBalance(businessId, asOf || undefined);
       setItems(res.data?.items ?? []);
+      // V1-37b review SEC-V37b-1: a refused read (403, revenue:read required) says so, not an empty table.
+      if (res.error) setError(res.error);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load trial balance");
     } finally {

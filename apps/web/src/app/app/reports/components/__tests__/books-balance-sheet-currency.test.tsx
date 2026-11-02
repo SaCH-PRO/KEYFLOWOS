@@ -92,5 +92,15 @@ describe("Books balance sheet: one sheet per currency, never summed", () => {
     await screen.findByTestId("balance-sheet-TTD");
     expect(screen.queryByTestId("balance-sheet-USD")).toBeNull();
     expect(screen.queryByText(/other currenc/i)).toBeNull();
+    expect(screen.queryByText(/export/i)).toBeNull();
+  });
+
+  it("BS-CUR-03 (review RV37b-CR-03): with other currencies on screen, the view says the CSV / PDF export carries the business-currency sheet only", async () => {
+    vi.mocked(fetchLedgerBalanceSheet).mockResolvedValue({ data: REPORT, error: null } as never);
+    render(<BooksReportView businessId="biz_bs" kind="books-balance-sheet" asOf="2026-11-02" />);
+    await screen.findByTestId("balance-sheet-USD");
+    expect(screen.getByTestId("balance-sheet-export-note")).toHaveTextContent(
+      "The CSV and PDF exports carry the TTD sheet only; the USD balances are shown here.",
+    );
   });
 });

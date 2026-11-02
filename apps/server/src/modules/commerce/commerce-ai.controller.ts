@@ -27,9 +27,14 @@ export class CommerceAiController {
   ) {}
 
   /**
-   * V1-37b (V1-37 review ST-V37-2): revenue figures, so revenue:read like every
-   * other revenue read. It carried AuthGuard and BusinessGuard only, so a
-   * member whose revenue scope is none read every invoice total.
+   * V1-37b (V1-37 review ST-V37-2): revenue figures, so revenue:read, as the
+   * commerce invoice and quote reads (commerce.controller.ts) and, since the
+   * V1-37b review (SEC-V37b-1), the finance trial balance require. It carried
+   * AuthGuard and BusinessGuard only, so a member whose revenue scope is none
+   * read every invoice total. Not every revenue read is gated yet: the reports
+   * balance sheet and P&L (reports.controller.ts) and GET
+   * revenue-reports/:preset (revenue-reporting.controller.ts) still run
+   * AuthGuard and BusinessGuard only (review residual SEC-V37b-1).
    */
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')

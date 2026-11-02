@@ -223,6 +223,10 @@ function BalanceSheetBlock({ r }: { r: BalanceSheetWithCurrencies }) {
           <div className="text-xs text-muted-foreground">
             Balances in other currencies are shown on their own; they are not converted or added to the {r.currency} figures above.
           </div>
+          {/* V1-37b review RV37b-CR-03: the CSV / PDF export (report-formatters.ts) carries the business-currency sheet only. */}
+          <div className="text-xs text-muted-foreground" data-testid="balance-sheet-export-note">
+            The CSV and PDF exports carry the {r.currency} sheet only; the {others.map(([code]) => code).join(", ")} balances are shown here.
+          </div>
           {others.map(([code, sheet]) => (
             <div key={code} className="rounded-lg border p-3" style={{ borderColor: "hsl(var(--border))" }}>
               <div className="font-semibold mb-2">{code} balances</div>

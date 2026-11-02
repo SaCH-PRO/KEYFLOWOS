@@ -103,4 +103,15 @@ describe("trial balance page: one line per (account, currency), totals per curre
     expect(within(screen.getByTestId("trial-balance-totals-USD")).getByTestId("difference")).toHaveAttribute("data-balanced", "false");
     expect(within(screen.getByTestId("trial-balance-totals-TTD")).getByTestId("difference")).toHaveAttribute("data-balanced", "true");
   });
+
+  it("TB-CUR-04 (review SEC-V37b-1): a refused read (403, revenue:read required) shows the refusal, not an empty balanced table", async () => {
+    vi.mocked(fetchTrialBalance).mockResolvedValue({
+      data: null,
+      error: "Insufficient permissions: revenue requires read access (you have none)",
+      status: 403,
+    } as never);
+    render(<TrialBalancePage />);
+    expect(await screen.findByText(/Insufficient permissions: revenue requires read access/)).toBeInTheDocument();
+    expect(screen.queryByTestId("trial-balance-totals-TTD")).toBeNull();
+  });
 });

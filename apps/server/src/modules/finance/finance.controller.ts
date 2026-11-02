@@ -8,6 +8,7 @@ import { memoryStorage } from 'multer';
 import type { Response } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ReceivablesService } from './receivables.service';
 import { LedgerBalanceService } from './ledger-balance.service';
@@ -159,6 +160,15 @@ export class FinanceController {
     });
   }
 
+  /**
+   * V1-37b review SEC-V37b-1: the trial balance carries the REVENUE rows per
+   * currency, so it needs revenue:read (ModuleScopeGuard, the gate of the
+   * commerce revenue reads): a member whose revenue scope is none is refused
+   * with 403 before anything is read. The other Books reads here keep
+   * membership only (ensureAccess); no module key governs Books yet.
+   */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('trial-balance')
   async getTrialBalance(
     @Param('businessId') businessId: string,
