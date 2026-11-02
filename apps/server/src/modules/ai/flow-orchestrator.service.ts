@@ -313,6 +313,11 @@ interface FlowBoundConfirmation {
    * arguments executed and the hash over them.
    */
   argsJson: string;
+  /**
+   * The model's tool call id, or '' when the provider sent none (the stream accumulator starts
+   * every id as '', and a gateway can pass a missing one through). It is not what binds the
+   * confirmation (the confirmation id is), so an empty one is stored and honoured (V1-31 CR-2).
+   */
   toolCallId: string;
   requestedBy: string;
   crew: BusinessRole[];
@@ -343,7 +348,7 @@ function readFlowBoundConfirmation(value: unknown): { bound: FlowBoundConfirmati
   const v = value as Record<string, unknown>;
   const isText = (x: unknown): x is string => typeof x === 'string' && x.length > 0;
   if (v.kind !== 'flow_confirmation') return null;
-  if (!isText(v.toolName) || !isText(v.toolCallId) || !isText(v.requestedBy) || !isText(v.issuedAt) || !isText(v.expiresAt)) return null;
+  if (!isText(v.toolName) || typeof v.toolCallId !== 'string' || !isText(v.requestedBy) || !isText(v.issuedAt) || !isText(v.expiresAt)) return null;
   if (!isText(v.argsJson)) return null;
   if (!Array.isArray(v.crew) || !v.crew.every((r) => typeof r === 'string')) return null;
   if (v.surface !== 'CHAT' && v.surface !== 'CHAT_STREAM') return null;
@@ -1841,62 +1846,73 @@ ${triage.standingContext}`;
       const claim = await this.claimFlowConfirmation(businessId, pendingConfirmation, userId, crew, envelope);
       if (claim.kind === 'answered') return claim.response;
       pendingConfirmation = claim.confirmation;
+      // The member the call was issued to, verified by the claim. The approval
+      // item, the queue's log row and the executed call's log row name them
+      // (V1-31 review SEC-V131-2; they used to say 'system', or no one).
+      const confirmedBy = claim.requestedBy;
 
-      if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
-        // Governed again now, on the bound tool and the crew it was proposed under.
-        const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, claim.crew, envelope);
-        if (!confirmDecision.allowed) {
-          await claim.settle('refused', confirmDecision.reason);
+      // Whatever throws once the claim is held (governance, the approval
+      // queue, the executor) records the claim as failed before it
+      // propagates, so a retry is told the truth instead of "already used"
+      // (V1-31 review CR-1). settle() is a compare-and-set from 'claimed', so
+      // an outcome already recorded is never overwritten.
+      try {
+        if (pendingConfirmation.toolName && pendingConfirmation.toolArgs) {
+          // Governed again now, on the bound tool and the crew it was proposed under.
+          const confirmDecision = await this.governance.evaluate(businessId, pendingConfirmation.toolName, undefined, claim.crew, envelope);
+          if (!confirmDecision.allowed) {
+            await claim.settle('refused', confirmDecision.reason);
+            return {
+              reply: `This action is blocked: ${confirmDecision.reason}`,
+              usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
+            };
+          }
+          if (confirmDecision.requiresFormalApproval) {
+            const item = await this.governance.createApprovalItem(businessId, {
+              toolName: pendingConfirmation.toolName,
+              title: `Chat action: ${pendingConfirmation.toolName}`,
+              description: `User confirmed action via chat. Governance requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval (Tier ${confirmDecision.tier}).`,
+              rationale: confirmDecision.reason,
+              inputPayload: pendingConfirmation.toolArgs as Record<string, any>,
+            });
+            await this.attributeApprovalItem(businessId, item?.id, confirmedBy);
+            await this.executionLog.log({
+              businessId,
+              action: `approval_queued_chat`,
+              toolName: pendingConfirmation.toolName,
+              riskTier: confirmDecision.tier,
+              mode: 'assisted',
+              actor: 'user',
+              userId: confirmedBy,
+              rationale: `Chat confirmation routed to approval queue — Tier ${confirmDecision.tier} requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
+              success: true,
+            });
+            await claim.settle('completed');
+            return {
+              reply: confirmDecision.requiresAdminApproval
+                ? `This is a high-impact action (Tier ${confirmDecision.tier}) that requires admin approval. It has been added to your approval queue for an admin to review.`
+                : `This action requires formal approval before execution (Tier ${confirmDecision.tier}). It has been added to your approval queue.`,
+              usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
+            };
+          }
+          // A call the provider sent with no id keeps the executor's own id (CR-2).
+          const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, pendingConfirmation.toolCallId || undefined, { planId: '', planStepId: '', role: claim.role ?? detectedRole ?? undefined, actorUserId: confirmedBy });
+          await claim.settle(result.success ? 'completed' : 'failed', result.success ? undefined : (result.error ?? 'Unknown error'));
           return {
-            reply: `This action is blocked: ${confirmDecision.reason}`,
-            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
+            reply: result.success
+              ? `Done! ${this.formatToolSuccess(pendingConfirmation.toolName, result.result)}`
+              : `Something went wrong: ${result.error || 'Unknown error'}. Please try again or contact support.`,
+            toolResults: [result],
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 2 },
           };
         }
-        if (confirmDecision.requiresFormalApproval) {
-          await this.governance.createApprovalItem(businessId, {
-            toolName: pendingConfirmation.toolName,
-            title: `Chat action: ${pendingConfirmation.toolName}`,
-            description: `User confirmed action via chat. Governance requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval (Tier ${confirmDecision.tier}).`,
-            rationale: confirmDecision.reason,
-            inputPayload: pendingConfirmation.toolArgs as Record<string, any>,
-          });
-          await this.executionLog.log({
-            businessId,
-            action: `approval_queued_chat`,
-            toolName: pendingConfirmation.toolName,
-            riskTier: confirmDecision.tier,
-            mode: 'assisted',
-            actor: 'system',
-            rationale: `Chat confirmation routed to approval queue — Tier ${confirmDecision.tier} requires ${confirmDecision.requiresAdminApproval ? 'admin' : 'formal'} approval`,
-            success: true,
-          });
-          await claim.settle('completed');
-          return {
-            reply: confirmDecision.requiresAdminApproval
-              ? `This is a high-impact action (Tier ${confirmDecision.tier}) that requires admin approval. It has been added to your approval queue for an admin to review.`
-              : `This action requires formal approval before execution (Tier ${confirmDecision.tier}). It has been added to your approval queue.`,
-            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
-          };
-        }
-        let result: FlowToolResult;
-        try {
-          result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, pendingConfirmation.toolCallId, { planId: '', planStepId: '', role: claim.role ?? detectedRole ?? undefined });
-        } catch (err: unknown) {
-          await claim.settle('failed', err instanceof Error ? err.message : String(err));
-          throw err;
-        }
-        await claim.settle(result.success ? 'completed' : 'failed', result.success ? undefined : (result.error ?? 'Unknown error'));
-        return {
-          reply: result.success
-            ? `Done! ${this.formatToolSuccess(pendingConfirmation.toolName, result.result)}`
-            : `Something went wrong: ${result.error || 'Unknown error'}. Please try again or contact support.`,
-          toolResults: [result],
-          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 2 },
-        };
+        // Unreachable for a call this code bound (it always has both).
+        await claim.settle('failed', 'No call was bound to this confirmation');
+        return { reply: UNBOUND_CONFIRMATION_REPLY, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 } };
+      } catch (err: unknown) {
+        await claim.settle('failed', err instanceof Error ? err.message : String(err));
+        throw err;
       }
-      // Unreachable for a call this code bound (it always has both).
-      await claim.settle('failed', 'No call was bound to this confirmation');
-      return { reply: UNBOUND_CONFIRMATION_REPLY, usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 } };
     }
 
     messages.push({ role: 'user', content: enrichedMessage });
@@ -2811,7 +2827,9 @@ ${triage.standingContext}`;
       kind: 'flow_confirmation',
       toolName: tc.name,
       argsJson: JSON.stringify(tc.arguments ?? {}),
-      toolCallId: tc.id,
+      // A provider can send no id (V1-31 review CR-2); '' is stored, not a
+      // missing field, so the row reads back and hashes the same.
+      toolCallId: typeof tc.id === 'string' ? tc.id : '',
       requestedBy: ctx.userId,
       crew: [...ctx.crew],
       role: ctx.role,
@@ -2840,6 +2858,34 @@ ${triage.standingContext}`;
   }
 
   /**
+   * Name the member who confirmed as the requester of the approval item their
+   * confirmation filed (V1-31 review SEC-V131-2). AiOversightService.
+   * createApprovalItem takes no requester, so the item it creates has none;
+   * this sets it, on that item in this business only. The item is already in
+   * the queue, so a failure here is logged and the confirmation still answers
+   * as queued.
+   */
+  private async attributeApprovalItem(businessId: string, itemId: unknown, userId: string): Promise<void> {
+    if (typeof itemId !== 'string' || itemId.length === 0) return;
+    try {
+      await this.prisma.client.aiApprovalItem.updateMany({ where: { id: itemId, businessId }, data: { userId } });
+    } catch (err: unknown) {
+      this.logger.warn(`Could not name the requester of approval item ${itemId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * Name the member on whose confirmation a tool ran on its execution log row
+   * (V1-31 review SEC-V131-2). AiExecutionLogService.logToolExecution writes
+   * the row as actor 'flow' with no user; this adds the user, on that row in
+   * this business only.
+   */
+  private async attributeExecutionLog(businessId: string, logId: unknown, userId: string | undefined): Promise<void> {
+    if (!userId || typeof logId !== 'string' || logId.length === 0) return;
+    await this.prisma.client.aiExecutionLog.updateMany({ where: { id: logId, businessId }, data: { userId } });
+  }
+
+  /**
    * Claim the call a confirmation is bound to (V1-31), or answer it.
    *
    * Only an id the Flow issued is a confirmation here (the boundary answered
@@ -2850,8 +2896,9 @@ ${triage.standingContext}`;
    * A confirmation with no Flow id executes nothing; a tool governance
    * refuses anyway is still named as refused, as before.
    *
-   * `claimed` hands back the bound call, the crew it was proposed under and
-   * `settle`, which records the outcome on the claimed row.
+   * `claimed` hands back the bound call, the crew it was proposed under, the
+   * member it was issued to (who has just been verified as the confirming
+   * user) and `settle`, which records the outcome on the claimed row.
    */
   private async claimFlowConfirmation(
     businessId: string,
@@ -2866,6 +2913,7 @@ ${triage.standingContext}`;
         confirmation: { toolCallId: string; confirmed: true; toolName: string; toolArgs: Record<string, unknown>; confirmationId: string };
         crew: BusinessRole[];
         role: BusinessRole | null;
+        requestedBy: string;
         settle: (to: 'completed' | 'failed' | 'refused', error?: string) => Promise<boolean>;
       }
   > {
@@ -2958,6 +3006,7 @@ ${triage.standingContext}`;
       confirmation: { toolCallId: bound.toolCallId, confirmed: true, toolName: bound.toolName, toolArgs: args, confirmationId },
       crew: bound.crew,
       role: bound.role,
+      requestedBy: bound.requestedBy,
       settle: (to, error) =>
         transition('claimed', to, error).catch((e: unknown) => {
           this.logger.warn(`Could not record the outcome of confirmation ${confirmationId}: ${e instanceof Error ? e.message : String(e)}`);
@@ -2995,10 +3044,17 @@ ${triage.standingContext}`;
     toolName: string,
     args: Record<string, any>,
     toolCallId?: string,
-    planContext?: { planId: string; planStepId: string; role?: string },
+    /**
+     * `actorUserId`: the authenticated member the call runs for (a confirmed
+     * Flow call, V1-31). Their id goes on the execution log row, and the call
+     * answers only after the row is written, so the row exists and names them
+     * when the confirmation returns.
+     */
+    planContext?: { planId: string; planStepId: string; role?: string; actorUserId?: string },
     action?: ActionContext,
   ): Promise<FlowToolResult> {
     const id = toolCallId ?? `manual_${toolName}`;
+    const actorUserId = planContext?.actorUserId;
     const startTime = Date.now();
     try {
       this.validateToolInput(toolName, args);
@@ -3006,14 +3062,15 @@ ${triage.standingContext}`;
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
+      const logged = this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
         role: planContext?.role,
-      }).catch((e: unknown) => {
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, actorUserId)).catch((e: unknown) => {
         this.logger.error(`Failed to log tool execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
+      if (actorUserId) await logged;
       this.businessGraph.invalidateCache(businessId);
       return {
         toolCallId: id,
@@ -3028,14 +3085,15 @@ ${triage.standingContext}`;
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
+      const logged = this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
         riskTier: tier,
         planId: planContext?.planId,
         planStepId: planContext?.planStepId,
         role: planContext?.role,
-      }).catch((e: unknown) => {
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, actorUserId)).catch((e: unknown) => {
         this.logger.error(`Failed to log tool execution error for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
+      if (actorUserId) await logged;
       const errorEnvelope = wrapToolResult(toolName, null);
       return {
         toolCallId: id,

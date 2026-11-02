@@ -194,7 +194,12 @@ export class ApprovalController {
     @Param('businessId') businessId: string,
     @Param('approvalId') approvalId: string,
     @Body() body: { reason?: string },
+    @Request() req: PrincipalRequest,
   ) {
+    // Escalation records no actor (escalateRequest takes none), but it moves
+    // the request to a terminal state, so it needs a principal like every
+    // other write here (V1-31 review SEC-V131-3).
+    principalOf(req);
     await this.requestInBusiness(businessId, approvalId);
     return this.approvals.escalateRequest(approvalId, body.reason);
   }

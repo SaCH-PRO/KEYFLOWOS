@@ -86,6 +86,13 @@ interface HarnessOptions {
   /** The crew the turn resolves. Mutable between turns. */
   crew?: string[];
   decide?: (tool: string, crew: unknown) => Decision;
+  /** The id the model gives its tool call; null sends the call with no id at all (review CR-2). */
+  toolCallId?: string | null;
+  /**
+   * Run the real FlowOrchestratorService.executeTool (validation and the tool action stubbed,
+   * the execution log a recorder that returns a row id) instead of a recorder in its place.
+   */
+  realExecuteTool?: boolean;
 }
 
 function makeHarness(opts: HarnessOptions = {}) {
@@ -131,13 +138,26 @@ function makeHarness(opts: HarnessOptions = {}) {
       success: true,
     };
   });
+  const modelToolCallId = opts.toolCallId === undefined ? 'tc_1' : opts.toolCallId === null ? undefined : opts.toolCallId;
   const modelToolCalls = () =>
-    state.toolCall ? [{ id: 'tc_1', type: 'function', function: { name: state.toolCall.name, arguments: JSON.stringify(state.toolCall.args) } }] : [];
+    state.toolCall ? [{ id: modelToolCallId, type: 'function', function: { name: state.toolCall.name, arguments: JSON.stringify(state.toolCall.args) } }] : [];
+  /** ai_approval_items and ai_execution_logs writes the confirm path makes beside the tool's own. */
+  const approvalItems = { updateMany: vi.fn(async (_q: unknown) => ({ count: 1 })) };
+  const executionLogs = { updateMany: vi.fn(async (_q: unknown) => ({ count: 1 })) };
+  const executionLog = {
+    log: vi.fn(async (_entry: Record<string, unknown>) => 'log_entry_1'),
+    logToolExecution: vi.fn(async (..._args: unknown[]) => 'log_tool_1'),
+  };
+  /** With realExecuteTool: what reached the tool action, behind the real executeTool. */
+  const executeToolAction = vi.fn(async (businessId: string, name: string, args: Record<string, unknown>) => {
+    executed.push({ businessId, name, args: structuredClone(args), toolCallId: undefined });
+    return { id: 'inv_1', invoiceNumber: 'INV-1' };
+  });
   const orchestrator = Object.assign(Object.create(FlowOrchestratorService.prototype), {
     logger: quiet,
-    prisma: { client: { idempotencyKey: store.model } },
+    prisma: { client: { idempotencyKey: store.model, aiApprovalItem: approvalItems, aiExecutionLog: executionLogs } },
     governance,
-    executionLog: { log: vi.fn(async () => undefined), logToolExecution: vi.fn(async () => undefined) },
+    executionLog,
     moduleRef: { get: (token: unknown) => (token === KeyActionBoundaryService ? boundary : undefined) },
     businessGraph: { invalidateCache() {}, getSnapshot: async () => ({ business: { name: 'Biz' } }), buildContextString: () => '' },
     roleEngine: { getSystemPromptForCrew: () => 'You are KEY. {{CURRENT_DATE}}' },
@@ -164,7 +184,7 @@ function makeHarness(opts: HarnessOptions = {}) {
     saveConversationHistory: vi.fn(async () => undefined),
     enforceDoNotSay: async () => undefined,
     finalizeStreamSession: async function* () {},
-    executeTool,
+    ...(opts.realExecuteTool ? { executeToolAction, validateToolInput: () => undefined } : { executeTool }),
   }) as FlowOrchestratorService;
 
   /** An ordinary turn in which the model calls state.toolCall. */
@@ -192,7 +212,23 @@ function makeHarness(opts: HarnessOptions = {}) {
     expect(id, 'the server issues an id with every quick confirmation').toEqual(expect.any(String));
     return id as string;
   };
-  return { orchestrator, state, store, governance, boundary, evaluations, executed, executeTool, ask, confirm, issue };
+  return {
+    orchestrator,
+    state,
+    store,
+    governance,
+    boundary,
+    evaluations,
+    executed,
+    executeTool,
+    executeToolAction,
+    executionLog,
+    approvalItems,
+    executionLogs,
+    ask,
+    confirm,
+    issue,
+  };
 }
 
 afterEach(() => {
@@ -480,4 +516,166 @@ describe('V1-31 — the action boundary keeps its own confirmations (KF-EXEC-ACT
     expect(h.executeTool).not.toHaveBeenCalled();
     expect(h.boundary.confirmAndExecute).not.toHaveBeenCalled();
   });
+});
+
+describe('V1-31 review SEC-V131-2 — the member who confirmed is named on what the confirmation does', () => {
+  const FORMAL: Decision = { allowed: true, requiresFormalApproval: true, tier: 3, reason: 'Tier 3' };
+
+  it('an approval filed at confirm time names the confirming member as its requester, and so does its log row', async () => {
+    const h = makeHarness();
+    const confirmationId = await h.issue(OWNER);
+    h.state.decide = () => FORMAL;
+
+    const response = await h.confirm({ confirmationId }, OWNER);
+
+    expect(response.reply).toMatch(/approval queue/);
+    expect(h.governance.createApprovalItem).toHaveBeenCalledTimes(1);
+    expect(h.approvalItems.updateMany).toHaveBeenCalledWith({ where: { id: 'appr_1', businessId: BIZ }, data: { userId: OWNER } });
+    const queued = h.executionLog.log.mock.calls.map(([entry]) => entry).filter((e) => e.action === 'approval_queued_chat');
+    expect(queued).toEqual([expect.objectContaining({ businessId: BIZ, toolName: TOOL, actor: 'user', userId: OWNER })]);
+    expect(h.store.all()[0]).toMatchObject({ status: 'completed' });
+  });
+
+  it('a requester that cannot be written onto the item does not undo the queueing: it is logged and the answer stands', async () => {
+    const h = makeHarness();
+    const confirmationId = await h.issue(OWNER);
+    h.state.decide = () => FORMAL;
+    h.approvalItems.updateMany.mockRejectedValueOnce(new Error('db down'));
+
+    const response = await h.confirm({ confirmationId }, OWNER);
+
+    expect(response.reply).toMatch(/approval queue/);
+    expect(h.store.all()[0]).toMatchObject({ status: 'completed' });
+  });
+
+  it('the confirmed call is executed for the confirming member', async () => {
+    const h = makeHarness();
+    const confirmationId = await h.issue(OWNER);
+    await h.confirm({ confirmationId }, OWNER);
+    expect(h.executeTool).toHaveBeenCalledTimes(1);
+    expect(h.executeTool.mock.calls[0][4]).toMatchObject({ actorUserId: OWNER });
+  });
+
+  it.each([
+    ['succeeds', false],
+    ['fails', true],
+  ])('through the real executeTool, the log row of a confirmed call that %s names the member, and is written before the answer', async (_label, fails) => {
+    const h = makeHarness({ realExecuteTool: true });
+    const confirmationId = await h.issue(OWNER);
+    if (fails) h.executeToolAction.mockRejectedValueOnce(new Error('contact not found'));
+
+    const response = await h.confirm({ confirmationId }, OWNER);
+
+    expect(response.reply).toMatch(fails ? /Something went wrong: contact not found/ : /^Done!/);
+    expect(h.executeToolAction).toHaveBeenCalledTimes(1);
+    expect(h.executeToolAction.mock.calls[0].slice(0, 3)).toEqual([BIZ, TOOL, ARGS]);
+    expect(h.executionLog.logToolExecution).toHaveBeenCalledTimes(1);
+    expect(h.executionLog.logToolExecution.mock.calls[0].slice(0, 2)).toEqual([BIZ, TOOL]);
+    // No flushing: chat() answered only after the row named the member.
+    expect(h.executionLogs.updateMany).toHaveBeenCalledWith({ where: { id: 'log_tool_1', businessId: BIZ }, data: { userId: OWNER } });
+    expect(h.store.all()[0]).toMatchObject({ status: fails ? 'failed' : 'completed' });
+  });
+
+  it('a tool run with no member to name (a plan, a direct call) is logged as before: nothing is added and nothing waits', async () => {
+    const h = makeHarness({ realExecuteTool: true });
+    const result = await (h.orchestrator as any).executeTool(BIZ, TOOL, ARGS, 'tc_9', { planId: 'p_1', planStepId: 's_1' });
+    expect(result).toMatchObject({ success: true, toolCallId: 'tc_9' });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(h.executionLog.logToolExecution).toHaveBeenCalledTimes(1);
+    expect(h.executionLogs.updateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('V1-31 review CR-1 — a failure after the claim is recorded, so a retry is not told the call was used', () => {
+  it('the approval queue throws: the claim is settled failed, and the same id is answered as failed, not "already used"', async () => {
+    const h = makeHarness();
+    const confirmationId = await h.issue(OWNER);
+    h.state.decide = () => ({ allowed: true, requiresFormalApproval: true, tier: 3, reason: 'Tier 3' });
+    h.governance.createApprovalItem.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(h.confirm({ confirmationId }, OWNER)).rejects.toThrow('db down');
+    expect(h.store.all()[0]).toMatchObject({ status: 'failed', error: 'db down' });
+
+    const retry = await h.confirm({ confirmationId }, OWNER);
+    expect(retry.reply).not.toMatch(/already used/);
+    expect(retry.reply).toMatch(/was not executed: this confirmation is failed\. Please ask again\./);
+    expect(h.governance.createApprovalItem).toHaveBeenCalledTimes(1);
+    expect(h.executeTool).not.toHaveBeenCalled();
+  });
+
+  it('governance throws at confirm time: the claim is settled failed and nothing runs', async () => {
+    const h = makeHarness();
+    const confirmationId = await h.issue(OWNER);
+    h.governance.evaluate.mockRejectedValueOnce(new Error('policy store unavailable'));
+
+    await expect(h.confirm({ confirmationId }, OWNER)).rejects.toThrow('policy store unavailable');
+    expect(h.store.all()[0]).toMatchObject({ status: 'failed', error: 'policy store unavailable' });
+    expect(h.executeTool).not.toHaveBeenCalled();
+  });
+
+  it('the executor throws: still settled failed (as before), and an outcome already recorded is never overwritten', async () => {
+    const h = makeHarness();
+    const confirmationId = await h.issue(OWNER);
+    h.executeTool.mockRejectedValueOnce(new Error('executor crashed'));
+    await expect(h.confirm({ confirmationId }, OWNER)).rejects.toThrow('executor crashed');
+    expect(h.store.all()[0]).toMatchObject({ status: 'failed', error: 'executor crashed' });
+
+    const h2 = makeHarness();
+    const id2 = await h2.issue(OWNER);
+    await h2.confirm({ confirmationId: id2 }, OWNER);
+    expect(h2.store.all()[0]).toMatchObject({ status: 'completed' });
+    const transitions = h2.store.model.updateMany.mock.calls.map(([q]) => `${q.where.status}->${q.data.status}`);
+    expect(transitions).toEqual(['pending->claimed', 'claimed->completed']);
+  });
+});
+
+describe('V1-31 review CR-2 — a model tool call with no id is still confirmable by the id the server issued', () => {
+  it.each([
+    ['an empty id', ''],
+    ['no id at all', null],
+  ])('chat(): %s binds, confirms, executes once with the executor\'s own id, and spends the row', async (_label, toolCallId) => {
+    const h = makeHarness({ toolCallId });
+    const confirmationId = await h.issue(OWNER);
+    expect(h.store.all()[0].response.toolCallId).toBe('');
+
+    const response = await h.confirm({ confirmationId }, OWNER);
+
+    expect(response.reply).toMatch(/^Done!/);
+    expect(h.executed).toEqual([{ businessId: BIZ, name: TOOL, args: ARGS, toolCallId: undefined }]);
+    expect(h.store.all()[0]).toMatchObject({ status: 'completed' });
+  });
+
+  it.each([
+    ['an empty id', ''],
+    ['no id at all', null],
+  ])('streamChat(): %s binds the same way and confirms', async (_label, toolCallId) => {
+    const h = makeHarness({ toolCallId });
+    const chunks: any[] = [];
+    for await (const chunk of h.orchestrator.streamChat(BIZ, 'invoice the client for two hours', [], undefined, undefined, undefined, 's_1', OWNER)) {
+      chunks.push(chunk);
+    }
+    const id = chunks.find((c) => c.type === 'confirmation_required').pendingConfirmations[0].confirmationId;
+    expect(id).toEqual(expect.stringMatching(/^flowc_/));
+
+    const response = await h.confirm({ confirmationId: id }, OWNER);
+    expect(response.reply).toMatch(/^Done!/);
+    expect(h.executed).toHaveLength(1);
+    expect(h.store.all()[0]).toMatchObject({ status: 'completed' });
+  });
+
+  it('a stored row whose tool call id is missing (not even "") is still refused: only a row this code wrote is honoured', async () => {
+    const h = makeHarness();
+    const confirmationId = await h.issue(OWNER);
+    const [row] = h.store.rows.values();
+    delete row.response.toolCallId;
+    const response = await h.confirm({ confirmationId }, OWNER);
+    expect(response.reply).toMatch(/was not executed/);
+    expect(h.executeTool).not.toHaveBeenCalled();
+  });
+});
+
+describe('V1-31 review SEC-V131-1 — sibling execution routes outside this packet', () => {
+  it.todo(
+    'POST /actions/businesses/:businessId/execute (graph-actions.controller.ts executeAction) evaluates governance on the client toolName, ignores requiresQuickConfirm and runs executeToolDirect with the client args, so a quick-confirm call /flow/confirm refuses still runs there. That file is outside the V1-31 write set and the route predates it; M46 is not closed until a follow-up packet binds or refuses it.',
+  );
 });

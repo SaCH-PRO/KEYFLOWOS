@@ -51,7 +51,7 @@ describe('ApprovalController', () => {
   });
 
   it('escalates a request', async () => {
-    const result = await controller.escalate('biz_1', 'ar_1', { reason: 'No response' });
+    const result = await controller.escalate('biz_1', 'ar_1', { reason: 'No response' }, { user: { id: 'user_1' } } as any);
     expect(result!.status).toBe('escalated');
   });
 
@@ -72,7 +72,7 @@ describe('ApprovalController', () => {
       ['reject', () => scoped.reject('biz_other', 'ar_1', { decision: 'reject' } as any, req)],
       ['delegate', () => scoped.delegate('biz_other', 'ar_1', { delegatedTo: 'user_2' } as any, req)],
       ['cancel', () => scoped.cancel('biz_other', 'ar_1', req)],
-      ['escalate', () => scoped.escalate('biz_other', 'ar_1', { reason: 'x' })],
+      ['escalate', () => scoped.escalate('biz_other', 'ar_1', { reason: 'x' }, req)],
     ];
     for (const [name, attempt] of attempts) {
       await expect(attempt(), name).rejects.toMatchObject({ status: 404, message: 'Approval request not found' });
@@ -135,6 +135,33 @@ describe('ApprovalController', () => {
       const controller = new ApprovalController({ ...createMockApprovalService(), getById: async () => { lookedUp += 1; return { id: 'ar_1', businessId: 'biz_1' }; } } as any);
       await expect(controller.approve('biz_other', 'ar_1', {} as any, {} as any)).rejects.toMatchObject({ status: 401 });
       expect(lookedUp).toBe(0);
+    });
+
+    it.each([
+      ['no request', undefined],
+      ['no user', {}],
+      ['a user with no id', { user: {} }],
+      ['an empty id', { user: { id: '' } }],
+    ])('review SEC-V131-3: escalate with %s answers 401 before the tenant lookup and never escalates', async (_label, req) => {
+      const calls: string[] = [];
+      const controller = new ApprovalController({
+        ...createMockApprovalService(),
+        getById: async () => { calls.push('getById'); return { id: 'ar_1', businessId: 'biz_1', status: 'pending' }; },
+        escalateRequest: async () => { calls.push('escalateRequest'); return { id: 'ar_1', status: 'escalated' }; },
+      } as any);
+      await expect(controller.escalate('biz_1', 'ar_1', { reason: 'x' }, req as any)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(controller.escalate('biz_1', 'ar_1', { reason: 'x' }, req as any)).rejects.toMatchObject({ status: 401 });
+      expect(calls).toEqual([]);
+    });
+
+    it('review SEC-V131-3: an authenticated caller still escalates a request of the path business', async () => {
+      const calls: Array<[string, unknown]> = [];
+      const controller = new ApprovalController({
+        ...createMockApprovalService(),
+        escalateRequest: async (approvalId: string, reason?: string) => { calls.push(['escalateRequest', { approvalId, reason }]); return { id: 'ar_1', status: 'escalated' }; },
+      } as any);
+      await expect(controller.escalate('biz_1', 'ar_1', { reason: 'No response' }, { user: { id: 'manager_1' } } as any)).resolves.toMatchObject({ status: 'escalated' });
+      expect(calls).toEqual([['escalateRequest', { approvalId: 'ar_1', reason: 'No response' }]]);
     });
 
     it.todo(
