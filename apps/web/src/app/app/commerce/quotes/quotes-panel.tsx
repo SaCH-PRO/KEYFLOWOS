@@ -80,6 +80,38 @@ import { useCompose } from "@/components/email/compose-context";
 import { quoteConvertDefaults, quoteConvertRequest, type QuoteConvertForm } from "../../finance/components/quote-convert-modal";
 import { ArrowRightLeft, Eye } from "lucide-react";
 
+type QuoteBulkAction = "send" | "reject" | "delete";
+/** One row the bulk route left as it is (V1-50 / V1-QUOTE-CHAIN-finish bulk contract). */
+type QuoteBulkSkip = { id: string; quoteStatus?: string; code?: string };
+type QuoteBulkResult = { updated: number; action: string; skipped?: QuoteBulkSkip[]; skippedCount?: number };
+type BulkSkippedNotice = {
+  action: QuoteBulkAction;
+  total: number;
+  rows: Array<{ id: string; number: string; reason: string }>;
+};
+
+const QUOTE_BULK_DONE: Record<QuoteBulkAction, string> = { send: "sent", reject: "rejected", delete: "deleted" };
+
+/** Why the server skipped a row, in words (V1-53b). */
+function describeQuoteBulkSkip(skip: QuoteBulkSkip, action: QuoteBulkAction): string {
+  const status = (skip.quoteStatus ?? "").toLowerCase();
+  const aStatus = status ? `${/^[aeiou]/.test(status) ? "an" : "a"} ${status} quote` : "a quote in this status";
+  switch (skip.code) {
+    case "quote_converted":
+      return "converted to an invoice";
+    case "quote_bulk_not_eligible":
+      if (action === "send") return "only a draft can be sent in bulk";
+      if (action === "reject") return "only a sent or viewed quote can be rejected in bulk";
+      return `${aStatus} cannot be deleted`;
+    case "quote_transition_not_allowed":
+      return `${aStatus} cannot be ${QUOTE_BULK_DONE[action]}`;
+    case "quote_status_changed":
+      return "changed while the action ran; refresh and try again";
+    default:
+      return skip.code ? `refused (${skip.code})` : "refused by the server";
+  }
+}
+
 interface QuotesPanelProps {
   quotes: Quote[];
   contacts: Contact[];
@@ -237,34 +269,52 @@ export default function QuotesPanel({
   const [dateRange, setDateRange] = useState<DateRange>(DEFAULT_DATE_RANGE);
   const { selectedIds, toggleSelected, selectAll, clearSelection } = useBulkSelection();
 
+  const [bulkSkipped, setBulkSkipped] = useState<BulkSkippedNotice | null>(null);
+
+  // V1-53b-QUOTE-RESIDUALS: the bulk route answers the rows it skipped
+  // (`skipped`: id, quoteStatus, code). The panel said "<n> updated", cleared
+  // the whole selection and patched the rows it guessed from their status on
+  // screen, so a converted quote the server refused was shown SENT or removed
+  // and a VIEWED quote the server rejected stayed VIEWED. Now only the rows the
+  // server changed (sent and not skipped) are patched, the skipped rows stay
+  // selected, and the panel lists each one with the reason.
   const handleBulkStatusChange = useCallback(async (status: string) => {
     if (!businessId || selectedIds.size === 0) return;
-    const action = status === "SENT" ? "send" : status === "REJECTED" ? "reject" : "delete";
-    const { data, error } = await bulkUpdateQuotes(businessId, Array.from(selectedIds), action as "send" | "reject" | "delete");
-    if (data) {
-      toast.success(`${data.updated} quote(s) updated`);
-      clearSelection();
-      if (data.updated > 0) {
-        const eligibleStatuses: Record<string, string[]> = {
-          send: ["DRAFT"],
-          reject: ["SENT"],
-          delete: ["DRAFT", "SENT", "REJECTED", "EXPIRED"],
-        };
-        const eligible = new Set(
-          quotes
-            .filter((q) => selectedIds.has(q.id) && (eligibleStatuses[action] ?? []).includes(q.status))
-            .map((q) => q.id)
-        );
-        if (action === "delete") {
-          setQuotes((prev) => prev.filter((q) => !eligible.has(q.id)));
-        } else {
-          setQuotes((prev) => prev.map((q) => eligible.has(q.id) ? { ...q, status: status as Quote["status"] } : q));
-        }
-      }
-    } else {
+    const action: QuoteBulkAction = status === "SENT" ? "send" : status === "REJECTED" ? "reject" : "delete";
+    const ids = Array.from(selectedIds);
+    setBulkSkipped(null);
+    const { data, error } = await bulkUpdateQuotes(businessId, ids, action);
+    if (!data) {
       toast.error(error ?? "Bulk action failed");
+      return;
     }
-  }, [businessId, selectedIds, quotes, setQuotes]);
+    const result = data as QuoteBulkResult;
+    const skipped = (Array.isArray(result.skipped) ? result.skipped : []).filter((s) => ids.includes(s.id));
+    const skippedIds = new Set(skipped.map((s) => s.id));
+    const changed = new Set(ids.filter((id) => !skippedIds.has(id)));
+    if (result.updated > 0 && changed.size > 0) {
+      if (action === "delete") {
+        setQuotes((prev) => prev.filter((q) => !changed.has(q.id)));
+      } else {
+        setQuotes((prev) =>
+          prev.map((q) => (changed.has(q.id) && q.status !== status ? { ...q, status: status as Quote["status"] } : q)),
+        );
+      }
+    }
+    selectAll(ids.filter((id) => skippedIds.has(id)));
+    if (result.updated > 0 || skipped.length === 0) {
+      toast.success(`${result.updated} quote(s) updated`);
+    }
+    if (skipped.length > 0) {
+      const numberOf = new Map(quotes.map((q) => [q.id, q.quoteNumber]));
+      setBulkSkipped({
+        action,
+        total: ids.length,
+        rows: skipped.map((s) => ({ id: s.id, number: numberOf.get(s.id) ?? s.id, reason: describeQuoteBulkSkip(s, action) })),
+      });
+      toast.warning(`${skipped.length} of ${ids.length} selected quote(s) skipped`);
+    }
+  }, [businessId, selectedIds, quotes, setQuotes, selectAll]);
 
   const handleBulkDelete = useCallback(async () => {
     setConfirmState({
@@ -835,6 +885,35 @@ export default function QuotesPanel({
           </span>
         </div>
       </div>
+
+      {bulkSkipped && (
+        <div
+          data-testid="quotes-bulk-skipped"
+          role="status"
+          className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-medium text-amber-300">
+              {bulkSkipped.rows.length} of {bulkSkipped.total} selected quote(s) skipped, not {QUOTE_BULK_DONE[bulkSkipped.action]}; they stay selected.
+            </p>
+            <button
+              type="button"
+              onClick={() => setBulkSkipped(null)}
+              className="min-w-[24px] min-h-[24px] flex items-center justify-center rounded hover:bg-white/[0.06]"
+              aria-label="Dismiss skipped quotes notice"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+          <ul className="mt-1 max-h-32 overflow-y-auto space-y-0.5 text-muted-foreground">
+            {bulkSkipped.rows.map((row) => (
+              <li key={row.id}>
+                <span className="font-mono text-foreground">{row.number}</span>: {row.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {loading ? (
         <SkeletonList rows={4} cols={3} />

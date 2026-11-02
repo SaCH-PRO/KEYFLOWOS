@@ -148,6 +148,59 @@ export class CommerceAiService {
     return null;
   }
 
+  /**
+   * V1-53b-QUOTE-RESIDUALS: the quote a KEY quote action names by number, in
+   * this business and not deleted. The lookup was `quoteNumber: { contains }`
+   * with the first match taken, so "Q-1" acted on Q-10 or Q-11 and an absent
+   * "Q-2" on Q-20. The number now matches exactly: the exact spelling first
+   * ((businessId, quoteNumber) is unique), else the one quote equal to it
+   * ignoring case. Prisma sends an insensitive `equals` to Postgres as ILIKE
+   * with the value unescaped, so LIKE wildcards are escaped here and every
+   * candidate is checked again in code. No match answers quote_not_found;
+   * two quotes equal ignoring case, neither spelled as asked, answer
+   * quote_ambiguous; neither acts on any quote.
+   */
+  private async findQuoteByNumber(
+    businessId: string,
+    raw: unknown,
+  ): Promise<
+    | { quote: { id: string; quoteNumber: string } }
+    | { error: { success: false; error: string; code?: 'quote_not_found' | 'quote_ambiguous' } }
+  > {
+    const quoteNumber = typeof raw === 'string' || typeof raw === 'number' ? String(raw).trim() : '';
+    if (!quoteNumber) return { error: { success: false, error: 'Quote number is required' } };
+    const select = { id: true, quoteNumber: true } as const;
+    const exact = await this.db.quote.findFirst({
+      where: { businessId, quoteNumber, deletedAt: null },
+      select,
+    });
+    if (exact) return { quote: exact };
+    const lowered = quoteNumber.toLowerCase();
+    const candidates = (
+      await this.db.quote.findMany({
+        where: {
+          businessId,
+          quoteNumber: { equals: quoteNumber.replace(/[\\%_]/g, '\\$&'), mode: 'insensitive' },
+          deletedAt: null,
+        },
+        select,
+        take: 5,
+      })
+    ).filter((q) => q.quoteNumber.toLowerCase() === lowered);
+    if (candidates.length === 1) return { quote: candidates[0]! };
+    if (candidates.length > 1) {
+      const numbers = candidates.map((q) => q.quoteNumber).join(', ');
+      return {
+        error: {
+          success: false,
+          code: 'quote_ambiguous',
+          error: `Quote "${quoteNumber}" is ambiguous: it matches more than one quote (${numbers}). Use the exact quote number.`,
+        },
+      };
+    }
+    return { error: { success: false, code: 'quote_not_found', error: `Quote "${quoteNumber}" not found` } };
+  }
+
   private async findProduct(businessId: string, params: Record<string, any>) {
     if (params.productId) {
       return this.db.product.findFirst({
@@ -851,12 +904,9 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         }
 
         case 'convert_quote': {
-          const quoteNumber = params.quoteNumber;
-          if (!quoteNumber) return { success: false, error: 'Quote number is required' };
-          const quote = await this.db.quote.findFirst({
-            where: { businessId, quoteNumber: { contains: String(quoteNumber) }, deletedAt: null },
-          });
-          if (!quote) return { success: false, error: `Quote "${quoteNumber}" not found` };
+          const found = await this.findQuoteByNumber(businessId, params.quoteNumber);
+          if ('error' in found) return found.error;
+          const quote = found.quote;
           // V1-QUOTE-CHAIN-finish (review SEC-3 / SEC-V50-4): this wrote
           // status ACCEPTED directly, so it marked a customer-REJECTED quote
           // (or a converted one) ACCEPTED with no event. It is now the status
@@ -869,12 +919,9 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         }
 
         case 'send_quote': {
-          const quoteNumber = params.quoteNumber;
-          if (!quoteNumber) return { success: false, error: 'Quote number is required' };
-          const quote = await this.db.quote.findFirst({
-            where: { businessId, quoteNumber: { contains: String(quoteNumber) }, deletedAt: null },
-          });
-          if (!quote) return { success: false, error: `Quote "${quoteNumber}" not found` };
+          const found = await this.findQuoteByNumber(businessId, params.quoteNumber);
+          if ('error' in found) return found.error;
+          const quote = found.quote;
           // V1-QUOTE-CHAIN-finish (review SEC-3 / SEC-V50-4): this wrote
           // status SENT directly, with no view token and no event, and re-opened
           // a REJECTED or converted quote. It is now the status route's move:

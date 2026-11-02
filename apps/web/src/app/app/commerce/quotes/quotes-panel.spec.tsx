@@ -25,7 +25,7 @@
  *   - with nothing skipped the panel behaves as before (regression control).
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { render, screen, cleanup, fireEvent, waitFor, within, act } from "@testing-library/react";
 
 const toastMock = vi.hoisted(() => {
@@ -104,10 +104,16 @@ function installServer(reply: { status?: number; body: unknown }) {
 }
 
 let latest: Quote[] = [];
+const track = (quotes: Quote[]) => {
+  latest = quotes;
+};
 
+/** Holds the quotes in React state, as the commerce page does, and reports each committed list. */
 function Harness({ initial }: { initial: Quote[] }) {
   const [quotes, setQuotes] = useState<Quote[]>(initial);
-  latest = quotes;
+  useEffect(() => {
+    track(quotes);
+  }, [quotes]);
   return (
     <QuotesPanel
       quotes={quotes}
@@ -208,7 +214,8 @@ describe("V1-53b quotes panel: bulk actions report skipped rows", () => {
 
   it("bulk reject: the server's VIEWED move is shown REJECTED; a DRAFT it skips (not eligible) stays DRAFT and selected, with the reason", async () => {
     const s1 = quote("q_s1", { status: "SENT" });
-    const v1 = quote("q_v1", { status: "VIEWED" });
+    // The server stores VIEWED (QuoteStatus); the web Quote type does not list it.
+    const v1 = quote("q_v1", { status: "VIEWED" as Quote["status"] });
     const dr = quote("q_dr", { status: "DRAFT" });
     const server = installServer({
       body: { updated: 2, action: "reject", skipped: [{ id: dr.id, quoteStatus: "DRAFT", code: "quote_bulk_not_eligible" }], skippedCount: 1 },
