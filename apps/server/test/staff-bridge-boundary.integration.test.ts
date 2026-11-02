@@ -143,6 +143,7 @@ async function cleanup() {
     byBiz('quotes'),
     byBiz('project_tasks'),
     byBiz('projects'),
+    byBiz('business_goals'),
     byBiz('services'),
     byBiz('staff_members'),
     byBiz('org_assignments'),
@@ -482,6 +483,33 @@ describe('FB-2 — a member is matched to a position phone however either number
   });
 });
 
+describe("V1-21c review CR-1 — a Vietnamese number in Meta's spelling is not a Moscow member's phone", () => {
+  const moscow = `${P}moscow`; // STAFF of bizA, User.phone '+7 495 123-45-67'
+  const trunk8 = `${P}trunk8`; // STAFF of bizA, User.phone written with the trunk 8: '8 (912) 345-67-89'
+
+  beforeAll(async () => {
+    for (const [id, phone] of [[moscow, '+7 495 123-45-67'], [trunk8, '8 (912) 345-67-89']]) {
+      await db.user.create({ data: { id, email: `${id}@${P}test.local`, role: 'USER', phone } });
+      await db.membership.create({ data: { id: m(id), userId: id, businessId: ID.bizA, role: 'STAFF', maxApprovalTier: 0 } });
+    }
+  });
+
+  it("a contact-only position on '84951234567' (Vietnam, as Meta writes a sender) is filed: no member uses that number", async () => {
+    await expect(
+      structure.createAssignment(ID.bizA, { isContactOnly: true, contactName: 'Hanoi line', contactPhone: '84951234567', orgUnitId: ID.unitA }, ID.ownerA),
+    ).resolves.toMatchObject({ contactPhone: '84951234567', isContactOnly: true });
+  });
+
+  it("control: a member's own number is still refused, in Meta's spelling and against a User.phone written with the trunk 8", async () => {
+    for (const contactPhone of ['74951234567', '+7 (495) 123-45-67', '79123456789', '+7 912 345 67 89']) {
+      await expect(
+        structure.createAssignment(ID.bizA, { isContactOnly: true, contactName: 'Member line', contactPhone, orgUnitId: ID.unitA }, ID.ownerA),
+        contactPhone,
+      ).rejects.toThrow(REFUSED_MEMBER_PHONE);
+    }
+  });
+});
+
 describe("WB-2 — the per-business route takes a Meta message only for that business's own number", () => {
   it("a body Meta signed for B's number, posted to A's route, runs nothing in A", async () => {
     const item = await pendingItem(ID.posMeta, 3);
@@ -532,6 +560,39 @@ describe('WB-3 — a signed staff message is acted on once', () => {
     const second = (await db.aiApprovalItem.findFirst({ where: { businessId: ID.bizA, approverAssignmentId: ID.posFull, status: 'pending' } }))!;
     await twilioPost(ID.bizA, { ...params, SmsMessageSid: 'SMv21bb3' });
     expect(await statusOf(second.id)).toMatchObject({ status: 'approved', resolvedByUserId: ID.full });
+  });
+});
+
+/**
+ * V1-21c review CR-2: since V1-21c, WhatsAppController claims a Twilio delivery by its signature,
+ * so the Twilio cases above pass without the bridge's per-message claim. On the Meta routes (and
+ * /communications/inbound/sms) that claim is the only replay guard: Meta signs the raw body, so a
+ * replayed body carries the same wamid, and StaffChatBridgeService.claimMessage drops it.
+ */
+describe('WB-3 (Meta) — a Meta-signed staff message delivered again is acted on once (V1-21c review CR-2)', () => {
+  const raw = JSON.stringify(metaBody(PNID_A, PHONE.meta, 'YES', 'wamid.v21c.replay'));
+
+  it("the signed 'YES' approves the position's pending item", async () => {
+    const first = await pendingItem(ID.posMeta, 3);
+    const res = await metaPost(`/whatsapp/webhook/${ID.bizA}`, raw);
+    expect(res.status).toBe(201);
+    expect(await statusOf(first.id)).toMatchObject({ status: 'approved', resolvedBy: 'key_delegate' });
+  });
+
+  it('the same signed body (the same wamid), on the business route and on the shared one, leaves a later pending item pending', async () => {
+    const second = await pendingItem(ID.posMeta, 3);
+    const scoped = await metaPost(`/whatsapp/webhook/${ID.bizA}`, raw);
+    expect(scoped.status).toBe(201);
+    expect(await statusOf(second.id)).toMatchObject({ status: 'pending', resolvedBy: null });
+    const shared = await metaPost('/whatsapp/webhook', raw);
+    expect(shared.status).toBe(201);
+    expect(await statusOf(second.id)).toMatchObject({ status: 'pending', resolvedBy: null });
+  });
+
+  it('control: a new message (its own wamid, freshly signed) approves it', async () => {
+    const second = (await db.aiApprovalItem.findFirst({ where: { businessId: ID.bizA, approverAssignmentId: ID.posMeta, status: 'pending' } }))!;
+    await metaPost(`/whatsapp/webhook/${ID.bizA}`, JSON.stringify(metaBody(PNID_A, PHONE.meta, 'YES', 'wamid.v21c.replay2')));
+    expect(await statusOf(second.id)).toMatchObject({ status: 'approved', resolvedBy: 'key_delegate' });
   });
 });
 
@@ -723,11 +784,67 @@ describe("V1-21c — a project's task includes read only the business's own task
   });
 
   // The KEY dispatcher reads these with its own queries (FlowOrchestratorService.executeToolAction,
-  // src/modules/ai/flow-orchestrator.service.ts), which V1-21c's write set does not include: on a
-  // row like `planted`, projects_list_tasks for A returns B's project name through the task's
-  // project include, and bookings_list_bookings for A returns B's service name through a booking's
-  // service include. Both are to-one includes, which Prisma cannot filter: the dispatcher's where
-  // has to bind the relation ({ project: { businessId } }, { service: { businessId } }).
-  it.todo("projects_list_tasks does not read another business's project through a task's project include (dispatcher outside the V1-21c write set)");
-  it.todo("bookings_list_bookings does not read another business's service through a booking's service include (dispatcher outside the V1-21c write set)");
+  // src/modules/ai/flow-orchestrator.service.ts), which V1-21c's write set does not include. Over
+  // rows written before the TD9 repairs (V1-21c review ST-1, confirmed by running):
+  //   projects_list_tasks for A returns B's project name through the task's to-one project include
+  //     (a row like `planted`);
+  //   bookings_list_bookings for A returns B's service name AND B's contact (firstName, lastName,
+  //     email) through a booking's to-one service and contact includes (an A booking that names
+  //     serviceB and contactB);
+  //   projects_list for B counts A's task in projectB's taskCount (its _count's where names no
+  //     business).
+  // A to-one include cannot be filtered, and binding the booking's where on one relation
+  // ({ service: { businessId } }) would leave the other leaking: each to-one relation has to be
+  // read with its businessId and dropped when it is not the caller's (or the row left out by a
+  // where on every relation it includes), and the _count's where has to name businessId.
+  it.todo("projects_list_tasks does not read another business's project through a task's project include (dispatcher outside the V1-21c write set, ST-1)");
+  it.todo("bookings_list_bookings does not read another business's service through a booking's service include (dispatcher outside the V1-21c write set, ST-1)");
+  it.todo("bookings_list_bookings does not read another business's contact through a booking's contact include (dispatcher outside the V1-21c write set, ST-1)");
+  it.todo("projects_list does not count another business's task in a project's taskCount (dispatcher outside the V1-21c write set, ST-1)");
+});
+
+// ─── V1-21c review ST-2: a project's goal, written and read ──────────────────
+
+describe("V1-21c review ST-2 — a project names, and reads back, only the business's own goal", () => {
+  const goalA = `${P}goalA`;
+  const goalB = `${P}goalB`;
+  const GOAL_SECRET = 'A-SECRET-GOAL';
+
+  beforeAll(async () => {
+    await db.businessGoal.create({ data: { id: goalA, businessId: ID.bizA, title: GOAL_SECRET, category: 'revenue', targetValue: 1234567 } });
+    await db.businessGoal.create({ data: { id: goalB, businessId: ID.bizB, title: 'B-OWN-GOAL', category: 'leads' } });
+  });
+  afterAll(async () => {
+    await db.project.updateMany({ where: { id: ID.projectB }, data: { goalId: null } });
+  });
+
+  it("createProject refuses another business's goal and writes no project", async () => {
+    await expect(projects.createProject(ID.bizB, { name: 'v21c-foreign-goal', goalId: goalA })).rejects.toThrow(/Goal not found/);
+    expect(await db.project.count({ where: { businessId: ID.bizB, name: 'v21c-foreign-goal' } })).toBe(0);
+  });
+
+  it("updateProject refuses it and leaves the project's goal as it was", async () => {
+    await expect(projects.updateProject(ID.bizB, ID.projectB, { goalId: goalA })).rejects.toThrow(/Goal not found/);
+    expect((await db.project.findUnique({ where: { id: ID.projectB } })).goalId).toBeNull();
+  });
+
+  it("a project linked to another business's goal before this check reads no goal (getProject, listProjects)", async () => {
+    await db.project.update({ where: { id: ID.projectB }, data: { goalId: goalA } });
+    const one = await projects.getProject(ID.bizB, ID.projectB);
+    expect(one.goal).toBeNull();
+    const all = await projects.listProjects(ID.bizB);
+    expect(all.find((p: { id: string }) => p.id === ID.projectB).goal).toBeNull();
+    expect(JSON.stringify([one, all])).not.toContain(GOAL_SECRET);
+    await db.project.update({ where: { id: ID.projectB }, data: { goalId: null } });
+  });
+
+  it('control: its own goal is linked and read back, and null unlinks it', async () => {
+    const created = await projects.createProject(ID.bizB, { name: 'v21c-own-goal', goalId: goalB });
+    expect(created.goal).toMatchObject({ id: goalB, title: 'B-OWN-GOAL' });
+    expect((await projects.getProject(ID.bizB, created.id)).goal).toMatchObject({ id: goalB, title: 'B-OWN-GOAL' });
+    const listed = (await projects.listProjects(ID.bizB)).find((p: { id: string }) => p.id === created.id);
+    expect(listed.goal).toEqual({ id: goalB, title: 'B-OWN-GOAL', category: 'leads' });
+    expect((await projects.updateProject(ID.bizB, ID.projectB, { goalId: goalB })).goalId).toBe(goalB);
+    expect((await projects.updateProject(ID.bizB, ID.projectB, { goalId: null })).goalId).toBeNull();
+  });
 });

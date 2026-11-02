@@ -52,10 +52,17 @@ const PARENTHESISED_TRUNK_ZERO = /\(\s*0\s*\)/g;
 /**
  * Russia and Kazakhstan (country code 7) write their national trunk prefix as 8, not 0:
  * '8 (912) 345-67-89' is '+79123456789' (V1-21c FB2-PLUS0). The 8 is read as a trunk prefix only
- * in front of a 10-digit national number and only against country code 7, so a national number
- * that merely begins with 8 ('868-555-0122') is never shortened into another country's number.
+ * where it is written as one, set apart from the number by a space, '(', '-' or '.', in front of
+ * a 10-digit national number, and only against country code 7. A bare run of digits that begins
+ * with 8 is read as written: it is how Meta writes a sender in country codes 81 to 88 (Vietnam
+ * '84951234567', Hong Kong '85291234567'), and read as a trunk 8 it would be the +7 number with
+ * the same last ten digits (V1-21c review CR-1). Nor is a national number that merely begins
+ * with 8 ('868-555-0122') ever shortened into another country's number. A position's contactPhone
+ * arrives as normalizePhone leaves it (digits and '+'), so the trunk 8 is read on User.phone,
+ * which keeps its spelling.
  */
 const TRUNK_EIGHT_NATIONAL = /^8(\d{10})$/;
+const TRUNK_EIGHT_WRITTEN = /^8[\s(.-]/;
 const TRUNK_EIGHT_COUNTRY_CODES: ReadonlySet<string> = new Set(['7']);
 
 /**
@@ -87,11 +94,11 @@ function readings(phone: string | null | undefined): {
     }
     // Written with '+', the digits carry their country code; written without, they may be a
     // national number, kept as written (Italy keeps its leading 0), without a trunk '0', or
-    // without country code 7's trunk '8'.
+    // without country code 7's trunk '8' where it is written as one.
     if (!raw.includes('+')) {
       addNational(digits, null);
       if (/^0[1-9]/.test(digits)) addNational(digits.slice(1), null);
-      const trunkEight = TRUNK_EIGHT_NATIONAL.exec(digits);
+      const trunkEight = TRUNK_EIGHT_WRITTEN.test(spelling.trim()) ? TRUNK_EIGHT_NATIONAL.exec(digits) : null;
       if (trunkEight) addNational(trunkEight[1], TRUNK_EIGHT_COUNTRY_CODES);
     }
   }
@@ -105,8 +112,10 @@ function readings(phone: string | null | undefined): {
  * equal, or one side is a national number (at least MIN_NATIONAL_DIGITS digits, written without
  * '+') that the other's digits end with, behind exactly a country calling code. A shorter local
  * number ('555-0122') or digits behind something other than a country code are no match. A '(0)'
- * after the country code and country code 7's trunk '8' are read as trunk prefixes (V1-21c
- * FB2-PLUS0): '+44 (0) 7700 900123' is '+447700900123', '8 (912) 345-67-89' is '+79123456789'.
+ * after the country code and country code 7's trunk '8', written apart from the number, are read
+ * as trunk prefixes (V1-21c FB2-PLUS0): '+44 (0) 7700 900123' is '+447700900123',
+ * '8 (912) 345-67-89' is '+79123456789'; '84951234567' (Vietnam, as Meta writes it) is not
+ * '+74951234567' (V1-21c review CR-1).
  */
 export function samePhoneNumber(a: string | null | undefined, b: string | null | undefined): boolean {
   const ra = readings(a);
