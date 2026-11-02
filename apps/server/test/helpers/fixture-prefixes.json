@@ -358,6 +358,11 @@
       "packet": "V1-37-DM-CURRENCY"
     },
     {
+      "prefix": "v42a_",
+      "owner": "apps/server/test/invoice-transition-concurrency.integration.test.ts",
+      "packet": "V1-42-DM-LIFECYCLE-OWNER-CAS"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"
