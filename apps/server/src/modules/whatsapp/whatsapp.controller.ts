@@ -4,6 +4,8 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { WhatsAppService, type WhatsAppConfig } from './whatsapp.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { WebhookIngressLoggerService } from '../../core/connectors/webhook-ingress-logger.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
@@ -55,21 +57,43 @@ export class WhatsAppController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
+  // ─── Operator routes (R0-SEC2-WHATSAPP-CONFIG-AUTHORITY) ──────────────
+  //
+  // These had AuthGuard and BusinessGuard only: any member read the decrypted
+  // credentials, replaced the business's sending identity and sent from its
+  // number. Now: the config read answers no secret value (WhatsAppConfigView);
+  // the config write is OWNER only (D-11, WhatsAppService.assertConfigOwner,
+  // the BUSINESS_PROFILE_OWNER_ONLY refusal) and keeps no ModuleScopeGuard,
+  // which would refuse a distinguished owner with no membership row; sending
+  // needs operations:write and the inbox reads operations:read — `operations`
+  // is the module key the KEY inbox routes (KeyInboxController) require, the
+  // surface these WhatsApp conversations are ingested into.
+
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/config')
-  async getConfig(@Param('businessId') businessId: string) {
-    const config = await this.service.getConfig(businessId);
+  async getConfig(
+    @Param('businessId') businessId: string,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    const writer = await this.service.isConfigOwner(businessId, user);
+    const config = await this.service.getConfigView(businessId, { writer });
     return { data: config };
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
   @Patch('businesses/:businessId/config')
-  async saveConfig(@Param('businessId') businessId: string, @Body() config: WhatsAppConfig) {
+  async saveConfig(
+    @Param('businessId') businessId: string,
+    @Body() config: WhatsAppConfig,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    await this.service.assertConfigOwner(businessId, user);
     await this.service.saveConfig(businessId, config);
     return { success: true };
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('operations', 'write')
   @Post('businesses/:businessId/send')
   async sendMessage(
     @Param('businessId') businessId: string,
@@ -79,7 +103,8 @@ export class WhatsAppController {
     return result;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('operations', 'read')
   @Post('businesses/:businessId/test')
   async testConnection(@Param('businessId') businessId: string) {
     const config = await this.service.getConfig(businessId);
@@ -94,13 +119,19 @@ export class WhatsAppController {
   // shapes below are the drawer's own interfaces — returning the array/object
   // directly, not wrapped in `{ data }`, because that is what it reads.
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('operations', 'read')
   @Get('businesses/:businessId/status')
-  async getStatus(@Param('businessId') businessId: string) {
-    return this.service.getStatus(businessId);
+  async getStatus(
+    @Param('businessId') businessId: string,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ) {
+    const writer = await this.service.isConfigOwner(businessId, user);
+    return this.service.getStatus(businessId, { writer });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('operations', 'read')
   @Get('businesses/:businessId/conversations')
   async listConversations(
     @Param('businessId') businessId: string,
@@ -109,7 +140,8 @@ export class WhatsAppController {
     return this.service.listConversations(businessId, limit ? Number(limit) : undefined);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('operations', 'read')
   @Get('businesses/:businessId/conversations/:conversationId')
   async getConversation(
     @Param('businessId') businessId: string,
@@ -120,13 +152,15 @@ export class WhatsAppController {
     return conversation;
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('operations', 'read')
   @Get('businesses/:businessId/templates')
   async listTemplates(@Param('businessId') businessId: string) {
     return this.service.listTemplates(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('operations', 'write')
   @Post('businesses/:businessId/messages')
   async sendFromDrawer(
     @Param('businessId') businessId: string,
