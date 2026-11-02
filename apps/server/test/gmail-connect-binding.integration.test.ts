@@ -99,8 +99,38 @@
  * mailbox disconnected and connected again through the commerce flow is synced
  * again (CR-CMF6-1). For M01 and M02 the connector lookup forwards to the live
  * registry and ConnectorCredentialsService is real. SEC-CMF6-2 (a sync or smoke
- * test already running re-marks the row connected after a disconnect) is
- * outside this write set and tracked as the it.todo L04.
+ * test already running re-marks the row connected after a disconnect) was
+ * outside that write set and tracked as the it.todo L04.
+ *
+ * R0-CMF6b-GMAIL-SYNC-RACE (cases L04-L07; review SEC-CMF6-2). RED-BEFORE on
+ * claude/elegant-curie-7azpsb (cb50b388): GmailIngestionService.syncInbox and
+ * ConnectorRegistryService.smokeTestConnector wrote the gmail connector row
+ * connected (or error) unconditionally once they finished, so one that had
+ * started before the owner disconnected the mailbox wrote the row connected
+ * again after the disconnect marked it disconnected (or created one when there
+ * was none), with no mailbox behind it, and the nightly sync selected it again.
+ * GREEN-AFTER: that final write is made only while the business still has its
+ * mailbox, checked under the business row lock the disconnect takes. For these
+ * cases the sync reaches the REAL GmailIngestionService (its Gmail profile and
+ * inbox list are stubbed; the inbox is empty), and a case can hold the stubbed
+ * inbox list (the sync has read the row and not yet written it) or the smoke
+ * test's send open while it disconnects, then release it.
+ *
+ * R0-CMF6b review repairs (cases L08-L10; SEC-CMF6b-1..3, CR-CMF6b-1).
+ * RED-BEFORE on pkt/R0-CMF6b-GMAIL-SYNC-RACE (1433cc2b): the check for a
+ * linked mailbox read gmail_access_token, the one mailbox column a token
+ * refresh writes back, so a sync whose refresh was in flight over the
+ * disconnect marked the row connected again (L08); it did not check that the
+ * mailbox was still the one the sync or smoke test read, so a run over a
+ * disconnect and a new connection wrote the old mailbox onto the new row
+ * (L09); and a sync kept reading and filing messages after the disconnect
+ * (L10). GREEN-AFTER: a run binds the mailbox it reads (gmail_email, with a
+ * refresh token) before it reads a token; its final write is made only while
+ * that same mailbox is still linked (gmail_refresh_token and gmail_email, which
+ * a refresh never writes), and a sync re-checks that before every message read
+ * and every filing and stops when it is gone. An access token a refresh wrote
+ * back onto a cleared mailbox is cleared under the same lock. The stub answers
+ * the refresh_token grant and individual message reads; either can be held.
  *
  * Fixtures: prefix `k07d_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
@@ -169,6 +199,64 @@ const GRANTED_SCOPES = [
 
 /** R0-CMF6: the Gmail API send endpoint the GmailConnector smoke test posts its marked self-test to (stubbed). */
 const GMAIL_SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
+/**
+ * R0-CMF6b: the Gmail API inbox list GmailIngestionService.syncInbox calls
+ * after it has read the gmail connector row and before it writes it (stubbed:
+ * an empty inbox, or a 500 when the case releases it with 'fail').
+ */
+const GMAIL_LIST_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages';
+/** R0-CMF6b: the history id the stubbed Gmail profile reports (syncInbox stores it as its cursor). */
+const GMAIL_HISTORY_ID = 'k07d_history_1';
+
+/**
+ * R0-CMF6b: a stubbed Gmail call held open. `reached` resolves when the call
+ * arrives; the call answers once the case calls release ('ok', or 'fail' for
+ * a Gmail error).
+ */
+interface GmailHold {
+  reached: Promise<void>;
+  release: (outcome?: 'ok' | 'fail') => void;
+  wait: () => Promise<'ok' | 'fail'>;
+}
+function makeHold(): GmailHold {
+  let arrived!: () => void;
+  let answer!: (outcome: 'ok' | 'fail') => void;
+  const reached = new Promise<void>((resolve) => { arrived = resolve; });
+  const released = new Promise<'ok' | 'fail'>((resolve) => { answer = resolve; });
+  return {
+    reached,
+    release: (outcome = 'ok') => answer(outcome),
+    wait: () => { arrived(); return released; },
+  };
+}
+/**
+ * R0-CMF6b: the next inbox list ('list'), smoke-test send ('send'), access
+ * token refresh ('refresh', review SEC-CMF6b-1) or message read ('message',
+ * review SEC-CMF6b-3) the stub holds; each is used once.
+ */
+type HeldCall = 'list' | 'send' | 'refresh' | 'message';
+const holds: Partial<Record<HeldCall, GmailHold>> = {};
+function holdNext(call: HeldCall): GmailHold {
+  const held = makeHold();
+  holds[call] = held;
+  return held;
+}
+/** R0-CMF6b: the mailbox behind every inbox list the stubbed Gmail API answered. */
+const inboxLists: string[] = [];
+/** R0-CMF6b review SEC-CMF6b-1: the mailbox behind every refresh_token grant the stubbed token endpoint answered. */
+const refreshes: string[] = [];
+let refreshSeq = 0;
+/**
+ * R0-CMF6b review SEC-CMF6b-3: the messages a mailbox's stubbed inbox lists
+ * (empty unless a case puts some there), and every message read (the mailbox
+ * whose token read it and the message id).
+ */
+interface StubMessage { id: string; threadId: string; from: string; subject: string; text: string }
+const inboxOf = new Map<string, StubMessage[]>();
+const messageReads: Array<{ mailbox: string; id: string }> = [];
+function base64Url(text: string): string {
+  return Buffer.from(text, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
 
 let db: any;
 let app: any;
@@ -179,6 +267,13 @@ let realFetch: typeof fetch;
  * forwards the routes that act on a connector to it.
  */
 let liveRegistry: any;
+/**
+ * R0-CMF6b: the REAL GmailIngestionService (real PrismaService; entity
+ * resolution and Key Inbox are recording stand-ins, reached only when a case
+ * puts messages in the stubbed inbox, L10). A case routes one sync to it with
+ * inboxIngestion.syncInbox.mockImplementationOnce.
+ */
+let realIngestion: any;
 /** The connector registry stand-in behind ConnectorController: records what reached it. */
 const registry = {
   disconnectConnector: vi.fn(async () => undefined),
@@ -197,6 +292,19 @@ const registry = {
    * it too, so every other case sees it as before.
    */
   get: vi.fn((_type: string): unknown => undefined),
+};
+
+/**
+ * R0-CMF6b review SEC-CMF6b-3: what the REAL GmailIngestionService files a
+ * message through, stand-ins recording each call (contact resolution and the
+ * Key Inbox thread and message writes).
+ */
+const contactResolution = {
+  resolveContact: vi.fn(async (_businessId: string, _input: Record<string, unknown>) => ({ contactId: '' })),
+};
+const keyInboxFiling = {
+  upsertThread: vi.fn(async (input: Record<string, unknown>) => ({ id: `${P}thread_${String(input.externalThreadId)}` })),
+  addMessage: vi.fn(async (input: Record<string, unknown>) => ({ id: `${P}filed_${String(input.externalMessageId)}` })),
 };
 
 /**
@@ -275,6 +383,25 @@ async function stubFetch(input: any, init?: any): Promise<Response> {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : String(input?.url ?? input);
   if (url === TOKEN_URL && String(init?.method ?? 'GET').toUpperCase() === 'POST') {
     const body = new URLSearchParams(String(init?.body ?? ''));
+    // R0-CMF6b review SEC-CMF6b-1: GoogleTokenHelper refreshes an expired
+    // access token with the stored refresh token; a known one gets a fresh
+    // access token for the same mailbox (the case may hold it open).
+    if (body.get('grant_type') === 'refresh_token') {
+      const owner = [...accountsByCode.values()].find((a) => a.refresh !== null && a.refresh === body.get('refresh_token'));
+      if (owner) {
+        refreshes.push(owner.email);
+        const held = holds.refresh;
+        holds.refresh = undefined;
+        if (held) await held.wait();
+        refreshSeq += 1;
+        const access = `${owner.access}_r${refreshSeq}`;
+        accountsByAccess.set(access, owner);
+        return new Response(JSON.stringify({ access_token: access, expires_in: 3600, token_type: 'Bearer' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    }
     const code = body.get('code') ?? '';
     exchanges.push(code);
     const account = accountsByCode.get(code);
@@ -292,7 +419,8 @@ async function stubFetch(input: any, init?: any): Promise<Response> {
       { status: 200, headers: { 'content-type': 'application/json' } },
     );
   }
-  if (url === GMAIL_PROFILE_URL) {
+  // R0-CMF6b: syncInbox asks for the profile with ?fields=emailAddress,historyId.
+  if (url === GMAIL_PROFILE_URL || url.startsWith(`${GMAIL_PROFILE_URL}?`)) {
     const auth = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '');
     const account = accountsByAccess.get(auth.replace(/^Bearer /, ''));
     profileChecks.push(account?.email ?? '(unknown token)');
@@ -303,7 +431,10 @@ async function stubFetch(input: any, init?: any): Promise<Response> {
         { status: 403, headers: { 'content-type': 'application/json' } },
       );
     }
-    return new Response(JSON.stringify({ emailAddress: account.email }), { status: 200, headers: { 'content-type': 'application/json' } });
+    return new Response(JSON.stringify({ emailAddress: account.email, historyId: GMAIL_HISTORY_ID }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
   }
   if (url === GMAIL_SEND_URL && String(init?.method ?? 'GET').toUpperCase() === 'POST') {
     const auth = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '');
@@ -311,8 +442,61 @@ async function stubFetch(input: any, init?: any): Promise<Response> {
     const raw = String(JSON.parse(String(init?.body ?? '{}')).raw ?? '');
     const message = Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
     sends.push({ mailbox: account?.email ?? '(unknown token)', message });
+    const held = holds.send;
+    holds.send = undefined;
+    if (held) await held.wait();
     if (!account) return new Response('{}', { status: 401 });
     return new Response(JSON.stringify({ id: `${P}sent_${sends.length}` }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+  if (url.startsWith(`${GMAIL_LIST_URL}?`) && String(init?.method ?? 'GET').toUpperCase() === 'GET') {
+    const auth = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '');
+    const account = accountsByAccess.get(auth.replace(/^Bearer /, ''));
+    inboxLists.push(account?.email ?? '(unknown token)');
+    const held = holds.list;
+    holds.list = undefined;
+    const outcome = held ? await held.wait() : 'ok';
+    if (!account) return new Response('{}', { status: 401 });
+    if (outcome === 'fail') {
+      return new Response(JSON.stringify({ error: { message: 'k07d: Gmail backend error' } }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    const listed = (account ? inboxOf.get(account.email) : undefined) ?? [];
+    return new Response(
+      JSON.stringify({ messages: listed.map((m) => ({ id: m.id, threadId: m.threadId })), resultSizeEstimate: listed.length }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  }
+  // R0-CMF6b review SEC-CMF6b-3: GmailIngestionService reads each listed message (GET .../messages/:id?format=full).
+  if (url.startsWith(`${GMAIL_LIST_URL}/`) && String(init?.method ?? 'GET').toUpperCase() === 'GET') {
+    const auth = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '');
+    const account = accountsByAccess.get(auth.replace(/^Bearer /, ''));
+    const id = decodeURIComponent(url.slice(GMAIL_LIST_URL.length + 1).split('?')[0]);
+    messageReads.push({ mailbox: account?.email ?? '(unknown token)', id });
+    const held = holds.message;
+    holds.message = undefined;
+    if (held) await held.wait();
+    const found = account ? (inboxOf.get(account.email) ?? []).find((m) => m.id === id) : undefined;
+    if (!found) return new Response('{}', { status: 404 });
+    return new Response(
+      JSON.stringify({
+        id: found.id,
+        threadId: found.threadId,
+        labelIds: ['INBOX'],
+        internalDate: String(Date.now()),
+        snippet: found.subject,
+        payload: {
+          mimeType: 'text/plain',
+          headers: [
+            { name: 'From', value: `K07D Sender <${found.from}>` },
+            { name: 'Subject', value: found.subject },
+          ],
+          body: { data: base64Url(found.text) },
+        },
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
   }
   if (url === USERINFO_URL) {
     const auth = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '');
@@ -502,6 +686,60 @@ async function clearGmailConnector(businessId: string) {
   await db.$executeRawUnsafe(`DELETE FROM connector_activity_logs WHERE business_id = $1 AND connector_type = 'gmail'`, businessId);
 }
 
+/** R0-CMF6b: the transaction that last wrote the gmail connector row (xmin), or undefined when there is none. */
+async function gmailRowTx(businessId: string): Promise<string | undefined> {
+  const [row] = await db.$queryRawUnsafe(
+    `SELECT xmin::text AS tx FROM connector_statuses WHERE business_id = $1 AND connector_type = 'gmail'`,
+    businessId,
+  );
+  return row?.tx;
+}
+
+/** R0-CMF6b: the transaction of the latest gmail_disconnected audit row of a business (the disconnect's own). */
+async function disconnectTx(businessId: string): Promise<string | undefined> {
+  const [audit] = await db.$queryRawUnsafe(
+    `SELECT xmin::text AS tx FROM team_activity_logs WHERE business_id = $1 AND action = 'gmail_disconnected' ORDER BY created_at DESC LIMIT 1`,
+    businessId,
+  );
+  return audit?.tx;
+}
+
+/** R0-CMF6b review SEC-CMF6b-2: the transaction of the latest gmail_connected or gmail_replaced audit row (the confirmation's own). */
+async function connectTx(businessId: string): Promise<string | undefined> {
+  const [audit] = await db.$queryRawUnsafe(
+    `SELECT xmin::text AS tx FROM team_activity_logs WHERE business_id = $1 AND action IN ('gmail_connected', 'gmail_replaced') ORDER BY created_at DESC LIMIT 1`,
+    businessId,
+  );
+  return audit?.tx;
+}
+
+/**
+ * R0-CMF6b: the owner's POST .../sync/gmail, routed through the live registry
+ * and GmailConnector to the REAL GmailIngestionService.syncInbox; the request
+ * is sent at once and its response awaited by the caller.
+ */
+function startRealSync(businessId: string, actor = ID.owner): Promise<any> {
+  inboxIngestion.syncInbox.mockImplementationOnce((id: string) => realIngestion.syncInbox(id));
+  return connectorOp('sync', businessId, 'gmail', actor).then((res) => res);
+}
+
+/** R0-CMF6b: the owner's POST .../smoke/gmail (the live registry's smokeTestConnector), sent at once. */
+function startSmoke(businessId: string, actor = ID.owner): Promise<any> {
+  return connectorOp('smoke', businessId, 'gmail', actor).then((res) => res);
+}
+
+/** R0-CMF6b: a gmail connector row in the given state, with the mailbox as its account and intake on. */
+async function seedGmailConnectorRowAs(businessId: string, account: string, rowStatus: 'connected' | 'error') {
+  await seedGmailConnectorRow(businessId, account);
+  if (rowStatus === 'error') {
+    await db.$executeRawUnsafe(
+      `UPDATE connector_statuses SET status = 'error', last_error = 'k07d: earlier failure', last_error_at = NOW()
+        WHERE business_id = $1 AND connector_type = 'gmail'`,
+      businessId,
+    );
+  }
+}
+
 /** The business's mailbox columns as stored (raw SQL: what a database dump holds). */
 async function mailboxOf(businessId: string): Promise<{ email: string | null; access: string | null; refresh: string | null; expiry: Date | null }> {
   const rows = await db.$queryRawUnsafe(
@@ -653,6 +891,9 @@ beforeAll(async () => {
   liveRegistry = new ConnectorRegistryService(new EventEmitter2(), prismaService);
   liveRegistry.register(new GmailConnector(prismaService, new EventEmitter2(), {} as any, inboxIngestion as any));
   liveRegistry.register(controlConnector as any);
+  // R0-CMF6b: the real inbox sync, reached only by the cases that route a sync to it.
+  const { GmailIngestionService } = await import('../src/core/connectors/implementations/gmail-ingestion.service');
+  realIngestion = new GmailIngestionService(prismaService, contactResolution as any, keyInboxFiling as any);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -1766,9 +2007,397 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     await clearGmailConnector(ID.biz);
   });
 
-  it.todo(
-    '[R0-CMF6-L04] REQUIRED (follow-up; review SEC-CMF6-2, outside this write set: core/connectors/implementations/gmail-ingestion.service.ts syncInbox and core/connectors/connector-registry.service.ts smokeTestConnector): a gmail sync or smoke test already running when the owner disconnects the mailbox does not mark the gmail connector row connected again once the disconnect has marked it disconnected (their final status write is unconditional today, so the row ends connected with no mailbox and the nightly sync selects it again); the fix makes that write conditional on the mailbox still being linked',
-  );
+  it('[R0-CMF6-L04] R0-CMF6b RED-BEFORE (review SEC-CMF6-2): a gmail sync already running when the owner disconnects the mailbox does not mark the gmail connector row connected again: the owner\'s sync (the real inbox sync) is held after it has read the connected row and before it writes it, the owner disconnects (the row is marked disconnected), the sync is released: the row stays disconnected and was last written by the disconnect\'s transaction, the nightly sync does not select it, and the sync reports that the mailbox was disconnected while it ran (success false, nothing synced)', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+    const mailbox = googleAccount('cmf6b_sync_race');
+    await seedMailbox(ID.biz, mailbox);
+    await seedGmailConnectorRow(ID.biz, mailbox.email);
+    expect(await nightlySyncRowsOf(ID.biz)).toContain('gmail');
+    const listsBefore = inboxLists.length;
+
+    const held = holdNext('list');
+    const running = startRealSync(ID.biz);
+    await held.reached;
+    // The sync has read the row (its cursor comes from it) and is listing the inbox with the mailbox's token.
+    expect(inboxLists.slice(listsBefore)).toEqual([mailbox.email]);
+
+    const off = await disconnect(ID.biz, ID.owner);
+    expect([200, 204], JSON.stringify(off.body)).toContain(off.status);
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'disconnected' })]);
+    const disconnectedBy = await disconnectTx(ID.biz);
+    expect(disconnectedBy).toBeTruthy();
+    expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
+
+    held.release();
+    const res = await running;
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+
+    expect(await mailboxOf(ID.biz)).toMatchObject({ email: null, access: null, refresh: null });
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([
+      expect.objectContaining({ status: 'disconnected', connected_account: mailbox.email }),
+    ]);
+    expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
+    expect(await nightlySyncRowsOf(ID.biz)).not.toContain('gmail');
+    expect(res.body).toMatchObject({ success: false, itemsSynced: 0 });
+    expect(JSON.stringify(res.body.errors)).toMatch(/disconnected/i);
+    await clearGmailConnector(ID.biz);
+  });
+
+  it('[R0-CMF6-L05] R0-CMF6b RED-BEFORE (review SEC-CMF6-2): a gmail smoke test already running when the owner disconnects the mailbox does not mark the gmail connector row connected again: the owner\'s smoke test is held at its send (it has read the mailbox and its token), the owner disconnects, the send is released: the self-test it sent is reported as sent, but the row stays disconnected and was last written by the disconnect\'s transaction, and the nightly sync does not select it', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+    const mailbox = googleAccount('cmf6b_smoke_race');
+    await seedMailbox(ID.biz, mailbox);
+    await seedGmailConnectorRow(ID.biz, mailbox.email);
+    const sentBefore = sends.length;
+
+    const held = holdNext('send');
+    const running = startSmoke(ID.biz);
+    await held.reached;
+    expect(sends.slice(sentBefore).map((s) => s.mailbox)).toEqual([mailbox.email]);
+
+    const off = await disconnect(ID.biz, ID.owner);
+    expect([200, 204], JSON.stringify(off.body)).toContain(off.status);
+    const disconnectedBy = await disconnectTx(ID.biz);
+    expect(disconnectedBy).toBeTruthy();
+    expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
+
+    held.release();
+    const res = await running;
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect(res.body).toMatchObject({ success: true, account: mailbox.email });
+
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([
+      expect.objectContaining({ status: 'disconnected', connected_account: mailbox.email }),
+    ]);
+    expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
+    expect(await nightlySyncRowsOf(ID.biz)).not.toContain('gmail');
+    expect(sends.slice(sentBefore)).toHaveLength(1);
+    await clearGmailConnector(ID.biz);
+  });
+
+  it('[R0-CMF6-L06] R0-CMF6b RED-BEFORE (review SEC-CMF6-2): with no gmail connector row, a sync or a smoke test running over the owner\'s disconnect creates none (the disconnect writes none, L02), so the nightly sync selects nothing; and a sync that fails after the disconnect does not turn the disconnected row into an error row: it stays disconnected, last written by the disconnect', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+
+    // A sync with no row.
+    const syncMailbox = googleAccount('cmf6b_sync_norow');
+    await seedMailbox(ID.biz, syncMailbox);
+    const heldList = holdNext('list');
+    const syncing = startRealSync(ID.biz);
+    await heldList.reached;
+    expect([200, 204]).toContain((await disconnect(ID.biz, ID.owner)).status);
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([]);
+    heldList.release();
+    const synced = await syncing;
+    expect([200, 201], JSON.stringify(synced.body)).toContain(synced.status);
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([]);
+    expect(synced.body).toMatchObject({ success: false });
+
+    // A smoke test with no row.
+    const smokeMailbox = googleAccount('cmf6b_smoke_norow');
+    await seedMailbox(ID.biz, smokeMailbox);
+    const heldSend = holdNext('send');
+    const smoking = startSmoke(ID.biz);
+    await heldSend.reached;
+    expect([200, 204]).toContain((await disconnect(ID.biz, ID.owner)).status);
+    heldSend.release();
+    const smoked = await smoking;
+    expect([200, 201], JSON.stringify(smoked.body)).toContain(smoked.status);
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([]);
+    expect(await nightlySyncRowsOf(ID.biz)).not.toContain('gmail');
+
+    // A sync that fails after the disconnect.
+    const failMailbox = googleAccount('cmf6b_sync_fails');
+    await seedMailbox(ID.biz, failMailbox);
+    await seedGmailConnectorRow(ID.biz, failMailbox.email);
+    const heldFail = holdNext('list');
+    const failing = startRealSync(ID.biz);
+    await heldFail.reached;
+    expect([200, 204]).toContain((await disconnect(ID.biz, ID.owner)).status);
+    const disconnectedBy = await disconnectTx(ID.biz);
+    expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
+    heldFail.release('fail');
+    const failed = await failing;
+    expect([200, 201], JSON.stringify(failed.body)).toContain(failed.status);
+    expect(failed.body).toMatchObject({ success: false });
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([
+      expect.objectContaining({ status: 'disconnected', connected_account: failMailbox.email, last_error: null }),
+    ]);
+    expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
+    expect(await nightlySyncRowsOf(ID.biz)).not.toContain('gmail');
+    await clearGmailConnector(ID.biz);
+  });
+
+  it('[R0-CMF6-L07] R0-CMF6b control: with the mailbox still linked the final writes are made as before: a sync that fails marks the row error with its message; the real sync marks an error row connected (the mailbox as its account, intake on, no error, its history cursor stored) and creates a connected row when there is none; the smoke test marks an error row connected with the verified account and creates one when there is none; the nightly sync selects each connected row', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    const mailbox = googleAccount('cmf6b_linked');
+    await seedMailbox(ID.biz, mailbox);
+
+    // A sync that fails with the mailbox linked: error, as on the base.
+    await seedGmailConnectorRow(ID.biz, mailbox.email);
+    const heldFail = holdNext('list');
+    const failing = startRealSync(ID.biz);
+    await heldFail.reached;
+    heldFail.release('fail');
+    const failed = await failing;
+    expect([200, 201], JSON.stringify(failed.body)).toContain(failed.status);
+    expect(failed.body).toMatchObject({ success: false });
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([
+      expect.objectContaining({ status: 'error', last_error: expect.stringContaining('Gmail messages list 500') }),
+    ]);
+
+    // The sync from that error row.
+    const synced = await startRealSync(ID.biz);
+    expect([200, 201], JSON.stringify(synced.body)).toContain(synced.status);
+    expect(synced.body).toMatchObject({ success: true, itemsSynced: 0, errors: [] });
+    const [row] = await db.$queryRawUnsafe(
+      `SELECT status, connected_account, intake_enabled, last_error, metadata FROM connector_statuses
+        WHERE business_id = $1 AND connector_type = 'gmail'`,
+      ID.biz,
+    );
+    expect(row).toMatchObject({ status: 'connected', connected_account: mailbox.email, intake_enabled: true, last_error: null });
+    expect(row.metadata).toMatchObject({ lastHistoryId: GMAIL_HISTORY_ID });
+    expect(await nightlySyncRowsOf(ID.biz)).toContain('gmail');
+
+    // The smoke test from an error row.
+    await seedGmailConnectorRowAs(ID.biz, mailbox.email, 'error');
+    const smoked = await startSmoke(ID.biz);
+    expect([200, 201], JSON.stringify(smoked.body)).toContain(smoked.status);
+    expect(smoked.body).toMatchObject({ success: true, account: mailbox.email });
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'connected', connected_account: mailbox.email })]);
+
+    // No row: the sync creates one, and so does the smoke test.
+    await clearGmailConnector(ID.biz);
+    const created = await startRealSync(ID.biz);
+    expect(created.body).toMatchObject({ success: true });
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([
+      expect.objectContaining({ status: 'connected', connected_account: mailbox.email, intake_enabled: true }),
+    ]);
+    await clearGmailConnector(ID.biz);
+    const smokeCreated = await startSmoke(ID.biz);
+    expect(smokeCreated.body).toMatchObject({ success: true, account: mailbox.email });
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'connected', connected_account: mailbox.email })]);
+    expect(await nightlySyncRowsOf(ID.biz)).toContain('gmail');
+
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+  });
+
+  it('[R0-CMF6-L08] R0-CMF6b review SEC-CMF6b-1 and CR-CMF6b-1 RED-BEFORE: a sync whose access token refresh is still in flight when the owner disconnects the mailbox does not mark the gmail connector row connected again once the refresh writes the new access token back: the sync reports that the mailbox was disconnected while it ran (success false, nothing synced), reads nothing more from the mailbox (no profile, no inbox list), the row stays disconnected and was last written by the disconnect\'s transaction, the nightly sync does not select it, and the access token the refresh wrote back is not left on the business (every mailbox column empty, health/gmail disconnected)', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+    const mailbox = googleAccount('cmf6b_refresh_race');
+    await seedMailbox(ID.biz, mailbox);
+    // The stored access token is an hour old, so the sync refreshes it first (as a nightly sync usually does).
+    await db.$executeRawUnsafe(`UPDATE businesses SET gmail_token_expiry = NOW() - INTERVAL '1 hour' WHERE id = $1`, ID.biz);
+    await seedGmailConnectorRow(ID.biz, mailbox.email);
+    expect(await nightlySyncRowsOf(ID.biz)).toContain('gmail');
+    const refreshesBefore = refreshes.length;
+    const profilesBefore = profileChecks.length;
+    const listsBefore = inboxLists.length;
+
+    const held = holdNext('refresh');
+    const running = startRealSync(ID.biz);
+    await held.reached;
+    expect(refreshes.slice(refreshesBefore)).toEqual([mailbox.email]);
+
+    const off = await disconnect(ID.biz, ID.owner);
+    expect([200, 204], JSON.stringify(off.body)).toContain(off.status);
+    expect(await mailboxOf(ID.biz)).toMatchObject({ email: null, access: null, refresh: null, expiry: null });
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'disconnected' })]);
+    const disconnectedBy = await disconnectTx(ID.biz);
+    expect(disconnectedBy).toBeTruthy();
+    expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
+
+    // Google answers the refresh; GoogleTokenHelper writes the new access token and its expiry back.
+    held.release();
+    const res = await running;
+    expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
+    expect(res.body).toMatchObject({ success: false, itemsSynced: 0 });
+    expect(JSON.stringify(res.body.errors)).toMatch(/disconnected/i);
+
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([
+      expect.objectContaining({ status: 'disconnected', connected_account: mailbox.email }),
+    ]);
+    expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
+    expect(await nightlySyncRowsOf(ID.biz)).not.toContain('gmail');
+    expect(profileChecks.slice(profilesBefore)).toEqual([]);
+    expect(inboxLists.slice(listsBefore)).toEqual([]);
+    expect(await mailboxOf(ID.biz)).toMatchObject({ email: null, access: null, refresh: null, expiry: null });
+    const health = await connectorRead('health/gmail', ID.biz, ID.owner);
+    expect(health.status, JSON.stringify(health.body)).toBe(200);
+    expect(health.body).toMatchObject({ status: 'disconnected' });
+    await clearGmailConnector(ID.biz);
+  });
+
+  it('[R0-CMF6-L09] R0-CMF6b review SEC-CMF6b-2 RED-BEFORE: a sync or a smoke test of one mailbox still running when the owner disconnects it and connects another does not write the first mailbox onto the gmail connector row the confirmation wrote: the sync reports that its mailbox was disconnected while it ran (success false, nothing synced) and the row keeps the new address, no history cursor of the first mailbox, and the confirmation\'s transaction; the smoke test reports the self-test it sent from the mailbox it read, and the row keeps the next confirmation\'s address and transaction', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+    const first = googleAccount('cmf6b_swap_a');
+    await seedMailbox(ID.biz, first);
+    await seedGmailConnectorRow(ID.biz, first.email);
+    const listsBefore = inboxLists.length;
+
+    // A sync of the first mailbox, held at its inbox list.
+    const heldList = holdNext('list');
+    const syncing = startRealSync(ID.biz);
+    await heldList.reached;
+    expect(inboxLists.slice(listsBefore)).toEqual([first.email]);
+    expect([200, 204]).toContain((await disconnect(ID.biz, ID.owner)).status);
+    const second = googleAccount('cmf6b_swap_b');
+    const secondBack = await startAndComplete(ID.biz, ID.owner, second);
+    expect(secondBack.gmail).toBe('pending');
+    const secondOk = await confirm(ID.biz, secondBack.pending, ID.owner, second.email);
+    expect([200, 201], JSON.stringify(secondOk.body)).toContain(secondOk.status);
+    const secondBy = await connectTx(ID.biz);
+    expect(secondBy).toBeTruthy();
+    expect(await gmailRowTx(ID.biz)).toBe(secondBy);
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'connected', connected_account: second.email })]);
+
+    heldList.release();
+    const synced = await syncing;
+    expect([200, 201], JSON.stringify(synced.body)).toContain(synced.status);
+    expect(synced.body).toMatchObject({ success: false, itemsSynced: 0 });
+    expect(JSON.stringify(synced.body.errors)).toMatch(/disconnected/i);
+    const [afterSync] = await db.$queryRawUnsafe(
+      `SELECT status, connected_account, metadata FROM connector_statuses WHERE business_id = $1 AND connector_type = 'gmail'`,
+      ID.biz,
+    );
+    expect(afterSync).toMatchObject({ status: 'connected', connected_account: second.email });
+    expect((afterSync.metadata as Record<string, unknown> | null)?.lastHistoryId).toBeUndefined();
+    expect(await gmailRowTx(ID.biz)).toBe(secondBy);
+    expect((await mailboxOf(ID.biz)).email).toBe(second.email);
+
+    // A smoke test of the second mailbox, held at its send; the owner disconnects it and connects a third.
+    const sentBefore = sends.length;
+    const heldSend = holdNext('send');
+    const smoking = startSmoke(ID.biz);
+    await heldSend.reached;
+    expect(sends.slice(sentBefore).map((s) => s.mailbox)).toEqual([second.email]);
+    expect([200, 204]).toContain((await disconnect(ID.biz, ID.owner)).status);
+    const third = googleAccount('cmf6b_swap_c');
+    const thirdBack = await startAndComplete(ID.biz, ID.owner, third);
+    const thirdOk = await confirm(ID.biz, thirdBack.pending, ID.owner, third.email);
+    expect([200, 201], JSON.stringify(thirdOk.body)).toContain(thirdOk.status);
+    const thirdBy = await connectTx(ID.biz);
+    expect(thirdBy).toBeTruthy();
+    expect(thirdBy).not.toBe(secondBy);
+    expect(await gmailRowTx(ID.biz)).toBe(thirdBy);
+
+    heldSend.release();
+    const smoked = await smoking;
+    expect([200, 201], JSON.stringify(smoked.body)).toContain(smoked.status);
+    expect(smoked.body).toMatchObject({ success: true, account: second.email });
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'connected', connected_account: third.email })]);
+    expect(await gmailRowTx(ID.biz)).toBe(thirdBy);
+    expect((await mailboxOf(ID.biz)).email).toBe(third.email);
+    expect(await nightlySyncRowsOf(ID.biz)).toContain('gmail');
+
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+  });
+
+  it('[R0-CMF6-L10] R0-CMF6b review SEC-CMF6b-3 RED-BEFORE: a sync stops reading the mailbox once the owner has disconnected it: held at its inbox list over the disconnect, it reads no message, resolves no contact and files nothing into Key Inbox; held at its first message read over the disconnect, it files not even that message and reads no other; each reports that the mailbox was disconnected while it ran (success false, nothing synced) and the row stays disconnected, last written by the disconnect; control: with the mailbox linked the same sync reads and files every message and marks the row connected', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+    const mailbox = googleAccount('cmf6b_reads');
+    const inbox: StubMessage[] = [1, 2].map((n) => ({
+      id: `${P}msg_${n}_${mailbox.code}`,
+      threadId: `${P}thr_${n}_${mailbox.code}`,
+      from: `${P}sender_${n}@outside.test`,
+      subject: `K07D message ${n}`,
+      text: `k07d secret body ${n}`,
+    }));
+    inboxOf.set(mailbox.email, inbox);
+    const resetFiling = () => {
+      contactResolution.resolveContact.mockClear();
+      keyInboxFiling.upsertThread.mockClear();
+      keyInboxFiling.addMessage.mockClear();
+    };
+    const expectNothingFiled = () => {
+      expect(contactResolution.resolveContact).not.toHaveBeenCalled();
+      expect(keyInboxFiling.upsertThread).not.toHaveBeenCalled();
+      expect(keyInboxFiling.addMessage).not.toHaveBeenCalled();
+    };
+    try {
+      // Held at the inbox list: the owner disconnects, the list answers with both messages.
+      await seedMailbox(ID.biz, mailbox);
+      await seedGmailConnectorRow(ID.biz, mailbox.email);
+      resetFiling();
+      let readsBefore = messageReads.length;
+      const heldList = holdNext('list');
+      const listing = startRealSync(ID.biz);
+      await heldList.reached;
+      expect([200, 204]).toContain((await disconnect(ID.biz, ID.owner)).status);
+      let disconnectedBy = await disconnectTx(ID.biz);
+      heldList.release();
+      const listed = await listing;
+      expect([200, 201], JSON.stringify(listed.body)).toContain(listed.status);
+      expect(listed.body).toMatchObject({ success: false, itemsSynced: 0 });
+      expect(JSON.stringify(listed.body.errors)).toMatch(/disconnected/i);
+      expect(messageReads.slice(readsBefore)).toEqual([]);
+      expectNothingFiled();
+      expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'disconnected' })]);
+      expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
+
+      // Held at the first message read: the owner disconnects, the read answers.
+      await seedMailbox(ID.biz, mailbox);
+      await seedGmailConnectorRow(ID.biz, mailbox.email);
+      resetFiling();
+      readsBefore = messageReads.length;
+      const heldRead = holdNext('message');
+      const reading = startRealSync(ID.biz);
+      await heldRead.reached;
+      expect([200, 204]).toContain((await disconnect(ID.biz, ID.owner)).status);
+      disconnectedBy = await disconnectTx(ID.biz);
+      heldRead.release();
+      const read = await reading;
+      expect([200, 201], JSON.stringify(read.body)).toContain(read.status);
+      expect(read.body).toMatchObject({ success: false, itemsSynced: 0 });
+      expect(JSON.stringify(read.body.errors)).toMatch(/disconnected/i);
+      expect(messageReads.slice(readsBefore)).toEqual([{ mailbox: mailbox.email, id: inbox[0].id }]);
+      expectNothingFiled();
+      expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'disconnected' })]);
+      expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
+      expect(await nightlySyncRowsOf(ID.biz)).not.toContain('gmail');
+
+      // Control: the mailbox stays linked, so the same sync reads and files both messages.
+      await seedMailbox(ID.biz, mailbox);
+      await seedGmailConnectorRow(ID.biz, mailbox.email);
+      resetFiling();
+      readsBefore = messageReads.length;
+      const synced = await startRealSync(ID.biz);
+      expect([200, 201], JSON.stringify(synced.body)).toContain(synced.status);
+      expect(synced.body).toMatchObject({ success: true, itemsSynced: 2, errors: [] });
+      expect(messageReads.slice(readsBefore)).toEqual(inbox.map((m) => ({ mailbox: mailbox.email, id: m.id })));
+      expect(contactResolution.resolveContact.mock.calls.map((c) => c[1].email)).toEqual(inbox.map((m) => m.from));
+      expect(keyInboxFiling.addMessage.mock.calls.map((c) => [c[0].businessId, c[0].externalMessageId, c[0].contentText])).toEqual(
+        inbox.map((m) => [ID.biz, m.id, m.text]),
+      );
+      expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'connected', connected_account: mailbox.email })]);
+    } finally {
+      inboxOf.delete(mailbox.email);
+    }
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+  });
 
   it('[R0-CMF6-M01] review SEC-CMF6-1 RED-BEFORE: DELETE /connectors/businesses/:b/credentials/gmail, which marks the gmail connector row disconnected and clears its account, is refused for a STAFF member (role defaults), a STAFF member granted revenue: admin and an ADMIN (403 GMAIL_OWNER_ONLY) before anything is written: the row stays connected with its account and connection time, the nightly sync still selects it and the mailbox stays; a non-member 403, anonymous 401; the owner and a SUPER_ADMIN still clear it, and a STAFF member still clears another connector\'s credentials (google_calendar control)', async () => {
     await clearPending(ID.biz);
