@@ -26,6 +26,13 @@
  *   CONTROL (green at the base, kept as regression controls): two staff
  *   members in the same slot both succeed; the same slot in another tenant
  *   does not block; a reschedule into an occupied slot is refused.
+ *   REVIEW REPAIR SEC-V16-1 (RED at bfeeb9b1, the first V1-16 head): a status
+ *   write that brings a CANCELLED or NO_SHOW booking back (the status route,
+ *   confirmBooking) is a claim too, so it cannot land on a slot booked since;
+ *   controls: back into a free slot it succeeds, and a move between two
+ *   slot-holding statuses still works for legacy rows that already overlap.
+ *   TODO CR-V16-1: KEY's get_availability reads staff hours in UTC (outside
+ *   this packet's write set); see the it.todo at the end.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * PlanLimitGuard, PublicRateLimitGuard (real Redis at REDIS_URL, this suite's
@@ -495,4 +502,116 @@ describe('V1-16 the business clock (RED at the base: server-local hours)', () =>
     expect(lateInApp.status).toBe(400);
     expect(lateInApp.body.message).toBe('The selected time is outside business hours.');
   });
+});
+
+/**
+ * Review repair SEC-V16-1. A CANCELLED or NO_SHOW booking gave its slot back
+ * (the guard stops counting it), so the slot can be booked again. The status
+ * route and confirmBooking moved such a booking back to PENDING or CONFIRMED
+ * with a bare update: no guard and no lock, so it landed on top of the booking
+ * made since, and one staff slot had two live owners. At bfeeb9b1 the first two
+ * cases below wrote two owners and the confirmBooking case resolved.
+ */
+describe('V1-16 a status write that brings a booking back claims its slot (SEC-V16-1)', () => {
+  function setStatus(bookingId: string, status: string) {
+    return agent()
+      .post(`/bookings/businesses/${ID.bizA}/bookings/${bookingId}/status`)
+      .set(HEADER, ID.ownerA)
+      .send({ status });
+  }
+
+  function seedBooking(id: string, input: { staffId: string; start: Date; status: string }) {
+    return db.booking.create({
+      data: {
+        id, businessId: ID.bizA, contactId: ID.contactA, serviceId: ID.svcRace, staffId: input.staffId,
+        startTime: input.start, endTime: plusMins(input.start, 60), status: input.status,
+      },
+    });
+  }
+
+  const statusOf = async (id: string) => (await db.booking.findUnique({ where: { id }, select: { status: true } })).status;
+
+  it('RED-BEFORE: a cancelled booking is not confirmed back onto a slot booked since the cancellation', async () => {
+    const start = utc('2030-01-15T14:00:00.000Z'); // Tuesday 10:00 local
+    const cancelled = `${P}bkCancelled`;
+    await seedBooking(cancelled, { staffId: ID.staff1, start, status: 'CANCELLED' });
+    const since = await inAppCreate({ serviceId: ID.svcRace, staffId: ID.staff1, start });
+    expect(since.status, since.body?.message).toBe(201);
+
+    const res = await setStatus(cancelled, 'CONFIRMED');
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.message).toBe(MSG.taken);
+    expect(await statusOf(cancelled)).toBe('CANCELLED');
+    const rows = await liveAt(ID.bizA, start, { staffId: ID.staff1 });
+    expect(rows.map((r: any) => r.id)).toEqual([since.body.id]);
+  });
+
+  it('RED-BEFORE: a no-show set back to PENDING racing a public create for its slot leaves ONE owner, whichever lands first', async () => {
+    // Six rounds, one slot each (Wednesday 09:00-14:00 local), with the status
+    // write sent 0 to 320 ms after the public create: the early rounds land
+    // before the create, the late ones after it has committed, which is the
+    // order that wrote two owners at bfeeb9b1.
+    const delays = [0, 20, 40, 80, 160, 320];
+    for (const [i, delay] of delays.entries()) {
+      const start = utc(`2030-01-16T${String(13 + i).padStart(2, '0')}:00:00.000Z`);
+      const noShow = `${P}bkNoShow${i}`;
+      await seedBooking(noShow, { staffId: ID.staff2, start, status: 'NO_SHOW' });
+
+      const results = await Promise.all([
+        publicCreate({ serviceId: ID.svcRace, staffId: ID.staff2, start }),
+        new Promise((resolve) => setTimeout(resolve, delay)).then(() => setStatus(noShow, 'PENDING')),
+      ]);
+      const round = `round ${i} (status write +${delay} ms): ${describeResults(results)}`;
+      const rows = await liveAt(ID.bizA, start, { staffId: ID.staff2 });
+      expect(rows.length, `owners of the slot; ${round}`).toBe(1);
+      expect(results.filter(created).length, round).toBe(1);
+      const refused = results.find((r) => !created(r))!;
+      expect(refused.status, round).toBe(400);
+      expect(refused.body.message, round).toBe(MSG.taken);
+    }
+  });
+
+  it('RED-BEFORE: confirmBooking (invoice.paid, KEY confirm_booking) does not bring a cancelled booking back onto a taken slot', async () => {
+    const start = utc('2030-01-18T14:00:00.000Z'); // Friday 10:00 local
+    const cancelled = `${P}bkCancelledPaid`;
+    await seedBooking(cancelled, { staffId: ID.staff1, start, status: 'CANCELLED' });
+    const since = await inAppCreate({ serviceId: ID.svcRace, staffId: ID.staff1, start });
+    expect(since.status, since.body?.message).toBe(201);
+
+    await expect(bookingsService.confirmBooking(cancelled)).rejects.toThrow(MSG.taken);
+    expect(await statusOf(cancelled)).toBe('CANCELLED');
+    expect(await liveAt(ID.bizA, start, { staffId: ID.staff1 })).toHaveLength(1);
+  });
+
+  it('CONTROL: a cancelled booking whose slot is still free is confirmed back', async () => {
+    const start = utc('2030-01-17T14:00:00.000Z'); // Thursday 10:00 local
+    const cancelled = `${P}bkCancelledFree`;
+    await seedBooking(cancelled, { staffId: ID.staff1, start, status: 'CANCELLED' });
+
+    const res = await setStatus(cancelled, 'CONFIRMED');
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.status).toBe('CONFIRMED');
+    expect((await liveAt(ID.bizA, start, { staffId: ID.staff1 })).map((r: any) => r.id)).toEqual([cancelled]);
+  });
+
+  it('CONTROL: a move between two slot-holding statuses does not re-read the slot, so legacy rows that already overlap still move', async () => {
+    const start = utc('2030-01-17T16:00:00.000Z'); // Thursday 12:00 local
+    const first = `${P}bkLegacy1`;
+    const second = `${P}bkLegacy2`;
+    await seedBooking(first, { staffId: ID.staff2, start, status: 'CONFIRMED' });
+    await seedBooking(second, { staffId: ID.staff2, start, status: 'PENDING' });
+
+    const res = await setStatus(second, 'CONFIRMED');
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(await statusOf(second)).toBe('CONFIRMED');
+    const cancel = await setStatus(first, 'CANCELLED');
+    expect(cancel.status, JSON.stringify(cancel.body)).toBe(201);
+    expect(await statusOf(first)).toBe('CANCELLED');
+  });
+});
+
+describe('V1-16 consumers of the business clock outside this packet (review CR-V16-1)', () => {
+  it.todo(
+    "CR-V16-1: KEY get_availability (key-cortex/adapters/bookings-adapter.service.ts:217-225, outside the V1-16 write set) still reads staff hours as UTC wall-clock, so on a UTC server a Port_of_Spain business is offered 09:00Z..16:00Z and KEY create_booking/reschedule_booking refuse those slots as outside the staff member's hours; the adapter must read hours in Business.timezone (or ask BookingsService.getAvailableSlots) in a packet whose write set holds it",
+  );
 });

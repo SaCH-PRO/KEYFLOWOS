@@ -1,6 +1,6 @@
 import { BadRequestException, NotFoundException, ForbiddenException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { BookingStatus, Prisma } from '@prisma/client';
+import { Booking, BookingStatus, Prisma } from '@prisma/client';
 import {
   BookingCompletedPayload,
   BookingConfirmedPayload,
@@ -89,6 +89,13 @@ type SlotParams = {
  */
 const SLOT_LOCK_NAMESPACE = 'booking-slot:';
 const SLOT_CLAIM_TX_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
+
+/** Statuses that give the slot back: the ones assertSlotFree's `notIn` does not count. */
+const SLOT_RELEASING_STATUSES: BookingStatus[] = ['CANCELLED', 'NO_SHOW'];
+const holdsSlot = (status: BookingStatus) => !SLOT_RELEASING_STATUSES.includes(status);
+
+/** What a status write needs to know about the booking to decide whether it claims a slot. */
+type StatusWriteTarget = Pick<Booking, 'id' | 'businessId' | 'serviceId' | 'staffId' | 'startTime' | 'endTime' | 'status'>;
 
 /** An instant as a wall clock reads it: calendar day, weekday (0 = Sunday), minutes past midnight. */
 interface WallClock {
@@ -399,15 +406,19 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         'Invalid status. Must be one of: PENDING, CONFIRMED, CANCELLED, COMPLETED, NO_SHOW',
       );
     }
-    const updated = await this.prisma.client.booking.update({
-      where: { id: bookingId },
-      data: { status },
-      include: {
-        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-        service: { select: { id: true, name: true, duration: true, price: true } },
-        staff: { select: { id: true, name: true } },
-      },
-    });
+    // V1-16: back from CANCELLED or NO_SHOW, the booking takes its slot again,
+    // through the claim (writeBookingStatus).
+    const updated = await this.writeBookingStatus(booking, status, (db, where) =>
+      db.booking.update({
+        where,
+        data: { status },
+        include: {
+          contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+          service: { select: { id: true, name: true, duration: true, price: true } },
+          staff: { select: { id: true, name: true } },
+        },
+      }),
+    );
 
     if (status === 'CONFIRMED' && booking.contactId) {
       this.events.emit('booking.confirmed', {
@@ -807,6 +818,51 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       await this.assertSlotFree(slot, tx);
       return write(tx);
     }, SLOT_CLAIM_TX_OPTIONS);
+  }
+
+  /**
+   * V1-16 (SEC-V16-1): a booking's status write, which can take a slot too. A
+   * CANCELLED or NO_SHOW booking gave its slot back, and assertSlotFree stops
+   * counting it, so moving it to any other status holds the slot again. That is
+   * a claim like a create: it goes through claimSlot and is refused with the
+   * overlap message when the slot was booked after the cancellation. It was a
+   * bare update, which put a second live booking on that slot.
+   *
+   * A move between two slot-holding statuses keeps the slot the booking already
+   * holds: a plain update, no lock, and no overlap re-read, which legacy rows
+   * that already overlap would fail. The update is conditional on the booking
+   * still holding the slot, so a cancel that lands between the read and this
+   * write turns it into a reinstatement, and that goes through the claim. A move
+   * to CANCELLED or NO_SHOW gives the slot back and stays a plain update.
+   */
+  private async writeBookingStatus<T>(
+    booking: StatusWriteTarget,
+    status: BookingStatus,
+    write: (db: Pick<PrismaTx, 'booking'>, where: Prisma.BookingWhereUniqueInput) => Promise<T>,
+  ): Promise<T> {
+    if (!holdsSlot(status)) return write(this.prisma.client, { id: booking.id });
+    if (holdsSlot(booking.status)) {
+      try {
+        return await write(this.prisma.client, { id: booking.id, status: { notIn: SLOT_RELEASING_STATUSES } });
+      } catch (err) {
+        // P2025: the booking no longer holds its slot (cancelled meanwhile).
+        if ((err as { code?: unknown } | null)?.code !== 'P2025') throw err;
+      }
+    }
+    const service = await this.prisma.client.service.findUnique({
+      where: { id: booking.serviceId },
+      select: { bufferMins: true },
+    });
+    const slot: SlotParams = {
+      businessId: booking.businessId,
+      serviceId: booking.serviceId,
+      staffId: booking.staffId,
+      start: booking.startTime,
+      end: booking.endTime,
+      bufferMins: service?.bufferMins,
+      excludeBookingId: booking.id,
+    };
+    return this.claimSlot(slot, (tx) => write(tx, { id: booking.id }));
   }
 
   /**
@@ -1274,11 +1330,14 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async confirmBooking(bookingId: string) {
-    const booking = await this.prisma.client.booking.update({
-      where: { id: bookingId },
-      data: { status: 'CONFIRMED' },
-      include: { contact: true },
-    });
+    const write = (db: Pick<PrismaTx, 'booking'>, where: Prisma.BookingWhereUniqueInput) =>
+      db.booking.update({ where, data: { status: 'CONFIRMED' }, include: { contact: true } });
+    // V1-16: confirming a cancelled or no-show booking takes its slot again,
+    // through the claim. A booking that is not there fails in the update, as before.
+    const current = await this.prisma.client.booking.findUnique({ where: { id: bookingId } });
+    const booking = current
+      ? await this.writeBookingStatus(current, 'CONFIRMED', write)
+      : await write(this.prisma.client, { id: bookingId });
     const payload: BookingConfirmedPayload = {
       booking,
       contact: booking.contact ?? undefined,
