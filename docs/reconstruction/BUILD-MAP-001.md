@@ -954,7 +954,14 @@ Counts: ADOPTED 1, CONTROL 15, DEFER 8, DOCS 10, EVIDENCE 3, NONE 9, PORT 9, STA
 | D-07 | The customer link (paid and remaining) and the receipt are in Release 0, token links only. The bare-id pay page is retired. | V1-48, V1-49 and V1-46 move to wave R0, after R0-20. |
 | D-11 | Editing the business profile is OWNER only, regardless of granted scopes. | R0-09 implements owner-only on PATCH /identity/businesses/:id. |
 
-D-04 (quotes in Release 0) was not ruled; Release 0 proceeds with invoices, and the quote branch stays in V1 as written.
+### Owner rulings, 2026-11-02
+
+| Id | Ruling | Effect on the queue |
+|---|---|---|
+| D-04 | The quote branch is in Release 0. | V1-50 to V1-53 run now as a chain (state machine, conversion carrying tax and discount, provider-free public link, quote create/edit/convert errors). Quotes stay disabled on the FREE plan (`quotesEnabled=false`) until D-12 is ruled. |
+| D-13 | Cents-safe integer-cents arithmetic at every write and balance boundary on the existing Float columns (no migration; Decimal staged later). One currency per business, defaulting to the business currency; TTD and USD supported. | V1-22 and V1-37 run without a migration; the chain V1-22, V1-29, V1-34, V1-36, V1-37, V1-42 is unblocked. |
+| D-14 | Manual refunds are separate negative REFUNDED rows (the provider convention). A fully refunded invoice returns to SENT with paidAt cleared; no new invoice state, no enum migration. | V1-29 runs without its stop rule; V1-36 follows. |
+| D-17 | Keep both KEY pipelines (Flow for member chat, Cortex for plans) and harden each as its packet specifies. A server-side `KEY_DISABLED` off switch, distinct from the storefront-only `AI_DISABLED`. Port the #155 and #182 hunks as specified. Run the KEY packets now. | V1-02, V1-03, V1-09, V1-24, V1-32 run now (with V1-04); V1-31 follows V1-03. |
 
 ---
 
