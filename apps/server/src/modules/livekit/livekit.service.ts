@@ -1,6 +1,8 @@
 import { Inject, Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { AccessToken, AgentDispatchClient, RoomServiceClient, WebhookReceiver } from 'livekit-server-sdk';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { keyDisabled } from '../../core/config/env';
+import { keyDisabledRefusal } from '../ai/model-gateway.service';
 
 export const KEY_VOICE_AGENT_NAME = 'key-voice-agent';
 
@@ -41,6 +43,12 @@ export class LivekitService {
    * it, mint a user join token, and record a VoiceSession for history.
    */
   async createVoiceSession(businessId: string, userId: string | undefined, opts: { identity?: string; roomName?: string } = {}) {
+    // V1-24b review (SEC-V124b-2): a KEY voice session dispatches the KEY voice
+    // agent, which streams the member's audio to OpenAI Realtime with the
+    // business blueprint in its instructions. With KEY switched off
+    // (KEY_DISABLED) it is refused, read per call, before any room, agent
+    // dispatch, join token or VoiceSession row: the gateway's KEY-disabled 503.
+    if (keyDisabled()) throw keyDisabledRefusal();
     this.assertConfigured();
     const roomName = opts.roomName ?? `key-voice-${businessId.slice(0, 8)}-${Date.now().toString(36)}`;
     const identity = opts.identity ?? `user-${userId ?? 'anon'}-${Math.random().toString(36).slice(2, 6)}`;

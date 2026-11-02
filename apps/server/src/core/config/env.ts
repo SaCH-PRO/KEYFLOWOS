@@ -249,8 +249,11 @@ export function envFlagOn(value: string | undefined): boolean {
 
 /**
  * The unified scheduler kill switch, for every scheduler in the server: the
- * OnModuleInit interval schedulers, timers armed elsewhere, and every @Cron,
- * @Interval and @Timeout handler (V1-24b). True when DISABLE_SCHEDULERS or
+ * OnModuleInit interval schedulers, timers armed elsewhere, every @Cron,
+ * @Interval and @Timeout handler (V1-24b), and the BullMQ repeatables seeded
+ * at boot (the tenants' AI cron triggers and the temporal-flow-memory
+ * compaction: not registered, and not run by this process; V1-24b review
+ * SEC-V124b-1, CR-V124b-1). True when DISABLE_SCHEDULERS or
  * KF_DISABLE_SCHEDULERS is on, or NODE_ENV is 'test' (the repo convention since
  * invoice-overdue.scheduler.ts, now in one place) unless the test opted in with
  * ENABLE_SCHEDULERS_IN_TEST. KF_DISABLE_SCHEDULERS is the older spelling
@@ -290,7 +293,10 @@ export function schedulersOptedInForTest(): boolean {
  * Since V1-24b the AI calls that bypass the gateway read it too (KEY voice
  * speak/listen, the embedding, vision and audio helpers, KEY document
  * embeddings, the phone realtime bridge, ElevenLabs TTS, the diagnostics
- * OpenAI check): each refuses before it builds a provider client.
+ * OpenAI check): each refuses before it builds a provider client. A LiveKit
+ * KEY voice session is refused before any room or agent dispatch, and the KEY
+ * voice agent worker (apps/voice-agent, its own process and environment)
+ * rejects every job while the switch is set there (V1-24b review, SEC-V124b-2).
  * KEY_DISABLED_NOT_COVERED (model-gateway.service.ts) is empty, and
  * scheduler-kill-switch.spec.ts fails if a new direct path ignores the switch.
  * Distinct from AI_DISABLED, which only the storefront reads and which does not

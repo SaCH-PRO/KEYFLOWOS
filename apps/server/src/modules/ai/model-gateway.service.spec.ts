@@ -1215,6 +1215,12 @@ describe('ModelGatewayService', () => {
         expect(line, `boot line does not name ${named}`).toContain(named);
       }
       expect(line).toMatch(/refuse before they build a client/);
+      // V1-24b review (SEC-V124b-2): the indirect path (LiveKit dispatch of the KEY
+      // voice agent) is named as refused, and the operator is told the worker is a
+      // separate process that needs KEY_DISABLED in its own environment.
+      expect(line).toMatch(/LiveKit KEY voice session is refused before any room, agent dispatch or join token/);
+      expect(line).toMatch(/KEY voice agent worker \(apps\/voice-agent, OpenAI Realtime\) is a separate process/);
+      expect(line).toMatch(/in its own environment/);
     });
 
     // V1-24 review (SEC-V124-2), fixed in V1-24b: AiUsageService.trackAndStream wrote a

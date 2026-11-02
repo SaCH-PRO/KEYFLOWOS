@@ -166,6 +166,12 @@ export type AiDisabledReason = 'key_disabled';
  * embedding, vision and audio helpers (ai-usage.service.ts), the phone
  * realtime bridge, ElevenLabs text-to-speech, and the diagnostics OpenAI key
  * check.
+ *
+ * V1-24b review (SEC-V124b-2): and the indirect path. A LiveKit KEY voice
+ * session (livekit.service.ts) dispatches the KEY voice agent, which streams
+ * the member's audio to OpenAI Realtime from another process; it is refused
+ * before any room, dispatch or token. That worker (apps/voice-agent) reads
+ * KEY_DISABLED from its own environment and rejects every job while it is set.
  */
 export const KEY_DISABLED_NOT_COVERED: ReadonlyArray<{ file: string; path: string }> = [];
 
@@ -188,7 +194,10 @@ export function keyDisabledBootLine(): string {
   const stops =
     'KEY_DISABLED is set: KEY is switched off on this server. Every model-gateway dispatch answers 503 and reaches no AI provider, ' +
     'and the KEY cortex crons do not run. The direct provider paths (KEY voice speak/listen, the embedding, vision and audio helpers, ' +
-    'KEY document embeddings, the phone realtime bridge, ElevenLabs text-to-speech, the diagnostics OpenAI check) refuse before they build a client.';
+    'KEY document embeddings, the phone realtime bridge, ElevenLabs text-to-speech, the diagnostics OpenAI check) refuse before they build a client, ' +
+    'and a LiveKit KEY voice session is refused before any room, agent dispatch or join token. ' +
+    'The KEY voice agent worker (apps/voice-agent, OpenAI Realtime) is a separate process: it rejects every job only while KEY_DISABLED is set ' +
+    'in its own environment (the repo-root .env it loads at start), so set it there too.';
   if (KEY_DISABLED_NOT_COVERED.length === 0) return stops;
   return (
     stops +

@@ -32,6 +32,7 @@ const { db } = require('@keyflow/db');
 import { cli, defineAgent, JobContext, llm, voice, WorkerOptions } from '@livekit/agents';
 import * as openai from '@livekit/agents-plugin-openai';
 import { z } from 'zod';
+import { keyDisabled, KEY_DISABLED_JOB_NOTICE, screenJobRequest } from './key-switch';
 
 const AGENT_NAME = 'key-voice-agent';
 
@@ -79,6 +80,15 @@ How to behave on voice:
 
 export default defineAgent({
   entry: async (ctx: JobContext) => {
+    // V1-24b review (SEC-V124b-2): KEY switched off (KEY_DISABLED). The job
+    // filter below already rejects dispatched jobs; a job that reaches here
+    // anyway ends before the room is joined, a blueprint is read or an OpenAI
+    // Realtime session is opened.
+    if (keyDisabled()) {
+      console.warn(`[voice-agent] ${KEY_DISABLED_JOB_NOTICE}: job ended`);
+      ctx.shutdown('key_disabled');
+      return;
+    }
     await ctx.connect();
 
     let meta: RoomMeta = {};
@@ -135,6 +145,8 @@ cli.runApp(
   new WorkerOptions({
     agent: __filename,
     agentName: AGENT_NAME,
+    // V1-24b review (SEC-V124b-2): reject every dispatched job while KEY_DISABLED is set.
+    requestFunc: screenJobRequest,
     wsURL: process.env.LIVEKIT_WS_URL ?? 'ws://localhost:7880',
     apiKey: process.env.LIVEKIT_API_KEY,
     apiSecret: process.env.LIVEKIT_API_SECRET,

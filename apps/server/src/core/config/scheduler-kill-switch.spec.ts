@@ -639,6 +639,97 @@ function timersOutsideOnModuleInit(): Array<{ file: string; gated: boolean }> {
   return out.sort((a, b) => a.file.localeCompare(b.file));
 }
 
+/** A class member declaration at the repo's 2-space member indentation. */
+const MEMBER_DECL = /^ {2}(?:(?:public|private|protected|static|readonly|override)\s+)*(?:async\s+)?(?!(?:if|for|while|switch|catch|return|await)\b)(\w+)\s*\(/gm;
+const REGISTERS_REPEATABLE = /\brepeat\s*:/;
+
+/** The name of the class member whose declaration precedes `at`. */
+function memberAt(src: string, at: number): string | undefined {
+  let name: string | undefined;
+  for (const m of src.matchAll(MEMBER_DECL)) {
+    if ((m.index ?? 0) > at) break;
+    name = m[1];
+  }
+  return name;
+}
+
+/** The body of class member `name` (past its parameters and any return type, `Promise<{ ... }>` included). */
+function memberBody(src: string, name: string): string {
+  const m = new RegExp(`^ {2}(?:(?:public|private|protected|static|override)\\s+)*(?:async\\s+)?${name}\\s*\\(`, 'm').exec(src);
+  if (!m) return '';
+  let i = closeParen(src, src.indexOf('(', m.index));
+  let angle = 0;
+  for (; i > 0 && i < src.length; i++) {
+    const c = src[i];
+    if (c === '<') angle++;
+    else if (c === '>' && src[i - 1] !== '=') angle--;
+    else if (c === '{') {
+      if (angle <= 0) return braceBlock(src, i);
+      i += braceBlock(src, i).length - 1;
+    }
+  }
+  return '';
+}
+
+/** Methods anywhere in apps/server/src whose body registers a BullMQ repeatable (QueueService.enqueueCronTrigger, ...). */
+function repeatRegistrars(): string[] {
+  const names = new Set<string>();
+  for (const abs of sourceFiles(SRC)) {
+    const src = stripComments(readFileSync(abs, 'utf8'));
+    for (const m of src.matchAll(/\brepeat\s*:/g)) {
+      const name = memberAt(src, m.index ?? 0);
+      if (name && name !== 'onModuleInit' && name !== 'constructor') names.add(name);
+    }
+  }
+  return [...names].sort();
+}
+
+/**
+ * Every onModuleInit that registers a BullMQ repeatable: directly (`repeat:` in
+ * its body), by calling a registrar method on another object, or through a
+ * same-class method that does either (followed transitively). `at` is the index
+ * in the onModuleInit body of the first such registration point.
+ */
+function bootRepeatableRegistrations(): Array<{ file: string; init: string; at: number; via: string }> {
+  const registrars = repeatRegistrars();
+  const callsRegistrar = (body: string) => registrars.find((r) => new RegExp(`\\.${r}\\s*\\(`).test(body));
+  const out: Array<{ file: string; init: string; at: number; via: string }> = [];
+  for (const abs of sourceFiles(SRC)) {
+    const src = stripComments(readFileSync(abs, 'utf8'));
+    const m = ON_MODULE_INIT.exec(src);
+    if (!m) continue;
+    const init = braceBlock(src, m.index);
+    const reaches = (name: string, seen: Set<string>): string | undefined => {
+      if (seen.has(name)) return undefined;
+      seen.add(name);
+      const body = memberBody(src, name);
+      if (REGISTERS_REPEATABLE.test(body)) return `${name}: repeat`;
+      const r = callsRegistrar(body);
+      if (r) return `${name} -> ${r}`;
+      for (const c of body.matchAll(/\bthis\.(\w+)\s*\(/g)) {
+        const via = reaches(c[1], seen);
+        if (via) return `${name} -> ${via}`;
+      }
+      return undefined;
+    };
+    const points: Array<{ at: number; via: string }> = [];
+    const direct = init.search(REGISTERS_REPEATABLE);
+    if (direct >= 0) points.push({ at: direct, via: 'repeat in onModuleInit' });
+    for (const r of registrars) {
+      const at = init.search(new RegExp(`\\.${r}\\s*\\(`));
+      if (at >= 0) points.push({ at, via: r });
+    }
+    for (const c of init.matchAll(/\bthis\.(\w+)\s*\(/g)) {
+      const via = reaches(c[1], new Set(['onModuleInit']));
+      if (via) points.push({ at: c.index ?? 0, via });
+    }
+    if (points.length === 0) continue;
+    points.sort((a, b) => a.at - b.at);
+    out.push({ file: posix(abs), init, at: points[0].at, via: points[0].via });
+  }
+  return out.sort((a, b) => a.file.localeCompare(b.file));
+}
+
 describe('census: intervals armed outside onModuleInit (constructors, helpers)', () => {
   const found = timersOutsideOnModuleInit();
 
@@ -657,22 +748,36 @@ describe('census: intervals armed outside onModuleInit (constructors, helpers)',
   // Found while implementing V1-24b (added after the tests-first commit): a BullMQ
   // repeatable job registered in onModuleInit is a scheduler too, kept in Redis
   // and run by any worker. temporal-flow-memory registered a 6-hourly compaction.
-  it('a BullMQ repeatable job registered in onModuleInit reads schedulersDisabled() first (temporal-flow-memory periodic compaction)', () => {
-    const registering = sourceFiles(SRC)
-      .map((abs) => {
-        const src = stripComments(readFileSync(abs, 'utf8'));
-        const m = ON_MODULE_INIT.exec(src);
-        return m ? { file: posix(abs), init: braceBlock(src, m.index) } : undefined;
-      })
-      .filter((r): r is { file: string; init: string } => r !== undefined && /\brepeat\s*:/.test(r.init));
-    expect(registering.map((r) => r.file)).toContain('src/modules/temporal-flow/temporal-flow-memory.queue.service.ts');
+  //
+  // V1-24b review (SEC-V124b-1): the first version of this scan looked for a
+  // literal `repeat:` inside an onModuleInit body only, so it could not see
+  // CronSchedulerService, whose onModuleInit calls this.syncCronTriggers(),
+  // which calls QueueService.enqueueCronTrigger(), which holds the `repeat:`.
+  // The scan now follows the calls: same-class methods (transitively) and any
+  // method, in any file, that registers a repeatable. Behaviour, on real BullMQ,
+  // is proven in scheduler-kill-switch-bullmq.spec.ts.
+  it('a BullMQ repeatable job registered at boot, directly or through the methods onModuleInit calls, reads schedulersDisabled() first (temporal-flow-memory compaction, the tenant AI cron triggers)', () => {
+    const registering = bootRepeatableRegistrations();
+    expect(registering.map((r) => r.file)).toEqual(
+      expect.arrayContaining(['src/modules/temporal-flow/temporal-flow-memory.queue.service.ts', 'src/modules/ai/cron-scheduler.service.ts']),
+    );
     const ungated = registering
       .filter((r) => {
         const guard = r.init.search(/\bschedulersDisabled\s*\(/);
-        return guard < 0 || guard > r.init.search(/\brepeat\s*:/);
+        return guard < 0 || guard > r.at;
       })
-      .map((r) => r.file);
+      .map((r) => `${r.file} (${r.via})`);
     expect(ungated).toEqual([]);
+  });
+
+  it('a file that registers a BullMQ repeatable and starts a Worker reads schedulersDisabled(), so a repeatable an earlier boot left in Redis is not run with schedulers off (SEC-V124b-1, CR-V124b-1)', () => {
+    const files = sourceFiles(SRC)
+      .map((abs) => ({ file: posix(abs), src: stripComments(readFileSync(abs, 'utf8')) }))
+      .filter((f) => /\brepeat\s*:/.test(f.src) && /\bnew\s+Worker\s*[<(]/.test(f.src));
+    expect(files.map((f) => f.file)).toEqual(
+      expect.arrayContaining(['src/modules/temporal-flow/temporal-flow-memory.queue.service.ts', 'src/modules/ai/queue.service.ts']),
+    );
+    expect(files.filter((f) => !/\bschedulersDisabled\s*\(/.test(f.src)).map((f) => f.file)).toEqual([]);
   });
 
   it('behaviourally, the cross-module agent job poller (armed in its constructor) arms nothing under NODE_ENV=test or DISABLE_SCHEDULERS, and arms with the opt-in (control)', async () => {
@@ -861,6 +966,12 @@ const PROVIDER_CREDENTIAL =
 /** ...used by a file that opens its own connection. */
 const OPENS_CONNECTION = /\bfetch\s*\(|\bnew\s+WebSocket\s*\(/;
 const READS_KEY_SWITCH = /\bkeyDisabled\s*\(/;
+/**
+ * V1-24b review (SEC-V124b-2): an INDIRECT provider path. Dispatching the KEY
+ * voice agent through LiveKit reaches OpenAI Realtime from another process
+ * (apps/voice-agent), with no SDK client, credential or fetch in this server.
+ */
+const DISPATCHES_KEY_AGENT = /\bnew\s+AgentDispatchClient\s*\(|\.createDispatch\s*\(/;
 
 interface DirectPath { file: string; gated: boolean }
 
@@ -868,10 +979,23 @@ function directProviderPaths(): DirectPath[] {
   const out: DirectPath[] = [];
   for (const abs of sourceFiles(SRC)) {
     const src = readFileSync(abs, 'utf8');
-    if (!BUILDS_SDK_CLIENT.test(src) && !(PROVIDER_CREDENTIAL.test(src) && OPENS_CONNECTION.test(src))) continue;
+    if (!BUILDS_SDK_CLIENT.test(src) && !(PROVIDER_CREDENTIAL.test(src) && OPENS_CONNECTION.test(src)) && !DISPATCHES_KEY_AGENT.test(src)) continue;
     out.push({ file: posix(abs), gated: READS_KEY_SWITCH.test(src) });
   }
   return out.sort((a, b) => a.file.localeCompare(b.file));
+}
+
+/** apps/voice-agent/src: the KEY voice agent worker, a separate process that holds the OpenAI Realtime session. */
+const VOICE_AGENT_SRC = join(SERVER_ROOT, '..', 'voice-agent', 'src');
+/** A model built in the worker: the agents OpenAI Realtime plugin, an SDK client, or a provider credential. */
+const AGENT_BUILDS_MODEL = /\bRealtimeModel\s*\(|\bnew\s+(?:OpenAI|Anthropic)\s*\(|\bprocess\.env\.(?:AI_INTEGRATIONS_OPENAI_API_KEY|OPENAI_API_KEY)\b/;
+
+function voiceAgentModelPaths(): DirectPath[] {
+  return sourceFiles(VOICE_AGENT_SRC)
+    .map((abs) => ({ abs, src: readFileSync(abs, 'utf8') }))
+    .filter((f) => AGENT_BUILDS_MODEL.test(f.src))
+    .map((f) => ({ file: relative(join(SERVER_ROOT, '..', '..'), f.abs).split(sep).join('/'), gated: READS_KEY_SWITCH.test(f.src) }))
+    .sort((a, b) => a.file.localeCompare(b.file));
 }
 
 describe('KEY_DISABLED coverage: every direct AI provider path outside the gateway is either gated or named in the boot warning', () => {
@@ -887,6 +1011,8 @@ describe('KEY_DISABLED coverage: every direct AI provider path outside the gatew
       'src/modules/ai/ai-usage.service.ts',
       'src/modules/key-cortex/key-cortex-document.service.ts',
       'src/modules/phone-voice/realtime-bridge.service.ts',
+      // V1-24b review (SEC-V124b-2): the indirect path, LiveKit dispatch of the KEY voice agent.
+      'src/modules/livekit/livekit.service.ts',
     ]) {
       expect(all.map((p) => p.file)).toContain(f);
     }
@@ -907,5 +1033,15 @@ describe('KEY_DISABLED coverage: every direct AI provider path outside the gatew
     const ungated = all.filter((p) => !p.gated && p.file !== GATEWAY_FILE).map((p) => p.file);
     expect(ungated).toEqual([]);
     expect(KEY_DISABLED_NOT_COVERED).toEqual([]);
+  });
+
+  // V1-24b review (SEC-V124b-2): the server census scanned apps/server/src only,
+  // so the worker that actually talks to OpenAI Realtime was invisible. Every
+  // file in apps/voice-agent/src that builds a model or reads an OpenAI key
+  // reads KEY_DISABLED (behaviour in livekit.service.spec.ts).
+  it('the KEY voice agent worker (apps/voice-agent/src) reads KEY_DISABLED wherever it builds a model (V1-24b, SEC-V124b-2)', () => {
+    const paths = voiceAgentModelPaths();
+    expect(paths.map((p) => p.file), 'gate-vacuity: the scan sees the worker entry').toContain('apps/voice-agent/src/main.ts');
+    expect(paths.filter((p) => !p.gated).map((p) => p.file)).toEqual([]);
   });
 });

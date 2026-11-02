@@ -7,6 +7,9 @@ import { TemporalFlowMemoryService } from './temporal-flow-memory.service';
 import { TemporalFlowGenomeBridgeService } from './temporal-flow-genome-bridge.service';
 import { schedulersDisabled } from '../../core/config/env';
 
+/** The 6-hourly all-business compaction registered at boot (a scheduler, V1-24b). */
+const PERIODIC_COMPACT = 'periodic-compact';
+
 export interface TemporalFlowMemoryJob {
   businessId: string;
   operation: 'compact' | 'detect_patterns';
@@ -55,15 +58,19 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
 
     // Schedule periodic compaction every 6 hours
     try {
+      // V1-24b review (CR-V124b-1): found by NAME. bullmq 5's getRepeatableJobs()
+      // entries carry key, name, pattern, tz and next but no `id`, so the old
+      // lookup by id never matched and nothing was ever removed.
       const existing = await this.queue.getRepeatableJobs();
-      const match = existing.find((r) => r.id === 'temporal-flow-memory-periodic-compact');
-      if (match) {
-        await this.queue.removeRepeatableByKey(match.key);
+      for (const r of existing.filter((j) => j.name === PERIODIC_COMPACT)) {
+        await this.queue.removeRepeatableByKey(r.key);
       }
 
       // V1-24b: a repeatable job registered at boot is a scheduler. With
       // schedulers off it is not (re)registered, and the removal above clears
-      // one an earlier boot left in Redis. The worker still runs enqueued jobs.
+      // one an earlier boot left in Redis, with its next delayed run. The worker
+      // still runs the on-demand jobs (the memory/compact and detect-patterns
+      // routes); a periodic run already queued is dropped in process().
       if (schedulersDisabled()) {
         this.logger.log('Periodic compaction not scheduled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
         this.logger.log('TemporalFlowMemory worker initialized');
@@ -71,7 +78,7 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
       }
 
       await this.queue.add(
-        'periodic-compact',
+        PERIODIC_COMPACT,
         { businessId: 'ALL', operation: 'compact' },
         {
           jobId: 'temporal-flow-memory-periodic-compact',
@@ -108,6 +115,12 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
   }
 
   private async process(job: Job<TemporalFlowMemoryJob>): Promise<void> {
+    // V1-24b review (CR-V124b-1): a periodic run already waiting when this
+    // process booted with schedulers off does no work here.
+    if (job.name === PERIODIC_COMPACT && schedulersDisabled()) {
+      this.logger.log('Periodic compaction skipped (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     const data = job.data;
 
     if (data.operation === 'compact') {
