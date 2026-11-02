@@ -439,7 +439,7 @@ beforeAll(async () => {
   // V1-37b (ST-V37-2): two STAFF members of the TTD business with explicit
   // scope maps, one without revenue access, one that may read revenue.
   for (const [user, revenue] of [[ID.memberNone, 'none'], [ID.memberRead, 'read']] as const) {
-    await db.user.create({ data: { id: user, email: `${user}@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id: user, email: `${P}member-${revenue}@test.local`, role: 'USER' } });
     await db.membership.create({
       data: { id: `${user}_m`, userId: user, businessId: ID.bizTtd, role: 'STAFF', permissionScopes: { revenue, crm: 'write' } },
     });
