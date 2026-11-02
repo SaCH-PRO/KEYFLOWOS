@@ -853,43 +853,99 @@ export class GmailService {
     };
   }
 
+  /**
+   * R0-CMF6c: a refreshed access token is written back only onto the
+   * connection it was refreshed for. The refresh is a network round trip with
+   * no lock held, and a disconnect, a connection of another mailbox or a
+   * re-consent can commit during it; the old unconditional write then gave a
+   * disconnected business a live access token again, or put the old mailbox's
+   * token on the new mailbox. A lost race writes nothing and the state is read
+   * again, once: no mailbox is "Gmail not connected"; another connection's
+   * still-valid token is used (an expired one is refreshed for that
+   * connection). A second lost race is "Gmail not connected" too.
+   */
   private async getValidAccessToken(businessId: string): Promise<string> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: {
-        gmailAccessToken: true,
-        gmailRefreshToken: true,
-        gmailTokenExpiry: true,
-      },
-    });
+    for (let attempt = 1; ; attempt += 1) {
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: {
+          gmailEmail: true,
+          gmailAccessToken: true,
+          gmailRefreshToken: true,
+          gmailTokenExpiry: true,
+        },
+      });
 
-    if (!business?.gmailRefreshToken) {
-      throw gmailNotConfigured('Gmail not connected');
+      if (!business?.gmailRefreshToken) {
+        throw gmailNotConfigured('Gmail not connected');
+      }
+
+      const now = new Date();
+      const expiry = business.gmailTokenExpiry ? new Date(business.gmailTokenExpiry) : null;
+      const isExpired = !expiry || now >= new Date(expiry.getTime() - 5 * 60 * 1000);
+
+      if (!isExpired && business.gmailAccessToken) {
+        return business.gmailAccessToken;
+      }
+
+      const tokens = await this.refreshAccessToken(business.gmailRefreshToken);
+
+      const newExpiry = tokens.expires_in
+        ? new Date(Date.now() + tokens.expires_in * 1000)
+        : null;
+
+      const written = await this.writeRefreshedTokenIfUnchanged(
+        businessId,
+        { email: business.gmailEmail ?? null, refreshToken: business.gmailRefreshToken },
+        tokens.access_token,
+        newExpiry,
+      );
+      if (written) return tokens.access_token;
+
+      this.logger.warn(`Gmail token refresh for business ${businessId}: the mailbox changed while it ran; the refreshed token was not stored`);
+      if (attempt >= 2) throw gmailNotConfigured('Gmail not connected');
     }
+  }
 
-    const now = new Date();
-    const expiry = business.gmailTokenExpiry ? new Date(business.gmailTokenExpiry) : null;
-    const isExpired = !expiry || now >= new Date(expiry.getTime() - 5 * 60 * 1000);
-
-    if (!isExpired && business.gmailAccessToken) {
-      return business.gmailAccessToken;
-    }
-
-    const tokens = await this.refreshAccessToken(business.gmailRefreshToken);
-    
-    const newExpiry = tokens.expires_in
-      ? new Date(Date.now() + tokens.expires_in * 1000)
-      : null;
-
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        gmailAccessToken: tokens.access_token,
-        gmailTokenExpiry: newExpiry,
-      },
+  /**
+   * R0-CMF6c: the compare-and-set behind getValidAccessToken. In one short
+   * transaction that first takes the business row lock disconnectGmail and
+   * confirmPendingConnection take (lockBusinessRow), the mailbox is read again
+   * and the token written only while the stored refresh token and address are
+   * still the ones the refresh used: the refresh token is the connection (a
+   * disconnect clears it, a new mailbox or a re-consent replaces it), the
+   * address guards a write onto another mailbox. The comparison is made on the
+   * values the Prisma token-encryption extension decrypts, and the write goes
+   * through business.update so the extension encrypts it: the columns hold
+   * AES-GCM ciphertext with a random IV, so an SQL equality on them is no
+   * test of the token, and updateMany would bypass the extension and store the
+   * token in plaintext. Returns whether it wrote.
+   */
+  private async writeRefreshedTokenIfUnchanged(
+    businessId: string,
+    refreshedFor: { email: string | null; refreshToken: string },
+    accessToken: string,
+    tokenExpiry: Date | null,
+  ): Promise<boolean> {
+    return this.prisma.client.$transaction(async (tx) => {
+      await this.lockBusinessRow(tx, businessId);
+      const current = await tx.business.findUnique({
+        where: { id: businessId },
+        select: { gmailEmail: true, gmailRefreshToken: true },
+      });
+      if (
+        !current?.gmailRefreshToken ||
+        current.gmailRefreshToken !== refreshedFor.refreshToken ||
+        (current.gmailEmail ?? null) !== refreshedFor.email
+      ) {
+        return false;
+      }
+      await tx.business.update({
+        where: { id: businessId },
+        data: { gmailAccessToken: accessToken, gmailTokenExpiry: tokenExpiry },
+      });
+      return true;
     });
-
-    return tokens.access_token;
   }
 
   private createMimeMessage(params: {
