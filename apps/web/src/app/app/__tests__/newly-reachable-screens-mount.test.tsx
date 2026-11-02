@@ -24,7 +24,7 @@
  * only mount against populated data, that is worth knowing too.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, cleanup } from '@testing-library/react';
+import { render, cleanup, screen, within } from '@testing-library/react';
 import { GenomeProvider } from '@/contexts/genome-context';
 
 /* ── Everything a page reaches for that jsdom does not have ─────────────── */
@@ -195,4 +195,126 @@ describe('every newly-reachable screen mounts', () => {
       // finding and this number should not be raised again.
     }, 20_000);
   }
+});
+
+/**
+ * V1-47-COCKPIT-TRUTH. The cockpit (/app/command-center) is not a newly opened
+ * door, so it is not in the list above; it is here because it is the one screen
+ * whose mount has to say something true about the data. CF-19: a source that
+ * failed rendered as a healthy zero, and the Release 0 records (contacts, open
+ * invoices, payments) were not visible from it at all. So these cases assert
+ * WHAT renders, with the snapshot shaped like the server's
+ * (business-command-center.types.ts): each Release 0 tile shows its count and
+ * links to its list, a real zero reads 0, a missing count never reads 0, and
+ * the degraded banner appears exactly when the snapshot says degraded.
+ */
+function cockpitSnapshot(over: Record<string, unknown> = {}) {
+  const ok = (label: string) => ({ label, status: 'OK', fetchedAt: '2026-11-02T10:00:00.000Z' });
+  return {
+    businessId: 'biz_mount_test',
+    generatedAt: '2026-11-02T10:00:00.000Z',
+    health: {
+      genomeIntegrity: 0, executiveReadinessScore: 0, genomeStage: 'SEED', criticalCount: 0, highPriorityCount: 0,
+      pendingApprovalCount: 0, approvedAwaitingExecutionCount: 0, urgentTemporalCount: 0, pendingGenomeProposalCount: 0,
+      assetRiskCount: 0, constitutionStale: false, keyGenomeOverall: 0, keyGenomeReadiness: 0, keyGenomeConfidence: 0,
+      blockedModuleCount: 0, lowReadinessModuleCount: 0, missingBlockingFactCount: 0,
+    },
+    summary: 'Cockpit summary.',
+    pulse: { overallScore: 0, dimensions: [] },
+    briefing: { headline: 'No urgent actions today.', bullets: [], warnings: [] },
+    governance: { autoReady: 0, needsApproval: 0, dueToday: 0, urgentRisks: 0 },
+    topPriorities: [], pendingApprovals: [], approvedAwaitingExecution: [], urgentItems: [], risks: [], opportunities: [],
+    genome: { integrity: 0, readiness: 0, stage: 'SEED', pendingProposals: [], weakestSections: [] },
+    keyGenome: { overall: 0, integrity: 0, readiness: 0, confidence: 0, computedAt: '2026-11-02T10:00:00.000Z', sections: [], weakestSections: [] },
+    moduleReadiness: [],
+    constitution: { latestVersion: null, stale: false, reason: null, href: '/app/profile?tab=business-genome&section=constitution' },
+    executiveModes: [],
+    recommendedActions: [],
+    degraded: false,
+    sources: { pendingApprovals: ok('pendingApprovals'), contacts: ok('contacts'), openInvoices: ok('openInvoices'), payments: ok('payments') },
+    results: {
+      contacts: { label: 'Contacts', count: 1, status: 'OK', href: '/app/crm/contacts' },
+      openInvoices: { label: 'Open invoices', count: 0, status: 'OK', href: '/app/commerce/invoices' },
+      payments: { label: 'Payments', count: 2, status: 'OK', href: '/app/payments' },
+    },
+    ...over,
+  };
+}
+
+/**
+ * Answer the snapshot route with `snapshot`, and every other read the cockpit's
+ * side panels make (nudges, cross-domain, obligations, KEY streams) with a 503:
+ * those panels are not under test here and each has its own unavailable state.
+ * The file-wide 200 `{ items: [] }` body is not one any of their routes returns
+ * (NudgesWidgetV2 and CrossDomainPanelV2 throw on it after mount), so it would
+ * measure the stub, not the cockpit.
+ */
+function serveCockpit(snapshot: unknown) {
+  globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    const isSnapshot = url.includes('/business-command-center/businesses/biz_mount_test/snapshot');
+    const body = isSnapshot ? JSON.stringify(snapshot) : '{"message":"Service Unavailable"}';
+    return {
+      ok: isSnapshot,
+      status: isSnapshot ? 200 : 503,
+      statusText: isSnapshot ? 'OK' : 'Service Unavailable',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => JSON.parse(body),
+      text: async () => body,
+    };
+  }) as unknown as typeof fetch;
+}
+
+async function renderCockpit(snapshot: unknown) {
+  serveCockpit(snapshot);
+  const { default: Page } = await import('../command-center/page');
+  render(
+    <GenomeProvider>
+      <Page />
+    </GenomeProvider>,
+  );
+  return screen.findByTestId('cockpit-results', {}, { timeout: 10_000 });
+}
+
+describe('V1-47-COCKPIT-TRUTH: the cockpit shows the Release 0 results and says when it is degraded', () => {
+  it('each Release 0 tile shows its count and links to its list; a real zero reads 0; no degraded banner when degraded is false', async () => {
+    const results = await renderCockpit(cockpitSnapshot());
+    const tile = (key: string) => within(results).getByTestId(`cockpit-result-${key}`);
+    expect(tile('contacts').getAttribute('href')).toBe('/app/crm/contacts');
+    expect(tile('openInvoices').getAttribute('href')).toBe('/app/commerce/invoices');
+    expect(tile('payments').getAttribute('href')).toBe('/app/payments');
+    expect(within(tile('contacts')).getByText('Contacts')).toBeTruthy();
+    expect(within(tile('contacts')).getByTestId('cockpit-result-count').textContent).toBe('1');
+    expect(within(tile('openInvoices')).getByTestId('cockpit-result-count').textContent).toBe('0');
+    expect(within(tile('payments')).getByTestId('cockpit-result-count').textContent).toBe('2');
+    expect(screen.queryByTestId('cockpit-degraded-banner')).toBeNull();
+  }, 20_000);
+
+  it('the degraded banner appears when degraded is true and names the failed sources; a missing count reads Unavailable, never 0; a restricted one reads No access', async () => {
+    const failed = { label: 'contacts', status: 'FAILED', fetchedAt: '2026-11-02T10:00:00.000Z' };
+    const results = await renderCockpit(
+      cockpitSnapshot({
+        degraded: true,
+        sources: {
+          pendingApprovals: { label: 'pendingApprovals', status: 'FAILED', fetchedAt: '2026-11-02T10:00:00.000Z' },
+          contacts: failed,
+          openInvoices: { label: 'openInvoices', status: 'OK', fetchedAt: '2026-11-02T10:00:00.000Z' },
+        },
+        results: {
+          contacts: { label: 'Contacts', count: null, status: 'FAILED', href: '/app/crm/contacts' },
+          openInvoices: { label: 'Open invoices', count: 4, status: 'OK', href: '/app/commerce/invoices' },
+          payments: { label: 'Payments', count: null, status: 'RESTRICTED', href: '/app/payments' },
+        },
+      }),
+    );
+    const banner = screen.getByTestId('cockpit-degraded-banner');
+    expect(banner.getAttribute('role')).toBe('alert');
+    expect(banner.textContent).toContain('pendingApprovals');
+    expect(banner.textContent).toContain('contacts');
+    expect(banner.textContent).not.toContain('openInvoices');
+    const count = (key: string) => within(within(results).getByTestId(`cockpit-result-${key}`)).getByTestId('cockpit-result-count').textContent;
+    expect(count('contacts')).toBe('Unavailable');
+    expect(count('openInvoices')).toBe('4');
+    expect(count('payments')).toBe('No access');
+  }, 20_000);
 });

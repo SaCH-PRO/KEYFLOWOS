@@ -721,6 +721,35 @@ describe('step 5 — simulated refresh: the tenant list routes agree with steps 
     expect(tenantPayments.body.map((p: any) => p.id).sort()).toEqual(dbPayments.map((p: any) => p.id).sort());
     expect(tenantPayments.body.map((p: any) => p.id)).toEqual(expect.arrayContaining([S.firstPaymentId, S.settlePaymentId]));
     note(5, 'refresh lists', 'GET contacts / invoices / invoices/:id/payments / payments', `${contacts.status}/${invoices.status}/${perInvoice.status}/${tenantPayments.status}`, `contacts=1 invoices=1(PAID) payments=${dbPayments.length}`);
+
+    // V1-47-COCKPIT-TRUTH: the cockpit is one more read of the same records. With AI_DISABLED=1 it answers 200,
+    // its Release 0 counts are what the list routes above just returned (the invoice is PAID, so none is open:
+    // a real zero, status OK), a source that failed says so instead of reading as zero, and the read writes
+    // nothing to the ledger. Folded into this case rather than added as a new one: release0-journey.json binds
+    // exactly these 26 titles (allowAdditionalCases false).
+    const ledgerScope = { businessId: { in: [S.bizA!, S.bizB!] } };
+    const ledgerBefore = [await db.financialTransaction.count({ where: ledgerScope }), await db.ledgerEntry.count({ where: ledgerScope })];
+    const cockpit = await call(5, 'get', `/business-command-center/businesses/${S.bizA}/snapshot`, { token: OWNER });
+    const ledgerAfter = [await db.financialTransaction.count({ where: ledgerScope }), await db.ledgerEntry.count({ where: ledgerScope })];
+    expect(cockpit.status, JSON.stringify(cockpit.body).slice(0, 400)).toBe(200);
+    const openListed = invoices.body.data.filter((i: any) => ['SENT', 'OVERDUE', 'PARTIALLY_PAID'].includes(i.status)).length;
+    expect(cockpit.body.results).toEqual({
+      contacts: { label: 'Contacts', count: contacts.body.contacts.length, status: 'OK', href: '/app/crm/contacts' },
+      openInvoices: { label: 'Open invoices', count: openListed, status: 'OK', href: '/app/commerce/invoices' },
+      payments: { label: 'Payments', count: tenantPayments.body.length, status: 'OK', href: '/app/payments' },
+    });
+    expect([cockpit.body.results.contacts.count, cockpit.body.results.openInvoices.count, cockpit.body.results.payments.count]).toEqual([1, 0, dbPayments.length]);
+    const sources = Object.entries(cockpit.body.sources ?? {}) as Array<[string, any]>;
+    expect(sources.length).toBeGreaterThan(0);
+    for (const [key, s] of sources) {
+      expect(s.label, key).toBe(key);
+      expect(['OK', 'FAILED'], `${key} status`).toContain(s.status);
+      expect(Number.isNaN(Date.parse(s.fetchedAt)), `${key} fetchedAt`).toBe(false);
+    }
+    const failedSources = sources.filter(([, s]) => s.status === 'FAILED').map(([key]) => key);
+    expect(cockpit.body.degraded).toBe(failedSources.length > 0);
+    expect(ledgerAfter, 'the cockpit snapshot is a read: no FinancialTransaction or LedgerEntry row appears').toEqual(ledgerBefore);
+    note(5, 'cockpit snapshot', 'GET /business-command-center/businesses/:bizA/snapshot', cockpit.status, `contacts=${cockpit.body.results.contacts.count} openInvoices=${cockpit.body.results.openInvoices.count} payments=${cockpit.body.results.payments.count} degraded=${cockpit.body.degraded} failed=[${failedSources.join(',')}] ledger ${ledgerBefore.join('/')}->${ledgerAfter.join('/')}`);
   });
 });
 
@@ -758,8 +787,10 @@ describe("step 6 — the second tenant's owner is denied on every step-2..5 reso
       ['post', `/commerce/businesses/${S.bizA}/invoices/${S.invoiceId}/payments`, { amount: 1, method: 'cash' }],
       ['get', `/commerce/businesses/${S.bizA}/invoices/${S.invoiceId}/timeline`],
       ['get', `/commerce/businesses/${S.bizA}/payments`],
+      // V1-47-COCKPIT-TRUTH: the cockpit that now counts bizA's records is bizA's alone.
+      ['get', `/business-command-center/businesses/${S.bizA}/snapshot`],
     ]);
-    note(6, 'bizA routes as r0_other', '12 business-prefixed routes', rows.map((r) => r.status).join(','), 'expect all 403');
+    note(6, 'bizA routes as r0_other', '13 business-prefixed routes', rows.map((r) => r.status).join(','), 'expect all 403');
     for (const r of rows) {
       expect(r.status, `${r.method} ${r.path}`).toBe(403);
       expect(JSON.stringify(r.body)).not.toContain(S.invoiceNumber!);
@@ -885,7 +916,17 @@ describe("step 6 — the second tenant's owner is denied on every step-2..5 reso
     expect(await db.payment.count({ where: { businessId: S.bizB } })).toBe(0);
     const owned = await call(6, 'get', `/commerce/businesses/${S.bizA}/invoices`, { token: OWNER });
     expect(owned.body.total).toBe(1);
-    note(6, 'state after denials', 'db + GET /commerce/businesses/:bizA/invoices', owned.status, 'contact, invoice, payments unchanged; bizB owns nothing');
+    // V1-47-COCKPIT-TRUTH: bizB's own cockpit counts none of bizA's rows; its zeros are real zeros (status OK).
+    const otherCockpit = await call(6, 'get', `/business-command-center/businesses/${S.bizB}/snapshot`, { token: OTHER });
+    expect(otherCockpit.status, JSON.stringify(otherCockpit.body).slice(0, 400)).toBe(200);
+    expect(otherCockpit.body.businessId).toBe(S.bizB);
+    expect(otherCockpit.body.results).toMatchObject({
+      contacts: { count: 0, status: 'OK' },
+      openInvoices: { count: 0, status: 'OK' },
+      payments: { count: 0, status: 'OK' },
+    });
+    expect(JSON.stringify(otherCockpit.body)).not.toContain(S.invoiceNumber!);
+    note(6, 'state after denials', 'db + GET /commerce/businesses/:bizA/invoices + GET bizB cockpit as r0_other', `${owned.status}/${otherCockpit.status}`, 'contact, invoice, payments unchanged; bizB owns nothing and its cockpit counts 0/0/0');
   });
 });
 
