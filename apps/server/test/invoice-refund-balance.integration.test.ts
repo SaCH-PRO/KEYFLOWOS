@@ -26,7 +26,16 @@
  *          the server's: net 60, remaining 40, 60% paid; 40 is within the remaining, 40.01 is not.
  *          This proves the mirror over the served rows. The three web files of the V1-36 write set
  *          render on no route (review V36-CR-1, balance-arithmetic.spec.ts BA-07); the live web
- *          surfaces are outside the write set (BA-08, it.todo)
+ *          surfaces (the invoices hub, the invoice detail page, the finance payment-record modal)
+ *          read the mirror since V1-29b-REFUND-READERS (BA-08 and their web unit tests)
+ *   BR-09  (V1-29b-REFUND-READERS) every balance reader outside the V1-29 / V1-36 write sets reads
+ *          the CF-17 invoice as paid 60, remaining 40, the ledger cash net: the reminder email
+ *          (CR-V29-1), the evidence-match candidate (CR-V29-1), CASH-basis receivables (CR-V29-2),
+ *          the open payables (V1-22 residual), the public receipt (CR-V29-3), and the web mirror
+ *          over the rows the list route (invoices hub) and the detail route (detail page, payment
+ *          modal fallback) serve
+ *   BR-10  (same) a fully refunded invoice reads paid 0, remaining = the total on every one of
+ *          them; the public receipt answers 409 (nothing received net)
  *   BR-04  Finance overview revenueThisMonth subtracts refunds: = the tenant's ledger cash net
  *   BR-05  revenue KPIs collectedThisMonth and the 12-week revenue pulse subtract refunds
  *   BR-06  the collected-vs-expected report subtracts refunds
@@ -46,8 +55,11 @@
  * `x-v36a-user`, loads that seeded user row and attaches `{ id, email, role }`
  * exactly as the Supabase-verifying AuthMiddleware would. EventEmitter2 is a
  * recording stub; ExpensePostingService (COGS), the contact timeline, the
- * stats cache and the AI / Gmail / Drive services are stubs off the boundary
+ * stats cache and the AI / Drive services are stubs off the boundary
  * (RevenueActionService's model gateway is never called by the KPI reads).
+ * The Gmail service records every email it is handed and sends nothing (BR-09,
+ * BR-10 read the rendered figures); the model extraction of payment evidence is
+ * stubbed in BR-09 / BR-10.
  *
  * Fixtures: prefix `v36a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL (patterns built by sqlLikePrefix) in dependency order in
@@ -58,7 +70,7 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
@@ -80,6 +92,7 @@ const ID = {
   contactB: `${P}contactB`,
   invReads: `${P}invReads`,
   invSettle: `${P}invSettle`,
+  invFullRefund: `${P}invFullRefund`, // BR-10
   invRRefund: `${P}invRRefund`,
   invRPaid: `${P}invRPaid`,
   invRLegacy: `${P}invRLegacy`,
@@ -99,6 +112,20 @@ let financeOverview: any;
 let revenueActions: any;
 let revenueReporting: any;
 let revenuePosting: any;
+// V1-29b-REFUND-READERS (BR-09, BR-10): the readers outside the V1-29 / V1-36 write sets.
+let receipts: any;
+let paymentEvidence: any;
+let receivables: any;
+let paymentsOps: any;
+
+/** The Gmail boundary: every email the readers render is recorded; nothing is sent. */
+const sentEmails: Array<{ businessId: string; to: string; subject: string; htmlBody: string }> = [];
+const gmailStub = {
+  sendEmail: async (args: { businessId: string; to: string; subject: string; htmlBody: string }) => {
+    sentEmails.push(args);
+    return { messageId: `${P}msg_${sentEmails.length}` };
+  },
+};
 
 const eventStub = {
   emit: () => true,
@@ -293,7 +320,7 @@ beforeAll(async () => {
       { provide: PublicEventsService, useValue: {} },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
       { provide: TimeEntryService, useValue: {} },
-      { provide: GmailService, useValue: {} },
+      { provide: GmailService, useValue: gmailStub },
       { provide: CommerceVisionService, useValue: {} },
       { provide: StoreReadinessService, useValue: {} },
       PaymentEvidenceService,
@@ -307,6 +334,14 @@ beforeAll(async () => {
   financeOverview = new FinanceOverviewService(prismaSvc, null, null, null);
   revenueActions = new RevenueActionService(prismaSvc, eventStub as any, {} as any, {} as any);
   revenueReporting = new RevenueReportingService(prismaSvc);
+  // V1-29b-REFUND-READERS: the module's receipt builder and evidence service, CASH-basis
+  // receivables and the open payables over the same real Prisma (no payment gateway is called).
+  receipts = moduleRef.get(InvoiceReceiptBuilderService);
+  paymentEvidence = moduleRef.get(PaymentEvidenceService);
+  const { ReceivablesService } = await import('../src/modules/finance/receivables.service');
+  const { PaymentsOpsService } = await import('../src/modules/payments/payments-ops.service');
+  receivables = new ReceivablesService(prismaSvc, moduleRef.get(ChartOfAccountsSeederService));
+  paymentsOps = new PaymentsOpsService(prismaSvc, {} as any, {} as any, {} as any, {} as any);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -341,6 +376,7 @@ beforeAll(async () => {
   const invoices: Array<[string, string, string, number]> = [
     [ID.invReads, ID.bizA, ID.contactA, 100],
     [ID.invSettle, ID.bizA, ID.contactA, 100],
+    [ID.invFullRefund, ID.bizA, ID.contactA, 100],
     [ID.invRRefund, ID.bizR, ID.contactR, 100],
     [ID.invRPaid, ID.bizR, ID.contactR, 50],
     [ID.invRLegacy, ID.bizR, ID.contactR, 30],
@@ -364,6 +400,10 @@ beforeAll(async () => {
     });
   }
 }, 180_000);
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 afterAll(async () => {
   if (app) await app.close();
@@ -435,7 +475,135 @@ describe('per invoice: SUCCESSFUL 100 (60 + 40) with the 40 refunded, on a 100 i
     expect(mirror.computeInvoiceBalance(Number(row.total), [...row.payments, { amount: 40.01, status: 'SUCCESSFUL' }]).isOverpaid, 'recording 40.01').toBe(true);
     expect(web.net, 'LEDGER: the invoice cash net').toBe(await invoiceCashNet(inv));
   });
+
+  it('BR-09 (V1-29b-REFUND-READERS): every balance reader outside the V1-29 / V1-36 write sets reads the CF-17 invoice as paid 60, remaining 40, the ledger cash net: reminder email, evidence match, CASH receivables, open payables, public receipt, and the web mirror over the list and detail rows', async () => {
+    const inv = ID.invReads; // BR-01 seeded it: 60 + 40 paid, the 40 refunded
+    const server = (await listPayments(ID.bizA, inv)).body;
+    expect(server).toMatchObject({ paidAmount: 60, remaining: 40 });
+    const cashNet = await invoiceCashNet(inv);
+    expect(cashNet, 'LEDGER: the invoice cash net').toBe(60);
+
+    const readings = await readersOf(inv, 40);
+    // RED-BEFORE (int/trial-I 7f4b81a2): the reminder email Paid 100 with no Balance due line and
+    // "TT$0.00 awaiting payment", the evidence candidate remaining 0, receivables paid 100 /
+    // outstanding 0 and out of the aging, the public receipt amountPaid 100 (each read the gross).
+    expect(readings).toEqual({
+      'listPayments': { paid: 60, remaining: 40 },
+      'reminder email': { paid: 60, remaining: 40, awaiting: 40 },
+      'evidence match': { remaining: 40 },
+      'receivables (customer balance)': { paid: 60, remaining: 40 },
+      'receivables (aging)': { remaining: 40 },
+      'open payables': { remaining: 40 },
+      'public receipt': { paid: 60, remaining: 40 },
+      'web: list row (invoices hub)': { paid: 60, remaining: 40 },
+      'web: detail row (detail page, payment modal)': { paid: 60, remaining: 40 },
+    });
+    expect(money(100 - cashNet), 'remaining = total - the ledger cash net').toBe(40);
+  });
+
+  it('BR-10 (V1-29b-REFUND-READERS): a fully refunded invoice reads paid 0, remaining = the total (100) on every reader; the public receipt answers 409 (nothing received net); = the ledger cash net', async () => {
+    const inv = ID.invFullRefund;
+    const all = await paid(ID.bizA, inv, 100, 'V36A-F-100');
+    await refunded(ID.bizA, all.id);
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null });
+    expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
+    expect(await invoiceCashNet(inv), 'LEDGER: the invoice cash net').toBe(0);
+
+    const readings = await readersOf(inv, 100);
+    // RED-BEFORE: the reminder email Paid 100, "TT$0.00 awaiting payment", no Balance due; the
+    // evidence candidate and receivables read nothing owed; the invoice dropped out of the aging.
+    expect(readings).toEqual({
+      'listPayments': { paid: 0, remaining: 100 },
+      'reminder email': { paid: null, remaining: 100, awaiting: 100 },
+      'evidence match': { remaining: 100 },
+      'receivables (customer balance)': { paid: 0, remaining: 100 },
+      'receivables (aging)': { remaining: 100 },
+      'open payables': { remaining: 100 },
+      'public receipt': { status: 409 },
+      'web: list row (invoices hub)': { paid: 0, remaining: 100 },
+      'web: detail row (detail page, payment modal)': { paid: 0, remaining: 100 },
+    });
+  });
 });
+
+/** A figure an email states ('TT$60.00') as a number; null where the line is absent. */
+function emailMoney(html: string, re: RegExp): number | null {
+  const m = html.match(re);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * BR-09 / BR-10: what each balance reader outside the V1-29 / V1-36 write sets states for one
+ * invoice of bizA (contactA), read through its real door. `slip` is the amount the stubbed
+ * evidence extraction reads off the customer's slip.
+ */
+async function readersOf(inv: string, slip: number): Promise<Record<string, Record<string, number | null>>> {
+  const out: Record<string, Record<string, number | null>> = {};
+  const list = (await listPayments(ID.bizA, inv)).body;
+  out['listPayments'] = { paid: list.paidAmount, remaining: list.remaining };
+
+  sentEmails.length = 0;
+  const reminder = await agent()
+    .post(`/commerce/businesses/${ID.bizA}/invoices/${inv}/send-reminder`)
+    .set(HEADER, ID.ownerA)
+    .send({ channel: 'email' });
+  expect(reminder.status, JSON.stringify(reminder.body)).toBe(201);
+  expect(sentEmails, 'one reminder email').toHaveLength(1);
+  const html = sentEmails[0].htmlBody;
+  out['reminder email'] = {
+    paid: emailMoney(html, />Paid<\/td><td[^>]*>TT\$(-?[\d.]+)</),
+    remaining: emailMoney(html, />Balance due<\/td><td[^>]*>TT\$(-?[\d.]+)</),
+    awaiting: emailMoney(html, /for TT\$(-?[\d.]+) is awaiting payment/),
+  };
+
+  vi.spyOn(paymentEvidence, 'extractEvidence').mockResolvedValue({
+    extracted: { amount: slip, method: 'bank_transfer', payer: 'V36a Customer' },
+    raw: null,
+  });
+  const evidence = await agent()
+    .post(`/commerce/businesses/${ID.bizA}/payments/extract-evidence`)
+    .set(HEADER, ID.ownerA)
+    .send({ evidenceUrl: 'https://example.invalid/v36a-slip.png', evidenceMimeType: 'image/png', filename: 'v36a-slip.png', source: 'upload' });
+  expect(evidence.status, JSON.stringify(evidence.body)).toBe(201);
+  const candidate = evidence.body.candidates.find((c: any) => c.id === inv);
+  out['evidence match'] = { remaining: candidate ? candidate.remaining : null };
+
+  const customer = await receivables.getCustomerBalance(ID.bizA, ID.contactA);
+  expect(customer.basis).toBe('CASH');
+  const line = customer.invoices.find((i: any) => i.id === inv);
+  out['receivables (customer balance)'] = { paid: line?.paid ?? null, remaining: line?.outstanding ?? null };
+  // The aging row of contactA holds every open invoice of the contact: this invoice's share is the
+  // row total less the other open invoices' contract remaining.
+  const aging = await receivables.getAging(ID.bizA);
+  const agingRow = aging.customers.find((c: any) => c.contactId === ID.contactA);
+  const others = await db.invoice.findMany({
+    where: { businessId: ID.bizA, contactId: ID.contactA, id: { not: inv }, deletedAt: null, status: { in: ['SENT', 'PARTIALLY_PAID', 'OVERDUE', 'PENDING'] } },
+  });
+  let otherRemaining = 0;
+  for (const o of others) otherRemaining = money(otherRemaining + (await balanceOf(o.id)).remaining);
+  out['receivables (aging)'] = { remaining: money((agingRow?.total ?? 0) - otherRemaining) };
+
+  const { payables } = await paymentsOps.listOpenPayables(ID.bizA);
+  const payable = payables.find((p: any) => p.type === 'invoice' && p.id === inv);
+  out['open payables'] = { remaining: payable ? payable.amount : null };
+
+  try {
+    const receipt = await receipts.buildPublicReceipt(inv, ID.bizA);
+    out['public receipt'] = { paid: receipt.amountPaid, remaining: receipt.amountDue };
+  } catch (err: any) {
+    out['public receipt'] = { status: typeof err?.getStatus === 'function' ? err.getStatus() : -1 };
+  }
+
+  const mirror = await sharedMirror();
+  expect(mirror, 'packages/shared/src/invoice-balance.ts exists').not.toBeNull();
+  const listed = (await invoiceList(ID.bizA)).body.data.find((i: any) => i.id === inv);
+  const viaList = mirror.invoiceBalanceOfStoredRows(Number(listed.total), listed.payments, listed.currency);
+  out['web: list row (invoices hub)'] = { paid: viaList.net, remaining: viaList.remaining };
+  const detail = (await invoiceDetail(ID.bizA, inv)).body;
+  const viaDetail = mirror.invoiceBalanceOfStoredRows(Number(detail.total), detail.payments, detail.currency);
+  out['web: detail row (detail page, payment modal)'] = { paid: viaDetail.net, remaining: viaDetail.remaining };
+  return out;
+}
 
 describe('per tenant: the revenue surfaces subtract refunds', () => {
   // bizR: 60 + 40 paid with the 40 refunded (net 60); 50 paid (net 50); 30 paid and flipped to
