@@ -1,0 +1,254 @@
+{
+  "$comment": [
+    "R0-23-WEB-R0-SCREENS: server responses the Release 0 screens are rendered against in jsdom.",
+    "journey.*: shaped from apps/server/test/release0-journey.integration.test.ts. Each body carries exactly the keys that suite asserts on that route, or on the same row elsewhere in the journey, and no other key. release0-journey.test.tsx holds the checked-in key list (JOURNEY_ASSERTED_SHAPES, with the line each key comes from) and asserts every body's key paths equal it, so a screen here can only read what the real-server journey proves.",
+    "The one exception is the tenant detail route GET /commerce/businesses/:b/invoices/:id (invoiceDraft, invoiceSent, invoicePartiallyPaid, invoicePaid): the journey never reads it (it reloads the row through the list route), and the server always adds paidAmount, remaining and the payment rows to that read (getInvoiceForBusiness, apps/server/src/modules/commerce/commerce.service.ts L669-683). Those bodies are the journey's row plus exactly the keys apps/server/test/commerce-invoice-detail.integration.test.ts asserts on that route (L225-227: payments, paidAmount, remaining on every read; L523-543: payments[].id, .amount, .status, and paidAmount = the SUCCESSFUL rows, remaining = total - paidAmount). The figures follow the journey: 0 paid on the DRAFT and SENT reads, the 100 cash payment (step 4), then the 150 settle (PAID).",
+    "screenOnly.*: responses a screen reads that the journey does not drive. Each names why it is outside the journey and where its shape comes from.",
+    "Ids carry the r023_ prefix; values mirror the journey (contact Ada Byron, CLIENT; INV-1001 with Consulting 2 x 100 and Setup 1 x 50 = 250 TTD; a 100 cash payment leaves 150)."
+  ],
+  "journey": {
+    "bootstrap": {
+      "route": "POST /identity/bootstrap",
+      "status": 201,
+      "body": {
+        "user": { "id": "r023_owner" },
+        "business": { "id": "r023_bizA", "name": "r023_bizA" },
+        "isNewBusiness": true
+      }
+    },
+    "myBusinesses": {
+      "route": "GET /identity/businesses",
+      "status": 200,
+      "body": [{ "id": "r023_bizA" }]
+    },
+    "me": {
+      "route": "GET /identity/me",
+      "status": 200,
+      "body": { "id": "r023_owner", "email": "r023_owner@test.local" }
+    },
+    "business": {
+      "route": "GET /identity/businesses/:businessId",
+      "status": 200,
+      "body": { "id": "r023_bizA" }
+    },
+    "contactCreated": {
+      "route": "POST /crm/businesses/:businessId/contacts",
+      "status": 201,
+      "body": { "id": "r023_contact_grace" }
+    },
+    "contactsBefore": {
+      "route": "GET /crm/businesses/:businessId/contacts",
+      "status": 200,
+      "body": {
+        "contacts": [{ "id": "r023_contact_ada", "lastName": "Byron", "status": "CLIENT" }]
+      }
+    },
+    "contactsAfter": {
+      "route": "GET /crm/businesses/:businessId/contacts",
+      "status": 200,
+      "body": {
+        "contacts": [
+          { "id": "r023_contact_grace", "lastName": "Hopper", "status": "LEAD" },
+          { "id": "r023_contact_ada", "lastName": "Byron", "status": "CLIENT" }
+        ]
+      }
+    },
+    "invoiceCreated": {
+      "route": "POST /commerce/businesses/:businessId/invoices",
+      "status": 201,
+      "body": {
+        "id": "r023_inv_1",
+        "invoiceNumber": "INV-1001",
+        "status": "DRAFT",
+        "total": 250,
+        "subtotal": 250,
+        "currency": "TTD",
+        "contactId": "r023_contact_ada",
+        "items": [
+          { "description": "Consulting", "quantity": 2, "unitPrice": 100, "total": 200 },
+          { "description": "Setup", "quantity": 1, "unitPrice": 50, "total": 50 }
+        ]
+      }
+    },
+    "invoiceDraft": {
+      "route": "GET /commerce/businesses/:businessId/invoices/:invoiceId",
+      "status": 200,
+      "body": {
+        "id": "r023_inv_1",
+        "invoiceNumber": "INV-1001",
+        "status": "DRAFT",
+        "total": 250,
+        "subtotal": 250,
+        "currency": "TTD",
+        "contactId": "r023_contact_ada",
+        "items": [
+          { "description": "Consulting", "quantity": 2, "unitPrice": 100, "total": 200 },
+          { "description": "Setup", "quantity": 1, "unitPrice": 50, "total": 50 }
+        ],
+        "payments": [],
+        "paidAmount": 0,
+        "remaining": 250
+      }
+    },
+    "invoiceSent": {
+      "route": "GET /commerce/businesses/:businessId/invoices/:invoiceId",
+      "status": 200,
+      "body": {
+        "id": "r023_inv_1",
+        "invoiceNumber": "INV-1001",
+        "status": "SENT",
+        "total": 250,
+        "subtotal": 250,
+        "currency": "TTD",
+        "contactId": "r023_contact_ada",
+        "items": [
+          { "description": "Consulting", "quantity": 2, "unitPrice": 100, "total": 200 },
+          { "description": "Setup", "quantity": 1, "unitPrice": 50, "total": 50 }
+        ],
+        "payments": [],
+        "paidAmount": 0,
+        "remaining": 250
+      }
+    },
+    "invoicePartiallyPaid": {
+      "route": "GET /commerce/businesses/:businessId/invoices/:invoiceId",
+      "status": 200,
+      "body": {
+        "id": "r023_inv_1",
+        "invoiceNumber": "INV-1001",
+        "status": "PARTIALLY_PAID",
+        "total": 250,
+        "subtotal": 250,
+        "currency": "TTD",
+        "contactId": "r023_contact_ada",
+        "items": [
+          { "description": "Consulting", "quantity": 2, "unitPrice": 100, "total": 200 },
+          { "description": "Setup", "quantity": 1, "unitPrice": 50, "total": 50 }
+        ],
+        "payments": [
+          { "id": "r023_pay_1", "amount": 100, "status": "SUCCESSFUL" }
+        ],
+        "paidAmount": 100,
+        "remaining": 150
+      }
+    },
+    "invoicePaid": {
+      "route": "GET /commerce/businesses/:businessId/invoices/:invoiceId",
+      "status": 200,
+      "body": {
+        "id": "r023_inv_1",
+        "invoiceNumber": "INV-1001",
+        "status": "PAID",
+        "total": 250,
+        "subtotal": 250,
+        "currency": "TTD",
+        "contactId": "r023_contact_ada",
+        "items": [
+          { "description": "Consulting", "quantity": 2, "unitPrice": 100, "total": 200 },
+          { "description": "Setup", "quantity": 1, "unitPrice": 50, "total": 50 }
+        ],
+        "payments": [
+          { "id": "r023_pay_1", "amount": 100, "status": "SUCCESSFUL" },
+          { "id": "r023_pay_2", "amount": 150, "status": "SUCCESSFUL" }
+        ],
+        "paidAmount": 250,
+        "remaining": 0
+      }
+    },
+    "paymentRecorded": {
+      "route": "POST /commerce/businesses/:businessId/invoices/:invoiceId/payments",
+      "status": 201,
+      "body": {
+        "payment": { "id": "r023_pay_1" },
+        "invoice": {
+          "id": "r023_inv_1",
+          "invoiceNumber": "INV-1001",
+          "status": "PARTIALLY_PAID",
+          "total": 250,
+          "subtotal": 250,
+          "currency": "TTD",
+          "contactId": "r023_contact_ada",
+          "items": [
+            { "description": "Consulting", "quantity": 2, "unitPrice": 100, "total": 200 },
+            { "description": "Setup", "quantity": 1, "unitPrice": 50, "total": 50 }
+          ],
+          "payments": [{ "id": "r023_pay_1" }]
+        },
+        "paidAmount": 100,
+        "remaining": 150
+      }
+    }
+  },
+  "screenOnly": {
+    "login": {
+      "route": "POST /identity/login",
+      "status": 200,
+      "why": "The journey never signs in by password: it mints Supabase-shaped HS256 tokens and drives POST /identity/bootstrap. POST /identity/login proxies Supabase password sign-in (owner ruling D-02, hosted Supabase), so jsdom stubs it. Shape: the success return of IdentityController.login (apps/server/src/modules/identity/identity.controller.ts) and IdentityLoginResult (apps/web/src/lib/client.ts).",
+      "body": {
+        "status": "authenticated",
+        "email": "r023_owner@test.local",
+        "accessToken": "r023-access-token",
+        "refreshToken": "r023-refresh-token"
+      }
+    },
+    "products": {
+      "route": "GET /commerce/businesses/:businessId/products",
+      "status": 200,
+      "why": "invoices/new loads the catalogue for its product picker; the journey invoices free-text items. Shape: the paginated envelope fetchProducts validates (apps/web/src/lib/client.ts).",
+      "body": { "data": [], "total": 0, "page": 1, "pageSize": 20, "totalPages": 0 }
+    },
+    "timeline": {
+      "route": "GET /commerce/businesses/:businessId/invoices/:invoiceId/timeline",
+      "status": 200,
+      "why": "invoices/[id] reads the activity timeline; the journey calls this route only as a denial probe (step 6) and asserts no owner body.",
+      "body": { "invoiceId": "r023_inv_1", "entries": [] }
+    },
+    "onboardingState": {
+      "route": "GET /onboarding-concierge/businesses/:businessId/onboarding-state",
+      "status": 200,
+      "why": "Onboarding is not a journey step (the journey bootstraps straight to a business). Shape: FRESH_STATE in apps/web/src/app/app/__tests__/onboarding-manual-path.test.tsx (R0-06).",
+      "body": {
+        "step": "welcome",
+        "onboardingComplete": false,
+        "onboardingStartedAt": null,
+        "onboardingCompletedAt": null,
+        "threePillarMet": false,
+        "setupStatus": null
+      }
+    },
+    "forbidden": {
+      "route": "any business-prefixed route, as a non-member",
+      "status": 403,
+      "why": "The journey asserts 403 on every business-prefixed route under another tenant (step 6) but not the body. Body: BusinessGuard's ForbiddenException('No access to this business') (apps/server/src/core/auth/business.guard.ts) through the global filter.",
+      "body": { "statusCode": 403, "message": "No access to this business", "error": "Forbidden" }
+    },
+    "serverError": {
+      "route": "POST /commerce/businesses/:businessId/invoices/:invoiceId/payments (a transient failure)",
+      "status": 500,
+      "why": "The journey's payments all land, so it never sees a failed submit. Step 4's retry case answers the first submit with this to prove a retry of the same form open reuses its idempotency key (R0-21). Body: the 500 branch of GlobalHttpExceptionFilter (apps/server/src/core/filters/http-exception.filter.ts), volatile envelope fields (timestamp, path, correlationId) left out.",
+      "body": { "statusCode": 500, "code": "INTERNAL_SERVER_ERROR", "message": "Internal server error", "error": "Internal Server Error" }
+    },
+    "gmailNotConfigured": {
+      "route": "POST /commerce/businesses/:businessId/invoices/:invoiceId/send-email | send-reminder | resend-receipt",
+      "status": 503,
+      "why": "The R0-07 contract: with no Gmail connection every Gmail send path answers this before any outbound call (apps/server/test/optional-services-fail-visibly.integration.test.ts, expectNotConfigured; GmailService gmailNotConfigured).",
+      "body": {
+        "statusCode": 503,
+        "code": "provider_not_configured",
+        "message": "Gmail not connected",
+        "details": { "service": "gmail" }
+      }
+    },
+    "aiNotConfigured": {
+      "route": "any /ai/* route",
+      "status": 503,
+      "why": "The R0-07 contract for AI dispatch with no provider key (optional-services-fail-visibly.integration.test.ts: POST /ai/businesses/:b/ai/chat).",
+      "body": {
+        "statusCode": 503,
+        "code": "provider_not_configured",
+        "message": "No AI providers available: no AI provider is configured",
+        "details": { "service": "ai" }
+      }
+    }
+  }
+}
