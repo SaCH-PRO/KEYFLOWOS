@@ -1260,7 +1260,6 @@ const UNMAPPED: Record<string, string> = {
   approval: 'approval.controller declares no module scope',
   automations: 'FlowService.createAutomation/updateAutomation back no route; playbook routes (automation.controller) are unscoped',
   bookings: 'bookings.controller declares no module scope (the legacy `bookings` key still grants bookings_*)',
-  command: 'command.controller declares no module scope',
   comms: 'CommunicationsService.sendBroadcast backs no route',
   community: 'reads Prisma directly; no service call',
   content: 'content-ops.controller declares no module scope (the legacy `content` key still grants content_*)',
@@ -1283,7 +1282,6 @@ const UNMAPPED: Record<string, string> = {
   people: 'StructureService.listPeople backs no route; TaskAssignmentService routes are unscoped',
   portal: 'portal.controller declares no module scope',
   present: 'renders an onboarding card; no service call',
-  procurement: 'procurement.controller declares no module scope',
   projects: 'projects.controller declares no module scope (the legacy `projects` key still grants projects_*, time_*)',
   queue: 'EmailMarketingService.queueCampaign backs no route',
   reconcile: 'finance.controller declares no module scope',
@@ -1337,6 +1335,12 @@ const UNGRANTED: Record<string, string> = {
   finance_view_receivables: 'ReceivablesService is reached by finance.controller, which is unscoped',
   payroll_generate_run: 'PayrollService.generateRun backs no route (payroll.controller has list/get/approve/mark-paid only)',
   payroll_set_rate: 'PayrollService.setRate backs no route (payroll.controller has list/get/approve/mark-paid only)',
+  procurement_acknowledge_vendor:
+    'operations:write (D-40) is only a floor: ProcurementService.acknowledgeVendor updates the request by its bare id, AMBIENT-BOUND on the staff bridge (rule 2b, R0-13g)',
+  procurement_mark_fulfilled:
+    'operations:write (D-40) is only a floor: ProcurementService.markFulfilled updates the request by its bare id, AMBIENT-BOUND on the staff bridge (rule 2b, R0-13g)',
+  procurement_mark_invoiced:
+    'operations:write (D-40) is only a floor: ProcurementService.markInvoiced updates the request by its bare id, AMBIENT-BOUND on the staff bridge (rule 2b, R0-13g)',
   structure_find_person: 'StructureService.findPeople backs no route',
 };
 
@@ -1430,7 +1434,17 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
 
   it('GOVERNED_UNGRANTED is exactly the governed tools no module grants (rule 4)', () => {
     // commerce_send_invoice: review 7 DRV5-2 (TransactionalEmailService.send backs no member route to a customer)
-    expect(derived.governedUngranted).toEqual(['commerce_send_invoice', 'execute_custom_logic', 'send_message_with_approval', 'update_status_with_confirmation']);
+    // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: governed by operations since D-40
+    // (R0-13g), but each dispatcher call updates the request by its bare id (rule 2b), so the route is only a floor
+    expect(derived.governedUngranted).toEqual([
+      'commerce_send_invoice',
+      'execute_custom_logic',
+      'procurement_acknowledge_vendor',
+      'procurement_mark_fulfilled',
+      'procurement_mark_invoiced',
+      'send_message_with_approval',
+      'update_status_with_confirmation',
+    ]);
     expect(Object.keys(GOVERNED_UNGRANTED).sort()).toEqual(derived.governedUngranted);
   });
 
@@ -1525,6 +1539,10 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
       },
       analytics: {},
       operations: {
+        // command_* and procurement_*: D-40 put the command-centre item and procurement routes
+        // under operations (R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT)
+        command_discharge_obligation: 'write',
+        command_list_due_obligations: 'read',
         contract_create_tag: 'write',
         contract_extract_terms: 'write',
         contract_list_tags: 'read',
@@ -1551,6 +1569,17 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         performance_take_snapshot: 'write',
         performance_team_summary: 'read',
         performance_trend: 'read',
+        // procurement_acknowledge_vendor, procurement_mark_fulfilled, procurement_mark_invoiced:
+        // GOVERNED_UNGRANTED (rule 2b: each updates the request by its bare id, R0-13g)
+        procurement_create_request: 'write',
+        procurement_get_request: 'read',
+        procurement_get_stats: 'read',
+        procurement_issue_po: 'write',
+        procurement_list_requests: 'read',
+        procurement_list_suppliers: 'read',
+        procurement_select_vendor: 'write',
+        procurement_submit_for_review: 'write',
+        procurement_update_request: 'write',
       },
       connect: {},
     });
@@ -2303,9 +2332,14 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
 
     it('TENANT_UNBOUND_TOOLS is exactly the ungoverned tools with an AMBIENT-BOUND call: no key reaches them, the legacy families and the baseline included', () => {
       const ungoverned = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) === 0).sort();
-      const governed = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) > 0);
-      // a governed one is GOVERNED_UNGRANTED by rule 4 instead (none today)
-      expect(governed).toEqual([]);
+      const governed = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) > 0).sort();
+      // a governed one is GOVERNED_UNGRANTED by rule 4 instead: the three procurement transitions since
+      // D-40 put their routes under operations (R0-13g)
+      expect(governed).toEqual(['procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced']);
+      for (const t of governed) {
+        expect(derived.governedUngranted, t).toContain(t);
+        expect(Object.keys(GOVERNED_UNGRANTED), t).toContain(t);
+      }
       expect(Object.keys(TENANT_UNBOUND).sort()).toEqual(ungoverned);
       for (const [t, why] of Object.entries(TENANT_UNBOUND)) expect(why, t).toMatch(new RegExp(AMBIENT.get(t)![0].replace('.', '\\.')));
     });

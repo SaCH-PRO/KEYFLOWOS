@@ -121,11 +121,19 @@ export class ProcurementController {
     return this.service.issuePO(businessId, id, req.user?.id);
   }
 
+  /**
+   * The three vendor-side transitions. ProcurementService.acknowledgeVendor, markFulfilled and
+   * markInvoiced update the request by its bare id, so each route first finds the request in the
+   * path business (get, 404 otherwise), as submit, vendor and issue-po do inside the service.
+   * Without it only the ambient Prisma tenant kept a member of one business off another's
+   * request, and the miss surfaced as 500 (review SEC-R013g-2).
+   */
   @RequireModuleScope('operations', 'write')
   @Post('businesses/:businessId/:id/acknowledge')
   @UseGuards(BusinessGuard, ModuleScopeGuard)
   @CrmRateLimit(30, 60_000)
   async acknowledgeVendor(@Param('businessId') businessId: string, @Param('id') id: string) {
+    await this.service.get(businessId, id);
     return this.service.acknowledgeVendor(businessId, id);
   }
 
@@ -134,6 +142,7 @@ export class ProcurementController {
   @UseGuards(BusinessGuard, ModuleScopeGuard)
   @CrmRateLimit(30, 60_000)
   async markFulfilled(@Param('businessId') businessId: string, @Param('id') id: string) {
+    await this.service.get(businessId, id);
     return this.service.markFulfilled(businessId, id);
   }
 
@@ -142,6 +151,7 @@ export class ProcurementController {
   @UseGuards(BusinessGuard, ModuleScopeGuard)
   @CrmRateLimit(30, 60_000)
   async markInvoiced(@Param('businessId') businessId: string, @Param('id') id: string) {
+    await this.service.get(businessId, id);
     return this.service.markInvoiced(businessId, id);
   }
 }

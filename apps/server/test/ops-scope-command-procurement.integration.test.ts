@@ -295,6 +295,14 @@ const KNOWN_HANDLER_FAILURE: Record<string, number> = {
   'ProcurementController.reject': 500,
 };
 
+/**
+ * Review CR-2: a case that seeds and sends every route for one or more actors makes up to ~70
+ * real-database requests, which took 3.2-5.0 s on a shared machine against vitest's default
+ * 5 s budget (and a timed-out case left requests in flight that reset the next case). These
+ * cases name their own budget, as the other integration suites do.
+ */
+const HEAVY_CASE_MS = 60_000;
+
 const okStatus = (verb: Verb) => (verb === 'post' ? 201 : 200);
 /** What a caller the gate admits gets: the handler's own answer. */
 const admittedStatus = (r: RouteCase) => KNOWN_HANDLER_FAILURE[r.key] ?? okStatus(r.verb);
@@ -566,7 +574,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
       }
       expect(await writableState(), `${actor}: nothing written`).toEqual(before);
     }
-  });
+  }, HEAVY_CASE_MS);
 
   it("[OPS-03] RED-BEFORE: the same two members get 403 on every procurement route (list, create, suppliers, stats, read, PATCH, submit, approve, reject, vendor, issue-po, acknowledge, fulfill, invoice) and nothing is written: no request changes, no purchase order is issued", async () => {
     for (const actor of [ID.noOps, ID.opsNone]) {
@@ -579,7 +587,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
       }
       expect(await writableState(), `${actor}: nothing written`).toEqual(before);
     }
-  });
+  }, HEAVY_CASE_MS);
 
   it("[OPS-04] RED-BEFORE: operations 'read' (an explicit grant, and a STAFF member on role defaults) lists and reads every command-centre and procurement GET (200) but every mutation answers 403 (operations requires write, you have read) and nothing is written", async () => {
     for (const actor of [ID.opsRead, ID.staffDefault]) {
@@ -595,7 +603,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
       expect({ ...after, reached: after.reached.slice(before.reached.length).filter((r) => !r.startsWith('scheduler.')) }, actor)
         .toEqual({ ...before, reached: [] });
     }
-  });
+  }, HEAVY_CASE_MS);
 
   it("[OPS-05] operations 'write' reaches every command-centre and procurement route (GET 200, PATCH and DELETE 200, POST 201; procurement approve and reject 500, KNOWN_HANDLER_FAILURE): the gate refuses on scope, not on role", async () => {
     const built = await buildAll(GATED_ROUTES);
@@ -606,7 +614,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
     expect(bodies['ProcurementController.issuePO']).toMatchObject({ status: 'PO_ISSUED', purchaseOrder: { businessId: ID.bizA, supplierConnectionId: SUPPLIER.a } });
     expect(bodies['ProcurementController.submit']).toMatchObject({ status: 'SUBMITTED', businessId: ID.bizA });
     expect(bodies['CommandController.complete']).toMatchObject({ status: 'COMPLETED', businessId: ID.bizA });
-  });
+  }, HEAVY_CASE_MS);
 
   it('[OPS-06] OWNER and ADMIN (role defaults, operations admin) keep every route, the cockpit snapshot included (procurement approve and reject 500, KNOWN_HANDLER_FAILURE)', async () => {
     for (const actor of [ID.owner, ID.admin]) {
@@ -616,7 +624,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
         expectedAll(ALL_ROUTES, admittedStatus),
       );
     }
-  });
+  }, HEAVY_CASE_MS);
 
   it("[OPS-07] refusal: an unauthenticated caller gets 401 and another tenant's owner 403 on every route of the three controllers, and nothing is written", async () => {
     const built = await buildAll(ALL_ROUTES);
@@ -624,7 +632,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
     expect((await sendAll(built, undefined)).statuses).toEqual(expectedAll(ALL_ROUTES, () => 401));
     expect((await sendAll(built, ID.outsider)).statuses).toEqual(expectedAll(ALL_ROUTES, () => 403));
     expect(await writableState()).toEqual(before);
-  });
+  }, HEAVY_CASE_MS);
 
   it("[OPS-08] the cockpit snapshot stays open to a member without operations (the census's named exception): the STAFF member with no operations key and the one with operations 'none' read it 200, as release0-journey's step 5 STAFF member does", async () => {
     for (const actor of [ID.noOps, ID.opsNone]) {
@@ -633,6 +641,127 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
       expect(res.body.businessId).toBe(ID.bizA);
     }
   });
+
+  it("[OPS-09] review SEC-R013g-2: a member of bizA the gate admits (STAFF operations write, and the OWNER) who sends another tenant's command item or procurement request id through bizA's own path gets 404 on every route that takes an id (the single-item routes, the bulk bodies, PATCH, submit, approve, reject, vendor, issue-po, acknowledge, fulfill, invoice) and bizB's rows are unchanged. This harness arms no TenantInterceptor, so the route's own binding is what is proven: acknowledge, fulfill and invoice look the request up in the path business before the transition, as submit and vendor do", async () => {
+    // A request bizB has carried to PO_ISSUED, so each procurement transition would be a real change.
+    const foreignRequest = async (suffix: string) => {
+      const row = await seedProcurementRequest(ID.bizB, { supplier: SUPPLIER.b });
+      await db.procurementRequest.update({ where: { id: row.id }, data: { status: 'PO_ISSUED' } });
+      return `${proc(ID.bizB)}/${row.id}${suffix}`;
+    };
+    const FOREIGN_BUILD: Record<string, () => Promise<{ url: string; body?: unknown }>> = {
+      'ProcurementController.acknowledgeVendor': async () => ({ url: await foreignRequest('/acknowledge') }),
+      'ProcurementController.markFulfilled': async () => ({ url: await foreignRequest('/fulfill') }),
+      'ProcurementController.markInvoiced': async () => ({ url: await foreignRequest('/invoice') }),
+    };
+    const byId = (built: { url: string; body?: unknown }) =>
+      built.url.includes(`${P}ci_`) || built.url.includes(`${P}pr_`) || Array.isArray((built.body as { ids?: unknown } | undefined)?.ids);
+    for (const actor of [ID.opsWrite, ID.owner]) {
+      const built: Array<RouteCase & { url: string; body?: unknown }> = [];
+      for (const r of GATED_ROUTES) {
+        // bizB's row, sent through bizA's path
+        const b = FOREIGN_BUILD[r.key] ? await FOREIGN_BUILD[r.key]() : await r.build(ID.bizB);
+        const url = b.url.replace(`/businesses/${ID.bizB}`, `/businesses/${ID.bizA}`);
+        if (byId({ url, body: b.body })) built.push({ ...r, url, body: b.body });
+      }
+      // anti-vacuity: 14 command item routes (3 of them by body ids) and 10 procurement request routes take an id
+      expect(built.length, actor).toBe(24);
+      for (const r of built) {
+        expect(r.url.startsWith(`/command/businesses/${ID.bizA}/`) || r.url.startsWith(`/procurement/businesses/${ID.bizA}/`), r.key).toBe(true);
+      }
+      const before = await writableState();
+      const { statuses } = await sendAll(built, actor);
+      expect(statuses, actor).toEqual(Object.fromEntries(built.map((r) => [r.key, 404])));
+      expect(await writableState(), `${actor}: bizB unchanged, nothing written`).toEqual(before);
+    }
+  }, HEAVY_CASE_MS);
+
+  it("[OPS-10] review SEC-R013g-1 / CR-1: KEY reaches a command or procurement tool only where HTTP admits the same member: the position envelope (JobRolePolicyService.envelopeForPosition, bounded by the holder's real membership row) gives no command_* or procurement_* tool to the members the gate refuses and only the read tools to operations read; the legacy 'procurement' family key reaches none of them; the three bare-id procurement transitions are reached by no key", async () => {
+    const { JobRolePolicyService, CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } = await import('../src/modules/structure/job-role-policy.service');
+    const { FLOW_TOOLS } = await import('../src/modules/ai/flow-tool-registry');
+    const policy = new JobRolePolicyService();
+    const tier = new Map(FLOW_TOOLS.map((t) => [t.name, t.riskTier as number]));
+    // both envelope checks AiOversightService.evaluate applies: allowed, and within the tier cap
+    const reaches = (env: ReturnType<typeof policy.envelopeForJobRole>, tool: string) =>
+      policy.isToolAllowed(env, tool) && tier.get(tool)! <= env.maxRiskTier;
+    const TOOLS = FLOW_TOOLS.map((t) => t.name).filter((n) => n.startsWith('command_') || n.startsWith('procurement_')).sort();
+    // the route each tool's work sits behind, at the level D-40 gives it
+    const ROUTE_LEVEL: Record<string, 'read' | 'write'> = {
+      command_list_due_obligations: 'read',
+      command_discharge_obligation: 'write',
+      procurement_list_requests: 'read',
+      procurement_get_request: 'read',
+      procurement_list_suppliers: 'read',
+      procurement_get_stats: 'read',
+      procurement_create_request: 'write',
+      procurement_update_request: 'write',
+      procurement_submit_for_review: 'write',
+      procurement_select_vendor: 'write',
+      procurement_issue_po: 'write',
+      procurement_acknowledge_vendor: 'write',
+      procurement_mark_fulfilled: 'write',
+      procurement_mark_invoiced: 'write',
+    };
+    expect(TOOLS).toEqual(Object.keys(ROUTE_LEVEL).sort());
+    const BARE_ID = ['procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced'];
+    const READS = TOOLS.filter((t) => ROUTE_LEVEL[t] === 'read');
+
+    // What OPS-02..OPS-06 prove HTTP gives each bizA member on these routes.
+    const HTTP_LEVEL: Record<string, 'none' | 'read' | 'write'> = {
+      [ID.noOps]: 'none',
+      [ID.opsNone]: 'none',
+      [ID.opsRead]: 'read',
+      [ID.staffDefault]: 'read',
+      [ID.opsWrite]: 'write',
+      [ID.owner]: 'write',
+      [ID.admin]: 'write',
+    };
+    const rank = { none: 0, read: 1, write: 2 } as const;
+    // A position whose JobRole grants everything these tools could want, the legacy family key
+    // included, held by each member: the holder's membership row (read from the database) bounds it.
+    const broad = { id: `${P}jr`, name: 'K13O broad', permissions: { operations: 'admin', procurement: 'admin', crm: 'read' } };
+    for (const [userId, httpLevel] of Object.entries(HTTP_LEVEL)) {
+      const m = await db.membership.findFirst({ where: { userId, businessId: ID.bizA }, include: { user: true } });
+      const env = policy.envelopeForPosition({ businessId: ID.bizA, userId, membershipId: m.id, jobRole: broad as any, membership: m });
+      const reached = TOOLS.filter((t) => reaches(env, t));
+      // K2: never a tool whose route HTTP refuses this member
+      for (const t of reached) {
+        expect(rank[httpLevel], `${userId} reaches ${t} over KEY but HTTP gives ${httpLevel}`).toBeGreaterThanOrEqual(rank[ROUTE_LEVEL[t]]);
+      }
+      if (httpLevel === 'none') expect(reached, userId).toEqual([]);
+      if (httpLevel === 'read') expect(reached, userId).toEqual(READS);
+      if (httpLevel === 'write') expect(reached, userId).toEqual(expect.arrayContaining(READS));
+      for (const t of BARE_ID) expect(reached, `${userId} ${t}`).not.toContain(t);
+    }
+
+    // The reviewer's probes: a legacy JobRole and holder map with procurement but no operations key
+    // (HTTP answers 403 on every procurement route, OPS-03), membership-backed and contact-only.
+    const legacy = { id: `${P}jr_legacy`, name: 'K13O legacy', permissions: { procurement: 'write', crm: 'read' } };
+    const legacyHolder = { userId: ID.noOps, businessId: ID.bizA, role: 'STAFF', permissionScopes: { procurement: 'write', crm: 'read' }, user: {} };
+    const membershipBacked = policy.envelopeForPosition({
+      businessId: ID.bizA, userId: ID.noOps, membershipId: `${P}m_legacy`, jobRole: legacy as any, membership: legacyHolder as any,
+    });
+    const contactOnly = policy.envelopeForPosition({ businessId: ID.bizA, jobRole: { ...legacy, permissions: { procurement: 'admin' } } as any });
+    expect(TOOLS.filter((t) => reaches(membershipBacked, t))).toEqual([]);
+    expect(TOOLS.filter((t) => reaches(contactOnly, t))).toEqual([]);
+    // ...and the governing key reaches them at its level and tier (issue-po is tier 3: admin)
+    const job = (permissions: Record<string, string>) => policy.envelopeForJobRole({ id: `${P}jr_ops`, name: 'K13O ops', permissions: permissions as any });
+    expect(TOOLS.filter((t) => reaches(job({ operations: 'read' }), t))).toEqual(READS);
+    expect(TOOLS.filter((t) => reaches(job({ operations: 'write' }), t))).toEqual(TOOLS.filter((t) => !BARE_ID.includes(t) && t !== 'procurement_issue_po'));
+    expect(TOOLS.filter((t) => reaches(job({ operations: 'admin' }), t))).toEqual(TOOLS.filter((t) => !BARE_ID.includes(t)));
+
+    // The reviewed tables say so (job-role-tool-families.spec.ts derives them from the route decorators).
+    for (const t of BARE_ID) expect(GOVERNED_UNGRANTED[t], t).toMatch(/bare id/);
+    for (const t of TOOLS.filter((x) => !BARE_ID.includes(x))) expect(CANONICAL_MODULE_TOOLS.operations[t], t).toBe(ROUTE_LEVEL[t]);
+  });
+
+  it.todo(
+    "[OPS-T03] review SEC-R013g-3: KEY chat (POST /ai/businesses/:id/flow/chat) selects tools by the crew detected from the message (FlowOrchestratorService.selectToolsForRequest; RoleEngine ROLE_BASELINE_TOOLS gives every crew command_list_due_obligations and command_discharge_obligation, the operations crew procurement_*) with no member module scope, and POST /ai/businesses/:id/key/command (do, draft) reaches CommandService.create for any member — not done: pre-existing, in role-engine.service.ts, flow-orchestrator.service.ts and ai.controller.ts, outside this packet's write set; D-40 over KEY chat needs its own packet",
+  );
+
+  it.todo(
+    "[OPS-T04] review SEC-R013g-4: the audit rows name the member who acted (command item approve, complete and dismiss record actorType USER with no actorId; procurement acknowledge, fulfill and invoice record neither) — not done: CommandService.approve/complete/dismiss and ProcurementService.acknowledgeVendor/markFulfilled/markInvoiced take no actor, so the controllers cannot pass one, and both services are outside this packet's write set",
+  );
 
   it.todo(
     "[OPS-T01] the cockpit snapshot (GET business-command-center/businesses/:id/snapshot) under operations 'read' — not done: release0-journey.integration.test.ts step 5 (an R0 exit proof, outside this packet's write set) pins a STAFF member with no operations key reading it 200, V1-47 projects each tile by the member's own scopes, and the snapshot reads no command item or procurement row; whether D-40 covers it is referred to the owner",
