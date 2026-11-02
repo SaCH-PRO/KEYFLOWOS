@@ -348,6 +348,11 @@
       "packet": "V1-16-BK-SLOT-CONCURRENCY"
     },
     {
+      "prefix": "v18a_",
+      "owner": "apps/server/test/storefront-paid-event.integration.test.ts",
+      "packet": "V1-18-PUB-STOREFRONT-PAID-EVENT"
+    },
+    {
       "prefix": "v19a_",
       "owner": "apps/server/test/key-idempotency-claim.integration.test.ts",
       "packet": "V1-19-KEY-IDEMPOTENCY-CLAIM"
