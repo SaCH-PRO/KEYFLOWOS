@@ -10,6 +10,10 @@
 # status ready and db.ok true; web.healthz status ok, apiReachable true and
 # env ok). A malformed body, an unexpected status or a curl transport failure
 # fails closed with a named reason; response bodies are never printed.
+# A probe passes only on the module's positive `valid_health_body` verdict:
+# its exit status alone is not a pass. Only reason tokens from a fixed
+# allow-list reach the table; any other verifier output is reported as
+# health_verifier_failed.
 #
 # Usage:
 #   bash scripts/verify-up.sh                                 # local dev defaults
@@ -22,7 +26,8 @@
 # Specs: pnpm test:verify-up (scripts/tests/verify-up-*.spec.mjs).
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Physical path (-P): a symlinked checkout must not change which file runs.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 API_BASE="${API_BASE:-${BASE_URL:-http://localhost:3001}}"
 WEB_BASE="${WEB_BASE:-${BASE_URL:-http://localhost:5000}}"
 SAME_HOST=false
@@ -35,11 +40,25 @@ BODY_FILE="$(mktemp)" || exit 2
 ERR_FILE="$(mktemp)" || { rm -f "$BODY_FILE"; exit 2; }
 trap 'rm -f "$BODY_FILE" "$ERR_FILE"' EXIT
 
+# Maps the body verifier's stderr to a fixed reason token. Anything outside
+# the allow-list (a crash, a stack trace, body text) becomes
+# health_verifier_failed, so no response text can reach the table.
+verifier_reason() {
+  local raw
+  raw="$(head -n 1 "$ERR_FILE" 2>/dev/null)"
+  case "$raw" in
+    unknown_probe|invalid_json|not_an_object|health_body_unhealthy|body_unreadable|health_verifier_usage_error)
+      printf '%s' "$raw" ;;
+    *)
+      printf '%s' 'health_verifier_failed' ;;
+  esac
+}
+
 probe() {
   local label="$1"
   local url="$2"
   local expected_status="${3:-200}"
-  local started_ms ended_ms latency_ms body_status transport_ok=1 error_reason=""
+  local started_ms ended_ms latency_ms body_status transport_ok=1 error_reason="" verdict verifier_exit
   started_ms=$(date +%s%3N 2>/dev/null || node -e 'process.stdout.write(String(Date.now()))')
   if ! body_status=$(curl -sS -o "$BODY_FILE" -w '%{http_code}' --max-time 10 "$url" 2>"$ERR_FILE"); then
     transport_ok=0
@@ -51,7 +70,15 @@ probe() {
     if [ "$label" != 'web.root' ]; then
       # The existing API/web contracts return JSON. Reject HTTP 200 when the
       # response is missing, degraded, malformed or contains a failed DB check.
-      if ! error_reason=$(node "$SCRIPT_DIR/verify-up-body.mjs" "$label" "$BODY_FILE" 2>&1); then
+      verifier_exit=0
+      verdict=$(node "$SCRIPT_DIR/verify-up-body.mjs" "$label" "$BODY_FILE" 2>"$ERR_FILE") || verifier_exit=$?
+      if [ "$verifier_exit" -ne 0 ]; then
+        error_reason="$(verifier_reason)"
+      elif [ "$verdict" != 'valid_health_body' ]; then
+        # Exit 0 without the verdict means the body was never checked.
+        error_reason='health_verifier_no_verdict'
+      fi
+      if [ -n "$error_reason" ]; then
         RESULTS+=("FAIL  ${label}  ${body_status}  ${latency_ms}ms  ${url}  ::  ${error_reason}")
         FAIL=$((FAIL + 1))
         return 1

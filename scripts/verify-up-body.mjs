@@ -3,8 +3,13 @@
  * port of #188; called by scripts/verify-up.sh for every JSON probe).
  * An HTTP 200 with a degraded body is NOT a passing readiness probe.
  * This never prints response bodies, URLs, credentials or private fields.
+ *
+ * CLI: `node verify-up-body.mjs <probe> <body-file>`. A healthy body prints
+ * exactly `valid_health_body` on stdout and exits 0; anything else prints one
+ * fixed reason token on stderr and exits non-zero. verify-up.sh requires the
+ * stdout token, so a run that checks nothing can never read as a pass.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,7 +36,19 @@ export function verifyHealthBody(label, raw) {
     : { ok: false, reason: 'health_body_unhealthy' };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// Node gives the main module's import.meta.url as a real path, while argv[1]
+// keeps any symlink in the path it was started with (a deploy `current ->
+// releases/N` checkout, /tmp on macOS). Compare real paths on both sides.
+function isCliEntry() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntry()) {
   const [label, file] = process.argv.slice(2);
   if (!label || !file) {
     console.error('health_verifier_usage_error');
@@ -43,8 +60,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     } catch {
       result = { ok: false, reason: 'body_unreadable' };
     }
-    if (!result.ok) {
-      console.error(result.reason);
+    if (result.ok) {
+      process.stdout.write(result.reason + '\n');
+    } else {
+      process.stderr.write(result.reason + '\n');
       process.exitCode = 1;
     }
   }
