@@ -1562,7 +1562,7 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/invoices/:invoiceId/payments')
-  recordPayment(
+  async recordPayment(
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
     // R0-D2: a DTO class so the global ValidationPipe sees the body; it
@@ -1576,10 +1576,14 @@ export class CommerceController {
     // reference (the journey's duplicate slip); internal callers pass a
     // document-derived reference and keep one row per call.
     // R0-PL-07: the recorder is the authenticated user, never a body field.
-    return this.commerce.recordPayment(invoiceId, businessId, body, {
+    const result = await this.commerce.recordPayment(invoiceId, businessId, body, {
       dedupeByReference: true,
       actorId: req?.user?.id ?? null,
     });
+    // R0-SEC3 review SEC3-ST-1 (SEC-CMF1-2 class): recordPayment and its keyed
+    // replay reload the invoice with the whole Contact row; the HTTP body
+    // projects it like every other invoice write (toInvoiceWriteResponse).
+    return { ...result, invoice: result.invoice ? toInvoiceWriteResponse(result.invoice) : result.invoice };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

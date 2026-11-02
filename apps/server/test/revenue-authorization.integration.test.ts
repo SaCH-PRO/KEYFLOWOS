@@ -1615,3 +1615,100 @@ describe('Review repairs (R0-02): invoice write responses and the linked booking
     expect(leaking, `write routes answering with the linked Booking row: ${leaking.join(', ')}`).toEqual([]);
   });
 });
+
+describe('Review repairs (R0-SEC3): the record-payment route projects the invoice contact (SEC3-ST-1)', () => {
+  // R0-SEC3 review SEC3-ST-1 (the SEC-CMF1-2 class, on the one invoice write
+  // route of this controller that did not answer through
+  // toInvoiceWriteResponse): CommerceService.recordPayment reloads the invoice
+  // with `contact: true` (and its keyed replay with the same include), and
+  // POST .../payments handed the reload back, so a revenue:write member with
+  // no CRM scope received the whole Contact row (notesInternal, phone, ownerId,
+  // visibility). The route now answers the invoice through
+  // toInvoiceWriteResponse; the service return, which KEY and the evidence
+  // flow read, is unchanged.
+  const PRIV_CANARY = 'RVA_PRIV_';
+  const PRIV = {
+    contact: `${P}contactPriv`,
+    notesInternal: `${PRIV_CANARY}notes internal`,
+    phone: '+18685550199',
+  };
+
+  beforeAll(async () => {
+    await db.contact.create({
+      data: {
+        id: PRIV.contact,
+        businessId: ID.bizA,
+        firstName: 'Rva',
+        lastName: 'Private',
+        email: 'rva.private@test.local',
+        phone: PRIV.phone,
+        notesInternal: PRIV.notesInternal,
+        ownerId: ID.ownerA,
+        visibility: 'PRIVATE',
+      },
+    });
+  });
+
+  function recordPayment(actor: string, invoiceId: string, body: Record<string, unknown>) {
+    return withActor(agent().post(`/commerce/businesses/${ID.bizA}/invoices/${invoiceId}/payments`), actor).send(body);
+  }
+
+  it('RR-SEC3-01 (SEC3-ST-1): POST /commerce/businesses/:businessId/invoices/:invoiceId/payments answers a revenue:write member with no CRM scope with the invoice contact projected to id, businessId, email, firstName and lastName (no notesInternal, phone, ownerId or visibility) and no booking, on the fresh record and on its keyed replay, as the operator invoice read discloses; the payment lands once and the contact row is unchanged', async () => {
+    const actor = ID.staffWriteA;
+    const copy = await createCopy('rr_sec3_01', { status: 'SENT' });
+    await db.invoice.update({ where: { id: copy }, data: { contactId: PRIV.contact } });
+    const secrets = [PRIV.notesInternal, PRIV_CANARY, PRIV.phone];
+    const body = { amount: 40, method: 'CASH', idempotencyKey: 'rr-sec3-01' };
+
+    const fresh = await recordPayment(actor, copy, body);
+    expect(fresh.status, JSON.stringify(fresh.body)).toBe(201);
+    expect(fresh.body.payment).toMatchObject({ invoiceId: copy, status: 'SUCCESSFUL' });
+    expect(Number(fresh.body.payment.amount)).toBe(40);
+    expect(fresh.body.paidAmount).toBe(40);
+    expect(fresh.body.remaining).toBe(60);
+    expect(fresh.body.invoice).toMatchObject({ id: copy, businessId: ID.bizA, contactId: PRIV.contact, status: 'PARTIALLY_PAID' });
+    expect(Array.isArray(fresh.body.invoice.payments)).toBe(true);
+    expect(Array.isArray(fresh.body.invoice.items)).toBe(true);
+    expect(Object.keys(fresh.body.invoice.contact ?? {}).sort()).toEqual(['businessId', 'email', 'firstName', 'id', 'lastName']);
+    expect(fresh.body.invoice.contact).toEqual({
+      id: PRIV.contact, businessId: ID.bizA, email: 'rva.private@test.local', firstName: 'Rva', lastName: 'Private',
+    });
+    expect(fresh.body.invoice).not.toHaveProperty('booking');
+    expect(secrets.filter((s) => JSON.stringify(fresh.body).includes(s)), 'fresh record').toEqual([]);
+    expect(await paymentCount(copy)).toBe(1);
+
+    // The keyed replay (replayRecordedPayment, the same include) answers the same projection and writes nothing.
+    const replay = await recordPayment(actor, copy, body);
+    expect(replay.status, JSON.stringify(replay.body)).toBe(201);
+    expect(replay.body.payment.id).toBe(fresh.body.payment.id);
+    expect(Object.keys(replay.body.invoice.contact ?? {}).sort()).toEqual(['businessId', 'email', 'firstName', 'id', 'lastName']);
+    expect(replay.body.invoice).not.toHaveProperty('booking');
+    expect(secrets.filter((s) => JSON.stringify(replay.body).includes(s)), 'keyed replay').toEqual([]);
+    expect(await paymentCount(copy)).toBe(1);
+
+    // Only the HTTP body changes: the contact row keeps its private fields.
+    const row = await db.contact.findUnique({
+      where: { id: PRIV.contact },
+      select: { notesInternal: true, phone: true, ownerId: true, visibility: true },
+    });
+    expect(row).toEqual({ notesInternal: PRIV.notesInternal, phone: PRIV.phone, ownerId: ID.ownerA, visibility: 'PRIVATE' });
+
+    // The reference: the operator invoice read of the same copy by the same member.
+    const read = await withActor(agent().get(`/commerce/businesses/${ID.bizA}/invoices/${copy}`), actor);
+    expect(read.status, 'operator read').toBe(200);
+    expect(Object.keys(read.body.contact ?? {}).sort(), 'operator read').toEqual(['email', 'firstName', 'lastName']);
+    expect(secrets.filter((s) => JSON.stringify(read.body).includes(s)), 'operator read').toEqual([]);
+  });
+
+  // R0-SEC3 review SEC3-ST-2: the same disclosure through KEY, outside this
+  // packet's write set. Kept visible so the deferral is in the run output.
+  it.todo(
+    'RR-SEC3-02 (SEC3-ST-2): the KEY tool commerce_mark_invoice_paid answers a revenue:write member with no bookings or CRM ' +
+      'scope without the linked Booking row or the whole Contact row. DEFERRED: follow-up packet (outside the ' +
+      'R0-SEC3-INVOICE-WRITE-PROJECTION write set) — FlowOrchestratorService.executeToolAction case ' +
+      "'commerce_mark_invoice_paid' returns { invoice } straight from CommerceService.markInvoicePaid, whose reload " +
+      'includes booking: true and contact: true; wrapToolResult and executeTool pass it through, and the chat path sends ' +
+      'toolResults to the model, to the HTTP client and into the FlowSession. The fix belongs in flow-orchestrator.service.ts ' +
+      '(project the tool result) or commerce.service.ts, neither in this write set.',
+  );
+});
