@@ -46,7 +46,7 @@ import type { Prisma } from '@prisma/client';
 import { PickType } from '@nestjs/mapped-types';
 import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import { assertContactVisible, resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
 import { contactWhereBase } from './crm.helpers';
 
 /**
@@ -132,6 +132,26 @@ export class CrmController {
     return actorUserId;
   }
 
+  /**
+   * The record-visibility gate of the contact-scoped sibling reads (events,
+   * notes, journey, cross-journey, story, revenue-summary, health-metrics,
+   * relationships, network, data-quality, playbook, conversations,
+   * conversation-context, best-channel). Their collaborators check the tenant
+   * only, so each handler awaits this before calling one: the session member
+   * must be able to open the contact itself, by the rule GET
+   * contacts/:contactId applies. A contact outside that rule answers that
+   * route's 404 for an unknown id and no child row is read; a request without
+   * a member is 401 (V1-08, M13).
+   */
+  private async assertVisibleContact(
+    businessId: string,
+    contactId: string,
+    req: { user?: { id?: string } } | undefined,
+  ): Promise<void> {
+    const actorUserId = this.requireActorUserId(req);
+    await assertContactVisible(this.prisma, businessId, contactId, actorUserId);
+  }
+
   // ---------------------------------------------------------------------------
   // Relationship graph (M5)
   // ---------------------------------------------------------------------------
@@ -140,10 +160,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/relationships')
-  listContactRelationships(
+  async listContactRelationships(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.network.listForContact(businessId, contactId);
   }
 
@@ -151,11 +173,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/network')
-  getContactNetwork(
+  async getContactNetwork(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('depth') depth?: string,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     const d = depth ? Math.max(1, Math.min(2, Number(depth) || 2)) : 2;
     return this.network.getNeighbourhood(businessId, contactId, d);
   }
@@ -346,10 +370,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/best-channel')
-  bestChannelExplain(
+  async bestChannelExplain(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.bestChannel.explain(businessId, contactId);
   }
 
@@ -666,7 +692,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/data-quality')
-  dqContactIssues(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+  async dqContactIssues(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.dataQuality.getContactIssues(businessId, contactId);
   }
 
@@ -1289,7 +1320,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/events')
-  contactEvents(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+  async contactEvents(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.crm.listContactEvents({ businessId, contactId });
   }
 
@@ -1297,7 +1333,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/notes')
-  contactNotes(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+  async contactNotes(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.crm.listContactNotes({ businessId, contactId });
   }
 
@@ -1323,7 +1364,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/playbook')
-  getPlaybook(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+  async getPlaybook(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    // Before getOrCreatePlaybook, which creates a row for any id it is given.
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.playbook.getOrCreatePlaybook({ businessId, contactId });
   }
 
@@ -1552,10 +1599,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/revenue-summary')
-  getContactRevenueSummary(
+  async getContactRevenueSummary(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.revenue.getContactRevenueSummary(businessId, contactId);
   }
 
@@ -1563,10 +1612,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/health-metrics')
-  getContactHealthMetrics(
+  async getContactHealthMetrics(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.journey.getContactHealthMetrics(businessId, contactId);
   }
 
@@ -1574,10 +1625,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/journey')
-  getContactJourney(
+  async getContactJourney(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.journey.getContactJourney(businessId, contactId);
   }
 
@@ -1585,10 +1638,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/cross-journey')
-  getContactCrossJourney(
+  async getContactCrossJourney(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.journey.getContactCrossJourney(businessId, contactId);
   }
 
@@ -1599,8 +1654,10 @@ export class CrmController {
   async getContactStory(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('filter') filter?: string,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     const result = await this.journey.getContactCrossJourney(businessId, contactId);
     if (!filter || filter === 'all') return result;
     const filterFn = (() => {
@@ -1664,10 +1721,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/conversation-context')
-  getConversationContext(
+  async getConversationContext(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.journey.getConversationContext(businessId, contactId);
   }
 
@@ -1688,9 +1747,10 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/conversations')
-  listConversations(
+  async listConversations(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
     @Query('channel') channel?: string,
@@ -1698,6 +1758,7 @@ export class CrmController {
     @Query('since') since?: string,
     @Query('until') until?: string,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     const validChannels: ConversationChannel[] = ['whatsapp', 'email', 'sms', 'call', 'meeting', 'note'];
     const validDirections: ConversationDirection[] = ['in', 'out', 'internal'];
     return this.communication.list({

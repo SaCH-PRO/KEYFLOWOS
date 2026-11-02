@@ -1,5 +1,7 @@
-import { ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import type { PrismaService } from '../../core/prisma/prisma.service';
+import { contactWhereWithId } from './crm.helpers';
 
 /**
  * Effective CRM permissions derived from membership.role + permissionScopes.
@@ -123,4 +125,31 @@ export function visibilityClause(access: CrmAccess, userId: string) {
       { shares: { some: { userId } } },
     ],
   };
+}
+
+/**
+ * The record-visibility gate of a contact-scoped read: resolves when
+ * `actorUserId` may open the contact by the rule GET contacts/:contactId
+ * applies (CrmStatsService.contactDetail: the tenant predicate, deletedAt null
+ * and visibilityClause), and otherwise throws exactly what that route throws
+ * for an unknown id, NotFoundException('Contact not found'), so a hidden
+ * contact and an absent one cannot be told apart. resolveCrmAccess refuses a
+ * non-member 403 first. It reads the user, the membership and the contact row
+ * only, so a caller it refuses never reaches the contact's child rows (V1-08,
+ * M13).
+ */
+export async function assertContactVisible(
+  prisma: PrismaService,
+  businessId: string,
+  contactId: string,
+  actorUserId: string,
+): Promise<void> {
+  const access = await resolveCrmAccess(prisma, businessId, actorUserId);
+  const where: Prisma.ContactWhereInput = { ...contactWhereWithId(businessId, contactId) };
+  const visClause = visibilityClause(access, actorUserId);
+  if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
+  const visible = await prisma.client.contact.findFirst({ where, select: { id: true } });
+  if (!visible) {
+    throw new NotFoundException('Contact not found');
+  }
 }
