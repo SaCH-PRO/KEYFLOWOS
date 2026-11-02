@@ -31,6 +31,11 @@ import { BestChannelService } from '../src/modules/crm/best-channel.service';
 import { ConversationAiService } from '../src/modules/crm/conversation-ai.service';
 import { CrmNetworkService } from '../src/modules/crm/crm-network.service';
 import { ContactInsightService } from '../src/modules/crm/contact-insight.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { CallTaskController } from '../src/modules/call-tasks/call-task.controller';
+import { CallLogService } from '../src/modules/call-tasks/call-log.service';
+import { CallScriptService } from '../src/modules/call-tasks/call-script.service';
+import { RateLimitGuard } from '../src/core/guards/rate-limit.guard';
 
 interface MembershipSeed {
   userId: string;
@@ -90,6 +95,7 @@ const crmServiceMock = {
     return item;
   }),
   updateContact: vi.fn(),
+  bulkUpdateContacts: vi.fn(),
   softDeleteContact: vi.fn(),
   mergeContacts: vi.fn(),
   addTask: vi.fn(),
@@ -118,6 +124,12 @@ const journeyMock = {
   getContactCrossJourney: vi.fn(),
   generateAiInsight: vi.fn(),
   getContactHealthMetrics: vi.fn(),
+};
+
+// The unread-counts handler's collaborator. Recording stub: the claim under
+// test is which handler a request reaches, not what it counts.
+const communicationMock = {
+  unreadCounts: vi.fn(),
 };
 
 const subscriptionsMock = {
@@ -153,7 +165,7 @@ describe('CRM e2e', () => {
         { provide: CrmDataQualityService, useValue: {} },
         { provide: CrmSavedViewsService, useValue: {} },
         { provide: CrmRelationshipHealthService, useValue: {} },
-        { provide: CrmCommunicationService, useValue: {} },
+        { provide: CrmCommunicationService, useValue: communicationMock },
         { provide: BestChannelService, useValue: {} },
         { provide: ConversationAiService, useValue: {} },
         { provide: CrmNetworkService, useValue: {} },
@@ -196,6 +208,7 @@ describe('CRM e2e', () => {
     journeyMock.getContactCrossJourney.mockResolvedValue({ summary: 'journey-summary', timeline: [] });
     journeyMock.generateAiInsight.mockResolvedValue(null);
     journeyMock.getContactHealthMetrics.mockResolvedValue({ score: 1 });
+    communicationMock.unreadCounts.mockResolvedValue({});
     subscriptionsMock.checkLimit.mockResolvedValue({
       allowed: true,
       current: 0,
@@ -568,6 +581,63 @@ describe('CRM e2e', () => {
     });
   });
 
+  // V1-54-CT-ROUTE-ORDER-CALLER (M15), a regression control: R0-13e declared the
+  // literal contacts routes before their :contactId siblings, and
+  // core/config/route-shadowing.spec.ts keeps every controller in that order
+  // from the source. These cases prove the same over HTTP: Express answers the
+  // first route that matches, so with PATCH contacts/:contactId first a bulk edit
+  // reached updateContact as contact 'bulk' (404), and with GET contacts/:contactId
+  // first unread-counts was answered as a contact detail.
+  describe('contacts route order (V1-54 regression controls)', () => {
+    it('PATCH contacts/bulk reaches bulkUpdateContacts with the actor, never updateContact as contact "bulk"', async () => {
+      crmServiceMock.bulkUpdateContacts.mockResolvedValue({ updated: 2 });
+      const res = await request(app.getHttpServer())
+        .patch('/crm/businesses/biz_1/contacts/bulk')
+        .send({ contactIds: ['contact_1', 'contact_2'], status: 'CLIENT' })
+        .expect(200);
+      expect(res.body).toEqual({ updated: 2 });
+      expect(crmServiceMock.bulkUpdateContacts).toHaveBeenCalledTimes(1);
+      expect(crmServiceMock.bulkUpdateContacts).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessId: 'biz_1',
+          contactIds: ['contact_1', 'contact_2'],
+          status: 'CLIENT',
+          actorUserId: 'user_1',
+        }),
+      );
+      expect(crmServiceMock.updateContact).not.toHaveBeenCalled();
+    });
+
+    it('GET contacts/unread-counts reaches the unread-count handler for the session member, never the contact detail', async () => {
+      communicationMock.unreadCounts.mockResolvedValueOnce({});
+      const res = await request(app.getHttpServer())
+        .get('/crm/businesses/biz_1/contacts/unread-counts')
+        .expect(200);
+      expect(res.body).toEqual({ counts: {} });
+      expect(communicationMock.unreadCounts).toHaveBeenCalledTimes(1);
+      expect(communicationMock.unreadCounts).toHaveBeenCalledWith('biz_1', 'user_1');
+      expect(crmStatsMock.contactDetail).not.toHaveBeenCalled();
+    });
+
+    it('GET and PATCH contacts/:contactId still reach the single-contact handlers, not the literal siblings', async () => {
+      crmServiceMock.updateContact.mockResolvedValue({ id: 'contact_7', status: 'CLIENT' });
+      const agent = request(app.getHttpServer());
+      await agent.get('/crm/businesses/biz_1/contacts/contact_7').expect(200);
+      await agent.patch('/crm/businesses/biz_1/contacts/contact_7').send({ status: 'CLIENT' }).expect(200);
+      expect(crmStatsMock.contactDetail).toHaveBeenCalledWith({
+        businessId: 'biz_1',
+        contactId: 'contact_7',
+        actorUserId: 'user_1',
+      });
+      expect(crmServiceMock.updateContact).toHaveBeenCalledWith(
+        expect.objectContaining({ businessId: 'biz_1', contactId: 'contact_7', status: 'CLIENT' }),
+        expect.objectContaining({ actor: { type: 'USER', id: 'user_1' } }),
+      );
+      expect(communicationMock.unreadCounts).not.toHaveBeenCalled();
+      expect(crmServiceMock.bulkUpdateContacts).not.toHaveBeenCalled();
+    });
+  });
+
   // KF-PRODUCT-CONTACTS-PILOT-001, CG-REV-PRODUCT-CONTACTS-OWNERSHIP-001: the
   // dossier route shares the detail service. Mocked; the real-database proof
   // is contacts-visibility.integration.test.ts.
@@ -611,5 +681,224 @@ describe('CRM e2e', () => {
       expect(crmStatsMock.contactDetail).not.toHaveBeenCalled();
       expect(journeyMock.getContactCrossJourney).not.toHaveBeenCalled();
     });
+  });
+});
+
+// V1-54-CT-ROUTE-ORDER-CALLER: a call log's caller is the session member. POST
+// businesses/:b/calls took `body.callerId ?? req.user.id ?? 'system'` and POST
+// contacts/:c/calls/from-next-action did the same, so any member could log a call
+// as another member (or as nobody), and complete/follow-up fell back to 'system'
+// as their actor. GET calls/scheduled/today read the caller from the query only,
+// so without one (the web never sends one) it answered every member's calls as
+// the caller's day. CallLog is under the tenant extension
+// (packages/db/src/client.ts:85) and the guards bind the business, so this is
+// attribution, not tenant isolation. The real CallLogService runs over a
+// recording Prisma double: the claim is which callerId the row is written with
+// and which callerId the read is bounded by. vitest emits no decorator
+// metadata, so the global ValidationPipe is inert here: these cases say nothing
+// about CreateCallLogDto, which still requires a (now ignored) body callerId.
+class CallPrismaMock {
+  memberships: MembershipSeed[] = [];
+  contacts: any[] = [];
+  callLogs: any[] = [];
+  client: any;
+
+  constructor() {
+    const self = this;
+    self.client = {
+      membership: {
+        findUnique: vi.fn(({ where }: any) => {
+          const composite = where.userId_businessId;
+          if (!composite) return Promise.resolve(null);
+          return Promise.resolve(
+            self.memberships.find(
+              (m) => m.userId === composite.userId && m.businessId === composite.businessId,
+            ) ?? null,
+          );
+        }),
+      },
+      contact: {
+        findFirst: vi.fn(({ where }: any) =>
+          Promise.resolve(
+            self.contacts.find((c) => c.id === where.id && c.businessId === where.businessId) ?? null,
+          ),
+        ),
+        findUnique: vi.fn(({ where }: any) =>
+          Promise.resolve(self.contacts.find((c) => c.id === where.id) ?? null),
+        ),
+      },
+      callLog: {
+        create: vi.fn(({ data }: any) => {
+          const row = { id: `call_${self.callLogs.length + 1}`, completedAt: null, createdAt: new Date(), ...data };
+          self.callLogs.push(row);
+          return Promise.resolve(row);
+        }),
+        findFirst: vi.fn(({ where }: any) =>
+          Promise.resolve(
+            self.callLogs.find((l) => l.id === where.id && l.businessId === where.businessId) ?? null,
+          ),
+        ),
+        findMany: vi.fn(() => Promise.resolve([])),
+        count: vi.fn(() => Promise.resolve(0)),
+      },
+    };
+  }
+}
+
+describe('call logs take the caller from the session (V1-54)', () => {
+  let app: INestApplication;
+  let prisma: CallPrismaMock;
+  const emitter = { emit: vi.fn() };
+  const scripts = { generateScript: vi.fn() };
+
+  beforeAll(async () => {
+    prisma = new CallPrismaMock();
+    const moduleRef = await Test.createTestingModule({
+      controllers: [CallTaskController],
+      providers: [
+        ModuleScopeGuard,
+        CallLogService,
+        { provide: PrismaService, useValue: prisma },
+        { provide: EventEmitter2, useValue: emitter },
+        { provide: CallScriptService, useValue: scripts },
+      ],
+    })
+      .overrideGuard(AuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(BusinessGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(RateLimitGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+
+    // CallTaskController's constructor carries no @Inject, and vitest transpiles
+    // without decorator metadata, so Nest cannot resolve its parameters here (the
+    // compiled server can). Hand it the module's real CallLogService and the stub.
+    const controller = moduleRef.get(CallTaskController) as any;
+    controller.callLogs = moduleRef.get(CallLogService);
+    controller.callScripts = scripts;
+
+    app = moduleRef.createNestApplication();
+    app.use((req: any, _res: any, next: any) => {
+      // `x-test-user` names the session member (default user_1);
+      // `x-test-anonymous: 1` leaves the request without an identity.
+      if (req.headers['x-test-anonymous'] !== '1') {
+        req.user = { id: (req.headers['x-test-user'] as string) || 'user_1', role: 'MEMBER' };
+      }
+      next();
+    });
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await app.init();
+  });
+
+  afterAll(async () => {
+    await app.close();
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    prisma.memberships = [
+      { userId: 'user_1', businessId: 'biz_1', role: 'OWNER', permissionScopes: { crm: 'admin' } },
+      { userId: 'user_2', businessId: 'biz_1', role: 'STAFF', permissionScopes: { crm: 'write' } },
+    ];
+    prisma.contacts = [
+      { id: 'contact_1', businessId: 'biz_1', nextActionType: 'call', nextActionAt: new Date('2026-11-03T10:00:00.000Z') },
+    ];
+    prisma.callLogs = [];
+  });
+
+  it('POST calls records the session member as the caller and ignores a body callerId naming another member', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/businesses/biz_1/calls')
+      .send({ businessId: 'biz_1', contactId: 'contact_1', callerId: 'user_2', scheduledAt: '2026-11-03T10:00:00.000Z' })
+      .expect(201);
+    expect(res.body.callerId).toBe('user_1');
+    expect(prisma.client.callLog.create).toHaveBeenCalledTimes(1);
+    expect(prisma.callLogs).toHaveLength(1);
+    expect(prisma.callLogs[0]).toMatchObject({ businessId: 'biz_1', contactId: 'contact_1', callerId: 'user_1' });
+    expect(emitter.emit).toHaveBeenCalledWith(
+      'call_log.created',
+      expect.objectContaining({ businessId: 'biz_1', callerId: 'user_1' }),
+    );
+  });
+
+  it('POST contacts/:contactId/calls/from-next-action records the session member and ignores a body callerId', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/businesses/biz_1/contacts/contact_1/calls/from-next-action')
+      .set('x-test-user', 'user_2')
+      .send({ callerId: 'user_1' })
+      .expect(201);
+    expect(res.body.callerId).toBe('user_2');
+    expect(prisma.callLogs).toHaveLength(1);
+    expect(prisma.callLogs[0]).toMatchObject({ businessId: 'biz_1', contactId: 'contact_1', callerId: 'user_2' });
+    expect(emitter.emit).toHaveBeenCalledWith(
+      'call_log.created_from_next_action',
+      expect.objectContaining({ callerId: 'user_2' }),
+    );
+  });
+
+  it("GET calls/scheduled/today without a callerId is the session member's day, not every member's calls; an explicit callerId stays a read filter", async () => {
+    const agent = request(app.getHttpServer());
+    await agent.get('/businesses/biz_1/calls/scheduled/today').set('x-test-user', 'user_2').expect(200);
+    await agent.get('/businesses/biz_1/calls/scheduled/today?callerId=user_1').set('x-test-user', 'user_2').expect(200);
+    expect(prisma.client.callLog.findMany).toHaveBeenCalledTimes(2);
+    const [own, named] = prisma.client.callLog.findMany.mock.calls.map((c: any[]) => c[0].where);
+    expect(own).toMatchObject({ businessId: 'biz_1', callerId: 'user_2', completedAt: null });
+    expect(named).toMatchObject({ businessId: 'biz_1', callerId: 'user_1', completedAt: null });
+    expect(prisma.client.callLog.create).not.toHaveBeenCalled();
+  });
+
+  it('GET calls keeps callerId as an optional read filter: absent, the list is the business\'s; present, it names whose calls to read', async () => {
+    const agent = request(app.getHttpServer());
+    await agent.get('/businesses/biz_1/calls').expect(200);
+    await agent.get('/businesses/biz_1/calls?callerId=user_2').expect(200);
+    const [unfiltered, filtered] = prisma.client.callLog.findMany.mock.calls.map((c: any[]) => c[0].where);
+    expect(unfiltered).toEqual({ businessId: 'biz_1' });
+    expect(filtered).toEqual({ businessId: 'biz_1', callerId: 'user_2' });
+    expect(prisma.client.callLog.create).not.toHaveBeenCalled();
+  });
+
+  it('a request with no identity writes no call log', async () => {
+    const agent = request(app.getHttpServer());
+    for (const res of [
+      await agent.post('/businesses/biz_1/calls').set('x-test-anonymous', '1')
+        .send({ businessId: 'biz_1', contactId: 'contact_1', callerId: 'user_1' }),
+      await agent.post('/businesses/biz_1/contacts/contact_1/calls/from-next-action').set('x-test-anonymous', '1')
+        .send({ callerId: 'user_1' }),
+    ]) {
+      expect([401, 403]).toContain(res.status);
+    }
+    expect(prisma.client.callLog.create).not.toHaveBeenCalled();
+  });
+
+  it('the handlers themselves refuse a request that carries no user id, even if every guard were bypassed, and never record SYSTEM', async () => {
+    const callLogs = {
+      createCallLog: vi.fn(),
+      createFromContactNextAction: vi.fn(),
+      completeCall: vi.fn(),
+      createFollowUpTask: vi.fn(),
+      getScheduledCalls: vi.fn(),
+    };
+    const controller = new CallTaskController(callLogs as any, scripts as any);
+    for (const req of [{ user: undefined }, { user: {} }] as any[]) {
+      await expect(
+        Promise.resolve().then(() => controller.create('biz_1', { businessId: 'biz_1', callerId: 'user_2' } as any, req)),
+      ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        Promise.resolve().then(() => controller.createFromNextAction('biz_1', 'contact_1', { callerId: 'user_2' }, req)),
+      ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        Promise.resolve().then(() => controller.complete('biz_1', 'call_1', { outcome: 'reached' } as any, req)),
+      ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        Promise.resolve().then(() => controller.createFollowUp('biz_1', 'call_1', { title: 'Follow up' } as any, req)),
+      ).rejects.toMatchObject({ status: 401 });
+      await expect(
+        Promise.resolve().then(() => (controller.getScheduledToday as any)('biz_1', undefined, req)),
+      ).rejects.toMatchObject({ status: 401 });
+    }
+    for (const fn of Object.values(callLogs)) {
+      expect(fn).not.toHaveBeenCalled();
+    }
   });
 });
