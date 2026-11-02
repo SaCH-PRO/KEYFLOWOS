@@ -353,6 +353,11 @@
       "packet": "V1-50-QUOTE-STATE-MACHINE"
     },
     {
+      "prefix": "v51a_",
+      "owner": "apps/server/test/release0-quote-journey.integration.test.ts",
+      "packet": "V1-51-QUOTE-CONVERSION-JOURNEY"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
