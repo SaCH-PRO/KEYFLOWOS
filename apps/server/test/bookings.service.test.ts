@@ -22,7 +22,20 @@ class PrismaMock {
     const self = this;
     self.services = opts.services ?? [
       { id: 'service_1', businessId: 'biz_1', duration: 60, price: 100, name: 'Consult', deletedAt: null, leadTimeMins: 0, bufferMins: 0 },
+      { id: 'service_2', businessId: 'biz_2', duration: 60, price: 100, name: 'Consult', deletedAt: null, leadTimeMins: 0, bufferMins: 0 },
     ];
+    // V1-06: createBooking checks the contact and staff member are live rows
+    // of the booking's business, so the fixtures say which business owns each.
+    const contacts = [
+      { id: 'contact_1', businessId: 'biz_1', deletedAt: null },
+      { id: 'contact_2', businessId: 'biz_2', deletedAt: null },
+    ];
+    const staffMembers = [
+      { id: 'staff_1', businessId: 'biz_1', deletedAt: null },
+      { id: 'staff_2', businessId: 'biz_2', deletedAt: null },
+    ];
+    const ownedBy = (rows: Array<{ id: string; businessId: string; deletedAt: null }>) => ({ where }: any) =>
+      rows.find((r) => r.id === where.id && r.businessId === where.businessId && r.deletedAt === null) ?? null;
     self.availabilities = opts.availabilities ?? [];
     self.businessHours = opts.businessHours ?? null;
     self.storeEnabled = opts.storeEnabled ?? true;
@@ -69,8 +82,11 @@ class PrismaMock {
         }),
       },
       contact: {
-        findFirst: vi.fn(() => null),
+        findFirst: vi.fn(ownedBy(contacts)),
         create: vi.fn(),
+      },
+      staffMember: {
+        findFirst: vi.fn(ownedBy(staffMembers)),
       },
       business: {
         findFirstOrThrow: vi.fn(() => ({
@@ -79,6 +95,8 @@ class PrismaMock {
           storeEnabled: self.storeEnabled,
           businessHours: self.businessHours,
         })),
+        // createBooking reads the hours to apply the public path's schedule rules.
+        findUnique: vi.fn(() => ({ businessHours: self.businessHours })),
       },
     };
   }
