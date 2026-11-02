@@ -1,8 +1,22 @@
-import { Inject, Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy, forwardRef } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, OnModuleInit, OnModuleDestroy, forwardRef } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
+
+/** lastError of a schedule whose contact belongs to another business (V1-12 review ST-12-3). */
+const CONTACT_OUTSIDE_BUSINESS = "the schedule's contact does not belong to its business; not billed";
+
+/**
+ * The schedule as an event hands it to listeners. A contact of another
+ * business is never handed on: listeners write that contact's timeline and
+ * notify the customer from it (V1-12 review ST-12-3).
+ */
+function scheduleForEvent<T extends { businessId: string; contact?: { businessId: string } | null }>(schedule: T) {
+  return schedule.contact && schedule.contact.businessId === schedule.businessId
+    ? schedule
+    : { ...schedule, contactId: null, contact: null };
+}
 
 @Injectable()
 export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
@@ -46,10 +60,11 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     nextRunDate: Date | string;
     metadata?: Record<string, unknown> | null;
   }) {
+    const contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     const recurringInvoice = await this.prisma.client.recurringInvoice.create({
       data: {
         businessId: input.businessId,
-        contactId: input.contactId,
+        contactId,
         name: input.name,
         description: input.description ?? null,
         frequency: input.frequency,
@@ -68,6 +83,30 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
       businessId: input.businessId,
     });
     return recurringInvoice;
+  }
+
+  /**
+   * Resolve a contact id inside the caller's tenant before a schedule binds it.
+   * A schedule is the third way a contact reaches an Invoice (after invoice
+   * create and quote convert), and the row is returned with
+   * `include: { contact: true }`, so a foreign id would both bind another
+   * tenant's contact to every invoice the schedule issues and disclose its row.
+   * Same rule and answers as CommerceService.assertContactInBusiness (private
+   * there): a foreign, soft-deleted or unknown id is the same 404 and nothing
+   * is written. V1-12 review ST-12-3 (ST-27-1).
+   */
+  private async assertContactInBusiness(contactId: unknown, businessId: string): Promise<string> {
+    if (typeof contactId !== 'string' || contactId.length === 0) {
+      throw new BadRequestException('contactId must be a non-empty string');
+    }
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId },
+      select: { id: true },
+    });
+    if (!contact) {
+      throw new NotFoundException('Contact not found');
+    }
+    return contactId;
   }
 
   async updateRecurringInvoice(input: {
@@ -256,6 +295,14 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
+        // V1-12 review ST-12-3: a schedule bound to another business's contact
+        // (a row written before create checked the tenant) is never billed,
+        // and that contact is never handed to a listener: the `due` trigger
+        // sends the customer the invoice. Recorded as a failure on the schedule.
+        if (recurring.contact.businessId !== recurring.businessId) {
+          throw new Error(CONTACT_OUTSIDE_BUSINESS);
+        }
+
         this.events.emit('recurring_invoice.due', {
           recurringInvoice: recurring,
           businessId: recurring.businessId,
@@ -276,14 +323,26 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
         // this run read: a second runner (another instance) that read the
         // same period waits on the row lock, then matches no row and skips.
         // Invoice events are buffered and emitted only after the commit.
+        //
+        // V1-12 review (ST-12-1 / ST-12-2): the claim re-applies the scan's
+        // whole due predicate (status, deletedAt, endDate) and binds the
+        // frequency the advance was computed from, so a schedule paused,
+        // cancelled, deleted, ended or re-scheduled after the scan matches no
+        // row and is not billed this run. The invoice is built from the row
+        // read back after the claim (whose lock is held until commit), not
+        // from the scan snapshot: an amount changed after the scan bills at
+        // the amount the schedule holds. The contact's tenant is checked again
+        // on that row.
         const pendingEvents: Array<{ name: string; payload: unknown }> = [];
-        const sentInvoice = await this.prisma.client.$transaction(async (tx) => {
+        const billed = await this.prisma.client.$transaction(async (tx) => {
           const claimed = await tx.recurringInvoice.updateMany({
             where: {
               id: recurring.id,
               nextRunDate: recurring.nextRunDate,
+              frequency: recurring.frequency,
               status: 'ACTIVE',
               deletedAt: null,
+              OR: [{ endDate: null }, { endDate: { gte: now } }],
             },
             data: {
               lastGeneratedAt: now,
@@ -296,55 +355,65 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
           });
           if (claimed.count === 0) return null;
 
+          const schedule = await tx.recurringInvoice.findUnique({
+            where: { id: recurring.id },
+            include: { contact: true },
+          });
+          if (!schedule || schedule.contact.businessId !== schedule.businessId) {
+            throw new Error(CONTACT_OUTSIDE_BUSINESS);
+          }
+
           const invoice = await tx.invoice.create({
             data: {
-              businessId: recurring.businessId,
-              contactId: recurring.contactId,
+              businessId: schedule.businessId,
+              contactId: schedule.contactId,
               invoiceNumber: `INV-${Date.now()}`,
               status: 'DRAFT',
               issueDate: new Date(),
-              subtotal: recurring.amount,
+              subtotal: schedule.amount,
               taxRate: 0,
               taxAmount: 0,
               discountType: null,
               discountValue: null,
               discountAmount: 0,
-              total: recurring.amount,
-              currency: recurring.currency,
-              notes: recurring.description,
-              recurringInvoiceId: recurring.id,
+              total: schedule.amount,
+              currency: schedule.currency,
+              notes: schedule.description,
+              recurringInvoiceId: schedule.id,
               items: {
                 create: [
                   {
-                    description: recurring.description || recurring.name,
+                    description: schedule.description || schedule.name,
                     quantity: 1,
-                    unitPrice: recurring.amount,
-                    total: recurring.amount,
+                    unitPrice: schedule.amount,
+                    total: schedule.amount,
                   },
                 ],
               },
             },
           });
 
-          return this.invoiceWorkflow.transition(invoice.id, 'SENT', {
+          const sent = await this.invoiceWorkflow.transition(invoice.id, 'SENT', {
             sentAt: new Date(),
             tx: tx as unknown as Prisma.TransactionClient,
             eventBuffer: pendingEvents,
           });
+          return { schedule, invoice: sent };
         });
 
-        if (!sentInvoice) {
+        if (!billed) {
           this.logger.log(
-            `Recurring invoice ${recurring.id}: this period was already billed by another run; skipped`,
+            `Recurring invoice ${recurring.id}: no longer due when claimed (billed by another run, or paused, cancelled, deleted, ended or re-scheduled since the scan); skipped`,
           );
           continue;
         }
+        const { schedule, invoice: sentInvoice } = billed;
 
         for (const event of pendingEvents) this.events.emit(event.name, event.payload);
         this.events.emit('recurring_invoice.generated', {
-          recurringInvoice: { ...recurring, lastGeneratedAt: now, nextRunDate, generatedCount: recurring.generatedCount + 1 },
+          recurringInvoice: schedule,
           invoice: sentInvoice,
-          businessId: recurring.businessId,
+          businessId: schedule.businessId,
         });
         this.events.emit('invoice.created', {
           invoice: sentInvoice,
@@ -380,7 +449,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
           );
         }
         this.events.emit('recurring_invoice.failed', {
-          recurringInvoice: recurring,
+          recurringInvoice: scheduleForEvent(recurring),
           businessId: recurring.businessId,
           error: String(error?.message ?? error),
         });

@@ -27,12 +27,25 @@
  *   LEDGER   one Invoice:<id>:invoice_finalized posting per period under
  *            ACCRUAL, none duplicated.
  *
+ * V1-12 review repairs pinned here as well:
+ *   CLAIM    the compare-and-set re-applies the scan's due predicate: a
+ *            schedule paused, cancelled, soft-deleted or ended between the
+ *            scan and the claim is not billed (ST-12-1, ST-12-2a); the invoice
+ *            is built from the claimed row, so an amount changed after the
+ *            scan bills at the new amount (ST-12-2b); a frequency changed after
+ *            the scan is not advanced on the scanned one.
+ *   TENANT   create refuses a contact of another business (404, nothing
+ *            written); a legacy schedule bound to one is never billed and its
+ *            contact reaches no listener, on a CASH business where no posting
+ *            refuses it; the contact is checked again on the claimed row
+ *            (ST-12-3).
+ *
  * Wiring: RecurringInvoiceService, InvoiceWorkflowService, RevenuePostingService,
  * PostingService and ChartOfAccountsSeederService are the real classes against
  * DATABASE_URL. The PrismaService handed to the recurring and workflow services
  * wraps the real client to (a) inject one-shot faults (scan rejects, schedule
  * advance throws), (b) record which transaction each write ran in, and (c)
- * scope the due-schedule scan to this suite's business, so a run never bills
+ * scope the due-schedule scan to this suite's businesses, so a run never bills
  * another suite's schedules. The scan's own where clause is kept verbatim.
  * The ACCRUAL posting is the real one, wrapped to fail once on demand.
  * The event emitter and the timeline are recorders.
@@ -45,6 +58,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
@@ -57,7 +71,16 @@ const ID = {
   owner: `${P}owner`,
   biz: `${P}biz`,
   contact: `${P}contact`,
+  /** A CASH business: no posting stands between a schedule and its SENT invoice (ST-12-3). */
+  cashBiz: `${P}cashbiz`,
+  cashContact: `${P}cashcontact`,
+  /** Another tenant and its customer. */
+  otherBiz: `${P}otherbiz`,
+  otherContact: `${P}xcontact`,
 };
+const OTHER_EMAIL = `${P}xcustomer@test.local`;
+/** The businesses whose schedules a run of this suite may read. */
+const SCANNED = [ID.biz, ID.cashBiz];
 
 let db: any;
 let realLedger: any;
@@ -143,7 +166,7 @@ function wrapDelegate(model: 'recurringInvoice' | 'invoice', delegate: any, tx: 
             return Promise.reject(new Error(`${INJECTED}: due-schedule scan lost its connection`));
           }
           // Scope the scan to this suite's business; the service's own where is kept as is.
-          const scoped = { ...a, where: { AND: [a.where ?? {}, { businessId: { in: [ID.biz] } }] } };
+          const scoped = { ...a, where: { AND: [a.where ?? {}, { businessId: { in: SCANNED } }] } };
           const rows = orig.apply(target, [scoped]);
           const gate = scanGate;
           return gate ? Promise.resolve(rows).then(async (r: unknown) => { await gate.arrive(); return r; }) : rows;
@@ -209,14 +232,14 @@ async function cleanup() {
 }
 
 /** A MONTHLY schedule due one minute ago: exactly one period is due, the next one is a month out. */
-async function seedDueSchedule(tag: string) {
+async function seedDueSchedule(tag: string, owner: { businessId: string; contactId: string } = { businessId: ID.biz, contactId: ID.contact }) {
   const id = `${P}rec_${tag}`;
   const nextRunDate = new Date(Date.now() - 60_000);
   await db.recurringInvoice.create({
     data: {
       id,
-      businessId: ID.biz,
-      contactId: ID.contact,
+      businessId: owner.businessId,
+      contactId: owner.contactId,
       name: `V12 ${tag}`,
       description: `v12 ${tag} retainer`,
       frequency: 'MONTHLY',
@@ -325,6 +348,10 @@ beforeAll(async () => {
   await db.business.create({ data: { id: ID.biz, name: 'V12 Recurring Biz', ownerId: ID.owner, currency: 'TTD', accountingBasis: 'ACCRUAL' } });
   await db.contact.create({ data: { id: ID.contact, businessId: ID.biz, firstName: 'V12', lastName: 'Customer', email: `${P}customer@test.local` } });
   await coaSeeder.ensureDefaults(ID.biz);
+  await db.business.create({ data: { id: ID.cashBiz, name: 'V12 Cash Biz', ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' } });
+  await db.contact.create({ data: { id: ID.cashContact, businessId: ID.cashBiz, firstName: 'V12', lastName: 'Cash Customer', email: `${P}cashcustomer@test.local` } });
+  await db.business.create({ data: { id: ID.otherBiz, name: 'V12 Other Tenant', ownerId: ID.owner, currency: 'TTD' } });
+  await db.contact.create({ data: { id: ID.otherContact, businessId: ID.otherBiz, firstName: 'V12', lastName: 'Other Tenant Customer', email: OTHER_EMAIL } });
 }, 180_000);
 
 afterAll(async () => {
@@ -339,7 +366,7 @@ afterEach(async () => {
   events.length = 0;
   opLog.length = 0;
   // A case's schedule never leaks into the next case's run.
-  await db.recurringInvoice.updateMany({ where: { businessId: ID.biz }, data: { status: 'CANCELLED' } });
+  await db.recurringInvoice.updateMany({ where: { businessId: { in: SCANNED } }, data: { status: 'CANCELLED' } });
 });
 
 // ---------------------------------------------------------------- cases
@@ -498,6 +525,183 @@ describe('RACE: two runners on one due period', () => {
   });
 });
 
+/** Holds the next run's due-schedule scan after it has read; resolves once the run has read the schedules. */
+async function runHeldAfterScan(svc: any) {
+  const gate = makeGate(1, false);
+  scanGate = gate;
+  const run: Promise<any[]> = svc.processRecurringInvoices();
+  await gate.allArrived;
+  return { release: async () => { gate.release(); return run; } };
+}
+
+describe('CLAIM: the compare-and-set re-applies the due predicate to the row it bills (V1-12 review ST-12-1 / ST-12-2)', () => {
+  it('a schedule paused, cancelled or soft-deleted between the scan and the claim is not billed, and no failure is recorded', async () => {
+    const paused = await seedDueSchedule('pause');
+    const cancelled = await seedDueSchedule('cancel');
+    const deleted = await seedDueSchedule('softdel');
+    const svc = newRunner();
+
+    const held = await runHeldAfterScan(svc); // the run has read all three as due
+    await svc.pauseRecurringInvoice(ID.biz, paused.id);
+    await svc.cancelRecurringInvoice(ID.biz, cancelled.id);
+    await db.recurringInvoice.update({ where: { id: deleted.id }, data: { deletedAt: new Date() } });
+    const result = await held.release();
+
+    expect(result, 'the run billed a schedule the owner stopped after the scan').toEqual([]);
+    for (const s of [paused, cancelled, deleted]) {
+      expect(await invoicesOf(s.id), s.id).toEqual([]);
+      const row = await scheduleRow(s.id);
+      expect(row.nextRunDate.getTime(), `${s.id} advanced`).toBe(s.nextRunDate.getTime());
+      expect(row.generatedCount).toBe(0);
+      expect(row.failureCount, `${s.id}: a skipped claim is not a failure`).toBe(0);
+    }
+    const names = events.map((e) => e.name);
+    expect(names).not.toContain('invoice.sent');
+    expect(names).not.toContain('recurring_invoice.generated');
+    expect(names).not.toContain('recurring_invoice.failed');
+  });
+
+  it('a schedule ended (endDate moved into the past) between the scan and the claim is not billed', async () => {
+    const ended = await seedDueSchedule('ended');
+    const svc = newRunner();
+
+    const held = await runHeldAfterScan(svc);
+    await svc.updateRecurringInvoice({ id: ended.id, businessId: ID.biz, endDate: new Date(Date.now() - 60 * 60_000) });
+    const result = await held.release();
+
+    expect(result, 'the run billed a period after the schedule ended').toEqual([]);
+    expect(await invoicesOf(ended.id)).toEqual([]);
+    const row = await scheduleRow(ended.id);
+    expect(row.nextRunDate.getTime()).toBe(ended.nextRunDate.getTime());
+    expect(row.generatedCount).toBe(0);
+    expect(row.failureCount).toBe(0);
+  });
+
+  it('an amount changed between the scan and the claim is billed at the amount the schedule holds, not the scanned one', async () => {
+    const s = await seedDueSchedule('amount'); // scanned at 150
+    const svc = newRunner();
+
+    const held = await runHeldAfterScan(svc);
+    await svc.updateRecurringInvoice({ id: s.id, businessId: ID.biz, amount: 999 });
+    const result = await held.release();
+
+    expect(result.map((r: any) => r.recurringId)).toEqual([s.id]);
+    const invoices = await invoicesOf(s.id);
+    expect(invoices).toHaveLength(1);
+    expect(invoices[0].status).toBe('SENT');
+    expect(Number(invoices[0].total), 'billed at the scanned amount').toBe(999);
+    const items = await db.invoiceItem.findMany({ where: { invoiceId: invoices[0].id }, select: { unitPrice: true, total: true } });
+    expect(items.map((i: any) => [Number(i.unitPrice), Number(i.total)])).toEqual([[999, 999]]);
+    const postings = await finalizedPostings([invoices[0].id]);
+    expect(postings.map((p) => Number(p.amount)), 'AR posted at the scanned amount').toEqual([999]);
+    const generated = events.filter((e) => e.name === 'recurring_invoice.generated');
+    expect(generated.map((e) => e.payload.recurringInvoice.amount)).toEqual([999]);
+    const row = await scheduleRow(s.id);
+    expect(row.nextRunDate.getTime()).toBe(s.advanced.getTime());
+    expect(row.generatedCount).toBe(1);
+  });
+
+  it('a frequency changed between the scan and the claim is not advanced on the scanned frequency: the run skips it, the next run bills it once on the new one', async () => {
+    const s = await seedDueSchedule('freq'); // scanned MONTHLY
+    const svc = newRunner();
+
+    const held = await runHeldAfterScan(svc);
+    await svc.updateRecurringInvoice({ id: s.id, businessId: ID.biz, frequency: 'WEEKLY' });
+    const result = await held.release();
+
+    expect(result, 'the run advanced the schedule on the frequency it scanned').toEqual([]);
+    expect(await invoicesOf(s.id)).toEqual([]);
+    expect((await scheduleRow(s.id)).failureCount).toBe(0);
+
+    const next = await svc.processRecurringInvoices();
+    expect(next.map((r: any) => r.recurringId)).toEqual([s.id]);
+    expect(await invoicesOf(s.id)).toHaveLength(1);
+    const weekly = new Date(s.nextRunDate);
+    weekly.setDate(weekly.getDate() + 7);
+    const row = await scheduleRow(s.id);
+    expect(row.nextRunDate.getTime(), 'advanced one WEEKLY period').toBe(weekly.getTime());
+    expect(row.generatedCount).toBe(1);
+  });
+});
+
+describe("TENANT: a schedule never binds or bills another business's contact (V1-12 review ST-12-3)", () => {
+  /** Every recorded event whose payload carries the other tenant's contact (its id or its customer's email). */
+  const leaks = () =>
+    events
+      .filter((e) => { const s = JSON.stringify(e.payload ?? null); return s.includes(ID.otherContact) || s.includes(OTHER_EMAIL); })
+      .map((e) => e.name);
+
+  it('create: a contact of another business is a 404 and nothing is written; an unknown id the same; a contact of the business is accepted', async () => {
+    const svc = newRunner();
+    const input = (contactId: unknown) => ({
+      businessId: ID.cashBiz,
+      contactId: contactId as string,
+      name: `V12 create ${String(contactId)}`,
+      frequency: 'MONTHLY',
+      amount: 150,
+      startDate: '2026-01-01T00:00:00Z',
+      nextRunDate: new Date(Date.now() + 30 * 24 * 3600_000).toISOString(),
+    });
+
+    await expect(svc.createRecurringInvoice(input(ID.otherContact))).rejects.toBeInstanceOf(NotFoundException);
+    await expect(svc.createRecurringInvoice(input(`${P}no_such_contact`))).rejects.toThrow('Contact not found');
+    await expect(svc.createRecurringInvoice(input(''))).rejects.toBeInstanceOf(BadRequestException);
+    const written = await db.recurringInvoice.findMany({ where: { name: { startsWith: 'V12 create' } }, select: { id: true } });
+    expect(written, 'a schedule bound to a contact outside the business was written').toEqual([]);
+    expect(events.filter((e) => e.name === 'recurring_invoice.created')).toEqual([]);
+    expect(leaks()).toEqual([]);
+
+    const ok = await svc.createRecurringInvoice(input(ID.cashContact));
+    expect(ok.contactId).toBe(ID.cashContact);
+    expect(ok.contact.businessId).toBe(ID.cashBiz);
+  });
+
+  it('run (CASH business): a legacy schedule bound to another business\'s contact is not billed, its contact reaches no listener, and the failure is recorded; the business\'s own schedule is billed', async () => {
+    const legacy = await seedDueSchedule('foreign', { businessId: ID.cashBiz, contactId: ID.otherContact });
+    const own = await seedDueSchedule('cashown', { businessId: ID.cashBiz, contactId: ID.cashContact });
+    const svc = newRunner();
+
+    const result = await svc.processRecurringInvoices();
+
+    expect(result.map((r: any) => r.recurringId), 'only the schedule bound to the business\'s own contact is billed').toEqual([own.id]);
+    expect(await invoicesOf(legacy.id), 'an invoice was issued to another tenant\'s contact').toEqual([]);
+    const row = await scheduleRow(legacy.id);
+    expect(row.nextRunDate.getTime()).toBe(legacy.nextRunDate.getTime());
+    expect(row.generatedCount).toBe(0);
+    expect(row.failureCount).toBe(1);
+    expect(row.lastError).toContain('does not belong to its business');
+
+    expect(leaks(), 'an event handed another tenant\'s contact to a listener').toEqual([]);
+    const failed = events.filter((e) => e.name === 'recurring_invoice.failed');
+    expect(failed.map((e) => [e.payload.recurringInvoice.id, e.payload.recurringInvoice.contactId, e.payload.businessId])).toEqual([[legacy.id, null, ID.cashBiz]]);
+
+    const ownInvoices = await db.invoice.findMany({ where: { recurringInvoiceId: own.id }, select: { status: true, businessId: true, contactId: true } });
+    expect(ownInvoices).toEqual([{ status: 'SENT', businessId: ID.cashBiz, contactId: ID.cashContact }]);
+  });
+
+  it('run: the contact is checked again on the claimed row, inside the transaction (a schedule re-pointed to another business\'s contact after the scan is not billed)', async () => {
+    // No API path re-points a schedule's contact today; the direct write stands
+    // in for any writer between the scan and the claim, and pins the check that
+    // guards the invoice now built from the claimed row.
+    const s = await seedDueSchedule('repoint', { businessId: ID.cashBiz, contactId: ID.cashContact });
+    const svc = newRunner();
+
+    const held = await runHeldAfterScan(svc);
+    await db.recurringInvoice.update({ where: { id: s.id }, data: { contactId: ID.otherContact } });
+    const result = await held.release();
+
+    expect(result).toEqual([]);
+    expect(await invoicesOf(s.id), 'an invoice was issued to another tenant\'s contact').toEqual([]);
+    const row = await scheduleRow(s.id);
+    expect(row.nextRunDate.getTime(), 'the claim was not rolled back with the refused invoice').toBe(s.nextRunDate.getTime());
+    expect(row.generatedCount).toBe(0);
+    expect(row.failureCount).toBe(1);
+    expect(row.lastError).toContain('does not belong to its business');
+    expect(leaks()).toEqual([]);
+    expect(events.map((e) => e.name)).not.toContain('invoice.sent');
+  });
+});
+
 describe('LEDGER: one invoice_finalized posting per period under ACCRUAL', () => {
   it('across every case above, each invoice of this business has exactly one posting and no posting is duplicated or orphaned', async () => {
     const invoices: Array<{ id: string; status: string }> = await db.invoice.findMany({
@@ -509,7 +713,7 @@ describe('LEDGER: one invoice_finalized posting per period under ACCRUAL', () =>
     expect(new Set(refs).size, 'a duplicated invoice_finalized posting').toBe(refs.length);
     expect(invoices.every((i) => i.status === 'SENT'), JSON.stringify(invoices)).toBe(true);
     expect(refs.sort()).toEqual(invoices.map((i) => `Invoice:${i.id}:invoice_finalized`).sort());
-    // One period per schedule was due in each case that billed: scan, overlap, advance, order, posting, race.
+    // One period per schedule was due in each case that billed: scan, overlap, advance, order, posting, race, amount, freq.
     const perSchedule = await db.invoice.groupBy({ by: ['recurringInvoiceId'], where: { businessId: ID.biz }, _count: { _all: true } });
     expect(perSchedule.every((g: any) => g._count._all === 1), JSON.stringify(perSchedule)).toBe(true);
   });
