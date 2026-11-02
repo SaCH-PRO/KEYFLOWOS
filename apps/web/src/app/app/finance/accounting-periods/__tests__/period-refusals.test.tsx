@@ -139,6 +139,16 @@ describe("accounting periods: a refused close, reopen or create is shown, never 
     expect(screen.getByText("Create Period")).toBeInTheDocument();
   });
 
+  it("LC2-06: a refused period list shows the reason with a retry, not an empty table", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      return refusal(403, "You do not have access to this business", new URL(url, "http://localhost").pathname);
+    }));
+    render(<AccountingPeriodsPage />);
+    expect(await screen.findByText("You do not have access to this business")).toBeInTheDocument();
+    expect(screen.getByText("Retry")).toBeInTheDocument();
+  });
+
   it("LC2-05: an accepted close still reports success and reloads", async () => {
     const { posted } = stubServer(() => jsonResponse(201, { ...OPEN, status: "CLOSED" }));
     await mountWithRows();
