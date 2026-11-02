@@ -225,10 +225,18 @@ export class AgentController {
     );
   }
 
+  /**
+   * V1-42b-UNDO-TENANT-SCOPE review SEC-V42B-3: only the actions req.user may
+   * undo, by the rule POST agent/undo/:undoId applies (UndoService
+   * getUndoableActionsFor): no entity ids of a module below write, of a
+   * contact they cannot see, or of a type no one may undo.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/undo')
-  async getUndoableActions(@Param('businessId') businessId: string) {
-    const actions = await this.undoService.getRecentActions(businessId);
+  async getUndoableActions(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    const userId = req.user?.id;
+    if (!userId) return { error: 'Authentication required' };
+    const actions = await this.undoService.getUndoableActionsFor(businessId, userId);
     return {
       actions: actions.map((a) => ({
         id: a.id,

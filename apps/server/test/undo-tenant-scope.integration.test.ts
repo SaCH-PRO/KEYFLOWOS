@@ -53,6 +53,26 @@
  *   UT-11 RED-BEFORE deny by default: an entity type with no scope mapping (message) -> 403 for the
  *         owner, nothing logged or emitted
  *   UT-12 control: GET agent/undo lists only the route tenant's actions
+ *
+ * Review repairs (RED-BEFORE = fails on pkt/V1-42b-UNDO-TENANT-SCOPE ec729c82):
+ *   UT-14 RED-BEFORE (SEC-V42B-1) a contact undo applies the CRM row rules, not only crm:write: a
+ *         PRIVATE contact of the owner, which a crm:write member cannot see, answers 404 identical
+ *         to an unknown id (delete scope 'owned' and 'any' alike); CrmService.undoContact is not
+ *         called; the owner still undoes it
+ *   UT-15 RED-BEFORE (CR-V42b-1) on a visible contact of another member the delete door's and the
+ *         edit door's rules both apply (undoContact soft-deletes or reverts to LEAD at write time):
+ *         crm_delete 'owned' -> 403, crm_edit 'none' -> 403, crm_edit 'owned' and not shared ->
+ *         403, crm_view 'owned' (my book) -> 404; crm_delete 'any' with edit 'any' -> 201
+ *   UT-16 control: a crm:write member undoes a contact they own; crm_edit 'owned' reaches a
+ *         contact shared with them
+ *   UT-17 RED-BEFORE (SEC-V42B-2) concurrent undo of one record runs the writer once: 12 parallel
+ *         POSTs -> one success, the others { success: false }; the invoice is DRAFT (not
+ *         soft-deleted), one action.undone log, one event
+ *   UT-18 control: a writer failure releases the claim: { success: false }, the record stays
+ *         undoable, a retry succeeds
+ *   UT-19 RED-BEFORE (SEC-V42B-3) GET agent/undo lists only what this actor may undo: no invoice
+ *         record for revenue below write, no PRIVATE contact the actor cannot see, no message
+ *         record (refused to everyone), and each listed record answers canUndo: true
  *   CEN-01..03 census: the scope map, every entity type the dispatcher can register over the
  *         FLOW_TOOLS registry (ActionDispatcherService.inferEntityType) is mapped or denied by
  *         default, every tool that registers an invoice (the payment one included) needs
@@ -94,11 +114,19 @@ const ID = {
   staffNone: `${P}staffNone`,   // STAFF of bizA, { revenue: none, crm: write }
   staffRead: `${P}staffRead`,   // STAFF of bizA, no scope map: role defaults (revenue read)
   staffWrite: `${P}staffWrite`, // STAFF of bizA, { revenue: write, crm: read }
+  staffAny: `${P}staffAny`,     // STAFF of bizA, { revenue: none, crm: write, crm_delete: any }
+  staffBook: `${P}staffBook`,   // STAFF of bizA, { crm: write, crm_view: owned, crm_delete: any } (my book)
+  staffEditNone: `${P}staffEditNone`,   // STAFF of bizA, { crm: write, crm_edit: none, crm_delete: any }
+  staffEditOwned: `${P}staffEditOwned`, // STAFF of bizA, { crm: write, crm_edit: owned, crm_delete: any }
   ownerB: `${P}ownerB`,         // OWNER of bizB only
   superAdmin: `${P}super`,      // role SUPER_ADMIN, no membership anywhere
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
   contactA: `${P}contactA`,
+  cPriv: `${P}cPriv`,       // PRIVATE, owned by ownerA
+  cTeam: `${P}cTeam`,       // TEAM, owned by ownerA
+  cStaff: `${P}cStaff`,     // TEAM, owned by staffNone
+  cShared: `${P}cShared`,   // TEAM, owned by ownerA, shared with staffEditOwned
   planA: `${P}planA`,
   planB: `${P}planB`,
 };
@@ -144,6 +172,7 @@ let db: any;
 let app: any;
 let undoService: any;
 let workflow: any;
+let commerce: any;
 let tenantMod: any;
 let census: {
   FLOW_TOOLS: Array<{ name: string }>;
@@ -163,6 +192,7 @@ async function cleanup() {
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_shares WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -340,6 +370,7 @@ beforeAll(async () => {
     .compile();
   undoService = moduleRef.get(UndoService);
   workflow = moduleRef.get(InvoiceWorkflowService);
+  commerce = moduleRef.get(CommerceService);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only, for seeded v42b_ users. No guard is overridden.
@@ -365,6 +396,10 @@ beforeAll(async () => {
     [ID.staffNone, 'none', 'USER'],
     [ID.staffRead, 'read', 'USER'],
     [ID.staffWrite, 'write', 'USER'],
+    [ID.staffAny, 'any', 'USER'],
+    [ID.staffBook, 'book', 'USER'],
+    [ID.staffEditNone, 'editnone', 'USER'],
+    [ID.staffEditOwned, 'editowned', 'USER'],
     [ID.ownerB, 'ownerb', 'USER'],
     [ID.superAdmin, 'super', 'SUPER_ADMIN'],
   ] as const) {
@@ -378,8 +413,21 @@ beforeAll(async () => {
   await m(ID.staffNone, ID.bizA, 'STAFF', { revenue: 'none', crm: 'write' });
   await m(ID.staffRead, ID.bizA, 'STAFF');
   await m(ID.staffWrite, ID.bizA, 'STAFF', { revenue: 'write', crm: 'read' });
+  await m(ID.staffAny, ID.bizA, 'STAFF', { revenue: 'none', crm: 'write', crm_delete: 'any' });
+  await m(ID.staffBook, ID.bizA, 'STAFF', { crm: 'write', crm_view: 'owned', crm_delete: 'any' });
+  await m(ID.staffEditNone, ID.bizA, 'STAFF', { crm: 'write', crm_edit: 'none', crm_delete: 'any' });
+  await m(ID.staffEditOwned, ID.bizA, 'STAFF', { crm: 'write', crm_edit: 'owned', crm_delete: 'any' });
   await m(ID.ownerB, ID.bizB, 'OWNER');
   await db.contact.create({ data: { id: ID.contactA, businessId: ID.bizA, firstName: 'V42b', lastName: 'Customer', email: `${P}customer@test.local` } });
+  for (const [id, visibility, ownerId] of [
+    [ID.cPriv, 'PRIVATE', ID.ownerA],
+    [ID.cTeam, 'TEAM', ID.ownerA],
+    [ID.cStaff, 'TEAM', ID.staffNone],
+    [ID.cShared, 'TEAM', ID.ownerA],
+  ] as const) {
+    await db.contact.create({ data: { id, businessId: ID.bizA, firstName: 'V42b', lastName: id, visibility, ownerId } });
+  }
+  await db.contactShare.create({ data: { id: `${P}share`, businessId: ID.bizA, contactId: ID.cShared, userId: ID.staffEditOwned, createdBy: ID.ownerA } });
   await db.aiPlan.create({ data: { id: ID.planA, businessId: ID.bizA, status: 'completed', objective: 'v42b plan A' } });
   await db.aiPlan.create({ data: { id: ID.planB, businessId: ID.bizB, status: 'completed', objective: 'v42b plan B' } });
 }, 120_000);
@@ -570,6 +618,166 @@ describe('a member with the write scope keeps undo, through the workflow, as the
     const logs = await undoneLogs(ID.bizA);
     expect(logs[logs.length - 1]).toMatchObject({ actor: ID.staffWrite, userId: ID.staffWrite });
     expect(emitted.filter((e) => e.name === 'action.undone').map((e) => e.payload.userId)).toEqual([ID.staffWrite]);
+  }, 60_000);
+});
+
+/** What the action dispatcher registers after KEY created or updated a contact. */
+function registerContactUndo(contactId: string, actionType = 'crm_update_contact') {
+  return undoService.registerAction({
+    businessId: ID.bizA, actionType, entityType: 'contact', entityId: contactId, originalPayload: {},
+  }) as Promise<string>;
+}
+
+/** The same caller and route with an undo id of the same length that names no record. */
+function unknownLike(undoId: string) {
+  return `${undoId.slice(0, -1)}#`;
+}
+
+describe('a contact undo applies the CRM row rules of the doors it stands in for (SEC-V42B-1, CR-V42b-1)', () => {
+  it("UT-14 RED-BEFORE (SEC-V42B-1): a PRIVATE contact of the owner, which a crm:write member cannot see -> 404 identical to an unknown id (delete 'owned' and 'any'); undoContact not called; the owner still undoes it", async () => {
+    const undoId = await registerContactUndo(ID.cPriv);
+    for (const actor of [ID.staffNone, ID.staffAny]) {
+      const hidden = await agentUndo(actor, ID.bizA, undoId);
+      const unknown = await agentUndo(actor, ID.bizA, unknownLike(undoId));
+      expect.soft(hidden.status, `${actor} ${JSON.stringify(hidden.body)}`).toBe(404);
+      expect.soft(stripVolatile(hidden.body), actor).toEqual(stripVolatile(unknown.body));
+    }
+    // The plan-step route reaches the same service.
+    const step = await seedStep('ut14', ID.planA);
+    const viaStep = await stepUndo(ID.staffAny, ID.bizA, ID.planA, step, { undoId });
+    expect.soft(viaStep.status, JSON.stringify(viaStep.body)).toBe(404);
+    expect.soft(await stepStatus(step)).toEqual({ status: 'completed', errorMessage: null });
+    expect.soft(crmUndoCalls, 'CrmService.undoContact not reached').toEqual([]);
+    expect.soft(undoService.canUndo(undoId).canUndo, 'the record is still undoable').toBe(true);
+    expect.soft(emitted.filter((e) => e.name === 'action.undone')).toEqual([]);
+
+    const owner = await agentUndo(ID.ownerA, ID.bizA, undoId);
+    expect(owner.status, JSON.stringify(owner.body)).toBe(201);
+    expect(owner.body).toMatchObject({ success: true, restored: { id: ID.cPriv } });
+    expect(crmUndoCalls).toEqual([`${ID.bizA}:${ID.cPriv}`]);
+  }, 60_000);
+
+  it("UT-15 RED-BEFORE (CR-V42b-1): a visible contact of another member: crm_delete 'owned' -> 403, crm_edit 'none' -> 403, crm_edit 'owned' (not shared) -> 403, my book -> 404; undoContact not called; crm_delete 'any' -> 201", async () => {
+    const undoId = await registerContactUndo(ID.cTeam);
+    const refusals: Array<[string, number, RegExp | null]> = [
+      [ID.staffNone, 403, /You can only delete contacts you own/],
+      [ID.staffEditNone, 403, /You do not have permission to edit contacts/],
+      [ID.staffEditOwned, 403, /You can only edit contacts you own/],
+      [ID.staffBook, 404, null],
+    ];
+    for (const [actor, status, message] of refusals) {
+      const res = await agentUndo(actor, ID.bizA, undoId);
+      expect.soft(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(status);
+      if (message) expect.soft(res.body.message, actor).toMatch(message);
+      else {
+        const unknown = await agentUndo(actor, ID.bizA, unknownLike(undoId));
+        expect.soft(stripVolatile(res.body), actor).toEqual(stripVolatile(unknown.body));
+      }
+    }
+    expect.soft(crmUndoCalls, 'CrmService.undoContact not reached').toEqual([]);
+    expect.soft(undoService.canUndo(undoId).canUndo).toBe(true);
+
+    const allowed = await agentUndo(ID.staffAny, ID.bizA, undoId);
+    expect(allowed.status, JSON.stringify(allowed.body)).toBe(201);
+    expect(allowed.body).toMatchObject({ success: true, restored: { id: ID.cTeam } });
+    expect(crmUndoCalls).toEqual([`${ID.bizA}:${ID.cTeam}`]);
+    expect(emitted.filter((e) => e.name === 'action.undone').map((e) => e.payload.userId)).toEqual([ID.staffAny]);
+  }, 60_000);
+
+  it("UT-16 control: a crm:write member undoes a contact they own; crm_edit 'owned' reaches a contact shared with them", async () => {
+    const own = await registerContactUndo(ID.cStaff, 'crm_create_contact');
+    const res = await agentUndo(ID.staffNone, ID.bizA, own);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ success: true, restored: { id: ID.cStaff } });
+
+    const shared = await registerContactUndo(ID.cShared);
+    const viaShare = await agentUndo(ID.staffEditOwned, ID.bizA, shared);
+    expect(viaShare.status, JSON.stringify(viaShare.body)).toBe(201);
+    expect(viaShare.body).toMatchObject({ success: true, restored: { id: ID.cShared } });
+    expect(crmUndoCalls).toEqual([`${ID.bizA}:${ID.cStaff}`, `${ID.bizA}:${ID.cShared}`]);
+  }, 60_000);
+});
+
+describe('one undo record is undone once, also under concurrent requests (SEC-V42B-2)', () => {
+  it('UT-17 RED-BEFORE: 12 parallel POSTs for one invoice undo run the writer once: one success, the others { success: false }; the invoice is DRAFT, not soft-deleted; one action.undone log and event', async () => {
+    const inv = await seedSentInvoice('ut17');
+    const undoId = await registerInvoiceUndo(inv);
+    const logsBefore = (await undoneLogs(ID.bizA)).length;
+    // The real writer, entered late enough that every request has passed its checks first.
+    const original = commerce.undoInvoice.bind(commerce);
+    let writerCalls = 0;
+    vi.spyOn(commerce, 'undoInvoice').mockImplementation(async (...args: unknown[]) => {
+      writerCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      return original(...args);
+    });
+
+    const results = await Promise.all(Array.from({ length: 12 }, () => agentUndo(ID.ownerA, ID.bizA, undoId)));
+    const ok = results.filter((r) => r.body?.success === true);
+    const refused = results.filter((r) => r.body?.success === false);
+    expect.soft(results.map((r) => r.status), 'every request answered 201').toEqual(Array(12).fill(201));
+    expect.soft(writerCalls, 'the writer ran once').toBe(1);
+    expect.soft(ok.map((r) => r.body.restored), 'one success').toEqual([{ id: inv, status: 'reverted_to_draft' }]);
+    expect.soft(refused).toHaveLength(11);
+    for (const r of refused) expect.soft(r.body.message).toMatch(/^(Undo already in progress|Action already undone)$/);
+
+    const [row] = await db.$queryRawUnsafe(`SELECT status::text AS status, deleted_at FROM invoices WHERE id = $1`, inv);
+    expect.soft(row, 'reverted, not deleted').toEqual({ status: 'DRAFT', deleted_at: null });
+    expect.soft((await undoneLogs(ID.bizA)).length - logsBefore, 'one action.undone log').toBe(1);
+    expect.soft(emitted.filter((e) => e.name === 'action.undone'), 'one action.undone event').toHaveLength(1);
+    expect(undoService.canUndo(undoId)).toMatchObject({ canUndo: false, reason: 'Action already undone' });
+  }, 60_000);
+
+  it('UT-18 control: a writer failure releases the claim: { success: false }, the record stays undoable and listed, a retry succeeds', async () => {
+    const inv = await seedSentInvoice('ut18');
+    const undoId = await registerInvoiceUndo(inv);
+    vi.spyOn(commerce, 'undoInvoice').mockImplementationOnce(async () => {
+      throw new Error('writer unavailable');
+    });
+    const failed = await agentUndo(ID.ownerA, ID.bizA, undoId);
+    expect(failed.status, JSON.stringify(failed.body)).toBe(201);
+    expect(failed.body).toMatchObject({ success: false, message: 'Undo failed: writer unavailable' });
+    expect(undoService.canUndo(undoId).canUndo).toBe(true);
+    const list = await agent().get(`/ai/businesses/${ID.bizA}/agent/undo`).set(HEADER, ID.ownerA);
+    expect((list.body.actions as Array<{ id: string; canUndo: boolean }>).find((a) => a.id === undoId)).toMatchObject({ canUndo: true });
+
+    const retry = await agentUndo(ID.ownerA, ID.bizA, undoId);
+    expect(retry.body).toMatchObject({ success: true, restored: { id: inv, status: 'reverted_to_draft' } });
+    expect(await invoiceStatus(inv)).toBe('DRAFT');
+  }, 60_000);
+});
+
+describe('GET agent/undo lists only what this actor may undo (SEC-V42B-3)', () => {
+  it('UT-19 RED-BEFORE: no invoice record below revenue:write, no PRIVATE contact the actor cannot see, no message record; every listed record canUndo: true', async () => {
+    const inv = await seedSentInvoice('ut19');
+    const invoiceUndo = await registerInvoiceUndo(inv);
+    const messageUndo = await undoService.registerAction({
+      businessId: ID.bizA, actionType: 'send_message_with_approval', entityType: 'message', entityId: `${P}msg19`, originalPayload: {},
+    });
+    const privUndo = await registerContactUndo(ID.cPriv);
+    const ownUndo = await registerContactUndo(ID.cStaff);
+    const ours = [invoiceUndo, messageUndo, privUndo, ownUndo];
+
+    const listed = async (actor: string) => {
+      const res = await agent().get(`/ai/businesses/${ID.bizA}/agent/undo`).set(HEADER, actor);
+      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(200);
+      const actions = (res.body.actions as Array<{ id: string; canUndo: boolean }>).filter((a) => ours.includes(a.id));
+      for (const a of actions) expect.soft(a.canUndo, `${actor} ${a.id}`).toBe(true);
+      return actions.map((a) => a.id).sort();
+    };
+
+    // revenue:none, crm:write (delete 'owned'): their own contact only.
+    expect.soft(await listed(ID.staffNone)).toEqual([ownUndo]);
+    // revenue:read, crm:read (STAFF role defaults): nothing.
+    expect.soft(await listed(ID.staffRead)).toEqual([]);
+    // revenue:write, crm:read: the invoice only.
+    expect.soft(await listed(ID.staffWrite)).toEqual([invoiceUndo]);
+    // The owner: everything but the message record, which no one may undo.
+    expect.soft(await listed(ID.ownerA)).toEqual([invoiceUndo, privUndo, ownUndo].sort());
+
+    // What is listed is what POST accepts: the owner's listing is undoable by the owner.
+    const posted = await agentUndo(ID.ownerA, ID.bizA, invoiceUndo);
+    expect(posted.body).toMatchObject({ success: true });
   }, 60_000);
 });
 
