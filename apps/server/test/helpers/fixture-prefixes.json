@@ -323,6 +323,11 @@
       "packet": "V1-21 (V1-21b-JOBROLE-TOOL-FAMILIES)"
     },
     {
+      "prefix": "v23a_",
+      "owner": "apps/server/test/public-catalog-projection.integration.test.ts",
+      "packet": "V1-23-PUB-PUBLIC-PROJECTIONS"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"

@@ -360,7 +360,9 @@ beforeAll(async () => {
       { provide: CrmService, useValue: crmStub },
       { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
       { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
-      { provide: CatalogService, useValue: {} },
+      // Real: the public /slots read asks CatalogService.assertPublicStore
+      // whether the storefront is open (V1-23 review repair SEC-V123-2).
+      CatalogService,
       { provide: RevenueAttributionService, useValue: { record: async () => undefined } },
       { provide: TransactionalEmailService, useValue: { send: async () => undefined } },
       { provide: PublicEventsService, useValue: { logStorefrontEvent: async () => undefined, backstitchVisitor: async () => undefined } },

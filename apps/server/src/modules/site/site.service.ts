@@ -1,6 +1,7 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
+import { PUBLIC_PRODUCT_SELECT, PUBLIC_SERVICE_SELECT } from '../catalog/catalog.service';
 
 interface StorefrontEvent {
   type: string;
@@ -155,14 +156,17 @@ export class SiteService {
     const storefrontEvents: StorefrontEvent[] = meta.storefrontEvents ?? [];
     const completedOrdersCount = storefrontEvents.filter((e) => e.type === 'checkout_complete').length;
 
+    // Public projections (V1-23, M36): never the whole Service or Product row.
     const [services, products, shippingZones] = await Promise.all([
       this.prisma.client.service.findMany({
         where: { businessId: business.id, deletedAt: null },
         orderBy: { createdAt: 'desc' },
+        select: PUBLIC_SERVICE_SELECT,
       }),
       this.prisma.client.product.findMany({
         where: { businessId: business.id, deletedAt: null, isActive: true },
         orderBy: { createdAt: 'desc' },
+        select: PUBLIC_PRODUCT_SELECT,
       }),
       this.prisma.client.shippingZone.findMany({
         where: { businessId: business.id, isActive: true },

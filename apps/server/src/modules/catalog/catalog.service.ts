@@ -1,4 +1,5 @@
 import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -17,6 +18,38 @@ import {
   CatalogServiceUpdatedPayload,
   CatalogServiceDeletedPayload,
 } from '../../core/event-bus/events.types';
+
+/*
+ * What an anonymous visitor may read of a catalog row (M36, V1-23). Every
+ * public read selects one of these instead of the whole row: a new column is
+ * private until it is added here. Left out on purpose: downloadUrl (the paid
+ * file), licenseTerms, sku, fulfillmentModel, inventoryMode, executionMeta;
+ * a service's invoice timing, deposit terms, buffers and sourceProductId; a
+ * staff member's hourlyRate and maxHoursPerWeek; every businessId and
+ * timestamp.
+ */
+export const PUBLIC_PRODUCT_SELECT = {
+  id: true,
+  name: true,
+  description: true,
+  price: true,
+  currency: true,
+  category: true,
+  duration: true,
+  imageUrl: true,
+  isActive: true,
+  compareAtPrice: true,
+} as const satisfies Prisma.ProductSelect;
+
+export const PUBLIC_SERVICE_SELECT = {
+  id: true,
+  name: true,
+  description: true,
+  duration: true,
+  price: true,
+} as const satisfies Prisma.ServiceSelect;
+
+export const PUBLIC_STAFF_SELECT = { id: true, name: true } as const satisfies Prisma.StaffMemberSelect;
 
 export interface CatalogProductInput {
   businessId: string;
@@ -131,20 +164,46 @@ export class CatalogService {
    *   - purchasable: boolean — single source of truth for storefront UI
    * Tracked products at zero stock with outOfStockBehavior='hide' are
    * filtered out of the public list entirely.
+   *
+   * Each row is PUBLIC_PRODUCT_SELECT plus that availability, never the
+   * whole Product. A business whose storefront is off, or that does not
+   * exist, is a 404 (assertPublicStore), for this route and the Commerce
+   * pass-through alike.
    */
   async listPublicProducts(businessId: string) {
     const products = await this.prisma.client.product.findMany({
-      where: { businessId, deletedAt: null, isActive: true },
+      where: { businessId, deletedAt: null, isActive: true, business: { deletedAt: null, storeEnabled: true } },
       orderBy: { createdAt: 'desc' },
+      select: { ...PUBLIC_PRODUCT_SELECT, inventoryMode: true, outOfStockBehavior: true },
     });
+    if (products.length === 0) {
+      // The store filter rides on the query, so an empty list means either
+      // "no open store" (404) or "an open store with nothing listed" ([]).
+      await this.assertPublicStore(businessId);
+      return [];
+    }
     const stockByProduct = await this.aggregateStock(products.map((p) => p.id));
     const result: any[] = [];
-    for (const p of products) {
-      const projected = this.projectAvailability(p, stockByProduct.get(p.id));
+    for (const { inventoryMode, outOfStockBehavior, ...publicFields } of products) {
+      const projected = this.projectAvailability({ inventoryMode, outOfStockBehavior }, stockByProduct.get(publicFields.id));
       if (projected.hidden) continue;
-      result.push({ ...p, ...projected.public });
+      result.push({ ...publicFields, ...projected.public });
     }
     return result;
+  }
+
+  /**
+   * 404 unless the business exists and its storefront is on (storeEnabled).
+   * A closed store and an unknown id get the same answer, the one
+   * getPublicStorefront gives (CF-56), so the public reads disclose nothing
+   * about a store that is not open.
+   */
+  async assertPublicStore(businessId: string): Promise<void> {
+    const business = await this.prisma.client.business.findFirst({
+      where: { id: businessId, deletedAt: null, storeEnabled: true },
+      select: { id: true },
+    });
+    if (!business) throw new NotFoundException('Storefront not found');
   }
 
   async getProduct(businessId: string, productId: string) {
