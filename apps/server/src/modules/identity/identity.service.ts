@@ -4,7 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { DefaultTriggersService } from '../ai/default-triggers.service';
-import { sanitizeBusiness } from '../../core/security/sanitize-business';
+import { BUSINESS_META_PAYMENT_SECRET_KEYS, sanitizeBusiness } from '../../core/security/sanitize-business';
 import { computeProfileCompleteness, computeTieredCompleteness, COMPLETENESS_TIERS, PROGRESSIVE_DEEPENING_PROMPTS } from './profile-completeness.constants';
 import type { UserIdentityDataDto } from './dto/bootstrap.dto';
 import {
@@ -51,6 +51,38 @@ export const PROFILE_PATCH_RESERVED_META_KEYS = ['whatsapp'] as const;
 
 /** The 400 code updateBusiness answers a metaData bag naming a reserved key with. */
 export const BUSINESS_METADATA_KEY_RESERVED = 'BUSINESS_METADATA_KEY_RESERVED';
+
+/**
+ * R0-SEC2c-PAYMENT-SECRETS-WRITE-ONLY: how the profile PATCH writes the payment
+ * secrets (BUSINESS_META_PAYMENT_SECRET_KEYS) a Business read never answers.
+ * `merged` is the stored metaData with the caller's bag spread over it; for
+ * each secret the caller named:
+ *   - a non-blank string is a new secret: stored trimmed;
+ *   - null is an explicit clear: the key is removed;
+ *   - anything else (blank, the {configured} marker a read answers, any other
+ *     value) is no new secret: the stored value stays as it was, or stays
+ *     absent. So a client that sends a read back never writes a mask over a
+ *     secret.
+ * A secret the caller did not name is the stored one, by the merge itself.
+ */
+function applyPaymentSecretWrites(
+  merged: Record<string, unknown>,
+  stored: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): void {
+  const has = (o: Record<string, unknown>, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+  for (const key of BUSINESS_META_PAYMENT_SECRET_KEYS) {
+    if (!has(incoming, key)) continue;
+    const value = incoming[key];
+    if (typeof value === 'string' && value.trim() !== '') {
+      merged[key] = value.trim();
+    } else if (value === null || !has(stored, key)) {
+      delete merged[key];
+    } else {
+      merged[key] = stored[key];
+    }
+  }
+}
 
 /**
  * The CRM ownership authority a membership's scope map confers (level, crm_view,
@@ -474,7 +506,9 @@ export class IdentityService {
 
     if (metaData) {
       const existingMeta = (oldBusiness.metaData as Record<string, any>) || {};
-      data.metaData = { ...existingMeta, ...metaData };
+      const merged: Record<string, unknown> = { ...existingMeta, ...metaData };
+      applyPaymentSecretWrites(merged, existingMeta, metaData);
+      data.metaData = merged;
     }
 
     const getStr = (key: string): string | null => {
