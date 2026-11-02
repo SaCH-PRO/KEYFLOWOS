@@ -147,6 +147,12 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM ledger_entries WHERE business_id LIKE '${P}%'`,
     `DELETE FROM financial_transactions WHERE business_id LIKE '${P}%'`,
+    // R0-SEC3: the RR-R002-04 bookings reference invoices, contacts, a service,
+    // a staff member and an org unit (NoAction), so they go first.
+    `DELETE FROM bookings WHERE business_id LIKE '${P}%'`,
+    `DELETE FROM services WHERE business_id LIKE '${P}%'`,
+    `DELETE FROM staff_members WHERE business_id LIKE '${P}%'`,
+    `DELETE FROM org_units WHERE business_id LIKE '${P}%'`,
     `DELETE FROM payments WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
     `DELETE FROM payment_links WHERE business_id LIKE '${P}%'`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE '${P}%'`,
@@ -1510,16 +1516,102 @@ describe('Review repairs (R0-02): the service membership check holds on all thre
 });
 
 describe('Review repairs (R0-02): invoice write responses and the linked booking (SEC-R002-3)', () => {
-  // Confirmed by the reviewer's probe on mark-paid. The fix is in
-  // commerce.service.ts / commerce.controller.ts, outside this packet's write
-  // set and outside the contract, so it is a visible todo for a follow-up
-  // packet (the SEC-CMF1-2 class, for the booking relation).
-  it.todo(
-    'RR-R002-04 (SEC-R002-3): an invoice write response carries no linked Booking row. DEFERRED: follow-up packet ' +
-      '(outside the R0-02 write set) — CommerceService.markInvoicePaid reloads the invoice with booking: true ' +
-      '(commerce.service.ts 958-962; InvoiceWorkflowService.transition, behind payment-failed and the status route, returns ' +
-      'the same include at invoice-workflow.service.ts 341) and toInvoiceWriteResponse (commerce.controller.ts 88-99) projects only the ' +
-      'contact, so PATCH /commerce/invoices/:id/paid hands a revenue:write member with no bookings scope the whole Booking ' +
-      'row (notes, location, calendarEventId, staffId, orgUnitId), which the operator invoice read does not disclose.',
-  );
+  // R0-SEC3-INVOICE-WRITE-PROJECTION closes the deferral R0-02 recorded here.
+  // markInvoicePaid reloads the invoice with `booking: true`
+  // (commerce.service.ts reload), and InvoiceWorkflowService.transition, behind
+  // payment-failed, the status route and PATCH {status}, updates with the same
+  // include, so the write routes handed a revenue:write member the whole
+  // linked Booking row: notes, location, calendarEventId, staffId, orgUnitId.
+  // rva_staffWriteA's scope map is explicit ({ revenue: 'write' }), so its
+  // bookings scope is the absent-key default 'none' (EXPLICIT_MAP_MISSING_KEY);
+  // and the operator invoice read (OPERATOR_INVOICE_INCLUDE) carries no booking
+  // at all. toInvoiceWriteResponse now drops the relation on every write route,
+  // so the write answers what the read discloses. The service return is
+  // unchanged: the invoice listeners still receive the booking.
+  const BOOKING_CANARY = 'RVA_BKG_';
+  const BKG = {
+    service: `${P}svc_bkg`,
+    staff: `${P}staff_bkg`,
+    orgUnit: `${P}ou_bkg`,
+  };
+
+  beforeAll(async () => {
+    await db.service.create({ data: { id: BKG.service, businessId: ID.bizA, name: 'RVA consultation', duration: 60, price: 100 } });
+    await db.staffMember.create({ data: { id: BKG.staff, businessId: ID.bizA, name: `${BOOKING_CANARY}stylist`, hourlyRate: 55 } });
+    await db.orgUnit.create({ data: { id: BKG.orgUnit, businessId: ID.bizA, name: `${BOOKING_CANARY}branch`, type: 'BRANCH' } });
+  });
+
+  /** A booking linked to the invoice copy; every value a write must not leak is returned. */
+  async function linkBooking(invoiceId: string, tag: string): Promise<{ id: string; secrets: string[] }> {
+    const id = `${P}bkg_${tag}`;
+    const values = {
+      notes: `${BOOKING_CANARY}notes ${tag}: gate code 4411`,
+      location: `${BOOKING_CANARY}location ${tag}: 7 Private Lane`,
+      calendarEventId: `${BOOKING_CANARY}cal_${tag}`,
+    };
+    await db.booking.create({
+      data: {
+        id,
+        businessId: ID.bizA,
+        contactId: ID.contactA,
+        serviceId: BKG.service,
+        staffId: BKG.staff,
+        orgUnitId: BKG.orgUnit,
+        invoiceId,
+        status: 'CONFIRMED',
+        startTime: new Date('2026-03-02T14:00:00.000Z'),
+        endTime: new Date('2026-03-02T15:00:00.000Z'),
+        ...values,
+      },
+    });
+    return { id, secrets: [id, BKG.staff, BKG.orgUnit, BOOKING_CANARY, ...Object.values(values)] };
+  }
+
+  function patchInvoice(actor: string, invoiceId: string, body: Record<string, unknown>) {
+    return withActor(agent().patch(`/commerce/businesses/${ID.bizA}/invoices/${invoiceId}`), actor).send(body);
+  }
+
+  it('RR-R002-04 (SEC-R002-3): every invoice write route (mark-paid, payment-failed, the status route on void and send, PATCH {status:"PAID"}, PATCH {status:"VOID"} and a PATCH edit) answers a revenue:write member with no bookings scope without the linked Booking row (no notes, location, calendarEventId, staffId or orgUnitId), as the operator invoice read does; the write lands and the booking row is unchanged', async () => {
+    const actor = ID.staffWriteA;
+    const routes: Array<{ label: string; status: 'SENT' | 'DRAFT'; viaWorkflow?: boolean; call: (copy: string) => request.Test; expect: string }> = [
+      { label: 'mark-paid', status: 'SENT', call: (c) => markPaid(actor, c, { businessId: ID.bizA }), expect: 'PAID' },
+      { label: 'payment-failed', status: 'SENT', call: (c) => markFailed(actor, c, { businessId: ID.bizA, reason: 'x' }), expect: 'FAILED' },
+      { label: 'status route VOID', status: 'SENT', viaWorkflow: true, call: (c) => setStatus(actor, c, 'void', { businessId: ID.bizA, status: 'VOID' }), expect: 'VOID' },
+      { label: 'status route SENT', status: 'DRAFT', call: (c) => setStatus(actor, c, 'sent', { businessId: ID.bizA, status: 'SENT' }), expect: 'SENT' },
+      { label: 'PATCH status PAID', status: 'SENT', call: (c) => patchInvoice(actor, c, { status: 'PAID' }), expect: 'PAID' },
+      { label: 'PATCH status VOID', status: 'SENT', viaWorkflow: true, call: (c) => patchInvoice(actor, c, { status: 'VOID' }), expect: 'VOID' },
+      { label: 'PATCH edit', status: 'SENT', call: (c) => patchInvoice(actor, c, { notes: 'RVA edited' }), expect: 'SENT' },
+    ];
+
+    const leaking: string[] = [];
+    for (const [i, route] of routes.entries()) {
+      const copy = await createCopy(`rr_r002_04_${i}`, { status: route.status, viaWorkflow: route.viaWorkflow });
+      const booking = await linkBooking(copy, `r002_04_${i}`);
+
+      const res = await route.call(copy);
+      expect(res.status, `${route.label}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect(res.body.id, route.label).toBe(copy);
+      expect(res.body.status, route.label).toBe(route.expect);
+      expect(await invoiceStatus(copy), route.label).toBe(route.expect);
+      // The SEC-CMF1-2 contact projection is unchanged beside the booking drop.
+      expect(Object.keys(res.body.contact ?? {}).sort(), route.label).toEqual(['businessId', 'email', 'firstName', 'id', 'lastName']);
+
+      const text = JSON.stringify(res.body);
+      const leaked = Object.prototype.hasOwnProperty.call(res.body, 'booking') || booking.secrets.some((s) => text.includes(s));
+      if (leaked) leaking.push(route.label);
+
+      // Only the HTTP body changes: the booking is still linked to the invoice.
+      const row = await db.booking.findUnique({ where: { id: booking.id }, select: { invoiceId: true, notes: true, staffId: true, orgUnitId: true } });
+      expect(row, route.label).toMatchObject({ invoiceId: copy, staffId: BKG.staff, orgUnitId: BKG.orgUnit });
+      expect(row?.notes, route.label).toContain(BOOKING_CANARY);
+
+      // The reference: the operator invoice read of the same copy by the same member.
+      const read = await withActor(agent().get(`/commerce/businesses/${ID.bizA}/invoices/${copy}`), actor);
+      expect(read.status, `${route.label}: operator read`).toBe(200);
+      expect(read.body, `${route.label}: operator read`).not.toHaveProperty('booking');
+      expect(booking.secrets.filter((s) => JSON.stringify(read.body).includes(s)), `${route.label}: operator read`).toEqual([]);
+    }
+    // Every write route answers what the read discloses: no route leaks.
+    expect(leaking, `write routes answering with the linked Booking row: ${leaking.join(', ')}`).toEqual([]);
+  });
 });
