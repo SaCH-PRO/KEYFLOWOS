@@ -1,4 +1,13 @@
-import { test, expect, type APIRequestContext, type BrowserContext, type Locator, type Page, type TestInfo } from "@playwright/test";
+import {
+  test,
+  expect,
+  type APIRequestContext,
+  type APIResponse,
+  type BrowserContext,
+  type Locator,
+  type Page,
+  type TestInfo,
+} from "@playwright/test";
 import { createHmac } from "node:crypto";
 
 /**
@@ -10,7 +19,10 @@ import { createHmac } from "node:crypto";
  *   lands in the workspace of the selected business (R0-18) -> create a contact
  *   -> edit it -> create an invoice -> issue it -> record a manual payment ->
  *   every page reloaded with its values read back from the server -> a second
- *   tenant is denied the first tenant's contact and invoice.
+ *   tenant is denied the first tenant's contact and invoice: in the browser,
+ *   and with its token on the first tenant's business path (reads, contact
+ *   edit, invoice status, payment), after which the first tenant's invoice,
+ *   payments and contact read back unchanged.
  *
  * Throughout: no 5xx (an optional service answering the R0-07 503
  * `provider_not_configured` is recorded, not a failure, because that is its
@@ -39,10 +51,18 @@ import { createHmac } from "node:crypto";
  * E2E_BASE_URL for a web server already running). With the API stopped the
  * spec fails at its first step (the negative control).
  *
- * FIXTURES: every user id, user email and business name embeds the registered
- * prefix `k25a_` and a per-run stamp. Rows are left behind on purpose (as in
- * live-journey.spec.ts): a cleanup that runs after a failure destroys the
- * evidence. The database is the isolated one, and the prefix finds them.
+ * FIXTURES: every user id, user email and business name embeds the prefix
+ * `k25a_` (the k<NN><a-z>_ head for R0-25) and a per-run stamp. The prefix is
+ * NOT registered in apps/server/test/helpers/fixture-prefixes.json: that
+ * registry covers apps/server/test suites, and its gate
+ * (fixture-prefix-registry.spec.ts) requires each owner to be a file under
+ * apps/server/test that declares the prefix, which this web spec is not. No
+ * server suite's cleanup pattern reaches `k25a_` (new suites escape '_' with
+ * sqlLikePrefix(); no legacy head matches it). Rows are left behind on
+ * purpose (as in live-journey.spec.ts): a cleanup that runs after a failure
+ * destroys the evidence. Users and businesses are found by the prefix;
+ * contacts, invoices and payments carry no prefix and are found through the
+ * business ids the run prints ("journey" in its output).
  */
 
 const LIVE = process.env.E2E_LIVE === "1";
@@ -450,7 +470,13 @@ test.describe(LIVE ? "Release 0 live journey (R0-25)" : "Release 0 live journey 
       await expect(pageB.getByText(editedLastName)).toHaveCount(0);
     });
 
-    await test.step("tenant B with tenant A's business forced into its session is refused (403/404 on every read of A), never shown A's data", async () => {
+    await test.step("tenant B with tenant A's business forced into its session: every call its browser makes on A's business is refused, and it is never shown A's data", async () => {
+      // The invoice page re-selects its business from the server
+      // (refreshWorkspace() in app/commerce/invoices/[id]/page.tsx), which
+      // replaces the forced id with B's own, so the browser never asks for A's
+      // invoice on A's path; its A-path calls here are the app shell's. A's
+      // invoice, payments and contact on A's path are probed with B's token in
+      // the next step (review repair SEC-R025-1).
       await storeSession(pageB, ownerB, ownerA.businessId);
       await pageB.goto(`/app/commerce/invoices/${invoiceId}`);
       await expect(pageB.getByRole("heading", { name: "Invoice not found" })).toBeVisible();
@@ -466,8 +492,61 @@ test.describe(LIVE ? "Release 0 live journey (R0-25)" : "Release 0 live journey 
       expect(onA.filter((c) => c.status !== 403 && c.status !== 404)).toEqual([]);
     });
 
-    const direct = await request.get(`${API_URL}/crm/businesses/${ownerA.businessId}/contacts/${contactId}`, { headers: auth });
-    expect(direct.status(), "the API refuses tenant B on tenant A's contact").toBe(403);
+    await test.step("tenant B's token on tenant A's business path: every read and write of A's invoice, payments and contact is refused (403); A's records are unchanged", async () => {
+      const invoiceOnA = `${API_URL}/commerce/businesses/${ownerA.businessId}/invoices/${invoiceId}`;
+      const contactOnA = `${API_URL}/crm/businesses/${ownerA.businessId}/contacts/${contactId}`;
+      // Each write, had it been admitted, would show in the read-back below.
+      const attempts: Array<[string, () => Promise<APIResponse>]> = [
+        ["GET A's contact", () => request.get(contactOnA, { headers: auth })],
+        ["GET A's invoice", () => request.get(invoiceOnA, { headers: auth })],
+        ["GET A's invoice payments", () => request.get(`${invoiceOnA}/payments`, { headers: auth })],
+        ["PATCH A's contact", () => request.patch(contactOnA, { headers: auth, data: { lastName: `${RUN}_b_overwrote` } })],
+        [
+          "PATCH A's invoice status to VOID (tenant A named in the body)",
+          () =>
+            request.patch(`${API_URL}/commerce/invoices/${invoiceId}/status/void`, {
+              headers: auth,
+              data: { businessId: ownerA.businessId, status: "VOID" },
+            }),
+        ],
+        [
+          "POST a payment on A's invoice",
+          () =>
+            request.post(`${invoiceOnA}/payments`, {
+              headers: auth,
+              data: { amount: 150, method: "Cash", idempotencyKey: `${RUN}_b_payment` },
+            }),
+        ],
+      ];
+      const answered: string[] = [];
+      for (const [label, call] of attempts) {
+        const res = await call();
+        answered.push(`${label}: ${res.status()}`);
+      }
+      record(testInfo, "tenant-b-on-a-path", answered.join("; "));
+      expect(answered, "tenant B's token on tenant A's business path").toEqual(attempts.map(([label]) => `${label}: 403`));
+
+      // Read back as tenant A: still part-paid 100 of 250 (not VOID), one payment, the edited contact.
+      const authA = { Authorization: `Bearer ${ownerA.token}` };
+      const invoiceA = await request.get(invoiceOnA, { headers: authA });
+      expect(invoiceA.status(), await invoiceA.text()).toBe(200);
+      const inv = (await invoiceA.json()) as { status: string; total: number | string; paidAmount: number; remaining: number };
+      expect({ status: inv.status, total: Number(inv.total), paidAmount: inv.paidAmount, remaining: inv.remaining }).toEqual({
+        status: "PARTIALLY_PAID",
+        total: 250,
+        paidAmount: 100,
+        remaining: 150,
+      });
+      const paymentsA = await request.get(`${invoiceOnA}/payments`, { headers: authA });
+      expect(paymentsA.status(), await paymentsA.text()).toBe(200);
+      const pays = (await paymentsA.json()) as { payments: Array<{ amount: number | string }> };
+      expect(pays.payments.map((p) => Number(p.amount)), "the payments on tenant A's invoice").toEqual([100]);
+      const contactA = await request.get(contactOnA, { headers: authA });
+      expect(contactA.status(), await contactA.text()).toBe(200);
+      // The contact detail route answers { contact, bookings, notes, tasks, ... }.
+      const detail = (await contactA.json()) as { contact?: unknown };
+      expect(detail.contact, "tenant A's contact").toMatchObject({ id: contactId, firstName, lastName: editedLastName });
+    });
 
     // ── the whole run ─────────────────────────────────────────────────────────
     await test.step("no request left localhost, no 5xx, and tenant A's browser only ever named its own business", async () => {
