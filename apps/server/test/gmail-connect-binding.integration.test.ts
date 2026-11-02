@@ -69,6 +69,27 @@
  * never pairs a new mailbox with the replaced one's refresh token (SEC-CMF5-R3);
  * confirm and disconnect sent together never deadlock (SEC-CMF5-R4).
  *
+ * R0-CMF6-GMAIL-CONNECTOR-ROUTES (cases K01-K05, L01-L02). RED-BEFORE (found by
+ * the CMF5 verification, wf_84ed7b52-835): the generic connector routes that
+ * act on the business mailbox had only AuthGuard and BusinessGuard, so any
+ * member could make KEY send a smoke email from the business mailbox
+ * (POST /connectors/businesses/:b/smoke/gmail) and read its inbox into Key
+ * Inbox (.../sync/gmail); and DELETE /commerce/businesses/:b/gmail never
+ * updated connector_statuses, so a mailbox connected through the Google Suite
+ * sign-in (CMF5R-1 writes that row) and disconnected that way stayed
+ * 'connected' and the nightly sync kept trying it ("Gmail not connected").
+ * GREEN-AFTER: smoke/gmail and sync/gmail follow the Gmail owner rule
+ * (GmailService.assertConnectAuthority, 403 GMAIL_OWNER_ONLY before the registry
+ * is reached); test/gmail (the Gmail profile check: it sends nothing and reads
+ * no message), health, statuses, dashboard and authenticate (status reads) and
+ * every other connector are unchanged; the commerce disconnect marks the gmail
+ * connector row disconnected in its own transaction, and writes none when
+ * there is none. For these cases the connector routes that act on a connector
+ * reach a REAL ConnectorRegistryService holding the REAL GmailConnector (its
+ * smoke test really sends through the stubbed Gmail API, which records every
+ * message) and a google_calendar control connector; the GmailConnector's inbox
+ * ingestion is a stand-in that records each inbox read.
+ *
  * Fixtures: prefix `k07d_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
  * $transaction wrapping.
@@ -134,13 +155,62 @@ const GRANTED_SCOPES = [
   'openid',
 ].join(' ');
 
+/** R0-CMF6: the Gmail API send endpoint the GmailConnector smoke test posts its marked self-test to (stubbed). */
+const GMAIL_SEND_URL = 'https://gmail.googleapis.com/gmail/v1/users/me/messages/send';
+
 let db: any;
 let app: any;
 let realFetch: typeof fetch;
+/**
+ * R0-CMF6: a real ConnectorRegistryService holding the real GmailConnector and
+ * the google_calendar control connector, built in beforeAll; the stand-in below
+ * forwards the routes that act on a connector to it.
+ */
+let liveRegistry: any;
 /** The connector registry stand-in behind ConnectorController: records what reached it. */
 const registry = {
   disconnectConnector: vi.fn(async () => undefined),
   reconnectConnector: vi.fn(async () => ({ connected: false })),
+  syncConnector: vi.fn((type: any, businessId: string) => liveRegistry.syncConnector(type, businessId)),
+  testConnector: vi.fn((type: any, businessId: string) => liveRegistry.testConnector(type, businessId)),
+  smokeTestConnector: vi.fn((type: any, businessId: string) => liveRegistry.smokeTestConnector(type, businessId)),
+  authenticateConnector: vi.fn((type: any, businessId: string) => liveRegistry.authenticateConnector(type, businessId)),
+  getHealth: vi.fn((type: any, businessId: string) => liveRegistry.getHealth(type, businessId)),
+  getStatuses: vi.fn((businessId: string) => liveRegistry.getStatuses(businessId)),
+  getDashboard: vi.fn((businessId: string) => liveRegistry.getDashboard(businessId)),
+};
+
+/**
+ * R0-CMF6: the GmailConnector's inbox ingestion, a stand-in that records each
+ * read (the real GmailIngestionService lists the inbox with the business's
+ * token and files every message into Key Inbox).
+ */
+const inboxIngestion = {
+  syncInbox: vi.fn(async (_businessId: string) => ({ success: true, itemsSynced: 0, errors: [] as string[], duration: 0 })),
+};
+
+/** R0-CMF6 control: a connector that is not the business mailbox (google_calendar), recording what reached it. */
+const controlConnector = {
+  meta: {
+    type: 'google_calendar',
+    name: 'K07D control calendar',
+    description: 'k07d control connector',
+    category: 'calendar',
+    icon: 'calendar',
+    supportsSync: true,
+    supportsWebhook: false,
+    authType: 'oauth2',
+  },
+  authenticate: vi.fn(async () => ({ connected: true })),
+  healthCheck: vi.fn(async () => ({
+    status: 'connected', lastSyncAt: null, lastErrorAt: null, lastError: null, errorCount: 0, syncCount: 0, connectedAt: null, connectedAccount: `${P}calendar`,
+  })),
+  getStatus: vi.fn(async () => ({ type: 'google_calendar', name: 'K07D control calendar', category: 'calendar', status: 'connected', connectedAccount: `${P}calendar` })),
+  isConnected: vi.fn(async () => true),
+  sync: vi.fn(async (_businessId: string) => ({ success: true, itemsSynced: 0, errors: [] as string[], duration: 0 })),
+  testConnection: vi.fn(async (_businessId: string) => ({ success: true, account: `${P}calendar` })),
+  smokeTest: vi.fn(async (_businessId: string) => ({ success: true, action: 'k07d control smoke', account: `${P}calendar` })),
+  disconnect: vi.fn(async () => undefined),
 };
 
 /**
@@ -174,6 +244,11 @@ const REFUSED_CODE = `${P}code_refused`;
 const exchanges: string[] = [];
 /** The mailbox behind every access token the stubbed live Gmail check was called with (review 2 CMF5R-1). */
 const profileChecks: string[] = [];
+/**
+ * R0-CMF6: every message the stubbed Gmail API was asked to send: the mailbox
+ * whose access token sent it and the decoded RFC 822 message.
+ */
+const sends: Array<{ mailbox: string; message: string }> = [];
 /** Every other outbound fetch attempted during the suite (refused). */
 const outbound: string[] = [];
 
@@ -210,6 +285,15 @@ async function stubFetch(input: any, init?: any): Promise<Response> {
       );
     }
     return new Response(JSON.stringify({ emailAddress: account.email }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }
+  if (url === GMAIL_SEND_URL && String(init?.method ?? 'GET').toUpperCase() === 'POST') {
+    const auth = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '');
+    const account = accountsByAccess.get(auth.replace(/^Bearer /, ''));
+    const raw = String(JSON.parse(String(init?.body ?? '{}')).raw ?? '');
+    const message = Buffer.from(raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+    sends.push({ mailbox: account?.email ?? '(unknown token)', message });
+    if (!account) return new Response('{}', { status: 401 });
+    return new Response(JSON.stringify({ id: `${P}sent_${sends.length}` }), { status: 200, headers: { 'content-type': 'application/json' } });
   }
   if (url === USERINFO_URL) {
     const auth = String(init?.headers?.Authorization ?? init?.headers?.authorization ?? '');
@@ -267,8 +351,27 @@ function suiteCallback(state: string, code: string, actor?: string, query: Recor
   return as(agent().get('/connect/google-suite/callback').query({ state, code, ...query }), actor);
 }
 
-function connectorOp(op: 'disconnect' | 'reconnect', businessId: string, type: string, actor?: string) {
+function connectorOp(
+  op: 'disconnect' | 'reconnect' | 'sync' | 'test' | 'smoke' | 'authenticate',
+  businessId: string,
+  type: string,
+  actor?: string,
+) {
   return as(agent().post(`/connectors/businesses/${businessId}/${op}/${type}`), actor).send({});
+}
+
+/** R0-CMF6: a connector status read (GET .../health/:type, .../statuses, .../dashboard). */
+function connectorRead(pathTail: string, businessId: string, actor?: string) {
+  return as(agent().get(`/connectors/businesses/${businessId}/${pathTail}`), actor);
+}
+
+/** R0-CMF6: the connector rows the nightly sync would try for a business (ConnectorSyncSchedulerService ELIGIBLE_STATUSES). */
+async function nightlySyncRowsOf(businessId: string): Promise<string[]> {
+  const rows: Array<{ connector_type: string }> = await db.$queryRawUnsafe(
+    `SELECT connector_type FROM connector_statuses WHERE business_id = $1 AND status IN ('connected', 'syncing') ORDER BY connector_type`,
+    businessId,
+  );
+  return rows.map((r) => r.connector_type);
 }
 
 /** The audit rows the mailbox changes wrote for a business (raw SQL). */
@@ -500,6 +603,17 @@ beforeAll(async () => {
       { provide: ConnectorCredentialsService, useValue: {} },
     ],
   }).compile();
+
+  // R0-CMF6: the registry the mailbox-acting connector routes reach. Real
+  // ConnectorRegistryService and GmailConnector (reading the business mailbox
+  // columns through the real PrismaService; its smoke test sends through the
+  // stubbed Gmail API); entity resolution is unused by sync, test and smoke.
+  const { EventEmitter2 } = await import('@nestjs/event-emitter');
+  const { GmailConnector } = await import('../src/core/connectors/implementations/gmail.connector');
+  const prismaService = moduleRef.get(PrismaService);
+  liveRegistry = new ConnectorRegistryService(new EventEmitter2(), prismaService);
+  liveRegistry.register(new GmailConnector(prismaService, new EventEmitter2(), {} as any, inboxIngestion as any));
+  liveRegistry.register(controlConnector as any);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -1354,6 +1468,202 @@ describe('R0-CMF5 review 2: a confirmation links a whole mailbox and does not de
     await clearPending(ID.biz);
     await clearMailbox(ID.biz);
   }, 120_000);
+});
+
+describe('R0-CMF6 the business mailbox on the generic connector surface follows the Gmail owner rule (D-11)', () => {
+  const MEMBERS = [ID.staff, ID.staffAdmin, ID.admin];
+
+  it('[R0-CMF6-K01] RED-BEFORE: POST /connectors/businesses/:b/smoke/gmail, which sends a marked self-test email from the business mailbox, is refused for a STAFF member (role defaults), a STAFF member granted revenue: admin and an ADMIN (403 GMAIL_OWNER_ONLY) before the registry is reached: no message is sent, the mailbox token is not used and no gmail connector row is written; a non-member 403, anonymous 401', async () => {
+    await clearPending(ID.biz);
+    await clearGmailConnector(ID.biz);
+    const mailbox = googleAccount('cmf6_smoke_refused');
+    await seedMailbox(ID.biz, mailbox);
+    registry.smokeTestConnector.mockClear();
+    const sentBefore = sends.length;
+    const checksBefore = profileChecks.length;
+
+    for (const actor of MEMBERS) expectOwnerOnly(await connectorOp('smoke', ID.biz, 'gmail', actor));
+    const stranger = await connectorOp('smoke', ID.biz, 'gmail', ID.stranger);
+    expect(stranger.status, JSON.stringify(stranger.body)).toBe(403);
+    const anonymous = await connectorOp('smoke', ID.biz, 'gmail');
+    expect(anonymous.status, JSON.stringify(anonymous.body)).toBe(401);
+
+    expect(registry.smokeTestConnector).not.toHaveBeenCalled();
+    expect(sends.slice(sentBefore)).toEqual([]);
+    expect(profileChecks.slice(checksBefore)).toEqual([]);
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([]);
+    expect((await mailboxOf(ID.biz)).email).toBe(mailbox.email);
+    await clearMailbox(ID.biz);
+  });
+
+  it('[R0-CMF6-K02] RED-BEFORE: POST .../sync/gmail, which reads the business inbox into Key Inbox, is refused for the same members (403 GMAIL_OWNER_ONLY) before the registry is reached; the inbox is not read', async () => {
+    const mailbox = googleAccount('cmf6_sync_refused');
+    await seedMailbox(ID.biz, mailbox);
+    registry.syncConnector.mockClear();
+    inboxIngestion.syncInbox.mockClear();
+
+    for (const actor of MEMBERS) expectOwnerOnly(await connectorOp('sync', ID.biz, 'gmail', actor));
+
+    expect(registry.syncConnector).not.toHaveBeenCalled();
+    expect(inboxIngestion.syncInbox).not.toHaveBeenCalled();
+    await clearMailbox(ID.biz);
+  });
+
+  it('[R0-CMF6-K03] positive: the owner, the distinguished owner (no membership row) and a SUPER_ADMIN smoke-test and sync the business mailbox: each smoke test sends one marked self-test from and to that mailbox with its own token, each sync reads that business inbox once, and the gmail connector row records the verified account', async () => {
+    await clearGmailConnector(ID.biz);
+    await clearGmailConnector(ID.bizDist);
+    const mailbox = googleAccount('cmf6_owner');
+    const distMailbox = googleAccount('cmf6_dist');
+    await seedMailbox(ID.biz, mailbox);
+    await seedMailbox(ID.bizDist, distMailbox);
+    inboxIngestion.syncInbox.mockClear();
+    const sentBefore = sends.length;
+
+    const runs: Array<[string, string, GoogleAccount]> = [
+      [ID.owner, ID.biz, mailbox],
+      [ID.superAdmin, ID.biz, mailbox],
+      [ID.distOwner, ID.bizDist, distMailbox],
+    ];
+    for (const [actor, businessId, account] of runs) {
+      const smoke = await connectorOp('smoke', businessId, 'gmail', actor);
+      expect([200, 201], JSON.stringify(smoke.body)).toContain(smoke.status);
+      expect(smoke.body).toMatchObject({ success: true, account: account.email });
+      const synced = await connectorOp('sync', businessId, 'gmail', actor);
+      expect([200, 201], JSON.stringify(synced.body)).toContain(synced.status);
+      expect(synced.body).toMatchObject({ success: true });
+    }
+
+    const sent = sends.slice(sentBefore);
+    expect(sent.map((s) => s.mailbox)).toEqual([mailbox.email, mailbox.email, distMailbox.email]);
+    for (const [i, s] of sent.entries()) {
+      const address = runs[i][2].email;
+      expect(s.message).toContain(`From: ${address}\r\n`);
+      expect(s.message).toContain(`To: ${address}\r\n`);
+      expect(s.message).toContain('X-Keyflow-Smoke-Test: 1');
+    }
+    expect(inboxIngestion.syncInbox.mock.calls.map((c) => c[0])).toEqual([ID.biz, ID.biz, ID.bizDist]);
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'connected', connected_account: mailbox.email })]);
+
+    await clearMailbox(ID.biz);
+    await clearMailbox(ID.bizDist);
+    await clearGmailConnector(ID.biz);
+    await clearGmailConnector(ID.bizDist);
+  });
+
+  it('[R0-CMF6-K04] control: the gmail routes that only read a status, or check the stored credential without sending or reading a message, stay open to every member: a STAFF member gets GET .../health/gmail, .../statuses and .../dashboard (connected, the mailbox address), POST .../test/gmail (the Gmail profile check: success and the account) and POST .../authenticate/gmail ({connected: true}); nothing is sent and the inbox is not read', async () => {
+    const mailbox = googleAccount('cmf6_reads');
+    await seedMailbox(ID.biz, mailbox);
+    inboxIngestion.syncInbox.mockClear();
+    const sentBefore = sends.length;
+    const checksBefore = profileChecks.length;
+
+    const health = await connectorRead('health/gmail', ID.biz, ID.staff);
+    expect(health.status, JSON.stringify(health.body)).toBe(200);
+    expect(health.body).toMatchObject({ status: 'connected', connectedAccount: mailbox.email });
+
+    const statuses = await connectorRead('statuses', ID.biz, ID.staff);
+    expect(statuses.status, JSON.stringify(statuses.body)).toBe(200);
+    expect(statuses.body).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'gmail', status: 'connected', connectedAccount: mailbox.email }),
+    ]));
+
+    const dashboard = await connectorRead('dashboard', ID.biz, ID.staff);
+    expect(dashboard.status, JSON.stringify(dashboard.body)).toBe(200);
+    const gmailEntry = (dashboard.body as any[]).find((e) => e.meta?.type === 'gmail');
+    expect(gmailEntry?.health).toMatchObject({ status: 'connected', connectedAccount: mailbox.email });
+
+    const tested = await connectorOp('test', ID.biz, 'gmail', ID.staff);
+    expect([200, 201], JSON.stringify(tested.body)).toContain(tested.status);
+    expect(tested.body).toEqual({ success: true, account: mailbox.email });
+    expect(profileChecks.slice(checksBefore)).toEqual([mailbox.email]);
+
+    const authenticated = await connectorOp('authenticate', ID.biz, 'gmail', ID.staff);
+    expect([200, 201], JSON.stringify(authenticated.body)).toContain(authenticated.status);
+    expect(authenticated.body).toEqual({ connected: true });
+
+    expect(sends.slice(sentBefore)).toEqual([]);
+    expect(inboxIngestion.syncInbox).not.toHaveBeenCalled();
+    await clearMailbox(ID.biz);
+  });
+
+  it('[R0-CMF6-K05] control: other connectors are not gated by the mailbox rule: a STAFF member syncs, tests and smoke-tests google_calendar, and the registry and the connector are reached (success)', async () => {
+    controlConnector.sync.mockClear();
+    controlConnector.testConnection.mockClear();
+    controlConnector.smokeTest.mockClear();
+    for (const op of ['sync', 'test', 'smoke'] as const) {
+      const res = await connectorOp(op, ID.biz, 'google_calendar', ID.staff);
+      expect([200, 201], `${op} ${JSON.stringify(res.body)}`).toContain(res.status);
+      expect(res.body).toMatchObject({ success: true });
+    }
+    expect(controlConnector.sync).toHaveBeenCalledWith(ID.biz);
+    expect(controlConnector.testConnection).toHaveBeenCalledWith(ID.biz);
+    expect(controlConnector.smokeTest).toHaveBeenCalledWith(ID.biz);
+    await db.$executeRawUnsafe(`DELETE FROM connector_statuses WHERE business_id = $1 AND connector_type = 'google_calendar'`, ID.biz);
+  });
+
+  it('[R0-CMF6-L01] RED-BEFORE: a mailbox connected through the Google Suite sign-in (its gmail connector row connected, so the nightly sync tries it) and disconnected with DELETE /commerce/businesses/:b/gmail: the row is marked disconnected in the disconnect\'s own transaction (the row, the cleared mailbox columns and the audit row carry one transaction id) and the nightly sync no longer selects it; a refused DELETE (STAFF) leaves it connected', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+    const mailbox = googleAccount('cmf6_suite_disconnect');
+    const own = await suiteAuthUrl(ID.biz, ID.owner, { services: ['gmail'] });
+    expect([200, 201], JSON.stringify(own.body)).toContain(own.status);
+    const back = suiteRedirectOf(await suiteCallback(stateOf(own.body.authUrl), mailbox.code));
+    expect(back.gmail).toBe('pending');
+    const ok = await confirm(ID.biz, back.pending, ID.owner, mailbox.email);
+    expect([200, 201], JSON.stringify(ok.body)).toContain(ok.status);
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'connected', connected_account: mailbox.email })]);
+    expect(await nightlySyncRowsOf(ID.biz)).toContain('gmail');
+
+    expectOwnerOnly(await disconnect(ID.biz, ID.staff));
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'connected' })]);
+
+    const res = await disconnect(ID.biz, ID.owner);
+    expect([200, 204], JSON.stringify(res.body)).toContain(res.status);
+    expect(await mailboxOf(ID.biz)).toMatchObject({ email: null, access: null, refresh: null });
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([expect.objectContaining({ status: 'disconnected' })]);
+    expect(await nightlySyncRowsOf(ID.biz)).not.toContain('gmail');
+    // What the nightly sync met on a row left connected: the mailbox is gone.
+    expect(await liveRegistry.syncConnector('gmail', ID.biz)).toMatchObject({ success: false, errors: ['Gmail not connected'] });
+
+    const [biz] = await db.$queryRawUnsafe('SELECT xmin::text AS tx FROM businesses WHERE id = $1', ID.biz);
+    const [row] = await db.$queryRawUnsafe(`SELECT xmin::text AS tx FROM connector_statuses WHERE business_id = $1 AND connector_type = 'gmail'`, ID.biz);
+    const [audit] = await db.$queryRawUnsafe(
+      `SELECT xmin::text AS tx FROM team_activity_logs WHERE business_id = $1 AND action = 'gmail_disconnected' ORDER BY created_at DESC LIMIT 1`,
+      ID.biz,
+    );
+    expect(audit?.tx).toBeTruthy();
+    expect(row?.tx).toBe(audit.tx);
+    expect(biz?.tx).toBe(audit.tx);
+    await clearGmailConnector(ID.biz);
+  });
+
+  it('[R0-CMF6-L02] control: with no gmail connector row, DELETE .../gmail writes none; another connector\'s row and another business\'s gmail row are untouched', async () => {
+    await clearGmailConnector(ID.biz);
+    await clearGmailConnector(ID.bizTwo);
+    const mailbox = googleAccount('cmf6_no_row');
+    await seedMailbox(ID.biz, mailbox);
+    for (const [businessId, connectorType] of [[ID.biz, 'google_calendar'], [ID.bizTwo, 'gmail']]) {
+      await db.connectorStatus.upsert({
+        where: { businessId_connectorType: { businessId, connectorType } },
+        create: { businessId, connectorType, status: 'connected' },
+        update: { status: 'connected' },
+      });
+    }
+
+    const res = await disconnect(ID.biz, ID.owner);
+    expect([200, 204], JSON.stringify(res.body)).toContain(res.status);
+    expect((await mailboxOf(ID.biz)).email).toBeNull();
+    expect(await gmailConnectorStatusOf(ID.biz)).toEqual([]);
+    const stillTried = await nightlySyncRowsOf(ID.biz);
+    expect(stillTried).toContain('google_calendar');
+    expect(stillTried).not.toContain('gmail');
+    expect(await gmailConnectorStatusOf(ID.bizTwo)).toEqual([expect.objectContaining({ status: 'connected' })]);
+
+    await db.$executeRawUnsafe(`DELETE FROM connector_statuses WHERE business_id = $1 AND connector_type = 'google_calendar'`, ID.biz);
+    await clearGmailConnector(ID.bizTwo);
+  });
 });
 
 describe('R0-CMF5 harness invariant', () => {
