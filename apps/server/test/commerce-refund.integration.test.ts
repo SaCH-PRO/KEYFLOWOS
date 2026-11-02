@@ -59,10 +59,37 @@
  *          is computeBalance for every row written since V1-29), one REVERSAL per refunded
  *          posting, and the tenant's trial balance balances
  *
+ * V1-29b-REFUND-READERS: the readers the V1-29 review found outside the V1-29 write set read
+ * the stored rows through balanceOfStoredRows, in integer cents, and show the net received as
+ * "paid" (the shared contract, packages/shared/src/invoice-balance.ts: show `net` as paid):
+ *   RR-01  (CR-V29-1) the reminder email for 60 + 40 paid with the 40 refunded states 40 awaiting
+ *          payment, Paid 60, Balance due 40: listPayments' figures and the ledger cash net
+ *   RR-02  (CR-V29-1) the reminder for a fully refunded invoice states the whole total awaiting
+ *          payment and no Paid line
+ *   RR-03  (CR-V29-1) the evidence-match candidates carry the contract's remaining (40, 100), and
+ *          every candidate's remaining is balanceOfStoredRows over its own-tenant rows
+ *   RR-04  (CR-V29-2) CASH-basis receivables (getCustomerBalance, getAging): paid 60 / outstanding
+ *          40 on the CF-17 invoice, outstanding = total on a fully refunded one, a pre-V1-29
+ *          flipped row read as the base read it (outstanding 100); = total - the ledger cash net
+ *   RR-05  (CR-V29-3) paid, fully refunded, paid again: the invoice.paid receipt email, the
+ *          operator's Resend receipt and the public receipt state 100 received (not 200)
+ *   RR-06  (CR-V29-3, CR-V29-4) a pre-V1-29 flipped 60 and then 100 paid: PAID with nothing
+ *          remaining, so the receipt email goes out stating 100, Resend receipt is allowed, and the
+ *          public receipt reads 100 / 0 (computeBalance alone read remaining 60 and sent nothing)
+ *   RR-07  (CR-V29-3) the public receipt of the CF-17 invoice reads 60 received, 40 due
+ *   RR-08  (V1-22 residual) the open payables (payments-ops listOpenPayables) carry the contract's
+ *          remaining in integer cents: a PENDING row is not cash, a flipped row reads as the base
+ *          read it, 10.10 + 20.20 + 30.30 leaves exactly 39.40
+ *   RR-04 / RR-08 M31 controls (review SEC-V29B-1): a Payment row on A's invoice tagged with tenant
+ *          B (Payment has no FK to Business) is not A's money. Receivables and the open payables
+ *          read the own-tenant rows, the rows the receipt, the reminder email and the evidence match
+ *          read: 50 paid + a foreign SUCCESSFUL 30 reads paid 50 / 50 owed (not 80 / 20), 100 paid +
+ *          a foreign REFUNDED -100 reads paid 100 / 0 owed (not 0 / 100), 60 paid + a foreign
+ *          REFUNDED -60 reads 40 owed (not 100); each = the public receipt's figures
+ *
  * Open (it.todo, outside the V1-29 write set; owner decision): SEC-V29-2 (the refund audit
- * names the payment's full amount), CR-V29-1 (invoice / reminder email and evidence-match
- * figures read gross paid), CR-V29-2 (CASH-basis receivables count SUCCESSFUL rows only),
- * CR-V29-3 (receipt email and public receipt state gross paid after a re-settlement).
+ * names the payment's full amount). Outside the V1-29b write set (it.todo, queued follow-up):
+ * CR-29b-1 (the public token view still states the gross paid beside the receipt's net).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
@@ -72,7 +99,9 @@
  * `x-v29a-user`, loads that seeded user row and attaches `{ id, email, role }`
  * exactly as the Supabase-verifying AuthMiddleware would. EventEmitter2 is a
  * recording stub; ExpensePostingService (COGS), the contact timeline, the stats
- * cache and the AI / Gmail / Drive services are stubs off the boundary.
+ * cache and the AI / Drive services are stubs off the boundary; the Gmail service records every
+ * email it is handed and sends nothing (RR-01 .. RR-06 read the rendered figures), and the model
+ * extraction of payment evidence is stubbed in RR-03.
  *
  * Fixtures: prefix `v29a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL (patterns built by sqlLikePrefix) in dependency order in
@@ -117,6 +146,40 @@ const ID = {
   invStripeMixed: `${P}invStripeMixed`,
   invStray: `${P}invStray`,
   invLegacy: `${P}invLegacy`,
+  // V1-29b-REFUND-READERS (RR-01 .. RR-08)
+  contactMail: `${P}contactMail`,
+  contactRecv: `${P}contactRecv`,
+  invEmailPart: `${P}invEmailPart`,
+  invEmailFull: `${P}invEmailFull`,
+  invReceiptResettle: `${P}invReceiptResettle`,
+  invReceiptLegacy: `${P}invReceiptLegacy`,
+  invRecvPart: `${P}invRecvPart`,
+  invRecvFull: `${P}invRecvFull`,
+  invRecvLegacy: `${P}invRecvLegacy`,
+  invOpsPart: `${P}invOpsPart`,
+  invOpsPending: `${P}invOpsPending`,
+  invOpsLegacy: `${P}invOpsLegacy`,
+  invOpsCents: `${P}invOpsCents`,
+  // review SEC-V29B-1 (M31 controls on RR-04 / RR-08)
+  contactRecvForeign: `${P}contactRecvForeign`,
+  invRecvForeignPaid: `${P}invRecvForeignPaid`,
+  invRecvForeignRefund: `${P}invRecvForeignRefund`,
+  invOpsForeign: `${P}invOpsForeign`,
+  invOpsForeignRefund: `${P}invOpsForeignRefund`,
+};
+
+/**
+ * RR-01 .. RR-04: the email / evidence invoices and the receivables invoices belong to contacts of
+ * their own, so the evidence match ranks them by name and the receivables rows hold them alone.
+ */
+const CONTACT_OF: Record<string, string> = {
+  [ID.invEmailPart]: ID.contactMail,
+  [ID.invEmailFull]: ID.contactMail,
+  [ID.invRecvPart]: ID.contactRecv,
+  [ID.invRecvFull]: ID.contactRecv,
+  [ID.invRecvLegacy]: ID.contactRecv,
+  [ID.invRecvForeignPaid]: ID.contactRecvForeign,
+  [ID.invRecvForeignRefund]: ID.contactRecvForeign,
 };
 
 const TOTAL = 100;
@@ -132,6 +195,21 @@ let storedBalanceFn: (total: number, rows: Array<{ amount: number; status: strin
 // The real Stripe webhook handlers (RF-11, RF-12) and the real posting reversal (RF-14).
 let paymentsSvc: any;
 let revenuePosting: any;
+// V1-29b-REFUND-READERS: the readers over the same real Prisma (RR-01 .. RR-08).
+let receipts: any;
+let paymentEvidence: any;
+let receivables: any;
+let paymentsOps: any;
+let receiptListener: any;
+
+/** The Gmail boundary: every email the readers render is recorded; nothing is sent. */
+const sentEmails: Array<{ businessId: string; to: string; subject: string; htmlBody: string }> = [];
+const gmailStub = {
+  sendEmail: async (args: { businessId: string; to: string; subject: string; htmlBody: string }) => {
+    sentEmails.push(args);
+    return { messageId: `${P}msg_${sentEmails.length}` };
+  },
+};
 
 const emitted: Array<{ name: string; payload: any }> = [];
 const eventStub = {
@@ -220,10 +298,13 @@ async function reversalsFor(paymentId: string): Promise<any[]> {
 /**
  * The invoice's balance over its stored rows (balanceOfStoredRows: computeBalance for every row
  * written since V1-29; a pre-V1-29 flipped row is read as its payment plus its refund, CR-V29-4).
+ * Over the rows of the invoice's own tenant: Payment has no FK to Business (M31), so a row tagged
+ * with another businessId is not this invoice's money (review SEC-V29B-1; every invoice here is
+ * bizA's, and only the M31 controls seed a foreign row).
  */
 async function balanceOf(invoiceId: string) {
   const inv = await invoiceRow(invoiceId);
-  const rows = await paymentsOf(invoiceId);
+  const rows = (await paymentsOf(invoiceId)).filter((r) => r.businessId === inv.businessId);
   return storedBalanceFn(Number(inv.total), rows.map((r) => ({ amount: Number(r.amount), status: r.status })), inv.currency);
 }
 
@@ -353,7 +434,7 @@ beforeAll(async () => {
       { provide: PublicEventsService, useValue: {} },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
       { provide: TimeEntryService, useValue: {} },
-      { provide: GmailService, useValue: {} },
+      { provide: GmailService, useValue: gmailStub },
       { provide: CommerceVisionService, useValue: {} },
       { provide: StoreReadinessService, useValue: {} },
       PaymentEvidenceService,
@@ -367,6 +448,17 @@ beforeAll(async () => {
   // The Stripe webhook handlers over the same real Prisma, workflow and ledger chain.
   const { PaymentsService } = await import('../src/modules/payments/payments.service');
   paymentsSvc = new PaymentsService(moduleRef.get(PrismaService), commerce, workflow, revenuePosting);
+  // V1-29b-REFUND-READERS: the module's receipt builder and evidence service, the invoice.paid
+  // receipt listener, CASH-basis receivables and the open payables over the same real Prisma (the
+  // payment gateways are never called by listOpenPayables).
+  receipts = moduleRef.get(InvoiceReceiptBuilderService);
+  paymentEvidence = moduleRef.get(PaymentEvidenceService);
+  const { InvoiceReceiptListener } = await import('../src/modules/commerce/invoice-receipt.listener');
+  const { ReceivablesService } = await import('../src/modules/finance/receivables.service');
+  const { PaymentsOpsService } = await import('../src/modules/payments/payments-ops.service');
+  receiptListener = new InvoiceReceiptListener(commerce, gmailStub as any);
+  receivables = new ReceivablesService(moduleRef.get(PrismaService), moduleRef.get(ChartOfAccountsSeederService));
+  paymentsOps = new PaymentsOpsService(moduleRef.get(PrismaService), {} as any, {} as any, {} as any, {} as any);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -396,6 +488,9 @@ beforeAll(async () => {
     await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(biz);
   }
   await db.contact.create({ data: { id: ID.contact, businessId: ID.bizA, firstName: 'V29a', lastName: 'Customer', email: `${P}c@test.local` } });
+  await db.contact.create({ data: { id: ID.contactMail, businessId: ID.bizA, firstName: 'V29a', lastName: 'Mailed', email: `${P}mail@test.local` } });
+  await db.contact.create({ data: { id: ID.contactRecv, businessId: ID.bizA, firstName: 'V29a', lastName: 'Receivable', email: `${P}recv@test.local` } });
+  await db.contact.create({ data: { id: ID.contactRecvForeign, businessId: ID.bizA, firstName: 'V29a', lastName: 'Stray', email: `${P}stray@test.local` } });
 
   let n = 0;
   for (const id of Object.values(ID).filter((v) => v.startsWith(`${P}inv`))) {
@@ -409,7 +504,7 @@ beforeAll(async () => {
         total: TOTAL,
         currency: 'TTD',
         businessId: ID.bizA,
-        contactId: ID.contact,
+        contactId: CONTACT_OF[id] ?? ID.contact,
         items: { create: [{ id: `${id}_item1`, description: `V29A item ${n}`, quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
       },
     });
@@ -424,6 +519,7 @@ afterAll(async () => {
 
 beforeEach(() => {
   emitted.length = 0;
+  sentEmails.length = 0;
 });
 
 afterEach(() => {
@@ -846,17 +942,335 @@ describe('V1-29 review: rows the manual refund flipped before V1-29 (CR-V29-4)',
   });
 });
 
-describe('V1-29 review findings outside the V1-29 write set (owner decision; it.todo)', () => {
+// ---------------------------------------------------------------------------
+// V1-29b-REFUND-READERS (RR-01 .. RR-08): the readers outside the V1-29 write set
+// ---------------------------------------------------------------------------
+
+/** The figures a rendered invoice email states (invoice-email.template.ts); null where the line is absent. */
+function emailFigures(html: string) {
+  const grab = (re: RegExp) => html.match(re)?.[1] ?? null;
+  return {
+    awaiting: grab(/for (TT\$-?[\d.]+) is awaiting payment/),
+    received: grab(/received your payment of (TT\$-?[\d.]+)/),
+    paid: grab(/>Paid<\/td><td[^>]*>(TT\$-?[\d.]+)</),
+    balanceDue: grab(/>Balance due<\/td><td[^>]*>(TT\$-?[\d.]+)</),
+  };
+}
+
+function remind(inv: string) {
+  return agent()
+    .post(`/commerce/businesses/${ID.bizA}/invoices/${inv}/send-reminder`)
+    .set(HEADER, ID.ownerA)
+    .send({ channel: 'email' });
+}
+
+function resendReceipt(inv: string) {
+  return agent().post(`/commerce/businesses/${ID.bizA}/invoices/${inv}/resend-receipt`).set(HEADER, ID.ownerA).send({});
+}
+
+/** The pre-V1-29 manual refund, as it wrote it: the row flipped to REFUNDED (positive amount kept), its posting reversed once. */
+async function flipLegacy(paymentId: string) {
+  await db.payment.update({ where: { id: paymentId }, data: { status: 'REFUNDED' } });
+  await revenuePosting.onPaymentRefunded(paymentId, { createdById: ID.ownerA });
+}
+
+/**
+ * M31: a Payment row on one of A's invoices tagged with tenant B, as a stray row would sit (Payment
+ * has no FK to Business). Seeded directly: no posting, no reconcile.
+ */
+async function foreignRow(inv: string, tag: string, amount: number, status: 'SUCCESSFUL' | 'REFUNDED') {
+  return db.payment.create({
+    data: {
+      id: `${inv}_${tag}`, businessId: ID.bizB, invoiceId: inv, amount, currency: 'TTD', status, provider: 'cash', method: 'cash',
+      providerPaymentId: `${P}m31_${tag}`, notes: 'seeded: a row tagged with another tenant (M31)',
+    },
+  });
+}
+
+/** The CF-17 invoice: 60 + 40 paid with the 40 refunded (SUCCESSFUL 100 in all, one REFUNDED -40). */
+async function seedPartRefund(inv: string, tag: string) {
+  await paid(inv, 60, `${tag}-60`);
+  const forty = await paid(inv, 40, `${tag}-40`);
+  const res = await refund(forty.id, `${tag} refund`);
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+}
+
+/** 100 paid and refunded in full: SUCCESSFUL 100, REFUNDED -100; SENT (D-14). */
+async function seedFullRefund(inv: string, tag: string) {
+  const all = await paid(inv, 100, `${tag}-100`);
+  const res = await refund(all.id, `${tag} refund`);
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+}
+
+describe('V1-29b-REFUND-READERS: the invoice / reminder email and evidence-match figures (CR-V29-1)', () => {
+  it('RR-01: the reminder for 60 + 40 paid with the 40 refunded states TT$40.00 awaiting payment, Paid TT$60.00 and Balance due TT$40.00: listPayments\' figures and the ledger cash net', async () => {
+    const inv = ID.invEmailPart;
+    await seedPartRefund(inv, 'V29A-EP');
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_PAID');
+    expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 40, net: 60, remaining: 40 });
+    expect((await listPayments(inv)).body).toMatchObject({ paidAmount: 60, remaining: 40 });
+    await expectLedgerAgrees(inv, { net: 60, reversals: 1 });
+
+    sentEmails.length = 0;
+    const res = await remind(inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ delivered: true, channel: 'email' });
+    expect(sentEmails, 'one reminder email').toHaveLength(1);
+    expect(sentEmails[0].to).toBe(`${P}mail@test.local`);
+    // RED-BEFORE (int/trial-I 7f4b81a2): awaiting TT$0.00, Paid TT$100.00 and no Balance due line
+    // (amountPaid was computeBalance.paid, the gross; amountRemaining total - gross).
+    expect(emailFigures(sentEmails[0].htmlBody)).toEqual({ awaiting: 'TT$40.00', received: null, paid: 'TT$60.00', balanceDue: 'TT$40.00' });
+  });
+
+  it('RR-02: the reminder for a fully refunded invoice (SENT, net 0) states the whole TT$100.00 awaiting payment and due, with no Paid line', async () => {
+    const inv = ID.invEmailFull;
+    await seedFullRefund(inv, 'V29A-EF');
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null });
+    expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
+    await expectLedgerAgrees(inv, { net: 0, reversals: 1 });
+
+    sentEmails.length = 0;
+    const res = await remind(inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(sentEmails).toHaveLength(1);
+    // RED-BEFORE: "TT$0.00 is awaiting payment" and Paid TT$100.00 on an invoice that has received nothing net.
+    expect(emailFigures(sentEmails[0].htmlBody)).toEqual({ awaiting: 'TT$100.00', received: null, paid: null, balanceDue: 'TT$100.00' });
+  });
+
+  it('RR-03: the evidence-match candidates carry the contract\'s remaining: 40 on the CF-17 invoice, 100 on the fully refunded one; every candidate\'s remaining is balanceOfStoredRows over its own-tenant rows', async () => {
+    // RR-01 and RR-02 seeded the two invoices (the suite runs in order).
+    expect(await balanceOf(ID.invEmailPart)).toMatchObject({ net: 60, remaining: 40 });
+    expect(await balanceOf(ID.invEmailFull)).toMatchObject({ net: 0, remaining: 100 });
+    // The model extraction is the one stand-in: a 40 slip from the customer of the two invoices.
+    vi.spyOn(paymentEvidence, 'extractEvidence').mockResolvedValue({
+      extracted: { amount: 40, method: 'bank_transfer', payer: 'V29a Mailed' },
+      raw: null,
+    });
+    const res = await agent()
+      .post(`/commerce/businesses/${ID.bizA}/payments/extract-evidence`)
+      .set(HEADER, ID.ownerA)
+      .send({ evidenceUrl: 'https://example.invalid/v29a-slip.png', evidenceMimeType: 'image/png', filename: 'v29a-slip.png', source: 'upload' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const candidates: any[] = res.body.candidates;
+    const byId = new Map(candidates.map((c) => [c.id, c]));
+    // RED-BEFORE: remaining 0 on both (total minus the SUCCESSFUL rows: the refund never subtracted).
+    expect(byId.get(ID.invEmailPart), 'the CF-17 invoice is a candidate').toMatchObject({ total: 100, remaining: 40 });
+    expect(byId.get(ID.invEmailFull), 'the fully refunded invoice is a candidate').toMatchObject({ total: 100, remaining: 100 });
+    expect(candidates[0].id, 'the exact 40 from the named customer ranks first').toBe(ID.invEmailPart);
+    for (const c of candidates) {
+      const rows = (await paymentsOf(c.id)).filter((r) => r.businessId === ID.bizA);
+      const inv = await invoiceRow(c.id);
+      expect(c.remaining, `${c.id}: the contract's remaining`).toBe(
+        storedBalanceFn(Number(inv.total), rows.map((r) => ({ amount: Number(r.amount), status: r.status })), inv.currency).remaining,
+      );
+    }
+  });
+});
+
+describe('V1-29b-REFUND-READERS: CASH-basis receivables (CR-V29-2)', () => {
+  it('RR-04: getCustomerBalance and getAging read paid 60 / outstanding 40 on the CF-17 invoice, outstanding = the total on a fully refunded one, and a pre-V1-29 flipped 60 as the base read it (outstanding 100); each outstanding = total - the ledger cash net', async () => {
+    await seedPartRefund(ID.invRecvPart, 'V29A-RP');
+    await seedFullRefund(ID.invRecvFull, 'V29A-RF');
+    const sixty = await paid(ID.invRecvLegacy, 60, 'V29A-RL-60');
+    await flipLegacy(sixty.id);
+    expect((await db.business.findUnique({ where: { id: ID.bizA } })).accountingBasis, 'CASH basis: the invoice-payment fallback').toBe('CASH');
+
+    const want: Record<string, { paid: number; outstanding: number }> = {
+      [ID.invRecvPart]: { paid: 60, outstanding: 40 },
+      [ID.invRecvFull]: { paid: 0, outstanding: 100 },
+      [ID.invRecvLegacy]: { paid: 0, outstanding: 100 },
+    };
+    for (const [inv, w] of Object.entries(want)) {
+      const { cashNet } = await expectLedgerAgrees(inv, { net: w.paid, reversals: 1 });
+      expect(money(TOTAL - cashNet), `${inv}: total - the ledger cash net`).toBe(w.outstanding);
+      expect((await balanceOf(inv)).remaining, `${inv}: balanceOfStoredRows`).toBe(w.outstanding);
+    }
+
+    const balance = await receivables.getCustomerBalance(ID.bizA, ID.contactRecv);
+    expect(balance.basis).toBe('CASH');
+    const rows = Object.fromEntries(balance.invoices.map((i: any) => [i.id, { paid: i.paid, outstanding: i.outstanding }]));
+    // RED-BEFORE: the CF-17 invoice paid 100 / outstanding 0 and the fully refunded one paid 100 /
+    // outstanding 0 (SUCCESSFUL rows only, written for the pre-V1-29 flip).
+    expect(rows).toEqual(want);
+    expect(balance).toMatchObject({ invoicedTotal: 300, paidTotal: 60, outstanding: 240 });
+
+    const aging = await receivables.getAging(ID.bizA);
+    expect(aging.basis).toBe('CASH');
+    // RED-BEFORE: 100 (the flipped invoice alone; the two refunded invoices read as settled).
+    expect(aging.customers.find((c: any) => c.contactId === ID.contactRecv)).toMatchObject({ total: 240, current: 240 });
+  });
+
+  it('RR-04 (M31 control, review SEC-V29B-1): a row on A\'s invoice tagged with tenant B is not A\'s money: receivables read the own-tenant rows, the figures the public receipt and the reminder email state (50 paid + a foreign SUCCESSFUL 30 -> paid 50 / outstanding 50; 100 paid + a foreign REFUNDED -100 -> paid 100 / outstanding 0); = total - the ledger cash net', async () => {
+    await paid(ID.invRecvForeignPaid, 50, 'V29A-RX-50');
+    await foreignRow(ID.invRecvForeignPaid, 'rx_s30', 30, 'SUCCESSFUL');
+    await paid(ID.invRecvForeignRefund, 100, 'V29A-RXR-100');
+    await foreignRow(ID.invRecvForeignRefund, 'rxr_r100', -100, 'REFUNDED');
+    expect((await invoiceRow(ID.invRecvForeignPaid)).status).toBe('PARTIALLY_PAID');
+    expect((await invoiceRow(ID.invRecvForeignRefund)).status).toBe('PAID');
+    // The foreign rows sit on A's invoices; read with every tenant's rows they would move A's figures.
+    expect((await paymentsOf(ID.invRecvForeignPaid)).map((r) => r.businessId).sort()).toEqual([ID.bizA, ID.bizB]);
+    expect(await rawBalanceOf(ID.invRecvForeignRefund), 'every tenant\'s rows: the foreign refund cancels A\'s payment').toMatchObject({ net: 0, remaining: 100 });
+
+    const want: Record<string, { paid: number; outstanding: number }> = {
+      [ID.invRecvForeignPaid]: { paid: 50, outstanding: 50 },
+      [ID.invRecvForeignRefund]: { paid: 100, outstanding: 0 },
+    };
+    for (const [inv, w] of Object.entries(want)) {
+      const { cashNet } = await expectLedgerAgrees(inv, { net: w.paid, reversals: 0 });
+      expect(money(TOTAL - cashNet), `${inv}: total - the ledger cash net`).toBe(w.outstanding);
+      const receipt = await receipts.buildPublicReceipt(inv, ID.bizA);
+      expect({ paid: receipt.amountPaid, outstanding: receipt.amountDue }, `${inv}: the public receipt (own-tenant rows)`).toEqual(w);
+    }
+
+    const balance = await receivables.getCustomerBalance(ID.bizA, ID.contactRecvForeign);
+    expect(balance.basis).toBe('CASH');
+    const rows = Object.fromEntries(balance.invoices.map((i: any) => [i.id, { paid: i.paid, outstanding: i.outstanding }]));
+    // RED-BEFORE (V1-29b 052d3939, every tenant's rows): paid 80 / outstanding 20 and paid 0 /
+    // outstanding 100: the foreign refund moved A's receivables (base 7f4b81a2: 80 / 20 and 100 / 0).
+    expect(rows).toEqual(want);
+    expect(balance).toMatchObject({ invoicedTotal: 200, paidTotal: 150, outstanding: 50 });
+
+    const aging = await receivables.getAging(ID.bizA);
+    // RED-BEFORE: 20. The PAID invoice is not open, so the aging row holds the part-paid one alone.
+    expect(aging.customers.find((c: any) => c.contactId === ID.contactRecvForeign)).toMatchObject({ total: 50, current: 50 });
+
+    sentEmails.length = 0;
+    const res = await remind(ID.invRecvForeignPaid);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(sentEmails).toHaveLength(1);
+    expect(emailFigures(sentEmails[0].htmlBody), 'the reminder email states the same figures').toEqual({
+      awaiting: 'TT$50.00', received: null, paid: 'TT$50.00', balanceDue: 'TT$50.00',
+    });
+  });
+});
+
+describe('V1-29b-REFUND-READERS: the receipt email and the public receipt (CR-V29-3)', () => {
+  it('RR-05: paid 100, refunded in full, paid 100 again -> PAID; the invoice.paid receipt email, the operator\'s Resend receipt and the public receipt state TT$100.00 received (not TT$200.00), the ledger cash net', async () => {
+    const inv = ID.invReceiptResettle;
+    await seedFullRefund(inv, 'V29A-RS');
+    await paid(inv, 100, 'V29A-RS-100B');
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    expect(await balanceOf(inv)).toMatchObject({ paid: 200, refunded: 100, net: 100, remaining: 0, isFullyPaid: true });
+    await expectLedgerAgrees(inv, { net: 100, reversals: 1 });
+    const receiptFigures = { awaiting: null, received: 'TT$100.00', paid: 'TT$100.00', balanceDue: null };
+
+    sentEmails.length = 0;
+    await receiptListener.onInvoicePaid({ invoice: { id: inv }, businessId: ID.bizA });
+    expect(sentEmails, 'the invoice.paid receipt').toHaveLength(1);
+    // RED-BEFORE: "We've received your payment of TT$200.00" and Paid TT$200.00 (computeBalance.paid, the gross).
+    expect(emailFigures(sentEmails[0].htmlBody)).toEqual(receiptFigures);
+
+    sentEmails.length = 0;
+    const resend = await resendReceipt(inv);
+    expect(resend.status, JSON.stringify(resend.body)).toBe(201);
+    expect(sentEmails, 'the operator\'s Resend receipt').toHaveLength(1);
+    expect(emailFigures(sentEmails[0].htmlBody)).toEqual(receiptFigures);
+
+    // RED-BEFORE: amountPaid 200.
+    expect(await receipts.buildPublicReceipt(inv, ID.bizA)).toMatchObject({ status: 'PAID', total: TOTAL, amountPaid: 100, amountDue: 0 });
+  });
+
+  it('RR-06 (CR-V29-4): a pre-V1-29 flipped 60 and then 100 paid -> PAID with nothing remaining; the receipt email goes out stating TT$100.00, Resend receipt is allowed, the public receipt reads 100 received, 0 due', async () => {
+    const inv = ID.invReceiptLegacy;
+    const sixty = await paid(inv, 60, 'V29A-RL2-60');
+    await flipLegacy(sixty.id);
+    await paid(inv, 100, 'V29A-RL2-100');
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    expect(await rawBalanceOf(inv), 'computeBalance alone subtracts the flipped row twice').toMatchObject({ net: 40, remaining: 60 });
+    expect(await balanceOf(inv)).toMatchObject({ paid: 160, refunded: 60, net: 100, remaining: 0, isFullyPaid: true });
+    await expectLedgerAgrees(inv, { net: 100, reversals: 1 });
+    const receiptFigures = { awaiting: null, received: 'TT$100.00', paid: 'TT$100.00', balanceDue: null };
+
+    sentEmails.length = 0;
+    await receiptListener.onInvoicePaid({ invoice: { id: inv }, businessId: ID.bizA });
+    // RED-BEFORE: no receipt (the listener read computeBalance: 60 still owed on a PAID invoice).
+    expect(sentEmails, 'the invoice.paid receipt').toHaveLength(1);
+    expect(emailFigures(sentEmails[0].htmlBody)).toEqual(receiptFigures);
+
+    sentEmails.length = 0;
+    const resend = await resendReceipt(inv);
+    // RED-BEFORE: 403 "Invoice is not yet paid".
+    expect(resend.status, JSON.stringify(resend.body)).toBe(201);
+    expect(emailFigures(sentEmails[0].htmlBody)).toEqual(receiptFigures);
+
+    // RED-BEFORE: amountPaid 100, amountDue 60 on a PAID invoice.
+    expect(await receipts.buildPublicReceipt(inv, ID.bizA)).toMatchObject({ status: 'PAID', amountPaid: 100, amountDue: 0 });
+  });
+
+  it('RR-07: the public receipt of the CF-17 invoice (60 + 40 paid, the 40 refunded) reads 60 received, 40 due: listPayments\' figures', async () => {
+    const inv = ID.invEmailPart; // seeded by RR-01
+    const list = (await listPayments(inv)).body;
+    expect(list).toMatchObject({ paidAmount: 60, remaining: 40 });
+    const receipt = await receipts.buildPublicReceipt(inv, ID.bizA);
+    // RED-BEFORE: amountPaid 100 (the gross) beside amountDue 40.
+    expect(receipt).toMatchObject({ status: 'PARTIALLY_PAID', amountPaid: 60, amountDue: 40, paidAt: null });
+    expect({ paidAmount: receipt.amountPaid, remaining: receipt.amountDue }).toEqual({ paidAmount: list.paidAmount, remaining: list.remaining });
+  });
+});
+
+describe('V1-29b-REFUND-READERS: the open payables (V1-22 residual)', () => {
+  it('RR-08: listOpenPayables carries the contract\'s remaining in integer cents: the CF-17 invoice 40, a fully refunded one 100, a PENDING row is not cash (40 owed), a pre-V1-29 flipped 60 reads 100 owed, 10.10 + 20.20 + 30.30 leaves exactly 39.40; every invoice payable is balanceOfStoredRows(...).remaining', async () => {
+    await seedPartRefund(ID.invOpsPart, 'V29A-OP');
+    await paid(ID.invOpsPending, 60, 'V29A-OPP-60');
+    await db.payment.create({
+      data: {
+        id: `${ID.invOpsPending}_pending`, businessId: ID.bizA, invoiceId: ID.invOpsPending, amount: 40, currency: 'TTD', status: 'PENDING',
+        provider: 'stripe', providerPaymentId: `${P}pi_ops_pending`, notes: 'seeded: a checkout not yet completed',
+      },
+    });
+    const legacy = await paid(ID.invOpsLegacy, 60, 'V29A-OPL-60');
+    await flipLegacy(legacy.id);
+    for (const [i, amount] of [10.1, 20.2, 30.3].entries()) await paid(ID.invOpsCents, amount, `V29A-OPC-${i}`);
+    expect(await balanceOf(ID.invOpsCents)).toMatchObject({ paid: 60.6, net: 60.6, remaining: 39.4 });
+
+    const { payables } = await paymentsOps.listOpenPayables(ID.bizA);
+    const amountOf = (id: string) => payables.find((p: any) => p.type === 'invoice' && p.id === id)?.amount;
+    // RED-BEFORE (a status-blind float sum of every row): part 40 and full 100 by accident of the
+    // sign, pending 0 (the PENDING 40 counted as received), legacy 40 (the flipped 60 counted as
+    // received), cents 39.400000000000006.
+    expect({
+      part: amountOf(ID.invOpsPart),
+      full: amountOf(ID.invEmailFull),
+      pending: amountOf(ID.invOpsPending),
+      legacy: amountOf(ID.invOpsLegacy),
+      cents: amountOf(ID.invOpsCents),
+    }).toEqual({ part: 40, full: 100, pending: 40, legacy: 100, cents: 39.4 });
+    const invoicePayables = payables.filter((p: any) => p.type === 'invoice');
+    expect(invoicePayables.length).toBeGreaterThan(5);
+    for (const p of invoicePayables) {
+      expect(p.amount, `${p.id}: balanceOfStoredRows(...).remaining`).toBe((await balanceOf(p.id)).remaining);
+    }
+  });
+
+  it('RR-08 (M31 control, review SEC-V29B-1): listOpenPayables reads the own-tenant rows: 50 paid + a foreign SUCCESSFUL 30 -> 50 owed (not 20), 60 paid + a foreign REFUNDED -60 -> 40 owed (not 100); each = the public receipt\'s amountDue and total - the ledger cash net', async () => {
+    await paid(ID.invOpsForeign, 50, 'V29A-OX-50');
+    await foreignRow(ID.invOpsForeign, 'ox_s30', 30, 'SUCCESSFUL');
+    await paid(ID.invOpsForeignRefund, 60, 'V29A-OXR-60');
+    await foreignRow(ID.invOpsForeignRefund, 'oxr_r60', -60, 'REFUNDED');
+    expect(await rawBalanceOf(ID.invOpsForeign), 'every tenant\'s rows').toMatchObject({ net: 80, remaining: 20 });
+    expect(await rawBalanceOf(ID.invOpsForeignRefund), 'every tenant\'s rows').toMatchObject({ net: 0, remaining: 100 });
+
+    const { payables } = await paymentsOps.listOpenPayables(ID.bizA);
+    const amountOf = (id: string) => payables.find((p: any) => p.type === 'invoice' && p.id === id)?.amount;
+    // RED-BEFORE (V1-29b 052d3939, every tenant's rows): 20, 100 and 20 (base 7f4b81a2's
+    // status-blind sum read the same).
+    expect({
+      foreign: amountOf(ID.invOpsForeign),
+      foreignRefund: amountOf(ID.invOpsForeignRefund),
+      recvForeign: amountOf(ID.invRecvForeignPaid), // RR-04's M31 control, still open
+    }).toEqual({ foreign: 50, foreignRefund: 40, recvForeign: 50 });
+    for (const inv of [ID.invOpsForeign, ID.invOpsForeignRefund, ID.invRecvForeignPaid]) {
+      await expectLedgerAgrees(inv, { net: money(TOTAL - amountOf(inv)), reversals: 0 });
+      expect(amountOf(inv), `${inv}: the public receipt's amountDue`).toBe((await receipts.buildPublicReceipt(inv, ID.bizA)).amountDue);
+    }
+  });
+});
+
+describe('V1-29 review findings outside the V1-29 and V1-29b write sets (owner decision; it.todo)', () => {
   it.todo(
     'SEC-V29-2: the FINANCE payment_refunded audit row of a manual refund names the amount refunded and the refund row (a "what is left" refund of 60 after a provider -40 records data.amount 100, the original\'s amount): needs a refund amount / refund id option on RevenuePostingService.onPaymentRefunded (finance/revenue-posting.service.ts, outside the write set)',
   );
   it.todo(
-    'CR-V29-1: the invoice / reminder email context states paid = computeBalance.paid (gross) and amountRemaining = total - gross, so a reminder for a refunded invoice reads "TT$0.00 awaiting payment"; the evidence-match candidates sum SUCCESSFUL rows the same way (commerce/commerce.controller.ts buildInvoiceEmailContext and extractPaymentEvidence, outside the write set)',
-  );
-  it.todo(
-    'CR-V29-2: CASH-basis receivables (getAging, getCustomerBalance) count SUCCESSFUL rows only and relied on the flip, so a refunded invoice that is owed again reads outstanding 0 (finance/receivables.service.ts, outside the write set; or accepted until V1-36)',
-  );
-  it.todo(
-    'CR-V29-3: after a full refund and a new payment the receipt email and the public receipt state amountPaid = gross paid (TT$200.00 on a TT$100 invoice; net received 100) (commerce/invoice-receipt.listener.ts, commerce/invoice-receipt-builder.service.ts, outside the write set)',
+    'CR-29b-1 (review of V1-29b): the public token view (GET public/invoice-link/:token, CommerceService.getPaymentLinkBalance) states the net received as amountPaid, the figure the public receipt states beside it on /public/invoice/[token] (60 for 60 + 40 paid with the 40 refunded; the token view reads the gross 100, the receipt 60): needs amountPaid: balance.net in getPaymentLinkBalance (commerce/commerce.service.ts) and public-invoice-link.integration L-14 (pins the gross 160), both outside the V1-29b write set; queued follow-up',
   );
 });

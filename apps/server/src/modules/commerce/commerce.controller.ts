@@ -1411,14 +1411,19 @@ export class CommerceController {
   ) {
     const business = invoice.business;
     const contact = invoice.contact;
-    // V1-49 review (SEC-V49-1, CR-V49-2): the amount received is computeBalance's
-    // paid over the invoice's own-tenant rows, the rule the invoice.paid receipt
-    // and the public receipt use. It was sumSuccessfulPayments over every row,
-    // so a SUCCESSFUL row tagged with another businessId (M31) raised the
-    // "received" figure in a customer email. Tenancy does not depend on the
-    // variant, so the invoice and reminder emails use the same rows; their
-    // arithmetic (remaining = total - paid) is unchanged.
-    const paid = ownTenantReceiptBalance(invoice).paid;
+    // V1-49 review (SEC-V49-1, CR-V49-2): the figures come from the invoice's
+    // own-tenant rows, the rule the invoice.paid receipt and the public receipt
+    // use. It was sumSuccessfulPayments over every row, so a SUCCESSFUL row
+    // tagged with another businessId (M31) raised the "received" figure in a
+    // customer email. Tenancy does not depend on the variant, so the invoice,
+    // reminder and receipt emails use the same rows.
+    // V1-29b-REFUND-READERS (CR-V29-1, CR-V29-3): "paid" is the balance's net
+    // (money received less refunds) and "remaining" its remaining, read through
+    // balanceOfStoredRows in integer cents (ownTenantReceiptBalance). The email
+    // stated computeBalance's gross paid and total - gross, so a reminder for
+    // 60 + 40 paid with the 40 refunded read "TT$0.00 awaiting payment" and a
+    // receipt after a re-settlement "received TT$200.00" on a TT$100 invoice.
+    const balance = ownTenantReceiptBalance(invoice);
     return buildInvoiceEmailHtml({
       businessName: business?.name ?? 'Your business',
       businessLogo: business?.logoUrl,
@@ -1448,8 +1453,8 @@ export class CommerceController {
       discountValue: invoice.discountValue != null ? Number(invoice.discountValue) : null,
       discountAmount: invoice.discountAmount != null ? Number(invoice.discountAmount) : null,
       total: Number(invoice.total),
-      amountPaid: paid,
-      amountRemaining: Math.max(0, Number(invoice.total) - paid),
+      amountPaid: balance.net,
+      amountRemaining: balance.remaining,
       currency: invoice.currency,
       notes: invoice.notes,
       invoiceUrl: paymentUrl,
@@ -1749,12 +1754,11 @@ export class CommerceController {
       take: 50,
     });
 
-    // Compute remaining balance for each invoice
+    // What is still owed on each invoice: the balance read contract over its
+    // own-tenant rows (V1-29b-REFUND-READERS, CR-V29-1). Summing the SUCCESSFUL
+    // rows never subtracted a refund, so a refunded invoice matched as settled.
     const candidates = invoices.map((inv) => {
-      const paid = (inv.payments ?? [])
-        .filter((p: any) => p.status === 'SUCCESSFUL')
-        .reduce((s: number, p: any) => s + (p.amount ?? 0), 0);
-      const remaining = Math.max(0, Number(inv.total) - paid);
+      const { remaining } = ownTenantReceiptBalance(inv);
       return {
         id: inv.id,
         invoiceNumber: inv.invoiceNumber,

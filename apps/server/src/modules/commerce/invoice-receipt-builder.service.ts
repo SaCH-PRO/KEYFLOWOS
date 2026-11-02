@@ -1,6 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { computeBalance, isShareableInvoiceStatus, type BalanceSummary } from './invoice-workflow.service';
+import { balanceOfStoredRows, isShareableInvoiceStatus, type BalanceSummary } from './invoice-workflow.service';
 
 /** The invoice fields a receipt email's figures come from (full Payment rows carry businessId). */
 export interface ReceiptBalanceSource {
@@ -13,17 +13,24 @@ export interface ReceiptBalanceSource {
 
 /**
  * V1-49 (M24, M31): the balance every receipt email states, the invoice.paid
- * listener's and the operator's "Resend receipt" alike: computeBalance over
- * the invoice's Payment rows of its own tenant. Payment sits outside the
- * tenant extension and has no FK to Business, so a row carrying another
- * businessId is not this invoice's money. One rule, so the two receipt emails
- * for one invoice and the public receipt never state different amounts.
+ * listener's and the operator's "Resend receipt" alike: the invoice's Payment
+ * rows of its own tenant. Payment sits outside the tenant extension and has
+ * no FK to Business, so a row carrying another businessId is not this
+ * invoice's money. One rule, so the two receipt emails for one invoice and
+ * the public receipt never state different amounts.
+ *
+ * V1-29b-REFUND-READERS (CR-V29-3, CR-V29-4): the rows are read through
+ * balanceOfStoredRows, the contract every balance reader uses: integer cents,
+ * each refund a separate negative REFUNDED row (D-14), and a row the manual
+ * refund flipped before V1-29 read as its payment plus its refund (net 0).
+ * computeBalance alone subtracted such a row twice, so a PAID invoice paid
+ * after a flipped refund read 60 still owed and got no receipt. The amount
+ * received is the balance's `net` (paid less refunded), not `paid`, which
+ * counts refunded money too.
  */
 export function ownTenantReceiptBalance(invoice: ReceiptBalanceSource): BalanceSummary {
-  const own = (invoice.payments ?? [])
-    .filter((p) => p.businessId === invoice.businessId)
-    .map((p) => ({ amount: Number(p.amount), status: p.status }));
-  return computeBalance(Number(invoice.total), own, invoice.currency);
+  const own = (invoice.payments ?? []).filter((p) => p.businessId === invoice.businessId);
+  return balanceOfStoredRows(Number(invoice.total), own, invoice.currency);
 }
 
 /**
@@ -79,23 +86,23 @@ export class InvoiceReceiptBuilderService {
    * serves), the customer's name and two figures. No payment row, reference,
    * note or evidence, no customer email, no `metaData`.
    *
-   * amountPaid / amountDue are computeBalance's paid / remaining over this
-   * invoice's Payment rows of its own tenant, the figures the token view shows
-   * (getPaymentLinkBalance): Payment sits outside the tenant extension and has
-   * no FK to Business (M31), so a row carrying another businessId is not this
-   * invoice's money. A manually refunded row is counted twice by
-   * computeBalance (M28); this mirrors it until V1-29 settles the convention.
+   * amountPaid / amountDue are the net received and the remaining of
+   * balanceOfStoredRows over this invoice's Payment rows of its own tenant:
+   * Payment sits outside the tenant extension and has no FK to Business (M31),
+   * so a row carrying another businessId is not this invoice's money.
+   * V1-29b-REFUND-READERS (CR-V29-3): amountPaid is the balance's `net` (60
+   * for 60 + 40 paid with the 40 refunded; 100, not 200, for an invoice paid,
+   * fully refunded and paid again), and a row flipped to REFUNDED before
+   * V1-29 reads as its payment plus its refund (CR-V29-4).
    *
    * Whether a receipt exists is decided by those rows, not by the status
    * (review CR-V49-1, SEC-V49-2). A shareable invoice (SENT, PAID,
    * PARTIALLY_PAID, OVERDUE) whose own-tenant net is above zero answers the
    * receipt, so a part-paid invoice moved to OVERDUE still gets one for what
    * has arrived. A net of zero or less answers 409 with no figures: either
-   * nothing was received, or a refund took the net to zero or below. The
-   * invoice can then still be PAID, because deriveStatusAfterPayment reopens
-   * only on a positive net, and under M28 the receipt would read "PAID,
-   * received 0, remaining twice the total". With a positive net, amountDue
-   * stays below the total. A DRAFT, VOID, PENDING, FAILED, soft-deleted or
+   * nothing was received, or a refund took the net to zero (since V1-29 a
+   * full refund returns the invoice to SENT, D-14). With a positive net,
+   * amountDue stays below the total. A DRAFT, VOID, PENDING, FAILED, soft-deleted or
    * other-tenant invoice answers the same 404 as an unknown token. Read-only.
    */
   async buildPublicReceipt(invoiceId: string, businessId: string) {
@@ -115,7 +122,7 @@ export class InvoiceReceiptBuilderService {
       },
     });
     if (!invoice || !isShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Receipt not found');
-    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     if (balance.net <= 0) {
       // "Nothing received" would be false after a refund, so that case gets a neutral message.
       throw new ConflictException(
@@ -127,7 +134,7 @@ export class InvoiceReceiptBuilderService {
       status: invoice.status,
       currency: invoice.currency,
       total: invoice.total,
-      amountPaid: balance.paid,
+      amountPaid: balance.net,
       amountDue: balance.remaining,
       paidAt: invoice.status === 'PAID' ? invoice.paidAt ?? null : null,
       issuedAt: invoice.issueDate,

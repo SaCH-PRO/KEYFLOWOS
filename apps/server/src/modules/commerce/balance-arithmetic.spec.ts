@@ -23,8 +23,10 @@
  *          to the net) selects exactly the rows whose sum is balanceOfStoredRows(...).net
  *   BA-04  ratchet: no write-set surface reads money as a SUCCESSFUL-only sum (a `.filter` on
  *          status === 'SUCCESSFUL', or a Payment aggregate / findMany of amounts pinned to
- *          SUCCESSFUL); outside the write set the known readers are an exact inventory that
- *          only shrinks; a new one fails, naming file:line
+ *          SUCCESSFUL) or as a status-blind sum of an invoice's payment rows (a `.reduce` over
+ *          `payments` adding `.amount` with no status in the chain: PENDING, FAILED and flipped
+ *          rows counted as received, V1-29b); outside the write sets the known readers are an
+ *          exact inventory that only shrinks; a new one fails, naming file:line
  *   BA-05  the web surfaces read the shared contract: each imports invoiceBalanceOfStoredRows
  *          from @keyflow/shared, and the package index re-exports ./invoice-balance
  *   BA-06  scanner self-test: an injected SUCCESSFUL-only sum is found
@@ -34,7 +36,18 @@
  *          billing/billing-panel.tsx, which nothing imports). BA-04 / BA-05 on them prove the files
  *          read the contract, not that a screen does. The live web balance surfaces (the nav
  *          "Invoices" hub invoices/page.tsx, the invoice detail page, the finance payment-record
- *          modal) are outside the write set and still in the BA-04 inventory: it.todo below.
+ *          modal) were outside the write set and in the BA-04 inventory at V1-36.
+ *   BA-08  (V1-29b-REFUND-READERS, review V36-CR-1) the live web balance surfaces (the nav
+ *          "Invoices" hub, the invoice detail page, the finance payment-record modal) are rendered
+ *          by a route, import invoiceBalanceOfStoredRows from @keyflow/shared and hold no
+ *          SUCCESSFUL-only or status-blind sum
+ *   BA-09  (V1-29b-REFUND-READERS, reviews CR-V29-1/2/3) the server balance readers outside the
+ *          V1-29 / V1-36 write sets (the invoice / reminder email and evidence match, CASH-basis
+ *          receivables, the open payables, the receipt email and the public receipt) hold no such
+ *          sum, read stored rows through balanceOfStoredRows (directly or through
+ *          ownTenantReceiptBalance, which does) and never call computeBalance on them (it reads a
+ *          pre-V1-29 flipped row as a refund twice); sumSuccessfulPayments, the last inventory
+ *          entry of the commerce email path, has no production caller
  *
  * The mirror is loaded by path from the tree this spec runs in (a worktree
  * resolves @keyflow/shared to the main tree's built dist).
@@ -220,7 +233,7 @@ describe('BA-03: the database form of the contract', () => {
 export interface SuccessfulOnlyRead {
   file: string;
   line: number;
-  form: 'filter' | 'prisma';
+  form: 'filter' | 'prisma' | 'reduce';
 }
 
 /** Comments blanked (line and block), string contents kept, offsets kept. */
@@ -249,6 +262,22 @@ const FILTER_SUCCESSFUL =
 const PAYMENT_READ = /\.\s*payment\s*\.\s*(aggregate|groupBy|findMany)\s*\(/g;
 const PINNED_SUCCESSFUL = /\bstatus\s*:\s*(?:(['"])SUCCESSFUL\1|\{\s*(?:equals\s*:\s*(['"])SUCCESSFUL\2|in\s*:\s*\[\s*(['"])SUCCESSFUL\3\s*\]))/;
 const READS_AMOUNT = /_sum\s*:\s*\{[^}]*\bamount\b|\bamount\s*:\s*true\b/;
+/**
+ * V1-29b: a `.reduce(` whose receiver chain (back to the statement start) is a payment-row
+ * collection (`payments`, `inv.payments`, `(invoice?.payments ?? [])`) with no `.status` in it,
+ * adding `.amount`: a status-blind sum that counts PENDING, FAILED and flipped REFUNDED rows as
+ * received. A chain with a SUCCESSFUL filter is the 'filter' form already.
+ */
+const REDUCE_CALL = /\.reduce\s*\(/g;
+const PAYMENT_ROWS = /(?:^|[^\w$])payments\b/;
+const STATUS_IN_CHAIN = /\.\s*status\b/;
+const ADDS_AMOUNT = /\.\s*amount\b/;
+
+/** The text from the start of the statement (after the last `;`, `{` or `}`) up to `index`. */
+function statementBefore(src: string, index: number): string {
+  const start = Math.max(src.lastIndexOf(';', index - 1), src.lastIndexOf('{', index - 1), src.lastIndexOf('}', index - 1));
+  return src.slice(start + 1, index);
+}
 
 /** Every SUCCESSFUL-only money read in one source file. `file` is repo-relative. */
 export function scanSuccessfulOnlyReads(file: string, source: string): SuccessfulOnlyRead[] {
@@ -259,6 +288,12 @@ export function scanSuccessfulOnlyReads(file: string, source: string): Successfu
     const open = (m.index ?? 0) + m[0].length - 1;
     const call = callText(src, open);
     if (PINNED_SUCCESSFUL.test(call) && READS_AMOUNT.test(call)) out.push({ file, line: lineAt(src, m.index ?? 0), form: 'prisma' });
+  }
+  for (const m of src.matchAll(REDUCE_CALL)) {
+    const at = m.index ?? 0;
+    const receiver = statementBefore(src, at);
+    if (!PAYMENT_ROWS.test(receiver) || STATUS_IN_CHAIN.test(receiver)) continue;
+    if (ADDS_AMOUNT.test(callText(src, at + m[0].length - 1))) out.push({ file, line: lineAt(src, at), form: 'reduce' });
   }
   return out.sort((a, b) => a.line - b.line);
 }
@@ -303,38 +338,51 @@ const WRITE_SET_SURFACES = [
 ];
 
 /**
- * SUCCESSFUL-only money reads outside the V1-36 write set, at V1-36. Exact
- * counts; the list only shrinks: each is a surface that still reads a
- * refunded invoice as paid and moves onto the contract in its own packet.
+ * The V1-29b-REFUND-READERS write set's balance readers (CR-V29-1/2/3, the V1-22 residual,
+ * V36-CR-1): no SUCCESSFUL-only or status-blind read may remain in any of them.
+ */
+const REFUND_READER_SURFACES = {
+  server: [
+    'apps/server/src/modules/commerce/commerce.controller.ts',
+    'apps/server/src/modules/finance/receivables.service.ts',
+    'apps/server/src/modules/payments/payments-ops.service.ts',
+    'apps/server/src/modules/commerce/invoice-receipt.listener.ts',
+    'apps/server/src/modules/commerce/invoice-receipt-builder.service.ts',
+  ],
+  web: [
+    'apps/web/src/app/app/commerce/invoices/page.tsx',
+    'apps/web/src/app/app/commerce/invoices/[id]/page.tsx',
+    'apps/web/src/app/app/finance/components/payment-record-modal.tsx',
+  ],
+};
+const REFUND_READER_FILES = [...REFUND_READER_SURFACES.server, ...REFUND_READER_SURFACES.web];
+
+/**
+ * SUCCESSFUL-only and status-blind money reads outside the V1-36 and
+ * V1-29b write sets. Exact counts; the list only shrinks: each is a surface
+ * that still reads a refunded invoice as paid and moves onto the contract in
+ * its own packet. V1-29b removed receivables.service.ts (2, CR-V29-2),
+ * commerce.controller.ts (1, CR-V29-1), payment-record-modal.tsx (1),
+ * invoices/[id]/page.tsx (1) and invoices/page.tsx (2) (V36-CR-1); the
+ * status-blind form it added found payments-ops.service.ts (fixed here) and
+ * the two entries marked V1-29b below.
  */
 const KNOWN_OUTSIDE_WRITE_SET: Record<string, { count: number; why: string }> = {
   'apps/server/src/modules/crm/crm-revenue.service.ts': {
     count: 1,
     why: 'contact lifetime revenue and payment counts (successfulPayments); refunds not subtracted',
   },
-  'apps/server/src/modules/finance/receivables.service.ts': {
-    count: 2,
-    why: 'CASH-basis aging and customer balance (CR-V29-2): written for the pre-V1-29 flip',
-  },
-  'apps/server/src/modules/commerce/commerce.controller.ts': {
-    count: 1,
-    why: 'payment-evidence match candidates (CR-V29-1)',
-  },
   'apps/server/src/modules/commerce/invoice-email.types.ts': {
     count: 1,
-    why: 'sumSuccessfulPayments: invoice / reminder email figures (CR-V29-1)',
+    why: 'sumSuccessfulPayments: no production caller since V1-49 (the email figures read ownTenantReceiptBalance; BA-09 keeps it uncalled)',
   },
-  'apps/web/src/app/app/finance/components/payment-record-modal.tsx': {
+  'apps/server/src/modules/key-cortex/key-cortex-context-v2.service.ts': {
     count: 1,
-    why: 'the finance payment modal fallback figures (successfulPaid): the live Record-payment form of the Sales pipeline (finance-pipeline.tsx), V36-CR-1',
+    why: 'V1-29b (status-blind form): the "changes since" digest sums new Payment amounts (paymentTotal) with no refund netting',
   },
-  'apps/web/src/app/app/commerce/invoices/[id]/page.tsx': {
+  'apps/web/src/app/app/finance/components/records/record-card.tsx': {
     count: 1,
-    why: 'the invoice detail page fallback paid figure',
-  },
-  'apps/web/src/app/app/commerce/invoices/page.tsx': {
-    count: 2,
-    why: 'the nav "Invoices" hub (nav-config.ts -> /app/commerce/invoices): stat cards and row "% paid" still read a refunded invoice as paid (V36-CR-1); the live CF-17 web list, outside the write set',
+    why: 'V1-29b (status-blind form): the finance record card progress bar (PaymentProgress) sums every payment row of an invoice record',
   },
 };
 
@@ -351,15 +399,24 @@ describe('BA-04: SUCCESSFUL-only money reads are ratcheted out', () => {
     expect(fmt(offenders), 'SUCCESSFUL-only reads in the V1-36 write set').toBe('');
   });
 
-  it('outside the write set the SUCCESSFUL-only readers are exactly the known inventory (a new one fails; one that disappears lowers the inventory)', () => {
+  it('no V1-29b-REFUND-READERS balance reader reads money as a SUCCESSFUL-only or status-blind sum', () => {
+    const offenders = REFUND_READER_FILES.flatMap((f) => byFile.get(f) ?? []);
+    // RED-BEFORE (int/trial-I 7f4b81a2): receivables.service.ts x2 (CASH basis), commerce.controller.ts
+    // (evidence match), payments-ops.service.ts (status-blind float sum), invoices/page.tsx x2,
+    // invoices/[id]/page.tsx and payment-record-modal.tsx (fallback figures).
+    expect(fmt(offenders), 'SUCCESSFUL-only / status-blind reads in the V1-29b write set').toBe('');
+  });
+
+  it('outside the write sets the SUCCESSFUL-only and status-blind readers are exactly the known inventory (a new one fails; one that disappears lowers the inventory)', () => {
+    const ownedElsewhere = (file: string) => CANONICAL.has(file) || WRITE_SET_SURFACES.includes(file) || REFUND_READER_FILES.includes(file);
     const actual: Record<string, number> = {};
     for (const [file, rs] of byFile) {
-      if (CANONICAL.has(file) || WRITE_SET_SURFACES.includes(file)) continue;
+      if (ownedElsewhere(file)) continue;
       actual[file] = rs.length;
     }
     const expected = Object.fromEntries(Object.entries(KNOWN_OUTSIDE_WRITE_SET).map(([f, v]) => [f, v.count]));
-    const unexpected = found.filter((r) => !CANONICAL.has(r.file) && !WRITE_SET_SURFACES.includes(r.file) && !(r.file in expected));
-    expect(fmt(unexpected), 'new SUCCESSFUL-only money reads (use balanceOfStoredRows / the shared mirror / CASH_NET_PAYMENT_WHERE)').toBe('');
+    const unexpected = found.filter((r) => !ownedElsewhere(r.file) && !(r.file in expected));
+    expect(fmt(unexpected), 'new SUCCESSFUL-only / status-blind money reads (use balanceOfStoredRows / the shared mirror / CASH_NET_PAYMENT_WHERE)').toBe('');
     expect(actual).toEqual(expected);
   });
 
@@ -469,13 +526,52 @@ describe('BA-07: which write-set web files a route renders (V36-CR-1)', () => {
     expect(unreachable).toEqual(Object.keys(UNREACHABLE_WRITE_SET_WEB).sort());
   });
 
-  it.todo(
-    'BA-08 (V36-CR-1, outside the V1-36 write set): the live web balance surfaces read invoiceBalanceOfStoredRows from @keyflow/shared. apps/web/src/app/app/commerce/invoices/page.tsx (the nav "Invoices" hub: stat cards ~line 151, row "% paid" ~line 316) reads a 100 invoice paid 60 + 40 with the 40 refunded as "100% paid", where the mirror gives 60% and remaining 40; invoices/[id]/page.tsx (detail fallback paid figure) and finance/components/payment-record-modal.tsx (the Sales pipeline Record-payment fallback) sum SUCCESSFUL rows too. The V1-36 write set named invoice-list.tsx, invoice-stat-cards.tsx and invoices-panel.tsx, which no route renders (BA-07): the fix needs a packet whose write set holds the live files',
-  );
+});
+
+describe('BA-08: the live web balance surfaces read the shared contract (V1-29b-REFUND-READERS, V36-CR-1)', () => {
+  const reachable = routeReachableWebFiles();
+  const scanned = scanTree();
+
+  it.each(REFUND_READER_SURFACES.web)('%s is rendered by a route, imports invoiceBalanceOfStoredRows from @keyflow/shared and holds no SUCCESSFUL-only or status-blind sum', (file) => {
+    expect(reachable.has(file), `${file} is rendered by a route`).toBe(true);
+    const src = stripComments(readFileSync(join(REPO, file), 'utf8'));
+    // RED-BEFORE (int/trial-I 7f4b81a2): none of the three imported the contract; the hub read
+    // "100% paid" and nothing unpaid for 60 + 40 with the 40 refunded (mirror: 60%, remaining 40).
+    const imports = /import\s*\{[^}]*\binvoiceBalanceOfStoredRows\b[^}]*\}\s*from\s*["']@keyflow\/shared["']/.test(src);
+    expect(imports, `${file} imports invoiceBalanceOfStoredRows from @keyflow/shared`).toBe(true);
+    expect(scanned.filter((r) => r.file === file).map((r) => `${r.line} (${r.form})`), file).toEqual([]);
+  });
+});
+
+describe('BA-09: the server balance readers outside the V1-29 / V1-36 write sets read stored rows through the contract (V1-29b-REFUND-READERS)', () => {
+  const SERVER_SRC = (file: string) => stripComments(readFileSync(join(REPO, file), 'utf8'));
+
+  it.each(REFUND_READER_SURFACES.server)('%s reads stored rows through balanceOfStoredRows (or ownTenantReceiptBalance) and never calls computeBalance on them', (file) => {
+    const src = SERVER_SRC(file);
+    // RED-BEFORE: the receipt builder called computeBalance (a flipped row subtracted twice); the
+    // controller, receivables and payables summed rows by hand.
+    expect(/\b(?:balanceOfStoredRows|ownTenantReceiptBalance)\s*\(/.test(src), `${file} calls balanceOfStoredRows or ownTenantReceiptBalance`).toBe(true);
+    expect(src.match(/\bcomputeBalance\s*\(/g) ?? [], `${file}: no computeBalance call over stored rows`).toEqual([]);
+  });
+
+  it('ownTenantReceiptBalance (the receipt emails, the email context, the evidence match) is balanceOfStoredRows over the own-tenant rows', () => {
+    const src = SERVER_SRC('apps/server/src/modules/commerce/invoice-receipt-builder.service.ts');
+    const body = src.match(/export function ownTenantReceiptBalance\([\s\S]*?\n\}/)?.[0] ?? '';
+    expect(body, 'ownTenantReceiptBalance is defined').not.toBe('');
+    expect(body).toMatch(/\bbalanceOfStoredRows\s*\(/);
+  });
+
+  it('sumSuccessfulPayments (invoice-email.types.ts, the last inventory entry of the email path) has no production caller', () => {
+    const callers = walk(join(SERVER, 'src'), isServerSource)
+      .filter((f) => !f.endsWith(join('commerce', 'invoice-email.types.ts')))
+      .filter((f) => /\bsumSuccessfulPayments\b/.test(stripComments(readFileSync(f, 'utf8'))))
+      .map(repoPath);
+    expect(callers).toEqual([]);
+  });
 });
 
 describe('BA-06: scanner self-test', () => {
-  it('finds an injected filter sum, typed filter, Prisma aggregate and findMany pinned to SUCCESSFUL; ignores comments, other statuses and reads without amounts', () => {
+  it('finds an injected filter sum, typed filter, Prisma aggregate and findMany pinned to SUCCESSFUL, and a status-blind reduce of payment amounts; ignores comments, other statuses, reads without amounts and reduces of other rows', () => {
     const src = [
       "const a = rows.filter((p) => p.status === 'SUCCESSFUL').reduce((s, p) => s + p.amount, 0);",
       'const b = rows.filter((x: any) => x.status === "SUCCESSFUL");',
@@ -487,7 +583,19 @@ describe('BA-06: scanner self-test', () => {
       "const d = rows.filter((p) => p.status === 'FAILED');",
       "await this.prisma.client.payment.findMany({ where: { status: 'SUCCESSFUL' }, select: { createdAt: true } });",
       "if (p.status === 'SUCCESSFUL') entries.push(p);",
+      'const e = inv.payments.reduce((sum, p) => sum + (p.amount ?? 0), 0);',
+      'const f = (invoice?.payments ?? []).reduce((s, p) => s + Number(p.amount), 0);',
+      'const g = inv.payments',
+      "  .filter((p) => p.status === 'SUCCESSFUL')",
+      '  .reduce((s, p) => s + p.amount, 0);',
+      'const h = successfulPayments.reduce((s, p) => s + p.amount, 0);',
+      'const i = expenses.reduce((s, x) => s + x.amount, 0);',
+      'const j = payments.reduce((n, p) => n + 1, 0);',
     ].join('\n');
-    expect(scanSuccessfulOnlyReads('x.ts', src).map((r) => `${r.line}:${r.form}`)).toEqual(['1:filter', '2:filter', '3:filter', '4:prisma', '5:prisma']);
+    // 11: a status-blind sum of payment rows; 12: the same behind `?? []`; 13-15: the filter form,
+    // counted once; 16: a named, already filtered list; 17: not payment rows; 18: not an amount.
+    expect(scanSuccessfulOnlyReads('x.ts', src).map((r) => `${r.line}:${r.form}`)).toEqual([
+      '1:filter', '2:filter', '3:filter', '4:prisma', '5:prisma', '11:reduce', '12:reduce', '14:filter',
+    ]);
   });
 });

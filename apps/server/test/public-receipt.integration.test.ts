@@ -34,8 +34,9 @@
  *   LEDGER (no refund row)    -> amountPaid = sum(SUCCESSFUL) = computeBalance.paid = the ledger
  *                                cash net of the invoice's payment postings
  *   LEDGER (refund row)       -> V1-29 (D-14): the refund is a separate negative row, so amountDue
- *                                = total - the ledger cash net; amountPaid is computeBalance's gross
- *                                paid (characterization: the net display is V1-36)
+ *                                = total - the ledger cash net; amountPaid is the balance's net, the
+ *                                ledger cash net (V1-29b-REFUND-READERS, CR-V29-3: it was the gross
+ *                                paid, characterized here until the contract reached the receipt)
  *   read-only                 -> no FinancialTransaction, LedgerEntry, Payment or PaymentLink
  *                                write; the invoice row is unchanged
  *   TENANT (M31)              -> a Payment row tagged with another tenant is not counted; another
@@ -667,11 +668,11 @@ describe('LEDGER and TENANT (V1-49)', () => {
     expect(res.body).toMatchObject({ status: 'PAID', amountPaid: 100, amountDue: 0 });
   });
 
-  it('R-10 LEDGER (refund row, V1-29): the receipt equals computeBalance, which counts the separate refund row once; amountDue = total - the ledger cash net', async () => {
+  it('R-10 LEDGER (refund row, V1-29): the receipt states the balance\'s net received (the ledger cash net) and remaining, the separate refund row counted once; amountDue = total - the ledger cash net', async () => {
     const res = await receipt(TOKEN[ID.invRefund]);
     expect(res.status).toBe(200);
     const balance = await balanceOf(ID.invRefund);
-    expect(res.body.amountPaid).toBe(balance.paid);
+    expect(res.body.amountPaid).toBe(balance.net);
     expect(res.body.amountDue).toBe(balance.remaining);
     // 50 + 30 received, 30 refunded through the operator route: the ledger nets 50.
     const cashNet = await ledgerCashNet(ID.invRefund, ID.bizA);
@@ -679,9 +680,11 @@ describe('LEDGER and TENANT (V1-49)', () => {
     // computeBalance (V1-29, D-14): paid 80 (the refunded 30 stays SUCCESSFUL), refunded 30, net 50 = the ledger.
     expect(balance).toMatchObject({ paid: 80, refunded: 30, net: 50, remaining: 50 });
     expect(balance.net).toBe(cashNet);
-    // The base read net 20, remaining 80 (M28). amountPaid is the gross paid (80):
-    // characterization, the net display is V1-36 (one balance read contract).
-    expect(res.body).toMatchObject({ status: 'PARTIALLY_PAID', amountPaid: 80, amountDue: 50, paidAt: null });
+    // The base read net 20, remaining 80 (M28). V1-29b-REFUND-READERS (CR-V29-3): amountPaid is
+    // the net received (50), the ledger cash net; it was the gross paid (80), characterized
+    // here until the balance read contract reached the receipt.
+    expect(res.body).toMatchObject({ status: 'PARTIALLY_PAID', amountPaid: 50, amountDue: 50, paidAt: null });
+    expect(res.body.amountPaid).toBe(cashNet);
     expect(res.body.amountDue).toBe(TOTAL - cashNet);
   });
 

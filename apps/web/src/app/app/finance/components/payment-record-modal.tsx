@@ -19,6 +19,7 @@ import { SideSheet } from "../../commerce/components/side-sheet";
 import { formatCurrency } from "@/lib/currency";
 import type { Invoice } from "@/lib/client";
 import { getInvoice, recordPaymentFromEvidence } from "@/lib/client";
+import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
 import { useUpload } from "@/hooks/use-upload";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
@@ -86,11 +87,18 @@ export function attemptIdempotencyKey(attempt: PaymentAttempt, reference: string
   return attempt.key;
 }
 
-/** Status-aware: only SUCCESSFUL rows are collected cash (PENDING, FAILED and REFUNDED are not). */
-function successfulPaid(invoice: Invoice): number {
-  return (invoice.payments ?? [])
-    .filter((p) => p.status === "SUCCESSFUL")
-    .reduce((s, p) => s + (Number(p.amount) || 0), 0);
+/**
+ * The row's own figures, for when the server's are unavailable: the shared
+ * balance contract over its payment rows (V1-29b-REFUND-READERS, review
+ * V36-CR-1: invoiceBalanceOfStoredRows, the mirror of the server's
+ * balanceOfStoredRows). Paid is the net received, in integer cents: PENDING
+ * and FAILED rows are not cash, and a refund (a separate negative REFUNDED
+ * row, D-14) is owed again. Summing the SUCCESSFUL rows alone read 60 + 40
+ * paid with the 40 refunded as already-paid 100, remaining 0.
+ */
+function rowBalance(invoice: Invoice): { paidAmount: number; remaining: number } {
+  const balance = invoiceBalanceOfStoredRows(Number(invoice.total), invoice.payments ?? [], invoice.currency);
+  return { paidAmount: balance.net, remaining: balance.remaining };
 }
 
 export interface PaymentRecordForm {
@@ -134,10 +142,10 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
   const { uploadFile, isUploading, progress } = useUpload();
 
   // R0-21 (M29): paid and remaining are the server's figures from the tenant
-  // detail route (R0-QI-01: paidAmount = SUCCESSFUL rows, remaining = total -
-  // paidAmount), read on every open. Summing the list row's payments counted
-  // PENDING and FAILED rows as collected cash. Only when that read fails does
-  // the modal fall back to the row's SUCCESSFUL payments.
+  // detail route (paidAmount = the net received, remaining = what is owed),
+  // read on every open. Summing the list row's payments counted PENDING and
+  // FAILED rows as collected cash. Only when that read fails does the modal
+  // fall back to the row's own balance through the shared contract (rowBalance).
   const openInvoiceId = invoice?.id ?? null;
   const [serverBalance, setServerBalance] = useState<{ invoiceId: string; paidAmount: number; remaining: number } | null>(null);
   const [balanceFailedFor, setBalanceFailedFor] = useState<string | null>(null);
@@ -164,10 +172,7 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
   const balance = useMemo(() => {
     if (!invoice) return null;
     if (serverBalance && serverBalance.invoiceId === invoice.id) return serverBalance;
-    if (balanceFailedFor === invoice.id || !businessId) {
-      const paidAmount = successfulPaid(invoice);
-      return { paidAmount, remaining: Math.max(0, Number(invoice.total) - paidAmount) };
-    }
+    if (balanceFailedFor === invoice.id || !businessId) return rowBalance(invoice);
     return null; // the server read is still in flight
   }, [invoice, serverBalance, balanceFailedFor, businessId]);
   const paidSoFar = balance?.paidAmount ?? 0;

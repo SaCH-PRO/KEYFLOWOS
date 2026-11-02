@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
 
 export interface AgingBucket {
@@ -92,8 +93,17 @@ const EMPTY_TOTALS = (): AgingBucket[] => [
  *     payment entries against that invoice). Invoice rows supply due
  *     date / status metadata only.
  *   CASH businesses — there are no AR ledger entries by design (revenue
- *     posts against deposit accounts directly). We fall back to
- *     invoice.total minus net payments for outstanding.
+ *     posts against deposit accounts directly). We fall back to the
+ *     invoice balance read contract over its Payment rows of its own tenant
+ *     (balanceOfStoredRows: integer cents, each refund a separate negative
+ *     REFUNDED row, D-14; a row flipped to REFUNDED before V1-29 read as its
+ *     payment plus its refund): paid = the net received, outstanding = the
+ *     remaining (V1-29b-REFUND-READERS, CR-V29-2). Payment sits outside the
+ *     tenant extension and has no FK to Business (M31), so a row carrying
+ *     another businessId is not this invoice's money: the same rows the
+ *     receipt, the invoice / reminder emails and the evidence match read
+ *     (ownTenantReceiptBalance), so they state the same figures (review
+ *     SEC-V29B-1).
  *
  * `ledgerArBalance` / `ledgerReconciled` are returned in both cases so
  * Reports can surface posting drift.
@@ -235,7 +245,8 @@ export class ReceivablesService {
         dueDate: true,
         contactId: true,
         contact: { select: { id: true, firstName: true, lastName: true, email: true } },
-        payments: { select: { amount: true, status: true } },
+        // Own-tenant rows only (M31, review SEC-V29B-1).
+        payments: { where: { businessId }, select: { amount: true, status: true } },
       },
     });
 
@@ -257,15 +268,12 @@ export class ReceivablesService {
       if (basis === 'ACCRUAL' && ledgerArByInvoice.has(inv.id)) {
         outstanding = Math.max(0, +(ledgerArByInvoice.get(inv.id) ?? 0).toFixed(2));
       } else {
-        // CASH-basis fallback: count only SUCCESSFUL payments. Manual
-        // refund flow (CommerceService.markPaymentRefunded) flips the
-        // existing payment's status from SUCCESSFUL → REFUNDED, so the
-        // refund effect is already reflected by the row dropping out of
-        // SUCCESSFUL — subtracting it again would double-count.
-        const paid = inv.payments
-          .filter((p) => p.status === 'SUCCESSFUL')
-          .reduce((s, p) => s + Number(p.amount), 0);
-        outstanding = Math.max(0, Number(inv.total) - paid);
+        // CASH-basis fallback: what the invoice's rows leave owed, read through
+        // the balance contract (V1-29b-REFUND-READERS, CR-V29-2). Counting the
+        // SUCCESSFUL rows alone was written for the pre-V1-29 flip; since V1-29
+        // a refund is a separate negative REFUNDED row beside its SUCCESSFUL
+        // original, so a refunded invoice read as settled (outstanding 0).
+        outstanding = balanceOfStoredRows(Number(inv.total), inv.payments, inv.currency).remaining;
       }
       if (outstanding < 0.005) continue;
 
@@ -353,9 +361,11 @@ export class ReceivablesService {
         invoiceNumber: true,
         status: true,
         total: true,
+        currency: true,
         issueDate: true,
         dueDate: true,
-        payments: { select: { amount: true, status: true } },
+        // Own-tenant rows only (M31, review SEC-V29B-1).
+        payments: { where: { businessId }, select: { amount: true, status: true } },
       },
     });
     const ledgerArByInvoice =
@@ -371,18 +381,17 @@ export class ReceivablesService {
 
     const detail = invoices.map((inv) => {
       const total = Number(inv.total);
-      // CASH-basis: rely on SUCCESSFUL rows only — manual refund flow
-      // status-flips the original to REFUNDED, so it's already removed
-      // from `paid`. Subtracting refunded amounts again would double-count.
-      const paid = inv.payments
-        .filter((p) => p.status === 'SUCCESSFUL')
-        .reduce((s, p) => s + Number(p.amount), 0);
-      const net = paid;
+      // The invoice's balance over its Payment rows (V1-29b-REFUND-READERS,
+      // CR-V29-2): `net` is the money received less refunds, `remaining` what
+      // is still owed, both in integer cents. The SUCCESSFUL rows alone were
+      // written for the pre-V1-29 flip and read a refunded invoice as paid.
+      const balance = balanceOfStoredRows(total, inv.payments, inv.currency);
+      const net = balance.net;
       const ledgerBalance = +(ledgerArByInvoice.get(inv.id) ?? 0).toFixed(2);
       const outstanding =
         basis === 'ACCRUAL' && ledgerArByInvoice.has(inv.id)
           ? Math.max(0, ledgerBalance)
-          : Math.max(0, total - net);
+          : balance.remaining;
       invoicedTotal = +(invoicedTotal + total).toFixed(2);
       paidTotal = +(paidTotal + Math.max(0, net)).toFixed(2);
       outstandingTotal = +(outstandingTotal + outstanding).toFixed(2);

@@ -13,6 +13,7 @@ import {
   RefundResult,
 } from '../../core/connectors/payment-gateway.interface';
 import { CurrencyRatesService } from './currency-rates.service';
+import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 
 export type GatewayId = 'stripe' | 'paypal' | 'wipay';
 
@@ -234,7 +235,8 @@ export class PaymentsOpsService {
               email: true,
             },
           },
-          payments: { select: { amount: true } },
+          // Own-tenant rows only: Payment has no FK to Business (M31, review SEC-V29B-1).
+          payments: { where: { businessId }, select: { amount: true, status: true } },
         },
         orderBy: { dueDate: 'asc' },
         take: 100,
@@ -274,7 +276,14 @@ export class PaymentsOpsService {
     }
 
     const buildInvoicePayable = <T extends 'invoice' | 'mass_comm'>(inv: (typeof invoices)[number], type: T) => {
-      const paid = inv.payments.reduce((sum, p) => sum + (p.amount ?? 0), 0);
+      // V1-29b-REFUND-READERS (V1-22 residual): what is still owed is the
+      // balance read contract over the invoice's own-tenant rows, in integer
+      // cents (a row tagged with another businessId is not this invoice's
+      // money, M31; the receipt and the receivables read the same rows). The
+      // status-blind float sum counted PENDING and FAILED rows and a row
+      // flipped to REFUNDED before V1-29 as received (10.10 + 20.20 + 30.30
+      // left 39.400000000000006 owed).
+      const { remaining } = balanceOfStoredRows(Number(inv.total), inv.payments, inv.currency);
       const contact = inv.contact;
       const customerName =
         contact?.displayName ??
@@ -289,7 +298,7 @@ export class PaymentsOpsService {
         id: inv.id,
         title: type === 'mass_comm' ? `Campaign — ${inv.invoiceNumber}` : `Invoice ${inv.invoiceNumber}`,
         customer: customerName,
-        amount: Math.max(0, inv.total - paid),
+        amount: remaining,
         currency: inv.currency,
         status: inv.status,
         dueAt: inv.dueDate?.toISOString() ?? null,

@@ -41,6 +41,7 @@ import {
   InvoiceTimelineEntry,
 } from "@/lib/client";
 import { apiDelete } from "@/lib/api";
+import { invoiceBalanceOfStoredRows } from "@keyflow/shared";
 import { refreshWorkspace, getStoredBusinessId } from "@/lib/workspace";
 import { useCompose } from "@/components/email/compose-context";
 import { formatAmount, getDaysUntilDue } from "../../utils/commerce-utils";
@@ -128,15 +129,23 @@ export default function InvoiceDetailPage() {
   useEffect(() => { if (activeTab === "payments" && payments.length === 0) void loadPayments(); }, [activeTab, loadPayments, payments.length]);
 
   // R0-21 (M29): the server's status-aware figures (tenant detail route, and
-  // after a record the payments route's response). The SUCCESSFUL rows are
-  // only a fallback for a response that carries no figures.
+  // after a record the payments route's response). A response that carries no
+  // figures is read through the shared balance contract over its rows
+  // (V1-29b-REFUND-READERS, review V36-CR-1: invoiceBalanceOfStoredRows, the
+  // mirror of the server's balanceOfStoredRows): paid is the net received, so
+  // a refund (a separate negative REFUNDED row, D-14) is owed again. The
+  // SUCCESSFUL rows alone read 60 + 40 paid with the 40 refunded as Paid 100,
+  // Remaining 0.
   const serverFigures = typeof invoice?.paidAmount === "number" && typeof invoice?.remaining === "number"
     ? { paidAmount: invoice.paidAmount, remaining: invoice.remaining }
     : null;
-  const paidAmount = serverFigures
-    ? serverFigures.paidAmount
-    : (invoice?.payments ?? []).filter(p => p.status === "SUCCESSFUL").reduce((s, p) => s + p.amount, 0);
-  const remaining = serverFigures ? serverFigures.remaining : Math.max(0, Number(invoice?.total ?? 0) - paidAmount);
+  const rowFigures = (() => {
+    if (serverFigures || !invoice) return null;
+    const balance = invoiceBalanceOfStoredRows(Number(invoice.total), invoice.payments ?? [], invoice.currency);
+    return { paidAmount: balance.net, remaining: balance.remaining };
+  })();
+  const paidAmount = serverFigures?.paidAmount ?? rowFigures?.paidAmount ?? 0;
+  const remaining = serverFigures?.remaining ?? rowFigures?.remaining ?? 0;
   const dueInfo = invoice ? getDaysUntilDue(invoice.dueDate) : null;
 
   // R0-21 (M26, CF-08): one payment attempt per open of the payment form. Its
