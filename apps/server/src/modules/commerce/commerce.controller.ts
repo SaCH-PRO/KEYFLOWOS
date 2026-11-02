@@ -101,12 +101,24 @@ const INVOICE_WRITE_CONTACT_KEYS: readonly InvoiceWriteContactKey[] = [
  * internal notes, phone, owner and visibility. The body now carries only the
  * customer fields the operator invoice detail discloses; an invoice without a
  * loaded contact passes through unchanged.
+ *
+ * R0-02 review SEC-R002-3 (R0-SEC3-INVOICE-WRITE-PROJECTION): the same
+ * returns carry the whole linked Booking row (markInvoicePaid reloads, and
+ * InvoiceWorkflowService.transition updates, with `booking: true`, which the
+ * invoice listeners need), so a revenue:write member with no bookings scope
+ * read the booking's notes, location, calendarEventId, staffId and orgUnitId.
+ * The operator invoice read (OPERATOR_INVOICE_INCLUDE) carries no booking, so
+ * the body drops the relation on every write route, whether or not a contact
+ * was loaded.
  */
-function toInvoiceWriteResponse<I extends { contact?: Record<InvoiceWriteContactKey, unknown> | null }>(invoice: I) {
-  const contact = invoice.contact;
-  if (!contact) return invoice;
+function toInvoiceWriteResponse<I extends { contact?: Record<InvoiceWriteContactKey, unknown> | null; booking?: unknown }>(
+  invoice: I,
+) {
+  const rest = Object.fromEntries(Object.entries(invoice).filter(([key]) => key !== 'booking')) as Omit<I, 'booking'>;
+  const contact = rest.contact;
+  if (!contact) return rest;
   return {
-    ...invoice,
+    ...rest,
     contact: Object.fromEntries(INVOICE_WRITE_CONTACT_KEYS.map((key) => [key, contact[key]])) as Pick<
       NonNullable<I['contact']>,
       InvoiceWriteContactKey
@@ -186,6 +198,15 @@ export class CommerceController {
     }
   }
 
+  /**
+   * The products list the /book storefront calls (V1-23 projection, 404 for a
+   * closed store). R0-SEC3 (review SEC-V123-1 / V23-CR-1): rate limited with
+   * the same guard and limit as CatalogController.listPublicProducts, which
+   * serves the same rows; without it this route kept answering after the
+   * catalog route was a 429.
+   */
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
   @Get('public/businesses/:businessId/products')
   listPublicProducts(@Param('businessId') businessId: string) {
     return this.commerce.listPublicProducts(businessId);
@@ -1650,7 +1671,7 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/invoices/:invoiceId/payments')
-  recordPayment(
+  async recordPayment(
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
     // R0-D2: a DTO class so the global ValidationPipe sees the body; it
@@ -1664,10 +1685,14 @@ export class CommerceController {
     // reference (the journey's duplicate slip); internal callers pass a
     // document-derived reference and keep one row per call.
     // R0-PL-07: the recorder is the authenticated user, never a body field.
-    return this.commerce.recordPayment(invoiceId, businessId, body, {
+    const result = await this.commerce.recordPayment(invoiceId, businessId, body, {
       dedupeByReference: true,
       actorId: req?.user?.id ?? null,
     });
+    // R0-SEC3 review SEC3-ST-1 (SEC-CMF1-2 class): recordPayment and its keyed
+    // replay reload the invoice with the whole Contact row; the HTTP body
+    // projects it like every other invoice write (toInvoiceWriteResponse).
+    return { ...result, invoice: result.invoice ? toInvoiceWriteResponse(result.invoice) : result.invoice };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

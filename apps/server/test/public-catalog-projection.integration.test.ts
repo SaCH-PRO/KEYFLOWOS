@@ -38,8 +38,10 @@
  *                                    is on but lists nothing is still 200 []
  *   rate limit                    -> the catalog products route carries
  *                                    @PublicRateLimit(N <= 60, >= 60s); request N+1
- *                                    in the window is a 429. Staff and services were
- *                                    already limited (regression controls)
+ *                                    in the window is a 429. The commerce products
+ *                                    route carries the same limit (R0-SEC3, review
+ *                                    SEC-V123-1). Staff and services were already
+ *                                    limited (regression controls)
  *   POSITIVE CONTROL              -> the reads the /book page makes on load still answer
  *                                    200 with every field the page maps
  *
@@ -134,6 +136,7 @@ let db: any;
 let app: any;
 let redis: any;
 let CatalogControllerClass: any;
+let CommerceControllerClass: any;
 let BookingsControllerClass: any;
 let PUBLIC_RATE_LIMIT_KEY_VALUE: string;
 
@@ -261,6 +264,7 @@ beforeAll(async () => {
   const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
 
   CatalogControllerClass = CatalogController;
+  CommerceControllerClass = CommerceController;
   BookingsControllerClass = BookingsController;
   PUBLIC_RATE_LIMIT_KEY_VALUE = PUBLIC_RATE_LIMIT_KEY;
 
@@ -461,13 +465,20 @@ describe('V1-23 GET /commerce/public/businesses/:id/products (the route /book ca
 
   // Review findings SEC-V123-1 / V23-CR-1 (confirmed by running): this is the
   // products route /book calls, it serves the same rows as the limited
-  // catalog route, and with no global throttler it keeps answering after the
-  // catalog route is a 429. The fix is @UseGuards(PublicRateLimitGuard)
-  // @PublicRateLimit(30, 60_000) on CommerceController.listPublicProducts; it
-  // cannot be enforced from CatalogService (no request, no client IP there).
-  it.todo(
-    'is rate limited: the guard belongs on CommerceController.listPublicProducts (commerce.controller.ts), outside the V1-23 write set; follow-up packet (SEC-V123-1, V23-CR-1)',
-  );
+  // catalog route, and with no global throttler it kept answering after the
+  // catalog route was a 429. It cannot be enforced from CatalogService (no
+  // request, no client IP there), so R0-SEC3-INVOICE-WRITE-PROJECTION puts
+  // the catalog route's guard and limit on CommerceController.listPublicProducts.
+  it('SEC-V123-1 / V23-CR-1: is rate limited like the catalog route (@PublicRateLimit equal to CatalogController.listPublicProducts) and request N+1 in the window is a 429', async () => {
+    const catalog = rateLimitOf(CatalogControllerClass, 'listPublicProducts');
+    expect(catalog, '@PublicRateLimit on CatalogController.listPublicProducts (the reference)').toBeDefined();
+    const opts = rateLimitOf(CommerceControllerClass, 'listPublicProducts');
+    const limit = opts?.limit ?? catalog!.limit;
+    const statuses = await burst(() => commerceProducts(ID.bizA), limit + 1);
+    expect(statuses.slice(0, limit).every((s) => s === 200), `first ${limit}: ${statuses.join(',')}`).toBe(true);
+    expect(statuses[limit], `request ${limit + 1}: ${statuses.join(',')}`).toBe(429);
+    expect(opts, '@PublicRateLimit on CommerceController.listPublicProducts').toEqual(catalog);
+  });
 });
 
 // ---------------------------------------------------------------------------
