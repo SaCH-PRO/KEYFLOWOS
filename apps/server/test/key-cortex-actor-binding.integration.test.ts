@@ -61,6 +61,16 @@
  * emits for the controller's constructor and for the handlers it drives
  * (key-cortex.controller.spec.ts checks them against tsc's own output).
  *
+ * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-5 / CR-2 and ST-7) extends the suite
+ * to KEY plans and the execute audit row. Also REAL here: KeyCortexGoalsController
+ * (POST plans, goals/:goalId/plans, plans/:planId/execute), KeyCortexPlannerService,
+ * PlannerService.createPlan (the AiPlan and AiPlanStep rows), KeyCortexSagaService
+ * (saga rows) and KeyCortexExecutorService.logExecution (ai_execution_logs rows).
+ * Stand-ins: the plan decomposition model call (AiUsageService.callAi answers one
+ * settings.update_business_profile step at once) and PlannerService's context
+ * readers (business graph, memory, blueprint, tool tiers); the trigger service
+ * the goals controller holds for its other routes.
+ *
  * Every seeded row carries the `k34c_` prefix and is hard-deleted by raw SQL
  * with sqlLikePrefix() in beforeAll and afterAll; no $transaction wrapping.
  */
@@ -89,6 +99,7 @@ const ID = {
   sessionOwnerA: `${P}session_ownerA`,
   sessionStaffA: `${P}session_staffA`,
   sessionOutsiderB: `${P}session_outsiderB`,
+  goalA: `${P}goalA`,
 };
 
 /** What each seeded session holds, so a read of someone else's session is visible in the response body. */
@@ -109,7 +120,7 @@ const OFF_BOUNDARY = new Set([
   'KeyCortexVoiceService', 'KeyCortexPersonalityService', 'KeyCortexActionsService',
   'KeyCortexInsightService', 'KeyCortexMonitorV2Service', 'KeyCortexSandboxService', 'KeyCortexFlowStudioService',
   'KeyCortexEvolutionService', 'KeyCortexPhoneService', 'KeyCortexDocumentService', 'KeyAutonomySafetyService',
-  'KeyCortexApprovalOrchestratorService', 'KeyCortexAwarenessService',
+  'KeyCortexApprovalOrchestratorService', 'KeyCortexAwarenessService', 'KeyCortexTriggerService',
 ]);
 
 interface CommandSeen { module: unknown; action: unknown; businessId: unknown; userId: unknown }
@@ -119,6 +130,9 @@ let app: any;
 let executor: any;
 let connector: any;
 let settingsAdapter: any;
+let plannerService: any;
+/** Every plan decomposition the model stand-in answered (no model is called). */
+const planAiCalls: unknown[] = [];
 /** Every ConnectorCommand the real connector routed (what an adapter receives). */
 const connectorCommands: CommandSeen[] = [];
 /** Every batch the real executor was handed, as its commands. */
@@ -127,6 +141,11 @@ const batches: CommandSeen[][] = [];
 const rollbacks: CommandSeen[] = [];
 /** Every verdict request the autonomy orchestrator stand-in received. */
 const autonomyCalls: Array<{ businessId: unknown; actionType: unknown; proposedBy: unknown }> = [];
+/**
+ * What the autonomy orchestrator stand-in answers: null allows (every case but
+ * the R0-09e repair refusals), a reason denies, 'throw' is a gate error.
+ */
+let autonomyVerdict: { reason: string } | 'throw' | null = null;
 /** Every natural-language parse, with the user it was handed. */
 const parseCalls: Array<{ text: unknown; businessId: unknown; userId: unknown }> = [];
 /** Every query the reasoning engine was handed (chat, chat/stream, stream). */
@@ -161,6 +180,10 @@ async function cleanup() {
     `DELETE FROM cognition_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM cortex_sessions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_goals WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM saga_executions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM business_settings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -261,6 +284,12 @@ beforeAll(async () => {
   const { KeyCortexConsciousnessService } = await import('../src/modules/key-cortex/key-cortex-consciousness.service');
   const { KeyCortexSessionService } = await import('../src/modules/key-cortex/key-cortex-session.service');
   const { KeyCortexAwarenessService } = await import('../src/modules/key-cortex/key-cortex-awareness.service');
+  const goalsModule: any = await import('../src/modules/key-cortex/key-cortex-goals.controller');
+  const { KeyCortexGoalsController } = goalsModule;
+  const { KeyCortexPlannerService } = await import('../src/modules/key-cortex/key-cortex-planner.service');
+  const { KeyCortexTriggerService } = await import('../src/modules/key-cortex/key-cortex-trigger.service');
+  const { KeyCortexSagaService } = await import('../src/modules/key-cortex/key-cortex-saga.service');
+  const { PlannerService } = await import('../src/modules/ai/planner.service');
 
   // The production build (tsc, emitDecoratorMetadata) records the constructor
   // parameter types Nest injects by; vitest's esbuild transform does not. This
@@ -295,11 +324,28 @@ beforeAll(async () => {
   emitHandler('recordFeedback', [controllerModule.FeedbackDto, Object]);
   emitHandler('consciousChat', [controllerModule.ConsciousChatDto, Object]);
   emitHandler('consciousStream', [controllerModule.ConsciousChatDto, String, Object]);
+  // KeyCortexGoalsController: its constructor and the three plan handlers this
+  // suite drives, as tsc emits them (key-cortex-goals.controller.spec.ts checks
+  // these against tsc's own output): the body class, the guarded tenant, the principal.
+  if (!Reflect.getMetadata('design:paramtypes', KeyCortexGoalsController)) {
+    Reflect.defineMetadata('design:paramtypes', [KeyCortexPlannerService, KeyCortexTriggerService, PrismaService], KeyCortexGoalsController);
+  }
+  const emitGoalsHandler = (method: string, types: unknown[]) => {
+    if (!Reflect.getMetadata('design:paramtypes', KeyCortexGoalsController.prototype, method)) {
+      Reflect.defineMetadata('design:paramtypes', types, KeyCortexGoalsController.prototype, method);
+    }
+  };
+  emitGoalsHandler('createPlanFromGoal', [String, goalsModule.CreatePlanFromGoalDto, String, Object]);
+  emitGoalsHandler('createPlanFromCommand', [goalsModule.CreatePlanFromCommandDto, String, Object]);
+  emitGoalsHandler('executePlan', [String, Object, String, Object]);
 
   // Stand-ins (see the header).
   const autonomy = {
     evaluateAction: async (businessId: unknown, actionType: unknown, _params: unknown, opts?: { proposedBy?: unknown }) => {
       autonomyCalls.push({ businessId, actionType, proposedBy: opts?.proposedBy });
+      // R0-09e repair: a case may make the verdict a deny or a gate error (see autonomyVerdict).
+      if (autonomyVerdict === 'throw') throw new Error('k34c: the autonomy orchestrator is down');
+      if (autonomyVerdict) return { allowed: false, requiresApproval: false, reason: autonomyVerdict.reason };
       return { allowed: true, requiresApproval: false };
     },
   };
@@ -331,9 +377,28 @@ beforeAll(async () => {
       return { text: 'k34c answer', meta: {} };
     },
   };
+  // PlannerService.createPlan's model call answers one settings step at once (no
+  // model is called); its context readers answer empty.
+  const planAi = {
+    callAi: async (req: any) => {
+      planAiCalls.push(req?.feature);
+      return {
+        content: JSON.stringify({
+          steps: [{
+            order: 1, toolName: 'settings.update_business_profile', module: 'settings', action: 'update_business_profile',
+            description: 'k34c rename the business', riskTier: 1, inputPayload: { ...HIJACK },
+          }],
+        }),
+      };
+    },
+  };
+  const planGraph = { getSnapshot: async () => ({}), buildContextString: () => '' };
+  const planGovernance = { getToolTier: () => 1 };
+  const planMemory = { buildContextBlock: async () => ({}), buildPromptSection: () => '' };
+  const planBlueprint = { getBlueprintContext: async () => null };
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [KeyCortexController],
+    controllers: [KeyCortexController, KeyCortexGoalsController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -385,6 +450,24 @@ beforeAll(async () => {
         useFactory: (prisma: any) => new KeyCortexLearningService(prisma),
         inject: [PrismaService],
       },
+      {
+        provide: KeyCortexSagaService,
+        useFactory: (prisma: any) => new KeyCortexSagaService(prisma),
+        inject: [PrismaService],
+      },
+      {
+        provide: PlannerService,
+        useFactory: (prisma: any) => new PlannerService(
+          prisma, planAi as any, planGraph as any, planGovernance as any, planMemory as any, planBlueprint as any,
+        ),
+        inject: [PrismaService],
+      },
+      {
+        // No AiUsageService: goal decomposition takes the deterministic fallback.
+        provide: KeyCortexPlannerService,
+        useFactory: (prisma: any, planner: any, exec: any, saga: any) => new KeyCortexPlannerService(prisma, planner, exec, saga),
+        inject: [PrismaService, PlannerService, KeyCortexExecutorService, KeyCortexSagaService],
+      },
       { provide: KeyCortexReasoningService, useValue: reasoning },
       { provide: KeyCortexConsciousnessService, useValue: consciousness },
       // Installed globally in production (app.module.ts).
@@ -400,6 +483,7 @@ beforeAll(async () => {
   executor = moduleRef.get(KeyCortexExecutorService);
   connector = moduleRef.get(KeyCortexConnectorService);
   settingsAdapter = moduleRef.get(SettingsAdapterService);
+  plannerService = moduleRef.get(KeyCortexPlannerService);
   const command = moduleRef.get(KeyCortexCommandService);
 
   // Record (and call through) what the real services are handed.
@@ -463,6 +547,7 @@ beforeAll(async () => {
   await db.cortexSession.create({ data: { id: ID.sessionOwnerA, businessId: ID.bizA, userId: ID.ownerA, title: 'k34c owner session', messages: [note(`${P}msg_owner`, OWNER_PRIVATE)] } });
   await db.cortexSession.create({ data: { id: ID.sessionStaffA, businessId: ID.bizA, userId: ID.staffA, title: 'k34c staff session', messages: [note(`${P}msg_staff`, STAFF_NOTE)] } });
   await db.cortexSession.create({ data: { id: ID.sessionOutsiderB, businessId: ID.bizB, userId: ID.outsider, title: 'k34c B session', messages: [note(`${P}msg_b`, B_PRIVATE)] } });
+  await db.aiGoal.create({ data: { id: ID.goalA, businessId: ID.bizA, title: 'k34c rename the business', description: 'k34c goal' } });
 
   // No case below may reach a real provider: every global fetch is recorded and refused.
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: any) => {
@@ -925,9 +1010,413 @@ describe('the settings adapter: team commands name their target member, integrat
   });
 });
 
-describe('open review hand-offs outside this write set (review ST-5 / CR-2, ST-7)', () => {
-  it.todo("review ST-5 / CR-2: KEY plans do not act for the authenticated member. POST /api/v1/cortex/plans and goals/:id/plans hand the planner dto.userId (key-cortex-goals.controller.ts), the planner builds every step's ConnectorCommand as plan.userId ?? 'key_cortex' (key-cortex-planner.service.ts buildCommand), and POST plans/:id/execute takes no actor, so a STAFF member naming the OWNER's id runs KEY commands as the OWNER (settings.update_business_profile then passes the owner rule). Fix, in those two files: the goals controller takes the actor from @CurrentUser() for plan creation and execution, and the planner never runs a member's plan as 'key_cortex'");
-  it.todo("review ST-7: the execute audit record is never written. KeyCortexExecutorService.logExecution (key-cortex-executor.service.ts) writes fields AiExecutionLog does not have (Prisma: Unknown argument `traceId`) and its call is fire-and-forget, so no ai_execution_logs row carries the actor this packet binds. Fix, in that file: map the record onto AiExecutionLog's columns (userId, module, action, inputSummary, outputSummary, success, errorMessage, durationMs); then this suite asserts one row per execute naming the authenticated member");
+/**
+ * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-5 / CR-2, ST-7). KEY plans did not act
+ * for the authenticated member: POST plans and POST goals/:goalId/plans handed
+ * the planner the body `userId`, the planner built every step's ConnectorCommand
+ * as `plan.userId ?? 'key_cortex'`, and POST plans/:planId/execute took no actor
+ * at all. So a STAFF member who named the OWNER's id ran KEY commands as the
+ * OWNER (settings.update_business_profile then passed the owner rule), and any
+ * member ran anyone's plan. And KeyCortexExecutorService.logExecution wrote
+ * fields AiExecutionLog does not have, fire-and-forget, so no execute ever wrote
+ * its ai_execution_logs row.
+ *
+ * Required, and pinned here: plan creation takes the actor from the principal
+ * AuthGuard admitted (a body `userId` naming someone else is IGNORED, as
+ * KeyCortexController does since R0-09c; with no authenticated user, 401).
+ * Plan execution re-checks that the executing member may act on the plan: its
+ * creator, the business OWNER (OWNER membership or Business.ownerId) or
+ * SUPER_ADMIN; anyone else is refused 403 before the plan starts; a plan of
+ * another tenant is 404. Every step then runs as the EXECUTING member, never as
+ * the creator named in the row and never as 'key_cortex'. A plan run by a
+ * system trigger (KeyCortexPlannerService.executePlan with no member) runs a
+ * member's plan as that member and a plan no member created as the system
+ * actor 'key_cortex', whose audit rows name no user and are labelled 'system'.
+ * Each execute writes one ai_execution_logs row naming its actor.
+ */
+const PLAN = {
+  owner: `${P}plan_owner`,
+  system: `${P}plan_system`,
+  staff: `${P}plan_staff`,
+  staffForOwner: `${P}plan_staff_for_owner`,
+  staffForSuper: `${P}plan_staff_for_super`,
+  staffAudit: `${P}plan_staff_audit`,
+  systemTrigger: `${P}plan_system_trigger`,
+  staffTrigger: `${P}plan_staff_trigger`,
+  // R0-09e repair
+  staffBlocked: `${P}plan_staff_blocked`,
+  ownerTwice: `${P}plan_owner_twice`,
+  ownerConcurrent: `${P}plan_owner_concurrent`,
+  ownerManual: `${P}plan_owner_manual`,
+};
+
+/** A one-step settings plan in A, written directly (the creation path is tested on its own). */
+async function seedPlan(id: string, userId: string | null, action: string, parameters: Record<string, unknown>) {
+  await db.aiPlan.create({
+    data: {
+      id, businessId: ID.bizA, userId, objective: `k34c ${id}`, status: 'pending',
+      steps: { create: [{ id: `${id}_step1`, order: 1, module: 'settings', action, toolName: `settings.${action}`, inputPayload: parameters }] },
+    },
+  });
+}
+
+const planRow = (id: string) => db.aiPlan.findUnique({
+  where: { id },
+  select: { userId: true, status: true, startedAt: true, steps: { select: { status: true, errorMessage: true } } },
+});
+
+/** POST plans/:planId/execute answers 201 (Nest's POST default; this packet does not change it). */
+function executePlanAs(user: string | undefined, planId: string, businessId: string = ID.bizA) {
+  return post(`plans/${planId}/execute`, user, { businessId });
+}
+
+/** The ai_execution_logs rows of A, by id, so a case can read exactly the rows it wrote. */
+async function auditIds(): Promise<Set<string>> {
+  const rows = await db.aiExecutionLog.findMany({ where: { businessId: ID.bizA }, select: { id: true } });
+  return new Set(rows.map((r: any) => r.id));
+}
+
+async function auditRowsSince(before: Set<string>) {
+  const rows = await db.aiExecutionLog.findMany({
+    where: { businessId: ID.bizA },
+    select: { id: true, userId: true, actor: true, module: true, action: true, success: true, errorMessage: true, durationMs: true, inputSummary: true },
+    orderBy: { createdAt: 'asc' },
+  });
+  return rows.filter((r: any) => !before.has(r.id)).map(({ id: _id, ...rest }: any) => rest);
+}
+
+describe("KEY plans act for the authenticated member: creation and execution take the actor from the session, never a body userId or 'key_cortex' (review ST-5 / CR-2)", () => {
+  it("RED-BEFORE: POST plans with body userId <OWNER> from a STAFF member writes the plan as the STAFF member's", async () => {
+    const res = await post('plans', ID.staffA, { businessId: ID.bizA, objective: 'k34c rename the business', userId: ID.ownerA });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(planAiCalls.length).toBeGreaterThan(0);
+    expect(await planRow(res.body.id)).toMatchObject({ userId: ID.staffA, status: 'draft' });
+  });
+
+  it("RED-BEFORE: POST goals/:goalId/plans with body userId <OWNER> from a STAFF member writes the plan as the STAFF member's", async () => {
+    const res = await post(`goals/${ID.goalA}/plans`, ID.staffA, { businessId: ID.bizA, userId: ID.ownerA });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(await planRow(res.body.id)).toMatchObject({ userId: ID.staffA });
+  });
+
+  it('RED-BEFORE: end to end, a STAFF member that creates a plan naming the OWNER and executes it runs settings.update_business_profile as itself: the owner rule refuses it and the profile is byte-identical', async () => {
+    const before = await businessRowText(ID.bizA);
+    const created = await post('plans', ID.staffA, { businessId: ID.bizA, objective: 'k34c rename the business (escalation)', userId: ID.ownerA });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const from = connectorCommands.length;
+    const res = await executePlanAs(ID.staffA, created.body.id);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expectRouted(from, 'update_business_profile', ID.staffA);
+    expect(res.body).toMatchObject({ planId: created.body.id, status: 'failed', executed: 1 });
+    const row = await planRow(created.body.id);
+    expect(row.steps).toHaveLength(1);
+    expect(row.steps[0].status).toBe('failed');
+    expect(String(row.steps[0].errorMessage)).toMatch(OWNER_ONLY);
+    expect(await businessRowText(ID.bizA)).toBe(before);
+  });
+
+  it("RED-BEFORE: a STAFF member executing the plan it created with no body userId runs every step as itself, never as 'key_cortex'", async () => {
+    const created = await post('plans', ID.staffA, { businessId: ID.bizA, objective: 'k34c rename the business (no userId)' });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const from = connectorCommands.length;
+    const res = await executePlanAs(ID.staffA, created.body.id);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expectRouted(from, 'update_business_profile', ID.staffA);
+    expect(connectorCommands.slice(from).map((c) => c.userId)).not.toContain('key_cortex');
+  });
+
+  it("RED-BEFORE: only the plan's creator, the business OWNER or SUPER_ADMIN may execute it: a STAFF member is refused 403 on the OWNER's plan and on a plan no member created, an ADMIN on the STAFF member's plan; nothing is routed, no plan starts and the profile is byte-identical", async () => {
+    await seedPlan(PLAN.owner, ID.ownerA, 'update_business_profile', { ...HIJACK });
+    await seedPlan(PLAN.system, null, 'update_business_profile', { ...HIJACK });
+    await seedPlan(PLAN.staff, ID.staffA, 'update_business_profile', { ...HIJACK });
+    const before = await businessRowText(ID.bizA);
+    const from = connectorCommands.length;
+    for (const [user, planId] of [[ID.staffA, PLAN.owner], [ID.staffA, PLAN.system], [ID.adminA, PLAN.staff]] as const) {
+      const res = await executePlanAs(user, planId);
+      expect(res.status, `${user} ${planId} ${JSON.stringify(res.body)}`).toBe(403);
+      expect(await planRow(planId), planId).toMatchObject({ status: 'pending', startedAt: null });
+    }
+    expect(connectorCommands.slice(from)).toEqual([]);
+    expect(await businessRowText(ID.bizA)).toBe(before);
+  });
+
+  it("RED-BEFORE: the OWNER executing the STAFF member's plan runs it as the OWNER (the executing member, not the creator), so the owner rule passes and the profile changes", async () => {
+    const renamed = { name: 'K34C Biz A (plan run by the owner)' };
+    await seedPlan(PLAN.staffForOwner, ID.staffA, 'update_business_profile', renamed);
+    const from = connectorCommands.length;
+    const res = await executePlanAs(ID.ownerA, PLAN.staffForOwner);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(connectorCommands.slice(from)).toEqual([{ module: 'settings', action: 'update_business_profile', businessId: ID.bizA, userId: ID.ownerA }]);
+    expect(res.body).toMatchObject({ status: 'completed', executed: 1 });
+    expect(await db.business.findUnique({ where: { id: ID.bizA } })).toMatchObject(renamed);
+  });
+
+  it("RED-BEFORE: SUPER_ADMIN executing a member's plan runs it as itself (the platform bypass), never as the creator", async () => {
+    await seedPlan(PLAN.staffForSuper, ID.staffA, 'update_business_profile', { timezone: 'Asia/Tokyo' });
+    const from = connectorCommands.length;
+    const res = await executePlanAs(ID.superAdmin, PLAN.staffForSuper);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(connectorCommands.slice(from)).toEqual([{ module: 'settings', action: 'update_business_profile', businessId: ID.bizA, userId: ID.superAdmin }]);
+    expect(await db.business.findUnique({ where: { id: ID.bizA } })).toMatchObject({ timezone: 'Asia/Tokyo' });
+  });
+
+  it("a member of B naming B is not found (404) on A's plan, and nothing is routed", async () => {
+    const from = connectorCommands.length;
+    const res = await executePlanAs(ID.outsider, PLAN.staff, ID.bizB);
+    expect(res.status, JSON.stringify(res.body)).toBe(404);
+    expect(connectorCommands.slice(from)).toEqual([]);
+    expect(await planRow(PLAN.staff)).toMatchObject({ status: 'pending', startedAt: null });
+  });
+
+  it('POST plans, goals/:goalId/plans and plans/:planId/execute with no authenticated user answer 401: no plan is written and nothing is routed', async () => {
+    const plansBefore = await db.aiPlan.count({ where: { businessId: ID.bizA } });
+    const from = connectorCommands.length;
+    for (const [path, body] of [
+      ['plans', { businessId: ID.bizA, objective: 'k34c anonymous', userId: ID.ownerA }],
+      [`goals/${ID.goalA}/plans`, { businessId: ID.bizA, userId: ID.ownerA }],
+      [`plans/${PLAN.staff}/execute`, { businessId: ID.bizA }],
+    ] as const) {
+      const res = await post(path, undefined, body as Record<string, unknown>);
+      expect(res.status, `${path} ${JSON.stringify(res.body)}`).toBe(401);
+    }
+    expect(await db.aiPlan.count({ where: { businessId: ID.bizA } })).toBe(plansBefore);
+    expect(connectorCommands.slice(from)).toEqual([]);
+  });
+
+  it("RED-BEFORE: a plan run by a system trigger (executePlan with no member) keeps a system actor: a plan no member created runs as 'key_cortex' and its audit row names no user and is labelled 'system'; a member's plan runs as that member, never 'key_cortex'", async () => {
+    await seedPlan(PLAN.systemTrigger, null, 'update_business_profile', { ...HIJACK });
+    await seedPlan(PLAN.staffTrigger, ID.staffA, 'update_business_profile', { ...HIJACK });
+    const before = await businessRowText(ID.bizA);
+    const audit = await auditIds();
+
+    let from = connectorCommands.length;
+    const system = await plannerService.executePlan(PLAN.systemTrigger);
+    expect(system).toMatchObject({ status: 'failed', executed: 1 });
+    expectRouted(from, 'update_business_profile', 'key_cortex');
+    const systemRows = await auditRowsSince(audit);
+    expect(systemRows).toHaveLength(1);
+    expect(systemRows[0]).toMatchObject({ userId: null, actor: 'system', module: 'settings', action: 'update_business_profile', success: false });
+    expect(systemRows[0].inputSummary).toMatchObject({ actorId: 'key_cortex' });
+
+    from = connectorCommands.length;
+    const member = await plannerService.executePlan(PLAN.staffTrigger);
+    expect(member).toMatchObject({ status: 'failed', executed: 1 });
+    expectRouted(from, 'update_business_profile', ID.staffA);
+    expect(await businessRowText(ID.bizA)).toBe(before);
+  });
+});
+
+describe('every execute writes its ai_execution_logs row naming the actor (review ST-7)', () => {
+  it('RED-BEFORE: POST execute by a STAFF member writes exactly one ai_execution_logs row naming the STAFF member, with the command, the refusal and its duration', async () => {
+    const audit = await auditIds();
+    const res = await post('execute', ID.staffA, structured('update_business_profile', HIJACK, { userId: ID.ownerA }));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const rows = await auditRowsSince(audit);
+    expect(rows, JSON.stringify(rows)).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.staffA, actor: 'user', module: 'settings', action: 'update_business_profile', success: false });
+    expect(String(rows[0].errorMessage)).toMatch(OWNER_ONLY);
+    expect(typeof rows[0].durationMs).toBe('number');
+    expect(rows[0].inputSummary).toMatchObject({ actorId: ID.staffA, parameters: HIJACK });
+  });
+
+  it("RED-BEFORE: the OWNER's successful execute writes one row naming the OWNER, success true", async () => {
+    const audit = await auditIds();
+    const res = await post('execute', ID.ownerA, structured('update_branding', { primaryColor: '#333333' }));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.result).toMatchObject({ success: true });
+    const rows = await auditRowsSince(audit);
+    expect(rows, JSON.stringify(rows)).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.ownerA, actor: 'user', module: 'settings', action: 'update_branding', success: true, errorMessage: null });
+  });
+
+  it('RED-BEFORE: each step of a plan execution writes one row naming the executing member, not the creator', async () => {
+    await seedPlan(PLAN.staffAudit, ID.staffA, 'update_branding', { primaryColor: '#444444' });
+    const audit = await auditIds();
+    const res = await executePlanAs(ID.ownerA, PLAN.staffAudit);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ status: 'completed', executed: 1 });
+    const rows = await auditRowsSince(audit);
+    expect(rows, JSON.stringify(rows)).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.ownerA, actor: 'user', module: 'settings', action: 'update_branding', success: true });
+  });
+});
+
+/**
+ * R0-09e repair (review ST-1 / CR-1). execute() returned before logExecution on
+ * every path that refuses a command before the connector (a blocked action, an
+ * autonomy-orchestrator deny, a legacy-gate BLOCK, a gate error, approval
+ * pending), so the executes an audit most needs left no ai_execution_logs row,
+ * on POST execute and on a plan step alike. Required: each writes its one row
+ * naming the member, with the refusal. (The legacy-gate BLOCK is reached only
+ * with no orchestrator; key-cortex-executor.service.spec.ts pins it. Approval
+ * pending is in the approval-policy block below.)
+ */
+describe('a refused execute writes its ai_execution_logs row too, naming the member (R0-09e repair, review ST-1 / CR-1)', () => {
+  it("RED-BEFORE: POST execute of a blocked action (settings.UPDATE_RECORD) by a STAFF member answers 200 with the refusal, routes nothing, and writes one row naming the STAFF member", async () => {
+    const audit = await auditIds();
+    const from = connectorCommands.length;
+    const res = await post('execute', ID.staffA, structured('UPDATE_RECORD', { name: HIJACK.name }));
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.result).toMatchObject({ success: false });
+    expect(connectorCommands.slice(from)).toEqual([]);
+    const rows = await auditRowsSince(audit);
+    expect(rows, JSON.stringify(rows)).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.staffA, actor: 'user', module: 'settings', action: 'UPDATE_RECORD', success: false });
+    expect(String(rows[0].errorMessage)).toMatch(/disabled in this build/);
+    expect(rows[0].inputSummary).toMatchObject({ actorId: ID.staffA });
+  });
+
+  it('RED-BEFORE: an autonomy-orchestrator deny and an orchestrator error on POST execute each write one row naming the member, with the refusal; nothing is routed', async () => {
+    for (const [verdict, message] of [
+      [{ reason: 'k34c: tier locked for this member' }, /k34c: tier locked for this member/],
+      ['throw', /Autonomy gate unavailable; execution blocked for safety/],
+    ] as const) {
+      const audit = await auditIds();
+      const from = connectorCommands.length;
+      autonomyVerdict = verdict;
+      try {
+        const res = await post('execute', ID.staffA, structured('update_branding', { primaryColor: '#999999' }));
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
+        expect(res.body.result).toMatchObject({ success: false });
+      } finally {
+        autonomyVerdict = null;
+      }
+      expect(connectorCommands.slice(from)).toEqual([]);
+      const rows = await auditRowsSince(audit);
+      expect(rows, JSON.stringify(rows)).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ userId: ID.staffA, actor: 'user', module: 'settings', action: 'update_branding', success: false });
+      expect(String(rows[0].errorMessage)).toMatch(message);
+    }
+  });
+
+  it('RED-BEFORE: a plan step refused before the connector (settings.UPDATE_RECORD) writes one row naming the executing member, and nothing is routed', async () => {
+    await seedPlan(PLAN.staffBlocked, ID.staffA, 'UPDATE_RECORD', { name: HIJACK.name });
+    const audit = await auditIds();
+    const from = connectorCommands.length;
+    const res = await executePlanAs(ID.staffA, PLAN.staffBlocked);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ status: 'failed', executed: 1 });
+    expect(connectorCommands.slice(from)).toEqual([]);
+    const rows = await auditRowsSince(audit);
+    expect(rows, JSON.stringify(rows)).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.staffA, actor: 'user', module: 'settings', action: 'UPDATE_RECORD', success: false });
+    expect(String(rows[0].errorMessage)).toMatch(/disabled in this build/);
+  });
+});
+
+/**
+ * R0-09e repair (review ST-2). executePlan set the plan 'running'
+ * unconditionally and never checked its status, so POST plans/:planId/execute
+ * re-ran a completed plan's side-effecting steps under a new saga, and two
+ * concurrent executes of one pending plan both ran it. Required: the plan is
+ * claimed in one conditional write over the runnable statuses; a plan that is
+ * running or completed answers 409 and nothing runs.
+ */
+describe('a plan runs once: a completed or already-claimed plan is refused 409 (R0-09e repair, review ST-2)', () => {
+  const sagaCount = () => db.sagaExecution.count({ where: { businessId: ID.bizA } });
+
+  it('RED-BEFORE: re-posting execute on a completed plan answers 409: the step is not routed again, no second saga starts and no second audit row is written', async () => {
+    await seedPlan(PLAN.ownerTwice, ID.ownerA, 'update_branding', { primaryColor: '#555555' });
+    const audit = await auditIds();
+    const sagas = await sagaCount();
+    const from = connectorCommands.length;
+    const first = await executePlanAs(ID.ownerA, PLAN.ownerTwice);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(first.body).toMatchObject({ status: 'completed', executed: 1 });
+    const second = await executePlanAs(ID.ownerA, PLAN.ownerTwice);
+    expect(second.status, JSON.stringify(second.body)).toBe(409);
+    expect(connectorCommands.slice(from)).toEqual([{ module: 'settings', action: 'update_branding', businessId: ID.bizA, userId: ID.ownerA }]);
+    expect(await sagaCount()).toBe(sagas + 1);
+    expect(await auditRowsSince(audit)).toHaveLength(1);
+    expect(await planRow(PLAN.ownerTwice)).toMatchObject({ status: 'completed' });
+  });
+
+  it('RED-BEFORE: two concurrent executes of one pending plan: one runs it (201) and the other answers 409; the step is routed once', async () => {
+    await seedPlan(PLAN.ownerConcurrent, ID.ownerA, 'update_branding', { primaryColor: '#666666' });
+    const sagas = await sagaCount();
+    const from = connectorCommands.length;
+    const results = await Promise.all([executePlanAs(ID.ownerA, PLAN.ownerConcurrent), executePlanAs(ID.ownerA, PLAN.ownerConcurrent)]);
+    expect(results.map((r) => r.status).sort(), JSON.stringify(results.map((r) => r.body))).toEqual([201, 409]);
+    expect(results.find((r) => r.status === 201)!.body).toMatchObject({ status: 'completed', executed: 1 });
+    expect(connectorCommands.slice(from)).toEqual([{ module: 'settings', action: 'update_branding', businessId: ID.bizA, userId: ID.ownerA }]);
+    expect(await sagaCount()).toBe(sagas + 1);
+  });
+});
+
+/**
+ * R0-09e repair (review ST-3). fetchApprovalPolicy counted ai_execution_logs by
+ * `startedAt`, which AiExecutionLog does not have, so Prisma refused the query,
+ * the fallback policy answered, and the business's BusinessSetting was never
+ * applied: plan execute (no skipApproval) and POST execute with requireApproval
+ * ignored aiAutonomyLevel 'manual', aiAlwaysRequireApproval and the hourly cap.
+ * Required: the real executor reads A's BusinessSetting and its real
+ * ai_execution_logs count. Each case writes A's setting and removes it after.
+ */
+describe("the business's approval policy applies to KEY executes (R0-09e repair, review ST-3)", () => {
+  async function withPolicy(data: Record<string, unknown>, run: () => Promise<void>) {
+    await db.businessSetting.create({ data: { id: `${P}setting_bizA`, businessId: ID.bizA, ...data } });
+    try {
+      await run();
+    } finally {
+      await db.businessSetting.deleteMany({ where: { businessId: ID.bizA } });
+    }
+  }
+  const asCommand = (action: string, userId: string) => ({
+    module: 'settings' as any, action, parameters: {}, businessId: ID.bizA, userId, source: 'key_cortex', timestamp: new Date(),
+  });
+
+  it("RED-BEFORE: aiAlwaysRequireApproval ['settings.update_branding'] at full autonomy makes the real executor require approval for update_branding, not for update_business_profile", async () => {
+    await withPolicy({ aiAutonomyLevel: 'full', aiAlwaysRequireApproval: ['settings.update_branding'] }, async () => {
+      expect(await executor.requiresApproval(asCommand('update_branding', ID.ownerA))).toBe(true);
+      expect(await executor.requiresApproval(asCommand('update_business_profile', ID.ownerA))).toBe(false);
+    });
+  });
+
+  it("RED-BEFORE: aiMaxAutoExecutionsPerHour is checked against A's successful ai_execution_logs rows of the last hour", async () => {
+    const since = new Date(Date.now() - 60 * 60 * 1000);
+    const recent = await db.aiExecutionLog.count({ where: { businessId: ID.bizA, success: true, createdAt: { gte: since } } });
+    expect(recent, 'earlier cases left successful rows in A').toBeGreaterThan(0);
+    await withPolicy({ aiAutonomyLevel: 'full', aiMaxAutoExecutionsPerHour: recent }, async () => {
+      expect(await executor.requiresApproval(asCommand('update_business_profile', ID.ownerA))).toBe(true);
+    });
+    await withPolicy({ aiAutonomyLevel: 'full', aiMaxAutoExecutionsPerHour: recent + 100 }, async () => {
+      expect(await executor.requiresApproval(asCommand('update_business_profile', ID.ownerA))).toBe(false);
+    });
+  });
+
+  it("RED-BEFORE: with aiAutonomyLevel 'manual' the OWNER's plan stops at approval: the step waits for approval, nothing is routed, the branding is unchanged, and one row names the OWNER with 'Approval pending'", async () => {
+    await seedPlan(PLAN.ownerManual, ID.ownerA, 'update_branding', { primaryColor: '#777777' });
+    await withPolicy({ aiAutonomyLevel: 'manual' }, async () => {
+      const before = await businessRowText(ID.bizA);
+      const audit = await auditIds();
+      const from = connectorCommands.length;
+      const res = await executePlanAs(ID.ownerA, PLAN.ownerManual);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).toMatchObject({ executed: 1 });
+      expect(connectorCommands.slice(from)).toEqual([]);
+      expect((await planRow(PLAN.ownerManual)).steps).toEqual([{ status: 'waiting_approval', errorMessage: null }]);
+      expect(await businessRowText(ID.bizA)).toBe(before);
+      const rows = await auditRowsSince(audit);
+      expect(rows, JSON.stringify(rows)).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ userId: ID.ownerA, actor: 'user', module: 'settings', action: 'update_branding', success: false, errorMessage: 'Approval pending' });
+    });
+  });
+
+  it("RED-BEFORE: with aiAutonomyLevel 'manual' the OWNER's POST execute with requireApproval answers 'Approval pending', routes nothing, and writes one row naming the OWNER", async () => {
+    await withPolicy({ aiAutonomyLevel: 'manual' }, async () => {
+      const before = await businessRowText(ID.bizA);
+      const audit = await auditIds();
+      const from = connectorCommands.length;
+      const res = await post('execute', ID.ownerA, structured('update_branding', { primaryColor: '#888888' }, { requireApproval: true }));
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body.result).toMatchObject({ success: false, error: 'Approval pending', data: { approvalStatus: 'pending' } });
+      expect(connectorCommands.slice(from)).toEqual([]);
+      expect(await businessRowText(ID.bizA)).toBe(before);
+      const rows = await auditRowsSince(audit);
+      expect(rows, JSON.stringify(rows)).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ userId: ID.ownerA, actor: 'user', action: 'update_branding', success: false, errorMessage: 'Approval pending' });
+    });
+  });
 });
 
 describe('nothing left the process (suite-wide)', () => {

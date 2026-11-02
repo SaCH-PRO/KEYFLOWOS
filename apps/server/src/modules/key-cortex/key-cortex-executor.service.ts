@@ -24,6 +24,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 
 // ─── Prisma ───────────────────────────────────────────────────────────────────
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 // ─── Connector ──────────────────────────────────────────────────────────────────
@@ -49,6 +50,8 @@ const BATCH_STOP_ON_FAILURE = true;
 const MAX_BATCH_SIZE = 50;
 const APPROVAL_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const APPROVAL_CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
+/** A business that sets no aiSpendingThreshold is held to this one (the fallback policy's). */
+const DEFAULT_SPENDING_THRESHOLD = 1000;
 
 // Safety blocklist: actions that are too dangerous to expose through the AI
 // command surface until they are hardened with allowlists, read-only scopes,
@@ -61,6 +64,28 @@ const BLOCKED_ACTIONS = new Set([
 
 function isBlockedCommand(command: ConnectorCommand): boolean {
   return BLOCKED_ACTIONS.has(command.action);
+}
+
+/** Past this many characters an audit payload is kept as a preview (as AiExecutionLogService does). */
+const AUDIT_JSON_MAX_CHARS = 5000;
+
+/**
+ * A value as the JSON an ai_execution_logs Json column stores: a JSON copy, a
+ * preview when it is large, or a marker when it cannot be serialized, so an
+ * odd payload never costs the execute its audit row.
+ */
+function auditJson(value: unknown): Prisma.InputJsonValue | null {
+  if (value === undefined || value === null) return null;
+  try {
+    const text = JSON.stringify(value);
+    if (text === undefined) return null;
+    if (text.length > AUDIT_JSON_MAX_CHARS) {
+      return { _truncated: true, _size: text.length, _preview: text.slice(0, 500) };
+    }
+    return JSON.parse(text) as Prisma.InputJsonValue;
+  } catch {
+    return { _error: 'Could not serialize payload' };
+  }
 }
 
 // ─── Types ──────────────────────────────────────────────────────────────────────
@@ -197,7 +222,9 @@ export class KeyCortexExecutorService {
    *   1. Resolve the approval policy for this business + user.
    *   2. If approval required → delegate to executeWithApproval().
    *   3. Otherwise → call connector.execute() with timeout & error wrapping.
-   *   4. Log the execution to Prisma (non-blocking).
+   *   4. Log the execution to Prisma (awaited, never thrown): one
+   *      ai_execution_logs row on every path, the refusals that return before
+   *      the connector included (R0-09e repair, review ST-1 / CR-1).
    *   5. Emit real-time event (non-blocking).
    *   6. If failed + rollbackOnFailure → attempt rollback.
    *   7. Return the execution record.
@@ -218,7 +245,7 @@ export class KeyCortexExecutorService {
     if (isBlockedCommand(command)) {
       const reason = `Action "${command.action}" is disabled in this build for safety review.`;
       this.logger.warn(`[execute] Blocked ${command.module}.${command.action}: ${reason}`);
-      return {
+      return this.audited({
         id: randomUUID(),
         command,
         result: {
@@ -232,7 +259,7 @@ export class KeyCortexExecutorService {
         durationMs: 0,
         traceId,
         rolledBack: false,
-      };
+      });
     }
 
     // ── Unified Autonomy Orchestrator: canonical verdict ───────────────────────
@@ -248,7 +275,7 @@ export class KeyCortexExecutorService {
         if (!verdict.allowed) {
           const reason = verdict.reason || 'Blocked by autonomy orchestrator';
           this.logger.warn(`[execute] Autonomy orchestrator BLOCKED ${command.module}.${command.action}: ${reason}`);
-          return {
+          return this.audited({
             id: randomUUID(),
             command,
             result: {
@@ -262,7 +289,7 @@ export class KeyCortexExecutorService {
             durationMs: 0,
             traceId,
             rolledBack: false,
-          };
+          });
         }
 
         if (verdict.requiresApproval && options.skipApproval) {
@@ -283,7 +310,7 @@ export class KeyCortexExecutorService {
             gate.blockingReasons?.join('; ') ||
             'Blocked by KEY Genome autonomy gate.';
           this.logger.warn(`[execute] Autonomy gate BLOCKED ${command.module}.${command.action}: ${reason}`);
-          return {
+          return this.audited({
             id: randomUUID(),
             command,
             result: {
@@ -297,7 +324,7 @@ export class KeyCortexExecutorService {
             durationMs: 0,
             traceId,
             rolledBack: false,
-          };
+          });
         }
 
         if (gate.decision === 'ALLOW_WITH_APPROVAL' && options.skipApproval) {
@@ -308,7 +335,7 @@ export class KeyCortexExecutorService {
       this.logger.error(
         `[execute] Autonomy gate error for ${command.module}.${command.action}: ${(gateErr as Error).message}`,
       );
-      return {
+      return this.audited({
         id: randomUUID(),
         command,
         result: {
@@ -322,7 +349,7 @@ export class KeyCortexExecutorService {
         durationMs: 0,
         traceId,
         rolledBack: false,
-      };
+      });
     }
 
     // ── Emit START event ─────────────────────────────────────────────────────
@@ -345,7 +372,7 @@ export class KeyCortexExecutorService {
       );
       const approvalRecord = await this.executeWithApproval(command);
 
-      return {
+      return this.audited({
         id: approvalRecord.id,
         command,
         result: {
@@ -360,7 +387,7 @@ export class KeyCortexExecutorService {
         durationMs: Date.now() - startMs,
         traceId,
         rolledBack: false,
-      };
+      });
     }
 
     // ── 2. Execute via connector ─────────────────────────────────────────────
@@ -424,10 +451,11 @@ export class KeyCortexExecutorService {
       rollbackResult,
     };
 
-    // ── 5. Audit log (fire-and-forget) ───────────────────────────────────────
-    this.logExecution(record).catch((err) => {
-      this.logger.error(`[execute] Audit log failed: ${err.message}`);
-    });
+    // ── 5. Audit log (awaited; a failure is logged, never thrown) ────────────
+    // R0-09e (R0-09c review ST-7): this was fire-and-forget over a write that
+    // always failed, so no execute ever left its ai_execution_logs row. It is
+    // awaited now, so the row naming the actor exists when execute() returns.
+    await this.audited(record);
 
     // ── 6. Emit completion event ─────────────────────────────────────────────
     if (options.emitEvents !== false) {
@@ -778,35 +806,53 @@ export class KeyCortexExecutorService {
   // SECTION 7 — logExecution()
   // ════════════════════════════════════════════════════════════════════════════
   /**
-   * Persist an execution record to the database for audit trail.
-   * Writes to aiExecutionLog (or equivalent) with full context.
+   * Persist an execution record to the database for audit trail: one
+   * ai_execution_logs row per execute, naming its actor.
+   *
+   * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-7): this wrote fields AiExecutionLog
+   * does not have (traceId, parameters, commandJson, resultData,
+   * executionTimeMs, rolledBack, rollbackResult, startedAt, finishedAt, source)
+   * through an untyped client, so Prisma refused every row ("Unknown argument
+   * `traceId`") and no execute was ever audited. It now writes only the model's
+   * own columns, through the typed client so a column that does not exist no
+   * longer compiles: the actor in `userId` (the command's actor when it names a
+   * User row; null for a system actor such as 'key_cortex', which the foreign
+   * key would refuse) and `actor` ('user', or 'system' for a system actor), the
+   * command in `module`, `action` and `toolName`, the actor id as sent, the
+   * parameters, source and trace in `inputSummary`, the result and rollback in
+   * `outputSummary`, then `success`, `errorMessage`, `durationMs` and
+   * `correlationId`.
    */
   async logExecution(record: ExecutionRecord): Promise<void> {
+    const { command, result } = record;
     try {
-      await (this.prisma.client as any).aiExecutionLog.create({
+      const humanActorId = await this.humanActorId(command.userId);
+      await this.prisma.client.aiExecutionLog.create({
         data: {
           id: record.id,
-          businessId: record.command.businessId,
-          userId: record.command.userId,
-          traceId: record.traceId,
-          correlationId: record.command.correlationId,
-          module: record.command.module,
-          action: record.command.action,
-          parameters: JSON.stringify(record.command.parameters),
-          commandJson: JSON.stringify(record.command),
-          success: record.result.success,
-          resultData: record.result.data
-            ? JSON.stringify(record.result.data)
-            : null,
-          errorMessage: record.result.error ?? null,
-          executionTimeMs: record.durationMs,
-          rolledBack: record.rolledBack,
-          rollbackResult: record.rollbackResult
-            ? JSON.stringify(record.rollbackResult)
-            : null,
-          startedAt: record.startedAt,
-          finishedAt: record.finishedAt,
-          source: 'key_cortex',
+          businessId: command.businessId,
+          userId: humanActorId,
+          actor: humanActorId ? 'user' : 'system',
+          action: command.action,
+          toolName: `${command.module}.${command.action}`,
+          module: command.module,
+          inputSummary: {
+            actorId: typeof command.userId === 'string' ? command.userId : null,
+            parameters: auditJson(command.parameters),
+            source: command.source ?? null,
+            traceId: record.traceId,
+          },
+          outputSummary: {
+            data: auditJson(result.data),
+            rolledBack: record.rolledBack,
+            rollbackError: record.rollbackResult && !record.rollbackResult.success
+              ? record.rollbackResult.error ?? null
+              : null,
+          },
+          success: result.success,
+          errorMessage: result.error ?? null,
+          durationMs: record.durationMs,
+          correlationId: command.correlationId ?? null,
         },
       });
 
@@ -819,6 +865,39 @@ export class KeyCortexExecutorService {
       );
       throw err; // Let caller decide
     }
+  }
+
+  /**
+   * Write `record`'s ai_execution_logs row, awaited, then hand the record back.
+   * A failed write is logged, never thrown: the audit never changes what
+   * execute() answers.
+   *
+   * R0-09e repair (review ST-1 / CR-1): execute() reaches this on EVERY path,
+   * not only after the connector ran. The refusals return before the connector
+   * (a blocked action, an autonomy-orchestrator deny, a legacy-gate BLOCK, a
+   * gate error, approval pending) and used to leave no row, so the executes an
+   * audit most needs, a member's refused command and a plan step stopped for
+   * approval, were the ones with no trail.
+   */
+  private async audited(record: ExecutionRecord): Promise<ExecutionRecord> {
+    try {
+      await this.logExecution(record);
+    } catch (err) {
+      this.logger.error(`[execute] Audit log failed: ${(err as Error).message}`);
+    }
+    return record;
+  }
+
+  /**
+   * The command's actor when it names a User row, else null: a system actor
+   * ('key_cortex', 'system', KEY's own 'key_ai') is recorded as `actor:
+   * 'system'` with no userId, which the AiExecutionLog -> User foreign key
+   * requires.
+   */
+  private async humanActorId(userId: unknown): Promise<string | null> {
+    if (typeof userId !== 'string' || userId.length === 0) return null;
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { id: true } });
+    return user ? user.id : null;
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -1015,13 +1094,23 @@ export class KeyCortexExecutorService {
 
   /**
    * Fetch the approval policy for a business + user from the database.
+   *
+   * R0-09e repair (review ST-3): the rate-limit count filtered on `startedAt`,
+   * which AiExecutionLog does not have (its timestamp is `createdAt`), through
+   * an untyped client, so Prisma refused the query, the catch below answered
+   * the fallback policy, and the business's own BusinessSetting
+   * (aiAutonomyLevel 'manual', aiAlwaysRequireApproval, the spending limits)
+   * was never applied. Both reads now go through the typed client, so a column
+   * that does not exist no longer compiles. A business that sets no spending
+   * threshold keeps DEFAULT_SPENDING_THRESHOLD, the threshold every business
+   * was in fact held to while the fallback answered.
    */
   private async fetchApprovalPolicy(
     businessId: string,
     _userId: string,
   ): Promise<ApprovalPolicy> {
     try {
-      const setting = await (this.prisma.client as any).businessSetting.findUnique({
+      const setting = await this.prisma.client.businessSetting.findUnique({
         where: { businessId },
         select: {
           aiAutonomyLevel: true,
@@ -1035,11 +1124,11 @@ export class KeyCortexExecutorService {
 
       // Count recent auto-executions for rate-limiting
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
-      const recentCount = await (this.prisma.client as any).aiExecutionLog.count({
+      const recentCount = await this.prisma.client.aiExecutionLog.count({
         where: {
           businessId,
           success: true,
-          startedAt: { gte: oneHourAgo },
+          createdAt: { gte: oneHourAgo },
         },
       });
 
@@ -1053,9 +1142,10 @@ export class KeyCortexExecutorService {
         neverRequireApproval: this.parseStringArray(
           setting?.aiNeverRequireApproval,
         ),
-        spendingThreshold: setting?.aiSpendingThreshold
-          ? Number(setting.aiSpendingThreshold)
-          : undefined,
+        spendingThreshold:
+          setting?.aiSpendingThreshold != null
+            ? Number(setting.aiSpendingThreshold)
+            : DEFAULT_SPENDING_THRESHOLD,
         actionSpendingLimits: this.parseRecord(
           setting?.aiActionSpendingLimits,
         ),
@@ -1063,13 +1153,16 @@ export class KeyCortexExecutorService {
           setting?.aiMaxAutoExecutionsPerHour ?? 100,
         currentHourExecutionCount: recentCount,
       };
-    } catch {
+    } catch (err) {
+      this.logger.warn(
+        `[fetchApprovalPolicy] Falling back to the default policy for ${businessId}: ${(err as Error).message}`,
+      );
       // Fallback policy
       return {
         autonomyLevel: 'supervised',
         alwaysRequireApproval: [],
         neverRequireApproval: [],
-        spendingThreshold: 1000,
+        spendingThreshold: DEFAULT_SPENDING_THRESHOLD,
         actionSpendingLimits: {},
         maxAutoExecutionsPerHour: 100,
         currentHourExecutionCount: 0,

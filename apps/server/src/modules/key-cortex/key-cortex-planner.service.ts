@@ -1,5 +1,6 @@
-import { Injectable, Logger, NotFoundException, Optional, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException, ConflictException, Optional, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { Prisma } from '@prisma/client';
 import { PlannerService } from '../ai/planner.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { ParsedIntent } from '../ai/intent-parser.service';
@@ -20,14 +21,51 @@ export interface CreateGoalInput {
   parentGoalId?: string;
 }
 
+/**
+ * No `userId`: who a plan is for is createPlanFromCommand's `userId` argument
+ * (KeyCortexGoalsController passes the authenticated principal, R0-09e), never
+ * a field of the request body.
+ */
 export interface CreatePlanFromCommandInput {
   objective: string;
   rawInput?: string;
   urgency?: ParsedIntent['urgency'];
   modules?: string[];
   scope?: string[];
-  userId?: string;
 }
+
+/**
+ * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-5 / CR-2): the member who asked, over
+ * HTTP, for a plan to run. KeyCortexGoalsController builds it from the
+ * principal AuthGuard admitted (@CurrentUser()) and the tenant BusinessGuard
+ * checked; nothing in it comes from the request body.
+ */
+export interface PlanExecutionActor {
+  /** The executing member's user id. */
+  userId: string;
+  /** Its User role, as AuthMiddleware attaches it (SUPER_ADMIN keeps the platform bypass). */
+  role?: string | null;
+  /** The tenant BusinessGuard checked: the plan must belong to it. */
+  businessId: string;
+}
+
+/**
+ * The actor a plan step runs as when no member is behind it: executePlan
+ * called with no PlanExecutionActor (a system trigger, the query pipeline) on a
+ * plan no member created. It names no User row, so the settings adapter's owner
+ * rule and every other actor check refuse it, and the executor's audit row
+ * records it as `actor: 'system'` with no userId.
+ */
+export const SYSTEM_PLAN_ACTOR = 'key_cortex';
+
+/**
+ * The AiPlan statuses executePlan may claim (R0-09e repair, review ST-2): a plan
+ * not yet run ('draft', 'pending', 'approved') and one a member may run again
+ * ('failed', 'waiting_approval'; the goals page offers Run on both). Never
+ * 'running' (another execute holds it), 'completed', or the other executor's
+ * 'executing'.
+ */
+export const RUNNABLE_PLAN_STATUSES: readonly string[] = ['draft', 'pending', 'approved', 'failed', 'waiting_approval'];
 
 export interface PlanGoal {
   objective: string;
@@ -374,18 +412,74 @@ export class KeyCortexPlannerService {
     };
   }
 
-  async executePlan(planId: string, options: ExecuteOptions = {}) {
-    const plan = await this.prisma.client.aiPlan.findUnique({
-      where: { id: planId },
-      include: { steps: true },
-    });
+  /**
+   * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-5 / CR-2). Every step used to run as
+   * `plan.userId ?? 'key_cortex'`, and POST plans/:planId/execute handed this
+   * method no actor at all, while plan.userId came from the request body. So a
+   * STAFF member who named the OWNER's id ran KEY commands as the OWNER (the
+   * settings adapter's owner rule then passed), and any member ran any plan.
+   *
+   * With a `member` (the HTTP route): the plan is read in the member's checked
+   * tenant only (another tenant's plan is not found), the member must be the
+   * plan's creator, the business OWNER (OWNER membership or Business.ownerId)
+   * or SUPER_ADMIN (else 403, before the plan starts), and every step runs as
+   * that EXECUTING member, never as the creator named in the row and never as
+   * SYSTEM_PLAN_ACTOR. With no member (a system trigger or the query pipeline,
+   * which call this directly): a member's plan runs as that member, and only a
+   * plan no member created runs as SYSTEM_PLAN_ACTOR. On either path a plan
+   * runs only once it is claimed out of RUNNABLE_PLAN_STATUSES (409 otherwise:
+   * running, completed, or a concurrent execute claimed it first).
+   */
+  async executePlan(planId: string, options: ExecuteOptions = {}, member?: PlanExecutionActor) {
+    const plan = member
+      ? await this.prisma.client.aiPlan.findFirst({
+          where: { id: planId, businessId: member.businessId },
+          include: { steps: true },
+        })
+      : await this.prisma.client.aiPlan.findUnique({
+          where: { id: planId },
+          include: { steps: true },
+        });
     if (!plan) throw new NotFoundException('Plan not found');
+    if (member) await this.assertMayExecutePlan(plan, member);
+    const actorId = member ? member.userId : (plan.userId ?? SYSTEM_PLAN_ACTOR);
 
-    await this.prisma.client.aiPlan.update({
-      where: { id: planId },
+    // R0-09e repair (review ST-2): claim the plan atomically. This set the
+    // status to 'running' unconditionally, so a 'completed' plan re-ran every
+    // side-effecting step under a new saga, and two concurrent executes of one
+    // pending plan both ran it. Only a plan in RUNNABLE_PLAN_STATUSES is
+    // claimed, in one conditional write; a plan that is running, completed or
+    // in any other state is refused 409 and nothing runs.
+    const claimed = await this.prisma.client.aiPlan.updateMany({
+      where: { id: planId, businessId: plan.businessId, status: { in: [...RUNNABLE_PLAN_STATUSES] } },
       data: { status: 'running', startedAt: new Date() },
     });
+    if (claimed.count !== 1) {
+      throw new ConflictException('Plan is already running, completed or otherwise not runnable');
+    }
 
+    try {
+      return await this.runClaimedPlan(planId, plan, actorId, options);
+    } catch (err) {
+      // An unexpected error while the plan is still 'running' must not leave it
+      // so for ever (no execute could claim it again): it is released as
+      // 'failed', which a member may run again, and the error is rethrown. Only
+      // a plan still 'running' is released, so an error after the final status
+      // was written never turns a 'completed' plan runnable again.
+      await this.prisma.client.aiPlan
+        .updateMany({ where: { id: planId, status: 'running' }, data: { status: 'failed', completedAt: null } })
+        .catch((releaseErr: unknown) => this.logger.error(`Plan ${planId} release failed: ${(releaseErr as Error).message}`));
+      throw err;
+    }
+  }
+
+  /** Runs the steps of a plan executePlan has claimed ('running'), as `actorId`. */
+  private async runClaimedPlan(
+    planId: string,
+    plan: Prisma.AiPlanGetPayload<{ include: { steps: true } }>,
+    actorId: string,
+    options: ExecuteOptions,
+  ) {
     const saga = await this.saga.start({
       businessId: plan.businessId,
       sagaType: 'ai_plan',
@@ -411,7 +505,7 @@ export class KeyCortexPlannerService {
         data: { status: 'running', startedAt: new Date() },
       });
 
-      const command = this.buildCommand(plan, step, options);
+      const command = this.buildCommand(plan, step, actorId);
       const actionRef = `${step.module}.${step.action}`;
 
       // Record how this step would be undone, BEFORE running it.
@@ -535,17 +629,43 @@ export class KeyCortexPlannerService {
     };
   }
 
-  private buildCommand(
+  /**
+   * Who may execute a plan over HTTP (R0-09e, pinned): its creator, the
+   * business OWNER (the OWNER membership or Business.ownerId, the two arms
+   * IdentityService.assertBusinessOwner admits) or SUPER_ADMIN. A plan no member
+   * created (plan.userId null) is the OWNER's or SUPER_ADMIN's to run.
+   */
+  private async assertMayExecutePlan(
     plan: { businessId: string; userId?: string | null },
+    member: PlanExecutionActor,
+  ): Promise<void> {
+    if (member.role === 'SUPER_ADMIN') return;
+    if (plan.userId && plan.userId === member.userId) return;
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: member.userId, businessId: plan.businessId } },
+      select: { role: true },
+    });
+    if (membership?.role === 'OWNER') return;
+    const owned = await this.prisma.client.business.findFirst({
+      where: { id: plan.businessId, ownerId: member.userId },
+      select: { id: true },
+    });
+    if (owned) return;
+    throw new ForbiddenException("Only the plan's creator or the business owner can execute this plan");
+  }
+
+  /** Every step's command names `actorId`, which executePlan resolves (R0-09e). */
+  private buildCommand(
+    plan: { businessId: string },
     step: { module: string | null; action: string; inputPayload: unknown; toolName: string | null },
-    _options: ExecuteOptions,
+    actorId: string,
   ): ConnectorCommand {
     return {
       module: (step.module ?? 'general') as any,
       action: step.action,
       parameters: (step.inputPayload as Record<string, unknown>) ?? {},
       businessId: plan.businessId,
-      userId: plan.userId ?? 'key_cortex',
+      userId: actorId,
       source: 'key_cortex',
       timestamp: new Date(),
       correlationId: `plan_${plan.businessId}_${Date.now()}`,

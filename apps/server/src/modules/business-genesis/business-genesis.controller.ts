@@ -11,6 +11,7 @@ import {
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { GenomeGateGuard } from '../../core/auth/genome-gate.guard';
+import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { BusinessGenesisService } from './business-genesis.service';
 import { GenesisMarketStrategyService } from './genesis-market-strategy.service';
 import {
@@ -43,12 +44,22 @@ export class BusinessGenesisController {
     return this.genesis.getNextQuestions(businessId, query.limit ?? 3);
   }
 
+  /**
+   * R0-09d (owner ruling D-11, R0-09b review SEC-1): answers that write the
+   * Business row (businessName, businessIntent, country, currency) are the
+   * owner's only; the check runs before anything is read or written. Other
+   * answers (the blueprint, the legal disclaimer acceptance) stay open to any
+   * member.
+   */
   @Post('answers')
   async submitAnswers(
     @Param('businessId') businessId: string,
     @Body() body: SubmitAnswersDto,
+    @CurrentUser() user: AuthenticatedUser | undefined,
   ) {
-    return this.genesis.submitAnswers(businessId, body.answers || {});
+    const answers = body.answers || {};
+    await this.genesis.assertProfileAnswersOwner(businessId, answers, user);
+    return this.genesis.submitAnswers(businessId, answers);
   }
 
   @Get('readiness')

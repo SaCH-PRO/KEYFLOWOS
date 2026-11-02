@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { KeyCortexPlannerService } from './key-cortex-planner.service';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import { KeyCortexPlannerService, SYSTEM_PLAN_ACTOR, RUNNABLE_PLAN_STATUSES } from './key-cortex-planner.service';
 import { PlannerService } from '../ai/planner.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
@@ -43,6 +44,9 @@ const mkPrisma = () => {
           if (plan) Object.assign(plan, args.data);
           return plan;
         }),
+        // executePlan's conditional claim (R0-09e repair, ST-2): the plans these
+        // cases run are mocked as runnable, so the claim takes them.
+        updateMany: vi.fn(async () => ({ count: 1 })),
       },
       aiPlanStep: {
         create: vi.fn(),
@@ -232,6 +236,198 @@ describe('KeyCortexPlannerService', () => {
     const result = await service.executePlan('plan_1');
     expect(result.status).toBe('failed');
     expect(saga.compensate).toHaveBeenCalledWith('saga_1');
+    expect(executor.execute).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-5 / CR-2). executePlan built every
+ * step's command as `plan.userId ?? 'key_cortex'` and took no executing member,
+ * so whoever named the OWNER as a plan's userId ran its steps as the OWNER, and
+ * any member ran any plan. Pinned here: with a member (the HTTP route) the plan
+ * is read in the member's tenant only, the member must be its creator, the
+ * business OWNER (OWNER membership or Business.ownerId) or SUPER_ADMIN, and
+ * every step runs as that executing member; with no member (a system trigger) a
+ * member's plan runs as that member and only a plan no member created runs as
+ * SYSTEM_PLAN_ACTOR ('key_cortex'). The executePlan cases above run with no
+ * member (the system path) and are unchanged.
+ */
+describe('KeyCortexPlannerService.executePlan — the executing member (R0-09e, review ST-5 / CR-2)', () => {
+  const STAFF = 'user_staff';
+  const OWNER = 'user_owner';
+  const planSteps = () => [
+    { id: 's1', order: 1, module: 'settings', action: 'update_business_profile', inputPayload: { name: 'x' }, toolName: 'settings.update_business_profile', dependsOn: [] },
+    { id: 's2', order: 2, module: 'crm', action: 'list_contacts', inputPayload: {}, toolName: 'crm.list_contacts', dependsOn: [] },
+  ];
+  let prisma: any;
+  let executor: any;
+  let sagaStub: any;
+  let service: KeyCortexPlannerService;
+  /** The plan row build() serves, as the planner last wrote it. */
+  let row: Record<string, unknown>;
+
+  function build(plan: Record<string, unknown>, memberships: Record<string, string> = {}, ownerId = OWNER) {
+    row = { status: 'pending', ...plan };
+    prisma = {
+      client: {
+        aiPlan: {
+          findFirst: vi.fn(async ({ where }: any) => (where.id === row.id && where.businessId === row.businessId ? { ...row, steps: planSteps() } : null)),
+          findUnique: vi.fn(async ({ where }: any) => (where.id === row.id ? { ...row, steps: planSteps() } : null)),
+          update: vi.fn(async ({ data }: any) => Object.assign(row, data)),
+          // The conditional claim (R0-09e repair, ST-2), over this one row.
+          updateMany: vi.fn(async ({ where, data }: any) => {
+            const statusOk = typeof where.status === 'string' ? row.status === where.status : (where.status?.in ?? [row.status]).includes(row.status);
+            if (where.id !== row.id || (where.businessId && where.businessId !== row.businessId) || !statusOk) return { count: 0 };
+            Object.assign(row, data);
+            return { count: 1 };
+          }),
+        },
+        aiPlanStep: { update: vi.fn(async () => ({})) },
+        aiPlanResult: { upsert: vi.fn(async () => ({})) },
+        membership: {
+          findUnique: vi.fn(async ({ where }: any) => {
+            const role = memberships[where.userId_businessId.userId];
+            return role && where.userId_businessId.businessId === 'biz_1' ? { role } : null;
+          }),
+        },
+        business: {
+          findFirst: vi.fn(async ({ where }: any) => (where.id === 'biz_1' && where.ownerId === ownerId ? { id: 'biz_1' } : null)),
+        },
+      },
+    };
+    executor = { execute: vi.fn(async () => ({ result: { success: true, data: {} }, durationMs: 1 })) };
+    sagaStub = {
+      start: vi.fn(async () => ({ id: `saga_${sagaStub.start.mock.calls.length}` })),
+      addStep: vi.fn(), completeStep: vi.fn(), failStep: vi.fn(), compensate: vi.fn(), completeSaga: vi.fn(), failSaga: vi.fn(),
+    };
+    service = new KeyCortexPlannerService(prisma, { createPlan: vi.fn() } as any, executor, sagaStub as any);
+  }
+  const actorsRun = () => executor.execute.mock.calls.map((c: any[]) => c[0].userId);
+
+  it("RED-BEFORE: every step runs as the EXECUTING member, never as the plan's creator: the OWNER running a STAFF member's plan runs it as the OWNER", async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: STAFF }, { [OWNER]: 'OWNER', [STAFF]: 'STAFF' });
+    const result = await service.executePlan('plan_1', {}, { userId: OWNER, role: 'USER', businessId: 'biz_1' });
+    expect(result.status).toBe('completed');
+    expect(actorsRun()).toEqual([OWNER, OWNER]);
+  });
+
+  it('the creator runs its own plan as itself', async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: STAFF }, { [STAFF]: 'STAFF' });
+    await service.executePlan('plan_1', {}, { userId: STAFF, role: 'USER', businessId: 'biz_1' });
+    expect(actorsRun()).toEqual([STAFF, STAFF]);
+  });
+
+  it("RED-BEFORE: a member who is neither the creator, the OWNER (membership or Business.ownerId) nor SUPER_ADMIN is refused 403 before the plan starts, on another member's plan and on a plan no member created", async () => {
+    for (const userId of [OWNER, null]) {
+      build({ id: 'plan_1', businessId: 'biz_1', userId }, { [STAFF]: 'STAFF', user_admin: 'ADMIN' }, 'someone_else');
+      for (const member of [STAFF, 'user_admin']) {
+        await expect(service.executePlan('plan_1', {}, { userId: member, role: 'USER', businessId: 'biz_1' })).rejects.toBeInstanceOf(ForbiddenException);
+      }
+      expect(prisma.client.aiPlan.update).not.toHaveBeenCalled();
+      expect(prisma.client.aiPlan.updateMany).not.toHaveBeenCalled();
+      expect(executor.execute).not.toHaveBeenCalled();
+    }
+  });
+
+  it('RED-BEFORE: the OWNER membership, the Business.ownerId owner and SUPER_ADMIN may run a plan no member created, each as itself', async () => {
+    for (const [userId, role, memberships, ownerId] of [
+      ['user_owner_member', 'USER', { user_owner_member: 'OWNER' }, 'someone_else'],
+      ['user_owner_id', 'USER', {}, 'user_owner_id'],
+      ['user_super', 'SUPER_ADMIN', {}, 'someone_else'],
+    ] as const) {
+      build({ id: 'plan_1', businessId: 'biz_1', userId: null }, memberships as Record<string, string>, ownerId);
+      const result = await service.executePlan('plan_1', {}, { userId, role, businessId: 'biz_1' });
+      expect(result.status, userId).toBe('completed');
+      expect(actorsRun(), userId).toEqual([userId, userId]);
+    }
+  });
+
+  it("RED-BEFORE: a member's execution reads the plan in the member's checked tenant only: another tenant's plan is not found and nothing runs", async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: STAFF });
+    await expect(service.executePlan('plan_1', {}, { userId: STAFF, role: 'USER', businessId: 'biz_2' })).rejects.toBeInstanceOf(NotFoundException);
+    expect(prisma.client.aiPlan.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'plan_1', businessId: 'biz_2' } }));
+    expect(executor.execute).not.toHaveBeenCalled();
+  });
+
+  it("with no member (a system trigger), a member's plan runs as that member and a plan no member created runs as the system actor 'key_cortex'", async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: STAFF });
+    await service.executePlan('plan_1');
+    expect(actorsRun()).toEqual([STAFF, STAFF]);
+
+    build({ id: 'plan_1', businessId: 'biz_1', userId: null });
+    await service.executePlan('plan_1');
+    expect(actorsRun()).toEqual(['key_cortex', 'key_cortex']);
+  });
+
+  it('SYSTEM_PLAN_ACTOR names that system actor', () => {
+    expect(SYSTEM_PLAN_ACTOR).toBe('key_cortex');
+  });
+
+  // R0-09e repair (review ST-2): executePlan set the status to 'running'
+  // unconditionally, so a completed plan re-ran every side-effecting step under
+  // a new saga, and two concurrent executes of one pending plan both ran it.
+
+  it('RED-BEFORE: a completed plan is refused 409 on a second execute, by a member or a system trigger: no step runs again and no new saga starts', async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: OWNER }, { [OWNER]: 'OWNER' });
+    const first = await service.executePlan('plan_1', {}, { userId: OWNER, role: 'USER', businessId: 'biz_1' });
+    expect(first.status).toBe('completed');
+    expect(row.status).toBe('completed');
+    expect(executor.execute).toHaveBeenCalledTimes(2);
+    await expect(service.executePlan('plan_1', {}, { userId: OWNER, role: 'USER', businessId: 'biz_1' })).rejects.toBeInstanceOf(ConflictException);
+    await expect(service.executePlan('plan_1')).rejects.toBeInstanceOf(ConflictException);
+    expect(executor.execute).toHaveBeenCalledTimes(2);
+    expect(sagaStub.start).toHaveBeenCalledTimes(1);
+    expect(row.status).toBe('completed');
+  });
+
+  it('RED-BEFORE: the claim is one conditional write over the runnable statuses; a running plan (or one in any status outside them) is refused 409 and left as it is', async () => {
+    for (const status of ['running', 'executing', 'completed', 'skipped']) {
+      build({ id: 'plan_1', businessId: 'biz_1', userId: OWNER, status }, { [OWNER]: 'OWNER' });
+      await expect(service.executePlan('plan_1', {}, { userId: OWNER, role: 'USER', businessId: 'biz_1' }), status).rejects.toBeInstanceOf(ConflictException);
+      expect(row.status, status).toBe(status);
+      expect(executor.execute, status).not.toHaveBeenCalled();
+      expect(sagaStub.start, status).not.toHaveBeenCalled();
+      expect(prisma.client.aiPlan.updateMany).toHaveBeenCalledWith({
+        where: { id: 'plan_1', businessId: 'biz_1', status: { in: [...RUNNABLE_PLAN_STATUSES] } },
+        data: { status: 'running', startedAt: expect.any(Date) },
+      });
+    }
+    expect(RUNNABLE_PLAN_STATUSES).toEqual(['draft', 'pending', 'approved', 'failed', 'waiting_approval']);
+  });
+
+  it('each runnable status is claimed and run once: a plan not yet run, and a failed or approval-stopped plan run again', async () => {
+    for (const status of RUNNABLE_PLAN_STATUSES) {
+      build({ id: 'plan_1', businessId: 'biz_1', userId: OWNER, status }, { [OWNER]: 'OWNER' });
+      const result = await service.executePlan('plan_1', {}, { userId: OWNER, role: 'USER', businessId: 'biz_1' });
+      expect(result.status, status).toBe('completed');
+      expect(executor.execute, status).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it('RED-BEFORE: two concurrent executes of one pending plan: exactly one runs it, the other is refused 409', async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: OWNER }, { [OWNER]: 'OWNER' });
+    const member = { userId: OWNER, role: 'USER', businessId: 'biz_1' };
+    const settled = await Promise.allSettled([service.executePlan('plan_1', {}, member), service.executePlan('plan_1', {}, member)]);
+    expect(settled.filter((s) => s.status === 'fulfilled')).toHaveLength(1);
+    const rejected = settled.filter((s): s is PromiseRejectedResult => s.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toBeInstanceOf(ConflictException);
+    expect(executor.execute).toHaveBeenCalledTimes(2);
+    expect(sagaStub.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("an error after the claim releases a still-running plan as 'failed' (runnable again) and rethrows; it never reopens a plan already marked completed", async () => {
+    build({ id: 'plan_1', businessId: 'biz_1', userId: OWNER }, { [OWNER]: 'OWNER' });
+    sagaStub.start.mockRejectedValueOnce(new Error('saga store down'));
+    await expect(service.executePlan('plan_1')).rejects.toThrow('saga store down');
+    expect(row.status).toBe('failed');
+    expect(executor.execute).not.toHaveBeenCalled();
+
+    build({ id: 'plan_1', businessId: 'biz_1', userId: OWNER }, { [OWNER]: 'OWNER' });
+    sagaStub.completeSaga.mockRejectedValueOnce(new Error('saga store down'));
+    await expect(service.executePlan('plan_1')).rejects.toThrow('saga store down');
+    expect(row.status).toBe('completed');
+    await expect(service.executePlan('plan_1')).rejects.toBeInstanceOf(ConflictException);
     expect(executor.execute).toHaveBeenCalledTimes(2);
   });
 });
