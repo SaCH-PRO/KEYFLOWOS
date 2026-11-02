@@ -1211,7 +1211,8 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.accountingPeriods.update(businessId, id, body);
+    // V1-15b repair2 (review SEC9-1): the owner's or an admin's call, like close / reopen.
+    return this.accountingPeriods.update(businessId, id, body, { actorId: req.user?.id });
   }
 
   @Post('accounting-periods/:id/close')
@@ -1234,7 +1235,8 @@ export class FinanceController {
   @Delete('accounting-periods/:id')
   async deleteAccountingPeriod(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
-    return this.accountingPeriods.remove(businessId, id);
+    // V1-15b repair2 (review SEC9-1): the owner's or an admin's call, like close / reopen.
+    return this.accountingPeriods.remove(businessId, id, { actorId: req.user?.id });
   }
 
   // ---------- Bank Connections ----------

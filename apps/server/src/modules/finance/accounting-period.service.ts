@@ -24,22 +24,42 @@ export interface ReopenAccountingPeriodInput {
   reopenedById?: string;
 }
 
+/** Who changes or deletes a period (review SEC9-1); else the request's authenticated user. */
+export interface AccountingPeriodActor {
+  actorId?: string;
+}
+
 /**
  * V1-15 review SEC-V15-3: the advisory-lock namespace that serializes closing
- * a business's period against that business's postings. close() holds the
- * lock exclusively; PostingService.post()/reverse() hold it shared (through
- * assertOpenForPosting, inside the posting transaction), so postings never
- * wait on each other, a close waits for every posting already past its period
- * check to commit (and then stamps it), and a posting that starts while a
- * close runs reads the period after the close committed. Namespaced so the
- * key never collides with another advisory lock that hashes a bare id.
+ * a period against the postings dated inside it. close() and reopen() hold
+ * the lock exclusively; PostingService.post()/reverse() (and FixedAssetService)
+ * hold it shared (through assertOpenForPosting, inside the posting
+ * transaction), so postings never wait on each other, a close waits for every
+ * posting already past its period check to commit (and then stamps it), and a
+ * posting that starts while a close runs reads the period after the close
+ * committed. Namespaced so the key never collides with another advisory lock
+ * that hashes a bare id.
+ *
+ * V1-15b repair2 (review LC-1): the lock is one per business per UTC calendar
+ * month (accountingPeriodLockKey), not one per business. A close only ever
+ * shuts a month that has ENDED, so a posting dated now (a provider webhook, a
+ * payment, a refund, a reversal) never shares a key with it and never waits
+ * on it. With one lock per business, a close stamping a large month held every
+ * posting of the business: a webhook's payment transaction (5s interactive
+ * timeout) expired after its dedupe row had committed, and the redelivery was
+ * acked as a duplicate, so the payment was lost.
  */
 export const ACCOUNTING_PERIOD_LOCK_NAMESPACE = 'finance:accounting-period:';
 
-/** Who may close or reopen a period (V1-15 review SEC-V15-2). */
+/** The period lock's key for one business and one UTC calendar month (review LC-1). */
+export function accountingPeriodLockKey(businessId: string, year: number, month: number): string {
+  return `${ACCOUNTING_PERIOD_LOCK_NAMESPACE}${businessId}:${year}-${String(month).padStart(2, '0')}`;
+}
+
+/** Who may close, reopen, change or delete a period (V1-15 review SEC-V15-2; repair2 SEC9-1). */
 const PERIOD_GATE_ROLES = new Set(['OWNER', 'ADMIN']);
 
-/** Close waits for in-flight postings of the business before stamping. */
+/** Close waits for in-flight postings of the month before stamping. */
 const CLOSE_TX_OPTIONS = { maxWait: 10_000, timeout: 30_000 } as const;
 
 @Injectable()
@@ -87,7 +107,24 @@ export class AccountingPeriodService {
     });
   }
 
-  async update(businessId: string, id: string, input: Partial<CreateAccountingPeriodInput>) {
+  /**
+   * Move an OPEN period to another month. V1-15b repair2 (review SEC9-1):
+   *  - the owner's or an admin's call, like close and reopen (403 otherwise):
+   *    a period's months decide what its close shuts;
+   *  - written only while the row is still OPEN (`status: 'OPEN'` in the
+   *    write's own WHERE). close() holds the row (FOR UPDATE) while it closes,
+   *    so a PATCH that read the period OPEN and writes after the close
+   *    committed matches nothing and is refused (400): it can no longer move a
+   *    CLOSED period off its month (reopening that month with no audit row) or
+   *    onto a month that has not ended.
+   */
+  async update(
+    businessId: string,
+    id: string,
+    input: Partial<CreateAccountingPeriodInput>,
+    actor: AccountingPeriodActor = {},
+  ) {
+    await this.assertMayGate(businessId, actor.actorId, 'update');
     const period = await this.get(businessId, id);
     if (period.status === 'CLOSED') throw new BadRequestException('Cannot update a closed period');
 
@@ -101,10 +138,12 @@ export class AccountingPeriodService {
     const startDate = new Date(Date.UTC(year, month - 1, 1));
     const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
-    return this.prisma.client.accountingPeriod.update({
-      where: { id },
+    const { count } = await this.prisma.client.accountingPeriod.updateMany({
+      where: { id, businessId, status: 'OPEN' },
       data: { year, month, startDate, endDate },
     });
+    if (count === 0) await this.refuseNoLongerOpen(businessId, id, 'update');
+    return this.get(businessId, id);
   }
 
   /**
@@ -123,47 +162,53 @@ export class AccountingPeriodService {
    *    member (403 otherwise; a STAFF member cannot shut the posting door), and
    *    the close is recorded in the finance audit trail (team_activity_logs,
    *    module 'finance', action PERIOD_CLOSED) in the same transaction.
-   *  - SEC-V15-3: the close takes the business's period lock exclusively, so it
-   *    waits for postings already past their period check and stamps them, and
-   *    no posting lands inside the period after it closes.
+   *  - SEC-V15-3: the close takes the period lock of its month exclusively, so
+   *    it waits for postings dated in the month already past their period
+   *    check and stamps them, and no posting lands inside the period after it
+   *    closes.
+   *
+   * V1-15b repair2:
+   *  - SEC9-1: the period's row is locked first (FOR UPDATE), so a PATCH or
+   *    DELETE racing the close waits and then finds it CLOSED.
+   *  - LC-1: the lock is the month's, not the business's (a posting dated now
+   *    never waits on a close), and the stamp is one statement, so the close
+   *    holds its month for one round trip instead of one per transaction (and
+   *    stamps every row, not the first 1000 a findMany returns).
    *
    * The actor is `input.closedById`, else the request's authenticated user
    * (TenantInterceptor's AsyncLocalStorage context) for this business; with
    * neither, the close is refused.
    */
   async close(businessId: string, id: string, input: CloseAccountingPeriodInput = {}) {
-    await this.get(businessId, id);
+    const current = await this.get(businessId, id);
     const actorId = await this.assertMayGate(businessId, input.closedById, 'close');
+    // Refused before any lock is taken, and again under the locks below.
+    if (current.status !== 'CLOSED') assertEnded(current);
 
     await this.prisma.client.$transaction(async (rawTx) => {
       const tx = rawTx as unknown as Prisma.TransactionClient;
-      await this.lockPeriods(tx, businessId, 'exclusive');
-      // Re-read under the lock: a concurrent close of the same period lost the race.
-      const period = await tx.accountingPeriod.findFirst({ where: { id, businessId } });
-      if (!period) throw new NotFoundException('Accounting period not found');
+      // The row first (review SEC9-1): its months cannot change and it cannot be
+      // deleted while it closes; a concurrent close of it waits and then loses.
+      const period = await this.lockPeriodRow(tx, businessId, id);
+      await this.lockMonths(tx, businessId, monthsOf(period), 'exclusive');
       if (period.status === 'CLOSED') throw new BadRequestException('Period already closed');
-      if (period.endDate.getTime() >= Date.now()) {
-        throw new BadRequestException(
-          `Accounting period ${periodLabel(period)} has not ended: a period can be closed only after its last day.`,
-        );
-      }
+      assertEnded(period);
 
       const stamp = `lock:${businessId}:${periodLabel(period)}`;
-      // Stamp all transactions in the period — preserve existing metadata
-      const txs = await tx.financialTransaction.findMany({
-        where: {
-          businessId,
-          date: { gte: period.startDate, lte: period.endDate },
-        },
-        select: { id: true, metadata: true },
-      });
-      for (const t of txs) {
-        const existing = (t.metadata as Record<string, unknown> | null) ?? {};
-        await tx.financialTransaction.update({
-          where: { id: t.id },
-          data: { metadata: { ...existing, lockedByPeriod: stamp } },
-        });
-      }
+      // Stamp every transaction dated in the period, keeping its own metadata.
+      // One statement (review LC-1): the month's rows are neither read through
+      // the 1000-row findMany cap nor written one round trip each under the lock.
+      const stamped = await tx.$executeRaw`
+        UPDATE financial_transactions AS ft
+           SET metadata = (CASE WHEN jsonb_typeof(ft.metadata) = 'object' THEN ft.metadata ELSE '{}'::jsonb END)
+                          || jsonb_build_object('lockedByPeriod', ${stamp}::text),
+               updated_at = (now() AT TIME ZONE 'UTC')
+          FROM accounting_periods AS ap
+         WHERE ap.id = ${id}
+           AND ap.business_id = ${businessId}
+           AND ft.business_id = ap.business_id
+           AND ft.date >= ap.start_date
+           AND ft.date <= ap.end_date`;
 
       const closedAt = new Date();
       await tx.accountingPeriod.update({
@@ -182,7 +227,7 @@ export class AccountingPeriodService {
         action: 'PERIOD_CLOSED',
         periodId: id,
         title: `Accounting period ${periodLabel(period)} closed`,
-        meta: { year: period.year, month: period.month, stamp, transactionsStamped: txs.length, closedAt: closedAt.toISOString() },
+        meta: { year: period.year, month: period.month, stamp, transactionsStamped: stamped, closedAt: closedAt.toISOString() },
       });
     }, CLOSE_TX_OPTIONS);
 
@@ -197,6 +242,7 @@ export class AccountingPeriodService {
    * clears closedById / closedAt on the period, so who closed it, when, and
    * who reopened it are written to the finance audit trail (PERIOD_REOPENED)
    * in the same transaction, which fails the reopen if it cannot be written.
+   * Locks as close() does: the row, then its month (repair2, SEC9-1 / LC-1).
    */
   async reopen(businessId: string, id: string, input: ReopenAccountingPeriodInput = {}) {
     await this.get(businessId, id);
@@ -205,30 +251,28 @@ export class AccountingPeriodService {
     await this.prisma.client.$transaction(async (rawTx) => {
       const tx = rawTx as unknown as Prisma.TransactionClient;
       // Serialized with close() (and with a second reopen): one audit row per change.
-      await this.lockPeriods(tx, businessId, 'exclusive');
-      const period = await tx.accountingPeriod.findFirst({ where: { id, businessId } });
-      if (!period) throw new NotFoundException('Accounting period not found');
+      const period = await this.lockPeriodRow(tx, businessId, id);
+      await this.lockMonths(tx, businessId, monthsOf(period), 'exclusive');
       if (period.status !== 'CLOSED') throw new BadRequestException('Period is not closed');
 
-      // Clear stamp from transactions — preserve other metadata
+      // Clear the stamp from every transaction dated in the period, keeping the
+      // rest of its metadata (JSON null when nothing else is left). One
+      // statement, as in close() (review LC-1).
       let unstamped = 0;
       if (period.lockedTransactionStamp) {
-        const txs = await tx.financialTransaction.findMany({
-          where: {
-            businessId,
-            date: { gte: period.startDate, lte: period.endDate },
-          },
-          select: { id: true, metadata: true },
-        });
-        for (const t of txs) {
-          const existing = { ...((t.metadata as Record<string, unknown> | null) ?? {}) };
-          delete existing.lockedByPeriod;
-          await tx.financialTransaction.update({
-            where: { id: t.id },
-            data: { metadata: Object.keys(existing).length > 0 ? (existing as Prisma.InputJsonObject) : Prisma.JsonNull },
-          });
-        }
-        unstamped = txs.length;
+        unstamped = await tx.$executeRaw`
+          UPDATE financial_transactions AS ft
+             SET metadata = CASE WHEN (ft.metadata - 'lockedByPeriod') = '{}'::jsonb THEN 'null'::jsonb
+                                 ELSE ft.metadata - 'lockedByPeriod' END,
+                 updated_at = (now() AT TIME ZONE 'UTC')
+            FROM accounting_periods AS ap
+           WHERE ap.id = ${id}
+             AND ap.business_id = ${businessId}
+             AND ft.business_id = ap.business_id
+             AND ft.date >= ap.start_date
+             AND ft.date <= ap.end_date
+             AND jsonb_typeof(ft.metadata) = 'object'
+             AND (ft.metadata -> 'lockedByPeriod') IS NOT NULL`;
       }
 
       await tx.accountingPeriod.update({
@@ -261,10 +305,20 @@ export class AccountingPeriodService {
     return this.get(businessId, id);
   }
 
-  async remove(businessId: string, id: string) {
+  /**
+   * Delete an OPEN period. Same rules as update() (V1-15b repair2, review
+   * SEC9-1): the owner's or an admin's call (403 otherwise), and deleted only
+   * while the row is still OPEN, so a DELETE that read the period OPEN and
+   * runs after its close committed is refused (400) and the CLOSED period
+   * stays.
+   */
+  async remove(businessId: string, id: string, actor: AccountingPeriodActor = {}) {
+    await this.assertMayGate(businessId, actor.actorId, 'delete');
     const period = await this.get(businessId, id);
     if (period.status === 'CLOSED') throw new BadRequestException('Cannot delete a closed period');
-    return this.prisma.client.accountingPeriod.delete({ where: { id } });
+    const { count } = await this.prisma.client.accountingPeriod.deleteMany({ where: { id, businessId, status: 'OPEN' } });
+    if (count === 0) await this.refuseNoLongerOpen(businessId, id, 'delete');
+    return period;
   }
 
   /**
@@ -293,9 +347,10 @@ export class AccountingPeriodService {
    * inside an open one.
    *
    * V1-15 review:
-   *  - SEC-V15-3: with the caller's transaction, the business's period lock is
-   *    taken shared first, so the read below cannot pass while a close of the
-   *    same business is committing, and a close waits for this posting.
+   *  - SEC-V15-3: with the caller's transaction, the period lock of the date's
+   *    month is taken shared first, so the read below cannot pass while a
+   *    close of that month is committing, and that close waits for this
+   *    posting. A close of another month never holds it (review LC-1).
    *  - SEC-V15-1: a period is a lock once it is CLOSED and has ENDED. close()
    *    refuses a period that has not ended, so for every period it closes the
    *    two coincide. A CLOSED row that has not ended can only be left by a
@@ -304,7 +359,7 @@ export class AccountingPeriodService {
    *    provider settlements, refunds, reversals). It becomes a lock once it ends.
    */
   async assertOpenForPosting(businessId: string, date: Date, client?: Prisma.TransactionClient): Promise<void> {
-    if (client) await this.lockPeriods(client, businessId, 'shared');
+    if (client) await this.lockMonths(client, businessId, [{ year: date.getUTCFullYear(), month: date.getUTCMonth() + 1 }], 'shared');
     const closed = await this.checkClosed(businessId, date, client);
     if (!closed) return;
     if (closed.endDate.getTime() >= Date.now()) {
@@ -320,23 +375,62 @@ export class AccountingPeriodService {
     );
   }
 
-  /** The business's period lock (see ACCOUNTING_PERIOD_LOCK_NAMESPACE), released at commit or rollback. */
-  private async lockPeriods(tx: Prisma.TransactionClient, businessId: string, mode: 'shared' | 'exclusive') {
-    const key = ACCOUNTING_PERIOD_LOCK_NAMESPACE + businessId;
-    if (mode === 'shared') {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${key}))`;
-    } else {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+  /**
+   * The period locks of `months` (see ACCOUNTING_PERIOD_LOCK_NAMESPACE and
+   * accountingPeriodLockKey), released at commit or rollback. Taken in month
+   * order, so two holders of several months never wait on each other in a cycle.
+   */
+  private async lockMonths(
+    tx: Prisma.TransactionClient,
+    businessId: string,
+    months: Array<{ year: number; month: number }>,
+    mode: 'shared' | 'exclusive',
+  ) {
+    const ordered = [...months].sort((a, b) => a.year - b.year || a.month - b.month);
+    for (const m of ordered) {
+      const key = accountingPeriodLockKey(businessId, m.year, m.month);
+      if (mode === 'shared') {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock_shared(hashtext(${key}))`;
+      } else {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+      }
     }
   }
 
   /**
-   * V1-15 review SEC-V15-2: closing or reopening a period opens or shuts the
-   * posting door, so it is the business owner's or an admin's call: the
-   * distinguished owner (Business.ownerId) or an OWNER / ADMIN membership.
-   * A STAFF member, a stranger, or no actor at all is refused (403).
+   * Lock the period's row (FOR UPDATE) for the rest of the transaction and read
+   * it (review SEC9-1): while close() or reopen() holds it, update() and
+   * remove() wait, and then find it no longer OPEN.
    */
-  private async assertMayGate(businessId: string, explicitActorId: string | undefined, verb: 'close' | 'reopen'): Promise<string> {
+  private async lockPeriodRow(tx: Prisma.TransactionClient, businessId: string, id: string) {
+    const locked = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM accounting_periods WHERE id = ${id} AND business_id = ${businessId} FOR UPDATE`;
+    if (locked.length === 0) throw new NotFoundException('Accounting period not found');
+    const period = await tx.accountingPeriod.findFirst({ where: { id, businessId } });
+    if (!period) throw new NotFoundException('Accounting period not found');
+    return period;
+  }
+
+  /** update() / remove() matched no OPEN row: it was deleted (404) or closed (400) after it was read. */
+  private async refuseNoLongerOpen(businessId: string, id: string, verb: 'update' | 'delete'): Promise<never> {
+    const now = await this.prisma.client.accountingPeriod.findFirst({ where: { id, businessId }, select: { status: true } });
+    if (!now) throw new NotFoundException('Accounting period not found');
+    throw new BadRequestException(`Cannot ${verb} a closed period`);
+  }
+
+  /**
+   * V1-15 review SEC-V15-2: closing or reopening a period opens or shuts the
+   * posting door, and changing or deleting one decides which month a close
+   * shuts (repair2, review SEC9-1), so each is the business owner's or an
+   * admin's call: the distinguished owner (Business.ownerId) or an OWNER /
+   * ADMIN membership. A STAFF member, a stranger, or no actor at all is
+   * refused (403).
+   */
+  private async assertMayGate(
+    businessId: string,
+    explicitActorId: string | undefined,
+    verb: 'close' | 'reopen' | 'update' | 'delete',
+  ): Promise<string> {
     const ambient = getTenantContext();
     const actorId = explicitActorId ?? (ambient?.businessId === businessId ? ambient.userId : undefined);
     if (actorId) {
@@ -383,4 +477,35 @@ export class AccountingPeriodService {
 
 function periodLabel(period: { year: number; month: number }): string {
   return `${period.year}-${String(period.month).padStart(2, '0')}`;
+}
+
+/** SEC-V15-1: only a period that has ended can be closed (400 otherwise). */
+function assertEnded(period: { year: number; month: number; endDate: Date }): void {
+  if (period.endDate.getTime() >= Date.now()) {
+    throw new BadRequestException(
+      `Accounting period ${periodLabel(period)} has not ended: a period can be closed only after its last day.`,
+    );
+  }
+}
+
+/**
+ * The UTC calendar months a period's range touches, in order: its own month
+ * for every period create() and update() write; every month a legacy row's
+ * range spans, so a close locks each month a posting inside it could lock.
+ */
+function monthsOf(period: { startDate: Date; endDate: Date }): Array<{ year: number; month: number }> {
+  const months: Array<{ year: number; month: number }> = [];
+  let year = period.startDate.getUTCFullYear();
+  let month = period.startDate.getUTCMonth() + 1;
+  const lastYear = period.endDate.getUTCFullYear();
+  const lastMonth = period.endDate.getUTCMonth() + 1;
+  while (year < lastYear || (year === lastYear && month <= lastMonth)) {
+    months.push({ year, month });
+    month += 1;
+    if (month > 12) {
+      month = 1;
+      year += 1;
+    }
+  }
+  return months;
 }

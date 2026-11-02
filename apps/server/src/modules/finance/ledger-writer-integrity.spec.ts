@@ -155,12 +155,12 @@ const UPDATE_INVENTORY: Array<{ write: string; why: string }> = [
     why: 'PostingService.reverse marks the original REVERSED in the reversal\'s own transaction',
   },
   {
-    write: 'apps/server/src/modules/finance/accounting-period.service.ts FinancialTransaction.update',
-    why: 'close(): stamps metadata.lockedByPeriod on the period\'s transactions',
+    write: 'apps/server/src/modules/finance/accounting-period.service.ts FinancialTransaction.raw update',
+    why: 'close(): stamps metadata.lockedByPeriod on the period\'s transactions (metadata and updated_at only; one statement, review LC-1)',
   },
   {
-    write: 'apps/server/src/modules/finance/accounting-period.service.ts FinancialTransaction.update',
-    why: 'reopen(): clears metadata.lockedByPeriod',
+    write: 'apps/server/src/modules/finance/accounting-period.service.ts FinancialTransaction.raw update',
+    why: 'reopen(): clears metadata.lockedByPeriod (metadata and updated_at only; one statement, review LC-1)',
   },
   {
     write: 'apps/server/src/modules/finance/reconciliation.service.ts LedgerEntry.updateMany',

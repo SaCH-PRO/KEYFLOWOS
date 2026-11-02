@@ -185,7 +185,7 @@ export class FixedAssetService {
 
     return this.prisma.client.$transaction(async (rawTx) => {
       const tx = rawTx as unknown as Prisma.TransactionClient;
-      // Every run, under the business's period lock, before any write (SEC-V15b-1).
+      // Every run, under the period lock of its date's month, before any write (SEC-V15b-1).
       await this.periods.assertOpenForPosting(businessId, date, tx);
       // Nothing to add: the figure is never written down.
       if (!accounts) return tx.fixedAsset.findUniqueOrThrow({ where: { id } });
