@@ -114,7 +114,22 @@
  *   LWD-23  (LC-3) with 1001 cash transactions in range, the REVERSAL past the
  *           1000th is read: cash P&L and cash cashflow equal the accrual figures
  *
- *   TB-01   trial balance after payments (two currencies), a refund and an
+ *   V1-15c-PAYMENT-INGRESS-AND-READERS (the V1-15 / V1-15b verification):
+ *
+ *   LWD-24  a PayPal capture (capturePaypalOrder; the SDK client stubbed at
+ *           getPaypalClient, no network) records its payment through the door:
+ *           one SUCCESSFUL row and its INCOME posting; the invoice is PAID. At
+ *           cb50b388 it wrote the row with payment.create and posted nothing
+ *   LWD-25  the capture's row and posting commit together: when the posting
+ *           aborts, no SUCCESSFUL row is left unposted
+ *   LWD-26  the dimension breakdowns read every ledger row past the 1000-row
+ *           read cap: with 1001 invoice postings, revenue by customer and by
+ *           product count all 1001; with 1001 bills, expense by vendor and by
+ *           project count all 1001 (at cb50b388: 1000 of each)
+ *   LWD-27  AP aging reads every AP entry and every bill past the cap: 1001
+ *           open bills age into their bucket in full (at cb50b388: 1000)
+ *
+ *   TB-01  trial balance after payments (two currencies), a refund and an
  *           expense void: sum(debit) = sum(credit) per currency, every
  *           transaction balanced, entry currency = transaction currency
  *   TB-02   accrual AR net per invoice = computeBalance(...).remaining, for every
@@ -202,6 +217,16 @@ const ID = {
   contactSlow: `${P}contactSlow`,
   invSlow: `${P}invSlow`,
   bizMany: `${P}bizMany`, // more cash transactions in a report range than one read returns
+  // V1-15c (payment writers through the door, report readers past the read cap)
+  bizCapture: `${P}bizCapture`, // PayPal captures through the door
+  contactCapture: `${P}contactCapture`,
+  invCapture: `${P}invCapture`,
+  invCaptureAbort: `${P}invCaptureAbort`,
+  bizBreak: `${P}bizBreak`, // more ledger rows in a dimension breakdown than one read returns
+  customerBreak: `${P}customerBreak`,
+  vendorBreak: `${P}vendorBreak`,
+  projectBreak: `${P}projectBreak`,
+  productBreak: `${P}productBreak`,
 };
 
 const TB_INVOICES: Array<{ id: string; total: number; currency: string }> = [
@@ -256,6 +281,8 @@ async function cleanup() {
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM projects WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -1789,6 +1816,168 @@ describe('review LC-3: the cash-basis P&L and cashflow read every cash transacti
     expect(cashFlow.accrualAdjustments.netIncome).toBe((SALES - 1) * 10);
     await expectBalanced(ID.bizMany);
   }, 60_000);
+});
+
+describe('V1-15c: a PayPal capture records its payment through the posting door', () => {
+  /** The PayPal SDK client, stubbed at getPaypalClient: the order is this invoice's, and it captures. */
+  function stubPaypal(invoiceId: string, orderId: string, captureId: string) {
+    return vi.spyOn(payments as any, 'getPaypalClient').mockReturnValue({
+      client: {},
+      ordersController: {
+        getOrder: async () => ({ result: { purchaseUnits: [{ customId: invoiceId, amount: { value: '100.00' } }] } }),
+        captureOrder: async () => ({
+          result: { id: orderId, status: 'COMPLETED', purchaseUnits: [{ payments: { captures: [{ id: captureId }] } }], payer: {} },
+        }),
+      },
+    });
+  }
+
+  beforeAll(async () => {
+    await seedTenant(ID.bizCapture, 'CASH');
+    await db.contact.create({ data: { id: ID.contactCapture, businessId: ID.bizCapture, firstName: 'V15A', lastName: 'Capture', email: `${P}capture@test.local` } });
+    await seedInvoice(ID.invCapture, ID.bizCapture, ID.contactCapture, 50, 100, 'TTD', 'SENT');
+    await seedInvoice(ID.invCaptureAbort, ID.bizCapture, ID.contactCapture, 51, 100, 'TTD', 'SENT');
+  }, 60_000);
+
+  it('LWD-24 (V1-15c): capturePaypalOrder records one SUCCESSFUL row and posts it once; the invoice is PAID', async () => {
+    const spy = stubPaypal(ID.invCapture, `${P}order_capture`, `${P}cap_capture`);
+    try {
+      expect(await payments.capturePaypalOrder(`${P}order_capture`, ID.invCapture)).toMatchObject({ id: `${P}order_capture`, status: 'COMPLETED' });
+    } finally {
+      spy.mockRestore();
+    }
+    const rows = await db.payment.findMany({ where: { invoiceId: ID.invCapture } });
+    expect(rows.map((p: any) => `${p.provider}:${p.providerPaymentId}:${p.status}:${Number(p.amount)}`)).toEqual([`paypal:${P}cap_capture:SUCCESSFUL:100`]);
+    // At cb50b388: [] (payment.create with no posting: the ledger never saw the capture).
+    expect((await paymentPostings(rows[0].id)).map((t: any) => `${t.type}:${t.status}:${Number(t.amount)}`)).toEqual(['INCOME:POSTED:100']);
+    expect((await db.invoice.findUnique({ where: { id: ID.invCapture } })).status).toBe('PAID');
+    await expectBalanced(ID.bizCapture);
+  });
+
+  it('LWD-25 (V1-15c): when the capture\'s posting aborts, no SUCCESSFUL row is left unposted', async () => {
+    const revenuePosting = (payments as any).revenuePosting;
+    const abort = vi.spyOn(revenuePosting, 'onPaymentRecorded').mockRejectedValue(
+      Object.assign(new Error('Transaction already closed (injected by V1-15c)'), { code: 'P2028' }),
+    );
+    const spy = stubPaypal(ID.invCaptureAbort, `${P}order_abort`, `${P}cap_abort`);
+    try {
+      await expect(payments.capturePaypalOrder(`${P}order_abort`, ID.invCaptureAbort)).rejects.toThrow(/Failed to capture PayPal order/);
+    } finally {
+      spy.mockRestore();
+      abort.mockRestore();
+    }
+    const rows = await db.payment.findMany({ where: { invoiceId: ID.invCaptureAbort } });
+    // At cb50b388: one SUCCESSFUL row with no posting (the posting was never attempted).
+    expect(rows.filter((p: any) => p.status === 'SUCCESSFUL')).toEqual([]);
+    expect(await db.financialTransaction.count({ where: { sourceType: 'Payment', sourceId: { in: rows.map((p: any) => p.id) } } })).toBe(0);
+    expect((await db.invoice.findUnique({ where: { id: ID.invCaptureAbort } })).status).toBe('SENT');
+  });
+});
+
+describe('V1-15c: the dimension breakdowns and AP aging read every ledger row, past the 1000-row read cap', () => {
+  const ROWS = 1001;
+  const from = new Date(Date.UTC(2000, 0, 1));
+  const date = new Date(Date.now() - 86_400_000);
+  /** Every bill fell due ten days ago: one aging bucket (1-30 days). */
+  const dueDate = new Date(Date.now() - 10 * 86_400_000);
+
+  beforeAll(async () => {
+    await seedTenant(ID.bizBreak, 'ACCRUAL');
+    await db.contact.create({ data: { id: ID.customerBreak, businessId: ID.bizBreak, firstName: 'V15A', lastName: 'Customer', email: `${P}break_customer@test.local` } });
+    await db.contact.create({ data: { id: ID.vendorBreak, businessId: ID.bizBreak, firstName: 'V15A', lastName: 'Vendor', email: `${P}break_vendor@test.local` } });
+    await db.project.create({ data: { id: ID.projectBreak, businessId: ID.bizBreak, name: 'V15A project' } });
+    await db.product.create({ data: { id: ID.productBreak, businessId: ID.bizBreak, name: 'V15A product', price: 10, category: 'PRODUCT' } });
+    const ar = await accountId(ID.bizBreak, 'ACCOUNTS_RECEIVABLE');
+    const revenue = await accountId(ID.bizBreak, 'REVENUE');
+    const expense = await accountId(ID.bizBreak, 'EXPENSE_GENERAL');
+    const ap = await accountId(ID.bizBreak, 'ACCOUNTS_PAYABLE');
+    const n = Array.from({ length: ROWS }, (_, i) => i);
+    // 1001 invoices of one product, each recognised (Dr AR / Cr Revenue) by its own posting.
+    await db.invoice.createMany({
+      data: n.map((i) => ({
+        id: `${P}brk_inv_${i}`,
+        invoiceNumber: `V15A-BRK-${i}`,
+        status: 'SENT',
+        subtotal: 10,
+        total: 10,
+        currency: 'TTD',
+        businessId: ID.bizBreak,
+        contactId: ID.customerBreak,
+      })),
+    });
+    await db.invoiceItem.createMany({
+      data: n.map((i) => ({ id: `${P}brk_item_${i}`, invoiceId: `${P}brk_inv_${i}`, productId: ID.productBreak, description: 'v15a item', quantity: 1, unitPrice: 10, total: 10 })),
+    });
+    // 1001 bills of one vendor and one project, each booked (Dr Expense / Cr AP) by its own posting.
+    await db.expense.createMany({
+      data: n.map((i) => ({
+        id: `${P}brk_exp_${i}`,
+        description: `v15a bill ${i}`,
+        amount: 10,
+        currency: 'TTD',
+        date,
+        vendor: 'V15A Vendor',
+        contactId: ID.vendorBreak,
+        projectId: ID.projectBreak,
+        status: 'BILL',
+        dueDate,
+        businessId: ID.bizBreak,
+      })),
+    });
+    const txn = (id: string, type: string, sourceType: string, sourceId: string, contactId: string) => ({
+      id, businessId: ID.bizBreak, type, status: 'POSTED', date, amount: 10, currency: 'TTD', contactId, sourceType, sourceId,
+      description: `v15a break ${sourceId}`,
+    });
+    await db.financialTransaction.createMany({
+      data: [
+        ...n.map((i) => txn(`${P}brk_in_${i}`, 'INCOME', 'Invoice', `${P}brk_inv_${i}`, ID.customerBreak)),
+        ...n.map((i) => txn(`${P}brk_ex_${i}`, 'EXPENSE', 'Expense', `${P}brk_exp_${i}`, ID.vendorBreak)),
+      ],
+    });
+    const entry = (txId: string, account: string, side: 'debit' | 'credit') => ({
+      businessId: ID.bizBreak, transactionId: txId, accountId: account, currency: 'TTD', date, debit: side === 'debit' ? 10 : 0, credit: side === 'credit' ? 10 : 0,
+    });
+    await db.ledgerEntry.createMany({
+      data: [
+        ...n.flatMap((i) => [entry(`${P}brk_in_${i}`, ar, 'debit'), entry(`${P}brk_in_${i}`, revenue, 'credit')]),
+        ...n.flatMap((i) => [entry(`${P}brk_ex_${i}`, expense, 'debit'), entry(`${P}brk_ex_${i}`, ap, 'credit')]),
+      ],
+    });
+  }, 120_000);
+
+  it('LWD-26 (V1-15c): revenue by customer and by product, and expense by vendor and by project, count all 1001 postings', async () => {
+    const to = new Date(Date.now() + 86_400_000);
+    expect(await db.ledgerEntry.count({ where: { businessId: ID.bizBreak } })).toBe(ROWS * 4);
+    const total = ROWS * 10;
+    // At cb50b388 each read was cut at 1000 rows: 10000 and 1000.
+    expect(await reporting.getRevenueBy(ID.bizBreak, 'customer', from, to)).toEqual([
+      { key: ID.customerBreak, label: 'V15A Customer', total, count: ROWS },
+    ]);
+    expect(await reporting.getRevenueBy(ID.bizBreak, 'product', from, to)).toEqual([
+      { key: ID.productBreak, label: 'V15A product', total, count: ROWS },
+    ]);
+    expect(await reporting.getExpenseBy(ID.bizBreak, 'vendor', from, to)).toEqual([
+      { key: ID.vendorBreak, label: 'V15A Vendor', total, count: ROWS },
+    ]);
+    expect(await reporting.getExpenseBy(ID.bizBreak, 'project', from, to)).toEqual([
+      { key: ID.projectBreak, label: 'V15A project', total, count: ROWS },
+    ]);
+    // The aggregate readers (a groupBy, no cap) agree.
+    const pnl = await reporting.getPnl(ID.bizBreak, from, to, 'accrual');
+    expect(pnl.revenue.total).toBe(total);
+    await expectBalanced(ID.bizBreak);
+  });
+
+  it('LWD-27 (V1-15c): AP aging reads every AP entry and every bill: 1001 open bills age into the 1-30 day bucket in full', async () => {
+    const aging = await reporting.getApAging(ID.bizBreak, new Date());
+    // At cb50b388: 10000, 1000 bills.
+    expect(aging.total).toBe(ROWS * 10);
+    expect(aging.buckets.d_1_30).toEqual({ total: ROWS * 10, count: ROWS });
+    expect(aging.buckets.current).toEqual({ total: 0, count: 0 });
+    expect(aging.vendors).toEqual([
+      expect.objectContaining({ key: ID.vendorBreak, label: 'V15A Vendor', total: ROWS * 10, d1to30: ROWS * 10 }),
+    ]);
+  });
 });
 
 describe('M30: real-database trial balance after payment, refund and void', () => {

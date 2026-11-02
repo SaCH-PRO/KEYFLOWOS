@@ -88,14 +88,15 @@ export const MONEY_STATE_WRITERS: Inventory = {
       '(PENDING intent row: create, or amount update on the existing intent)',
   },
   'apps/server/src/modules/payments/payments.service.ts': {
-    ops: { create: 8 },
+    ops: { create: 7 },
     why:
       'provider settlement: createPaymentWithPosting / createRefundWithPosting(ByInvoice) (row + posting in one ' +
-      'transaction), WiPay callback, store payment, PayPal capture',
+      'transaction); FAILED records (WiPay callback, PayPal capture); PENDING store checkout intents. ' +
+      'Per function: PAYMENTS_MODULE_WRITERS below (V1-15c)',
   },
   'apps/server/src/modules/payments/payments-ops.service.ts': {
     ops: { create: 1 },
-    why: 'refundCharge: provider refund row',
+    why: 'refundCharge: provider refund row, unposted (PAYMENTS_MODULE_WRITERS below names its owner)',
   },
   'apps/server/src/modules/site/store-order.service.ts': {
     ops: { create: 1 },
@@ -190,4 +191,246 @@ describe('V1-15 money-state writer inventory (Payment rows)', () => {
       'apps/server/src/modules/payments/payments-ops.service.ts now has 0 Payment create call site(s), the inventory records 1: lower it',
     ]);
   });
+});
+
+/**
+ * V1-15c-PAYMENT-INGRESS-AND-READERS — the payments module's Payment writers,
+ * by the function that holds each one. MONEY_STATE_WRITERS counts call sites
+ * per file, and its entry for the payments module allowed refundCharge,
+ * createStorePayment and capturePaypalOrder to write Payment rows with no
+ * posting without saying so. Here every writer in apps/server/src/modules/payments
+ * is one of:
+ *
+ *   door      the row and its ledger posting in one transaction (the function
+ *             runs a $transaction and calls RevenuePostingService.onPayment*)
+ *   no-money  only PENDING or FAILED rows, each with its status written as a
+ *             literal: nothing moved, nothing to post until it settles
+ *   unposted  money state written without a posting: listed with its reason
+ *             and the packet that owns routing it through the door, which an
+ *             it.todo below names (no silent allowance)
+ *
+ *   MSW-04  every Payment writer of the module is classified by its function;
+ *           each class is checked against the source; a stale entry fails
+ *   MSW-05  capturePaypalOrder records a captured payment through the door
+ *           (createPaymentWithPosting); its only direct write is the FAILED
+ *           record of a capture that failed
+ *   MSW-06  every todo names an owning packet that is in the build map
+ */
+const PAYMENTS_MODULE = 'apps/server/src/modules/payments/';
+
+type WriterClass =
+  | { kind: 'door'; why: string }
+  | { kind: 'no-money'; why: string; todo?: { owner: string; what: string } }
+  | { kind: 'unposted'; why: string; todo: { owner: string; what: string } };
+
+export const PAYMENTS_MODULE_WRITERS: Record<string, WriterClass> = {
+  'apps/server/src/modules/payments/payments.service.ts#createPaymentWithPosting': {
+    kind: 'door',
+    why: 'provider settlements (Stripe, PayPal webhooks and capture, WiPay callback): row + onPaymentRecorded in one transaction',
+  },
+  'apps/server/src/modules/payments/payments.service.ts#createRefundWithPosting': {
+    kind: 'door',
+    why: 'provider refunds keyed by the original capture: negative REFUNDED row + onPaymentRefunded in one transaction',
+  },
+  'apps/server/src/modules/payments/payments.service.ts#createRefundWithPostingByInvoice': {
+    kind: 'door',
+    why: 'provider refunds without the capture id: the same, the original resolved by invoice',
+  },
+  'apps/server/src/modules/payments/payments.service.ts#handleWipayCallback': {
+    kind: 'no-money',
+    why: 'the FAILED record of a failed WiPay callback; a successful one goes through createPaymentWithPosting',
+  },
+  'apps/server/src/modules/payments/payments.service.ts#capturePaypalOrder': {
+    kind: 'no-money',
+    why: 'the FAILED record of a PayPal capture that failed; a COMPLETED capture goes through createPaymentWithPosting (V1-15c)',
+  },
+  'apps/server/src/modules/payments/payments.service.ts#createStorePayment': {
+    kind: 'no-money',
+    why:
+      'PENDING checkout intents of a storefront order (CASH / MANUAL, Stripe store checkout); the settled row is written ' +
+      'through the door by StoreOrderService.completeCheckout',
+    todo: {
+      owner: 'V1-33-PUB-CHECKOUT-RETRY-OFFLINE',
+      what:
+        'the intent puts the MarketplaceOrder id in payments.invoice_id, which has a foreign key to invoices, so the write ' +
+        'fails for a storefront order (the Stripe store checkout errors after its session was created), and nothing ' +
+        'settles or retires a PENDING intent',
+    },
+  },
+  'apps/server/src/modules/payments/payments-ops.service.ts#refundCharge': {
+    kind: 'unposted',
+    why:
+      'the operator / KEY provider refund: a negative REFUNDED row written after the provider refunded, with no ' +
+      'reversal of the original posting; the provider refund webhook then finds the row by its refund id and posts nothing either',
+    todo: {
+      owner: 'V1-29-DM-REFUND-CONVENTION',
+      what:
+        'route refundCharge through the refund door (row + onPaymentRefunded in one transaction, as ' +
+        "PaymentsService.createRefundWithPosting); payments-ops.service.ts is outside V1-15c's write set",
+    },
+  },
+};
+
+interface WriteSite extends MoneyWrite {
+  fn: string;
+  /** Status literals written by the call (`status: 'X'`); empty when the data is not a literal. */
+  statuses: string[];
+}
+
+/** A class member declaration at the member indent (two spaces). */
+const MEMBER_DECL =
+  /^ {2}(?:(?:public|private|protected|static|async|override)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>\n]*>)?\s*\(/;
+const NOT_A_MEMBER = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'await', 'function', 'new', 'typeof']);
+
+/** The class members of a source file: name and [start, end) line range of each (1-based). */
+function members(source: string): Array<{ name: string; start: number; end: number }> {
+  const lines = codeLines(source).split('\n');
+  const decls: Array<{ name: string; start: number }> = [];
+  lines.forEach((l, i) => {
+    const m = MEMBER_DECL.exec(l);
+    if (m && !NOT_A_MEMBER.has(m[1])) decls.push({ name: m[1], start: i + 1 });
+  });
+  return decls.map((d, i) => ({ ...d, end: decls[i + 1]?.start ?? lines.length + 1 }));
+}
+
+/** The text of the call whose `(` is at `open`. */
+function callText(src: string, open: number): string {
+  let depth = 0;
+  for (let i = open; i < src.length; i++) {
+    if (src[i] === '(') depth += 1;
+    else if (src[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return src.slice(open, i + 1);
+    }
+  }
+  return src.slice(open);
+}
+
+/** Every delegate Payment write of one file, with the member that holds it and the statuses it writes. */
+export function writeSites(file: string, source: string): WriteSite[] {
+  const src = codeLines(source);
+  const ms = members(source);
+  const out: WriteSite[] = [];
+  for (const m of src.matchAll(DELEGATE_WRITE)) {
+    const index = m.index ?? 0;
+    const line = lineAt(src, index);
+    const fn = ms.find((x) => line >= x.start && line < x.end)?.name ?? '<top level>';
+    const text = callText(src, index + m[0].length - 1);
+    out.push({ file, line, op: m[1], fn, statuses: [...text.matchAll(/\bstatus\s*:\s*'([A-Z_]+)'/g)].map((s) => s[1]) });
+  }
+  return out;
+}
+
+/** The source of one member of a file (comments blanked). */
+function memberSource(source: string, name: string): string {
+  const m = members(source).find((x) => x.name === name);
+  if (!m) return '';
+  return codeLines(source).split('\n').slice(m.start - 1, m.end - 1).join('\n');
+}
+
+/** MSW-04: findings for a module's Payment writers against their classification. */
+export function compareToClassification(files: Record<string, string>, classes: Record<string, WriterClass>): string[] {
+  const problems: string[] = [];
+  const sites = Object.entries(files).flatMap(([file, source]) => writeSites(file, source));
+  for (const [file, source] of Object.entries(files)) {
+    const scanned = scanMoneyWrites(file, source).length;
+    const attributed = sites.filter((s) => s.file === file).length;
+    if (scanned !== attributed) {
+      problems.push(
+        `${file}: ${scanned} Payment write(s), ${attributed} attributed to a function (a nested, raw or computed write is not classifiable)`,
+      );
+    }
+  }
+  for (const s of sites) {
+    const key = `${s.file}#${s.fn}`;
+    const c = classes[key];
+    if (!c) {
+      problems.push(`${s.file}:${s.line} (${s.fn}) writes Payment (${s.op}) and is not classified`);
+    } else if (c.kind === 'no-money' && (s.statuses.length === 0 || s.statuses.some((st) => st !== 'PENDING' && st !== 'FAILED'))) {
+      problems.push(`${s.file}:${s.line} (${s.fn}) is classified no-money but writes status ${s.statuses.join('/') || '<not a literal>'}`);
+    }
+  }
+  for (const [key, c] of Object.entries(classes)) {
+    const [file, fn] = key.split('#');
+    if (!sites.some((s) => s.file === file && s.fn === fn)) {
+      problems.push(`${key} is classified but writes no Payment row: remove it`);
+    } else if (c.kind === 'door') {
+      const body = memberSource(files[file] ?? '', fn);
+      if (!/\$transaction\s*\(/.test(body) || !/revenuePosting\s*\.\s*onPayment(Recorded|Refunded)\s*\(/.test(body)) {
+        problems.push(`${key} is classified door but does not post in its transaction`);
+      }
+    }
+  }
+  return problems.sort();
+}
+
+const MODULE_FILES: Record<string, string> = Object.fromEntries(
+  FILES.map((f) => [relative(REPO, f).split(sep).join('/'), f] as const)
+    .filter(([rel]) => rel.startsWith(PAYMENTS_MODULE))
+    .map(([rel, f]) => [rel, readFileSync(f, 'utf8')]),
+);
+
+describe('V1-15c Payment writers of the payments module, by function (no silent allowance)', () => {
+  it('reads the payments module and attributes its writers (this gate is not vacuous)', () => {
+    const sites = Object.entries(MODULE_FILES).flatMap(([file, source]) => writeSites(file, source));
+    expect(sites.map((s) => s.fn)).toEqual(expect.arrayContaining(['createPaymentWithPosting', 'refundCharge', 'createStorePayment']));
+  });
+
+  it('MSW-04: every Payment writer of the payments module is classified, and each class holds in the source', () => {
+    expect(compareToClassification(MODULE_FILES, PAYMENTS_MODULE_WRITERS)).toEqual([]);
+  });
+
+  it('MSW-04: the check fails a SUCCESSFUL row written outside the door, an unclassified writer and a stale entry (self-test)', () => {
+    const file = `${PAYMENTS_MODULE}rogue.service.ts`;
+    const source = [
+      'export class Rogue {',
+      '  async settle(tx: any) {',
+      "    await tx.payment.create({ data: { amount: 1, status: 'SUCCESSFUL' } });",
+      '  }',
+      '',
+      '  async intend(tx: any) {',
+      "    await tx.payment.create({ data: { amount: 1, status: 'PENDING' } });",
+      '  }',
+      '}',
+    ].join('\n');
+    expect(
+      compareToClassification(
+        { [file]: source },
+        {
+          [`${file}#settle`]: { kind: 'no-money', why: 'claims to move no money' },
+          [`${file}#gone`]: { kind: 'door', why: 'stale' },
+        },
+      ),
+    ).toEqual([
+      `${file}#gone is classified but writes no Payment row: remove it`,
+      `${file}:3 (settle) is classified no-money but writes status SUCCESSFUL`,
+      `${file}:7 (intend) writes Payment (create) and is not classified`,
+    ]);
+  });
+
+  it('MSW-05: capturePaypalOrder records a COMPLETED capture through createPaymentWithPosting; its only direct write is the FAILED record', () => {
+    const file = `${PAYMENTS_MODULE}payments.service.ts`;
+    const source = MODULE_FILES[file];
+    expect(memberSource(source, 'capturePaypalOrder')).toMatch(/this\.createPaymentWithPosting\(/);
+    expect(writeSites(file, source).filter((s) => s.fn === 'capturePaypalOrder').map((s) => s.statuses)).toEqual([['FAILED']]);
+  });
+
+  it('MSW-06: every todo names an owning packet that is in the build map, and every unposted writer has one', () => {
+    const map = readFileSync(join(REPO, 'docs', 'reconstruction', 'BUILD-MAP-001.md'), 'utf8');
+    const owners = Object.entries(PAYMENTS_MODULE_WRITERS).flatMap(([key, c]) => ('todo' in c && c.todo ? [[key, c.todo.owner]] : []));
+    expect(owners.map(([key]) => key)).toEqual(
+      expect.arrayContaining([
+        'apps/server/src/modules/payments/payments-ops.service.ts#refundCharge',
+        'apps/server/src/modules/payments/payments.service.ts#createStorePayment',
+      ]),
+    );
+    for (const [key, owner] of owners) expect(map, `${key} names ${owner}`).toContain(`\`${owner}\``);
+    for (const [key, c] of Object.entries(PAYMENTS_MODULE_WRITERS)) {
+      if (c.kind === 'unposted') expect(c.todo?.owner, `${key} is unposted with no owning packet`).toMatch(/^V1-\d+[a-z]?-[A-Z0-9-]+$/);
+    }
+  });
+
+  for (const [key, c] of Object.entries(PAYMENTS_MODULE_WRITERS)) {
+    if ('todo' in c && c.todo) it.todo(`${c.todo.owner}: ${key.split('#')[1]} (${c.kind}): ${c.todo.what}`);
+  }
 });

@@ -313,6 +313,11 @@
       "packet": "V1-15-DM-LEDGER-WRITE-DOOR"
     },
     {
+      "prefix": "v15c_",
+      "owner": "apps/server/test/payment-webhook-dedupe.integration.test.ts",
+      "packet": "V1-15 (V1-15c-PAYMENT-INGRESS-AND-READERS)"
+    },
+    {
       "prefix": "v16a_",
       "owner": "apps/server/test/booking-concurrency.integration.test.ts",
       "packet": "V1-16-BK-SLOT-CONCURRENCY"
