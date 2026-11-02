@@ -17,6 +17,8 @@ import {
 } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
+import { contactWhereWithId } from '../crm/crm.helpers';
+import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { CommerceService } from '../commerce/commerce.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
@@ -678,6 +680,123 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * The service's advance-notice rule, as the public widget has always applied
+   * it. publicCreateBooking and createBooking both call this (V1-06), so the
+   * in-app path refuses with the same message rather than not at all.
+   */
+  private assertLeadTime(leadTimeMins: number | null | undefined, start: Date): void {
+    if (!leadTimeMins || leadTimeMins <= 0) return;
+    const minStart = new Date(Date.now() + leadTimeMins * 60000);
+    if (start < minStart) {
+      throw new BadRequestException(
+        `This service requires at least ${leadTimeMins} minutes advance notice.`,
+      );
+    }
+  }
+
+  /**
+   * The optional ids a create writes onto the booking must be live rows of the
+   * booking's business; anything else answers like an unknown id (404). Both
+   * create paths call this (V1-06 review): the public widget wrote any staffId
+   * or orgUnitId it was handed, so an anonymous caller could put another
+   * business's staff member or org unit on this business's booking, and its
+   * name then showed in this business's booking list and notifications.
+   */
+  private async assertOwnedRefs(params: {
+    businessId: string;
+    staffId?: string | null;
+    orgUnitId?: string | null;
+  }): Promise<void> {
+    if (params.staffId) {
+      const staff = await this.prisma.client.staffMember.findFirst({
+        where: { id: params.staffId, businessId: params.businessId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!staff) throw new NotFoundException('Staff member not found');
+    }
+    if (params.orgUnitId) {
+      const orgUnit = await this.prisma.client.orgUnit.findFirst({
+        where: { id: params.orgUnitId, businessId: params.businessId },
+        select: { id: true },
+      });
+      if (!orgUnit) throw new NotFoundException('Org unit not found');
+    }
+  }
+
+  /**
+   * Staff working hours, else business hours: the public path's rules and
+   * messages, moved out of publicCreateBooking (V1-06) so createBooking applies
+   * the same ones and the two cannot drift apart.
+   *
+   * A staff member with any availability rows is held to them and business
+   * hours are not consulted. Otherwise the day must not be closed, and start
+   * through end plus the buffer must fit inside the day's opening hours.
+   *
+   * Both checks measure the end as start-of-day minutes plus the booking's
+   * length, so a booking that runs past midnight (in-app, the client chooses
+   * the end) is outside every day's hours rather than judged by the end's time
+   * of day alone. A day row without open/close times sets no hours, as in
+   * rescheduleBooking. Server-local time, as everywhere in this service
+   * (timezone is V1-16).
+   */
+  private async assertWithinSchedule(params: {
+    businessId: string;
+    staffId?: string | null;
+    hours: BusinessHoursMap | null;
+    start: Date;
+    end: Date;
+    bufferMins?: number | null;
+  }): Promise<void> {
+    const { start, end } = params;
+    const startMinsOfDay = start.getHours() * 60 + start.getMinutes();
+    const durationMins = Math.round((end.getTime() - start.getTime()) / 60000);
+    if (params.staffId) {
+      const staffAvailabilities = await this.prisma.client.availability.findMany({
+        where: {
+          staffId: params.staffId,
+          staff: { businessId: params.businessId, deletedAt: null },
+        },
+      });
+      if (staffAvailabilities.length > 0) {
+        const dayOfWeek = start.getDay();
+        const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
+        if (slotAvail.length === 0) {
+          throw new BadRequestException('The selected staff member is not available on this day.');
+        }
+        // An end at midnight is 1440, as the end's time of day `|| 1440` was.
+        const endMinsOfDay = startMinsOfDay + durationMins;
+        const withinAny = slotAvail.some((a) => {
+          const [sh, sm] = a.startTime.split(':').map(Number);
+          const [eh, em] = a.endTime.split(':').map(Number);
+          return startMinsOfDay >= sh * 60 + sm && endMinsOfDay <= eh * 60 + em;
+        });
+        if (!withinAny) {
+          throw new BadRequestException('The selected time is outside this staff member\'s available hours.');
+        }
+        return;
+      }
+    }
+
+    const hours = params.hours;
+    if (!hours) return;
+    const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const dayHours = hours[dayKeys[start.getDay()]];
+    if (dayHours?.closed) {
+      throw new BadRequestException('This business is closed on the selected day.');
+    }
+    if (dayHours && dayHours.open && dayHours.close) {
+      const [oh, om] = dayHours.open.split(':').map(Number);
+      const [ch, cm] = dayHours.close.split(':').map(Number);
+      const openMins = oh * 60 + om;
+      const closeMins = ch * 60 + cm;
+      const endMins = startMinsOfDay + durationMins + (params.bufferMins || 0);
+      if (startMinsOfDay < openMins || endMins > closeMins) {
+        throw new BadRequestException('The selected time is outside business hours.');
+      }
+    }
+  }
+
   async rescheduleBooking(businessId: string, bookingId: string, newStartTime: Date) {
     const booking = await this.prisma.client.booking.findFirst({
       where: { id: bookingId, businessId, deletedAt: null },
@@ -858,23 +977,63 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     locationPlaceId?: string;
     locationLatLng?: { lat: number; lng: number };
     orgUnitId?: string;
+    /** The member making the booking: their CRM view bounds which contact they may book. */
+    actorUserId?: string;
   }) {
     // Staff booking from inside the app had NO check of any kind — not
     // overlap, not lead time, nothing. It went straight to booking.create, so
     // anyone with app access could double-book a slot the public widget would
     // have refused. The buffer is read from the service for the same reason
     // the other two paths read it: a configured buffer widens the window.
+    //
+    // V1-06: it also wrote whatever ids it was handed, so another business's
+    // service, contact, staff member or org unit was booked into this one.
+    // Each must be a live row of this business, and the contact one the actor's
+    // CRM view shows (as GET contacts/:id decides it); anything else answers
+    // like an unknown id. Without staffId the service is the resource
+    // (assertSlotFree). The client chooses endTime, so it must follow startTime.
+    const startMs = input.startTime.getTime();
+    const endMs = input.endTime.getTime();
+    if (Number.isNaN(startMs) || Number.isNaN(endMs)) {
+      throw new BadRequestException('startTime and endTime must be valid dates.');
+    }
+    if (endMs <= startMs) throw new BadRequestException('The end time must be after the start time.');
     const bookedService = await this.prisma.client.service.findFirst({
       where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
-      select: { bufferMins: true },
+      select: { bufferMins: true, leadTimeMins: true },
     });
+    if (!bookedService) throw new NotFoundException('Service not found');
+    const contactWhere: Prisma.ContactWhereInput = { ...contactWhereWithId(input.businessId, input.contactId) };
+    if (input.actorUserId) {
+      const access = await resolveCrmAccess(this.prisma, input.businessId, input.actorUserId);
+      const visClause = visibilityClause(access, input.actorUserId);
+      if (visClause) contactWhere.AND = [visClause as Prisma.ContactWhereInput];
+    }
+    const contact = await this.prisma.client.contact.findFirst({ where: contactWhere, select: { id: true } });
+    if (!contact) throw new NotFoundException('Contact not found');
+    await this.assertOwnedRefs(input);
+
+    // The public path's rules, in its order and with its messages.
+    this.assertLeadTime(bookedService.leadTimeMins, input.startTime);
     await this.assertSlotFree({
       businessId: input.businessId,
       serviceId: input.serviceId,
       staffId: input.staffId,
       start: input.startTime,
       end: input.endTime,
-      bufferMins: bookedService?.bufferMins,
+      bufferMins: bookedService.bufferMins,
+    });
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: input.businessId },
+      select: { businessHours: true },
+    });
+    await this.assertWithinSchedule({
+      businessId: input.businessId,
+      staffId: input.staffId,
+      hours: (business?.businessHours ?? null) as BusinessHoursMap | null,
+      start: input.startTime,
+      end: input.endTime,
+      bufferMins: bookedService.bufferMins,
     });
 
     const createData: Prisma.BookingUncheckedCreateInput = {
@@ -993,18 +1152,12 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     const service = await this.prisma.client.service.findFirstOrThrow({
       where: { id: input.serviceId, businessId: input.businessId, deletedAt: null },
     });
+    await this.assertOwnedRefs(input);
 
     const start = new Date(input.startTime);
     const end = new Date(start.getTime() + service.duration * 60000);
 
-    if (service.leadTimeMins && service.leadTimeMins > 0) {
-      const minStart = new Date(Date.now() + service.leadTimeMins * 60000);
-      if (start < minStart) {
-        throw new BadRequestException(
-          `This service requires at least ${service.leadTimeMins} minutes advance notice.`,
-        );
-      }
-    }
+    this.assertLeadTime(service.leadTimeMins, start);
 
     await this.assertSlotFree({
       businessId: input.businessId,
@@ -1015,54 +1168,14 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       bufferMins: service.bufferMins,
     });
 
-    let hasStaffScheduleOverride = false;
-    if (input.staffId) {
-      const staffAvailabilities = await this.prisma.client.availability.findMany({
-        where: {
-          staffId: input.staffId,
-          staff: { businessId: input.businessId, deletedAt: null },
-        },
-      });
-      if (staffAvailabilities.length > 0) {
-        hasStaffScheduleOverride = true;
-        const dayOfWeek = start.getDay();
-        const slotAvail = staffAvailabilities.filter((a) => a.dayOfWeek === dayOfWeek);
-        if (slotAvail.length === 0) {
-          throw new BadRequestException('The selected staff member is not available on this day.');
-        }
-        const startMinsOfDay = start.getHours() * 60 + start.getMinutes();
-        const endMinsOfDay = (end.getHours() * 60 + end.getMinutes()) || 1440;
-        const withinAny = slotAvail.some((a) => {
-          const [sh, sm] = a.startTime.split(':').map(Number);
-          const [eh, em] = a.endTime.split(':').map(Number);
-          return startMinsOfDay >= sh * 60 + sm && endMinsOfDay <= eh * 60 + em;
-        });
-        if (!withinAny) {
-          throw new BadRequestException('The selected time is outside this staff member\'s available hours.');
-        }
-      }
-    }
-
-    const hours = business.businessHours as BusinessHoursMap | null;
-    if (hours && !hasStaffScheduleOverride) {
-      const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-      const dayKey = dayKeys[start.getDay()];
-      const dayHours = hours[dayKey];
-      if (dayHours?.closed) {
-        throw new BadRequestException('This business is closed on the selected day.');
-      }
-      if (dayHours) {
-        const [oh, om] = dayHours.open.split(':').map(Number);
-        const [ch, cm] = dayHours.close.split(':').map(Number);
-        const startMins = start.getHours() * 60 + start.getMinutes();
-        const openMins = oh * 60 + om;
-        const closeMins = ch * 60 + cm;
-        const endMins = startMins + (service.duration || 0) + (service.bufferMins || 0);
-        if (startMins < openMins || endMins > closeMins) {
-          throw new BadRequestException('The selected time is outside business hours.');
-        }
-      }
-    }
+    await this.assertWithinSchedule({
+      businessId: input.businessId,
+      staffId: input.staffId,
+      hours: business.businessHours as BusinessHoursMap | null,
+      start,
+      end,
+      bufferMins: service.bufferMins,
+    });
 
     const sourceDetail = input.storefrontSlug
       ? `storefront:${input.storefrontSlug}`

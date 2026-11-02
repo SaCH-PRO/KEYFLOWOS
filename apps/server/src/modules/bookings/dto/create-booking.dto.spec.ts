@@ -70,8 +70,16 @@ describe('CreateBookingDto', () => {
   });
 
   it('still rejects a missing required field', async () => {
+    // serviceId, not staffId: staff is optional since V1-06 (the next case).
+    const { serviceId: _omitted, ...withoutService } = valid;
+    await expect(through(withoutService)).rejects.toThrow();
+  });
+
+  it('accepts a payload without staffId: the service is then the booked resource (V1-06)', async () => {
     const { staffId: _omitted, ...withoutStaff } = valid;
-    await expect(through(withoutStaff)).rejects.toThrow();
+    const out = await through(withoutStaff);
+    expect(out.staffId).toBeUndefined();
+    expect(out.serviceId).toBe('service_1');
   });
 
   it('carries no @Type(() => Date) on the time fields', async () => {

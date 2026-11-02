@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards, Delete, Query, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, NotFoundException, Param, Patch, Post, UseGuards, Delete, Query, Req, Res, UnauthorizedException } from '@nestjs/common';
 import { Response } from 'express';
 import { BookingStatus } from '@prisma/client';
 import { BookingsService } from './bookings.service';
@@ -119,11 +119,18 @@ export class BookingsController {
   createBooking(
     @Param('businessId') businessId: string,
     @Body() body: CreateBookingDto,
+    @Req() req: { user?: { id?: string } },
   ) {
     if (!body.contactId) {
       throw new BadRequestException('contactId is required');
     }
+    // The member's CRM view bounds which contact they may book (V1-06 review):
+    // a contact GET contacts/:id would answer 404 for them is a 404 here too.
+    // AuthGuard has already refused a request without a user.
+    const actorUserId = req?.user?.id;
+    if (!actorUserId) throw new UnauthorizedException('Authentication required');
     return this.bookings.createBooking({
+      actorUserId,
       businessId,
       contactId: body.contactId,
       serviceId: body.serviceId,
