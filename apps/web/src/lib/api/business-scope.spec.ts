@@ -24,11 +24,16 @@
  *      literal or an empty id), and the business-scoped helper layer sends
  *      nothing except through its guard.
  *   2. A runtime census of the helpers: EVERY exported lib/client.ts function
- *      that names a business route is called for real, with only the network
- *      stubbed. With a business selected, every request it sends names that
- *      business; with none selected (and with an empty, null or undefined id),
- *      it sends nothing and answers "No business selected" instead.
- *   3. The mounts: contact detail, the pipeline tab and settings/custom-fields,
+ *      that names a business route, or carries its business in the request
+ *      query or body, is called for real, with only the network stubbed. With
+ *      a business selected, every request it sends names that business (in
+ *      its path, its businessId query or its body); with none selected (and
+ *      with an empty, null or undefined id), it sends nothing and answers "No
+ *      business selected" instead: a helper that answers an ApiResult
+ *      resolves that answer, it never rejects (R0-15d review SEC-R015d-2,
+ *      CR-R015d-1).
+ *   3. The mounts: contact detail (its custom fields, its consent writes and
+ *      its momentum reads), the pipeline tab and settings/custom-fields,
  *      rendered for real, read and write the business they are bound to.
  *   4. The e2e workflows serve the web build the way next.config.ts builds it.
  */
@@ -45,6 +50,7 @@ import CustomFieldsSettingsPage from "@/app/app/settings/custom-fields/page";
 import { PipelineTabContent } from "@/app/app/crm/pipeline/pipeline-tab-content";
 import { useContactsPipeline } from "@/app/app/crm/pipeline/use-contacts-pipeline";
 import { selectBusiness } from "@/lib/workspace";
+import { toast } from "sonner";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -247,15 +253,27 @@ describe(`census: ${SITES.length} web call sites of a /businesses/:businessId ro
 
 /** A function that resolves a business for a caller that names none. */
 const RESOLVES_A_BUSINESS = /DEFAULT_BUSINESS_ID|selectedBusinessId\(|getStoredBusinessId\(/;
-/** A function that names a business route, or resolves a business. */
-const NAMES_OR_RESOLVES_A_BUSINESS = /\/businesses\/|DEFAULT_BUSINESS_ID|selectedBusinessId\(|getStoredBusinessId\(/;
+/**
+ * A function that names a business route, carries the business in its query
+ * (`?businessId=`) or in an object literal it sends (`{ businessId ... }`, the
+ * routes BusinessGuard resolves from the body), or resolves a business.
+ */
+const NAMES_OR_RESOLVES_A_BUSINESS = /\/businesses\/|[?&]businessId=|\{\s*businessId\b|DEFAULT_BUSINESS_ID|selectedBusinessId\(|getStoredBusinessId\(/;
 
-/** Every exported function of a module's source whose body matches `selects`. */
-function businessScopedFunctions(source: string, selects: RegExp = NAMES_OR_RESOLVES_A_BUSINESS): string[] {
-  const names: string[] = [];
+/**
+ * A helper that answers an ApiResult ({ data, error }) instead of handing back a
+ * Response or throwing: it declares one, builds one, or returns a transport
+ * that answers one. With no business it must RESOLVE "No business selected"
+ * (lib/api/_defaults.ts), never reject (CR-R015d-1).
+ */
+const ANSWERS_AN_API_RESULT = /ApiResult<|return \{ data[,:]|return api(?:Get|GetSimple|Post|PostSimple|Patch|Put|Delete)\b/;
+
+/** Every exported function of a module's source, with its source text. */
+function exportedFunctions(source: string): Array<{ name: string; body: string }> {
+  const found: Array<{ name: string; body: string }> = [];
   let current: { name: string; body: string } | null = null;
   const flush = () => {
-    if (current && selects.test(current.body)) names.push(current.name);
+    if (current) found.push(current);
   };
   for (const line of source.split("\n")) {
     const fn = /^export (?:async )?function (\w+)/.exec(line);
@@ -266,19 +284,34 @@ function businessScopedFunctions(source: string, selects: RegExp = NAMES_OR_RESO
     if (current) current.body += `${line}\n`;
   }
   flush();
-  return names;
+  return found;
+}
+
+/** Every exported function of a module's source whose body matches `selects`. */
+function businessScopedFunctions(source: string, selects: RegExp = NAMES_OR_RESOLVES_A_BUSINESS): string[] {
+  return exportedFunctions(source).filter((f) => selects.test(f.body)).map((f) => f.name);
 }
 
 type AnyFn = (...args: unknown[]) => unknown;
 
-interface Recorded { url: string; via: "fetch" | "EventSource" }
+interface Recorded { url: string; via: "fetch" | "EventSource"; body?: unknown }
+
+/** A request body as the server reads it: a JSON body parsed, anything else (FormData, none) undefined. */
+function bodyOf(body: BodyInit | null | undefined): unknown {
+  if (typeof body !== "string") return undefined;
+  try {
+    return JSON.parse(body) as unknown;
+  } catch {
+    return undefined;
+  }
+}
 
 /** The network stubbed as a permissive API: every request answers 200 `{}`. */
 function stubNetwork() {
   const requests: Recorded[] = [];
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    requests.push({ url, via: "fetch" });
+    requests.push({ url, via: "fetch", body: bodyOf(init?.body) });
     return new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } });
   }));
   class RecordingEventSource {
@@ -293,34 +326,52 @@ function stubNetwork() {
   return requests;
 }
 
+/** How a call ended: it resolved, it threw or rejected, or it was still pending at the bound. */
+type Settled =
+  | { outcome: "resolved"; value: unknown }
+  | { outcome: "rejected"; error: unknown }
+  | { outcome: "pending" };
+
 /** Settle a call (sync throw, rejection, or a promise that never settles) within a bound. */
-async function settle(call: () => unknown): Promise<unknown> {
+async function settle(call: () => unknown): Promise<Settled> {
   let result: unknown;
   try {
     result = call();
   } catch (error) {
-    return error;
+    return { outcome: "rejected", error };
   }
   if (typeof result === "function") {
     // A subscription: unsubscribe so nothing lingers.
     try { (result as () => void)(); } catch { /* ignore */ }
-    return undefined;
+    return { outcome: "resolved", value: undefined };
   }
-  return Promise.race([
-    Promise.resolve(result).catch((error: unknown) => error),
-    new Promise((resolve) => setTimeout(() => resolve(undefined), 150)),
+  return Promise.race<Settled>([
+    Promise.resolve(result).then(
+      (value: unknown): Settled => ({ outcome: "resolved", value }),
+      (error: unknown): Settled => ({ outcome: "rejected", error }),
+    ),
+    new Promise<Settled>((resolve) => setTimeout(() => resolve({ outcome: "pending" }), 150)),
   ]);
 }
 
 /**
  * The business named by a request: its /businesses/ segment (a route word such
- * as /businesses/system/ names none), else its businessId query.
+ * as /businesses/system/ names none), else its businessId query, else the
+ * businessId of its JSON body (the routes BusinessGuard resolves from the body).
+ * A body that names its business as null names "null": it is still a request
+ * that names a business, and none it can be served for.
  */
-function businessOf(url: string): string | null {
-  const u = new URL(url, "http://localhost");
+function businessOf(request: Pick<Recorded, "url" | "body">): string | null {
+  const u = new URL(request.url, "http://localhost");
   const segment = /\/businesses\/([^/?#]*)/.exec(u.pathname)?.[1];
   if (segment !== undefined) return segment !== "" && ROUTE_WORDS.has(segment) ? null : decodeURIComponent(segment);
-  return u.searchParams.get("businessId");
+  const query = u.searchParams.get("businessId");
+  if (query !== null) return query;
+  const body = request.body;
+  if (body && typeof body === "object" && !Array.isArray(body) && Object.prototype.hasOwnProperty.call(body, "businessId")) {
+    return String((body as { businessId: unknown }).businessId);
+  }
+  return null;
 }
 
 /**
@@ -332,10 +383,19 @@ function businessOf(url: string): string | null {
  * see the follow-up below.
  */
 const CLIENT_SOURCE = readText(CLIENT_FILE);
-const HELPERS: Array<{ module: string; name: string; fn: AnyFn }> = [
-  ...businessScopedFunctions(CLIENT_SOURCE).map((name) => ({ module: "lib/client.ts", name, fn: (client as unknown as Record<string, AnyFn>)[name] })),
-  ...businessScopedFunctions(readText(path.join(WEB_SRC, "lib", "api", "approvals.ts")), RESOLVES_A_BUSINESS).map((name) => ({ module: "lib/api/approvals.ts", name, fn: (approvals as unknown as Record<string, AnyFn>)[name] })),
-  ...businessScopedFunctions(readText(path.join(WEB_SRC, "lib", "api", "product-cost.ts")), RESOLVES_A_BUSINESS).map((name) => ({ module: "lib/api/product-cost.ts", name, fn: (productCost as unknown as Record<string, AnyFn>)[name] })),
+function helpersOf(module: string, source: string, exports: unknown, selects?: RegExp) {
+  const bodies = new Map(exportedFunctions(source).map((f) => [f.name, f.body]));
+  return businessScopedFunctions(source, selects).map((name) => ({
+    module,
+    name,
+    fn: (exports as Record<string, AnyFn>)[name],
+    answersApiResult: ANSWERS_AN_API_RESULT.test(bodies.get(name) ?? ""),
+  }));
+}
+const HELPERS: Array<{ module: string; name: string; fn: AnyFn; answersApiResult: boolean }> = [
+  ...helpersOf("lib/client.ts", CLIENT_SOURCE, client),
+  ...helpersOf("lib/api/approvals.ts", readText(path.join(WEB_SRC, "lib", "api", "approvals.ts")), approvals, RESOLVES_A_BUSINESS),
+  ...helpersOf("lib/api/product-cost.ts", readText(path.join(WEB_SRC, "lib", "api", "product-cost.ts")), productCost, RESOLVES_A_BUSINESS),
 ].filter((h) => typeof h.fn === "function");
 
 /**
@@ -367,7 +427,15 @@ describe(`runtime census: the ${HELPERS.length} exported helpers that name a bus
     expect(HELPERS.map((h) => h.name)).toEqual(expect.arrayContaining([
       "fetchContacts", "fetchCustomFieldDefinitions", "createCustomFieldDefinition", "fetchDealStages",
       "fetchInvoices", "subscribeContactConversationStream", "approveApprovalRequest", "fetchProductCostProfile",
+      // The business in the body or the query (SEC-R015d-2).
+      "markInvoicePaid", "updateInvoiceStatus", "updateQuoteStatus", "fetchAutonomyProfile", "updateAutonomyProfile",
     ]));
+    // The ApiResult helpers that send through the Response transport (CR-R015d-1).
+    const answering = new Set(HELPERS.filter((h) => h.answersApiResult).map((h) => h.name));
+    for (const name of ["updateStorefrontConfig", "fetchAiConversionAdvice", "updateAgentTrigger", "updateQualificationConfig", "savePresenceDraft", "unpublishPresence", "fetchContacts"]) {
+      expect(answering, name).toContain(name);
+    }
+    expect(answering).not.toContain("importContactsFromFile");
   });
 
   it("with a business selected, every request any of them sends for a missing business names the selected business (never biz_demo); with none selected, or an empty, null or undefined id, they send nothing", { timeout: 120_000 }, async () => {
@@ -389,8 +457,8 @@ describe(`runtime census: the ${HELPERS.length} exported helpers that name a bus
         shapeOf.set(helper.name, args);
         exercised.push(helper.name);
         for (const r of sent) {
-          const business = businessOf(r.url);
-          if (business !== null && business !== SELECTED) wrongBusiness.push(`${helper.module} ${helper.name}(${JSON.stringify(args).slice(1, -1)}) -> ${r.via} ${new URL(r.url, "http://localhost").pathname}`);
+          const business = businessOf(r);
+          if (business !== null && business !== SELECTED) wrongBusiness.push(`${helper.module} ${helper.name}(${JSON.stringify(args).slice(1, -1)}) -> ${r.via} ${new URL(r.url, "http://localhost").pathname}${new URL(r.url, "http://localhost").search} business=${business}`);
         }
         break;
       }
@@ -401,22 +469,34 @@ describe(`runtime census: the ${HELPERS.length} exported helpers that name a bus
     expect(exercised.length).toBeGreaterThan(250);
 
     // No business selected: nothing is sent, for every helper and every shape,
-    // and a missing (undefined) required id is refused the same way.
+    // and a missing (undefined) required id is refused the same way. A helper
+    // that answers an ApiResult answers the refusal; it does not reject.
     const sentWithout: string[] = [];
+    const rejectedInstead: string[] = [];
     for (const helper of HELPERS) {
       for (const args of shapeOf.has(helper.name) ? [shapeOf.get(helper.name) as unknown[]] : ARG_SHAPES) {
         window.localStorage.clear();
         const before = requests.length;
-        await settle(() => helper.fn(...args));
+        const settled = await settle(() => helper.fn(...args));
+        const call = `${helper.module} ${helper.name}(${JSON.stringify(args).slice(1, -1)})`;
         for (const r of requests.slice(before)) {
-          // Any request naming a business (a route word such as /businesses/system/ names none).
-          if (businessOf(r.url) !== null) {
-            sentWithout.push(`${helper.module} ${helper.name}(${JSON.stringify(args).slice(1, -1)}) -> ${r.via} ${new URL(r.url, "http://localhost").pathname}`);
+          // Any request naming a business, in its path, query or body (a route
+          // word such as /businesses/system/ names none).
+          const business = businessOf(r);
+          if (business !== null) {
+            sentWithout.push(`${call} -> ${r.via} ${new URL(r.url, "http://localhost").pathname}${new URL(r.url, "http://localhost").search} business=${business}`);
           }
+        }
+        // The refusal itself must not reject. (A TypeError from an argument
+        // the census leaves out, say a required status or input object, is
+        // the caller's type error, not the refusal.)
+        if (helper.answersApiResult && settled.outcome === "rejected" && (settled.error as Error)?.message === NO_BUSINESS) {
+          rejectedInstead.push(`${call} rejected: ${(settled.error as Error).name}: ${NO_BUSINESS}`);
         }
       }
     }
     expect(sentWithout).toEqual([]);
+    expect(rejectedInstead).toEqual([]);
   });
 
   it("a business-scoped read with no business selected answers the typed 'No business selected' state without a request", async () => {
@@ -445,13 +525,63 @@ describe(`runtime census: the ${HELPERS.length} exported helpers that name a bus
     for (const answer of answers) expect(answer).toMatchObject({ error: NO_BUSINESS });
   });
 
+  it("a helper that carries the business in the request body or query sends nothing with no business selected, or an empty one (SEC-R015d-2)", async () => {
+    const requests = stubNetwork();
+    const unselected = await Promise.all([
+      client.markInvoicePaid("inv_1"),
+      client.updateInvoiceStatus("inv_1", "SENT"),
+      client.updateQuoteStatus("q_1", "SENT"),
+      client.updateAutonomyProfile(undefined as unknown as string, {}),
+      client.fetchAutonomyProfile(undefined as unknown as string),
+    ]);
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const empty = await Promise.all([
+      client.markInvoicePaid("inv_1", ""),
+      client.updateInvoiceStatus("inv_1", "VOID", { businessId: "" }),
+      client.updateQuoteStatus("q_1", "ACCEPTED", ""),
+      client.updateAutonomyProfile("", {}),
+      client.updateAutonomyProfile(null as unknown as string, {}),
+      client.fetchAutonomyProfile(""),
+      client.fetchAutonomyProfile("null"),
+    ]);
+    expect(requests.map((r) => `${new URL(r.url, "http://localhost").pathname}${new URL(r.url, "http://localhost").search} ${JSON.stringify(r.body)}`)).toEqual([]);
+    for (const answer of [...unselected, ...empty]) expect(answer).toMatchObject({ error: NO_BUSINESS });
+  });
+
+  it("an ApiResult helper that sends through the Response transport answers 'No business selected' for an empty id instead of rejecting (CR-R015d-1)", async () => {
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const requests = stubNetwork();
+    const settled = await Promise.all([
+      settle(() => client.updateStorefrontConfig("", {})),
+      settle(() => client.fetchAiConversionAdvice("")),
+      settle(() => client.updateAgentTrigger("", "trg_1", { enabled: true })),
+      settle(() => client.updateQualificationConfig("", {} as Parameters<typeof client.updateQualificationConfig>[1])),
+      settle(() => client.savePresenceDraft("", {} as Parameters<typeof client.savePresenceDraft>[1])),
+      settle(() => client.unpublishPresence("")),
+    ]);
+    expect(requests).toEqual([]);
+    for (const s of settled) expect(s).toEqual({ outcome: "resolved", value: { data: null, error: NO_BUSINESS } });
+  });
+
   it("control: a business the caller names is the business called", async () => {
     window.localStorage.setItem("kf_business_id", SELECTED);
     const requests = stubNetwork();
     await client.fetchContacts(HANDED);
     await client.fetchCustomFieldDefinitions(HANDED);
     await productCost.fetchProductCostProfile("prod_1", HANDED);
-    expect(requests.map((r) => businessOf(r.url))).toEqual([HANDED, HANDED, HANDED]);
+    await client.markInvoicePaid("inv_1", HANDED);
+    await client.fetchAutonomyProfile(HANDED);
+    await client.updateStorefrontConfig(HANDED, {});
+    expect(requests.map((r) => businessOf(r))).toEqual([HANDED, HANDED, HANDED, HANDED, HANDED, HANDED]);
+  });
+
+  it("control: a body-scoped helper whose caller names no business sends the selected business in the body", async () => {
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    const requests = stubNetwork();
+    await client.markInvoicePaid("inv_1");
+    await client.updateInvoiceStatus("inv_1", "SENT");
+    await client.updateQuoteStatus("q_1", "SENT");
+    expect(requests.map((r) => (r.body as { businessId?: unknown }).businessId)).toEqual([SELECTED, SELECTED, SELECTED]);
   });
 });
 
@@ -516,6 +646,7 @@ function stubApi(memberOf: string[] = [SELECTED, HANDED]) {
     if (/\/custom-field-definitions\/[^/]+\/(archive|restore)$/.test(pathname)) return jsonResponse(200, definitionOf(business));
     if (/\/custom-field-definitions\/[^/]+$/.test(pathname) && method === "DELETE") return jsonResponse(200, {});
     if (/\/crm\/businesses\/[^/]+\/contacts$/.test(pathname)) return jsonResponse(200, { contacts: [], nextCursor: null, hasMore: false });
+    if (/\/crm\/businesses\/[^/]+\/contacts\/[^/]+$/.test(pathname) && method === "PATCH") return jsonResponse(200, { id: pathname.split("/").pop() });
     return jsonResponse(404, { message: "Not stubbed" }, "Not Found");
   }));
   return {
@@ -577,6 +708,31 @@ describe("the mounts read and write the business they are bound to", () => {
     expect(await screen.findByText(fieldOf(HANDED))).toBeInTheDocument();
     expect(screen.getByText(`Gold at ${HANDED}`)).toBeInTheDocument();
     expect(api.definitionReads()).toEqual([definitionsPath(HANDED)]);
+    expect(api.namingDemo()).toEqual([]);
+  });
+
+  it("contact detail: the consent write (Do Not Contact) and the momentum reads go to the business ContactDetail is bound to, not kf_business_id (SEC-R015d-1)", async () => {
+    window.localStorage.setItem("kf_business_id", SELECTED);
+    vi.mocked(toast.success).mockClear();
+    vi.mocked(toast.error).mockClear();
+    const api = stubApi();
+    render(createElement(ContactDetail, { contact: { ...contact, doNotContact: false } as ContactDetailData, customFieldValues: storedValues, businessId: HANDED }));
+
+    // The momentum card and badge read the bound business.
+    await waitFor(() => expect(api.requested).toEqual(expect.arrayContaining([
+      `GET /momentum/businesses/${HANDED}/contacts/c_1`,
+      `GET /momentum/businesses/${HANDED}/contacts/c_1/history`,
+    ])));
+
+    fireEvent.click(screen.getByRole("button", { name: /More details/ }));
+    fireEvent.click(await screen.findByText("Contactable"));
+    fireEvent.click(await screen.findByRole("button", { name: "Mark Do Not Contact" }));
+    await waitFor(() => expect(api.requested.filter((r) => !r.startsWith("GET "))).toEqual([`PATCH /crm/businesses/${HANDED}/contacts/c_1`]));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Marked as Do Not Contact"));
+    expect(toast.error).not.toHaveBeenCalled();
+
+    // Nothing this contact detail sent named the business kf_business_id says.
+    expect(api.requested.filter((r) => r.includes(`/businesses/${SELECTED}/`))).toEqual([]);
     expect(api.namingDemo()).toEqual([]);
   });
 

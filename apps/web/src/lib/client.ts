@@ -19,6 +19,7 @@ import {
   NoBusinessSelectedError,
   namesNoBusiness,
   noBusinessSelected,
+  requestNamesNoBusiness,
 } from "./api/_defaults";
 
 /**
@@ -32,14 +33,16 @@ function selectedBusinessId(): string {
 }
 
 /*
- * Every request this module sends goes through one of these. A request whose
- * URL names no business (no business selected, or an empty, "undefined" or
- * "null" id) is never sent: the ApiResult helpers answer "No business
- * selected", and the ones that hand back a Response throw
- * NoBusinessSelectedError.
+ * Every request this module sends goes through one of these. A request that
+ * names no business (no business selected, or an empty, "undefined" or "null"
+ * id, in its /businesses/ segment, its businessId query, or the body of a route
+ * that takes its business from the body) is never sent: the ApiResult helpers
+ * answer "No business selected", and the ones that hand back a Response throw
+ * NoBusinessSelectedError (an ApiResult helper built on fetchWithAuthRetry
+ * checks namesNoBusiness first, so it answers rather than rejects).
  */
 function apiPost<T>(options: Parameters<typeof sendPost>[0]): ReturnType<typeof sendPost<T>> {
-  return namesNoBusiness(options.path) ? Promise.resolve(noBusinessSelected()) : sendPost<T>(options);
+  return requestNamesNoBusiness(options.path, options.body) ? Promise.resolve(noBusinessSelected()) : sendPost<T>(options);
 }
 
 function apiPostSimple<T>(path: string, body: unknown): ReturnType<typeof sendPost<T>> {
@@ -47,15 +50,15 @@ function apiPostSimple<T>(path: string, body: unknown): ReturnType<typeof sendPo
 }
 
 function apiPatch<T>(path: string, body: unknown): ReturnType<typeof sendPatch<T>> {
-  return namesNoBusiness(path) ? Promise.resolve(noBusinessSelected()) : sendPatch<T>(path, body);
+  return requestNamesNoBusiness(path, body) ? Promise.resolve(noBusinessSelected()) : sendPatch<T>(path, body);
 }
 
 function apiPut<T>(path: string, body: unknown): ReturnType<typeof sendPut<T>> {
-  return namesNoBusiness(path) ? Promise.resolve(noBusinessSelected()) : sendPut<T>(path, body);
+  return requestNamesNoBusiness(path, body) ? Promise.resolve(noBusinessSelected()) : sendPut<T>(path, body);
 }
 
 function apiDelete<T>(path: string, body?: unknown): ReturnType<typeof sendDelete<T>> {
-  return namesNoBusiness(path) ? Promise.resolve(noBusinessSelected()) : sendDelete<T>(path, body);
+  return requestNamesNoBusiness(path, body) ? Promise.resolve(noBusinessSelected()) : sendDelete<T>(path, body);
 }
 
 function apiGetSimple<T>(path: string, opts?: { signal?: AbortSignal }): ReturnType<typeof sendGet<T>> {
@@ -63,13 +66,13 @@ function apiGetSimple<T>(path: string, opts?: { signal?: AbortSignal }): ReturnT
 }
 
 async function fetchWithAuthRetry(url: string, init?: RequestInit): Promise<Response> {
-  if (namesNoBusiness(url)) throw new NoBusinessSelectedError();
+  if (requestNamesNoBusiness(url, init?.body)) throw new NoBusinessSelectedError();
   return sendWithAuthRetry(url, init);
 }
 
 /** `fetch` for the business-scoped requests that carry no auth retry (public storefront events). */
 async function businessFetch(url: string, init?: RequestInit): Promise<Response> {
-  if (namesNoBusiness(url)) throw new NoBusinessSelectedError();
+  if (requestNamesNoBusiness(url, init?.body)) throw new NoBusinessSelectedError();
   return fetch(url, init);
 }
 
@@ -2382,7 +2385,7 @@ export async function markInvoicePaid(invoiceId: string, businessId?: string) {
   // param, and the old empty body meant even a corrected verb would 403.
   return apiPatch<Invoice>(
     `/commerce/invoices/${encodeURIComponent(invoiceId)}/paid`,
-    { businessId: businessId ?? getStoredBusinessId() },
+    { businessId: businessId ?? selectedBusinessId() },
   );
 }
 
@@ -2652,7 +2655,7 @@ export async function updateInvoiceStatus(
   return apiPatch<Invoice>(
     `/commerce/invoices/${encodeURIComponent(invoiceId)}/status/${status.toLowerCase()}`,
     {
-      businessId: options?.businessId ?? getStoredBusinessId(),
+      businessId: options?.businessId ?? selectedBusinessId(),
       status,
       ...(options?.dueDate ? { dueDate: options.dueDate } : {}),
       ...(options?.sentAt ? { sentAt: options.sentAt } : {}),
@@ -2826,7 +2829,7 @@ export async function updateQuoteStatus(
   // param, so every call 403'd.
   return apiPatch<Quote>(
     `/commerce/quotes/${encodeURIComponent(quoteId)}/status/${status.toLowerCase()}`,
-    { businessId: businessId ?? getStoredBusinessId() },
+    { businessId: businessId ?? selectedBusinessId() },
   );
 }
 
@@ -5329,7 +5332,10 @@ export async function fetchStorefrontConfig(businessId: string): Promise<ApiResu
 }
 
 export async function updateStorefrontConfig(businessId: string, config: Partial<StorefrontConfig>): Promise<ApiResult<StorefrontConfig>> {
-  const res = await fetchWithAuthRetry(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/storefront`, {
+  const url = `${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/storefront`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
+  const res = await fetchWithAuthRetry(url, {
     method: 'PUT',
     headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
@@ -5654,7 +5660,10 @@ export async function fetchConversionSuggestions(businessId: string): Promise<Ap
 }
 
 export async function fetchAiConversionAdvice(businessId: string): Promise<ApiResult<AiConversionAdvice>> {
-  const res = await fetchWithAuthRetry(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/conversion-advice`, {
+  const url = `${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/conversion-advice`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
+  const res = await fetchWithAuthRetry(url, {
     method: 'POST',
     headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
   });
@@ -6664,8 +6673,11 @@ export async function updateAgentTrigger(
   triggerId: string,
   patch: Partial<{ enabled: boolean; autoExecute: boolean; maxRiskTier: number }>,
 ) {
+  const url = `${API_BASE}/ai/businesses/${encodeURIComponent(businessId)}/agent/triggers/${encodeURIComponent(triggerId)}`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
   const res = await fetchWithAuthRetry(
-    `${API_BASE}/ai/businesses/${encodeURIComponent(businessId)}/agent/triggers/${encodeURIComponent(triggerId)}`,
+    url,
     {
       method: 'PUT',
       headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
@@ -10929,7 +10941,10 @@ export async function fetchQualificationConfig(businessId: string): Promise<ApiR
 }
 
 export async function updateQualificationConfig(businessId: string, config: QualificationFlowConfig): Promise<ApiResult<QualificationFlowConfig>> {
-  const res = await fetchWithAuthRetry(`${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/qualification-config`, {
+  const url = `${API_BASE}/site/businesses/${encodeURIComponent(businessId)}/qualification-config`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
+  const res = await fetchWithAuthRetry(url, {
     method: 'PUT',
     headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify(config),
@@ -12618,7 +12633,10 @@ export async function fetchPresenceDraft(businessId: string) {
 }
 
 export async function savePresenceDraft(businessId: string, payload: PresencePayload) {
-  const res = await fetchWithAuthRetry(`${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/draft`, {
+  const url = `${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/draft`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
+  const res = await fetchWithAuthRetry(url, {
     method: 'PUT',
     headers: { ...await getAuthHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ payload }),
@@ -12647,7 +12665,10 @@ export async function publishPresence(businessId: string) {
 }
 
 export async function unpublishPresence(businessId: string) {
-  const res = await fetchWithAuthRetry(`${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/publish`, {
+  const url = `${API_BASE}/site/presence/businesses/${encodeURIComponent(businessId)}/publish`;
+  // CR-R015d-1: an ApiResult helper answers "No business selected"; fetchWithAuthRetry would throw it.
+  if (namesNoBusiness(url)) return noBusinessSelected();
+  const res = await fetchWithAuthRetry(url, {
     method: 'DELETE',
     headers: { ...await getAuthHeaders() },
   });
