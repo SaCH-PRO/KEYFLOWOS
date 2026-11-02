@@ -5,10 +5,13 @@
 # every heavy step and the job goes green having scanned nothing (PRS-M08).
 # This workflow needs no third-party account and no repository credential. It
 # builds the API, boots it against the job's own Postgres and Redis, and sends
-# the unauthenticated probes in scripts/security/native-dast-manifest.json:
-# every protected route must answer 401 or 403. A 404 (route gone), a 5xx, a
-# 2xx/3xx, a leaked stack or Prisma marker, or a server that cannot be reached
-# fails the job. Nothing is skipped.
+# the probes in scripts/security/native-dast-manifest.json. Every probed
+# protected route is AuthGuard-first: an anonymous call and a credential
+# authentication must refuse (malformed bearer, alg none, wrong key, expired,
+# wrong audience, foreign issuer) must answer 401, and a valid token for a
+# caller who is no member must answer 403. A 404 (route gone), a 5xx, a
+# 2xx/3xx, a 403 to a refused credential, a leaked stack or Prisma marker, or a
+# server that cannot be reached fails the job. Nothing is skipped.
 #
 # NOT A REQUIRED CHECK YET. REQUIRED_WORKFLOWS in
 # scripts/agent-control/lib/events.mjs still names 'DAST (HawkScan)'; swapping
@@ -127,12 +130,25 @@ jobs:
           PORT: '3001'
         run: |
           # Ephemeral keys generated per run; nothing secret-shaped is
-          # committed, and a fresh CI database holds no encrypted data. No
-          # identity provider is configured, so bearer tokens are judged by
-          # the server alone and no probe leaves this machine.
+          # committed, and a fresh CI database holds no encrypted data.
+          # JWT_SECRET is only the encryption-key fallback; no auth code
+          # reads it.
           export JWT_SECRET="$(openssl rand -hex 24)"
           export BYOK_ENCRYPTION_SECRET="$(openssl rand -hex 24)"
           export CREDENTIALS_ENCRYPTION_KEY="$(openssl rand -hex 24)"
+          # The token verifiers. Without these, SupabaseAuthService.verifyLocal
+          # and verifyAdminToken return null before they read a token, so no
+          # probe would reach the alg, signature, exp, iss or aud checks
+          # (review SEC-DAST-2). No Supabase project URL or anon key is set:
+          # there is no identity provider, the server verifies every token
+          # itself, and no probe leaves this machine.
+          export ADMIN_JWT_SECRET="$(openssl rand -hex 32)"
+          SUPABASE_JWT_SECRET="$(openssl rand -hex 32)"
+          echo "::add-mask::$SUPABASE_JWT_SECRET"
+          export SUPABASE_JWT_SECRET
+          # The probe step signs its expired, wrong-audience, foreign-issuer
+          # and valid non-member tokens with the server's own key.
+          echo "SUPABASE_JWT_SECRET=$SUPABASE_JWT_SECRET" >> "$GITHUB_ENV"
           node apps/server/dist/main.js > native-dast-server.log 2>&1 &
           echo "SERVER_PID=$!" >> "$GITHUB_ENV"
 
