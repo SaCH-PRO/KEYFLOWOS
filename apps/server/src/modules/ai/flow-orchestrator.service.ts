@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { createHash, randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
@@ -586,10 +586,41 @@ export function toKeyQuoteResult(businessId: string, quote: object): Record<stri
 }
 
 /**
+ * V1-21d review SEC-V21D-2: the related rows of a booking the dispatcher resolved inside the
+ * business (bookingWithinBusiness), relation -> the id of the row it found there (null: none).
+ */
+export type KeyBookingLinks = Partial<Record<'contact' | 'service' | 'staff', string | null>>;
+const KEY_BOOKING_LINKS = ['contact', 'service', 'staff'] as const;
+
+/**
+ * V1-21d review SEC-V21D-2: what a KEY booking write hands the model. rescheduleBooking and
+ * updateBookingStatus reload the booking with its contact, service and staff member, read by id
+ * with no business (bookings.service.ts), and the dispatcher returned that row as it came: on a
+ * booking cross-linked before TD9-3 the model read another business's service (name, price) and
+ * contact. A related row is kept only when it is the one bookingWithinBusiness resolved inside the
+ * business before the write (same id); any other (relinked since, or never resolved) is null.
+ */
+export function toKeyBookingResult(booking: object, links: KeyBookingLinks): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...booking };
+  for (const key of KEY_BOOKING_LINKS) {
+    const related = out[key] as { id?: unknown } | null | undefined;
+    if (related != null && (links[key] == null || related.id !== links[key])) out[key] = null;
+  }
+  return out;
+}
+
+/**
  * The tenant models whose model-supplied ids the dispatcher resolves itself (V1-21d), because the
  * service it hands them to looks them up by id alone.
  */
-type DispatcherTenantModel = 'contentRequest' | 'evidence' | 'approvalRequest' | 'bookingWaitlistEntry' | 'service' | 'staffMember';
+type DispatcherTenantModel =
+  | 'contentRequest'
+  | 'evidence'
+  | 'approvalRequest'
+  | 'bookingWaitlistEntry'
+  | 'service'
+  | 'staffMember'
+  | 'procurementRequest';
 
 @Injectable()
 export class FlowOrchestratorService {
@@ -3254,11 +3285,12 @@ ${triage.standingContext}`;
   /**
    * V1-21d: a model-supplied id, refused unless it names a row of `businessId`, before it reaches a
    * service that looks it up by id alone (ContentRequestService.getById, EvidenceService.verify,
-   * ApprovalRequestService.decideStep, BookingWaitlistService.offerSlot). On the staff bridge, a
+   * ApprovalRequestService.decideStep, BookingWaitlistService.offerSlot, and the ProcurementService
+   * status writes, which take businessId but update where { id } alone). On the staff bridge, a
    * plan or a monitor there is no tenant context, so nothing else binds the id: KEY in A read and
-   * moved B's content request, verified B's evidence, decided B's approval request and booked a
-   * slot in B. NotFound, as for an unknown id, so the answer confirms nothing about another
-   * business's ids.
+   * moved B's content request, verified B's evidence, decided B's approval request, booked a slot
+   * in B and moved B's procurement request. NotFound, as for an unknown id, so the answer confirms
+   * nothing about another business's ids.
    */
   private async idWithinBusiness(model: DispatcherTenantModel, businessId: string, id: unknown, label: string): Promise<string> {
     if (typeof id !== 'string' || !id) throw new BadRequestException(`${label} id must be a non-empty string`);
@@ -3288,6 +3320,53 @@ ${triage.standingContext}`;
     const missing = wanted.filter((u) => !found.has(u));
     if (missing.length) throw new NotFoundException(`Team member not found: ${missing.join(', ')}`);
     return userIds as string[];
+  }
+
+  /**
+   * V1-21d review SEC-V21D-1: the assignee projects_update_task hands ProjectsService.updateTask,
+   * refused unless it is a staff member of `businessId` or a member of it (the two kinds updateTask
+   * assigns). updateTask finds the task inside the business but resolves the assignee by findUnique
+   * on its id alone and records the assignment: KEY in A assigned A's task to B's staff member.
+   */
+  private async assigneeWithinBusiness(businessId: string, assigneeId: unknown): Promise<string> {
+    if (typeof assigneeId !== 'string' || !assigneeId) throw new BadRequestException('assigneeId must be a non-empty string');
+    const [staff, member] = await Promise.all([
+      this.prisma.client.staffMember.findFirst({ where: { id: assigneeId, businessId }, select: { id: true } }),
+      this.prisma.client.membership.findFirst({ where: { userId: assigneeId, businessId }, select: { userId: true } }),
+    ]);
+    if (!staff && !member) throw new NotFoundException('Assignee not found');
+    return assigneeId;
+  }
+
+  /**
+   * V1-21d review SEC-V21D-2: the booking a KEY booking write (reschedule, cancel, no-show) is
+   * about to change, resolved inside `businessId` together with the business of each row it names.
+   * BookingsService writes first and then emits the booking event with the booking's contact,
+   * service and staff member (read by id, with no business), which drives the customer mail and the
+   * calendar; only after that does logContactEvent refuse a contact of another business. On a
+   * booking cross-linked before TD9-3 the write and the event therefore went out through the other
+   * business's contact or service. Such a booking is refused here, before anything is written (it
+   * is corrected by a person, not by KEY); the answer carries only the links resolved here.
+   */
+  private async bookingWithinBusiness(businessId: string, bookingId: unknown): Promise<KeyBookingLinks> {
+    if (typeof bookingId !== 'string' || !bookingId) throw new BadRequestException('bookingId must be a non-empty string');
+    const booking = await this.prisma.client.booking.findFirst({
+      where: { id: bookingId, businessId, deletedAt: null },
+      select: {
+        contact: { select: { id: true, businessId: true } },
+        service: { select: { id: true, businessId: true } },
+        staff: { select: { id: true, businessId: true } },
+      },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    const names = { contact: 'contact', service: 'service', staff: 'staff member' } as const;
+    const crossed = KEY_BOOKING_LINKS.filter((key) => booking[key] != null && booking[key]!.businessId !== businessId);
+    if (crossed.length) {
+      throw new ConflictException(
+        `This booking names a ${crossed.map((key) => names[key]).join(' and a ')} of another business; KEY does not change it until a person corrects the booking.`,
+      );
+    }
+    return { contact: booking.contact?.id ?? null, service: booking.service?.id ?? null, staff: booking.staff?.id ?? null };
   }
 
   private async executeToolAction(
@@ -4029,13 +4108,18 @@ ${triage.standingContext}`;
       }
 
       case 'bookings_reschedule_booking': {
+        // V1-21d review SEC-V21D-2: a booking linked to another business's row is refused before
+        // the write, and the answer carries only the related rows resolved inside the business
+        const links = await this.bookingWithinBusiness(businessId, args.bookingId);
         const updated = await this.getBookings().rescheduleBooking(businessId, args.bookingId, new Date(args.startTime));
-        return { booking: updated, id: updated.id };
+        return { booking: toKeyBookingResult(updated, links), id: updated.id };
       }
 
       case 'bookings_cancel_booking': {
+        // V1-21d review SEC-V21D-2, as bookings_reschedule_booking
+        const links = await this.bookingWithinBusiness(businessId, args.bookingId);
         const updated = await this.getBookings().updateBookingStatus(businessId, args.bookingId, 'CANCELLED');
-        return { booking: updated, id: updated.id };
+        return { booking: toKeyBookingResult(updated, links), id: updated.id };
       }
 
       case 'bookings_add_to_waitlist': {
@@ -6311,6 +6395,9 @@ ${triage.standingContext}`;
         return { overview };
       }
       case 'bookings_mark_no_show': {
+        // V1-21d review SEC-V21D-2: the booking.no_show event carries the booking's contact (the
+        // no-show notice), so a booking linked to another business's row is refused before the write
+        await this.bookingWithinBusiness(businessId, args.bookingId);
         const booking = await this.getBookings().updateBookingStatus(businessId, args.bookingId, 'NO_SHOW');
         return { id: booking.id, status: booking.status };
       }
@@ -6496,6 +6583,9 @@ ${triage.standingContext}`;
 
       // === PROJECT UPDATES ===
       case 'projects_update_task': {
+        // V1-21d review SEC-V21D-1: updateTask resolves the assignee by its id alone; this
+        // business's staff member or member first ('' unassigns and names no one)
+        if (args.assigneeId) await this.assigneeWithinBusiness(businessId, args.assigneeId);
         const task = await this.getProjects().updateTask(businessId, args.taskId, {
           title: args.title,
           dueDate: args.dueDate ? new Date(args.dueDate).toISOString() : undefined,
@@ -6759,16 +6849,25 @@ ${triage.standingContext}`;
       }
 
       case 'procurement_acknowledge_vendor': {
+        // V1-21d review SEC-V21D-1: ProcurementService.acknowledgeVendor updates the request where { id }
+        // alone (TENANT_UNBOUND_TOOLS); this business's request first
+        await this.idWithinBusiness('procurementRequest', businessId, args.requestId, 'Procurement request');
         const request = await this.getProcurement().acknowledgeVendor(businessId, args.requestId);
         return { id: request.id, status: request.status };
       }
 
       case 'procurement_mark_fulfilled': {
+        // V1-21d review SEC-V21D-1: ProcurementService.markFulfilled updates the request where { id }
+        // alone (TENANT_UNBOUND_TOOLS); this business's request first
+        await this.idWithinBusiness('procurementRequest', businessId, args.requestId, 'Procurement request');
         const request = await this.getProcurement().markFulfilled(businessId, args.requestId);
         return { id: request.id, status: request.status };
       }
 
       case 'procurement_mark_invoiced': {
+        // V1-21d review SEC-V21D-1: ProcurementService.markInvoiced updates the request where { id }
+        // alone (TENANT_UNBOUND_TOOLS); this business's request first
+        await this.idWithinBusiness('procurementRequest', businessId, args.requestId, 'Procurement request');
         const request = await this.getProcurement().markInvoiced(businessId, args.requestId);
         return { id: request.id, status: request.status };
       }

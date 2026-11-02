@@ -1,7 +1,8 @@
 /**
  * V1-21d-KEY-DISPATCHER-TENANT-INCLUDES — the KEY tool dispatcher on a REAL database: it reads
- * related rows only inside the business, resolves every id the model hands it inside the business,
- * and never hands the model a row the caller cannot see.
+ * related rows only inside the business, uses an id the model hands it only inside the business (in
+ * a query naming it, through a service that filters by it, or after resolving it there itself when
+ * the service finds its row by the id alone), and never hands the model a row the caller cannot see.
  *
  * The dispatcher is FlowOrchestratorService.executeToolAction, which every KEY surface reaches
  * (member chat, plans, monitors, and the staff WhatsApp/SMS bridge, where no tenant context is
@@ -30,10 +31,20 @@
  *     returned the invoice with the whole Contact row (internal notes, phone, owner, visibility) and
  *     the whole Booking row (notes, location, calendarEventId); commerce_create_invoice and
  *     commerce_create_quote returned the whole Contact row.
+ *   Review SEC-V21D-1 (a service handed businessId that ignores it, TENANT_UNBOUND_TOOLS):
+ *     procurement_acknowledge_vendor, procurement_mark_fulfilled and procurement_mark_invoiced moved
+ *     B's procurement request (ProcurementService updates where { id }); projects_update_task
+ *     assigned A's task to B's staff member (ProjectsService resolves assigneeId by findUnique).
+ *   Review SEC-V21D-2: bookings_cancel_booking and bookings_reschedule_booking answered with
+ *     BookingsService's row, whose service (B's name and price) and contact the service includes
+ *     with no business; on a booking naming B's contact the write and its booking event (B's contact)
+ *     went out before logContactEvent refused that contact. bookings_mark_no_show did the same
+ *     without the refusal.
  *
  * HOW IT IS COMPOSED: the real FlowOrchestratorService.executeToolAction (no constructor: the
  * prototype with the real PrismaService and a module ref) over the real CommerceService,
- * ContentRequestService, EvidenceService, ApprovalRequestService and BookingWaitlistService.
+ * ContentRequestService, EvidenceService, ApprovalRequestService, BookingWaitlistService,
+ * BookingsService, ProcurementService and ProjectsService.
  * Stubbed: what the path does not decide (event emitters, the CRM activity log, timeline, the
  * model gateway: aiUsage.callAi records its prompt and answers a fixed JSON, no provider traffic;
  * TransactionalEmailService.send records its recipient and answers SENT, no mail is sent).
@@ -69,6 +80,9 @@ const ID = {
   staffB: `${P}staffB`,
   bookingOwn: `${P}booking_own`,
   bookingCross: `${P}booking_cross`, // A's booking naming B's service and B's contact (before TD9-3)
+  bookingCrossService: `${P}booking_cross_service`, // A's booking on A's contact naming B's service
+  bookingCrossStaff: `${P}booking_cross_staff`, // A's booking on A's contact and service naming B's staff member
+  bookingOwn2: `${P}booking_own2`, // A's booking on its own contact and service (the write controls)
   invOwnPaid: `${P}inv_own_paid`, // A's PAID invoice on A's contact, linked to A's booking
   invCrossSent: `${P}inv_cross_sent`, // A's SENT invoice naming B's contact (before TD9-4)
   invCrossPaid: `${P}inv_cross_paid`, // A's PAID invoice naming B's contact
@@ -80,6 +94,8 @@ const ID = {
   approvalA: `${P}approval_a`,
   approvalB: `${P}approval_b`,
   waitlistB: `${P}waitlist_b`,
+  procA: `${P}proc_a`,
+  procB: `${P}proc_b`,
 };
 const m = (who: string) => `${P}m_${who.slice(P.length)}`;
 /** Strings only B (or A's private fields) holds: none may reach A's model. */
@@ -100,6 +116,8 @@ let db: any;
 let dispatcher: any;
 let prompts: string[];
 let sent: Array<{ recipientEmail: string }>;
+/** Every event the services emitted: [name, payload]. */
+let emitted: Array<[string, any]>;
 
 /** Any method, any depth: an async no-op (the collaborators the path does not decide). */
 const stub = (): any =>
@@ -116,6 +134,8 @@ async function cleanup() {
     byBiz('evidence'),
     byBiz('content_requests'),
     byBiz('booking_waitlist_entries'),
+    byBiz('procurement_requests'),
+    `DELETE FROM task_assignments WHERE task_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     byBiz('invoices'),
@@ -204,6 +224,15 @@ async function seed() {
   await db.booking.create({
     data: { id: ID.bookingCross, businessId: ID.bizA, contactId: ID.contactB, serviceId: ID.serviceB, startTime: at(31), endTime: at(31.05) },
   });
+  await db.booking.create({
+    data: { id: ID.bookingCrossService, businessId: ID.bizA, contactId: ID.contactA, serviceId: ID.serviceB, startTime: at(32), endTime: at(32.05) },
+  });
+  await db.booking.create({
+    data: { id: ID.bookingCrossStaff, businessId: ID.bizA, contactId: ID.contactA, serviceId: ID.serviceA, staffId: ID.staffB, startTime: at(33), endTime: at(33.05) },
+  });
+  await db.booking.create({
+    data: { id: ID.bookingOwn2, businessId: ID.bizA, contactId: ID.contactA, serviceId: ID.serviceA, startTime: at(34), endTime: at(34.05) },
+  });
 
   await db.supportTicket.create({ data: { id: ID.ticketCross, businessId: ID.bizA, contactId: ID.contactB, title: 'A ticket', description: 'help' } });
 
@@ -240,6 +269,13 @@ async function seed() {
   await approval(ID.approvalB, ID.bizB);
 
   await db.bookingWaitlistEntry.create({ data: { id: ID.waitlistB, businessId: ID.bizB, contactId: ID.contactB, serviceId: ID.serviceB } });
+
+  for (const [id, businessId] of [
+    [ID.procA, ID.bizA],
+    [ID.procB, ID.bizB],
+  ]) {
+    await db.procurementRequest.create({ data: { id, businessId, userPrompt: `${id} supplies`, status: 'PO_ISSUED', poIssuedAt: new Date() } });
+  }
 }
 
 function run(businessId: string, tool: string, args: Record<string, unknown>) {
@@ -268,10 +304,19 @@ beforeAll(async () => {
   const { HelpdeskService } = await import('../src/modules/helpdesk/helpdesk.service');
   const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
   const { ActivityLogService } = await import('../src/modules/activity/activity.service');
+  const { BookingsService } = await import('../src/modules/bookings/bookings.service');
+  const { ProcurementService } = await import('../src/modules/procurement/procurement.service');
+  const { ProjectsService } = await import('../src/modules/projects/projects.service');
   const { NotFoundException } = await import('@nestjs/common');
 
   const prisma = new PrismaService();
-  const emitter = { emit: vi.fn() };
+  emitted = [];
+  const emitter = {
+    emit: vi.fn((name: string, payload: unknown) => {
+      emitted.push([name, payload]);
+      return true;
+    }),
+  };
   // CRM activity log: refuses a contact outside the business, as CrmService.logContactEvent does.
   const crm = {
     logContactEvent: vi.fn(async ({ businessId, contactId }: { businessId: string; contactId: string }) => {
@@ -284,6 +329,9 @@ beforeAll(async () => {
   const contentRequests = new ContentRequestService(prisma as any, emitter as any, approvals);
   const evidence = new EvidenceService(prisma as any, stub(), emitter as any);
   const waitlist = new BookingWaitlistService(prisma as any, emitter as any);
+  const bookings = new BookingsService(prisma as any, emitter as any, crm as any, commerce as any, stub(), stub(), stub(), stub(), stub());
+  const procurement = new ProcurementService(prisma as any, stub());
+  const projects = new ProjectsService(prisma as any, emitter as any, stub(), stub(), stub());
   sent = [];
   const email = {
     send: vi.fn(async (input: { recipientEmail: string }) => {
@@ -298,6 +346,9 @@ beforeAll(async () => {
     [EvidenceService, evidence],
     [ApprovalRequestService, approvals],
     [BookingWaitlistService, waitlist],
+    [BookingsService, bookings],
+    [ProcurementService, procurement],
+    [ProjectsService, projects],
     [HelpdeskService, helpdesk],
     [TransactionalEmailService, email],
     [ActivityLogService, stub()],
@@ -511,5 +562,115 @@ describe('V1-21d SEC3-ST-2 — a KEY commerce write answers with the write proje
     expect(qt.quote).toMatchObject({ businessId: ID.bizA, contactId: ID.contactA });
     expect(Object.keys(qt.quote.contact).sort()).toEqual(['businessId', 'email', 'firstName', 'id', 'lastName']);
     expect(leaks([inv, qt], PRIVATE)).toEqual([]);
+  });
+});
+
+// ─── review SEC-V21D-1: a service that ignores the business gets only an id resolved inside it ───
+
+describe('V1-21d review SEC-V21D-1 — a TENANT_UNBOUND_TOOLS service is handed only ids the dispatcher resolved inside the business', () => {
+  it("procurement_acknowledge_vendor, procurement_mark_fulfilled and procurement_mark_invoiced refuse B's request and leave it as it was", async () => {
+    for (const tool of ['procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced']) {
+      const { result, error } = await outcome(ID.bizA, tool, { requestId: ID.procB });
+      expect(error?.message, tool).toMatch(/not found/i);
+      expect(result, tool).toBeNull();
+    }
+    expect(
+      await db.procurementRequest.findUnique({ where: { id: ID.procB }, select: { status: true, vendorAcknowledgedAt: true, fulfilledAt: true, invoicedAt: true } }),
+    ).toEqual({ status: 'PO_ISSUED', vendorAcknowledgedAt: null, fulfilledAt: null, invoicedAt: null });
+  });
+
+  it('control: its own request moves through acknowledged, fulfilled and invoiced', async () => {
+    expect(await run(ID.bizA, 'procurement_acknowledge_vendor', { requestId: ID.procA })).toEqual({ id: ID.procA, status: 'VENDOR_ACKNOWLEDGED' });
+    expect(await run(ID.bizA, 'procurement_mark_fulfilled', { requestId: ID.procA })).toEqual({ id: ID.procA, status: 'FULFILLED' });
+    expect(await run(ID.bizA, 'procurement_mark_invoiced', { requestId: ID.procA })).toEqual({ id: ID.procA, status: 'INVOICED' });
+  });
+
+  it("projects_update_task refuses B's staff member, or a user who is no member, as the assignee: the task and its assignments are left as they were", async () => {
+    for (const assigneeId of [ID.staffB, ID.ownerB]) {
+      const { error } = await outcome(ID.bizA, 'projects_update_task', { taskId: ID.taskOwnA, assigneeId, title: 'A-RENAMED' });
+      expect(error?.message, assigneeId).toMatch(/not found/i);
+    }
+    expect(await db.projectTask.findUnique({ where: { id: ID.taskOwnA }, select: { assigneeId: true, title: true } })).toEqual({
+      assigneeId: null,
+      title: 'A-OWN-TASK',
+    });
+    expect(await db.taskAssignment.count({ where: { taskId: ID.taskOwnA } })).toBe(0);
+  });
+
+  it('control: its own staff member, then a member of the business, is assigned; an update naming no assignee is not checked', async () => {
+    const staff = await run(ID.bizA, 'projects_update_task', { taskId: ID.taskOwnA, assigneeId: ID.staffA });
+    expect(staff).toMatchObject({ id: ID.taskOwnA, assigneeId: ID.staffA });
+    const member = await run(ID.bizA, 'projects_update_task', { taskId: ID.taskOwnA, assigneeId: ID.memberA });
+    expect(member).toMatchObject({ id: ID.taskOwnA, assigneeId: ID.memberA });
+    expect(
+      await db.taskAssignment.findFirst({ where: { taskId: ID.taskOwnA, unassignedAt: null }, select: { assignableType: true, assignableId: true } }),
+    ).toEqual({ assignableType: 'User', assignableId: ID.memberA });
+    const renamed = await run(ID.bizA, 'projects_update_task', { taskId: ID.taskOwnA, title: 'A-OWN-TASK' });
+    expect(renamed).toMatchObject({ id: ID.taskOwnA, title: 'A-OWN-TASK', assigneeId: ID.memberA });
+  });
+});
+
+// ─── review SEC-V21D-2: a booking write over a booking linked across businesses ───
+
+describe("V1-21d review SEC-V21D-2 — a KEY booking write never answers with, or writes through, another business's related row", () => {
+  const eventsFor = (bookingId: string) => emitted.filter(([, payload]) => payload?.booking?.id === bookingId).map(([name]) => name);
+  const bookingState = (id: string) => db.booking.findUnique({ where: { id }, select: { status: true, startTime: true } });
+
+  it("bookings_cancel_booking and bookings_reschedule_booking refuse A's booking on B's service: nothing written, no event, B's service in no answer", async () => {
+    const before = await bookingState(ID.bookingCrossService);
+    emitted.length = 0;
+    const cancel = await outcome(ID.bizA, 'bookings_cancel_booking', { bookingId: ID.bookingCrossService });
+    const moved = await outcome(ID.bizA, 'bookings_reschedule_booking', {
+      bookingId: ID.bookingCrossService,
+      startTime: new Date(Date.now() + 50 * 24 * 3600_000).toISOString(),
+    });
+    for (const { result, error } of [cancel, moved]) {
+      expect(error?.message).toMatch(/another business/i);
+      expect(leaks([result, error?.message], [SECRET.serviceB, ID.serviceB])).toEqual([]);
+    }
+    expect(await bookingState(ID.bookingCrossService)).toEqual(before);
+    expect(eventsFor(ID.bookingCrossService)).toEqual([]);
+  });
+
+  it("bookings_cancel_booking and bookings_mark_no_show refuse A's booking on B's contact BEFORE the write: no status change, no booking event carrying B's contact", async () => {
+    const before = await bookingState(ID.bookingCross);
+    emitted.length = 0;
+    for (const tool of ['bookings_cancel_booking', 'bookings_mark_no_show']) {
+      const { result, error } = await outcome(ID.bizA, tool, { bookingId: ID.bookingCross });
+      expect(error?.message, tool).toMatch(/another business/i);
+      expect(leaks([result, error?.message], [SECRET.contactB, SECRET.contactBEmail, SECRET.serviceB]), tool).toEqual([]);
+    }
+    expect(await bookingState(ID.bookingCross)).toEqual(before);
+    expect(eventsFor(ID.bookingCross)).toEqual([]);
+    expect(leaks(emitted, [SECRET.contactB, SECRET.contactBEmail])).toEqual([]);
+  });
+
+  it("bookings_cancel_booking refuses A's booking with B's staff member", async () => {
+    const before = await bookingState(ID.bookingCrossStaff);
+    const { error } = await outcome(ID.bizA, 'bookings_cancel_booking', { bookingId: ID.bookingCrossStaff });
+    expect(error?.message).toMatch(/another business/i);
+    expect(await bookingState(ID.bookingCrossStaff)).toEqual(before);
+  });
+
+  it("refuses B's own booking as not found", async () => {
+    const at = (days: number) => new Date(Date.now() + days * 24 * 3600_000);
+    const theirs = await db.booking.create({
+      data: { id: `${P}booking_b`, businessId: ID.bizB, contactId: ID.contactB, serviceId: ID.serviceB, startTime: at(60), endTime: at(60.05) },
+    });
+    const { error } = await outcome(ID.bizA, 'bookings_cancel_booking', { bookingId: theirs.id });
+    expect(error?.message).toMatch(/not found/i);
+    expect((await bookingState(theirs.id)).status).not.toBe('CANCELLED');
+  });
+
+  it('control: its own booking is rescheduled and cancelled, answering with its own service and contact', async () => {
+    emitted.length = 0;
+    const startTime = new Date(Date.now() + 70 * 24 * 3600_000);
+    const moved = await run(ID.bizA, 'bookings_reschedule_booking', { bookingId: ID.bookingOwn2, startTime: startTime.toISOString() });
+    expect(moved.id).toBe(ID.bookingOwn2);
+    expect(moved.booking).toMatchObject({ id: ID.bookingOwn2, service: { id: ID.serviceA, name: 'A-OWN-SERVICE' }, contact: { id: ID.contactA } });
+    expect(new Date(moved.booking.startTime).getTime()).toBe(startTime.getTime());
+    const cancelled = await run(ID.bizA, 'bookings_cancel_booking', { bookingId: ID.bookingOwn2 });
+    expect(cancelled.booking).toMatchObject({ id: ID.bookingOwn2, status: 'CANCELLED', service: { name: 'A-OWN-SERVICE' }, contact: { id: ID.contactA } });
+    expect(eventsFor(ID.bookingOwn2)).toEqual(expect.arrayContaining(['booking.rescheduled', 'booking.cancelled']));
   });
 });

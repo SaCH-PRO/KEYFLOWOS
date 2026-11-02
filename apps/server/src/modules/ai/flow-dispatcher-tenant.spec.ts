@@ -12,17 +12,32 @@
  *             naming B's service and contact, an A invoice naming B's contact) handed the model
  *             another business's row; a to-many include or a _count without businessId counted or
  *             listed another business's tasks under the caller's project.
- *   IDS       ~200 dispatcher sites take an id from the model. Most go to a service with the
- *             business, or to a query naming businessId; the census below found the rest:
- *             content_* (six tools) read and moved a content request by id alone, evidence_verify
- *             verified any business's evidence, approval_decide_step decided any business's
- *             approval request, bookings_offer_waitlist_slot booked a slot on another business's
- *             waiting list (and named any staff member), content_assign_request stored user ids
- *             that are no member of the business.
+ *   IDS       ~200 dispatcher sites take an id from the model. Most go to a query naming
+ *             businessId, or to a service handed the business that filters by it. The census below
+ *             found the dispatcher's own unbound uses: content_* (six tools) read and moved a content
+ *             request by id alone, evidence_verify verified any business's evidence,
+ *             approval_decide_step decided any business's approval request,
+ *             bookings_offer_waitlist_slot booked a slot on another business's waiting list (and
+ *             named any staff member), content_assign_request stored user ids that are no member of
+ *             the business.
+ *             A service handed businessId is bound only when it filters by it, which an AST of the
+ *             dispatcher cannot see (review SEC-V21D-1): procurement_acknowledge_vendor,
+ *             procurement_mark_fulfilled and procurement_mark_invoiced moved another business's
+ *             procurement request (ProcurementService updates where { id }), and
+ *             projects_update_task assigned another business's staff member (ProjectsService
+ *             resolves assigneeId by findUnique). TENANT_UNBOUND_TOOLS (job-role-policy.service.ts,
+ *             derived in job-role-tool-families.spec.ts by following each call into its service)
+ *             lists the tools whose service does not filter; the census requires every id such a
+ *             case hands a service to be resolved in the dispatcher first.
  *   SEC3-ST-2 commerce_mark_invoice_paid returned CommerceService.markInvoicePaid's reload
  *             (items, the whole Contact row and the whole Booking row) to the model, where the HTTP
  *             route projects through toInvoiceWriteResponse; commerce_create_invoice and
  *             commerce_create_quote returned the whole Contact row the same way.
+ *             bookings_reschedule_booking and bookings_cancel_booking returned BookingsService's
+ *             row, whose contact, service and staff member the service includes with no business
+ *             (review SEC-V21D-2): on a booking cross-linked before TD9-3 the model read the other
+ *             business's service, and the write (and its booking event, which drives the customer
+ *             mail) went out with the other business's contact before logContactEvent refused it.
  *
  * WHAT IS PINNED HERE (source and behaviour; the real-database proof is
  * test/key-dispatcher-tenant.integration.test.ts):
@@ -34,12 +49,16 @@
  *     relation into a tenant model is read with its businessId and passed through ownRelations,
  *     which drops it when it belongs elsewhere; a model-supplied id is used only in a query naming
  *     businessId, a *WithinBusiness helper, or a service call handed the business, or after one of
- *     those resolved it in the same case. Exceptions sit in shrink-only allowlists, each with its
- *     reason: an entry that no longer matches fails until it is removed;
- *  3. the census flags a planted dispatcher that reads by id alone or includes without a business
- *     filter (its negative control), and still sees the cases it exists for;
+ *     those resolved it in the same case; in a TENANT_UNBOUND_TOOLS case a service call handed the
+ *     business does not count, the id is resolved in the dispatcher first. Exceptions sit in
+ *     shrink-only allowlists, each with its reason: an entry that no longer matches fails until it
+ *     is removed;
+ *  3. the census flags a planted dispatcher that reads by id alone, trusts a service that ignores
+ *     the business, includes without a business filter or returns a write's row unprojected (its
+ *     negative control), and still sees the cases it exists for;
  *  4. the commerce write tools hand the model the write projection (no booking, the contact's
- *     id/businessId/name/email only, nothing of another business's contact).
+ *     id/businessId/name/email only, nothing of another business's contact); the booking write
+ *     tools hand it only the related rows the dispatcher resolved inside the business.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -49,6 +68,7 @@ import { Prisma } from '@prisma/client';
 import { FLOW_TOOLS } from './flow-tool-registry';
 import * as orchestratorModule from './flow-orchestrator.service';
 import { CommerceService } from '../commerce/commerce.service';
+import { TENANT_UNBOUND_TOOLS } from '../structure/job-role-policy.service';
 
 const { FlowOrchestratorService } = orchestratorModule;
 /** The V1-21d exports, read loosely so the census below still runs where they do not exist yet. */
@@ -56,6 +76,7 @@ const v21d = orchestratorModule as unknown as {
   ownRelations?: (businessId: string, row: object, relations: readonly string[]) => Record<string, unknown>;
   toKeyInvoiceResult?: (businessId: string, invoice: object) => Record<string, unknown>;
   toKeyQuoteResult?: (businessId: string, quote: object) => Record<string, unknown>;
+  toKeyBookingResult?: (booking: object, links: Record<string, string | null>) => Record<string, unknown>;
 };
 
 // ─── the census ──────────────────────────────────────────────────────────────
@@ -82,7 +103,16 @@ const COMMERCE_ROW_WRITES = new Set([
   'updateQuote',
   'updateQuoteStatus',
 ]);
-const PROJECTIONS = /^(toKeyInvoiceResult|toKeyQuoteResult)$/;
+/**
+ * The service writes whose returned row the dispatcher hands the model only through a projection:
+ * the commerce rows (SEC3-ST-2: the whole Contact and Booking rows), and the booking rows
+ * BookingsService reloads with its contact, service and staff member read by id with no business
+ * (review SEC-V21D-2).
+ */
+const ROW_WRITES: ReadonlyArray<{ prefix: string; methods: ReadonlySet<string>; projection: RegExp }> = [
+  { prefix: 'this.getCommerce().', methods: COMMERCE_ROW_WRITES, projection: /^(toKeyInvoiceResult|toKeyQuoteResult)$/ },
+  { prefix: 'this.getBookings().', methods: new Set(['rescheduleBooking', 'updateBookingStatus']), projection: /^toKeyBookingResult$/ },
+];
 
 interface IdSite {
   tool: string;
@@ -92,6 +122,8 @@ interface IdSite {
   bound: boolean;
   via: string;
   line: number;
+  /** The query or helper of the same case that resolved this id inside the business before this use. */
+  resolvedBy?: string;
 }
 interface RelationSite {
   tool: string;
@@ -309,11 +341,13 @@ function census(source: string) {
       }
     }
     // resolved before use: a use that names no business is bound when the same case already
-    // resolved that id inside the business (a query naming businessId, or a *WithinBusiness helper)
+    // resolved that id inside the business (a query naming businessId, or a *WithinBusiness helper);
+    // every use so resolved records by what (a TENANT_UNBOUND_TOOLS case needs it, see below)
     for (const s of sites) {
-      if (s.bound) continue;
       const first = sites.find((o) => o !== s && o.arg === s.arg && (o.kind === 'query' || o.kind === 'helper') && o.bound && o.line < s.line);
-      if (first) {
+      if (!first) continue;
+      s.resolvedBy = first.via;
+      if (!s.bound) {
         s.bound = true;
         s.via += ` (resolved first by ${first.via})`;
       }
@@ -427,14 +461,19 @@ function census(source: string) {
     };
     clause.statements.forEach(findPrisma);
 
-    // SEC3-ST-2: a row a commerce write returned reaches the model only through a projection
-    const rowVars = new Map<string, string>();
+    // SEC3-ST-2, SEC-V21D-2: a row a commerce or booking write returned reaches the model only
+    // through its projection
+    const rowVars = new Map<string, { method: string; projection: RegExp }>();
     const findRows = (n: ts.Node) => {
       if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer) {
         const init = unwrap(n.initializer);
-        if (ts.isCallExpression(init) && text(init.expression).startsWith('this.getCommerce().')) {
-          const name = text(init.expression).slice('this.getCommerce().'.length);
-          if (COMMERCE_ROW_WRITES.has(name)) rowVars.set(n.name.text, name);
+        if (ts.isCallExpression(init)) {
+          const callee = text(init.expression);
+          for (const w of ROW_WRITES) {
+            if (callee.startsWith(w.prefix) && w.methods.has(callee.slice(w.prefix.length))) {
+              rowVars.set(n.name.text, { method: callee.slice('this.'.length), projection: w.projection });
+            }
+          }
         }
       }
       ts.forEachChild(n, findRows);
@@ -451,14 +490,15 @@ function census(source: string) {
         const ret = n.expression;
         const v = (x: ts.Node) => {
           if (ts.isIdentifier(x) && rowVars.has(x.text) && !readsAProperty(x)) {
+            const row = rowVars.get(x.text)!;
             let q: ts.Node = x;
             let projected = false;
             while (q !== ret) {
               q = q.parent;
-              if (ts.isCallExpression(q) && PROJECTIONS.test(text(q.expression).replace(/^this\./, ''))) projected = true;
+              if (ts.isCallExpression(q) && row.projection.test(text(q.expression).replace(/^this\./, ''))) projected = true;
             }
             if (!projected && !(ts.isPropertyAssignment(x.parent) && x.parent.name === x)) {
-              rawRows.push({ tool, variable: x.text, method: rowVars.get(x.text)!, line: lineOf(x) });
+              rawRows.push({ tool, variable: x.text, method: row.method, line: lineOf(x) });
             }
           }
           ts.forEachChild(x, v);
@@ -486,6 +526,19 @@ function census(source: string) {
   return { cases, ids, relations, rawRows };
 }
 
+/**
+ * Review SEC-V21D-1: the census counts an id handed to a service together with businessId as
+ * bound, which holds only when the service filters by it. The tools whose service does not
+ * (`unboundTools`: TENANT_UNBOUND_TOOLS, derived by following each call into its service) must
+ * resolve inside the business, in the dispatcher, every id they hand on. These are the uses that do
+ * not: an id of such a case reaching a service (or a write) with no query or *WithinBusiness helper
+ * of the same case resolving it first.
+ */
+function trustedServiceIds(c: ReturnType<typeof census>, unboundTools: Iterable<string>): IdSite[] {
+  const tools = new Set(unboundTools);
+  return c.ids.filter((s) => s.tool.split('|').some((t) => tools.has(t)) && s.kind !== 'query' && s.kind !== 'helper' && !s.resolvedBy);
+}
+
 // ─── the allowlists (shrink-only: an entry that no longer matches fails until removed) ───
 
 /**
@@ -497,6 +550,20 @@ const ID_ALLOWLIST: Record<string, string> = {
     "Google Drive file ids in the business's own connected Drive, not rows of this database; stored on the content request (resolved inside the business first) as POST .../upload-deliverables stores them",
   'content_upload_deliverables:folderId':
     "a Google Drive folder id in the business's own connected Drive, not a row of this database; stored as POST .../upload-deliverables stores it",
+};
+
+/**
+ * Ids a TENANT_UNBOUND_TOOLS case hands its service without resolving them in the dispatcher,
+ * `${tool}:${arg}` -> where the service binds that id to the business (the tool is listed for
+ * another of its ids, or for a lookup the service makes before its own check).
+ */
+const SERVICE_BINDS_ALLOWLIST: Record<string, string> = {
+  'people_assign_task:taskId':
+    'TaskAssignmentService.assign is handed businessId and refuses a task of another business (assertTaskInBusiness, NotFound) before it writes anything; the tool is listed for the existence probes (validateTask) that run first',
+  'people_assign_task:assignableId':
+    'TaskAssignmentService.assign is handed businessId and refuses a staff member or user outside the business (assertAssignableInBusiness, NotFound) before it writes anything; Contractor and KeyflowStaff ids name no row',
+  'projects_update_task:taskId':
+    'ProjectsService.updateTask finds the task with findFirst({ where: { id: taskId, businessId } }) and updates where { id, businessId }; the tool is listed for its assigneeId',
 };
 
 /** Relations a dispatcher read includes without a business filter, `${tool}:${Model}.${relation}` -> why. */
@@ -580,6 +647,17 @@ describe('V1-21d census — it sees the dispatcher (negative control: an empty c
               const invoice = await this.getCommerce().markInvoicePaid(args.invoiceId, 'key', businessId);
               return { invoice, id: invoice.id };
             }
+            case 'p_raw_booking_row': {
+              const updated = await this.getBookings().updateBookingStatus(businessId, args.bookingId, 'CANCELLED');
+              return { booking: updated, id: updated.id };
+            }
+            case 'p_booking_row_wrong_projection': {
+              const updated = await this.getBookings().rescheduleBooking(businessId, args.bookingId, new Date());
+              return { booking: toKeyInvoiceResult(businessId, updated) };
+            }
+            case 'p_service_ignores_business': {
+              return this.getProcurement().acknowledgeVendor(businessId, args.requestId);
+            }
             case 'b_bound_query':
             case 'b_bound_query_alias': {
               const c = await this.prisma.client.contact.findFirst({ where: { id: args.contactId, businessId } });
@@ -608,6 +686,15 @@ describe('V1-21d census — it sees the dispatcher (negative control: an empty c
               const invoice = await this.getCommerce().markInvoicePaid(args.invoiceId, 'key', businessId);
               return { invoice: toKeyInvoiceResult(businessId, invoice), id: invoice.id };
             }
+            case 'b_projected_booking_row': {
+              const links = await this.bookingWithinBusiness(businessId, args.bookingId);
+              const updated = await this.getBookings().updateBookingStatus(businessId, args.bookingId, 'CANCELLED');
+              return { booking: toKeyBookingResult(updated, links), id: updated.id, status: updated.status };
+            }
+            case 'b_service_resolved_first': {
+              await this.idWithinBusiness('procurementRequest', businessId, args.requestId, 'Procurement request');
+              return this.getProcurement().acknowledgeVendor(businessId, args.requestId);
+            }
             default:
               return null;
           }
@@ -629,7 +716,18 @@ describe('V1-21d census — it sees the dispatcher (negative control: an empty c
       'p_to_one_with_business_but_kept:Booking.service',
     ]);
     expect(c.relations.filter((r) => r.tool.startsWith('b_')).every((r) => r.ok)).toBe(true);
-    expect(c.rawRows.map((r) => `${r.tool}:${r.variable}`)).toEqual(['p_raw_commerce_row:invoice']);
+    expect(c.rawRows.map((r) => `${r.tool}:${r.variable}`).sort()).toEqual([
+      'p_booking_row_wrong_projection:updated',
+      'p_raw_booking_row:updated',
+      'p_raw_commerce_row:invoice',
+    ]);
+    // SEC-V21D-1: a service handed businessId reads as bound to the plain rule, whatever the
+    // service does with it; for a tool whose service ignores it, only a resolution in the
+    // dispatcher counts
+    expect(c.ids.find((s) => idKey(s) === 'p_service_ignores_business:requestId')).toMatchObject({ kind: 'service', bound: true });
+    expect(trustedServiceIds(c, ['p_service_ignores_business', 'b_service_resolved_first', 'b_projected_booking_row']).map(idKey)).toEqual([
+      'p_service_ignores_business:requestId',
+    ]);
   });
 });
 
@@ -673,6 +771,37 @@ describe('V1-21d IDS — every model-supplied id is resolved inside the business
       expect(sites.some((s) => s.kind === 'helper' || s.kind === 'query'), `${pair} is resolved in the dispatcher`).toBe(true);
     }
   });
+
+  it('review SEC-V21D-1: a TENANT_UNBOUND_TOOLS case resolves every id it hands its service inside the business, in the dispatcher', () => {
+    const unbound = Object.keys(TENANT_UNBOUND_TOOLS);
+    // the rule is not vacuous: the job-role ceiling's list is read, and the census sees each of its cases
+    expect(unbound.length, 'TENANT_UNBOUND_TOOLS entries').toBeGreaterThan(10);
+    const seen = new Set(live.cases.flatMap((t) => t.split('|')));
+    for (const tool of unbound) expect(seen, `${tool} is a dispatcher case`).toContain(tool);
+    const offenders = trustedServiceIds(live, unbound).filter((s) => !ID_ALLOWLIST[idKey(s)] && !SERVICE_BINDS_ALLOWLIST[idKey(s)]);
+    expect(
+      offenders.map(show),
+      "these hand a service that finds its row by a bare id (TENANT_UNBOUND_TOOLS) an id the model chose, trusting the businessId beside it: resolve the id first (idWithinBusiness, a *WithinBusiness helper)",
+    ).toEqual([]);
+    // the review's sites, each resolved in the dispatcher now
+    for (const pair of [
+      'procurement_acknowledge_vendor:requestId',
+      'procurement_mark_fulfilled:requestId',
+      'procurement_mark_invoiced:requestId',
+      'projects_update_task:assigneeId',
+    ]) {
+      const sites = live.ids.filter((s) => idKey(s) === pair);
+      expect(sites.some((s) => s.kind === 'helper' && s.bound), `${pair} is resolved by a *WithinBusiness helper`).toBe(true);
+    }
+  });
+
+  it('the service-binds allowlist only shrinks: every entry is still a TENANT_UNBOUND_TOOLS id handed on unresolved, and names its reason', () => {
+    const trusted = new Set(trustedServiceIds(live, Object.keys(TENANT_UNBOUND_TOOLS)).map(idKey));
+    for (const [key, reason] of Object.entries(SERVICE_BINDS_ALLOWLIST)) {
+      expect(trusted, `${key} is resolved in the dispatcher now (or its tool left TENANT_UNBOUND_TOOLS): remove it from SERVICE_BINDS_ALLOWLIST`).toContain(key);
+      expect(reason.length, `${key} needs a reason`).toBeGreaterThan(20);
+    }
+  });
 });
 
 describe('V1-21d INCLUDES — every relation a dispatcher read includes is filtered to the business', () => {
@@ -710,12 +839,18 @@ describe('V1-21d INCLUDES — every relation a dispatcher read includes is filte
 });
 
 describe('V1-21d SEC3-ST-2 — the commerce write tools hand the model the write projection', () => {
-  it('no dispatcher case returns a row a commerce write returned, outside a projection', () => {
+  it('no dispatcher case returns a row a commerce or booking write returned, outside its projection', () => {
     const offenders = live.rawRows.filter((r) => !RAW_ROW_ALLOWLIST[`${r.tool}:${r.variable}`]);
     expect(
-      offenders.map((r) => `${r.tool}: ${r.variable} from getCommerce().${r.method} (line ${r.line})`),
-      'project it through toKeyInvoiceResult / toKeyQuoteResult (no booking; the contact as the HTTP write routes answer it)',
+      offenders.map((r) => `${r.tool}: ${r.variable} from ${r.method} (line ${r.line})`),
+      'project a commerce row through toKeyInvoiceResult / toKeyQuoteResult (no booking; the contact as the HTTP write routes answer it), ' +
+        'a booking row through toKeyBookingResult with the links bookingWithinBusiness resolved',
     ).toEqual([]);
+    // review SEC-V21D-2: the census sees the booking writes it exists for
+    const bookingRows = census(DISPATCHER.replace(/toKeyBookingResult\((\w+), \w+\)/g, '$1'));
+    expect(bookingRows.rawRows.map((r) => r.tool).sort(), 'with the projection taken out').toEqual(
+      expect.arrayContaining(['bookings_cancel_booking', 'bookings_reschedule_booking']),
+    );
     for (const key of Object.keys(RAW_ROW_ALLOWLIST)) {
       expect(live.rawRows.map((r) => `${r.tool}:${r.variable}`), `${key}: remove it from RAW_ROW_ALLOWLIST`).toContain(key);
     }
@@ -795,5 +930,28 @@ describe('V1-21d SEC3-ST-2 — the commerce write tools hand the model the write
     expect(typeof v21d.toKeyQuoteResult).toBe('function');
     expect(v21d.toKeyInvoiceResult!(BIZ, { id: 'inv_1', booking: { id: 'bk' } })).toEqual({ id: 'inv_1' });
     expect(v21d.toKeyQuoteResult!(BIZ, { id: 'qt_1', contact: null })).toEqual({ id: 'qt_1', contact: null });
+  });
+
+  it('review SEC-V21D-2: toKeyBookingResult keeps only the related rows the dispatcher resolved inside the business', () => {
+    expect(typeof v21d.toKeyBookingResult, 'toKeyBookingResult is exported from flow-orchestrator.service.ts').toBe('function');
+    const project = v21d.toKeyBookingResult!;
+    const row = {
+      id: 'bk_1',
+      status: 'CANCELLED',
+      contact: { id: 'con_a', firstName: 'Ada', email: 'ada@example.com', phone: '+1' },
+      service: { id: 'svc_b', name: 'B-SECRET-SERVICE', duration: 60, price: 999 },
+      staff: { id: 'st_a', name: 'A staff' },
+    };
+    // the service row this business resolved is kept; one it did not (relinked since, or never read) is dropped
+    expect(project(row, { contact: 'con_a', service: 'svc_a', staff: 'st_a' })).toEqual({
+      id: 'bk_1',
+      status: 'CANCELLED',
+      contact: row.contact,
+      service: null,
+      staff: row.staff,
+    });
+    expect(project(row, {})).toEqual({ id: 'bk_1', status: 'CANCELLED', contact: null, service: null, staff: null });
+    expect(project({ id: 'bk_2', staff: null }, { contact: 'con_a', service: 'svc_a', staff: null })).toEqual({ id: 'bk_2', staff: null });
+    expect(row.service.name, 'the input is left alone').toBe('B-SECRET-SERVICE');
   });
 });
