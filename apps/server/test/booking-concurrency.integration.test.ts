@@ -270,7 +270,9 @@ beforeAll(async () => {
       // Every service in this suite is free, so no invoice is ever created.
       { provide: CommerceService, useValue: { computeServiceDeposit: () => 0, createInvoiceForService: async () => null } },
       { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
-      { provide: CatalogService, useValue: {} },
+      // V1-23: the public slot and booking routes check the storefront is open first (assertPublicStore),
+      // so this suite runs the real CatalogService over its own rows (storeEnabled defaults to true).
+      CatalogService,
       { provide: RevenueAttributionService, useValue: { record: async () => undefined } },
       { provide: TransactionalEmailService, useValue: { send: async () => undefined } },
       { provide: PublicEventsService, useValue: { logStorefrontEvent: async () => undefined, backstitchVisitor: async () => undefined } },

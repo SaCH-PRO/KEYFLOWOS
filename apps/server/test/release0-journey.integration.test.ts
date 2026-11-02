@@ -85,7 +85,13 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+
+// Each step drives the spawned server over HTTP against the shared real database. Run alone,
+// the slowest step (5, which since V1-47 also reads the cockpit) takes about 1.6 s; under the
+// full suite's parallel load it crossed vitest's 5 s default. The limit is per case and changes
+// no assertion.
+vi.setConfig({ testTimeout: 30_000 });
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
