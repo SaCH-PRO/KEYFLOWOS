@@ -34,6 +34,8 @@
  *   PL-09  a SENT quote written with no token (the ai-execute send_quote path,
  *          V1-50 CR-V150-2) gets its one token minted by the link route,
  *          compare-and-set: two concurrent calls answer the same token
+ *   PL-10  a sent quote the customer accepted (unconverted) keeps its link; a decision
+ *          recorded on a never-sent DRAFT has none -> 409 quote_link_unavailable
  *   LEDGER no FinancialTransaction (or ledger entry) is written by link creation or
  *          by a public view, on an ACCRUAL tenant with a seeded chart of accounts
  *
@@ -370,8 +372,13 @@ describe('POST /commerce/businesses/:businessId/quotes/:quoteId/public-link (V1-
   it('PL-01: a DRAFT answers 409 quote_not_sent and no token is minted; a DRAFT holding a reserved send-email token is refused the same way without disclosing it', async () => {
     const draft = await createQuote(ID.ownerA, ID.bizA, ID.contactA);
     expect(draft.status).toBe('DRAFT');
+    // send-email reserves a token on the DRAFT while Gmail has the message (R0-CMF4).
+    const reserved = await createQuote(ID.ownerA, ID.bizA, ID.contactA);
+    await db.$executeRawUnsafe(`UPDATE quotes SET view_token = $1 WHERE id = $2`, `${P}tok_reserved`, reserved.id);
     const before = await quoteRow(draft.id);
     expect(before.view_token).toBeNull();
+    recordedEvents.length = 0; // the two quote.created
+    crmCalls.length = 0;
 
     const res = await publicLink(ID.ownerA, ID.bizA, draft.id);
     expect(res.status, JSON.stringify(res.body)).toBe(409);
@@ -380,9 +387,6 @@ describe('POST /commerce/businesses/:businessId/quotes/:quoteId/public-link (V1-
     expect(res.body).not.toHaveProperty('url');
     expect(await quoteRow(draft.id)).toEqual(before);
 
-    // send-email reserves a token on the DRAFT while Gmail has the message (R0-CMF4).
-    const reserved = await createQuote(ID.ownerA, ID.bizA, ID.contactA);
-    await db.$executeRawUnsafe(`UPDATE quotes SET view_token = $1 WHERE id = $2`, `${P}tok_reserved`, reserved.id);
     const reservedBefore = await quoteRow(reserved.id);
     const res2 = await publicLink(ID.ownerA, ID.bizA, reserved.id);
     expect(res2.status, JSON.stringify(res2.body)).toBe(409);
@@ -422,6 +426,7 @@ describe('POST /commerce/businesses/:businessId/quotes/:quoteId/public-link (V1-
     const quoteId = await sentQuote(ID.ownerA, ID.bizA, ID.contactA);
     const stateA = await tenantState(ID.bizA);
     const stateB = await tenantState(ID.bizB);
+    recordedEvents.length = 0; // quote.created and quote.sent
 
     const unknown = await publicLink(ID.ownerB, ID.bizB, ID.unknown);
     const cross = await publicLink(ID.ownerB, ID.bizB, quoteId);
@@ -534,6 +539,28 @@ describe('POST /commerce/businesses/:businessId/quotes/:quoteId/public-link (V1-
     const again = await publicLink(ID.ownerA, ID.bizA, quoteId);
     expect(again.body).toEqual(a.body);
     expect(await quoteRow(quoteId)).toEqual(after);
+  });
+});
+
+describe('decided quotes (V1-52)', () => {
+  it('PL-10: a sent quote the customer accepted (not yet converted) keeps its link, so they can reopen what they accepted; a decision the operator recorded on a never-sent DRAFT has no link (409 quote_link_unavailable) and none is minted', async () => {
+    const quoteId = await sentQuote(ID.ownerA, ID.bizA, ID.contactA);
+    const token = (await quoteRow(quoteId)).view_token;
+    const accepted = await agent().post(`/commerce/public/quotes/${token}/accept`).send({});
+    expect([200, 201], JSON.stringify(accepted.body)).toContain(accepted.status);
+    const link = await publicLink(ID.ownerA, ID.bizA, quoteId);
+    expect(link.status, JSON.stringify(link.body)).toBe(201);
+    expect(link.body).toEqual({ token, url: `${APP_URL}/quote/${token}` });
+
+    const draft = await createQuote(ID.ownerA, ID.bizA, ID.contactA);
+    const recorded = await setQuoteStatus(ID.ownerA, ID.bizA, draft.id, 'accepted');
+    expect(recorded.status, JSON.stringify(recorded.body)).toBe(200);
+    const before = await quoteRow(draft.id);
+    expect(before.view_token).toBeNull();
+    const res = await publicLink(ID.ownerA, ID.bizA, draft.id);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.code).toBe('quote_link_unavailable');
+    expect(await quoteRow(draft.id)).toEqual(before);
   });
 });
 

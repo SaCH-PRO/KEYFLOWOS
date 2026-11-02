@@ -28,6 +28,7 @@ import {
   CalendarClock,
   Clock,
   Sparkles,
+  Link2,
 } from "lucide-react";
 import nextDynamic from "next/dynamic";
 
@@ -43,6 +44,7 @@ import {
   deleteQuote,
   convertQuoteToInvoice,
   bulkUpdateQuotes,
+  createQuotePublicLink,
   Product,
   Quote,
   Contact,
@@ -594,12 +596,40 @@ export default function QuotesPanel({
     setShowQuoteBuilder(true);
   }
 
-  function shareQuoteViaWhatsApp(quote: Quote) {
+  // V1-52-QUOTE-PUBLIC-LINK (CF-16): the customer link comes from the server
+  // (the quote's one token, on the /quote/<token> page), so it can be copied or
+  // shared with no email provider connected. A refusal (a DRAFT must be sent
+  // first; an expired or converted quote has no link to share) is shown to the
+  // operator, never replaced by a message without a link.
+  async function fetchQuoteLink(quote: Quote): Promise<string | null> {
+    if (!businessId) return null;
+    const { data, error } = await createQuotePublicLink(businessId, quote.id);
+    if (!data?.url) {
+      toast.error(error ?? "Could not create a link for this quote");
+      return null;
+    }
+    return data.url;
+  }
+
+  async function copyQuoteLink(quote: Quote) {
+    const url = await fetchQuoteLink(quote);
+    if (!url) return;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success("Quote link copied");
+    } catch {
+      toast.info("Copy the quote link", { description: url });
+    }
+  }
+
+  async function shareQuoteViaWhatsApp(quote: Quote) {
+    const url = await fetchQuoteLink(quote);
+    if (!url) return;
     const contactName = quote.contact
       ? `${quote.contact.firstName ?? ""} ${quote.contact.lastName ?? ""}`.trim()
       : "there";
-    const msg = `Hi ${contactName}, here is your quote ${quote.quoteNumber} for ${formatAmount(quote.total, quote.currency)}. Please review and let us know if you'd like to proceed!`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
+    const msg = `Hi ${contactName}, here is your quote ${quote.quoteNumber} for ${formatAmount(quote.total, quote.currency)}. You can view and accept it here: ${url}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank", "noopener,noreferrer");
   }
 
   async function handleConvert() {
@@ -965,6 +995,9 @@ export default function QuotesPanel({
                     <OverflowMenuItem icon={Files} label="Duplicate" onClick={() => duplicateQuote(quote)} />
                     <OverflowMenuItem icon={Sparkles} label="AI Follow-up" onClick={() => setFollowUpFor(quote)} />
                     <OverflowMenuItem icon={MessageCircle} label="Share via WhatsApp" onClick={() => shareQuoteViaWhatsApp(quote)} />
+                    {quote.status !== "DRAFT" && !quote.invoiceId && (
+                      <OverflowMenuItem icon={Link2} label="Copy link" onClick={() => copyQuoteLink(quote)} />
+                    )}
                     {(quote.status === "DRAFT" || quote.status === "SENT") && (
                       <OverflowMenuItem
                         icon={Mail}
@@ -1250,6 +1283,11 @@ export default function QuotesPanel({
                     <button onClick={() => shareQuoteViaWhatsApp(selectedQuote)} className="p-2 rounded-lg hover:bg-emerald-500/10 transition-colors" title="Share via WhatsApp">
                       <MessageCircle className="w-4 h-4 text-emerald-400" />
                     </button>
+                    {selectedQuote.status !== "DRAFT" && !selectedQuote.invoiceId && (
+                      <button onClick={() => copyQuoteLink(selectedQuote)} className="p-2 rounded-lg hover:bg-white/[0.06] transition-colors" title="Copy link">
+                        <Link2 className="w-4 h-4 text-slate-400" />
+                      </button>
+                    )}
                     <button
                       onClick={() => openComposer({
                         to: selectedQuote.contact?.email || "",

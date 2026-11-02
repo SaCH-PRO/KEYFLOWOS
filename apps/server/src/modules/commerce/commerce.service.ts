@@ -1321,10 +1321,7 @@ export class CommerceService {
         // compare-and-set on no token, so overlapping requests store one.
         // The status does not change, so nothing is emitted or logged.
         if (target === 'SENT' && needsViewTokenRepair(existingQuote)) {
-          await this.prisma.client.quote.updateMany({
-            where: { id: params.quoteId, status: 'SENT', viewToken: null, invoiceId: null, deletedAt: null },
-            data: { viewToken: mintQuoteViewToken() },
-          });
+          await this.repairSentQuoteViewToken(params.quoteId);
         }
         const current = await this.prisma.client.quote.findUnique({ where: { id: params.quoteId }, include: { contact: true } });
         if (!current) throw new NotFoundException('Quote not found');
@@ -1361,6 +1358,86 @@ export class CommerceService {
     await this.logQuoteMoveOnTimeline(eventQuote, target, { actorId: params.actorId, source, reason: params.reason });
     this.statsCache.invalidateCache(existingQuote.businessId);
     return quote;
+  }
+
+  /**
+   * V1-50 review CR-V150-2: mint the one view token of a SENT quote written
+   * without one (needsViewTokenRepair), as a compare-and-set on "SENT, no
+   * token, not converted, not deleted", so overlapping callers store a single
+   * token. Used by the status route's `sent` no-op and by the public-link
+   * route (V1-52). Writes nothing else: no status, sentAt, event or timeline.
+   */
+  private async repairSentQuoteViewToken(quoteId: string): Promise<void> {
+    await this.prisma.client.quote.updateMany({
+      where: { id: quoteId, status: 'SENT', viewToken: null, invoiceId: null, deletedAt: null },
+      data: { viewToken: mintQuoteViewToken() },
+    });
+  }
+
+  /**
+   * V1-52-QUOTE-PUBLIC-LINK (CF-16): the customer link of a quote, for the
+   * operator to copy or share by any channel, with no mail provider. The quote's
+   * viewToken used to reach a customer only inside the Gmail send-email
+   * message, so a business with no mailbox connected had no handoff at all.
+   *
+   * Bound to the path tenant the guards admitted: an unknown, soft-deleted or
+   * foreign id is one 404. The link is the quote's existing token (the single
+   * mint of V1-50) and `${appUrl()}/quote/<token>`, the page that reads
+   * GET /commerce/public/quotes/:token and the URL quote-notifications.listener
+   * builds. It is idempotent: an existing token is returned as stored and the
+   * row is not written. The one write is the CR-V150-2 repair of a SENT quote
+   * that has no token (repairSentQuoteViewToken). Nothing is emitted, logged or
+   * posted: creating a link is not a send (no sentAt, no quote.sent) and no
+   * ledger row is involved.
+   *
+   * Refusals, before any write:
+   * - converted (invoiceId set, or INVOICED/PAID/CONVERTED): 400 quote_converted,
+   *   as the public accept/reject answers it; the customer's document is the invoice;
+   * - expired (stored EXPIRED, or an open SENT/VIEWED offer past its expiryDate,
+   *   the rule respondToQuoteByToken applies): 400 quote_expired;
+   * - DRAFT: 409 quote_not_sent. The public routes refuse a DRAFT, and a token
+   *   send-email reserved on one belongs to the message Gmail has (R0-CMF4), so
+   *   it is never disclosed here;
+   * - a decided quote that was never sent (ACCEPTED or REJECTED with no token,
+   *   an operator-recorded decision): 409 quote_link_unavailable.
+   */
+  async getQuotePublicLink(quoteId: string, businessId: string): Promise<{ token: string; url: string }> {
+    const quote = await this.prisma.client.quote.findFirst({
+      where: { id: quoteId, businessId, deletedAt: null },
+      select: { id: true, status: true, viewToken: true, invoiceId: true, expiryDate: true },
+    });
+    if (!quote) throw new NotFoundException('Quote not found');
+    if (isConvertedQuote(quote)) {
+      throw new BadRequestException({
+        code: 'quote_converted',
+        message: 'This quote has been converted to an invoice; share the invoice instead.',
+      });
+    }
+    const openOffer = quote.status === 'SENT' || quote.status === 'VIEWED';
+    if (quote.status === 'EXPIRED' || (openOffer && !!quote.expiryDate && new Date(quote.expiryDate).getTime() < Date.now())) {
+      throw new BadRequestException({
+        code: 'quote_expired',
+        message: 'This quote has expired; extend its expiry date before sharing it.',
+      });
+    }
+    if (quote.status === 'DRAFT') {
+      throw new ConflictException({
+        code: 'quote_not_sent',
+        message: 'This quote is a draft: send it first, then share its link.',
+      });
+    }
+    let token = quote.viewToken;
+    if (!token && needsViewTokenRepair(quote)) {
+      await this.repairSentQuoteViewToken(quote.id);
+      token = (await this.prisma.client.quote.findFirst({ where: { id: quote.id, businessId }, select: { viewToken: true } }))?.viewToken ?? null;
+    }
+    if (!token) {
+      throw new ConflictException({
+        code: 'quote_link_unavailable',
+        message: 'This quote was never sent, so it has no customer link.',
+      });
+    }
+    return { token, url: `${appUrl()}/quote/${encodeURIComponent(token)}` };
   }
 
   /**

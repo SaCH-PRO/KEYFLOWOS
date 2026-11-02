@@ -2818,6 +2818,19 @@ export async function sendQuoteEmail(input: {
   });
 }
 
+/**
+ * V1-52-QUOTE-PUBLIC-LINK: the quote's customer link (`url` opens the
+ * /quote/<token> page), for copying or sharing without an email provider.
+ * Tenant-bound and revenue:write. The server answers 409 for a DRAFT (send it
+ * first) and 400 for an expired or converted quote; `error` carries its message.
+ */
+export async function createQuotePublicLink(businessId: string, quoteId: string) {
+  return apiPost<{ token: string; url: string }>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/quotes/${encodeURIComponent(quoteId)}/public-link`,
+    body: {},
+  });
+}
+
 // R2: stale-quote candidates for the Action Queue.
 export async function fetchStaleQuotes(businessId?: string, days?: number) {
   const bId = businessId ?? DEFAULT_BUSINESS_ID;

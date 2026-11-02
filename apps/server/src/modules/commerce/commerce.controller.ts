@@ -973,6 +973,24 @@ export class CommerceController {
     return this.commerce.convertQuoteToInvoice({ ...body, quoteId, businessId });
   }
 
+  // V1-52-QUOTE-PUBLIC-LINK (CF-16): the quote's customer link, { token, url },
+  // for the operator to copy or share on any channel, with no mail provider
+  // (the link used to reach a customer only inside the Gmail send-email
+  // message). Bound to the path tenant: a foreign or unknown id is a 404. It
+  // returns the quote's existing token and writes nothing, except minting the
+  // one token of a SENT quote stored without one, so it is revenue:write like
+  // send-email. A DRAFT is a 409, an expired or converted quote a 400
+  // (CommerceService.getQuotePublicLink).
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/quotes/:quoteId/public-link')
+  createQuotePublicLink(
+    @Param('businessId') businessId: string,
+    @Param('quoteId') quoteId: string,
+  ) {
+    return this.commerce.getQuotePublicLink(quoteId, businessId);
+  }
+
   // ========== GMAIL INTEGRATION ==========
   //
   // R0-CMF5-GMAIL-CONNECT-BINDING (owner ruling D-11; R0-07 review ST-2, ST-3):
