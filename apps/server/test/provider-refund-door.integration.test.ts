@@ -376,15 +376,15 @@ beforeAll(async () => {
 
   await cleanup();
 
-  for (const [user, biz, contact, secret, name] of [
-    [ID.ownerA, ID.bizA, ID.contactA, SECRET_A, 'V29C Biz A'],
-    [ID.ownerB, ID.bizB, ID.contactB, SECRET_B, 'V29C Biz B'],
+  for (const [user, biz, contact, secret, name, email, contactEmail] of [
+    [ID.ownerA, ID.bizA, ID.contactA, SECRET_A, 'V29C Biz A', `${P}owner_a@test.local`, `${P}c_a@test.local`],
+    [ID.ownerB, ID.bizB, ID.contactB, SECRET_B, 'V29C Biz B', `${P}owner_b@test.local`, `${P}c_b@test.local`],
   ] as const) {
-    await db.user.create({ data: { id: user, email: `${user}@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id: user, email, role: 'USER' } });
     await db.business.create({ data: { id: biz, name, ownerId: user, currency: 'TTD', accountingBasis: 'CASH', metaData: { stripeWebhookSecret: secret } } });
     await db.membership.create({ data: { id: `${user}_m`, userId: user, businessId: biz, role: 'OWNER' } });
     await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(biz);
-    await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V29c', lastName: name, email: `${contact}@test.local` } });
+    await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V29c', lastName: name, email: contactEmail } });
   }
 
   let n = 0;

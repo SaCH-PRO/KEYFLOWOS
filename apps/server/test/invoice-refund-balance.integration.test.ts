@@ -84,6 +84,9 @@ const ID = {
   invRPaid: `${P}invRPaid`,
   invRLegacy: `${P}invRLegacy`,
   invBPaid: `${P}invBPaid`,
+  // V1-29c-REFUND-WRITE-DOOR: BR-07 / BR-08 made real (provider refunds through the real webhook handlers)
+  invBr07: `${P}invBr07`,
+  invBr08: `${P}invBr08`,
 };
 
 const DEPOSIT_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
@@ -99,6 +102,8 @@ let financeOverview: any;
 let revenueActions: any;
 let revenueReporting: any;
 let revenuePosting: any;
+/** V1-29c: the real Stripe webhook handlers over the same Prisma, workflow and ledger chain (BR-07, BR-08). */
+let paymentsSvc: any;
 
 const eventStub = {
   emit: () => true,
@@ -303,6 +308,8 @@ beforeAll(async () => {
   }).compile();
   prismaSvc = moduleRef.get(PrismaService);
   revenuePosting = moduleRef.get(RevenuePostingService);
+  const { PaymentsService } = await import('../src/modules/payments/payments.service');
+  paymentsSvc = new PaymentsService(prismaSvc, moduleRef.get(CommerceService), moduleRef.get(workflowMod.InvoiceWorkflowService), revenuePosting);
   // The tenant read surfaces over the same real Prisma (no Redis cache, no seeder, no receivables).
   financeOverview = new FinanceOverviewService(prismaSvc, null, null, null);
   revenueActions = new RevenueActionService(prismaSvc, eventStub as any, {} as any, {} as any);
@@ -345,6 +352,8 @@ beforeAll(async () => {
     [ID.invRPaid, ID.bizR, ID.contactR, 50],
     [ID.invRLegacy, ID.bizR, ID.contactR, 30],
     [ID.invBPaid, ID.bizB, ID.contactB, 70],
+    [ID.invBr07, ID.bizA, ID.contactA, 100],
+    [ID.invBr08, ID.bizA, ID.contactA, 100],
   ];
   let n = 0;
   for (const [id, biz, contact, total] of invoices) {
@@ -495,10 +504,38 @@ describe('per tenant: the revenue surfaces subtract refunds', () => {
 });
 
 describe('V1-36 discovery outside the write set (it.todo)', () => {
-  it.todo(
-    'BR-07 LEDGER: a provider partial refund (the real Stripe refund webhook, refund.created 40 of a 100 PaymentIntent payment) leaves every balance surface at net 60, remaining 40, but the ledger cash net of the invoice at 0: createRefundWithPosting (payments/payments.service.ts) calls RevenuePostingService.onPaymentRefunded (finance/revenue-posting.service.ts), which reverses the WHOLE original posting whatever the refund amount. Observed at the V1-34 head with this suite\'s fixtures; both files are outside the V1-36 write set (a partial refund needs a partial reversing posting)',
-  );
-  it.todo(
-    'BR-08 (review ST-V36-1): one Stripe refund is one negative REFUNDED row. A charge.refunded event without refunds.data (Stripe API 2022-11-15 and later omit Charge.refunds by default) is stored under the synthetic id re_synth_<charge> (payments/payments.service.ts processStripeRefund), and refund.created for the same refund under its real re_ id; the refund dedupe looks at providerPaymentId alone, so both rows land. On a 100 invoice paid by a PaymentIntent (latest_charge ch_x), charge.refunded {amount_refunded 4000, no refunds list} then refund.created {amount 4000, charge ch_x} write SUCCESSFUL 100, REFUNDED -40 (re_synth_ch_x) and REFUNDED -40 (re_x): balanceOfStoredRows reads net 20, remaining 80, and since V1-36 every tenant revenue read over CASH_NET_PAYMENT_WHERE (Finance overview revenueThisMonth, revenue KPIs and pulse, collected-vs-expected) subtracts the refund twice; the right reading is net 60, remaining 40. The read contract is not where the duplicate is made: the fix is at the refund write door (dedupe on charge plus cumulative amount_refunded, or skip the synthetic row when real re_ rows on the charge already cover it), payments.service.ts, outside the V1-36 write set',
-  );
+  // Was it.todo; made real by V1-29c-REFUND-WRITE-DOOR (a partial refund posts its amount).
+  it('BR-07 LEDGER: a provider partial refund (the real Stripe refund webhook, refund.created 40 of a 100 PaymentIntent payment) leaves every balance surface at net 60, remaining 40, but the ledger cash net of the invoice at 0: createRefundWithPosting (payments/payments.service.ts) calls RevenuePostingService.onPaymentRefunded (finance/revenue-posting.service.ts), which reverses the WHOLE original posting whatever the refund amount. Observed at the V1-34 head with this suite\'s fixtures; both files are outside the V1-36 write set (a partial refund needs a partial reversing posting)', async () => {
+    const inv = ID.invBr07;
+    await paymentsSvc.processStripeChargeOrSession(
+      'payment_intent.succeeded',
+      { id: `${P}pi_br07`, amount_received: 10000, currency: 'ttd', latest_charge: `${P}ch_br07`, metadata: { invoiceId: inv } },
+      `${P}evt_br07`,
+    );
+    await paymentsSvc.processStripeRefund('refund.created', {
+      id: `${P}re_br07`, amount: 4000, currency: 'ttd', charge: `${P}ch_br07`, payment_intent: `${P}pi_br07`, status: 'succeeded',
+    });
+    expect(await balanceOf(inv)).toMatchObject({ net: 60, remaining: 40 });
+    // RED-BEFORE (int/trial-I 7f4b81a2): 0, the whole 100 posting reversed.
+    expect(await invoiceCashNet(inv)).toBe(60);
+  });
+  // Was it.todo; made real by V1-29c-REFUND-WRITE-DOOR (the refund write door dedupes on charge + cumulative amount).
+  it('BR-08 (review ST-V36-1): one Stripe refund is one negative REFUNDED row. A charge.refunded event without refunds.data (Stripe API 2022-11-15 and later omit Charge.refunds by default) is stored under the synthetic id re_synth_<charge> (payments/payments.service.ts processStripeRefund), and refund.created for the same refund under its real re_ id; the refund dedupe looks at providerPaymentId alone, so both rows land. On a 100 invoice paid by a PaymentIntent (latest_charge ch_x), charge.refunded {amount_refunded 4000, no refunds list} then refund.created {amount 4000, charge ch_x} write SUCCESSFUL 100, REFUNDED -40 (re_synth_ch_x) and REFUNDED -40 (re_x): balanceOfStoredRows reads net 20, remaining 80, and since V1-36 every tenant revenue read over CASH_NET_PAYMENT_WHERE (Finance overview revenueThisMonth, revenue KPIs and pulse, collected-vs-expected) subtracts the refund twice; the right reading is net 60, remaining 40. The read contract is not where the duplicate is made: the fix is at the refund write door (dedupe on charge plus cumulative amount_refunded, or skip the synthetic row when real re_ rows on the charge already cover it), payments.service.ts, outside the V1-36 write set', async () => {
+    const inv = ID.invBr08;
+    await paymentsSvc.processStripeChargeOrSession(
+      'payment_intent.succeeded',
+      { id: `${P}pi_br08`, amount_received: 10000, currency: 'ttd', latest_charge: `${P}ch_br08`, metadata: { invoiceId: inv } },
+      `${P}evt_br08`,
+    );
+    await paymentsSvc.processStripeRefund('charge.refunded', {
+      id: `${P}ch_br08`, payment_intent: `${P}pi_br08`, amount: 10000, amount_refunded: 4000, currency: 'ttd',
+    });
+    await paymentsSvc.processStripeRefund('refund.created', {
+      id: `${P}re_br08`, amount: 4000, currency: 'ttd', charge: `${P}ch_br08`, payment_intent: `${P}pi_br08`, status: 'succeeded',
+    });
+    // RED-BEFORE (int/trial-I 7f4b81a2): SUCCESSFUL 100, REFUNDED -40 (re_synth_ch_x), REFUNDED -40 (re_x); net 20, remaining 80.
+    expect((await paymentsOf(inv)).map((r) => [r.status, Number(r.amount)])).toEqual([['SUCCESSFUL', 100], ['REFUNDED', -40]]);
+    expect(await balanceOf(inv)).toMatchObject({ net: 60, remaining: 40 });
+    expect(await invoiceCashNet(inv)).toBe(60);
+  });
 });

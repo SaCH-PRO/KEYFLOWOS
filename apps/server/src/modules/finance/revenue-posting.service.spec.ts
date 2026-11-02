@@ -32,6 +32,8 @@ describe('RevenuePostingService recipe semantics', () => {
   // and assert which entries land on which account, not what the DB does
   // about it.
   type Posted = {
+    type?: string;
+    metadata?: unknown;
     kind?: string | null;
     sourceType?: string | null;
     sourceId?: string | null;
@@ -54,14 +56,30 @@ describe('RevenuePostingService recipe semantics', () => {
     invoice,
     payment,
     existingFinancialTx,
+    partialRefunds = [],
+    linkedRefund,
   }: {
     basis: 'CASH' | 'ACCRUAL';
     invoice?: any;
     payment?: any;
     existingFinancialTx?: any;
+    /** V1-29c: earlier partial refund postings of the payment (Payment:<id>:payment_refunded:<n>, n = 1, 2, ...). */
+    partialRefunds?: Array<{ id: string; amount: number; refundPaymentId: string }>;
+    /** V1-29c: the newest refund row linked to the payment (what the manual refund wrote). */
+    linkedRefund?: { id: string; amount: number };
   }) {
     const posted: Posted[] = [];
     const reversed: ReverseCall[] = [];
+    // Answers by key: the recording / finalized posting, or the n-th partial refund posting.
+    const findTransaction = vi.fn(async ({ where }: any) => {
+      const ref: string = where?.businessId_externalRef?.externalRef ?? '';
+      const partial = /:payment_refunded:(\d+)$/.exec(ref);
+      if (partial) {
+        const p = partialRefunds[Number(partial[1]) - 1];
+        return p ? { id: p.id, amount: p.amount, metadata: { refundPaymentId: p.refundPaymentId } } : null;
+      }
+      return existingFinancialTx ?? null;
+    });
     const prisma = {
       client: {
         business: {
@@ -72,9 +90,13 @@ describe('RevenuePostingService recipe semantics', () => {
         },
         payment: {
           findUnique: vi.fn().mockResolvedValue(payment ?? null),
+          findFirst: vi.fn().mockResolvedValue(linkedRefund ?? null),
         },
         financialTransaction: {
-          findUnique: vi.fn().mockResolvedValue(existingFinancialTx ?? null),
+          findUnique: findTransaction,
+        },
+        activity: {
+          create: vi.fn(async ({ data }: any) => data),
         },
       },
     };
@@ -95,8 +117,30 @@ describe('RevenuePostingService recipe semantics', () => {
     };
     const timeline = { recordEvent: vi.fn().mockResolvedValue(undefined) };
     const svc = new RevenuePostingService(prisma as any, posting as any, coa as any, timeline as any);
-    return { svc, posted, reversed, posting };
+    return { svc, posted, reversed, posting, prisma, timeline };
   }
+
+  /** A cash-basis recording of a 100 Stripe payment with a 3 fee: Dr processor 97, Dr fee 3, Cr revenue 100. */
+  const RECORDING = {
+    id: 'txn-orig',
+    status: 'POSTED',
+    entries: [
+      { accountId: ACCOUNTS.PAYMENT_PROCESSOR, debit: 97, credit: 0, account: { systemKey: 'PAYMENT_PROCESSOR' } },
+      { accountId: ACCOUNTS.EXPENSE_BANK_FEES, debit: 3, credit: 0, account: { systemKey: 'EXPENSE_BANK_FEES' } },
+      { accountId: ACCOUNTS.REVENUE, debit: 0, credit: 100, account: { systemKey: 'REVENUE' } },
+    ],
+  };
+  const PAYMENT = {
+    id: 'p1',
+    businessId: 'b1',
+    invoiceId: 'inv1',
+    amount: 100,
+    currency: 'TTD',
+    provider: 'stripe',
+    method: 'card',
+    providerPaymentId: 'pi_1',
+    invoice: { contactId: null, invoiceNumber: 'INV-1' },
+  };
 
   it('cash basis: invoice finalize is a no-op', async () => {
     const { svc, posted } = make({
@@ -243,6 +287,72 @@ describe('RevenuePostingService recipe semantics', () => {
     expect((res as { alreadyPosted?: boolean })?.alreadyPosted).toBe(true);
     expect(posting.reverse).not.toHaveBeenCalled();
     expect(reversed).toHaveLength(0);
+  });
+
+  it('V1-29c (BR-07): a partial refund posts a REFUND of the amount refunded (Dr the recording\'s credit account / Cr its deposit account); the recording is not reversed', async () => {
+    const { svc, posted, posting } = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING });
+    await svc.onPaymentRefunded('p1', { refund: { paymentId: 'r1', amount: 40 } });
+    expect(posting.reverse).not.toHaveBeenCalled();
+    expect(posted).toHaveLength(1);
+    expect(posted[0]).toMatchObject({ type: 'REFUND', amount: 40, sourceType: 'Payment', sourceId: 'p1', kind: 'payment_refunded:1', metadata: { refundPaymentId: 'r1' } });
+    expect(posted[0]!.entries).toEqual([
+      expect.objectContaining({ accountId: ACCOUNTS.REVENUE, debit: 40 }),
+      expect.objectContaining({ accountId: ACCOUNTS.PAYMENT_PROCESSOR, credit: 40 }),
+    ]);
+  });
+
+  it('V1-29c (BR-07): the second partial refund is numbered after the first; the refund that leaves nothing reverses the recording once and folds the partials back', async () => {
+    const second = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING, partialRefunds: [{ id: 'rf-1', amount: 30, refundPaymentId: 'r1' }] });
+    await second.svc.onPaymentRefunded('p1', { refund: { paymentId: 'r2', amount: 20 } });
+    expect(second.posted.map((p) => [p.type, p.kind, p.amount])).toEqual([['REFUND', 'payment_refunded:2', 20]]);
+
+    const last = make({
+      basis: 'CASH',
+      payment: PAYMENT,
+      existingFinancialTx: RECORDING,
+      partialRefunds: [{ id: 'rf-1', amount: 30, refundPaymentId: 'r1' }, { id: 'rf-2', amount: 20, refundPaymentId: 'r2' }],
+    });
+    await last.svc.onPaymentRefunded('p1', { refund: { paymentId: 'r3', amount: 50 } });
+    expect(last.reversed).toEqual([{ businessId: 'b1', transactionId: 'txn-orig' }]);
+    expect(last.posted).toHaveLength(1);
+    expect(last.posted[0]).toMatchObject({ type: 'ADJUSTMENT', kind: 'payment_refunds_folded', amount: 50 });
+    expect(last.posted[0]!.entries).toEqual([
+      expect.objectContaining({ accountId: ACCOUNTS.PAYMENT_PROCESSOR, debit: 50 }),
+      expect.objectContaining({ accountId: ACCOUNTS.REVENUE, credit: 50 }),
+    ]);
+  });
+
+  it('V1-29c: a refund already posted under its refund row is not posted again', async () => {
+    const { svc, posted, posting } = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING, partialRefunds: [{ id: 'rf-1', amount: 30, refundPaymentId: 'r1' }] });
+    const res = await svc.onPaymentRefunded('p1', { refund: { paymentId: 'r1', amount: 30 } });
+    expect(res).toMatchObject({ transactionId: 'rf-1', alreadyPosted: true });
+    expect(posted).toHaveLength(0);
+    expect(posting.reverse).not.toHaveBeenCalled();
+  });
+
+  it('V1-29c: a call that names no refund refunds all that is left: the recording reversed and the partials folded back', async () => {
+    const { svc, posted, reversed } = make({ basis: 'CASH', payment: PAYMENT, existingFinancialTx: RECORDING, partialRefunds: [{ id: 'rf-1', amount: 40, refundPaymentId: 'r1' }] });
+    await svc.onPaymentRefunded('p1');
+    expect(reversed).toHaveLength(1);
+    expect(posted.map((p) => [p.type, p.amount])).toEqual([['ADJUSTMENT', 40]]);
+  });
+
+  it('V1-29c (SEC-V29-2): the manual refund (auditInTransaction) posts and audits the refund row it wrote: amount 60 of a 100 payment after a posted partial of 40 completes it', async () => {
+    const { svc, prisma, reversed, posted } = make({
+      basis: 'CASH',
+      payment: PAYMENT,
+      existingFinancialTx: RECORDING,
+      partialRefunds: [{ id: 'rf-1', amount: 40, refundPaymentId: 'r1' }],
+      linkedRefund: { id: 'r-manual', amount: -60 },
+    });
+    await svc.onPaymentRefunded('p1', { auditInTransaction: true, createdById: 'u1' });
+    expect(reversed).toHaveLength(1);
+    expect(posted.map((p) => [p.type, p.amount])).toEqual([['ADJUSTMENT', 40]]);
+    expect(prisma.client.payment.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ reference: 'pi_1', status: 'REFUNDED', amount: { lt: 0 } }) }),
+    );
+    const audit = prisma.client.activity.create.mock.calls[0]![0].data;
+    expect(audit.data).toMatchObject({ amount: 60, paymentAmount: 100, refundPaymentId: 'r-manual', ledgerReversed: true, refundedBy: 'u1' });
   });
 
   it('invoice void reverses the finalized accrual posting', async () => {

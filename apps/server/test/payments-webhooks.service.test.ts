@@ -42,6 +42,8 @@ class PrismaMock {
 
   client: any = {
     $transaction: vi.fn(async (fn: any) => fn(this.client)),
+    // V1-29c: the provider refund door takes the invoice row lock (SELECT ... FOR NO KEY UPDATE).
+    $queryRaw: vi.fn(async () => []),
     invoice: {
       findUnique: vi.fn(async ({ where }: any) => this.invoices.get(where.id) ?? null),
     },
