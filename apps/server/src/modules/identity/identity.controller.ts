@@ -16,9 +16,10 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
+import { isIPv4, isIPv6 } from 'node:net';
 import { IdentityService } from './identity.service';
 import { IdentitySignupService, isEmailVerificationRequired } from './identity-signup.service';
-import { AuthSecurityService } from './auth-security.service';
+import { AuthSecurityService, type RateLimitRule } from './auth-security.service';
 import { IdentityPasswordService } from './identity-password.service';
 import { allowedCorsOrigins } from '../../core/config/runtime-urls';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -50,6 +51,96 @@ import { CurrentUser, AuthenticatedUser } from '../../core/decorators/current-us
 import { OptionalAuthGuard } from '../../core/auth/optional-auth.guard';
 import { generateDocumentRecommendations } from './document-guidance.util';
 import { PROFILE_COMPLETENESS_FIELDS, COMPLETENESS_TIERS } from './profile-completeness.constants';
+
+/**
+ * Throttle for GET /identity/check-username (V1-56-AUTH-USERNAME-THROTTLE).
+ * The route is unauthenticated and says whether a username exists, so without
+ * a limit it is an enumeration oracle.
+ *
+ * The bound comes from what the signup form sends, because the form cannot
+ * tell a refusal from a failure: any non-2xx answer becomes 'unknown', and
+ * 'unknown' blocks signup ("Unable to verify username", signup/page.tsx).
+ * A limit the form can reach is a signup outage, not a throttle.
+ *
+ * The form checks once per keystroke after a 300 ms debounce
+ * (apps/web/src/hooks/use-username-availability.ts) and once more on submit.
+ * A debounced check fires only after 300 ms without a keystroke, so two of
+ * them are at least 300 ms apart and one 60 s window holds at most
+ * 60_000 / 300 + 1 = 201. The submit check comes on top, one per click, with
+ * the button disabled while it is in flight. 240 leaves 39 above that ceiling
+ * for submits and for requests arriving closer together than they were sent.
+ * It still cuts a script from thousands of probes a second to four per client
+ * (see usernameCheckSubject for what one client is). Both numbers are pinned
+ * by apps/server/test/identity-signup.e2e.test.ts, and
+ * apps/web/src/app/auth/signup/__tests__/signup-username-throttle.test.tsx
+ * reads them from here and drives the real form against them.
+ *
+ * Keyed by client address (req.ip, so TRUST_PROXY decides the hops; an IPv6
+ * address counts as its /64, usernameCheckSubject) and enforced by
+ * AuthSecurityService like every other limit in this controller. That store
+ * fails open, so signup gains no dependency it lacked: this handler reads the
+ * user table anyway. The Redis-backed PublicRateLimitGuard fails closed, and
+ * would make a Redis outage a signup outage, which AuthMiddleware deliberately
+ * avoids.
+ */
+export const USERNAME_CHECK_RULE = { scope: 'check_username:ip', limit: 240, windowMs: 60_000 } as const satisfies RateLimitRule;
+
+/**
+ * The client a check-username call is counted against: an IPv4 address as it
+ * is, an IPv6 address as the /64 it sits in (ST-V156-1).
+ *
+ * Keyed by the whole IPv6 address, the limit bound nothing: one /64 is what a
+ * VPS or a home line is handed, it holds 2^64 addresses, and a script rotating
+ * through them got a fresh bucket per call. The /64 is the smallest block one
+ * customer is given (SLAAC needs a whole one), so keying by it never merges two
+ * customers of an ordinary provider. A caller holding a whole /48 still has
+ * 65,536 buckets: that is the bound this buys, not zero.
+ *
+ * An IPv4-mapped address (::ffff:a.b.c.d, what a dual-stack socket reports for
+ * an IPv4 client) is that IPv4 client: masked to a /64 it would put every IPv4
+ * client in the one bucket ::/64. Anything that is not an address (req.ip can
+ * be absent; clientIp then says 'unknown') is returned unchanged.
+ *
+ * Exported for apps/server/test/identity-signup.e2e.test.ts.
+ */
+export function usernameCheckSubject(ip: string): string {
+  const address = ip.trim();
+  if (!isIPv6(address)) return address;
+  const groups = ipv6Groups(address);
+  if (!groups) return address;
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
+    return [groups[6] >> 8, groups[6] & 0xff, groups[7] >> 8, groups[7] & 0xff].join('.');
+  }
+  return `${groups.slice(0, 4).map((g) => g.toString(16)).join(':')}::/64`;
+}
+
+/** The eight 16-bit groups of an address net.isIPv6 accepted; null if it does not parse. */
+function ipv6Groups(address: string): number[] | null {
+  let text = address.split('%')[0]; // zone id (fe80::1%eth0)
+  const lastColon = text.lastIndexOf(':');
+  const tail = text.slice(lastColon + 1);
+  if (isIPv4(tail)) {
+    // Embedded IPv4 (::ffff:1.2.3.4, 64:ff9b::1.2.3.4): its two groups in hex.
+    const [a, b, c, d] = tail.split('.').map(Number);
+    text = `${text.slice(0, lastColon + 1)}${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`;
+  }
+  const halves = text.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const rest = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const zeros = halves.length === 2 ? 8 - head.length - rest.length : 0;
+  if (zeros < 0) return null;
+  const groups = [...head, ...Array<string>(zeros).fill('0'), ...rest].map((g) => Number.parseInt(g, 16));
+  return groups.length === 8 && groups.every((g) => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groups : null;
+}
+
+/**
+ * How many refused check-username clients are remembered for the one-audit-row-
+ * per-client-per-window rule (IdentityController.firstUsernameCheckRefusal).
+ * Entries older than the window are dropped first; past this many live ones the
+ * oldest goes, so memory is bounded however many clients a campaign uses.
+ */
+const USERNAME_CHECK_AUDIT_MEMORY = 10_000;
 
 @Controller('identity')
 export class IdentityController {
@@ -121,6 +212,31 @@ export class IdentityController {
 
   private clientUa(req: Request): string {
     return ((req.headers['user-agent'] as string | undefined) ?? '').slice(0, 512);
+  }
+
+  /**
+   * check-username clients refused so far, with when their refusal was last
+   * audited. Oldest first: every write goes to the end at `now`.
+   */
+  private readonly usernameCheckRefusalsAudited = new Map<string, number>();
+
+  /**
+   * True the first time `subject` is refused within a USERNAME_CHECK_RULE
+   * window (and records it), false for its later refusals in that window. The
+   * check and the record are one synchronous step, so concurrent refusals of
+   * one client cannot both pass.
+   */
+  private firstUsernameCheckRefusal(subject: string, now: number): boolean {
+    const seen = this.usernameCheckRefusalsAudited;
+    const last = seen.get(subject);
+    if (last !== undefined && now - last < USERNAME_CHECK_RULE.windowMs) return false;
+    seen.delete(subject);
+    for (const [key, at] of seen) {
+      if (now - at < USERNAME_CHECK_RULE.windowMs && seen.size < USERNAME_CHECK_AUDIT_MEMORY) break;
+      seen.delete(key);
+    }
+    seen.set(subject, now);
+    return true;
   }
 
   /**
@@ -667,9 +783,35 @@ export class IdentityController {
   /**
    * Username availability check — public, no auth required.
    * Checks whether the given username is already taken in the local User table.
+   *
+   * Throttled per client (usernameCheckSubject) by USERNAME_CHECK_RULE before
+   * anything is read; see the rule for why its numbers sit above what the signup
+   * form can send.
+   *
+   * A refusal is audited as `rate_limited` like the other limits here, so the
+   * admin Security view (admin/auth-audit?event=rate_limited) shows a campaign
+   * against this oracle (ST-V156-2). Unlike them it is audited at most once per
+   * client per window: a script refused thousands of times a minute writes one
+   * row a minute, not thousands. Each refused client has already spent `limit`
+   * accepted calls, each of which wrote an auth_rate_limits row, so these rows
+   * are at most 1/240 of the limiter's own writes. The memory is per process,
+   * so N instances write at most N rows per client per window.
    */
   @Get('check-username')
-  async checkUsernameAvailability(@Query('username') username?: string) {
+  async checkUsernameAvailability(@Req() req: Request, @Query('username') username?: string) {
+    const ip = this.clientIp(req);
+    const subject = usernameCheckSubject(ip);
+    try {
+      await this.authSec.enforce(USERNAME_CHECK_RULE, subject);
+    } catch (rateErr) {
+      if (this.firstUsernameCheckRefusal(subject, Date.now())) {
+        await this.authSec.audit({
+          event: 'rate_limited', outcome: 'rate_limited', ip, userAgent: this.clientUa(req),
+          reason: 'check_username', metadata: { subject },
+        });
+      }
+      throw rateErr;
+    }
     if (!username || username.trim().length === 0) {
       return { available: false, reason: 'Username is required' };
     }
