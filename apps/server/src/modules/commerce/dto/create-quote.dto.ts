@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
@@ -20,6 +20,22 @@ import { DocumentLineItemDto } from './document-line-item.dto';
  * string in a field every quote list, email and PDF renders.
  */
 export const MAX_QUOTE_NUMBER_LENGTH = 64;
+
+/**
+ * V1-53 review (CR-V53-1): an empty date field is "no date", as the service
+ * read it before these DTOs (`input.dueDate ? new Date(..) : null`).
+ * IsOptional skips only null and undefined, so '' failed IsDateString with a
+ * 400, and the Finance pipeline's Convert-to-Invoice action, which sends the
+ * modal's untouched due date as '', could no longer convert. Create and
+ * convert read '' as absent; an edit reads it as null, which clears the
+ * stored expiry as '' did before.
+ */
+function emptyDateToUndefined({ value }: { value: unknown }): unknown {
+  return typeof value === 'string' && value.trim() === '' ? undefined : value;
+}
+function emptyDateToNull({ value }: { value: unknown }): unknown {
+  return typeof value === 'string' && value.trim() === '' ? null : value;
+}
 
 /**
  * Body of POST /commerce/businesses/:businessId/quotes (V1-53, M19 quote half;
@@ -66,6 +82,7 @@ export class CreateQuoteDto {
   currency?: string;
 
   @IsOptional()
+  @Transform(emptyDateToUndefined)
   @IsDateString()
   expiryDate?: string;
 
@@ -125,6 +142,7 @@ export class UpdateQuoteDto {
   currency?: string;
 
   @IsOptional()
+  @Transform(emptyDateToNull)
   @IsDateString()
   expiryDate?: string | null;
 
@@ -152,7 +170,9 @@ export class UpdateQuoteDto {
  * discountType (it was written to the invoice as given), a malformed dueDate
  * or a non-string notes reached the service and answered 500 or wrote the
  * invoice. The ranges and the amount rules stay with
- * CommerceService.convertQuoteToInvoice.
+ * CommerceService.convertQuoteToInvoice, which also prices a discountValue
+ * sent with no discountType (null passes IsOptional) as a percentage, capped
+ * at 100 (V1-53 review CR-V53-4). An empty dueDate is no due date (CR-V53-1).
  */
 export class ConvertQuoteDto {
   @IsOptional()
@@ -172,6 +192,7 @@ export class ConvertQuoteDto {
   notes?: string;
 
   @IsOptional()
+  @Transform(emptyDateToUndefined)
   @IsDateString()
   dueDate?: string;
 }

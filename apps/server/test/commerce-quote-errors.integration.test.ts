@@ -45,6 +45,26 @@
  *              Quote or a FinancialTransaction (tenant B is ACCRUAL with a
  *              seeded chart of accounts, and the real ledger chain is wired)
  *
+ * Review repairs (V1-53 review):
+ *   RR-PROJECT (SEC-V53-1) the create and edit 201/200 bodies carry the
+ *              contact's id, businessId, firstName, lastName and email only;
+ *              a revenue:write STAFF member with crm:none gets no internal
+ *              note, phone, owner or visibility of a PRIVATE contact
+ *   RR-RACE    (SEC-V53-2) a delete and a convert of one quote never both
+ *              succeed: a delete that read the quote before an in-flight
+ *              convert linked it answers 409 quote_converted, a convert that
+ *              read it before an in-flight delete answers 404 and writes no
+ *              invoice; no row is both deleted and converted
+ *   RR-PRODUCT (SEC-V53-3) convert refuses a stored line whose productId
+ *              belongs to another tenant (404 'Product not found', nothing
+ *              written); an own product, even one archived since, converts
+ *   RR-DISC    (CR-V53-4) a convert body discountValue with no type (null or
+ *              omitted) is priced and capped as a percentage, never written
+ *              as a typeless discount
+ *   RR-EMPTY   (CR-V53-1) dueDate '' on convert (the Finance pipeline's body)
+ *              is no due date (201), as before V1-53; expiryDate '' on create
+ *              is no expiry, on edit it clears the expiry
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService and the real
  * ledger chain run against DATABASE_URL behind the production
@@ -784,5 +804,284 @@ describe('send-email and the operator read', () => {
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.contact).toBeNull();
     expectNothingOfTenantA({ ...res.body, contactId: undefined });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1-53 review repairs
+// ---------------------------------------------------------------------------
+const RR = {
+  staffB: `${P}staffB`, // STAFF of bizB: revenue write, crm none
+  contactPrivateB: `${P}contactPrivateB`, // PRIVATE contact of bizB, owned by ownerB
+  productGoneB: `${P}productGoneB`, // a product of bizB archived (soft-deleted) after it was quoted
+};
+const CANARY_NOTE = `${P}SECRET_NOTE`;
+const CANARY_PHONE = '+18685550153';
+const WRITE_CONTACT_KEYS = ['businessId', 'email', 'firstName', 'id', 'lastName'];
+
+/** The server backend running a transaction client. */
+async function backendPid(tx: any): Promise<number> {
+  const [row] = await tx.$queryRawUnsafe('SELECT pg_backend_pid() AS pid');
+  return Number(row.pid);
+}
+
+/** Resolves once some backend waits on a lock held by the backend `holderPid`; throws if none does in time. */
+async function waitForLockWaiter(holderPid: number, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const [row] = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM pg_locks WHERE NOT granted AND $1::int = ANY(pg_blocking_pids(pid))`,
+      holderPid,
+    );
+    if (row.n > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`no backend queued on a lock held by backend ${holderPid} within ${timeoutMs}ms`);
+}
+
+/**
+ * Runs `work` in a real transaction that stays open, holding its row locks,
+ * until `release()`: the other side of a race, stopped between its write and
+ * its commit.
+ */
+function holdTransaction(work: (tx: any) => Promise<void>) {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  let announce!: (pid: number) => void;
+  let fail!: (err: unknown) => void;
+  const pid = new Promise<number>((resolve, reject) => { announce = resolve; fail = reject; });
+  const done = db
+    .$transaction(async (tx: any) => {
+      await work(tx);
+      announce(await backendPid(tx));
+      await held;
+    }, { maxWait: 10_000, timeout: 60_000 })
+    .catch((err: unknown) => {
+      fail(err);
+      throw err;
+    });
+  return { pid, release: () => release(), done };
+}
+
+describe('V1-53 review repairs', () => {
+  beforeAll(async () => {
+    await db.user.create({ data: { id: RR.staffB, email: `${P}staffB@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${P}m_staffB`, userId: RR.staffB, businessId: ID.bizB, role: 'STAFF', permissionScopes: { revenue: 'write', crm: 'none' } },
+    });
+    await db.contact.create({
+      data: {
+        id: RR.contactPrivateB,
+        businessId: ID.bizB,
+        firstName: 'V53aPrivate',
+        lastName: 'Customer',
+        email: `${P}private@test.local`,
+        phone: CANARY_PHONE,
+        visibility: 'PRIVATE',
+        ownerId: ID.ownerB,
+        notesInternal: CANARY_NOTE,
+      },
+    });
+    await db.product.create({ data: { id: RR.productGoneB, businessId: ID.bizB, name: 'V53A Archived Product', price: 3 } });
+  });
+
+  // SEC-V53-1 ---------------------------------------------------------------
+  function expectWriteProjection(body: any, contactId: string) {
+    expect(Object.keys(body.contact).sort(), JSON.stringify(body.contact)).toEqual(WRITE_CONTACT_KEYS);
+    expect(body.contact).toMatchObject({ id: contactId, businessId: ID.bizB });
+    const raw = JSON.stringify(body);
+    expect(raw).not.toContain(CANARY_NOTE);
+    expect(raw).not.toContain(CANARY_PHONE);
+    expect(raw).not.toContain('PRIVATE');
+    expect(body.contact).not.toHaveProperty('ownerId');
+  }
+
+  it("RR-PROJECT-CREATE (SEC-V53-1): a revenue:write STAFF member with crm:none creating a quote on a PRIVATE contact gets 201 with contact { id, businessId, firstName, lastName, email } only, the operator detail's customer fields; the quote.created listener still receives the whole contact", async () => {
+    const res = await as(RR.staffB, agent().post(routes.create(ID.bizB))).send({
+      contactId: RR.contactPrivateB,
+      quoteNumber: nextNumber('PROJ-C'),
+      items: [line()],
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expectWriteProjection(res.body, RR.contactPrivateB);
+
+    const created = recordedEvents.filter((e) => e.name === 'quote.created');
+    expect(created).toHaveLength(1);
+    expect(created[0].payload.quote.contact).toMatchObject({ id: RR.contactPrivateB, phone: CANARY_PHONE });
+
+    const detail = await as(RR.staffB, agent().get(routes.one(ID.bizB, res.body.id)));
+    expect(detail.status, JSON.stringify(detail.body)).toBe(200);
+    const { firstName, lastName, email } = res.body.contact;
+    expect({ firstName, lastName, email }).toEqual(detail.body.contact);
+  });
+
+  it('RR-PROJECT-PATCH (SEC-V53-1): the same STAFF member editing a DRAFT on that PRIVATE contact gets 200 with the same projection; nothing of the internal note, phone, owner or visibility', async () => {
+    const quoteId = await seedQuote(ID.bizB, RR.contactPrivateB, 'DRAFT');
+    const res = await as(RR.staffB, agent().patch(routes.one(ID.bizB, quoteId))).send({ notes: `${P}x` });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ id: quoteId, notes: `${P}x`, contactId: RR.contactPrivateB });
+    expectWriteProjection(res.body, RR.contactPrivateB);
+    expect(recordedEvents.filter((e) => e.name === 'quote.updated')).toHaveLength(1);
+  });
+
+  // SEC-V53-2 ---------------------------------------------------------------
+  it('RR-RACE-DELETE (SEC-V53-2): a delete that read the quote before an in-flight convert linked its invoice answers 409 quote_converted once the convert commits; the quote is not deleted and quote.deleted is not emitted', async () => {
+    const quoteId = await seedQuote(ID.bizB, ID.contactB, 'ACCEPTED');
+    const invoiceId = `${quoteId}_inv`;
+    // The convert's own two writes (the invoice with quoteId, then the quote's backlink), committed only on release.
+    const convert = holdTransaction(async (tx) => {
+      await tx.invoice.create({
+        data: { id: invoiceId, businessId: ID.bizB, contactId: ID.contactB, invoiceNumber: invoiceId, status: 'DRAFT', subtotal: 20, total: 20, quoteId },
+      });
+      await tx.$executeRawUnsafe(`UPDATE quotes SET invoice_id = $1 WHERE id = $2`, invoiceId, quoteId);
+    });
+    try {
+      const pid = await convert.pid;
+      const deleting = deleteOnB(quoteId).then((r) => r);
+      await waitForLockWaiter(pid);
+      convert.release();
+      await convert.done;
+      const res = await deleting;
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(res.body).toMatchObject({ code: 'quote_converted', message: 'Cannot delete a quote that has been converted to an invoice' });
+      const row = await quoteRow(quoteId);
+      expect(row.deleted_at).toBeNull();
+      expect(row.invoice_id).toBe(invoiceId);
+      expect(recordedEvents.filter((e) => e.name === 'quote.deleted')).toEqual([]);
+    } finally {
+      convert.release();
+      await convert.done.catch(() => undefined);
+    }
+  }, 60_000);
+
+  it('RR-RACE-CONVERT (SEC-V53-2): a convert that read the quote before an in-flight delete answers 404 once the delete commits; no invoice is written or linked and nothing is emitted', async () => {
+    const quoteId = await seedQuote(ID.bizB, ID.contactB, 'ACCEPTED');
+    const del = holdTransaction(async (tx) => {
+      await tx.$executeRawUnsafe(`UPDATE quotes SET deleted_at = now() WHERE id = $1`, quoteId);
+    });
+    try {
+      const pid = await del.pid;
+      const converting = convertOnB(quoteId).then((r) => r);
+      await waitForLockWaiter(pid);
+      del.release();
+      await del.done;
+      const res = await converting;
+      expect(res.status, JSON.stringify(res.body)).toBe(404);
+      expect(res.body).toMatchObject({ code: 'NOT_FOUND', message: 'Quote not found' });
+      const invoices: any[] = await db.$queryRawUnsafe(`SELECT id FROM invoices WHERE quote_id = $1`, quoteId);
+      expect(invoices).toEqual([]);
+      const row = await quoteRow(quoteId);
+      expect(row.invoice_id).toBeNull();
+      expect(row.deleted_at).not.toBeNull();
+      expect(recordedEvents.filter((e) => e.name === 'invoice.created' || e.name === 'quote.converted')).toEqual([]);
+      expect(crmCalls).toEqual([]);
+    } finally {
+      del.release();
+      await del.done.catch(() => undefined);
+    }
+  }, 60_000);
+
+  it('RR-RACE-PAIRS (SEC-V53-2, the review repro): a convert and a delete of one ACCEPTED quote sent together, eight times -> each pair is 201/409 or 404/200; no quote is both deleted and converted, and no invoice points at a deleted quote', async () => {
+    const outcomes: string[] = [];
+    const ids: string[] = [];
+    // Pairs run one after another: two converts of different quotes in the
+    // same millisecond collide on the invoice number (INV-<ms>), which is not
+    // what this case is about.
+    for (let i = 0; i < 8; i++) {
+      const quoteId = await seedQuote(ID.bizB, ID.contactB, 'ACCEPTED');
+      ids.push(quoteId);
+      const [conv, del] = await Promise.all([convertOnB(quoteId), deleteOnB(quoteId)]);
+      outcomes.push(`${conv.status}/${del.status}`);
+      if (conv.status === 201) expect(del.body.code, JSON.stringify(del.body)).toBe('quote_converted');
+      if (conv.status === 404) expect(conv.body.message, JSON.stringify(conv.body)).toBe('Quote not found');
+    }
+    for (const outcome of outcomes) expect(['201/409', '404/200'], outcomes.join(' ')).toContain(outcome);
+    const both: Array<{ n: number }> = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM quotes WHERE id = ANY($1::text[]) AND deleted_at IS NOT NULL AND invoice_id IS NOT NULL`,
+      ids,
+    );
+    expect(both[0].n).toBe(0);
+    const orphaned: Array<{ n: number }> = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM invoices v JOIN quotes q ON q.id = v.quote_id WHERE q.id = ANY($1::text[]) AND q.deleted_at IS NOT NULL`,
+      ids,
+    );
+    expect(orphaned[0].n).toBe(0);
+  }, 60_000);
+
+  // SEC-V53-3 ---------------------------------------------------------------
+  it("RR-PRODUCT (SEC-V53-3): converting a legacy B quote whose stored line names tenant A's product -> 404 'Product not found'; no Invoice, no FinancialTransaction, nothing emitted; tenant A unchanged", async () => {
+    const quoteId = await seedQuote(ID.bizB, ID.contactB, 'ACCEPTED');
+    await db.$executeRawUnsafe(`UPDATE quote_items SET product_id = $1 WHERE quote_id = $2`, ID.productA, quoteId);
+    const before = await tenantState(ID.bizB);
+    const beforeA = await tenantState(ID.bizA);
+    const res = await convertOnB(quoteId);
+    expect(res.status, JSON.stringify(res.body)).toBe(404);
+    expect(res.body).toMatchObject({ code: 'NOT_FOUND', message: 'Product not found' });
+    expectNothingOfTenantA(res.body);
+    expect(await tenantState(ID.bizB)).toBe(before);
+    expect(await tenantState(ID.bizA)).toBe(beforeA);
+    expect(recordedEvents.filter((e) => e.name === 'invoice.created' || e.name === 'quote.converted')).toEqual([]);
+  });
+
+  it("RR-PRODUCT-OWN (control): stored lines naming B's own product, and B's product archived since it was quoted, convert (201) and the invoice lines keep them", async () => {
+    const quoteId = await seedQuote(ID.bizB, ID.contactB, 'ACCEPTED');
+    await db.$executeRawUnsafe(`UPDATE quote_items SET product_id = $1 WHERE quote_id = $2`, ID.productB, quoteId);
+    await db.quoteItem.create({
+      data: { id: `${quoteId}_item2`, quoteId, description: 'V53A archived product line', quantity: 1, unitPrice: 10, total: 10, productId: RR.productGoneB },
+    });
+    await db.$executeRawUnsafe(`UPDATE quotes SET subtotal = 30, total = 30 WHERE id = $1`, quoteId);
+    await db.$executeRawUnsafe(`UPDATE products SET deleted_at = now() WHERE id = $1`, RR.productGoneB);
+    const res = await convertOnB(quoteId);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const lines: Array<{ product_id: string }> = await db.$queryRawUnsafe(
+      `SELECT product_id FROM invoice_items WHERE invoice_id = $1 ORDER BY product_id`,
+      res.body.id,
+    );
+    expect(lines.map((l) => l.product_id).sort()).toEqual([ID.productB, RR.productGoneB].sort());
+  });
+
+  // CR-V53-4 ----------------------------------------------------------------
+  for (const [label, body] of [
+    ['discountType null', { discountType: null, discountValue: 150 }],
+    ['discountType omitted', { discountValue: 150 }],
+  ] as Array<[string, Record<string, unknown>]>) {
+    it(`RR-DISC (CR-V53-4): convert with ${label} and discountValue 150 -> 400 (priced as a percentage, capped at 100); no Invoice written`, async () => {
+      const quoteId = await seedQuote(ID.bizB, ID.contactB, 'ACCEPTED');
+      const before = await tenantState(ID.bizB);
+      const res = await convertOnB(quoteId, body);
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      expect(res.body.message).toBe('Percentage discount cannot exceed 100%');
+      expect(await tenantState(ID.bizB)).toBe(before);
+    });
+  }
+
+  it('RR-DISC-OK (CR-V53-4): convert with discountValue 10 and no type -> 201, an invoice discounted 10% (PERCENT, 2.00 off 20.00), never a typeless discount; discountValue 0 clears the discount', async () => {
+    const quoteId = await seedQuote(ID.bizB, ID.contactB, 'ACCEPTED');
+    const res = await convertOnB(quoteId, { discountType: null, discountValue: 10 });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ discountType: 'PERCENT', discountValue: 10, discountAmount: 2, total: 18 });
+    const cleared = await convertOnB(await seedQuote(ID.bizB, ID.contactB, 'ACCEPTED'), { discountType: null, discountValue: 0 });
+    expect(cleared.status, JSON.stringify(cleared.body)).toBe(201);
+    expect(cleared.body).toMatchObject({ discountAmount: 0, total: 20 });
+  });
+
+  // CR-V53-1 ----------------------------------------------------------------
+  it("RR-EMPTY-DUE (CR-V53-1): the Finance pipeline's convert body { taxRate: 0, dueDate: '', notes: '' } -> 201 with no due date, as before V1-53", async () => {
+    const quoteId = await seedQuote(ID.bizB, ID.contactB, 'ACCEPTED');
+    const res = await convertOnB(quoteId, { taxRate: 0, dueDate: '', notes: '' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ quoteId, dueDate: null, total: 20 });
+  });
+
+  it("RR-EMPTY-EXPIRY (CR-V53-1, same class): expiryDate '' on create is no expiry (201); on edit it clears the stored expiry (200)", async () => {
+    const created = await createOnB({ contactId: ID.contactB, quoteNumber: nextNumber('EMPTY-EXP'), items: [line()], expiryDate: '' });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect(created.body.expiryDate).toBeNull();
+
+    const quoteId = await seedQuote(ID.bizB, ID.contactB, 'DRAFT', { expiryDate: new Date('2026-12-31T00:00:00.000Z') });
+    const res = await patchOnB(quoteId, { expiryDate: '' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.expiryDate).toBeNull();
+    expect((await quoteRow(quoteId)).expiry_date).toBeNull();
   });
 });

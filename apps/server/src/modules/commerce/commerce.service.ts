@@ -12,7 +12,7 @@ import {
 } from '../../core/event-bus/events.types';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { Service, Prisma, Payment } from '@keyflow/db';
+import { Service, Prisma, Payment, QuoteStatus as StoredQuoteStatus } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
@@ -317,6 +317,36 @@ function quoteNumberTaken(): ConflictException {
 }
 
 /**
+ * V1-53 review (SEC-V53-2): the stored statuses isConvertedQuote reads as
+ * converted (INVOICED, PAID, CONVERTED), derived from the enum so the delete's
+ * conditional write and the V1-50 table cannot drift apart.
+ */
+const CONVERTED_QUOTE_STATUSES = Object.values(StoredQuoteStatus).filter((status) => isConvertedQuote({ status }));
+
+/**
+ * V1-53 review (SEC-V53-2): thrown inside the convert transaction when the
+ * quote's backlink write matches no row (a delete, or another convert,
+ * committed after the quote was read). It rolls the invoice back; the catch
+ * answers from the quote as it now stands.
+ */
+class QuoteConvertRaceLost extends Error {
+  constructor() {
+    super('The quote changed while it was being converted');
+  }
+}
+
+/** The distinct, non-empty productIds of a set of quote lines ('' and null are "no product"). */
+function lineProductIds(items: ReadonlyArray<{ productId?: string | null } | null | undefined>): string[] {
+  return Array.from(
+    new Set(
+      items
+        .map((item) => item?.productId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
+  );
+}
+
+/**
  * V1-51 review (SEC-V51-1 / CR51-1): the discount type a quote is priced with.
  * createQuote and updateQuote price any discount that is not FIXED as a
  * percentage, a stored discount with no type included, so that is the type its
@@ -555,13 +585,7 @@ export class CommerceService {
     if (!Array.isArray(items) || items.length === 0) {
       throw new BadRequestException('items must contain at least 1 elements');
     }
-    const productIds = Array.from(
-      new Set(
-        items
-          .map((item) => item?.productId)
-          .filter((id): id is string => typeof id === 'string' && id.length > 0),
-      ),
-    );
+    const productIds = lineProductIds(items);
     if (productIds.length > 0) {
       const products = await this.prisma.client.product.findMany({
         where: { id: { in: productIds }, businessId },
@@ -570,6 +594,31 @@ export class CommerceService {
       if (products.length !== productIds.length) {
         throw new NotFoundException('Product not found');
       }
+    }
+  }
+
+  /**
+   * V1-53 review (SEC-V53-3): the productIds a stored quote's lines carry,
+   * checked inside the tenant before convert copies them onto the invoice
+   * lines. assertQuoteLines holds new lines (create, edit) to this; a quote
+   * written before it, or edited without `items`, can still hold a line bound
+   * to another tenant's product, which convert turned into this tenant's
+   * invoice line bound to that product (as the stored contactId is refused
+   * here, assertContactInBusiness). Only the tenant is checked: the row is read
+   * raw because the soft-delete extension hides an archived product, and a
+   * product of this tenant archived after it was quoted is still its own.
+   * Same 404 as quote and invoice create.
+   */
+  private async assertStoredLineProductsInBusiness(
+    items: ReadonlyArray<{ productId: string | null }>,
+    businessId: string,
+  ): Promise<void> {
+    const productIds = lineProductIds(items);
+    if (productIds.length === 0) return;
+    const owned = await this.prisma.client.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM products WHERE business_id = ${businessId} AND id IN (${Prisma.join(productIds)})`;
+    if (owned.length !== productIds.length) {
+      throw new NotFoundException('Product not found');
     }
   }
 
@@ -2391,10 +2440,28 @@ export class CommerceService {
     if (isConvertedQuote(quote)) {
       throw quoteConvertedNotDeletable();
     }
-    const result = await this.prisma.client.quote.update({
-      where: { id: quoteId },
-      data: { deletedAt: new Date() },
-    });
+    // V1-53 review (SEC-V53-2): the write carries the checks above as its own
+    // condition. It was by id alone, so a delete that read the quote before a
+    // concurrent convert linked its invoice soft-deleted a converted quote
+    // (both answered success, and quote.deleted was emitted for it). The
+    // UPDATE re-reads the row once a concurrent writer commits: a row that
+    // no longer matches (linked, given a converted status, or deleted) is not
+    // written, and the answer is read from the row as it now stands.
+    const result = await this.prisma.client.quote
+      .update({
+        // (invoiceId is a unique field, so its null condition goes in AND.)
+        where: {
+          id: quoteId,
+          AND: [{ businessId, deletedAt: null, invoiceId: null, status: { notIn: CONVERTED_QUOTE_STATUSES } }],
+        },
+        data: { deletedAt: new Date() },
+      })
+      .catch(async (err: unknown) => {
+        if ((err as { code?: string } | null)?.code !== 'P2025') throw err;
+        const now = await this.prisma.client.quote.findFirst({ where: { id: quoteId, businessId } });
+        if (now && isConvertedQuote(now)) throw quoteConvertedNotDeletable();
+        throw quoteNotFound();
+      });
     this.events.emit('quote.deleted', { businessId, quoteId });
     this.statsCache.invalidateCache(businessId);
     return result;
@@ -2438,11 +2505,19 @@ export class CommerceService {
     // (a body that names either discountType or discountValue replaces the
     // quote's discount; discountValue 0 clears it). The quote's discount is
     // read as createQuote/updateQuote priced it: FIXED, else a percentage.
+    // V1-53 review (CR-V53-4): a body discountValue with no type (null, which
+    // the DTO's IsOptional lets through, or omitted) is priced as a percentage,
+    // like the quote's own (quotePricedDiscountType), and so checked with the
+    // 100% cap below. It was written as a typeless discount, uncapped and not
+    // applied (discountAmount 0), which an invoice edit that later named a type
+    // turned into a negative total.
     const taxRate = input.taxRate ?? quote.taxRate ?? 0;
     const bodyDiscount = input.discountType !== undefined || input.discountValue !== undefined;
     const discountValue = bodyDiscount ? input.discountValue ?? null : quote.discountValue ?? null;
     const discountType: 'PERCENT' | 'FIXED' | null = bodyDiscount
-      ? input.discountType ?? null
+      ? discountValue
+        ? quotePricedDiscountType(input.discountType)
+        : input.discountType ?? null
       : discountValue
         ? quotePricedDiscountType(quote.discountType)
         : null;
@@ -2489,6 +2564,8 @@ export class CommerceService {
     // foreign (or since deleted) contact; it must not become an Invoice bound
     // to it. Same 404 as invoice create, and nothing is written.
     await this.assertContactInBusiness(quote.contactId, input.businessId);
+    // V1-53 review (SEC-V53-3): so is a stored line's product (404, nothing written).
+    await this.assertStoredLineProductsInBusiness(quote.items, input.businessId);
 
     // R2: do the invoice insert + the quote.invoiceId backlink in a single
     // transaction so we never end up with a quote that thinks it was
@@ -2527,15 +2604,26 @@ export class CommerceService {
         },
         include: { items: true, contact: true },
       });
-      await tx.quote.update({
-        where: { id: quote.id },
+      // V1-53 review (SEC-V53-2): the backlink is written only to a quote that
+      // is still live and unlinked. It was by id alone, so a convert that read
+      // the quote before a concurrent delete committed linked an invoice to a
+      // soft-deleted quote (both answered success). This UPDATE waits for that
+      // delete and then matches no row; the invoice is rolled back.
+      const linked = await tx.quote.updateMany({
+        where: { id: quote.id, businessId: input.businessId, deletedAt: null, invoiceId: null },
         data: { invoiceId: created.id },
       });
+      if (linked.count !== 1) throw new QuoteConvertRaceLost();
       return created;
     }).catch(async (err: unknown) => {
-      if ((err as { code?: string } | null)?.code === 'P2002') {
-        const now = await this.prisma.client.quote.findFirst({ where: { id: quote.id }, select: { invoiceId: true } });
+      if (err instanceof QuoteConvertRaceLost || (err as { code?: string } | null)?.code === 'P2002') {
+        // The quote as it now stands (the read hides a deleted one).
+        const now = await this.prisma.client.quote.findFirst({
+          where: { id: quote.id, businessId: input.businessId },
+          select: { invoiceId: true },
+        });
         if (now?.invoiceId) throw quoteAlreadyConverted();
+        if (!now) throw quoteNotFound();
       }
       throw err;
     });

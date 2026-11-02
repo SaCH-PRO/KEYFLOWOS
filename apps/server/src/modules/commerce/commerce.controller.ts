@@ -113,6 +113,41 @@ function toInvoiceWriteResponse<I extends { contact?: Record<InvoiceWriteContact
   };
 }
 
+/**
+ * The contact keys a quote create or edit response carries: the operator
+ * quote detail's customer fields (OPERATOR_QUOTE_CONTACT_SELECT), plus `id`
+ * and `businessId`, which repeat the quote's own `contactId` and the path
+ * tenant and so disclose nothing new (as on invoice writes).
+ */
+type QuoteWriteContactKey = 'id' | 'businessId' | OperatorQuoteContactKey;
+const QUOTE_WRITE_CONTACT_KEYS: readonly QuoteWriteContactKey[] = [
+  'id',
+  'businessId',
+  ...(Object.keys(OPERATOR_QUOTE_CONTACT_SELECT) as OperatorQuoteContactKey[]),
+];
+
+/**
+ * V1-53 review (SEC-V53-1, the R28-ST-01 / SEC-CMF1-2 class, for quote
+ * create and edit): createQuote and updateQuote return the quote with its
+ * whole Contact row (`include: { contact: true }`, which the quote.created and
+ * quote.updated listeners read), and the routes handed it back: a
+ * revenue:write member with no CRM access received a PRIVATE contact's
+ * internal notes, phone, owner and visibility. The body now carries only
+ * QUOTE_WRITE_CONTACT_KEYS; a quote without a contact (a legacy row whose
+ * contact belongs to another tenant reads null) passes through unchanged.
+ */
+function toQuoteWriteResponse<Q extends { contact?: Record<QuoteWriteContactKey, unknown> | null }>(quote: Q) {
+  const contact = quote.contact;
+  if (!contact) return quote;
+  return {
+    ...quote,
+    contact: Object.fromEntries(QUOTE_WRITE_CONTACT_KEYS.map((key) => [key, contact[key]])) as Pick<
+      NonNullable<Q['contact']>,
+      QuoteWriteContactKey
+    >,
+  };
+}
+
 @Controller('commerce')
 export class CommerceController {
   private readonly logger = new Logger(CommerceController.name);
@@ -929,7 +964,7 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/quotes')
-  createQuote(
+  async createQuote(
     @Param('businessId') businessId: string,
     @Body(CREATE_QUOTE_BODY_PIPE) body: CreateQuoteDto,
   ) {
@@ -937,7 +972,8 @@ export class CommerceController {
     // type the ValidationPipe could not see), and only its declared fields are
     // forwarded. The service computes subtotal, tax, discount, total and every
     // line total; the tenant is the guarded path param, never a body field.
-    return this.commerce.createQuote({
+    // V1-53 review (SEC-V53-1): the 201 body's contact is projected.
+    const quote = await this.commerce.createQuote({
       businessId,
       contactId: body.contactId,
       items: body.items.map(({ description, quantity, unitPrice, productId }) => ({ description, quantity, unitPrice, productId })),
@@ -949,19 +985,22 @@ export class CommerceController {
       notes: body.notes,
       quoteNumber: body.quoteNumber,
     });
+    return toQuoteWriteResponse(quote);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/quotes/:quoteId')
-  updateQuote(
+  async updateQuote(
     @Param('businessId') businessId: string,
     @Param('quoteId') quoteId: string,
     // V1-53: the edit contract (UpdateQuoteDto); unknown keys are stripped,
     // replacement lines obey the create rules. The tenant stays after the spread.
     @Body(UPDATE_QUOTE_BODY_PIPE) body: UpdateQuoteDto,
   ) {
-    return this.commerce.updateQuote({ ...body, quoteId, businessId });
+    // V1-53 review (SEC-V53-1): the 200 body's contact is projected.
+    const quote = await this.commerce.updateQuote({ ...body, quoteId, businessId });
+    return toQuoteWriteResponse(quote);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
