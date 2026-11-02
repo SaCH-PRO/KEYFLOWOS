@@ -32,6 +32,17 @@
  *     writer, with the stored profile as `before`, whichever request field
  *     names the tenant; a refused write leaves none.
  *
+ * Second review (SEC-V103-1..3), pinned in the final block:
+ *   - the write is a compare-and-set on the profile the guard judged: a
+ *     request whose judged profile changed before its write lands is 409 and
+ *     writes nothing, so a tier-3 ADMIN's stale resubmission of an OWNER's
+ *     ceiling of 4 can no longer overwrite their own release of the kill
+ *     switch with the ceiling lowered to 3;
+ *   - the audit row's `before` is the row the write replaced, so the audit
+ *     rows of any interleaving chain from the stored profile to the final one;
+ *   - the write and its audit row commit together: when the insert fails the
+ *     request is 500 and the profile is unchanged.
+ *
  * Two request pipelines, as in key-cortex-tenant-binding.integration.test.ts:
  *   - `production`: TenantInterceptor installed as an APP_INTERCEPTOR and the
  *     Prisma tenant extension's context provider installed (main.ts);
@@ -56,6 +67,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { isDeepStrictEqual } from 'util';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
@@ -111,8 +123,13 @@ const PIPELINE_LABEL: Record<Pipeline, string> = {
 let db: any;
 const apps: Partial<Record<Pipeline, any>> = {};
 
+/** A test-only trigger that refuses the audit insert for bizA's rows (SEC-V103-3); created and dropped by its case. */
+const AUDIT_REFUSAL = `${P}audit_refusal`;
+
 async function cleanup() {
   for (const sql of [
+    `DROP TRIGGER IF EXISTS ${AUDIT_REFUSAL} ON team_activity_logs`,
+    `DROP FUNCTION IF EXISTS ${AUDIT_REFUSAL}()`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM business_autonomy_profiles WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -587,6 +604,144 @@ for (const pipeline of PIPELINES) {
         expect(res.status, `${user} ${describeBody(res)}`).toBe(403);
       }
       expect((await auditRows(ID.bizA)).length).toBe(prior);
+    });
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  Second review: SEC-V103-1 (stale writes), SEC-V103-2 (the audit's  */
+/*  before is the replaced row), SEC-V103-3 (write and audit commit    */
+/*  together)                                                          */
+/* ------------------------------------------------------------------ */
+
+type ProfileRow = (typeof BASELINE)[string];
+
+/** Resolves once some backend is waiting on a lock the backend `pid` holds. */
+async function waitUntilBlockedBy(pid: number) {
+  for (let i = 0; i < 400; i++) {
+    const [{ n }] = await db.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))`;
+    if (n > 0) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`no request reached its write behind backend ${pid} within 10s`);
+}
+
+/**
+ * The stored profile changes between a request's guard read and its write, deterministically: the
+ * test holds the tenant's profile row locked (as a concurrent write in flight would), sends the
+ * request, waits until its UPDATE is blocked behind that lock (the guard read is a plain SELECT, so
+ * it has already judged the old row), then applies `concurrent` to the row and commits. Only the
+ * lock-holding writer is a transaction; the fixtures are not wrapped.
+ */
+async function landBetweenCheckAndWrite<T>(businessId: string, send: () => Promise<T>, concurrent: Partial<ProfileRow>): Promise<T> {
+  let pending: Promise<T> | undefined;
+  await db.$transaction(async (tx: any) => {
+    const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid()::int AS pid`;
+    await tx.$queryRaw`SELECT id FROM business_autonomy_profiles WHERE business_id = ${businessId} FOR UPDATE`;
+    pending = send();
+    await waitUntilBlockedBy(pid);
+    await tx.businessAutonomyProfile.update({ where: { businessId }, data: concurrent });
+  }, { timeout: 30_000, maxWait: 10_000 });
+  return pending!;
+}
+
+/**
+ * Whether the audit rows chain from `start` to `end` in some order: the first one's before is
+ * `start`, each next one's before is the previous one's after, and the last one's after is `end`.
+ */
+function chains(rows: Array<{ meta: any }>, start: ProfileRow, end: ProfileRow): boolean {
+  const same = (a: unknown, b: unknown) => isDeepStrictEqual(a, b);
+  const orders = rows.length === 2 ? [rows, [rows[1], rows[0]]] : [rows];
+  return orders.some((order) => {
+    let at: unknown = start;
+    for (const row of order) {
+      if (!same(row.meta.before, at)) return false;
+      at = row.meta.after;
+    }
+    return same(at, end);
+  });
+}
+
+for (const pipeline of PIPELINES) {
+  describe(`PATCH autonomy-profile second review (SEC-V103-1..3) — ${PIPELINE_LABEL[pipeline]}`, () => {
+    it("SEC-V103-1: a tier-3 ADMIN's stale resubmission of the OWNER's ceiling of 4 does not overwrite their release of the kill switch with the ceiling lowered to 3: 409, and no audit row", async () => {
+      await setProfile(ID.bizA, { globalKillSwitch: true, maxTierWithoutApproval: 4 });
+      const prior = (await auditRows(ID.bizA)).length;
+      // The release (admitted on its own: it lowers the ceiling to the ADMIN's tier) lands after the
+      // stale request's guard read and before its write.
+      const res = await landBetweenCheckAndWrite(
+        ID.bizA,
+        () => patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { maxTierWithoutApproval: 4 } }).then((r) => r),
+        { globalKillSwitch: false, maxTierWithoutApproval: 3 },
+      );
+      expect(res.status, describeBody(res)).toBe(409);
+      expect(await profile(ID.bizA)).toEqual({ ...BASELINE[ID.bizA], globalKillSwitch: false, maxTierWithoutApproval: 3 });
+      expect((await auditRows(ID.bizA)).length).toBe(prior);
+    });
+
+    it("SEC-V103-1: an ADMIN's kill-switch release judged under a ceiling of 3 does not land once the OWNER has raised the ceiling to 4: 409, the kill switch stays on", async () => {
+      const prior = (await auditRows(ID.bizA)).length;
+      const res = await landBetweenCheckAndWrite(
+        ID.bizA,
+        () => patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { globalKillSwitch: false } }).then((r) => r),
+        { maxTierWithoutApproval: 4 },
+      );
+      expect(res.status, describeBody(res)).toBe(409);
+      expect(await profile(ID.bizA)).toEqual({ ...BASELINE[ID.bizA], globalKillSwitch: true, maxTierWithoutApproval: 4 });
+      expect((await auditRows(ID.bizA)).length).toBe(prior);
+    });
+
+    it('SEC-V103-1 / SEC-V103-2, the race as the review ran it: the two ADMIN writes sent together never leave the kill switch off under a ceiling of 4, and the audit rows chain from the stored profile to the final one', async () => {
+      const start: ProfileRow = { ...BASELINE[ID.bizA], globalKillSwitch: true, maxTierWithoutApproval: 4 };
+      const released: ProfileRow = { ...start, globalKillSwitch: false, maxTierWithoutApproval: 3 };
+      const seen = new Set<string>();
+      for (let round = 0; round < 12; round++) {
+        await setProfile(ID.bizA, start);
+        const prior = (await auditRows(ID.bizA)).length;
+        const [stale, release] = await Promise.all([
+          patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { maxTierWithoutApproval: 4 } }).then((r) => r),
+          patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { globalKillSwitch: false, maxTierWithoutApproval: 3 } }).then((r) => r),
+        ]);
+        seen.add(`${stale.status}/${release.status}`);
+        // The stale write changes no setting, so the release always lands. The stale one lands only
+        // before it (200); judged before it and landing after, it is 409; judged after it, it raises
+        // the ceiling from 3 to 4 and the guard refuses it (403).
+        expect(release.status, `round ${round} ${describeBody(release)}`).toBe(200);
+        expect([200, 403, 409], `round ${round} ${describeBody(stale)}`).toContain(stale.status);
+        expect(await profile(ID.bizA), `round ${round}`).toEqual(released);
+        const rows = (await auditRows(ID.bizA)).slice(prior);
+        expect(rows.length, `round ${round}`).toBe([stale, release].filter((r) => r.status === 200).length);
+        expect(chains(rows, start, released), `round ${round} ${JSON.stringify(rows.map((r: any) => r.meta))}`).toBe(true);
+        const releaseRow = rows.find((r: any) => r.meta.changed.includes('globalKillSwitch'));
+        expect(releaseRow?.meta).toMatchObject({ before: { globalKillSwitch: true, maxTierWithoutApproval: 4 }, loosened: ['globalKillSwitch'], actorTier: 3 });
+      }
+      for (const statuses of seen) expect(['200/200', '403/200', '409/200']).toContain(statuses);
+    }, 60_000);
+
+    it('SEC-V103-3: when the audit row cannot be inserted the write rolls back: 500, the kill switch stays on and no audit row', async () => {
+      await db.$executeRawUnsafe(
+        `CREATE OR REPLACE FUNCTION ${AUDIT_REFUSAL}() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'v03a: audit insert refused'; END $$`,
+      );
+      await db.$executeRawUnsafe(
+        `CREATE TRIGGER ${AUDIT_REFUSAL} BEFORE INSERT ON team_activity_logs FOR EACH ROW
+           WHEN (NEW.business_id = '${ID.bizA}') EXECUTE FUNCTION ${AUDIT_REFUSAL}()`,
+      );
+      try {
+        const before = await snapshot();
+        const prior = (await auditRows(ID.bizA)).length;
+        const res = await patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { globalKillSwitch: false } });
+        expect(res.status, describeBody(res)).toBe(500);
+        expect(await snapshot()).toEqual(before);
+        expect((await profile(ID.bizA))!.globalKillSwitch).toBe(true);
+        expect((await auditRows(ID.bizA)).length).toBe(prior);
+      } finally {
+        await db.$executeRawUnsafe(`DROP TRIGGER IF EXISTS ${AUDIT_REFUSAL} ON team_activity_logs`);
+        await db.$executeRawUnsafe(`DROP FUNCTION IF EXISTS ${AUDIT_REFUSAL}()`);
+      }
+      // The same write goes through once the insert is allowed again.
+      const again = await patch(pipeline, { user: ID.adminA, query: { businessId: ID.bizA }, body: { globalKillSwitch: false } });
+      expect(again.status, describeBody(again)).toBe(200);
+      expect((await profile(ID.bizA))!.globalKillSwitch).toBe(false);
     });
   });
 }

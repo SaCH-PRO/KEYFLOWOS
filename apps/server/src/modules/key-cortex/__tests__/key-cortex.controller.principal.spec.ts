@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { BadRequestException, ForbiddenException, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
-import { lastValueFrom, of } from 'rxjs';
+import { BadRequestException, ConflictException, ForbiddenException, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
+import { defer, lastValueFrom, of } from 'rxjs';
 import { GUARDS_METADATA, INTERCEPTORS_METADATA } from '@nestjs/common/constants';
 import * as controllerModule from '../key-cortex.controller';
 import { KeyCortexExecutorService } from '../key-cortex-executor.service';
@@ -526,7 +526,7 @@ describe('V1-03 review ST-1 / CR-V103-1: a write that loosens the profile needs 
   });
 });
 
-describe('V1-03 review ST-2: every autonomy-profile write leaves an audit row naming its writer (AutonomyProfileAuditInterceptor)', () => {
+describe('V1-03 review ST-2, SEC-V103-1..3: every autonomy-profile write is a compare-and-set on the judged profile, committed with its audit row (AutonomyProfileAuditInterceptor)', () => {
   const decision = {
     businessId: 'biz_1',
     actorId: 'u_admin',
@@ -534,11 +534,39 @@ describe('V1-03 review ST-2: every autonomy-profile write leaves an audit row na
     before: { ...DEFAULT_PROFILE, globalKillSwitch: true },
     loosened: ['globalKillSwitch'],
   };
-  const answered = { id: 'prof_1', businessId: 'biz_1', ...DEFAULT_PROFILE, globalKillSwitch: false, createdAt: new Date(), updatedAt: new Date() };
+  /** The row the write leaves, as the transaction reads it back. */
+  const leftRow = { id: 'prof_1', businessId: 'biz_1', ...DEFAULT_PROFILE, globalKillSwitch: false, createdAt: new Date(), updatedAt: new Date() };
 
-  function interceptorWith(create: (...args: any[]) => Promise<unknown>) {
-    const prisma = { client: { teamActivityLog: { create: vi.fn(create) } } };
-    return { prisma, interceptor: new AutonomyProfileAuditInterceptor(prisma) };
+  /** PrismaService with an interactive transaction whose client records every call. */
+  function txPrisma(opts: { count?: number; create?: (...args: any[]) => Promise<unknown> } = {}) {
+    const calls: string[] = [];
+    const tx = {
+      businessAutonomyProfile: {
+        updateMany: vi.fn(async () => { calls.push('updateMany'); return { count: opts.count ?? 1 }; }),
+        findUniqueOrThrow: vi.fn(async () => { calls.push('findUniqueOrThrow'); return leftRow; }),
+      },
+      teamActivityLog: { create: vi.fn(async (...args: any[]) => { calls.push('teamActivityLog.create'); return (opts.create ?? (async () => ({})))(...args); }) },
+    };
+    const prisma = {
+      client: {
+        $transaction: vi.fn(async (fn: (t: typeof tx) => Promise<unknown>) => {
+          calls.push('BEGIN');
+          const out = await fn(tx);
+          calls.push('COMMIT');
+          return out;
+        }),
+        // Outside the transaction: nothing may write here.
+        teamActivityLog: { create: vi.fn() },
+        businessAutonomyProfile: { update: vi.fn(), updateMany: vi.fn() },
+      },
+    };
+    return { tx, prisma, calls, interceptor: new AutonomyProfileAuditInterceptor(prisma) };
+  }
+
+  /** The PATCH as Nest runs it: the route interceptor around the real handler (safety is `{}`, so only the bound write can write). */
+  function runPatch(interceptor: any, req: Record<string, unknown>, dto: Record<string, unknown>, businessId = 'biz_1') {
+    const controller = build(stubs());
+    return lastValueFrom(interceptor.intercept(httpContext(req), { handle: () => defer(() => controller.updateAutonomyProfile(dto as any, businessId)) }));
   }
 
   it('the PATCH handler carries the audit interceptor', () => {
@@ -547,12 +575,14 @@ describe('V1-03 review ST-2: every autonomy-profile write leaves an audit row na
     expect(interceptors).toContain(AutonomyProfileAuditInterceptor);
   });
 
-  it("writes one team_activity_logs row: the guard's tenant and writer, the stored profile as before, the handler's answer as after", async () => {
-    const { prisma, interceptor } = interceptorWith(async () => ({}));
-    const out = await lastValueFrom(interceptor.intercept(httpContext({ autonomyProfileWrite: decision }), { handle: () => of(answered) }));
-    expect(out).toBe(answered);
-    expect(prisma.client.teamActivityLog.create).toHaveBeenCalledTimes(1);
-    const { data } = (prisma.client.teamActivityLog.create.mock.calls[0] as any[])[0];
+  it("writes one team_activity_logs row in the write's transaction: the guard's tenant and writer, the replaced profile as before, the row it left as after", async () => {
+    const { tx, prisma, calls, interceptor } = txPrisma();
+    const out = await runPatch(interceptor, { autonomyProfileWrite: decision }, { globalKillSwitch: false });
+    expect(out).toBe(leftRow);
+    expect(calls).toEqual(['BEGIN', 'updateMany', 'findUniqueOrThrow', 'teamActivityLog.create', 'COMMIT']);
+    expect(prisma.client.teamActivityLog.create).not.toHaveBeenCalled();
+    expect(tx.teamActivityLog.create).toHaveBeenCalledTimes(1);
+    const { data } = (tx.teamActivityLog.create.mock.calls[0] as any[])[0];
     expect(data).toMatchObject({
       businessId: 'biz_1',
       userId: 'u_admin',
@@ -571,16 +601,59 @@ describe('V1-03 review ST-2: every autonomy-profile write leaves an audit row na
     expect(data.title).toContain('globalKillSwitch true -> false');
   });
 
-  it('a failed audit write fails the request (500) instead of answering success for an unaudited change', async () => {
-    const { interceptor } = interceptorWith(async () => { throw new Error('db down'); });
-    await expect(lastValueFrom(interceptor.intercept(httpContext({ autonomyProfileWrite: decision }), { handle: () => of(answered) })))
-      .rejects.toBeInstanceOf(InternalServerErrorException);
+  it('SEC-V103-1: the write is a compare-and-set on the whole judged profile and writes only the settings that differ from it', async () => {
+    const { tx, prisma, interceptor } = txPrisma();
+    // The web form: every field, the ceiling resubmitted at its stored value.
+    await runPatch(interceptor, { autonomyProfileWrite: decision }, { ...decision.before, globalKillSwitch: false });
+    expect(prisma.client.businessAutonomyProfile.update).not.toHaveBeenCalled();
+    const [{ where, data }] = tx.businessAutonomyProfile.updateMany.mock.calls[0] as any[];
+    expect(where).toEqual({ businessId: 'biz_1', ...decision.before });
+    const { updatedAt, ...settings } = data;
+    expect(settings).toEqual({ globalKillSwitch: false });
+    expect(updatedAt).toBeInstanceOf(Date);
   });
 
-  it('a write that reached the handler without a guard decision is not answered as a success', async () => {
-    const { prisma, interceptor } = interceptorWith(async () => ({}));
-    await expect(lastValueFrom(interceptor.intercept(httpContext({}), { handle: () => of(answered) })))
+  it("SEC-V103-1: a stale write (the stored profile changed after the guard judged it) is 409, writes no audit row and answers no success; a stale no-op save too", async () => {
+    for (const dto of [{ maxTierWithoutApproval: 3 }, { globalKillSwitch: false }]) {
+      const { tx, interceptor } = txPrisma({ count: 0 });
+      await expect(runPatch(interceptor, { autonomyProfileWrite: decision }, dto), JSON.stringify(dto)).rejects.toBeInstanceOf(ConflictException);
+      expect(tx.teamActivityLog.create).not.toHaveBeenCalled();
+    }
+    // The no-op save still runs the compare-and-set (Prisma skips an UPDATE with no data, so updatedAt is set).
+    const noop = txPrisma({ count: 0 });
+    await expect(runPatch(noop.interceptor, { autonomyProfileWrite: decision }, { ...decision.before })).rejects.toBeInstanceOf(ConflictException);
+    const [{ data }] = noop.tx.businessAutonomyProfile.updateMany.mock.calls[0] as any[];
+    expect(Object.keys(data)).toEqual(['updatedAt']);
+    expect(noop.tx.teamActivityLog.create).not.toHaveBeenCalled();
+  });
+
+  it('SEC-V103-3: a failed audit insert fails the transaction it shares with the write (500), so the change rolls back with it', async () => {
+    const { calls, interceptor } = txPrisma({ create: async () => { throw new Error('db down'); } });
+    const res = runPatch(interceptor, { autonomyProfileWrite: decision }, { globalKillSwitch: false });
+    await expect(res).rejects.toBeInstanceOf(InternalServerErrorException);
+    await expect(res).rejects.toThrow('nothing was changed');
+    // The insert threw inside the transaction callback: the write was never committed.
+    expect(calls).toEqual(['BEGIN', 'updateMany', 'findUniqueOrThrow', 'teamActivityLog.create']);
+  });
+
+  it('a write that reached the interceptor without a guard decision is 500 and the handler never runs', async () => {
+    const { prisma, interceptor } = txPrisma();
+    const handle = vi.fn(() => of(leftRow));
+    await expect(lastValueFrom(interceptor.intercept(httpContext({}), { handle }))).rejects.toBeInstanceOf(InternalServerErrorException);
+    expect(handle).not.toHaveBeenCalled();
+    expect(prisma.client.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('a handler that answers without running the bound write is not answered as a success (500)', async () => {
+    const { prisma, interceptor } = txPrisma();
+    await expect(lastValueFrom(interceptor.intercept(httpContext({ autonomyProfileWrite: decision }), { handle: () => of(leftRow) })))
       .rejects.toBeInstanceOf(InternalServerErrorException);
-    expect(prisma.client.teamActivityLog.create).not.toHaveBeenCalled();
+    expect(prisma.client.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('the handler writes only the tenant the guard judged: another businessId is 403 and nothing is written', async () => {
+    const { prisma, interceptor } = txPrisma();
+    await expect(runPatch(interceptor, { autonomyProfileWrite: decision }, { globalKillSwitch: true }, 'biz_2')).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.client.$transaction).not.toHaveBeenCalled();
   });
 });

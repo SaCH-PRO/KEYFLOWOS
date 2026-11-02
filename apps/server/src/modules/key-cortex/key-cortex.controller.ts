@@ -37,6 +37,7 @@ import {
   UseInterceptors,
   UseGuards,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   HttpException,
   InternalServerErrorException,
@@ -73,7 +74,8 @@ import {
 } from 'class-validator';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { Response } from 'express';
-import { Observable, Subject, interval, map, from, of, catchError, concatMap, concatWith, defer, switchMap } from 'rxjs';
+import { AsyncLocalStorage } from 'async_hooks';
+import { Observable, Subject, interval, map, from, of, catchError, concatWith, defer, switchMap, throwError } from 'rxjs';
 
 import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
 import { KeyCortexConversationService } from './key-cortex-conversation.service';
@@ -340,12 +342,16 @@ export type AutonomyProfileWriteRequest = BusinessGuardedRequest & {
  * after the class guards, so the handler's signature (and the parameter types
  * key-cortex-tenant-binding.spec.ts pins) is unchanged; it reads the raw body,
  * which the ValidationPipe validates afterwards. The decision is left on the
- * request (`autonomyProfileWrite`) for the audit row
- * (AutonomyProfileAuditInterceptor).
+ * request (`autonomyProfileWrite`) for the write AutonomyProfileAuditInterceptor
+ * binds.
  *
- * Residual: the stored profile is read here and written by updateProfile
- * (key-autonomy-safety.service.ts, outside V1-03's write set) without a lock,
- * so an OWNER's change landing between the two is not seen by this decision.
+ * The decision holds only for the profile it was judged against, which is
+ * read here, before the handler runs, without a lock. So the write is a
+ * compare-and-set on that profile (review SEC-V103-1): it lands only while the
+ * stored row still equals `before`, and answers 409 otherwise. A stale request
+ * (a resubmitted ceiling of 4, or a kill-switch release judged before an
+ * OWNER raised the ceiling) can no longer overwrite a change made after it was
+ * judged.
  */
 @Injectable()
 export class AutonomyProfileWriteGuard implements CanActivate {
@@ -428,25 +434,111 @@ export class AutonomyProfileWriteGuard implements CanActivate {
 const auditValue = (field: keyof AutonomyProfileSettings, value: unknown) =>
   field === 'maxDailySpendTtd' && typeof value === 'number' && value <= 0 ? 'unlimited' : String(value);
 
+/** A stored BusinessAutonomyProfile row, as KeyAutonomySafetyService returns it. */
+type StoredAutonomyProfile = Awaited<ReturnType<KeyAutonomySafetyService['ensureProfile']>>;
+
 /**
- * V1-03 review ST-2: every autonomy-profile write leaves an audit row naming
- * its writer. Neither the handler nor KeyAutonomySafetyService.updateProfile
- * wrote one, and the global BusinessEventInterceptor takes the tenant only
- * from params or body, so a write naming the tenant in the query string (which
- * BusinessGuard and the handler accept) left no trace, and one naming it in
- * the body was logged as 'unknown.update' with the request body as `before`.
+ * The settings a write sets that differ from the profile it was judged
+ * against. A field sent with its stored value is left out, so it is never
+ * written back over a change that landed after the request was judged
+ * (review SEC-V103-1).
+ */
+function changedAutonomySettings(
+  before: AutonomyProfileSettings,
+  requested: Partial<AutonomyProfileSettings>,
+): Partial<AutonomyProfileSettings> {
+  const out: Partial<AutonomyProfileSettings> = {};
+  for (const field of AUTONOMY_PROFILE_FIELDS) {
+    const value = requested[field];
+    if (value !== undefined && value !== before[field]) Object.assign(out, { [field]: value });
+  }
+  return out;
+}
+
+/**
+ * The team_activity_logs row of one autonomy-profile write: the writer, their
+ * tier, the profile the write replaced (`before`, which the compare-and-set
+ * guarantees is the stored row), the profile it left (`after`), and the
+ * settings that changed and that loosened.
+ */
+function autonomyProfileAuditRow(decision: AutonomyProfileWriteDecision, row: StoredAutonomyProfile) {
+  const after = autonomySettingsOf(row);
+  const changed = AUTONOMY_PROFILE_FIELDS.filter((field) => decision.before[field] !== after[field]);
+  const title = changed.length === 0
+    ? 'Saved the KEY autonomy profile (no setting changed)'
+    : `Changed the KEY autonomy profile: ${changed
+      .map((field) => `${field} ${auditValue(field, decision.before[field])} -> ${auditValue(field, after[field])}`)
+      .join(', ')}`;
+  return {
+    businessId: decision.businessId,
+    userId: decision.actorId,
+    module: 'settings',
+    action: 'key_autonomy_profile_updated',
+    entityType: 'businessAutonomyProfile',
+    entityId: row.id,
+    title,
+    meta: {
+      before: { ...decision.before },
+      after: { ...after },
+      changed: [...changed],
+      loosened: [...decision.loosened],
+      actorTier: decision.actorTier,
+    },
+  };
+}
+
+/**
+ * The write the PATCH handler makes for one admitted request, bound by
+ * AutonomyProfileAuditInterceptor.
+ */
+type AutonomyProfileWrite = (businessId: string, dto: UpdateAutonomyProfileDto) => Promise<StoredAutonomyProfile>;
+
+/**
+ * Carries the bound write from AutonomyProfileAuditInterceptor to the handler
+ * for the length of one request. The handler's parameters stay (dto,
+ * businessId), the types key-cortex-tenant-binding.spec.ts pins against tsc's
+ * output, so the request's decision reaches it this way and not as a parameter.
+ */
+const autonomyProfileWriteScope = new AsyncLocalStorage<AutonomyProfileWrite>();
+
+/**
+ * V1-03 review ST-2, SEC-V103-1..3: every autonomy-profile write is a
+ * compare-and-set on the profile AutonomyProfileWriteGuard judged, committed
+ * in one transaction with the audit row naming its writer.
  *
- * After the handler answers, this writes one team_activity_logs row (the
- * mechanism the team-permission and AI-governance changes already use:
- * IdentityService.logTeamActivity, AiOversightService) for the tenant the
- * guard checked: the writer (`userId`), the stored profile the guard judged
- * the write against (`meta.before`), the profile the handler returned
- * (`meta.after`), the settings that changed and those that loosened, and the
- * writer's approval tier. A refused write never reaches the handler, so it
- * writes no row. The row is awaited: when it cannot be written the request
- * fails (500) rather than answer success for an unaudited change. Residual:
- * updateProfile (outside V1-03's write set) takes no transaction client, so
- * the row commits after the profile change, not with it.
+ * Neither the handler nor KeyAutonomySafetyService.updateProfile wrote an
+ * audit row, and the global BusinessEventInterceptor takes the tenant only
+ * from params or body, so a write naming the tenant in the query string (which
+ * BusinessGuard and the handler accept) left no trace. The first repair wrote
+ * the row after the handler answered, which left three gaps the review ran:
+ *
+ *   - SEC-V103-1: the handler wrote every DTO field over whatever was stored,
+ *     though the guard judged the write against a profile it had read
+ *     earlier. A field resubmitted with its stored value counts as no change,
+ *     so a tier-3 ADMIN's stale `{maxTierWithoutApproval: 4}` was admitted
+ *     and then overwrote the same ADMIN's concurrent release of the kill
+ *     switch with the ceiling lowered to 3: the kill switch ended OFF under a
+ *     ceiling of 4, a state the guard refuses to any single request from that ADMIN.
+ *   - SEC-V103-2: the audit row recorded the guard's snapshot as `before`, not
+ *     the row the write replaced, so that ceiling going from 3 back to 4 was
+ *     in no audit row.
+ *   - SEC-V103-3: the profile change committed before the audit row was
+ *     inserted, so a failed insert answered 500 over a change that stayed.
+ *
+ * Now the interceptor binds, for the request the guard admitted, a write the
+ * handler runs (autonomyProfileWriteScope). It writes only the settings that
+ * differ from the judged profile (changedAutonomySettings), with an UPDATE
+ * whose WHERE is that whole profile, so it lands only while the stored row
+ * still equals it; 0 rows is 409 and nothing is written. In the same
+ * transaction it reads the row it left and inserts the audit row
+ * (autonomyProfileAuditRow): `before` is the row the write replaced and
+ * `after` the row it left. When the insert fails the transaction rolls back,
+ * so the request answers 500 and the profile is unchanged.
+ *
+ * A request with no guard decision never reaches the handler (500), and a
+ * handler that answers without running the bound write is answered 500, so no
+ * success is ever answered for an unaudited change. A refused write never
+ * reaches the handler, so it writes no row.
  */
 @Injectable()
 export class AutonomyProfileAuditInterceptor implements NestInterceptor {
@@ -456,52 +548,62 @@ export class AutonomyProfileAuditInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const req = context.switchToHttp().getRequest<AutonomyProfileWriteRequest>();
-    return next.handle().pipe(
-      concatMap(async (profile: unknown) => {
-        await this.audit(req, profile);
+    const decision = req?.autonomyProfileWrite;
+    if (!decision) {
+      this.logger.error('An autonomy-profile write reached the handler without a guard decision; refusing it');
+      return throwError(() => new InternalServerErrorException('The KEY autonomy profile change could not be audited'));
+    }
+    let written = false;
+    const write: AutonomyProfileWrite = async (businessId, dto) => {
+      const profile = await this.write(decision, businessId, dto);
+      written = true;
+      return profile;
+    };
+    // Subscribed inside the scope, so the handler (which Nest calls on subscription) runs in it.
+    return new Observable<unknown>((subscriber) =>
+      autonomyProfileWriteScope.run(write, () => next.handle().subscribe(subscriber)),
+    ).pipe(
+      map((profile) => {
+        if (!written) {
+          this.logger.error(`An autonomy-profile write for ${decision.businessId} answered without its audited write; refusing to answer success`);
+          throw new InternalServerErrorException('The KEY autonomy profile change could not be audited');
+        }
         return profile;
       }),
     );
   }
 
-  private async audit(req: AutonomyProfileWriteRequest, profile: unknown): Promise<void> {
-    const decision = req?.autonomyProfileWrite;
-    const row = profile && typeof profile === 'object' ? (profile as AutonomyProfileSettings & { id?: unknown; businessId?: unknown }) : undefined;
-    if (!decision || !row) {
-      this.logger.error('Autonomy-profile write reached the audit without a guard decision or a profile; refusing to answer success');
-      throw new InternalServerErrorException('The KEY autonomy profile change could not be audited');
+  /** The compare-and-set write and its audit row, in one transaction. */
+  private async write(
+    decision: AutonomyProfileWriteDecision,
+    businessId: string,
+    dto: UpdateAutonomyProfileDto,
+  ): Promise<StoredAutonomyProfile> {
+    if (businessId !== decision.businessId) {
+      throw new ForbiddenException('businessId does not match the business this request was authorized for');
     }
-    const after = autonomySettingsOf(row);
-    const changed = AUTONOMY_PROFILE_FIELDS.filter((field) => decision.before[field] !== after[field]);
-    const title = changed.length === 0
-      ? 'Saved the KEY autonomy profile (no setting changed)'
-      : `Changed the KEY autonomy profile: ${changed
-        .map((field) => `${field} ${auditValue(field, decision.before[field])} -> ${auditValue(field, after[field])}`)
-        .join(', ')}`;
+    const changes = changedAutonomySettings(decision.before, requestedAutonomySettings(dto));
     try {
-      await this.prisma.client.teamActivityLog.create({
-        data: {
-          businessId: decision.businessId,
-          userId: decision.actorId,
-          module: 'settings',
-          action: 'key_autonomy_profile_updated',
-          entityType: 'businessAutonomyProfile',
-          ...(typeof row.id === 'string' ? { entityId: row.id } : {}),
-          title,
-          meta: {
-            before: { ...decision.before },
-            after: { ...after },
-            changed: [...changed],
-            loosened: [...decision.loosened],
-            actorTier: decision.actorTier,
-          },
-        },
+      return await this.prisma.client.$transaction(async (tx) => {
+        // updatedAt is set explicitly so a save that changes nothing still runs
+        // the UPDATE (Prisma skips one with no data) and is checked like any other.
+        const { count } = await tx.businessAutonomyProfile.updateMany({
+          where: { businessId, ...decision.before },
+          data: { ...changes, updatedAt: new Date() },
+        });
+        if (count !== 1) {
+          throw new ConflictException('The KEY autonomy profile changed while this request was being checked; reload it and try again');
+        }
+        const row = await tx.businessAutonomyProfile.findUniqueOrThrow({ where: { businessId } });
+        await tx.teamActivityLog.create({ data: autonomyProfileAuditRow(decision, row) });
+        return row;
       });
     } catch (err) {
+      if (err instanceof HttpException) throw err;
       this.logger.error(
-        `Failed to audit the KEY autonomy profile change for ${decision.businessId} by ${decision.actorId}: ${err instanceof Error ? err.message : String(err)}`,
+        `Failed to write the KEY autonomy profile change for ${businessId} by ${decision.actorId} with its audit row: ${err instanceof Error ? err.message : String(err)}`,
       );
-      throw new InternalServerErrorException('The KEY autonomy profile was changed but its audit row could not be written');
+      throw new InternalServerErrorException('The KEY autonomy profile change could not be written with its audit row; nothing was changed');
     }
   }
 }
@@ -1619,9 +1721,13 @@ export class KeyCortexController {
    * V1-03 (CF-28): only an OWNER or ADMIN of that tenant (or its owner of
    * record, or SUPER_ADMIN) may write it, and a write that loosens any setting
    * needs the caller's own approval tier to reach the tier ceiling the profile
-   * keeps (AutonomyProfileWriteGuard). Every write leaves a team activity row
-   * naming its writer (AutonomyProfileAuditInterceptor, review ST-2). Any
-   * member still reads it (GET).
+   * keeps (AutonomyProfileWriteGuard). The write is a compare-and-set on the
+   * profile the guard judged, committed with a team activity row naming its
+   * writer (AutonomyProfileAuditInterceptor binds it for the request; review
+   * ST-2, SEC-V103-1..3). Any member still reads it (GET).
+   *
+   * Called directly, outside a request (the unit specs), no write is bound and
+   * no guard ran either: the service's own write stands, as it did before V1-03.
    */
   @Patch('autonomy-profile')
   @UseGuards(AutonomyProfileWriteGuard)
@@ -1633,7 +1739,8 @@ export class KeyCortexController {
     if (!businessId) {
       throw new BadRequestException('businessId is required');
     }
-    return this.safety.updateProfile(businessId, dto);
+    const write = autonomyProfileWriteScope.getStore();
+    return write ? write(businessId, dto) : this.safety.updateProfile(businessId, dto);
   }
 
   /* ================================================================== */
