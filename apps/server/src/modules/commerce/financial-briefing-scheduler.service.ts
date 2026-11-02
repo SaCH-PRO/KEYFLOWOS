@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { FinancialCopilotService } from './financial-copilot.service';
 import { SystemEmailService } from '../notifications/system-email.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 const CHECK_INTERVAL_MS = 60 * 1000;
 const TARGET_HOUR = 7;
@@ -91,6 +92,11 @@ export class FinancialBriefingSchedulerService implements OnModuleInit, OnModule
   }
 
   onModuleInit() {
+    // V1-24: DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test stops it.
+    if (schedulersDisabled()) {
+      this.logger.log('[FinancialBriefingScheduler] Disabled via env');
+      return;
+    }
     this.logger.log('[FinancialBriefingScheduler] Starting — checking every 60s for Monday 7am briefings');
     this.intervalRef = safeInterval('FinancialBriefingSchedulerService', CHECK_INTERVAL_MS, () => this.checkAndRunBriefings(), this.logger);
   }

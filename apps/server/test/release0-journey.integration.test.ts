@@ -1062,18 +1062,31 @@ describe('step 7 — no step required an external provider', () => {
 
     // V1-24-KEY-KILL-SWITCHES. The title above is pinned by release0-journey.json and
     // payments-actor.json, so the kill-switch proof extends this case instead of adding one.
-    // (a) The switch reached the server: the gateway logs one boot line when KEY_DISABLED is set.
+    // (a) The switch reached the server: the gateway logs one boot line per process when KEY_DISABLED is set.
     expect(
-      serverLog.filter((l) => /KEY_DISABLED/.test(l) && /KEY is switched off on this server/.test(l)),
+      serverLog.filter((l) => /KEY_DISABLED is set: KEY is switched off on this server/.test(l)),
       'the gateway never logged the KEY_DISABLED boot line, so the journey did not run with KEY switched off',
     ).toHaveLength(1);
+    // Every gateway dispatch the journey triggered (listeners and fallbacks that try AI) was refused by
+    // the switch, before any provider check: the gateway's two other refusals never appear.
+    const keyRefusals = serverLog.filter((l) => /No AI providers available: KEY is switched off on this server \(KEY_DISABLED\)/.test(l));
+    const otherGatewayRefusals = serverLog.filter((l) =>
+      /No AI providers available: (no AI provider is configured|every configured AI provider is temporarily unavailable)/.test(l),
+    );
+    expect(otherGatewayRefusals).toEqual([]);
     // (b) The four V1-24 interval schedulers were loaded and declined to start (positive control:
     //     their absence from (c) is then not an unloaded module).
     const declined = V124_SCHEDULERS.filter((name) => serverLog.some((l) => l.includes(`[${name}] Disabled via env`)));
     expect(declined).toEqual(V124_SCHEDULERS);
     // (c) No gated scheduler or cortex cron logged a start or a run.
     const gated = serverLog.filter((l) => GATED_SCHEDULER_LINES.some((re) => re.test(l)));
-    note(7, 'gated scheduler lines (V1-24)', 'server log', gated.length, `${declined.length}/4 schedulers declined; KEY_DISABLED boot line seen`);
+    note(
+      7,
+      'gated scheduler lines (V1-24)',
+      'server log',
+      gated.length,
+      `${declined.length}/4 schedulers declined; KEY_DISABLED boot line seen; ${keyRefusals.length} gateway dispatch(es) refused by KEY_DISABLED`,
+    );
     expect(gated).toEqual([]);
   });
 });

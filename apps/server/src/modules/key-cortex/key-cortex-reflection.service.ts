@@ -37,6 +37,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
 // randomUUID returns a v4 UUID string, and every call site here is a bare
 // uuidv4() with no arguments, so this is a true drop-in.
 import { randomUUID as uuidv4 } from 'node:crypto';
+import { keyCronsDisabled } from '../../core/config/env';
 
 /* ─────────────────────────── Type Definitions ─────────────────────────── */
 
@@ -681,6 +682,8 @@ export class KeyCortexReflectionService {
   /** Reflection — every 30 minutes */
   @Cron(CronExpression.EVERY_30_MINUTES)
   async scheduledReflection(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const idleBusinesses = await this.findIdleBusinesses();
     for (const businessId of idleBusinesses) {
       if (!this.activeSessions.has(businessId)) {
@@ -694,6 +697,8 @@ export class KeyCortexReflectionService {
   /** Dream Mode — nightly at 3:00 AM */
   @Cron('0 3 * * *')
   async scheduledDream(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const allBusinesses = await this.findAllActiveBusinesses();
     for (const businessId of allBusinesses) {
       await this.runDream(businessId).catch((err) =>
@@ -705,6 +710,8 @@ export class KeyCortexReflectionService {
   /** Synthesis — weekly on Sunday at 4:00 AM */
   @Cron('0 4 * * 0')
   async scheduledSynthesis(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const allBusinesses = await this.findAllActiveBusinesses();
     for (const businessId of allBusinesses) {
       await this.runSynthesis(businessId).catch((err) =>
@@ -716,6 +723,8 @@ export class KeyCortexReflectionService {
   /** Maintenance — daily at 2:00 AM */
   @Cron('0 2 * * *')
   async scheduledMaintenance(): Promise<void> {
+    // V1-24: KEY_DISABLED (or DISABLE_SCHEDULERS) stops this job before it reads anything.
+    if (keyCronsDisabled()) return;
     const allBusinesses = await this.findAllActiveBusinesses();
     for (const businessId of allBusinesses) {
       await this.runMaintenance(businessId).catch((err) =>

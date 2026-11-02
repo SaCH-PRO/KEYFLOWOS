@@ -1175,16 +1175,19 @@ describe('ModelGatewayService', () => {
       expect(res.content).toBe('callOpenAi answered');
     });
 
-    it('construction with KEY_DISABLED set logs one warning naming the switch (the boot line the Release 0 journey looks for)', () => {
+    it('construction with KEY_DISABLED set logs one warning naming the switch, once per process however many gateways the module graph builds (the boot line the Release 0 journey looks for)', () => {
       const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
-      createService({ KEY_DISABLED: '1' });
-      const lines = warn.mock.calls.map((c) => String(c[0]));
-      expect(lines.filter((l) => l.includes('KEY_DISABLED'))).toHaveLength(1);
-      expect(lines.find((l) => l.includes('KEY_DISABLED'))).toMatch(/KEY is switched off on this server/);
+      const keyLines = () => warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('KEY_DISABLED'));
 
-      warn.mockClear();
+      (ModelGatewayService as any).keyDisabledAnnounced = false;
       createService({ KEY_DISABLED: null });
-      expect(warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes('KEY_DISABLED'))).toEqual([]);
+      expect(keyLines()).toEqual([]);
+
+      createService({ KEY_DISABLED: '1' });
+      createService({ KEY_DISABLED: '1' });
+      createService({ KEY_DISABLED: '1' });
+      expect(keyLines()).toHaveLength(1);
+      expect(keyLines()[0]).toMatch(/KEY is switched off on this server/);
     });
   });
 });
