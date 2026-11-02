@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ForbiddenException, HttpException } from '@nestjs/common';
+import { ForbiddenException, HttpException, Logger } from '@nestjs/common';
 import { AiUsageService } from './ai-usage.service';
 import { AI_CREDIT_COSTS } from '../subscriptions/plans';
+import { ModelGatewayService, type StreamChunk } from './model-gateway.service';
+import { KeyCortexVoiceService } from '../key-cortex/key-cortex-voice.service';
+import { KeyCortexDocumentService } from '../key-cortex/key-cortex-document.service';
+import { RealtimeBridgeService } from '../phone-voice/realtime-bridge.service';
+import { ElevenLabsVoiceProvider } from '../voice/elevenlabs-voice.provider';
+import { DiagnosticsService } from '../diagnostics/diagnostics.service';
 
 /**
  * R0-07a: the OpenAI SDK the direct helpers (trackEmbedding, trackVision,
@@ -40,6 +46,38 @@ vi.mock('openai', async (importOriginal) => {
   return { ...actual, default: RecordingOpenAI, OpenAI: RecordingOpenAI };
 });
 
+/**
+ * V1-24b: the `ws` client the phone realtime bridge opens to OpenAI Realtime.
+ * A recording stand-in: `attempts` holds every `new WebSocket(url)`; no network
+ * socket is ever opened, the stand-in just reports 'open' on the next tick.
+ */
+const wsClient = vi.hoisted(() => ({ attempts: [] as string[] }));
+
+vi.mock('ws', () => {
+  class RecordingWebSocket {
+    static OPEN = 1;
+    readyState = 0;
+    private handlers: Array<[string, (...a: unknown[]) => void]> = [];
+    constructor(url: string) {
+      wsClient.attempts.push(url);
+      setImmediate(() => {
+        this.readyState = 1;
+        for (const [evt, cb] of this.handlers) if (evt === 'open') cb();
+      });
+    }
+    on(evt: string, cb: (...a: unknown[]) => void) {
+      this.handlers.push([evt, cb]);
+      return this;
+    }
+    once(evt: string, cb: (...a: unknown[]) => void) {
+      return this.on(evt, cb);
+    }
+    send() {}
+    close() {}
+  }
+  return { default: RecordingWebSocket, WebSocket: RecordingWebSocket };
+});
+
 const mockPrismaClient = {
   aiUsageLog: {
     create: vi.fn().mockResolvedValue({}),
@@ -65,6 +103,7 @@ const mockOutputTemplateService = {
 const mockGateway = {
   complete: vi.fn(),
   getBudgetStatus: vi.fn(),
+  streamComplete: vi.fn(),
 };
 
 function createService(): AiUsageService {
@@ -1050,6 +1089,355 @@ describe('AiUsageService direct OpenAI helpers fail visibly when no OpenAI key i
         service.trackVision('biz-r07a', undefined, 'vision_contact', [{ role: 'user', content: 'card' }]),
       ).rejects.toThrow(ForbiddenException);
       expect(sdk.chatCreate).not.toHaveBeenCalled();
+    });
+  });
+});
+
+/**
+ * V1-24b-KEY-OFF-SWITCH-COVERAGE (review SEC-V124-1, SEC-V124-2).
+ *
+ * SEC-V124-2: AiUsageService.trackAndStream wrote a credited, billable
+ * aiUsageLog row naming provider 'openai' / model 'gpt-4o' for a stream the
+ * gateway refused before calling any provider (one coded error chunk, no usage
+ * chunk): the KEY_DISABLED refusal, and the R0-07 provider_not_configured /
+ * provider_unavailable chunk it inherited from. A refused stream is not billed.
+ *
+ * SEC-V124-1: six paths reach an AI provider without the model gateway and did
+ * not read KEY_DISABLED. With the switch on and a provider key configured,
+ * each must refuse with the gateway's KEY-disabled answer (or, where the path
+ * has its own refusal shape, that shape) without constructing a provider
+ * client, opening a connection, spending credit or writing a usage row. With
+ * the switch off and a key configured (SDK, socket and fetch stubbed), each one
+ * still reaches its client: the control that makes "no client" a real answer.
+ */
+describe('KEY_DISABLED stops every direct AI provider path, and a refused stream is never billed (V1-24b)', () => {
+  const ENV_KEYS = [
+    'KEY_DISABLED',
+    'AI_INTEGRATIONS_OPENAI_API_KEY',
+    'OPENAI_API_KEY',
+    'AI_INTEGRATIONS_OPENAI_BASE_URL',
+    'OPENAI_BASE_URL',
+    'ELEVENLABS_API_KEY',
+  ];
+  const saved: Record<string, string | undefined> = {};
+  const TEST_KEY = 'v124b-test-not-a-real-key';
+  let service: AiUsageService;
+
+  /** The gateway's KEY_DISABLED refusal: the R0-07 503 with reason key_disabled. */
+  async function expectKeyDisabled(call: Promise<unknown>) {
+    const err: any = await call.then(
+      () => { throw new Error('expected the call to be refused'); },
+      (e: unknown) => e,
+    );
+    expect(err, String(err?.stack ?? err)).toBeInstanceOf(HttpException);
+    expect(err.getStatus()).toBe(503);
+    expect(err.getResponse()).toMatchObject({
+      code: 'provider_not_configured',
+      reason: 'key_disabled',
+      service: 'ai',
+      error: 'Service Unavailable',
+    });
+    expect(err.getResponse().message).toMatch(/KEY_DISABLED/);
+  }
+
+  /** Background usage writes are fire-and-forget: let them land before asserting on them. */
+  async function settle() {
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  }
+
+  async function drain(gen: AsyncGenerator<StreamChunk>): Promise<StreamChunk[]> {
+    const out: StreamChunk[] = [];
+    for await (const c of gen) out.push(c);
+    return out;
+  }
+
+  function permissive(): any {
+    const p: any = new Proxy(function stub() {}, {
+      get: (_t, prop) => (prop === 'then' ? undefined : p),
+      apply: () => p,
+    });
+    return p;
+  }
+
+  /** A dependency that fails the test if it is touched. */
+  const untouchable = (name: string) =>
+    new Proxy({}, { get: (_t, p) => { if (p === 'then') return undefined; throw new Error(`${name}.${String(p)} was touched`); } });
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    for (const k of ENV_KEYS) {
+      saved[k] = process.env[k];
+      delete process.env[k];
+    }
+    sdk.attempts.length = 0;
+    sdk.clients.length = 0;
+    wsClient.attempts.length = 0;
+    mockPrismaClient.aiUsageLog.create.mockResolvedValue({});
+    mockPrismaClient.aiUsageLog.aggregate.mockResolvedValue({ _sum: { creditsUsed: 0, estimatedCost: 0 } });
+    mockUnlimitedPlan();
+    mockSubscriptionsService.getActiveSubscription.mockClear();
+    service = createService();
+  });
+
+  afterEach(() => {
+    service.onModuleDestroy();
+    for (const k of ENV_KEYS) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+    vi.restoreAllMocks();
+  });
+
+  // -------------------------------------------------------------------------
+  // SEC-V124-2: trackAndStream
+  // -------------------------------------------------------------------------
+
+  describe('trackAndStream (SEC-V124-2)', () => {
+    const request = { messages: [{ role: 'user' as const, content: 'hello' }] };
+
+    it('a stream the real gateway refuses because KEY_DISABLED is set passes the refusal chunk through and writes NO aiUsageLog row', async () => {
+      process.env.KEY_DISABLED = '1';
+      // The real gateway's refusal: it answers before it reads anything off `this`.
+      mockGateway.streamComplete.mockImplementation((req: any) =>
+        ModelGatewayService.prototype.streamComplete.call(Object.create(ModelGatewayService.prototype), req),
+      );
+
+      const chunks = await drain(service.trackAndStream('biz-v124b', 'user-1', 'chat', request));
+      await settle();
+
+      expect(chunks).toEqual([
+        expect.objectContaining({ type: 'error', code: 'provider_not_configured', reason: 'key_disabled' }),
+      ]);
+      expect(mockGateway.streamComplete).toHaveBeenCalledTimes(1);
+      expect(mockPrismaClient.aiUsageLog.create).not.toHaveBeenCalled();
+    });
+
+    it('the R0-07 refusal (provider_not_configured, nothing dispatched, no usage chunk) writes no row either', async () => {
+      mockGateway.streamComplete.mockImplementation(async function* () {
+        yield { type: 'error', error: 'No AI providers available: no AI provider is configured', code: 'provider_not_configured' } as StreamChunk;
+      });
+
+      const chunks = await drain(service.trackAndStream('biz-v124b', 'user-1', 'chat', request));
+      await settle();
+
+      expect(chunks.map((c) => c.code)).toEqual(['provider_not_configured']);
+      expect(mockPrismaClient.aiUsageLog.create).not.toHaveBeenCalled();
+    });
+
+    it('the R0-07 provider_unavailable refusal (every circuit open) writes no row', async () => {
+      mockGateway.streamComplete.mockImplementation(async function* () {
+        yield { type: 'error', error: 'No AI providers available: every configured AI provider is temporarily unavailable', code: 'provider_unavailable' } as StreamChunk;
+      });
+
+      await drain(service.trackAndStream('biz-v124b', undefined, 'chat', request));
+      await settle();
+
+      expect(mockPrismaClient.aiUsageLog.create).not.toHaveBeenCalled();
+    });
+
+    it('control: a stream a provider answered (text, then usage) still writes exactly one credited row with the provider and usage', async () => {
+      mockGateway.streamComplete.mockImplementation(async function* () {
+        yield { type: 'text', content: 'hi', provider: 'anthropic', model: 'claude-x' } as StreamChunk;
+        yield {
+          type: 'usage',
+          usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15, estimatedCost: 0.0012 },
+          provider: 'anthropic',
+          model: 'claude-x',
+        } as StreamChunk;
+      });
+
+      await drain(service.trackAndStream('biz-v124b', 'user-1', 'chat', request));
+      await settle();
+
+      expect(mockPrismaClient.aiUsageLog.create).toHaveBeenCalledTimes(1);
+      expect(mockPrismaClient.aiUsageLog.create.mock.calls[0][0].data).toMatchObject({
+        businessId: 'biz-v124b',
+        feature: 'chat',
+        provider: 'anthropic',
+        model: 'claude-x',
+        totalTokens: 15,
+        creditsUsed: AI_CREDIT_COSTS.chat,
+      });
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // SEC-V124-1: the direct paths
+  // -------------------------------------------------------------------------
+
+  describe('AiUsageService direct OpenAI helpers (trackEmbedding, trackVision, trackAudio)', () => {
+    function expectNothingRan() {
+      expect(sdk.attempts).toEqual([]);
+      expect(sdk.embeddingsCreate).not.toHaveBeenCalled();
+      expect(sdk.chatCreate).not.toHaveBeenCalled();
+      expect(sdk.speechCreate).not.toHaveBeenCalled();
+      expect(sdk.transcriptionsCreate).not.toHaveBeenCalled();
+      expect(mockSubscriptionsService.getActiveSubscription).not.toHaveBeenCalled();
+      expect(mockPrismaClient.aiUsageLog.create).not.toHaveBeenCalled();
+    }
+
+    it('with KEY_DISABLED=1 and an OpenAI key configured, each helper answers the KEY-disabled 503 before any client, credit check, rate-limit slot or usage row', async () => {
+      process.env.KEY_DISABLED = '1';
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+      process.env.OPENAI_API_KEY = TEST_KEY;
+
+      await expectKeyDisabled(service.trackEmbedding('biz-v124b', 'user-1', 'semantic_embedding', ['hello']));
+      await expectKeyDisabled(service.trackVision('biz-v124b', undefined, 'vision_contact', [{ role: 'user', content: 'card' }]));
+      await expectKeyDisabled(service.trackAudio('biz-v124b', undefined, 'audio_tts', 'tts', { text: 'Hello', voice: 'alloy' }));
+      await expectKeyDisabled(service.trackAudio('biz-v124b', undefined, 'audio_stt', 'stt', { audioFile: Buffer.from('a'), fileName: 'a.webm' }));
+      expectNothingRan();
+      // No rate-limit slot was spent: all 120 of this minute's calls are still free.
+      for (let i = 0; i < 120; i++) service.checkRateLimit('biz-v124b');
+      expect(() => service.checkRateLimit('biz-v124b')).toThrow();
+    });
+
+    it('control: with KEY on and the same key, trackEmbedding builds its client and calls the provider', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+      sdk.embeddingsCreate.mockResolvedValue({ data: [{ embedding: [1] }] });
+
+      await expect(service.trackEmbedding('biz-v124b', undefined, 'semantic_embedding', ['x'])).resolves.toEqual([[1]]);
+      expect(sdk.clients.map((c) => c.apiKey)).toEqual([TEST_KEY]);
+    });
+  });
+
+  describe('KEY voice (KeyCortexVoiceService: OpenAI TTS and Whisper)', () => {
+    const aiUsage = { trackAudioUsage: vi.fn() };
+    const build = () => new KeyCortexVoiceService(aiUsage as any, {} as any);
+
+    it('with KEY_DISABLED=1 and a key configured: no client is built, and synthesize / transcribe / preview answer the KEY-disabled 503', async () => {
+      process.env.KEY_DISABLED = '1';
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+      const voice = build();
+
+      await expectKeyDisabled(voice.synthesize({ text: 'Hello there', persona: 'jarvis' }, 'biz-v124b'));
+      await expectKeyDisabled(voice.transcribe({ audioBuffer: Buffer.from('a'), mimeType: 'audio/webm' }, 'biz-v124b'));
+      await expectKeyDisabled(voice.generateVoicePreview('nova', 'nova'));
+      expect(sdk.attempts).toEqual([]);
+      expect(sdk.speechCreate).not.toHaveBeenCalled();
+      expect(sdk.transcriptionsCreate).not.toHaveBeenCalled();
+      expect(aiUsage.trackAudioUsage).not.toHaveBeenCalled();
+    });
+
+    it('the switch is read at call time: a service built with KEY on refuses once KEY_DISABLED is set', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+      const voice = build();
+      process.env.KEY_DISABLED = '1';
+
+      await expectKeyDisabled(voice.synthesize({ text: 'Hello' }, 'biz-v124b'));
+      expect(sdk.speechCreate).not.toHaveBeenCalled();
+    });
+
+    it('control: with KEY on and the key, synthesize builds its client and calls OpenAI TTS', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+      sdk.speechCreate.mockResolvedValue({ arrayBuffer: async () => new Uint8Array([1]).buffer });
+
+      await build().synthesize({ text: 'Hi' }, 'biz-v124b');
+      expect(sdk.clients.map((c) => c.apiKey)).toEqual([TEST_KEY]);
+      expect(sdk.speechCreate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('KEY document embeddings (KeyCortexDocumentService)', () => {
+    const file = { buffer: Buffer.from('v124b document'), originalname: 'notes.txt', mimetype: 'text/plain', size: 14 };
+    const build = (prisma: unknown) =>
+      new KeyCortexDocumentService(
+        prisma as any,
+        untouchable('redis') as any,
+        untouchable('gateway') as any,
+        untouchable('aiUsage') as any,
+        untouchable('memoryWriter') as any,
+      );
+
+    it('with KEY_DISABLED=1 and a key configured: no client is built and an upload answers the KEY-disabled 503 before any write', async () => {
+      process.env.KEY_DISABLED = '1';
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+      const docs = build(untouchable('prisma'));
+
+      await expectKeyDisabled(docs.uploadDocument(file, {}, 'biz-v124b'));
+      expect(sdk.attempts).toEqual([]);
+      expect(sdk.embeddingsCreate).not.toHaveBeenCalled();
+    });
+
+    it('control: with KEY on and the key, the upload builds its OpenAI client and goes on to write the document', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+      const reached = new Error('v124b: reached the document write');
+      const prisma = { client: new Proxy({}, { get: () => ({ create: () => Promise.reject(reached) }) }) };
+
+      const err = await build(prisma).uploadDocument(file, {}, 'biz-v124b').catch((e) => e);
+      expect(err).toBe(reached);
+      expect(sdk.clients.map((c) => c.apiKey)).toEqual([TEST_KEY]);
+    });
+  });
+
+  describe('the phone realtime bridge (RealtimeBridgeService: OpenAI Realtime)', () => {
+    const opts = () => ({
+      instructions: 'v124b',
+      tools: [],
+      events: { onAudioDelta: vi.fn(), onTranscript: vi.fn(), onFunctionCall: vi.fn(), onError: vi.fn(), onClose: vi.fn() },
+    });
+
+    it('with KEY_DISABLED=1 and a key configured: openSession answers null (the bridge refusal, which closes the call stream) and opens no socket', async () => {
+      process.env.KEY_DISABLED = '1';
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+      vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+      vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+      await expect(new RealtimeBridgeService().openSession(opts())).resolves.toBeNull();
+      expect(wsClient.attempts).toEqual([]);
+    });
+
+    it('control: with KEY on and the key, openSession opens the OpenAI Realtime socket', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+
+      const session = await new RealtimeBridgeService().openSession(opts());
+      expect(session).not.toBeNull();
+      expect(wsClient.attempts).toHaveLength(1);
+      expect(wsClient.attempts[0]).toMatch(/^wss:\/\/api\.openai\.com\/v1\/realtime/);
+    });
+  });
+
+  describe('ElevenLabs text-to-speech (ElevenLabsVoiceProvider)', () => {
+    it('with KEY_DISABLED=1 and ELEVENLABS_API_KEY configured: synthesize answers the KEY-disabled 503 and makes no request', async () => {
+      process.env.KEY_DISABLED = '1';
+      process.env.ELEVENLABS_API_KEY = TEST_KEY;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('v124b: fetch must not be called'));
+
+      await expectKeyDisabled(new ElevenLabsVoiceProvider().synthesize('biz-v124b', 'Hello there'));
+      expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
+    it('control: with KEY on and the key, synthesize calls ElevenLabs', async () => {
+      process.env.ELEVENLABS_API_KEY = TEST_KEY;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new Uint8Array([4, 2]), { status: 200 }));
+
+      const audio = await new ElevenLabsVoiceProvider().synthesize('biz-v124b', 'Hello there');
+      expect([...audio]).toEqual([4, 2]);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(String(fetchSpy.mock.calls[0][0])).toMatch(/^https:\/\/api\.elevenlabs\.io\//);
+    });
+  });
+
+  describe('the diagnostics OpenAI key check (DiagnosticsService.checkOpenAI)', () => {
+    const build = () => new DiagnosticsService(permissive(), permissive(), permissive(), permissive());
+
+    it('with KEY_DISABLED=1 and a key configured: the check sends nothing and reports that KEY is switched off', async () => {
+      process.env.KEY_DISABLED = '1';
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('v124b: fetch must not be called'));
+
+      const result = await build().checkOpenAI();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ name: 'OpenAI API', status: 'warn' });
+      expect(result.message).toMatch(/KEY_DISABLED/);
+    });
+
+    it('control: with KEY on and the key, the check calls the OpenAI models endpoint', async () => {
+      process.env.AI_INTEGRATIONS_OPENAI_API_KEY = TEST_KEY;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{}', { status: 200 }));
+
+      const result = await build().checkOpenAI();
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(result.status).toBe('pass');
     });
   });
 });

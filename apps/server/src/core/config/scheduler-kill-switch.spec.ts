@@ -44,8 +44,29 @@
  *     while one of these still calls it. A fixed entry must leave the list.
  *
  * Every scan asserts its input was non-empty (gate-vacuity.spec.ts).
+ *
+ * V1-24b-KEY-OFF-SWITCH-COVERAGE (from the V1-24 census, SEC-V124-1/2 and the
+ * f5c93ba0 scheduler-race flake): the ratchets above become absolute.
+ *   - Every OnModuleInit interval scheduler in apps/server/src calls
+ *     schedulersDisabled() as the first statement of onModuleInit, and,
+ *     behaviourally, arms no timer and reads nothing but its logger under
+ *     DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test. The control
+ *     (it arms with no switch, and under NODE_ENV=test with the explicit opt-in
+ *     ENABLE_SCHEDULERS_IN_TEST=1) makes "no timer" a real answer.
+ *   - A timer armed anywhere else (a constructor, a helper) is either gated
+ *     the same way or named in IN_PROCESS_TIMERS with why it is not a scheduler.
+ *   - Every @Cron, @Interval and @Timeout handler in apps/server/src (not only
+ *     the cortex ones) runs the guard first and, behaviourally, returns without
+ *     touching its service under NODE_ENV=test unless opted in, and under
+ *     DISABLE_SCHEDULERS or KF_DISABLE_SCHEDULERS. keyCronsDisabled() now
+ *     includes schedulersDisabled(), so the cortex crons also stop under
+ *     NODE_ENV=test (V1-24 left that out; a spawned test server that does not
+ *     set DISABLE_SCHEDULERS, such as app-module-boots, ran them).
+ *   - KEY_DISABLED_NOT_COVERED is empty: every direct AI provider path reads
+ *     keyDisabled() (behaviour proven in ai-usage.service.spec.ts).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import * as envModule from './env';
@@ -137,60 +158,33 @@ const PACKET_SCHEDULERS = [
 
 /**
  * OnModuleInit interval schedulers OUTSIDE the V1-24 write set whose
- * onModuleInit does not honour DISABLE_SCHEDULERS, as observed at the V1-24
- * base (int/trial-F f5c93ba0). The packet's RED claim named four; the census
- * finds 37 that honour neither DISABLE_SCHEDULERS nor NODE_ENV==='test' (these
- * 33 plus the four), and calendar-insight honours NODE_ENV only. Some carry
- * their own flag (noted), which still works. They need a follow-up packet; this
- * list only stops it growing. Remove an entry when its scheduler is fixed.
+ * onModuleInit did not honour DISABLE_SCHEDULERS. At the V1-24 base
+ * (int/trial-F f5c93ba0) and again at the V1-24b base (0a481439) this held 34
+ * entries (connector health/sync, error-digest, agent-health, ai-usage-alert,
+ * connector-intelligence, match-refresh, pattern-detector, plan-executor,
+ * pro-auto-monitor, delegation-loop, bookings reminders, calendar-insight,
+ * calendar-sync, recurring-invoice, delivery-queue, abandoned-cart,
+ * review-solicitation, crm-data-quality, crm relationship-health,
+ * deal-intelligence, lead-scoring, contact-privacy, campaign-scheduler,
+ * recurring-expense, recurring-journal-entry, flow.listener, growth-intelligence,
+ * momentum, transactional-email, currency-rates, storefront-conversion,
+ * social-gap-detector, social-scheduler). V1-24b gates every one; the list
+ * must stay empty.
  */
-const KNOWN_UNGATED_OUTSIDE_WRITE_SET = [
-  'src/core/connectors/connector-health-monitor.service.ts',
-  'src/core/connectors/connector-sync-scheduler.service.ts',
-  'src/core/observability/error-digest.service.ts',
-  'src/modules/ai/agent-health.service.ts',
-  'src/modules/ai/ai-usage-alert-scheduler.service.ts', // AI_USAGE_ALERT_SCHEDULER_DISABLED (module-level), NODE_ENV=test
-  'src/modules/ai/connector-intelligence.service.ts',
-  'src/modules/ai/match-refresh-scheduler.service.ts',
-  'src/modules/ai/pattern-detector.service.ts',
-  'src/modules/ai/plan-executor.service.ts',
-  'src/modules/ai/pro-auto-monitor.service.ts',
-  'src/modules/autopilot/delegation-loop.service.ts',
-  'src/modules/bookings/bookings.service.ts',
-  'src/modules/calendar/calendar-insight-scheduler.service.ts', // DISABLE_CALENDAR_INSIGHT_SCHEDULER, NODE_ENV=test
-  'src/modules/calendar/calendar-sync.scheduler.ts', // KF_DISABLE_SCHEDULERS
-  'src/modules/commerce/recurring-invoice.service.ts',
-  'src/modules/communications/delivery-queue.service.ts',
-  'src/modules/conversion/abandoned-cart-recovery.service.ts',
-  'src/modules/conversion/review-solicitation.service.ts',
-  'src/modules/crm/crm-data-quality.scheduler.ts', // KF_DISABLE_SCHEDULERS
-  'src/modules/crm/crm-relationship-health-scheduler.service.ts', // CRM_HEALTH_SCHEDULER_DISABLED
-  'src/modules/crm/deal-intelligence-scheduler.service.ts', // DEAL_INTEL_SCHEDULER_DISABLED
-  'src/modules/crm/lead-scoring.scheduler.ts', // LEAD_SCORE_SCHEDULER_DISABLED
-  'src/modules/crm/privacy/contact-privacy.service.ts', // DISABLE_FORGET_SCHEDULER
-  'src/modules/email-marketing/campaign-scheduler.service.ts',
-  'src/modules/expenses/recurring-expense.service.ts',
-  'src/modules/finance/recurring-journal-entry.service.ts',
-  'src/modules/flow/flow.listener.ts',
-  'src/modules/growth-intelligence/growth-intelligence-scheduler.service.ts',
-  'src/modules/momentum/momentum-scheduler.service.ts',
-  'src/modules/notifications/transactional-email.service.ts',
-  'src/modules/payments/currency-rates.scheduler.ts',
-  'src/modules/site/storefront-conversion.scheduler.ts',
-  'src/modules/social/social-gap-detector.service.ts',
-  'src/modules/social/social-scheduler.service.ts',
-];
+const KNOWN_UNGATED_OUTSIDE_WRITE_SET: string[] = [];
+
+/** `{`, any comment lines, then `if (schedulersDisabled())` as the first statement. */
+const SCHEDULER_GUARD_FIRST = /^\{\s*(?:\/\/[^\n]*\n\s*|\/\*[\s\S]*?\*\/\s*)*if\s*\(\s*schedulersDisabled\(\)\s*\)/;
 
 /**
  * Own flags that worked before V1-24 and must keep working (additive): the
- * file still reads the flag. The unified switch also honours
- * KF_DISABLE_SCHEDULERS (proven behaviourally below).
+ * file still reads the flag. KF_DISABLE_SCHEDULERS, which calendar-sync and
+ * crm-data-quality used to read themselves, is now read through
+ * schedulersDisabled() and proven behaviourally for every scheduler below.
  */
 const OWN_FLAGS: Array<[string, string]> = [
   ['src/modules/ai/ai-usage-alert-scheduler.service.ts', 'AI_USAGE_ALERT_SCHEDULER_DISABLED'],
   ['src/modules/calendar/calendar-insight-scheduler.service.ts', 'DISABLE_CALENDAR_INSIGHT_SCHEDULER'],
-  ['src/modules/calendar/calendar-sync.scheduler.ts', 'KF_DISABLE_SCHEDULERS'],
-  ['src/modules/crm/crm-data-quality.scheduler.ts', 'KF_DISABLE_SCHEDULERS'],
   ['src/modules/crm/crm-relationship-health-scheduler.service.ts', 'CRM_HEALTH_SCHEDULER_DISABLED'],
   ['src/modules/crm/deal-intelligence-scheduler.service.ts', 'DEAL_INTEL_SCHEDULER_DISABLED'],
   ['src/modules/crm/lead-scoring.scheduler.ts', 'LEAD_SCORE_SCHEDULER_DISABLED'],
@@ -256,7 +250,7 @@ async function runOn(fn: (...args: unknown[]) => unknown, self: object): Promise
 // env discipline
 // ---------------------------------------------------------------------------
 
-const SWITCHES = ['DISABLE_SCHEDULERS', 'KF_DISABLE_SCHEDULERS', 'KEY_DISABLED', 'NODE_ENV'] as const;
+const SWITCHES = ['DISABLE_SCHEDULERS', 'KF_DISABLE_SCHEDULERS', 'KEY_DISABLED', 'NODE_ENV', 'ENABLE_SCHEDULERS_IN_TEST'] as const;
 let saved: Record<string, string | undefined>;
 
 function setSwitches(next: Partial<Record<(typeof SWITCHES)[number], string>>) {
@@ -329,17 +323,46 @@ describe('env.ts exports the unified switches (V1-24)', () => {
     }
   });
 
-  it('keyCronsDisabled() is on for KEY_DISABLED, DISABLE_SCHEDULERS or KF_DISABLE_SCHEDULERS, and NOT for NODE_ENV=test alone', () => {
+  // V1-24b: V1-24 left NODE_ENV=test out of keyCronsDisabled() because the cortex
+  // specs call the handlers directly. A spawned test server that does not set
+  // DISABLE_SCHEDULERS (app-module-boots spreads the runner's env) then ran every
+  // cortex cron against the shared database. Now NODE_ENV=test stops them too,
+  // and a spec that calls a handler directly opts in with ENABLE_SCHEDULERS_IN_TEST.
+  it('keyCronsDisabled() is on for KEY_DISABLED, DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS and NODE_ENV=test, and off under NODE_ENV=test only with the explicit opt-in (V1-24b)', () => {
     expect(typeof env.keyCronsDisabled).toBe('function');
     const off = env.keyCronsDisabled!;
-    setSwitches({ NODE_ENV: 'test' });
+    setSwitches({ NODE_ENV: 'production' });
     expect(off()).toBe(false);
-    setSwitches({ NODE_ENV: 'test', KEY_DISABLED: '1' });
+    setSwitches({ NODE_ENV: 'test' });
+    expect(off()).toBe(true);
+    setSwitches({ NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1' });
+    expect(off()).toBe(false);
+    setSwitches({ NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1', KEY_DISABLED: '1' });
+    expect(off()).toBe(true);
+    setSwitches({ NODE_ENV: 'production', KEY_DISABLED: '1' });
     expect(off()).toBe(true);
     setSwitches({ NODE_ENV: 'production', DISABLE_SCHEDULERS: '1' });
     expect(off()).toBe(true);
     setSwitches({ NODE_ENV: 'production', KF_DISABLE_SCHEDULERS: 'true' });
     expect(off()).toBe(true);
+  });
+
+  it('ENABLE_SCHEDULERS_IN_TEST is an opt-in for NODE_ENV=test only: it never overrides DISABLE_SCHEDULERS or KF_DISABLE_SCHEDULERS, and outside test it changes nothing (V1-24b)', () => {
+    const on = env.schedulersDisabled!;
+    setSwitches({ NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1' });
+    expect(on()).toBe(false);
+    setSwitches({ NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: 'true' });
+    expect(on()).toBe(false);
+    setSwitches({ NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '0' });
+    expect(on()).toBe(true);
+    setSwitches({ NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1', DISABLE_SCHEDULERS: '1' });
+    expect(on()).toBe(true);
+    setSwitches({ NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1', KF_DISABLE_SCHEDULERS: '1' });
+    expect(on()).toBe(true);
+    setSwitches({ NODE_ENV: 'production', ENABLE_SCHEDULERS_IN_TEST: '1', DISABLE_SCHEDULERS: '1' });
+    expect(on()).toBe(true);
+    setSwitches({ NODE_ENV: 'production', ENABLE_SCHEDULERS_IN_TEST: '1' });
+    expect(on()).toBe(false);
   });
 });
 
@@ -417,32 +440,161 @@ describe('the four OnModuleInit interval schedulers honour the unified switch', 
 });
 
 // ---------------------------------------------------------------------------
-// every OnModuleInit interval scheduler: census and ratchet
+// every OnModuleInit interval scheduler: census, structure and behaviour
 // ---------------------------------------------------------------------------
+
+const QUIET_LOGGER = { log() {}, warn() {}, error() {}, debug() {}, verbose() {}, fatal() {} };
+
+/**
+ * A deep, permissive stand-in for a dependency: every property is itself,
+ * every call returns itself, it is not thenable, iterates as empty and
+ * stringifies. Used only for the CONTROL runs, where the question is "does this
+ * scheduler arm a timer at all", not what its work does.
+ */
+function permissive(): any {
+  const target = function stub() {};
+  const p: any = new Proxy(target, {
+    get(_t, prop) {
+      if (prop === 'then') return undefined;
+      if (prop === Symbol.toPrimitive) return () => 0;
+      if (prop === Symbol.iterator) return function* empty() {};
+      if (typeof prop === 'symbol') return undefined;
+      return p;
+    },
+    apply: () => p,
+    construct: () => p,
+  });
+  return p;
+}
+
+/**
+ * A `this` for onModuleInit built from the class prototype (no constructor
+ * runs). It hands out a silent logger, keeps what onModuleInit assigns, and
+ * records every other property read. Strict: the read throws (the disabled runs
+ * must read nothing but the logger). Permissive: prototype methods run for real
+ * and anything else is a permissive() stand-in (the control runs).
+ */
+function schedulerSelf(proto: Record<string, unknown>, mode: 'strict' | 'permissive') {
+  const reads: string[] = [];
+  const own = new Map<PropertyKey, unknown>();
+  const self: any = new Proxy(Object.create(proto), {
+    get(t, prop, receiver) {
+      if (prop === 'then') return undefined;
+      if (prop === 'logger') return QUIET_LOGGER;
+      if (own.has(prop)) return own.get(prop);
+      if (typeof prop === 'symbol') return Reflect.get(t, prop, receiver);
+      reads.push(prop);
+      if (mode === 'strict') throw new Error(`onModuleInit touched this.${prop}`);
+      const fromProto = proto[prop];
+      return typeof fromProto === 'function' ? (fromProto as (...a: unknown[]) => unknown).bind(self) : permissive();
+    },
+    set(_t, prop, value) {
+      own.set(prop, value);
+      return true;
+    },
+  });
+  return { self, reads };
+}
+
+/** The exported class of a scheduler file whose prototype defines `method`. */
+async function exportedClassWith(abs: string, method: string): Promise<{ name: string; prototype: Record<string, unknown> } | undefined> {
+  const mod = (await import(abs)) as Record<string, unknown>;
+  return Object.values(mod).find(
+    (v): v is { name: string; prototype: Record<string, unknown> } =>
+      typeof v === 'function' && typeof (v as { prototype?: Record<string, unknown> }).prototype?.[method] === 'function',
+  );
+}
+
+/** Timers onModuleInit arms (fake clock, nothing fires), and what it read off `this`. */
+async function initRun(proto: Record<string, unknown>, mode: 'strict' | 'permissive'): Promise<{ armed: number; reads: string[]; error?: string }> {
+  const { self, reads } = schedulerSelf(proto, mode);
+  vi.useFakeTimers();
+  let error: string | undefined;
+  try {
+    await (proto.onModuleInit as () => unknown).call(self);
+  } catch (e) {
+    error = (e as Error).message;
+  }
+  const armed = vi.getTimerCount();
+  vi.clearAllTimers();
+  vi.useRealTimers();
+  return { armed, reads, error };
+}
 
 describe('census: every OnModuleInit interval scheduler in apps/server/src', () => {
   const all = intervalSchedulers();
 
-  it('the scan is non-empty and sees both gated and ungated schedulers (gate-vacuity control)', () => {
-    expect(all.length).toBeGreaterThan(40);
-    expect(all.filter((s) => s.honours).length).toBeGreaterThanOrEqual(10);
-    // The legacy spelling is recognised: invoice-overdue has honoured DISABLE_SCHEDULERS since before V1-24.
-    expect(all.find((s) => s.file === 'src/modules/commerce/invoice-overdue.scheduler.ts')?.honours).toBe(true);
+  it('the scan is non-empty and sees every scheduler class the V1-24 census counted (gate-vacuity control)', () => {
+    // 48 at the V1-24b base: 34 ungated, 10 on the legacy DISABLE_SCHEDULERS spelling, the 4 V1-24 ones.
+    expect(all.length).toBeGreaterThanOrEqual(48);
     for (const f of PACKET_SCHEDULERS) expect(all.map((s) => s.file)).toContain(f);
+    for (const f of [
+      'src/modules/crm/crm-data-quality.scheduler.ts',
+      'src/core/connectors/connector-sync-scheduler.service.ts',
+      'src/modules/calendar/calendar-insight-scheduler.service.ts',
+      'src/modules/commerce/invoice-overdue.scheduler.ts',
+    ]) {
+      expect(all.map((s) => s.file)).toContain(f);
+    }
   });
 
-  it('ratchet: no scheduler outside the pinned list ignores DISABLE_SCHEDULERS, and every pinned entry is still ungated (remove it when fixed)', () => {
+  it('ratchet: the pinned list of ungated schedulers is empty, and nothing outside it ignores DISABLE_SCHEDULERS (V1-24b)', () => {
     const ungatedOutside = all.filter((s) => !s.honours && !PACKET_SCHEDULERS.includes(s.file)).map((s) => s.file);
     expect(ungatedOutside.filter((f) => !KNOWN_UNGATED_OUTSIDE_WRITE_SET.includes(f))).toEqual([]);
     expect(KNOWN_UNGATED_OUTSIDE_WRITE_SET.filter((f) => !ungatedOutside.includes(f))).toEqual([]);
-    expect(KNOWN_UNGATED_OUTSIDE_WRITE_SET.length).toBeGreaterThan(0);
+    expect(KNOWN_UNGATED_OUTSIDE_WRITE_SET).toEqual([]);
   });
 
-  it.todo(
-    'every OnModuleInit interval scheduler honours DISABLE_SCHEDULERS: the 34 in KNOWN_UNGATED_OUTSIDE_WRITE_SET are outside the V1-24 write set (follow-up packet; the packet named only four)',
-  );
+  it('structurally, `if (schedulersDisabled())` is the first statement of every onModuleInit that arms an interval (the legacy DISABLE_SCHEDULERS spelling does not honour KF_DISABLE_SCHEDULERS or the test opt-in)', () => {
+    const notFirst = all.filter((s) => !SCHEDULER_GUARD_FIRST.test(s.init)).map((s) => s.file);
+    expect(notFirst).toEqual([]);
+  });
 
-  it('own flags still honoured (additive): every scheduler that read a per-scheduler or KF_ flag still reads it', () => {
+  async function schedulerProtos(): Promise<Array<{ file: string; proto: Record<string, unknown> }>> {
+    const out: Array<{ file: string; proto: Record<string, unknown> }> = [];
+    for (const s of all) {
+      const cls = await exportedClassWith(join(SERVER_ROOT, s.file), 'onModuleInit');
+      expect(cls, `${s.file}: no exported class has onModuleInit`).toBeDefined();
+      out.push({ file: s.file, proto: cls!.prototype });
+    }
+    return out;
+  }
+
+  for (const [label, switches] of [
+    ['DISABLE_SCHEDULERS=1 (NODE_ENV=production)', { NODE_ENV: 'production', DISABLE_SCHEDULERS: '1' }],
+    ['KF_DISABLE_SCHEDULERS=1 (NODE_ENV=production)', { NODE_ENV: 'production', KF_DISABLE_SCHEDULERS: '1' }],
+    ["NODE_ENV==='test' alone (every integration app, in-process or spawned)", { NODE_ENV: 'test' }],
+  ] as const) {
+    it(`${label}: no scheduler arms a timer or reads anything but its logger`, async () => {
+      const protos = await schedulerProtos();
+      expect(protos.length).toBeGreaterThanOrEqual(48);
+      const ticking: string[] = [];
+      for (const { file, proto } of protos) {
+        setSwitches(switches);
+        const run = await initRun(proto, 'strict');
+        if (run.armed > 0 || run.reads.length > 0) ticking.push(`${file}: armed ${run.armed}, read ${run.reads.join(',') || 'nothing'}`);
+      }
+      expect(ticking).toEqual([]);
+    }, 120_000);
+  }
+
+  for (const [label, switches] of [
+    ['no switch set (NODE_ENV=production)', { NODE_ENV: 'production' }],
+    ['NODE_ENV=test with the explicit opt-in ENABLE_SCHEDULERS_IN_TEST=1', { NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1' }],
+  ] as const) {
+    it(`control, ${label}: every scheduler arms a timer, so "no timer" above is a real answer`, async () => {
+      const protos = await schedulerProtos();
+      const silent: string[] = [];
+      for (const { file, proto } of protos) {
+        setSwitches(switches);
+        const run = await initRun(proto, 'permissive');
+        if (run.armed === 0) silent.push(`${file}${run.error ? ` (threw: ${run.error})` : ''}`);
+      }
+      expect(silent).toEqual([]);
+    }, 120_000);
+  }
+
+  it('own flags still honoured (additive): every scheduler that read a per-scheduler flag still reads it', () => {
     expect(OWN_FLAGS.length).toBeGreaterThan(5);
     const missing = OWN_FLAGS.filter(([file, flag]) => !readFileSync(join(SERVER_ROOT, file), 'utf8').includes(`process.env.${flag}`)).map(
       ([file, flag]) => `${file}: ${flag}`,
@@ -452,8 +604,148 @@ describe('census: every OnModuleInit interval scheduler in apps/server/src', () 
 });
 
 // ---------------------------------------------------------------------------
+// timers armed outside onModuleInit
+// ---------------------------------------------------------------------------
+
+/**
+ * Timers armed outside onModuleInit that are NOT schedulers: in-process
+ * housekeeping that touches no database, sends nothing and calls no provider,
+ * or a security control that must run in tests. Every other file that arms an
+ * interval outside onModuleInit must call schedulersDisabled().
+ */
+const IN_PROCESS_TIMERS: Record<string, string> = {
+  'src/core/scheduling/safe-interval.ts': 'the safeInterval helper itself',
+  'src/modules/ai/ai-usage.service.ts': 'prunes the in-memory per-business rate-limit map',
+  'src/modules/key-cortex/key-cortex-executor.service.ts': 'prunes the in-memory pending-approvals map',
+  'src/modules/social/social-connections.service.ts': 'prunes the in-memory OAuth session map',
+  'src/modules/key-cortex/key-cortex.gateway.ts':
+    'the WebSocket live-revocation re-check (R0-W): a security control, measured by identity-boundary ST-WS-R1, that must run in tests',
+};
+
+/** Source text with comments removed (URLs survive: `//` after `:` is kept). */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+}
+
+function timersOutsideOnModuleInit(): Array<{ file: string; gated: boolean }> {
+  const out: Array<{ file: string; gated: boolean }> = [];
+  for (const abs of sourceFiles(SRC)) {
+    let src = stripComments(readFileSync(abs, 'utf8'));
+    const m = ON_MODULE_INIT.exec(src);
+    if (m) src = src.replace(braceBlock(src, m.index), '{}');
+    if (!ARMS_INTERVAL.test(src)) continue;
+    out.push({ file: posix(abs), gated: /\bschedulersDisabled\s*\(/.test(src) });
+  }
+  return out.sort((a, b) => a.file.localeCompare(b.file));
+}
+
+describe('census: intervals armed outside onModuleInit (constructors, helpers)', () => {
+  const found = timersOutsideOnModuleInit();
+
+  it('the scan is non-empty and finds the in-process housekeeping timers (gate-vacuity control)', () => {
+    expect(found.length).toBeGreaterThanOrEqual(6);
+    for (const f of Object.keys(IN_PROCESS_TIMERS)) expect(found.map((t) => t.file)).toContain(f);
+    expect(found.map((t) => t.file)).toContain('src/modules/flow/cross-module-agent.service.ts');
+  });
+
+  it('every one is either gated by schedulersDisabled() or named in IN_PROCESS_TIMERS with why it is not a scheduler', () => {
+    const ungated = found.filter((t) => !t.gated && !(t.file in IN_PROCESS_TIMERS)).map((t) => t.file);
+    expect(ungated).toEqual([]);
+    expect(Object.keys(IN_PROCESS_TIMERS).filter((f) => !found.some((t) => t.file === f)), 'listed but no longer arms a timer').toEqual([]);
+  });
+
+  it('behaviourally, the cross-module agent job poller (armed in its constructor) arms nothing under NODE_ENV=test or DISABLE_SCHEDULERS, and arms with the opt-in (control)', async () => {
+    const cls = (await exportedClassWith(join(SRC, 'modules/flow/cross-module-agent.service.ts'), 'onModuleDestroy')) as unknown as new (
+      ...a: unknown[]
+    ) => { onModuleDestroy(): void };
+    expect(cls).toBeDefined();
+    const armedUnder = (switches: Partial<Record<(typeof SWITCHES)[number], string>>) => {
+      setSwitches(switches);
+      vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      vi.useFakeTimers();
+      const svc = new cls(permissive(), permissive(), permissive(), null, permissive());
+      const armed = vi.getTimerCount();
+      svc.onModuleDestroy();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+      return armed;
+    };
+    expect(armedUnder({ NODE_ENV: 'test' })).toBe(0);
+    expect(armedUnder({ NODE_ENV: 'production', DISABLE_SCHEDULERS: '1' })).toBe(0);
+    expect(armedUnder({ NODE_ENV: 'production', KF_DISABLE_SCHEDULERS: '1' })).toBe(0);
+    expect(armedUnder({ NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1' })).toBeGreaterThan(0);
+    expect(armedUnder({ NODE_ENV: 'production' })).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // cortex @Cron handlers
 // ---------------------------------------------------------------------------
+
+/** Every `@Cron(` / `@Interval(` / `@Timeout(` handler under `dir`, past any comments and stacked decorators. */
+function scheduledHandlers(dir: string, decorators: RegExp): CronHandler[] {
+  const out: CronHandler[] = [];
+  for (const abs of sourceFiles(dir)) {
+    const src = readFileSync(abs, 'utf8');
+    const re = new RegExp(`^\\s*@(?:${decorators.source})\\(`, 'gm');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      let i = closeParen(src, src.indexOf('(', m.index));
+      // Skip whitespace, comments and further decorators up to the method signature.
+      for (;;) {
+        const rest = src.slice(i);
+        const trivia = /^(?:\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\/)/.exec(rest);
+        if (trivia && trivia[0].length > 0) {
+          i += trivia[0].length;
+          continue;
+        }
+        const deco = /^@[A-Za-z0-9_.]+/.exec(rest);
+        if (deco) {
+          i += deco[0].length;
+          if (src[i] === '(') i = closeParen(src, i);
+          continue;
+        }
+        break;
+      }
+      const sig = /^(?:public\s+)?(?:async\s+)?([A-Za-z0-9_]+)\s*\(/.exec(src.slice(i));
+      if (!sig) continue;
+      const paramsOpen = i + sig[0].length - 1;
+      const paramsClose = closeParen(src, paramsOpen);
+      out.push({ file: posix(abs), abs, method: sig[1], body: braceBlock(src, paramsClose) });
+    }
+  }
+  return out.sort((a, b) => `${a.file}#${a.method}`.localeCompare(`${b.file}#${b.method}`));
+}
+
+/** `{`, any comment lines, then `if (schedulersDisabled()) return` or `if (keyCronsDisabled()) return` first. */
+const SCHEDULED_GUARD_FIRST =
+  /^\{\s*(?:\/\/[^\n]*\n\s*|\/\*[\s\S]*?\*\/\s*)*if\s*\(\s*(?:schedulersDisabled|keyCronsDisabled)\(\)\s*\)\s*(?:\{\s*)?return\b/;
+
+async function handlerFns(handlers: CronHandler[]): Promise<Array<{ id: string; fn: (...a: unknown[]) => unknown }>> {
+  const out: Array<{ id: string; fn: (...a: unknown[]) => unknown }> = [];
+  for (const h of handlers) {
+    const owner = await exportedClassWith(h.abs, h.method);
+    expect(owner, `${h.file}: no exported class has ${h.method}`).toBeDefined();
+    out.push({ id: `${h.file}#${h.method}`, fn: owner!.prototype[h.method] as (...a: unknown[]) => unknown });
+  }
+  return out;
+}
+
+async function readsUnder(
+  fns: Array<{ id: string; fn: (...a: unknown[]) => unknown }>,
+  switches: Partial<Record<(typeof SWITCHES)[number], string>>,
+): Promise<{ touched: string[]; silent: string[] }> {
+  const touched: string[] = [];
+  const silent: string[] = [];
+  for (const { id, fn } of fns) {
+    setSwitches(switches);
+    const t = trap();
+    await runOn(fn, t.self);
+    if (t.reads.length > 0) touched.push(`${id} read this.${t.reads[0]}`);
+    else silent.push(id);
+  }
+  return { touched, silent };
+}
 
 describe('every cortex @Cron handler returns early with KEY off', () => {
   const handlers = cortexCronHandlers();
@@ -469,58 +761,70 @@ describe('every cortex @Cron handler returns early with KEY off', () => {
     expect(unguarded).toEqual([]);
   });
 
-  async function cronFns(): Promise<Array<{ id: string; fn: (...a: unknown[]) => unknown }>> {
-    const out: Array<{ id: string; fn: (...a: unknown[]) => unknown }> = [];
-    for (const h of handlers) {
-      const mod = (await import(h.abs)) as Record<string, unknown>;
-      const owner = Object.values(mod).find(
-        (v): v is { prototype: Record<string, unknown> } =>
-          typeof v === 'function' && typeof (v as { prototype?: Record<string, unknown> }).prototype?.[h.method] === 'function',
-      );
-      expect(owner, `${h.file}: no exported class has ${h.method}`).toBeDefined();
-      out.push({ id: `${h.file}#${h.method}`, fn: owner!.prototype[h.method] as (...a: unknown[]) => unknown });
-    }
-    return out;
-  }
-
-  it('control: with neither KEY_DISABLED nor a scheduler switch set, every handler reads its service (so "no read" below is a real answer)', async () => {
-    setSwitches({ NODE_ENV: 'test' });
-    const fns = await cronFns();
+  it('control: with no switch set (NODE_ENV=test plus the explicit opt-in ENABLE_SCHEDULERS_IN_TEST=1), every handler reads its service (so "no read" below is a real answer)', async () => {
+    const fns = await handlerFns(handlers);
     expect(fns.length).toBeGreaterThanOrEqual(16);
-    const silent: string[] = [];
-    for (const { id, fn } of fns) {
-      const t = trap();
-      await runOn(fn, t.self);
-      if (t.reads.length === 0) silent.push(id);
-    }
+    const { silent } = await readsUnder(fns, { NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1' });
     expect(silent).toEqual([]);
   }, 60_000);
 
-  it('KEY_DISABLED=1: every handler returns without reading anything from its service (no business scan, no model call)', async () => {
-    setSwitches({ NODE_ENV: 'test', KEY_DISABLED: '1' });
-    const fns = await cronFns();
+  it('KEY_DISABLED=1 alone (NODE_ENV=production, or NODE_ENV=test with the opt-in): every handler returns without reading anything from its service (no business scan, no model call)', async () => {
+    const fns = await handlerFns(handlers);
     expect(fns.length).toBeGreaterThanOrEqual(16);
-    const touched: string[] = [];
-    for (const { id, fn } of fns) {
-      const t = trap();
-      await runOn(fn, t.self);
-      if (t.reads.length > 0) touched.push(`${id} read this.${t.reads[0]}`);
-    }
-    expect(touched).toEqual([]);
+    expect((await readsUnder(fns, { NODE_ENV: 'production', KEY_DISABLED: '1' })).touched).toEqual([]);
+    expect((await readsUnder(fns, { NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1', KEY_DISABLED: '1' })).touched).toEqual([]);
   }, 60_000);
 
   it('DISABLE_SCHEDULERS=1 stops them too (one switch for every scheduler)', async () => {
-    setSwitches({ NODE_ENV: 'production', DISABLE_SCHEDULERS: '1' });
-    const fns = await cronFns();
+    const fns = await handlerFns(handlers);
     expect(fns.length).toBeGreaterThanOrEqual(16);
-    const touched: string[] = [];
-    for (const { id, fn } of fns) {
-      const t = trap();
-      await runOn(fn, t.self);
-      if (t.reads.length > 0) touched.push(`${id} read this.${t.reads[0]}`);
-    }
-    expect(touched).toEqual([]);
+    expect((await readsUnder(fns, { NODE_ENV: 'production', DISABLE_SCHEDULERS: '1' })).touched).toEqual([]);
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// every @Cron / @Interval / @Timeout handler in apps/server/src (V1-24b)
+// ---------------------------------------------------------------------------
+
+describe('every @Cron, @Interval and @Timeout handler in apps/server/src honours the scheduler switches (V1-24b)', () => {
+  const handlers = scheduledHandlers(SRC, /Cron|Interval|Timeout/);
+
+  it('the scan is non-empty: the 16 cortex @Cron handlers plus the @Interval ticks and the @Cron handlers outside the cortex (gate-vacuity control)', () => {
+    expect(handlers.length).toBeGreaterThanOrEqual(30);
+    expect(handlers.filter((h) => !h.file.startsWith('src/modules/key-cortex/')).length).toBeGreaterThanOrEqual(13);
+    for (const f of [
+      'src/modules/analytics/analytics-scheduler.service.ts',
+      'src/modules/whatsapp/whatsapp.service.ts',
+      'src/modules/intelligence/scheduled-scans.service.ts',
+      'src/modules/key-cortex/key-cortex-realtime.service.ts',
+    ]) {
+      expect(handlers.map((h) => h.file)).toContain(f);
+    }
+    expect(handlers.every((h) => h.body.startsWith('{'))).toBe(true);
+  });
+
+  it('structurally, the guard (schedulersDisabled(), or keyCronsDisabled() which includes it) is the first statement of every handler', () => {
+    const unguarded = handlers.filter((h) => !SCHEDULED_GUARD_FIRST.test(h.body)).map((h) => `${h.file}#${h.method}`);
+    expect(unguarded).toEqual([]);
+  });
+
+  it('control: NODE_ENV=test with the explicit opt-in ENABLE_SCHEDULERS_IN_TEST=1, every handler reads its service', async () => {
+    const fns = await handlerFns(handlers);
+    const { silent } = await readsUnder(fns, { NODE_ENV: 'test', ENABLE_SCHEDULERS_IN_TEST: '1' });
+    expect(silent).toEqual([]);
+  }, 60_000);
+
+  for (const [label, switches] of [
+    ["NODE_ENV==='test' alone (an integration app that boots ScheduleModule)", { NODE_ENV: 'test' }],
+    ['DISABLE_SCHEDULERS=1 (NODE_ENV=production)', { NODE_ENV: 'production', DISABLE_SCHEDULERS: '1' }],
+    ['KF_DISABLE_SCHEDULERS=1 (NODE_ENV=production)', { NODE_ENV: 'production', KF_DISABLE_SCHEDULERS: '1' }],
+  ] as const) {
+    it(`${label}: every handler returns without reading anything from its service`, async () => {
+      const fns = await handlerFns(handlers);
+      expect(fns.length).toBeGreaterThanOrEqual(30);
+      expect((await readsUnder(fns, switches)).touched).toEqual([]);
+    }, 60_000);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -574,7 +878,13 @@ describe('KEY_DISABLED coverage: every direct AI provider path outside the gatew
     expect(new Set(notCovered).size).toBe(notCovered.length);
   });
 
-  it.todo(
-    'every direct AI provider path refuses while KEY_DISABLED is set (directOpenAiKey()/requireDirectOpenAiKey() in ai-usage.service.ts, the KEY voice and document OpenAI clients, the phone realtime bridge, ElevenLabs TTS, the diagnostics key check): all outside the V1-24 write set (follow-up packet); until then KEY_DISABLED_NOT_COVERED and the boot line name them',
-  );
+  // V1-24b (SEC-V124-1): the it.todo that stood here. Every direct path reads
+  // keyDisabled(); the refusal itself (no client built, no provider reached,
+  // the KEY-disabled 503 or the path's own refusal) is proven per path in
+  // ai-usage.service.spec.ts.
+  it('every direct AI provider path reads keyDisabled(), so KEY_DISABLED_NOT_COVERED is empty (V1-24b, SEC-V124-1)', () => {
+    const ungated = all.filter((p) => !p.gated && p.file !== GATEWAY_FILE).map((p) => p.file);
+    expect(ungated).toEqual([]);
+    expect(KEY_DISABLED_NOT_COVERED).toEqual([]);
+  });
 });
