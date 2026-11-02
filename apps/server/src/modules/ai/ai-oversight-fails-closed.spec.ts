@@ -173,6 +173,45 @@ describe('a governance read that fails does not become a permissive policy', () 
   });
 });
 
+describe('a caller-supplied mode cannot lift a degraded read', () => {
+  // flow-orchestrator autoExecuteToolForMonitoring calls
+  // evaluate(businessId, toolName, 'pro_auto'). The degraded object has empty
+  // blocklists, so if the explicit mode replaced the degraded 'restricted' the
+  // tool would be auto-approved by a policy nobody could read.
+  for (const tool of ['draft_followup_message', 'payments_refund_charge']) {
+    it(`denies ${tool} under 'pro_auto' when the typed read fails and legacy bans it`, async () => {
+      const prisma = makePrisma({
+        typedReadThrows: true,
+        policy: { mode: 'pro_auto', maxAutoTier: 4, blockedTools: [tool], blockedModules: ['payments', 'crm'] },
+      });
+
+      const decision = await makeService(prisma).evaluate('biz_1', tool, 'pro_auto');
+
+      expect(decision.allowed, decision.reason).toBe(false);
+      expect(decision.reason).toMatch(/could not be read/);
+    });
+  }
+
+  it("denies under 'pro_auto' when both settings reads fail", async () => {
+    const decision = await makeService(makePrisma({ readThrows: true }))
+      .evaluate('biz_1', 'draft_followup_message', 'pro_auto');
+
+    expect(decision.allowed, decision.reason).toBe(false);
+    expect(decision.reason).toMatch(/could not be read/);
+  });
+
+  it("still lets 'pro_auto' auto-approve a tier-1 tool when the read succeeded with no policy", async () => {
+    // Positive control: the refusal is about the failed read, not the mode.
+    const service = makeService(makePrisma());
+    expect(service.getToolTier('draft_followup_message')).toBe(1);
+
+    const decision = await service.evaluate('biz_1', 'draft_followup_message', 'pro_auto');
+
+    expect(decision.allowed, decision.reason).toBe(true);
+    expect(decision.requiresQuickConfirm).toBe(false);
+  });
+});
+
 describe('a settings save never overwrites a policy it could not read', () => {
   it('refuses policy and audit writes even when legacy succeeds after a typed read failure', async () => {
     const prisma = makePrisma({

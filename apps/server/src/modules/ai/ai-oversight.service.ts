@@ -242,6 +242,15 @@ export class AiOversightService {
       return { ...blocked, reason: `Module "${module}" is blocked by business settings` };
     }
 
+    // A policy that could not be read refuses here, BEFORE a caller-supplied
+    // mode can replace the degraded 'restricted'. The degraded object carries
+    // empty blocklists, so the mode is the only thing denying; letting
+    // `mode || settings.mode` override it (autoExecuteToolForMonitoring passes
+    // 'pro_auto') turned an unknown policy into an auto-approval.
+    if (businessSettings.degraded) {
+      return { ...blocked, reason: 'AI governance settings could not be read — no actions allowed until they can be' };
+    }
+
     const effectiveMode = (mode as AutonomySettings['mode']) || settings.mode;
 
     if (effectiveMode === 'restricted') {
@@ -366,6 +375,12 @@ export class AiOversightService {
 
     // Legacy policy is authoritative only after a confirmed absence of the
     // typed row. A successful legacy read cannot resolve a failed typed read.
+    //
+    // Known gap, NOT settled here: updateAutonomySettings writes only this
+    // AiMemory row, so for a business that has a typed row (seedForBusiness
+    // creates one) a governance update, the web pause included, does not
+    // change the policy read above. Which store is authoritative is an
+    // architecture decision routed to V1-24-KEY-KILL-SWITCHES.
     try {
       const memory = await client.aiMemory.findUnique({
         where: { businessId_category_key: { businessId, category: 'settings', key: 'autonomy' } },
@@ -384,9 +399,10 @@ export class AiOversightService {
     if (readFailed) {
       // FAIL CLOSED. Not knowing the policy is not the same as there being no
       // policy, and acting outside a business's stated limits is worse than not
-      // acting. 'restricted' makes evaluate() refuse every tool with a stated
-      // reason (:151), which surfaces as a blocked action rather than as an
-      // unpoliced one.
+      // acting. evaluate() refuses every tool on `degraded` before any
+      // caller-supplied mode is applied, and 'restricted' keeps any other
+      // reader of the mode from treating it as actionable. Either surfaces as a
+      // blocked action rather than as an unpoliced one.
       //
       // At least one required read failed; a legacy row cannot clear that
       // uncertainty about a potentially more restrictive typed policy.
