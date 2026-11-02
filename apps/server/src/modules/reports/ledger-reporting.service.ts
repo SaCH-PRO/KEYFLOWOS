@@ -105,6 +105,12 @@ export interface DimensionRow {
 const D = Prisma.Decimal;
 const ZERO = new D(0);
 const CASH_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR', 'CREDIT_CARD']);
+/**
+ * Transaction statuses that are in the books. PostingService.reverse never
+ * edits an original: it marks it REVERSED and posts a mirrored REVERSAL, and
+ * the two net to zero only when both are read (V1-15 review CR-1).
+ */
+const BOOKED_TRANSACTION_STATUSES = ['POSTED', 'REVERSED'];
 
 function toNum(d: Prisma.Decimal | number | string | null | undefined): number {
   if (d == null) return 0;
@@ -120,6 +126,16 @@ function toNum(d: Prisma.Decimal | number | string | null | undefined): number {
  * Cash basis filter: only count entries whose parent FinancialTransaction
  * also touched a Cash/Bank/Processor/Credit-Card account. This produces
  * the classic cash-only revenue/expense view from a single ledger.
+ *
+ * Reversals (V1-15 review CR-1): a reversed original stays in the books
+ * beside its REVERSAL, which mirrors its entries and is dated when it was
+ * made. Every reader here must see both so the pair nets to zero over a
+ * range covering both, while each period keeps its own side. The
+ * LedgerEntry aggregations (accrual P&L, cashflow, balance sheet, tax,
+ * revenue/expense breakdowns, AP aging) carry no status filter, so they
+ * already read both. computeCashBasisPnl is the one transaction-level
+ * reader: it reads BOOKED_TRANSACTION_STATUSES and classifies a REVERSAL
+ * as the mirror of its original.
  */
 @Injectable()
 export class LedgerReportingService {
@@ -171,6 +187,13 @@ export class LedgerReportingService {
    *    composition.
    *  • Pure asset swaps (e.g. Cash↔Inventory) carry no income/expense
    *    leg under cash basis and are skipped.
+   *  • A REVERSAL (reversalOfId set) mirrors its original's entries, so
+   *    its cash moves the other way: it is classified as its original
+   *    was (a refunded collection is negative income traced to the
+   *    invoice, a reversed bill payment negative expense traced to the
+   *    bill) and its signed amounts offset the original's. The traced
+   *    composition is the document's own postings, never their
+   *    reversals, so a voided bill still allocates its payment.
    */
   private async computeCashBasisPnl(
     businessId: string,
@@ -187,7 +210,9 @@ export class LedgerReportingService {
     const txns = await this.prisma.client.financialTransaction.findMany({
       where: {
         businessId,
-        status: 'POSTED',
+        // POSTED and REVERSED: a reversed original and its REVERSAL net to zero (V1-15 review CR-1).
+        // Under AND because the hermetic ledger-reporting.service.spec.ts stub matches `status` by equality.
+        AND: [{ status: { in: BOOKED_TRANSACTION_STATUSES } }],
         date: { gte: from, lte: to },
         entries: { some: { account: { systemKey: { in: Array.from(CASH_KEYS) } } } },
       },
@@ -195,6 +220,7 @@ export class LedgerReportingService {
         id: true,
         sourceType: true,
         sourceId: true,
+        reversalOfId: true,
         entries: {
           select: {
             accountId: true,
@@ -256,6 +282,9 @@ export class LedgerReportingService {
       ? await this.prisma.client.financialTransaction.findMany({
           where: {
             businessId,
+            // The document's own composition: its reversals would net it to
+            // zero and leave a reversed payment nothing to allocate against.
+            reversalOfId: null,
             OR: [
               ...(invoiceIds.length ? [{ sourceType: 'Invoice', sourceId: { in: invoiceIds } }] : []),
               ...(billIds.length ? [{ sourceType: 'Expense', sourceId: { in: billIds } }] : []),
@@ -322,8 +351,12 @@ export class LedgerReportingService {
         continue;
       }
 
+      // A REVERSAL mirrors its original, so its cash moves the other way;
+      // the allocations below are signed and offset the original's.
+      const settlementSign = t.reversalOfId ? -1 : 1;
+
       // Customer payment settling AR — trace to invoice and allocate.
-      if (touchesAR && cashEffect > 0 && t.sourceType === 'Payment' && t.sourceId) {
+      if (touchesAR && settlementSign * cashEffect > 0 && t.sourceType === 'Payment' && t.sourceId) {
         const invoiceId = paymentToInvoice.get(t.sourceId);
         if (!invoiceId) continue;
         const lines = (sourceByKey.get(`Invoice:${invoiceId}`) ?? [])
@@ -340,7 +373,7 @@ export class LedgerReportingService {
       }
 
       // Vendor bill payment settling AP — trace to bill and allocate.
-      if (touchesAP && cashEffect < 0 && t.sourceType === 'Expense' && t.sourceId) {
+      if (touchesAP && settlementSign * cashEffect < 0 && t.sourceType === 'Expense' && t.sourceId) {
         const lines = (sourceByKey.get(`Expense:${t.sourceId}`) ?? [])
           .flatMap((s) => s.entries)
           .filter((e) => e.account.type === 'EXPENSE' || e.account.type === 'COGS');
