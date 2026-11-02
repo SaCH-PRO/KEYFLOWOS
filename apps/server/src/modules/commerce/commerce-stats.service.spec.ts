@@ -184,7 +184,11 @@ describe('V1-37 CommerceStatsService: per-currency figures, never a heterogeneou
     expect(s.overdueAmount).toBe(s.byCurrency.TTD.overdueAmount);
     expect(s.monthlyPaid).toBe(s.byCurrency.TTD.monthlyPaid);
     expect(s.averageInvoiceValue).toBe(s.byCurrency.TTD.averageInvoiceValue);
-    expect(s.invoiceStatusBreakdown).toEqual(s.byCurrency.TTD.invoiceStatusBreakdown);
+    // V1-37 review (RV37-03): the top-level breakdown's counts are whole-business
+    // (CS-07); its totals are the business currency's money only.
+    for (const [status, entry] of Object.entries<any>(s.invoiceStatusBreakdown)) {
+      expect(entry.total, `${status} total`).toBe(s.byCurrency.TTD.invoiceStatusBreakdown[status]?.total ?? 0);
+    }
     expect(s.topProducts).toEqual(s.byCurrency.TTD.topProducts);
     expect(s.revenueByMonth).toEqual(s.byCurrency.TTD.revenueByMonth);
 
@@ -238,5 +242,34 @@ describe('V1-37 CommerceStatsService: per-currency figures, never a heterogeneou
     expect(s.quoteCount).toBe(2);
     expect(s.productCount).toBe(3);
     expect(s.quoteConversionRate).toBe(50);
+  });
+
+  it('CS-07 (review RV37-03): the top-level status counts are whole-business; the totals stay in the business currency', async () => {
+    // A TTD business with a TTD SENT invoice, a USD OVERDUE one and a USD DRAFT
+    // one: the KPI strip, the billing card and the insights tab read the
+    // OVERDUE, DRAFT and SENT counts from the top-level breakdown, so the USD
+    // invoices must count there, while no total adds USD money to TTD.
+    const s = await statsOf([
+      inv('t1', 'TTD', 'SENT', 40, { dueDate: future }),
+      inv('u1', 'USD', 'OVERDUE', 60, { dueDate: past }),
+      inv('u2', 'USD', 'DRAFT', 25, { dueDate: future }),
+    ]);
+    expect(s.invoiceCount).toBe(3);
+    expect(s.invoiceStatusBreakdown).toEqual({
+      SENT: { count: 1, total: 40 },
+      OVERDUE: { count: 1, total: 0 },
+      DRAFT: { count: 1, total: 0 },
+    });
+    expect(s.byCurrency.USD.invoiceStatusBreakdown).toEqual({ OVERDUE: { count: 1, total: 60 }, DRAFT: { count: 1, total: 25 } });
+    expect(s.byCurrency.TTD.invoiceStatusBreakdown).toEqual({ SENT: { count: 1, total: 40 } });
+
+    const m = await statsOf(MIXED);
+    expect(m.invoiceStatusBreakdown).toEqual({
+      PAID: { count: 5, total: 115.3 },
+      SENT: { count: 1, total: 40 },
+      OVERDUE: { count: 1, total: 0 },
+    });
+    const counted = Object.values<any>(m.invoiceStatusBreakdown).reduce((n, e) => n + e.count, 0);
+    expect(counted).toBe(m.invoiceCount);
   });
 });

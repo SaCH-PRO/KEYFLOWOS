@@ -39,6 +39,19 @@
  *          account with no activity reads once, in the business currency; another tenant's
  *          rows never appear
  *
+ * Review repairs (V1-37 review):
+ *
+ *   CUR-04b (RV37-03) the top-level invoiceStatusBreakdown counts every invoice (counts are not
+ *          money); its totals stay in the business currency
+ *   CUR-08 (ST-V37-1) the currency of an issued invoice is fixed: PATCH {currency} on a SENT or
+ *          OVERDUE invoice -> 409, nothing written; restating the stored currency stays allowed;
+ *          a DRAFT may still change; the payment then posts in the invoice's own currency and
+ *          its receivable closes in that currency
+ *   CUR-09 (RV37-05) an expense in a currency the door refuses (EUR on a TTD business) fails
+ *          closed: 400 and no expense row, no ledger row (the posting runs inside the create)
+ *   it.todo: the findings whose repair lies outside the V1-37 write set (ST-V37-2, ST-V37-3 /
+ *          RV37-01, RV37-02, RV37-04), each with its reason
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed), CommerceService,
  * CommerceStatsService, InvoiceWorkflowService, RevenuePostingService,
@@ -86,6 +99,7 @@ let commerce: any;
 let posting: any;
 let coa: any;
 let ledgerBalance: any;
+let expenses: any;
 
 const eventStub = {
   emit: () => true,
@@ -109,6 +123,7 @@ async function cleanup() {
     `DELETE FROM email_campaigns WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM expenses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -213,6 +228,7 @@ beforeAll(async () => {
   const { LedgerBalanceService } = await import('../src/modules/finance/ledger-balance.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  const { ExpensesService } = await import('../src/modules/expenses/expenses.service');
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
@@ -259,6 +275,16 @@ beforeAll(async () => {
   posting = moduleRef.get(PostingService);
   coa = moduleRef.get(ChartOfAccountsSeederService);
   ledgerBalance = moduleRef.get(LedgerBalanceService);
+  // CUR-09: the real expense create (row + posting in one transaction) over the
+  // real expense-posting recipes and the real ledger door. Only the event bus
+  // and the timeline are stubs.
+  expenses = new ExpensesService(
+    moduleRef.get(PrismaService),
+    eventStub as any,
+    new ExpensePostingService(moduleRef.get(PrismaService), posting, coa),
+    { recordEvent: async () => null } as any,
+    posting,
+  );
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -410,6 +436,23 @@ describe('V1-37 per-currency figures (no heterogeneous sum)', () => {
     expect(foreign.status).toBe(403);
   }, 30_000);
 
+  it('CUR-04b (review RV37-03): the top-level status breakdown counts every invoice; its totals stay TTD', async () => {
+    // The KPI strip, the billing card and the insights tab read the OVERDUE,
+    // DRAFT and SENT counts here: the USD OVERDUE invoice is overdue on this
+    // TTD business too. Its money stays under byCurrency.USD.
+    const res = await agent().get(`/commerce/businesses/${ID.bizTtd}/stats`).set(HEADER, ID.ownerT);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const s = res.body;
+    expect(s.invoiceStatusBreakdown).toEqual({
+      PAID: { count: 3, total: 115 },
+      SENT: { count: 1, total: 40 },
+      OVERDUE: { count: 1, total: 0 },
+    });
+    const counted = Object.values<any>(s.invoiceStatusBreakdown).reduce((n, e) => n + e.count, 0);
+    expect(counted).toBe(s.invoiceCount);
+    expect(s.byCurrency.USD.invoiceStatusBreakdown).toEqual({ PAID: { count: 1, total: 250 }, OVERDUE: { count: 1, total: 60 } });
+  }, 30_000);
+
   it('CUR-05 RED-BEFORE: campaign revenue is per currency; the top level is the business currency', async () => {
     const r = await commerce.getCampaignRevenue(ID.bizTtd, ID.campaign);
     expect(r.currency).toBe('TTD');
@@ -524,4 +567,113 @@ describe('V1-37 LEDGER: the trial balance is by currency', () => {
     const own = new Set((await db.chartOfAccount.findMany({ where: { businessId: ID.bizUsd }, select: { id: true } })).map((a: any) => a.id));
     for (const r of rows) expect(own.has(r.accountId), `${r.accountId} belongs to the USD business`).toBe(true);
   }, 30_000);
+});
+
+describe('V1-37 review: the currency of an issued invoice is fixed (ST-V37-1)', () => {
+  function patchInvoice(invoiceId: string, body: Record<string, unknown>) {
+    return agent().patch(`/commerce/businesses/${ID.bizUsd}/invoices/${invoiceId}`).set(HEADER, ID.owner).send(body);
+  }
+
+  it('CUR-08a control: a DRAFT invoice may change its currency (the D-13 rule still applies)', async () => {
+    const created = await createInvoice(ID.bizUsd, ID.owner, { contactId: ID.contactU, items: [{ description: 'v37a draft switch', quantity: 1, unitPrice: 30 }] });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect(created.body.status).toBe('DRAFT');
+    const ttd = await patchInvoice(created.body.id, { currency: 'ttd' });
+    expect(ttd.status, JSON.stringify(ttd.body)).toBe(200);
+    expect(ttd.body.currency).toBe('TTD');
+    const eur = await patchInvoice(created.body.id, { currency: 'EUR' });
+    expect(eur.status, JSON.stringify(eur.body)).toBe(400);
+    expect((await db.invoice.findUnique({ where: { id: created.body.id }, select: { currency: true } })).currency).toBe('TTD');
+  }, 30_000);
+
+  it('CUR-08b: PATCH {currency} on a SENT invoice whose receivable has posted -> 409, nothing written; the payment posts in USD and the receivable closes in USD', async () => {
+    const created = await createInvoice(ID.bizUsd, ID.owner, { contactId: ID.contactU, items: [{ description: 'v37a sent switch', quantity: 1, unitPrice: 100 }] });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect(created.body.currency).toBe('USD');
+    const sent = await issue(ID.bizUsd, ID.owner, created.body.id);
+    expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+
+    const before = await ledgerCount(ID.bizUsd);
+    const switched = await patchInvoice(created.body.id, { currency: 'TTD', notes: 'v37a should not land' });
+    expect(switched.status, JSON.stringify(switched.body)).toBe(409);
+    expect(JSON.stringify(switched.body)).toMatch(/currency/i);
+    const row = await db.invoice.findUnique({ where: { id: created.body.id }, select: { currency: true, status: true, notes: true } });
+    expect(row).toEqual({ currency: 'USD', status: 'SENT', notes: null });
+    expect(await ledgerCount(ID.bizUsd)).toEqual(before);
+
+    // Restating the stored currency (any case) is not a change: an edit form may send the whole document.
+    const restated = await patchInvoice(created.body.id, { currency: 'usd', notes: 'v37a restated' });
+    expect(restated.status, JSON.stringify(restated.body)).toBe(200);
+    expect(restated.body.currency).toBe('USD');
+    expect(restated.body.notes).toBe('v37a restated');
+
+    const paid = await pay(ID.bizUsd, ID.owner, created.body.id, 100);
+    expect(paid.status, JSON.stringify(paid.body)).toBe(201);
+    const after = await db.invoice.findUnique({ where: { id: created.body.id }, select: { currency: true, status: true } });
+    expect(after).toEqual({ currency: 'USD', status: 'PAID' });
+
+    // The receivable for this invoice nets to zero in USD and never saw TTD.
+    const ar = await coa.getBySystemKey(ID.bizUsd, 'ACCOUNTS_RECEIVABLE');
+    const arRows: Array<{ currency: string; d: string; c: string }> = await db.$queryRawUnsafe(
+      `SELECT le.currency, SUM(le.debit)::text AS d, SUM(le.credit)::text AS c
+         FROM ledger_entries le JOIN financial_transactions ft ON ft.id = le.transaction_id
+        WHERE le.business_id = $1 AND le.account_id = $2
+          AND (ft.source_id = $3 OR ft.source_id IN (SELECT id FROM payments WHERE invoice_id = $3))
+        GROUP BY le.currency`,
+      ID.bizUsd, ar.id, created.body.id,
+    );
+    expect(arRows.map((r) => ({ currency: r.currency, d: Number(r.d), c: Number(r.c) }))).toEqual([{ currency: 'USD', d: 100, c: 100 }]);
+  }, 60_000);
+
+  it('CUR-08c: PATCH {currency} on an OVERDUE invoice -> 409, nothing written', async () => {
+    const created = await createInvoice(ID.bizUsd, ID.owner, { contactId: ID.contactU, items: [{ description: 'v37a overdue switch', quantity: 1, unitPrice: 45 }] });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect((await issue(ID.bizUsd, ID.owner, created.body.id)).status).toBe(200);
+    const overdue = await agent()
+      .patch(`/commerce/invoices/${created.body.id}/status/overdue`)
+      .set(HEADER, ID.owner)
+      .send({ businessId: ID.bizUsd, status: 'OVERDUE' });
+    expect(overdue.status, JSON.stringify(overdue.body)).toBe(200);
+    expect(overdue.body.status).toBe('OVERDUE');
+
+    const switched = await patchInvoice(created.body.id, { currency: 'TTD' });
+    expect(switched.status, JSON.stringify(switched.body)).toBe(409);
+    expect((await db.invoice.findUnique({ where: { id: created.body.id }, select: { currency: true } })).currency).toBe('USD');
+  }, 30_000);
+});
+
+describe('V1-37 review: an expense in a refused currency fails closed (RV37-05)', () => {
+  it('CUR-09: EUR expense on the TTD business -> 400 and no expense row and no ledger row; a TTD expense posts (control)', async () => {
+    const before = await ledgerCount(ID.bizTtd);
+    const rowsBefore = await db.expense.count({ where: { businessId: ID.bizTtd } });
+    await expect(
+      expenses.createExpense({ businessId: ID.bizTtd, description: 'v37a EUR hotel', amount: 20, currency: 'EUR' }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(await db.expense.count({ where: { businessId: ID.bizTtd } })).toBe(rowsBefore);
+    expect(await ledgerCount(ID.bizTtd)).toEqual(before);
+
+    const ok = await expenses.createExpense({ businessId: ID.bizTtd, description: 'v37a TTD supplies', amount: 20, currency: 'TTD' });
+    const txn = await db.financialTransaction.findFirst({ where: { businessId: ID.bizTtd, sourceType: 'Expense', sourceId: ok.id }, include: { entries: true } });
+    expect(txn?.currency).toBe('TTD');
+    expect(new Set(txn.entries.map((e: any) => e.currency))).toEqual(new Set(['TTD']));
+  }, 30_000);
+});
+
+describe('V1-37 review findings whose repair lies outside the V1-37 write set', () => {
+  it.todo(
+    'ST-V37-2: GET /commerce/businesses/:id/stats answers 403 to a member whose revenue scope is none ' +
+      '(needs ModuleScopeGuard + @RequireModuleScope(revenue, read) on commerce-ai.controller.ts, outside the write set)',
+  );
+  it.todo(
+    'ST-V37-3 / RV37-01: GET /finance/businesses/:id/trial-balance items carry `currency`, and the web page keys and totals ' +
+      'by (accountId, currency) (finance.controller.ts:171 projection and web finance/trial-balance/page.tsx, outside the write set)',
+  );
+  it.todo(
+    'RV37-02: getBalanceSheet lines are one per (account, currency) with their currency, never two unlabelled lines per account ' +
+      '(reports/ledger-reporting.service.ts and BooksReportView.tsx, outside the write set)',
+  );
+  it.todo(
+    'RV37-04: applyRules skips (does not abort) a bank row whose currency the posting door refuses (400) and posts the rest ' +
+      '(finance/bank-rule.service.ts catch at :236, outside the write set)',
+  );
 });

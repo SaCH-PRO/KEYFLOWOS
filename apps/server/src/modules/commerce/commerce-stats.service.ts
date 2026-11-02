@@ -76,7 +76,8 @@ export class CommerceStatsService {
    * stored invoice holds, each in its own bucket. The top-level money fields
    * (what the KPI strip and the money hub read) are the business currency's
    * bucket, named by `currency`; no figure adds two currencies. Counts that
-   * are not money (invoices, quotes, products, conversion) stay whole-business.
+   * are not money (invoices, quotes, products, conversion, and the per-status
+   * counts of the top-level invoiceStatusBreakdown) stay whole-business.
    * Sums are cents-safe (sumMoney, V1-22).
    */
   async getCommerceStats(businessId: string) {
@@ -197,6 +198,20 @@ export class CommerceStatsService {
     const quoteConversionRate = totalQuotes > 0 ? Math.round((acceptedQuotes / totalQuotes) * 100) : 0;
 
     const home = byCurrency[businessCurrency];
+    // V1-37 review (RV37-03): the top-level status breakdown keeps the
+    // whole-business count per status (a count is not money: the KPI strip,
+    // billing card and insights read OVERDUE, DRAFT and SENT counts from it),
+    // while its `total` stays the business currency's money only. A USD
+    // OVERDUE invoice on a TTD business counts as overdue there, and adds
+    // nothing to the TTD total; its money is under byCurrency.USD.
+    const invoiceStatusBreakdown: Record<string, { count: number; total: number }> = {};
+    for (const g of statusGroups) {
+      const prior = invoiceStatusBreakdown[g.status] ?? { count: 0, total: 0 };
+      invoiceStatusBreakdown[g.status] = {
+        count: prior.count + g._count.id,
+        total: home.invoiceStatusBreakdown[g.status]?.total ?? 0,
+      };
+    }
     const result = {
       currency: businessCurrency,
       totalRevenue: home.totalRevenue,
@@ -209,7 +224,7 @@ export class CommerceStatsService {
       activeProductCount,
       averageInvoiceValue: home.averageInvoiceValue,
       quoteConversionRate,
-      invoiceStatusBreakdown: home.invoiceStatusBreakdown,
+      invoiceStatusBreakdown,
       quoteStatusBreakdown,
       topProducts: home.topProducts,
       revenueByMonth: home.revenueByMonth,

@@ -3328,7 +3328,21 @@ export class CommerceService {
       updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     }
     // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
-    if (input.currency !== undefined) updateData.currency = await this.documentCurrency(input.businessId, input.currency);
+    if (input.currency !== undefined) {
+      const currency = await this.documentCurrency(input.businessId, input.currency);
+      // V1-37 review (ST-V37-1): the currency is fixed once the invoice leaves
+      // DRAFT. Issuing posts accounts receivable in the invoice's currency
+      // (accrual), and that posting is idempotent on its key, so a SENT USD
+      // invoice switched to TTD took its payment in TTD while the USD
+      // receivable stayed open for ever. Restating the stored currency is not
+      // a change (an edit form sends the whole document) and stays allowed.
+      if (currency !== normalizeCurrency(invoice.currency) && invoice.status !== 'DRAFT') {
+        throw new ConflictException(
+          `Cannot change the currency of a ${invoice.status} invoice: the currency is fixed once the invoice is issued`,
+        );
+      }
+      updateData.currency = currency;
+    }
     if (input.dueDate !== undefined) {
       updateData.dueDate = input.dueDate ? new Date(input.dueDate) : null;
     }
