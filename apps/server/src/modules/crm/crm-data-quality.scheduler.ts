@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { CrmDataQualityService } from './crm-data-quality.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 const SCAN_INTERVAL_MS = 24 * 60 * 60 * 1000; // nightly
 const STARTUP_DELAY_MS = 60 * 1000;
@@ -22,8 +23,8 @@ export class CrmDataQualityScheduler implements OnModuleInit, OnModuleDestroy {
   constructor(@Inject(CrmDataQualityService) private readonly dq: CrmDataQualityService) {}
 
   onModuleInit(): void {
-    if (process.env.KF_DISABLE_SCHEDULERS === '1') {
-      this.logger.log('Data-quality scheduler disabled via KF_DISABLE_SCHEDULERS');
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
       return;
     }
     this.startupTimer = setTimeout(() => {

@@ -35,6 +35,7 @@ import {
   quoteRejectedCustomerTemplate,
   quoteSentTemplate,
 } from './email-templates';
+import { schedulersDisabled } from '../../core/config/env';
 
 export type NotificationType =
   | 'booking_confirmed'
@@ -146,6 +147,10 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.drainInterval = setInterval(() => {
       this.drainQueue().catch((e) =>
         this.logger.error(`Queue drain failed: ${(e as Error).message}`),

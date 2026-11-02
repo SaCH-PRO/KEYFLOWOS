@@ -5,6 +5,7 @@ import { ProjectionService } from './projection.service';
 import { GrowthInsightGeneratorService } from './growth-insight-generator.service';
 import { MaturityAssessmentService } from './maturity-assessment.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
 export class AnalyticsSchedulerService {
@@ -20,6 +21,7 @@ export class AnalyticsSchedulerService {
 
   @Cron(CronExpression.EVERY_DAY_AT_1AM)
   async generateDailySnapshots() {
+    if (schedulersDisabled()) return;
     this.logger.log('Starting daily snapshot generation');
     try {
       const result = await this.engine.generateDailySnapshots();
@@ -31,6 +33,7 @@ export class AnalyticsSchedulerService {
 
   @Cron(CronExpression.EVERY_WEEK)
   async generateWeeklySnapshots() {
+    if (schedulersDisabled()) return;
     this.logger.log('Starting weekly snapshot generation');
     try {
       const result = await this.engine.generateWeeklySnapshots();
@@ -42,6 +45,7 @@ export class AnalyticsSchedulerService {
 
   @Cron('0 2 1 * *') // 1st of each month at 2 AM
   async generateMonthlySnapshots() {
+    if (schedulersDisabled()) return;
     this.logger.log('Starting monthly snapshot generation');
     try {
       const result = await this.engine.generateMonthlySnapshots();
@@ -53,6 +57,7 @@ export class AnalyticsSchedulerService {
 
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
   async generateProjections() {
+    if (schedulersDisabled()) return;
     this.logger.log('Starting projection generation');
     try {
       const businesses = await this.prisma.client.business.findMany({
@@ -75,6 +80,7 @@ export class AnalyticsSchedulerService {
 
   @Cron(CronExpression.EVERY_DAY_AT_4AM)
   async generateInsights() {
+    if (schedulersDisabled()) return;
     this.logger.log('Starting insight generation');
     try {
       const businesses = await this.prisma.client.business.findMany({
@@ -97,6 +103,7 @@ export class AnalyticsSchedulerService {
 
   @Cron('0 5 1 * *') // 1st of each month at 5 AM
   async assessMaturity() {
+    if (schedulersDisabled()) return;
     this.logger.log('Starting maturity assessment');
     try {
       const businesses = await this.prisma.client.business.findMany({

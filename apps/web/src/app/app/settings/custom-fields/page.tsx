@@ -30,6 +30,8 @@ import {
   deleteCustomFieldDefinition,
   type CustomFieldDefinition,
 } from "@/lib/client";
+import { NO_BUSINESS_SELECTED } from "@/lib/api/_defaults";
+import { useSelectedBusinessId } from "@/components/contacts/contact-custom-fields";
 import { toast } from "sonner";
 
 const FIELD_TYPES = [
@@ -69,27 +71,40 @@ const DEFAULT_FORM: FormState = {
 };
 
 export default function CustomFieldsSettingsPage() {
-  const [definitions, setDefinitions] = useState<CustomFieldDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
+  // SEC-R015c-2 (R0-15d): the page reads and writes the definitions of the
+  // member's selected business, followed while mounted. It used to name no
+  // business, and the client defaulted every call to the demo tenant: a member
+  // got 403 and a SUPER_ADMIN managed the demo tenant's definitions.
+  const businessId = useSelectedBusinessId();
+  // What was read, and for which business: another business's definitions are
+  // never shown, and an answer for a business the page moved away from is dropped.
+  const [read, setRead] = useState<{ for: string; definitions: CustomFieldDefinition[] } | null>(null);
+  const [reloads, setReloads] = useState(0);
   const [showArchived, setShowArchived] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(DEFAULT_FORM);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const res = await fetchCustomFieldDefinitions(undefined, { includeArchived: showArchived });
-    if (res.data) {
-      setDefinitions(res.data);
-    } else {
-      toast.error(res.error ?? "Failed to load custom fields");
-    }
-    setLoading(false);
-  }, [showArchived]);
+  const load = useCallback(() => setReloads((n) => n + 1), []);
 
   useEffect(() => {
-    Promise.resolve().then(() => load());
-  }, [load]);
+    if (!businessId) return;
+    let cancelled = false;
+    fetchCustomFieldDefinitions(businessId, { includeArchived: showArchived }).then((res) => {
+      if (cancelled) return;
+      if (res.data) {
+        setRead({ for: businessId, definitions: res.data });
+      } else {
+        toast.error(res.error ?? "Failed to load custom fields");
+        setRead((prev) => ({ for: businessId, definitions: prev?.for === businessId ? prev.definitions : [] }));
+      }
+    });
+    return () => { cancelled = true; };
+  }, [businessId, showArchived, reloads]);
+
+  const definitions = read && read.for === businessId ? read.definitions : [];
+  const loading = Boolean(businessId) && read?.for !== businessId;
 
   const resetForm = () => {
     setForm(DEFAULT_FORM);
@@ -134,6 +149,10 @@ export default function CustomFieldsSettingsPage() {
       toast.error("Label is required");
       return;
     }
+    if (!businessId) {
+      toast.error(NO_BUSINESS_SELECTED);
+      return;
+    }
     setIsSubmitting(true);
 
     const payload = {
@@ -148,7 +167,7 @@ export default function CustomFieldsSettingsPage() {
     };
 
     if (editingId) {
-      const res = await updateCustomFieldDefinition(editingId, payload);
+      const res = await updateCustomFieldDefinition(editingId, payload, businessId);
       if (res.data) {
         toast.success("Custom field updated");
         resetForm();
@@ -157,7 +176,7 @@ export default function CustomFieldsSettingsPage() {
         toast.error(res.error ?? "Failed to update");
       }
     } else {
-      const res = await createCustomFieldDefinition(payload as Omit<CustomFieldDefinition, "id" | "businessId" | "createdAt" | "updatedAt" | "archivedAt">);
+      const res = await createCustomFieldDefinition(payload as Omit<CustomFieldDefinition, "id" | "businessId" | "createdAt" | "updatedAt" | "archivedAt">, businessId);
       if (res.data) {
         toast.success("Custom field created");
         resetForm();
@@ -170,7 +189,11 @@ export default function CustomFieldsSettingsPage() {
   };
 
   const handleArchive = async (id: string) => {
-    const res = await archiveCustomFieldDefinition(id);
+    if (!businessId) {
+      toast.error(NO_BUSINESS_SELECTED);
+      return;
+    }
+    const res = await archiveCustomFieldDefinition(id, businessId);
     if (res.data) {
       toast.success("Archived");
       load();
@@ -180,7 +203,11 @@ export default function CustomFieldsSettingsPage() {
   };
 
   const handleRestore = async (id: string) => {
-    const res = await restoreCustomFieldDefinition(id);
+    if (!businessId) {
+      toast.error(NO_BUSINESS_SELECTED);
+      return;
+    }
+    const res = await restoreCustomFieldDefinition(id, businessId);
     if (res.data) {
       toast.success("Restored");
       load();
@@ -190,7 +217,11 @@ export default function CustomFieldsSettingsPage() {
   };
 
   const handleDelete = async (id: string) => {
-    const res = await deleteCustomFieldDefinition(id);
+    if (!businessId) {
+      toast.error(NO_BUSINESS_SELECTED);
+      return;
+    }
+    const res = await deleteCustomFieldDefinition(id, businessId);
     if (res.error === null) {
       toast.success("Deleted permanently");
       setDeleteConfirmId(null);
@@ -363,7 +394,12 @@ export default function CustomFieldsSettingsPage() {
           Active Fields ({activeDefs.length})
         </h3>
 
-        {loading ? (
+        {!businessId ? (
+          <div role="status" className="rounded-2xl border border-border/40 bg-muted/20 p-8 text-center">
+            <p className="text-sm text-muted-foreground">{NO_BUSINESS_SELECTED}.</p>
+            <p className="text-xs text-muted-foreground mt-1">Choose a business to manage its custom fields.</p>
+          </div>
+        ) : loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>

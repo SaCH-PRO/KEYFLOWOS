@@ -1,5 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { VoiceProvider, VoiceInfo } from './voice-provider.interface';
+import { keyDisabled } from '../../core/config/env';
+import { keyDisabledRefusal } from '../ai/model-gateway.service';
 
 const VOICES: VoiceInfo[] = [
   { key: '21m00Tcm4TlvDq8ikWAM', name: 'Rachel', language: 'en' },
@@ -20,6 +22,8 @@ export class ElevenLabsVoiceProvider implements VoiceProvider {
   readonly voices = VOICES;
 
   async synthesize(_businessId: string, text: string, voice?: string): Promise<Buffer> {
+    // V1-24b (SEC-V124-1): the gateway's KEY-disabled 503, before the key is read or a request is made.
+    if (keyDisabled()) throw keyDisabledRefusal();
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {
       throw new ServiceUnavailableException('ELEVENLABS_API_KEY is not configured.');

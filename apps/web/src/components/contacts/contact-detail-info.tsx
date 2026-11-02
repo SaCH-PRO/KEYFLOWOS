@@ -110,14 +110,17 @@ export function ContactDetailInfo({
   const localTime = useMemo(() => contact.timezone ? localTimeFor(contact.timezone) : null, [contact.timezone]);
 
   const persistFlag = async (field: "marketingOptIn" | "doNotContact", value: boolean) => {
-    const businessId = getStoredBusinessId() ?? undefined;
+    // SEC-R015d-1: the consent write goes to the business this contact is shown
+    // in (the one its custom fields are read from), not whatever kf_business_id
+    // says now; the selection only when no business was handed.
+    const tenant = businessId || getStoredBusinessId() || undefined;
     setSavingFlag(field === "marketingOptIn" ? "marketing" : "dnc");
     const previousMarketing = marketingOptIn;
     const previousDnc = doNotContact;
     if (field === "marketingOptIn") setMarketingOptIn(value);
     else setDoNotContact(value);
     try {
-      const res = await updateContact({ businessId, contactId: contact.id, [field]: value });
+      const res = await updateContact({ businessId: tenant, contactId: contact.id, [field]: value });
       if (res.error) throw new Error(res.error);
       toast.success(field === "marketingOptIn"
         ? value ? "Marketing opt-in enabled" : "Marketing opt-in disabled"

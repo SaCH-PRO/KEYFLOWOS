@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TaxLiabilityService } from './tax-liability.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_MS = 24 * 60 * 60 * 1000;
 
@@ -20,7 +21,7 @@ export class TaxLiabilityRollupScheduler implements OnModuleInit, OnModuleDestro
   ) {}
 
   onModuleInit(): void {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[TaxLiabilityRollup] disabled via env');
       return;
     }

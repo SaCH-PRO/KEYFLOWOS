@@ -323,10 +323,11 @@ jobs:
   # R0-25-PLAYWRIGHT-R0. The Playwright specs under apps/web/e2e had never run
   # in CI. This job runs the non-live ones with the API mocked at the network
   # edge (page.route on http://api.test.local): E2E_NO_SERVER is unset, so
-  # playwright.config.ts starts the web server itself, here `next start` on a
-  # build made with NEXT_PUBLIC_API_BASE_URL=http://api.test.local (a dev
-  # server compiles each route on first visit, past the mocked specs' 15 s
-  # navigation timeout). The live specs (release0-live, live-journey) need a
+  # playwright.config.ts starts the web server itself, here the standalone
+  # server (next.config.ts builds `output: "standalone"`, which `next start`
+  # does not serve; R0-15d) on a build made with
+  # NEXT_PUBLIC_API_BASE_URL=http://api.test.local (a dev server compiles each
+  # route on first visit, past the mocked specs' 15 s navigation timeout). The live specs (release0-live, live-journey) need a
   # real stack and run in e2e-live.yml, by hand.
   #
   # THE SPEC LIST IS EXPLICIT: the files green at this head. The other 15 files
@@ -391,7 +392,9 @@ jobs:
           e2e/auth-helpers.spec.ts
           e2e/public-flows.spec.ts
         env:
-          E2E_WEB_COMMAND: pnpm exec next start -H 0.0.0.0 -p 5000
+          # The standalone server (.next/standalone/apps/web/server.js) on 0.0.0.0
+          # and E2E_PORT (5000): playwright.config.ts webServerCommand.
+          E2E_WEB_COMMAND: standalone
 
       - name: Upload Playwright traces
         if: failure()

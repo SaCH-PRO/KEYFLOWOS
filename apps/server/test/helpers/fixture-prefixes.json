@@ -69,6 +69,11 @@
       "packet": "R0-07 / R0-SEC2-WHATSAPP-CONFIG-AUTHORITY"
     },
     {
+      "prefix": "k07p_",
+      "owner": "apps/server/test/payment-secrets-write-only.integration.test.ts",
+      "packet": "R0-07 / R0-SEC2c-PAYMENT-SECRETS-WRITE-ONLY"
+    },
+    {
       "prefix": "k08c_",
       "owner": "apps/server/test/subscriptions-authority.integration.test.ts",
       "packet": "R0-08 / R0-08c-SUBSCRIPTION-AUTHORITY"
@@ -283,6 +288,11 @@
       "legacy": true
     },
     {
+      "prefix": "v02b_",
+      "owner": "apps/server/test/key-cortex-legacy-gate-audit.integration.test.ts",
+      "packet": "V1-02 (V1-02b-KEY-LEGACY-GATE)"
+    },
+    {
       "prefix": "v03a_",
       "owner": "apps/server/test/autonomy-profile-authority.integration.test.ts",
       "packet": "V1-03-KEY-CORTEX-PRINCIPAL"
@@ -296,6 +306,11 @@
       "prefix": "v09a_",
       "owner": "apps/server/test/key-command-ask-governed.integration.test.ts",
       "packet": "V1-09-KEY-COMMAND-GOVERNED"
+    },
+    {
+      "prefix": "v09b_",
+      "owner": "apps/server/test/key-commands-read-scope.integration.test.ts",
+      "packet": "V1-09 / V1-09b-KEY-COMMANDS-READ-SCOPE"
     },
     {
       "prefix": "v10a_",
@@ -341,6 +356,11 @@
       "prefix": "v19b_",
       "owner": "apps/server/test/plan-executor-approval-resume.integration.test.ts",
       "packet": "V1-19-KEY-IDEMPOTENCY-CLAIM"
+    },
+    {
+      "prefix": "v19c_",
+      "owner": "apps/server/test/key-cortex-action-audit.integration.test.ts",
+      "packet": "V1-19 (V1-19c-CORTEX-ACTION-AUDIT-ROW)"
     },
     {
       "prefix": "v21a_",

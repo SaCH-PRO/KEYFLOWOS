@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CrmTimelineService } from '../crm/crm-timeline.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_MS = 30 * 60 * 1000;
 const ABANDON_AFTER_HOURS = 6;
@@ -28,7 +29,7 @@ export class AbandonedCheckoutScheduler implements OnModuleInit, OnModuleDestroy
   ) {}
 
   onModuleInit() {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[AbandonedCheckoutScheduler] Disabled via env');
       return;
     }

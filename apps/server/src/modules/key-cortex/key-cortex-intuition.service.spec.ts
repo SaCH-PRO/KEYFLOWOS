@@ -6,8 +6,19 @@
  * explicitly inert rather than fabricating signals, and that the ones with real
  * data query the right columns.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { KeyCortexIntuitionService } from './key-cortex-intuition.service';
+
+// V1-24b: this file calls a @Cron handler directly. Under NODE_ENV=test the
+// handlers return first (keyCronsDisabled() includes schedulersDisabled()),
+// so the file opts in explicitly; without it the sweep assertions would pass
+// without the sweep ever running.
+beforeEach(() => {
+  vi.stubEnv('ENABLE_SCHEDULERS_IN_TEST', '1');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 function makeService(rows: Record<string, unknown[]> = {}) {
   const model = (n: string) => ({

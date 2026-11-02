@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from './commerce.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 const TICK_MS = 60 * 60 * 1000; // hourly
 const TARGET_HOUR = 8; // run once per business per UTC day at ~08:00
@@ -28,7 +29,7 @@ export class QuoteStaleScheduler implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    if (process.env.DISABLE_SCHEDULERS === '1' || process.env.NODE_ENV === 'test') {
+    if (schedulersDisabled()) {
       this.logger.log('[QuoteStaleScheduler] Disabled via env');
       return;
     }

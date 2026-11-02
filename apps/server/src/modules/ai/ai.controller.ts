@@ -1285,7 +1285,8 @@ export class AiController {
         where: { id: cmd.id },
         data: { status: 'EXECUTED', executionResult: { goal: result.goal, findings: result.findings, actions: result.actions, commandItemIds: result.commandItemIds } as any },
       });
-      return result;
+      // SEC-V109b-2: what GET key/commands lists this caller for the row just written.
+      return this.keyCommand.projectDoItForMe(businessId, req.user?.id, result);
     }
 
     // ASK and PLAN modes use the traditional planning pipeline
@@ -1301,7 +1302,9 @@ export class AiController {
         where: { id: cmd.id },
         data: { status: 'PLANNED', executionResult: { goal: result.goal, findings: result.findings, actions: result.actions, commandItemIds: result.commandItemIds, mode: 'draft' } as any },
       });
-      return { commandId: cmd.id, intent, plan, riskLevel, mode, drafts: result.actions };
+      // SEC-V109b-2: the drafts GET key/commands lists this caller for the row just written.
+      const shown = await this.keyCommand.projectDoItForMe(businessId, req.user?.id, result);
+      return { commandId: cmd.id, intent, plan, riskLevel, mode, drafts: shown.actions, ...(shown.dataWithheld ? { dataWithheld: true } : {}) };
     }
 
     // PLAN mode returns the plan without executing
@@ -1321,12 +1324,10 @@ export class AiController {
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/key/commands')
   @CrmRateLimit(60, 60_000)
-  async listKeyCommands(@Param('businessId') businessId: string) {
-    return (this.prisma as any).client.keyCommand.findMany({
-      where: { businessId },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
+  async listKeyCommands(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    // SEC-V109-1 (V1-09b): a member's own rows, an OWNER/ADMIN's every row,
+    // each projected to the caller's module scopes and contact visibility.
+    return this.keyCommand.listCommands(businessId, req.user?.id);
   }
 
   // ── Briefings (Phase 7 MD) ──────────────────────────────────────────────

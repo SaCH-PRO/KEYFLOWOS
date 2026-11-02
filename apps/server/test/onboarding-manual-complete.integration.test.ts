@@ -100,7 +100,12 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import { config as loadEnv, parse as parseEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+
+// The genome-editor characterization makes several HTTP round trips (about 2s
+// alone); under the one parallel run of every suite the default 5s budget
+// times out with no assertion failing. The assertions are unchanged.
+vi.setConfig({ testTimeout: 30_000 });
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.

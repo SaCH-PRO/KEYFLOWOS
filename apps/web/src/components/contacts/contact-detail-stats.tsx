@@ -30,22 +30,27 @@ interface ContactDetailStatsProps {
   onSetActiveTab: (tab: string) => void;
   onQuickAction?: (contactId: string, action: DetailQuickAction) => void;
   onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
+  /** The business the contact is shown in; without it, the member's selected business (SEC-R015d-1). */
+  businessId?: string | null;
 }
 
 export function MomentumPrimaryCTA({
   contactId,
   contactName,
   onAddTask,
+  businessId,
 }: {
   contactId: string;
   contactName: string;
   onAddTask?: (title: string, options?: { dueDate?: string; priority?: string; remindAt?: string }) => Promise<void>;
+  /** The business the contact is shown in; without it, the member's selected business (SEC-R015d-1). */
+  businessId?: string | null;
 }) {
   const [topRec, setTopRec] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const bid = getStoredBusinessId();
+    const bid = businessId || getStoredBusinessId();
     if (!bid) return;
     let cancelled = false;
     fetchContactMomentum(contactId, bid).then((res) => {
@@ -62,7 +67,7 @@ export function MomentumPrimaryCTA({
       }
     });
     return () => { cancelled = true; };
-  }, [contactId]);
+  }, [contactId, businessId]);
 
   if (!topRec) return null;
 
@@ -315,21 +320,25 @@ function MomentumSparkline({ data }: { data: { score: number; calculatedAt: stri
   );
 }
 
-function MomentumBadge({ contactId }: { contactId: string }) {
+function MomentumBadge({ contactId, businessId }: { contactId: string; businessId?: string | null }) {
   const [momentum, setMomentum] = useState<MomentumScore | null>(null);
   const [history, setHistory] = useState<MomentumHistory>([]);
 
   useEffect(() => {
-    const bid = getStoredBusinessId();
+    // SEC-R015d-1: the business the contact is shown in, else the selection.
+    const bid = businessId || getStoredBusinessId();
     if (!bid) return;
+    let cancelled = false;
     Promise.all([
       fetchContactMomentum(contactId, bid),
       fetchContactMomentumHistory(contactId, 30, bid),
     ]).then(([scoreRes, historyRes]) => {
+      if (cancelled) return;
       if (scoreRes.data) setMomentum(scoreRes.data);
       if (historyRes.data) setHistory(historyRes.data);
     });
-  }, [contactId]);
+    return () => { cancelled = true; };
+  }, [contactId, businessId]);
 
   if (!momentum) return null;
 
@@ -401,7 +410,7 @@ function MomentumBadge({ contactId }: { contactId: string }) {
   );
 }
 
-export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAction }: ContactDetailStatsProps) {
+export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAction, businessId }: ContactDetailStatsProps) {
   const router = useRouter();
   const goInvoices = (status?: string) => {
     const qs = new URLSearchParams({ tab: "invoices", contactId: contact.id });
@@ -500,7 +509,7 @@ export function ContactDetailStats({ contact, events, onSetActiveTab, onQuickAct
         )}
       </CollapsibleCard>
 
-      <MomentumBadge contactId={contact.id} />
+      <MomentumBadge contactId={contact.id} businessId={businessId} />
 
       <CollapsibleCard icon={BarChart3} title="Financial Summary" hasData={hasFinancial}
         preview={hasFinancial ? [

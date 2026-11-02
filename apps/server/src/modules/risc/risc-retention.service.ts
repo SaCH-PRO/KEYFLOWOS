@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 /**
  * GDPR retention worker for Cross-Account Protection (RISC) events.
@@ -32,6 +33,14 @@ export class RiscRetentionService {
    * Daily cleanup of expired RISC event rows.
    */
   @Cron(CronExpression.EVERY_DAY_AT_3AM)
+  // V1-24b: the scheduled entry point. It returns first when schedulers are
+  // off (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS, or NODE_ENV=test without
+  // ENABLE_SCHEDULERS_IN_TEST); the work below stays callable directly.
+  async scheduledPurgeExpiredEvents(): Promise<void> {
+    if (schedulersDisabled()) return;
+    await this.purgeExpiredEvents();
+  }
+
   async purgeExpiredEvents(): Promise<{ deleted: number }> {
     const retentionDays = this.retentionDays();
     const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);

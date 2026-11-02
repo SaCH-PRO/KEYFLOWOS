@@ -21,6 +21,7 @@
 
 import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { getTenantContext } from '../../core/tenant/tenant-context';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { KeyIdempotencyService, fingerprintToolRequest } from './key-idempotency.service';
@@ -39,6 +40,8 @@ export interface KeyCortexToolContext {
   commandId?: string;
   autonomyLevel?: number;
   correlationId?: string;
+  /** The approval proposal this call executes, when it executes one: named on its CortexActionLog row. */
+  proposalId?: string;
   idempotencyKey?: string;
   sagaId?: string;
   /**
@@ -140,6 +143,117 @@ export interface KeyCortexToolScore {
   totalUses: number;
 }
 
+// ---------------------------------------------------------------------------
+// What a CortexActionLog row may hold of a call (V1-19c review, SEC-V19c-1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The longest answer a row stores whole, and the preview kept of a longer one:
+ * the bound AiExecutionLogService.sanitizePayload puts on its copy of the same
+ * answer, in the same { _truncated, _size, _preview } form. These rows are read
+ * into prompts (UnifiedMemoryRetrievalService), so an unbounded answer is
+ * stored, and read, whole on every execution.
+ */
+const AUDIT_STORED_WHOLE_MAX = 5000;
+const AUDIT_PREVIEW_CHARS = 500;
+/** What stands, in a stored answer or error, where a value of the call's input was. */
+const AUDIT_INPUT_REDACTION = '[redacted:input]';
+/** An input value at least this long is also taken out of a longer text that quotes it. */
+const AUDIT_INPUT_QUOTE_MIN = 6;
+/**
+ * An input key that names a record (id, contactId, thread_id, contactIds): its
+ * values are references, not personal data, and the audit row needs them to
+ * say what the call acted on. They are not taken out.
+ */
+const AUDIT_ID_KEY = /(^id$|Id$|_id$|Ids$|_ids$)/;
+
+/** The string values of a call's input, longest first, minus the record references. */
+function auditInputValues(input: unknown): string[] {
+  const values = new Set<string>();
+  const walk = (value: unknown, key: string | undefined, depth: number): void => {
+    if (depth > 10 || values.size >= 500) return;
+    if (typeof value === 'string') {
+      if (value.trim().length > 0 && !(key && AUDIT_ID_KEY.test(key))) values.add(value);
+    } else if (Array.isArray(value)) {
+      for (const item of value) walk(item, key, depth + 1);
+    } else if (value && typeof value === 'object') {
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) walk(v, k, depth + 1);
+    }
+  };
+  walk(input, undefined, 0);
+  // Longest first: a value inside another is not taken out before the one that holds it.
+  return [...values].sort((a, b) => b.length - a.length);
+}
+
+/** A text with every input value taken out: equal to one, or quoting one long enough to be personal data. */
+function redactAuditText(text: string, inputValues: string[]): string {
+  let out = text;
+  for (const value of inputValues) {
+    if (out === value) return AUDIT_INPUT_REDACTION;
+    if (value.length >= AUDIT_INPUT_QUOTE_MIN && out.includes(value)) out = out.split(value).join(AUDIT_INPUT_REDACTION);
+  }
+  return out;
+}
+
+function redactAuditValue(value: unknown, inputValues: string[]): unknown {
+  if (typeof value === 'string') return redactAuditText(value, inputValues);
+  if (Array.isArray(value)) return value.map((item) => redactAuditValue(item, inputValues));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, redactAuditValue(v, inputValues)]),
+    );
+  }
+  return value;
+}
+
+/**
+ * A tool's answer as a CortexActionLog `result` text (V1-19c): JSON, with every
+ * value of the call's input taken out (an answer can echo its input, such as a
+ * create tool answering with the record it made, and the input is never stored
+ * on the row), bounded as AiExecutionLog bounds its copy. Null when the answer
+ * is empty or has no JSON form (a cycle, a BigInt): an unserializable answer
+ * must not cost the execution its audit row. Only the stored copy changes; the
+ * caller's answer is not touched.
+ */
+export function auditResultText(data: unknown, input: unknown): string | null {
+  if (data === undefined || data === null) return null;
+  let plain: unknown;
+  try {
+    const json = JSON.stringify(data);
+    if (json === undefined) return null;
+    plain = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  const text = JSON.stringify(redactAuditValue(plain, auditInputValues(input)));
+  if (text.length <= AUDIT_STORED_WHOLE_MAX) return text;
+  return JSON.stringify({ _truncated: true, _size: text.length, _preview: text.slice(0, AUDIT_PREVIEW_CHARS) });
+}
+
+/** A tool's error as a CortexActionLog `error` text (V1-19c): input values taken out, bounded. */
+export function auditErrorText(error: string | null | undefined, input: unknown): string | null {
+  if (error === undefined || error === null) return null;
+  const text = redactAuditText(String(error), auditInputValues(input));
+  return text.length <= AUDIT_STORED_WHOLE_MAX
+    ? text
+    : `${text.slice(0, AUDIT_STORED_WHOLE_MAX)}... [${text.length} characters]`;
+}
+
+/**
+ * The actor named on a call's CortexActionLog row (V1-19c review, SEC-V19c-2):
+ * the one its caller names, else the authenticated member of the request the
+ * call runs in, when the TenantInterceptor verified that request's tenant as
+ * the call's business. Callers that pass no actor (the chat's bridged organ
+ * tools, cortex.execute_tool) otherwise audited a member's action with nobody
+ * named. Attribution only: no permission is decided from it. A call outside a
+ * request (a job, a queue worker) names nobody.
+ */
+function auditActor(ctx: KeyCortexToolContext): string | null {
+  if (ctx.userId) return ctx.userId;
+  const request = getTenantContext();
+  return request?.userId && request.businessId === ctx.businessId ? request.userId : null;
+}
+
 @Injectable()
 export class KeyCortexToolRegistryService {
   private readonly logger = new Logger(KeyCortexToolRegistryService.name);
@@ -148,6 +262,8 @@ export class KeyCortexToolRegistryService {
     string,
     { successes: number; failures: number; totalDurationMs: number; lastUsedAt: Date }
   >();
+  /** CortexActionLog rows this process failed to write (V1-19c): see audit(). */
+  private auditWriteFailures = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -520,7 +636,7 @@ export class KeyCortexToolRegistryService {
         }
       }
 
-      await this.audit(ctx, name, input, result, durationMs).catch((err) => {
+      await this.audit(ctx, name, input, result, startMs, durationMs).catch((err) => {
         this.logger.warn(`Tool audit failed: ${(err as Error).message}`);
       });
       await this.emitBusinessEvent(ctx, name, input, result, durationMs).catch((err) => {
@@ -558,7 +674,7 @@ export class KeyCortexToolRegistryService {
         }
       }
 
-      await this.audit(ctx, name, input, result, durationMs).catch((auditErr) => {
+      await this.audit(ctx, name, input, result, startMs, durationMs).catch((auditErr) => {
         this.logger.warn(`Tool audit failed: ${(auditErr as Error).message}`);
       });
       await this.emitBusinessEvent(ctx, name, input, result, durationMs).catch((err) => {
@@ -892,37 +1008,67 @@ export class KeyCortexToolRegistryService {
     return { valid: true, parsed: input };
   }
 
+  /**
+   * The CortexActionLog row of one tool execution (V1-19c). Written through
+   * the typed client, so a field the model lacks is a compile error: the
+   * untyped write named `metadata`, which CortexActionLog has no column for,
+   * so Prisma refused every row and no execution was ever audited.
+   *
+   * Only the model's columns are written. Dropped, because no column holds
+   * them: the tool input (it can carry personal data and is never stored
+   * here) and the autonomy level. Since an answer or an error can quote the
+   * input, both are stored with the input's values taken out, and bounded
+   * (auditResultText, auditErrorText: V1-19c review, SEC-V19c-1). The actor
+   * is the caller's, else the request member's (auditActor, SEC-V19c-2).
+   *
+   * Never throws: a row that cannot be written costs the record, not the
+   * tool's answer. It is logged at error with the business id and counted.
+   */
   private async audit(
     ctx: KeyCortexToolContext,
     toolName: string,
     input: Record<string, unknown>,
     result: KeyCortexToolResult,
+    startMs: number,
     durationMs: number,
   ): Promise<void> {
     try {
-      await (this.prisma.client as any).cortexActionLog.create({
+      const error = auditErrorText(result.error, input);
+      await this.prisma.client.cortexActionLog.create({
         data: {
+          businessId: ctx.businessId,
+          userId: auditActor(ctx),
           sessionId: ctx.sessionId ?? ctx.correlationId ?? 'unknown',
+          commandId: ctx.commandId ?? null,
+          correlationId: ctx.correlationId ?? null,
+          proposalId: ctx.proposalId ?? null,
           actionType: toolName,
           status: result.success ? 'success' : 'error',
           description: result.success
             ? `Executed tool ${toolName}`
-            : `Tool ${toolName} failed: ${result.error}`,
-          result: result.data ? JSON.stringify(result.data) : null,
-          error: result.error ?? null,
-          businessId: ctx.businessId,
-          userId: ctx.userId ?? null,
-          metadata: {
-            input,
-            durationMs,
-            autonomyLevel: ctx.autonomyLevel,
-          } as any,
+            : `Tool ${toolName} failed: ${error ?? 'unknown error'}`,
+          result: auditResultText(result.data, input),
+          error,
+          requiresApproval: this.tools.get(toolName)?.requiresApproval ?? false,
+          startedAt: new Date(startMs),
+          completedAt: new Date(startMs + durationMs),
+          durationMs,
           createdAt: new Date(),
         },
       });
     } catch (err: unknown) {
-      this.logger.error(`Failed to audit tool execution: ${err instanceof Error ? err.message : String(err)}`);
+      this.auditWriteFailures += 1;
+      this.logger.error(
+        `[audit][${ctx.businessId}] CortexActionLog row for ${toolName} not written ` +
+          `(${this.auditWriteFailures} audit write failure(s) in this process): ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
     }
+  }
+
+  /** How many CortexActionLog rows this process failed to write (V1-19c). */
+  getAuditWriteFailureCount(): number {
+    return this.auditWriteFailures;
   }
 
   /**
@@ -967,7 +1113,7 @@ export class KeyCortexToolRegistryService {
           sessionId: ctx.sessionId,
           commandId: ctx.commandId,
           correlationId: ctx.correlationId,
-          proposalId: (ctx as any).proposalId,
+          proposalId: ctx.proposalId,
           metadata,
         },
         { status: 'attempted' },

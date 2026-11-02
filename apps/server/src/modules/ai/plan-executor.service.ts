@@ -11,6 +11,7 @@ import { AgentStateMachineService, type AgentState } from './agent-state-machine
 import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 import { KeyActionProposalService } from '../key-autonomy/key-action-proposal.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
+import { schedulersDisabled } from '../../core/config/env';
 
 export interface PlanExecutionResult {
   planId: string;
@@ -56,6 +57,10 @@ export class PlanExecutorService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.pollInterval = safeInterval('PlanExecutorService', this.POLL_MS, () => this.tick(), this.logger);
     this.logger.log(`Plan executor polling started every ${this.POLL_MS}ms`);
   }

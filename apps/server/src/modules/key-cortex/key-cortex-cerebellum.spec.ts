@@ -21,8 +21,19 @@
  *   NOISE          flooding the prompt so no lesson carries weight
  *   DESCRIPTION    stating what happened instead of what to do differently
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { KeyCortexCerebellumService } from './key-cortex-cerebellum.service';
+
+// V1-24b: this file calls a @Cron handler directly. Under NODE_ENV=test the
+// handlers return first (keyCronsDisabled() includes schedulersDisabled()),
+// so the file opts in explicitly; without it the sweep assertions would pass
+// without the sweep ever running.
+beforeEach(() => {
+  vi.stubEnv('ENABLE_SCHEDULERS_IN_TEST', '1');
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 type Row = { toolName: string | null; success: boolean; errorMessage: string | null };
 

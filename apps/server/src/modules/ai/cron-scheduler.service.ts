@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { QueueService } from './queue.service';
+import { schedulersDisabled } from '../../core/config/env';
 
 @Injectable()
 export class CronSchedulerService implements OnModuleInit {
@@ -12,6 +13,14 @@ export class CronSchedulerService implements OnModuleInit {
   ) {}
 
   async onModuleInit() {
+    // V1-24b review (SEC-V124b-1): seeding every tenant's scheduled AgentTrigger
+    // as a BullMQ repeatable at boot is a scheduler. With schedulers off no
+    // trigger is read or registered; QueueService starts no cron worker either,
+    // so a repeatable an earlier boot left in Redis does not fire here.
+    if (schedulersDisabled()) {
+      this.logger.log('Cron triggers not registered (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     // Seed cron triggers on boot
     await this.syncCronTriggers();
   }

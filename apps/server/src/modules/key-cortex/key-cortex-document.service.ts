@@ -6,8 +6,9 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
-import { ModelGatewayService } from '../ai/model-gateway.service';
+import { ModelGatewayService, keyDisabledRefusal } from '../ai/model-gateway.service';
 import { AiUsageService, directOpenAiKey, directOpenAiNotConfigured } from '../ai/ai-usage.service';
+import { keyDisabled } from '../../core/config/env';
 import { UnifiedMemoryWriterService } from './unified-memory-writer.service';
 import OpenAI from 'openai';
 
@@ -108,7 +109,11 @@ export interface DocumentListEntry {
 @Injectable()
 export class KeyCortexDocumentService {
   private readonly logger = new Logger(KeyCortexDocumentService.name);
-  private readonly openai: OpenAI | null;
+  /**
+   * Null when no OpenAI key is configured (never a placeholder key), or while
+   * KEY_DISABLED is set at boot (V1-24b; then built on first use once KEY is on).
+   */
+  private openai: OpenAI | null = null;
 
   // Chunking configuration
   private readonly CHUNK_SIZE = 800;
@@ -136,18 +141,31 @@ export class KeyCortexDocumentService {
     // that needs an embedding answers the structured 503 provider_not_configured
     // (directOpenAiNotConfigured) before any write or provider call, as KEY
     // voice does.
+    //
+    // V1-24b (SEC-V124-1): a server booted with KEY_DISABLED builds no client
+    // here (client() builds it on first use once KEY is on), and the switch is
+    // read on every call.
     const apiKey = directOpenAiKey();
     if (!apiKey) {
       this.logger.warn(
         'Neither AI_INTEGRATIONS_OPENAI_API_KEY nor OPENAI_API_KEY is set. Document embeddings answer 503 provider_not_configured.',
       );
     }
-    this.openai = apiKey ? new OpenAI({ apiKey }) : null;
+    if (apiKey && !keyDisabled()) this.openai = new OpenAI({ apiKey });
   }
 
-  /** The configured client, or the structured 503 (R0-07a) when no OpenAI key is configured. */
+  /**
+   * The client, or a structured 503 before any client is built: the
+   * KEY-disabled one (reason key_disabled) while KEY_DISABLED is set (V1-24b),
+   * else provider_not_configured (R0-07a) when no OpenAI key is configured.
+   */
   private client(): OpenAI {
-    if (!this.openai) throw directOpenAiNotConfigured();
+    if (keyDisabled()) throw keyDisabledRefusal();
+    if (!this.openai) {
+      const apiKey = directOpenAiKey();
+      if (!apiKey) throw directOpenAiNotConfigured();
+      this.openai = new OpenAI({ apiKey });
+    }
     return this.openai;
   }
 

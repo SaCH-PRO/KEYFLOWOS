@@ -4,6 +4,7 @@ import { ConnectorRegistryService } from './connector-registry.service';
 import { ConnectorActivityService } from './connector-activity.service';
 import { ConnectorType } from './connector.interface';
 import { safeInterval } from '../scheduling/safe-interval';
+import { schedulersDisabled } from '../config/env';
 
 const CHECK_INTERVAL_MS = 5 * 60 * 1000;
 const STARTUP_DELAY_MS = 90 * 1000;
@@ -41,6 +42,10 @@ export class ConnectorSyncSchedulerService implements OnModuleInit, OnModuleDest
   ) {}
 
   onModuleInit() {
+    if (schedulersDisabled()) {
+      this.logger.log('Scheduler disabled (DISABLE_SCHEDULERS, KF_DISABLE_SCHEDULERS or NODE_ENV=test)');
+      return;
+    }
     this.startupTimeout = setTimeout(() => {
       void this.tick();
       this.intervalRef = safeInterval('ConnectorSyncSchedulerService', CHECK_INTERVAL_MS, () => this.tick(), this.logger);
