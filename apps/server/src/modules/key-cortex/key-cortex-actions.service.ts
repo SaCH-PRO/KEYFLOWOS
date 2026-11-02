@@ -78,6 +78,38 @@ const ACTION_PARAM_SCHEMA: Record<CortexActionType, string[]> = {
   EXECUTE_TOOL: ['toolName'],
 };
 
+/**
+ * V1-02b: the usability check the parsed-command gate applies since V1-02
+ * (KeyCortexQueryPipelineService.isUsableAutonomyVerdict), applied to the
+ * legacy gate too. That one is a private method of the pipeline, which imports
+ * this service, so it is mirrored here; a parity spec
+ * (key-cortex-actions.legacy-gate.spec.ts, V1-02b-UV01) pins the two together.
+ *
+ * A verdict is usable only when it is an object that states every field the
+ * execution decision reads: a boolean `allowed`, a boolean `requiresApproval`
+ * and a recognized `tier`. An omitted `requiresApproval` or `tier` is not a
+ * statement that no approval is needed.
+ */
+export function isUsableAutonomyVerdict(verdict: unknown): boolean {
+  if (typeof verdict !== 'object' || verdict === null) {
+    return false;
+  }
+  const { allowed, requiresApproval, tier } = verdict as Record<string, unknown>;
+  return (
+    typeof allowed === 'boolean' &&
+    typeof requiresApproval === 'boolean' &&
+    (tier === 'manual' || tier === 'supervised' || tier === 'full')
+  );
+}
+
+interface LegacyAutonomyDecision {
+  allowed: boolean;
+  requiresApproval: boolean;
+  reason?: string;
+  /** Set when the authority could not give a usable answer: the batch fails closed. */
+  failedClosed?: string;
+}
+
 @Injectable()
 export class KeyCortexActionsService implements OnModuleInit {
   private readonly logger = new Logger(KeyCortexActionsService.name);
@@ -171,17 +203,32 @@ export class KeyCortexActionsService implements OnModuleInit {
 
     const results: CortexActionResult[] = [];
 
+    // V1-02b: every action is put to the authority before any of them runs,
+    // as the parsed-command gate does (V1-02). The batch is atomic: one
+    // evaluation that throws or returns an unusable verdict fails the whole
+    // batch closed, so no action runs and no approval is created.
+    const verdicts: LegacyAutonomyDecision[] = [];
     for (const action of actions) {
+      const verdict = await this.evaluateAutonomy(action, session);
+      if (verdict.failedClosed !== undefined) {
+        return this.failBatchClosed(actions, session, verdict.failedClosed);
+      }
+      verdicts.push(verdict);
+    }
+
+    for (const [index, action] of actions.entries()) {
       try {
-        const verdict = await this.evaluateAutonomy(action, session);
+        const verdict = verdicts[index];
         if (!verdict.allowed) {
-          results.push({
+          const blocked: CortexActionResult = {
             ...action,
             status: 'blocked',
             description: verdict.reason || `Action "${action.actionType}" blocked by autonomy guard.`,
             requiresApproval: false,
             error: verdict.reason,
-          });
+          };
+          results.push(blocked);
+          await this.trackActionExecution(blocked, session.id);
           continue;
         }
 
@@ -282,7 +329,7 @@ export class KeyCortexActionsService implements OnModuleInit {
   private async evaluateAutonomy(
     action: CortexActionResult,
     session?: CortexSession,
-  ): Promise<{ allowed: boolean; requiresApproval: boolean; reason?: string }> {
+  ): Promise<LegacyAutonomyDecision> {
     if (!this.autonomyOrchestrator) {
       // Legacy static fallback
       return {
@@ -291,13 +338,18 @@ export class KeyCortexActionsService implements OnModuleInit {
       };
     }
 
+    const actionKey = `key_cortex.${action.actionType}`;
     try {
       const verdict = await this.autonomyOrchestrator.evaluateAction(
         session?.businessId ?? 'unknown',
-        `key_cortex.${action.actionType}`,
+        actionKey,
         (action.result as Record<string, unknown>) ?? {},
         { proposedBy: session?.userId },
       );
+      // V1-02b: an answer the authority did not fully state is not an answer.
+      if (!isUsableAutonomyVerdict(verdict)) {
+        throw new Error(`Unusable autonomy verdict for ${actionKey}`);
+      }
       return {
         allowed: verdict.allowed,
         requiresApproval: verdict.requiresApproval || verdict.tier === 'manual',
@@ -305,9 +357,45 @@ export class KeyCortexActionsService implements OnModuleInit {
       };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
-      this.logger.error(`[evaluateAutonomy] ${action.actionType}: ${message}`);
-      return { allowed: false, requiresApproval: true, reason: `Autonomy evaluation failed: ${message}` };
+      this.logger.error(`[evaluateAutonomy] ${actionKey}: ${message}`);
+      return {
+        allowed: false,
+        requiresApproval: true,
+        reason: `Autonomy evaluation failed: ${message}`,
+        failedClosed: message,
+      };
     }
+  }
+
+  /**
+   * V1-02b: the authority could not give a usable answer for one action of
+   * the batch, so none of them runs and no approval is created (the parsed-
+   * command gate's failed_closed disposition). Each action is refused and
+   * goes through this gate's audit door; a failed audit write is logged by
+   * trackActionExecution and never changes the answer.
+   */
+  private async failBatchClosed(
+    actions: CortexActionResult[],
+    session: CortexSession,
+    error: string,
+  ): Promise<CortexActionResult[]> {
+    const reason = `Authority check failed closed; execution blocked for safety: ${error}`;
+    this.logger.error(
+      `[executeActions][${session.id}] Autonomy check failed, failing closed: 0/${actions.length} actions executable: ${error}`,
+    );
+    const results: CortexActionResult[] = [];
+    for (const action of actions) {
+      const blocked: CortexActionResult = {
+        ...action,
+        status: 'blocked',
+        description: reason,
+        requiresApproval: false,
+        error: reason,
+      };
+      results.push(blocked);
+      await this.trackActionExecution(blocked, session.id);
+    }
+    return results;
   }
 
   requiresApproval(action: CortexActionResult): boolean {
