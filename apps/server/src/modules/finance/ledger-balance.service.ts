@@ -7,6 +7,12 @@ export interface AccountBalance {
   systemKey: string | null;
   name: string;
   type: string;
+  /**
+   * V1-37 (CF-38): the currency of this row's debits and credits. An account
+   * with entries in two currencies has one row per currency; one with no
+   * activity has one zero row in the business currency.
+   */
+  currency: string;
   debit: Prisma.Decimal;
   credit: Prisma.Decimal;
   /** Net = debit - credit (positive for assets/expenses, negative for liabilities/equity/income by convention). */
@@ -53,16 +59,23 @@ export class LedgerBalanceService {
 
   /**
    * Trial balance — every active account, including those with zero activity.
-   * Sums debit/credit per account in one grouped query, then LEFT JOINs with
-   * all active ChartOfAccount rows so zero-balance accounts are still shown.
+   * Sums debit/credit per (account, currency) in one grouped query, then joins
+   * the active ChartOfAccount rows so zero-balance accounts are still shown.
+   *
+   * V1-37 (CF-38, D-13): grouped by currency as well as account. It grouped by
+   * account only, so a TTD business's USD invoice added its USD debit to the
+   * TTD debits on accounts receivable. Each row now carries its currency, and
+   * within each currency sum(debit) = sum(credit) (every posting is balanced
+   * in its one currency, PostingService). Idle accounts read once, zero, in
+   * the business currency.
    */
   async getTrialBalance(businessId: string, asOf?: Date): Promise<AccountBalance[]> {
     const where: Prisma.LedgerEntryWhereInput = { businessId };
     if (asOf) where.date = { lte: asOf };
 
-    const [grouped, allAccounts] = await Promise.all([
+    const [grouped, allAccounts, business] = await Promise.all([
       this.prisma.client.ledgerEntry.groupBy({
-        by: ['accountId'],
+        by: ['accountId', 'currency'],
         where,
         _sum: { debit: true, credit: true },
       }),
@@ -70,26 +83,35 @@ export class LedgerBalanceService {
         where: { businessId, isActive: true },
         select: { id: true, name: true, type: true, systemKey: true },
       }),
+      this.prisma.client.business.findUnique({ where: { id: businessId }, select: { currency: true } }),
     ]);
+    const businessCurrency = business?.currency ?? 'TTD';
 
-    const byId = new Map(grouped.map((g) => [g.accountId, g]));
+    const byId = new Map<string, typeof grouped>();
+    for (const g of grouped) byId.set(g.accountId, [...(byId.get(g.accountId) ?? []), g]);
 
     return allAccounts
-      .map((account): AccountBalance => {
-        const g = byId.get(account.id);
-        const debit = new D(((g?._sum.debit as Prisma.Decimal | null) ?? ZERO).toString());
-        const credit = new D(((g?._sum.credit as Prisma.Decimal | null) ?? ZERO).toString());
-        return {
-          accountId: account.id,
-          systemKey: account.systemKey ?? null,
-          name: account.name,
-          type: account.type,
-          debit,
-          credit,
-          net: debit.sub(credit),
-        };
+      .flatMap((account): AccountBalance[] => {
+        const groups = byId.get(account.id) ?? [];
+        const sums = groups.length > 0
+          ? groups.map((g) => ({ currency: g.currency, debit: g._sum.debit as Prisma.Decimal | null, credit: g._sum.credit as Prisma.Decimal | null }))
+          : [{ currency: businessCurrency, debit: null, credit: null }];
+        return sums.map((g) => {
+          const debit = new D((g.debit ?? ZERO).toString());
+          const credit = new D((g.credit ?? ZERO).toString());
+          return {
+            accountId: account.id,
+            systemKey: account.systemKey ?? null,
+            name: account.name,
+            type: account.type,
+            currency: g.currency,
+            debit,
+            credit,
+            net: debit.sub(credit),
+          };
+        });
       })
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => a.name.localeCompare(b.name) || a.currency.localeCompare(b.currency));
   }
 
   /**

@@ -105,6 +105,55 @@ export function validatePosting(input: PostingInput): void {
 }
 
 /**
+ * V1-37-DM-CURRENCY (CF-38; owner ruling D-13): the currencies KEYFLOW
+ * supports. One currency per business, documents default to it.
+ */
+export const D13_CURRENCIES: readonly string[] = ['TTD', 'USD'];
+
+/** An ISO currency code as stored and compared: trimmed, upper-case; '' when absent. */
+export function normalizeCurrency(currency?: string | null): string {
+  return typeof currency === 'string' ? currency.trim().toUpperCase() : '';
+}
+
+/**
+ * The currency a posting is written in, under the D-13 policy (V1-37). Pure,
+ * so the unit spec reaches every branch; post() applies it inside the posting
+ * transaction with the business currency read alongside the chart rows.
+ *
+ *   - No currency: the business currency. (It was the literal 'TTD', so a USD
+ *     business's manual journal, recurring journal and tax payment were TTD.)
+ *   - The business currency: always postable, also one that predates D-13.
+ *   - Another currency is a mismatch. D-13 allows it only for a supported
+ *     currency (TTD, USD) carried by a source document (sourceType and
+ *     sourceId): the document's explicit currency wins (a TTD business's USD
+ *     invoice, its AR and its payments; V1-15 TB-01). A sourceless mismatch (a
+ *     manual or KEY journal in a currency the business does not keep) and any
+ *     unsupported currency are refused with 400 before anything is written.
+ *
+ * The ledger stays balanced per currency: every entry carries the posting's
+ * one currency, and the trial balance groups by it (LedgerBalanceService).
+ */
+export function resolvePostingCurrency(
+  input: Pick<PostingInput, 'currency' | 'sourceType' | 'sourceId'>,
+  businessCurrency: string,
+): string {
+  const business = normalizeCurrency(businessCurrency);
+  const requested = normalizeCurrency(input.currency);
+  if (!requested || requested === business) return business;
+  if (!D13_CURRENCIES.includes(requested)) {
+    throw new BadRequestException(
+      `Unsupported posting currency ${requested}: the business currency is ${business}; supported currencies are ${D13_CURRENCIES.join(', ')}`,
+    );
+  }
+  if (!input.sourceType || !input.sourceId) {
+    throw new BadRequestException(
+      `Posting currency ${requested} differs from the business currency ${business}: only a posting from a source document may carry another currency`,
+    );
+  }
+  return requested;
+}
+
+/**
  * The single entry point for writing to the ledger. Direct INSERTs into
  * `LedgerEntry` from anywhere else are forbidden by FIN1 architectural
  * rules — every monetary movement must come through here.
@@ -163,11 +212,14 @@ export class PostingService {
       // "Unknown chart-of-account id(s)", and the cross-business throw that
       // follows it would become unreachable dead code. This query must SEE the
       // foreign row in order to reject it.
+      //
+      // V1-37: each row also carries its business's currency, so the D-13
+      // currency check below reads it in the same query.
       const accountIds = Array.from(new Set(input.entries.map((e) => e.accountId)));
       const accounts = await tx.chartOfAccount.findMany(
         skipTenantIsolation({
           where: { id: { in: accountIds } },
-          select: { id: true, businessId: true },
+          select: { id: true, businessId: true, business: { select: { currency: true } } },
         }),
       );
       if (accounts.length !== accountIds.length) {
@@ -181,6 +233,11 @@ export class PostingService {
           `Cross-business posting blocked: ${wrongBusiness.map((a) => a.id).join(', ')}`,
         );
       }
+
+      // V1-37 (CF-38, D-13): the posting's one currency. Every account is the
+      // posting business's here, so any row names its currency. A stub that
+      // returns no business relation reads as the schema default.
+      const currency = resolvePostingCurrency(input, accounts[0]?.business?.currency ?? 'TTD');
 
       // Verify contactId (when provided) belongs to the posting business.
       // Without this check a caller could attribute revenue to a foreign
@@ -204,7 +261,7 @@ export class PostingService {
           status: 'POSTED',
           date: input.date,
           amount: new D(String(input.amount)),
-          currency: input.currency ?? 'TTD',
+          currency,
           description: input.description ?? null,
           contactId: input.contactId ?? null,
           sourceType: input.sourceType ?? null,
@@ -221,7 +278,7 @@ export class PostingService {
               accountId: e.accountId,
               debit: new D(String(e.debit ?? 0)),
               credit: new D(String(e.credit ?? 0)),
-              currency: input.currency ?? 'TTD',
+              currency,
               date: input.date,
               memo: e.memo ?? null,
             })),

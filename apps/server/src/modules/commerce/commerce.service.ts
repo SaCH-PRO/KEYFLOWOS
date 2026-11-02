@@ -21,6 +21,7 @@ import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percent
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
 import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
 import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/update-invoice.dto';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
@@ -299,6 +300,8 @@ export class CommerceService {
       kind === 'DEPOSIT'
         ? `Deposit — ${service.name}${options?.descriptionSuffix ?? ''}`
         : `${service.name}${options?.descriptionSuffix ?? ''}`;
+    // V1-37 (CF-38, D-13): the business currency, not the literal 'TTD'.
+    const currency = await this.documentCurrency(businessId);
     return this.prisma.client.invoice.create({
       data: {
         businessId,
@@ -308,7 +311,7 @@ export class CommerceService {
         issueDate: new Date(),
         subtotal: total,
         total,
-        currency: 'TTD',
+        currency,
         notes: kind === 'DEPOSIT' ? `Deposit for service "${service.name}"` : null,
         items: {
           create: [
@@ -395,6 +398,37 @@ export class CommerceService {
   }
 
   /**
+   * V1-37-DM-CURRENCY (CF-38, P0-7; owner ruling D-13: one currency per
+   * business, documents default to it; TTD and USD supported): the currency a
+   * new or edited invoice or quote is written in.
+   *
+   *   - none named: the business currency (createInvoice, createQuote and
+   *     createInvoiceForService wrote the literal 'TTD', so a USD business's
+   *     invoices were TTD);
+   *   - named: it wins, upper-cased ('ttd' was stored as given), when it is a
+   *     D-13 currency or the business's own;
+   *   - anything else (EUR on a TTD business) is refused with 400 before
+   *     anything is written: the ledger door would refuse to post it
+   *     (PostingService, resolvePostingCurrency), so it could never be issued
+   *     on accrual or paid (IV-P04).
+   */
+  private async documentCurrency(businessId: string, requested?: string | null): Promise<string> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { currency: true },
+    });
+    const home = normalizeCurrency(business?.currency) || 'TTD';
+    const currency = normalizeCurrency(requested);
+    if (!currency) return home;
+    if (currency !== home && !D13_CURRENCIES.includes(currency)) {
+      throw new BadRequestException(
+        `Unsupported currency ${currency}: use the business currency ${home} or one of ${D13_CURRENCIES.join(', ')}`,
+      );
+    }
+    return currency;
+  }
+
+  /**
    * Resolve a contact id inside the caller's tenant before it is bound to an
    * invoice or a quote. The row is returned with `include: { contact: true }`,
    * so a foreign id would both bind another tenant's contact and disclose its
@@ -450,6 +484,8 @@ export class CommerceService {
       discountType: input.discountType,
       discountValue: input.discountValue,
     });
+    // V1-37 (D-13): the business currency unless one is named; checked before any write.
+    const currency = await this.documentCurrency(input.businessId, input.currency);
     // The internal callers' overrides (document intelligence) are stored in cents too.
     const subtotal = input.subtotal != null ? roundMoney(input.subtotal) : calculated.subtotal;
     const taxAmount = input.taxAmount != null ? roundMoney(input.taxAmount) : calculated.taxAmount;
@@ -467,7 +503,7 @@ export class CommerceService {
       discountValue: input.discountValue ?? null,
       discountAmount,
       total,
-      currency: input.currency ?? 'TTD',
+      currency,
       notes: input.notes ?? null,
       items: {
         create: input.items.map((item, i) => ({
@@ -1806,6 +1842,8 @@ export class CommerceService {
       discountValue,
     });
     const { subtotal, taxAmount, discountAmount, total } = amounts;
+    // V1-37 (D-13): the business currency unless one is named; checked before any write.
+    const currency = await this.documentCurrency(input.businessId, input.currency);
 
     // R2: viewToken is intentionally NOT generated at draft time. The
     // public accept/reject URL is minted only when the quote is sent so
@@ -1825,7 +1863,7 @@ export class CommerceService {
         discountValue,
         discountAmount,
         total,
-        currency: input.currency ?? 'TTD',
+        currency,
         notes: input.notes ?? null,
         items: {
           create: input.items.map((item, i) => ({
@@ -1880,7 +1918,8 @@ export class CommerceService {
     const updateData: any = {};
     // R0-27 review (ST-27-2): same tenant check as quote create, before any write.
     if (input.contactId) updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
-    if (input.currency) updateData.currency = input.currency;
+    // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
+    if (input.currency) updateData.currency = await this.documentCurrency(input.businessId, input.currency);
     if (input.expiryDate !== undefined) {
       updateData.expiryDate = input.expiryDate ? new Date(input.expiryDate) : null;
     }
@@ -3288,7 +3327,8 @@ export class CommerceService {
       // a missing one, and nothing is written.
       updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     }
-    if (input.currency !== undefined) updateData.currency = input.currency;
+    // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
+    if (input.currency !== undefined) updateData.currency = await this.documentCurrency(input.businessId, input.currency);
     if (input.dueDate !== undefined) {
       updateData.dueDate = input.dueDate ? new Date(input.dueDate) : null;
     }
@@ -3392,27 +3432,44 @@ export class CommerceService {
     return result;
   }
 
+  /**
+   * V1-37 (CF-38): campaign revenue per currency. It added every invoice's
+   * total whatever its currency and labelled the sum with the first row's
+   * currency. `byCurrency` holds each currency's figures; the top-level
+   * figures are the business currency's, named by `currency`; invoiceCount
+   * stays the campaign's whole count. Cents-safe (sumMoney).
+   */
   async getCampaignRevenue(businessId: string, campaignId: string) {
-    const invoices = await this.prisma.client.invoice.findMany({
-      where: {
-        businessId,
-        campaignId,
-        deletedAt: null,
-        status: { in: ['PAID', 'PARTIALLY_PAID', 'SENT', 'OVERDUE'] },
-      },
-      select: { id: true, total: true, status: true, currency: true },
-    });
-    const totalRevenue = invoices
-      .filter((i: any) => i.status === 'PAID')
-      .reduce((sum: number, i: any) => sum + i.total, 0);
-    const pipelineRevenue = invoices
-      .filter((i: any) => i.status !== 'PAID')
-      .reduce((sum: number, i: any) => sum + i.total, 0);
+    const [invoices, business] = await Promise.all([
+      this.prisma.client.invoice.findMany({
+        where: {
+          businessId,
+          campaignId,
+          deletedAt: null,
+          status: { in: ['PAID', 'PARTIALLY_PAID', 'SENT', 'OVERDUE'] },
+        },
+        select: { id: true, total: true, status: true, currency: true },
+      }),
+      this.prisma.client.business.findUnique({ where: { id: businessId }, select: { currency: true } }),
+    ]);
+    const currency = normalizeCurrency(business?.currency) || 'TTD';
+    const byCurrency: Record<string, { totalRevenue: number; pipelineRevenue: number; invoiceCount: number }> = {};
+    const codes = new Set<string>([...D13_CURRENCIES, currency, ...invoices.map((i) => normalizeCurrency(i.currency))]);
+    codes.delete('');
+    for (const code of [...codes].sort()) {
+      const rows = invoices.filter((i) => normalizeCurrency(i.currency) === code);
+      byCurrency[code] = {
+        totalRevenue: sumMoney(rows.filter((i) => i.status === 'PAID').map((i) => Number(i.total ?? 0))),
+        pipelineRevenue: sumMoney(rows.filter((i) => i.status !== 'PAID').map((i) => Number(i.total ?? 0))),
+        invoiceCount: rows.length,
+      };
+    }
     return {
-      totalRevenue,
-      pipelineRevenue,
+      totalRevenue: byCurrency[currency].totalRevenue,
+      pipelineRevenue: byCurrency[currency].pipelineRevenue,
       invoiceCount: invoices.length,
-      currency: invoices[0]?.currency || 'TTD',
+      currency,
+      byCurrency,
     };
   }
 
