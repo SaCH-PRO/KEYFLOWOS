@@ -91,6 +91,16 @@ jobs:
       - name: Type check web
         run: cd apps/web && npx tsc --noEmit
 
+      # Launch verifier contract (V1-20, PRS-M01): readiness must reject a
+      # degraded JSON body even when the HTTP status is 200. The shell spec
+      # runs scripts/verify-up.sh itself against a 127.0.0.1 fixture (no
+      # external network). Same command as `pnpm test:verify-up`. Explicit
+      # files, never a bare directory: `node --test scripts/tests/` runs zero
+      # specs on Node 20. No env here: NODE_TEST_CONTEXT=child alone makes
+      # `node --test` skip every file and exit 0.
+      - name: Verify launch health contract
+        run: node --test scripts/tests/verify-up-body.spec.mjs scripts/tests/verify-up-shell.spec.mjs
+
   # Lint is a DEBT RATCHET, and nothing depends on it.
   #
   # It used to be the first step of lint-and-typecheck, which every other job
