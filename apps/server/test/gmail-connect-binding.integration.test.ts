@@ -132,8 +132,8 @@
  * back onto a cleared mailbox is cleared under the same lock. The stub answers
  * the refresh_token grant and individual message reads; either can be held.
  *
- * R0-CMF6c-GMAIL-TOKEN-REFRESH-CAS (cases N01-N04, the it.todo N05; the
- * R0-CMF6b residual). RED-BEFORE on claude/elegant-curie-7azpsb (d78f591a):
+ * R0-CMF6c-GMAIL-TOKEN-REFRESH-CAS (cases N01-N06; the R0-CMF6b residual;
+ * N05 and N06 from review SEC-CMF6c-1). RED-BEFORE on claude/elegant-curie-7azpsb (d78f591a):
  * GmailService.getValidAccessToken read the stored refresh token, awaited
  * Google's refresh_token grant, then wrote the new access token and expiry
  * back with an unconditional business.update, so a disconnect that committed
@@ -149,7 +149,14 @@
  * another mailbox or a re-consent: that connection's own token, N02, N04).
  * Google's refresh_token grant is the stub's (held open by the case), and the
  * Gmail labels list (GET .../gmail/labels) is stubbed, recording the mailbox
- * whose token read it.
+ * whose token read it. Review SEC-CMF6c-1 (N05; RED-BEFORE on the packet head
+ * 49e08509): GoogleTokenHelper.getValidAccessToken, the gmail sync's token
+ * read, still wrote its refresh back unconditionally, so a sync's refresh in
+ * flight over a disconnect plus a connection of another mailbox left the
+ * first mailbox's token on the second one's row, and GmailService (which uses
+ * a stored, unexpired token as it is) read and sent for the second mailbox
+ * with it. The helper now makes the same compare-and-set for the gmail
+ * columns; N06 is its control (no change in flight: written back as before).
  *
  * Fixtures: prefix `k07d_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
@@ -2256,7 +2263,8 @@ describe('R0-CMF6 the business mailbox on the generic connector surface follows 
     expect(disconnectedBy).toBeTruthy();
     expect(await gmailRowTx(ID.biz)).toBe(disconnectedBy);
 
-    // Google answers the refresh; GoogleTokenHelper writes the new access token and its expiry back.
+    // Google answers the refresh. GoogleTokenHelper wrote the new access token back unconditionally
+    // before R0-CMF6c review SEC-CMF6c-1; it now writes nothing over the disconnect (its compare-and-set loses).
     held.release();
     const res = await running;
     expect([200, 201], JSON.stringify(res.body)).toContain(res.status);
@@ -2695,7 +2703,125 @@ describe('R0-CMF6c a Gmail access-token refresh never writes over a disconnect o
     await clearGmailConnector(ID.biz);
   });
 
-  it.todo('[R0-CMF6c-N05] residual outside the R0-CMF6c write set: GoogleTokenHelper.getValidAccessToken (modules/connect/google-token.helper.ts; the gmail sync, GmailIngestionService.syncInbox and collectInboxInputs) still writes a refreshed gmail access token back with an unconditional business.update, so a sync whose refresh is in flight over a disconnect plus a connection of another mailbox writes the first mailbox\'s token onto the second one\'s row (R0-CMF6b clears it only when the row has no mailbox at all), and GmailService then sends the second mailbox\'s mail with the first one\'s token until it expires; the follow-up applies the same compare-and-set (stored refresh token and address, under the business row lock) there');
+  it('[R0-CMF6c-N05] review SEC-CMF6c-1 RED-BEFORE: a gmail sync whose access token refresh is in flight when the owner disconnects the mailbox and connects another does not write the first mailbox\'s token onto the second one\'s row (GoogleTokenHelper.getValidAccessToken): the real sync (stored token expired, Google\'s refresh held) reports that its mailbox was disconnected while it ran (success false, nothing synced) and reads nothing (no profile, no inbox list); the business keeps exactly the columns the confirmation wrote (the second mailbox\'s address, access token and refresh token) and the gmail connector row keeps the confirmation\'s address and transaction; the owner\'s GET .../gmail/labels and POST .../gmail/messages/send then read and send with the second mailbox\'s own token, with no further refresh', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    await db.$executeRawUnsafe('DELETE FROM team_activity_logs WHERE business_id = $1', ID.biz);
+    const first = googleAccount('cmf6c_sync_swap_a');
+    await seedMailbox(ID.biz, first);
+    await expireStoredToken(ID.biz);
+    await seedGmailConnectorRow(ID.biz, first.email);
+    const refreshesBefore = refreshes.length;
+    const profilesBefore = profileChecks.length;
+    const listsBefore = inboxLists.length;
+    const labelsBefore = labelReads.length;
+    const sentBefore = sends.length;
+
+    const held = holdNext('refresh');
+    const syncing = startRealSync(ID.biz);
+    await held.reached;
+    expect(refreshes.slice(refreshesBefore)).toEqual([first.email]);
+
+    expect([200, 204]).toContain((await disconnect(ID.biz, ID.owner)).status);
+    const second = googleAccount('cmf6c_sync_swap_b');
+    const back = await startAndComplete(ID.biz, ID.owner, second);
+    expect(back.gmail).toBe('pending');
+    const ok = await confirm(ID.biz, back.pending, ID.owner, second.email);
+    expect([200, 201], JSON.stringify(ok.body)).toContain(ok.status);
+    const confirmed = await mailboxOf(ID.biz);
+    expect(confirmed.email).toBe(second.email);
+    const secondBy = await connectTx(ID.biz);
+    expect(secondBy).toBeTruthy();
+    expect(await gmailRowTx(ID.biz)).toBe(secondBy);
+
+    // Google answers the refresh of the first mailbox's refresh token.
+    held.release();
+    const synced = await syncing;
+    expect([200, 201], JSON.stringify(synced.body)).toContain(synced.status);
+    expect(synced.body).toMatchObject({ success: false, itemsSynced: 0 });
+    expect(JSON.stringify(synced.body.errors)).toMatch(/disconnected/i);
+    expect(profileChecks.slice(profilesBefore)).toEqual([]);
+    expect(inboxLists.slice(listsBefore)).toEqual([]);
+
+    expect(await mailboxOf(ID.biz)).toEqual(confirmed);
+    expect(await decryptedMailboxOf(ID.biz)).toEqual({
+      gmailEmail: second.email,
+      gmailAccessToken: second.access,
+      gmailRefreshToken: second.refresh,
+    });
+    const [row] = await db.$queryRawUnsafe(
+      `SELECT status, connected_account, metadata FROM connector_statuses WHERE business_id = $1 AND connector_type = 'gmail'`,
+      ID.biz,
+    );
+    expect(row).toMatchObject({ status: 'connected', connected_account: second.email });
+    expect((row.metadata as Record<string, unknown> | null)?.lastHistoryId).toBeUndefined();
+    expect(await gmailRowTx(ID.biz)).toBe(secondBy);
+
+    // GmailService uses a stored, unexpired token as it is: it must be the second mailbox's own.
+    const labels = await startLabels(ID.biz);
+    expect(labels.status, JSON.stringify(labels.body)).toBe(200);
+    expect(labelReads.slice(labelsBefore)).toEqual([second.email]);
+    const sent = await startSend(ID.biz, 'K07D CMF6c sync swap');
+    expect([200, 201], JSON.stringify(sent.body)).toContain(sent.status);
+    const out = sends.slice(sentBefore);
+    expect(out.map((s) => s.mailbox)).toEqual([second.email]);
+    expect(out[0].message).toContain(`<${second.email}>`);
+    expect(out[0].message).not.toContain(first.email);
+    expect(refreshes.slice(refreshesBefore)).toEqual([first.email]);
+
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+  });
+
+  it('[R0-CMF6c-N06] review SEC-CMF6c-1 control: with no change while it is in flight, a gmail sync\'s refresh (GoogleTokenHelper) writes back as before: the real sync with the stored token expired refreshes once, syncs (success, the row connected with the mailbox and its history cursor) and stores the new token encrypted (enc:v1: ciphertext, decrypting to the token Google returned for that mailbox) with an expiry about an hour ahead, the mailbox and refresh token untouched; GET .../gmail/labels then uses the stored token without another refresh', async () => {
+    await clearPending(ID.biz);
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+    const mailbox = googleAccount('cmf6c_sync_control');
+    await seedMailbox(ID.biz, mailbox);
+    await expireStoredToken(ID.biz);
+    await seedGmailConnectorRow(ID.biz, mailbox.email);
+    const before = await mailboxOf(ID.biz);
+    const refreshesBefore = refreshes.length;
+    const profilesBefore = profileChecks.length;
+    const labelsBefore = labelReads.length;
+
+    const synced = await startRealSync(ID.biz);
+    expect([200, 201], JSON.stringify(synced.body)).toContain(synced.status);
+    expect(synced.body).toMatchObject({ success: true, itemsSynced: 0, errors: [] });
+    expect(refreshes.slice(refreshesBefore)).toEqual([mailbox.email]);
+    expect([...new Set(profileChecks.slice(profilesBefore))]).toEqual([mailbox.email]);
+    const [row] = await db.$queryRawUnsafe(
+      `SELECT status, connected_account, metadata FROM connector_statuses WHERE business_id = $1 AND connector_type = 'gmail'`,
+      ID.biz,
+    );
+    expect(row).toMatchObject({ status: 'connected', connected_account: mailbox.email });
+    expect(row.metadata).toMatchObject({ lastHistoryId: GMAIL_HISTORY_ID });
+
+    const after = await mailboxOf(ID.biz);
+    expect(after.email).toBe(mailbox.email);
+    expect(after.refresh).toBe(before.refresh);
+    expect(after.access).toMatch(/^enc:v1:/);
+    expect(after.access).not.toBe(before.access);
+    const stored = await decryptedMailboxOf(ID.biz);
+    expect(stored?.gmailAccessToken).not.toBe(mailbox.access);
+    expect(accountsByAccess.get(String(stored?.gmailAccessToken))?.email).toBe(mailbox.email);
+    expect(stored?.gmailRefreshToken).toBe(mailbox.refresh);
+    const expiresIn = new Date(after.expiry as Date).getTime() - Date.now();
+    expect(expiresIn).toBeGreaterThan(55 * 60 * 1000);
+    expect(expiresIn).toBeLessThanOrEqual(60 * 60 * 1000);
+
+    const labels = await startLabels(ID.biz);
+    expect(labels.status, JSON.stringify(labels.body)).toBe(200);
+    expect(labelReads.slice(labelsBefore)).toEqual([mailbox.email]);
+    expect(refreshes.slice(refreshesBefore)).toEqual([mailbox.email]);
+    expect(await mailboxOf(ID.biz)).toEqual(after);
+
+    await clearMailbox(ID.biz);
+    await clearGmailConnector(ID.biz);
+  });
 });
 
 describe('R0-CMF5 harness invariant', () => {
