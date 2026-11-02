@@ -94,6 +94,10 @@ class PrismaMock implements Partial<PrismaService> {
     membership: {
       findFirst: vi.fn(() => ({ id: 'mem_1', businessId: 'biz_1', userId: 'user_1', role: 'OWNER' })),
     },
+    // V1-37: a document that names no currency is written in the business currency.
+    business: {
+      findUnique: vi.fn(() => ({ currency: 'TTD' })),
+    },
     invoice: {
       update: vi.fn(({ where, data }: any) => {
         const invoice = this.invoices.find((i) => i.id === where.id);

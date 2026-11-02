@@ -25,7 +25,7 @@
  *   SENT / OVERDUE, unpaid    -> 409, no figures
  *   (review repairs)          -> the own-tenant rows decide, not the status: OVERDUE after a part
  *                                payment answers the receipt (CR-V49-1); a net of zero or less
- *                                (paid in full, then refunded, still PAID) is a 409 (SEC-V49-2);
+ *                                (paid in full, then refunded: SENT since V1-29) is a 409 (SEC-V49-2);
  *                                the operator's Resend receipt states the same own-tenant amount
  *                                and refuses what the invoice.paid listener would not send
  *                                (SEC-V49-1, CR-V49-2)
@@ -33,8 +33,9 @@
  *                             -> 404, the same body as an unknown token
  *   LEDGER (no refund row)    -> amountPaid = sum(SUCCESSFUL) = computeBalance.paid = the ledger
  *                                cash net of the invoice's payment postings
- *   LEDGER (refund row)       -> characterization naming V1-29 (M28: computeBalance subtracts a
- *                                flipped REFUNDED row twice; the ledger reverses it once)
+ *   LEDGER (refund row)       -> V1-29 (D-14): the refund is a separate negative row, so amountDue
+ *                                = total - the ledger cash net; amountPaid is computeBalance's gross
+ *                                paid (characterization: the net display is V1-36)
  *   read-only                 -> no FinancialTransaction, LedgerEntry, Payment or PaymentLink
  *                                write; the invoice row is unchanged
  *   TENANT (M31)              -> a Payment row tagged with another tenant is not counted; another
@@ -567,7 +568,8 @@ describe('fixture sanity (real rows)', () => {
     expect(del.status).toBe('PAID');
     expect(del.deletedAt).toBeTruthy();
     const refundRows = await db.payment.findMany({ where: { invoiceId: ID.invRefund }, orderBy: { createdAt: 'asc' } });
-    expect(refundRows.map((r: any) => [Number(r.amount), r.status])).toEqual([[50, 'SUCCESSFUL'], [30, 'REFUNDED']]);
+    // V1-29 (D-14): the refunded 30 stays SUCCESSFUL beside a separate -30 REFUNDED row.
+    expect(refundRows.map((r: any) => [Number(r.amount), r.status])).toEqual([[50, 'SUCCESSFUL'], [30, 'SUCCESSFUL'], [-30, 'REFUNDED']]);
     expect((await ledgerCounts(ID.bizA)).transactions).toBeGreaterThanOrEqual(8);
     expect(Object.keys(TOKEN)).toHaveLength(13);
     // review-repair fixtures
@@ -665,7 +667,7 @@ describe('LEDGER and TENANT (V1-49)', () => {
     expect(res.body).toMatchObject({ status: 'PAID', amountPaid: 100, amountDue: 0 });
   });
 
-  it('R-10 LEDGER (refund row, characterization naming V1-29): the receipt equals computeBalance, which drops the flipped REFUNDED row from paid AND subtracts it again (M28)', async () => {
+  it('R-10 LEDGER (refund row, V1-29): the receipt equals computeBalance, which counts the separate refund row once; amountDue = total - the ledger cash net', async () => {
     const res = await receipt(TOKEN[ID.invRefund]);
     expect(res.status).toBe(200);
     const balance = await balanceOf(ID.invRefund);
@@ -674,11 +676,13 @@ describe('LEDGER and TENANT (V1-49)', () => {
     // 50 + 30 received, 30 refunded through the operator route: the ledger nets 50.
     const cashNet = await ledgerCashNet(ID.invRefund, ID.bizA);
     expect(cashNet).toBe(50);
-    // computeBalance: paid 50 (the REFUNDED row is no longer SUCCESSFUL), refunded 30, net 20.
-    expect(balance).toMatchObject({ paid: 50, refunded: 30, net: 20, remaining: 80 });
-    // V1-29: the true remaining is 100 - 50 = 50; the receipt shows 80 until V1-29 settles the convention.
-    expect(res.body).toMatchObject({ status: 'PARTIALLY_PAID', amountPaid: 50, amountDue: 80, paidAt: null });
-    expect(res.body.amountDue).not.toBe(TOTAL - cashNet);
+    // computeBalance (V1-29, D-14): paid 80 (the refunded 30 stays SUCCESSFUL), refunded 30, net 50 = the ledger.
+    expect(balance).toMatchObject({ paid: 80, refunded: 30, net: 50, remaining: 50 });
+    expect(balance.net).toBe(cashNet);
+    // The base read net 20, remaining 80 (M28). amountPaid is the gross paid (80):
+    // characterization, the net display is V1-36 (one balance read contract).
+    expect(res.body).toMatchObject({ status: 'PARTIALLY_PAID', amountPaid: 80, amountDue: 50, paidAt: null });
+    expect(res.body.amountDue).toBe(TOTAL - cashNet);
   });
 
   it('R-11 read-only: reading a receipt three times writes no FinancialTransaction, LedgerEntry, Payment or PaymentLink and leaves the invoice row as it was', async () => {
@@ -758,11 +762,13 @@ describe('review repairs: the rows decide, and both receipt emails agree (V1-49)
     expect(view.body.balance).toMatchObject({ amountPaid: res.body.amountPaid, amountDue: res.body.amountDue });
   });
 
-  it('R-17 (SEC-V49-2; the PAID status is a characterization naming V1-29): paid in full, then that payment refunded, the row stays PAID; the receipt is a 409 with no figures, never "PAID, received 0, remaining 200", and Resend receipt sends nothing', async () => {
-    // deriveStatusAfterPayment reopens only on a positive net, so the row stays PAID (V1-29).
-    expect((await invoiceRow(ID.invRefundFull)).status).toBe('PAID');
-    // M28: the flipped row leaves paid and is subtracted again, so remaining is twice the total.
-    expect(await balanceOf(ID.invRefundFull)).toMatchObject({ paid: 0, refunded: 100, net: -100, remaining: 200 });
+  it('R-17 (SEC-V49-2; V1-29 / D-14): paid in full, then that payment refunded, the invoice is back to SENT with paidAt cleared; the receipt is a 409 with no figures, never "PAID, received 0, remaining 200", and Resend receipt sends nothing', async () => {
+    // V1-29 (D-14): a fully refunded invoice returns to SENT with paidAt cleared (the base kept PAID).
+    const row = await invoiceRow(ID.invRefundFull);
+    expect(row.status).toBe('SENT');
+    expect(row.paidAt).toBeNull();
+    // The refund is a separate row counted once: net 0, remaining = the total (the base read -100 / 200).
+    expect(await balanceOf(ID.invRefundFull)).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
     expect(await ledgerCashNet(ID.invRefundFull, ID.bizA)).toBe(0);
 
     const res = await receipt(TOKEN[ID.invRefundFull]);

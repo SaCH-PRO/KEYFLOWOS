@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConflictException } from '@nestjs/common';
 import {
   InvoiceWorkflowService,
+  balanceOfStoredRows,
   computeBalance,
   deriveStatusAfterPayment,
   isLegalTransition,
+  readStoredPayments,
   roundMoney,
 } from './invoice-workflow.service';
 
@@ -102,6 +104,199 @@ describe('computeBalance', () => {
     expect(b.isFullyPaid).toBe(true);
   });
 });
+
+/**
+ * V1-22-DM-MONEY-CENTS (M23, CF-54; D-13): the PAID / overpaid decisions are
+ * integer-cent comparisons. At the base they compared floats with a +/-0.005
+ * tolerance after a float `Math.round(x * 100) / 100`, which reads a half cent
+ * below the half (1.005 -> 1.00): a legacy total of 1.005 paid with 1.01 was
+ * flagged overpaid. Each balance figure is the exact decimal sum of the rows
+ * rounded once to cents; legacy sub-cent rows keep the status the old sum gave.
+ */
+describe('V1-22 computeBalance in integer cents', () => {
+  const ok = (amount: number) => ({ amount, status: 'SUCCESSFUL' });
+
+  it('three payments of 33.33 plus one of 0.01 on 100.00: PAID, remaining 0, not overpaid', () => {
+    const b = computeBalance(100, [ok(33.33), ok(33.33), ok(33.33), ok(0.01)], 'TTD');
+    expect(b).toEqual({ total: 100, paid: 100, refunded: 0, net: 100, remaining: 0, isFullyPaid: true, isOverpaid: false });
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', b)).toBe('PAID');
+  });
+
+  it('the same rows in another order give the same balance (no float order dependence)', () => {
+    const b = computeBalance(100, [ok(0.01), ok(33.33), ok(33.33), ok(33.33)], 'USD');
+    expect(b).toMatchObject({ paid: 100, net: 100, remaining: 0, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('three payments of 33.33 on 100.00 leave exactly 0.01, PARTIALLY_PAID', () => {
+    const b = computeBalance(100, [ok(33.33), ok(33.33), ok(33.33)]);
+    expect(b).toMatchObject({ paid: 99.99, net: 99.99, remaining: 0.01, isFullyPaid: false, isOverpaid: false });
+    expect(deriveStatusAfterPayment('SENT', b)).toBe('PARTIALLY_PAID');
+  });
+
+  it('one cent short is not paid; one cent over is overpaid; exact is neither short nor over', () => {
+    expect(computeBalance(100, [ok(99.99)])).toMatchObject({ isFullyPaid: false, isOverpaid: false, remaining: 0.01 });
+    expect(computeBalance(100, [ok(100.01)])).toMatchObject({ isFullyPaid: true, isOverpaid: true, remaining: 0 });
+    expect(computeBalance(100, [ok(100)])).toMatchObject({ isFullyPaid: true, isOverpaid: false, remaining: 0 });
+  });
+
+  it('RED-BEFORE: a legacy total of 1.005 is 1.01 in cents, so a payment of 1.01 settles it and is not an overpayment', () => {
+    const b = computeBalance(1.005, [ok(1.01)]);
+    expect(b).toMatchObject({ total: 1.01, net: 1.01, remaining: 0, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('a legacy total of 1.015 (7 x 0.145) reads 1.02 in cents, as a new write stores it; 1.01, what the base settled it with, still settles it (CR-V22-1)', () => {
+    // The float 1.015 is 1.01499999999999990...: Math.round(1.015 * 100) / 100 read it as 1.01 and settled it with 1.01.
+    const b = computeBalance(1.015, [ok(1.01)]);
+    expect(b).toMatchObject({ total: 1.02, paid: 1.01, remaining: 0, isFullyPaid: true, isOverpaid: false });
+    expect(deriveStatusAfterPayment('PAID', b)).toBe('PAID');
+    // 1.00 settles neither reading.
+    expect(computeBalance(1.015, [ok(1)])).toMatchObject({ total: 1.02, remaining: 0.02, isFullyPaid: false });
+  });
+
+  it('a legacy unrounded total (0.1 + 0.2 at 12.5% stored as 0.3375) paid with 0.34 stays PAID, not overpaid', () => {
+    const b = computeBalance(0.30000000000000004 + 0.037500000000000006, [ok(0.34)]);
+    expect(b).toMatchObject({ total: 0.34, net: 0.34, remaining: 0, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('a thousand payments of 0.10 settle 100.00 exactly', () => {
+    const b = computeBalance(100, Array.from({ length: 1000 }, () => ok(0.1)));
+    expect(b).toMatchObject({ paid: 100, remaining: 0, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('legacy sub-cent rows are summed exactly and rounded once (0.004 + 0.004 settles 0.01, as before)', () => {
+    const b = computeBalance(0.01, [ok(0.004), ok(0.004)]);
+    expect(b).toMatchObject({ paid: 0.01, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('refunds are summed in cents too, whatever their stored sign', () => {
+    const b = computeBalance(100, [ok(33.33), ok(33.33), ok(33.34), { amount: -0.1, status: 'REFUNDED' }, { amount: 0.2, status: 'REFUNDED' }]);
+    expect(b).toMatchObject({ paid: 100, refunded: 0.3, net: 99.7, remaining: 0.3, isFullyPaid: false });
+  });
+
+  it('every figure is a canonical cent value (what the Float columns store)', () => {
+    const b = computeBalance(0.3375, [ok(0.1), ok(0.2)]);
+    for (const v of [b.total, b.paid, b.refunded, b.net, b.remaining]) {
+      expect(Math.round(v * 100) / 100).toBe(v);
+    }
+    expect(b.remaining).toBe(0.04);
+  });
+
+  it('RED-BEFORE: roundMoney (re-exported for its callers) rounds a half cent by decimal value, symmetrically', () => {
+    expect(roundMoney(1.005)).toBe(1.01);
+    expect(roundMoney(-1.005)).toBe(-1.01);
+    expect(roundMoney(2.675, 'USD')).toBe(2.68);
+  });
+});
+
+/**
+ * V1-22 review (CR-V22-1): a stored PAID invoice stays PAID. A legacy total
+ * that is not a whole cent has two cent readings (money.ts readTotalCents):
+ * its decimal half away from zero, which is shown, and the base's
+ * Math.round(total * 100), which every pre-V1-22 payment, mark-paid amount and
+ * status was computed against. Either settles it; only above both overpays.
+ */
+describe('V1-22 review CR-V22-1: legacy sub-cent totals keep the statuses the base gave them', () => {
+  const ok = (amount: number) => ({ amount, status: 'SUCCESSFUL' });
+  /** The base computeBalance (f5c93ba0), verbatim, as the oracle for what a stored row's status was. */
+  const baseRound = (x: number) => Math.round(x * 100) / 100;
+  const baseBalance = (total: number, paidRows: number[]) => {
+    const net = baseRound(paidRows.reduce((s, a) => s + a, 0));
+    const t = baseRound(total);
+    return {
+      isFullyPaid: net + 0.005 >= t && t > 0,
+      isOverpaid: net - 0.005 > t,
+      remaining: Math.max(0, baseRound(t - net)),
+    };
+  };
+
+  it('RED-BEFORE (HEAD be6195d6): 8.36 + 12.5% stored as 9.405, paid 9.40 by the base mark-paid: PAID, nothing remaining, a reconcile keeps PAID', () => {
+    const total = 8.36 + (8.36 * 12.5) / 100;
+    expect(total).toBe(9.405);
+    const b = computeBalance(total, [ok(9.4)]);
+    expect(b).toEqual({ total: 9.41, paid: 9.4, refunded: 0, net: 9.4, remaining: 0, isFullyPaid: true, isOverpaid: false });
+    expect(deriveStatusAfterPayment('PAID', b)).toBe('PAID');
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', b)).toBe('PAID');
+  });
+
+  it('the same 9.405: 9.41 (the decimal reading, what mark-paid records now) settles it too and is not an overpayment; 9.42 is', () => {
+    expect(computeBalance(9.405, [ok(9.41)])).toMatchObject({ remaining: 0, isFullyPaid: true, isOverpaid: false });
+    expect(computeBalance(9.405, [ok(9.42)])).toMatchObject({ remaining: 0, isFullyPaid: true, isOverpaid: true });
+  });
+
+  it('the same 9.405 short of both readings stays PARTIALLY_PAID with total - net remaining', () => {
+    const b = computeBalance(9.405, [ok(9.39)]);
+    expect(b).toMatchObject({ total: 9.41, net: 9.39, remaining: 0.02, isFullyPaid: false, isOverpaid: false });
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', b)).toBe('PARTIALLY_PAID');
+  });
+
+  it('the pure rule the other way: a total of 0.40499999999999997 (decimal 0.40, base 0.41) paid 0.41 is PAID and not overpaid', () => {
+    // Not a stored row: Prisma writes a model float with 15 significant digits and reads this back as 0.405
+    // (both readings 0.41). computeBalance is pure, so the band holds whichever reading is the higher.
+    const total = 0.36 + (0.36 * 12.5) / 100;
+    expect(total).toBe(0.40499999999999997);
+    const b = computeBalance(total, [ok(0.41)]);
+    expect(b).toMatchObject({ total: 0.4, paid: 0.41, remaining: 0, isFullyPaid: true, isOverpaid: false });
+  });
+
+  it('the band is the two readings, never wider: a legacy 0.3375 reads 0.34 both ways, so 0.33 does not settle it (PARTIALLY_PAID stays)', () => {
+    const total = 0.1 + 0.2 + ((0.1 + 0.2) * 12.5) / 100;
+    const b = computeBalance(total, [ok(0.33)]);
+    expect(b).toMatchObject({ total: 0.34, remaining: 0.01, isFullyPaid: false, isOverpaid: false });
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', b)).toBe('PARTIALLY_PAID');
+    expect(computeBalance(total, [ok(0.35)])).toMatchObject({ isOverpaid: true });
+  });
+
+  it('a whole-cent total has one reading: 100.00 is not settled by 99.99 and is overpaid by 100.01', () => {
+    expect(computeBalance(100, [ok(99.99)])).toMatchObject({ remaining: 0.01, isFullyPaid: false });
+    expect(computeBalance(100, [ok(100.01)])).toMatchObject({ isOverpaid: true });
+    expect(computeBalance(0, [])).toMatchObject({ isFullyPaid: false, remaining: 0 });
+    expect(computeBalance(0, [ok(1)])).toMatchObject({ isFullyPaid: false, isOverpaid: true });
+  });
+
+  it('property: over every legacy taxed total 0.01..250.00 at 5 rates, a row the base settled is settled, not overpaid, nothing remaining', () => {
+    const divergent: string[] = [];
+    let readingsDiffer = 0;
+    for (const rate of [12.5, 10, 7, 8.25, 15]) {
+      for (let s = 1; s <= 25_000; s++) {
+        const subtotal = s / 100;
+        const total = subtotal + (subtotal * rate) / 100;
+        const paidRows = [baseRound(total)]; // what the base mark-paid recorded
+        const before = baseBalance(total, paidRows);
+        const after = computeBalance(total, paidRows.map(ok));
+        if (!before.isFullyPaid) continue;
+        if (toCentsRound(total) !== Math.round(total * 100)) readingsDiffer += 1;
+        if (after.isFullyPaid !== true || after.isOverpaid !== false || after.remaining !== 0) {
+          divergent.push(`${subtotal}@${rate}: ${JSON.stringify(after)}`);
+        }
+      }
+    }
+    // The scan reaches the rows CR-V22-1 is about (the two readings differ on a few hundred of them).
+    expect(readingsDiffer).toBeGreaterThan(100);
+    expect(divergent.slice(0, 5)).toEqual([]);
+  });
+
+  it('property: over the same totals, a status the base did not settle at one cent below both readings is not settled now either', () => {
+    const flipped: string[] = [];
+    for (const rate of [12.5, 10, 7, 8.25, 15]) {
+      for (let s = 1; s <= 25_000; s++) {
+        const subtotal = s / 100;
+        const total = subtotal + (subtotal * rate) / 100;
+        const low = Math.min(toCentsRound(total), Math.round(total * 100)) - 1;
+        if (low <= 0) continue;
+        const paidRows = [low / 100];
+        const before = baseBalance(total, paidRows);
+        const after = computeBalance(total, paidRows.map(ok));
+        if (before.isFullyPaid !== after.isFullyPaid) flipped.push(`${subtotal}@${rate}`);
+      }
+    }
+    expect(flipped.slice(0, 5)).toEqual([]);
+  });
+});
+
+/** The decimal reading of a number in cents, half away from zero (money.ts toCents), via roundMoney. */
+function toCentsRound(x: number): number {
+  return Math.round(roundMoney(x) * 100);
+}
 
 describe('deriveStatusAfterPayment', () => {
   it('keeps VOID locked', () => {
@@ -315,5 +510,170 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
     expect(h.tx.calls).toEqual([]);
     expect(h.events.emit).toHaveBeenCalledTimes(1);
     expect(h.events.emit.mock.calls[0][0]).toBe('invoice.paid');
+  });
+});
+
+/**
+ * V1-29-DM-REFUND-CONVENTION (M28, D-14): a manual refund is a separate
+ * negative REFUNDED row beside the SUCCESSFUL original (the provider
+ * convention), so computeBalance counts it once. A fully refunded invoice
+ * returns to SENT with paidAt cleared (no REFUNDED invoice state, no enum
+ * migration); a partial refund of a PAID invoice reopens it to
+ * PARTIALLY_PAID, also with paidAt cleared. Only the payment rows (the
+ * reconcile) may move an invoice out of PAID: the generic transition map
+ * still forbids PAID -> SENT for transition() callers. The real-database
+ * proof is test/commerce-refund.integration.test.ts.
+ */
+describe('V1-29 refund convention (D-14)', () => {
+  const ok = (amount: number) => ({ amount, status: 'SUCCESSFUL' });
+  const refunded = (amount: number) => ({ amount: -Math.abs(amount), status: 'REFUNDED' });
+
+  it('computeBalance counts a separate refund row once: 100 paid, -100 refunded -> paid 100, refunded 100, net 0, remaining 100', () => {
+    expect(computeBalance(100, [ok(100), refunded(100)])).toMatchObject({
+      paid: 100, refunded: 100, net: 0, remaining: 100, isFullyPaid: false, isOverpaid: false,
+    });
+  });
+
+  it('RED-BEFORE: a fully refunded PAID invoice derives SENT (the base kept PAID: it reopened only on a positive net)', () => {
+    expect(deriveStatusAfterPayment('PAID', computeBalance(100, [ok(100), refunded(100)]))).toBe('SENT');
+  });
+
+  it('RED-BEFORE: a fully refunded PARTIALLY_PAID invoice derives SENT', () => {
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', computeBalance(100, [ok(40), refunded(40)]))).toBe('SENT');
+  });
+
+  it('a partial refund of a PAID invoice derives PARTIALLY_PAID (60 + 40 paid, 40 refunded: remaining 40)', () => {
+    const b = computeBalance(100, [ok(60), ok(40), refunded(40)]);
+    expect(b).toMatchObject({ net: 60, remaining: 40 });
+    expect(deriveStatusAfterPayment('PAID', b)).toBe('PARTIALLY_PAID');
+  });
+
+  it('an overpaid invoice refunded down to the total stays PAID', () => {
+    expect(deriveStatusAfterPayment('PAID', computeBalance(100, [ok(150), refunded(50)]))).toBe('PAID');
+  });
+
+  it('net 0 with no refund leaves the status alone (nothing was refunded); SENT, OVERDUE and VOID are never moved by a full refund', () => {
+    expect(deriveStatusAfterPayment('PARTIALLY_PAID', computeBalance(100, [{ amount: 40, status: 'PENDING' }]))).toBe('PARTIALLY_PAID');
+    expect(deriveStatusAfterPayment('SENT', computeBalance(100, [ok(40), refunded(40)]))).toBe('SENT');
+    expect(deriveStatusAfterPayment('OVERDUE', computeBalance(100, [ok(40), refunded(40)]))).toBe('OVERDUE');
+    expect(deriveStatusAfterPayment('VOID', computeBalance(100, [ok(40), refunded(40)]))).toBe('VOID');
+  });
+
+  it('the generic transition map is unchanged: PAID -> SENT and PARTIALLY_PAID -> SENT stay illegal for transition() callers', () => {
+    expect(isLegalTransition('PAID', 'SENT')).toBe(false);
+    expect(isLegalTransition('PARTIALLY_PAID', 'SENT')).toBe(false);
+  });
+
+  type Inv = {
+    id: string;
+    status: string;
+    total: number;
+    currency: string;
+    businessId: string;
+    paidAt: Date | null;
+    payments: Array<{ amount: number; status: string }>;
+  };
+
+  function build(invoice: Inv) {
+    const update = vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...invoice, ...data, items: [], contact: null, booking: null }));
+    const tx = {
+      invoice: { findUnique: vi.fn(async () => invoice), update },
+      invoiceItem: { findMany: vi.fn(async () => []) },
+    };
+    const events = { emit: vi.fn() };
+    const expensePosting = { onProductSold: vi.fn(async () => null) };
+    const service = new InvoiceWorkflowService(
+      { client: { $transaction: vi.fn() } } as never,
+      events as never,
+      {} as never,
+      expensePosting as never,
+    );
+    return { service, tx, update, events, expensePosting };
+  }
+
+  const paidInvoice = (payments: Inv['payments'], status = 'PAID'): Inv => ({
+    id: 'inv_1',
+    status,
+    total: 100,
+    currency: 'TTD',
+    businessId: 'biz_1',
+    paidAt: new Date('2026-10-01T00:00:00Z'),
+    payments,
+  });
+
+  it('RED-BEFORE: the refund reconcile moves a fully refunded PAID invoice to SENT, clears paidAt, posts no COGS and queues no event (no invoice.sent email, no paid event)', async () => {
+    const h = build(paidInvoice([ok(100), refunded(100)]));
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: buffer, onIllegalTransition: 'keep' });
+    expect(result).toMatchObject({ status: 'SENT', changed: true, balance: { net: 0, remaining: 100 } });
+    expect(h.update).toHaveBeenCalledTimes(1);
+    expect(h.update.mock.calls[0][0].data).toEqual({ status: 'SENT', paidAt: null });
+    expect(h.expensePosting.onProductSold).not.toHaveBeenCalled();
+    expect(buffer).toEqual([]);
+    expect(h.events.emit).not.toHaveBeenCalled();
+  });
+
+  it('the same reopen without onIllegalTransition (provider refund webhooks) also reaches SENT, not a 409', async () => {
+    const h = build(paidInvoice([ok(40), refunded(40)], 'PARTIALLY_PAID'));
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: [] });
+    expect(result).toMatchObject({ status: 'SENT', changed: true });
+    expect(h.update.mock.calls[0][0].data).toEqual({ status: 'SENT', paidAt: null });
+  });
+
+  it('RED-BEFORE: a partial refund reopening PAID -> PARTIALLY_PAID clears paidAt and queues invoice.payment_recorded with the balance', async () => {
+    const h = build(paidInvoice([ok(60), ok(40), refunded(40)]));
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: buffer, onIllegalTransition: 'keep' });
+    expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: true, balance: { net: 60, remaining: 40 } });
+    expect(h.update.mock.calls[0][0].data).toEqual({ status: 'PARTIALLY_PAID', paidAt: null });
+    expect(buffer.map((e) => e.name)).toEqual(['invoice.payment_recorded']);
+  });
+
+  it('a payment settling the invoice still stamps paidAt (PARTIALLY_PAID -> PAID)', async () => {
+    const h = build({ ...paidInvoice([ok(60), ok(40)], 'PARTIALLY_PAID'), paidAt: null });
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: [] });
+    expect(result).toMatchObject({ status: 'PAID', changed: true });
+    expect(h.update.mock.calls[0][0].data.paidAt).toBeInstanceOf(Date);
+  });
+
+  it('transition() (UI / mark-paid / void callers) still refuses PAID -> SENT with 409', async () => {
+    const h = build(paidInvoice([ok(100)]));
+    const tx = { invoice: { findUnique: vi.fn(async () => ({ id: 'inv_1', status: 'PAID', businessId: 'biz_1' })), update: vi.fn() } };
+    await expect(h.service.transition('inv_1', 'SENT', { tx: tx as never, eventBuffer: [] })).rejects.toBeInstanceOf(ConflictException);
+    expect(tx.invoice.update).not.toHaveBeenCalled();
+  });
+  // V1-29 review (CR-V29-4): a row the manual refund flipped to REFUNDED
+  // before V1-29 (positive amount, no separate refund row) is read from the
+  // table as its payment plus its refund, not subtracted twice.
+  const flipped = (amount: number) => ({ amount, status: 'REFUNDED' });
+
+  it('CR-V29-4: readStoredPayments reads a positive REFUNDED row as the SUCCESSFUL payment plus a negative refund of the same amount; every other row passes unchanged', () => {
+    expect(readStoredPayments([flipped(60), ok(40), refunded(40), { amount: 5, status: 'PENDING' }])).toEqual([
+      { amount: 60, status: 'SUCCESSFUL' },
+      { amount: -60, status: 'REFUNDED' },
+      { amount: 40, status: 'SUCCESSFUL' },
+      { amount: -40, status: 'REFUNDED' },
+      { amount: 5, status: 'PENDING' },
+    ]);
+  });
+
+  it('CR-V29-4 (RED-BEFORE in the readers): a legacy flipped 60 on a 100 invoice reads net 0, remaining 100 from the table (computeBalance alone reads net -60, remaining 160)', () => {
+    expect(computeBalance(100, [flipped(60)])).toMatchObject({ net: -60, remaining: 160 });
+    expect(balanceOfStoredRows(100, [flipped(60)], 'TTD')).toMatchObject({ paid: 60, refunded: 60, net: 0, remaining: 100, isFullyPaid: false });
+    // Legacy 60 refunded beside a SUCCESSFUL 40: 40 is still received.
+    expect(balanceOfStoredRows(100, [flipped(60), ok(40)])).toMatchObject({ paid: 100, refunded: 60, net: 40, remaining: 60 });
+  });
+
+  it('CR-V29-4: rows written since V1-29 (negative refund rows) read exactly as computeBalance reads them', () => {
+    const rows = [ok(60), ok(40), refunded(40), { amount: 999, status: 'FAILED' }];
+    expect(balanceOfStoredRows(100, rows)).toEqual(computeBalance(100, rows));
+  });
+
+  it('CR-V29-4: the reconcile reads a legacy flipped row as payment plus refund: 60 flipped + 40 received on a PAID invoice -> PARTIALLY_PAID, remaining 60 (computeBalance alone: net -20 -> SENT)', async () => {
+    expect(deriveStatusAfterPayment('PAID', computeBalance(100, [flipped(60), ok(40)]))).toBe('SENT');
+    const h = build(paidInvoice([flipped(60), ok(40)]));
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: [], onIllegalTransition: 'keep' });
+    expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: true, balance: { paid: 100, refunded: 60, net: 40, remaining: 60 } });
+    expect(h.update.mock.calls[0][0].data).toEqual({ status: 'PARTIALLY_PAID', paidAt: null });
   });
 });

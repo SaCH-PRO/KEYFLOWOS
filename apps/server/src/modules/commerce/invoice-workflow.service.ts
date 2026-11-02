@@ -4,6 +4,14 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
+import { fromCents, readTotalCents, sumMoney, toCents } from './money';
+
+/**
+ * Currency-aware rounding to cents, half away from zero on the decimal value
+ * (V1-22: 1.005 -> 1.01; the float `Math.round(x * 100) / 100` it replaces
+ * read 1.00). Lives in ./money; re-exported here for its existing importers.
+ */
+export { roundMoney } from './money';
 
 /**
  * Canonical invoice statuses. Mirrors the string-typed `Invoice.status`
@@ -49,18 +57,57 @@ const ALLOWED_TRANSITIONS: Record<InvoiceStatus, ReadonlySet<InvoiceStatus>> = {
   FAILED: new Set<InvoiceStatus>(['SENT', 'PARTIALLY_PAID', 'PAID', 'VOID']),
   // PAID can be re-opened to PARTIALLY_PAID by a refund (driven by
   // reconcileFromPayments after a refund row lands). All other transitions
-  // out of PAID are terminal.
+  // out of PAID are terminal for transition() callers; a full refund's
+  // return to SENT is the reconcile's alone (REFUND_REOPENS_TO_SENT, V1-29).
   PAID: new Set<InvoiceStatus>(['PARTIALLY_PAID']),
   VOID: new Set<InvoiceStatus>([]),
 };
 
-/** Currency-aware rounding to 2 decimals. Avoids float drift on TTD/USD. */
-export function roundMoney(amount: number, currency = 'TTD'): number {
-  // No 0-decimal currencies in scope (TTD/USD/JMD/etc all 2dp). Centralised so
-  // adding JPY etc. only changes one place.
-  void currency;
-  return Math.round(amount * 100) / 100;
-}
+/**
+ * V1-29-DM-REFUND-CONVENTION (D-14): the statuses a refund returns to SENT
+ * once nothing net is left received. There is no REFUNDED invoice state (the
+ * InvoiceStatus enum has none; adding one would be a migration): a fully
+ * refunded invoice is owed again, so it is SENT with paidAt cleared. Only the
+ * payment rows can drive this move (reconcileFromPayments); the generic
+ * transition map above keeps PAID -> SENT illegal, so no UI or status route
+ * can un-pay an invoice whose money is still recorded as received.
+ */
+const REFUND_REOPENS_TO_SENT: ReadonlySet<InvoiceStatus> = new Set<InvoiceStatus>(['PAID', 'PARTIALLY_PAID']);
+
+/**
+ * V1-42-DM-LIFECYCLE-OWNER-CAS: the statuses the AI undo
+ * (CommerceService.undoInvoice) returns to DRAFT: every status but DRAFT
+ * (soft-deleted instead) and VOID (terminal, so undoing it is a 409). The undo
+ * has always put an invoice back to DRAFT for a person to review
+ * (payments-mark-paid MP-16, payments-manual PM-20); it now does so here,
+ * compare-and-set, rather than by a raw write in CommerceService.
+ *
+ * V1-42 review (SEC-V42-1, CR-V42-3): the undo stays non-terminal. The packet
+ * voided an issued invoice (SENT, PENDING, OVERDUE, FAILED) instead, but VOID
+ * is terminal, and both callers (POST /ai/businesses/:businessId/agent/undo/
+ * :undoId and the plan-step undo) check no revenue scope and never bind the
+ * undo's tenant to the route's, so a member without revenue authority, or
+ * another tenant's owner, could void an invoice for good. Choosing by status
+ * also voided an OVERDUE or FAILED invoice a payment had touched, reversing its
+ * whole receivable while the payment stayed. Until those routes require
+ * revenue:write and bind the tenant (a follow-up packet; they are outside
+ * V1-42), every undone invoice returns to DRAFT: status only, no posting, no
+ * event. Its payments and its accrual recognition stay as they are, so
+ * re-issuing it posts nothing twice (RevenuePostingService.onInvoiceFinalized
+ * is idempotent per invoice) and voiding it later reverses the recognition
+ * once.
+ */
+const UNDO_RETURNS_TO_DRAFT: ReadonlySet<string> = new Set<string>([
+  'SENT',
+  'PENDING',
+  'OVERDUE',
+  'FAILED',
+  'PAID',
+  'PARTIALLY_PAID',
+  'PARTIALLY_CREDITED',
+  'FULLY_CREDITED',
+  'PARTIAL',
+]);
 
 export interface PaymentLike {
   amount: number;
@@ -84,37 +131,126 @@ export interface BalanceSummary {
  *   `amount` by convention; we abs them so the sign convention is irrelevant)
  * - PENDING / FAILED are ignored
  *
+ * V1-29 (M28, D-14): every refund, manual or provider, is a separate negative
+ * REFUNDED row beside the SUCCESSFUL original, which stays SUCCESSFUL, so the
+ * refunded money is in `paid` once and in `refunded` once: 100 paid and 100
+ * refunded is net 0, remaining 100. A row written before V1-29 by the manual
+ * refund flipped its original to REFUNDED (a positive REFUNDED row with no
+ * SUCCESSFUL twin) and is still read sign-agnostically here, i.e. subtracted
+ * twice; stored Payment rows are therefore read through balanceOfStoredRows,
+ * which reads such a row as the payment plus its refund (V1-29 review
+ * CR-V29-4). Mark-paid still refuses an invoice carrying one (CommerceService
+ * .markPaidRemaining). Nothing writes such a row any more.
+ *
  * `remaining` is clamped at zero (overpayments don't drive remaining negative).
  * `isOverpaid` flags overpayment for downstream surfacing.
+ *
+ * V1-22-DM-MONEY-CENTS (M23, D-13): every figure is integer cents. `paid` and
+ * `refunded` are the exact decimal sums of their rows rounded once to cents
+ * (sumMoney), the total is rounded to cents half away from zero, and PAID /
+ * overpaid are exact cent comparisons: no float sum, no +/-0.005 tolerance.
+ * Three payments of 33.33 and one of 0.01 settle 100.00 exactly.
+ *
+ * V1-22 review (CR-V22-1): the total is read by readTotalCents. A whole-cent
+ * total (every V1-22 write) has one reading. A legacy total that is not a
+ * whole cent (8.36 + 12.5% stored as 9.405) is shown as its decimal rounded
+ * half away from zero (9.41) but is settled by the reading the base settled it
+ * with too (9.40, what mark-paid recorded), so a stored PAID invoice stays PAID
+ * with nothing remaining; it is overpaid only above both readings.
+ * `remaining` is 0 exactly when `isFullyPaid`, otherwise total - net.
  */
 export function computeBalance(total: number, payments: PaymentLike[], currency = 'TTD'): BalanceSummary {
-  let paid = 0;
-  let refunded = 0;
-  for (const p of payments) {
-    if (p.status === 'SUCCESSFUL') paid += Number(p.amount) || 0;
-    else if (p.status === 'REFUNDED') refunded += Math.abs(Number(p.amount) || 0);
-  }
-  paid = roundMoney(paid, currency);
-  refunded = roundMoney(refunded, currency);
-  const net = roundMoney(paid - refunded, currency);
-  const totalRounded = roundMoney(total, currency);
-  // Tolerance ≈ half a cent — covers float drift in currency conversions.
-  const isFullyPaid = net + 0.005 >= totalRounded && totalRounded > 0;
-  const remaining = Math.max(0, roundMoney(totalRounded - net, currency));
+  void currency; // every currency in scope (D-13: TTD, USD) has 2 decimals
+  const paid = sumMoney(payments.filter((p) => p.status === 'SUCCESSFUL').map((p) => Number(p.amount) || 0));
+  const refunded = sumMoney(
+    payments.filter((p) => p.status === 'REFUNDED').map((p) => Math.abs(Number(p.amount) || 0)),
+  );
+  const t = readTotalCents(total);
+  const netCents = toCents(paid) - toCents(refunded);
+  const isFullyPaid = netCents >= t.settleCents;
   return {
-    total: totalRounded,
+    total: fromCents(t.cents),
     paid,
     refunded,
-    net,
-    remaining,
+    net: fromCents(netCents),
+    remaining: isFullyPaid ? 0 : fromCents(Math.max(0, t.cents - netCents)),
     isFullyPaid,
-    isOverpaid: net - 0.005 > totalRounded,
+    isOverpaid: netCents > t.maxCents,
   };
 }
 
 /**
+ * V1-29 review (CR-V29-4): stored Payment rows as the balance reads them.
+ * Before V1-29 the manual refund flipped its original row to REFUNDED and
+ * kept the positive amount; computeBalance, which reads refunds whatever
+ * their sign, then dropped that row from `paid` and subtracted it again (60
+ * paid and refunded on a 100 invoice: net -60, remaining 160). Every refund
+ * writer since (the Stripe and PayPal refund webhooks, refundCharge, the
+ * manual refund) writes a separate NEGATIVE REFUNDED row beside a SUCCESSFUL
+ * original, so a positive REFUNDED row in the table is such a flipped
+ * original. It is read as what it stands for under D-14: the payment
+ * received (SUCCESSFUL) plus its refund (a negative REFUNDED row of the same
+ * amount), counted once in `paid` and once in `refunded`, net 0. Every other
+ * row passes unchanged, so for rows written since V1-29 this is computeBalance
+ * itself. computeBalance alone stays sign-agnostic for figures that are not
+ * stored rows.
+ */
+export function readStoredPayments(rows: ReadonlyArray<{ amount: number | string; status: string }>): PaymentLike[] {
+  return rows.flatMap((p): PaymentLike[] => {
+    const amount = Number(p.amount) || 0;
+    if (p.status === 'REFUNDED' && amount > 0) {
+      return [
+        { amount, status: 'SUCCESSFUL' },
+        { amount: -amount, status: 'REFUNDED' },
+      ];
+    }
+    return [{ amount, status: p.status }];
+  });
+}
+
+/**
+ * computeBalance over stored Payment rows (readStoredPayments): the balance
+ * the reconcile derives the status from and every operator and public
+ * balance read in CommerceService serves (V1-29 review CR-V29-4).
+ */
+export function balanceOfStoredRows(
+  total: number,
+  rows: ReadonlyArray<{ amount: number | string; status: string }>,
+  currency?: string | null,
+): BalanceSummary {
+  return computeBalance(total, readStoredPayments(rows), currency ?? undefined);
+}
+
+/**
+ * V1-36-DM-BALANCE-READ-CONTRACT (CF-17): the same contract for a figure that
+ * is summed in the database (money received in a period, across invoices).
+ * The Payment rows whose amounts add up to balanceOfStoredRows(...).net: the
+ * SUCCESSFUL rows (money in) and the negative REFUNDED rows (money out, D-14).
+ * A positive REFUNDED row, flipped before V1-29, stands for its payment plus
+ * its refund (net 0, readStoredPayments) and is left out; PENDING and FAILED
+ * rows are not cash. So `_sum.amount` over `{ ...where, ...CASH_NET_PAYMENT_WHERE }`
+ * is the cash received net of refunds, the ledger's cash net for those
+ * payments; round it with roundMoney. It equals the sum of the rows' nets
+ * exactly for whole-cent rows (every row written since V1-22); a legacy
+ * sub-cent row may move it by one cent (computeBalance rounds paid and
+ * refunded separately, one sum rounds once). Summing SUCCESSFUL rows alone counted
+ * refunded money as received (balance-arithmetic.spec.ts ratchets that form
+ * out and pins this filter to balanceOfStoredRows). It carries an `OR`: spread
+ * it into a where that has none of its own.
+ */
+export const CASH_NET_PAYMENT_WHERE = {
+  OR: [{ status: 'SUCCESSFUL' }, { status: 'REFUNDED', amount: { lt: 0 } }],
+} satisfies Prisma.PaymentWhereInput;
+
+/**
  * Compute the resulting invoice status after a payment is applied. Pure
  * function — no DB. Used by `applyPayment` and by tests.
+ *
+ * V1-29 (D-14): a refund that leaves nothing net received (net <= 0 with a
+ * refund on the invoice) returns a PAID or PARTIALLY_PAID invoice to SENT.
+ * The base reopened only on a positive net, so a full refund left the
+ * invoice PAID. SENT, OVERDUE and the statuses outside the payment flow keep
+ * their status; with no refund a non-positive net changes nothing.
  */
 export function deriveStatusAfterPayment(
   currentStatus: InvoiceStatus,
@@ -124,12 +260,37 @@ export function deriveStatusAfterPayment(
   if (balance.isFullyPaid) return 'PAID';
   // Refund reopening: PAID drops below total -> PARTIALLY_PAID.
   if (balance.net > 0) return 'PARTIALLY_PAID';
+  if (balance.refunded > 0 && REFUND_REOPENS_TO_SENT.has(currentStatus)) return 'SENT';
   return currentStatus;
+}
+
+/**
+ * V1-42-DM-LIFECYCLE-OWNER-CAS: run a status write whose `where` carries the
+ * status the caller read (`{ id, status: <read> }`). When that row no longer
+ * holds that status (another writer committed in between), Prisma finds no
+ * record to update (P2025) and the move is refused 409: nothing is written,
+ * the caller's transaction rolls back, and no event or posting follows.
+ */
+async function compareAndSet<T>(write: () => Promise<T>, conflict: string): Promise<T> {
+  try {
+    return await write();
+  } catch (err) {
+    if ((err as { code?: string } | null)?.code === 'P2025') throw new ConflictException(conflict);
+    throw err;
+  }
 }
 
 export function isLegalTransition(from: InvoiceStatus, to: InvoiceStatus): boolean {
   if (from === to) return true;
   return ALLOWED_TRANSITIONS[from]?.has(to) ?? false;
+}
+
+/**
+ * The moves reconcileFromPayments may make: the transition map, plus a
+ * refund's return to SENT (V1-29, D-14), which only the payment rows drive.
+ */
+export function isLegalReconcileTransition(from: InvoiceStatus, to: InvoiceStatus): boolean {
+  return isLegalTransition(from, to) || (to === 'SENT' && REFUND_REOPENS_TO_SENT.has(from));
 }
 
 @Injectable()
@@ -201,7 +362,7 @@ export class InvoiceWorkflowService {
       include: { payments: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
-    return computeBalance(Number(invoice.total), invoice.payments as PaymentLike[], invoice.currency);
+    return balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
   }
 
   /**
@@ -240,23 +401,27 @@ export class InvoiceWorkflowService {
       include: { payments: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
-    const balance = computeBalance(
-      Number(invoice.total),
-      invoice.payments as PaymentLike[],
-      invoice.currency,
-    );
+    // V1-29 review (CR-V29-4): a row the manual refund flipped before V1-29
+    // is read as its payment plus its refund, not subtracted twice.
+    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     const current = invoice.status as InvoiceStatus;
     const next = deriveStatusAfterPayment(current, balance);
     if (next === current) {
       return { status: current, balance, changed: false };
     }
-    if (extra.onIllegalTransition === 'keep' && !isLegalTransition(current, next)) {
-      this.logger.warn(
-        `reconcileFromPayments: invoice ${invoiceId} kept at ${current}; ${current} -> ${next} is not a legal transition (net ${balance.net} of ${balance.total})`,
-      );
-      return { status: current, balance, changed: false };
+    if (!isLegalReconcileTransition(current, next)) {
+      if (extra.onIllegalTransition === 'keep') {
+        this.logger.warn(
+          `reconcileFromPayments: invoice ${invoiceId} kept at ${current}; ${current} -> ${next} is not a legal transition (net ${balance.net} of ${balance.total})`,
+        );
+        return { status: current, balance, changed: false };
+      }
+      this.assertLegalTransition(current, next);
     }
-    this.assertLegalTransition(current, next);
+    // V1-29 (D-14): paidAt says when the invoice was settled. A refund that
+    // reopens it (PAID -> PARTIALLY_PAID, or back to SENT) clears it, and
+    // the next settlement stamps it again.
+    const paidAt = next === 'PAID' ? { paidAt: new Date() } : current === 'PAID' || next === 'SENT' ? { paidAt: null } : {};
     // FIN3 — wrap status update + COGS posting in a single $transaction
     // so a posting failure rolls back the PAID write. Listeners only see
     // PAID after the ledger entries have been committed alongside it.
@@ -265,7 +430,7 @@ export class InvoiceWorkflowService {
         where: { id: invoiceId },
         data: {
           status: next,
-          ...(next === 'PAID' ? { paidAt: new Date() } : {}),
+          ...paidAt,
         },
         include: { items: true, contact: true, booking: true },
       });
@@ -302,6 +467,17 @@ export class InvoiceWorkflowService {
    * Generic transition entry-point used by callers that already know the
    * target status (UI mark-paid, void, send, mark-overdue scheduler, etc).
    * Enforces the allowed-transitions map and emits the matching event.
+   *
+   * V1-42-DM-LIFECYCLE-OWNER-CAS (CF-39): one caller wins a move. The status
+   * is written compare-and-set on the status this call read
+   * (`UPDATE ... WHERE id = $1 AND status = <read>`): a concurrent writer that
+   * committed in between (a second transition, a payment's reconcile) leaves
+   * nothing to update, and this call is refused 409 with no write, posting or
+   * event. A move to the status the invoice already holds is refused 409 too
+   * (the loser of a race that read after the winner committed), except the
+   * map's explicit self-moves (PARTIALLY_PAID -> PARTIALLY_PAID). So of two
+   * transition(id, 'OVERDUE') calls exactly one succeeds and invoice.overdue
+   * is emitted once, whatever the interleaving.
    */
   async transition(
     invoiceId: string,
@@ -328,18 +504,27 @@ export class InvoiceWorkflowService {
         select: { id: true, status: true, businessId: true },
       });
       if (!existing) throw new NotFoundException('Invoice not found');
-      this.assertLegalTransition(existing.status as InvoiceStatus, to);
+      const from = existing.status as InvoiceStatus;
+      this.assertLegalTransition(from, to);
+      if (from === to && !ALLOWED_TRANSITIONS[from]?.has(to)) {
+        throw new ConflictException(`Invoice is already ${to}`);
+      }
 
       const data: Record<string, unknown> = { status: to };
       if (extra.sentAt) data.sentAt = extra.sentAt;
       if (extra.dueDate !== undefined) data.dueDate = extra.dueDate;
       if (to === 'PAID') data.paidAt = extra.paidAt ?? new Date();
 
-      const updated = await db.invoice.update({
-        where: { id: invoiceId },
-        data,
-        include: { items: true, contact: true, booking: true },
-      });
+      // V1-42: compare-and-set on the status read above (see the doc comment).
+      const updated = await compareAndSet(
+        () =>
+          db.invoice.update({
+            where: { id: invoiceId, status: existing.status },
+            data,
+            include: { items: true, contact: true, booking: true },
+          }),
+        `Invoice status changed while ${from} -> ${to} was in flight; reload it and try again`,
+      );
 
       // FIN2 — accrual recognition: post AR/Revenue when an invoice goes
       // SENT (or PENDING, which is the awaiting-confirmation flavour of
@@ -395,6 +580,29 @@ export class InvoiceWorkflowService {
       });
     }
     return updated;
+  }
+
+  /**
+   * V1-42: the AI undo's return of an invoice to DRAFT, for the statuses in
+   * UNDO_RETURNS_TO_DRAFT (every one but DRAFT and VOID). Compare-and-set like
+   * transition(); writes the status alone, with no posting and no event,
+   * exactly as the undo did before it moved here. Any other status is a 409:
+   * CommerceService.undoInvoice soft-deletes a DRAFT, and VOID is terminal.
+   * Non-terminal on purpose until its callers are guarded (V1-42 review
+   * SEC-V42-1, see UNDO_RETURNS_TO_DRAFT).
+   */
+  async returnToDraftOnUndo(invoiceId: string) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const existing = await tx.invoice.findUnique({ where: { id: invoiceId }, select: { status: true } });
+      if (!existing) throw new NotFoundException('Invoice not found');
+      if (!UNDO_RETURNS_TO_DRAFT.has(existing.status)) {
+        throw new ConflictException(`A ${existing.status} invoice cannot be undone to DRAFT`);
+      }
+      return compareAndSet(
+        () => tx.invoice.update({ where: { id: invoiceId, status: existing.status }, data: { status: 'DRAFT' } }),
+        'Invoice status changed while it was being undone; reload it and try again',
+      );
+    });
   }
 
   /**

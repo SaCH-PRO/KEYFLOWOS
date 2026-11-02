@@ -18,9 +18,10 @@
  *   the same route by user V (STAFF, revenue:write)  -> V on every one of the above
  *   idempotent replay (R0-D2) by V of U's key       -> U's row, recordedBy still U, nothing new written
  *   POST /commerce/businesses/:b/payments/:id/refund by user V
- *     -> the reversal FinancialTransaction.createdById = V (the manual refund
- *        has no separate refund Payment row: it flips the original to REFUNDED)
- *     -> Payment.recordedBy stays U (who recorded the receipt is not overwritten)
+ *     -> the reversal FinancialTransaction.createdById = V
+ *     -> the original Payment stays SUCCESSFUL with recordedBy U (who recorded the
+ *        receipt is not overwritten); since V1-29 (D-14) the refund is a separate
+ *        negative REFUNDED row linked by reference, and its recordedBy is V
  *   KEY cortex adapter process_payment               -> KEY_SYSTEM_ACTOR_ID, actorType SYSTEM
  *   PaymentEvidenceService (POST .../payments/from-evidence) -> KEY_SYSTEM_ACTOR_ID, actorType SYSTEM
  *   service caller passing no actor                  -> recordedBy null (no invented actor)
@@ -276,6 +277,18 @@ async function postingsFor(paymentId: string): Promise<any[]> {
 async function reversalsFor(paymentId: string): Promise<any[]> {
   return db.financialTransaction.findMany({
     where: { businessId: ID.biz, externalRef: `Payment:${paymentId}:payment_recorded:reversal` },
+  });
+}
+
+/**
+ * V1-29 (D-14): the refund rows linked to a payment. A manual refund keeps the
+ * original SUCCESSFUL and adds a negative REFUNDED row whose reference is the
+ * original's providerPaymentId (the provider refund convention).
+ */
+async function refundRowsOf(paymentId: string): Promise<any[]> {
+  const original = await paymentRow(paymentId);
+  return db.payment.findMany({
+    where: { invoiceId: original.invoiceId, status: 'REFUNDED', amount: { lt: 0 }, reference: original.providerPaymentId },
   });
 }
 
@@ -566,6 +579,9 @@ describe('idempotent replay (R0-D2) keeps the original recorder', () => {
 });
 
 describe('refund through the HTTP route records the refunding user', () => {
+  // Title bound by scripts/proof-admission/manifests/payments-actor.json. Since
+  // V1-29 (D-14) "Payment REFUNDED" is the separate refund row; the original
+  // stays SUCCESSFUL with recordedBy U.
   it('PA-05: U records, V refunds -> reversal createdById = V; Payment REFUNDED with recordedBy still U; original posting still U', async () => {
     const res = await postAs(ID.userU, ID.invRefund, { amount: 60, method: 'cash', reference: 'PYA-R-1' });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -576,11 +592,15 @@ describe('refund through the HTTP route records the refunding user', () => {
     expect(refunded.body.status).toBe('REFUNDED');
 
     const row = await paymentRow(paymentId);
-    expect(row.status).toBe('REFUNDED');
-    // The manual refund flips the original row; there is no separate refund
-    // Payment row and no refundedBy column, so the recorder stays U.
+    // V1-29 (D-14): the original is kept as it was, recorded by U; the refund
+    // is a separate negative REFUNDED row linked to it, recorded by V.
+    expect(row.status).toBe('SUCCESSFUL');
     expect(row.recordedBy).toBe(ID.userU);
-    expect(await paymentsOf(ID.invRefund)).toHaveLength(1);
+    const refunds = await refundRowsOf(paymentId);
+    expect(refunds).toHaveLength(1);
+    expect(refunds[0]).toMatchObject({ amount: -60, recordedBy: ID.userV });
+    expect(refunded.body).toMatchObject({ id: refunds[0].id, refundOfPaymentId: paymentId });
+    expect(await paymentsOf(ID.invRefund)).toHaveLength(2);
 
     const reversals = await reversalsFor(paymentId);
     expect(reversals).toHaveLength(1);
@@ -675,15 +695,18 @@ describe('review repairs: mark-paid, refund guard, initiating human', () => {
     const first = await refundAs(ID.userV, paymentId, 'first');
     expect(first.status, JSON.stringify(first.body)).toBe(201);
     const afterFirst = await paymentRow(paymentId);
-    expect(afterFirst.status).toBe('REFUNDED');
-    expect(afterFirst.notes).toBe('Refunded: first');
+    // V1-29 (D-14): the original is kept; the refund row carries the reason.
+    expect(afterFirst.status).toBe('SUCCESSFUL');
+    expect(await refundRowsOf(paymentId)).toEqual([expect.objectContaining({ notes: 'Refunded: first', recordedBy: ID.userV })]);
 
     const second = await refundAs(ID.userU, paymentId, 'second');
     expect(second.status, JSON.stringify(second.body)).toBe(409);
     expect(second.body.message).toMatch(/already refunded/i);
 
     const row = await paymentRow(paymentId);
-    expect(row).toMatchObject({ status: 'REFUNDED', notes: 'Refunded: first', recordedBy: ID.userU });
+    expect(row).toEqual(afterFirst);
+    expect(row).toMatchObject({ status: 'SUCCESSFUL', recordedBy: ID.userU });
+    expect(await refundRowsOf(paymentId)).toEqual([expect.objectContaining({ notes: 'Refunded: first', recordedBy: ID.userV })]);
     const reversals = await reversalsFor(paymentId);
     expect(reversals).toHaveLength(1);
     expect(reversals[0].createdById).toBe(ID.userV);
@@ -719,8 +742,10 @@ describe('review repairs: mark-paid, refund guard, initiating human', () => {
     const winnerId = winner === results[0] ? ID.userU : ID.userV;
 
     const row = await paymentRow(paymentId);
-    expect(row.status).toBe('REFUNDED');
-    expect(row.notes).toBe('Refunded: race');
+    // V1-29 (D-14): the original is kept; exactly one refund row, by the winner.
+    expect(row.status).toBe('SUCCESSFUL');
+    expect(row.notes).toBeNull();
+    expect(await refundRowsOf(paymentId)).toEqual([expect.objectContaining({ amount: -35, notes: 'Refunded: race', recordedBy: winnerId })]);
     const reversals = await reversalsFor(paymentId);
     expect(reversals).toHaveLength(1);
     expect(reversals[0].createdById).toBe(winnerId);
@@ -1293,7 +1318,9 @@ describe('R0-CMF2: a refund names its refunder on a durable row, posted or not (
     expect(res.body.status).toBe('REFUNDED');
 
     const row = await paymentRow(paymentId);
-    expect(row).toMatchObject({ status: 'REFUNDED', recordedBy: null });
+    // V1-29 (D-14): the original is kept as seeded; the refund row names V.
+    expect(row).toMatchObject({ status: 'SUCCESSFUL', recordedBy: null });
+    expect(await refundRowsOf(paymentId)).toEqual([expect.objectContaining({ amount: -INVOICE_TOTAL, recordedBy: ID.userV })]);
     // Nothing to reverse, and no posting is invented to make one.
     expect(await postingsFor(paymentId)).toHaveLength(0);
     expect(await reversalsFor(paymentId)).toHaveLength(0);
@@ -1343,6 +1370,8 @@ describe('R0-CMF2: a refund names its refunder on a durable row, posted or not (
       spy.mockRestore();
     }
     expect((await paymentRow(paymentId)).status).toBe('SUCCESSFUL');
+    // V1-29: the rollback leaves no refund row (the original stays SUCCESSFUL either way).
+    expect(await refundRowsOf(paymentId)).toHaveLength(0);
     expect(await reversalsFor(paymentId)).toHaveLength(0);
     expect((await postingsFor(paymentId))[0].status).toBe('POSTED');
     expect(refundActivityHanded(paymentId)).toHaveLength(0);
@@ -1368,7 +1397,9 @@ describe('R0-CMF2: a refund names its refunder on a durable row, posted or not (
     } finally {
       spy.mockRestore();
     }
-    expect((await paymentRow(rejected)).status).toBe('REFUNDED');
+    // V1-29 (D-14): the refund is a separate row; the original stays SUCCESSFUL.
+    expect((await paymentRow(rejected)).status).toBe('SUCCESSFUL');
+    expect(await refundRowsOf(rejected)).toHaveLength(1);
     await expectOneRefundAuditBy(rejected, ID.userV, 'USER', false);
 
     // (b) The real TimelineService over a client whose activities insert
@@ -1410,6 +1441,9 @@ describe('R0-CMF2: a refund names its refunder on a durable row, posted or not (
     const row = await paymentRow(paymentId);
     expect(row.status).toBe('SUCCESSFUL');
     expect(row.notes).toBe(notesBefore);
+    // V1-29: the original stays SUCCESSFUL even after a refund, so the rollback
+    // is proven by the absence of the refund row.
+    expect(await refundRowsOf(paymentId)).toHaveLength(0);
     expect(await reversalsFor(paymentId)).toHaveLength(0);
     expect((await postingsFor(paymentId))[0].status).toBe('POSTED');
     expect(await refundActivityRows(paymentId)).toHaveLength(0);

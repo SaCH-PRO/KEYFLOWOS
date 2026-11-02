@@ -4,6 +4,7 @@ import { AiUsageService } from '../ai/ai-usage.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { CommerceService } from './commerce.service';
 import { CatalogService } from '../catalog/catalog.service';
+import { CommerceService } from './commerce.service';
 import {
   buildCommerceCommandPrompt,
   buildRevenueAnalysisPrompt,
@@ -30,6 +31,8 @@ export class CommerceAiService {
     @Inject(CatalogService) private readonly catalog: CatalogService,
     // V1-QUOTE-CHAIN-finish (SEC-V50-4): the quote actions go through the
     // quote transition table (CommerceService.updateQuoteStatus).
+    // V1-42-DM-LIFECYCLE-OWNER-CAS: invoice status commands go through the
+    // operator paths (recordPayment, the workflow), never a raw status write.
     @Inject(CommerceService) private readonly commerce: CommerceService,
   ) {}
 
@@ -132,20 +135,49 @@ export class CommerceAiService {
     return parts.join('\n');
   }
 
-  private async findInvoice(businessId: string, params: Record<string, any>) {
+  /**
+   * The invoice a command names, by id or by number, in this tenant.
+   *
+   * V1-42 review (SEC-V42-2): mark_paid records a real payment and its ledger
+   * posting, and void_invoice reverses the receivable, on the invoice found
+   * here. A number was matched with `contains` and findFirst (no order, no
+   * exact match), so `INV-001` could pay `INV-0012`. The invoice whose number
+   * is exactly the one given wins (numbers are unique per business). Failing
+   * that, a partial number (the command prompt allows one) must match exactly
+   * one invoice; one that matches more is refused, naming the ambiguity, and
+   * nothing is touched.
+   */
+  private async findInvoice(
+    businessId: string,
+    params: Record<string, any>,
+  ): Promise<{ invoice: { id: string; invoiceNumber: string } | null; error: string }> {
+    const select = { id: true, invoiceNumber: true } as const;
+    const notFound = { invoice: null, error: 'Invoice not found' };
     if (params.invoiceId) {
-      return this.db.invoice.findFirst({
+      const invoice = await this.db.invoice.findFirst({
         where: { id: String(params.invoiceId), businessId, deletedAt: null },
-        select: { id: true, invoiceNumber: true },
+        select,
       });
+      return invoice ? { invoice, error: '' } : notFound;
     }
     if (params.invoiceNumber) {
-      return this.db.invoice.findFirst({
-        where: { businessId, invoiceNumber: { contains: String(params.invoiceNumber) }, deletedAt: null },
-        select: { id: true, invoiceNumber: true },
+      const number = String(params.invoiceNumber);
+      const exact = await this.db.invoice.findFirst({
+        where: { businessId, invoiceNumber: number, deletedAt: null },
+        select,
       });
+      if (exact) return { invoice: exact, error: '' };
+      const partial = await this.db.invoice.findMany({
+        where: { businessId, invoiceNumber: { contains: number }, deletedAt: null },
+        select,
+        take: 2,
+      });
+      if (partial.length === 1) return { invoice: partial[0], error: '' };
+      if (partial.length > 1) {
+        return { invoice: null, error: `Invoice number "${number}" matches more than one invoice; give the full number` };
+      }
     }
-    return null;
+    return notFound;
   }
 
   private async findProduct(businessId: string, params: Record<string, any>) {
@@ -813,6 +845,20 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
    * Runs an interpreted commerce command. `actorId` is the authenticated
    * member (the ai-execute route needs revenue:write); the quote actions are
    * moves of the quote transition table made as that member.
+   *
+   * @param actorId The authenticated caller (the route's `req.user.id`): the
+   *   member the payment and the status change are recorded against.
+   *
+   * V1-42-DM-LIFECYCLE-OWNER-CAS (CF-39): mark_paid and void_invoice wrote the
+   * status raw. mark_paid set PAID with no payment row and no posting (and on
+   * any status, VOID included); void_invoice set VOID on any status (PAID
+   * included) and left the accrual receivable open. They now take the
+   * operator paths: mark_paid is CommerceService.markInvoicePaid (the
+   * remaining balance recorded through recordPayment: one payment, its
+   * posting, the reconcile to PAID, invoice.paid), and void_invoice is
+   * CommerceService.updateInvoiceStatus (the workflow's compare-and-set VOID,
+   * the AR reversal, invoice.void). A move the workflow refuses is the 409 it
+   * answers.
    */
   async executeCommand(businessId: string, action: string, params: Record<string, any> = {}, actorId: string | null = null) {
     this.logger.log(`Executing commerce command: ${action} for business ${businessId}`);
@@ -821,30 +867,24 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
     try {
       switch (action) {
         case 'mark_paid': {
-          const invoice = await this.findInvoice(businessId, params);
-          if (!invoice) return { success: false, error: `Invoice not found` };
-          await this.db.invoice.update({
-            where: { id: invoice.id },
-            data: { status: 'PAID', paidAt: new Date() },
-          });
+          const { invoice, error } = await this.findInvoice(businessId, params);
+          if (!invoice) return { success: false, error };
+          await this.commerce.markInvoicePaid(invoice.id, actorId, businessId);
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Invoice #${invoice.invoiceNumber} marked as paid`, invoiceId: invoice.id };
         }
 
         case 'void_invoice': {
-          const invoice = await this.findInvoice(businessId, params);
-          if (!invoice) return { success: false, error: `Invoice not found` };
-          await this.db.invoice.update({
-            where: { id: invoice.id },
-            data: { status: 'VOID' },
-          });
+          const { invoice, error } = await this.findInvoice(businessId, params);
+          if (!invoice) return { success: false, error };
+          await this.commerce.updateInvoiceStatus({ invoiceId: invoice.id, status: 'VOID', actorId, businessId });
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Invoice #${invoice.invoiceNumber} voided`, invoiceId: invoice.id };
         }
 
         case 'send_reminder': {
-          const invoice = await this.findInvoice(businessId, params);
-          if (!invoice) return { success: false, error: `Invoice not found` };
+          const { invoice, error } = await this.findInvoice(businessId, params);
+          if (!invoice) return { success: false, error };
           const reminder = await this.generateInvoiceReminder(businessId, invoice.id);
           this.stats.invalidateCache(businessId);
           return { success: true, message: `Reminder drafted for Invoice #${invoice.invoiceNumber}`, invoiceId: invoice.id, reminder };

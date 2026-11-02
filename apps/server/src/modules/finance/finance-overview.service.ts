@@ -1,8 +1,11 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
+import { CashPositionService } from './cash-position.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 import { ReceivablesService } from './receivables.service';
+import { CASH_NET_PAYMENT_WHERE } from '../commerce/invoice-workflow.service';
+import { roundMoney } from '../commerce/money';
 
 /**
  * FIN5 — Compute the start of the current month in America/Port_of_Spain
@@ -42,7 +45,10 @@ export interface FinanceOverviewActionItem {
 }
 
 export interface FinanceOverview {
+  /** The ledger cash position (CashPositionService), never FinancialAccount.currentBalance. */
   cashBalance: number;
+  /** V1-34: how cashBalance was derived. */
+  cashBasis: 'ledger';
   cashAccountCount: number;
   revenueThisMonth: number;
   expensesThisMonth: number;
@@ -62,19 +68,28 @@ export interface FinanceOverview {
 
 /**
  * FIN5 — Aggregates the headline numbers for the Finance Overview tab.
- * Reuses the existing FinancialAccount.currentBalance ledger and the
- * Invoice/Payment/Expense tables. Falls back to ledger trial balance for
- * the Tax Payable holding account so the figure shown matches what the
- * accountant sees in Reports.
+ * Cash is the ledger cash position (V1-34, CashPositionService: the booked
+ * entries on the CASH, BANK and PAYMENT_PROCESSOR chart rows, plus account
+ * opening balances not yet posted), the figure safe-to-spend and the OS command
+ * center serve too, read fresh even when the rest is cached; FinancialAccount
+ * rows only give the account count. Invoice/Payment/Expense tables feed the rest,
+ * and the Tax Payable holding account is read from the ledger so the figure
+ * shown matches what the accountant sees in Reports.
  */
 @Injectable()
 export class FinanceOverviewService {
+  private readonly cashPosition: CashPositionService;
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() @Inject(FinancialAccountSeederService) private readonly accountSeeder: FinancialAccountSeederService | null,
     @Optional() @Inject(ReceivablesService) private readonly receivables: ReceivablesService | null,
     @Optional() @Inject(RedisService) private readonly redis: RedisService | null,
-  ) {}
+    // Optional like its siblings so hand-built instances keep working; it needs only Prisma.
+    @Optional() @Inject(CashPositionService) cashPosition?: CashPositionService | null,
+  ) {
+    this.cashPosition = cashPosition ?? new CashPositionService(prisma);
+  }
 
   private cacheKey(businessId: string) {
     return `finance:overview:${businessId}`;
@@ -88,9 +103,18 @@ export class FinanceOverviewService {
 
   async getOverview(businessId: string): Promise<FinanceOverview> {
     const cacheKey = this.cacheKey(businessId);
+    // V1-34 review (V34-SEC-01 / CR-34-02): the cash position is read fresh on
+    // every call, outside the 60s cache. Nothing invalidates the cache when the
+    // ledger posts, so a cached overview is served only while its cash equals
+    // the ledger's now; otherwise it is recomputed (cash, runway and the
+    // low-runway action together) and re-cached. Safe-to-spend, the OS command
+    // center and this overview therefore never serve different cash.
+    const cashPosition = await this.cashPosition.getCashPosition(businessId);
     if (this.redis) {
       const cached = await this.redis.getJson<FinanceOverview>(cacheKey).catch(() => null);
-      if (cached) return cached;
+      if (cached && cached.cashBasis === cashPosition.basis && cached.cashBalance === cashPosition.cashBalance) {
+        return cached;
+      }
     }
 
     // First read of the surface seeds the default Cash + Bank accounts +
@@ -125,12 +149,15 @@ export class FinanceOverviewService {
       recurringBills,
       receivablesAging,
     ] = await Promise.all([
+      // The account count only: currentBalance is an opening snapshot (V1-34, CF-41).
       this.prisma.client.financialAccount.findMany({
         where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-        select: { currentBalance: true },
+        select: { id: true },
       }),
+      // V1-36 (CF-17): cash received this month net of refunds (CASH_NET_PAYMENT_WHERE,
+      // the database form of computeBalance); SUCCESSFUL rows alone counted refunded money.
       this.prisma.client.payment.aggregate({
-        where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: monthStart } },
+        where: { businessId, createdAt: { gte: monthStart }, ...CASH_NET_PAYMENT_WHERE },
         _sum: { amount: true },
       }),
       this.prisma.client.expense.aggregate({
@@ -203,7 +230,7 @@ export class FinanceOverviewService {
       this.receivables ? this.receivables.getAging(businessId) : Promise.resolve(null),
     ]);
 
-    const cashBalance = cashAccounts.reduce((sum, a) => sum + Number(a.currentBalance ?? 0), 0);
+    const cashBalance = cashPosition.cashBalance;
 
     let taxReserved = 0;
     if (taxPayable) {
@@ -215,7 +242,7 @@ export class FinanceOverviewService {
       taxReserved = Number(agg._sum.credit ?? 0) - Number(agg._sum.debit ?? 0);
     }
 
-    const revenueThisMonth = Number(paidInvoices._sum.amount ?? 0);
+    const revenueThisMonth = roundMoney(Number(paidInvoices._sum.amount ?? 0));
     const expensesThisMonth = Number(monthExpenses._sum.amount ?? 0);
     const netProfitThisMonth = revenueThisMonth - expensesThisMonth;
 
@@ -342,6 +369,7 @@ export class FinanceOverviewService {
 
     const result: FinanceOverview = {
       cashBalance,
+      cashBasis: cashPosition.basis,
       cashAccountCount: cashAccounts.length,
       revenueThisMonth,
       expensesThisMonth,

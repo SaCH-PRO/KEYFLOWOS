@@ -708,7 +708,8 @@ describe('review ST-D2-2: a refunded payment in the slot answers 409, never a si
     expectErrorEnvelope(again.body, 409, 'CONFLICT');
     expect(again.body.message).toMatch(/refunded/i);
     expect(again.body.payment).toBeUndefined();
-    expect(await paymentsOf(REFUND.invRef)).toHaveLength(1);
+    // V1-29 (D-14): the original plus the separate -20 refund row; the 409 wrote nothing.
+    expect(await paymentsOf(REFUND.invRef)).toHaveLength(2);
     expect(crmCalls).toEqual([]);
     const bal = await balanceIn(REFUND.biz, REFUND.invRef);
     expect(bal.body).toMatchObject({ paidAmount: 0, remaining: INVOICE_TOTAL });
@@ -718,7 +719,7 @@ describe('review ST-D2-2: a refunded payment in the slot answers 409, never a si
     expect(fresh.status, JSON.stringify(fresh.body)).toBe(201);
     expect(fresh.body.payment.id).not.toBe(first.body.payment.id);
     expect(fresh.body.paidAmount).toBe(20);
-    expect(await paymentsOf(REFUND.invRef)).toHaveLength(2);
+    expect(await paymentsOf(REFUND.invRef)).toHaveLength(3);
     expect(crmCalls).toHaveLength(1);
   });
 
@@ -733,13 +734,14 @@ describe('review ST-D2-2: a refunded payment in the slot answers 409, never a si
     expectErrorEnvelope(again.body, 409, 'CONFLICT');
     expect(again.body.message).toMatch(/idempotency key/i);
     expect(again.body.message).toMatch(/refunded/i);
-    expect(await paymentsOf(REFUND.invKey)).toHaveLength(1);
+    // V1-29 (D-14): the original plus the separate -20 refund row; the 409 wrote nothing.
+    expect(await paymentsOf(REFUND.invKey)).toHaveLength(2);
 
     const fresh = await postIn(REFUND.biz, REFUND.invKey, { ...body, idempotencyKey: 'kk-2' });
     expect(fresh.status, JSON.stringify(fresh.body)).toBe(201);
     expect(fresh.body.payment.id).not.toBe(first.body.payment.id);
     expect(fresh.body.paidAmount).toBe(20);
-    expect(await paymentsOf(REFUND.invKey)).toHaveLength(2);
+    expect(await paymentsOf(REFUND.invKey)).toHaveLength(3);
   });
 });
 

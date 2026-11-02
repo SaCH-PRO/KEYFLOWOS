@@ -762,12 +762,12 @@ describe('V1-51 review repairs: an accepted quote is final (SEC-V51-2)', () => {
 });
 
 describe('V1-51 review repairs: a discounted sub-cent quote converts to its accepted total to the cent (CR51-2)', () => {
-  it('RV-CENTS-1: 1 x 100.04 @ 12.5% less 5% (quote total 107.543, shown as 107.54) -> invoice 107.54 from convert {} and from the quotes-panel body; subtotal + tax - discount = total', async () => {
+  it('RV-CENTS-1: 1 x 100.04 @ 12.5% less 5% (quote priced in cents under D-13 / V1-22: 100.04 + 12.51 - 5.00 = 107.55) -> invoice 107.55 from convert {} and from the quotes-panel body; subtotal + tax - discount = total', async () => {
     const quoteBody: QuoteBody = { taxRate: 12.5, discountType: 'PERCENT', discountValue: 5, items: [{ description: 'V51A cents discount', quantity: 1, unitPrice: 100.04 }] };
     for (const body of [{}, { taxRate: 12.5, discountType: 'PERCENT', discountValue: 5 }]) {
       const { quote } = await acceptedQuote(ID.ownerCash, ID.bizCash, ID.contactCash, quoteBody);
       const accepted = money(Number((await quoteRow(quote.id)).total));
-      expect(accepted).toBe(107.54);
+      expect(accepted).toBe(107.55);
       const res = await convert(ID.ownerCash, ID.bizCash, quote.id, body);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
       const invoice = await invoiceRow(res.body.id);

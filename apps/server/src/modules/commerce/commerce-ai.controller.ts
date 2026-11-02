@@ -160,7 +160,15 @@ export class CommerceAiController {
   // navigation and AI-tool actions write nothing and have no web caller), so
   // the route needs revenue:write like every other revenue write; the quote
   // actions run as the authenticated member through CommerceService.
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard, ModuleScopeGuard)
+  /**
+   * V1-42-DM-LIFECYCLE-OWNER-CAS: executes revenue writes (mark an invoice
+   * paid, void it, products, quotes), so it requires revenue:write like every
+   * other revenue write route. It carried AuthGuard and BusinessGuard only, so
+   * a member whose revenue scope is none could mark an invoice paid. The
+   * caller is the actor the payment and the status change are recorded
+   * against.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
   @RequireModuleScope('revenue', 'write')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)

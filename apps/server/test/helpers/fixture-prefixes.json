@@ -353,14 +353,44 @@
       "packet": "V1-21 (V1-21b-JOBROLE-TOOL-FAMILIES)"
     },
     {
+      "prefix": "v22a_",
+      "owner": "apps/server/test/commerce-money-rounding.integration.test.ts",
+      "packet": "V1-22-DM-MONEY-CENTS"
+    },
+    {
       "prefix": "v23a_",
       "owner": "apps/server/test/public-catalog-projection.integration.test.ts",
       "packet": "V1-23-PUB-PUBLIC-PROJECTIONS"
     },
     {
+      "prefix": "v29a_",
+      "owner": "apps/server/test/commerce-refund.integration.test.ts",
+      "packet": "V1-29-DM-REFUND-CONVENTION"
+    },
+    {
       "prefix": "v32a_",
       "owner": "apps/server/test/key-action-proposal-claim.integration.test.ts",
       "packet": "V1-32-KEY-PROPOSAL-CLAIM"
+    },
+    {
+      "prefix": "v34a_",
+      "owner": "apps/server/test/cash-position.integration.test.ts",
+      "packet": "V1-34-DM-CASH-POSITION"
+    },
+    {
+      "prefix": "v36a_",
+      "owner": "apps/server/test/invoice-refund-balance.integration.test.ts",
+      "packet": "V1-36-DM-BALANCE-READ-CONTRACT"
+    },
+    {
+      "prefix": "v37a_",
+      "owner": "apps/server/test/commerce-currency.integration.test.ts",
+      "packet": "V1-37-DM-CURRENCY"
+    },
+    {
+      "prefix": "v42a_",
+      "owner": "apps/server/test/invoice-transition-concurrency.integration.test.ts",
+      "packet": "V1-42-DM-LIFECYCLE-OWNER-CAS"
     },
     {
       "prefix": "v46a_",

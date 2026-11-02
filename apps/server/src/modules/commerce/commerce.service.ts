@@ -16,10 +16,12 @@ import { Service, Prisma, Payment, QuoteStatus as StoredQuoteStatus } from '@key
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
+import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
 import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
 import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/update-invoice.dto';
 import {
@@ -466,11 +468,14 @@ export class CommerceService {
     options?: { kind?: 'FULL' | 'DEPOSIT'; amountOverride?: number; descriptionSuffix?: string },
   ) {
     const kind = options?.kind ?? 'FULL';
-    const total = options?.amountOverride ?? service.price;
+    // V1-22 (D-13): the one amount this invoice stores, in cents.
+    const total = roundMoney(options?.amountOverride ?? service.price);
     const description =
       kind === 'DEPOSIT'
         ? `Deposit — ${service.name}${options?.descriptionSuffix ?? ''}`
         : `${service.name}${options?.descriptionSuffix ?? ''}`;
+    // V1-37 (CF-38, D-13): the business currency, not the literal 'TTD'.
+    const currency = await this.documentCurrency(businessId);
     return this.prisma.client.invoice.create({
       data: {
         businessId,
@@ -480,7 +485,7 @@ export class CommerceService {
         issueDate: new Date(),
         subtotal: total,
         total,
-        currency: 'TTD',
+        currency,
         notes: kind === 'DEPOSIT' ? `Deposit for service "${service.name}"` : null,
         items: {
           create: [
@@ -507,7 +512,8 @@ export class CommerceService {
     if (value <= 0) return 0;
     if (service.depositType === 'PERCENT') {
       const pct = Math.min(Math.max(value, 0), 100);
-      return Math.round(((service.price * pct) / 100) * 100) / 100;
+      // V1-22: exact, rounded to cents (the float form read 10.05 x 10% as 1.00).
+      return percentOf(service.price, pct);
     }
     if (service.depositType === 'FIXED') {
       return Math.min(value, service.price);
@@ -563,6 +569,37 @@ export class CommerceService {
     if (amounts.discountType === 'FIXED' && amounts.discountValue != null && amounts.discountValue > amounts.subtotal) {
       throw new BadRequestException('Fixed discount cannot exceed the subtotal');
     }
+  }
+
+  /**
+   * V1-37-DM-CURRENCY (CF-38, P0-7; owner ruling D-13: one currency per
+   * business, documents default to it; TTD and USD supported): the currency a
+   * new or edited invoice or quote is written in.
+   *
+   *   - none named: the business currency (createInvoice, createQuote and
+   *     createInvoiceForService wrote the literal 'TTD', so a USD business's
+   *     invoices were TTD);
+   *   - named: it wins, upper-cased ('ttd' was stored as given), when it is a
+   *     D-13 currency or the business's own;
+   *   - anything else (EUR on a TTD business) is refused with 400 before
+   *     anything is written: the ledger door would refuse to post it
+   *     (PostingService, resolvePostingCurrency), so it could never be issued
+   *     on accrual or paid (IV-P04).
+   */
+  private async documentCurrency(businessId: string, requested?: string | null): Promise<string> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { currency: true },
+    });
+    const home = normalizeCurrency(business?.currency) || 'TTD';
+    const currency = normalizeCurrency(requested);
+    if (!currency) return home;
+    if (currency !== home && !D13_CURRENCIES.includes(currency)) {
+      throw new BadRequestException(
+        `Unsupported currency ${currency}: use the business currency ${home} or one of ${D13_CURRENCIES.join(', ')}`,
+      );
+    }
+    return currency;
   }
 
   /**
@@ -676,25 +713,29 @@ export class CommerceService {
     total?: number;
   }) {
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
-    const calculatedSubtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-    const subtotal = input.subtotal ?? calculatedSubtotal;
     const taxRate = input.taxRate ?? 0;
-    const calculatedTaxAmount = (calculatedSubtotal * taxRate) / 100;
-    const taxAmount = input.taxAmount ?? calculatedTaxAmount;
-    let discountAmount = 0;
-    if (input.discountType === 'PERCENT' && input.discountValue) {
-      discountAmount = (calculatedSubtotal * input.discountValue) / 100;
-    } else if (input.discountType === 'FIXED' && input.discountValue) {
-      discountAmount = input.discountValue;
-    }
-    const calculatedTotal = calculatedSubtotal + calculatedTaxAmount - discountAmount;
-    this.assertInvoiceAmounts({
-      subtotal: calculatedSubtotal,
-      total: calculatedTotal,
+    // V1-22-DM-MONEY-CENTS (M23, D-13): every amount is computed and stored in
+    // integer cents. The float form stored items 0.1 + 0.2 at 12.5% tax as
+    // subtotal 0.30000000000000004 and total 0.3375, and posted 0.3375.
+    const calculated = computeDocumentAmounts({
+      lines: input.items.map((item) => lineAmount(item.quantity, item.unitPrice)),
+      taxRate,
       discountType: input.discountType,
       discountValue: input.discountValue,
     });
-    const total = input.total ?? calculatedTotal;
+    const discountAmount = calculated.discountAmount;
+    this.assertInvoiceAmounts({
+      subtotal: calculated.subtotal,
+      total: calculated.total,
+      discountType: input.discountType,
+      discountValue: input.discountValue,
+    });
+    // V1-37 (D-13): the business currency unless one is named; checked before any write.
+    const currency = await this.documentCurrency(input.businessId, input.currency);
+    // The internal callers' overrides (document intelligence) are stored in cents too.
+    const subtotal = input.subtotal != null ? roundMoney(input.subtotal) : calculated.subtotal;
+    const taxAmount = input.taxAmount != null ? roundMoney(input.taxAmount) : calculated.taxAmount;
+    const total = input.total != null ? roundMoney(input.total) : calculated.total;
     const data: any = {
       businessId: input.businessId,
       invoiceNumber: input.invoiceNumber ?? `INV-${Date.now()}`,
@@ -708,14 +749,14 @@ export class CommerceService {
       discountValue: input.discountValue ?? null,
       discountAmount,
       total,
-      currency: input.currency ?? 'TTD',
+      currency,
       notes: input.notes ?? null,
       items: {
-        create: input.items.map((item) => ({
+        create: input.items.map((item, i) => ({
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          total: item.total ?? item.quantity * item.unitPrice,
+          total: item.total != null ? roundMoney(item.total) : calculated.lineTotals[i],
         })),
       },
     };
@@ -933,6 +974,18 @@ export class CommerceService {
   /**
    * Undo an AI-created invoice. If it is still a draft, soft-delete it;
    * otherwise revert it to DRAFT so a human can review.
+   *
+   * V1-42-DM-LIFECYCLE-OWNER-CAS (CF-39): the status move goes through the
+   * workflow, compare-and-set (InvoiceWorkflowService.returnToDraftOnUndo),
+   * not a raw write. VOID is terminal: undoing it is a 409.
+   *
+   * V1-42 review (SEC-V42-1, CR-V42-3): the undo stays non-terminal. It does
+   * not void an issued invoice: VOID cannot be undone, and the routes that
+   * reach this (agent undo, plan-step undo) check no revenue scope and do not
+   * bind the undo's tenant to the route's, and a status alone does not say
+   * whether money is on the invoice (an OVERDUE or FAILED invoice may carry a
+   * payment). The invoice's payments and its accrual recognition are left as
+   * they are; re-issuing it posts nothing twice.
    */
   async undoInvoice(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
@@ -949,10 +1002,7 @@ export class CommerceService {
       });
       return { id: invoiceId, status: 'deleted' };
     }
-    const reverted = await this.prisma.client.invoice.update({
-      where: { id: invoiceId },
-      data: { status: 'DRAFT' },
-    });
+    const reverted = await this.invoiceWorkflow.returnToDraftOnUndo(invoiceId);
     this.statsCache.invalidateCache(businessId);
     return { id: invoiceId, status: 'reverted_to_draft', invoice: reverted };
   }
@@ -991,13 +1041,15 @@ export class CommerceService {
       include: OPERATOR_INVOICE_INCLUDE,
     });
     if (!invoice) return null;
-    const paidAmount = invoice.payments
-      .filter((p) => p.status === 'SUCCESSFUL')
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
+    // CR-V22-1: remaining is 0 once the paid sum settles the stored total.
+    // V1-29 (CF-17): computeBalance's net and remaining, so a refund row counts;
+    // a row flipped before V1-29 is read as its payment plus its refund (CR-V29-4).
+    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     return {
       ...withLegacySubtotal(invoice),
-      paidAmount,
-      remaining: Math.max(0, Number(invoice.total) - paidAmount),
+      paidAmount: balance.net,
+      remaining: balance.remaining,
     };
   }
 
@@ -1175,7 +1227,7 @@ export class CommerceService {
 
     if (!isShareableInvoiceStatus(invoice.status)) return null;
 
-    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     // Same legacy-row fallback as getInvoiceWithBusiness: older invoices stored
     // subtotal 0 with priced items.
     const subtotal =
@@ -1339,7 +1391,19 @@ export class CommerceService {
     } else {
       // Nothing left to collect (a zero-total invoice, or payment rows that
       // already cover the total): no payment is invented; only the status moves.
-      await this.invoiceWorkflow.transition(invoiceId, 'PAID');
+      try {
+        await this.invoiceWorkflow.transition(invoiceId, 'PAID');
+      } catch (err) {
+        // V1-42 review (CR-V42-2): as the recordPayment branch above. Another
+        // mark-paid won the compare-and-set while this one was in flight: the
+        // invoice is PAID, which is what was asked, and this call wrote
+        // nothing. Any other refusal is the answer.
+        if (err instanceof ConflictException) {
+          const now = await reload();
+          if (now?.status === 'PAID') return now;
+        }
+        throw err;
+      }
     }
     const invoice = await reload();
     if (!invoice) throw new NotFoundException('Invoice not found');
@@ -1383,7 +1447,7 @@ export class CommerceService {
   async markInvoicePaymentFailed(invoiceId: string, actorId?: string | null, reason?: string, businessId?: string) {
     const existingInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      select: { businessId: true },
+      select: { businessId: true, status: true },
     });
     if (!existingInvoice) {
       throw new NotFoundException('Invoice not found');
@@ -1400,7 +1464,29 @@ export class CommerceService {
         throw new ForbiddenException('Not authorized to update this invoice');
       }
     }
-    const invoice = await this.invoiceWorkflow.transition(invoiceId, 'FAILED');
+    // V1-42 review (CR-V42-1): a failed attempt on an invoice that is already
+    // FAILED (a second attempt failed, or a concurrent report of a failure won
+    // the compare-and-set first) is answered with the invoice as it is: no
+    // status write and no second invoice.payment_failed, since the workflow
+    // refuses a same-status move 409 so that one mover emits. The attempt
+    // itself is still logged on the timeline with its reason, as it was before
+    // V1-42. Any other refusal is the answer.
+    const reload = () =>
+      this.prisma.client.invoice.findUnique({
+        where: { id: invoiceId },
+        include: { items: true, contact: true, booking: true },
+      });
+    const invoice =
+      existingInvoice.status === 'FAILED'
+        ? await reload()
+        : await this.invoiceWorkflow.transition(invoiceId, 'FAILED').catch(async (err: unknown) => {
+            if (err instanceof ConflictException) {
+              const now = await reload();
+              if (now?.status === 'FAILED') return now;
+            }
+            throw err;
+          });
+    if (!invoice) throw new NotFoundException('Invoice not found');
     if (invoice.contactId) {
       await this.crm.logContactEvent({
         businessId: invoice.businessId,
@@ -1942,7 +2028,7 @@ export class CommerceService {
   }) {
     const existingInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: params.invoiceId },
-      select: { businessId: true },
+      select: { businessId: true, status: true },
     });
     if (!existingInvoice) {
       throw new NotFoundException('Invoice not found');
@@ -1966,12 +2052,53 @@ export class CommerceService {
         throw new ForbiddenException('Not authorized to update this invoice');
       }
     }
+    // V1-42-DM-LIFECYCLE-OWNER-CAS: asking for the status the invoice already
+    // holds is answered idempotently (the send-email of a DRAFT that another
+    // send issued meanwhile, a KEY compensation voiding a VOID invoice): no
+    // status write, no posting, no invoice.* event, no timeline entry. The
+    // workflow refuses a same-status transition 409 so that of two racing
+    // moves exactly one wins and emits; this route only answers the request.
+    // A sentAt / dueDate it carries is still applied, as the transition
+    // applied it before.
+    const answerHeldStatus = async () => {
+      const fields: { sentAt?: Date; dueDate?: Date } = {};
+      if (params.sentAt) fields.sentAt = new Date(params.sentAt);
+      if (params.dueDate) fields.dueDate = new Date(params.dueDate);
+      if (Object.keys(fields).length > 0) {
+        await this.prisma.client.invoice.update({ where: { id: params.invoiceId }, data: fields });
+      }
+      const current = await this.prisma.client.invoice.findUnique({
+        where: { id: params.invoiceId },
+        include: { items: true, contact: true, booking: true },
+      });
+      if (!current) throw new NotFoundException('Invoice not found');
+      return current;
+    };
+    if (existingInvoice.status === params.status) {
+      return answerHeldStatus();
+    }
     // Route through the workflow so transitions like PAID -> SENT throw
     // 409 instead of silently corrupting the row.
-    const invoice = await this.invoiceWorkflow.transition(params.invoiceId, params.status, {
-      sentAt: params.sentAt ? new Date(params.sentAt) : undefined,
-      dueDate: params.dueDate ? new Date(params.dueDate) : undefined,
-    });
+    let invoice: Awaited<ReturnType<InvoiceWorkflowService['transition']>>;
+    try {
+      invoice = await this.invoiceWorkflow.transition(params.invoiceId, params.status, {
+        sentAt: params.sentAt ? new Date(params.sentAt) : undefined,
+        dueDate: params.dueDate ? new Date(params.dueDate) : undefined,
+      });
+    } catch (err) {
+      // V1-42 review (CR-V42-2): the check above reads the status outside the
+      // transition, so of two overlapping requests for the same status both
+      // pass it and the loser is refused 409 by the compare-and-set (two
+      // send-emails of one DRAFT, each answered only after Gmail accepted its
+      // message). A request that lost to a move to the very status it asked
+      // for gets the same idempotent answer as above; any other refusal is
+      // the answer.
+      if (err instanceof ConflictException) {
+        const now = await this.prisma.client.invoice.findUnique({ where: { id: params.invoiceId }, select: { status: true } });
+        if (now?.status === params.status) return answerHeldStatus();
+      }
+      throw err;
+    }
 
     if (invoice.contactId) {
       await this.crm.logContactEvent({
@@ -2356,13 +2483,20 @@ export class CommerceService {
     const contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     // V1-53: at least one line, each product inside the tenant (404).
     await this.assertQuoteLines(input.items, input.businessId);
-    const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
     const taxRate = input.taxRate ?? 0;
-    const taxAmount = subtotal * taxRate / 100;
     const discountValue = input.discountValue ?? 0;
-    const discountAmount = input.discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
-    const total = subtotal + taxAmount - discountAmount;
+    // V1-22 (D-13): in integer cents. A discount type other than FIXED is a
+    // percentage here, as it was.
+    const amounts = computeDocumentAmounts({
+      lines: input.items.map((item) => lineAmount(item.quantity, item.unitPrice)),
+      taxRate,
+      discountType: input.discountType === 'FIXED' ? 'FIXED' : 'PERCENT',
+      discountValue,
+    });
+    const { subtotal, taxAmount, discountAmount, total } = amounts;
     this.assertQuoteAmounts(subtotal, total);
+    // V1-37 (D-13): the business currency unless one is named; checked before any write.
+    const currency = await this.documentCurrency(input.businessId, input.currency);
 
     // R2: viewToken is intentionally NOT generated at draft time. The
     // public accept/reject URL is minted only when the quote is sent so
@@ -2384,14 +2518,14 @@ export class CommerceService {
         discountValue,
         discountAmount,
         total,
-        currency: input.currency ?? 'TTD',
+        currency,
         notes: input.notes ?? null,
         items: {
-          create: input.items.map((item) => ({
+          create: input.items.map((item, i) => ({
             description: item.description,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            total: item.total ?? item.quantity * item.unitPrice,
+            total: item.total != null ? roundMoney(item.total) : amounts.lineTotals[i],
             productId: item.productId || null,
           })),
         },
@@ -2449,7 +2583,8 @@ export class CommerceService {
     const updateData: any = {};
     // R0-27 review (ST-27-2): same tenant check as quote create, before any write.
     if (input.contactId) updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
-    if (input.currency) updateData.currency = input.currency;
+    // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
+    if (input.currency) updateData.currency = await this.documentCurrency(input.businessId, input.currency);
     if (input.expiryDate !== undefined) {
       updateData.expiryDate = input.expiryDate ? new Date(input.expiryDate) : null;
     }
@@ -2460,8 +2595,9 @@ export class CommerceService {
     
     // Get items for recalculating totals
     const currentItems = input.items ?? (await this.prisma.client.quoteItem.findMany({ where: { quoteId: input.quoteId } }));
-    const subtotal = currentItems.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
-    
+    // V1-22 (D-13): each line is quantity x unitPrice in cents, as stored below.
+    const lineTotals = currentItems.map((item) => lineAmount(item.quantity, item.unitPrice));
+
     // Handle tax/discount updates
     const taxRate = input.taxRate ?? quote.taxRate ?? 0;
     const discountType = input.discountType ?? quote.discountType;
@@ -2471,11 +2607,14 @@ export class CommerceService {
     // turned a stored FIXED 150 into an uncapped PERCENT 150 (a negative quote).
     this.validateTaxAndDiscount(taxRate, discountValue, quotePricedDiscountType(discountType));
 
-    const taxAmount = subtotal * taxRate / 100;
-    const discountAmount = discountType === 'FIXED' ? discountValue : subtotal * discountValue / 100;
-    const total = subtotal + taxAmount - discountAmount;
+    const { subtotal, taxAmount, discountAmount, total } = computeDocumentAmounts({
+      lines: lineTotals,
+      taxRate,
+      discountType: discountType === 'FIXED' ? 'FIXED' : 'PERCENT',
+      discountValue,
+    });
     this.assertQuoteAmounts(subtotal, total);
-    
+
     updateData.subtotal = subtotal;
     updateData.taxRate = taxRate;
     updateData.taxAmount = taxAmount;
@@ -2518,12 +2657,13 @@ export class CommerceService {
         if (input.items) {
           await tx.quoteItem.deleteMany({ where: { quoteId: input.quoteId } });
           await tx.quoteItem.createMany({
-            data: input.items.map((item) => ({
+            data: input.items.map((item, i) => ({
               quoteId: input.quoteId,
               description: item.description,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
-              total: item.quantity * item.unitPrice,
+              // V1-22 (D-13): the line in cents, as priced above.
+              total: lineTotals[i],
               productId: item.productId || null,
             })),
           });
@@ -2656,28 +2796,19 @@ export class CommerceService {
     // uncapped percentage before the repair) reached the invoice as PERCENT 150,
     // a negative total that issues with no AR (RR27-DISC, ST-27-3).
     this.validateTaxAndDiscount(taxRate, discountValue ?? undefined, discountType ?? undefined);
-    // D-13: integer cents at this write boundary (the columns stay Float).
-    // CR51-2: the total is rounded once, from the same formula the quote's
-    // total was priced with, so it is the accepted total to the cent. Rounding
-    // tax and discount separately could move it by one cent (100.04 @ 12.5%
-    // less 5%: quote 107.543, invoice 107.55). The tax is rounded on its own
-    // and the discount takes the remainder; with no discount it is exactly 0,
-    // and it never goes below 0 (round(t) >= round(t - d) for d >= 0).
-    const subtotalCents = quote.items.reduce((sum, item) => sum + Math.round(item.total * 100), 0);
-    const exactTaxCents = (subtotalCents * taxRate) / 100;
-    let exactDiscountCents = 0;
-    if (discountType === 'PERCENT' && discountValue) {
-      exactDiscountCents = (subtotalCents * discountValue) / 100;
-    } else if (discountType === 'FIXED' && discountValue) {
-      exactDiscountCents = discountValue * 100;
-    }
-    const taxCents = Math.round(exactTaxCents);
-    const totalCents = Math.round(subtotalCents + exactTaxCents - exactDiscountCents);
-    const discountCents = subtotalCents + taxCents - totalCents;
-    const subtotal = subtotalCents / 100;
-    const taxAmount = taxCents / 100;
-    const discountAmount = discountCents / 100;
-    const total = totalCents / 100;
+    // D-13 / V1-22, merged with V1-51 (CR51-2): the invoice is priced with the
+    // formula every quote and invoice is priced with (computeDocumentAmounts:
+    // lines in cents, tax and discount each rounded to cents, total their sum),
+    // from the carried tax and discount above. A quote priced by createQuote or
+    // updateQuote therefore converts to its accepted total to the cent, and
+    // subtotal + tax - discount = total exactly. The quote's stored line totals
+    // (legacy rows may hold the raw float product) are read in cents.
+    const { subtotal, taxAmount, discountAmount, total } = computeDocumentAmounts({
+      lines: quote.items.map((item) => item.total),
+      taxRate,
+      discountType,
+      discountValue,
+    });
     // R0-27 review (ST-27-3): the converted invoice obeys the same amount rules
     // as a created one (no FIXED discount above the subtotal, no amount the
     // ledger cannot hold).
@@ -2723,11 +2854,11 @@ export class CommerceService {
           notes: input.notes ?? null,
           quoteId: quote.id,
           items: {
-            create: quote.items.map((item) => ({
+            create: quote.items.map((item, i) => ({
               description: item.description,
               quantity: item.quantity,
               unitPrice: item.unitPrice,
-              total: item.total,
+              total: amounts.lineTotals[i],
               productId: item.productId ?? null,
             })),
           },
@@ -2875,7 +3006,9 @@ export class CommerceService {
     if (typeof input.amount !== 'number' || !Number.isFinite(input.amount)) {
       throw new BadRequestException('Payment amount must be a number');
     }
-    if (input.amount <= 0) {
+    // V1-22 (D-13): the amount is stored in cents, so it must be at least one
+    // cent once rounded; a sub-cent amount (0.004) would be stored as 0.
+    if (toCents(input.amount) <= 0) {
       throw new BadRequestException('Payment amount must be positive');
     }
     if (typeof input.method !== 'string' || input.method.trim().length === 0) {
@@ -2916,7 +3049,8 @@ export class CommerceService {
     // ledger stays truthful. The UI presents an explicit confirm + warning
     // toast when amount > remaining and prompts the operator to issue a refund
     // from the Payments tab to settle the over-paid balance.
-    const paymentAmount = input.amount;
+    // V1-22 (D-13): stored, posted and compared in cents.
+    const paymentAmount = roundMoney(input.amount);
 
     // FIN2 — record the payment row and post the deposit-side ledger
     // entries in a single transaction so a posting failure rolls back the
@@ -2970,7 +3104,7 @@ export class CommerceService {
           // rows under the lock, so a manual refund that committed in the gap
           // refuses this call rather than being counted twice.
           const remaining = CommerceService.markPaidRemaining(Number(current?.total ?? 0), current?.payments ?? [], current?.currency);
-          if (Math.abs(remaining - options.expectRemaining) > 0.005) {
+          if (!moneyEquals(remaining, options.expectRemaining)) {
             throw new ConflictException('The invoice balance changed while it was being marked paid; reload it and try again');
           }
         }
@@ -3035,11 +3169,18 @@ export class CommerceService {
     // under the invoice lock (this payment included), the same read that
     // derived newStatus. A total computed from the pre-transaction read would
     // miss a payment committed while this one waited for the lock: the audit
-    // would contradict newStatus and never flag an overpayment. `paid` is the
-    // sum of SUCCESSFUL rows, the formula this route and its replay use.
-    const newPaidTotal = reconciled.balance.paid;
-    const invoiceTotal = reconciled.balance.total;
-    const overPaid = newPaidTotal > invoiceTotal + 0.005 ? Number((newPaidTotal - invoiceTotal).toFixed(2)) : 0;
+    // would contradict newStatus and never flag an overpayment. V1-29 (CF-17):
+    // the total paid is computeBalance's net (SUCCESSFUL rows less refund
+    // rows), the figure the status was derived from and the one the replay,
+    // listPayments and the operator invoice read serve; the gross SUCCESSFUL
+    // sum would ignore a refund row and understate `remaining`.
+    const newPaidTotal = reconciled.balance.net;
+    // V1-22: in cents (the remaining after 33.33 x 3 on 100.00 read 0.010000000000005116).
+    // CR-V22-1: against the stored total (the one the audit reports), so a
+    // legacy sub-cent total is settled and overpaid by the same rule as the
+    // reconcile (readTotalCents); a payment never changes the total.
+    const invoiceTotal = Number(invoice.total);
+    const overPaid = overpaidMoney(invoiceTotal, newPaidTotal);
     const newStatus = reconciled.status;
     const updatedInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
@@ -3077,7 +3218,7 @@ export class CommerceService {
       payment,
       invoice: updatedInvoice,
       paidAmount: newPaidTotal,
-      remaining: Math.max(0, invoiceTotal - newPaidTotal),
+      remaining: remainingMoney(invoiceTotal, newPaidTotal),
     };
   }
 
@@ -3096,18 +3237,23 @@ export class CommerceService {
   /**
    * R0-PL-04 review (CR-PL04-1): the amount mark-paid records, or a 409 when
    * no amount would be true. The amount is computeBalance's remaining, the
-   * figure the reconcile settles against. A manual refund
-   * (markPaymentRefunded) flips the original row to REFUNDED and keeps its
-   * positive amount, and computeBalance then both drops it from `paid` and
-   * subtracts it as `refunded` (V1-29): 60 paid and refunded on a 100 invoice
-   * reads remaining 160. Recording 160 would post an invented 60
-   * over-payment; recording the true 100 would leave the reconcile
-   * PARTIALLY_PAID. Until V1-29 settles that convention, mark-paid refuses
-   * such an invoice and writes nothing. Provider refunds are separate rows
-   * with a negative amount beside a SUCCESSFUL original, counted once, so they
-   * do not block. A remaining above the total (refunds exceeding payments) is
-   * refused the same way. Run on the pre-transaction read and again under the
-   * invoice lock.
+   * figure the reconcile settles against.
+   *
+   * V1-29 (D-14): every refund is now a separate negative REFUNDED row beside
+   * its SUCCESSFUL original, counted once, so after a refund mark-paid records
+   * the true remaining (60 + 40 paid, 40 refunded: 40). What still blocks is a
+   * row the manual refund flipped to REFUNDED before V1-29 (a positive
+   * REFUNDED row with no SUCCESSFUL twin): computeBalance both drops it from
+   * `paid` and subtracts it as `refunded` (60 paid and refunded on a 100
+   * invoice reads remaining 160), so recording 160 would post an invented 60
+   * over-payment and recording the true 100 would leave the reconcile
+   * PARTIALLY_PAID; mark-paid refuses such an invoice and writes nothing. A
+   * remaining above the total (refunds exceeding payments) is refused the same
+   * way. Run on the pre-transaction read and again under the invoice lock.
+   * (The balance reads and the reconcile read such a row as its payment plus
+   * its refund since the V1-29 review, CR-V29-4: balanceOfStoredRows. Mark-paid
+   * keeps refusing it: settling legacy refunded invoices waits for the owner's
+   * backfill decision.)
    */
   private static markPaidRemaining(
     total: number,
@@ -3116,7 +3262,7 @@ export class CommerceService {
   ): number {
     const flippedRefund = rows.some((r) => r.status === 'REFUNDED' && Number(r.amount) > 0);
     const balance = computeBalance(total, rows, currency ?? undefined);
-    if (flippedRefund || balance.remaining > balance.total + 0.005) {
+    if (flippedRefund || toCents(balance.remaining) > toCents(balance.total)) {
       throw new ConflictException(
         'Cannot mark an invoice paid after one of its payments was refunded; record the payment received instead',
       );
@@ -3151,7 +3297,8 @@ export class CommerceService {
     }
     const reference = dedupeByReference && typeof input.reference === 'string' ? input.reference.trim() : '';
     if (reference.length > 0) {
-      return { value: `manual_${invoiceId}_ref_${digest(`${reference}\n${input.amount.toFixed(2)}`)}`, keyedOn: 'reference' };
+      // V1-22: the amount as stored (cents); for a cent amount this is the same text as before.
+      return { value: `manual_${invoiceId}_ref_${digest(`${reference}\n${roundMoney(input.amount).toFixed(2)}`)}`, keyedOn: 'reference' };
     }
     return { value: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, keyedOn: null };
   }
@@ -3210,7 +3357,7 @@ export class CommerceService {
    * longer SUCCESSFUL.
    */
   private async replayRecordedPayment(existing: Payment, invoiceId: string, amount: number, keyedOn: 'key' | 'reference') {
-    if (Math.abs(Number(existing.amount) - amount) > 0.005) {
+    if (!moneyEquals(Number(existing.amount), amount)) {
       throw new ConflictException('Idempotency key already used on this invoice with a different amount');
     }
     // R0-D2 review (ST-D2-2): once the operator refunded the payment in this
@@ -3219,27 +3366,36 @@ export class CommerceService {
     // that key/reference permanently dead on this invoice while the API
     // reports success and writes nothing; answer 409 so the operator records
     // the new receipt under a new key/reference.
+    //
+    // V1-29: a refund no longer flips the payment; it stays SUCCESSFUL beside
+    // a linked refund row, so a refund against it is looked up as well.
+    const slot = keyedOn === 'key' ? 'idempotency key' : 'reference and amount';
+    const fresh = keyedOn === 'key' ? 'idempotency key' : 'reference';
     if (existing.status !== 'SUCCESSFUL') {
-      const slot = keyedOn === 'key' ? 'idempotency key' : 'reference and amount';
-      const fresh = keyedOn === 'key' ? 'idempotency key' : 'reference';
       throw new ConflictException(
         `A payment with this ${slot} was already recorded on this invoice and is now ${existing.status}` +
           (existing.status === 'REFUNDED' ? ' (refunded)' : '') +
           `; use a new ${fresh} to record another payment`,
       );
     }
+    const refunded = await CommerceService.refundedAgainst(this.prisma.client as unknown as Prisma.TransactionClient, existing);
+    if (toCents(refunded) > 0) {
+      throw new ConflictException(
+        `A payment with this ${slot} was already recorded on this invoice and was refunded; use a new ${fresh} to record another payment`,
+      );
+    }
     const updatedInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
       include: { payments: true, contact: true, items: true },
     });
-    const paidAmount = (updatedInvoice?.payments ?? [])
-      .filter((p) => p.status === 'SUCCESSFUL')
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    // V1-29 (CF-17): the figures every balance reader serves (computeBalance):
+    // paidAmount is what is received net of refunds, remaining is total - net.
+    const balance = balanceOfStoredRows(Number(updatedInvoice?.total ?? 0), updatedInvoice?.payments ?? [], updatedInvoice?.currency);
     return {
       payment: existing,
       invoice: updatedInvoice,
-      paidAmount,
-      remaining: Math.max(0, Number(updatedInvoice?.total ?? 0) - paidAmount),
+      paidAmount: balance.net,
+      remaining: balance.remaining,
     };
   }
 
@@ -3299,19 +3455,127 @@ export class CommerceService {
   }
 
   /**
-   * Mark a payment refunded (no provider call — local bookkeeping only).
+   * V1-29 (D-14): how much has been refunded against a payment, in currency
+   * units: the sum of its linked refund rows. A refund row is linked by the
+   * provider convention: a negative REFUNDED row on the same invoice and
+   * tenant whose `reference` is the original's providerPaymentId (the manual
+   * refund since V1-29, refundCharge, the PayPal refund webhook when it names
+   * the capture, and the Stripe refund webhook for a payment stored under its
+   * charge id). The Stripe webhook links by the charge id only, so the refund
+   * of a Checkout Session or PaymentIntent payment (stored as cs_ / pi_) does
+   * not link here; the manual refund accounts for such refunds through
+   * refundableOf (V1-29 review SEC-V29-1 / CR-V29-5). Used by the replay guard
+   * of a manually recorded payment, whose refunds are always linked. Payment
+   * sits outside the tenant extension (M31), so the tenant is in the filter.
+   */
+  private static async refundedAgainst(
+    db: Prisma.TransactionClient,
+    payment: { businessId: string; invoiceId: string; providerPaymentId: string },
+  ): Promise<number> {
+    const rows = await db.payment.findMany({
+      where: {
+        businessId: payment.businessId,
+        invoiceId: payment.invoiceId,
+        status: 'REFUNDED',
+        amount: { lt: 0 },
+        reference: payment.providerPaymentId,
+      },
+      select: { amount: true },
+    });
+    return sumMoney(rows.map((r) => Math.abs(Number(r.amount))));
+  }
+
+  /**
+   * V1-29 review (SEC-V29-1 / CR-V29-5): what is left to refund of `payment`,
+   * from the Payment rows of its invoice and tenant (`rows`, the payment
+   * included), or a 0 with the reason nothing is left.
+   *
+   * 1. Its linked refunds are subtracted: a negative REFUNDED row whose
+   *    `reference` is the payment's providerPaymentId, or, from the same
+   *    provider, the payment's own `reference` (a PaymentIntent payment keeps
+   *    its charge id there, the id the Stripe refund webhook links by).
+   * 2. A refund row that links to no payment on the invoice is subtracted too
+   *    when it comes from the same provider. The Stripe refund webhook writes
+   *    reference = the charge id while a Checkout Session payment is stored as
+   *    cs_ with its pi_ in reference, and the PayPal webhook without a capture
+   *    id writes no reference: such a refund cannot be told apart from a
+   *    refund of this payment, so it is counted against each payment of that
+   *    provider on the invoice. A payment the provider already refunded is
+   *    then not refunded a second time; a refund that cannot be matched errs
+   *    towards refusing, never towards paying out twice.
+   * 3. Never more than the invoice's net received (balanceOfStoredRows): a
+   *    refund cannot take the invoice below nothing received, whatever refund
+   *    rows the providers wrote.
+   */
+  private static refundableOf(
+    payment: { amount: number; provider: string; providerPaymentId: string; reference: string | null },
+    rows: ReadonlyArray<{ amount: number; status: string; provider: string; providerPaymentId: string; reference: string | null }>,
+  ): { amount: number; refusal: string | null } {
+    const isRefundRow = (r: { status: string; amount: number }) => r.status === 'REFUNDED' && Number(r.amount) < 0;
+    const linksTo = (
+      refund: { provider: string; reference: string | null },
+      original: { provider: string; providerPaymentId: string; reference: string | null },
+    ) =>
+      !!refund.reference &&
+      (refund.reference === original.providerPaymentId ||
+        (refund.provider === original.provider && refund.reference === original.reference));
+    const refunds = rows.filter(isRefundRow);
+    const originals = rows.filter((r) => !isRefundRow(r));
+    const linked = sumMoney(refunds.filter((r) => linksTo(r, payment)).map((r) => Math.abs(Number(r.amount))));
+    const leftLinked = subtractMoney(Number(payment.amount), linked);
+    if (!(toCents(leftLinked) > 0)) return { amount: 0, refusal: 'Payment is already refunded' };
+    const unmatched = sumMoney(
+      refunds
+        .filter((r) => r.provider === payment.provider && !originals.some((o) => linksTo(r, o)))
+        .map((r) => Math.abs(Number(r.amount))),
+    );
+    const leftUnmatched = subtractMoney(leftLinked, unmatched);
+    if (!(toCents(leftUnmatched) > 0)) {
+      return {
+        amount: 0,
+        refusal: `Payment is already refunded: a ${payment.provider} refund on this invoice that cannot be matched to one payment covers it`,
+      };
+    }
+    const net = balanceOfStoredRows(0, rows).net;
+    if (!(toCents(net) > 0)) {
+      return { amount: 0, refusal: 'Payment is already refunded: nothing received on this invoice is left to refund' };
+    }
+    return { amount: Math.min(leftUnmatched, net), refusal: null };
+  }
+
+  /**
+   * Refund a payment (no provider call — local bookkeeping only).
+   *
+   * V1-29-DM-REFUND-CONVENTION (M28, CF-11, D-14): the refund is a separate
+   * negative REFUNDED Payment row, the convention the provider refunds already
+   * use: the SUCCESSFUL original is kept as it was, and the refund row carries
+   * `-amount`, the original's currency, provider and method, `reference` =
+   * the original's providerPaymentId (the link), the reason in its notes and
+   * the refunder in `recordedBy`. computeBalance then counts the money once
+   * in `paid` and once in `refunded`. The base flipped the original to
+   * REFUNDED instead, which computeBalance subtracted twice (a full refund of
+   * 100 read net -100, remaining 200, status still PAID). What is refunded is
+   * what is left of the payment after its earlier refunds (a provider partial
+   * refund included, also one that does not link to it, and never more than
+   * the invoice's net received: refundableOf); a payment with nothing left
+   * answers 409 "already refunded" and writes nothing, which makes a replay
+   * of the same refund a no-op. The original's payment_recorded posting is reversed once
+   * (RevenuePostingService.onPaymentRefunded, idempotent), and the reconcile
+   * reopens the invoice: PARTIALLY_PAID while something net is still
+   * received, SENT with paidAt cleared once nothing is (D-14). The response
+   * is the refund row, plus `refundOfPaymentId`, the reconciled
+   * `invoiceStatus` and its `balance`, so a status the reconcile kept (see
+   * onIllegalTransition below) is visible to the caller.
    *
    * R0-PL-07: `actorId` (the refunding user) is written to the reversal
-   * FinancialTransaction.createdById. The manual refund flips the original
-   * Payment row rather than writing a refund row, and Payment has no
-   * refunded-by column, so Payment.recordedBy keeps the original recorder.
+   * FinancialTransaction.createdById and, since V1-29, to the refund row's
+   * recordedBy. The original's recordedBy keeps the original recorder.
    *
    * R0-PL-07 review (PL07-ST-1): only a SUCCESSFUL payment can be refunded.
-   * An already REFUNDED payment, or a PENDING / FAILED one, answers 409 and
-   * changes nothing, so a second refund can no longer rewrite the notes and
-   * report success while recording no refunder. The SUCCESSFUL -> REFUNDED
-   * flip is conditional on the status, so two concurrent refunds of the same
-   * payment produce one refund and one 409.
+   * A PENDING / FAILED payment, a refund row, or a row flipped to REFUNDED
+   * before V1-29 answers 409 and changes nothing. The checks run again under
+   * the invoice lock, so two concurrent refunds of the same payment produce
+   * one refund and one 409.
    *
    * R0-CMF2-PAYMENT-ACTOR-GAPS (ST-R011-2): every refund, posted or not,
    * writes one FINANCE payment_refunded activity row naming the refunder
@@ -3320,72 +3584,94 @@ export class CommerceService {
    * The row is written inside the refund transaction (R0-CMF2 review
    * SEC-CMF2-1 / CR-CMF2-1): a committed refund always has it, a refund that
    * rolls back leaves none, and a failed insert fails the refund rather than
-   * committing a REFUNDED payment that names nobody.
+   * committing a refund that names nobody.
    */
   async markPaymentRefunded(paymentId: string, businessId: string, reason?: string, actorId?: string | null) {
     const payment = await this.prisma.client.payment.findFirst({
       where: { id: paymentId, businessId },
     });
     if (!payment) throw new NotFoundException('Payment not found');
-    const refusal = (status: string) =>
+    const refusal = (row: { status: string; amount: number }) =>
       new ConflictException(
-        status === 'REFUNDED'
-          ? 'Payment is already refunded'
-          : `Only a successful payment can be refunded (this payment is ${status})`,
+        row.status !== 'REFUNDED'
+          ? `Only a successful payment can be refunded (this payment is ${row.status})`
+          : Number(row.amount) < 0
+            ? 'A refund cannot itself be refunded'
+            : 'Payment is already refunded',
       );
-    if (payment.status !== 'SUCCESSFUL') throw refusal(payment.status);
-    // FIN2 — flip the row + reverse the original posting in one tx so the
-    // refunded state and the offsetting ledger entries commit together.
+    if (payment.status !== 'SUCCESSFUL') throw refusal(payment);
+    // FIN2 — write the refund row + reverse the original posting in one tx so
+    // the refund and the offsetting ledger entries commit together.
     //
     // R0-PL-03 (G12): the invoice reconcile runs in the same transaction. A
-    // reconcile error is no longer swallowed: it rolls the refund back and is
-    // the caller's response, so the payment, the ledger and the invoice
+    // reconcile error is not swallowed: it rolls the refund back and is the
+    // caller's response, so the payment rows, the ledger and the invoice
     // status never disagree. Invoice events are emitted after commit.
     const pendingEvents: Array<{ name: string; payload: unknown }> = [];
-    const updated = await this.prisma.client.$transaction(async (tx) => {
+    const { refund, reconciled } = await this.prisma.client.$transaction(async (tx) => {
       const txClient = tx as unknown as Prisma.TransactionClient;
-      if (payment.invoiceId) await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
-      const flipped = await tx.payment.updateMany({
-        where: { id: paymentId, businessId, status: 'SUCCESSFUL' },
+      // Serialized with payments and other refunds of this invoice
+      // (R0-PL-03): the reads below see every refund committed before ours.
+      await CommerceService.lockInvoiceForPayment(txClient, payment.invoiceId);
+      const current = await tx.payment.findFirst({ where: { id: paymentId, businessId } });
+      if (!current) throw new NotFoundException('Payment not found');
+      if (current.status !== 'SUCCESSFUL') throw refusal(current);
+      // What is left of the payment after its earlier refunds, linked or not,
+      // capped at the invoice's net received (V1-29 review SEC-V29-1 / CR-V29-5).
+      const invoiceRows = await tx.payment.findMany({
+        where: { businessId, invoiceId: current.invoiceId },
+        select: { amount: true, status: true, provider: true, providerPaymentId: true, reference: true },
+      });
+      const left = CommerceService.refundableOf(current, invoiceRows);
+      if (left.refusal) throw new ConflictException(left.refusal);
+      const refundable = left.amount;
+      const created = await tx.payment.create({
         data: {
+          amount: subtractMoney(0, refundable),
+          currency: current.currency,
           status: 'REFUNDED',
-          notes: reason ? `${payment.notes ? payment.notes + ' | ' : ''}Refunded: ${reason}` : payment.notes,
+          provider: current.provider,
+          method: current.method,
+          // Unique and server-built; the link to the original is `reference`.
+          providerPaymentId: `manual_refund_${current.id}_${randomBytes(8).toString('hex')}`,
+          reference: current.providerPaymentId,
+          notes: reason ? `Refunded: ${reason}` : null,
+          recordedBy: actorId ?? null,
+          businessId,
+          invoiceId: current.invoiceId,
         },
       });
-      if (flipped.count === 0) {
-        // Lost a race with another refund (or a status change) after the read above.
-        const current = await tx.payment.findUnique({ where: { id: paymentId }, select: { status: true } });
-        throw refusal(current?.status ?? 'missing');
-      }
-      const next = await tx.payment.findUniqueOrThrow({ where: { id: paymentId } });
-      await this.revenuePosting.onPaymentRefunded(paymentId, {
+      await this.revenuePosting.onPaymentRefunded(current.id, {
         tx: txClient,
         createdById: actorId ?? null,
         // The refund's audit row (posted or not) names the refunder and
         // commits or rolls back with the refund.
         auditInTransaction: true,
       });
-      if (payment.invoiceId) {
-        await this.invoiceWorkflow.reconcileFromPayments(payment.invoiceId, {
-          tx: txClient,
-          eventBuffer: pendingEvents,
-          // R0-PL-03 review (ST-PL03-3 / CR-1): reversing money must not be
-          // blocked by invoice status bookkeeping. When the status the rows
-          // now imply is not reachable from the current one (a DRAFT invoice
-          // holding payments, e.g. after undoInvoice or from pre-G3 data, or
-          // a credit-note status outside the transition map), the status is
-          // left as it is, as before this packet, and the refund commits.
-          // Any other reconcile failure still rolls the refund back (G12).
-          onIllegalTransition: 'keep',
-        });
-      }
-      return next;
+      const r = await this.invoiceWorkflow.reconcileFromPayments(current.invoiceId, {
+        tx: txClient,
+        eventBuffer: pendingEvents,
+        // R0-PL-03 review (ST-PL03-3 / CR-1): reversing money must not be
+        // blocked by invoice status bookkeeping. When the status the rows
+        // now imply is not reachable from the current one (a DRAFT invoice
+        // holding payments, e.g. after undoInvoice or from pre-G3 data, or
+        // a credit-note status outside the transition map), the status is
+        // left as it is and the refund commits; the response says so.
+        // Any other reconcile failure still rolls the refund back (G12).
+        onIllegalTransition: 'keep',
+      });
+      return { refund: created, reconciled: r };
     });
     for (const evt of pendingEvents) {
       this.events.emit(evt.name, evt.payload);
     }
     this.statsCache.invalidateCache(businessId);
-    return updated;
+    return {
+      ...refund,
+      refundOfPaymentId: payment.id,
+      invoiceStatus: reconciled.status,
+      balance: reconciled.balance,
+    };
   }
 
   /** Retry a failed payment by flipping it to PENDING and emitting an event. */
@@ -3733,13 +4019,16 @@ export class CommerceService {
       where: { invoiceId },
       orderBy: { createdAt: 'desc' },
     });
-    const paidAmount = payments
-      .filter((p) => p.status === 'SUCCESSFUL')
-      .reduce((sum, p) => sum + Number(p.amount), 0);
+    // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
+    // CR-V22-1: remaining is 0 once the paid sum settles the stored total.
+    // V1-29 (CF-17): computeBalance's net and remaining, the figures the
+    // reconcile derives the status from, so a refund row counts here too
+    // (summing SUCCESSFUL rows alone read a refunded invoice as still paid).
+    const balance = balanceOfStoredRows(Number(invoice.total), payments, invoice.currency);
     return {
       payments,
-      paidAmount,
-      remaining: Math.max(0, Number(invoice.total) - paidAmount),
+      paidAmount: balance.net,
+      remaining: balance.remaining,
       invoiceTotal: invoice.total,
     };
   }
@@ -3835,7 +4124,22 @@ export class CommerceService {
       // a missing one, and nothing is written.
       updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     }
-    if (input.currency !== undefined) updateData.currency = input.currency;
+    // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
+    if (input.currency !== undefined) {
+      const currency = await this.documentCurrency(input.businessId, input.currency);
+      // V1-37 review (ST-V37-1): the currency is fixed once the invoice leaves
+      // DRAFT. Issuing posts accounts receivable in the invoice's currency
+      // (accrual), and that posting is idempotent on its key, so a SENT USD
+      // invoice switched to TTD took its payment in TTD while the USD
+      // receivable stayed open for ever. Restating the stored currency is not
+      // a change (an edit form sends the whole document) and stays allowed.
+      if (currency !== normalizeCurrency(invoice.currency) && invoice.status !== 'DRAFT') {
+        throw new ConflictException(
+          `Cannot change the currency of a ${invoice.status} invoice: the currency is fixed once the invoice is issued`,
+        );
+      }
+      updateData.currency = currency;
+    }
     if (input.dueDate !== undefined) {
       updateData.dueDate = input.dueDate ? new Date(input.dueDate) : null;
     }
@@ -3865,18 +4169,17 @@ export class CommerceService {
           throw new NotFoundException('Product not found');
         }
       }
-      const subtotal = input.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
       const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
-      const taxAmount = (subtotal * taxRate) / 100;
-      let discountAmount = 0;
       const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
       const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
-      if (discountType === 'PERCENT' && discountValue) {
-        discountAmount = (subtotal * discountValue) / 100;
-      } else if (discountType === 'FIXED' && discountValue) {
-        discountAmount = discountValue;
-      }
-      const total = subtotal + taxAmount - discountAmount;
+      // V1-22 (D-13): in integer cents, the same rules as create.
+      const amounts = computeDocumentAmounts({
+        lines: input.items.map((item) => lineAmount(item.quantity, item.unitPrice)),
+        taxRate,
+        discountType,
+        discountValue,
+      });
+      const { subtotal, taxAmount, discountAmount, total } = amounts;
       // R0-27 review (ST-27-3): the same amount rules as create, checked before
       // the existing items are deleted, so a refused edit writes nothing.
       this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
@@ -3890,29 +4193,29 @@ export class CommerceService {
       updateData.discountAmount = discountAmount;
       updateData.total = total;
       updateData.items = {
-        create: input.items.map((item) => ({
+        create: input.items.map((item, i) => ({
           description: item.description,
           quantity: item.quantity,
           unitPrice: item.unitPrice,
-          total: item.quantity * item.unitPrice,
+          total: amounts.lineTotals[i],
           productId: item.productId || null,
         })),
       };
     } else if (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined) {
-      const subtotal = invoice.subtotal;
       const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
-      const taxAmount = (subtotal * taxRate) / 100;
-      let discountAmount = 0;
       const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
       const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
-      if (discountType === 'PERCENT' && discountValue) {
-        discountAmount = (subtotal * discountValue) / 100;
-      } else if (discountType === 'FIXED' && discountValue) {
-        discountAmount = discountValue;
-      }
-      const total = subtotal + taxAmount - discountAmount;
+      // V1-22 (D-13): recomputed in cents from the stored subtotal (a legacy
+      // row may hold the raw float sum; it is rewritten in cents with the rest).
+      const { subtotal, taxAmount, discountAmount, total } = computeDocumentAmounts({
+        lines: [invoice.subtotal],
+        taxRate,
+        discountType,
+        discountValue,
+      });
       // R0-27 review (ST-27-3): a FIXED discount above the stored subtotal is refused.
       this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+      updateData.subtotal = subtotal;
       updateData.taxRate = taxRate;
       updateData.taxAmount = taxAmount;
       updateData.discountType = discountType;
@@ -3940,27 +4243,44 @@ export class CommerceService {
     return result;
   }
 
+  /**
+   * V1-37 (CF-38): campaign revenue per currency. It added every invoice's
+   * total whatever its currency and labelled the sum with the first row's
+   * currency. `byCurrency` holds each currency's figures; the top-level
+   * figures are the business currency's, named by `currency`; invoiceCount
+   * stays the campaign's whole count. Cents-safe (sumMoney).
+   */
   async getCampaignRevenue(businessId: string, campaignId: string) {
-    const invoices = await this.prisma.client.invoice.findMany({
-      where: {
-        businessId,
-        campaignId,
-        deletedAt: null,
-        status: { in: ['PAID', 'PARTIALLY_PAID', 'SENT', 'OVERDUE'] },
-      },
-      select: { id: true, total: true, status: true, currency: true },
-    });
-    const totalRevenue = invoices
-      .filter((i: any) => i.status === 'PAID')
-      .reduce((sum: number, i: any) => sum + i.total, 0);
-    const pipelineRevenue = invoices
-      .filter((i: any) => i.status !== 'PAID')
-      .reduce((sum: number, i: any) => sum + i.total, 0);
+    const [invoices, business] = await Promise.all([
+      this.prisma.client.invoice.findMany({
+        where: {
+          businessId,
+          campaignId,
+          deletedAt: null,
+          status: { in: ['PAID', 'PARTIALLY_PAID', 'SENT', 'OVERDUE'] },
+        },
+        select: { id: true, total: true, status: true, currency: true },
+      }),
+      this.prisma.client.business.findUnique({ where: { id: businessId }, select: { currency: true } }),
+    ]);
+    const currency = normalizeCurrency(business?.currency) || 'TTD';
+    const byCurrency: Record<string, { totalRevenue: number; pipelineRevenue: number; invoiceCount: number }> = {};
+    const codes = new Set<string>([...D13_CURRENCIES, currency, ...invoices.map((i) => normalizeCurrency(i.currency))]);
+    codes.delete('');
+    for (const code of [...codes].sort()) {
+      const rows = invoices.filter((i) => normalizeCurrency(i.currency) === code);
+      byCurrency[code] = {
+        totalRevenue: sumMoney(rows.filter((i) => i.status === 'PAID').map((i) => Number(i.total ?? 0))),
+        pipelineRevenue: sumMoney(rows.filter((i) => i.status !== 'PAID').map((i) => Number(i.total ?? 0))),
+        invoiceCount: rows.length,
+      };
+    }
     return {
-      totalRevenue,
-      pipelineRevenue,
+      totalRevenue: byCurrency[currency].totalRevenue,
+      pipelineRevenue: byCurrency[currency].pipelineRevenue,
       invoiceCount: invoices.length,
-      currency: invoices[0]?.currency || 'TTD',
+      currency,
+      byCurrency,
     };
   }
 
@@ -4231,10 +4551,11 @@ export class CommerceService {
    * tenant's businessId is not this invoice's money. No row, reference or
    * amount per payment leaves here. `paidAt` only when the invoice is PAID.
    *
-   * A manually refunded row is counted twice by computeBalance (M28): it is
-   * dropped from `paid` and subtracted as `refunded`, so `amountDue` can
-   * exceed total - paid until V1-29 settles that convention. This mirrors it
-   * rather than diverging from every other balance reader.
+   * V1-29: a refund is a separate negative row (D-14), so `amountDue` is
+   * total - net. `amountPaid` stays computeBalance's gross `paid`, the figure
+   * the receipt and the status route serve too; with a refund on the invoice
+   * amountPaid + amountDue exceeds the total by the refunded amount. One
+   * public read contract for both is V1-36.
    */
   async getPaymentLinkBalance(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
@@ -4248,7 +4569,7 @@ export class CommerceService {
       },
     });
     if (!invoice) return null;
-    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     return {
       amountPaid: balance.paid,
       amountDue: balance.remaining,
@@ -4433,9 +4754,11 @@ export class CommerceService {
         where: { id: invoiceId },
         select: { total: true, currency: true, payments: { select: { amount: true, status: true } } },
       });
-      const balance = computeBalance(Number(current?.total ?? 0), current?.payments ?? [], current?.currency ?? undefined);
-      // A manually refunded row is counted twice by computeBalance (V1-29), so
-      // `remaining` can exceed the total; an intent never asks for more than either.
+      // A row the manual refund flipped to REFUNDED before V1-29 is read as
+      // its payment plus its refund (balanceOfStoredRows, V1-29 review
+      // CR-V29-4), so `remaining` no longer exceeds the total for it; an
+      // intent still never asks for more than either.
+      const balance = balanceOfStoredRows(Number(current?.total ?? 0), current?.payments ?? [], current?.currency);
       const remaining = Math.min(balance.remaining, balance.total);
       if (remaining <= 0) throw new ConflictException('Invoice is already paid');
 
