@@ -826,12 +826,38 @@ describe('List B: regression controls', () => {
       expect(await invoiceStatus(copy)).toBe('SENT');
     });
 
-    it.todo(
-      'RA-G4-13: SUPER_ADMIN still passes (matrix: 200 before and after). CONTRADICTION measured on main b1948d27: ' +
-        'both guards bypass SUPER_ADMIN, but CommerceService.markInvoicePaid then requires a Membership row for every ' +
-        'non-system actor (service 482-489) and rva_superAdmin has none, so the request answers 500 on main and 403 after ' +
-        'the error-mapping fix. Admitting SUPER_ADMIN inside the service is an authority widening outside the released ' +
-        'scope of KF-REVENUE-AUTH-PROJECTION-001; the guard half is pinned at L1 (commerce-authorization.e2e.test.ts).',
+    // R0-02-REV-AUTH-CONFORM: converted from it.todo per owner ruling D-11
+    // (2026-10-31). D-11 carried the RA-G4-13 question ("should the service
+    // admit SUPER_ADMIN instead?") and was ruled without widening the service,
+    // so the packet text stands: the guards bypass SUPER_ADMIN, the service's
+    // membership check refuses it with 403 (the answer R0-28 QS-07 pins for
+    // quotes). The guard half stays pinned at L1; this pins the service half
+    // against real rows. The matrix cell (200 before and after) is disproved by
+    // the run and kept here as a CONTRADICTION, not edited.
+    it(
+      'RA-G4-13 (D-11): SUPER_ADMIN with no membership passes both guards and reaches the service, which refuses it ' +
+        '(403 Not authorized to update this invoice); status, payment rows, invoice.paid and postings unchanged. ' +
+        'CONTRADICTION with the matrix cell (200 before and after): 500 on main b1948d27, 403 at the fix head; the ' +
+        'service is not widened to admit SUPER_ADMIN',
+      async () => {
+        const copy = await createCopy('g4_13', { status: 'SENT' });
+        const paidSpy = vi.spyOn(commerce, 'markInvoicePaid');
+        try {
+          const res = await markPaid(ID.superAdmin, copy, { businessId: ID.bizA });
+          expect(res.status).toBe(403);
+          expect(res.body.message).toMatch(/Not authorized to update this invoice/);
+          expectNoCanary(res.body);
+          // Both guards admitted SUPER_ADMIN: the refusal is the service's, and
+          // the service was handed the tenant the guards checked.
+          expect(paidSpy).toHaveBeenCalledWith(copy, ID.superAdmin, ID.bizA);
+        } finally {
+          paidSpy.mockRestore();
+        }
+        expect(await invoiceStatus(copy)).toBe('SENT');
+        expect(await paymentCount(copy)).toBe(0);
+        expect(eventsFor('invoice.paid', copy)).toHaveLength(0);
+        expect(await postingsFor(copy)).toHaveLength(0);
+      },
     );
   });
 
@@ -894,6 +920,10 @@ describe('List B: regression controls', () => {
   });
 
   describe('G16 — deferred service-level tightening', () => {
+    // Skipped by design (matrix ruling 4), not a pass. 'KF-REVENUE-FINANCIAL-INTEGRITY'
+    // is not a queue id: it maps to R0-20 if owner decision D-05 authorizes the
+    // webhooks.controller.ts 86-91 change, otherwise to the INGRESS-001 row of
+    // the V1+ backlog. D-05's webhook half is not authorized (R0-02-REV-AUTH-CONFORM).
     it.todo(
       'RA-G16-01: a caller with no actor and no tenant cannot mark paid through the service. ' +
         'DEFERRED: KF-REVENUE-FINANCIAL-INTEGRITY (webhooks.controller.ts 86-91) — the deprecated Stripe handler calls ' +
