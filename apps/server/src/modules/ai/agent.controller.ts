@@ -225,10 +225,18 @@ export class AgentController {
     );
   }
 
+  /**
+   * V1-42b-UNDO-TENANT-SCOPE review SEC-V42B-3: only the actions req.user may
+   * undo, by the rule POST agent/undo/:undoId applies (UndoService
+   * getUndoableActionsFor): no entity ids of a module below write, of a
+   * contact they cannot see, or of a type no one may undo.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/agent/undo')
-  async getUndoableActions(@Param('businessId') businessId: string) {
-    const actions = await this.undoService.getRecentActions(businessId);
+  async getUndoableActions(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    const userId = req.user?.id;
+    if (!userId) return { error: 'Authentication required' };
+    const actions = await this.undoService.getUndoableActionsFor(businessId, userId);
     return {
       actions: actions.map((a) => ({
         id: a.id,
@@ -241,6 +249,13 @@ export class AgentController {
     };
   }
 
+  /**
+   * V1-42b-UNDO-TENANT-SCOPE (SEC-V42-1): the undo id is the client's; the
+   * service resolves it only inside the guarded business (404 otherwise, the
+   * same as an unknown id) and requires req.user to hold write on the module of
+   * what is undone. No canUndo pre-check here: it read the record before the
+   * tenant check and told another business's id apart from an unknown one.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/agent/undo/:undoId')
   async undoAction(
@@ -251,12 +266,7 @@ export class AgentController {
     const userId = req.user?.id;
     if (!userId) return { error: 'Authentication required' };
 
-    const check = this.undoService.canUndo(undoId);
-    if (!check.canUndo) {
-      return { success: false, message: check.reason };
-    }
-
-    const result = await this.undoService.undo(undoId, userId);
+    const result = await this.undoService.undo(undoId, userId, businessId);
     return result;
   }
 
