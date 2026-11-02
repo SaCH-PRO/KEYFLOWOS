@@ -348,6 +348,11 @@
       "packet": "V1-49-PUBLIC-RECEIPT"
     },
     {
+      "prefix": "v50a_",
+      "owner": "apps/server/test/commerce-quote-status.integration.test.ts",
+      "packet": "V1-50-QUOTE-STATE-MACHINE"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
