@@ -37,6 +37,21 @@
  *   for one free slot leave exactly one booking on it; the other three are
  *   refused with the guard's message.
  *
+ * Review repairs:
+ *   SEC-V27-1: the tRPC create's two new refusals (an inverted or empty window,
+ *   400; a service of another business, 404) and a second tenant B as the
+ *   negative control: A's owner cannot create in B, cannot reach B's booking
+ *   event through A's calendar route (404) or B's (403), and B's owner can
+ *   (the control that the refusals are the tenancy, not the setup).
+ *   CR-1: the window rule belongs to the writers that choose a window (the
+ *   offer's placeholder, a calendar move), not to the shared guard, so a
+ *   status-only calendar reinstatement of a legacy CANCELLED row whose end is
+ *   not after its start writes, as BookingsService.updateBookingStatus does.
+ *   CR-2: convertWaitlistEntry, the fourth writer of the waitlist family,
+ *   claims the slot when its placeholder was cancelled: refused onto a slot
+ *   booked since (and behind a held lock), allowed onto a free one, and a live
+ *   placeholder converts beside a legacy overlap with no re-read.
+ *
  * Boundary: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
  * CalendarController, CalendarQueryService, CalendarPermissionService,
  * CalendarProjectionService, BookingWaitlistService, BookingWaitlistListener
@@ -80,11 +95,19 @@ const ID = {
   svcBuf: `${P}svcBuf`, // a 15-minute buffer
   staff1: `${P}staff1`,
   staff2: `${P}staff2`,
+  // Business B: another tenant, with its own owner, catalogue and calendar.
+  ownerB: `${P}ownerB`,
+  bizB: `${P}bizB`,
+  contactB: `${P}contactB`,
+  svcB: `${P}svcB`,
+  staffB: `${P}staffB`,
 };
 
 const MSG = {
   taken: 'That time slot has already been booked. Please choose another.',
   buffer15: 'This time slot is unavailable due to a 15-minute buffer between appointments.',
+  // The in-app create's window refusal (BookingsService.createBooking).
+  window: 'The end time must be after the start time.',
 };
 
 const utc = (iso: string) => new Date(iso);
@@ -213,18 +236,30 @@ async function occupyUnderHeldLock(staffId: string, start: Date, holdMs = 700) {
 }
 
 /** tRPC bookings.createBooking as the business owner, over HTTP. */
-function trpcCreate(input: { staffId: string; start: Date; mins?: number; serviceId?: string }) {
+function trpcCreate(input: {
+  staffId: string;
+  start: Date;
+  mins?: number;
+  serviceId?: string;
+  businessId?: string;
+  contactId?: string;
+}) {
   return agent()
     .post('/trpc/bookings.createBooking')
     .set(HEADER, ID.owner)
     .send({
-      businessId: ID.biz,
-      contactId: ID.contact,
+      businessId: input.businessId ?? ID.biz,
+      contactId: input.contactId ?? ID.contact,
       serviceId: input.serviceId ?? ID.svc,
       staffId: input.staffId,
       startTime: input.start.toISOString(),
       endTime: plusMins(input.start, input.mins ?? 60).toISOString(),
     });
+}
+
+/** Every booking row of the suite's two tenants, live or not. */
+function bookingsOfBothTenants() {
+  return db.booking.findMany({ where: { businessId: { in: [ID.biz, ID.bizB] } }, select: { id: true, businessId: true } });
 }
 
 /** A waiting waitlist entry for the unbuffered service. */
@@ -237,17 +272,17 @@ function waitingEntry(preferredStaffId?: string) {
   });
 }
 
-function offer(entryId: string, staffId: string, start: Date) {
+function offer(entryId: string, staffId: string, start: Date, mins = 60) {
   return waitlist.offerSlot(entryId, {
     startTime: start,
-    endTime: plusMins(start, 60),
+    endTime: plusMins(start, mins),
     serviceId: ID.svc,
     staffId,
   });
 }
 
 /** A booking and its calendar projection, as the bookings listener writes it. */
-async function projectedBooking(input: { staffId: string; start: Date; status?: string }) {
+async function projectedBooking(input: { staffId: string; start: Date; status?: string; mins?: number }) {
   const booking = await occupy(input);
   const event = await db.calendarEvent.create({
     data: {
@@ -393,6 +428,14 @@ beforeAll(async () => {
   // No availability rows and no business hours: nothing but the overlap guard decides.
   await db.staffMember.create({ data: { id: ID.staff1, businessId: ID.biz, name: 'Staff One' } });
   await db.staffMember.create({ data: { id: ID.staff2, businessId: ID.biz, name: 'Staff Two' } });
+
+  // Business B (SEC-V27-1): a second tenant whose rows A's owner must not reach.
+  await db.user.create({ data: { id: ID.ownerB, email: `${P}ownerb@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: ID.bizB, name: 'V27A Biz B', slug: `${P}bizb`, ownerId: ID.ownerB, currency: 'TTD', timezone: 'UTC' } });
+  await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
+  await db.contact.create({ data: { id: ID.contactB, businessId: ID.bizB, firstName: 'Bea', lastName: 'Other' } });
+  await db.service.create({ data: { id: ID.svcB, businessId: ID.bizB, name: 'V27A B Cut', duration: 60, price: 0 } });
+  await db.staffMember.create({ data: { id: ID.staffB, businessId: ID.bizB, name: 'Staff B' } });
 }, 60_000);
 
 afterAll(async () => {
@@ -463,6 +506,16 @@ describe('tRPC bookings.createBooking (packages/api/src/routers/bookings.ts)', (
     expect(await liveOn(ID.staff1, T13, T14)).toHaveLength(1);
     expect(await liveOn(ID.staff2, T10, T11)).toHaveLength(1);
   });
+
+  it('REFUSAL (SEC-V27-1): a window that does not move forward is refused with the in-app create\'s message; nothing written', async () => {
+    const inverted = await trpcCreate({ staffId: ID.staff1, start: T11, mins: -60 });
+    expect(inverted.status, JSON.stringify(inverted.body)).toBe(400);
+    expect(inverted.body.error.message).toBe(MSG.window);
+    const empty = await trpcCreate({ staffId: ID.staff1, start: T10, mins: 0 });
+    expect(empty.status, JSON.stringify(empty.body)).toBe(400);
+    expect(empty.body.error.message).toBe(MSG.window);
+    expect(await bookingsOfBothTenants()).toHaveLength(0);
+  });
 });
 
 describe('waitlist offerSlot placeholder (booking-waitlist.service.ts)', () => {
@@ -505,6 +558,70 @@ describe('waitlist offerSlot placeholder (booking-waitlist.service.ts)', () => {
     const after = await db.bookingWaitlistEntry.findUniqueOrThrow({ where: { id: entry.id }, include: { offeredBooking: true } });
     expect(after.status).toBe('OFFERED');
     expect(after.offeredBooking).toMatchObject({ status: 'UNCONFIRMED', staffId: ID.staff1, startTime: T10, endTime: T11 });
+  });
+
+  it('REFUSAL (CR-1): a window that does not move forward is refused before the claim; no placeholder, entry WAITING', async () => {
+    const entry = await waitingEntry();
+    await expect(offer(entry.id, ID.staff1, T11, -60)).rejects.toThrow(MSG.window);
+    await expect(offer(entry.id, ID.staff1, T10, 0)).rejects.toThrow(MSG.window);
+    const after = await db.bookingWaitlistEntry.findUniqueOrThrow({ where: { id: entry.id } });
+    expect(after.status).toBe('WAITING');
+    expect(after.offeredBookingId).toBeNull();
+    expect(await bookingsOfBothTenants()).toHaveLength(0);
+  });
+});
+
+describe('waitlist convertWaitlistEntry (booking-waitlist.service.ts, CR-2)', () => {
+  /** An entry offered T10-T11 on staff1, whose placeholder staff then cancelled through the in-app status write. */
+  async function offeredThenPlaceholderCancelled() {
+    const entry = await waitingEntry();
+    const { booking: placeholder } = await offer(entry.id, ID.staff1, T10);
+    await bookingsService.updateBookingStatus(ID.biz, placeholder.id, 'CANCELLED');
+    return { entry, placeholder };
+  }
+
+  async function expectConvertRefusedAndNothingWritten(entryId: string, placeholderId: string) {
+    const after = await db.bookingWaitlistEntry.findUniqueOrThrow({ where: { id: entryId } });
+    expect(after.status).toBe('OFFERED');
+    expect(after.convertedAt).toBeNull();
+    expect((await db.booking.findUniqueOrThrow({ where: { id: placeholderId } })).status).toBe('CANCELLED');
+    expect(await liveOn(ID.staff1, T10, T11)).toHaveLength(1);
+  }
+
+  it('RED-BEFORE: refuses to bring a cancelled placeholder back onto a slot booked since; entry stays OFFERED', async () => {
+    const { entry, placeholder } = await offeredThenPlaceholderCancelled();
+    // The slot, rebooked through the guarded in-app create after the cancel.
+    await bookingsService.createBooking({
+      businessId: ID.biz, contactId: ID.contact, serviceId: ID.svc, staffId: ID.staff1, startTime: T10, endTime: T11,
+    });
+    await expect(waitlist.convertWaitlistEntry(ID.biz, entry.id)).rejects.toThrow(MSG.taken);
+    await expectConvertRefusedAndNothingWritten(entry.id, placeholder.id);
+  });
+
+  it('RED-BEFORE: waits for a claim holding the slot lock, then is refused', async () => {
+    const { entry, placeholder } = await offeredThenPlaceholderCancelled();
+    const holder = await occupyUnderHeldLock(ID.staff1, T10);
+    const [result] = await Promise.allSettled([waitlist.convertWaitlistEntry(ID.biz, entry.id), holder]);
+    expect(refusal(result)).toBe(MSG.taken);
+    await expectConvertRefusedAndNothingWritten(entry.id, placeholder.id);
+  });
+
+  it('CONTROL: a cancelled placeholder whose slot is still free is reinstated and the entry CONVERTED', async () => {
+    const { entry, placeholder } = await offeredThenPlaceholderCancelled();
+    await occupy({ staffId: ID.staff2, start: T10 }); // another staff member's booking does not block
+    const result = await waitlist.convertWaitlistEntry(ID.biz, entry.id);
+    expect(result.entry.status).toBe('CONVERTED');
+    expect(result.booking).toMatchObject({ id: placeholder.id, status: 'CONFIRMED' });
+    expect(await liveOn(ID.staff1, T10, T11)).toHaveLength(1);
+  });
+
+  it('CONTROL: a live placeholder converts with no overlap re-read, even beside a legacy row that overlaps it', async () => {
+    const entry = await waitingEntry();
+    const { booking: placeholder } = await offer(entry.id, ID.staff1, T10);
+    await occupy({ staffId: ID.staff1, start: plusMins(T10, 30) }); // a legacy overlap written past the guard
+    const result = await waitlist.convertWaitlistEntry(ID.biz, entry.id);
+    expect(result.entry.status).toBe('CONVERTED');
+    expect(result.booking).toMatchObject({ id: placeholder.id, status: 'CONFIRMED' });
   });
 });
 
@@ -572,6 +689,93 @@ describe('calendar PATCH write-back (calendar-projection.service.ts applyPatchTo
     const cancelled = await calendarPatch(event.id, { status: 'CANCELLED' });
     expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
     expect((await db.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('CANCELLED');
+  });
+
+  it('CONTROL (CR-1): a status-only reinstatement of a legacy CANCELLED row whose end is not after its start writes, as the in-app status write does', async () => {
+    const { booking, event } = await projectedBooking({ staffId: ID.staff1, start: T10, mins: 0, status: 'CANCELLED' });
+    const res = await calendarPatch(event.id, { status: 'CONFIRMED' });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect((await db.booking.findUniqueOrThrow({ where: { id: booking.id } })).status).toBe('CONFIRMED');
+    // Parity: BookingsService.updateBookingStatus reinstates an identical row.
+    const twin = await occupy({ staffId: ID.staff2, start: T10, mins: 0, status: 'CANCELLED' });
+    await bookingsService.updateBookingStatus(ID.biz, twin.id, 'CONFIRMED');
+    expect((await db.booking.findUniqueOrThrow({ where: { id: twin.id } })).status).toBe('CONFIRMED');
+  });
+
+  it('REFUSAL (CR-1): a move that leaves the end not after the start is refused; booking and projection unchanged', async () => {
+    const { booking, event } = await projectedBooking({ staffId: ID.staff1, start: T13 });
+    // startAt alone: the calendar's own endAt check does not run, and the booking keeps its T14 end.
+    const res = await calendarPatch(event.id, { startAt: plusMins(T14, 30).toISOString() });
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.message).toBe(MSG.window);
+    const after = await db.booking.findUniqueOrThrow({ where: { id: booking.id } });
+    expect(after.startTime).toEqual(T13);
+    expect(after.endTime).toEqual(T14);
+    expect((await db.calendarEvent.findUniqueOrThrow({ where: { id: event.id } })).startAt).toEqual(T13);
+  });
+});
+
+describe('TENANCY (SEC-V27-1): the writers stay inside the caller\'s business', () => {
+  /** A booking of business B and its projection. */
+  async function projectedBookingOfB() {
+    const booking = await db.booking.create({
+      data: {
+        businessId: ID.bizB, contactId: ID.contactB, serviceId: ID.svcB, staffId: ID.staffB, startTime: T13, endTime: T14, status: 'CONFIRMED',
+      },
+    });
+    const event = await db.calendarEvent.create({
+      data: {
+        businessId: ID.bizB,
+        title: 'V27A booking of B',
+        type: 'BOOKING',
+        module: 'BOOKINGS',
+        startAt: T13,
+        endAt: T14,
+        status: 'SCHEDULED',
+        sourceType: 'booking',
+        sourceId: booking.id,
+        staffId: ID.staffB,
+        contactId: ID.contactB,
+      },
+    });
+    return { booking, event };
+  }
+
+  it('tRPC: a service of another business is not found, and nothing is written in either tenant', async () => {
+    const res = await trpcCreate({ staffId: ID.staff1, start: T10, serviceId: ID.svcB });
+    expect(res.status, JSON.stringify(res.body)).toBe(404);
+    expect(res.body.error.message).toBe('Service not found');
+    expect(await bookingsOfBothTenants()).toHaveLength(0);
+  });
+
+  it('tRPC: A\'s owner cannot create in business B, even naming B\'s own rows; nothing written', async () => {
+    const res = await trpcCreate({ businessId: ID.bizB, contactId: ID.contactB, serviceId: ID.svcB, staffId: ID.staffB, start: T10 });
+    // assertBusinessAccess (unchanged by this packet) throws a plain Error, which tRPC answers 500.
+    expect(res.status, JSON.stringify(res.body)).toBeGreaterThanOrEqual(400);
+    expect(res.body.error.message).toBe('Forbidden');
+    expect(await bookingsOfBothTenants()).toHaveLength(0);
+  });
+
+  it('calendar: B\'s booking event is not found through A\'s route and forbidden on B\'s route to A\'s owner; B\'s booking unchanged', async () => {
+    const { booking, event } = await projectedBookingOfB();
+    const body = { startAt: T10.toISOString(), endAt: T11.toISOString(), status: 'CANCELLED' };
+    const viaA = await calendarPatch(event.id, body);
+    expect(viaA.status, JSON.stringify(viaA.body)).toBe(404);
+    const viaB = await agent().patch(`/calendar/businesses/${ID.bizB}/events/${event.id}`).set(HEADER, ID.owner).send(body);
+    expect(viaB.status, JSON.stringify(viaB.body)).toBe(403);
+    const after = await db.booking.findUniqueOrThrow({ where: { id: booking.id } });
+    expect(after).toMatchObject({ startTime: T13, endTime: T14, status: 'CONFIRMED' });
+    expect((await db.calendarEvent.findUniqueOrThrow({ where: { id: event.id } })).startAt).toEqual(T13);
+  });
+
+  it('CONTROL: B\'s owner moves B\'s booking through B\'s route (the refusals above are the tenancy, not the setup)', async () => {
+    const { booking, event } = await projectedBookingOfB();
+    const res = await agent()
+      .patch(`/calendar/businesses/${ID.bizB}/events/${event.id}`)
+      .set(HEADER, ID.ownerB)
+      .send({ startAt: T10.toISOString(), endAt: T11.toISOString() });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect((await db.booking.findUniqueOrThrow({ where: { id: booking.id } })).startTime).toEqual(T10);
   });
 });
 

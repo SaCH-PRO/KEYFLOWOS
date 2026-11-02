@@ -253,7 +253,12 @@ describe('BookingWaitlistService', () => {
   describe('convertWaitlistEntry', () => {
     it('confirms the placeholder booking and marks entry CONVERTED', async () => {
       prismaMock.client.bookingWaitlistEntry.findFirst.mockResolvedValueOnce(
-        mockEntry({ status: WAITLIST_STATUSES.OFFERED, offeredBookingId: 'booking_1' }),
+        mockEntry({
+          status: WAITLIST_STATUSES.OFFERED,
+          offeredBookingId: 'booking_1',
+          // V1-27 (CR-2): the included placeholder, which names the calendar the convert locks.
+          offeredBooking: { id: 'booking_1', businessId: 'biz_1', serviceId: 'service_1', staffId: null, status: 'UNCONFIRMED' },
+        }),
       );
 
       const result = await service.convertWaitlistEntry('biz_1', 'entry_1');

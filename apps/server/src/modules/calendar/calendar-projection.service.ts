@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
   assertBookingSlotFree,
+  assertBookingWindowMovesForward,
   bookingHoldsSlot,
   withBookingSlotLock,
 } from '../bookings/booking-waitlist.service';
@@ -347,6 +348,11 @@ export class CalendarProjectionService {
       const status = next.status ?? current.status;
       const moves =
         start.getTime() !== current.startTime.getTime() || end.getTime() !== current.endTime.getTime();
+      // A move chooses a window, so it keeps the in-app create's window rule.
+      // A status-only write leaves the window the user never touched alone,
+      // as BookingsService.updateBookingStatus does, even on a legacy row
+      // whose end is not after its start (CR-1).
+      if (moves) assertBookingWindowMovesForward(start, end);
       if (bookingHoldsSlot(status) && (moves || !bookingHoldsSlot(current.status))) {
         await assertBookingSlotFree(tx, {
           ...resource,
