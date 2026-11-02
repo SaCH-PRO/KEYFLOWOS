@@ -22,6 +22,14 @@ import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
 import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/update-invoice.dto';
+import {
+  decideQuoteTransition,
+  mintQuoteViewToken,
+  quoteTransitionRefusal,
+  requireQuoteStatusTarget,
+  type QuoteStatus,
+  type QuoteStatusTarget,
+} from './quote-workflow';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { appUrl } from '../../core/config/runtime-urls';
@@ -173,6 +181,9 @@ function forQuoteEvent<S extends { contactId: string | null; contact: unknown }>
 }
 
 type OperatorQuoteContact = Prisma.ContactGetPayload<{ select: typeof OPERATOR_QUOTE_CONTACT_SELECT }>;
+
+/** A quote row as the status writers read and return it (V1-50 moveQuoteStatus). */
+type QuoteWithContactRow = Prisma.QuoteGetPayload<{ include: { contact: true } }>;
 
 /**
  * The served contact of a quote read: only OPERATOR_QUOTE_CONTACT_SELECT (name
@@ -553,42 +564,62 @@ export class CommerceService {
     return { updated, action, failed, failedCount: failed.length };
   }
 
+  /**
+   * V1-50: `send` and `reject` go through the quote transition table
+   * (quote-workflow.ts), row by row, with the same compare-and-set move as the
+   * status route (moveQuoteStatus), so a bulk send mints a DRAFT's view token
+   * only when it has none and a bulk reject stamps rejectedAt. They used their
+   * own rules: `reject` skipped a DRAFT the status route would reject and left
+   * rejectedAt empty. A row already in the target status is left as it is; a
+   * row the table refuses (decided, converted) is left as it is and listed in
+   * `skipped`. Side effects are unchanged: a bulk send emits quote.sent with
+   * the same minimal quote ({ id, status, sentAt, viewToken }, no contact), a
+   * bulk reject emits nothing. `delete` is not a status move and keeps its rule.
+   */
   async bulkUpdateQuotes(businessId: string, ids: string[], action: 'send' | 'reject' | 'delete') {
     const where = { id: { in: ids }, businessId, deletedAt: null };
-    let result: { count: number };
-    switch (action) {
-      case 'send': {
-        // Mint viewTokens per-row so bulk-sent quotes have valid public links.
-        const candidates = await this.prisma.client.quote.findMany({
-          where: { ...where, status: 'DRAFT' },
-          select: { id: true, viewToken: true },
-        });
-        let updatedCount = 0;
-        for (const q of candidates) {
-          const data: Record<string, any> = { status: 'SENT', sentAt: new Date() };
-          if (!q.viewToken) data.viewToken = this.generateQuoteToken();
-          await this.prisma.client.quote.update({ where: { id: q.id }, data });
-          updatedCount++;
-          this.events.emit('quote.sent', { quote: { id: q.id, ...data }, businessId } as QuoteSentPayload);
-        }
-        result = { count: updatedCount };
-        break;
+    if (action === 'delete') {
+      const result = await this.prisma.client.quote.updateMany({
+        where: { ...where, status: { in: ['DRAFT', 'SENT', 'REJECTED', 'EXPIRED'] } },
+        data: { deletedAt: new Date() },
+      });
+      this.statsCache.invalidateCache(businessId);
+      return { updated: result.count, action };
+    }
+    const target: QuoteStatusTarget = action === 'send' ? 'SENT' : 'REJECTED';
+    const rows = await this.prisma.client.quote.findMany({
+      where,
+      select: { id: true, status: true, viewToken: true, invoiceId: true },
+    });
+    let updated = 0;
+    const skipped: Array<{ id: string; quoteStatus: string; code: string }> = [];
+    for (const row of rows) {
+      const decision = decideQuoteTransition(row, target);
+      if (decision.kind === 'noop') continue;
+      if (decision.kind === 'refuse') {
+        const refusal = quoteTransitionRefusal(row, target, decision.reason).getResponse() as { code: string };
+        skipped.push({ id: row.id, quoteStatus: row.status, code: refusal.code });
+        continue;
       }
-      case 'reject':
-        result = await this.prisma.client.quote.updateMany({
-          where: { ...where, status: { in: ['SENT'] } },
-          data: { status: 'REJECTED' },
-        });
-        break;
-      case 'delete':
-        result = await this.prisma.client.quote.updateMany({
-          where: { ...where, status: { in: ['DRAFT', 'SENT', 'REJECTED', 'EXPIRED'] } },
-          data: { deletedAt: new Date() },
-        });
-        break;
+      let moved: Awaited<ReturnType<CommerceService['moveQuoteStatus']>>;
+      try {
+        moved = await this.moveQuoteStatus(row, target, new Date());
+      } catch (err) {
+        if (err instanceof NotFoundException) continue; // deleted meanwhile
+        if (!(err instanceof ConflictException)) throw err;
+        const body = err.getResponse() as { code?: string; quoteStatus?: string };
+        skipped.push({ id: row.id, quoteStatus: body.quoteStatus ?? row.status, code: body.code ?? 'quote_status_changed' });
+        continue;
+      }
+      if (!moved.moved) continue;
+      updated++;
+      if (target === 'SENT') {
+        const { id, status, sentAt, viewToken } = moved.row;
+        this.events.emit('quote.sent', { quote: { id, status, sentAt, viewToken }, businessId } as QuoteSentPayload);
+      }
     }
     this.statsCache.invalidateCache(businessId);
-    return { updated: result.count, action };
+    return { updated, action, skipped, skippedCount: skipped.length };
   }
 
   async deleteInvoice(invoiceId: string, businessId: string) {
@@ -1126,13 +1157,18 @@ export class CommerceService {
      */
     viewToken?: string;
   }) {
+    // V1-50: the route forwards its path segment upper-cased but unchecked. A
+    // value that is not one of the four targets used to reach Prisma: a 500,
+    // or (`/status/converted`) a write of that enum value. It is a 400 now.
+    const target = requireQuoteStatusTarget(params.status);
     const existingQuote = await this.prisma.client.quote.findUnique({
       where: { id: params.quoteId },
-      select: { businessId: true, status: true, viewToken: true },
+      select: { id: true, businessId: true, status: true, viewToken: true, invoiceId: true },
     });
     // R0-28: unknown, soft-deleted and foreign ids answer the same 404 (they
     // were plain Errors, so 500s): a different answer for "exists but is not
-    // yours" would confirm the id belongs to someone.
+    // yours" would confirm the id belongs to someone. V1-50: this stays ahead
+    // of the transition table, so a 409 never describes a foreign quote.
     if (!existingQuote) {
       throw new NotFoundException('Quote not found');
     }
@@ -1148,30 +1184,37 @@ export class CommerceService {
       }
     }
     const now = new Date();
-    const data: Record<string, any> = { status: params.status };
-    if (params.status === 'SENT') {
-      data.sentAt = now;
-      // Make sure a public-link token exists so the email URL works.
-      if (params.ifStatus && params.viewToken) {
-        data.viewToken = params.viewToken;
-      } else if (!existingQuote.viewToken) {
-        data.viewToken = this.generateQuoteToken();
-      }
-    } else if (params.status === 'ACCEPTED') {
-      data.acceptedAt = now;
-    } else if (params.status === 'REJECTED') {
-      data.rejectedAt = now;
-    }
     // R0-CMF3 review (ST-CMF3-1, CR-CMF3-1): the status route, send-email and
     // the public accept/reject all land here. A legacy quote can still point
     // at another tenant's contact: the returned quote reads contact null, and
     // the events and the timeline write carry neither that contact nor its id.
-    // R0-CMF4: with ifStatus the move is a compare-and-set.
+    let row: QuoteWithContactRow;
+    // The status the move was made from: the compare-and-set proved it.
+    let priorStatus: string;
     if (params.ifStatus) {
+      // R0-CMF4: with ifStatus the move is a compare-and-set on that status
+      // (and, with `viewToken`, on no token or that one). V1-50: it must be a
+      // move the table allows from ifStatus, on an unconverted quote.
+      const decision = decideQuoteTransition({ status: params.ifStatus, invoiceId: existingQuote.invoiceId }, target);
+      if (decision.kind !== 'move') {
+        throw quoteTransitionRefusal(existingQuote, target, decision.kind === 'refuse' ? decision.reason : 'not_allowed');
+      }
+      const data: Prisma.QuoteUpdateManyMutationInput = { status: target };
+      if (target === 'SENT') {
+        data.sentAt = now;
+        // The token the email carried; without one (no caller today), the quote's one mint.
+        if (params.viewToken) data.viewToken = params.viewToken;
+        else if (!existingQuote.viewToken) data.viewToken = mintQuoteViewToken();
+      } else if (target === 'ACCEPTED') {
+        data.acceptedAt = now;
+      } else if (target === 'REJECTED') {
+        data.rejectedAt = now;
+      }
       const moved = await this.prisma.client.quote.updateMany({
         where: {
           id: params.quoteId,
           status: params.ifStatus,
+          invoiceId: null,
           ...(params.viewToken ? { OR: [{ viewToken: null }, { viewToken: params.viewToken }] } : {}),
         },
         data,
@@ -1182,32 +1225,41 @@ export class CommerceService {
           include: { contact: true },
         });
         if (!current) throw new NotFoundException('Quote not found');
-        if (current.status === params.status && (!params.viewToken || current.viewToken === params.viewToken)) {
+        if (current.status === target && (!params.viewToken || current.viewToken === params.viewToken)) {
           return withTenantContact(current);
         }
         throw new ConflictException({
           code: 'quote_status_changed',
-          message: `The quote is ${current.status}, not ${params.ifStatus}: it was not moved to ${params.status}.`,
+          message: `The quote is ${current.status}, not ${params.ifStatus}: it was not moved to ${target}.`,
           quoteStatus: current.status,
         });
       }
+      row = await this.prisma.client.quote.findUniqueOrThrow({ where: { id: params.quoteId }, include: { contact: true } });
+      priorStatus = params.ifStatus;
+    } else {
+      // V1-50: the transition table decides. An illegal move, or any move on a
+      // converted quote, is a 409 and nothing is written. Asking for the status
+      // the quote already has answers the quote as it is: no write, no second
+      // token, no sentAt bump, no event, no timeline entry.
+      const decision = decideQuoteTransition(existingQuote, target);
+      if (decision.kind === 'refuse') throw quoteTransitionRefusal(existingQuote, target, decision.reason);
+      if (decision.kind === 'noop') {
+        const current = await this.prisma.client.quote.findUnique({ where: { id: params.quoteId }, include: { contact: true } });
+        if (!current) throw new NotFoundException('Quote not found');
+        return withTenantContact(current);
+      }
+      const moved = await this.moveQuoteStatus(existingQuote, target, now);
+      if (!moved.moved) return withTenantContact(moved.row);
+      row = moved.row;
+      priorStatus = existingQuote.status;
     }
-    const row = params.ifStatus
-      ? await this.prisma.client.quote.findUniqueOrThrow({ where: { id: params.quoteId }, include: { contact: true } })
-      : await this.prisma.client.quote.update({
-          where: { id: params.quoteId },
-          data,
-          include: { contact: true },
-        });
     const quote = withTenantContact(row);
     const eventQuote = forQuoteEvent(row, quote);
-    // The status the move was made from: with ifStatus, the compare-and-set proved it.
-    const priorStatus = params.ifStatus ?? existingQuote.status;
     const source = params.source ?? 'internal';
-    if (params.status === 'SENT' && priorStatus !== 'SENT') {
+    if (target === 'SENT' && priorStatus !== 'SENT') {
       this.events.emit('quote.sent', { quote: eventQuote, businessId: quote.businessId } as QuoteSentPayload);
     }
-    if (params.status === 'ACCEPTED' && priorStatus !== 'ACCEPTED') {
+    if (target === 'ACCEPTED' && priorStatus !== 'ACCEPTED') {
       this.events.emit('quote.accepted', {
         quote: eventQuote,
         businessId: quote.businessId,
@@ -1215,7 +1267,7 @@ export class CommerceService {
         source,
       } as QuoteAcceptedPayload);
     }
-    if (params.status === 'REJECTED' && priorStatus !== 'REJECTED') {
+    if (target === 'REJECTED' && priorStatus !== 'REJECTED') {
       this.events.emit('quote.rejected', {
         quote: eventQuote,
         businessId: quote.businessId,
@@ -1228,7 +1280,7 @@ export class CommerceService {
       await this.crm.logContactEvent({
         businessId: quote.businessId,
         contactId: eventQuote.contactId,
-        type: `quote.${params.status.toLowerCase()}`,
+        type: `quote.${target.toLowerCase()}`,
         data: {
           quoteId: quote.id,
           total: quote.total,
@@ -1245,13 +1297,77 @@ export class CommerceService {
     return quote;
   }
 
+  /**
+   * V1-50: the one write of a quote status move (the status route, the public
+   * accept/reject and bulkUpdateQuotes), made after decideQuoteTransition said
+   * "move". It is a compare-and-set on what the caller decided from: the
+   * status, an unconverted and undeleted row, and for SENT the view token. A
+   * DRAFT -> SENT move keeps a stored token (one send-email reserved) and
+   * otherwise mints the quote's one token here, so two overlapping moves cannot
+   * each mint one. When the row changed after it was read:
+   * - it now has the requested status: nothing is written (`moved: false`);
+   * - only its token changed (send-email reserved one meanwhile): the move is
+   *   made once more on the fresh row, keeping that token;
+   * - the table now refuses the move: that 409;
+   * - otherwise 409 quote_status_changed (the caller decided from a status the
+   *   quote no longer has).
+   */
+  private async moveQuoteStatus(
+    seen: { id: string; status: string; viewToken: string | null; invoiceId?: string | null },
+    target: QuoteStatusTarget,
+    now: Date,
+  ): Promise<{ moved: boolean; row: QuoteWithContactRow }> {
+    let current = seen;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const data: Prisma.QuoteUpdateInput = { status: target };
+      if (target === 'SENT') {
+        data.sentAt = now;
+        data.viewToken = current.viewToken ?? mintQuoteViewToken();
+      } else if (target === 'ACCEPTED') {
+        data.acceptedAt = now;
+      } else if (target === 'REJECTED') {
+        data.rejectedAt = now;
+      }
+      try {
+        const row = await this.prisma.client.quote.update({
+          where: {
+            id: current.id,
+            status: current.status as QuoteStatus,
+            deletedAt: null,
+            AND: [{ invoiceId: null }, ...(target === 'SENT' ? [{ viewToken: current.viewToken }] : [])],
+          },
+          data,
+          include: { contact: true },
+        });
+        return { moved: true, row };
+      } catch (err) {
+        // P2025: no row matched the compare-and-set.
+        if ((err as { code?: unknown } | null)?.code !== 'P2025') throw err;
+      }
+      const fresh = await this.prisma.client.quote.findUnique({ where: { id: current.id }, include: { contact: true } });
+      if (!fresh) throw new NotFoundException('Quote not found');
+      const decision = decideQuoteTransition(fresh, target);
+      if (decision.kind === 'noop') return { moved: false, row: fresh };
+      if (decision.kind === 'refuse') throw quoteTransitionRefusal(fresh, target, decision.reason);
+      if (fresh.status !== current.status) {
+        throw new ConflictException({
+          code: 'quote_status_changed',
+          message: `The quote is ${fresh.status}, not ${current.status}: it was not moved to ${target}.`,
+          quoteStatus: fresh.status,
+        });
+      }
+      current = fresh;
+    }
+    throw new ConflictException({
+      code: 'quote_status_changed',
+      message: `The quote changed while it was being moved to ${target}; it was not moved.`,
+      quoteStatus: current.status,
+    });
+  }
+
   // R2: how many days a SENT quote can sit without a view/accept before
   // we surface it as a stale-quote candidate for the Action Queue.
   static readonly QUOTE_STALE_DAYS = 7;
-
-  private generateQuoteToken(): string {
-    return randomBytes(24).toString('base64url');
-  }
 
   /**
    * R0-CMF4-SEND-EMAIL-ORDER (COST-LEDGER-001 section 7 item 2) and its
@@ -1285,7 +1401,7 @@ export class CommerceService {
     let viewToken = quote.viewToken;
     let reserved = false;
     if (!viewToken && quote.status === 'DRAFT') {
-      const token = this.generateQuoteToken();
+      const token = mintQuoteViewToken();
       const won = await this.prisma.client.quote.updateMany({
         where: { id: quoteId, status: 'DRAFT', viewToken: null },
         data: { viewToken: token },
