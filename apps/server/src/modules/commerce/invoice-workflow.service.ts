@@ -102,7 +102,9 @@ export interface BalanceSummary {
  * refunded is net 0, remaining 100. A row written before V1-29 by the manual
  * refund flipped its original to REFUNDED (a positive REFUNDED row with no
  * SUCCESSFUL twin) and is still read sign-agnostically here, i.e. subtracted
- * twice; mark-paid refuses an invoice carrying one (CommerceService
+ * twice; stored Payment rows are therefore read through balanceOfStoredRows,
+ * which reads such a row as the payment plus its refund (V1-29 review
+ * CR-V29-4). Mark-paid still refuses an invoice carrying one (CommerceService
  * .markPaidRemaining). Nothing writes such a row any more.
  *
  * `remaining` is clamped at zero (overpayments don't drive remaining negative).
@@ -140,6 +142,48 @@ export function computeBalance(total: number, payments: PaymentLike[], currency 
     isFullyPaid,
     isOverpaid: netCents > t.maxCents,
   };
+}
+
+/**
+ * V1-29 review (CR-V29-4): stored Payment rows as the balance reads them.
+ * Before V1-29 the manual refund flipped its original row to REFUNDED and
+ * kept the positive amount; computeBalance, which reads refunds whatever
+ * their sign, then dropped that row from `paid` and subtracted it again (60
+ * paid and refunded on a 100 invoice: net -60, remaining 160). Every refund
+ * writer since (the Stripe and PayPal refund webhooks, refundCharge, the
+ * manual refund) writes a separate NEGATIVE REFUNDED row beside a SUCCESSFUL
+ * original, so a positive REFUNDED row in the table is such a flipped
+ * original. It is read as what it stands for under D-14: the payment
+ * received (SUCCESSFUL) plus its refund (a negative REFUNDED row of the same
+ * amount), counted once in `paid` and once in `refunded`, net 0. Every other
+ * row passes unchanged, so for rows written since V1-29 this is computeBalance
+ * itself. computeBalance alone stays sign-agnostic for figures that are not
+ * stored rows.
+ */
+export function readStoredPayments(rows: ReadonlyArray<{ amount: number | string; status: string }>): PaymentLike[] {
+  return rows.flatMap((p): PaymentLike[] => {
+    const amount = Number(p.amount) || 0;
+    if (p.status === 'REFUNDED' && amount > 0) {
+      return [
+        { amount, status: 'SUCCESSFUL' },
+        { amount: -amount, status: 'REFUNDED' },
+      ];
+    }
+    return [{ amount, status: p.status }];
+  });
+}
+
+/**
+ * computeBalance over stored Payment rows (readStoredPayments): the balance
+ * the reconcile derives the status from and every operator and public
+ * balance read in CommerceService serves (V1-29 review CR-V29-4).
+ */
+export function balanceOfStoredRows(
+  total: number,
+  rows: ReadonlyArray<{ amount: number | string; status: string }>,
+  currency?: string | null,
+): BalanceSummary {
+  return computeBalance(total, readStoredPayments(rows), currency ?? undefined);
 }
 
 /**
@@ -246,7 +290,7 @@ export class InvoiceWorkflowService {
       include: { payments: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
-    return computeBalance(Number(invoice.total), invoice.payments as PaymentLike[], invoice.currency);
+    return balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
   }
 
   /**
@@ -285,11 +329,9 @@ export class InvoiceWorkflowService {
       include: { payments: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
-    const balance = computeBalance(
-      Number(invoice.total),
-      invoice.payments as PaymentLike[],
-      invoice.currency,
-    );
+    // V1-29 review (CR-V29-4): a row the manual refund flipped before V1-29
+    // is read as its payment plus its refund, not subtracted twice.
+    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     const current = invoice.status as InvoiceStatus;
     const next = deriveStatusAfterPayment(current, balance);
     if (next === current) {

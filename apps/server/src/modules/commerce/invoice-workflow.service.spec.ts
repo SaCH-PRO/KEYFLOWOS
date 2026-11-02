@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { ConflictException } from '@nestjs/common';
 import {
   InvoiceWorkflowService,
+  balanceOfStoredRows,
   computeBalance,
   deriveStatusAfterPayment,
   isLegalTransition,
+  readStoredPayments,
   roundMoney,
 } from './invoice-workflow.service';
 
@@ -639,5 +641,39 @@ describe('V1-29 refund convention (D-14)', () => {
     const tx = { invoice: { findUnique: vi.fn(async () => ({ id: 'inv_1', status: 'PAID', businessId: 'biz_1' })), update: vi.fn() } };
     await expect(h.service.transition('inv_1', 'SENT', { tx: tx as never, eventBuffer: [] })).rejects.toBeInstanceOf(ConflictException);
     expect(tx.invoice.update).not.toHaveBeenCalled();
+  });
+  // V1-29 review (CR-V29-4): a row the manual refund flipped to REFUNDED
+  // before V1-29 (positive amount, no separate refund row) is read from the
+  // table as its payment plus its refund, not subtracted twice.
+  const flipped = (amount: number) => ({ amount, status: 'REFUNDED' });
+
+  it('CR-V29-4: readStoredPayments reads a positive REFUNDED row as the SUCCESSFUL payment plus a negative refund of the same amount; every other row passes unchanged', () => {
+    expect(readStoredPayments([flipped(60), ok(40), refunded(40), { amount: 5, status: 'PENDING' }])).toEqual([
+      { amount: 60, status: 'SUCCESSFUL' },
+      { amount: -60, status: 'REFUNDED' },
+      { amount: 40, status: 'SUCCESSFUL' },
+      { amount: -40, status: 'REFUNDED' },
+      { amount: 5, status: 'PENDING' },
+    ]);
+  });
+
+  it('CR-V29-4 (RED-BEFORE in the readers): a legacy flipped 60 on a 100 invoice reads net 0, remaining 100 from the table (computeBalance alone reads net -60, remaining 160)', () => {
+    expect(computeBalance(100, [flipped(60)])).toMatchObject({ net: -60, remaining: 160 });
+    expect(balanceOfStoredRows(100, [flipped(60)], 'TTD')).toMatchObject({ paid: 60, refunded: 60, net: 0, remaining: 100, isFullyPaid: false });
+    // Legacy 60 refunded beside a SUCCESSFUL 40: 40 is still received.
+    expect(balanceOfStoredRows(100, [flipped(60), ok(40)])).toMatchObject({ paid: 100, refunded: 60, net: 40, remaining: 60 });
+  });
+
+  it('CR-V29-4: rows written since V1-29 (negative refund rows) read exactly as computeBalance reads them', () => {
+    const rows = [ok(60), ok(40), refunded(40), { amount: 999, status: 'FAILED' }];
+    expect(balanceOfStoredRows(100, rows)).toEqual(computeBalance(100, rows));
+  });
+
+  it('CR-V29-4: the reconcile reads a legacy flipped row as payment plus refund: 60 flipped + 40 received on a PAID invoice -> PARTIALLY_PAID, remaining 60 (computeBalance alone: net -20 -> SENT)', async () => {
+    expect(deriveStatusAfterPayment('PAID', computeBalance(100, [flipped(60), ok(40)]))).toBe('SENT');
+    const h = build(paidInvoice([flipped(60), ok(40)]));
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: [], onIllegalTransition: 'keep' });
+    expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: true, balance: { paid: 100, refunded: 60, net: 40, remaining: 60 } });
+    expect(h.update.mock.calls[0][0].data).toEqual({ status: 'PARTIALLY_PAID', paidAt: null });
   });
 });

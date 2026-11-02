@@ -16,7 +16,7 @@ import { Service, Prisma, Payment } from '@keyflow/db';
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
 import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -679,8 +679,9 @@ export class CommerceService {
     if (!invoice) return null;
     // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
     // CR-V22-1: remaining is 0 once the paid sum settles the stored total.
-    // V1-29 (CF-17): computeBalance's net and remaining, so a refund row counts.
-    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    // V1-29 (CF-17): computeBalance's net and remaining, so a refund row counts;
+    // a row flipped before V1-29 is read as its payment plus its refund (CR-V29-4).
+    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     return {
       ...withLegacySubtotal(invoice),
       paidAmount: balance.net,
@@ -862,7 +863,7 @@ export class CommerceService {
 
     if (!isShareableInvoiceStatus(invoice.status)) return null;
 
-    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     // Same legacy-row fallback as getInvoiceWithBusiness: older invoices stored
     // subtotal 0 with priced items.
     const subtotal =
@@ -2413,6 +2414,10 @@ export class CommerceService {
    * PARTIALLY_PAID; mark-paid refuses such an invoice and writes nothing. A
    * remaining above the total (refunds exceeding payments) is refused the same
    * way. Run on the pre-transaction read and again under the invoice lock.
+   * (The balance reads and the reconcile read such a row as its payment plus
+   * its refund since the V1-29 review, CR-V29-4: balanceOfStoredRows. Mark-paid
+   * keeps refusing it: settling legacy refunded invoices waits for the owner's
+   * backfill decision.)
    */
   private static markPaidRemaining(
     total: number,
@@ -2549,7 +2554,7 @@ export class CommerceService {
     });
     // V1-29 (CF-17): the figures every balance reader serves (computeBalance):
     // paidAmount is what is received net of refunds, remaining is total - net.
-    const balance = computeBalance(Number(updatedInvoice?.total ?? 0), updatedInvoice?.payments ?? [], updatedInvoice?.currency);
+    const balance = balanceOfStoredRows(Number(updatedInvoice?.total ?? 0), updatedInvoice?.payments ?? [], updatedInvoice?.currency);
     return {
       payment: existing,
       invoice: updatedInvoice,
@@ -2617,10 +2622,15 @@ export class CommerceService {
    * V1-29 (D-14): how much has been refunded against a payment, in currency
    * units: the sum of its linked refund rows. A refund row is linked by the
    * provider convention: a negative REFUNDED row on the same invoice and
-   * tenant whose `reference` is the original's providerPaymentId (Stripe and
-   * PayPal refund webhooks, refundCharge, and the manual refund since V1-29).
-   * Payment sits outside the tenant extension (M31), so the tenant is in the
-   * filter.
+   * tenant whose `reference` is the original's providerPaymentId (the manual
+   * refund since V1-29, refundCharge, the PayPal refund webhook when it names
+   * the capture, and the Stripe refund webhook for a payment stored under its
+   * charge id). The Stripe webhook links by the charge id only, so the refund
+   * of a Checkout Session or PaymentIntent payment (stored as cs_ / pi_) does
+   * not link here; the manual refund accounts for such refunds through
+   * refundableOf (V1-29 review SEC-V29-1 / CR-V29-5). Used by the replay guard
+   * of a manually recorded payment, whose refunds are always linked. Payment
+   * sits outside the tenant extension (M31), so the tenant is in the filter.
    */
   private static async refundedAgainst(
     db: Prisma.TransactionClient,
@@ -2640,6 +2650,64 @@ export class CommerceService {
   }
 
   /**
+   * V1-29 review (SEC-V29-1 / CR-V29-5): what is left to refund of `payment`,
+   * from the Payment rows of its invoice and tenant (`rows`, the payment
+   * included), or a 0 with the reason nothing is left.
+   *
+   * 1. Its linked refunds are subtracted: a negative REFUNDED row whose
+   *    `reference` is the payment's providerPaymentId, or, from the same
+   *    provider, the payment's own `reference` (a PaymentIntent payment keeps
+   *    its charge id there, the id the Stripe refund webhook links by).
+   * 2. A refund row that links to no payment on the invoice is subtracted too
+   *    when it comes from the same provider. The Stripe refund webhook writes
+   *    reference = the charge id while a Checkout Session payment is stored as
+   *    cs_ with its pi_ in reference, and the PayPal webhook without a capture
+   *    id writes no reference: such a refund cannot be told apart from a
+   *    refund of this payment, so it is counted against each payment of that
+   *    provider on the invoice. A payment the provider already refunded is
+   *    then not refunded a second time; a refund that cannot be matched errs
+   *    towards refusing, never towards paying out twice.
+   * 3. Never more than the invoice's net received (balanceOfStoredRows): a
+   *    refund cannot take the invoice below nothing received, whatever refund
+   *    rows the providers wrote.
+   */
+  private static refundableOf(
+    payment: { amount: number; provider: string; providerPaymentId: string; reference: string | null },
+    rows: ReadonlyArray<{ amount: number; status: string; provider: string; providerPaymentId: string; reference: string | null }>,
+  ): { amount: number; refusal: string | null } {
+    const isRefundRow = (r: { status: string; amount: number }) => r.status === 'REFUNDED' && Number(r.amount) < 0;
+    const linksTo = (
+      refund: { provider: string; reference: string | null },
+      original: { provider: string; providerPaymentId: string; reference: string | null },
+    ) =>
+      !!refund.reference &&
+      (refund.reference === original.providerPaymentId ||
+        (refund.provider === original.provider && refund.reference === original.reference));
+    const refunds = rows.filter(isRefundRow);
+    const originals = rows.filter((r) => !isRefundRow(r));
+    const linked = sumMoney(refunds.filter((r) => linksTo(r, payment)).map((r) => Math.abs(Number(r.amount))));
+    const leftLinked = subtractMoney(Number(payment.amount), linked);
+    if (!(toCents(leftLinked) > 0)) return { amount: 0, refusal: 'Payment is already refunded' };
+    const unmatched = sumMoney(
+      refunds
+        .filter((r) => r.provider === payment.provider && !originals.some((o) => linksTo(r, o)))
+        .map((r) => Math.abs(Number(r.amount))),
+    );
+    const leftUnmatched = subtractMoney(leftLinked, unmatched);
+    if (!(toCents(leftUnmatched) > 0)) {
+      return {
+        amount: 0,
+        refusal: `Payment is already refunded: a ${payment.provider} refund on this invoice that cannot be matched to one payment covers it`,
+      };
+    }
+    const net = balanceOfStoredRows(0, rows).net;
+    if (!(toCents(net) > 0)) {
+      return { amount: 0, refusal: 'Payment is already refunded: nothing received on this invoice is left to refund' };
+    }
+    return { amount: Math.min(leftUnmatched, net), refusal: null };
+  }
+
+  /**
    * Refund a payment (no provider call — local bookkeeping only).
    *
    * V1-29-DM-REFUND-CONVENTION (M28, CF-11, D-14): the refund is a separate
@@ -2652,9 +2720,10 @@ export class CommerceService {
    * REFUNDED instead, which computeBalance subtracted twice (a full refund of
    * 100 read net -100, remaining 200, status still PAID). What is refunded is
    * what is left of the payment after its earlier refunds (a provider partial
-   * refund included); a payment with nothing left answers 409 "already
-   * refunded" and writes nothing, which makes a replay of the same refund a
-   * no-op. The original's payment_recorded posting is reversed once
+   * refund included, also one that does not link to it, and never more than
+   * the invoice's net received: refundableOf); a payment with nothing left
+   * answers 409 "already refunded" and writes nothing, which makes a replay
+   * of the same refund a no-op. The original's payment_recorded posting is reversed once
    * (RevenuePostingService.onPaymentRefunded, idempotent), and the reconcile
    * reopens the invoice: PARTIALLY_PAID while something net is still
    * received, SENT with paidAt cleared once nothing is (D-14). The response
@@ -2711,8 +2780,15 @@ export class CommerceService {
       const current = await tx.payment.findFirst({ where: { id: paymentId, businessId } });
       if (!current) throw new NotFoundException('Payment not found');
       if (current.status !== 'SUCCESSFUL') throw refusal(current);
-      const refundable = subtractMoney(Number(current.amount), await CommerceService.refundedAgainst(txClient, current));
-      if (!(toCents(refundable) > 0)) throw new ConflictException('Payment is already refunded');
+      // What is left of the payment after its earlier refunds, linked or not,
+      // capped at the invoice's net received (V1-29 review SEC-V29-1 / CR-V29-5).
+      const invoiceRows = await tx.payment.findMany({
+        where: { businessId, invoiceId: current.invoiceId },
+        select: { amount: true, status: true, provider: true, providerPaymentId: true, reference: true },
+      });
+      const left = CommerceService.refundableOf(current, invoiceRows);
+      if (left.refusal) throw new ConflictException(left.refusal);
+      const refundable = left.amount;
       const created = await tx.payment.create({
         data: {
           amount: subtractMoney(0, refundable),
@@ -3112,7 +3188,7 @@ export class CommerceService {
     // V1-29 (CF-17): computeBalance's net and remaining, the figures the
     // reconcile derives the status from, so a refund row counts here too
     // (summing SUCCESSFUL rows alone read a refunded invoice as still paid).
-    const balance = computeBalance(Number(invoice.total), payments, invoice.currency);
+    const balance = balanceOfStoredRows(Number(invoice.total), payments, invoice.currency);
     return {
       payments,
       paidAmount: balance.net,
@@ -3625,7 +3701,7 @@ export class CommerceService {
       },
     });
     if (!invoice) return null;
-    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     return {
       amountPaid: balance.paid,
       amountDue: balance.remaining,
@@ -3810,10 +3886,11 @@ export class CommerceService {
         where: { id: invoiceId },
         select: { total: true, currency: true, payments: { select: { amount: true, status: true } } },
       });
-      const balance = computeBalance(Number(current?.total ?? 0), current?.payments ?? [], current?.currency ?? undefined);
-      // A row the manual refund flipped to REFUNDED before V1-29 is counted
-      // twice by computeBalance, so `remaining` can exceed the total; an
-      // intent never asks for more than either.
+      // A row the manual refund flipped to REFUNDED before V1-29 is read as
+      // its payment plus its refund (balanceOfStoredRows, V1-29 review
+      // CR-V29-4), so `remaining` no longer exceeds the total for it; an
+      // intent still never asks for more than either.
+      const balance = balanceOfStoredRows(Number(current?.total ?? 0), current?.payments ?? [], current?.currency);
       const remaining = Math.min(balance.remaining, balance.total);
       if (remaining <= 0) throw new ConflictException('Invoice is already paid');
 

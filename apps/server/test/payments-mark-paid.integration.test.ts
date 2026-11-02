@@ -880,10 +880,11 @@ describe('review repairs (R0-PL-04 review)', () => {
     expect(paid.status, JSON.stringify(paid.body)).toBe(201);
     // The pre-V1-29 manual flip, seeded directly (the route no longer writes it).
     await db.payment.update({ where: { id: paid.body.payment.id }, data: { status: 'REFUNDED' } });
-    // Characterization (legacy rows only): computeBalance reads a flipped row
-    // sign-agnostically, so it is dropped from paid AND subtracted again; the
-    // operator read now serves computeBalance's figures too (V1-29, CF-17).
-    expect(await commerce.getInvoiceForBusiness(inv, ID.biz)).toMatchObject({ paidAmount: -60, remaining: 160 });
+    // Legacy rows: computeBalance alone reads a flipped row sign-agnostically
+    // (dropped from paid AND subtracted again: -60 / 160); the operator read
+    // reads the stored rows through balanceOfStoredRows, which counts the
+    // flipped row as its payment plus its refund (V1-29 review CR-V29-4).
+    expect(await commerce.getInvoiceForBusiness(inv, ID.biz)).toMatchObject({ paidAmount: 0, remaining: 100 });
     const statusBefore = (await invoiceRow(inv)).status;
     const postingsBefore = (await paymentPostingsOf(inv)).map((t) => t.id).sort();
     emitted.length = 0;

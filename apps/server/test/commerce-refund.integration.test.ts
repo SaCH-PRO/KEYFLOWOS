@@ -43,9 +43,26 @@
  *          then refunded is not replayed by the same key (409 naming the refund)
  *   RF-10  a provider-refunded payment (SUCCESSFUL 100 beside a provider -40 row) refunded
  *          manually refunds only the remaining 60; net 0; SENT
+ *   RF-11  (review SEC-V29-1 / CR-V29-5) a Stripe Checkout payment (cs_, pi_ in reference) fully
+ *          refunded by the real Stripe refund webhook (refund row reference = the charge id, which
+ *          does not link to cs_) refunded manually -> 409 "already refunded"; nothing written
+ *   RF-12  (same review) the real webhook rows on one invoice: a PaymentIntent payment part-refunded
+ *          at Stripe (linked through the charge id in its reference) does not block refunding a
+ *          second Stripe payment in full; the PaymentIntent payment refunds only what is left
+ *   RF-13  (same review) a refund never takes the invoice below nothing received: a refund row of
+ *          another provider that links to no payment covers the invoice -> 409, nothing written
+ *   RF-14  (review CR-V29-4) a row the manual refund flipped to REFUNDED before V1-29 is read as
+ *          the payment plus its refund: listPayments / the operator read serve paidAmount 0,
+ *          remaining 100 (not -60 / 160), and later payments settle the invoice at the true total
  *   LEDGER after every case: each transaction balances, the ledger cash net of the invoice's
- *          payment postings = computeBalance.net, one REVERSAL per refunded posting, and the
- *          tenant's trial balance balances
+ *          payment postings = computeBalance.net (over the stored rows: balanceOfStoredRows, which
+ *          is computeBalance for every row written since V1-29), one REVERSAL per refunded
+ *          posting, and the tenant's trial balance balances
+ *
+ * Open (it.todo, outside the V1-29 write set; owner decision): SEC-V29-2 (the refund audit
+ * names the payment's full amount), CR-V29-1 (invoice / reminder email and evidence-match
+ * figures read gross paid), CR-V29-2 (CASH-basis receivables count SUCCESSFUL rows only),
+ * CR-V29-3 (receipt email and public receipt state gross paid after a re-settlement).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
@@ -96,6 +113,10 @@ const ID = {
   invMarkPaid: `${P}invMarkPaid`,
   invIdemKey: `${P}invIdemKey`,
   invProvider: `${P}invProvider`,
+  invStripeFull: `${P}invStripeFull`,
+  invStripeMixed: `${P}invStripeMixed`,
+  invStray: `${P}invStray`,
+  invLegacy: `${P}invLegacy`,
 };
 
 const TOTAL = 100;
@@ -107,6 +128,10 @@ let redis: any;
 let commerce: CommerceService;
 let workflow: InvoiceWorkflowService;
 let computeBalanceFn: (total: number, payments: Array<{ amount: number; status: string }>, currency?: string) => any;
+let storedBalanceFn: (total: number, rows: Array<{ amount: number; status: string }>, currency?: string) => any;
+// The real Stripe webhook handlers (RF-11, RF-12) and the real posting reversal (RF-14).
+let paymentsSvc: any;
+let revenuePosting: any;
 
 const emitted: Array<{ name: string; payload: any }> = [];
 const eventStub = {
@@ -192,7 +217,18 @@ async function reversalsFor(paymentId: string): Promise<any[]> {
   });
 }
 
+/**
+ * The invoice's balance over its stored rows (balanceOfStoredRows: computeBalance for every row
+ * written since V1-29; a pre-V1-29 flipped row is read as its payment plus its refund, CR-V29-4).
+ */
 async function balanceOf(invoiceId: string) {
+  const inv = await invoiceRow(invoiceId);
+  const rows = await paymentsOf(invoiceId);
+  return storedBalanceFn(Number(inv.total), rows.map((r) => ({ amount: Number(r.amount), status: r.status })), inv.currency);
+}
+
+/** computeBalance alone over the stored rows (sign-agnostic: a flipped row is subtracted twice). */
+async function rawBalanceOf(invoiceId: string) {
   const inv = await invoiceRow(invoiceId);
   const rows = await paymentsOf(invoiceId);
   return computeBalanceFn(Number(inv.total), rows.map((r) => ({ amount: Number(r.amount), status: r.status })), inv.currency);
@@ -284,6 +320,7 @@ beforeAll(async () => {
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   computeBalanceFn = workflowMod.computeBalance;
+  storedBalanceFn = workflowMod.balanceOfStoredRows;
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
@@ -326,6 +363,10 @@ beforeAll(async () => {
   }).compile();
   commerce = moduleRef.get(CommerceService);
   workflow = moduleRef.get(workflowMod.InvoiceWorkflowService);
+  revenuePosting = moduleRef.get(RevenuePostingService);
+  // The Stripe webhook handlers over the same real Prisma, workflow and ledger chain.
+  const { PaymentsService } = await import('../src/modules/payments/payments.service');
+  paymentsSvc = new PaymentsService(moduleRef.get(PrismaService), commerce, workflow, revenuePosting);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -659,4 +700,163 @@ describe('agreeing figures after a refund (CF-17)', () => {
     expect(again.status, JSON.stringify(again.body)).toBe(409);
     expect(again.body.message).toMatch(/already refunded/i);
   });
+});
+
+describe('V1-29 review: refunds that do not link to their payment (SEC-V29-1 / CR-V29-5)', () => {
+  it('RF-11: a Stripe Checkout payment (cs_, pi_ in reference) fully refunded by the real Stripe refund webhook (reference = the charge id) and then refunded manually -> 409 "already refunded"; nothing written, one reversal, net 0', async () => {
+    const inv = ID.invStripeFull;
+    await paymentsSvc.processStripeChargeOrSession(
+      'checkout.session.completed',
+      { id: `${P}cs_full`, client_reference_id: inv, amount_total: 10000, currency: 'ttd', payment_intent: `${P}pi_full` },
+      `${P}evt_full`,
+    );
+    const [original] = await paymentsOf(inv);
+    expect(original).toMatchObject({ provider: 'stripe', providerPaymentId: `${P}cs_full`, reference: `${P}pi_full`, status: 'SUCCESSFUL', amount: 100 });
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+
+    await paymentsSvc.processStripeRefund('charge.refunded', {
+      id: `${P}ch_full`, payment_intent: `${P}pi_full`, amount_refunded: 10000, currency: 'ttd',
+      refunds: { data: [{ id: `${P}re_full`, amount: 10000, currency: 'ttd', charge: `${P}ch_full`, payment_intent: `${P}pi_full`, status: 'succeeded' }] },
+    });
+    const afterWebhook = await paymentsOf(inv);
+    // The webhook's refund row does not link to the cs_ payment by reference.
+    expect(afterWebhook.map((r) => [r.providerPaymentId, r.status, Number(r.amount), r.reference])).toEqual([
+      [`${P}cs_full`, 'SUCCESSFUL', 100, `${P}pi_full`],
+      [`${P}re_full`, 'REFUNDED', -100, `${P}ch_full`],
+    ]);
+    expect(await refundRowsOf(original)).toHaveLength(0);
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+    const balanceBefore = await balanceOf(inv);
+    expect(balanceBefore).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
+    await expectLedgerAgrees(inv, { net: 0, reversals: 1 });
+
+    // RED-BEFORE (V1-29 head 3c8de27f): 201 with a second -100 row, net -100, remaining 200.
+    const res = await refund(original.id, 'operator refunds again');
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toMatch(/already refunded/i);
+    expect(await paymentsOf(inv)).toEqual(afterWebhook);
+    expect(await balanceOf(inv)).toEqual(balanceBefore);
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+    expect(await reversalsFor(original.id)).toHaveLength(1);
+    await expectLedgerAgrees(inv, { net: 0, reversals: 1 });
+    const list = await listPayments(inv);
+    expect(list.body).toMatchObject({ paidAmount: 0, remaining: 100 });
+  });
+
+  it('RF-12: a PaymentIntent payment part-refunded at Stripe (linked through the charge id in its reference) does not block refunding a second Stripe payment on the invoice in full; the PaymentIntent payment then refunds only what is left (30); a third refund -> 409', async () => {
+    const inv = ID.invStripeMixed;
+    await paymentsSvc.processStripeChargeOrSession(
+      'payment_intent.succeeded',
+      { id: `${P}pi_mixed`, amount_received: 5000, currency: 'ttd', latest_charge: `${P}ch_mixed`, metadata: { invoiceId: inv } },
+      `${P}evt_mixed_pi`,
+    );
+    await paymentsSvc.processStripeChargeOrSession(
+      'checkout.session.completed',
+      { id: `${P}cs_mixed`, client_reference_id: inv, amount_total: 5000, currency: 'ttd', payment_intent: `${P}pi_mixed_cs` },
+      `${P}evt_mixed_cs`,
+    );
+    const rows = await paymentsOf(inv);
+    const intent = rows.find((r) => r.providerPaymentId === `${P}pi_mixed`);
+    const session = rows.find((r) => r.providerPaymentId === `${P}cs_mixed`);
+    expect(intent).toMatchObject({ provider: 'stripe', reference: `${P}ch_mixed`, amount: 50, status: 'SUCCESSFUL' });
+    expect(session).toMatchObject({ provider: 'stripe', reference: `${P}pi_mixed_cs`, amount: 50, status: 'SUCCESSFUL' });
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+
+    // Stripe refunds 20 of the PaymentIntent payment (refund.created: the Refund object itself).
+    await paymentsSvc.processStripeRefund('refund.created', {
+      id: `${P}re_mixed`, amount: 2000, currency: 'ttd', charge: `${P}ch_mixed`, payment_intent: `${P}pi_mixed`, status: 'succeeded',
+    });
+    expect((await paymentsOf(inv)).find((r) => r.providerPaymentId === `${P}re_mixed`)).toMatchObject({ amount: -20, status: 'REFUNDED', reference: `${P}ch_mixed` });
+    expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 20, net: 80 });
+
+    const whole = await refund(session.id, 'second stripe payment');
+    expect(whole.status, JSON.stringify(whole.body)).toBe(201);
+    expect(whole.body).toMatchObject({ amount: -50, status: 'REFUNDED', refundOfPaymentId: session.id, invoiceStatus: 'PARTIALLY_PAID' });
+    expect(whole.body.balance).toMatchObject({ net: 30, remaining: 70 });
+
+    const rest = await refund(intent.id, 'rest of the intent');
+    expect(rest.status, JSON.stringify(rest.body)).toBe(201);
+    expect(rest.body).toMatchObject({ amount: -30, status: 'REFUNDED', refundOfPaymentId: intent.id, invoiceStatus: 'SENT' });
+    expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+
+    const again = await refund(intent.id, 'again');
+    expect(again.status, JSON.stringify(again.body)).toBe(409);
+    expect(again.body.message).toMatch(/already refunded/i);
+    // The webhook reversed the intent's posting, the manual refund the session's; nothing twice.
+    expect(await reversalsFor(intent.id)).toHaveLength(1);
+    expect(await reversalsFor(session.id)).toHaveLength(1);
+    await expectLedgerAgrees(inv, { net: 0, reversals: 2 });
+  });
+
+  it('RF-13: a refund never takes the invoice below nothing received: a cash 100 beside a stray -100 refund row of another provider that links to no payment -> 409 "already refunded"; nothing written', async () => {
+    const inv = ID.invStray;
+    const cash = await paid(inv, 100, 'V29A-STRAY');
+    await db.payment.create({
+      data: {
+        id: `${inv}_stray`, businessId: ID.bizA, invoiceId: inv, amount: -100, currency: 'TTD', status: 'REFUNDED',
+        provider: 'paypal', providerPaymentId: `${P}paypal_refund_stray`, reference: null,
+      },
+    });
+    const rowsBefore = await paymentsOf(inv);
+    expect(await balanceOf(inv)).toMatchObject({ net: 0 });
+
+    const res = await refund(cash.id, 'stray');
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(res.body.message).toMatch(/already refunded/i);
+    expect(await paymentsOf(inv)).toEqual(rowsBefore);
+    expect(await reversalsFor(cash.id)).toHaveLength(0);
+  });
+});
+
+describe('V1-29 review: rows the manual refund flipped before V1-29 (CR-V29-4)', () => {
+  it('RF-14: a pre-V1-29 flipped 60 on a 100 invoice reads paidAmount 0, remaining 100 in listPayments and the operator read (not -60 / 160); 40 then 60 paid -> PARTIALLY_PAID then PAID at the true total; the ledger cash net equals the stored balance net', async () => {
+    const inv = ID.invLegacy;
+    const sixty = await paid(inv, 60, 'V29A-LEGACY-60');
+    // The pre-V1-29 manual refund, as it wrote it: the row flipped to REFUNDED
+    // (positive amount kept) and its posting reversed once.
+    await db.payment.update({ where: { id: sixty.id }, data: { status: 'REFUNDED' } });
+    await revenuePosting.onPaymentRefunded(sixty.id, { createdById: ID.ownerA });
+    expect(await rawBalanceOf(inv), 'computeBalance alone subtracts the flipped row twice').toMatchObject({ net: -60, remaining: 160 });
+    expect(await balanceOf(inv)).toMatchObject({ paid: 60, refunded: 60, net: 0, remaining: 100 });
+
+    // RED-BEFORE (V1-29 head 3c8de27f): paidAmount -60, remaining 160 on both reads.
+    const list = await listPayments(inv);
+    expect(list.status, JSON.stringify(list.body)).toBe(200);
+    expect(list.body).toMatchObject({ paidAmount: 0, remaining: 100 });
+    expect(await commerce.getInvoiceForBusiness(inv, ID.bizA)).toMatchObject({ paidAmount: 0, remaining: 100 });
+    await expectLedgerAgrees(inv, { net: 0, reversals: 1 });
+
+    const forty = await pay(inv, { amount: 40, method: 'cash', reference: 'V29A-LEGACY-40' });
+    expect(forty.status, JSON.stringify(forty.body)).toBe(201);
+    expect(forty.body).toMatchObject({ paidAmount: 40, remaining: 60 });
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_PAID');
+
+    const rest = await pay(inv, { amount: 60, method: 'cash', reference: 'V29A-LEGACY-60B' });
+    expect(rest.status, JSON.stringify(rest.body)).toBe(201);
+    expect(rest.body).toMatchObject({ paidAmount: 100, remaining: 0 });
+    const row = await invoiceRow(inv);
+    expect(row.status, 'computeBalance alone would read net 40 and keep PARTIALLY_PAID').toBe('PAID');
+    expect(row.paidAt).not.toBeNull();
+    expect(await balanceOf(inv)).toMatchObject({ net: 100, remaining: 0, isFullyPaid: true, isOverpaid: false });
+    await expectLedgerAgrees(inv, { net: 100, reversals: 1 });
+
+    // The flipped row itself is still not refundable (RF-04).
+    expect((await refund(sixty.id, 'legacy')).status).toBe(409);
+  });
+});
+
+describe('V1-29 review findings outside the V1-29 write set (owner decision; it.todo)', () => {
+  it.todo(
+    'SEC-V29-2: the FINANCE payment_refunded audit row of a manual refund names the amount refunded and the refund row (a "what is left" refund of 60 after a provider -40 records data.amount 100, the original\'s amount): needs a refund amount / refund id option on RevenuePostingService.onPaymentRefunded (finance/revenue-posting.service.ts, outside the write set)',
+  );
+  it.todo(
+    'CR-V29-1: the invoice / reminder email context states paid = computeBalance.paid (gross) and amountRemaining = total - gross, so a reminder for a refunded invoice reads "TT$0.00 awaiting payment"; the evidence-match candidates sum SUCCESSFUL rows the same way (commerce/commerce.controller.ts buildInvoiceEmailContext and extractPaymentEvidence, outside the write set)',
+  );
+  it.todo(
+    'CR-V29-2: CASH-basis receivables (getAging, getCustomerBalance) count SUCCESSFUL rows only and relied on the flip, so a refunded invoice that is owed again reads outstanding 0 (finance/receivables.service.ts, outside the write set; or accepted until V1-36)',
+  );
+  it.todo(
+    'CR-V29-3: after a full refund and a new payment the receipt email and the public receipt state amountPaid = gross paid (TT$200.00 on a TT$100 invoice; net received 100) (commerce/invoice-receipt.listener.ts, commerce/invoice-receipt-builder.service.ts, outside the write set)',
+  );
 });
