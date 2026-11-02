@@ -64,3 +64,42 @@ export function unverifiedCortexBatchAction(): CortexActionResult {
     requiresApproval: false,
   };
 }
+
+/**
+ * V1-02 review repair (CR-V102-1, SEC-V102-2). Display records for a command
+ * the pipeline's autonomy gate kept from the executor. Neither was attempted:
+ * one waits on the approval request the executor's approval flow created, the
+ * other was refused before execution.
+ */
+type CortexCommandRef = { module: string; action: string };
+
+function cortexActionType(action: string): CortexActionType {
+  return action.toUpperCase().replace(/\s+/g, '_') as CortexActionType;
+}
+
+export function pendingApprovalCortexAction(
+  command: CortexCommandRef,
+  approvalRequestId: string,
+): CortexActionResult {
+  return {
+    actionType: cortexActionType(command.action),
+    status: 'pending_approval',
+    description: `Approval pending for ${command.action} on ${command.module}`,
+    error: 'Approval pending',
+    requiresApproval: true,
+    approvalRequestId,
+  };
+}
+
+export function blockedCortexAction(
+  command: CortexCommandRef,
+  reason: string,
+): CortexActionResult {
+  return {
+    actionType: cortexActionType(command.action),
+    status: 'blocked',
+    description: `Blocked ${command.action} on ${command.module}: ${reason}`,
+    error: reason,
+    requiresApproval: false,
+  };
+}

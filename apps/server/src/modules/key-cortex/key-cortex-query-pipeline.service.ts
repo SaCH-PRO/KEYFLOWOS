@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   Injectable,
   Logger,
@@ -39,7 +40,13 @@ import { KeyCortexLifecycleService } from './key-cortex-lifecycle.service';
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
 import { KeyCortexCommandService } from './key-cortex-command.service';
 import { KeyCortexExecutorService } from './key-cortex-executor.service';
-import { mapCortexBatchResult, unverifiedCortexBatchAction } from './key-cortex-batch-result.mapper';
+import type { ConnectorCommand, ConnectorResult } from './key-cortex-connector.types';
+import {
+  blockedCortexAction,
+  mapCortexBatchResult,
+  pendingApprovalCortexAction,
+  unverifiedCortexBatchAction,
+} from './key-cortex-batch-result.mapper';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexGenomeBridgeService, AutonomyCheck } from './key-cortex-genome-bridge.service';
@@ -68,6 +75,17 @@ import {
   Suggestion,
 } from './key-cortex-reasoning.types';
 import type { MemoryFragment } from './unified-memory.types';
+
+/**
+ * What the autonomy authority made of one parsed command (V1-02 review
+ * repair). Only 'executable' commands reach the executor; the rest are settled
+ * without executing them (settleUnexecutedCommands).
+ */
+type ParsedCommandDecision<C> = {
+  command: C;
+  disposition: 'executable' | 'approval_required' | 'denied' | 'failed_closed';
+  reason: string;
+};
 
 /**
  * KeyCortexQueryPipelineService
@@ -408,11 +426,7 @@ export class KeyCortexQueryPipelineService {
 
       // KF-EXEC-AUTH-FAIL-CLOSED-001 (#155), V1-02: fails closed. The same
       // evaluation gates the stream path (streamQuery) before executeBatch.
-      const {
-        executable: autonomyCheckedCommands,
-        results: autonomyResults,
-        error: autonomyCheckError,
-      } = await this.evaluateParsedCommandAutonomy(
+      const parsedAutonomy = await this.evaluateParsedCommandAutonomy(
         parsedCommands,
         query,
         session,
@@ -420,20 +434,16 @@ export class KeyCortexQueryPipelineService {
         correlationId,
         'processQuery',
       );
+      const {
+        executable: autonomyCheckedCommands,
+        error: autonomyCheckError,
+      } = parsedAutonomy;
 
-      await this.logEvent(correlationId, 'STEP_5_CHECK_AUTONOMY', {
-        totalCommands: parsedCommands.length,
-        approvedCommands: autonomyCheckedCommands.length,
-        outcome:
-          autonomyCheckError === null
-            ? 'evaluated'
-            : 'authority_check_failed_closed',
-        authorityCheckFailed: autonomyCheckError !== null,
-        authorityCheckError: autonomyCheckError,
-        autonomyMap: Object.fromEntries(
-          Object.entries(autonomyResults).map(([k, v]) => [k, v.allowed]),
-        ),
-      });
+      await this.logEvent(
+        correlationId,
+        'STEP_5_CHECK_AUTONOMY',
+        this.autonomyEvidence(parsedCommands.length, parsedAutonomy),
+      );
 
       let rankedRecommendations: GenomeRecommendation[] = [];
       if (flags.genomeV3Enabled && this.genomeBridgeService) {
@@ -742,26 +752,31 @@ export class KeyCortexQueryPipelineService {
       let executedActions: CortexActionResult[] = toolLoopResult?.actions ?? [];
 
       if (query.enableActions && executedActions.length === 0) {
+        const toParsedConnectorCommand = (
+          cmd: (typeof parsedCommands)[number],
+        ): ConnectorCommand =>
+          this.commandService!.toConnectorCommand(
+            {
+              intent: cmd.action,
+              confidence: 0.95,
+              module: cmd.module as any,
+              action: cmd.action,
+              parameters: cmd.parameters,
+              requiresApproval: cmd.requiresApproval,
+              naturalLanguage: cmd.naturalLanguage,
+            },
+            query.businessId,
+            query.userId,
+          );
+
         if (
           flags.integrationV2Enabled &&
           this.executorService &&
           autonomyCheckedCommands.length > 0
         ) {
           try {
-            const connectorCommands = autonomyCheckedCommands.map((cmd: any) =>
-              this.commandService!.toConnectorCommand(
-                {
-                  intent: cmd.action,
-                  confidence: 0.95,
-                  module: cmd.module as any,
-                  action: cmd.action,
-                  parameters: cmd.parameters,
-                  requiresApproval: cmd.requiresApproval,
-                  naturalLanguage: cmd.naturalLanguage,
-                },
-                query.businessId,
-                query.userId,
-              ),
+            const connectorCommands = autonomyCheckedCommands.map(
+              toParsedConnectorCommand,
             );
 
             // BatchResult is an object with nested ExecutionRecord results.
@@ -788,7 +803,13 @@ export class KeyCortexQueryPipelineService {
             executedActions = [unverifiedCortexBatchAction()];
             assistantMessage.metadata!.actionsTriggered = executedActions;
           }
-        } else {
+        } else if (parsedCommands.length === 0 && autonomyCheckError === null) {
+          // V1-02 review repair (SEC-V102-1): the legacy route (actions the
+          // completion names, through actionsService.executeActions and its
+          // own, weaker gate) is taken only when no parsed command was put to
+          // the authority. Once one was, whatever the authority decided
+          // (approved, denied, approval required, or failed closed) is final
+          // for this turn and nothing else executes.
           const detectedActions = query.enableActions
             ? this.actionDetectionService.detectActions(completionResult.content ?? '')
             : [];
@@ -798,6 +819,30 @@ export class KeyCortexQueryPipelineService {
               detectedActions,
               session as any,
             );
+            assistantMessage.metadata!.actionsTriggered = executedActions;
+          }
+        }
+
+        // V1-02 review repair (CR-V102-1, SEC-V102-2): every parsed command the
+        // gate kept from the executor is settled without executing it. An
+        // approval request is reported with the response; a refusal is
+        // audited and recorded by STEP_5, and is not reported as an action
+        // because no proposal for it was ever shown to the client.
+        if (flags.integrationV2Enabled && this.executorService) {
+          const pendingApprovals = (
+            await this.settleUnexecutedCommands(
+              parsedAutonomy.decisions
+                .filter((decision) => decision.disposition !== 'executable')
+                .map((decision) => ({
+                  ...decision,
+                  command: toParsedConnectorCommand(decision.command),
+                })),
+              correlationId,
+              'processQuery',
+            )
+          ).filter((action) => action.status === 'pending_approval');
+          if (pendingApprovals.length > 0) {
+            executedActions = [...executedActions, ...pendingApprovals];
             assistantMessage.metadata!.actionsTriggered = executedActions;
           }
         }
@@ -1411,31 +1456,43 @@ export class KeyCortexQueryPipelineService {
           // reaches the executor. An evaluation that throws, or a verdict that
           // is not usable, leaves none executable; nothing falls back to the
           // legacy executor.
-          const { executable } = await this.evaluateParsedCommandAutonomy(
-            detectedActions.map((a) => ({
-              module: 'autopilot' as const,
-              action: a.actionType.toLowerCase(),
-              parameters: { description: a.description } as Record<string, unknown>,
-              requiresApproval: a.requiresApproval === true,
-            })),
+          const detectedCommands = detectedActions.map((a) => ({
+            module: 'autopilot' as const,
+            action: a.actionType.toLowerCase(),
+            parameters: { description: a.description } as Record<string, unknown>,
+            requiresApproval: a.requiresApproval === true,
+          }));
+          const streamAutonomy = await this.evaluateParsedCommandAutonomy(
+            detectedCommands,
             query,
             session,
             flags,
             correlationId,
             'streamQuery',
           );
+          const { executable } = streamAutonomy;
+          // V1-02 review repair (SEC-V102-2): the stream's autonomy outcome is
+          // evidenced like processQuery's STEP_5_CHECK_AUTONOMY.
+          await this.logEvent(
+            correlationId,
+            'STREAM_CHECK_AUTONOMY',
+            this.autonomyEvidence(detectedCommands.length, streamAutonomy),
+          );
+          const toStreamConnectorCommand = (
+            cmd: (typeof detectedCommands)[number],
+          ): ConnectorCommand => ({
+            module: cmd.module,
+            action: cmd.action,
+            parameters: cmd.parameters,
+            businessId: query.businessId,
+            userId: query.userId,
+            source: 'key_cortex' as const,
+            timestamp: new Date(),
+            correlationId,
+          });
           if (executable.length > 0) {
             try {
-              const connectorCommands = executable.map((cmd) => ({
-                module: cmd.module,
-                action: cmd.action,
-                parameters: cmd.parameters,
-                businessId: query.businessId,
-                userId: query.userId,
-                source: 'key_cortex' as const,
-                timestamp: new Date(),
-                correlationId,
-              }));
+              const connectorCommands = executable.map(toStreamConnectorCommand);
               const batch = await this.executorService.executeBatch(
                 connectorCommands,
                 { sourceInfo: { businessId: query.businessId, userId: query.userId } },
@@ -1471,6 +1528,25 @@ export class KeyCortexQueryPipelineService {
               }
             }
           }
+
+          // V1-02 review repair (CR-V102-1, SEC-V102-2): every detected action
+          // the gate kept from the executor is settled without executing it
+          // (an approval request through the executor's approval flow, or an
+          // audited refusal), so each detection-time proposal above gets a
+          // follow-up delta backed by a real record.
+          executedActions = [
+            ...executedActions,
+            ...(await this.settleUnexecutedCommands(
+              streamAutonomy.decisions
+                .filter((decision) => decision.disposition !== 'executable')
+                .map((decision) => ({
+                  ...decision,
+                  command: toStreamConnectorCommand(decision.command),
+                })),
+              correlationId,
+              'streamQuery',
+            )),
+          ];
         } else {
           executedActions = await this.actionsService.executeActions(
             detectedActions,
@@ -1485,6 +1561,9 @@ export class KeyCortexQueryPipelineService {
               actionType: result.actionType,
               description: result.description,
               status: result.status,
+              ...(result.approvalRequestId
+                ? { approvalRequestId: result.approvalRequestId }
+                : {}),
             },
           };
         }
@@ -1610,6 +1689,11 @@ export class KeyCortexQueryPipelineService {
    * evaluated. An authority error, or an unusable verdict, may only narrow the
    * executable set, never widen it: the batch is atomic, so commands approved
    * before the failure are not kept either.
+   *
+   * `decisions` names, per command and in order, what the authority made of
+   * it (V1-02 review repair): 'executable'; 'approval_required' (allowed, but
+   * the verdict or the command needs approval); 'denied'; or, when the check
+   * failed, 'failed_closed' for every command of the batch.
    */
   private async evaluateParsedCommandAutonomy<
     C extends {
@@ -1627,16 +1711,19 @@ export class KeyCortexQueryPipelineService {
     path: 'processQuery' | 'streamQuery',
   ): Promise<{
     executable: C[];
+    decisions: Array<ParsedCommandDecision<C>>;
     results: Record<string, AutonomyVerdict | AutonomyCheck>;
     error: string | null;
   }> {
     let executable: C[] = [];
+    let decisions: Array<ParsedCommandDecision<C>> = [];
     const results: Record<string, AutonomyVerdict | AutonomyCheck> = {};
     let error: string | null = null;
 
     if (commands.length > 0) {
       try {
         const approvedCommands: C[] = [];
+        const evaluated: Array<ParsedCommandDecision<C>> = [];
 
         for (const cmd of commands) {
           const actionKey = `${cmd.module}.${cmd.action}`;
@@ -1686,9 +1773,23 @@ export class KeyCortexQueryPipelineService {
               `[${path}][${correlationId}] Action ${actionKey} requires approval — autonomy: ${'reason' in autonomyCheck ? autonomyCheck.reason : ''}`,
             );
           }
+          evaluated.push({
+            command: cmd,
+            disposition: isAllowed
+              ? 'executable'
+              : autonomyCheck.allowed
+                ? 'approval_required'
+                : 'denied',
+            reason:
+              autonomyCheck.reason ||
+              (autonomyCheck.allowed
+                ? 'Approval required'
+                : 'Blocked by the autonomy authority'),
+          });
         }
 
         executable = approvedCommands;
+        decisions = evaluated;
         this.logger.log(
           `[${path}][${correlationId}] Autonomy check: ${approvedCommands.length}/${commands.length} commands approved`,
         );
@@ -1696,13 +1797,124 @@ export class KeyCortexQueryPipelineService {
         // The batch is atomic: commands approved before the failure are not
         // kept, because `executable` is only assigned above.
         error = err instanceof Error ? err.message : String(err);
+        const reason = `Authority check failed closed; execution blocked for safety: ${error}`;
+        decisions = commands.map((command) => ({
+          command,
+          disposition: 'failed_closed' as const,
+          reason,
+        }));
         this.logger.error(
           `[${path}][${correlationId}] Autonomy check failed, failing closed: ${executable.length}/${commands.length} parsed commands executable: ${error}`,
         );
       }
     }
 
-    return { executable, results, error };
+    return { executable, decisions, results, error };
+  }
+
+  /**
+   * The STEP_5_CHECK_AUTONOMY evidence of one evaluation. streamQuery logs the
+   * same record as STREAM_CHECK_AUTONOMY (V1-02 review repair, SEC-V102-2).
+   */
+  private autonomyEvidence(
+    totalCommands: number,
+    evaluation: {
+      executable: unknown[];
+      results: Record<string, AutonomyVerdict | AutonomyCheck>;
+      error: string | null;
+    },
+  ): Record<string, unknown> {
+    return {
+      totalCommands,
+      approvedCommands: evaluation.executable.length,
+      outcome:
+        evaluation.error === null
+          ? 'evaluated'
+          : 'authority_check_failed_closed',
+      authorityCheckFailed: evaluation.error !== null,
+      authorityCheckError: evaluation.error,
+      autonomyMap: Object.fromEntries(
+        Object.entries(evaluation.results).map(([k, v]) => [k, v.allowed]),
+      ),
+    };
+  }
+
+  /**
+   * Settle the commands the autonomy gate kept from the executor, without
+   * executing any of them (V1-02 review repair, CR-V102-1 and SEC-V102-2):
+   *
+   *   - 'approval_required': the executor's own approval flow
+   *     (executeWithApproval) records a pending proposal, as execute() does
+   *     for an action that needs approval. Nothing runs until a human approves
+   *     it. A request that cannot be created is a refusal, never an execution.
+   *   - 'denied' and 'failed_closed': refused before execution.
+   *
+   * Each leaves one actor-attributed ai_execution_logs row through the
+   * executor's logExecution, the row execute() writes for its own refusals and
+   * approvals (R0-09e). A failed audit write is logged and never changes the
+   * answer.
+   */
+  private async settleUnexecutedCommands(
+    decisions: Array<ParsedCommandDecision<ConnectorCommand>>,
+    correlationId: string,
+    path: 'processQuery' | 'streamQuery',
+  ): Promise<CortexActionResult[]> {
+    const executor = this.executorService;
+    const settled: CortexActionResult[] = [];
+    if (!executor) return settled;
+
+    for (const { command, disposition, reason } of decisions) {
+      if (disposition === 'executable') continue;
+      const startedAt = new Date();
+      let recordId: string = randomUUID();
+      let outcome: ConnectorResult;
+      let display: CortexActionResult;
+
+      if (disposition === 'approval_required') {
+        try {
+          const approval = await executor.executeWithApproval(command);
+          recordId = approval.id;
+          outcome = {
+            success: false,
+            data: { approvalStatus: approval.status },
+            error: 'Approval pending',
+            executionTimeMs: 0,
+            command,
+          };
+          display = pendingApprovalCortexAction(command, approval.id);
+        } catch (err: unknown) {
+          const refusal = `Approval request could not be created; not executed: ${err instanceof Error ? err.message : String(err)}`;
+          this.logger.error(
+            `[${path}][${correlationId}] ${command.module}.${command.action}: ${refusal}`,
+          );
+          outcome = { success: false, error: refusal, executionTimeMs: 0, command };
+          display = blockedCortexAction(command, refusal);
+        }
+      } else {
+        outcome = { success: false, error: reason, executionTimeMs: 0, command };
+        display = blockedCortexAction(command, reason);
+      }
+
+      try {
+        await executor.logExecution({
+          id: recordId,
+          command,
+          result: outcome,
+          startedAt,
+          finishedAt: new Date(),
+          durationMs: 0,
+          traceId: correlationId,
+          rolledBack: false,
+        });
+      } catch (err: unknown) {
+        this.logger.error(
+          `[${path}][${correlationId}] Audit of unexecuted ${command.module}.${command.action} failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      settled.push(display);
+    }
+
+    return settled;
   }
 
   /**

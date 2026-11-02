@@ -166,6 +166,16 @@ function executionRecord(
   };
 }
 
+/** An ApprovalRequest as KeyCortexExecutorService.executeWithApproval() returns it. */
+function approvalRequest(command: any, id = `proposal-${command.action}`) {
+  return { id, command, status: 'pending', requestedAt: new Date(0), correlationId: 'corr' };
+}
+
+/** The ai_execution_logs records the pipeline audited through logExecution. */
+function auditedRecords(executorService: { logExecution: any }) {
+  return executorService.logExecution.mock.calls.map(([record]: any[]) => record);
+}
+
 /** A BatchResult as KeyCortexExecutorService.executeBatch() returns it. */
 function batchResult(records: any[], totalCommands = records.length) {
   return {
@@ -403,6 +413,10 @@ describe('KeyCortexQueryPipelineService parsed-command autonomy fails closed', (
       executeBatch: vi.fn(async (commands: any[]) =>
         batchResult(commands.map((command) => executionRecord(command))),
       ),
+      // V1-02 review repair: the executor's approval flow and its audit write,
+      // which the pipeline uses for the parsed commands it does not execute.
+      executeWithApproval: vi.fn(async (command: any) => approvalRequest(command)),
+      logExecution: vi.fn().mockResolvedValue(undefined),
     };
     const eventService = { logEvent: vi.fn().mockResolvedValue(undefined) };
     const autonomyOrchestrator = {
@@ -762,6 +776,250 @@ describe('KeyCortexQueryPipelineService parsed-command autonomy fails closed', (
       t.allLogLines().filter((line) => /using all parsed commands/.test(line)),
     ).toEqual([]);
   });
+
+  // ── V1-02 review repair SEC-V102-1: no legacy route after evaluation ──────
+  // The legacy branch (detectActions on the completion, then
+  // actionsService.executeActions) has a weaker gate keyed on
+  // key_cortex.<TYPE>. Once a parsed command has been put to the authority,
+  // whatever it decided is final for the turn: nothing reaches that branch.
+  // The completion here names an action, so a legacy route would be visible.
+  const completionAction = {
+    actionType: 'CREATE_INVOICE',
+    status: 'pending_approval',
+    description: 'invoice',
+    result: { amount: 100 },
+  };
+
+  it.each([
+    ['fails closed (the evaluation throws)', () => Promise.reject(new Error('oracle down'))],
+    ['fails closed (an unusable allowed verdict)', () => Promise.resolve({ allowed: true })],
+    ['denies the parsed command', () => Promise.resolve(deny)],
+  ])(
+    'V1-02-LG01 processQuery runs nothing on the legacy executor when the authority %s',
+    async (_label, verdict) => {
+      const t = setup();
+      t.autonomyOrchestrator.evaluateAction.mockImplementation(verdict);
+      mockActionDetectionService.detectActions.mockReturnValue([completionAction]);
+      mockActionsService.executeActions.mockImplementation(async (actions: any[]) =>
+        actions.map((a: any) => ({ ...a, status: 'success', description: 'legacy executed' })),
+      );
+
+      const response = await t.run();
+
+      expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+      expect(mockActionDetectionService.detectActions).not.toHaveBeenCalled();
+      expect(mockActionsService.executeActions).not.toHaveBeenCalled();
+      expect(response.actions).toEqual([]);
+    },
+  );
+
+  it('V1-02-LG02 processQuery with no parsed command keeps the legacy detection path', async () => {
+    const t = setup({ intents: [] });
+    mockActionDetectionService.detectActions.mockReturnValue([completionAction]);
+
+    await t.run();
+
+    expect(t.autonomyOrchestrator.evaluateAction).not.toHaveBeenCalled();
+    expect(mockActionsService.executeActions).toHaveBeenCalledTimes(1);
+    expect(mockActionsService.executeActions).toHaveBeenCalledWith(
+      [completionAction],
+      expect.objectContaining({ id: 'session_1' }),
+    );
+  });
+
+  it('V1-02-LG03 with the real legacy actions service, a verdict the pipeline rejects as unusable runs no tool', async () => {
+    const { KeyCortexActionsService } = await import('../key-cortex-actions.service');
+    // The legacy gate reads verdict.allowed with no usability check, so on a
+    // legacy route this verdict would execute cortex.create_task.
+    const orchestrator = { evaluateAction: vi.fn().mockResolvedValue({ allowed: true }) };
+    const toolExecute = vi.fn().mockResolvedValue({ success: true, data: { id: 'task_1' } });
+    const realActions = new (KeyCortexActionsService as any)(
+      { client: { cortexActionLog: { create: vi.fn().mockResolvedValue({}) } } },
+      undefined,
+      {},
+      { execute: toolExecute },
+      undefined,
+      orchestrator,
+      undefined,
+      undefined,
+      undefined,
+    );
+    vi.spyOn(realActions, 'buildToolDefinitions').mockResolvedValue([]);
+    const router = new AdaptiveRouterService();
+    vi.spyOn(router, 'route').mockReturnValue({
+      taskCategory: 'general',
+      layers: ['ethics'],
+      promptVariant: 'concise',
+      includeGenomeContext: false,
+      includeMemoryContext: false,
+      includeActions: true,
+      complexity: 'simple',
+      domain: 'general',
+      urgency: 'low',
+      emotionalWeight: 'low',
+      timeHorizon: 'tactical',
+      dataRequirement: 'none',
+    } as any);
+    const executorService = {
+      executeBatch: vi.fn(),
+      executeWithApproval: vi.fn(),
+      logExecution: vi.fn().mockResolvedValue(undefined),
+    };
+    const eventService = { logEvent: vi.fn().mockResolvedValue(undefined) };
+    const pipeline = new KeyCortexQueryPipelineService(
+      mockModelGateway as any,
+      mockPrisma as any,
+      mockRedis as any,
+      mockPersonalityService as any,
+      mockContextService as any,
+      realActions,
+      mockSessionService as any,
+      mockPromptContextService as any,
+      mockToolLoopService as any,
+      mockActionDetectionService as any,
+      mockSuggestionService as any,
+      mockGenomeContextService as any,
+      mockSystemPromptService as any,
+      mockStructuredOutputService as any,
+      mockMoodDetectionService as any,
+      makeMemoryRetrieval([]),
+      router,
+      { getAllCapabilities: vi.fn().mockReturnValue([]) } as any,
+      {
+        parseIntent: vi.fn().mockResolvedValue([
+          { module: 'crm', action: 'create_task', parameters: { title: 't' }, requiresApproval: false, naturalLanguage: 'x' },
+        ]),
+        toConnectorCommand: vi.fn((intent: any, businessId: string, userId: string) => ({
+          module: intent.module,
+          action: intent.action,
+          parameters: intent.parameters,
+          businessId,
+          userId,
+        })),
+      } as any,
+      executorService as any,
+      undefined,
+      mockGenomeBridgeService as any,
+      eventService as any,
+      undefined,
+      undefined,
+      undefined,
+      orchestrator as any,
+    );
+    for (const target of [pipeline, realActions]) {
+      for (const level of ['error', 'warn', 'log', 'debug']) {
+        vi.spyOn((target as any).logger, level).mockImplementation(() => undefined);
+      }
+    }
+    mockActionDetectionService.detectActions.mockReturnValue([
+      { actionType: 'CREATE_TASK', status: 'pending_approval', description: 'task', result: { title: 'call Ana' } },
+    ]);
+
+    const response = await pipeline.processQuery(
+      { text: 'make a task', businessId: 'biz-1', userId: 'user-1', enableActions: true } as any,
+      { integrationV2Enabled: true, genomeV3Enabled: false },
+    );
+
+    const step5 = eventService.logEvent.mock.calls
+      .map(([event]: any[]) => event)
+      .find((event: any) => event.step === 'STEP_5_CHECK_AUTONOMY');
+    expect(step5.data.outcome).toBe('authority_check_failed_closed');
+    expect(toolExecute).not.toHaveBeenCalled();
+    expect(executorService.executeBatch).not.toHaveBeenCalled();
+    expect(response.actions.filter((a: any) => a.status === 'success')).toEqual([]);
+  });
+
+  // ── V1-02 review repair CR-V102-1: approval-required commands ─────────────
+  it.each([
+    ['the verdict is supervised', { ...allow, tier: 'supervised', requiresApproval: true }, createInvoice],
+    ['the command needs approval', allow, { ...createInvoice, requiresApproval: true }],
+  ])(
+    'V1-02-AP01 processQuery: when %s the executor approval flow records a request and nothing executes',
+    async (_label, verdict, intent) => {
+      const t = setup({ intents: [intent] });
+      t.autonomyOrchestrator.evaluateAction.mockResolvedValue(verdict);
+
+      const response = await t.run();
+
+      expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+      expect(mockActionsService.executeActions).not.toHaveBeenCalled();
+      expect(t.executorService.executeWithApproval).toHaveBeenCalledTimes(1);
+      expect(t.executorService.executeWithApproval).toHaveBeenCalledWith(
+        expect.objectContaining({
+          module: 'commerce',
+          action: 'create_invoice',
+          businessId: 'biz-1',
+          userId: 'user-1',
+        }),
+      );
+      expect(response.actions).toEqual([
+        expect.objectContaining({
+          actionType: 'CREATE_INVOICE',
+          status: 'pending_approval',
+          requiresApproval: true,
+          approvalRequestId: 'proposal-create_invoice',
+        }),
+      ]);
+      expect(auditedRecords(t.executorService)).toEqual([
+        expect.objectContaining({
+          id: 'proposal-create_invoice',
+          command: expect.objectContaining({ action: 'create_invoice', userId: 'user-1' }),
+          result: expect.objectContaining({
+            success: false,
+            error: 'Approval pending',
+            data: { approvalStatus: 'pending' },
+          }),
+        }),
+      ]);
+    },
+  );
+
+  // ── V1-02 review repair SEC-V102-2: refusals leave an audit row ───────────
+  it('V1-02-AU01 processQuery: a denied parsed command leaves one refusal row and only the allowed one executes', async () => {
+    const t = setup({ intents: [createInvoice, sendEmail] });
+    t.autonomyOrchestrator.evaluateAction
+      .mockResolvedValueOnce(allow)
+      .mockResolvedValueOnce(deny);
+
+    await t.run();
+
+    expect(t.executedCommands()).toEqual([
+      expect.objectContaining({ action: 'create_invoice' }),
+    ]);
+    expect(t.executorService.executeWithApproval).not.toHaveBeenCalled();
+    expect(auditedRecords(t.executorService)).toEqual([
+      expect.objectContaining({
+        command: expect.objectContaining({
+          module: 'outreach',
+          action: 'send_email',
+          businessId: 'biz-1',
+          userId: 'user-1',
+        }),
+        result: expect.objectContaining({ success: false, error: 'policy denies' }),
+      }),
+    ]);
+  });
+
+  it('V1-02-AU02 processQuery: a failed-closed check leaves one refusal row per parsed command and creates no approval', async () => {
+    const t = setup({ intents: [createInvoice, { ...sendEmail, requiresApproval: true }] });
+    t.autonomyOrchestrator.evaluateAction
+      .mockResolvedValueOnce(allow)
+      .mockRejectedValueOnce(new Error('oracle down'));
+
+    const response = await t.run();
+
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(t.executorService.executeWithApproval).not.toHaveBeenCalled();
+    expect(response.actions).toEqual([]);
+    const audited = auditedRecords(t.executorService);
+    expect(audited.map((r: any) => r.command.action)).toEqual(['create_invoice', 'send_email']);
+    for (const record of audited) {
+      expect(record.command.userId).toBe('user-1');
+      expect(record.result.success).toBe(false);
+      expect(record.result.error).toContain('failed closed');
+      expect(record.result.error).toContain('oracle down');
+    }
+  });
 });
 
 // V1-02-KEY-CORTEX-FAILCLOSED (#182, PRS-M20). executeBatch answers a
@@ -841,10 +1099,13 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
       executeBatch: vi.fn(async (commands: any[]) =>
         batchResult(commands.map((command) => executionRecord(command))),
       ),
+      executeWithApproval: vi.fn(async (command: any) => approvalRequest(command)),
+      logExecution: vi.fn().mockResolvedValue(undefined),
     };
     const autonomyOrchestrator = {
       evaluateAction: vi.fn().mockResolvedValue(allow),
     };
+    const eventService = { logEvent: vi.fn().mockResolvedValue(undefined) };
     mockActionDetectionService.detectActions.mockReturnValue(detected);
     // A legacy replay, were one attempted, would visibly "succeed".
     mockActionsService.executeActions.mockImplementation(async (actions: any[]) =>
@@ -856,7 +1117,7 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
       connectorService: { getAllCapabilities: vi.fn().mockReturnValue([]) },
       commandService,
       executorService,
-      eventService: { logEvent: vi.fn().mockResolvedValue(undefined) },
+      eventService,
       autonomyOrchestrator,
     });
     const logger = (pipeline as any).logger;
@@ -887,6 +1148,8 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
         .map((c) => c.action);
     const executedCommands = () =>
       executorService.executeBatch.mock.calls.flatMap(([commands]: any[]) => commands);
+    const loggedSteps = () =>
+      eventService.logEvent.mock.calls.map(([event]: any[]) => event);
 
     return {
       run,
@@ -895,6 +1158,7 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
       executorService,
       autonomyOrchestrator,
       executedCommands,
+      loggedSteps,
       logged,
     };
   }
@@ -1057,7 +1321,13 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
     );
     expect(t.executorService.executeBatch).not.toHaveBeenCalled();
     expect(mockActionsService.executeActions).not.toHaveBeenCalled();
-    expect(t.streamedResults(chunks)).toEqual([]);
+    // V1-02 review repair (SEC-V102-2): every detection-time proposal is
+    // resolved as blocked; none is left reading as a pending approval.
+    expect(t.streamedResults(chunks)).toEqual([
+      expect.objectContaining({ actionType: 'CREATE_TASK', status: 'blocked' }),
+      expect.objectContaining({ actionType: 'CREATE_EVENT', status: 'blocked' }),
+      expect.objectContaining({ actionType: 'GENERATE_REPORT', status: 'blocked' }),
+    ]);
     expect(t.logged.error).toHaveBeenCalledWith(
       expect.stringMatching(
         /^\[streamQuery\]\[[^\]]+\] Autonomy check failed, failing closed: 0\/3 parsed commands executable: oracle down$/,
@@ -1076,7 +1346,11 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
 
     expect(t.executorService.executeBatch).not.toHaveBeenCalled();
     expect(mockActionsService.executeActions).not.toHaveBeenCalled();
-    expect(t.streamedResults(chunks)).toEqual([]);
+    expect(t.executorService.executeWithApproval).not.toHaveBeenCalled();
+    expect(t.streamedResults(chunks)).toEqual([
+      expect.objectContaining({ actionType: 'CREATE_TASK', status: 'blocked' }),
+      expect.objectContaining({ actionType: 'CREATE_EVENT', status: 'blocked' }),
+    ]);
   });
 
   it('V1-02-ST03 streamQuery: only the explicitly allowed command of a mixed batch reaches executeBatch', async () => {
@@ -1095,6 +1369,7 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
     });
     expect(t.streamedResults(chunks)).toEqual([
       expect.objectContaining({ actionType: 'CREATE_TASK', status: 'success' }),
+      expect.objectContaining({ actionType: 'CREATE_EVENT', status: 'blocked' }),
     ]);
     expect(mockActionsService.executeActions).not.toHaveBeenCalled();
   });
@@ -1140,6 +1415,166 @@ describe('KeyCortexQueryPipelineService v2 BatchResult is consumed without legac
     const results = t.streamedResults(chunks);
     expect(results).toHaveLength(1);
     expect(results[0].description).toContain('unverified');
+  });
+
+  // ── streamQuery: V1-02 review repair (CR-V102-1, SEC-V102-2) ──────────────
+
+  const detectedInvoice = {
+    actionType: 'CREATE_INVOICE',
+    status: 'pending_approval',
+    description: 'invoice Ana for the retainer',
+    requiresApproval: true,
+  };
+  const supervised = { ...allow, requiresApproval: true, tier: 'supervised', reason: 'needs approval' };
+
+  it.each([
+    ['the detector flags it', [detectedInvoice], allow, 'create_invoice', 'CREATE_INVOICE'],
+    ['the verdict is supervised', [detectedTask], supervised, 'create_task', 'CREATE_TASK'],
+  ])(
+    'V1-02-ST07 streamQuery: an allowed action that needs approval because %s gets an approval request from the executor approval flow, not an execution',
+    async (_label, detected, verdict, action, actionType) => {
+      const t = setup({ detected });
+      t.autonomyOrchestrator.evaluateAction.mockResolvedValue(verdict);
+
+      const chunks = await t.stream();
+
+      expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+      expect(mockActionsService.executeActions).not.toHaveBeenCalled();
+      expect(t.executorService.executeWithApproval).toHaveBeenCalledTimes(1);
+      expect(t.executorService.executeWithApproval).toHaveBeenCalledWith(
+        expect.objectContaining({
+          module: 'autopilot',
+          action,
+          businessId: 'biz-1',
+          userId: 'user-1',
+          source: 'key_cortex',
+        }),
+      );
+      expect(t.streamedResults(chunks)).toEqual([
+        expect.objectContaining({
+          actionType,
+          status: 'pending_approval',
+          approvalRequestId: `proposal-${action}`,
+        }),
+      ]);
+      expect(auditedRecords(t.executorService)).toEqual([
+        expect.objectContaining({
+          id: `proposal-${action}`,
+          command: expect.objectContaining({ action, userId: 'user-1' }),
+          result: expect.objectContaining({ success: false, error: 'Approval pending' }),
+        }),
+      ]);
+    },
+  );
+
+  it('V1-02-ST08 streamQuery: a denied action leaves one refusal row naming the actor and a blocked follow-up delta', async () => {
+    const t = setup({ detected: [detectedTask] });
+    t.autonomyOrchestrator.evaluateAction.mockResolvedValue(deny);
+
+    const chunks = await t.stream();
+
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(t.executorService.executeWithApproval).not.toHaveBeenCalled();
+    expect(auditedRecords(t.executorService)).toEqual([
+      expect.objectContaining({
+        command: expect.objectContaining({
+          module: 'autopilot',
+          action: 'create_task',
+          businessId: 'biz-1',
+          userId: 'user-1',
+        }),
+        result: expect.objectContaining({ success: false, error: 'policy denies' }),
+      }),
+    ]);
+    expect(t.streamedResults(chunks)).toEqual([
+      expect.objectContaining({ actionType: 'CREATE_TASK', status: 'blocked' }),
+    ]);
+  });
+
+  it('V1-02-ST09 streamQuery: a failed-closed check is evidenced, audits one refusal per action, and creates no approval', async () => {
+    const t = setup({ detected: [detectedInvoice, detectedTask] });
+    t.autonomyOrchestrator.evaluateAction.mockRejectedValue(new Error('oracle down'));
+
+    const chunks = await t.stream();
+
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(t.executorService.executeWithApproval).not.toHaveBeenCalled();
+    const evidence = t.loggedSteps().filter((e: any) => e.step === 'STREAM_CHECK_AUTONOMY');
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0].data).toEqual({
+      totalCommands: 2,
+      approvedCommands: 0,
+      outcome: 'authority_check_failed_closed',
+      authorityCheckFailed: true,
+      authorityCheckError: 'oracle down',
+      autonomyMap: {},
+    });
+    const audited = auditedRecords(t.executorService);
+    expect(audited.map((r: any) => r.command.action)).toEqual(['create_invoice', 'create_task']);
+    for (const record of audited) {
+      expect(record.command.userId).toBe('user-1');
+      expect(record.result.success).toBe(false);
+      expect(record.result.error).toContain('failed closed');
+    }
+    expect(t.streamedResults(chunks)).toEqual([
+      expect.objectContaining({ actionType: 'CREATE_INVOICE', status: 'blocked' }),
+      expect.objectContaining({ actionType: 'CREATE_TASK', status: 'blocked' }),
+    ]);
+  });
+
+  it('V1-02-ST10 streamQuery: the autonomy evidence of an evaluated batch is logged', async () => {
+    const t = setup({ detected: [detectedTask, detectedEvent] });
+    t.autonomyOrchestrator.evaluateAction
+      .mockResolvedValueOnce(allow)
+      .mockResolvedValueOnce(deny);
+
+    await t.stream();
+
+    const evidence = t.loggedSteps().filter((e: any) => e.step === 'STREAM_CHECK_AUTONOMY');
+    expect(evidence).toHaveLength(1);
+    expect(evidence[0].data).toEqual({
+      totalCommands: 2,
+      approvedCommands: 1,
+      outcome: 'evaluated',
+      authorityCheckFailed: false,
+      authorityCheckError: null,
+      autonomyMap: { 'autopilot:create_task': true, 'autopilot:create_event': false },
+    });
+  });
+
+  it('V1-02-ST11 streamQuery: an approval request that cannot be created is a refusal, never an execution', async () => {
+    const t = setup({ detected: [detectedInvoice] });
+    t.executorService.executeWithApproval.mockRejectedValue(new Error('proposal store down'));
+
+    const chunks = await t.stream();
+
+    expect(t.executorService.executeBatch).not.toHaveBeenCalled();
+    expect(mockActionsService.executeActions).not.toHaveBeenCalled();
+    expect(t.streamedResults(chunks)).toEqual([
+      expect.objectContaining({ actionType: 'CREATE_INVOICE', status: 'blocked' }),
+    ]);
+    expect(auditedRecords(t.executorService)).toEqual([
+      expect.objectContaining({
+        result: expect.objectContaining({
+          success: false,
+          error: expect.stringContaining('proposal store down'),
+        }),
+      }),
+    ]);
+  });
+
+  it('V1-02-ST12 streamQuery: an audit write that fails does not change the answer', async () => {
+    const t = setup({ detected: [detectedTask] });
+    t.autonomyOrchestrator.evaluateAction.mockResolvedValue(deny);
+    t.executorService.logExecution.mockRejectedValue(new Error('audit db down'));
+
+    const chunks = await t.stream();
+
+    expect(t.streamedResults(chunks)).toEqual([
+      expect.objectContaining({ actionType: 'CREATE_TASK', status: 'blocked' }),
+    ]);
+    expect(t.logged.error).toHaveBeenCalledWith(expect.stringContaining('audit db down'));
+    expect(chunks[chunks.length - 1]).toEqual({ type: 'done' });
   });
 
   // ── static ────────────────────────────────────────────────

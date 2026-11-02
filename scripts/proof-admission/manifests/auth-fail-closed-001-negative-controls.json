@@ -5,7 +5,8 @@
   "notes": [
     "The #155 parsed-command block is ported into one private method, evaluateParsedCommandAutonomy, called by processQuery (STEP_5_CHECK_AUTONOMY evidence as at 26c10943) and by streamQuery before executeBatch (the stream path had no autonomy evaluation at f5c93ba0). The #155 controls are kept with their ids and claims; their find strings are re-anchored to the method's indentation and variable name (executable for autonomyCheckedCommands).",
     "The #155 executeBatch fixture answered an array; the executor answers a BatchResult and #182's mapper rejects the array as an invalid envelope, so the ported fixture answers a real BatchResult.",
-    "Every one of the 12 #182 mapper cases is named by at least one control, so the clean-tree half requires each to pass at HEAD (#182's body says they never ran)."
+    "Every one of the 12 #182 mapper cases is named by at least one control, so the clean-tree half requires each to pass at HEAD (#182's body says they never ran).",
+    "Review repair (SEC-V102-1, SEC-V102-2, CR-V102-1): processQuery takes the legacy route only when no parsed command was evaluated; the commands the gate keeps from the executor are settled without executing them (approval-required through the executor approval flow, denied and failed-closed as refusals), each with one ai_execution_logs row through logExecution; streamQuery logs STREAM_CHECK_AUTONOMY and yields a follow-up delta for each one. NC-AUTH-FC-P06 and NC-V102-STREAM-NO-AUTONOMY-GATE are re-anchored to autonomyEvidence() and toStreamConnectorCommand; six NC-V102R controls are added."
   ],
   "proofs": {
     "unit": {
@@ -85,17 +86,18 @@
     {
       "id": "NC-AUTH-FC-P06-FAILURE-REPORTED-AS-EVALUATED",
       "obligation": "AUTH-FC-P06_HONEST_EVIDENCE",
-      "claim": "STEP_5_CHECK_AUTONOMY names a failed authority check as authority_check_failed_closed. Reporting it with the outcome of an ordinary evaluation hides the failure behind zero approvals.",
+      "claim": "STEP_5_CHECK_AUTONOMY (processQuery) and STREAM_CHECK_AUTONOMY (streamQuery) name a failed authority check as authority_check_failed_closed. Reporting it with the outcome of an ordinary evaluation hides the failure behind zero approvals.",
       "mutation": {
         "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
-        "find": "            : 'authority_check_failed_closed',",
-        "replace": "            : 'evaluated',"
+        "find": "          : 'authority_check_failed_closed',",
+        "replace": "          : 'evaluated',"
       },
       "mustFail": {
         "unit": [
           "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P06 the evidence and the log name a failed authority check as failed closed",
           "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01B a verdict whose allowed is truthy but not a boolean leaves zero parsed commands executable",
-          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01 V1-02 an evaluation that throws on command 2 of 3 lets zero commands reach executeBatch"
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed AUTH-FC-P01 V1-02 an evaluation that throws on command 2 of 3 lets zero commands reach executeBatch",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST09 streamQuery: a failed-closed check is evidenced, audits one refusal per action, and creates no approval"
         ]
       }
     },
@@ -173,8 +175,8 @@
       "claim": "streamQuery sends to executeBatch only the commands the fail-closed evaluation left executable. Sending every command parsed from the model's text (the f5c93ba0 behaviour) lets an evaluation that throws, a malformed verdict or a denial still reach the executor.",
       "mutation": {
         "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
-        "find": "          if (executable.length > 0) {\n            try {\n              const connectorCommands = executable.map((cmd) => ({",
-        "replace": "          if (detectedActions.length > 0) {\n            try {\n              const connectorCommands = detectedActions.map((a) => ({ module: 'autopilot' as const, action: a.actionType.toLowerCase(), parameters: { description: a.description } as Record<string, unknown> })).map((cmd) => ({"
+        "find": "          if (executable.length > 0) {\n            try {\n              const connectorCommands = executable.map(toStreamConnectorCommand);",
+        "replace": "          if (detectedCommands.length > 0) {\n            try {\n              const connectorCommands = detectedCommands.map(toStreamConnectorCommand);"
       },
       "mustFail": {
         "unit": [
@@ -369,6 +371,120 @@
           "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-BR05 processQuery reports one unverified result, and replays nothing, for an unreadable batch envelope",
           "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST05 streamQuery yields one unverified result, not a replay, when executeBatch throws",
           "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST06 streamQuery yields one unverified result, not a replay, for an unreadable batch envelope"
+        ]
+      }
+    },
+    {
+      "id": "NC-V102R-SEC1-LEGACY-AFTER-EVALUATION",
+      "obligation": "SEC-V102-1_NO_LEGACY_AFTER_EVALUATION",
+      "claim": "processQuery takes the legacy route (detectActions on the completion, then actionsService.executeActions with its weaker key_cortex.<TYPE> gate) only when no parsed command was put to the authority. Restoring the unconditional else-branch executes the completion's actions in the same turn after the authority failed closed or denied.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+        "find": "        } else if (parsedCommands.length === 0 && autonomyCheckError === null) {",
+        "replace": "        } else {"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-LG01 processQuery runs nothing on the legacy executor when the authority fails closed (the evaluation throws)",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-LG01 processQuery runs nothing on the legacy executor when the authority fails closed (an unusable allowed verdict)",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-LG01 processQuery runs nothing on the legacy executor when the authority denies the parsed command",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-LG03 with the real legacy actions service, a verdict the pipeline rejects as unusable runs no tool"
+        ]
+      }
+    },
+    {
+      "id": "NC-V102R-CR1-APPROVAL-REQUEST-DROPPED",
+      "obligation": "CR-V102-1_APPROVAL_PATH",
+      "claim": "An allowed command that needs approval (a supervised verdict, or a command or detector that flags approval) gets a pending proposal from the executor's approval flow, in processQuery and in streamQuery. Treating it as a refusal drops the approval request the client was promised.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+        "find": "      if (disposition === 'approval_required') {",
+        "replace": "      if (false) {"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-AP01 processQuery: when the verdict is supervised the executor approval flow records a request and nothing executes",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-AP01 processQuery: when the command needs approval the executor approval flow records a request and nothing executes",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST07 streamQuery: an allowed action that needs approval because the detector flags it gets an approval request from the executor approval flow, not an execution",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST07 streamQuery: an allowed action that needs approval because the verdict is supervised gets an approval request from the executor approval flow, not an execution"
+        ]
+      }
+    },
+    {
+      "id": "NC-V102R-SEC2-FAILED-CLOSED-CREATES-APPROVAL",
+      "obligation": "SEC-V102-2_FAILED_CLOSED_IS_A_REFUSAL",
+      "claim": "A failed authority check refuses every command of the batch. Settling the batch as approval-required would create approval proposals for commands the authority never ruled on.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+        "find": "          disposition: 'failed_closed' as const,",
+        "replace": "          disposition: 'approval_required' as const,"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-AU02 processQuery: a failed-closed check leaves one refusal row per parsed command and creates no approval",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST09 streamQuery: a failed-closed check is evidenced, audits one refusal per action, and creates no approval"
+        ]
+      }
+    },
+    {
+      "id": "NC-V102R-SEC2-REFUSAL-NOT-AUDITED",
+      "obligation": "SEC-V102-2_REFUSAL_AUDITED",
+      "claim": "Every command the gate keeps from the executor leaves one actor-attributed ai_execution_logs row through the executor's logExecution (R0-09e). Dropping the write leaves a refusal or an approval request with only a logger line.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+        "find": "        await executor.logExecution({",
+        "replace": "        await Promise.resolve({"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-AP01 processQuery: when the verdict is supervised the executor approval flow records a request and nothing executes",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-AP01 processQuery: when the command needs approval the executor approval flow records a request and nothing executes",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-AU01 processQuery: a denied parsed command leaves one refusal row and only the allowed one executes",
+          "KeyCortexQueryPipelineService parsed-command autonomy fails closed V1-02-AU02 processQuery: a failed-closed check leaves one refusal row per parsed command and creates no approval",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST07 streamQuery: an allowed action that needs approval because the detector flags it gets an approval request from the executor approval flow, not an execution",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST07 streamQuery: an allowed action that needs approval because the verdict is supervised gets an approval request from the executor approval flow, not an execution",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST08 streamQuery: a denied action leaves one refusal row naming the actor and a blocked follow-up delta",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST09 streamQuery: a failed-closed check is evidenced, audits one refusal per action, and creates no approval",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST11 streamQuery: an approval request that cannot be created is a refusal, never an execution"
+        ]
+      }
+    },
+    {
+      "id": "NC-V102R-SEC2-STREAM-NO-EVIDENCE",
+      "obligation": "SEC-V102-2_STREAM_EVIDENCE",
+      "claim": "streamQuery logs its autonomy outcome (STREAM_CHECK_AUTONOMY, the STEP_5_CHECK_AUTONOMY record). Without it a failed or denying check leaves no event.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+        "find": "            'STREAM_CHECK_AUTONOMY',",
+        "replace": "            'STREAM_AUTONOMY_UNLOGGED',"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST09 streamQuery: a failed-closed check is evidenced, audits one refusal per action, and creates no approval",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST10 streamQuery: the autonomy evidence of an evaluated batch is logged"
+        ]
+      }
+    },
+    {
+      "id": "NC-V102R-SEC2-STREAM-NO-FOLLOWUP-DELTA",
+      "obligation": "SEC-V102-2_NO_DANGLING_PENDING_DELTA",
+      "claim": "Each detection-time pending_approval delta gets a follow-up delta: pending_approval backed by a real request, or blocked. Dropping the settled results leaves the client showing approvals that do not exist.",
+      "mutation": {
+        "file": "apps/server/src/modules/key-cortex/key-cortex-query-pipeline.service.ts",
+        "find": "              'streamQuery',\n            )),\n          ];",
+        "replace": "              'streamQuery',\n            )).filter(() => false),\n          ];"
+      },
+      "mustFail": {
+        "unit": [
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST01 streamQuery: an evaluation that throws on command 2 of 3 lets zero commands reach executeBatch",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST02 streamQuery: a malformed verdict lets zero commands reach executeBatch",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST03 streamQuery: only the explicitly allowed command of a mixed batch reaches executeBatch",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST07 streamQuery: an allowed action that needs approval because the detector flags it gets an approval request from the executor approval flow, not an execution",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST07 streamQuery: an allowed action that needs approval because the verdict is supervised gets an approval request from the executor approval flow, not an execution",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST08 streamQuery: a denied action leaves one refusal row naming the actor and a blocked follow-up delta",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST09 streamQuery: a failed-closed check is evidenced, audits one refusal per action, and creates no approval",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST11 streamQuery: an approval request that cannot be created is a refusal, never an execution",
+          "KeyCortexQueryPipelineService v2 BatchResult is consumed without legacy replay V1-02-ST12 streamQuery: an audit write that fails does not change the answer"
         ]
       }
     }

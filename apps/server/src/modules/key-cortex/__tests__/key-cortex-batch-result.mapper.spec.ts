@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { BatchResult, ExecutionRecord } from '../key-cortex-executor.service';
-import { mapCortexBatchResult, unverifiedCortexBatchAction } from '../key-cortex-batch-result.mapper';
+import {
+  blockedCortexAction,
+  mapCortexBatchResult,
+  pendingApprovalCortexAction,
+  unverifiedCortexBatchAction,
+} from '../key-cortex-batch-result.mapper';
 
 function record(action: string, success: boolean, data?: unknown, error?: string): ExecutionRecord {
   const command = { module: 'crm' as const, action, parameters: {}, businessId: 'biz',
@@ -61,5 +66,32 @@ describe('Cortex actual BatchResult consumption', () => {
     expect(result.status).toBe('error');
     expect(result.description).toContain('unverified');
     expect(result.error).toContain('not attempted');
+  });
+});
+
+// V1-02 review repair (CR-V102-1, SEC-V102-2): a command the pipeline's gate
+// kept from the executor is shown as waiting on its approval request, or as
+// blocked; never as an attempted execution.
+describe('Cortex display records for commands that were not executed', () => {
+  it('shows an approval-required command as pending on its approval request', () => {
+    expect(pendingApprovalCortexAction({ module: 'commerce', action: 'create invoice' }, 'proposal_1'))
+      .toEqual({
+        actionType: 'CREATE_INVOICE',
+        status: 'pending_approval',
+        description: 'Approval pending for create invoice on commerce',
+        error: 'Approval pending',
+        requiresApproval: true,
+        approvalRequestId: 'proposal_1',
+      });
+  });
+  it('shows a refused command as blocked with its reason, not as a failed attempt', () => {
+    expect(blockedCortexAction({ module: 'autopilot', action: 'create_task' }, 'policy denies'))
+      .toEqual({
+        actionType: 'CREATE_TASK',
+        status: 'blocked',
+        description: 'Blocked create_task on autopilot: policy denies',
+        error: 'policy denies',
+        requiresApproval: false,
+      });
   });
 });
