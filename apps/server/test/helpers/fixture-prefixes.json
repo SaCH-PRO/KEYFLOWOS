@@ -595,6 +595,10 @@
     {
       "file": "apps/server/test/token-encryption-coverage.integration.test.ts",
       "reason": "Reads schema.prisma and the encryption extension's coverage; touches no rows."
+    },
+    {
+      "file": "apps/server/test/schema-sync-path.integration.test.ts",
+      "reason": "creates and drops its own throwaway database; writes no rows in the shared database"
     }
   ]
 }
