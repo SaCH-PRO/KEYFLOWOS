@@ -39,6 +39,9 @@ export interface CronTriggerJob {
   payload: Record<string, any>;
 }
 
+/** The job name a trigger's repeatable is registered under: stable across schedule changes, unique per AgentTrigger id. */
+const cronTriggerJobName = (triggerId: string) => `cron-trigger:${triggerId}`;
+
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QueueService.name);
@@ -128,19 +131,15 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async enqueueCronTrigger(job: CronTriggerJob, cronExpression: string): Promise<void> {
-    const jobId = `cron:${job.triggerId}`;
-    // Upsert repeatable job
-    const existing = await this.cronQueue.getRepeatableJobs();
-    const match = existing.find((r) => r.id === jobId);
-    if (match) {
-      await this.cronQueue.removeRepeatableByKey(match.key);
-    }
+    // Upsert: a changed schedule hashes to a new repeatable key, so every
+    // repeatable the trigger already has is removed first (V1-24c).
+    await this.removeCronTrigger(job.triggerId);
 
     await this.cronQueue.add(
-      `cron-trigger:${job.triggerId}`,
+      cronTriggerJobName(job.triggerId),
       job,
       {
-        jobId,
+        jobId: `cron:${job.triggerId}`,
         repeat: { pattern: cronExpression, tz: 'UTC' },
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 50 },
@@ -148,11 +147,19 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /**
+   * V1-24c: a trigger's repeatables are found by the job NAME they are
+   * registered under. bullmq 5's getRepeatableJobs() entries carry key (an md5
+   * of name:jobId:endDate:tz:pattern), name, tz, pattern and next, but no `id`,
+   * so the old lookup by id never matched: a removed trigger kept firing and a
+   * changed schedule added a second repeatable beside the old one. Every match
+   * is removed (duplicates that lookup left behind included), each with its
+   * next delayed run. An unknown trigger matches nothing.
+   */
   async removeCronTrigger(triggerId: string): Promise<void> {
-    const existing = await this.cronQueue.getRepeatableJobs();
-    const match = existing.find((r) => r.id === `cron:${triggerId}`);
-    if (match) {
-      await this.cronQueue.removeRepeatableByKey(match.key);
+    const name = cronTriggerJobName(triggerId);
+    for (const r of await this.cronQueue.getRepeatableJobs()) {
+      if (r.name === name) await this.cronQueue.removeRepeatableByKey(r.key);
     }
   }
 
@@ -289,16 +296,53 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * V1-24c review (ST-V124c-1, CR-V124c-2): no production path removes a
+   * trigger's repeatable when its AgentTrigger row is deleted (directly or with
+   * its business), disabled, unscheduled or rescheduled: the API writes the row
+   * only and the boot sync only adds. So each run re-reads the row by its id
+   * AND the business it was registered for, and fires only an enabled row still
+   * on the schedule this run came from, with the row's current event and
+   * payload (not the copy stored in Redis at registration). A missing, disabled
+   * or unscheduled row (or one now under another business) has its repeatables
+   * removed and fires nothing; a rescheduled row is re-registered on its current
+   * schedule and nothing fires on the old one. A failed lookup throws: the run
+   * fails and fires nothing, and the repeatable is kept.
+   */
   private async processCronTrigger(job: Job<CronTriggerJob>): Promise<void> {
-    const data = job.data;
-    this.logger.log(`Cron trigger fired: ${data.triggerId} for ${data.businessId}`);
+    const { triggerId, businessId } = job.data;
+    const row = await this.prisma.client.agentTrigger.findFirst({
+      where: { id: triggerId, businessId },
+      select: { id: true, businessId: true, name: true, eventPattern: true, objective: true, condition: true, enabled: true, schedule: true },
+    });
 
-    this.events.emit(data.eventName, {
-      name: data.eventName,
-      businessId: data.businessId,
-      payload: data.payload,
+    if (!row || !row.enabled || !row.schedule) {
+      await this.removeCronTrigger(triggerId);
+      this.logger.log(`Cron trigger ${triggerId} for ${businessId} is no longer scheduled: repeatable removed, not fired`);
+      return;
+    }
+
+    const current: CronTriggerJob = {
+      triggerId: row.id,
+      businessId: row.businessId,
+      eventName: row.eventPattern,
+      payload: { triggerId: row.id, name: row.name, objective: row.objective, condition: row.condition },
+    };
+
+    if (row.schedule !== job.opts.repeat?.pattern) {
+      await this.enqueueCronTrigger(current, row.schedule);
+      this.logger.log(`Cron trigger ${triggerId} for ${businessId} was rescheduled (${row.schedule}): re-registered, not fired on the old schedule`);
+      return;
+    }
+
+    this.logger.log(`Cron trigger fired: ${triggerId} for ${businessId}`);
+
+    this.events.emit(current.eventName, {
+      name: current.eventName,
+      businessId: current.businessId,
+      payload: current.payload,
       source: 'cron',
-      triggerId: data.triggerId,
+      triggerId: current.triggerId,
     });
   }
 
