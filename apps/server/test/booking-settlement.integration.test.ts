@@ -561,10 +561,13 @@ describe('V1-28 the completion invoice nets the deposit (CF-43)', () => {
     await db.contact.create({ data: { id: `${P}c_collide`, businessId: ID.biz, firstName: 'Col', lastName: 'Lide' } });
     await db.invoice.create({ data: { id: `${P}inv_collide`, businessId: ID.biz, contactId: `${P}c_collide`, invoiceNumber: `INV-${T}`, total: 1 } });
     const real = commerce.createInvoiceForService.bind(commerce);
-    const pinned = (...args: unknown[]) => {
+    // The pin is held across the awaited call: since V1-37 the invoice number is
+    // drawn after an awaited currency read, so a synchronous pin had already
+    // been restored when Date.now() ran and the collision never happened.
+    const pinned = async (...args: unknown[]) => {
       const now = vi.spyOn(Date, 'now').mockReturnValue(T);
       try {
-        return real(...args);
+        return await real(...args);
       } finally {
         now.mockRestore();
       }
@@ -753,11 +756,14 @@ describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
     expect(contactEvents.filter((e) => e.type === 'booking.deposit_forfeited')).toHaveLength(0);
   });
 
-  it('S-07c SEC-V28-3: a refunded deposit (still PAID) is not money held: not restored on reinstatement, not netted, not forfeit', async () => {
+  it('S-07c SEC-V28-3: a refunded deposit (reopened to SENT under D-14) is not money held: not restored on reinstatement, owed again on its own invoice (the final nets it once), not forfeit', async () => {
     const refundDeposit = async (depositInvoiceId: string) => {
       const payment = await db.payment.findFirst({ where: { invoiceId: depositInvoiceId, status: 'SUCCESSFUL' } });
       await commerce.markPaymentRefunded(payment.id, ID.biz, 'goodwill', ID.owner);
-      expect((await invoiceRow(depositInvoiceId)).status, 'a refund leaves the deposit invoice PAID').toBe('PAID');
+      // D-14 (V1-29): a fully refunded invoice returns to SENT with paidAt cleared.
+      const refunded = await invoiceRow(depositInvoiceId);
+      expect(refunded.status, 'a full refund reopens the deposit invoice (D-14)').toBe('SENT');
+      expect(refunded.paidAt).toBeNull();
     };
 
     // Forfeited, then refunded by hand (D-26), then reinstated and completed.
@@ -770,8 +776,15 @@ describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
     expect((await bookingRow(b.bookingId)).paymentStatus, 'nothing is held for the booking').toBe('UNPAID');
     const done = await setStatus(b.bookingId, 'COMPLETED');
     expect(done.status, JSON.stringify(done.body)).toBe(201);
-    expect((await finalInvoicesOf(b.bookingId)).map((i) => money(i.total)), 'the refunded deposit is not netted').toEqual([100]);
-    expect(done.body.invoicing).toMatchObject({ status: 'CREATED', amount: 100, depositAmount: 0, depositInvoiceId: null });
+    // D-14: the fully refunded deposit invoice is open again (SENT) and owed on
+    // its own invoice, so the final invoice nets it and the two together bill
+    // the price once: 25 (reopened deposit) + 75 (final) = 100. Nothing held
+    // is counted, nothing is forfeit, and nothing is billed twice.
+    expect((await finalInvoicesOf(b.bookingId)).map((i) => money(i.total)), 'the final nets the reopened deposit').toEqual([75]);
+    expect(done.body.invoicing).toMatchObject({ status: 'CREATED', amount: 75, depositAmount: 25, depositInvoiceId: b.depositInvoiceId });
+    const reopened = await invoiceRow(b.depositInvoiceId!);
+    expect(reopened.status).toBe('SENT');
+    expect(money(reopened.total) + 75, 'deposit + final == price').toBe(100);
 
     // Refunded before the cancel: there is nothing to forfeit.
     const early = await book(ID.svcDep, 's07c_early');

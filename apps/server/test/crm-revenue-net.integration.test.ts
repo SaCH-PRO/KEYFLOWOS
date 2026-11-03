@@ -507,20 +507,17 @@ describe('VR-02: the contact revenue summary nets refunds (V1-29e-CRM-REVENUE-NE
     });
   });
 
-  it("CRN-08: tenant B is refused on A's path and reads nothing of A's contact on its own path", async () => {
+  it("CRN-08: tenant B is refused on A's path and reads nothing of A's contact on its own path (404 since V1-08)", async () => {
     const refused = await summary(ID.ownerB, ID.cTenant, ID.bizA);
     expect(refused.status).toBe(403);
     expect(refused.body).not.toHaveProperty('lifetimeRevenue');
+    // Since V1-08 the contact-scoped sibling reads resolve the contact inside the
+    // guarded business first: A's contact on B's own path answers 404, exactly
+    // as an unknown id, and no figure of it is read.
     const own = await summary(ID.ownerB, ID.cTenant, ID.bizB);
-    expect(own.status).toBe(200);
-    expect(own.body).toMatchObject({
-      lifetimeRevenue: 0,
-      outstandingBalance: 0,
-      openInvoices: 0,
-      lastPaymentAmount: null,
-      lastPaymentAt: null,
-      paymentReliability: null,
-    });
+    expect(own.status).toBe(404);
+    expect(own.body).not.toHaveProperty('lifetimeRevenue');
+    expect(own.body).not.toHaveProperty('lastPaymentAmount');
   });
 
   it('CRN-09: for every seeded contact lifetimeRevenue is balanceOfStoredRows(...).net over its own-tenant rows', async () => {

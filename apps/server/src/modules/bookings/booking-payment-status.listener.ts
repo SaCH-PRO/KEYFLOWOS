@@ -3,7 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { InvoicePaidPayload } from '../../core/event-bus/events.types';
-import { computeBalance } from '../commerce/invoice-workflow.service';
+import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 
 /** What one invoice.paid did to a booking's paymentStatus. */
 export interface BookingPaymentStatusOutcome {
@@ -53,24 +53,32 @@ const NOTHING_LEFT_TO_COLLECT: ReadonlySet<string> = new Set(['PAID', 'FULLY_CRE
  *
  *   billed  its total less the credit notes applied to it (all of it once it
  *           is FULLY_CREDITED, the status CreditNoteService.apply writes)
- *   held    money it holds for the booking: a PAID deposit's billed amount
- *           less what was refunded on it. A refund leaves the invoice PAID
- *           (markPaymentRefunded flips the payment to REFUNDED; a provider
- *           refund adds a negative REFUNDED row; computeBalance counts both),
- *           so the status alone is not money held.
+ *   held    money it holds for the booking: the net received on it (the
+ *           shared balance contract, balanceOfStoredRows: SUCCESSFUL rows less
+ *           D-14's negative REFUNDED rows; a legacy positive REFUNDED flip
+ *           reads as net 0), at most what it bills. Under D-14 a refund moves
+ *           the invoice (a full refund back to SENT, a partial one to
+ *           PARTIALLY_PAID), so a part-refunded deposit still holds its net.
+ *           A PAID deposit with no payment rows (a legacy raw status write)
+ *           holds what it bills.
  *   covers  the part of the price the deposit accounts for, which the final
- *           invoice nets out: a PAID deposit collects nothing more, so it
- *           covers what it holds; any other live deposit is still owed on its
- *           own invoice, so it covers what it bills.
+ *           invoice nets out: a deposit with nothing left to collect (PAID,
+ *           FULLY_CREDITED) covers what it holds; any other live deposit,
+ *           including one D-14 reopened by a refund, is still owed on its own
+ *           invoice, so it covers what it bills.
  */
 export function depositPosition(deposit: SettlementInvoice): { billedCents: number; heldCents: number; coversCents: number } {
   const totalCents = toCents(deposit.total);
   const appliedCents = deposit.creditNotes.reduce((sum, cn) => sum + toCents(Number(String(cn.amount))), 0);
   const creditedCents = deposit.status === 'FULLY_CREDITED' ? totalCents : Math.min(totalCents, appliedCents);
   const billedCents = Math.max(0, totalCents - creditedCents);
-  const refundedCents = toCents(computeBalance(Number(deposit.total), deposit.payments, deposit.currency).refunded);
-  const heldCents = deposit.status === 'PAID' ? Math.max(0, billedCents - refundedCents) : 0;
-  return { billedCents, heldCents, coversCents: deposit.status === 'PAID' ? heldCents : billedCents };
+  // A PAID invoice with no payment rows at all is a legacy raw status write
+  // (marked paid before R0-20 recorded a payment): its status is the only
+  // evidence, so it holds what it bills, as before.
+  const legacyPaidWithoutRows = deposit.status === 'PAID' && deposit.payments.length === 0;
+  const netCents = toCents(balanceOfStoredRows(Number(deposit.total), deposit.payments, deposit.currency).net);
+  const heldCents = legacyPaidWithoutRows ? billedCents : Math.min(billedCents, Math.max(0, netCents));
+  return { billedCents, heldCents, coversCents: NOTHING_LEFT_TO_COLLECT.has(deposit.status) ? heldCents : billedCents };
 }
 
 /**

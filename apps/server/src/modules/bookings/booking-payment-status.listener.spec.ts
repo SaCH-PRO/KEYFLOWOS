@@ -255,7 +255,14 @@ describe('BookingPaymentStatusListener (V1-28, M42)', () => {
       ['PAID', inv('PAID', [{ amount: 25, status: 'SUCCESSFUL' }]), { billedCents: 2500, heldCents: 2500, coversCents: 2500 }],
       ['PAID, payment flipped to REFUNDED', inv('PAID', [{ amount: 25, status: 'REFUNDED' }]), { billedCents: 2500, heldCents: 0, coversCents: 0 }],
       ['PAID, negative refund row of 10', inv('PAID', [{ amount: 25, status: 'SUCCESSFUL' }, { amount: -10, status: 'REFUNDED' }]), { billedCents: 2500, heldCents: 1500, coversCents: 1500 }],
-      ['PARTIALLY_CREDITED by 10 (Decimal)', inv('PARTIALLY_CREDITED', [{ amount: 25, status: 'SUCCESSFUL' }], [{ amount: '10.0000' }]), { billedCents: 1500, heldCents: 0, coversCents: 1500 }],
+      // 25 received, 10 credited (D-28 PARTIALLY_CREDITED): it holds what it still bills (15), the net received capped at billed.
+      ['PARTIALLY_CREDITED by 10 (Decimal)', inv('PARTIALLY_CREDITED', [{ amount: 25, status: 'SUCCESSFUL' }], [{ amount: '10.0000' }]), { billedCents: 1500, heldCents: 1500, coversCents: 1500 }],
+      // D-14 (V1-29): a partial refund moves the deposit to PARTIALLY_PAID; it still holds its net and is owed its remainder.
+      ['PARTIALLY_PAID after a D-14 refund of 10', inv('PARTIALLY_PAID', [{ amount: 25, status: 'SUCCESSFUL' }, { amount: -10, status: 'REFUNDED' }]), { billedCents: 2500, heldCents: 1500, coversCents: 2500 }],
+      // D-14: a full refund reopens it to SENT: nothing held, still owed on its own invoice.
+      ['SENT after a D-14 full refund', inv('SENT', [{ amount: 25, status: 'SUCCESSFUL' }, { amount: -25, status: 'REFUNDED' }]), { billedCents: 2500, heldCents: 0, coversCents: 2500 }],
+      // A legacy PAID deposit with no payment rows: the status is the only evidence.
+      ['PAID with no payment rows (legacy)', inv('PAID'), { billedCents: 2500, heldCents: 2500, coversCents: 2500 }],
       ['FULLY_CREDITED (status alone)', inv('FULLY_CREDITED', [{ amount: 25, status: 'SUCCESSFUL' }]), { billedCents: 0, heldCents: 0, coversCents: 0 }],
       ['PAID 33.00 of 99.99 (cents)', inv('PAID', [{ amount: 33, status: 'SUCCESSFUL' }], [], 33), { billedCents: 3300, heldCents: 3300, coversCents: 3300 }],
     ];
