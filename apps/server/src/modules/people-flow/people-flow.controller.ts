@@ -2,7 +2,7 @@ import { Controller, Get, Inject, Param, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { assertContactVisible } from '../crm/crm-permissions.helper';
+import { assertContactVisible, contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { PeopleOverviewService } from './people-overview.service';
 import { RelationshipHealthService } from './relationship-health.service';
 
@@ -34,8 +34,25 @@ export class PeopleFlowController {
     return this.health.computeHealth(businessId, contactId);
   }
 
+  /**
+   * V1-84 review (FOLLOW3-D5 ST-5): a segment's `contacts` name contacts (id,
+   * name, email, health score), so a member is shown only the ones they may
+   * open (V1-08 rule, contactVisibilityFilter); OWNER and SUPER_ADMIN get
+   * exactly today's answer. A segment's `count` stays the tenant-wide figure,
+   * like the segment counts GET overview already gives every member: it names
+   * no contact.
+   */
   @Get('segments')
-  async getSegments(@Param('businessId') businessId: string) {
-    return this.health.listSegments(businessId);
+  async getSegments(
+    @Param('businessId') businessId: string,
+    @Req() req: { user: { id: string } },
+  ) {
+    const access = await resolveCrmAccess(this.prisma, businessId, req.user.id);
+    const segments = await this.health.listSegments(businessId);
+    const canOpen = await contactVisibilityFilter(
+      this.prisma, businessId, access, req.user.id, segments.flatMap((s) => s.contacts.map((c) => c.id)),
+    );
+    if (!canOpen) return segments;
+    return segments.map((s) => ({ ...s, contacts: s.contacts.filter((c) => canOpen(c.id)) }));
   }
 }

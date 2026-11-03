@@ -42,6 +42,23 @@
  * contact, see the characterization case). Unknown ids answered 500
  * (order-history, PATCH sales-rep) or an empty 200. The controls pass before
  * and after.
+ *
+ * REVIEW REPAIRS (V1-84 review ST-1..ST-5; RED at df41de0b, GREEN after):
+ *   RV-01 POST momentum recommendations/:id/draft read body.contactId's PRIVATE
+ *         contact (name into the reply, its notes into the AI prompt): now the
+ *         recommendation and the contact must both be ones the caller may open.
+ *   RV-02 PATCH sales-rep also needs the PATCH crm contacts/:id edit right
+ *         (crm_edit 'none' 403, 'owned' on another's contact 403). The earlier
+ *         control that let STAFF_OWNED (crm 'read', edit 'none') write is
+ *         replaced: that caller is now refused 403, and an editor proves 200.
+ *   RV-03 GET momentum recommendations listed the hidden contact (name, email,
+ *         score); its action/snooze/dismiss wrote it. Both now follow V1-08.
+ *   RV-04 GET marketplace orders/:orderId/cross-links named the hidden linked
+ *         contact: `contact` is now null for a caller who may not open it.
+ *   RV-05 GET people-flow segments and GET conversion sales-reps/:repId/pipeline
+ *         named the hidden contact: those entries are now dropped.
+ * The AI provider is never reached: AiUsageService.callAi is a recording stub
+ * that throws, so MomentumAiService answers its fallback draft.
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -68,24 +85,35 @@ const ID = {
   cReferredByTeam: `${P}cRefTeam`, // referred by cTeam
   orderPriv: `${P}ordPriv`,
   orderTeam: `${P}ordTeam`,
+  // Review repairs (RV-01..RV-05).
+  staffEditor: `${P}staffEditor`, // STAFF of bizA, crm: write + crm_edit: owned (crm_view 'all' by default)
+  cEditor: `${P}cEditor`,         // TEAM, owned by staffEditor
+  recPriv: `${P}recPriv`,         // momentum recommendation on cPriv
+  recTeam: `${P}recTeam`,         // momentum recommendation on cTeam
 };
 
 // Markers that must never reach a refused caller.
 const PRIV_REF_CODE = 'V84E-PRIV-REF-9c1d';
 const PRIV_ORDER_NUMBER = `${P}ORD-PRIV-4471`;
 const PRIV_NAME = 'V84ePrivateCustomer';
+const PRIV_EMAIL = `${P}priv@test.local`;
 const PRIV_REP = `${P}rep_original`;
+const PRIV_NOTE = 'V84E-SECRET-NOTE-6f2a';
 const TEAM_REF_CODE = 'V84E-TEAM-REF-2b7e';
 const TEAM_ORDER_NUMBER = `${P}ORD-TEAM-5512`;
 const TEAM_REP = `${P}rep_team_original`;
+const EDITOR_REP = `${P}rep_editor_original`;
 
 let db: any;
 let app: any;
 const svc: Record<string, any> = {};
 const spies: Record<string, any> = {};
+/** Every AiUsageService.callAi request (the stub records it, then throws). */
+const aiCalls: any[] = [];
 
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM momentum_recommendations WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_momentum_snapshots WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_momentum WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -217,7 +245,19 @@ beforeAll(async () => {
       SalesTeamService,
       RelationshipHealthService,
       ClientMomentumService,
-      // Collaborators the six routes never reach.
+      // The draft route's service (RV-01): real; its AI call is a recording
+      // stub that throws, so no provider is reached and the fallback answers.
+      MomentumAiService,
+      {
+        provide: AiUsageService,
+        useValue: {
+          callAi: async (req: unknown) => {
+            aiCalls.push(req);
+            throw new Error('no AI provider in this suite');
+          },
+        },
+      },
+      // Collaborators the routes this suite sends never reach.
       { provide: MarketplaceService, useValue: {} },
       { provide: CrmService, useValue: {} },
       { provide: ExpensesService, useValue: {} },
@@ -226,9 +266,7 @@ beforeAll(async () => {
       { provide: LeadMagnetService, useValue: {} },
       { provide: MerchantSubscriptionService, useValue: {} },
       { provide: PeopleOverviewService, useValue: {} },
-      { provide: MomentumAiService, useValue: {} },
       { provide: AutopilotService, useValue: {} },
-      { provide: AiUsageService, useValue: {} },
       // PublicRateLimitGuard (conversion's public lead-magnet route) is built
       // with the controller; no route this suite sends reaches it.
       { provide: REDIS_CLIENT, useValue: {} },
@@ -258,11 +296,18 @@ beforeAll(async () => {
   spies.health = vi.spyOn(svc.health, 'computeHealth');
   spies.momentum = vi.spyOn(svc.momentum, 'getContactMomentum');
   spies.momentumHistory = vi.spyOn(svc.momentum, 'getContactMomentumHistory');
+  // Review repairs: the recommendation writes and the draft must not run for
+  // a refused caller (the list routes call their service, then filter).
+  svc.momentumAi = moduleRef.get(MomentumAiService);
+  spies.draft = vi.spyOn(svc.momentumAi, 'generateDraft');
+  spies.recAction = vi.spyOn(svc.momentum, 'actionRecommendation');
+  spies.recSnooze = vi.spyOn(svc.momentum, 'snoozeRecommendation');
+  spies.recDismiss = vi.spyOn(svc.momentum, 'dismissRecommendation');
 
   await cleanup(); // in case a prior run aborted
 
   // ---- identities, tenants, memberships ----------------------------------
-  for (const id of [ID.owner, ID.staffOwned, ID.other]) {
+  for (const id of [ID.owner, ID.staffOwned, ID.other, ID.staffEditor]) {
     await db.user.create({ data: { id, email: `${P}u_${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V84E Biz A', ownerId: ID.owner } });
@@ -272,6 +317,7 @@ beforeAll(async () => {
   await m(ID.owner, ID.bizA, 'OWNER');
   await m(ID.staffOwned, ID.bizA, 'STAFF', { crm: 'read', crm_view: 'owned' });
   await m(ID.other, ID.bizB, 'OWNER');
+  await m(ID.staffEditor, ID.bizA, 'STAFF', { crm: 'write', crm_edit: 'owned' });
 
   // ---- contacts ----------------------------------------------------------
   const recent = new Date(Date.now() - 3 * 86_400_000);
@@ -311,6 +357,23 @@ beforeAll(async () => {
     await db.contactTask.create({ data: { id: `${contactId}_task`, businessId: ID.bizA, contactId, title: `${P}follow up`, status: 'DONE' } });
     await db.contactNote.create({ data: { id: `${contactId}_note`, businessId: ID.bizA, contactId, body: `${P}note`, authorId: ID.owner } });
   }
+
+  // ---- review repairs (RV-01..RV-05) --------------------------------------
+  // A TEAM contact the editor owns, a secret note on the PRIVATE contact, and a
+  // pending momentum recommendation on the PRIVATE and on the TEAM contact.
+  await db.contact.create({ data: {
+    id: ID.cEditor, businessId: ID.bizA, firstName: 'V84eEditorCustomer', email: `${P}editor@test.local`, status: 'CUSTOMER',
+    visibility: 'TEAM', ownerId: ID.staffEditor, lastInteractionAt: recent, custom: { salesRepId: EDITOR_REP },
+  } });
+  await db.contactNote.create({ data: { id: `${ID.cPriv}_secret`, businessId: ID.bizA, contactId: ID.cPriv, body: PRIV_NOTE, authorId: ID.owner } });
+  await db.momentumRecommendation.create({ data: {
+    id: ID.recPriv, businessId: ID.bizA, contactId: ID.cPriv, type: 'check_in', title: `Check in with ${PRIV_NAME}`,
+    description: `${PRIV_NAME} has gone quiet`, priority: 'high', momentumScore: 71,
+  } });
+  await db.momentumRecommendation.create({ data: {
+    id: ID.recTeam, businessId: ID.bizA, contactId: ID.cTeam, type: 'check_in', title: 'Check in with V84eTeamCustomer',
+    description: 'V84eTeamCustomer has gone quiet', priority: 'medium', momentumScore: 42,
+  } });
 }, 120_000);
 
 afterAll(async () => {
@@ -320,12 +383,15 @@ afterAll(async () => {
 
 beforeEach(() => {
   for (const s of Object.values(spies)) s.mockClear();
+  aiCalls.length = 0;
 });
 
 describe('fixture sanity (real rows)', () => {
   it('seeded the memberships, contacts, orders, momentum rows and health inputs', async () => {
-    expect(await db.membership.count({ where: { businessId: ID.bizA } })).toBe(2);
-    expect(await db.contact.count({ where: { businessId: ID.bizA } })).toBe(4);
+    // owner, staffOwned and (review repairs) staffEditor; 4 contacts + cEditor.
+    expect(await db.membership.count({ where: { businessId: ID.bizA } })).toBe(3);
+    expect(await db.contact.count({ where: { businessId: ID.bizA } })).toBe(5);
+    expect(await db.momentumRecommendation.count({ where: { businessId: ID.bizA } })).toBe(2);
     expect(await db.marketplaceOrder.count({ where: { businessId: ID.bizA } })).toBe(2);
     expect(await db.contactMomentum.count({ where: { businessId: ID.bizA } })).toBe(2);
     expect(await db.contactMomentumSnapshot.count({ where: { businessId: ID.bizA } })).toBe(2);
@@ -413,13 +479,17 @@ describe('CONTROLS (pass before and after)', () => {
     expect(snaps.body.map((s: any) => s.score)).toEqual([42]);
   });
 
-  it('STAFF_OWNED on the TEAM contact: PATCH sales-rep answers 200 and the sales rep changes', async () => {
+  // RV-02 (review ST-2): this control answered 200 and wrote before the review
+  // repairs. STAFF_OWNED holds crm 'read', so crm_edit 'none': the PATCH crm
+  // contacts/:id edit rule refuses it 403, and so does this write now. The
+  // 200-and-write path is proved for an editor in the RV-02 block below.
+  it('STAFF_OWNED (crm read: crm_edit none) on the TEAM contact they own: PATCH sales-rep 403, nothing written', async () => {
     try {
       const res = await send(route('NC-06'), ID.staffOwned, ID.cTeam, ID.bizA, { salesRepId: `${P}rep_team_new` });
-      expect(res.status).toBe(200);
-      expect(res.body).toEqual({ updated: true });
-      expect(spies.setSalesRep.mock.calls).toEqual([[ID.bizA, ID.cTeam, `${P}rep_team_new`]]);
-      expect(await salesRepOf(ID.cTeam)).toBe(`${P}rep_team_new`);
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe('You do not have permission to edit contacts');
+      expect(spies.setSalesRep).not.toHaveBeenCalled();
+      expect(await salesRepOf(ID.cTeam)).toBe(TEAM_REP);
     } finally {
       await setSalesRepRaw(ID.cTeam, TEAM_REP);
     }
@@ -462,6 +532,276 @@ describe('CONTROLS (pass before and after)', () => {
     expectNoServiceCall();
     expect(await salesRepOf(ID.cPriv)).toBe(PRIV_REP);
     expect(await salesRepOf(ID.cTeam)).toBe(TEAM_REP);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review repairs (V1-84 review ST-1..ST-5). RED at df41de0b, GREEN after.
+// ---------------------------------------------------------------------------
+
+const hit = (method: 'get' | 'post' | 'patch', url: string, actor: string, body?: object) => {
+  const req = request(app.getHttpServer())[method](url).set('x-test-user', actor);
+  return body === undefined ? req : req.send(body);
+};
+const momentumUrl = (p: string) => `/momentum/businesses/${ID.bizA}${p}`;
+const draftBody = (contactId?: string) => ({
+  ...(contactId === undefined ? {} : { contactId }),
+  contactName: 'Someone', type: 'check_in', description: 'catch up',
+});
+
+/** The contacts each restricted member may open in the fixture, by the V1-08 rule. */
+const OPENS: Record<string, Set<string>> = {
+  // crm_view 'owned': its own book only.
+  [ID.staffOwned]: new Set([ID.cTeam]),
+  // crm 'write' (crm_view 'all' by default): every TEAM row and its own, no PRIVATE row of another.
+  [ID.staffEditor]: new Set([ID.cTeam, ID.cReferredByPriv, ID.cReferredByTeam, ID.cEditor]),
+};
+const RESTRICTED = [ID.staffOwned, ID.staffEditor];
+
+async function recRow(id: string): Promise<{ status: string; draft_message: string | null }> {
+  const rows: any[] = await db.$queryRawUnsafe(`SELECT status, draft_message FROM momentum_recommendations WHERE id = $1`, id);
+  return rows[0];
+}
+
+async function resetRec(id: string) {
+  await db.$executeRawUnsafe(
+    `UPDATE momentum_recommendations SET status = 'pending', snoozed_until = NULL, actioned_at = NULL, dismissed_at = NULL,
+       draft_message = NULL, draft_subject = NULL, suggested_channel = NULL WHERE id = $1`,
+    id,
+  );
+}
+
+function expectNoPrivateContact(body: unknown) {
+  const text = JSON.stringify(body ?? {});
+  for (const marker of [ID.cPriv, PRIV_NAME, PRIV_EMAIL, PRIV_NOTE, ID.recPriv]) {
+    expect(text).not.toContain(marker);
+  }
+}
+
+describe('RV-01 POST momentum recommendations/:id/draft applies record visibility (review ST-1)', () => {
+  it("STAFF_OWNED naming the PRIVATE contact in body.contactId: 404 'Contact not found', no draft, no AI call", async () => {
+    const res = await hit('post', momentumUrl(`/recommendations/${ID.recTeam}/draft`), ID.staffOwned, draftBody(ID.cPriv));
+    expect(res.status).toBe(404);
+    expect(res.body.message).toBe('Contact not found');
+    expectNoPrivateContact(res.body);
+    expect(spies.draft).not.toHaveBeenCalled();
+    expect(aiCalls).toEqual([]);
+    expect(await recRow(ID.recTeam)).toEqual({ status: 'pending', draft_message: null });
+    const absent = await hit('post', momentumUrl(`/recommendations/${ID.recTeam}/draft`), ID.staffOwned, draftBody(`${P}absent`));
+    expect({ status: absent.status, body: absent.body }).toEqual({ status: res.status, body: res.body });
+  });
+
+  it('a missing or empty body.contactId answers the same 404 (an absent id would match any contact of the tenant)', async () => {
+    for (const body of [draftBody(), draftBody('')]) {
+      const res = await hit('post', momentumUrl(`/recommendations/${ID.recTeam}/draft`), ID.staffOwned, body);
+      expect(res.status).toBe(404);
+      expect(res.body.message).toBe('Contact not found');
+      expectNoPrivateContact(res.body);
+    }
+    expect(spies.draft).not.toHaveBeenCalled();
+    expect(aiCalls).toEqual([]);
+  });
+
+  it("the PRIVATE contact's recommendation (with a visible body.contactId): 404 'Recommendation not found', as for an absent id, nothing written", async () => {
+    try {
+      const hidden = await hit('post', momentumUrl(`/recommendations/${ID.recPriv}/draft`), ID.staffOwned, draftBody(ID.cTeam));
+      const absent = await hit('post', momentumUrl(`/recommendations/${P}absentRec/draft`), ID.staffOwned, draftBody(ID.cTeam));
+      expect(hidden.status).toBe(404);
+      expect(hidden.body.message).toBe('Recommendation not found');
+      expect({ status: absent.status, body: absent.body }).toEqual({ status: hidden.status, body: hidden.body });
+      expect(spies.draft).not.toHaveBeenCalled();
+      expect(aiCalls).toEqual([]);
+      expect(await recRow(ID.recPriv)).toEqual({ status: 'pending', draft_message: null });
+    } finally {
+      await resetRec(ID.recPriv);
+    }
+  });
+
+  it('STAFF_EDITOR (crm_view all) naming the PRIVATE contact of another: 404 as well', async () => {
+    const res = await hit('post', momentumUrl(`/recommendations/${ID.recTeam}/draft`), ID.staffEditor, draftBody(ID.cPriv));
+    expect(res.status).toBe(404);
+    expect(res.body.message).toBe('Contact not found');
+    expect(spies.draft).not.toHaveBeenCalled();
+    expect(aiCalls).toEqual([]);
+  });
+
+  it('CONTROL: STAFF_OWNED on the TEAM recommendation and contact gets the draft; the prompt carries no PRIVATE note', async () => {
+    const res = await hit('post', momentumUrl(`/recommendations/${ID.recTeam}/draft`), ID.staffOwned, draftBody(ID.cTeam));
+    expect(res.status).toBe(201);
+    expect(res.body.message).toContain('V84eTeamCustomer');
+    expect(spies.draft.mock.calls).toEqual([[ID.bizA, expect.objectContaining({ recommendationId: ID.recTeam, contactId: ID.cTeam })]]);
+    expect(aiCalls).toHaveLength(1);
+    expect(JSON.stringify(aiCalls)).toContain(`${P}note`);
+    expectNoPrivateContact(aiCalls);
+  });
+
+  it('CONTROL: OWNER is unchanged: the PRIVATE recommendation and contact draft as before', async () => {
+    const res = await hit('post', momentumUrl(`/recommendations/${ID.recPriv}/draft`), ID.owner, draftBody(ID.cPriv));
+    expect(res.status).toBe(201);
+    expect(res.body.message).toContain(PRIV_NAME);
+    expect(JSON.stringify(aiCalls)).toContain(PRIV_NOTE);
+  });
+});
+
+describe('RV-02 PATCH conversion sales-rep follows the PATCH crm contacts/:id edit right (review ST-2)', () => {
+  it('STAFF_EDITOR (crm_edit owned) on the TEAM contact they own: 200 and the sales rep changes', async () => {
+    try {
+      const res = await send(route('NC-06'), ID.staffEditor, ID.cEditor, ID.bizA, { salesRepId: `${P}rep_editor_new` });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ updated: true });
+      expect(spies.setSalesRep.mock.calls).toEqual([[ID.bizA, ID.cEditor, `${P}rep_editor_new`]]);
+      expect(await salesRepOf(ID.cEditor)).toBe(`${P}rep_editor_new`);
+    } finally {
+      await setSalesRepRaw(ID.cEditor, EDITOR_REP);
+    }
+  });
+
+  it("STAFF_EDITOR on a TEAM contact they neither own nor share: 403 'You can only edit contacts you own', nothing written", async () => {
+    try {
+      const res = await send(route('NC-06'), ID.staffEditor, ID.cTeam, ID.bizA, { salesRepId: `${P}hijack` });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe('You can only edit contacts you own');
+      expect(spies.setSalesRep).not.toHaveBeenCalled();
+      expect(await salesRepOf(ID.cTeam)).toBe(TEAM_REP);
+    } finally {
+      await setSalesRepRaw(ID.cTeam, TEAM_REP);
+    }
+  });
+
+  it("STAFF_EDITOR on the PRIVATE contact they cannot open: 404 'Contact not found' (as for an absent id), nothing written", async () => {
+    try {
+      const hidden = await send(route('NC-06'), ID.staffEditor, ID.cPriv, ID.bizA, { salesRepId: `${P}hijack` });
+      const absent = await send(route('NC-06'), ID.staffEditor, `${P}absent`, ID.bizA, { salesRepId: `${P}hijack` });
+      expect(hidden.status).toBe(404);
+      expect(hidden.body.message).toBe('Contact not found');
+      expect({ status: absent.status, body: absent.body }).toEqual({ status: hidden.status, body: hidden.body });
+      expect(spies.setSalesRep).not.toHaveBeenCalled();
+      expect(await salesRepOf(ID.cPriv)).toBe(PRIV_REP);
+    } finally {
+      await setSalesRepRaw(ID.cPriv, PRIV_REP);
+    }
+  });
+});
+
+describe('RV-03 momentum recommendations follow record visibility (review ST-3)', () => {
+  it("GET recommendations: a restricted member sees the TEAM contact's recommendation, never the PRIVATE one", async () => {
+    for (const actor of RESTRICTED) {
+      const res = await hit('get', momentumUrl('/recommendations'), actor);
+      expect(res.status, actor).toBe(200);
+      expect(res.body.map((r: any) => r.id), actor).toEqual([ID.recTeam]);
+      expectNoPrivateContact(res.body);
+    }
+  });
+
+  it("GET recommendations?limit=1: the limit counts only what the member may see (the PRIVATE 'high' one sorts first)", async () => {
+    const res = await hit('get', momentumUrl('/recommendations?limit=1'), ID.staffOwned);
+    expect(res.status).toBe(200);
+    expect(res.body.map((r: any) => r.id)).toEqual([ID.recTeam]);
+  });
+
+  it('CONTROL: OWNER is unchanged: the service answer, PRIVATE recommendation included', async () => {
+    const res = await hit('get', momentumUrl('/recommendations'), ID.owner);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(json(await svc.momentum.getDailyRecommendations(ID.bizA, 5)));
+    expect(res.body.map((r: any) => r.id)).toEqual([ID.recPriv, ID.recTeam]);
+    expect(res.body[0]).toMatchObject({ momentumScore: 71, contact: { firstName: PRIV_NAME, email: PRIV_EMAIL } });
+  });
+
+  for (const [verb, spy] of [['action', 'recAction'], ['snooze', 'recSnooze'], ['dismiss', 'recDismiss']] as const) {
+    it(`POST recommendations/:id/${verb} on the PRIVATE contact's recommendation: 404 'Recommendation not found' (as for an absent id), row unchanged`, async () => {
+      try {
+        for (const actor of RESTRICTED) {
+          const hidden = await hit('post', momentumUrl(`/recommendations/${ID.recPriv}/${verb}`), actor, { days: 3 });
+          const absent = await hit('post', momentumUrl(`/recommendations/${P}absentRec/${verb}`), actor, { days: 3 });
+          expect(hidden.status, actor).toBe(404);
+          expect(hidden.body.message, actor).toBe('Recommendation not found');
+          expect({ status: absent.status, body: absent.body }).toEqual({ status: hidden.status, body: hidden.body });
+          expectNoPrivateContact(hidden.body);
+        }
+        expect(spies[spy]).not.toHaveBeenCalled();
+        expect((await recRow(ID.recPriv)).status).toBe('pending');
+      } finally {
+        await resetRec(ID.recPriv);
+      }
+    });
+  }
+
+  it("CONTROL: STAFF_OWNED snoozes the TEAM contact's recommendation: 201 and the row is snoozed", async () => {
+    try {
+      const res = await hit('post', momentumUrl(`/recommendations/${ID.recTeam}/snooze`), ID.staffOwned, { days: 3 });
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ id: ID.recTeam, status: 'snoozed' });
+      expect((await recRow(ID.recTeam)).status).toBe('snoozed');
+    } finally {
+      await resetRec(ID.recTeam);
+    }
+  });
+});
+
+describe('RV-04 GET marketplace orders/:orderId/cross-links names only a contact the caller may open (review ST-4)', () => {
+  const crossLinks = (orderId: string) => `/marketplace/businesses/${ID.bizA}/orders/${orderId}/cross-links`;
+
+  it("a restricted member gets the PRIVATE contact's order with `contact` null, the rest unchanged", async () => {
+    const service: any = json(await svc.commerce.getOrderCrossLinks(ID.bizA, ID.orderPriv));
+    expect(service.contact).toMatchObject({ id: ID.cPriv, firstName: PRIV_NAME, email: PRIV_EMAIL });
+    for (const actor of RESTRICTED) {
+      const res = await hit('get', crossLinks(ID.orderPriv), actor);
+      expect(res.status, actor).toBe(200);
+      expect(res.body, actor).toEqual({ ...service, contact: null });
+      for (const marker of [ID.cPriv, PRIV_NAME, PRIV_EMAIL]) expect(JSON.stringify(res.body)).not.toContain(marker);
+    }
+  });
+
+  it('CONTROL: STAFF_OWNED on the TEAM contact\'s order and OWNER on the PRIVATE one get the service answer', async () => {
+    const team = await hit('get', crossLinks(ID.orderTeam), ID.staffOwned);
+    expect(team.status).toBe(200);
+    expect(team.body).toEqual(json(await svc.commerce.getOrderCrossLinks(ID.bizA, ID.orderTeam)));
+    expect(team.body.contact).toMatchObject({ id: ID.cTeam });
+    const owner = await hit('get', crossLinks(ID.orderPriv), ID.owner);
+    expect(owner.status).toBe(200);
+    expect(owner.body).toEqual(json(await svc.commerce.getOrderCrossLinks(ID.bizA, ID.orderPriv)));
+    expect(owner.body.contact).toMatchObject({ id: ID.cPriv, firstName: PRIV_NAME });
+  });
+});
+
+describe('RV-05 GET people-flow segments and conversion sales-reps/:repId/pipeline name only openable contacts (review ST-5)', () => {
+  it('segments: a restricted member gets the service answer with only the contacts they may open', async () => {
+    const service: any[] = json(await svc.health.listSegments(ID.bizA)) as any[];
+    expect(JSON.stringify(service)).toContain(PRIV_NAME);
+    for (const actor of RESTRICTED) {
+      const res = await hit('get', `/people-flow/businesses/${ID.bizA}/segments`, actor);
+      expect(res.status, actor).toBe(200);
+      const expected = service.map((s) => ({ ...s, contacts: s.contacts.filter((c: any) => OPENS[actor].has(c.id)) }));
+      expect(res.body, actor).toEqual(expected);
+      expectNoPrivateContact(res.body);
+    }
+  });
+
+  it('CONTROL: segments: OWNER gets the service answer, the PRIVATE contact included', async () => {
+    const res = await hit('get', `/people-flow/businesses/${ID.bizA}/segments`, ID.owner);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(json(await svc.health.listSegments(ID.bizA)));
+    expect(JSON.stringify(res.body)).toContain(PRIV_NAME);
+  });
+
+  it("pipeline: the PRIVATE contact's rep shows a restricted member nothing; OWNER the contact", async () => {
+    const pipeline = (rep: string) => `/conversion/businesses/${ID.bizA}/sales-reps/${rep}/pipeline`;
+    for (const actor of RESTRICTED) {
+      const res = await hit('get', pipeline(PRIV_REP), actor);
+      expect(res.status, actor).toBe(200);
+      expect(res.body, actor).toEqual([]);
+    }
+    const owner = await hit('get', pipeline(PRIV_REP), ID.owner);
+    expect(owner.status).toBe(200);
+    expect(owner.body).toEqual(json(await svc.salesTeam.getRepPipeline(ID.bizA, PRIV_REP)));
+    expect(owner.body.map((e: any) => e.id)).toEqual([ID.cPriv]);
+  });
+
+  it("CONTROL: pipeline: the TEAM contact's rep shows STAFF_OWNED the service answer", async () => {
+    const res = await hit('get', `/conversion/businesses/${ID.bizA}/sales-reps/${TEAM_REP}/pipeline`, ID.staffOwned);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(json(await svc.salesTeam.getRepPipeline(ID.bizA, TEAM_REP)));
+    expect(res.body.map((e: any) => e.id)).toEqual([ID.cTeam]);
   });
 });
 
