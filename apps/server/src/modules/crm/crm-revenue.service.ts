@@ -15,31 +15,58 @@ type StoredPaymentRow = {
   createdAt: Date;
 };
 
+type LinkTarget = Pick<StoredPaymentRow, 'provider' | 'providerPaymentId' | 'reference'>;
+
+/** A refund row since D-14: negative and REFUNDED (a row flipped to REFUNDED before V1-29 is positive). */
+const isRefundRow = (row: { status: string; amount: number }) => row.status === 'REFUNDED' && Number(row.amount) < 0;
+
+/**
+ * A refund links to `row` the way every refund writer links (reference = its
+ * providerPaymentId, or, same provider, its own reference: the Stripe charge
+ * id), as CommerceService.refundableOf reads the link.
+ */
+const linksTo = (refund: LinkTarget, row: LinkTarget) =>
+  !!refund.reference &&
+  (refund.reference === row.providerPaymentId || (refund.provider === row.provider && refund.reference === row.reference));
+
+/**
+ * Review CR-V29E-1: the refunds among `rows` whose reference links to no other
+ * row read. Their original may be older than the read: the caller looks their
+ * references up (originalsNotRead) before paymentsNetOfRefunds resolves them.
+ */
+function refundsLinkedToNoRowRead(rows: ReadonlyArray<StoredPaymentRow>): StoredPaymentRow[] {
+  const originals = rows.filter((row) => !isRefundRow(row));
+  return rows.filter((row) => isRefundRow(row) && !!row.reference && !originals.some((o) => linksTo(row, o)));
+}
+
 /**
  * V1-29e-CRM-REVENUE-NET (VR-02, D-14): the SUCCESSFUL payments among `rows`,
  * newest first, each with what is left of it after its refunds: the balance
  * contract over the payment and its refund rows (balanceOfStoredRows(...).net).
- * A refund is the payment's when it links to it the way every refund writer
- * links (reference = its providerPaymentId, or, same provider, its own
- * reference: the Stripe charge id). A refund that links to no payment read
- * here (a PayPal webhook row written before V1-29c, with no reference) is the
- * most recent payment's of its invoice that it can still cover, of its
- * provider first, as the provider refund door resolves it. A row flipped to
- * REFUNDED before V1-29 (positive amount) is no payment here, as the base read
- * it. PENDING and FAILED rows are not payments.
+ * A refund is the payment's when it links to it (linksTo). A refund that links
+ * to another row, read or not (`originalsNotRead`: the rows its reference
+ * names that are older than the read, review CR-V29E-1), is that row's and
+ * never another payment's. Only a refund that links to no row at all (a PayPal
+ * webhook row written before V1-29c, with no reference, or a Stripe refund
+ * written before V1-29c whose charge id no row keeps) is the most recent
+ * payment's of its invoice that it can still cover, of its provider first, as
+ * the provider refund door and CommerceService.refundableOf resolve it. A row
+ * flipped to REFUNDED before V1-29 (positive amount) is no payment here, as
+ * the base read it. PENDING and FAILED rows are not payments.
  */
-function paymentsNetOfRefunds(rows: ReadonlyArray<StoredPaymentRow>): Array<{ payment: StoredPaymentRow; net: number }> {
+function paymentsNetOfRefunds(
+  rows: ReadonlyArray<StoredPaymentRow>,
+  originalsNotRead: ReadonlyArray<LinkTarget> = [],
+): Array<{ payment: StoredPaymentRow; net: number }> {
   const payments: StoredPaymentRow[] = [];
   const refunds: StoredPaymentRow[] = [];
   for (const row of [...rows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())) {
     if (row.status === 'SUCCESSFUL') payments.push(row);
-    else if (row.status === 'REFUNDED' && Number(row.amount) < 0) refunds.push(row);
+    else if (isRefundRow(row)) refunds.push(row);
   }
+  const originals: LinkTarget[] = [...rows.filter((row) => !isRefundRow(row)), ...originalsNotRead];
   const refundsOf = new Map<string, StoredPaymentRow[]>(payments.map((p) => [p.id, []]));
   const netOf = (p: StoredPaymentRow) => balanceOfStoredRows(0, [p, ...(refundsOf.get(p.id) ?? [])], p.currency).net;
-  const linksTo = (refund: StoredPaymentRow, p: StoredPaymentRow) =>
-    !!refund.reference &&
-    (refund.reference === p.providerPaymentId || (refund.provider === p.provider && refund.reference === p.reference));
   const coverableOnInvoice = (refund: StoredPaymentRow, sameProvider: boolean) =>
     payments.find(
       (p) =>
@@ -50,8 +77,12 @@ function paymentsNetOfRefunds(rows: ReadonlyArray<StoredPaymentRow>): Array<{ pa
     );
   // Oldest refund first, so an unlinked refund sees what the earlier ones left.
   for (const refund of [...refunds].reverse()) {
+    const linked = payments.find((p) => linksTo(refund, p));
     const payment =
-      payments.find((p) => linksTo(refund, p)) ?? coverableOnInvoice(refund, true) ?? coverableOnInvoice(refund, false);
+      linked ??
+      (originals.some((o) => linksTo(refund, o))
+        ? undefined
+        : coverableOnInvoice(refund, true) ?? coverableOnInvoice(refund, false));
     if (payment) refundsOf.get(payment.id)?.push(refund);
   }
   return payments.map((payment) => ({ payment, net: netOf(payment) }));
@@ -117,6 +148,10 @@ export class CrmRevenueService {
    * such payments against FAILED attempts, so a fully refunded payment counts
    * as neither, as the base read it. Both read the 50 most recent rows; a
    * refund is written after its payment, so a payment read has its refunds read.
+   * A refund read may not have its payment read (review CR-V29E-1): a refund
+   * whose reference links to no row read has that reference looked up among
+   * the contact's own-tenant rows of its invoice, and one that links to a row
+   * older than the read is that row's, never charged to another payment.
    */
   async getContactRevenueSummary(
     businessId: string,
@@ -203,7 +238,9 @@ export class CrmRevenueService {
       }),
     ]);
 
-    const received = paymentsNetOfRefunds(payments).filter((p) => p.net > 0);
+    const received = paymentsNetOfRefunds(payments, await this.originalsNotRead(ownRows, payments)).filter(
+      (p) => p.net > 0,
+    );
     const failedPayments = payments.filter((p) => p.status === 'FAILED');
     const lifetimeRevenue = roundMoney(Number(cashNet._sum.amount ?? 0));
     const openInvoices = invoices.filter((i) => ['SENT', 'OVERDUE', 'DRAFT'].includes(i.status));
@@ -263,6 +300,30 @@ export class CrmRevenueService {
         };
       }),
     };
+  }
+
+  /**
+   * Review CR-V29E-1: the non-refund rows, among `ownRows` on their invoices,
+   * that the refunds read but linked to no row read name by reference: their
+   * originals older than the read. No query when every refund read links to a
+   * row read or carries no reference.
+   */
+  private async originalsNotRead(
+    ownRows: { businessId: string; invoice: { businessId: string; contactId: string } },
+    rows: ReadonlyArray<StoredPaymentRow>,
+  ): Promise<LinkTarget[]> {
+    const unlinked = refundsLinkedToNoRowRead(rows);
+    if (unlinked.length === 0) return [];
+    const references = [...new Set(unlinked.map((r) => r.reference as string))];
+    const found = await this.db.payment.findMany({
+      where: {
+        ...ownRows,
+        invoiceId: { in: [...new Set(unlinked.map((r) => r.invoiceId))] },
+        OR: [{ providerPaymentId: { in: references } }, { reference: { in: references } }],
+      },
+      select: { amount: true, status: true, provider: true, providerPaymentId: true, reference: true },
+    });
+    return found.filter((row) => !isRefundRow(row));
   }
 
   async getPredictiveRevenue(businessId: string): Promise<RevenueData> {

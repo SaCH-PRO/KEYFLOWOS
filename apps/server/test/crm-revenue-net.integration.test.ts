@@ -33,6 +33,16 @@
  *           reads nothing of this contact on its own path
  *   CRN-09  contract binding: for every seeded contact lifetimeRevenue is balanceOfStoredRows(...)
  *           .net over the contact's own-tenant rows
+ *   CRN-10  review CR-V29E-1: a refund linked by reference to a payment older than the 50-row
+ *           read is that payment's, never another payment's of its invoice: P1 100 and P2 100
+ *           paid, P1 refunded, 48 FAILED rows on a second invoice push P1 out of the read ->
+ *           100 / P2's 100 at its date / 1 of 49 (the base read)
+ *   CRN-11  a refund whose reference links to no row (a pre-V1-29c Stripe refund carrying the
+ *           charge id beside a Checkout Session payment that keeps its PaymentIntent id) still
+ *           covers the payment on its invoice -> 0, no last payment
+ *   CRN-12  the same rule over the rows read: a refund linked to a row that is no payment (the
+ *           gateway refundCharge links to whatever row holds the charge id, here a PENDING one)
+ *           is that row's, never charged to the SUCCESSFUL payment beside it -> 100 / 1
  *
  * Nothing on the HTTP or authorization path is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CrmRateLimitGuard, CrmController and CrmRevenueService are real against the
@@ -80,13 +90,20 @@ const ID = {
   cLegacyOnly: `${P}cLegacyOnly`,
   cTenant: `${P}cTenant`,
   cNone: `${P}cNone`,
+  cWindow: `${P}cWindow`,
+  cChargeRef: `${P}cChargeRef`,
+  cPendingRef: `${P}cPendingRef`,
 };
 
 const CONTACTS = [
   ID.cB1, ID.cB2, ID.cPartial, ID.cUnlinked, ID.cMixed, ID.cResettle, ID.cLegacy, ID.cLegacyOnly, ID.cTenant, ID.cNone,
+  ID.cWindow, ID.cChargeRef, ID.cPendingRef,
 ];
 
 const invoiceOf = (contactId: string) => `${contactId}_inv`;
+/** CRN-10's second invoice (the contact's other invoice, holding the FAILED attempts). */
+const WINDOW_INV2 = `${ID.cWindow}_inv2`;
+const INVOICES = [...CONTACTS.map(invoiceOf), WINDOW_INV2];
 
 /** Minute `n` of the fixture day: the order the rows were written in. */
 const at = (n: number) => new Date(Date.UTC(2026, 9, 1, 10, n, 0));
@@ -138,6 +155,8 @@ type Row = {
   provider?: string;
   reference?: string | null;
   businessId?: string;
+  /** Default: the contact's invoice (invoiceOf). */
+  invoiceId?: string;
 };
 
 /** providerPaymentId of a seeded row (prefixed: the column is globally unique). */
@@ -155,7 +174,7 @@ async function row(r: Row) {
       providerPaymentId: `${P}ppid_${r.key}`,
       reference: r.reference ?? null,
       businessId: r.businessId ?? ID.bizA,
-      invoiceId: invoiceOf(r.contactId),
+      invoiceId: r.invoiceId ?? invoiceOf(r.contactId),
       createdAt: at(r.minute),
     },
   });
@@ -220,6 +239,26 @@ seedRow({ key: 'lo_flip100', contactId: ID.cLegacyOnly, amount: 100, status: 'RE
 const tenantPaid = seedRow({ key: 'tn_s100', contactId: ID.cTenant, amount: 100, status: 'SUCCESSFUL', minute: 1 });
 seedRow({ key: 'tn_fs30', contactId: ID.cTenant, amount: 30, status: 'SUCCESSFUL', minute: 2, businessId: ID.bizB });
 seedRow(refundOf('tn_fr100', tenantPaid, 100, 3, ID.bizB));
+
+// CRN-10 (review CR-V29E-1): on invoice X, P1 100 and P2 100 paid, then P1 refunded by the manual
+// refund (reference = P1's providerPaymentId); on invoice Y, 48 FAILED attempts after it. The 50
+// most recent rows hold P2, the refund and the 48 attempts: P1 is older than the read.
+const windowP1 = seedRow({ key: 'wn_s100a', contactId: ID.cWindow, amount: 100, status: 'SUCCESSFUL', minute: 1 });
+seedRow({ key: 'wn_s100b', contactId: ID.cWindow, amount: 100, status: 'SUCCESSFUL', minute: 2 });
+seedRow(refundOf('wn_r100', windowP1, 100, 3));
+for (let i = 0; i < 48; i++) {
+  seedRow({ key: `wn_f${i}`, contactId: ID.cWindow, amount: 10, status: 'FAILED', minute: 4 + i, invoiceId: WINDOW_INV2 });
+}
+
+// CRN-11: a Checkout Session payment (stored under its session id, its PaymentIntent id in
+// reference) and a Stripe refund written before V1-29c, carrying the charge id: it links to no row
+seedRow({ key: 'cr_s100', contactId: ID.cChargeRef, amount: 100, status: 'SUCCESSFUL', minute: 1, provider: 'stripe', reference: `${P}pi_cr` });
+seedRow({ key: 'cr_r100', contactId: ID.cChargeRef, amount: -100, status: 'REFUNDED', minute: 2, provider: 'stripe', reference: `${P}ch_cr` });
+
+// CRN-12: a SUCCESSFUL 100, a PENDING 50 and a refund of 50 linked to the PENDING row
+seedRow({ key: 'pr_s100', contactId: ID.cPendingRef, amount: 100, status: 'SUCCESSFUL', minute: 1, provider: 'stripe' });
+const pendingRow = seedRow({ key: 'pr_p50', contactId: ID.cPendingRef, amount: 50, status: 'PENDING', minute: 2, provider: 'stripe' });
+seedRow(refundOf('pr_r50', pendingRow, 50, 3));
 
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
@@ -349,6 +388,19 @@ beforeAll(async () => {
       },
     });
   }
+  await db.invoice.create({
+    data: {
+      id: WINDOW_INV2,
+      invoiceNumber: `V29E-${String(n + 1).padStart(3, '0')}`,
+      status: 'SENT',
+      subtotal: 200,
+      total: 200,
+      currency: 'TTD',
+      businessId: ID.bizA,
+      contactId: ID.cWindow,
+      createdAt: at(0),
+    },
+  });
   for (const r of ROWS) await row(r);
 }, 120_000);
 
@@ -359,7 +411,7 @@ afterAll(async () => {
 
 describe('fixture sanity (real rows)', () => {
   it('seeded every payment row as its writer writes it', async () => {
-    const rows = await db.payment.findMany({ where: { invoiceId: { in: CONTACTS.map(invoiceOf) } } });
+    const rows = await db.payment.findMany({ where: { invoiceId: { in: INVOICES } } });
     expect(rows).toHaveLength(ROWS.length);
     // the D-14 refund rows are negative REFUNDED rows linked to a SUCCESSFUL original that stays SUCCESSFUL
     const b1 = rows.filter((r: any) => r.invoiceId === invoiceOf(ID.cB1));
@@ -474,13 +526,54 @@ describe('VR-02: the contact revenue summary nets refunds (V1-29e-CRM-REVENUE-NE
   it('CRN-09: for every seeded contact lifetimeRevenue is balanceOfStoredRows(...).net over its own-tenant rows', async () => {
     for (const contactId of CONTACTS) {
       const rows = await db.payment.findMany({
-        where: { businessId: ID.bizA, invoiceId: invoiceOf(contactId) },
+        where: { businessId: ID.bizA, invoice: { businessId: ID.bizA, contactId } },
         select: { amount: true, status: true },
       });
       const expected = storedBalanceFn(0, rows, 'TTD').net;
       const got = await figures(contactId);
       expect(got.lifetimeRevenue, `contact ${contactId}`).toBe(expected);
     }
+  });
+
+  it('CRN-10 (review CR-V29E-1): a refund linked to a payment older than the 50-row read is never charged to another payment of its invoice', async () => {
+    // The read holds P2, P1's refund and the 48 FAILED attempts, not P1 itself.
+    const read = await db.payment.findMany({
+      where: { businessId: ID.bizA, invoice: { businessId: ID.bizA, contactId: ID.cWindow } },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      select: { id: true },
+    });
+    expect(read.map((r: any) => r.id)).not.toContain(`${P}pay_${windowP1.key}`);
+    expect(read.map((r: any) => r.id)).toContain(`${P}pay_wn_r100`);
+    // RED-BEFORE (packet head c35bc513): the refund fell back to P2 -> 100 / null / null / 0.
+    // The base (bf5ca9fe) read 100 / 100 at minute 2 / 1 of 49.
+    expect(await figures(ID.cWindow)).toEqual({
+      lifetimeRevenue: 100,
+      lastPaymentAmount: 100,
+      lastPaymentAt: at(2).toISOString(),
+      paymentReliability: 1 / 49,
+    });
+  });
+
+  it('CRN-11: a refund whose reference links to no row (pre-V1-29c Stripe charge id) still covers the payment on its invoice', async () => {
+    expect(await figures(ID.cChargeRef)).toEqual({
+      lifetimeRevenue: 0,
+      lastPaymentAmount: null,
+      lastPaymentAt: null,
+      paymentReliability: null,
+    });
+  });
+
+  it('CRN-12: a refund linked to a row read that is no payment (PENDING) is never charged to the SUCCESSFUL payment beside it', async () => {
+    // lifetimeRevenue is the cash net of every row (CASH_NET_PAYMENT_WHERE): 100 - 50. The SUCCESSFUL
+    // 100 has no refund of its own, so it stays the last payment, whole, and a reliable one.
+    // Packet head c35bc513 charged the refund to it: last payment 50.
+    expect(await figures(ID.cPendingRef)).toEqual({
+      lifetimeRevenue: 50,
+      lastPaymentAmount: 100,
+      lastPaymentAt: at(1).toISOString(),
+      paymentReliability: 1,
+    });
   });
 
   it('a contact with no payment rows reads no revenue and no last payment', async () => {
