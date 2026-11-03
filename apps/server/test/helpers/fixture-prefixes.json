@@ -513,6 +513,11 @@
       "packet": "V1-44-DM-CREDIT-NOTE"
     },
     {
+      "prefix": "v45a_",
+      "owner": "apps/server/test/commerce-create-idempotency.integration.test.ts",
+      "packet": "V1-45-DM-CREATE-IDEMPOTENCY"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"
