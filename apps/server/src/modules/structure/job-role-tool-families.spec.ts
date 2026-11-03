@@ -1335,12 +1335,8 @@ const UNGRANTED: Record<string, string> = {
   finance_view_receivables: 'ReceivablesService is reached by finance.controller, which is unscoped',
   payroll_generate_run: 'PayrollService.generateRun backs no route (payroll.controller has list/get/approve/mark-paid only)',
   payroll_set_rate: 'PayrollService.setRate backs no route (payroll.controller has list/get/approve/mark-paid only)',
-  procurement_acknowledge_vendor:
-    'operations:write (D-40) is only a floor: ProcurementService.acknowledgeVendor updates the request by its bare id, AMBIENT-BOUND on the staff bridge (rule 2b, R0-13g)',
-  procurement_mark_fulfilled:
-    'operations:write (D-40) is only a floor: ProcurementService.markFulfilled updates the request by its bare id, AMBIENT-BOUND on the staff bridge (rule 2b, R0-13g)',
-  procurement_mark_invoiced:
-    'operations:write (D-40) is only a floor: ProcurementService.markInvoiced updates the request by its bare id, AMBIENT-BOUND on the staff bridge (rule 2b, R0-13g)',
+  // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: granted (operations write) since
+  // FOLLOW3-D15, whose ProcurementService writes the request where { id, businessId }
   structure_find_person: 'StructureService.findPeople backs no route',
 };
 
@@ -1434,14 +1430,12 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
 
   it('GOVERNED_UNGRANTED is exactly the governed tools no module grants (rule 4)', () => {
     // commerce_send_invoice: review 7 DRV5-2 (TransactionalEmailService.send backs no member route to a customer)
-    // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: governed by operations since D-40
-    // (R0-13g), but each dispatcher call updates the request by its bare id (rule 2b), so the route is only a floor
+    // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced were here from R0-13g (each dispatcher
+    // call updated the request by its bare id, rule 2b) until FOLLOW3-D15 bound ProcurementService's writes
+    // to the business: they are operations write in the table below
     expect(derived.governedUngranted).toEqual([
       'commerce_send_invoice',
       'execute_custom_logic',
-      'procurement_acknowledge_vendor',
-      'procurement_mark_fulfilled',
-      'procurement_mark_invoiced',
       'send_message_with_approval',
       'update_status_with_confirmation',
     ]);
@@ -1576,14 +1570,17 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         performance_take_snapshot: 'write',
         performance_team_summary: 'read',
         performance_trend: 'read',
-        // procurement_acknowledge_vendor, procurement_mark_fulfilled, procurement_mark_invoiced:
-        // GOVERNED_UNGRANTED (rule 2b: each updates the request by its bare id, R0-13g)
+        // procurement_acknowledge_vendor, procurement_mark_fulfilled, procurement_mark_invoiced: GOVERNED_UNGRANTED
+        // from R0-13g (rule 2b, bare-id writes) until FOLLOW3-D15 bound the service writes to the business
+        procurement_acknowledge_vendor: 'write',
         procurement_create_request: 'write',
         procurement_get_request: 'read',
         procurement_get_stats: 'read',
         procurement_issue_po: 'write',
         procurement_list_requests: 'read',
         procurement_list_suppliers: 'read',
+        procurement_mark_fulfilled: 'write',
+        procurement_mark_invoiced: 'write',
         procurement_select_vendor: 'write',
         procurement_submit_for_review: 'write',
         procurement_update_request: 'write',
@@ -2333,9 +2330,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
           'people_assign_task -> TaskAssignmentService.assign -> contactTask.findUnique',
           'people_assign_task -> TaskAssignmentService.assign -> projectTask.findUnique',
           'people_assign_task -> TaskAssignmentService.assign -> staffMember.findUnique',
-          'procurement_acknowledge_vendor -> ProcurementService.acknowledgeVendor -> procurementRequest.update',
-          'procurement_mark_fulfilled -> ProcurementService.markFulfilled -> procurementRequest.update',
-          'procurement_mark_invoiced -> ProcurementService.markInvoiced -> procurementRequest.update',
+          // FOLLOW3-D15: ProcurementService.acknowledgeVendor / markFulfilled / markInvoiced write the request
+          // where { id, businessId } now, so the three procurement transitions are no longer here
           'projects_update_task -> ProjectsService.updateTask -> staffMember.findUnique',
         ].sort(),
       );
@@ -2344,9 +2340,9 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     it('TENANT_UNBOUND_TOOLS is exactly the ungoverned tools with an AMBIENT-BOUND call: no key reaches them, the legacy families and the baseline included', () => {
       const ungoverned = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) === 0).sort();
       const governed = [...AMBIENT.keys()].filter((t) => (derived.toolLevels.get(t)?.size ?? 0) > 0).sort();
-      // a governed one is GOVERNED_UNGRANTED by rule 4 instead: the three procurement transitions since
-      // D-40 put their routes under operations (R0-13g)
-      expect(governed).toEqual(['procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced']);
+      // a governed one is GOVERNED_UNGRANTED by rule 4 instead: the three procurement transitions were, from
+      // D-40 (R0-13g) until FOLLOW3-D15 bound ProcurementService's writes to the business; none is now
+      expect(governed).toEqual([]);
       for (const t of governed) {
         expect(derived.governedUngranted, t).toContain(t);
         expect(Object.keys(GOVERNED_UNGRANTED), t).toContain(t);

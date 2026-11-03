@@ -178,9 +178,12 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     payroll_list_rates: 'read', payroll_list_runs: 'read', payroll_mark_paid: 'write',
     performance_scorecard: 'read', performance_take_snapshot: 'write',
     performance_team_summary: 'read', performance_trend: 'read',
-    procurement_create_request: 'write', procurement_get_request: 'read',
-    procurement_get_stats: 'read', procurement_issue_po: 'write',
+    // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: GOVERNED_UNGRANTED from R0-13g
+    // (bare-id writes) until FOLLOW3-D15 bound ProcurementService's writes to the business
+    procurement_acknowledge_vendor: 'write', procurement_create_request: 'write',
+    procurement_get_request: 'read', procurement_get_stats: 'read', procurement_issue_po: 'write',
     procurement_list_requests: 'read', procurement_list_suppliers: 'read',
+    procurement_mark_fulfilled: 'write', procurement_mark_invoiced: 'write',
     procurement_select_vendor: 'write', procurement_submit_for_review: 'write',
     procurement_update_request: 'write',
   },
@@ -197,12 +200,6 @@ export const GOVERNED_UNGRANTED: Readonly<Record<string, string>> = {
   commerce_send_invoice:
     "revenue:write (CommerceService.updateInvoiceStatus) beside TransactionalEmailService.send to the invoice's customer, which no member route does (review 7 DRV5-2)",
   execute_custom_logic: 're-enters the dispatcher for any tool (innerToolExecutor -> executeToolByName)',
-  procurement_acknowledge_vendor:
-    "operations:write (D-40) is only a floor: ProcurementService.acknowledgeVendor updates the request by its bare id, so on the staff bridge, with no tenant armed, it reaches any business's request (review 8 DD8-1; R0-13g)",
-  procurement_mark_fulfilled:
-    "operations:write (D-40) is only a floor: ProcurementService.markFulfilled updates the request by its bare id, so on the staff bridge, with no tenant armed, it reaches any business's request (review 8 DD8-1; R0-13g)",
-  procurement_mark_invoiced:
-    "operations:write (D-40) is only a floor: ProcurementService.markInvoiced updates the request by its bare id, so on the staff bridge, with no tenant armed, it reaches any business's request (review 8 DD8-1; R0-13g)",
   send_message_with_approval: 'crm:write (CrmService.addNote) beside AiMessageSenderService.sendMessage, which backs no route',
   update_status_with_confirmation: 'needs crm AND revenue',
 };
@@ -247,7 +244,9 @@ export const CRM_ROW_VISIBILITY_TOOLS: readonly string[] = ['crm_delete_contact'
  * found). Derived in job-role-tool-families.spec.ts (rule 2b), which fails if this list and the
  * dispatcher disagree. A governed tool with such a call is GOVERNED_UNGRANTED instead (rule 4):
  * procurement_acknowledge_vendor, procurement_mark_fulfilled and procurement_mark_invoiced moved
- * there when D-40 put the procurement routes under operations (R0-13g).
+ * there when D-40 put the procurement routes under operations (R0-13g), and on to
+ * CANONICAL_MODULE_TOOLS.operations when FOLLOW3-D15 made ProcurementService write the request
+ * where { id, businessId }.
  */
 export const TENANT_UNBOUND_TOOLS: Readonly<Record<string, string>> = {
   approval_decide_step: 'ApprovalRequestService.decideStep finds the approval request by its bare id',
