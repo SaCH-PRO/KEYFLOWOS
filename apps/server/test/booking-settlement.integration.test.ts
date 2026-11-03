@@ -58,6 +58,20 @@
  *   S-07e F1/REG-3   a deposit part-refunded under D-14 (reopened to PARTIALLY_PAID, net 15)
  *                    forfeits the 15 it still holds on a cancel; CONTROL: a part payment on a
  *                    deposit still owed (never refunded) holds nothing and forfeits nothing
+ *
+ * Trial-N integration review (deposit: V1-28 x D-14), red at 42190801:
+ *   S-09  N1-SEC  a payment row tagged with another business on the deposit invoice is not the
+ *                 deposit's money (M31): it neither makes an owed deposit forfeit nor erases what a
+ *                 paid one holds (the cancel forfeits 25; the final nets 25)
+ *   S-10  N2-SEC  a cancel racing another status write: the forfeit lands only on a booking that is
+ *                 still CANCELLED, and a booking written back to a live status from a forfeit takes
+ *                 the status its invoices state (from the row as written), so it is never live with
+ *                 DEPOSIT_FORFEITED and still reaches PAID
+ *   S-11  N3-SEC/N2-CR  a D-14 refund that moves an invoice (invoice.reopened, invoice.payment_recorded)
+ *                 re-derives Booking.paymentStatus, backwards too; a forfeit (D-26) is never overwritten
+ *   S-12  N4-SEC  a refund on a deposit never settled (part paid) does not make it hold money
+ *   S-13  N1-CR   a deposit paid then part-credited (D-28 PARTIALLY_CREDITED) is not owed: the paid
+ *                 final makes the booking PAID
  *   TODO  CR-V28-4   a business-initiated cancel forfeits nothing (needs a cancel-initiator input)
  *   TODO  CR-V28-3   the storefront passes the token link into the confirmation (book/[slug]/page.tsx)
  *
@@ -87,6 +101,7 @@ import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach, vi } from 'vitest';
+import { EVENT_LISTENER_METADATA } from '@nestjs/event-emitter/dist/constants';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
@@ -270,6 +285,24 @@ async function settle(invoiceId: string, amount: number) {
   await deliverPaid(events[0]);
   return events[0];
 }
+
+/**
+ * Hand every emitted event of these names for this invoice to the real
+ * BookingPaymentStatusListener's handlers that subscribe to it (@OnEvent
+ * metadata), as the bus would. A name no handler subscribes to reaches nothing.
+ */
+async function deliverToPaymentStatusListener(invoiceId: string, names: string[]) {
+  const proto = Object.getPrototypeOf(paymentStatusListener);
+  const handlers = Object.getOwnPropertyNames(proto)
+    .map((key) => ({ key, events: ((Reflect.getMetadata(EVENT_LISTENER_METADATA, proto[key]) ?? []) as Array<{ event: string }>).map((m) => m.event) }))
+    .filter((h) => h.events.length > 0);
+  for (const e of emitted.filter((x) => names.includes(x.name) && x.payload?.invoice?.id === invoiceId)) {
+    for (const h of handlers.filter((x) => x.events.includes(e.name))) await paymentStatusListener[h.key](e.payload);
+  }
+}
+
+/** A refund that moves an invoice (D-14) emits invoice.reopened (to SENT) or invoice.payment_recorded (to PARTIALLY_PAID). */
+const REFUND_MOVES = ['invoice.reopened', 'invoice.payment_recorded'];
 
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
@@ -855,6 +888,166 @@ describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
     'CR-V28-4: a cancel the BUSINESS initiates (operator, KEY bookings_cancel_booking, undo, saga compensation) forfeits nothing; ' +
       'needs a cancel-initiator input on the status route (bookings.controller.ts) and its callers, all outside the V1-28 write set',
   );
+});
+
+describe('Trial-N integration review: the deposit rule under D-14 (V1-28 x V1-29)', () => {
+  const forfeitRowsOf = (bookingId: string) => contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === bookingId);
+  /** A payment row tagged with ANOTHER business on an invoice of this one: Payment has no FK to Business (M31). No known writer does this today. */
+  let foreignSeq = 0;
+  const foreignRow = (invoiceId: string, amount: number, status: string) =>
+    db.payment.create({
+      data: { amount, currency: 'TTD', status, provider: 'cash', method: 'cash', providerPaymentId: `${P}foreign_${++foreignSeq}`, businessId: ID.bizB, invoiceId },
+    });
+  const refundSuccessful = async (invoiceId: string, amount?: number) => {
+    const payment = await db.payment.findFirst({ where: { invoiceId, businessId: ID.biz, status: 'SUCCESSFUL', ...(amount === undefined ? {} : { amount }) } });
+    return commerce.markPaymentRefunded(payment.id, ID.biz, 'goodwill', ID.owner);
+  };
+
+  it('S-09 N1-SEC: a payment row of another business on the deposit invoice is not its money: no forfeit on an owed deposit; a paid one still forfeits and nets its 25', async () => {
+    // An owed deposit (SENT) carrying another tenant's SUCCESSFUL 25: nothing is held, nothing is forfeit.
+    const owed = await book(ID.svcDep, 's09_owed');
+    await workflow.transition(owed.depositInvoiceId!, 'SENT');
+    await foreignRow(owed.depositInvoiceId!, 25, 'SUCCESSFUL');
+    const c1 = await setStatus(owed.bookingId, 'CANCELLED');
+    expect(c1.status, JSON.stringify(c1.body)).toBe(201);
+    expect(c1.body.depositForfeit ?? null, "another tenant's row is not a paid deposit").toBeNull();
+    expect((await bookingRow(owed.bookingId)).paymentStatus).toBe('UNPAID');
+    expect(forfeitRowsOf(owed.bookingId)).toHaveLength(0);
+
+    // A paid deposit carrying another tenant's negative REFUNDED 25: it still holds its 25.
+    const paid = await book(ID.svcDep, 's09_paid');
+    await settle(paid.depositInvoiceId!, 25);
+    await foreignRow(paid.depositInvoiceId!, -25, 'REFUNDED');
+    const c2 = await setStatus(paid.bookingId, 'CANCELLED');
+    expect(c2.status, JSON.stringify(c2.body)).toBe(201);
+    expect(c2.body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    expect(c2.body.depositForfeit).toMatchObject({ depositInvoiceId: paid.depositInvoiceId, amount: 25 });
+    expect(forfeitRowsOf(paid.bookingId).map((e) => e.data.amount)).toEqual([25]);
+
+    // ...and the final invoice nets it: 75, not 100.
+    const done = await book(ID.svcDep, 's09_done');
+    await settle(done.depositInvoiceId!, 25);
+    await foreignRow(done.depositInvoiceId!, -25, 'REFUNDED');
+    const r = await setStatus(done.bookingId, 'COMPLETED');
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body.invoicing).toMatchObject({ status: 'CREATED', amount: 75, depositAmount: 25, depositInvoiceId: done.depositInvoiceId });
+    expect((await finalInvoicesOf(done.bookingId)).map((i) => money(i.total))).toEqual([75]);
+  });
+
+  it('S-10 N2-SEC: a cancel racing another status write never leaves a live booking DEPOSIT_FORFEITED, and the booking still reaches PAID', async () => {
+    const svc = bookingsService as any;
+    // (a) A cancel commits (status, then forfeit) between a PENDING write's read and its write.
+    const b = await book(ID.svcDep, 's10');
+    await settle(b.depositInvoiceId!, 25);
+    expect(await bookingRow(b.bookingId)).toMatchObject({ status: 'CONFIRMED', paymentStatus: 'DEPOSIT_PAID' });
+    const writeBookingStatus = svc.writeBookingStatus;
+    let raced = false;
+    vi.spyOn(svc, 'writeBookingStatus').mockImplementation(async (...args: any[]) => {
+      if (!raced && args[1] === 'PENDING') {
+        raced = true;
+        const cancel = await svc.updateBookingStatus(ID.biz, b.bookingId, 'CANCELLED');
+        expect(cancel.paymentStatus, 'the cancel in between forfeits the deposit').toBe('DEPOSIT_FORFEITED');
+      }
+      return writeBookingStatus.apply(svc, args);
+    });
+    const back = await setStatus(b.bookingId, 'PENDING');
+    expect(back.status, JSON.stringify(back.body)).toBe(201);
+    expect(raced).toBe(true);
+    vi.restoreAllMocks();
+    expect(back.body.paymentStatus, 'written back to a live status, it takes what its invoices state').toBe('DEPOSIT_PAID');
+    expect(await bookingRow(b.bookingId)).toMatchObject({ status: 'PENDING', paymentStatus: 'DEPOSIT_PAID' });
+    expect((await setStatus(b.bookingId, 'COMPLETED')).status).toBe(201);
+    const finalId = (await bookingRow(b.bookingId)).invoiceId;
+    expect(money((await invoiceRow(finalId)).total)).toBe(75);
+    await settle(finalId, 75);
+    expect(await bookingRow(b.bookingId)).toMatchObject({ status: 'COMPLETED', paymentStatus: 'PAID' });
+
+    // (b) A reinstatement commits between a cancel's status write and its forfeit: nothing is forfeit on the live booking.
+    const c = await book(ID.svcDep, 's10_rev');
+    await settle(c.depositInvoiceId!, 25);
+    const forfeitPaidDeposit = svc.forfeitPaidDeposit;
+    vi.spyOn(svc, 'forfeitPaidDeposit').mockImplementationOnce(async (...args: any[]) => {
+      const reinstated = await svc.updateBookingStatus(ID.biz, c.bookingId, 'CONFIRMED');
+      expect(reinstated.status).toBe('CONFIRMED');
+      return forfeitPaidDeposit.apply(svc, args);
+    });
+    const cancel = await setStatus(c.bookingId, 'CANCELLED');
+    expect(cancel.status, JSON.stringify(cancel.body)).toBe(201);
+    vi.restoreAllMocks();
+    expect(cancel.body.depositForfeit ?? null, 'the booking was live again when the forfeit was due').toBeNull();
+    expect(await bookingRow(c.bookingId)).toMatchObject({ status: 'CONFIRMED', paymentStatus: 'DEPOSIT_PAID' });
+    expect(forfeitRowsOf(c.bookingId)).toHaveLength(0);
+  });
+
+  it('S-11 N3-SEC/N2-CR: a D-14 refund that moves an invoice re-derives Booking.paymentStatus (backwards too); a forfeit is never overwritten', async () => {
+    // A full refund of the deposit reopens it to SENT (invoice.reopened): DEPOSIT_PAID -> UNPAID; a cancel then forfeits nothing.
+    const b = await book(ID.svcDep, 's11');
+    await settle(b.depositInvoiceId!, 25);
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('DEPOSIT_PAID');
+    await refundSuccessful(b.depositInvoiceId!);
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('SENT');
+    await deliverToPaymentStatusListener(b.depositInvoiceId!, REFUND_MOVES);
+    expect((await bookingRow(b.bookingId)).paymentStatus, 'nothing is held after the refund').toBe('UNPAID');
+    const cancel = await setStatus(b.bookingId, 'CANCELLED');
+    expect(cancel.status, JSON.stringify(cancel.body)).toBe(201);
+    expect(cancel.body.depositForfeit ?? null).toBeNull();
+    expect(cancel.body.paymentStatus).toBe('UNPAID');
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('UNPAID');
+
+    // PAID, then 25 of the final refunded (PARTIALLY_PAID, invoice.payment_recorded): PAID -> DEPOSIT_PAID.
+    const p = await book(ID.svcDep, 's11_paid');
+    await settle(p.depositInvoiceId!, 25);
+    expect((await setStatus(p.bookingId, 'COMPLETED')).status).toBe(201);
+    const finalId = (await bookingRow(p.bookingId)).invoiceId;
+    await sendAndPay(finalId, 50);
+    await settle(finalId, 25);
+    expect((await bookingRow(p.bookingId)).paymentStatus).toBe('PAID');
+    emitted.length = 0;
+    await refundSuccessful(finalId, 25);
+    expect((await invoiceRow(finalId)).status).toBe('PARTIALLY_PAID');
+    await deliverToPaymentStatusListener(finalId, REFUND_MOVES);
+    expect((await bookingRow(p.bookingId)).paymentStatus, 'the final is owed 25 again; the deposit is held').toBe('DEPOSIT_PAID');
+
+    // CONTROL: a forfeit (D-26) is not overwritten by the owner's refund of it.
+    const f = await book(ID.svcDep, 's11_forfeit');
+    await settle(f.depositInvoiceId!, 25);
+    expect((await setStatus(f.bookingId, 'CANCELLED')).body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    await refundSuccessful(f.depositInvoiceId!);
+    await deliverToPaymentStatusListener(f.depositInvoiceId!, REFUND_MOVES);
+    expect((await bookingRow(f.bookingId)).paymentStatus).toBe('DEPOSIT_FORFEITED');
+  });
+
+  it('S-12 N4-SEC: a refund on a deposit never settled (10 of 25 received, 4 refunded) does not make it hold money: a cancel forfeits nothing', async () => {
+    const b = await book(ID.svcDep, 's12');
+    await sendAndPay(b.depositInvoiceId!, 6);
+    await sendAndPay(b.depositInvoiceId!, 4);
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('PARTIALLY_PAID');
+    await refundSuccessful(b.depositInvoiceId!, 4);
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('PARTIALLY_PAID');
+    await deliverToPaymentStatusListener(b.depositInvoiceId!, REFUND_MOVES);
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('UNPAID');
+    const cancel = await setStatus(b.bookingId, 'CANCELLED');
+    expect(cancel.status, JSON.stringify(cancel.body)).toBe(201);
+    expect(cancel.body.depositForfeit ?? null, 'a part payment on a deposit still owed is not held, refund or not').toBeNull();
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('UNPAID');
+    expect(forfeitRowsOf(b.bookingId)).toHaveLength(0);
+  });
+
+  it('S-13 N1-CR: a deposit paid in full then part-credited (D-28 PARTIALLY_CREDITED) is not owed: the final paid makes the booking PAID', async () => {
+    const b = await book(ID.svcDep, 's13');
+    await settle(b.depositInvoiceId!, 25);
+    // The rows CreditNoteService.apply leaves (as S-02b): its own door cannot reach a real invoice yet (V1-44-DM-CREDIT-NOTE).
+    await db.creditNote.create({
+      data: { id: `${P}cn_s13`, businessId: ID.biz, invoiceId: b.depositInvoiceId, creditNoteNumber: `${P}CN-S13`, status: 'APPLIED', amount: 10, appliedAt: new Date() },
+    });
+    await db.invoice.update({ where: { id: b.depositInvoiceId }, data: { status: 'PARTIALLY_CREDITED' } });
+    const done = await setStatus(b.bookingId, 'COMPLETED');
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect(done.body.invoicing).toMatchObject({ status: 'CREATED', amount: 85, depositAmount: 15, depositInvoiceId: b.depositInvoiceId });
+    const finalId = (await bookingRow(b.bookingId)).invoiceId;
+    await settle(finalId, 85);
+    expect((await bookingRow(b.bookingId)).paymentStatus, '25 received for the 15 the deposit bills, and the 85 final paid').toBe('PAID');
+  });
 });
 
 describe('V1-28 the confirmation pages link the token receipt (D-07)', () => {

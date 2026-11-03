@@ -25,6 +25,13 @@
  *   LS-14  depositPosition: billed / held / covers in cents, both refund conventions, applied credits
  *   LS-15  derivePaymentStatus: the rule the listener and the reinstatement both write
  *
+ * Trial-N integration review (deposit), red at 42190801:
+ *   LS-14  N4: a refund on a deposit that was never settled does not make it hold money
+ *   LS-16  N1-CR: a paid deposit part-credited (D-28 PARTIALLY_CREDITED) is not owed: the paid final is PAID
+ *   LS-17  N1-SEC: the settlement invoices are read with their own-tenant payment rows only (M31)
+ *   LS-18  N2-CR/N3-SEC: invoice.reopened / invoice.payment_recorded (a D-14 refund moving an invoice)
+ *          re-derive the booking from its invoices, backwards too; DEPOSIT_FORFEITED is never overwritten
+ *
  * The real-database half (real workflow payloads, real rows) is
  * test/booking-settlement.integration.test.ts S-05.
  */
@@ -274,6 +281,9 @@ describe('BookingPaymentStatusListener (V1-28, M42)', () => {
       ['PAID, short rows then a refund of 5', inv('PAID', [{ amount: 10, status: 'SUCCESSFUL' }, { amount: -5, status: 'REFUNDED' }]), { billedCents: 2500, heldCents: 500, coversCents: 500 }],
       // Review F3/REG-2: a part payment on a deposit still owed, nothing refunded, holds nothing (the booking stays UNPAID).
       ['PARTIALLY_PAID 10 of 25, no refund', inv('PARTIALLY_PAID', [{ amount: 10, status: 'SUCCESSFUL' }]), { billedCents: 2500, heldCents: 0, coversCents: 2500 }],
+      // Trial-N N4: a refund never raises what a deposit holds. 10 received on an owed 25, 5 of it refunded: it was never
+      // settled (nothing received ever covered what it bills), so it holds nothing, as before the refund.
+      ['PARTIALLY_PAID 10 of 25, then a refund of 5 (never settled)', inv('PARTIALLY_PAID', [{ amount: 10, status: 'SUCCESSFUL' }, { amount: -5, status: 'REFUNDED' }]), { billedCents: 2500, heldCents: 0, coversCents: 2500 }],
       ['SENT with a PENDING row', inv('SENT', [{ amount: 25, status: 'PENDING' }]), { billedCents: 2500, heldCents: 0, coversCents: 2500 }],
       ['FULLY_CREDITED (status alone)', inv('FULLY_CREDITED', [{ amount: 25, status: 'SUCCESSFUL' }]), { billedCents: 0, heldCents: 0, coversCents: 0 }],
       ['PAID 33.00 of 99.99 (cents)', inv('PAID', [{ amount: 33, status: 'SUCCESSFUL' }], [], 33), { billedCents: 3300, heldCents: 3300, coversCents: 3300 }],
@@ -292,5 +302,79 @@ describe('BookingPaymentStatusListener (V1-28, M42)', () => {
     expect(derivePaymentStatus({ final: { status: 'SENT' }, deposit: dep('PAID') })).toBe('DEPOSIT_PAID');
     expect(derivePaymentStatus({ final: null, deposit: dep('PAID', [{ amount: 25, status: 'REFUNDED' }]) })).toBe('UNPAID');
     expect(derivePaymentStatus({ final: null, deposit: null })).toBe('UNPAID');
+  });
+
+  it('LS-16 (trial-N N1-CR): a deposit paid in full and then part-credited (D-28 PARTIALLY_CREDITED) is not owed: the paid final makes the booking PAID', () => {
+    const credited = (payments: Pay[]) =>
+      ({ id: 'd', invoiceNumber: 'N', status: 'PARTIALLY_CREDITED', total: 25, currency: 'TTD', payments, creditNotes: [{ amount: '10.0000' }] }) as any;
+    // 25 received, 10 credited: it holds the 15 it still bills, nothing is left to collect on it.
+    expect(derivePaymentStatus({ final: { status: 'PAID' }, deposit: credited([{ amount: 25, status: 'SUCCESSFUL' }]) })).toBe('PAID');
+    expect(derivePaymentStatus({ final: { status: 'SENT' }, deposit: credited([{ amount: 25, status: 'SUCCESSFUL' }]) })).toBe('DEPOSIT_PAID');
+    // CONTROL: credited by 10 with only 5 received: still owed its 10, so the paid final is not PAID.
+    expect(derivePaymentStatus({ final: { status: 'PAID' }, deposit: credited([{ amount: 5, status: 'SUCCESSFUL' }]) })).toBe('UNPAID');
+    // CONTROL: reopened by a D-14 refund of 10 (PARTIALLY_PAID, holds 15 of 25): owed its 10 again.
+    const reopened = { id: 'd', invoiceNumber: 'N', status: 'PARTIALLY_PAID', total: 25, currency: 'TTD', creditNotes: [],
+      payments: [{ amount: 25, status: 'SUCCESSFUL' }, { amount: -10, status: 'REFUNDED' }] } as any;
+    expect(derivePaymentStatus({ final: { status: 'PAID' }, deposit: reopened })).toBe('DEPOSIT_PAID');
+  });
+
+  it('LS-17 (trial-N N1-SEC): the settlement invoices are read with their own-tenant payment rows only (Payment has no FK to Business, M31)', async () => {
+    const f = fixture({ finalStatus: 'PAID' });
+    await f.listener.onInvoicePaid(paid('inv_final') as any);
+    const reads = f.client.invoice.findFirst.mock.calls.map(([args]: any[]) => args).filter((args: any) => args.select?.payments);
+    expect(reads.length, 'both settlement invoices read').toBe(2);
+    for (const args of reads) {
+      expect(args.where.businessId).toBe(A);
+      expect(args.select.payments.where, `invoice ${args.where.id}`).toEqual({ businessId: A });
+    }
+  });
+
+  describe('LS-18 (trial-N N2-CR/N3-SEC): a refund that moves an invoice (D-14) re-derives the booking from its invoices', () => {
+    const moved = (invoiceId: string, businessId = A, invoiceBusinessId: string = businessId) => ({
+      businessId,
+      invoice: { id: invoiceId, businessId: invoiceBusinessId },
+    });
+    // At the trial-I head there is no refund handler: nothing re-derives the booking.
+    const NOT_HANDLED = { changed: false };
+    const refundHandler = (listener: any) => (listener.onInvoiceRefundMoved?.bind(listener) ?? (async () => NOT_HANDLED)) as (p: any) => Promise<any>;
+
+    it('a full refund reopens the deposit to SENT: DEPOSIT_PAID -> UNPAID', async () => {
+      const f = fixture({ depositStatus: 'SENT', paymentStatus: 'DEPOSIT_PAID', depositPayments: [{ amount: 25, status: 'SUCCESSFUL' }, { amount: -25, status: 'REFUNDED' }] });
+      const out = await refundHandler(f.listener)(moved('inv_dep'));
+      expect(f.bookings[0].paymentStatus).toBe('UNPAID');
+      expect(out).toMatchObject({ bookingId: 'bk_a', paymentStatus: 'UNPAID', changed: true });
+    });
+
+    it('the final refunded while the deposit is held: PAID -> DEPOSIT_PAID; a part refund of the deposit after PAID: PAID -> DEPOSIT_PAID', async () => {
+      const f = fixture({ depositStatus: 'PAID', finalStatus: 'SENT', paymentStatus: 'PAID', depositPayments: [{ amount: 25, status: 'SUCCESSFUL' }] });
+      await refundHandler(f.listener)(moved('inv_final'));
+      expect(f.bookings[0].paymentStatus).toBe('DEPOSIT_PAID');
+      const g = fixture({ depositStatus: 'PARTIALLY_PAID', finalStatus: 'PAID', paymentStatus: 'PAID', depositPayments: [{ amount: 25, status: 'SUCCESSFUL' }, { amount: -10, status: 'REFUNDED' }] });
+      await refundHandler(g.listener)(moved('inv_dep'));
+      expect(g.bookings[0].paymentStatus).toBe('DEPOSIT_PAID');
+    });
+
+    it('CONTROLS: a forfeited deposit (D-26) stays forfeited; nothing changed writes nothing; another tenant moves nothing; a failure is never thrown', async () => {
+      const forfeited = fixture({ depositStatus: 'SENT', paymentStatus: 'DEPOSIT_FORFEITED', depositPayments: [{ amount: 25, status: 'SUCCESSFUL' }, { amount: -25, status: 'REFUNDED' }] });
+      await refundHandler(forfeited.listener)(moved('inv_dep'));
+      expect(forfeited.bookings[0].paymentStatus).toBe('DEPOSIT_FORFEITED');
+      const same = fixture({ depositStatus: 'PARTIALLY_PAID', paymentStatus: 'DEPOSIT_PAID', depositPayments: [{ amount: 25, status: 'SUCCESSFUL' }, { amount: -10, status: 'REFUNDED' }] });
+      expect(await refundHandler(same.listener)(moved('inv_dep'))).toMatchObject({ changed: false });
+      const tenant = fixture({ depositStatus: 'SENT', paymentStatus: 'DEPOSIT_PAID' });
+      expect(await refundHandler(tenant.listener)(moved('inv_dep', B))).toMatchObject({ changed: false });
+      expect(await refundHandler(tenant.listener)(moved('inv_dep', A, B))).toMatchObject({ changed: false });
+      expect(tenant.bookings[0].paymentStatus).toBe('DEPOSIT_PAID');
+      expect([...forfeited.writes, ...same.writes, ...tenant.writes]).toEqual([]);
+      const broken = fixture({ depositStatus: 'SENT', paymentStatus: 'DEPOSIT_PAID' });
+      broken.client.booking.findFirst.mockRejectedValueOnce(new Error('db down'));
+      await expect(refundHandler(broken.listener)(moved('inv_dep'))).resolves.toMatchObject({ changed: false });
+    });
+
+    it("it is wired: @OnEvent('invoice.reopened') and @OnEvent('invoice.payment_recorded') on the refund handler", () => {
+      const handler = (BookingPaymentStatusListener.prototype as any).onInvoiceRefundMoved;
+      expect(handler, 'BookingPaymentStatusListener.onInvoiceRefundMoved').toBeTypeOf('function');
+      const events = (Reflect.getMetadata(EVENT_LISTENER_METADATA, handler) ?? []).map((m: any) => m.event);
+      expect(events.sort()).toEqual(['invoice.payment_recorded', 'invoice.reopened']);
+    });
   });
 });
