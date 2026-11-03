@@ -543,6 +543,11 @@
       "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
+      "prefix": "v82c_",
+      "owner": "apps/server/test/accrual-revenue-splits.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B3-ACCRUAL-SPLIT-DISCOUNT)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
