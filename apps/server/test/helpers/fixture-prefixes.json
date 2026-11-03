@@ -503,6 +503,11 @@
       "packet": "V1-42 / V1-42c-INVOICE-STATUS-EVENTS"
     },
     {
+      "prefix": "v44a_",
+      "owner": "apps/server/test/credit-note-reversal.integration.test.ts",
+      "packet": "V1-44-DM-CREDIT-NOTE"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"

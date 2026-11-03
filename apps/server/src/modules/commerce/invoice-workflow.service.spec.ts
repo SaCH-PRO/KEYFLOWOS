@@ -4,10 +4,14 @@ import {
   InvoiceWorkflowService,
   balanceOfStoredRows,
   computeBalance,
+  deriveStatusAfterCredit,
   deriveStatusAfterPayment,
+  isLegalCreditTransition,
+  isLegalReconcileTransition,
   isLegalTransition,
   readStoredPayments,
   roundMoney,
+  type InvoiceStatus,
 } from './invoice-workflow.service';
 
 describe('roundMoney', () => {
@@ -730,5 +734,170 @@ describe('V1-29 refund convention (D-14)', () => {
     const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: [], onIllegalTransition: 'keep' });
     expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: true, balance: { paid: 100, refunded: 60, net: 40, remaining: 60 } });
     expect(h.update.mock.calls[0][0].data).toEqual({ status: 'PARTIALLY_PAID', paidAt: null });
+  });
+});
+
+/**
+ * V1-44-DM-CREDIT-NOTE (CF-42, owner ruling D-28): FULLY_CREDITED and
+ * PARTIALLY_CREDITED are real invoice states, driven by credit notes that post
+ * to the ledger, and the workflow owns them. CreditNoteService applies or voids
+ * the note and its posting; reconcileFromCredits, on the caller's transaction,
+ * derives the invoice status from the APPLIED notes and the payment rows and
+ * makes the move through the credit table, compare-and-set like transition().
+ * The generic map keeps every credited move out of reach of transition()
+ * callers and of the payment reconcile. Fakes only: the real-database proof is
+ * test/credit-note-reversal.integration.test.ts.
+ */
+describe('V1-44 credited states (D-28): deriveStatusAfterCredit and the credit table', () => {
+  const none = computeBalance(100, []);
+  const paid40 = computeBalance(100, [{ amount: 40, status: 'SUCCESSFUL' }]);
+  const paid100 = computeBalance(100, [{ amount: 100, status: 'SUCCESSFUL' }]);
+  const ISSUED: InvoiceStatus[] = ['SENT', 'PENDING', 'OVERDUE', 'FAILED', 'PARTIALLY_PAID', 'PAID'];
+  const CREDITED: InvoiceStatus[] = ['PARTIALLY_CREDITED', 'FULLY_CREDITED'];
+
+  it('CS-01 applied credits short of the total -> PARTIALLY_CREDITED; reaching it -> FULLY_CREDITED, whatever was paid', () => {
+    expect(deriveStatusAfterCredit('SENT', 100, 40, none)).toBe('PARTIALLY_CREDITED');
+    expect(deriveStatusAfterCredit('SENT', 100, 100, none)).toBe('FULLY_CREDITED');
+    expect(deriveStatusAfterCredit('OVERDUE', 100, 100, none)).toBe('FULLY_CREDITED');
+    // A deposit paid in full and then part-credited (what V1-28 depositPosition reads).
+    expect(deriveStatusAfterCredit('PAID', 100, 10, paid100)).toBe('PARTIALLY_CREDITED');
+    expect(deriveStatusAfterCredit('PARTIALLY_PAID', 100, 60, paid40)).toBe('PARTIALLY_CREDITED');
+    expect(deriveStatusAfterCredit('PARTIALLY_CREDITED', 100, 100, none)).toBe('FULLY_CREDITED');
+    // One of two notes voided: still part-credited.
+    expect(deriveStatusAfterCredit('FULLY_CREDITED', 100, 40, none)).toBe('PARTIALLY_CREDITED');
+  });
+
+  it('CS-01b compared in cents (D-13): 99.99 credited of 100.00 is partial; 0.1 + 0.2 credited of 0.30 is full', () => {
+    expect(deriveStatusAfterCredit('SENT', 100, 99.99, none)).toBe('PARTIALLY_CREDITED');
+    expect(deriveStatusAfterCredit('SENT', 0.3, 0.1 + 0.2, computeBalance(0.3, []))).toBe('FULLY_CREDITED');
+  });
+
+  it('CS-02 the last credit voided: the status the payment rows give it (nothing paid SENT, part paid PARTIALLY_PAID, settled PAID)', () => {
+    for (const from of CREDITED) {
+      expect(deriveStatusAfterCredit(from, 100, 0, none), from).toBe('SENT');
+      expect(deriveStatusAfterCredit(from, 100, 0, paid40), from).toBe('PARTIALLY_PAID');
+      expect(deriveStatusAfterCredit(from, 100, 0, paid100), from).toBe('PAID');
+    }
+  });
+
+  it('CS-03 nothing credited and not a credited status: unchanged (nothing to move)', () => {
+    for (const from of ['DRAFT', 'VOID', ...ISSUED] as InvoiceStatus[]) {
+      expect(deriveStatusAfterCredit(from, 100, 0, none), from).toBe(from);
+    }
+  });
+
+  it('CS-04 the credit table: an issued invoice may be credited; a credited one moves between the credited states and back to SENT / PARTIALLY_PAID / PAID', () => {
+    for (const from of ISSUED) for (const to of CREDITED) expect(isLegalCreditTransition(from, to), `${from} -> ${to}`).toBe(true);
+    for (const to of ['PARTIALLY_CREDITED', 'FULLY_CREDITED', 'SENT', 'PARTIALLY_PAID', 'PAID'] as InvoiceStatus[]) {
+      expect(isLegalCreditTransition('PARTIALLY_CREDITED', to), `PARTIALLY_CREDITED -> ${to}`).toBe(true);
+    }
+    for (const to of ['PARTIALLY_CREDITED', 'SENT', 'PARTIALLY_PAID', 'PAID'] as InvoiceStatus[]) {
+      expect(isLegalCreditTransition('FULLY_CREDITED', to), `FULLY_CREDITED -> ${to}`).toBe(true);
+    }
+  });
+
+  it('CS-05 the credit table refuses: crediting a DRAFT or VOID invoice; a credited invoice to VOID, DRAFT, OVERDUE, PENDING or FAILED; a credit move between two uncredited states', () => {
+    for (const from of ['DRAFT', 'VOID'] as InvoiceStatus[]) for (const to of CREDITED) expect(isLegalCreditTransition(from, to), `${from} -> ${to}`).toBe(false);
+    for (const from of CREDITED) {
+      for (const to of ['VOID', 'DRAFT', 'OVERDUE', 'PENDING', 'FAILED'] as InvoiceStatus[]) expect(isLegalCreditTransition(from, to), `${from} -> ${to}`).toBe(false);
+    }
+    expect(isLegalCreditTransition('SENT', 'PAID')).toBe(false);
+    expect(isLegalCreditTransition('PAID', 'SENT')).toBe(false);
+  });
+
+  it('CS-06 the generic map: no transition() caller and no payment reconcile enters or leaves a credited state (credit notes alone drive them)', () => {
+    for (const from of [...ISSUED, 'DRAFT'] as InvoiceStatus[]) {
+      for (const to of CREDITED) {
+        expect(isLegalTransition(from, to), `${from} -> ${to}`).toBe(false);
+        expect(isLegalReconcileTransition(from, to), `reconcile ${from} -> ${to}`).toBe(false);
+      }
+    }
+    for (const from of CREDITED) {
+      for (const to of ['SENT', 'PARTIALLY_PAID', 'PAID', 'OVERDUE', 'VOID', 'DRAFT', 'FAILED', 'PENDING'] as InvoiceStatus[]) {
+        expect(isLegalTransition(from, to), `${from} -> ${to}`).toBe(false);
+        expect(isLegalReconcileTransition(from, to), `reconcile ${from} -> ${to}`).toBe(false);
+      }
+    }
+  });
+});
+
+describe('V1-44 InvoiceWorkflowService.reconcileFromCredits (fakes)', () => {
+  type Inv = { status: string; total: number; paidAt: Date | null };
+
+  function build(invoice: Inv, applied: number | null, payments: Array<{ amount: number; status: string }> = []) {
+    const row = { id: 'inv_1', businessId: 'biz_1', currency: 'TTD', ...invoice };
+    const tx = {
+      invoice: {
+        findUnique: vi.fn(async () => row),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...row, ...data })),
+      },
+      payment: { findMany: vi.fn(async () => payments) },
+      creditNote: { aggregate: vi.fn(async () => ({ _sum: { amount: applied } })) },
+    };
+    const $transaction = vi.fn();
+    const prisma = { client: { $transaction } };
+    const events = { emit: vi.fn() };
+    const revenuePosting = { onInvoiceFinalized: vi.fn(), onInvoiceVoided: vi.fn() };
+    const expensePosting = { onProductSold: vi.fn(async () => null) };
+    const service = new InvoiceWorkflowService(prisma as never, events as never, revenuePosting as never, expensePosting as never);
+    const quiet = () => {
+      expect($transaction, 'runs on the caller transaction only').not.toHaveBeenCalled();
+      expect(events.emit, 'a credit move emits no invoice event').not.toHaveBeenCalled();
+      expect(revenuePosting.onInvoiceFinalized).not.toHaveBeenCalled();
+      expect(revenuePosting.onInvoiceVoided).not.toHaveBeenCalled();
+      expect(expensePosting.onProductSold, 'no COGS').not.toHaveBeenCalled();
+    };
+    return { service, tx, quiet };
+  }
+
+  it('CR-01 SENT with 40 of 100 applied: one compare-and-set write to PARTIALLY_CREDITED through tx; reads the APPLIED notes and the business payment rows', async () => {
+    const h = build({ status: 'SENT', total: 100, paidAt: null }, 40);
+    const result = await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never });
+    expect(result).toEqual({ status: 'PARTIALLY_CREDITED', changed: true });
+    expect(h.tx.invoice.update).toHaveBeenCalledTimes(1);
+    expect(h.tx.invoice.update.mock.calls[0][0]).toMatchObject({ where: { id: 'inv_1', status: 'SENT' }, data: { status: 'PARTIALLY_CREDITED' } });
+    expect(h.tx.creditNote.aggregate.mock.calls[0][0]).toMatchObject({ where: { invoiceId: 'inv_1', businessId: 'biz_1', status: 'APPLIED' } });
+    expect(h.tx.payment.findMany.mock.calls[0][0]).toMatchObject({ where: { invoiceId: 'inv_1', businessId: 'biz_1' } });
+    h.quiet();
+  });
+
+  it('CR-02 FULLY_CREDITED, the last note voided, paid in full: back to PAID; paidAt kept; no COGS, no invoice.paid', async () => {
+    const paidAt = new Date('2026-10-01T12:00:00Z');
+    const h = build({ status: 'FULLY_CREDITED', total: 100, paidAt }, null, [{ amount: 100, status: 'SUCCESSFUL' }]);
+    const result = await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never });
+    expect(result).toEqual({ status: 'PAID', changed: true });
+    expect(h.tx.invoice.update.mock.calls[0][0]).toMatchObject({ where: { id: 'inv_1', status: 'FULLY_CREDITED' } });
+    expect(h.tx.invoice.update.mock.calls[0][0].data).toEqual({ status: 'PAID' });
+    h.quiet();
+  });
+
+  it('CR-03 PARTIALLY_CREDITED, the last note voided, nothing paid: SENT', async () => {
+    const h = build({ status: 'PARTIALLY_CREDITED', total: 100, paidAt: null }, 0);
+    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never })).toEqual({ status: 'SENT', changed: true });
+    expect(h.tx.invoice.update.mock.calls[0][0].data).toEqual({ status: 'SENT' });
+    h.quiet();
+  });
+
+  it('CR-04 still part-credited (a second partial note, or one of two voided): no write, changed false', async () => {
+    const h = build({ status: 'PARTIALLY_CREDITED', total: 100, paidAt: null }, 70);
+    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never })).toEqual({ status: 'PARTIALLY_CREDITED', changed: false });
+    expect(h.tx.invoice.update).not.toHaveBeenCalled();
+    h.quiet();
+  });
+
+  for (const status of ['DRAFT', 'VOID']) {
+    it(`CR-05 a credit on a ${status} invoice: 409 from the credit table, nothing written`, async () => {
+      const h = build({ status, total: 100, paidAt: null }, 10);
+      await expect(h.service.reconcileFromCredits('inv_1', { tx: h.tx as never })).rejects.toBeInstanceOf(ConflictException);
+      expect(h.tx.invoice.update).not.toHaveBeenCalled();
+      h.quiet();
+    });
+  }
+
+  it('CR-06 a status moved by another writer between the read and the write (P2025): 409, the caller rolls back', async () => {
+    const h = build({ status: 'SENT', total: 100, paidAt: null }, 40);
+    h.tx.invoice.update.mockRejectedValueOnce(Object.assign(new Error('Record to update not found.'), { code: 'P2025' }));
+    await expect(h.service.reconcileFromCredits('inv_1', { tx: h.tx as never })).rejects.toBeInstanceOf(ConflictException);
+    h.quiet();
   });
 });
