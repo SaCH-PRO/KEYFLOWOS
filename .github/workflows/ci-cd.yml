@@ -712,6 +712,20 @@ jobs:
       - name: Run web tests
         run: pnpm --filter web test:unit
 
+      # KF-HARNESS-PKG-TESTS-001 (V1-26). packages/api carries specs
+      # (vitest.config.ts: src/**/*.spec.ts) -- the no-raw-records gate and
+      # the crm.contactDetail visibility cases -- and no step ran them: the
+      # server step runs apps/server only and the step above runs apps/web.
+      # /trpc is mounted, but the Nest exact-path mount answers 404 for
+      # /trpc/<procedure> today (apps/server/src/trpc.module.spec.ts), so
+      # these specs gate the routers for the day the mount path is fixed.
+      # The three crm.contactDetail visibility refusals are `it.fails` (RED,
+      # blocked on a shared visibility helper): they fail this step the day
+      # the rule lands, until they are turned back into `it`. Pure unit
+      # specs: no database, no Redis; "Build workspace packages" is enough.
+      - name: Run packages/api tests
+        run: pnpm --filter @keyflow/api test:unit
+
   # Production deployment (commented out until configured)
   # deploy:
   #   name: Deploy to Production

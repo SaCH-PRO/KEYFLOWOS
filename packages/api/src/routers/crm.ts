@@ -1,5 +1,5 @@
 import { protectedProcedure, router } from '../trpc';
-import type { AnyRouter } from '@trpc/server';
+import { TRPCError, type AnyRouter } from '@trpc/server';
 import { z } from 'zod';
 import { assertBusinessAccess } from '../lib/access';
 
@@ -69,9 +69,19 @@ export const crmRouter: AnyRouter = router({
     .input(z.object({ businessId: z.string(), contactId: z.string() }))
     .query(async ({ input, ctx }) => {
       await assertBusinessAccess(ctx, input.businessId);
+      // The contact is read first, by the predicate the REST detail route uses
+      // (contactWhereWithId: the id, the tenant, deletedAt null). An id naming
+      // no live contact of this business answers NOT_FOUND, as REST answers
+      // 404 'Contact not found', before any event, note or task is read (V1-26).
+      // Record visibility (V1-08's visibilityClause) is NOT applied here yet:
+      // packages/api cannot reach that rule without a shared helper outside
+      // this packet's write set (see crm.contact-detail.spec.ts).
       const contact = await ctx.db.contact.findFirst({
         where: { id: input.contactId, businessId: input.businessId, deletedAt: null },
       });
+      if (!contact) {
+        throw new TRPCError({ code: 'NOT_FOUND', message: 'Contact not found' });
+      }
       const [events, notes, tasks] = await Promise.all([
         ctx.db.contactEvent.findMany({
           where: { businessId: input.businessId, contactId: input.contactId },
