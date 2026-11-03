@@ -3519,3 +3519,44 @@ negative_controls:
       replace: '"name": DAST (Native)'
     proof_command: node --test --test-name-pattern="NC duplicate name" scripts/agent-control/tests/workflow-integrity.spec.mjs
     timeout_ms: 120000
+
+  # FOLLOW3-C4-DAST-DOCS-NATIVE-GATE (review CR-V1-30-4). The operator docs
+  # describe the required DAST (Native) gate and HawkScan as manual-only. Each
+  # control restores one stale instruction. Proof: 'NC setup doc' in
+  # tests/workflow-integrity.spec.mjs.
+  - id: NC-FOLLOW3-C4-SETUP-DOC-REQUIRES-HAWKSCAN
+    claim: >
+      No operator doc tells anyone to make HawkScan a required check. With no
+      PR trigger that check never reports, so it would block every merge.
+      Restoring the setup doc's step that adds HawkScan to main's required
+      status checks is rejected.
+    mutation:
+      file: docs/SECURITY_DAST_SETUP.md
+      find: "### Not a gate"
+      replace: |-
+        2. Add `HawkScan` to `main`'s required status checks (same ruleset you created
+           for the CI checks — see [issue #60](https://github.com/SaCH-PRO/KEYFLOWOS/issues/60)).
+
+        ### Not a gate
+    proof_command: node --test --test-name-pattern="NC setup doc" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-FOLLOW3-C4-NATIVE-HEADER-NOT-REQUIRED
+    claim: >
+      The native-dast.yml header says it is the required DAST gate. Restoring
+      the header that said it was not a required check yet is rejected.
+    mutation:
+      file: .github/workflows/native-dast.yml
+      find: |-
+        # THE REQUIRED DAST GATE. REQUIRED_WORKFLOWS in
+        # scripts/agent-control/lib/events.mjs names 'DAST (Native)' since V1-30 (owner
+        # ruling D-22), and scripts/agent-control/tests/workflow-integrity.spec.mjs
+        # proves this workflow cannot conclude success without probing. hawkscan.yml
+        # is manual-only and not a required check. Operator doc:
+        # docs/SECURITY_DAST_SETUP.md.
+      replace: |-
+        # NOT A REQUIRED CHECK YET. REQUIRED_WORKFLOWS in
+        # scripts/agent-control/lib/events.mjs still names 'DAST (HawkScan)'; swapping
+        # the admission gate to this workflow is V1-30.
+    proof_command: node --test --test-name-pattern="NC setup doc" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
