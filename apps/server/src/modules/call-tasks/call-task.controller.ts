@@ -21,7 +21,7 @@ import {
 } from '../../core/auth/module-scope.guard';
 import { RateLimit } from '../../core/decorators/rate-limit.decorator';
 import { RateLimitGuard } from '../../core/guards/rate-limit.guard';
-import { CallLogService } from './call-log.service';
+import { CallLogService, type CallLogViewer } from './call-log.service';
 import { CallScriptService } from './call-script.service';
 import { CreateCallLogDto } from './dto/create-call-log.dto';
 import { UpdateCallLogDto } from './dto/update-call-log.dto';
@@ -47,6 +47,19 @@ function sessionCallerId(req: { user?: { id?: string } } | undefined): string {
   return callerId;
 }
 
+/**
+ * The session member as the viewer of a call log (V1-84): every route here applies the CRM
+ * record visibility of GET contacts/:contactId (V1-08) through the call log's contact, so a
+ * member reads, lists, writes and scripts only the call logs on contacts they may open, and
+ * creates call logs only on such contacts. The guards check the business and the crm module
+ * level, not the record; a request without a member is 401 here as for sessionCallerId.
+ */
+function sessionViewer(req: { user?: { id?: string; role?: string } } | undefined): CallLogViewer {
+  return { userId: sessionCallerId(req), role: req?.user?.role ?? null };
+}
+
+type SessionRequest = ExpressRequest & { user?: { id: string; role?: string } };
+
 @Controller()
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard, ModuleScopeGuard)
 export class CallTaskController {
@@ -61,11 +74,13 @@ export class CallTaskController {
   async create(
     @Param('businessId') businessId: string,
     @Body() body: CreateCallLogDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: SessionRequest,
   ) {
     // The caller is the session member; a body callerId is ignored.
     // CreateCallLogDto still declares it, and the DTO is outside V1-54's write set.
-    const callerId = sessionCallerId(req);
+    const viewer = sessionViewer(req);
+    const callerId = viewer.userId;
+    await this.callLogs.assertContactVisibleTo(businessId, body.contactId, viewer);
     return this.callLogs.createCallLog({
       ...body,
       businessId,
@@ -79,7 +94,9 @@ export class CallTaskController {
   async list(
     @Param('businessId') businessId: string,
     @Query() query: ListCallsQueryDto,
+    @Request() req: SessionRequest,
   ) {
+    const viewer = sessionViewer(req);
     return this.callLogs.listCalls(businessId, {
       callerId: query.callerId,
       contactId: query.contactId,
@@ -88,6 +105,7 @@ export class CallTaskController {
       toDate: query.toDate,
       limit: query.limit,
       offset: query.offset,
+      viewer,
     });
   }
 
@@ -97,8 +115,9 @@ export class CallTaskController {
   async getById(
     @Param('businessId') businessId: string,
     @Param('callId') callId: string,
+    @Request() req: SessionRequest,
   ) {
-    return this.callLogs.getCallLog(businessId, callId);
+    return this.callLogs.getVisibleCallLog(businessId, callId, sessionViewer(req));
   }
 
   @Patch('businesses/:businessId/calls/:callId')
@@ -108,7 +127,12 @@ export class CallTaskController {
     @Param('businessId') businessId: string,
     @Param('callId') callId: string,
     @Body() body: UpdateCallLogDto,
+    @Request() req: SessionRequest,
   ) {
+    // The call log as it is, and the contact a PATCH moves it to, must both be ones the member may open.
+    const viewer = sessionViewer(req);
+    await this.callLogs.getVisibleCallLog(businessId, callId, viewer);
+    await this.callLogs.assertContactVisibleTo(businessId, body.contactId, viewer);
     return this.callLogs.updateCallLog(businessId, callId, body);
   }
 
@@ -119,9 +143,11 @@ export class CallTaskController {
     @Param('businessId') businessId: string,
     @Param('callId') callId: string,
     @Body() body: CompleteCallDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: SessionRequest,
   ) {
-    const completedBy = sessionCallerId(req);
+    const viewer = sessionViewer(req);
+    const completedBy = viewer.userId;
+    await this.callLogs.getVisibleCallLog(businessId, callId, viewer);
     return this.callLogs.completeCall(businessId, callId, body, completedBy);
   }
 
@@ -132,9 +158,11 @@ export class CallTaskController {
     @Param('businessId') businessId: string,
     @Param('callId') callId: string,
     @Body() body: CreateFollowUpDto,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: SessionRequest,
   ) {
-    const createdBy = sessionCallerId(req);
+    const viewer = sessionViewer(req);
+    const createdBy = viewer.userId;
+    await this.callLogs.getVisibleCallLog(businessId, callId, viewer);
     return this.callLogs.createFollowUpTask(businessId, callId, body, createdBy);
   }
 
@@ -144,7 +172,9 @@ export class CallTaskController {
   async delete(
     @Param('businessId') businessId: string,
     @Param('callId') callId: string,
+    @Request() req: SessionRequest,
   ) {
+    await this.callLogs.getVisibleCallLog(businessId, callId, sessionViewer(req));
     return this.callLogs.deleteCallLog(businessId, callId);
   }
 
@@ -154,13 +184,16 @@ export class CallTaskController {
   async getScheduledToday(
     @Param('businessId') businessId: string,
     @Query('callerId') callerId: string | undefined,
+    @Request() req: SessionRequest,
   ) {
     // callerId is an optional read filter, as on GET calls. Without one this is
     // every member's open calls today in the business: the Operations dashboard
     // ("Calls Today") and the call-tasks page ("Scheduled Today") send none and
     // show the team's calls. Narrowing it to the session member would change what
-    // they show, which is outside V1-54's write-attribution scope (review CR-1).
-    return this.callLogs.getScheduledCalls(businessId, callerId || undefined, new Date());
+    // they show, which is outside V1-54's write-attribution scope (review CR-1). Either way the
+    // day holds only the calls whose contact the session member may open (V1-84).
+    const viewer = sessionViewer(req);
+    return this.callLogs.getScheduledCalls(businessId, callerId || undefined, new Date(), viewer);
   }
 
   @Post('businesses/:businessId/calls/:callId/generate-script')
@@ -169,9 +202,9 @@ export class CallTaskController {
   async generateScript(
     @Param('businessId') businessId: string,
     @Param('callId') callId: string,
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: SessionRequest,
   ) {
-    const callLog = await this.callLogs.getCallLog(businessId, callId);
+    const callLog = await this.callLogs.getVisibleCallLog(businessId, callId, sessionViewer(req));
     if (!callLog.contactId) {
       throw new BadRequestException('Call log has no contact');
     }
@@ -189,11 +222,14 @@ export class CallTaskController {
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: { callerId?: string; script?: string; autoGenerateScript?: boolean },
-    @Request() req: ExpressRequest & { user?: { id: string } },
+    @Request() req: SessionRequest,
   ) {
     // The caller is the session member; a body callerId is ignored. The contact
-    // is looked up within the path business (review ST-3).
-    const callerId = sessionCallerId(req);
+    // is looked up within the path business (review ST-3), and must be one the
+    // member may open (V1-84).
+    const viewer = sessionViewer(req);
+    const callerId = viewer.userId;
+    await this.callLogs.assertContactVisibleTo(businessId, contactId, viewer);
     const callLog = await this.callLogs.createFromContactNextAction(
       businessId,
       contactId,

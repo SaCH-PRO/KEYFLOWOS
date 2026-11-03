@@ -6,7 +6,24 @@ import {
   Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  assertContactVisible,
+  contactVisibilityFilter,
+  resolveCrmAccess,
+  visibilityClause,
+  type CrmAccess,
+} from '../crm/crm-permissions.helper';
+
+/**
+ * The session member a call-log route reads or writes for (V1-84): their user id and their
+ * session role (the User row's role, which AuthMiddleware attached to the request).
+ */
+export interface CallLogViewer {
+  userId: string;
+  role?: string | null;
+}
 
 export interface CreateCallLogInput {
   businessId: string;
@@ -51,6 +68,8 @@ export interface ListCallsFilter {
   toDate?: Date | string;
   limit?: number;
   offset?: number;
+  /** The member the list is for: only the call logs whose contact they may open (V1-84). */
+  viewer?: CallLogViewer;
 }
 
 @Injectable()
@@ -79,8 +98,108 @@ export class CallLogService {
     if (!contact) throw new NotFoundException('Contact not found');
   }
 
+  /**
+   * A call log's caller is a member user of its business (V1-54 review ST-4). createCallLog
+   * stored any callerId, and the KEY tool call_create_task hands it the callerId the model
+   * chose, so a call log could name another business's user or any string as the member who
+   * makes the call (the tool contract: "User ID who will make the call"). HTTP callers pass the
+   * session member, whom BusinessGuard has already found a member; a SUPER_ADMIN who is not a
+   * member of the business is refused here too. The check sits here rather than in the
+   * dispatcher so every writer of a caller is covered.
+   */
+  private async assertCallerIsMember(businessId: string, callerId: string) {
+    const membership = callerId
+      ? await this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId: callerId, businessId } },
+          select: { id: true },
+        })
+      : null;
+    if (!membership) {
+      throw new BadRequestException('callerId must belong to a member of this business');
+    }
+  }
+
+  /**
+   * The CRM rule's client for `viewer` (V1-84). resolveCrmAccess, assertContactVisible and
+   * contactVisibilityFilter read the User row only to tell SUPER_ADMIN; here the role comes
+   * from the session, the same answer ModuleScopeGuard and BusinessGuard decided the request
+   * by. The membership and contact reads are the real ones, so the rule is V1-08's verbatim.
+   */
+  private crmRule(viewer: CallLogViewer): PrismaService {
+    const client = this.prisma.client;
+    return {
+      client: {
+        user: { findUnique: async () => ({ role: viewer.role ?? 'USER' }) },
+        membership: client.membership,
+        contact: client.contact,
+      },
+    } as unknown as PrismaService;
+  }
+
+  private viewerAccess(businessId: string, viewer: CallLogViewer): Promise<CrmAccess> {
+    return resolveCrmAccess(this.crmRule(viewer), businessId, viewer.userId);
+  }
+
+  /**
+   * Refuses, as GET contacts/:contactId refuses an unknown id (404 'Contact not found'), a
+   * contact `viewer` may not open by the V1-08 rule: a call log written on it (POST calls,
+   * from-next-action, a PATCH that names it) would put the member's call notes on a contact
+   * they cannot see and show them that it exists (V1-84). No contact is no check.
+   */
+  async assertContactVisibleTo(businessId: string, contactId: string | null | undefined, viewer: CallLogViewer) {
+    if (contactId === undefined || contactId === null) return;
+    await assertContactVisible(this.crmRule(viewer), businessId, contactId, viewer.userId);
+  }
+
+  /**
+   * The call log `id` of `businessId` if `viewer` may open it (V1-84): a call log on a contact
+   * the member may not open (V1-08: another member's PRIVATE contact, or outside "my book" under
+   * crm_view 'owned') answers 404 'Call log not found', exactly as an unknown id, so its notes,
+   * script and outcome are not read through it and its existence is not told. A call log with
+   * no contact is the business's. A member with the whole book (OWNER, SUPER_ADMIN) reads as
+   * before: no contact lookup is made for them.
+   */
+  async getVisibleCallLog(businessId: string, id: string, viewer: CallLogViewer) {
+    const callLog = await this.getCallLog(businessId, id);
+    if (!callLog.contactId) return callLog;
+    const access = await this.viewerAccess(businessId, viewer);
+    if (!visibilityClause(access, viewer.userId)) return callLog;
+    try {
+      await assertContactVisible(this.crmRule(viewer), businessId, callLog.contactId, viewer.userId);
+    } catch (err) {
+      if (err instanceof NotFoundException) throw new NotFoundException('Call log not found');
+      throw err;
+    }
+    return callLog;
+  }
+
+  /**
+   * A where that keeps the call logs `viewer` may open among those `where` matches, or null
+   * when the member has the whole book (V1-84). The distinct contacts of the matching call logs
+   * go through contactVisibilityFilter (the V1-08 rule), and the list keeps the contactless
+   * call logs and those on a visible contact. A contact soft-deleted or gone is not visible.
+   */
+  private async visibleCallLogsWhere(
+    businessId: string,
+    where: Prisma.CallLogWhereInput,
+    viewer: CallLogViewer,
+  ): Promise<Prisma.CallLogWhereInput | null> {
+    const access = await this.viewerAccess(businessId, viewer);
+    if (!visibilityClause(access, viewer.userId)) return null;
+    const rows = await this.prisma.client.callLog.findMany({
+      where,
+      select: { contactId: true },
+      distinct: ['contactId'],
+    });
+    const contactIds = rows.map((r: { contactId: string | null }) => r.contactId).filter((id): id is string => !!id);
+    const canOpen = await contactVisibilityFilter(this.crmRule(viewer), businessId, access, viewer.userId, contactIds);
+    const visible = canOpen ? contactIds.filter((id) => canOpen(id)) : contactIds;
+    return { OR: [{ contactId: null }, { contactId: { in: visible } }] };
+  }
+
   async createCallLog(input: CreateCallLogInput) {
     await this.assertContactInBusiness(input.businessId, input.contactId);
+    await this.assertCallerIsMember(input.businessId, input.callerId);
     const scheduledAt = input.scheduledAt
       ? new Date(input.scheduledAt)
       : undefined;
@@ -153,6 +272,12 @@ export class CallLogService {
       if (filters.toDate) {
         where.scheduledAt.lte = new Date(filters.toDate);
       }
+    }
+    if (filters?.viewer) {
+      // In the where, not filtered after the read, so skip/take and the total count only
+      // the call logs the member may open.
+      const visible = await this.visibleCallLogsWhere(businessId, where, filters.viewer);
+      if (visible) where.AND = [visible];
     }
 
     const [items, total] = await Promise.all([
@@ -252,19 +377,23 @@ export class CallLogService {
   /**
    * The open calls scheduled on `date`: `callerId`'s when one is named, otherwise every member's
    * in the business (what the Operations dashboard and the call-tasks page show, V1-54 review
-   * CR-1). The filter is left out rather than handed to Prisma as undefined.
+   * CR-1). The filter is left out rather than handed to Prisma as undefined. With a `viewer`,
+   * only the calls whose contact that member may open (V1-84); the day is not paged, so the
+   * rows read are filtered by the V1-08 rule (contactVisibilityFilter).
    */
   async getScheduledCalls(
     businessId: string,
     callerId: string | undefined,
     date: Date | string,
+    viewer?: CallLogViewer,
   ) {
     const startOfDay = new Date(date);
     startOfDay.setHours(0, 0, 0, 0);
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
 
-    return this.prisma.client.callLog.findMany({
+    const access = viewer ? await this.viewerAccess(businessId, viewer) : null;
+    const calls = await this.prisma.client.callLog.findMany({
       where: {
         businessId,
         ...(callerId ? { callerId } : {}),
@@ -276,6 +405,15 @@ export class CallLogService {
       },
       orderBy: { scheduledAt: 'asc' },
     });
+    if (!viewer || !access) return calls;
+    const canOpen = await contactVisibilityFilter(
+      this.crmRule(viewer),
+      businessId,
+      access,
+      viewer.userId,
+      calls.map((c: { contactId: string | null }) => c.contactId),
+    );
+    return canOpen ? calls.filter((c: { contactId: string | null }) => !c.contactId || canOpen(c.contactId)) : calls;
   }
 
   async createFollowUpTask(

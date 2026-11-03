@@ -17,6 +17,12 @@ function createMockPrisma() {
       ['contact_2', { id: 'contact_2', businessId: 'biz_1' }],
       ['contact_t', { id: 'contact_t', businessId: 'biz_theirs' }],
     ]),
+    // the callers the cases name, each a member of their business (createCallLog checks it, V1-84)
+    memberships: [
+      { userId: 'user_1', businessId: 'biz_1' },
+      { userId: 'user_2', businessId: 'biz_1' },
+      { userId: 'user_t', businessId: 'biz_theirs' },
+    ],
   };
   let idCounter = 0;
 
@@ -119,6 +125,13 @@ function createMockPrisma() {
         findUnique: vi.fn(async (args: any) =>
           store.contactTasks.get(args.where.id) ?? null,
         ),
+      },
+      membership: {
+        findUnique: vi.fn(async (args: any) => {
+          const key = args.where.userId_businessId;
+          const row = store.memberships.find((m) => m.userId === key?.userId && m.businessId === key?.businessId);
+          return row ? { id: `m_${row.userId}_${row.businessId}` } : null;
+        }),
       },
       contact: {
         findUnique: vi.fn(async (args: any) =>
