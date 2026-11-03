@@ -64,6 +64,10 @@ export class PaymentsController {
     });
   }
 
+  // V1-05-PUB-PROVIDER-CALLBACKS (M35, D-19): public, so the callback itself is
+  // the proof: WiPay's keyed response hash (transaction_id + requested total +
+  // the business's WiPay API key). One that does not verify, or with no key
+  // configured, is a 400 and writes nothing (PaymentsService.handleWipayCallback).
   @PublicRateLimit(20, 60_000)
   @Get('wipay/callback')
   async handleWipayCallback(@Query() queryParams: Record<string, string>) {

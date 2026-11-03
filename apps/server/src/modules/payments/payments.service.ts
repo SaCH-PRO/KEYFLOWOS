@@ -5,6 +5,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { InvoiceWorkflowService, computeBalance, isShareableInvoiceStatus } from '../commerce/invoice-workflow.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { normalizeCurrency } from '../finance/posting.service';
 import { fromCents, subtractMoney, toCents } from '../commerce/money';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
@@ -1525,8 +1526,71 @@ export class PaymentsService {
     throw new Error('Failed to create WiPay checkout');
   }
 
+  /**
+   * V1-05-PUB-PROVIDER-CALLBACKS (M35; owner ruling D-19) — WiPay's response
+   * hash as WiPay's Transaction Response documentation defines it
+   * (docs.wipayfinancial.com/payments-api/transaction-response; WiPay API
+   * Documentation, wipaycaribbean.com/WiPay-API-Documentation.pdf): the MD5 of
+   * transaction_id, the ORIGINAL total this server sent in the payment request
+   * (two decimals; not the customer-facing total of the response) and the
+   * merchant's API key, concatenated in that order with no separator.
+   */
+  private static wipayResponseHash(transactionId: string, originalTotal: number, apiKey: string): string {
+    return createHash('md5').update(`${transactionId}${originalTotal.toFixed(2)}${apiKey}`).digest('hex');
+  }
+
+  /**
+   * The WiPay API key a callback is verified with: the business's own
+   * (metaData.wipayApiKey), else the platform's (WIPAY_API_KEY), as the
+   * checkout reads them. Nothing configured is null: the callback is refused,
+   * never checked against a default (WiPay's sandbox key is public).
+   */
+  private static wipayApiKey(metaData: unknown): string | null {
+    const meta = (metaData as Record<string, unknown> | null) ?? {};
+    for (const key of [meta.wipayApiKey, process.env.WIPAY_API_KEY]) {
+      if (typeof key === 'string' && key.trim() !== '') return key;
+    }
+    return null;
+  }
+
+  /** Whether `hash` is WiPay's keyed response hash for this transaction (constant-time compare). */
+  private static wipayProofVerifies(
+    apiKey: string | null,
+    transactionId: string | undefined,
+    originalTotal: number,
+    hash: unknown,
+  ): boolean {
+    if (!apiKey || !transactionId || typeof hash !== 'string' || !Number.isFinite(originalTotal)) return false;
+    const expected = Buffer.from(PaymentsService.wipayResponseHash(transactionId, originalTotal, apiKey), 'utf8');
+    const given = Buffer.from(hash.trim().toLowerCase(), 'utf8');
+    return given.length === expected.length && timingSafeEqual(given, expected);
+  }
+
+  /**
+   * The WiPay callback (the payer's browser brings WiPay's response back to
+   * the pay page, which forwards its query here).
+   *
+   * V1-05-PUB-PROVIDER-CALLBACKS (M35; D-19: any callback that does not
+   * verify is refused): every callback, success or failure, must carry
+   * WiPay's keyed response hash (wipayResponseHash) over its transaction_id,
+   * the total this server requested for the invoice or storefront order and
+   * the business's WiPay API key. One that does not verify, or that arrives
+   * with no key configured, is refused with 400 before anything is written:
+   * no Payment row, no WebhookEvent claim, no storefront status. The hash
+   * used to be md5(transaction_id + order_id + total + status), every input
+   * public, so anyone holding an invoice id settled it for the total they
+   * chose, and an unsigned failure callback wrote a FAILED row on a
+   * transaction id of the caller's choosing and claimed it. A verified
+   * success records the requested total (the amount the hash binds), never
+   * the callback's `total`, through createPaymentWithPosting, deduplicated
+   * on the transaction id.
+   */
   async handleWipayCallback(queryParams: WipayCallbackParams): Promise<{ success: boolean; invoiceId?: string; message: string }> {
-    const { transaction_id, order_id, status, total, hash } = queryParams;
+    const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
+    const transaction_id = str(queryParams.transaction_id);
+    const order_id = str(queryParams.order_id);
+    const status = str(queryParams.status);
+    const { hash } = queryParams;
 
     if (!order_id || !status) {
       return { success: false, message: 'Missing required callback parameters' };
@@ -1537,11 +1601,11 @@ export class PaymentsService {
       include: { business: { select: { metaData: true } } },
     });
 
-    let order: { id: string; businessId: string; currency: string; total: number; paymentStatus: string } | null = null;
+    let order: { id: string; businessId: string; currency: string; total: number; paymentStatus: string; business: { metaData: Prisma.JsonValue } } | null = null;
     if (!invoice) {
       order = await this.prisma.client.marketplaceOrder.findUnique({
         where: { id: order_id },
-        select: { id: true, businessId: true, currency: true, total: true, paymentStatus: true },
+        select: { id: true, businessId: true, currency: true, total: true, paymentStatus: true, business: { select: { metaData: true } } },
       });
       if (!order) {
         return { success: false, message: 'Invoice not found' };
@@ -1549,39 +1613,19 @@ export class PaymentsService {
     }
 
     const businessId = invoice?.businessId ?? order!.businessId;
-
-    // Signature verification is mandatory — a callback with no hash, or
-    // missing the fields needed to compute one, is treated as forged. This
-    // closes the previous loophole where hash was only checked when present.
-    const isSuccessfulStatus = status === 'success' || status === '1';
-    if (isSuccessfulStatus) {
-      if (!hash || !transaction_id || !total) {
-        this.logger.error(`WiPay callback missing signature fields for order ${order_id} — rejecting`);
-        throw new BadRequestException('Invalid WiPay callback signature');
-      }
-      const expectedHash = createHash('md5')
-        .update(`${transaction_id}${order_id}${total}${status}`)
-        .digest('hex');
-      if (hash !== expectedHash) {
-        this.logger.error(`WiPay hash mismatch for order ${order_id} — rejecting callback`);
-        throw new BadRequestException('Invalid WiPay callback signature');
-      }
-    } else if (hash && transaction_id && total) {
-      // Failure callbacks: still verify when WiPay supplies the fields.
-      const expectedHash = createHash('md5')
-        .update(`${transaction_id}${order_id}${total}${status}`)
-        .digest('hex');
-      if (hash !== expectedHash) {
-        this.logger.error(`WiPay hash mismatch on failure callback for order ${order_id} — rejecting`);
-        throw new BadRequestException('Invalid WiPay callback signature');
-      }
+    // The total this server sent WiPay for this payable (createWipayCheckout, createStorePayment).
+    const requestedTotal = invoice ? Number(invoice.total) : Number(order!.total);
+    const apiKey = PaymentsService.wipayApiKey(invoice ? invoice.business.metaData : order!.business.metaData);
+    if (!PaymentsService.wipayProofVerifies(apiKey, transaction_id, requestedTotal, hash)) {
+      this.logger.error(
+        `WiPay callback for ${order_id} refused: ${apiKey ? 'its hash is not WiPay\'s keyed response hash' : 'no WiPay API key is configured to verify it'}`,
+      );
+      throw new BadRequestException('Invalid WiPay callback signature');
     }
 
-    // Provider-event-id idempotency. WiPay's transaction_id uniquely
-    // identifies a callback delivery; re-deliveries become no-ops. Failure
-    // callbacks that arrive without a transaction_id are deduplicated by
-    // order id so replayed failure notifications cannot accumulate junk rows.
-    const wipayEventId = transaction_id || `wipay_fail_${order_id}`;
+    // Provider-event-id idempotency. WiPay's transaction_id (verified above)
+    // identifies a callback delivery; re-deliveries become no-ops.
+    const wipayEventId = transaction_id!;
     const fresh = await this.invoiceWorkflow.assertNewProviderEvent(
       'wipay',
       wipayEventId,
@@ -1605,14 +1649,15 @@ export class PaymentsService {
         }
 
         const existingPayment = await this.prisma.client.payment.findUnique({
-          where: { providerPaymentId: transaction_id || `wipay_${order_id}_${Date.now()}` },
+          where: { providerPaymentId: wipayEventId },
         });
 
         if (!existingPayment) {
+          // V1-05: the requested total the verified hash binds, never the callback's `total`.
           await this.createPaymentWithPosting({
             provider: 'wipay',
-            providerPaymentId: transaction_id || `wipay_${order_id}_${Date.now()}`,
-            amount: parseFloat(total || String(invoice!.total)),
+            providerPaymentId: wipayEventId,
+            amount: requestedTotal,
             currency: invoice!.currency,
             status: 'SUCCESSFUL',
             invoiceId: order_id,
@@ -1624,7 +1669,7 @@ export class PaymentsService {
           });
 
           this.wipayConnector?.emitPaymentReceived(invoice!.businessId, {
-            amount: parseFloat(total || String(invoice!.total)),
+            amount: requestedTotal,
             currency: invoice!.currency,
             invoiceId: order_id,
             externalId: transaction_id,
@@ -1643,15 +1688,16 @@ export class PaymentsService {
 
     try {
       if (order) {
-        if (order.paymentStatus !== 'FAILED' && this.storeOrderService) {
+        // A failed attempt never takes back an order already PAID.
+        if (order.paymentStatus !== 'FAILED' && order.paymentStatus !== 'PAID' && this.storeOrderService) {
           await this.storeOrderService.updatePaymentStatus(order.id, 'FAILED', transaction_id);
         }
       } else {
         await this.prisma.client.payment.create({
           data: {
             provider: 'wipay',
-            providerPaymentId: transaction_id || `wipay_fail_${order_id}_${Date.now()}`,
-            amount: parseFloat(total || String(invoice!.total)),
+            providerPaymentId: wipayEventId,
+            amount: requestedTotal,
             currency: invoice!.currency,
             status: 'FAILED',
             invoiceId: order_id,
@@ -1660,7 +1706,7 @@ export class PaymentsService {
         });
 
         this.wipayConnector?.emitPaymentFailed(invoice!.businessId, {
-          amount: parseFloat(total || String(invoice!.total)),
+          amount: requestedTotal,
           currency: invoice!.currency,
           error: `WiPay payment status: ${status}`,
           invoiceId: order_id,
@@ -1714,7 +1760,8 @@ export class PaymentsService {
               customId: invoiceId,
               description: `Invoice ${invoice.invoiceNumber} - ${invoice.business.name}`,
               amount: {
-                currencyCode: invoice.currency === 'USD' ? 'USD' : 'USD',
+                // V1-05: the invoice's own currency (it was USD whatever the invoice's), which the capture checks.
+                currencyCode: normalizeCurrency(invoice.currency),
                 value: invoice.total.toFixed(2),
               },
             },
@@ -2073,14 +2120,20 @@ export class PaymentsService {
    * payment of this invoice's whole total. An order that does not match, or
    * cannot be read, is refused (400) before it is captured; nothing is written
    * and no FAILED row is left behind.
+   *
+   * V1-05-PUB-PROVIDER-CALLBACKS (M35): and its currency this invoice's
+   * currency. The capture records the invoice's amount in the invoice's
+   * currency, so an order in another currency (every order was USD, a TTD
+   * invoice's included) recorded X TTD for X USD taken; an order whose
+   * currency cannot be read is refused too.
    */
   private async assertPaypalOrderForInvoice(
     ordersController: OrdersController,
     orderId: string,
-    invoice: { id: string; total: number },
+    invoice: { id: string; total: number; currency: string },
   ): Promise<void> {
     const refusal = 'This PayPal order does not belong to this invoice';
-    let units: Array<{ customId?: string; amount?: { value?: string } }> | undefined;
+    let units: Array<{ customId?: string; amount?: { value?: string; currencyCode?: string } }> | undefined;
     try {
       const { result } = await ordersController.getOrder({ id: orderId });
       units = result.purchaseUnits;
@@ -2091,7 +2144,15 @@ export class PaymentsService {
     }
     const unit = units?.length === 1 ? units[0] : undefined;
     const value = Number(unit?.amount?.value);
-    if (!unit || unit.customId !== invoice.id || !Number.isFinite(value) || value.toFixed(2) !== Number(invoice.total).toFixed(2)) {
+    const currency = normalizeCurrency(unit?.amount?.currencyCode);
+    if (
+      !unit ||
+      unit.customId !== invoice.id ||
+      !Number.isFinite(value) ||
+      value.toFixed(2) !== Number(invoice.total).toFixed(2) ||
+      !currency ||
+      currency !== normalizeCurrency(invoice.currency)
+    ) {
       this.logger.warn(`PayPal order ${orderId} is not an order for invoice ${invoice.id}; capture refused`);
       throw new BadRequestException(refusal);
     }
