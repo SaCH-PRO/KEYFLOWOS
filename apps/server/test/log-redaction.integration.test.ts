@@ -84,8 +84,10 @@
  * route. Section 1b drives LoggingInterceptor and GlobalHttpExceptionFilter
  * directly with the rest of the class: platform secrets (the Chatwoot webhook
  * secret in the path, WHATSAPP_VERIFY_TOKEN in hub.verify_token, an OAuth
- * `code`) on the success line, the error line and the 500 line, and an
- * unrouted request whose path and query reach none of them.
+ * `code`) on the success line, the SLOW warn line (past 1000 ms, on a stubbed
+ * clock), the error line and the 500 line, and an unrouted request whose path
+ * and query reach none of them. A static case pins that neither file reads the
+ * request URL, path, query or params outside the filter's response body.
  *
  * Fixtures: prefix `v40a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
@@ -105,7 +107,7 @@ import { existsSync, readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFil
 import { inspect } from 'util';
 import { createHmac } from 'crypto';
 import { spawnSync } from 'child_process';
-import { lastValueFrom, of, throwError } from 'rxjs';
+import { defer, lastValueFrom, of, throwError } from 'rxjs';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -991,14 +993,32 @@ describe('the HTTP access line and the 500 line log the route pattern, never req
   /**
    * One request through the production LoggingInterceptor; `error` makes the
    * handler throw it. `routePath` is the pattern Express matched (absent: no route).
+   * `elapsedMs` is how long the handler takes on a stubbed Date.now (absent:
+   * the real clock, a few ms, so the line is the debug one).
    */
-  async function throughInterceptor(method: string, url: string, statusCode: number, error?: Error, routePath?: string): Promise<LogEntry[]> {
+  async function throughInterceptor(
+    method: string,
+    url: string,
+    statusCode: number,
+    error?: Error,
+    routePath?: string,
+    elapsedMs?: number,
+  ): Promise<LogEntry[]> {
     const cap = startCapture();
+    let clock = 1_700_000_000_000;
+    const clockSpy = elapsedMs === undefined ? null : vi.spyOn(Date, 'now').mockImplementation(() => clock);
     try {
       const ctx = http(fakeRequest(method, url, routePath), { statusCode });
-      const next: CallHandler = { handle: () => (error ? throwError(() => error) : of({ ok: true })) };
+      const next: CallHandler = {
+        handle: () =>
+          defer(() => {
+            if (elapsedMs !== undefined) clock += elapsedMs;
+            return error ? throwError(() => error) : of({ ok: true });
+          }),
+      };
       await lastValueFrom(new LoggingInterceptorClass().intercept(ctx, next)).catch(() => undefined);
     } finally {
+      clockSpy?.mockRestore();
       cap.stop();
     }
     return cap.entries;
@@ -1115,7 +1135,83 @@ describe('the HTTP access line and the 500 line log the route pattern, never req
     for (const needle of needles) expect(label ?? '').not.toContain(needle);
   });
 
-  it('the filter writes the URL only on the 500 branch: a 4xx on the same route logs nothing', () => {
+  // The SLOW warn line (duration > 1000 ms) is the access line's third
+  // emitter. An OAuth callback that exchanges its code with the provider is a
+  // realistic path past one second. Before this case, putting req.originalUrl
+  // back into that branch alone left the whole suite green (SEC-C1-1).
+  it('NEGATIVE CONTROL: a slow request (past the 1000 ms threshold) logs the SLOW warn line with the route pattern, never the URL: every platform-secret flow and an unrouted request', async () => {
+    const SLOW_MS = 1500;
+    const cases = [
+      ...FLOWS.map((f) => ({ name: f.name, method: f.method, url: f.url, routePath: f.route as string | undefined, pattern: f.route, status: f.status, needles: [f.secret, encodeURIComponent(f.secret)] })),
+      { name: 'an unrouted request', method: 'GET', url: UNROUTED_URL, routePath: undefined, pattern: UNROUTED, status: 200, needles: [UNROUTED_PATH_SECRET, UNROUTED_QUERY_SECRET, `${P}nowhere`] },
+    ];
+    const runs: Array<{ c: (typeof cases)[number]; entries: LogEntry[] }> = [];
+    for (const c of cases) runs.push({ c, entries: await throughInterceptor(c.method, c.url, c.status, undefined, c.routePath, SLOW_MS) });
+
+    const leaks = runs.flatMap(({ c, entries }) => entriesContaining(entries, c.needles));
+    expect(leaks, describeEntries(leaks)).toEqual([]);
+
+    for (const { c, entries } of runs) {
+      expect(entries.map((e) => e.channel), c.name).toEqual(['Logger#warn[HTTP]']);
+      expect(entries[0].text, c.name).toBe(`SLOW ${c.method} ${c.pattern} ${c.status} ${SLOW_MS}ms [${CORRELATION}]`);
+    }
+  });
+
+  // The committed form of the review grep (SEC-C1-1). The runtime cases above
+  // drive each emitter; this pins that no emitter can reach the URL at all,
+  // including one added later. The only URL read left is the filter's
+  // response body (`path: request.url`, the caller's own URL echoed back to
+  // the caller; crm-contact-duplicate pins it), which no log call references.
+  it('STATIC: LoggingInterceptor and GlobalHttpExceptionFilter read no request URL, path, query or params, except the filter response body, and no log call names that body', () => {
+    const URL_READ = /\b(?:url|originalUrl|baseUrl)\b|\b(?:req|request)\s*\??\.\s*(?:path|query|params)\b/g;
+    const code = (rel: string) =>
+      readFileSync(path.join(REPO_ROOT, rel), 'utf8')
+        .replace(/\r\n/g, '\n')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/(^|[^:])\/\/.*$/gm, '$1');
+    /** Each `this.logger.<level>(...)` and `errorRegistry.record(...)` call: its level (or 'record') and its argument text. */
+    const logCalls = (src: string) => {
+      const calls: Array<{ level: string; args: string }> = [];
+      for (const m of src.matchAll(/this\.logger\.(\w+)\(|errorRegistry\.(record)\(/g)) {
+        let depth = 1;
+        let i = m.index! + m[0].length;
+        const from = i;
+        for (; i < src.length && depth > 0; i++) {
+          if (src[i] === '(') depth++;
+          else if (src[i] === ')') depth--;
+        }
+        calls.push({ level: m[1] ?? m[2], args: src.slice(from, i - 1) });
+      }
+      return calls;
+    };
+
+    const interceptor = code('apps/server/src/core/interceptors/logging.interceptor.ts');
+    expect(interceptor.match(URL_READ) ?? [], 'logging.interceptor.ts reads the request URL').toEqual([]);
+
+    const filter = code('apps/server/src/core/filters/http-exception.filter.ts');
+    const reads = [...filter.matchAll(URL_READ)];
+    expect(reads.map((r) => r[0]), 'http-exception.filter.ts reads the request URL only once').toEqual(['url']);
+    const bodyStart = filter.indexOf('const body');
+    const bodyEnd = filter.indexOf('};', bodyStart);
+    const readLine = filter.slice(filter.lastIndexOf('\n', reads[0].index!) + 1, filter.indexOf('\n', reads[0].index!)).trim();
+    expect(readLine).toBe('path: request.url,');
+    expect(bodyStart).toBeGreaterThan(-1);
+    expect(reads[0].index!).toBeGreaterThan(bodyStart);
+    expect(reads[0].index!).toBeLessThan(bodyEnd);
+
+    // Every emitter, so a new one is seen here and gets its runtime case in
+    // this section; none of their arguments reads the URL or the body.
+    const interceptorCalls = logCalls(interceptor);
+    const filterCalls = logCalls(filter);
+    expect(interceptorCalls.map((c) => c.level)).toEqual(['warn', 'debug', 'error']);
+    expect(filterCalls.map((c) => c.level)).toEqual(['error', 'record']);
+    for (const c of [...interceptorCalls, ...filterCalls]) {
+      expect(c.args.match(URL_READ) ?? [], c.args).toEqual([]);
+      expect(c.args, c.args).not.toMatch(/\bbody\b/);
+    }
+  });
+
+  it('the filter logs only on the 500 branch: a 4xx on the same route logs nothing', () => {
     const { entries, status } = throughFilter('GET', `/commerce/public/invoice-link/${LINK_TOKEN}`, new ForbiddenException());
     expect(status).toBe(403);
     expect(entries).toEqual([]);
