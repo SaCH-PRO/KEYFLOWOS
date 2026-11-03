@@ -303,6 +303,11 @@
       "packet": "V1-03-KEY-CORTEX-PRINCIPAL"
     },
     {
+      "prefix": "v05a_",
+      "owner": "apps/server/test/payments-provider-callbacks.integration.test.ts",
+      "packet": "V1-05-PUB-PROVIDER-CALLBACKS"
+    },
+    {
       "prefix": "v06a_",
       "owner": "apps/server/test/bookings-core.integration.test.ts",
       "packet": "V1-06-BK-BASELINE-PARITY"
@@ -356,6 +361,11 @@
       "prefix": "v16a_",
       "owner": "apps/server/test/booking-concurrency.integration.test.ts",
       "packet": "V1-16-BK-SLOT-CONCURRENCY"
+    },
+    {
+      "prefix": "v18a_",
+      "owner": "apps/server/test/storefront-paid-event.integration.test.ts",
+      "packet": "V1-18-PUB-STOREFRONT-PAID-EVENT"
     },
     {
       "prefix": "v19a_",
@@ -433,6 +443,11 @@
       "packet": "V1-32-KEY-PROPOSAL-CLAIM"
     },
     {
+      "prefix": "v33a_",
+      "owner": "apps/server/test/storefront-checkout-retry.integration.test.ts",
+      "packet": "V1-33-PUB-CHECKOUT-RETRY-OFFLINE"
+    },
+    {
       "prefix": "v34a_",
       "owner": "apps/server/test/cash-position.integration.test.ts",
       "packet": "V1-34-DM-CASH-POSITION"
@@ -461,6 +476,11 @@
       "prefix": "v40a_",
       "owner": "apps/server/test/log-redaction.integration.test.ts",
       "packet": "V1-40-SEC-TRUST-CENSUS-REDACTION"
+    },
+    {
+      "prefix": "v41a_",
+      "owner": "apps/server/test/untrusted-payment-inputs.integration.test.ts",
+      "packet": "V1-41-DM-UNTRUSTED-MONEY-INPUTS"
     },
     {
       "prefix": "v42a_",

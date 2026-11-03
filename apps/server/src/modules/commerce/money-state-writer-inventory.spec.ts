@@ -88,6 +88,13 @@ export const MONEY_STATE_WRITERS: Inventory = {
       'in one transaction; the compare-and-set flip to REFUNDED it replaced is gone); retryPayment (FAILED -> PENDING); ' +
       'recordPublicPaymentIntent (PENDING intent row: create, or amount update on the existing intent)',
   },
+  'apps/server/src/modules/commerce/payment-evidence.service.ts': {
+    ops: { create: 1, updateMany: 1 },
+    why:
+      'V1-41 (M32, D-27): recordPendingPayment writes an evidence-extracted or Drive-intake payment PENDING (no ' +
+      'posting, no balance move); confirmPendingPayment records the money through recordPayment as the confirming ' +
+      'member and retires the pending row PENDING -> CONFIRMED (compare-and-set on status)',
+  },
   'apps/server/src/modules/payments/payments.service.ts': {
     ops: { create: 7 },
     why:

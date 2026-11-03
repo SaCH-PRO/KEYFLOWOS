@@ -27,6 +27,13 @@
  * the 'approved' flip) replays the first payment instead of crediting the
  * invoice twice; two record_payment steps of one plan keep distinct keys.
  * The real replay is proven in payments-actor PA-18c..d.
+ *
+ * V1-41-DM-UNTRUSTED-MONEY-INPUTS (D-27): the step no longer records money.
+ * It hands the same arguments to PaymentEvidenceService.recordPendingPayment,
+ * which writes the payment PENDING (no posting, no balance move) until a member
+ * with revenue:write confirms it; CommerceService.recordPayment is never called
+ * by the plan. The pending row and its confirmation are proven in
+ * test/untrusted-payment-inputs.integration.test.ts.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DriveIntakeOrchestrator, type DriveIntakePlan } from './drive-intake-orchestrator.service';
@@ -49,6 +56,8 @@ function makeOrchestrator(plan: DriveIntakePlan) {
     recordPayment: vi.fn().mockResolvedValue({ payment: { id: 'pay_dio' } }),
     createInvoice: vi.fn().mockResolvedValue({ id: 'inv_created_by_plan' }),
   };
+  // V1-41 (D-27): the PENDING writer the record_payment step calls.
+  const paymentEvidence = { recordPendingPayment: vi.fn().mockResolvedValue({ id: 'pay_dio', status: 'PENDING' }) };
   const invoiceWorkflow = { transition: vi.fn().mockResolvedValue(undefined) };
   const crm = { addTask: vi.fn() };
   const governance = { resolveApproval: vi.fn() };
@@ -62,8 +71,9 @@ function makeOrchestrator(plan: DriveIntakePlan) {
     invoiceWorkflow as any,
     {} as any,
     {} as any,
+    paymentEvidence as any,
   );
-  return { orchestrator, prisma, commerce };
+  return { orchestrator, prisma, commerce, paymentEvidence };
 }
 
 function paymentPlan(payload: Record<string, unknown>, extra: DriveIntakePlan['actions'] = []): DriveIntakePlan {
@@ -79,13 +89,14 @@ describe('DriveIntakeOrchestrator.executePlan record_payment names the approver 
   beforeEach(() => vi.clearAllMocks());
 
   it('DIO-01: an approved plan records its payment with the approving user as the actor', async () => {
-    const { orchestrator, commerce } = makeOrchestrator(
+    const { orchestrator, commerce, paymentEvidence } = makeOrchestrator(
       paymentPlan({ invoiceId: 'inv_dio', amount: 40, method: 'bank_transfer', reference: 'DIO-1' }),
     );
     const result = await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
     expect(result.success).toBe(true);
-    expect(commerce.recordPayment).toHaveBeenCalledTimes(1);
-    expect(commerce.recordPayment).toHaveBeenCalledWith(
+    expect(paymentEvidence.recordPendingPayment).toHaveBeenCalledTimes(1);
+    expect(commerce.recordPayment).not.toHaveBeenCalled();
+    expect(paymentEvidence.recordPendingPayment).toHaveBeenCalledWith(
       'inv_dio',
       BIZ,
       { amount: 40, method: 'bank_transfer', reference: 'DIO-1', idempotencyKey: `drive:${INTAKE}:0` },
@@ -94,23 +105,24 @@ describe('DriveIntakeOrchestrator.executePlan record_payment names the approver 
   });
 
   it('DIO-02: a payment on the invoice the same plan created is recorded with the approving user as the actor', async () => {
-    const { orchestrator, commerce } = makeOrchestrator(
+    const { orchestrator, commerce, paymentEvidence } = makeOrchestrator(
       paymentPlan({ amount: 25, method: 'cash' }, [
         { type: 'create_invoice', payload: { items: [{ description: 'x', quantity: 1, unitPrice: 25 }], currency: 'TTD' } },
       ]),
     );
     const result = await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
     expect(result.success).toBe(true);
-    expect(commerce.recordPayment).toHaveBeenCalledWith(
+    expect(paymentEvidence.recordPendingPayment).toHaveBeenCalledWith(
       'inv_created_by_plan',
       BIZ,
       { amount: 25, method: 'cash', reference: undefined, idempotencyKey: `drive:${INTAKE}:1` },
       { actorId: APPROVER },
     );
+    expect(commerce.recordPayment).not.toHaveBeenCalled();
   });
 
   it('DIO-03: a recorder named in the plan payload never reaches recordPayment; the approver is the actor', async () => {
-    const { orchestrator, commerce } = makeOrchestrator(
+    const { orchestrator, commerce, paymentEvidence } = makeOrchestrator(
       paymentPlan({
         invoiceId: 'inv_dio',
         amount: 10,
@@ -122,22 +134,24 @@ describe('DriveIntakeOrchestrator.executePlan record_payment names the approver 
       }),
     );
     await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
-    const [, , input, options] = commerce.recordPayment.mock.calls[0];
+    const [, , input, options] = paymentEvidence.recordPendingPayment.mock.calls[0];
     expect(input).toEqual({ amount: 10, method: 'cash', reference: 'DIO-3', idempotencyKey: `drive:${INTAKE}:0` });
     expect(options).toEqual({ actorId: APPROVER });
+    expect(commerce.recordPayment).not.toHaveBeenCalled();
   });
 
   for (const placeholder of ['system', 'user']) {
     it(`DIO-04: a plan run with no human approver ("${placeholder}") records the payment with no actor; the placeholder is never the recorder`, async () => {
-      const { orchestrator, commerce } = makeOrchestrator(
+      const { orchestrator, commerce, paymentEvidence } = makeOrchestrator(
         paymentPlan({ invoiceId: 'inv_dio', amount: 5, method: 'cash', reference: 'DIO-4' }),
       );
       const result = await orchestrator.executePlan(BIZ, INTAKE, placeholder);
       expect(result.success).toBe(true);
-      expect(commerce.recordPayment).toHaveBeenCalledTimes(1);
-      const options = commerce.recordPayment.mock.calls[0][3] as { actorId?: string | null } | undefined;
+      expect(paymentEvidence.recordPendingPayment).toHaveBeenCalledTimes(1);
+      expect(commerce.recordPayment).not.toHaveBeenCalled();
+      const options = paymentEvidence.recordPendingPayment.mock.calls[0][3] as { actorId?: string | null } | undefined;
       expect(options?.actorId ?? null).toBeNull();
-      expect(JSON.stringify(commerce.recordPayment.mock.calls[0])).not.toContain(`"${placeholder}"`);
+      expect(JSON.stringify(paymentEvidence.recordPendingPayment.mock.calls[0])).not.toContain(`"${placeholder}"`);
     });
   }
 
@@ -151,12 +165,13 @@ describe('DriveIntakeOrchestrator.executePlan record_payment names the approver 
         { type: 'record_payment', payload: { invoiceId: 'inv_dio', amount: 10, method: 'cash', reference: 'SAME' } },
       ],
     };
-    const { orchestrator, commerce } = makeOrchestrator(plan);
+    const { orchestrator, commerce, paymentEvidence } = makeOrchestrator(plan);
     await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
     await orchestrator.executePlan(BIZ, INTAKE, 'user_dio_second_approver');
-    const keys = commerce.recordPayment.mock.calls.map((c: unknown[]) => (c[2] as { idempotencyKey?: string }).idempotencyKey);
+    const keys = paymentEvidence.recordPendingPayment.mock.calls.map((c: unknown[]) => (c[2] as { idempotencyKey?: string }).idempotencyKey);
     expect(keys).toEqual([`drive:${INTAKE}:0`, `drive:${INTAKE}:1`, `drive:${INTAKE}:0`, `drive:${INTAKE}:1`]);
     // The key is the plan step's identity, never the approver's.
     expect(keys.join(' ')).not.toContain(APPROVER);
+    expect(commerce.recordPayment).not.toHaveBeenCalled();
   });
 });

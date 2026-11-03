@@ -1,8 +1,8 @@
-import { Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Put, Post, Patch, Param, Body, Query, Inject, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
 import { SiteService } from './site.service';
-import { StoreOrderService } from './store-order.service';
+import { CHECKOUT_IN_FLIGHT_RETRY_AFTER_S, CheckoutInFlightException, StoreOrderService } from './store-order.service';
 import { PromoCodeService } from './promo-code.service';
 import { IntakeService } from './intake.service';
 import { QualificationService } from './qualification.service';
@@ -12,6 +12,7 @@ import { CaseStudyService } from './case-study.service';
 import { PaymentsService } from '../payments/payments.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { HoneypotGuard, Honeypot } from '../../core/guards/honeypot.guard';
 import { sanitize, sanitizeObject } from '../../core/utils/sanitize';
@@ -174,7 +175,7 @@ export class SiteController {
       country: sanitize(body.customer.country ?? null) ?? undefined,
     };
 
-    const order = await this.storeOrderService.createOrder({
+    const orderInput = {
       businessId,
       cartItems: body.items,
       customerInfo: cleanCustomer,
@@ -185,24 +186,55 @@ export class SiteController {
       storefrontSlug: slug,
       visitorId: resolvedVid,
       referralCode: body.referralCode ? sanitize(body.referralCode, 100) ?? undefined : undefined,
-    });
+    };
 
-    let payment: any = null;
-    if (body.paymentMethod && body.paymentMethod !== 'CASH' && body.paymentMethod !== 'MANUAL') {
-      payment = await this.paymentsService.createStorePayment({
-        orderId: order.id,
-        amount: order.total,
-        currency: order.currency,
-        method: body.paymentMethod,
-        businessId,
-        returnUrl: body.returnUrl,
-      });
+    // CASH, MANUAL and no method start no provider session.
+    const paymentMethod = body.paymentMethod;
+    const startPayment = paymentMethod && paymentMethod !== 'CASH' && paymentMethod !== 'MANUAL'
+      ? (order: { id: string; total: number; currency: string }) =>
+          this.paymentsService.createStorePayment({
+            orderId: order.id,
+            amount: order.total,
+            currency: order.currency,
+            method: paymentMethod,
+            businessId,
+            returnUrl: body.returnUrl,
+          })
+      : null;
+
+    // V1-33 (M37, SSP-BP-03): a retried checkout carries the same
+    // Idempotency-Key and is answered with the order (and payment session)
+    // the first call created. Without the header nothing changes. A retry
+    // while the first call is still starting the session, past the wait, is
+    // 409 with Retry-After (V1-33 review, V33-CR-1).
+    const idempotencyKey = SiteController.checkoutIdempotencyKey(req.headers['idempotency-key']);
+    if (idempotencyKey) {
+      const result = await this.storeOrderService
+        .createOrderOnce(orderInput, idempotencyKey, startPayment)
+        .catch((err: unknown) => {
+          if (err instanceof CheckoutInFlightException) req.res?.setHeader('Retry-After', String(CHECKOUT_IN_FLIGHT_RETRY_AFTER_S));
+          throw err;
+        });
+      if (result.replayed) req.res?.setHeader('Idempotent-Replayed', 'true');
+      return { order: result.order, payment: result.payment };
     }
+
+    const order = await this.storeOrderService.createOrder(orderInput);
+    const payment = startPayment ? await startPayment(order) : null;
 
     return {
       order,
       payment,
     };
+  }
+
+  /** V1-33: the checkout's Idempotency-Key header, trimmed; absent or blank means none. At most 255 characters. */
+  private static checkoutIdempotencyKey(header: string | string[] | undefined): string | null {
+    const raw = Array.isArray(header) ? header[0] : header;
+    const key = typeof raw === 'string' ? raw.trim() : '';
+    if (!key) return null;
+    if (key.length > 255) throw new BadRequestException('Idempotency-Key must be at most 255 characters');
+    return key;
   }
 
   @UseGuards(PublicRateLimitGuard)
@@ -288,6 +320,22 @@ export class SiteController {
     @Body() body: { status: string },
   ) {
     return this.storeOrderService.updateOrderStatus(orderId, body.status, businessId);
+  }
+
+  /**
+   * V1-33 (M37): the operator records the cash a customer paid for a CASH
+   * (or MANUAL) storefront order. Revenue write, like recording any payment;
+   * the recorder is the authenticated user, never a body field.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/orders/:orderId/complete-offline')
+  completeOfflineOrder(
+    @Param('businessId') businessId: string,
+    @Param('orderId') orderId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    return this.storeOrderService.completeOfflineOrder(orderId, businessId, req?.user?.id ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
