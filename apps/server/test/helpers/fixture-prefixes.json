@@ -473,6 +473,11 @@
       "packet": "V1-37 / V1-37c-CURRENCY-NORMALIZE-CASH"
     },
     {
+      "prefix": "v38a_",
+      "owner": "apps/server/test/contact-privacy-purge.integration.test.ts",
+      "packet": "V1-38-CT-PRIVACY-PURGE-STATUS"
+    },
+    {
       "prefix": "v40a_",
       "owner": "apps/server/test/log-redaction.integration.test.ts",
       "packet": "V1-40-SEC-TRUST-CENSUS-REDACTION"
