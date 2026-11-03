@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CatalogService } from '../catalog/catalog.service';
+import { contactStatusForExternalCustomer } from '../crm/crm.constants';
 
 export interface ShopifyCredentials {
   shopDomain: string;
@@ -224,7 +225,8 @@ export class ShopifyService {
               lastName: order.customer.last_name || 'Customer',
               email: order.customer.email,
               phone: order.customer.phone || null,
-              status: 'CUSTOMER',
+              // A Shopify order makes its customer a client (CF-49: canonical vocabulary only).
+              status: contactStatusForExternalCustomer(1),
               source: 'shopify',
               custom: { shopifyCustomerId: order.customer.id },
             },
@@ -293,7 +295,6 @@ export class ShopifyService {
         lastName: customer.last_name || 'Customer',
         email: customer.email,
         phone: customer.phone || null,
-        status: customer.orders_count > 0 ? 'CUSTOMER' : 'LEAD',
         source: 'shopify',
         addressLine1: customer.default_address?.address1 || null,
         city: customer.default_address?.city || null,
@@ -305,6 +306,9 @@ export class ShopifyService {
         },
       };
 
+      // CF-49: Shopify maps a NEW contact into the canonical vocabulary and
+      // never overwrites an existing contact's status (it used to write
+      // 'CUSTOMER', or downgrade a PROSPECT/CLIENT to 'LEAD' on every sync).
       if (existing) {
         await this.prisma.client.contact.update({
           where: { id: existing.id },
@@ -312,7 +316,9 @@ export class ShopifyService {
         });
         updated++;
       } else {
-        await this.prisma.client.contact.create({ data: contactData });
+        await this.prisma.client.contact.create({
+          data: { ...contactData, status: contactStatusForExternalCustomer(customer.orders_count) },
+        });
         imported++;
       }
     }

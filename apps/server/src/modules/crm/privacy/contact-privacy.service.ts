@@ -8,6 +8,7 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { randomBytes, createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../core/prisma/prisma.service';
 import { ObjectStorageService } from '../../../core/object-storage';
 import {
@@ -31,6 +32,64 @@ const DOWNLOAD_TTL_SECONDS = 24 * 60 * 60; // signed-URL validity (1 day)
 const EXPORT_TTL_DAYS = 7;
 
 /**
+ * What a GDPR purge sets on the Contact row (D-25, CF-48). Every field that
+ * identifies or describes the person is cleared; the row keeps only its id,
+ * business, status, ownership/visibility, timestamps and derived scores, so the
+ * invoices, quotes and bookings retained below still have the row they
+ * reference. Json columns are set to SQL NULL, `custom` and `tags` to empty.
+ */
+const ERASED_CONTACT_FIELDS = {
+  firstName: null,
+  lastName: null,
+  displayName: null,
+  email: null,
+  emailNormalized: null,
+  secondaryEmail: null,
+  phone: null,
+  phoneNormalized: null,
+  secondaryPhone: null,
+  whatsappNumber: null,
+  addressLine1: null,
+  addressLine2: null,
+  city: null,
+  state: null,
+  postalCode: null,
+  country: null,
+  timezone: null,
+  language: null,
+  companyName: null,
+  jobTitle: null,
+  department: null,
+  industry: null,
+  ageGroup: null,
+  notesInternal: null,
+  source: null,
+  sourceDetail: null,
+  segment: null,
+  preferredChannel: null,
+  bestChannel: null,
+  bestChannelConfidence: null,
+  bestTimeWindowJson: Prisma.DbNull,
+  preferredServices: Prisma.DbNull,
+  riskFlags: Prisma.DbNull,
+  opportunities: Prisma.DbNull,
+  nextBestAction: null,
+  accountId: null,
+  tags: [] as string[],
+  custom: {},
+};
+
+/**
+ * The basis on which a purge keeps the records that reference the contact:
+ * invoices, quotes and bookings are financial and transaction records the
+ * business must retain (GDPR Art. 17(3)(b), legal obligation).
+ */
+const PURGE_RETAINED_BASIS = 'legal_obligation:financial_records';
+const PURGE_RETAINED_BASIS_DETAIL =
+  'Invoices, quotes and bookings are retained as financial and transaction records ' +
+  '(GDPR Art. 17(3)(b)); they keep referencing the anonymised, deleted contact row.';
+
+/**
  * GDPR export & forget service (M7).
  *
  * Two flows:
@@ -45,10 +104,14 @@ const EXPORT_TTL_DAYS = 7;
  *   2. **Forget** — soft-deletes the contact, opens a
  *      `ContactForgetRequest` with `purgeAt = now + graceDays` (per
  *      business setting; default 7), and lets the operator cancel
- *      during the window. After `purgeAt` a scheduled purge job hard-
- *      deletes the contact + child rows in a single transaction and
- *      replaces identifiers in the audit log with hashed placeholders
- *      so the compliance trail survives without PII.
+ *      during the window. After `purgeAt` a scheduled purge erases the
+ *      contact's personal fields in place, deletes its personal child
+ *      rows, scrubs the audit log, and records one `forget_purged`
+ *      audit entry naming what was erased and what was retained and on
+ *      which basis, all in a single transaction (D-25). The contact row
+ *      itself stays, anonymised and soft-deleted: invoices, quotes and
+ *      bookings reference it (ON DELETE NO ACTION) and are retained as
+ *      financial records.
  */
 @Injectable()
 export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
@@ -426,11 +489,10 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       for (const req of due) {
         if (!req.contactId) continue; // already detached from a purged contact
         try {
-          await this.purgeOne(req.businessId, req.contactId);
-          purged += 1;
+          if (await this.purgeOne(req.id, req.businessId, req.contactId)) purged += 1;
         } catch (err: any) {
           this.logger.warn(
-            `[ContactPrivacy] purge failed contact=${req.contactId}: ${err instanceof Error ? err.message : err}`,
+            `[ContactPrivacy] purge failed request=${req.id} contact=${req.contactId}: ${err instanceof Error ? err.message : err}`,
           );
         }
       }
@@ -444,73 +506,96 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Hard-delete a contact and all its child rows; scrub identifiers
-   * in the audit log (replace contactId + actor PII with hashed
-   * placeholders) so the compliance trail survives without leaking
-   * PII. Performed in a single transaction.
+   * Erase one forgotten contact (D-25, CF-48). In a single transaction:
+   *
+   *   1. claim the request (requested -> purged, detached, hashed); a request
+   *      that is no longer 'requested' is a no-op;
+   *   2. erase the Contact row's personal fields IN THE REQUEST'S BUSINESS; a
+   *      request naming another business's contact erases nothing and the
+   *      claim rolls back;
+   *   3. delete the personal child rows (events, notes, tasks, media, custom
+   *      field values, tag links, export jobs) and blank import raw data;
+   *   4. scrub the contact's audit trail down to the hash;
+   *   5. write the forget_purged entry naming what was erased, what was
+   *      retained and on which basis. It is mandatory: if it cannot be
+   *      written, nothing above commits.
+   *
+   * The row is not deleted. `contact.delete` is a soft delete under the
+   * soft-delete extension (the old purge recorded 'GDPR purge completed' over
+   * a row that kept every personal field), and invoices and bookings reference
+   * the row with ON DELETE NO ACTION because they are retained records.
+   *
+   * Returns true when this call purged the contact, false when the request
+   * had already left 'requested'.
    */
-  private async purgeOne(businessId: string, contactId: string): Promise<void> {
+  private async purgeOne(requestId: string, businessId: string, contactId: string): Promise<boolean> {
     const contactHash = this.audit.hashContact(businessId, contactId);
     const purgeStart = Date.now();
-    const expiredJobs = await this.prisma.client.contactExportJob.findMany({
-      where: { contactId },
+    const exportJobs = await this.prisma.client.contactExportJob.findMany({
+      where: { contactId, businessId },
       select: { id: true, jsonKey: true, zipKey: true },
     });
 
-    await this.prisma.client.$transaction(async (tx) => {
-      // Snapshot child counts before deletion (for audit metadata).
-      const counts = {
-        events: await tx.contactEvent.count({ where: { contactId } }),
-        notes: await tx.contactNote.count({ where: { contactId } }),
-        tasks: await tx.contactTask.count({ where: { contactId } }),
-        media: await tx.contactMedia.count({ where: { contactId } }),
-        invoices: await tx.invoice.count({ where: { contactId } }),
-        quotes: await tx.quote.count({ where: { contactId } }),
-        bookings: await tx.booking.count({ where: { contactId } }),
-      };
+    const purged = await this.prisma.client.$transaction(async (tx) => {
+      const now = new Date();
+      const claimed = await tx.contactForgetRequest.updateMany({
+        where: { id: requestId, businessId, contactId, status: 'requested' },
+        data: { status: 'purged', purgedAt: now, contactId: null, contactHash },
+      });
+      if (claimed.count === 0) return false;
 
-      // Scrub identifiers in the audit log: keep the entries (they are
-      // tamper-evident compliance evidence) but null out direct PII so
-      // the contact is unrecoverable from this table.
-      await tx.contactAuditEntry.updateMany({
+      // Tenant-bound: the contact must belong to the request's business.
+      const erased = await tx.contact.updateMany({
+        where: { id: contactId, businessId },
+        data: ERASED_CONTACT_FIELDS,
+      });
+      if (erased.count !== 1) {
+        throw new NotFoundException(
+          `Forget request ${requestId} names no contact of business ${businessId}; nothing was purged`,
+        );
+      }
+      // The request soft-deleted the row; keep that deletedAt, or set one if
+      // the contact was restored outside the forget flow.
+      await tx.contact.updateMany({
+        where: { id: contactId, businessId, deletedAt: null },
+        data: { deletedAt: now },
+      });
+
+      // Personal child rows. None of these is a retained record.
+      const events = await tx.contactEvent.deleteMany({ where: { contactId, businessId } });
+      const notes = await tx.contactNote.deleteMany({ where: { contactId, businessId } });
+      const tasks = await tx.contactTask.deleteMany({ where: { contactId, businessId } });
+      const media = await tx.contactMedia.deleteMany({ where: { contactId, businessId } });
+      const customFieldValues = await tx.contactCustomFieldValue.deleteMany({ where: { contactId } });
+      const contactTags = await tx.contactTag.deleteMany({ where: { contactId } });
+      const exportJobRows = await tx.contactExportJob.deleteMany({ where: { contactId, businessId } });
+      const importRecords = await tx.contactImportContact.updateMany({
         where: { contactId },
+        data: { contactId: null, status: 'PURGED', rawData: {} },
+      });
+
+      // Scrub the audit trail: keep the entries (tamper-evident compliance
+      // evidence), anchored by the hash only and carrying no personal data.
+      const auditScrubbed = await tx.contactAuditEntry.updateMany({
+        where: { contactId, businessId },
         data: {
           contactId: null,
+          contactHash,
           before: {} as never,
           after: {} as never,
           actor: { type: 'SYSTEM', label: 'purged' } as never,
           reason: 'PII scrubbed on GDPR purge',
+          ip: null,
+          userAgent: null,
         },
       });
 
-      // Hard-delete child rows. Order matters where foreign keys
-      // restrict (most use ON DELETE CASCADE so contact.delete would
-      // suffice, but explicit deletes give us confidence under strict
-      // FK constraints we don't fully control here).
-      await tx.contactImportContact.updateMany({
-        where: { contactId },
-        data: { contactId: null, status: 'PURGED' },
-      });
-      await tx.contactExportJob.deleteMany({ where: { contactId } });
-      // Decouple the forget request from the contact BEFORE we delete
-      // the contact so the request survives the hard-purge for
-      // compliance review (status=purged, contactId=null, hash kept).
-      await tx.contactForgetRequest.update({
-        where: { contactId },
-        data: {
-          status: 'purged',
-          purgedAt: new Date(),
-          contactId: null,
-          contactHash,
-        },
-      });
+      // What stays, and why. aggregate() also counts soft-deleted rows (the
+      // soft-delete extension filters count()), so these are every retained row.
+      const invoices = await tx.invoice.aggregate({ where: { contactId, businessId }, _count: { _all: true } });
+      const quotes = await tx.quote.aggregate({ where: { contactId, businessId }, _count: { _all: true } });
+      const bookings = await tx.booking.aggregate({ where: { contactId, businessId }, _count: { _all: true } });
 
-      // The Contact row owns CASCADEs for events / notes / tasks /
-      // media / quotes / invoices / bookings — deleting it cleans
-      // those up automatically.
-      await tx.contact.delete({ where: { id: contactId } });
-
-      // Final audit entry, anchored only by the hash.
       await tx.contactAuditEntry.create({
         data: {
           businessId,
@@ -518,24 +603,56 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
           contactHash,
           action: 'forget_purged',
           entityType: 'contact',
+          entityId: requestId,
           actor: { type: 'SYSTEM', label: 'forget-purge' } as never,
-          after: { ...counts, durationMs: Date.now() - purgeStart } as never,
-          reason: 'GDPR purge completed',
-          changedFields: [],
+          after: {
+            retainedBasis: PURGE_RETAINED_BASIS,
+            retainedBasisDetail: PURGE_RETAINED_BASIS_DETAIL,
+            retained: {
+              contactRow: 'anonymised',
+              invoices: invoices._count._all,
+              quotes: quotes._count._all,
+              bookings: bookings._count._all,
+            },
+            erased: {
+              contactFields: Object.keys(ERASED_CONTACT_FIELDS).length,
+              events: events.count,
+              notes: notes.count,
+              tasks: tasks.count,
+              media: media.count,
+              customFieldValues: customFieldValues.count,
+              contactTags: contactTags.count,
+              exportJobs: exportJobRows.count,
+              importRecords: importRecords.count,
+              auditEntriesScrubbed: auditScrubbed.count,
+            },
+            durationMs: Date.now() - purgeStart,
+          } as never,
+          reason: 'GDPR purge: personal data erased; financial records retained (legal obligation)',
+          changedFields: Object.keys(ERASED_CONTACT_FIELDS),
         },
       });
+      return true;
     });
 
-    // Best-effort cleanup of export bundles in object storage.
-    if (expiredJobs.length > 0) {
-      const { client, bucket } = this.s3();
-      await Promise.allSettled(
-        expiredJobs.flatMap((job) => [
-          client.send(new DeleteObjectCommand({ Bucket: bucket, Key: job.jsonKey })),
-          client.send(new DeleteObjectCommand({ Bucket: bucket, Key: job.zipKey })),
-        ]),
-      );
+    // Best-effort cleanup of export bundles in object storage. The purge has
+    // committed; a storage failure is logged, not reported as a failed purge.
+    if (purged && exportJobs.length > 0) {
+      try {
+        const { client, bucket } = this.s3();
+        await Promise.allSettled(
+          exportJobs.flatMap((job) => [
+            client.send(new DeleteObjectCommand({ Bucket: bucket, Key: job.jsonKey })),
+            client.send(new DeleteObjectCommand({ Bucket: bucket, Key: job.zipKey })),
+          ]),
+        );
+      } catch (err: unknown) {
+        this.logger.warn(
+          `[ContactPrivacy] export bundle cleanup failed request=${requestId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }
+    return purged;
   }
 
   // ------------------------- Helpers -------------------------
