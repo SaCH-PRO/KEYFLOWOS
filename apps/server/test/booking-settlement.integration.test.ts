@@ -47,8 +47,9 @@
  * V1-28 review repairs (red at the V1-28 head e8d1f172, green after):
  *   S-02b CR-V28-2   a credited deposit nets only what it still bills (FULLY_CREDITED: nothing)
  *   S-04  SEC-V28-1  the invoiceError is a fixed sentence plus a code, never the raw error text
- *   S-04b SEC-V28-1  an invoice-number collision (INV-<Date.now()>) is retried; a persistent database
- *                    failure answers the fixed sentence, never Prisma's text, paths or column names
+ *   S-04b SEC-V28-1  an invoice-number collision is retried; a persistent database failure answers
+ *                    the fixed sentence, never Prisma's text, paths or column names (aligned by V1-43:
+ *                    the retry is the allocator's P2002 retry, met through a real held collision)
  *   S-05c CR-V28-1   the final paid while the deposit is still owed (SENT or DRAFT) is not PAID
  *   S-07c SEC-V28-3  a refunded deposit (reopened to SENT under D-14) forfeits nothing, is not
  *                    restored as DEPOSIT_PAID on reinstatement, and is owed again on its own invoice
@@ -591,40 +592,66 @@ describe('V1-28 the completion invoice nets the deposit (CF-43)', () => {
   });
 
   it('S-04b SEC-V28-1: an invoice-number collision is retried; a persistent database failure answers a fixed invoiceError, never the database text', async () => {
-    // CommerceService numbers invoices INV-<Date.now()> under
-    // @@unique([businessId, invoiceNumber]): an invoice already holding
-    // INV-<T>, and Date.now() pinned to T while an attempt builds its row,
-    // is the collision two completions in one millisecond meet.
-    const T = 4102444800123;
+    // V1-43 (D-15): CommerceService draws the business's next number
+    // (allocateDocumentNumber) under @@unique([businessId, invoiceNumber]) and
+    // retries a collision itself (the retry that lived in issueFinalInvoice).
+    // The collision is a real one: another connection inserts the number the
+    // completion will draw and holds it uncommitted, so the completion's
+    // insert waits on the unique index; once it commits, that insert fails
+    // with P2002 and the allocator redraws the following number.
+    const { allocateDocumentNumber } = await import('../src/modules/commerce/document-number');
     await db.contact.create({ data: { id: `${P}c_collide`, businessId: ID.biz, firstName: 'Col', lastName: 'Lide' } });
-    await db.invoice.create({ data: { id: `${P}inv_collide`, businessId: ID.biz, contactId: `${P}c_collide`, invoiceNumber: `INV-${T}`, total: 1 } });
-    const real = commerce.createInvoiceForService.bind(commerce);
-    // The pin is held across the awaited call: since V1-37 the invoice number is
-    // drawn after an awaited currency read, so a synchronous pin had already
-    // been restored when Date.now() ran and the collision never happened.
-    const pinned = async (...args: unknown[]) => {
-      const now = vi.spyOn(Date, 'now').mockReturnValue(T);
-      try {
-        return await real(...args);
-      } finally {
-        now.mockRestore();
-      }
-    };
 
     // The first attempt collides; the retry draws the invoice up.
     const once = await book(ID.svcDep, 's04b_once');
-    vi.spyOn(commerce, 'createInvoiceForService').mockImplementationOnce(pinned);
-    const ok = await setStatus(once.bookingId, 'COMPLETED');
-    vi.restoreAllMocks();
+    const held = await allocateDocumentNumber(db, ID.biz, 'invoice');
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let inserted!: () => void;
+    const ready = new Promise<void>((r) => { inserted = r; });
+    const holder = db.$transaction(async (tx: any) => {
+      await tx.invoice.create({ data: { id: `${P}inv_collide`, businessId: ID.biz, contactId: `${P}c_collide`, invoiceNumber: held, total: 1 } });
+      inserted();
+      await gate;
+    }, { timeout: 60_000, maxWait: 10_000 });
+    await Promise.race([ready, holder]);
+    const pending = setStatus(once.bookingId, 'COMPLETED').then((r) => r);
+    let blocked = false;
+    try {
+      for (const until = Date.now() + 5000; !blocked && Date.now() < until; ) {
+        const rows: Array<{ n: number }> = await db.$queryRawUnsafe(
+          `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND starts_with(query, 'INSERT INTO "public"."invoices"')`,
+        );
+        blocked = rows[0].n > 0;
+        if (!blocked) await new Promise((r) => setTimeout(r, 20));
+      }
+    } finally {
+      release();
+      await holder;
+    }
+    const ok = await pending;
+    expect(blocked, `the completion drew ${held} and waited on the unique index`).toBe(true);
     expect(ok.status, JSON.stringify(ok.body)).toBe(201);
     expect(ok.body.invoiceError, JSON.stringify(ok.body.invoicing)).toBeNull();
     expect(ok.body.invoicing).toMatchObject({ status: 'CREATED', amount: 75 });
-    expect((await finalInvoicesOf(once.bookingId)).map((i) => money(i.total))).toEqual([75]);
+    const finals = await finalInvoicesOf(once.bookingId);
+    expect(finals.map((i) => money(i.total))).toEqual([75]);
+    const following = `INV-${String(Number(held.slice(4)) + 1).padStart(4, '0')}`;
+    expect(finals[0].invoiceNumber, 'the retry drew the following number').toBe(following);
+    expect(ok.body.invoicing.invoiceNumber).toBe(following);
 
     // Every attempt collides: FAILED, with a code and a sentence that carry
-    // none of Prisma's text (invocation, server path, source, columns).
+    // none of Prisma's text (invocation, server path, source, columns). The
+    // failure is Prisma's own P2002 from a real duplicate insert.
+    let collision: unknown;
+    try {
+      await db.invoice.create({ data: { businessId: ID.biz, contactId: `${P}c_collide`, invoiceNumber: held, total: 1 } });
+    } catch (err) {
+      collision = err;
+    }
+    expect((collision as { code?: string } | undefined)?.code).toBe('P2002');
     const always = await book(ID.svcDep, 's04b_always');
-    vi.spyOn(commerce, 'createInvoiceForService').mockImplementation(pinned);
+    vi.spyOn(commerce, 'createInvoiceForService').mockRejectedValue(collision);
     const res = await setStatus(always.bookingId, 'COMPLETED');
     vi.restoreAllMocks();
     expect(res.status, JSON.stringify(res.body)).toBe(201);

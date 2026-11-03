@@ -23,6 +23,7 @@ import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
 import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
+import { allocateDocumentNumber, retryDocumentNumber } from './document-number';
 import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/update-invoice.dto';
 import {
   decideQuoteBulkMove,
@@ -476,11 +477,14 @@ export class CommerceService {
         : `${service.name}${options?.descriptionSuffix ?? ''}`;
     // V1-37 (CF-38, D-13): the business currency, not the literal 'TTD'.
     const currency = await this.documentCurrency(businessId);
-    return this.prisma.client.invoice.create({
+    // V1-43 (D-15): the business's next number, in this create's own
+    // transaction; a collision is retried with the following number. Booking
+    // invoices (deposit, booking-time, completion) are all drawn up here.
+    return retryDocumentNumber('invoice', () => this.prisma.client.$transaction(async (tx) => tx.invoice.create({
       data: {
         businessId,
         contactId,
-        invoiceNumber: `INV-${Date.now()}`,
+        invoiceNumber: await allocateDocumentNumber(tx, businessId, 'invoice'),
         status: 'DRAFT',
         issueDate: new Date(),
         subtotal: total,
@@ -499,7 +503,7 @@ export class CommerceService {
         },
       },
       include: { items: true, contact: true },
-    });
+    })));
   }
 
   /**
@@ -738,7 +742,6 @@ export class CommerceService {
     const total = input.total != null ? roundMoney(input.total) : calculated.total;
     const data: any = {
       businessId: input.businessId,
-      invoiceNumber: input.invoiceNumber ?? `INV-${Date.now()}`,
       status: 'DRAFT',
       issueDate: new Date(),
       dueDate: input.dueDate ? new Date(input.dueDate) : null,
@@ -767,10 +770,14 @@ export class CommerceService {
     if (input.contactId !== undefined) {
       data.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
     }
-    const invoice = await this.prisma.client.invoice.create({
-      data,
+    // V1-43 (D-15): a number the caller names (document intake) is kept as
+    // given; otherwise the business's next number is drawn in this create's
+    // own transaction, and a collision is retried with the following number.
+    const create = () => this.prisma.client.$transaction(async (tx) => tx.invoice.create({
+      data: { ...data, invoiceNumber: input.invoiceNumber ?? (await allocateDocumentNumber(tx, input.businessId, 'invoice')) },
       include: { items: true, contact: true },
-    });
+    }));
+    const invoice = input.invoiceNumber != null ? await create() : await retryDocumentNumber('invoice', create);
     this.events.emit('invoice.created', {
       invoice,
       businessId: input.businessId,
@@ -2507,11 +2514,14 @@ export class CommerceService {
     // pre-send drafts can never be acted on via a leaked link.
     // V1-53: the only unique index a new quote can hit is
     // (businessId, quoteNumber): its P2002 is a 409, not a 500.
-    const quote = await this.prisma.client.quote.create({
+    // V1-43 (D-15): a number the caller names is kept as given (and a taken
+    // one is that 409); otherwise the business's next number is drawn in this
+    // create's own transaction, and a collision is retried with the following.
+    const create = () => this.prisma.client.$transaction(async (tx) => tx.quote.create({
       data: {
         businessId: input.businessId,
         contactId,
-        quoteNumber: input.quoteNumber ?? `QT-${Date.now()}`,
+        quoteNumber: input.quoteNumber ?? (await allocateDocumentNumber(tx, input.businessId, 'quote')),
         status: 'DRAFT',
         issueDate: new Date(),
         expiryDate: input.expiryDate ? new Date(input.expiryDate) : null,
@@ -2535,7 +2545,8 @@ export class CommerceService {
         },
       },
       include: { items: true, contact: true },
-    }).catch((err: unknown) => {
+    }));
+    const quote = await (input.quoteNumber != null ? create() : retryDocumentNumber('quote', create)).catch((err: unknown) => {
       if ((err as { code?: string } | null)?.code === 'P2002') throw quoteNumberTaken();
       throw err;
     });
@@ -2839,12 +2850,14 @@ export class CommerceService {
     // V1-51: two concurrent converts both pass the invoiceId check above; the
     // loser's insert hits the unique Invoice.quoteId once the winner commits,
     // and answers the same 409 as a sequential repeat.
-    const invoice = await this.prisma.client.$transaction(async (tx) => {
+    // V1-43 (D-15): the invoice takes the business's next number inside this
+    // transaction; a number collision reruns the whole transaction.
+    const invoice = await retryDocumentNumber('invoice', () => this.prisma.client.$transaction(async (tx) => {
       const created = await tx.invoice.create({
         data: {
           businessId: quote.businessId,
           contactId: quote.contactId,
-          invoiceNumber: `INV-${Date.now()}`,
+          invoiceNumber: await allocateDocumentNumber(tx, quote.businessId, 'invoice'),
           status: 'DRAFT',
           issueDate: new Date(),
           dueDate: input.dueDate ? new Date(input.dueDate) : null,
@@ -2881,7 +2894,7 @@ export class CommerceService {
       });
       if (linked.count !== 1) throw new QuoteConvertRaceLost();
       return created;
-    }).catch(async (err: unknown) => {
+    })).catch(async (err: unknown) => {
       if (err instanceof QuoteConvertRaceLost || (err as { code?: string } | null)?.code === 'P2002') {
         // The quote as it now stands (the read hides a deleted one).
         const now = await this.prisma.client.quote.findFirst({

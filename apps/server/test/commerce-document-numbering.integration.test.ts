@@ -233,7 +233,7 @@ async function waitForBlockedInsert(table: 'invoices', ms = 5000): Promise<boole
   const until = Date.now() + ms;
   while (Date.now() < until) {
     const rows: Array<{ n: number }> = await db.$queryRawUnsafe(
-      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE 'INSERT INTO "public"."${table}"%'`,
+      `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND starts_with(query, 'INSERT INTO "public"."${table}"')`,
     );
     if (rows[0].n > 0) return true;
     await sleep(20);
@@ -388,7 +388,7 @@ beforeAll(async () => {
       data: { id: biz, name: `V43A ${biz}`, slug: biz, ownerId: ID.owner, currency: 'TTD', accountingBasis: basis },
     });
     await db.membership.create({ data: { id: `${biz}_m_owner`, userId: ID.owner, businessId: biz, role: 'OWNER' } });
-    await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V43A', lastName: biz, email: `${contact}@test.local` } });
+    await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V43A', lastName: biz, email: `${P}${contact.slice(P.length)}@test.local` } });
     if (basis === 'ACCRUAL') await coa.ensureDefaults(biz);
   }
 

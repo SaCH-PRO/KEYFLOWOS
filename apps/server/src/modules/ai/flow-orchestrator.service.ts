@@ -3950,8 +3950,8 @@ ${triage.standingContext}`;
         // the contact is this business's (V1-21b review 9 TD9-4), before anything is written
         await this.contactWithinBusiness(businessId, args.contactId);
         const items = args.items ?? [];
-        const invoiceCount = await this.prisma.client.invoice.count({ where: { businessId } });
-        const invoiceNumber = `INV-${String(invoiceCount + 1).padStart(4, '0')}`;
+        // V1-43 (D-15): numbered by CommerceService's allocator, the business's
+        // one sequence. INV-<count+1> skipped soft-deleted rows and collided.
         const invoice = await this.getCommerce().createInvoice({
           businessId,
           contactId: args.contactId,
@@ -3960,7 +3960,6 @@ ${triage.standingContext}`;
             quantity: item.quantity,
             unitPrice: item.unitPrice,
           })),
-          invoiceNumber,
           currency: args.currency ?? 'TTD',
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           notes: args.notes ?? undefined,
@@ -3993,8 +3992,7 @@ ${triage.standingContext}`;
         // as commerce_create_invoice: no quote is written for another business's contact (TD9-4)
         await this.contactWithinBusiness(businessId, args.contactId);
         const items = args.items ?? [];
-        const quoteCount = await this.prisma.client.quote.count({ where: { businessId } });
-        const quoteNumber = `QT-${String(quoteCount + 1).padStart(4, '0')}`;
+        // V1-43 (D-15): numbered by CommerceService's allocator, as commerce_create_invoice.
         const quote = await this.getCommerce().createQuote({
           businessId,
           contactId: args.contactId,
@@ -4003,7 +4001,6 @@ ${triage.standingContext}`;
             quantity: item.quantity,
             unitPrice: item.unitPrice,
           })),
-          quoteNumber,
           currency: args.currency ?? 'TTD',
           expiryDate: args.expiryDate ? new Date(args.expiryDate) : undefined,
         });
