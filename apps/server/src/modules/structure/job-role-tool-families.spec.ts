@@ -587,7 +587,9 @@ const SIGNED_PROVIDER_ROUTES: Array<{ file: string; verb: string; path: string; 
     verb: 'POST',
     path: '/webhooks/stripe',
     proof: /this\.stripe!?\.webhooks\.constructEvent\(rawBody, signature, webhookSecret\)/,
-    call: 'CommerceService.markInvoicePaid',
+    // R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR (D-05): the verified event goes to the Stripe ledger
+    // door; the route no longer calls CommerceService.markInvoicePaid.
+    call: 'PaymentsService.handleStripeWebhook',
   },
 ];
 const routeKey = (r: { file: string; verb: string; path: string }) => `${r.file} ${r.verb} ${r.path}`;
@@ -1964,7 +1966,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
           "POST /commerce/businesses/:businessId/invoices/:invoiceId/send-email CommerceService.updateInvoiceStatus <- if (invoice.status === 'DRAFT')",
           'POST /drive/businesses/:businessId/email-content TransactionalEmailService.send <- after if (!user || !user.email) return',
           'GET /key-inbox/businesses/:businessId/brief KeyInboxService.generateBrief <- after if (insights.length > 0) return',
-          'POST /webhooks/stripe CommerceService.markInvoicePaid <- if (invoiceId)',
+          // R0-20b: POST /webhooks/stripe hands its verified event to PaymentsService.handleStripeWebhook
+          // and no longer calls CommerceService.markInvoicePaid (it was `<- if (invoiceId)`).
         ].sort(),
       );
     });

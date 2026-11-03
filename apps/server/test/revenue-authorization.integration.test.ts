@@ -1838,7 +1838,8 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: G16 — the anonymous, tenantless c
     expect(markPaidSpy).not.toHaveBeenCalled();
   });
 
-  it('RA-G16-01 (census): no production caller of CommerceService.markInvoicePaid passes neither actor nor tenant: every call site in apps/server/src names a tenant (third argument), and the deprecated Stripe handler calls it nowhere', () => {
+  it('RA-G16-01 (census): no production caller of CommerceService.markInvoicePaid passes neither actor nor tenant: every call site in apps/server/src names a tenant (third argument), and the deprecated Stripe handler calls it nowhere', async () => {
+    const ts = (await import('typescript')).default;
     const src = path.resolve(__dirname, '../src');
     const files: string[] = [];
     const walk = (dir: string) => {
@@ -1849,33 +1850,19 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: G16 — the anonymous, tenantless c
       }
     };
     walk(src);
-    /** Top-level arguments of the call whose '(' is at `open`. */
-    const argsAt = (text: string, open: number): string[] => {
-      const out: string[] = [];
-      let depth = 0;
-      let start = open + 1;
-      for (let i = open; i < text.length; i++) {
-        const ch = text[i];
-        if (ch === '(' || ch === '[' || ch === '{') depth += 1;
-        else if (ch === ')' || ch === ']' || ch === '}') {
-          depth -= 1;
-          if (depth === 0) {
-            out.push(text.slice(start, i).trim());
-            return out.filter((a) => a.length > 0);
-          }
-        } else if (ch === ',' && depth === 1) {
-          out.push(text.slice(start, i).trim());
-          start = i + 1;
-        }
-      }
-      throw new Error('unbalanced call');
-    };
+    // Call expressions only (comments and strings that name the method do not count).
     const sites: Array<{ file: string; args: string[] }> = [];
     for (const file of files) {
       const text = readFileSync(file, 'utf8');
-      for (const m of text.matchAll(/\.markInvoicePaid\(/g)) {
-        sites.push({ file: path.relative(src, file).split(path.sep).join('/'), args: argsAt(text, m.index! + m[0].length - 1) });
-      }
+      if (!text.includes('markInvoicePaid')) continue;
+      const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+      const visit = (n: import('typescript').Node) => {
+        if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'markInvoicePaid') {
+          sites.push({ file: path.relative(src, file).split(path.sep).join('/'), args: n.arguments.map((a) => a.getText(sf)) });
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
     }
     expect(sites.length, 'the census is not vacuous').toBeGreaterThanOrEqual(4);
     expect(sites.map((s) => s.file)).not.toContain('modules/webhooks/webhooks.controller.ts');
