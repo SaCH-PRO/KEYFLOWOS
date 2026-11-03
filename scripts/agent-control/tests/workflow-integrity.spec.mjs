@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseYaml } from '../lib/yaml.mjs';
-import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
+import { REQUIRED_WORKFLOWS, REQUIRED_WORKFLOW_FILES } from '../lib/events.mjs';
 
 const DIR = '.github/workflows';
 const NATIVE = 'DAST (Native)';
@@ -115,6 +115,20 @@ test('NC duplicate name: every required workflow is declared by exactly one work
   // later green run of a second "DAST (Native)" that sent no probes would
   // replace a failed native run (review SEC-V130-2).
   for (const name of REQUIRED_WORKFLOWS) workflowNamed(name);
+});
+
+test('NC gate files: every required workflow is bound to the one file that declares it', () => {
+  // Admission counts a run for a required gate only when GitHub reports it
+  // was produced by that gate's own file (owner ruling D-61; FOLLOW3-C5). The
+  // map must name exactly the required workflows, each file must exist, and
+  // each must declare the name it is bound to, read the way GitHub reads it.
+  assert.deepEqual(Object.keys(REQUIRED_WORKFLOW_FILES).sort(), [...REQUIRED_WORKFLOWS].sort(), 'one file per required workflow, and no other');
+  for (const [name, file] of Object.entries(REQUIRED_WORKFLOW_FILES)) {
+    assert.equal(path.posix.dirname(file), DIR, `"${name}" is bound to a file directly under ${DIR}; found ${file}`);
+    assert.ok(fs.existsSync(file), `"${name}" is bound to ${file}, which does not exist`);
+    assert.equal(parseYaml(read(file))?.name, name, `${file} must declare name: ${name}`);
+    assert.equal(`${DIR}/${workflowNamed(name).file}`, file, `the one file declaring "${name}" is its bound file`);
+  }
 });
 
 // ------------------------------------------- THE GATE MUST DO ITS WORK
@@ -221,22 +235,48 @@ test('NC doc: the operator doc names the workflows admission requires, and HawkS
   );
 });
 
-// Review CR-V1-30-4. docs/SECURITY_DAST_SETUP.md and the header of
-// native-dast.yml still describe the gate before the swap, and both are outside
-// this packet's write set. The setup doc says opening a PR runs HawkScan and
-// tells operators to add HawkScan to main's required status checks; after the
-// swap that check never reports on a PR and would block every merge. The
-// native-dast.yml header says it is not a required check yet. hawkscan.yml and
-// AGENT_AUTOPILOT.md (in the write set) warn against those steps meanwhile.
-test(
-  'NC setup doc: no operator doc says a PR runs DAST (HawkScan) or tells anyone to require it',
-  { todo: 'docs/SECURITY_DAST_SETUP.md and the native-dast.yml header are outside the V1-30 write set; follow-up packet' },
-  () => {
-    const setup = read('docs/SECURITY_DAST_SETUP.md').replace(/\s+/g, ' ');
-    assert.doesNotMatch(setup, /starts scanning on PRs/i, 'the setup doc says HAWK_API_KEY makes HawkScan scan PRs');
-    assert.doesNotMatch(setup, /Open a PR \(or run the workflow manually/i, 'the setup doc says opening a PR runs HawkScan');
-    assert.doesNotMatch(setup, /Add `?HawkScan`? to `?main`?'s required status checks/i, 'the setup doc tells operators to require HawkScan');
-    const nativeHeader = read(path.join(DIR, 'native-dast.yml')).split(/\nname:/)[0];
-    assert.doesNotMatch(nativeHeader, /NOT A REQUIRED CHECK YET/i, 'the native-dast.yml header says it is not required');
-  },
-);
+// Review CR-V1-30-4; FOLLOW3-C4. Before FOLLOW3-C4 the setup doc said that
+// setting HAWK_API_KEY made HawkScan scan every PR, that opening a PR ran it,
+// and told operators to add HawkScan to main's required status checks; the
+// plugin roadmap gave the same soft-then-required path. After the swap that
+// check never reports on a PR, so following those steps blocks every merge.
+// The native-dast.yml header said it was not a required check yet. The setup
+// doc now describes the required native gate and HawkScan as manual-only.
+const SETUP = 'docs/SECURITY_DAST_SETUP.md';
+const ROADMAP = 'docs/PLUGIN_INTEGRATION_ROADMAP.md';
+const INVENTORY = 'docs/development/feature-inventory.md';
+const REQUIRE_HAWKSCAN = /\badd\s+`?HawkScan`?\s+to\s+(?:`?main`?'s\s+|the\s+)?required\b/i;
+
+test('NC setup doc: no operator doc says a PR runs DAST (HawkScan) or tells anyone to require it', () => {
+  const setup = read(SETUP).replace(/\s+/g, ' ');
+  assert.doesNotMatch(setup, /starts scanning on PRs/i, 'the setup doc says HAWK_API_KEY makes HawkScan scan PRs');
+  assert.doesNotMatch(setup, /Open a PR \(or run the workflow manually/i, 'the setup doc says opening a PR runs HawkScan');
+  assert.doesNotMatch(setup, /Add `?HawkScan`? to `?main`?'s required status checks/i, 'the setup doc tells operators to require HawkScan');
+  const nativeHeader = read(path.join(DIR, 'native-dast.yml')).split(/\nname:/)[0];
+  assert.doesNotMatch(nativeHeader, /NOT A REQUIRED CHECK YET/i, 'the native-dast.yml header says it is not required');
+
+  // The setup doc describes the required gate, by name, workflow, harness and manifest.
+  for (const referent of [NATIVE, `${DIR}/native-dast.yml`, HARNESS, path.basename(HARNESS_MANIFEST)]) {
+    assert.ok(setup.includes(referent), `the setup doc must name ${referent}`);
+  }
+  // ...and HawkScan as manual-only (workflow_dispatch) and not a required check.
+  const paragraphs = read(SETUP).split(/\n\s*\n/).map((p) => p.replace(/\s+/g, ' '));
+  assert.ok(
+    paragraphs.some((p) => p.includes('HawkScan') && /manual-only/i.test(p) && p.includes('workflow_dispatch') && /\bnot a required (?:status )?check\b/i.test(p)),
+    'the setup doc says HawkScan is manual-only (workflow_dispatch) and not a required check',
+  );
+  assert.doesNotMatch(setup, REQUIRE_HAWKSCAN, 'the setup doc has no step that adds HawkScan to the required checks');
+
+  // The plugin roadmap gives no soft-then-required path to a required HawkScan.
+  const roadmap = read(ROADMAP).replace(/\s+/g, ' ');
+  assert.doesNotMatch(roadmap, /flip `?continue-on-error/i, 'the roadmap says to flip continue-on-error on HawkScan');
+  assert.doesNotMatch(roadmap, REQUIRE_HAWKSCAN, 'the roadmap says to add HawkScan to the required checks');
+  assert.doesNotMatch(roadmap, /soft\s*(?:→|->|then)\s*required/i, 'the roadmap describes a soft-then-required HawkScan gate');
+
+  // The feature inventory lists the required native gate, and HawkScan as manual-only.
+  const rows = read(INVENTORY).split('\n').filter((line) => line.startsWith('|'));
+  assert.ok(rows.some((row) => row.startsWith(`| ${NATIVE} |`)), `the feature inventory has a "${NATIVE}" row`);
+  const hawk = rows.filter((row) => row.startsWith(`| ${HAWKSCAN} |`));
+  assert.equal(hawk.length, 1, `the feature inventory has one "${HAWKSCAN}" row`);
+  assert.match(hawk[0], /manual-only/i, `the "${HAWKSCAN}" row says it is manual-only`);
+});

@@ -2,9 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS } from '../lib/admission.mjs';
 import { SEMANTIC_REVIEW_REASONS } from '../lib/semantic-review.mjs';
-import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
+import { REQUIRED_WORKFLOWS, REQUIRED_WORKFLOW_FILES } from '../lib/events.mjs';
 import { parseYaml } from '../lib/yaml.mjs';
 import { GRANT_REASONS } from '../lib/merge-grant.mjs';
 import { grantComment, followUp, target as grantTarget } from './helpers/merge-grant-fixture.mjs';
@@ -13,10 +15,13 @@ const HEAD = 'a'.repeat(40);
 const BASE = 'b'.repeat(40);
 const SEMANTIC = 'c'.repeat(40);
 
+// Each run carries the workflow file GitHub reports it came from: admission
+// counts a run for a required gate only from that gate's own file (D-61).
 const greenRuns = (sha = HEAD) =>
   REQUIRED_WORKFLOWS.map((name, i) => ({
     id: 100 + i,
     name,
+    path: REQUIRED_WORKFLOW_FILES[name],
     head_sha: sha,
     status: 'completed',
     conclusion: 'success',
@@ -423,6 +428,132 @@ test('every required workflow exists, runs on every PR, and wakes the autopilot'
 
   const policy = parseYaml(fs.readFileSync('docs/development/AGENT_AUTOPILOT_POLICY.yaml', 'utf8'));
   assert.deepEqual([...policy.required_pr_workflows].sort(), [...REQUIRED_WORKFLOWS].sort(), 'policy and code must agree');
+});
+
+// ------------------------------------------------- GATE FILE BINDING
+// FOLLOW3-C5 (review SEC-V130-2, owner ruling D-61). A workflow's name is
+// whatever its file declares, so a second file declaring `name: DAST (Native)`
+// produces runs of that name. Keyed by name alone, its later green run
+// replaced a failed native-dast.yml run and admission returned ELIGIBLE. A run
+// counts for a required gate only when GitHub reports it came from that
+// gate's own file; a run with no path counts for none.
+
+const NATIVE = 'DAST (Native)';
+const IMPOSTOR_FILE = '.github/workflows/dast-fast.yml';
+const nativeRun = (fields = {}) => ({ id: 700, name: NATIVE, path: REQUIRED_WORKFLOW_FILES[NATIVE], head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-23T10:00:00Z', ...fields });
+const impostorRun = (fields = {}) => nativeRun({ id: 701, path: IMPOSTOR_FILE, created_at: '2026-09-23T10:05:00Z', ...fields });
+const withoutNative = (sha = HEAD) => greenRuns(sha).filter((r) => r.name !== NATIVE);
+
+test('NC impostor gate: a later green run of a second file named DAST (Native) does not replace a failed native-dast.yml run', () => {
+  const runs = [...withoutNative(), nativeRun({ conclusion: 'failure' }), impostorRun()];
+  const v = evaluateAdmission(admissible({ workflow_runs: runs }));
+  assert.equal(v.eligible, false);
+  assert.equal(v.reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
+  assert.deepEqual(v.detail, [{ workflow: NATIVE, conclusion: 'failure' }]);
+  // Referent: a later green run of native-dast.yml itself does replace it.
+  const rerun = [...withoutNative(), nativeRun({ conclusion: 'failure' }), nativeRun({ id: 702, created_at: '2026-09-23T10:05:00Z' })];
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: rerun })).eligible, true);
+});
+
+test('NC impostor gate: an impostor run alone is a missing gate', () => {
+  const v = evaluateAdmission(admissible({ workflow_runs: [...withoutNative(), impostorRun()] }));
+  assert.equal(v.eligible, false);
+  assert.equal(v.reason, ADMISSION_REASONS.MISSING_WORKFLOWS);
+  assert.deepEqual(v.detail, [NATIVE]);
+  // Any other file is an impostor too, a file of another required gate included.
+  for (const file of [REQUIRED_WORKFLOW_FILES['CI/CD Pipeline'], '.github/workflows/hawkscan.yml', 'native-dast.yml', '.github/workflows/native-dast.yaml', '.github/workflows/native-dast.yml.bak', ' .github/workflows/native-dast.yml']) {
+    const other = evaluateAdmission(admissible({ workflow_runs: [...withoutNative(), nativeRun({ path: file })] }));
+    assert.equal(other.reason, ADMISSION_REASONS.MISSING_WORKFLOWS, JSON.stringify(file));
+  }
+});
+
+test('NC impostor gate: a pending impostor run does not block a green real run', () => {
+  const runs = [...greenRuns(), impostorRun({ status: 'in_progress', conclusion: null })];
+  const v = evaluateAdmission(admissible({ workflow_runs: runs }));
+  assert.equal(v.eligible, true);
+  assert.equal(v.reason, ADMISSION_REASONS.ELIGIBLE);
+  // Referent: a pending run of native-dast.yml itself still blocks.
+  const pending = [...greenRuns(), nativeRun({ id: 703, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:05:00Z' })];
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: pending })).reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
+});
+
+test('gate path: a run of the gate file whose path carries an @refs suffix counts', () => {
+  for (const ref of ['refs/heads/impl/x', 'refs/pull/87/merge', 'refs/heads/main']) {
+    const runs = greenRuns().map((r) => ({ ...r, path: `${r.path}@${ref}` }));
+    assert.equal(evaluateAdmission(admissible({ workflow_runs: runs })).eligible, true, ref);
+  }
+  // The suffix is only a ref: anything else after the file is another path.
+  for (const suffix of ['@', '@main', '@refs/', '@refs/heads/x y']) {
+    const runs = [...withoutNative(), nativeRun({ path: `${REQUIRED_WORKFLOW_FILES[NATIVE]}${suffix}` })];
+    assert.equal(evaluateAdmission(admissible({ workflow_runs: runs })).reason, ADMISSION_REASONS.MISSING_WORKFLOWS, suffix);
+  }
+});
+
+test('NC impostor gate: a run with no path speaks for no gate (D-61 fails closed)', () => {
+  for (const value of [undefined, null, '', 42, {}]) {
+    const runs = [...withoutNative(), nativeRun({ path: value })];
+    const v = evaluateAdmission(admissible({ workflow_runs: runs }));
+    assert.equal(v.eligible, false, String(value));
+    assert.equal(v.reason, ADMISSION_REASONS.MISSING_WORKFLOWS, String(value));
+    assert.deepEqual(v.detail, [NATIVE], String(value));
+  }
+  // Every run without a path: every gate is missing.
+  const bare = greenRuns().map(({ path: omitted, ...run }) => run);
+  const v = evaluateAdmission(admissible({ workflow_runs: bare }));
+  assert.equal(v.reason, ADMISSION_REASONS.MISSING_WORKFLOWS);
+  assert.deepEqual(v.detail, [...REQUIRED_WORKFLOWS]);
+});
+
+test('NC impostor gate: the stale-head check matches by path too', () => {
+  const other = 'e'.repeat(40);
+  // An impostor at another head is not a run of the gate there either.
+  const impostorElsewhere = evaluateAdmission(admissible({ workflow_runs: [...withoutNative(), impostorRun({ head_sha: other })] }));
+  assert.equal(impostorElsewhere.reason, ADMISSION_REASONS.MISSING_WORKFLOWS);
+  assert.deepEqual(impostorElsewhere.detail, [NATIVE]);
+  // Referent: the gate's own file at another head is a stale head.
+  const stale = evaluateAdmission(admissible({ workflow_runs: [...withoutNative(), nativeRun({ head_sha: other })] }));
+  assert.equal(stale.reason, ADMISSION_REASONS.STALE_WORKFLOW_HEAD);
+  assert.deepEqual(stale.detail.missing_at_head, [NATIVE]);
+  assert.deepEqual(stale.detail.runs_at_other_heads, [other]);
+});
+
+// The collector maps the GitHub runs API with toWorkflowRunSnapshot. It runs
+// in a child with no credentials and no repository: importing the CLI module
+// must run nothing, so the child can reach no network and merge nothing.
+const CLI_MODULE = pathToFileURL(path.resolve('scripts/agent-control/auto-merge-admitted.mjs')).href;
+function snapshotInChild(raw) {
+  const program = `const raw = ${JSON.stringify(raw)};\nimport(${JSON.stringify(CLI_MODULE)}).then((m) => process.stdout.write(JSON.stringify(raw.map((r) => m.toWorkflowRunSnapshot(r)))));`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', program], {
+    encoding: 'utf8',
+    timeout: 30000,
+    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot },
+  });
+  assert.equal(child.status, 0, `importing the CLI module and mapping runs must succeed; exit ${child.status}: ${child.stderr}`);
+  return JSON.parse(child.stdout);
+}
+
+test('NC run snapshot: the collector keeps the workflow file path of each run', () => {
+  // The fields the GitHub runs API returns for a run (abridged), and a few it adds.
+  const raw = greenRuns().map((r) => ({
+    ...r,
+    path: `${r.path}@refs/heads/impl/x`,
+    display_title: 'impl/x',
+    head_branch: 'impl/x',
+    event: 'pull_request',
+    workflow_id: 9000 + r.id,
+    html_url: `https://github.com/o/r/actions/runs/${r.id}`,
+  }));
+  raw.push({ ...raw[0], id: 799, name: NATIVE, path: IMPOSTOR_FILE, created_at: '2026-09-23T10:05:00Z' });
+  const mapped = snapshotInChild(raw);
+  assert.deepEqual(
+    mapped,
+    raw.map(({ id, name, path: file, head_sha, status, conclusion, created_at }) => ({ id, name, path: file, head_sha, status, conclusion, created_at })),
+    'each run keeps id, name, path, head_sha, status, conclusion and created_at, and nothing else',
+  );
+  // Collected and evaluated together: the real runs admit, the impostor beside them changes nothing.
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: mapped })).eligible, true);
+  const failedNative = mapped.map((r) => (r.name === NATIVE && r.path.startsWith(REQUIRED_WORKFLOW_FILES[NATIVE]) ? { ...r, conclusion: 'failure' } : r));
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: failedNative })).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
 });
 
 // ------------------------------------------ INDEPENDENT SEMANTIC REVIEW

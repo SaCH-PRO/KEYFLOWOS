@@ -17,7 +17,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
+import { REQUIRED_WORKFLOWS, REQUIRED_WORKFLOW_FILES } from '../lib/events.mjs';
 import {
   REPO, HEAD, BASE, SEMANTIC, target, grantComment, followUp, holdComment, claudeNote, directiveComment, realPlanComment,
 } from './helpers/merge-grant-fixture.mjs';
@@ -59,7 +59,7 @@ const scenario = (comments_by_snapshot, overrides = {}) => ({
   active: common,
   ret: ret('ACCEPT_FOR_ADMISSION'),
   compare: { [`${SEMANTIC}...${HEAD}`]: { status: 'ahead', files: [{ filename: '.agent-control/claude-return.yaml' }] } },
-  runs: REQUIRED_WORKFLOWS.map((name, i) => ({ id: 100 + i, name, head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-10-17T00:00:00Z' })),
+  runs: REQUIRED_WORKFLOWS.map((name, i) => ({ id: 100 + i, name, path: REQUIRED_WORKFLOW_FILES[name], head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-10-17T00:00:00Z' })),
   reviews: [{ user: { login: 'copilot-pull-request-reviewer[bot]', type: 'Bot' }, body: '**Findings:** 0', commit_id: HEAD, html_url: REVIEW_URL }],
   events: [],
   comments_by_snapshot,
