@@ -45,6 +45,10 @@ import { render, screen, waitFor, cleanup, fireEvent, act, within } from "@testi
 import * as client from "@/lib/client";
 import * as approvals from "@/lib/api/approvals";
 import * as productCost from "@/lib/api/product-cost";
+import * as transport from "@/lib/api";
+import * as finance from "@/lib/api/finance";
+import * as structure from "@/lib/api/structure";
+import * as businessGenome from "@/lib/api/business-genome";
 import { ContactDetail, type ContactDetailData } from "@/components/contacts/contact-detail";
 import CustomFieldsSettingsPage from "@/app/app/settings/custom-fields/page";
 import { PipelineTabContent } from "@/app/app/crm/pipeline/pipeline-tab-content";
@@ -818,21 +822,66 @@ describe("the mounts read and write the business they are bound to", () => {
   });
 });
 
-describe("follow-ups outside this write set", () => {
+describe("the lib/api.ts transports refuse an unbound business for every lib/api/* module and screen (FOLLOW3-D11)", () => {
   // The census above proves every site of the helper layer (lib/client.ts, and
   // the resolving functions of lib/api/approvals.ts and product-cost.ts) refuses
   // an empty, null or undefined id, and that no site anywhere resolves to the
-  // demo tenant or another literal. It does not prove the rest: the other
-  // lib/api/* modules (business-genome, finance, structure, approvals'
-  // required-id functions, ...) take a required businessId and send through the
-  // lib/api.ts helpers directly, and about 60 screens pass
-  // `getStoredBusinessId() ?? ""` into them, so with no business selected they
-  // send /businesses//... (the server answers 403/404; nothing resolves to
-  // another tenant). The fix is one guard in lib/api.ts (apiGet, apiPost,
-  // apiPatch, apiPut, apiDelete, fetchWithAuthRetry refuse a URL for which
-  // _defaults.ts namesNoBusiness is true), plus the screens' raw fetch() sites:
-  // lib/api.ts is outside this packet's write set.
-  it.todo("lib/api.ts refuses a request whose /businesses/ segment is empty, undefined or null, so no lib/api/* module or screen can send an empty business id");
+  // demo tenant or another literal. The other lib/api/* modules
+  // (business-genome, finance, structure, approvals' required-id functions,
+  // ...) take a required businessId and send through the lib/api.ts transports
+  // directly, and about 60 screens pass `getStoredBusinessId() ?? ""` into
+  // them, so with no business selected they sent /businesses//... FOLLOW3-D11
+  // puts the guard in lib/api.ts itself: apiGet, apiPost, apiPostSimple,
+  // apiPatch, apiPut and apiDelete refuse a request for which _defaults.ts
+  // requestNamesNoBusiness is true (and one with any other missing id segment,
+  // lib/__tests__/api-empty-id-segment.test.ts). Still outside: the
+  // Response-returning fetchWithAuthRetry (lib/client.ts guards its own use of
+  // it) and the screens' raw fetch() sites.
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("lib/api.ts refuses a request whose /businesses/ segment is empty, undefined or null, so no lib/api/* module or screen can send an empty business id", async () => {
+    const requests = stubNetwork();
+    const unbound = ["", "undefined", "null"];
+    const transports = await Promise.all(unbound.flatMap((id) => [
+      transport.apiGet(`/finance/businesses/${id}/accounts`),
+      transport.apiPost({ path: `/finance/businesses/${id}/accounts`, body: { name: "x" } }),
+      transport.apiPostSimple(`/finance/businesses/${id}/accounts`, { name: "x" }),
+      transport.apiPatch(`/finance/businesses/${id}/accounts/acc_1`, { name: "x" }),
+      transport.apiPut(`/finance/businesses/${id}/accounts/acc_1`, { name: "x" }),
+      transport.apiDelete(`/finance/businesses/${id}/accounts/acc_1`),
+    ]));
+    // The lib/api/* modules a screen hands `getStoredBusinessId() ?? ""`, with
+    // no business selected; and the same modules handed undefined or null.
+    const modules = await Promise.all(["", undefined, null].flatMap((id) => {
+      const bid = id as unknown as string;
+      return [
+        finance.fetchReserveBuckets(bid),
+        finance.createReserveBucket(bid, { name: "x", purpose: "y" }),
+        structure.fetchOrgUnits(bid),
+        structure.deleteOrgUnit(bid, "ou_1"),
+        businessGenome.getGenome(bid),
+        approvals.fetchApprovalRequest(bid, "apr_1"),
+        approvals.escalateApproval(bid, "apr_1"),
+      ];
+    }));
+    expect(requests.map((r) => new URL(r.url, "http://localhost").pathname)).toEqual([]);
+    for (const answer of [...transports, ...modules]) expect(answer).toEqual({ data: null, error: NO_BUSINESS });
+
+    // Control: the same modules, handed the selected business, call it.
+    await finance.fetchReserveBuckets(SELECTED);
+    await structure.fetchOrgUnits(SELECTED);
+    await businessGenome.getGenome(SELECTED);
+    await approvals.fetchApprovalRequest(SELECTED, "apr_1");
+    expect(requests.map((r) => businessOf(r))).toEqual([SELECTED, SELECTED, SELECTED, SELECTED]);
+  });
 });
 
 // ---------------------------------------------------------------------------
