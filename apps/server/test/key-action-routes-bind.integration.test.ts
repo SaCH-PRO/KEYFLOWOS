@@ -27,9 +27,9 @@
  *   briefing/:planId/execute-all, ai/approvals/:id/resolve, key-autonomy proposals/:id/execute (V1-32), cortex plans/:id/execute
  *   (V1-10), autopilot loops/:id/run and key/execute (a stored DelegationLoop by id in the business).
  *   Outside this write set, still passing request-body tool names or arguments to an executor (KNOWN_BODY_EXECUTORS below, kind
- *   'open', each an it.todo): cortex POST execute and batch (client module.action + parameters), sandbox/execute (client
+ *   'open' at V1-31b): cortex POST execute and batch (client module.action + parameters), sandbox/execute (client
  *   code), sandbox/apply (client template parameters), flows/:id/execute (client inputs to a stored flow). code-executor
- *   tool-bridge is kind 'bounded' (a server-minted one-time token, tier 1-2 tools only).
+ *   tool-bridge is kind 'bounded' (a server-minted one-time token, tier 1-2 tools only). V1-31c closes the five (below).
  *
  * WHAT IS REAL: PrismaService and the Prisma client at DATABASE_URL, AuthGuard,
  * BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard, the four controllers,
@@ -47,6 +47,35 @@
  * records), the intent parser and plan generation (no LLM), the business
  * graph, the business-event and contact-timeline sinks (record). No provider
  * is reached.
+ *
+ * V1-31c-KEY-ACTION-WEB-AND-OPEN-ROUTES (the V1-31b companion) closes the five
+ * 'open' census entries, each in KeyCortexController (api/v1/cortex), against
+ * the principle of the packet notes (M46 / ACTION-001): an AI-proposed action
+ * executes only the server-stored proposal by id; a member-initiated direct
+ * action may carry client arguments only when the route checks the action's
+ * own module write scope (deny by default), binds the tenant, runs the autonomy
+ * gate and audits the member; client code is refused unless a bounded sandbox
+ * runs it.
+ *   CX  POST execute, POST batch     member-initiated direct commands. Every command (structured, or parsed from the
+ *                                    member's words) is checked against cortexCommandRequirement before the executor:
+ *                                    the capability registry must list the action for the module, the module must map
+ *                                    to a canonical module scope the member holds at write (deny by default; crm is
+ *                                    OWNER only because the crm adapter writes with no actor; settings is enforced by
+ *                                    its adapter on the actor, R0-09c). A refusal is 403 with an ai_execution_logs row
+ *                                    naming the member; the executor's own autonomy gate and audit door run the rest.
+ *   SB  POST sandbox/execute, apply  REFUSED (410) for everyone: the cortex sandbox is node:vm with host intrinsics in
+ *                                    scope, not a bounded sandbox (SB-03 reaches the host process from it), and apply
+ *                                    substitutes client parameters into code text (SB-04).
+ *   FL  POST flows/:id/execute       BOUND to the stored FlowDefinition by id in the guarded business (404 otherwise),
+ *                                    each effect node checked like a direct command, client inputs data only (an
+ *                                    engine key such as _userId refused), the actor set by the server, the autonomy
+ *                                    gate per action (V1-02 isUsableAutonomyVerdict, fail closed) and an audit row.
+ * WHAT IS REAL for these (a second Nest app): PrismaService, AuthGuard, BusinessGuard, KeyCortexController,
+ * KeyCortexExecutorService (its autonomy gate call and its ai_execution_logs audit door), KeyCortexFlowStudioService
+ * (loadFlow, executeFlow, flow_definitions and flow_executions rows) and KeyCortexSandboxService for the two proofs.
+ * Stand-ins: the module connector (records every command, the external effect), the autonomy orchestrator (answers
+ * cortexVerdict, records every call), the natural-language parser (no LLM), the sandbox the controller holds (records;
+ * no case may reach it), and the controller's collaborators for its other routes.
  *
  * Every seeded row carries the `v31b_` prefix (or a v31b_ business id) and is
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
@@ -115,6 +144,14 @@ const ID = {
   taskC: `${P}taskC`, // no approval needed; completed through the status route
   taskD: `${P}taskD`, // awaiting approval; AUTO_EXECUTED is refused on it
   itemA: `${P}itemA`,
+  // V1-31c cortex direct actions (their own business, so the V1-31b fixture counts are unchanged)
+  cxBiz: `${P}cxBiz`,
+  cxOwner: `${P}cxOwner`, // OWNER of cxBiz (role-default scopes)
+  cxStaffRO: `${P}cxStaffRO`, // STAFF of cxBiz: projects read, automations read (no write scope)
+  cxStaffW: `${P}cxStaffW`, // STAFF of cxBiz: projects write, automations write, revenue read
+  cxFlow: `${P}cxFlow`, // trigger -> projects.create_project
+  cxFlowRev: `${P}cxFlowRev`, // trigger -> commerce.process_payment (revenue write)
+  cxFlowB: `${P}cxFlowB`, // a flow of bizB
 };
 
 const STORED_ARGS = { contactId: `${P}contactA`, body: 'v31b stored note' };
@@ -151,8 +188,25 @@ let beforeEvaluate: (() => Promise<void>) | null = null;
 
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/* V1-31c: the cortex app (KeyCortexController) and what its stand-ins recorded. */
+let cortexApp: any;
+let cortexExecutor: any;
+/** Every command the module connector stand-in was handed (the external effect). */
+const connectorCalls: Array<{ module: unknown; action: unknown; businessId: unknown; userId: unknown; parameters: unknown }> = [];
+/** Every verdict request the autonomy orchestrator stand-in received. */
+const cortexAutonomyCalls: Array<{ businessId: unknown; actionKey: unknown; proposedBy: unknown }> = [];
+/** Every call the sandbox the controller holds received (no case may reach it). */
+const sandboxCalls: string[] = [];
+/** What the autonomy stand-in answers: a fully stated allow unless a case sets another verdict or 'throw'. */
+const ALLOW = { allowed: true, requiresApproval: false, tier: 'full', reason: 'v31c allows' };
+let cortexVerdict: unknown = ALLOW;
+/** What the natural-language parser stand-in answers (no LLM). */
+let parsedIntent: { module: string; action: string; parameters: Record<string, unknown> } = { module: 'projects', action: 'create_project', parameters: { name: 'v31c parsed' } };
+
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM flow_executions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM flow_definitions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM idempotency_keys WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -426,6 +480,179 @@ beforeAll(async () => {
 afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
+});
+
+/** The cortex controller's collaborators for its other routes; the routes under test reach none of them. */
+const CORTEX_OFF_BOUNDARY = new Set([
+  'KeyCortexReasoningService', 'KeyCortexConversationService', 'KeyCortexVoiceService', 'KeyCortexPersonalityService',
+  'KeyCortexActionsService', 'KeyCortexContextService', 'KeyCortexInsightService', 'KeyCortexMonitorV2Service',
+  'KeyCortexEvolutionService', 'KeyCortexPhoneService', 'KeyCortexDocumentService', 'KeyCortexLearningService',
+  'KeyAutonomySafetyService', 'KeyCortexApprovalOrchestratorService', 'KeyCortexConsciousnessService',
+  'KeyCortexSessionService', 'KeyCortexAwarenessService',
+]);
+
+beforeAll(async () => {
+  const { Test } = await import('@nestjs/testing');
+  const { ValidationPipe } = await import('@nestjs/common');
+  const { EventEmitter2 } = await import('@nestjs/event-emitter');
+  const { PrismaService } = await import('../src/core/prisma/prisma.service');
+  const { AuthGuard } = await import('../src/core/auth/auth.guard');
+  const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const controllerModule: any = await import('../src/modules/key-cortex/key-cortex.controller');
+  const { KeyCortexController } = controllerModule;
+  const { KeyCortexReasoningService } = await import('../src/modules/key-cortex/key-cortex-reasoning.service');
+  const { KeyCortexConversationService } = await import('../src/modules/key-cortex/key-cortex-conversation.service');
+  const { KeyCortexVoiceService } = await import('../src/modules/key-cortex/key-cortex-voice.service');
+  const { KeyCortexPersonalityService } = await import('../src/modules/key-cortex/key-cortex-personality.service');
+  const { KeyCortexActionsService } = await import('../src/modules/key-cortex/key-cortex-actions.service');
+  const { KeyCortexContextService } = await import('../src/modules/key-cortex/key-cortex-context.service');
+  const { KeyCortexConnectorService } = await import('../src/modules/key-cortex/key-cortex-connector.service');
+  const { KeyCortexCommandService } = await import('../src/modules/key-cortex/key-cortex-command.service');
+  const { KeyCortexExecutorService } = await import('../src/modules/key-cortex/key-cortex-executor.service');
+  const { KeyCortexContextV2Service } = await import('../src/modules/key-cortex/key-cortex-context-v2.service');
+  const { KeyCortexInsightService } = await import('../src/modules/key-cortex/key-cortex-insight.service');
+  const { KeyCortexMonitorV2Service } = await import('../src/modules/key-cortex/key-cortex-monitor-v2.service');
+  const { KeyCortexSandboxService } = await import('../src/modules/key-cortex/key-cortex-sandbox.service');
+  const { KeyCortexFlowStudioService } = await import('../src/modules/key-cortex/key-cortex-flow-studio.service');
+  const { KeyCortexEvolutionService } = await import('../src/modules/key-cortex/key-cortex-evolution.service');
+  const { KeyCortexPhoneService } = await import('../src/modules/key-cortex/key-cortex-phone.service');
+  const { KeyCortexDocumentService } = await import('../src/modules/key-cortex/key-cortex-document.service');
+  const { KeyCortexLearningService } = await import('../src/modules/key-cortex/key-cortex-learning.service');
+  const { KeyAutonomySafetyService } = await import('../src/modules/key-autonomy/key-autonomy-safety.service');
+  const { KeyCortexApprovalOrchestratorService } = await import('../src/modules/key-cortex/key-cortex-approval-orchestrator.service');
+  const { KeyCortexConsciousnessService } = await import('../src/modules/key-cortex/key-cortex-consciousness.service');
+  const { KeyCortexSessionService } = await import('../src/modules/key-cortex/key-cortex-session.service');
+  const { KeyCortexAwarenessService } = await import('../src/modules/key-cortex/key-cortex-awareness.service');
+  const { AutonomyOrchestratorService } = await import('../src/modules/key-autonomy/autonomy-orchestrator.service');
+
+  // The production build (tsc, emitDecoratorMetadata) records the constructor
+  // parameter types Nest injects by; vitest's esbuild transform does not. This
+  // writes what tsc emits for the 23 typed parameters (as key-cortex-tenant-binding
+  // does); a parameter declared with @Inject() names its own token.
+  if (!Reflect.getMetadata('design:paramtypes', KeyCortexController)) {
+    Reflect.defineMetadata('design:paramtypes', [
+      KeyCortexReasoningService, KeyCortexConversationService, KeyCortexVoiceService, KeyCortexPersonalityService,
+      KeyCortexActionsService, KeyCortexContextService, KeyCortexConnectorService, KeyCortexCommandService,
+      KeyCortexExecutorService, KeyCortexContextV2Service, KeyCortexInsightService, KeyCortexMonitorV2Service,
+      KeyCortexSandboxService, KeyCortexFlowStudioService, KeyCortexEvolutionService, KeyCortexPhoneService,
+      KeyCortexDocumentService, KeyCortexLearningService, KeyAutonomySafetyService, KeyCortexApprovalOrchestratorService,
+      KeyCortexConsciousnessService, KeyCortexSessionService, KeyCortexAwarenessService,
+    ], KeyCortexController);
+  }
+  // The body classes the ValidationPipe reads, for the handlers driven here (the principal is Object).
+  for (const [method, types] of [
+    ['executeCommand', [controllerModule.ExecuteCommandDto, Object, Object]],
+    ['executeBatch', [controllerModule.ExecuteBatchDto, Object, Object]],
+  ] as const) {
+    if (!Reflect.getMetadata('design:paramtypes', KeyCortexController.prototype, method)) {
+      Reflect.defineMetadata('design:paramtypes', types, KeyCortexController.prototype, method);
+    }
+  }
+
+  const connector = {
+    execute: async (c: any) => {
+      connectorCalls.push({ module: c?.module, action: c?.action, businessId: c?.businessId, userId: c?.userId, parameters: c?.parameters });
+      return { success: true, data: { ok: true }, executionTimeMs: 1, command: c };
+    },
+    getAllCapabilities: () => [],
+  };
+  const autonomy = {
+    evaluateAction: async (businessId: unknown, actionKey: unknown, _params: unknown, opts?: { proposedBy?: unknown }) => {
+      cortexAutonomyCalls.push({ businessId, actionKey, proposedBy: opts?.proposedBy });
+      if (cortexVerdict === 'throw') throw new Error('v31c: the autonomy orchestrator is down');
+      return cortexVerdict;
+    },
+  };
+  const command = {
+    parseIntent: async () => [{ intent: 'v31c', confidence: 0.9, module: parsedIntent.module, action: parsedIntent.action, parameters: { ...parsedIntent.parameters }, requiresApproval: false, naturalLanguage: 'v31c' }],
+    toConnectorCommand: (intent: any, businessId: string, userId: string) => ({
+      module: intent.module, action: intent.action, parameters: intent.parameters ?? {}, businessId, userId,
+      source: 'key_cortex', timestamp: new Date(), correlationId: `v31c_${Math.random().toString(36).slice(2, 8)}`,
+    }),
+  };
+  const sandbox = new Proxy({}, {
+    get: (_t, prop) => (prop === 'then' ? undefined : async () => { sandboxCalls.push(String(prop)); return { output: 'v31c', exitCode: 0, executionTimeMs: 0 }; }),
+  });
+  const off = (name: string) => new Proxy({}, {
+    get: (_t, prop) => (prop === 'then' ? undefined : () => { throw new Error(`v31c: ${name}.${String(prop)} is off this path`); }),
+  });
+
+  const moduleRef = await Test.createTestingModule({
+    controllers: [KeyCortexController],
+    providers: [
+      PrismaService,
+      AuthGuard,
+      BusinessGuard,
+      { provide: KeyCortexConnectorService, useValue: connector },
+      {
+        provide: KeyCortexExecutorService,
+        inject: [PrismaService],
+        useFactory: (prisma: any) => new KeyCortexExecutorService(connector as any, prisma, { emit: () => true } as any, {} as any, autonomy as any, undefined, undefined),
+      },
+      {
+        provide: KeyCortexFlowStudioService,
+        inject: [PrismaService],
+        useFactory: (prisma: any) => new KeyCortexFlowStudioService(prisma, connector as any, off('modelGateway') as any, off('aiUsage') as any, new EventEmitter2()),
+      },
+      { provide: KeyCortexCommandService, useValue: command },
+      { provide: KeyCortexContextV2Service, useValue: { getFullContext: async () => ({}) } },
+      { provide: KeyCortexSandboxService, useValue: sandbox },
+      { provide: AutonomyOrchestratorService, useValue: autonomy },
+    ],
+  })
+    .useMocker((token: any) => {
+      const name = typeof token === 'function' ? token.name : String(token);
+      return CORTEX_OFF_BOUNDARY.has(name) ? {} : undefined;
+    })
+    .compile();
+  cortexExecutor = moduleRef.get(KeyCortexExecutorService);
+
+  cortexApp = moduleRef.createNestApplication();
+  cortexApp.use(async (req: any, _res: any, next: any) => {
+    const header = req.headers['x-test-user'];
+    const id = typeof header === 'string' ? header : undefined;
+    if (id && id.startsWith(P)) {
+      const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+      if (user) req.user = { id: user.id, email: user.email, role: user.role };
+    }
+    next();
+  });
+  cortexApp.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  await cortexApp.init();
+
+  for (const id of [ID.cxOwner, ID.cxStaffRO, ID.cxStaffW]) {
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
+  }
+  await db.business.create({ data: { id: ID.cxBiz, name: 'V31c Cortex Biz', ownerId: ID.cxOwner } });
+  const m = (userId: string, role: string, permissionScopes?: Record<string, string>) =>
+    db.membership.create({ data: { id: `${P}m_${userId.slice(P.length)}_cx`, userId, businessId: ID.cxBiz, role, permissionScopes } });
+  await m(ID.cxOwner, 'OWNER');
+  await m(ID.cxStaffRO, 'STAFF', { projects: 'read', automations: 'read' });
+  await m(ID.cxStaffW, 'STAFF', { projects: 'write', automations: 'write', revenue: 'read' });
+
+  const flow = (id: string, businessId: string, module: string, action: string, parameters: Record<string, unknown>) =>
+    db.flowDefinition.create({
+      data: {
+        id,
+        businessId,
+        name: `v31c ${module}.${action}`,
+        status: 'active',
+        trigger: { type: 'manual', config: {} },
+        nodes: [
+          { id: 't1', type: 'trigger', position: { x: 0, y: 0 }, data: { label: 'Start' }, inputs: [], outputs: ['a1'] },
+          { id: 'a1', type: 'action', position: { x: 0, y: 100 }, data: { label: 'Act', module, action, parameters }, inputs: ['t1'], outputs: [] },
+        ],
+        edges: [{ id: 'e1', source: 't1', target: 'a1' }],
+      },
+    });
+  await flow(ID.cxFlow, ID.cxBiz, 'projects', 'create_project', { name: '{{projectName}}' });
+  await flow(ID.cxFlowRev, ID.cxBiz, 'commerce', 'process_payment', { invoiceId: `${P}inv` });
+  await flow(ID.cxFlowB, ID.bizB, 'projects', 'create_project', { name: 'b' });
+}, 120_000);
+
+afterAll(async () => {
+  if (cortexExecutor?.approvalCleanupInterval) clearInterval(cortexExecutor.approvalCleanupInterval);
+  if (cortexApp) await cortexApp.close();
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -759,10 +986,301 @@ describe('V1-31b AP: autopilot', () => {
   });
 });
 
-describe('V1-31b review CR-4: web callers outside the write set', () => {
+describe('V1-31b review CR-4 (closed by V1-31c): the control-tower web callers execute only stored plan steps', () => {
+  it('CR-4 priority-queue and daily-plan plan in words and execute stored step ids; executePlanStep sends only the ids (behaviour: apps/web control-tower __tests__/action-routes-web.test.tsx)', () => {
+    const WEB = path.resolve(__dirname, '../../web/src');
+    const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    for (const file of ['app/app/control-tower/components/priority-queue.tsx', 'app/app/control-tower/components/daily-plan.tsx']) {
+      const src = strip(readFileSync(path.join(WEB, file), 'utf8'));
+      expect(src, file).not.toMatch(/\bexecuteAction\s*\(/);
+      expect(src, file).toMatch(/\brunPlannedAction\s*\(/);
+    }
+    const client = strip(readFileSync(path.join(WEB, 'lib/client.ts'), 'utf8'));
+    const start = client.indexOf('export async function executePlanStep(');
+    expect(start).toBeGreaterThan(-1);
+    const fn = client.slice(start, client.indexOf('\n}\n', start));
+    expect(fn).toMatch(/body:\s*\{\s*planId,\s*planStepId\s*\}/);
+    expect(fn).not.toMatch(/toolName|args/);
+  });
+});
+
+/* ------------------------------------------------------------------------ */
+/*  V1-31c: the cortex direct-action routes (KeyCortexController)            */
+/* ------------------------------------------------------------------------ */
+
+function cortex(route: string, actor: string | null, body: Record<string, unknown>) {
+  const req = request(cortexApp.getHttpServer()).post(`/api/v1/cortex/${route}`).send(body);
+  return actor ? req.set('x-test-user', actor) : req;
+}
+
+const structuredCmd = (module: string, action: string, parameters: Record<string, unknown> = {}, businessId = ID.cxBiz) =>
+  ({ businessId, command: '', module, action, parameters });
+
+/** The ai_execution_logs rows written for cxBiz since `since` (a row-id snapshot), oldest first. */
+async function cxAuditIds(): Promise<Set<string>> {
+  const rows = await db.aiExecutionLog.findMany({ where: { businessId: { in: [ID.cxBiz, ID.bizB] } }, select: { id: true } });
+  return new Set(rows.map((r: any) => r.id));
+}
+async function cxAuditSince(since: Set<string>) {
+  const rows = await db.aiExecutionLog.findMany({ where: { businessId: { in: [ID.cxBiz, ID.bizB] } }, orderBy: { createdAt: 'asc' } });
+  return rows.filter((r: any) => !since.has(r.id));
+}
+const flowRuns = (flowId: string) => db.flowExecution.count({ where: { flowId } });
+
+describe('V1-31c CX: POST execute and POST batch run a member-initiated command only under its own module write scope', () => {
+  it('CX-01 a member without the module write scope (projects read) is refused 403, nothing reaches the connector, and a row names the member', async () => {
+    const before = connectorCalls.length;
+    const audit = await cxAuditIds();
+    const res = await cortex('execute', ID.cxStaffRO, structuredCmd('projects', 'create_project', { name: 'v31c ro' }));
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(JSON.stringify(res.body)).toMatch(/projects requires write/);
+    expect(connectorCalls.length).toBe(before);
+    const rows = await cxAuditSince(audit);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ businessId: ID.cxBiz, userId: ID.cxStaffRO, actor: 'user', module: 'projects', action: 'create_project', success: false });
+    expect(String(rows[0].errorMessage)).toMatch(/projects requires write/);
+  });
+
+  it('CX-02 a member of another business naming this one is refused 403 by BusinessGuard and nothing runs', async () => {
+    const before = { connector: connectorCalls.length, autonomy: cortexAutonomyCalls.length };
+    const res = await cortex('execute', ID.other, structuredCmd('projects', 'create_project', { name: 'v31c cross' }));
+    expect(res.status).toBe(403);
+    const batch = await cortex('batch', ID.other, { businessId: ID.cxBiz, commands: [{ type: 'structured', module: 'projects', action: 'create_project', parameters: {} }] });
+    expect(batch.status).toBe(403);
+    expect(connectorCalls.length).toBe(before.connector);
+    expect(cortexAutonomyCalls.length).toBe(before.autonomy);
+  });
+
+  it('CX-03 a member holding projects write runs it once, named for the member, through the executor gate and audit door', async () => {
+    const before = { connector: connectorCalls.length, autonomy: cortexAutonomyCalls.length };
+    const audit = await cxAuditIds();
+    const res = await cortex('execute', ID.cxStaffW, { ...structuredCmd('projects', 'create_project', { name: 'v31c w' }), userId: ID.cxOwner });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.result).toMatchObject({ success: true });
+    expect(connectorCalls.slice(before.connector)).toEqual([
+      { module: 'projects', action: 'create_project', businessId: ID.cxBiz, userId: ID.cxStaffW, parameters: { name: 'v31c w' } },
+    ]);
+    expect(cortexAutonomyCalls.slice(before.autonomy)).toEqual([{ businessId: ID.cxBiz, actionKey: 'projects.create_project', proposedBy: ID.cxStaffW }]);
+    const rows = await cxAuditSince(audit);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.cxStaffW, actor: 'user', module: 'projects', action: 'create_project', success: true });
+  });
+
+  it('CX-04 deny by default: an unmapped module, an action the capability registry does not list, and a refused module are 403 even for the OWNER', async () => {
+    const before = connectorCalls.length;
+    for (const [module, action] of [['keystore', 'export_all'], ['projects', 'drop_everything'], ['activity', 'delete_old_logs']] as const) {
+      const res = await cortex('execute', ID.cxOwner, structuredCmd(module, action));
+      expect(res.status, `${module}.${action} ${JSON.stringify(res.body)}`).toBe(403);
+    }
+    expect(connectorCalls.length).toBe(before);
+  });
+
+  it('CX-05 a crm command is the OWNER\'s only: the crm adapter writes contacts with no actor, so row visibility cannot be applied', async () => {
+    const before = connectorCalls.length;
+    const staff = await cortex('execute', ID.cxStaffW, structuredCmd('crm', 'update_contact', { contactId: `${P}c`, email: 'x@test.local' }));
+    expect(staff.status).toBe(403);
+    expect(JSON.stringify(staff.body)).toMatch(/business owner/);
+    expect(connectorCalls.length).toBe(before);
+    const owner = await cortex('execute', ID.cxOwner, structuredCmd('crm', 'add_note', { contactId: `${P}c`, note: 'v31c' }));
+    expect(owner.status, JSON.stringify(owner.body)).toBe(200);
+    expect(connectorCalls.slice(before).map((c) => `${c.module}.${c.action}:${c.userId}`)).toEqual([`crm.add_note:${ID.cxOwner}`]);
+  });
+
+  it('CX-06 batch: one command outside the member\'s scope refuses the whole batch before anything runs; a batch inside it runs', async () => {
+    const before = connectorCalls.length;
+    const refused = await cortex('batch', ID.cxStaffW, {
+      businessId: ID.cxBiz,
+      commands: [
+        { type: 'structured', module: 'projects', action: 'create_project', parameters: { name: 'v31c b1' } },
+        { type: 'structured', module: 'commerce', action: 'process_payment', parameters: { invoiceId: `${P}inv` } },
+      ],
+    });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    expect(JSON.stringify(refused.body)).toMatch(/revenue requires write/);
+    expect(connectorCalls.length).toBe(before);
+
+    const ran = await cortex('batch', ID.cxStaffW, {
+      businessId: ID.cxBiz,
+      commands: [
+        { type: 'structured', module: 'projects', action: 'create_project', parameters: { name: 'v31c b2' } },
+        { type: 'structured', module: 'projects', action: 'add_task', parameters: { title: 'v31c b3' } },
+      ],
+    });
+    expect(ran.status, JSON.stringify(ran.body)).toBe(200);
+    expect(ran.body.summary).toMatchObject({ total: 2, succeeded: 2 });
+    expect(connectorCalls.slice(before).map((c) => `${c.module}.${c.action}:${c.userId}`)).toEqual([
+      `projects.create_project:${ID.cxStaffW}`, `projects.add_task:${ID.cxStaffW}`,
+    ]);
+  });
+
+  it('CX-07 natural language: the command parsed from the member\'s words is checked the same way (refused for projects read, run for projects write)', async () => {
+    parsedIntent = { module: 'projects', action: 'create_project', parameters: { name: 'v31c parsed' } };
+    const before = connectorCalls.length;
+    const refused = await cortex('execute', ID.cxStaffRO, { businessId: ID.cxBiz, command: 'start a project called v31c' });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(403);
+    const batchRefused = await cortex('batch', ID.cxStaffRO, { businessId: ID.cxBiz, commands: [{ type: 'natural', command: 'start a project' }] });
+    expect(batchRefused.status, JSON.stringify(batchRefused.body)).toBe(403);
+    expect(connectorCalls.length).toBe(before);
+    const ran = await cortex('execute', ID.cxStaffW, { businessId: ID.cxBiz, command: 'start a project called v31c' });
+    expect(ran.status, JSON.stringify(ran.body)).toBe(200);
+    expect(connectorCalls.slice(before).map((c) => `${c.module}.${c.action}:${c.userId}`)).toEqual([`projects.create_project:${ID.cxStaffW}`]);
+  });
+
+  it('CX-08 every action the capability registry lists has a requirement: a module scope, its adapter, or a refusal by name', async () => {
+    const { KeyCortexCapabilityRegistryService } = await import('../src/modules/key-cortex/key-cortex-capability-registry.service');
+    const { cortexCommandRequirement } = await import('../src/modules/key-cortex/key-cortex.controller');
+    const unmapped: string[] = [];
+    const refusedModules = new Set<string>();
+    for (const cap of new (KeyCortexCapabilityRegistryService as any)().getAllCapabilities()) {
+      for (const a of cap.actions) {
+        const req = cortexCommandRequirement(cap.module, a.name);
+        if (!req) unmapped.push(`${cap.module}.${a.name}`);
+        else if ('refused' in req) refusedModules.add(cap.module);
+      }
+    }
+    expect(unmapped).toEqual([]);
+    expect([...refusedModules].sort()).toEqual(['activity', 'genome']);
+    expect(cortexCommandRequirement('projects', 'not_in_the_registry')).toMatchObject({ refused: expect.any(String) });
+    expect(cortexCommandRequirement('settings', 'update_business_profile')).toMatchObject({ adapterEnforced: expect.any(String) });
+  });
+
   it.todo(
-    'CR-4 control-tower priority-queue (action buttons, dismiss log) and daily-plan block execute still POST {toolName, args} with no stored plan step (apps/web lib/client.ts executeAction) and get 400: a companion web packet must first obtain a stored step (POST .../plan) or a server-held proposal, then execute it by planId/planStepId. Executing a client tool name here would reopen SEC-V131-1.',
+    'CX-09 (deviation, outside the write set) V1-02 isUsableAutonomyVerdict on POST execute and batch: the autonomy gate these routes run is KeyCortexExecutorService.execute\'s (one evaluateAction per command, fail closed on a throw or a deny, audited), which reads only verdict.allowed and verdict.requiresApproval; a verdict that omits requiresApproval or tier still runs. Making it V1-02-strict is a change to key-cortex-executor.service.ts, and the k34c suite (key-cortex-actor-binding) and key-cortex.controller.principal.spec.ts pin exactly one evaluateAction per command with a tier-less allow, so a second, controller-side evaluation cannot be added without editing them.',
   );
+});
+
+describe('V1-31c SB: client code is not executed (the cortex sandbox is not bounded)', () => {
+  it('SB-01 POST sandbox/execute is 410 for the OWNER and a scope-less member, 403 across tenants, and the sandbox is never reached', async () => {
+    const before = sandboxCalls.length;
+    for (const actor of [ID.cxOwner, ID.cxStaffRO]) {
+      const res = await cortex('sandbox/execute', actor, { businessId: ID.cxBiz, code: 'return 1', language: 'javascript' });
+      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(410);
+    }
+    const cross = await cortex('sandbox/execute', ID.other, { businessId: ID.cxBiz, code: 'return 1', language: 'javascript' });
+    expect(cross.status).toBe(403);
+    expect(sandboxCalls.slice(before)).toEqual([]);
+  });
+
+  it('SB-02 POST sandbox/apply is 410 likewise: a template\'s client parameters are never substituted or run', async () => {
+    const before = sandboxCalls.length;
+    for (const actor of [ID.cxOwner, ID.cxStaffRO]) {
+      const res = await cortex('sandbox/apply', actor, { businessId: ID.cxBiz, templateId: 'weekly-report', parameters: { reportData: '{}' } });
+      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(410);
+    }
+    const cross = await cortex('sandbox/apply', ID.other, { businessId: ID.cxBiz, templateId: 'weekly-report', parameters: {} });
+    expect(cross.status).toBe(403);
+    expect(sandboxCalls.slice(before)).toEqual([]);
+  });
+
+  it('SB-03 (proof) the sandbox puts host intrinsics in scope: code that passes its audit reaches the host process, while the context\'s own realm has none', async () => {
+    const { KeyCortexSandboxService } = await import('../src/modules/key-cortex/key-cortex-sandbox.service');
+    const prisma = { client: { sandboxExecutionLog: { create: async () => ({}) } } };
+    const sandbox = new (KeyCortexSandboxService as any)({}, {}, prisma, {});
+    const host = await sandbox.executeCode({ code: "return Object['constr' + 'uctor']('return typeof process')();", language: 'javascript', context: { businessId: ID.cxBiz } });
+    expect(host).toMatchObject({ success: true, output: 'object' });
+    // Control: the same reach from an object the context itself created finds no process.
+    const own = await sandbox.executeCode({ code: "return ({})['constr' + 'uctor']['constr' + 'uctor']('return typeof process')();", language: 'javascript', context: { businessId: ID.cxBiz } });
+    expect(own).toMatchObject({ success: true, output: 'undefined' });
+  });
+
+  it('SB-04 (proof) sandbox/apply substitutes a client parameter the template does not declare into code, outside any string literal', async () => {
+    const { KeyCortexSandboxService } = await import('../src/modules/key-cortex/key-cortex-sandbox.service');
+    const sandbox: any = new (KeyCortexSandboxService as any)({}, {}, { client: {} }, {});
+    let ran = '';
+    sandbox.executeCode = async (req: any) => { ran = req.code; return { success: true, output: '' }; };
+    await sandbox.applyTemplate('bulk-personalized-emails', { contacts: '[]', subject: 's', body: 'b', firstName: 'v31c_code' }, { businessId: ID.cxBiz });
+    expect(ran).toContain('.replace(/v31c_code/g');
+  });
+});
+
+describe('V1-31c FL: POST flows/:id/execute runs only a stored flow of the guarded business, under each action\'s scope and the autonomy gate', () => {
+  const execFlow = (flowId: string, actor: string | null, body: Record<string, unknown>) => cortex(`flows/${flowId}/execute`, actor, body);
+
+  it('FL-01 a member without automations write is refused 403: no node runs, no execution row, and a row names the member', async () => {
+    const before = connectorCalls.length;
+    const audit = await cxAuditIds();
+    const res = await execFlow(ID.cxFlow, ID.cxStaffRO, { businessId: ID.cxBiz, inputs: { projectName: 'v31c ro' } });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(JSON.stringify(res.body)).toMatch(/automations requires write/);
+    expect(connectorCalls.length).toBe(before);
+    expect(await flowRuns(ID.cxFlow)).toBe(0);
+    const rows = await cxAuditSince(audit);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ businessId: ID.cxBiz, userId: ID.cxStaffRO, module: 'flow', action: 'trigger_flow', success: false });
+  });
+
+  it('FL-02 across tenants: a member of B naming A is 403; naming B with A\'s flow id is 404 byte-identical to an unknown id; nothing runs', async () => {
+    const before = connectorCalls.length;
+    const named = await execFlow(ID.cxFlow, ID.other, { businessId: ID.cxBiz, inputs: {} });
+    expect(named.status).toBe(403);
+    const foreign = await execFlow(ID.cxFlow, ID.other, { businessId: ID.bizB, inputs: {} });
+    const unknown = await execFlow(`${P}noflow`, ID.other, { businessId: ID.bizB, inputs: {} });
+    expect(foreign.status).toBe(404);
+    expect(unknown.status).toBe(404);
+    expect(foreign.text).toBe(unknown.text);
+    expect(connectorCalls.length).toBe(before);
+    expect(await flowRuns(ID.cxFlow)).toBe(0);
+  });
+
+  it('FL-03 a member holding automations and projects write runs the stored flow: its action runs once for that member with the inputs as data, an execution row and an audit row', async () => {
+    const before = { connector: connectorCalls.length, autonomy: cortexAutonomyCalls.length };
+    const audit = await cxAuditIds();
+    const res = await execFlow(ID.cxFlow, ID.cxStaffW, { businessId: ID.cxBiz, inputs: { projectName: 'v31c flow' } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ executionId: expect.any(String), status: 'completed' });
+    expect(connectorCalls.slice(before.connector)).toEqual([
+      { module: 'projects', action: 'create_project', businessId: ID.cxBiz, userId: ID.cxStaffW, parameters: { name: 'v31c flow' } },
+    ]);
+    expect(cortexAutonomyCalls.slice(before.autonomy).map((c) => `${c.actionKey}:${c.proposedBy}`)).toEqual([
+      `flow.trigger_flow:${ID.cxStaffW}`, `projects.create_project:${ID.cxStaffW}`,
+    ]);
+    expect(await flowRuns(ID.cxFlow)).toBe(1);
+    const rows = await cxAuditSince(audit);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.cxStaffW, actor: 'user', module: 'flow', action: 'trigger_flow', success: true });
+  });
+
+  it('FL-04 an engine key in the inputs (_userId naming the OWNER) is refused 400 and nothing runs', async () => {
+    const before = connectorCalls.length;
+    const runs = await flowRuns(ID.cxFlow);
+    const res = await execFlow(ID.cxFlow, ID.cxStaffW, { businessId: ID.cxBiz, inputs: { projectName: 'x', _userId: ID.cxOwner } });
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    const notObject = await execFlow(ID.cxFlow, ID.cxStaffW, { businessId: ID.cxBiz, inputs: ['x'] });
+    expect(notObject.status).toBe(400);
+    expect(connectorCalls.length).toBe(before);
+    expect(await flowRuns(ID.cxFlow)).toBe(runs);
+  });
+
+  it('FL-05 an action node outside the member\'s scope (commerce.process_payment, revenue read) refuses the whole flow', async () => {
+    const before = connectorCalls.length;
+    const res = await execFlow(ID.cxFlowRev, ID.cxStaffW, { businessId: ID.cxBiz, inputs: {} });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(JSON.stringify(res.body)).toMatch(/revenue requires write/);
+    expect(connectorCalls.length).toBe(before);
+    expect(await flowRuns(ID.cxFlowRev)).toBe(0);
+  });
+
+  it('FL-06 the autonomy gate fails closed: an unusable verdict or an error is 503, a deny or an approval requirement is 403, and nothing runs', async () => {
+    const before = connectorCalls.length;
+    const runs = await flowRuns(ID.cxFlow);
+    for (const [verdict, status] of [
+      [{ allowed: true, requiresApproval: false }, 503], // no tier: not a statement that nothing needs approval
+      ['throw', 503],
+      [{ allowed: false, requiresApproval: false, tier: 'manual', reason: 'v31c locked' }, 403],
+      [{ allowed: true, requiresApproval: true, tier: 'supervised', reason: 'v31c approve first' }, 403],
+      [{ allowed: true, requiresApproval: false, tier: 'manual' }, 403],
+    ] as const) {
+      cortexVerdict = verdict;
+      try {
+        const res = await execFlow(ID.cxFlow, ID.cxStaffW, { businessId: ID.cxBiz, inputs: { projectName: 'v31c gate' } });
+        expect(res.status, `${JSON.stringify(verdict)} ${JSON.stringify(res.body)}`).toBe(status);
+      } finally {
+        cortexVerdict = ALLOW;
+      }
+    }
+    expect(connectorCalls.length).toBe(before);
+    expect(await flowRuns(ID.cxFlow)).toBe(runs);
+  });
 });
 
 /* ------------------------------------------------------------------------ */
@@ -780,9 +1298,9 @@ describe('V1-31b review CR-4: web callers outside the write set', () => {
  * A handler is FLAGGED when it passes a body-derived value in the arguments of
  * an EXECUTOR call: executeToolDirect, executeToolDirectly, executeTool,
  * executeToolAction, autoExecuteToolForMonitoring, handleToolBridge,
- * confirmAndExecute, executeBatch, applyTemplate, executeApproved, `.execute(...)`
- * or `.executeAction(...)` on any receiver other than bare `this`, or a call of
- * innerToolExecutor.
+ * confirmAndExecute, executeBatch, applyTemplate, executeApproved, executeFlow
+ * (V1-31c), `.execute(...)` or `.executeAction(...)` on any receiver other than
+ * bare `this`, or a call of innerToolExecutor.
  *
  * WHAT IS REQUIRED: the flagged handlers are exactly KNOWN_BODY_EXECUTORS. A new
  * one fails until it is bound to a stored proposal or listed with a reason; a
@@ -792,7 +1310,12 @@ describe('V1-31b review CR-4: web callers outside the write set', () => {
  * another method (`this.helper(body)` that executes is not seen), and it trusts
  * the id naming rule. Real behaviour is proven by the HTTP cases above.
  */
-const KNOWN_BODY_EXECUTORS: Record<string, { kind: 'bounded' | 'open'; reason: string }> = {
+/**
+ * V1-31c: an entry is 'bound' (the route executes a stored object by id; the body only selects it or carries data the
+ * stored object reads) or 'bounded' (a member-initiated direct action under the direct-action principle, or a route
+ * that runs nothing), each with its reason. There is no 'open' kind any more (CS-03).
+ */
+const KNOWN_BODY_EXECUTORS: Record<string, { kind: 'bound' | 'bounded'; reason: string }> = {
   'modules/key-inbox/key-inbox.controller.ts#KeyInboxController.executeAction': {
     kind: 'bounded',
     reason:
@@ -811,27 +1334,22 @@ const KNOWN_BODY_EXECUTORS: Record<string, { kind: 'bounded' | 'open'; reason: s
   'modules/key-cortex/key-cortex.controller.ts#KeyCortexController.flowApplyTemplate': {
     kind: 'bounded',
     reason:
-      'Runs nothing: KeyCortexFlowStudioService.applyTemplate builds a flow definition from a built-in template with the member name and parameters; the flow only runs through flows/:id/execute (open below).',
+      'Runs nothing: KeyCortexFlowStudioService.applyTemplate builds a flow definition from a built-in template with the member name and parameters; the flow only runs through flows/:id/execute (bound below).',
   },
   'modules/key-cortex/key-cortex.controller.ts#KeyCortexController.executeCommand': {
-    kind: 'open',
-    reason: 'POST api/v1/cortex/execute: a structured dto.module/dto.action/dto.parameters runs through KeyCortexExecutorService (autonomy gate only). Outside the V1-31b write set.',
+    kind: 'bounded',
+    reason:
+      "V1-31c: POST api/v1/cortex/execute is a member-initiated direct command (structured, or parsed from the member's words). Before the executor every command passes cortexCommandRequirement for the member CortexMemberAuthorityGuard loaded in the guarded tenant: the registry must list the action and the module must map to a canonical module scope held at write (deny by default; crm OWNER only; settings enforced by its adapter on the actor); a refusal is 403 with an ai_execution_logs row naming the member (CX-01..CX-08). The executor runs the autonomy gate and audits the rest (CX-09: not yet V1-02-strict).",
   },
   'modules/key-cortex/key-cortex.controller.ts#KeyCortexController.executeBatch': {
-    kind: 'open',
-    reason: 'POST api/v1/cortex/batch: client commands (module/action/parameters) through executeBatch. Outside the V1-31b write set.',
-  },
-  'modules/key-cortex/key-cortex.controller.ts#KeyCortexController.sandboxExecute': {
-    kind: 'open',
-    reason: 'POST api/v1/cortex/sandbox/execute: client code in the cortex sandbox. Outside the V1-31b write set.',
-  },
-  'modules/key-cortex/key-cortex.controller.ts#KeyCortexController.sandboxApply': {
-    kind: 'open',
-    reason: 'POST api/v1/cortex/sandbox/apply: a stored template with client parameters. Outside the V1-31b write set.',
+    kind: 'bounded',
+    reason:
+      'V1-31c: POST api/v1/cortex/batch: every command, structured or parsed, is checked as for POST execute before any of them runs; one refusal refuses the whole batch (CX-06, CX-07).',
   },
   'modules/key-cortex/key-cortex.controller.ts#KeyCortexController.flowExecute': {
-    kind: 'open',
-    reason: 'POST api/v1/cortex/flows/:id/execute: a stored flow by id with client inputs. Outside the V1-31b write set.',
+    kind: 'bound',
+    reason:
+      'V1-31c: POST api/v1/cortex/flows/:id/execute runs only the stored FlowDefinition by id in the guarded business (404 otherwise). The body inputs are data the stored nodes read (an engine key such as _userId is refused 400; the actor is set by the server); automations write and every effect node are checked as direct commands, the autonomy gate runs per action (isUsableAutonomyVerdict, fail closed) and the member is audited (FL-01..FL-06).',
   },
 };
 
@@ -840,6 +1358,8 @@ const ROUTE_DECORATORS = new Set(['Get', 'Post', 'Put', 'Patch', 'Delete', 'All'
 const ALWAYS_EXECUTORS = new Set([
   'executeToolDirect', 'executeToolDirectly', 'executeTool', 'executeToolAction', 'autoExecuteToolForMonitoring',
   'handleToolBridge', 'confirmAndExecute', 'executeBatch', 'applyTemplate', 'executeApproved',
+  // V1-31c: the flow studio's engine entry point (flows/:id/execute calls it by this name).
+  'executeFlow',
 ]);
 const ID_FIELD = /^(id|ids|.*Id|.*Ids)$/;
 
@@ -971,9 +1491,9 @@ describe('V1-31b CS: census of controller routes that hand request-body tool nam
     ]);
   });
 
-  describe('routes outside the V1-31b write set that still pass body data to an executor (follow-up packets)', () => {
-    for (const [key, entry] of Object.entries(KNOWN_BODY_EXECUTORS)) {
-      if (entry.kind === 'open') it.todo(`${key}: ${entry.reason} Bind it to a stored proposal by id, or refuse it.`);
-    }
+  it("CS-03 (V1-31c) no listed route is 'open': each is 'bound' or 'bounded', with its reason", () => {
+    const entries = Object.entries(KNOWN_BODY_EXECUTORS) as Array<[string, { kind: string; reason: string }]>;
+    expect(entries.filter(([, e]) => e.kind !== 'bound' && e.kind !== 'bounded').map(([k]) => k)).toEqual([]);
+    expect(entries.filter(([, e]) => e.reason.trim().length < 40).map(([k]) => k)).toEqual([]);
   });
 });
