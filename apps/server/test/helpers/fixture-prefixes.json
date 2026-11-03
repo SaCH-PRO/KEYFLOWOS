@@ -543,6 +543,11 @@
       "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
+      "prefix": "v84d_",
+      "owner": "apps/server/test/call-log-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D4-CALL-LOG-VIS)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
