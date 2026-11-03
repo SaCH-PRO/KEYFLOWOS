@@ -229,9 +229,11 @@ async function cleanQueue(name: string, ours: (j: { name: string; data?: any }) 
 }
 
 afterAll(async () => {
-  // quit() waits for the replies still owed on each connection; disconnect()
-  // closed them under in-flight BullMQ commands, which then rejected with
-  // 'Connection is closed' after the suite (an unhandled rejection in the run).
+  // quit() waits for the replies still owed on each connection. These are the
+  // connections the services were handed; the 'Connection is closed'
+  // rejection once blamed on closing them was a Worker's OWN duplicate,
+  // closed while still initializing (FOLLOW3-C3, fixed in
+  // TemporalFlowMemoryQueueService.onModuleDestroy).
   await Promise.all(connections.map((c) => c.quit().catch(() => undefined)));
 });
 

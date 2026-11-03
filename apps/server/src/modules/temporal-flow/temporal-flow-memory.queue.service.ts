@@ -95,6 +95,19 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
   }
 
   async onModuleDestroy() {
+    // FOLLOW3-C3: the worker is closed only once it is ready. new Worker()
+    // duplicates this.redis as its blocking connection and initializes it in
+    // the background: connect, then an INFO for bullmq's version check. A
+    // close() before that INFO is answered (a destroy a few hundred ms after
+    // onModuleInit) disconnects the duplicate under it (bullmq 5.76
+    // redis-connection.js:363-365). The INFO rejects with 'Connection is
+    // closed' and bullmq re-emits it on a connection whose listeners close()
+    // has already removed, which throws inside bullmq's own .catch (:74-75,
+    // :385): an unhandled rejection from RedisConnection.getRedisVersionAndType
+    // <- RedisConnection.init. Once ready, close() quits instead, which waits
+    // for the reply. A worker whose connection failed to initialize (bullmq has
+    // already emitted that as the worker's 'error') is closed all the same.
+    await this.worker?.waitUntilReady().catch(() => undefined);
     await this.worker?.close();
     await this.queue.close();
   }
