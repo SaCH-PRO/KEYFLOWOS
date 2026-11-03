@@ -132,14 +132,26 @@ export function normalizeCurrency(currency?: string | null): string {
  *
  * The ledger stays balanced per currency: every entry carries the posting's
  * one currency, and the trial balance groups by it (LedgerBalanceService).
+ *
+ * V1-37d-LEGACY-CURRENCY-PAYMENTS (verify-money VR-04): money that follows a
+ * document already stored in a currency outside D-13 (a TTD business's JMD
+ * invoice, written before D-13) posts in that document's own currency, as the
+ * base did. `followedDocumentCurrency` is that stored currency, which post()
+ * reads itself (followedDocumentCurrency below); a sourced posting in exactly
+ * that currency is accepted. New documents are held to D-13 where they are
+ * written (CommerceService.documentCurrency, RecurringInvoiceService), and a
+ * posting that follows no stored document keeps the refusal above.
  */
 export function resolvePostingCurrency(
   input: Pick<PostingInput, 'currency' | 'sourceType' | 'sourceId'>,
   businessCurrency: string,
+  followedDocumentCurrency?: string | null,
 ): string {
   const business = normalizeCurrency(businessCurrency);
   const requested = normalizeCurrency(input.currency);
   if (!requested || requested === business) return business;
+  const sourced = Boolean(input.sourceType && input.sourceId);
+  if (sourced && normalizeCurrency(followedDocumentCurrency) === requested) return requested;
   if (!D13_CURRENCIES.includes(requested)) {
     throw new BadRequestException(
       `Unsupported posting currency ${requested}: the business currency is ${business}; supported currencies are ${D13_CURRENCIES.join(', ')}`,
@@ -151,6 +163,38 @@ export function resolvePostingCurrency(
     );
   }
   return requested;
+}
+
+/**
+ * V1-37d: the currency of the stored document a posting follows, read only
+ * when the posting needs it (a currency that is neither the business's nor a
+ * D-13 one). A Payment-sourced posting (the payment's recording, a partial
+ * refund of it) follows the payment's invoice. Both are read from the posting
+ * business's payment row, never taken from the caller: the invoice must be that
+ * business's and not deleted, and the payment must carry the invoice's
+ * currency. Anything else follows no stored document (null) and keeps the D-13
+ * refusal: an invoice's own receivable is the document being issued; a void
+ * and a full refund are reversals (reverse()), which copy the original's
+ * currency and never come here.
+ */
+async function followedDocumentCurrency(
+  tx: Prisma.TransactionClient,
+  input: Pick<PostingInput, 'businessId' | 'currency' | 'sourceType' | 'sourceId'>,
+  businessCurrency: string,
+): Promise<string | null> {
+  const requested = normalizeCurrency(input.currency);
+  if (!requested || requested === normalizeCurrency(businessCurrency) || D13_CURRENCIES.includes(requested)) {
+    return null;
+  }
+  if (input.sourceType !== 'Payment' || !input.sourceId) return null;
+  const payment = await tx.payment.findFirst({
+    where: { id: input.sourceId, businessId: input.businessId },
+    select: { currency: true, invoice: { select: { businessId: true, currency: true, deletedAt: true } } },
+  });
+  const invoice = payment?.invoice;
+  if (!payment || !invoice || invoice.businessId !== input.businessId || invoice.deletedAt) return null;
+  const stored = normalizeCurrency(invoice.currency);
+  return stored && normalizeCurrency(payment.currency) === stored ? stored : null;
 }
 
 /**
@@ -237,7 +281,14 @@ export class PostingService {
       // V1-37 (CF-38, D-13): the posting's one currency. Every account is the
       // posting business's here, so any row names its currency. A stub that
       // returns no business relation reads as the schema default.
-      const currency = resolvePostingCurrency(input, accounts[0]?.business?.currency ?? 'TTD');
+      // V1-37d: money that follows a stored legacy-currency invoice posts in
+      // that invoice's currency (read here, inside the posting transaction).
+      const businessCurrency = accounts[0]?.business?.currency ?? 'TTD';
+      const currency = resolvePostingCurrency(
+        input,
+        businessCurrency,
+        await followedDocumentCurrency(tx, input, businessCurrency),
+      );
 
       // Verify contactId (when provided) belongs to the posting business.
       // Without this check a caller could attribute revenue to a foreign
