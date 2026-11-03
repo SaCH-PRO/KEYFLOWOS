@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Request, Response } from 'express';
 import { errorRegistry } from '../observability/error-registry';
+import { routePatternOf } from '../interceptors/logging.interceptor';
 
 @Catch()
 export class GlobalHttpExceptionFilter implements ExceptionFilter {
@@ -61,22 +62,21 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
       message = 'Internal server error';
       error = 'Internal Server Error';
+      // The route PATTERN, never request.url: a URL carries credentials (link
+      // tokens, webhook secrets, OAuth codes) in its path or query (V1-83).
+      // An error thrown before routing (in middleware) names '<unrouted>'.
+      const route = routePatternOf(request);
       this.logger.error(
-        `Unhandled exception on ${request.method} ${request.url} [${correlationId ?? '-'}]`,
+        `Unhandled exception on ${request.method} ${route} [${correlationId ?? '-'}]`,
         exception instanceof Error ? exception.stack : String(exception),
       );
       // Only the 500 branch is recorded. A 401 or a 422 is the API working;
       // recording those would bury the handful of entries that mean something
       // under thousands that do not.
       //
-      // Labelled by route PATTERN rather than request.url, so
-      // /crm/contacts/:id cannot become one distinct entry per contact id and
-      // evict the rest of the history.
-      errorRegistry.record(
-        'http',
-        `${request.method} ${(request as { route?: { path?: string } }).route?.path ?? request.url}`,
-        exception,
-      );
+      // Labelled by route pattern, so /crm/contacts/:id cannot become one
+      // distinct entry per contact id and evict the rest of the history.
+      errorRegistry.record('http', `${request.method} ${route}`, exception);
     }
 
     if (!code) {
