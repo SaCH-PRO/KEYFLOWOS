@@ -1,8 +1,10 @@
-import { Controller, Get, Post, Param, Body, Query, UseGuards, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, Query, Req, UseGuards, Inject } from '@nestjs/common';
 import { ClientMomentumService } from './client-momentum.service';
 import { MomentumAiService } from './momentum-ai.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertContactVisible } from '../crm/crm-permissions.helper';
 
 @Controller('momentum/businesses/:businessId')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -10,6 +12,7 @@ export class MomentumController {
   constructor(
     @Inject(ClientMomentumService) private readonly momentumService: ClientMomentumService,
     @Inject(MomentumAiService) private readonly momentumAi: MomentumAiService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Get('recommendations')
@@ -71,11 +74,17 @@ export class MomentumController {
     });
   }
 
+  // V1-84 (FOLLOW3-D5): a contact-keyed route answers only for a contact the
+  // caller may open by the GET crm contacts/:contactId rule (V1-08
+  // assertContactVisible): a hidden contact gets the same 404 'Contact not
+  // found' as an unknown id, before the service runs.
   @Get('contacts/:contactId')
   async getContactMomentum(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     return this.momentumService.getContactMomentum(businessId, contactId);
   }
 
@@ -83,8 +92,10 @@ export class MomentumController {
   async getContactMomentumHistory(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
     @Query('days') days?: string,
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     const parsedDays = days ? parseInt(days, 10) : 30;
     return this.momentumService.getContactMomentumHistory(
       businessId,

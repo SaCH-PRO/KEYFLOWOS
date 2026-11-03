@@ -1,7 +1,9 @@
-import { Controller, Get, Post, Patch, Param, Body, UseGuards, Query, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body, UseGuards, Query, Inject, Req } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { PublicRateLimitGuard } from '../../core/guards/public-rate-limit.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertContactVisible } from '../crm/crm-permissions.helper';
 import { UpsellService } from './upsell.service';
 import { ReferralRewardService } from './referral-reward.service';
 import { SalesTeamService } from './sales-team.service';
@@ -17,6 +19,7 @@ export class ConversionController {
     @Inject(SalesTeamService) private readonly salesTeam: SalesTeamService,
     @Inject(LeadMagnetService) private readonly leadMagnet: LeadMagnetService,
     @Inject(MerchantSubscriptionService) private readonly merchantSub: MerchantSubscriptionService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   // ─── Upsell Engine ───
@@ -43,8 +46,17 @@ export class ConversionController {
   }
 
   // ─── Referral Rewards ───
+  // V1-84 (FOLLOW3-D5): a contact-keyed route answers only for a contact the
+  // caller may open by the GET crm contacts/:contactId rule (V1-08
+  // assertContactVisible): a hidden contact gets the same 404 'Contact not
+  // found' as an unknown id, before the service runs.
   @Get('businesses/:businessId/contacts/:contactId/referral-stats')
-  async getReferralStats(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+  async getReferralStats(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
+  ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     return this.referralReward.getReferralStats(businessId, contactId);
   }
 
@@ -69,12 +81,16 @@ export class ConversionController {
     return this.salesTeam.getRepPipeline(businessId, repId);
   }
 
+  // V1-84 (FOLLOW3-D5): the contact must be one the caller may open (V1-08
+  // rule); a hidden contact answers 404 'Contact not found' and is not written.
   @Patch('businesses/:businessId/contacts/:contactId/sales-rep')
   async assignSalesRep(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: { salesRepId: string | null },
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     await this.salesTeam.setSalesRep(businessId, contactId, body.salesRepId);
     return { updated: true };
   }

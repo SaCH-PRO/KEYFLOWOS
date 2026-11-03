@@ -7,6 +7,8 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { MarketplaceService } from './marketplace.service';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { CommerceIntegrationService } from './commerce-integration.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertContactVisible } from '../crm/crm-permissions.helper';
 
 @Controller('marketplace')
 @UseGuards(AuthGuard, BusinessGuard, CrmRateLimitGuard)
@@ -14,6 +16,7 @@ export class MarketplaceController {
   constructor(
     @Inject(MarketplaceService) private readonly marketplaceService: MarketplaceService,
     @Inject(CommerceIntegrationService) private readonly commerceIntegration: CommerceIntegrationService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Get('businesses/:businessId/dashboard')
@@ -348,11 +351,17 @@ export class MarketplaceController {
     return this.commerceIntegration.getOrderCrossLinks(businessId, orderId);
   }
 
+  // V1-84 (FOLLOW3-D5): a contact-keyed route answers only for a contact the
+  // caller may open by the GET crm contacts/:contactId rule (V1-08
+  // assertContactVisible): a hidden contact gets the same 404 'Contact not
+  // found' as an unknown id, before the service runs.
   @Get('businesses/:businessId/contacts/:contactId/order-history')
-  getContactOrderHistory(
+  async getContactOrderHistory(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     return this.commerceIntegration.getContactOrderHistory(businessId, contactId);
   }
 
