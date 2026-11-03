@@ -491,6 +491,16 @@ export class AutomationExecutorService {
     }
   }
 
+  /*
+   * V1-55-EVT-ACTIVITY-DEDUPE (M50, D-08: Activity is the user-visible feed).
+   * flow.module.ts registers ActivityEventListener next to this service, and
+   * it writes the feed row for contact.updated (a status change),
+   * booking.created, booking.confirmed, invoice.paid, invoice.sent and
+   * invoice.overdue. The handlers below run the playbooks, flows and built-in
+   * rules on those events and write no second feed row for them.
+   * contact.created still writes its own row: log-redaction.integration.test.ts
+   * mounts this service alone and counts that row as proof its listener ran.
+   */
   @OnEvent('contact.created')
   async onContactCreated(payload: ContactCreatedPayload) {
     await this.activity.log({
@@ -517,17 +527,22 @@ export class AutomationExecutorService {
 
   @OnEvent('contact.updated')
   async onContactUpdated(payload: ContactUpdatedPayload) {
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'crm',
-      action: 'updated',
-      entityType: 'contact',
-      entityId: payload.contact.id,
-      title: 'Contact updated',
-      detail: payload.toStatus ? `Status changed to ${payload.toStatus}` : undefined,
-      icon: 'UserCog',
-      contactId: payload.contact.id,
-    });
+    // V1-55: ActivityEventListener writes the feed row for a status change
+    // (both statuses set and different); this row is written only for an
+    // update that listener leaves out (the negation of its guard).
+    if (!payload.fromStatus || !payload.toStatus || payload.fromStatus === payload.toStatus) {
+      await this.activity.log({
+        businessId: payload.businessId,
+        module: 'crm',
+        action: 'updated',
+        entityType: 'contact',
+        entityId: payload.contact.id,
+        title: 'Contact updated',
+        detail: payload.toStatus ? `Status changed to ${payload.toStatus}` : undefined,
+        icon: 'UserCog',
+        contactId: payload.contact.id,
+      });
+    }
     await this.executePlaybooks(payload.businessId, 'contact.updated', {
       contactId: payload.contact.id,
       fromStatus: payload.fromStatus,
@@ -580,21 +595,6 @@ export class AutomationExecutorService {
 
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
-    const contactName = payload.contact
-      ? [payload.contact.firstName, payload.contact.lastName].filter(Boolean).join(' ') || 'Customer'
-      : 'Customer';
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'bookings',
-      action: 'created',
-      entityType: 'booking',
-      entityId: payload.booking.id,
-      title: `New booking from ${contactName}`,
-      detail: new Date(payload.booking.startTime).toLocaleString(),
-      icon: 'Calendar',
-      tone: 'info',
-      contactId: payload.contact?.id,
-    });
     await this.executePlaybooks(payload.businessId, 'booking.created', {
       contactId: payload.contact?.id,
       bookingId: payload.booking.id,
@@ -609,17 +609,6 @@ export class AutomationExecutorService {
 
   @OnEvent('booking.confirmed')
   async onBookingConfirmed(payload: BookingConfirmedPayload) {
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'bookings',
-      action: 'confirmed',
-      entityType: 'booking',
-      entityId: payload.booking.id,
-      title: 'Booking confirmed',
-      icon: 'CheckCircle',
-      tone: 'success',
-      contactId: payload.contact?.id,
-    });
     await this.executePlaybooks(payload.businessId, 'booking.confirmed', {
       contactId: payload.contact?.id,
       bookingId: payload.booking.id,
@@ -650,19 +639,6 @@ export class AutomationExecutorService {
   @OnEvent('invoice.paid')
   async onInvoicePaid(payload: InvoicePaidPayload) {
     const inv = payload.invoice;
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'commerce',
-      action: 'paid',
-      entityType: 'invoice',
-      entityId: inv.id,
-      title: `Invoice paid`,
-      detail: `${inv.currency} ${inv.total.toFixed(2)}`,
-      icon: 'DollarSign',
-      tone: 'success',
-      contactId: inv.contact?.id,
-      data: { total: inv.total, currency: inv.currency },
-    });
     await this.executePlaybooks(payload.businessId, 'invoice.paid', {
       contactId: inv.contact?.id,
       invoiceId: inv.id,
@@ -731,18 +707,6 @@ export class AutomationExecutorService {
 
   @OnEvent('invoice.sent')
   async onInvoiceSent(payload: InvoiceStatusPayload) {
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'commerce',
-      action: 'sent',
-      entityType: 'invoice',
-      entityId: payload.invoice.id,
-      title: 'Invoice sent',
-      detail: `${payload.invoice.currency} ${payload.invoice.total.toFixed(2)}`,
-      icon: 'Send',
-      tone: 'info',
-      contactId: payload.invoice.contact?.id,
-    });
     await this.executePlaybooks(payload.businessId, 'invoice.sent', {
       contactId: payload.invoice.contact?.id,
       invoiceId: payload.invoice.id,
@@ -757,18 +721,6 @@ export class AutomationExecutorService {
 
   @OnEvent('invoice.overdue')
   async onInvoiceOverdue(payload: InvoiceStatusPayload) {
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'commerce',
-      action: 'overdue',
-      entityType: 'invoice',
-      entityId: payload.invoice.id,
-      title: 'Invoice overdue',
-      detail: `${payload.invoice.currency} ${payload.invoice.total.toFixed(2)}`,
-      icon: 'AlertTriangle',
-      tone: 'warning',
-      contactId: payload.invoice.contact?.id,
-    });
     await this.executePlaybooks(payload.businessId, 'invoice.overdue', {
       contactId: payload.invoice.contact?.id,
       invoiceId: payload.invoice.id,

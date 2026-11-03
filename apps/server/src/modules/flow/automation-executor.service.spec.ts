@@ -12,11 +12,11 @@
  *
  * Pinned here, with the listeners wired the way the full app wires them (each
  * handler found by its @OnEvent metadata, both writing to one feed recorder):
- *   AE-01 one feed row per event for every event both classes listen to, and it
- *     is ActivityEventListener's row
- *   AE-02 the census: the events both classes listen to are exactly the seven
- *     deduped here, and the executor's only other feed event is post.published
- *     (a new double writer fails this)
+ *   AE-01 one feed row per event for the six deduped events both classes
+ *     listen to, and it is ActivityEventListener's row
+ *   AE-02 the census: the events both classes listen to are exactly those six
+ *     plus contact.created (AE-07), and the executor's only other feed event is
+ *     post.published (a new double writer fails this)
  *   AE-03 contact.updated without a status change: the listener writes nothing,
  *     so the executor keeps the one 'Contact updated' row
  *   AE-04 post.published: the executor is the only writer and keeps its row
@@ -24,6 +24,11 @@
  *     deduped event (the dedupe removes the feed write only)
  *   AE-06 a playbook's own run row (automation:executed:playbook) is not a feed
  *     duplicate and is still written
+ *   AE-07 contact.created is NOT deduped (CHARACTERIZATION + it.todo): the
+ *     executor's 'New contact added' row is the liveness signal
+ *     log-redaction.integration.test.ts:758-762 counts with the executor
+ *     mounted alone; removing it needs that test changed (outside V1-55's
+ *     write set)
  *
  * Pure: Prisma, CRM, e-mail and the flow runner are mocks; ActivityService is a
  * recorder shared by both listeners.
@@ -132,13 +137,8 @@ function harness(opts: { playbooks?: unknown[] } = {}) {
   return { feed, activity, prisma, crm, flowRunner, executor, listener, emit };
 }
 
-/** The seven events both classes wrote a feed row for, with the listener's row (the one the feed keeps). */
+/** The six events both classes wrote a feed row for and V1-55 dedupes, with the listener's row (the one the feed keeps). */
 const DEDUPED: Array<{ event: string; payload: Record<string, unknown>; row: Partial<FeedRow> }> = [
-  {
-    event: 'contact.created',
-    payload: { businessId: BIZ, contact: CONTACT },
-    row: { module: 'crm', action: 'created', entityType: 'contact', entityId: CONTACT.id, title: 'New contact' },
-  },
   {
     event: 'contact.updated',
     payload: { businessId: BIZ, contact: CONTACT, fromStatus: 'LEAD', toStatus: 'CUSTOMER' },
@@ -187,12 +187,26 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: AutomationExecutorService writes no second 
     });
   }
 
-  it('AE-02 census: the events both classes listen to are exactly the seven above, and the executor\'s only other feed event is post.published', () => {
+  it("AE-02 census: the events both classes listen to are exactly the six above plus contact.created (AE-07), and the executor's only other feed event is post.published", () => {
     const executorEvents = eventsOf(AutomationExecutorService);
     const listenerEvents = new Set(eventsOf(ActivityEventListener));
-    expect(executorEvents.filter((e) => listenerEvents.has(e))).toEqual(DEDUPED.map((d) => d.event).sort());
+    expect(executorEvents.filter((e) => listenerEvents.has(e))).toEqual([...DEDUPED.map((d) => d.event), 'contact.created'].sort());
     expect(executorEvents.filter((e) => !listenerEvents.has(e))).toEqual(['post.published']);
   });
+
+  it("AE-07 CHARACTERIZATION contact.created: still two feed rows for the contact, the listener's 'New contact' and the executor's 'New contact added' (kept, see the todo below); its playbooks and flows are dispatched", async () => {
+    const h = harness();
+    await h.emit('contact.created', { businessId: BIZ, contact: CONTACT });
+    const rows = h.feed.filter(sameEntity({ module: 'crm', action: 'created', entityType: 'contact', entityId: CONTACT.id }));
+    expect(rows.map((r) => r.title).sort()).toEqual(['New contact', 'New contact added']);
+    expect(h.flowRunner.runFlow.mock.calls.map((c: any[]) => [c[1], c[2]?.trigger])).toEqual([[flowFor('contact.created'), 'contact.created']]);
+  });
+
+  it.todo(
+    "AE-07 contact.created: one emit, one feed row ('New contact', ActivityEventListener's): AutomationExecutorService.onContactCreated's row is kept because " +
+      'log-redaction.integration.test.ts:758-762 (outside V1-55\'s write set) mounts the executor without ActivityEventListener and counts exactly that row ' +
+      'as proof its contact.created listener ran; removing it needs that test to mount ActivityEventListener (or read another signal)',
+  );
 
   it('AE-03 contact.updated without a status change: the listener writes nothing, so the executor keeps the one "Contact updated" row', async () => {
     for (const payload of [

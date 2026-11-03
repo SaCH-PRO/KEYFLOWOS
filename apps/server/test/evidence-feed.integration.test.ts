@@ -70,7 +70,8 @@
  * real @nestjs/event-emitter loader on a real EventEmitter2 with the
  * event-bus.module.ts options), and every Activity row the step wrote is pinned:
  *   V55-01 contact create (the real CrmService.createContact; the CRM controller
- *     is not mounted here): one crm created row, ActivityEventListener's
+ *     is not mounted here): ActivityEventListener's crm created row; the
+ *     executor's second one is still written (characterization, V55-08)
  *   V55-02 invoice create (POST .../invoices): one commerce created row
  *   V55-03 invoice send (PATCH .../status/sent): one commerce sent row
  *   V55-04 a partial manual payment: its FINANCE payment_recorded row, no paid row
@@ -86,6 +87,9 @@
  *   V55-07 it.todo: the CRM contact mirror (crm-timeline.service.ts:106 ->
  *     timeline.service.ts:51) still copies invoice.payment_recorded and
  *     invoice.paid into the feed: outside V1-55's write set
+ *   V55-08 it.todo: contact.created keeps the executor's row, because
+ *     log-redaction.integration.test.ts:758-762 (outside the write set) counts
+ *     it as proof the executor's listener ran
  *
  * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
  *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
@@ -1174,17 +1178,20 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(feedBus.listeners('invoice.paid')).toHaveLength(3);
   });
 
-  it("V55-01 contact create: one crm created row for the contact, ActivityEventListener's ('New contact'); the contact.created flow is dispatched once", async () => {
+  it("V55-01 contact create: ActivityEventListener's crm created row ('New contact') for the contact; the contact.created flow is dispatched once. CHARACTERIZATION: the executor's own 'New contact added' row is still written (V55-08)", async () => {
     const s = await step(async () => {
       const contact = await crm.createContact({ businessId: C.biz, firstName: 'K19a', lastName: 'CustomerC', email: C.contactEmail, actorUserId: C.owner });
       SC.contactId = contact.id;
     });
     expect(s.events).toContain('contact.created');
     const created = s.rows.filter((r) => kind(r) === 'crm:created:contact' && r.entityId === SC.contactId);
-    expect(created.map((r) => r.title), 'crm created rows for the contact').toEqual(['New contact']);
-    expect(created[0]).toMatchObject({ contactId: SC.contactId, detail: 'K19a CustomerC added to CRM' });
-    // Every row the step wrote: the feed row and the CRM contact-event mirror (CrmService's own ContactEvent).
-    expect(s.rows.map(kind).sort()).toEqual(['crm:contact.created:contact', 'crm:created:contact']);
+    const listenerRow = created.filter((r) => r.title === 'New contact');
+    expect(listenerRow, "ActivityEventListener's crm created row").toHaveLength(1);
+    expect(listenerRow[0]).toMatchObject({ contactId: SC.contactId, detail: 'K19a CustomerC added to CRM' });
+    // CHARACTERIZATION (V55-08 todo): the second crm created row, the executor's.
+    expect(created.map((r) => r.title).sort(), 'crm created rows for the contact').toEqual(['New contact', 'New contact added']);
+    // Every row the step wrote: those two and the CRM contact-event mirror (CrmService's own ContactEvent).
+    expect(s.rows.map(kind).sort()).toEqual(['crm:contact.created:contact', 'crm:created:contact', 'crm:created:contact']);
 
     const runs = await runsOf('contact.created', 1);
     expect(runs.map((r) => [r.businessId, r.ctx.trigger, r.ctx.contactId])).toEqual([[C.biz, 'contact.created', SC.contactId]]);
@@ -1290,7 +1297,8 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     const rows: Row[] = res.body;
     expect(rows.every((r: any) => r.businessId === C.biz)).toBe(true);
     const count = (k: string, entityId: string | undefined) => rows.filter((r) => kind(r) === k && r.entityId === entityId).length;
-    expect(count('crm:created:contact', SC.contactId), 'contact created').toBe(1);
+    // CHARACTERIZATION (V55-08 todo): contact create still shows twice.
+    expect(count('crm:created:contact', SC.contactId), 'contact created').toBe(2);
     expect(count('commerce:created:invoice', SC.invoiceId), 'invoice created').toBe(1);
     expect(count('commerce:sent:invoice', SC.invoiceId), 'invoice sent').toBe(1);
     expect(count('commerce:paid:invoice', SC.invoiceId), 'invoice paid').toBe(1);
@@ -1328,4 +1336,5 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
   // them). Removing or folding the mirror changes the CRM timeline, outside
   // V1-55's write set (automation-executor.service.ts only).
   it.todo("V55-07: a settling manual payment writes no CRM contact-event mirror row (crm:invoice.payment_recorded:contact, crm:invoice.paid:contact) beside its FINANCE row and the one commerce paid row: needs crm-timeline.service.ts / revenue-event.listener.ts (outside V1-55's write set)");
+  it.todo("V55-08: contact create writes one crm created row (ActivityEventListener's 'New contact'): AutomationExecutorService.onContactCreated's 'New contact added' row is kept because log-redaction.integration.test.ts:758-762 (outside V1-55's write set) mounts the executor without ActivityEventListener and counts exactly that row as proof its contact.created listener ran; removing it needs that test to mount ActivityEventListener or read another signal");
 });
