@@ -73,6 +73,27 @@ export class ExpensesService {
     @Inject(PostingService) private readonly ledger: PostingService,
   ) {}
 
+  /**
+   * SEC-B4B7-3 (FOLLOW3-B4B7 review): an expense's category, and each split
+   * item's, belongs to its business, as its project, contact and service must.
+   * A foreign or unknown id is refused (400) before anything is written, so
+   * neither the row (include: { category }) nor its posting (resolveExpenseCoa)
+   * reaches another business's category or chart of accounts, and nothing of
+   * either is returned. No id named (undefined, null, '') checks nothing.
+   */
+  private async assertCategoriesInBusiness(businessId: string, categoryId: unknown, items: unknown): Promise<void> {
+    const ids = new Set<string>();
+    if (typeof categoryId === 'string' && categoryId) ids.add(categoryId);
+    if (Array.isArray(items)) {
+      for (const item of items as Array<{ categoryId?: unknown } | null>) {
+        if (typeof item?.categoryId === 'string' && item.categoryId) ids.add(item.categoryId);
+      }
+    }
+    if (ids.size === 0) return;
+    const found = await this.prisma.client.expenseCategory.count({ where: { businessId, id: { in: [...ids] } } });
+    if (found !== ids.size) throw new BadRequestException('Category not found or does not belong to this business');
+  }
+
   async listExpenses(
     businessId: string,
     filters?: {
@@ -190,6 +211,7 @@ export class ExpensesService {
       if (!svc) throw new BadRequestException(`Service not found or does not belong to this business`);
       validServiceId = input.serviceId;
     }
+    await this.assertCategoriesInBusiness(input.businessId, input.categoryId, input.items);
 
     const status = input.status ?? 'PAID';
     if (status !== 'PAID' && status !== 'BILL') {
@@ -628,6 +650,8 @@ export class ExpensesService {
         updateData.serviceId = input.serviceId;
       }
     }
+    // SEC-B4B7-3: a named category (or split item category) is this business's.
+    await this.assertCategoriesInBusiness(input.businessId, input.categoryId, input.items);
 
     // FOLLOW3-B7-EXPENSE-EDIT-POSTED (owner ruling D-67): the amount, items and
     // currency of a posted expense are what its ledger posting carries, so they
@@ -638,11 +662,15 @@ export class ExpensesService {
     // An unposted PAID or BILL expense whose amount becomes positive is posted
     // once here, by the recipe createExpense uses, so no edit leaves the row
     // and its ledger disagreeing. The row is held (FOR UPDATE) for the whole
-    // decision, so a concurrent edit, payment or void of it waits.
+    // decision, so a concurrent edit, payment, void or delete of it waits
+    // (deleteExpense takes the same lock, SEC-B4B7-1). A soft-deleted expense
+    // (deleted or voided) is gone here as it is to GET, pay and void: 404, so
+    // no edit lands on a row a trash restore would bring back unposted
+    // (SEC-B4B7-2).
     return this.prisma.client.$transaction(async (rawTx) => {
       const tx = rawTx as unknown as Prisma.TransactionClient;
       await tx.$queryRaw`SELECT id FROM expenses WHERE id = ${input.expenseId} AND business_id = ${input.businessId} FOR UPDATE`;
-      const existing = await tx.expense.findFirst({ where: { id: input.expenseId, businessId: input.businessId } });
+      const existing = await tx.expense.findFirst({ where: { id: input.expenseId, businessId: input.businessId, deletedAt: null } });
       if (!existing) throw new NotFoundException('Expense not found');
 
       if ('amount' in updateData && moneyEquals(updateData.amount as number, existing.amount)) delete updateData.amount;
@@ -695,18 +723,27 @@ export class ExpensesService {
     // hard/soft-delete it: deletion would leave a balanced ledger entry
     // referencing a row that no longer exists. Force callers to use
     // `voidExpense` instead, which posts an explicit reversal.
-    const posted = await this.prisma.client.financialTransaction.findFirst({
-      where: { businessId, sourceType: 'Expense', sourceId: expenseId },
-      select: { id: true },
-    });
-    if (posted) {
-      throw new BadRequestException(
-        'Cannot delete a posted expense — call POST /finance/businesses/:businessId/bills/:expenseId/void to reverse the ledger entries instead.',
-      );
-    }
-    const deleted = await this.prisma.client.expense.update({
-      where: { id: expenseId, businessId },
-      data: { deletedAt: new Date() },
+    // SEC-B4B7-1 (FOLLOW3-B4B7 review): the posted check and the soft delete
+    // run in one transaction holding the row FOR UPDATE, the lock updateExpense
+    // holds while an edit may post the row. A delete racing such an edit waits
+    // for it, then sees its posting and refuses, so a posted expense is never
+    // soft-deleted (which would leave a live posting the void door cannot reach).
+    const deleted = await this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      await tx.$queryRaw`SELECT id FROM expenses WHERE id = ${expenseId} AND business_id = ${businessId} FOR UPDATE`;
+      const posted = await tx.financialTransaction.findFirst({
+        where: { businessId, sourceType: 'Expense', sourceId: expenseId },
+        select: { id: true },
+      });
+      if (posted) {
+        throw new BadRequestException(
+          'Cannot delete a posted expense — call POST /finance/businesses/:businessId/bills/:expenseId/void to reverse the ledger entries instead.',
+        );
+      }
+      return tx.expense.update({
+        where: { id: expenseId, businessId },
+        data: { deletedAt: new Date() },
+      });
     });
     await this.timeline.recordEvent({
       businessId,
