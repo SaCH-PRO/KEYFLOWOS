@@ -175,6 +175,10 @@ function openingCurrency(stored: string | null | undefined, businessCurrency: st
  * TTD), and each unposted opening is bridged in its own currency. cashBalance
  * is the business currency's figure, labelled by `currency`; every currency's
  * figure is in `byCurrency`; nothing is summed across currencies or converted.
+ * Safe-to-spend and the OS command center report the other currencies apart
+ * (otherCurrencyCash). The Finance overview (finance-overview.service.ts, outside
+ * V1-37c) serves cashBalance only and does not yet (review CR-37c-01; it.todo
+ * CP-17 and CP-18 in test/cash-position.integration.test.ts).
  */
 @Injectable()
 export class CashPositionService {

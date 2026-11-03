@@ -120,6 +120,14 @@
  *          posts it (RV37b-CR-01), so the backfill moves nothing; TTD cash a
  *          source document brought is held apart, never added
  *
+ * V1-37c review CR-37c-01 (it.todo, outside the V1-37c write set):
+ *
+ *   CP-17  the Finance overview serves the business-currency cashBalance (CP-14
+ *          pins it, never the sum) but does not yet report other-currency cash
+ *          apart, and labels it with the raw stored currency code
+ *   CP-18  the overview's LOW_RUNWAY action is computed from business-currency
+ *          cash alone and says nothing of other-currency cash
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * the global TenantInterceptor, CommerceService, InvoiceWorkflowService,
  * RevenuePostingService, PostingService, AccountingPeriodService,
@@ -1284,4 +1292,25 @@ describe('V1-37c the cash position never adds currencies together (VL-05)', () =
     expect(p.byCurrency).toEqual(await ledgerCashByCurrency(ID.bizJ));
     await expectSurfaces(ID.bizJ, ID.ownerJ, 300);
   }, 60_000);
+
+  // Review CR-37c-01 (confirmed by running at the packet head, on I after
+  // CP-15: TTD 150 beside USD 620, plus a 600 TTD expense 45 days ago, so a
+  // burn of 100 a month): GET /finance/businesses/:id/overview answers
+  // { cashBalance: 150, currency: 'TTD', cashRunwayMonths: 1.5, ... } with no
+  // cashCurrency, otherCurrencyCash or byCurrency key, and a PENDING
+  // LOW_RUNWAY RevenueAction is persisted ('Low cash runway', '~1.5 months at
+  // current burn', amountAtRisk 150) that says nothing of the USD 620. Both
+  // live in FinanceOverviewService.getOverview (finance-overview.service.ts:
+  // the response object, the `currency` label read raw from Business.currency,
+  // and the runway / LOW_RUNWAY spec), which is outside the V1-37c write set,
+  // as are its web readers (finance/_overview-client.tsx 'Cash on hand',
+  // money/components/money-cash-hero.tsx). Lift these into a follow-up packet
+  // whose write set holds finance-overview.service.ts:
+  //   expect(read.overview).toMatchObject({ cashBalance: 150, cashCurrency: 'TTD',
+  //     otherCurrencyCash: [{ currency: 'USD', amount: 620 }] });
+  //   a business stored as 'ttd': expect(read.overview.currency).toBe('TTD');
+  //   the LOW_RUNWAY action names the other-currency cash it leaves out (or is
+  //   withheld while other-currency cash exists: an owner ruling under D-13).
+  it.todo('CP-17 (review CR-37c-01) BLOCKED outside the V1-37c write set (finance-overview.service.ts): the Finance overview reports other-currency cash apart (cashCurrency, otherCurrencyCash) as safe-to-spend and the OS command center do, and labels cashBalance with the normalized business currency');
+  it.todo('CP-18 (review CR-37c-01) BLOCKED outside the V1-37c write set (finance-overview.service.ts) and awaiting a D-13 ruling: the LOW_RUNWAY action computed from business-currency cash says when other-currency cash exists (or is withheld), never a silent low-runway alarm beside USD reserves');
 });
