@@ -28,10 +28,10 @@ import { TimelineService } from '../timeline/timeline.service';
 import { schedulersDisabled } from '../../core/config/env';
 import { getTenantContext } from '../../core/tenant/tenant-context';
 import {
-  SETTLEMENT_INVOICE_SELECT,
   depositPosition,
   derivePaymentStatus,
   readSettlementInvoices,
+  settlementInvoiceSelect,
   toCents,
 } from './booking-payment-status.listener';
 
@@ -517,14 +517,19 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // booking. A booking brought back from CANCELLED takes the status its
     // invoices state again (V1-28 review, SEC-V28-3): DEPOSIT_PAID only while
     // the deposit still holds money; one refunded meanwhile leaves UNPAID.
+    // Trial-N (N2-SEC): the reinstatement is read from the row as written, not
+    // from the status read before the write: a cancel that committed between
+    // that read and this write (its forfeit included) left a live booking
+    // DEPOSIT_FORFEITED, which no invoice.paid could advance. It is written
+    // only while the booking is still not CANCELLED.
     let depositForfeit: DepositForfeit | null = null;
     if (status === 'CANCELLED') {
       depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
       if (depositForfeit) updated.paymentStatus = DEPOSIT_FORFEITED;
-    } else if (booking.status === 'CANCELLED' && booking.paymentStatus === DEPOSIT_FORFEITED) {
-      const reinstated = derivePaymentStatus(await readSettlementInvoices(this.prisma, businessId, booking));
+    } else if (updated.paymentStatus === DEPOSIT_FORFEITED) {
+      const reinstated = derivePaymentStatus(await readSettlementInvoices(this.prisma, businessId, updated));
       const restored = await this.prisma.client.booking.updateMany({
-        where: { id: booking.id, businessId, paymentStatus: DEPOSIT_FORFEITED },
+        where: { id: booking.id, businessId, paymentStatus: DEPOSIT_FORFEITED, status: { not: 'CANCELLED' } },
         data: { paymentStatus: reinstated },
       });
       if (restored.count > 0) updated.paymentStatus = reinstated;
@@ -633,6 +638,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * whose request this is (TenantInterceptor's context for this business), or
    * SYSTEM for a caller with none (a KEY tool, undo or compensation run
    * outside a member's request); it claimed USER with no actor.
+   *
+   * Trial-N (N2-SEC): the forfeit is written only while the booking is still
+   * CANCELLED. A reinstatement that committed between the cancel's status
+   * write and this one left a live booking DEPOSIT_FORFEITED; now nothing is
+   * forfeit on it. The deposit's payment rows are its own tenant's (N1-SEC).
    */
   private async forfeitPaidDeposit(
     businessId: string,
@@ -641,7 +651,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     if (!booking.depositInvoiceId) return null;
     const deposit = await this.prisma.client.invoice.findFirst({
       where: { id: booking.depositInvoiceId, businessId, deletedAt: null, status: { not: 'VOID' } },
-      select: SETTLEMENT_INVOICE_SELECT,
+      select: settlementInvoiceSelect(businessId),
     });
     if (!deposit) return null;
     const { heldCents } = depositPosition(deposit);
@@ -653,12 +663,12 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       currency: deposit.currency,
     };
     const recorded = await this.prisma.client.booking.updateMany({
-      where: { id: booking.id, businessId, paymentStatus: { in: ['UNPAID', 'DEPOSIT_PAID'] } },
+      where: { id: booking.id, businessId, status: 'CANCELLED', paymentStatus: { in: ['UNPAID', 'DEPOSIT_PAID'] } },
       data: { paymentStatus: DEPOSIT_FORFEITED },
     });
     if (recorded.count === 0) {
-      const current = await this.prisma.client.booking.findUnique({ where: { id: booking.id }, select: { paymentStatus: true } });
-      return current?.paymentStatus === DEPOSIT_FORFEITED ? forfeit : null;
+      const current = await this.prisma.client.booking.findUnique({ where: { id: booking.id }, select: { status: true, paymentStatus: true } });
+      return current?.status === 'CANCELLED' && current.paymentStatus === DEPOSIT_FORFEITED ? forfeit : null;
     }
     if (booking.contactId) {
       await this.crm.logContactEvent({
@@ -742,7 +752,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         const live = booking.depositInvoiceId
           ? await tx.invoice.findFirst({
               where: { id: booking.depositInvoiceId, businessId, deletedAt: null, status: { not: 'VOID' } },
-              select: SETTLEMENT_INVOICE_SELECT,
+              select: settlementInvoiceSelect(businessId),
             })
           : null;
         // V1-28 review (SEC-V28-3, CR-V28-2): the deposit nets out what it
