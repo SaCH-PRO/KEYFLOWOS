@@ -78,18 +78,32 @@
  *   V55-05 the final manual payment: its FINANCE row and ONE commerce paid row
  *     for the settled invoice, ActivityEventListener's ('Payment received')
  *   flows are still dispatched: one ACTIVE published flow per trigger
- *     (contact.created, invoice.sent, invoice.paid) runs once, through the
- *     executor, with the step's ids
+ *     (contact.created, invoice.sent, invoice.paid, booking.created,
+ *     booking.confirmed) runs once, through the executor, with the step's ids
  *   LEDGER: the feed writers add no FinancialTransaction or LedgerEntry; each
  *     payment has exactly one Payment:<id>:payment_recorded posting, and C holds
  *     only those two, balanced
- *   V55-06 the cockpit read of C shows each of those rows once
+ *   V55-09 booking create (the real BookingsService.createBooking; the bookings
+ *     controller is not mounted here): ActivityEventListener's bookings created
+ *     row ('New booking', no date or time) and the executor's ('New booking
+ *     from <contact>', detail the start time), which V1-55 keeps (review repair
+ *     CR-V155-1: it is the only feed row that says when the booking is); the
+ *     booking.created flow is dispatched once
+ *   V55-10 booking confirm (the real BookingsService.confirmBooking): ONE
+ *     bookings confirmed row, ActivityEventListener's (the executor's removed
+ *     row had no detail, so nothing it showed is lost); the booking.confirmed
+ *     flow is dispatched once
+ *   V55-06 the cockpit read of C shows each of those rows once (the booking
+ *     created pair twice, its timed row among them)
  *   V55-07 it.todo: the CRM contact mirror (crm-timeline.service.ts:106 ->
  *     timeline.service.ts:51) still copies invoice.payment_recorded and
  *     invoice.paid into the feed: outside V1-55's write set
  *   V55-08 it.todo: contact.created keeps the executor's row, because
  *     log-redaction.integration.test.ts:758-762 (outside the write set) counts
  *     it as proof the executor's listener ran
+ *   V55-11 it.todo: booking create keeps the executor's row until
+ *     activity-event.listener.ts (outside the write set) puts the start time in
+ *     its own detail
  *
  * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
  *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
@@ -227,6 +241,9 @@ async function cleanup() {
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // V1-55 review (CR-V155-1): tenant C's booking and its service (Booking.contact is NoAction).
+    `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -1009,11 +1026,17 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
   };
   const INVOICE_C_TOTAL = 300;
   /** One ACTIVE flow with a published version per trigger the executor dispatches in these steps. */
-  const FLOW_TRIGGERS = ['contact.created', 'invoice.sent', 'invoice.paid'] as const;
+  const FLOW_TRIGGERS = ['contact.created', 'invoice.sent', 'invoice.paid', 'booking.created', 'booking.confirmed'] as const;
   const flowId = (trigger: string) => `${P}${RUN}_flowC_${trigger.replace(/\./g, '_')}`;
   const cents = (v: unknown) => Math.round(Number(v) * 100);
 
-  const SC: { contactId?: string; invoiceId?: string; invoiceNumber?: string; partialId?: string; fullId?: string } = {};
+  const SC: { contactId?: string; invoiceId?: string; invoiceNumber?: string; partialId?: string; fullId?: string; bookingId?: string } = {};
+  /** V55-09: tenant C's booking, on its own service, at a fixed start (no business hours, staff or lead time to meet). */
+  const BOOKING_C = {
+    serviceId: `${P}${RUN}_svcC`,
+    start: new Date('2026-12-15T14:00:00.000Z'),
+    end: new Date('2026-12-15T15:00:00.000Z'),
+  };
   /** What the executor dispatched to the flow runner (the runner itself is off the feed). */
   const flowRuns: Array<{ businessId: string; flowId: string; ctx: any }> = [];
   /** What the executor's built-in rules asked CRM for. */
@@ -1021,6 +1044,7 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
   let feedModule: any;
   let feedBus: any;
   let crm: any;
+  let bookings: any;
 
   type Row = { id: string; module: string; action: string; entityType: string; entityId: string | null; title: string; detail: string | null; data: any; category: string | null; contactId: string | null };
   const kind = (r: Row) => `${r.module}:${r.action}:${r.entityType}`;
@@ -1089,11 +1113,13 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
     const { CrmService } = await import('../src/modules/crm/crm.service');
     const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    const { BookingsService } = await import('../src/modules/bookings/bookings.service');
 
     await db.user.create({ data: { id: C.owner, email: `${P}${RUN}_ownerC@test.local`, role: 'USER' } });
     await db.business.create({ data: { id: C.biz, name: 'K19A Biz C', ownerId: C.owner, currency: 'TTD' } });
     await db.membership.create({ data: { id: `${P}${RUN}_mC`, userId: C.owner, businessId: C.biz, role: 'OWNER' } });
     await app.get(ChartOfAccountsSeederService).ensureDefaults(C.biz);
+    await db.service.create({ data: { id: BOOKING_C.serviceId, businessId: C.biz, name: 'K19A C service', duration: 60, price: 120 } });
     for (const trigger of FLOW_TRIGGERS) {
       await db.automationFlow.create({
         data: {
@@ -1165,6 +1191,23 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
       { write: async () => undefined } as never,
       {} as never,
     );
+
+    // V55-09 / V55-10: the real booking create and confirm (the bookings
+    // controller is not mounted in this harness). Real: Prisma (slot claim,
+    // booking row) and the CRM contact event; the commerce, attribution,
+    // subscription, e-mail, storefront and timeline collaborators are off
+    // these two paths.
+    bookings = new BookingsService(
+      app.get(PrismaService),
+      eventRecorder as never,
+      crm,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
   }, 120_000);
 
   afterAll(async () => {
@@ -1172,7 +1215,7 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
   });
 
   it('wiring: the feed bus subscribes the full app\'s Activity writers to each event of the steps below (invoice.paid: ActivityEventListener, AutomationExecutorService, RevenueEventListener)', () => {
-    for (const event of ['contact.created', 'invoice.created', 'invoice.sent', 'invoice.paid']) {
+    for (const event of ['contact.created', 'invoice.created', 'invoice.sent', 'invoice.paid', 'booking.created', 'booking.confirmed']) {
       expect(feedBus.listeners(event).length, event).toBeGreaterThan(0);
     }
     expect(feedBus.listeners('invoice.paid')).toHaveLength(3);
@@ -1291,6 +1334,56 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(s.ledgerAfterDelivery).toEqual(s.ledgerBeforeDelivery);
   });
 
+  it("V55-09 booking create (BookingsService.createBooking): the feed says when the booking is: the executor's bookings created row ('New booking from <contact>', detail the start time) beside ActivityEventListener's ('New booking', no date or time; kept, V55-11); the booking.created flow is dispatched once", async () => {
+    const s = await step(async () => {
+      const booking = await bookings.createBooking({
+        businessId: C.biz,
+        contactId: SC.contactId,
+        serviceId: BOOKING_C.serviceId,
+        startTime: BOOKING_C.start,
+        endTime: BOOKING_C.end,
+        actorUserId: C.owner,
+      });
+      SC.bookingId = booking.id;
+    });
+    expect(SC.bookingId).toBeTruthy();
+    expect(s.events).toContain('booking.created');
+    const created = s.rows.filter((r) => kind(r) === 'bookings:created:booking' && r.entityId === SC.bookingId);
+    const when = new Date(BOOKING_C.start).toLocaleString();
+    const timed = created.filter((r) => r.detail === when);
+    expect(timed, `a bookings created row whose detail is the start time (${when})`).toHaveLength(1);
+    expect(timed[0]).toMatchObject({ title: 'New booking from K19a CustomerC', contactId: SC.contactId });
+    // CHARACTERIZATION (V55-11 todo): ActivityEventListener's row, with no date or time.
+    expect(created.map((r) => [r.title, r.detail]).sort(), 'bookings created rows for the booking').toEqual(
+      [
+        ['New booking', 'K19a CustomerC booked an appointment'],
+        ['New booking from K19a CustomerC', when],
+      ].sort(),
+    );
+    // Every row the step wrote: those two and the CRM contact-event mirror (V55-07).
+    expect(s.rows.map(kind).sort()).toEqual(['bookings:created:booking', 'bookings:created:booking', 'crm:booking.created:contact']);
+
+    const runs = await runsOf('booking.created', 1);
+    expect(runs.map((r) => [r.businessId, r.ctx.trigger, r.ctx.bookingId, r.ctx.contactId])).toEqual([[C.biz, 'booking.created', SC.bookingId, SC.contactId]]);
+    expect(s.ledgerAfterDelivery).toEqual(s.ledgerBeforeDelivery);
+  });
+
+  it("V55-10 booking confirm (BookingsService.confirmBooking): ONE bookings confirmed row, ActivityEventListener's ('Booking confirmed', the contact); the booking.confirmed flow is dispatched once", async () => {
+    const s = await step(async () => {
+      const booking = await bookings.confirmBooking(SC.bookingId);
+      expect(booking.status).toBe('CONFIRMED');
+    });
+    expect(s.events).toContain('booking.confirmed');
+    const confirmed = s.rows.filter((r) => kind(r) === 'bookings:confirmed:booking' && r.entityId === SC.bookingId);
+    expect(confirmed.map((r) => r.title), 'bookings confirmed rows for the booking').toEqual(['Booking confirmed']);
+    expect(confirmed[0]).toMatchObject({ detail: 'Appointment confirmed', contactId: SC.contactId });
+    expect(s.rows.map(kind).sort()).toEqual(['bookings:confirmed:booking', 'crm:booking.confirmed:contact']);
+
+    const runs = await runsOf('booking.confirmed', 1);
+    expect(runs.map((r) => [r.businessId, r.ctx.trigger, r.ctx.bookingId, r.ctx.contactId])).toEqual([[C.biz, 'booking.confirmed', SC.bookingId, SC.contactId]]);
+    expect(s.ledgerAfterDelivery).toEqual(s.ledgerBeforeDelivery);
+  });
+
   it("V55-06 C's feed, read as the cockpit reads it, shows each step's row once; each flow ran once; LEDGER: C holds exactly the two payment postings, balanced, summing to the invoice", async () => {
     const res = await agent().get(`/timeline/businesses/${C.biz}/events?limit=50`).set(HEADER, C.owner);
     expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -1304,6 +1397,13 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(count('commerce:paid:invoice', SC.invoiceId), 'invoice paid').toBe(1);
     expect(count('FINANCE:payment_recorded:payment', SC.partialId), 'partial payment').toBe(1);
     expect(count('FINANCE:payment_recorded:payment', SC.fullId), 'final payment').toBe(1);
+    // CHARACTERIZATION (V55-11 todo): booking create still shows twice; the executor's row is the one with the start time.
+    expect(count('bookings:created:booking', SC.bookingId), 'booking created').toBe(2);
+    expect(
+      rows.filter((r) => kind(r) === 'bookings:created:booking' && r.entityId === SC.bookingId && r.detail === new Date(BOOKING_C.start).toLocaleString()),
+      'the booking created row with the start time',
+    ).toHaveLength(1);
+    expect(count('bookings:confirmed:booking', SC.bookingId), 'booking confirmed').toBe(1);
 
     expect(flowRuns.map((r) => r.flowId).sort()).toEqual(FLOW_TRIGGERS.map(flowId).sort());
 
@@ -1336,5 +1436,6 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
   // them). Removing or folding the mirror changes the CRM timeline, outside
   // V1-55's write set (automation-executor.service.ts only).
   it.todo("V55-07: a settling manual payment writes no CRM contact-event mirror row (crm:invoice.payment_recorded:contact, crm:invoice.paid:contact) beside its FINANCE row and the one commerce paid row: needs crm-timeline.service.ts / revenue-event.listener.ts (outside V1-55's write set)");
+  it.todo("V55-11: booking create writes one bookings created row, and it carries the booking's start time: AutomationExecutorService.onBookingCreated's row is kept (review repair CR-V155-1) because ActivityEventListener.onBookingCreated (activity-event.listener.ts:225, outside V1-55's write set) builds its detail from booking.service?.name, which no booking.created payload carries, so its row has no date or time; removing the executor row needs that listener to put the start time in its detail");
   it.todo("V55-08: contact create writes one crm created row (ActivityEventListener's 'New contact'): AutomationExecutorService.onContactCreated's 'New contact added' row is kept because log-redaction.integration.test.ts:758-762 (outside V1-55's write set) mounts the executor without ActivityEventListener and counts exactly that row as proof its contact.created listener ran; removing it needs that test to mount ActivityEventListener or read another signal");
 });

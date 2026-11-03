@@ -12,11 +12,12 @@
  *
  * Pinned here, with the listeners wired the way the full app wires them (each
  * handler found by its @OnEvent metadata, both writing to one feed recorder):
- *   AE-01 one feed row per event for the six deduped events both classes
+ *   AE-01 one feed row per event for the five deduped events both classes
  *     listen to, and it is ActivityEventListener's row
- *   AE-02 the census: the events both classes listen to are exactly those six
- *     plus contact.created (AE-07), and the executor's only other feed event is
- *     post.published (a new double writer fails this)
+ *   AE-02 the census: the events both classes listen to are exactly those five
+ *     plus contact.created (AE-07) and booking.created (AE-08), and the
+ *     executor's only other feed event is post.published (a new double writer
+ *     fails this)
  *   AE-03 contact.updated without a status change: the listener writes nothing,
  *     so the executor keeps the one 'Contact updated' row
  *   AE-04 post.published: the executor is the only writer and keeps its row
@@ -29,6 +30,17 @@
  *     log-redaction.integration.test.ts:758-762 counts with the executor
  *     mounted alone; removing it needs that test changed (outside V1-55's
  *     write set)
+ *   AE-08 booking.created is NOT deduped (review repair CR-V155-1): the feed
+ *     must show when the booking is. bookings.service.ts puts the booking row
+ *     and its contact on the bus, never the service, so the listener's row
+ *     reads 'New booking / <contact> booked an appointment' with no date or
+ *     time; only the executor's row ('New booking from <contact>', detail the
+ *     start time) carries it. That row is kept (behaviour test + it.todo: one
+ *     row needs activity-event.listener.ts, outside the write set, to put the
+ *     start time in its detail)
+ *   AE-09 booking.confirmed stays deduped: the executor's removed row was
+ *     'Booking confirmed' with no detail, so the listener's row carries all it
+ *     did (title, booking, contact) and no start time is lost
  *
  * Pure: Prisma, CRM, e-mail and the flow runner are mocks; ActivityService is a
  * recorder shared by both listeners.
@@ -52,6 +64,8 @@ const INVOICE = {
   contact: CONTACT,
 };
 const BOOKING = { id: 'bk_v155', startTime: new Date('2026-11-03T14:00:00Z'), contactId: CONTACT.id, serviceId: 'svc_v155' };
+/** booking.created as BookingsService.createBooking emits it: the booking row (contact included, no service) and its contact. */
+const BOOKING_CREATED = { businessId: BIZ, booking: { ...BOOKING, contact: CONTACT }, contact: CONTACT, eventName: 'booking.created' };
 
 type FeedRow = { module: string; action: string; entityType: string; entityId?: string; title: string; [k: string]: unknown };
 
@@ -137,7 +151,7 @@ function harness(opts: { playbooks?: unknown[] } = {}) {
   return { feed, activity, prisma, crm, flowRunner, executor, listener, emit };
 }
 
-/** The six events both classes wrote a feed row for and V1-55 dedupes, with the listener's row (the one the feed keeps). */
+/** The five events both classes wrote a feed row for and V1-55 dedupes, with the listener's row (the one the feed keeps). */
 const DEDUPED: Array<{ event: string; payload: Record<string, unknown>; row: Partial<FeedRow> }> = [
   {
     event: 'contact.updated',
@@ -145,14 +159,11 @@ const DEDUPED: Array<{ event: string; payload: Record<string, unknown>; row: Par
     row: { module: 'crm', action: 'updated', entityType: 'contact', entityId: CONTACT.id, title: 'Status changed' },
   },
   {
-    event: 'booking.created',
-    payload: { businessId: BIZ, booking: BOOKING, contact: CONTACT },
-    row: { module: 'bookings', action: 'created', entityType: 'booking', entityId: BOOKING.id, title: 'New booking' },
-  },
-  {
+    // AE-09: the executor's removed row was { title: 'Booking confirmed', contactId } with no detail;
+    // the listener's row carries the same title, booking and contact.
     event: 'booking.confirmed',
     payload: { businessId: BIZ, booking: BOOKING, contact: CONTACT },
-    row: { module: 'bookings', action: 'confirmed', entityType: 'booking', entityId: BOOKING.id, title: 'Booking confirmed' },
+    row: { module: 'bookings', action: 'confirmed', entityType: 'booking', entityId: BOOKING.id, title: 'Booking confirmed', contactId: CONTACT.id },
   },
   {
     event: 'invoice.paid',
@@ -187,10 +198,10 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: AutomationExecutorService writes no second 
     });
   }
 
-  it("AE-02 census: the events both classes listen to are exactly the six above plus contact.created (AE-07), and the executor's only other feed event is post.published", () => {
+  it("AE-02 census: the events both classes listen to are exactly the five above plus contact.created (AE-07) and booking.created (AE-08), and the executor's only other feed event is post.published", () => {
     const executorEvents = eventsOf(AutomationExecutorService);
     const listenerEvents = new Set(eventsOf(ActivityEventListener));
-    expect(executorEvents.filter((e) => listenerEvents.has(e))).toEqual([...DEDUPED.map((d) => d.event), 'contact.created'].sort());
+    expect(executorEvents.filter((e) => listenerEvents.has(e))).toEqual([...DEDUPED.map((d) => d.event), 'contact.created', 'booking.created'].sort());
     expect(executorEvents.filter((e) => !listenerEvents.has(e))).toEqual(['post.published']);
   });
 
@@ -206,6 +217,37 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: AutomationExecutorService writes no second 
     "AE-07 contact.created: one emit, one feed row ('New contact', ActivityEventListener's): AutomationExecutorService.onContactCreated's row is kept because " +
       'log-redaction.integration.test.ts:758-762 (outside V1-55\'s write set) mounts the executor without ActivityEventListener and counts exactly that row ' +
       'as proof its contact.created listener ran; removing it needs that test to mount ActivityEventListener (or read another signal)',
+  );
+
+  it("AE-08 booking.created (CR-V155-1): with the payload bookings.service.ts puts on the bus (the booking row and its contact, no service), the feed shows when the booking is: a row for the booking carries its start time as its detail, and it names the contact", async () => {
+    const h = harness();
+    await h.emit('booking.created', BOOKING_CREATED);
+    const rows = h.feed.filter(sameEntity({ module: 'bookings', action: 'created', entityType: 'booking', entityId: BOOKING.id }));
+    const when = new Date(BOOKING.startTime).toLocaleString();
+    const timed = rows.filter((r) => r.detail === when);
+    expect(timed, `a bookings created row whose detail is the start time (${when})`).toHaveLength(1);
+    expect(timed[0]).toMatchObject({ businessId: BIZ, title: 'New booking from Ada Lovelace', contactId: CONTACT.id, icon: 'Calendar', tone: 'info' });
+  });
+
+  it("AE-08 CHARACTERIZATION booking.created: two feed rows for the booking, the listener's 'New booking' (no date or time: its detail names the service, which the payload never carries) and the executor's 'New booking from <contact>' with the start time (kept, see the todo below); its playbooks and flows are dispatched", async () => {
+    const h = harness();
+    await h.emit('booking.created', BOOKING_CREATED);
+    const rows = h.feed.filter(sameEntity({ module: 'bookings', action: 'created', entityType: 'booking', entityId: BOOKING.id }));
+    expect(rows.map((r) => [r.title, r.detail]).sort()).toEqual(
+      [
+        ['New booking', 'Ada Lovelace booked an appointment'],
+        ['New booking from Ada Lovelace', new Date(BOOKING.startTime).toLocaleString()],
+      ].sort(),
+    );
+    expect(h.feed).toHaveLength(2);
+    expect(h.flowRunner.runFlow.mock.calls.map((c: any[]) => [c[1], c[2]?.trigger, c[2]?.bookingId])).toEqual([[flowFor('booking.created'), 'booking.created', BOOKING.id]]);
+  });
+
+  it.todo(
+    "AE-08 booking.created: one emit, one feed row that carries the start time: AutomationExecutorService.onBookingCreated's row is kept because it is the only " +
+      "feed row with the booking's date and time; ActivityEventListener.onBookingCreated (activity-event.listener.ts:225, outside V1-55's write set) builds its " +
+      'detail from booking.service?.name, which no booking.created payload carries (bookings.service.ts createBooking and publicCreateBooking); removing the ' +
+      'executor row needs that listener to put the start time in its detail',
   );
 
   it('AE-03 contact.updated without a status change: the listener writes nothing, so the executor keeps the one "Contact updated" row', async () => {
@@ -229,7 +271,7 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: AutomationExecutorService writes no second 
     expect(h.feed[0]).toMatchObject({ businessId: BIZ, module: 'social', action: 'published', entityType: 'post', entityId: 'post_v155', title: 'Social post published' });
   });
 
-  for (const { event, payload } of DEDUPED) {
+  for (const { event, payload } of [...DEDUPED, { event: 'booking.created', payload: BOOKING_CREATED }]) {
     it(`AE-05 ${event}: playbooks and flows are still dispatched on the event (the dedupe removes the feed write only)`, async () => {
       const h = harness();
       await h.emit(event, payload);

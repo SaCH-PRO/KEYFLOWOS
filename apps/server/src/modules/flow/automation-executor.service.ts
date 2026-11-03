@@ -495,11 +495,14 @@ export class AutomationExecutorService {
    * V1-55-EVT-ACTIVITY-DEDUPE (M50, D-08: Activity is the user-visible feed).
    * flow.module.ts registers ActivityEventListener next to this service, and
    * it writes the feed row for contact.updated (a status change),
-   * booking.created, booking.confirmed, invoice.paid, invoice.sent and
-   * invoice.overdue. The handlers below run the playbooks, flows and built-in
-   * rules on those events and write no second feed row for them.
+   * booking.confirmed, invoice.paid, invoice.sent and invoice.overdue. The
+   * handlers below run the playbooks, flows and built-in rules on those events
+   * and write no second feed row for them.
    * contact.created still writes its own row: log-redaction.integration.test.ts
    * mounts this service alone and counts that row as proof its listener ran.
+   * booking.created still writes its own row (CR-V155-1): it is the only feed
+   * row with the booking's start time, because the listener's detail names
+   * booking.service, which no booking.created payload carries.
    */
   @OnEvent('contact.created')
   async onContactCreated(payload: ContactCreatedPayload) {
@@ -595,6 +598,23 @@ export class AutomationExecutorService {
 
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
+    // V1-55 review (CR-V155-1): kept beside ActivityEventListener's row, which
+    // has no date or time; the feed shows when the booking is from this row.
+    const contactName = payload.contact
+      ? [payload.contact.firstName, payload.contact.lastName].filter(Boolean).join(' ') || 'Customer'
+      : 'Customer';
+    await this.activity.log({
+      businessId: payload.businessId,
+      module: 'bookings',
+      action: 'created',
+      entityType: 'booking',
+      entityId: payload.booking.id,
+      title: `New booking from ${contactName}`,
+      detail: new Date(payload.booking.startTime).toLocaleString(),
+      icon: 'Calendar',
+      tone: 'info',
+      contactId: payload.contact?.id,
+    });
     await this.executePlaybooks(payload.businessId, 'booking.created', {
       contactId: payload.contact?.id,
       bookingId: payload.booking.id,
