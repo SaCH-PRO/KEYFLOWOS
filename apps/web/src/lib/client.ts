@@ -6485,6 +6485,9 @@ export interface ActionExecuteResponse {
   blocked?: boolean;
   requiresApproval?: boolean;
   approvalId?: string;
+  /** The action boundary holds the step for a confirmation (V1-31b CR-5). */
+  requiresConfirmation?: boolean;
+  confirmationId?: string;
   result?: unknown;
   changedEntities?: string[];
   followOnSuggestions?: string[];
@@ -6555,6 +6558,11 @@ export async function planAction(businessId: string, input: string): Promise<Api
   });
 }
 
+/**
+ * Since V1-31b the server executes only a stored plan step (planId and
+ * planStepId); a toolName or args sent beside them are ignored, and without
+ * them the request is refused 400. Prefer executePlanStep.
+ */
 export async function executeAction(
   businessId: string,
   toolName: string,
@@ -6567,6 +6575,70 @@ export async function executeAction(
     path: `/actions/businesses/${encodeURIComponent(businessId)}/execute`,
     body: { toolName, args, planId, planStepId },
   });
+}
+
+/**
+ * V1-31c (the V1-31b companion): execute one plan step the server holds, by
+ * its ids. The body is exactly {planId, planStepId}: the server runs the step's
+ * own tool with its stored arguments, so the caller never names a tool or sends
+ * arguments.
+ */
+export async function executePlanStep(
+  businessId: string,
+  planId: string,
+  planStepId: string,
+): Promise<ApiResult<ActionExecuteResponse>> {
+  return apiPost<ActionExecuteResponse>({
+    path: `/actions/businesses/${encodeURIComponent(businessId)}/execute`,
+    body: { planId, planStepId },
+  });
+}
+
+/**
+ * How a planned action ended: every stored step ran ('completed'); a step is
+ * waiting for an approval or a confirmation ('queued'); governance blocked a
+ * step ('blocked'); a request or a step failed ('failed'); or the planner needs
+ * the request clarified and nothing ran ('clarify').
+ */
+export type PlannedActionOutcome = 'completed' | 'queued' | 'blocked' | 'failed' | 'clarify';
+
+export interface PlannedActionResult {
+  outcome: PlannedActionOutcome;
+  planId?: string;
+  /** What each executed step answered, in order, up to the one that stopped the run. */
+  results: ActionExecuteResponse[];
+  reason?: string;
+}
+
+/**
+ * V1-31c: act on a request in words. The plan route plans the request and
+ * stores the plan (POST .../plan answers its steps with their ids); each stored
+ * step is then executed by id, in order, stopping at the first one that did not
+ * complete. Nothing here names a tool or carries tool arguments: the server
+ * decides both, and runs only what it stored.
+ */
+export async function runPlannedAction(businessId: string, input: string): Promise<PlannedActionResult> {
+  const planned = await planAction(businessId, input);
+  if (!planned.data) return { outcome: 'failed', results: [], reason: planned.error ?? undefined };
+  const plan = planned.data.plan;
+  if (planned.data.clarificationNeeded || !plan) return { outcome: 'clarify', results: [] };
+  const steps = [...(plan.steps ?? [])]
+    .filter((s) => typeof s.id === 'string' && s.id.length > 0)
+    .sort((a, b) => a.order - b.order);
+  if (steps.length === 0) return { outcome: 'failed', planId: plan.id, results: [], reason: 'The plan has no steps to execute' };
+  const results: ActionExecuteResponse[] = [];
+  for (const step of steps) {
+    const res = await executePlanStep(businessId, plan.id, step.id);
+    if (!res.data) return { outcome: 'failed', planId: plan.id, results, reason: res.error ?? undefined };
+    results.push(res.data);
+    if (res.data.success) continue;
+    if (res.data.requiresApproval || res.data.requiresConfirmation) {
+      return { outcome: 'queued', planId: plan.id, results, reason: res.data.reason };
+    }
+    if (res.data.blocked) return { outcome: 'blocked', planId: plan.id, results, reason: res.data.reason };
+    return { outcome: 'failed', planId: plan.id, results, reason: res.data.error ?? res.data.reason };
+  }
+  return { outcome: 'completed', planId: plan.id, results };
 }
 
 export async function fetchActionQueue(businessId: string, status?: string, limit?: number): Promise<ApiResult<ActionQueueResponse>> {
