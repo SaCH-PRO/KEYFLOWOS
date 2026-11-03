@@ -188,6 +188,8 @@ let systemActorId: string;
 let workflow: any;
 let driveOrchestrator: any;
 let revenuePosting: any;
+/** V1-41 (D-27): the real PaymentEvidenceService, whose confirmPendingPayment records an extracted payment. */
+let paymentEvidence: any;
 /** The real TimelineService the recorder below passes every entry on to. */
 let realTimeline: { recordEvent: (input: any) => Promise<unknown> } | null = null;
 /** The TimelineService class, for PA-17f's timeline whose insert fails. */
@@ -449,6 +451,7 @@ beforeAll(async () => {
   workflow = moduleRef.get(InvoiceWorkflowService);
   driveOrchestrator = moduleRef.get(DriveIntakeOrchestrator);
   revenuePosting = moduleRef.get(RevenuePostingService);
+  paymentEvidence = moduleRef.get(PaymentEvidenceService);
   TimelineServiceClass = TimelineService;
   realTimeline = new TimelineService(moduleRef.get(PrismaService));
   // The KEY cortex adapter, constructed exactly as KeyCortexModule wires it.
@@ -638,7 +641,9 @@ describe('KEY and evidence paths record the system actor, distinct from a human'
     expect(((await contactEventsFor(ID.invKey))[0].data as any).initiatedBy).toBe(ID.userU);
   });
 
-  it('PA-07: POST .../payments/from-evidence (PaymentEvidenceService) -> recordedBy KEY_SYSTEM_ACTOR_ID, posting createdById KEY, contact event SYSTEM', async () => {
+  // V1-41 (D-27): an AI-extracted amount is recorded PENDING by KEY and
+  // moves no money; the member who confirms it records the money.
+  it('PA-07: POST .../payments/from-evidence (PaymentEvidenceService) -> the PENDING row is recorded by KEY_SYSTEM_ACTOR_ID and nothing is posted (D-27); U confirms it -> the payment, its posting and the contact event name U (USER)', async () => {
     nextExtraction = {
       documentType: 'receipt',
       confidence: 0.92,
@@ -650,14 +655,22 @@ describe('KEY and evidence paths record the system actor, distinct from a human'
       .send({ evidenceUrl: 'https://evidence.test/pya.pdf', evidenceMimeType: 'application/pdf', filename: 'pya.pdf', source: 'upload' });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
 
+    const [pending] = await paymentsOf(ID.invEvidence);
+    expect(pending).toMatchObject({ status: 'PENDING', amount: 45, evidenceUrl: 'https://evidence.test/pya.pdf' });
+    expect(pending.recordedBy).toBe(KEY_ACTOR);
+    expect(await postingsFor(pending.id)).toHaveLength(0);
+    expect(await contactEventsFor(ID.invEvidence)).toHaveLength(0);
+
+    const confirmed = await paymentEvidence.confirmPendingPayment(pending.id, ID.biz, ID.userU);
     const rows = await paymentsOf(ID.invEvidence);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ amount: 45, evidenceUrl: 'https://evidence.test/pya.pdf' });
-    expect(rows[0].recordedBy).toBe(KEY_ACTOR);
-    await expectPostingBy(rows[0].id, KEY_ACTOR);
-    await expectContactEventBy(ID.invEvidence, KEY_ACTOR, 'SYSTEM');
-    // Review PL07-ST-3: the authenticated uploader stays on the trail.
-    expect(((await contactEventsFor(ID.invEvidence))[0].data as any).initiatedBy).toBe(ID.userU);
+    expect(rows.map((r: any) => [r.id, r.status, r.recordedBy])).toEqual([
+      [pending.id, 'CONFIRMED', KEY_ACTOR],
+      [confirmed.payment.id, 'SUCCESSFUL', ID.userU],
+    ]);
+    expect(rows[1]).toMatchObject({ amount: 45, evidenceUrl: 'https://evidence.test/pya.pdf' });
+    expect(await postingsFor(pending.id)).toHaveLength(0);
+    await expectPostingBy(confirmed.payment.id, ID.userU);
+    await expectContactEventBy(ID.invEvidence, ID.userU, 'USER');
   });
 
   // R0-11 review (ST-R011-3): this is a direct service call with no actor. It
@@ -777,7 +790,7 @@ describe('review repairs: mark-paid, refund guard, initiating human', () => {
     expect((await paymentRow(paymentId)).recordedBy).toBe(ID.userU);
   });
 
-  it('PA-14 (PL07-ST-3): from-evidence by V -> recorder KEY (SYSTEM); initiatedBy = V from req.user, never the body\'s recordedBy / initiatedBy', async () => {
+  it('PA-14 (PL07-ST-3): from-evidence by V -> the PENDING row\'s recorder is KEY (SYSTEM), never the body\'s recordedBy / initiatedBy / actorId; V confirms it -> the money is recorded as V, never as the body\'s actor (D-27)', async () => {
     nextExtraction = {
       documentType: 'receipt',
       confidence: 0.9,
@@ -792,13 +805,25 @@ describe('review repairs: mark-paid, refund guard, initiating human', () => {
       });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
 
-    const rows = await paymentsOf(ID.invEvidenceV);
-    expect(rows).toHaveLength(1);
-    expect(rows[0].recordedBy).toBe(KEY_ACTOR);
-    await expectPostingBy(rows[0].id, KEY_ACTOR);
-    await expectContactEventBy(ID.invEvidenceV, KEY_ACTOR, 'SYSTEM');
-    expect(((await contactEventsFor(ID.invEvidenceV))[0].data as any).initiatedBy).toBe(ID.userV);
+    const [pending] = await paymentsOf(ID.invEvidenceV);
+    expect(pending).toMatchObject({ status: 'PENDING', recordedBy: KEY_ACTOR });
+    expect(await postingsFor(pending.id)).toHaveLength(0);
+
+    const confirmed = await paymentEvidence.confirmPendingPayment(pending.id, ID.biz, ID.userV);
+    expect((await paymentRow(confirmed.payment.id)).recordedBy).toBe(ID.userV);
+    await expectPostingBy(confirmed.payment.id, ID.userV);
+    await expectContactEventBy(ID.invEvidenceV, ID.userV, 'USER');
+    expect(JSON.stringify(await paymentsOf(ID.invEvidenceV))).not.toContain(ID.userU);
   });
+
+  // V1-41 (D-27): recordPayment kept the uploader on the invoice.payment_recorded
+  // contact event (PL07-ST-3). A PENDING row writes no contact event: the
+  // canonical CONTACT_EVENT_TYPES (packages/shared/src/contact-events.ts) has no
+  // pending-payment type, and that file is outside V1-41's write set.
+  it.todo(
+    'PA-14b (PL07-ST-3, D-27): the uploader (initiatedBy) of a PENDING evidence-extracted payment is kept on the audit trail until a member confirms it - ' +
+      'needs a pending-payment type in CONTACT_EVENT_TYPES (packages/shared/src/contact-events.ts) written by PaymentEvidenceService.recordPendingPayment; outside the V1-41 write set',
+  );
 
   it('PA-15 (PL07-ST-3): initiatedBy is kept only beside the system recorder; a human recorder ignores it', async () => {
     const result = await commerce.recordPayment(
@@ -1490,17 +1515,25 @@ describe('R0-CMF2: drive-intake approval names the approver on the payment it re
     expect(res.body.success, JSON.stringify(res.body)).toBe(true);
     expect(res.body.results).toEqual([expect.objectContaining({ action: 'record_payment', success: true })]);
 
-    const rows = await paymentsOf(ID.invDriveV);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ amount: 30, status: 'SUCCESSFUL', reference: 'PYA-DRV-1' });
-    expect(rows[0].id).toBe(res.body.results[0].entityId);
-    expect(rows[0].recordedBy).toBe(ID.userV);
-    await expectPostingBy(rows[0].id, ID.userV);
-    await expectContactEventBy(ID.invDriveV, ID.userV, 'USER');
+    // V1-41 (D-27): the approved step records the payment PENDING, recorded by
+    // V; nothing is posted until a member confirms it (here V).
+    const [pending] = await paymentsOf(ID.invDriveV);
+    expect(pending).toMatchObject({ amount: 30, status: 'PENDING', reference: 'PYA-DRV-1', recordedBy: ID.userV });
+    expect(pending.id).toBe(res.body.results[0].entityId);
+    expect(await postingsFor(pending.id)).toHaveLength(0);
+    expect(await contactEventsFor(ID.invDriveV)).toHaveLength(0);
     expect((await db.driveIntakeFile.findUnique({ where: { id: intakeId } })).status).toBe('approved');
+
+    const confirmed = await paymentEvidence.confirmPendingPayment(pending.id, ID.biz, ID.userV);
+    const rows = await paymentsOf(ID.invDriveV);
+    expect(rows.map((r: any) => [r.status, r.recordedBy])).toEqual([['CONFIRMED', ID.userV], ['SUCCESSFUL', ID.userV]]);
+    expect(rows[1]).toMatchObject({ id: confirmed.payment.id, amount: 30, reference: 'PYA-DRV-1' });
+    await expectPostingBy(confirmed.payment.id, ID.userV);
+    await expectContactEventBy(ID.invDriveV, ID.userV, 'USER');
+    expect(JSON.stringify(rows)).not.toContain(ID.userU);
   });
 
-  it('PA-18b: the ingestion auto-execute runs the plan with no human (approver "system") -> recordedBy null, posting createdById null, contact event with no actor; "system" is recorded nowhere (PA-08 holds)', async () => {
+  it('PA-18b: the ingestion auto-execute runs the plan with no human (approver "system") -> the PENDING row\'s recordedBy is null, nothing is posted and no contact event is written (D-27); "system" is recorded nowhere (PA-08 holds)', async () => {
     const intakeId = `${P}drive_sys`;
     await seedDriveIntake(intakeId, ID.invDriveSystem, { amount: 20, method: 'cash', reference: 'PYA-DRV-SYS' });
 
@@ -1509,13 +1542,14 @@ describe('R0-CMF2: drive-intake approval names the approver on the payment it re
 
     const rows = await paymentsOf(ID.invDriveSystem);
     expect(rows).toHaveLength(1);
-    expect(rows[0].recordedBy).toBeNull();
-    await expectPostingBy(rows[0].id, null);
-    const events = await contactEventsFor(ID.invDriveSystem);
-    expect(events).toHaveLength(1);
-    expect(events[0].actorId).toBeNull();
-    expect((events[0].data as any).recordedBy).toBeNull();
-    expect(crmActivityFor(ID.invDriveSystem).map((a) => a.actorId ?? null)).toEqual([null]);
+    expect(rows[0]).toMatchObject({ status: 'PENDING', recordedBy: null });
+    expect(await postingsFor(rows[0].id)).toHaveLength(0);
+    expect(await contactEventsFor(ID.invDriveSystem)).toHaveLength(0);
+    expect(crmActivityFor(ID.invDriveSystem)).toEqual([]);
+    expect(JSON.stringify(rows)).not.toContain('"system"');
+    // No member, no money: the system placeholder cannot confirm it either.
+    await expect(paymentEvidence.confirmPendingPayment(rows[0].id, ID.biz, 'system')).rejects.toMatchObject({ status: 403 });
+    expect(await postingsFor(rows[0].id)).toHaveLength(0);
   });
 });
 
@@ -1524,18 +1558,17 @@ function approveIntakeAs(user: string, intakeId: string) {
 }
 
 describe('R0-CMF2 review repairs: a drive-intake payment step credits the invoice once (PA-18, SEC-CMF2-2)', () => {
-  it('PA-18c: U and V approve the same intake concurrently -> one SUCCESSFUL payment, one posting and one contact event, all naming the same approver; every successful answer is that payment; the invoice is credited once', async () => {
+  it('PA-18c: U and V approve the same intake concurrently -> one PENDING payment naming one approver and nothing posted (D-27); every successful answer is that payment; once that approver confirms it, one posting and one contact event name them and the invoice is credited once', async () => {
     const intakeId = `${P}drive_race`;
     await seedDriveIntake(intakeId, ID.invDriveRace, { amount: 30, method: 'bank_transfer', reference: 'PYA-DRV-RACE' });
 
     const answers = await Promise.all([approveIntakeAs(ID.userU, intakeId), approveIntakeAs(ID.userV, intakeId)]);
 
     const rows = await paymentsOf(ID.invDriveRace);
-    expect(rows.map((r: any) => [r.amount, r.status])).toEqual([[30, 'SUCCESSFUL']]);
+    expect(rows.map((r: any) => [r.amount, r.status])).toEqual([[30, 'PENDING']]);
     const recorder = rows[0].recordedBy;
     expect([ID.userU, ID.userV]).toContain(recorder);
-    await expectPostingBy(rows[0].id, recorder);
-    await expectContactEventBy(ID.invDriveRace, recorder, 'USER');
+    expect(await postingsFor(rows[0].id)).toHaveLength(0);
     // Each answer is the one payment (the second replayed) or, if the first
     // had already flipped the intake to approved, the already-executed refusal.
     for (const res of answers) {
@@ -1547,6 +1580,13 @@ describe('R0-CMF2 review repairs: a drive-intake payment step credits the invoic
       }
     }
     expect(answers.map((r) => r.status)).toContain(201);
+    expect((await db.invoice.findUnique({ where: { id: ID.invDriveRace }, select: { status: true } })).status).toBe('SENT');
+
+    const confirmed = await paymentEvidence.confirmPendingPayment(rows[0].id, ID.biz, recorder);
+    const after = await paymentsOf(ID.invDriveRace);
+    expect(after.map((r: any) => [r.amount, r.status])).toEqual([[30, 'CONFIRMED'], [30, 'SUCCESSFUL']]);
+    await expectPostingBy(confirmed.payment.id, recorder);
+    await expectContactEventBy(ID.invDriveRace, recorder, 'USER');
     const invoice = await db.invoice.findUnique({ where: { id: ID.invDriveRace }, select: { status: true } });
     expect(invoice.status).toBe('PARTIALLY_PAID');
   });
@@ -1565,10 +1605,19 @@ describe('R0-CMF2 review repairs: a drive-intake payment step credits the invoic
     expect(second.body.success, JSON.stringify(second.body)).toBe(true);
     expect(second.body.results[0].entityId).toBe(first.body.results[0].entityId);
 
+    // V1-41 (D-27): the one row is PENDING, recorded by U, and unposted.
     const rows = await paymentsOf(ID.invDriveRerun);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ amount: 25, status: 'SUCCESSFUL', recordedBy: ID.userU });
-    await expectPostingBy(rows[0].id, ID.userU);
+    expect(rows[0]).toMatchObject({ amount: 25, status: 'PENDING', recordedBy: ID.userU });
+    expect(await postingsFor(rows[0].id)).toHaveLength(0);
+
+    // U confirms it: the money is recorded and posted once, by U.
+    const confirmed = await paymentEvidence.confirmPendingPayment(rows[0].id, ID.biz, ID.userU);
+    expect((await paymentsOf(ID.invDriveRerun)).map((r: any) => [r.status, r.recordedBy])).toEqual([
+      ['CONFIRMED', ID.userU],
+      ['SUCCESSFUL', ID.userU],
+    ]);
+    await expectPostingBy(confirmed.payment.id, ID.userU);
     await expectContactEventBy(ID.invDriveRerun, ID.userU, 'USER');
   });
 });

@@ -767,21 +767,33 @@ describe('review CR-1: internal callers are not keyed on a document-derived refe
   it('two receipts citing the invoice number for the same amount record two payments through the real PaymentEvidenceService; the invoice settles', async () => {
     nextExtraction = { documentType: 'receipt', confidence: 0.9, invoiceData: { invoiceNumber: 'CPI-EVID-001', total: 50, notes: 'bank transfer' } };
 
+    // V1-41 (D-27): each receipt is recorded PENDING (nothing posted, the
+    // invoice untouched) until the owner confirms it; the confirmation records
+    // it through recordPayment. Two receipts are still two payments.
     const first = await evidence.processEvidence(receipt('receipt-deposit.pdf'));
-    expect(first.payment).toMatchObject({ amount: 50, reference: 'CPI-EVID-001', evidenceUrl: 'https://evidence.test/receipt-deposit.pdf' });
-    expect(first.invoiceStatus).toBe('PARTIALLY_PAID');
+    expect(first.payment).toMatchObject({ status: 'PENDING', amount: 50, reference: 'CPI-EVID-001', evidenceUrl: 'https://evidence.test/receipt-deposit.pdf' });
+    expect(first.invoiceStatus).toBe('SENT');
 
     const second = await evidence.processEvidence(receipt('receipt-balance.pdf'));
     expect(second.payment.id).not.toBe(first.payment.id);
-    expect(second.payment).toMatchObject({ amount: 50, reference: 'CPI-EVID-001', evidenceUrl: 'https://evidence.test/receipt-balance.pdf' });
-    expect(second.invoiceStatus).toBe('PAID');
+    expect(second.payment).toMatchObject({ status: 'PENDING', amount: 50, reference: 'CPI-EVID-001', evidenceUrl: 'https://evidence.test/receipt-balance.pdf' });
+    expect(second.invoiceStatus).toBe('SENT');
+    expect(await postingsFor(first.payment.id)).toHaveLength(0);
+    expect(await postingsFor(second.payment.id)).toHaveLength(0);
+    expect(crmCalls).toHaveLength(0);
 
-    const rows = await paymentsOf(ID.invEvidence);
+    const firstPaid = await evidence.confirmPendingPayment(first.payment.id, ID.biz, ID.owner);
+    expect(firstPaid.invoice?.status).toBe('PARTIALLY_PAID');
+    const secondPaid = await evidence.confirmPendingPayment(second.payment.id, ID.biz, ID.owner);
+    expect(secondPaid.payment.id).not.toBe(firstPaid.payment.id);
+    expect(secondPaid.invoice?.status).toBe('PAID');
+
+    const rows = (await paymentsOf(ID.invEvidence)).filter((r) => r.status === 'SUCCESSFUL');
     expect(rows).toHaveLength(2);
     expect(rows.map((r) => r.evidenceUrl).sort()).toEqual(['https://evidence.test/receipt-balance.pdf', 'https://evidence.test/receipt-deposit.pdf']);
     expect(new Set(rows.map((r) => r.providerPaymentId)).size).toBe(2);
-    await expectPostedOnce(first.payment.id, 50);
-    await expectPostedOnce(second.payment.id, 50);
+    await expectPostedOnce(firstPaid.payment.id, 50);
+    await expectPostedOnce(secondPaid.payment.id, 50);
     expect(await invoiceStatus(ID.invEvidence)).toBe('PAID');
     expect(crmCalls).toHaveLength(2);
   });
