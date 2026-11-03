@@ -36,6 +36,7 @@ import {
   resendInvoiceReceipt,
   createInvoicePaymentLink,
   recordInvoicePayment,
+  confirmPendingInvoicePayment,
   Invoice,
   PaymentRecord,
   InvoiceTimelineEntry,
@@ -58,6 +59,24 @@ const STATUS_META: Record<string, { label: string; color: string; bg: string }> 
   VOID: { label: "Void", color: "text-gray-500", bg: "bg-gray-100" },
 };
 
+/**
+ * V1-41 (D-27): Payment.provider of a payment an evidence scan or a Drive
+ * intake recorded PENDING (the server's EXTRACTED_PAYMENT_PROVIDER). Such a
+ * row is not money until a member with revenue write access confirms it
+ * (V1-41b: POST .../payments/:paymentId/confirm). A customer's pay-link intent
+ * is PENDING too, but is not an extracted row and is not confirmed here.
+ */
+const EXTRACTED_PAYMENT_PROVIDER = "extracted";
+const isPendingExtractedPayment = (p: PaymentRecord) => p.status === "PENDING" && p.provider === EXTRACTED_PAYMENT_PROVIDER;
+
+/**
+ * V1-41b (V1-41 review CR-V41-4): a confirmed extracted row (CONFIRMED) keeps
+ * its amount beside the SUCCESSFUL payment the member recorded from it; that
+ * payment is the money, so the row is never listed as a second one. The
+ * payments route no longer serves it; the invoice read still carries it.
+ */
+const isListedPayment = (p: PaymentRecord) => p.status !== "CONFIRMED";
+
 export default function InvoiceDetailPage() {
   const router = useRouter();
   const { open: openComposer } = useCompose();
@@ -77,6 +96,11 @@ export default function InvoiceDetailPage() {
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ amount: "", method: "Cash", reference: "", notes: "" });
   const [recordingPayment, setRecordingPayment] = useState(false);
+  // V1-41b: the pending extracted payment being confirmed, and whether the
+  // server refused this member the confirmation (403: no revenue write access).
+  const [confirmingPaymentId, setConfirmingPaymentId] = useState<string | null>(null);
+  const [confirmForbidden, setConfirmForbidden] = useState(false);
+  const confirmingPaymentRef = useRef(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmAction, setConfirmAction] = useState<(() => void) | null>(null);
   const [confirmTitle, setConfirmTitle] = useState("");
@@ -225,6 +249,36 @@ export default function InvoiceDetailPage() {
     } finally { recordingPaymentRef.current = false; setRecordingPayment(false); }
   };
 
+  // V1-41b-PENDING-PAYMENT-CONFIRM-ROUTE (D-27): confirm a payment an evidence
+  // scan or a Drive intake recorded PENDING. The amount sent is the one shown
+  // on the row, so a pending amount that changed meanwhile is refused (409)
+  // rather than recorded. The server's figures come from the answer; the list
+  // is read again so the confirmed money is listed once. A 403 (no revenue
+  // write access) withdraws the action; any other refusal re-reads the list
+  // (another member may have confirmed it first).
+  const handleConfirmPending = async (p: PaymentRecord) => {
+    if (!businessId || !invoice || confirmingPaymentRef.current) return;
+    confirmingPaymentRef.current = true;
+    setConfirmingPaymentId(p.id);
+    try {
+      const { data, error, status } = await confirmPendingInvoicePayment(businessId, invoice.id, p.id, { amount: Number(p.amount) });
+      if (!error && data) {
+        setInvoice(prev => prev ? { ...data.invoice, payments: data.invoice.payments, paidAmount: data.paidAmount, remaining: data.remaining } : prev);
+        toast.success(`Payment of ${formatAmount(data.payment.amount, data.payment.currency)} confirmed`);
+        await loadPayments();
+      } else if (status === 403) {
+        setConfirmForbidden(true);
+        toast.error("Confirming a payment needs revenue write access", { description: error ?? undefined });
+      } else {
+        toast.error(error ?? "Could not confirm this payment");
+        await loadPayments();
+      }
+    } finally {
+      confirmingPaymentRef.current = false;
+      if (mountedRef.current) setConfirmingPaymentId(null);
+    }
+  };
+
   const handleSendReminder = () => {
     if (!invoice) return;
     openComposer({
@@ -274,6 +328,13 @@ export default function InvoiceDetailPage() {
   const canDelete = invoice.status === "DRAFT" || invoice.status === "VOID";
   const meta = STATUS_META[invoice.status] ?? STATUS_META.DRAFT;
   const currentStep = STATUS_ORDER.indexOf(invoice.status);
+  // V1-41b (CR-V41-4): a CONFIRMED extracted row is not a payment of its own.
+  const listedPayments = payments.filter(isListedPayment);
+  const listedInvoicePaymentCount = (invoice.payments ?? []).filter(isListedPayment).length;
+  // V1-41b: a pending extracted payment is confirmed only while the invoice
+  // takes payments (the confirmation records one), and not after the server
+  // refused this member (403).
+  const canConfirmPending = canRecordPayment && !confirmForbidden;
 
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-6xl mx-auto pb-12">
@@ -349,7 +410,7 @@ export default function InvoiceDetailPage() {
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`flex items-center gap-1.5 px-5 py-3 text-[13px] font-medium transition-colors border-b-2 ${activeTab === tab ? "border-[hsl(var(--kf-accent1))] text-[hsl(var(--kf-accent1))]" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
                   {tab === "activity" && <Activity className="w-4 h-4" />}{tab === "payments" && <CreditCard className="w-4 h-4" />}{tab === "notes" && <StickyNote className="w-4 h-4" />}
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                  {tab === "payments" && (invoice.payments?.length ?? 0) > 0 && <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{invoice.payments!.length}</span>}
+                  {tab === "payments" && listedInvoicePaymentCount > 0 && <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full">{listedInvoicePaymentCount}</span>}
                 </button>
               ))}
             </div>
@@ -369,25 +430,41 @@ export default function InvoiceDetailPage() {
                 {activeTab === "payments" && (
                   <motion.div key="payments" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-3">
                     {paymentsLoading ? <div className="flex justify-center py-6"><Loader2 className="w-5 h-5 animate-spin text-muted-foreground" /></div> :
-                      payments.length === 0 ? (
+                      listedPayments.length === 0 ? (
                         <div className="text-center py-6">
                           <p className="text-sm text-muted-foreground">No payments recorded yet.</p>
                           {canRecordPayment && <button onClick={() => setShowPaymentForm(true)} className="mt-2 text-xs text-[hsl(var(--kf-accent1))] hover:underline">Record a payment</button>}
                         </div>
-                      ) : payments.map(p => (
-                        <div key={p.id} className="flex items-center justify-between p-3 rounded-lg bg-muted/30 border border-border/60">
+                      ) : listedPayments.map(p => {
+                        const pendingExtracted = isPendingExtractedPayment(p);
+                        return (
+                        <div key={p.id} data-testid="invoice-payment-row" data-payment-id={p.id} className="flex items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border/60">
                           <div className="flex items-center gap-3">
                             <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${p.status === "SUCCESSFUL" ? "bg-emerald-50" : "bg-amber-50"}`}>
                               <DollarSign className={`w-4 h-4 ${p.status === "SUCCESSFUL" ? "text-emerald-600" : "text-amber-600"}`} />
                             </div>
                             <div>
                               <p className="text-sm font-medium">{formatAmount(p.amount, p.currency)}</p>
-                              <p className="text-[11px] text-muted-foreground">{p.provider} · {new Date(p.createdAt).toLocaleDateString()}</p>
+                              <p className="text-[11px] text-muted-foreground">{pendingExtracted ? "Read from evidence" : p.provider} · {new Date(p.createdAt).toLocaleDateString()}</p>
+                              {pendingExtracted && <p className="text-[11px] text-amber-700">Awaiting confirmation: not counted as paid until a member confirms it.</p>}
                             </div>
                           </div>
-                          <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${p.status === "SUCCESSFUL" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{p.status}</span>
+                          <div className="flex items-center gap-2 shrink-0">
+                            {pendingExtracted && canConfirmPending && (
+                              <button
+                                onClick={() => void handleConfirmPending(p)}
+                                disabled={confirmingPaymentId !== null}
+                                className="inline-flex items-center gap-1 px-2.5 h-7 text-[11px] font-semibold rounded-lg bg-[hsl(var(--kf-accent1))] text-white hover:opacity-90 transition-opacity disabled:opacity-50"
+                              >
+                                {confirmingPaymentId === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+                                Confirm
+                              </button>
+                            )}
+                            <span className={`text-[10px] font-semibold px-2 py-1 rounded-full ${p.status === "SUCCESSFUL" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>{p.status}</span>
+                          </div>
                         </div>
-                      ))}
+                        );
+                      })}
                   </motion.div>
                 )}
                 {activeTab === "notes" && (

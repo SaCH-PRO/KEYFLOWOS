@@ -2427,9 +2427,37 @@ export async function recordPaymentFromEvidence(businessId: string, invoiceId: s
     notes?: string;
     confidence: number;
   };
+  /**
+   * V1-41 (D-27): the extracted payment is recorded PENDING (payment.status
+   * 'PENDING'); nothing is posted and the balance does not move until a member
+   * confirms it (confirmPendingInvoicePayment).
+   */
+  requiresConfirmation?: boolean;
 }>> {
   return apiPost({
     path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments/from-evidence`,
+    body: input,
+  });
+}
+
+/**
+ * V1-41b-PENDING-PAYMENT-CONFIRM-ROUTE (D-27): a member with revenue write
+ * access confirms a payment an evidence scan or a Drive intake recorded
+ * PENDING (status 'PENDING', provider 'extracted'). The server records the money as the
+ * member, in the manual payment route's envelope with the server's figures,
+ * and retires the pending row (CONFIRMED). `amount` is the amount the member
+ * was shown: a different pending amount is refused (409), as are a row already
+ * confirmed and a row that is not an extracted one; 403 without revenue write
+ * access. `error` carries the server's message and `status` the code.
+ */
+export async function confirmPendingInvoicePayment(
+  businessId: string,
+  invoiceId: string,
+  paymentId: string,
+  input: { amount?: number } = {},
+) {
+  return apiPost<{ payment: PaymentRecord; invoice: Invoice; paidAmount: number; remaining: number; confirmedPaymentId: string }>({
+    path: `/commerce/businesses/${encodeURIComponent(businessId)}/invoices/${encodeURIComponent(invoiceId)}/payments/${encodeURIComponent(paymentId)}/confirm`,
     body: input,
   });
 }

@@ -27,6 +27,7 @@ import { UpdateInvoiceStatusDto } from './dto/update-invoice-status.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { UpdateQuoteStatusDto } from './dto/update-quote-status.dto';
 import { RecordPaymentDto } from './dto/record-payment.dto';
+import { ConfirmPendingPaymentDto } from './dto/confirm-pending-payment.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
 import { assertQuoteStatusAgreement } from './quote-workflow';
 import { buildInvoiceEmailHtml } from './invoice-email.template';
@@ -57,6 +58,13 @@ const CREATE_INVOICE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform
 const CREATE_QUOTE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: CreateQuoteDto });
 const UPDATE_QUOTE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: UpdateQuoteDto });
 const CONVERT_QUOTE_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: ConvertQuoteDto });
+
+/**
+ * V1-41b: the pending-payment confirm body, bound the same way (see
+ * CREATE_INVOICE_BODY_PIPE), so the whitelist drops every field but `amount`
+ * wherever the controller runs.
+ */
+const CONFIRM_PENDING_PAYMENT_BODY_PIPE = new ValidationPipe({ whitelist: true, transform: true, expectedType: ConfirmPendingPaymentDto });
 
 type OperatorQuoteContactKey = keyof typeof OPERATOR_QUOTE_CONTACT_SELECT;
 
@@ -1722,6 +1730,39 @@ export class CommerceController {
       { ...body, businessId, invoiceId },
       { initiatedBy: req?.user?.id ?? null },
     );
+  }
+
+  // V1-41b-PENDING-PAYMENT-CONFIRM-ROUTE (V1-41 review CR-V41-3; D-27): the
+  // HTTP door to PaymentEvidenceService.confirmPendingPayment. A payment read
+  // from an untrusted input (from-evidence above, a Drive intake
+  // record_payment step) is recorded PENDING; this is how a member turns it
+  // into money. The guard stack and the revenue:write scope are the manual
+  // payment route's; the door restates the revenue:write rule for the member
+  // and refuses a SUPER_ADMIN with no membership (D-46). The confirming member
+  // is the authenticated user, never a body field (R0-PL-07): the SUCCESSFUL
+  // row, its payment_recorded posting and the invoice.payment_recorded contact
+  // event name them. The optional `amount` binds what the member was shown
+  // (SEC-V41-1). The pending row must be this invoice's in this tenant (404
+  // otherwise); a row no untrusted input wrote, or one already confirmed, is
+  // a 409; nothing is written on any refusal.
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
+  @Post('businesses/:businessId/invoices/:invoiceId/payments/:paymentId/confirm')
+  async confirmPendingPayment(
+    @Param('businessId') businessId: string,
+    @Param('invoiceId') invoiceId: string,
+    @Param('paymentId') paymentId: string,
+    @Body(CONFIRM_PENDING_PAYMENT_BODY_PIPE) body: ConfirmPendingPaymentDto,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    const result = await this.paymentEvidence.confirmPendingPayment(paymentId, businessId, req?.user?.id ?? null, {
+      amount: body?.amount,
+      invoiceId,
+    });
+    // V1-41 review DISC-V41-6 (the SEC3-ST-1 class): recordPayment and its
+    // keyed replay reload the invoice with the whole Contact row; the body is
+    // projected exactly as the manual payment route projects it.
+    return { ...result, invoice: result.invoice ? toInvoiceWriteResponse(result.invoice) : result.invoice };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

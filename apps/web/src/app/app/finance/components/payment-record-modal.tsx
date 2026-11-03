@@ -251,7 +251,17 @@ export function PaymentRecordModal({ invoice, businessId, onClose, onSubmit, loa
         setScanError(res.error);
         toast.error(res.error);
       } else if (res.data) {
-        toast.success(`Payment recorded from ${evidenceFile.filename}`);
+        // V1-41 (D-27, V1-41 review CR-V41-3): the extracted payment is
+        // recorded PENDING and moves no balance until a member confirms it on
+        // the invoice's Payments tab; it is never announced as recorded.
+        if (res.data.requiresConfirmation === true || res.data.payment.status === "PENDING") {
+          toast.info(
+            `Payment of ${formatCurrency(res.data.payment.amount, res.data.payment.currency)} from ${evidenceFile.filename} is pending confirmation`,
+            { description: "Confirm it on the invoice's Payments tab to record the money." },
+          );
+        } else {
+          toast.success(`Payment recorded from ${evidenceFile.filename}`);
+        }
         handleClose();
       }
     } catch (err) {

@@ -4031,7 +4031,14 @@ export class CommerceService {
     // (summing SUCCESSFUL rows alone read a refunded invoice as still paid).
     const balance = balanceOfStoredRows(Number(invoice.total), payments, invoice.currency);
     return {
-      payments,
+      // V1-41b (V1-41 review CR-V41-4): a confirmed extracted row (status
+      // CONFIRMED, PaymentEvidenceService.CONFIRMED_EXTRACTED_PAYMENT_STATUS)
+      // keeps its full amount beside the SUCCESSFUL payment the member
+      // recorded from it, so listing it showed the same money twice. It is
+      // not money (the balance above ignores it, and it is read over every
+      // row as before) and is not listed; the row itself is kept. The literal
+      // avoids importing payment-evidence.service, which imports this one.
+      payments: payments.filter((p) => p.status !== 'CONFIRMED'),
       paidAmount: balance.net,
       remaining: balance.remaining,
       invoiceTotal: invoice.total,

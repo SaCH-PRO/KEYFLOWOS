@@ -475,12 +475,17 @@ export class PaymentEvidenceService {
    * cents, to the pending row's amount, or the confirmation is refused 409
    * and writes nothing, so the money recorded is never other than what the
    * member approved. A confirm route passes it from the member's request.
+   *
+   * V1-41b-PENDING-PAYMENT-CONFIRM-ROUTE: `options.invoiceId` binds the row
+   * to the invoice the caller named (the HTTP route's :invoiceId); a pending
+   * row of another invoice is not found (404) and nothing is written. The
+   * route projects the answer (toInvoiceWriteResponse, DISC-V41-6).
    */
   async confirmPendingPayment(
     paymentId: string,
     businessId: string,
     memberId: string | null | undefined,
-    options: { amount?: unknown } = {},
+    options: { amount?: unknown; invoiceId?: string } = {},
   ) {
     let approved: number | undefined;
     if (options.amount !== undefined) {
@@ -490,7 +495,9 @@ export class PaymentEvidenceService {
       approved = options.amount;
     }
     await this.assertMemberMayRecordPayments(businessId, memberId);
-    const pending = await this.prisma.client.payment.findFirst({ where: { id: paymentId, businessId } });
+    const pending = await this.prisma.client.payment.findFirst({
+      where: { id: paymentId, businessId, ...(options.invoiceId !== undefined ? { invoiceId: options.invoiceId } : {}) },
+    });
     if (!pending) throw new NotFoundException('Payment not found');
     if (
       !pending.providerPaymentId.startsWith(EXTRACTED_PAYMENT_ID_PREFIX) ||
