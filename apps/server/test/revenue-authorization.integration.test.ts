@@ -1745,8 +1745,9 @@ describe('Review repairs (R0-SEC3): the record-payment route projects the invoic
 // no tenant, the only production caller of that shape. D-05 authorizes the
 // bounded change to that handler: after signature verification it hands the
 // verified event to the Stripe ledger door (PaymentsService.handleStripeWebhook,
-// what POST /payments/stripe/webhook runs), bound to the invoice's business,
-// amount and currency, and never calls markInvoicePaid.
+// what POST /payments/stripe/webhook runs), bound to the invoice's business and
+// currency with a positive amount, recorded as carried (R0-20b review
+// CR-R020B-1), and never calls markInvoicePaid.
 // ---------------------------------------------------------------------------
 describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: G16 — the anonymous, tenantless caller (D-05; RA-G16-01 leaves deferral)', () => {
   const SECRET = `whsec_${P}legacy`;

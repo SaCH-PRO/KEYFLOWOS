@@ -86,13 +86,26 @@
  *          PAYMENT_PROCESSOR (no CASH entry); PAID; markInvoicePaid never runs; a redelivery
  *          on the legacy route or on the Stripe ledger door (PaymentsService.handleStripeWebhook,
  *          what POST /payments/stripe/webhook runs) writes nothing; the answer keeps
- *          deprecated:true and the use hint
+ *          deprecated:true and the use hint; the Stripe connector's payment.received is
+ *          emitted once, for the recorded payment (review CR-R020B-2)
  *   MP-06b the event first recorded through the Stripe ledger door, then delivered to the legacy
- *          route -> acknowledged, nothing new written
- *   MP-06c refused (400), nothing written and no dedupe claim: a verified event naming another
- *          business than the invoice's, naming none, carrying another amount, no amount or
- *          another currency; an unsigned or wrongly signed call (as before); an event type the
+ *          route -> acknowledged, nothing new written, no connector event
+ *   MP-06c refused (400), nothing recorded and no dedupe claim: a verified event naming another
+ *          business than the invoice's, naming none, carrying no amount or a non-positive one,
+ *          another currency or none; each refusal is kept as one webhook_events row (provider
+ *          stripe-legacy-refused, the invoice's business, `<type>:<reason>`; a retry adds none;
+ *          review SEC-R020B-3); an unsigned or wrongly signed call (as before); an event type the
  *          door ignores is acknowledged as before (deprecated:true, the use hint)
+ *   MP-06d (review SEC-R020B-1) an id that is a storefront order, not an invoice: the door would
+ *          settle the order for its whole total, so a Payment Link session of another business
+ *          pointed at the order through client_reference_id, or a session not naming the order,
+ *          its business, its currency or exactly its total, is refused (400; the order is never
+ *          settled, no claim, one refusal row); the storefront checkout's own session settles it
+ *          once through the door (StoreOrderService.updatePaymentStatus is a recording stub)
+ *   MP-06e (review CR-R020B-1) a session paid after the invoice total was edited is recorded for
+ *          the amount it carries (100 of 120 -> PARTIALLY_PAID; 100 of 80 -> PAID), once,
+ *          whichever endpoint gets it first; the legacy route no longer refuses it
+ *   MP-06g (review SEC-R020B-2) DEFERRED it.todo: the door's own endpoint applies the binding
  *   MP-06s the service shape markInvoicePaid(invoiceId) itself (no actor, no tenant) still takes
  *          the posted path; no production caller passes it any more (RA-G16-01 census in
  *          revenue-authorization.integration.test.ts)
@@ -201,12 +214,19 @@ const ID = {
   invLegacyStripe: `${P}invLegacyStripe`,
   invLegacyStripeDoorFirst: `${P}invLegacyStripeDoorFirst`,
   invLegacyStripeRefused: `${P}invLegacyStripeRefused`,
+  // R0-20b review repairs: totals edited after the session was made (MP-06e, CR-R020B-1)
+  invLegacyStripeEditedUp: `${P}invLegacyStripeEditedUp`,
+  invLegacyStripeEditedDown: `${P}invLegacyStripeEditedDown`,
+  // R0-20b review repairs: a storefront order of business A, not an invoice (MP-06d, SEC-R020B-1)
+  orderLegacyStripe: `${P}orderLegacyStripe`,
   // tenant B (R0-20 TENANT): a second business with its own owner; it owns no invoice
   ownerB: `${P}ownerB`,
   bizB: `${P}bizB`,
 };
 
 const INVOICE_TOTAL = 100;
+/** R0-20b review (SEC-R020B-1): the storefront order's total (TTD). */
+const LEGACY_ORDER_TOTAL = 500;
 /** Fixture invoices whose total is not INVOICE_TOTAL (R0-20's 100 of 250). */
 const INVOICE_TOTALS: Record<string, number> = { [ID.invPartial250]: 250 };
 const totalOf = (id: string) => INVOICE_TOTALS[id] ?? INVOICE_TOTAL;
@@ -276,6 +296,27 @@ const eventStub = {
 /** Contact timeline entries (CrmService.logContactEvent is a recording stub). */
 const contactEvents: any[] = [];
 
+/**
+ * R0-20b review (SEC-R020B-1): StoreOrderService.updatePaymentStatus, which the
+ * Stripe ledger door calls to settle a storefront order (completeCheckout: a
+ * SUCCESSFUL payment for the order's whole total), is a recording stub.
+ */
+const storeOrderCalls: unknown[][] = [];
+const storeOrderStub = {
+  updatePaymentStatus: async (...args: unknown[]) => {
+    storeOrderCalls.push(args);
+    return null;
+  },
+};
+
+/** R0-20b review (CR-R020B-2): StripeConnector.emitPaymentReceived ('payment.received') is a recording stub. */
+const connectorEvents: Array<{ businessId: string; opts: any }> = [];
+const stripeConnectorStub = {
+  emitPaymentReceived: async (businessId: string, opts: any) => {
+    connectorEvents.push({ businessId, opts });
+  },
+};
+
 async function cleanup() {
   for (const sql of [
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -288,6 +329,7 @@ async function cleanup() {
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -523,6 +565,8 @@ beforeAll(async () => {
   const { PaymentsService } = await import('../src/modules/payments/payments.service');
   const { WebhooksController } = await import('../src/modules/webhooks/webhooks.controller');
   const { WebhookDispatcherService } = await import('../src/modules/webhooks/webhook-dispatcher.service');
+  const { StoreOrderService } = await import('../src/modules/site/store-order.service');
+  const { StripeConnector } = await import('../src/core/connectors/implementations/stripe.connector');
 
   systemActorId = KEY_SYSTEM_ACTOR_ID;
 
@@ -572,6 +616,10 @@ beforeAll(async () => {
       // R0-20b: the legacy Stripe route and the Stripe ledger door it hands verified events to.
       PaymentsService,
       { provide: WebhookDispatcherService, useValue: {} },
+      // R0-20b review repairs: the storefront settle the door calls (SEC-R020B-1) and the
+      // connector event the legacy route emits (CR-R020B-2), both recording stubs.
+      { provide: StoreOrderService, useValue: storeOrderStub },
+      { provide: StripeConnector, useValue: stripeConnectorStub },
     ],
   }).compile();
   if (previousStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
@@ -640,6 +688,19 @@ beforeAll(async () => {
       },
     });
   }
+  // R0-20b review (SEC-R020B-1): an unpaid storefront order of business A, 500 TTD.
+  await db.marketplaceOrder.create({
+    data: {
+      id: ID.orderLegacyStripe,
+      businessId: ID.biz,
+      orderNumber: `${P}ORD-1`,
+      customerName: 'Pmp Shopper',
+      subtotal: LEGACY_ORDER_TOTAL,
+      total: LEGACY_ORDER_TOTAL,
+      currency: 'TTD',
+      paymentStatus: 'UNPAID',
+    },
+  });
 }, 180_000);
 
 afterAll(async () => {
@@ -651,6 +712,8 @@ afterAll(async () => {
 beforeEach(() => {
   emitted.length = 0;
   contactEvents.length = 0;
+  storeOrderCalls.length = 0;
+  connectorEvents.length = 0;
 });
 
 afterEach(() => {
@@ -1379,9 +1442,11 @@ describe('R0-20-MARKPAID-CONVERGENCE: the R0-20 proof against the landed mark-pa
  * after verifying the signature, hands the verified event to the Stripe ledger
  * door (PaymentsService.handleStripeWebhook, what POST /payments/stripe/webhook
  * runs: provider-event dedupe, createPaymentWithPosting, the reconcile), bound
- * to the invoice's business, amount and currency. It never calls
- * markInvoicePaid. Every delivery is signed with the deployment secret; the
- * secret is set only while these cases run.
+ * to the invoice's business and currency with a positive amount (recorded as
+ * carried), or to a storefront order's id, business, currency and exact total
+ * (R0-20b review repairs). It never calls markInvoicePaid. Every delivery is
+ * signed with the deployment secret; the secret is set only while these cases
+ * run.
  */
 describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe records a provider-paid invoice through the Stripe ledger door (D-05)', () => {
   const HINT = { deprecated: true, use: '/payments/stripe/webhook' };
@@ -1439,6 +1504,20 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     return db.webhookEvent.count({ where: { provider: 'stripe', providerEventId: `${P}evt_${tag}` } });
   }
 
+  /** R0-20b review (SEC-R020B-3): the refusal rows the legacy route kept for this event. */
+  async function refusalsOf(tag: string): Promise<any[]> {
+    return db.webhookEvent.findMany({ where: { provider: 'stripe-legacy-refused', providerEventId: `${P}evt_${tag}` } });
+  }
+
+  /** The legacy route refused this event: 400, no dedupe claim, exactly one refusal row naming `businessId` and `reason`. */
+  async function expectRefused(res: any, tag: string, reason: string, businessId = ID.biz) {
+    expect(res.status, `${tag}: ${JSON.stringify(res.body)}`).toBe(400);
+    expect(await claimsOf(tag), `${tag}: no dedupe claim`).toBe(0);
+    const kept = await refusalsOf(tag);
+    expect(kept, `${tag}: one refusal row`).toHaveLength(1);
+    expect(kept[0], `${tag}: refusal row`).toMatchObject({ businessId, eventType: `checkout.session.completed:${reason}` });
+  }
+
   /** The deposit-side system account(s) a payment's posting debits. */
   async function depositKeysOf(paymentId: string): Promise<string[]> {
     const [txn] = await db.financialTransaction.findMany({
@@ -1489,6 +1568,11 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     expect(await claimsOf('legacy1')).toBe(1);
     const postings = (await paymentPostingsOf(inv)).map((t) => t.id);
     expect(postings).toHaveLength(1);
+    // R0-20b review (CR-R020B-2): the Stripe connector's payment.received, as before R0-20b,
+    // now for the payment the door recorded (its amount and currency, the session id).
+    expect(connectorEvents).toEqual([
+      { businessId: ID.biz, opts: { amount: INVOICE_TOTAL, currency: 'TTD', invoiceId: inv, externalId: `${P}cs_legacy1` } },
+    ]);
 
     // Redelivery on the legacy route: acknowledged, nothing new.
     const again = await legacy(raw);
@@ -1502,6 +1586,8 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
     expect(markPaidSpy).not.toHaveBeenCalled();
     expect((await expectLedgerConverged(inv)).cashNet).toBe(INVOICE_TOTAL);
+    // A redelivery is not processed again, so no second connector event.
+    expect(connectorEvents).toHaveLength(1);
   });
 
   it('MP-06b: the event first recorded through the Stripe ledger door (POST /payments/stripe/webhook), then delivered to the legacy route -> acknowledged with deprecated:true; nothing new written', async () => {
@@ -1524,28 +1610,29 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     expect((await paymentPostingsOf(inv)).map((t) => t.id)).toEqual(postings);
     expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
     expect(markPaidSpy).not.toHaveBeenCalled();
+    // The door processed it, not the legacy route: no connector event from the redelivery.
+    expect(connectorEvents).toHaveLength(0);
   });
 
-  it('MP-06c: refused (400), nothing written and no dedupe claim: a verified event naming another business, no business, another amount, no amount or another currency; an unsigned or wrongly signed call is refused as before; an event type the door ignores is acknowledged as before', async () => {
+  it('MP-06c: refused (400), nothing recorded and no dedupe claim: a verified event naming another business, no business, no amount or a non-positive one, another currency or none; each refusal is kept as one webhook_events row (a retry adds none); an unsigned or wrongly signed call is refused as before; an event type the door ignores is acknowledged as before', async () => {
     const inv = ID.invLegacyStripeRefused;
     const markPaidSpy = vi.spyOn(commerce, 'markInvoicePaid');
-    const refusals: Array<[string, Record<string, unknown>]> = [
-      ['otherbiz', { metadata: { invoiceId: inv, businessId: ID.bizB } }],
-      ['nobiz', { metadata: { invoiceId: inv } }],
-      ['partial', { amount_total: 5000 }],
-      ['over', { amount_total: 25000 }],
-      ['noamount', { amount_total: null }],
-      ['zero', { amount_total: 0 }],
-      ['usd', { currency: 'usd' }],
-      ['nocurrency', { currency: null }],
+    const refusals: Array<[string, string, Record<string, unknown>]> = [
+      ['otherbiz', 'business', { metadata: { invoiceId: inv, businessId: ID.bizB } }],
+      ['nobiz', 'business', { metadata: { invoiceId: inv } }],
+      ['noamount', 'amount', { amount_total: null }],
+      ['zero', 'amount', { amount_total: 0 }],
+      ['negative', 'amount', { amount_total: -10000 }],
+      ['usd', 'currency', { currency: 'usd' }],
+      ['nocurrency', 'currency', { currency: null }],
     ];
-    for (const [tag, object] of refusals) {
-      const res = await legacy(sessionEvent(tag, inv, object));
-      expect(res.status, `${tag}: ${JSON.stringify(res.body)}`).toBe(400);
-      expect(await claimsOf(tag), `${tag}: no dedupe claim`).toBe(0);
+    for (const [tag, reason, object] of refusals) {
+      await expectRefused(await legacy(sessionEvent(tag, inv, object)), tag, reason);
     }
+    // SEC-R020B-3: Stripe's retry of a refused event is refused again and keeps no second row.
+    await expectRefused(await legacy(sessionEvent('otherbiz', inv, refusals[0][2])), 'otherbiz', 'business');
 
-    // Unsigned and wrongly signed: refused before anything is read, as before.
+    // Unsigned and wrongly signed: refused before anything is read, as before (nothing kept).
     const raw = sessionEvent('unsigned', inv);
     const unsigned = await legacy(raw, null);
     expect(unsigned.status).toBe(400);
@@ -1554,6 +1641,7 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     expect(forged.status).toBe(400);
     expect(forged.body.message).toMatch(/Webhook signature verification failed/);
     expect(await claimsOf('unsigned')).toBe(0);
+    expect(await refusalsOf('unsigned')).toHaveLength(0);
 
     // An event type the door ignores: acknowledged as before.
     const ignoredRaw = JSON.stringify({ id: `${P}evt_ignored`, object: 'event', type: 'customer.created', data: { object: { id: `${P}cus_1`, object: 'customer' } } });
@@ -1564,7 +1652,102 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     await expectUntouched(inv, 'SENT');
     expect(timelineFor(inv)).toHaveLength(0);
     expect(markPaidSpy).not.toHaveBeenCalled();
+    expect(connectorEvents).toHaveLength(0);
   });
+
+  it('MP-06d: a storefront order id (not an invoice): a Payment Link session of another business pointed at the order through client_reference_id, or a session not naming the order, its business, its currency or exactly its total, is refused (400): the order is never settled, no dedupe claim, one refusal row; the storefront checkout session of the order settles it once through the door', async () => {
+    const order = ID.orderLegacyStripe;
+    const totalMinor = LEGACY_ORDER_TOTAL * 100;
+    /** A session naming the storefront order (as createStorePayment makes it, unless `object` overrides it). */
+    const orderEvent = (tag: string, object: Record<string, unknown>) =>
+      sessionEvent(tag, order, {
+        client_reference_id: order,
+        metadata: { orderId: order, businessId: ID.biz },
+        amount_total: totalMinor,
+        currency: 'ttd',
+        ...object,
+      });
+    const refusals: Array<[string, string, Record<string, unknown>]> = [
+      // The review's repro: business B's Payment Link (metadata.businessId = B, no orderId), the payer's
+      // ?client_reference_id= naming A's order, 1 cent in another currency.
+      ['ord_link', 'order', { metadata: { businessId: ID.bizB }, amount_total: 1, currency: 'usd' }],
+      // The same link paying exactly the order's total in its currency is still not the order's session.
+      ['ord_link_total', 'order', { metadata: { businessId: ID.bizB } }],
+      ['ord_link_own_biz', 'order', { metadata: { businessId: ID.biz } }],
+      ['ord_otherbiz', 'business', { metadata: { orderId: order, businessId: ID.bizB } }],
+      ['ord_short', 'amount', { amount_total: totalMinor - 100 }],
+      ['ord_over', 'amount', { amount_total: totalMinor + 100 }],
+      ['ord_noamount', 'amount', { amount_total: null }],
+      ['ord_usd', 'currency', { currency: 'usd' }],
+    ];
+    for (const [tag, reason, object] of refusals) {
+      await expectRefused(await legacy(orderEvent(tag, object)), tag, reason);
+    }
+    expect(storeOrderCalls, 'the order is never settled by a refused event').toEqual([]);
+
+    // The storefront checkout's own session: settled once through the door, redelivery a no-op.
+    const raw = orderEvent('ord_ok', {});
+    const res = await legacy(raw);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ ok: true, received: true, processed: 'checkout.session.completed', ...HINT });
+    expect(storeOrderCalls).toEqual([[order, 'PAID', `${P}cs_ord_ok`, 'stripe']]);
+    expect(await refusalsOf('ord_ok')).toHaveLength(0);
+    const again = await legacy(raw);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(storeOrderCalls).toHaveLength(1);
+    // An order payment is no invoice payment: no invoice connector event.
+    expect(connectorEvents).toHaveLength(0);
+  });
+
+  it('MP-06e: a session paid after the invoice total was edited (createStripeCheckout fixed the amount) is recorded for the amount it carries: 100 of an invoice edited to 120 -> PARTIALLY_PAID, 100 of one edited to 80 -> PAID; once, whichever endpoint gets it first; no refusal', async () => {
+    // Edited up, the legacy route first: recorded for 100, then a redelivery on either endpoint is a no-op.
+    const up = ID.invLegacyStripeEditedUp;
+    const rawUp = sessionEvent('edited_up', up);
+    await db.invoice.update({ where: { id: up }, data: { subtotal: 120, total: 120 } });
+    const first = await legacy(rawUp);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(first.body).toMatchObject({ ok: true, received: true, processed: 'checkout.session.completed', ...HINT });
+    const upRows = await paymentsOf(up);
+    expect(upRows).toHaveLength(1);
+    expectStripeRow(upRows[0], up, 'edited_up');
+    expect((await invoiceRow(up)).status).toBe('PARTIALLY_PAID');
+    expect(connectorEvents).toEqual([
+      { businessId: ID.biz, opts: { amount: 100, currency: 'TTD', invoiceId: up, externalId: `${P}cs_edited_up` } },
+    ]);
+    const upAgain = await legacy(rawUp);
+    expect(upAgain.status, JSON.stringify(upAgain.body)).toBe(201);
+    await expect(door(rawUp)).resolves.toMatchObject({ ok: true, received: true });
+    expect((await paymentsOf(up)).map((r) => r.id)).toEqual([upRows[0].id]);
+    expect(await refusalsOf('edited_up')).toHaveLength(0);
+    expect((await expectLedgerConverged(up)).cashNet).toBe(100);
+
+    // Edited down, the door first: the legacy delivery afterwards is acknowledged (it was refused before the repair).
+    const down = ID.invLegacyStripeEditedDown;
+    const rawDown = sessionEvent('edited_down', down);
+    await db.invoice.update({ where: { id: down }, data: { subtotal: 80, total: 80 } });
+    await expect(door(rawDown)).resolves.toMatchObject({ ok: true, received: true, processed: 'checkout.session.completed' });
+    const downRows = await paymentsOf(down);
+    expect(downRows).toHaveLength(1);
+    expectStripeRow(downRows[0], down, 'edited_down');
+    expect((await invoiceRow(down)).status).toBe('PAID');
+    const late = await legacy(rawDown);
+    expect(late.status, JSON.stringify(late.body)).toBe(201);
+    expect(late.body).toMatchObject({ ok: true, received: true, ...HINT });
+    expect(late.body).not.toHaveProperty('processed');
+    expect((await paymentsOf(down)).map((r) => r.id)).toEqual([downRows[0].id]);
+    expect(await refusalsOf('edited_down')).toHaveLength(0);
+    expect((await expectLedgerConverged(down)).cashNet).toBe(100);
+    // Only the legacy route's own first processing emitted (edited up); the door's did not.
+    expect(connectorEvents).toHaveLength(1);
+  });
+
+  // SEC-R020B-2: the binding lives in the legacy controller only. Moving it into the Stripe
+  // ledger door is a payments.service.ts change, outside this packet's write set.
+  it.todo(
+    'MP-06g (review SEC-R020B-2): the Stripe ledger door itself (POST /payments/stripe/webhook) refuses a payment event ' +
+      'whose metadata.businessId is not the invoice\'s. DEFERRED: payments.service.ts is outside the ' +
+      'R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR write set; follow-up packet.',
+  );
 });
 
 describe('R0-20 LEDGER: the ledger converges with the payment rows after every case', () => {

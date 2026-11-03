@@ -30,6 +30,7 @@ import { PrismaService } from '../src/core/prisma/prisma.service';
 import { WebhookDispatcherService } from '../src/modules/webhooks/webhook-dispatcher.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
 import { BusinessGuard } from '../src/core/auth/business.guard';
+import { StripeConnector } from '../src/core/connectors/implementations/stripe.connector';
 
 interface BusinessAccess {
   businessId: string;
@@ -40,6 +41,12 @@ interface BusinessAccess {
 class WebhooksPrismaMock {
   webhooks: any[] = [];
   invoices: any[] = [{ id: 'inv_1', businessId: 'biz_1', total: 250, currency: 'USD' }];
+  // R0-20b review (CR-R020B-2): the payment the Stripe ledger door records for sess_1.
+  payments: any[] = [
+    { providerPaymentId: 'sess_1', invoiceId: 'inv_1', businessId: 'biz_1', provider: 'stripe', status: 'SUCCESSFUL', amount: 250, currency: 'USD' },
+  ];
+  // R0-20b review (SEC-R020B-3): refusal rows the legacy route keeps.
+  webhookEvents: any[] = [];
   businessAccess: BusinessAccess[] = [{ businessId: 'biz_1', ownerId: 'user_1' }];
   client: any;
 
@@ -86,6 +93,20 @@ class WebhooksPrismaMock {
           Promise.resolve(self.invoices.find((i) => i.id === where.id) ?? null),
         ),
       },
+      marketplaceOrder: {
+        findUnique: vi.fn(() => Promise.resolve(null)),
+      },
+      payment: {
+        findUnique: vi.fn(({ where }: any) =>
+          Promise.resolve(self.payments.find((p) => p.providerPaymentId === where.providerPaymentId) ?? null),
+        ),
+      },
+      webhookEvent: {
+        create: vi.fn(({ data }: any) => {
+          self.webhookEvents.push(data);
+          return Promise.resolve({ id: `we_${self.webhookEvents.length}`, ...data });
+        }),
+      },
       business: {
         findFirst: vi.fn(({ where }: any) => {
           const id: string = where?.id;
@@ -118,6 +139,9 @@ describe('WebhooksController', () => {
   const handleStripeWebhook = vi.fn().mockResolvedValue({ ok: true, received: true, processed: 'checkout.session.completed' });
   const sendTestEvent = vi.fn();
   const getDeliveryLogs = vi.fn();
+  // R0-20b review (CR-R020B-2): the Stripe connector's 'payment.received'.
+  const emitPaymentReceived = vi.fn().mockResolvedValue(undefined);
+  let controller: WebhooksController;
   let currentUserId: string | undefined = 'user_1';
 
   const originalStripeWebhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -140,8 +164,10 @@ describe('WebhooksController', () => {
           provide: WebhookDispatcherService,
           useValue: { sendTestEvent, getDeliveryLogs },
         },
+        { provide: StripeConnector, useValue: { emitPaymentReceived } },
       ],
     }).compile();
+    controller = moduleRef.get(WebhooksController);
 
     app = moduleRef.createNestApplication({ rawBody: true });
     app.use((req: any, _res: any, next: any) => {
@@ -166,6 +192,8 @@ describe('WebhooksController', () => {
     prismaMock.businessAccess = [{ businessId: 'biz_1', ownerId: 'user_1' }];
     markInvoicePaid.mockClear();
     handleStripeWebhook.mockClear();
+    emitPaymentReceived.mockClear();
+    prismaMock.webhookEvents = [];
     sendTestEvent.mockReset();
     getDeliveryLogs.mockReset();
   });
@@ -184,6 +212,46 @@ describe('WebhooksController', () => {
     expect(handleStripeWebhook).toHaveBeenCalledWith(JSON.stringify({ invoiceId: 'inv_1' }), 'test_sig');
     expect(markInvoicePaid).not.toHaveBeenCalled();
     expect(res.body).toMatchObject({ received: true, processed: 'checkout.session.completed', deprecated: true, use: '/payments/stripe/webhook' });
+  });
+
+  it('R0-20b review (CR-R020B-2): emits the Stripe connector payment.received once, for the payment the door recorded, and not for a delivery the door did not process', async () => {
+    await request(app.getHttpServer())
+      .post('/webhooks/stripe')
+      .set('stripe-signature', 'test_sig')
+      .send({ invoiceId: 'inv_1' })
+      .expect(201);
+    expect(emitPaymentReceived).toHaveBeenCalledTimes(1);
+    expect(emitPaymentReceived).toHaveBeenCalledWith('biz_1', { amount: 250, currency: 'USD', invoiceId: 'inv_1', externalId: 'sess_1' });
+
+    // A redelivery (the door's claim already taken): acknowledged without `processed`, no second event.
+    handleStripeWebhook.mockResolvedValueOnce({ ok: true, received: true });
+    const again = await request(app.getHttpServer())
+      .post('/webhooks/stripe')
+      .set('stripe-signature', 'test_sig')
+      .send({ invoiceId: 'inv_1' })
+      .expect(201);
+    expect(again.body).not.toHaveProperty('processed');
+    expect(emitPaymentReceived).toHaveBeenCalledTimes(1);
+  });
+
+  it('R0-20b review (SEC-R020B-3): a refused payment event is kept as one webhook_events refusal row and never reaches the door', async () => {
+    const constructEvent = (controller as unknown as { stripe: { webhooks: { constructEvent: ReturnType<typeof vi.fn> } } }).stripe.webhooks.constructEvent;
+    constructEvent.mockReturnValueOnce({
+      id: 'evt_foreign',
+      type: 'checkout.session.completed',
+      data: { object: { id: 'sess_foreign', metadata: { invoiceId: 'inv_1', businessId: 'biz_other' }, amount_total: 25000, currency: 'usd' } },
+    });
+    const res = await request(app.getHttpServer())
+      .post('/webhooks/stripe')
+      .set('stripe-signature', 'test_sig')
+      .send({ invoiceId: 'inv_1' })
+      .expect(400);
+    expect(res.body.message).toMatch(/does not match the invoice/);
+    expect(handleStripeWebhook).not.toHaveBeenCalled();
+    expect(emitPaymentReceived).not.toHaveBeenCalled();
+    expect(prismaMock.webhookEvents).toEqual([
+      { provider: 'stripe-legacy-refused', providerEventId: 'evt_foreign', eventType: 'checkout.session.completed:business', businessId: 'biz_1' },
+    ]);
   });
 
   it('rejects authenticated CRUD when no user is on the request', async () => {
