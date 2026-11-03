@@ -64,11 +64,13 @@ describe('AutopilotAdapterService', () => {
     expect(autopilot.createTask).toHaveBeenCalled();
   });
 
-  it('approve_task delegates to approveTask', async () => {
+  // Trial-N integration review (NEW-3): the approver is the member the command acts for
+  // (command.userId), not 'key-cortex'; this pinned the old attribution.
+  it('approve_task delegates to approveTask, approved by the command\'s member', async () => {
     (autopilot.approveTask as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 't1', status: 'APPROVED' });
     const result = await service.execute(mkCmd('approve_task', { taskId: 't1' }));
     expect(result.success).toBe(true);
-    expect(autopilot.approveTask).toHaveBeenCalledWith('t1', 'biz_123', 'key-cortex');
+    expect(autopilot.approveTask).toHaveBeenCalledWith('t1', 'biz_123', 'user_456');
   });
 
   it('reject_task delegates to denyTask', async () => {
@@ -78,11 +80,11 @@ describe('AutopilotAdapterService', () => {
     expect(autopilot.denyTask).toHaveBeenCalledWith('t1', 'biz_123');
   });
 
-  it('complete_task delegates to updateTaskStatus COMPLETED', async () => {
+  it('complete_task delegates to updateTaskStatus COMPLETED, executed by the command\'s member', async () => {
     (autopilot.updateTaskStatus as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 't1', status: 'COMPLETED' });
     const result = await service.execute(mkCmd('complete_task', { taskId: 't1' }));
     expect(result.success).toBe(true);
-    expect(autopilot.updateTaskStatus).toHaveBeenCalledWith('t1', 'biz_123', 'COMPLETED', 'key-cortex');
+    expect(autopilot.updateTaskStatus).toHaveBeenCalledWith('t1', 'biz_123', 'COMPLETED', 'user_456');
   });
 
   it('enable_loop delegates to updateLoop enabled true', async () => {

@@ -165,6 +165,25 @@ const ID = {
   cxFlowTwin: `${P}cxFlowTwin`, // two projects.create_project nodes: a stored name, then {{text}} (SEC-V131c-4 / CRR-2)
   cxFlowStored: `${P}cxFlowStored`, // projects.create_project with a stored name the value check denies (CRR-2)
   cxFlowChain: `${P}cxFlowChain`, // projects.add_task whose title is the first node's output (filled only at run time)
+  // Trial-N integration review
+  superNM: `${P}superNM`, // role SUPER_ADMIN, a member of no business (D-46)
+  planD: `${P}planD`, // the OWNER's draft plan
+  sSuperRev: `${P}sSuperRev`, // commerce_mark_invoice_paid (an invoice write)
+  sSuperSend: `${P}sSuperSend`, // commerce_send_invoice (an invoice write, GOVERNED_UNGRANTED)
+  sOwnerNote: `${P}sOwnerNote`, // crm_add_note proposed by the OWNER (another member may not run it)
+  sApproveThenRun: `${P}sApproveThenRun`, // crm_delete_contact: queued for approval, approved, then run
+  planNoRev: `${P}planNoRev`, // staffNoRev's own draft plan
+  sCreateOwn: `${P}sCreateOwn`, // crm_create_contact
+  sNoRevNote: `${P}sNoRevNote`, // crm_add_note (the OWNER may run a member's step)
+  planExp: `${P}planExp`, // staffExp's own draft plan
+  sPayBillOwn: `${P}sPayBillOwn`, // finance_pay_bill (expenses write)
+  planNoCrm: `${P}planNoCrm`, // staffNoCrm's own draft plan
+  sListDealsOwn: `${P}sListDealsOwn`, // crm_list_deals (crm read)
+  sListContactsOwn: `${P}sListContactsOwn`, // crm_list_contacts (reads every contact, PRIVATE ones included)
+  sSearchContactsOwn: `${P}sSearchContactsOwn`, // crm_search_contacts (likewise)
+  taskE: `${P}taskE`, // awaiting approval; approved through the cortex autopilot adapter
+  taskF: `${P}taskF`, // no approval needed; completed through the cortex autopilot adapter
+  cxSuper: `${P}cxSuper`, // role SUPER_ADMIN, not a member of cxBiz (D-46)
 };
 
 const STORED_ARGS = { contactId: `${P}contactA`, body: 'v31b stored note' };
@@ -482,6 +501,22 @@ beforeAll(async () => {
     await db.aiPlan.create({ data: { id: planId, businessId: ID.bizA, userId: ID.owner, objective: `v31b ${status}`, status } });
     await seedStep(stepId, planId, 1, 'crm_add_note', STORED_ARGS);
   }
+  // Trial-N integration review.
+  await db.user.create({ data: { id: ID.superNM, email: `${P}superNM@test.local`, role: 'SUPER_ADMIN' } });
+  await db.aiPlan.create({ data: { id: ID.planD, businessId: ID.bizA, userId: ID.owner, objective: 'v31b plan D', status: 'draft' } });
+  await seedStep(ID.sSuperRev, ID.planD, 1, 'commerce_mark_invoice_paid', { invoiceId: `${P}inv` });
+  await seedStep(ID.sSuperSend, ID.planD, 2, 'commerce_send_invoice', { invoiceId: `${P}inv` });
+  await seedStep(ID.sOwnerNote, ID.planD, 3, 'crm_add_note', STORED_ARGS);
+  await seedStep(ID.sApproveThenRun, ID.planD, 4, 'crm_delete_contact', { contactId: ID.contactA });
+  for (const [planId, userId] of [[ID.planNoRev, ID.staffNoRev], [ID.planExp, ID.staffExp], [ID.planNoCrm, ID.staffNoCrm]] as const) {
+    await db.aiPlan.create({ data: { id: planId, businessId: ID.bizA, userId, objective: `v31b ${userId}`, status: 'draft' } });
+  }
+  await seedStep(ID.sCreateOwn, ID.planNoRev, 1, 'crm_create_contact', { firstName: 'V31b Created' });
+  await seedStep(ID.sNoRevNote, ID.planNoRev, 2, 'crm_add_note', STORED_ARGS);
+  await seedStep(ID.sPayBillOwn, ID.planExp, 1, 'finance_pay_bill', { billId: `${P}bill` });
+  await seedStep(ID.sListDealsOwn, ID.planNoCrm, 1, 'crm_list_deals', {});
+  await seedStep(ID.sListContactsOwn, ID.planNoCrm, 2, 'crm_list_contacts', {});
+  await seedStep(ID.sSearchContactsOwn, ID.planNoCrm, 3, 'crm_search_contacts', { query: 'V31b' });
 
   await db.keyInboxThread.create({ data: { id: ID.threadA, businessId: ID.bizA, channel: 'email', contactId: ID.contactA, subject: 'v31b A' } });
   await db.keyInboxThread.create({ data: { id: ID.threadB, businessId: ID.bizB, channel: 'email', contactId: ID.contactB, subject: 'v31b B' } });
@@ -496,6 +531,8 @@ beforeAll(async () => {
   await db.autopilotTask.create({ data: { id: ID.taskB, businessId: ID.bizA, title: 'v31b not yours to resolve', category: 'OPERATIONS', status: 'AWAITING_APPROVAL', requiresApproval: true } });
   await db.autopilotTask.create({ data: { id: ID.taskC, businessId: ID.bizA, title: 'v31b complete me', category: 'OPERATIONS', status: 'PENDING', requiresApproval: false } });
   await db.autopilotTask.create({ data: { id: ID.taskD, businessId: ID.bizA, title: 'v31b not auto-executed', category: 'OPERATIONS', status: 'PENDING', requiresApproval: true } });
+  await db.autopilotTask.create({ data: { id: ID.taskE, businessId: ID.bizA, title: 'v31b approved by a member through KEY', category: 'OPERATIONS', status: 'AWAITING_APPROVAL', requiresApproval: true } });
+  await db.autopilotTask.create({ data: { id: ID.taskF, businessId: ID.bizA, title: 'v31b completed by a member through KEY', category: 'OPERATIONS', status: 'PENDING', requiresApproval: false } });
   await db.aiApprovalItem.create({ data: { id: ID.itemA, businessId: ID.bizA, toolName: 'crm_add_note', title: 'v31b item', riskTier: 1 } });
 }, 120_000);
 
@@ -660,6 +697,7 @@ beforeAll(async () => {
   for (const id of [ID.cxOwner, ID.cxStaffRO, ID.cxStaffW]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
+  await db.user.create({ data: { id: ID.cxSuper, email: `${P}cxSuper@test.local`, role: 'SUPER_ADMIN' } });
   await db.business.create({ data: { id: ID.cxBiz, name: 'V31c Cortex Biz', ownerId: ID.cxOwner } });
   const m = (userId: string, role: string, permissionScopes?: Record<string, string>) =>
     db.membership.create({ data: { id: `${P}m_${userId.slice(P.length)}_cx`, userId, businessId: ID.cxBiz, role, permissionScopes } });
@@ -859,7 +897,9 @@ describe('V1-31b review repairs: who may run a stored step, and when', () => {
     expect(JSON.stringify(staff.body)).toMatch(/business owner/);
     expect(executions.length).toBe(before);
 
-    const create = await executeGraph(ID.staffNoRev, { planId: ID.planC, planStepId: ID.sCreate });
+    // Trial-N review (NEW-2): a step runs for the member who proposed it (or the OWNER), so the
+    // crm_create_contact case is a step of staffNoRev's own plan (planC is the OWNER's).
+    const create = await executeGraph(ID.staffNoRev, { planId: ID.planNoRev, planStepId: ID.sCreateOwn });
     expect(create.status).toBe(201);
     const owner = await executeGraph(ID.owner, { planId: ID.planC, planStepId: ID.sPrivUpdate });
     expect(owner.status).toBe(201);
@@ -894,15 +934,17 @@ describe('V1-31b review repairs: who may run a stored step, and when', () => {
     }
     expect(mismatches).toEqual([]);
 
+    // Trial-N review: the members run steps of their own plans (NEW-2), and the crm read case is
+    // crm_list_deals, because crm_list_contacts reads every contact with no actor (NEW-4, GA-18).
     const before = executions.length;
-    const pay = await executeGraph(ID.staffExp, { planId: ID.planC, planStepId: ID.sPayBill });
+    const pay = await executeGraph(ID.staffExp, { planId: ID.planExp, planStepId: ID.sPayBillOwn });
     expect(pay.status).toBe(201);
     const extract = await executeGraph(ID.staffExp, { planId: ID.planC, planStepId: ID.sExtract });
     expect(extract.status).toBe(403);
     expect(JSON.stringify(extract.body)).toMatch(/operations requires write/);
-    const list = await executeGraph(ID.staffNoCrm, { planId: ID.planC, planStepId: ID.sListContacts });
+    const list = await executeGraph(ID.staffNoCrm, { planId: ID.planNoCrm, planStepId: ID.sListDealsOwn });
     expect(list.status).toBe(201);
-    expect(executions.slice(before).map((e) => e.toolName)).toEqual(['finance_pay_bill', 'crm_list_contacts']);
+    expect(executions.slice(before).map((e) => e.toolName)).toEqual(['finance_pay_bill', 'crm_list_deals']);
     expect(await stepStatus(ID.sExtract)).toBe('pending');
   });
 
@@ -932,6 +974,101 @@ describe('V1-31b review repairs: who may run a stored step, and when', () => {
     });
     expect(logs.find((l: any) => l.planStepId === ID.sPrivUpdate)).toMatchObject({ action: 'graph_action:execute', userId: ID.owner });
     expect(logs.find((l: any) => l.planStepId === ID.sApproval)).toMatchObject({ action: 'approval_queued_graph_action', userId: ID.owner, planId: ID.planA });
+  });
+});
+
+describe('Trial-N integration review: who may run a stored step, what it may read, and an approved step', () => {
+  it('GA-16 (NEW-1, D-46) a platform SUPER_ADMIN who is not a member of the business does not write its invoices: 403 and nothing runs', async () => {
+    const before = executions.length;
+    for (const stepId of [ID.sSuperRev, ID.sSuperSend]) {
+      const res = await executeGraph(ID.superNM, { planId: ID.planD, planStepId: stepId });
+      expect(res.status, `${stepId} ${JSON.stringify(res.body)}`).toBe(403);
+      expect(JSON.stringify(res.body)).toMatch(/not a member/i);
+      expect(await stepStatus(stepId)).toBe('pending');
+    }
+    expect(executions.length).toBe(before);
+  });
+
+  it("GA-17 (NEW-2) a step runs for the member who proposed it or the business OWNER: another member holding the tool's scopes is 403 and nothing runs", async () => {
+    const before = executions.length;
+    const other = await executeGraph(ID.staffNoRev, { planId: ID.planD, planStepId: ID.sOwnerNote });
+    expect(other.status, JSON.stringify(other.body)).toBe(403);
+    expect(JSON.stringify(other.body)).toMatch(/proposed it or the business owner/);
+    expect(await stepStatus(ID.sOwnerNote)).toBe('pending');
+    expect(executions.length).toBe(before);
+
+    // The OWNER may run a member's step (as KeyCortexPlannerService.assertMayExecutePlan admits for a KEY plan).
+    const owner = await executeGraph(ID.owner, { planId: ID.planNoRev, planStepId: ID.sNoRevNote });
+    expect(owner.status, JSON.stringify(owner.body)).toBe(201);
+    expect(executions.slice(before)).toMatchObject([{ toolName: 'crm_add_note', planStepId: ID.sNoRevNote, action: { principalUserId: ID.owner } }]);
+  });
+
+  it('GA-18 (NEW-4) the contact reads the dispatcher makes with no actor (every contact, PRIVATE ones included) run only for the OWNER', async () => {
+    const before = executions.length;
+    for (const stepId of [ID.sListContactsOwn, ID.sSearchContactsOwn]) {
+      const res = await executeGraph(ID.staffNoCrm, { planId: ID.planNoCrm, planStepId: stepId });
+      expect(res.status, `${stepId} ${JSON.stringify(res.body)}`).toBe(403);
+      expect(JSON.stringify(res.body)).toMatch(/business owner/);
+      expect(await stepStatus(stepId)).toBe('pending');
+    }
+    expect(executions.length).toBe(before);
+    const owner = await executeGraph(ID.owner, { planId: ID.planNoCrm, planStepId: ID.sListContactsOwn });
+    expect(owner.status, JSON.stringify(owner.body)).toBe(201);
+    expect(executions.slice(before).map((e) => e.toolName)).toEqual(['crm_list_contacts']);
+  });
+
+  it('GA-19 (correctness NEW-3) a step queued for approval runs once it is approved: no second approval item, and it runs once with its stored arguments', async () => {
+    const before = executions.length;
+    const queued = await executeGraph(ID.owner, { planId: ID.planD, planStepId: ID.sApproveThenRun });
+    expect(queued.status).toBe(201);
+    expect(queued.body).toMatchObject({ success: false, requiresApproval: true, approvalId: expect.any(String) });
+    expect(await stepStatus(ID.sApproveThenRun)).toBe('awaiting_approval');
+
+    // What AiOversightService.finalizeResolution writes when the item is approved.
+    await db.aiApprovalItem.update({ where: { id: queued.body.approvalId }, data: { status: 'approved', resolvedAt: new Date(), resolution: 'approved' } });
+    await db.aiPlanStep.update({ where: { id: ID.sApproveThenRun }, data: { status: 'pending' } });
+
+    const ran = await executeGraph(ID.owner, { planId: ID.planD, planStepId: ID.sApproveThenRun });
+    expect(ran.status, JSON.stringify(ran.body)).toBe(201);
+    expect(ran.body).toMatchObject({ success: true });
+    expect(await db.aiApprovalItem.count({ where: { businessId: ID.bizA, planStepId: ID.sApproveThenRun } })).toBe(1);
+    expect(executions.slice(before)).toMatchObject([{ toolName: 'crm_delete_contact', args: { contactId: ID.contactA }, planStepId: ID.sApproveThenRun }]);
+    expect(await stepStatus(ID.sApproveThenRun)).toBe('completed');
+
+    const replay = await executeGraph(ID.owner, { planId: ID.planD, planStepId: ID.sApproveThenRun });
+    expect(replay.status).toBe(409);
+    expect(executions.length).toBe(before + 1);
+  });
+
+  it("GA-20 (correctness NEW-2 / CRR-1) the planner stores a step whose tool the registry does not list (its 'analyze' step) with no tool, so the web callers skip it and run the next step", async () => {
+    const { PlannerService } = await import('../src/modules/ai/planner.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const aiUsage = {
+      callAi: async () => ({
+        content: JSON.stringify({
+          steps: [
+            { order: 1, toolName: 'analyze', module: 'crm', action: 'Review the contact', description: 'v31b analyze', riskTier: 1, inputPayload: null },
+            { order: 2, toolName: 'crm_add_note', module: 'crm', action: 'Add a note', description: 'v31b note', riskTier: 1, inputPayload: STORED_ARGS },
+          ],
+        }),
+      }),
+    };
+    const graph = { getSnapshot: async () => ({}), buildContextString: () => 'v31b' };
+    const memory = { buildContextBlock: async () => ({}), buildPromptSection: () => '' };
+    const blueprint = { getBlueprintContext: async () => null };
+    const governance = { getToolTier: () => 1 };
+    const planner = new PlannerService(app.get(PrismaService), aiUsage as any, graph as any, governance as any, memory as any, blueprint as any);
+    const intent = { objective: 'v31b planner', rawInput: 'v31b planner', urgency: 'normal', modules: ['crm'], scope: [], missingInfo: [], actionCandidates: [], clarificationNeeded: false };
+    const plan = await planner.createPlan(ID.bizA, intent as any, ID.owner);
+    const rows = await db.aiPlanStep.findMany({ where: { planId: plan.id }, orderBy: { order: 'asc' } });
+    expect(rows.map((r: any) => r.toolName)).toEqual([null, 'crm_add_note']);
+
+    const before = executions.length;
+    const analyze = await executeGraph(ID.owner, { planId: plan.id, planStepId: rows[0].id });
+    expect(analyze.status).toBe(400);
+    const note = await executeGraph(ID.owner, { planId: plan.id, planStepId: rows[1].id });
+    expect(note.status, JSON.stringify(note.body)).toBe(201);
+    expect(executions.slice(before).map((e) => e.toolName)).toEqual(['crm_add_note']);
   });
 });
 
@@ -1058,6 +1195,23 @@ describe('V1-31b AP: autopilot', () => {
     const done = await http().patch(route(ID.taskC)).set('x-test-user', ID.owner).send({ status: 'COMPLETED', executedBy: `${P}someone_else` });
     expect(done.status).toBe(200);
     expect(await db.autopilotTask.findUnique({ where: { id: ID.taskC } })).toMatchObject({ status: 'COMPLETED', executedBy: ID.owner });
+  });
+
+  it("AP-05 (trial-N review NEW-3) the cortex autopilot adapter (POST cortex/execute and batch) records the member the command acts for as approver and executor, not 'key-cortex'", async () => {
+    const { AutopilotService } = await import('../src/modules/autopilot/autopilot.service');
+    const { AutopilotAdapterService } = await import('../src/modules/key-cortex/adapters/autopilot-adapter.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const adapter = new AutopilotAdapterService(app.get(AutopilotService), {} as any, app.get(PrismaService));
+    const command = (action: string, taskId: string) => ({
+      module: 'autopilot', action, parameters: { taskId }, businessId: ID.bizA, userId: ID.staffNoRev,
+      source: 'key_cortex', timestamp: new Date(), correlationId: 'v31b_ap05',
+    });
+    const approved = await adapter.execute(command('approve_task', ID.taskE) as any);
+    expect(approved.success, JSON.stringify(approved)).toBe(true);
+    expect(await db.autopilotTask.findUnique({ where: { id: ID.taskE } })).toMatchObject({ status: 'COMPLETED', approvedBy: ID.staffNoRev });
+    const completed = await adapter.execute(command('complete_task', ID.taskF) as any);
+    expect(completed.success, JSON.stringify(completed)).toBe(true);
+    expect(await db.autopilotTask.findUnique({ where: { id: ID.taskF } })).toMatchObject({ status: 'COMPLETED', executedBy: ID.staffNoRev });
   });
 });
 
@@ -1279,6 +1433,26 @@ describe('V1-31c CX: POST execute and POST batch run a member-initiated command 
     const res = await cortex('query', ID.other, { businessId: ID.cxBiz, module: 'projects', query: 'get_projects', parameters: {} });
     expect(res.status).toBe(403);
     expect(connectorCalls.length).toBe(before);
+  });
+
+  it('CX-14 (trial-N review NEW-1, D-46) a platform SUPER_ADMIN who is not a member does not write the business\'s invoices: execute, batch and a flow with a commerce node are 403, a row names it, and nothing reaches the connector', async () => {
+    const before = { connector: connectorCalls.length, autonomy: cortexAutonomyCalls.length };
+    const audit = await cxAuditIds();
+    const execute = await cortex('execute', ID.cxSuper, structuredCmd('commerce', 'process_payment', { invoiceId: `${P}inv` }));
+    expect(execute.status, JSON.stringify(execute.body)).toBe(403);
+    expect(JSON.stringify(execute.body)).toMatch(/not a member/i);
+    const batch = await cortex('batch', ID.cxSuper, {
+      businessId: ID.cxBiz,
+      commands: [{ type: 'structured', module: 'commerce', action: 'create_invoice', parameters: { contactId: `${P}c` } }],
+    });
+    expect(batch.status, JSON.stringify(batch.body)).toBe(403);
+    const flow = await cortex(`flows/${ID.cxFlowRev}/execute`, ID.cxSuper, { businessId: ID.cxBiz, inputs: {} });
+    expect(flow.status, JSON.stringify(flow.body)).toBe(403);
+    expect(await flowRuns(ID.cxFlowRev)).toBe(0);
+    expect(connectorCalls.length).toBe(before.connector);
+    const rows = await cxAuditSince(audit);
+    expect(rows.length).toBeGreaterThanOrEqual(1);
+    expect(rows[0]).toMatchObject({ businessId: ID.cxBiz, userId: ID.cxSuper, module: 'commerce', action: 'process_payment', success: false });
   });
 
   it.todo(
