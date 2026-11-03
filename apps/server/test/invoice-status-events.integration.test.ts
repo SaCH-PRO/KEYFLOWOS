@@ -76,6 +76,21 @@
  *   A9-PART (control) a partial refund (PARTIALLY_PAID, invoice.payment_recorded only) triggers none
  *           of the new handlers: no timeline entry, no stale reason, no delivery, the action stays
  *
+ * FOLLOW3-A9 review repairs (each RED before the repair):
+ *   A9-R1  (SEC-A9-1) the paid handler is still drafting its recommendation (a slow AI call) when the
+ *          refund's reopen handler runs and finds no row: no Send receipt action is raised for the
+ *          reopened invoice afterwards
+ *   A9-R2  (SEC-A9-1) the reopen's handler runs between the paid handler's last status check and its
+ *          write: the row it writes is removed by its own check after the write
+ *   A9-R3  (SEC-A9-1, reverse window) a re-pay commits between the reopen handler's status read and its
+ *          delete: the PAID invoice keeps (gets back) its Send receipt action
+ *   A9-R4  (SEC-A9-1) the 5-minute sweep (reconcileBusiness) removes an open Send receipt action of a
+ *          SENT or OVERDUE invoice of the business; PAID, PARTIALLY_PAID, COMPLETED rows and a row
+ *          naming another business's invoice are left
+ *   A9-R5  (SEC-A9-2 / CR-A9-1) pay, full refund, pay again, full refund again inside the dedupe window:
+ *          the timeline is [paid, reopened, paid, reopened], each entry the invoice's status at the
+ *          time; a re-delivery of the same paid or reopen event still writes nothing
+ *
  * Census of the other invoice-status listeners (outside this packet's write set, it.todo below; the
  * review, SEC-V42C-2, completed it): every one of the 21 invoice.paid handlers but the calendar,
  * first ReferralRewardService (the referrer credit stays after a full refund), then CRM network /
@@ -146,6 +161,11 @@ const ID = {
   invA9Completed: `${P}invA9Completed`,
   invA9Dismissed: `${P}invA9Dismissed`,
   invA9Partial: `${P}invA9Partial`,
+  // FOLLOW3-A9 review repairs (SEC-A9-1, SEC-A9-2 / CR-A9-1)
+  invA9RaceDraft: `${P}invA9RaceDraft`,
+  invA9RaceWrite: `${P}invA9RaceWrite`,
+  invA9RaceRepay: `${P}invA9RaceRepay`,
+  invA9Repay: `${P}invA9Repay`,
 };
 
 /** FOLLOW3-A9 tenant negative control: another business, its owner, contact, webhook and action rows. */
@@ -200,6 +220,7 @@ let redis: any;
 let paymentsSvc: any;
 let workflow: any;
 let revenueActions: any;
+let revenueEvents: any;
 
 const WAIT = { timeout: 4_000, interval: 50 };
 
@@ -477,6 +498,7 @@ beforeAll(async () => {
 
   workflow = moduleRef.get(workflowMod.InvoiceWorkflowService);
   revenueActions = moduleRef.get(RevenueActionService);
+  revenueEvents = moduleRef.get(RevenueEventListener);
 
   // Record every reason the insight listener marks a snapshot stale (the call itself is the real one).
   const insightListener = moduleRef.get(ContactInsightListener) as any;
@@ -997,6 +1019,217 @@ describe('VR-05: a refund that reopens an invoice emits a status event its liste
   it.todo('VR-05 census: FlowListener (flow/flow.listener.ts:110 confirms the linked booking and notifies "Invoice Paid"; :324 revenue milestone notification; :483 payment_receipt to the customer), ActivityEventListener (flow/activity-event.listener.ts:58) and AutomationExecutorService.onInvoicePaid (flow/automation-executor.service.ts:650, playbooks / flows on trigger invoice.paid, and AutomationService rule invoice.paid -> "Send thank-you note" task): the booking stays confirmed and no invoice.reopened trigger or activity exists');
   it.todo('VR-05 census: InvoiceReceiptListener (commerce/invoice-receipt.listener.ts:31) and WhatsappNotificationsListener (whatsapp/whatsapp-notifications.listener.ts:73) message the customer on paid; by this packet ruling the reopen messages nobody, so a follow-up rules whether the customer is told of a refund');
   it.todo('VR-05 census: AiListener.onInvoicePaid (ai/ai.listener.ts:36) and AgentTriggerService (onAny, exact eventPattern, no cooldown; default trigger invoice.paid in ai/default-triggers.constants.ts:62) have no invoice.reopened trigger; a business trigger on it fires once per event, which SEC-V42C-1 below keeps to one per reopen');
+});
+
+/**
+ * FOLLOW3-A9 review repairs. SEC-A9-1: the refund's reopen handler and the paid handler that raised the
+ * Send receipt action race (the paid handler awaits an AI draft between its PAID read and its write), so
+ * the paid handler checks the status again before and after its write, the reopen handler checks it
+ * again after its delete, and the 5-minute sweep removes an open Send receipt action of a reopened
+ * invoice. SEC-A9-2 / CR-A9-1: the CRM timeline dedupes invoice.paid / invoice.reopened per transition,
+ * so pay -> refund -> pay inside the 10-minute window logs every move.
+ */
+describe('FOLLOW3-A9 review: the Send receipt action and the contact timeline follow every transition', () => {
+  const actionCreated = (inv: string) =>
+    emitted.filter((e) => e.name === 'revenue_action.created' && e.payload?.type === 'PAID_INVOICE_NO_RECEIPT' && e.payload?.relatedId === inv);
+
+  it('A9-R1 (SEC-A9-1, RED before): the paid handler is still drafting (slow AI) when the refund reopens the invoice and the reopen handler finds no row -> no Send receipt action is raised for the SENT invoice', async () => {
+    const inv = ID.invA9RaceDraft;
+    const ai = (revenueActions as any).aiUsage;
+    const realTrack = ai.trackAndComplete;
+    // The paid handler's draft (the AI call) is held until the refund's reopen listeners have run.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let drafting = false;
+    ai.trackAndComplete = async () => {
+      drafting = true;
+      await gate;
+      throw new Error('v42c: slow AI, then the template');
+    };
+    try {
+      const original = await paid(inv, 100, 'V42C-A9-R1');
+      await vi.waitFor(() => expect(drafting, 'the paid handler is drafting').toBe(true), WAIT);
+      const res = await refund(original.id, 'mistaken payment');
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null });
+      expect(eventsFor(inv)).toEqual(['invoice.paid', 'invoice.reopened']);
+      // The reopen's listeners ran (the calendar is back to SCHEDULED); the revenue-action one found no row.
+      await waitForCalendar('invoice', inv, (cal) => expect(cal).toMatchObject({ status: 'SCHEDULED' }));
+      await settle(300);
+      expect(await receiptAction(inv)).toBeNull();
+      // Now the paid handler's draft ends and it goes on to raise the action.
+      release();
+      await settle(1_000);
+      expect(await receiptAction(inv), 'a reopened invoice gets no Send receipt action').toBeNull();
+      expect(actionCreated(inv), 'none is raised, not even for a moment').toEqual([]);
+    } finally {
+      release();
+      ai.trackAndComplete = realTrack;
+    }
+  }, 20_000);
+
+  it('A9-R2 (SEC-A9-1, RED before): the refund reopens the invoice after the paid handler\'s last status check and before its write -> the row it writes is removed by its own check after the write', async () => {
+    const inv = ID.invA9RaceWrite;
+    const svc = revenueActions as any;
+    const inner: string[] = [];
+    let reopenedInside = false;
+    svc.upsertAction = async (input: any) => {
+      if (input?.type === 'PAID_INVOICE_NO_RECEIPT' && input?.relatedId === inv && !reopenedInside) {
+        reopenedInside = true;
+        try {
+          // The full refund commits and its reopen handler runs (no row to remove yet) before this write.
+          const payment = await db.payment.findFirst({ where: { invoiceId: inv, amount: { gt: 0 } } });
+          const res = await refund(payment.id, 'mistaken payment');
+          if (res.status !== 201) inner.push(`refund ${res.status} ${JSON.stringify(res.body)}`);
+          await waitForCalendar('invoice', inv, (cal) => expect(cal).toMatchObject({ status: 'SCHEDULED' }));
+          await settle(300);
+        } catch (e) {
+          inner.push(String(e));
+        }
+      }
+      return Object.getPrototypeOf(svc).upsertAction.call(svc, input);
+    };
+    try {
+      await paid(inv, 100, 'V42C-A9-R2');
+      await vi.waitFor(() => expect(reopenedInside).toBe(true), WAIT);
+      await vi.waitFor(async () => expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null }), WAIT);
+      // The write happened (revenue_action.created) and its own check removed it.
+      await vi.waitFor(() => expect(actionCreated(inv)).toHaveLength(1), WAIT);
+      await vi.waitFor(async () => expect(await receiptAction(inv), 'the row written for the reopened invoice is removed').toBeNull(), WAIT);
+      await settle();
+      expect(await receiptAction(inv)).toBeNull();
+      expect(inner).toEqual([]);
+    } finally {
+      delete svc.upsertAction;
+    }
+  }, 20_000);
+
+  it('A9-R3 (SEC-A9-1 reverse window, RED before): a re-pay commits between the reopen handler\'s status read and its delete (its paid handler refreshes the row the delete then removes) -> the PAID invoice gets its Send receipt action back', async () => {
+    const inv = ID.invA9RaceRepay;
+    const original = await paid(inv, 100, 'V42C-A9-R3');
+    await vi.waitFor(async () => expect(await receiptAction(inv)).toMatchObject({ status: 'PENDING' }), WAIT);
+    await settle();
+    const svc = revenueActions as any;
+    const inner: string[] = [];
+    let repaidInside = false;
+    let deletedAfterRepay = false;
+    svc.removeOpenReceiptActions = async (businessId: string, ids: string[]) => {
+      if (!repaidInside && ids.includes(inv)) {
+        repaidInside = true;
+        try {
+          const res = await pay(inv, { amount: 100, method: 'cash', reference: 'V42C-A9-R3-AGAIN' });
+          if (res.status !== 201) inner.push(`re-pay ${res.status} ${JSON.stringify(res.body)}`);
+          await vi.waitFor(() => expect(emitted.filter((e) => e.name === 'invoice.paid' && e.payload?.invoice?.id === inv)).toHaveLength(1), WAIT);
+          // The re-pay's paid handler refreshes the existing row.
+          await settle();
+        } catch (e) {
+          inner.push(String(e));
+        }
+      }
+      const removed = await Object.getPrototypeOf(svc).removeOpenReceiptActions.call(svc, businessId, ids);
+      if (repaidInside && ids.includes(inv)) deletedAfterRepay = true;
+      return removed;
+    };
+    try {
+      emitted.length = 0;
+      const res = await refund(original.id, 'mistaken payment');
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(eventsFor(inv)).toContain('invoice.reopened');
+      // The reopen handler's delete ran after the re-pay refreshed the row (it removed that row).
+      await vi.waitFor(() => expect(deletedAfterRepay).toBe(true), WAIT);
+      await vi.waitFor(async () => expect(await invoiceRow(inv)).toMatchObject({ status: 'PAID' }), WAIT);
+      await vi.waitFor(async () => expect(await receiptAction(inv), 'the PAID invoice has its Send receipt action').toMatchObject({ status: 'PENDING', relatedId: inv }), WAIT);
+      await settle();
+      expect((await invoiceRow(inv)).status).toBe('PAID');
+      expect(await receiptAction(inv)).toMatchObject({ status: 'PENDING', relatedId: inv });
+      expect(inner).toEqual([]);
+      await expectLedgerBalanced(inv);
+    } finally {
+      delete svc.removeOpenReceiptActions;
+    }
+  }, 20_000);
+
+  it('A9-R4 (SEC-A9-1, RED before): the 5-minute sweep (reconcileBusiness) removes an open Send receipt action of a SENT or OVERDUE invoice of the business; PAID, PARTIALLY_PAID and COMPLETED rows and a row naming another business\'s invoice are left', async () => {
+    const S = {
+      sent: `${P}bSweepSent`,
+      overdue: `${P}bSweepOverdue`,
+      paid: `${P}bSweepPaid`,
+      part: `${P}bSweepPart`,
+      done: `${P}bSweepDone`,
+    };
+    let n = 0;
+    const invoice = async (id: string, status: string, extra: Record<string, unknown> = {}) => {
+      n += 1;
+      await db.invoice.create({
+        data: {
+          id, invoiceNumber: `V42C-BS-${n}`, status, sentAt: PAST_DUE, dueDate: PAST_DUE, subtotal: TOTAL, total: TOTAL,
+          currency: 'TTD', businessId: B.biz, contactId: B.contact, ...extra,
+        },
+      });
+    };
+    await invoice(S.sent, 'SENT');
+    await invoice(S.overdue, 'OVERDUE');
+    await invoice(S.paid, 'PAID', { paidAt: new Date() });
+    await invoice(S.part, 'PARTIALLY_PAID');
+    await invoice(S.done, 'SENT');
+    const action = (id: string, relatedId: string, status: string, extra: Record<string, unknown> = {}) =>
+      db.revenueAction.create({
+        data: { id, businessId: B.biz, type: 'PAID_INVOICE_NO_RECEIPT', title: `V42C sweep ${id}`, priority: 3, status, relatedType: 'invoice', relatedId, ...extra },
+      });
+    await action(`${P}ra_sweep_sent`, S.sent, 'PENDING');
+    await action(`${P}ra_sweep_overdue`, S.overdue, 'SNOOZED', { snoozedUntil: new Date(Date.now() + 86_400_000) });
+    await action(`${P}ra_sweep_paid`, S.paid, 'PENDING');
+    await action(`${P}ra_sweep_part`, S.part, 'PENDING');
+    await action(`${P}ra_sweep_done`, S.done, 'COMPLETED', { completedAt: new Date() });
+    // Business B's row naming business A's SENT invoice: B's sweep never reads A's invoice, so it is left.
+    expect((await invoiceRow(ID.invRemindStatus)).status).toBe('SENT');
+    await action(`${P}ra_sweep_cross`, ID.invRemindStatus, 'PENDING');
+    const aRowsBefore = await db.revenueAction.count({ where: { businessId: ID.biz } });
+
+    await revenueActions.reconcileBusiness(B.biz);
+
+    expect(await receiptAction(S.sent, B.biz), 'SENT: removed').toBeNull();
+    expect(await receiptAction(S.overdue, B.biz), 'OVERDUE (SNOOZED row): removed').toBeNull();
+    expect(await receiptAction(S.paid, B.biz), 'PAID: left').toMatchObject({ id: `${P}ra_sweep_paid`, status: 'PENDING' });
+    expect(await receiptAction(S.part, B.biz), 'PARTIALLY_PAID: left (as the event path leaves a partial refund)').toMatchObject({ id: `${P}ra_sweep_part`, status: 'PENDING' });
+    expect(await receiptAction(S.done, B.biz), 'COMPLETED: the operator\'s record').toMatchObject({ id: `${P}ra_sweep_done`, status: 'COMPLETED' });
+    expect(await receiptAction(ID.invRemindStatus, B.biz), 'a row naming another business\'s invoice').toMatchObject({ id: `${P}ra_sweep_cross`, status: 'PENDING' });
+    expect(await db.revenueAction.count({ where: { businessId: ID.biz } }), 'business A is untouched by B\'s sweep').toBe(aRowsBefore);
+  }, 20_000);
+
+  it('A9-R5 (SEC-A9-2 / CR-A9-1, RED before): pay, full refund, pay again, full refund again inside the 10-minute dedupe window -> the timeline is [paid, reopened, paid, reopened], each ending on the invoice\'s status at the time; a re-delivery of the same paid or reopen event writes nothing', async () => {
+    const inv = ID.invA9Repay;
+    const types = async () => (await contactTimeline(inv)).map((e) => e.type);
+    const p1 = await paid(inv, 100, 'V42C-A9-R5-1');
+    await vi.waitFor(async () => expect(await types()).toEqual(['invoice.paid']), WAIT);
+    expect((await refund(p1.id, 'first refund')).status).toBe(201);
+    await vi.waitFor(async () => expect(await types()).toEqual(['invoice.paid', 'invoice.reopened']), WAIT);
+
+    emitted.length = 0;
+    const p2 = await paid(inv, 100, 'V42C-A9-R5-2');
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    // RED before: the second invoice.paid was dropped as a duplicate of the first; the timeline ended on reopened.
+    await vi.waitFor(async () => expect(await types()).toEqual(['invoice.paid', 'invoice.reopened', 'invoice.paid']), WAIT);
+    const paidEvent = emitted.find((e) => e.name === 'invoice.paid' && e.payload?.invoice?.id === inv)!;
+    await revenueEvents.onInvoicePaid(paidEvent.payload);
+    expect(await types(), 'a re-delivered paid event is still a duplicate').toEqual(['invoice.paid', 'invoice.reopened', 'invoice.paid']);
+
+    emitted.length = 0;
+    expect((await refund(p2.id, 'second refund')).status).toBe(201);
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null });
+    // RED before: the second reopen was dropped as a duplicate of the first.
+    await vi.waitFor(async () => expect(await types()).toEqual(['invoice.paid', 'invoice.reopened', 'invoice.paid', 'invoice.reopened']), WAIT);
+    const reopenEvent = emitted.find((e) => e.name === 'invoice.reopened' && e.payload?.invoice?.id === inv)!;
+    await revenueEvents.onInvoiceReopened(reopenEvent.payload);
+    await settle();
+
+    const rows = await contactTimeline(inv);
+    expect(rows.map((e) => e.type), 'a re-delivered reopen event is still a duplicate').toEqual(['invoice.paid', 'invoice.reopened', 'invoice.paid', 'invoice.reopened']);
+    expect(new Set(rows.filter((r) => r.type === 'invoice.paid').map((r) => r.data.paidAt)).size, 'each paid entry names its own settlement').toBe(2);
+    expect(new Set(rows.filter((r) => r.type === 'invoice.reopened').map((r) => r.data.reopenedAt)).size, 'each reopen entry names its own reopen').toBe(2);
+    for (const r of rows) expect(r.data.dedupeKey).toBe(`rev:${r.type}:${inv}`);
+    await expectLedgerBalanced(inv);
+  }, 20_000);
 });
 
 /**

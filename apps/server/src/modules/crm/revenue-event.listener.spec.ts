@@ -120,6 +120,88 @@ describe('RevenueEventListener (idempotency)', () => {
     expect(logEvent.mock.calls[0][2]).toBe('payment.failed');
   });
 
+  describe('FOLLOW3-A9 review (SEC-A9-2 / CR-A9-1): invoice.paid / invoice.reopened dedupe per transition', () => {
+    const T1 = '2026-11-03T10:00:00.000Z';
+    const T2 = '2026-11-03T10:01:00.000Z';
+    const T3 = '2026-11-03T10:02:00.000Z';
+    const row = (type: string, at: string, data: Record<string, unknown>) => ({ type, createdAt: new Date(at), data });
+    const paidPayload = (paidAt: string | null) => ({ businessId: 'biz_1', invoice: { id: 'inv_1', contactId: 'c_1', paidAt } }) as any;
+    const reopenPayload = (updatedAt: string | null) =>
+      ({ businessId: 'biz_1', status: 'SENT', previousStatus: 'PAID', invoice: { id: 'inv_1', contactId: 'c_1', updatedAt } }) as any;
+
+    it('reads both transition types of the invoice in the window', async () => {
+      const { listener, findManyContactEvent } = build();
+      await listener.onInvoicePaid(paidPayload(T1));
+      expect(findManyContactEvent.mock.calls[0][0].where.type).toEqual({ in: ['invoice.paid', 'invoice.reopened'] });
+      await listener.onQuoteViewed({ businessId: 'biz_1', quote: { id: 'q_1', contactId: 'c_1' } } as any);
+      expect(findManyContactEvent.mock.calls[1][0].where.type).toBe('quote.viewed');
+    });
+
+    it('a re-delivered invoice.paid (same paidAt, no reopen since) is a duplicate', async () => {
+      const { listener, logEvent } = build({
+        recentEvents: [row('invoice.paid', T1, { invoiceId: 'inv_1', paidAt: T1, dedupeKey: 'rev:invoice.paid:inv_1' })],
+      });
+      await listener.onInvoicePaid(paidPayload(T1));
+      expect(logEvent).not.toHaveBeenCalled();
+    });
+
+    it('the mark-paid direct write (no dedupeKey, same invoiceId and paidAt) still suppresses the bus entry', async () => {
+      const { listener, logEvent } = build({ recentEvents: [row('invoice.paid', T1, { invoiceId: 'inv_1', paidAt: T1 })] });
+      await listener.onInvoicePaid(paidPayload(T1));
+      expect(logEvent).not.toHaveBeenCalled();
+    });
+
+    it('invoice.paid after a newer invoice.reopened of the invoice is a new transition: written', async () => {
+      const { listener, logEvent } = build({
+        recentEvents: [
+          row('invoice.reopened', T2, { invoiceId: 'inv_1', reopenedAt: T2, dedupeKey: 'rev:invoice.reopened:inv_1' }),
+          row('invoice.paid', T1, { invoiceId: 'inv_1', paidAt: T1, dedupeKey: 'rev:invoice.paid:inv_1' }),
+        ],
+      });
+      // No paidAt on the payload: the reopen alone tells the moves apart.
+      await listener.onInvoicePaid(paidPayload(null));
+      expect(logEvent).toHaveBeenCalledTimes(1);
+      expect(logEvent.mock.calls[0][2]).toBe('invoice.paid');
+    });
+
+    it('invoice.paid with another paidAt is a new transition even when the reopen entry is missing', async () => {
+      const { listener, logEvent } = build({
+        recentEvents: [row('invoice.paid', T1, { invoiceId: 'inv_1', paidAt: T1, dedupeKey: 'rev:invoice.paid:inv_1' })],
+      });
+      await listener.onInvoicePaid(paidPayload(T3));
+      expect(logEvent).toHaveBeenCalledTimes(1);
+    });
+
+    it('a reopen of another invoice does not make a duplicate paid new', async () => {
+      const { listener, logEvent } = build({
+        recentEvents: [
+          row('invoice.reopened', T2, { invoiceId: 'inv_OTHER', reopenedAt: T2, dedupeKey: 'rev:invoice.reopened:inv_OTHER' }),
+          row('invoice.paid', T1, { invoiceId: 'inv_1', paidAt: T1, dedupeKey: 'rev:invoice.paid:inv_1' }),
+        ],
+      });
+      await listener.onInvoicePaid(paidPayload(T1));
+      expect(logEvent).not.toHaveBeenCalled();
+    });
+
+    it('a second invoice.reopened after a newer invoice.paid is written, carrying its reopenedAt; a re-delivery of it is not', async () => {
+      const history = [
+        row('invoice.paid', T2, { invoiceId: 'inv_1', paidAt: T2, dedupeKey: 'rev:invoice.paid:inv_1' }),
+        row('invoice.reopened', T1, { invoiceId: 'inv_1', reopenedAt: T1, dedupeKey: 'rev:invoice.reopened:inv_1' }),
+      ];
+      const fresh = build({ recentEvents: history });
+      await fresh.listener.onInvoiceReopened(reopenPayload(T3));
+      expect(fresh.logEvent).toHaveBeenCalledTimes(1);
+      expect(fresh.logEvent.mock.calls[0][2]).toBe('invoice.reopened');
+      expect(fresh.logEvent.mock.calls[0][3]).toMatchObject({ invoiceId: 'inv_1', reopenedAt: T3, previousStatus: 'PAID', status: 'SENT' });
+
+      const again = build({
+        recentEvents: [row('invoice.reopened', T3, { invoiceId: 'inv_1', reopenedAt: T3, dedupeKey: 'rev:invoice.reopened:inv_1' }), ...history],
+      });
+      await again.listener.onInvoiceReopened(reopenPayload(T3));
+      expect(again.logEvent).not.toHaveBeenCalled();
+    });
+  });
+
   it('store_order.fulfillment_routed without contactId is skipped', async () => {
     const { listener, logEvent } = build();
     await listener.onFulfillmentRouted({
