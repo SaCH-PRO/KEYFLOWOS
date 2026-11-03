@@ -48,6 +48,9 @@ describe('RevenuePostingService recipe semantics', () => {
     PAYMENT_PROCESSOR: 'acc-pp',
     ACCOUNTS_RECEIVABLE: 'acc-ar',
     REVENUE: 'acc-rev',
+    REVENUE_SERVICE: 'acc-rev-svc',
+    REVENUE_PRODUCT: 'acc-rev-prod',
+    REVENUE_PACKAGE: 'acc-rev-pkg',
     EXPENSE_BANK_FEES: 'acc-fee',
   } as const;
 
@@ -381,6 +384,153 @@ describe('RevenuePostingService recipe semantics', () => {
     );
     const audit = prisma.client.activity.create.mock.calls[0]![0].data;
     expect(audit.data).toMatchObject({ amount: 60, paymentAmount: 100, refundPaymentId: 'r-manual', ledgerReversed: true, ledgerPartialRefundsReversed: 1, refundedBy: 'u1' });
+  });
+
+  describe('V1-82 (FOLLOW3-B3): accrual recognition splits revenue by category; a net discount is apportioned, never a negative leg', () => {
+    type Item = { total: number; product: { category: string } | null };
+    const SVC = (total: number): Item => ({ total, product: { category: 'SERVICE' } });
+    const GOODS = (total: number): Item => ({ total, product: { category: 'PRODUCT' } });
+    const PKG = (total: number): Item => ({ total, product: { category: 'PACKAGE' } });
+
+    async function finalize(total: number, items: Item[]) {
+      const h = make({
+        basis: 'ACCRUAL',
+        invoice: {
+          id: 'inv1',
+          businessId: 'b1',
+          contactId: null,
+          currency: 'TTD',
+          total,
+          issueDate: new Date(),
+          invoiceNumber: 'INV-1',
+          status: 'SENT',
+          deletedAt: null,
+          items,
+        },
+      });
+      await h.svc.onInvoiceFinalized('inv1');
+      expect(h.posted).toHaveLength(1);
+      return h.posted[0]!.entries.map((e): [string, number, number] => [e.accountId, Number(e.debit ?? 0), Number(e.credit ?? 0)]);
+    }
+
+    /** Every leg non-negative with one side set; debits and credits each equal the total, in integer cents. */
+    function expectLegRules(rows: Array<[string, number, number]>, total: number) {
+      for (const [acc, dr, cr] of rows) {
+        expect(dr, `${acc} debit`).toBeGreaterThanOrEqual(0);
+        expect(cr, `${acc} credit`).toBeGreaterThanOrEqual(0);
+        expect((dr > 0) !== (cr > 0), `${acc}: one side`).toBe(true);
+        expect(Math.round(cr * 100) / 100, `${acc} credit is a cent value`).toBe(cr);
+      }
+      const c = (v: number) => Math.round(v * 100);
+      expect(rows.reduce((s, r) => s + c(r[1]), 0)).toBe(c(total));
+      expect(rows.reduce((s, r) => s + c(r[2]), 0)).toBe(c(total));
+    }
+
+    it('RS-01 shape: svc 10 + goods 10 at PERCENT 60 (total 8) -> AR Dr 8, service Cr 4, product Cr 4 (was service Cr -2, product Cr 10)', async () => {
+      const e = await finalize(8, [SVC(10), GOODS(10)]);
+      expect(e).toEqual([
+        [ACCOUNTS.ACCOUNTS_RECEIVABLE, 8, 0],
+        [ACCOUNTS.REVENUE_SERVICE, 0, 4],
+        [ACCOUNTS.REVENUE_PRODUCT, 0, 4],
+      ]);
+      expectLegRules(e, 8);
+    });
+
+    it('RS-03 shape: svc 10 + goods 5 with FIXED 12 (total 3) -> credits 2 and 1, pro rata', async () => {
+      const e = await finalize(3, [SVC(10), GOODS(5)]);
+      expect(e).toEqual([
+        [ACCOUNTS.ACCOUNTS_RECEIVABLE, 3, 0],
+        [ACCOUNTS.REVENUE_SERVICE, 0, 2],
+        [ACCOUNTS.REVENUE_PRODUCT, 0, 1],
+      ]);
+      expectLegRules(e, 3);
+    });
+
+    it('RS-04 shape: svc 1 + goods 1 + package 1 with FIXED 2 (total 1) -> 0.34 / 0.33 / 0.33: the leftover cent to the largest remainder, ties by split order', async () => {
+      const e = await finalize(1, [SVC(1), GOODS(1), PKG(1)]);
+      expect(e).toEqual([
+        [ACCOUNTS.ACCOUNTS_RECEIVABLE, 1, 0],
+        [ACCOUNTS.REVENUE_SERVICE, 0, 0.34],
+        [ACCOUNTS.REVENUE_PRODUCT, 0, 0.33],
+        [ACCOUNTS.REVENUE_PACKAGE, 0, 0.33],
+      ]);
+      expectLegRules(e, 1);
+      // Split order decides a tie: the first split takes the cent.
+      const reordered = await finalize(1, [PKG(1), SVC(1), GOODS(1)]);
+      expect(reordered).toEqual([
+        [ACCOUNTS.ACCOUNTS_RECEIVABLE, 1, 0],
+        [ACCOUNTS.REVENUE_PACKAGE, 0, 0.34],
+        [ACCOUNTS.REVENUE_SERVICE, 0, 0.33],
+        [ACCOUNTS.REVENUE_PRODUCT, 0, 0.33],
+      ]);
+    });
+
+    it('largest remainder: the leftover cents go to the largest fractional shares, not the largest split', async () => {
+      // Total 0.55 over svc 0.40 / goods 0.35 / pkg 0.25: exact shares 22 / 19.25 / 13.75 cents -> floors 22 / 19 / 13
+      // (54 cents); the one cent left goes to pkg (remainder .75), not to svc, the largest split.
+      const e = await finalize(0.55, [SVC(0.4), GOODS(0.35), PKG(0.25)]);
+      expect(e).toEqual([
+        [ACCOUNTS.ACCOUNTS_RECEIVABLE, 0.55, 0],
+        [ACCOUNTS.REVENUE_SERVICE, 0, 0.22],
+        [ACCOUNTS.REVENUE_PRODUCT, 0, 0.19],
+        [ACCOUNTS.REVENUE_PACKAGE, 0, 0.14],
+      ]);
+      expectLegRules(e, 0.55);
+    });
+
+    it('a split whose apportioned share is zero cents posts no leg (a zero leg is refused by validatePosting)', async () => {
+      // svc 100 + goods 0.01 at PERCENT 99 (total 1.00): goods' exact share is 0.0099 cents.
+      const e = await finalize(1, [SVC(100), GOODS(0.01)]);
+      expect(e).toEqual([
+        [ACCOUNTS.ACCOUNTS_RECEIVABLE, 1, 0],
+        [ACCOUNTS.REVENUE_SERVICE, 0, 1],
+      ]);
+      expectLegRules(e, 1);
+    });
+
+    it('property: 200 seeded discounted invoices of 1-3 categories post non-negative legs whose credits sum to the total in cents', async () => {
+      let seed = 82;
+      const rand = () => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed / 2147483648;
+      };
+      const makers = [SVC, GOODS, PKG];
+      for (let n = 0; n < 200; n += 1) {
+        const items: Item[] = [];
+        const lines = 1 + Math.floor(rand() * 4);
+        for (let i = 0; i < lines; i += 1) items.push(makers[Math.floor(rand() * 3)]!(1 + Math.floor(rand() * 100000) / 100));
+        const subtotalCents = items.reduce((s, it) => s + Math.round(it.total * 100), 0);
+        const totalCents = 1 + Math.floor(rand() * (subtotalCents - 1));
+        const e = await finalize(totalCents / 100, items);
+        expectLegRules(e, totalCents / 100);
+      }
+    });
+
+    it('RS-05 control: one category at PERCENT 60 (svc 10 + svc 10, total 8) posts one credit equal to the total', async () => {
+      const e = await finalize(8, [SVC(10), SVC(10)]);
+      expect(e).toEqual([
+        [ACCOUNTS.ACCOUNTS_RECEIVABLE, 8, 0],
+        [ACCOUNTS.REVENUE_SERVICE, 0, 8],
+      ]);
+    });
+
+    it('RS-05 control: two categories with no discount post 120 / 80', async () => {
+      const e = await finalize(200, [SVC(120), GOODS(80)]);
+      expect(e).toEqual([
+        [ACCOUNTS.ACCOUNTS_RECEIVABLE, 200, 0],
+        [ACCOUNTS.REVENUE_SERVICE, 0, 120],
+        [ACCOUNTS.REVENUE_PRODUCT, 0, 80],
+      ]);
+    });
+
+    it('RS-05 control: a positive drift (10% tax: svc 100, goods 50, total 165) stays on the largest split (svc 115, goods 50)', async () => {
+      const e = await finalize(165, [SVC(100), GOODS(50)]);
+      expect(e).toEqual([
+        [ACCOUNTS.ACCOUNTS_RECEIVABLE, 165, 0],
+        [ACCOUNTS.REVENUE_SERVICE, 0, 115],
+        [ACCOUNTS.REVENUE_PRODUCT, 0, 50],
+      ]);
+    });
   });
 
   it('invoice void reverses the finalized accrual posting', async () => {
