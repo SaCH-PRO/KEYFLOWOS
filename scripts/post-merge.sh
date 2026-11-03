@@ -3,17 +3,30 @@
 #
 # Runs automatically after a task agent merges into the main repl. Keeps the
 # host environment in lockstep with the merged code: installs deps, generates
-# the Prisma client, and reconciles the database schema.
+# the Prisma client, and applies the committed migrations.
+#
+# Schema step (owner ruling D-62): `prisma migrate deploy` applies
+# packages/db/prisma/migrations and nothing else. It replaced `prisma db push`,
+# which reconciles a database with schema.prisma alone and so cannot create
+# what only a migration declares: on a database one migration behind
+# 20261101000000_contact_partial_identity_uniques it dropped both contact
+# identity uniques and created neither partial *_live_key index.
 #
 # Failure policy:
 #   - Dependency install: fail loudly.
 #   - Prisma generate: fail loudly.
-#   - Schema push: fail loudly. Real schema drift used to be silently
+#   - Migrate deploy: fail loudly. Real schema drift used to be silently
 #     swallowed here, which led to the deployed app going live with a
 #     broken database. We now propagate the failure.
+#   - A database with no _prisma_migrations record of 0_baseline (one that
+#     was built with db push) is refused (P3005) until an operator records
+#     the baseline once, after checking the database matches it:
+#       pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline
+#     This script never records it by itself.
 #
 # Override:
-#   POST_MERGE_SKIP_DB_PUSH=1   skip the db push step entirely
+#   POST_MERGE_SKIP_DB_PUSH=1   skip both database steps (drift check and
+#                               migrate deploy); the name is kept for operators
 #   POST_MERGE_ALLOW_DB_DRIFT=1 reduce drift detection to a warning
 #                               (use only when intentional schema drift exists)
 
@@ -73,15 +86,23 @@ case "$DIFF_EXIT" in
 esac
 rm -f "$DIFF_TMP"
 
-echo "[4/4] Syncing database schema (prisma db push)…"
-# In development, accept Prisma's data-loss warnings for additive changes
-# (e.g. adding a unique constraint on a brand-new nullable column where every
-# existing row is NULL — harmless in Postgres but Prisma flags it). Production
-# merges still require an explicit migration.
-PUSH_FLAGS="--schema=./prisma/schema.prisma --skip-generate"
-if [ "${NODE_ENV:-development}" = "development" ] || [ "${POST_MERGE_ACCEPT_DATA_LOSS:-0}" = "1" ]; then
-  PUSH_FLAGS="$PUSH_FLAGS --accept-data-loss"
+echo "[4/4] Applying migrations (prisma migrate deploy)…"
+DEPLOY_TMP=$(mktemp)
+set +e
+pnpm --filter @keyflow/db exec prisma migrate deploy --schema=./prisma/schema.prisma 2>&1 | tee "$DEPLOY_TMP"
+DEPLOY_EXIT=${PIPESTATUS[0]}
+set -e
+if [ "$DEPLOY_EXIT" -ne 0 ]; then
+  echo "[FATAL] prisma migrate deploy failed (exit ${DEPLOY_EXIT}) — aborting." >&2
+  if grep -qE 'P3005|Migration name: 0_baseline' "$DEPLOY_TMP"; then
+    echo "  This database has no _prisma_migrations record of 0_baseline: it was built" >&2
+    echo "  without migrations. Back it up, confirm its schema matches 0_baseline" >&2
+    echo "  (docs/SCHEMA_DEPLOYMENT.md §3), record the baseline once, then rerun:" >&2
+    echo "    pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline" >&2
+  fi
+  rm -f "$DEPLOY_TMP"
+  exit 1
 fi
-pnpm --filter @keyflow/db exec prisma db push $PUSH_FLAGS
+rm -f "$DEPLOY_TMP"
 
 echo "=== Post-merge setup complete ==="

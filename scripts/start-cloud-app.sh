@@ -102,8 +102,21 @@ main() {
 
   ensure_local_postgres
 
-  log "Syncing schema to local database"
-  DATABASE_URL="$db_url" DIRECT_URL="$direct_url" pnpm db:push >/dev/null
+  # Owner ruling D-62: apply the committed migrations (pnpm db:deploy =
+  # prisma migrate deploy), never `prisma db push`. db push cannot create the
+  # partial contact identity uniques of migration
+  # 20261101000000_contact_partial_identity_uniques and drops the full ones.
+  # A local database built with db push has no _prisma_migrations record of
+  # 0_baseline and is refused (P3005) until it is recorded once by hand.
+  log "Applying migrations to local database (prisma migrate deploy)"
+  if ! DATABASE_URL="$db_url" DIRECT_URL="$direct_url" pnpm db:deploy >/dev/null; then
+    echo "[FATAL] prisma migrate deploy failed against the local database." >&2
+    echo "  If it reports P3005, the database has no _prisma_migrations record of" >&2
+    echo "  0_baseline. Confirm its schema matches 0_baseline (docs/SCHEMA_DEPLOYMENT.md §3)," >&2
+    echo "  record the baseline once, then rerun this script:" >&2
+    echo "    pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline" >&2
+    exit 1
+  fi
 
   ensure_session "server-dev"
   ensure_session "web-dev"

@@ -69,6 +69,15 @@ Verified directly, and **not yet fixed**:
 | `.github/workflows/ci-cd.yml` | none, and the deploy job is commented out |
 | `scripts/start-cloud-app.sh` | `pnpm db:push` — but this is the **local dev** orchestrator (tmux, `ensure_local_postgres`) |
 
+**Update 2026-11-03 (V1-83, owner ruling D-62).** `scripts/post-merge.sh`
+(step [4/4], the schema step of the Replit Publish path in `MAINTENANCE.md`)
+and `scripts/start-cloud-app.sh` (`pnpm db:deploy`) now run
+`prisma migrate deploy`. Both ran `prisma db push` until then, which on a
+database one migration behind `20261101000000_contact_partial_identity_uniques`
+dropped both contact identity uniques and created neither partial index.
+`apps/server/test/schema-sync-path.integration.test.ts` proves both paths on
+that database and fails if any file under `scripts/` runs db push again.
+
 Adding a model or a column reaches production only if a human runs something by
 hand. This is not theoretical: the `flow_sessions.user_id` column added for
 session privacy (`18d599ae`) is a **security fix**, and no automated process
@@ -161,8 +170,14 @@ to that database.
 ## 5. From here
 
 - Schema changes go through `prisma migrate dev`, which now works.
-- **Production still needs `migrate resolve --applied 0_baseline` once**, then a
-  `prisma migrate deploy` step in the deploy path (§2).
+- **Production still needs `migrate resolve --applied 0_baseline` once.** The
+  deploy path now runs `prisma migrate deploy` (§2 update): on a database with
+  no `_prisma_migrations` record of `0_baseline` it fails loudly with P3005,
+  and post-merge names the fix, until an operator runs
+  `pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline`
+  once against it (§3). No script records the baseline by itself.
 - `db push` should no longer be used outside throwaway databases. It drops
   columns and tables `schema.prisma` no longer declares, and this repo has
-  already demonstrated a database holding twelve such objects.
+  already demonstrated a database holding twelve such objects. Since V1-17 it
+  also cannot create the partial contact identity uniques, which exist only in
+  a migration.

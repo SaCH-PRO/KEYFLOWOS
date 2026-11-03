@@ -244,8 +244,10 @@ To deploy:
    browser. `apiReachable: true` and `env: "ok"` = green.
 
 To roll back: redeploy the last known-good version from the deployment
-history. There is **no separate database migration step** — Prisma
-schema is reconciled by `scripts/post-merge.sh` (see below).
+history. There is **no separate database migration step** —
+`scripts/post-merge.sh` applies the committed migrations with
+`prisma migrate deploy` (see below). Rolling the code back does not roll
+back a migration that has already been applied.
 
 ---
 
@@ -261,23 +263,29 @@ runs automatically and:
 2. Regenerates the Prisma client (`pnpm --filter @keyflow/db run db:generate`).
 3. **Detects schema drift** with `prisma migrate diff` and prints a
    one-line summary of what would change.
-4. Applies the schema with `prisma db push --skip-generate`.
+4. Applies the committed migrations in `packages/db/prisma/migrations`
+   with `prisma migrate deploy` (owner ruling D-62).
 
 Failure policy:
 
 - In **non-development** environments (`NODE_ENV != development`), real
   drift causes the script to exit non-zero. The deploy is blocked.
 - In dev, drift logs a warning and continues so you can iterate fast.
+- A failed `prisma migrate deploy` exits non-zero in every environment.
 - Override knobs (use sparingly):
-  - `POST_MERGE_SKIP_DB_PUSH=1` — skip steps 3 and 4 entirely.
+  - `POST_MERGE_SKIP_DB_PUSH=1` — skip steps 3 and 4 entirely (the name
+    predates `migrate deploy` and is kept so operator settings still work).
   - `POST_MERGE_ALLOW_DB_DRIFT=1` — downgrade drift to a warning
     everywhere.
 
-To force a manual reconcile from the shell:
+To apply migrations manually from the shell:
 
 ```bash
 bash scripts/post-merge.sh
 ```
+
+`scripts/start-cloud-app.sh` (the local cloud dev stack) applies them the
+same way, with `pnpm db:deploy`.
 
 To inspect drift without applying:
 
@@ -289,6 +297,37 @@ pnpm --filter @keyflow/db exec prisma migrate diff \
 ```
 
 Exit `0` = clean, `2` = drift, anything else = something else broke.
+
+### Why not `prisma db push`
+
+Both scripts used `prisma db push` until V1-83 and no longer do. It
+reconciles a database with `schema.prisma` alone, so it cannot create what
+only a migration declares. Since V1-17
+(`20261101000000_contact_partial_identity_uniques`) the contact identity
+uniques are partial indexes (`WHERE deleted_at IS NULL`) that Prisma cannot
+declare. On a database that has not applied that migration yet, it drops
+the old full uniques and creates nothing in their place, so two live
+contacts of one business could share an email or a phone.
+Never run `prisma db push` (`pnpm db:push`) against a database you keep;
+it is for throwaway databases only.
+
+### A database without a `0_baseline` record (P3005)
+
+A database that was built with `db push` instead of migrations has no
+`_prisma_migrations` record of `0_baseline`. `prisma migrate deploy`
+refuses it with **P3005** ("The database schema is not empty"), and
+post-merge stops with a `[FATAL]` naming the fix. Neither script records
+the baseline by itself. Once per such database, after a backup and after
+confirming its schema matches `0_baseline`
+([docs/SCHEMA_DEPLOYMENT.md](docs/SCHEMA_DEPLOYMENT.md) §3), an operator
+runs, with `DATABASE_URL` and `DIRECT_URL` pointing at it:
+
+```bash
+pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline
+```
+
+This writes one bookkeeping row and runs no DDL. The next post-merge then
+applies every later migration.
 
 ---
 
@@ -332,9 +371,11 @@ Either:
 - A `schema.prisma` change was merged without regenerating the lockfile.
 
 Run `prisma migrate diff` (above) locally against the production
-database URL to see what changed. Resolve by either updating
-`schema.prisma` to match production, or rerunning `prisma db push`
-(after a backup).
+database URL to see what changed. Resolve with a reviewed migration
+(`prisma migrate dev --create-only`, then `prisma migrate deploy`) or by
+updating `schema.prisma` to match production. Do not use `prisma db push`
+to close drift: it drops what `schema.prisma` does not declare, such as the
+partial contact uniques of V1-17.
 
 ---
 
@@ -353,7 +394,7 @@ apps/web/src/app/api/healthz/route.ts         # web health endpoint
 
 scripts/start-prod.sh                         # production process supervisor
 scripts/verify-up.sh                          # one-command smoke test
-scripts/post-merge.sh                         # post-merge db sync + drift gate
+scripts/post-merge.sh                         # post-merge drift gate + prisma migrate deploy
 scripts/uptime-monitor.sh                     # self-hosted uptime poller (Option C)
 .github/workflows/uptime-monitor.yml          # GHA schedule for uptime-monitor.sh
 .env / .env.example                           # env config + template
