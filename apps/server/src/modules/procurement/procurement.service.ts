@@ -1,9 +1,22 @@
-import { Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { BusinessEventService } from '../business-events/business-event.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { CreateProcurementRequestDto } from './dto/create-procurement-request.dto';
 import { UpdateProcurementRequestDto } from './dto/update-procurement-request.dto';
 
+/**
+ * Procurement requests.
+ *
+ * FOLLOW3-D15-PROCUREMENT-BOUND-WRITES: every write to a request goes through writeRequest, an
+ * updateMany where { id, businessId } that refuses (404) unless it moved exactly one row. The
+ * binding is the service's own, not the caller's: the KEY dispatcher also runs on the staff bridge,
+ * with no tenant armed, and acknowledgeVendor, markFulfilled and markInvoiced used to update the
+ * request where { id } alone (review SEC-R013g-2). Approve and reject write only the status (the
+ * model has no approval columns) and record the decision in the audit trail, one BusinessEvent
+ * naming the member who decided (D-08: BusinessEvent is the audit trail, Activity the feed).
+ */
 @Injectable()
 export class ProcurementService {
   private readonly logger = new Logger(ProcurementService.name);
@@ -11,7 +24,24 @@ export class ProcurementService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
+    // BusinessEventModule is @Global, so the app always provides it; optional only so a test
+    // module that wires this service without the audit trail still resolves it (Nest DI).
+    // updateStatus refuses to decide a request without it.
+    @Optional() @Inject(BusinessEventService) private readonly businessEvents: BusinessEventService | null = null,
   ) {}
+
+  /**
+   * The one write to a procurement request: bound to the business by the where itself, refused
+   * unless exactly one row moved, and answered with the row as it now is.
+   */
+  private async writeRequest(businessId: string, id: string, data: Prisma.ProcurementRequestUpdateManyMutationInput) {
+    const { count } = await this.prisma.client.procurementRequest.updateMany({
+      where: { id, businessId },
+      data,
+    });
+    if (count !== 1) throw new NotFoundException('Request not found');
+    return this.get(businessId, id);
+  }
 
   async list(businessId: string) {
     return (this.prisma.client as any).procurementRequest.findMany({
@@ -73,28 +103,21 @@ export class ProcurementService {
   }
 
   async update(businessId: string, id: string, dto: UpdateProcurementRequestDto) {
-    await this.get(businessId, id);
-    return (this.prisma.client as any).procurementRequest.update({
-      where: { id },
-      data: {
-        status: dto.status,
-        priority: dto.priority,
-        internalNotes: dto.internalNotes,
-        brief: dto.brief as any,
-      },
+    return this.writeRequest(businessId, id, {
+      status: dto.status,
+      priority: dto.priority,
+      internalNotes: dto.internalNotes,
+      brief: dto.brief as Prisma.InputJsonValue | undefined,
     });
   }
 
   async submitForReview(businessId: string, id: string) {
     const req = await this.get(businessId, id);
     const brief = this.generateBrief(req);
-    const updated = await (this.prisma.client as any).procurementRequest.update({
-      where: { id },
-      data: {
-        status: 'SUBMITTED',
-        submittedAt: new Date(),
-        brief: brief as any,
-      },
+    const updated = await this.writeRequest(businessId, id, {
+      status: 'SUBMITTED',
+      submittedAt: new Date(),
+      brief: brief as Prisma.InputJsonValue,
     });
 
     // Write to unified Activity ledger (Wave 1)
@@ -118,34 +141,51 @@ export class ProcurementService {
     return updated;
   }
 
+  /**
+   * Approve (status APPROVED) or reject (REJECTED, with an optional reason) a request.
+   *
+   * FOLLOW3-D15: the request row has no approval columns, so the status is all that is written to
+   * it (writing the approver, the time and the reason there answered 500 to every caller). Who
+   * decided, when, and why is the audit trail's: exactly one BusinessEvent per decision, written
+   * only after the request moved (a refused or failed call writes none). The Activity feed row
+   * below is the user-facing entry, best effort as before.
+   */
   async updateStatus(businessId: string, id: string, status: string, userId?: string, reason?: string) {
+    const audit = this.businessEvents;
+    if (!audit) throw new ServiceUnavailableException('The audit trail is unavailable; the request was not decided');
     const req = await this.get(businessId, id);
-    const updated = await (this.prisma.client as any).procurementRequest.update({
-      where: { id },
-      data: {
-        status,
-        approvedAt: status === 'APPROVED' ? new Date() : undefined,
-        approvedByUserId: status === 'APPROVED' ? (userId ?? null) : undefined,
-        rejectedAt: status === 'REJECTED' ? new Date() : undefined,
-        rejectedByUserId: status === 'REJECTED' ? (userId ?? null) : undefined,
-        rejectionReason: status === 'REJECTED' ? (reason ?? null) : undefined,
-        internalNotes: reason && status !== 'REJECTED' ? req.internalNotes : req.internalNotes,
-      },
+    // the body is not validated by a DTO: only a non-empty string is a reason
+    const why = typeof reason === 'string' && reason.trim() ? reason : undefined;
+    const updated = await this.writeRequest(businessId, id, { status });
+    const decision = status.toLowerCase();
+
+    await audit.emit({
+      businessId,
+      eventType: `procurement_request.${decision}`,
+      subjectType: 'procurement_request',
+      subjectId: id,
+      actorType: userId ? 'human' : 'system',
+      actorId: userId ?? 'system',
+      action: decision,
+      before: { status: req.status },
+      after: { status: updated.status },
+      source: 'web',
+      metadata: why ? { reason: why } : undefined,
     });
 
     this.timeline.recordEvent({
       businessId,
       module: 'procurement',
-      action: `request.${status.toLowerCase()}`,
+      action: `request.${decision}`,
       entityType: 'procurement_request',
       entityId: id,
-      title: `Procurement request ${status.toLowerCase()}`,
-      detail: reason ? `${reason.slice(0, 200)}` : `Status changed to ${status}`,
+      title: `Procurement request ${decision}`,
+      detail: why ? why.slice(0, 200) : `Status changed to ${status}`,
       category: 'SYSTEM',
       actorType: 'USER',
       actorId: userId,
       status: status === 'APPROVED' ? 'COMPLETED' : 'CANCELLED',
-      data: { status, reason },
+      data: { status, reason: why },
       occurredAt: new Date(),
     }).catch((err) => {
       this.logger.warn(`[UnifiedLedger] failed to record procurement activity: ${(err as Error).message}`);
@@ -163,11 +203,7 @@ export class ProcurementService {
   }
 
   async selectVendor(businessId: string, id: string, supplierConnectionId: string | null) {
-    await this.get(businessId, id);
-    return (this.prisma.client as any).procurementRequest.update({
-      where: { id },
-      data: { supplierConnectionId },
-    });
+    return this.writeRequest(businessId, id, { supplierConnectionId });
   }
 
   async issuePO(businessId: string, id: string, userId?: string) {
@@ -192,10 +228,7 @@ export class ProcurementService {
       },
     });
 
-    const updated = await (this.prisma.client as any).procurementRequest.update({
-      where: { id },
-      data: { status: 'PO_ISSUED', purchaseOrderId: po.id, poIssuedAt: new Date() },
-    });
+    const updated = await this.writeRequest(businessId, id, { status: 'PO_ISSUED', purchaseOrderId: po.id, poIssuedAt: new Date() });
 
     this.timeline.recordEvent({
       businessId,
@@ -214,10 +247,7 @@ export class ProcurementService {
   }
 
   async acknowledgeVendor(businessId: string, id: string) {
-    const updated = await (this.prisma.client as any).procurementRequest.update({
-      where: { id },
-      data: { status: 'VENDOR_ACKNOWLEDGED', vendorAcknowledgedAt: new Date() },
-    });
+    const updated = await this.writeRequest(businessId, id, { status: 'VENDOR_ACKNOWLEDGED', vendorAcknowledgedAt: new Date() });
     this.timeline.recordEvent({
       businessId,
       module: 'procurement',
@@ -231,10 +261,7 @@ export class ProcurementService {
   }
 
   async markFulfilled(businessId: string, id: string) {
-    const updated = await (this.prisma.client as any).procurementRequest.update({
-      where: { id },
-      data: { status: 'FULFILLED', fulfilledAt: new Date() },
-    });
+    const updated = await this.writeRequest(businessId, id, { status: 'FULFILLED', fulfilledAt: new Date() });
     this.timeline.recordEvent({
       businessId,
       module: 'procurement',
@@ -248,10 +275,7 @@ export class ProcurementService {
   }
 
   async markInvoiced(businessId: string, id: string) {
-    const updated = await (this.prisma.client as any).procurementRequest.update({
-      where: { id },
-      data: { status: 'INVOICED', invoicedAt: new Date() },
-    });
+    const updated = await this.writeRequest(businessId, id, { status: 'INVOICED', invoicedAt: new Date() });
     this.timeline.recordEvent({
       businessId,
       module: 'procurement',
