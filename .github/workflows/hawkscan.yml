@@ -14,11 +14,10 @@
 # What it adds when run by hand with real credentials: ci-cd.yml's "Security
 # Scan" job is static (SCA and secret scanning) and the native proof sends a
 # fixed set of auth-boundary probes; HawkScan crawls and attacks the running
-# API for a broader surface. Activation: docs/SECURITY_DAST_SETUP.md, except
-# its steps that open a PR to run HawkScan and add HawkScan to main's required
-# status checks: they predate V1-30. With no PR trigger such a required check
-# never reports, so it would block every merge. A manual run without
-# HAWK_API_KEY is still a green no-op and proves nothing.
+# API for a broader surface. Activation: docs/SECURITY_DAST_SETUP.md. Do not
+# make HawkScan a required status check on main: with no PR trigger it never
+# reports, so it would block every merge. A manual run without HAWK_API_KEY is
+# still a green no-op and proves nothing.
 name: DAST (HawkScan)
 
 on:

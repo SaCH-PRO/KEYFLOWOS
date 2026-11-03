@@ -10,15 +10,21 @@ so the code is already merged and safe.
 ## What shipped
 
 - **`stackhawk.yml`** — HawkScan config targeting the NestJS API (`:3001`).
-- **`.github/workflows/hawkscan.yml`** — a **dark-by-default** DAST workflow. It
-  boots the app the same way the `Run Tests` job does (Postgres + Redis, real
+- **`.github/workflows/hawkscan.yml`** — a **dark-by-default**, **manual-only**
+  DAST workflow (`workflow_dispatch`, no `pull_request` trigger). It boots the
+  app the same way the `Run Tests` job does (Postgres + Redis, real
   migrations), waits on `/healthz`, then runs HawkScan. With no `HAWK_API_KEY`
-  secret it skips every heavy step and passes as a no-op, so it never turns the
-  branch-protected `main` red on its own.
+  secret it skips every heavy step and passes as a no-op, having scanned
+  nothing.
 
-It is a **separate workflow**, not a job in `ci-cd.yml`, precisely so a scan that
-depends on an external account can't break the required status checks. Promote it
-to a required check only after it has run green with real credentials.
+It is a **separate workflow**, not a job in `ci-cd.yml`, so a scan that depends on
+an external account can't break the required status checks. It is **not** an
+admission gate: as the required check `DAST (HawkScan)` it passed without
+scanning whenever the key was absent (PRS-M08). The required DAST gate is
+`DAST (Native)` (`native-dast.yml`, V1-13): it needs no third-party account or
+secret, boots the API against its own Postgres and Redis, and fails on any probe
+it cannot prove. `REQUIRED_WORKFLOWS` in `scripts/agent-control/lib/events.mjs`
+names it (V1-30, owner ruling D-22).
 
 ---
 
@@ -38,11 +44,12 @@ that's the only way those surface. The two are complementary, not redundant.
    (https://app.stackhawk.com). Note its **Application ID**.
 2. Create an **API key** (Settings → API keys).
 3. Add two repository secrets (Settings → Secrets and variables → Actions):
-   - `HAWK_API_KEY` — the API key. **This is the activation switch** — the moment
-     it exists, the workflow starts scanning on PRs to `main`.
+   - `HAWK_API_KEY` — the API key. **This is the activation switch** — once it
+     exists, a manual run scans; without it a manual run is a green no-op.
    - `HAWK_APP_ID` — the Application ID (kept out of the committed config).
-4. Open a PR (or run the workflow manually via **Actions → DAST (HawkScan) → Run
-   workflow**). The first run establishes a baseline.
+4. Run the workflow by hand via **Actions → DAST (HawkScan) → Run workflow**. A
+   PR does not run it (it has no `pull_request` trigger). The first run
+   establishes a baseline.
 
 ### First-pass scope
 The committed config scans the **public surface unauthenticated** — health/readiness
@@ -69,12 +76,17 @@ To scan **behind Supabase auth**, uncomment the `authentication` block in
 `stackhawk.yml` and add a `HAWK_TEST_JWT` secret holding a **disposable test
 user's** token — never a real user's.
 
-### Turning it into a gate
-The scan starts as a **soft gate** (`continue-on-error: true`) so it reports
-without blocking. Once the baseline is triaged:
-1. Set `continue-on-error: false` on the `Run HawkScan` step.
-2. Add `HawkScan` to `main`'s required status checks (same ruleset you created
-   for the CI checks — see [issue #60](https://github.com/SaCH-PRO/KEYFLOWOS/issues/60)).
+### Findings and the gate
+The `Run HawkScan` step is `continue-on-error: true`, so a manual run reports
+findings without failing. Once the baseline is triaged, set it to `false` so a
+manual run fails on findings.
+
+HawkScan is not a gate. Do **not** make `HawkScan` or `DAST (HawkScan)` a
+required status check on `main`: the workflow has no `pull_request` trigger, so
+that check never reports on a PR and would block every merge. The DAST check
+admission requires is `DAST (Native)`. Making HawkScan
+a gate again would need a PR trigger, a run that cannot pass without the key,
+and an owner ruling (D-22 left it manual-only).
 
 ---
 
@@ -87,8 +99,8 @@ repo, but here's the path so it's not lost:
 1. Connect Vanta to the infrastructure it monitors: the cloud host (Render, per
    `render.yaml`), GitHub (this org), the database, and identity/SSO.
 2. Map controls to what already exists here — e.g. this repo's branch protection
-   and required checks, `SECURITY.md`, Sentry, secret scanning, and (once live)
-   the StackHawk DAST gate are all evidence for change-management and
+   and required checks, `SECURITY.md`, Sentry, secret scanning, and the native
+   DAST gate (`DAST (Native)`) are all evidence for change-management and
    vulnerability-management controls.
 3. Assign control owners and let Vanta's monitors run continuously.
 
@@ -101,7 +113,7 @@ connected an agent can query control/evidence status directly.
 
 | Piece | State |
 |---|---|
-| `stackhawk.yml` + DAST workflow | Merged, dormant until `HAWK_API_KEY` is set |
+| `stackhawk.yml` + HawkScan workflow | Merged, manual-only, dormant until `HAWK_API_KEY` is set |
 | Authenticated scanning | Config block ready, needs `HAWK_TEST_JWT` |
-| DAST as a required check | After baseline triage (flip `continue-on-error`) |
+| DAST as a required check | `DAST (Native)` (`native-dast.yml`), since V1-30 (D-22); HawkScan is not required |
 | Vanta | Account/connector setup (no code) |

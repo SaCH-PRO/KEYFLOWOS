@@ -432,6 +432,13 @@ jobs:
       # ESM-only dependency dies with ERR_REQUIRE_ESM), and requires it gone
       # once none does.
       #
+      # With require(esm) on, an ESM-only dependency that uses top-level await
+      # dies with ERR_REQUIRE_ASYNC_MODULE and one required inside an import
+      # cycle with ERR_REQUIRE_CYCLE_MODULE, not ERR_REQUIRE_ESM (review
+      # RP-R1-1), so both greps name them. The exit code cannot tell: the boot
+      # fails at the database either way. runtime-pin.spec.mjs case 7 holds
+      # both greps to every code, and probes what the pinned Node prints.
+      #
       # DATABASE_URL: main.ts validates the environment and exits before it
       # imports AppModule, so with no DATABASE_URL this step only loaded
       # main.ts's own imports. An unreachable one (port 1, no password) gets
@@ -443,9 +450,9 @@ jobs:
         run: |
           set +e
           OUT=$(timeout 45 node apps/server/dist/main.js 2>&1)
-          if echo "$OUT" | grep -qE "ERR_REQUIRE_ESM|ERR_MODULE_NOT_FOUND|ERR_UNSUPPORTED_DIR_IMPORT|Cannot find module"; then
+          if echo "$OUT" | grep -qE "ERR_REQUIRE_ESM|ERR_REQUIRE_ASYNC_MODULE|ERR_REQUIRE_CYCLE_MODULE|ERR_MODULE_NOT_FOUND|ERR_UNSUPPORTED_DIR_IMPORT|Cannot find module"; then
             echo "::error::Server dies during module loading — it cannot start"
-            echo "$OUT" | grep -aE "ERR_REQUIRE_ESM|ERR_MODULE_NOT_FOUND|Cannot find module" | head -5
+            echo "$OUT" | grep -aE "ERR_REQUIRE_ESM|ERR_REQUIRE_ASYNC_MODULE|ERR_REQUIRE_CYCLE_MODULE|ERR_MODULE_NOT_FOUND|ERR_UNSUPPORTED_DIR_IMPORT|Cannot find module" | head -5
             exit 1
           fi
           echo "Server loaded its module graph successfully"
