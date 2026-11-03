@@ -415,7 +415,7 @@ beforeAll(async () => {
     [ID.norev, { ...defaultScopesForRole('STAFF'), revenue: 'none' }],
     [ID.writer, { ...defaultScopesForRole('STAFF'), revenue: 'write' }],
   ] as const) {
-    await db.user.create({ data: { id: user, email: `${user}@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id: user, email: `${P}${user.slice(P.length)}@test.local`, role: 'USER' } });
     await db.membership.create({
       data: { id: `${user}_m`, userId: user, businessId: ID.biz, role: 'STAFF', ...(scopes ? { permissionScopes: scopes } : {}) },
     });
@@ -728,7 +728,7 @@ describe('V1-44 review: who may apply, the DRAFT-only delete, the void actor, co
     /** Backends of this database waiting on a lock in a statement on credit_notes. */
     const lockWaiters = async (): Promise<number> => {
       const rows: Array<{ n: number }> = await db.$queryRawUnsafe(
-        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%credit_notes%'`,
+        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND position('credit_notes' in query) > 0`,
       );
       return rows[0]?.n ?? 0;
     };
