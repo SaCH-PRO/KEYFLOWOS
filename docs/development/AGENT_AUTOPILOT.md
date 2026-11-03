@@ -117,7 +117,10 @@ guard skipped every scan step when the StackHawk key was absent, and the run
 still concluded success, so as a required check it admitted PRs that were never
 scanned (PRS-M08; V1-30, owner ruling D-22). `tests/workflow-integrity.spec.mjs`
 proves the swap, the manual-only trigger and that the required DAST workflow
-cannot conclude success without probing.
+cannot conclude success without probing. `docs/SECURITY_DAST_SETUP.md` predates
+the swap: do not follow its steps that open a PR to run HawkScan or add HawkScan
+to `main`'s required status checks. With no PR trigger that check never
+reports, so it would block every merge.
 
 ## Concurrency
 

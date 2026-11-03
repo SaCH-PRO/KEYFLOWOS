@@ -39,7 +39,12 @@ const read = (file) => lf(fs.readFileSync(file, 'utf8'));
 const code = (text) => text.split('\n').filter((line) => !/^\s*#/.test(line)).join('\n');
 const isDast = (name) => /^DAST\b/.test(name);
 
-/** Every workflow file with the name it declares. The name is read the way GitHub shows it. */
+/**
+ * Every workflow file with the name it declares, read the way GitHub reads it:
+ * the YAML value of the top-level `name` key, so a trailing comment, quoting
+ * or a quoted key cannot hide a second workflow of the same name (review
+ * SEC-V130-2). A workflow with no name shows as its file path.
+ */
 function declaredWorkflows() {
   return fs
     .readdirSync(DIR)
@@ -47,8 +52,9 @@ function declaredWorkflows() {
     .sort()
     .map((file) => {
       const text = read(path.join(DIR, file));
-      const name = ((text.match(/^name:\s*(.+?)\s*$/m) || [])[1] || '').replace(/^["']|["']$/g, '');
-      return { file, text, name };
+      const doc = parseYaml(text) || {};
+      const name = typeof doc.name === 'string' && doc.name.trim() ? doc.name : `${DIR}/${file}`;
+      return { file, text, doc, name };
     });
 }
 
@@ -56,7 +62,7 @@ function declaredWorkflows() {
 function workflowNamed(name) {
   const found = declaredWorkflows().filter((w) => w.name === name);
   assert.equal(found.length, 1, `exactly one workflow file must declare "${name}"; found ${found.map((w) => w.file).join(', ') || 'none'}`);
-  return { ...found[0], doc: parseYaml(found[0].text) };
+  return found[0];
 }
 
 /** A workflow's trigger names, whichever form `on:` takes. */
@@ -71,6 +77,31 @@ function steps(doc) {
   return Object.entries(doc.jobs || {}).flatMap(([job, spec]) => (spec.steps || []).map((step) => ({ job, ...step })));
 }
 
+const PROBE_COMMAND = `node ${HARNESS} ${HARNESS_MANIFEST}`;
+const EVALUATOR_COMMAND = `node --test ${EVALUATOR_SPEC}`;
+
+/**
+ * The steps of `wf` that invoke `script`; there must be one, and each runs
+ * exactly `command` (review SEC-V130-1). A list of swallow patterns is never
+ * complete: GitHub's default `bash -e {0}` has no pipefail, so `| tee log`
+ * exits 0 with the probes failed, and `|| echo`, a trailing command under
+ * `shell: bash {0}`, or another interpreter all conclude success too. So
+ * nothing may surround the command, and the step takes no shell, working
+ * directory or condition of its own.
+ */
+function exactInvocations(wf, name, script, command) {
+  const found = steps(wf.doc).filter((s) => String(s.run ?? '').includes(script));
+  assert.ok(found.length > 0, `"${name}" must run ${command}`);
+  for (const step of found) {
+    const where = `step "${step.name}" of "${name}"`;
+    assert.equal(String(step.run).trim(), command, `${where} must run exactly "${command}"; anything around it can swallow its exit status`);
+    assert.ok(!('shell' in step), `${where} must use the default shell; found shell: ${step.shell}`);
+    assert.ok(!('working-directory' in step), `${where} must run from the repository root; found working-directory: ${step['working-directory']}`);
+    assert.equal(step.if ?? null, null, `${where} must be unconditional; found if: ${step.if}`);
+  }
+  return found;
+}
+
 // ------------------------------------------------------------ THE SWAP
 
 test('NC gate swap: the required DAST gate is DAST (Native), and DAST (HawkScan) is not required', () => {
@@ -78,9 +109,11 @@ test('NC gate swap: the required DAST gate is DAST (Native), and DAST (HawkScan)
   assert.ok(!REQUIRED_WORKFLOWS.includes(HAWKSCAN), 'HawkScan concluded success with every scan step skipped (PRS-M08)');
 });
 
-test('every required workflow is declared by exactly one workflow file', () => {
+test('NC duplicate name: every required workflow is declared by exactly one workflow file', () => {
   // Admission takes the latest run by name. A name no file declares makes every
-  // impl/* PR inadmissible; a name two files declare lets either stand in.
+  // impl/* PR inadmissible; a name two files declare lets either stand in, so a
+  // later green run of a second "DAST (Native)" that sent no probes would
+  // replace a failed native run (review SEC-V130-2).
   for (const name of REQUIRED_WORKFLOWS) workflowNamed(name);
 });
 
@@ -97,8 +130,25 @@ test('NC soft gate: the required DAST workflow cannot conclude success without p
     const pr = (wf.doc.on && typeof wf.doc.on === 'object' && !Array.isArray(wf.doc.on) && wf.doc.on.pull_request) || {};
     assert.ok(!('paths' in pr) && !('paths-ignore' in pr), `"${name}" must not be path-filtered`);
 
-    // No soft gate: a failed step must fail the run.
+    // No soft gate: a failed step must fail the run. Read structurally too, so
+    // a step written `- continue-on-error: true` (the key first in its list
+    // item) is caught as well.
     assert.doesNotMatch(body, /^\s*continue-on-error\s*:/m, `"${name}" must not declare continue-on-error`);
+    for (const [job, spec] of Object.entries(wf.doc.jobs || {})) {
+      assert.ok(!('continue-on-error' in spec), `job "${job}" of "${name}" must not declare continue-on-error`);
+    }
+    for (const step of steps(wf.doc)) {
+      assert.ok(!('continue-on-error' in step), `step "${step.name}" of "${name}" must not declare continue-on-error`);
+    }
+
+    // No default shell or directory: `defaults.run.shell: bash {0}` drops
+    // errexit for every step, and another shell or directory changes what
+    // the probe command means.
+    const scopes = [['the workflow', wf.doc.defaults], ...Object.entries(wf.doc.jobs || {}).map(([job, spec]) => [`job "${job}"`, spec.defaults])];
+    for (const [scope, defaults] of scopes) {
+      const run = (defaults && typeof defaults === 'object' && defaults.run) || {};
+      assert.deepEqual(Object.keys(run), [], `${scope} of "${name}" must not set defaults.run; found ${JSON.stringify(run)}`);
+    }
 
     // No dormant guard: nothing may skip the work and still conclude success.
     // Only diagnostics and cleanup may be conditional, and only on the outcome.
@@ -117,16 +167,21 @@ test('NC soft gate: the required DAST workflow cannot conclude success without p
     // No secret dependency: an absent secret is how HawkScan went dark.
     assert.doesNotMatch(body, /\bsecrets\./, `"${name}" must not depend on a repository secret`);
 
-    // It runs the harness against its manifest, unconditionally and unswallowed,
-    // after the job that proves the evaluator itself.
+    // It runs the harness against its manifest, exactly, unconditionally and
+    // unswallowed, after the job that proves the evaluator itself, which is
+    // held to the same rule: a swallowed evaluator lets a broken judge
+    // produce a green probe run.
     assert.ok(fs.existsSync(HARNESS) && fs.existsSync(HARNESS_MANIFEST), 'the native DAST harness and its manifest exist');
-    const probe = steps(wf.doc).find((s) => String(s.run || '').includes(`node ${HARNESS} ${HARNESS_MANIFEST}`));
-    assert.ok(probe, `"${name}" must run node ${HARNESS} ${HARNESS_MANIFEST}`);
-    assert.equal(probe.if ?? null, null, 'the probe step must be unconditional');
-    assert.doesNotMatch(String(probe.run), /\|\|\s*(?:true|:)|\bset \+e\b|\bexit 0\b/, 'the probe outcome must not be swallowed');
-    const needs = [].concat(wf.doc.jobs[probe.job].needs || []);
-    const evaluator = needs.find((job) => steps({ jobs: { [job]: wf.doc.jobs[job] || {} } }).some((s) => String(s.run || '').includes(`node --test ${EVALUATOR_SPEC}`)));
-    assert.ok(evaluator, `the probe job must need the job that runs node --test ${EVALUATOR_SPEC}`);
+    assert.ok(fs.existsSync(EVALUATOR_SPEC), 'the native DAST evaluator spec exists');
+    const probes = exactInvocations(wf, name, HARNESS, PROBE_COMMAND);
+    const evaluators = exactInvocations(wf, name, EVALUATOR_SPEC, EVALUATOR_COMMAND);
+    for (const probe of probes) {
+      const needs = [].concat(wf.doc.jobs[probe.job].needs || []);
+      assert.ok(
+        evaluators.some((e) => needs.includes(e.job)),
+        `the probe job "${probe.job}" must need the job that runs ${EVALUATOR_COMMAND}`,
+      );
+    }
   }
 });
 
@@ -165,3 +220,23 @@ test('NC doc: the operator doc names the workflows admission requires, and HawkS
     'the doc says DAST (HawkScan) is manual-only (workflow_dispatch)',
   );
 });
+
+// Review CR-V1-30-4. docs/SECURITY_DAST_SETUP.md and the header of
+// native-dast.yml still describe the gate before the swap, and both are outside
+// this packet's write set. The setup doc says opening a PR runs HawkScan and
+// tells operators to add HawkScan to main's required status checks; after the
+// swap that check never reports on a PR and would block every merge. The
+// native-dast.yml header says it is not a required check yet. hawkscan.yml and
+// AGENT_AUTOPILOT.md (in the write set) warn against those steps meanwhile.
+test(
+  'NC setup doc: no operator doc says a PR runs DAST (HawkScan) or tells anyone to require it',
+  { todo: 'docs/SECURITY_DAST_SETUP.md and the native-dast.yml header are outside the V1-30 write set; follow-up packet' },
+  () => {
+    const setup = read('docs/SECURITY_DAST_SETUP.md').replace(/\s+/g, ' ');
+    assert.doesNotMatch(setup, /starts scanning on PRs/i, 'the setup doc says HAWK_API_KEY makes HawkScan scan PRs');
+    assert.doesNotMatch(setup, /Open a PR \(or run the workflow manually/i, 'the setup doc says opening a PR runs HawkScan');
+    assert.doesNotMatch(setup, /Add `?HawkScan`? to `?main`?'s required status checks/i, 'the setup doc tells operators to require HawkScan');
+    const nativeHeader = read(path.join(DIR, 'native-dast.yml')).split(/\nname:/)[0];
+    assert.doesNotMatch(nativeHeader, /NOT A REQUIRED CHECK YET/i, 'the native-dast.yml header says it is not required');
+  },
+);

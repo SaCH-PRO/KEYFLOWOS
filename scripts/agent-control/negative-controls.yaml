@@ -1207,11 +1207,15 @@ negative_controls:
   - id: NC-RETURN-ARTIFACT-PASS-PROSE
     claim: >
       The prose rule runs on this branch's real claude-return.yaml, so the
-      6d8a6bd8 DAST sentence fails the portable suite at the exact head.
+      6d8a6bd8 DAST sentence fails the portable suite at the exact head. The
+      target leaves the gate name out, so it holds both before and after the
+      artifact's DAST sentence follows the V1-30 swap from DAST (HawkScan) to
+      DAST (Native) (review CR-V1-30-2): either name, or "exact-head check"
+      alone, next to "passed" is a claim.
     mutation:
       file: .agent-control/claude-return.yaml
-      find: "DAST (HawkScan) is a required exact-head check; its result for this head is PENDING until the RETURN."
-      replace: "DAST (HawkScan) is a required exact-head check and passed."
+      find: "is a required exact-head check; its result for this head is PENDING until the RETURN."
+      replace: "is a required exact-head check and passed."
     proof_command: node --test --test-name-pattern="NC branch artifact" scripts/agent-control/tests/return-evidence.spec.mjs
     timeout_ms: 120000
 
@@ -3381,4 +3385,137 @@ negative_controls:
       find: "Branch divergence,\n  DAST (Native) and Agent Control Worker Proof"
       replace: "Branch divergence,\n  DAST (HawkScan) and Agent Control Worker Proof"
     proof_command: node --test --test-name-pattern="NC doc" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  # Review SEC-V130-1. A list of swallow patterns is never complete, so each
+  # step that invokes the harness or the evaluator spec runs exactly its
+  # command, with no shell, working directory or condition of its own, and no
+  # default shell applies. Each control below was VACUOUS against the
+  # pattern list.
+  - id: NC-V1-30-NATIVE-DAST-TEE-PIPE
+    claim: >
+      Piping the probe through tee is a soft gate: GitHub's default bash -e
+      has no pipefail, so the pipe exits 0 with the probes failed. Rejected.
+    mutation:
+      file: .github/workflows/native-dast.yml
+      find: "        run: node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json"
+      replace: "        run: node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json | tee native-dast-probes.log"
+    proof_command: node --test --test-name-pattern="NC soft gate" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-V1-30-NATIVE-DAST-OR-ECHO
+    claim: >
+      A probe whose failure falls through to an echo concludes success.
+      Rejected.
+    mutation:
+      file: .github/workflows/native-dast.yml
+      find: "        run: node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json"
+      replace: '        run: node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json || echo "::warning::native DAST probes failed"'
+    proof_command: node --test --test-name-pattern="NC soft gate" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-V1-30-NATIVE-DAST-SHELL-NO-ERREXIT
+    claim: >
+      Under shell bash {0} there is no errexit, so a probe followed by another
+      command concludes with that command's status. Rejected.
+    mutation:
+      file: .github/workflows/native-dast.yml
+      find: "        run: node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json"
+      replace: "        shell: bash {0}\n        run: |\n          node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json\n          echo probes-finished"
+    proof_command: node --test --test-name-pattern="NC soft gate" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-V1-30-NATIVE-DAST-SHELL-WRAPPER
+    claim: >
+      The probe command can be exact and still be swallowed by the step's own
+      shell template. A step shell is rejected.
+    mutation:
+      file: .github/workflows/native-dast.yml
+      find: "run: node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json"
+      replace: |-
+        shell: bash -c "bash {0} || true"
+                run: node scripts/security/native-dast.mjs scripts/security/native-dast-manifest.json
+    proof_command: node --test --test-name-pattern="NC soft gate" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-V1-30-NATIVE-DAST-DEFAULT-SHELL
+    claim: >
+      A workflow-wide defaults.run.shell swallows every step without touching
+      any step. Rejected.
+    mutation:
+      file: .github/workflows/native-dast.yml
+      find: |-
+        permissions:
+          contents: read
+      replace: |-
+        permissions:
+          contents: read
+        defaults:
+          run:
+            shell: bash -c "bash {0} || true"
+    proof_command: node --test --test-name-pattern="NC soft gate" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-V1-30-NATIVE-DAST-EVALUATOR-SWALLOWED
+    claim: >
+      The evaluator spec is held to the same rule as the probes: a swallowed
+      evaluator lets a broken judge produce a green probe run. Rejected.
+    mutation:
+      file: .github/workflows/native-dast.yml
+      find: "        run: node --test scripts/security/tests/native-dast.spec.mjs"
+      replace: "        run: node --test scripts/security/tests/native-dast.spec.mjs || true"
+    proof_command: node --test --test-name-pattern="NC soft gate" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-V1-30-NATIVE-DAST-EVALUATOR-SKIPPED
+    claim: >
+      An evaluator step conditional on failure() is skipped on every healthy
+      run, and its job still concludes success. The diagnostics allowance
+      (failure() or always()) does not extend to the evaluator. Rejected.
+    mutation:
+      file: .github/workflows/native-dast.yml
+      find: |-
+        - name: Native DAST evaluator spec
+                run: node --test scripts/security/tests/native-dast.spec.mjs
+      replace: |-
+        - name: Native DAST evaluator spec
+                if: failure()
+                run: node --test scripts/security/tests/native-dast.spec.mjs
+    proof_command: node --test --test-name-pattern="NC soft gate" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-V1-30-NATIVE-DAST-LIST-ITEM-CONTINUE-ON-ERROR
+    claim: >
+      continue-on-error written as the first key of a step's list item is
+      still a soft gate. It is read structurally, not only by line. Rejected.
+    mutation:
+      file: .github/workflows/native-dast.yml
+      find: "- name: Run native DAST probes"
+      replace: "- continue-on-error: true\n        name: Run native DAST probes"
+    proof_command: node --test --test-name-pattern="NC soft gate" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  # Review SEC-V130-2. Admission takes the latest run by name, so a second
+  # workflow that declares a required name stands in for it. The name is read
+  # as YAML, the way GitHub reads it.
+  - id: NC-V1-30-IMPOSTOR-NAME-COMMENT
+    claim: >
+      A second workflow named "DAST (Native) # fast lane" is named DAST
+      (Native) to GitHub. Two files declaring a required name are rejected.
+    mutation:
+      file: .github/workflows/hawkscan.yml
+      find: "name: DAST (HawkScan)"
+      replace: "name: DAST (Native) # fast lane"
+    proof_command: node --test --test-name-pattern="NC duplicate name" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-V1-30-IMPOSTOR-QUOTED-KEY
+    claim: >
+      A second workflow whose name key is quoted ("name": DAST (Native)) is
+      named DAST (Native) to GitHub. Rejected.
+    mutation:
+      file: .github/workflows/uptime-monitor.yml
+      find: "name: Uptime monitor"
+      replace: '"name": DAST (Native)'
+    proof_command: node --test --test-name-pattern="NC duplicate name" scripts/agent-control/tests/workflow-integrity.spec.mjs
     timeout_ms: 120000
