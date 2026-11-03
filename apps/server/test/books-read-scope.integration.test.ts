@@ -32,6 +32,27 @@
  *               message; staffRead, role-default STAFF and the owner read the
  *               REVENUE row.
  *
+ * Review repairs (FOLLOW3-A5A6 review):
+ *   BRS-09      SEC-A5A6-02: the routes that serve the same figures again
+ *               (GET journal-entries, GET accountant-export.zip, POST
+ *               accountant-export, POST accountant-export/email, GET
+ *               money-moves, GET cashflow-forecast) refuse staffNone with the
+ *               same 403 before the service runs. RED-BEFORE: 200/201 with the
+ *               ADJUSTMENT lines, the export built (and mailed), 'could add
+ *               TTD 54.33', the forecast.
+ *   BRS-10      control: staffRead, role-default STAFF and the owner still read
+ *               them (journal lines, export built, email handed to the sender
+ *               stand-in, money-moves 54.33, forecast).
+ *   BRS-11      SEC-A5A6-04: a SUPER_ADMIN with no Membership (BusinessGuard and
+ *               ModuleScopeGuard pass that role) is refused 403 'No access to
+ *               this business' on the six reads, the trial balance, GET
+ *               journal-entries, money-moves and the cashflow forecast before
+ *               any service runs. RED-BEFORE: aging, customer balance,
+ *               safe-to-spend, journal-entries, money-moves and the forecast
+ *               answered 200 with the figures.
+ *   BRS-12      todo (CR-A6-02 / SEC-A5A6-03, outside the write set): a
+ *               distinguished owner (Business.ownerId) with no Membership row.
+ *
  * Fixtures: one TTD business (CASH basis); an invoice of 345.67 PAID by a
  * SUCCESSFUL payment with its INCOME posting (DR CASH / CR REVENUE 345.67,
  * sourced from the Payment); an OVERDUE invoice of 54.33 to a second contact,
@@ -74,6 +95,7 @@ const ID = {
   staffRead: `${P}staffRead`,
   staffDefault: `${P}staffDefault`,
   outsider: `${P}outsider`,
+  superAdmin: `${P}superAdmin`,
   biz: `${P}biz`,
   contactPaid: `${P}contactPaid`,
   contactOpen: `${P}contactOpen`,
@@ -88,6 +110,8 @@ let db: any;
 let app: any;
 let coa: any;
 let posting: any;
+/** The ADJUSTMENT posted by hand (equity only: no cash, revenue or receivable figure moves). */
+const ADJUSTMENT = 12.34;
 /** The business's REVENUE and CASH chart-of-account rows. */
 const ACC: Record<string, string> = {};
 /** vi.spyOn wrappers (calling through) on the real service methods behind the six reads. */
@@ -221,6 +245,16 @@ beforeAll(async () => {
   const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { PostingService } = await import('../src/modules/finance/posting.service');
   const { AccountingPeriodService } = await import('../src/modules/finance/accounting-period.service');
+  const { CashflowForecastService } = await import('../src/modules/finance/cashflow-forecast.service');
+  const { MoneyMovesService } = await import('../src/modules/finance/money-moves.service');
+  const { AccountantExportService } = await import('../src/modules/finance/accountant-export.service');
+  const { AccountantExportEmailService } = await import('../src/modules/finance/accountant-export-email.service');
+  // The export's builder and mailer are stand-ins (no object storage, no mail
+  // provider): only whether a request reaches them is under test.
+  SPY.build = vi.fn(async () => ({
+    buffer: Buffer.from('v81f-zip'), contentType: 'application/zip', bytes: 8, filename: 'v81f-export.zip',
+  }));
+  SPY.send = vi.fn(async () => ({ sent: true }));
 
   // FinanceController's collaborators off the six reads and the trial balance.
   const stubs = await Promise.all([
@@ -235,11 +269,7 @@ beforeAll(async () => {
     import('../src/modules/finance/recurring-journal-entry.service').then((m) => m.RecurringJournalEntryService),
     import('../src/modules/finance/reconciliation.service').then((m) => m.ReconciliationService),
     import('../src/modules/finance/tax-liability.service').then((m) => m.TaxLiabilityService),
-    import('../src/modules/finance/accountant-export.service').then((m) => m.AccountantExportService),
     import('../src/modules/finance/finance-intelligence.service').then((m) => m.FinanceIntelligenceService),
-    import('../src/modules/finance/accountant-export-email.service').then((m) => m.AccountantExportEmailService),
-    import('../src/modules/finance/cashflow-forecast.service').then((m) => m.CashflowForecastService),
-    import('../src/modules/finance/money-moves.service').then((m) => m.MoneyMovesService),
     import('../src/modules/finance/cash-reserve.service').then((m) => m.CashReserveService),
     import('../src/modules/finance/credit-note.service').then((m) => m.CreditNoteService),
     import('../src/modules/finance/bank-connection.service').then((m) => m.BankConnectionService),
@@ -265,6 +295,10 @@ beforeAll(async () => {
       ChartOfAccountsSeederService,
       PostingService,
       AccountingPeriodService,
+      CashflowForecastService,
+      MoneyMovesService,
+      { provide: AccountantExportService, useValue: { build: SPY.build } },
+      { provide: AccountantExportEmailService, useValue: { send: SPY.send } },
       ...stubs.map((token) => ({ provide: token, useValue: {} })),
     ],
   }).compile();
@@ -279,6 +313,8 @@ beforeAll(async () => {
   SPY.getCustomerBalance = vi.spyOn(receivables, 'getCustomerBalance');
   SPY.getOverview = vi.spyOn(moduleRef.get(FinanceOverviewService), 'getOverview');
   SPY.calculate = vi.spyOn(moduleRef.get(SafeToSpendService), 'calculate');
+  SPY.forecast = vi.spyOn(moduleRef.get(CashflowForecastService), 'forecast');
+  SPY.generate = vi.spyOn(moduleRef.get(MoneyMovesService), 'generate');
 
   app = moduleRef.createNestApplication();
   attachIdentity(app);
@@ -288,8 +324,9 @@ beforeAll(async () => {
 
   await cleanup(); // in case a prior run aborted
 
-  for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.staffDefault, ID.outsider]) {
-    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
+  for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.staffDefault, ID.outsider, ID.superAdmin]) {
+    const role = id === ID.superAdmin ? 'SUPER_ADMIN' : 'USER';
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role } });
   }
   await db.business.create({
     data: { id: ID.biz, name: 'V81F Books', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' },
@@ -338,6 +375,20 @@ beforeAll(async () => {
     entries: [
       { accountId: ACC.cash, debit: 345.67 },
       { accountId: ACC.revenue, credit: 345.67 },
+    ],
+  });
+  // A manual journal entry (GET journal-entries lists ADJUSTMENTs): equity
+  // only, so the cash, revenue and receivable figures above are unchanged.
+  await posting.post({
+    businessId: ID.biz,
+    type: 'ADJUSTMENT',
+    date: new Date(Date.now() - 30_000),
+    amount: ADJUSTMENT,
+    currency: 'TTD',
+    description: 'v81f owner drawings reclass',
+    entries: [
+      { accountId: (await coa.getBySystemKey(ID.biz, 'OWNER_DRAWINGS')).id, debit: ADJUSTMENT },
+      { accountId: (await coa.getBySystemKey(ID.biz, 'OWNER_EQUITY')).id, credit: ADJUSTMENT },
     ],
   });
   await db.invoice.create({
@@ -419,4 +470,104 @@ describe('FOLLOW3-A6 (C3-00): GET trial-balance is unchanged', () => {
       expect(rows.map((i: any) => [i.currency, i.credit, i.net]), as).toEqual([['TTD', '345.67', '-345.67']]);
     }
   }, 30_000);
+});
+
+/**
+ * Review SEC-A5A6-02: the routes that serve the gated figures again. `call`
+ * makes the request; `spy` is the service method behind it ('' for the
+ * journal list, which reads Prisma directly); `served` checks what a reader
+ * that may see the figures gets back.
+ */
+const SIBLINGS: Array<{ route: string; spy: string; call: (as: string) => request.Test; served: (res: request.Response) => void }> = [
+  {
+    route: 'GET journal-entries',
+    spy: '',
+    call: (as) => get('journal-entries', as),
+    served: (res) => {
+      type Line = { debit: string; credit: string };
+      const items: Array<{ entries?: Line[] }> = res.body.items ?? [];
+      const amounts = items.flatMap((t) => (t.entries ?? []).map((e) => Number(e.debit) || Number(e.credit)));
+      expect(amounts).toEqual([ADJUSTMENT, ADJUSTMENT]);
+    },
+  },
+  {
+    route: 'GET accountant-export.zip',
+    spy: 'build',
+    call: (as) => get('accountant-export.zip?start=2026-01-01&end=2026-12-31', as),
+    served: (res) => expect(res.headers['content-disposition']).toContain('v81f-export.zip'),
+  },
+  {
+    route: 'POST accountant-export',
+    spy: 'build',
+    call: (as) => request(app.getHttpServer()).post(`/finance/businesses/${ID.biz}/accountant-export`).set(HEADER, as)
+      .send({ periodStart: '2026-01-01', periodEnd: '2026-12-31' }),
+    // A permitted call goes on to object storage, which this harness does not
+    // stand up; the refusal is what is under test, so BRS-10 skips it.
+    served: () => undefined,
+  },
+  {
+    route: 'POST accountant-export/email',
+    spy: 'send',
+    call: (as) => request(app.getHttpServer()).post(`/finance/businesses/${ID.biz}/accountant-export/email`).set(HEADER, as)
+      .send({ periodStart: '2026-01-01', periodEnd: '2026-12-31', to: `${P}accountant@test.local` }),
+    served: (res) => expect(res.body).toMatchObject({ sent: true }),
+  },
+  {
+    route: 'GET money-moves',
+    spy: 'generate',
+    call: (as) => get('money-moves', as),
+    served: (res) => expect(JSON.stringify(res.body)).toContain('could add TTD 54.33'),
+  },
+  {
+    route: 'GET cashflow-forecast',
+    spy: 'forecast',
+    call: (as) => get('cashflow-forecast', as),
+    served: (res) => expect(res.body).toHaveProperty('currency', 'TTD'),
+  },
+];
+
+describe('FOLLOW3-A6 review SEC-A5A6-02 (BRS-09): the routes that serve the gated figures again carry the same gate', () => {
+  for (const sibling of SIBLINGS) {
+    it(`[BRS-09] RED-BEFORE: staffNone ${sibling.route} answers 403 '${REVENUE_DENIED}' before the service runs, with no figure`, async () => {
+      clearSpies();
+      const res = await sibling.call(ID.staffNone);
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body).toMatchObject({ code: 'FORBIDDEN', message: REVENUE_DENIED });
+      expect(JSON.stringify(res.body)).not.toMatch(/345\.67|54\.33|12\.34|"items"|"entries"|could add/);
+      for (const [name, spy] of Object.entries(SPY)) expect(spy, `${name} never runs for a refused read`).not.toHaveBeenCalled();
+    }, 30_000);
+  }
+
+  it('[BRS-10] control: staffRead, STAFF on role defaults and the owner still read them', async () => {
+    for (const as of [ID.staffRead, ID.staffDefault, ID.owner]) {
+      for (const sibling of SIBLINGS.filter((s) => s.route !== 'POST accountant-export')) {
+        clearSpies();
+        const res = await sibling.call(as);
+        expect(res.status, `${as} ${sibling.route}: ${JSON.stringify(res.body)}`).toBeLessThan(300);
+        sibling.served(res);
+        if (sibling.spy) expect(SPY[sibling.spy], `${as} ${sibling.route}`).toHaveBeenCalledTimes(1);
+        // The export's builder and mailer are handed the route business and the caller.
+        if (sibling.spy === 'build' || sibling.spy === 'send') {
+          expect(SPY[sibling.spy].mock.calls[0][0], `${as} ${sibling.route}`).toMatchObject({ businessId: ID.biz, userId: as });
+        }
+      }
+    }
+  }, 60_000);
+});
+
+describe('FOLLOW3-A6 review SEC-A5A6-04 (BRS-11): a SUPER_ADMIN with no Membership reads no Books figure', () => {
+  it("[BRS-11] RED-BEFORE: the non-member SUPER_ADMIN gets 403 'No access to this business' on the six reads, the trial balance, journal-entries, money-moves and the cashflow forecast, before any service runs", async () => {
+    clearSpies();
+    for (const route of [...READS.map((r) => r.route()), 'trial-balance', 'journal-entries', 'money-moves', 'cashflow-forecast']) {
+      const res = await get(route, ID.superAdmin);
+      expect(res.status, `${route}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body).toMatchObject({ code: 'FORBIDDEN', message: 'No access to this business' });
+      expect(JSON.stringify(res.body)).not.toMatch(/345\.67|54\.33|12\.34/);
+    }
+    for (const [name, spy] of Object.entries(SPY)) expect(spy, name).not.toHaveBeenCalled();
+  }, 30_000);
+});
+
+describe('FOLLOW3-A6 review CR-A6-02 / SEC-A5A6-03 (BRS-12): the distinguished owner without a Membership row', () => {
+  it.todo("[BRS-12] BLOCKED outside the write set (core/auth/module-scope.guard.ts) or pending a ruling: a distinguished owner (Business.ownerId) with no Membership row, whom BusinessGuard and ensureAccess admit, reads the Books reads as at base; ModuleScopeGuard (the D-57 trial-balance gate, which already refused this owner on GET trial-balance at base) refuses it 'Not a member of this business', as on every revenue-scoped route");
 });

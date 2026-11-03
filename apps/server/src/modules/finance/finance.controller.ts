@@ -10,6 +10,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { ReceivablesService } from './receivables.service';
 import { LedgerBalanceService } from './ledger-balance.service';
 import { FinanceOverviewService } from './finance-overview.service';
@@ -118,13 +119,21 @@ export class FinanceController {
     return this.posting.post(input);
   }
 
+  // FOLLOW3-A6 review SEC-A5A6-02 (D-57): the manual journal lines are
+  // general-ledger lines (BRS-01), so the list needs revenue:read too; and
+  // SEC-A5A6-04: the membership check, so a non-member SUPER_ADMIN (whom
+  // ModuleScopeGuard and BusinessGuard pass) reads no ledger line.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('journal-entries')
   async listJournalEntries(
     @Param('businessId') businessId: string,
+    @Req() req: { user: AuthenticatedUser },
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('accountId') accountId?: string,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     const where: any = { businessId, type: 'ADJUSTMENT' };
     if (from || to) {
       where.date = {};
@@ -150,7 +159,14 @@ export class FinanceController {
   // customer balance, overview, safe-to-spend) need revenue:read, the
   // trial-balance gate below; no new module key. ModuleScopeGuard runs after
   // the class guards and refuses a revenue:none member with 403 before the
-  // handler, so nothing is read or seeded for them.
+  // handler, so nothing is read or seeded for them. Review SEC-A5A6-02: the
+  // routes that serve the same figures again (GET journal-entries, the
+  // accountant export ZIP, its signed URL and its email, money-moves and the
+  // cashflow forecast) carry the same gate. Review SEC-A5A6-04: each of these
+  // reads also runs ensureAccess, so a non-member SUPER_ADMIN (whom
+  // BusinessGuard and ModuleScopeGuard pass) is refused on every one.
+  // ModuleScopeGuard refuses a distinguished owner (Business.ownerId) with no
+  // Membership row, as GET trial-balance already did (review CR-A6-02, open).
   @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
   @Get('general-ledger')
@@ -242,7 +258,8 @@ export class FinanceController {
   @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
   @Get('receivables/aging')
-  async aging(@Param('businessId') businessId: string, @Query('asOf') asOf?: string) {
+  async aging(@Param('businessId') businessId: string, @Req() req: { user: AuthenticatedUser }, @Query('asOf') asOf?: string) {
+    await this.ensureAccess(req.user.id, businessId);
     const date = asOf ? (() => { const d = new Date(asOf); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid asOf date'); return d; })() : new Date();
     const [report, ledgerAr] = await Promise.all([
       this.receivables.getAging(businessId, date),
@@ -257,8 +274,10 @@ export class FinanceController {
   async customerBalance(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: AuthenticatedUser },
     @Query('asOf') asOf?: string,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     const date = asOf ? new Date(asOf) : new Date();
     return this.receivables.getCustomerBalance(businessId, contactId, date);
   }
@@ -989,6 +1008,12 @@ export class FinanceController {
   ) { return this.payTaxLiability(businessId, id, body, req); }
 
   // ---------- FIN7: Accountant Export ZIP ----------
+  // FOLLOW3-A6 review SEC-A5A6-02 (D-57, every money report): the ZIP holds
+  // trial-balance.csv, general-ledger.csv and ar-aging.csv, the figures the
+  // trial-balance gate and the six Books reads refuse a revenue:none member,
+  // so the stream, the signed URL and the email below need revenue:read.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('accountant-export.zip')
   async accountantExportStream(
     @Param('businessId') businessId: string,
@@ -1022,6 +1047,8 @@ export class FinanceController {
    * `(start, end)` (legacy/short form). Each may be a YYYY-MM-DD string or
    * a full ISO timestamp.
    */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Post('accountant-export')
   async accountantExportSigned(
     @Param('businessId') businessId: string,
@@ -1074,24 +1101,35 @@ export class FinanceController {
   @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
   @Get('safe-to-spend')
-  async getSafeToSpend(@Param('businessId') businessId: string) {
+  async getSafeToSpend(@Param('businessId') businessId: string, @Req() req: { user: AuthenticatedUser }) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.safeToSpend.calculate(businessId);
   }
 
   // ---------- Cashflow Forecast ----------
+  // Review SEC-A5A6-02/04: the forecast opens on the cash balance and counts
+  // the open receivables (the safe-to-spend and aging figures), and money-moves
+  // below names the overdue receivables total: revenue:read and membership.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('cashflow-forecast')
   async getCashflowForecast(
     @Param('businessId') businessId: string,
+    @Req() req: { user: AuthenticatedUser },
     @Query('days') days?: string,
   ) {
+    await this.ensureAccess(req.user.id, businessId);
     const daysNum = days ? parseInt(days, 10) : 90;
     if (days && Number.isNaN(daysNum)) throw new BadRequestException('Invalid days');
     return this.cashflowForecast.forecast(businessId, daysNum);
   }
 
   // ---------- Money Moves ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('money-moves')
-  async getMoneyMoves(@Param('businessId') businessId: string) {
+  async getMoneyMoves(@Param('businessId') businessId: string, @Req() req: { user: AuthenticatedUser }) {
+    await this.ensureAccess(req.user.id, businessId);
     return this.moneyMoves.generate(businessId);
   }
 
@@ -1100,6 +1138,8 @@ export class FinanceController {
    * business's configured `accountantEmail` when `to` is omitted; pass
    * `saveRecipient: true` to persist a new address as the new default.
    */
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Post('accountant-export/email')
   async accountantExportEmailSend(
     @Param('businessId') businessId: string,
