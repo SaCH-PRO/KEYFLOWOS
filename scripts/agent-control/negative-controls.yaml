@@ -3560,3 +3560,31 @@ negative_controls:
         # the admission gate to this workflow is V1-30.
     proof_command: node --test --test-name-pattern="NC setup doc" scripts/agent-control/tests/workflow-integrity.spec.mjs
     timeout_ms: 120000
+
+  # FOLLOW3-C5-ADMISSION-RUN-PATH (review SEC-V130-2, owner ruling D-61).
+  # Admission binds each required gate to its workflow file, so a second file
+  # that declares a required name cannot speak for it. Proof:
+  # tests/admission.spec.mjs.
+  - id: NC-FOLLOW3-C5-RUN-PATH-UNBOUND
+    claim: >
+      Only a run of a required gate's own workflow file counts for that gate.
+      Without the path filter, a later green run of a second file named
+      DAST (Native) replaces a failed native-dast.yml run and the head is
+      admitted.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "  const runs = (snapshot.workflow_runs || []).filter(runOfRequiredGate);"
+      replace: "  const runs = snapshot.workflow_runs || [];"
+    proof_command: node --test --test-name-pattern="NC impostor gate" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-FOLLOW3-C5-RUN-PATH-DROPPED
+    claim: >
+      The collector keeps each run's workflow file path. A snapshot that drops
+      it leaves admission unable to tell a gate from an impostor.
+    mutation:
+      file: scripts/agent-control/auto-merge-admitted.mjs
+      find: "  path: r.path,\n"
+      replace: ""
+    proof_command: node --test --test-name-pattern="NC run snapshot" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000

@@ -271,7 +271,9 @@ A packet PR is merge-eligible only when:
 - the independent semantic review is satisfied at the exact admitted semantics
   (see "Independent semantic review");
 - no required check at the admission head is pending, queued or in progress,
-  and the newest run of each required workflow is green;
+  and the newest run of each required workflow is green, counting only runs
+  of that workflow's own file (see "Each required gate is bound to its
+  workflow file");
 - no required check is owed: a `reopened`, `ready_for_review`,
   `converted_to_draft`, `renamed` or `base_ref_changed` transition newer than a
   workflow's latest run means GitHub is about to create a run the list may not
@@ -280,6 +282,40 @@ A packet PR is merge-eligible only when:
 - a distinct ChatGPT merge grant for this exact target is current on issue #80
   (see "The merge grant"). Everything above is necessary, and none of it is
   the decision to merge.
+
+### Each required gate is bound to its workflow file
+
+(FOLLOW3-C5-ADMISSION-RUN-PATH, owner ruling D-61; review SEC-V130-2)
+
+A workflow's name is whatever its file declares. Admission used to keep the
+newest run per required gate by name alone, so a second workflow file that
+declared `name: DAST (Native)` could replace a failed `native-dast.yml` run
+with a later green run of its own, and the head was admitted.
+`workflow-integrity.spec.mjs` rejects a second file declaring a required name,
+but it runs inside Agent Control Worker Proof, a gate that was itself chosen
+by name.
+
+Admission now binds each gate to its file, in `lib/admission.mjs` itself.
+`REQUIRED_WORKFLOW_FILES` in `lib/events.mjs` maps each required workflow to
+its file:
+
+| Required workflow | File |
+|---|---|
+| CI/CD Pipeline | `.github/workflows/ci-cd.yml` |
+| Agent Control Gate | `.github/workflows/agent-control-gate.yml` |
+| Branch divergence | `.github/workflows/branch-divergence.yml` |
+| DAST (Native) | `.github/workflows/native-dast.yml` |
+| Agent Control Worker Proof | `.github/workflows/agent-control-worker-proof.yml` |
+
+The collector (`toWorkflowRunSnapshot` in `auto-merge-admitted.mjs`) keeps
+each run's `path` from the GitHub runs API. `runOfRequiredGate()` counts a run
+for a gate only when that path, less any `@refs/...` suffix, is the gate's
+file. Every run check reads only those runs: the newest run, the pending
+check, the stale-head check and the transition check. A run from another file,
+or with no path, counts for no gate, so admission fails closed with
+`missing_workflows` or `workflows_not_green`. A pending run of another file
+does not block. `workflow-integrity.spec.mjs` proves that each mapped file
+exists, declares its name, and that the map names exactly `REQUIRED_WORKFLOWS`.
 
 ### The merge grant
 

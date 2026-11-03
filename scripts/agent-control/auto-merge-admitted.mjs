@@ -30,6 +30,10 @@
  *     evaluator waits for that gate's own successful run. EXPECTED_HEAD_SHA
  *     and EXPECTED_BASE_SHA, when set, must equal the live PR.
  *
+ * FOLLOW3-C5 (owner ruling D-61) keeps each run's workflow file (`path`) in
+ * the snapshot, so admission counts a run for a required gate only when it
+ * came from that gate's own file (lib/admission.mjs runOfRequiredGate).
+ *
  * Without --merge this is the pre-merge check every merge must pass, manual
  * merges included (docs/development/AGENT_CONTROL_PLANE.md).
  *
@@ -47,15 +51,35 @@ const prNumber = Number(process.env.PR_NUMBER || 0);
 const wantMerge = process.argv.includes('--merge');
 const grantOnly = process.argv.includes('--grant-only');
 
-if (wantMerge && grantOnly) {
+// Imported, the module only exports its mapper: it reads nothing and merges
+// nothing (tests/admission.spec.mjs imports it with no credentials).
+const invokedDirectly = Boolean(process.argv[1] && process.argv[1].endsWith('auto-merge-admitted.mjs'));
+
+if (invokedDirectly && wantMerge && grantOnly) {
   process.stderr.write('--merge and --grant-only are exclusive\n');
   process.exit(2);
 }
 
-if (!token || !repo || !prNumber) {
+if (invokedDirectly && (!token || !repo || !prNumber)) {
   process.stderr.write('GITHUB_TOKEN, GITHUB_REPOSITORY and PR_NUMBER are required\n');
   process.exit(2);
 }
+
+/**
+ * One run of the GitHub runs API, as admission reads it. `path` is the
+ * workflow file that produced the run: without it admission cannot tell a
+ * required gate from a second file that declares the same name, and counts
+ * the run for no gate (D-61).
+ */
+export const toWorkflowRunSnapshot = (r) => ({
+  id: r.id,
+  name: r.name,
+  path: r.path,
+  head_sha: r.head_sha,
+  status: r.status,
+  conclusion: r.conclusion,
+  created_at: r.created_at,
+});
 
 async function api(path, init = {}) {
   const res = await fetch('https://api.github.com' + path, {
@@ -207,14 +231,7 @@ async function evaluateNow() {
   }
 
   const runs = await api(`/repos/${repo}/actions/runs?head_sha=${pr.head.sha}&per_page=100`);
-  const workflow_runs = (runs.workflow_runs || []).map((r) => ({
-    id: r.id,
-    name: r.name,
-    head_sha: r.head_sha,
-    status: r.status,
-    conclusion: r.conclusion,
-    created_at: r.created_at,
-  }));
+  const workflow_runs = (runs.workflow_runs || []).map(toWorkflowRunSnapshot);
 
   const [reviews, events, chatgpt, lineage, control_comments] = await Promise.all([
     apiAll(`/repos/${repo}/pulls/${prNumber}/reviews`),
@@ -267,14 +284,16 @@ async function main() {
   return result;
 }
 
-main()
-  .then((result) => {
-    process.stdout.write(JSON.stringify(result));
-    process.exit(result.eligible ? 0 : 3);
-  })
-  .catch((error) => {
-    // An unexpected failure is never a silent no-op.
-    process.stdout.write(JSON.stringify({ eligible: false, reason: 'evaluator_error', error: error.message, pr: prNumber }));
-    process.stderr.write(`admission evaluator failed: ${error.stack || error.message}\n`);
-    process.exit(2);
-  });
+if (invokedDirectly) {
+  main()
+    .then((result) => {
+      process.stdout.write(JSON.stringify(result));
+      process.exit(result.eligible ? 0 : 3);
+    })
+    .catch((error) => {
+      // An unexpected failure is never a silent no-op.
+      process.stdout.write(JSON.stringify({ eligible: false, reason: 'evaluator_error', error: error.message, pr: prNumber }));
+      process.stderr.write(`admission evaluator failed: ${error.stack || error.message}\n`);
+      process.exit(2);
+    });
+}

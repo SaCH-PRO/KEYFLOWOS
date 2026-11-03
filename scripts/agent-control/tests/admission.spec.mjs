@@ -366,13 +366,13 @@ test('a red required workflow blocks admission', () => {
 
 test('the newest run at the head wins when a workflow re-ran', () => {
   const runs = greenRuns();
-  runs.push({ id: 999, name: 'CI/CD Pipeline', head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-23T12:00:00Z' });
+  runs.push({ id: 999, name: 'CI/CD Pipeline', path: REQUIRED_WORKFLOW_FILES['CI/CD Pipeline'], head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-23T12:00:00Z' });
   runs[0] = { ...runs[0], conclusion: 'failure', created_at: '2026-09-23T09:00:00Z' };
   assert.equal(evaluateAdmission(admissible({ workflow_runs: runs })).eligible, true);
 
   // ...and a newer FAILURE must lose to nothing.
   const runs2 = greenRuns();
-  runs2.push({ id: 998, name: 'CI/CD Pipeline', head_sha: HEAD, status: 'completed', conclusion: 'failure', created_at: '2026-09-23T12:00:00Z' });
+  runs2.push({ id: 998, name: 'CI/CD Pipeline', path: REQUIRED_WORKFLOW_FILES['CI/CD Pipeline'], head_sha: HEAD, status: 'completed', conclusion: 'failure', created_at: '2026-09-23T12:00:00Z' });
   assert.equal(evaluateAdmission(admissible({ workflow_runs: runs2 })).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
 });
 
@@ -586,7 +586,7 @@ test('an eligible verdict records which independent review satisfied it', () => 
 test('NC pending re-run: a required run still in progress at the head blocks admission even after an older green run', () => {
   const runs = [
     ...greenRuns(),
-    { id: 900, name: 'Agent Control Gate', head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:01Z' },
+    { id: 900, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:01Z' },
   ];
   const v = evaluateAdmission(admissible({ workflow_runs: runs }));
   assert.equal(v.eligible, false);
@@ -596,7 +596,7 @@ test('NC pending re-run: a required run still in progress at the head blocks adm
 
 test('NC pending re-run: an older queued run beside a newer green one still blocks', () => {
   const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-23T10:00:05Z' }));
-  runs.push({ id: 901, name: 'CI/CD Pipeline', head_sha: HEAD, status: 'queued', conclusion: null, created_at: '2026-09-23T10:00:00Z' });
+  runs.push({ id: 901, name: 'CI/CD Pipeline', path: REQUIRED_WORKFLOW_FILES['CI/CD Pipeline'], head_sha: HEAD, status: 'queued', conclusion: null, created_at: '2026-09-23T10:00:00Z' });
   assert.equal(evaluateAdmission(admissible({ workflow_runs: runs })).reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
 });
 
@@ -618,7 +618,7 @@ test('NC PR 103 replay: ready_for_review after the last gate run owes a re-run, 
 
 test('PR 103 replay, settled: once the owed gate run exists and is green, the transition is satisfied', () => {
   const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-28T18:22:37Z' }));
-  runs.push({ id: 902, name: 'Agent Control Gate', head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-28T19:09:36Z' });
+  runs.push({ id: 902, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-28T19:09:36Z' });
   const v = evaluateAdmission(admissible({
     workflow_runs: runs,
     pr_transitions: [{ event: 'ready_for_review', created_at: '2026-09-28T19:09:33Z' }],
@@ -628,7 +628,7 @@ test('PR 103 replay, settled: once the owed gate run exists and is green, the tr
 
 test('PR 103 replay, failed: the owed gate run that failed blocks admission', () => {
   const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-28T18:22:37Z' }));
-  runs.push({ id: 903, name: 'Agent Control Gate', head_sha: HEAD, status: 'completed', conclusion: 'failure', created_at: '2026-09-28T19:09:36Z' });
+  runs.push({ id: 903, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'completed', conclusion: 'failure', created_at: '2026-09-28T19:09:36Z' });
   const v = evaluateAdmission(admissible({
     workflow_runs: runs,
     pr_transitions: [{ event: 'ready_for_review', created_at: '2026-09-28T19:09:33Z' }],
@@ -659,7 +659,7 @@ test('every transition trigger names only required workflows that listen to that
 
 test('NC recheck before merge: a second snapshot that is no longer eligible stops the merge', () => {
   const first = evaluateAdmission(admissible());
-  const runs = [...greenRuns(), { id: 904, name: 'Agent Control Gate', head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
+  const runs = [...greenRuns(), { id: 904, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
   const second = evaluateAdmission(admissible({ workflow_runs: runs }));
   const v = recheckBeforeMerge(first, second);
   assert.equal(v.eligible, false);
@@ -730,7 +730,7 @@ test('NC F9: the grant is checked last, so every other contract keeps its own re
   assert.equal(evaluateAdmission({ ...base, ret: { ...base.ret, review_status: 'CORRECTION_REQUIRED' } }).reason, ADMISSION_REASONS.REVIEW_NOT_READY);
   assert.equal(evaluateAdmission({ ...base, pr: { ...base.pr, base_sha: 'd'.repeat(40) } }).reason, ADMISSION_REASONS.SOURCE_MAIN_DRIFT);
   assert.equal(evaluateAdmission({ ...base, semantic_review_live: { copilot: [], chatgpt: [] } }).reason, ADMISSION_REASONS.SEMANTIC_REVIEW_NOT_SATISFIED);
-  const pending = [...greenRuns(), { id: 905, name: 'Agent Control Gate', head_sha: HEAD, status: 'queued', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
+  const pending = [...greenRuns(), { id: 905, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'queued', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
   assert.equal(evaluateAdmission({ ...base, workflow_runs: pending }).reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
   const failed = greenRuns().map((r) => (r.name === 'CI/CD Pipeline' ? { ...r, conclusion: 'failure' } : r));
   assert.equal(evaluateAdmission({ ...base, workflow_runs: failed }).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
