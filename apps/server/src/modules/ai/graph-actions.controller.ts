@@ -38,6 +38,7 @@ import {
   GOVERNED_UNGRANTED,
 } from '../structure/job-role-policy.service';
 import { getToolByName } from './flow-tool-registry';
+import { isMcpToolName } from '../mcp/mcp.types';
 import type { BusinessRole } from './role-engine.service';
 
 interface AuthenticatedRequest extends Request {
@@ -318,6 +319,89 @@ export async function assertMayRunGraphAction(
   if (!overrideRoles.has(membership.role) && (!proposerId || proposerId !== user.id)) {
     throw new ForbiddenException(options.proposerRefusal ?? 'This plan step is executed only for the member who proposed it or the business owner');
   }
+}
+
+/**
+ * Trial-N repair round 2 recheck (APPROVE-NOTOOL): the tool PlanExecutorService dispatches for a
+ * stored plan step, which is `step.toolName ?? step.action` (PlannerService stores the model's
+ * action verbatim when its tool is not in the registry), or null when that is nothing the
+ * dispatcher runs. A step with a toolName dispatches it. A step with none dispatches its action,
+ * and FlowOrchestratorService.executeToolAction runs a registry tool or a bridged MCP tool by that
+ * name and answers any other name 'Unknown tool' (an 'analyze' step's free text runs nothing).
+ */
+export function planStepDispatchedTool(step: { toolName: string | null; action: string | null }): string | null {
+  if (step.toolName) return step.toolName;
+  const name = step.action;
+  if (!name) return null;
+  return getToolByName(name) || isMcpToolName(name) ? name : null;
+}
+
+/**
+ * What a viewer may read of the business's KEY plans: QUEUE-READ (trial-N repair round 2) for GET
+ * actions/.../queue, and the same rule for GET ai/plans and GET ai/plans/:planId (recheck
+ * AI-PLANS-READ). `seesEveryPlan`: every member's plans (the OWNER, an ADMIN, a SUPER_ADMIN), else
+ * only the viewer's own. `step`: whether a step of `toolName` is shown (every step for the OWNER and
+ * a SUPER_ADMIN; otherwise a step whose tool graphActionRequirement maps, with each of its module
+ * scopes held at read as ModuleScopeGuard computes them). `stepOutput`: whether that step's stored
+ * output is shown: not, to anyone but the OWNER or a SUPER_ADMIN, for a contact read
+ * (GRAPH_ACTION_CONTACT_READ_TOOLS), whose output the plan executor writes from a run with no
+ * principal (every contact, another member's PRIVATE ones included).
+ */
+export interface GraphPlanReadScope {
+  seesEveryPlan: boolean;
+  step: (toolName: string | null | undefined) => boolean;
+  stepOutput: (toolName: string) => boolean;
+}
+
+export async function graphPlanReadScope(
+  prisma: PrismaService,
+  businessId: string,
+  viewer: { id: string; role?: string },
+): Promise<GraphPlanReadScope> {
+  const everything: GraphPlanReadScope = { seesEveryPlan: true, step: () => true, stepOutput: () => true };
+  if (viewer.role === 'SUPER_ADMIN') return everything;
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId: viewer.id, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  if (!membership) return { seesEveryPlan: false, step: () => false, stepOutput: () => false };
+  if (membership.role === 'OWNER') return everything;
+  const scopes: Record<string, string> = isJsonObject(membership.permissionScopes)
+    ? (membership.permissionScopes as Record<string, string>)
+    : defaultScopesForRole(membership.role);
+  return {
+    seesEveryPlan: PLAN_APPROVER_ROLES.has(membership.role),
+    step: (toolName) => {
+      if (!toolName) return false;
+      const requirement = graphActionRequirement(toolName);
+      if (!requirement || 'refused' in requirement) return false;
+      return requirement.scopes.every(({ module }) => rankOf(scopes[module] || 'none') >= LEVEL_RANK.read);
+    },
+    stepOutput: (toolName) => !GRAPH_ACTION_CONTACT_READ_TOOLS.has(toolName),
+  };
+}
+
+/**
+ * A plan's steps as `scope` lets its viewer read them, each judged by the tool the executor
+ * dispatches for it (planStepDispatchedTool: a step with no toolName whose action names a tool is
+ * that tool). A step that dispatches nothing (an 'analyze' step) is shown with its plan. A step
+ * whose output the viewer may not read is shown with outputResult null.
+ */
+export function visiblePlanSteps<S extends { toolName: string | null; action: string | null; outputResult?: unknown }>(
+  steps: readonly S[],
+  scope: GraphPlanReadScope,
+): S[] {
+  const out: S[] = [];
+  for (const step of steps) {
+    const tool = planStepDispatchedTool(step);
+    if (tool === null) {
+      out.push(step);
+      continue;
+    }
+    if (!scope.step(tool)) continue;
+    out.push(scope.stepOutput(tool) ? step : { ...step, outputResult: null });
+  }
+  return out;
 }
 
 /**
@@ -681,7 +765,7 @@ export class GraphActionsController {
         orderBy: { resolvedAt: 'desc' },
         take,
       }),
-      this.queueReadScope(businessId, viewer),
+      graphPlanReadScope(this.prisma, businessId, viewer),
     ]);
 
     // Who proposed each plan a pending approval item names (the listed plans, else one read).
@@ -694,9 +778,11 @@ export class GraphActionsController {
     }
     const isOwn = (requesterId: string | null | undefined) => mayRead.seesEveryPlan || (!!requesterId && requesterId === viewer.id);
 
+    // Recheck AI-PLANS-READ: each step judged by the tool the executor dispatches for it, and a
+    // contact read's output withheld from all but the OWNER (visiblePlanSteps).
     const activePlans = (listedPlans ?? [])
       .filter((p) => isOwn(p.userId))
-      .map((p) => ({ ...p, steps: (p.steps ?? []).filter((st) => mayRead.step(st.toolName)) }));
+      .map((p) => ({ ...p, steps: visiblePlanSteps(p.steps ?? [], mayRead) }));
 
     const pending = pendingApprovals
       .filter((a) => mayRead.step(a.toolName) && isOwn(a.planId ? proposerOf.get(a.planId) : a.userId))
@@ -765,37 +851,6 @@ export class GraphActionsController {
         failed: logs.filter((l: any) => l.status === 'failed').length,
       },
       plans: activePlans,
-    };
-  }
-
-  /**
-   * What the viewer may read on the queue (QUEUE-READ): whether they see every member's plans
-   * (the OWNER, an ADMIN, a SUPER_ADMIN), and which steps (by tool) they see: every step for the
-   * OWNER and a SUPER_ADMIN; otherwise a step whose tool graphActionRequirement maps, with each of
-   * its module scopes held at read as ModuleScopeGuard computes them.
-   */
-  private async queueReadScope(
-    businessId: string,
-    viewer: { id: string; role?: string },
-  ): Promise<{ seesEveryPlan: boolean; step: (toolName: string | null | undefined) => boolean }> {
-    if (viewer.role === 'SUPER_ADMIN') return { seesEveryPlan: true, step: () => true };
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: viewer.id, businessId } },
-      select: { role: true, permissionScopes: true },
-    });
-    if (!membership) return { seesEveryPlan: false, step: () => false };
-    if (membership.role === 'OWNER') return { seesEveryPlan: true, step: () => true };
-    const scopes: Record<string, string> = isJsonObject(membership.permissionScopes)
-      ? (membership.permissionScopes as Record<string, string>)
-      : defaultScopesForRole(membership.role);
-    return {
-      seesEveryPlan: PLAN_APPROVER_ROLES.has(membership.role),
-      step: (toolName) => {
-        if (!toolName) return false;
-        const requirement = graphActionRequirement(toolName);
-        if (!requirement || 'refused' in requirement) return false;
-        return requirement.scopes.every(({ module }) => rankOf(scopes[module] || 'none') >= LEVEL_RANK.read);
-      },
     };
   }
 

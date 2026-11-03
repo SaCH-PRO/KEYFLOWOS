@@ -1311,6 +1311,7 @@ export class CrmController {
   @Get('businesses/:businessId/duplicates')
   async findDuplicates(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('importId') importId?: string,
     @Query('minConfidence') minConfidence?: string,
     @Query('limit') limit?: string,
@@ -1319,16 +1320,37 @@ export class CrmController {
     const min = minConfidence ? Number(minConfidence) : 0.5;
     const max = limit ? Math.min(Number(limit), 200) : 50;
     const off = offset ? Math.max(0, Number(offset)) : 0;
-    const { pairs, total } = await this.duplicates.findCandidatesScoped({
+    const pageLimit = Number.isFinite(max) ? max : 50;
+    const pageOffset = Number.isFinite(off) ? off : 0;
+    // Trial-N repair round 2 recheck (CRM-DUP-HTTP, D-37): a pair, and a legacy group, names
+    // contacts by id and row, so only the contacts the member may open by the rule GET detail
+    // applies (resolveCrmAccess + visibilityClause) are answered, as the KEY dispatcher's
+    // crm_find_duplicates does: a pair only when the member may open both contacts, a group only
+    // with the two or more of its contacts they may open. Every pair is read and the page is cut
+    // here, so total and the page count only the pairs they may see (the service sorts, then
+    // slices, so for the OWNER the answer is the same as asking it for the page).
+    const actorUserId = this.requireActorUserId(req);
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const all = await this.duplicates.findCandidatesScoped({
       businessId,
       importId,
       minConfidence: Number.isFinite(min) ? min : 0.5,
-      limit: Number.isFinite(max) ? max : 50,
-      offset: Number.isFinite(off) ? off : 0,
+      limit: Number.MAX_SAFE_INTEGER,
+      offset: 0,
     });
     // Back-compat: also return legacy `groups` shape derived from pairs.
     const legacy = await this.crm.findDuplicates(businessId);
-    return { pairs, total, offset: off, limit: max, ...legacy };
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, [
+      ...all.pairs.flatMap((pair) => [pair.primaryId, pair.duplicateId]),
+      ...legacy.groups.flatMap((group) => group.contacts.map((c) => c.id)),
+    ]);
+    const pairs = canOpen ? all.pairs.filter((pair) => canOpen(pair.primaryId) && canOpen(pair.duplicateId)) : all.pairs;
+    const groups = canOpen
+      ? legacy.groups
+          .map((group) => ({ ...group, contacts: group.contacts.filter((c) => canOpen(c.id)) }))
+          .filter((group) => group.contacts.length > 1)
+      : legacy.groups;
+    return { pairs: pairs.slice(pageOffset, pageOffset + pageLimit), total: pairs.length, offset: off, limit: max, groups };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)

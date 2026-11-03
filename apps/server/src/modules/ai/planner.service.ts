@@ -307,9 +307,11 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
     };
   }
 
-  async listPlans(businessId: string, status?: string, limit = 20) {
-    const where: { businessId: string; status?: string } = { businessId };
+  /** `userId`: only the plans that member proposed (GET ai/plans for a viewer who sees only their own). */
+  async listPlans(businessId: string, status?: string, limit = 20, userId?: string) {
+    const where: { businessId: string; status?: string; userId?: string } = { businessId };
     if (status) where.status = status;
+    if (userId) where.userId = userId;
 
     return this.prisma.client.aiPlan.findMany({
       where,

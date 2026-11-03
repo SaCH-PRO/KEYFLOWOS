@@ -8,7 +8,13 @@ import { AiOversightService, RiskTier } from './ai-oversight.service';
 import { BusinessGraphService } from './business-graph.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
-import { PLAN_APPROVER_ROLES, assertMayRunGraphAction } from './graph-actions.controller';
+import {
+  PLAN_APPROVER_ROLES,
+  assertMayRunGraphAction,
+  graphPlanReadScope,
+  planStepDispatchedTool,
+  visiblePlanSteps,
+} from './graph-actions.controller';
 import { AiMemoryService, MemoryCategory } from './ai-memory.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
@@ -312,14 +318,27 @@ export class AiController {
     return { intent, plan, clarificationNeeded: false };
   }
 
+  /**
+   * Trial-N repair round 2 recheck (AI-PLANS-READ): these returned every plan of the business with
+   * its steps, inputPayload and outputResult to any member, undoing the queue's QUEUE-READ rule.
+   * They now apply that rule (graphPlanReadScope): a plan to its proposer, the business OWNER, an
+   * ADMIN or a SUPER_ADMIN; within it the steps whose dispatched tool's module scopes the viewer
+   * holds at read; and a contact read's output (written by the plan executor from a run with no
+   * principal) to the OWNER or a SUPER_ADMIN only (visiblePlanSteps). Another member's plan is
+   * answered exactly as an unknown id.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/plans')
   async listPlans(
     @Param('businessId') businessId: string,
-    @Query('status') status?: string,
-    @Query('limit') limit?: string,
+    @Query('status') status: string | undefined,
+    @Query('limit') limit: string | undefined,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.planner.listPlans(businessId, status, safeInt(limit, 20));
+    const viewer = this.planViewer(req);
+    const mayRead = await graphPlanReadScope(this.prisma, businessId, viewer);
+    const plans = await this.planner.listPlans(businessId, status, safeInt(limit, 20), mayRead.seesEveryPlan ? undefined : viewer.id);
+    return plans.map((p) => ({ ...p, steps: visiblePlanSteps(p.steps, mayRead) }));
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -327,8 +346,22 @@ export class AiController {
   async getPlan(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.planner.getPlan(planId, businessId);
+    const viewer = this.planViewer(req);
+    const [mayRead, proposer] = await Promise.all([
+      graphPlanReadScope(this.prisma, businessId, viewer),
+      this.prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: { userId: true } }),
+    ]);
+    if (!proposer || (!mayRead.seesEveryPlan && proposer.userId !== viewer.id)) return null;
+    const plan = await this.planner.getPlan(planId, businessId);
+    return plan ? { ...plan, steps: visiblePlanSteps(plan.steps, mayRead) } : null;
+  }
+
+  private planViewer(req: AuthenticatedRequest): { id: string; role?: string } {
+    const id = req?.user?.id;
+    if (!id) throw new UnauthorizedException('Authenticated user required');
+    return { id, role: req.user?.role };
   }
 
   /**
@@ -338,7 +371,12 @@ export class AiController {
    * sub-permission, the OWNER for owner-only tools, D-46 for a SUPER_ADMIN who is not a member),
    * with the contact reads the dispatcher bounds by its principal kept to the OWNER (the executor
    * hands it none), and the plan proposed by the approver or the approver the business OWNER or an
-   * ADMIN. A step with no tool runs nothing and needs nothing. Refused 403 before anything changes.
+   * ADMIN. Refused 403 before anything changes.
+   *
+   * Trial-N repair round 2 recheck (APPROVE-NOTOOL): the tool checked is the one the executor
+   * dispatches (planStepDispatchedTool: `toolName ?? action`), so a step stored with no toolName
+   * whose action names a tool is checked as that tool; only a step whose action names nothing the
+   * dispatcher runs (an 'analyze' step) runs nothing and needs nothing.
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai/plans/:planId/approve')
@@ -351,9 +389,9 @@ export class AiController {
     if (!userId) throw new UnauthorizedException('Authenticated user required to approve plans');
     const plan = await this.prisma.client.aiPlan.findFirst({
       where: { id: planId, businessId },
-      select: { userId: true, steps: { select: { toolName: true }, orderBy: { order: 'asc' } } },
+      select: { userId: true, steps: { select: { toolName: true, action: true }, orderBy: { order: 'asc' } } },
     });
-    for (const toolName of new Set((plan?.steps ?? []).map((s) => s.toolName).filter((t): t is string => !!t))) {
+    for (const toolName of new Set((plan?.steps ?? []).map(planStepDispatchedTool).filter((t): t is string => !!t))) {
       await assertMayRunGraphAction(this.prisma, businessId, { id: userId, role: req.user?.role }, toolName, plan?.userId ?? null, {
         proposerOverrideRoles: PLAN_APPROVER_ROLES,
         proposerRefusal: 'This plan is approved only by the member who proposed it, the business owner or an admin',

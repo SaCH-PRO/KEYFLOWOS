@@ -87,6 +87,11 @@ export const SAGA_STOPPED_FOR_APPROVAL = 'stopped_for_approval';
  */
 export const INVOICE_WRITE_MODULES: ReadonlySet<string> = new Set(['commerce']);
 
+/** Whether a plan has a step of an INVOICE_WRITE_MODULES module. */
+function planWritesInvoices(plan: { steps?: Array<{ module: string | null }> }): boolean {
+  return (plan.steps ?? []).some((s) => !!s.module && INVOICE_WRITE_MODULES.has(s.module));
+}
+
 export interface PlanGoal {
   objective: string;
   constraints?: string[];
@@ -445,8 +450,10 @@ export class KeyCortexPlannerService {
    * or SUPER_ADMIN (else 403, before the plan starts), and every step runs as
    * that EXECUTING member, never as the creator named in the row and never as
    * SYSTEM_PLAN_ACTOR. With no member (a system trigger or the query pipeline,
-   * which call this directly): a member's plan runs as that member, and only a
-   * plan no member created runs as SYSTEM_PLAN_ACTOR. On either path a plan
+   * which call this directly): a member's plan runs as that member (held, for a
+   * plan that writes invoices or payments, to what the HTTP route requires:
+   * assertCreatorMayWriteInvoices, D-46), and only a plan no member created
+   * runs as SYSTEM_PLAN_ACTOR. On either path a plan
    * runs only once it is claimed out of RUNNABLE_PLAN_STATUSES (409 'not
    * claimable' otherwise: running, completed, or a concurrent execute claimed
    * it first; V1-10, PRS-M24). `options.skipApproval` is honoured only for the
@@ -466,6 +473,7 @@ export class KeyCortexPlannerService {
         });
     if (!plan) throw new NotFoundException('Plan not found');
     if (member) await this.assertMayExecutePlan(plan, member);
+    else await this.assertCreatorMayWriteInvoices(plan);
     const actorId = member ? member.userId : (plan.userId ?? SYSTEM_PLAN_ACTOR);
 
     // V1-10 review ST-3: skipApproval skips the executor's whole approval
@@ -748,19 +756,51 @@ export class KeyCortexPlannerService {
     plan: { businessId: string; userId?: string | null; steps?: Array<{ module: string | null }> },
     member: PlanExecutionActor,
   ): Promise<void> {
-    const writesInvoices = (plan.steps ?? []).some((s) => !!s.module && INVOICE_WRITE_MODULES.has(s.module));
+    const writesInvoices = planWritesInvoices(plan);
     if (member.role === 'SUPER_ADMIN') {
-      if (writesInvoices && !(await this.membershipOf(plan.businessId, member.userId))) {
-        throw new ForbiddenException(
-          'Not a member of this business: a platform SUPER_ADMIN who is not a member does not write its invoices or payments (D-46), so this plan is not run',
-        );
-      }
+      if (writesInvoices) await this.assertMayWriteInvoices(plan.businessId, member);
       return;
     }
     const mayRun =
       (!!plan.userId && plan.userId === member.userId) || (await this.isBusinessOwner(plan.businessId, member.userId));
     if (!mayRun) throw new ForbiddenException("Only the plan's creator or the business owner can execute this plan");
     if (writesInvoices) await this.assertRevenueWrite(plan.businessId, member.userId);
+  }
+
+  /**
+   * Trial-N repair round 2 recheck (KEY-D46-NOMEMBER, D-46 on every path): executePlan with no
+   * member (the query pipeline behind POST cortex/chat, the cortex triggers) runs a member's plan
+   * as its creator (plan.userId), and ran it with no check, so a plan a non-member SUPER_ADMIN or a
+   * member without revenue write created had its invoice and payment steps run. The creator is
+   * now held to what the HTTP route holds the executing member to for such a plan
+   * (assertMayWriteInvoices), its role read from its User row. A plan no member created runs as
+   * SYSTEM_PLAN_ACTOR, as before. Checked before the claim, so a refused plan is left as it was.
+   */
+  private async assertCreatorMayWriteInvoices(plan: {
+    businessId: string;
+    userId?: string | null;
+    steps?: Array<{ module: string | null }>;
+  }): Promise<void> {
+    if (!plan.userId || !planWritesInvoices(plan)) return;
+    const creator = await this.prisma.client.user.findUnique({ where: { id: plan.userId }, select: { role: true } });
+    await this.assertMayWriteInvoices(plan.businessId, { userId: plan.userId, role: creator?.role ?? null });
+  }
+
+  /**
+   * Whether `actor` may have a plan's invoice or payment steps run: a SUPER_ADMIN only when a
+   * member of the business (D-46; a member keeps the platform bypass, as on POST cortex/execute),
+   * anyone else only with revenue write (assertRevenueWrite).
+   */
+  private async assertMayWriteInvoices(businessId: string, actor: { userId: string; role?: string | null }): Promise<void> {
+    if (actor.role === 'SUPER_ADMIN') {
+      if (!(await this.membershipOf(businessId, actor.userId))) {
+        throw new ForbiddenException(
+          'Not a member of this business: a platform SUPER_ADMIN who is not a member does not write its invoices or payments (D-46), so this plan is not run',
+        );
+      }
+      return;
+    }
+    await this.assertRevenueWrite(businessId, actor.userId);
   }
 
   /**
