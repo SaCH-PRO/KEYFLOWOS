@@ -22,6 +22,16 @@
  * status of one that exists. The source-scan half is
  * src/modules/crm/contact-status-vocabulary.spec.ts.
  *
+ * Review repairs (V1-38 repair): a duplicate merged into the subject is erased
+ * with it and the merges cannot be undone (SEC-V138-1); cancel and purge share
+ * one claim (SEC-V138-2); the forget reason, data issues, external mappings,
+ * CRM activities and tasks and relationship notes are erased and the audit
+ * claims only what it counted (SEC-V138-3, CR-2); a failed export bundle
+ * deletion is logged and recorded by key (SEC-V138-4); a contact the pre-D-25
+ * purge closed but left intact is erased on the next cycle (CR-3); Shopify
+ * maps an existing legacy 'CUSTOMER' into the vocabulary (CR-1). The merge
+ * and undo run through the real CrmController in their own Nest app.
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, ContactPrivacyController/Service and ContactAuditService are
  * real against DATABASE_URL. Identity is attached from an `x-test-user` header
@@ -61,6 +71,18 @@ const ID = {
   tag: `${P}tag`,
   shopClient: `${P}shopClient`, // bizA, CLIENT, also a Shopify customer
   shopProspect: `${P}shopProspect`, // bizA, PROSPECT, Shopify customer with no orders
+  // ---- review repairs (V1-38 repair) ----
+  mPrimary: `${P}mPrimary`, // bizA: forgotten after mDup (itself holding mDup2) was merged into it
+  mDup: `${P}mDup`,
+  mDup2: `${P}mDup2`,
+  race: `${P}race`, // bizA: a cancel racing the purge
+  regrace: `${P}regrace`, // bizA: cancelled and re-requested between the due read and the claim
+  leftover: `${P}leftover`, // bizA: records hanging off the contact that the purge must erase
+  bundle: `${P}bundle`, // bizA: an export bundle the storage refuses to delete
+  legacy: `${P}legacy`, // bizA: 'purged' by the pre-D-25 code, row intact
+  legacyReq: `${P}legacyReq`,
+  shopLegacy: `${P}shopLegacy`, // bizA: holds the legacy 'CUSTOMER' status
+  shopOrderLegacy: `${P}shopOrderLegacy`,
 };
 
 /** Every personal value seeded on the subject. None may survive the purge anywhere. */
@@ -121,6 +143,13 @@ async function cleanup() {
     `DELETE FROM contact_tags WHERE contact_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM tags WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM merge_operations WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_data_issues WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_external_mappings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM crm_activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM crm_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_relationships WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_notes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -427,6 +456,415 @@ describe("another tenant's forget request is rejected", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Review repairs (V1-38 repair): SEC-V138-1..4, CR-2, CR-3.
+// ---------------------------------------------------------------------------
+
+/** Every audit row of a contact, by its hash (the purge keeps them, hash-anchored). */
+async function trailOf(businessId: string, contactId: string) {
+  return db.contactAuditEntry.findMany({ where: { businessId, contactHash: audit.hashContact(businessId, contactId) } });
+}
+
+/** The soft-delete extension hides the request's contact; requests are read by hash. */
+async function requestsOf(businessId: string, contactId: string) {
+  return db.contactForgetRequest.findMany({ where: { businessId, contactHash: audit.hashContact(businessId, contactId) } });
+}
+
+/** The same service over a client whose contactForgetRequest[method] runs `between` after it reads. */
+function serviceInterleaving(method: 'findUnique' | 'findMany', between: () => Promise<unknown>) {
+  const interleaved = new Proxy(db, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop !== 'contactForgetRequest') return value;
+      return new Proxy(value, {
+        get(model, q, r) {
+          if (q !== method) return Reflect.get(model, q, r);
+          return async (args: unknown) => {
+            const out = await model[method](args);
+            await between();
+            return out;
+          };
+        },
+      });
+    },
+  });
+  return new ContactPrivacyServiceCtor({ client: interleaved } as any, audit);
+}
+
+describe('a duplicate merged into the subject is the same person and is erased with it (SEC-V138-1)', () => {
+  let crmApp: any;
+  const PRIMARY_PII = { firstName: 'V38A-Primary-Ada', email: `${P}ada.primary@test.local` };
+  const DUP_PII = { firstName: 'V38A-Dup-Ada', email: `${P}ada.work@test.local`, phone: '+1 868 555 0191', addressLine1: 'V38A-Dup 12 Engine Rd' };
+  const DUP2_PII = { firstName: 'V38A-Dup2-Ada', email: `${P}ada.home@test.local`, phone: '+1 868 555 0192', city: 'V38A-Dup2-City' };
+  const SECRETS = [...Object.values(PRIMARY_PII), ...Object.values(DUP_PII), ...Object.values(DUP2_PII), '+18685550191', '+18685550192'];
+  const merges: string[] = [];
+
+  beforeAll(async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { ValidationPipe } = await import('@nestjs/common');
+    const { EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+    const { TeamAuditInterceptor } = await import('../src/core/interceptors/team-audit.interceptor');
+    const { EntityResolutionService } = await import('../src/core/connectors/entity-resolution.service');
+    const { CrmController } = await import('../src/modules/crm/crm.controller');
+    const { CrmService } = await import('../src/modules/crm/crm.service');
+    const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+    const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+    const { CrmCacheService } = await import('../src/modules/crm/crm-cache.service');
+    const { CrmListsService } = await import('../src/modules/crm/crm-lists.service');
+    const { CrmFlowService } = await import('../src/modules/crm/crm-flow.service');
+    const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
+    const { ContactCustomFieldValueService } = await import('../src/modules/crm/contact-custom-field-value.service');
+    const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+    const { FeatureFlagGuard } = await import('../src/modules/crm/guards/feature-flag.guard');
+    const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
+    const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
+    const { CrmImportService } = await import('../src/modules/crm/crm-import.service');
+    const { CrmPlaybookService } = await import('../src/modules/crm/crm-playbook.service');
+    const { CrmActionsService } = await import('../src/modules/crm/crm-actions.service');
+    const { CrmRevenueService } = await import('../src/modules/crm/crm-revenue.service');
+    const { CrmJourneyService } = await import('../src/modules/crm/crm-journey.service');
+    const { CrmDuplicateDetectionService } = await import('../src/modules/crm/crm-duplicate-detection.service');
+    const { CrmDataQualityService } = await import('../src/modules/crm/crm-data-quality.service');
+    const { CrmSavedViewsService } = await import('../src/modules/crm/crm-saved-views.service');
+    const { CrmRelationshipHealthService } = await import('../src/modules/crm/crm-relationship-health.service');
+    const { CrmCommunicationService } = await import('../src/modules/crm/crm-communication.service');
+    const { BestChannelService } = await import('../src/modules/crm/best-channel.service');
+    const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
+    const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
+    const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+
+    // The real merge and undo path (CrmController -> CrmService.mergeContacts /
+    // revertMerge) with its guards; only the side channels are stubbed, as in
+    // crm-contact-duplicate.integration.test.ts.
+    const moduleRef = await Test.createTestingModule({
+      controllers: [CrmController],
+      providers: [
+        PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard, FeatureFlagGuard, PlanLimitGuard,
+        TeamAuditInterceptor, CrmStatsService, CrmService, ContactAuditService,
+        { provide: EventEmitter2, useValue: new EventEmitter2() },
+        { provide: CrmTimelineService, useValue: { logEvent: async () => undefined } },
+        { provide: CrmCacheService, useValue: { invalidate: async () => undefined } },
+        { provide: CrmFlowService, useValue: { invalidateCache: () => undefined } },
+        { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
+        { provide: CrmListsService, useValue: {} },
+        { provide: EntityResolutionService, useValue: {} },
+        { provide: ContactCustomFieldValueService, useValue: {} },
+        { provide: CrmImportService, useValue: {} },
+        { provide: CrmPlaybookService, useValue: {} },
+        { provide: CrmActionsService, useValue: {} },
+        { provide: CrmRevenueService, useValue: {} },
+        { provide: CrmJourneyService, useValue: {} },
+        { provide: CrmDuplicateDetectionService, useValue: {} },
+        { provide: CrmDataQualityService, useValue: {} },
+        { provide: CrmSavedViewsService, useValue: {} },
+        { provide: CrmRelationshipHealthService, useValue: {} },
+        { provide: CrmCommunicationService, useValue: {} },
+        { provide: BestChannelService, useValue: {} },
+        { provide: ConversationAiService, useValue: {} },
+        { provide: CrmNetworkService, useValue: {} },
+        { provide: ContactInsightService, useValue: {} },
+      ],
+    }).compile();
+    crmApp = moduleRef.createNestApplication();
+    crmApp.use(async (req: any, _res: any, next: any) => {
+      const header = req.headers['x-test-user'];
+      const id = typeof header === 'string' ? header : undefined;
+      if (id && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    crmApp.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    crmApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+    await crmApp.init();
+  }, 120_000);
+
+  afterAll(async () => {
+    if (crmApp) await crmApp.close();
+  });
+
+  const merge = (primaryId: string, duplicateId: string) =>
+    request(crmApp.getHttpServer())
+      .post(`/crm/businesses/${ID.bizA}/contacts/${primaryId}/merge/${duplicateId}`)
+      .set('x-test-user', ID.owner)
+      .send({});
+  const revert = (mergeId: string) =>
+    request(crmApp.getHttpServer())
+      .post(`/crm/businesses/${ID.bizA}/duplicates/merges/${mergeId}/revert`)
+      .set('x-test-user', ID.owner)
+      .send({});
+
+  it('merge mDup2 into mDup and mDup into the subject, forget and purge the subject: every merged row, snapshot and audit row is erased', async () => {
+    await db.contact.create({ data: { id: ID.mPrimary, businessId: ID.bizA, ...PRIMARY_PII } });
+    await db.contact.create({ data: { id: ID.mDup, businessId: ID.bizA, ...DUP_PII } });
+    await db.contact.create({ data: { id: ID.mDup2, businessId: ID.bizA, ...DUP2_PII } });
+    const inner = await merge(ID.mDup, ID.mDup2);
+    expect(inner.status).toBe(201);
+    const outer = await merge(ID.mPrimary, ID.mDup);
+    expect(outer.status).toBe(201);
+    merges.push(inner.body.mergeId, outer.body.mergeId);
+
+    // The 'merged' audit rows are fire-and-forget (DEC-CONTACTS-002): wait for
+    // them, so the purge meets the duplicates' PII in their `before`.
+    const ids = [ID.mPrimary, ID.mDup, ID.mDup2];
+    for (let i = 0; i < 50; i++) {
+      const n = await db.contactAuditEntry.count({ where: { businessId: ID.bizA, action: 'merged', contactId: { in: ids } } });
+      if (n >= 4) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    // Pre-condition: the merged duplicates hold their PII, soft-deleted.
+    expect(await rawContact(ID.mDup)).toMatchObject({ first_name: DUP_PII.firstName, email: DUP_PII.email });
+    expect((await rawContact(ID.mDup2))!.first_name).toBe(DUP2_PII.firstName);
+    const before = JSON.stringify(await db.$queryRawUnsafe(`SELECT duplicate_snapshot, resolved_fields FROM merge_operations WHERE id = $1`, outer.body.mergeId));
+    expect(before).toContain(DUP_PII.email);
+
+    expect((await forget(ID.owner, ID.bizA, ID.mPrimary)).status).toBe(201);
+    await makeDue(ID.mPrimary);
+    await privacy.runPurgeCycle();
+
+    for (const id of ids) {
+      const row = await rawContact(id);
+      expect(row!.deleted_at, `${id} deleted`).toBeInstanceOf(Date);
+      for (const col of ['first_name', 'email', 'email_normalized', 'phone', 'phone_normalized', 'address_line_1', 'city']) {
+        expect(row![col], `${id}.${col}`).toBeNull();
+      }
+      const text = JSON.stringify(row);
+      for (const secret of SECRETS) expect(text, `${id} still holds ${secret}`).not.toContain(secret);
+    }
+
+    const ops = await db.$queryRawUnsafe(
+      `SELECT duplicate_snapshot, resolved_fields, field_overrides, repointed_counts, expires_at <= now() AS closed
+         FROM merge_operations WHERE id = ANY($1::text[])`,
+      merges,
+    );
+    expect(ops).toHaveLength(2);
+    for (const op of ops) {
+      expect(op.closed, 'the undo window is closed').toBe(true);
+      expect(op.resolved_fields).toBeNull();
+      expect(JSON.stringify(op.repointed_counts ?? {})).not.toContain('_deletedSnapshots');
+      const text = JSON.stringify(op);
+      for (const secret of SECRETS) expect(text, `merge operation still holds ${secret}`).not.toContain(secret);
+    }
+
+    for (const id of ids) {
+      const trail = await trailOf(ID.bizA, id);
+      expect(trail.length, `${id} keeps its audit rows`).toBeGreaterThan(0);
+      expect(trail.filter((t: any) => t.contactId !== null)).toEqual([]);
+      const text = JSON.stringify(trail);
+      for (const secret of SECRETS) expect(text, `${id} audit trail still holds ${secret}`).not.toContain(secret);
+    }
+
+    const [entry] = await purgedEntries(ID.bizA, ID.mPrimary);
+    expect(entry.after.erased).toMatchObject({ mergedDuplicates: 2, mergeOperationsScrubbed: 2 });
+  });
+
+  it('neither merge can be undone to bring the forgotten person back', async () => {
+    for (const mergeId of merges) {
+      const res = await revert(mergeId);
+      expect(res.status, `revert ${mergeId}`).toBe(400);
+    }
+    for (const id of [ID.mDup, ID.mDup2]) {
+      const row = await rawContact(id);
+      expect(row).toMatchObject({ first_name: null, email: null });
+      expect(row!.deleted_at).toBeInstanceOf(Date);
+    }
+    const reverted = await db.$queryRawUnsafe(`SELECT reverted_at FROM merge_operations WHERE id = ANY($1::text[])`, merges);
+    expect(reverted).toEqual([{ reverted_at: null }, { reverted_at: null }]);
+  });
+});
+
+describe('cancel and purge are bound to one claim (SEC-V138-2)', () => {
+  it('a cancel that read the request before the purge committed is refused, and the purge stands', async () => {
+    await db.contact.create({ data: { id: ID.race, businessId: ID.bizA, firstName: 'V38A-Race', email: `${P}race@test.local` } });
+    await privacy.requestForget({ businessId: ID.bizA, contactId: ID.race });
+    await makeDue(ID.race);
+
+    // cancelForget reads 'requested', then the scheduled purge commits, then
+    // the cancel's transaction runs.
+    const svc = serviceInterleaving('findUnique', () => privacy.runPurgeCycle());
+    await expect(svc.cancelForget({ businessId: ID.bizA, contactId: ID.race })).rejects.toThrow(/no longer open/);
+
+    const row = await rawContact(ID.race);
+    expect(row!.deleted_at, 'the anonymised row stays deleted').toBeInstanceOf(Date);
+    expect(row).toMatchObject({ first_name: null, email: null });
+    const reqs = await requestsOf(ID.bizA, ID.race);
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]).toMatchObject({ status: 'purged', contactId: null, cancelledAt: null });
+    const actions = (await trailOf(ID.bizA, ID.race)).map((t: any) => t.action);
+    expect(actions).toContain('forget_purged');
+    expect(actions).not.toContain('forget_cancelled');
+  });
+
+  it('a request cancelled and filed again after the due list was read keeps its new grace period', async () => {
+    await db.contact.create({ data: { id: ID.regrace, businessId: ID.bizA, firstName: 'V38A-Regrace', email: `${P}regrace@test.local` } });
+    await privacy.requestForget({ businessId: ID.bizA, contactId: ID.regrace });
+    await makeDue(ID.regrace);
+
+    const svc = serviceInterleaving('findMany', async () => {
+      await privacy.cancelForget({ businessId: ID.bizA, contactId: ID.regrace });
+      await privacy.requestForget({ businessId: ID.bizA, contactId: ID.regrace }); // a fresh grace period
+    });
+    await svc.runPurgeCycle();
+
+    expect((await rawContact(ID.regrace))!.first_name).toBe('V38A-Regrace');
+    const req = await db.contactForgetRequest.findUnique({ where: { contactId: ID.regrace } });
+    expect(req).toMatchObject({ status: 'requested', purgedAt: null });
+    expect(req.purgeAt.getTime()).toBeGreaterThan(Date.now());
+    expect(await purgedEntries(ID.bizA, ID.regrace)).toHaveLength(0);
+  });
+});
+
+describe('the purge erases the records hanging off the contact and says exactly what it swept (SEC-V138-3, CR-2)', () => {
+  const L = {
+    name: 'V38A Grace Hopper',
+    email: `${P}hopper@test.local`,
+    phone: '+18685550177',
+    shopifyId: `${P}shopify-777`,
+    activity: 'V38A-activity: called Grace Hopper about her order',
+    task: 'V38A-task: ring Grace Hopper back',
+    taskBody: 'V38A-task-body: Grace Hopper prefers mornings',
+    relation: 'V38A-relation: Grace Hopper was referred by the bystander',
+  };
+
+  it('the forget reason, data-issue fix values, external ids, CRM activities and tasks and relationship notes are gone', async () => {
+    await db.contact.create({ data: { id: ID.leftover, businessId: ID.bizA, firstName: 'V38A-Hopper', email: L.email, phone: L.phone } });
+    await db.contactDataIssue.create({ data: { businessId: ID.bizA, contactId: ID.leftover, kind: 'invalid_phone', message: 'reformat', recommendedFix: { action: 'replace_phone', value: L.phone } } });
+    await db.contactExternalMapping.create({ data: { businessId: ID.bizA, contactId: ID.leftover, source: 'shopify', externalId: L.shopifyId } });
+    await db.crmActivity.create({ data: { businessId: ID.bizA, contactId: ID.leftover, type: 'call', description: L.activity } });
+    await db.crmTask.create({ data: { businessId: ID.bizA, contactId: ID.leftover, title: L.task, description: L.taskBody } });
+    await db.contactRelationship.create({ data: { businessId: ID.bizA, fromContactId: ID.leftover, toContactId: ID.bystander, type: 'referred_by', note: L.relation } });
+    await privacy.requestForget({ businessId: ID.bizA, contactId: ID.leftover, reason: `${L.name} (${L.email}) asked by phone ${L.phone}` });
+    await makeDue(ID.leftover);
+    await privacy.runPurgeCycle();
+
+    // The reason is readable by any member through privacy-settings.
+    const settings = await request(app.getHttpServer())
+      .get(`/crm/businesses/${ID.bizA}/privacy-settings`)
+      .set('x-test-user', ID.owner);
+    expect(settings.status).toBe(200);
+    expect(settings.body.recentForget.length).toBeGreaterThan(0);
+    const settingsText = JSON.stringify(settings.body);
+    for (const secret of Object.values(L)) expect(settingsText, `privacy-settings still shows ${secret}`).not.toContain(secret);
+
+    expect(await rawCount('contact_data_issues', 'contact_id', ID.leftover)).toBe(0);
+    expect(await rawCount('contact_external_mappings', 'contact_id', ID.leftover)).toBe(0);
+    expect(await rawCount('crm_activities', 'contact_id', ID.leftover)).toBe(0);
+    expect(await rawCount('crm_tasks', 'contact_id', ID.leftover)).toBe(0);
+    expect(await rawCount('contact_relationships', 'from_contact_id', ID.leftover)).toBe(0);
+    const leftovers = await db.$queryRawUnsafe(
+      `SELECT 'issue' AS t, recommended_fix::text AS v FROM contact_data_issues WHERE business_id = $1
+       UNION ALL SELECT 'mapping', external_id FROM contact_external_mappings WHERE business_id = $1
+       UNION ALL SELECT 'activity', description FROM crm_activities WHERE business_id = $1
+       UNION ALL SELECT 'task', title || ' ' || coalesce(description, '') FROM crm_tasks WHERE business_id = $1
+       UNION ALL SELECT 'relation', note FROM contact_relationships WHERE business_id = $1
+       UNION ALL SELECT 'request', reason FROM contact_forget_requests WHERE business_id = $1`,
+      ID.bizA,
+    );
+    const leftText = JSON.stringify(leftovers);
+    for (const secret of Object.values(L)) expect(leftText, `a record still holds ${secret}`).not.toContain(secret);
+    // The other end of the relationship is untouched.
+    expect(await rawContact(ID.bystander)).toMatchObject({ first_name: 'V38A-Bystander', deleted_at: null });
+
+    const [entry] = await purgedEntries(ID.bizA, ID.leftover);
+    expect(entry.after.erased).toMatchObject({ dataIssues: 1, externalMappings: 1, crmActivities: 1, crmTasks: 1, relationships: 1 });
+    expect(typeof entry.after.notSwept).toBe('string');
+    expect(entry.reason).toMatch(/retain/i);
+    expect(entry.reason, 'the entry claims only what it counted').not.toMatch(/personal data erased/i);
+    const trailText = JSON.stringify(await trailOf(ID.bizA, ID.leftover));
+    for (const secret of Object.values(L)) expect(trailText, `audit trail still holds ${secret}`).not.toContain(secret);
+  });
+});
+
+describe('an export bundle the storage refuses to delete is never silent (SEC-V138-4)', () => {
+  it('the failed keys are logged and recorded in a forget_storage_cleanup_failed entry naming the request', async () => {
+    const keys = [
+      `private/contact-exports/${ID.bizA}/${ID.bundle}/1.json`,
+      `private/contact-exports/${ID.bizA}/${ID.bundle}/1.zip`,
+    ];
+    await db.contact.create({ data: { id: ID.bundle, businessId: ID.bizA, firstName: 'V38A-Bundle', email: `${P}bundle@test.local` } });
+    await db.contactExportJob.create({
+      data: { businessId: ID.bizA, contactId: ID.bundle, token: `${P}tok_bundle`, jsonKey: keys[0], zipKey: keys[1], expiresAt: new Date(Date.now() + 86_400_000) },
+    });
+    const req = await privacy.requestForget({ businessId: ID.bizA, contactId: ID.bundle });
+    await makeDue(ID.bundle);
+
+    const send = vi.fn(async () => { throw new Error('v38a: AccessDenied'); });
+    const s3 = vi.spyOn(privacy as any, 's3').mockReturnValue({ client: { send }, bucket: 'v38a-bucket' });
+    const warn = vi.spyOn((privacy as any).logger, 'warn');
+    try {
+      await privacy.runPurgeCycle();
+    } finally {
+      s3.mockRestore();
+    }
+    const warned = warn.mock.calls.map((c: any[]) => String(c[0]));
+    warn.mockRestore();
+
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(warned.some((w: string) => w.includes(req.id) && keys.every((k) => w.includes(k)))).toBe(true);
+    expect(await rawCount('contact_export_jobs', 'contact_id', ID.bundle)).toBe(0);
+    const failed = await db.contactAuditEntry.findMany({
+      where: { businessId: ID.bizA, contactHash: audit.hashContact(ID.bizA, ID.bundle), action: 'forget_storage_cleanup_failed' },
+    });
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatchObject({ entityId: req.id, contactId: null });
+    expect([...failed[0].after.failedKeys].sort()).toEqual([...keys].sort());
+    const [entry] = await purgedEntries(ID.bizA, ID.bundle);
+    expect(entry.after.erased.exportJobs).toBe(1);
+    expect(entry.after.exportBundleObjects).toBe(2);
+  });
+});
+
+describe('a contact the pre-D-25 purge closed but left intact is erased (CR-3)', () => {
+  const OLD = { firstName: 'V38A-OldPurged', email: `${P}oldpurged@test.local`, phone: '+18685550150', note: 'V38A-oldpurged-note' };
+  const oldPurgedAt = new Date(Date.now() - 30 * 86_400_000);
+
+  it('the next cycle erases the row and its child rows and records a repair entry; the old entry is kept', async () => {
+    // The legacy state: soft-deleted with every personal field, request
+    // 'purged' and detached, a 'GDPR purge completed' entry naming no request.
+    await db.contact.create({ data: { id: ID.legacy, businessId: ID.bizA, firstName: OLD.firstName, email: OLD.email, phone: OLD.phone } });
+    await db.contactNote.create({ data: { id: `${P}note_legacy`, businessId: ID.bizA, contactId: ID.legacy, body: OLD.note } });
+    await db.$executeRawUnsafe(`UPDATE contacts SET deleted_at = $2 WHERE id = $1`, ID.legacy, oldPurgedAt);
+    const hash = audit.hashContact(ID.bizA, ID.legacy);
+    await db.contactForgetRequest.create({
+      data: { id: ID.legacyReq, businessId: ID.bizA, contactId: null, contactHash: hash, status: 'purged', reason: `${OLD.firstName} asked`, purgeAt: oldPurgedAt, purgedAt: oldPurgedAt },
+    });
+    await db.contactAuditEntry.create({
+      data: { businessId: ID.bizA, contactId: null, contactHash: hash, action: 'forget_purged', entityType: 'contact', actor: { type: 'SYSTEM', label: 'forget-purge' }, after: { notes: 1 }, reason: 'GDPR purge completed', changedFields: [] },
+    });
+
+    await privacy.runPurgeCycle();
+
+    const row = await rawContact(ID.legacy);
+    expect(row).toMatchObject({ first_name: null, email: null, phone: null });
+    expect(row!.deleted_at).toBeInstanceOf(Date);
+    expect(await rawCount('contact_notes', 'contact_id', ID.legacy)).toBe(0);
+    const req = await db.contactForgetRequest.findUnique({ where: { id: ID.legacyReq } });
+    expect(req).toMatchObject({ status: 'purged', contactId: null, reason: null });
+
+    const entries = await purgedEntries(ID.bizA, ID.legacy);
+    expect(entries).toHaveLength(2);
+    const old = entries.find((e: any) => e.entityId === null);
+    const repair = entries.find((e: any) => e.entityId === ID.legacyReq);
+    expect(old.reason).toBe('GDPR purge completed');
+    expect(repair.reason).toMatch(/repair/i);
+    expect(repair.after.legacyRepairOf).toEqual({ previousPurgedAt: oldPurgedAt.toISOString() });
+    expect(repair.after.erased).toMatchObject({ notes: 1 });
+    const text = JSON.stringify(await trailOf(ID.bizA, ID.legacy));
+    for (const secret of Object.values(OLD)) expect(text).not.toContain(secret);
+  });
+
+  it('the repair is a one-off: a further cycle writes nothing', async () => {
+    await privacy.runPurgeCycle();
+    expect(await purgedEntries(ID.bizA, ID.legacy)).toHaveLength(2);
+  });
+});
+
 describe('Shopify maps into the canonical status vocabulary and never overwrites it (CF-49)', () => {
   const customer = (id: number, email: string, orders: number) => ({
     id, email, first_name: 'V38A', last_name: `Shopper${id}`, orders_count: orders, total_spent: String(orders * 10), created_at: new Date().toISOString(),
@@ -472,6 +910,28 @@ describe('Shopify maps into the canonical status vocabulary and never overwrites
     await shopify.syncOrders(ID.bizA);
     const rows = await db.$queryRawUnsafe(`SELECT status FROM contacts WHERE business_id = $1 AND email = $2`, ID.bizA, `${P}orderbuyer@test.local`);
     expect(rows).toEqual([{ status: 'CLIENT' }]);
+  });
+
+  it("an existing contact holding the legacy 'CUSTOMER' is mapped into the vocabulary by a customer sync (CR-1)", async () => {
+    await db.contact.create({ data: { id: ID.shopLegacy, businessId: ID.bizA, firstName: 'V38A-Legacy', email: `${P}legacy.buyer@test.local`, status: 'CUSTOMER' } });
+    vi.spyOn(shopify, 'shopifyRequest').mockResolvedValueOnce({ customers: [customer(38006, `${P}legacy.buyer@test.local`, 3)] });
+    expect(await shopify.syncCustomers(ID.bizA)).toEqual({ imported: 0, updated: 1 });
+    expect((await rawContact(ID.shopLegacy))!.status).toBe('CLIENT');
+  });
+
+  it("an order from an existing contact holding 'CUSTOMER' maps it to CLIENT; a PROSPECT's status is left alone (CR-1)", async () => {
+    await db.contact.create({ data: { id: ID.shopOrderLegacy, businessId: ID.bizA, firstName: 'V38A-LegacyOrder', email: `${P}legacy.order@test.local`, status: 'CUSTOMER' } });
+    const order = (id: number, email: string, customerId: number) => ({
+      id, name: `${P}${id}`, email, financial_status: 'paid', fulfillment_status: null,
+      total_price: '25.00', currency: 'TTD', created_at: new Date().toISOString(), line_items: [],
+      customer: { id: customerId, email, first_name: 'V38A', last_name: `Order${id}` },
+    });
+    vi.spyOn(shopify, 'shopifyRequest').mockResolvedValueOnce({
+      orders: [order(38101, `${P}legacy.order@test.local`, 38007), order(38102, `${P}prospect@test.local`, 38002)],
+    });
+    await shopify.syncOrders(ID.bizA);
+    expect((await rawContact(ID.shopOrderLegacy))!.status).toBe('CLIENT');
+    expect((await rawContact(ID.shopProspect))!.status).toBe('PROSPECT');
   });
 
   it('no contact in the fixture business holds a status outside CONTACT_STATUSES', async () => {

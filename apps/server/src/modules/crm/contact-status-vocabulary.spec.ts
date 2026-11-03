@@ -59,8 +59,16 @@ const PACKET_WRITERS = [
 /**
  * Files outside this packet's write set that still compare against a dialect,
  * at the V1-38 head. The count per file may only go down; a file not listed
- * here may not acquire one. Each is a READ of a value no canonical writer
- * produces any more, so the branch is dead rather than wrong data.
+ * here may not acquire one.
+ *
+ * These are READS of a value no canonical writer produces any more. That is a
+ * regression this packet caused, not dead code (review CR-1): before V1-38 the
+ * Shopify adapter wrote 'CUSTOMER', so the lead-scoring +5, the health-score
+ * dormant-customer count, the relationship-health CUSTOMER signals and the
+ * maturity customer count fired for every Shopify buyer. Shopify now writes
+ * CLIENT (and maps an existing 'CUSTOMER' to CLIENT on its next sync), so those
+ * branches no longer fire for Shopify buyers until the readers accept CLIENT.
+ * The readers are outside the V1-38 write set: see the it.todo below.
  */
 const LEGACY_DIALECT_READERS: Record<string, { hits: number; why: string }> = {
   'modules/ai/key-tool-registry.service.ts': { hits: 1, why: "status: { not: 'DORMANT' } filter (no-op: no contact holds DORMANT)" },
@@ -136,6 +144,10 @@ describe('Contact.status vocabulary (CF-49)', () => {
     expect(grown, 'a new Contact.status dialect literal: use CONTACT_STATUSES (crm.constants.ts)').toEqual([]);
     for (const w of PACKET_WRITERS) expect(LEGACY_DIALECT_READERS[w], `${w} may not be baselined`).toBeUndefined();
   });
+
+  it.todo(
+    "CR-1 (companion packet, files outside the V1-38 write set): the legacy 'CUSTOMER' readers read CLIENT - lead-scoring.scheduler.ts (+5), health-score.service.ts (dormant customer count), relationship-health.service.ts (CUSTOMER signal branches), maturity-assessment.service.ts (customer count) - and LEGACY_DIALECT_READERS drops each file it fixes",
+  );
 
   it('an external store buyer maps into the vocabulary: orders make a CLIENT, none a LEAD', () => {
     expect(contactStatusForExternalCustomer(3)).toBe('CLIENT');
