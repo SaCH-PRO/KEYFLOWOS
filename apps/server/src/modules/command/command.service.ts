@@ -1,10 +1,22 @@
 import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { RealtimeService } from '../realtime/realtime.service';
+import { contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { CreateCommandItemDto } from './dto/create-command-item.dto';
 import { UpdateCommandItemDto } from './dto/update-command-item.dto';
+
+/**
+ * The ownerType of an item owned by a contact: ownerId is then a Contact id.
+ * generateDoItForMe (key-command.service.ts) writes one per action ('Follow up:
+ * <name>'). FOLLOW3-D10 (V1-84): such an item is listed, read and acted on only
+ * by a member who may open that contact.
+ */
+const CONTACT_OWNER = 'CONTACT';
+
+type OwnedItem = { ownerType: string | null; ownerId: string | null };
 
 @Injectable()
 export class CommandService {
@@ -77,6 +89,65 @@ export class CommandService {
     return item;
   }
 
+  /**
+   * FOLLOW3-D10 (V1-84): the contacts named by this business's CONTACT-owned
+   * items that `actorUserId` may not open, by the rule GET contacts/:contactId
+   * applies (contactVisibilityFilter: the tenant predicate, deletedAt null and
+   * visibilityClause). Empty when nothing is withheld: no actor (an internal
+   * caller), the OWNER and SUPER_ADMIN (visibilityClause null).
+   */
+  private async hiddenOwnerContacts(businessId: string, actorUserId?: string): Promise<string[]> {
+    if (!actorUserId) return [];
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const named = await this.prisma.client.commandItem.findMany({
+      where: { businessId, ownerType: CONTACT_OWNER, ownerId: { not: null } },
+      select: { ownerId: true },
+      distinct: ['ownerId'],
+    });
+    const ids = named.map((r) => r.ownerId).filter((id): id is string => !!id);
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, ids);
+    return canOpen ? ids.filter((id) => !canOpen(id)) : [];
+  }
+
+  /**
+   * The where fragment that leaves out the items owned by `hidden` contacts
+   * and keeps every other row. The null branches are explicit because SQL
+   * `<>` and `NOT IN` drop a NULL column: an item with no owner, or whose
+   * ownerType is not CONTACT, must stay. Null when nothing is hidden.
+   */
+  private withoutHiddenOwners(hidden: string[]): Prisma.CommandItemWhereInput | null {
+    if (hidden.length === 0) return null;
+    return {
+      OR: [
+        { ownerType: null },
+        { ownerType: { not: CONTACT_OWNER } },
+        { ownerId: null },
+        { ownerId: { notIn: hidden } },
+      ],
+    };
+  }
+
+  /**
+   * Whether `actorUserId` may open every contact that owns one of `items`
+   * (FOLLOW3-D10). True with no actor (an internal caller) and for items with
+   * no CONTACT owner; the OWNER and SUPER_ADMIN open every contact.
+   */
+  private async ownerContactsVisible(businessId: string, items: OwnedItem[], actorUserId?: string): Promise<boolean> {
+    if (!actorUserId) return true;
+    const owners = items
+      .filter((i) => i.ownerType === CONTACT_OWNER && !!i.ownerId)
+      .map((i) => i.ownerId as string);
+    if (owners.length === 0) return true;
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, owners);
+    return !canOpen || owners.every((id) => canOpen(id));
+  }
+
+  /**
+   * With `actorUserId` (the HTTP routes), an item owned by a contact the member
+   * may not open is left out of the list and the total, whatever the client's
+   * own ownerId/ownerType filters say (FOLLOW3-D10).
+   */
   async findMany(businessId: string, filters: {
     status?: string;
     category?: string;
@@ -85,13 +156,15 @@ export class CommandService {
     ownerType?: string;
     limit?: number;
     offset?: number;
-  }) {
+  }, actorUserId?: string) {
     const where: Record<string, unknown> = { businessId };
     if (filters.status) where.status = filters.status;
     if (filters.category) where.category = filters.category;
     if (filters.sourceModule) where.sourceModule = filters.sourceModule;
     if (filters.ownerId) where.ownerId = filters.ownerId;
     if (filters.ownerType) where.ownerType = filters.ownerType;
+    const visible = this.withoutHiddenOwners(await this.hiddenOwnerContacts(businessId, actorUserId));
+    if (visible) where.AND = [visible];
 
     const [items, total] = await Promise.all([
       this.prisma.client.commandItem.findMany({
@@ -106,11 +179,18 @@ export class CommandService {
     return { items, total };
   }
 
-  async findOne(businessId: string, id: string) {
+  /**
+   * With `actorUserId`, an item owned by a contact the member may not open
+   * answers exactly as an unknown id (FOLLOW3-D10). Every single-item mutation
+   * below reads its row through here first, so it refuses before it writes.
+   */
+  async findOne(businessId: string, id: string, actorUserId?: string) {
     const item = await this.prisma.client.commandItem.findFirst({
       where: { id, businessId },
     });
-    if (!item) throw new NotFoundException('Command item not found');
+    if (!item || !(await this.ownerContactsVisible(businessId, [item], actorUserId))) {
+      throw new NotFoundException('Command item not found');
+    }
     return item;
   }
 
@@ -151,8 +231,8 @@ export class CommandService {
    * Discharged means the thing owed actually happened, and `dischargeRef` names
    * what did it — a tool name, an invoice id, a short note.
    */
-  async discharge(businessId: string, id: string, dischargeRef?: string) {
-    const item = await this.findOne(businessId, id);
+  async discharge(businessId: string, id: string, dischargeRef?: string, actorUserId?: string) {
+    const item = await this.findOne(businessId, id, actorUserId);
 
     if (item.kind !== 'OBLIGATION') {
       // Refusing rather than quietly succeeding. Discharging a SUGGESTION would
@@ -192,11 +272,14 @@ export class CommandService {
   async findDue(
     businessId: string,
     opts: { windowDays?: number; includeOverdue?: boolean; limit?: number; now?: Date } = {},
+    actorUserId?: string,
   ) {
     const now = opts.now ?? new Date();
     const windowDays = Math.min(Math.max(opts.windowDays ?? 7, 1), 365);
     const until = new Date(now.getTime() + windowDays * 24 * 60 * 60 * 1000);
     const includeOverdue = opts.includeOverdue ?? true;
+    // FOLLOW3-D10: with an actor, an obligation owned by a contact they may not open is not theirs to see.
+    const visible = this.withoutHiddenOwners(await this.hiddenOwnerContacts(businessId, actorUserId));
 
     const items = await this.prisma.client.commandItem.findMany({
       where: {
@@ -206,6 +289,7 @@ export class CommandService {
         dischargedAt: null,
         dueAt: includeOverdue ? { lte: until } : { gte: now, lte: until },
         OR: [{ snoozedUntil: null }, { snoozedUntil: { lte: now } }],
+        ...(visible ? { AND: [visible] } : {}),
       },
       orderBy: [{ dueAt: 'asc' }, { priority: 'desc' }],
       take: Math.min(opts.limit ?? 100, 500),
@@ -227,8 +311,8 @@ export class CommandService {
     };
   }
 
-  async update(businessId: string, id: string, dto: UpdateCommandItemDto) {
-    const existing = await this.findOne(businessId, id);
+  async update(businessId: string, id: string, dto: UpdateCommandItemDto, actorUserId?: string) {
+    const existing = await this.findOne(businessId, id, actorUserId);
     const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: {
@@ -264,8 +348,8 @@ export class CommandService {
     return item;
   }
 
-  async dismiss(businessId: string, id: string) {
-    const existing = await this.findOne(businessId, id);
+  async dismiss(businessId: string, id: string, actorUserId?: string) {
+    const existing = await this.findOne(businessId, id, actorUserId);
     const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: { status: 'DISMISSED', dismissedAt: new Date() },
@@ -284,11 +368,11 @@ export class CommandService {
     return item;
   }
 
-  async snooze(businessId: string, id: string, until: Date) {
+  async snooze(businessId: string, id: string, until: Date, actorUserId?: string) {
     if (until.getTime() <= Date.now()) {
       throw new BadRequestException('Snooze until date must be in the future');
     }
-    const existing = await this.findOne(businessId, id);
+    const existing = await this.findOne(businessId, id, actorUserId);
     const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: { status: 'SNOOZED', snoozedUntil: until },
@@ -307,8 +391,8 @@ export class CommandService {
     return item;
   }
 
-  async complete(businessId: string, id: string) {
-    const existing = await this.findOne(businessId, id);
+  async complete(businessId: string, id: string, actorUserId?: string) {
+    const existing = await this.findOne(businessId, id, actorUserId);
     const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: { status: 'COMPLETED', completedAt: new Date() },
@@ -332,8 +416,8 @@ export class CommandService {
     return item;
   }
 
-  async assign(businessId: string, id: string, ownerType: string, ownerId: string) {
-    const existing = await this.findOne(businessId, id);
+  async assign(businessId: string, id: string, ownerType: string, ownerId: string, actorUserId?: string) {
+    const existing = await this.findOne(businessId, id, actorUserId);
     const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: { ownerType, ownerId },
@@ -357,8 +441,8 @@ export class CommandService {
     return item;
   }
 
-  async reopen(businessId: string, id: string) {
-    const existing = await this.findOne(businessId, id);
+  async reopen(businessId: string, id: string, actorUserId?: string) {
+    const existing = await this.findOne(businessId, id, actorUserId);
     const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: { status: 'OPEN', completedAt: null, dismissedAt: null, snoozedUntil: null },
@@ -377,8 +461,8 @@ export class CommandService {
     return item;
   }
 
-  async approve(businessId: string, id: string) {
-    const existing = await this.findOne(businessId, id);
+  async approve(businessId: string, id: string, actorUserId?: string) {
+    const existing = await this.findOne(businessId, id, actorUserId);
     const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: { status: 'EXECUTED', completedAt: new Date() },
@@ -397,8 +481,8 @@ export class CommandService {
     return item;
   }
 
-  async execute(businessId: string, id: string, result?: Record<string, unknown>) {
-    const existing = await this.findOne(businessId, id);
+  async execute(businessId: string, id: string, result?: Record<string, unknown>, actorUserId?: string) {
+    const existing = await this.findOne(businessId, id, actorUserId);
     const item = await this.prisma.client.commandItem.update({
       where: { id },
       data: {
@@ -421,8 +505,8 @@ export class CommandService {
     return item;
   }
 
-  async delete(businessId: string, id: string) {
-    const existing = await this.findOne(businessId, id);
+  async delete(businessId: string, id: string, actorUserId?: string) {
+    const existing = await this.findOne(businessId, id, actorUserId);
     await this.prisma.client.commandItem.delete({ where: { id } });
     await this.timeline.recordEvent({
       businessId,
@@ -437,12 +521,13 @@ export class CommandService {
     return existing;
   }
 
-  async bulkComplete(businessId: string, ids: string[]) {
+  async bulkComplete(businessId: string, ids: string[], actorUserId?: string) {
     if (!ids.length) return { count: 0 };
     const existing = await this.prisma.client.commandItem.findMany({
       where: { id: { in: ids }, businessId },
     });
-    if (existing.length !== ids.length) {
+    // FOLLOW3-D10: an item owned by a contact the member may not open refuses the whole call, as an unknown id does.
+    if (existing.length !== ids.length || !(await this.ownerContactsVisible(businessId, existing, actorUserId))) {
       throw new NotFoundException('One or more command items not found');
     }
     const { count } = await this.prisma.client.commandItem.updateMany({
@@ -472,12 +557,13 @@ export class CommandService {
     return { count };
   }
 
-  async bulkDismiss(businessId: string, ids: string[]) {
+  async bulkDismiss(businessId: string, ids: string[], actorUserId?: string) {
     if (!ids.length) return { count: 0 };
     const existing = await this.prisma.client.commandItem.findMany({
       where: { id: { in: ids }, businessId },
     });
-    if (existing.length !== ids.length) {
+    // FOLLOW3-D10: an item owned by a contact the member may not open refuses the whole call, as an unknown id does.
+    if (existing.length !== ids.length || !(await this.ownerContactsVisible(businessId, existing, actorUserId))) {
       throw new NotFoundException('One or more command items not found');
     }
     const { count } = await this.prisma.client.commandItem.updateMany({
@@ -507,12 +593,13 @@ export class CommandService {
     return { count };
   }
 
-  async bulkDelete(businessId: string, ids: string[]) {
+  async bulkDelete(businessId: string, ids: string[], actorUserId?: string) {
     if (!ids.length) return { count: 0 };
     const existing = await this.prisma.client.commandItem.findMany({
       where: { id: { in: ids }, businessId },
     });
-    if (existing.length !== ids.length) {
+    // FOLLOW3-D10: an item owned by a contact the member may not open refuses the whole call, as an unknown id does.
+    if (existing.length !== ids.length || !(await this.ownerContactsVisible(businessId, existing, actorUserId))) {
       throw new NotFoundException('One or more command items not found');
     }
     const { count } = await this.prisma.client.commandItem.deleteMany({

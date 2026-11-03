@@ -24,9 +24,11 @@
  *
  * Nothing on the authorization or persistence path is mocked: PrismaService,
  * the user, business, membership, contact, contact share and command item
- * rows, AuthGuard, BusinessGuard, ModuleScopeGuard, the global ValidationPipe
- * and GlobalHttpExceptionFilter, CommandController and CommandService are real
- * against DATABASE_URL. The stand-ins are recorders behind the guards: identity
+ * rows, AuthGuard, BusinessGuard, ModuleScopeGuard, the global ValidationPipe,
+ * GlobalHttpExceptionFilter and TenantInterceptor (global in app.module.ts as
+ * APP_INTERCEPTOR; the bulk routes read their actor from the context it binds),
+ * CommandController and CommandService are real against DATABASE_URL. The
+ * stand-ins are recorders behind the guards: identity
  * attachment (a test middleware reads `x-test-user` and attaches the seeded user
  * row as AuthMiddleware would), TimelineService, RealtimeService,
  * NotificationsService, and the command generator and scheduler (a scan would
@@ -200,6 +202,7 @@ beforeAll(async () => {
   const { AuthGuard } = await import('../src/core/auth/auth.guard');
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
   const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+  const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
   const { CommandController } = await import('../src/modules/command/command.controller');
   const { CommandService } = await import('../src/modules/command/command.service');
   const { CommandGeneratorService } = await import('../src/modules/command/command-generator.service');
@@ -248,6 +251,8 @@ beforeAll(async () => {
     next();
   });
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
+  // As app.module.ts (APP_INTERCEPTOR): the guarded tenant and the member become the ambient context.
+  app.useGlobalInterceptors(new TenantInterceptor(moduleRef.get(PrismaService)));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
 
