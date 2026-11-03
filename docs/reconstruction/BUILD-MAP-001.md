@@ -949,6 +949,8 @@ Counts: ADOPTED 1, CONTROL 15, DEFER 8, DOCS 10, EVIDENCE 3, NONE 9, PORT 9, STA
 | D-50 | **Who may edit or delete accounting periods.** PATCH and DELETE of accounting periods are now OWNER or ADMIN only (a member with the finance scope can read and post, not reopen or remove a period). Keep, or OWNER only (as D-11 does for the business profile)? | V1-15 |
 | D-51 | **Stranded KEY idempotency claims.** A claim whose holder crashed before settling stays pending, so a retry with the same key is refused, not run twice. Releasing it needs a lease: how long a pending claim may stand before a retry may take it over (and whether the takeover must first check the tool's effect). Pick the lease, or keep manual release only? | V1-19b |
 | D-52 | **Staff approvals by message.** A staff YES over WhatsApp or SMS now approves only when the inbound message has a provider message id (so a replayed or forged webhook cannot approve). Providers or test numbers that omit the id can no longer approve by message. Keep? | V1-21c (WB-3) |
+| D-53 | **KEY sandbox routes.** `POST .../sandbox/execute` ran client-supplied code in `node:vm`, which reaches the host process, and `sandbox/apply` applied client template parameters. V1-31c answers both with 410 Gone. Keep them retired, or rebuild a real isolated sandbox (a separate process or service: a new dependency or provider)? | V1-31c |
+| D-54 | **Flows with runtime-filled parameters.** `POST flows/:id/execute` now refuses a stored flow whose node parameters are filled at run time from the request (client inputs reaching a tool's arguments). Flows with fixed parameters still run. Keep the refusal, or allow a declared, validated input schema per flow? | V1-31c |
 
 ---
 
@@ -985,6 +987,30 @@ Counts: ADOPTED 1, CONTROL 15, DEFER 8, DOCS 10, EVIDENCE 3, NONE 9, PORT 9, STA
 | D-46 | A platform SUPER_ADMIN who is not a member stays refused on tenant invoice writes. | No change. |
 | D-40 | Command-centre and procurement routes are gated under the existing `operations` module scope (OWNER and ADMIN keep access). No new module key. | A follow-up packet adds the gate. |
 | D-41..D-45, D-47..D-52 | Kept as built: a period closes only after it ends (D-41); the Gmail owner-only and refresh-token rules (D-42, D-43); no client role on KEY chat (D-44); no staff invoice send by message (D-45); the stricter of the two autonomy settings wins (D-47); termsVersion is mandatory on public accept (D-48); KEY convert_quote only accepts (D-49); OWNER/ADMIN period edits (D-50); stranded idempotency claims are released manually (D-51); message approvals need a provider message id (D-52). | No change. |
+
+### Owner rulings, 2026-11-03
+
+All accepted as recommended, in one batch, by the owner directly (the FOLLOW3 residual scoping, `follow3-scope`).
+
+| Id | Ruling | Effect on the queue |
+|---|---|---|
+| D-55 | A hand-recorded payment whose method is `stripe`, `paypal` or `wipay` (HTTP route or KEY) is accepted as today but stored with provider `manual`, so no gateway refund door can match it; it still posts to the payment-processor account. | FOLLOW3-A1. |
+| D-56 | A Stripe refund event verified by the deployment's webhook secret but carrying no owner tag may read the charge through the existing `StripeConnector.isOwnCharge` to bind it to the business the platform tagged, and is refused when the matched payment belongs to another business. | FOLLOW3-A3. |
+| D-57 | The Books reads that carry revenue and cash figures (general ledger, per-account balance, receivables aging, customer balance, finance overview, safe-to-spend) and every money report (`reports/*`, commerce revenue reports) need `revenue:read`, the trial-balance gate. No new module key. | FOLLOW3-A6, FOLLOW3-A7. |
+| D-58 | An outbound webhook subscribed to `invoice.paid` also receives `invoice.reopened`. | FOLLOW3-A9. |
+| D-59 | When a booking's live deposit is in another currency than the final invoice, completion refuses with 409 (`DEPOSIT_CURRENCY_MISMATCH`), writes nothing, and the operator settles by hand (D-13: one currency per business). | FOLLOW3-A10. |
+| D-60 | Once an invoice has left DRAFT, a PATCH that changes its lines, tax or discount (and so its total) is refused with 409; corrections go through void-and-reissue or a credit note (D-28). Restating the stored amounts unchanged, notes, due date and contact edits stay allowed. | FOLLOW3-B2. |
+| D-61 | Repository admission binds each required gate to its workflow file (CI/CD Pipeline, Agent Control Gate, Branch divergence, DAST (Native), Agent Control Worker Proof) and fails closed when a run's path is absent or different. | FOLLOW3-C5. |
+| D-62 | Deploy scripts (`post-merge.sh`, `start-cloud-app.sh`) run `prisma migrate deploy` instead of `db push`. A database without `0_baseline` fails loudly (P3005) until an operator runs `prisma migrate resolve --applied 0_baseline` once. No auto-baseline. | FOLLOW3-C6. D-20 remains an operator fact to confirm. |
+| D-63 | Timeline (Activity) rows map to canonical scopes: KEY/AI rows to `ai`, settings rows to `settings`, communications/messages/inbox to `crm`, genome/site/notifications/analytics per the pinned table; a row of an unmapped module is visible to OWNER/ADMIN only, and the census keeps that set empty. | FOLLOW3-D1. |
+| D-64 | Invoice and quote create, update and convert refuse (404) a contact the acting member cannot open under CRM visibility, as bookings create does since V1-06. | FOLLOW3-D6. |
+| D-37 | KEY's member-chat contact and calendar reads pass the member as the actor and apply the CRM visibility clause. | FOLLOW3-D7. |
+| D-65 | A CANCELLED from the operator status route without an initiator is a customer cancel: a paid deposit is forfeit, as today. KEY `bookings_cancel_booking`, undo and saga compensation are business-initiated and never forfeit. | FOLLOW3-D18. |
+| D-66 | Only DRAFT and VOID invoices may be deleted (single, bulk, KEY); an issued invoice is voided first. | FOLLOW3-B6. |
+| D-67 | A posted expense refuses amount, items or currency edits with 409 (void and re-record). On the expense detail page, Approve pays a BILL (`POST bills/:id/pay`) and Reject voids it (`POST bills/:id/void`); both are hidden for expenses that are not BILLs. | FOLLOW3-B7. |
+| D-68 | The tRPC endpoint (packages/api routers, no web consumer) is unmounted by default: the server serves /trpc only when TRPC_ENABLED=1. V1-26's blocked visibility cases stay it.fails until it is re-enabled with fixes. | Repair round 2 (trpc area); V1-26 closes as partial. |
+| D-69 | A WiPay checkout (invoice or storefront) for an amount not in TTD answers 400 and WiPay is not offered for it, until WiPay's currency parameter is verified from its documentation (D-19 fail closed). | Repair round 2 (g6pub area). |
+| D-70 | An approved queued KEY action step is run from a Run action on that queue item in the web control tower, executing exactly the stored step through the bound execute route (V1-31b), with no re-planning. | Repair round 2 (key area). |
 
 ---
 
