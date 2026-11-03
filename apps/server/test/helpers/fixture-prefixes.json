@@ -598,6 +598,11 @@
       "packet": "V1-84 (FOLLOW3-D1-TIMELINE-SCOPE)"
     },
     {
+      "prefix": "v84b_",
+      "owner": "apps/server/test/crm-contact-routes-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D2-CRM-CONTACT-ROUTES-VIS)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
