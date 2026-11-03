@@ -616,16 +616,20 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * D-26: a deposit is forfeit when the customer cancels after paying it. The
    * forfeit is recorded on the booking (paymentStatus DEPOSIT_FORFEITED) and
    * on the contact's timeline; nothing moves automatically: the deposit
-   * invoice stays PAID, and no refund, credit note or posting is written. The
-   * owner may refund it by hand through the refund path (a negative refund
-   * row, D-14). The deposit counts as paid when its invoice is PAID in the
-   * table, so a booking whose paymentStatus was never written (before V1-28)
-   * is covered too. Cancelling again records nothing new.
+   * invoice keeps its status, and no refund, credit note or posting is
+   * written. The owner may refund it by hand through the refund path (a
+   * negative refund row, D-14). What was paid is read from the live deposit
+   * invoice in the table, not from Booking.paymentStatus, so a booking whose
+   * paymentStatus was never written (before V1-28) is covered too.
+   * Cancelling again records nothing new.
    *
-   * V1-28 review: what is forfeit is the money the deposit holds, its PAID
-   * total less what was refunded on it (the invoice stays PAID after a
-   * refund, SEC-V28-3), so a deposit already refunded forfeits nothing. The
-   * timeline row names who cancelled (SEC-V28-2): the authenticated member
+   * V1-28 review: what is forfeit is the money the live deposit (not VOID,
+   * not deleted) holds, by the rule the booking's status is derived from
+   * (depositPosition): all of a PAID deposit nothing was refunded on, the net
+   * received on one that was refunded, whether D-14 left it PAID or reopened
+   * it to PARTIALLY_PAID or SENT, and nothing on a deposit still owed. So a
+   * deposit refunded in full forfeits nothing, and one refunded in part
+   * forfeits what it still holds. The timeline row names who cancelled (SEC-V28-2): the authenticated member
    * whose request this is (TenantInterceptor's context for this business), or
    * SYSTEM for a caller with none (a KEY tool, undo or compensation run
    * outside a member's request); it claimed USER with no actor.
@@ -636,7 +640,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<DepositForfeit | null> {
     if (!booking.depositInvoiceId) return null;
     const deposit = await this.prisma.client.invoice.findFirst({
-      where: { id: booking.depositInvoiceId, businessId, deletedAt: null, status: 'PAID' },
+      where: { id: booking.depositInvoiceId, businessId, deletedAt: null, status: { not: 'VOID' } },
       select: SETTLEMENT_INVOICE_SELECT,
     });
     if (!deposit) return null;

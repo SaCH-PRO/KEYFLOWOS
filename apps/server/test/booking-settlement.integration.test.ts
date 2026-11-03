@@ -50,9 +50,14 @@
  *   S-04b SEC-V28-1  an invoice-number collision (INV-<Date.now()>) is retried; a persistent database
  *                    failure answers the fixed sentence, never Prisma's text, paths or column names
  *   S-05c CR-V28-1   the final paid while the deposit is still owed (SENT or DRAFT) is not PAID
- *   S-07c SEC-V28-3  a refunded deposit (still PAID) forfeits nothing, is not restored as
- *                    DEPOSIT_PAID on reinstatement, and is not netted from the final invoice
+ *   S-07c SEC-V28-3  a refunded deposit (reopened to SENT under D-14) forfeits nothing, is not
+ *                    restored as DEPOSIT_PAID on reinstatement, and is owed again on its own invoice
  *   S-07d SEC-V28-2  the forfeit row names the member who cancelled; a call with no member is SYSTEM
+ *
+ * Trial-I integration review (V1-28 with the D-14 refund convention), red at b1852b46:
+ *   S-07e F1/REG-3   a deposit part-refunded under D-14 (reopened to PARTIALLY_PAID, net 15)
+ *                    forfeits the 15 it still holds on a cancel; CONTROL: a part payment on a
+ *                    deposit still owed (never refunded) holds nothing and forfeits nothing
  *   TODO  CR-V28-4   a business-initiated cancel forfeits nothing (needs a cancel-initiator input)
  *   TODO  CR-V28-3   the storefront passes the token link into the confirmation (book/[slug]/page.tsx)
  *
@@ -795,6 +800,39 @@ describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
     expect(cancel.body.depositForfeit ?? null).toBeNull();
     expect((await bookingRow(early.bookingId)).paymentStatus).not.toBe('DEPOSIT_FORFEITED');
     expect(contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === early.bookingId)).toHaveLength(0);
+  });
+
+  it('S-07e F1/REG-3: a deposit part-refunded under D-14 (PARTIALLY_PAID, net 15) forfeits the 15 it holds; a part payment on an owed deposit forfeits nothing', async () => {
+    const b = await book(ID.svcDep, 's07e');
+    await sendAndPay(b.depositInvoiceId!, 15);
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('PARTIALLY_PAID');
+    await settle(b.depositInvoiceId!, 10);
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('DEPOSIT_PAID');
+    const ten = await db.payment.findFirst({ where: { invoiceId: b.depositInvoiceId, status: 'SUCCESSFUL', amount: 10 } });
+    await commerce.markPaymentRefunded(ten.id, ID.biz, 'goodwill', ID.owner);
+    expect((await invoiceRow(b.depositInvoiceId!)).status, 'a partial refund reopens the deposit (D-14)').toBe('PARTIALLY_PAID');
+
+    const res = await setStatus(b.bookingId, 'CANCELLED');
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    expect(res.body.depositForfeit).toMatchObject({ depositInvoiceId: b.depositInvoiceId, amount: 15 });
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('DEPOSIT_FORFEITED');
+    const rows = contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === b.bookingId);
+    expect(rows.map((e) => e.data.amount)).toEqual([15]);
+    // Nothing moves automatically (D-26): the deposit keeps its status and rows.
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('PARTIALLY_PAID');
+    const payments = await db.payment.findMany({ where: { invoiceId: b.depositInvoiceId }, orderBy: { createdAt: 'asc' } });
+    expect(payments.map((p: any) => `${p.status} ${money(p.amount)}`)).toEqual(['SUCCESSFUL 15', 'SUCCESSFUL 10', 'REFUNDED -10']);
+
+    // CONTROL: a part payment on a deposit still owed, never refunded, is not held for the booking.
+    const owed = await book(ID.svcDep, 's07e_owed');
+    await sendAndPay(owed.depositInvoiceId!, 10);
+    expect((await invoiceRow(owed.depositInvoiceId!)).status).toBe('PARTIALLY_PAID');
+    const cancel = await setStatus(owed.bookingId, 'CANCELLED');
+    expect(cancel.status, JSON.stringify(cancel.body)).toBe(201);
+    expect(cancel.body.depositForfeit ?? null).toBeNull();
+    expect((await bookingRow(owed.bookingId)).paymentStatus).toBe('UNPAID');
+    expect(contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === owed.bookingId)).toHaveLength(0);
   });
 
   it('S-07d SEC-V28-2: the forfeit row names the member who cancelled; a call with no member (KEY tool, undo, compensation) is SYSTEM', async () => {

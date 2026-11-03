@@ -53,14 +53,21 @@ const NOTHING_LEFT_TO_COLLECT: ReadonlySet<string> = new Set(['PAID', 'FULLY_CRE
  *
  *   billed  its total less the credit notes applied to it (all of it once it
  *           is FULLY_CREDITED, the status CreditNoteService.apply writes)
- *   held    money it holds for the booking: the net received on it (the
- *           shared balance contract, balanceOfStoredRows: SUCCESSFUL rows less
- *           D-14's negative REFUNDED rows; a legacy positive REFUNDED flip
- *           reads as net 0), at most what it bills. Under D-14 a refund moves
- *           the invoice (a full refund back to SENT, a partial one to
- *           PARTIALLY_PAID), so a part-refunded deposit still holds its net.
- *           A PAID deposit with no payment rows (a legacy raw status write)
- *           holds what it bills.
+ *   held    money it holds for the booking, at most what it bills, read
+ *           from the shared balance contract (balanceOfStoredRows: SUCCESSFUL
+ *           rows less D-14's negative REFUNDED rows; a legacy positive REFUNDED
+ *           flip reads as net 0):
+ *             - a deposit something was refunded on (PAID, or reopened by a
+ *               D-14 refund to PARTIALLY_PAID or SENT) holds its net received;
+ *             - a deposit nothing was refunded on holds what it bills when it
+ *               is PAID (its status is the evidence: a legacy deposit marked
+ *               PAID with no rows, FAILED or PENDING rows only, or rows short
+ *               of its total, from before R0-20 recorded every payment, was
+ *               paid, and the final invoice netted it as paid) or when the net
+ *               received on it covers what it bills (a paid deposit a credit
+ *               note was then applied to, D-28 PARTIALLY_CREDITED);
+ *             - any other deposit holds nothing: a part payment on a deposit
+ *               still owed does not make the booking DEPOSIT_PAID.
  *   covers  the part of the price the deposit accounts for, which the final
  *           invoice nets out: a deposit with nothing left to collect (PAID,
  *           FULLY_CREDITED) covers what it holds; any other live deposit,
@@ -72,12 +79,11 @@ export function depositPosition(deposit: SettlementInvoice): { billedCents: numb
   const appliedCents = deposit.creditNotes.reduce((sum, cn) => sum + toCents(Number(String(cn.amount))), 0);
   const creditedCents = deposit.status === 'FULLY_CREDITED' ? totalCents : Math.min(totalCents, appliedCents);
   const billedCents = Math.max(0, totalCents - creditedCents);
-  // A PAID invoice with no payment rows at all is a legacy raw status write
-  // (marked paid before R0-20 recorded a payment): its status is the only
-  // evidence, so it holds what it bills, as before.
-  const legacyPaidWithoutRows = deposit.status === 'PAID' && deposit.payments.length === 0;
-  const netCents = toCents(balanceOfStoredRows(Number(deposit.total), deposit.payments, deposit.currency).net);
-  const heldCents = legacyPaidWithoutRows ? billedCents : Math.min(billedCents, Math.max(0, netCents));
+  const balance = balanceOfStoredRows(Number(deposit.total), deposit.payments, deposit.currency);
+  const netHeldCents = Math.min(billedCents, Math.max(0, toCents(balance.net)));
+  const refunded = toCents(balance.refunded) > 0;
+  const settled = deposit.status === 'PAID' || netHeldCents === billedCents;
+  const heldCents = refunded ? netHeldCents : settled ? billedCents : 0;
   return { billedCents, heldCents, coversCents: NOTHING_LEFT_TO_COLLECT.has(deposit.status) ? heldCents : billedCents };
 }
 
