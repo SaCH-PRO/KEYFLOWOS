@@ -296,16 +296,53 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  /**
+   * V1-24c review (ST-V124c-1, CR-V124c-2): no production path removes a
+   * trigger's repeatable when its AgentTrigger row is deleted (directly or with
+   * its business), disabled, unscheduled or rescheduled: the API writes the row
+   * only and the boot sync only adds. So each run re-reads the row by its id
+   * AND the business it was registered for, and fires only an enabled row still
+   * on the schedule this run came from, with the row's current event and
+   * payload (not the copy stored in Redis at registration). A missing, disabled
+   * or unscheduled row (or one now under another business) has its repeatables
+   * removed and fires nothing; a rescheduled row is re-registered on its current
+   * schedule and nothing fires on the old one. A failed lookup throws: the run
+   * fails and fires nothing, and the repeatable is kept.
+   */
   private async processCronTrigger(job: Job<CronTriggerJob>): Promise<void> {
-    const data = job.data;
-    this.logger.log(`Cron trigger fired: ${data.triggerId} for ${data.businessId}`);
+    const { triggerId, businessId } = job.data;
+    const row = await this.prisma.client.agentTrigger.findFirst({
+      where: { id: triggerId, businessId },
+      select: { id: true, businessId: true, name: true, eventPattern: true, objective: true, condition: true, enabled: true, schedule: true },
+    });
 
-    this.events.emit(data.eventName, {
-      name: data.eventName,
-      businessId: data.businessId,
-      payload: data.payload,
+    if (!row || !row.enabled || !row.schedule) {
+      await this.removeCronTrigger(triggerId);
+      this.logger.log(`Cron trigger ${triggerId} for ${businessId} is no longer scheduled: repeatable removed, not fired`);
+      return;
+    }
+
+    const current: CronTriggerJob = {
+      triggerId: row.id,
+      businessId: row.businessId,
+      eventName: row.eventPattern,
+      payload: { triggerId: row.id, name: row.name, objective: row.objective, condition: row.condition },
+    };
+
+    if (row.schedule !== job.opts.repeat?.pattern) {
+      await this.enqueueCronTrigger(current, row.schedule);
+      this.logger.log(`Cron trigger ${triggerId} for ${businessId} was rescheduled (${row.schedule}): re-registered, not fired on the old schedule`);
+      return;
+    }
+
+    this.logger.log(`Cron trigger fired: ${triggerId} for ${businessId}`);
+
+    this.events.emit(current.eventName, {
+      name: current.eventName,
+      businessId: current.businessId,
+      payload: current.payload,
       source: 'cron',
-      triggerId: data.triggerId,
+      triggerId: current.triggerId,
     });
   }
 

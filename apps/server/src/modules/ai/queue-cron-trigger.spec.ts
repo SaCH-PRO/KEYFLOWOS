@@ -29,6 +29,18 @@
  * loaded first keeps the real, unprefixed bullmq: the tests then run in the
  * default namespace, filter by this run's trigger ids, and clean up the
  * namespace the service actually used (recorded below).
+ *
+ * V1-24c review (ST-V124c-1, CR-V124c-2): nothing in production calls
+ * removeCronTrigger or addCronTrigger. The API writes only the AgentTrigger row
+ * and the boot sync (CronSchedulerService.syncCronTriggers) only adds, so a
+ * deleted, disabled, unscheduled or rescheduled trigger kept its repeatable and
+ * kept emitting the event and payload stored in Redis. The cron worker now
+ * re-reads the row (by id AND the business the run was registered for) on every
+ * run. The row is a stand-in table below, matched on both fields like the real
+ * query; the tests that prove the queue mechanics leave the row as it was, so
+ * that re-read cannot mask a repeatable enqueue or remove failed to clear.
+ * CR-V124c-1: the yearly run is checked as a Jan 1 00:00 UTC instant, not as
+ * "more than 24h away" (false every Dec 31).
  */
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import { Logger } from '@nestjs/common';
@@ -86,6 +98,9 @@ afterEach(() => {
     else process.env[k] = saved[k];
   }
   vi.restoreAllMocks();
+  // Each test seeds its own rows: the boot sync reads the whole stand-in table.
+  table.clear();
+  lookups.length = 0;
 });
 
 async function until(cond: () => Promise<boolean> | boolean, ms: number): Promise<boolean> {
@@ -151,8 +166,49 @@ afterAll(async () => {
 
 const stub = () => ({}) as any;
 
-function queueService(emit: (...a: unknown[]) => unknown = vi.fn()) {
-  const svc = new QueueService(redis() as any, stub(), { emit } as any, stub(), stub(), stub(), stub(), stub(), stub());
+/** The AgentTrigger columns the boot sync and the cron worker read. */
+type Row = {
+  id: string;
+  businessId: string;
+  name: string;
+  eventPattern: string;
+  objective: string;
+  condition: unknown;
+  schedule: string | null;
+  enabled: boolean;
+};
+
+/**
+ * The AgentTrigger table as the cron worker sees it: findFirst matches on id
+ * AND businessId, like the real query, and every lookup's where is recorded.
+ */
+const table = new Map<string, Row>();
+const lookups: Array<{ id?: string; businessId?: string }> = [];
+const triggerTable = {
+  client: {
+    agentTrigger: {
+      findFirst: async ({ where }: { where: { id?: string; businessId?: string } }) => {
+        lookups.push(where);
+        const r = table.get(String(where.id));
+        return r && where.businessId !== undefined && r.businessId === where.businessId ? { ...r } : null;
+      },
+      /** The boot sync's query: enabled rows with a schedule, any business. */
+      findMany: async () => [...table.values()].filter((r) => r.enabled && r.schedule !== null).map((r) => ({ ...r })),
+    },
+  },
+};
+
+/** A stand-in passed where QueueService and CronSchedulerService take PrismaService. */
+const asPrisma = (p: unknown) => p as ConstructorParameters<typeof QueueService>[1];
+
+function row(id: string, businessId: string, schedule: string | null, over: Partial<Row> = {}): Row {
+  const r: Row = { id, businessId, name: `v124c ${id}`, eventPattern: EVENT, objective: 'v124c', condition: null, schedule, enabled: true, ...over };
+  table.set(id, r);
+  return r;
+}
+
+function queueService(emit: (...a: unknown[]) => unknown = vi.fn(), prisma: unknown = triggerTable) {
+  const svc = new QueueService(redis() as any, asPrisma(prisma), { emit } as any, stub(), stub(), stub(), stub(), stub(), stub());
   noteNamespace(svc.cronQueue);
   noteNamespace(svc.planQueue);
   return svc;
@@ -195,6 +251,22 @@ async function expectStoppedFiring(emit: ReturnType<typeof vi.fn>, triggerId: st
   expect(fires(emit, triggerId), `${what}: the old every-second schedule kept firing after the change`).toBe(afterOneInterval);
 }
 
+/**
+ * CR-V124c-1: the queued run is the yearly pattern's: a Jan 1 00:00:00.000 UTC
+ * instant after `since` and at most a year (and a day) later. This holds on any
+ * date; "more than 24h away" did not hold on Dec 31 (UTC).
+ */
+function expectYearlyRun(job: { timestamp: number; opts: { delay?: number } }, since: number) {
+  const at = job.timestamp + (job.opts.delay ?? 0);
+  const d = new Date(at);
+  expect(
+    [d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds(), d.getUTCMilliseconds()],
+    `the queued run (${d.toISOString()}) is not the yearly pattern's Jan 1 00:00 UTC`,
+  ).toEqual([0, 1, 0, 0, 0, 0]);
+  expect(at, 'the queued yearly run is not in the future').toBeGreaterThan(since);
+  expect(at, 'the queued yearly run is more than a year away').toBeLessThanOrEqual(since + 367 * 24 * 3600 * 1000);
+}
+
 describe.skipIf(!REDIS_URL)('V1-24c on real BullMQ (REDIS_URL): user cron triggers are found and removed by their repeatable name', () => {
   it('control: getRepeatableJobs() entries carry no `id` in this bullmq (why the lookup by id never matched); the trigger is found by its name', async () => {
     const svc = queueService();
@@ -217,6 +289,8 @@ describe.skipIf(!REDIS_URL)('V1-24c on real BullMQ (REDIS_URL): user cron trigge
     const svc = queueService(emit);
     await svc.onModuleInit();
     const id = `${RUN}-remove`;
+    // The row stays as it is: only removeCronTrigger can stop the repeatable here.
+    row(id, 'v124c-biz-A', EVERY_SECOND);
     try {
       await svc.enqueueCronTrigger(trigger(id, 'v124c-biz-A'), EVERY_SECOND);
       expect(await entries(svc, id), 'control: registered').toHaveLength(1);
@@ -238,10 +312,15 @@ describe.skipIf(!REDIS_URL)('V1-24c on real BullMQ (REDIS_URL): user cron trigge
     const svc = queueService(emit);
     await svc.onModuleInit();
     const id = `${RUN}-change`;
+    // The row is left on the old schedule on purpose: the worker's re-read of it
+    // then lets an every-second repeatable that enqueueCronTrigger failed to
+    // replace keep firing, so this proves the replacement itself.
+    row(id, 'v124c-biz-A', EVERY_SECOND);
     try {
       await svc.enqueueCronTrigger(trigger(id, 'v124c-biz-A'), EVERY_SECOND);
       expect(await until(() => fires(emit, id) >= 1, 6_000), 'control: the every-second trigger fires').toBe(true);
 
+      const changedAt = Date.now();
       await svc.enqueueCronTrigger(trigger(id, 'v124c-biz-A'), YEARLY);
 
       await expectStoppedFiring(emit, id, 'after the schedule changed to yearly');
@@ -250,7 +329,7 @@ describe.skipIf(!REDIS_URL)('V1-24c on real BullMQ (REDIS_URL): user cron trigge
       expect(mine[0].tz).toBe('UTC');
       const queued = await pending(svc, id);
       expect(queued, 'exactly the next yearly run is queued').toHaveLength(1);
-      expect(queued[0].timestamp + (queued[0].opts.delay ?? 0)).toBeGreaterThan(Date.now() + 24 * 3600 * 1000);
+      expectYearlyRun(queued[0], changedAt);
     } finally {
       await svc.removeCronTrigger(id).catch(() => undefined);
       await svc.onModuleDestroy();
@@ -263,6 +342,7 @@ describe.skipIf(!REDIS_URL)('V1-24c on real BullMQ (REDIS_URL): user cron trigge
     const svc = queueService(emit);
     await svc.onModuleInit();
     const id = `${RUN}-takes-effect`;
+    row(id, 'v124c-biz-A', EVERY_SECOND);
     try {
       await svc.enqueueCronTrigger(trigger(id, 'v124c-biz-A'), YEARLY);
       await svc.enqueueCronTrigger(trigger(id, 'v124c-biz-A'), EVERY_SECOND);
@@ -286,6 +366,9 @@ describe.skipIf(!REDIS_URL)('V1-24c on real BullMQ (REDIS_URL): user cron trigge
     await svc.onModuleInit();
     const idA = `${RUN}-x`;
     const idB = `${RUN}-x0`;
+    // Both rows stay as they are: only removeCronTrigger can stop B's repeatable here.
+    row(idA, 'v124c-biz-A', EVERY_SECOND);
+    row(idB, 'v124c-biz-B', EVERY_SECOND);
     try {
       await svc.enqueueCronTrigger(trigger(idA, 'v124c-biz-A'), EVERY_SECOND);
       await svc.enqueueCronTrigger(trigger(idB, 'v124c-biz-B'), EVERY_SECOND);
@@ -379,4 +462,156 @@ describe.skipIf(!REDIS_URL)('V1-24c on real BullMQ (REDIS_URL): user cron trigge
       await on.onModuleDestroy();
     }
   }, 20_000);
+  // -------------------------------------------------------------------------
+  // V1-24c review (ST-V124c-1, CR-V124c-2): the production path. The API writes
+  // only the row, the boot sync only adds, and nothing calls removeCronTrigger;
+  // the cron worker's re-read of the row is what stops a stale repeatable.
+  // -------------------------------------------------------------------------
+
+  const ROW_GONE: Array<[string, string, (r: Row) => void]> = [
+    ['deleted (directly, or with its business by the cascade)', 'deleted', (r) => void table.delete(r.id)],
+    ['disabled (enabled: false)', 'disabled', (r) => void (r.enabled = false)],
+    ['unscheduled (schedule: null)', 'unscheduled', (r) => void (r.schedule = null)],
+  ];
+
+  it.each(ROW_GONE)(
+    'a synced every-second trigger whose row is then %s stops firing within one interval and its repeatable and next run are removed, though nothing calls removeCronTrigger and the boot sync runs again',
+    async (what, slug, change) => {
+      setSwitches(SCHEDULERS_ON);
+      const emit = vi.fn();
+      const svc = queueService(emit);
+      await svc.onModuleInit();
+      const id = `${RUN}-gone-${slug}`;
+      const r = row(id, 'v124c-biz-A', EVERY_SECOND, { objective: 'v124c review' });
+      const cron = new CronSchedulerService(asPrisma(triggerTable), svc);
+      const removeSpy = vi.spyOn(cron, 'removeCronTrigger');
+      try {
+        await cron.syncCronTriggers();
+        expect(await entries(svc, id), 'control: the boot sync registered it').toHaveLength(1);
+        expect(await until(() => fires(emit, id) >= 1, 6_000), 'control: the synced every-second trigger fires').toBe(true);
+
+        change(r);
+        await cron.syncCronTriggers(); // a later boot: it only adds, it never prunes
+
+        await expectStoppedFiring(emit, id, `after the row was ${what}`);
+        expect(await entries(svc, id), `the repeatable of a ${slug} trigger is still registered`).toHaveLength(0);
+        expect(await pending(svc, id), `a run of a ${slug} trigger is still queued`).toHaveLength(0);
+        expect(removeSpy, 'the production path does not go through CronSchedulerService.removeCronTrigger').not.toHaveBeenCalled();
+        const mine = lookups.filter((w) => w.id === id);
+        expect(mine.length, 'control: the worker looked the row up').toBeGreaterThan(0);
+        expect(
+          mine.every((w) => w.businessId === 'v124c-biz-A' && Object.keys(w).length === 2),
+          'the worker looks the row up by exactly its id and the business it was registered for',
+        ).toBe(true);
+      } finally {
+        await svc.removeCronTrigger(id).catch(() => undefined);
+        await svc.onModuleDestroy();
+      }
+    },
+    30_000,
+  );
+
+  it('a row moved to another business fires nothing more for the business its repeatable was registered for, and that repeatable is removed (the lookup is by id AND business)', async () => {
+    setSwitches(SCHEDULERS_ON);
+    const emit = vi.fn();
+    const svc = queueService(emit);
+    await svc.onModuleInit();
+    const id = `${RUN}-moved`;
+    const r = row(id, 'v124c-biz-A', EVERY_SECOND);
+    try {
+      await new CronSchedulerService(asPrisma(triggerTable), svc).syncCronTriggers();
+      expect(await until(() => fires(emit, id) >= 1, 6_000), 'control: it fires for business A').toBe(true);
+
+      r.businessId = 'v124c-biz-B';
+
+      await expectStoppedFiring(emit, id, 'after the row moved to business B');
+      expect(await entries(svc, id), "business A's registration is still there").toHaveLength(0);
+      expect(await pending(svc, id)).toHaveLength(0);
+      const forB = emit.mock.calls.filter((c) => (c[1] as { triggerId?: string; businessId?: string })?.triggerId === id && (c[1] as { businessId?: string }).businessId !== 'v124c-biz-A');
+      expect(forB, "business A's registration emitted for another business").toEqual([]);
+    } finally {
+      await svc.removeCronTrigger(id).catch(() => undefined);
+      await svc.onModuleDestroy();
+    }
+  }, 30_000);
+
+  it('a row rescheduled in the database only (every second -> yearly, nothing re-enqueued) is re-registered on its current schedule at its next run: one repeatable, on the yearly pattern, and the every-second pattern stops firing within one interval', async () => {
+    setSwitches(SCHEDULERS_ON);
+    const emit = vi.fn();
+    const svc = queueService(emit);
+    await svc.onModuleInit();
+    const id = `${RUN}-rescheduled`;
+    const r = row(id, 'v124c-biz-A', EVERY_SECOND);
+    try {
+      await new CronSchedulerService(asPrisma(triggerTable), svc).syncCronTriggers();
+      expect(await until(() => fires(emit, id) >= 1, 6_000), 'control: the every-second trigger fires').toBe(true);
+
+      const changedAt = Date.now();
+      r.schedule = YEARLY;
+
+      await expectStoppedFiring(emit, id, 'after the row was rescheduled to yearly');
+      const mine = await entries(svc, id);
+      expect(mine.map((e) => e.pattern), 'repeatables registered for the trigger after the row was rescheduled').toEqual([YEARLY]);
+      expect(mine[0].tz).toBe('UTC');
+      const queued = await pending(svc, id);
+      expect(queued, 'exactly the next yearly run is queued').toHaveLength(1);
+      expectYearlyRun(queued[0], changedAt);
+      expect(queued[0].data, 're-registered from the row').toMatchObject({ triggerId: id, businessId: 'v124c-biz-A', eventName: EVENT });
+    } finally {
+      await svc.removeCronTrigger(id).catch(() => undefined);
+      await svc.onModuleDestroy();
+    }
+  }, 30_000);
+
+  it('a run fires the row\'s current event payload (name, objective, condition), not the copy stored in Redis when the trigger was registered', async () => {
+    setSwitches(SCHEDULERS_ON);
+    const emit = vi.fn();
+    const svc = queueService(emit);
+    await svc.onModuleInit();
+    const id = `${RUN}-edited`;
+    const r = row(id, 'v124c-biz-A', EVERY_SECOND, { name: 'before', objective: 'before objective' });
+    try {
+      await new CronSchedulerService(asPrisma(triggerTable), svc).syncCronTriggers();
+      expect(await until(() => fires(emit, id) >= 1, 6_000), 'control: it fires').toBe(true);
+      const last = () => emit.mock.calls.filter((c) => c[0] === EVENT && (c[1] as { triggerId?: string })?.triggerId === id).at(-1)![1];
+      expect(last(), 'control: before the edit').toMatchObject({ payload: { name: 'before', objective: 'before objective' } });
+
+      r.name = 'after';
+      r.objective = 'after objective';
+      r.condition = { field: 'x', op: 'eq', value: 1 };
+      const at = fires(emit, id);
+      expect(await until(() => fires(emit, id) >= at + 2, 6_000), 'it keeps firing after the edit').toBe(true);
+
+      expect(last()).toEqual({
+        name: EVENT,
+        businessId: 'v124c-biz-A',
+        payload: { triggerId: id, name: 'after', objective: 'after objective', condition: { field: 'x', op: 'eq', value: 1 } },
+        source: 'cron',
+        triggerId: id,
+      });
+      const queued = await pending(svc, id);
+      expect(queued.map((j) => j.data.payload.objective), 'control: the copy in Redis is still the one registered').toContain('before objective');
+    } finally {
+      await svc.removeCronTrigger(id).catch(() => undefined);
+      await svc.onModuleDestroy();
+    }
+  }, 30_000);
+
+  it('a failed row lookup fires nothing and keeps the repeatable (fail closed; a database error is not a deletion)', async () => {
+    setSwitches(SCHEDULERS_ON);
+    const emit = vi.fn();
+    const findFirst = vi.fn().mockRejectedValue(new Error('v124c: database unavailable'));
+    const svc = queueService(emit, { client: { agentTrigger: { findFirst } } });
+    await svc.onModuleInit();
+    const id = `${RUN}-lookup-fails`;
+    try {
+      await svc.enqueueCronTrigger(trigger(id, 'v124c-biz-A'), EVERY_SECOND);
+      expect(await until(() => findFirst.mock.calls.length >= 2, 6_000), 'control: the worker ran it').toBe(true);
+      expect(fires(emit, id), 'a run fired without its row').toBe(0);
+      expect(await entries(svc, id), 'a failed lookup removed the repeatable').toHaveLength(1);
+    } finally {
+      await svc.removeCronTrigger(id).catch(() => undefined);
+      await svc.onModuleDestroy();
+    }
+  }, 30_000);
 });
