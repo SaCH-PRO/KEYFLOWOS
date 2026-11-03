@@ -52,7 +52,7 @@ KEYFLOW OS unifies the tools you need to run a business — CRM, invoicing, book
 
 ### Prerequisites
 
-- Node.js 20.x (see `.nvmrc`)
+- Node.js 22.x (the exact version is pinned in `.nvmrc`)
 - pnpm 9.15.0
 - PostgreSQL 15+
 - Redis (optional, used for queues/cache)

@@ -12,11 +12,14 @@ concurrency:
   cancel-in-progress: true
 
 # Must match the exact versions in the root package.json `engines` field.
-# Major-only ranges ('20'/'9') resolve to the latest patch, which
-# `pnpm install --frozen-lockfile` then rejects with ERR_PNPM_UNSUPPORTED_ENGINE,
-# failing every job before any code runs.
+# Major-only ranges ('22'/'9') resolve to the latest patch. pnpm rejects an
+# engines.pnpm mismatch with ERR_PNPM_UNSUPPORTED_ENGINE, failing every job
+# before any code runs, but only WARNS on an engines.node mismatch.
+# Node 22.22.0 is owner ruling D-21 (V1-39): .nvmrc, engines.node, this line,
+# hawkscan.yml and the Dockerfile ARG must agree, which the "Check the Node
+# runtime pin" step proves (scripts/ci/runtime-pin.spec.mjs).
 env:
-  NODE_VERSION: '20.18.1'
+  NODE_VERSION: '22.22.0'
   PNPM_VERSION: '9.15.0'
 
 jobs:
@@ -41,6 +44,13 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
+
+      # V1-39 (PRS-M04, D-21): one declared Node runtime. Runs on the Node
+      # setup-node just installed, before install, and needs no dependencies.
+      # No env here: NODE_TEST_CONTEXT=child alone makes `node --test` skip
+      # every file and exit 0.
+      - name: Check the Node runtime pin
+        run: node --test scripts/ci/runtime-pin.spec.mjs
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

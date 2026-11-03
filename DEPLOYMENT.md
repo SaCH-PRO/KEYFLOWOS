@@ -38,7 +38,7 @@ The fastest way to get a complete local stack.
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop)
 - [pnpm](https://pnpm.io/installation) (`npm i -g pnpm`)
-- Node 20.x (see `.nvmrc`)
+- Node 22.x (the exact version is pinned in `.nvmrc`)
 
 ### 1. Clone & Install
 
@@ -372,7 +372,7 @@ fly redis create --name keyflowos-redis
 Create `apps/server/Dockerfile`:
 
 ```dockerfile
-FROM node:20-alpine
+FROM node:22.22.0-alpine
 WORKDIR /app
 RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./

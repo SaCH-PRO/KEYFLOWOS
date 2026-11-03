@@ -80,7 +80,7 @@ git commit --amend --no-edit
 
 ## Environment
 
-- **Node:** 20.x (see `.nvmrc`)
+- **Node:** 22.x, the exact version pinned in `.nvmrc` (owner ruling D-21; checked by `node --test scripts/ci/runtime-pin.spec.mjs`). Recorded exceptions in that spec, not yet aligned: the control-plane workflows `agent-control-autopilot.yml` and `agent-control-worker-proof.yml`, and `native-dast.yml` and `e2e-live.yml`, still pin `20.18.1`.
 - **Package Manager:** pnpm 9.15.0
 - **Monorepo:** pnpm workspaces with Turborepo
 
