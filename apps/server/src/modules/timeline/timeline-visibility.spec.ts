@@ -45,6 +45,12 @@
  *         notifications -> settings, analytics -> analytics.
  *   TV-06 classification is case-folded: 'REVENUE', 'BOOKINGS', 'EXPENSE'
  *         classify as 'revenue', 'bookings', 'expenses' do.
+ *   TV-08 (review ST-1) a row names the contact of its contactId, and of its
+ *         entityId when its entityType is 'contact'; such a row needs crm.
+ *   TV-07 (review ST-2) a writer whose title / detail interpolates a contact
+ *         (CONTACT_TEXT) but sets neither contactId nor entityType 'contact'
+ *         + entityId is listed in TEXT_ONLY_CONTACT_WRITERS as a follow-up:
+ *         the feed's contact rule cannot see which contact such a row names.
  *
  * WHAT THIS CANNOT DO: it cannot see a writer reached through an alias it
  * cannot type, or a module computed at runtime (those land in OPAQUE).
@@ -70,6 +76,25 @@ async function visibility() {
  */
 const OPAQUE_WRITERS: Record<string, string> = {};
 
+/**
+ * TV-07 (review ST-2): writers whose row names a contact only in its title or
+ * detail text, with no contactId and no entityType 'contact' + entityId, so
+ * the feed's contact rule cannot withhold it from a member who may not open
+ * that contact (the row is still governed by its module and by revenue).
+ * Each entry is an open FOLLOW-UP outside V1-84's write set: the writer must
+ * set contactId (then it leaves this list, and TV-07 fails until it does).
+ * Detection is a heuristic (CONTACT_TEXT in title / detail); entries the
+ * heuristic cannot see are listed by hand and marked so.
+ */
+const TEXT_ONLY_CONTACT_WRITERS: Record<string, string> = {
+  'modules/ai/flow-orchestrator.service.ts#FlowOrchestratorService.executeToolAction':
+    "KEY send_invoice: 'Invoice <n> sent to <contactName>' (module commerce) carries no contactId; follow-up: set contactId: invoice.contactId.",
+  'modules/communications/message-intake-orchestrator.service.ts#MessageIntakeOrchestrator.executePlan':
+    "message_intake.approved: detail is the intake plan's summary of an inbound message (module communications), no contactId; follow-up: set the intake's contactId. Listed by hand: the heuristic cannot see a summary's content.",
+};
+/** Entries above the heuristic does not flag, kept on purpose. */
+const TEXT_ONLY_BY_HAND = new Set(['modules/communications/message-intake-orchestrator.service.ts#MessageIntakeOrchestrator.executePlan']);
+
 /** The writer implementations: they pass the caller's module through. */
 const PASS_THROUGH = new Set([
   'modules/timeline/timeline.service.ts#TimelineService.recordEvent',
@@ -86,6 +111,13 @@ export interface ActivityWriter {
   line: number;
   /** Module literals as written (not case-folded), or OPAQUE. */
   modules: string[];
+  /**
+   * TV-07 (review ST-2): the row's title or detail interpolates a contact's
+   * name or record (an identifier matching CONTACT_TEXT) while the input sets
+   * no contactId and no entityType 'contact' with an entityId, so the
+   * feed's contact rule (namedContacts) cannot see which contact it names.
+   */
+  textOnlyContact: boolean;
 }
 
 // --------------------------------------------------------------------------
@@ -307,15 +339,63 @@ function hasActivityShape(arg: ts.Expression | undefined): boolean {
   return ts.isObjectLiteralExpression(a) && ACTIVITY_SHAPE.every((k) => objectProp(a, k) !== undefined);
 }
 
+/** Identifiers in a title / detail expression that carry a contact's name or record. */
+const CONTACT_TEXT = /contact|customer|client|firstname|lastname|fullname/i;
+
+/** Whether `expr` mentions an identifier matching CONTACT_TEXT anywhere inside it. */
+function mentionsContact(expr: ts.Node): boolean {
+  if ((ts.isIdentifier(expr) || ts.isPrivateIdentifier(expr)) && CONTACT_TEXT.test(expr.text)) return true;
+  return ts.forEachChild(expr, (c) => (mentionsContact(c) ? true : undefined)) === true;
+}
+
+/** The object literal(s) a writer call writes: the input of a service writer, the `data` (or upsert create/update) of a Prisma write. */
+function writtenObjects(arg: ts.Expression | undefined, at: ts.Node, prismaOp?: string): ts.ObjectLiteralExpression[] {
+  if (!arg) return [];
+  let a = unwrap(arg);
+  if (ts.isIdentifier(a)) {
+    const init = initializerOf(a.text, at);
+    if (!init) return [];
+    a = unwrap(init);
+  }
+  if (!ts.isObjectLiteralExpression(a)) return [];
+  if (!prismaOp) return [a];
+  const out: ts.ObjectLiteralExpression[] = [];
+  for (const f of prismaOp === 'upsert' ? ['create', 'update'] : ['data']) {
+    const v0 = objectProp(a, f);
+    if (!v0) continue;
+    const v = unwrap(v0);
+    for (const item of ts.isArrayLiteralExpression(v) ? v.elements : [v]) {
+      const obj = unwrap(item as ts.Expression);
+      if (ts.isObjectLiteralExpression(obj)) out.push(obj);
+    }
+  }
+  return out;
+}
+
+/** TV-07: the object names a contact in its text but not in contactId / entityType 'contact' + entityId. */
+function textOnlyContact(obj: ts.ObjectLiteralExpression): boolean {
+  if (obj.properties.some(ts.isSpreadAssignment)) return false; // a spread may carry contactId: not judged
+  if (objectProp(obj, 'contactId')) return false;
+  const entityType = objectProp(obj, 'entityType');
+  const et = entityType ? unwrap(entityType) : undefined;
+  if (et && (ts.isStringLiteral(et) || ts.isNoSubstitutionTemplateLiteral(et)) && et.text.trim().toLowerCase() === 'contact' && objectProp(obj, 'entityId')) {
+    return false;
+  }
+  return ['title', 'detail'].some((k) => {
+    const v = objectProp(obj, k);
+    return v !== undefined && mentionsContact(v);
+  });
+}
+
 /** Every Activity writer in one source file (`rel` is the path under src). */
 export function scanActivityWriters(rel: string, source: string): ActivityWriter[] {
   const sf = ts.createSourceFile(rel, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const found: ActivityWriter[] = [];
   const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
-  const record = (n: ts.Node, modules: Set<string>) => {
+  const record = (n: ts.Node, modules: Set<string>, objects: ts.ObjectLiteralExpression[]) => {
     const key = ownerKey(rel, n);
     if (PASS_THROUGH.has(key)) return;
-    found.push({ key, line: lineOf(n), modules: [...modules].sort() });
+    found.push({ key, line: lineOf(n), modules: [...modules].sort(), textOnlyContact: objects.some(textOnlyContact) });
   };
   const visit = (n: ts.Node) => {
     if (ts.isCallExpression(n)) {
@@ -325,14 +405,14 @@ export function scanActivityWriters(rel: string, source: string): ActivityWriter
         const arg = n.arguments[0];
         if (PRISMA_OPS.has(method) && isActivityDelegate(callee.expression)) {
           const modules = prismaModules(method, arg, n);
-          if (modules) record(n, modules);
+          if (modules) record(n, modules, writtenObjects(arg, n, method));
         } else if (method === 'recordEvent' || method === 'log' || method === 'createActivity') {
           const type = receiverType(callee.expression, n);
           const typed =
             (method === 'recordEvent' && type === 'TimelineService') ||
             (method === 'log' && type === 'ActivityService') ||
             method === 'createActivity';
-          if (typed || (type === null && hasActivityShape(arg))) record(n, inputModules(arg, n));
+          if (typed || (type === null && hasActivityShape(arg))) record(n, inputModules(arg, n), writtenObjects(arg, n));
         }
       }
     }
@@ -461,6 +541,49 @@ describe('V1-84: every Activity.module written at head is mapped (D-63 census)',
       connect: 'connect',
     };
     for (const [key, scope] of Object.entries(pinned)) expect(ACTIVITY_MODULE_SCOPES[key], key).toBe(scope);
+  });
+
+  it('TV-07 (review ST-2): every writer whose title / detail names a contact without contactId or entityType contact + entityId is a listed follow-up (TEXT_ONLY_CONTACT_WRITERS), and no entry is stale', async () => {
+    await visibility();
+    const flagged = [...new Set(writers.filter((w) => w.textOnlyContact).map((w) => w.key))].sort();
+    const unlisted = flagged.filter((k) => !TEXT_ONLY_CONTACT_WRITERS[k]).map((k) => `${k} names a contact only in its text: set contactId, or list it with a follow-up`);
+    expect(unlisted).toEqual([]);
+    const keys = new Set(writers.map((w) => w.key));
+    expect(Object.keys(TEXT_ONLY_CONTACT_WRITERS).filter((k) => !keys.has(k)), 'entries that are no writer').toEqual([]);
+    expect(
+      Object.keys(TEXT_ONLY_CONTACT_WRITERS).filter((k) => !TEXT_ONLY_BY_HAND.has(k) && !flagged.includes(k)),
+      'entries the heuristic no longer flags (the writer now names its contact): remove them',
+    ).toEqual([]);
+    // The detector: a contact name in the title without contactId is flagged;
+    // with contactId, or with entityType 'contact' + entityId, it is not.
+    const probe = scanActivityWriters('modules/x/y.ts', `
+      class B { constructor(private readonly activity: ActivityService) {}
+        async a(contactName: string, id: string, c: any) {
+          await this.activity.log({ module: 'commerce', action: 'a', entityType: 'invoice', entityId: id, title: \`Invoice sent to \${contactName}\` });
+          await this.activity.log({ module: 'commerce', action: 'b', entityType: 'invoice', entityId: id, contactId: c.id, title: \`Invoice sent to \${contactName}\` });
+          await this.activity.log({ module: 'ai', action: 'c', entityType: 'Contact', entityId: id, title: \`Message to \${c.firstName}\` });
+          await this.activity.log({ module: 'ai', action: 'd', entityType: 'job', entityId: id, title: 'Nightly run' });
+        } }`);
+    expect(probe.map((w) => w.textOnlyContact)).toEqual([true, false, false, false]);
+  });
+
+  it("TV-08 (review ST-1): a row names the contact of its contactId and, when its entityType is 'contact' (case-folded), of its entityId; such a row needs crm read", async () => {
+    const { namedContacts, canReadActivityRow } = await visibility();
+    expect(namedContacts({ contactId: 'c1' })).toEqual(['c1']);
+    expect(namedContacts({ entityType: 'contact', entityId: 'c2' })).toEqual(['c2']);
+    expect(namedContacts({ entityType: ' Contact ', entityId: 'c2' })).toEqual(['c2']);
+    expect(namedContacts({ entityType: 'contact', entityId: 'c2', contactId: 'c1' })).toEqual(['c1', 'c2']);
+    expect(namedContacts({ entityType: 'contact', entityId: 'c1', contactId: 'c1' })).toEqual(['c1']);
+    expect(namedContacts({ entityType: 'invoice', entityId: 'i1' })).toEqual([]);
+    expect(namedContacts({ entityType: 'contact', entityId: '' })).toEqual([]);
+    expect(namedContacts({ entityType: 'contact', entityId: null })).toEqual([]);
+    const viewer = (readable: string[]) => ({
+      businessId: 'b', userId: 'u', readsUnmapped: false, readable: new Set(readable) as any, crmAccess: {} as any,
+    });
+    const keyRow = { module: 'ai', entityType: 'contact', entityId: 'c2' };
+    expect(canReadActivityRow(viewer(['ai']), keyRow)).toBe(false);
+    expect(canReadActivityRow(viewer(['ai', 'crm']), keyRow)).toBe(true);
+    expect(canReadActivityRow(viewer(['ai']), { module: 'ai', entityType: 'key_command', entityId: 'k1' })).toBe(true);
   });
 
   it("TV-06: classification is case-folded: 'REVENUE', 'BOOKINGS' and 'EXPENSE' classify as their lower-case forms; an unmapped module classifies as null", async () => {

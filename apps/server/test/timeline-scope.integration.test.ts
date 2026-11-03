@@ -30,6 +30,18 @@
  * intelligence, autopilot (-> ai); settings, genome, notifications
  * (-> settings); connect (-> connect); and any unmapped module.
  *
+ * Review repairs (TS-11..TS-14):
+ *   ST-1  a row names a contact through entityType 'contact' + entityId as well
+ *         as through contactId (the KEY send-message row, written here through
+ *         the real ActivityLogService.createActivity, has no contactId): it
+ *         needs crm read and a contact the caller may open.
+ *   CR-1  a soft-deleted contact is judged by its visibility, so a view-all
+ *         ADMIN keeps the money and history rows of a deleted TEAM contact
+ *         (and their revenueImpact in the day summary). An id that is no
+ *         contact of the business stays withheld from every member
+ *         visibilityClause restricts (nothing to judge it by).
+ *   ST-2, ST-3 are follow-ups outside the write set (it.todo, TS-13, TS-14).
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * CrmRateLimitGuard, TimelineController, TimelineService, FlowController's
  * activity route and ActivityService read real rows, with the production
@@ -62,12 +74,17 @@ const ID = {
   staffCrmNone: `${P}staffCrmNone`,
   staffOwned: `${P}staffOwned`,
   staffDefault: `${P}staffDefault`,
+  staffAiCrm: `${P}staffAiCrm`,   // crm read, ai read
+  staffAiOnly: `${P}staffAiOnly`, // crm none, ai read
   ownerB: `${P}ownerB`,
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
   cPriv: `${P}cPriv`,       // PRIVATE, owned by the owner
   cTeam: `${P}cTeam`,       // TEAM, owned by the owner
   cStaff: `${P}cStaff`,     // PRIVATE, owned by staffOwned
+  cDelTeam: `${P}cDelTeam`, // TEAM, owned by the owner, soft-deleted
+  cDelPriv: `${P}cDelPriv`, // PRIVATE, owned by the owner, soft-deleted
+  cGone: `${P}cGone`,       // no contact row at all (hard-deleted / never a contact)
 };
 
 /** The day the main rows sit on: today at local noon (the summary reads local days). */
@@ -75,6 +92,19 @@ const DAY = new Date();
 DAY.setHours(12, 0, 0, 0);
 const pad = (n: number) => String(n).padStart(2, '0');
 const DAY_PARAM = `${DAY.getFullYear()}-${pad(DAY.getMonth() + 1)}-${pad(DAY.getDate())}T12:00:00`;
+
+/**
+ * The review-repair rows (TS-11, TS-12) sit five days back, older than every
+ * row the main pages read, so the main cases are unchanged; they are read
+ * through from/to (/events), the day's summary and cursor (legacy).
+ */
+const OLD = new Date(DAY.getTime() - 5 * 86_400_000);
+const OLD_PARAM = `${OLD.getFullYear()}-${pad(OLD.getMonth() + 1)}-${pad(OLD.getDate())}T12:00:00`;
+const OLD_WINDOW = `from=${new Date(OLD.getTime() - 3_600_000).toISOString()}&to=${new Date(OLD.getTime() + 3_600_000).toISOString()}`;
+const OLD_CURSOR = `cursor=${new Date(OLD.getTime() + 86_400_000).toISOString()}`;
+const oldId = (key: string) => `${P}old_${key}`;
+/** Ids of the two rows written through ActivityLogService.createActivity (cuid ids). */
+const KEY_ROW: { priv: string; team: string } = { priv: '', team: '' };
 
 type Seed = { key: string; module: string; category?: string; contactId?: string; revenueImpact?: number; title?: string };
 
@@ -141,8 +171,8 @@ const agent = () => request(app.getHttpServer());
 function events(user: string, query = 'limit=200', biz = ID.bizA) {
   return agent().get(`/timeline/businesses/${biz}/events?${query}`).set(HEADER, user);
 }
-function summary(user: string, biz = ID.bizA) {
-  return agent().get(`/timeline/businesses/${biz}/summary/${DAY_PARAM}`).set(HEADER, user);
+function summary(user: string, biz = ID.bizA, day = DAY_PARAM) {
+  return agent().get(`/timeline/businesses/${biz}/summary/${day}`).set(HEADER, user);
 }
 function upcoming(user: string, query = 'limit=200', biz = ID.bizA) {
   return agent().get(`/timeline/businesses/${biz}/upcoming?${query}`).set(HEADER, user);
@@ -238,7 +268,7 @@ beforeAll(async () => {
 
   await cleanup();
 
-  for (const id of [ID.owner, ID.admin, ID.staffRevNone, ID.staffCrmNone, ID.staffOwned, ID.staffDefault, ID.ownerB]) {
+  for (const id of [ID.owner, ID.admin, ID.staffRevNone, ID.staffCrmNone, ID.staffOwned, ID.staffDefault, ID.staffAiCrm, ID.staffAiOnly, ID.ownerB]) {
     await db.user.create({ data: { id, email: `${P}u_${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V84A Biz A', ownerId: ID.owner } });
@@ -252,11 +282,15 @@ beforeAll(async () => {
   await m(ID.staffCrmNone, ID.bizA, 'STAFF', { crm: 'none', revenue: 'read' });
   await m(ID.staffOwned, ID.bizA, 'STAFF', { crm: 'read', crm_view: 'owned', revenue: 'read' });
   await m(ID.staffDefault, ID.bizA, 'STAFF');
+  await m(ID.staffAiCrm, ID.bizA, 'STAFF', { crm: 'read', ai: 'read' });
+  await m(ID.staffAiOnly, ID.bizA, 'STAFF', { crm: 'none', ai: 'read' });
   await m(ID.ownerB, ID.bizB, 'OWNER');
 
   await db.contact.create({ data: { id: ID.cPriv, businessId: ID.bizA, firstName: 'Priv', visibility: 'PRIVATE', ownerId: ID.owner } });
   await db.contact.create({ data: { id: ID.cTeam, businessId: ID.bizA, firstName: 'Team', visibility: 'TEAM', ownerId: ID.owner } });
   await db.contact.create({ data: { id: ID.cStaff, businessId: ID.bizA, firstName: 'Staff', visibility: 'PRIVATE', ownerId: ID.staffOwned } });
+  await db.contact.create({ data: { id: ID.cDelTeam, businessId: ID.bizA, firstName: 'DelTeam', visibility: 'TEAM', ownerId: ID.owner, deletedAt: new Date() } });
+  await db.contact.create({ data: { id: ID.cDelPriv, businessId: ID.bizA, firstName: 'DelPriv', visibility: 'PRIVATE', ownerId: ID.owner, deletedAt: new Date() } });
 
   await db.activity.createMany({
     data: MAIN.map((s, i) => ({
@@ -292,6 +326,46 @@ beforeAll(async () => {
       createdAt: new Date(older.getTime() - i * 1000),
     })),
   });
+  // CR-1: money and history rows of a soft-deleted TEAM contact, a
+  // soft-deleted PRIVATE contact and an id that is no contact, on OLD.
+  const OLD_ROWS: Seed[] = [
+    { key: 'payDelTeam', module: 'payments', category: 'PAYMENT', contactId: ID.cDelTeam, revenueImpact: 40 },
+    { key: 'payDelPriv', module: 'payments', category: 'PAYMENT', contactId: ID.cDelPriv, revenueImpact: 7 },
+    { key: 'payGone', module: 'payments', category: 'PAYMENT', contactId: ID.cGone, revenueImpact: 3 },
+    { key: 'crmDelTeam', module: 'crm', contactId: ID.cDelTeam },
+  ];
+  await db.activity.createMany({
+    data: OLD_ROWS.map((s, i) => ({
+      id: oldId(s.key),
+      businessId: ID.bizA,
+      module: s.module,
+      action: `${P}${s.key}`,
+      entityType: 'v84a_entity',
+      title: `v84a ${s.key} row`,
+      category: s.category ?? null,
+      contactId: s.contactId ?? null,
+      revenueImpact: s.revenueImpact ?? null,
+      occurredAt: new Date(OLD.getTime() - i * 1000),
+      createdAt: new Date(OLD.getTime() - i * 1000),
+    })),
+  });
+  // ST-1: the KEY send-message row as its writer produces it
+  // (flow-orchestrator.service.ts, send-message tool): entityType 'contact',
+  // entityId, the contact's name in the title, the message in the detail, no
+  // contactId. Written through the real ActivityLogService, then dated to OLD.
+  const { ActivityLogService } = await import('../src/modules/activity/activity.service');
+  const activityLog = new ActivityLogService(app.get(PrismaService));
+  const keyRow = async (entityType: string, entityId: string, name: string, body: string, at: number) => {
+    const row = await activityLog.createActivity({
+      businessId: ID.bizA, module: 'ai', action: 'message_sent', entityType, entityId,
+      title: `Message sent to ${name} via email`, detail: body.slice(0, 200), tone: 'success',
+    });
+    await db.activity.update({ where: { id: row.id }, data: { occurredAt: new Date(at), createdAt: new Date(at) } });
+    return row.id as string;
+  };
+  KEY_ROW.priv = await keyRow('contact', ID.cPriv, 'v84a Secret Client', 'Hi Secret, about your confidential matter', OLD.getTime() - 10_000);
+  KEY_ROW.team = await keyRow('Contact', ID.cTeam, 'v84a Team Client', 'Hello team client', OLD.getTime() - 11_000);
+
   // A row of B, which no A read may serve.
   await db.activity.create({
     data: { id: `${P}act_bizB`, businessId: ID.bizB, module: 'crm', action: 'x', entityType: 'v84a_entity', title: 'v84a B row', occurredAt: DAY },
@@ -448,6 +522,94 @@ describe('V1-84: the ruling (TS-07, TS-08)', () => {
       expect(await mainSeen(user), user).not.toContain(unmapped);
     }
   });
+});
+
+describe('V1-84 review ST-1: a row naming its contact by entityType contact + entityId (TS-11)', () => {
+  const window = (user: string) => ids(events(user, `limit=200&${OLD_WINDOW}`));
+
+  it("TS-11a: ADMIN, who cannot open the owner's PRIVATE contact, is not served the KEY send-message row naming it (no name, no message text), nor through ?entityType=contact&entityId=; the TEAM contact's row is served (entityType case-folded)", async () => {
+    const res = await events(ID.admin, `limit=200&${OLD_WINDOW}`);
+    const seen = await ids(res);
+    expect(seen).not.toContain(KEY_ROW.priv);
+    expect(seen).toContain(KEY_ROW.team);
+    const text = JSON.stringify(res.body);
+    expect(text).not.toContain('Secret Client');
+    expect(text).not.toContain('confidential matter');
+    expect(await ids(events(ID.admin, `limit=50&entityType=contact&entityId=${ID.cPriv}`))).toEqual([]);
+    expect(await ids(events(ID.admin, `limit=50&contactId=${ID.cPriv}`))).toEqual([]);
+    const day = await summary(ID.admin, ID.bizA, OLD_PARAM);
+    expect(day.status).toBe(200);
+    expect(day.body.events.map((e: any) => e.id)).not.toContain(KEY_ROW.priv);
+    expect(JSON.stringify(day.body)).not.toContain('Secret Client');
+
+    const owner = await window(ID.owner);
+    expect(owner).toEqual(expect.arrayContaining([KEY_ROW.priv, KEY_ROW.team]));
+    expect(await ids(events(ID.owner, `limit=50&entityType=contact&entityId=${ID.cPriv}`))).toEqual([KEY_ROW.priv]);
+  });
+
+  it('TS-11b: a STAFF member with crm read and ai read is served the TEAM row and not the PRIVATE row, on /events, the summary and the legacy route', async () => {
+    const seen = await window(ID.staffAiCrm);
+    expect(seen).not.toContain(KEY_ROW.priv);
+    expect(seen).toContain(KEY_ROW.team);
+    const day = await summary(ID.staffAiCrm, ID.bizA, OLD_PARAM);
+    expect(day.status).toBe(200);
+    expect(day.body.events.map((e: any) => e.id)).not.toContain(KEY_ROW.priv);
+    const leg = await ids(legacy(ID.staffAiCrm, `limit=200&${OLD_CURSOR}`));
+    expect(leg).not.toContain(KEY_ROW.priv);
+    expect(leg).toContain(KEY_ROW.team);
+  });
+
+  it("TS-11c: a member with ai read and crm 'none' is served neither KEY row (they name contacts), on /events, ?entityType=&entityId= and the legacy route, and still gets the ai row that names no contact", async () => {
+    const seen = await window(ID.staffAiOnly);
+    expect(seen).not.toContain(KEY_ROW.priv);
+    expect(seen).not.toContain(KEY_ROW.team);
+    expect(await ids(events(ID.staffAiOnly, `limit=50&entityType=Contact&entityId=${ID.cTeam}`))).toEqual([]);
+    const leg = await ids(legacy(ID.staffAiOnly, `limit=200&${OLD_CURSOR}`));
+    expect(leg).not.toContain(KEY_ROW.priv);
+    expect(leg).not.toContain(KEY_ROW.team);
+    expect(await mainSeen(ID.staffAiOnly)).toContain(rowId('ai'));
+  });
+});
+
+describe('V1-84 review CR-1: rows of a soft-deleted contact (TS-12)', () => {
+  it("TS-12a: a view-all ADMIN keeps the payment and history rows of a soft-deleted TEAM contact, and the day's revenueImpact counts the payment; a soft-deleted PRIVATE contact's row and a row naming no contact of the business stay withheld", async () => {
+    const own = await summary(ID.owner, ID.bizA, OLD_PARAM);
+    expect(own.status).toBe(200);
+    const ownIds = own.body.events.map((e: any) => e.id);
+    expect(ownIds).toEqual(expect.arrayContaining(['payDelTeam', 'payDelPriv', 'payGone', 'crmDelTeam'].map(oldId)));
+    expect(own.body.revenueImpact).toBe(50);
+
+    const adm = await summary(ID.admin, ID.bizA, OLD_PARAM);
+    expect(adm.status).toBe(200);
+    const admIds = adm.body.events.map((e: any) => e.id);
+    expect(admIds).toEqual(expect.arrayContaining([oldId('payDelTeam'), oldId('crmDelTeam')]));
+    expect(admIds).not.toContain(oldId('payDelPriv'));
+    expect(admIds).not.toContain(oldId('payGone'));
+    expect(adm.body.revenueImpact).toBe(40);
+    expect(adm.body.eventCount).toBe(adm.body.events.length);
+
+    const seen = await ids(events(ID.admin, `limit=200&${OLD_WINDOW}`));
+    expect(seen).toEqual(expect.arrayContaining([oldId('payDelTeam'), oldId('crmDelTeam')]));
+    expect(await ids(legacy(ID.admin, `limit=200&${OLD_CURSOR}`))).toContain(oldId('payDelTeam'));
+  });
+
+  it("TS-12b: the deleted contact is still judged by its visibility: a crm_view 'owned' member does not get the deleted TEAM contact's rows; a crm read member with revenue 'none' gets its history row only", async () => {
+    const owned = await ids(events(ID.staffOwned, `limit=200&${OLD_WINDOW}`));
+    expect(owned).not.toContain(oldId('payDelTeam'));
+    expect(owned).not.toContain(oldId('crmDelTeam'));
+    const revNone = await ids(events(ID.staffRevNone, `limit=200&${OLD_WINDOW}`));
+    expect(revNone).toContain(oldId('crmDelTeam'));
+    expect(revNone).not.toContain(oldId('payDelTeam'));
+  });
+});
+
+describe('V1-84 review follow-ups outside the write set (TS-13, TS-14)', () => {
+  it.todo(
+    "TS-13 (review ST-2): a row that names a contact only in its title / detail (KEY send_invoice 'Invoice <n> sent to <contactName>', module commerce, flow-orchestrator.service.ts; message_intake.approved, detail = plan summary, message-intake-orchestrator.service.ts) is served to a revenue / communications reader who may not open that contact. Closing it needs those writers to set contactId, outside V1-84's write set; timeline-visibility.spec.ts TV-07 lists them (TEXT_ONLY_CONTACT_WRITERS) and fails on any new one",
+  );
+  it.todo(
+    "TS-14 (review ST-3): GET /ai/businesses/:businessId/briefing/morning (ai.controller.ts, AuthGuard + BusinessGuard, no module scope) serves the last 24h of SCHEDULED Activity rows, revenueImpact included, and revenueToday, unfiltered, so a STAFF member with revenue 'none' reads the rows /upcoming withholds. Outside V1-84's write set: follow-up packet to read them through filterVisibleActivity",
+  );
 });
 
 describe('V1-84: tenant control (TS-09) and cleanup (TS-10)', () => {

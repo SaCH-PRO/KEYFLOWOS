@@ -1,4 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import type { PrismaService } from '../../core/prisma/prisma.service';
 import {
   CANONICAL_MODULES,
@@ -7,7 +8,7 @@ import {
   rankOf,
   type CanonicalModule,
 } from '../../core/authority/module-vocabulary';
-import { contactVisibilityFilter, resolveCrmAccess, type CrmAccess } from '../crm/crm-permissions.helper';
+import { resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 
 /**
  * V1-84 (FOLLOW3-D1-TIMELINE-SCOPE): which Activity rows a member may read.
@@ -31,8 +32,19 @@ import { contactVisibilityFilter, resolveCrmAccess, type CrmAccess } from '../cr
  *     or that carries a revenueImpact also needs revenue read: it carries an
  *     amount;
  *   - a row that names a contact also needs crm read, and the contact must be
- *     one the member may open (visibilityClause, M7, via contactVisibilityFilter
- *     — the rule GET contacts/:id applies).
+ *     one the member may open (visibilityClause, M7, the rule GET contacts/:id
+ *     applies). A row names the contact in its contactId, and the one in its
+ *     entityId when its entityType, case-folded, is 'contact' (namedContacts;
+ *     review ST-1: the KEY send-message row names its contact that way only).
+ *     A contact that is soft-deleted is judged by its visibility all the same
+ *     (review CR-1: its history and money rows stay with the members who could
+ *     open it); an id that is no contact of the business has no visibility to
+ *     judge and is served to OWNER and SUPER_ADMIN only (hiddenContacts).
+ *
+ * What the rule cannot see: a row that names a contact only in its title or
+ * detail text (review ST-2, e.g. 'Invoice <n> sent to <name>'). Those writers
+ * are listed in timeline-visibility.spec.ts (TV-07, TEXT_ONLY_CONTACT_WRITERS)
+ * until they set contactId.
  */
 
 /**
@@ -106,7 +118,26 @@ export interface ActivityRowLike {
   module?: string | null;
   category?: string | null;
   contactId?: string | null;
+  entityType?: string | null;
+  entityId?: string | null;
   revenueImpact?: unknown;
+}
+
+/**
+ * The contacts a row names: its contactId, and its entityId when its
+ * entityType, case-folded, is 'contact' (both when both are set and differ).
+ * Review ST-1: ActivityLogService.createActivity rows such as the KEY
+ * send-message row ({ entityType: 'contact', entityId, title: 'Message sent
+ * to <name> ...' }) carry no contactId.
+ */
+export function namedContacts(row: ActivityRowLike): string[] {
+  const out: string[] = [];
+  if (typeof row.contactId === 'string' && row.contactId.length > 0) out.push(row.contactId);
+  const entityType = typeof row.entityType === 'string' ? row.entityType.trim().toLowerCase() : '';
+  if (entityType === 'contact' && typeof row.entityId === 'string' && row.entityId.length > 0 && row.entityId !== row.contactId) {
+    out.push(row.entityId);
+  }
+  return out;
 }
 
 /** The caller of a feed read, as the rule needs them. */
@@ -183,21 +214,59 @@ export function canReadActivityRow(viewer: TimelineViewer, row: ActivityRowLike)
   const category = typeof row.category === 'string' ? row.category.trim().toLowerCase() : '';
   const carriesMoney = REVENUE_CATEGORIES.has(category) || (row.revenueImpact !== null && row.revenueImpact !== undefined);
   if (carriesMoney && !viewer.readable.has('revenue')) return false;
-  if (row.contactId && !viewer.readable.has('crm')) return false;
+  if (namedContacts(row).length > 0 && !viewer.readable.has('crm')) return false;
   return true;
 }
 
 /**
  * Prisma `where` terms that drop, in the database, rows the rule would drop
- * anyway (so a page is filled with fewer reads): rows naming a contact for a
- * member without crm read, rows with a revenueImpact for a member without
- * revenue read. The rule itself is canReadActivityRow.
+ * anyway (so a page is filled with fewer reads): rows naming a contact (by
+ * contactId, or by entityType 'contact' and an entityId) for a member without
+ * crm read, rows with a revenueImpact for a member without revenue read. They
+ * never drop a row the rule would serve; the rule itself is canReadActivityRow.
  */
 export function activityPrefilter(viewer: TimelineViewer): Array<Record<string, unknown>> {
   const terms: Array<Record<string, unknown>> = [];
-  if (!viewer.readable.has('crm')) terms.push({ contactId: null });
+  if (!viewer.readable.has('crm')) {
+    terms.push({ contactId: null });
+    terms.push({ OR: [{ entityId: null }, { entityId: '' }, { NOT: { entityType: { equals: 'contact', mode: 'insensitive' } } }] });
+  }
   if (!viewer.readable.has('revenue')) terms.push({ revenueImpact: null });
   return terms;
+}
+
+/**
+ * Which of `contactIds` the viewer may not open: the contacts of the business
+ * (soft-deleted or not) that visibilityClause (M7) does not admit, and the ids
+ * that are no contact of the business (nothing to judge them by, so they are
+ * withheld from every member visibilityClause restricts). Null when
+ * visibilityClause does not restrict the viewer (OWNER, SUPER_ADMIN): nothing
+ * is withheld. Unlike contactVisibilityFilter (GET detail's rule, which also
+ * requires deletedAt null), a soft-deleted contact is judged by its visibility,
+ * so a view-all member keeps its history and money rows (review CR-1).
+ *
+ * The contacts are read through the business's `contacts` relation, not
+ * contact.findMany: @keyflow/db's soft-delete extension adds deletedAt null to
+ * every top-level Contact read, so a top-level read cannot see a soft-deleted
+ * contact's visibility at all. The relation read applies the same predicate
+ * (the business, the ids, visibilityClause) with deletedAt left out; TS-12a
+ * (timeline-scope.integration.test.ts) fails if it ever stops seeing them.
+ */
+async function hiddenContacts(
+  prisma: PrismaService,
+  viewer: TimelineViewer,
+  contactIds: Iterable<string>,
+): Promise<ReadonlySet<string> | null> {
+  const clause = visibilityClause(viewer.crmAccess, viewer.userId);
+  if (!clause) return null;
+  const ids = [...new Set(contactIds)];
+  if (ids.length === 0) return new Set();
+  const business = await prisma.client.business.findFirst({
+    where: { id: viewer.businessId },
+    select: { contacts: { where: { id: { in: ids }, AND: [clause as Prisma.ContactWhereInput] }, select: { id: true } } },
+  });
+  const visible = new Set((business?.contacts ?? []).map((row: { id: string }) => row.id));
+  return new Set(ids.filter((id) => !visible.has(id)));
 }
 
 /** The rows of `rows` the viewer may read, in order. */
@@ -207,15 +276,9 @@ export async function filterVisibleActivity<T extends ActivityRowLike>(
   rows: T[],
 ): Promise<T[]> {
   const readable = rows.filter((row) => canReadActivityRow(viewer, row));
-  const canOpen = await contactVisibilityFilter(
-    prisma,
-    viewer.businessId,
-    viewer.crmAccess,
-    viewer.userId,
-    readable.map((row) => row.contactId),
-  );
-  if (!canOpen) return readable;
-  return readable.filter((row) => !row.contactId || canOpen(row.contactId));
+  const hidden = await hiddenContacts(prisma, viewer, readable.flatMap(namedContacts));
+  if (!hidden) return readable;
+  return readable.filter((row) => namedContacts(row).every((id) => !hidden.has(id)));
 }
 
 /**
