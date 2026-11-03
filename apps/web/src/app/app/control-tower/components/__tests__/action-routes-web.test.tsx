@@ -255,6 +255,49 @@ describe("PriorityQueue acts on stored plan steps, never a client tool (V1-31b r
     expect(toast.error).not.toHaveBeenCalled();
   });
 
+  it("WEB-06 (review CRR-1) a plan that begins with the planner's analyze step (no tool) skips it and executes the stored tool steps by id", async () => {
+    // The planner puts its data-gathering 'analyze' steps first, with toolName null;
+    // POST .../execute refuses such a step 400 (graph-actions.controller.ts).
+    const ANALYZE = { id: "step_v31c_analyze", order: 0, toolName: null, module: "revenue", action: "Analyze overdue invoices", description: "", riskTier: 0, requiresApproval: false, dependsOn: [], inputPayload: null };
+    const api = stubApi({
+      plan: () => ({
+        intent: { objective: "x", modules: ["revenue"] },
+        plan: { id: PLAN_ID, status: "draft", objective: "x", maxRiskTier: 1, steps: [ANALYZE, ...STEPS] },
+        clarificationNeeded: false,
+      }),
+      stepResult: (stepId) => stepId === ANALYZE.id
+        ? { status: 400, body: { statusCode: 400, message: "This plan step has no action to execute", error: "Bad Request" } }
+        : { status: 201, body: { success: true, tier: 1 } },
+    });
+    render(<PriorityQueue priorities={[PRIORITY]} businessId={BIZ} />);
+
+    fireEvent.click(screen.getByTitle("Send Reminders"));
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    expectStoredStepExecutes(api.executes());
+    expect(api.executes().map((r) => (r.body as Record<string, unknown>).planStepId)).not.toContain(ANALYZE.id);
+    expectNoClientTool(api.sent);
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("WEB-07 (review CRR-1) a plan of analyze steps only executes nothing and is not reported as done", async () => {
+    const api = stubApi({
+      plan: () => ({
+        intent: { objective: "x" },
+        plan: { id: PLAN_ID, status: "draft", objective: "x", maxRiskTier: 0, steps: [{ ...STEPS[0], toolName: null }] },
+        clarificationNeeded: false,
+      }),
+    });
+    render(<PriorityQueue priorities={[PRIORITY]} businessId={BIZ} />);
+
+    fireEvent.click(screen.getByTitle("Send Reminders"));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(api.plans()).toHaveLength(1);
+    expect(api.executes()).toEqual([]);
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
   it("WEB-04 a request the planner needs clarified executes nothing", async () => {
     const api = stubApi({ plan: () => ({ intent: { objective: "x" }, plan: null, clarificationNeeded: true }) });
     render(<PriorityQueue priorities={[PRIORITY]} businessId={BIZ} />);

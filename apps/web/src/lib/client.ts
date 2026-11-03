@@ -6616,6 +6616,11 @@ export interface PlannedActionResult {
  * step is then executed by id, in order, stopping at the first one that did not
  * complete. Nothing here names a tool or carries tool arguments: the server
  * decides both, and runs only what it stored.
+ *
+ * A step with no tool (the planner's 'analyze' steps, toolName null) is the
+ * planner's own reasoning, not an action: the execute route refuses it 400
+ * ("This plan step has no action to execute"), so it is skipped here, as the
+ * command entry does (V1-31c review CRR-1).
  */
 export async function runPlannedAction(businessId: string, input: string): Promise<PlannedActionResult> {
   const planned = await planAction(businessId, input);
@@ -6623,9 +6628,9 @@ export async function runPlannedAction(businessId: string, input: string): Promi
   const plan = planned.data.plan;
   if (planned.data.clarificationNeeded || !plan) return { outcome: 'clarify', results: [] };
   const steps = [...(plan.steps ?? [])]
-    .filter((s) => typeof s.id === 'string' && s.id.length > 0)
+    .filter((s) => typeof s.id === 'string' && s.id.length > 0 && typeof s.toolName === 'string' && s.toolName.length > 0)
     .sort((a, b) => a.order - b.order);
-  if (steps.length === 0) return { outcome: 'failed', planId: plan.id, results: [], reason: 'The plan has no steps to execute' };
+  if (steps.length === 0) return { outcome: 'failed', planId: plan.id, results: [], reason: 'The plan has no action to execute' };
   const results: ActionExecuteResponse[] = [];
   for (const step of steps) {
     const res = await executePlanStep(businessId, plan.id, step.id);

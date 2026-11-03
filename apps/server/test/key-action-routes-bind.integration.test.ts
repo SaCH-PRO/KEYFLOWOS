@@ -70,6 +70,14 @@
  *                                    each effect node checked like a direct command, client inputs data only (an
  *                                    engine key such as _userId refused), the actor set by the server, the autonomy
  *                                    gate per action (V1-02 isUsableAutonomyVerdict, fail closed) and an audit row.
+ * V1-31c review repairs:
+ *   QY  POST query (SEC-V131c-2)     connector.query ran ANY name as a command, so everything CX refuses ran here
+ *                                    unchecked, ungated and unaudited. Bounded: a registry query at the module's read
+ *                                    scope; settings through the executor; anything else 403 with a row (CX-10..CX-13).
+ *   SB  POST sandbox/auto (-3)       generated code from the member's description and ran it in the same sandbox: 410.
+ *   FL  flows/:id/execute (-1, -4)   the run's businessId is the flow's own (an input named businessId picked the tenant
+ *                                    of the AI decision's model call); the gate is asked per effect node with the
+ *                                    parameters it runs with; a parameter filled only at run time is refused.
  * WHAT IS REAL for these (a second Nest app): PrismaService, AuthGuard, BusinessGuard, KeyCortexController,
  * KeyCortexExecutorService (its autonomy gate call and its ai_execution_logs audit door), KeyCortexFlowStudioService
  * (loadFlow, executeFlow, flow_definitions and flow_executions rows) and KeyCortexSandboxService for the two proofs.
@@ -152,6 +160,11 @@ const ID = {
   cxFlow: `${P}cxFlow`, // trigger -> projects.create_project
   cxFlowRev: `${P}cxFlowRev`, // trigger -> commerce.process_payment (revenue write)
   cxFlowB: `${P}cxFlowB`, // a flow of bizB
+  // V1-31c review repairs
+  cxFlowAi: `${P}cxFlowAi`, // trigger -> ai_decision (SEC-V131c-1)
+  cxFlowTwin: `${P}cxFlowTwin`, // two projects.create_project nodes: a stored name, then {{text}} (SEC-V131c-4 / CRR-2)
+  cxFlowStored: `${P}cxFlowStored`, // projects.create_project with a stored name the value check denies (CRR-2)
+  cxFlowChain: `${P}cxFlowChain`, // projects.add_task whose title is the first node's output (filled only at run time)
 };
 
 const STORED_ARGS = { contactId: `${P}contactA`, body: 'v31b stored note' };
@@ -200,6 +213,15 @@ const sandboxCalls: string[] = [];
 /** What the autonomy stand-in answers: a fully stated allow unless a case sets another verdict or 'throw'. */
 const ALLOW = { allowed: true, requiresApproval: false, tier: 'full', reason: 'v31c allows' };
 let cortexVerdict: unknown = ALLOW;
+/** The parameters each verdict request carried, in the order of cortexAutonomyCalls (review SEC-V131c-4 / CRR-2). */
+const cortexGateParams: Array<{ actionKey: unknown; parameters: unknown }> = [];
+/**
+ * A value check the stand-in applies, as ConstitutionValuesService.checkAction does with a
+ * dealbreaker term: a verdict request whose parameters contain this text is denied.
+ */
+const DEALBREAKER = 'V31C-DEALBREAKER-TERM';
+/** The tenant of every model call the flow engine's AI decision made (review SEC-V131c-1). */
+const modelGatewayCalls: Array<{ businessId: unknown }> = [];
 /** What the natural-language parser stand-in answers (no LLM). */
 let parsedIntent: { module: string; action: string; parameters: Record<string, unknown> } = { module: 'projects', action: 'create_project', parameters: { name: 'v31c parsed' } };
 
@@ -543,24 +565,39 @@ beforeAll(async () => {
   for (const [method, types] of [
     ['executeCommand', [controllerModule.ExecuteCommandDto, Object, Object]],
     ['executeBatch', [controllerModule.ExecuteBatchDto, Object, Object]],
+    ['queryModule', [controllerModule.QueryModuleDto, Object, Object]],
   ] as const) {
     if (!Reflect.getMetadata('design:paramtypes', KeyCortexController.prototype, method)) {
       Reflect.defineMetadata('design:paramtypes', types, KeyCortexController.prototype, method);
     }
   }
 
-  const connector = {
+  const connector: any = {
     execute: async (c: any) => {
       connectorCalls.push({ module: c?.module, action: c?.action, businessId: c?.businessId, userId: c?.userId, parameters: c?.parameters });
       return { success: true, data: { ok: true }, executionTimeMs: 1, command: c };
     },
+    // As KeyCortexConnectorService.query: any name becomes a command handed to execute (review SEC-V131c-2).
+    query: async (module: unknown, queryName: unknown, parameters: unknown, businessId: unknown, userId: unknown) =>
+      connector.execute({ module, action: queryName, parameters, businessId, userId, source: 'key_cortex', timestamp: new Date(), correlationId: 'v31c_q' }),
     getAllCapabilities: () => [],
   };
   const autonomy = {
-    evaluateAction: async (businessId: unknown, actionKey: unknown, _params: unknown, opts?: { proposedBy?: unknown }) => {
+    evaluateAction: async (businessId: unknown, actionKey: unknown, params: unknown, opts?: { proposedBy?: unknown }) => {
       cortexAutonomyCalls.push({ businessId, actionKey, proposedBy: opts?.proposedBy });
+      cortexGateParams.push({ actionKey, parameters: params });
       if (cortexVerdict === 'throw') throw new Error('v31c: the autonomy orchestrator is down');
+      if (JSON.stringify(params ?? {}).includes(DEALBREAKER)) {
+        return { allowed: false, requiresApproval: false, tier: 'manual', reason: 'v31c: a dealbreaker term' };
+      }
       return cortexVerdict;
+    },
+  };
+  // The model gateway the flow engine's AI decision calls: records the tenant it was named, answers an option.
+  const modelGateway = {
+    complete: async (req: { businessId?: unknown }) => {
+      modelGatewayCalls.push({ businessId: req?.businessId });
+      return { content: 'yes' };
     },
   };
   const command = {
@@ -592,7 +629,7 @@ beforeAll(async () => {
       {
         provide: KeyCortexFlowStudioService,
         inject: [PrismaService],
-        useFactory: (prisma: any) => new KeyCortexFlowStudioService(prisma, connector as any, off('modelGateway') as any, off('aiUsage') as any, new EventEmitter2()),
+        useFactory: (prisma: any) => new KeyCortexFlowStudioService(prisma, connector as any, modelGateway as any, off('aiUsage') as any, new EventEmitter2()),
       },
       { provide: KeyCortexCommandService, useValue: command },
       { provide: KeyCortexContextV2Service, useValue: { getFullContext: async () => ({}) } },
@@ -648,6 +685,44 @@ beforeAll(async () => {
   await flow(ID.cxFlow, ID.cxBiz, 'projects', 'create_project', { name: '{{projectName}}' });
   await flow(ID.cxFlowRev, ID.cxBiz, 'commerce', 'process_payment', { invoiceId: `${P}inv` });
   await flow(ID.cxFlowB, ID.bizB, 'projects', 'create_project', { name: 'b' });
+  // Review repairs: a flow of its nodes as given, in cxBiz.
+  const flowOf = (id: string, nodes: Array<{ id: string; type: string; data: Record<string, unknown> }>) =>
+    db.flowDefinition.create({
+      data: {
+        id,
+        businessId: ID.cxBiz,
+        name: `v31c ${id}`,
+        status: 'active',
+        trigger: { type: 'manual', config: {} },
+        nodes: nodes.map((n, i) => ({
+          ...n,
+          position: { x: 0, y: i * 100 },
+          inputs: i === 0 ? [] : [nodes[i - 1].id],
+          outputs: i === nodes.length - 1 ? [] : [nodes[i + 1].id],
+        })),
+        edges: nodes.slice(1).map((n, i) => ({ id: `e${i}`, source: nodes[i].id, target: n.id })),
+      },
+    });
+  const start = { id: 't1', type: 'trigger', data: { label: 'Start' } };
+  // SEC-V131c-1: trigger -> AI decision (the engine calls the model gateway for context.businessId).
+  await flowOf(ID.cxFlowAi, [start, { id: 'd1', type: 'ai_decision', data: { label: 'Decide', prompt: 'v31c decide', options: ['yes', 'no'] } }]);
+  // SEC-V131c-4 / CRR-2: the same action twice, a stored parameter and one filled from the inputs.
+  await flowOf(ID.cxFlowTwin, [
+    start,
+    { id: 'a1', type: 'action', data: { label: 'First', module: 'projects', action: 'create_project', parameters: { name: 'v31c benign' } } },
+    { id: 'a2', type: 'action', data: { label: 'Second', module: 'projects', action: 'create_project', parameters: { name: '{{text}}' } } },
+  ]);
+  // A stored parameter the value check denies.
+  await flowOf(ID.cxFlowStored, [
+    start,
+    { id: 'a1', type: 'action', data: { label: 'Only', module: 'projects', action: 'create_project', parameters: { name: `v31c ${DEALBREAKER}` } } },
+  ]);
+  // A parameter filled only while the flow runs (the first node's output).
+  await flowOf(ID.cxFlowChain, [
+    start,
+    { id: 'a1', type: 'action', data: { label: 'First', module: 'projects', action: 'create_project', parameters: { name: 'v31c chain' } } },
+    { id: 'a2', type: 'action', data: { label: 'Second', module: 'projects', action: 'add_task', parameters: { title: '{{a1_output}}' } } },
+  ]);
 }, 120_000);
 
 afterAll(async () => {
@@ -1144,6 +1219,68 @@ describe('V1-31c CX: POST execute and POST batch run a member-initiated command 
     expect(cortexCommandRequirement('settings', 'update_business_profile')).toMatchObject({ adapterEnforced: expect.any(String) });
   });
 
+  it('CX-10 (review SEC-V131c-2) POST query does not run what POST execute refuses: an action, a crm write, a refused module and an executor-blocked action are 403 with a row each, and nothing reaches the connector or the gate', async () => {
+    const before = { connector: connectorCalls.length, autonomy: cortexAutonomyCalls.length };
+    const audit = await cxAuditIds();
+    const cases = [
+      [ID.cxStaffRO, 'projects', 'create_project'], // an action (a write): POST execute refuses it for projects read
+      [ID.cxStaffW, 'projects', 'create_project'], // an action even with projects write: it runs through POST execute, gated and audited
+      [ID.cxStaffW, 'crm', 'update_contact'],
+      [ID.cxOwner, 'activity', 'delete_old_logs'],
+      [ID.cxOwner, 'projects', 'UPDATE_RECORD'],
+      [ID.cxOwner, 'keystore', 'export_all'],
+    ] as const;
+    for (const [actor, module, query] of cases) {
+      const res = await cortex('query', actor, { businessId: ID.cxBiz, module, query, parameters: { name: 'v31c query' } });
+      expect(res.status, `${actor} ${module}.${query} ${JSON.stringify(res.body)}`).toBe(403);
+    }
+    expect(connectorCalls.length).toBe(before.connector);
+    expect(cortexAutonomyCalls.length).toBe(before.autonomy);
+    const rows = await cxAuditSince(audit);
+    expect(rows.map((r: any) => `${r.userId}:${r.module}.${r.action}:${r.success}`).sort()).toEqual(
+      cases.map(([actor, module, query]) => `${actor}:${module}.${query}:false`).sort(),
+    );
+  });
+
+  it('CX-11 POST query runs a query the capability registry lists under the module\'s read scope, for the member; crm reads are the OWNER\'s only', async () => {
+    const before = connectorCalls.length;
+    const read = await cortex('query', ID.cxStaffRO, { businessId: ID.cxBiz, module: 'projects', query: 'get_projects', parameters: {} });
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(read.body).toMatchObject({ success: true });
+    // expenses: none in cxStaffRO's explicit scope map.
+    const noScope = await cortex('query', ID.cxStaffRO, { businessId: ID.cxBiz, module: 'finance', query: 'get_expense_summary', parameters: {} });
+    expect(noScope.status, JSON.stringify(noScope.body)).toBe(403);
+    expect(JSON.stringify(noScope.body)).toMatch(/expenses requires read/);
+    const crmStaff = await cortex('query', ID.cxStaffW, { businessId: ID.cxBiz, module: 'crm', query: 'search_contacts', parameters: { query: 'v31c' } });
+    expect(crmStaff.status, JSON.stringify(crmStaff.body)).toBe(403);
+    expect(JSON.stringify(crmStaff.body)).toMatch(/business owner/);
+    const crmOwner = await cortex('query', ID.cxOwner, { businessId: ID.cxBiz, module: 'crm', query: 'search_contacts', parameters: { query: 'v31c' } });
+    expect(crmOwner.status, JSON.stringify(crmOwner.body)).toBe(200);
+    expect(connectorCalls.slice(before).map((c) => `${c.module}.${c.action}:${c.userId}`)).toEqual([
+      `projects.get_projects:${ID.cxStaffRO}`, `crm.search_contacts:${ID.cxOwner}`,
+    ]);
+  });
+
+  it('CX-12 POST query on settings (enforced by its adapter on the actor) runs as POST execute does: one autonomy verdict and an audit row naming the member', async () => {
+    const before = { connector: connectorCalls.length, autonomy: cortexAutonomyCalls.length };
+    const audit = await cxAuditIds();
+    const res = await cortex('query', ID.cxOwner, { businessId: ID.cxBiz, module: 'settings', query: 'update_branding', parameters: { primaryColor: '#000000' } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toMatchObject({ success: true });
+    expect(connectorCalls.slice(before.connector).map((c) => `${c.module}.${c.action}:${c.userId}`)).toEqual([`settings.update_branding:${ID.cxOwner}`]);
+    expect(cortexAutonomyCalls.slice(before.autonomy)).toEqual([{ businessId: ID.cxBiz, actionKey: 'settings.update_branding', proposedBy: ID.cxOwner }]);
+    const rows = await cxAuditSince(audit);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.cxOwner, actor: 'user', module: 'settings', action: 'update_branding', success: true });
+  });
+
+  it('CX-13 POST query across tenants is refused 403 by BusinessGuard and nothing runs', async () => {
+    const before = connectorCalls.length;
+    const res = await cortex('query', ID.other, { businessId: ID.cxBiz, module: 'projects', query: 'get_projects', parameters: {} });
+    expect(res.status).toBe(403);
+    expect(connectorCalls.length).toBe(before);
+  });
+
   it.todo(
     'CX-09 (deviation, outside the write set) V1-02 isUsableAutonomyVerdict on POST execute and batch: the autonomy gate these routes run is KeyCortexExecutorService.execute\'s (one evaluateAction per command, fail closed on a throw or a deny, audited), which reads only verdict.allowed and verdict.requiresApproval; a verdict that omits requiresApproval or tier still runs. Making it V1-02-strict is a change to key-cortex-executor.service.ts, and the k34c suite (key-cortex-actor-binding) and key-cortex.controller.principal.spec.ts pin exactly one evaluateAction per command with a tier-less allow, so a second, controller-side evaluation cannot be added without editing them.',
   );
@@ -1190,6 +1327,33 @@ describe('V1-31c SB: client code is not executed (the cortex sandbox is not boun
     sandbox.executeCode = async (req: any) => { ran = req.code; return { success: true, output: '' }; };
     await sandbox.applyTemplate('bulk-personalized-emails', { contacts: '[]', subject: 's', body: 'b', firstName: 'v31c_code' }, { businessId: ID.cxBiz });
     expect(ran).toContain('.replace(/v31c_code/g');
+  });
+
+  it('SB-05 (review SEC-V131c-3) POST sandbox/auto is 410 likewise, whether or not it asks to execute, and the sandbox is never reached', async () => {
+    const before = sandboxCalls.length;
+    for (const actor of [ID.cxOwner, ID.cxStaffRO]) {
+      for (const body of [
+        { businessId: ID.cxBiz, description: 'return typeof process' },
+        { businessId: ID.cxBiz, description: 'return typeof process', execute: true },
+        { businessId: ID.cxBiz, description: 'return typeof process', execute: false },
+      ]) {
+        const res = await cortex('sandbox/auto', actor, body);
+        expect(res.status, `${actor} ${JSON.stringify(body)} ${JSON.stringify(res.body)}`).toBe(410);
+      }
+    }
+    const cross = await cortex('sandbox/auto', ID.other, { businessId: ID.cxBiz, description: 'return 1' });
+    expect(cross.status).toBe(403);
+    expect(sandboxCalls.slice(before)).toEqual([]);
+  });
+
+  it('SB-06 (proof) sandbox.auto runs the code it generates in the same unbounded sandbox: generated code reaches the host process', async () => {
+    const { KeyCortexSandboxService } = await import('../src/modules/key-cortex/key-cortex-sandbox.service');
+    const prisma = { client: { sandboxExecutionLog: { create: async () => ({}) } } };
+    const sandbox: any = new (KeyCortexSandboxService as any)({}, {}, prisma, {});
+    // The generation step (an LLM call) is not run: it answers what a member could steer it to write.
+    sandbox.generate = async () => ({ code: "return Object['constr' + 'uctor']('return typeof process')();", language: 'javascript', explanation: 'v31c' });
+    const out = await sandbox.auto('return typeof process', { businessId: ID.cxBiz });
+    expect(out).toMatchObject({ executed: true, output: 'object' });
   });
 });
 
@@ -1281,6 +1445,55 @@ describe('V1-31c FL: POST flows/:id/execute runs only a stored flow of the guard
     expect(connectorCalls.length).toBe(before);
     expect(await flowRuns(ID.cxFlow)).toBe(runs);
   });
+
+  it('FL-07 (review SEC-V131c-1) an input named businessId never picks the tenant: the AI decision\'s model call is the flow\'s own business, with or without it', async () => {
+    const before = modelGatewayCalls.length;
+    const named = await execFlow(ID.cxFlowAi, ID.cxOwner, { businessId: ID.cxBiz, inputs: { businessId: ID.bizB } });
+    expect(named.status, JSON.stringify(named.body)).toBe(200);
+    expect(named.body).toMatchObject({ status: 'completed' });
+    const none = await execFlow(ID.cxFlowAi, ID.cxOwner, { businessId: ID.cxBiz, inputs: {} });
+    expect(none.status, JSON.stringify(none.body)).toBe(200);
+    expect(modelGatewayCalls.slice(before)).toEqual([{ businessId: ID.cxBiz }, { businessId: ID.cxBiz }]);
+  });
+
+  it('FL-08 (review SEC-V131c-4 / CRR-2) the autonomy gate is asked once per action node, with the parameters that node runs with (stored, or filled from the inputs)', async () => {
+    const before = { connector: connectorCalls.length, gate: cortexGateParams.length };
+    const res = await execFlow(ID.cxFlowTwin, ID.cxStaffW, { businessId: ID.cxBiz, inputs: { text: 'v31c from input' } });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(cortexGateParams.slice(before.gate)).toEqual([
+      { actionKey: 'flow.trigger_flow', parameters: { flowId: ID.cxFlowTwin, inputs: { text: 'v31c from input' } } },
+      { actionKey: 'projects.create_project', parameters: { name: 'v31c benign' } },
+      { actionKey: 'projects.create_project', parameters: { name: 'v31c from input' } },
+    ]);
+    // What the gate saw is what ran.
+    expect(connectorCalls.slice(before.connector).map((c) => c.parameters)).toEqual([{ name: 'v31c benign' }, { name: 'v31c from input' }]);
+  });
+
+  it('FL-09 (review SEC-V131c-4 / CRR-2) a value the gate denies refuses the whole flow before any node runs: in an input filled into the second node, or in a stored parameter', async () => {
+    const before = connectorCalls.length;
+    const runs = { twin: await flowRuns(ID.cxFlowTwin), stored: await flowRuns(ID.cxFlowStored) };
+    const viaInput = await execFlow(ID.cxFlowTwin, ID.cxStaffW, { businessId: ID.cxBiz, inputs: { text: `v31c ${DEALBREAKER}` } });
+    expect(viaInput.status, JSON.stringify(viaInput.body)).toBe(403);
+    expect(JSON.stringify(viaInput.body)).toMatch(/dealbreaker/);
+    const stored = await execFlow(ID.cxFlowStored, ID.cxStaffW, { businessId: ID.cxBiz, inputs: {} });
+    expect(stored.status, JSON.stringify(stored.body)).toBe(403);
+    expect(connectorCalls.length).toBe(before);
+    expect(await flowRuns(ID.cxFlowTwin)).toBe(runs.twin);
+    expect(await flowRuns(ID.cxFlowStored)).toBe(runs.stored);
+  });
+
+  it('FL-10 a parameter filled only while the flow runs (another node\'s output) cannot be checked before the run: the flow is refused 403 and nothing runs', async () => {
+    const before = connectorCalls.length;
+    const audit = await cxAuditIds();
+    const res = await execFlow(ID.cxFlowChain, ID.cxStaffW, { businessId: ID.cxBiz, inputs: {} });
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(JSON.stringify(res.body)).toMatch(/a1_output/);
+    expect(connectorCalls.length).toBe(before);
+    expect(await flowRuns(ID.cxFlowChain)).toBe(0);
+    const rows = await cxAuditSince(audit);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ userId: ID.cxStaffW, module: 'flow', action: 'trigger_flow', success: false });
+  });
 });
 
 /* ------------------------------------------------------------------------ */
@@ -1300,7 +1513,8 @@ describe('V1-31c FL: POST flows/:id/execute runs only a stored flow of the guard
  * executeToolAction, autoExecuteToolForMonitoring, handleToolBridge,
  * confirmAndExecute, executeBatch, applyTemplate, executeApproved, executeFlow
  * (V1-31c), `.execute(...)` or `.executeAction(...)` on any receiver other than
- * bare `this`, or a call of innerToolExecutor.
+ * bare `this`, `connector.query(...)` and `sandbox.auto(...)` (V1-31c review), or
+ * a call of innerToolExecutor.
  *
  * WHAT IS REQUIRED: the flagged handlers are exactly KNOWN_BODY_EXECUTORS. A new
  * one fails until it is bound to a stored proposal or listed with a reason; a
@@ -1349,7 +1563,12 @@ const KNOWN_BODY_EXECUTORS: Record<string, { kind: 'bound' | 'bounded'; reason: 
   'modules/key-cortex/key-cortex.controller.ts#KeyCortexController.flowExecute': {
     kind: 'bound',
     reason:
-      'V1-31c: POST api/v1/cortex/flows/:id/execute runs only the stored FlowDefinition by id in the guarded business (404 otherwise). The body inputs are data the stored nodes read (an engine key such as _userId is refused 400; the actor is set by the server); automations write and every effect node are checked as direct commands, the autonomy gate runs per action (isUsableAutonomyVerdict, fail closed) and the member is audited (FL-01..FL-06).',
+      'V1-31c: POST api/v1/cortex/flows/:id/execute runs only the stored FlowDefinition by id in the guarded business (404 otherwise). The body inputs are data the stored nodes read (an engine key such as _userId is refused 400; the actor and businessId are set by the server, FL-07); automations write and every effect node are checked as direct commands, the autonomy gate runs per effect node with the parameters it runs with (isUsableAutonomyVerdict, fail closed; a parameter filled only at run time is refused) and the member is audited (FL-01..FL-10).',
+  },
+  'modules/key-cortex/key-cortex.controller.ts#KeyCortexController.queryModule': {
+    kind: 'bounded',
+    reason:
+      'V1-31c review SEC-V131c-2: POST api/v1/cortex/query (connector.query runs any name as a command). Deny by default (cortexQueryRefusal): only a query the capability registry lists for the module, under its scope at read (crm OWNER only); settings, enforced by its adapter on the actor, runs through the executor (autonomy gate, blocked actions, audit row); anything else, an action included, is 403 with a row naming the member (CX-10..CX-13).',
   },
 };
 
@@ -1361,6 +1580,12 @@ const ALWAYS_EXECUTORS = new Set([
   // V1-31c: the flow studio's engine entry point (flows/:id/execute calls it by this name).
   'executeFlow',
 ]);
+/**
+ * V1-31c review SEC-V131c-2 / SEC-V131c-3: executors reached by a method name too generic to flag alone, so
+ * named with their receiver (`this.<receiver>.<method>(...)`): KeyCortexConnectorService.query hands any name to the
+ * module adapter as a command, and KeyCortexSandboxService.auto runs the code it generates. The census missed both.
+ */
+const RECEIVER_EXECUTORS = new Set(['connector.query', 'sandbox.auto']);
 const ID_FIELD = /^(id|ids|.*Id|.*Ids)$/;
 
 function listControllerFiles(dir: string, out: string[] = []): string[] {
@@ -1389,6 +1614,7 @@ function isExecutorCall(call: ts.CallExpression): boolean {
   if (!ts.isPropertyAccessExpression(callee)) return false;
   const name = callee.name.text;
   if (ALWAYS_EXECUTORS.has(name)) return true;
+  if (ts.isPropertyAccessExpression(callee.expression) && RECEIVER_EXECUTORS.has(`${callee.expression.name.text}.${name}`)) return true;
   const bareThis = callee.expression.kind === ts.SyntaxKind.ThisKeyword;
   return (name === 'execute' || name === 'executeAction') && !bareThis;
 }
@@ -1488,6 +1714,20 @@ describe('V1-31b CS: census of controller routes that hand request-body tool nam
       'modules/x/synthetic.controller.ts#Synthetic.b',
       'modules/x/synthetic.controller.ts#Synthetic.c',
       'modules/x/synthetic.controller.ts#Synthetic.e',
+    ]);
+  });
+
+  it('CS-04 (V1-31c review SEC-V131c-2/-3) the reader flags a body module/query handed to connector.query and a body description handed to sandbox.auto, and not code generation alone', () => {
+    const src = `
+      class Synthetic {
+        @Post('q') q(@Body() dto: any) { return this.connector.query(dto.module, dto.query, dto.parameters ?? {}, dto.businessId, actor); }
+        @Post('auto') auto(@Body() dto: any) { return this.sandbox.auto(dto.description, { execute: true, businessId: dto.businessId }); }
+        @Post('gen') gen(@Body() dto: any) { return this.sandbox.generate(dto.description, { businessId: dto.businessId }); }
+        @Post('read') read(@Body() dto: any) { return this.prisma.query(dto.sql); }
+      }`;
+    expect(flaggedHandlers(path.join(SRC, 'modules/x/synthetic.controller.ts'), src)).toEqual([
+      'modules/x/synthetic.controller.ts#Synthetic.q',
+      'modules/x/synthetic.controller.ts#Synthetic.auto',
     ]);
   });
 
