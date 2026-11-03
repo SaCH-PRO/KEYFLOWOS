@@ -163,6 +163,10 @@ describe("V1-41b: the invoice Payments tab confirms a PENDING extracted payment 
     expect(screen.queryAllByRole("button", { name: /^Confirm/ })).toHaveLength(0);
     expect(summary()).toEqual({ paid: formatAmount(65, "TTD"), remaining: formatAmount(35, "TTD") });
     expect(vi.mocked(toast.success).mock.calls.map((c) => String(c[0]))).toEqual([`Payment of ${formatAmount(45, "TTD")} confirmed`]);
+    // V1-41b review (CR-V41b-2): the route answers the retired row CONFIRMED in
+    // invoice.payments (pinned on the real route by V41-T1i), so the tab badge
+    // counts the confirmed money once: 3 rows, as before the confirm.
+    expect(screen.getByRole("button", { name: /^Payments/ }).textContent).toBe("Payments3");
   });
 
   it("a member without revenue write access (403) is told so; the action is withdrawn and nothing reads as confirmed", async () => {

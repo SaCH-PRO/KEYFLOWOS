@@ -379,3 +379,96 @@ describe('BusinessEventInterceptor: the payment rule is the exact route and meth
     expect(emitted).toEqual([]);
   });
 });
+
+/**
+ * V1-41b review (SEC-V41b-1, CR-V41b-1): the pending-payment confirm route
+ * records the money of a PENDING extracted row through the manual payment
+ * door, as the confirming member, and answers recordPayment's envelope plus
+ * confirmedPaymentId. It is audited exactly as a manual payment: one
+ * payment.record row on the SUCCESSFUL Payment it recorded, by the confirming
+ * member; never invoice.create on the invoice, never the pending row or the
+ * invoice as subject. A confirm answering a Payment this request did not
+ * record (the door's keyed replay, or a manual payment that took the door's
+ * key) emits nothing (R19-ST-1). The real-DB pins are V41-T1i/T1j in
+ * test/untrusted-payment-inputs.integration.test.ts.
+ */
+describe('BusinessEventInterceptor: the pending-payment confirm route is audited as the payment it records (V1-41b review)', () => {
+  const CONFIRM_ROUTE = `${PAYMENT_ROUTE}/:paymentId/confirm`;
+  const OTHER = 'other_member_v41b';
+
+  /** CommerceService.recordPayment's envelope as confirmPendingPayment answers it. */
+  function confirmed(paymentId: string, invoiceId: string, pendingId: string, recordedBy: string | null, createdAt: Date | string) {
+    const r = paymentResponse(paymentId, invoiceId);
+    return { ...r, payment: { ...r.payment, recordedBy, createdAt }, confirmedPaymentId: pendingId };
+  }
+
+  it('V41b-A01: a fresh confirm emits exactly one payment.record row whose subject is the recorded Payment, by the confirming member; never invoice.create, never the pending row or the invoice as subject', async () => {
+    for (const routePath of [CONFIRM_ROUTE, CONFIRM_ROUTE.slice(1)]) {
+      const { emitted, result } = await run({
+        method: 'POST',
+        routePath,
+        params: { invoiceId: 'inv_c1', paymentId: 'pend_c1' },
+        body: { amount: 100 },
+        respond: () => confirmed('pay_c1', 'inv_c1', 'pend_c1', USER, new Date()),
+      });
+      expect(result, routePath).toMatchObject({ payment: { id: 'pay_c1' }, confirmedPaymentId: 'pend_c1' });
+      expect(emitted, routePath).toHaveLength(1);
+      expect(emitted[0], routePath).toMatchObject({
+        businessId: BIZ,
+        eventType: 'payment.record',
+        subjectType: 'payment',
+        subjectId: 'pay_c1',
+        action: 'record',
+        actorType: 'human',
+        actorId: USER,
+        metadata: { route: routePath, httpMethod: 'POST' },
+      });
+      expect(emitted.map((e) => e.eventType), routePath).not.toContain('invoice.create');
+      expect(emitted.map((e) => e.subjectId), routePath).not.toContain('inv_c1');
+      expect(emitted.map((e) => e.subjectId), routePath).not.toContain('pend_c1');
+    }
+  });
+
+  it('V41b-A02: a confirm answering a Payment recorded before this request (the keyed replay after a failed confirm) or by another member (a manual payment that took the door key, a lost race) emits nothing', async () => {
+    const replays = [
+      confirmed('pay_c2', 'inv_c2', 'pend_c2', USER, new Date(Date.now() - 60_000)),
+      confirmed('pay_c2b', 'inv_c2', 'pend_c2', OTHER, new Date(Date.now() - 60_000)),
+    ];
+    for (const response of replays) {
+      const { emitted, result } = await run({
+        method: 'POST',
+        routePath: CONFIRM_ROUTE,
+        params: { invoiceId: 'inv_c2', paymentId: 'pend_c2' },
+        body: { amount: 100 },
+        response,
+      });
+      expect(result).toEqual(response);
+      expect(emitted, response.payment.id).toEqual([]);
+    }
+    const race = await run({
+      method: 'POST',
+      routePath: CONFIRM_ROUTE,
+      params: { invoiceId: 'inv_c2', paymentId: 'pend_c2' },
+      respond: () => confirmed('pay_c2c', 'inv_c2', 'pend_c2', OTHER, new Date(Date.now() + 5)),
+    });
+    expect(race.emitted).toEqual([]);
+  });
+
+  it('V41b-A03: the confirm rule is the exact route: the manual payment route keeps its own rule and from-evidence keeps its label', async () => {
+    const manual = await run({
+      method: 'POST',
+      routePath: PAYMENT_ROUTE,
+      params: { invoiceId: 'inv_c3' },
+      respond: () => confirmed('pay_c3', 'inv_c3', 'pend_c3', USER, new Date()),
+    });
+    expect(manual.emitted.map((e) => [e.eventType, e.subjectId])).toEqual([['payment.record', 'pay_c3']]);
+
+    const fromEvidence = await run({
+      method: 'POST',
+      routePath: `${PAYMENT_ROUTE}/from-evidence`,
+      params: { invoiceId: 'inv_c3' },
+      response: paymentResponse('pay_c3b', 'inv_c3'),
+    });
+    expect(fromEvidence.emitted.map((e) => [e.eventType, e.subjectType])).toEqual([['invoice.create', 'invoice']]);
+  });
+});

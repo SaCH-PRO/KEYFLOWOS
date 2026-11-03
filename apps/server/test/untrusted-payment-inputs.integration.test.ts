@@ -75,6 +75,18 @@
  *   V41-T1h    the optional {amount}: malformed 400, mismatch 409, nothing
  *              written; the matching amount confirms.
  *
+ * V1-41b review repairs:
+ *   V41-T1i    SEC-V41b-1, CR-V41b-1: the confirm is audited by the global
+ *              BusinessEventInterceptor exactly as a manual payment: one
+ *              payment.record job on the SUCCESSFUL Payment, by the confirming
+ *              member; never invoice.create on the invoice. CR-V41b-2: the
+ *              answer's invoice.payments carries the retired row CONFIRMED,
+ *              never PENDING, beside the recorded money.
+ *   V41-T1j    a confirm answering a Payment this request did not record (the
+ *              door's keyed replay after a confirm that recorded the money but
+ *              failed before retiring the row) hands the audit emitter nothing;
+ *              its answer carries the retired row CONFIRMED too.
+ *
  * Nothing on the authorization or money boundary is mocked: PrismaService,
  * AuthGuard, BusinessGuard, ModuleScopeGuard, CommerceService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService, the chart of
@@ -143,6 +155,9 @@ const ID = {
   invRouteBody: `${P}invRouteBody`,
   invB: `${P}invB`, // bizB
   invRouteB: `${P}invRouteB`, // bizB
+  // V1-41b review repairs (SEC-V41b-1, CR-V41b-1, CR-V41b-2)
+  invRouteAudit: `${P}invRouteAudit`,
+  invRouteReplay: `${P}invRouteReplay`,
 };
 
 /** V1-41b (DISC-V41-6): contactA's private fields, which no invoice write answer may carry. */
@@ -166,6 +181,32 @@ let commerceControllerClass: any;
 // Document intelligence (the LLM boundary) returns what the next receipt "says".
 let nextExtraction: Record<string, unknown> = {};
 const docIntelStub = { extractFromDocument: async () => nextExtraction };
+
+/**
+ * V1-41b review (SEC-V41b-1): every job the real BusinessEventInterceptor
+ * (installed as APP_INTERCEPTOR, as app.module.ts does) hands the audit
+ * emitter. The emitter is this recorder: the BullMQ write behind it is
+ * evidence-feed.integration.test.ts's concern.
+ */
+const auditJobs: Array<{ businessId: string; eventType: string; subjectType: string; subjectId: string; actorType: string; actorId: string; route?: unknown }> = [];
+const auditRecorder = {
+  emit: async (job: any) => {
+    auditJobs.push({
+      businessId: job.businessId,
+      eventType: job.eventType,
+      subjectType: job.subjectType,
+      subjectId: job.subjectId,
+      actorType: job.actorType,
+      actorId: job.actorId,
+      route: job.metadata?.route,
+    });
+  },
+};
+
+/** The audit jobs recorded since `start`, as [eventType, subjectType, subjectId, actorType, actorId]. */
+function auditJobsAfter(start: number) {
+  return auditJobs.slice(start).map((j) => [j.eventType, j.subjectType, j.subjectId, j.actorType, j.actorId]);
+}
 
 const eventStub = {
   emit: () => true,
@@ -380,6 +421,9 @@ beforeAll(async () => {
   const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
   const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
   const { CreditNoteService } = await import('../src/modules/finance/credit-note.service');
+  const { APP_INTERCEPTOR } = await import('@nestjs/core');
+  const { BusinessEventInterceptor } = await import('../src/modules/business-events/business-event.interceptor');
+  const { ResilientEmitterService } = await import('../src/modules/business-events/resilient-emitter.service');
 
   // What tsc emits for DriveIntakeController's constructor (vitest's esbuild
   // transform emits no design:paramtypes; payments-actor does the same).
@@ -441,6 +485,10 @@ beforeAll(async () => {
       { provide: TransactionalEmailService, useValue: {} },
       { provide: AiOversightService, useValue: { resolveApproval: async () => undefined } },
       { provide: CreditNoteService, useValue: {} },
+      // V1-41b review (SEC-V41b-1): the real audit interceptor, global as in
+      // app.module.ts; its emitter is the recorder above.
+      { provide: APP_INTERCEPTOR, useClass: BusinessEventInterceptor },
+      { provide: ResilientEmitterService, useValue: auditRecorder },
     ],
   }).compile();
   evidence = moduleRef.get(PaymentEvidenceService);
@@ -1095,5 +1143,67 @@ describe('V1-41b: a member confirms a pending extracted payment over HTTP (CR-V4
     expect(ok.body.payment).toMatchObject({ status: 'SUCCESSFUL', amount: 45, recordedBy: ID.owner });
     expect(await paymentPostingsOf(ID.invRouteBody)).toHaveLength(1);
     expect(await balanceOf(ID.invRouteBody)).toEqual({ paidAmount: 45, remaining: 55 });
+  });
+});
+
+describe('V1-41b review repairs: the confirm is audited as the payment it records, and answers the retired row as CONFIRMED (SEC-V41b-1, CR-V41b-1, CR-V41b-2)', () => {
+  const CONFIRM_ROUTE_PATH = '/commerce/businesses/:businessId/invoices/:invoiceId/payments/:paymentId/confirm';
+
+  /** The answer's invoice.payments as { id: status }. */
+  function statusesOf(payments: Array<{ id: string; status: string }>): Record<string, string> {
+    return Object.fromEntries(payments.map((p) => [p.id, p.status]));
+  }
+
+  it('V41-T1i: the writer confirms -> the audit interceptor hands the emitter exactly one payment.record job on the SUCCESSFUL Payment by the writer (never invoice.create, never the invoice or the pending row as subject); the answer\'s invoice.payments holds the retired row CONFIRMED beside the money, as the database does', async () => {
+    const body = await evidencePayment(ID.owner, ID.bizA, ID.invRouteAudit, 45, 'v41a-route-audit.pdf');
+    const pendingId = body.payment.id;
+    const start = auditJobs.length;
+
+    const res = await confirmRouteAs(ID.writer, ID.bizA, ID.invRouteAudit, pendingId, { amount: 45 });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const recordedId = res.body.payment.id;
+    expect(res.body.payment).toMatchObject({ status: 'SUCCESSFUL', amount: 45, recordedBy: ID.writer });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // AUDIT: exactly as the manual payment route audits its payment (R0-19).
+    expect(auditJobsAfter(start)).toEqual([['payment.record', 'payment', recordedId, 'human', ID.writer]]);
+    expect(auditJobs[start]).toMatchObject({ businessId: ID.bizA, route: CONFIRM_ROUTE_PATH });
+    const subjects = auditJobs.slice(start).map((j) => j.subjectId);
+    expect(subjects).not.toContain(ID.invRouteAudit);
+    expect(subjects).not.toContain(pendingId);
+
+    // CR-V41b-2: the answer reports the rows as they now are; no row reads PENDING.
+    const stored = await paymentsOf(ID.invRouteAudit);
+    expect(statusesOf(stored)).toEqual({ [pendingId]: 'CONFIRMED', [recordedId]: 'SUCCESSFUL' });
+    expect(statusesOf(res.body.invoice.payments)).toEqual(statusesOf(stored));
+    expect(res.body.invoice.payments.filter((p: any) => p.status === 'PENDING')).toEqual([]);
+    expect(res.body).toMatchObject({ paidAmount: 45, remaining: 55 });
+    expect(await balanceOf(ID.invRouteAudit)).toEqual({ paidAmount: 45, remaining: 55 });
+  });
+
+  it('V41-T1j: a confirm retried by another member after the door recorded the money under its key but before the row was retired answers that payment, hands the audit emitter nothing, and answers the retired row CONFIRMED', async () => {
+    const body = await evidencePayment(ID.owner, ID.bizA, ID.invRouteReplay, 30, 'v41a-route-replay.pdf');
+    const pendingId = body.payment.id;
+    // What a first confirm by the owner commits before it retires the row (its keyed recordPayment).
+    const first = await commerce.recordPayment(
+      ID.invRouteReplay, ID.bizA,
+      { amount: 30, method: 'OTHER', idempotencyKey: `extracted-confirm:${pendingId}` },
+      { actorId: ID.owner },
+    );
+    const start = auditJobs.length;
+
+    const res = await confirmRouteAs(ID.writer, ID.bizA, ID.invRouteReplay, pendingId, { amount: 30 });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.payment).toMatchObject({ id: first.payment.id, status: 'SUCCESSFUL', amount: 30, recordedBy: ID.owner });
+    expect(res.body.confirmedPaymentId).toBe(pendingId);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // R19-ST-1: no payment.record naming the writer as the recorder of the owner's payment, and no invoice.create.
+    expect(auditJobsAfter(start)).toEqual([]);
+
+    const stored = await paymentsOf(ID.invRouteReplay);
+    expect(statusesOf(stored)).toEqual({ [pendingId]: 'CONFIRMED', [first.payment.id]: 'SUCCESSFUL' });
+    expect(statusesOf(res.body.invoice.payments)).toEqual(statusesOf(stored));
+    expect(await paymentPostingsOf(ID.invRouteReplay)).toHaveLength(1);
   });
 });

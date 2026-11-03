@@ -101,9 +101,27 @@ function isPaymentReplay(response: unknown, call: RouteCall): boolean {
  * `invoices` and was audited as `invoice.create` on the invoice. It records a
  * Payment, and its handler answers { payment, invoice, paidAmount, remaining },
  * so the subject is response.payment.id. A replay is not audited (R19-ST-1).
+ *
+ * V1-41b review (SEC-V41b-1, CR-V41b-1): the pending-payment confirm route
+ * records the money of a PENDING extracted row through the same door
+ * (CommerceService.recordPayment, as the confirming member) and answers the
+ * same envelope plus confirmedPaymentId. Without a rule it walked back to
+ * `invoices` too (invoice.create on the invoice). It is audited exactly as a
+ * manual payment: payment.record on the SUCCESSFUL Payment it recorded, by the
+ * confirming member (metadata.route and the snapshot's confirmedPaymentId say
+ * it was a confirmation). A confirm that answers a Payment this request did
+ * not record (the door's keyed replay after a confirm that recorded the money
+ * but failed before retiring the row, or a manual payment that took the
+ * door's key) is not audited as a record by this member (R19-ST-1).
  */
 const ROUTE_EVENT_RULES: Record<string, RouteEventRule> = {
   'POST commerce/businesses/:businessId/invoices/:invoiceId/payments': {
+    subjectType: 'payment',
+    action: 'record',
+    subjectId: (response) => nestedId(response, 'payment'),
+    isReplay: isPaymentReplay,
+  },
+  'POST commerce/businesses/:businessId/invoices/:invoiceId/payments/:paymentId/confirm': {
     subjectType: 'payment',
     action: 'record',
     subjectId: (response) => nestedId(response, 'payment'),

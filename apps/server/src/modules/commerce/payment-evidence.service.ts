@@ -530,7 +530,21 @@ export class PaymentEvidenceService {
     if (retired.count !== 1) {
       throw new ConflictException('This payment was already confirmed');
     }
-    return { ...recorded, confirmedPaymentId: pending.id };
+    // V1-41b review (CR-V41b-2): recordPayment (and its keyed replay) read the
+    // invoice with its payments before the row above was retired, so that
+    // read still carries this row PENDING. The answer reports the row as it
+    // now is, so a caller that lists invoice.payments never counts the
+    // confirmed row as a pending payment beside the money recorded from it.
+    // Only `status` changed (a Payment row has no updatedAt).
+    const invoice = recorded.invoice
+      ? {
+          ...recorded.invoice,
+          payments: recorded.invoice.payments.map((p) =>
+            p.id === pending.id ? { ...p, status: CONFIRMED_EXTRACTED_PAYMENT_STATUS } : p,
+          ),
+        }
+      : recorded.invoice;
+    return { ...recorded, invoice, confirmedPaymentId: pending.id };
   }
 
   /** ModuleScopeGuard's legacy rule for revenue >= write, for a member named by a service caller. */
