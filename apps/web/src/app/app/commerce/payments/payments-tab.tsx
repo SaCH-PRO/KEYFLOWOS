@@ -19,7 +19,7 @@ import { toast } from "sonner";
 import type { Invoice } from "@/lib/client";
 import {
   markInvoicePaid,
-  updateInvoiceStatus,
+  sendInvoiceReminder,
 } from "@/lib/client";
 import { formatCurrency, formatCurrencyCompact } from "@/lib/currency";
 import { getStatusBadge } from "../components/commerce-types";
@@ -195,19 +195,29 @@ export default function PaymentsTab({
     [actionLoading, setInvoices]
   );
 
+  // FOLLOW3-A8 (VR-01): the reminder goes through the reminder door
+  // (POST .../invoices/:id/send-reminder), as the Collections panel's does since
+  // V1-42c. It used to ask the status route for SENT, which since V1-42 answers
+  // a SENT invoice without doing anything (and refuses PARTIALLY_PAID/OVERDUE),
+  // while this toasted "Reminder sent" and rewrote the row to SENT.
+  // "Reminder sent" now means the server delivered one; a reminder changes
+  // nothing on the invoice, so the row is left as it is.
   const handleSendReminder = useCallback(
     async (invoiceId: string) => {
       if (actionLoading[invoiceId]) return;
+      if (!businessId) {
+        toast.error("Select a workspace to send a reminder");
+        return;
+      }
       setActionLoading((prev) => ({ ...prev, [invoiceId]: "send" }));
       try {
-        const { data, error } = await updateInvoiceStatus(invoiceId, "SENT");
-        if (!error && data) {
-          setInvoices((prev) =>
-            prev.map((i) => (i.id === invoiceId ? { ...i, status: "SENT" } : i))
-          );
+        const { data, error } = await sendInvoiceReminder(businessId, invoiceId, {});
+        if (error || !data) {
+          toast.error(error ?? "Failed to send reminder");
+        } else if (data.delivered) {
           toast.success("Reminder sent");
         } else {
-          toast.error(error ?? "Failed to send reminder");
+          toast.warning("Reminder logged but not emailed: this customer has no email address");
         }
       } finally {
         setActionLoading((prev) => {
@@ -217,7 +227,7 @@ export default function PaymentsTab({
         });
       }
     },
-    [actionLoading, setInvoices]
+    [actionLoading, businessId]
   );
 
   const toggleSelected = useCallback((id: string) => {

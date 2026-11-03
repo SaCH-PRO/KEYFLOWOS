@@ -23,7 +23,7 @@
  * only its data door (@/lib/client) and the toast are stubbed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import type { Invoice } from "@/lib/client";
 import { toast } from "sonner";
@@ -57,10 +57,12 @@ function invoice(id: string, status: string): Invoice {
 /** The tab with a real invoices state, so whatever setInvoices does is rendered. */
 function mount(invoices: Invoice[], businessId: string | null = BIZ) {
   const setInvoicesSpy = vi.fn();
-  let current: Invoice[] = invoices;
+  const rendered = { list: invoices };
   function Holder() {
     const [list, setList] = useState<Invoice[]>(invoices);
-    current = list;
+    useEffect(() => {
+      rendered.list = list;
+    }, [list]);
     const setInvoices: React.Dispatch<React.SetStateAction<Invoice[]>> = (action) => {
       setInvoicesSpy(action);
       setList(action);
@@ -68,7 +70,7 @@ function mount(invoices: Invoice[], businessId: string | null = BIZ) {
     return <PaymentsTab invoices={list} currency="TTD" businessId={businessId} setInvoices={setInvoices} />;
   }
   render(<Holder />);
-  return { setInvoicesSpy, statusOf: (id: string) => current.find((i) => i.id === id)?.status };
+  return { setInvoicesSpy, statusOf: (id: string) => rendered.list.find((i) => i.id === id)?.status };
 }
 
 /** Recovery Queue button (first in the DOM) or the payments-list row button (last). */
