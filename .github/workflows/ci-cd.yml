@@ -12,11 +12,16 @@ concurrency:
   cancel-in-progress: true
 
 # Must match the exact versions in the root package.json `engines` field.
-# Major-only ranges ('20'/'9') resolve to the latest patch, which
-# `pnpm install --frozen-lockfile` then rejects with ERR_PNPM_UNSUPPORTED_ENGINE,
-# failing every job before any code runs.
+# Major-only ranges ('22'/'9') resolve to the latest patch. pnpm rejects an
+# engines.pnpm mismatch with ERR_PNPM_UNSUPPORTED_ENGINE, failing every job
+# before any code runs, but only WARNS on an engines.node mismatch.
+# Node 22.x is owner ruling D-21 (V1-39). 22.23.4 is the newest Node 22
+# security release when pinned (2026-10-20); a later security release moves
+# every pin together. .nvmrc, engines.node, this line, hawkscan.yml and the
+# Dockerfile ARG must agree, which the "Check the Node runtime pin" step
+# proves (scripts/ci/runtime-pin.spec.mjs).
 env:
-  NODE_VERSION: '20.18.1'
+  NODE_VERSION: '22.23.4'
   PNPM_VERSION: '9.15.0'
 
 jobs:
@@ -41,6 +46,13 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
+
+      # V1-39 (PRS-M04, D-21): one declared Node runtime. Runs on the Node
+      # setup-node just installed, before install, and needs no dependencies.
+      # No env here: NODE_TEST_CONTEXT=child alone makes `node --test` skip
+      # every file and exit 0.
+      - name: Check the Node runtime pin
+        run: node --test scripts/ci/runtime-pin.spec.mjs
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -410,10 +422,27 @@ jobs:
       # process gets PAST module loading, which is the part a missing or
       # ESM-only dependency breaks. A DB connection failure afterwards is fine
       # and expected here.
+      #
+      # --no-experimental-require-module (V1-39, review CR-V139-2): this job
+      # runs Node 22, where require(esm) is on by default, so without the flag
+      # an ESM-only dependency loads here and this check passes. native-dast.yml
+      # (the required DAST gate) and e2e-live.yml still boot dist/main.js on
+      # 20.18.1, where that dependency dies with ERR_REQUIRE_ESM. The flag keeps
+      # this check failing the way those boots would; scripts/ci/runtime-pin.spec.mjs
+      # requires it while any workflow boots the server without require(esm),
+      # and requires it gone once none does.
+      #
+      # DATABASE_URL: main.ts validates the environment and exits before it
+      # imports AppModule, so with no DATABASE_URL this step only loaded
+      # main.ts's own imports. An unreachable one (port 1, no password) gets
+      # the process through the whole AppModule graph to NestFactory, which
+      # then fails to reach the database (Prisma P1001): expected here.
       - name: Verify the server gets past module loading
+        env:
+          DATABASE_URL: postgresql://module-load-check@127.0.0.1:1/module-load-check
         run: |
           set +e
-          OUT=$(timeout 45 node apps/server/dist/main.js 2>&1)
+          OUT=$(timeout 45 node --no-experimental-require-module apps/server/dist/main.js 2>&1)
           if echo "$OUT" | grep -qE "ERR_REQUIRE_ESM|ERR_MODULE_NOT_FOUND|ERR_UNSUPPORTED_DIR_IMPORT|Cannot find module"; then
             echo "::error::Server dies during module loading — it cannot start"
             echo "$OUT" | grep -aE "ERR_REQUIRE_ESM|ERR_MODULE_NOT_FOUND|Cannot find module" | head -5
