@@ -42,6 +42,12 @@
  *   H-01..H-03      TODO the HTTP door: POST .../invoices and .../quotes with an Idempotency-Key header.
  *                   commerce.controller.ts (outside the V1-45 write set) does not forward the header
  *                   to the service yet; see the describe block at the end.
+ *   H-04..H-07      TODO (V1-45 review SEC-V45-1, V45-CR-1, SEC-V45-2) what the packet that wires the
+ *                   door must also hold: the browser's CORS preflight allows the Idempotency-Key
+ *                   header (app-bootstrap.ts allowedHeaders lists only Content-Type, Authorization and
+ *                   x-business-id today); a replay writes no second invoice_created audit row; a replay
+ *                   at the plan's invoice limit answers the existing invoice, not PlanLimitGuard's 403;
+ *                   the quote create route is audited once per quote. All outside the V1-45 write set.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed), CommerceService,
@@ -508,4 +514,17 @@ describe('V1-45 create idempotency — the HTTP door (Idempotency-Key header, D-
   it.todo('H-01 RED-BEFORE: POST invoices twice with one Idempotency-Key answers one invoice (201, same id and number, one row) — needs commerce.controller.ts, outside the V1-45 write set');
   it.todo('H-02 RED-BEFORE: POST invoices with a used Idempotency-Key and a different body is a 409 idempotency_key_reused, nothing written — needs commerce.controller.ts, outside the V1-45 write set');
   it.todo('H-03 RED-BEFORE: POST quotes twice with one Idempotency-Key answers one quote (201, same id, one row) — needs commerce.controller.ts, outside the V1-45 write set');
+  // V1-45 review (SEC-V45-1, V45-CR-1): supertest sends no preflight, so H-01..H-03
+  // can pass while a browser still fails. The web app calls the API cross-origin
+  // and the CORS allowedHeaders in app-bootstrap.ts (and the public-route
+  // middleware's list) omit Idempotency-Key: OPTIONS with
+  // Access-Control-Request-Headers 'authorization,content-type,idempotency-key'
+  // answers Access-Control-Allow-Headers 'Content-Type,Authorization,x-business-id'.
+  // Probe: configureNestApp(app), then OPTIONS the route with an Origin header.
+  it.todo('H-04 RED-BEFORE: the CORS preflight for POST invoices and POST quotes from the web origin allows the Idempotency-Key request header — needs app-bootstrap.ts allowedHeaders, outside the V1-45 write set');
+  // V1-45 review (SEC-V45-2): the door's guards and interceptor run before and
+  // after the service, so a replay is still seen as a new create there.
+  it.todo('H-05 RED-BEFORE: a replayed POST invoices (same Idempotency-Key and body) writes no second invoice_created team audit row — needs commerce.controller.ts / TeamAuditInterceptor, outside the V1-45 write set');
+  it.todo('H-06 RED-BEFORE: a replayed POST invoices at the plan\'s invoice limit answers the existing invoice (same id), not PlanLimitGuard\'s 403 — needs commerce.controller.ts / PlanLimitGuard, outside the V1-45 write set');
+  it.todo('H-07 RED-BEFORE: POST quotes writes one quote_created team audit row and a replay writes none (the route has no audit today) — needs commerce.controller.ts, outside the V1-45 write set');
 });
