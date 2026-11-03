@@ -1,11 +1,66 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpenseCreatedPayload } from '../../core/event-bus/events.types';
 import { ExpensePostingService } from '../finance/expense-posting.service';
-import { PostingService } from '../finance/posting.service';
+import { PostingService, normalizeCurrency } from '../finance/posting.service';
+import { moneyEquals, roundMoney, toCents } from '../commerce/money';
 import { TimelineService } from '../timeline/timeline.service';
+
+type ExpenseItemInput = { amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null };
+
+/**
+ * FOLLOW3-B4-EXPENSE-CURRENCY-CENTS (VL-07): a money value in whole cents, half
+ * away from zero on its decimal value (the V1-22 rule, commerce/money.ts, that
+ * recordPayment applies). A value that is not a finite number is passed through
+ * unchanged, so Prisma refuses it as it did before.
+ */
+function toCentsAmount<T>(amount: T): T {
+  return (typeof amount === 'number' && Number.isFinite(amount) ? roundMoney(amount) : amount) as T;
+}
+
+/** Split items with each amount in whole cents (FOLLOW3-B4). */
+function centsItems<T extends ExpenseItemInput[] | null | undefined>(items: T): T {
+  return (Array.isArray(items) ? items.map((item) => ({ ...item, amount: toCentsAmount(item?.amount) })) : items) as T;
+}
+
+/**
+ * FOLLOW3-B7: the split items as their posting reads them (amounts in cents,
+ * account, memo, tax rate), so a PATCH that restates the stored items is not a
+ * change. No items and an empty list read the same.
+ */
+function itemsKey(items: unknown): string {
+  if (!Array.isArray(items)) return '[]';
+  return JSON.stringify(
+    items.map((item: Partial<ExpenseItemInput> | null) => ({
+      amount: toCents(Number(item?.amount)),
+      categoryId: item?.categoryId ?? null,
+      description: item?.description ?? null,
+      taxRateId: item?.taxRateId ?? null,
+    })),
+  );
+}
+
+/**
+ * FOLLOW3-B4-EXPENSE-CURRENCY-CENTS (VL-06; owner ruling D-13: one currency per
+ * business, documents default to it): the currency an expense, a bill or a
+ * recurring expense is written in. A named currency is normalized ('usd' ->
+ * 'USD'); none named is the business currency. Both writers stored the literal
+ * 'TTD', so a USD business's expenses were TTD. A currency the ledger door
+ * refuses (EUR on a TTD business) is still refused there, inside the create
+ * transaction (commerce-currency CUR-09).
+ */
+export async function expenseCurrency(
+  prisma: PrismaService,
+  businessId: string,
+  requested?: string | null,
+): Promise<string> {
+  const named = normalizeCurrency(requested);
+  if (named) return named;
+  const business = await prisma.client.business.findUnique({ where: { id: businessId }, select: { currency: true } });
+  return normalizeCurrency(business?.currency) || 'TTD';
+}
 
 @Injectable()
 export class ExpensesService {
@@ -17,6 +72,27 @@ export class ExpensesService {
     // V1-15: the ledger door, for the void's reversals (FinanceModule exports it).
     @Inject(PostingService) private readonly ledger: PostingService,
   ) {}
+
+  /**
+   * SEC-B4B7-3 (FOLLOW3-B4B7 review): an expense's category, and each split
+   * item's, belongs to its business, as its project, contact and service must.
+   * A foreign or unknown id is refused (400) before anything is written, so
+   * neither the row (include: { category }) nor its posting (resolveExpenseCoa)
+   * reaches another business's category or chart of accounts, and nothing of
+   * either is returned. No id named (undefined, null, '') checks nothing.
+   */
+  private async assertCategoriesInBusiness(businessId: string, categoryId: unknown, items: unknown): Promise<void> {
+    const ids = new Set<string>();
+    if (typeof categoryId === 'string' && categoryId) ids.add(categoryId);
+    if (Array.isArray(items)) {
+      for (const item of items as Array<{ categoryId?: unknown } | null>) {
+        if (typeof item?.categoryId === 'string' && item.categoryId) ids.add(item.categoryId);
+      }
+    }
+    if (ids.size === 0) return;
+    const found = await this.prisma.client.expenseCategory.count({ where: { businessId, id: { in: [...ids] } } });
+    if (found !== ids.size) throw new BadRequestException('Category not found or does not belong to this business');
+  }
 
   async listExpenses(
     businessId: string,
@@ -135,11 +211,17 @@ export class ExpensesService {
       if (!svc) throw new BadRequestException(`Service not found or does not belong to this business`);
       validServiceId = input.serviceId;
     }
+    await this.assertCategoriesInBusiness(input.businessId, input.categoryId, input.items);
 
     const status = input.status ?? 'PAID';
     if (status !== 'PAID' && status !== 'BILL') {
       throw new BadRequestException(`Invalid expense status: ${status}`);
     }
+    // FOLLOW3-B4: the business currency by default, and whole cents for the
+    // amount and each split item, so the row and its posting agree.
+    const currency = await expenseCurrency(this.prisma, input.businessId, input.currency);
+    const amount = toCentsAmount(input.amount);
+    const items = centsItems(input.items);
     const expenseDate = input.date ? new Date(input.date) : new Date();
     const paidAt = status === 'PAID' ? (input.paidAt ? new Date(input.paidAt) : expenseDate) : null;
     const dueDate = input.dueDate
@@ -156,8 +238,8 @@ export class ExpensesService {
         data: {
           businessId: input.businessId,
           description: input.description,
-          amount: input.amount,
-          currency: input.currency ?? 'TTD',
+          amount,
+          currency,
           date: expenseDate,
           vendor: input.vendor ?? null,
           receiptUrl: input.receiptUrl ?? null,
@@ -174,7 +256,7 @@ export class ExpensesService {
           status,
           dueDate,
           paidAt,
-          items: input.items ? (input.items as Prisma.InputJsonValue) : undefined,
+          items: items ? (items as Prisma.InputJsonValue) : undefined,
         },
         include: { category: true },
       });
@@ -190,7 +272,7 @@ export class ExpensesService {
         description: created.description,
         contactId: created.contactId,
         vendor: created.vendor,
-        items: input.items ?? null,
+        items: items ?? null,
       };
       if (status === 'PAID') {
         await this.posting.onExpensePaid(postPayload, tx);
@@ -527,8 +609,9 @@ export class ExpensesService {
   }) {
     const updateData: Record<string, unknown> = {};
     if (input.description !== undefined) updateData.description = input.description;
-    if (input.amount !== undefined) updateData.amount = input.amount;
-    if (input.currency !== undefined) updateData.currency = input.currency;
+    // FOLLOW3-B4: whole cents and a normalized currency (the business's when blank).
+    if (input.amount !== undefined) updateData.amount = toCentsAmount(input.amount);
+    if (input.currency !== undefined) updateData.currency = await expenseCurrency(this.prisma, input.businessId, input.currency);
     if (input.date !== undefined) updateData.date = new Date(input.date);
     if (input.vendor !== undefined) updateData.vendor = input.vendor;
     if (input.receiptUrl !== undefined) updateData.receiptUrl = input.receiptUrl;
@@ -538,7 +621,7 @@ export class ExpensesService {
     if (input.isRecurring !== undefined) updateData.isRecurring = input.isRecurring;
     if (input.recurringFrequency !== undefined) updateData.recurringFrequency = input.recurringFrequency;
     if (input.categoryId !== undefined) updateData.categoryId = input.categoryId;
-    if (input.items !== undefined) updateData.items = input.items as Prisma.InputJsonValue;
+    if (input.items !== undefined) updateData.items = centsItems(input.items) as Prisma.InputJsonValue;
 
     if (input.projectId !== undefined) {
       if (input.projectId === null) {
@@ -567,11 +650,71 @@ export class ExpensesService {
         updateData.serviceId = input.serviceId;
       }
     }
+    // SEC-B4B7-3: a named category (or split item category) is this business's.
+    await this.assertCategoriesInBusiness(input.businessId, input.categoryId, input.items);
 
-    return this.prisma.client.expense.update({
-      where: { id: input.expenseId, businessId: input.businessId },
-      data: updateData,
-      include: { category: true },
+    // FOLLOW3-B7-EXPENSE-EDIT-POSTED (owner ruling D-67): the amount, items and
+    // currency of a posted expense are what its ledger posting carries, so they
+    // are not edited in place: such an edit is refused with 409 (void it, which
+    // posts the reversal, and record a new one), as deleteExpense refuses a
+    // posted expense. Every other field stays editable. A value that restates
+    // the stored one (the edit forms send the whole payload) is not a change.
+    // An unposted PAID or BILL expense whose amount becomes positive is posted
+    // once here, by the recipe createExpense uses, so no edit leaves the row
+    // and its ledger disagreeing. The row is held (FOR UPDATE) for the whole
+    // decision, so a concurrent edit, payment, void or delete of it waits
+    // (deleteExpense takes the same lock, SEC-B4B7-1). A soft-deleted expense
+    // (deleted or voided) is gone here as it is to GET, pay and void: 404, so
+    // no edit lands on a row a trash restore would bring back unposted
+    // (SEC-B4B7-2).
+    return this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      await tx.$queryRaw`SELECT id FROM expenses WHERE id = ${input.expenseId} AND business_id = ${input.businessId} FOR UPDATE`;
+      const existing = await tx.expense.findFirst({ where: { id: input.expenseId, businessId: input.businessId, deletedAt: null } });
+      if (!existing) throw new NotFoundException('Expense not found');
+
+      if ('amount' in updateData && moneyEquals(updateData.amount as number, existing.amount)) delete updateData.amount;
+      if ('currency' in updateData && updateData.currency === normalizeCurrency(existing.currency)) delete updateData.currency;
+      if ('items' in updateData && itemsKey(updateData.items) === itemsKey(existing.items)) delete updateData.items;
+      const changesMoney = 'amount' in updateData || 'currency' in updateData || 'items' in updateData;
+
+      if (changesMoney) {
+        const posted = await tx.financialTransaction.findFirst({
+          where: { businessId: input.businessId, sourceType: 'Expense', sourceId: existing.id },
+          select: { id: true },
+        });
+        if (posted) {
+          throw new ConflictException('Cannot change the amount or currency of a posted expense: void it and record a new one');
+        }
+      }
+
+      const updated = await tx.expense.update({
+        where: { id: existing.id, businessId: input.businessId },
+        data: updateData,
+        include: { category: true },
+      });
+
+      if (changesMoney && updated.amount > 0 && !updated.deletedAt && (updated.status === 'PAID' || updated.status === 'BILL')) {
+        const postPayload = {
+          id: updated.id,
+          businessId: updated.businessId,
+          amount: updated.amount,
+          currency: updated.currency,
+          date: updated.date,
+          categoryId: updated.categoryId,
+          paymentMethod: updated.paymentMethod,
+          description: updated.description,
+          contactId: updated.contactId,
+          vendor: updated.vendor,
+          items: Array.isArray(updated.items) ? (updated.items as unknown as ExpenseItemInput[]) : null,
+        };
+        if (updated.status === 'PAID') {
+          await this.posting.onExpensePaid(postPayload, tx);
+        } else {
+          await this.posting.onBillCreated(postPayload, tx);
+        }
+      }
+      return updated;
     });
   }
 
@@ -580,18 +723,27 @@ export class ExpensesService {
     // hard/soft-delete it: deletion would leave a balanced ledger entry
     // referencing a row that no longer exists. Force callers to use
     // `voidExpense` instead, which posts an explicit reversal.
-    const posted = await this.prisma.client.financialTransaction.findFirst({
-      where: { businessId, sourceType: 'Expense', sourceId: expenseId },
-      select: { id: true },
-    });
-    if (posted) {
-      throw new BadRequestException(
-        'Cannot delete a posted expense — call POST /finance/businesses/:businessId/bills/:expenseId/void to reverse the ledger entries instead.',
-      );
-    }
-    const deleted = await this.prisma.client.expense.update({
-      where: { id: expenseId, businessId },
-      data: { deletedAt: new Date() },
+    // SEC-B4B7-1 (FOLLOW3-B4B7 review): the posted check and the soft delete
+    // run in one transaction holding the row FOR UPDATE, the lock updateExpense
+    // holds while an edit may post the row. A delete racing such an edit waits
+    // for it, then sees its posting and refuses, so a posted expense is never
+    // soft-deleted (which would leave a live posting the void door cannot reach).
+    const deleted = await this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      await tx.$queryRaw`SELECT id FROM expenses WHERE id = ${expenseId} AND business_id = ${businessId} FOR UPDATE`;
+      const posted = await tx.financialTransaction.findFirst({
+        where: { businessId, sourceType: 'Expense', sourceId: expenseId },
+        select: { id: true },
+      });
+      if (posted) {
+        throw new BadRequestException(
+          'Cannot delete a posted expense — call POST /finance/businesses/:businessId/bills/:expenseId/void to reverse the ledger entries instead.',
+        );
+      }
+      return tx.expense.update({
+        where: { id: expenseId, businessId },
+        data: { deletedAt: new Date() },
+      });
     });
     await this.timeline.recordEvent({
       businessId,
