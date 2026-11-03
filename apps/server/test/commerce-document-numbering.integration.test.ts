@@ -39,6 +39,13 @@
  *                   (createInvoiceForService), quote conversion and recurring invoices draw from the
  *                   same allocator
  *   N-07 RED-BEFORE Promise.all of 6 POST quotes inside one millisecond: QT-0001..QT-0006, all 201
+ *   N-08            (review CR43-1) document intake (the real DocumentIntelligenceService
+ *                   .processExtractedDocument) of a scanned number in the sequence's own form that the
+ *                   business already holds (INV-0002 after INV-0001/INV-0002) creates the invoice with the
+ *                   business's next number (INV-0003), as the base created it (its own numbers were
+ *                   INV-<timestamp>, so nothing collided); one invoice.created; the next HTTP create is
+ *                   INV-0004 (no jump). A taken scanned number of any other form still fails as at the
+ *                   base and writes nothing. At 906faff3 the intake failed with P2002.
  *   L-01 RED-BEFORE LEDGER: a real collision (a row holding the next number, committed while the create
  *                   waits on the unique index) is retried with the following number; the retry leaves
  *                   one Invoice, and issuing it posts once. The same for a recurring run: one invoice for
@@ -87,12 +94,14 @@ const ID = {
   bizK: `${P}bizK`, // N-05, N-06: KEY and the shared sequence (ACCRUAL)
   bizQ: `${P}bizQ`, // N-07: quotes
   bizR: `${P}bizR`, // L-01: forced collisions (ACCRUAL)
+  bizI: `${P}bizI`, // N-08: document intake (CR43-1)
   contactA: `${P}contactA`,
   contactB: `${P}contactB`,
   contactL: `${P}contactL`,
   contactK: `${P}contactK`,
   contactQ: `${P}contactQ`,
   contactR: `${P}contactR`,
+  contactI: `${P}contactI`,
   scheduleK: `${P}schedK`,
   scheduleR: `${P}schedR`,
 };
@@ -108,6 +117,7 @@ let redis: any;
 let commerce: any;
 let workflow: any;
 let dispatcher: any;
+let intake: any;
 let recurringRunner: (businessId: string) => any;
 
 const emitted: Array<{ name: string; payload: any }> = [];
@@ -332,6 +342,19 @@ beforeAll(async () => {
     moduleRef: { get: (token: unknown) => (token === CommerceService ? commerce : stub()) },
   });
 
+  // Document intake (N-08): the real DocumentIntelligenceService over the real
+  // CommerceService; extraction is skipped (the case hands it an extracted
+  // result), governance auto-approves, and the AI services it never reaches are stubs.
+  intake = new DocumentIntelligenceService(
+    prismaService,
+    eventStub as any,
+    stub(),
+    stub(),
+    { evaluateAutoApproval: async () => ({ autoApproved: true }) } as any,
+    stub(),
+    { get: (token: unknown) => (token === CommerceService ? commerce : stub()) } as any,
+  );
+
   // The real recurring runner over the real workflow; its due scan is scoped
   // to one of this suite's businesses so a run never bills another suite's schedules.
   recurringRunner = (businessId: string) => {
@@ -381,6 +404,7 @@ beforeAll(async () => {
     [ID.bizK, ID.contactK, 'ACCRUAL'],
     [ID.bizQ, ID.contactQ, 'CASH'],
     [ID.bizR, ID.contactR, 'ACCRUAL'],
+    [ID.bizI, ID.contactI, 'CASH'],
   ];
   const coa = moduleRef.get(ChartOfAccountsSeederService);
   for (const [biz, contact, basis] of businesses) {
@@ -592,6 +616,60 @@ describe('V1-43 numbering — sequential per business, safe under concurrency (M
     expect(res.map((r) => r.status), JSON.stringify(res.filter((r) => r.status !== 201).map((r) => r.body))).toEqual(Array(6).fill(201));
     expect(res.map((r) => r.body.quoteNumber).sort()).toEqual(seq('QT-', 1, 6));
     expect(await quoteNumbers(ID.bizQ)).toEqual(seq('QT-', 1, 6));
+  }, 60_000);
+
+  it('N-08 (CR43-1): document intake of a scanned number the business already holds in its sequence creates the invoice with the next number; no jump, nothing else renumbered', async () => {
+    const scan = (invoiceNumber: string, description: string) =>
+      intake.processExtractedDocument(ID.bizI, {
+        documentType: 'invoice',
+        confidence: 0.95,
+        rawText: '',
+        suggestedActions: [],
+        invoiceData: {
+          contactEmail: `${P}contactI@test.local`,
+          lineItems: [{ description, quantity: 1, unitPrice: 25, total: 25 }],
+          subtotal: 25,
+          total: 25,
+          currency: 'TTD',
+          invoiceNumber,
+          confidence: 0.95,
+        },
+      });
+    const createdIn = () => emitted.filter((e) => e.name === 'invoice.created' && e.payload?.businessId === ID.bizI);
+
+    // The business numbers its own invoices INV-0001, INV-0002.
+    for (const n of seq('INV-', 1, 2)) {
+      const res = await createInvoice(ID.bizI, ID.contactI);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.invoiceNumber).toBe(n);
+    }
+
+    // A scanned document numbered INV-0002 (the common INV-NNNN form): the base
+    // created it (its own numbers were INV-<timestamp>); it is created again,
+    // under the business's next number, not refused with P2002.
+    const outcomes = await scan('INV-0002', 'v43a scanned INV-0002');
+    expect(outcomes, JSON.stringify(outcomes)).toEqual([{ action: 'create_invoice', success: true, entityId: expect.any(String) }]);
+    const scanned = await db.invoice.findUnique({ where: { id: outcomes[0].entityId }, include: { items: true } });
+    expect(scanned.invoiceNumber, 'the business\'s next number').toBe('INV-0003');
+    expect(scanned.items.map((i: any) => i.description)).toEqual(['v43a scanned INV-0002']);
+    expect(createdIn().map((e) => e.payload.invoice.invoiceNumber), 'one invoice.created; the refused attempt emitted nothing').toEqual(seq('INV-', 1, 3));
+
+    // The sequence did not move: the next HTTP create is INV-0004.
+    const next = await createInvoice(ID.bizI, ID.contactI);
+    expect(next.status, JSON.stringify(next.body)).toBe(201);
+    expect(next.body.invoiceNumber).toBe('INV-0004');
+    expect(await invoiceNumbers(ID.bizI)).toEqual(seq('INV-', 1, 4));
+
+    // Control: a scanned number of any other form is kept as given (N-03), and
+    // one already held still fails as at the base, writing nothing.
+    const external = await scan(`${P}EXT-88`, 'v43a scanned EXT-88');
+    expect(external[0]?.success, JSON.stringify(external)).toBe(true);
+    expect((await db.invoice.findUnique({ where: { id: external[0].entityId } })).invoiceNumber).toBe(`${P}EXT-88`);
+    const again = await scan(`${P}EXT-88`, 'v43a scanned EXT-88 again');
+    expect(again[0]?.success, JSON.stringify(again)).toBe(false);
+    expect(again[0]?.error ?? '').toMatch(/Unique constraint/i);
+    expect(await invoiceNumbers(ID.bizI)).toEqual([...seq('INV-', 1, 4), `${P}EXT-88`].sort());
+    expect(createdIn()).toHaveLength(5);
   }, 60_000);
 });
 

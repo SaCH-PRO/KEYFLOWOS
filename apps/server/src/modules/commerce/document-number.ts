@@ -23,6 +23,17 @@ export type DocumentKind = 'invoice' | 'quote';
 
 const PREFIX: Record<DocumentKind, string> = { invoice: 'INV-', quote: 'QT-' };
 
+/** The allocator's own form of a number: the one allocateDocumentNumber counts and draws. */
+const SEQUENCE: Record<DocumentKind, RegExp> = { invoice: /^INV-[0-9]+$/, quote: /^QT-[0-9]+$/ };
+
+/**
+ * True when `value` has the form of the business's own sequence
+ * (INV-<digits> / QT-<digits>), so a row holding it can be one the allocator drew.
+ */
+export function isSequenceNumber(value: string, kind: DocumentKind): boolean {
+  return SEQUENCE[kind].test(value);
+}
+
 /** Attempts per create before a persistent collision is handed to the caller. */
 export const DOCUMENT_NUMBER_ATTEMPTS = 5;
 

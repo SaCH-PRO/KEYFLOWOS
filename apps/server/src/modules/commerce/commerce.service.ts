@@ -23,7 +23,7 @@ import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
 import { MAX_DOCUMENT_AMOUNT } from './dto/document-line-item.dto';
-import { allocateDocumentNumber, retryDocumentNumber } from './document-number';
+import { allocateDocumentNumber, isDocumentNumberConflict, isSequenceNumber, retryDocumentNumber } from './document-number';
 import { PATCHABLE_INVOICE_STATUSES, type PatchableInvoiceStatus } from './dto/update-invoice.dto';
 import {
   decideQuoteBulkMove,
@@ -773,11 +773,23 @@ export class CommerceService {
     // V1-43 (D-15): a number the caller names (document intake) is kept as
     // given; otherwise the business's next number is drawn in this create's
     // own transaction, and a collision is retried with the following number.
-    const create = () => this.prisma.client.$transaction(async (tx) => tx.invoice.create({
-      data: { ...data, invoiceNumber: input.invoiceNumber ?? (await allocateDocumentNumber(tx, input.businessId, 'invoice')) },
+    // Review CR43-1: a named number in the sequence's own form (a scanned
+    // INV-0002) that the business already holds meets its own numbering, which
+    // the base's INV-<timestamp> never did; that create takes the business's
+    // next number instead of failing. A taken number of any other form still
+    // fails as it did at the base.
+    const create = (invoiceNumber?: string) => this.prisma.client.$transaction(async (tx) => tx.invoice.create({
+      data: { ...data, invoiceNumber: invoiceNumber ?? (await allocateDocumentNumber(tx, input.businessId, 'invoice')) },
       include: { items: true, contact: true },
     }));
-    const invoice = input.invoiceNumber != null ? await create() : await retryDocumentNumber('invoice', create);
+    const allocated = () => retryDocumentNumber('invoice', () => create());
+    const named = input.invoiceNumber;
+    const invoice = named == null
+      ? await allocated()
+      : await create(named).catch((err: unknown) => {
+          if (isSequenceNumber(named, 'invoice') && isDocumentNumberConflict(err, 'invoice')) return allocated();
+          throw err;
+        });
     this.events.emit('invoice.created', {
       invoice,
       businessId: input.businessId,
