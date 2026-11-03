@@ -65,20 +65,27 @@
  *
  * RESULT. No contact email, operator bearer JWT or providerPaymentId reaches
  * the logs in the recordPayment, contact create (no playbook) and public link
- * windows. Two leaks do, both from production log calls outside the packet's
- * write set, so each negative control is it.todo naming the file and a
- * CHARACTERIZATION case pins the leaking line until the fix lands:
- *   - the public link token: LoggingInterceptor's access line is built from
- *     req.url (apps/server/src/core/interceptors/logging.interceptor.ts:22);
- *   - the contact email, when a SEND_EMAIL playbook runs on contact.created
- *     (apps/server/src/modules/flow/automation-executor.service.ts:286).
+ * windows. One leak does, from a production log call outside V1-40's write
+ * set, so its negative control is it.todo naming the file and a
+ * CHARACTERIZATION case pins the leaking line until the fix lands: the
+ * contact email, when a SEND_EMAIL playbook runs on contact.created
+ * (apps/server/src/modules/flow/automation-executor.service.ts:286).
  *
- * The req.url leak is not specific to the link token. Section 1b drives
- * LoggingInterceptor and GlobalHttpExceptionFilter directly: the access line
- * also carries platform secrets (the Chatwoot webhook secret in the path,
- * WHATSAPP_VERIFY_TOKEN in hub.verify_token, an OAuth `code`), and the 500
- * line (apps/server/src/core/filters/http-exception.filter.ts:65) logs
- * request.url as well, so a fix to LoggingInterceptor alone leaves it open.
+ * The public link token no longer reaches the logs (V1-83,
+ * FOLLOW3-C1-HTTP-LOG-ROUTE-PATTERN). LoggingInterceptor's access line
+ * (apps/server/src/core/interceptors/logging.interceptor.ts, :22 at bb6b86d4)
+ * and GlobalHttpExceptionFilter's 500 line and error-registry label
+ * (apps/server/src/core/filters/http-exception.filter.ts, :65 and :77 at
+ * bb6b86d4) were built from request.url. Both now name the route pattern
+ * Express matched (req.route.path, e.g. GET /commerce/public/invoice-link/:token),
+ * else the constant '<unrouted>', and never the query. The public link
+ * windows prove it through the real Nest app and Express routing: the plain
+ * view, the view with a `?code=` query, and a 500 injected into the token
+ * route. Section 1b drives LoggingInterceptor and GlobalHttpExceptionFilter
+ * directly with the rest of the class: platform secrets (the Chatwoot webhook
+ * secret in the path, WHATSAPP_VERIFY_TOKEN in hub.verify_token, an OAuth
+ * `code`) on the success line, the error line and the 500 line, and an
+ * unrouted request whose path and query reach none of them.
  *
  * Fixtures: prefix `v40a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
@@ -310,6 +317,15 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
   let bearer = '';
   let linkToken = '';
 
+  /** A credential-shaped query parameter on the public link (an OAuth-style `code`). Not a real credential. */
+  const QUERY_SECRET = `${P}query_secret_0001`;
+  /** The route pattern Express matched for the public link view. */
+  const LINK_ROUTE = '/commerce/public/invoice-link/:token';
+  /** The message of the error injected into the token route (the 500 window). */
+  const INJECTED_500 = 'v40a injected 500';
+  /** The newest http entry the error registry held right after the 500 window. */
+  let registryAfter500: { label: string; message: string } | undefined;
+
   /** What each window recorded, and what it read afterwards. */
   const windows: Record<string, { entries: LogEntry[]; status: number[] }> = {};
   /** The contact each contact-create window created. */
@@ -472,6 +488,7 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
     const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
     const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
     const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+    const { errorRegistry } = await import('../src/core/observability/error-registry');
 
     redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
@@ -693,6 +710,29 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       await until(async () => (await db.contactEvent.count({ where: { businessId: ID.biz, contactId: ID.customer, type: 'invoice.viewed' } })) > 0);
       return [res.status];
     });
+
+    // ---- window 3b: the same view with a credential-shaped query ------------
+    await captureWindow('publicInvoiceLinkQuery', async () => {
+      const res = await agent().get(`/commerce/public/invoice-link/${encodeURIComponent(linkToken)}?code=${QUERY_SECRET}`);
+      return [res.status];
+    });
+
+    // ---- window 3c: an unhandled error on the token route (the 500 line) ----
+    // The real route, guards, interceptors and filter; only the service read
+    // throws, once, as a database outage would.
+    const failOnce = vi
+      .spyOn(CommerceService.prototype, 'getPaymentLinkByToken')
+      .mockRejectedValueOnce(new Error(INJECTED_500));
+    try {
+      await captureWindow('publicInvoiceLink500', async () => {
+        const res = await agent().get(`/commerce/public/invoice-link/${encodeURIComponent(linkToken)}`);
+        return [res.status];
+      });
+    } finally {
+      failOnce.mockRestore();
+    }
+    const newestHttp = errorRegistry.snapshot(200).entries.find((e) => e.source === 'http');
+    registryAfter500 = newestHttp ? { label: newestHttp.label, message: newestHttp.message } : undefined;
   }, 180_000);
 
   afterAll(async () => {
@@ -707,7 +747,9 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       if (previousEnv[k] === undefined) delete process.env[k];
       else process.env[k] = previousEnv[k];
     }
-  });
+    // An explicit budget: the default hook timeout cut this cleanup short once
+    // and left users.v40a_owner behind (V1-40 review).
+  }, 60_000);
 
   // ---- recordPayment ---------------------------------------------------------
 
@@ -715,7 +757,8 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
     it('the window ran the real flow: 201 recorded, the keyed replay answered, a providerPaymentId was derived, and the spy saw the access lines', () => {
       expect(windows.recordPayment.status).toEqual([201, 201]);
       expect(providerPaymentId).toMatch(new RegExp(`^manual_${ID.invoice}_key_[0-9a-f]{32}$`));
-      expect(accessLines(windows.recordPayment.entries, 'POST', `/commerce/businesses/${ID.biz}/invoices/${ID.invoice}/payments`).length).toBe(2);
+      // The access line names the route pattern, not the request URL (V1-83).
+      expect(accessLines(windows.recordPayment.entries, 'POST', '/commerce/businesses/:businessId/invoices/:invoiceId/payments').length).toBe(2);
     });
 
     it('NEGATIVE CONTROL: no log entry carries the providerPaymentId, whole or its digest', () => {
@@ -741,8 +784,9 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
   describe('POST /crm/businesses/:businessId/contacts (contact create, and its duplicate 409)', () => {
     it('the window ran the real flow: 201 created, the duplicate answered 409, and the spy saw both access lines', () => {
       expect(windows.contactCreate.status).toEqual([201, 409]);
-      // One success line (debug) and one error line (the 409 reaches LoggingInterceptor's error branch).
-      expect(accessLines(windows.contactCreate.entries, 'POST', `/crm/businesses/${ID.biz}/contacts`).length).toBe(2);
+      // One success line (debug) and one error line (the 409 reaches LoggingInterceptor's error branch),
+      // each naming the route pattern (V1-83).
+      expect(accessLines(windows.contactCreate.entries, 'POST', '/crm/businesses/:businessId/contacts').length).toBe(2);
     });
 
     it("NEGATIVE CONTROL: no log entry carries the new contact's email", () => {
@@ -770,7 +814,7 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       expect(emailsSent).toEqual([{ recipientEmail: PLAYBOOK_CONTACT_EMAIL, type: 'invoice_sent' }]);
       const playbook = await db.automation.findUnique({ where: { id: `${P}playbook_email` }, select: { runCount: true } });
       expect(playbook?.runCount).toBe(1);
-      expect(accessLines(windows.contactCreatePlaybook.entries, 'POST', `/crm/businesses/${ID.biz}/contacts`).length).toBe(1);
+      expect(accessLines(windows.contactCreatePlaybook.entries, 'POST', '/crm/businesses/:businessId/contacts').length).toBe(1);
     });
 
     it('NEGATIVE CONTROL: no log entry carries the operator bearer token', () => {
@@ -802,7 +846,8 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
   describe('GET /commerce/public/invoice-link/:token (the customer view)', () => {
     it('the window ran the real flow: 200, the view event landed, and the spy saw the access line', () => {
       expect(windows.publicInvoiceLink.status).toEqual([200]);
-      expect(accessLines(windows.publicInvoiceLink.entries, 'GET', '/commerce/public/invoice-link/').length).toBe(1);
+      // The access line names the route pattern, not the request URL (V1-83).
+      expect(accessLines(windows.publicInvoiceLink.entries, 'GET', LINK_ROUTE).length).toBe(1);
     });
 
     it("NEGATIVE CONTROL: no log entry carries the invoice customer's email", () => {
@@ -816,30 +861,74 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       expect(leaks, describeLeaks(leaks)).toEqual([]);
     });
 
-    // RED at b1e8f5f5 (the tests-first commit ran this case as a real `it` and
-    // it failed): LoggingInterceptor's access line carries the token. The fix
-    // is in a production logger call outside this packet's write set:
-    // apps/server/src/core/interceptors/logging.interceptor.ts:22 builds the
-    // line from req.url (emitted at :25 slow, :27 debug, :31-33 error), and
-    // main.ts keeps Nest's default ConsoleLogger, which prints debug. Logging
-    // the route pattern (req.route?.path) instead of the URL closes it for
-    // every token-in-path route. The same req.url leak also covers platform
-    // secrets in paths and queries, and GlobalHttpExceptionFilter logs
-    // request.url on every 500 (section 1b, which has its own todos). When
-    // the fix lands, this todo becomes the `it` below with the
-    // CHARACTERIZATION case removed.
-    it.todo(
-      "NEGATIVE CONTROL: no log entry carries the link token (the customer's bearer credential) — " +
-        'fix outside the write set: apps/server/src/core/interceptors/logging.interceptor.ts:22 logs req.url',
-    );
-
-    it('CHARACTERIZATION (open finding IA-044, logging.interceptor.ts:22): only the HTTP access line carries the link token today', () => {
+    // RED at b1e8f5f5 (V1-40) and again on the V1-83 tests-first commit at
+    // bb6b86d4: LoggingInterceptor built its access line from req.url
+    // (logging.interceptor.ts:22, emitted at :26 debug), and main.ts keeps
+    // Nest's default ConsoleLogger, which prints debug.
+    it("NEGATIVE CONTROL: no log entry carries the link token (the customer's bearer credential)", () => {
       expect(linkToken.length).toBeGreaterThanOrEqual(32);
       const leaks = entriesContaining(windows.publicInvoiceLink.entries, [linkToken, encodeURIComponent(linkToken)]);
-      // Exactly the one access line LoggingInterceptor writes for this GET, and
-      // nothing else: no service, guard or filter logs the token.
-      expect(leaks.map((e) => e.channel)).toEqual(['Logger#debug[HTTP]']);
-      expect(leaks[0].text).toMatch(new RegExp(`^GET /commerce/public/invoice-link/${linkToken.replace(/[-]/g, '\\-')} 200 \\d+ms \\[`));
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    it("the window's access line is the route pattern, the status, the duration and the correlation id", () => {
+      const lines = windows.publicInvoiceLink.entries.filter((e) => e.channel.endsWith('[HTTP]'));
+      expect(lines.map((e) => e.channel)).toEqual(['Logger#debug[HTTP]']);
+      expect(lines[0].text).toMatch(/^GET \/commerce\/public\/invoice-link\/:token 200 \d+ms \[[^\]\s]+\]$/);
+    });
+  });
+
+  describe('GET /commerce/public/invoice-link/:token?code=... (a credential-shaped query on the same route)', () => {
+    it('the window ran the real flow: 200, and the spy saw the access line', () => {
+      expect(windows.publicInvoiceLinkQuery.status).toEqual([200]);
+      expect(accessLines(windows.publicInvoiceLinkQuery.entries, 'GET', LINK_ROUTE).length).toBe(1);
+    });
+
+    it('NEGATIVE CONTROL: no log entry carries the query secret, or the link token', () => {
+      const leaks = entriesContaining(windows.publicInvoiceLinkQuery.entries, [
+        QUERY_SECRET,
+        encodeURIComponent(QUERY_SECRET),
+        linkToken,
+        encodeURIComponent(linkToken),
+      ]);
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    it('the access line carries no query string at all', () => {
+      const lines = windows.publicInvoiceLinkQuery.entries.filter((e) => e.channel.endsWith('[HTTP]'));
+      expect(lines.map((e) => e.channel)).toEqual(['Logger#debug[HTTP]']);
+      expect(lines[0].text).toMatch(/^GET \/commerce\/public\/invoice-link\/:token 200 \d+ms \[[^\]\s]+\]$/);
+      expect(lines[0].text).not.toContain('?');
+    });
+  });
+
+  describe('GET /commerce/public/invoice-link/:token answering 500 (an unhandled error on the token route)', () => {
+    it('the window ran the real route: the injected error answered 500', () => {
+      expect(windows.publicInvoiceLink500.status).toEqual([500]);
+    });
+
+    // RED on the V1-83 tests-first commit at bb6b86d4: the 500 line logged
+    // request.url (http-exception.filter.ts:65), and so did the access line's
+    // error branch (logging.interceptor.ts:32).
+    it('NEGATIVE CONTROL: no log entry carries the link token', () => {
+      const leaks = entriesContaining(windows.publicInvoiceLink500.entries, [linkToken, encodeURIComponent(linkToken)]);
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    it('the GlobalHttpExceptionFilter line names the route pattern', () => {
+      const lines = windows.publicInvoiceLink500.entries.filter((e) => e.channel === 'Logger#error[GlobalHttpExceptionFilter]');
+      expect(lines).toHaveLength(1);
+      expect(lines[0].text).toMatch(/^Unhandled exception on GET \/commerce\/public\/invoice-link\/:token \[[^\]\s]+\]/);
+    });
+
+    it("the access line's error branch names the route pattern", () => {
+      const lines = windows.publicInvoiceLink500.entries.filter((e) => e.channel === 'Logger#error[HTTP]');
+      expect(lines).toHaveLength(1);
+      expect(lines[0].text).toMatch(new RegExp(`^GET /commerce/public/invoice-link/:token ERR \\d+ms \\[[^\\]\\s]+\\] ${INJECTED_500}$`));
+    });
+
+    it('the newest error-registry http entry is labelled by the route pattern', () => {
+      expect(registryAfter500).toEqual({ label: `GET ${LINK_ROUTE}`, message: INJECTED_500 });
     });
   });
 });
@@ -848,16 +937,23 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
 // 1b. The req.url leak is a class: platform secrets, and the 500 line (no database)
 // ===========================================================================
 
-describe('the HTTP access line and the 500 line log request.url: platform secrets in paths and queries (IA-044 scope)', () => {
+describe('the HTTP access line and the 500 line log the route pattern, never request.url: platform secrets in paths and queries (IA-044 scope)', () => {
   // Literals only: none of these is a real credential.
   const CHATWOOT_SECRET = `${P}chatwoot-webhook-secret-0001`;
   const VERIFY_TOKEN = `${P}whatsapp-verify-token-0001`;
   const OAUTH_CODE = `${P}oauth-code-0001`;
   const LINK_TOKEN = `${P}link-token-0001`;
   const CORRELATION = `${P}corr`;
+  /** What a request no route matched carries: a secret in its path and one in its query. */
+  const UNROUTED_PATH_SECRET = `${P}unrouted-path-secret-0001`;
+  const UNROUTED_QUERY_SECRET = `${P}unrouted-query-secret-0001`;
+  const UNROUTED_URL = `/${P}nowhere/${UNROUTED_PATH_SECRET}?${P}q=${UNROUTED_QUERY_SECRET}`;
+  /** What the access line and the 500 line name when Express matched no route. */
+  const UNROUTED = '<unrouted>';
 
   let LoggingInterceptorClass: typeof import('../src/core/interceptors/logging.interceptor').LoggingInterceptor;
   let ExceptionFilterClass: typeof import('../src/core/filters/http-exception.filter').GlobalHttpExceptionFilter;
+  let registry: typeof import('../src/core/observability/error-registry').errorRegistry;
 
   /** The slice of an Express response the filter writes to. */
   interface FakeResponse {
@@ -868,17 +964,38 @@ describe('the HTTP access line and the 500 line log request.url: platform secret
   beforeAll(async () => {
     ({ LoggingInterceptor: LoggingInterceptorClass } = await import('../src/core/interceptors/logging.interceptor'));
     ({ GlobalHttpExceptionFilter: ExceptionFilterClass } = await import('../src/core/filters/http-exception.filter'));
+    ({ errorRegistry: registry } = await import('../src/core/observability/error-registry'));
   });
+
+  /** The label the error registry holds for the 500 whose message is `message` (null when none). */
+  function registryLabel(message: string): string | null {
+    return registry.snapshot(200).entries.find((e) => e.source === 'http' && e.message === message)?.label ?? null;
+  }
+
+  /** The request Express hands a handler: `route.path` is set only when a route matched. */
+  function fakeRequest(method: string, url: string, routePath?: string): Record<string, unknown> {
+    const req: Record<string, unknown> = { method, url, originalUrl: url, path: url.split('?')[0], correlationId: CORRELATION };
+    if (routePath !== undefined) req.route = { path: routePath };
+    return req;
+  }
+
+  const escapeRe = (s: string) => s.replace(/[.*?+^$()[\]\\|{}]/g, '\\$&');
+
+  /** Each leaking entry on its own line, in full, for the failure message. */
+  const describeEntries = (entries: LogEntry[]) => entries.map((e) => `${e.channel}: ${e.text}`).join('\n');
 
   function http(req: Record<string, unknown>, res: unknown): ExecutionContext & ArgumentsHost {
     return { switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }) } as unknown as ExecutionContext & ArgumentsHost;
   }
 
-  /** One request through the production LoggingInterceptor; `error` makes the handler throw it. */
-  async function throughInterceptor(method: string, url: string, statusCode: number, error?: Error): Promise<LogEntry[]> {
+  /**
+   * One request through the production LoggingInterceptor; `error` makes the
+   * handler throw it. `routePath` is the pattern Express matched (absent: no route).
+   */
+  async function throughInterceptor(method: string, url: string, statusCode: number, error?: Error, routePath?: string): Promise<LogEntry[]> {
     const cap = startCapture();
     try {
-      const ctx = http({ method, url, correlationId: CORRELATION }, { statusCode });
+      const ctx = http(fakeRequest(method, url, routePath), { statusCode });
       const next: CallHandler = { handle: () => (error ? throwError(() => error) : of({ ok: true })) };
       await lastValueFrom(new LoggingInterceptorClass().intercept(ctx, next)).catch(() => undefined);
     } finally {
@@ -887,8 +1004,8 @@ describe('the HTTP access line and the 500 line log request.url: platform secret
     return cap.entries;
   }
 
-  /** One exception through the production GlobalHttpExceptionFilter. */
-  function throughFilter(method: string, url: string, exception: unknown): { entries: LogEntry[]; status: number } {
+  /** One exception through the production GlobalHttpExceptionFilter. `routePath` as for throughInterceptor. */
+  function throughFilter(method: string, url: string, exception: unknown, routePath?: string): { entries: LogEntry[]; status: number } {
     const cap = startCapture();
     let status = 0;
     try {
@@ -899,56 +1016,103 @@ describe('the HTTP access line and the 500 line log request.url: platform secret
         },
         json: () => res,
       };
-      new ExceptionFilterClass().catch(exception, http({ method, url, correlationId: CORRELATION }, res));
+      new ExceptionFilterClass().catch(exception, http(fakeRequest(method, url, routePath), res));
     } finally {
       cap.stop();
     }
     return { entries: cap.entries, status };
   }
 
-  /** Mounted public routes whose URL carries a platform secret. */
+  /**
+   * Mounted public routes whose URL carries a platform secret, with the route
+   * pattern Express sets on req.route.path when the route matches.
+   */
   const FLOWS = [
     // apps/server/src/modules/chatwoot/chatwoot.controller.ts:14, POST /chatwoot/webhook/:secret
-    { name: 'the Chatwoot webhook secret in the path', method: 'POST', url: `/chatwoot/webhook/${CHATWOOT_SECRET}`, status: 202, secret: CHATWOOT_SECRET },
+    { name: 'the Chatwoot webhook secret in the path', method: 'POST', url: `/chatwoot/webhook/${CHATWOOT_SECRET}`, route: '/chatwoot/webhook/:secret', status: 202, secret: CHATWOOT_SECRET },
     // apps/server/src/modules/whatsapp/whatsapp.controller.ts:234-237, WHATSAPP_VERIFY_TOKEN in hub.verify_token
-    { name: 'WHATSAPP_VERIFY_TOKEN in the query', method: 'GET', url: `/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=${VERIFY_TOKEN}&hub.challenge=1234`, status: 200, secret: VERIFY_TOKEN },
+    { name: 'WHATSAPP_VERIFY_TOKEN in the query', method: 'GET', url: `/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=${VERIFY_TOKEN}&hub.challenge=1234`, route: '/whatsapp/webhook', status: 200, secret: VERIFY_TOKEN },
     // apps/server/src/modules/google-drive/google-drive.controller.ts:26, an OAuth authorization code
-    { name: 'an OAuth code on a callback', method: 'GET', url: `/drive/callback?state=${P}state&code=${OAUTH_CODE}`, status: 302, secret: OAUTH_CODE },
+    { name: 'an OAuth code on a callback', method: 'GET', url: `/drive/callback?state=${P}state&code=${OAUTH_CODE}`, route: '/drive/callback', status: 302, secret: OAUTH_CODE },
   ];
 
-  it.todo(
-    'NEGATIVE CONTROL: no HTTP access line carries a platform secret in the path or query (Chatwoot webhook secret, hub.verify_token, OAuth code) — ' +
-      'fix outside the write set: apps/server/src/core/interceptors/logging.interceptor.ts:22 and :32 log req.url',
-  );
-
-  it.todo(
-    'NEGATIVE CONTROL: no 500 line carries a token in the URL — fix outside the write set: ' +
-      'apps/server/src/core/filters/http-exception.filter.ts:65 logs request.url (a fix to LoggingInterceptor alone leaves it open)',
-  );
-
-  it('CHARACTERIZATION (open finding IA-044, logging.interceptor.ts:22): the success access line carries each platform secret verbatim', async () => {
+  // RED on the V1-83 tests-first commit at bb6b86d4: the access line was
+  // built from req.url (logging.interceptor.ts:22, emitted at :26 debug and
+  // :32 error), and the 500 line logged request.url
+  // (http-exception.filter.ts:65), so each secret reached all three.
+  it('NEGATIVE CONTROL: no HTTP access line carries a platform secret in the path or query (Chatwoot webhook secret, hub.verify_token, OAuth code): the success line, the 403 error line and the 500 line name the route pattern', async () => {
+    const runs = [];
     for (const flow of FLOWS) {
-      const entries = await throughInterceptor(flow.method, flow.url, flow.status);
-      const leaks = entriesContaining(entries, [flow.secret]);
-      expect(leaks.map((e) => e.channel), flow.name).toEqual(['Logger#debug[HTTP]']);
-      expect(leaks[0].text, flow.name).toMatch(new RegExp(`^${flow.method} ${flow.url.replace(/[.*?+^$()[\]\\|{}]/g, '\\$&')} ${flow.status} \\d+ms \\[${CORRELATION}\\]$`));
+      const success = await throughInterceptor(flow.method, flow.url, flow.status, undefined, flow.route);
+      const refused = await throughInterceptor(flow.method, flow.url, 403, new ForbiddenException('Invalid verify token'), flow.route);
+      const unhandledMessage = `v40a unhandled on ${flow.route}`;
+      const unhandled = throughFilter(flow.method, flow.url, new Error(unhandledMessage), flow.route);
+      runs.push({ flow, success, refused, unhandled, unhandledMessage });
+    }
+
+    // Every flow's leaks first, so a failure names each secret on each surface.
+    const leaks = runs.flatMap(({ flow, success, refused, unhandled, unhandledMessage }) =>
+      entriesContaining(
+        [...success, ...refused, ...unhandled.entries, { channel: 'errorRegistry[http].label', text: registryLabel(unhandledMessage) ?? '' }],
+        [flow.secret, encodeURIComponent(flow.secret)],
+      ),
+    );
+    expect(leaks, describeEntries(leaks)).toEqual([]);
+
+    for (const { flow, success, refused, unhandled, unhandledMessage } of runs) {
+      expect(success.map((e) => e.channel), flow.name).toEqual(['Logger#debug[HTTP]']);
+      expect(success[0].text, flow.name).toMatch(new RegExp(`^${flow.method} ${escapeRe(flow.route)} ${flow.status} \\d+ms \\[${CORRELATION}\\]$`));
+
+      expect(refused.map((e) => e.channel), flow.name).toEqual(['Logger#error[HTTP]']);
+      expect(refused[0].text, flow.name).toMatch(new RegExp(`^${flow.method} ${escapeRe(flow.route)} ERR \\d+ms \\[${CORRELATION}\\] Invalid verify token$`));
+
+      expect(unhandled.status, flow.name).toBe(500);
+      expect(unhandled.entries.map((e) => e.channel), flow.name).toEqual(['Logger#error[GlobalHttpExceptionFilter]']);
+      expect(unhandled.entries[0].text.startsWith(`Unhandled exception on ${flow.method} ${flow.route} [${CORRELATION}]`), flow.name).toBe(true);
+      expect(registryLabel(unhandledMessage), flow.name).toBe(`${flow.method} ${flow.route}`);
     }
   });
 
-  it('CHARACTERIZATION (logging.interceptor.ts:32): the error access line carries it too (a refused hub.verify_token, 403)', async () => {
-    const flow = FLOWS[1];
-    const entries = await throughInterceptor(flow.method, flow.url, 403, new ForbiddenException('Invalid verify token'));
-    const leaks = entriesContaining(entries, [flow.secret]);
-    expect(leaks.map((e) => e.channel)).toEqual(['Logger#error[HTTP]']);
-    expect(leaks[0].text.startsWith(`${flow.method} ${flow.url} ERR `)).toBe(true);
-  });
-
-  it('CHARACTERIZATION (open finding IA-044, http-exception.filter.ts:65): an unhandled error on a token route logs the URL with the token', () => {
-    const { entries, status } = throughFilter('GET', `/commerce/public/invoice-link/${LINK_TOKEN}`, new Error('db down'));
+  // RED on the V1-83 tests-first commit at bb6b86d4: http-exception.filter.ts:65
+  // logged request.url (a fix to LoggingInterceptor alone left it open).
+  it('NEGATIVE CONTROL: no 500 line carries a token in the URL: the filter names the route pattern, and so does its registry label', () => {
+    const message = 'v40a unhandled on the token route';
+    const { entries, status } = throughFilter('GET', `/commerce/public/invoice-link/${LINK_TOKEN}`, new Error(message), '/commerce/public/invoice-link/:token');
     expect(status).toBe(500);
     const leaks = entriesContaining(entries, [LINK_TOKEN]);
-    expect(leaks.map((e) => e.channel)).toEqual(['Logger#error[GlobalHttpExceptionFilter]']);
-    expect(leaks[0].text.startsWith(`Unhandled exception on GET /commerce/public/invoice-link/${LINK_TOKEN} [${CORRELATION}]`)).toBe(true);
+    expect(leaks, describeEntries(leaks)).toEqual([]);
+    expect(entries.map((e) => e.channel)).toEqual(['Logger#error[GlobalHttpExceptionFilter]']);
+    expect(entries[0].text.startsWith(`Unhandled exception on GET /commerce/public/invoice-link/:token [${CORRELATION}]`)).toBe(true);
+    expect(registryLabel(message)).toBe('GET /commerce/public/invoice-link/:token');
+  });
+
+  // RED on the V1-83 tests-first commit at bb6b86d4: with no req.route the
+  // access line and the 500 line logged the raw URL, and the registry label
+  // fell back to request.url (http-exception.filter.ts:77).
+  it('NEGATIVE CONTROL: a request no route matched logs neither its path nor its query: the access line, the 500 line and the registry label name <unrouted>', async () => {
+    const needles = [UNROUTED_PATH_SECRET, UNROUTED_QUERY_SECRET, `${P}nowhere`];
+    const success = await throughInterceptor('GET', UNROUTED_URL, 200);
+    const failed = await throughInterceptor('GET', UNROUTED_URL, 500, new Error('v40a unrouted failure'));
+    const message = 'v40a unhandled with no route';
+    const unhandled = throughFilter('GET', UNROUTED_URL, new Error(message));
+
+    const leaks = entriesContaining(
+      [...success, ...failed, ...unhandled.entries, { channel: 'errorRegistry[http].label', text: registryLabel(message) ?? '' }],
+      needles,
+    );
+    expect(leaks, describeEntries(leaks)).toEqual([]);
+
+    expect(success.map((e) => e.channel)).toEqual(['Logger#debug[HTTP]']);
+    expect(success[0].text).toMatch(new RegExp(`^GET ${escapeRe(UNROUTED)} 200 \\d+ms \\[${CORRELATION}\\]$`));
+    expect(failed.map((e) => e.channel)).toEqual(['Logger#error[HTTP]']);
+    expect(failed[0].text).toMatch(new RegExp(`^GET ${escapeRe(UNROUTED)} ERR \\d+ms \\[${CORRELATION}\\] v40a unrouted failure$`));
+
+    expect(unhandled.status).toBe(500);
+    expect(unhandled.entries.map((e) => e.channel)).toEqual(['Logger#error[GlobalHttpExceptionFilter]']);
+    expect(unhandled.entries[0].text.startsWith(`Unhandled exception on GET ${UNROUTED} [${CORRELATION}]`)).toBe(true);
+    const label = registryLabel(message);
+    expect(label).toBe(`GET ${UNROUTED}`);
+    for (const needle of needles) expect(label ?? '').not.toContain(needle);
   });
 
   it('the filter writes the URL only on the 500 branch: a 4xx on the same route logs nothing', () => {
