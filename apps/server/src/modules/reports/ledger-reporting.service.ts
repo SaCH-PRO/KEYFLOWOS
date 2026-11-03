@@ -239,6 +239,17 @@ export class LedgerReportingService {
    *    bill) and its signed amounts offset the original's. The traced
    *    composition is the document's own postings, never their
    *    reversals, so a voided bill still allocates its payment.
+   *  • A partial refund (V1-81, FOLLOW3-A7 item 8): the REFUND transaction
+   *    RevenuePostingService.onPaymentRefunded posts for a refund that
+   *    leaves part of a payment (sourceType 'Payment', no reversalOfId;
+   *    Dr AR / Cr cash on ACCRUAL) is a collection given back: its cash
+   *    out is negative income traced to the invoice and an operating
+   *    outflow. Its REVERSAL (the refund completed: the recording is
+   *    reversed, and each partial with it) cancels it: income back, and
+   *    the refund's outflow taken back rather than a new inflow, so the
+   *    completed refund reads in = out = the payment (PRD-12) and each
+   *    period keeps its own side. On CASH basis the REFUND is Dr REVENUE /
+   *    Cr cash and takes the direct branch, as before.
    */
   private async computeCashBasisPnl(
     businessId: string,
@@ -267,9 +278,12 @@ export class LedgerReportingService {
       take: READ_PAGE,
       select: {
         id: true,
+        type: true,
         sourceType: true,
         sourceId: true,
         reversalOfId: true,
+        // V1-81: a REVERSAL of a partial REFUND cancels the refund, not the collection.
+        reversalOf: { select: { type: true } },
         entries: {
           select: {
             accountId: true,
@@ -292,9 +306,12 @@ export class LedgerReportingService {
       name: string,
       systemKey: string | null,
       delta: number,
+      takesBackOutflow = false,
     ) => {
       const cur = opCash.get(accountId) ?? { name, systemKey, inflow: 0, outflow: 0 };
-      if (delta > 0) cur.inflow += delta;
+      // V1-81: a reversed refund takes its outflow back (cash in reduces the outflow).
+      if (takesBackOutflow) cur.outflow -= delta;
+      else if (delta > 0) cur.inflow += delta;
       else cur.outflow += -delta;
       opCash.set(accountId, cur);
     };
@@ -391,11 +408,11 @@ export class LedgerReportingService {
         if (sk === 'ACCOUNTS_PAYABLE') touchesAP = true;
       }
 
-      const recordOperatingCash = () => {
+      const recordOperatingCash = (takesBackOutflow = false) => {
         for (const ce of cashEntries) {
           const delta = toNum(ce.debit) - toNum(ce.credit);
           if (Math.abs(delta) < 0.005) continue;
-          addOpCash(ce.accountId, ce.account.name, ce.account.systemKey, delta);
+          addOpCash(ce.accountId, ce.account.name, ce.account.systemKey, delta, takesBackOutflow);
         }
       };
 
@@ -411,9 +428,16 @@ export class LedgerReportingService {
       // A REVERSAL mirrors its original, so its cash moves the other way;
       // the allocations below are signed and offset the original's.
       const settlementSign = t.reversalOfId ? -1 : 1;
+      // V1-81 (FOLLOW3-A7 item 8): on the AR side a partial REFUND of a
+      // payment gives cash back (sign -1, like a reversed collection), and
+      // the REVERSAL of such a REFUND cancels it (sign +1, the refund's
+      // outflow taken back). The AP branch keeps settlementSign as it was.
+      const refundOfPayment = t.type === 'REFUND' && !t.reversalOfId;
+      const reversesRefund = !!t.reversalOfId && t.reversalOf?.type === 'REFUND';
+      const arSign = reversesRefund ? 1 : refundOfPayment ? -1 : settlementSign;
 
       // Customer payment settling AR — trace to invoice and allocate.
-      if (touchesAR && settlementSign * cashEffect > 0 && t.sourceType === 'Payment' && t.sourceId) {
+      if (touchesAR && arSign * cashEffect > 0 && t.sourceType === 'Payment' && t.sourceId) {
         const invoiceId = paymentToInvoice.get(t.sourceId);
         if (!invoiceId) continue;
         const lines = (sourceByKey.get(`Invoice:${invoiceId}`) ?? [])
@@ -425,7 +449,7 @@ export class LedgerReportingService {
           const lineAmt = toNum(e.credit) - toNum(e.debit);
           add(income, e.accountId, e.account.name, e.account.systemKey, cashEffect * (lineAmt / total));
         }
-        recordOperatingCash();
+        recordOperatingCash(reversesRefund);
         continue;
       }
 
@@ -462,7 +486,8 @@ export class LedgerReportingService {
         outflow: +v.outflow.toFixed(2),
         net: +(v.inflow - v.outflow).toFixed(2),
       }))
-      .filter((r) => r.inflow >= 0.005 || r.outflow >= 0.005);
+      // Absolute: a reversed refund alone in a period reads as a negative outflow (V1-81).
+      .filter((r) => Math.abs(r.inflow) >= 0.005 || Math.abs(r.outflow) >= 0.005);
     const operatingCashIn = +operatingCashByAccount.reduce((s, r) => s + r.inflow, 0).toFixed(2);
     const operatingCashOut = +operatingCashByAccount.reduce((s, r) => s + r.outflow, 0).toFixed(2);
 
