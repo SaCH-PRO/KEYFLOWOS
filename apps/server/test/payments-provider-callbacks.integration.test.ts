@@ -661,7 +661,8 @@ describe('V1-05: a WiPay callback settles nothing without a keyed proof (D-19)',
     const ok = await wipay(q);
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     expect(ok.body).toMatchObject({ success: true, invoiceId: ID.storeOrder });
-    expect(storeOrders.updatePaymentStatus.mock.calls).toEqual([[ID.storeOrder, 'PAID', txn]]);
+    // Trial-N review G6ML-3: the settlement names its provider (the door posts it to PAYMENT_PROCESSOR, not CASH).
+    expect(storeOrders.updatePaymentStatus.mock.calls).toEqual([[ID.storeOrder, 'PAID', txn, 'wipay']]);
 
     const replay = await wipay(q);
     expect(replay.body).toMatchObject({ success: true, message: 'Duplicate callback ignored' });
@@ -930,5 +931,148 @@ describe('V1-05: the ledger', () => {
       }
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('trial-N review: the storefront provider checkouts and settlements fail closed', () => {
+  /** The provider requests the checkouts made (global fetch stubbed; no network). */
+  let providerRequests: Array<{ url: string; body: string }> = [];
+  let fetchSpy: ReturnType<typeof vi.spyOn> | undefined;
+  const STRIPE_SESSION_URL = 'https://checkout.stripe.v05a.test/session';
+
+  beforeEach(() => {
+    providerRequests = [];
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: any, init?: any) => {
+      const url = String(input?.url ?? input);
+      const host = new URL(url).host;
+      providerRequests.push({ url, body: String(init?.body ?? '') });
+      if (host.endsWith('wipayfinancial.com')) return new Response('OK', { status: 200 });
+      if (host === 'api.stripe.com') {
+        return new Response(JSON.stringify({ id: `${P}cs_store`, url: STRIPE_SESSION_URL }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`v05a: unexpected network call to ${url}`);
+    }) as typeof fetch);
+  });
+
+  afterEach(() => {
+    fetchSpy?.mockRestore();
+  });
+
+  function gatewaysOf(invoiceId: string) {
+    return agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(invoiceId))}/gateways`);
+  }
+
+  function wipayCheckout(invoiceId: string) {
+    return agent()
+      .post(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(invoiceId))}/checkout`)
+      .send({ gateway: 'wipay', returnUrl: RETURN_URL });
+  }
+
+  it('PC-12 (G6PUB-SEC-5, V05-SEC-3): the storefront WiPay checkout refuses a return URL off the platform origin, and a missing one, with 400 before WiPay is called', async () => {
+    for (const returnUrl of ['https://evil.v05a.test/collect', 'javascript:alert(1)', undefined]) {
+      // At 2db133a4: REDIRECT with return_url=<the caller's URL> (WiPay hands its keyed proof there).
+      await expect(
+        payments.createStorePayment({ orderId: ID.storeOrder, amount: STORE_TOTAL, currency: 'TTD', method: 'WIPAY', businessId: ID.bizKeyed, returnUrl }),
+        String(returnUrl),
+      ).rejects.toThrow('Invalid return URL');
+    }
+    expect(providerRequests).toEqual([]);
+    // Control: the platform's own return URL is accepted.
+    const ok = await payments.createStorePayment({ orderId: ID.storeOrder, amount: STORE_TOTAL, currency: 'TTD', method: 'WIPAY', businessId: ID.bizKeyed, returnUrl: RETURN_URL });
+    expect(ok.status).toBe('REDIRECT');
+    expect(new URLSearchParams(providerRequests[0].body).get('return_url')).toBe(RETURN_URL);
+  });
+
+  it('PC-13 (NEW-1, CR-V05-6): no WiPay key verifies a business with its own WiPay account and no key of its own, so WiPay is not offered and its checkouts are refused (400) before WiPay is called', async () => {
+    for (const platformKey of [PLATFORM_KEY, undefined]) {
+      if (platformKey) process.env.WIPAY_API_KEY = platformKey;
+      try {
+        await clearRateLimits();
+        const gateways = await gatewaysOf(ID.invOwnAccount);
+        expect(gateways.status, JSON.stringify(gateways.body)).toBe(200);
+        // At 2db133a4: ['wipay'] (with the platform key a live checkout into the merchant's account follows; its callback is always refused).
+        expect(gateways.body.map((g: { id: string }) => g.id), `platform key ${platformKey ?? 'unset'}`).not.toContain('wipay');
+
+        const res = await wipayCheckout(ID.invOwnAccount);
+        expect(res.status, `platform key ${platformKey ?? 'unset'}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect(res.body.message).toBe('WiPay is not configured for this business: no WiPay API key to verify its payments');
+        await expect(
+          payments.createStorePayment({ orderId: `${P}store_own_account`, amount: 10, currency: 'TTD', method: 'WIPAY', businessId: ID.bizOwnAccount, returnUrl: RETURN_URL }),
+        ).rejects.toThrow('WiPay is not configured for this business: no WiPay API key to verify its payments');
+      } finally {
+        delete process.env.WIPAY_API_KEY;
+      }
+    }
+    expect(providerRequests).toEqual([]);
+    expect(await rowsOf(ID.invOwnAccount)).toEqual([]);
+
+    // Control: a business whose own key verifies its callbacks is offered WiPay.
+    await clearRateLimits();
+    const keyed = await gatewaysOf(ID.invCheckout);
+    expect(keyed.body.map((g: { id: string }) => g.id)).toContain('wipay');
+  });
+
+  it("PC-14 (G6PUB-SEC-2): a storefront order the marketplace route cancelled ('cancelled') gets no provider checkout", async () => {
+    const cancelledId = `${P}storeCancelled`;
+    await db.marketplaceOrder.create({
+      data: {
+        id: cancelledId,
+        businessId: ID.bizKeyed,
+        orderNumber: `${P}SO-0002`,
+        customerName: 'V05A Store Customer',
+        customerEmail: `${P}store@test.local`,
+        subtotal: STORE_TOTAL,
+        total: STORE_TOTAL,
+        currency: 'TTD',
+        status: 'cancelled',
+        type: 'STOREFRONT',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'WIPAY',
+      },
+    });
+    // At 2db133a4: a WiPay redirect for the cancelled order.
+    await expect(
+      payments.createGenericCheckout({ payableType: 'storefront_order', payableId: cancelledId, gateway: 'wipay', returnUrl: RETURN_URL }),
+    ).rejects.toThrow('Storefront order is already paid or cancelled');
+    expect(providerRequests).toEqual([]);
+  });
+
+  it("PC-15 (G6PUB-SEC-4): the storefront PayPal order is made in the order's own currency, and a CAPTURE.COMPLETED settles a storefront order only for its total in its currency, naming PayPal (G6ML-3)", async () => {
+    paypalOrders.createOrder.mockClear();
+    const created = await payments.createStorePayment({ orderId: ID.storeOrder, amount: STORE_TOTAL, currency: 'TTD', method: 'PAYPAL', businessId: ID.bizKeyed });
+    expect(created.paymentId).toBeTruthy();
+    const units = (paypalOrders.createOrder.mock.calls[0] as any[])[0].body.purchaseUnits;
+    // At 2db133a4: currencyCode 'USD' for a TTD order.
+    expect(units.map((u: any) => `${u.customId}:${u.amount.value}:${u.amount.currencyCode}`)).toEqual([`${ID.storeOrder}:${STORE_TOTAL.toFixed(2)}:TTD`]);
+
+    storeOrders.updatePaymentStatus.mockClear();
+    // A capture of another amount, and one in another currency, naming the storefront order (PayPal orders can be made client-side).
+    const short = await captureWebhook(`${P}WH_store_short`, `${P}cap_store_short`, ID.storeOrder, '0.01', 'TTD');
+    const usd = await captureWebhook(`${P}WH_store_usd`, `${P}cap_store_usd`, ID.storeOrder, STORE_TOTAL.toFixed(2), 'USD');
+    expect(short.status, JSON.stringify(short.body)).toBe(201);
+    expect(usd.status, JSON.stringify(usd.body)).toBe(201);
+    // At 2db133a4: updatePaymentStatus(order, 'PAID', <capture>) for each, so the order total is booked for 0.01 TTD and for USD.
+    expect(storeOrders.updatePaymentStatus).not.toHaveBeenCalled();
+
+    const ok = await captureWebhook(`${P}WH_store_ok`, `${P}cap_store_ok`, ID.storeOrder, STORE_TOTAL.toFixed(2), 'TTD');
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(storeOrders.updatePaymentStatus.mock.calls).toEqual([[ID.storeOrder, 'PAID', `${P}cap_store_ok`, 'paypal']]);
+  });
+
+  it('PC-16 (G6ML-4): the storefront Stripe checkout answers its session and writes no PENDING payment naming the order as an invoice', async () => {
+    const previous = process.env.STRIPE_SECRET_KEY;
+    process.env.STRIPE_SECRET_KEY = `${P}sk_test`;
+    try {
+      // At 2db133a4: P2003 (payments.invoice_id references invoices) after the Stripe session was created: every storefront Stripe checkout fails.
+      const result = await payments.createStorePayment({ orderId: ID.storeOrder, amount: STORE_TOTAL, currency: 'TTD', method: 'STRIPE', businessId: ID.bizKeyed, returnUrl: RETURN_URL });
+      expect(result).toEqual({ paymentId: `${P}cs_store`, status: 'REDIRECT', redirectUrl: STRIPE_SESSION_URL });
+    } finally {
+      if (previous === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = previous;
+    }
+    const sent = new URLSearchParams(providerRequests.find((r) => r.url.includes('api.stripe.com'))!.body);
+    expect(sent.get('client_reference_id')).toBe(ID.storeOrder);
+    expect(sent.get('line_items[0][price_data][currency]')).toBe('ttd');
+    expect(await db.payment.count({ where: { OR: [{ invoiceId: ID.storeOrder }, { providerPaymentId: `${P}cs_store` }] } })).toBe(0);
   });
 });

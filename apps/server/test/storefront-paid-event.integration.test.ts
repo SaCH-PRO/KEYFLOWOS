@@ -57,15 +57,26 @@
  *           {status:'paid'} do) has no invoice and no payment: its paid event
  *           writes no invoice and tells nobody it was paid (no notification,
  *           no paid timeline event), also when the event names another order's
- *           checkout invoice. The marketplace routes themselves are outside
- *           this packet (it.todo below)
+ *           checkout invoice. The marketplace routes themselves refuse it
+ *           since the trial-N review (V18-10)
  *   V18-09  the order cross-links reader finds completeCheckout's invoice
  *           (INV-<orderNumber>, no notes marker) as the order's revenue
  *
- * Outside the V1-18 write set (it.todo, follow-up packets): the marketplace
- * routes that set a storefront order PAID without completeCheckout, the
- * store_order.paid listeners that do not read the stored payment status, and
- * CASH / MANUAL storefront completion (V1-33).
+ * Trial-N integration review (G6PUB-SEC-3, NEW-2, G6ML-1, G6ML-3):
+ *
+ *   V18-10  the marketplace routes (fulfil mark_paid, PATCH .../status with
+ *           status paid or paymentStatus PAID) refuse a STOREFRONT order with
+ *           400: it is paid only through completeCheckout (a provider
+ *           settlement or the offline completion). Nothing is written and no
+ *           store_order.paid is emitted. Controls: a fulfilment status still
+ *           moves, and a STANDARD order is still marked paid there
+ *   V18-11  a provider settlement through updatePaymentStatus names its
+ *           provider, so the payment is that provider's and its deposit leg is
+ *           PAYMENT_PROCESSOR (it was unknown:unknown, posted to CASH)
+ *
+ * Still open (it.todo): the store_order.paid listeners that do not read the
+ * stored payment status (for a STANDARD order), and the web caller of the
+ * CASH / MANUAL offline completion (V1-33).
  *
  * Nothing on the money path is mocked: PrismaService, StoreOrderService
  * (createOrder's server-side pricing, completeCheckout's transaction),
@@ -261,6 +272,8 @@ beforeAll(async () => {
   const { CommerceIntegrationService } = await import('../src/modules/marketplace/commerce-integration.service');
   const { ExpensesService } = await import('../src/modules/expenses/expenses.service');
   const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
+  const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
+  const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
   storedBalanceFn = workflowMod.balanceOfStoredRows;
 
   const crmStub = {
@@ -296,6 +309,9 @@ beforeAll(async () => {
       { provide: InventoryRiskService, useValue: { evaluateProduct: async () => null } },
       { provide: ExpensesService, useValue: { createExpense: async () => null } },
       { provide: TransactionalEmailService, useValue: {} },
+      // The marketplace order routes' service (V18-10): real, over the same rows and bus.
+      MarketplaceService,
+      FulfillmentRoutingService,
     ],
   }).compile();
 
@@ -555,13 +571,65 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     expect(links.margin).toBe(ORDER_TOTAL);
   });
 
+  it('V18-10 (V18-T1; trial-N review G6PUB-SEC-3, NEW-2, G6ML-1) the marketplace routes cannot set a STOREFRONT order paid: mark_paid and PATCH status paid / paymentStatus PAID are refused (400); nothing written, no store_order.paid', async () => {
+    const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
+    const market = app.get(MarketplaceService);
+    const order = await placeOrder('CASH');
+    seen = [];
+    const before = await counts();
+
+    // At 2db133a4: paid/PAID with no invoice, payment or posting, and store_order.paid emitted (offline completion then no-ops).
+    await expect(market.fulfillOrder(ID.biz, order.id, 'mark_paid', {}), 'POST .../fulfill mark_paid').rejects.toThrow(/storefront order/i);
+    await expect(market.updateOrderStatus(ID.biz, order.id, 'paid', { status: 'paid', paymentStatus: 'PAID' }), 'PATCH status paid + PAID').rejects.toThrow(/storefront order/i);
+    await expect(market.updateOrderStatus(ID.biz, order.id, 'paid', { status: 'paid' }), 'PATCH status paid').rejects.toThrow(/storefront order/i);
+    await expect(market.updateOrderStatus(ID.biz, order.id, 'CONFIRMED', { status: 'CONFIRMED', paymentStatus: 'paid' }), 'PATCH paymentStatus paid').rejects.toThrow(/storefront order/i);
+    await settle();
+
+    const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+    expect(`${stored.status}/${stored.paymentStatus}`).toBe('PENDING/PENDING');
+    expect(storeEvents(), 'no store_order.paid').not.toContain('store_order.paid');
+    expect(await invoicesOf(order)).toEqual([]);
+    expect(await counts(), 'no invoice, payment or posting').toEqual(before);
+
+    // Controls: a fulfilment status still moves through PATCH, and a STANDARD (marketplace) order is still marked paid there.
+    const moved = await market.updateOrderStatus(ID.biz, order.id, 'PROCESSING', { status: 'PROCESSING' });
+    expect(`${moved.status}/${moved.paymentStatus}`).toBe('PROCESSING/PENDING');
+    const standard = await db.marketplaceOrder.create({
+      data: {
+        businessId: ID.biz,
+        orderNumber: `${P}std_10`,
+        type: 'STANDARD',
+        status: 'placed',
+        paymentStatus: 'UNPAID',
+        customerName: 'Vee Eighteen',
+        customerEmail: CUSTOMER_EMAIL,
+        subtotal: ORDER_TOTAL,
+        total: ORDER_TOTAL,
+        currency: 'TTD',
+      },
+    });
+    const paidStandard = await market.updateOrderStatus(ID.biz, standard.id, 'paid', { status: 'paid', paymentStatus: 'PAID' });
+    await settle();
+    expect(`${paidStandard.status}/${paidStandard.paymentStatus}`).toBe('paid/PAID');
+  });
+
+  it('V18-11 (trial-N review G6ML-3) a provider settlement through updatePaymentStatus names its provider: the payment is that provider\'s and its deposit leg is PAYMENT_PROCESSOR, not CASH', async () => {
+    const order = await placeOrder('WIPAY');
+
+    await storeOrders.updatePaymentStatus(order.id, 'PAID', `${P}wtx_11`, 'wipay');
+    await settle();
+
+    const { payment, posting } = await expectOnePaidInvoice(order);
+    // At 2db133a4: unknown:unknown, and the money posted to CASH (till cash).
+    expect(`${payment.provider}:${payment.method}:${payment.providerPaymentId}`).toBe(`wipay:wipay:${P}wtx_11`);
+    const deposit = posting.entries.filter((e: any) => DEPOSIT_KEYS.has(e.account?.systemKey) && Number(e.debit) > 0).map((e: any) => e.account.systemKey);
+    expect(deposit).toEqual(['PAYMENT_PROCESSOR']);
+  });
+
   it.todo(
-    'V18-T1 MarketplaceService.fulfillOrder(mark_paid) and PATCH /marketplace/businesses/:id/orders/:orderId/status {status:"paid"} on a STOREFRONT order bypass completeCheckout (PAID with no invoice or payment; completeCheckout then no-ops): route through completeCheckout or refuse. marketplace.service.ts is outside the V1-18 write set (SEC-V18-2, SEC-V18-3)',
+    'V18-T2 store_order.paid listeners that do not read the stored paymentStatus (webhook-dispatcher.service.ts, revenue-event.listener.ts, store-order-routing.listener.ts). For a STOREFRONT order the marketplace emission is closed at its source (V18-10); a STANDARD order set paid by PATCH .../status without a payment still reaches them (SEC-V18-3)',
   );
   it.todo(
-    'V18-T2 store_order.paid listeners that do not read the stored paymentStatus (webhook-dispatcher.service.ts, revenue-event.listener.ts, store-order-routing.listener.ts) act on the marketplace emission for an UNPAID storefront order. Outside the V1-18 write set (SEC-V18-3)',
-  );
-  it.todo(
-    'V18-T3 CASH / MANUAL storefront orders (paymentStatus PENDING, no provider payment) have no reachable path to PAID now that CONFIRMED is not paid: offline completion through completeCheckout is V1-33 (CR-V18-3)',
+    'V18-T3 CASH / MANUAL storefront orders reach PAID through POST /site/businesses/:id/orders/:orderId/complete-offline (V1-33, V33-07..V33-11); the web has no caller yet (the store fulfillment panel offers confirm, process, ship and deliver only) (CR-V18-3)',
   );
 });

@@ -74,6 +74,14 @@
  *           WiPay failure callback chooses its providerPaymentId) carrying
  *           storefront_offline_<orderId> does not block the offline
  *           completion: the reference is server-random
+ *   V33-21  a platform SUPER_ADMIN who is not a member of the business is
+ *           refused (D-46; trial-N review G6PUB-SEC-1)
+ *   V33-22  the marketplace fulfil route's lowercase 'cancelled' / 'refunded'
+ *           are closed too (409), V33-23 its lowercase 'shipped' /
+ *           'delivered' are kept, V33-25 a checkout retry starts no session for
+ *           an order it cancelled (G6PUB-SEC-2, V33-CR-3)
+ *   V33-24  an order cancelled between the offline guard and the transaction
+ *           is refused (409) and nothing is written (SEC-V33-5)
  *
  * Added with the fix (not in the tests-first commit): V33-12 and the
  * Idempotent-Replayed response-header assertions in V33-01 and V33-06.
@@ -119,6 +127,7 @@ const ID = {
   owner: `${P}owner`, // OWNER of bizA
   staffRead: `${P}staff_read`, // STAFF of bizA, revenue: read
   ownerB: `${P}owner_b`, // OWNER of bizB only
+  superAdmin: `${P}super_admin`, // platform SUPER_ADMIN, member of no business (D-46)
   bizA: `${P}biz_a`,
   bizB: `${P}biz_b`,
   contactA: `${P}contact_a`,
@@ -147,6 +156,8 @@ let failNextPayment = false;
 let paymentDelayMs = 0;
 /** The production event bus. */
 let events: any;
+/** When set, runs once while completeCheckout resolves the customer contact (between the offline guard and the transaction). */
+let onContactResolve: (() => Promise<void>) | null = null;
 /** How long a retry waits for an in-flight payment step before 409 (StoreOrderService). */
 let inFlightWaitMs = 0;
 
@@ -336,10 +347,14 @@ beforeAll(async () => {
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   const crmStub = {
-    findOrCreateContact: async (businessId: string, input: { email?: string | null }) =>
-      input?.email
+    findOrCreateContact: async (businessId: string, input: { email?: string | null }) => {
+      const hook = onContactResolve;
+      onContactResolve = null;
+      if (hook) await hook();
+      return input?.email
         ? db.contact.findFirst({ where: { businessId, emailNormalized: input.email.toLowerCase() }, select: { id: true } })
-        : null,
+        : null;
+    },
     logContactEvent: async () => null,
   };
   let sessions = 0;
@@ -422,6 +437,7 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.staffRead, email: `${P}staff_read@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.ownerB, email: `${P}owner_b@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.superAdmin, email: `${P}super_admin@test.local`, role: 'SUPER_ADMIN' } });
   await db.business.create({
     data: { id: ID.bizA, name: 'V33A Store A', slug: SLUG.a, ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH', storeEnabled: true },
   });
@@ -453,6 +469,7 @@ beforeEach(async () => {
   paymentCalls = [];
   failNextPayment = false;
   paymentDelayMs = 0;
+  onContactResolve = null;
 });
 
 afterAll(async () => {
@@ -873,6 +890,88 @@ describe('V1-33 CASH-order offline completion (operator, revenue:write)', () => 
     const { payment } = await expectOneOfflinePayment(order, 'cash', ID.owner);
     expect(payment.providerPaymentId, 'the reference is not the predictable one').not.toBe(predictable);
     expect(payment.providerPaymentId).toMatch(new RegExp(`^storefront_offline_${order.id}_[0-9a-f]{32}$`));
+  });
+
+  it('V33-21 (G6PUB-SEC-1, D-46) a platform SUPER_ADMIN who is not a member of the business is refused (403); nothing written', async () => {
+    const order = await placeCashOrder();
+    const before = await moneyCounts();
+
+    const res = await completeOffline(ID.superAdmin, order.id);
+
+    // At 2db133a4: 201 PAID, with an invoice, a SUCCESSFUL payment recorded by the super admin and a posting.
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(await moneyCounts(), 'no invoice, payment or posting').toEqual(before);
+    expect(await invoicesOf(order)).toEqual([]);
+    const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+    expect(`${stored.status}/${stored.paymentStatus}`).toBe('PENDING/PENDING');
+  });
+
+  it("V33-22 (G6PUB-SEC-2) an order the marketplace fulfil route cancelled or refunded (its lowercase 'cancelled' / 'refunded') is refused (409); nothing written, the status kept", async () => {
+    for (const closed of ['cancelled', 'refunded', 'Cancelled']) {
+      const order = await placeCashOrder();
+      await db.marketplaceOrder.update({ where: { id: order.id }, data: { status: closed } });
+      const before = await moneyCounts();
+
+      const res = await completeOffline(ID.owner, order.id);
+
+      // At 2db133a4: 201, the order revived to CONFIRMED/PAID with an invoice, a payment and a posting.
+      expect(res.status, `${closed}: ${JSON.stringify(res.body)}`).toBe(409);
+      expect(await moneyCounts(), closed).toEqual(before);
+      expect(await invoicesOf(order), closed).toEqual([]);
+      const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      expect(`${stored.status}/${stored.paymentStatus}`, closed).toBe(`${closed}/PENDING`);
+    }
+  });
+
+  it("V33-23 (G6PUB-SEC-2, V33-CR-3) a cash-on-delivery order the marketplace route shipped or delivered (lowercase 'shipped' / 'delivered') keeps that status when its cash is recorded", async () => {
+    for (const fulfilment of ['shipped', 'delivered']) {
+      const order = await placeCashOrder();
+      await db.marketplaceOrder.update({ where: { id: order.id }, data: { status: fulfilment } });
+
+      const res = await completeOffline(ID.owner, order.id);
+
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      // At 2db133a4: rewound to CONFIRMED.
+      expect(res.body.status, `${fulfilment} is not rewound to CONFIRMED`).toBe(fulfilment);
+      const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      expect(`${stored.status}/${stored.paymentStatus}`).toBe(`${fulfilment}/PAID`);
+      await expectOneOfflinePayment(order, 'cash', ID.owner);
+    }
+  });
+
+  it('V33-24 (SEC-V33-5) an order cancelled after the offline guard read it and before the transaction is refused (409): nothing written, it stays cancelled', async () => {
+    const order = await placeCashOrder();
+    const before = await moneyCounts();
+    // A member cancels the order while the completion is resolving the customer contact (between the guard and the transaction).
+    onContactResolve = async () => {
+      await db.marketplaceOrder.update({ where: { id: order.id }, data: { status: 'CANCELLED' } });
+    };
+
+    const res = await completeOffline(ID.owner, order.id);
+
+    expect(onContactResolve, 'the concurrent cancel ran').toBeNull();
+    // At 2db133a4: 201, the cancelled order revived to CONFIRMED/PAID with its cash booked.
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(await moneyCounts(), 'no invoice, payment or posting').toEqual(before);
+    const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+    expect(`${stored.status}/${stored.paymentStatus}`).toBe('CANCELLED/PENDING');
+  });
+
+  it("V33-25 (G6PUB-SEC-2) a retry of a provider checkout whose order the marketplace route has since cancelled ('cancelled') starts no payment session", async () => {
+    const key = `${P}key_25`;
+    failNextPayment = true;
+    const first = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+    expect(first.status, 'the provider outage reaches the customer').toBe(500);
+    const [orderId] = created();
+    await db.marketplaceOrder.update({ where: { id: orderId }, data: { status: 'cancelled' } });
+
+    const retry = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.order.id).toBe(orderId);
+    expect(retry.body.payment, 'no payment session for a cancelled order').toBeNull();
+    // At 2db133a4: the retry starts a session for the cancelled order (two calls).
+    expect(paymentCalls.map((c) => c.orderId), 'only the failed first call').toEqual([orderId]);
   });
 
   it.todo(
