@@ -378,6 +378,11 @@
       "packet": "V1-21 (V1-21b-JOBROLE-TOOL-FAMILIES)"
     },
     {
+      "prefix": "v21d_",
+      "owner": "apps/server/test/key-dispatcher-tenant.integration.test.ts",
+      "packet": "V1-21 (V1-21d-KEY-DISPATCHER-TENANT-INCLUDES)"
+    },
+    {
       "prefix": "v23a_",
       "owner": "apps/server/test/public-catalog-projection.integration.test.ts",
       "packet": "V1-23-PUB-PUBLIC-PROJECTIONS"
