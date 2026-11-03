@@ -34,6 +34,22 @@
  *           both are answered with it
  *   V33-12  a retry after the first call's payment step failed is answered
  *           with the same order and starts its payment session (once)
+ *   V33-13  two concurrent provider-method checkouts with the same key: one
+ *           order, one payment session, and both are answered with it (the
+ *           loser of the race waits for the session; it is never handed an
+ *           order with no session as if that were final)
+ *   V33-14  a retry that arrives while the first call is still starting the
+ *           payment session is answered with that session, once it exists
+ *   V33-15  a retry whose first call's payment step outlasts the wait is
+ *           answered 409 with Retry-After, writes nothing and starts no
+ *           session; the next retry gets the first call's session
+ *   V33-16  a slot left in flight by a request that died after the order
+ *           committed (its lease expired) is taken over by the next retry,
+ *           which starts the session once
+ *   V33-17  a failure after the order commit (a throwing store_order.created
+ *           listener) frees the payment step: the immediate retry starts it
+ *   V33-18  two concurrent retries after a failed payment step start ONE
+ *           session, and both are answered with it
  *   V33-07  an operator (revenue:write) completes a CASH order offline: PAID
  *           and CONFIRMED, one PAID invoice INV-<orderNumber>, one SUCCESSFUL
  *           cash payment of the order total recorded by that operator, exactly
@@ -51,9 +67,18 @@
  *           an invoice or a payment
  *   V33-11  a MANUAL order (the other no-provider method the checkout accepts)
  *           completes offline the same way: one payment, one posting
+ *   V33-19  a cash-on-delivery order already SHIPPED or DELIVERED keeps its
+ *           fulfilment status when its cash is recorded (PAID, not rewound to
+ *           CONFIRMED)
+ *   V33-20  a payment row anyone can plant in another tenant (the unsigned
+ *           WiPay failure callback chooses its providerPaymentId) carrying
+ *           storefront_offline_<orderId> does not block the offline
+ *           completion: the reference is server-random
  *
  * Added with the fix (not in the tests-first commit): V33-12 and the
  * Idempotent-Replayed response-header assertions in V33-01 and V33-06.
+ * Added with the review repairs: V33-13..V33-20 (V33-CR-1, SEC-V33-3,
+ * V33-CR-2, V33-CR-3, SEC-V33-1) and the todo for SEC-V33-2.
  *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
@@ -118,6 +143,14 @@ let seen: Array<{ name: string; payload: any }> = [];
 let paymentCalls: Array<{ orderId: string; method: string }> = [];
 /** When set, the next createStorePayment call throws (a provider outage), once. */
 let failNextPayment = false;
+/** How long the provider stand-in takes to answer (a slow provider), in ms. */
+let paymentDelayMs = 0;
+/** The production event bus. */
+let events: any;
+/** How long a retry waits for an in-flight payment step before 409 (StoreOrderService). */
+let inFlightWaitMs = 0;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function cleanup() {
   for (const sql of [
@@ -277,7 +310,8 @@ beforeAll(async () => {
   const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
   const { SiteController } = await import('../src/modules/site/site.controller');
   const { SiteService } = await import('../src/modules/site/site.service');
-  const { StoreOrderService } = await import('../src/modules/site/store-order.service');
+  const { StoreOrderService, CHECKOUT_IN_FLIGHT_WAIT_MS } = await import('../src/modules/site/store-order.service');
+  inFlightWaitMs = CHECKOUT_IN_FLIGHT_WAIT_MS;
   const { PromoCodeService } = await import('../src/modules/site/promo-code.service');
   const { IntakeService } = await import('../src/modules/site/intake.service');
   const { QualificationService } = await import('../src/modules/site/qualification.service');
@@ -312,6 +346,7 @@ beforeAll(async () => {
   const paymentsRecorder = {
     createStorePayment: async (input: { orderId: string; method: string }) => {
       paymentCalls.push({ orderId: input.orderId, method: input.method });
+      if (paymentDelayMs) await sleep(paymentDelayMs);
       if (failNextPayment) {
         failNextPayment = false;
         throw new Error('provider unavailable');
@@ -375,7 +410,8 @@ beforeAll(async () => {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
 
-  app.get(EventEmitter2).onAny((name: string | string[], payload: any) => {
+  events = app.get(EventEmitter2);
+  events.onAny((name: string | string[], payload: any) => {
     const n = Array.isArray(name) ? name.join('.') : String(name);
     if (n.startsWith('store_order.')) seen.push({ name: n, payload });
   });
@@ -415,6 +451,8 @@ beforeEach(async () => {
   await clearRateLimits();
   seen = [];
   paymentCalls = [];
+  failNextPayment = false;
+  paymentDelayMs = 0;
 });
 
 afterAll(async () => {
@@ -543,6 +581,159 @@ describe('V1-33 storefront checkout retry identity (Idempotency-Key)', () => {
     expect(paymentCalls.map((c) => c.orderId), 'the failed call, then one session').toEqual([orderId, orderId]);
     expect(await orderCount()).toBe(before + 1);
   });
+
+  it('V33-13 two concurrent provider checkouts with the same key: one order, one session, and both are answered with it', async () => {
+    const key = `${P}key_13`;
+    const before = await orderCount();
+    const body = { ...cart(ID.prodA, 'WIPAY'), returnUrl: 'https://shop.test.local/return' };
+    paymentDelayMs = 300; // the session is still being started when the loser of the race reads the slot
+
+    const [a, b] = await Promise.all([checkout(SLUG.a, body, key), checkout(SLUG.a, body, key)]);
+
+    expect(a.status, JSON.stringify(a.body)).toBe(201);
+    expect(b.status, JSON.stringify(b.body)).toBe(201);
+    expect(b.body.order.id).toBe(a.body.order.id);
+    expect(a.body.payment?.redirectUrl, 'a payment session').toBeTruthy();
+    expect(b.body.payment, 'both are answered with the one session').toEqual(a.body.payment);
+    expect(paymentCalls, 'one provider payment session').toEqual([{ orderId: a.body.order.id, method: 'WIPAY' }]);
+    expect(await orderCount()).toBe(before + 1);
+    expect([a, b].filter((r) => r.headers['idempotent-replayed'] === 'true'), 'exactly one of them is the replay').toHaveLength(1);
+  });
+
+  it('V33-14 a retry while the first call is still starting the payment session is answered with that session', async () => {
+    const key = `${P}key_14`;
+    const before = await orderCount();
+    const body = { ...cart(ID.prodA, 'WIPAY'), returnUrl: 'https://shop.test.local/return' };
+    paymentDelayMs = 800;
+
+    const firstP = checkout(SLUG.a, body, key).then((r) => r);
+    await sleep(300);
+    const retry = await checkout(SLUG.a, body, key);
+    const first = await firstP;
+
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.order.id).toBe(first.body.order.id);
+    expect(first.body.payment?.redirectUrl).toBeTruthy();
+    expect(retry.body.payment, 'the retry is answered with the session, never with payment:null').toEqual(first.body.payment);
+    expect(retry.headers['idempotent-replayed']).toBe('true');
+    expect(paymentCalls).toHaveLength(1);
+    expect(await orderCount()).toBe(before + 1);
+  });
+
+  it('V33-15 a retry whose first call outlasts the wait is answered 409 with Retry-After and starts nothing', async () => {
+    const key = `${P}key_15`;
+    const before = await orderCount();
+    const body = { ...cart(ID.prodA, 'WIPAY'), returnUrl: 'https://shop.test.local/return' };
+    paymentDelayMs = inFlightWaitMs + 1_000;
+
+    const firstP = checkout(SLUG.a, body, key).then((r) => r);
+    await sleep(300);
+    const retry = await checkout(SLUG.a, body, key);
+
+    expect(retry.status, JSON.stringify(retry.body)).toBe(409);
+    expect(Number(retry.headers['retry-after']), 'the client is told when to retry').toBeGreaterThan(0);
+    expect(retry.headers['idempotent-replayed']).toBeUndefined();
+    expect(paymentCalls, 'the retry started no second session').toHaveLength(1);
+    expect(await orderCount(), 'and wrote no second order').toBe(before + 1);
+
+    const first = await firstP;
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    paymentDelayMs = 0;
+    const later = await checkout(SLUG.a, body, key);
+    expect(later.status, JSON.stringify(later.body)).toBe(201);
+    expect(later.body.order.id).toBe(first.body.order.id);
+    expect(later.body.payment, "the next retry gets the first call's session").toEqual(first.body.payment);
+    expect(paymentCalls).toHaveLength(1);
+  }, 20_000);
+
+  it('V33-16 a slot left in flight by a request that died after the order commit is taken over once its lease expires', async () => {
+    const key = `${P}key_16`;
+    const before = await orderCount();
+    failNextPayment = true;
+    const first = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+    expect(first.status).toBe(500);
+    const [orderId] = created();
+    expect(orderId).toBeTruthy();
+    // The state a process that died between the order commit and the payment
+    // step leaves behind: the slot in flight under a claim nobody will settle,
+    // its lease long expired.
+    const rewritten = await db.$executeRawUnsafe(
+      `UPDATE idempotency_keys
+          SET status = 'pending',
+              response = jsonb_build_object('orderId', $1::text, 'claim', 'v33a_dead_claim'),
+              updated_at = now() - interval '1 hour'
+        WHERE business_id = $2 AND response->>'orderId' = $1`,
+      orderId,
+      ID.bizA,
+    );
+    expect(rewritten).toBe(1);
+
+    const retry = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.order.id).toBe(orderId);
+    expect(retry.body.payment?.redirectUrl, 'the retry starts the session the dead request never did').toBeTruthy();
+    const again = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+    expect(again.body.payment, 'once').toEqual(retry.body.payment);
+
+    expect(paymentCalls.map((c) => c.orderId), 'the failed call, then one session').toEqual([orderId, orderId]);
+    expect(await orderCount()).toBe(before + 1);
+  });
+
+  it('V33-17 a failure after the order commit (a throwing created listener) frees the payment step for the immediate retry', async () => {
+    const key = `${P}key_17`;
+    const before = await orderCount();
+    let thrown = false;
+    const boom = () => {
+      if (!thrown) {
+        thrown = true;
+        throw new Error('store_order.created listener failed');
+      }
+    };
+    events.on('store_order.created', boom);
+    try {
+      const first = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+      expect(first.status, 'the listener failure reaches the customer').toBe(500);
+      expect(thrown).toBe(true);
+      expect(await orderCount(), 'the order committed before the failure').toBe(before + 1);
+      expect(paymentCalls, 'no session was started').toEqual([]);
+      const [orderId] = created();
+
+      const retry = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+
+      expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+      expect(retry.body.order.id).toBe(orderId);
+      expect(retry.body.payment?.redirectUrl, 'the immediate retry starts the session').toBeTruthy();
+      expect(paymentCalls).toEqual([{ orderId, method: 'WIPAY' }]);
+      expect(await orderCount()).toBe(before + 1);
+    } finally {
+      events.off('store_order.created', boom);
+    }
+  });
+
+  it('V33-18 two concurrent retries after a failed payment step start one session, and both are answered with it', async () => {
+    const key = `${P}key_18`;
+    const before = await orderCount();
+    failNextPayment = true;
+    const first = await checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key);
+    expect(first.status).toBe(500);
+    const [orderId] = created();
+    paymentDelayMs = 300;
+
+    const [a, b] = await Promise.all([
+      checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key),
+      checkout(SLUG.a, cart(ID.prodA, 'WIPAY'), key),
+    ]);
+
+    expect(a.status, JSON.stringify(a.body)).toBe(201);
+    expect(b.status, JSON.stringify(b.body)).toBe(201);
+    expect(a.body.order.id).toBe(orderId);
+    expect(b.body.order.id).toBe(orderId);
+    expect(a.body.payment?.redirectUrl).toBeTruthy();
+    expect(b.body.payment, 'one session, answered to both').toEqual(a.body.payment);
+    expect(paymentCalls.map((c) => c.orderId), 'the failed call, then ONE session').toEqual([orderId, orderId]);
+    expect(await orderCount()).toBe(before + 1);
+  });
 });
 
 describe('V1-33 CASH-order offline completion (operator, revenue:write)', () => {
@@ -636,4 +827,59 @@ describe('V1-33 CASH-order offline completion (operator, revenue:write)', () => 
     const { payment } = await expectOneOfflinePayment(order, 'manual', ID.owner);
     expect(payment.provider).toBe('manual');
   });
+
+  it('V33-19 a cash-on-delivery order already SHIPPED or DELIVERED keeps its fulfilment status when its cash is recorded', async () => {
+    for (const fulfilment of ['SHIPPED', 'DELIVERED']) {
+      const order = await placeCashOrder();
+      await db.marketplaceOrder.update({ where: { id: order.id }, data: { status: fulfilment } });
+
+      const res = await completeOffline(ID.owner, order.id);
+
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body.paymentStatus).toBe('PAID');
+      expect(res.body.status, `${fulfilment} is not rewound to CONFIRMED`).toBe(fulfilment);
+      const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+      expect(`${stored.status}/${stored.paymentStatus}`).toBe(`${fulfilment}/PAID`);
+      await expectOneOfflinePayment(order, 'cash', ID.owner);
+    }
+  });
+
+  it('V33-20 a payment row planted in another tenant under storefront_offline_<orderId> does not block the offline completion', async () => {
+    const order = await placeCashOrder();
+    const predictable = `storefront_offline_${order.id}`;
+    // What the public WiPay failure callback writes with no hash: a FAILED
+    // payment whose providerPaymentId (unique across all tenants) the caller chose.
+    const decoy = await db.invoice.create({
+      data: {
+        businessId: ID.bizB,
+        contactId: ID.contactB,
+        invoiceNumber: `${P}INV-DECOY-${Date.now()}`,
+        status: 'SENT',
+        subtotal: 1,
+        taxAmount: 0,
+        total: 1,
+        currency: 'TTD',
+        issueDate: new Date(),
+      },
+    });
+    await db.payment.create({
+      data: { provider: 'wipay', providerPaymentId: predictable, amount: 1, currency: 'TTD', status: 'FAILED', invoiceId: decoy.id, businessId: ID.bizB },
+    });
+
+    const res = await completeOffline(ID.owner, order.id);
+
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.paymentStatus).toBe('PAID');
+    const { payment } = await expectOneOfflinePayment(order, 'cash', ID.owner);
+    expect(payment.providerPaymentId, 'the reference is not the predictable one').not.toBe(predictable);
+    expect(payment.providerPaymentId).toMatch(new RegExp(`^storefront_offline_${order.id}_[0-9a-f]{32}$`));
+  });
+
+  it.todo(
+    "SEC-V33-2 (routed to its own security packet, outside V1-33's write set): the WiPay success hash " +
+      '(payments.service.ts handleWipayCallback) is md5(transaction_id+order_id+total+status) with no secret, so a forged ' +
+      'success callback settles a storefront order through updatePaymentStatus(PAID). Not guarded in StoreOrderService: a ' +
+      'CASH order may legitimately be paid online later (payments.service.ts storefront_order checkout), and its genuine ' +
+      'provider callback reaches the same door; the fix is a keyed signature check in payments.service.ts',
+  );
 });

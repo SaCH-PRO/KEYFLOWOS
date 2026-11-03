@@ -2,7 +2,7 @@ import { BadRequestException, Controller, Get, Put, Post, Patch, Param, Body, Qu
 import type { Request } from 'express';
 import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
 import { SiteService } from './site.service';
-import { StoreOrderService } from './store-order.service';
+import { CHECKOUT_IN_FLIGHT_RETRY_AFTER_S, CheckoutInFlightException, StoreOrderService } from './store-order.service';
 import { PromoCodeService } from './promo-code.service';
 import { IntakeService } from './intake.service';
 import { QualificationService } from './qualification.service';
@@ -188,32 +188,39 @@ export class SiteController {
       referralCode: body.referralCode ? sanitize(body.referralCode, 100) ?? undefined : undefined,
     };
 
-    const startPayment = async (
-      order: { id: string; total: number; currency: string },
-    ): Promise<Awaited<ReturnType<PaymentsService['createStorePayment']>> | null> => {
-      if (!body.paymentMethod || body.paymentMethod === 'CASH' || body.paymentMethod === 'MANUAL') return null;
-      return this.paymentsService.createStorePayment({
-        orderId: order.id,
-        amount: order.total,
-        currency: order.currency,
-        method: body.paymentMethod,
-        businessId,
-        returnUrl: body.returnUrl,
-      });
-    };
+    // CASH, MANUAL and no method start no provider session.
+    const paymentMethod = body.paymentMethod;
+    const startPayment = paymentMethod && paymentMethod !== 'CASH' && paymentMethod !== 'MANUAL'
+      ? (order: { id: string; total: number; currency: string }) =>
+          this.paymentsService.createStorePayment({
+            orderId: order.id,
+            amount: order.total,
+            currency: order.currency,
+            method: paymentMethod,
+            businessId,
+            returnUrl: body.returnUrl,
+          })
+      : null;
 
     // V1-33 (M37, SSP-BP-03): a retried checkout carries the same
     // Idempotency-Key and is answered with the order (and payment session)
-    // the first call created. Without the header nothing changes.
+    // the first call created. Without the header nothing changes. A retry
+    // while the first call is still starting the session, past the wait, is
+    // 409 with Retry-After (V1-33 review, V33-CR-1).
     const idempotencyKey = SiteController.checkoutIdempotencyKey(req.headers['idempotency-key']);
     if (idempotencyKey) {
-      const result = await this.storeOrderService.createOrderOnce(orderInput, idempotencyKey, startPayment);
+      const result = await this.storeOrderService
+        .createOrderOnce(orderInput, idempotencyKey, startPayment)
+        .catch((err: unknown) => {
+          if (err instanceof CheckoutInFlightException) req.res?.setHeader('Retry-After', String(CHECKOUT_IN_FLIGHT_RETRY_AFTER_S));
+          throw err;
+        });
       if (result.replayed) req.res?.setHeader('Idempotent-Replayed', 'true');
       return { order: result.order, payment: result.payment };
     }
 
     const order = await this.storeOrderService.createOrder(orderInput);
-    const payment = await startPayment(order);
+    const payment = startPayment ? await startPayment(order) : null;
 
     return {
       order,
