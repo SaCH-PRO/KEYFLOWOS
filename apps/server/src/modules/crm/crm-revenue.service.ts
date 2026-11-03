@@ -1,6 +1,92 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CASH_NET_PAYMENT_WHERE, balanceOfStoredRows, roundMoney } from '../commerce/invoice-workflow.service';
 import { contactWhereBase } from './crm.helpers';
+
+type StoredPaymentRow = {
+  id: string;
+  amount: number;
+  currency: string;
+  status: string;
+  provider: string;
+  providerPaymentId: string;
+  reference: string | null;
+  invoiceId: string;
+  createdAt: Date;
+};
+
+type LinkTarget = Pick<StoredPaymentRow, 'provider' | 'providerPaymentId' | 'reference'>;
+
+/** A refund row since D-14: negative and REFUNDED (a row flipped to REFUNDED before V1-29 is positive). */
+const isRefundRow = (row: { status: string; amount: number }) => row.status === 'REFUNDED' && Number(row.amount) < 0;
+
+/**
+ * A refund links to `row` the way every refund writer links (reference = its
+ * providerPaymentId, or, same provider, its own reference: the Stripe charge
+ * id), as CommerceService.refundableOf reads the link.
+ */
+const linksTo = (refund: LinkTarget, row: LinkTarget) =>
+  !!refund.reference &&
+  (refund.reference === row.providerPaymentId || (refund.provider === row.provider && refund.reference === row.reference));
+
+/**
+ * Review CR-V29E-1: the refunds among `rows` whose reference links to no other
+ * row read. Their original may be older than the read: the caller looks their
+ * references up (originalsNotRead) before paymentsNetOfRefunds resolves them.
+ */
+function refundsLinkedToNoRowRead(rows: ReadonlyArray<StoredPaymentRow>): StoredPaymentRow[] {
+  const originals = rows.filter((row) => !isRefundRow(row));
+  return rows.filter((row) => isRefundRow(row) && !!row.reference && !originals.some((o) => linksTo(row, o)));
+}
+
+/**
+ * V1-29e-CRM-REVENUE-NET (VR-02, D-14): the SUCCESSFUL payments among `rows`,
+ * newest first, each with what is left of it after its refunds: the balance
+ * contract over the payment and its refund rows (balanceOfStoredRows(...).net).
+ * A refund is the payment's when it links to it (linksTo). A refund that links
+ * to another row, read or not (`originalsNotRead`: the rows its reference
+ * names that are older than the read, review CR-V29E-1), is that row's and
+ * never another payment's. Only a refund that links to no row at all (a PayPal
+ * webhook row written before V1-29c, with no reference, or a Stripe refund
+ * written before V1-29c whose charge id no row keeps) is the most recent
+ * payment's of its invoice that it can still cover, of its provider first, as
+ * the provider refund door and CommerceService.refundableOf resolve it. A row
+ * flipped to REFUNDED before V1-29 (positive amount) is no payment here, as
+ * the base read it. PENDING and FAILED rows are not payments.
+ */
+function paymentsNetOfRefunds(
+  rows: ReadonlyArray<StoredPaymentRow>,
+  originalsNotRead: ReadonlyArray<LinkTarget> = [],
+): Array<{ payment: StoredPaymentRow; net: number }> {
+  const payments: StoredPaymentRow[] = [];
+  const refunds: StoredPaymentRow[] = [];
+  for (const row of [...rows].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())) {
+    if (row.status === 'SUCCESSFUL') payments.push(row);
+    else if (isRefundRow(row)) refunds.push(row);
+  }
+  const originals: LinkTarget[] = [...rows.filter((row) => !isRefundRow(row)), ...originalsNotRead];
+  const refundsOf = new Map<string, StoredPaymentRow[]>(payments.map((p) => [p.id, []]));
+  const netOf = (p: StoredPaymentRow) => balanceOfStoredRows(0, [p, ...(refundsOf.get(p.id) ?? [])], p.currency).net;
+  const coverableOnInvoice = (refund: StoredPaymentRow, sameProvider: boolean) =>
+    payments.find(
+      (p) =>
+        p.invoiceId === refund.invoiceId &&
+        (!sameProvider || p.provider === refund.provider) &&
+        p.createdAt.getTime() <= refund.createdAt.getTime() &&
+        netOf(p) > 0,
+    );
+  // Oldest refund first, so an unlinked refund sees what the earlier ones left.
+  for (const refund of [...refunds].reverse()) {
+    const linked = payments.find((p) => linksTo(refund, p));
+    const payment =
+      linked ??
+      (originals.some((o) => linksTo(refund, o))
+        ? undefined
+        : coverableOnInvoice(refund, true) ?? coverableOnInvoice(refund, false));
+    if (payment) refundsOf.get(payment.id)?.push(refund);
+  }
+  return payments.map((payment) => ({ payment, net: netOf(payment) }));
+}
 
 type RevenueData = {
   fromActivePipeline: number;
@@ -48,6 +134,24 @@ export class CrmRevenueService {
   /**
    * Per-contact revenue rollup for the M5 Insight Card revenue panel.
    * Idempotent read: pure aggregation over Quote/Invoice/Payment.
+   *
+   * V1-29e-CRM-REVENUE-NET (VR-02, D-14): the money figures read the balance
+   * contract over the contact's own-tenant Payment rows (the row's tenant and
+   * its invoice's). Under D-14 a refund is a separate negative REFUNDED row
+   * beside its SUCCESSFUL original, so summing the SUCCESSFUL rows alone read
+   * refunded money as received; the base, whose manual refund flipped the
+   * original to REFUNDED, read it as no revenue. lifetimeRevenue is the cash
+   * received net of refunds (CASH_NET_PAYMENT_WHERE, the database form of
+   * balanceOfStoredRows(...).net, over every row). The last payment is the
+   * most recent payment with something left of it after its refunds, and its
+   * amount is what is left (paymentsNetOfRefunds); paymentReliability counts
+   * such payments against FAILED attempts, so a fully refunded payment counts
+   * as neither, as the base read it. Both read the 50 most recent rows; a
+   * refund is written after its payment, so a payment read has its refunds read.
+   * A refund read may not have its payment read (review CR-V29E-1): a refund
+   * whose reference links to no row read has that reference looked up among
+   * the contact's own-tenant rows of its invoice, and one that links to a row
+   * older than the read is that row's, never charged to another payment.
    */
   async getContactRevenueSummary(
     businessId: string,
@@ -71,7 +175,9 @@ export class CrmRevenueService {
       entityId: string | null;
     }>;
   }> {
-    const [quotes, invoices, payments, recentEvents] = await Promise.all([
+    // Own-tenant rows only: the Payment row's tenant and its invoice's.
+    const ownRows = { businessId, invoice: { businessId, contactId } };
+    const [quotes, invoices, payments, cashNet, recentEvents] = await Promise.all([
       this.db.quote.findMany({
         where: { businessId, contactId, deletedAt: null },
         select: { id: true, status: true, total: true, currency: true, sentAt: true, expiryDate: true },
@@ -89,10 +195,24 @@ export class CrmRevenueService {
         },
       }),
       this.db.payment.findMany({
-        where: { businessId, invoice: { contactId } },
+        where: ownRows,
         orderBy: { createdAt: 'desc' },
         take: 50,
-        select: { id: true, amount: true, currency: true, status: true, provider: true, createdAt: true, invoiceId: true },
+        select: {
+          id: true,
+          amount: true,
+          currency: true,
+          status: true,
+          provider: true,
+          providerPaymentId: true,
+          reference: true,
+          createdAt: true,
+          invoiceId: true,
+        },
+      }),
+      this.db.payment.aggregate({
+        where: { ...ownRows, ...CASH_NET_PAYMENT_WHERE },
+        _sum: { amount: true },
       }),
       this.db.contactEvent.findMany({
         where: {
@@ -118,16 +238,19 @@ export class CrmRevenueService {
       }),
     ]);
 
-    const successfulPayments = payments.filter((p) => p.status === 'SUCCESSFUL');
+    const received = paymentsNetOfRefunds(payments, await this.originalsNotRead(ownRows, payments)).filter(
+      (p) => p.net > 0,
+    );
     const failedPayments = payments.filter((p) => p.status === 'FAILED');
-    const lifetimeRevenue = successfulPayments.reduce((s, p) => s + this.toNum(p.amount), 0);
+    const lifetimeRevenue = roundMoney(Number(cashNet._sum.amount ?? 0));
     const openInvoices = invoices.filter((i) => ['SENT', 'OVERDUE', 'DRAFT'].includes(i.status));
     const outstandingBalance = openInvoices.reduce((s, i) => s + this.toNum(i.total), 0);
     const openQuotes = quotes.filter((q) => ['SENT', 'DRAFT'].includes(q.status));
-    const lastPayment = successfulPayments[0] ?? null;
-    const totalAttempts = successfulPayments.length + failedPayments.length;
+    const last = received[0] ?? null;
+    const lastPayment = last?.payment ?? null;
+    const totalAttempts = received.length + failedPayments.length;
     const reliability = totalAttempts > 0
-      ? successfulPayments.length / totalAttempts
+      ? received.length / totalAttempts
       : null;
     const currency =
       lastPayment?.currency ?? invoices[0]?.currency ?? quotes[0]?.currency ?? 'TTD';
@@ -155,7 +278,7 @@ export class CrmRevenueService {
       openInvoices: openInvoices.length,
       openQuotes: openQuotes.length,
       lastPaymentAt: lastPayment?.createdAt?.toISOString() ?? null,
-      lastPaymentAmount: lastPayment ? this.toNum(lastPayment.amount) : null,
+      lastPaymentAmount: last ? last.net : null,
       paymentReliability: reliability,
       recentRevenueActions: recentEvents.map((e) => {
         const data = (e.data ?? {}) as Record<string, unknown>;
@@ -177,6 +300,30 @@ export class CrmRevenueService {
         };
       }),
     };
+  }
+
+  /**
+   * Review CR-V29E-1: the non-refund rows, among `ownRows` on their invoices,
+   * that the refunds read but linked to no row read name by reference: their
+   * originals older than the read. No query when every refund read links to a
+   * row read or carries no reference.
+   */
+  private async originalsNotRead(
+    ownRows: { businessId: string; invoice: { businessId: string; contactId: string } },
+    rows: ReadonlyArray<StoredPaymentRow>,
+  ): Promise<LinkTarget[]> {
+    const unlinked = refundsLinkedToNoRowRead(rows);
+    if (unlinked.length === 0) return [];
+    const references = [...new Set(unlinked.map((r) => r.reference as string))];
+    const found = await this.db.payment.findMany({
+      where: {
+        ...ownRows,
+        invoiceId: { in: [...new Set(unlinked.map((r) => r.invoiceId))] },
+        OR: [{ providerPaymentId: { in: references } }, { reference: { in: references } }],
+      },
+      select: { amount: true, status: true, provider: true, providerPaymentId: true, reference: true },
+    });
+    return found.filter((row) => !isRefundRow(row));
   }
 
   async getPredictiveRevenue(businessId: string): Promise<RevenueData> {
