@@ -1469,14 +1469,9 @@ export class PaymentsService {
 
     if (!invoice) throw new Error('Invoice not found');
     this.assertInvoicePayable(invoice.status, invoiceId);
+    PaymentsService.assertWipayReturnUrl(returnUrl);
 
-    const meta = (invoice.business.metaData as Record<string, any>) || {};
-    const developerId = meta.wipayApiKey || process.env.WIPAY_API_KEY || '1';
-    const isSandbox = !meta.wipayApiKey && !process.env.WIPAY_API_KEY;
-
-    const apiUrl = isSandbox
-      ? 'https://sandbox.wipayfinancial.com/v1/gateway'
-      : 'https://tt.wipayfinancial.com/v1/gateway_live';
+    const { apiUrl, environment, developerId, accountNumber } = PaymentsService.wipayCheckoutTarget(invoice.business.metaData);
 
     const contactName = invoice.contact
       ? `${invoice.contact.firstName || ''} ${invoice.contact.lastName || ''}`.trim()
@@ -1492,9 +1487,7 @@ export class PaymentsService {
     params.append('order_id', invoiceId);
     params.append('return_url', returnUrl);
     params.append('developer_id', developerId);
-    params.append('environment', isSandbox ? 'sandbox' : 'live');
-
-    const accountNumber = meta.wipayAccountNumber || process.env.WIPAY_ACCOUNT_NUMBER;
+    params.append('environment', environment);
     if (accountNumber) {
       params.append('account_number', accountNumber);
     }
@@ -1519,6 +1512,7 @@ export class PaymentsService {
     }
 
     if (response.ok) {
+      // The request's own parameters (TG-16b). Review V05-SEC-1: they carry no secret any more (wipayCheckoutTarget).
       return { redirectUrl: `${apiUrl}?${params.toString()}` };
     }
 
@@ -1540,17 +1534,78 @@ export class PaymentsService {
   }
 
   /**
-   * The WiPay API key a callback is verified with: the business's own
-   * (metaData.wipayApiKey), else the platform's (WIPAY_API_KEY), as the
-   * checkout reads them. Nothing configured is null: the callback is refused,
-   * never checked against a default (WiPay's sandbox key is public).
+   * The WiPay API key a callback is verified with: the key of the WiPay
+   * account the business's checkout pays into. That is the business's own
+   * (metaData.wipayApiKey); else, for a business that checks out into the
+   * platform's account (no WiPay account number of its own), the platform's
+   * (WIPAY_API_KEY). Review V05-SEC-3: a business with its own WiPay account
+   * but no key of its own gets null, so the platform key never settles a
+   * payable of a tenant whose money goes to another account. Nothing
+   * configured is null: the callback is refused, never checked against a
+   * default (WiPay's sandbox key is public).
    */
   private static wipayApiKey(metaData: unknown): string | null {
     const meta = (metaData as Record<string, unknown> | null) ?? {};
-    for (const key of [meta.wipayApiKey, process.env.WIPAY_API_KEY]) {
-      if (typeof key === 'string' && key.trim() !== '') return key;
+    const configured = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
+    if (configured(meta.wipayApiKey)) return meta.wipayApiKey;
+    if (configured(meta.wipayAccountNumber)) return null;
+    const platformKey = process.env.WIPAY_API_KEY;
+    return configured(platformKey) ? platformKey : null;
+  }
+
+  /**
+   * Review V05-SEC-1: where a WiPay checkout goes and which merchant it names.
+   * The API key is the secret behind the callback proof (wipayResponseHash),
+   * so it never leaves this server: it used to be sent as developer_id, and so
+   * reached the anonymous payer in the request echo (createWipayCheckout,
+   * createStorePayment). developer_id is the merchant's WiPay account number
+   * (WiPay's sandbox developer id '1' in the sandbox); a live checkout with no
+   * account number configured is refused (400) before WiPay is called.
+   */
+  private static wipayCheckoutTarget(metaData: unknown): {
+    apiUrl: string;
+    environment: 'sandbox' | 'live';
+    developerId: string;
+    accountNumber?: string;
+  } {
+    const meta = (metaData as Record<string, unknown> | null) ?? {};
+    const isSandbox = !meta.wipayApiKey && !process.env.WIPAY_API_KEY;
+    const accountNumber = (meta.wipayAccountNumber ? String(meta.wipayAccountNumber) : '') || process.env.WIPAY_ACCOUNT_NUMBER || undefined;
+    if (isSandbox) {
+      return { apiUrl: 'https://sandbox.wipayfinancial.com/v1/gateway', environment: 'sandbox', developerId: '1', accountNumber };
     }
-    return null;
+    if (!accountNumber) {
+      throw new BadRequestException('WiPay is not configured for this business: no WiPay account number');
+    }
+    return { apiUrl: 'https://tt.wipayfinancial.com/v1/gateway_live', environment: 'live', developerId: accountNumber, accountNumber };
+  }
+
+  /**
+   * Review V05-SEC-3: WiPay hands its response, proof included, to the
+   * checkout's return_url, so the invoice checkout's return URL must be on
+   * one of the platform's public origins (PUBLIC_URL_ALLOWLIST, else
+   * NEXT_PUBLIC_BASE_URL), as the Stripe checkout's success and cancel URLs
+   * are; none configured refuses the checkout.
+   */
+  private static assertWipayReturnUrl(returnUrl: string): void {
+    const allowed = (process.env.PUBLIC_URL_ALLOWLIST || process.env.NEXT_PUBLIC_BASE_URL || '')
+      .split(',').map((s) => s.trim()).filter(Boolean)
+      .map((s) => (s.startsWith('http') ? s : `https://${s}`));
+    if (allowed.length === 0) {
+      throw new BadRequestException('Server misconfigured: no allowed return-URL origins set');
+    }
+    let parsed: URL;
+    try {
+      parsed = new URL(returnUrl);
+    } catch {
+      throw new BadRequestException('Invalid return URL');
+    }
+    const onAllowedOrigin =
+      (parsed.protocol === 'https:' || parsed.protocol === 'http:') &&
+      allowed.some((a) => {
+        try { return new URL(a).origin === parsed.origin; } catch { return false; }
+      });
+    if (!onAllowedOrigin) throw new BadRequestException('Invalid return URL');
   }
 
   /** Whether `hash` is WiPay's keyed response hash for this transaction (constant-time compare). */
@@ -1571,19 +1626,29 @@ export class PaymentsService {
    * the pay page, which forwards its query here).
    *
    * V1-05-PUB-PROVIDER-CALLBACKS (M35; D-19: any callback that does not
-   * verify is refused): every callback, success or failure, must carry
-   * WiPay's keyed response hash (wipayResponseHash) over its transaction_id,
-   * the total this server requested for the invoice or storefront order and
-   * the business's WiPay API key. One that does not verify, or that arrives
-   * with no key configured, is refused with 400 before anything is written:
-   * no Payment row, no WebhookEvent claim, no storefront status. The hash
-   * used to be md5(transaction_id + order_id + total + status), every input
-   * public, so anyone holding an invoice id settled it for the total they
-   * chose, and an unsigned failure callback wrote a FAILED row on a
-   * transaction id of the caller's choosing and claimed it. A verified
-   * success records the requested total (the amount the hash binds), never
-   * the callback's `total`, through createPaymentWithPosting, deduplicated
-   * on the transaction id.
+   * verify is refused): a success callback must carry WiPay's keyed response
+   * hash (wipayResponseHash) over its transaction_id, the total this server
+   * requested for the invoice or storefront order and the key of the WiPay
+   * account the business checks out into (wipayApiKey). One that does not
+   * verify, or that arrives with no key to verify it, is refused with 400
+   * before anything is written: no Payment row, no WebhookEvent claim, no
+   * storefront status. The hash used to be md5(transaction_id + order_id +
+   * total + status), every input public, so anyone holding an invoice id
+   * settled it for the total they chose. A verified success records the
+   * requested total (the amount the hash binds), never the callback's `total`,
+   * through createPaymentWithPosting, deduplicated on the transaction id.
+   *
+   * Review V05-SEC-2, CR-V05-2, CR-V05-3: the hash does not cover `status`,
+   * and WiPay documents it for successful transactions only (its decline
+   * carries none), so it is proof of a success and of nothing else. A
+   * callback whose status is not a success, hashed or not, is answered
+   * { success: false, 'Payment was not successful' } and acted on in no way:
+   * no FAILED row, no claim on its transaction id (which would turn the
+   * genuine success of that transaction into 'Duplicate callback ignored'),
+   * no storefront FAILED status and no payment-failed event or email. It
+   * used to write a FAILED row and claim the transaction id of the caller's
+   * choosing; since the packet it was a 400 the pay page showed the payer
+   * as 'Invalid WiPay callback signature'.
    */
   async handleWipayCallback(queryParams: WipayCallbackParams): Promise<{ success: boolean; invoiceId?: string; message: string }> {
     const str = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
@@ -1612,6 +1677,12 @@ export class PaymentsService {
       }
     }
 
+    // Review V05-SEC-2 / CR-V05-2 / CR-V05-3: a failure is answered, never acted on (see above).
+    const isSuccessful = status === 'success' || status === '1';
+    if (!isSuccessful) {
+      return { success: false, invoiceId: order_id, message: 'Payment was not successful' };
+    }
+
     const businessId = invoice?.businessId ?? order!.businessId;
     // The total this server sent WiPay for this payable (createWipayCheckout, createStorePayment).
     const requestedTotal = invoice ? Number(invoice.total) : Number(order!.total);
@@ -1636,91 +1707,66 @@ export class PaymentsService {
       return { success: true, invoiceId: order_id, message: 'Duplicate callback ignored' };
     }
 
-    const isSuccessful = status === 'success' || status === '1';
-
-    if (isSuccessful) {
-      try {
-        if (order) {
-          // Storefront checkout path
-          if (order.paymentStatus !== 'PAID' && this.storeOrderService) {
-            await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', transaction_id);
-          }
-          return { success: true, invoiceId: order_id, message: 'Payment successful' };
+    try {
+      if (order) {
+        // Storefront checkout path
+        if (order.paymentStatus !== 'PAID' && this.storeOrderService) {
+          await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', transaction_id);
         }
-
-        const existingPayment = await this.prisma.client.payment.findUnique({
-          where: { providerPaymentId: wipayEventId },
-        });
-
-        if (!existingPayment) {
-          // V1-05: the requested total the verified hash binds, never the callback's `total`.
-          await this.createPaymentWithPosting({
-            provider: 'wipay',
-            providerPaymentId: wipayEventId,
-            amount: requestedTotal,
-            currency: invoice!.currency,
-            status: 'SUCCESSFUL',
-            invoiceId: order_id,
-            businessId: invoice!.businessId,
-          });
-
-          await this.invoiceWorkflow.reconcileFromPayments(order_id).catch((e) => {
-            this.logger.warn(`WiPay reconcile failed for invoice ${order_id}: ${e instanceof Error ? e.message : e}`);
-          });
-
-          this.wipayConnector?.emitPaymentReceived(invoice!.businessId, {
-            amount: requestedTotal,
-            currency: invoice!.currency,
-            invoiceId: order_id,
-            externalId: transaction_id,
-          }).catch((e) => this.logger.warn(`WiPay connector event emission failed: ${e.message}`));
-        }
-
         return { success: true, invoiceId: order_id, message: 'Payment successful' };
-      } catch (error: unknown) {
-        const errMsg = error instanceof Error ? error.message : 'Unknown error';
-        this.logger.error(`Failed to process WiPay payment for order ${order_id}: ${errMsg}`);
-        // V1-15c: nothing was recorded, so the callback is not handled: a redelivery runs it again.
+      }
+
+      const existingPayment = await this.prisma.client.payment.findUnique({
+        where: { providerPaymentId: wipayEventId },
+        select: { status: true, invoiceId: true },
+      });
+
+      // Review V05-SEC-2: only this invoice's own SUCCESSFUL row of this
+      // transaction means it is already recorded. Another row on the id (a
+      // FAILED row a pre-V1-05 failure callback wrote, or another payable's
+      // payment) is not this payment: nothing is recorded (the id is unique)
+      // and the payer is not told it succeeded.
+      if (existingPayment && (existingPayment.status !== 'SUCCESSFUL' || existingPayment.invoiceId !== order_id)) {
+        this.logger.error(
+          `WiPay transaction ${wipayEventId} for invoice ${order_id} not recorded: a ${existingPayment.status} payment of ` +
+            `${existingPayment.invoiceId ?? 'no invoice'} already holds that provider id`,
+        );
         await this.releaseProviderEvent('wipay', wipayEventId);
         return { success: false, invoiceId: order_id, message: 'Payment processing error' };
       }
-    }
 
-    try {
-      if (order) {
-        // A failed attempt never takes back an order already PAID.
-        if (order.paymentStatus !== 'FAILED' && order.paymentStatus !== 'PAID' && this.storeOrderService) {
-          await this.storeOrderService.updatePaymentStatus(order.id, 'FAILED', transaction_id);
-        }
-      } else {
-        await this.prisma.client.payment.create({
-          data: {
-            provider: 'wipay',
-            providerPaymentId: wipayEventId,
-            amount: requestedTotal,
-            currency: invoice!.currency,
-            status: 'FAILED',
-            invoiceId: order_id,
-            businessId: invoice!.businessId,
-          },
-        });
-
-        this.wipayConnector?.emitPaymentFailed(invoice!.businessId, {
+      if (!existingPayment) {
+        // V1-05: the requested total the verified hash binds, never the callback's `total`.
+        await this.createPaymentWithPosting({
+          provider: 'wipay',
+          providerPaymentId: wipayEventId,
           amount: requestedTotal,
           currency: invoice!.currency,
-          error: `WiPay payment status: ${status}`,
+          status: 'SUCCESSFUL',
+          invoiceId: order_id,
+          businessId: invoice!.businessId,
+        });
+
+        await this.invoiceWorkflow.reconcileFromPayments(order_id).catch((e) => {
+          this.logger.warn(`WiPay reconcile failed for invoice ${order_id}: ${e instanceof Error ? e.message : e}`);
+        });
+
+        this.wipayConnector?.emitPaymentReceived(invoice!.businessId, {
+          amount: requestedTotal,
+          currency: invoice!.currency,
           invoiceId: order_id,
           externalId: transaction_id,
         }).catch((e) => this.logger.warn(`WiPay connector event emission failed: ${e.message}`));
       }
+
+      return { success: true, invoiceId: order_id, message: 'Payment successful' };
     } catch (error: unknown) {
       const errMsg = error instanceof Error ? error.message : 'Unknown error';
-      this.logger.error(`Failed to record failed WiPay payment: ${errMsg}`);
-      // V1-15c: the failure was not recorded either, so a redelivery may record it.
+      this.logger.error(`Failed to process WiPay payment for order ${order_id}: ${errMsg}`);
+      // V1-15c: nothing was recorded, so the callback is not handled: a redelivery runs it again.
       await this.releaseProviderEvent('wipay', wipayEventId);
+      return { success: false, invoiceId: order_id, message: 'Payment processing error' };
     }
-
-    return { success: false, invoiceId: order_id, message: 'Payment was not successful' };
   }
 
   async getPaypalClientToken(): Promise<{ clientToken: string }> {
@@ -1761,6 +1807,8 @@ export class PaymentsService {
               description: `Invoice ${invoice.invoiceNumber} - ${invoice.business.name}`,
               amount: {
                 // V1-05: the invoice's own currency (it was USD whatever the invoice's), which the capture checks.
+                // PayPal does not offer every currency (TTD among them): it refuses such an order and the checkout
+                // fails closed here; the up-front 400 is held by pay-link-token-gate TG-14/TG-14b (review V05-COR-4).
                 currencyCode: normalizeCurrency(invoice.currency),
                 value: invoice.total.toFixed(2),
               },
@@ -1808,12 +1856,8 @@ export class PaymentsService {
         where: { id: input.businessId },
         select: { metaData: true },
       });
-      const meta = (business?.metaData as Record<string, any>) || {};
-      const developerId = meta.wipayApiKey || process.env.WIPAY_API_KEY || '1';
-      const isSandbox = !meta.wipayApiKey && !process.env.WIPAY_API_KEY;
-      const apiUrl = isSandbox
-        ? 'https://sandbox.wipayfinancial.com/v1/gateway'
-        : 'https://tt.wipayfinancial.com/v1/gateway_live';
+      // Review V05-SEC-1: developer_id is the account number, never the API key (wipayCheckoutTarget).
+      const { apiUrl, environment, developerId, accountNumber } = PaymentsService.wipayCheckoutTarget(business?.metaData);
 
       const params = new URLSearchParams();
       params.append('total', input.amount.toFixed(2));
@@ -1823,9 +1867,7 @@ export class PaymentsService {
       params.append('order_id', input.orderId);
       params.append('return_url', input.returnUrl || '');
       params.append('developer_id', developerId);
-      params.append('environment', isSandbox ? 'sandbox' : 'live');
-
-      const accountNumber = meta.wipayAccountNumber || process.env.WIPAY_ACCOUNT_NUMBER;
+      params.append('environment', environment);
       if (accountNumber) params.append('account_number', accountNumber);
 
       const response = await fetch(apiUrl, {
