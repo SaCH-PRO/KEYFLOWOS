@@ -38,6 +38,15 @@ updates:
       - "dependencies"
     commit-message:
       prefix: "chore(ci)"
+    # The secret scanner moves by hand, never through Dependabot. ci-cd.yml
+    # pins trufflesecurity/trufflehog to a tag commit AND its CLI image by
+    # digest (`with.version`), and scripts/security/tests/secret-scan-contract
+    # .spec.mjs asserts both. Dependabot would rewrite the commit pin only, so
+    # each release would open a PR that fails the security suite, run an
+    # action against a CLI image of another version, and hold back the rest
+    # of the grouped action bumps behind it.
+    ignore:
+      - dependency-name: "trufflesecurity/trufflehog"
     groups:
       actions-minor-and-patch:
         update-types:

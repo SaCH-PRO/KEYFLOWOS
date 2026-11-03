@@ -30,10 +30,24 @@ jobs:
           # Packet PRs: impl/* (agent-control implementation branches) and,
           # by owner ruling D-22 (V1-40-SEC-TRUST-CENSUS-REDACTION), pkt/*
           # (reconstruction packet branches), which bypassed the gate before.
-          # Fail closed until the grant predicate admits pkt/* heads: today
-          # evaluateGrantGate refuses any head outside impl/*
-          # (scripts/agent-control/lib/admission.mjs, NOT_IMPL_BRANCH), so a
-          # non-draft pkt/* PR cannot pass the grant step below.
+          #
+          # Where a pkt/* PR stops today, draft or not: at "Validate control
+          # artifacts". The .agent-control artifacts a pkt/* branch carries
+          # name an impl/* implementation_branch, and packet workers may not
+          # edit .agent-control/, so the branch check fails closed. If the
+          # artifacts named the pkt/* head, a non-draft PR would still stop
+          # at the grant step: evaluateGrantGate refuses any head outside
+          # impl/* (scripts/agent-control/lib/admission.mjs, NOT_IMPL_BRANCH).
+          #
+          # Limit: this job runs on pull_request, so it executes the PR's own
+          # copy of this workflow and of scripts/agent-control/. A PR that
+          # edits either can make this check pass without a #80 grant. impl/*
+          # heads are re-checked from base code by the trusted merger; pkt/*
+          # heads are not (scripts/agent-control/lib/events.mjs ignores them).
+          # For pkt/* this gate is therefore only as strong as the repository
+          # settings around it: CODEOWNERS names the owner for every path, but
+          # code-owner review is enforced only by branch protection, which is
+          # a repository setting, not code.
           case "$HEAD_REF" in
             impl/*|pkt/*)
               echo "required=true" >> "$GITHUB_OUTPUT"

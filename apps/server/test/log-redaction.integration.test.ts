@@ -45,34 +45,65 @@
  * ContactAuditService and TimelineService are real against the database.
  * Stand-ins: the BullMQ queue (its stand-in hands the job to the real
  * BusinessEventService.emit, as the worker does), Gmail, Drive, AI, catalog,
- * stats caches and the plan-limit count. Listeners other modules register on
- * contact.created / invoice.paid are not mounted here.
+ * stats caches, the plan-limit count and the transactional-email sender.
+ *
+ * THE EVENT BUS. EventEmitterModule.forRoot with the options of
+ * src/core/event-bus/event-bus.module.ts, and the real
+ * AutomationExecutorService (with the real ActivityService) mounted on it: the
+ * contact.created / invoice.paid playbook listener, and the one listener on
+ * those events with a log call that names a contact field
+ * (automation-executor.service.ts:286, `Email sent to ${c.email}`). The other
+ * contact.created listeners (flow/activity-event.listener.ts,
+ * flow/flow.listener.ts, ai/ai.listener.ts,
+ * growth-intelligence/journey-listener.service.ts,
+ * webhooks/webhook-dispatcher.service.ts) are not mounted; their log calls
+ * were read, not run, and interpolate no contact field.
+ *
+ *   flow                                   window
+ *   POST .../contacts with a SEND_EMAIL    operator, bearer JWT; a playbook on
+ *     playbook on contact.created          contact.created (seeded, real listener)
  *
  * RESULT. No contact email, operator bearer JWT or providerPaymentId reaches
- * the logs in any window. The public link token does: LoggingInterceptor's
- * access line is built from req.url
- * (apps/server/src/core/interceptors/logging.interceptor.ts:22). That fix is
- * outside the packet's write set, so its negative control is it.todo naming
- * the file, and a CHARACTERIZATION case pins the one leaking line until it lands.
+ * the logs in the recordPayment, contact create (no playbook) and public link
+ * windows. Two leaks do, both from production log calls outside the packet's
+ * write set, so each negative control is it.todo naming the file and a
+ * CHARACTERIZATION case pins the leaking line until the fix lands:
+ *   - the public link token: LoggingInterceptor's access line is built from
+ *     req.url (apps/server/src/core/interceptors/logging.interceptor.ts:22);
+ *   - the contact email, when a SEND_EMAIL playbook runs on contact.created
+ *     (apps/server/src/modules/flow/automation-executor.service.ts:286).
+ *
+ * The req.url leak is not specific to the link token. Section 1b drives
+ * LoggingInterceptor and GlobalHttpExceptionFilter directly: the access line
+ * also carries platform secrets (the Chatwoot webhook secret in the path,
+ * WHATSAPP_VERIFY_TOKEN in hub.verify_token, an OAuth `code`), and the 500
+ * line (apps/server/src/core/filters/http-exception.filter.ts:65) logs
+ * request.url as well, so a fix to LoggingInterceptor alone leaves it open.
  *
  * Fixtures: prefix `v40a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
  * $transaction wrapping. Literals in globally unique columns embed the prefix.
  *
  * The file also carries the packet's static proofs, which need no database:
- * the agent gate binds pkt/* heads (D-22), dependabot is configured, and the
- * Release 0 trust census cites an existing test path or OPEN on every row and a
- * disposition on every T0 row.
+ * the agent gate binds pkt/* heads (D-22; its scope and validation scripts are
+ * executed with bash against fixture artifacts), dependabot is configured and
+ * leaves the SHA-pinned secret scanner alone, and the Release 0 trust census
+ * cites an existing test path or OPEN on every row and a disposition on every
+ * T0 row.
  */
 import 'reflect-metadata';
 import path from 'path';
-import { existsSync, readFileSync } from 'fs';
+import os from 'os';
+import { existsSync, readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { inspect } from 'util';
 import { createHmac } from 'crypto';
+import { spawnSync } from 'child_process';
+import { lastValueFrom, of, throwError } from 'rxjs';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { Logger, ConsoleLogger } from '@nestjs/common';
+import { Logger, ConsoleLogger, ForbiddenException } from '@nestjs/common';
+import type { ArgumentsHost, CallHandler, ExecutionContext } from '@nestjs/common';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
@@ -248,6 +279,11 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
   const CUSTOMER_EMAIL = `${P}invoice.customer@test.local`;
   /** The contact the operator creates through POST .../contacts. */
   const NEW_CONTACT_EMAIL = `${P}new.contact@test.local`;
+  /** The contact created while a SEND_EMAIL playbook listens on contact.created. */
+  const PLAYBOOK_CONTACT_EMAIL = `${P}playbook.contact@test.local`;
+  const PLAYBOOK_NAME = 'V40A welcome email';
+  /** What the transactional-email stand-in was asked to send (the playbook's effect). */
+  const emailsSent: Array<{ recipientEmail: string; type: string }> = [];
   const OWNER_EMAIL = `${P}owner@test.local`;
   const IDEMPOTENCY_KEY = `${P}idem-0001`;
   const TOTAL = 250;
@@ -276,6 +312,8 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
 
   /** What each window recorded, and what it read afterwards. */
   const windows: Record<string, { entries: LogEntry[]; status: number[] }> = {};
+  /** The contact each contact-create window created. */
+  const windowContacts: Record<string, string> = {};
   let providerPaymentId = '';
 
   async function cleanup() {
@@ -285,6 +323,7 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
       `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
       `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM automations WHERE business_id LIKE ${sqlLikePrefix(P)}`,
       `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
       `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
       `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
@@ -361,7 +400,10 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
     const { Test } = await import('@nestjs/testing');
     const { ValidationPipe } = await import('@nestjs/common');
     const { APP_INTERCEPTOR } = await import('@nestjs/core');
-    const { EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { EventEmitterModule } = await import('@nestjs/event-emitter');
+    const { AutomationExecutorService } = await import('../src/modules/flow/automation-executor.service');
+    const { ActivityService } = await import('../src/modules/flow/activity.service');
+    const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
     const IORedis = (await import('ioredis')).default;
     const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
     const { PrismaService } = await import('../src/core/prisma/prisma.service');
@@ -434,6 +476,9 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
     redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
     const moduleRef = await Test.createTestingModule({
+      // The production event bus (src/core/event-bus/event-bus.module.ts), so
+      // the @OnEvent listeners mounted below run on the emits these flows make.
+      imports: [EventEmitterModule.forRoot({ wildcard: true, delimiter: '.', maxListeners: 50 })],
       controllers: [CommerceController, CrmController],
       providers: [
         PrismaService,
@@ -465,7 +510,19 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
         CrmRateLimitGuard,
         FeatureFlagGuard,
         TeamAuditInterceptor,
-        { provide: EventEmitter2, useValue: new EventEmitter2() },
+        // The contact.created / invoice.paid playbook listener, real, with the
+        // real ActivityService; only the email sender is a stand-in (no provider traffic).
+        AutomationExecutorService,
+        ActivityService,
+        {
+          provide: TransactionalEmailService,
+          useValue: {
+            send: async (input: { recipientEmail: string; type: string }) => {
+              emailsSent.push({ recipientEmail: input.recipientEmail, type: input.type });
+              return { sent: true };
+            },
+          },
+        },
         // Commerce: the real payment, link and ledger chain.
         CommerceService,
         InvoiceWorkflowService,
@@ -597,9 +654,37 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       const contactId = created.body?.id;
       if (contactId) {
         await until(async () => (await db.contactAuditEntry.count({ where: { businessId: ID.biz, contactId } })) > 0);
+        // The real contact.created listener writes its activity row: it ran inside the window.
+        await until(async () => (await db.activity.count({ where: { businessId: ID.biz, entityType: 'contact', entityId: contactId } })) > 0);
+        windowContacts.contactCreate = contactId;
       }
       return [created.status, duplicate.status];
     });
+
+    // ---- window 2b: contact create while a SEND_EMAIL playbook listens -------
+    // Seeded outside the window, as an operator configures it; the real
+    // AutomationExecutorService runs it on the contact.created emit.
+    await db.automation.create({
+      data: {
+        id: `${P}playbook_email`,
+        businessId: ID.biz,
+        name: PLAYBOOK_NAME,
+        trigger: 'contact.created',
+        enabled: true,
+        actionData: { type: 'SEND_EMAIL', notificationType: 'invoice_sent' },
+      },
+    });
+    await captureWindow('contactCreatePlaybook', async () => {
+      const created = await agent()
+        .post(`/crm/businesses/${ID.biz}/contacts`)
+        .set(HEADER_AUTH, `Bearer ${bearer}`)
+        .send({ firstName: `${P}Grace`, lastName: 'Hopper', email: PLAYBOOK_CONTACT_EMAIL });
+      // The playbook's run is recorded after its action: it finished inside the window.
+      await until(async () => ((await db.automation.findUnique({ where: { id: `${P}playbook_email` }, select: { runCount: true } }))?.runCount ?? 0) > 0);
+      windowContacts.contactCreatePlaybook = created.body?.id ?? '';
+      return [created.status];
+    });
+    await db.automation.update({ where: { id: `${P}playbook_email` }, data: { enabled: false } });
 
     // ---- window 3: the customer opens the public invoice link ----------------
     await clearRateLimits();
@@ -669,6 +754,47 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       const leaks = entriesContaining(windows.contactCreate.entries, tokenForms(bearer));
       expect(leaks, describeLeaks(leaks)).toEqual([]);
     });
+
+    it('the real contact.created listener ran inside the window (its activity row landed), with no playbook configured', async () => {
+      const contactId = windowContacts.contactCreate;
+      expect(contactId).toBeTruthy();
+      expect(await db.activity.count({ where: { businessId: ID.biz, entityType: 'contact', entityId: contactId, module: 'crm', action: 'created' } })).toBe(1);
+    });
+  });
+
+  // ---- contact create with a SEND_EMAIL playbook on contact.created ----------
+
+  describe('POST /crm/businesses/:businessId/contacts with a SEND_EMAIL playbook on contact.created (real listener)', () => {
+    it('the window ran the real flow: 201, the playbook ran once and asked the sender for exactly this contact, and the spy saw the access line', async () => {
+      expect(windows.contactCreatePlaybook.status).toEqual([201]);
+      expect(emailsSent).toEqual([{ recipientEmail: PLAYBOOK_CONTACT_EMAIL, type: 'invoice_sent' }]);
+      const playbook = await db.automation.findUnique({ where: { id: `${P}playbook_email` }, select: { runCount: true } });
+      expect(playbook?.runCount).toBe(1);
+      expect(accessLines(windows.contactCreatePlaybook.entries, 'POST', `/crm/businesses/${ID.biz}/contacts`).length).toBe(1);
+    });
+
+    it('NEGATIVE CONTROL: no log entry carries the operator bearer token', () => {
+      const leaks = entriesContaining(windows.contactCreatePlaybook.entries, tokenForms(bearer));
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    // RED when written as an `it` (this repair ran it first): the playbook's
+    // SEND_EMAIL action logs the recipient. The fix is a production logger
+    // call outside this packet's write set:
+    // apps/server/src/modules/flow/automation-executor.service.ts:286 logs
+    // `Email sent to ${c.email}` at log level (and :358 logs the phone for
+    // SEND_WHATSAPP). Logging the contact id instead closes it. When that
+    // lands, this todo becomes an `it` and the CHARACTERIZATION case goes.
+    it.todo(
+      "NEGATIVE CONTROL: no log entry carries the new contact's email when a SEND_EMAIL playbook runs on contact.created — " +
+        'fix outside the write set: apps/server/src/modules/flow/automation-executor.service.ts:286 logs c.email',
+    );
+
+    it('CHARACTERIZATION (open finding IA-044, automation-executor.service.ts:286): only the playbook\'s "Email sent to" line carries the email today', () => {
+      const leaks = entriesContaining(windows.contactCreatePlaybook.entries, emailForms(PLAYBOOK_CONTACT_EMAIL));
+      expect(leaks.map((e) => e.channel)).toEqual(['Logger#log[AutomationExecutorService]']);
+      expect(leaks[0].text).toBe(`Email sent to ${PLAYBOOK_CONTACT_EMAIL} for playbook "${PLAYBOOK_NAME}"`);
+    });
   });
 
   // ---- public invoice link ---------------------------------------------------
@@ -697,8 +823,11 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
     // line from req.url (emitted at :25 slow, :27 debug, :31-33 error), and
     // main.ts keeps Nest's default ConsoleLogger, which prints debug. Logging
     // the route pattern (req.route?.path) instead of the URL closes it for
-    // every token-in-path route. When that lands, this todo becomes the `it`
-    // below with the CHARACTERIZATION case removed.
+    // every token-in-path route. The same req.url leak also covers platform
+    // secrets in paths and queries, and GlobalHttpExceptionFilter logs
+    // request.url on every 500 (section 1b, which has its own todos). When
+    // the fix lands, this todo becomes the `it` below with the
+    // CHARACTERIZATION case removed.
     it.todo(
       "NEGATIVE CONTROL: no log entry carries the link token (the customer's bearer credential) — " +
         'fix outside the write set: apps/server/src/core/interceptors/logging.interceptor.ts:22 logs req.url',
@@ -712,6 +841,120 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       expect(leaks.map((e) => e.channel)).toEqual(['Logger#debug[HTTP]']);
       expect(leaks[0].text).toMatch(new RegExp(`^GET /commerce/public/invoice-link/${linkToken.replace(/[-]/g, '\\-')} 200 \\d+ms \\[`));
     });
+  });
+});
+
+// ===========================================================================
+// 1b. The req.url leak is a class: platform secrets, and the 500 line (no database)
+// ===========================================================================
+
+describe('the HTTP access line and the 500 line log request.url: platform secrets in paths and queries (IA-044 scope)', () => {
+  // Literals only: none of these is a real credential.
+  const CHATWOOT_SECRET = `${P}chatwoot-webhook-secret-0001`;
+  const VERIFY_TOKEN = `${P}whatsapp-verify-token-0001`;
+  const OAUTH_CODE = `${P}oauth-code-0001`;
+  const LINK_TOKEN = `${P}link-token-0001`;
+  const CORRELATION = `${P}corr`;
+
+  let LoggingInterceptorClass: typeof import('../src/core/interceptors/logging.interceptor').LoggingInterceptor;
+  let ExceptionFilterClass: typeof import('../src/core/filters/http-exception.filter').GlobalHttpExceptionFilter;
+
+  /** The slice of an Express response the filter writes to. */
+  interface FakeResponse {
+    status(code: number): FakeResponse;
+    json(body: unknown): FakeResponse;
+  }
+
+  beforeAll(async () => {
+    ({ LoggingInterceptor: LoggingInterceptorClass } = await import('../src/core/interceptors/logging.interceptor'));
+    ({ GlobalHttpExceptionFilter: ExceptionFilterClass } = await import('../src/core/filters/http-exception.filter'));
+  });
+
+  function http(req: Record<string, unknown>, res: unknown): ExecutionContext & ArgumentsHost {
+    return { switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }) } as unknown as ExecutionContext & ArgumentsHost;
+  }
+
+  /** One request through the production LoggingInterceptor; `error` makes the handler throw it. */
+  async function throughInterceptor(method: string, url: string, statusCode: number, error?: Error): Promise<LogEntry[]> {
+    const cap = startCapture();
+    try {
+      const ctx = http({ method, url, correlationId: CORRELATION }, { statusCode });
+      const next: CallHandler = { handle: () => (error ? throwError(() => error) : of({ ok: true })) };
+      await lastValueFrom(new LoggingInterceptorClass().intercept(ctx, next)).catch(() => undefined);
+    } finally {
+      cap.stop();
+    }
+    return cap.entries;
+  }
+
+  /** One exception through the production GlobalHttpExceptionFilter. */
+  function throughFilter(method: string, url: string, exception: unknown): { entries: LogEntry[]; status: number } {
+    const cap = startCapture();
+    let status = 0;
+    try {
+      const res: FakeResponse = {
+        status: (s: number) => {
+          status = s;
+          return res;
+        },
+        json: () => res,
+      };
+      new ExceptionFilterClass().catch(exception, http({ method, url, correlationId: CORRELATION }, res));
+    } finally {
+      cap.stop();
+    }
+    return { entries: cap.entries, status };
+  }
+
+  /** Mounted public routes whose URL carries a platform secret. */
+  const FLOWS = [
+    // apps/server/src/modules/chatwoot/chatwoot.controller.ts:14, POST /chatwoot/webhook/:secret
+    { name: 'the Chatwoot webhook secret in the path', method: 'POST', url: `/chatwoot/webhook/${CHATWOOT_SECRET}`, status: 202, secret: CHATWOOT_SECRET },
+    // apps/server/src/modules/whatsapp/whatsapp.controller.ts:234-237, WHATSAPP_VERIFY_TOKEN in hub.verify_token
+    { name: 'WHATSAPP_VERIFY_TOKEN in the query', method: 'GET', url: `/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=${VERIFY_TOKEN}&hub.challenge=1234`, status: 200, secret: VERIFY_TOKEN },
+    // apps/server/src/modules/google-drive/google-drive.controller.ts:26, an OAuth authorization code
+    { name: 'an OAuth code on a callback', method: 'GET', url: `/drive/callback?state=${P}state&code=${OAUTH_CODE}`, status: 302, secret: OAUTH_CODE },
+  ];
+
+  it.todo(
+    'NEGATIVE CONTROL: no HTTP access line carries a platform secret in the path or query (Chatwoot webhook secret, hub.verify_token, OAuth code) — ' +
+      'fix outside the write set: apps/server/src/core/interceptors/logging.interceptor.ts:22 and :32 log req.url',
+  );
+
+  it.todo(
+    'NEGATIVE CONTROL: no 500 line carries a token in the URL — fix outside the write set: ' +
+      'apps/server/src/core/filters/http-exception.filter.ts:65 logs request.url (a fix to LoggingInterceptor alone leaves it open)',
+  );
+
+  it('CHARACTERIZATION (open finding IA-044, logging.interceptor.ts:22): the success access line carries each platform secret verbatim', async () => {
+    for (const flow of FLOWS) {
+      const entries = await throughInterceptor(flow.method, flow.url, flow.status);
+      const leaks = entriesContaining(entries, [flow.secret]);
+      expect(leaks.map((e) => e.channel), flow.name).toEqual(['Logger#debug[HTTP]']);
+      expect(leaks[0].text, flow.name).toMatch(new RegExp(`^${flow.method} ${flow.url.replace(/[.*?+^$()[\]\\|{}]/g, '\\$&')} ${flow.status} \\d+ms \\[${CORRELATION}\\]$`));
+    }
+  });
+
+  it('CHARACTERIZATION (logging.interceptor.ts:32): the error access line carries it too (a refused hub.verify_token, 403)', async () => {
+    const flow = FLOWS[1];
+    const entries = await throughInterceptor(flow.method, flow.url, 403, new ForbiddenException('Invalid verify token'));
+    const leaks = entriesContaining(entries, [flow.secret]);
+    expect(leaks.map((e) => e.channel)).toEqual(['Logger#error[HTTP]']);
+    expect(leaks[0].text.startsWith(`${flow.method} ${flow.url} ERR `)).toBe(true);
+  });
+
+  it('CHARACTERIZATION (open finding IA-044, http-exception.filter.ts:65): an unhandled error on a token route logs the URL with the token', () => {
+    const { entries, status } = throughFilter('GET', `/commerce/public/invoice-link/${LINK_TOKEN}`, new Error('db down'));
+    expect(status).toBe(500);
+    const leaks = entriesContaining(entries, [LINK_TOKEN]);
+    expect(leaks.map((e) => e.channel)).toEqual(['Logger#error[GlobalHttpExceptionFilter]']);
+    expect(leaks[0].text.startsWith(`Unhandled exception on GET /commerce/public/invoice-link/${LINK_TOKEN} [${CORRELATION}]`)).toBe(true);
+  });
+
+  it('the filter writes the URL only on the 500 branch: a 4xx on the same route logs nothing', () => {
+    const { entries, status } = throughFilter('GET', `/commerce/public/invoice-link/${LINK_TOKEN}`, new ForbiddenException());
+    expect(status).toBe(403);
+    expect(entries).toEqual([]);
   });
 });
 
@@ -772,6 +1015,143 @@ describe('agent control gate: pkt/* heads are packet PRs (D-22)', () => {
     expect(gate).toMatch(/if \[ "\$declared_branch" != "\$HEAD_REF" \]; then/);
     expect(gate).toMatch(/if \[ "\$return_branch" != "\$HEAD_REF" \]; then/);
   });
+
+  // ---- the scripts themselves, executed with bash as the runner does --------
+
+  /** The `run: |` script of one step, de-indented, as the runner hands it to bash. */
+  function stepScript(stepName: string): string {
+    const lines = readFileSync(GATE, 'utf8').replace(/\r\n/g, '\n').split('\n');
+    const start = lines.findIndex((l) => l.trim() === `- name: ${stepName}`);
+    expect(start, `step "${stepName}"`).toBeGreaterThan(0);
+    const stepIndent = lines[start].search(/\S/);
+    let i = start + 1;
+    while (i < lines.length && !/^\s+run: \|\s*$/.test(lines[i])) {
+      expect(lines[i].trim() === '' || lines[i].search(/\S/) > stepIndent, `step "${stepName}" has a run block`).toBe(true);
+      i++;
+    }
+    const runIndent = lines[i].search(/\S/);
+    const body: string[] = [];
+    for (i += 1; i < lines.length; i++) {
+      if (lines[i].trim() !== '' && lines[i].search(/\S/) <= runIndent) break;
+      body.push(lines[i]);
+    }
+    const indent = Math.min(...body.filter((l) => l.trim() !== '').map((l) => l.search(/\S/)));
+    const script = body.map((l) => l.slice(indent)).join('\n').trimEnd() + '\n';
+    // An expression here would be substituted by the runner before bash sees it.
+    expect(script, `step "${stepName}" carries no \${{ }} expression`).not.toContain('${{');
+    return script;
+  }
+
+  /** `shell: bash` on a GitHub runner: bash --noprofile --norc -eo pipefail {0}. */
+  function bash(script: string, cwd: string, env: Record<string, string>) {
+    return spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', script], {
+      cwd,
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: cwd, ...env },
+      encoding: 'utf8',
+    });
+  }
+
+  function scope(headRef: string): { required: string; injected: boolean } {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'v40a-scope-'));
+    try {
+      const out = path.join(dir, 'github_output');
+      writeFileSync(out, '');
+      const r = bash(stepScript('Determine whether packet controls apply'), dir, { HEAD_REF: headRef, GITHUB_OUTPUT: out });
+      expect(r.status, r.stderr).toBe(0);
+      return { required: readFileSync(out, 'utf8').trim(), injected: existsSync(path.join(dir, 'PWNED')) };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('the scope step, executed: pkt/* and impl/* heads are packet PRs; no other head is, and a head ref cannot inject', () => {
+    for (const head of ['pkt/V1-40-SEC-TRUST-CENSUS-REDACTION', 'impl/kf-product-contacts-visibility-001']) {
+      expect(scope(head), head).toEqual({ required: 'required=true', injected: false });
+    }
+    for (const head of ['main', 'pkt', 'Pkt/x', 'feature/pkt/x', 'xpkt/x', 'dependabot/github_actions/x']) {
+      expect(scope(head), head).toEqual({ required: 'required=false', injected: false });
+    }
+    // A legal git ref name (no space) that would run a command if interpolated.
+    expect(scope('pkt/$(touch${IFS}PWNED)')).toEqual({ required: 'required=true', injected: false });
+    expect(scope('x";touch${IFS}PWNED;"')).toEqual({ required: 'required=false', injected: false });
+  });
+
+  /**
+   * A throwaway repository holding control artifacts that name `artifactBranch`,
+   * with the validation step run against it for the PR head `headRef`.
+   */
+  function validate(headRef: string, artifactBranch: string) {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'v40a-validate-'));
+    try {
+      const git = (...args: string[]) => {
+        const r = spawnSync('git', ['-c', 'user.name=v40a', '-c', 'user.email=v40a@test.local', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args], {
+          cwd: dir,
+          env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: dir, GIT_CONFIG_NOSYSTEM: '1' },
+          encoding: 'utf8',
+        });
+        expect(r.status, `git ${args.join(' ')}: ${r.stderr}`).toBe(0);
+        return r.stdout.trim();
+      };
+      git('init', '-q', '-b', 'work');
+      writeFileSync(path.join(dir, 'README.md'), 'v40a fixture\n');
+      git('add', '.');
+      git('commit', '-q', '-m', 'source head');
+      const sourceHead = git('rev-parse', 'HEAD');
+      mkdirSync(path.join(dir, '.agent-control'));
+      const common = [`implementation_branch: ${artifactBranch}`, 'state: PROVING', 'health: GREEN', 'scope_changed: false', 'production_touched: false'];
+      writeFileSync(path.join(dir, '.agent-control/active-packet.yaml'), ['packet_id: V40A-FIXTURE', `source_main: ${sourceHead}`, ...common, ''].join('\n'));
+      writeFileSync(
+        path.join(dir, '.agent-control/claude-return.yaml'),
+        ['packet_id: V40A-FIXTURE', `source_head: ${sourceHead}`, ...common, 'review_status: PENDING_CHATGPT_REVIEW', ''].join('\n'),
+      );
+      git('add', '.');
+      git('commit', '-q', '-m', 'control artifacts');
+      const r = bash(stepScript('Validate control artifacts'), dir, { HEAD_REF: headRef });
+      return { status: r.status, output: `${r.stdout}${r.stderr}` };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('the validation step, executed: a pkt/* PR whose artifacts name an impl/* branch fails closed there, draft or not (CR-V140-2)', () => {
+    const r = validate('pkt/V1-40-SEC-TRUST-CENSUS-REDACTION', 'impl/kf-product-contacts-visibility-001');
+    expect(r.status).toBe(1);
+    expect(r.output).toContain('::error::active-packet.yaml implementation_branch does not match PR head');
+  });
+
+  it('the validation step, executed: artifacts that name the pkt/* head pass it (the remaining barrier for a non-draft PR is the grant step)', () => {
+    const r = validate('pkt/V1-40-SEC-TRUST-CENSUS-REDACTION', 'pkt/V1-40-SEC-TRUST-CENSUS-REDACTION');
+    expect(r.output).toBe('');
+    expect(r.status).toBe(0);
+  });
+
+  it("this checkout's own control artifacts name an impl/* branch, so a pkt/* PR off this base stops at the validation step", () => {
+    const active = path.join(REPO_ROOT, '.agent-control/active-packet.yaml');
+    if (!existsSync(active)) return;
+    const declared = /^implementation_branch:[ \t]*"?([^"\n]*)"?/m.exec(readFileSync(active, 'utf8'))?.[1] ?? '';
+    expect(declared.startsWith('pkt/'), `implementation_branch: ${declared}`).toBe(false);
+  });
+
+  it('CHARACTERIZATION (SEC-V40-2): the gate runs the PR\'s own workflow and script copies, and the comment and the census record that limit', () => {
+    const gate = readFileSync(GATE, 'utf8').replace(/\r\n/g, '\n');
+    // pull_request (not pull_request_target): the workflow file comes from the PR.
+    expect(gate).toMatch(/^on:\n\s+pull_request:\n/m);
+    expect(gate).not.toContain('pull_request_target');
+    // The checkout takes the PR merge ref (no `ref:`), and the grant step runs the checked-out copy.
+    expect(gate).toMatch(/- name: Checkout PR\n\s+uses: actions\/checkout@v4\n\s+with:\n\s+fetch-depth: 0\n/);
+    expect(gate).toContain('node scripts/agent-control/auto-merge-admitted.mjs --grant-only');
+    // The scope step's comment states where pkt/* stops and the self-modification limit, not "cannot pass".
+    const step = gate.slice(gate.indexOf('- name: Determine whether packet controls apply'), gate.indexOf('- name: Validate control artifacts'));
+    expect(step).not.toMatch(/cannot pass the grant step/);
+    expect(step).toContain('at "Validate control');
+    expect(step).toContain("executes the PR's own");
+    // The census carries the same limit on the rows that cite this gate as evidence.
+    const census = readFileSync(path.join(REPO_ROOT, 'docs/reconstruction/product/evidence/RELEASE0-TRUST-CENSUS-001.md'), 'utf8');
+    for (const id of ['IA-048', 'CF-023']) {
+      const row = census.split('\n').find((l) => l.startsWith(`| ${id} |`)) ?? '';
+      expect(row, id).toMatch(/self-modifiable/);
+    }
+  });
 });
 
 // ===========================================================================
@@ -796,6 +1176,24 @@ describe('dependabot: version updates for the workspace and the workflows', () =
       expect(block!).toMatch(/directory: ["']?\/["']?\n/);
       expect(block!).toMatch(/schedule:\n\s+interval: ["']?(daily|weekly|monthly)["']?/);
     }
+  });
+
+  it('the github-actions entry ignores the SHA- and digest-pinned secret scanner, which moves by hand (CR-V140-1)', () => {
+    const text = existsSync(FILE) ? readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n') : '';
+    const actions = text.split(/\n\s*- package-ecosystem: /).slice(1).find((b) => b.replace(/["']/g, '').startsWith('github-actions')) ?? '';
+    // ci-cd.yml pins the action to a tag commit and the CLI image by digest; the
+    // security suite asserts both, and Dependabot would rewrite only the first.
+    const ciCd = readFileSync(path.join(REPO_ROOT, '.github/workflows/ci-cd.yml'), 'utf8');
+    expect(ciCd).toMatch(/uses: trufflesecurity\/trufflehog@[0-9a-f]{40} # v\d+\.\d+\.\d+\n\s+with:\n\s+path: \.\/\n\s+version: '[\d.]+@sha256:[0-9a-f]{64}'/);
+    expect(actions).toMatch(/\n\s+ignore:\n\s+- dependency-name: ["']?trufflesecurity\/trufflehog["']?\n/);
+    // Every other action in the workflows is pinned by tag, which Dependabot moves whole.
+    const shaPinned = new Set<string>();
+    const workflows = path.join(REPO_ROOT, '.github/workflows');
+    for (const name of readdirSync(workflows)) {
+      if (!/\.ya?ml$/.test(name)) continue;
+      for (const m of readFileSync(path.join(workflows, name), 'utf8').matchAll(/uses: ([\w.-]+\/[\w./-]+)@[0-9a-f]{40}\b/g)) shaPinned.add(m[1]);
+    }
+    expect([...shaPinned]).toEqual(['trufflesecurity/trufflehog']);
   });
 });
 
@@ -948,5 +1346,25 @@ describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
   it('IA-044 (log redaction) cites this negative control', () => {
     const row = rows('IA').find((r) => r.id === 'IA-044');
     expect(row?.cells[IA_COL.evidence] ?? '').toContain('`apps/server/test/log-redaction.integration.test.ts`');
+  });
+
+  it('the IA-044, CF-011 and CF-029 OPEN notes name every leak this suite pins, not only the link token (SEC-V40-1, SEC-V40-3)', () => {
+    const notes: Record<string, string> = {
+      'IA-044': rows('IA').find((r) => r.id === 'IA-044')?.cells[IA_COL.evidence] ?? '',
+      'CF-011': rows('CF').find((r) => r.id === 'CF-011')?.cells[CF_COL.evidence] ?? '',
+      'CF-029': rows('CF').find((r) => r.id === 'CF-029')?.cells[CF_COL.evidence] ?? '',
+    };
+    for (const [id, note] of Object.entries(notes)) {
+      for (const needle of ['logging.interceptor.ts:22', 'http-exception.filter.ts:65', 'Chatwoot', 'hub.verify_token', 'OAuth']) {
+        expect(note, `${id} names ${needle}`).toContain(needle);
+      }
+    }
+    // The logged contact email is personal data, not a secret: IA-044 and CF-029 carry it (CF-011 is secrets only).
+    for (const id of ['IA-044', 'CF-029']) expect(notes[id], id).toContain('automation-executor.service.ts:286');
+    const findings = readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n').split('## 6.')[1] ?? '';
+    for (const needle of ['http-exception.filter.ts:65', 'chatwoot.controller.ts:14', 'whatsapp.controller.ts:234-237', 'automation-executor.service.ts:286', 'Validate control artifacts', 'self-modifiable']) {
+      expect(findings, `section 6 names ${needle}`).toContain(needle);
+    }
+    expect(findings).not.toMatch(/A non-draft pkt\/\* PR fails closed at the grant step/);
   });
 });
