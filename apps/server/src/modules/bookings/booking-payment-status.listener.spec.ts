@@ -32,6 +32,13 @@
  *   LS-18  N2-CR/N3-SEC: invoice.reopened / invoice.payment_recorded (a D-14 refund moving an invoice)
  *          re-derive the booking from its invoices, backwards too; DEPOSIT_FORFEITED is never overwritten
  *
+ * Trial-N repair round 2 (deposit recheck), red at f5bbd543:
+ *   LS-19  RC-DEP-1: a deposit holds money only once paid in full, read from its rows in the order they were
+ *          written since it last stood at nothing received (D-14 reopens a fully refunded one to SENT): refund
+ *          and repayment churn never makes a part payment held
+ *   LS-20  RC-DEP-3: both handlers lock the booking row before they read it, and read its invoices and write
+ *          its status in that same transaction, so the compare-and-set covers what the status was derived from
+ *
  * The real-database half (real workflow payloads, real rows) is
  * test/booking-settlement.integration.test.ts S-05.
  */
@@ -56,10 +63,28 @@ type Bk = { id: string; businessId: string; invoiceId: string | null; depositInv
 /** Just enough of Prisma for the listener: findFirst with the where shapes it uses, conditional updateMany. */
 function fakePrisma(invoices: Inv[], bookings: Bk[]) {
   const writes: Array<{ id: string; to: string }> = [];
+  // Trial-N round 2 (RC-DEP-3): each call, and whether it ran inside $transaction.
+  const log: string[] = [];
+  let inTx = 0;
+  const note = (op: string) => log.push(inTx > 0 ? `${op} (tx)` : op);
   const matchIn = (v: string, cond: any) => (cond?.in ? cond.in.includes(v) : cond === undefined || cond === v);
-  const client = {
+  const client: any = {
+    // Interactive transaction over the same fake rows (the listener's booking row lock, RC-DEP-3).
+    $transaction: vi.fn(async (fn: (tx: any) => Promise<unknown>) => {
+      inTx += 1;
+      try {
+        return await fn(client);
+      } finally {
+        inTx -= 1;
+      }
+    }),
+    $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+      note(`$queryRaw ${strings.join('?').replace(/\s+/g, ' ').trim()}`);
+      return [];
+    }),
     invoice: {
       findFirst: vi.fn(async ({ where }: any) => {
+        note('invoice.findFirst');
         const row = invoices.find(
           (i) =>
             i.id === where.id &&
@@ -82,6 +107,7 @@ function fakePrisma(invoices: Inv[], bookings: Bk[]) {
     },
     booking: {
       findFirst: vi.fn(async ({ where }: any) => {
+        note('booking.findFirst');
         const row = bookings.find(
           (b) =>
             b.businessId === where.businessId &&
@@ -91,6 +117,7 @@ function fakePrisma(invoices: Inv[], bookings: Bk[]) {
         return row ? { ...row } : null;
       }),
       updateMany: vi.fn(async ({ where, data }: any) => {
+        note('booking.updateMany');
         const row = bookings.find((b) => b.id === where.id && b.businessId === where.businessId && matchIn(b.paymentStatus, where.paymentStatus));
         if (!row) return { count: 0 };
         row.paymentStatus = data.paymentStatus;
@@ -99,7 +126,7 @@ function fakePrisma(invoices: Inv[], bookings: Bk[]) {
       }),
     },
   };
-  return { prisma: { client } as any, client, writes };
+  return { prisma: { client } as any, client, writes, log };
 }
 
 const A = 'biz_a';
@@ -375,6 +402,90 @@ describe('BookingPaymentStatusListener (V1-28, M42)', () => {
       expect(handler, 'BookingPaymentStatusListener.onInvoiceRefundMoved').toBeTypeOf('function');
       const events = (Reflect.getMetadata(EVENT_LISTENER_METADATA, handler) ?? []).map((m: any) => m.event);
       expect(events.sort()).toEqual(['invoice.payment_recorded', 'invoice.reopened']);
+    });
+  });
+
+  it('LS-19 (trial-N round 2, RC-DEP-1): a deposit holds money only once paid in full since it last stood at nothing received; refund and repayment churn never makes a part payment held', () => {
+    const inv = (status: string, payments: Pay[]) => ({ id: 'd', invoiceNumber: 'N', status, total: 25, currency: 'TTD', payments, creditNotes: [] }) as any;
+    const S = (amount: number): Pay => ({ amount, status: 'SUCCESSFUL' });
+    const R = (amount: number): Pay => ({ amount: -amount, status: 'REFUNDED' });
+    const cases: Array<[string, any, { billedCents: number; heldCents: number; coversCents: number }]> = [
+      // Probe R1: 20 of 25 received, refunded (SENT), 10 received (PARTIALLY_PAID). Gross 30 >= 25, yet never paid in full.
+      ['20 received, refunded, 10 received (never paid in full)', inv('PARTIALLY_PAID', [S(20), R(20), S(10)]), { billedCents: 2500, heldCents: 0, coversCents: 2500 }],
+      // Paid in full, refunded in full (D-14: SENT, paidAt cleared, owed afresh), then 10 received: a part payment on an owed deposit.
+      ['paid in full, refunded in full, then 10 received', inv('PARTIALLY_PAID', [S(25), R(25), S(10)]), { billedCents: 2500, heldCents: 0, coversCents: 2500 }],
+      ['10 received, refunded, 10 received', inv('PARTIALLY_PAID', [S(10), R(10), S(10)]), { billedCents: 2500, heldCents: 0, coversCents: 2500 }],
+      // CONTROLS: paid in full and never reopened to nothing: it holds its net, whatever came after.
+      ['paid in full in two, 10 refunded (S-07e)', inv('PARTIALLY_PAID', [S(15), S(10), R(10)]), { billedCents: 2500, heldCents: 1500, coversCents: 2500 }],
+      ['paid in full in two, 24 refunded, 9 received', inv('PARTIALLY_PAID', [S(24), S(1), R(24), S(9)]), { billedCents: 2500, heldCents: 1000, coversCents: 2500 }],
+      ['churn, then paid in full again (PAID), 5 refunded', inv('PARTIALLY_PAID', [S(20), R(20), S(25), R(5)]), { billedCents: 2500, heldCents: 2000, coversCents: 2500 }],
+      ['churn, then paid in full again (PAID)', inv('PAID', [S(10), R(10), S(25)]), { billedCents: 2500, heldCents: 2500, coversCents: 2500 }],
+    ];
+    for (const [label, deposit, expected] of cases) {
+      expect.soft(depositPosition(deposit), label).toEqual(expected);
+    }
+    // ...so the booking is not DEPOSIT_PAID on a deposit never paid in full, and a final paid beside it is not PAID.
+    expect(derivePaymentStatus({ final: { status: 'SENT' }, deposit: inv('PARTIALLY_PAID', [S(20), R(20), S(10)]) })).toBe('UNPAID');
+    expect(derivePaymentStatus({ final: { status: 'PAID' }, deposit: inv('PARTIALLY_PAID', [S(25), R(25), S(10)]) })).toBe('UNPAID');
+    expect(derivePaymentStatus({ final: { status: 'SENT' }, deposit: inv('PARTIALLY_PAID', [S(15), S(10), R(10)]) })).toBe('DEPOSIT_PAID');
+  });
+
+  it('LS-19b (RC-DEP-1): the settlement select reads the payment rows in the order they were written', async () => {
+    const f = fixture({ finalStatus: 'PAID' });
+    await f.listener.onInvoicePaid(paid('inv_final') as any);
+    const reads = f.client.invoice.findFirst.mock.calls.map(([args]: any[]) => args).filter((args: any) => args.select?.payments);
+    expect(reads.length).toBe(2);
+    for (const args of reads) {
+      expect(args.select.payments.orderBy, `invoice ${args.where.id}`).toEqual([{ createdAt: 'asc' }, { id: 'asc' }]);
+    }
+  });
+
+  describe('LS-20 (trial-N round 2, RC-DEP-3): the compare-and-set covers what the status was derived from', () => {
+    const lockOf = (log: string[]) => log.findIndex((l) => /^\$queryRaw SELECT id FROM bookings .*FOR NO KEY UPDATE \(tx\)$/.test(l));
+
+    it('invoice.paid: the booking row is locked before it is read; its invoices are read and its status written in the same transaction', async () => {
+      const f = fixture();
+      const out = await f.listener.onInvoicePaid(paid('inv_dep') as any);
+      expect(out).toMatchObject({ bookingId: 'bk_a', paymentStatus: 'DEPOSIT_PAID', changed: true });
+      expect(f.client.$transaction).toHaveBeenCalledTimes(1);
+      const lock = lockOf(f.log);
+      expect(lock, f.log.join(' | ')).toBeGreaterThanOrEqual(0);
+      const after = f.log.slice(lock + 1);
+      expect(after, 'after the lock: the booking, its two invoices, the write, all in the transaction').toEqual([
+        'booking.findFirst (tx)',
+        'invoice.findFirst (tx)',
+        'invoice.findFirst (tx)',
+        'booking.updateMany (tx)',
+      ]);
+      expect(f.log.slice(0, lock).some((l) => l.startsWith('booking.')), 'nothing of the booking is read before the lock').toBe(false);
+      // The lock names the booking by the event's business and invoice.
+      const [strings, ...values] = f.client.$queryRaw.mock.calls[0];
+      expect(strings.join('?')).toMatch(/business_id = \?.*deleted_at IS NULL.*invoice_id = \?.*deposit_invoice_id = \?/s);
+      expect(values).toEqual([A, 'inv_dep', 'inv_dep']);
+    });
+
+    it('a refund that moves an invoice: the same lock, reads and write in one transaction', async () => {
+      const f = fixture({ depositStatus: 'SENT', paymentStatus: 'DEPOSIT_PAID', depositPayments: [{ amount: 25, status: 'SUCCESSFUL' }, { amount: -25, status: 'REFUNDED' }] });
+      const out = await f.listener.onInvoiceRefundMoved({ businessId: A, invoice: { id: 'inv_dep', businessId: A } } as any);
+      expect(out).toMatchObject({ bookingId: 'bk_a', paymentStatus: 'UNPAID', changed: true });
+      expect(f.client.$transaction).toHaveBeenCalledTimes(1);
+      const lock = lockOf(f.log);
+      expect(lock, f.log.join(' | ')).toBeGreaterThanOrEqual(0);
+      expect(f.log.slice(lock + 1)).toEqual(['booking.findFirst (tx)', 'invoice.findFirst (tx)', 'invoice.findFirst (tx)', 'booking.updateMany (tx)']);
+      expect(f.log.slice(0, lock).some((l) => l.startsWith('booking.'))).toBe(false);
+    });
+
+    it('CONTROLS: a payload of another tenant, or naming another business, takes no lock; a failure inside the transaction is logged, never thrown', async () => {
+      const f = fixture();
+      await f.listener.onInvoicePaid(paid('inv_dep', B) as any);
+      await f.listener.onInvoicePaid(paid('inv_dep', A, B) as any);
+      await f.listener.onInvoiceRefundMoved({ businessId: B, invoice: { id: 'inv_dep', businessId: B } } as any);
+      expect(f.client.$queryRaw).not.toHaveBeenCalled();
+      expect(f.writes).toEqual([]);
+      const g = fixture();
+      g.client.booking.findFirst.mockRejectedValueOnce(new Error('lock timeout'));
+      await expect(g.listener.onInvoicePaid(paid('inv_dep') as any)).resolves.toMatchObject({ changed: false });
+      expect(g.writes).toEqual([]);
     });
   });
 });

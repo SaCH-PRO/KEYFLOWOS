@@ -72,7 +72,18 @@
  *   S-12  N4-SEC  a refund on a deposit never settled (part paid) does not make it hold money
  *   S-13  N1-CR   a deposit paid then part-credited (D-28 PARTIALLY_CREDITED) is not owed: the paid
  *                 final makes the booking PAID
- *   TODO  CR-V28-4   a business-initiated cancel forfeits nothing (needs a cancel-initiator input)
+ *
+ * Trial-N repair round 2 (deposit recheck), red at f5bbd543:
+ *   S-14  RC-DEP-1  refund and repayment churn never makes a part payment held: a deposit holds money
+ *                 only once paid in full since it last stood at nothing received (D-14 reopens a
+ *                 fully refunded one to SENT, owed afresh); a cancel forfeits nothing
+ *   S-15  RC-DEP-2  the invoice reconcile, InvoiceWorkflowService.getBalance and mark-paid read the
+ *                 invoice's own-tenant payment rows (M31): a foreign row neither settles a deposit
+ *                 (then forfeit through its PAID status) nor reopens one, nor stands in for the
+ *                 money mark-paid records
+ *   S-16  RC-DEP-3  a re-derivation racing a payment or refund leaves the booking as its invoices
+ *                 state it: the listener reads and writes under the booking row lock
+ *   TODO  CR-V28-4  a business-initiated cancel forfeits nothing (needs a cancel-initiator input)
  *   TODO  CR-V28-3   the storefront passes the token link into the confirmation (book/[slug]/page.tsx)
  *
  * Nothing on the money path is mocked: PrismaService, AuthGuard, BusinessGuard,
@@ -1047,6 +1058,223 @@ describe('Trial-N integration review: the deposit rule under D-14 (V1-28 x V1-29
     const finalId = (await bookingRow(b.bookingId)).invoiceId;
     await settle(finalId, 85);
     expect((await bookingRow(b.bookingId)).paymentStatus, '25 received for the 15 the deposit bills, and the 85 final paid').toBe('PAID');
+  });
+});
+
+describe('Trial-N repair round 2: the deposit recheck (RC-DEP-1, RC-DEP-2, RC-DEP-3)', () => {
+  const forfeitRowsOf = (bookingId: string) => contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === bookingId);
+  /** A payment row tagged with ANOTHER business on an invoice of this one: Payment has no FK to Business (M31). No known writer does this today. */
+  let foreignSeq = 0;
+  const foreignRow = (invoiceId: string, amount: number, status: string) =>
+    db.payment.create({
+      data: { amount, currency: 'TTD', status, provider: 'cash', method: 'cash', providerPaymentId: `${P}r2_foreign_${++foreignSeq}`, businessId: ID.bizB, invoiceId },
+    });
+  /** The business's own payment rows on the invoice, oldest first. */
+  const ownRows = async (invoiceId: string) =>
+    (await db.payment.findMany({ where: { invoiceId, businessId: ID.biz }, orderBy: { createdAt: 'asc' } })).map((p: any) => `${p.status} ${money(p.amount)}`);
+  /** The manual refund (D-14) of the business's own SUCCESSFUL payment of `amount` on the invoice. */
+  const refundPayment = async (invoiceId: string, amount: number) => {
+    const payment = await db.payment.findFirst({ where: { invoiceId, businessId: ID.biz, status: 'SUCCESSFUL', amount }, orderBy: { createdAt: 'desc' } });
+    return commerce.markPaymentRefunded(payment.id, ID.biz, 'goodwill', ID.owner);
+  };
+  const eventsOf = (name: string, invoiceId: string) => emitted.filter((e) => e.name === name && e.payload?.invoice?.id === invoiceId);
+
+  it('S-14 RC-DEP-1: refund and repayment churn never makes a part payment on a deposit held: a cancel forfeits nothing; CONTROL: one paid in full and never refunded back to nothing forfeits its net', async () => {
+    // Probe R1: 20 of 25 received, refunded (SENT), 10 received (PARTIALLY_PAID): 30 received in all, never paid in full.
+    const a = await book(ID.svcDep, 's14_churn');
+    await sendAndPay(a.depositInvoiceId!, 20);
+    await refundPayment(a.depositInvoiceId!, 20);
+    expect((await invoiceRow(a.depositInvoiceId!)).status).toBe('SENT');
+    await sendAndPay(a.depositInvoiceId!, 10);
+    expect((await invoiceRow(a.depositInvoiceId!)).status).toBe('PARTIALLY_PAID');
+    await deliverToPaymentStatusListener(a.depositInvoiceId!, REFUND_MOVES);
+    expect((await bookingRow(a.bookingId)).paymentStatus, '10 of 25 is a part payment on a deposit still owed').toBe('UNPAID');
+    const c1 = await setStatus(a.bookingId, 'CANCELLED');
+    expect(c1.status, JSON.stringify(c1.body)).toBe(201);
+    expect(c1.body.depositForfeit ?? null, 'nothing is held, so nothing is forfeit').toBeNull();
+    expect(c1.body.paymentStatus).toBe('UNPAID');
+    expect(forfeitRowsOf(a.bookingId)).toHaveLength(0);
+
+    // Paid in full, refunded in full (D-14: back to SENT, paidAt cleared, owed afresh), then 10 received: a part payment again.
+    const b = await book(ID.svcDep, 's14_reopened');
+    await settle(b.depositInvoiceId!, 25);
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('DEPOSIT_PAID');
+    await refundPayment(b.depositInvoiceId!, 25);
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('SENT');
+    await sendAndPay(b.depositInvoiceId!, 10);
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('PARTIALLY_PAID');
+    await deliverToPaymentStatusListener(b.depositInvoiceId!, REFUND_MOVES);
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('UNPAID');
+    const c2 = await setStatus(b.bookingId, 'CANCELLED');
+    expect(c2.status, JSON.stringify(c2.body)).toBe(201);
+    expect(c2.body.depositForfeit ?? null).toBeNull();
+    expect(forfeitRowsOf(b.bookingId)).toHaveLength(0);
+
+    // CONTROL: paid in full (24 + 1), the 24 refunded (net 1: never back to nothing), 9 received: it holds 10 and a cancel forfeits 10.
+    const c = await book(ID.svcDep, 's14_control');
+    await sendAndPay(c.depositInvoiceId!, 24);
+    await settle(c.depositInvoiceId!, 1);
+    await refundPayment(c.depositInvoiceId!, 24);
+    expect((await invoiceRow(c.depositInvoiceId!)).status).toBe('PARTIALLY_PAID');
+    await sendAndPay(c.depositInvoiceId!, 9);
+    await deliverToPaymentStatusListener(c.depositInvoiceId!, REFUND_MOVES);
+    expect((await bookingRow(c.bookingId)).paymentStatus).toBe('DEPOSIT_PAID');
+    const c3 = await setStatus(c.bookingId, 'CANCELLED');
+    expect(c3.status, JSON.stringify(c3.body)).toBe(201);
+    expect(c3.body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    expect(c3.body.depositForfeit).toMatchObject({ depositInvoiceId: c.depositInvoiceId, amount: 10 });
+    expect(forfeitRowsOf(c.bookingId).map((e) => e.data.amount)).toEqual([10]);
+  });
+
+  it("S-15 RC-DEP-2: the reconcile, the invoice balance and mark-paid read the deposit's own-tenant rows only: a foreign row neither settles nor reopens it, nor stands in for the money mark-paid records", async () => {
+    // (a) Another business's SUCCESSFUL 25 on an owed deposit, then 1 received: PARTIALLY_PAID, not PAID; nothing held, nothing forfeit.
+    const a = await book(ID.svcDep, 's15_settle');
+    await workflow.transition(a.depositInvoiceId!, 'SENT');
+    await foreignRow(a.depositInvoiceId!, 25, 'SUCCESSFUL');
+    await commerce.recordPayment(a.depositInvoiceId!, ID.biz, { amount: 1, method: 'cash' }, { actorId: ID.owner });
+    expect((await invoiceRow(a.depositInvoiceId!)).status, "another tenant's row does not settle the deposit").toBe('PARTIALLY_PAID');
+    expect(paidEventsFor(a.depositInvoiceId!), 'no invoice.paid for 1 of 25').toHaveLength(0);
+    expect(await workflow.getBalance(a.depositInvoiceId!)).toMatchObject({ paid: 1, net: 1, remaining: 24, isFullyPaid: false });
+    await deliverToPaymentStatusListener(a.depositInvoiceId!, REFUND_MOVES);
+    const c1 = await setStatus(a.bookingId, 'CANCELLED');
+    expect(c1.status, JSON.stringify(c1.body)).toBe(201);
+    expect(c1.body.depositForfeit ?? null, 'the business received 1: nothing is forfeit').toBeNull();
+    expect((await bookingRow(a.bookingId)).paymentStatus).toBe('UNPAID');
+    expect(forfeitRowsOf(a.bookingId)).toHaveLength(0);
+
+    // (b) Own 20 + 5 received (PAID), another business's negative REFUNDED 25, then own 5 refunded: PARTIALLY_PAID holding 20, not reopened to SENT.
+    const b = await book(ID.svcDep, 's15_reopen');
+    await sendAndPay(b.depositInvoiceId!, 20);
+    await settle(b.depositInvoiceId!, 5);
+    await foreignRow(b.depositInvoiceId!, -25, 'REFUNDED');
+    await refundPayment(b.depositInvoiceId!, 5);
+    const reopened = await invoiceRow(b.depositInvoiceId!);
+    expect(reopened.status, "another tenant's refund row does not reopen the deposit").toBe('PARTIALLY_PAID');
+    expect(eventsOf('invoice.reopened', b.depositInvoiceId!)).toHaveLength(0);
+    expect(await workflow.getBalance(b.depositInvoiceId!)).toMatchObject({ paid: 25, refunded: 5, net: 20, remaining: 5 });
+    await deliverToPaymentStatusListener(b.depositInvoiceId!, REFUND_MOVES);
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('DEPOSIT_PAID');
+    const c2 = await setStatus(b.bookingId, 'CANCELLED');
+    expect(c2.status, JSON.stringify(c2.body)).toBe(201);
+    expect(c2.body.depositForfeit).toMatchObject({ depositInvoiceId: b.depositInvoiceId, amount: 20 });
+
+    // (c) Mark-paid on an owed deposit carrying another business's SUCCESSFUL 25: it records the 25 owed as the business's own payment.
+    const m = await book(ID.svcDep, 's15_markpaid');
+    await workflow.transition(m.depositInvoiceId!, 'SENT');
+    await foreignRow(m.depositInvoiceId!, 25, 'SUCCESSFUL');
+    const marked = await commerce.markInvoicePaid(m.depositInvoiceId!, ID.owner, ID.biz);
+    expect(marked.status).toBe('PAID');
+    expect(await ownRows(m.depositInvoiceId!), 'the money mark-paid says arrived is recorded on the business').toEqual(['SUCCESSFUL 25']);
+    expect(await workflow.getBalance(m.depositInvoiceId!)).toMatchObject({ paid: 25, net: 25, remaining: 0, isFullyPaid: true });
+  });
+
+  /**
+   * Holds the booking row lock (SELECT ... FOR UPDATE) in a transaction of the
+   * test's own until release(): a stand-in for "a write is in flight", so the
+   * order the listener's reads and writes land in is the test's, not the
+   * scheduler's.
+   */
+  async function holdBookingLock(bookingId: string) {
+    let release!: () => void;
+    const released = new Promise<void>((r) => (release = r));
+    let ready!: (pid: number) => void;
+    const locked = new Promise<number>((r) => (ready = r));
+    const done = db.$transaction(
+      async (tx: any) => {
+        const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+        await tx.$queryRaw`SELECT id FROM bookings WHERE id = ${bookingId} FOR UPDATE`;
+        ready(Number(pid));
+        await released;
+      },
+      { timeout: 60_000, maxWait: 10_000 },
+    );
+    const pid = await Promise.race([
+      locked,
+      done.then(() => {
+        throw new Error('the lock transaction ended before it held the lock');
+      }),
+    ]);
+    return {
+      pid,
+      release: async () => {
+        release();
+        await done;
+      },
+    };
+  }
+
+  /** Sessions of this database waiting behind `pid`, directly or behind one that is. */
+  async function waitersBehind(pid: number): Promise<number> {
+    const rows: Array<{ n: number }> = await db.$queryRawUnsafe(
+      `WITH w AS (SELECT a.pid, pg_blocking_pids(a.pid) AS b FROM pg_stat_activity a WHERE a.datname = current_database() AND a.wait_event_type = 'Lock')
+       SELECT count(*)::int AS n FROM w WHERE $1::int = ANY(w.b) OR EXISTS (SELECT 1 FROM w w2 WHERE w2.pid = ANY(w.b) AND $1::int = ANY(w2.b))`,
+      pid,
+    );
+    return Number(rows[0]?.n ?? 0);
+  }
+
+  /** Until `n` sessions wait behind `pid`, or `stop()` says the call it waits for finished without waiting. */
+  async function untilWaiting(pid: number, n: number, stop: () => boolean = () => false) {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      if (stop() || (await waitersBehind(pid)) >= n) return;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    throw new Error(`fewer than ${n} session(s) waited behind the test's booking lock`);
+  }
+
+  it('S-16 RC-DEP-3: a re-derivation racing a payment or refund of the deposit leaves the booking as its invoices state it (the backward write the recheck found, and its forward mirror)', async () => {
+    const listener = paymentStatusListener;
+    const failures = vi.spyOn((listener as any).logger, 'error');
+
+    // (a) The recheck's probe: the refund's re-derivation reads the deposit SENT; the deposit is paid again and its
+    // invoice.paid handled (DEPOSIT_PAID already: nothing to write) before that re-derivation's write lands.
+    const a = await book(ID.svcDep, 's16_back');
+    await settle(a.depositInvoiceId!, 25);
+    expect((await bookingRow(a.bookingId)).paymentStatus).toBe('DEPOSIT_PAID');
+    await refundPayment(a.depositInvoiceId!, 25);
+    const [reopen] = eventsOf('invoice.reopened', a.depositInvoiceId!);
+    expect(reopen, 'the full refund reopened the deposit (D-14)').toBeDefined();
+    const lockA = await holdBookingLock(a.bookingId);
+    const rederiveA = listener.onInvoiceRefundMoved(reopen.payload);
+    await untilWaiting(lockA.pid, 1);
+    emitted.length = 0;
+    await sendAndPay(a.depositInvoiceId!, 25);
+    const [paidAgain] = paidEventsFor(a.depositInvoiceId!);
+    let appliedA = false;
+    const applyA = listener.onInvoicePaid(paidAgain).finally(() => {
+      appliedA = true;
+    });
+    await untilWaiting(lockA.pid, 2, () => appliedA);
+    await lockA.release();
+    await Promise.all([rederiveA, applyA]);
+    expect((await invoiceRow(a.depositInvoiceId!)).status).toBe('PAID');
+    expect((await bookingRow(a.bookingId)).paymentStatus, 'the deposit is paid again, so it is held').toBe('DEPOSIT_PAID');
+
+    // (b) The mirror: a payment's invoice.paid reads the deposit PAID; the deposit is refunded in full and the
+    // refund's re-derivation handled (UNPAID already: nothing to write) before that invoice.paid's write lands.
+    const b = await book(ID.svcDep, 's16_fwd');
+    await workflow.transition(b.depositInvoiceId!, 'SENT');
+    emitted.length = 0;
+    await sendAndPay(b.depositInvoiceId!, 25);
+    const [paidB] = paidEventsFor(b.depositInvoiceId!);
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('UNPAID');
+    const lockB = await holdBookingLock(b.bookingId);
+    const applyB = listener.onInvoicePaid(paidB);
+    await untilWaiting(lockB.pid, 1);
+    await refundPayment(b.depositInvoiceId!, 25);
+    const [reopenB] = eventsOf('invoice.reopened', b.depositInvoiceId!);
+    let rederivedB = false;
+    const rederiveB = listener.onInvoiceRefundMoved(reopenB.payload).finally(() => {
+      rederivedB = true;
+    });
+    await untilWaiting(lockB.pid, 2, () => rederivedB);
+    await lockB.release();
+    await Promise.all([applyB, rederiveB]);
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('SENT');
+    expect((await bookingRow(b.bookingId)).paymentStatus, 'refunded in full: nothing is held').toBe('UNPAID');
+
+    expect(failures, 'no derivation failed (a lock timeout would be logged here)').not.toHaveBeenCalled();
   });
 });
 

@@ -352,7 +352,7 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
     currency: string;
     businessId: string;
     paidAt: Date | null;
-    payments: Array<{ amount: number; status: string }>;
+    payments: Array<{ amount: number; status: string; businessId?: string }>;
   };
 
   function fakeDb(invoice: Inv, label: string) {
@@ -400,6 +400,7 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
     return { service, client, tx, $transaction, events, expensePosting };
   }
 
+  // Trial-N round 2 (RC-DEP-2): the rows are the invoice's own tenant's, as Payment rows carry businessId.
   const sent = (payments: Inv['payments']): Inv => ({
     id: 'inv_1',
     status: 'SENT',
@@ -407,7 +408,7 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
     currency: 'TTD',
     businessId: 'biz_1',
     paidAt: null,
-    payments,
+    payments: payments.map((p) => ({ businessId: 'biz_1', ...p })),
   });
 
   it('with tx + eventBuffer: reads and writes through tx only, opens no transaction of its own, buffers invoice.payment_recorded instead of emitting', async () => {
@@ -621,7 +622,7 @@ describe('V1-29 refund convention (D-14)', () => {
     currency: string;
     businessId: string;
     paidAt: Date | null;
-    payments: Array<{ amount: number; status: string }>;
+    payments: Array<{ amount: number; status: string; businessId?: string }>;
   };
 
   function build(invoice: Inv) {
@@ -641,6 +642,7 @@ describe('V1-29 refund convention (D-14)', () => {
     return { service, tx, update, events, expensePosting };
   }
 
+  // Trial-N round 2 (RC-DEP-2): the rows are the invoice's own tenant's, as Payment rows carry businessId.
   const paidInvoice = (payments: Inv['payments'], status = 'PAID'): Inv => ({
     id: 'inv_1',
     status,
@@ -648,7 +650,7 @@ describe('V1-29 refund convention (D-14)', () => {
     currency: 'TTD',
     businessId: 'biz_1',
     paidAt: new Date('2026-10-01T00:00:00Z'),
-    payments,
+    payments: payments.map((p) => ({ businessId: 'biz_1', ...p })),
   });
 
   it('RED-BEFORE: the refund reconcile moves a fully refunded PAID invoice to SENT, clears paidAt, posts no COGS and queues only invoice.reopened (no invoice.sent email, no paid event; V1-42c)', async () => {
@@ -730,5 +732,34 @@ describe('V1-29 refund convention (D-14)', () => {
     const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: [], onIllegalTransition: 'keep' });
     expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: true, balance: { paid: 100, refunded: 60, net: 40, remaining: 60 } });
     expect(h.update.mock.calls[0][0].data).toEqual({ status: 'PARTIALLY_PAID', paidAt: null });
+  });
+
+  // Trial-N repair round 2 (RC-DEP-2): Payment sits outside the tenant
+  // extension and has no FK to Business (M31), so a row carrying another
+  // businessId is not this invoice's money (the receipt, receivables and
+  // payments-ops balance readers hold this: SEC-V29B-1, SEC-V49-1). The
+  // reconcile derived the status from every row on the invoice.
+  const foreign = (row: { amount: number; status: string }) => ({ ...row, businessId: 'biz_other' });
+
+  it('RC-DEP-2: a SUCCESSFUL row of another business is not the invoice\'s money: 1 received on 25 is PARTIALLY_PAID, not PAID, and no invoice.paid is queued', async () => {
+    const h = build({ ...paidInvoice([foreign(ok(25)), ok(1)], 'SENT'), total: 25, paidAt: null });
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: buffer });
+    expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: true, balance: { paid: 1, net: 1, remaining: 24 } });
+    expect(buffer.map((e) => e.name)).toEqual(['invoice.payment_recorded']);
+  });
+
+  it('RC-DEP-2: a negative REFUNDED row of another business does not reopen the invoice: 20 + 5 received, 5 refunded -> PARTIALLY_PAID net 20 (not SENT)', async () => {
+    const h = build({ ...paidInvoice([ok(20), ok(5), foreign(refunded(25)), refunded(5)]), total: 25 });
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: buffer, onIllegalTransition: 'keep' });
+    expect(result).toMatchObject({ status: 'PARTIALLY_PAID', changed: true, balance: { paid: 25, refunded: 5, net: 20, remaining: 5 } });
+    expect(buffer.map((e) => e.name)).toEqual(['invoice.payment_recorded']);
+  });
+
+  it('RC-DEP-2 CONTROL: the invoice\'s own rows alone settle it as before (25 received on 25: PAID)', async () => {
+    const h = build({ ...paidInvoice([ok(25)], 'SENT'), total: 25, paidAt: null });
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: [] });
+    expect(result).toMatchObject({ status: 'PAID', changed: true, balance: { net: 25, remaining: 0 } });
   });
 });
