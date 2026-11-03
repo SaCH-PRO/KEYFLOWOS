@@ -166,6 +166,15 @@ const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActi
   update_status_with_confirmation: [{ module: 'revenue', minLevel: 'write' }],
 };
 
+/**
+ * Trial-N integration review NEW-4: contact reads the dispatcher makes with no actor. They query
+ * every contact of the business (no visibilityClause), so a member kept to their own book, or
+ * one who may not see another member's PRIVATE contact, would read the whole book with its
+ * emails and phones, which GET contacts refuses them. The OWNER's only, like the crm reads of
+ * POST cortex/query (CRM_READ_OWNER_ONLY there).
+ */
+const GRAPH_ACTION_CONTACT_READ_TOOLS: ReadonlySet<string> = new Set(['crm_list_contacts', 'crm_search_contacts']);
+
 /** What a member must hold to execute a stored step of `toolName` from this route. */
 export interface GraphActionRequirement {
   /** Every module scope, as ModuleScopeGuard reads it. */
@@ -174,7 +183,8 @@ export interface GraphActionRequirement {
    * Why only the business's OWNER (or a SUPER_ADMIN) may run it (V1-31b review SEC-V131b-1).
    * The dispatcher calls these with no actor, so the HTTP row checks never run:
    * CRM_ROW_VISIBILITY_TOOLS reach any contact (visibilityClause keeps another member's PRIVATE
-   * contact from everyone but the OWNER), and GOVERNED_UNGRANTED tools do work beside the
+   * contact from everyone but the OWNER), GRAPH_ACTION_CONTACT_READ_TOOLS read every contact
+   * likewise (trial-N review NEW-4), and GOVERNED_UNGRANTED tools do work beside the
    * governed call that no member route does. JobRolePolicy grants them to no key; here only the
    * principal whose HTTP access is the whole business runs them.
    */
@@ -192,6 +202,8 @@ export function graphActionRequirement(toolName: string): GraphActionRequirement
   const requirement: GraphActionRequirement = { scopes: [scope, ...extra] };
   if (CRM_ROW_VISIBILITY_TOOLS.includes(toolName)) {
     requirement.ownerOnly = 'it writes a contact with no actor, so no visibility clause bounds the row it reaches';
+  } else if (GRAPH_ACTION_CONTACT_READ_TOOLS.has(toolName)) {
+    requirement.ownerOnly = "it reads every contact with no actor, so no visibility clause keeps another member's PRIVATE contact out";
   } else if (Object.prototype.hasOwnProperty.call(GOVERNED_UNGRANTED, toolName)) {
     requirement.ownerOnly = GOVERNED_UNGRANTED[toolName];
   }
@@ -311,6 +323,14 @@ export class GraphActionsController {
    * confirmation or an approval is given back (pending): asking again reaches
    * the boundary, which answers the same action for the same step, or, once it
    * ran, its recorded outcome. Every run is recorded under the caller's id.
+   *
+   * Trial-N integration review: a step runs for the member who proposed its
+   * plan or the business OWNER (NEW-2, the rule KeyCortexPlannerService
+   * applies to a KEY plan), a platform SUPER_ADMIN who is not a member does
+   * not write the business's invoices (NEW-1, D-46), and a step queued for
+   * approval runs once its approval item is approved (correctness NEW-3:
+   * finalizeResolution gives the step back as pending "so it can be
+   * executed"; asking again no longer queues a second item).
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('actions/businesses/:businessId/execute')
@@ -328,7 +348,7 @@ export class GraphActionsController {
 
     const step = await this.prisma.client.aiPlanStep.findFirst({
       where: { id: planStepId, planId, plan: { businessId } },
-      include: { plan: { select: { status: true, role: true } } },
+      include: { plan: { select: { status: true, role: true, userId: true } } },
     });
     if (!step) throw new NotFoundException('Plan step not found');
     if (body.toolName !== undefined || body.args !== undefined) {
@@ -339,7 +359,7 @@ export class GraphActionsController {
     if (!OPEN_PLAN_STATUS_SET.has(step.plan.status)) {
       throw new ConflictException(`This plan is ${step.plan.status}; its steps are executed by the plan, not from here`);
     }
-    await this.authorizeGraphAction(businessId, { id: userId, role: user.role }, toolName);
+    await this.authorizeGraphAction(businessId, { id: userId, role: user.role }, toolName, step.plan.userId);
 
     const spent = () => new ConflictException('This plan step was already executed or is being executed');
     if (step.status !== 'pending') throw spent();
@@ -386,7 +406,16 @@ export class GraphActionsController {
       return { success: false, blocked: true, reason: decision.reason, tier: decision.tier };
     }
 
-    if (decision.requiresFormalApproval || decision.requiresAdminApproval) {
+    // An approval item for this step that a member approved (finalizeResolution then gives the
+    // step back as pending): the approval it asked for is given, so the step runs.
+    const approved =
+      decision.requiresFormalApproval || decision.requiresAdminApproval
+        ? await this.prisma.client.aiApprovalItem.findFirst({
+            where: { businessId, planStepId: step.id, status: 'approved' },
+            select: { id: true },
+          })
+        : null;
+    if ((decision.requiresFormalApproval || decision.requiresAdminApproval) && !approved) {
       if (!(await claim('awaiting_approval'))) throw spent();
       let approval: { id: string };
       try {
@@ -463,7 +492,7 @@ export class GraphActionsController {
       );
       await audit('graph_action:execute', {
         success: result.success,
-        rationale: `Plan step ${step.id} executed by ${userId}`,
+        rationale: `Plan step ${step.id} executed by ${userId}${approved ? ` (approval ${approved.id})` : ''}`,
         errorMessage: result.success ? undefined : result.error,
         durationMs,
       });
@@ -508,15 +537,25 @@ export class GraphActionsController {
 
   /**
    * Whether the member may execute `toolName` here (graphActionRequirement). A refused or
-   * unmapped tool is 403 for everyone. SUPER_ADMIN passes the rest. Otherwise: a member of the
-   * business; the OWNER alone for an owner-only tool; every module scope as ModuleScopeGuard
+   * unmapped tool is 403 for everyone. SUPER_ADMIN passes the rest, except that one who is not a
+   * member of the business does not write its invoices (a revenue write; D-46, trial-N review
+   * NEW-1): the dispatcher writes as KEY_SYSTEM_ACTOR_ID, so the service membership check that
+   * refuses that principal over HTTP never runs. Otherwise: a member of the business; the OWNER
+   * alone for an owner-only tool; every module scope as ModuleScopeGuard
    * computes it (the membership's explicit scope map, else its role's defaults); and, for a
    * contact create / edit / delete, the CRM sub-permission as resolveCrmAccess computes it over
    * HTTP, held for the whole book (crm_view 'all' and the scope 'any'), because the dispatcher
    * passes no actor that could keep the write to the member's own contacts (the rule
-   * JobRolePolicy's crmWithheld applies to a KEY envelope).
+   * JobRolePolicy's crmWithheld applies to a KEY envelope). Last, the step must be the
+   * member's own: its plan was proposed by them, or they are the business OWNER (trial-N review
+   * NEW-2; KeyCortexPlannerService.assertMayExecutePlan's rule for the same ai_plans rows).
    */
-  private async authorizeGraphAction(businessId: string, user: { id: string; role?: string }, toolName: string): Promise<void> {
+  private async authorizeGraphAction(
+    businessId: string,
+    user: { id: string; role?: string },
+    toolName: string,
+    proposerId: string | null,
+  ): Promise<void> {
     const requirement = graphActionRequirement(toolName);
     if (!requirement) {
       throw new ForbiddenException(`Tool "${toolName}" is mapped to no module scope, so it is not executed from this route`);
@@ -524,11 +563,16 @@ export class GraphActionsController {
     if ('refused' in requirement) {
       throw new ForbiddenException(`Tool "${toolName}" is not executed from this route: ${requirement.refused}`);
     }
-    if (user.role === 'SUPER_ADMIN') return;
     const membership = await this.prisma.client.membership.findUnique({
       where: { userId_businessId: { userId: user.id, businessId } },
       select: { role: true, permissionScopes: true },
     });
+    if (user.role === 'SUPER_ADMIN') {
+      if (!membership && requirement.scopes.some((s) => s.module === 'revenue' && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write)) {
+        throw new ForbiddenException('Not a member of this business: a platform SUPER_ADMIN who is not a member does not write its invoices (D-46)');
+      }
+      return;
+    }
     if (!membership) throw new ForbiddenException('Not a member of this business');
     if (requirement.ownerOnly && membership.role !== 'OWNER') {
       throw new ForbiddenException(`Tool "${toolName}" is executed from here only for the business owner: ${requirement.ownerOnly}`);
@@ -550,6 +594,9 @@ export class GraphActionsController {
           `Insufficient permissions: "${toolName}" needs crm_view all and ${requirement.crmSubPermission} any (you have crm_view ${access.viewAll ? 'all' : 'owned'}, ${requirement.crmSubPermission} ${scope})`,
         );
       }
+    }
+    if (membership.role !== 'OWNER' && (!proposerId || proposerId !== user.id)) {
+      throw new ForbiddenException('This plan step is executed only for the member who proposed it or the business owner');
     }
   }
 

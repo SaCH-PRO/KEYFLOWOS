@@ -7,6 +7,18 @@ import { AiOversightService } from './ai-oversight.service';
 import { AiMemoryService } from './ai-memory.service';
 import { ParsedIntent } from './intent-parser.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
+import { getToolByName } from './flow-tool-registry';
+
+/**
+ * Trial-N integration review (correctness NEW-2 / V1-31c CRR-1): the stored tool of a step is a
+ * registry tool or none. The model is told a step may be an "analyze" step and names any tool it
+ * likes; a name the registry does not list is not an action (no executor runs it), so it is
+ * stored as no tool, the planner's own reasoning, which the execute route answers 400 and the
+ * web callers skip, instead of a tool name every execute refuses 403, stopping the run.
+ */
+function registryToolName(name: unknown): string | null {
+  return typeof name === 'string' && name.length > 0 && getToolByName(name) ? name : null;
+}
 
 interface RawAiStep {
   order?: number;
@@ -133,12 +145,13 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
       const rawSteps = Array.isArray(parsed.steps) ? parsed.steps : Array.isArray(parsed) ? parsed : [];
 
       steps = rawSteps.map((s: RawAiStep, idx: number) => {
-        const tierFromGov = s.toolName ? this.governance.getToolTier(s.toolName) : (s.riskTier || 1);
+        const toolName = registryToolName(s.toolName);
+        const tierFromGov = toolName ? this.governance.getToolTier(toolName) : (s.riskTier || 1);
         const depOrders = Array.isArray(s.dependsOnOrders) ? s.dependsOnOrders
           : Array.isArray(s.dependsOn) ? s.dependsOn : [];
         return {
           order: s.order ?? idx + 1,
-          toolName: s.toolName || null,
+          toolName,
           module: s.module || null,
           action: s.action || `Step ${idx + 1}`,
           description: s.description || '',
@@ -153,7 +166,7 @@ Respond with JSON only: { "steps": [ { "order": 1, "toolName": "tool_name_or_nul
       this.logger.warn(`Plan generation fallback: ${(err as Error).message}`);
       steps = intent.actionCandidates.map((ac, idx) => ({
         order: idx + 1,
-        toolName: ac.toolName,
+        toolName: registryToolName(ac.toolName),
         module: null,
         action: ac.description,
         description: ac.description,

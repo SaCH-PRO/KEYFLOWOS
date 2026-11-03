@@ -316,7 +316,8 @@ export function cortexCommandRequirement(module: unknown, action: unknown): Cort
  * The member a direct command acts for, in the tenant BusinessGuard checked,
  * as CortexMemberAuthorityGuard loaded it: the membership role and its scopes
  * as ModuleScopeGuard computes them (the explicit scope map, else the role's
- * defaults), or the SUPER_ADMIN platform bypass.
+ * defaults), or the SUPER_ADMIN platform bypass (which, for a SUPER_ADMIN who
+ * holds no membership, stops at the business's invoice writes: D-46).
  */
 export interface CortexMemberAuthority {
   userId: string;
@@ -324,6 +325,8 @@ export interface CortexMemberAuthority {
   role: string;
   superAdmin: boolean;
   scopes: Record<string, string>;
+  /** False only for a platform SUPER_ADMIN who holds no membership in the business (D-46). */
+  member: boolean;
 }
 
 /** Why `authority` may not run `module.action` as a direct command, or null when it may. */
@@ -331,7 +334,14 @@ export function cortexCommandRefusal(authority: CortexMemberAuthority, module: u
   const requirement = cortexCommandRequirement(module, action);
   if ('refused' in requirement) return requirement.refused;
   if ('executorRefused' in requirement || 'adapterEnforced' in requirement) return null;
-  if (authority.superAdmin) return null;
+  if (authority.superAdmin) {
+    // D-46 (trial-N review NEW-1): the commerce adapter writes as KEY_SYSTEM_ACTOR_ID, so the
+    // service membership check that refuses this principal over HTTP never runs.
+    if (!authority.member && requirement.scope === 'revenue') {
+      return `Not a member of this business: a platform SUPER_ADMIN who is not a member does not write its invoices (D-46), so "${String(module)}.${String(action)}" is not run`;
+    }
+    return null;
+  }
   if (requirement.ownerOnly && authority.role !== 'OWNER') {
     return `"${String(module)}.${String(action)}" is run as a direct command only for the business owner: ${requirement.ownerOnly}`;
   }
@@ -457,21 +467,21 @@ export class CortexMemberAuthorityGuard implements CanActivate {
     const guarded = req.guardedBusinessId;
     const businessId = typeof guarded === 'string' && guarded.length > 0 ? guarded : resolveRequestBusinessId(req);
     if (!businessId) throw new BadRequestException('businessId is required');
-    if (user.role === 'SUPER_ADMIN') {
-      req.cortexMemberAuthority = { userId: user.id, businessId, role: 'SUPER_ADMIN', superAdmin: true, scopes: {} };
-      return true;
-    }
     const membership = await this.prisma.client.membership.findUnique({
       where: { userId_businessId: { userId: user.id, businessId } },
       select: { role: true, permissionScopes: true },
     });
+    if (user.role === 'SUPER_ADMIN') {
+      req.cortexMemberAuthority = { userId: user.id, businessId, role: 'SUPER_ADMIN', superAdmin: true, scopes: {}, member: !!membership };
+      return true;
+    }
     if (!membership) throw new ForbiddenException('Not a member of this business');
     const explicit = membership.permissionScopes;
     const scopes: Record<string, string> =
       explicit && typeof explicit === 'object' && !Array.isArray(explicit)
         ? (explicit as Record<string, string>)
         : defaultScopesForRole(membership.role);
-    req.cortexMemberAuthority = { userId: user.id, businessId, role: membership.role, superAdmin: false, scopes };
+    req.cortexMemberAuthority = { userId: user.id, businessId, role: membership.role, superAdmin: false, scopes, member: true };
     return true;
   }
 }
