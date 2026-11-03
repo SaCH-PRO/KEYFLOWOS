@@ -132,7 +132,8 @@ function api(method: 'get' | 'post' | 'patch', route: string, businessId = ID.bi
   return agent()[method](`/finance/businesses/${businessId}/credit-notes${route}`).set(HEADER, actor);
 }
 
-const money = (n: number) => Math.round(n * 100) / 100;
+/** Rounded to cents; never negative zero (a fully credited revenue nets to 0, not -0). */
+const money = (n: number) => Math.round(n * 100) / 100 || 0;
 
 let invoiceSeq = 0;
 
@@ -373,16 +374,16 @@ beforeAll(async () => {
 
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.ownerF, email: `${P}ownerF@test.local`, role: 'USER' } });
-  for (const [biz, owner, basis, contact] of [
-    [ID.biz, ID.owner, 'ACCRUAL', ID.contact],
-    [ID.bizCash, ID.owner, 'CASH', ID.contactCash],
-    [ID.bizF, ID.ownerF, 'ACCRUAL', ID.contactF],
+  for (const [tag, biz, owner, basis, contact] of [
+    ['accrual', ID.biz, ID.owner, 'ACCRUAL', ID.contact],
+    ['cash', ID.bizCash, ID.owner, 'CASH', ID.contactCash],
+    ['foreign', ID.bizF, ID.ownerF, 'ACCRUAL', ID.contactF],
   ] as const) {
     await db.business.create({
-      data: { id: biz, name: `V44A ${biz}`, slug: `${biz}-slug`, ownerId: owner, currency: 'TTD', accountingBasis: basis },
+      data: { id: biz, name: `V44A ${tag}`, slug: `${P}slug-${tag}`, ownerId: owner, currency: 'TTD', accountingBasis: basis },
     });
     await db.membership.create({ data: { id: `${biz}_m`, userId: owner, businessId: biz, role: 'OWNER' } });
-    await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V44a', lastName: 'Customer', email: `${contact}@test.local` } });
+    await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V44a', lastName: 'Customer', email: `${P}customer-${tag}@test.local` } });
     await coa.ensureDefaults(biz);
   }
 }, 180_000);

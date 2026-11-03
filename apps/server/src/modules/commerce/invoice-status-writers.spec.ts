@@ -76,12 +76,8 @@ type Entry = { writes: string[]; why: string };
  * lower ALLOWLIST_CEILING with it.
  */
 export const BYPASS_ALLOWLIST: Record<string, Entry> = {
-  'modules/finance/credit-note.service.ts#CreditNoteService.apply': {
-    writes: ['status'],
-    why:
-      'Applying a credit note writes PARTIALLY_CREDITED / FULLY_CREDITED, statuses the transition map does not know. ' +
-      'V1-44-DM-CREDIT-NOTE moves this into the workflow ("statuses owned by the workflow").',
-  },
+  // V1-44-DM-CREDIT-NOTE removed CreditNoteService.apply: the credited states
+  // are moved by InvoiceWorkflowService.reconcileFromCredits (D-28).
   'modules/trash/trash.controller.ts#TrashController.updateModel': {
     writes: [OPAQUE],
     why:
@@ -90,8 +86,8 @@ export const BYPASS_ALLOWLIST: Record<string, Entry> = {
   },
 };
 
-/** The allow-list size at V1-42. It only goes down. */
-export const ALLOWLIST_CEILING = 2;
+/** The allow-list size (2 at V1-42, 1 since V1-44). It only goes down. */
+export const ALLOWLIST_CEILING = 1;
 
 /** The V1-42 write-set files: none of them may carry a bypassing status writer. */
 const V1_42_WRITE_SET = [
@@ -351,7 +347,7 @@ describe('V1-42 invoice status writers: InvoiceWorkflowService is the single own
 
   it('ISW-02: the allow-list is shrink-only (at most ALLOWLIST_CEILING entries)', () => {
     expect(Object.keys(BYPASS_ALLOWLIST).length).toBeLessThanOrEqual(ALLOWLIST_CEILING);
-    expect(ALLOWLIST_CEILING, 'the V1-42 ceiling; lower it, never raise it').toBeLessThanOrEqual(2);
+    expect(ALLOWLIST_CEILING, 'the V1-44 ceiling; lower it, never raise it').toBeLessThanOrEqual(1);
   });
 
   it('ISW-03: no V1-42 write-set file writes Invoice.status around the workflow (DelegationLoop, CommerceAi, CommerceService)', () => {

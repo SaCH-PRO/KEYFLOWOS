@@ -26,7 +26,10 @@ export type InvoiceStatus =
   | 'OVERDUE'
   | 'VOID'
   | 'FAILED'
-  | 'PENDING';
+  | 'PENDING'
+  // V1-44 (owner ruling D-28): credit-note states; only CREDIT_TRANSITIONS moves into or out of them.
+  | 'PARTIALLY_CREDITED'
+  | 'FULLY_CREDITED';
 
 /**
  * The statuses an invoice may be shown in to someone who holds only its id or
@@ -61,7 +64,69 @@ const ALLOWED_TRANSITIONS: Record<InvoiceStatus, ReadonlySet<InvoiceStatus>> = {
   // return to SENT is the reconcile's alone (REFUND_REOPENS_TO_SENT, V1-29).
   PAID: new Set<InvoiceStatus>(['PARTIALLY_PAID']),
   VOID: new Set<InvoiceStatus>([]),
+  // V1-44 (D-28): no transition() caller and no payment reconcile moves into
+  // or out of a credited state; credit notes alone do (CREDIT_TRANSITIONS).
+  PARTIALLY_CREDITED: new Set<InvoiceStatus>([]),
+  FULLY_CREDITED: new Set<InvoiceStatus>([]),
 };
+
+/**
+ * V1-44-DM-CREDIT-NOTE (CF-42, owner ruling D-28): FULLY_CREDITED and
+ * PARTIALLY_CREDITED are real invoice states, driven by credit notes that post
+ * to the ledger (no enum migration: InvoiceStatus has carried both all along).
+ * These are the moves an applied or voided credit note makes, through
+ * reconcileFromCredits only (CreditNoteService writes no Invoice.status):
+ *
+ *   - an issued invoice (SENT, PENDING, OVERDUE, FAILED, PARTIALLY_PAID, PAID)
+ *     may be credited in part or in full (a paid deposit part-credited is what
+ *     V1-28's depositPosition reads);
+ *   - a credited invoice moves between the credited states as notes are
+ *     applied and voided, and once its last APPLIED note is voided returns to
+ *     the status its payment rows give it: SENT, PARTIALLY_PAID or PAID (an
+ *     OVERDUE one is SENT again and the overdue scheduler re-flips it);
+ *   - DRAFT and VOID are never credited, and a credit note never voids an
+ *     invoice or returns it to DRAFT.
+ */
+const CREDITED_STATUSES: ReadonlySet<InvoiceStatus> = new Set<InvoiceStatus>(['PARTIALLY_CREDITED', 'FULLY_CREDITED']);
+const CREDIT_TRANSITIONS: Record<InvoiceStatus, ReadonlySet<InvoiceStatus>> = {
+  DRAFT: new Set<InvoiceStatus>([]),
+  SENT: CREDITED_STATUSES,
+  PENDING: CREDITED_STATUSES,
+  OVERDUE: CREDITED_STATUSES,
+  FAILED: CREDITED_STATUSES,
+  PARTIALLY_PAID: CREDITED_STATUSES,
+  PAID: CREDITED_STATUSES,
+  PARTIALLY_CREDITED: new Set<InvoiceStatus>(['PARTIALLY_CREDITED', 'FULLY_CREDITED', 'SENT', 'PARTIALLY_PAID', 'PAID']),
+  FULLY_CREDITED: new Set<InvoiceStatus>(['PARTIALLY_CREDITED', 'SENT', 'PARTIALLY_PAID', 'PAID']),
+  VOID: new Set<InvoiceStatus>([]),
+};
+
+/** V1-44: whether a credit note may move an invoice from `from` to `to` (CREDIT_TRANSITIONS). */
+export function isLegalCreditTransition(from: InvoiceStatus, to: InvoiceStatus): boolean {
+  return CREDIT_TRANSITIONS[from]?.has(to) ?? false;
+}
+
+/**
+ * V1-44 (D-28): the invoice status once its APPLIED credit notes sum to
+ * `credited`. Pure. Compared in integer cents (D-13): credited short of the
+ * total is PARTIALLY_CREDITED, reaching it FULLY_CREDITED, whatever was paid.
+ * With nothing credited, a credited invoice (its last note voided) takes the
+ * status its payment rows give it (SENT, PARTIALLY_PAID, PAID); any other
+ * status is left as it is.
+ */
+export function deriveStatusAfterCredit(
+  current: InvoiceStatus,
+  total: number,
+  credited: number,
+  balance: BalanceSummary,
+): InvoiceStatus {
+  const creditedCents = toCents(Number(credited) || 0);
+  if (creditedCents > 0) return creditedCents >= readTotalCents(total).cents ? 'FULLY_CREDITED' : 'PARTIALLY_CREDITED';
+  if (!CREDITED_STATUSES.has(current)) return current;
+  if (balance.isFullyPaid) return 'PAID';
+  if (balance.net > 0) return 'PARTIALLY_PAID';
+  return 'SENT';
+}
 
 /**
  * V1-29-DM-REFUND-CONVENTION (D-14): the statuses a refund returns to SENT
@@ -659,6 +724,56 @@ export class InvoiceWorkflowService {
         'Invoice status changed while it was being undone; reload it and try again',
       );
     });
+  }
+
+  /**
+   * V1-44-DM-CREDIT-NOTE (CF-42, D-28): move the invoice after a credit note
+   * was applied or voided. CreditNoteService writes no Invoice.status; it calls
+   * this on its own transaction, once the note's status is written, holding the
+   * invoice row lock every money door takes (SELECT ... FOR NO KEY UPDATE), so
+   * this reads every APPLIED note committed before it plus the caller's own.
+   * The status is deriveStatusAfterCredit over the APPLIED notes and the
+   * business's own payment rows; a move outside CREDIT_TRANSITIONS is a 409
+   * (the caller's note and posting roll back with it), and the write is
+   * compare-and-set on the status read, as transition() (V1-42). No posting
+   * (the note's is the caller's) and no event: no listener reads a credit move,
+   * and an invoice returning to PAID was paid already (no second invoice.paid,
+   * receipt or COGS). paidAt is kept; a return to PAID with none stamps it.
+   */
+  async reconcileFromCredits(
+    invoiceId: string,
+    extra: { tx: Prisma.TransactionClient },
+  ): Promise<{ status: InvoiceStatus; changed: boolean }> {
+    const db = extra.tx;
+    const invoice = await db.invoice.findUnique({
+      where: { id: invoiceId },
+      select: { id: true, businessId: true, status: true, total: true, currency: true, paidAt: true },
+    });
+    if (!invoice) throw new NotFoundException('Invoice not found');
+    const payments = await db.payment.findMany({
+      where: { invoiceId, businessId: invoice.businessId },
+      select: { amount: true, status: true },
+    });
+    const applied = await db.creditNote.aggregate({
+      where: { invoiceId, businessId: invoice.businessId, status: 'APPLIED' },
+      _sum: { amount: true },
+    });
+    const balance = balanceOfStoredRows(Number(invoice.total), payments, invoice.currency);
+    const current = invoice.status as InvoiceStatus;
+    const next = deriveStatusAfterCredit(current, Number(invoice.total), Number(applied._sum.amount ?? 0), balance);
+    if (next === current) return { status: current, changed: false };
+    if (!isLegalCreditTransition(current, next)) {
+      throw new ConflictException(`Illegal invoice status transition for a credit note: ${current} -> ${next}`);
+    }
+    await compareAndSet(
+      () =>
+        db.invoice.update({
+          where: { id: invoiceId, status: invoice.status },
+          data: { status: next, ...(next === 'PAID' && !invoice.paidAt ? { paidAt: new Date() } : {}) },
+        }),
+      `Invoice status changed while ${current} -> ${next} was in flight; reload it and try again`,
+    );
+    return { status: next, changed: true };
   }
 
   /**
