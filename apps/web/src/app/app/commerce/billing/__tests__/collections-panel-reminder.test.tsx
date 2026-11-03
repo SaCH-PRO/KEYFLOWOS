@@ -135,12 +135,8 @@ describe("Collections panel: Send Reminder (V1-42c VR-01)", () => {
   });
 });
 
-// Review CR-V42C-1: the Payments tab has a second "Send Reminder" button with the same defect.
-// apps/web/src/app/app/commerce/payments/payments-tab.tsx handleSendReminder (lines 198-220, buttons at
-// 408 and 627) still calls updateInvoiceStatus(id, "SENT"), sets the row SENT and toasts "Reminder sent":
-// on a SENT row the server answers 200 and reminds nobody (VR-01a), on an OVERDUE row it is a 409
-// (VR-01c). payments-tab.tsx is outside this packet's write set, so VR-01 stays half closed until a
-// follow-up packet moves that button to sendInvoiceReminder exactly as the Collections panel above.
-describe("Payments tab: Send Reminder (V1-42c review CR-V42C-1, outside the packet write set)", () => {
-  it.todo("payments-tab.tsx Send Reminder calls sendInvoiceReminder(businessId, id, {}), never updateInvoiceStatus(id, 'SENT'); says 'Reminder sent' only when delivered: true, warns when not delivered, shows the error otherwise, and leaves the row status alone (needs a follow-up packet that owns payments-tab.tsx)");
-});
+// Review CR-V42C-1: the Payments tab had a second "Send Reminder" button with the same defect
+// (payments-tab.tsx handleSendReminder called updateInvoiceStatus(id, "SENT"), set the row SENT and
+// toasted "Reminder sent"). FOLLOW3-A8-PAYMENTS-TAB-REMINDER moved it to sendInvoiceReminder exactly as
+// the Collections panel above; the it.todo that stood here is replaced by the real spec in
+// apps/web/src/app/app/commerce/payments/__tests__/payments-tab-reminder.test.tsx.
