@@ -1,6 +1,6 @@
 import {
   BadRequestException,
-  Body, Controller, Delete, ForbiddenException, Get, Header, Inject, Param, Patch, Post, Query, Req, Res,
+  Body, Controller, Delete, ForbiddenException, Get, Header, Inject, NotFoundException, Param, Patch, Post, Query, Req, Res,
   UploadedFile, UseGuards, UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -93,6 +93,10 @@ export class FinanceController {
     @Req() req: Request,
   ) {
     const userId = (req as any).user?.id as string | undefined;
+    // FOLLOW3-A5 (F2 PF-03): the membership check every sibling Books write
+    // runs. BusinessGuard lets a SUPER_ADMIN through, so without it a
+    // SUPER_ADMIN with no Membership posted into any business's ledger.
+    await this.ensureAccess((req as any).user.id, businessId);
     const totalDebit = body.entries.reduce((sum, e) => sum + (e.debit ?? 0), 0);
     const input: PostingInput = {
       businessId,
@@ -203,6 +207,14 @@ export class FinanceController {
     @Query('asOf') asOf?: string,
   ) {
     await this.ensureAccess((req as any).user.id, businessId);
+    // FOLLOW3-A5: the balance is an aggregate by accountId alone (aggregate is
+    // not tenant-hooked), so the account must be the route business's own
+    // chart row first; another business's id answers like an unknown one.
+    const account = await this.prisma.client.chartOfAccount.findFirst({
+      where: { id: accountId, businessId },
+      select: { id: true },
+    });
+    if (!account) throw new NotFoundException('Account not found');
     const balance = await this.ledgerBalance.getAccountBalance(accountId, asOf ? new Date(asOf) : undefined);
     return { accountId, balance: balance.toString() };
   }
