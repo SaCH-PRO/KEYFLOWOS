@@ -189,7 +189,26 @@ class PrismaMock {
       },
       booking: {
         updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
+        // V1-27: the write-back reads the booking and, for a move, checks the
+        // slot (the overlap read is the one with `id: { not }`: nothing clashes).
+        findFirst: vi.fn(({ where }: any) =>
+          Promise.resolve(
+            typeof where.id === 'object'
+              ? null
+              : {
+                  serviceId: 'svc_1',
+                  staffId: null,
+                  service: { bufferMins: null },
+                  status: 'PENDING',
+                  startTime: new Date('2030-06-01T10:00:00Z'),
+                  endTime: new Date('2030-06-01T11:00:00Z'),
+                },
+          ),
+        ),
       },
+      // V1-27: the write-back runs under the slot's advisory lock.
+      $transaction: vi.fn(async (fn: any) => fn(self.client)),
+      $executeRaw: vi.fn(() => Promise.resolve(0)),
       contactTask: {
         updateMany: vi.fn(() => Promise.resolve({ count: 1 })),
       },

@@ -65,6 +65,8 @@ describe('BookingWaitlistService', () => {
             staff: args.data.staffId ? { id: args.data.staffId, name: 'Sarah' } : null,
           })),
           update: vi.fn((args: any) => Promise.resolve({ id: args.where.id, status: args.data.status })),
+          // V1-27: offerSlot's placeholder is a slot claim; no booking overlaps here.
+          findFirst: vi.fn(() => Promise.resolve(null)),
         },
         $transaction: vi.fn(async (fn: any) => {
           if (typeof fn === 'function') {
@@ -72,6 +74,8 @@ describe('BookingWaitlistService', () => {
           }
           return Promise.all(fn);
         }),
+        // V1-27: the slot claim's advisory lock.
+        $executeRaw: vi.fn(() => Promise.resolve(0)),
       },
     };
 
@@ -249,7 +253,12 @@ describe('BookingWaitlistService', () => {
   describe('convertWaitlistEntry', () => {
     it('confirms the placeholder booking and marks entry CONVERTED', async () => {
       prismaMock.client.bookingWaitlistEntry.findFirst.mockResolvedValueOnce(
-        mockEntry({ status: WAITLIST_STATUSES.OFFERED, offeredBookingId: 'booking_1' }),
+        mockEntry({
+          status: WAITLIST_STATUSES.OFFERED,
+          offeredBookingId: 'booking_1',
+          // V1-27 (CR-2): the included placeholder, which names the calendar the convert locks.
+          offeredBooking: { id: 'booking_1', businessId: 'biz_1', serviceId: 'service_1', staffId: null, status: 'UNCONFIRMED' },
+        }),
       );
 
       const result = await service.convertWaitlistEntry('biz_1', 'entry_1');

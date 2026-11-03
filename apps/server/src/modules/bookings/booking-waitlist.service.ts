@@ -2,6 +2,127 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException } fr
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
+type PrismaClientLike = PrismaService['client'];
+type PrismaTx = Parameters<Parameters<PrismaClientLike['$transaction']>[0]>[0];
+
+/**
+ * V1-27 (M41, M06): the slot claim for booking writers outside
+ * BookingsService. A booking on a calendar is the staff member's (else the
+ * service's) time, and every writer that puts one there must check and take it
+ * the way BookingsService.claimSlot does (V1-16): under the calendar's advisory
+ * transaction lock, re-reading the overlap guard inside that transaction. The
+ * waitlist offer's placeholder and the calendar PATCH write-back wrote booking
+ * rows with no check at all, so an occupied slot got a second live booking.
+ *
+ * These mirror BookingsService (bookings.service.ts: SLOT_LOCK_NAMESPACE,
+ * assertSlotFree, claimSlot) to the byte: the same lock key, so a claim here
+ * and a claim there serialize on one calendar; the same overlap rule and
+ * buffer; the same messages, so a refusal reads the same whichever door it
+ * came through. They are copies only because bookings.service.ts is outside
+ * this packet's write set (V1-28 holds it): folding BookingsService's private
+ * pair onto these is the follow-up. booking-slot-writers.integration.test.ts
+ * pins the parity (message against BookingsService's own refusal; lock against
+ * a claim holding BookingsService's key; a race of all four doors).
+ */
+const BOOKING_SLOT_LOCK_NAMESPACE = 'booking-slot:';
+const BOOKING_SLOT_CLAIM_TX_OPTIONS = { maxWait: 5_000, timeout: 10_000 } as const;
+const SLOT_RELEASING_BOOKING_STATUSES = ['CANCELLED', 'NO_SHOW'];
+
+/** A booking's claim on a calendar: the resource (staff member, else service) and the window. */
+export interface BookingSlotClaim {
+  businessId: string;
+  serviceId: string;
+  staffId?: string | null;
+  start: Date;
+  end: Date;
+  bufferMins?: number | null;
+  /** The booking being moved or reinstated, which does not block itself. */
+  excludeBookingId?: string;
+}
+
+/** Whether a booking in `status` holds its slot (CANCELLED and NO_SHOW give it back). */
+export function bookingHoldsSlot(status: string): boolean {
+  return !SLOT_RELEASING_BOOKING_STATUSES.includes(status);
+}
+
+/**
+ * Run `work` in a transaction holding the slot lock of one calendar: the
+ * business and the staff member, else the service (BookingsService.claimSlot's
+ * key). Postgres releases it at commit or rollback.
+ */
+export function withBookingSlotLock<T>(
+  client: PrismaClientLike,
+  slot: Pick<BookingSlotClaim, 'businessId' | 'serviceId' | 'staffId'>,
+  work: (tx: PrismaTx) => Promise<T>,
+): Promise<T> {
+  const key = `${BOOKING_SLOT_LOCK_NAMESPACE}${slot.businessId}:${slot.staffId || slot.serviceId}`;
+  return client.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    return work(tx);
+  }, BOOKING_SLOT_CLAIM_TX_OPTIONS);
+}
+
+/**
+ * BookingsService.createBooking's window rule, with its message: a window that
+ * does not move forward cannot be checked for overlap. It belongs to the
+ * writers that choose a window (offerSlot's placeholder, a calendar move), not
+ * to the shared guard: BookingsService.assertSlotFree has no such check, and a
+ * status-only reinstatement of a legacy row whose end is not after its start
+ * must stay writable, as BookingsService.updateBookingStatus keeps it (CR-1).
+ */
+export function assertBookingWindowMovesForward(start: Date, end: Date): void {
+  if (!(end.getTime() > start.getTime())) {
+    throw new BadRequestException('The end time must be after the start time.');
+  }
+}
+
+/**
+ * BookingsService.assertSlotFree: refuse when a live booking of the same
+ * resource overlaps the window widened by the service's buffer. Called with the
+ * lock's transaction, so it sees every claim committed before the lock was
+ * granted. Like BookingsService's, it does not judge the window itself: the
+ * callers that choose one check it first (assertBookingWindowMovesForward).
+ */
+export async function assertBookingSlotFree(db: Pick<PrismaTx, 'booking'>, slot: BookingSlotClaim): Promise<void> {
+  const bufferMins = slot.bufferMins ?? 0;
+  const bufferMs = bufferMins * 60000;
+
+  const clash = await db.booking.findFirst({
+    where: {
+      businessId: slot.businessId,
+      status: { notIn: ['CANCELLED', 'NO_SHOW'] },
+      deletedAt: null,
+      startTime: { lt: new Date(slot.end.getTime() + bufferMs) },
+      endTime: { gt: new Date(slot.start.getTime() - bufferMs) },
+      ...(slot.excludeBookingId ? { id: { not: slot.excludeBookingId } } : {}),
+      // Without a staff member the service itself is the resource being
+      // consumed; with one, that person is.
+      ...(slot.staffId ? { staffId: slot.staffId } : { serviceId: slot.serviceId }),
+    },
+    select: { id: true },
+  });
+
+  if (clash) {
+    throw new BadRequestException(
+      bufferMins > 0
+        ? `This time slot is unavailable due to a ${bufferMins}-minute buffer between appointments.`
+        : 'That time slot has already been booked. Please choose another.',
+    );
+  }
+}
+
+/** BookingsService.claimSlot: lock the calendar, check the slot again, write. */
+export function claimBookingSlot<T>(
+  client: PrismaClientLike,
+  slot: BookingSlotClaim,
+  write: (tx: PrismaTx) => Promise<T>,
+): Promise<T> {
+  return withBookingSlotLock(client, slot, async (tx) => {
+    await assertBookingSlotFree(tx, slot);
+    return write(tx);
+  });
+}
+
 export interface AddToWaitlistInput {
   businessId: string;
   contactId: string;
@@ -226,7 +347,7 @@ export class BookingWaitlistService {
       include: {
         business: { select: { id: true } },
         contact: { select: { id: true, firstName: true, lastName: true } },
-        service: { select: { id: true, name: true, duration: true } },
+        service: { select: { id: true, name: true, duration: true, bufferMins: true } },
         preferredStaff: { select: { id: true, name: true } },
       },
     });
@@ -239,23 +360,44 @@ export class BookingWaitlistService {
     const businessId = entry.businessId;
     const staffId = entry.preferredStaffId ?? slot.staffId ?? null;
 
-    const placeholder = await this.prisma.client.booking.create({
-      data: {
+    // V1-27: the placeholder holds the slot (UNCONFIRMED does not give it
+    // back), so writing it is a claim like any create: a freed slot booked
+    // again before the offer, or an occupied one handed in by the REST route
+    // or KEY, is refused with the overlap message and nothing is written.
+    const startTime = new Date(slot.startTime);
+    const endTime = new Date(slot.endTime);
+    // The placeholder is a create, so it keeps the in-app create's window rule
+    // (checked here, before the claim, as BookingsService.createBooking does).
+    assertBookingWindowMovesForward(startTime, endTime);
+    const placeholder = await claimBookingSlot(
+      this.prisma.client,
+      {
         businessId,
-        contactId: entry.contactId,
         serviceId: entry.serviceId,
         staffId,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-        status: 'UNCONFIRMED',
-        notes: entry.notes ? `Waitlist request: ${entry.notes}` : 'Hold for waitlisted contact',
+        start: startTime,
+        end: endTime,
+        bufferMins: entry.service?.bufferMins,
       },
-      include: {
-        contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
-        service: { select: { id: true, name: true } },
-        staff: { select: { id: true, name: true } },
-      },
-    });
+      (tx) =>
+        tx.booking.create({
+          data: {
+            businessId,
+            contactId: entry.contactId,
+            serviceId: entry.serviceId,
+            staffId,
+            startTime,
+            endTime,
+            status: 'UNCONFIRMED',
+            notes: entry.notes ? `Waitlist request: ${entry.notes}` : 'Hold for waitlisted contact',
+          },
+          include: {
+            contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
+            service: { select: { id: true, name: true } },
+            staff: { select: { id: true, name: true } },
+          },
+        }),
+    );
 
     const updated = await this.prisma.client.bookingWaitlistEntry.update({
       where: { id: entryId },
@@ -287,6 +429,17 @@ export class BookingWaitlistService {
   /**
    * Accept an offered slot: confirm the placeholder booking and mark the
    * waitlist entry CONVERTED.
+   *
+   * V1-27 (CR-2): confirming the placeholder is a slot claim when it no longer
+   * holds its slot. Staff can cancel the placeholder (it is an ordinary
+   * booking) and the slot can be booked again through a guarded create; the
+   * convert then brought the CANCELLED placeholder back onto the occupied slot
+   * by id, a second live booking (what V1-16 closed for writeBookingStatus).
+   * It now runs under the calendar's slot lock and reads the placeholder again
+   * inside it: one that still holds its slot keeps it (no overlap re-read, so
+   * legacy overlaps stay convertible, as writeBookingStatus keeps them); one
+   * that gave it back is checked with the shared guard, excluding itself, and
+   * is refused with its message, writing nothing.
    */
   async convertWaitlistEntry(businessId: string, entryId: string) {
     const entry = await this.prisma.client.bookingWaitlistEntry.findFirst({
@@ -295,28 +448,53 @@ export class BookingWaitlistService {
     });
 
     if (!entry) throw new NotFoundException('Waitlist entry not found');
-    if (entry.status !== WAITLIST_STATUSES.OFFERED || !entry.offeredBookingId) {
+    // offeredBooking is set exactly when offeredBookingId is (the relation is
+    // ON DELETE SET NULL); the placeholder names the calendar to lock.
+    const offered = entry.offeredBooking;
+    if (entry.status !== WAITLIST_STATUSES.OFFERED || !entry.offeredBookingId || !offered) {
       throw new BadRequestException('Waitlist entry has no offered slot to convert');
     }
+    const placeholderId = offered.id;
+    const resource = { businessId: offered.businessId, serviceId: offered.serviceId, staffId: offered.staffId };
 
-    const [convertedEntry, confirmedBooking] = await this.prisma.client.$transaction([
-      this.prisma.client.bookingWaitlistEntry.update({
+    const [convertedEntry, confirmedBooking] = await withBookingSlotLock(this.prisma.client, resource, async (tx) => {
+      const current = await tx.booking.findFirst({
+        where: { id: placeholderId },
+        select: { status: true, startTime: true, endTime: true, serviceId: true, staffId: true, deletedAt: true },
+      });
+      if (current && !current.deletedAt && !bookingHoldsSlot(current.status)) {
+        const service = await tx.service.findUnique({
+          where: { id: current.serviceId },
+          select: { bufferMins: true },
+        });
+        await assertBookingSlotFree(tx, {
+          businessId: resource.businessId,
+          serviceId: current.serviceId,
+          staffId: current.staffId,
+          start: current.startTime,
+          end: current.endTime,
+          bufferMins: service?.bufferMins,
+          excludeBookingId: placeholderId,
+        });
+      }
+      const convertedEntryRow = await tx.bookingWaitlistEntry.update({
         where: { id: entryId },
         data: {
           status: WAITLIST_STATUSES.CONVERTED,
           convertedAt: new Date(),
         },
-      }),
-      this.prisma.client.booking.update({
-        where: { id: entry.offeredBookingId },
+      });
+      const confirmedBookingRow = await tx.booking.update({
+        where: { id: placeholderId },
         data: { status: 'CONFIRMED' },
         include: {
           contact: { select: { id: true, firstName: true, lastName: true } },
           service: { select: { id: true, name: true } },
           staff: { select: { id: true, name: true } },
         },
-      }),
-    ]);
+      });
+      return [convertedEntryRow, confirmedBookingRow] as const;
+    });
 
     this.events.emit('booking.waitlist.converted', {
       entry: convertedEntry,

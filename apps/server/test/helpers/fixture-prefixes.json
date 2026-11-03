@@ -378,6 +378,11 @@
       "packet": "V1-23-PUB-PUBLIC-PROJECTIONS"
     },
     {
+      "prefix": "v27a_",
+      "owner": "apps/server/test/booking-slot-writers.integration.test.ts",
+      "packet": "V1-27-BK-SLOT-WRITERS"
+    },
+    {
       "prefix": "v32a_",
       "owner": "apps/server/test/key-action-proposal-claim.integration.test.ts",
       "packet": "V1-32-KEY-PROPOSAL-CLAIM"

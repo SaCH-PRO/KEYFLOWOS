@@ -6,6 +6,13 @@
  * waitlist service and listener against Postgres so the match, offer, and
  * cleanup paths are falsifiable.
  *
+ * V1-27: the booking each case hands the listener as cancelled (or whose slot
+ * it offers) is now written CANCELLED, as BookingsService writes it before
+ * emitting booking.cancelled. It was written CONFIRMED, which left the "freed"
+ * slot occupied; offerSlot now claims the slot through the overlap guard and
+ * refuses an occupied one (booking-slot-writers.integration.test.ts), so the
+ * old fixture would have tested the defect, not the waitlist.
+ *
  * Requires DATABASE_URL, same as the other integration tests.
  */
 import 'reflect-metadata';
@@ -122,7 +129,7 @@ describe('booking waitlist (real database)', () => {
         staffId: STAFF,
         startTime: SLOT_START,
         endTime: SLOT_END,
-        status: 'CONFIRMED',
+        status: 'CANCELLED', // the cancellation that freed the slot (V1-27)
       },
       include: { contact: true, service: true, staff: true },
     });
@@ -177,7 +184,7 @@ describe('booking waitlist (real database)', () => {
         staffId: STAFF,
         startTime: SLOT_START,
         endTime: SLOT_END,
-        status: 'CONFIRMED',
+        status: 'CANCELLED', // the cancellation that freed the slot (V1-27)
       },
       include: { contact: true, service: true, staff: true },
     });
@@ -214,7 +221,7 @@ describe('booking waitlist (real database)', () => {
         staffId: STAFF,
         startTime: SLOT_START,
         endTime: SLOT_END,
-        status: 'CONFIRMED',
+        status: 'CANCELLED', // the cancellation that freed the slot (V1-27)
       },
       include: { contact: true, service: true, staff: true },
     });
@@ -266,7 +273,7 @@ describe('booking waitlist (real database)', () => {
         staffId: STAFF,
         startTime: SLOT_START,
         endTime: SLOT_END,
-        status: 'CONFIRMED',
+        status: 'CANCELLED', // the cancellation that freed the slot (V1-27)
       },
       include: { contact: true, service: true, staff: true },
     });
@@ -313,7 +320,7 @@ describe('booking waitlist (real database)', () => {
         staffId: STAFF,
         startTime: SLOT_START,
         endTime: SLOT_END,
-        status: 'CONFIRMED',
+        status: 'CANCELLED', // the cancellation that freed the slot (V1-27)
       },
       include: { contact: true, service: true, staff: true },
     });
