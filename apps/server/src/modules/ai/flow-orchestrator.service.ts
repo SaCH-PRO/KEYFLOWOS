@@ -42,6 +42,7 @@ import { StaffPerformanceService } from '../staff-performance/staff-performance.
 import { CrmSequenceService } from '../crm/crm-sequence.service';
 import { CrmDealsService } from '../crm/crm-deals.service';
 import { CrmDuplicateDetectionService } from '../crm/crm-duplicate-detection.service';
+import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
 import { SocialAnalyticsService } from '../social/social-analytics.service';
 import { GenomeFactService } from '../business-genome/key-genome/genome-fact.service';
 import { BusinessGraphService } from './business-graph.service';
@@ -3265,6 +3266,26 @@ ${triage.standingContext}`;
   }
 
   /**
+   * Trial-N repair round 2 (CONTACT-READ-ABORT, NEW-4-REST; D-37: KEY contact reads apply the
+   * member's visibility). The CRM access of the principal a surface established for this call
+   * (resolveCrmAccess, which refuses a non-member 403) and the clause GET contacts ANDs onto its
+   * rows for them (visibilityClause: another member's PRIVATE contact stays out; a member kept to
+   * their own book reads only it). null when the call has no principal (a system surface; the
+   * routes that run contact reads that way keep them to the OWNER) or the clause is empty (the
+   * OWNER, a SUPER_ADMIN): the read is then the whole business, as before.
+   */
+  private async contactReadAccess(
+    businessId: string,
+    action?: ActionContext,
+  ): Promise<{ userId: string; access: CrmAccess; clause: Prisma.ContactWhereInput } | null> {
+    const userId = action?.principalUserId;
+    if (!userId) return null;
+    const access = await resolveCrmAccess(this.prisma, businessId, userId);
+    const clause = visibilityClause(access, userId) as Prisma.ContactWhereInput | null;
+    return clause ? { userId, access, clause } : null;
+  }
+
+  /**
    * A contact id the model chose, refused unless it is a live contact of `businessId` (V1-21b
    * review 9 TD9-4). CommerceService.createInvoice / createQuote store contactId as given on this
    * base (R0-27's assertContactInBusiness is not on it): on the staff bridge, with no tenant
@@ -3407,6 +3428,7 @@ ${triage.standingContext}`;
         const q = args.query?.trim();
         if (!q) return { contacts: [] };
         const containsFilter = { contains: q, mode: 'insensitive' as const };
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
         const contacts = await this.prisma.client.contact.findMany({
           where: {
             businessId,
@@ -3418,6 +3440,7 @@ ${triage.standingContext}`;
               { email: containsFilter },
               { phone: containsFilter },
             ],
+            ...(visible ? { AND: [visible] } : {}),
           },
           select: { id: true, firstName: true, lastName: true, email: true, phone: true, status: true, displayName: true },
           take: 10,
@@ -3426,8 +3449,9 @@ ${triage.standingContext}`;
       }
 
       case 'crm_list_contacts': {
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
         const contacts = await this.prisma.client.contact.findMany({
-          where: { businessId, deletedAt: null, ...(args.status ? { status: args.status } : {}) },
+          where: { businessId, deletedAt: null, ...(args.status ? { status: args.status } : {}), ...(visible ? { AND: [visible] } : {}) },
           select: { id: true, firstName: true, lastName: true, email: true, phone: true, status: true, displayName: true },
           take: args.limit ?? 10,
           orderBy: { createdAt: 'desc' },
@@ -6366,13 +6390,35 @@ ${triage.standingContext}`;
         return { id: deal.id, stageId: deal.stageId };
       }
       case 'crm_find_duplicates': {
-        return this.getCrmDuplicates().findCandidatesScoped({
+        const reader = await this.contactReadAccess(businessId, action);
+        if (!reader) {
+          return this.getCrmDuplicates().findCandidatesScoped({
+            businessId,
+            minConfidence: args.minConfidence ?? 0.6,
+            limit: args.limit ?? 20,
+          });
+        }
+        // Trial-N repair round 2 (NEW-4-REST, D-37): only the pairs whose two contacts the member may open.
+        const limit = args.limit ?? 20;
+        const all = await this.getCrmDuplicates().findCandidatesScoped({
           businessId,
           minConfidence: args.minConfidence ?? 0.6,
-          limit: args.limit ?? 20,
+          limit: Number.MAX_SAFE_INTEGER,
         });
+        const canOpen = await contactVisibilityFilter(
+          this.prisma, businessId, reader.access, reader.userId,
+          all.pairs.flatMap((pair) => [pair.primaryId, pair.duplicateId]),
+        );
+        const pairs = canOpen ? all.pairs.filter((pair) => canOpen(pair.primaryId) && canOpen(pair.duplicateId)) : all.pairs;
+        return { pairs: pairs.slice(0, limit), total: pairs.length };
       }
       case 'crm_merge_preview': {
+        const reader = await this.contactReadAccess(businessId, action);
+        if (reader) {
+          // Trial-N repair round 2 (NEW-4-REST, D-37): a contact the member may not open is answered as an unknown one.
+          const canOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, [args.primaryId, args.duplicateId]);
+          if (canOpen && !(canOpen(args.primaryId) && canOpen(args.duplicateId))) return { preview: null };
+        }
         const preview = await this.getCrmDuplicates().preview({
           businessId,
           primaryId: args.primaryId,

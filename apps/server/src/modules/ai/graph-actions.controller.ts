@@ -167,13 +167,24 @@ const GRAPH_ACTION_EXTRA_SCOPES: Readonly<Record<string, ReadonlyArray<GraphActi
 };
 
 /**
- * Trial-N integration review NEW-4: contact reads the dispatcher makes with no actor. They query
- * every contact of the business (no visibilityClause), so a member kept to their own book, or
- * one who may not see another member's PRIVATE contact, would read the whole book with its
- * emails and phones, which GET contacts refuses them. The OWNER's only, like the crm reads of
- * POST cortex/query (CRM_READ_OWNER_ONLY there).
+ * Trial-N integration review NEW-4, repair round 2 (CONTACT-READ-ABORT, NEW-4-REST; D-37: KEY
+ * contact reads apply the member's visibility). Contact reads the dispatcher bounds by the
+ * principal it is handed (FlowOrchestratorService.contactReadAccess: resolveCrmAccess +
+ * visibilityClause, as GET contacts and GET duplicates' rows), so a member kept to their own book,
+ * or one who may not see another member's PRIVATE contact, reads only what GET contacts shows them.
+ * This route always hands the dispatcher the caller, so they run for any member holding crm read.
+ * A run with no principal (PlanExecutorService after POST ai/plans/:planId/approve) reads every
+ * contact, so there they are the OWNER's only (GraphActionAuthorityOptions.noPrincipal).
  */
-const GRAPH_ACTION_CONTACT_READ_TOOLS: ReadonlySet<string> = new Set(['crm_list_contacts', 'crm_search_contacts']);
+export const GRAPH_ACTION_CONTACT_READ_TOOLS: ReadonlySet<string> = new Set([
+  'crm_list_contacts',
+  'crm_search_contacts',
+  'crm_find_duplicates',
+  'crm_merge_preview',
+]);
+
+const CONTACT_READ_NO_PRINCIPAL =
+  "it reads every contact when it runs with no principal (the plan executor), so no visibility clause keeps another member's PRIVATE contact out";
 
 /** What a member must hold to execute a stored step of `toolName` from this route. */
 export interface GraphActionRequirement {
@@ -183,12 +194,16 @@ export interface GraphActionRequirement {
    * Why only the business's OWNER (or a SUPER_ADMIN) may run it (V1-31b review SEC-V131b-1).
    * The dispatcher calls these with no actor, so the HTTP row checks never run:
    * CRM_ROW_VISIBILITY_TOOLS reach any contact (visibilityClause keeps another member's PRIVATE
-   * contact from everyone but the OWNER), GRAPH_ACTION_CONTACT_READ_TOOLS read every contact
-   * likewise (trial-N review NEW-4), and GOVERNED_UNGRANTED tools do work beside the
+   * contact from everyone but the OWNER), and GOVERNED_UNGRANTED tools do work beside the
    * governed call that no member route does. JobRolePolicy grants them to no key; here only the
    * principal whose HTTP access is the whole business runs them.
    */
   ownerOnly?: string;
+  /**
+   * A contact read bounded by the principal's visibility (GRAPH_ACTION_CONTACT_READ_TOOLS): the
+   * OWNER's only when the run has no principal, why in this text.
+   */
+  ownerOnlyWithoutPrincipal?: string;
   /** The CRM sub-permission resolveCrmAccess checks over HTTP (crm_edit / crm_delete), held at 'any' with crm_view 'all'. */
   crmSubPermission?: 'crm_edit' | 'crm_delete';
 }
@@ -203,13 +218,106 @@ export function graphActionRequirement(toolName: string): GraphActionRequirement
   if (CRM_ROW_VISIBILITY_TOOLS.includes(toolName)) {
     requirement.ownerOnly = 'it writes a contact with no actor, so no visibility clause bounds the row it reaches';
   } else if (GRAPH_ACTION_CONTACT_READ_TOOLS.has(toolName)) {
-    requirement.ownerOnly = "it reads every contact with no actor, so no visibility clause keeps another member's PRIVATE contact out";
+    requirement.ownerOnlyWithoutPrincipal = CONTACT_READ_NO_PRINCIPAL;
   } else if (Object.prototype.hasOwnProperty.call(GOVERNED_UNGRANTED, toolName)) {
     requirement.ownerOnly = GOVERNED_UNGRANTED[toolName];
   }
   if (CRM_SUBPERMISSION_TOOLS.crm_delete.includes(toolName)) requirement.crmSubPermission = 'crm_delete';
   else if (CRM_SUBPERMISSION_TOOLS.crm_edit.includes(toolName)) requirement.crmSubPermission = 'crm_edit';
   return requirement;
+}
+
+/** Who besides a plan's proposer runs one of its steps from POST .../execute: the business OWNER (trial-N review NEW-2). */
+const STEP_RUNNER_ROLES: ReadonlySet<string> = new Set(['OWNER']);
+
+/**
+ * Trial-N repair round 2 (PLAN-APPROVE): who besides a plan's proposer approves it, so that
+ * PlanExecutorService runs its steps: the business OWNER or an ADMIN.
+ */
+export const PLAN_APPROVER_ROLES: ReadonlySet<string> = new Set(['OWNER', 'ADMIN']);
+
+export interface GraphActionAuthorityOptions {
+  /** Membership roles that act on a step of a plan another member proposed (default: the OWNER). */
+  proposerOverrideRoles?: ReadonlySet<string>;
+  /** The refusal when the member neither proposed the plan nor holds one of those roles. */
+  proposerRefusal?: string;
+  /**
+   * The step will run with no principal (PlanExecutorService after a plan approval), so the
+   * contact reads the dispatcher bounds by its principal are the OWNER's only.
+   */
+  noPrincipal?: boolean;
+}
+
+/**
+ * Whether the member may have `toolName` run as a stored step of a plan `proposerId` proposed
+ * (graphActionRequirement); throws 403 when not. A refused or unmapped tool is 403 for everyone.
+ * SUPER_ADMIN passes the rest, except that one who is not a member of the business does not
+ * write its invoices (a revenue write; D-46, trial-N review NEW-1): the dispatcher writes as
+ * KEY_SYSTEM_ACTOR_ID, so the service membership check that refuses that principal over HTTP
+ * never runs. Otherwise: a member of the business; the OWNER alone for an owner-only tool (and,
+ * with no principal, for a visibility-bound contact read); every module scope as ModuleScopeGuard
+ * computes it (the membership's explicit scope map, else its role's defaults); and, for a contact
+ * create / edit / delete, the CRM sub-permission as resolveCrmAccess computes it over HTTP, held
+ * for the whole book (crm_view 'all' and the scope 'any'), because the dispatcher passes no actor
+ * that could keep the write to the member's own contacts (the rule JobRolePolicy's crmWithheld
+ * applies to a KEY envelope). Last, the step must be the member's own: its plan was proposed by
+ * them, or they hold one of `proposerOverrideRoles` (trial-N review NEW-2;
+ * KeyCortexPlannerService.assertMayExecutePlan's rule for the same ai_plans rows).
+ * POST .../execute and the queue's approved steps use the defaults; POST ai/plans/:planId/approve
+ * passes PLAN_APPROVER_ROLES and noPrincipal (trial-N repair round 2, PLAN-APPROVE).
+ */
+export async function assertMayRunGraphAction(
+  prisma: PrismaService,
+  businessId: string,
+  user: { id: string; role?: string },
+  toolName: string,
+  proposerId: string | null,
+  options: GraphActionAuthorityOptions = {},
+): Promise<void> {
+  const requirement = graphActionRequirement(toolName);
+  if (!requirement) {
+    throw new ForbiddenException(`Tool "${toolName}" is mapped to no module scope, so it is not executed from this route`);
+  }
+  if ('refused' in requirement) {
+    throw new ForbiddenException(`Tool "${toolName}" is not executed from this route: ${requirement.refused}`);
+  }
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId: user.id, businessId } },
+    select: { role: true, permissionScopes: true },
+  });
+  if (user.role === 'SUPER_ADMIN') {
+    if (!membership && requirement.scopes.some((s) => s.module === 'revenue' && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write)) {
+      throw new ForbiddenException('Not a member of this business: a platform SUPER_ADMIN who is not a member does not write its invoices (D-46)');
+    }
+    return;
+  }
+  if (!membership) throw new ForbiddenException('Not a member of this business');
+  const ownerOnly = requirement.ownerOnly ?? (options.noPrincipal ? requirement.ownerOnlyWithoutPrincipal : undefined);
+  if (ownerOnly && membership.role !== 'OWNER') {
+    throw new ForbiddenException(`Tool "${toolName}" is executed from here only for the business owner: ${ownerOnly}`);
+  }
+  const scopes: Record<string, string> = isJsonObject(membership.permissionScopes)
+    ? (membership.permissionScopes as Record<string, string>)
+    : defaultScopesForRole(membership.role);
+  for (const { module, minLevel } of requirement.scopes) {
+    const level = scopes[module] || 'none';
+    if (rankOf(level) < LEVEL_RANK[minLevel]) {
+      throw new ForbiddenException(`Insufficient permissions: ${module} requires ${minLevel} access (you have ${level})`);
+    }
+  }
+  if (requirement.crmSubPermission) {
+    const access = await resolveCrmAccess(prisma, businessId, user.id);
+    const scope = requirement.crmSubPermission === 'crm_delete' ? access.deleteScope : access.editScope;
+    if (!access.viewAll || scope !== 'any') {
+      throw new ForbiddenException(
+        `Insufficient permissions: "${toolName}" needs crm_view all and ${requirement.crmSubPermission} any (you have crm_view ${access.viewAll ? 'all' : 'owned'}, ${requirement.crmSubPermission} ${scope})`,
+      );
+    }
+  }
+  const overrideRoles = options.proposerOverrideRoles ?? STEP_RUNNER_ROLES;
+  if (!overrideRoles.has(membership.role) && (!proposerId || proposerId !== user.id)) {
+    throw new ForbiddenException(options.proposerRefusal ?? 'This plan step is executed only for the member who proposed it or the business owner');
+  }
 }
 
 /**
@@ -359,7 +467,7 @@ export class GraphActionsController {
     if (!OPEN_PLAN_STATUS_SET.has(step.plan.status)) {
       throw new ConflictException(`This plan is ${step.plan.status}; its steps are executed by the plan, not from here`);
     }
-    await this.authorizeGraphAction(businessId, { id: userId, role: user.role }, toolName, step.plan.userId);
+    await assertMayRunGraphAction(this.prisma, businessId, { id: userId, role: user.role }, toolName, step.plan.userId);
 
     const spent = () => new ConflictException('This plan step was already executed or is being executed');
     if (step.status !== 'pending') throw spent();
@@ -536,86 +644,63 @@ export class GraphActionsController {
   }
 
   /**
-   * Whether the member may execute `toolName` here (graphActionRequirement). A refused or
-   * unmapped tool is 403 for everyone. SUPER_ADMIN passes the rest, except that one who is not a
-   * member of the business does not write its invoices (a revenue write; D-46, trial-N review
-   * NEW-1): the dispatcher writes as KEY_SYSTEM_ACTOR_ID, so the service membership check that
-   * refuses that principal over HTTP never runs. Otherwise: a member of the business; the OWNER
-   * alone for an owner-only tool; every module scope as ModuleScopeGuard
-   * computes it (the membership's explicit scope map, else its role's defaults); and, for a
-   * contact create / edit / delete, the CRM sub-permission as resolveCrmAccess computes it over
-   * HTTP, held for the whole book (crm_view 'all' and the scope 'any'), because the dispatcher
-   * passes no actor that could keep the write to the member's own contacts (the rule
-   * JobRolePolicy's crmWithheld applies to a KEY envelope). Last, the step must be the
-   * member's own: its plan was proposed by them, or they are the business OWNER (trial-N review
-   * NEW-2; KeyCortexPlannerService.assertMayExecutePlan's rule for the same ai_plans rows).
+   * The action queue: pending approvals, plans, recent executions and (D-70) approved steps.
+   *
+   * Trial-N repair round 2 (QUEUE-READ): it returned every plan of the business with its steps,
+   * step ids and inputPayload to any member. A viewer now sees a plan only when they proposed it
+   * or are the business OWNER or an ADMIN (or a SUPER_ADMIN), and within it only the steps whose
+   * tool's module scopes they hold at read (the OWNER and a SUPER_ADMIN see every step); a pending
+   * approval item and an execution-history row likewise (its tool's modules at read, and their own
+   * request, plan or run unless OWNER/ADMIN). Another member's inputPayload is never in the answer.
+   *
+   * D-70 (2026-11-03): an approval item a member approved for a stored plan step that has not run
+   * yet (the step pending in a plan this route still runs) is listed as an 'approved_step' item
+   * with its stored planId and planStepId, for a viewer who may run that step (the rule POST
+   * .../execute applies: assertMayRunGraphAction). The control tower's Run action posts exactly
+   * those ids to POST .../execute, which runs the stored step once with no re-planning.
    */
-  private async authorizeGraphAction(
-    businessId: string,
-    user: { id: string; role?: string },
-    toolName: string,
-    proposerId: string | null,
-  ): Promise<void> {
-    const requirement = graphActionRequirement(toolName);
-    if (!requirement) {
-      throw new ForbiddenException(`Tool "${toolName}" is mapped to no module scope, so it is not executed from this route`);
-    }
-    if ('refused' in requirement) {
-      throw new ForbiddenException(`Tool "${toolName}" is not executed from this route: ${requirement.refused}`);
-    }
-    const membership = await this.prisma.client.membership.findUnique({
-      where: { userId_businessId: { userId: user.id, businessId } },
-      select: { role: true, permissionScopes: true },
-    });
-    if (user.role === 'SUPER_ADMIN') {
-      if (!membership && requirement.scopes.some((s) => s.module === 'revenue' && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write)) {
-        throw new ForbiddenException('Not a member of this business: a platform SUPER_ADMIN who is not a member does not write its invoices (D-46)');
-      }
-      return;
-    }
-    if (!membership) throw new ForbiddenException('Not a member of this business');
-    if (requirement.ownerOnly && membership.role !== 'OWNER') {
-      throw new ForbiddenException(`Tool "${toolName}" is executed from here only for the business owner: ${requirement.ownerOnly}`);
-    }
-    const scopes: Record<string, string> = isJsonObject(membership.permissionScopes)
-      ? (membership.permissionScopes as Record<string, string>)
-      : defaultScopesForRole(membership.role);
-    for (const { module, minLevel } of requirement.scopes) {
-      const level = scopes[module] || 'none';
-      if (rankOf(level) < LEVEL_RANK[minLevel]) {
-        throw new ForbiddenException(`Insufficient permissions: ${module} requires ${minLevel} access (you have ${level})`);
-      }
-    }
-    if (requirement.crmSubPermission) {
-      const access = await resolveCrmAccess(this.prisma, businessId, user.id);
-      const scope = requirement.crmSubPermission === 'crm_delete' ? access.deleteScope : access.editScope;
-      if (!access.viewAll || scope !== 'any') {
-        throw new ForbiddenException(
-          `Insufficient permissions: "${toolName}" needs crm_view all and ${requirement.crmSubPermission} any (you have crm_view ${access.viewAll ? 'all' : 'owned'}, ${requirement.crmSubPermission} ${scope})`,
-        );
-      }
-    }
-    if (membership.role !== 'OWNER' && (!proposerId || proposerId !== user.id)) {
-      throw new ForbiddenException('This plan step is executed only for the member who proposed it or the business owner');
-    }
-  }
-
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('actions/businesses/:businessId/queue')
   async getActionQueue(
     @Param('businessId') businessId: string,
-    @Query('status') status?: string,
-    @Query('limit') limit?: string,
+    @Query('status') status: string | undefined,
+    @Query('limit') limit: string | undefined,
+    @Req() req: AuthenticatedRequest,
   ) {
+    const user = req?.user;
+    if (!user?.id) throw new UnauthorizedException('Authenticated user required');
+    const viewer = { id: user.id, role: user.role };
     const take = safeInt(limit, 30);
 
-    const [pendingApprovals, recentLogs, activePlans] = await Promise.all([
+    const [pendingApprovals, recentLogs, listedPlans, approvedItems, mayRead] = await Promise.all([
       this.governance.getPendingApprovals(businessId, take),
       this.executionLog.getHistory(businessId, {}, take, 0),
       this.planner.listPlans(businessId, status || undefined, take),
+      this.prisma.client.aiApprovalItem.findMany({
+        where: { businessId, status: 'approved', planStepId: { not: null } },
+        orderBy: { resolvedAt: 'desc' },
+        take,
+      }),
+      this.queueReadScope(businessId, viewer),
     ]);
 
-    const pending = pendingApprovals.map((a: any) => ({
+    // Who proposed each plan a pending approval item names (the listed plans, else one read).
+    const proposerOf = new Map<string, string | null>();
+    for (const p of listedPlans ?? []) proposerOf.set(p.id, p.userId ?? null);
+    const unlisted = [...new Set(pendingApprovals.map((a) => a.planId).filter((id): id is string => !!id && !proposerOf.has(id)))];
+    if (unlisted.length > 0) {
+      const rows = await this.prisma.client.aiPlan.findMany({ where: { id: { in: unlisted }, businessId }, select: { id: true, userId: true } });
+      for (const row of rows) proposerOf.set(row.id, row.userId ?? null);
+    }
+    const isOwn = (requesterId: string | null | undefined) => mayRead.seesEveryPlan || (!!requesterId && requesterId === viewer.id);
+
+    const activePlans = (listedPlans ?? [])
+      .filter((p) => isOwn(p.userId))
+      .map((p) => ({ ...p, steps: (p.steps ?? []).filter((st) => mayRead.step(st.toolName)) }));
+
+    const pending = pendingApprovals
+      .filter((a) => mayRead.step(a.toolName) && isOwn(a.planId ? proposerOf.get(a.planId) : a.userId))
+      .map((a: any) => ({
       id: a.id,
       type: 'pending_approval' as const,
       toolName: a.toolName,
@@ -628,7 +713,12 @@ export class GraphActionsController {
       affectedEntities: a.inputPayload ? this.extractAffectedEntities(a.inputPayload) : [],
     }));
 
-    const logs = (recentLogs.logs ?? recentLogs ?? []).map((l: any) => ({
+    // The same rule for the execution history: another member's run (its rationale names their
+    // plan and step) is shown to the OWNER and an ADMIN only, and a run only under its tool's read scope.
+    const logs = (recentLogs.logs ?? recentLogs ?? [])
+      .filter((l: { userId: string | null; toolName: string | null }) =>
+        isOwn(l.userId) && (l.toolName ? mayRead.step(l.toolName) : mayRead.seesEveryPlan))
+      .map((l: any) => ({
       id: l.id,
       type: 'executed' as const,
       toolName: l.toolName,
@@ -641,7 +731,7 @@ export class GraphActionsController {
       affectedEntities: l.outputSummary?.changedEntities ?? [],
     }));
 
-    const planItems = (activePlans ?? [])
+    const planItems = activePlans
       .filter((p: any) => ['pending', 'in_progress', 'approved'].includes(p.status))
       .map((p: any) => ({
         id: p.id,
@@ -656,7 +746,9 @@ export class GraphActionsController {
         affectedEntities: p.modules ?? [],
       }));
 
-    let items = [...pending, ...planItems, ...logs];
+    const approved = await this.approvedRunnableSteps(businessId, viewer, approvedItems);
+
+    let items = [...approved, ...pending, ...planItems, ...logs];
     if (status) {
       items = items.filter(i => i.status === status);
     }
@@ -666,6 +758,7 @@ export class GraphActionsController {
       items: items.slice(0, take),
       counts: {
         pending: pending.length,
+        approved: approved.length,
         scheduled: planItems.filter((p: any) => p.status === 'scheduled').length,
         active: planItems.filter((p: any) => p.status === 'active').length,
         completed: logs.filter((l: any) => l.status === 'completed').length,
@@ -673,6 +766,95 @@ export class GraphActionsController {
       },
       plans: activePlans,
     };
+  }
+
+  /**
+   * What the viewer may read on the queue (QUEUE-READ): whether they see every member's plans
+   * (the OWNER, an ADMIN, a SUPER_ADMIN), and which steps (by tool) they see: every step for the
+   * OWNER and a SUPER_ADMIN; otherwise a step whose tool graphActionRequirement maps, with each of
+   * its module scopes held at read as ModuleScopeGuard computes them.
+   */
+  private async queueReadScope(
+    businessId: string,
+    viewer: { id: string; role?: string },
+  ): Promise<{ seesEveryPlan: boolean; step: (toolName: string | null | undefined) => boolean }> {
+    if (viewer.role === 'SUPER_ADMIN') return { seesEveryPlan: true, step: () => true };
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: viewer.id, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) return { seesEveryPlan: false, step: () => false };
+    if (membership.role === 'OWNER') return { seesEveryPlan: true, step: () => true };
+    const scopes: Record<string, string> = isJsonObject(membership.permissionScopes)
+      ? (membership.permissionScopes as Record<string, string>)
+      : defaultScopesForRole(membership.role);
+    return {
+      seesEveryPlan: PLAN_APPROVER_ROLES.has(membership.role),
+      step: (toolName) => {
+        if (!toolName) return false;
+        const requirement = graphActionRequirement(toolName);
+        if (!requirement || 'refused' in requirement) return false;
+        return requirement.scopes.every(({ module }) => rankOf(scopes[module] || 'none') >= LEVEL_RANK.read);
+      },
+    };
+  }
+
+  /**
+   * D-70: the approved approval items whose stored plan step has not run yet (pending, in a plan
+   * this route runs) and that the viewer may run (assertMayRunGraphAction, as POST .../execute
+   * checks it), as queue items carrying the stored planId and planStepId; one item per step.
+   */
+  private async approvedRunnableSteps(
+    businessId: string,
+    viewer: { id: string; role?: string },
+    approvedItems: Array<{
+      id: string;
+      planId: string | null;
+      planStepId: string | null;
+      title: string;
+      description: string | null;
+      riskTier: number;
+      module: string | null;
+      createdAt: Date;
+      resolvedAt: Date | null;
+    }>,
+  ) {
+    const stepIds = [...new Set(approvedItems.map((a) => a.planStepId).filter((id): id is string => !!id))];
+    if (stepIds.length === 0) return [];
+    const steps = await this.prisma.client.aiPlanStep.findMany({
+      where: { id: { in: stepIds }, status: 'pending', plan: { businessId, status: { in: [...OPEN_PLAN_STATUSES] } } },
+      select: { id: true, planId: true, toolName: true, inputPayload: true, plan: { select: { userId: true } } },
+    });
+    const byId = new Map(steps.map((st) => [st.id, st]));
+    const seen = new Set<string>();
+    const out = [];
+    for (const item of approvedItems) {
+      const step = item.planStepId ? byId.get(item.planStepId) : undefined;
+      if (!step || !step.toolName || seen.has(step.id) || (item.planId && item.planId !== step.planId)) continue;
+      try {
+        await assertMayRunGraphAction(this.prisma, businessId, viewer, step.toolName, step.plan.userId);
+      } catch (err: unknown) {
+        if (err instanceof ForbiddenException) continue;
+        throw err;
+      }
+      seen.add(step.id);
+      out.push({
+        id: item.id,
+        type: 'approved_step' as const,
+        toolName: step.toolName,
+        title: item.title,
+        description: item.description ?? null,
+        riskTier: item.riskTier,
+        module: item.module ?? this.inferModule(step.toolName),
+        status: 'approved' as const,
+        createdAt: item.resolvedAt ?? item.createdAt,
+        affectedEntities: isJsonObject(step.inputPayload) ? this.extractAffectedEntities(step.inputPayload) : [],
+        planId: step.planId,
+        planStepId: step.id,
+        approvalId: item.id,
+      });
+    }
+    return out;
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

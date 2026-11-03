@@ -141,8 +141,8 @@ export class AutopilotController {
     @Param('taskId') taskId: string,
     @Req() req: { user?: { id?: string } },
   ) {
-    resolvingUserId(req);
-    return this.autopilotService.denyTask(taskId, businessId);
+    // Trial-N repair round 2 (DENY-ACTOR): the denier is recorded on the audit trail.
+    return this.autopilotService.denyTask(taskId, businessId, resolvingUserId(req));
   }
 
   @Post('tasks/generate-setup')

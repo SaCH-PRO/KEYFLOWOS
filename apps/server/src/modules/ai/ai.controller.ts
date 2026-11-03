@@ -8,6 +8,7 @@ import { AiOversightService, RiskTier } from './ai-oversight.service';
 import { BusinessGraphService } from './business-graph.service';
 import { IntentParserService } from './intent-parser.service';
 import { PlannerService } from './planner.service';
+import { PLAN_APPROVER_ROLES, assertMayRunGraphAction } from './graph-actions.controller';
 import { AiMemoryService, MemoryCategory } from './ai-memory.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
 import { ProAutoMonitorService } from './pro-auto-monitor.service';
@@ -330,6 +331,15 @@ export class AiController {
     return this.planner.getPlan(planId, businessId);
   }
 
+  /**
+   * Trial-N repair round 2 (PLAN-APPROVE): an approval makes PlanExecutorService run every stored
+   * step with no principal, so the approver must be one who could have each step run: what
+   * POST actions/.../execute requires (assertMayRunGraphAction: the tool's module scopes, the CRM
+   * sub-permission, the OWNER for owner-only tools, D-46 for a SUPER_ADMIN who is not a member),
+   * with the contact reads the dispatcher bounds by its principal kept to the OWNER (the executor
+   * hands it none), and the plan proposed by the approver or the approver the business OWNER or an
+   * ADMIN. A step with no tool runs nothing and needs nothing. Refused 403 before anything changes.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/ai/plans/:planId/approve')
   async approvePlan(
@@ -339,6 +349,17 @@ export class AiController {
   ) {
     const userId = req?.user?.id;
     if (!userId) throw new UnauthorizedException('Authenticated user required to approve plans');
+    const plan = await this.prisma.client.aiPlan.findFirst({
+      where: { id: planId, businessId },
+      select: { userId: true, steps: { select: { toolName: true }, orderBy: { order: 'asc' } } },
+    });
+    for (const toolName of new Set((plan?.steps ?? []).map((s) => s.toolName).filter((t): t is string => !!t))) {
+      await assertMayRunGraphAction(this.prisma, businessId, { id: userId, role: req.user?.role }, toolName, plan?.userId ?? null, {
+        proposerOverrideRoles: PLAN_APPROVER_ROLES,
+        proposerRefusal: 'This plan is approved only by the member who proposed it, the business owner or an admin',
+        noPrincipal: true,
+      });
+    }
     const result = await this.planner.approvePlan(planId, businessId, userId);
     // Trigger immediate execution — no 30s polling delay
     this.events.emit('plan.approved', { planId, businessId });

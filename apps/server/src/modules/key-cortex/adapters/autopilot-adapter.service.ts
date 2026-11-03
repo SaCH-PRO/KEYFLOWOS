@@ -65,12 +65,14 @@ export class AutopilotAdapterService {
     return this.autopilot.approveTask(input.taskId, input.businessId, input.actorId || 'key-cortex');
   }
 
+  /** Trial-N repair round 2 (DENY-ACTOR): the denier is the member the command acts for, as for approve. */
   async rejectTask(input: {
     businessId: string;
     taskId: string;
     reason?: string;
+    actorId?: string;
   }) {
-    return this.autopilot.denyTask(input.taskId, input.businessId);
+    return this.autopilot.denyTask(input.taskId, input.businessId, input.actorId || 'key-cortex');
   }
 
   async enableLoop(input: { businessId: string; loopId: string }) {
@@ -207,6 +209,7 @@ export class AutopilotAdapterService {
           businessId: command.businessId,
           taskId: command.parameters.taskId as string,
           reason: command.parameters.reason as string,
+          actorId: command.userId,
         });
         return connectorOk(command, start, rejected);
       }

@@ -12,6 +12,7 @@ import {
 import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 import { ConnectorCommand } from './key-cortex-connector.types';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 
 export interface CreateGoalInput {
   title: string;
@@ -77,6 +78,14 @@ export const RUNNABLE_PLAN_STATUSES: readonly string[] = ['draft', 'pending', 'a
  * ran.
  */
 export const SAGA_STOPPED_FOR_APPROVAL = 'stopped_for_approval';
+
+/**
+ * Trial-N repair round 2 (KEY-PLANS-D46): the connector modules whose actions
+ * write the business's invoices and payments, the ones POST cortex/execute
+ * holds to the revenue scope (CORTEX_MODULE_RULES: commerce -> revenue). A
+ * plan step of one runs only for a member who holds revenue write.
+ */
+export const INVOICE_WRITE_MODULES: ReadonlySet<string> = new Set(['commerce']);
 
 export interface PlanGoal {
   objective: string;
@@ -725,15 +734,61 @@ export class KeyCortexPlannerService {
    * business OWNER (the OWNER membership or Business.ownerId, the two arms
    * IdentityService.assertBusinessOwner admits) or SUPER_ADMIN. A plan no member
    * created (plan.userId null) is the OWNER's or SUPER_ADMIN's to run.
+   *
+   * Trial-N repair round 2 (KEY-PLANS-D46): a plan with a step that writes the
+   * business's invoices or payments (INVOICE_WRITE_MODULES) runs only for a
+   * member who holds revenue write: the commerce adapter writes as
+   * KEY_SYSTEM_ACTOR_ID, so the service membership and scope checks that apply
+   * over HTTP never run on this path. A SUPER_ADMIN who is not a member of the
+   * business is refused such a plan (D-46); one who is a member keeps the
+   * platform bypass, as on POST cortex/execute (cortexCommandRefusal). The
+   * check runs before the claim, so a refused plan is left as it was.
    */
   private async assertMayExecutePlan(
-    plan: { businessId: string; userId?: string | null },
+    plan: { businessId: string; userId?: string | null; steps?: Array<{ module: string | null }> },
     member: PlanExecutionActor,
   ): Promise<void> {
-    if (member.role === 'SUPER_ADMIN') return;
-    if (plan.userId && plan.userId === member.userId) return;
-    if (await this.isBusinessOwner(plan.businessId, member.userId)) return;
-    throw new ForbiddenException("Only the plan's creator or the business owner can execute this plan");
+    const writesInvoices = (plan.steps ?? []).some((s) => !!s.module && INVOICE_WRITE_MODULES.has(s.module));
+    if (member.role === 'SUPER_ADMIN') {
+      if (writesInvoices && !(await this.membershipOf(plan.businessId, member.userId))) {
+        throw new ForbiddenException(
+          'Not a member of this business: a platform SUPER_ADMIN who is not a member does not write its invoices or payments (D-46), so this plan is not run',
+        );
+      }
+      return;
+    }
+    const mayRun =
+      (!!plan.userId && plan.userId === member.userId) || (await this.isBusinessOwner(plan.businessId, member.userId));
+    if (!mayRun) throw new ForbiddenException("Only the plan's creator or the business owner can execute this plan");
+    if (writesInvoices) await this.assertRevenueWrite(plan.businessId, member.userId);
+  }
+
+  /**
+   * Revenue write as ModuleScopeGuard computes it (the membership's explicit scope
+   * map, else its role's defaults); the business OWNER (either arm) holds it.
+   */
+  private async assertRevenueWrite(businessId: string, userId: string): Promise<void> {
+    if (await this.isBusinessOwner(businessId, userId)) return;
+    const membership = await this.membershipOf(businessId, userId);
+    if (!membership) throw new ForbiddenException('Not a member of this business');
+    const explicit = membership.permissionScopes;
+    const scopes: Record<string, string> =
+      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
+        ? (explicit as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(
+        `Insufficient permissions: revenue requires write access (you have ${level}); this plan writes the business's invoices or payments`,
+      );
+    }
+  }
+
+  private membershipOf(businessId: string, userId: string) {
+    return this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
   }
 
   /**

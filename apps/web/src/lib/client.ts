@@ -6526,21 +6526,30 @@ export interface ActionExecuteResponse {
 
 export interface ActionQueueItem {
   id: string;
-  type: 'pending_approval' | 'executed' | 'scheduled';
+  /**
+   * 'approved_step' (D-70): a stored plan step whose approval item a member approved and that has
+   * not run yet; listed only for a member who may run it, with its stored planId and planStepId.
+   */
+  type: 'pending_approval' | 'executed' | 'scheduled' | 'approved_step';
   toolName: string;
   title: string;
   description: string | null;
   riskTier: number;
   module: string | null;
-  status: 'pending' | 'scheduled' | 'active' | 'completed' | 'failed';
+  status: 'pending' | 'approved' | 'scheduled' | 'active' | 'completed' | 'failed';
   createdAt: string;
   affectedEntities: string[];
+  /** On an 'approved_step' item: the stored plan and step the Run action executes, by id. */
+  planId?: string;
+  planStepId?: string;
+  approvalId?: string;
 }
 
 export interface ActionQueueResponse {
   items: ActionQueueItem[];
   counts: {
     pending: number;
+    approved?: number;
     scheduled: number;
     active: number;
     completed: number;
@@ -6672,6 +6681,22 @@ export async function runPlannedAction(businessId: string, input: string): Promi
     return { outcome: 'failed', planId: plan.id, results, reason: res.data.error ?? res.data.reason };
   }
   return { outcome: 'completed', planId: plan.id, results };
+}
+
+/**
+ * D-70 (2026-11-03): run an approved queued KEY action step from its queue item. The item carries
+ * the stored planId and planStepId the server listed it with; exactly those ids go to the bound
+ * execute route (V1-31b), which runs the stored step once. Nothing is planned again and no tool
+ * name or argument is sent. An item without both ids is not run.
+ */
+export async function runApprovedQueueItem(
+  businessId: string,
+  item: Pick<ActionQueueItem, 'type' | 'planId' | 'planStepId'>,
+): Promise<ApiResult<ActionExecuteResponse>> {
+  if (item.type !== 'approved_step' || !item.planId || !item.planStepId) {
+    return { data: null, error: 'This queue item is not an approved step with stored ids' };
+  }
+  return executePlanStep(businessId, item.planId, item.planStepId);
 }
 
 export async function fetchActionQueue(businessId: string, status?: string, limit?: number): Promise<ApiResult<ActionQueueResponse>> {

@@ -2,6 +2,8 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from '../crm/crm-timeline.service';
+import { BusinessEventService } from '../business-events/business-event.service';
+import { isSystemActor } from '../../core/auth/system-actor';
 import { CONTACT_EVENT } from '@keyflow/shared';
 
 interface AutopilotTaskInput {
@@ -63,6 +65,7 @@ export class AutopilotService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
+    @Inject(BusinessEventService) private readonly businessEvents: BusinessEventService,
   ) {}
 
   async getTodaysTasks(businessId: string, limit: number = 3) {
@@ -186,11 +189,35 @@ export class AutopilotService {
     });
   }
 
-  async denyTask(taskId: string, businessId: string) {
-    return this.prisma.client.autopilotTask.update({
+  /**
+   * Trial-N repair round 2 (DENY-ACTOR, SEC-V131b-3): AutopilotTask has no column for who denied
+   * a task (approvedBy and executedBy would misstate it), so the denier is recorded on the audit
+   * trail (BusinessEvent, D-08) once the task is SKIPPED: the authenticated member over HTTP, the
+   * member the command acts for through the cortex adapter. No schema change.
+   */
+  async denyTask(taskId: string, businessId: string, deniedBy: string) {
+    const before = await this.prisma.client.autopilotTask.findUnique({
+      where: { id: taskId, businessId },
+      select: { status: true },
+    });
+    const task = await this.prisma.client.autopilotTask.update({
       where: { id: taskId, businessId },
       data: { status: 'SKIPPED' },
     });
+    const system = isSystemActor(deniedBy);
+    await this.businessEvents.emit({
+      businessId,
+      eventType: 'autopilot_task.denied',
+      subjectType: 'autopilot_task',
+      subjectId: taskId,
+      actorType: system ? 'system' : 'human',
+      actorId: deniedBy,
+      action: 'deny',
+      before: before ? { status: before.status } : undefined,
+      after: { status: task.status },
+      source: system ? 'ai' : 'web',
+    });
+    return task;
   }
 
   async generateSetupTasks(businessId: string) {
