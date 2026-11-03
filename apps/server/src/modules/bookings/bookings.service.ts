@@ -527,7 +527,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
       if (depositForfeit) updated.paymentStatus = DEPOSIT_FORFEITED;
     } else if (updated.paymentStatus === DEPOSIT_FORFEITED) {
-      const reinstated = derivePaymentStatus(await readSettlementInvoices(this.prisma, businessId, updated));
+      const reinstated = derivePaymentStatus(await readSettlementInvoices(this.prisma.client, businessId, updated));
       const restored = await this.prisma.client.booking.updateMany({
         where: { id: booking.id, businessId, paymentStatus: DEPOSIT_FORFEITED, status: { not: 'CANCELLED' } },
         data: { paymentStatus: reinstated },

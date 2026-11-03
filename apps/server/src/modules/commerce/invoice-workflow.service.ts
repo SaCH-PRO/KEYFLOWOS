@@ -222,6 +222,17 @@ export function balanceOfStoredRows(
 }
 
 /**
+ * Trial-N round 2 (RC-DEP-2): an invoice's Payment rows of its own tenant.
+ * Payment sits outside the tenant extension and has no FK to Business (M31),
+ * so a row carrying another businessId is not this invoice's money, as the
+ * receipt, receivables and payments-ops balance readers (SEC-V29B-1,
+ * SEC-V49-1) and the booking settlement (trial-N N1-SEC) already read it.
+ */
+export function ownTenantPayments<T extends { businessId: string }>(invoice: { businessId: string; payments: T[] }): T[] {
+  return invoice.payments.filter((p) => p.businessId === invoice.businessId);
+}
+
+/**
  * V1-36-DM-BALANCE-READ-CONTRACT (CF-17): the same contract for a figure that
  * is summed in the database (money received in a period, across invoices).
  * The Payment rows whose amounts add up to balanceOfStoredRows(...).net: the
@@ -355,14 +366,17 @@ export class InvoiceWorkflowService {
     }
   }
 
-  /** Loads invoice + payments and returns the canonical balance summary. */
+  /**
+   * Loads invoice + payments and returns the canonical balance summary, over
+   * the invoice's own-tenant rows (trial-N round 2, RC-DEP-2: ownTenantPayments).
+   */
   async getBalance(invoiceId: string): Promise<BalanceSummary> {
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
       include: { payments: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
-    return balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
+    return balanceOfStoredRows(Number(invoice.total), ownTenantPayments(invoice), invoice.currency);
   }
 
   /**
@@ -438,7 +452,12 @@ export class InvoiceWorkflowService {
     if (!invoice) throw new NotFoundException('Invoice not found');
     // V1-29 review (CR-V29-4): a row the manual refund flipped before V1-29
     // is read as its payment plus its refund, not subtracted twice.
-    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
+    // Trial-N round 2 (RC-DEP-2): the status is derived from the invoice's
+    // own-tenant rows. Every row on the invoice was read, so a SUCCESSFUL row
+    // tagged with another business moved it to PAID (and a booking deposit's
+    // PAID status is what it holds and forfeits, D-26), and a foreign negative
+    // REFUNDED row reopened it.
+    const balance = balanceOfStoredRows(Number(invoice.total), ownTenantPayments(invoice), invoice.currency);
     const current = invoice.status as InvoiceStatus;
     const next = deriveStatusAfterPayment(current, balance);
     if (next === current) {

@@ -1348,8 +1348,12 @@ export class CommerceService {
     // guard (DRAFT / VOID -> 409) and records the actor (R0-PL-07). The tenant
     // is the invoice's own, exactly as the synthetic row used; the authority
     // checks above are unchanged.
+    // Trial-N round 2 (RC-DEP-2): the invoice's own-tenant rows (M31), as the
+    // reconcile reads them (ownTenantPayments): a row of another business is
+    // not money received, so it neither shrinks the payment recorded here nor
+    // lets the status move to PAID with nothing recorded.
     const rows = await this.prisma.client.payment.findMany({
-      where: { invoiceId },
+      where: { invoiceId, businessId: existingInvoice.businessId },
       select: { amount: true, status: true },
     });
     const balance = computeBalance(Number(existingInvoice.total), rows, existingInvoice.currency);
@@ -3103,7 +3107,8 @@ export class CommerceService {
         if (options.expectRemaining != null) {
           const current = await tx.invoice.findUnique({
             where: { id: invoiceId },
-            select: { total: true, currency: true, payments: { select: { amount: true, status: true } } },
+            // Trial-N round 2 (RC-DEP-2): own-tenant rows, as markInvoicePaid read them.
+            select: { total: true, currency: true, payments: { where: { businessId }, select: { amount: true, status: true } } },
           });
           // R0-PL-04 review (CR-PL04-1): the refund guard runs again on the
           // rows under the lock, so a manual refund that committed in the gap

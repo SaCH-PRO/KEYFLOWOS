@@ -3,7 +3,18 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import type { InvoicePaidPayload } from '../../core/event-bus/events.types';
-import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
+import { balanceOfStoredRows, readStoredPayments } from '../commerce/invoice-workflow.service';
+
+type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
+/** What the settlement reads need: the invoice delegate of the client or of a transaction. */
+type SettlementReader = Pick<PrismaTx, 'invoice'>;
+
+/**
+ * Trial-N round 2 (RC-DEP-3): the bound on a derivation's transaction. It is
+ * a few reads and one write under the booking row lock; the bound only ends
+ * one that is stuck, so it never holds the lock for long.
+ */
+const DERIVATION_TX_TIMEOUT_MS = 10_000;
 
 /** What one invoice.paid did to a booking's paymentStatus. */
 export interface BookingPaymentStatusOutcome {
@@ -59,17 +70,48 @@ export type SettlementInvoice = Prisma.InvoiceGetPayload<{ select: typeof SETTLE
  * tenant extension and has no FK to Business (M31), so a row carrying another
  * businessId is not this invoice's money, as the receipt, the receivables and
  * the payments-ops balance readers already hold (SEC-V29B-1, SEC-V49-1). Every
- * settlement read passes the business it reads the invoice under.
+ * settlement read passes the business it reads the invoice under. The rows
+ * come in the order they were written (trial-N round 2, RC-DEP-1): whether a
+ * deposit was paid in full is read from that order (depositPosition).
  */
 export function settlementInvoiceSelect(businessId: string) {
   return {
     ...SETTLEMENT_INVOICE_SHAPE,
-    payments: { where: { businessId }, select: SETTLEMENT_INVOICE_SHAPE.payments.select },
+    payments: {
+      where: { businessId },
+      select: SETTLEMENT_INVOICE_SHAPE.payments.select,
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    },
   } satisfies Prisma.InvoiceSelect;
 }
 
 /** Invoice statuses with nothing left to collect on the invoice itself. */
 const NOTHING_LEFT_TO_COLLECT: ReadonlySet<string> = new Set(['PAID', 'FULLY_CREDITED']);
+
+/**
+ * Trial-N round 2 (RC-DEP-1): whether a deposit's own payment rows, read in
+ * the order they were written (settlementInvoiceSelect), paid what it bills
+ * in full since it last stood at nothing received. The running net follows
+ * the balance contract (balanceOfStoredRows: SUCCESSFUL rows in, D-14 negative
+ * REFUNDED rows out, a legacy positive REFUNDED flip read as its payment then
+ * its refund; PENDING and FAILED rows are not money). A net back at nothing
+ * is D-14's full refund, which reopens an invoice to SENT with paidAt cleared,
+ * owed afresh: what was paid before it no longer counts. The gross received
+ * (paid >= billed) counted refund and repayment churn: 20 paid, refunded, then
+ * 10 paid read as settled and held the 10.
+ */
+function paidInFullSinceReopened(rows: SettlementInvoice['payments'], billedCents: number): boolean {
+  let netCents = 0;
+  let paidInFull = false;
+  for (const row of readStoredPayments(rows)) {
+    if (row.status === 'SUCCESSFUL') netCents += toCents(row.amount);
+    else if (row.status === 'REFUNDED') netCents -= Math.abs(toCents(row.amount));
+    else continue;
+    if (netCents <= 0) paidInFull = false;
+    else if (netCents >= billedCents) paidInFull = true;
+  }
+  return paidInFull;
+}
 
 /**
  * What a booking's live deposit invoice (not VOID, not deleted) stands for, in
@@ -83,14 +125,18 @@ const NOTHING_LEFT_TO_COLLECT: ReadonlySet<string> = new Set(['PAID', 'FULLY_CRE
  *           flip reads as net 0):
  *             - a deposit that was never settled holds nothing: a part payment
  *               on a deposit still owed does not make the booking DEPOSIT_PAID,
- *               and a refund of part of it does not either (trial-N N4). A
+ *               and a refund of part of it does not either (trial-N N4), nor
+ *               does refund and repayment churn (trial-N round 2, RC-DEP-1). A
  *               deposit was settled when it is PAID (its status is the
  *               evidence: a legacy deposit marked PAID with no rows, FAILED or
  *               PENDING rows only, or rows short of its total, from before
  *               R0-20 recorded every payment, was paid, and the final invoice
- *               netted it as paid) or when the gross received on it covered
- *               what it bills (a paid deposit a credit note was then applied
- *               to, D-28 PARTIALLY_CREDITED, or one D-14 reopened by a refund);
+ *               netted it as paid) or when its rows, in the order they were
+ *               written, paid what it bills in full since it last stood at
+ *               nothing received (paidInFullSinceReopened: a paid deposit a
+ *               credit note was then applied to, D-28 PARTIALLY_CREDITED, or
+ *               one a D-14 refund reopened to PARTIALLY_PAID; one refunded
+ *               back to nothing, D-14's SENT, is owed afresh);
  *             - a settled deposit something was refunded on (PAID, or reopened
  *               by a D-14 refund to PARTIALLY_PAID or SENT) holds its net
  *               received;
@@ -109,7 +155,7 @@ export function depositPosition(deposit: SettlementInvoice): { billedCents: numb
   const balance = balanceOfStoredRows(Number(deposit.total), deposit.payments, deposit.currency);
   const netHeldCents = Math.min(billedCents, Math.max(0, toCents(balance.net)));
   const refunded = toCents(balance.refunded) > 0;
-  const settled = deposit.status === 'PAID' || toCents(balance.paid) >= billedCents;
+  const settled = deposit.status === 'PAID' || paidInFullSinceReopened(deposit.payments, billedCents);
   const heldCents = !settled ? 0 : refunded ? netHeldCents : billedCents;
   return { billedCents, heldCents, coversCents: NOTHING_LEFT_TO_COLLECT.has(deposit.status) ? heldCents : billedCents };
 }
@@ -140,21 +186,25 @@ export function derivePaymentStatus(invoices: {
   return 'UNPAID';
 }
 
-/** The booking's final invoice (not deleted) and live deposit invoice (not VOID, not deleted), under its business. */
+/**
+ * The booking's final invoice (not deleted) and live deposit invoice (not
+ * VOID, not deleted), under its business, read through `db`: the client, or
+ * the transaction holding the booking row lock (BookingPaymentStatusListener).
+ */
 export async function readSettlementInvoices(
-  prisma: PrismaService,
+  db: SettlementReader,
   businessId: string,
   booking: { invoiceId: string | null; depositInvoiceId: string | null },
 ): Promise<{ final: SettlementInvoice | null; deposit: SettlementInvoice | null }> {
   const [final, deposit] = await Promise.all([
     booking.invoiceId
-      ? prisma.client.invoice.findFirst({
+      ? db.invoice.findFirst({
           where: { id: booking.invoiceId, businessId, deletedAt: null },
           select: settlementInvoiceSelect(businessId),
         })
       : null,
     booking.depositInvoiceId
-      ? prisma.client.invoice.findFirst({
+      ? db.invoice.findFirst({
           where: { id: booking.depositInvoiceId, businessId, deletedAt: null, status: { not: 'VOID' } },
           select: settlementInvoiceSelect(businessId),
         })
@@ -176,6 +226,20 @@ export async function readSettlementInvoices(
  * read under the same business, so a payload naming another tenant moves
  * nothing. The write is a conditional update on the statuses it may advance
  * from, so replays and concurrent deliveries write once.
+ *
+ * Trial-N round 2 (RC-DEP-3): every derivation (invoice.paid, and a refund's
+ * invoice.reopened / invoice.payment_recorded) runs in one transaction that
+ * locks the booking row (FOR NO KEY UPDATE) before it reads the booking, and
+ * reads its invoices and writes its status under that lock. The
+ * compare-and-set on the status read covered the booking only, not the
+ * invoices the status was derived from: a refund's re-derivation that read the
+ * deposit SENT could write UNPAID after the deposit was paid again and its
+ * invoice.paid had found DEPOSIT_PAID with nothing to write (and the mirror:
+ * an invoice.paid that read the deposit PAID could write DEPOSIT_PAID after a
+ * full refund's re-derivation had found UNPAID). Under the lock the
+ * derivations of one booking run one after another, each reads the invoices as
+ * committed when it holds the lock, and every invoice move emits its event
+ * after it commits, so the derivation of the last move runs after it.
  *
  * Listener failures are logged and never thrown into the emitter: the payment
  * that raised the event has already committed.
@@ -205,9 +269,9 @@ export class BookingPaymentStatusListener {
    * after a cancel that rightly forfeited nothing). On either event the booking
    * takes the status its two invoices state now (derivePaymentStatus), forward
    * or back, by the database's word as on invoice.paid; a forfeited deposit
-   * (D-26) is never overwritten. The write is conditional on the status read,
-   * so a write that landed in between is not overwritten. Failures are logged,
-   * never thrown into the emitter.
+   * (D-26) is never overwritten. The write is conditional on the status read
+   * under the booking row lock (RC-DEP-3), so nothing lands in between.
+   * Failures are logged, never thrown into the emitter.
    */
   @OnEvent('invoice.reopened', { async: true })
   @OnEvent('invoice.payment_recorded', { async: true })
@@ -220,62 +284,75 @@ export class BookingPaymentStatusListener {
     }
   }
 
-  private async rederive(payload: Pick<InvoicePaidPayload, 'invoice' | 'businessId'>): Promise<BookingPaymentStatusOutcome> {
-    const booking = await this.bookingOf(payload);
-    if (!booking) return NOTHING;
-    const unchanged = { bookingId: booking.id, paymentStatus: booking.paymentStatus, changed: false };
-    if (!REDERIVES_FROM.has(booking.paymentStatus)) return unchanged;
-    const target = derivePaymentStatus(await readSettlementInvoices(this.prisma, booking.businessId, booking));
-    if (target === booking.paymentStatus) return unchanged;
-    const write = await this.prisma.client.booking.updateMany({
-      where: { id: booking.id, businessId: booking.businessId, paymentStatus: booking.paymentStatus },
-      data: { paymentStatus: target },
+  private rederive(payload: Pick<InvoicePaidPayload, 'invoice' | 'businessId'>): Promise<BookingPaymentStatusOutcome> {
+    return this.underBookingLock(async (tx) => {
+      const booking = await this.bookingOf(tx, payload);
+      if (!booking) return NOTHING;
+      const unchanged = { bookingId: booking.id, paymentStatus: booking.paymentStatus, changed: false };
+      if (!REDERIVES_FROM.has(booking.paymentStatus)) return unchanged;
+      const target = derivePaymentStatus(await readSettlementInvoices(tx, booking.businessId, booking));
+      if (target === booking.paymentStatus) return unchanged;
+      const write = await tx.booking.updateMany({
+        where: { id: booking.id, businessId: booking.businessId, paymentStatus: booking.paymentStatus },
+        data: { paymentStatus: target },
+      });
+      return write.count > 0 ? { bookingId: booking.id, paymentStatus: target, changed: true } : unchanged;
     });
-    return write.count > 0 ? { bookingId: booking.id, paymentStatus: target, changed: true } : unchanged;
+  }
+
+  /** One derivation, in a transaction whose booking row lock bookingOf takes (trial-N round 2, RC-DEP-3). */
+  private underBookingLock(derive: (tx: PrismaTx) => Promise<BookingPaymentStatusOutcome>): Promise<BookingPaymentStatusOutcome> {
+    return this.prisma.client.$transaction((tx) => derive(tx), { timeout: DERIVATION_TX_TIMEOUT_MS });
   }
 
   /**
    * The booking the event's invoice belongs to (as its deposit or final
    * invoice), read under the event's business; null when the payload is
    * malformed, its invoice names another business, or the invoice is not this
-   * business's (not deleted).
+   * business's (not deleted). Trial-N round 2 (RC-DEP-3): the booking is read
+   * in the derivation's transaction after its row is locked (FOR NO KEY
+   * UPDATE, the lock a status write takes), so the status read stays the
+   * status until the transaction's own write.
    */
-  private async bookingOf(payload: Pick<InvoicePaidPayload, 'invoice' | 'businessId'>, requireStatus?: 'PAID') {
+  private async bookingOf(tx: PrismaTx, payload: Pick<InvoicePaidPayload, 'invoice' | 'businessId'>, requireStatus?: 'PAID') {
     const businessId = payload?.businessId;
     const invoiceId = payload?.invoice?.id;
     if (!businessId || !invoiceId) return null;
     // A payload whose invoice names another business than the event is not this tenant's money.
     if (payload.invoice.businessId && payload.invoice.businessId !== businessId) return null;
 
-    const invoice = await this.prisma.client.invoice.findFirst({
+    const invoice = await tx.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
       select: { id: true, status: true },
     });
     if (!invoice || (requireStatus && invoice.status !== requireStatus)) return null;
 
-    const booking = await this.prisma.client.booking.findFirst({
+    await tx.$queryRaw`SELECT id FROM bookings WHERE business_id = ${businessId} AND deleted_at IS NULL AND (invoice_id = ${invoiceId} OR deposit_invoice_id = ${invoiceId}) FOR NO KEY UPDATE`;
+    const booking = await tx.booking.findFirst({
       where: { businessId, deletedAt: null, OR: [{ invoiceId }, { depositInvoiceId: invoiceId }] },
       select: { id: true, invoiceId: true, depositInvoiceId: true, paymentStatus: true },
     });
     return booking ? { ...booking, businessId } : null;
   }
 
-  private async apply(payload: InvoicePaidPayload): Promise<BookingPaymentStatusOutcome> {
-    const booking = await this.bookingOf(payload, 'PAID');
-    if (!booking) return NOTHING;
-    const businessId = booking.businessId;
+  private apply(payload: InvoicePaidPayload): Promise<BookingPaymentStatusOutcome> {
+    return this.underBookingLock(async (tx) => {
+      const booking = await this.bookingOf(tx, payload, 'PAID');
+      if (!booking) return NOTHING;
+      const businessId = booking.businessId;
 
-    const target = derivePaymentStatus(await readSettlementInvoices(this.prisma, businessId, booking));
-    if (target === 'UNPAID') {
+      const target = derivePaymentStatus(await readSettlementInvoices(tx, businessId, booking));
+      if (target === 'UNPAID') {
+        return { bookingId: booking.id, paymentStatus: booking.paymentStatus, changed: false };
+      }
+      const write = await tx.booking.updateMany({
+        where: { id: booking.id, businessId, paymentStatus: { in: ADVANCES_FROM[target] } },
+        data: { paymentStatus: target },
+      });
+      if (write.count > 0) {
+        return { bookingId: booking.id, paymentStatus: target, changed: true };
+      }
       return { bookingId: booking.id, paymentStatus: booking.paymentStatus, changed: false };
-    }
-    const write = await this.prisma.client.booking.updateMany({
-      where: { id: booking.id, businessId, paymentStatus: { in: ADVANCES_FROM[target] } },
-      data: { paymentStatus: target },
     });
-    if (write.count > 0) {
-      return { bookingId: booking.id, paymentStatus: target, changed: true };
-    }
-    return { bookingId: booking.id, paymentStatus: booking.paymentStatus, changed: false };
   }
 }
