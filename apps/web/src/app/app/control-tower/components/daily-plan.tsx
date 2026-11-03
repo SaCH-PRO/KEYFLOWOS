@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
 import { apiGet } from "@/lib/api";
-import { executeAction } from "@/lib/client";
+import { runPlannedAction } from "@/lib/client";
 
 type DayBlock = {
   timeSlot: string;
@@ -153,23 +153,27 @@ export function DailyPlan({ businessId }: { businessId: string }) {
     }
   }, [hasAutoLoaded, businessId, loadPlan]);
 
+  /*
+   * V1-31c (the V1-31b companion): a block's toolName/toolArgs come from the
+   * weekly-plan text and are never sent; the server executes only plan steps
+   * it stored. The block is asked of KEY in words (POST .../plan stores a
+   * plan) and each stored step is executed by id (runPlannedAction).
+   */
   const handleExecuteBlock = async (block: DayBlock, index: number) => {
     if (block.toolName && businessId) {
       setExecutingBlock(index);
       try {
-        const res = await executeAction(
-          businessId,
-          block.toolName,
-          block.toolArgs ?? {},
-        );
-        if (res.data?.success) {
+        const res = await runPlannedAction(businessId, `${block.focus}: ${block.description}`);
+        if (res.outcome === "completed") {
           toast.success(`${block.focus} completed`);
           setCompletedBlocks((prev) => new Set(prev).add(index));
           window.dispatchEvent(new CustomEvent("kf:action.executed"));
-        } else if (res.data?.blocked) {
-          toast.info(res.data.requiresApproval
+        } else if (res.outcome === "queued" || res.outcome === "blocked") {
+          toast.info(res.outcome === "queued"
             ? "Queued for approval"
             : "Blocked by governance");
+        } else if (res.outcome === "clarify") {
+          toast.info("KEY needs more detail to plan this. Try it from the command bar.");
         } else {
           toast.error("Action failed");
         }

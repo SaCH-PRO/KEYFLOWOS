@@ -423,6 +423,11 @@
       "packet": "V1-29 (V1-29e-CRM-REVENUE-NET)"
     },
     {
+      "prefix": "v31b_",
+      "owner": "apps/server/test/key-action-routes-bind.integration.test.ts",
+      "packet": "V1-31 (V1-31b-KEY-ACTION-ROUTES-BIND)"
+    },
+    {
       "prefix": "v32a_",
       "owner": "apps/server/test/key-action-proposal-claim.integration.test.ts",
       "packet": "V1-32-KEY-PROPOSAL-CLAIM"

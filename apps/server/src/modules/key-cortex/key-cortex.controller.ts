@@ -39,6 +39,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  GoneException,
   HttpException,
   InternalServerErrorException,
   NotFoundException,
@@ -47,6 +48,9 @@ import {
   Logger,
   Inject,
   Injectable,
+  Optional,
+  createParamDecorator,
+  forwardRef,
   type CallHandler,
   type CanActivate,
   type ExecutionContext,
@@ -81,13 +85,15 @@ import { KeyCortexReasoningService } from './key-cortex-reasoning.service';
 import { KeyCortexConversationService } from './key-cortex-conversation.service';
 import { KeyCortexVoiceService } from './key-cortex-voice.service';
 import { KeyCortexPersonalityService } from './key-cortex-personality.service';
-import { KeyCortexActionsService } from './key-cortex-actions.service';
+import { KeyCortexActionsService, isUsableAutonomyVerdict } from './key-cortex-actions.service';
 import { KeyCortexContextService } from './key-cortex-context.service';
+import { KeyCortexCapabilityRegistryService } from './key-cortex-capability-registry.service';
+import { randomUUID } from 'crypto';
 
 // -- v2 Integration Layer Services --
 import { KeyCortexConnectorService } from './key-cortex-connector.service';
 import { KeyCortexCommandService } from './key-cortex-command.service';
-import { KeyCortexExecutorService } from './key-cortex-executor.service';
+import { KeyCortexExecutorService, type ExecutionRecord } from './key-cortex-executor.service';
 import { KeyCortexContextV2Service } from './key-cortex-context-v2.service';
 import { KeyCortexInsightService } from './key-cortex-insight.service';
 import { KeyCortexMonitorV2Service } from './key-cortex-monitor-v2.service';
@@ -133,10 +139,18 @@ import { BusinessGuard, type BusinessGuardedRequest } from '../../core/auth/busi
 import { GuardedBusinessId, resolveRequestBusinessId } from '../../core/auth/request-business-id';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
-import { DEFAULT_APPROVAL_TIERS, MAX_APPROVAL_TIER } from '../../core/authority/module-vocabulary';
+import {
+  DEFAULT_APPROVAL_TIERS,
+  LEVEL_RANK,
+  MAX_APPROVAL_TIER,
+  defaultScopesForRole,
+  rankOf,
+  type CanonicalModule,
+} from '../../core/authority/module-vocabulary';
 import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/current-user.decorator';
 import { KeyCortexApprovalOrchestratorService } from './key-cortex-approval-orchestrator.service';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
+import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
 
 /**
  * R0-07a / R0-34b (COST-LEDGER-001 section 7 item 7): the structured 503 an
@@ -195,6 +209,283 @@ function requestActorId(user: AuthenticatedUser | undefined): string {
   }
   return id;
 }
+
+/* ------------------------------------------------------------------ */
+/*  V1-31c-KEY-ACTION-WEB-AND-OPEN-ROUTES: the direct-action principle  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * V1-31c (M46 / ACTION-001; owner rulings D-17, D-40). POST execute, POST batch
+ * and a flow's effect nodes run a member-initiated direct command: a connector
+ * module and action with client parameters. Such a command runs only when the
+ * member holds the action's own module write scope, read here deny by default:
+ *
+ *   - the action must be one the KEY capability registry lists as an ACTION of
+ *     that module (KeyCortexCapabilityRegistryService, the catalogue the
+ *     connector routes by); anything else is refused by name;
+ *   - the connector module must map to a canonical module scope below; an
+ *     unmapped module is refused;
+ *   - crm is the OWNER's only: the crm adapter writes contacts with no actor,
+ *     so neither row visibility (V1-08, V1-17) nor the crm sub-permissions can
+ *     apply (the rule V1-31b's graphActionRequirement keeps for the contact
+ *     writes the dispatcher makes);
+ *   - settings is enforced by its adapter on the command's actor
+ *     (SettingsAdapterService, R0-09c review CR-3, CR-1, ST-6: the D-11 owner
+ *     rule on the profile and branding, connect write for integrations, the
+ *     team rules for members); the executor's own blocked actions
+ *     (EXECUTE_TOOL, QUERY_DATABASE, UPDATE_RECORD) are refused by the executor,
+ *     which writes that refusal's audit row (R0-09e).
+ *
+ * Every action of a mapped module needs write: a registry action mutates state
+ * (ModuleAction); reads go through POST query.
+ */
+type CortexModuleRule =
+  | { scope: CanonicalModule; ownerOnly?: string }
+  | { adapterEnforced: string }
+  | { refused: string };
+
+const CRM_OWNER_ONLY =
+  'the crm adapter writes contacts with no actor, so row visibility and the crm sub-permissions cannot be applied';
+
+const CORTEX_MODULE_RULES: Readonly<Record<string, CortexModuleRule>> = {
+  crm: { scope: 'crm', ownerOnly: CRM_OWNER_ONLY },
+  commerce: { scope: 'revenue' },
+  finance: { scope: 'expenses' },
+  bookings: { scope: 'bookings' },
+  content: { scope: 'content' },
+  social: { scope: 'content' },
+  communications: { scope: 'content' },
+  projects: { scope: 'projects' },
+  analytics: { scope: 'analytics' },
+  intelligence: { scope: 'analytics' },
+  flow: { scope: 'automations' },
+  autopilot: { scope: 'automations' },
+  inbox: { scope: 'operations' },
+  notifications: { scope: 'operations' },
+  temporal: { scope: 'ai' },
+  settings: {
+    adapterEnforced:
+      "SettingsAdapterService applies the actor's own authority per action (the D-11 owner rule, connect write, the team rules)",
+  },
+  genome: { refused: 'the business genome is changed through its own routes, not by a direct command' },
+  activity: { refused: 'the audit trail is not written, exported or pruned by a direct command' },
+};
+
+/** The actions KeyCortexExecutorService refuses itself (its BLOCKED_ACTIONS), writing the refusal's audit row. */
+const EXECUTOR_REFUSED_ACTIONS = new Set(['EXECUTE_TOOL', 'QUERY_DATABASE', 'UPDATE_RECORD']);
+
+const CORTEX_CAPABILITIES = new KeyCortexCapabilityRegistryService().getAllCapabilities();
+
+/** The actions the KEY capability registry lists, per connector module. */
+const CORTEX_REGISTRY_ACTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  CORTEX_CAPABILITIES.map((capability) => [capability.module as string, new Set(capability.actions.map((a) => a.name))]),
+);
+
+/** The read-only queries the KEY capability registry lists, per connector module (V1-31c review SEC-V131c-2). */
+const CORTEX_REGISTRY_QUERIES: ReadonlyMap<string, ReadonlySet<string>> = new Map(
+  CORTEX_CAPABILITIES.map((capability) => [capability.module as string, new Set(capability.queries.map((q) => q.name))]),
+);
+
+const CRM_READ_OWNER_ONLY =
+  'the crm adapter reads contacts with no actor, so row visibility (a private contact stays its owner\'s) cannot be applied';
+
+export type CortexCommandRequirement =
+  | { scope: CanonicalModule; ownerOnly?: string }
+  | { adapterEnforced: string }
+  | { executorRefused: string }
+  | { refused: string };
+
+/** What a direct command `module.action` needs from the member (see CORTEX_MODULE_RULES). */
+export function cortexCommandRequirement(module: unknown, action: unknown): CortexCommandRequirement {
+  if (typeof action === 'string' && EXECUTOR_REFUSED_ACTIONS.has(action)) {
+    return { executorRefused: `"${action}" is refused by KeyCortexExecutorService` };
+  }
+  if (typeof module !== 'string' || typeof action !== 'string' || module.length === 0 || action.length === 0) {
+    return { refused: 'A direct command names a module and an action' };
+  }
+  const rule = Object.prototype.hasOwnProperty.call(CORTEX_MODULE_RULES, module) ? CORTEX_MODULE_RULES[module] : undefined;
+  if (!rule) return { refused: `Module "${module}" is mapped to no module scope, so it is not run as a direct command` };
+  if ('refused' in rule) return { refused: `Module "${module}" is not run as a direct command: ${rule.refused}` };
+  if (!CORTEX_REGISTRY_ACTIONS.get(module)?.has(action)) {
+    return { refused: `"${module}.${action}" is not an action the KEY capability registry lists, so it is not run` };
+  }
+  return rule;
+}
+
+/**
+ * The member a direct command acts for, in the tenant BusinessGuard checked,
+ * as CortexMemberAuthorityGuard loaded it: the membership role and its scopes
+ * as ModuleScopeGuard computes them (the explicit scope map, else the role's
+ * defaults), or the SUPER_ADMIN platform bypass.
+ */
+export interface CortexMemberAuthority {
+  userId: string;
+  businessId: string;
+  role: string;
+  superAdmin: boolean;
+  scopes: Record<string, string>;
+}
+
+/** Why `authority` may not run `module.action` as a direct command, or null when it may. */
+export function cortexCommandRefusal(authority: CortexMemberAuthority, module: unknown, action: unknown): string | null {
+  const requirement = cortexCommandRequirement(module, action);
+  if ('refused' in requirement) return requirement.refused;
+  if ('executorRefused' in requirement || 'adapterEnforced' in requirement) return null;
+  if (authority.superAdmin) return null;
+  if (requirement.ownerOnly && authority.role !== 'OWNER') {
+    return `"${String(module)}.${String(action)}" is run as a direct command only for the business owner: ${requirement.ownerOnly}`;
+  }
+  const level = authority.scopes[requirement.scope] || 'none';
+  if (rankOf(level) < LEVEL_RANK.write) {
+    return `Insufficient permissions: ${requirement.scope} requires write access (you have ${level})`;
+  }
+  return null;
+}
+
+/** True when `module` is one whose adapter applies the actor's own authority per action (settings). */
+export function cortexModuleAdapterEnforced(module: unknown): boolean {
+  if (typeof module !== 'string' || !Object.prototype.hasOwnProperty.call(CORTEX_MODULE_RULES, module)) return false;
+  return 'adapterEnforced' in CORTEX_MODULE_RULES[module];
+}
+
+/**
+ * V1-31c review SEC-V131c-2: why `authority` may not run `module.query` through
+ * POST query, or null when it may. connector.query hands any name to the module
+ * adapter as a command (connector.execute), so the route is bounded, deny by
+ * default, to what it says it is:
+ *   - a READ the KEY capability registry lists as a QUERY of that module, under
+ *     the module's canonical scope at read (crm reads are the OWNER's only:
+ *     the crm adapter reads with no actor, so row visibility cannot apply);
+ *   - settings, whose adapter applies the actor's own authority per action;
+ *     the route runs it as POST execute does (the executor's autonomy gate,
+ *     blocked actions and audit row);
+ *   - nothing else: an action (a write) runs through POST execute, which checks
+ *     it (cortexCommandRefusal), gates it and audits it; an unmapped or refused
+ *     module, and the executor's blocked actions, are refused by name.
+ */
+export function cortexQueryRefusal(authority: CortexMemberAuthority, module: unknown, query: unknown): string | null {
+  if (typeof query === 'string' && EXECUTOR_REFUSED_ACTIONS.has(query)) {
+    return `"${query}" is refused by KeyCortexExecutorService and is not run as a query`;
+  }
+  if (typeof module !== 'string' || typeof query !== 'string' || module.length === 0 || query.length === 0) {
+    return 'A query names a module and a query';
+  }
+  const rule = Object.prototype.hasOwnProperty.call(CORTEX_MODULE_RULES, module) ? CORTEX_MODULE_RULES[module] : undefined;
+  if (!rule) return `Module "${module}" is mapped to no module scope, so it is not queried directly`;
+  if ('refused' in rule) return `Module "${module}" is not queried directly: ${rule.refused}`;
+  if ('adapterEnforced' in rule) return null;
+  if (!CORTEX_REGISTRY_QUERIES.get(module)?.has(query)) {
+    return `"${module}.${query}" is not a query the KEY capability registry lists for ${module}; an action runs through POST execute, which checks, gates and audits it`;
+  }
+  if (authority.superAdmin) return null;
+  if (rule.scope === 'crm' && authority.role !== 'OWNER') {
+    return `"${module}.${query}" is queried directly only by the business owner: ${CRM_READ_OWNER_ONLY}`;
+  }
+  const level = authority.scopes[rule.scope] || 'none';
+  if (rankOf(level) < LEVEL_RANK.read) {
+    return `Insufficient permissions: ${rule.scope} requires read access (you have ${level})`;
+  }
+  return null;
+}
+
+/** A flow node's effect, as a direct command (or a module scope), or null when the node has none of its own. */
+function cortexFlowNodeEffect(node: { type?: unknown; data?: Record<string, unknown> }):
+  | { module: unknown; action: unknown }
+  | { scope: CanonicalModule }
+  | { refused: string }
+  | null {
+  switch (node.type) {
+    case 'action':
+      return { module: node.data?.module, action: node.data?.action };
+    case 'notification':
+      return { module: 'notifications', action: 'send_notification' };
+    case 'ai_decision':
+      return { scope: 'ai' };
+    case 'trigger':
+    case 'condition':
+    case 'delay':
+    case 'merge':
+    case 'split':
+    case 'wait_for':
+    case 'loop':
+    case 'error_handler':
+    case 'transform':
+    case 'filter':
+      return null;
+    default:
+      return { refused: `A flow node of type "${String(node.type)}" is not run from this route` };
+  }
+}
+
+/** V1-31c: what sandbox/execute, sandbox/apply and sandbox/auto answer (410). */
+const SANDBOX_REFUSED =
+  'Client code is not executed: the cortex sandbox is not bounded to your own data. This route is no longer available.';
+
+/** V1-31c: the flow engine's own context keys (`_userId` names the actor of every node); a client input never sets one. */
+const FLOW_ENGINE_KEY = /^_/;
+
+/** The flow engine's parameter template syntax (KeyCortexFlowStudioService.interpolateTemplate). */
+const FLOW_PLACEHOLDER = /\{\{\s*([^}]+)\s*\}\}/g;
+
+/** KeyCortexFlowStudioService.resolveParameters: the engine resolves a node's parameters against the run context with it. */
+type FlowParameterResolver = (params: Record<string, unknown>, context: Record<string, unknown>) => Record<string, unknown>;
+
+type CortexMemberRequest = BusinessGuardedRequest & {
+  user?: { id?: string; role?: string };
+  cortexMemberAuthority?: CortexMemberAuthority;
+};
+
+/**
+ * V1-31c: loads the member a direct command acts for (CortexMemberAuthority)
+ * in the tenant BusinessGuard checked, and leaves it on the request for the
+ * handler (@CortexMember()). It runs as a route guard after the class guards,
+ * so the handler signatures key-cortex-tenant-binding.spec.ts and the
+ * real-database suites pin keep their first parameters; it refuses nothing
+ * BusinessGuard admitted except a request with no user or no tenant.
+ */
+@Injectable()
+export class CortexMemberAuthorityGuard implements CanActivate {
+  // One line on purpose: key-cortex-conscious-surface.spec.ts reads the controller's constructor by text.
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const req = context.switchToHttp().getRequest<CortexMemberRequest>();
+    const user = req?.user;
+    if (typeof user?.id !== 'string' || user.id.length === 0) {
+      throw new UnauthorizedException('Authenticated user required');
+    }
+    const guarded = req.guardedBusinessId;
+    const businessId = typeof guarded === 'string' && guarded.length > 0 ? guarded : resolveRequestBusinessId(req);
+    if (!businessId) throw new BadRequestException('businessId is required');
+    if (user.role === 'SUPER_ADMIN') {
+      req.cortexMemberAuthority = { userId: user.id, businessId, role: 'SUPER_ADMIN', superAdmin: true, scopes: {} };
+      return true;
+    }
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: user.id, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) throw new ForbiddenException('Not a member of this business');
+    const explicit = membership.permissionScopes;
+    const scopes: Record<string, string> =
+      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
+        ? (explicit as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    req.cortexMemberAuthority = { userId: user.id, businessId, role: membership.role, superAdmin: false, scopes };
+    return true;
+  }
+}
+
+/**
+ * The CortexMemberAuthority the route's CortexMemberAuthorityGuard loaded. Over
+ * HTTP it is always there (the guard runs first); a route that declares this
+ * parameter without the guard is refused rather than run unchecked.
+ */
+export const CortexMember = createParamDecorator((_data: unknown, ctx: ExecutionContext): CortexMemberAuthority => {
+  const authority = ctx.switchToHttp().getRequest<CortexMemberRequest>()?.cortexMemberAuthority;
+  if (!authority) throw new ForbiddenException('The member this command acts for was not established');
+  return authority;
+});
 
 /** The membership roles that may write the KEY autonomy profile (V1-03). */
 const AUTONOMY_PROFILE_WRITER_ROLES = new Set(['OWNER', 'ADMIN']);
@@ -1321,6 +1612,12 @@ export class KeyCortexController {
     private readonly sessionService: KeyCortexSessionService,
     // Appended, never inserted: specs construct this controller positionally.
     private readonly awareness: KeyCortexAwarenessService,
+    // V1-31c: the autonomy authority POST flows/:id/execute asks before a flow
+    // runs (a flow's nodes reach the connector without the executor's gate).
+    // KeyCortexModule and KeyAutonomyModule import each other (see the executor),
+    // hence forwardRef. Optional only so the specs that build this controller for
+    // other routes need not provide it: the route refuses (503) when it is absent.
+    @Optional() @Inject(forwardRef(() => AutonomyOrchestratorService)) private readonly autonomy?: AutonomyOrchestratorService,
   ) {}
 
   /* ================================================================== */
@@ -2054,12 +2351,20 @@ export class KeyCortexController {
    * built with `userId: dto.userId ?? 'system'`, so a STAFF member attributed
    * it to the OWNER, or to nobody; a body `userId` is now ignored, and with no
    * authenticated user the request is 401 before anything is parsed or run.
+   *
+   * V1-31c: a member-initiated direct command. The command, structured or
+   * parsed from the member's words, runs only when the member may run it as a
+   * direct command (cortexCommandRefusal: the action's own module write scope,
+   * deny by default); a refusal is 403 with an audit row naming the member.
+   * The executor then runs its autonomy gate and audits the run.
    */
   @Post('execute')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CortexMemberAuthorityGuard)
   async executeCommand(
     @Body() dto: ExecuteCommandDto,
     @CurrentUser() user?: AuthenticatedUser,
+    @CortexMember() member?: CortexMemberAuthority,
   ): Promise<ConnectorResult & { intent?: string; confidence?: number }> {
     const actorId = requestActorId(user);
     if (!dto.command?.trim() && !dto.module) {
@@ -2083,6 +2388,7 @@ export class KeyCortexController {
           correlationId: this.generateCorrelationId(),
         };
 
+        await this.assertDirectCommands(member, [connectorCommand]);
         const result = await this.executor.execute(connectorCommand, {
           skipApproval: !(dto.requireApproval ?? false),
         });
@@ -2113,6 +2419,7 @@ export class KeyCortexController {
         actorId,
       );
 
+      await this.assertDirectCommands(member, [connectorCommand]);
       const result = await this.executor.execute(connectorCommand, {
         skipApproval: !(dto.requireApproval ?? topIntent.requiresApproval),
       });
@@ -2123,7 +2430,7 @@ export class KeyCortexController {
         confidence: topIntent.confidence,
       } as any;
     } catch (err: any) {
-      if (err instanceof BadRequestException) throw err;
+      if (err instanceof BadRequestException || err instanceof ForbiddenException) throw err;
       this.logger.error(`Execute error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Command execution failed');
     }
@@ -2136,12 +2443,24 @@ export class KeyCortexController {
    * R0-09c: the connector routes `query` to the module adapter as a command
    * like any other (settings.update_business_profile included), and this
    * handler named no actor at all. It names the authenticated user now.
+   *
+   * V1-31c review SEC-V131c-2: connector.query runs ANY name as a command
+   * (connector.execute), so every command POST execute refuses ran here with
+   * no scope check, no autonomy gate, no blocked-action check and no audit
+   * row. The route is bounded now (cortexQueryRefusal, deny by default): it
+   * runs a query the KEY capability registry lists for the module, under the
+   * module's scope at read; settings, whose adapter applies the actor's own
+   * authority, runs through the executor exactly as POST execute runs it
+   * (autonomy gate, blocked actions, audit row); anything else is 403 with an
+   * ai_execution_logs row naming the member.
    */
   @Post('query')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CortexMemberAuthorityGuard)
   async queryModule(
     @Body() dto: QueryModuleDto,
     @CurrentUser() user?: AuthenticatedUser,
+    @CortexMember() member?: CortexMemberAuthority,
   ): Promise<ConnectorResult> {
     const actorId = requestActorId(user);
     if (!dto.module) {
@@ -2154,12 +2473,38 @@ export class KeyCortexController {
       throw new BadRequestException('businessId is required');
     }
 
+    const command: ConnectorCommand = {
+      module: dto.module,
+      action: dto.query,
+      parameters: dto.parameters ?? {},
+      businessId: dto.businessId,
+      userId: actorId,
+      source: 'key_cortex',
+      timestamp: new Date(),
+      correlationId: this.generateCorrelationId(),
+    };
+    // `member` is always there over HTTP (see assertDirectCommands).
+    if (member) {
+      const refusal = command.businessId !== member.businessId
+        ? 'businessId does not match the business this request was authorized for'
+        : cortexQueryRefusal(member, command.module, command.action);
+      if (refusal) {
+        await this.auditDirectCommand(command, { success: false, error: refusal });
+        throw new ForbiddenException(refusal);
+      }
+    }
+
     try {
+      if (cortexModuleAdapterEnforced(command.module)) {
+        // A query reports, it does not compensate: no rollback of a refused command.
+        const record = await this.executor.execute(command, { skipApproval: true, rollbackOnFailure: false });
+        return record.result;
+      }
       const result = await this.connector.query(
-        dto.module,
-        dto.query,
-        dto.parameters ?? {},
-        dto.businessId,
+        command.module,
+        command.action,
+        command.parameters,
+        command.businessId,
         actorId,
       );
       return result;
@@ -2539,12 +2884,18 @@ export class KeyCortexController {
    * POST /api/v1/cortex/batch
    * Execute multiple commands in a single batch. Every command, structured or
    * parsed, is the authenticated user's (R0-09c; it was `dto.userId ?? 'system'`).
+   *
+   * V1-31c: every command, structured or parsed, is checked as POST execute
+   * checks one (cortexCommandRefusal) before any of them runs; one refusal
+   * refuses the whole batch (403), each refused command on record.
    */
   @Post('batch')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CortexMemberAuthorityGuard)
   async executeBatch(
     @Body() dto: ExecuteBatchDto,
     @CurrentUser() user?: AuthenticatedUser,
+    @CortexMember() member?: CortexMemberAuthority,
   ): Promise<{
     results: ConnectorResult[];
     summary: {
@@ -2604,6 +2955,7 @@ export class KeyCortexController {
         }
       }
 
+      await this.assertDirectCommands(member, connectorCommands);
       const batchResult = await this.executor.executeBatch(connectorCommands, {
         stopOnError: dto.stopOnError ?? false,
         skipApproval: !(dto.requireApproval ?? false),
@@ -2623,6 +2975,7 @@ export class KeyCortexController {
         },
       };
     } catch (err: any) {
+      if (err instanceof ForbiddenException) throw err;
       this.logger.error(`Batch execution error: ${err.message}`, err.stack);
       throw new ServiceUnavailableException('Batch execution failed');
     }
@@ -2825,46 +3178,43 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/sandbox/execute
-   * Execute code in a sandboxed environment.
+   *
+   * V1-31c: REFUSED (410) for everyone. It ran the member's own code in
+   * KeyCortexSandboxService, which is not a bounded sandbox: JavaScript runs in
+   * node:vm with host intrinsics (Object, Array, ...) in scope, so the code
+   * reaches the host process and every tenant's data through it (the packet
+   * suite's SB-03 does it with code that passes the sandbox's own audit), and
+   * Python runs as a child process outside production. Client code runs again
+   * only in a sandbox bounded to the caller's own read scopes. No web screen
+   * calls this route.
    */
   @Post('sandbox/execute')
   @HttpCode(HttpStatus.OK)
   async sandboxExecute(
-    @Body() dto: SandboxExecuteDto,
+    @Body() _dto: SandboxExecuteDto,
   ): Promise<{
     output: string;
     exitCode: number;
     executionTimeMs: number;
     logs?: string[];
   }> {
-    if (!dto.businessId) {
-      throw new BadRequestException('businessId is required');
-    }
-    if (!dto.code?.trim()) {
-      throw new BadRequestException('code is required');
-    }
-
-    try {
-      return await this.sandbox.execute(dto.code, {
-        language: dto.language,
-        inputs: dto.inputs,
-        timeoutMs: dto.timeoutMs,
-        businessId: dto.businessId,
-      });
-    } catch (err: any) {
-      this.logger.error(`Sandbox execute error: ${err.message}`, err.stack);
-      throw new ServiceUnavailableException('Code execution failed');
-    }
+    throw new GoneException(SANDBOX_REFUSED);
   }
 
   /**
    * POST /api/v1/cortex/sandbox/auto
-   * Generate code from description and optionally execute it.
+   *
+   * V1-31c review SEC-V131c-3: REFUSED (410) for everyone, as sandbox/execute
+   * is. It generated code from the member's own description and ran it
+   * (execute defaulted to true) in the same KeyCortexSandboxService.execute
+   * that sandbox/execute reached, so a member steering the description reached
+   * the host process (SB-03) with no scope check. Code generation without a
+   * run stays on POST sandbox/generate. No web screen calls this route.
    */
   @Post('sandbox/auto')
   @HttpCode(HttpStatus.OK)
   async sandboxAuto(
-    @Body() dto: SandboxAutoDto,
+    @Body() _dto: SandboxAutoDto,
   ): Promise<{
     code: string;
     executed: boolean;
@@ -2872,24 +3222,7 @@ export class KeyCortexController {
     exitCode?: number;
     explanation?: string;
   }> {
-    if (!dto.businessId) {
-      throw new BadRequestException('businessId is required');
-    }
-    if (!dto.description?.trim()) {
-      throw new BadRequestException('description is required');
-    }
-
-    try {
-      return await this.sandbox.auto(dto.description, {
-        language: dto.language,
-        execute: dto.execute ?? true,
-        inputs: dto.inputs,
-        businessId: dto.businessId,
-      });
-    } catch (err: any) {
-      this.logger.error(`Sandbox auto error: ${err.message}`, err.stack);
-      throw new ServiceUnavailableException('Auto code generation failed');
-    }
+    throw new GoneException(SANDBOX_REFUSED);
   }
 
   /**
@@ -2920,31 +3253,22 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/sandbox/apply
-   * Apply a template with parameters.
+   *
+   * V1-31c: REFUSED (410) for everyone. The template is a built-in one by id,
+   * but applyTemplate writes every client parameter into the template's code
+   * text (a parameter the template does not declare lands outside any string
+   * literal: the packet suite's SB-04) and runs it in the same unbounded
+   * sandbox as sandbox/execute. No web screen calls this route.
    */
   @Post('sandbox/apply')
   @HttpCode(HttpStatus.OK)
   async sandboxApply(
-    @Body() dto: SandboxApplyDto,
+    @Body() _dto: SandboxApplyDto,
   ): Promise<{
     code: string;
     templateId: string;
   }> {
-    if (!dto.businessId) {
-      throw new BadRequestException('businessId is required');
-    }
-    if (!dto.templateId) {
-      throw new BadRequestException('templateId is required');
-    }
-
-    try {
-      return await this.sandbox.applyTemplate(dto.templateId, dto.parameters, {
-        businessId: dto.businessId,
-      });
-    } catch (err: any) {
-      this.logger.error(`Sandbox apply error: ${err.message}`, err.stack);
-      throw new ServiceUnavailableException('Template application failed');
-    }
+    throw new GoneException(SANDBOX_REFUSED);
   }
 
   /**
@@ -3197,15 +3521,41 @@ export class KeyCortexController {
 
   /**
    * POST /api/v1/cortex/flows/:id/execute
-   * Execute a flow by ID.
+   * Execute a stored flow by ID.
+   *
+   * V1-31c: it called `flowStudio.execute`, a method the flow studio does not
+   * have, so every call was 503 and nothing ran. Now it runs ONLY the stored
+   * FlowDefinition by id in the business the guard checked (another tenant's
+   * flow is the same 404 as an unknown id), and only when:
+   *   - the inputs are data: a plain object, no engine key (`_userId` would
+   *     name the actor of every node; the actor is the authenticated member);
+   *   - the member holds automations write (running a flow is flow.trigger_flow)
+   *     and may run every effect node as a direct command (cortexCommandRefusal:
+   *     an action node's module write scope, notifications for a notification,
+   *     ai for an AI decision; an unknown node type is refused);
+   *   - the autonomy authority answers a usable verdict that allows each action
+   *     without approval (V1-02 isUsableAutonomyVerdict; fail closed: an
+   *     unusable verdict, an error or no authority is 503, a deny or an approval
+   *     requirement 403). A flow's nodes reach the connector directly, without
+   *     the executor's gate, and there is no approval queue for a flow run.
+   *     Review SEC-V131c-4 / CRR-2: the gate is asked once per effect node, with
+   *     the parameters that node will run with (flowNodeGateParameters); a node
+   *     whose parameters are filled only while the flow runs is refused.
+   * Review SEC-V131c-1: the run's `businessId` is the flow's own tenant, set
+   * after the inputs (an AI decision bills and keys its model call by it).
+   * Every refusal after the flow is found, and the run, write one
+   * ai_execution_logs row naming the member (the executor's audit door).
    */
   @Post('flows/:id/execute')
   @HttpCode(HttpStatus.OK)
+  @UseGuards(CortexMemberAuthorityGuard)
   async flowExecute(
     @Param('id') flowId: string,
-    @Body() body: { inputs?: Record<string, unknown> },
+    @Body() body: { inputs?: unknown },
     // The tenant the guard checked: the body's businessId when it names one, else the query's.
     @GuardedBusinessId() businessId?: string,
+    @CurrentUser() user?: AuthenticatedUser,
+    @CortexMember() member?: CortexMemberAuthority,
   ): Promise<{
     executionId: string;
     status: string;
@@ -3214,11 +3564,137 @@ export class KeyCortexController {
     if (!businessId) {
       throw new BadRequestException('businessId is required');
     }
+    const actorId = requestActorId(user);
+    if (!member || member.userId !== actorId || member.businessId !== businessId) {
+      throw new ForbiddenException('The member this flow runs for was not established');
+    }
+    const inputs = body?.inputs ?? {};
+    if (typeof inputs !== 'object' || inputs === null || Array.isArray(inputs)) {
+      throw new BadRequestException('inputs must be an object');
+    }
+    const engineKeys = Object.keys(inputs).filter((k) => FLOW_ENGINE_KEY.test(k));
+    if (engineKeys.length > 0) {
+      throw new BadRequestException(`inputs may not set the flow engine's own keys (${engineKeys.join(', ')})`);
+    }
+
+    const flow = await this.flowStudio.loadFlow(flowId);
+    if (!flow || flow.businessId !== businessId) {
+      throw new NotFoundException('Flow not found');
+    }
+
+    // The run, as the command the audit row records (the executor's audit door).
+    const command = (): ConnectorCommand => ({
+      module: 'flow',
+      action: 'trigger_flow',
+      parameters: { flowId: flow.id, inputKeys: Object.keys(inputs) },
+      businessId,
+      userId: actorId,
+      source: 'key_cortex',
+      timestamp: new Date(),
+      correlationId: this.generateCorrelationId(),
+    });
+    const refuse = async (exception: HttpException, reason: string): Promise<never> => {
+      await this.auditDirectCommand(command(), { success: false, error: reason });
+      throw exception;
+    };
+
+    // What the run starts from: the inputs as data, then the keys the server
+    // sets. `businessId` is the flow's own tenant AFTER the spread: the engine
+    // reads context.businessId as the tenant of an AI decision's model call
+    // (its preferences, BYOK keys, budget and cost row), so a client input
+    // never names it (V1-31c review SEC-V131c-1). `_userId` is the member.
+    const runContext: Record<string, unknown> = {
+      ...(inputs as Record<string, unknown>),
+      businessId: flow.businessId,
+      _userId: actorId,
+    };
+
+    // Scope: running the flow, then every effect node. Each effect node is gated
+    // on its own, with the parameters it will run with (V1-31c review
+    // SEC-V131c-4 / CRR-2): the engine's own resolver over the context the
+    // run starts from (stored parameters, inputs filled in), as POST execute
+    // gates a command with its parameters.
+    const gates: Array<{ key: string; parameters: Record<string, unknown> }> = [
+      { key: 'flow.trigger_flow', parameters: { flowId: flow.id, inputs } },
+    ];
+    const flowRefusal = cortexCommandRefusal(member, 'flow', 'trigger_flow');
+    if (flowRefusal) return refuse(new ForbiddenException(flowRefusal), flowRefusal);
+    const engine = this.flowStudio as unknown as { resolveParameters?: unknown };
+    if (typeof engine.resolveParameters !== 'function') {
+      const reason = "The flow engine's parameter resolver is unavailable; the flow was not run";
+      return refuse(new ServiceUnavailableException(reason), reason);
+    }
+    const resolve = (engine.resolveParameters as FlowParameterResolver).bind(this.flowStudio);
+    for (const node of (flow.nodes ?? []) as Array<{ id?: unknown; type?: unknown; data?: Record<string, unknown> }>) {
+      const effect = cortexFlowNodeEffect(node);
+      if (!effect) continue;
+      let refusal: string | null = null;
+      if ('refused' in effect) {
+        refusal = effect.refused;
+      } else if ('scope' in effect) {
+        const level = member.superAdmin ? 'admin' : member.scopes[effect.scope] || 'none';
+        if (rankOf(level) < LEVEL_RANK.write) refusal = `Insufficient permissions: ${effect.scope} requires write access (you have ${level})`;
+      } else {
+        refusal = cortexCommandRefusal(member, effect.module, effect.action);
+        if (!refusal) {
+          const parameters = this.flowNodeGateParameters(resolve, node, { ...runContext, _trigger: flow.trigger });
+          if ('unresolved' in parameters) {
+            refusal = `${parameters.unresolved.map((p) => `{{${p}}}`).join(', ')} is filled only while the flow runs, so the autonomy gate cannot check this node's parameters before the run`;
+          } else {
+            gates.push({ key: `${String(effect.module)}.${String(effect.action)}`, parameters: parameters.resolved });
+          }
+        }
+      }
+      if (refusal) {
+        const reason = `Flow node ${String(node.id)}: ${refusal}`;
+        return refuse(new ForbiddenException(reason), reason);
+      }
+    }
+
+    // The autonomy gate, fail closed.
+    for (const { key, parameters } of gates) {
+      if (!this.autonomy) {
+        const reason = 'The autonomy authority is unavailable; the flow was not run';
+        return refuse(new ServiceUnavailableException(reason), reason);
+      }
+      let verdict: unknown;
+      try {
+        verdict = await this.autonomy.evaluateAction(businessId, key, parameters, { proposedBy: actorId });
+      } catch (err: unknown) {
+        this.logger.error(`[flowExecute] autonomy gate error for ${key}: ${err instanceof Error ? err.message : String(err)}`);
+        const reason = 'Autonomy gate unavailable; execution blocked for safety.';
+        return refuse(new ServiceUnavailableException(reason), reason);
+      }
+      if (!isUsableAutonomyVerdict(verdict)) {
+        const reason = `Unusable autonomy verdict for ${key}; execution blocked for safety.`;
+        return refuse(new ServiceUnavailableException(reason), reason);
+      }
+      const v = verdict as { allowed: boolean; requiresApproval: boolean; tier: string; reason?: string };
+      if (!v.allowed) {
+        const reason = v.reason || `Blocked by the autonomy authority: ${key}`;
+        return refuse(new ForbiddenException(reason), reason);
+      }
+      if (v.requiresApproval || v.tier === 'manual') {
+        const reason = `${key} needs approval; a flow runs here only when every action is allowed without approval${v.reason ? ` (${v.reason})` : ''}`;
+        return refuse(new ForbiddenException(reason), reason);
+      }
+    }
 
     try {
-      return await this.flowStudio.execute(flowId, businessId, body.inputs);
+      const execution = await this.flowStudio.executeFlow(flow.id, runContext);
+      await this.auditDirectCommand(command(), {
+        success: execution.status === 'completed',
+        error: execution.error,
+        data: { executionId: execution.id, status: execution.status },
+      });
+      return {
+        executionId: execution.id,
+        status: execution.status,
+        results: execution.results as unknown as Array<Record<string, unknown>>,
+      };
     } catch (err: any) {
       this.logger.error(`Flow execute error: ${err.message}`, err.stack);
+      await this.auditDirectCommand(command(), { success: false, error: err?.message ?? 'Flow execution failed' });
       throw new ServiceUnavailableException('Flow execution failed');
     }
   }
@@ -4007,6 +4483,105 @@ export class KeyCortexController {
 
   private generateCorrelationId(): string {
     return `kc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+  }
+
+  /**
+   * V1-31c: refuses (403) when any of `commands` is one the member may not run
+   * as a direct command (cortexCommandRefusal, or a tenant other than the one
+   * the guard checked), before any of them runs, and puts each refused command
+   * on record through the executor's audit door (one ai_execution_logs row
+   * naming the member).
+   *
+   * `member` comes from @CortexMember(), which over HTTP always supplies it (the
+   * route's CortexMemberAuthorityGuard loads it, and the decorator refuses a
+   * request it is missing from). It is undefined only when a handler is called
+   * directly as a method, as the unit specs that pin the actor binding do; no
+   * request reaches a handler that way.
+   */
+  private async assertDirectCommands(member: CortexMemberAuthority | undefined, commands: ConnectorCommand[]): Promise<void> {
+    if (!member) return;
+    const refused: Array<{ command: ConnectorCommand; reason: string }> = [];
+    for (const command of commands) {
+      const reason = command.businessId !== member.businessId
+        ? 'businessId does not match the business this request was authorized for'
+        : cortexCommandRefusal(member, command.module, command.action);
+      if (reason) refused.push({ command, reason });
+    }
+    if (refused.length === 0) return;
+    for (const { command, reason } of refused) {
+      await this.auditDirectCommand(command, { success: false, error: reason });
+    }
+    throw new ForbiddenException(refused.map((r) => r.reason).join('; '));
+  }
+
+  /**
+   * V1-31c review SEC-V131c-4 / CRR-2: the parameters an effect node of a flow
+   * will run with, for the autonomy gate. They are resolved by the flow
+   * engine's own resolver (`resolve`, KeyCortexFlowStudioService.resolveParameters)
+   * over the context the run starts from, so the gate sees what the engine
+   * will compute, not a copy of its rules. A placeholder that context does not
+   * fill (another node's output, a loop item, an error) is filled only while
+   * the flow runs, after the gate: it comes back as `unresolved` and the route
+   * refuses the flow (fail closed).
+   *
+   * An action node runs with its `data.parameters`; a notification node with
+   * what KeyCortexFlowStudioService.executeNotification sends: the recipient
+   * (the member by default), the title and body templates, and the priority.
+   */
+  private flowNodeGateParameters(
+    resolve: FlowParameterResolver,
+    node: { type?: unknown; data?: Record<string, unknown> },
+    context: Record<string, unknown>,
+  ): { resolved: Record<string, unknown> } | { unresolved: string[] } {
+    const data = node.data ?? {};
+    const literal: Record<string, unknown> = {};
+    let templated: Record<string, unknown>;
+    if (node.type === 'notification') {
+      literal.userId = data.notificationRecipient || context._userId || 'system';
+      literal.priority = data.notificationPriority || 'normal';
+      templated = { title: data.notificationTitle || 'Flow Notification', body: data.notificationBody || '' };
+    } else {
+      const params = data.parameters;
+      templated = params && typeof params === 'object' && !Array.isArray(params) ? (params as Record<string, unknown>) : {};
+    }
+    const unresolved = new Set<string>();
+    for (const value of Object.values(templated)) {
+      if (typeof value !== 'string') continue;
+      for (const match of value.matchAll(FLOW_PLACEHOLDER)) {
+        const placeholder = match[1].trim();
+        if (resolve({ value: `{{${placeholder}}}` }, context).value === undefined) unresolved.add(placeholder);
+      }
+    }
+    if (unresolved.size > 0) return { unresolved: [...unresolved] };
+    return { resolved: { ...resolve(templated, context), ...literal } };
+  }
+
+  /**
+   * V1-31c: one ai_execution_logs row for a direct command this controller
+   * decided (a refusal, or a flow run), written by the executor's own audit door
+   * (KeyCortexExecutorService.logExecution), so it reads like every executed
+   * command's row. A failed write is logged and never changes the answer.
+   */
+  private async auditDirectCommand(
+    command: ConnectorCommand,
+    outcome: { success: boolean; error?: string; data?: unknown },
+  ): Promise<void> {
+    const now = new Date();
+    const record: ExecutionRecord = {
+      id: randomUUID(),
+      command,
+      result: { success: outcome.success, error: outcome.error, data: outcome.data, executionTimeMs: 0, command },
+      startedAt: command.timestamp ?? now,
+      finishedAt: now,
+      durationMs: Math.max(0, now.getTime() - (command.timestamp ?? now).getTime()),
+      traceId: command.correlationId ?? this.generateCorrelationId(),
+      rolledBack: false,
+    };
+    try {
+      await this.executor.logExecution(record);
+    } catch (err: unknown) {
+      this.logger.error(`[V1-31c] audit row for ${command.module}.${command.action} failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   /**

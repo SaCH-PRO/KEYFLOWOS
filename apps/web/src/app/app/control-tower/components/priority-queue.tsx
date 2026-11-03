@@ -23,8 +23,24 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { SectionCard } from "@/components/ui/section-card";
-import { executeAction } from "@/lib/client";
+import { runPlannedAction } from "@/lib/client";
 import type { EnrichedPriority, PriorityAction } from "./use-control-tower-data";
+
+/*
+ * V1-31c (the V1-31b companion): the server executes only plan steps it stored
+ * (POST .../execute takes planId and planStepId, never a tool name or
+ * arguments). So a priority action and the dismiss log are asked of KEY in
+ * words: runPlannedAction plans the request (POST .../plan stores the plan)
+ * and executes each stored step by id. The action's own toolName only decides
+ * navigation here; it is never sent.
+ */
+function actionRequest(p: EnrichedPriority, action: PriorityAction): string {
+  return `${action.label} for the ${p.module} priority "${p.title}": ${p.description}`;
+}
+
+function dismissRequest(title: string, module: string, reason: string): string {
+  return `Create a low-priority task recording that I dismissed the ${module} priority "${title}". Reason: ${reason}.`;
+}
 
 const TYPE_CONFIG = {
   risk: { icon: ShieldAlert, color: "hsl(var(--kf-error))", bg: "hsl(var(--kf-error) / 0.08)" },
@@ -163,13 +179,12 @@ export function PriorityQueue({
   const handleDismiss = useCallback(async (priorityId: string, reason: string) => {
     let apiLogged = false;
     try {
-      const res = await executeAction(businessId, "create_task", {
-        title: `Dismissed priority: ${priorities.find((p) => p.id === priorityId)?.title ?? priorityId}`,
-        description: `Dismiss reason: ${reason}`,
-        priority: "low",
-        module: priorities.find((p) => p.id === priorityId)?.module ?? "general",
-      });
-      apiLogged = !!res.data?.success;
+      const priority = priorities.find((p) => p.id === priorityId);
+      const res = await runPlannedAction(
+        businessId,
+        dismissRequest(priority?.title ?? priorityId, priority?.module ?? "general", reason),
+      );
+      apiLogged = res.outcome === "completed";
     } catch {}
 
     setDismissedIds((prev) => {
@@ -222,16 +237,18 @@ export function PriorityQueue({
     const actionKey = `${p.id}-${action.key}`;
     setExecutingAction(actionKey);
     try {
-      const res = await executeAction(businessId, action.toolName, action.args);
-      if (res.data?.success) {
+      const res = await runPlannedAction(businessId, actionRequest(p, action));
+      if (res.outcome === "completed") {
         toast.success(`${action.label} completed`);
         window.dispatchEvent(new CustomEvent("kf:action.executed"));
         onActionExecuted?.();
-      } else if (res.data?.blocked) {
-        toast.info(res.data.requiresApproval
+      } else if (res.outcome === "queued" || res.outcome === "blocked") {
+        toast.info(res.outcome === "queued"
           ? "Queued for approval"
           : "Action blocked by governance");
         window.dispatchEvent(new CustomEvent("kf:action.blocked"));
+      } else if (res.outcome === "clarify") {
+        toast.info("KEY needs more detail to plan this. Try it from the command bar.");
       } else {
         toast.error("Action failed");
       }

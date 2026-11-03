@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { UnauthorizedException } from '@nestjs/common';
 import { ApprovalController } from './approval.controller';
 import { ApprovalRequestService } from './approval-request.service';
+import { AiApprovalsController } from '../ai/ai-approvals.controller';
 
 function createMockApprovalService(): any {
   return {
@@ -164,9 +165,39 @@ describe('ApprovalController', () => {
       expect(calls).toEqual([['escalateRequest', { approvalId: 'ar_1', reason: 'No response' }]]);
     });
 
-    it.todo(
-      "ai-approvals.controller.ts:65,75 still resolve items as req.user?.id ?? 'user' (AiApprovalsController.resolveItem / resolveBatch). That file is outside the V1-31 write set; the same 401 belongs there in a follow-up packet.",
-    );
+    // V1-31b-KEY-ACTION-ROUTES-BIND closed this: ai-approvals.controller.ts resolved items as
+    // req.user?.id ?? 'user'. Over HTTP: test/key-action-routes-bind.integration.test.ts AA-01, AA-02.
+    it.each([
+      ['no request', undefined],
+      ['no user', {}],
+      ['a user with no id', { user: {} }],
+      ['an empty id', { user: { id: '' } }],
+    ])("V1-31b: AiApprovalsController resolve and bulk-resolve with %s answer 401 and resolve nothing (never as 'user')", async (_label, req) => {
+      const calls: unknown[][] = [];
+      const service: any = {
+        resolveItem: async (...args: unknown[]) => { calls.push(['resolveItem', ...args]); return { id: 'item_1' }; },
+        resolveBatch: async (...args: unknown[]) => { calls.push(['resolveBatch', ...args]); return { succeeded: 1 }; },
+      };
+      const controller = new AiApprovalsController(service);
+      await expect(controller.resolveItem('biz_1', 'item_1', { resolution: 'approved' } as any, req as any)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(controller.bulkResolve('biz_1', { ids: ['item_1'], resolution: 'approved' } as any, req as any)).rejects.toMatchObject({ status: 401 });
+      expect(calls).toEqual([]);
+    });
+
+    it('V1-31b: AiApprovalsController resolves as the authenticated caller', async () => {
+      const calls: unknown[][] = [];
+      const service: any = {
+        resolveItem: async (...args: unknown[]) => { calls.push(['resolveItem', ...args]); return { id: 'item_1' }; },
+        resolveBatch: async (...args: unknown[]) => { calls.push(['resolveBatch', ...args]); return { succeeded: 1 }; },
+      };
+      const controller = new AiApprovalsController(service);
+      await controller.resolveItem('biz_1', 'item_1', { resolution: 'approved' } as any, { user: { id: 'manager_1' } } as any);
+      await controller.bulkResolve('biz_1', { ids: ['item_1'], resolution: 'rejected' } as any, { user: { id: 'manager_1' } } as any);
+      expect(calls).toEqual([
+        ['resolveItem', 'biz_1', 'item_1', 'approved', 'manager_1'],
+        ['resolveBatch', 'biz_1', ['item_1'], 'rejected', 'manager_1'],
+      ]);
+    });
   });
 });
 

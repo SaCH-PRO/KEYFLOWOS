@@ -22,6 +22,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FlowOrchestratorService } from './flow-orchestrator.service';
+import { GraphActionsController } from './graph-actions.controller';
 import { KeyActionBoundaryService } from '../key-autonomy/action-boundary/key-action-boundary.service';
 
 const BIZ = 'biz_v131';
@@ -674,8 +675,63 @@ describe('V1-31 review CR-2 — a model tool call with no id is still confirmabl
   });
 });
 
-describe('V1-31 review SEC-V131-1 — sibling execution routes outside this packet', () => {
-  it.todo(
-    'POST /actions/businesses/:businessId/execute (graph-actions.controller.ts executeAction) evaluates governance on the client toolName, ignores requiresQuickConfirm and runs executeToolDirect with the client args, so a quick-confirm call /flow/confirm refuses still runs there. That file is outside the V1-31 write set and the route predates it; M46 is not closed until a follow-up packet binds or refuses it.',
-  );
+describe('V1-31 review SEC-V131-1 — sibling execution routes (closed by V1-31b-KEY-ACTION-ROUTES-BIND)', () => {
+  // POST /actions/businesses/:businessId/execute (graph-actions.controller.ts executeAction)
+  // evaluated governance on the client toolName and ran executeToolDirect with the client args.
+  // V1-31b binds it to a server-stored plan step looked up by id inside the business; the real
+  // database proof is test/key-action-routes-bind.integration.test.ts (GA-01..GA-09).
+  async function graphActions(step: Record<string, any> | null) {
+    const executed: Array<{ toolName: string; args: unknown }> = [];
+    const orchestrator = {
+      executeToolDirect: vi.fn(async (_b: string, toolName: string, args: unknown) => {
+        executed.push({ toolName, args });
+        return { success: true, result: { ok: true }, changedEntities: [], followOnSuggestions: [] };
+      }),
+    };
+    const governance = {
+      evaluate: vi.fn(async () => ({ allowed: true, requiresQuickConfirm: true, requiresFormalApproval: false, requiresAdminApproval: false, tier: 2 })),
+      createApprovalItem: vi.fn(),
+    };
+    const prisma = {
+      client: {
+        aiPlanStep: {
+          findFirst: vi.fn(async () => step),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+          update: vi.fn(async () => ({})),
+        },
+        membership: { findUnique: vi.fn(async () => ({ role: 'OWNER', permissionScopes: null })) },
+      },
+    };
+    const planner = { updateStepStatus: vi.fn(async () => ({})) };
+    const emitter = { emit: vi.fn() };
+    const executionLog = { log: vi.fn(async () => 'log_1') };
+    const controller = new (GraphActionsController as any)({}, {}, planner, governance, orchestrator, executionLog, {}, prisma, emitter);
+    return { controller, executed, orchestrator, governance, executionLog };
+  }
+
+  it('a client toolName and args with no stored plan step are refused 400; nothing is evaluated or run', async () => {
+    const h = await graphActions(null);
+    await expect(
+      h.controller.executeAction(BIZ, { toolName: TOOL, args: ARGS }, { user: { id: OWNER } }),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(h.governance.evaluate).not.toHaveBeenCalled();
+    expect(h.orchestrator.executeToolDirect).not.toHaveBeenCalled();
+  });
+
+  it('a quick-confirm tool runs only as the stored step the member confirms by id, never the resubmitted name and arguments', async () => {
+    const step = { id: 'step_1', planId: 'plan_1', status: 'pending', toolName: 'crm_add_note', inputPayload: { contactId: 'c_1', body: 'stored' }, role: null, action: 'Add a note', description: null, plan: { id: 'plan_1', status: 'draft', role: null } };
+    const h = await graphActions(step);
+    const response = await h.controller.executeAction(
+      BIZ,
+      { planId: 'plan_1', planStepId: 'step_1', toolName: TOOL, args: { ...ARGS, amount: 999 } },
+      { user: { id: OWNER } },
+    );
+    expect(response).toMatchObject({ success: true });
+    expect(h.executed).toEqual([{ toolName: 'crm_add_note', args: { contactId: 'c_1', body: 'stored' } }]);
+    expect(h.governance.evaluate).toHaveBeenCalledWith(BIZ, 'crm_add_note', undefined, undefined);
+    // V1-31b review SEC-V131b-5: the run is recorded under the member who asked.
+    expect(h.executionLog.log).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'graph_action:execute', userId: OWNER, planId: 'plan_1', planStepId: 'step_1', toolName: 'crm_add_note', success: true }),
+    );
+  });
 });
