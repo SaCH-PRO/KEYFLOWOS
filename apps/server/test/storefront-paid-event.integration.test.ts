@@ -87,8 +87,9 @@
  *           (STANDARD): a body type STOREFRONT creates no STOREFRONT order
  *
  * Still open (it.todo): the store_order.paid listeners that do not read the
- * stored payment status (for a STANDARD order), and the web caller of the
- * CASH / MANUAL offline completion (V1-33).
+ * stored payment status (for a STANDARD order). V18-T3 (the web caller of the
+ * CASH / MANUAL offline completion, V1-33) is covered by the web spec
+ * fulfillment-panel-complete-offline since trial-N repair round 2.
  *
  * Nothing on the money path is mocked: PrismaService, StoreOrderService
  * (createOrder's server-side pricing, completeCheckout's transaction),
@@ -733,6 +734,6 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     'V18-T2 store_order.paid listeners that do not read the stored paymentStatus (webhook-dispatcher.service.ts, revenue-event.listener.ts, store-order-routing.listener.ts). For a STOREFRONT order the marketplace emission is closed at its source (V18-10); a STANDARD order set paid by PATCH .../status without a payment still reaches them (SEC-V18-3)',
   );
   it.todo(
-    'V18-T3 CASH / MANUAL storefront orders reach PAID through POST /site/businesses/:id/orders/:orderId/complete-offline (V1-33, V33-07..V33-11); the web has no caller yet (the store fulfillment panel offers confirm, process, ship and deliver only) (CR-V18-3)',
+    'V18-T3 CASH / MANUAL storefront orders reach PAID through POST /site/businesses/:id/orders/:orderId/complete-offline (V1-33, V33-07..V33-11); the store fulfillment panel calls it from its Complete offline action since trial-N repair round 2 (CR-V18-3, web spec fulfillment-panel-complete-offline FPO-01..04); this suite does not drive the web',
   );
 });

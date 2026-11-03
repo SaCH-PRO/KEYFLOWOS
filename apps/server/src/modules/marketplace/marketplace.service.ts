@@ -390,7 +390,10 @@ export class MarketplaceService {
           businessId,
           orderNumber,
           status: initialStatus,
-          type: data.type || 'STANDARD',
+          // Trial-N repair round 2 (G6RC-3, SEC-V18-3): the server decides the type. A STOREFRONT order is created
+          // by the storefront checkout only (StoreOrderService.createOrder); body.type was copied verbatim, so any
+          // member made a STOREFRONT order 'paid' with no invoice, payment or posting, and store_order.paid named it.
+          type: 'STANDARD',
           customerName: data.customerName,
           customerEmail: data.customerEmail,
           customerPhone: data.customerPhone,
@@ -576,12 +579,33 @@ export class MarketplaceService {
     );
   }
 
+  /**
+   * Trial-N repair round 2 (G6RC-2, G6PUB-SEC-3 remainder): a STOREFRONT
+   * order's payment fields (paymentStatus, paymentMethod, paymentRef) are
+   * written only by completeCheckout, with its invoice, payment and posting:
+   * a provider settlement, or the offline completion (revenue write, a
+   * member). PATCH .../status (any member) copied them verbatim in every
+   * direction but PAID, so a settled order could be set back to UNPAID with
+   * its books still on, and the provider paths then took it as payable again.
+   * Refused (400); the status alone still moves.
+   */
+  private assertNoStorefrontPaymentFields(order: { type?: string | null }, paymentData?: Record<string, unknown> | null): void {
+    if ((order.type ?? '').toUpperCase() !== 'STOREFRONT' || !paymentData) return;
+    const written = ['paymentStatus', 'paymentMethod', 'paymentRef'].filter((k) => paymentData[k] !== undefined);
+    if (written.length === 0) return;
+    throw new BadRequestException(
+      `A storefront order's payment fields (${written.join(', ')}) are set by its checkout only: its payment provider settles it, ` +
+        'or a cash or manual payment is recorded with POST /site/businesses/:businessId/orders/:orderId/complete-offline',
+    );
+  }
+
   async updateOrderStatus(businessId: string, orderId: string, status: string, paymentData?: any) {
     const order = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
     });
     if (!order) throw new NotFoundException('Order not found');
     this.assertNotPayingStorefrontOrder(order, status, paymentData?.paymentStatus);
+    this.assertNoStorefrontPaymentFields(order, paymentData);
 
     const updateData: any = { status };
     if (paymentData) {

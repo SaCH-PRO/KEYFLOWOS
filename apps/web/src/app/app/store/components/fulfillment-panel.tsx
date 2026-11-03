@@ -45,7 +45,33 @@ export type Order = {
   items: OrderItem[];
   metadata?: { statusTimeline?: TimelineEntry[] };
   shipments?: { carrier?: string; trackingNumber?: string; trackingUrl?: string }[];
+  /** STOREFRONT (the public checkout) or STANDARD (a marketplace order). */
+  type?: string;
+  paymentStatus?: string;
+  paymentMethod?: string | null;
 };
+
+/** The payment methods a storefront order is paid in person with (the server's OFFLINE_PAYMENT_METHODS). */
+const OFFLINE_PAYMENT_METHODS = new Set(["CASH", "MANUAL"]);
+
+/**
+ * Trial-N repair round 2 (CR-V18-3, V1-33): a CASH or MANUAL storefront order
+ * is paid only through POST /site/businesses/:businessId/orders/:orderId/
+ * complete-offline, which records its invoice, payment and posting (revenue
+ * write, a member). The marketplace mark_paid route refuses a storefront
+ * order. Offered while the order is unpaid and not cancelled or refunded, also
+ * once delivered (cash on delivery): the server keeps that status.
+ */
+function canCompleteOffline(order: Order): boolean {
+  const status = (order.status ?? "").toUpperCase();
+  return (
+    (order.type ?? "").toUpperCase() === "STOREFRONT" &&
+    OFFLINE_PAYMENT_METHODS.has((order.paymentMethod ?? "").toUpperCase()) &&
+    (order.paymentStatus ?? "").toUpperCase() !== "PAID" &&
+    status !== "CANCELLED" &&
+    status !== "REFUNDED"
+  );
+}
 
 const STATUS_STEPS = ["PENDING", "CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED"];
 const STATUS_COLORS: Record<string, string> = {
@@ -110,6 +136,22 @@ export function FulfillmentPanel({
     },
     [businessId, order.id, onUpdate]
   );
+
+  const handleCompleteOffline = useCallback(async () => {
+    setLoading(true);
+    setActionError(null);
+    // The server records the order's own total and the signed-in member as the recorder: no body fields.
+    const { data, error } = await apiPost<Order>({
+      path: `/site/businesses/${businessId}/orders/${order.id}/complete-offline`,
+      body: {},
+    });
+    if (data) {
+      onUpdate(data);
+    } else {
+      setActionError(error || "Could not record the payment. Please try again.");
+    }
+    setLoading(false);
+  }, [businessId, order.id, onUpdate]);
 
   const handleGetToken = useCallback(async () => {
     const { data } = await apiGet<{ token: string }>(
@@ -204,6 +246,17 @@ export function FulfillmentPanel({
         <div className="px-3 py-2 rounded-lg text-xs font-medium" style={{ background: "rgba(239,68,68,0.1)", color: "#ef4444", border: "1px solid rgba(239,68,68,0.2)" }}>
           {actionError}
         </div>
+      )}
+
+      {canCompleteOffline(order) && (
+        <button
+          onClick={handleCompleteOffline}
+          disabled={loading}
+          className="kf-btn-primary min-h-[44px] px-4 text-sm flex items-center gap-1.5"
+        >
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+          Complete offline
+        </button>
       )}
 
       {!isFinal && (

@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 import { GatewayNotSupportedError, IPaymentGatewayConnector, PaymentGatewayTransaction, PaymentLinkInput, PaymentLinkResult, RefundInput, RefundResult } from '../payment-gateway.interface';
+import { resolveWipayMerchant, wipayMerchantComplete } from './wipay-merchant';
 
 @Injectable()
 export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
@@ -38,8 +39,11 @@ export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
       where: { id: businessId },
       select: { metaData: true },
     });
-    const meta = (business?.metaData as Record<string, unknown>) ?? {};
-    const hasWiPay = !!(meta.wipayApiKey || process.env.WIPAY_API_KEY);
+    // Trial-N repair round 2 (G6RC-7): 'connected' on the gateway list's rule, one merchant's key and account
+    // (resolveWipayMerchant). It was the business's key or the platform's alone, so a business WiPay is never
+    // offered to (its own account with only the platform key, or its own key with no account) showed as connected.
+    const merchant = resolveWipayMerchant(business?.metaData);
+    const hasWiPay = wipayMerchantComplete(merchant);
     const realStatus = hasWiPay ? 'connected' : 'disconnected';
 
     const stored = await this.getConnectorStatus(businessId);
@@ -51,7 +55,7 @@ export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
       errorCount: stored?.errorCount ?? 0,
       syncCount: stored?.syncCount ?? 0,
       connectedAt: stored?.connectedAt ?? null,
-      connectedAccount: hasWiPay ? (stored?.connectedAccount ?? (String(meta.wipayAccountNumber ?? '') || 'WiPay Account')) : null,
+      connectedAccount: hasWiPay ? (stored?.connectedAccount ?? (merchant.accountNumber || 'WiPay Account')) : null,
     };
   }
 
@@ -90,9 +94,8 @@ export class WiPayConnector implements IConnector, IPaymentGatewayConnector {
       where: { id: businessId },
       select: { metaData: true },
     });
-    const meta = (business?.metaData as Record<string, unknown>) ?? {};
-    const apiKey = (meta.wipayApiKey as string | undefined) || process.env.WIPAY_API_KEY;
-    const accountNumber = (meta.wipayAccountNumber as string | undefined) || process.env.WIPAY_ACCOUNT_NUMBER;
+    // Trial-N repair round 2 (G6RC-1/7): the same one-merchant pair the checkouts use, never a mix of the two sources.
+    const { apiKey, accountNumber } = resolveWipayMerchant(business?.metaData);
     if (!apiKey) return { success: false, error: 'WIPAY_API_KEY is not configured' };
     if (!accountNumber) {
       return { success: false, error: 'WiPay account number missing — required to issue payment requests' };

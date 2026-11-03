@@ -8,6 +8,7 @@ import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { normalizeCurrency } from '../finance/posting.service';
 import { fromCents, subtractMoney, toCents } from '../commerce/money';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
+import { resolveWipayMerchant, wipayMerchantComplete } from '../../core/connectors/implementations/wipay-merchant';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
 import { StoreOrderService, isClosedStorefrontOrder } from '../site/store-order.service';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
@@ -516,8 +517,10 @@ export class PaymentsService {
 
   /** V1-46b: the gateways the token's business accepts. */
   async getGatewaysByToken(token: string): Promise<GatewayInfo[]> {
-    const { businessId } = await this.payLinkInvoice(token);
-    return this.getAvailableGateways(businessId);
+    const { invoiceId, businessId } = await this.payLinkInvoice(token);
+    // D-69: the invoice's own currency decides whether WiPay is offered for it.
+    const invoice = await this.prisma.client.invoice.findUnique({ where: { id: invoiceId }, select: { currency: true } });
+    return this.getAvailableGateways(businessId, invoice?.currency ?? null);
   }
 
   /**
@@ -529,10 +532,10 @@ export class PaymentsService {
     await this.assertBareIdInvoiceOpen(invoiceId);
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      select: { businessId: true },
+      select: { businessId: true, currency: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
-    return this.getAvailableGateways(invoice.businessId);
+    return this.getAvailableGateways(invoice.businessId, invoice.currency);
   }
 
   /**
@@ -563,10 +566,15 @@ export class PaymentsService {
     return this.capturePaypalOrder(orderId, invoiceId);
   }
 
-  async getAvailableGateways(businessId: string): Promise<GatewayInfo[]> {
+  /**
+   * The gateways a payable of this business can be checked out through.
+   * `payableCurrency` is the payable's own currency (an invoice's); without
+   * one, the business currency (D-13).
+   */
+  async getAvailableGateways(businessId: string, payableCurrency?: string | null): Promise<GatewayInfo[]> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
-      select: { metaData: true },
+      select: { metaData: true, currency: true },
     });
 
     const gateways: GatewayInfo[] = [];
@@ -574,15 +582,17 @@ export class PaymentsService {
 
     // Trial-N review (NEW-1, CR-V05-6): WiPay is offered only where its checkout
     // starts and its callbacks can be verified (wipayCheckoutTarget): a key
-    // that verifies this business's payments (wipayApiKey) and an account
-    // number to pay into. An account number alone, or a business with its own
-    // account and only the platform's key, is not offered.
-    const wipayAccount = meta.wipayAccountNumber || process.env.WIPAY_ACCOUNT_NUMBER;
-    if (PaymentsService.wipayApiKey(meta) && wipayAccount) {
+    // that verifies this business's payments and an account number to pay
+    // into, both from one source (resolveWipayMerchant; repair round 2,
+    // G6RC-1: the business's own pair or the platform's, never mixed).
+    // D-69 (G6ML-2): and only for a TTD amount, until WiPay's currency
+    // parameter is verified from its documentation.
+    const currency = payableCurrency ?? business?.currency ?? null;
+    if (wipayMerchantComplete(resolveWipayMerchant(meta)) && PaymentsService.wipayTakesCurrency(currency)) {
       gateways.push({
         id: 'wipay',
         name: 'WiPay',
-        currencies: ['TTD', 'JMD', 'BBD', 'GYD', 'XCD'],
+        currencies: [PaymentsService.WIPAY_CURRENCY],
       });
     }
 
@@ -1504,6 +1514,7 @@ export class PaymentsService {
 
     if (!invoice) throw new Error('Invoice not found');
     this.assertInvoicePayable(invoice.status, invoiceId);
+    PaymentsService.assertWipayCurrency(invoice.currency, 'invoice');
     PaymentsService.assertWipayReturnUrl(returnUrl);
 
     const { apiUrl, environment, developerId, accountNumber } = PaymentsService.wipayCheckoutTarget(invoice.business.metaData);
@@ -1572,7 +1583,7 @@ export class PaymentsService {
    * The WiPay API key a callback is verified with: the key of the WiPay
    * account the business's checkout pays into. That is the business's own
    * (metaData.wipayApiKey); else, for a business that checks out into the
-   * platform's account (no WiPay account number of its own), the platform's
+   * platform's account (no WiPay setting of its own), the platform's
    * (WIPAY_API_KEY). Review V05-SEC-3: a business with its own WiPay account
    * but no key of its own gets null, so the platform key never settles a
    * payable of a tenant whose money goes to another account. Nothing
@@ -1580,12 +1591,30 @@ export class PaymentsService {
    * default (WiPay's sandbox key is public).
    */
   private static wipayApiKey(metaData: unknown): string | null {
-    const meta = (metaData as Record<string, unknown> | null) ?? {};
-    const configured = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
-    if (configured(meta.wipayApiKey)) return meta.wipayApiKey;
-    if (configured(meta.wipayAccountNumber)) return null;
-    const platformKey = process.env.WIPAY_API_KEY;
-    return configured(platformKey) ? platformKey : null;
+    // Trial-N repair round 2 (G6RC-1): the key of the one merchant the business resolves to, its own or the
+    // platform's (resolveWipayMerchant); the gateway list, the checkouts and the connector read the same pair.
+    return resolveWipayMerchant(metaData).apiKey;
+  }
+
+  /** D-69: the one currency a WiPay checkout is made in, until WiPay's currency parameter is verified from its docs. */
+  private static readonly WIPAY_CURRENCY = 'TTD';
+
+  private static wipayTakesCurrency(currency: string | null | undefined): boolean {
+    return normalizeCurrency(currency) === PaymentsService.WIPAY_CURRENCY;
+  }
+
+  /**
+   * D-69 (trial-N recheck G6ML-2): a WiPay checkout, invoice or storefront,
+   * for an amount not in TTD is refused (400) before WiPay is called. The
+   * checkouts send WiPay no currency, so a USD invoice or order was settled in
+   * WiPay's default currency and booked as USD. Lifted only once WiPay's
+   * currency parameter is verified from its documentation (D-19).
+   */
+  private static assertWipayCurrency(currency: string | null | undefined, payable: 'invoice' | 'order'): void {
+    if (PaymentsService.wipayTakesCurrency(currency)) return;
+    throw new BadRequestException(
+      `WiPay takes ${PaymentsService.WIPAY_CURRENCY} only: this ${payable} is in ${normalizeCurrency(currency) || 'no currency'}`,
+    );
   }
 
   /**
@@ -1611,11 +1640,13 @@ export class PaymentsService {
     developerId: string;
     accountNumber?: string;
   } {
-    const meta = (metaData as Record<string, unknown> | null) ?? {};
-    if (!PaymentsService.wipayApiKey(meta)) {
+    // Trial-N repair round 2 (G6RC-1): the key and the account are one merchant's, the business's own pair or the
+    // platform's (resolveWipayMerchant). A business with its own key and no account of its own is refused here; it
+    // was sent to the platform's account, whose callback its own key then refused.
+    const { apiKey, accountNumber } = resolveWipayMerchant(metaData);
+    if (!apiKey) {
       throw new BadRequestException('WiPay is not configured for this business: no WiPay API key to verify its payments');
     }
-    const accountNumber = (meta.wipayAccountNumber ? String(meta.wipayAccountNumber) : '') || process.env.WIPAY_ACCOUNT_NUMBER || undefined;
     if (!accountNumber) {
       throw new BadRequestException('WiPay is not configured for this business: no WiPay account number');
     }
@@ -1895,6 +1926,8 @@ export class PaymentsService {
     }
 
     if (input.method === 'WIPAY') {
+      // D-69 (G6ML-2): a TTD order only; the request names no currency, so another one was settled in WiPay's default.
+      PaymentsService.assertWipayCurrency(input.currency, 'order');
       // Trial-N review (G6PUB-SEC-5, V05-SEC-3): WiPay hands its keyed proof to
       // the return URL, so the storefront checkout's must be on a platform
       // origin too, as the invoice checkout's is (a missing one is refused).
