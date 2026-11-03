@@ -344,7 +344,7 @@ describe('D-67: a posted expense refuses amount, items and currency edits (409, 
     expect(res.body.message).toMatch(POSTED_REFUSAL);
     expect(await snapshot(bill.body.id)).toBe(before);
     const [txn] = await txnsOf(bill.body.id);
-    expect(legs(txn)).toEqual([['ACCOUNTS_PAYABLE', 'Cr', 30], ['EXPENSE_GENERAL', 'Dr', 30]]);
+    expect(legs(txn)).toEqual([['ACCOUNTS_PAYABLE', 'Cr', 30], ['EXPENSE_OTHER', 'Dr', 30]]);
   });
 
   it("EE-03: PATCH {currency 'USD'} on a posted TTD expense -> 409; the row and its legs stay TTD", async () => {
@@ -438,7 +438,7 @@ describe('D-67 controls: everything else stays editable (200 as today)', () => {
     expect((await db.expense.findUnique({ where: { id: zero.body.id } })).amount).toBe(15);
     const txns = await txnsOf(zero.body.id);
     expect(txns.map((t) => t.externalRef)).toEqual([`Expense:${zero.body.id}:paid`]);
-    expect(legs(txns[0])).toEqual([['CASH', 'Cr', 15], ['EXPENSE_GENERAL', 'Dr', 15]]);
+    expect(legs(txns[0])).toEqual([['CASH', 'Cr', 15], ['EXPENSE_OTHER', 'Dr', 15]]);
     // Now posted: a further amount edit is refused like any posted expense's.
     const again = await patchExpense(zero.body.id, { amount: 16 });
     expect(again.status, JSON.stringify(again.body)).toBe(409);

@@ -49,11 +49,12 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
 
   const handleSubmit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
+    // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
     const payload: Partial<Expense> = {
       description: formData.description.trim(), amount: parseFloat(formData.amount),
       date: formData.date, vendor: formData.vendor.trim() || undefined,
       categoryId: formData.categoryId || undefined, notes: formData.notes.trim() || undefined,
-      receiptUrl: formData.receiptUrl.trim() || undefined, currency: "TTD",
+      receiptUrl: formData.receiptUrl.trim() || undefined,
       paymentMethod: formData.paymentMethod || undefined,
       tags: formData.tags ? formData.tags.split(",").map(t => t.trim()).filter(Boolean) : [],
       isRecurring: formData.isRecurring, recurringFrequency: formData.isRecurring ? formData.recurringFrequency : undefined,

@@ -117,6 +117,7 @@ export function ExpenseFormSideSheet({
 
   const handleSubmit = async () => {
     if (!formData.description.trim() || !formData.amount) return;
+    // No currency: the server writes the business currency (FOLLOW3-B4, D-13).
     const payload: Partial<Expense> = {
       description: formData.description.trim(),
       amount: parseFloat(formData.amount),
@@ -125,7 +126,6 @@ export function ExpenseFormSideSheet({
       categoryId: formData.categoryId || undefined,
       notes: formData.notes.trim() || undefined,
       receiptUrl: formData.receiptUrl.trim() || undefined,
-      currency: "TTD",
       paymentMethod: formData.paymentMethod || undefined,
       tags: formData.tags ? formData.tags.split(",").map((t) => t.trim()).filter(Boolean) : [],
       isRecurring: formData.isRecurring,

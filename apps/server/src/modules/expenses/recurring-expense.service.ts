@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModul
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { ExpensesService } from './expenses.service';
+import { ExpensesService, expenseCurrency } from './expenses.service';
 import { schedulersDisabled } from '../../core/config/env';
 
 /**
@@ -81,6 +81,9 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
     if (!['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'].includes(input.frequency)) {
       throw new BadRequestException(`Invalid frequency ${input.frequency}`);
     }
+    // FOLLOW3-B4 (VL-06, D-13): the business currency when none is named (it
+    // was the literal 'TTD', so a USD business's schedules generated TTD expenses).
+    const currency = await expenseCurrency(this.prisma, input.businessId, input.currency);
     return this.prisma.client.recurringExpense.create({
       data: {
         businessId: input.businessId,
@@ -90,7 +93,7 @@ export class RecurringExpenseService implements OnModuleInit, OnModuleDestroy {
         endDate: input.endDate ? new Date(input.endDate) : null,
         description: input.description,
         amount: input.amount,
-        currency: input.currency ?? 'TTD',
+        currency,
         vendor: input.vendor ?? null,
         paymentMethod: input.paymentMethod ?? null,
         notes: input.notes ?? null,

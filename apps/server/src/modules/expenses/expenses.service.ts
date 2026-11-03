@@ -4,8 +4,46 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpenseCreatedPayload } from '../../core/event-bus/events.types';
 import { ExpensePostingService } from '../finance/expense-posting.service';
-import { PostingService } from '../finance/posting.service';
+import { PostingService, normalizeCurrency } from '../finance/posting.service';
+import { roundMoney } from '../commerce/money';
 import { TimelineService } from '../timeline/timeline.service';
+
+type ExpenseItemInput = { amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null };
+
+/**
+ * FOLLOW3-B4-EXPENSE-CURRENCY-CENTS (VL-07): a money value in whole cents, half
+ * away from zero on its decimal value (the V1-22 rule, commerce/money.ts, that
+ * recordPayment applies). A value that is not a finite number is passed through
+ * unchanged, so Prisma refuses it as it did before.
+ */
+function toCentsAmount<T>(amount: T): T {
+  return (typeof amount === 'number' && Number.isFinite(amount) ? roundMoney(amount) : amount) as T;
+}
+
+/** Split items with each amount in whole cents (FOLLOW3-B4). */
+function centsItems<T extends ExpenseItemInput[] | null | undefined>(items: T): T {
+  return (Array.isArray(items) ? items.map((item) => ({ ...item, amount: toCentsAmount(item?.amount) })) : items) as T;
+}
+
+/**
+ * FOLLOW3-B4-EXPENSE-CURRENCY-CENTS (VL-06; owner ruling D-13: one currency per
+ * business, documents default to it): the currency an expense, a bill or a
+ * recurring expense is written in. A named currency is normalized ('usd' ->
+ * 'USD'); none named is the business currency. Both writers stored the literal
+ * 'TTD', so a USD business's expenses were TTD. A currency the ledger door
+ * refuses (EUR on a TTD business) is still refused there, inside the create
+ * transaction (commerce-currency CUR-09).
+ */
+export async function expenseCurrency(
+  prisma: PrismaService,
+  businessId: string,
+  requested?: string | null,
+): Promise<string> {
+  const named = normalizeCurrency(requested);
+  if (named) return named;
+  const business = await prisma.client.business.findUnique({ where: { id: businessId }, select: { currency: true } });
+  return normalizeCurrency(business?.currency) || 'TTD';
+}
 
 @Injectable()
 export class ExpensesService {
@@ -140,6 +178,11 @@ export class ExpensesService {
     if (status !== 'PAID' && status !== 'BILL') {
       throw new BadRequestException(`Invalid expense status: ${status}`);
     }
+    // FOLLOW3-B4: the business currency by default, and whole cents for the
+    // amount and each split item, so the row and its posting agree.
+    const currency = await expenseCurrency(this.prisma, input.businessId, input.currency);
+    const amount = toCentsAmount(input.amount);
+    const items = centsItems(input.items);
     const expenseDate = input.date ? new Date(input.date) : new Date();
     const paidAt = status === 'PAID' ? (input.paidAt ? new Date(input.paidAt) : expenseDate) : null;
     const dueDate = input.dueDate
@@ -156,8 +199,8 @@ export class ExpensesService {
         data: {
           businessId: input.businessId,
           description: input.description,
-          amount: input.amount,
-          currency: input.currency ?? 'TTD',
+          amount,
+          currency,
           date: expenseDate,
           vendor: input.vendor ?? null,
           receiptUrl: input.receiptUrl ?? null,
@@ -174,7 +217,7 @@ export class ExpensesService {
           status,
           dueDate,
           paidAt,
-          items: input.items ? (input.items as Prisma.InputJsonValue) : undefined,
+          items: items ? (items as Prisma.InputJsonValue) : undefined,
         },
         include: { category: true },
       });
@@ -190,7 +233,7 @@ export class ExpensesService {
         description: created.description,
         contactId: created.contactId,
         vendor: created.vendor,
-        items: input.items ?? null,
+        items: items ?? null,
       };
       if (status === 'PAID') {
         await this.posting.onExpensePaid(postPayload, tx);
@@ -527,8 +570,9 @@ export class ExpensesService {
   }) {
     const updateData: Record<string, unknown> = {};
     if (input.description !== undefined) updateData.description = input.description;
-    if (input.amount !== undefined) updateData.amount = input.amount;
-    if (input.currency !== undefined) updateData.currency = input.currency;
+    // FOLLOW3-B4: whole cents and a normalized currency (the business's when blank).
+    if (input.amount !== undefined) updateData.amount = toCentsAmount(input.amount);
+    if (input.currency !== undefined) updateData.currency = await expenseCurrency(this.prisma, input.businessId, input.currency);
     if (input.date !== undefined) updateData.date = new Date(input.date);
     if (input.vendor !== undefined) updateData.vendor = input.vendor;
     if (input.receiptUrl !== undefined) updateData.receiptUrl = input.receiptUrl;
@@ -538,7 +582,7 @@ export class ExpensesService {
     if (input.isRecurring !== undefined) updateData.isRecurring = input.isRecurring;
     if (input.recurringFrequency !== undefined) updateData.recurringFrequency = input.recurringFrequency;
     if (input.categoryId !== undefined) updateData.categoryId = input.categoryId;
-    if (input.items !== undefined) updateData.items = input.items as Prisma.InputJsonValue;
+    if (input.items !== undefined) updateData.items = centsItems(input.items) as Prisma.InputJsonValue;
 
     if (input.projectId !== undefined) {
       if (input.projectId === null) {

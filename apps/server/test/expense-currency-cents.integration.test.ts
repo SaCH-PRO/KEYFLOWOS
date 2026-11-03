@@ -323,7 +323,7 @@ describe('VL-06: expenses and bills default to the business currency (D-13)', ()
     const txns = await txnsOf(res.body.id);
     expect(txns.map((t) => t.externalRef)).toEqual([`Expense:${res.body.id}:bill_created`]);
     expectAllIn(txns, 'USD');
-    expect(legs(txns[0])).toEqual([['ACCOUNTS_PAYABLE', 'Cr', 30], ['EXPENSE_GENERAL', 'Dr', 30]]);
+    expect(legs(txns[0])).toEqual([['ACCOUNTS_PAYABLE', 'Cr', 30], ['EXPENSE_OTHER', 'Dr', 30]]);
   });
 
   it('EC-04: a recurring expense created with no currency on the USD business stores USD and generates a USD expense; the USD trial balance holds no TTD row', async () => {
@@ -386,7 +386,7 @@ describe('VL-07: expense and bill amounts are stored and posted in whole cents (
     const [txn, ...rest] = await txnsOf(res.body.id);
     expect(rest).toEqual([]);
     expect(num(txn.amount)).toBe(12.35);
-    expect(legs(txn)).toEqual([['CASH', 'Cr', 12.35], ['EXPENSE_GENERAL', 'Dr', 12.35]]);
+    expect(legs(txn)).toEqual([['CASH', 'Cr', 12.35], ['EXPENSE_OTHER', 'Dr', 12.35]]);
 
     expect(await ledgerCash(ID.bizC7, 'TTD')).toBe(-12.35);
     expect((await cashPosition.getCashPosition(ID.bizC7)).cashBalance).toBe(-12.35);
@@ -408,14 +408,14 @@ describe('VL-07: expense and bill amounts are stored and posted in whole cents (
     expect((await db.expense.findUnique({ where: { id: res.body.id } })).amount).toBe(1);
     const [txn] = await txnsOf(res.body.id);
     expect(num(txn.amount)).toBe(1);
-    expect(legs(txn)).toEqual([['CASH', 'Cr', 1], ['EXPENSE_GENERAL', 'Dr', 1]]);
+    expect(legs(txn)).toEqual([['CASH', 'Cr', 1], ['EXPENSE_OTHER', 'Dr', 1]]);
 
     const bill = await postBill(ID.bizT, { description: `${P}ec09 bill`, amount: 7.005 });
     expect(bill.status, JSON.stringify(bill.body)).toBe(201);
     expect(bill.body.amount).toBe(7.01);
     expect((await db.expense.findUnique({ where: { id: bill.body.id } })).amount).toBe(7.01);
     const [billTxn] = await txnsOf(bill.body.id);
-    expect(legs(billTxn)).toEqual([['ACCOUNTS_PAYABLE', 'Cr', 7.01], ['EXPENSE_GENERAL', 'Dr', 7.01]]);
+    expect(legs(billTxn)).toEqual([['ACCOUNTS_PAYABLE', 'Cr', 7.01], ['EXPENSE_OTHER', 'Dr', 7.01]]);
   });
 
   it('EC-10: amount 10 with items 3.333 / 6.667 -> items 3.33 / 6.67 stored and posted; cash credited 10.00', async () => {
@@ -433,7 +433,7 @@ describe('VL-07: expense and bill amounts are stored and posted in whole cents (
     expect(row.amount).toBe(10);
     expect((row.items as any[]).map((i) => i.amount)).toEqual([3.33, 6.67]);
     const [txn] = await txnsOf(res.body.id);
-    expect(legs(txn)).toEqual([['CASH', 'Cr', 10], ['EXPENSE_GENERAL', 'Dr', 3.33], ['EXPENSE_GENERAL', 'Dr', 6.67]]);
+    expect(legs(txn)).toEqual([['CASH', 'Cr', 10], ['EXPENSE_OTHER', 'Dr', 3.33], ['EXPENSE_OTHER', 'Dr', 6.67]]);
     expect(num(txn.amount)).toBe(10);
   });
 
