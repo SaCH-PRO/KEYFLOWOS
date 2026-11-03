@@ -221,16 +221,15 @@ test('NC doc: the operator doc names the workflows admission requires, and HawkS
   );
 });
 
-// Review CR-V1-30-4. docs/SECURITY_DAST_SETUP.md and the header of
-// native-dast.yml still describe the gate before the swap, and both are outside
-// this packet's write set. The setup doc says opening a PR runs HawkScan and
-// tells operators to add HawkScan to main's required status checks; after the
-// swap that check never reports on a PR and would block every merge. The
-// native-dast.yml header says it is not a required check yet. hawkscan.yml and
-// AGENT_AUTOPILOT.md (in the write set) warn against those steps meanwhile.
+// Review CR-V1-30-4, closed by the trial-N runtime-pin repair (review RP-R1-2).
+// docs/SECURITY_DAST_SETUP.md and the header of native-dast.yml described the
+// gate before the swap and sat outside the V1-30 write set (this was a todo).
+// The setup doc said opening a PR runs HawkScan and told operators to add
+// HawkScan to main's required status checks; after the swap that check never
+// reports on a PR and would block every merge. The native-dast.yml header said
+// it was not a required check yet.
 test(
   'NC setup doc: no operator doc says a PR runs DAST (HawkScan) or tells anyone to require it',
-  { todo: 'docs/SECURITY_DAST_SETUP.md and the native-dast.yml header are outside the V1-30 write set; follow-up packet' },
   () => {
     const setup = read('docs/SECURITY_DAST_SETUP.md').replace(/\s+/g, ' ');
     assert.doesNotMatch(setup, /starts scanning on PRs/i, 'the setup doc says HAWK_API_KEY makes HawkScan scan PRs');
