@@ -649,6 +649,10 @@
     {
       "file": "apps/server/test/trpc-mount-flag.integration.test.ts",
       "reason": "Boots the built server twice in child processes (TRPC_ENABLED unset, then 1) and probes /trpc over HTTP; seeds and deletes no rows."
+    },
+    {
+      "file": "apps/server/test/schema-sync-path.integration.test.ts",
+      "reason": "creates and drops its own throwaway database; writes no rows in the shared database"
     }
   ]
 }
