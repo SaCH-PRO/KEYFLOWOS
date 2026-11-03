@@ -17,7 +17,7 @@ type ActorRequest = { user?: { id?: string } };
 
 /**
  * The calling member, which bounds what an item route reaches (FOLLOW3-D10,
- * V1-84): an item owned by a contact the member may not open is left out of
+ * V1-84): an item that names a contact the member may not open is left out of
  * the lists and answers 404 on every route that names it, as an unknown id
  * does. AuthGuard already refuses a request without a user; this keeps the
  * routes closed if it ever does not, rather than serving them unbounded.
@@ -141,7 +141,7 @@ export class CommandController {
    * so another tenant's id answers exactly as an unknown one. The guards are
    * the class's (AuthGuard, BusinessGuard, ModuleScopeGuard) and the scope the
    * single-item routes require (operations write, D-40).
-   * route-shadowing.spec.ts keeps the order. An id of an item owned by a
+   * route-shadowing.spec.ts keeps the order. An id of an item that names a
    * contact the member may not open refuses the whole call too (FOLLOW3-D10).
    */
   @RequireModuleScope('operations', 'write')

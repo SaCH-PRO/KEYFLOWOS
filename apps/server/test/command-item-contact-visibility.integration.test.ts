@@ -15,12 +15,18 @@
  *
  * The rule applied is the contact detail route's (assertContactVisible: the
  * tenant predicate, deletedAt null and visibilityClause from resolveCrmAccess),
- * read through CommandItem.ownerId when ownerType is 'CONTACT'. An item the
- * member may not open answers exactly as an unknown id: absent from the list
- * and the due list, 404 on items/:id and on every single-item mutation, and a
- * bulk call that names it is refused whole, as for an unknown id. Items with no
- * owner, or whose ownerType is not 'CONTACT', are untouched by the rule, and
- * the OWNER (visibilityClause null) sees everything.
+ * read through every column by which an item names a contact (review
+ * ST-D10-2): ownerId when ownerType is 'CONTACT', contactId (message intake,
+ * REBOOK), owedToId when owedToType is 'CONTACT' (REBOOK) and entityId when
+ * entityType is 'contact' (finance SLOW_PAYER). An item the member may not
+ * open answers exactly as an unknown id: absent from the list and the due
+ * list, 404 on items/:id and on every single-item mutation, and a bulk call
+ * that names it is refused whole, as for an unknown id. Items that name no
+ * contact are untouched by the rule, and the OWNER (visibilityClause null)
+ * sees everything. The rule holds however many contacts a business's items
+ * name (review CR-1, CI-04), and the business-wide channels (timeline,
+ * notifications, realtime) carry neither the title nor the description of an
+ * item that names a contact (review ST-D10-1, CI-05).
  *
  * Nothing on the authorization or persistence path is mocked: PrismaService,
  * the user, business, membership, contact, contact share and command item
@@ -67,6 +73,10 @@ const ID = {
   iNone: `${P}iNone`, // no owner
   iUser: `${P}iUser`, // ownerType USER -> the OWNER
   unknown: `${P}nope`, // no such item
+  // CI-04: a second business whose items name more contacts than one findMany returns
+  bizS: `${P}bizS`,
+  ownerS: `${P}ownerS`, // OWNER of bizS
+  staffS: `${P}staffS`, // STAFF { operations: write, crm: read, crm_view: owned } of bizS
 };
 const READ_MODULE = `${P}read`;
 const PRIVATE_NAME = 'Priya Privatecontact';
@@ -98,6 +108,8 @@ const scheduler = { async getLastScanTime() { return null; }, async shouldAutoSc
 
 let db: any;
 let app: any;
+let commandService: any;
+let CONTACT_ITEM_LABEL: string;
 
 async function cleanup() {
   // Hard-delete via raw SQL (bypasses the soft-delete extension), children first.
@@ -204,7 +216,9 @@ beforeAll(async () => {
   const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
   const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
   const { CommandController } = await import('../src/modules/command/command.controller');
-  const { CommandService } = await import('../src/modules/command/command.service');
+  const commandModule = await import('../src/modules/command/command.service');
+  const { CommandService } = commandModule;
+  CONTACT_ITEM_LABEL = commandModule.CONTACT_ITEM_LABEL;
   const { CommandGeneratorService } = await import('../src/modules/command/command-generator.service');
   const { CommandSchedulerService } = await import('../src/modules/command/command-scheduler.service');
   const { BulkCommandItemsDto } = await import('../src/modules/command/dto/bulk-command-items.dto');
@@ -255,6 +269,7 @@ beforeAll(async () => {
   app.useGlobalInterceptors(new TenantInterceptor(moduleRef.get(PrismaService)));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   await app.init();
+  commandService = moduleRef.get(CommandService);
 
   await cleanup(); // in case a prior run aborted
 
@@ -413,7 +428,7 @@ describe('CI-02: actions on an item owned by a contact the member cannot open', 
 });
 
 describe('controls (pass before and after)', () => {
-  it('[CTL-01] items with no owner, or whose ownerType is not CONTACT, are untouched: the CI-02 member completes, dismisses and snoozes them, runs every other single-item mutation on them, and bulk-completes, dismisses and deletes them', async () => {
+  it('[CTL-01] items that name no contact (no owner, or ownerType USER, and no contactId, owedTo or contact entity) are untouched: the CI-02 member completes, dismisses and snoozes them, runs every other single-item mutation on them, and bulk-completes, dismisses and deletes them', async () => {
     for (const owner of ['none', 'user'] as const) {
       for (const r of SINGLE_MUTATIONS) {
         const item = await seedItem(owner);
@@ -461,4 +476,318 @@ describe('controls (pass before and after)', () => {
     expect(bulk.status).toBe(201);
     expect(bulk.body).toEqual({ count: 2 });
   });
+});
+
+// ---- review repairs (ST-D10-2, CR-1, ST-D10-1, ST-D10-3/CR-2) -------------------
+
+const DAY = 24 * 60 * 60 * 1000;
+const SHAPES_MODULE = `${P}shapes`;
+
+/** Every column by which an item names a contact, as the test reads the rule (CommandService keeps its own copy). */
+function namedContacts(i: any): string[] {
+  const isContact = (t: string | null) => (t ?? '').toUpperCase() === 'CONTACT';
+  return [
+    isContact(i.ownerType) ? i.ownerId : null,
+    i.contactId,
+    isContact(i.owedToType) ? i.owedToId : null,
+    isContact(i.entityType) ? i.entityId : null,
+  ].filter((id: string | null) => !!id);
+}
+
+async function seedShape(id: string, data: Record<string, unknown>) {
+  return db.commandItem.create({
+    data: {
+      id,
+      businessId: ID.bizA,
+      sourceModule: SHAPES_MODULE,
+      sourceType: 'shape',
+      sourceId: id,
+      category: 'PEOPLE',
+      actionType: 'shape',
+      status: 'OPEN',
+      ...data,
+    },
+  });
+}
+
+/** The writers that name a contact other than through ownerType 'CONTACT' (review ST-D10-2). */
+const SHAPE = {
+  // message-intake-orchestrator.service.ts create_command: ownerType KEY, ownerId = contactId = the contact
+  intake: `${P}sh_intake`,
+  // bookings.service.ts raiseRebookObligation: a REBOOK obligation owed to the contact
+  rebook: `${P}sh_rebook`,
+  // finance-intelligence.service.ts SLOW_PAYER mirror: entityType 'contact'
+  slow: `${P}sh_slow`,
+  // the same shapes on the TEAM contact (in staffOwned's book; view-all members see TEAM)
+  teamIntake: `${P}sh_tintake`,
+  teamRebook: `${P}sh_trebook`,
+};
+const HIDDEN_SHAPES = [SHAPE.intake, SHAPE.rebook, SHAPE.slow];
+
+describe('CI-03 (review ST-D10-2): items that name the contact through contactId, owedTo or a contact entity follow the same rule', () => {
+  beforeAll(async () => {
+    const due = new Date(Date.now() + 2 * DAY);
+    await seedShape(SHAPE.intake, { ownerType: 'KEY', ownerId: ID.cPriv, contactId: ID.cPriv, title: `Reply to ${PRIVATE_NAME}`, recommendedBy: 'KEY', executableByKey: true });
+    await seedShape(SHAPE.rebook, {
+      kind: 'OBLIGATION', actionType: 'REBOOK', category: 'SALES', dueAt: due, title: `Rebook ${PRIVATE_NAME} for Haircut`,
+      owedToType: 'CONTACT', owedToId: ID.cPriv, owedToLabel: PRIVATE_NAME, contactId: ID.cPriv, entityType: 'booking', entityId: `${P}bk1`,
+    });
+    await seedShape(SHAPE.slow, {
+      sourceType: 'contact', sourceId: ID.cPriv, actionType: 'FIN8_SLOW_PAYER', category: 'MONEY', title: `Slow payer: ${PRIVATE_NAME}`,
+      description: `${PRIVATE_NAME} has 5 invoices more than 30 days overdue.`, entityType: 'contact', entityId: ID.cPriv,
+    });
+    await seedShape(SHAPE.teamIntake, { ownerType: 'KEY', ownerId: ID.cTeam, contactId: ID.cTeam, title: `Reply to ${TEAM_NAME}` });
+    await seedShape(SHAPE.teamRebook, {
+      kind: 'OBLIGATION', actionType: 'REBOOK', category: 'SALES', dueAt: due, title: `Rebook ${TEAM_NAME} for Haircut`,
+      owedToType: 'CONTACT', owedToId: ID.cTeam, owedToLabel: TEAM_NAME, contactId: ID.cTeam,
+    });
+  });
+
+  it("[CI-03a] STAFF crm_view owned: the PRIVATE contact's intake, REBOOK and slow-payer items are off the list, the due list and items/:id (404 as an unknown id); the TEAM contact's stay", async () => {
+    const list = await send('get', `${cmd}/items?sourceModule=${SHAPES_MODULE}&limit=100`, ID.staffOwned);
+    expect(list.status).toBe(200);
+    expect(listIds(list.body)).toEqual([SHAPE.teamIntake, SHAPE.teamRebook].sort());
+    expect(list.body.total).toBe(2);
+    expect(JSON.stringify(list.body)).not.toContain(PRIVATE_NAME);
+    const due = await send('get', `${cmd}/items/due?limit=500`, ID.staffOwned);
+    expect(listIds(due.body)).toContain(SHAPE.teamRebook);
+    for (const id of HIDDEN_SHAPES) expect(listIds(due.body), id).not.toContain(id);
+    expect(JSON.stringify(due.body)).not.toContain(PRIVATE_NAME);
+    const unknown = await send('get', `${cmd}/items/${ID.unknown}`, ID.staffOwned);
+    for (const id of HIDDEN_SHAPES) {
+      const res = await send('get', `${cmd}/items/${id}`, ID.staffOwned);
+      expect(refusal(res), id).toEqual(refusal(unknown));
+    }
+    for (const id of [SHAPE.teamIntake, SHAPE.teamRebook]) {
+      expect((await send('get', `${cmd}/items/${id}`, ID.staffOwned)).status, id).toBe(200);
+    }
+  });
+
+  it('[CI-03b] STAFF { operations: write, crm_view: owned } cannot complete, dismiss, discharge or bulk-dismiss them: 404 as an unknown id, rows unchanged, nothing recorded', async () => {
+    for (const [id, suffix, body] of [
+      [SHAPE.intake, '/complete', undefined],
+      [SHAPE.slow, '/dismiss', undefined],
+      [SHAPE.rebook, '/discharge', { dischargeRef: `${P}paid` }],
+    ] as Array<[string, string, unknown]>) {
+      const before = await rowOf(id);
+      const rec = recorded();
+      const res = await send('post', `${cmd}/items/${id}${suffix}`, ID.writerOwned, body);
+      const unknown = await send('post', `${cmd}/items/${ID.unknown}${suffix}`, ID.writerOwned, body);
+      expect(unknown.status, id).toBe(404);
+      expect(refusal(res), id).toEqual(refusal(unknown));
+      expect(await rowOf(id), id).toBe(before);
+      expect(recorded(), id).toEqual(rec);
+    }
+    const visible = await seedItem('none');
+    const before = [await rowOf(visible.id), await rowOf(SHAPE.slow)];
+    const res = await send('post', `${cmd}/items/bulk/dismiss`, ID.writerOwned, { ids: [visible.id, SHAPE.slow] });
+    expect(res.status).toBe(404);
+    expect([await rowOf(visible.id), await rowOf(SHAPE.slow)]).toEqual(before);
+  });
+
+  it('[CI-03c] controls: the OWNER and the member the contact is shared with see them; a view-all member sees the TEAM ones only', async () => {
+    const all = Object.values(SHAPE).sort();
+    expect(listIds((await send('get', `${cmd}/items?sourceModule=${SHAPES_MODULE}&limit=100`, ID.owner)).body)).toEqual(all);
+    expect(listIds((await send('get', `${cmd}/items?sourceModule=${SHAPES_MODULE}&limit=100`, ID.writerShared)).body)).toEqual([...HIDDEN_SHAPES].sort());
+    expect(listIds((await send('get', `${cmd}/items?sourceModule=${SHAPES_MODULE}&limit=100`, ID.staffAll)).body)).toEqual([SHAPE.teamIntake, SHAPE.teamRebook].sort());
+    expect((await send('get', `${cmd}/items/${SHAPE.slow}`, ID.writerShared)).status).toBe(200);
+  });
+
+  it("[CI-03d] parity: for each restricted member the list (whole business, and filtered by status and category) and the due list are the OWNER's minus exactly the items that name a contact the member cannot open, in the same order rule", async () => {
+    const cannotOpen: Record<string, string[]> = {
+      [ID.staffOwned]: [ID.cPriv],
+      [ID.staffAll]: [ID.cPriv],
+      [ID.writerOwned]: [ID.cPriv, ID.cTeam],
+      [ID.writerShared]: [ID.cTeam],
+    };
+    const key = (i: any) => [i.priority, i.urgency, Date.parse(i.createdAt)];
+    for (const query of ['', '&status=OPEN', '&category=PEOPLE']) {
+      const owner = await send('get', `${cmd}/items?limit=1000${query}`, ID.owner);
+      expect(owner.body.total).toBe(owner.body.items.length);
+      for (const [member, hiddenContacts] of Object.entries(cannotOpen)) {
+        const res = await send('get', `${cmd}/items?limit=1000${query}`, member);
+        const expected = owner.body.items.filter((i: any) => !namedContacts(i).some((c) => hiddenContacts.includes(c)));
+        expect(listIds(res.body), `${member} ${query}`).toEqual(listIds({ items: expected }));
+        expect(res.body.total, `${member} ${query}`).toBe(expected.length);
+        for (let k = 1; k < res.body.items.length; k++) {
+          const [a, b] = [key(res.body.items[k - 1]), key(res.body.items[k])];
+          const ordered = a[0] > b[0] || (a[0] === b[0] && (a[1] > b[1] || (a[1] === b[1] && a[2] >= b[2])));
+          expect(ordered, `${member} ${query} order at ${k}`).toBe(true);
+        }
+      }
+    }
+    const ownerDue = await send('get', `${cmd}/items/due?limit=500`, ID.owner);
+    for (const [member, hiddenContacts] of Object.entries(cannotOpen)) {
+      const due = await send('get', `${cmd}/items/due?limit=500`, member);
+      const expected = ownerDue.body.items.filter((i: any) => !namedContacts(i).some((c) => hiddenContacts.includes(c)));
+      expect(listIds(due.body), member).toEqual(listIds({ items: expected }));
+      expect(due.body.total, member).toBe(expected.length);
+      expect(due.body.overdueCount, member).toBe(expected.filter((i: any) => i.overdue).length);
+      // dueAt ascending, then priority descending
+      for (let k = 1; k < due.body.items.length; k++) {
+        const [a, b] = [due.body.items[k - 1], due.body.items[k]];
+        const ordered = Date.parse(a.dueAt) < Date.parse(b.dueAt) || (a.dueAt === b.dueAt && a.priority >= b.priority);
+        expect(ordered, `${member} due order at ${k}`).toBe(true);
+      }
+    }
+  });
+});
+
+describe('CI-04 (review CR-1): the rule holds however many contacts the items name', () => {
+  // Above the 1000 rows one findMany returns (packages/db defaultTakeExtension) and
+  // the 32767 values a Prisma notIn list may carry.
+  const N = 33_000;
+  const HISTORIC = 500;
+  const cmdS = `/command/businesses/${ID.bizS}`;
+  const open = `${P}iS_open`;
+  const done = `${P}iS_done`;
+
+  beforeAll(async () => {
+    for (const id of [ID.ownerS, ID.staffS]) {
+      await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
+    }
+    await db.business.create({ data: { id: ID.bizS, name: 'V84J Biz S', ownerId: ID.ownerS } });
+    await db.membership.create({ data: { id: `${P}m_ownerS`, userId: ID.ownerS, businessId: ID.bizS, role: 'OWNER' } });
+    await db.membership.create({
+      data: { id: `${P}m_staffS`, userId: ID.staffS, businessId: ID.bizS, role: 'STAFF', permissionScopes: { operations: 'write', crm: 'read', crm_view: 'owned' } },
+    });
+    // N PRIVATE contacts of the OWNER, each named by one open obligation (ownerType CONTACT); the
+    // first HISTORIC also by a COMPLETED item (contactId): status does not decide what is checked.
+    await db.$executeRawUnsafe(`INSERT INTO contacts (id, business_id, visibility, owner_id, first_name, updated_at)
+      SELECT '${P}cs_' || g, '${ID.bizS}', 'PRIVATE', '${ID.ownerS}', 'Hidden' || g, now() FROM generate_series(1, ${N}) g`);
+    await db.$executeRawUnsafe(`INSERT INTO command_items (id, business_id, source_module, title, category, action_type, updated_at, owner_type, owner_id, kind, due_at)
+      SELECT '${P}is_' || g, '${ID.bizS}', '${P}scale', 'Follow up: Hidden' || g, 'PEOPLE', 'follow_up', now(), 'CONTACT', '${P}cs_' || g, 'OBLIGATION',
+        (now() AT TIME ZONE 'UTC') + interval '1 day' FROM generate_series(1, ${N}) g`);
+    await db.$executeRawUnsafe(`INSERT INTO command_items (id, business_id, source_module, title, category, action_type, updated_at, status, contact_id)
+      SELECT '${P}ih_' || g, '${ID.bizS}', '${P}scale', 'Followed up: Hidden' || g, 'PEOPLE', 'follow_up', now(), 'COMPLETED', '${P}cs_' || g
+      FROM generate_series(1, ${HISTORIC}) g`);
+    // what the member may see: one open obligation and one completed item, naming no contact
+    await db.commandItem.create({
+      data: { id: open, businessId: ID.bizS, sourceModule: `${P}scale`, sourceType: 'v', sourceId: open, title: 'Weekly review', category: 'WORK', actionType: 'review', kind: 'OBLIGATION', dueAt: new Date(Date.now() + DAY), priority: 10 },
+    });
+    await db.commandItem.create({
+      data: { id: done, businessId: ID.bizS, sourceModule: `${P}scale`, sourceType: 'v', sourceId: done, title: 'Last review', category: 'WORK', actionType: 'review', status: 'COMPLETED', priority: 10 },
+    });
+  }, 120_000);
+
+  it(`[CI-04a] STAFF crm_view owned, ${N} hidden contacts named by ${N + HISTORIC} items: the list, the filtered lists and the due list hold only the items that name no contact, totals to match; the OWNER sees all`, async () => {
+    const list = await send('get', `${cmdS}/items?limit=10`, ID.staffS);
+    expect(list.status).toBe(200);
+    expect(listIds(list.body)).toEqual([done, open].sort());
+    expect(list.body.total).toBe(2);
+    const completed = await send('get', `${cmdS}/items?status=COMPLETED&limit=10`, ID.staffS);
+    expect(listIds(completed.body)).toEqual([done]);
+    expect(completed.body.total).toBe(1);
+    const owned = await send('get', `${cmdS}/items?ownerType=CONTACT&ownerId=${P}cs_${N}&limit=10`, ID.staffS);
+    expect(owned.body).toEqual({ items: [], total: 0 });
+    const due = await send('get', `${cmdS}/items/due?limit=10`, ID.staffS);
+    expect(due.status).toBe(200);
+    expect(listIds(due.body)).toEqual([open]);
+    expect(due.body.total).toBe(1);
+    const owner = await send('get', `${cmdS}/items?limit=10`, ID.ownerS);
+    expect(owner.body.total).toBe(N + HISTORIC + 2);
+    expect((await send('get', `${cmdS}/items/due?limit=10`, ID.ownerS)).body.total).toBe(10);
+  }, 120_000);
+
+  it('[CI-04b] and on the single-item and bulk routes: the last hidden item answers 404 and a bulk call naming it is refused whole', async () => {
+    expect((await send('get', `${cmdS}/items/${P}is_${N}`, ID.staffS)).status).toBe(404);
+    expect((await send('get', `${cmdS}/items/${P}ih_${HISTORIC}`, ID.staffS)).status).toBe(404);
+    const before = await rowOf(open);
+    const bulk = await send('post', `${cmdS}/items/bulk/complete`, ID.staffS, { ids: [open, `${P}is_${N}`] });
+    expect(bulk.status).toBe(404);
+    expect(await rowOf(open)).toBe(before);
+    expect((await send('get', `${cmdS}/items/${P}is_${N}`, ID.ownerS)).status).toBe(200);
+  }, 120_000);
+});
+
+describe('CI-05 (review ST-D10-1): the business-wide channels carry neither the title nor the description of an item that names a contact', () => {
+  /** What the timeline, realtime and notification recorders received since `mark`. */
+  const since = (mark: ReturnType<typeof recorded>) => ({
+    timeline: timeline.events.slice(mark.timeline),
+    realtime: realtime.emits.slice(mark.realtime),
+    notifications: notifications.created.slice(mark.notifications),
+  });
+  const leaks = (channels: unknown) => {
+    const text = JSON.stringify(channels);
+    return ['Priya', 'Privatecontact', 'balance of 9000'].filter((s) => text.includes(s));
+  };
+
+  it('[CI-05a] the doItForMe call key-command.service.ts makes (ownerType CONTACT, priority 80) and the message-intake one (contactId) are announced as an item for a contact, with no description; the notification keeps the item id', async () => {
+    const mark = recorded();
+    const item = await commandService.create(ID.bizA, {
+      title: `Collect: ${PRIVATE_NAME}`, description: 'Suggested: Hi Priya, your balance of 9000 is due', category: 'MONEY', actionType: 'invoice_reminder',
+      sourceModule: `${P}chan`, sourceType: 'do_it_for_me', sourceId: `${P}chan1`, ownerType: 'CONTACT', ownerId: ID.cPriv, priority: 80, recommendedBy: 'KEY', executableByKey: true,
+    });
+    const intake = await commandService.create(ID.bizA, {
+      title: `Reply to ${PRIVATE_NAME}`, description: 'Priya asked about her order', category: 'PEOPLE', actionType: 'respond',
+      sourceModule: `${P}chan`, sourceType: 'message_intake', sourceId: `${P}chan2`, ownerType: 'KEY', ownerId: ID.cPriv, contactId: ID.cPriv, priority: 60, requiresApproval: true,
+    });
+    const got = since(mark);
+    expect(leaks(got)).toEqual([]);
+    expect(got.timeline.map((e: any) => [e.entityId, e.title, e.detail])).toEqual([
+      [item.id, CONTACT_ITEM_LABEL, undefined],
+      [intake.id, CONTACT_ITEM_LABEL, undefined],
+    ]);
+    expect(got.realtime.map((e: any) => [e.type, e.payload.id, e.payload.title])).toEqual([
+      ['command.created', item.id, CONTACT_ITEM_LABEL],
+      ['command.created', intake.id, CONTACT_ITEM_LABEL],
+    ]);
+    expect(got.notifications.map((n: any) => [n.title, n.body, n.data.commandId])).toEqual([
+      [`High priority: ${CONTACT_ITEM_LABEL}`, undefined, item.id],
+      [`Approval required: ${CONTACT_ITEM_LABEL}`, undefined, intake.id],
+    ]);
+    // the item itself keeps its title for those who may open it
+    expect((await send('get', `${cmd}/items/${item.id}`, ID.owner)).body.title).toBe(`Collect: ${PRIVATE_NAME}`);
+  });
+
+  it('[CI-05b] every single-item mutation and every bulk call by the OWNER on such items records and emits the label, never the title', async () => {
+    const mark = recorded();
+    for (const r of SINGLE_MUTATIONS) {
+      const item = await seedItem('priv');
+      const res = await send(r.verb, `${cmd}/items/${item.id}${r.suffix}`, ID.owner, r.body?.());
+      expect(res.status, r.key).toBe(okStatus(r.verb));
+    }
+    for (const action of ['complete', 'dismiss', 'delete']) {
+      const ids = [
+        (await seedShape(`${P}chb_${action}_1`, { contactId: ID.cPriv, title: `Call ${PRIVATE_NAME}` })).id,
+        (await seedShape(`${P}chb_${action}_2`, { entityType: 'contact', entityId: ID.cPriv, title: `Slow payer: ${PRIVATE_NAME}` })).id,
+      ];
+      expect((await send('post', `${cmd}/items/bulk/${action}`, ID.owner, { ids })).status, action).toBe(201);
+    }
+    // assigning an item that named no contact to the contact announces the label too
+    const plain = await seedItem('none');
+    await db.commandItem.update({ where: { id: plain.id }, data: { title: `Visit ${PRIVATE_NAME}` } });
+    expect((await send('post', `${cmd}/items/${plain.id}/assign`, ID.owner, { ownerType: 'CONTACT', ownerId: ID.cPriv })).status).toBe(201);
+    const got = since(mark);
+    expect(leaks(got)).toEqual([]);
+    // every single-item mutation but discharge (which records no timeline event), two per bulk call, and the assign
+    expect(got.timeline.length).toBe(SINGLE_MUTATIONS.length - 1 + 6 + 1);
+    for (const e of got.timeline as any[]) expect(e.title, e.action).toMatch(new RegExp(`^[A-Z][a-z]+: ${CONTACT_ITEM_LABEL}$`));
+    for (const e of got.realtime as any[]) if ('title' in e.payload) expect(e.payload.title, e.type).toBe(CONTACT_ITEM_LABEL);
+    expect(got.realtime.map((e: any) => e.type).sort()).toEqual(
+      ['command.assigned', 'command.assigned', 'command.bulk_completed', 'command.bulk_dismissed', 'command.completed', 'command.updated'].sort(),
+    );
+  });
+
+  it('[CI-05c] control: an item that names no contact is announced with its title and description, as before', async () => {
+    const mark = recorded();
+    const item = await commandService.create(ID.bizA, {
+      title: `${P}Weekly review`, description: 'Look at the week', category: 'WORK', actionType: 'review',
+      sourceModule: `${P}chan`, sourceType: 'plain', sourceId: `${P}chan3`, priority: 80,
+    });
+    expect((await send('post', `${cmd}/items/${item.id}/complete`, ID.owner)).status).toBe(201);
+    const got = since(mark);
+    expect(got.timeline.map((e: any) => [e.title, e.detail ?? null])).toEqual([
+      [`${P}Weekly review`, 'Look at the week'],
+      [`Completed: ${P}Weekly review`, null],
+    ]);
+    expect(got.notifications.map((n: any) => [n.title, n.body])).toEqual([[`High priority: ${P}Weekly review`, 'Look at the week']]);
+    expect(got.realtime.map((e: any) => e.payload.title)).toEqual([`${P}Weekly review`, `${P}Weekly review`]);
+  });
+});
+
+describe("KEY path (review ST-D10-3, CR-2): outside this packet's write set", () => {
+  it.todo(
+    '[KEY-01] command_list_due_obligations and command_discharge_obligation (flow-orchestrator.service.ts:5697, :5713) call findDue and discharge without the requesting member, so through KEY a crm_view owned member lists and discharges obligations these routes refuse them. Closing it needs the dispatcher to pass the member (flow-orchestrator.service.ts) or both tools in CRM_ROW_VISIBILITY_TOOLS (job-role-policy.service.ts) with the DRV-1 pins (job-role-tool-families.spec.ts), all outside FOLLOW3-D10: a follow-up packet',
+  );
 });
