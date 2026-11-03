@@ -372,7 +372,7 @@ fly redis create --name keyflowos-redis
 Create `apps/server/Dockerfile`:
 
 ```dockerfile
-FROM node:22.22.0-alpine
+FROM node:22.23.4-alpine
 WORKDIR /app
 RUN npm install -g pnpm
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json ./
