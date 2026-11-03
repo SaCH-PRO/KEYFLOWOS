@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { IsString, IsOptional, IsDateString, IsNumber, IsInt, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -7,14 +8,30 @@ import { Type } from 'class-transformer';
  * an unbounded read of a business's whole Activity table. Paging further back
  * uses `cursor`.
  *
- * This bounds this one route only (SEC-V125-3). Two sibling reads of the same
- * table take their limit as a bare parseInt with no cap and are not covered by
- * this DTO: GET /timeline/businesses/:id/upcoming (timeline.controller.ts) and
- * the legacy GET /api/flows/businesses/:id/activity (flow.controller.ts, still
- * called by fetchActivityFeed in apps/web/src/lib/client.ts). Both are outside
- * V1-25's write set; evidence-feed.integration.test.ts records them as it.todo.
+ * V1-84 (SEC-V125-3): the two sibling reads of the same table that take their
+ * limit as a bare query string, GET /timeline/businesses/:id/upcoming
+ * (timeline.controller.ts) and the legacy GET /api/flows/businesses/:id/activity
+ * (flow.controller.ts, still called by fetchActivityFeed in
+ * apps/web/src/lib/client.ts), are bounded by the same number through
+ * parseTimelineLimit below.
  */
 export const TIMELINE_MAX_LIMIT = 200;
+
+/**
+ * A `limit` query value of a feed read that does not go through
+ * QueryTimelineDto: absent or empty is `fallback`; anything but an integer
+ * from 1 to TIMELINE_MAX_LIMIT is a 400, as /events answers (the value is
+ * parsed here, not left to a global pipe, so the bound holds wherever the
+ * handler is mounted).
+ */
+export function parseTimelineLimit(raw: unknown, fallback: number): number {
+  if (raw === undefined || raw === null || raw === '') return fallback;
+  const value = typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  if (!Number.isSafeInteger(value) || value < 1 || value > TIMELINE_MAX_LIMIT) {
+    throw new BadRequestException(`limit must be an integer from 1 to ${TIMELINE_MAX_LIMIT}`);
+  }
+  return value;
+}
 
 export class QueryTimelineDto {
   @IsOptional()

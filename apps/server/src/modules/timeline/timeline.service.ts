@@ -1,5 +1,12 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  activityPrefilter,
+  filterVisibleActivity,
+  readVisibleActivityPage,
+  resolveTimelineViewer,
+  type TimelineViewer,
+} from './timeline-visibility';
 
 export interface RecordEventInput {
   businessId: string;
@@ -150,7 +157,19 @@ export class TimelineService {
     });
   }
 
-  async queryTimeline(businessId: string, filters: TimelineFilters) {
+  /**
+   * V1-84: the caller of a feed read as timeline-visibility.ts reads them
+   * (module scopes, OWNER / ADMIN for unmapped modules, CRM access).
+   */
+  async resolveViewer(businessId: string, userId: string): Promise<TimelineViewer> {
+    return resolveTimelineViewer(this.prisma, businessId, userId);
+  }
+
+  /**
+   * One page of the business's rows, newest first, holding only rows the
+   * viewer may read (V1-84: canReadActivityRow and contact visibility).
+   */
+  async queryTimeline(businessId: string, filters: TimelineFilters, viewer: TimelineViewer) {
     const where: any = { businessId };
     if (filters.category) where.category = filters.category;
     if (filters.contactId) where.contactId = filters.contactId;
@@ -166,50 +185,63 @@ export class TimelineService {
       if (filters.to) where.occurredAt.lte = filters.to;
     }
     if (filters.cursor) where.occurredAt = { ...where.occurredAt, lt: new Date(filters.cursor) };
+    const prefilter = activityPrefilter(viewer);
+    if (prefilter.length) where.AND = prefilter;
 
-    return (this.prisma.client as any).activity.findMany({
-      where,
-      orderBy: { occurredAt: 'desc' },
-      take: filters.limit ?? 50,
-    });
+    return readVisibleActivityPage(this.prisma, viewer, filters.limit ?? 50, (skip, take) =>
+      (this.prisma.client as any).activity.findMany({
+        where,
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+      }),
+    );
   }
 
-  async getBusinessDaySummary(businessId: string, date: Date) {
+  /**
+   * The day's rows the viewer may read, and the revenueImpact summed over
+   * exactly those rows (V1-84: a member without revenue read is served no
+   * money row, so their sum is 0).
+   */
+  async getBusinessDaySummary(businessId: string, date: Date, viewer: TimelineViewer) {
     const start = new Date(date);
     start.setHours(0, 0, 0, 0);
     const end = new Date(date);
     end.setHours(23, 59, 59, 999);
 
-    const [events, revenueAgg] = await Promise.all([
-      (this.prisma.client as any).activity.findMany({
-        where: { businessId, occurredAt: { gte: start, lte: end } },
-        orderBy: { occurredAt: 'desc' },
-      }),
-      (this.prisma.client as any).activity.aggregate({
-        where: { businessId, occurredAt: { gte: start, lte: end }, revenueImpact: { not: null } },
-        _sum: { revenueImpact: true },
-        _count: { _all: true },
-      }),
-    ]);
+    const prefilter = activityPrefilter(viewer);
+    const rows: Array<{ revenueImpact?: number | null }> = await (this.prisma.client as any).activity.findMany({
+      where: { businessId, occurredAt: { gte: start, lte: end }, ...(prefilter.length ? { AND: prefilter } : {}) },
+      orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+    });
+    const events = await filterVisibleActivity(this.prisma, viewer, rows);
+    const revenueImpact = events.reduce((sum, e) => sum + (typeof e.revenueImpact === 'number' ? e.revenueImpact : 0), 0);
 
     return {
       date: start.toISOString(),
       eventCount: events.length,
-      revenueImpact: revenueAgg._sum.revenueImpact ?? 0,
+      revenueImpact,
       events,
     };
   }
 
-  async getUpcomingActions(businessId: string, opts?: { limit?: number; from?: Date }) {
-    const from = opts?.from ?? new Date();
-    return (this.prisma.client as any).activity.findMany({
-      where: {
-        businessId,
-        status: 'SCHEDULED',
-        startsAt: { gte: from },
-      },
-      orderBy: { startsAt: 'asc' },
-      take: opts?.limit ?? 50,
-    });
+  /** The next SCHEDULED rows the viewer may read, soonest first (V1-84). */
+  async getUpcomingActions(businessId: string, opts: { limit?: number; from?: Date }, viewer: TimelineViewer) {
+    const from = opts.from ?? new Date();
+    const prefilter = activityPrefilter(viewer);
+    const where = {
+      businessId,
+      status: 'SCHEDULED',
+      startsAt: { gte: from },
+      ...(prefilter.length ? { AND: prefilter } : {}),
+    };
+    return readVisibleActivityPage(this.prisma, viewer, opts.limit ?? 50, (skip, take) =>
+      (this.prisma.client as any).activity.findMany({
+        where,
+        orderBy: [{ startsAt: 'asc' }, { id: 'asc' }],
+        skip,
+        take,
+      }),
+    );
   }
 }
