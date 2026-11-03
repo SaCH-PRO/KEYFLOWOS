@@ -42,6 +42,12 @@
  * unmodified code each hidden call answers 2xx and writes its row or reaches a
  * recorder. The CONTROLS describe passes before and after.
  *
+ * Review repairs: CV-21 GET duplicates/preview/:primaryId/:duplicateId (both
+ * full contact rows; review ST-D2-2) and CV-22..CV-27, the note and task routes
+ * keyed by the row's own id (PATCH/DELETE notes/:noteId, PATCH/DELETE
+ * tasks/:taskId, tasks/:taskId complete and reopen; review ST-D2-3): a row of
+ * a hidden contact answers the 404 of an unknown id and is left as it is.
+ *
  * Requires DATABASE_URL. Every seeded row has the `v84b_` prefix (or belongs to
  * a v84b_ business) and is hard-deleted by raw SQL in beforeAll and afterAll.
  */
@@ -77,6 +83,8 @@ const ABSENT = `${P}absent`;
 const ABSENT_REL = `${P}rel_absent`;
 
 const NOT_FOUND_BODY = { statusCode: 404, message: 'Contact not found', error: 'Not Found' };
+const PAIR_NOT_FOUND_BODY = { statusCode: 404, message: 'Contact pair not found' };
+const ABSENT_ROW = `${P}row_absent`;
 const REL_NOT_FOUND_BODY = { statusCode: 404, message: 'Relationship not found', error: 'Not Found' };
 
 /** Contacts the routes act on: each carries the rows every route reads or writes. */
@@ -397,7 +405,94 @@ function sendDeleteRelationship(actor: string, relationshipId: string) {
     .set('x-test-user', actor);
 }
 
+function sendPreview(actor: string, primaryId: string, duplicateId: string) {
+  return request(app.getHttpServer())
+    .get(`/crm/businesses/${ID.bizA}/duplicates/preview/${primaryId}/${duplicateId}`)
+    .set('x-test-user', actor);
+}
+
 const is2xx = (status: number) => status >= 200 && status < 300;
+
+// ---------------------------------------------------------------------------
+// The note and task routes keyed by the row's own id (review ST-D2-3).
+// ---------------------------------------------------------------------------
+
+type ChildRoute = {
+  cv: string;
+  name: string;
+  kind: 'note' | 'task';
+  method: 'patch' | 'delete' | 'post';
+  path: (rowId: string) => string;
+  body?: Record<string, unknown>;
+  /** The task's status before the call (complete needs OPEN, reopen DONE). */
+  seedStatus?: 'OPEN' | 'DONE';
+  /** A value a permitted call on the row changes. */
+  effect: (rowId: string) => Promise<unknown>;
+};
+
+const noteCol = async (id: string) => (await q(`SELECT body AS v FROM contact_notes WHERE id = '${id}'`))[0]?.v ?? null;
+const taskCol = async (id: string, col: string) => (await q(`SELECT ${col} AS v FROM contact_tasks WHERE id = '${id}'`))[0]?.v ?? null;
+
+const CHILD_ROUTES: ChildRoute[] = [
+  {
+    cv: 'CV-22', name: 'PATCH notes/:noteId', kind: 'note', method: 'patch',
+    path: (id) => `notes/${id}`, body: { body: 'v84b rewritten note' },
+    effect: noteCol,
+  },
+  {
+    cv: 'CV-23', name: 'DELETE notes/:noteId', kind: 'note', method: 'delete',
+    path: (id) => `notes/${id}`,
+    effect: async (id) => db.contactNote.count({ where: { id } }),
+  },
+  {
+    cv: 'CV-24', name: 'PATCH tasks/:taskId', kind: 'task', method: 'patch',
+    path: (id) => `tasks/${id}`, body: { title: 'v84b rewritten task' },
+    effect: async (id) => taskCol(id, 'title'),
+  },
+  {
+    cv: 'CV-25', name: 'DELETE tasks/:taskId', kind: 'task', method: 'delete',
+    path: (id) => `tasks/${id}`,
+    effect: async (id) => db.contactTask.count({ where: { id } }),
+  },
+  {
+    cv: 'CV-26', name: 'POST tasks/:taskId/complete', kind: 'task', method: 'post',
+    path: (id) => `tasks/${id}/complete`, body: {}, seedStatus: 'OPEN',
+    effect: async (id) => taskCol(id, 'status'),
+  },
+  {
+    cv: 'CV-27', name: 'POST tasks/:taskId/reopen', kind: 'task', method: 'post',
+    path: (id) => `tasks/${id}/reopen`, body: {}, seedStatus: 'DONE',
+    effect: async (id) => taskCol(id, 'status'),
+  },
+];
+
+/** A note or task row of `contactId`, for one call of `route`. */
+async function seedChild(route: ChildRoute, rowId: string, contactId: string) {
+  if (route.kind === 'note') {
+    await db.contactNote.create({ data: { id: rowId, businessId: ID.bizA, contactId, body: `v84b seeded note ${rowId}` } });
+  } else {
+    await db.contactTask.create({
+      data: {
+        id: rowId, businessId: ID.bizA, contactId, title: `v84b seeded task ${rowId}`, status: route.seedStatus ?? 'OPEN',
+        completedAt: route.seedStatus === 'DONE' ? new Date() : null,
+      },
+    });
+  }
+}
+
+/** The note and task rows of bizA, by raw SQL. */
+async function childRows() {
+  return {
+    notes: await q(`SELECT id, contact_id, body, source FROM contact_notes WHERE business_id = '${ID.bizA}' ORDER BY id`),
+    tasks: await q(`SELECT id, contact_id, title, status, priority, due_date, remind_at, completed_at, deleted_at
+                      FROM contact_tasks WHERE business_id = '${ID.bizA}' ORDER BY id`),
+  };
+}
+
+function sendChild(route: ChildRoute, actor: string, rowId: string) {
+  const req = request(app.getHttpServer())[route.method](`/crm/businesses/${ID.bizA}/${route.path(rowId)}`).set('x-test-user', actor);
+  return route.body ? req.send(route.body) : req;
+}
 
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
@@ -502,7 +597,8 @@ beforeAll(async () => {
       { provide: CrmActionsService, useValue: {} },
       { provide: CrmRevenueService, useValue: {} },
       { provide: CrmJourneyService, useValue: {} },
-      { provide: CrmDuplicateDetectionService, useValue: {} },
+      // The merge preview (CV-21) reads both contacts through the real service.
+      { provide: CrmDuplicateDetectionService, useValue: new CrmDuplicateDetectionService(prisma) },
       { provide: CrmSavedViewsService, useValue: {} },
       { provide: BestChannelService, useValue: {} },
       { provide: ContactInsightService, useValue: {} },
@@ -714,6 +810,60 @@ describe('contact-scoped routes refuse a contact the member cannot open (FOLLOW3
     }
     expect(await snapshot()).toEqual(before);
   });
+
+  it('CV-21 GET duplicates/preview/:primaryId/:duplicateId: a pair with a hidden contact answers 404 like an unknown pair, and neither row is returned (review ST-D2-2)', async () => {
+    const cases = [
+      { actor: ID.staffOwned, primary: ID.cPriv, duplicate: ID.cStaff, why: 'STAFF_OWNED: hidden PRIVATE primary' },
+      { actor: ID.staffOwned, primary: ID.cStaff, duplicate: ID.cTeam, why: "STAFF_OWNED: hidden duplicate (the owner's TEAM contact)" },
+      { actor: ID.admin, primary: ID.cPriv, duplicate: ID.cTeam, why: 'ADMIN: hidden PRIVATE primary' },
+      { actor: ID.admin, primary: ID.cTeam, duplicate: ID.cPriv, why: 'ADMIN: hidden PRIVATE duplicate' },
+    ];
+    const statuses: Record<string, number> = {};
+    const bodies: Record<string, string> = {};
+    for (const k of cases) {
+      const res = await sendPreview(k.actor, k.primary, k.duplicate);
+      statuses[k.why] = res.status;
+      bodies[k.why] = res.text;
+    }
+    const absent: Record<string, string> = {
+      [ID.staffOwned]: (await sendPreview(ID.staffOwned, ABSENT, ID.cStaff)).text,
+      [ID.admin]: (await sendPreview(ID.admin, ABSENT, ID.cTeam)).text,
+    };
+    const hiddenPhones = [await contactCol(ID.cPriv, 'phone'), await contactCol(ID.cTeam, 'phone')];
+
+    expect(statuses).toEqual(Object.fromEntries(cases.map((k) => [k.why, 404])));
+    for (const k of cases) {
+      expect(JSON.parse(bodies[k.why]), k.why).toEqual(PAIR_NOT_FOUND_BODY);
+      expect(bodies[k.why], `${k.why}: body vs an unknown pair`).toBe(absent[k.actor]);
+      for (const phone of hiddenPhones) expect(bodies[k.why], `${k.why}: discloses a contact row`).not.toContain(phone);
+    }
+  });
+
+  for (const route of CHILD_ROUTES) {
+    it(`${route.cv} ${route.name}: a ${route.kind} of a hidden contact answers 404 like an unknown ${route.kind} id, and the row is left as it is (review ST-D2-3)`, async () => {
+      const rows = HIDDEN.map((h, i) => ({ ...h, rowId: `${P}${route.kind}_${route.cv}_h${i}` }));
+      for (const r of rows) await seedChild(route, r.rowId, r.contactId);
+      const before = { snapshot: await snapshot(), rows: await childRows() };
+
+      const statuses: Record<string, number> = {};
+      const bodies: Record<string, string> = {};
+      for (const r of rows) {
+        const res = await sendChild(route, r.actor, r.rowId);
+        statuses[r.why] = res.status;
+        bodies[r.why] = res.text;
+      }
+      const absent: Record<string, string> = {};
+      for (const actor of [ID.staffOwned, ID.admin]) absent[actor] = (await sendChild(route, actor, ABSENT_ROW)).text;
+
+      const message = route.kind === 'note' ? 'Note not found' : 'Task not found';
+      expect(statuses, `${route.cv} statuses`).toEqual(Object.fromEntries(rows.map((r) => [r.why, 404])));
+      for (const r of rows) {
+        expect(JSON.parse(bodies[r.why]), r.why).toEqual({ statusCode: 404, message, error: 'Not Found' });
+        expect(bodies[r.why], `${r.why}: body vs an unknown ${route.kind} id`).toBe(absent[r.actor]);
+      }
+      expect({ snapshot: await snapshot(), rows: await childRows() }, `${route.cv} rows`).toEqual(before);
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -782,4 +932,36 @@ describe('CONTROLS: visible contacts, OWNER and another tenant (pass before and 
     const foreign = await sendDeleteRelationship(ID.other, REL.toPrivate.id);
     expect(foreign.status).toBe(403);
   });
+
+  it('CV-21 merge preview: ADMIN previews two TEAM contacts, STAFF_OWNED two of its own, OWNER a PRIVATE and a TEAM one; a bizB member gets 403', async () => {
+    for (const [actor, primary, duplicate] of [
+      [ID.admin, ID.cTeam, ID.cStaff],
+      [ID.staffOwned, ID.cStaff, ID.cStaff2],
+      [ID.owner, ID.cPriv, ID.cTeam],
+    ] as const) {
+      const res = await sendPreview(actor, primary, duplicate);
+      expect(res.status, `${actor}: ${res.text}`).toBe(200);
+      expect(res.body.primary.id).toBe(primary);
+      expect(res.body.duplicate.id).toBe(duplicate);
+    }
+    const foreign = await sendPreview(ID.other, ID.cTeam, ID.cStaff);
+    expect(foreign.status).toBe(403);
+  });
+
+  for (const route of CHILD_ROUTES) {
+    it(`${route.cv} ${route.name}: ADMIN on a TEAM contact's ${route.kind}, STAFF_OWNED on its own contact's and OWNER on its PRIVATE contact's get 2xx and the write lands; a bizB member gets 403`, async () => {
+      for (const [i, { actor, contactId, why }] of VISIBLE.entries()) {
+        const rowId = `${P}${route.kind}_${route.cv}_v${i}`;
+        await seedChild(route, rowId, contactId);
+        const effectBefore = await route.effect(rowId);
+        const res = await sendChild(route, actor, rowId);
+        expect(is2xx(res.status), `${why}: ${res.status} ${res.text}`).toBe(true);
+        expect(await route.effect(rowId), `${why}: effect`).not.toEqual(effectBefore);
+      }
+      const foreignRow = `${P}${route.kind}_${route.cv}_f`;
+      await seedChild(route, foreignRow, ID.cTeam);
+      const foreign = await sendChild(route, ID.other, foreignRow);
+      expect(foreign.status, `bizB member: ${foreign.text}`).toBe(403);
+    });
+  }
 });

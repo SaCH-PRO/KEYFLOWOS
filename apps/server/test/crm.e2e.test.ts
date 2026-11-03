@@ -295,7 +295,14 @@ describe('CRM e2e', () => {
     playbookMock.getOrCreatePlaybook.mockResolvedValue({ id: 'playbook_1' });
     bestChannelMock.explain.mockResolvedValue({ channel: 'email', confidence: 1, perChannel: [] });
     prisma.users = [{ id: 'user_1', role: 'USER' }];
-    prisma.contacts = [{ id: 'contact_1', businessId: 'biz_1' }];
+    // The contacts the write cases name, for the FOLLOW3-D2 visibility gate
+    // (tasks: contact_3 in biz_3; merge: contact_primary and contact_duplicate in biz_4).
+    prisma.contacts = [
+      { id: 'contact_1', businessId: 'biz_1' },
+      { id: 'contact_3', businessId: 'biz_3' },
+      { id: 'contact_primary', businessId: 'biz_4' },
+      { id: 'contact_duplicate', businessId: 'biz_4' },
+    ];
     subscriptionsMock.checkLimit.mockResolvedValue({
       allowed: true,
       current: 0,

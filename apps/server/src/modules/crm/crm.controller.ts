@@ -150,15 +150,19 @@ export class CrmController {
    * contacts/:contactId applies. A contact outside that rule answers that
    * route's 404 for an unknown id and no child row is read; a request without
    * a member is 401 (V1-08, M13). It also gates both ends of a relationship
-   * write (POST relationships, POST refer), and every other route that names
-   * a contact by its path: the contact-scoped writes (notes, tasks, events,
+   * write (POST relationships, POST refer), and the other routes that name a
+   * contact by its path: the contact-scoped writes (notes, tasks, events,
    * log-communication, favorite, playbook, next-action, data-quality
    * mark-verified, relationship-health, list removal, both contacts of a
    * merge) and the conversation routes (read, reply, summary, regenerate,
    * suggest-replies, insights), whose collaborators also check the tenant
-   * only (FOLLOW3-D2, review ST-4). It returns the member and their
-   * CRM access, which the relationship and network reads use to drop the
-   * neighbours the member cannot open (review ST-1).
+   * only (FOLLOW3-D2, review ST-4). The merge preview and DELETE
+   * relationships check both of their contacts with contactVisibilityFilter,
+   * and the note and task routes keyed by the row's own id go through
+   * assertVisibleChildRow. Not gated yet (follow-up): the
+   * conversations/stream SSE route and GET tasks?contactId=. It returns the
+   * member and their CRM access, which the relationship and network reads use
+   * to drop the neighbours the member cannot open (review ST-1).
    */
   private async assertVisibleContact(
     businessId: string,
@@ -168,6 +172,37 @@ export class CrmController {
     const actorUserId = this.requireActorUserId(req);
     const access = await assertContactVisible(this.prisma, businessId, contactId, actorUserId);
     return { actorUserId, access };
+  }
+
+  /**
+   * The record-visibility gate of the routes that name a contact's note or task
+   * by the row's own id (PATCH/DELETE notes/:noteId, PATCH/DELETE
+   * tasks/:taskId, tasks/:taskId complete and reopen; review ST-D2-3). The row
+   * is looked up in the business and its contact checked by the rule GET
+   * contacts/:contactId applies: a row of a contact the member cannot open
+   * answers the collaborator's own 404 for an unknown row id and is left as it
+   * is. A row outside this business is left to the collaborator, which answers
+   * that same 404. No restriction for OWNER/SUPER_ADMIN (contactVisibilityFilter
+   * returns null).
+   */
+  private async assertVisibleChildRow(
+    businessId: string,
+    kind: 'note' | 'task',
+    rowId: string,
+    req: { user?: { id?: string } } | undefined,
+  ): Promise<void> {
+    const actorUserId = this.requireActorUserId(req);
+    const where = { id: rowId, businessId };
+    const row: { contactId: string } | null =
+      kind === 'note'
+        ? await this.prisma.client.contactNote.findFirst({ where, select: { contactId: true } })
+        : await this.prisma.client.contactTask.findFirst({ where, select: { contactId: true } });
+    if (!row) return;
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, [row.contactId]);
+    if (canOpen && !canOpen(row.contactId)) {
+      throw new NotFoundException(kind === 'note' ? 'Note not found' : 'Task not found');
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -701,8 +736,19 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('primaryId') primaryId: string,
     @Param('duplicateId') duplicateId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
     if (primaryId === duplicateId) throw new BadRequestException('primaryId and duplicateId must differ');
+    // Both contacts, as the merge it previews (review ST-D2-2): the preview
+    // returns both full rows, so a pair with a contact the member cannot open
+    // answers the 404 of an unknown pair and neither row is read. No
+    // restriction for OWNER/SUPER_ADMIN (contactVisibilityFilter returns null).
+    const actorUserId = this.requireActorUserId(req);
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, [primaryId, duplicateId]);
+    if (canOpen && !(canOpen(primaryId) && canOpen(duplicateId))) {
+      throw new HttpException('Contact pair not found', 404);
+    }
     const preview = await this.duplicates.preview({ businessId, primaryId, duplicateId });
     if (!preview) throw new HttpException('Contact pair not found', 404);
     return preview;
@@ -1119,11 +1165,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/tasks/:taskId/complete')
-  completeTask(
+  async completeTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
     @Body() body: { evidenceIds?: string[] },
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleChildRow(businessId, 'task', taskId, req);
     return this.timeline.completeTask({ businessId, taskId, evidenceIds: body.evidenceIds });
   }
 
@@ -1131,10 +1179,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/tasks/:taskId/reopen')
-  reopenTask(
+  async reopenTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleChildRow(businessId, 'task', taskId, req);
     return this.timeline.reopenTask({ businessId, taskId });
   }
 
@@ -1142,11 +1192,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Patch('businesses/:businessId/notes/:noteId')
-  updateNote(
+  async updateNote(
     @Param('businessId') businessId: string,
     @Param('noteId') noteId: string,
     @Body() body: { body?: string; source?: string },
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleChildRow(businessId, 'note', noteId, req);
     return this.timeline.updateNote({ businessId, noteId, body: body.body, source: body.source });
   }
 
@@ -1154,10 +1206,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Delete('businesses/:businessId/notes/:noteId')
-  deleteNote(
+  async deleteNote(
     @Param('businessId') businessId: string,
     @Param('noteId') noteId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleChildRow(businessId, 'note', noteId, req);
     return this.timeline.deleteNote({ businessId, noteId });
   }
 
@@ -1165,11 +1219,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Patch('businesses/:businessId/tasks/:taskId')
-  updateTask(
+  async updateTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
     @Body() body: { title?: string; dueDate?: string; priority?: string; remindAt?: string },
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleChildRow(businessId, 'task', taskId, req);
     return this.timeline.updateTask({
       businessId,
       taskId,
@@ -1184,10 +1240,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Delete('businesses/:businessId/tasks/:taskId')
-  deleteTask(
+  async deleteTask(
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleChildRow(businessId, 'task', taskId, req);
     return this.timeline.deleteTask({ businessId, taskId });
   }
 
