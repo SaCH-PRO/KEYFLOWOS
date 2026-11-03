@@ -16,7 +16,9 @@ export interface ProductCostProfile {
 
 export async function fetchProductCostProfile(productId: string, businessId?: string) {
   // R0-15d: the business named, else the selected one, never the demo tenant.
-  const bid = businessId || getStoredBusinessId();
+  // FOLLOW3-D11: only a business left out resolves the selection; an explicit
+  // "" is refused, as lib/client.ts refuses it (`||` used to swap it silently).
+  const bid = businessId ?? getStoredBusinessId();
   if (!bid) return noBusinessSelected();
   return apiGetSimple<{
     costProfile: ProductCostProfile | null;
@@ -41,7 +43,8 @@ export async function updateProductCostProfile(
   businessId?: string,
 ) {
   // R0-15d: the business named, else the selected one, never the demo tenant.
-  const bid = businessId || getStoredBusinessId();
+  // FOLLOW3-D11: an explicit "" is refused, not swapped for the selection.
+  const bid = businessId ?? getStoredBusinessId();
   if (!bid) return noBusinessSelected();
   return apiPost<{
     costProfile: ProductCostProfile;

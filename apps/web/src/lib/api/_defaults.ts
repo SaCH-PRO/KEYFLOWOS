@@ -77,6 +77,50 @@ export function noBusinessSelected(): { data: null; error: string } {
   return { data: null, error: NO_BUSINESS_SELECTED };
 }
 
+/**
+ * FOLLOW3-D11-WEB-API-EMPTY-SEGMENT. What the lib/api.ts transports answer for a
+ * request whose path is missing an id other than the business: `contacts/${""}`
+ * sent .../contacts/, which the server's non-strict routing serves from the list
+ * route, so a detail read was answered with a list.
+ */
+export const MISSING_ID = "Missing id";
+
+/** A segment that holds no id: empty, or a missing value spelled out. */
+function isMissingSegment(segment: string): boolean {
+  return segment === "" || segment === "undefined" || segment === "null";
+}
+
+/**
+ * True when a request path or URL names a missing id: a path segment that is
+ * empty ("//", or a trailing "/" before the query or fragment) or spelled out
+ * ("undefined", "null"). Only the path is read; the query and fragment are the
+ * caller's data. No request path template in lib/** ends in "/" or holds "//"
+ * (the census in lib/__tests__/api-empty-id-segment.test.ts).
+ */
+export function namesMissingId(pathOrUrl: string): boolean {
+  const pathname = pathOrUrl.replace(/^[a-z][a-z\d+.-]*:\/\/[^/?#]*/i, "").split(/[?#]/, 1)[0];
+  if (pathname === "") return false;
+  const segments = pathname.split("/");
+  if (segments[0] === "") segments.shift();
+  return segments.some(isMissingSegment);
+}
+
+/** The ApiResult a transport answers with instead of sending a request that names a missing id. */
+export function missingId(): { data: null; error: string } {
+  return { data: null, error: MISSING_ID };
+}
+
+/**
+ * Why a request must not be sent, as the ApiResult to answer instead, or null
+ * to send it: it names no business (requestNamesNoBusiness), else it names a
+ * missing id (namesMissingId).
+ */
+export function unsendableRequest(pathOrUrl: string, body?: unknown): { data: null; error: string } | null {
+  if (requestNamesNoBusiness(pathOrUrl, body)) return noBusinessSelected();
+  if (namesMissingId(pathOrUrl)) return missingId();
+  return null;
+}
+
 /** Thrown by a business-scoped helper that hands back a raw Response. */
 export class NoBusinessSelectedError extends Error {
   constructor() {
