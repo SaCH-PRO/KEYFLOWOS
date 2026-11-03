@@ -548,6 +548,11 @@
       "packet": "V1-81 (FOLLOW3-A5-FINANCE-WRITE-TENANCY)"
     },
     {
+      "prefix": "v81f_",
+      "owner": "apps/server/test/books-read-scope.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A6-BOOKS-READ-SCOPE)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
