@@ -357,6 +357,8 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
     businessId: string;
     paidAt: Date | null;
     payments: Array<{ amount: number; status: string }>;
+    /** V1-44 review (CR-V44-1): the APPLIED credit notes' sum, read only for a credited invoice. */
+    credited?: number;
   };
 
   function fakeDb(invoice: Inv, label: string) {
@@ -381,6 +383,12 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
         findMany: vi.fn(async () => {
           calls.push(`${label}.invoiceItem.findMany`);
           return [{ productId: 'prod_1', quantity: 2 }];
+        }),
+      },
+      creditNote: {
+        aggregate: vi.fn(async (_args: unknown) => {
+          calls.push(`${label}.creditNote.aggregate`);
+          return { _sum: { amount: invoice.credited ?? null } };
         }),
       },
     };
@@ -490,12 +498,90 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
     });
   }
 
-  it("default (payments): an out-of-map status (PARTIALLY_CREDITED) with a payment still throws 409 and writes nothing", async () => {
-    const h = build({ ...sent([{ amount: 40, status: 'SUCCESSFUL' }]), status: 'PARTIALLY_CREDITED' });
+  // V1-44 review (CR-V44-1): a payment on a PARTIALLY_CREDITED invoice is no
+  // longer refused as such; what is still refused is money beyond what its
+  // APPLIED credit notes leave owing (70 credited of 100: 30 owed, 40 paid).
+  it("default (payments): a PARTIALLY_CREDITED invoice paid beyond what its credits leave owing still throws 409 and writes nothing", async () => {
+    const h = build({ ...sent([{ amount: 40, status: 'SUCCESSFUL' }]), status: 'PARTIALLY_CREDITED', credited: 70 });
     await expect(
       h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: [] }),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(h.tx.db.invoice.update).not.toHaveBeenCalled();
+  });
+
+  describe('V1-44 review (CR-V44-1): a credited invoice collects what its credit notes leave owing', () => {
+    it('CP-01 PARTIALLY_CREDITED, 40 of 100 credited, 60 paid: accepted; the status stays PARTIALLY_CREDITED; no write, no posting, nothing buffered; the APPLIED notes of this business are read through tx', async () => {
+      const h = build({ ...sent([{ amount: 60, status: 'SUCCESSFUL' }]), status: 'PARTIALLY_CREDITED', credited: 40 });
+      const buffer: Array<{ name: string; payload: unknown }> = [];
+      const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: buffer });
+      expect(result).toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false, balance: { net: 60 } });
+      expect(h.tx.calls).toEqual(['tx.invoice.findUnique', 'tx.creditNote.aggregate']);
+      expect(h.tx.db.creditNote.aggregate.mock.calls[0][0]).toEqual({
+        where: { invoiceId: 'inv_1', businessId: 'biz_1', status: 'APPLIED' },
+        _sum: { amount: true },
+      });
+      expect(h.client.calls).toEqual([]);
+      expect(h.expensePosting.onProductSold).not.toHaveBeenCalled();
+      expect(buffer).toEqual([]);
+      expect(h.events.emit).not.toHaveBeenCalled();
+    });
+
+    it('CP-02 a part payment short of what is owed is accepted too (40 credited, 30 paid)', async () => {
+      const h = build({ ...sent([{ amount: 30, status: 'SUCCESSFUL' }]), status: 'PARTIALLY_CREDITED', credited: 40 });
+      const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: [] });
+      expect(result).toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+      expect(h.tx.db.invoice.update).not.toHaveBeenCalled();
+    });
+
+    it('CP-03 one cent beyond what is owed (40 credited, 60.01 paid): 409, nothing written; the message names what is owed', async () => {
+      const h = build({ ...sent([{ amount: 60.01, status: 'SUCCESSFUL' }]), status: 'PARTIALLY_CREDITED', credited: 40 });
+      await expect(h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: [] })).rejects.toThrow(
+        /beyond what a PARTIALLY_CREDITED invoice still owes after its credit notes \(60 owed\)/,
+      );
+      expect(h.tx.db.invoice.update).not.toHaveBeenCalled();
+    });
+
+    it("CP-04 what mark-paid records today (the whole total, credits not netted) is refused 409 rather than over-collected", async () => {
+      const h = build({ ...sent([{ amount: 100, status: 'SUCCESSFUL' }]), status: 'PARTIALLY_CREDITED', credited: 40 });
+      await expect(h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: [] })).rejects.toBeInstanceOf(ConflictException);
+      expect(h.tx.db.invoice.update).not.toHaveBeenCalled();
+    });
+
+    it('CP-05 FULLY_CREDITED owes nothing: any payment 409, nothing written; with nothing net received it is left as it is', async () => {
+      const paid = build({ ...sent([{ amount: 0.01, status: 'SUCCESSFUL' }]), status: 'FULLY_CREDITED', credited: 100 });
+      await expect(paid.service.reconcileFromPayments('inv_1', { tx: paid.tx.db as never, eventBuffer: [] })).rejects.toBeInstanceOf(ConflictException);
+      expect(paid.tx.db.invoice.update).not.toHaveBeenCalled();
+
+      const refunded = build({
+        ...sent([{ amount: 100, status: 'SUCCESSFUL' }, { amount: -100, status: 'REFUNDED' }]),
+        status: 'FULLY_CREDITED',
+        credited: 100,
+      });
+      await expect(refunded.service.reconcileFromPayments('inv_1', { tx: refunded.tx.db as never, eventBuffer: [] })).resolves.toMatchObject({
+        status: 'FULLY_CREDITED',
+        changed: false,
+      });
+      expect(refunded.tx.db.invoice.update).not.toHaveBeenCalled();
+    });
+
+    it("CP-06 under 'keep' (the manual refund) an over-settled credited invoice is kept, not refused (a paid invoice part-credited, part refunded)", async () => {
+      const h = build({
+        ...sent([{ amount: 100, status: 'SUCCESSFUL' }, { amount: -10, status: 'REFUNDED' }]),
+        status: 'PARTIALLY_CREDITED',
+        credited: 30,
+      });
+      const buffer: Array<{ name: string; payload: unknown }> = [];
+      const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: buffer, onIllegalTransition: 'keep' });
+      expect(result).toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false, balance: { net: 90 } });
+      expect(h.tx.db.invoice.update).not.toHaveBeenCalled();
+      expect(buffer).toEqual([]);
+    });
+
+    it('CP-07 an invoice in no credited state reads no credit notes (the reconcile of every other status is unchanged)', async () => {
+      const h = build(sent([{ amount: 40, status: 'SUCCESSFUL' }]));
+      await h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: [] });
+      expect(h.tx.db.creditNote.aggregate).not.toHaveBeenCalled();
+    });
   });
 
   it("onIllegalTransition 'keep' does not suppress a legal transition (PAID -> PARTIALLY_PAID on a refund)", async () => {

@@ -46,6 +46,23 @@
  *         InvoiceWorkflowService.reconcileFromCredits (the static ratchet is
  *         src/modules/commerce/invoice-status-writers.spec.ts)
  *
+ * V1-44 review repairs:
+ *   CN-13 SEC-V44-1 / SEC-V44-4 apply needs a member holding revenue:write: a STAFF member
+ *         (revenue:read) and a revenue:none member -> 403 on the route; 'system', 'user',
+ *         'key_ai', no actor and a non-member -> 403 on the service; nothing read or written.
+ *         A member granted revenue:write applies, and the posting names that member
+ *   CN-14 SEC-V44-2 a DELETE that read DRAFT and then waited on an apply's row lock does not
+ *         delete the APPLIED note (400): the note, its posting and its void survive
+ *   CN-15 SEC-V44-5 (service) a void that names its member records that member on the reversal
+ *   CN-16 CR-V44-1 a PARTIALLY_CREDITED invoice collects what its credits leave owing (the
+ *         payment, its posting and the receivable to 0 commit; the status stays credited);
+ *         money beyond it, the credit-unaware total mark-paid records, and any payment on a
+ *         FULLY_CREDITED invoice -> 409 with nothing written
+ *   it.todo: the halves that live outside the V1-44 write set (finance.controller.ts route
+ *         scopes and void actor, drive-intake-orchestrator.service.ts apply_credit_note key,
+ *         the credit-unaware share / pay-link / mark-paid readers in commerce.service.ts and
+ *         payments.service.ts)
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor, FinanceController (credit-note routes), CreditNoteService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService,
@@ -77,6 +94,9 @@ const TOTAL = 100;
 const ID = {
   owner: `${P}owner`,
   ownerF: `${P}ownerF`,
+  staff: `${P}staff`, // STAFF, role defaults (revenue:read)
+  norev: `${P}norev`, // STAFF, an explicit scope map with revenue:none
+  writer: `${P}writer`, // STAFF, an explicit scope map granting revenue:write
   biz: `${P}biz`, // ACCRUAL, the tenant under test
   bizCash: `${P}bizCash`, // CASH basis
   bizF: `${P}bizF`, // a foreign tenant
@@ -103,6 +123,7 @@ let db: any;
 let app: any;
 let workflow: any;
 let revenuePosting: any;
+let creditNotes: any;
 
 async function cleanup() {
   for (const sql of [
@@ -128,7 +149,7 @@ function agent() {
   return request(app.getHttpServer());
 }
 
-function api(method: 'get' | 'post' | 'patch', route: string, businessId = ID.biz, actor = ID.owner) {
+function api(method: 'get' | 'post' | 'patch' | 'delete', route: string, businessId = ID.biz, actor = ID.owner) {
   return agent()[method](`/finance/businesses/${businessId}/credit-notes${route}`).set(HEADER, actor);
 }
 
@@ -353,6 +374,7 @@ beforeAll(async () => {
   }).compile();
   workflow = moduleRef.get(InvoiceWorkflowService);
   revenuePosting = moduleRef.get(RevenuePostingService);
+  creditNotes = moduleRef.get(CreditNoteService);
   const coa = moduleRef.get(ChartOfAccountsSeederService);
 
   app = moduleRef.createNestApplication();
@@ -385,6 +407,18 @@ beforeAll(async () => {
     await db.membership.create({ data: { id: `${biz}_m`, userId: owner, businessId: biz, role: 'OWNER' } });
     await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V44a', lastName: 'Customer', email: `${P}customer-${tag}@test.local` } });
     await coa.ensureDefaults(biz);
+  }
+  // V1-44 review (SEC-V44-1): members of the ACCRUAL tenant below OWNER.
+  const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
+  for (const [user, scopes] of [
+    [ID.staff, null],
+    [ID.norev, { ...defaultScopesForRole('STAFF'), revenue: 'none' }],
+    [ID.writer, { ...defaultScopesForRole('STAFF'), revenue: 'write' }],
+  ] as const) {
+    await db.user.create({ data: { id: user, email: `${user}@test.local`, role: 'USER' } });
+    await db.membership.create({
+      data: { id: `${user}_m`, userId: user, businessId: ID.biz, role: 'STAFF', ...(scopes ? { permissionScopes: scopes } : {}) },
+    });
   }
 }, 180_000);
 
@@ -646,4 +680,182 @@ describe('statuses owned by the workflow', () => {
     expect(src).not.toMatch(/\bupdate\s+"?invoices"?\s+set\b/i);
     expect(src, 'the credited moves go through the workflow').toMatch(/reconcileFromCredits\(/);
   });
+});
+
+/**
+ * V1-44 review repairs. The packet made apply reach the ledger, which turned
+ * five latent gaps into live ones; these pin the repairs inside the write set
+ * (credit-note.service.ts, invoice-workflow.service.ts) and keep the halves
+ * outside it as it.todo.
+ */
+describe('V1-44 review: who may apply, the DRAFT-only delete, the void actor, collecting what a credit leaves owing', () => {
+  it('CN-13 SEC-V44-1 / SEC-V44-4: apply needs a member with revenue:write; revenue:read, revenue:none, placeholders, no actor and a non-member are refused 403 and nothing is written', async () => {
+    const inv = await seedInvoice('authz', 'SENT');
+    const note = await createNote(inv, TOTAL);
+    const before = await ledgerCounts(ID.biz);
+
+    // RED-BEFORE (packet head): both 201, the invoice FULLY_CREDITED and its receivable written off
+    // by members the invoice status door refuses (revenue requires write).
+    for (const who of [ID.staff, ID.norev]) {
+      const res = await applyNote(note.id, ID.biz, who);
+      expect(res.status, `${who}: ${JSON.stringify(res.body)}`).toBe(403);
+    }
+    // RED-BEFORE: 'system' (the ingestion auto-execute) posted with createdById 'system'.
+    for (const userId of ['system', 'user', 'key_ai', undefined, null, ID.ownerF]) {
+      await expect(creditNotes.apply(ID.biz, note.id, { userId }), String(userId)).rejects.toMatchObject({ status: 403 });
+    }
+    await expect(creditNotes.apply(ID.biz, note.id), 'no opts').rejects.toMatchObject({ status: 403 });
+
+    expect((await noteRow(note.id)).status).toBe('DRAFT');
+    expect(await notePostings(note.id)).toEqual([]);
+    expect(await ledgerCounts(ID.biz)).toEqual(before);
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+    expect(await ledgerOf(inv)).toEqual({ receivable: TOTAL, revenue: TOTAL, credited: 0 });
+
+    // A member granted revenue:write applies; the posting names that member.
+    const res = await applyNote(note.id, ID.biz, ID.writer);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const [posting] = await notePostings(note.id);
+    expect(posting.createdById).toBe(ID.writer);
+    expect((await invoiceRow(inv)).status).toBe('FULLY_CREDITED');
+    await expectBalanced(ID.biz);
+  });
+
+  it('CN-14 SEC-V44-2: a DELETE that read DRAFT and then waited on an apply holding the note row does not delete the APPLIED note (400); its posting stays and it can still be voided', async () => {
+    const inv = await seedInvoice('delrace', 'SENT');
+    const note = await createNote(inv, 30);
+
+    /** Backends of this database waiting on a lock in a statement on credit_notes. */
+    const lockWaiters = async (): Promise<number> => {
+      const rows: Array<{ n: number }> = await db.$queryRawUnsafe(
+        `SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%credit_notes%'`,
+      );
+      return rows[0]?.n ?? 0;
+    };
+    const until = async (n: number) => {
+      const deadline = Date.now() + 15_000;
+      while ((await lockWaiters()) < n) {
+        if (Date.now() > deadline) throw new Error(`fewer than ${n} credit_notes lock waiters after 15s`);
+        await new Promise((r) => setTimeout(r, 25));
+      }
+    };
+
+    // Hold the note's row so the interleaving is forced, not timed: apply claims it first
+    // (DRAFT -> APPLIED, uncommitted), the DELETE has already read DRAFT and queues behind it.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let held!: () => void;
+    const heldP = new Promise<void>((r) => (held = r));
+    const holder = db.$transaction(
+      async (tx: any) => {
+        await tx.$queryRawUnsafe(`SELECT id FROM credit_notes WHERE id = $1 FOR UPDATE`, note.id);
+        held();
+        await gate;
+      },
+      { timeout: 60_000, maxWait: 10_000 },
+    );
+    await heldP;
+    const applyP = applyNote(note.id).then((r) => r);
+    await until(1);
+    const deleteP = api('delete', `/${note.id}`).then((r) => r);
+    await until(2);
+    release();
+    await holder;
+    const [applied, deleted] = await Promise.all([applyP, deleteP]);
+
+    expect(applied.status, JSON.stringify(applied.body)).toBe(201);
+    // RED-BEFORE (packet head): 200, the APPLIED row deleted under its posting; void then 404.
+    expect(deleted.status, JSON.stringify(deleted.body)).toBe(400);
+    const row = await noteRow(note.id);
+    expect(row?.status).toBe('APPLIED');
+    expect(await notePostings(note.id)).toHaveLength(1);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_CREDITED');
+
+    expect((await voidNote(note.id)).status).toBe(201);
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+    expect(await ledgerOf(inv)).toEqual({ receivable: TOTAL, revenue: TOTAL, credited: 0 });
+
+    // A DRAFT note is still deleted.
+    const draft = await createNote(inv, 10);
+    const gone = await api('delete', `/${draft.id}`);
+    expect(gone.status, JSON.stringify(gone.body)).toBe(200);
+    expect(await noteRow(draft.id)).toBeNull();
+    await expectBalanced(ID.biz);
+  });
+
+  it('CN-15 SEC-V44-5 (service half): a void that names its member records that member on the reversal', async () => {
+    const inv = await seedInvoice('voidactor', 'SENT');
+    const note = await createNote(inv, 40);
+    expect((await applyNote(note.id, ID.biz, ID.writer)).status).toBe(201);
+    await creditNotes.void(ID.biz, note.id, { userId: ID.writer });
+    const postings = await notePostings(note.id);
+    const reversal = postings.find((t: any) => t.reversalOfId !== null);
+    expect(reversal?.createdById).toBe(ID.writer);
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+  });
+
+  /** A SUCCESSFUL payment as CommerceService.recordPayment writes it: row, posting and reconcile in one transaction under the invoice lock. */
+  async function pay(invoiceId: string, amount: number, key: string) {
+    const id = `${invoiceId}_${key}`;
+    return db.$transaction(async (tx: any) => {
+      await tx.$queryRawUnsafe(`SELECT id FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, invoiceId);
+      await tx.payment.create({
+        data: { id, amount, currency: 'TTD', status: 'SUCCESSFUL', provider: 'cash', method: 'cash', providerPaymentId: `${P}pp_${key}`, businessId: ID.biz, invoiceId },
+      });
+      await revenuePosting.onPaymentRecorded(id, { tx, createdById: ID.owner });
+      return workflow.reconcileFromPayments(invoiceId, { tx, eventBuffer: [] });
+    });
+  }
+
+  it('CN-16 CR-V44-1: a PARTIALLY_CREDITED invoice collects what its credits leave owing; beyond it, and on a FULLY_CREDITED invoice, a payment is refused 409 with nothing written', async () => {
+    const inv = await seedInvoice('collect', 'SENT');
+    const note = await createNote(inv, 40);
+    expect((await applyNote(note.id)).status).toBe(201);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_CREDITED');
+
+    // RED-BEFORE (packet head): 409 "Illegal invoice status transition: PARTIALLY_CREDITED -> PARTIALLY_PAID", rolled back.
+    await expect(pay(inv, 60, 'collect_60')).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+    expect(await db.payment.count({ where: { invoiceId: inv } })).toBe(1);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_CREDITED');
+    expect(await ledgerOf(inv)).toEqual({ receivable: 0, revenue: 60, credited: 40 });
+    await expectBalanced(ID.biz);
+
+    // Nothing is left owing: one more cent is refused, and nothing is written.
+    const before = await ledgerCounts(ID.biz);
+    await expect(pay(inv, 0.01, 'collect_cent')).rejects.toMatchObject({ status: 409 });
+    expect(await db.payment.count({ where: { invoiceId: inv } })).toBe(1);
+    expect(await ledgerCounts(ID.biz)).toEqual(before);
+
+    // What mark-paid records today (the whole total; it does not net credits) is refused, not over-collected.
+    const inv2 = await seedInvoice('collect_markpaid', 'SENT');
+    const note2 = await createNote(inv2, 40);
+    expect((await applyNote(note2.id)).status).toBe(201);
+    const before2 = await ledgerCounts(ID.biz);
+    await expect(pay(inv2, TOTAL, 'collect_total')).rejects.toMatchObject({ status: 409 });
+    expect(await db.payment.count({ where: { invoiceId: inv2 } })).toBe(0);
+    expect(await ledgerCounts(ID.biz)).toEqual(before2);
+    expect(await ledgerOf(inv2)).toEqual({ receivable: 60, revenue: 60, credited: 40 });
+
+    // A FULLY_CREDITED invoice owes nothing.
+    const inv3 = await seedInvoice('collect_full', 'SENT');
+    const note3 = await createNote(inv3, TOTAL);
+    expect((await applyNote(note3.id)).status).toBe(201);
+    await expect(pay(inv3, 10, 'collect_full')).rejects.toMatchObject({ status: 409 });
+    expect(await db.payment.count({ where: { invoiceId: inv3 } })).toBe(0);
+    expect((await invoiceRow(inv3)).status).toBe('FULLY_CREDITED');
+  });
+
+  // Outside the V1-44 write set (credit-note.service.ts, invoice-workflow.service.ts and their tests):
+  it.todo(
+    'SEC-V44-1 (route half): POST/PATCH credit-notes, /:id/apply, /:id/void and DELETE /:id carry ModuleScopeGuard + RequireModuleScope(revenue, write) and the GETs RequireModuleScope(revenue, read), so a revenue:read member cannot create, edit, void or delete a note and a revenue:none member cannot list them (finance.controller.ts; apply itself is enforced in CreditNoteService by CN-13)',
+  );
+  it.todo(
+    'SEC-V44-3: two concurrent approvals of one Drive intake plan credit the invoice once: the apply_credit_note step needs a key drive:<intakeFileId>:<actionIndex> as record_payment has, or must leave the note DRAFT for a member to apply (drive-intake-orchestrator.service.ts)',
+  );
+  it.todo(
+    'SEC-V44-5 (route half): POST credit-notes/:id/void passes { userId: req.user.id } so the reversal names the member (finance.controller.ts:1197; the service records it, CN-15)',
+  );
+  it.todo(
+    'CR-V44-1 (reader half): the share surfaces, the token pay link and mark-paid net the APPLIED credit notes (commerce.service.ts markPaidRemaining / public views / INTENT_PAYABLE_STATUSES, payments.service.ts payLinkInvoice); until then PARTIALLY_CREDITED stays out of SHAREABLE_INVOICE_STATUSES and mark-paid is refused 409 (CN-16) rather than collecting the credited part again',
+  );
 });

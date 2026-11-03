@@ -1,6 +1,7 @@
-import { Inject, Injectable, NotFoundException, BadRequestException, ConflictException, forwardRef } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException, forwardRef } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { PostingService, buildExternalRef, type PostingInput } from './posting.service';
 
@@ -133,8 +134,19 @@ export class CreditNoteService {
    * 'INVOICE' and never found it). Any refusal rolls all of it back. An invoice
    * with no recognition (cash basis, or never issued) is refused 400, as
    * before.
+   *
+   * V1-44 review (SEC-V44-1, SEC-V44-4): applying moves money (a revenue
+   * reversal, the receivable reduced, the invoice credited), so `opts.userId`
+   * must be a member of this business holding revenue:write, the rule the
+   * invoice status door applies (assertMemberMayApply). Refused 403 before
+   * anything is read or written otherwise: a member with revenue:read or none,
+   * a non-member, no actor, and the placeholders that name no person ('system'
+   * from the ingestion auto-execute, 'user' from the data-inbox fallback, KEY's
+   * 'key_ai'), so the posting's createdById is always that member and a credit
+   * read from a document never posts without one.
    */
   async apply(businessId: string, id: string, opts: { userId?: string | null } = {}) {
+    await this.assertMemberMayApply(businessId, opts.userId);
     const cn = await this.get(businessId, id);
     if (cn.status !== 'DRAFT') throw new BadRequestException('Credit note already applied or voided');
 
@@ -284,9 +296,46 @@ export class CreditNoteService {
     });
   }
 
+  /**
+   * Delete a DRAFT note. V1-44 review (SEC-V44-2): compare-and-set on DRAFT,
+   * as update() is. The status check above is a read: a DELETE that read DRAFT
+   * while an apply held the note's row then deleted the APPLIED row once that
+   * apply committed, leaving its credit_note_applied posting and the credited
+   * invoice with no note to void. Deleting `{ id, businessId, status: 'DRAFT' }`
+   * waits on that row lock and re-reads the status: an applied (or voided)
+   * note is not deleted and the request is refused 400, as a DELETE that
+   * arrives after the apply is. Answers the note as it was read.
+   */
   async remove(businessId: string, id: string) {
     const cn = await this.get(businessId, id);
     if (cn.status !== 'DRAFT') throw new BadRequestException('Can only delete draft credit notes');
-    return this.prisma.client.creditNote.delete({ where: { id } });
+    const deleted = await this.prisma.client.creditNote.deleteMany({ where: { id, businessId, status: 'DRAFT' } });
+    if (deleted.count !== 1) throw new BadRequestException('Can only delete draft credit notes');
+    return cn;
+  }
+
+  /**
+   * V1-44 review (SEC-V44-1, SEC-V44-4): ModuleScopeGuard's legacy rule for
+   * revenue >= write (an explicit scope map, else the role defaults), for the
+   * member a service caller names, restated as PaymentEvidenceService and
+   * UndoService do. A membership is required (no SUPER_ADMIN bypass, D-46), so
+   * an absent actor and the placeholders that are no User id ('system',
+   * 'user', 'key_ai') have none and are refused.
+   */
+  private async assertMemberMayApply(businessId: string, userId: string | null | undefined): Promise<void> {
+    if (!userId) throw new ForbiddenException('A member with revenue write access must apply this credit note');
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) throw new ForbiddenException('A member with revenue write access must apply this credit note');
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
+    }
   }
 }

@@ -448,10 +448,13 @@ export class InvoiceWorkflowService {
    * R0-PL-03 review (ST-PL03-3 / CR-1): `onIllegalTransition` says what to do
    * when the status derived from the payment rows is not reachable from the
    * current one (DRAFT -> PARTIALLY_PAID, or any move out of a status the
-   * transition map does not know: PARTIALLY_CREDITED, FULLY_CREDITED,
-   * PARTIAL). 'throw' (default, payments and webhooks): 409. 'keep' (the
-   * manual refund): leave the status as it is, write nothing, queue no event,
-   * and return changed: false with the fresh balance.
+   * transition map does not know: PARTIAL). 'throw' (default, payments and
+   * webhooks): 409. 'keep' (the manual refund): leave the status as it is,
+   * write nothing, queue no event, and return changed: false with the fresh
+   * balance. A credited invoice (PARTIALLY_CREDITED, FULLY_CREDITED) is
+   * reconciled by reconcileCreditedFromPayments (V1-44 review CR-V44-1): it
+   * keeps its status and refuses, or under 'keep' keeps, only money beyond
+   * what its credit notes leave owing.
    *
    * V1-42c review (SEC-V42C-1): one move, one event. The provider webhooks
    * call this without a transaction, after their payment / refund commit and
@@ -505,6 +508,9 @@ export class InvoiceWorkflowService {
     // is read as its payment plus its refund, not subtracted twice.
     const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     const current = invoice.status as InvoiceStatus;
+    if (CREDITED_STATUSES.has(current)) {
+      return this.reconcileCreditedFromPayments(db, invoice, current, balance, extra);
+    }
     const next = deriveStatusAfterPayment(current, balance);
     if (next === current) {
       return { status: current, balance, changed: false };
@@ -582,6 +588,50 @@ export class InvoiceWorkflowService {
       });
     }
     return { status: next, balance, changed: true };
+  }
+
+  /**
+   * V1-44 review (CR-V44-1): the payment reconcile of a credited invoice
+   * (PARTIALLY_CREDITED, FULLY_CREDITED). Applying a note made these states
+   * reachable, and the transition map holds no move out of them, so every
+   * payment door (recordPayment, mark-paid, the V1-41 pending confirm) was
+   * refused 409 and what the credit left owing could never be collected.
+   *
+   * Owed is the total less the APPLIED notes (in cents, D-13; the total's
+   * higher reading, as isOverpaid). Money up to it is accepted: the payment,
+   * its posting and its receivable reduction commit, and the status stays the
+   * credited one, as deriveStatusAfterCredit holds it whatever was paid (D-28;
+   * V1-28's depositPosition reads the settlement from the rows). No write, no
+   * posting, no event. Money beyond it is a 409 under 'throw' (the caller's
+   * payment rolls back, nothing written) and kept under 'keep' (a refund): the
+   * balance readers and mark-paid's remaining do not net credits, so an
+   * over-settlement here would be an over-collection nobody sees. A fully
+   * credited invoice owes nothing, so a payment on it is refused as on PAID.
+   */
+  private async reconcileCreditedFromPayments(
+    db: Prisma.TransactionClient,
+    invoice: { id: string; businessId: string; total: unknown },
+    current: InvoiceStatus,
+    balance: BalanceSummary,
+    extra: { onIllegalTransition?: 'throw' | 'keep' },
+  ): Promise<{ status: InvoiceStatus; balance: BalanceSummary; changed: boolean }> {
+    const applied = await db.creditNote.aggregate({
+      where: { invoiceId: invoice.id, businessId: invoice.businessId, status: 'APPLIED' },
+      _sum: { amount: true },
+    });
+    const creditedCents = toCents(Number(applied._sum.amount ?? 0) || 0);
+    const owedCents = Math.max(0, readTotalCents(Number(invoice.total)).maxCents - creditedCents);
+    if (toCents(balance.net) > owedCents) {
+      const detail = `net received ${balance.net} is above the ${fromCents(owedCents)} its credit notes leave owing of ${balance.total}`;
+      if (extra.onIllegalTransition === 'keep') {
+        this.logger.warn(`reconcileFromPayments: invoice ${invoice.id} kept at ${current}; ${detail}`);
+        return { status: current, balance, changed: false };
+      }
+      throw new ConflictException(
+        `Cannot record a payment beyond what a ${current} invoice still owes after its credit notes (${fromCents(owedCents)} owed)`,
+      );
+    }
+    return { status: current, balance, changed: false };
   }
 
   /**
