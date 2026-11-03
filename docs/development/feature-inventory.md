@@ -406,7 +406,8 @@
 | Server lint | Debt ratchet | P3 | ⚠️ Partial | Non-blocking; 3,344 warnings |
 | Web lint | | P3 | ⚠️ Partial | Slow locally; non-blocking in CI |
 | Security scan | `pnpm audit` + TruffleHog | P3 | ⚠️ Partial | `continue-on-error: true` |
-| DAST (HawkScan) | | P3 | 🔇 Orphaned | Gated by missing secret |
+| DAST (Native) | `native-dast.yml` + `scripts/security/native-dast.mjs` | P0 | ✅ Working | Required admission gate on every PR (V1-13, V1-30); no secret needed |
+| DAST (HawkScan) | `hawkscan.yml` (StackHawk) | P3 | 🔇 Orphaned | Manual-only (`workflow_dispatch`), not a required check; scans nothing without `HAWK_API_KEY` |
 | Production deploy | Manual Hetzner deploy | P3 | ✅ Working | Deployed via `scripts/deploy.sh`; commented-out Vercel block is stale; `deploy-drift.yml` catches drift |
 | Branch divergence guard | | P3 | ✅ Working | |
 | Uptime monitor | | P3 | ✅ Working | Configured |

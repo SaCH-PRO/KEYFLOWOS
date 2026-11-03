@@ -3519,3 +3519,88 @@ negative_controls:
       replace: '"name": DAST (Native)'
     proof_command: node --test --test-name-pattern="NC duplicate name" scripts/agent-control/tests/workflow-integrity.spec.mjs
     timeout_ms: 120000
+
+  # FOLLOW3-C4-DAST-DOCS-NATIVE-GATE (review CR-V1-30-4). The operator docs
+  # describe the required DAST (Native) gate and HawkScan as manual-only. Each
+  # control restores one stale instruction. Proof: 'NC setup doc' in
+  # tests/workflow-integrity.spec.mjs.
+  - id: NC-FOLLOW3-C4-SETUP-DOC-REQUIRES-HAWKSCAN
+    claim: >
+      No operator doc tells anyone to make HawkScan a required check. With no
+      PR trigger that check never reports, so it would block every merge.
+      Restoring the setup doc's step that adds HawkScan to main's required
+      status checks is rejected.
+    mutation:
+      file: docs/SECURITY_DAST_SETUP.md
+      find: "### Not a gate"
+      replace: |-
+        2. Add `HawkScan` to `main`'s required status checks (same ruleset you created
+           for the CI checks — see [issue #60](https://github.com/SaCH-PRO/KEYFLOWOS/issues/60)).
+
+        ### Not a gate
+    proof_command: node --test --test-name-pattern="NC setup doc" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-FOLLOW3-C4-NATIVE-HEADER-NOT-REQUIRED
+    claim: >
+      The native-dast.yml header says it is the required DAST gate. Restoring
+      the header that said it was not a required check yet is rejected.
+    mutation:
+      file: .github/workflows/native-dast.yml
+      find: |-
+        # THE REQUIRED DAST GATE. REQUIRED_WORKFLOWS in
+        # scripts/agent-control/lib/events.mjs names 'DAST (Native)' since V1-30 (owner
+        # ruling D-22), and scripts/agent-control/tests/workflow-integrity.spec.mjs
+        # proves this workflow cannot conclude success without probing. hawkscan.yml
+        # is manual-only and not a required check. Operator doc:
+        # docs/SECURITY_DAST_SETUP.md.
+      replace: |-
+        # NOT A REQUIRED CHECK YET. REQUIRED_WORKFLOWS in
+        # scripts/agent-control/lib/events.mjs still names 'DAST (HawkScan)'; swapping
+        # the admission gate to this workflow is V1-30.
+    proof_command: node --test --test-name-pattern="NC setup doc" scripts/agent-control/tests/workflow-integrity.spec.mjs
+    timeout_ms: 120000
+
+  # FOLLOW3-C5-ADMISSION-RUN-PATH (review SEC-V130-2, owner ruling D-61).
+  # Admission binds each required gate to its workflow file, so a second file
+  # that declares a required name cannot speak for it. Proof:
+  # tests/admission.spec.mjs.
+  - id: NC-FOLLOW3-C5-RUN-PATH-UNBOUND
+    claim: >
+      Only a run of a required gate's own workflow file counts for that gate.
+      Without the path filter, a later green run of a second file named
+      DAST (Native) replaces a failed native-dast.yml run and the head is
+      admitted.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "  const runs = (snapshot.workflow_runs || []).filter(runOfRequiredGate);"
+      replace: "  const runs = snapshot.workflow_runs || [];"
+    proof_command: node --test --test-name-pattern="NC impostor gate" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-FOLLOW3-C5-RUN-PATH-DROPPED
+    claim: >
+      The collector keeps each run's workflow file path. A snapshot that drops
+      it leaves admission unable to tell a gate from an impostor. The mapper
+      lives in lib/admission.mjs (review SEC-C5-1) and the CLI maps with it.
+    mutation:
+      file: scripts/agent-control/lib/admission.mjs
+      find: "  path: r.path,\n"
+      replace: ""
+    proof_command: node --test --test-name-pattern="NC run snapshot" scripts/agent-control/tests/admission.spec.mjs
+    timeout_ms: 120000
+
+  # Review SEC-C5-1. Every load of auto-merge-admitted.mjs is a run: whatever
+  # name starts or imports it, without credentials it exits 2, because callers
+  # read exit 0 as a verdict (agent-control-gate.yml reads it as the #80 grant).
+  - id: NC-FOLLOW3-C5-CLI-LOAD-GUARDED
+    claim: >
+      The CLI's credential check runs on every load. Guarding it by the name
+      in argv[1] lets a symlink of another name or a wrapper that imports the
+      CLI start it with no credentials and no fail-closed exit 2.
+    mutation:
+      file: scripts/agent-control/auto-merge-admitted.mjs
+      find: "if (!token || !repo || !prNumber) {"
+      replace: "if (process.argv[1].endsWith('auto-merge-admitted.mjs') && (!token || !repo || !prNumber)) {"
+    proof_command: node --test --test-name-pattern="NC CLI load" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000

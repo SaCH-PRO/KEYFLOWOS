@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS } from '../lib/admission.mjs';
+import { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, toWorkflowRunSnapshot, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS } from '../lib/admission.mjs';
 import { SEMANTIC_REVIEW_REASONS } from '../lib/semantic-review.mjs';
-import { REQUIRED_WORKFLOWS } from '../lib/events.mjs';
+import { REQUIRED_WORKFLOWS, REQUIRED_WORKFLOW_FILES } from '../lib/events.mjs';
 import { parseYaml } from '../lib/yaml.mjs';
 import { GRANT_REASONS } from '../lib/merge-grant.mjs';
 import { grantComment, followUp, target as grantTarget } from './helpers/merge-grant-fixture.mjs';
@@ -13,10 +13,13 @@ const HEAD = 'a'.repeat(40);
 const BASE = 'b'.repeat(40);
 const SEMANTIC = 'c'.repeat(40);
 
+// Each run carries the workflow file GitHub reports it came from: admission
+// counts a run for a required gate only from that gate's own file (D-61).
 const greenRuns = (sha = HEAD) =>
   REQUIRED_WORKFLOWS.map((name, i) => ({
     id: 100 + i,
     name,
+    path: REQUIRED_WORKFLOW_FILES[name],
     head_sha: sha,
     status: 'completed',
     conclusion: 'success',
@@ -361,13 +364,13 @@ test('a red required workflow blocks admission', () => {
 
 test('the newest run at the head wins when a workflow re-ran', () => {
   const runs = greenRuns();
-  runs.push({ id: 999, name: 'CI/CD Pipeline', head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-23T12:00:00Z' });
+  runs.push({ id: 999, name: 'CI/CD Pipeline', path: REQUIRED_WORKFLOW_FILES['CI/CD Pipeline'], head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-23T12:00:00Z' });
   runs[0] = { ...runs[0], conclusion: 'failure', created_at: '2026-09-23T09:00:00Z' };
   assert.equal(evaluateAdmission(admissible({ workflow_runs: runs })).eligible, true);
 
   // ...and a newer FAILURE must lose to nothing.
   const runs2 = greenRuns();
-  runs2.push({ id: 998, name: 'CI/CD Pipeline', head_sha: HEAD, status: 'completed', conclusion: 'failure', created_at: '2026-09-23T12:00:00Z' });
+  runs2.push({ id: 998, name: 'CI/CD Pipeline', path: REQUIRED_WORKFLOW_FILES['CI/CD Pipeline'], head_sha: HEAD, status: 'completed', conclusion: 'failure', created_at: '2026-09-23T12:00:00Z' });
   assert.equal(evaluateAdmission(admissible({ workflow_runs: runs2 })).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
 });
 
@@ -425,6 +428,126 @@ test('every required workflow exists, runs on every PR, and wakes the autopilot'
   assert.deepEqual([...policy.required_pr_workflows].sort(), [...REQUIRED_WORKFLOWS].sort(), 'policy and code must agree');
 });
 
+// ------------------------------------------------- GATE FILE BINDING
+// FOLLOW3-C5 (review SEC-V130-2, owner ruling D-61). A workflow's name is
+// whatever its file declares, so a second file declaring `name: DAST (Native)`
+// produces runs of that name. Keyed by name alone, its later green run
+// replaced a failed native-dast.yml run and admission returned ELIGIBLE. A run
+// counts for a required gate only when GitHub reports it came from that
+// gate's own file; a run with no path counts for none.
+
+const NATIVE = 'DAST (Native)';
+const IMPOSTOR_FILE = '.github/workflows/dast-fast.yml';
+const nativeRun = (fields = {}) => ({ id: 700, name: NATIVE, path: REQUIRED_WORKFLOW_FILES[NATIVE], head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-23T10:00:00Z', ...fields });
+const impostorRun = (fields = {}) => nativeRun({ id: 701, path: IMPOSTOR_FILE, created_at: '2026-09-23T10:05:00Z', ...fields });
+const withoutNative = (sha = HEAD) => greenRuns(sha).filter((r) => r.name !== NATIVE);
+
+test('NC impostor gate: a later green run of a second file named DAST (Native) does not replace a failed native-dast.yml run', () => {
+  const runs = [...withoutNative(), nativeRun({ conclusion: 'failure' }), impostorRun()];
+  const v = evaluateAdmission(admissible({ workflow_runs: runs }));
+  assert.equal(v.eligible, false);
+  assert.equal(v.reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
+  assert.deepEqual(v.detail, [{ workflow: NATIVE, conclusion: 'failure' }]);
+  // Referent: a later green run of native-dast.yml itself does replace it.
+  const rerun = [...withoutNative(), nativeRun({ conclusion: 'failure' }), nativeRun({ id: 702, created_at: '2026-09-23T10:05:00Z' })];
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: rerun })).eligible, true);
+});
+
+test('NC impostor gate: an impostor run alone is a missing gate', () => {
+  const v = evaluateAdmission(admissible({ workflow_runs: [...withoutNative(), impostorRun()] }));
+  assert.equal(v.eligible, false);
+  assert.equal(v.reason, ADMISSION_REASONS.MISSING_WORKFLOWS);
+  assert.deepEqual(v.detail, [NATIVE]);
+  // Any other file is an impostor too, a file of another required gate included.
+  for (const file of [REQUIRED_WORKFLOW_FILES['CI/CD Pipeline'], '.github/workflows/hawkscan.yml', 'native-dast.yml', '.github/workflows/native-dast.yaml', '.github/workflows/native-dast.yml.bak', ' .github/workflows/native-dast.yml']) {
+    const other = evaluateAdmission(admissible({ workflow_runs: [...withoutNative(), nativeRun({ path: file })] }));
+    assert.equal(other.reason, ADMISSION_REASONS.MISSING_WORKFLOWS, JSON.stringify(file));
+  }
+});
+
+test('NC impostor gate: a pending impostor run does not block a green real run', () => {
+  const runs = [...greenRuns(), impostorRun({ status: 'in_progress', conclusion: null })];
+  const v = evaluateAdmission(admissible({ workflow_runs: runs }));
+  assert.equal(v.eligible, true);
+  assert.equal(v.reason, ADMISSION_REASONS.ELIGIBLE);
+  // Referent: a pending run of native-dast.yml itself still blocks.
+  const pending = [...greenRuns(), nativeRun({ id: 703, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:05:00Z' })];
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: pending })).reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
+});
+
+test('gate path: a run of the gate file whose path carries an @refs suffix counts', () => {
+  for (const ref of ['refs/heads/impl/x', 'refs/pull/87/merge', 'refs/heads/main']) {
+    const runs = greenRuns().map((r) => ({ ...r, path: `${r.path}@${ref}` }));
+    assert.equal(evaluateAdmission(admissible({ workflow_runs: runs })).eligible, true, ref);
+  }
+  // The suffix is only a ref: anything else after the file is another path.
+  for (const suffix of ['@', '@main', '@refs/', '@refs/heads/x y']) {
+    const runs = [...withoutNative(), nativeRun({ path: `${REQUIRED_WORKFLOW_FILES[NATIVE]}${suffix}` })];
+    assert.equal(evaluateAdmission(admissible({ workflow_runs: runs })).reason, ADMISSION_REASONS.MISSING_WORKFLOWS, suffix);
+  }
+});
+
+test('NC impostor gate: a run with no path speaks for no gate (D-61 fails closed)', () => {
+  for (const value of [undefined, null, '', 42, {}]) {
+    const runs = [...withoutNative(), nativeRun({ path: value })];
+    const v = evaluateAdmission(admissible({ workflow_runs: runs }));
+    assert.equal(v.eligible, false, String(value));
+    assert.equal(v.reason, ADMISSION_REASONS.MISSING_WORKFLOWS, String(value));
+    assert.deepEqual(v.detail, [NATIVE], String(value));
+  }
+  // Every run without a path: every gate is missing.
+  const bare = greenRuns().map(({ path: omitted, ...run }) => run);
+  const v = evaluateAdmission(admissible({ workflow_runs: bare }));
+  assert.equal(v.reason, ADMISSION_REASONS.MISSING_WORKFLOWS);
+  assert.deepEqual(v.detail, [...REQUIRED_WORKFLOWS]);
+});
+
+test('NC impostor gate: the stale-head check matches by path too', () => {
+  const other = 'e'.repeat(40);
+  // An impostor at another head is not a run of the gate there either.
+  const impostorElsewhere = evaluateAdmission(admissible({ workflow_runs: [...withoutNative(), impostorRun({ head_sha: other })] }));
+  assert.equal(impostorElsewhere.reason, ADMISSION_REASONS.MISSING_WORKFLOWS);
+  assert.deepEqual(impostorElsewhere.detail, [NATIVE]);
+  // Referent: the gate's own file at another head is a stale head.
+  const stale = evaluateAdmission(admissible({ workflow_runs: [...withoutNative(), nativeRun({ head_sha: other })] }));
+  assert.equal(stale.reason, ADMISSION_REASONS.STALE_WORKFLOW_HEAD);
+  assert.deepEqual(stale.detail.missing_at_head, [NATIVE]);
+  assert.deepEqual(stale.detail.runs_at_other_heads, [other]);
+});
+
+// The collector maps the GitHub runs API with toWorkflowRunSnapshot, which
+// lives in lib/admission.mjs: the test reads it from there and never loads the
+// CLI, whose every load checks credentials and runs (review SEC-C5-1;
+// tests/merge-cli.spec.mjs 'NC CLI load').
+test('NC run snapshot: the collector keeps the workflow file path of each run', () => {
+  // The fields the GitHub runs API returns for a run (abridged), and a few it adds.
+  const raw = greenRuns().map((r) => ({
+    ...r,
+    path: `${r.path}@refs/heads/impl/x`,
+    display_title: 'impl/x',
+    head_branch: 'impl/x',
+    event: 'pull_request',
+    workflow_id: 9000 + r.id,
+    html_url: `https://github.com/o/r/actions/runs/${r.id}`,
+  }));
+  raw.push({ ...raw[0], id: 799, name: NATIVE, path: IMPOSTOR_FILE, created_at: '2026-09-23T10:05:00Z' });
+  const mapped = raw.map(toWorkflowRunSnapshot);
+  assert.deepEqual(
+    mapped,
+    raw.map(({ id, name, path: file, head_sha, status, conclusion, created_at }) => ({ id, name, path: file, head_sha, status, conclusion, created_at })),
+    'each run keeps id, name, path, head_sha, status, conclusion and created_at, and nothing else',
+  );
+  // Collected and evaluated together: the real runs admit, the impostor beside them changes nothing.
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: mapped })).eligible, true);
+  const failedNative = mapped.map((r) => (r.name === NATIVE && r.path.startsWith(REQUIRED_WORKFLOW_FILES[NATIVE]) ? { ...r, conclusion: 'failure' } : r));
+  assert.equal(evaluateAdmission(admissible({ workflow_runs: failedNative })).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
+  // The CLI's collector is this mapper, read from lib, and not a copy of its own.
+  const cli = fs.readFileSync('scripts/agent-control/auto-merge-admitted.mjs', 'utf8');
+  assert.match(cli, /^import \{[^}]*\btoWorkflowRunSnapshot\b[^}]*\} from '\.\/lib\/admission\.mjs';$/m);
+  assert.match(cli, /const workflow_runs = \(runs\.workflow_runs \|\| \[\]\)\.map\(toWorkflowRunSnapshot\);/);
+  assert.doesNotMatch(cli, /head_sha: r\.head_sha/, 'the CLI keeps no mapper of its own');
+});
+
 // ------------------------------------------ INDEPENDENT SEMANTIC REVIEW
 // (KF-META-AI-REVIEW-FAILOVER-001) Admission consumes the provider-neutral
 // contract; lib/semantic-review.mjs and its spec cover the contract itself.
@@ -455,7 +578,7 @@ test('an eligible verdict records which independent review satisfied it', () => 
 test('NC pending re-run: a required run still in progress at the head blocks admission even after an older green run', () => {
   const runs = [
     ...greenRuns(),
-    { id: 900, name: 'Agent Control Gate', head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:01Z' },
+    { id: 900, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:01Z' },
   ];
   const v = evaluateAdmission(admissible({ workflow_runs: runs }));
   assert.equal(v.eligible, false);
@@ -465,7 +588,7 @@ test('NC pending re-run: a required run still in progress at the head blocks adm
 
 test('NC pending re-run: an older queued run beside a newer green one still blocks', () => {
   const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-23T10:00:05Z' }));
-  runs.push({ id: 901, name: 'CI/CD Pipeline', head_sha: HEAD, status: 'queued', conclusion: null, created_at: '2026-09-23T10:00:00Z' });
+  runs.push({ id: 901, name: 'CI/CD Pipeline', path: REQUIRED_WORKFLOW_FILES['CI/CD Pipeline'], head_sha: HEAD, status: 'queued', conclusion: null, created_at: '2026-09-23T10:00:00Z' });
   assert.equal(evaluateAdmission(admissible({ workflow_runs: runs })).reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
 });
 
@@ -487,7 +610,7 @@ test('NC PR 103 replay: ready_for_review after the last gate run owes a re-run, 
 
 test('PR 103 replay, settled: once the owed gate run exists and is green, the transition is satisfied', () => {
   const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-28T18:22:37Z' }));
-  runs.push({ id: 902, name: 'Agent Control Gate', head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-28T19:09:36Z' });
+  runs.push({ id: 902, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'completed', conclusion: 'success', created_at: '2026-09-28T19:09:36Z' });
   const v = evaluateAdmission(admissible({
     workflow_runs: runs,
     pr_transitions: [{ event: 'ready_for_review', created_at: '2026-09-28T19:09:33Z' }],
@@ -497,7 +620,7 @@ test('PR 103 replay, settled: once the owed gate run exists and is green, the tr
 
 test('PR 103 replay, failed: the owed gate run that failed blocks admission', () => {
   const runs = greenRuns().map((r) => ({ ...r, created_at: '2026-09-28T18:22:37Z' }));
-  runs.push({ id: 903, name: 'Agent Control Gate', head_sha: HEAD, status: 'completed', conclusion: 'failure', created_at: '2026-09-28T19:09:36Z' });
+  runs.push({ id: 903, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'completed', conclusion: 'failure', created_at: '2026-09-28T19:09:36Z' });
   const v = evaluateAdmission(admissible({
     workflow_runs: runs,
     pr_transitions: [{ event: 'ready_for_review', created_at: '2026-09-28T19:09:33Z' }],
@@ -528,7 +651,7 @@ test('every transition trigger names only required workflows that listen to that
 
 test('NC recheck before merge: a second snapshot that is no longer eligible stops the merge', () => {
   const first = evaluateAdmission(admissible());
-  const runs = [...greenRuns(), { id: 904, name: 'Agent Control Gate', head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
+  const runs = [...greenRuns(), { id: 904, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
   const second = evaluateAdmission(admissible({ workflow_runs: runs }));
   const v = recheckBeforeMerge(first, second);
   assert.equal(v.eligible, false);
@@ -599,7 +722,7 @@ test('NC F9: the grant is checked last, so every other contract keeps its own re
   assert.equal(evaluateAdmission({ ...base, ret: { ...base.ret, review_status: 'CORRECTION_REQUIRED' } }).reason, ADMISSION_REASONS.REVIEW_NOT_READY);
   assert.equal(evaluateAdmission({ ...base, pr: { ...base.pr, base_sha: 'd'.repeat(40) } }).reason, ADMISSION_REASONS.SOURCE_MAIN_DRIFT);
   assert.equal(evaluateAdmission({ ...base, semantic_review_live: { copilot: [], chatgpt: [] } }).reason, ADMISSION_REASONS.SEMANTIC_REVIEW_NOT_SATISFIED);
-  const pending = [...greenRuns(), { id: 905, name: 'Agent Control Gate', head_sha: HEAD, status: 'queued', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
+  const pending = [...greenRuns(), { id: 905, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'queued', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
   assert.equal(evaluateAdmission({ ...base, workflow_runs: pending }).reason, ADMISSION_REASONS.REQUIRED_CHECK_PENDING);
   const failed = greenRuns().map((r) => (r.name === 'CI/CD Pipeline' ? { ...r, conclusion: 'failure' } : r));
   assert.equal(evaluateAdmission({ ...base, workflow_runs: failed }).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
@@ -687,7 +810,8 @@ test('grant gate: the non-draft check reads the PR, its artifacts and the grant,
   assert.equal(gate.eligible, true);
   assert.equal(gate.merge_grant.comment_id, snapshot.control_comments[0].id);
   // It cannot wait on its own run: a pending gate run at the head is not its input.
-  const pending = [{ id: 906, name: 'Agent Control Gate', head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
+  // The run comes from the gate's own file, so it would count if read (D-61).
+  const pending = [{ id: 906, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
   assert.equal(evaluateGrantGate({ ...snapshot, workflow_runs: pending }).eligible, true);
   for (const [comments, reason] of [[[], GRANT_REASONS.ABSENT], [null, GRANT_REASONS.AUTHORITY_UNVERIFIED], [[grantFor(snapshot, { review_status: 'ACCEPT_FOR_ADMISSION' })], GRANT_REASONS.NOT_A_GRANT]]) {
     const v = evaluateGrantGate({ ...snapshot, control_comments: comments });

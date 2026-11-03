@@ -8,7 +8,7 @@
  * granted by authority may be mechanically executed against this exact head.
  */
 
-import { REQUIRED_WORKFLOWS } from './events.mjs';
+import { REQUIRED_WORKFLOWS, REQUIRED_WORKFLOW_FILES } from './events.mjs';
 import { evaluateSemanticReview } from './semantic-review.mjs';
 import { evaluateMergeGrant, sameGrant } from './merge-grant.mjs';
 
@@ -101,6 +101,46 @@ function fail(reason, detail) {
   return { eligible: false, reason, detail: detail ?? null };
 }
 
+/**
+ * GitHub reports a run's `path` as the workflow file, sometimes followed by
+ * `@` and the ref it ran from (`.github/workflows/ci-cd.yml@refs/heads/x`).
+ * The ref suffix is dropped; anything else is part of the path.
+ */
+const REF_SUFFIX = /@refs\/\S+$/;
+
+/**
+ * Whether a run speaks for the required gate its name claims (owner ruling
+ * D-61; FOLLOW3-C5, review SEC-V130-2). A workflow's name is whatever its file
+ * declares, so a second file declaring `name: DAST (Native)` produces runs of
+ * that name, and the newest of them would stand in for the real gate. A run
+ * counts only when it came from the gate's own file (REQUIRED_WORKFLOW_FILES).
+ * A run whose path is absent or not text shows no file and counts for no gate:
+ * admission fails closed (MISSING_WORKFLOWS or WORKFLOWS_NOT_GREEN).
+ */
+export function runOfRequiredGate(run) {
+  if (!run || typeof run.name !== 'string' || !Object.hasOwn(REQUIRED_WORKFLOW_FILES, run.name)) return false;
+  if (typeof run.path !== 'string') return false;
+  return run.path.replace(REF_SUFFIX, '') === REQUIRED_WORKFLOW_FILES[run.name];
+}
+
+/**
+ * One run of the GitHub runs API, as admission reads it (the collector in
+ * auto-merge-admitted.mjs maps every run through this). `path` is the
+ * workflow file that produced the run: without it admission cannot tell a
+ * required gate from a second file that declares the same name, and counts
+ * the run for no gate (D-61). It lives here, not in the CLI, so a test reads
+ * it without loading the CLI, whose every load checks credentials and runs.
+ */
+export const toWorkflowRunSnapshot = (r) => ({
+  id: r.id,
+  name: r.name,
+  path: r.path,
+  head_sha: r.head_sha,
+  status: r.status,
+  conclusion: r.conclusion,
+  created_at: r.created_at,
+});
+
 /** Why a pair of control artifacts is not the pair for this PR. */
 export const BINDING_PROBLEMS = Object.freeze({
   PACKET_ID_MISSING: 'packet_id_missing',
@@ -177,7 +217,8 @@ export function artifactBindingProblems({ pr = {}, active = {}, ret = {} } = {})
  *   active: parsed active-packet.yaml
  *   ret: parsed claude-return.yaml
  *     (both must be this PR's own artifacts; see artifactBindingProblems)
- *   workflow_runs: [{name, head_sha, status, conclusion, created_at}]
+ *   workflow_runs: [{id, name, path, head_sha, status, conclusion, created_at}]
+ *     (only a run of a required gate's own workflow file is read; see runOfRequiredGate)
  *   ancestry: {source_head_is_ancestor: bool, non_control_files: string[]}
  *   contradictions: string[]
  *   pr_transitions: [{event, created_at}] from the PR timeline
@@ -189,7 +230,9 @@ export function artifactBindingProblems({ pr = {}, active = {}, ret = {} } = {})
  */
 export function evaluateAdmission(snapshot) {
   const { pr = {}, active = {}, ret = {}, ancestry = {}, contradictions = [] } = snapshot;
-  const runs = snapshot.workflow_runs || [];
+  // Only a run of a required gate's own workflow file speaks for that gate
+  // (D-61). Every run check below, stale head and pending included, reads these.
+  const runs = (snapshot.workflow_runs || []).filter(runOfRequiredGate);
 
   if (pr.state !== 'open') return fail(ADMISSION_REASONS.PR_NOT_OPEN, pr.state);
   if (pr.draft === true) return fail(ADMISSION_REASONS.PR_IS_DRAFT);
@@ -352,4 +395,4 @@ export function recheckBeforeMerge(first, second) {
   return second;
 }
 
-export default { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS };
+export default { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, runOfRequiredGate, toWorkflowRunSnapshot, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS };

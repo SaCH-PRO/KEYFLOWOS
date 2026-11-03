@@ -49,6 +49,22 @@ export const REQUIRED_WORKFLOWS = Object.freeze([
 ]);
 
 /**
+ * The workflow file of each required gate (owner ruling D-61; FOLLOW3-C5).
+ * A workflow's name is whatever its file declares, so any second file may
+ * declare a required name. Admission therefore counts a run for a gate only
+ * when GitHub's `path` for that run is this file (lib/admission.mjs), and
+ * tests/workflow-integrity.spec.mjs proves each file exists and declares its
+ * name.
+ */
+export const REQUIRED_WORKFLOW_FILES = Object.freeze({
+  'CI/CD Pipeline': '.github/workflows/ci-cd.yml',
+  'Agent Control Gate': '.github/workflows/agent-control-gate.yml',
+  'Branch divergence': '.github/workflows/branch-divergence.yml',
+  'DAST (Native)': '.github/workflows/native-dast.yml',
+  'Agent Control Worker Proof': '.github/workflows/agent-control-worker-proof.yml',
+});
+
+/**
  * Read a top-level `key: value` from a control message body, through the one
  * #80 envelope parser (lib/control-envelope.mjs). Anchored to line start so a
  * mention inside prose cannot spoof a field; null when absent, null or repeated.
@@ -316,4 +332,5 @@ export default {
   HOLD_MESSAGE_TYPES,
   HOLD_REFUSALS,
   REQUIRED_WORKFLOWS,
+  REQUIRED_WORKFLOW_FILES,
 };

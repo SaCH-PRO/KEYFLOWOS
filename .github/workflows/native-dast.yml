@@ -13,9 +13,12 @@
 # 2xx/3xx, a 403 to a refused credential, a leaked stack or Prisma marker, or a
 # server that cannot be reached fails the job. Nothing is skipped.
 #
-# This is the required DAST gate. REQUIRED_WORKFLOWS in
-# scripts/agent-control/lib/events.mjs names 'DAST (Native)' (V1-30, owner
-# ruling D-22); 'DAST (HawkScan)' (hawkscan.yml) is manual-only and is not one.
+# THE REQUIRED DAST GATE. REQUIRED_WORKFLOWS in
+# scripts/agent-control/lib/events.mjs names 'DAST (Native)' since V1-30 (owner
+# ruling D-22), and scripts/agent-control/tests/workflow-integrity.spec.mjs
+# proves this workflow cannot conclude success without probing. hawkscan.yml
+# is manual-only and not a required check. Operator doc:
+# docs/SECURITY_DAST_SETUP.md.
 name: DAST (Native)
 
 on:

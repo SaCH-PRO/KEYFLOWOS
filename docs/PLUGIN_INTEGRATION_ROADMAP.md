@@ -70,14 +70,16 @@ So the highest-value plugins are the ones filling a **real gap**, not re-impleme
 
 **What shipped:**
 - **`stackhawk.yml`** — HawkScan config targeting the NestJS API (`:3001`), excluding the SSE stream and webhook-ingress paths (never fuzz those); unauthenticated first-pass with a ready-to-fill Supabase-auth block.
-- **`.github/workflows/hawkscan.yml`** — a **dark-by-default** DAST workflow that boots the app exactly like the `Run Tests` job (Postgres + Redis + real migrations), waits on `/healthz`, then runs HawkScan. Same contract as Langfuse/GrowthBook: absent `HAWK_API_KEY` ⇒ the guard short-circuits and it passes as a no-op, so it can't turn branch-protected `main` red. It's a **separate workflow** (not a job in `ci-cd.yml`) so an external-account scan can never break the required checks.
-- **`docs/SECURITY_DAST_SETUP.md`** — activation steps for StackHawk (secrets, baseline, soft→required gate) and Vanta.
+- **`.github/workflows/hawkscan.yml`** — DAST (HawkScan): boots the app exactly like the `Run Tests` job (Postgres + Redis + real migrations), waits on `/healthz`, then runs HawkScan. Absent `HAWK_API_KEY` ⇒ the guard short-circuits and the run concludes success having scanned nothing. Since V1-30 (owner ruling D-22) it is **manual-only** (`workflow_dispatch`) and not a required check.
+- **`docs/SECURITY_DAST_SETUP.md`** — the required DAST (Native) gate, manual HawkScan runs, and Vanta.
 
-**Vanta** is configuration, not code (connect cloud/GitHub/DB/identity; map controls to the branch protection, required checks, Sentry, secret scanning, and the DAST gate this repo already has). The Vanta MCP plugin is enabled, so an agent can query control status once the account is connected. Documented in the setup guide.
+**The DAST gate is DAST (Native)** (`.github/workflows/native-dast.yml`, V1-13): it boots the API against its own Postgres and Redis and runs `scripts/security/native-dast.mjs` over `scripts/security/native-dast-manifest.json` on every PR. It needs no third-party account and no secret, and it cannot conclude success without probing. As a required check, DAST (HawkScan) had admitted PRs it never scanned (PRS-M08).
 
-**To turn it on:** add `HAWK_API_KEY` + `HAWK_APP_ID` repo secrets. Starts as a soft gate (reports, doesn't block); flip `continue-on-error: false` and add `HawkScan` to the required checks once the baseline is triaged.
+**Vanta** is configuration, not code (connect cloud/GitHub/DB/identity; map controls to the branch protection, required checks, Sentry, secret scanning, and the DAST (Native) gate). The Vanta MCP plugin is enabled, so an agent can query control status once the account is connected. Documented in the setup guide.
 
-**Risk:** low — dormant until credentials exist, and isolated from the required-check pipeline.
+**To run HawkScan:** add `HAWK_API_KEY` + `HAWK_APP_ID` repo secrets and dispatch the workflow by hand. It stays manual-only and is not a gate: no PR runs it, so as a required check it would never report and would block every merge.
+
+**Risk:** low — HawkScan is manual and needs credentials; the required gate needs neither.
 
 ---
 
