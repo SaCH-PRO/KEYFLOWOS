@@ -54,7 +54,6 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v84a_';
 const HEADER = 'x-v84a-user';
-const LIKE = sqlLikePrefix(P);
 
 const ID = {
   owner: `${P}owner`,
@@ -117,12 +116,12 @@ let app: any;
 
 async function cleanup() {
   for (const sql of [
-    `DELETE FROM activities WHERE id LIKE ${LIKE} OR business_id LIKE ${LIKE}`,
-    `DELETE FROM contact_shares WHERE contact_id LIKE ${LIKE}`,
-    `DELETE FROM contacts WHERE id LIKE ${LIKE} OR business_id LIKE ${LIKE}`,
-    `DELETE FROM memberships WHERE id LIKE ${LIKE} OR business_id LIKE ${LIKE}`,
-    `DELETE FROM businesses WHERE id LIKE ${LIKE}`,
-    `DELETE FROM users WHERE id LIKE ${LIKE}`,
+    `DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_shares WHERE contact_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM memberships WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
@@ -131,7 +130,7 @@ async function cleanup() {
 async function leftovers(): Promise<number> {
   let n = 0;
   for (const table of ['activities', 'contacts', 'memberships', 'businesses', 'users']) {
-    const rows = await db.$queryRawUnsafe(`SELECT count(*)::int AS n FROM ${table} WHERE id LIKE ${LIKE}`);
+    const rows = await db.$queryRawUnsafe(`SELECT count(*)::int AS n FROM ${table} WHERE id LIKE ${sqlLikePrefix(P)}`);
     n += rows[0].n;
   }
   return n;
@@ -240,7 +239,7 @@ beforeAll(async () => {
   await cleanup();
 
   for (const id of [ID.owner, ID.admin, ID.staffRevNone, ID.staffCrmNone, ID.staffOwned, ID.staffDefault, ID.ownerB]) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id, email: `${P}u_${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V84A Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V84A Biz B', ownerId: ID.ownerB } });
