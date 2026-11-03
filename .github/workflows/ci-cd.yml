@@ -423,14 +423,14 @@ jobs:
       # ESM-only dependency breaks. A DB connection failure afterwards is fine
       # and expected here.
       #
-      # --no-experimental-require-module (V1-39, review CR-V139-2): this job
-      # runs Node 22, where require(esm) is on by default, so without the flag
-      # an ESM-only dependency loads here and this check passes. native-dast.yml
-      # (the required DAST gate) and e2e-live.yml still boot dist/main.js on
-      # 20.18.1, where that dependency dies with ERR_REQUIRE_ESM. The flag keeps
-      # this check failing the way those boots would; scripts/ci/runtime-pin.spec.mjs
-      # requires it while any workflow boots the server without require(esm),
-      # and requires it gone once none does.
+      # No --no-experimental-require-module (V1-39, review CR-V139-2): this job,
+      # native-dast.yml (the required DAST gate) and e2e-live.yml all boot
+      # dist/main.js on the pinned Node 22, where require(esm) is on by default,
+      # so this check loads the graph the way those boots do.
+      # scripts/ci/runtime-pin.spec.mjs requires the flag back while any
+      # workflow boots the server on a Node without require(esm) (where an
+      # ESM-only dependency dies with ERR_REQUIRE_ESM), and requires it gone
+      # once none does.
       #
       # DATABASE_URL: main.ts validates the environment and exits before it
       # imports AppModule, so with no DATABASE_URL this step only loaded
@@ -442,7 +442,7 @@ jobs:
           DATABASE_URL: postgresql://module-load-check@127.0.0.1:1/module-load-check
         run: |
           set +e
-          OUT=$(timeout 45 node --no-experimental-require-module apps/server/dist/main.js 2>&1)
+          OUT=$(timeout 45 node apps/server/dist/main.js 2>&1)
           if echo "$OUT" | grep -qE "ERR_REQUIRE_ESM|ERR_MODULE_NOT_FOUND|ERR_UNSUPPORTED_DIR_IMPORT|Cannot find module"; then
             echo "::error::Server dies during module loading — it cannot start"
             echo "$OUT" | grep -aE "ERR_REQUIRE_ESM|ERR_MODULE_NOT_FOUND|Cannot find module" | head -5

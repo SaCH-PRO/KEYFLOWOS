@@ -80,7 +80,7 @@ git commit --amend --no-edit
 
 ## Environment
 
-- **Node:** 22.x, the exact version pinned in `.nvmrc` (owner ruling D-21; the newest 22.x security release when pinned; checked by `node --test scripts/ci/runtime-pin.spec.mjs`, which also requires the Node running it, local proof harness included, to be that version). Recorded exceptions in that spec, not yet aligned: the control-plane workflows `agent-control-autopilot.yml` and `agent-control-worker-proof.yml` pin `20.18.1`, and `agent-control-gate.yml` runs its merge-grant check with no setup-node, on the runner image's Node; `native-dast.yml` and `e2e-live.yml` pin `20.18.1`. Until `native-dast.yml` is aligned, its DAST results come from a server running `20.18.1`, not the shipped runtime, and are not evidence for the shipped images.
+- **Node:** 22.x, the exact version pinned in `.nvmrc` (owner ruling D-21; the newest 22.x security release when pinned; checked by `node --test scripts/ci/runtime-pin.spec.mjs`, which also requires the Node running it, local proof harness included, to be that version). Recorded exceptions in that spec, not yet aligned: the control-plane workflows `agent-control-autopilot.yml` and `agent-control-worker-proof.yml` pin `20.18.1`, and `agent-control-gate.yml` runs its merge-grant check with no setup-node, on the runner image's Node.
 - **Package Manager:** pnpm 9.15.0
 - **Monorepo:** pnpm workspaces with Turborepo
 
