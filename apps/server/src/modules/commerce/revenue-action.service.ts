@@ -127,6 +127,39 @@ export class RevenueActionService implements OnModuleInit, OnModuleDestroy {
     await this.generateForPaidInvoiceMissingReceipt(payload.businessId, payload.invoice.id);
   }
 
+  /**
+   * FOLLOW3-A9: a refund's D-14 reopen (PAID / PARTIALLY_PAID -> SENT) takes
+   * back the "Send receipt" action invoice.paid raised: the invoice is not
+   * paid any more. Only an open row (PENDING or SNOOZED) of this business is
+   * removed; a COMPLETED or DISMISSED row is the operator's record and stays.
+   * Paying the invoice again raises the action again (onInvoicePaid). If the
+   * invoice is PAID again by the time this runs, its action is right: kept.
+   */
+  @OnEvent('invoice.reopened', { async: true })
+  async onInvoiceReopened(payload: InvoiceStatusPayload) {
+    const businessId = payload?.businessId;
+    const invoiceId = payload?.invoice?.id;
+    if (!businessId || !invoiceId) return;
+    try {
+      const inv = await this.prisma.client.invoice.findFirst({
+        where: { id: invoiceId, businessId },
+        select: { status: true },
+      });
+      if (!inv || inv.status === 'PAID') return;
+      await this.prisma.client.revenueAction.deleteMany({
+        where: {
+          businessId,
+          type: 'PAID_INVOICE_NO_RECEIPT',
+          relatedType: 'invoice',
+          relatedId: invoiceId,
+          status: { in: ['PENDING', 'SNOOZED'] },
+        },
+      });
+    } catch (e) {
+      this.logger.warn(`invoice.reopened action cleanup failed for ${invoiceId}: ${(e as Error).message}`);
+    }
+  }
+
   @OnEvent('payment.failed', { async: true })
   async onPaymentFailed(payload: PaymentFailedPayload) {
     if (!payload.invoiceId) return;

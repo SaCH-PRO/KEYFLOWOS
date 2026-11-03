@@ -163,6 +163,26 @@ export class WebhookDispatcherService {
     });
   }
 
+  /**
+   * FOLLOW3-A9: a refund's D-14 reopen (PAID / PARTIALLY_PAID -> SENT). Owner
+   * ruling D-58: a webhook subscribed to invoice.paid also receives it (else
+   * that integration keeps a refunded invoice paid), as does one subscribed to
+   * invoice.reopened; each such webhook gets one delivery.
+   */
+  @OnEvent('invoice.reopened')
+  async onInvoiceReopened(payload: InvoiceStatusPayload & { previousStatus?: string }) {
+    await this.dispatch(
+      'invoice.reopened',
+      payload.businessId,
+      {
+        invoice: payload.invoice,
+        status: payload.status,
+        previousStatus: payload.previousStatus ?? null,
+      },
+      ['invoice.reopened', 'invoice.paid'],
+    );
+  }
+
   @OnEvent('invoice.sent')
   async onInvoiceSent(payload: InvoiceStatusPayload) {
     await this.dispatch('invoice.sent', payload.businessId, {
@@ -221,13 +241,22 @@ export class WebhookDispatcherService {
     });
   }
 
-  private async dispatch(event: string, businessId: string, data: Record<string, unknown>) {
+  /**
+   * `subscribedVia` lists the subscriptions that receive `event` (default: the
+   * event itself); a webhook subscribed to several of them gets one delivery.
+   */
+  private async dispatch(
+    event: string,
+    businessId: string,
+    data: Record<string, unknown>,
+    subscribedVia: string[] = [event],
+  ) {
     try {
       const webhooks = await this.prisma.client.webhook.findMany({
         where: {
           businessId,
           isActive: true,
-          events: { has: event },
+          events: { hasSome: subscribedVia },
         },
       });
 

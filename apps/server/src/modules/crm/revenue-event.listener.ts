@@ -207,6 +207,25 @@ export class RevenueEventListener {
     });
   }
 
+  /**
+   * FOLLOW3-A9: a refund's D-14 reopen (PAID / PARTIALLY_PAID -> SENT,
+   * InvoiceWorkflowService.reconcileFromPayments) is logged beside the
+   * invoice.paid entry it takes back, so the timeline does not keep a
+   * refunded invoice as paid. The write also marks the insight stale (log()).
+   */
+  @OnEvent('invoice.reopened', { async: true })
+  async onInvoiceReopened(p: InvoiceStatusPayload & { previousStatus?: string }) {
+    const inv = p.invoice as { id?: string; contactId?: string | null; invoiceNumber?: string; total?: unknown; currency?: string | null } | undefined;
+    await this.log(p.businessId, inv?.contactId ?? null, 'invoice.reopened', {
+      invoiceId: inv?.id,
+      invoiceNumber: inv?.invoiceNumber,
+      total: inv?.total,
+      currency: inv?.currency,
+      previousStatus: p.previousStatus ?? null,
+      status: p.status,
+    });
+  }
+
   // ---- payment.* (connector-driven) ----
   @OnEvent('payment.received', { async: true })
   async onPaymentReceived(p: PaymentReceivedPayload) {
