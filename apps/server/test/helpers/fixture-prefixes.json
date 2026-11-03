@@ -543,6 +543,11 @@
       "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
+      "prefix": "v81e_",
+      "owner": "apps/server/test/finance-write-tenancy.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A5-FINANCE-WRITE-TENANCY)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
