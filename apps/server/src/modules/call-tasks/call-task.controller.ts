@@ -10,6 +10,7 @@ import {
   UseGuards,
   Request,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Request as ExpressRequest } from 'express';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -28,6 +29,24 @@ import { CompleteCallDto } from './dto/complete-call.dto';
 import { CreateFollowUpDto } from './dto/create-follow-up.dto';
 import { ListCallsQueryDto } from './dto/list-calls-query.dto';
 
+/**
+ * The session member: the caller of a call log this controller writes and the
+ * actor of every call-log mutation (V1-54). A call log used to take
+ * `body.callerId ?? req.user.id ?? 'system'`, so any member could log a call as
+ * another member, and complete/follow-up named 'system' when no user was
+ * attached. The guards already refuse a request without a user; this keeps
+ * such a request from being recorded as someone else or as SYSTEM if they ever
+ * do not. CallLog is under the tenant extension and the guards bind the
+ * business, so this is attribution, not tenant isolation.
+ */
+function sessionCallerId(req: { user?: { id?: string } } | undefined): string {
+  const callerId = req?.user?.id;
+  if (!callerId) {
+    throw new UnauthorizedException('Authentication required');
+  }
+  return callerId;
+}
+
 @Controller()
 @UseGuards(AuthGuard, BusinessGuard, RateLimitGuard, ModuleScopeGuard)
 export class CallTaskController {
@@ -44,10 +63,13 @@ export class CallTaskController {
     @Body() body: CreateCallLogDto,
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
+    // The caller is the session member; a body callerId is ignored.
+    // CreateCallLogDto still declares it, and the DTO is outside V1-54's write set.
+    const callerId = sessionCallerId(req);
     return this.callLogs.createCallLog({
       ...body,
       businessId,
-      callerId: body.callerId ?? req.user?.id ?? 'system',
+      callerId,
     });
   }
 
@@ -99,12 +121,8 @@ export class CallTaskController {
     @Body() body: CompleteCallDto,
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
-    return this.callLogs.completeCall(
-      businessId,
-      callId,
-      body,
-      req.user?.id ?? 'system',
-    );
+    const completedBy = sessionCallerId(req);
+    return this.callLogs.completeCall(businessId, callId, body, completedBy);
   }
 
   @Post('businesses/:businessId/calls/:callId/follow-up')
@@ -116,12 +134,8 @@ export class CallTaskController {
     @Body() body: CreateFollowUpDto,
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
-    return this.callLogs.createFollowUpTask(
-      businessId,
-      callId,
-      body,
-      req.user?.id ?? 'system',
-    );
+    const createdBy = sessionCallerId(req);
+    return this.callLogs.createFollowUpTask(businessId, callId, body, createdBy);
   }
 
   @Delete('businesses/:businessId/calls/:callId')
@@ -139,9 +153,14 @@ export class CallTaskController {
   @RequireModuleScope('crm', 'read')
   async getScheduledToday(
     @Param('businessId') businessId: string,
-    @Query('callerId') callerId: string,
+    @Query('callerId') callerId: string | undefined,
   ) {
-    return this.callLogs.getScheduledCalls(businessId, callerId, new Date());
+    // callerId is an optional read filter, as on GET calls. Without one this is
+    // every member's open calls today in the business: the Operations dashboard
+    // ("Calls Today") and the call-tasks page ("Scheduled Today") send none and
+    // show the team's calls. Narrowing it to the session member would change what
+    // they show, which is outside V1-54's write-attribution scope (review CR-1).
+    return this.callLogs.getScheduledCalls(businessId, callerId || undefined, new Date());
   }
 
   @Post('businesses/:businessId/calls/:callId/generate-script')
@@ -172,9 +191,13 @@ export class CallTaskController {
     @Body() body: { callerId?: string; script?: string; autoGenerateScript?: boolean },
     @Request() req: ExpressRequest & { user?: { id: string } },
   ) {
+    // The caller is the session member; a body callerId is ignored. The contact
+    // is looked up within the path business (review ST-3).
+    const callerId = sessionCallerId(req);
     const callLog = await this.callLogs.createFromContactNextAction(
+      businessId,
       contactId,
-      body.callerId ?? req.user?.id ?? 'system',
+      callerId,
       body.script,
     );
 

@@ -119,13 +119,26 @@ describe('CallTaskController', () => {
     expect(svc.getScheduledCalls).toHaveBeenCalledWith('biz_1', 'user_1', expect.any(Date));
   });
 
-  it('creates from next action', async () => {
+  // V1-54 review CR-1: no callerId reads every member's calls for the day, as the Operations
+  // dashboard and the call-tasks page (which send none) have always shown.
+  it("gets every member's scheduled calls for today when no callerId is named", async () => {
+    const svc = createMockService();
+    const scriptSvc = createMockScriptService();
+    const ctrl = new CallTaskController(svc, scriptSvc);
+
+    await ctrl.getScheduledToday('biz_1', undefined);
+    await ctrl.getScheduledToday('biz_1', '');
+    expect(svc.getScheduledCalls).toHaveBeenNthCalledWith(1, 'biz_1', undefined, expect.any(Date));
+    expect(svc.getScheduledCalls).toHaveBeenNthCalledWith(2, 'biz_1', undefined, expect.any(Date));
+  });
+
+  it('creates from next action within the path business (review ST-3)', async () => {
     const svc = createMockService();
     const scriptSvc = createMockScriptService();
     const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.createFromNextAction('biz_1', 'c1', {}, { user: { id: 'user_1' } } as any);
-    expect(svc.createFromContactNextAction).toHaveBeenCalledWith('c1', 'user_1', undefined);
+    expect(svc.createFromContactNextAction).toHaveBeenCalledWith('biz_1', 'c1', 'user_1', undefined);
   });
 
   it('generates a call script', async () => {

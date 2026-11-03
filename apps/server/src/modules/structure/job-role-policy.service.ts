@@ -160,6 +160,9 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
   },
   analytics: {},
   operations: {
+    // command_* and procurement_*: the command-centre item and procurement routes require
+    // operations (owner ruling D-40, R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT)
+    command_discharge_obligation: 'write', command_list_due_obligations: 'read',
     contract_create_tag: 'write', contract_extract_terms: 'write', contract_list_tags: 'read',
     contracts_acknowledge_alert: 'write', contracts_create: 'write', contracts_delete: 'write',
     contracts_get: 'read', contracts_list: 'read', contracts_stats: 'read',
@@ -169,6 +172,11 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     payroll_list_rates: 'read', payroll_list_runs: 'read', payroll_mark_paid: 'write',
     performance_scorecard: 'read', performance_take_snapshot: 'write',
     performance_team_summary: 'read', performance_trend: 'read',
+    procurement_create_request: 'write', procurement_get_request: 'read',
+    procurement_get_stats: 'read', procurement_issue_po: 'write',
+    procurement_list_requests: 'read', procurement_list_suppliers: 'read',
+    procurement_select_vendor: 'write', procurement_submit_for_review: 'write',
+    procurement_update_request: 'write',
   },
   connect: {},
 };
@@ -183,6 +191,12 @@ export const GOVERNED_UNGRANTED: Readonly<Record<string, string>> = {
   commerce_send_invoice:
     "revenue:write (CommerceService.updateInvoiceStatus) beside TransactionalEmailService.send to the invoice's customer, which no member route does (review 7 DRV5-2)",
   execute_custom_logic: 're-enters the dispatcher for any tool (innerToolExecutor -> executeToolByName)',
+  procurement_acknowledge_vendor:
+    "operations:write (D-40) is only a floor: ProcurementService.acknowledgeVendor updates the request by its bare id, so on the staff bridge, with no tenant armed, it reaches any business's request (review 8 DD8-1; R0-13g)",
+  procurement_mark_fulfilled:
+    "operations:write (D-40) is only a floor: ProcurementService.markFulfilled updates the request by its bare id, so on the staff bridge, with no tenant armed, it reaches any business's request (review 8 DD8-1; R0-13g)",
+  procurement_mark_invoiced:
+    "operations:write (D-40) is only a floor: ProcurementService.markInvoiced updates the request by its bare id, so on the staff bridge, with no tenant armed, it reaches any business's request (review 8 DD8-1; R0-13g)",
   send_message_with_approval: 'crm:write (CrmService.addNote) beside AiMessageSenderService.sendMessage, which backs no route',
   update_status_with_confirmation: 'needs crm AND revenue',
 };
@@ -222,10 +236,12 @@ export const CRM_ROW_VISIBILITY_TOOLS: readonly string[] = ['crm_delete_contact'
  * the Prisma tenant extension for the request's business; the WhatsApp/SMS staff bridge runs the
  * dispatcher inside a provider webhook with no tenant armed, so there it reaches another
  * business's row. No key reaches these, not a canonical key, a legacy family (content_*,
- * bookings_*, projects_*, procurement_*) or the baseline, until the dispatcher binds the row to
+ * bookings_*, projects_*) or the baseline, until the dispatcher binds the row to
  * the business KEY acts in, as it now does for the call tools (the governed ones the review
  * found). Derived in job-role-tool-families.spec.ts (rule 2b), which fails if this list and the
- * dispatcher disagree.
+ * dispatcher disagree. A governed tool with such a call is GOVERNED_UNGRANTED instead (rule 4):
+ * procurement_acknowledge_vendor, procurement_mark_fulfilled and procurement_mark_invoiced moved
+ * there when D-40 put the procurement routes under operations (R0-13g).
  */
 export const TENANT_UNBOUND_TOOLS: Readonly<Record<string, string>> = {
   approval_decide_step: 'ApprovalRequestService.decideStep finds the approval request by its bare id',
@@ -238,9 +254,6 @@ export const TENANT_UNBOUND_TOOLS: Readonly<Record<string, string>> = {
   content_upload_deliverables: 'ContentRequestService.uploadDeliverables finds the content request by its bare id',
   evidence_verify: 'EvidenceService.verify finds the evidence by its bare id',
   people_assign_task: 'TaskAssignmentService.assign finds the task and the staff assignee by bare ids',
-  procurement_acknowledge_vendor: 'ProcurementService.acknowledgeVendor updates the request by its bare id',
-  procurement_mark_fulfilled: 'ProcurementService.markFulfilled updates the request by its bare id',
-  procurement_mark_invoiced: 'ProcurementService.markInvoiced updates the request by its bare id',
   projects_update_task: 'ProjectsService.updateTask finds the staff assignee (args.assigneeId) by its bare id',
 };
 

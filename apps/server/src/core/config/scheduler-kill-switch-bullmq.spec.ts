@@ -184,13 +184,16 @@ async function cleanQueue(name: string, ours: (j: { name: string; data?: any }) 
 }
 
 afterAll(async () => {
-  for (const c of connections) c.disconnect();
+  // quit() waits for the replies still owed on each connection; disconnect()
+  // closed them under in-flight BullMQ commands, which then rejected with
+  // 'Connection is closed' after the suite (an unhandled rejection in the run).
+  await Promise.all(connections.map((c) => c.quit().catch(() => undefined)));
 });
 
 const stub = () => ({}) as any;
 
-function queueService(conn: IORedis, emit: (...a: unknown[]) => unknown) {
-  const svc = new QueueService(conn as any, stub(), { emit } as any, stub(), stub(), stub(), stub(), stub(), stub());
+function queueService(conn: IORedis, emit: (...a: unknown[]) => unknown, prisma: unknown = stub()) {
+  const svc = new QueueService(conn as any, prisma as ConstructorParameters<typeof QueueService>[1], { emit } as any, stub(), stub(), stub(), stub(), stub(), stub());
   noteNamespace(svc.cronQueue);
   noteNamespace(svc.planQueue);
   return svc;
@@ -208,6 +211,18 @@ describe.skipIf(!REDIS_URL)('SEC-V124b-1 on real BullMQ (REDIS_URL): a tenant cr
     enabled: true,
   };
   const ours = (j: { name: string; data?: any }) => j.name === `cron-trigger:${TRIGGER.id}` || j.data?.triggerId === TRIGGER.id;
+  // V1-24c review (ST-V124c-1): the cron worker re-reads the trigger's row (by id
+  // and business) on every run and fires only while it is enabled and on the same
+  // schedule. The row still exists here, in every boot, so a worker that ran
+  // would emit and "nothing fires" below stays a real check.
+  const rowStillThere = {
+    client: {
+      agentTrigger: {
+        findFirst: async ({ where }: { where: { id?: string; businessId?: string } }) =>
+          where.id === TRIGGER.id && where.businessId === TRIGGER.businessId ? { ...TRIGGER } : null,
+      },
+    },
+  };
 
   afterAll(async () => {
     await cleanQueue('ai-cron-triggers', ours);
@@ -217,7 +232,7 @@ describe.skipIf(!REDIS_URL)('SEC-V124b-1 on real BullMQ (REDIS_URL): a tenant cr
   it('an earlier schedulers-on boot registers the every-second trigger; schedulers-off boots start no cron worker and nothing fires; a schedulers-on boot fires it (control)', async () => {
     // Boot A: schedulers on. It seeds the tenant's trigger as a repeatable, then goes away.
     setSwitches({ NODE_ENV: 'production' });
-    const a = queueService(redis(), vi.fn());
+    const a = queueService(redis(), vi.fn(), rowStillThere);
     await a.onModuleInit();
     await new CronSchedulerService({ client: { agentTrigger: { findMany: vi.fn().mockResolvedValue([TRIGGER]) } } } as any, a).onModuleInit();
     const left = (await a.cronQueue.getRepeatableJobs()).filter((r) => r.name === `cron-trigger:${TRIGGER.id}`);
@@ -230,7 +245,7 @@ describe.skipIf(!REDIS_URL)('SEC-V124b-1 on real BullMQ (REDIS_URL): a tenant cr
       setSwitches(switches);
       const emit = vi.fn();
       const findMany = vi.fn().mockResolvedValue([TRIGGER]);
-      const svc = queueService(redis(), emit);
+      const svc = queueService(redis(), emit, rowStillThere);
       await svc.onModuleInit();
       await new CronSchedulerService({ client: { agentTrigger: { findMany } } } as any, svc).onModuleInit();
       booted.push({ label, svc, emit, findMany });
@@ -251,7 +266,7 @@ describe.skipIf(!REDIS_URL)('SEC-V124b-1 on real BullMQ (REDIS_URL): a tenant cr
     // Control C: schedulers on. The same leftover repeatable fires within a couple of seconds.
     setSwitches({ NODE_ENV: 'production' });
     const emitC = vi.fn();
-    const c = queueService(redis(), emitC);
+    const c = queueService(redis(), emitC, rowStillThere);
     await c.onModuleInit();
     try {
       expect((c as any).cronWorker).toBeDefined();

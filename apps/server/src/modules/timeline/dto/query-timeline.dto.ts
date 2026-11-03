@@ -1,4 +1,20 @@
-import { IsString, IsOptional, IsDateString, IsNumber, IsInt, Min } from 'class-validator';
+import { IsString, IsOptional, IsDateString, IsNumber, IsInt, Min, Max } from 'class-validator';
+import { Type } from 'class-transformer';
+
+/**
+ * V1-25-EVT-BUSINESS-FEED: the largest page GET /timeline/businesses/:id/events
+ * serves. The cockpit's business feed asks for 50; a larger page is a 400, not
+ * an unbounded read of a business's whole Activity table. Paging further back
+ * uses `cursor`.
+ *
+ * This bounds this one route only (SEC-V125-3). Two sibling reads of the same
+ * table take their limit as a bare parseInt with no cap and are not covered by
+ * this DTO: GET /timeline/businesses/:id/upcoming (timeline.controller.ts) and
+ * the legacy GET /api/flows/businesses/:id/activity (flow.controller.ts, still
+ * called by fetchActivityFeed in apps/web/src/lib/client.ts). Both are outside
+ * V1-25's write set; evidence-feed.integration.test.ts records them as it.todo.
+ */
+export const TIMELINE_MAX_LIMIT = 200;
 
 export class QueryTimelineDto {
   @IsOptional()
@@ -37,13 +53,18 @@ export class QueryTimelineDto {
   @IsDateString()
   to?: string;
 
+  // Query values arrive as strings: without @Type the ValidationPipe (no
+  // implicit conversion) refused every numeric value, `limit=50` included.
   @IsOptional()
+  @Type(() => Number)
   @IsNumber()
   minRevenueImpact?: number;
 
   @IsOptional()
+  @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(TIMELINE_MAX_LIMIT)
   limit?: number = 50;
 
   @IsOptional()

@@ -22,9 +22,34 @@ jobs:
       - name: Determine whether packet controls apply
         id: scope
         shell: bash
+        # The head ref is attacker-chosen text: read it from the environment,
+        # never interpolated into the script.
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          case "${{ github.head_ref }}" in
-            impl/*)
+          # Packet PRs: impl/* (agent-control implementation branches) and,
+          # by owner ruling D-22 (V1-40-SEC-TRUST-CENSUS-REDACTION), pkt/*
+          # (reconstruction packet branches), which bypassed the gate before.
+          #
+          # Where a pkt/* PR stops today, draft or not: at "Validate control
+          # artifacts". The .agent-control artifacts a pkt/* branch carries
+          # name an impl/* implementation_branch, and packet workers may not
+          # edit .agent-control/, so the branch check fails closed. If the
+          # artifacts named the pkt/* head, a non-draft PR would still stop
+          # at the grant step: evaluateGrantGate refuses any head outside
+          # impl/* (scripts/agent-control/lib/admission.mjs, NOT_IMPL_BRANCH).
+          #
+          # Limit: this job runs on pull_request, so it executes the PR's own
+          # copy of this workflow and of scripts/agent-control/. A PR that
+          # edits either can make this check pass without a #80 grant. impl/*
+          # heads are re-checked from base code by the trusted merger; pkt/*
+          # heads are not (scripts/agent-control/lib/events.mjs ignores them).
+          # For pkt/* this gate is therefore only as strong as the repository
+          # settings around it: CODEOWNERS names the owner for every path, but
+          # code-owner review is enforced only by branch protection, which is
+          # a repository setting, not code.
+          case "$HEAD_REF" in
+            impl/*|pkt/*)
               echo "required=true" >> "$GITHUB_OUTPUT"
               ;;
             *)
@@ -35,14 +60,16 @@ jobs:
       - name: Validate control artifacts
         if: steps.scope.outputs.required == 'true'
         shell: bash
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
 
           ACTIVE=".agent-control/active-packet.yaml"
           RETURN=".agent-control/claude-return.yaml"
 
-          test -f "$ACTIVE" || { echo "::error::$ACTIVE is required for impl/* PRs"; exit 1; }
-          test -f "$RETURN" || { echo "::error::$RETURN is required for impl/* PRs"; exit 1; }
+          test -f "$ACTIVE" || { echo "::error::$ACTIVE is required for packet PRs (impl/*, pkt/*)"; exit 1; }
+          test -f "$RETURN" || { echo "::error::$RETURN is required for packet PRs (impl/*, pkt/*)"; exit 1; }
 
           require_key() {
             local file="$1"
@@ -62,13 +89,13 @@ jobs:
           done
 
           declared_branch="$(sed -n 's/^implementation_branch:[[:space:]]*//p' "$ACTIVE" | head -n1 | tr -d '"')"
-          if [ "$declared_branch" != "${{ github.head_ref }}" ]; then
+          if [ "$declared_branch" != "$HEAD_REF" ]; then
             echo "::error::active-packet.yaml implementation_branch does not match PR head"
             exit 1
           fi
 
           return_branch="$(sed -n 's/^implementation_branch:[[:space:]]*//p' "$RETURN" | head -n1 | tr -d '"')"
-          if [ "$return_branch" != "${{ github.head_ref }}" ]; then
+          if [ "$return_branch" != "$HEAD_REF" ]; then
             echo "::error::claude-return.yaml implementation_branch does not match PR head"
             exit 1
           fi
@@ -124,7 +151,7 @@ jobs:
           return_source_main="$(sed -n 's/^source_main:[[:space:]]*//p' "$RETURN" | head -n1 | tr -d '"')"
           expected_base="${{ github.event.pull_request.base.sha }}"
           if [ "$active_source_main" != "$expected_base" ] || [ "$return_source_main" != "$expected_base" ]; then
-            echo "::error::Non-draft impl/* PR must be revalidated against the current PR base SHA $expected_base"
+            echo "::error::Non-draft packet PR must be revalidated against the current PR base SHA $expected_base"
             echo "::error::active source_main=$active_source_main return source_main=$return_source_main"
             exit 1
           fi
@@ -133,7 +160,7 @@ jobs:
             READY_TO_MERGE|ACCEPT_FOR_ADMISSION)
               ;;
             *)
-              echo "::error::Non-draft impl/* PR requires ChatGPT review_status READY_TO_MERGE or ACCEPT_FOR_ADMISSION; found: $status"
+              echo "::error::Non-draft packet PR requires ChatGPT review_status READY_TO_MERGE or ACCEPT_FOR_ADMISSION; found: $status"
               exit 1
               ;;
           esac
@@ -142,7 +169,7 @@ jobs:
           grant="$(node scripts/agent-control/auto-merge-admitted.mjs --grant-only)" || grant_status=$?
           echo "$grant"
           if [ "$grant_status" -ne 0 ]; then
-            echo "::error::Non-draft impl/* PR requires a valid, current #80 ChatGPT merge grant for this exact PR, packet, branch, semantic head, head and base (exit $grant_status)"
+            echo "::error::Non-draft packet PR requires a valid, current #80 ChatGPT merge grant for this exact PR, packet, branch, semantic head, head and base (exit $grant_status)"
             exit 1
           fi
 
@@ -150,7 +177,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ steps.scope.outputs.required }}" = "true" ]; then
-            echo "Agent control gate applies to this implementation PR."
+            echo "Agent control gate applies to this packet PR (impl/* or pkt/*)."
           else
-            echo "Non-implementation PR: agent control artifacts are not required."
+            echo "Not a packet PR (impl/* or pkt/*): agent control artifacts are not required."
           fi

@@ -64,14 +64,14 @@
       "packet": "R0-07 / R0-CMF5-GMAIL-CONNECT-BINDING"
     },
     {
-      "prefix": "k07w_",
-      "owner": "apps/server/test/whatsapp-config-authority.integration.test.ts",
-      "packet": "R0-07 / R0-SEC2-WHATSAPP-CONFIG-AUTHORITY"
-    },
-    {
       "prefix": "k07p_",
       "owner": "apps/server/test/payment-secrets-write-only.integration.test.ts",
       "packet": "R0-07 / R0-SEC2c-PAYMENT-SECRETS-WRITE-ONLY"
+    },
+    {
+      "prefix": "k07w_",
+      "owner": "apps/server/test/whatsapp-config-authority.integration.test.ts",
+      "packet": "R0-07 / R0-SEC2-WHATSAPP-CONFIG-AUTHORITY"
     },
     {
       "prefix": "k08c_",
@@ -127,6 +127,11 @@
       "prefix": "k13g_",
       "owner": "apps/server/test/key-cortex-flows-routes.integration.test.ts",
       "packet": "R0-13 / R0-13g-KEY-FLOWS-ROUTES"
+    },
+    {
+      "prefix": "k13o_",
+      "owner": "apps/server/test/ops-scope-command-procurement.integration.test.ts",
+      "packet": "R0-13 / R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT"
     },
     {
       "prefix": "k14a_",
@@ -378,6 +383,11 @@
       "packet": "V1-21 (V1-21b-JOBROLE-TOOL-FAMILIES)"
     },
     {
+      "prefix": "v21d_",
+      "owner": "apps/server/test/key-dispatcher-tenant.integration.test.ts",
+      "packet": "V1-21 (V1-21d-KEY-DISPATCHER-TENANT-INCLUDES)"
+    },
+    {
       "prefix": "v22a_",
       "owner": "apps/server/test/commerce-money-rounding.integration.test.ts",
       "packet": "V1-22-DM-MONEY-CENTS"
@@ -386,6 +396,16 @@
       "prefix": "v23a_",
       "owner": "apps/server/test/public-catalog-projection.integration.test.ts",
       "packet": "V1-23-PUB-PUBLIC-PROJECTIONS"
+    },
+    {
+      "prefix": "v27a_",
+      "owner": "apps/server/test/booking-slot-writers.integration.test.ts",
+      "packet": "V1-27-BK-SLOT-WRITERS"
+    },
+    {
+      "prefix": "v28a_",
+      "owner": "apps/server/test/booking-settlement.integration.test.ts",
+      "packet": "V1-28-BK-SETTLEMENT"
     },
     {
       "prefix": "v29a_",
@@ -413,6 +433,11 @@
       "packet": "V1-34-DM-CASH-POSITION"
     },
     {
+      "prefix": "v35a_",
+      "owner": "apps/server/test/cross-module-job-poller.integration.test.ts",
+      "packet": "V1-35-DM-POLLER-CLAIM"
+    },
+    {
       "prefix": "v36a_",
       "owner": "apps/server/test/invoice-refund-balance.integration.test.ts",
       "packet": "V1-36-DM-BALANCE-READ-CONTRACT"
@@ -426,6 +451,11 @@
       "prefix": "v37c_",
       "owner": "apps/server/test/ledger-currency-normalize.integration.test.ts",
       "packet": "V1-37 / V1-37c-CURRENCY-NORMALIZE-CASH"
+    },
+    {
+      "prefix": "v40a_",
+      "owner": "apps/server/test/log-redaction.integration.test.ts",
+      "packet": "V1-40-SEC-TRUST-CENSUS-REDACTION"
     },
     {
       "prefix": "v42a_",
@@ -481,6 +511,11 @@
       "prefix": "v53b_",
       "owner": "apps/server/test/quote-chain-finish.integration.test.ts",
       "packet": "V1-53-QUOTE-CHAIN-finish"
+    },
+    {
+      "prefix": "v54a_",
+      "owner": "apps/server/test/call-log-complete-once.integration.test.ts",
+      "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
       "prefix": "zz_credit_",

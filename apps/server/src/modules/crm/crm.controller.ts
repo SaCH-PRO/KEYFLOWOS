@@ -46,7 +46,15 @@ import type { Prisma } from '@prisma/client';
 import { PickType } from '@nestjs/mapped-types';
 import { IsArray, IsBoolean, IsOptional, IsString } from 'class-validator';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
+import {
+  assertContactVisible,
+  contactVisibilityFilter,
+  resolveCrmAccess,
+  visibilityClause,
+  visibleNeighbourhood,
+  visibleRelationshipGraph,
+  type CrmAccess,
+} from './crm-permissions.helper';
 import { contactWhereBase } from './crm.helpers';
 
 /**
@@ -132,6 +140,30 @@ export class CrmController {
     return actorUserId;
   }
 
+  /**
+   * The record-visibility gate of the contact-scoped sibling reads (events,
+   * notes, journey, cross-journey, story, revenue-summary, health-metrics,
+   * relationships, network, data-quality, playbook, conversations,
+   * conversation-context, best-channel). Their collaborators check the tenant
+   * only, so each handler awaits this before calling one: the session member
+   * must be able to open the contact itself, by the rule GET
+   * contacts/:contactId applies. A contact outside that rule answers that
+   * route's 404 for an unknown id and no child row is read; a request without
+   * a member is 401 (V1-08, M13). It also gates both ends of a relationship
+   * write (POST relationships, POST refer). It returns the member and their
+   * CRM access, which the relationship and network reads use to drop the
+   * neighbours the member cannot open (review ST-1).
+   */
+  private async assertVisibleContact(
+    businessId: string,
+    contactId: string,
+    req: { user?: { id?: string } } | undefined,
+  ): Promise<{ actorUserId: string; access: CrmAccess }> {
+    const actorUserId = this.requireActorUserId(req);
+    const access = await assertContactVisible(this.prisma, businessId, contactId, actorUserId);
+    return { actorUserId, access };
+  }
+
   // ---------------------------------------------------------------------------
   // Relationship graph (M5)
   // ---------------------------------------------------------------------------
@@ -140,57 +172,99 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/relationships')
-  listContactRelationships(
+  async listContactRelationships(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.network.listForContact(businessId, contactId);
+    const { actorUserId, access } = await this.assertVisibleContact(businessId, contactId, req);
+    const relationships = await this.network.listForContact(businessId, contactId);
+    // Each row carries the other contact's full row: keep only the rows whose
+    // other contact the member may open (review ST-1).
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, [
+      ...relationships.outgoing.map((r) => r.toContactId),
+      ...relationships.incoming.map((r) => r.fromContactId),
+    ]);
+    if (!canOpen) return relationships;
+    return {
+      ...relationships,
+      outgoing: relationships.outgoing.filter((r) => canOpen(r.toContactId)),
+      incoming: relationships.incoming.filter((r) => canOpen(r.fromContactId)),
+    };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/network')
-  getContactNetwork(
+  async getContactNetwork(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('depth') depth?: string,
   ) {
+    const { actorUserId, access } = await this.assertVisibleContact(businessId, contactId, req);
     const d = depth ? Math.max(1, Math.min(2, Number(depth) || 2)) : 2;
-    return this.network.getNeighbourhood(businessId, contactId, d);
+    const graph = await this.network.getNeighbourhood(businessId, contactId, d);
+    // Neighbours the member cannot open leave the graph with their edges and
+    // what is reached only through them (review ST-1).
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, [
+      ...graph.nodes.map((n) => n.id),
+      ...graph.edges.flatMap((e) => [e.fromContactId, e.toContactId]),
+    ].filter((id) => id !== contactId));
+    return canOpen ? visibleNeighbourhood(graph, d, canOpen) : graph;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/network')
-  getNetworkGraph(
+  async getNetworkGraph(
     @Param('businessId') businessId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('type') type?: string,
     @Query('relationshipHealth') relationshipHealth?: string,
     @Query('minDealValue') minDealValue?: string,
     @Query('search') search?: string,
   ) {
-    return this.network.listGraphForBusiness(businessId, {
+    // The business graph names every related contact: it shows only the ones
+    // the session member may open, by the rule GET detail applies (review ST-3).
+    const actorUserId = this.requireActorUserId(req);
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    const graph = await this.network.listGraphForBusiness(businessId, {
       type: type as ContactRelationshipEdgeType | undefined,
       relationshipHealth: relationshipHealth || undefined,
       minDealValue: minDealValue ? Number(minDealValue) : undefined,
       search: search || undefined,
     });
+    const canOpen = await contactVisibilityFilter(
+      this.prisma,
+      businessId,
+      access,
+      actorUserId,
+      graph.nodes.map((n) => n.id),
+    );
+    return canOpen ? visibleRelationshipGraph(graph, canOpen) : graph;
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/relationships')
-  createContactRelationship(
+  async createContactRelationship(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Body() body: { toContactId: string; type: string; since?: string | null; note?: string | null },
   ) {
-    if (!body?.toContactId || !body?.type) {
+    if (!body?.toContactId || typeof body.toContactId !== 'string' || !body?.type) {
       throw new BadRequestException('toContactId and type are required');
     }
+    // Both ends: a member relates only contacts they may open. A hidden end
+    // answers GET detail's 404 for an unknown id and nothing is written, not
+    // even the inverse edge on the hidden contact (review ST-2).
+    await this.assertVisibleContact(businessId, contactId, req);
+    await this.assertVisibleContact(businessId, body.toContactId, req);
     return this.network.createRelationship({
       businessId,
       fromContactId: contactId,
@@ -216,9 +290,10 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/refer')
-  referContact(
+  async referContact(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Body() body: {
       contactId?: string;
       firstName?: string;
@@ -231,6 +306,15 @@ export class CrmController {
     if (!body?.contactId && !body?.firstName && !body?.lastName && !body?.email && !body?.phone) {
       throw new BadRequestException('Provide an existing contactId or referral details (name/email/phone)');
     }
+    if (body.contactId != null && typeof body.contactId !== 'string') {
+      throw new BadRequestException('contactId must be a string');
+    }
+    // The other relationship write, gated like POST relationships (review
+    // ST-2): the referrer and an existing target must be contacts the member
+    // may open. Otherwise it would bump a hidden referrer's lead score, log on
+    // its timeline and copy its name into a new contact's sourceDetail.
+    await this.assertVisibleContact(businessId, contactId, req);
+    if (body.contactId) await this.assertVisibleContact(businessId, body.contactId, req);
     return this.network.referContact({
       businessId,
       referrerContactId: contactId,
@@ -346,10 +430,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/best-channel')
-  bestChannelExplain(
+  async bestChannelExplain(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.bestChannel.explain(businessId, contactId);
   }
 
@@ -666,7 +752,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/data-quality')
-  dqContactIssues(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+  async dqContactIssues(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.dataQuality.getContactIssues(businessId, contactId);
   }
 
@@ -1289,7 +1380,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/events')
-  contactEvents(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+  async contactEvents(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.crm.listContactEvents({ businessId, contactId });
   }
 
@@ -1297,7 +1393,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/notes')
-  contactNotes(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+  async contactNotes(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.crm.listContactNotes({ businessId, contactId });
   }
 
@@ -1323,7 +1424,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/playbook')
-  getPlaybook(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+  async getPlaybook(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    // Before getOrCreatePlaybook, which creates a row for any id it is given.
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.playbook.getOrCreatePlaybook({ businessId, contactId });
   }
 
@@ -1552,10 +1659,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/revenue-summary')
-  getContactRevenueSummary(
+  async getContactRevenueSummary(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.revenue.getContactRevenueSummary(businessId, contactId);
   }
 
@@ -1563,10 +1672,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/health-metrics')
-  getContactHealthMetrics(
+  async getContactHealthMetrics(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.journey.getContactHealthMetrics(businessId, contactId);
   }
 
@@ -1574,10 +1685,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/journey')
-  getContactJourney(
+  async getContactJourney(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.journey.getContactJourney(businessId, contactId);
   }
 
@@ -1585,10 +1698,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/cross-journey')
-  getContactCrossJourney(
+  async getContactCrossJourney(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.journey.getContactCrossJourney(businessId, contactId);
   }
 
@@ -1599,8 +1714,10 @@ export class CrmController {
   async getContactStory(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('filter') filter?: string,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     const result = await this.journey.getContactCrossJourney(businessId, contactId);
     if (!filter || filter === 'all') return result;
     const filterFn = (() => {
@@ -1664,10 +1781,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/conversation-context')
-  getConversationContext(
+  async getConversationContext(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.journey.getConversationContext(businessId, contactId);
   }
 
@@ -1688,9 +1807,10 @@ export class CrmController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/conversations')
-  listConversations(
+  async listConversations(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('cursor') cursor?: string,
     @Query('limit') limit?: string,
     @Query('channel') channel?: string,
@@ -1698,6 +1818,7 @@ export class CrmController {
     @Query('since') since?: string,
     @Query('until') until?: string,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     const validChannels: ConversationChannel[] = ['whatsapp', 'email', 'sms', 'call', 'meeting', 'note'];
     const validDirections: ConversationDirection[] = ['in', 'out', 'internal'];
     return this.communication.list({

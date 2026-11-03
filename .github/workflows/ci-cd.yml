@@ -91,6 +91,16 @@ jobs:
       - name: Type check web
         run: cd apps/web && npx tsc --noEmit
 
+      # Launch verifier contract (V1-20, PRS-M01): readiness must reject a
+      # degraded JSON body even when the HTTP status is 200. The shell spec
+      # runs scripts/verify-up.sh itself against a 127.0.0.1 fixture (no
+      # external network). Same command as `pnpm test:verify-up`. Explicit
+      # files, never a bare directory: `node --test scripts/tests/` runs zero
+      # specs on Node 20. No env here: NODE_TEST_CONTEXT=child alone makes
+      # `node --test` skip every file and exit 0.
+      - name: Verify launch health contract
+        run: node --test scripts/tests/verify-up-body.spec.mjs scripts/tests/verify-up-shell.spec.mjs
+
   # Lint is a DEBT RATCHET, and nothing depends on it.
   #
   # It used to be the first step of lint-and-typecheck, which every other job
@@ -184,12 +194,30 @@ jobs:
       - name: Lint web
         run: pnpm --filter web lint --max-warnings 26
 
+  # Security Scan (V1-01-SEC-CREDENTIAL-SECRET-SCAN, PRS-M07; ports #189's
+  # secret scan and #114's outcome capture). Until this packet the job could
+  # not fail: a shallow checkout, trufflehog@main scanning from a literal
+  # `base: main`, and continue-on-error on both scanners. Owner ruling D-22
+  # (docs/reconstruction/BUILD-MAP-001.md section (g)) makes the secret scan
+  # blocking, so nothing in this job, steps or job header, may skip the job or
+  # swallow a failure. D-22 does not name the dependency audit: its result is
+  # recorded on every run but not enforced (see the audit step). The contract
+  # for this job, with its negative controls, is
+  # scripts/security/tests/secret-scan-contract.spec.mjs, run below.
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
+    # The scanner image gets the whole checkout mounted: a read-only token,
+    # and checkout does not leave it in .git/config.
+    permissions:
+      contents: read
     steps:
+      # Full history: the scan range below needs both endpoint commits.
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v3
@@ -205,18 +233,127 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Recorded, not enforced. The packet makes enforcement wait on D-22 when
+      # high advisories exist (they do: 131 high and 17 critical at 0796a728),
+      # and D-22 names the secret scan, not the audit. A blocking audit would
+      # also turn the required pipeline red at a fixed head whenever a new
+      # advisory is published or the registry is unreachable. The exit code is
+      # a step output; the enforcement step reports a non-zero one as a
+      # ::warning and in the step summary, and fails the job if the audit step
+      # itself did not run or recorded nothing. Making the audit blocking takes
+      # a ruling and a remediation packet first, then one line in the
+      # enforcement step (and its contract).
       - name: Audit dependencies
-        run: pnpm audit --audit-level high
-        continue-on-error: true
+        id: dependency_audit
+        run: |
+          audit_exit=0
+          pnpm audit --audit-level high || audit_exit=$?
+          echo "exit_code=$audit_exit" >> "$GITHUB_OUTPUT"
 
+      # The steps below run even when an earlier one failed, so one run
+      # reports every scanner. The last step turns any outcome other than
+      # success, a skip included, into a failed job.
+      #
+      # Every spec in scripts/security/tests, this job's contract and R0-31's
+      # no-committed-credential spec among them (also `pnpm test:security`).
+      # The file glob is deliberate: `node --test scripts/security/tests/`
+      # runs zero specs and passes on Node 20, and fails to start on Node 22.
+      # No env, shell or working-directory here: NODE_TEST_CONTEXT=child alone
+      # makes `node --test` skip every file and exit 0.
+      - name: Security script specs
+        id: security_suite
+        if: ${{ !cancelled() }}
+        run: node --test scripts/security/tests/*.spec.mjs
+
+      # Fail closed when either endpoint is missing or absent from the
+      # checkout, when a push created the branch (all-zero before SHA: the
+      # action would silently widen to the whole history), or when no commit
+      # in the range touches a file (the action would scan nothing and pass).
+      # The range is judged by its commits, as TruffleHog scans it, not by the
+      # tree difference: a secret added and then reverted nets to no change.
+      - name: Require usable secret scan range
+        id: secret_scan_range
+        if: ${{ !cancelled() }}
+        shell: bash
+        env:
+          SCAN_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          SCAN_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SCAN_BASE:-}" ] || [ -z "${SCAN_HEAD:-}" ]; then
+            echo "::error::Secret-scan commit range is missing (base '${SCAN_BASE:-}', head '${SCAN_HEAD:-}')."
+            exit 1
+          fi
+          if [ "$SCAN_BASE" = "0000000000000000000000000000000000000000" ]; then
+            echo "::error::Secret-scan base is the all-zero SHA: this push created the branch, so there is no range to scan. Scan it through a pull request."
+            exit 1
+          fi
+          git cat-file -e "$SCAN_BASE^{commit}" || { echo "::error::Secret-scan base $SCAN_BASE is not in the checkout."; exit 1; }
+          git cat-file -e "$SCAN_HEAD^{commit}" || { echo "::error::Secret-scan head $SCAN_HEAD is not in the checkout."; exit 1; }
+          touched_files="$(git log --format= --name-only "$SCAN_BASE..$SCAN_HEAD" | sed '/^$/d' | sort -u)"
+          if [ -z "$touched_files" ]; then
+            echo "::error::Secret scan would examine an empty commit difference: no commit in $SCAN_BASE..$SCAN_HEAD touches a file."
+            exit 1
+          fi
+          echo "Secret-scan range $SCAN_BASE..$SCAN_HEAD: $(git rev-list --count "$SCAN_BASE..$SCAN_HEAD") commits touch $(printf '%s\n' "$touched_files" | wc -l) files."
+
+      # Pinned by commit to the v3.99.7 release tag. The action runs
+      # "${image}:${version}", so the CLI image is pinned by digest as well
+      # (the 3.99.7 multi-arch index on ghcr.io; a tag can be re-pushed) and
+      # no `image` input is given. No base/head inputs: the action derives the
+      # event's own commit SHAs (the ones checked above); a literal 'main' need
+      # not exist in the checkout. The action already passes --fail; passing it
+      # again aborts the scanner before it scans anything.
       - name: Secret scanning (trufflehog)
-        uses: trufflesecurity/trufflehog@main
+        id: secret_scan
+        if: ${{ !cancelled() && steps.secret_scan_range.outcome == 'success' }}
+        uses: trufflesecurity/trufflehog@31ce31ee1abbcc7dc8eee5764c17121c3044c8b2 # v3.99.7
         with:
           path: ./
-          base: main
-          head: HEAD
-          extra_args: --debug --only-verified
-        continue-on-error: true
+          version: '3.99.7@sha256:0d003fc3abc4e1565eca8462b992001314de51451e96e3c44de80d116794d5d1'
+          extra_args: --only-verified --fail-on-scan-errors
+
+      # Re-raise and record every scanner's outcome (#114). A skipped scanner
+      # does not fail a job by itself; this step does. The audit's own verdict
+      # is recorded here as a ::warning, not enforced (see the audit step).
+      - name: Enforce security scan outcomes
+        if: always()
+        shell: bash
+        env:
+          DEPENDENCY_AUDIT_OUTCOME: ${{ steps.dependency_audit.outcome }}
+          DEPENDENCY_AUDIT_EXIT_CODE: ${{ steps.dependency_audit.outputs.exit_code }}
+          SECURITY_SUITE_OUTCOME: ${{ steps.security_suite.outcome }}
+          SECRET_SCAN_RANGE_OUTCOME: ${{ steps.secret_scan_range.outcome }}
+          SECRET_SCAN_OUTCOME: ${{ steps.secret_scan.outcome }}
+        run: |
+          status=0
+          check() {
+            echo "$1=$2"
+            if [ "$2" != "success" ]; then
+              echo "::error::Security Scan: $1 outcome is '$2', not success."
+              status=1
+            fi
+          }
+          check dependency_audit "${DEPENDENCY_AUDIT_OUTCOME:-}"
+          check security_suite "${SECURITY_SUITE_OUTCOME:-}"
+          check secret_scan_range "${SECRET_SCAN_RANGE_OUTCOME:-}"
+          check secret_scan "${SECRET_SCAN_OUTCOME:-}"
+          audit_exit="${DEPENDENCY_AUDIT_EXIT_CODE:-}"
+          echo "dependency_audit_exit_code=$audit_exit"
+          if [ "${DEPENDENCY_AUDIT_OUTCOME:-}" = "success" ]; then
+            case "$audit_exit" in
+              0) ;;
+              '' | *[!0-9]*)
+                echo "::error::Security Scan: the dependency audit ran but recorded no usable exit code ('$audit_exit')."
+                status=1
+                ;;
+              *)
+                echo "::warning::Security Scan: dependency_audit (pnpm audit --audit-level high) exited $audit_exit: high or critical advisories, or the audit could not complete. Recorded, not enforced: D-22 does not make the audit blocking."
+                echo "Dependency audit (pnpm audit --audit-level high) exited $audit_exit: recorded, not enforced." >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+                ;;
+            esac
+          fi
+          exit "$status"
 
   build-server:
     name: Build Server

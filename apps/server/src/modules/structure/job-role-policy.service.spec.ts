@@ -197,13 +197,26 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     deny: ['reports_generate', 'finance_profit_and_loss', 'commerce_create_invoice'],
   },
   operations: {
-    read: ['contracts_list', 'contracts_get', 'contract_list_tags', 'inbox_list_threads', 'inbox_read_thread', 'payroll_list_rates', 'payroll_get_run', 'performance_scorecard'],
+    read: [
+      'contracts_list', 'contracts_get', 'contract_list_tags', 'inbox_list_threads', 'inbox_read_thread', 'payroll_list_rates', 'payroll_get_run', 'performance_scorecard',
+      // D-40 (R0-13g): the command-centre item and procurement routes require operations
+      'command_list_due_obligations', 'procurement_list_requests', 'procurement_get_request', 'procurement_list_suppliers', 'procurement_get_stats',
+    ],
     // contracts_acknowledge_alert / inbox_mark_resolved are tier 1, but their routes need operations:write
     // inbox_brief: GET brief generates only on a cache miss; POST brief/generate needs write (review 7 DRV-BRIEF)
-    write: ['contracts_acknowledge_alert', 'inbox_mark_resolved', 'contracts_create', 'contract_create_tag', 'inbox_update_thread_status', 'performance_take_snapshot', 'inbox_brief'],
-    admin: ['contracts_delete', 'inbox_reply_thread', 'payroll_approve_run', 'payroll_mark_paid'],
-    // PayrollService.setRate / generateRun and ContractClauseService.extractClauses back no route
-    deny: ['payroll_set_rate', 'payroll_generate_run', 'contract_extract_clauses', 'procurement_create_request', 'helpdesk_create_ticket', 'commerce_create_invoice', 'structure_get_org_tree'],
+    write: [
+      'contracts_acknowledge_alert', 'inbox_mark_resolved', 'contracts_create', 'contract_create_tag', 'inbox_update_thread_status', 'performance_take_snapshot', 'inbox_brief',
+      'command_discharge_obligation', 'procurement_create_request', 'procurement_update_request', 'procurement_submit_for_review', 'procurement_select_vendor',
+    ],
+    // procurement_issue_po: its route needs operations:write, its tier (3) needs admin (C3 ladder)
+    admin: ['contracts_delete', 'inbox_reply_thread', 'payroll_approve_run', 'payroll_mark_paid', 'procurement_issue_po'],
+    // PayrollService.setRate / generateRun and ContractClauseService.extractClauses back no route;
+    // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced update the request by its bare id
+    // (GOVERNED_UNGRANTED, R0-13g)
+    deny: [
+      'payroll_set_rate', 'payroll_generate_run', 'contract_extract_clauses', 'helpdesk_create_ticket', 'commerce_create_invoice', 'structure_get_org_tree',
+      'procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced',
+    ],
   },
   connect: {
     read: [],
@@ -874,6 +887,7 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
           'operations:inbox_reply_thread',
           'operations:payroll_approve_run',
           'operations:payroll_mark_paid',
+          'operations:procurement_issue_po',
           'revenue:commerce_delete_invoice',
           'revenue:payments_refund_charge',
           'team:structure_create_delegation_rule',
@@ -2785,9 +2799,8 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
         'bookings_offer_waitlist_slot',
         'evidence_verify',
         'people_assign_task',
-        'procurement_acknowledge_vendor',
-        'procurement_mark_fulfilled',
-        'procurement_mark_invoiced',
+        // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: governed by operations since
+        // D-40, so GOVERNED_UNGRANTED instead (R0-13g); still reached by no key (below)
         'projects_update_task',
       ].sort(),
     );
@@ -2837,8 +2850,12 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
     expect(passes(envelope({ content: 'read' }), 'content_list_requests')).toBe(true);
     expect(passes(envelope({ bookings: 'write' }), 'bookings_create_booking')).toBe(true);
     expect(passes(envelope({ projects: 'write' }), 'projects_create_task')).toBe(true);
-    expect(passes(envelope({ procurement: 'write' }), 'procurement_create_request')).toBe(true);
-    expect(passes(envelope({ procurement: 'read' }), 'procurement_get_request')).toBe(true);
+    // D-40 (R0-13g): the procurement routes require operations, so the sibling procurement tools are
+    // reached through operations and no longer through the legacy `procurement` family key
+    expect(passes(envelope({ operations: 'write' }), 'procurement_create_request')).toBe(true);
+    expect(passes(envelope({ operations: 'read' }), 'procurement_get_request')).toBe(true);
+    expect(passes(envelope({ procurement: 'admin' }), 'procurement_create_request')).toBe(false);
+    expect(passes(envelope({ procurement: 'admin' }), 'procurement_get_request')).toBe(false);
     const crm = envelope({ crm: 'write' });
     for (const t of ['call_log_outcome', 'call_schedule_followup', 'call_generate_script', 'call_create_task']) expect(passes(crm, t), t).toBe(true);
   });

@@ -16,6 +16,7 @@ import { TimelineModule } from '../timeline/timeline.module';
 import { BookingNoShowListener } from './booking-no-show.listener';
 import { BookingWaitlistService } from './booking-waitlist.service';
 import { BookingWaitlistListener } from './booking-waitlist.listener';
+import { BookingPaymentStatusListener } from './booking-payment-status.listener';
 
 @Module({
   imports: [CrmModule, PublicEventsModule, CommerceModule, SubscriptionsModule, AiModule, NotificationsModule, TimelineModule],
@@ -29,6 +30,8 @@ import { BookingWaitlistListener } from './booking-waitlist.listener';
     BookingNoShowListener,
     BookingWaitlistService,
     BookingWaitlistListener,
+    // V1-28 (M42): Booking.paymentStatus follows invoice.paid.
+    BookingPaymentStatusListener,
   ],
   exports: [BookingsService, BookingsAiService, CalendarService, BookingOptimizerService, BookingWaitlistService],
 })

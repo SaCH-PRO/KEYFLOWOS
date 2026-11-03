@@ -373,9 +373,11 @@ test('the newest run at the head wins when a workflow re-ran', () => {
 
 test('NEGATIVE CONTROL: the prototype head filter would have admitted a stale tree', () => {
   // The prototype queried runs by head_sha but never re-verified head_sha on
-  // the returned rows, so a mixed response could admit the wrong tree.
+  // the returned rows, so a mixed response could admit the wrong tree. Its
+  // list named the DAST gate of its day, 'DAST (HawkScan)'; the required DAST
+  // gate is 'DAST (Native)' since V1-30.
   const mixed = [...greenRuns('f'.repeat(40))];
-  const prototypeVerdict = ['CI/CD Pipeline', 'Agent Control Gate', 'Branch divergence', 'DAST (HawkScan)'].every((name) =>
+  const prototypeVerdict = ['CI/CD Pipeline', 'Agent Control Gate', 'Branch divergence', 'DAST (Native)'].every((name) =>
     mixed.some((r) => r.name === name && r.status === 'completed' && r.conclusion === 'success'),
   );
   assert.equal(prototypeVerdict, true, 'the old check passes on stale runs');

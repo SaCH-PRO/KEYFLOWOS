@@ -168,6 +168,22 @@ export class CallLogService {
     return { items, total, offset: filters?.offset ?? 0, limit: filters?.limit ?? 50 };
   }
 
+  /**
+   * A write to a call log that is still open (V1-54 review ST-1). completeCall, updateCallLog and
+   * deleteCallLog read completedAt and then wrote by id alone, so two members completing the same
+   * call both succeeded: each emitted call_log.completed with its own outcome and completedBy while
+   * the row kept one, and the autoExecute 'callback_requested' default trigger could fire for an
+   * outcome the row does not hold. An edit or a delete racing a completion likewise rewrote or
+   * removed a completed call. The where now carries `completedAt: null`; under Postgres' row lock
+   * the second writer re-checks the row the first one changed and matches nothing. A miss is then
+   * told apart: the call log is gone (404) or another request completed it (`completedMessage`).
+   */
+  private async assertOpenWrite(businessId: string, id: string, count: number, completedMessage: string) {
+    if (count > 0) return;
+    await this.getCallLog(businessId, id);
+    throw new BadRequestException(completedMessage);
+  }
+
   async updateCallLog(businessId: string, id: string, input: UpdateCallLogInput) {
     const existing = await this.getCallLog(businessId, id);
 
@@ -176,8 +192,8 @@ export class CallLogService {
     }
     await this.assertContactInBusiness(businessId, input.contactId);
 
-    const updated = await this.prisma.client.callLog.update({
-      where: { id },
+    const { count } = await this.prisma.client.callLog.updateMany({
+      where: { id, businessId, completedAt: null },
       data: {
         contactId: input.contactId ?? existing.contactId,
         scheduledAt: input.scheduledAt
@@ -188,6 +204,8 @@ export class CallLogService {
         evidenceIds: input.evidenceIds ?? existing.evidenceIds,
       },
     });
+    await this.assertOpenWrite(businessId, id, count, 'Cannot update a completed call log');
+    const updated = await this.getCallLog(businessId, id);
 
     this.emitter.emit('call_log.updated', {
       businessId: existing.businessId,
@@ -204,8 +222,10 @@ export class CallLogService {
       throw new BadRequestException('Call is already completed');
     }
 
-    const updated = await this.prisma.client.callLog.update({
-      where: { id },
+    // Completed once: only the writer that still finds the call open completes it and emits
+    // (see assertOpenWrite).
+    const { count } = await this.prisma.client.callLog.updateMany({
+      where: { id, businessId, completedAt: null },
       data: {
         outcome: input.outcome,
         duration: input.duration ?? null,
@@ -215,6 +235,8 @@ export class CallLogService {
         completedAt: new Date(),
       },
     });
+    await this.assertOpenWrite(businessId, id, count, 'Call is already completed');
+    const updated = await this.getCallLog(businessId, id);
 
     this.emitter.emit('call_log.completed', {
       businessId: existing.businessId,
@@ -227,9 +249,14 @@ export class CallLogService {
     return updated;
   }
 
+  /**
+   * The open calls scheduled on `date`: `callerId`'s when one is named, otherwise every member's
+   * in the business (what the Operations dashboard and the call-tasks page show, V1-54 review
+   * CR-1). The filter is left out rather than handed to Prisma as undefined.
+   */
   async getScheduledCalls(
     businessId: string,
-    callerId: string,
+    callerId: string | undefined,
     date: Date | string,
   ) {
     const startOfDay = new Date(date);
@@ -240,7 +267,7 @@ export class CallLogService {
     return this.prisma.client.callLog.findMany({
       where: {
         businessId,
-        callerId,
+        ...(callerId ? { callerId } : {}),
         scheduledAt: {
           gte: startOfDay,
           lte: endOfDay,
@@ -295,13 +322,21 @@ export class CallLogService {
     return task;
   }
 
+  /**
+   * A call log for the contact's next action, within `businessId` (V1-54 review ST-3). The
+   * contact was looked up by a bare findUnique({ id }) and the call log written under the
+   * contact's own business, so where no ambient tenant binds the lookup (a direct service call,
+   * the staff bridge) another business's contact got a call log in that business for this
+   * business's member. Another business's contact now answers as an unknown one.
+   */
   async createFromContactNextAction(
+    businessId: string,
     contactId: string,
     callerId: string,
     script?: string,
   ) {
-    const contact = await this.prisma.client.contact.findUnique({
-      where: { id: contactId },
+    const contact = await this.prisma.client.contact.findFirst({
+      where: { id: contactId, businessId },
       select: {
         id: true,
         businessId: true,
@@ -322,7 +357,7 @@ export class CallLogService {
 
     const callLog = await this.prisma.client.callLog.create({
       data: {
-        businessId: contact.businessId,
+        businessId,
         contactId: contact.id,
         callerId,
         scheduledAt: contact.nextActionAt ?? new Date(),
@@ -332,7 +367,7 @@ export class CallLogService {
     });
 
     this.emitter.emit('call_log.created_from_next_action', {
-      businessId: contact.businessId,
+      businessId,
       callLogId: callLog.id,
       contactId: contact.id,
       callerId,
@@ -348,7 +383,11 @@ export class CallLogService {
       throw new BadRequestException('Cannot delete a completed call log');
     }
 
-    await this.prisma.client.callLog.delete({ where: { id } });
+    // never removes a call another request has just completed (see assertOpenWrite)
+    const { count } = await this.prisma.client.callLog.deleteMany({
+      where: { id, businessId, completedAt: null },
+    });
+    await this.assertOpenWrite(businessId, id, count, 'Cannot delete a completed call log');
 
     this.emitter.emit('call_log.deleted', {
       businessId: existing.businessId,
