@@ -10,6 +10,25 @@ import { schedulersDisabled } from '../../core/config/env';
 /** The 6-hourly all-business compaction registered at boot (a scheduler, V1-24b). */
 const PERIODIC_COMPACT = 'periodic-compact';
 
+/** FOLLOW3-C3: how long onModuleDestroy waits for the worker's own connection to be ready before it closes it. */
+const READY_BEFORE_CLOSE_MS = 2_000;
+
+/** Resolves once `item` is ready or failed to initialize, or after `ms`, whichever comes first. */
+async function readyOrAfter(ms: number, item: { waitUntilReady(): Promise<unknown> } | undefined): Promise<void> {
+  if (!item) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      item.waitUntilReady().catch(() => undefined),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface TemporalFlowMemoryJob {
   businessId: string;
   operation: 'compact' | 'detect_patterns';
@@ -107,7 +126,11 @@ export class TemporalFlowMemoryQueueService implements OnModuleInit, OnModuleDes
     // <- RedisConnection.init. Once ready, close() quits instead, which waits
     // for the reply. A worker whose connection failed to initialize (bullmq has
     // already emitted that as the worker's 'error') is closed all the same.
-    await this.worker?.waitUntilReady().catch(() => undefined);
+    // The wait is bounded (FOLLOW3-C3 repair): if Redis stops answering while
+    // the worker initializes, it never becomes ready (ioredis reconnects
+    // forever), and a shutdown must not wait on that; after the bound close()
+    // runs as before.
+    await readyOrAfter(READY_BEFORE_CLOSE_MS, this.worker);
     await this.worker?.close();
     await this.queue.close();
   }

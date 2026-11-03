@@ -24,6 +24,7 @@
  * services actually used (recorded below), never only the prefixed one.
  */
 import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
+import * as net from 'node:net';
 import { Logger } from '@nestjs/common';
 import IORedis from 'ioredis';
 import { Queue } from 'bullmq';
@@ -232,8 +233,8 @@ afterAll(async () => {
   // quit() waits for the replies still owed on each connection. These are the
   // connections the services were handed; the 'Connection is closed'
   // rejection once blamed on closing them was a Worker's OWN duplicate,
-  // closed while still initializing (FOLLOW3-C3, fixed in
-  // TemporalFlowMemoryQueueService.onModuleDestroy).
+  // closed while still initializing (FOLLOW3-C3, fixed in the onModuleDestroy
+  // of TemporalFlowMemoryQueueService and QueueService; see the last describe).
   await Promise.all(connections.map((c) => c.quit().catch(() => undefined)));
 });
 
@@ -431,4 +432,202 @@ describe.skipIf(!REDIS_URL)('CR-V124b-1 on real BullMQ (REDIS_URL): the 6-hourly
       await c.onModuleDestroy();
     }
   }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// FOLLOW3-C3 (CR-C3-1): every BullMQ service here closes its own connections
+// only once they are ready, and waits for that a bounded time
+// ---------------------------------------------------------------------------
+
+/**
+ * A Worker's blocking connection and a QueueEvents connection are duplicates
+ * of the client the service was handed, initialized in the background (connect,
+ * then bullmq's version-check INFO). A close() before that INFO is answered
+ * leaves an unhandled 'Connection is closed' rejection
+ * (RedisConnection.getRedisVersionAndType <- RedisConnection.init). The cycles
+ * below sweep the destroy across that window; the file-level recorder above
+ * counts the rejections.
+ */
+async function initDestroyCycles(make: (conn: IORedis) => { onModuleInit(): Promise<void>; onModuleDestroy(): Promise<void> }, cycles = 100) {
+  for (let i = 0; i < cycles; i++) {
+    const conn = new IORedis(REDIS_URL!, { maxRetriesPerRequest: null, showFriendlyErrorStack: true });
+    const svc = make(conn);
+    await svc.onModuleInit();
+    if (i % 10) await pause(i % 10);
+    await svc.onModuleDestroy();
+    await conn.quit().catch(() => undefined);
+  }
+  // A rejection lands a few event-loop turns after the destroy that caused it.
+  await pause(200);
+}
+
+/** The production REDIS_CLIENT options (core/redis/redis.module.ts): ioredis reconnects forever. */
+function productionClient(url: string): IORedis {
+  const c = new IORedis(url, {
+    maxRetriesPerRequest: null,
+    enableReadyCheck: true,
+    lazyConnect: true,
+    enableOfflineQueue: false,
+    retryStrategy: (times: number) => Math.min(times * 50, 2000),
+  });
+  c.on('error', () => undefined);
+  return c;
+}
+
+/** A port nothing listens on. */
+async function deadPort(): Promise<number> {
+  const s = net.createServer();
+  await new Promise<void>((r) => s.listen(0, '127.0.0.1', () => r()));
+  const { port } = s.address() as net.AddressInfo;
+  await new Promise<void>((r) => s.close(() => r()));
+  return port;
+}
+
+/**
+ * A TCP proxy to REDIS_URL through which Redis goes away while a Worker's
+ * blocking connection initializes. Connection 1 is the service's own client;
+ * connection 2 is the Worker's duplicate, whose first INFO is ioredis's ready
+ * check and whose second is bullmq's version check. With that second INFO in
+ * flight every connection is cut and every later one refused, so the duplicate
+ * reconnects forever and never becomes ready.
+ */
+async function outageDuringWorkerInitProxy(): Promise<{ url: string; cut(): boolean; close(): Promise<void> }> {
+  const target = new URL(REDIS_URL!);
+  const sockets = new Set<net.Socket>();
+  let accepted = 0;
+  let down = false;
+  const server = net.createServer((client) => {
+    const index = ++accepted;
+    client.on('error', () => undefined);
+    if (down) {
+      client.destroy();
+      return;
+    }
+    const upstream = net.connect(Number(target.port || 6379), target.hostname);
+    sockets.add(client);
+    sockets.add(upstream);
+    upstream.on('error', () => undefined);
+    let infos = 0;
+    client.on('data', (buf) => {
+      if (down) return;
+      infos += (buf.toString('latin1').match(/\r\ninfo\r\n/gi) ?? []).length;
+      if (index === 2 && infos >= 2) {
+        down = true;
+        for (const s of sockets) s.destroy();
+        return;
+      }
+      upstream.write(buf);
+    });
+    upstream.on('data', (buf) => {
+      if (!down) client.write(buf);
+    });
+    client.on('close', () => upstream.destroy());
+    upstream.on('close', () => client.destroy());
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', () => r()));
+  const url = new URL(REDIS_URL!);
+  url.hostname = '127.0.0.1';
+  url.port = String((server.address() as net.AddressInfo).port);
+  return {
+    url: url.toString(),
+    cut: () => down,
+    close: async () => {
+      for (const s of sockets) s.destroy();
+      await new Promise<void>((r) => server.close(() => r()));
+    },
+  };
+}
+
+/** 'settled' (resolved or rejected) within `ms`, else 'still pending'. */
+async function settlesWithin(p: Promise<unknown>, ms: number): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      p.then(
+        () => 'settled',
+        () => 'settled',
+      ),
+      new Promise<string>((r) => {
+        timer = setTimeout(() => r(`still pending after ${ms} ms`), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function quietErrors(...emitters: Array<{ on(event: 'error', listener: () => void): unknown } | undefined>) {
+  for (const e of emitters) e?.on('error', () => undefined);
+}
+
+describe.skipIf(!REDIS_URL)('FOLLOW3-C3 on real BullMQ (REDIS_URL): a service destroyed right after onModuleInit leaves no unhandled rejection, and its destroy does not wait forever on a Redis that never answers', () => {
+  afterAll(async () => {
+    // The cycles add no job; under bull.prefix this obliterates what the workers wrote.
+    await cleanQueue('ai-cron-triggers', () => false);
+    await cleanQueue('ai-plan-steps', () => false);
+    await cleanQueue('temporal-flow-memory', () => false);
+  });
+
+  it('CR-C3-1: QueueService (plan worker, cron worker, plan events), 100 init -> destroy cycles at 0-9 ms: no unhandled rejection', async () => {
+    setSwitches({ NODE_ENV: 'production' });
+    const before = unhandledRejections.length;
+    let cronWorkers = 0;
+    await initDestroyCycles((conn) => {
+      const svc = queueService(conn, vi.fn());
+      return {
+        onModuleInit: async () => {
+          await svc.onModuleInit();
+          if ((svc as any).cronWorker) cronWorkers++;
+        },
+        onModuleDestroy: () => svc.onModuleDestroy(),
+      };
+    });
+    expect(cronWorkers, 'schedulers on: every cycle closes a cron worker too').toBe(100);
+    expect(unhandledRejections.slice(before).map(rejectionText), 'unhandled rejections from QueueService.onModuleDestroy (CR-C3-1)').toEqual([]);
+  }, 60_000);
+
+  it('TemporalFlowMemoryQueueService, 100 init -> destroy cycles at 0-9 ms: no unhandled rejection', async () => {
+    setSwitches({ NODE_ENV: 'test' });
+    const before = unhandledRejections.length;
+    await initDestroyCycles((conn) => memoryQueue(conn));
+    expect(unhandledRejections.slice(before).map(rejectionText), 'unhandled rejections from TemporalFlowMemoryQueueService.onModuleDestroy').toEqual([]);
+  }, 60_000);
+
+  it('QueueService.onModuleDestroy settles with Redis unreachable (production client options): its workers never become ready, and it does not wait for them forever', async () => {
+    setSwitches({ NODE_ENV: 'production' });
+    const conn = productionClient(`redis://127.0.0.1:${await deadPort()}`);
+    const svc = queueService(conn, vi.fn());
+    quietErrors(svc.planQueue, svc.cronQueue);
+    try {
+      await svc.onModuleInit();
+      quietErrors((svc as any).planWorker, (svc as any).cronWorker, (svc as any).planEvents);
+      await pause(300);
+      expect(await settlesWithin(svc.onModuleDestroy(), 8_000)).toBe('settled');
+    } finally {
+      conn.disconnect();
+    }
+  }, 20_000);
+
+  it.skipIf(!REDIS_URL?.startsWith('redis:'))('TemporalFlowMemoryQueueService.onModuleDestroy settles when Redis goes away while its worker initializes: it does not wait for the worker forever', async () => {
+    setSwitches({ NODE_ENV: 'test' });
+    const proxy = await outageDuringWorkerInitProxy();
+    const conn = productionClient(proxy.url);
+    try {
+      const svc = memoryQueue(conn);
+      quietErrors(svc.queue);
+      // In the app, other providers boot between this constructor (whose Queue
+      // connects the lazy client) and onModuleInit, whose ping needs it ready.
+      expect(await until(() => conn.status === 'ready', 5_000), 'the service client is ready through the proxy').toBe(true);
+      await svc.onModuleInit();
+      const worker = (svc as any).worker;
+      expect(worker, 'the worker was started (its ping went through the proxy)').toBeDefined();
+      quietErrors(worker);
+      expect(await until(() => proxy.cut(), 3_000), "the outage began with the worker's version-check INFO in flight").toBe(true);
+      await pause(300);
+      expect(await settlesWithin(svc.onModuleDestroy(), 8_000)).toBe('settled');
+    } finally {
+      conn.disconnect();
+      await proxy.close();
+    }
+  }, 20_000);
 });
