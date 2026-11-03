@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommandService } from '../command/command.service';
-import { CashPositionService } from '../finance/cash-position.service';
+import { CashPositionService, otherCurrencyCash, type OtherCurrencyCash } from '../finance/cash-position.service';
 
 export interface HealthScore {
   score: number;
@@ -35,10 +35,20 @@ export interface BusinessCommandCenterDto {
   };
   flows: {
     financial: {
-      /** The ledger cash position (CashPositionService), never FinancialAccount.currentBalance. */
+      /**
+       * The ledger cash position (CashPositionService), never FinancialAccount.currentBalance.
+       * V1-37c: the business currency's cash only, in `cashCurrency`.
+       */
       cashBalance: number;
       /** V1-34: how cashBalance was derived. */
       cashBasis: 'ledger';
+      /** V1-37c: the currency of cashBalance (the business currency, normalized). */
+      cashCurrency: string;
+      /**
+       * V1-37c (D-13): cash held in another currency, by currency; never added
+       * to cashBalance nor to the money health. Empty when there is none.
+       */
+      otherCurrencyCash: OtherCurrencyCash[];
       outstandingInvoices: number;
       overdueInvoices: number;
       billsDue: number;
@@ -238,6 +248,8 @@ export class OsService {
         financial: {
           cashBalance,
           cashBasis: cashPosition.basis,
+          cashCurrency: cashPosition.currency,
+          otherCurrencyCash: otherCurrencyCash(cashPosition),
           outstandingInvoices,
           overdueInvoices,
           billsDue,
