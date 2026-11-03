@@ -1920,7 +1920,10 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
     });
 
     it('the read tools it bounds are the accepted read follow-up (KEY CRM / calendar reads apply no row visibility)', () => {
-      expect(reads).toEqual(['calendar_list_events', 'crm_list_contacts', 'crm_search_contacts']);
+      // V1-84: CallLogService.listCalls bounds the list by the clause through the call log's contact
+      // when handed a viewer (GET calls); the dispatcher's call_list_tasks hands it none, so on the KEY
+      // path it lists every call log, like the other reads here (flow-orchestrator.service.ts is V1-43's).
+      expect(reads).toEqual(['calendar_list_events', 'call_list_tasks', 'crm_list_contacts', 'crm_search_contacts']);
     });
 
     it('the dispatcher passes them no actor, so the clause never runs on the KEY path', () => {
