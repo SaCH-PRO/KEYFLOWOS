@@ -129,6 +129,11 @@
       "packet": "R0-13 / R0-13g-KEY-FLOWS-ROUTES"
     },
     {
+      "prefix": "k13o_",
+      "owner": "apps/server/test/ops-scope-command-procurement.integration.test.ts",
+      "packet": "R0-13 / R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT"
+    },
+    {
       "prefix": "k14a_",
       "owner": "apps/server/test/identity-local-auth.integration.test.ts",
       "packet": "R0-14-AUTH-LOCAL-SIGNIN"

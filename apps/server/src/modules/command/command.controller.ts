@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { CommandService } from './command.service';
 import { CommandGeneratorService } from './command-generator.service';
 import { CommandSchedulerService } from './command-scheduler.service';
@@ -11,8 +12,18 @@ import { ListDueObligationsDto } from './dto/list-due-obligations.dto';
 import { DischargeObligationDto } from './dto/discharge-obligation.dto';
 import { BulkCommandItemsDto } from './dto/bulk-command-items.dto';
 
+/**
+ * Command-centre items. Every route requires the 'operations' module scope
+ * (owner ruling D-40, R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT): read for a GET,
+ * write for every mutation, approve included (the level the operations
+ * vocabulary gives an approval: payroll, data inbox and KEY approvals are
+ * operations write). OWNER and ADMIN hold operations admin by role default,
+ * STAFF read. ModuleScopeGuard reads the HANDLER's @RequireModuleScope, so each
+ * route names its own level; a route without one runs ungated, and
+ * test/ops-scope-command-procurement.integration.test.ts fails on it.
+ */
 @Controller('command/businesses/:businessId')
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class CommandController {
   constructor(
     @Inject(CommandService) private readonly commandService: CommandService,
@@ -20,6 +31,7 @@ export class CommandController {
     @Inject(CommandSchedulerService) private readonly scheduler: CommandSchedulerService,
   ) {}
 
+  @RequireModuleScope('operations', 'read')
   @Get('items')
   async list(
     @Param('businessId') businessId: string,
@@ -43,6 +55,7 @@ export class CommandController {
    * declaration order, and `due` under a sibling path would be shadowed the
    * moment anyone moved it below a `:id` parameter route.
    */
+  @RequireModuleScope('operations', 'read')
   @Get('items/due')
   async due(
     @Param('businessId') businessId: string,
@@ -55,6 +68,7 @@ export class CommandController {
     });
   }
 
+  @RequireModuleScope('operations', 'read')
   @Get('items/:id')
   async getOne(
     @Param('businessId') businessId: string,
@@ -63,6 +77,7 @@ export class CommandController {
     return this.commandService.findOne(businessId, id);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('items')
   async create(
     @Param('businessId') businessId: string,
@@ -71,6 +86,7 @@ export class CommandController {
     return this.commandService.create(businessId, dto);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Patch('items/:id')
   async update(
     @Param('businessId') businessId: string,
@@ -88,9 +104,11 @@ export class CommandController {
    * dismiss as item 'bulk' (404). The service scopes every id to the path
    * business and refuses the whole call when any id is not one of its items,
    * so another tenant's id answers exactly as an unknown one. The guards are
-   * the class's (AuthGuard, BusinessGuard), the ones the single-item routes
-   * run behind. route-shadowing.spec.ts keeps the order.
+   * the class's (AuthGuard, BusinessGuard, ModuleScopeGuard) and the scope the
+   * single-item routes require (operations write, D-40).
+   * route-shadowing.spec.ts keeps the order.
    */
+  @RequireModuleScope('operations', 'write')
   @Post('items/bulk/complete')
   async bulkComplete(
     @Param('businessId') businessId: string,
@@ -99,6 +117,7 @@ export class CommandController {
     return this.commandService.bulkComplete(businessId, dto.ids);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('items/bulk/dismiss')
   async bulkDismiss(
     @Param('businessId') businessId: string,
@@ -107,6 +126,7 @@ export class CommandController {
     return this.commandService.bulkDismiss(businessId, dto.ids);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('items/bulk/delete')
   async bulkDelete(
     @Param('businessId') businessId: string,
@@ -115,6 +135,7 @@ export class CommandController {
     return this.commandService.bulkDelete(businessId, dto.ids);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('items/:id/dismiss')
   async dismiss(
     @Param('businessId') businessId: string,
@@ -123,6 +144,7 @@ export class CommandController {
     return this.commandService.dismiss(businessId, id);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('items/:id/snooze')
   async snooze(
     @Param('businessId') businessId: string,
@@ -132,6 +154,7 @@ export class CommandController {
     return this.commandService.snooze(businessId, id, new Date(body.until));
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('items/:id/approve')
   async approve(
     @Param('businessId') businessId: string,
@@ -140,6 +163,7 @@ export class CommandController {
     return this.commandService.approve(businessId, id);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('items/:id/execute')
   async execute(
     @Param('businessId') businessId: string,
@@ -149,6 +173,7 @@ export class CommandController {
     return this.commandService.execute(businessId, id, body.result);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('items/:id/complete')
   async complete(
     @Param('businessId') businessId: string,
@@ -169,6 +194,7 @@ export class CommandController {
    * is not optional here — anything KEY can change, a person must be able to
    * change too, or the guarantee that KEY is optional stops being true.
    */
+  @RequireModuleScope('operations', 'write')
   @Post('items/:id/discharge')
   async discharge(
     @Param('businessId') businessId: string,
@@ -178,6 +204,7 @@ export class CommandController {
     return this.commandService.discharge(businessId, id, body?.dischargeRef);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('items/:id/assign')
   async assign(
     @Param('businessId') businessId: string,
@@ -187,6 +214,7 @@ export class CommandController {
     return this.commandService.assign(businessId, id, body.ownerType, body.ownerId);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('items/:id/reopen')
   async reopen(
     @Param('businessId') businessId: string,
@@ -195,6 +223,7 @@ export class CommandController {
     return this.commandService.reopen(businessId, id);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Delete('items/:id')
   async delete(
     @Param('businessId') businessId: string,
@@ -203,6 +232,7 @@ export class CommandController {
     return this.commandService.delete(businessId, id);
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('generate')
   async generate(
     @Param('businessId') businessId: string,
@@ -210,6 +240,7 @@ export class CommandController {
     return this.generator.generateForBusiness(businessId);
   }
 
+  @RequireModuleScope('operations', 'read')
   @Get('summary')
   async summary(
     @Param('businessId') businessId: string,
@@ -217,6 +248,7 @@ export class CommandController {
     return this.commandService.summary(businessId);
   }
 
+  @RequireModuleScope('operations', 'read')
   @Get('last-scan')
   async lastScan(@Param('businessId') businessId: string) {
     const lastScan = await this.scheduler.getLastScanTime(businessId);
@@ -224,6 +256,7 @@ export class CommandController {
     return { lastScan, shouldAutoScan };
   }
 
+  @RequireModuleScope('operations', 'write')
   @Post('auto-scan')
   async autoScan(@Param('businessId') businessId: string) {
     const should = await this.scheduler.shouldAutoScan(businessId);
