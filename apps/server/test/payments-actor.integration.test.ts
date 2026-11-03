@@ -24,6 +24,9 @@
  *        negative REFUNDED row linked by reference, and its recordedBy is V
  *   KEY cortex adapter process_payment               -> KEY_SYSTEM_ACTOR_ID, actorType SYSTEM
  *   PaymentEvidenceService (POST .../payments/from-evidence) -> KEY_SYSTEM_ACTOR_ID, actorType SYSTEM
+ *     (V1-41, D-27: a PENDING row; its payment_pending_recorded activities row
+ *     keeps the uploader as data.initiatedBy, PA-14b; the confirming member
+ *     records the money)
  *   service caller passing no actor                  -> recordedBy null (no invented actor)
  *
  * Open gaps found by the R0-11 review (it.todo at the end of the file; every
@@ -129,6 +132,8 @@ const ID = {
   invNotRefundable: `${P}invNotRefundable`,
   invRefundRace: `${P}invRefundRace`,
   invEvidenceV: `${P}invEvidenceV`,
+  // V1-41 review (AUD-V41-3, CR-V41-2): PA-14b, the uploader of a PENDING evidence payment
+  invEvidenceInit: `${P}invEvidenceInit`,
   invHumanInit: `${P}invHumanInit`,
   // R0-PL-04: PA-13, refund of a mark-paid payment
   invMarkPaidRefund: `${P}invMarkPaidRefund`,
@@ -817,13 +822,43 @@ describe('review repairs: mark-paid, refund guard, initiating human', () => {
   });
 
   // V1-41 (D-27): recordPayment kept the uploader on the invoice.payment_recorded
-  // contact event (PL07-ST-3). A PENDING row writes no contact event: the
-  // canonical CONTACT_EVENT_TYPES (packages/shared/src/contact-events.ts) has no
-  // pending-payment type, and that file is outside V1-41's write set.
-  it.todo(
-    'PA-14b (PL07-ST-3, D-27): the uploader (initiatedBy) of a PENDING evidence-extracted payment is kept on the audit trail until a member confirms it - ' +
-      'needs a pending-payment type in CONTACT_EVENT_TYPES (packages/shared/src/contact-events.ts) written by PaymentEvidenceService.recordPendingPayment; outside the V1-41 write set',
-  );
+  // contact event (PL07-ST-3). A PENDING row writes no contact event (the
+  // canonical CONTACT_EVENT_TYPES has no pending-payment type). V1-41 review
+  // (AUD-V41-3, CR-V41-2): PaymentEvidenceService.recordPendingPayment writes,
+  // with the row, one COMMERCE payment_pending_recorded `activities` row that
+  // keeps the uploader as data.initiatedBy (the R0-CMF2 refund audit row is
+  // the same kind of row).
+  it('PA-14b (PL07-ST-3, D-27): from-evidence by V (the body naming U) -> the PENDING row\'s payment_pending_recorded activities row is recorded by KEY (SYSTEM) with initiatedBy V, never U; U confirms it -> the money names U and the row still names V as the uploader', async () => {
+    nextExtraction = {
+      documentType: 'receipt',
+      confidence: 0.9,
+      invoiceData: { total: 14, invoiceNumber: 'PYA-EVID-INIT', notes: 'cash' },
+    };
+    const res = await agent()
+      .post(`/commerce/businesses/${ID.biz}/invoices/${ID.invEvidenceInit}/payments/from-evidence`)
+      .set(HEADER, ID.userV)
+      .send({
+        evidenceUrl: 'https://evidence.test/pya-init.pdf', evidenceMimeType: 'application/pdf', filename: 'pya-init.pdf', source: 'upload',
+        initiatedBy: ID.userU, recordedBy: ID.userU, actorId: ID.userU,
+      });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const [pending] = await paymentsOf(ID.invEvidenceInit);
+    expect(pending).toMatchObject({ status: 'PENDING', recordedBy: KEY_ACTOR });
+
+    const auditRows = () => db.activity.findMany({ where: { businessId: ID.biz, entityType: 'payment', entityId: pending.id } });
+    const before = await auditRows();
+    expect(before).toHaveLength(1);
+    expect(before[0]).toMatchObject({ module: 'COMMERCE', action: 'payment_pending_recorded', actorType: 'SYSTEM', actorId: KEY_ACTOR });
+    expect(before[0].data).toMatchObject({ invoiceId: ID.invEvidenceInit, recordedBy: KEY_ACTOR, initiatedBy: ID.userV });
+    expect(JSON.stringify(before)).not.toContain(ID.userU);
+
+    const confirmed = await paymentEvidence.confirmPendingPayment(pending.id, ID.biz, ID.userU);
+    expect((await paymentRow(confirmed.payment.id)).recordedBy).toBe(ID.userU);
+    await expectContactEventBy(ID.invEvidenceInit, ID.userU, 'USER');
+    const after = await auditRows();
+    expect(after).toHaveLength(1);
+    expect(after[0].data.initiatedBy).toBe(ID.userV);
+  });
 
   it('PA-15 (PL07-ST-3): initiatedBy is kept only beside the system recorder; a human recorder ignores it', async () => {
     const result = await commerce.recordPayment(

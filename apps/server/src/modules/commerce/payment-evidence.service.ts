@@ -64,6 +64,26 @@ interface ProcessEvidenceResult {
 export const EXTRACTED_PAYMENT_ID_PREFIX = 'extracted_';
 
 /**
+ * V1-41 review (SEC-V41-1, SEC-V41-2, CR-V41-1): Payment.provider of an
+ * extracted pending row. The method extracted or planned stays in
+ * Payment.method; the provider is never a method, because the anonymous
+ * customer intent (CommerceService.recordPublicPaymentIntent) keeps one
+ * PENDING row per invoice and method, found by `{ status: 'PENDING', method,
+ * provider: method }`, and rewrites its amount. With provider = method an
+ * intent through a pay link found the extracted row (every credit-note plan
+ * uses method 'other', an intent method) and replaced the extracted amount
+ * with the customer's, which a member then confirmed as money. No intent
+ * method, and no other Payment writer, uses this provider.
+ */
+export const EXTRACTED_PAYMENT_PROVIDER = 'extracted';
+
+/**
+ * V1-41 review (AUD-V41-3, CR-V41-2): the `activities` action written with
+ * each new extracted pending row (see recordPendingPayment).
+ */
+export const PENDING_PAYMENT_AUDIT_ACTION = 'payment_pending_recorded';
+
+/**
  * V1-41: the status an extracted pending row takes once a member confirmed it.
  * It is not money: computeBalance, CASH_NET_PAYMENT_WHERE and the posting door
  * read SUCCESSFUL and REFUNDED rows only. The money is the SUCCESSFUL row the
@@ -186,19 +206,21 @@ export class PaymentEvidenceService {
    * (confirmPendingPayment). The response is the pending row, the invoice
    * status as it stands and the extracted figures.
    *
-   * @param _options.initiatedBy R0-PL-07 review (PL07-ST-3): the authenticated
+   * @param options.initiatedBy R0-PL-07 review (PL07-ST-3): the authenticated
    *   person who submitted the evidence. The recorder stays KEY's system actor
    *   (the figures are machine-extracted). A separate argument, never part of
    *   `input`, so a request body spread into `input` can not name it. V1-41:
    *   recordPayment kept it on the invoice.payment_recorded contact event; a
    *   PENDING row writes no contact event (CONTACT_EVENT_TYPES in
-   *   packages/shared has no pending-payment type), so it is not recorded
-   *   until that type exists (payments-actor PA-14b, it.todo). The confirming
-   *   member is the recorder of the money (confirmPendingPayment).
+   *   packages/shared has no pending-payment type). V1-41 review (AUD-V41-3,
+   *   CR-V41-2): it is kept as data.initiatedBy on the pending row's
+   *   payment_pending_recorded `activities` row, written with the row and kept
+   *   after the confirmation (recordPendingPayment). The confirming member is
+   *   the recorder of the money (confirmPendingPayment).
    */
   async processEvidence(
     input: ProcessEvidenceInput,
-    _options: { initiatedBy?: string | null } = {},
+    options: { initiatedBy?: string | null } = {},
   ): Promise<ProcessEvidenceResult> {
     const { businessId, invoiceId, evidenceUrl, evidenceMimeType, filename, source, driveFileId } = input;
 
@@ -242,7 +264,7 @@ export class PaymentEvidenceService {
       notes: extractedPayment.notes,
       evidenceUrl,
       evidenceMimeType,
-    }, { actorId: KEY_SYSTEM_ACTOR_ID });
+    }, { actorId: KEY_SYSTEM_ACTOR_ID, initiatedBy: options.initiatedBy ?? null });
 
     // 5. Nothing was reconciled: the invoice status is read as it stands.
     const invoice = await this.prisma.client.invoice.findFirst({
@@ -294,14 +316,32 @@ export class PaymentEvidenceService {
    * of a Drive plan, null with no human). No contact event is written: the
    * money is not recorded yet (confirmPendingPayment writes
    * invoice.payment_recorded through recordPayment).
+   *
+   * The row's provider is EXTRACTED_PAYMENT_PROVIDER, never the method (V1-41
+   * review SEC-V41-1 / SEC-V41-2 / CR-V41-1), so the anonymous customer
+   * intent upsert can not find it and rewrite its amount.
+   *
+   * V1-41 review (AUD-V41-3, CR-V41-2, PL07-ST-3): a new row is written with
+   * one COMMERCE payment_pending_recorded `activities` row, in the same
+   * transaction (a row that can not be audited is not written; R0-CMF2 wrote
+   * the refund audit row the same way, since the contact-event registry has
+   * no type for it). It names the recorder (actorType SYSTEM for KEY, USER for
+   * a person, none without one) and, beside KEY only, `initiatedBy`: the
+   * person on whose behalf KEY extracted it (the uploader, from req.user),
+   * never a system actor, the same rule recordPayment applies. A replay writes
+   * no second row; the row stays after the confirmation.
    */
   async recordPendingPayment(
     invoiceId: string,
     businessId: string,
     input: ExtractedPaymentInput,
-    options: { actorId?: string | null } = {},
+    options: { actorId?: string | null; initiatedBy?: string | null } = {},
   ): Promise<Payment> {
     const actorId = options.actorId ?? null;
+    const initiatedBy =
+      isSystemActor(actorId) && options.initiatedBy && !isSystemActor(options.initiatedBy)
+        ? options.initiatedBy
+        : null;
     if (typeof input.amount !== 'number' || !Number.isFinite(input.amount)) {
       throw new BadRequestException('Payment amount must be a number');
     }
@@ -313,7 +353,7 @@ export class PaymentEvidenceService {
     }
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
-      select: { id: true, status: true, currency: true },
+      select: { id: true, status: true, currency: true, invoiceNumber: true, contactId: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
 
@@ -341,23 +381,56 @@ export class PaymentEvidenceService {
 
     let payment: Payment;
     try {
-      payment = await this.prisma.client.payment.create({
-        data: {
-          amount,
-          currency: invoice.currency,
-          // D-27: untrusted until a member confirms it; nothing is posted.
-          status: 'PENDING',
-          provider: input.method,
-          method: input.method,
-          providerPaymentId,
-          reference: input.reference ?? null,
-          notes: input.notes ?? null,
-          evidenceUrl: input.evidenceUrl ?? null,
-          evidenceMimeType: input.evidenceMimeType ?? null,
-          recordedBy: actorId,
-          businessId,
-          invoiceId,
-        },
+      payment = await this.prisma.client.$transaction(async (tx) => {
+        const created = await tx.payment.create({
+          data: {
+            amount,
+            currency: invoice.currency,
+            // D-27: untrusted until a member confirms it; nothing is posted.
+            status: 'PENDING',
+            // Review SEC-V41-1: never the method (EXTRACTED_PAYMENT_PROVIDER).
+            provider: EXTRACTED_PAYMENT_PROVIDER,
+            method: input.method,
+            providerPaymentId,
+            reference: input.reference ?? null,
+            notes: input.notes ?? null,
+            evidenceUrl: input.evidenceUrl ?? null,
+            evidenceMimeType: input.evidenceMimeType ?? null,
+            recordedBy: actorId,
+            businessId,
+            invoiceId,
+          },
+        });
+        // Review AUD-V41-3 / CR-V41-2: not caught; a row that can not be
+        // audited rolls the pending row back.
+        await tx.activity.create({
+          data: {
+            businessId,
+            module: 'COMMERCE',
+            action: PENDING_PAYMENT_AUDIT_ACTION,
+            type: 'invoice.payment_pending',
+            category: 'PAYMENT',
+            status: 'PENDING',
+            entityType: 'payment',
+            entityId: created.id,
+            title: 'Payment awaiting confirmation',
+            detail: `Invoice ${invoice.invoiceNumber ?? invoiceId}`,
+            contactId: invoice.contactId ?? null,
+            data: {
+              invoiceId,
+              amount,
+              currency: invoice.currency,
+              method: input.method,
+              reference: input.reference ?? null,
+              recordedBy: actorId,
+              ...(initiatedBy ? { initiatedBy } : {}),
+            },
+            // KEY is a SYSTEM actor, a person is USER; with no actor none is named.
+            actorType: actorId ? (isSystemActor(actorId) ? 'SYSTEM' : 'USER') : null,
+            actorId,
+          },
+        });
+        return created;
       });
     } catch (err: unknown) {
       // Two runs of the same keyed step raced: the winner's row is the answer.
@@ -396,21 +469,46 @@ export class PaymentEvidenceService {
    * retry after a failure between the record and the retirement, record it
    * once: the second replays the first payment and then finds the row already
    * retired (409).
+   *
+   * V1-41 review (SEC-V41-1): `options.amount` is the amount the member was
+   * shown and approved. When given it must be a finite number (400) equal, in
+   * cents, to the pending row's amount, or the confirmation is refused 409
+   * and writes nothing, so the money recorded is never other than what the
+   * member approved. A confirm route passes it from the member's request.
    */
-  async confirmPendingPayment(paymentId: string, businessId: string, memberId: string | null | undefined) {
+  async confirmPendingPayment(
+    paymentId: string,
+    businessId: string,
+    memberId: string | null | undefined,
+    options: { amount?: unknown } = {},
+  ) {
+    let approved: number | undefined;
+    if (options.amount !== undefined) {
+      if (typeof options.amount !== 'number' || !Number.isFinite(options.amount)) {
+        throw new BadRequestException('The approved amount must be a number');
+      }
+      approved = options.amount;
+    }
     await this.assertMemberMayRecordPayments(businessId, memberId);
     const pending = await this.prisma.client.payment.findFirst({ where: { id: paymentId, businessId } });
     if (!pending) throw new NotFoundException('Payment not found');
-    if (!pending.providerPaymentId.startsWith(EXTRACTED_PAYMENT_ID_PREFIX)) {
+    if (
+      !pending.providerPaymentId.startsWith(EXTRACTED_PAYMENT_ID_PREFIX) ||
+      pending.provider !== EXTRACTED_PAYMENT_PROVIDER
+    ) {
       throw new ConflictException('Only a payment extracted from evidence or a Drive intake can be confirmed');
     }
     if (pending.status !== 'PENDING') {
       throw new ConflictException(`This payment was already confirmed (it is ${pending.status})`);
     }
+    if (approved !== undefined && !moneyEquals(Number(pending.amount), approved)) {
+      throw new ConflictException('The pending payment amount differs from the amount approved; reload it and try again');
+    }
 
     const recorded = await this.commerce.recordPayment(pending.invoiceId, businessId, {
       amount: Number(pending.amount),
-      method: pending.method ?? pending.provider,
+      // The extracted method (the row's provider is EXTRACTED_PAYMENT_PROVIDER).
+      method: pending.method ?? 'OTHER',
       reference: pending.reference ?? undefined,
       notes: pending.notes ?? undefined,
       evidenceUrl: pending.evidenceUrl ?? undefined,

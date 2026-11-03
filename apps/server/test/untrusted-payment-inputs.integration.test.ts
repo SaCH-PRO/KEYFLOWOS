@@ -34,6 +34,24 @@
  *   V41-10     a Drive plan re-run after its payment was confirmed writes no
  *              second pending row and no second payment.
  *
+ * Review repairs (V1-41 review):
+ *   V41-11/12  SEC-V41-1, SEC-V41-2, CR-V41-1: an extracted row's provider is
+ *              EXTRACTED_PAYMENT_PROVIDER ('extracted'), which no customer
+ *              intent method equals, so the anonymous pay-link intent (its
+ *              "one PENDING row per invoice and method" upsert) never rewrites
+ *              the extracted amount: the intent gets its own row, the member
+ *              confirms what was extracted, and a Drive re-run still replays.
+ *   V41-13     SEC-V41-1: the member may bind the amount they approved
+ *              (confirmPendingPayment(..., { amount })); a mismatch is a 409
+ *              and writes nothing.
+ *   V41-14/15  AUD-V41-3, CR-V41-2 (PL07-ST-3): every new pending row writes,
+ *              in the same transaction, one COMMERCE payment_pending_recorded
+ *              `activities` row naming its recorder and, beside KEY, the
+ *              uploader (req.user, never the body) as data.initiatedBy; it
+ *              stays after the confirmation; a keyed replay adds none.
+ *   it.todo    CR-V41-3: no HTTP confirm route and no web copy for PENDING
+ *              (outside the V1-41 write set).
+ *
  * Nothing on the authorization or money boundary is mocked: PrismaService,
  * AuthGuard, BusinessGuard, ModuleScopeGuard, CommerceService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService, the chart of
@@ -84,8 +102,21 @@ const ID = {
   invEvRace: `${P}invEvRace`,
   invNotExtracted: `${P}invNotExtracted`,
   invDrvRerun: `${P}invDrvRerun`,
+  // review repairs (SEC-V41-1/2, CR-V41-1, AUD-V41-3, CR-V41-2)
+  invIntentOther: `${P}invIntentOther`,
+  invIntentCash: `${P}invIntentCash`,
+  invBound: `${P}invBound`,
+  invAuditEv: `${P}invAuditEv`,
+  invAuditDrv: `${P}invAuditDrv`,
   invB: `${P}invB`, // bizB
 };
+
+/** The pay-link token of invIntentOther (globally unique column: embeds the prefix). */
+const LINK_TOKEN = `${P}tok1`;
+
+// R0-00: this suite's public rate-limit windows are its own (NODE_ENV=test only).
+const PREVIOUS_RATE_LIMIT_NS = process.env.RATE_LIMIT_KEY_NAMESPACE;
+process.env.RATE_LIMIT_KEY_NAMESPACE = P;
 
 let db: any;
 let app: any;
@@ -186,9 +217,28 @@ async function outcomeOf(promise: Promise<unknown>): Promise<number | string> {
   }
 }
 
-function confirm(paymentId: string, businessId: string, memberId: string) {
+function confirm(paymentId: string, businessId: string, memberId: string, options?: { amount?: unknown }) {
   // V1-41: the confirm door; absent before this packet (TypeError).
-  return Promise.resolve().then(() => evidence.confirmPendingPayment(paymentId, businessId, memberId));
+  return Promise.resolve().then(() =>
+    options === undefined
+      ? evidence.confirmPendingPayment(paymentId, businessId, memberId)
+      : evidence.confirmPendingPayment(paymentId, businessId, memberId, options),
+  );
+}
+
+async function clearRateLimits() {
+  const keys: string[] = await redis.keys(`pub_rate_limit:${P}:*`);
+  if (keys.length) await redis.del(...keys);
+}
+
+/** The customer's anonymous offline intent through the live pay link (no identity header). */
+function publicIntent(token: string, body: Record<string, unknown>) {
+  return agent().post(`/commerce/public/invoice-link/${encodeURIComponent(token)}/payment-intent`).send(body);
+}
+
+/** The `activities` rows (real, fresh read) written for one payment row. */
+async function activitiesFor(paymentId: string): Promise<any[]> {
+  return db.activity.findMany({ where: { entityType: 'payment', entityId: paymentId }, orderBy: { occurredAt: 'asc' } });
 }
 
 /** Seed a drive intake awaiting approval whose plan records one payment on `invoiceId`. */
@@ -398,7 +448,12 @@ beforeAll(async () => {
 afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
-  if (redis) await redis.quit();
+  if (redis) {
+    await clearRateLimits().catch(() => undefined);
+    await redis.quit();
+  }
+  if (PREVIOUS_RATE_LIMIT_NS === undefined) delete process.env.RATE_LIMIT_KEY_NAMESPACE;
+  else process.env.RATE_LIMIT_KEY_NAMESPACE = PREVIOUS_RATE_LIMIT_NS;
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -605,4 +660,171 @@ describe('D-27: the Drive step stays idempotent across confirmation', () => {
     expect(before.payments.map((p) => p.status)).toEqual(['CONFIRMED', 'SUCCESSFUL']);
     expect(before.postings).toHaveLength(1);
   });
+});
+
+describe('review repairs: a customer payment intent never rewrites an extracted row (SEC-V41-1, SEC-V41-2, CR-V41-1)', () => {
+  it('V41-11: a Drive pending row with method "other", then an anonymous pay-link intent {method: "other", amount: 100} -> the intent writes its own PENDING row; the extracted row keeps 30 (provider "extracted"); the confirming member records 30, never the customer\'s 100', async () => {
+    const intakeId = `${P}drive_other`;
+    await seedDriveIntake(intakeId, ID.invIntentOther, { amount: 30, method: 'other', reference: 'V41A-DRV-OTHER' });
+    const approved = await approveIntakeAs(ID.writer, intakeId);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(201);
+    const pendingId = approved.body.results[0].entityId;
+    const [extracted] = await paymentsOf(ID.invIntentOther);
+    expect(extracted).toMatchObject({ id: pendingId, status: 'PENDING', amount: 30, method: 'other', provider: 'extracted', recordedBy: ID.writer });
+
+    await db.paymentLink.create({ data: { id: `${P}link1`, token: LINK_TOKEN, invoiceId: ID.invIntentOther, businessId: ID.bizA, active: true } });
+    await clearRateLimits();
+    const intent = await publicIntent(LINK_TOKEN, { method: 'other', amount: 100 });
+    expect(intent.status, JSON.stringify(intent.body)).toBe(201);
+
+    const rows = await paymentsOf(ID.invIntentOther);
+    expect(rows.map((r) => [r.status, r.amount, r.method, r.provider, r.recordedBy])).toEqual([
+      ['PENDING', 30, 'other', 'extracted', ID.writer],
+      ['PENDING', 100, 'other', 'other', null],
+    ]);
+    expect(rows[0].id).toBe(pendingId);
+    expect(rows[1].providerPaymentId.startsWith(`manual_${ID.invIntentOther}_intent_`)).toBe(true);
+
+    const result = await confirm(pendingId, ID.bizA, ID.owner);
+    expect(result.payment).toMatchObject({ status: 'SUCCESSFUL', amount: 30, method: 'other', provider: 'other', recordedBy: ID.owner });
+    const after = await paymentsOf(ID.invIntentOther);
+    expect(after.map((r) => [r.status, r.amount])).toEqual([
+      ['CONFIRMED', 30],
+      ['PENDING', 100],
+      ['SUCCESSFUL', 30],
+    ]);
+    const postings = await paymentPostingsOf(ID.invIntentOther);
+    expect(postings).toHaveLength(1);
+    expect(postings[0].externalRef).toBe(`Payment:${result.payment.id}:payment_recorded`);
+    expect(await invoiceStatus(ID.invIntentOther)).toBe('PARTIALLY_PAID');
+    expect(await balanceOf(ID.invIntentOther)).toEqual({ paidAmount: 30, remaining: 70 });
+  });
+
+  it('V41-12: a Drive pending row with method "cash", then intents {method: "cash"} with no amount and with 5 -> the extracted row keeps 40 and stays confirmable; the member records 40; a Drive re-run then replays the same row and writes nothing', async () => {
+    const intakeId = `${P}drive_cash`;
+    await seedDriveIntake(intakeId, ID.invIntentCash, { amount: 40, method: 'cash', reference: 'V41A-DRV-CASH' });
+    const approved = await approveIntakeAs(ID.writer, intakeId);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(201);
+    const pendingId = approved.body.results[0].entityId;
+
+    await commerce.recordPublicPaymentIntent(ID.invIntentCash, 'cash');
+    let rows = await paymentsOf(ID.invIntentCash);
+    expect(rows.map((r) => [r.id === pendingId, r.status, r.amount, r.provider])).toEqual([
+      [true, 'PENDING', 40, 'extracted'],
+      [false, 'PENDING', 0, 'cash'],
+    ]);
+    await commerce.recordPublicPaymentIntent(ID.invIntentCash, 'cash', 5);
+    rows = await paymentsOf(ID.invIntentCash);
+    expect(rows.map((r) => [r.id === pendingId, r.status, r.amount, r.provider])).toEqual([
+      [true, 'PENDING', 40, 'extracted'],
+      [false, 'PENDING', 5, 'cash'],
+    ]);
+
+    const result = await confirm(pendingId, ID.bizA, ID.owner);
+    expect(result.payment).toMatchObject({ status: 'SUCCESSFUL', amount: 40, recordedBy: ID.owner, reference: 'V41A-DRV-CASH' });
+    expect(await balanceOf(ID.invIntentCash)).toEqual({ paidAmount: 40, remaining: 60 });
+    const before = await moneyStateOf(ID.invIntentCash);
+
+    await db.driveIntakeFile.update({ where: { id: intakeId }, data: { status: 'reviewing', processedAt: null } });
+    const rerun = await approveIntakeAs(ID.owner, intakeId);
+    expect(rerun.status, JSON.stringify(rerun.body)).toBe(201);
+    expect(rerun.body.success, JSON.stringify(rerun.body)).toBe(true);
+    expect(rerun.body.results[0]).toMatchObject({ action: 'record_payment', success: true, entityId: pendingId });
+    expect(await moneyStateOf(ID.invIntentCash)).toEqual(before);
+  });
+});
+
+describe('review repairs: the confirming member binds the amount they approved (SEC-V41-1)', () => {
+  it('V41-13: confirm naming an amount other than the pending row\'s -> 409, a malformed amount -> 400, nothing written; the matching amount -> recorded and posted once', async () => {
+    const body = await evidencePayment(ID.owner, ID.bizA, ID.invBound, 45, 'v41a-ev-bound.pdf');
+    const before = await moneyStateOf(ID.invBound);
+
+    expect(await outcomeOf(confirm(body.payment.id, ID.bizA, ID.owner, { amount: 100 }))).toBe(409);
+    expect(await outcomeOf(confirm(body.payment.id, ID.bizA, ID.owner, { amount: 'abc' }))).toBe(400);
+    expect(await moneyStateOf(ID.invBound)).toEqual(before);
+    expect(before.payments).toEqual([expect.objectContaining({ status: 'PENDING', amount: 45 })]);
+
+    const result = await confirm(body.payment.id, ID.bizA, ID.owner, { amount: 45 });
+    expect(result.payment).toMatchObject({ status: 'SUCCESSFUL', amount: 45, recordedBy: ID.owner });
+    expect(await paymentPostingsOf(ID.invBound)).toHaveLength(1);
+    expect(await balanceOf(ID.invBound)).toEqual({ paidAmount: 45, remaining: 55 });
+  });
+});
+
+describe('review repairs: who recorded and who uploaded a pending payment stays on the audit trail (AUD-V41-3, CR-V41-2, PL07-ST-3)', () => {
+  it('V41-14: the writer uploads evidence (the body naming the owner as initiatedBy / recordedBy / actorId) -> one COMMERCE payment_pending_recorded activities row: actor KEY (SYSTEM), data.initiatedBy the writer; after the owner confirms, the row still names the writer and the money names the owner', async () => {
+    nextExtraction = {
+      documentType: 'receipt',
+      confidence: 0.9,
+      invoiceData: { total: 25, invoiceNumber: 'V41A-AUDIT-EV', notes: 'cash' },
+    };
+    const res = await agent()
+      .post(`/commerce/businesses/${ID.bizA}/invoices/${ID.invAuditEv}/payments/from-evidence`)
+      .set(HEADER, ID.writer)
+      .send({
+        evidenceUrl: 'https://evidence.test/v41a-audit.pdf', evidenceMimeType: 'application/pdf', filename: 'v41a-audit.pdf', source: 'upload',
+        initiatedBy: ID.owner, recordedBy: ID.owner, actorId: ID.owner,
+      });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const pendingId = res.body.payment.id;
+
+    const audit = await activitiesFor(pendingId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      businessId: ID.bizA,
+      module: 'COMMERCE',
+      action: 'payment_pending_recorded',
+      entityType: 'payment',
+      entityId: pendingId,
+      category: 'PAYMENT',
+      status: 'PENDING',
+      contactId: ID.contactA,
+      actorType: 'SYSTEM',
+      actorId: KEY_ACTOR,
+    });
+    expect(audit[0].data).toMatchObject({ invoiceId: ID.invAuditEv, amount: 25, recordedBy: KEY_ACTOR, initiatedBy: ID.writer });
+
+    const result = await confirm(pendingId, ID.bizA, ID.owner);
+    expect(result.payment.recordedBy).toBe(ID.owner);
+    const after = await activitiesFor(pendingId);
+    expect(after).toHaveLength(1);
+    expect(after[0].data.initiatedBy).toBe(ID.writer);
+    expect(JSON.stringify(after)).not.toContain(ID.owner);
+  });
+
+  it('V41-15: a Drive step\'s pending row names its approver (USER, no initiatedBy); a keyed re-run adds no second audit row; a caller with no human names no actor, and an initiatedBy beside a non-KEY recorder is not kept', async () => {
+    const intakeId = `${P}drive_audit`;
+    await seedDriveIntake(intakeId, ID.invAuditDrv, { amount: 12, method: 'cash', reference: 'V41A-DRV-AUDIT' });
+    const first = await approveIntakeAs(ID.writer, intakeId);
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const pendingId = first.body.results[0].entityId;
+
+    const audit = await activitiesFor(pendingId);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ module: 'COMMERCE', action: 'payment_pending_recorded', actorType: 'USER', actorId: ID.writer });
+    expect(audit[0].data).toMatchObject({ invoiceId: ID.invAuditDrv, amount: 12, method: 'cash', recordedBy: ID.writer });
+    expect(audit[0].data.initiatedBy).toBeUndefined();
+
+    await db.driveIntakeFile.update({ where: { id: intakeId }, data: { status: 'reviewing', processedAt: null } });
+    const rerun = await approveIntakeAs(ID.owner, intakeId);
+    expect(rerun.status, JSON.stringify(rerun.body)).toBe(201);
+    expect(rerun.body.results[0]).toMatchObject({ action: 'record_payment', success: true, entityId: pendingId });
+    expect(await activitiesFor(pendingId)).toHaveLength(1);
+
+    const unattended = await evidence.recordPendingPayment(
+      ID.invAuditDrv, ID.bizA, { amount: 3, method: 'cash' }, { actorId: null, initiatedBy: ID.owner },
+    );
+    const [row] = await activitiesFor(unattended.id);
+    expect(row).toMatchObject({ action: 'payment_pending_recorded', actorType: null, actorId: null });
+    expect(row.data).toMatchObject({ amount: 3, recordedBy: null });
+    expect(row.data.initiatedBy).toBeUndefined();
+  });
+
+  // CR-V41-3: the confirm door has no HTTP route and the web callers still
+  // say "recorded" for a PENDING payment. Both are outside the V1-41 write set
+  // (payment-evidence.service.ts, drive-intake-orchestrator.service.ts, this suite).
+  it.todo(
+    'V41-T1 (CR-V41-3): a member confirms a pending extracted payment over HTTP (revenue:write) and the web evidence / Drive flows say "pending confirmation", not "recorded" - ' +
+      'needs a confirm route in commerce.controller.ts and copy in apps/web standalone-payment-recorder.tsx / payment-record-modal.tsx; outside the V1-41 write set',
+  );
 });
