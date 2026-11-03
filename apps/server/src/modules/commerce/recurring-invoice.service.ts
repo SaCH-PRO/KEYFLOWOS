@@ -4,9 +4,29 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
 import { schedulersDisabled } from '../../core/config/env';
+import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
 
 /** lastError of a schedule whose contact belongs to another business (V1-12 review ST-12-3). */
 const CONTACT_OUTSIDE_BUSINESS = "the schedule's contact does not belong to its business; not billed";
+
+/**
+ * V1-37d-LEGACY-CURRENCY-PAYMENTS (D-13: one currency per business, documents
+ * default to it; TTD and USD supported). A schedule is a document generator, so
+ * it is held to the rule CommerceService.documentCurrency applies to invoices
+ * and quotes: a currency is postable on a business when it is the business
+ * currency or a D-13 currency. `null` when it is not.
+ */
+function d13DocumentCurrency(currency: string | null | undefined, businessCurrency: string | null | undefined): string | null {
+  const home = normalizeCurrency(businessCurrency) || 'TTD';
+  const code = normalizeCurrency(currency) || home;
+  return code === home || D13_CURRENCIES.includes(code) ? code : null;
+}
+
+/** Why `currency` is refused on a business that keeps `businessCurrency` (CommerceService's wording). */
+function unsupportedCurrency(currency: string | null | undefined, businessCurrency: string | null | undefined): string {
+  const home = normalizeCurrency(businessCurrency) || 'TTD';
+  return `Unsupported currency ${normalizeCurrency(currency)}: use the business currency ${home} or one of ${D13_CURRENCIES.join(', ')}`;
+}
 
 /**
  * The schedule as an event hands it to listeners. A contact of another
@@ -66,6 +86,9 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     metadata?: Record<string, unknown> | null;
   }) {
     const contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
+    // V1-37d (D-13): the business currency unless one is named (it was the
+    // literal 'TTD'); a named one is upper-cased and held to D-13.
+    const currency = await this.scheduleCurrency(input.businessId, input.currency);
     const recurringInvoice = await this.prisma.client.recurringInvoice.create({
       data: {
         businessId: input.businessId,
@@ -74,7 +97,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
         description: input.description ?? null,
         frequency: input.frequency,
         amount: input.amount,
-        currency: input.currency ?? 'TTD',
+        currency,
         startDate: new Date(input.startDate),
         endDate: input.endDate ? new Date(input.endDate) : null,
         nextRunDate: new Date(input.nextRunDate),
@@ -114,6 +137,23 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     return contactId;
   }
 
+  /**
+   * V1-37d (D-13): the currency a schedule is written in. None named: the
+   * business currency; named: upper-cased, and it must be the business
+   * currency or a D-13 currency, else 400 before anything is written. The
+   * invoices it generates carry it, so a JMD schedule on a TTD business would
+   * write new JMD documents.
+   */
+  private async scheduleCurrency(businessId: string, requested?: string | null): Promise<string> {
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { currency: true },
+    });
+    const currency = d13DocumentCurrency(requested, business?.currency);
+    if (!currency) throw new BadRequestException(unsupportedCurrency(requested, business?.currency));
+    return currency;
+  }
+
   async updateRecurringInvoice(input: {
     id: string;
     businessId: string;
@@ -138,7 +178,8 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     if (input.description !== undefined) data.description = input.description;
     if (input.frequency !== undefined) data.frequency = input.frequency;
     if (input.amount !== undefined) data.amount = input.amount;
-    if (input.currency !== undefined) data.currency = input.currency;
+    // V1-37d (D-13): a named currency is held to the create rule, before any write.
+    if (input.currency !== undefined) data.currency = await this.scheduleCurrency(input.businessId, input.currency);
     if (input.startDate !== undefined) data.startDate = new Date(input.startDate);
     if (input.endDate !== undefined) data.endDate = input.endDate ? new Date(input.endDate) : null;
     if (input.nextRunDate !== undefined) data.nextRunDate = new Date(input.nextRunDate);
@@ -308,6 +349,19 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
           throw new Error(CONTACT_OUTSIDE_BUSINESS);
         }
 
+        // V1-37d review (ST-V37D-2 / CR-V37D-2): a schedule stored before D-13
+        // in a currency its business may not write is refused here, before
+        // `due` is emitted (as ST-12-3 checks the contact above): `due` reaches
+        // automation (the KEY flow bridge, the 'Recurring Invoice Due -> Send
+        // Invoice' trigger). It is paused with the reason, so the next runs
+        // neither bill it nor report it again; its period stays due, and
+        // editing its currency (held to D-13) then resuming it bills that period.
+        const refusal = await this.d13Refusal(recurring);
+        if (refusal) {
+          await this.pauseRefusedSchedule(recurring, refusal, now);
+          continue;
+        }
+
         this.events.emit('recurring_invoice.due', {
           recurringInvoice: recurring,
           businessId: recurring.businessId,
@@ -367,6 +421,21 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
           if (!schedule || schedule.contact.businessId !== schedule.businessId) {
             throw new Error(CONTACT_OUTSIDE_BUSINESS);
           }
+          // V1-37d (D-13): a schedule stored before D-13 in a currency its
+          // business may not write (JMD on a TTD business) generates no new
+          // document in it. Refused before `due` above (and paused); checked
+          // again on the claimed row, under its lock, in case the business
+          // currency changed since the scan. The claim rolls back with this
+          // throw, the period stays due and the failure is recorded on the
+          // schedule. On CASH no posting would have refused the invoice.
+          const business = await tx.business.findUnique({
+            where: { id: schedule.businessId },
+            select: { currency: true },
+          });
+          const currency = d13DocumentCurrency(schedule.currency, business?.currency);
+          if (!currency) {
+            throw new Error(`${unsupportedCurrency(schedule.currency, business?.currency)}; not billed`);
+          }
 
           const invoice = await tx.invoice.create({
             data: {
@@ -382,7 +451,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
               discountValue: null,
               discountAmount: 0,
               total: schedule.amount,
-              currency: schedule.currency,
+              currency,
               notes: schedule.description,
               recurringInvoiceId: schedule.id,
               items: {
@@ -462,6 +531,52 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     }
 
     return results;
+  }
+
+  /**
+   * V1-37d review (ST-V37D-2): why the scanned schedule may not bill in its
+   * currency (D-13), or null when it may. The business is read only for a
+   * currency outside D-13: no currency, TTD and USD are always billable.
+   */
+  private async d13Refusal(schedule: { businessId: string; currency: string | null }): Promise<string | null> {
+    const code = normalizeCurrency(schedule.currency);
+    if (!code || D13_CURRENCIES.includes(code)) return null;
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: schedule.businessId },
+      select: { currency: true },
+    });
+    if (d13DocumentCurrency(schedule.currency, business?.currency)) return null;
+    return `${unsupportedCurrency(schedule.currency, business?.currency)}; not billed`;
+  }
+
+  /**
+   * V1-37d review (ST-V37D-2): pause a schedule D-13 refuses, record why, and
+   * report it once. A compare-and-set on the row the scan read (still ACTIVE,
+   * still in that currency): a schedule edited or paused since is left alone.
+   * nextRunDate is kept, so resuming it after its currency is edited bills the
+   * period that was due.
+   */
+  private async pauseRefusedSchedule(
+    recurring: { id: string; businessId: string; currency: string; contact?: { businessId: string } | null },
+    reason: string,
+    now: Date,
+  ): Promise<void> {
+    this.logger.warn(`Recurring invoice ${recurring.id} paused: ${reason}`);
+    const paused = await this.prisma.client.recurringInvoice.updateMany({
+      where: { id: recurring.id, status: 'ACTIVE', deletedAt: null, currency: recurring.currency },
+      data: {
+        status: 'PAUSED',
+        failureCount: { increment: 1 },
+        lastFailureAt: now,
+        lastError: reason.slice(0, 500),
+      },
+    });
+    if (paused.count === 0) return;
+    this.events.emit('recurring_invoice.failed', {
+      recurringInvoice: scheduleForEvent(recurring),
+      businessId: recurring.businessId,
+      error: reason,
+    });
   }
 
   private calculateNextRunDate(currentDate: Date, frequency: string): Date {
