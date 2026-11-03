@@ -42,6 +42,24 @@ export interface CronTriggerJob {
 /** The job name a trigger's repeatable is registered under: stable across schedule changes, unique per AgentTrigger id. */
 const cronTriggerJobName = (triggerId: string) => `cron-trigger:${triggerId}`;
 
+/** FOLLOW3-C3: how long onModuleDestroy waits for the workers' and events' own connections to be ready before it closes them. */
+const READY_BEFORE_CLOSE_MS = 2_000;
+
+/** Resolves once every one of these is ready or failed to initialize, or after `ms`, whichever comes first. */
+async function readyOrAfter(ms: number, items: Array<{ waitUntilReady(): Promise<unknown> } | undefined>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      Promise.all(items.map((item) => item?.waitUntilReady().catch(() => undefined))),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(QueueService.name);
@@ -107,6 +125,19 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
+    // FOLLOW3-C3 (CR-C3-1): each worker's blocking connection is a duplicate
+    // of this.redis that bullmq initializes in the background (connect, then
+    // an INFO for its version check). A close() before that INFO is answered
+    // disconnects the duplicate under it, and bullmq re-emits the rejected INFO
+    // on an emitter close() has already stripped: an unhandled 'Connection is
+    // closed' rejection from RedisConnection.getRedisVersionAndType <-
+    // RedisConnection.init (see TemporalFlowMemoryQueueService.onModuleDestroy).
+    // So they are closed once ready, or once they failed to initialize (the
+    // events connection too, although QueueEvents.close() already awaits its
+    // own). The wait is bounded: with Redis unreachable they never become ready
+    // (ioredis reconnects forever), and a shutdown must not wait on that; after
+    // the bound close() runs as before.
+    await readyOrAfter(READY_BEFORE_CLOSE_MS, [this.planWorker, this.cronWorker, this.planEvents]);
     await this.planWorker?.close();
     await this.cronWorker?.close();
     await this.planEvents?.close();
