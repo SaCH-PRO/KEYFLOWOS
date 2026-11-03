@@ -83,6 +83,23 @@
  *   V33-24  an order cancelled between the offline guard and the transaction
  *           is refused (409) and nothing is written (SEC-V33-5)
  *
+ * Trial-N repair round 2, recheck (G6PUB-RC1-1, G6PUB-RC1-3):
+ *
+ *   V33-26  D-69: a WiPay checkout of a cart that is not in TTD is refused
+ *           (400) before the order is written: no order, no store_order.created,
+ *           no payment session, no idempotency_keys row, with or without an
+ *           Idempotency-Key. createStorePayment refused it too, but only after
+ *           the order had committed, so every such checkout left an UNPAID
+ *           order (and a counted promo use) behind. Control: the same USD cart
+ *           in CASH is still an order
+ *   V33-27  POST .../orders/:orderId/refund moves money state, so it takes
+ *           revenue write and a member (D-46): anonymous 401, a STAFF member
+ *           with revenue:read 403, a platform SUPER_ADMIN who is not a member
+ *           403, another business's owner 403. And an order nothing was paid
+ *           on has nothing to refund: the owner is answered 409. None of them
+ *           writes anything or emits store_order.refunded (whose listener
+ *           booked an Expense for the order total)
+ *
  * Added with the fix (not in the tests-first commit): V33-12 and the
  * Idempotent-Replayed response-header assertions in V33-01 and V33-06.
  * Added with the review repairs: V33-13..V33-20 (V33-CR-1, SEC-V33-3,
@@ -130,12 +147,14 @@ const ID = {
   superAdmin: `${P}super_admin`, // platform SUPER_ADMIN, member of no business (D-46)
   bizA: `${P}biz_a`,
   bizB: `${P}biz_b`,
+  bizUsd: `${P}biz_usd`, // a USD business (D-13: one currency per business), owned by owner
   contactA: `${P}contact_a`,
   contactB: `${P}contact_b`,
   prodA: `${P}prod_a`,
   prodB: `${P}prod_b`,
+  prodUsd: `${P}prod_usd`,
 };
-const SLUG = { a: `${P}store-a`, b: `${P}store-b` };
+const SLUG = { a: `${P}store-a`, b: `${P}store-b`, usd: `${P}store-usd` };
 const CUSTOMER_EMAIL = `${P}customer@test.local`;
 const UNIT_PRICE = 40;
 const QUANTITY = 2;
@@ -216,6 +235,12 @@ function cart(productId = ID.prodA, paymentMethod = 'CASH', quantity = QUANTITY)
 function checkout(slug: string, body: CheckoutBody, key?: string) {
   const req = agent().post(`/site/storefront/public/${encodeURIComponent(slug)}/checkout`).send(body);
   return key === undefined ? req : req.set('Idempotency-Key', key);
+}
+
+/** The operator's refund of a storefront order. */
+function refund(actor: string | null, orderId: string, businessId = ID.bizA) {
+  const req = agent().post(`/site/businesses/${businessId}/orders/${orderId}/refund`).send({});
+  return actor ? req.set('x-test-user', actor) : req;
 }
 
 /** The operator's offline completion of a storefront order. */
@@ -308,7 +333,7 @@ beforeAll(async () => {
   db = dbMod.db;
 
   const { Test } = await import('@nestjs/testing');
-  const { ValidationPipe, Logger } = await import('@nestjs/common');
+  const { ValidationPipe, Logger, BadRequestException } = await import('@nestjs/common');
   const { EventEmitterModule, EventEmitter2 } = await import('@nestjs/event-emitter');
   const IORedis = (await import('ioredis')).default;
   const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
@@ -359,8 +384,12 @@ beforeAll(async () => {
   };
   let sessions = 0;
   const paymentsRecorder = {
-    createStorePayment: async (input: { orderId: string; method: string }) => {
+    createStorePayment: async (input: { orderId: string; method: string; currency?: string }) => {
       paymentCalls.push({ orderId: input.orderId, method: input.method });
+      // As PaymentsService.createStorePayment answers (D-69): WiPay takes TTD only.
+      if (input.method === 'WIPAY' && (input.currency ?? '').toUpperCase() !== 'TTD') {
+        throw new BadRequestException(`WiPay takes TTD only: this order is in ${input.currency}`);
+      }
       if (paymentDelayMs) await sleep(paymentDelayMs);
       if (failNextPayment) {
         failNextPayment = false;
@@ -449,6 +478,13 @@ beforeAll(async () => {
     data: { id: `${P}m_staff_a`, userId: ID.staffRead, businessId: ID.bizA, role: 'STAFF', permissionScopes: { revenue: 'read' } },
   });
   await db.membership.create({ data: { id: `${P}m_owner_b`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
+  await db.business.create({
+    data: { id: ID.bizUsd, name: 'V33A Store USD', slug: SLUG.usd, ownerId: ID.owner, currency: 'USD', accountingBasis: 'CASH', storeEnabled: true },
+  });
+  await db.membership.create({ data: { id: `${P}m_owner_usd`, userId: ID.owner, businessId: ID.bizUsd, role: 'OWNER' } });
+  await db.product.create({
+    data: { id: ID.prodUsd, businessId: ID.bizUsd, name: 'V33A USD Widget', price: UNIT_PRICE, currency: 'USD', category: 'PRODUCT', isActive: true },
+  });
   await app.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizA);
   await app.get(ChartOfAccountsSeederService).ensureDefaults(ID.bizB);
   for (const [id, businessId] of [[ID.contactA, ID.bizA], [ID.contactB, ID.bizB]] as const) {
@@ -981,4 +1017,54 @@ describe('V1-33 CASH-order offline completion (operator, revenue:write)', () => 
       'CASH order may legitimately be paid online later (payments.service.ts storefront_order checkout), and its genuine ' +
       'provider callback reaches the same door; the fix is a keyed signature check in payments.service.ts',
   );
+});
+
+describe('Trial-N repair round 2 recheck: D-69 before the order, and the refund route (G6PUB-RC1-1, G6PUB-RC1-3)', () => {
+  it('V33-26 (G6PUB-RC1-1, D-69) a WiPay checkout of a USD cart is refused (400) before the order is written; CASH still checks out', async () => {
+    const before = await orderCount(ID.bizUsd);
+    const keyRowsBefore = await db.idempotencyKey.count({ where: { businessId: ID.bizUsd } });
+
+    for (const key of [undefined, `${P}key_26`]) {
+      const res = await checkout(SLUG.usd, cart(ID.prodUsd, 'WIPAY'), key);
+      expect(res.status, JSON.stringify(res.body)).toBe(400);
+      expect(JSON.stringify(res.body)).toMatch(/WiPay takes TTD only/);
+    }
+
+    // At c549a12f: the order commits, then the payment step refuses it, so each attempt leaves an UNPAID order.
+    expect(await orderCount(ID.bizUsd), 'no order is written').toBe(before);
+    expect(created(), 'no store_order.created').toEqual([]);
+    expect(paymentCalls, 'no payment session is started').toEqual([]);
+    expect(await db.idempotencyKey.count({ where: { businessId: ID.bizUsd } }), 'no retry slot').toBe(keyRowsBefore);
+
+    // Control: the same USD cart paid in cash is an order (only WiPay is TTD-only).
+    const cash = await checkout(SLUG.usd, cart(ID.prodUsd, 'CASH'));
+    expect(cash.status, JSON.stringify(cash.body)).toBe(201);
+    expect(cash.body.order.currency).toBe('USD');
+    expect(await orderCount(ID.bizUsd)).toBe(before + 1);
+  });
+
+  it('V33-27 (G6PUB-RC1-3, D-46) the refund route takes revenue write and a member, and an order nothing was paid on is not refunded (409); nothing written', async () => {
+    const placed = await checkout(SLUG.a, cart());
+    expect(placed.status, JSON.stringify(placed.body)).toBe(201);
+    const orderId = placed.body.order.id;
+    const before = await moneyCounts();
+    seen = [];
+
+    const attempts: Array<[string, string | null, string, number]> = [
+      ['anonymous', null, ID.bizA, 401],
+      ['STAFF with revenue:read', ID.staffRead, ID.bizA, 403],
+      ['a SUPER_ADMIN who is not a member (D-46)', ID.superAdmin, ID.bizA, 403],
+      ["another business's owner", ID.ownerB, ID.bizA, 403],
+      ['the owner, on an order nothing was paid on', ID.owner, ID.bizA, 409],
+    ];
+    for (const [label, actor, businessId, status] of attempts) {
+      const res = await refund(actor, orderId, businessId);
+      expect(res.status, `${label}: ${JSON.stringify(res.body)}`).toBe(status);
+      const stored = await db.marketplaceOrder.findUnique({ where: { id: orderId } });
+      expect(`${stored.status}/${stored.paymentStatus}`, `${label}: the order is untouched`).toBe('PENDING/PENDING');
+    }
+
+    expect(await moneyCounts(), 'no invoice, payment or posting').toEqual(before);
+    expect(seen.filter((e) => e.name === 'store_order.refunded'), 'no store_order.refunded').toEqual([]);
+  });
 });

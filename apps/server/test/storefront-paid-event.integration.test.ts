@@ -86,6 +86,21 @@
  *   V18-13  POST /marketplace/businesses/:id/orders decides the type itself
  *           (STANDARD): a body type STOREFRONT creates no STOREFRONT order
  *
+ * Trial-N repair round 2, recheck (G6PUB-RC1-3, D-14):
+ *
+ *   V18-14  refunding a checked-out storefront order (StoreOrderService.
+ *           refundOrder, the site refund route) is a D-14 refund on its
+ *           invoice: one negative REFUNDED row of the order total linked to the
+ *           payment and naming the refunder, the SUCCESSFUL original kept, the
+ *           payment_recorded posting reversed (deposit net 0, trial balance
+ *           balanced), the invoice back to SENT with paidAt cleared, the order
+ *           REFUNDED; one store_order.refunded, and no Expense (the listener
+ *           booked the order total as an Expense, beside a PAID invoice and a
+ *           SUCCESSFUL payment). A second refund is refused and writes nothing
+ *   V18-15  an order nothing was paid on is not refunded (409): no event, no
+ *           Expense, nothing written (the listener booked the total as an
+ *           Expense for an UNPAID order)
+ *
  * Still open (it.todo): the store_order.paid listeners that do not read the
  * stored payment status (for a STANDARD order). V18-T3 (the web caller of the
  * CASH / MANUAL offline completion, V1-33) is covered by the web spec
@@ -145,6 +160,8 @@ let seen: Array<{ name: string; payload: any }> = [];
 const inflight: Promise<unknown>[] = [];
 /** Contact timeline events the listener asked CrmService to log. */
 const contactEvents: Array<{ businessId: string; type: string; orderId?: string }> = [];
+/** Expenses the listener asked ExpensesService to book (store_order.refunded books one). */
+const expenses: Array<{ businessId: string; amount: number; notes?: string }> = [];
 
 async function settle() {
   while (inflight.length > 0) {
@@ -287,6 +304,10 @@ beforeAll(async () => {
   const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
   const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
   const { FulfillmentRoutingService } = await import('../src/modules/marketplace/fulfillment-routing.service');
+  const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+  const { CommerceStatsService } = await import('../src/modules/commerce/commerce-stats.service');
+  const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
+  const { CatalogService } = await import('../src/modules/catalog/catalog.service');
   storedBalanceFn = workflowMod.balanceOfStoredRows;
 
   const crmStub = {
@@ -320,11 +341,24 @@ beforeAll(async () => {
         useValue: { logStorefrontEvent: async () => null, upsertStorefrontContact: async () => null, backstitchVisitor: async () => null },
       },
       { provide: InventoryRiskService, useValue: { evaluateProduct: async () => null } },
-      { provide: ExpensesService, useValue: { createExpense: async () => null } },
+      {
+        provide: ExpensesService,
+        useValue: {
+          createExpense: async (input: { businessId: string; amount: number; notes?: string }) => {
+            expenses.push({ businessId: input.businessId, amount: input.amount, notes: input.notes });
+            return null;
+          },
+        },
+      },
       { provide: TransactionalEmailService, useValue: {} },
       // The marketplace order routes' service (V18-10): real, over the same rows and bus.
       MarketplaceService,
       FulfillmentRoutingService,
+      // The D-14 refund door (markPaymentRefunded), real (V18-14). Its stand-ins are off the refund path.
+      CommerceService,
+      { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
+      { provide: SubscriptionsService, useValue: {} },
+      { provide: CatalogService, useValue: {} },
     ],
   }).compile();
 
@@ -728,6 +762,86 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     expect(created.map((o) => o.type), 'the answered type').toEqual(['STANDARD', 'STANDARD']);
     const paidStorefront = seen.filter((e) => e.name === 'store_order.paid' && String(e.payload?.order?.type ?? '').toUpperCase() === 'STOREFRONT');
     expect(paidStorefront, 'no store_order.paid names a STOREFRONT order').toEqual([]);
+  });
+
+  it('V18-14 (trial-N recheck G6PUB-RC1-3, D-14) refunding a checked-out storefront order is a D-14 refund on its invoice: a negative REFUNDED row naming the refunder, the posting reversed, the invoice back to SENT, the order REFUNDED, and no Expense; a second refund writes nothing', async () => {
+    const order = await placeOrder('CASH');
+    await storeOrders.completeCheckout({ orderId: order.id, paymentRef: `${P}ref_14`, provider: 'cash', method: 'cash', actorId: ID.owner });
+    await settle();
+    const { invoice, payment } = await expectOnePaidInvoice(order);
+    seen = [];
+    expenses.length = 0;
+
+    const refunded = await storeOrders.refundOrder(order.id, ID.biz, ID.owner);
+    await settle();
+
+    expect(`${refunded.status}/${refunded.paymentStatus}`, 'the answered order').toBe('REFUNDED/REFUNDED');
+    const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+    expect(`${stored.status}/${stored.paymentStatus}`, 'the stored order').toBe('REFUNDED/REFUNDED');
+
+    // At c549a12f: payments [SUCCESSFUL:80] only, the invoice PAID, and an Expense of 80 (RR-1).
+    const rows = await paymentsOf([invoice.id]);
+    expect(rows.map((p) => `${p.status}:${Number(p.amount)}`), 'the original kept, one negative refund row (D-14)').toEqual([
+      `SUCCESSFUL:${ORDER_TOTAL}`,
+      `REFUNDED:${-ORDER_TOTAL}`,
+    ]);
+    const refundRow = rows[1];
+    expect(refundRow.reference, 'the refund links to the payment').toBe(payment.providerPaymentId);
+    expect(refundRow.recordedBy, 'the refunder').toBe(ID.owner);
+    const reopened = await db.invoice.findUnique({ where: { id: invoice.id } });
+    expect(`${reopened.status}/${reopened.paidAt}`, 'a full refund reopens the invoice to SENT, paidAt cleared (D-14)').toBe('SENT/null');
+    const balance = storedBalanceFn(Number(invoice.total), rows.map((p) => ({ amount: Number(p.amount), status: p.status })), invoice.currency);
+    expect(balance.net, 'nothing net received').toBe(0);
+
+    const postings = await postingsOf([invoice.id, payment.id, refundRow.id]);
+    expect(postings.length, 'the recording and its reversal').toBeGreaterThanOrEqual(2);
+    const depositNet = money(
+      postings
+        .flatMap((t: any) => t.entries)
+        .filter((e: any) => DEPOSIT_KEYS.has(e.account?.systemKey))
+        .reduce((s: number, e: any) => s + Number(e.debit ?? 0) - Number(e.credit ?? 0), 0),
+    );
+    expect(depositNet, 'the cash taken is given back on the ledger').toBe(0);
+    const totals = await db.ledgerEntry.aggregate({ where: { businessId: ID.biz }, _sum: { debit: true, credit: true } });
+    expect(money(Number(totals._sum.debit ?? 0)), 'tenant trial balance').toBe(money(Number(totals._sum.credit ?? 0)));
+
+    expect(storeEvents().filter((n) => n === 'store_order.refunded'), 'one store_order.refunded').toHaveLength(1);
+    expect(expenses, 'no Expense: the refund is on the invoice, not a cost').toEqual([]);
+
+    // A second refund is refused and writes nothing.
+    const before = await counts();
+    seen = [];
+    const again = await storeOrders.refundOrder(order.id, ID.biz, ID.owner).then(
+      () => ({ status: 200 }),
+      (e: any) => ({ status: e?.status ?? e?.getStatus?.() }),
+    );
+    await settle();
+    expect(again.status, 'already refunded').toBe(400);
+    expect(await counts()).toEqual(before);
+    expect(storeEvents()).toEqual([]);
+    expect(expenses).toEqual([]);
+  });
+
+  it('V18-15 (trial-N recheck G6PUB-RC1-3) an order nothing was paid on is not refunded (409): no store_order.refunded, no Expense, nothing written', async () => {
+    const order = await placeOrder();
+    expect(order.paymentStatus).toBe('UNPAID');
+    const before = await counts();
+    seen = [];
+    expenses.length = 0;
+
+    const outcome = await storeOrders.refundOrder(order.id, ID.biz, ID.owner).then(
+      () => ({ status: 200, message: 'refunded' }),
+      (e: any) => ({ status: e?.status ?? e?.getStatus?.(), message: String(e?.message) }),
+    );
+    await settle();
+
+    // At c549a12f: REFUNDED/REFUNDED and an Expense of 80 for an order nobody paid (RR-2).
+    expect(outcome.status, outcome.message).toBe(409);
+    const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+    expect(`${stored.status}/${stored.paymentStatus}`, 'the order is untouched').toBe('PENDING/UNPAID');
+    expect(storeEvents(), 'no store_order.refunded').toEqual([]);
+    expect(expenses, 'no Expense').toEqual([]);
+    expect(await counts(), 'no invoice, payment or posting').toEqual(before);
   });
 
   it.todo(
