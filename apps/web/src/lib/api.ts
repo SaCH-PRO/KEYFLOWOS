@@ -184,9 +184,15 @@ function handleErrorResponse<T>(data: unknown, statusText: string, status?: numb
  * "undefined", "null" or unselected /businesses/ segment or businessId, or an
  * unbound businessId in the body of a route without one) or a missing id
  * ({ data: null, error: "Missing id" }: any other empty, "undefined" or "null"
- * path segment, or a trailing "/" before the query). Every lib/api/* module and
- * screen sends through these, so none can send /businesses//... or reach a list
- * route with an empty detail id. See lib/api/_defaults.ts unsendableRequest.
+ * path segment, or a trailing "/" before the query). The path is judged as
+ * written AND as fetch will send it (the WHATWG-normalised URL: ".", "..",
+ * "%2e" segments resolved, "\" read as "/", tab/CR/LF dropped, trailing spaces
+ * stripped), so `contacts/.` or `businesses/\t/` is refused like the shape it
+ * becomes, and a path whose business segment the wire would change (a ".."
+ * climbing over it) answers "No business selected" (review SEC-D11-1). Every
+ * lib/api/* module and screen sends through these, so none can send
+ * /businesses//... or reach a list route with an empty detail id. See
+ * lib/api/_defaults.ts unsendableRequest.
  */
 export async function apiPost<T>({ path, body, init }: FetchOptions): Promise<ApiResponse<T>> {
   const refused = unsendableRequest(path, body);

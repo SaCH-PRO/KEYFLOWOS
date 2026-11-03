@@ -35,10 +35,111 @@ const UNBOUND_QUERY = new RegExp(`[?&]businessId=(?:${UNSELECTED_BUSINESS}|undef
 /**
  * True when a request path or URL names no business, so it must not be sent:
  * its /businesses/ segment or its businessId query is unbound, or it carries
- * the unselected marker anywhere.
+ * the unselected marker anywhere, or the path fetch would actually send does
+ * not carry the business it names (wireChangesBusiness).
  */
 export function namesNoBusiness(pathOrUrl: string): boolean {
-  return pathOrUrl.includes(UNSELECTED_BUSINESS) || UNBOUND_SEGMENT.test(pathOrUrl) || UNBOUND_QUERY.test(pathOrUrl);
+  return (
+    pathOrUrl.includes(UNSELECTED_BUSINESS) ||
+    UNBOUND_SEGMENT.test(pathOrUrl) ||
+    UNBOUND_QUERY.test(pathOrUrl) ||
+    wireChangesBusiness(pathOrUrl)
+  );
+}
+
+/*
+ * FOLLOW3-D11 review SEC-D11-1. fetch does not send the path it is handed: it
+ * sends the WHATWG-parsed URL, which drops tab, CR and LF anywhere, reads "\"
+ * as "/", strips trailing spaces and control characters, and resolves ".",
+ * "..", "%2e" (and its spellings) segments. A judgement of the written path
+ * alone therefore let `contacts/.` reach the list route and `businesses/\t/`
+ * or `businesses/..` leave with an empty or no business segment. The guards
+ * below judge the path fetch will send as well as the one written. Percent-
+ * encoding (a space sent as %20, é as %C3%A9) changes no segment and is not a
+ * rewrite.
+ */
+
+/** Stands in for API_BASE: the transports send `${API_BASE}${path}`, and only the path is judged. */
+const WIRE_ORIGIN = "http://kf.invalid";
+const SCHEME_AND_AUTHORITY = /^[a-z][a-z\d+.-]*:\/\/[^/?#]*/i;
+/** Characters the URL parser never sends as written in a path: tab, LF and CR are dropped, "\" becomes "/". */
+const REWRITTEN_CHARACTER = /[\t\n\r\\]/;
+
+/** The path of a request path or URL as written: after any scheme and authority, before the query and fragment. */
+function writtenPathname(pathOrUrl: string): string {
+  return pathOrUrl.replace(SCHEME_AND_AUTHORITY, "").split(/[?#]/, 1)[0];
+}
+
+/** A path's segments, without the empty one before its leading "/". */
+function segmentsOf(pathname: string): string[] {
+  const segments = pathname.split("/");
+  if (segments[0] === "") segments.shift();
+  return segments;
+}
+
+/** A segment with its percent-escapes decoded where they decode (a malformed run is kept as written). */
+function decodeEscapes(segment: string): string {
+  return segment.replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  });
+}
+
+/** The written path's segments, escapes decoded. */
+function writtenSegments(pathOrUrl: string): string[] {
+  return segmentsOf(writtenPathname(pathOrUrl)).map(decodeEscapes);
+}
+
+/**
+ * The segments of the path fetch sends for this request path or URL, escapes
+ * decoded; null when no URL can be made of it (fetch then sends nothing).
+ */
+function wireSegments(pathOrUrl: string): string[] | null {
+  try {
+    const url = SCHEME_AND_AUTHORITY.test(pathOrUrl) ? new URL(pathOrUrl) : new URL(`${WIRE_ORIGIN}${pathOrUrl}`);
+    return segmentsOf(url.pathname).map(decodeEscapes);
+  } catch {
+    return null;
+  }
+}
+
+/** The segment after the first "businesses" segment, or undefined when the path has none. */
+function businessSegment(segments: string[]): string | undefined {
+  const at = segments.indexOf("businesses");
+  return at === -1 ? undefined : segments[at + 1];
+}
+
+/**
+ * True when the written path names a business (a /businesses/ segment) and the
+ * path fetch would send carries another business segment, or none: the
+ * business segment is a dot segment or whitespace, holds "\", a tab or a line
+ * break, or a later ".." climbs over it (`reserves/../../b2/...`).
+ */
+function wireChangesBusiness(pathOrUrl: string): boolean {
+  const written = writtenSegments(pathOrUrl);
+  if (!written.includes("businesses")) return false;
+  const wire = wireSegments(pathOrUrl);
+  if (wire === null) return false;
+  return businessSegment(wire) !== businessSegment(written);
+}
+
+/**
+ * True when fetch would send another path than the one written: a dot segment
+ * (".", "..", "%2e", ...) is resolved, "\" is read as "/", a tab, CR or LF is
+ * dropped, or trailing spaces or control characters are stripped. Only the path
+ * is judged; percent-encoding is not a rewrite.
+ */
+export function rewrittenOnTheWire(pathOrUrl: string): boolean {
+  const pathname = writtenPathname(pathOrUrl);
+  if (pathname === "") return false;
+  if (REWRITTEN_CHARACTER.test(pathname)) return true;
+  const wire = wireSegments(pathOrUrl);
+  if (wire === null) return false;
+  const written = writtenSegments(pathOrUrl);
+  return wire.length !== written.length || wire.some((segment, i) => segment !== written[i]);
 }
 
 /** A business id that names no business: not a string, empty, spelled out ("undefined", "null"), or the unselected marker. */
@@ -93,16 +194,17 @@ function isMissingSegment(segment: string): boolean {
 /**
  * True when a request path or URL names a missing id: a path segment that is
  * empty ("//", or a trailing "/" before the query or fragment) or spelled out
- * ("undefined", "null"). Only the path is read; the query and fragment are the
- * caller's data. No request path template in lib/** ends in "/" or holds "//"
- * (the census in lib/__tests__/api-empty-id-segment.test.ts).
+ * ("undefined", "null"), or a path fetch would not send as written
+ * (rewrittenOnTheWire: `contacts/.`, `contacts/%2e` and `contacts/ ` all leave
+ * as `contacts/`). Only the path is read; the query and fragment are the
+ * caller's data. No request path template in lib/** ends in "/", holds "//" or
+ * is rewritten on the wire (the census in
+ * lib/__tests__/api-empty-id-segment.test.ts).
  */
 export function namesMissingId(pathOrUrl: string): boolean {
-  const pathname = pathOrUrl.replace(/^[a-z][a-z\d+.-]*:\/\/[^/?#]*/i, "").split(/[?#]/, 1)[0];
+  const pathname = writtenPathname(pathOrUrl);
   if (pathname === "") return false;
-  const segments = pathname.split("/");
-  if (segments[0] === "") segments.shift();
-  return segments.some(isMissingSegment);
+  return segmentsOf(pathname).some(isMissingSegment) || rewrittenOnTheWire(pathOrUrl);
 }
 
 /** The ApiResult a transport answers with instead of sending a request that names a missing id. */
@@ -113,7 +215,9 @@ export function missingId(): { data: null; error: string } {
 /**
  * Why a request must not be sent, as the ApiResult to answer instead, or null
  * to send it: it names no business (requestNamesNoBusiness), else it names a
- * missing id (namesMissingId).
+ * missing id (namesMissingId). Both judge the path as written and as fetch
+ * will send it (WHATWG-normalised), so a dot segment, "\", tab, line break or
+ * trailing space cannot turn a refused shape into a sent one.
  */
 export function unsendableRequest(pathOrUrl: string, body?: unknown): { data: null; error: string } | null {
   if (requestNamesNoBusiness(pathOrUrl, body)) return noBusinessSelected();

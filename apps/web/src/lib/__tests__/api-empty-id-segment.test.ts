@@ -29,15 +29,25 @@
  *   - census: no legitimate request path template anywhere in lib/** ends in
  *     "/" or holds "//" (or an "undefined"/"null" segment), so the guard cannot
  *     refuse a request the app means to send.
+ *   - review SEC-D11-1: the guard judges the path fetch will send (the
+ *     WHATWG-normalised URL), not only the string it is handed, so a dot
+ *     segment, "\", tab/CR/LF or trailing space cannot turn a refused shape into
+ *     a sent one; proved with the stub and on the real wire (real fetch, local
+ *     node:http server), with controls that percent-encoding is not a rewrite,
+ *     and a census that no lib/** path template is rewritten on the wire.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import ts from "typescript";
 import * as api from "@/lib/api";
+import { namesNoBusiness, rewrittenOnTheWire } from "@/lib/api/_defaults";
 import { updateProductCostProfile, fetchProductCostProfile } from "@/lib/api/product-cost";
 import { fetchReserveBuckets, updateReserveBucket } from "@/lib/api/finance";
 import { fetchOrgUnits, deleteOrgUnit } from "@/lib/api/structure";
+import { fetchContactDetail } from "@/lib/client";
 
 const NO_BUSINESS = "No business selected";
 const MISSING_ID = "Missing id";
@@ -112,6 +122,56 @@ const BOUND_PATHS = [
   "/health",
 ];
 
+/*
+ * Review SEC-D11-1: fetch does not send the path it is handed but the
+ * WHATWG-normalised URL (".", "..", "%2e" segments resolved, "\" read as "/",
+ * tab/CR/LF dropped, trailing spaces stripped). The guard used to read only the
+ * written path, so each written path below passed it while the path after "->"
+ * (what the wire carries) is a shape the packet refuses. encodeURIComponent
+ * keeps "." and "..", so encoded helpers were open too.
+ */
+
+/** Written paths whose business segment the wire empties, drops or changes: refused as "No business selected". */
+const WIRE_UNBOUND_BUSINESS: Array<[written: string, wire: string]> = [
+  ["/finance/businesses/\t/accounts", "/finance/businesses//accounts"],
+  ["/finance/businesses/\\/accounts/acc_1", "/finance/businesses///accounts/acc_1"],
+  ["/finance/businesses/ ", "/finance/businesses/"],
+  ["/finance/businesses/./accounts", "/finance/businesses/accounts"],
+  ["/finance/businesses/%2e/accounts", "/finance/businesses/accounts"],
+  ["/commerce/businesses/../products/p1/cost-profile", "/commerce/products/p1/cost-profile"],
+  ["/finance/businesses/b1/reserves/../../b2/reserves/rb_9", "/finance/businesses/b2/reserves/rb_9"],
+  ["/finance/businesses/b1/%2E%2e/b2/accounts", "/finance/businesses/b2/accounts"],
+];
+
+/** Written paths with a bound business that the wire rewrites: refused as "Missing id". */
+const WIRE_MISSING_ID: Array<[written: string, wire: string]> = [
+  ["/crm/businesses/b1/contacts/.", "/crm/businesses/b1/contacts/"],
+  ["/crm/businesses/b1/contacts/%2e", "/crm/businesses/b1/contacts/"],
+  ["/crm/businesses/b1/contacts/%2E?include=notes", "/crm/businesses/b1/contacts/"],
+  ["/crm/businesses/b1/contacts/ ", "/crm/businesses/b1/contacts/"],
+  ["/crm/businesses/b1/contacts/\t", "/crm/businesses/b1/contacts/"],
+  ["/crm/businesses/b1/contacts/c_1/..", "/crm/businesses/b1/contacts/"],
+  ["/crm/businesses/b1/contacts/c_1/%2e%2e/c_2", "/crm/businesses/b1/contacts/c_2"],
+  ["/crm/businesses/b1/contacts\\c_1", "/crm/businesses/b1/contacts/c_1"],
+  ["/crm/businesses/b1/contacts/c\r\n_1", "/crm/businesses/b1/contacts/c_1"],
+  ["/identity/me/.", "/identity/me/"],
+];
+
+/**
+ * Controls: paths the wire does not rewrite are sent. Dots inside a segment are
+ * not dot segments, an escaped "/" stays one segment, percent-encoding (a space
+ * sent as %20) changes no segment, and the query and fragment are not judged.
+ */
+const WIRE_BOUND_PATHS: Array<[written: string, wire: string]> = [
+  ["/crm/businesses/b1/files/report.v2.pdf", "/crm/businesses/b1/files/report.v2.pdf"],
+  ["/crm/businesses/b1/contacts/c.1/notes", "/crm/businesses/b1/contacts/c.1/notes"],
+  ["/crm/businesses/b1/tags/a%2Fb", "/crm/businesses/b1/tags/a%2Fb"],
+  ["/crm/businesses/b1/tags/caf%C3%A9", "/crm/businesses/b1/tags/caf%C3%A9"],
+  ["/crm/businesses/b1/tags/a b", "/crm/businesses/b1/tags/a%20b"],
+  ["/crm/businesses/b1/contacts?next=/a/../b/./c", "/crm/businesses/b1/contacts"],
+  ["/crm/businesses/b1/contacts/c_1#x/../..", "/crm/businesses/b1/contacts/c_1"],
+];
+
 describe("FOLLOW3-D11 the lib/api.ts transports refuse an empty or unbound id segment", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -177,8 +237,45 @@ describe("FOLLOW3-D11 the lib/api.ts transports refuse an empty or unbound id se
         expect(sent.map((s) => s.url)).toEqual(BOUND_PATHS.map((p) => `${api.API_BASE}${p}`));
         expect(sent.every((s) => s.method === transport.method)).toBe(true);
       });
+
+      it("SEC-D11-1: refuses a path whose business segment the wire empties, drops or changes with 'No business selected', sending nothing", async () => {
+        const sent = stubNetwork();
+        const answers = await Promise.all(WIRE_UNBOUND_BUSINESS.map(([p]) => transport.call(p)));
+        expect(sent.map((s) => s.url)).toEqual([]);
+        expect(answers).toEqual(WIRE_UNBOUND_BUSINESS.map(() => ({ data: null, error: NO_BUSINESS })));
+      });
+
+      it("SEC-D11-1: refuses a path the wire rewrites (dot segment, '\\', tab/CR/LF, trailing space) with 'Missing id', sending nothing", async () => {
+        const sent = stubNetwork();
+        const answers = await Promise.all(WIRE_MISSING_ID.map(([p]) => transport.call(p)));
+        expect(sent.map((s) => s.url)).toEqual([]);
+        expect(answers).toEqual(WIRE_MISSING_ID.map(() => ({ data: null, error: MISSING_ID })));
+      });
+
+      it("SEC-D11-1 control: sends a path the wire does not rewrite, exactly as given", async () => {
+        const sent = stubNetwork();
+        for (const [p] of WIRE_BOUND_PATHS) {
+          const res = await transport.call(p);
+          expect(res.error, p).toBeNull();
+        }
+        expect(sent.map((s) => s.url)).toEqual(WIRE_BOUND_PATHS.map(([p]) => `${api.API_BASE}${p}`));
+      });
     });
   }
+
+  it("SEC-D11-1 sanity: every negative control really is rewritten by the URL parser fetch uses, and every control is not", () => {
+    const wireOf = (p: string) => new URL(`${api.API_BASE}${p}`).pathname;
+    for (const [written, wire] of [...WIRE_UNBOUND_BUSINESS, ...WIRE_MISSING_ID, ...WIRE_BOUND_PATHS]) {
+      expect(wireOf(written), JSON.stringify(written)).toBe(wire);
+    }
+    expect(WIRE_UNBOUND_BUSINESS.every(([p]) => namesNoBusiness(p))).toBe(true);
+    expect(WIRE_MISSING_ID.filter(([p]) => namesNoBusiness(p) || !rewrittenOnTheWire(p))).toEqual([]);
+    expect(WIRE_BOUND_PATHS.filter(([p]) => namesNoBusiness(p) || rewrittenOnTheWire(p))).toEqual([]);
+    // The judges read the path only: a written path without one, or an absolute URL, is judged the same way.
+    expect(rewrittenOnTheWire("?q=/a/../b")).toBe(false);
+    expect(rewrittenOnTheWire(`${api.API_BASE}/crm/businesses/b1/contacts/.`)).toBe(true);
+    expect(namesNoBusiness(`${api.API_BASE}/commerce/businesses/../products/p1`)).toBe(true);
+  });
 
   it("a write to a route that takes its business from the body refuses an unbound body businessId (requestNamesNoBusiness), and sends a bound one", async () => {
     const sent = stubNetwork();
@@ -274,6 +371,81 @@ describe("FOLLOW3-D11 the lib/api.ts transports refuse an empty or unbound id se
       expect(res).toEqual({ data: null, error: MISSING_ID });
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// SEC-D11-1 on the real wire: the real (undici) fetch, a local node:http server
+// ---------------------------------------------------------------------------
+
+describe("SEC-D11-1 on the real wire: what reaches the server is judged, not the string handed to fetch", () => {
+  const wire: Array<{ method: string; url: string }> = [];
+  const realFetch = globalThis.fetch;
+  let server: http.Server;
+  let origin = "";
+
+  beforeAll(async () => {
+    server = http.createServer((req, res) => {
+      wire.push({ method: req.method ?? "", url: req.url ?? "" });
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end("{}");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+    origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // Only the origin is swapped: the path reaches the real URL parser untouched.
+    vi.stubGlobal("fetch", (input: string, init?: RequestInit) => realFetch(String(input).replace(api.API_BASE, origin), init));
+  });
+  afterEach(() => {
+    wire.length = 0;
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const pathnameOf = (url: string) => new URL(url, origin).pathname;
+
+  it("no transport puts a rewritten negative control on the wire, and each answers as refused", async () => {
+    for (const transport of TRANSPORTS) {
+      for (const [p] of WIRE_UNBOUND_BUSINESS) expect(await transport.call(p), `${transport.name} ${JSON.stringify(p)}`).toEqual({ data: null, error: NO_BUSINESS });
+      for (const [p] of WIRE_MISSING_ID) expect(await transport.call(p), `${transport.name} ${JSON.stringify(p)}`).toEqual({ data: null, error: MISSING_ID });
+    }
+    expect(wire).toEqual([]);
+  });
+
+  it("the review's helper repros send nothing: product-cost business '..', an unencoded id climbing into another business, a client.ts business '..'", async () => {
+    window.localStorage.setItem("kf_business_id", STORED);
+    const answers = [
+      await fetchProductCostProfile("p1", ".."),
+      await updateProductCostProfile("p1", { sourceCost: 1 }, "."),
+      await updateReserveBucket("b1", "../../b2/reserves/rb_9", { name: "x" }),
+      // client.ts's own wrappers ask namesNoBusiness, which now judges the wire too.
+      await fetchContactDetail("c_1", ".."),
+    ];
+    expect(wire).toEqual([]);
+    expect(answers.map((a) => a.error)).toEqual([NO_BUSINESS, NO_BUSINESS, NO_BUSINESS, NO_BUSINESS]);
+  });
+
+  it("control: paths the wire does not rewrite arrive, at the path the parser sends", async () => {
+    for (const [p] of WIRE_BOUND_PATHS) expect((await api.apiGet(p)).error, p).toBeNull();
+    await fetchContactDetail("c.1", "b1");
+    await fetchProductCostProfile("p.1", "b1");
+    expect(wire.map((w) => `${w.method} ${pathnameOf(w.url)}`)).toEqual([
+      ...WIRE_BOUND_PATHS.map(([, wirePath]) => `GET ${wirePath}`),
+      "GET /crm/businesses/b1/contacts/c.1",
+      "GET /commerce/businesses/b1/products/p.1/cost-profile",
+    ]);
+  });
+
+  it.todo(
+    "fetchContactDetail('.', 'b1') (or '') is refused as a missing id: DEFERRED. It sends through lib/client.ts's private schema apiGet, " +
+      "which calls fetch itself and asks only namesNoBusiness, never namesMissingId, so a missing contact id still reaches the list route " +
+      "(as `''` always has). client.ts is outside this packet's write set (V1-45, V1-41b); the fix is one namesMissingId check there.",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -374,5 +546,17 @@ describe("CONTROL: census of the path templates in apps/web/src/lib/**", () => {
     expect(unexplained.map((t) => `${t.where} ${JSON.stringify(t.shape)}`)).toEqual([]);
     // The exceptions are exactly the ones pinned above, each still present.
     expect(new Set(flagged.map((t) => `${t.where.split(":")[0]} ${JSON.stringify(t.shape)}`))).toEqual(new Set(Object.keys(NOT_REQUEST_PATHS)));
+  });
+
+  it("SEC-D11-1: the wire judge would catch a bad template (sanity: it is not blind)", () => {
+    const probe = "const a = `/crm/businesses/${b}/contacts/./${id}`; const c = \"/crm\\\\x\"; const d = `${API_BASE}/x/%2e%2e/y`; const e = \"/x/a\\tb\";";
+    const shapes = templatesOf("probe.ts", probe).map((t) => t.shape);
+    expect(shapes).toEqual(["/crm/businesses/ID/contacts/./ID", "/crm\\x", "/x/%2e%2e/y", "/x/a\tb"]);
+    expect(shapes.filter(rewrittenOnTheWire)).toEqual(shapes);
+  });
+
+  it("SEC-D11-1: no request path template is rewritten on the wire (dot segment, '\\', tab/CR/LF, trailing space), so the wire judge refuses none the app means to send", () => {
+    const rewritten = paths.filter((t) => rewrittenOnTheWire(t.shape));
+    expect(rewritten.map((t) => `${t.where} ${JSON.stringify(t.shape)}`)).toEqual([]);
   });
 });
