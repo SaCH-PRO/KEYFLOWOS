@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
@@ -146,12 +146,28 @@ export class PaymentsOpsService {
   ): Promise<RefundResult> {
     if (!input.chargeId) throw new BadRequestException('Charge id is required');
     const gw = this.getGateway(gatewayId);
+    // V1-15d-STRIPE-OPS-TENANCY (F1): only the business's own charge is
+    // refunded; any other (another tenant's charge on the shared platform key,
+    // or a charge that is no one's) is refused like an unknown charge, before
+    // the provider is asked to move money. Stripe: the provider's own record
+    // on the shared key (StripeConnector.isOwnCharge; review SEC-V15D-1/2/3,
+    // CR-V15D-1/2). Other gateways: the business's own recorded payments.
+    const own =
+      gatewayId === 'stripe'
+        ? await this.stripe.isOwnCharge(businessId, input.chargeId)
+        : await this.ownsRecordedCharge(businessId, gatewayId, input.chargeId);
+    if (!own) throw new NotFoundException('Charge not found');
     try {
       const refund = await gw.refundCharge(businessId, input);
-      // Best-effort: record in our payments table
+      // Best-effort: record in our payments table. Only a payment of this
+      // business recorded under the charge id itself, as before V1-15d: a
+      // refund of one recorded under its Checkout Session or PaymentIntent id
+      // is recorded, linked and posted by the provider's refund event (the
+      // V1-29c door).
       try {
         const orig = await this.prisma.client.payment.findFirst({
-          where: { businessId, providerPaymentId: input.chargeId },
+          where: { businessId, provider: gatewayId, status: 'SUCCESSFUL', providerPaymentId: input.chargeId },
+          select: { invoiceId: true, providerPaymentId: true },
         });
         if (orig) {
           await this.prisma.client.payment.create({
@@ -163,7 +179,7 @@ export class PaymentsOpsService {
               status: 'REFUNDED',
               provider: gatewayId,
               providerPaymentId: refund.id,
-              reference: input.chargeId,
+              reference: orig.providerPaymentId,
               notes: input.reason ?? null,
             },
           });
@@ -178,6 +194,45 @@ export class PaymentsOpsService {
       }
       throw err;
     }
+  }
+
+  /**
+   * V1-15d-STRIPE-OPS-TENANCY (F1), for a gateway with no provider-side owner
+   * tag (PayPal): whether one of this business's SUCCESSFUL payments names
+   * `chargeId` (providerPaymentId or reference). Payment is outside the tenant
+   * extension (M31).
+   *
+   * On the business's own credentials only its own rows are read: no other
+   * tenant can reach that account. On the platform credentials only rows the
+   * provider's callback wrote (recordedBy null) count, and the charge is
+   * refused when such a row of another business names it too. A row a member
+   * typed through the manual payment route (recordedBy set, any method and
+   * reference) is no evidence there, for or against: it can neither claim
+   * another tenant's capture nor take one from its owner (review SEC-V15D-3).
+   */
+  private async ownsRecordedCharge(businessId: string, gatewayId: GatewayId, chargeId: string): Promise<boolean> {
+    const ownCredentials = await this.hasOwnCredentials(businessId, gatewayId);
+    const rows = await this.prisma.client.payment.findMany({
+      where: {
+        provider: gatewayId,
+        status: 'SUCCESSFUL',
+        OR: [{ providerPaymentId: chargeId }, { reference: chargeId }],
+        ...(ownCredentials ? { businessId } : { recordedBy: null }),
+      },
+      select: { businessId: true },
+    });
+    return rows.length > 0 && rows.every((r) => r.businessId === businessId);
+  }
+
+  /** Whether the business stores its own credentials for `gatewayId` (PayPal: client id and secret), so its operations never run on the platform's. */
+  private async hasOwnCredentials(businessId: string, gatewayId: GatewayId): Promise<boolean> {
+    if (gatewayId !== 'paypal') return false;
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+    const meta = (business?.metaData as Record<string, unknown> | null) ?? {};
+    return !!meta.paypalClientId && !!meta.paypalClientSecret;
   }
 
   async searchCharges(
