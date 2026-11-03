@@ -66,7 +66,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
@@ -574,5 +574,61 @@ describe('review repairs: a paused plan is not re-run, its saga is closed, and o
       expect(routed.slice(from).filter((r) => String(r.marker).startsWith(planId)).map((r) => r.userId), planId).toEqual([actor.userId]);
       expect(approvalsFor(planId), planId).toEqual([]);
     }
+  });
+});
+
+/**
+ * Trial-N repair round 2, KEY-PLANS-D46 (blocking). POST cortex/plans/:planId/execute ran every
+ * step of a member's plan through the commerce adapter, which writes as KEY_SYSTEM_ACTOR_ID, so the
+ * service membership check that refuses a non-member SUPER_ADMIN over HTTP never ran:
+ * assertMayExecutePlan returned at once for SUPER_ADMIN, and a STAFF creator with revenue read ran
+ * commerce.create_invoice on their own plan. Required: a plan with a step that writes the business's
+ * invoices or payments (the commerce module, the revenue scope) runs only for a member who holds
+ * revenue write (the OWNER by its role); a SUPER_ADMIN who is not a member is refused (D-46). The
+ * refusal comes before the claim: nothing is routed, no saga starts and the plan is left as it was.
+ */
+describe('Trial-N repair round 2: KEY plans that write invoices or payments (D-46)', () => {
+  const INVOICE = { module: 'commerce', action: 'create_invoice' };
+  const PAYMENT = { module: 'commerce', action: 'process_payment' };
+
+  it('KP-01 a platform SUPER_ADMIN who is not a member of the business is refused a plan that writes its invoices and payments: 403, nothing routed, no saga, the plan still pending', async () => {
+    const planId = `${P}plan_d46_super`;
+    await seedPlan(planId, [INVOICE, PAYMENT], null);
+    const from = routed.length;
+    const sagas = await sagaCount();
+
+    const err = await planner.executePlan(planId, {}, asSuperAdmin()).catch((e: unknown) => e);
+
+    expect(err, String(err)).toBeInstanceOf(ForbiddenException);
+    expect(String((err as Error).message)).toMatch(/not a member/i);
+    expect(routedPerStep(planId, from)).toEqual({});
+    expect(await sagaCount()).toBe(sagas);
+    expect(await planRow(planId)).toMatchObject({ status: 'pending', startedAt: null });
+  });
+
+  it('KP-02 a STAFF creator holding revenue read only (its role defaults) is refused its own plan that creates an invoice: 403 and nothing routed', async () => {
+    const planId = `${P}plan_d46_staff`;
+    await seedPlan(planId, [INVOICE], ID.staff);
+    const from = routed.length;
+
+    const err = await planner.executePlan(planId, {}, asStaff()).catch((e: unknown) => e);
+
+    expect(err, String(err)).toBeInstanceOf(ForbiddenException);
+    expect(String((err as Error).message)).toMatch(/revenue requires write/);
+    expect(routedPerStep(planId, from)).toEqual({});
+    expect((await planRow(planId)).status).toBe('pending');
+  });
+
+  it('KP-03 regression control: the OWNER runs the same invoice plan, every step once as the OWNER; a SUPER_ADMIN still runs a plan that writes no invoice', async () => {
+    const planId = `${P}plan_d46_owner`;
+    await seedPlan(planId, [INVOICE, PAYMENT], ID.owner);
+    const from = routed.length;
+    expect(await planner.executePlan(planId, {}, asOwner())).toMatchObject({ planId, status: 'completed', executed: 2 });
+    expect(routedPerStep(planId, from)).toEqual({ [`${planId}_s1`]: 1, [`${planId}_s2`]: 1 });
+    expect(routed.slice(from).filter((r) => String(r.marker).startsWith(planId)).map((r) => r.userId)).toEqual([ID.owner, ID.owner]);
+
+    const notes = `${P}plan_d46_super_notes`;
+    await seedPlan(notes, [NOTE], null);
+    expect(await planner.executePlan(notes, {}, asSuperAdmin())).toMatchObject({ planId: notes, status: 'completed', executed: 1 });
   });
 });

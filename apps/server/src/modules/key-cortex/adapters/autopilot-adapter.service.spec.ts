@@ -73,11 +73,13 @@ describe('AutopilotAdapterService', () => {
     expect(autopilot.approveTask).toHaveBeenCalledWith('t1', 'biz_123', 'user_456');
   });
 
-  it('reject_task delegates to denyTask', async () => {
+  // Aligned in trial-N repair round 2 (DENY-ACTOR): this pinned a deny with no actor; the member the
+  // command acts for is now handed over, and AutopilotService records them on the audit trail.
+  it('reject_task delegates to denyTask, denied by the command\'s member', async () => {
     (autopilot.denyTask as ReturnType<typeof vi.fn>).mockResolvedValue({ id: 't1', status: 'SKIPPED' });
     const result = await service.execute(mkCmd('reject_task', { taskId: 't1' }));
     expect(result.success).toBe(true);
-    expect(autopilot.denyTask).toHaveBeenCalledWith('t1', 'biz_123');
+    expect(autopilot.denyTask).toHaveBeenCalledWith('t1', 'biz_123', 'user_456');
   });
 
   it('complete_task delegates to updateTaskStatus COMPLETED, executed by the command\'s member', async () => {
