@@ -428,6 +428,11 @@
       "packet": "V1-37-DM-CURRENCY"
     },
     {
+      "prefix": "v41a_",
+      "owner": "apps/server/test/untrusted-payment-inputs.integration.test.ts",
+      "packet": "V1-41-DM-UNTRUSTED-MONEY-INPUTS"
+    },
+    {
       "prefix": "v42a_",
       "owner": "apps/server/test/invoice-transition-concurrency.integration.test.ts",
       "packet": "V1-42-DM-LIFECYCLE-OWNER-CAS"
