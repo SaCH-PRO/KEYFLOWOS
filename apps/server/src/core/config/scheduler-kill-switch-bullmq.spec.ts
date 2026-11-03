@@ -184,7 +184,10 @@ async function cleanQueue(name: string, ours: (j: { name: string; data?: any }) 
 }
 
 afterAll(async () => {
-  for (const c of connections) c.disconnect();
+  // quit() waits for the replies still owed on each connection; disconnect()
+  // closed them under in-flight BullMQ commands, which then rejected with
+  // 'Connection is closed' after the suite (an unhandled rejection in the run).
+  await Promise.all(connections.map((c) => c.quit().catch(() => undefined)));
 });
 
 const stub = () => ({}) as any;

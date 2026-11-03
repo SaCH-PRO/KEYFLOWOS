@@ -42,7 +42,12 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+
+// The V1-08 negative controls send every sibling read for several actors (dozens
+// of HTTP round trips per case); under the full parallel run the default 5s
+// budget times out with no assertion failing. Assertions unchanged.
+vi.setConfig({ testTimeout: 30_000 });
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
