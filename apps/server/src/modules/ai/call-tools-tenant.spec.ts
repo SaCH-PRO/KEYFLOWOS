@@ -47,6 +47,13 @@ function makePrisma() {
         callLogs.set(where.id, row);
         return row;
       }),
+      // completeCall writes with `completedAt: null` in its where (V1-54 review ST-1)
+      updateMany: vi.fn(async ({ where, data }: any) => {
+        const row = callLogs.get(where.id);
+        if (!matches(row, where)) return { count: 0 };
+        callLogs.set(where.id, { ...row, ...data });
+        return { count: 1 };
+      }),
     },
     contact: {
       findUnique: vi.fn(async ({ where }: any) => withRelations(contacts.get(where.id))),
@@ -99,6 +106,7 @@ describe("the call tools refuse another business's rows with no tenant context (
     await expect(run('call_log_outcome', { callLogId: 'cl_theirs', outcome: 'not_interested', notes: 'via KEY' })).rejects.toThrow('Call log not found');
     expect(prisma.callLogs.get('cl_theirs')).toMatchObject({ completedAt: null, notes: null });
     expect(prisma.client.callLog.update).not.toHaveBeenCalled();
+    expect(prisma.client.callLog.updateMany).not.toHaveBeenCalled();
     expect(emitter.emit).not.toHaveBeenCalled();
   });
 

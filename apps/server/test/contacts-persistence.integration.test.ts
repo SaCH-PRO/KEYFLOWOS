@@ -17,9 +17,10 @@
  *     crm_edit is none is refused 403 on POST and PATCH with no row change; an
  *     invalid email or an over-length name is refused 400 with no partial
  *     write; a STAFF member without delete scope is refused 403 on DELETE.
- *   - TODAY'S BEHAVIOUR, handed to V1-17: the soft-deleted holder still
- *     occupies the email, so re-creating it answers 409 with
- *     existingContactId null.
+ *   - Handed to V1-17 and flipped there (D-16): a soft-deleted contact no
+ *     longer occupies its email (the identity uniques cover live rows only),
+ *     so re-creating it answers 201 with a new live contact. Until V1-17 it
+ *     answered 409 with existingContactId null.
  *   - OWNER ON CREATE (review repair ST-3): naming another member as ownerId
  *     on POST needs the reassign permission PATCH already requires (403
  *     otherwise), and a non-member or unknown ownerId is refused 400, both
@@ -785,14 +786,22 @@ describe('REGRESSION CONTROL: an owner DELETE then a refresh', () => {
     await expectRefusedWithNoChange(() => patch(ID.owner, ID.cMain, { jobTitle: 'Ghost' }), 404, ID.cMain);
   });
 
-  it("TODAY'S BEHAVIOUR (handed to V1-17): re-creating the deleted contact's email answers 409 contact_email_taken with existingContactId null, and no live row is created", async () => {
+  it("V1-17 (D-16): re-creating the deleted contact's email answers 201 with a new live contact, and the deleted row keeps its deleted_at and its email", async () => {
     await settle();
+    const deletedBefore = await rawContact(ID.cMain);
+    expect(deletedBefore).toMatchObject({ email_normalized: MAIN_EMAIL });
+    expect(deletedBefore!.deleted_at).not.toBeNull();
     const tracesBefore = await traceCounts();
     const res = await post(ID.owner, { firstName: `${P}Again`, email: MAIN_EMAIL });
-    expect(res.status).toBe(409);
-    expect(res.body.code).toBe('contact_email_taken');
-    expect(res.body.details).toEqual({ existingContactId: null });
-    await settle();
-    expect(await traceCounts()).toEqual(tracesBefore);
+    expect(res.status).toBe(201);
+    expect(res.body).not.toHaveProperty('code');
+    expect(res.body.id).toBeTruthy();
+    expect(res.body.id).not.toBe(ID.cMain);
+    expect(await rawContact(res.body.id)).toMatchObject({ business_id: ID.bizA, email_normalized: MAIN_EMAIL, deleted_at: null });
+    // The soft-deleted contact is untouched: the same row, still deleted, still carrying the email.
+    expect(await rawContact(ID.cMain)).toEqual(deletedBefore);
+    const tracesAfter = await traceCounts();
+    expect(tracesAfter.contacts).toBe(tracesBefore.contacts + 1);
+    expect(tracesAfter.live).toBe(tracesBefore.live + 1);
   });
 });

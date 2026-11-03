@@ -32,6 +32,6 @@
     "REGRESSION CONTROL: an owner DELETE then a refresh after the DELETE a fresh GET of the detail answers 404 and the list no longer returns the contact",
     "REGRESSION CONTROL: an owner DELETE then a refresh the linked invoice is intact after the DELETE: the same row, still linked to the contact, not deleted (raw SQL)",
     "REGRESSION CONTROL: an owner DELETE then a refresh a PATCH of the deleted contact answers 404 and writes nothing",
-    "REGRESSION CONTROL: an owner DELETE then a refresh TODAY'S BEHAVIOUR (handed to V1-17): re-creating the deleted contact's email answers 409 contact_email_taken with existingContactId null, and no live row is created"
+    "REGRESSION CONTROL: an owner DELETE then a refresh V1-17 (D-16): re-creating the deleted contact's email answers 201 with a new live contact, and the deleted row keeps its deleted_at and its email"
   ]
 }

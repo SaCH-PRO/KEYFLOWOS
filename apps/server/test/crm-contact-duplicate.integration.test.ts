@@ -1,10 +1,10 @@
 /**
  * R0-D7-CONTACT-EMAIL-409 — duplicate contact identity inside a tenant (REAL database).
  *
- * The Contact table carries two tenant-scoped uniques (schema.prisma):
- *   @@unique([businessId, emailNormalized])
- *   @@unique([businessId, phoneNormalized])
- * Before this packet a second contact with an email (or phone) already held in
+ * The Contact table carries two tenant-scoped uniques, on
+ * (business_id, email_normalized) and (business_id, phone_normalized); since
+ * V1-17 they cover live (not soft-deleted) rows only, see the last block.
+ * Before R0-D7 a second contact with an email (or phone) already held in
  * the same business hit the index inside CrmService.createContact's
  * transaction and the Prisma P2002 surfaced as an opaque 500 — seen by the
  * Release 0 journey harness (D7) and by CONTACTS lane packet BP-04. The
@@ -40,8 +40,17 @@
  *
  * Cases tagged NEGATIVE CONTROL are the pre-fix failing controls: on the
  * packet's source base they answer 500 instead of 409.
+ *
+ * V1-17-DM-CONTACT-PARTIAL-UNIQUE (D-16) replaces those two full uniques with
+ * SQL-only partial unique indexes over live rows (`WHERE deleted_at IS NULL`,
+ * migration 20261101000000_contact_partial_identity_uniques), so a soft-deleted
+ * contact no longer keeps its email or phone reserved. Its cases are the last
+ * block of this file; its NEGATIVE CONTROL cases fail on the V1-08 head, where
+ * re-adding the customer of a soft-deleted contact answers 409 with
+ * existingContactId null.
  */
 import 'reflect-metadata';
+import fs from 'fs';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
@@ -72,6 +81,7 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM contact_audit_entries WHERE business_id LIKE '${P}%'`,
     `DELETE FROM contact_events WHERE business_id LIKE '${P}%'`,
+    `DELETE FROM merge_operations WHERE business_id LIKE '${P}%'`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE '${P}%'`,
     `DELETE FROM contacts WHERE business_id LIKE '${P}%'`,
     `DELETE FROM memberships WHERE id LIKE '${P}%'`,
@@ -521,36 +531,392 @@ describe('PATCH /crm/businesses/:businessId/contacts/:contactId — updating ont
   });
 });
 
-describe('a soft-deleted holder still occupies the unique (characterized, not a product decision)', () => {
-  // The unique index is on (business_id, email_normalized) with no deleted_at
-  // term, so a soft-deleted contact keeps its email reserved. The API answers
-  // 409 with the same code; the existing id is null because the holder is not
-  // a live contact and the detail route would answer 404 for it. Whether a
-  // deleted holder should be restored or released is a separate decision; this
-  // pins what the API does today so that decision starts from evidence.
-  //
-  // The GDPR forget flow soft-deletes a contact for its grace period, so the
-  // body must not say that the holder is deleted: it reads exactly like the
-  // live-holder 409 (same code, same message), only the id is null.
+
+describe('V1-17 — a soft-deleted contact releases its email and phone: the identity uniques cover live contacts only (D-16)', () => {
+  // D-16 (BUILD-MAP-001 section (g)) authorizes replacing the two full uniques
+  // with SQL-only partial unique indexes over live rows. Until then the index
+  // had no deleted_at term, so a soft-deleted contact (DELETE, the duplicate of
+  // a merge, a GDPR forget in its grace period) kept its email and phone
+  // reserved and the business could not add that customer again: the API
+  // answered 409 with existingContactId null (M12). Now the deleted row keeps
+  // its data and the slot is free; two live contacts still cannot share an
+  // email or phone in one business, and the database, not a read-then-write,
+  // still decides that. bizC is a tenant of its own so that the controller's
+  // per-tenant rate-limit bucket for bizA stays below its ceiling.
+  const BIZ = `${P}bizC`;
+  const EMAIL_INDEX = 'contacts_business_id_email_normalized_live_key';
+  const PHONE_INDEX = 'contacts_business_id_phone_normalized_live_key';
+  const MIGRATION = '20261101000000_contact_partial_identity_uniques';
   const GONE_EMAIL = `${P}gone@test.local`;
+  const GONE_PHONE = '+1 868 555 0177';
+  const GONE_PHONE_VARIANT = '+1 (868) 555-0177';
+  const GONE_PHONE_NORMALIZED = '+18685550177';
+  let goneId: string; // created, then soft-deleted through DELETE
+  let againId: string; // the same customer added again by email
+  let phoneAgainId: string; // the same customer added again by phone
 
-  it('creating with the email of a soft-deleted contact answers 409 contact_email_taken with existingContactId null, and the body does not say the holder is deleted', async () => {
-    const created = await post(ID.owner, ID.bizA, { firstName: `${P}Gone`, email: GONE_EMAIL });
-    expect(created.status).toBe(201);
-    await db.contact.delete({ where: { id: created.body.id } }); // soft-delete extension: sets deleted_at
-    const raw = await db.$queryRawUnsafe(`SELECT deleted_at FROM contacts WHERE id = '${created.body.id}'`);
-    expect(raw[0].deleted_at).not.toBeNull();
+  function del(actor: string, businessId: string, contactId: string) {
+    return request(app.getHttpServer())
+      .delete(`/crm/businesses/${businessId}/contacts/${contactId}`)
+      .set('x-test-user', actor);
+  }
 
-    const res = await post(ID.owner, ID.bizA, { firstName: `${P}Gone2`, email: GONE_EMAIL });
-    expect(res.status).toBe(409);
-    expectTaken(res.body, 'contact_email_taken', null);
-    expect(await db.contact.count({ where: { businessId: ID.bizA, emailNormalized: GONE_EMAIL, deletedAt: null } })).toBe(0);
+  /** The row as stored, read past the soft-delete extension. */
+  async function stored(id: string): Promise<{ deleted_at: Date | null; email_normalized: string | null; phone_normalized: string | null }> {
+    const rows = await db.$queryRawUnsafe(`SELECT deleted_at, email_normalized, phone_normalized FROM contacts WHERE id = '${id}'`);
+    return rows[0];
+  }
 
-    const live = await post(ID.owner, ID.bizA, { firstName: `${P}Gone3`, email: EMAIL });
-    expect(live.status).toBe(409);
-    expect(live.body.details.existingContactId).toBeTruthy();
-    expect(res.body.code).toBe(live.body.code);
-    expect(res.body.message).toBe(live.body.message);
-    expect(JSON.stringify(res.body)).not.toMatch(/delet/i);
+  function liveWith(where: Record<string, unknown>): Promise<number> {
+    return db.contact.count({ where: { businessId: BIZ, deletedAt: null, ...where } });
+  }
+
+  /** The ContactAuditEntry write is fire-and-forget (DEC-CONTACTS-002): wait for it to land. */
+  async function auditEntries(contactId: string, action: string, timeoutMs = 5_000) {
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const rows = await db.contactAuditEntry.findMany({ where: { businessId: BIZ, contactId, action } });
+      if (rows.length > 0 || Date.now() > deadline) return rows;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
+  function p2002(target: unknown) {
+    return Object.assign(new Error('Unique constraint failed'), { code: 'P2002', meta: { target } });
+  }
+
+  async function mapped(err: unknown, identity: { emailNormalized?: string | null; phoneNormalized?: string | null }) {
+    try {
+      await crm.rejectContactIdentityTaken(err, BIZ, identity);
+    } catch (thrown) {
+      return thrown as any;
+    }
+    return undefined;
+  }
+
+  beforeAll(async () => {
+    await db.business.create({ data: { id: BIZ, name: 'TCD Biz C', ownerId: ID.owner } });
+    await db.membership.create({ data: { id: `${P}m_owner_bizC`, userId: ID.owner, businessId: BIZ, role: 'OWNER' } });
   });
+
+  it('the database holds each identity unique as a partial index over live rows, and no full unique on either column pair remains', async () => {
+    const rows: Array<{ indexname: string; indexdef: string }> = await db.$queryRawUnsafe(
+      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'contacts' AND indexdef LIKE 'CREATE UNIQUE INDEX%'`,
+    );
+    for (const [column, name] of [['email_normalized', EMAIL_INDEX], ['phone_normalized', PHONE_INDEX]]) {
+      const onPair = rows.filter((r) => r.indexdef.includes(`(business_id, ${column})`));
+      expect(onPair.map((r) => r.indexname)).toEqual([name]);
+      expect(onPair[0].indexdef).toMatch(/ WHERE \(deleted_at IS NULL\)$/);
+    }
+  });
+
+  it('NEGATIVE CONTROL — after DELETE soft-deletes a contact, POST of the same customer (a case variant of the email) answers 201; the new contact is live and the deleted one keeps its row and identity', async () => {
+    const gone = await post(ID.owner, BIZ, { firstName: `${P}Gone`, email: GONE_EMAIL, phone: GONE_PHONE });
+    expect(gone.status).toBe(201);
+    goneId = gone.body.id;
+    expect((await del(ID.owner, BIZ, goneId)).status).toBe(200);
+    expect((await stored(goneId)).deleted_at).not.toBeNull();
+
+    const again = await post(ID.owner, BIZ, { firstName: `${P}Again`, email: GONE_EMAIL.toUpperCase() });
+    expect(again.status).toBe(201);
+    expect(again.body).not.toHaveProperty('code');
+    againId = again.body.id;
+    expect(againId).toBeTruthy();
+    expect(againId).not.toBe(goneId);
+    expect(await db.contact.findUnique({ where: { id: againId } })).toMatchObject({ businessId: BIZ, emailNormalized: GONE_EMAIL, deletedAt: null });
+
+    const old = await stored(goneId);
+    expect(old.deleted_at).not.toBeNull();
+    expect(old).toMatchObject({ email_normalized: GONE_EMAIL, phone_normalized: GONE_PHONE_NORMALIZED });
+    expect(await liveWith({ emailNormalized: GONE_EMAIL })).toBe(1);
+  });
+
+  it("NEGATIVE CONTROL — the soft-deleted contact's phone is free too: POST with a punctuation variant answers 201 and the new contact is live", async () => {
+    const res = await post(ID.owner, BIZ, { firstName: `${P}PhoneAgain`, phone: GONE_PHONE_VARIANT });
+    expect(res.status).toBe(201);
+    phoneAgainId = res.body.id;
+    expect(phoneAgainId).toBeTruthy();
+    expect(await db.contact.findUnique({ where: { id: phoneAgainId } })).toMatchObject({ phoneNormalized: GONE_PHONE_NORMALIZED, deletedAt: null });
+    expect((await stored(goneId)).deleted_at).not.toBeNull();
+    expect(await liveWith({ phoneNormalized: GONE_PHONE_NORMALIZED })).toBe(1);
+  });
+
+  it('a contact added again is recorded like any create (D-25): one ContactAuditEntry "created" naming the owner', async () => {
+    for (const id of [againId, phoneAgainId]) {
+      expect(id).toBeTruthy();
+      const rows = await auditEntries(id, 'created');
+      expect(rows).toHaveLength(1);
+      expect(rows[0].actor).toEqual({ type: 'USER', id: ID.owner });
+    }
+  });
+
+  it('two live contacts still cannot share an identity: another POST of the email answers 409 contact_email_taken naming the live contact, of the phone 409 contact_phone_taken naming the live contact, never 500', async () => {
+    const email = await post(ID.owner, BIZ, { firstName: `${P}Dup1`, email: GONE_EMAIL });
+    expect(email.status).toBe(409);
+    expectTaken(email.body, 'contact_email_taken', againId);
+    const phone = await post(ID.owner, BIZ, { firstName: `${P}Dup2`, phone: GONE_PHONE });
+    expect(phone.status).toBe(409);
+    expectTaken(phone.body, 'contact_phone_taken', phoneAgainId);
+    expect(await liveWith({ emailNormalized: GONE_EMAIL })).toBe(1);
+    expect(await liveWith({ phoneNormalized: GONE_PHONE_NORMALIZED })).toBe(1);
+  });
+
+  it("NEGATIVE CONTROL — PATCH of a live contact onto a soft-deleted contact's email and phone answers 200 and the live contact takes them", async () => {
+    const LEFT_EMAIL = `${P}left@test.local`;
+    const LEFT_PHONE = '+18685550188';
+    const left = await post(ID.owner, BIZ, { firstName: `${P}Left`, email: LEFT_EMAIL, phone: LEFT_PHONE });
+    const stay = await post(ID.owner, BIZ, { firstName: `${P}Stay`, email: `${P}stay@test.local` });
+    expect(left.status).toBe(201);
+    expect(stay.status).toBe(201);
+    expect((await del(ID.owner, BIZ, left.body.id)).status).toBe(200);
+
+    const res = await patch(ID.owner, BIZ, stay.body.id, { email: LEFT_EMAIL, phone: LEFT_PHONE });
+    expect(res.status).toBe(200);
+    expect(await db.contact.findUnique({ where: { id: stay.body.id } })).toMatchObject({ emailNormalized: LEFT_EMAIL, phoneNormalized: LEFT_PHONE, deletedAt: null });
+    const old = await stored(left.body.id);
+    expect(old.deleted_at).not.toBeNull();
+    expect(old.email_normalized).toBe(LEFT_EMAIL);
+  });
+
+  it('two concurrent POSTs of one new email: exactly one 201 and one 409 contact_email_taken naming the winner (the database decides, not a read-then-write)', async () => {
+    const RACE_EMAIL = `${P}race@test.local`;
+    const [a, b] = await Promise.all([
+      post(ID.owner, BIZ, { firstName: `${P}Race1`, email: RACE_EMAIL }),
+      post(ID.owner, BIZ, { firstName: `${P}Race2`, email: RACE_EMAIL }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([201, 409]);
+    const winner = a.status === 201 ? a : b;
+    const loser = a.status === 201 ? b : a;
+    expectTaken(loser.body, 'contact_email_taken', winner.body.id);
+    expect(await liveWith({ emailNormalized: RACE_EMAIL })).toBe(1);
+  });
+
+  it('the database refuses a second live holder: un-deleting the old contact while others hold its email and phone is a P2002, the row stays deleted, and rejectContactIdentityTaken maps that real error to 409 naming the live holder', async () => {
+    let caught: any;
+    try {
+      await db.contact.update({ where: { id: goneId }, data: { deletedAt: null } });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught?.code).toBe('P2002');
+    expect((await stored(goneId)).deleted_at).not.toBeNull();
+    expect(await liveWith({ emailNormalized: GONE_EMAIL })).toBe(1);
+    expect(await liveWith({ phoneNormalized: GONE_PHONE_NORMALIZED })).toBe(1);
+
+    const thrown = await mapped(caught, { emailNormalized: GONE_EMAIL, phoneNormalized: GONE_PHONE_NORMALIZED });
+    expect(thrown?.getStatus?.()).toBe(409);
+    const body = thrown.getResponse();
+    // Postgres reports whichever of the two indexes it checked first.
+    const expected = body.code === 'contact_email_taken' ? againId : phoneAgainId;
+    expect(['contact_email_taken', 'contact_phone_taken']).toContain(body.code);
+    expect(body.existingContactId).toBe(expected);
+  });
+
+  it('NEGATIVE CONTROL — a P2002 whose meta.target names a partial index instead of the column list still maps to 409 (email and phone); any other unique violation is rethrown untouched', async () => {
+    for (const target of [EMAIL_INDEX, [EMAIL_INDEX]]) {
+      const thrown = await mapped(p2002(target), { emailNormalized: GONE_EMAIL, phoneNormalized: null });
+      expect(thrown?.getStatus?.()).toBe(409);
+      expect(thrown.getResponse()).toMatchObject({ code: 'contact_email_taken', existingContactId: againId });
+    }
+    for (const target of [PHONE_INDEX, [PHONE_INDEX]]) {
+      const thrown = await mapped(p2002(target), { emailNormalized: null, phoneNormalized: GONE_PHONE_NORMALIZED });
+      expect(thrown?.getStatus?.()).toBe(409);
+      expect(thrown.getResponse()).toMatchObject({ code: 'contact_phone_taken', existingContactId: phoneAgainId });
+    }
+    for (const target of ['contacts_pkey', ['id'], undefined]) {
+      const other = p2002(target);
+      expect(await mapped(other, { emailNormalized: GONE_EMAIL, phoneNormalized: GONE_PHONE_NORMALIZED })).toBe(other);
+    }
+  });
+
+  it('DRIFT GUARD — schema.prisma declares no unique on either pair and names both SQL-only indexes, the migrate-dev rule and the db-push ban at the Contact model; the migration creates exactly those partial indexes, drops the full ones and states the same rules', () => {
+    const root = path.resolve(__dirname, '../../..');
+    const schema = fs.readFileSync(path.join(root, 'packages/db/prisma/schema.prisma'), 'utf8');
+    const model = schema.match(/\nmodel Contact \{[\s\S]*?\n\}/)?.[0] ?? '';
+    expect(model).toContain('@@map("contacts")');
+    const declarations = model.split('\n').filter((line) => !line.trim().startsWith('//')).join('\n');
+    expect(declarations).toContain('@@index([businessId])');
+    expect(declarations).not.toMatch(/@@unique\(\[businessId, (emailNormalized|phoneNormalized)\]/);
+    expect(declarations).not.toMatch(/(emailNormalized|phoneNormalized)\s+String\?[^\n]*@unique/);
+    // `prisma db push` would drop the full uniques on an unmigrated database
+    // and create neither partial index (review V117-ST-1 / CR-5), so the guard
+    // names it beside `migrate dev` and points at `migrate deploy`.
+    for (const text of [EMAIL_INDEX, PHONE_INDEX, MIGRATION, 'migrate dev', '--create-only', 'db push', 'migrate deploy']) {
+      expect(model).toContain(text);
+    }
+
+    const sql = fs.readFileSync(path.join(root, 'packages/db/prisma/migrations', MIGRATION, 'migration.sql'), 'utf8');
+    for (const [name, column] of [[EMAIL_INDEX, 'email_normalized'], [PHONE_INDEX, 'phone_normalized']]) {
+      expect(sql).toMatch(new RegExp(`CREATE UNIQUE INDEX "${name}"\\s+ON "contacts" \\("business_id", "${column}"\\)\\s+WHERE "deleted_at" IS NULL;`));
+    }
+    for (const full of ['contacts_business_id_email_normalized_key', 'contacts_business_id_phone_normalized_key']) {
+      expect(sql).toContain(`DROP INDEX IF EXISTS "${full}";`);
+    }
+    for (const text of ['migrate dev', '--create-only', 'db push', 'migrate deploy']) {
+      expect(sql).toContain(text);
+    }
+  });
+});
+
+describe('V1-17 review repairs — un-deleting a contact whose email or phone a live contact now holds (CR-4, V117-ST-3, CR-1, V117-ST-2)', () => {
+  // D-16 frees a soft-deleted contact's email and phone, so during a merge's
+  // 24h undo window (and a GDPR forget's grace period) another live contact can
+  // take them. Restoring the deleted row is then refused by the partial unique
+  // (P2002). revertMerge must answer that like every identity conflict, 409
+  // contact_email_taken / contact_phone_taken with the holder bounded by the
+  // actor's visibility, and never hand the client Prisma's message (it names
+  // the server's file path, source lines and the column list). bizD is a tenant
+  // of its own so the per-tenant rate-limit buckets of the blocks above stay
+  // below their ceilings.
+  const BIZ = `${P}bizD`;
+  const STAFF_BOOK = `${P}staffBookD`; // crm write, 'my book' (crm_view owned)
+  const P_EMAIL = `${P}keep@test.local`;
+  const P_PHONE = '+18685550201';
+  const D_EMAIL = `${P}merged@test.local`;
+  const D_PHONE = '+1 868 555 0202';
+  const D_PHONE_VARIANT = '+1 (868) 555-0202';
+  const D_PHONE_NORMALIZED = '+18685550202';
+  const LEAK = /invocation|prisma|unique constraint|\.ts\b|email_normalized|phone_normalized|business_id|node_modules/i;
+  let primaryId: string;
+  let duplicateId: string;
+  let mergeId: string;
+  let emailHolderId: string;
+
+  function del(actor: string, contactId: string) {
+    return request(app.getHttpServer())
+      .delete(`/crm/businesses/${BIZ}/contacts/${contactId}`)
+      .set('x-test-user', actor);
+  }
+
+  function merge(actor: string, keepId: string, dropId: string) {
+    return request(app.getHttpServer())
+      .post(`/crm/businesses/${BIZ}/contacts/${keepId}/merge/${dropId}`)
+      .set('x-test-user', actor)
+      .send({});
+  }
+
+  function revert(actor: string, id: string) {
+    return request(app.getHttpServer())
+      .post(`/crm/businesses/${BIZ}/duplicates/merges/${id}/revert`)
+      .set('x-test-user', actor)
+      .send({});
+  }
+
+  async function stored(id: string): Promise<{ deleted_at: Date | null; merged_into_id: string | null; email_normalized: string | null; phone_normalized: string | null }> {
+    const rows = await db.$queryRawUnsafe(`SELECT deleted_at, merged_into_id, email_normalized, phone_normalized FROM contacts WHERE id = '${id}'`);
+    return rows[0];
+  }
+
+  async function revertedAt(id: string): Promise<Date | null> {
+    const rows = await db.$queryRawUnsafe(`SELECT reverted_at FROM merge_operations WHERE id = '${id}'`);
+    return rows[0].reverted_at;
+  }
+
+  function liveWith(where: Record<string, unknown>): Promise<number> {
+    return db.contact.count({ where: { businessId: BIZ, deletedAt: null, ...where } });
+  }
+
+  beforeAll(async () => {
+    await db.business.create({ data: { id: BIZ, name: 'TCD Biz D', ownerId: ID.owner } });
+    await db.membership.create({ data: { id: `${P}m_owner_bizD`, userId: ID.owner, businessId: BIZ, role: 'OWNER' } });
+    await db.user.create({ data: { id: STAFF_BOOK, email: `${STAFF_BOOK}@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}m_staffBook_bizD`, userId: STAFF_BOOK, businessId: BIZ, role: 'STAFF', permissionScopes: { crm: 'write', crm_view: 'owned', crm_edit: 'owned' } } });
+
+    const keep = await post(ID.owner, BIZ, { firstName: `${P}Keep`, email: P_EMAIL, phone: P_PHONE });
+    const drop = await post(ID.owner, BIZ, { firstName: `${P}Merged`, email: D_EMAIL, phone: D_PHONE });
+    expect(keep.status).toBe(201);
+    expect(drop.status).toBe(201);
+    primaryId = keep.body.id;
+    duplicateId = drop.body.id;
+    const merged = await merge(ID.owner, primaryId, duplicateId);
+    expect(merged.status).toBe(201);
+    mergeId = merged.body.mergeId;
+    expect(mergeId).toBeTruthy();
+    expect(await stored(duplicateId)).toMatchObject({ merged_into_id: primaryId, email_normalized: D_EMAIL, phone_normalized: D_PHONE_NORMALIZED });
+    expect((await stored(duplicateId)).deleted_at).not.toBeNull();
+  });
+
+  it("NEGATIVE CONTROL — within the undo window another contact takes the merged duplicate's email (201), and the revert answers 409 contact_email_taken naming that live contact, with no database text in the body; nothing is restored and the merge stays revertable", async () => {
+    const taker = await post(ID.owner, BIZ, { firstName: `${P}Taker`, email: D_EMAIL.toUpperCase() });
+    expect(taker.status).toBe(201);
+    emailHolderId = taker.body.id;
+
+    const res = await revert(ID.owner, mergeId);
+    expect(res.status).toBe(409);
+    expectTaken(res.body, 'contact_email_taken', emailHolderId);
+    expect(JSON.stringify(res.body)).not.toMatch(LEAK);
+
+    const dup = await stored(duplicateId);
+    expect(dup.deleted_at).not.toBeNull();
+    expect(dup.merged_into_id).toBe(primaryId);
+    expect(await revertedAt(mergeId)).toBeNull();
+    expect(await liveWith({ emailNormalized: D_EMAIL })).toBe(1);
+  });
+
+  it("the revert's holder id is bounded by the actor's CRM visibility: a 'my book' STAFF who cannot open the holder gets the same 409 with existingContactId null and the id nowhere in the body", async () => {
+    const hidden = await revert(STAFF_BOOK, mergeId);
+    expect(hidden.status).toBe(409);
+    expectTaken(hidden.body, 'contact_email_taken', null);
+    expect(JSON.stringify(hidden.body)).not.toContain(emailHolderId);
+    expect(JSON.stringify(hidden.body)).not.toMatch(LEAK);
+    expect(await revertedAt(mergeId)).toBeNull();
+  });
+
+  it("NEGATIVE CONTROL — the same for the phone: once the email is free again but a live contact holds a punctuation variant of the duplicate's phone, the revert answers 409 contact_phone_taken naming it", async () => {
+    expect((await del(ID.owner, emailHolderId)).status).toBe(200);
+    const taker = await post(ID.owner, BIZ, { firstName: `${P}PhoneTaker`, phone: D_PHONE_VARIANT });
+    expect(taker.status).toBe(201);
+
+    const res = await revert(ID.owner, mergeId);
+    expect(res.status).toBe(409);
+    expectTaken(res.body, 'contact_phone_taken', taker.body.id);
+    expect(JSON.stringify(res.body)).not.toMatch(LEAK);
+    expect((await stored(duplicateId)).deleted_at).not.toBeNull();
+    expect(await revertedAt(mergeId)).toBeNull();
+
+    expect((await del(ID.owner, taker.body.id)).status).toBe(200);
+  });
+
+  it('positive control — with both values free again the same revert succeeds: the duplicate is live with its email and phone, the merge is stamped reverted, and a second revert is refused 400', async () => {
+    const res = await revert(ID.owner, mergeId);
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ mergeId, primaryId, duplicateId });
+    const dup = await stored(duplicateId);
+    expect(dup).toMatchObject({ deleted_at: null, merged_into_id: null, email_normalized: D_EMAIL, phone_normalized: D_PHONE_NORMALIZED });
+    expect(await revertedAt(mergeId)).not.toBeNull();
+    expect(await liveWith({ emailNormalized: D_EMAIL })).toBe(1);
+
+    const again = await revert(ID.owner, mergeId);
+    expect(again.status).toBe(400);
+  });
+
+  it('NEGATIVE CONTROL — a restore that fails for any other reason answers 400 "Failed to restore duplicate contact" with no database text, and the merge stays unreverted', async () => {
+    const keep = await post(ID.owner, BIZ, { firstName: `${P}Keep2`, email: `${P}keep2@test.local` });
+    const drop = await post(ID.owner, BIZ, { firstName: `${P}Merged2`, email: `${P}merged2@test.local` });
+    expect(keep.status).toBe(201);
+    expect(drop.status).toBe(201);
+    const merged = await merge(ID.owner, keep.body.id, drop.body.id);
+    expect(merged.status).toBe(201);
+    // The duplicate the operation names no longer exists, so the un-delete
+    // fails with a Prisma P2025 rather than a unique violation.
+    await db.$executeRawUnsafe(`UPDATE merge_operations SET duplicate_id = '${P}no_such_contact' WHERE id = '${merged.body.mergeId}'`);
+
+    const res = await revert(ID.owner, merged.body.mergeId);
+    expect(res.status).toBe(400);
+    expect(res.body.message).toBe('Failed to restore duplicate contact');
+    expect(JSON.stringify(res.body)).not.toMatch(LEAK);
+    expect(JSON.stringify(res.body)).not.toMatch(/not found|record/i);
+    expect(await revertedAt(merged.body.mergeId)).toBeNull();
+  });
+
+  // CR-1 / V117-ST-2 need a change outside the V1-17 write set
+  // (apps/server/src/modules/crm/privacy/contact-privacy.service.ts):
+  // ContactPrivacyService.cancelForget un-deletes with a bare
+  // tx.contact.update({ deletedAt: null }), so the P2002 it now meets reaches
+  // GlobalHttpExceptionFilter as a 500. The database still refuses the second
+  // live holder (see 'the database refuses a second live holder' above), so it
+  // fails closed, but the client gets no reason.
+  it.todo(
+    "CR-1 / V117-ST-2 (companion change to contact-privacy.service.ts, outside the V1-17 write set): POST .../contacts/:id/forget/cancel while a live contact holds the forgotten contact's email or phone answers 409 contact_email_taken / contact_phone_taken naming the holder the actor may see, not 500; the request stays 'requested', the contact stays deleted, and the cancel succeeds once the value is free",
+  );
 });
