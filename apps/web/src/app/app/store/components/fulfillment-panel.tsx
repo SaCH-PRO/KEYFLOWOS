@@ -60,9 +60,10 @@ const OFFLINE_PAYMENT_METHODS = new Set(["CASH", "MANUAL"]);
  * complete-offline, which records its invoice, payment and posting (revenue
  * write, a member). The marketplace mark_paid route refuses a storefront
  * order. Offered while the order is unpaid and not cancelled or refunded, also
- * once delivered (cash on delivery): the server keeps that status.
+ * once delivered (cash on delivery): the server keeps that status. The store
+ * order list (orders-panel.tsx) offers it on the same rule (G6PUB-RC1-2).
  */
-function canCompleteOffline(order: Order): boolean {
+export function canCompleteOffline(order: Pick<Order, "status" | "type" | "paymentStatus" | "paymentMethod">): boolean {
   const status = (order.status ?? "").toUpperCase();
   return (
     (order.type ?? "").toUpperCase() === "STOREFRONT" &&

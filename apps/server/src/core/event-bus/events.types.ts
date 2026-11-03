@@ -368,6 +368,12 @@ export class StoreOrderRefundedPayload {
   order!: any;
   businessId!: string;
   refundAmount?: number;
+  /**
+   * Trial-N recheck (G6PUB-RC1-3, D-14): the invoice the refund is recorded on
+   * (negative REFUNDED rows, the payment's posting reversed). Set, the books
+   * already carry the refund, so no Expense is booked for it.
+   */
+  invoiceId?: string;
 }
 
 export class StoreOrderRoutingFailedPayload {

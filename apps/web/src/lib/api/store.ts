@@ -39,6 +39,8 @@ export interface StoreOrder {
   currency: string;
   paymentStatus: string;
   paymentMethod?: string | null;
+  /** STOREFRONT (the public checkout) or STANDARD (a marketplace order). */
+  type?: string;
   items: StoreOrderItem[];
   createdAt: string;
   updatedAt: string;
@@ -117,6 +119,22 @@ export async function refundStoreOrder(
 ): Promise<{ data: StoreOrder | null; error: string | null }> {
   return apiPost<StoreOrder>({
     path: `/site/businesses/${encodeURIComponent(businessId)}/orders/${encodeURIComponent(orderId)}/refund`,
+    body: {},
+  });
+}
+
+/**
+ * V1-33 / trial-N recheck G6PUB-RC1-2: records the cash a customer paid for an
+ * unpaid CASH or MANUAL storefront order (its invoice, payment and posting).
+ * Revenue write, a member; the server decides the amount and the recorder, so
+ * the body carries nothing.
+ */
+export async function completeStoreOrderOffline(
+  businessId: string,
+  orderId: string,
+): Promise<{ data: StoreOrder | null; error: string | null }> {
+  return apiPost<StoreOrder>({
+    path: `/site/businesses/${encodeURIComponent(businessId)}/orders/${encodeURIComponent(orderId)}/complete-offline`,
     body: {},
   });
 }

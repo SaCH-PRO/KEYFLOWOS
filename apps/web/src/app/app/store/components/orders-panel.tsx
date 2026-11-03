@@ -8,8 +8,10 @@ import {
   fetchStoreOrders,
   updateStoreOrderStatus,
   refundStoreOrder,
+  completeStoreOrderOffline,
   type StoreOrder,
 } from "@/lib/api/store";
+import { canCompleteOffline } from "./fulfillment-panel";
 import {
   Search,
   Filter,
@@ -44,6 +46,11 @@ interface Order {
   total: number;
   status: OrderStatus;
   paymentMethod: string;
+  /** The stored values the Complete offline rule reads (G6PUB-RC1-2). */
+  apiStatus: string;
+  type: string;
+  paymentStatus: string;
+  rawPaymentMethod: string | null;
   /**
    * MarketplaceOrder keeps no status history — there is no audit table and no
    * status-change log. The panel used to render a full invented timeline
@@ -97,6 +104,10 @@ function fromApi(o: StoreOrder): Order {
     total: o.total,
     status: statusFromApi(o.status),
     paymentMethod: o.paymentMethod ?? "—",
+    apiStatus: o.status ?? "",
+    type: o.type ?? "",
+    paymentStatus: o.paymentStatus ?? "",
+    rawPaymentMethod: o.paymentMethod ?? null,
     placedAt: o.createdAt,
     lastUpdatedAt: o.updatedAt,
   };
@@ -126,7 +137,23 @@ const STATUS_FILTERS: { value: OrderStatus | "all"; label: string }[] = [
   { value: "refunded", label: "Refunded" },
 ];
 
-function OrderDetailSheet({ order, onClose, onStatusUpdate }: { order: Order; onClose: () => void; onStatusUpdate: (orderId: string, newStatus: OrderStatus) => void }) {
+function OrderDetailSheet({
+  order,
+  onClose,
+  onStatusUpdate,
+  onCompleteOffline,
+}: {
+  order: Order;
+  onClose: () => void;
+  onStatusUpdate: (orderId: string, newStatus: OrderStatus) => void;
+  onCompleteOffline: (orderId: string) => void;
+}) {
+  const offlinePayable = canCompleteOffline({
+    status: order.apiStatus,
+    type: order.type,
+    paymentStatus: order.paymentStatus,
+    paymentMethod: order.rawPaymentMethod,
+  });
   const currentIdx = STATUS_FLOW.indexOf(order.status);
   const nextStatus = currentIdx >= 0 && currentIdx < STATUS_FLOW.length - 1 ? STATUS_FLOW[currentIdx + 1] : null;
 
@@ -142,8 +169,24 @@ function OrderDetailSheet({ order, onClose, onStatusUpdate }: { order: Order; on
           <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Customer</h4>
           <p className="text-sm font-medium">{order.customerName}</p>
           <p className="text-xs text-muted-foreground">{order.customerEmail}</p>
-          <p className="text-xs text-muted-foreground">Payment: {order.paymentMethod}</p>
+          <p className="text-xs text-muted-foreground">Payment: {order.paymentMethod}{order.paymentStatus ? ` · ${order.paymentStatus}` : ""}</p>
         </div>
+
+        {/*
+          Trial-N recheck G6PUB-RC1-2 (V1-33): every unpaid CASH or MANUAL
+          storefront order in this list can be completed offline. The server
+          records its invoice, payment and posting, with the signed-in member
+          (revenue write) as the recorder.
+        */}
+        {offlinePayable && (
+          <button
+            onClick={() => onCompleteOffline(order.id)}
+            className="w-full text-sm font-medium px-4 py-2.5 rounded-lg transition-colors min-h-[44px]"
+            style={{ background: "hsl(var(--kf-success))", color: "hsl(var(--kf-success-foreground, 0 0% 100%))" }}
+          >
+            <CheckCircle2 className="w-3.5 h-3.5 inline mr-1.5" />Complete offline
+          </button>
+        )}
 
         <div className="rounded-xl p-4 space-y-3" style={{ background: "hsl(var(--kf-muted)/0.08)", border: "1px solid hsl(var(--kf-border)/0.3)" }}>
           <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Items</h4>
@@ -301,6 +344,20 @@ export function OrdersPanel() {
     toast.success(`Order ${updated.ref} is now ${updated.status}`);
   }, [businessId, load]);
 
+  const handleCompleteOffline = useCallback(async (orderId: string) => {
+    if (!businessId) return;
+    const { data, error } = await completeStoreOrderOffline(businessId, orderId);
+    if (error || !data) {
+      toast.error(error || "Could not record the payment. Please try again.");
+      return;
+    }
+    // Render the order the server answered (paid, its status kept or CONFIRMED).
+    const updated = fromApi(data);
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+    setSelectedOrder((prev) => (prev && prev.id === orderId ? updated : prev));
+    toast.success(`Payment recorded for ${updated.ref}`);
+  }, [businessId]);
+
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: orders.length };
     for (const o of orders) c[o.status] = (c[o.status] ?? 0) + 1;
@@ -415,7 +472,12 @@ export function OrdersPanel() {
       </div>
 
       {selectedOrder && (
-        <OrderDetailSheet order={selectedOrder} onClose={() => setSelectedOrder(null)} onStatusUpdate={handleStatusUpdate} />
+        <OrderDetailSheet
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+          onStatusUpdate={handleStatusUpdate}
+          onCompleteOffline={handleCompleteOffline}
+        />
       )}
     </motion.div>
   );

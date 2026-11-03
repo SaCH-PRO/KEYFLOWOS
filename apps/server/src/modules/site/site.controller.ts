@@ -338,13 +338,21 @@ export class SiteController {
     return this.storeOrderService.completeOfflineOrder(orderId, businessId, req?.user?.id ?? null);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard)
+  /**
+   * Trial-N recheck (G6PUB-RC1-3): a refund moves money state, so it takes
+   * revenue write, like recording a payment, and the refunder is the
+   * authenticated member (D-46: a SUPER_ADMIN who is not one is refused).
+   * StoreOrderService.refundOrder records it through the D-14 refund door.
+   */
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/orders/:orderId/refund')
   refundOrder(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.storeOrderService.refundOrder(orderId, businessId);
+    return this.storeOrderService.refundOrder(orderId, businessId, req?.user?.id ?? null);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

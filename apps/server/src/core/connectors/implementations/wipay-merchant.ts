@@ -37,6 +37,19 @@ export function resolveWipayMerchant(metaData: unknown): WipayMerchant {
   return { apiKey: configured(process.env.WIPAY_API_KEY), accountNumber: configured(process.env.WIPAY_ACCOUNT_NUMBER) };
 }
 
+/** D-69: the one currency a WiPay checkout is made in, until WiPay's currency parameter is verified from its docs. */
+export const WIPAY_CURRENCY = 'TTD';
+
+/**
+ * D-69: whether WiPay takes an amount in this currency (compared trimmed and
+ * upper-cased, as normalizeCurrency does). The gateway lists, both checkouts
+ * (PaymentsService) and the storefront order door (StoreOrderService.
+ * createOrder, before the order is written) read this one rule.
+ */
+export function wipayTakesCurrency(currency: string | null | undefined): boolean {
+  return typeof currency === 'string' && currency.trim().toUpperCase() === WIPAY_CURRENCY;
+}
+
 /** Whether a WiPay checkout can start and its callback be verified: both sides of one merchant are set. */
 export function wipayMerchantComplete(merchant: WipayMerchant): merchant is { apiKey: string; accountNumber: string } {
   return merchant.apiKey !== null && merchant.accountNumber !== null;

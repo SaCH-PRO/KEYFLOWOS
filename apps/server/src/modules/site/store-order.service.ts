@@ -1,4 +1,4 @@
-import { Injectable, Inject, BadRequestException, ConflictException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, Inject, Optional, forwardRef, BadRequestException, ConflictException, ForbiddenException, NotFoundException, ServiceUnavailableException, Logger } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -11,8 +11,10 @@ import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { InventoryRiskService } from '../commerce/inventory-risk.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { CommerceService } from '../commerce/commerce.service';
 import { isSystemActor } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { WIPAY_CURRENCY, wipayTakesCurrency } from '../../core/connectors/implementations/wipay-merchant';
 
 /**
  * V1-33: what a storefront checkout's Idempotency-Key slot remembers, in the
@@ -147,6 +149,8 @@ export class StoreOrderService {
     @Inject(InventoryRiskService) private readonly inventoryRisk: InventoryRiskService,
     @Inject(RevenueAttributionService) private readonly revenueAttribution: RevenueAttributionService,
     @Inject(RevenuePostingService) private readonly revenuePosting: RevenuePostingService,
+    /** The D-14 refund door (refundOrder). Optional only so the unit harnesses that never refund need not build it. */
+    @Optional() @Inject(forwardRef(() => CommerceService)) private readonly commerce?: CommerceService,
   ) {}
 
   async validateCart(items: { productId: string; quantity: number }[], businessId: string) {
@@ -295,6 +299,17 @@ export class StoreOrderService {
       input.promoCode,
       input.shippingInfo?.zoneId,
     );
+
+    // D-69 (trial-N recheck G6PUB-RC1-1): WiPay takes TTD only. A WiPay
+    // checkout of an order in another currency is refused here, before the
+    // order is written and its promo use counted. createStorePayment refuses
+    // it too, but only after the order had committed, so every such checkout
+    // left an UNPAID order behind.
+    if ((input.paymentMethod ?? '').toUpperCase() === 'WIPAY' && !wipayTakesCurrency(totals.currency)) {
+      throw new BadRequestException(
+        `WiPay takes ${WIPAY_CURRENCY} only: this order is in ${(totals.currency ?? '').toUpperCase() || 'no currency'}`,
+      );
+    }
 
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 
@@ -1286,27 +1301,98 @@ export class StoreOrderService {
     };
   }
 
-  async refundOrder(orderId: string, businessId: string) {
+  /**
+   * Refund an order in full (the site refund route).
+   *
+   * Trial-N recheck (G6PUB-RC1-3): a refund moves money state, so it takes a
+   * member with revenue write (D-46: no SUPER_ADMIN bypass), the same rule as
+   * the offline completion. It used to set paymentStatus REFUNDED on any order
+   * and leave its books as they were (invoice PAID, payment SUCCESSFUL), and
+   * the store_order.refunded listener then booked the order total as an
+   * Expense, also for an order nobody had paid.
+   *
+   *   - An order nothing was paid on has nothing to refund: 409, nothing is
+   *     written and no event is emitted (cancel it instead).
+   *   - A storefront order's money is on its checkout invoice
+   *     (INV-<orderNumber>, completeCheckout). Each SUCCESSFUL payment on it is
+   *     refunded through the D-14 refund door (CommerceService.
+   *     markPaymentRefunded): a negative REFUNDED row naming the refunder, the
+   *     payment's posting reversed, the invoice reopened (SENT, paidAt
+   *     cleared, for a full refund). A payment with nothing left to refund (an
+   *     earlier refund of it, this order's interrupted refund included) is
+   *     skipped. store_order.refunded then names the invoice, so its listener
+   *     books no Expense beside the refund. A paid storefront order with no
+   *     recorded payment is refused (409): there is no money door to move.
+   *   - The order flips to REFUNDED once (compare-and-set on the paymentStatus
+   *     read), so a concurrent refund emits nothing a second time.
+   */
+  async refundOrder(orderId: string, businessId: string, actorId: string | null = null) {
+    await this.assertMemberMayRecordPayments(businessId, actorId);
     const order = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
     });
     if (!order) throw new NotFoundException('Order not found');
 
-    if (order.status === 'REFUNDED') {
+    if ((order.status ?? '').toUpperCase() === 'REFUNDED' || (order.paymentStatus ?? '').toUpperCase() === 'REFUNDED') {
       throw new BadRequestException('Order has already been refunded');
     }
+    if ((order.paymentStatus ?? '').toUpperCase() !== 'PAID') {
+      throw new ConflictException('Nothing was paid on this order, so there is nothing to refund; cancel it instead');
+    }
 
-    const updated = await this.prisma.client.marketplaceOrder.update({
-      where: { id: orderId },
-      data: {
-        status: 'REFUNDED',
-        paymentStatus: 'REFUNDED',
-      },
-      include: { items: true },
+    const invoiceId = (order.type ?? '').toUpperCase() === 'STOREFRONT'
+      ? await this.refundCheckoutPayments(order, actorId)
+      : undefined;
+
+    const { count } = await this.prisma.client.marketplaceOrder.updateMany({
+      where: { id: orderId, businessId, paymentStatus: order.paymentStatus },
+      data: { status: 'REFUNDED', paymentStatus: 'REFUNDED' },
     });
-
-    this.events.emit('store_order.refunded', { order: updated, businessId, refundAmount: updated.total });
+    const updated = await this.getOrder(orderId, businessId);
+    if (count === 1) {
+      this.events.emit('store_order.refunded', {
+        order: updated,
+        businessId,
+        refundAmount: updated.total,
+        ...(invoiceId ? { invoiceId } : {}),
+      });
+    }
 
     return updated;
+  }
+
+  /**
+   * Trial-N recheck (G6PUB-RC1-3, D-14): refund the money a storefront order's
+   * checkout recorded, through the D-14 refund door. Returns the invoice the
+   * refund is on.
+   */
+  private async refundCheckoutPayments(
+    order: { businessId: string; orderNumber: string },
+    actorId: string | null,
+  ): Promise<string> {
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { businessId: order.businessId, invoiceNumber: `INV-${order.orderNumber}` },
+      select: { id: true },
+    });
+    const payments = invoice
+      ? await this.prisma.client.payment.findMany({
+          where: { businessId: order.businessId, invoiceId: invoice.id, status: 'SUCCESSFUL' },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: { id: true },
+        })
+      : [];
+    if (!invoice || payments.length === 0) {
+      throw new ConflictException('This order has no recorded payment to refund');
+    }
+    if (!this.commerce) throw new ServiceUnavailableException('Refunds are unavailable');
+    for (const payment of payments) {
+      try {
+        await this.commerce.markPaymentRefunded(payment.id, order.businessId, `Storefront order ${order.orderNumber} refunded`, actorId);
+      } catch (err) {
+        // 409: nothing is left of this payment to refund; an earlier refund holds it.
+        if (!(err instanceof ConflictException)) throw err;
+      }
+    }
+    return invoice.id;
   }
 }

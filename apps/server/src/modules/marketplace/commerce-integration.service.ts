@@ -552,7 +552,11 @@ export class CommerceIntegrationService {
         });
       }
 
-      if (payload.refundAmount && payload.refundAmount > 0) {
+      // Trial-N recheck (G6PUB-RC1-3, D-14): a refund recorded on the order's
+      // invoice (payload.invoiceId: negative REFUNDED rows, the posting
+      // reversed) is already in the books; an Expense beside it would take the
+      // money out twice.
+      if (payload.refundAmount && payload.refundAmount > 0 && !payload.invoiceId) {
         await this.expenses.createExpense({
           businessId: payload.businessId,
           description: `Refund for order ${order.orderNumber ?? order.id}`,

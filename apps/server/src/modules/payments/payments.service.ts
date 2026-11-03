@@ -8,7 +8,7 @@ import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { normalizeCurrency } from '../finance/posting.service';
 import { fromCents, subtractMoney, toCents } from '../commerce/money';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
-import { resolveWipayMerchant, wipayMerchantComplete } from '../../core/connectors/implementations/wipay-merchant';
+import { WIPAY_CURRENCY, resolveWipayMerchant, wipayMerchantComplete, wipayTakesCurrency } from '../../core/connectors/implementations/wipay-merchant';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
 import { StoreOrderService, isClosedStorefrontOrder } from '../site/store-order.service';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
@@ -1596,11 +1596,11 @@ export class PaymentsService {
     return resolveWipayMerchant(metaData).apiKey;
   }
 
-  /** D-69: the one currency a WiPay checkout is made in, until WiPay's currency parameter is verified from its docs. */
-  private static readonly WIPAY_CURRENCY = 'TTD';
+  /** D-69: the one currency a WiPay checkout is made in (wipay-merchant.ts holds the rule the storefront order door reads too). */
+  private static readonly WIPAY_CURRENCY = WIPAY_CURRENCY;
 
   private static wipayTakesCurrency(currency: string | null | undefined): boolean {
-    return normalizeCurrency(currency) === PaymentsService.WIPAY_CURRENCY;
+    return wipayTakesCurrency(currency);
   }
 
   /**

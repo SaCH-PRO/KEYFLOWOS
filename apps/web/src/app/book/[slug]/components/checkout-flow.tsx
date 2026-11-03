@@ -75,6 +75,16 @@ const paymentMethods: { id: PaymentMethod; name: string; description: string; ic
   { id: "cash", name: "Cash / Manual Payment", description: "Pay in person or arrange payment with the business", icon: CreditCard },
 ];
 
+/**
+ * D-69 (trial-N recheck G6PUB-RC1-1): WiPay takes TTD only, until its currency
+ * parameter is verified from its docs. The server refuses a WiPay checkout of
+ * any other currency (400), so WiPay is offered only for a TTD cart.
+ */
+function paymentMethodsFor(currency: string) {
+  const takesWipay = (currency ?? "").trim().toUpperCase() === "TTD";
+  return paymentMethods.filter((pm) => pm.id !== "wipay" || takesWipay);
+}
+
 export function CheckoutFlow({
   business,
   cart,
@@ -109,7 +119,12 @@ export function CheckoutFlow({
   });
 
   const [selectedShippingZone, setSelectedShippingZone] = useState<string | null>(null);
-  const [selectedPayment, setSelectedPayment] = useState<PaymentMethod>("wipay");
+  const offeredPaymentMethods = paymentMethodsFor(cartCurrency);
+  const [chosenPayment, setSelectedPayment] = useState<PaymentMethod>(offeredPaymentMethods[0].id);
+  // A method this cart is not offered (WiPay for a non-TTD cart) is never the one sent.
+  const selectedPayment: PaymentMethod = offeredPaymentMethods.some((pm) => pm.id === chosenPayment)
+    ? chosenPayment
+    : offeredPaymentMethods[0].id;
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [showRefundPolicy, setShowRefundPolicy] = useState(false);
 
@@ -890,7 +905,7 @@ export function CheckoutFlow({
                   </div>
                 </div>
                 <div className="p-5 space-y-2">
-                  {paymentMethods.map((pm) => {
+                  {offeredPaymentMethods.map((pm) => {
                     const isSelected = selectedPayment === pm.id;
                     return (
                       <button
