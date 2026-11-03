@@ -1,10 +1,26 @@
-import { Inject, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  Optional,
+  ServiceUnavailableException,
+} from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { BusinessEventService } from '../business-events/business-event.service';
+import type { CreateBusinessEventInput } from '../business-events/dto/create-business-event.dto';
 import { TimelineService } from '../timeline/timeline.service';
 import { CreateProcurementRequestDto } from './dto/create-procurement-request.dto';
 import { UpdateProcurementRequestDto } from './dto/update-procurement-request.dto';
+
+/** The statuses only approve and reject may set: they are decisions, and a decision is audited. */
+const DECISION_STATUSES = new Set(['APPROVED', 'REJECTED']);
+
+/** What writeRequest writes through: the app's client, or a transaction's. */
+type RequestWriter = Pick<PrismaService['client'], 'procurementRequest'>;
 
 /**
  * Procurement requests.
@@ -15,7 +31,10 @@ import { UpdateProcurementRequestDto } from './dto/update-procurement-request.dt
  * with no tenant armed, and acknowledgeVendor, markFulfilled and markInvoiced used to update the
  * request where { id } alone (review SEC-R013g-2). Approve and reject write only the status (the
  * model has no approval columns) and record the decision in the audit trail, one BusinessEvent
- * naming the member who decided (D-08: BusinessEvent is the audit trail, Activity the feed).
+ * naming the member who decided (D-08: BusinessEvent is the audit trail, Activity the feed),
+ * written in the same transaction as the status, so a decision never stands without its row
+ * (review SEC-D15-4), and only from the status the decider read (SEC-D15-2). PATCH cannot set a
+ * decision status (SEC-D15-3).
  */
 @Injectable()
 export class ProcurementService {
@@ -24,23 +43,45 @@ export class ProcurementService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
-    // BusinessEventModule is @Global, so the app always provides it; optional only so a test
-    // module that wires this service without the audit trail still resolves it (Nest DI).
-    // updateStatus refuses to decide a request without it.
-    @Optional() @Inject(BusinessEventService) private readonly businessEvents: BusinessEventService | null = null,
+    // The app's event bus (EventBusModule, global): a committed decision's audit row is fanned out
+    // on it as BusinessEventService.emit fans out every audit row. Optional, as there.
+    @Optional() @Inject(EventEmitter2) private readonly events: EventEmitter2 | null = null,
   ) {}
 
   /**
    * The one write to a procurement request: bound to the business by the where itself, refused
    * unless exactly one row moved, and answered with the row as it now is.
+   *
+   * fromStatus makes the write a compare-and-set: it moves the request only while its status is
+   * still the one the caller read, and answers 409 when the request is there but has moved.
+   * client is the transaction to write in (updateStatus), the app's client otherwise.
    */
-  private async writeRequest(businessId: string, id: string, data: Prisma.ProcurementRequestUpdateManyMutationInput) {
-    const { count } = await this.prisma.client.procurementRequest.updateMany({
-      where: { id, businessId },
+  private async writeRequest(
+    businessId: string,
+    id: string,
+    data: Prisma.ProcurementRequestUpdateManyMutationInput,
+    { fromStatus, client = this.prisma.client }: { fromStatus?: string; client?: RequestWriter } = {},
+  ) {
+    // Nothing to write (PATCH {}, a body the whitelist strips, a KEY update naming no field):
+    // Prisma answers count 0 for empty data without running SQL, which is not "missing" (review
+    // SEC-D15-1 / CR-D15-1). Answer the request as it is, found in this business as any read is.
+    if (Object.values(data).every((value) => value === undefined)) return this.get(businessId, id);
+    const { count } = await client.procurementRequest.updateMany({
+      where: { id, businessId, status: fromStatus },
       data,
     });
+    if (count !== 1 && fromStatus !== undefined) await this.refuseIfMoved(client, businessId, id);
     if (count !== 1) throw new NotFoundException('Request not found');
-    return this.get(businessId, id);
+    const row = await client.procurementRequest.findFirst({ where: { id, businessId } });
+    if (!row) throw new NotFoundException('Request not found');
+    return row;
+  }
+
+  /** A compare-and-set that moved nothing: 409 when the request is still in this business. */
+  private async refuseIfMoved(client: RequestWriter, businessId: string, id: string) {
+    if ((await client.procurementRequest.count({ where: { id, businessId } })) > 0) {
+      throw new ConflictException('The request changed while it was being decided; reload it and decide again');
+    }
   }
 
   async list(businessId: string) {
@@ -103,6 +144,14 @@ export class ProcurementService {
   }
 
   async update(businessId: string, id: string, dto: UpdateProcurementRequestDto) {
+    // Review SEC-D15-3: approving or rejecting is a decision, made through approve and reject,
+    // which record it (updateStatus). A request this business does not have answers 404 first.
+    if (typeof dto.status === 'string' && DECISION_STATUSES.has(dto.status.trim().toUpperCase())) {
+      await this.get(businessId, id);
+      throw new BadRequestException(
+        'A request is approved or rejected through its approve and reject actions, which record the decision; PATCH cannot set that status',
+      );
+    }
     return this.writeRequest(businessId, id, {
       status: dto.status,
       priority: dto.priority,
@@ -146,20 +195,22 @@ export class ProcurementService {
    *
    * FOLLOW3-D15: the request row has no approval columns, so the status is all that is written to
    * it (writing the approver, the time and the reason there answered 500 to every caller). Who
-   * decided, when, and why is the audit trail's: exactly one BusinessEvent per decision, written
-   * only after the request moved (a refused or failed call writes none). The Activity feed row
-   * below is the user-facing entry, best effort as before.
+   * decided, when, and why is the audit trail's: exactly one BusinessEvent per decision.
+   *
+   * The status and its BusinessEvent are written in one transaction (review SEC-D15-4):
+   * BusinessEventService.emit swallows a failed insert, so a decision written beside it could
+   * stand with no audit row; here a failed insert rolls the status back and answers 503. The
+   * status moves only from the one read (review SEC-D15-2): when another decision lands first this
+   * one answers 409 and writes nothing, and the row records the status this call wrote, not a
+   * re-read. A refused or failed call writes no audit row, feed row or bus event. The Activity
+   * feed row below is the user-facing entry, best effort as before.
    */
   async updateStatus(businessId: string, id: string, status: string, userId?: string, reason?: string) {
-    const audit = this.businessEvents;
-    if (!audit) throw new ServiceUnavailableException('The audit trail is unavailable; the request was not decided');
     const req = await this.get(businessId, id);
     // the body is not validated by a DTO: only a non-empty string is a reason
     const why = typeof reason === 'string' && reason.trim() ? reason : undefined;
-    const updated = await this.writeRequest(businessId, id, { status });
     const decision = status.toLowerCase();
-
-    await audit.emit({
+    const audit: CreateBusinessEventInput = {
       businessId,
       eventType: `procurement_request.${decision}`,
       subjectType: 'procurement_request',
@@ -168,10 +219,44 @@ export class ProcurementService {
       actorId: userId ?? 'system',
       action: decision,
       before: { status: req.status },
-      after: { status: updated.status },
+      after: { status },
       source: 'web',
       metadata: why ? { reason: why } : undefined,
+    };
+
+    const updated = await this.prisma.client.$transaction(async (tx) => {
+      const row = await this.writeRequest(businessId, id, { status }, { fromStatus: req.status, client: tx });
+      try {
+        await tx.businessEvent.create({
+          data: {
+            businessId: audit.businessId,
+            eventType: audit.eventType,
+            subjectType: audit.subjectType,
+            subjectId: audit.subjectId,
+            actorType: audit.actorType,
+            actorId: audit.actorId,
+            action: audit.action,
+            before: audit.before as Prisma.InputJsonValue,
+            after: audit.after as Prisma.InputJsonValue,
+            evidenceIds: [],
+            messageIds: [],
+            source: audit.source,
+            metadata: audit.metadata as Prisma.InputJsonValue | undefined,
+          },
+        });
+      } catch (err) {
+        this.logger.error(`[ProcurementAudit] ${audit.eventType} ${id} not recorded; decision rolled back: ${(err as Error).message}`);
+        throw new ServiceUnavailableException('The audit trail is unavailable; the request was not decided');
+      }
+      return row;
     });
+
+    // committed: fan the audit row out as BusinessEventService.emit does (never fails the decision)
+    try {
+      this.events?.emit('business_event.created', audit);
+    } catch (err) {
+      this.logger.warn(`[ProcurementAudit] business_event.created fan-out failed: ${(err as Error).message}`);
+    }
 
     this.timeline.recordEvent({
       businessId,

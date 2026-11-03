@@ -75,9 +75,17 @@
  * member who decided (D-08: BusinessEvent is the audit trail, Activity the feed),
  * beside the Activity feed row (OPS-13..OPS-15). With the writes bound, the three
  * vendor transitions rejoin CANONICAL_MODULE_TOOLS.operations at write (OPS-10).
- * BusinessEventService is real here (it writes business_events), and
- * writableState() now includes business_events, so every "nothing written"
- * comparison also proves a refused or failed call wrote no audit row.
+ * ProcurementService writes the business_events row itself, in the same
+ * transaction as the status, and fans it out on the EventEmitter2 bus once
+ * committed (a recorder here, `bus`); writableState() includes business_events
+ * and the bus, so every "nothing written" comparison also proves a refused or
+ * failed call wrote no audit row and announced none.
+ *
+ * The review repairs (OPS-16..OPS-19): an update naming no field answers the
+ * request (SEC-D15-1 / CR-D15-1); PATCH cannot set APPROVED or REJECTED
+ * (SEC-D15-3); a decision is a compare-and-set on the status it read, 409 when
+ * another landed first (SEC-D15-2); a failed audit insert rolls the decision
+ * back, 503 (SEC-D15-4).
  */
 import 'reflect-metadata';
 import path from 'path';
@@ -151,6 +159,14 @@ const cockpit = {
     return { businessId, generatedAt: new Date().toISOString() };
   },
 };
+/** The EventEmitter2 bus: the audit trail's 'business_event.created' fan-out (to the KEY flows bridge) lands here. */
+const bus = {
+  emitted: [] as Array<{ event: string; payload: any }>,
+  emit(event: string, payload: unknown) {
+    bus.emitted.push({ event, payload });
+    return true;
+  },
+};
 
 let db: any;
 let app: any;
@@ -159,6 +175,8 @@ const controllers: Record<string, any> = {};
 /** The real ProcurementService of the app under test, for the direct (no request, no tenant armed) calls. */
 let procurementService: any;
 let NotFound: any;
+let Conflict: any;
+let ServiceUnavailable: any;
 
 async function cleanup() {
   // Hard-delete via raw SQL (bypasses the soft-delete extension), children first.
@@ -358,6 +376,7 @@ async function writableState() {
     timeline: timeline.events.length,
     realtime: realtime.emits.length,
     notifications: notifications.created.length,
+    bus: bus.emitted.length,
     reached: [...reached],
   };
 }
@@ -428,9 +447,10 @@ beforeAll(async () => {
   const { ProcurementService } = await import('../src/modules/procurement/procurement.service');
   const { BusinessCommandCenterController } = await import('../src/modules/business-command-center/business-command-center.controller');
   const { BusinessCommandCenterService } = await import('../src/modules/business-command-center/business-command-center.service');
-  // FOLLOW3-D15: the audit trail is real (BusinessEventModule is @Global in the app)
-  const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
   NotFound = (await import('@nestjs/common')).NotFoundException;
+  Conflict = (await import('@nestjs/common')).ConflictException;
+  ServiceUnavailable = (await import('@nestjs/common')).ServiceUnavailableException;
+  const { EventEmitter2 } = await import('@nestjs/event-emitter');
   Object.assign(controllers, { CommandController, ProcurementController, BusinessCommandCenterController });
 
   // The parameter types tsc emits (emitDecoratorMetadata), which vitest's
@@ -453,13 +473,13 @@ beforeAll(async () => {
       CrmRateLimitGuard,
       CommandService,
       ProcurementService,
-      BusinessEventService,
       { provide: TimelineService, useValue: timeline },
       { provide: RealtimeService, useValue: realtime },
       { provide: NotificationsService, useValue: notifications },
       { provide: CommandGeneratorService, useValue: generator },
       { provide: CommandSchedulerService, useValue: scheduler },
       { provide: BusinessCommandCenterService, useValue: cockpit },
+      { provide: EventEmitter2, useValue: bus },
     ],
   }).compile();
   procurementService = moduleRef.get(ProcurementService);
@@ -881,9 +901,15 @@ describe('FOLLOW3-D15-PROCUREMENT-BOUND-WRITES (V1-84): ProcurementService binds
     const sites = [...src.matchAll(/procurementRequest\.updateMany\(/g)].map((m) => src.slice(m.index!, m.index! + 400));
     expect(sites.length).toBeGreaterThan(0);
     for (const site of sites) {
-      expect(site).toMatch(/^procurementRequest\.updateMany\(\{\s*where: \{ id, businessId \},/);
+      // review SEC-D15-2: the one narrowing allowed beside the binding is the decision's compare-and-set on the status read
+      expect(site).toMatch(/^procurementRequest\.updateMany\(\{\s*where: \{ id, businessId(?:, status: fromStatus)? \},/);
       expect(site).toMatch(/\bcount !== 1\)\s*throw new NotFoundException\(/);
     }
+    // review SEC-D15-4: updateStatus writes the status and its audit row in one transaction, not beside a
+    // fire-and-forget emit that swallows a failed insert
+    const decide = memberText(src, 'updateStatus')!;
+    expect(decide).toMatch(/\$transaction\(async \(tx\) => \{\s*const row = await this\.writeRequest\([^)]*client: tx \}\);\s*try \{\s*await tx\.businessEvent\.create\(/);
+    expect(decide).not.toMatch(/\.emit\(\{/);
     // each writing method writes through such a site, itself or through an own-class helper
     const writesThrough = (body: string) =>
       body.includes('procurementRequest.updateMany(') ||
@@ -901,6 +927,7 @@ describe('FOLLOW3-D15-PROCUREMENT-BOUND-WRITES (V1-84): ProcurementService binds
       const row = await seedProcurementRequest(ID.bizA);
       await db.procurementRequest.update({ where: { id: row.id }, data: { status: 'SUBMITTED' } });
       const feedFrom = timeline.events.length;
+      const busFrom = bus.emitted.length;
       const res = await send('post', `${proc(ID.bizA)}/${row.id}/approve`, actor);
       expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(201);
       expect(res.body, actor).toMatchObject({ id: row.id, businessId: ID.bizA, status: 'APPROVED' });
@@ -922,6 +949,9 @@ describe('FOLLOW3-D15-PROCUREMENT-BOUND-WRITES (V1-84): ProcurementService binds
       expect(feed, actor).toEqual([
         expect.objectContaining({ businessId: ID.bizA, module: 'procurement', action: 'request.approved', actorType: 'USER', actorId: actor }),
       ]);
+      // the audit row reaches the bus once, as BusinessEventService.emit fans out every audit row
+      expect(bus.emitted.slice(busFrom).filter((e) => e.payload?.subjectId === row.id).map((e) => [e.event, e.payload.eventType, e.payload.actorId]), actor)
+        .toEqual([['business_event.created', 'procurement_request.approved', actor]]);
     }
   }, HEAVY_CASE_MS);
 
@@ -975,5 +1005,140 @@ describe('FOLLOW3-D15-PROCUREMENT-BOUND-WRITES (V1-84): ProcurementService binds
     expect(await auditRows(foreign)).toEqual([]);
     expect({ own: await requestRow(own.id), foreign: await requestRow(foreign) }).toEqual(rows);
     expect(await writableState()).toEqual(before);
+  }, HEAVY_CASE_MS);
+
+  it("[OPS-16] review SEC-D15-1 / CR-D15-1: an update that names no field answers the request as it is (200), not 'Request not found': PATCH {} and a PATCH whose only key the whitelist strips ({ notes }), as a STAFF member with operations write and as the OWNER, and the KEY procurement_update_request call that sends neither priority nor internalNotes; nothing is written. The business binding holds: the same empty update of bizB's request through bizA is still 404 / NotFound and bizB's row is byte-identical", async () => {
+    const row = await seedProcurementRequest(ID.bizA);
+    const foreign = await foreignPoIssued();
+    const rows = { own: await requestRow(row.id), foreign: await requestRow(foreign) };
+    const before = await writableState();
+    const statuses: Record<string, number> = {};
+    for (const actor of [ID.opsWrite, ID.owner]) {
+      for (const [label, body] of [['{}', {}], ['{ notes }', { notes: `${P}stripped` }]] as const) {
+        const res = await send('patch', `${proc(ID.bizA)}/${row.id}`, actor, body);
+        statuses[`${actor} ${label}`] = res.status;
+        expect(res.body, `${actor} ${label} ${JSON.stringify(res.body)}`).toMatchObject({ id: row.id, businessId: ID.bizA, status: 'DRAFT', priority: 'normal' });
+      }
+      statuses[`${actor} foreign {}`] = (await send('patch', `${proc(ID.bizA)}/${foreign}`, actor, {})).status;
+    }
+    expect(statuses).toEqual({
+      [`${ID.opsWrite} {}`]: 200, [`${ID.opsWrite} { notes }`]: 200, [`${ID.opsWrite} foreign {}`]: 404,
+      [`${ID.owner} {}`]: 200, [`${ID.owner} { notes }`]: 200, [`${ID.owner} foreign {}`]: 404,
+    });
+    // what FlowOrchestratorService's procurement_update_request passes when the model names neither field
+    const keyShape = { priority: undefined, internalNotes: undefined };
+    expect(await procurementService.update(ID.bizA, row.id, keyShape)).toMatchObject({ id: row.id, businessId: ID.bizA, status: 'DRAFT' });
+    await expect(procurementService.update(ID.bizA, foreign, keyShape)).rejects.toBeInstanceOf(NotFound);
+    expect({ own: await requestRow(row.id), foreign: await requestRow(foreign) }).toEqual(rows);
+    expect(await writableState()).toEqual(before);
+    // anti-vacuity: an update that names a field still writes it
+    expect(await procurementService.update(ID.bizA, row.id, { internalNotes: `${P}noted` })).toMatchObject({ id: row.id, internalNotes: `${P}noted` });
+  }, HEAVY_CASE_MS);
+
+  it("[OPS-17] review SEC-D15-3: PATCH cannot decide a request: a body that sets status APPROVED or REJECTED (any case) answers 400 for a member with operations write and the OWNER, the request is byte-identical and no audit row is written; the decision is made only through approve and reject, which record it. A foreign request still answers 404 first, and a PATCH that sets any other status or field still writes", async () => {
+    const row = await seedProcurementRequest(ID.bizA);
+    await db.procurementRequest.update({ where: { id: row.id }, data: { status: 'SUBMITTED' } });
+    const foreign = await foreignPoIssued();
+    const rows = { own: await requestRow(row.id), foreign: await requestRow(foreign) };
+    const before = await writableState();
+    const DECISIONS = ['APPROVED', 'REJECTED', 'approved', 'Rejected'];
+    const outcomes: Record<string, [number, string]> = {};
+    for (const actor of [ID.opsWrite, ID.owner]) {
+      for (const status of DECISIONS) {
+        const res = await send('patch', `${proc(ID.bizA)}/${row.id}`, actor, { status, internalNotes: `${P}decided by edit` });
+        outcomes[`${actor} ${status}`] = [res.status, res.body.message];
+      }
+      const res = await send('patch', `${proc(ID.bizA)}/${foreign}`, actor, { status: 'APPROVED' });
+      outcomes[`${actor} foreign APPROVED`] = [res.status, res.body.message];
+    }
+    const refused = 'A request is approved or rejected through its approve and reject actions, which record the decision; PATCH cannot set that status';
+    expect(outcomes).toEqual(Object.fromEntries([ID.opsWrite, ID.owner].flatMap((actor) => [
+      ...DECISIONS.map((s) => [`${actor} ${s}`, [400, refused]]),
+      [`${actor} foreign APPROVED`, [404, 'Request not found']],
+    ])));
+    await expect(procurementService.update(ID.bizA, row.id, { status: 'APPROVED' })).rejects.toThrow(refused);
+    expect(await auditRows(row.id)).toEqual([]);
+    expect({ own: await requestRow(row.id), foreign: await requestRow(foreign) }).toEqual(rows);
+    expect(await writableState()).toEqual(before);
+    // controls: another status and a plain field still write; approve still decides, and is audited
+    expect((await send('patch', `${proc(ID.bizA)}/${row.id}`, ID.opsWrite, { status: 'DRAFT', priority: 'high' })).body).toMatchObject({ status: 'DRAFT', priority: 'high' });
+    await db.procurementRequest.update({ where: { id: row.id }, data: { status: 'SUBMITTED' } });
+    expect((await send('post', `${proc(ID.bizA)}/${row.id}/approve`, ID.opsWrite)).status).toBe(201);
+    expect((await auditRows(row.id)).map((e: any) => e.eventType)).toEqual(['procurement_request.approved']);
+  }, HEAVY_CASE_MS);
+
+  it("[OPS-18] review SEC-D15-2: a decision is a compare-and-set on the status it read. When another decision lands between updateStatus's read and its write, the later one is refused (ConflictException, 409), writes no audit or feed row and leaves the first decision standing; and under real concurrency (approve and reject of the same SUBMITTED request at once, 10 times) every audit row records the status its own call wrote, the rows chain (the first starts at SUBMITTED, each starts where the previous ended), the request ends at the last row's status, and every call that wrote nothing was refused as a conflict", async () => {
+    // (a) deterministic interleaving: the approve lands while the reject is between its read and its write
+    const row = await seedProcurementRequest(ID.bizA);
+    await db.procurementRequest.update({ where: { id: row.id }, data: { status: 'SUBMITTED' } });
+    const svc = procurementService;
+    const realGet = svc.get;
+    svc.get = async function interleaved(businessId: string, id: string) {
+      delete svc.get; // one interleaving only
+      const seen = await realGet.call(svc, businessId, id);
+      await svc.updateStatus(businessId, id, 'APPROVED', ID.owner);
+      return seen;
+    };
+    const feedFrom = timeline.events.length;
+    let outcome = 'resolved';
+    try {
+      await svc.updateStatus(ID.bizA, row.id, 'REJECTED', ID.opsWrite, `${P}too late`);
+    } catch (err) {
+      outcome = err instanceof Conflict ? 'Conflict' : `${(err as Error).constructor.name}: ${(err as Error).message}`;
+    } finally {
+      delete svc.get;
+    }
+    expect(outcome).toBe('Conflict');
+    expect((await db.procurementRequest.findUnique({ where: { id: row.id } })).status).toBe('APPROVED');
+    expect((await auditRows(row.id)).map((e: any) => [e.eventType, e.actorId, e.before, e.after])).toEqual([
+      ['procurement_request.approved', ID.owner, { status: 'SUBMITTED' }, { status: 'APPROVED' }],
+    ]);
+    expect(timeline.events.slice(feedFrom).filter((e) => e.entityId === row.id).map((e) => e.action)).toEqual(['request.approved']);
+
+    // (b) real concurrency: invariants that hold whatever the interleaving
+    const DECIDED: Record<string, string> = { 'procurement_request.approved': 'APPROVED', 'procurement_request.rejected': 'REJECTED' };
+    let raced = 0;
+    for (let i = 0; i < 10; i += 1) {
+      const r = await seedProcurementRequest(ID.bizA);
+      await db.procurementRequest.update({ where: { id: r.id }, data: { status: 'SUBMITTED' } });
+      const from = timeline.events.length;
+      const settled = await Promise.allSettled([
+        procurementService.updateStatus(ID.bizA, r.id, 'APPROVED', ID.owner),
+        procurementService.updateStatus(ID.bizA, r.id, 'REJECTED', ID.opsWrite, `${P}no`),
+      ]);
+      const failed = settled.filter((s): s is PromiseRejectedResult => s.status === 'rejected');
+      raced += failed.length;
+      for (const f of failed) expect(f.reason, `pair ${i}: ${(f.reason as Error)?.message}`).toBeInstanceOf(Conflict);
+      const audit = await auditRows(r.id);
+      expect(audit.length, `pair ${i}`).toBe(settled.length - failed.length);
+      let at = 'SUBMITTED';
+      for (const e of audit) {
+        expect([e.before, e.after], `pair ${i} ${e.eventType}`).toEqual([{ status: at }, { status: DECIDED[e.eventType] }]);
+        at = DECIDED[e.eventType];
+      }
+      expect((await db.procurementRequest.findUnique({ where: { id: r.id } })).status, `pair ${i}`).toBe(at);
+      expect(timeline.events.slice(from).filter((e) => e.entityId === r.id).length, `pair ${i} feed`).toBe(audit.length);
+    }
+    // anti-vacuity: the pairs did race (measured 10 of 10 on a shared machine; at the packet head 24 of 25 pairs wrote a contradicting row)
+    expect(raced).toBeGreaterThan(0);
+  }, HEAVY_CASE_MS);
+
+  it("[OPS-19] review SEC-D15-4: a decision stands only with its audit row. When the audit insert fails (Postgres refuses a NUL character: a reject over HTTP whose reason holds one, and an approve called directly whose actor id holds one), the call answers 503 / ServiceUnavailableException, the request is byte-identical (still SUBMITTED) and no audit row, feed row or bus event is written; the same reject with a clean reason then decides it with exactly one audit row", async () => {
+    const row = await seedProcurementRequest(ID.bizA);
+    await db.procurementRequest.update({ where: { id: row.id }, data: { status: 'SUBMITTED' } });
+    const unchanged = await requestRow(row.id);
+    const before = await writableState();
+    const res = await send('post', `${proc(ID.bizA)}/${row.id}/reject`, ID.opsWrite, { reason: `${P}over\u0000budget` });
+    expect([res.status, res.body.message]).toEqual([503, 'The audit trail is unavailable; the request was not decided']);
+    await expect(procurementService.updateStatus(ID.bizA, row.id, 'APPROVED', `${ID.owner}\u0000`)).rejects.toBeInstanceOf(ServiceUnavailable);
+    expect(await requestRow(row.id)).toBe(unchanged);
+    expect(await auditRows(row.id)).toEqual([]);
+    expect(await writableState()).toEqual(before);
+    // control: the insert succeeds, the decision stands with its row
+    const ok = await send('post', `${proc(ID.bizA)}/${row.id}/reject`, ID.opsWrite, { reason: `${P}over budget` });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect((await auditRows(row.id)).map((e: any) => [e.eventType, e.actorId, e.metadata])).toEqual([
+      ['procurement_request.rejected', ID.opsWrite, { reason: `${P}over budget` }],
+    ]);
   }, HEAVY_CASE_MS);
 });
