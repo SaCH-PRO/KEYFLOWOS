@@ -1678,7 +1678,7 @@ describe('the widget pay page and the producers (V1-46b, ST-2, CR-01)', () => {
     expect(await linksOf(ID.invAutoNoEmail)).toHaveLength(0);
   });
 
-  it('TG-18i (review SEC-V46B-1): an anonymous, unsigned WiPay failure callback for an invoice whose link was revoked mints no link and mails no token: the payment-failed email (real WiPayConnector and event bus) goes without a retry link and the bare-id routes stay closed', async () => {
+  it('TG-18i (review SEC-V46B-1; V1-05 CR-V05-3): an anonymous, unsigned WiPay failure callback for an invoice whose link was revoked mints no link and mails nothing: it is answered { success: false } and emits no payment-failed event (real WiPayConnector and event bus), and the bare-id routes stay closed', async () => {
     const inv = ID.invAutoRevoked;
     const bus = new EventEmitter2Ref();
     const mail = emailRecorder();
@@ -1693,24 +1693,24 @@ describe('the widget pay page and the producers (V1-46b, ST-2, CR-01)', () => {
     const previousConnector = payments.wipayConnector;
     payments.wipayConnector = new WiPayConnectorRef(prismaService, bus, {});
     const linksBefore = await linksOf(inv);
+    const emitFailed = vi.spyOn(payments.wipayConnector, 'emitPaymentFailed');
     try {
       expect(await commerce.isBareIdPublicAccessOpen(inv)).toBe(false);
       const res = await agent()
         .get('/payments/wipay/callback')
         .query({ order_id: inv, status: 'failed', transaction_id: `${P}tx_forged_fail`, total: '1.00' });
       expect(res.status, JSON.stringify(res.body)).toBe(200);
-      expect(res.body).toMatchObject({ success: false });
-      await vi.waitFor(() => expect(handled).toHaveLength(1), { timeout: 5000 });
-      await Promise.all(handled);
+      expect(res.body).toEqual({ success: false, invoiceId: inv, message: 'Payment was not successful' });
     } finally {
       payments.wipayConnector = previousConnector;
     }
 
-    // The contact is told the payment failed (the unsigned failure callback itself is TG-22, M35), with no pay link.
-    expect(mail.sent).toHaveLength(1);
-    expect(mail.sent[0].type).toBe('payment_failed');
-    expect(mail.sent[0].templateData.retryUrl).toBeUndefined();
-    expect(JSON.stringify(mail.sent[0].templateData)).not.toContain('/public/invoice/');
+    // V1-05 (CR-V05-3, D-19): an unsigned failure is answered and acted on in no way: no payment-failed event, no email,
+    // no FAILED row (it emailed the contact and wrote one before: TG-22, M35).
+    expect(emitFailed).not.toHaveBeenCalled();
+    expect(handled).toHaveLength(0);
+    expect(mail.sent).toHaveLength(0);
+    expect(await paymentsOf(inv)).toEqual([]);
     expect(await linksOf(inv), 'no link minted').toEqual(linksBefore);
     expect(await commerce.isBareIdPublicAccessOpen(inv)).toBe(false);
     await clearRateLimits();
@@ -1776,14 +1776,15 @@ describe('provider webhooks and callbacks keep working (V1-46b)', () => {
   });
 
   it('TG-21: a WiPay success callback records the payment for an invoice whose link has been revoked', async () => {
-    const q = { transaction_id: `${P}wipay_tx`, order_id: ID.invWhWipay, status: 'success', total: '25.00' };
-    const hash = createHash('md5').update(`${q.transaction_id}${q.order_id}${q.total}${q.status}`).digest('hex');
+    const q = { transaction_id: `${P}wipay_tx`, order_id: ID.invWhWipay, status: 'success', total: TOTAL.toFixed(2) };
+    // V1-05 (D-19): WiPay's keyed proof over the requested total (the invoice's), which is the amount recorded.
+    const hash = createHash('md5').update(`${q.transaction_id}${TOTAL.toFixed(2)}${PROVIDER_ENV.WIPAY_API_KEY}`).digest('hex');
     const res = await agent().get('/payments/wipay/callback').query({ ...q, hash });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ success: true });
     const rows = await paymentsOf(ID.invWhWipay);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ provider: 'wipay', providerPaymentId: `${P}wipay_tx`, status: 'SUCCESSFUL', amount: 25, businessId: ID.bizA });
+    expect(rows[0]).toMatchObject({ provider: 'wipay', providerPaymentId: `${P}wipay_tx`, status: 'SUCCESSFUL', amount: TOTAL, businessId: ID.bizA });
   });
 
   it.todo(

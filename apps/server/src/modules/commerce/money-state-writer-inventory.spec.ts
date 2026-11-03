@@ -96,10 +96,10 @@ export const MONEY_STATE_WRITERS: Inventory = {
       'member and retires the pending row PENDING -> CONFIRMED (compare-and-set on status)',
   },
   'apps/server/src/modules/payments/payments.service.ts': {
-    ops: { create: 7 },
+    ops: { create: 6 },
     why:
       'provider settlement: createPaymentWithPosting / createRefundWithPosting(ByInvoice) (row + posting in one ' +
-      'transaction); FAILED records (WiPay callback, PayPal capture); PENDING store checkout intents. ' +
+      'transaction); FAILED records (PayPal capture; the WiPay callback writes none since V1-05); PENDING store checkout intents. ' +
       'Per function: PAYMENTS_MODULE_WRITERS below (V1-15c)',
   },
   'apps/server/src/modules/payments/payments-ops.service.ts': {
@@ -246,10 +246,6 @@ export const PAYMENTS_MODULE_WRITERS: Record<string, WriterClass> = {
   'apps/server/src/modules/payments/payments.service.ts#createRefundWithPostingByInvoice': {
     kind: 'door',
     why: 'provider refunds without the capture id: the same, the original resolved by invoice',
-  },
-  'apps/server/src/modules/payments/payments.service.ts#handleWipayCallback': {
-    kind: 'no-money',
-    why: 'the FAILED record of a failed WiPay callback; a successful one goes through createPaymentWithPosting',
   },
   'apps/server/src/modules/payments/payments.service.ts#capturePaypalOrder': {
     kind: 'no-money',

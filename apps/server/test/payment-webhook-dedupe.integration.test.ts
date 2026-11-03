@@ -164,10 +164,13 @@ function paypal(event: Record<string, unknown>) {
   return agent().post('/payments/paypal/webhook').set('content-type', 'application/json').send(JSON.stringify(event));
 }
 
-/** A WiPay success callback for `invoiceId`, hashed as WiPay hashes it. */
+/** The business's own WiPay API key (business.metaData.wipayApiKey): the secret of WiPay's callback proof (V1-05, D-19). */
+const WIPAY_KEY = `${P}wipay_key`;
+
+/** A WiPay success callback for `invoiceId`, hashed as WiPay hashes it: md5(transaction_id + the requested total + the API key). */
 function wipay(invoiceId: string, transactionId: string, total: string) {
   const q = { order_id: invoiceId, status: 'success', transaction_id: transactionId, total };
-  const hash = createHash('md5').update(`${q.transaction_id}${q.order_id}${q.total}${q.status}`).digest('hex');
+  const hash = createHash('md5').update(`${q.transaction_id}${q.total}${WIPAY_KEY}`).digest('hex');
   return agent().get('/payments/wipay/callback').query({ ...q, hash });
 }
 
@@ -322,7 +325,7 @@ beforeAll(async () => {
 
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
   await db.business.create({
-    data: { id: ID.biz, name: 'V15C Biz', ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH', metaData: { stripeWebhookSecret: STRIPE_SECRET } },
+    data: { id: ID.biz, name: 'V15C Biz', ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH', metaData: { stripeWebhookSecret: STRIPE_SECRET, wipayApiKey: WIPAY_KEY } },
   });
   await db.membership.create({ data: { id: `${ID.biz}_m`, userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
   await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(ID.biz);

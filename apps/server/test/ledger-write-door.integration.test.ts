@@ -190,6 +190,8 @@ const P = 'v15a_';
 const HEADER = 'x-v15a-user';
 /** bizPay's own Stripe webhook secret (business.metaData.stripeWebhookSecret), so no global env is touched. */
 const STRIPE_SECRET = `whsec_${P}stripe`;
+/** bizPay's own WiPay API key (business.metaData.wipayApiKey): the secret of WiPay's callback proof (V1-05, D-19). */
+const WIPAY_KEY = `${P}wipay_key`;
 
 const ID = {
   owner: `${P}owner`,
@@ -680,7 +682,7 @@ beforeAll(async () => {
         ownerId: owner,
         currency: 'TTD',
         accountingBasis: basis,
-        ...(biz === ID.bizPay ? { metaData: { stripeWebhookSecret: STRIPE_SECRET } } : {}),
+        ...(biz === ID.bizPay ? { metaData: { stripeWebhookSecret: STRIPE_SECRET, wipayApiKey: WIPAY_KEY } } : {}),
       },
     });
     await db.membership.create({ data: { id: `${biz}_m`, userId: owner, businessId: biz, role: 'OWNER' } });
@@ -878,7 +880,8 @@ describe('review SEC-V15-1: a period closes only once it has ended, so what is d
     expect((await db.accountingPeriod.findUnique({ where: { id: currentId } })).status).toBe('CLOSED');
 
     const wipay = { order_id: ID.invWipay, status: 'success', transaction_id: `${P}wipay_txn`, total: '100.00' };
-    const hash = createHash('md5').update(`${wipay.transaction_id}${wipay.order_id}${wipay.total}${wipay.status}`).digest('hex');
+    // V1-05 (D-19): WiPay's keyed proof, md5(transaction_id + the requested total + the business's API key).
+    const hash = createHash('md5').update(`${wipay.transaction_id}100.00${WIPAY_KEY}`).digest('hex');
     // At a5d73ff6: { success: false, 'Payment processing error' }, then 'Duplicate callback ignored' forever, and no Payment row.
     expect(await payments.handleWipayCallback({ ...wipay, hash })).toMatchObject({ success: true, message: 'Payment successful' });
     expect(await payments.handleWipayCallback({ ...wipay, hash })).toMatchObject({ success: true, message: 'Duplicate callback ignored' });
@@ -1847,7 +1850,7 @@ describe('V1-15c: a PayPal capture records its payment through the posting door'
     return vi.spyOn(payments as any, 'getPaypalClient').mockReturnValue({
       client: {},
       ordersController: {
-        getOrder: async () => ({ result: { purchaseUnits: [{ customId: invoiceId, amount: { value: '100.00' } }] } }),
+        getOrder: async () => ({ result: { purchaseUnits: [{ customId: invoiceId, amount: { value: '100.00', currencyCode: 'TTD' } }] } }),
         captureOrder: async () => {
           await duringCapture?.();
           return {

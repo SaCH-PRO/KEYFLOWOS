@@ -851,8 +851,14 @@ describe('review repairs (R0-PL-04 review)', () => {
   it('MP-14 (ST-PL04-2): a FAILED row the unauthenticated WiPay failure callback wrote on the old predictable slot does not block mark-paid', async () => {
     const inv = ID.invSquat;
     const squat = oldMarkPaidSlot(inv, '100.00');
+    // V1-05 (CR-V05-3): the failure callback no longer writes it (answered, never acted on), so the row a
+    // pre-V1-05 callback wrote on that slot is seeded as the legacy data it is.
     const cb = await payments.handleWipayCallback({ order_id: inv, status: 'failed', transaction_id: squat, total: '100' });
-    expect(cb, JSON.stringify(cb)).toMatchObject({ invoiceId: inv });
+    expect(cb).toEqual({ success: false, invoiceId: inv, message: 'Payment was not successful' });
+    expect(await paymentsOf(inv)).toHaveLength(0);
+    await db.payment.create({
+      data: { provider: 'wipay', providerPaymentId: squat, amount: 100, currency: 'TTD', status: 'FAILED', invoiceId: inv, businessId: ID.biz },
+    });
     const before = await paymentsOf(inv);
     expect(before).toHaveLength(1);
     expect(before[0]).toMatchObject({ providerPaymentId: squat, status: 'FAILED', businessId: ID.biz, invoiceId: inv });
