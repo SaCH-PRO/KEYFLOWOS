@@ -6,13 +6,17 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vites
 vi.mock('stripe', () => ({
   default: class Stripe {
     webhooks = {
+      // R0-20b: the session KeyFlow's checkout creates names the invoice's business and carries its amount and currency.
       constructEvent: vi.fn().mockReturnValue({
+        id: 'evt_1',
         type: 'checkout.session.completed',
         data: {
           object: {
             id: 'sess_1',
-            metadata: { invoiceId: 'inv_1' },
+            metadata: { invoiceId: 'inv_1', businessId: 'biz_1' },
             client_reference_id: null,
+            amount_total: 25000,
+            currency: 'usd',
           },
         },
       }),
@@ -21,6 +25,7 @@ vi.mock('stripe', () => ({
 }));
 import { WebhooksController } from '../src/modules/webhooks/webhooks.controller';
 import { CommerceService } from '../src/modules/commerce/commerce.service';
+import { PaymentsService } from '../src/modules/payments/payments.service';
 import { PrismaService } from '../src/core/prisma/prisma.service';
 import { WebhookDispatcherService } from '../src/modules/webhooks/webhook-dispatcher.service';
 import { AuthGuard } from '../src/core/auth/auth.guard';
@@ -109,6 +114,8 @@ describe('WebhooksController', () => {
   let app: INestApplication;
   let prismaMock: WebhooksPrismaMock;
   const markInvoicePaid = vi.fn().mockResolvedValue({ id: 'inv_1', status: 'PAID' });
+  // R0-20b: the Stripe ledger door (what POST /payments/stripe/webhook runs).
+  const handleStripeWebhook = vi.fn().mockResolvedValue({ ok: true, received: true, processed: 'checkout.session.completed' });
   const sendTestEvent = vi.fn();
   const getDeliveryLogs = vi.fn();
   let currentUserId: string | undefined = 'user_1';
@@ -127,6 +134,7 @@ describe('WebhooksController', () => {
         AuthGuard,
         BusinessGuard,
         { provide: CommerceService, useValue: { markInvoicePaid } },
+        { provide: PaymentsService, useValue: { handleStripeWebhook } },
         { provide: PrismaService, useValue: prismaMock },
         {
           provide: WebhookDispatcherService,
@@ -157,18 +165,25 @@ describe('WebhooksController', () => {
     prismaMock.webhooks = [];
     prismaMock.businessAccess = [{ businessId: 'biz_1', ownerId: 'user_1' }];
     markInvoicePaid.mockClear();
+    handleStripeWebhook.mockClear();
     sendTestEvent.mockReset();
     getDeliveryLogs.mockReset();
   });
 
   it('handles stripe webhook and marks invoice paid', async () => {
-    await request(app.getHttpServer())
+    const res = await request(app.getHttpServer())
       .post('/webhooks/stripe')
       .set('stripe-signature', 'test_sig')
       .send({ invoiceId: 'inv_1' })
       .expect(201);
 
-    expect(markInvoicePaid).toHaveBeenCalledWith('inv_1');
+    // R0-20b (D-05): the verified bytes and their signature go to the Stripe
+    // ledger door, which records the payment; the anonymous, tenantless
+    // markInvoicePaid(invoiceId) of the deprecated route is gone.
+    expect(handleStripeWebhook).toHaveBeenCalledTimes(1);
+    expect(handleStripeWebhook).toHaveBeenCalledWith(JSON.stringify({ invoiceId: 'inv_1' }), 'test_sig');
+    expect(markInvoicePaid).not.toHaveBeenCalled();
+    expect(res.body).toMatchObject({ received: true, processed: 'checkout.session.completed', deprecated: true, use: '/payments/stripe/webhook' });
   });
 
   it('rejects authenticated CRUD when no user is on the request', async () => {

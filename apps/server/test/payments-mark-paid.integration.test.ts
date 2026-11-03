@@ -72,12 +72,33 @@
  *          its invoice, so the end state is the state after that case)
  *   MP-L2  LEDGER: every FinancialTransaction of both tenants balances (debits = credits)
  *
- * KNOWN DEFECT, not admitted as conforming (RA-G16-01, deferred; it.todo below MP-08b): the
- * legacy Stripe webhook shape markInvoicePaid(invoiceId) records provider 'manual' / method
- * 'MANUAL', so RevenuePostingService.depositSystemKey posts a Stripe checkout receipt Dr CASH
- * instead of Dr PAYMENT_PROCESSOR. MP-06 pins only that the caller takes the posted path; MP-L1
- * checks the deposit side as the union CASH | BANK | PAYMENT_PROCESSOR and does not judge the
- * account. Passing the provider needs the webhooks.controller.ts:86 half D-05 does not authorize.
+ * R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR (D-05, ruled 2026-11-02: the bounded change to the legacy
+ * handler is authorized; RA-G16-01 leaves deferral). Until R0-20b the deprecated POST
+ * /webhooks/stripe verified the Stripe signature and then called markInvoicePaid(invoiceId)
+ * with no actor and no tenant: the receipt was recorded as provider 'manual' / method 'MANUAL'
+ * (so depositSystemKey posted a Stripe checkout receipt Dr CASH, CR-R020-2), for the remaining
+ * balance whatever the session carried, with no check that the session's amount, currency or
+ * metadata business matched the invoice, and a redelivery was deduped only by the invoice
+ * already being PAID (this was the MP-06 KNOWN DEFECT it.todo). Contract pinned now:
+ *   MP-06  a signed checkout.session.completed for invoice X of business B, on the legacy route
+ *          -> one SUCCESSFUL Payment, provider 'stripe', providerPaymentId = the session id, the
+ *          amount and currency the event carries, recordedBy null, posted once Dr
+ *          PAYMENT_PROCESSOR (no CASH entry); PAID; markInvoicePaid never runs; a redelivery
+ *          on the legacy route or on the Stripe ledger door (PaymentsService.handleStripeWebhook,
+ *          what POST /payments/stripe/webhook runs) writes nothing; the answer keeps
+ *          deprecated:true and the use hint
+ *   MP-06b the event first recorded through the Stripe ledger door, then delivered to the legacy
+ *          route -> acknowledged, nothing new written
+ *   MP-06c refused (400), nothing written and no dedupe claim: a verified event naming another
+ *          business than the invoice's, naming none, carrying another amount, no amount or
+ *          another currency; an unsigned or wrongly signed call (as before); an event type the
+ *          door ignores is acknowledged as before (deprecated:true, the use hint)
+ *   MP-06s the service shape markInvoicePaid(invoiceId) itself (no actor, no tenant) still takes
+ *          the posted path; no production caller passes it any more (RA-G16-01 census in
+ *          revenue-authorization.integration.test.ts)
+ * The Stripe SDK is a stub (no provider traffic): its constructEvent verifies the
+ * t=<ts>,v1=<HMAC-SHA256> header as Stripe documents it, and the Stripe ledger door verifies the
+ * same header itself, so every delivery here is signed with the deployment secret.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
@@ -99,17 +120,42 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { createHash } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 import type { CommerceService } from '../src/modules/commerce/commerce.service';
 import type { InvoiceWorkflowService } from '../src/modules/commerce/invoice-workflow.service';
+
+// R0-20b: the Stripe SDK the legacy WebhooksController builds is a stub, so no
+// provider traffic is possible. constructEvent verifies the Stripe-Signature
+// header the way the SDK does (t=<ts>,v1=<HMAC-SHA256(secret, `${t}.${payload}`)>)
+// and returns the parsed payload; anything else throws, as the SDK does.
+vi.mock('stripe', async () => {
+  const { createHmac: hmac, timingSafeEqual } = await import('crypto');
+  class Stripe {
+    webhooks = {
+      constructEvent: (payload: Buffer | string, header: string, secret: string) => {
+        const raw = Buffer.isBuffer(payload) ? payload.toString('utf8') : payload;
+        const parts = Object.fromEntries(String(header).split(',').map((p) => p.split('=').map((x) => x.trim())));
+        const expected = Buffer.from(hmac('sha256', secret).update(`${parts.t}.${raw}`).digest('hex'));
+        const given = Buffer.from(String(parts.v1 ?? ''));
+        if (!parts.t || given.length !== expected.length || !timingSafeEqual(given, expected)) {
+          throw new Error('No signatures found matching the expected signature for payload');
+        }
+        return JSON.parse(raw);
+      },
+    };
+  }
+  return { default: Stripe };
+});
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'k20a_';
+/** R0-20b: the deployment's Stripe webhook secret, set only while the legacy-route cases run. */
+const LEGACY_STRIPE_SECRET = `whsec_${P}legacy`;
 const HEADER = 'x-pmp-user';
 /** Mirrors KEY_SYSTEM_ACTOR_ID (src/core/auth/system-actor.ts); asserted equal below. */
 const KEY_ACTOR = 'key_ai';
@@ -151,6 +197,10 @@ const ID = {
   invForeignPaid: `${P}invForeignPaid`,
   invKeyNoTenantPaid: `${P}invKeyNoTenantPaid`,
   invStatusFail: `${P}invStatusFail`,
+  // R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe (MP-06, MP-06b, MP-06c)
+  invLegacyStripe: `${P}invLegacyStripe`,
+  invLegacyStripeDoorFirst: `${P}invLegacyStripeDoorFirst`,
+  invLegacyStripeRefused: `${P}invLegacyStripeRefused`,
   // tenant B (R0-20 TENANT): a second business with its own owner; it owns no invoice
   ownerB: `${P}ownerB`,
   bizB: `${P}bizB`,
@@ -189,6 +239,8 @@ let CommerceServiceClass: any;
 let workflow: InvoiceWorkflowService;
 /** Real PaymentsService: the public WiPay callback is the squatter in ST-PL04-2. */
 let payments: any;
+/** R0-20b: the PaymentsService instance the legacy WebhooksController hands its events to (the Stripe ledger door). */
+let stripeDoor: any;
 let systemActorId: string;
 /** The real PostingService instance RevenuePostingService posts through (R0-20 failure injection). */
 let posting: any;
@@ -228,6 +280,8 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM webhook_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // R0-20b: the Stripe ledger door claims its events with no business (provider event ids carry the prefix).
+    `DELETE FROM webhook_events WHERE provider_event_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
@@ -466,13 +520,21 @@ beforeAll(async () => {
   const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  const { PaymentsService } = await import('../src/modules/payments/payments.service');
+  const { WebhooksController } = await import('../src/modules/webhooks/webhooks.controller');
+  const { WebhookDispatcherService } = await import('../src/modules/webhooks/webhook-dispatcher.service');
 
   systemActorId = KEY_SYSTEM_ACTOR_ID;
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
+  // R0-20b: WebhooksController builds its (stubbed) Stripe SDK client from
+  // STRIPE_SECRET_KEY when it is constructed; the key is set for the compile
+  // only, so no other code path of this suite sees a Stripe key.
+  const previousStripeKey = process.env.STRIPE_SECRET_KEY;
+  process.env.STRIPE_SECRET_KEY = `sk_test_${P}stub`;
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController],
+    controllers: [CommerceController, WebhooksController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -507,19 +569,25 @@ beforeAll(async () => {
       PaymentEvidenceService,
       { provide: DocumentIntelligenceService, useValue: {} },
       { provide: GoogleDriveService, useValue: {} },
+      // R0-20b: the legacy Stripe route and the Stripe ledger door it hands verified events to.
+      PaymentsService,
+      { provide: WebhookDispatcherService, useValue: {} },
     ],
   }).compile();
+  if (previousStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+  else process.env.STRIPE_SECRET_KEY = previousStripeKey;
   commerce = moduleRef.get(CommerceService);
   CommerceServiceClass = CommerceService;
   workflow = moduleRef.get(InvoiceWorkflowService);
   posting = moduleRef.get(PostingService);
   computeBalanceFn = (await import('../src/modules/commerce/invoice-workflow.service')).computeBalance;
+  stripeDoor = moduleRef.get(PaymentsService);
   // Constructed directly with the real collaborators (no connectors: the WiPay
   // failure path only writes the FAILED row).
-  const { PaymentsService } = await import('../src/modules/payments/payments.service');
   payments = new PaymentsService(moduleRef.get(PrismaService), commerce, workflow, moduleRef.get(RevenuePostingService));
 
-  app = moduleRef.createNestApplication();
+  // rawBody: the legacy Stripe route verifies the exact bytes Stripe signed (as app-bootstrap.ts serves it).
+  app = moduleRef.createNestApplication({ rawBody: true });
   // Identity attachment only. No guard is overridden.
   app.use(async (req: any, _res: any, next: any) => {
     const header = req.headers[HEADER];
@@ -710,7 +778,7 @@ describe('mark-paid records the remaining balance as a posted payment (G2)', () 
 });
 
 describe('every caller of markInvoicePaid takes the same posted path', () => {
-  it('MP-06: the legacy Stripe webhook call shape markInvoicePaid(invoiceId) (no actor, no tenant; G16 deferred) -> PAID with a posted payment, recordedBy null', async () => {
+  it("MP-06s: the service shape markInvoicePaid(invoiceId) with no actor and no tenant (the legacy Stripe webhook's until R0-20b; no production caller passes it now, RA-G16-01) -> PAID with a posted payment, recordedBy null", async () => {
     const invoice = await commerce.markInvoicePaid(ID.invWebhook);
     expect(invoice).toMatchObject({ id: ID.invWebhook, status: 'PAID' });
     const rows = await paymentsOf(ID.invWebhook);
@@ -761,12 +829,6 @@ describe('every caller of markInvoicePaid takes the same posted path', () => {
     expect(timelineFor(inv)).toHaveLength(0);
   });
 
-  it.todo(
-    'MP-06 KNOWN DEFECT (RA-G16-01, deferred; not admitted as conforming): the legacy Stripe webhook shape markInvoicePaid(invoiceId) '
-      + "records provider 'manual' / method 'MANUAL', so RevenuePostingService.depositSystemKey posts the Stripe checkout receipt "
-      + 'Dr CASH / Cr REVENUE instead of Dr PAYMENT_PROCESSOR. Fixing it needs the caller to name its provider '
-      + '(webhooks.controller.ts:86, the webhook half D-05 does not authorize).',
-  );
 });
 
 describe('concurrency: the remaining balance is the one under the invoice lock', () => {
@@ -1309,6 +1371,199 @@ describe('R0-20-MARKPAID-CONVERGENCE: the R0-20 proof against the landed mark-pa
     expect(after.paidAt).toBeTruthy();
     expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
     expect((await expectLedgerConverged(inv)).cashNet).toBe(INVOICE_TOTAL);
+  });
+});
+
+/**
+ * R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR (D-05). The deprecated POST /webhooks/stripe,
+ * after verifying the signature, hands the verified event to the Stripe ledger
+ * door (PaymentsService.handleStripeWebhook, what POST /payments/stripe/webhook
+ * runs: provider-event dedupe, createPaymentWithPosting, the reconcile), bound
+ * to the invoice's business, amount and currency. It never calls
+ * markInvoicePaid. Every delivery is signed with the deployment secret; the
+ * secret is set only while these cases run.
+ */
+describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe records a provider-paid invoice through the Stripe ledger door (D-05)', () => {
+  const HINT = { deprecated: true, use: '/payments/stripe/webhook' };
+  let previousSecret: string | undefined;
+
+  beforeAll(() => {
+    previousSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    process.env.STRIPE_WEBHOOK_SECRET = LEGACY_STRIPE_SECRET;
+  });
+
+  afterAll(() => {
+    if (previousSecret === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
+    else process.env.STRIPE_WEBHOOK_SECRET = previousSecret;
+  });
+
+  /** A Stripe-Signature header for this exact payload (t=<ts>,v1=<HMAC-SHA256>). */
+  function sign(raw: string, secret = LEGACY_STRIPE_SECRET) {
+    const t = Math.floor(Date.now() / 1000);
+    return `t=${t},v1=${createHmac('sha256', secret).update(`${t}.${raw}`).digest('hex')}`;
+  }
+
+  /** A checkout.session.completed for `invoiceId` as KeyFlow's checkout creates it (createStripeCheckout); `object` overrides fields. */
+  function sessionEvent(tag: string, invoiceId: string, object: Record<string, unknown> = {}) {
+    return JSON.stringify({
+      id: `${P}evt_${tag}`,
+      object: 'event',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: `${P}cs_${tag}`,
+          object: 'checkout.session',
+          amount_total: totalOf(invoiceId) * 100,
+          currency: 'ttd',
+          client_reference_id: invoiceId,
+          metadata: { invoiceId, businessId: ID.biz },
+          payment_intent: `${P}pi_${tag}`,
+          payment_status: 'paid',
+          ...object,
+        },
+      },
+    });
+  }
+
+  function legacy(raw: string, signature: string | null = sign(raw)) {
+    const req = agent().post('/webhooks/stripe').set('content-type', 'application/json');
+    return (signature === null ? req : req.set('stripe-signature', signature)).send(raw);
+  }
+
+  /** What POST /payments/stripe/webhook runs (PaymentsController hands it the raw body and the header). */
+  function door(raw: string) {
+    return stripeDoor.handleStripeWebhook(raw, sign(raw));
+  }
+
+  async function claimsOf(tag: string): Promise<number> {
+    return db.webhookEvent.count({ where: { provider: 'stripe', providerEventId: `${P}evt_${tag}` } });
+  }
+
+  /** The deposit-side system account(s) a payment's posting debits. */
+  async function depositKeysOf(paymentId: string): Promise<string[]> {
+    const [txn] = await db.financialTransaction.findMany({
+      where: { businessId: ID.biz, externalRef: `Payment:${paymentId}:payment_recorded` },
+      include: { entries: { include: { account: { select: { systemKey: true } } } } },
+    });
+    return (txn?.entries ?? [])
+      .filter((e: any) => Number(e.debit ?? 0) > 0 && DEPOSIT_KEYS.has(e.account?.systemKey))
+      .map((e: any) => e.account.systemKey);
+  }
+
+  function expectStripeRow(row: any, invoiceId: string, tag: string) {
+    expect(row).toMatchObject({
+      invoiceId,
+      businessId: ID.biz,
+      status: 'SUCCESSFUL',
+      amount: totalOf(invoiceId),
+      currency: 'TTD',
+      provider: 'stripe',
+      providerPaymentId: `${P}cs_${tag}`,
+      reference: `${P}pi_${tag}`,
+    });
+    expect(row.method, 'not the manual mark-paid row').not.toBe('MANUAL');
+    expect(row.recordedBy, 'a provider receipt names no human').toBeNull();
+  }
+
+  it('MP-06: a signed checkout.session.completed for invoice X of business B -> one SUCCESSFUL stripe payment (the session id, the amount and currency the event carries), posted once Dr PAYMENT_PROCESSOR, recordedBy null, PAID; markInvoicePaid never runs; a redelivery on either endpoint writes nothing; the answer keeps deprecated:true and the use hint', async () => {
+    const inv = ID.invLegacyStripe;
+    const markPaidSpy = vi.spyOn(commerce, 'markInvoicePaid');
+    const raw = sessionEvent('legacy1', inv);
+
+    const res = await legacy(raw);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ ok: true, received: true, processed: 'checkout.session.completed', type: 'checkout.session.completed', ...HINT });
+    // No invoice row leaves the unauthenticated route any more.
+    for (const key of ['id', 'status', 'contact', 'items', 'booking']) expect(res.body).not.toHaveProperty(key);
+
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(1);
+    expectStripeRow(rows[0], inv, 'legacy1');
+    await expectPostedOnce(rows[0].id, INVOICE_TOTAL, null);
+    // CR-R020-2: a Stripe receipt is posted to the processor clearing account, never CASH.
+    expect(await depositKeysOf(rows[0].id)).toEqual(['PAYMENT_PROCESSOR']);
+    const after = await invoiceRow(inv);
+    expect(after.status).toBe('PAID');
+    expect(after.paidAt).toBeTruthy();
+    expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
+    expect(await claimsOf('legacy1')).toBe(1);
+    const postings = (await paymentPostingsOf(inv)).map((t) => t.id);
+    expect(postings).toHaveLength(1);
+
+    // Redelivery on the legacy route: acknowledged, nothing new.
+    const again = await legacy(raw);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body).toMatchObject({ received: true, type: 'checkout.session.completed', ...HINT });
+    // The same event delivered to the other configured endpoint (the Stripe ledger door): nothing new.
+    await expect(door(raw)).resolves.toMatchObject({ ok: true, received: true });
+
+    expect((await paymentsOf(inv)).map((r) => r.id)).toEqual([rows[0].id]);
+    expect((await paymentPostingsOf(inv)).map((t) => t.id)).toEqual(postings);
+    expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
+    expect(markPaidSpy).not.toHaveBeenCalled();
+    expect((await expectLedgerConverged(inv)).cashNet).toBe(INVOICE_TOTAL);
+  });
+
+  it('MP-06b: the event first recorded through the Stripe ledger door (POST /payments/stripe/webhook), then delivered to the legacy route -> acknowledged with deprecated:true; nothing new written', async () => {
+    const inv = ID.invLegacyStripeDoorFirst;
+    const markPaidSpy = vi.spyOn(commerce, 'markInvoicePaid');
+    const raw = sessionEvent('doorfirst', inv);
+
+    await expect(door(raw)).resolves.toMatchObject({ ok: true, received: true, processed: 'checkout.session.completed' });
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(1);
+    expectStripeRow(rows[0], inv, 'doorfirst');
+    const postings = (await paymentPostingsOf(inv)).map((t) => t.id);
+    expect(postings).toHaveLength(1);
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+
+    const res = await legacy(raw);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ received: true, type: 'checkout.session.completed', ...HINT });
+    expect((await paymentsOf(inv)).map((r) => r.id)).toEqual([rows[0].id]);
+    expect((await paymentPostingsOf(inv)).map((t) => t.id)).toEqual(postings);
+    expect(invoiceEventsFor(inv, 'invoice.paid')).toHaveLength(1);
+    expect(markPaidSpy).not.toHaveBeenCalled();
+  });
+
+  it('MP-06c: refused (400), nothing written and no dedupe claim: a verified event naming another business, no business, another amount, no amount or another currency; an unsigned or wrongly signed call is refused as before; an event type the door ignores is acknowledged as before', async () => {
+    const inv = ID.invLegacyStripeRefused;
+    const markPaidSpy = vi.spyOn(commerce, 'markInvoicePaid');
+    const refusals: Array<[string, Record<string, unknown>]> = [
+      ['otherbiz', { metadata: { invoiceId: inv, businessId: ID.bizB } }],
+      ['nobiz', { metadata: { invoiceId: inv } }],
+      ['partial', { amount_total: 5000 }],
+      ['over', { amount_total: 25000 }],
+      ['noamount', { amount_total: null }],
+      ['zero', { amount_total: 0 }],
+      ['usd', { currency: 'usd' }],
+      ['nocurrency', { currency: null }],
+    ];
+    for (const [tag, object] of refusals) {
+      const res = await legacy(sessionEvent(tag, inv, object));
+      expect(res.status, `${tag}: ${JSON.stringify(res.body)}`).toBe(400);
+      expect(await claimsOf(tag), `${tag}: no dedupe claim`).toBe(0);
+    }
+
+    // Unsigned and wrongly signed: refused before anything is read, as before.
+    const raw = sessionEvent('unsigned', inv);
+    const unsigned = await legacy(raw, null);
+    expect(unsigned.status).toBe(400);
+    expect(unsigned.body.message).toMatch(/Missing stripe-signature header/);
+    const forged = await legacy(raw, sign(raw, `whsec_${P}not_the_secret`));
+    expect(forged.status).toBe(400);
+    expect(forged.body.message).toMatch(/Webhook signature verification failed/);
+    expect(await claimsOf('unsigned')).toBe(0);
+
+    // An event type the door ignores: acknowledged as before.
+    const ignoredRaw = JSON.stringify({ id: `${P}evt_ignored`, object: 'event', type: 'customer.created', data: { object: { id: `${P}cus_1`, object: 'customer' } } });
+    const ignored = await legacy(ignoredRaw);
+    expect(ignored.status, JSON.stringify(ignored.body)).toBe(201);
+    expect(ignored.body).toMatchObject({ received: true, type: 'customer.created', ...HINT });
+
+    await expectUntouched(inv, 'SENT');
+    expect(timelineFor(inv)).toHaveLength(0);
+    expect(markPaidSpy).not.toHaveBeenCalled();
   });
 });
 
