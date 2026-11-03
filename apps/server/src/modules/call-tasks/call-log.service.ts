@@ -3,6 +3,7 @@ import {
   Inject,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -99,15 +100,34 @@ export class CallLogService {
   }
 
   /**
-   * A call log's caller is a member user of its business (V1-54 review ST-4). createCallLog
-   * stored any callerId, and the KEY tool call_create_task hands it the callerId the model
-   * chose, so a call log could name another business's user or any string as the member who
-   * makes the call (the tool contract: "User ID who will make the call"). HTTP callers pass the
-   * session member, whom BusinessGuard has already found a member; a SUPER_ADMIN who is not a
-   * member of the business is refused here too. The check sits here rather than in the
-   * dispatcher so every writer of a caller is covered.
+   * A call log's caller is a member user of its business who may open its contact (V1-54 review
+   * ST-4; V1-84 review ST-1, CR-1, CR-2). createCallLog stored any callerId, and the KEY tool
+   * call_create_task hands it the callerId the model chose, so a call log could name another
+   * business's user or any string as the member who makes the call (the tool contract: "User ID
+   * who will make the call"). Both writers of a caller, createCallLog and
+   * createFromContactNextAction, check it here rather than in the dispatcher or the controller,
+   * so every writer is covered.
+   *
+   * Being the caller grants no visibility of the contact (review CR-2 ruling): the V1-08 rule
+   * through CallLog.contactId stays the only rule, so a call is not assigned to a member on a
+   * contact that member cannot open, where they could never open, complete or follow it up. A
+   * call whose contact is hidden from its caller later (the owner makes it PRIVATE, the member's
+   * crm_view changes) leaves that caller's view; the members who may open the contact keep it.
+   *
+   * `session` is the session member when they are the caller (the HTTP routes): its refusals are
+   * the actor's, 403 for a SUPER_ADMIN who is not a member (BusinessGuard lets them through) and,
+   * for a contact they cannot open, 404 'Contact not found' as GET contacts/:contactId answers
+   * them, with the SUPER_ADMIN bit taken from the session as crmRule does. Without it the callerId
+   * is an argument another writer chose (KEY call_create_task, a direct service call): 400, with
+   * the caller's role read from their User row.
    */
-  private async assertCallerIsMember(businessId: string, callerId: string) {
+  private async assertCaller(
+    businessId: string,
+    callerId: string,
+    contactId: string | null | undefined,
+    session?: CallLogViewer,
+  ) {
+    const asSession = session && session.userId === callerId ? session : undefined;
     const membership = callerId
       ? await this.prisma.client.membership.findUnique({
           where: { userId_businessId: { userId: callerId, businessId } },
@@ -115,7 +135,19 @@ export class CallLogService {
         })
       : null;
     if (!membership) {
+      if (asSession) {
+        throw new ForbiddenException('Only a member of this business can be the caller of a call log');
+      }
       throw new BadRequestException('callerId must belong to a member of this business');
+    }
+    if (contactId === undefined || contactId === null) return;
+    try {
+      await assertContactVisible(asSession ? this.crmRule(asSession) : this.prisma, businessId, contactId, callerId);
+    } catch (err) {
+      if (!asSession && err instanceof NotFoundException) {
+        throw new BadRequestException('callerId must be a member who may open this contact');
+      }
+      throw err;
     }
   }
 
@@ -142,9 +174,10 @@ export class CallLogService {
 
   /**
    * Refuses, as GET contacts/:contactId refuses an unknown id (404 'Contact not found'), a
-   * contact `viewer` may not open by the V1-08 rule: a call log written on it (POST calls,
-   * from-next-action, a PATCH that names it) would put the member's call notes on a contact
-   * they cannot see and show them that it exists (V1-84). No contact is no check.
+   * contact `viewer` may not open by the V1-08 rule: a PATCH that moves a call log onto it would
+   * put the member's call notes on a contact they cannot see and show them that it exists
+   * (V1-84). POST calls and from-next-action, where the member is the caller, are checked by
+   * assertCaller. No contact is no check.
    */
   async assertContactVisibleTo(businessId: string, contactId: string | null | undefined, viewer: CallLogViewer) {
     if (contactId === undefined || contactId === null) return;
@@ -157,7 +190,8 @@ export class CallLogService {
    * crm_view 'owned') answers 404 'Call log not found', exactly as an unknown id, so its notes,
    * script and outcome are not read through it and its existence is not told. A call log with
    * no contact is the business's. A member with the whole book (OWNER, SUPER_ADMIN) reads as
-   * before: no contact lookup is made for them.
+   * before: no contact lookup is made for them. Being the call log's caller opens nothing (review
+   * CR-2 ruling, see assertCaller): the rule is the contact's.
    */
   async getVisibleCallLog(businessId: string, id: string, viewer: CallLogViewer) {
     const callLog = await this.getCallLog(businessId, id);
@@ -197,9 +231,12 @@ export class CallLogService {
     return { OR: [{ contactId: null }, { contactId: { in: visible } }] };
   }
 
-  async createCallLog(input: CreateCallLogInput) {
+  /**
+   * `session`: the session member, when they are the caller (POST calls). See assertCaller.
+   */
+  async createCallLog(input: CreateCallLogInput, session?: CallLogViewer) {
     await this.assertContactInBusiness(input.businessId, input.contactId);
-    await this.assertCallerIsMember(input.businessId, input.callerId);
+    await this.assertCaller(input.businessId, input.callerId, input.contactId, session);
     const scheduledAt = input.scheduledAt
       ? new Date(input.scheduledAt)
       : undefined;
@@ -465,13 +502,17 @@ export class CallLogService {
    * contact was looked up by a bare findUnique({ id }) and the call log written under the
    * contact's own business, so where no ambient tenant binds the lookup (a direct service call,
    * the staff bridge) another business's contact got a call log in that business for this
-   * business's member. Another business's contact now answers as an unknown one.
+   * business's member. Another business's contact now answers as an unknown one. The caller is
+   * checked as createCallLog checks it (assertCaller, V1-84 review ST-1), before the next action
+   * is read, so a contact hidden from the caller does not tell its next action. `session`: the
+   * session member, when they are the caller (POST contacts/:contactId/calls/from-next-action).
    */
   async createFromContactNextAction(
     businessId: string,
     contactId: string,
     callerId: string,
     script?: string,
+    session?: CallLogViewer,
   ) {
     const contact = await this.prisma.client.contact.findFirst({
       where: { id: contactId, businessId },
@@ -486,6 +527,7 @@ export class CallLogService {
     if (!contact) {
       throw new NotFoundException('Contact not found');
     }
+    await this.assertCaller(businessId, callerId, contact.id, session);
 
     if (contact.nextActionType !== 'call') {
       throw new BadRequestException(

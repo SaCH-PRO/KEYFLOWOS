@@ -50,8 +50,8 @@ describe('CallTaskController', () => {
     } as any, { user: { id: 'user_1' } } as any);
 
     expect(result.businessId).toBe('biz_1');
-    expect(svc.assertContactVisibleTo).toHaveBeenCalledWith('biz_1', 'c1', viewer);
-    expect(svc.createCallLog).toHaveBeenCalled();
+    // the service checks the session member as the caller (V1-84 review ST-1, CR-1)
+    expect(svc.createCallLog).toHaveBeenCalledWith(expect.objectContaining({ businessId: 'biz_1', callerId: 'user_1' }), viewer);
   });
 
   it('lists calls', async () => {
@@ -150,8 +150,7 @@ describe('CallTaskController', () => {
     const ctrl = new CallTaskController(svc, scriptSvc);
 
     const result = await ctrl.createFromNextAction('biz_1', 'c1', {}, { user: { id: 'user_1' } } as any);
-    expect(svc.assertContactVisibleTo).toHaveBeenCalledWith('biz_1', 'c1', viewer);
-    expect(svc.createFromContactNextAction).toHaveBeenCalledWith('biz_1', 'c1', 'user_1', undefined);
+    expect(svc.createFromContactNextAction).toHaveBeenCalledWith('biz_1', 'c1', 'user_1', undefined, viewer);
   });
 
   it('generates a call script', async () => {

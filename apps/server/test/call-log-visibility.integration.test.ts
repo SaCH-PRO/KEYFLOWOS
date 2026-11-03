@@ -52,6 +52,7 @@ const ID = {
   staffOwned: `${P}staffOwned`, // STAFF of bizA: crm write, crm_view 'owned' (my book)
   staffAll: `${P}staffAll`, // STAFF of bizA: crm write (view-all default)
   ownerB: `${P}ownerB`, // OWNER of bizB only
+  superA: `${P}superA`, // SUPER_ADMIN, no membership in bizA (review ST-1/CR-1)
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
   cPriv: `${P}cPriv`, // PRIVATE, owned by owner, next action: call
@@ -195,6 +196,7 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.staffOwned, email: `${P}staffOwned@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.staffAll, email: `${P}staffAll@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.ownerB, email: `${P}ownerB@test.local`, role: 'USER' } });
+  await db.user.create({ data: { id: ID.superA, email: `${P}superA@test.local`, role: 'SUPER_ADMIN' } });
   await db.business.create({ data: { id: ID.bizA, name: 'V84D Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V84D Biz B', ownerId: ID.ownerB } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.bizA, role: 'OWNER' } });
@@ -371,6 +373,130 @@ describe('CL-03 a call log names a member of its business as its caller (the KEY
     expect(row).toMatchObject({ businessId: ID.bizA, contactId: ID.cTeam, callerId: ID.staffAll });
     expect(emitted.map(([name]) => name)).toEqual(['call_log.created']);
   });
+
+  // Review ST-1 / CR-1: the member check ran in createCallLog only. createFromContactNextAction
+  // stored any callerId, so a SUPER_ADMIN who is not a member was refused on POST calls but
+  // stored as the caller through from-next-action. Over HTTP the refusal answered 400 naming a
+  // body callerId the controller ignores; the session member is the caller there, so it is the
+  // actor's refusal (403).
+  it('CL-03c a non-member SUPER_ADMIN session is refused 403 as the caller on POST calls and from-next-action, and no call log is written', async () => {
+    const responses = [
+      await as(ID.superA).post(calls, { businessId: ID.bizA, contactId: ID.cTeam, callerId: ID.owner }),
+      await as(ID.superA).post(`/businesses/${ID.bizA}/contacts/${ID.cTeam}/calls/from-next-action`, { autoGenerateScript: true }),
+    ];
+    for (const res of responses) {
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe('Only a member of this business can be the caller of a call log');
+    }
+    expect(await db.callLog.count({ where: { callerId: ID.superA } })).toBe(0);
+    expect(scriptCalls).toEqual([]);
+    expect(emitted).toEqual([]);
+  });
+
+  it('CL-03d createFromContactNextAction refuses a callerId that is not a member user of the business, and writes nothing', async () => {
+    for (const callerId of ['not_a_member', ID.ownerB, ID.superA]) {
+      await expect(callLogs.createFromContactNextAction(ID.bizA, ID.cTeam, callerId), callerId).rejects.toMatchObject({
+        status: 400,
+        message: 'callerId must belong to a member of this business',
+      });
+      expect(await db.callLog.count({ where: { callerId } }), callerId).toBe(0);
+    }
+    expect(emitted).toEqual([]);
+  });
+});
+
+/**
+ * Review CR-2 ruling: being a call log's caller grants no visibility of its contact. The V1-08
+ * rule through CallLog.contactId stays the only rule (no caller exception, which would open the
+ * contact's script, follow-up tasks and outcome to a member the contact's owner hid it from).
+ * Instead no writer may assign a call to a member on a contact that member cannot open: the KEY
+ * call_create_task path (createCallLog with a model-chosen callerId) and createFromContactNextAction
+ * now refuse it. A call whose contact is hidden from its caller afterwards (the owner makes it
+ * PRIVATE, the member's crm_view changes) is a documented dead-end for that caller: the OWNER and
+ * the members who may open the contact still see and complete it.
+ */
+describe('CL-04 a call is assigned only to a member who may open its contact (review CR-2)', () => {
+  const keyShape = (callerId: string, contactId: string) => ({
+    businessId: ID.bizA,
+    contactId,
+    callerId,
+    scheduledAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    script: null,
+    notes: null,
+  });
+
+  it('CL-04a KEY call_create_task (createCallLog) refuses a member caller on a contact they cannot open, and writes nothing', async () => {
+    for (const [callerId, contactId] of [[ID.staffOwned, ID.cTeam], [ID.staffOwned, ID.cPriv], [ID.staffAll, ID.cPriv], [ID.staffAll, ID.cShared]] as const) {
+      await expect(callLogs.createCallLog(keyShape(callerId, contactId)), `${callerId} ${contactId}`).rejects.toMatchObject({
+        status: 400,
+        message: 'callerId must be a member who may open this contact',
+      });
+      expect(await db.callLog.count({ where: { callerId, contactId } }), `${callerId} ${contactId}`).toBe(0);
+    }
+    expect(emitted).toEqual([]);
+  });
+
+  it('CL-04b createFromContactNextAction refuses a member caller on a contact they cannot open, and writes nothing', async () => {
+    for (const [callerId, contactId] of [[ID.staffOwned, ID.cTeam], [ID.staffAll, ID.cPriv]] as const) {
+      await expect(callLogs.createFromContactNextAction(ID.bizA, contactId, callerId), `${callerId} ${contactId}`).rejects.toMatchObject({
+        status: 400,
+        message: 'callerId must be a member who may open this contact',
+      });
+      expect(await db.callLog.count({ where: { callerId, contactId } }), `${callerId} ${contactId}`).toBe(0);
+    }
+    expect(emitted).toEqual([]);
+  });
+
+  it('CL-04c CONTROL: a member caller on a contact they may open is stored (own, shared, contactless; OWNER on PRIVATE)', async () => {
+    const stored = [
+      await callLogs.createCallLog(keyShape(ID.staffOwned, ID.cMine)),
+      await callLogs.createCallLog(keyShape(ID.staffOwned, ID.cShared)),
+      await callLogs.createCallLog({ ...keyShape(ID.staffOwned, ID.cMine), contactId: undefined }),
+      await callLogs.createCallLog(keyShape(ID.owner, ID.cPriv)),
+      await callLogs.createFromContactNextAction(ID.bizA, ID.cMine, ID.staffOwned),
+    ];
+    expect(stored.map((l: any) => [l.callerId, l.contactId])).toEqual([
+      [ID.staffOwned, ID.cMine],
+      [ID.staffOwned, ID.cShared],
+      [ID.staffOwned, null],
+      [ID.owner, ID.cPriv],
+      [ID.staffOwned, ID.cMine],
+    ]);
+  });
+
+  it('CL-04d RULING: a call whose contact is made PRIVATE after it was assigned leaves its caller\'s view; the OWNER still opens and completes it', async () => {
+    const cFlip = `${P}cFlip`;
+    await db.contact.create({ data: { id: cFlip, businessId: ID.bizA, firstName: 'V84D', lastName: 'flip', visibility: 'TEAM', ownerId: ID.owner } });
+    const clFlip = await db.callLog.create({
+      data: { id: `${P}clFlip`, businessId: ID.bizA, contactId: cFlip, callerId: ID.staffAll, scheduledAt: today(13), notes: 'assigned', evidenceIds: [] },
+    });
+    await as(ID.staffAll).get(`${calls}/${clFlip.id}`).expect(200);
+
+    await db.contact.update({ where: { id: cFlip }, data: { visibility: 'PRIVATE' } });
+
+    await as(ID.staffAll).get(`${calls}/${clFlip.id}`).expect(404);
+    await as(ID.staffAll).post(`${calls}/${clFlip.id}/complete`, { outcome: 'reached' }).expect(404);
+    const mine = await as(ID.staffAll).get(`${calls}?callerId=${ID.staffAll}`).expect(200);
+    expect(mine.body.items.map((c: any) => c.id)).not.toContain(clFlip.id);
+    const day = await as(ID.staffAll).get(`${calls}/scheduled/today?callerId=${ID.staffAll}`).expect(200);
+    expect(day.body.map((c: any) => c.id)).not.toContain(clFlip.id);
+
+    await as(ID.owner).get(`${calls}/${clFlip.id}`).expect(200);
+    await as(ID.owner).post(`${calls}/${clFlip.id}/complete`, { outcome: 'reached' }).expect(201);
+  });
+
+  it.todo('chaser.service.ts and capacity-insight.service.ts tell a caller to log the outcome of a call log whose contact they can no longer open (review CR-2 dead-end; those services are outside FOLLOW3-D4-CALL-LOG-VIS\'s write set, follow-up packet)');
+});
+
+// Review ST-2 (residual, not fixed here): the KEY write tools reach the call logs and contacts the
+// HTTP routes now hide. call_log_outcome (completeCall), call_schedule_followup
+// (createFollowUpTask), call_generate_script and call_create_task run with no acting member, and
+// JobRolePolicyService grants them to non-OWNER crm:write holders (crm_view 'owned' included) while
+// it withholds crm_update_contact from the same holders. The fix is in job-role-policy.service.ts
+// (CRM_ROW_VISIBILITY_TOOLS) or a dispatcher that passes the actor (flow-orchestrator.service.ts),
+// both outside this packet's write set.
+describe('CL-05 KEY call-log write tools (review ST-2, follow-up packet)', () => {
+  it.todo("KEY call_log_outcome, call_schedule_followup, call_generate_script and call_create_task apply the acting member's CRM record visibility, or are withheld from members whose visibility is restricted (job-role-policy.service.ts / flow-orchestrator.service.ts)");
 });
 
 describe('CONTROLS: what a member may open behaves as before', () => {

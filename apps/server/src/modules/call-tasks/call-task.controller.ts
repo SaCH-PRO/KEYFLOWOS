@@ -78,14 +78,18 @@ export class CallTaskController {
   ) {
     // The caller is the session member; a body callerId is ignored.
     // CreateCallLogDto still declares it, and the DTO is outside V1-54's write set.
+    // The service checks the session member as the caller (V1-84 review ST-1, CR-1): a
+    // SUPER_ADMIN who is not a member is refused 403, a contact they may not open 404.
     const viewer = sessionViewer(req);
     const callerId = viewer.userId;
-    await this.callLogs.assertContactVisibleTo(businessId, body.contactId, viewer);
-    return this.callLogs.createCallLog({
-      ...body,
-      businessId,
-      callerId,
-    });
+    return this.callLogs.createCallLog(
+      {
+        ...body,
+        businessId,
+        callerId,
+      },
+      viewer,
+    );
   }
 
   @Get('businesses/:businessId/calls')
@@ -225,16 +229,17 @@ export class CallTaskController {
     @Request() req: SessionRequest,
   ) {
     // The caller is the session member; a body callerId is ignored. The contact
-    // is looked up within the path business (review ST-3), and must be one the
-    // member may open (V1-84).
+    // is looked up within the path business (review ST-3), and the service checks
+    // the session member as its caller as on POST calls: a member of the business
+    // who may open the contact (V1-84, review ST-1).
     const viewer = sessionViewer(req);
     const callerId = viewer.userId;
-    await this.callLogs.assertContactVisibleTo(businessId, contactId, viewer);
     const callLog = await this.callLogs.createFromContactNextAction(
       businessId,
       contactId,
       callerId,
       body.script,
+      viewer,
     );
 
     if (body.autoGenerateScript && callLog.contactId) {

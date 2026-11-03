@@ -126,6 +126,11 @@ function createMockPrisma() {
           store.contactTasks.get(args.where.id) ?? null,
         ),
       },
+      // a caller's User row: assertCaller reads the role (SUPER_ADMIN) of a callerId it did not
+      // get from the session (V1-84 review CR-2); every user the cases name is a plain USER
+      user: {
+        findUnique: vi.fn(async (args: any) => ({ id: args.where.id, role: 'USER' })),
+      },
       membership: {
         findUnique: vi.fn(async (args: any) => {
           const key = args.where.userId_businessId;
@@ -331,6 +336,34 @@ describe('CallLogService', () => {
     await expect(
       svc.createFromContactNextAction('biz_1', 'contact_1', 'user_1'),
     ).rejects.toThrow("Contact next action is 'email', not 'call'");
+  });
+
+  // V1-84 review ST-1 / CR-1: createFromContactNextAction stored any callerId. Both writers of a
+  // caller now refuse a non-member: 400 for a callerId another writer chose (KEY, a direct call),
+  // 403 for the session member as the caller (a SUPER_ADMIN who is not a member).
+  it('refuses a caller who is not a member on both writers: 400 named, 403 as the session', async () => {
+    const prisma = createMockPrisma();
+    const emitter = createMockEmitter();
+    const svc = new CallLogService(prisma as any, emitter as any);
+    prisma.store.contacts.set('contact_1', {
+      id: 'contact_1', businessId: 'biz_1', nextActionAt: new Date('2026-05-20T14:00:00Z'), nextActionType: 'call',
+    });
+    const superAdmin = { userId: 'user_sa', role: 'SUPER_ADMIN' };
+
+    await expect(svc.createFromContactNextAction('biz_1', 'contact_1', 'not_a_member')).rejects.toMatchObject({
+      status: 400, message: 'callerId must belong to a member of this business',
+    });
+    await expect(svc.createCallLog({ businessId: 'biz_1', contactId: 'contact_1', callerId: 'user_t' })).rejects.toMatchObject({
+      status: 400, message: 'callerId must belong to a member of this business',
+    });
+    await expect(svc.createFromContactNextAction('biz_1', 'contact_1', 'user_sa', undefined, superAdmin)).rejects.toMatchObject({
+      status: 403, message: 'Only a member of this business can be the caller of a call log',
+    });
+    await expect(svc.createCallLog({ businessId: 'biz_1', contactId: 'contact_1', callerId: 'user_sa' }, superAdmin)).rejects.toMatchObject({
+      status: 403, message: 'Only a member of this business can be the caller of a call log',
+    });
+    expect(prisma.client.callLog.create).not.toHaveBeenCalled();
+    expect(emitter.emit).not.toHaveBeenCalled();
   });
 
   it('deletes a scheduled call', async () => {
