@@ -106,15 +106,28 @@ main() {
   # prisma migrate deploy), never `prisma db push`. db push cannot create the
   # partial contact identity uniques of migration
   # 20261101000000_contact_partial_identity_uniques and drops the full ones.
-  # A local database built with db push has no _prisma_migrations record of
-  # 0_baseline and is refused (P3005) until it is recorded once by hand.
+  # A local database built or kept in sync without migrations is refused
+  # (P3005, or P3018 "already exists" then P3009) until it is adopted once by
+  # hand (MAINTENANCE.md "Adopting a database built without migrations").
   log "Applying migrations to local database (prisma migrate deploy)"
   if ! DATABASE_URL="$db_url" DIRECT_URL="$direct_url" pnpm db:deploy >/dev/null; then
     echo "[FATAL] prisma migrate deploy failed against the local database." >&2
-    echo "  If it reports P3005, the database has no _prisma_migrations record of" >&2
-    echo "  0_baseline. Confirm its schema matches 0_baseline (docs/SCHEMA_DEPLOYMENT.md §3)," >&2
-    echo "  record the baseline once, then rerun this script:" >&2
+    echo "  P3005, or P3018 'already exists' then P3009: the database holds schema that" >&2
+    echo "  _prisma_migrations does not record. Recording 0_baseline alone is not enough." >&2
+    echo "  Adopt it once with MAINTENANCE.md" >&2
+    echo "  \"Adopting a database built without migrations\" (record 0_baseline and each" >&2
+    echo "  migration listed there, starting with" >&2
     echo "    pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline" >&2
+    echo "  and leave 20261101000000_contact_partial_identity_uniques to migrate deploy)," >&2
+    echo "  then rerun this script." >&2
+    exit 1
+  fi
+  # Prisma cannot see the partial contact identity uniques, so a database that
+  # records 20261101000000 as applied without them passes migrate deploy.
+  if ! DATABASE_URL="$db_url" DIRECT_URL="$direct_url" pnpm --filter @keyflow/db exec prisma db execute --schema=./prisma/schema.prisma --file "$ROOT_DIR/scripts/assert-contact-identity-uniques.sql" >/dev/null; then
+    echo "[FATAL] the local database records 20261101000000_contact_partial_identity_uniques" >&2
+    echo "  as applied but lacks its partial contact identity uniques. See MAINTENANCE.md" >&2
+    echo "  \"Adopting a database built without migrations\"." >&2
     exit 1
   fi
 

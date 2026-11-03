@@ -18,11 +18,19 @@
 #   - Migrate deploy: fail loudly. Real schema drift used to be silently
 #     swallowed here, which led to the deployed app going live with a
 #     broken database. We now propagate the failure.
-#   - A database with no _prisma_migrations record of 0_baseline (one that
-#     was built with db push) is refused (P3005) until an operator records
-#     the baseline once, after checking the database matches it:
+#   - A database built or kept in sync without migrations (every environment
+#     before V1-83) holds schema that _prisma_migrations does not record:
+#     deploy refuses it with P3005, or, once only 0_baseline is recorded,
+#     with P3018 "already exists" and then P3009. An operator adopts it once
+#     with MAINTENANCE.md "Adopting a database built without migrations"
+#     (record 0_baseline and every migration it already holds, starting with
 #       pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline
-#     This script never records it by itself.
+#     and leave 20261101000000_contact_partial_identity_uniques to deploy).
+#     This script never records a migration by itself.
+#   - After deploy, scripts/assert-contact-identity-uniques.sql must find
+#     both partial contact identity uniques of V1-17. Prisma cannot see them
+#     (`migrate diff` and `migrate status` are silent), so a database that
+#     records V1-17 as applied without them fails here, loudly.
 #
 # Override:
 #   POST_MERGE_SKIP_DB_PUSH=1   skip both database steps (drift check and
@@ -44,14 +52,16 @@ echo "[2/4] Generating Prisma client…"
 pnpm --filter @keyflow/db run db:generate
 
 if [ "${POST_MERGE_SKIP_DB_PUSH:-0}" = "1" ]; then
-  echo "[3/4] Skipping schema push (POST_MERGE_SKIP_DB_PUSH=1)."
-  echo "[4/4] Skipping drift check (POST_MERGE_SKIP_DB_PUSH=1)."
+  echo "[3/4] Skipping drift check (POST_MERGE_SKIP_DB_PUSH=1)."
+  echo "[4/4] Skipping migrate deploy (POST_MERGE_SKIP_DB_PUSH=1)."
   echo "=== Post-merge setup complete (db steps skipped) ==="
   exit 0
 fi
 
-# Detect drift before pushing so the operator gets a one-line summary of
-# what would change (or has already changed in production).
+# Detect drift before deploying so the operator gets a one-line summary of
+# what would change (or has already changed in production). This check reads
+# schema.prisma only: it cannot see the partial contact identity uniques of
+# V1-17 (Prisma cannot declare them), so step [4/4] checks those separately.
 echo "[3/4] Checking for schema drift (prisma migrate diff)…"
 DIFF_TMP=$(mktemp)
 set +e
@@ -94,15 +104,43 @@ DEPLOY_EXIT=${PIPESTATUS[0]}
 set -e
 if [ "$DEPLOY_EXIT" -ne 0 ]; then
   echo "[FATAL] prisma migrate deploy failed (exit ${DEPLOY_EXIT}) — aborting." >&2
-  if grep -qE 'P3005|Migration name: 0_baseline' "$DEPLOY_TMP"; then
-    echo "  This database has no _prisma_migrations record of 0_baseline: it was built" >&2
-    echo "  without migrations. Back it up, confirm its schema matches 0_baseline" >&2
-    echo "  (docs/SCHEMA_DEPLOYMENT.md §3), record the baseline once, then rerun:" >&2
+  if grep -qE 'Migration name: 20261101000000_contact_partial_identity_uniques|20261101000000_contact_partial_identity_uniques` migration started' "$DEPLOY_TMP"; then
+    echo "  20261101000000_contact_partial_identity_uniques (V1-17) did not apply. Most" >&2
+    echo "  likely two live contacts of one business share an email or a phone: run the" >&2
+    echo "  duplicate scan in its migration.sql, resolve the duplicates, then rerun after:" >&2
+    echo "    pnpm --filter @keyflow/db exec prisma migrate resolve --rolled-back 20261101000000_contact_partial_identity_uniques" >&2
+    echo "  Never mark it --applied: that records V1-17 with no contact identity unique." >&2
+  elif grep -qE 'P3005|P3009|Migration name: 0_baseline|already exists' "$DEPLOY_TMP"; then
+    echo "  This database holds schema that _prisma_migrations does not record: it was" >&2
+    echo "  built or kept in sync without migrations. Recording 0_baseline alone is not" >&2
+    echo "  enough; the next deploy re-runs later migrations and stops with P3018" >&2
+    echo "  'already exists', then P3009. Adopt it once with MAINTENANCE.md" >&2
+    echo "  \"Adopting a database built without migrations\": back it up, check its" >&2
+    echo "  contact identity indexes and run the duplicate scan, then record 0_baseline" >&2
+    echo "  and each migration listed there (a failed one included), starting with:" >&2
     echo "    pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline" >&2
+    echo "  Leave 20261101000000_contact_partial_identity_uniques for migrate deploy; never" >&2
+    echo "  mark it --applied unless both *_live_key indexes already exist." >&2
   fi
   rm -f "$DEPLOY_TMP"
   exit 1
 fi
 rm -f "$DEPLOY_TMP"
+
+# Prisma cannot see the partial contact identity uniques of V1-17, so a
+# database that records 20261101000000 as applied without them passes both
+# migrate deploy and the drift check. Refuse it here.
+echo "  → checking the contact identity uniques (V1-17)…"
+if ! pnpm --filter @keyflow/db exec prisma db execute --schema=./prisma/schema.prisma --file "$ROOT_DIR/scripts/assert-contact-identity-uniques.sql"; then
+  echo "[FATAL] contacts_business_id_email_normalized_live_key and/or" >&2
+  echo "  contacts_business_id_phone_normalized_live_key is missing although every" >&2
+  echo "  migration is recorded as applied: 20261101000000_contact_partial_identity_uniques" >&2
+  echo "  was recorded by hand without running. Two live contacts of one business can" >&2
+  echo "  share an email or a phone until it runs. Run the duplicate scan in its" >&2
+  echo "  migration.sql, resolve any duplicates, then run its SQL once and rerun:" >&2
+  echo "    pnpm --filter @keyflow/db exec prisma db execute --schema=./prisma/schema.prisma --file ./prisma/migrations/20261101000000_contact_partial_identity_uniques/migration.sql" >&2
+  echo "  (MAINTENANCE.md \"Adopting a database built without migrations\")." >&2
+  exit 1
+fi
 
 echo "=== Post-merge setup complete ==="

@@ -75,8 +75,15 @@ and `scripts/start-cloud-app.sh` (`pnpm db:deploy`) now run
 `prisma migrate deploy`. Both ran `prisma db push` until then, which on a
 database one migration behind `20261101000000_contact_partial_identity_uniques`
 dropped both contact identity uniques and created neither partial index.
-`apps/server/test/schema-sync-path.integration.test.ts` proves both paths on
-that database and fails if any file under `scripts/` runs db push again.
+After deploy both scripts run `scripts/assert-contact-identity-uniques.sql`,
+which fails unless both partial contact identity uniques exist (Prisma cannot
+see them). `apps/server/test/schema-sync-path.integration.test.ts` proves both
+paths on that database. It runs `post-merge.sh` end to end with every package
+manager, `prisma` and `psql` stubbed, so a db push anywhere in it fails the
+suite. It also has a static check over every script under `scripts/` that
+flags `prisma db push` or a `db:push` script run by any package manager,
+including after `echo ... &&`. That check is lexical: a spelling it does not
+know (a variable holding the command, say) is not caught.
 
 Adding a model or a column reaches production only if a human runs something by
 hand. This is not theoretical: the `flow_sessions.user_id` column added for
@@ -140,6 +147,20 @@ This writes one bookkeeping row and executes no DDL. **Skipping it on a
 populated database means the next `migrate deploy` tries to create 433 tables
 that are already there.** Done for local dev; **still required on production**.
 
+**Correction (V1-83 review).** That was enough only while `0_baseline` was the
+only migration. A database built or kept in sync with `db push` already holds
+the schema of the later migrations too, so after recording `0_baseline` alone
+`migrate deploy` re-runs them and stops with P3018 ("column ... already
+exists"), then P3009 on every run. The one-time adoption is now the procedure
+in `MAINTENANCE.md` ("Adopting a database built without migrations"): check the
+contact identity indexes in `pg_indexes` and run the V1-17 duplicate scan,
+record `0_baseline` and every migration the database already holds, and leave
+`20260808140000_bank_transaction_external_id_unique` and
+`20261101000000_contact_partial_identity_uniques` to `migrate deploy`. Never
+record `20261101000000_contact_partial_identity_uniques` as applied unless both
+`*_live_key` indexes exist: `prisma migrate diff` reports "No difference
+detected" on a database that has neither contact identity unique.
+
 ## 4. The orphans — twelve, not four, and five held data
 
 Tables that existed in the local database with no model in `schema.prisma`, no
@@ -170,12 +191,14 @@ to that database.
 ## 5. From here
 
 - Schema changes go through `prisma migrate dev`, which now works.
-- **Production still needs `migrate resolve --applied 0_baseline` once.** The
-  deploy path now runs `prisma migrate deploy` (§2 update): on a database with
-  no `_prisma_migrations` record of `0_baseline` it fails loudly with P3005,
-  and post-merge names the fix, until an operator runs
-  `pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline`
-  once against it (§3). No script records the baseline by itself.
+- **Production still needs the one-time adoption** in `MAINTENANCE.md`
+  ("Adopting a database built without migrations"), not
+  `migrate resolve --applied 0_baseline` alone (§3 correction). The deploy
+  path now runs `prisma migrate deploy` (§2 update): until the adoption, it
+  fails loudly with P3005 (or P3018 "already exists", then P3009) and
+  post-merge points to the procedure. No script records a migration by
+  itself, and post-merge refuses a database that records V1-17 without its
+  two `*_live_key` indexes.
 - `db push` should no longer be used outside throwaway databases. It drops
   columns and tables `schema.prisma` no longer declares, and this repo has
   already demonstrated a database holding twelve such objects. Since V1-17 it

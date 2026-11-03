@@ -264,7 +264,9 @@ runs automatically and:
 3. **Detects schema drift** with `prisma migrate diff` and prints a
    one-line summary of what would change.
 4. Applies the committed migrations in `packages/db/prisma/migrations`
-   with `prisma migrate deploy` (owner ruling D-62).
+   with `prisma migrate deploy` (owner ruling D-62), then checks that both
+   partial contact identity uniques of V1-17 exist
+   (`scripts/assert-contact-identity-uniques.sql`).
 
 Failure policy:
 
@@ -272,6 +274,8 @@ Failure policy:
   drift causes the script to exit non-zero. The deploy is blocked.
 - In dev, drift logs a warning and continues so you can iterate fast.
 - A failed `prisma migrate deploy` exits non-zero in every environment.
+- So does a missing `contacts_business_id_email_normalized_live_key` or
+  `contacts_business_id_phone_normalized_live_key` after deploy.
 - Override knobs (use sparingly):
   - `POST_MERGE_SKIP_DB_PUSH=1` — skip steps 3 and 4 entirely (the name
     predates `migrate deploy` and is kept so operator settings still work).
@@ -285,7 +289,7 @@ bash scripts/post-merge.sh
 ```
 
 `scripts/start-cloud-app.sh` (the local cloud dev stack) applies them the
-same way, with `pnpm db:deploy`.
+same way, with `pnpm db:deploy`, and runs the same index check.
 
 To inspect drift without applying:
 
@@ -297,6 +301,10 @@ pnpm --filter @keyflow/db exec prisma migrate diff \
 ```
 
 Exit `0` = clean, `2` = drift, anything else = something else broke.
+It compares the database with `schema.prisma` only, so it cannot see what
+only a migration declares: the partial contact identity uniques of V1-17
+and `bank_transactions_account_external_id_key`. It answers "No difference
+detected" on a database that has none of them.
 
 ### Why not `prisma db push`
 
@@ -311,23 +319,132 @@ contacts of one business could share an email or a phone.
 Never run `prisma db push` (`pnpm db:push`) against a database you keep;
 it is for throwaway databases only.
 
-### A database without a `0_baseline` record (P3005)
+### Adopting a database built without migrations
 
-A database that was built with `db push` instead of migrations has no
-`_prisma_migrations` record of `0_baseline`. `prisma migrate deploy`
-refuses it with **P3005** ("The database schema is not empty"), and
-post-merge stops with a `[FATAL]` naming the fix. Neither script records
-the baseline by itself. Once per such database, after a backup and after
-confirming its schema matches `0_baseline`
-([docs/SCHEMA_DEPLOYMENT.md](docs/SCHEMA_DEPLOYMENT.md) §3), an operator
-runs, with `DATABASE_URL` and `DIRECT_URL` pointing at it:
+Every environment built before V1-83 got its schema from `db push`, not from
+migrations ([docs/SCHEMA_DEPLOYMENT.md](docs/SCHEMA_DEPLOYMENT.md) §1), and
+the old post-merge kept it in sync with `schema.prisma` the same way, not
+through migrations. Such a database already holds the schema of most
+migrations, but `_prisma_migrations` does not record them, so
+`prisma migrate deploy` refuses it:
+
+- **P3005** ("The database schema is not empty"): there is no
+  `_prisma_migrations` table, or it is empty.
+- **P3018** ending in "already exists" (SQLSTATE 42701, 42P07 or 42710):
+  `0_baseline` is recorded but the later migrations are not, so deploy
+  runs their DDL again. The failed migration rolls back and nothing
+  changes, but every later run stops with **P3009** (a failed migration
+  is recorded).
+
+Post-merge and `start-cloud-app.sh` stop with a `[FATAL]` that points
+here; neither records a migration by itself. **Recording `0_baseline`
+alone is not enough**: running only
+`pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline`
+is exactly what produces the P3018. Once per such database, with
+`DATABASE_URL` and `DIRECT_URL` pointing at it:
+
+1. Back it up.
+2. Check which contact identity uniques it has. `prisma migrate diff`
+   cannot tell you (see above); ask Postgres:
+
+   ```sql
+   SELECT indexname FROM pg_indexes
+    WHERE tablename = 'contacts'
+      AND indexname IN ('contacts_business_id_email_normalized_key',
+                        'contacts_business_id_phone_normalized_key',
+                        'contacts_business_id_email_normalized_live_key',
+                        'contacts_business_id_phone_normalized_live_key');
+   ```
+
+   A database synced from a `schema.prisma` older than V1-17 shows the two
+   full `*_key` indexes, which still keep live duplicates out. One synced
+   since V1-17 shows none of the four: nothing stops two live contacts of
+   one business from sharing an email or a phone until step 5 creates the
+   `*_live_key` indexes.
+3. Run the duplicate scan of
+   `20261101000000_contact_partial_identity_uniques`. Both queries must
+   return no rows; resolve any duplicates first, or that migration fails
+   (it then rolls back, and post-merge names the fix):
+
+   ```sql
+   SELECT business_id, email_normalized, count(*) FROM contacts
+    WHERE deleted_at IS NULL AND email_normalized IS NOT NULL
+    GROUP BY 1, 2 HAVING count(*) > 1;
+   SELECT business_id, phone_normalized, count(*) FROM contacts
+    WHERE deleted_at IS NULL AND phone_normalized IS NOT NULL
+    GROUP BY 1, 2 HAVING count(*) > 1;
+   ```
+
+4. Record as applied `0_baseline` and every migration whose schema the
+   database already holds, from the repository root. A migration that is
+   already recorded answers P3008, which is harmless; one that failed
+   (P3009) is recorded as applied by the same command.
+
+   ```bash
+   for m in \
+       0_baseline \
+       20260720181801_org_assignment_contact_delegation \
+       20260720191350_approval_item_approver_routing \
+       20260721044726_support_ticket_messages \
+       20260722004808_payroll_mvp \
+       20260722005135_payroll_mvp \
+       20260722011345_staff_performance_snapshots \
+       20260722224337_contract_clause_analysis \
+       20260726160935_add_risc_user_identity \
+       20260726161845_add_user_metadata \
+       20260803190000_flow_session_user_scope \
+       20260806120000_merge_omnichannel_inboxes \
+       20260806130000_retire_conversation_store \
+       20260809170000_add_user_deleted_at_banned_at \
+       20260810020000_command_item_obligations \
+       20260810230000_due_index_on_kind \
+       20260811030000_ai_usage_billable \
+       20260811040000_add_booking_waitlist \
+       20260823170000_business_id_indexes \
+       20260830220000_add_project_deliverables \
+       20260918060000_outbound_delivery_effect_certainty \
+       20260919223000_flow_run_tenant_idempotency \
+       20261005170000_key_action_boundary_clearance
+   do
+     pnpm --filter @keyflow/db exec prisma migrate resolve --applied "$m"
+   done
+   ```
+
+   Two migrations are deliberately not on the list, because they create
+   what Prisma cannot declare and such a database therefore lacks:
+   `20260808140000_bank_transaction_external_id_unique` (an expression
+   partial unique index; its SQL is `IF NOT EXISTS`) and
+   `20261101000000_contact_partial_identity_uniques` (V1-17). Migrate
+   deploy runs both in step 5. **Never record
+   `20261101000000_contact_partial_identity_uniques` as applied unless
+   step 2 shows both `*_live_key` indexes.** Recorded without them, it
+   leaves no contact identity unique at all, `migrate status` and
+   `migrate diff` stay silent, and post-merge stops at its index check.
+5. Run `bash scripts/post-merge.sh`. Deploy applies the two migrations
+   above (and any later ones), and step [4/4] confirms both `*_live_key`
+   indexes. Rerun the step 2 query to see them.
+
+If deploy then stops with P3018 "already exists" on a migration newer
+than `20261101000000`, the database was synced past it before V1-83
+landed: check that it creates nothing Prisma cannot declare, then record it
+as applied as in step 4.
+
+Recording a migration as applied skips its data steps too. On such a
+database the `UPDATE`s of `20260806130000_retire_conversation_store`
+(clears dangling `message_intakes.thread_id`) and
+`20260811030000_ai_usage_billable` (marks internal AI features
+`billable = false`) never ran; run them from their `migration.sql` by hand
+if that data matters.
+
+If post-merge stops at the [4/4] index check (every migration recorded,
+a `*_live_key` index missing), V1-17 was recorded without running. Run the
+duplicate scan (step 3), resolve any duplicates, then run its SQL once and
+rerun post-merge:
 
 ```bash
-pnpm --filter @keyflow/db exec prisma migrate resolve --applied 0_baseline
+pnpm --filter @keyflow/db exec prisma db execute --schema=./prisma/schema.prisma \
+  --file ./prisma/migrations/20261101000000_contact_partial_identity_uniques/migration.sql
 ```
-
-This writes one bookkeeping row and runs no DDL. The next post-merge then
-applies every later migration.
 
 ---
 
