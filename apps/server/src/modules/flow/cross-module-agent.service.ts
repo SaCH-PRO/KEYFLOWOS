@@ -22,6 +22,12 @@ import { isConvertedQuote } from '../commerce/quote-workflow';
 /** The stored statuses of a quote still open to the customer (sent, not decided, not expired). */
 const FOLLOW_UP_OPEN_QUOTE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'VIEWED']);
 
+/**
+ * The ScheduledAgentJob types this service's poller executes (executeScheduledJob).
+ * Every other type in the table belongs to another runner and is never read here.
+ */
+const CROSS_MODULE_JOB_TYPES = ['quote_followup', 'post_purchase_review_request', 'post_purchase_reorder_prompt'] as const;
+
 export interface WorkflowDefinition {
   key: string;
   name: string;
@@ -250,9 +256,24 @@ export class CrossModuleAgentService implements OnModuleDestroy {
     this.logger.log('[CrossModule] Scheduled job poller started (60s interval)');
   }
 
+  /**
+   * V1-35-DM-POLLER-CLAIM (#174 REL-01/02, PRS-M17/M18). ScheduledAgentJob is
+   * shared with other modules' runners (abandoned_cart_recovery,
+   * review_solicitation, lead_magnet_enroll), so this poller reads only the
+   * job types it executes; it used to close the others COMPLETED without their
+   * effect. Each job is claimed before any effect by a compare-and-set on the
+   * version read (PENDING, same updatedAt, still due; count === 1), so
+   * overlapping ticks, a second server instance, a runner that took the job
+   * after this read, or a writer that re-armed it after this read never repeat
+   * the task or email or run a stale payload (KF-EXEC-TIME-001 "one
+   * claimant"). The claim stamps COMPLETED; a failed execution then marks the
+   * row FAILED only if it is still this claim's. A lease for a crash after the
+   * claim is V1+.
+   */
   private async processScheduledJobs() {
     const dueJobs = await this.prisma.client.scheduledAgentJob.findMany({
       where: {
+        jobType: { in: [...CROSS_MODULE_JOB_TYPES] },
         status: 'PENDING',
         scheduledFor: { lte: new Date() },
       },
@@ -261,18 +282,31 @@ export class CrossModuleAgentService implements OnModuleDestroy {
     });
 
     for (const job of dueJobs) {
+      // The claim is a compare-and-set on the version read (review SEC-V35-1):
+      // still PENDING, the same updatedAt, still due. A row re-armed after the
+      // read (quote re-sent: PENDING again, new scheduledFor and payload) is a
+      // new version and is left for the tick that reads it, never run now with
+      // the stale payload. A claim that throws leaves the row PENDING and ends
+      // this tick (logged by the interval).
+      const claimedAt = new Date();
+      const claim = await this.prisma.client.scheduledAgentJob.updateMany({
+        where: { id: job.id, status: 'PENDING', updatedAt: job.updatedAt, scheduledFor: { lte: claimedAt } },
+        data: { status: 'COMPLETED', executedAt: claimedAt },
+      });
+      if (claim.count !== 1) continue; // taken by another claimant, cancelled, or re-armed after the read
       try {
         await this.executeScheduledJob(job);
-        await this.prisma.client.scheduledAgentJob.update({
-          where: { id: job.id },
-          data: { status: 'COMPLETED', executedAt: new Date() },
-        });
       } catch (e) {
         this.logger.error(`[CrossModule] Failed to execute job ${job.id}: ${(e as Error).message}`);
-        await this.prisma.client.scheduledAgentJob.update({
-          where: { id: job.id },
+        // Fenced to this claim (review SEC-V35-2): a row its writer re-armed
+        // during the execution (PENDING, executedAt null) keeps its new run.
+        const failed = await this.prisma.client.scheduledAgentJob.updateMany({
+          where: { id: job.id, status: 'COMPLETED', executedAt: claimedAt },
           data: { status: 'FAILED' },
-        }).catch(() => {});
+        }).catch(() => null);
+        if (failed && failed.count !== 1) {
+          this.logger.warn(`[CrossModule] Job ${job.id} changed during its failed execution; left as its writer set it`);
+        }
       }
     }
   }
