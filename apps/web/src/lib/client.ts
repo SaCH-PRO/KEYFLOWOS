@@ -2643,6 +2643,19 @@ export function capturePayLinkPaypalOrder(token: string, orderId: string) {
   });
 }
 
+/**
+ * V1-45-DM-CREATE-IDEMPOTENCY (owner ruling D-15): invoice and quote create
+ * carry the caller's key in the `Idempotency-Key` header, never in the body.
+ * A form mints one key when it opens and sends it on every submit of that
+ * form, so a retried submit is answered with the document the first one
+ * created; the same key with a different body is a 409 idempotency_key_reused.
+ * No key (or a blank one) sends no header: every call creates, as before.
+ */
+function createIdempotencyInit(idempotencyKey: string | undefined): RequestInit | undefined {
+  const key = idempotencyKey?.trim();
+  return key ? { headers: { "Idempotency-Key": key } } : undefined;
+}
+
 export async function createInvoice(input: {
   businessId?: string;
   contactId?: string;
@@ -2653,6 +2666,8 @@ export async function createInvoice(input: {
   discountType?: "PERCENT" | "FIXED";
   discountValue?: number;
   notes?: string;
+  /** V1-45: one key per form open, reused on retry (createIdempotencyInit). */
+  idempotencyKey?: string;
 }) {
   const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<Invoice>({
@@ -2667,6 +2682,7 @@ export async function createInvoice(input: {
       discountValue: input.discountValue,
       notes: input.notes,
     },
+    init: createIdempotencyInit(input.idempotencyKey),
   });
 }
 
@@ -2802,6 +2818,8 @@ export async function createQuote(input: {
   discountType?: "PERCENT" | "FIXED";
   discountValue?: number;
   notes?: string;
+  /** V1-45: one key per form open, reused on retry (createIdempotencyInit). */
+  idempotencyKey?: string;
 }) {
   const businessId = input.businessId ?? selectedBusinessId();
   return apiPost<Quote>({
@@ -2816,6 +2834,7 @@ export async function createQuote(input: {
       discountValue: input.discountValue,
       notes: input.notes,
     },
+    init: createIdempotencyInit(input.idempotencyKey),
   });
 }
 

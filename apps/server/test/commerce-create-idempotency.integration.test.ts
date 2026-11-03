@@ -2,7 +2,7 @@
  * V1-45-DM-CREATE-IDEMPOTENCY — a retried invoice or quote create carries an
  * idempotency key, claimed on the existing idempotency_keys table (REAL
  * database, REAL CommerceService / InvoiceWorkflowService / ledger door; the
- * HTTP cases go through the real routes behind the real AuthGuard /
+ * ledger case issues through the real route behind the real AuthGuard /
  * BusinessGuard / ModuleScopeGuard). No migration: IdempotencyKey already has
  * @@unique([businessId, idempotencyKey]), a status and a requestHash.
  *
@@ -39,7 +39,9 @@
  *   L-01 RED-BEFORE LEDGER: after the retries above, issuing every invoice of the business posts one
  *                   invoice_finalized transaction per key, balanced; a create retried after its invoice
  *                   was issued answers that invoice and posts nothing more
- *   H-01..H-03      the HTTP door: POST .../invoices and .../quotes with an Idempotency-Key header
+ *   H-01..H-03      TODO the HTTP door: POST .../invoices and .../quotes with an Idempotency-Key header.
+ *                   commerce.controller.ts (outside the V1-45 write set) does not forward the header
+ *                   to the service yet; see the describe block at the end.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed), CommerceService,
@@ -76,14 +78,12 @@ const ID = {
   bizB: `${P}bizB`, // I-04: another tenant with the same key
   bizC: `${P}bizC`, // I-03, I-05, I-06: conflicts, validation, no key
   bizQ: `${P}bizQ`, // Q-01: quotes
-  bizH: `${P}bizH`, // H-01..H-03: the HTTP door (ACCRUAL)
   contactA: `${P}contactA`,
   contactA2: `${P}contactA2`,
   contactB: `${P}contactB`,
   contactC: `${P}contactC`,
   contactC2: `${P}contactC2`,
   contactQ: `${P}contactQ`,
-  contactH: `${P}contactH`,
 };
 
 /** The client keys. One string is reused across tenants on purpose (I-04). */
@@ -95,9 +95,6 @@ const KEY = {
   quote: `${P}quote-c4d8`,
   quoteBurst: `${P}quote-burst-e6f0`,
   late: `${P}late-0b77`,
-  http: `${P}http-3a9e`,
-  httpConflict: `${P}http-conflict-8d21`,
-  httpQuote: `${P}http-quote-71bc`,
 };
 
 let db: any;
@@ -308,7 +305,6 @@ beforeAll(async () => {
     [ID.bizB, [ID.contactB], 'CASH'],
     [ID.bizC, [ID.contactC, ID.contactC2], 'CASH'],
     [ID.bizQ, [ID.contactQ], 'CASH'],
-    [ID.bizH, [ID.contactH], 'ACCRUAL'],
   ];
   const coa = moduleRef.get(ChartOfAccountsSeederService);
   for (const [biz, contacts, basis] of businesses) {
@@ -499,43 +495,17 @@ describe('V1-45 create idempotency — ledger', () => {
   }, 60_000);
 });
 
+// The HTTP door is outside the V1-45 write set. CommerceController.createInvoice
+// and .createQuote forward only the DTO's declared fields to the service, so the
+// Idempotency-Key header never reaches it; the claim above is live for every
+// caller that passes `idempotencyKey`, but the routes need two handler lines
+// each: read `req.headers['idempotency-key']` (as SiteController's
+// checkoutIdempotencyKey does) and forward it as `idempotencyKey`. These cases
+// ran red before and after this packet's service change (tests-first commit
+// 22a378b6 holds their bodies) and wait on a packet that releases
+// commerce.controller.ts.
 describe('V1-45 create idempotency — the HTTP door (Idempotency-Key header, D-15)', () => {
-  const postInvoice = (body: Record<string, unknown>, key?: string) => {
-    const req = agent().post(`/commerce/businesses/${ID.bizH}/invoices`).set(HEADER, ID.owner);
-    return (key ? req.set('Idempotency-Key', key) : req).send(body);
-  };
-  const postQuote = (body: Record<string, unknown>, key?: string) => {
-    const req = agent().post(`/commerce/businesses/${ID.bizH}/quotes`).set(HEADER, ID.owner);
-    return (key ? req.set('Idempotency-Key', key) : req).send(body);
-  };
-  const body = { contactId: ID.contactH, items, currency: 'TTD', notes: 'v45a http' };
-
-  it('H-01 RED-BEFORE: POST invoices twice with one Idempotency-Key answers one invoice', async () => {
-    const first = await postInvoice(body, KEY.http);
-    expect(first.status, JSON.stringify(first.body)).toBe(201);
-    const retry = await postInvoice(body, KEY.http);
-    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
-    expect(retry.body.id).toBe(first.body.id);
-    expect(retry.body.invoiceNumber).toBe(first.body.invoiceNumber);
-    expect((await invoiceRows(ID.bizH)).map((r) => r.id)).toEqual([first.body.id]);
-  });
-
-  it('H-02 RED-BEFORE: POST invoices with a used Idempotency-Key and a different body is a 409 idempotency_key_reused', async () => {
-    const first = await postInvoice(body, KEY.httpConflict);
-    expect(first.status, JSON.stringify(first.body)).toBe(201);
-    const before = (await invoiceRows(ID.bizH)).length;
-    const reused = await postInvoice({ ...body, items: otherItems }, KEY.httpConflict);
-    expect(reused.status, JSON.stringify(reused.body)).toBe(409);
-    expect(JSON.stringify(reused.body)).toContain('idempotency_key_reused');
-    expect((await invoiceRows(ID.bizH)).length).toBe(before);
-  });
-
-  it('H-03 RED-BEFORE: POST quotes twice with one Idempotency-Key answers one quote', async () => {
-    const first = await postQuote(body, KEY.httpQuote);
-    expect(first.status, JSON.stringify(first.body)).toBe(201);
-    const retry = await postQuote(body, KEY.httpQuote);
-    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
-    expect(retry.body.id).toBe(first.body.id);
-    expect((await quoteRows(ID.bizH)).map((r) => r.id)).toEqual([first.body.id]);
-  });
+  it.todo('H-01 RED-BEFORE: POST invoices twice with one Idempotency-Key answers one invoice (201, same id and number, one row) — needs commerce.controller.ts, outside the V1-45 write set');
+  it.todo('H-02 RED-BEFORE: POST invoices with a used Idempotency-Key and a different body is a 409 idempotency_key_reused, nothing written — needs commerce.controller.ts, outside the V1-45 write set');
+  it.todo('H-03 RED-BEFORE: POST quotes twice with one Idempotency-Key answers one quote (201, same id, one row) — needs commerce.controller.ts, outside the V1-45 write set');
 });

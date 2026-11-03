@@ -331,6 +331,83 @@ function quoteNumberTaken(): ConflictException {
 }
 
 /**
+ * V1-45-DM-CREATE-IDEMPOTENCY (M22, owner ruling D-15): a retried invoice or
+ * quote create carries the client's Idempotency-Key. The key is claimed on the
+ * existing idempotency_keys table (unique on business and key; no migration)
+ * under a namespaced slot, 'commerce.invoice.create:<key>' or
+ * 'commerce.quote.create:<key>', so a key is scoped to its business and to the
+ * kind of document. The slot remembers the request's hash and the document it
+ * created: the same key with the same request answers that document, with a
+ * different request a 409.
+ */
+type CreateKind = 'invoice' | 'quote';
+/** The transaction client of PrismaService's (extended) client, as bookings.service and gmail.service type it. */
+type PrismaTx = Parameters<Parameters<PrismaService['client']['$transaction']>[0]>[0];
+interface CreateClaim {
+  slot: string;
+  requestHash: string;
+}
+
+/** Longest client key a create accepts, as the storefront checkout (site.controller). */
+const CREATE_IDEMPOTENCY_KEY_MAX = 255;
+
+/**
+ * The create's claim, or null when it carries no key (absent or blank, as the
+ * base: every call creates). `material` is every field the caller sent, in a
+ * fixed shape (absent is null), so its JSON is the same for the same request.
+ */
+function createClaim(kind: CreateKind, key: unknown, material: Record<string, unknown>): CreateClaim | null {
+  if (key == null) return null;
+  if (typeof key !== 'string') throw new BadRequestException('Idempotency-Key must be a string');
+  const trimmed = key.trim();
+  if (!trimmed) return null;
+  if (trimmed.length > CREATE_IDEMPOTENCY_KEY_MAX) {
+    throw new BadRequestException(`Idempotency-Key must be at most ${CREATE_IDEMPOTENCY_KEY_MAX} characters`);
+  }
+  return {
+    slot: `commerce.${kind}.create:${trimmed}`,
+    requestHash: createHash('sha256').update(JSON.stringify(material), 'utf8').digest('hex'),
+  };
+}
+
+/** A create's document lines in the fixed shape its request hash reads. */
+function createLinesMaterial(items: ReadonlyArray<{ description?: unknown; quantity?: unknown; unitPrice?: unknown; productId?: unknown; total?: unknown }> | undefined) {
+  return Array.isArray(items)
+    ? items.map((item) => ({
+        description: item?.description ?? null,
+        quantity: item?.quantity ?? null,
+        unitPrice: item?.unitPrice ?? null,
+        productId: item?.productId ?? null,
+        total: item?.total ?? null,
+      }))
+    : null;
+}
+
+function createDateMaterial(value: Date | string | null | undefined): string | null {
+  return value instanceof Date ? value.toISOString() : value ?? null;
+}
+
+/**
+ * Thrown inside a create's transaction when its slot is already taken: the
+ * create rolls back, and the caller answers with the document that took it.
+ */
+class CreateSlotTaken extends Error {}
+
+function idempotencyKeyReused(kind: CreateKind): ConflictException {
+  return new ConflictException({
+    code: 'idempotency_key_reused',
+    message: `This Idempotency-Key was already used for a different ${kind}; use a new key for a new ${kind}.`,
+  });
+}
+
+function idempotencyKeySpent(kind: CreateKind): ConflictException {
+  return new ConflictException({
+    code: 'idempotency_key_spent',
+    message: `This Idempotency-Key was already used and its ${kind} no longer exists; use a new key.`,
+  });
+}
+
+/**
  * V1-53 review (SEC-V53-2): the stored statuses isConvertedQuote reads as
  * converted (INVOICED, PAID, CONVERTED), derived from the enum so the delete's
  * conditional write and the V1-50 table cannot drift apart.
@@ -701,6 +778,70 @@ export class CommerceService {
     }
   }
 
+  /**
+   * V1-45: take the create's slot, first thing inside its transaction. The
+   * insert skips a duplicate (ON CONFLICT DO NOTHING) instead of failing: a
+   * slot another create committed answers 0 rows at once, and one another
+   * create holds uncommitted makes this insert wait on the unique index until
+   * that create commits (0 rows) or rolls back (this create takes the slot).
+   * 0 rows throws CreateSlotTaken, which rolls this create back.
+   */
+  private async claimCreateSlot(tx: PrismaTx, businessId: string, claim: CreateClaim): Promise<void> {
+    const { count } = await tx.idempotencyKey.createMany({
+      data: [{ businessId, idempotencyKey: claim.slot, status: 'pending', requestHash: claim.requestHash }],
+      skipDuplicates: true,
+    });
+    if (count !== 1) throw new CreateSlotTaken();
+  }
+
+  /** V1-45: record the created document on the slot, in the same transaction (no 'pending' row is ever committed). */
+  private async settleCreateSlot(
+    tx: PrismaTx,
+    businessId: string,
+    claim: CreateClaim,
+    response: { invoiceId: string } | { quoteId: string },
+  ): Promise<void> {
+    await tx.idempotencyKey.updateMany({
+      where: { businessId, idempotencyKey: claim.slot, status: 'pending' },
+      data: { status: 'completed', response },
+    });
+  }
+
+  /**
+   * V1-45: the document a used slot answers with, or null when the slot is
+   * free. A different request under the key is a 409 (idempotency_key_reused);
+   * a slot whose document was deleted since answers 409 too
+   * (idempotency_key_spent), never a second document.
+   */
+  private async usedCreateSlot<D>(
+    businessId: string,
+    kind: CreateKind,
+    claim: CreateClaim,
+    load: (id: string) => Promise<D | null>,
+  ): Promise<D | null> {
+    const row = await this.prisma.client.idempotencyKey.findUnique({
+      where: { businessId_idempotencyKey: { businessId, idempotencyKey: claim.slot } },
+    });
+    if (!row) return null;
+    if (row.requestHash !== claim.requestHash) throw idempotencyKeyReused(kind);
+    const id = (row.response as Record<string, unknown> | null)?.[kind === 'invoice' ? 'invoiceId' : 'quoteId'];
+    const document = typeof id === 'string' ? await load(id) : null;
+    if (!document) throw idempotencyKeySpent(kind);
+    return document;
+  }
+
+  /** V1-45: a create that lost its slot to a concurrent one answers with the winner's document. */
+  private async takenCreateSlot<D>(
+    businessId: string,
+    kind: CreateKind,
+    claim: CreateClaim,
+    load: (id: string) => Promise<D | null>,
+  ): Promise<D> {
+    const winner = await this.usedCreateSlot(businessId, kind, claim, load);
+    if (!winner) throw idempotencyKeySpent(kind);
+    return winner;
+  }
+
   async createInvoice(input: {
     businessId: string;
     contactId?: string;
@@ -715,7 +856,29 @@ export class CommerceService {
     subtotal?: number;
     taxAmount?: number;
     total?: number;
+    /** V1-45 (D-15): the client's Idempotency-Key. The same key and request answer the invoice it created. */
+    idempotencyKey?: string;
   }) {
+    // V1-45 (M22): a retry with a used key is answered before anything else runs.
+    const claim = createClaim('invoice', input.idempotencyKey, {
+      contactId: input.contactId ?? null,
+      items: createLinesMaterial(input.items),
+      currency: input.currency ?? null,
+      dueDate: createDateMaterial(input.dueDate),
+      taxRate: input.taxRate ?? null,
+      discountType: input.discountType ?? null,
+      discountValue: input.discountValue ?? null,
+      notes: input.notes ?? null,
+      invoiceNumber: input.invoiceNumber ?? null,
+      subtotal: input.subtotal ?? null,
+      taxAmount: input.taxAmount ?? null,
+      total: input.total ?? null,
+    });
+    const loadCreated = (id: string) =>
+      this.prisma.client.invoice.findFirst({ where: { id, businessId: input.businessId }, include: { items: true, contact: true } });
+    const prior = claim ? await this.usedCreateSlot(input.businessId, 'invoice', claim, loadCreated) : null;
+    if (prior) return prior;
+
     this.validateTaxAndDiscount(input.taxRate, input.discountValue, input.discountType);
     const taxRate = input.taxRate ?? 0;
     // V1-22-DM-MONEY-CENTS (M23, D-13): every amount is computed and stored in
@@ -778,18 +941,32 @@ export class CommerceService {
     // the base's INV-<timestamp> never did; that create takes the business's
     // next number instead of failing. A taken number of any other form still
     // fails as it did at the base.
-    const create = (invoiceNumber?: string) => this.prisma.client.$transaction(async (tx) => tx.invoice.create({
-      data: { ...data, invoiceNumber: invoiceNumber ?? (await allocateDocumentNumber(tx, input.businessId, 'invoice')) },
-      include: { items: true, contact: true },
-    }));
+    // V1-45: with a key, its slot is taken first in the same transaction, so
+    // the invoice and its idempotency_keys row commit together; a create that
+    // finds the slot taken writes nothing and answers the invoice that took it.
+    const create = (invoiceNumber?: string) => this.prisma.client.$transaction(async (tx) => {
+      if (claim) await this.claimCreateSlot(tx, input.businessId, claim);
+      const created = await tx.invoice.create({
+        data: { ...data, invoiceNumber: invoiceNumber ?? (await allocateDocumentNumber(tx, input.businessId, 'invoice')) },
+        include: { items: true, contact: true },
+      });
+      if (claim) await this.settleCreateSlot(tx, input.businessId, claim, { invoiceId: created.id });
+      return created;
+    });
     const allocated = () => retryDocumentNumber('invoice', () => create());
     const named = input.invoiceNumber;
-    const invoice = named == null
-      ? await allocated()
-      : await create(named).catch((err: unknown) => {
-          if (isSequenceNumber(named, 'invoice') && isDocumentNumberConflict(err, 'invoice')) return allocated();
-          throw err;
-        });
+    let invoice: Awaited<ReturnType<typeof create>>;
+    try {
+      invoice = named == null
+        ? await allocated()
+        : await create(named).catch((err: unknown) => {
+            if (isSequenceNumber(named, 'invoice') && isDocumentNumberConflict(err, 'invoice')) return allocated();
+            throw err;
+          });
+    } catch (err) {
+      if (claim && err instanceof CreateSlotTaken) return this.takenCreateSlot(input.businessId, 'invoice', claim, loadCreated);
+      throw err;
+    }
     this.events.emit('invoice.created', {
       invoice,
       businessId: input.businessId,
@@ -2494,7 +2671,26 @@ export class CommerceService {
     discountValue?: number;
     notes?: string;
     quoteNumber?: string;
+    /** V1-45 (D-15): the client's Idempotency-Key. The same key and request answer the quote it created. */
+    idempotencyKey?: string;
   }) {
+    // V1-45 (M22): a retry with a used key is answered before anything else runs.
+    const claim = createClaim('quote', input.idempotencyKey, {
+      contactId: input.contactId ?? null,
+      items: createLinesMaterial(input.items),
+      currency: input.currency ?? null,
+      expiryDate: createDateMaterial(input.expiryDate),
+      taxRate: input.taxRate ?? null,
+      discountType: input.discountType ?? null,
+      discountValue: input.discountValue ?? null,
+      notes: input.notes ?? null,
+      quoteNumber: input.quoteNumber ?? null,
+    });
+    const loadCreated = (id: string) =>
+      this.prisma.client.quote.findFirst({ where: { id, businessId: input.businessId }, include: { items: true, contact: true } });
+    const prior = claim ? await this.usedCreateSlot(input.businessId, 'quote', claim, loadCreated) : null;
+    if (prior) return prior;
+
     // V1-51 review (SEC-V51-1): the discount is checked as it is priced below
     // (no type = a percentage). A typeless discountValue 150 passed the check,
     // which caps only an explicit PERCENT, and stored a quote of -50.
@@ -2529,39 +2725,51 @@ export class CommerceService {
     // V1-43 (D-15): a number the caller names is kept as given (and a taken
     // one is that 409); otherwise the business's next number is drawn in this
     // create's own transaction, and a collision is retried with the following.
-    const create = () => this.prisma.client.$transaction(async (tx) => tx.quote.create({
-      data: {
-        businessId: input.businessId,
-        contactId,
-        quoteNumber: input.quoteNumber ?? (await allocateDocumentNumber(tx, input.businessId, 'quote')),
-        status: 'DRAFT',
-        issueDate: new Date(),
-        expiryDate: input.expiryDate ? new Date(input.expiryDate) : null,
-        subtotal,
-        taxRate,
-        taxAmount,
-        discountType: input.discountType ?? null,
-        discountValue,
-        discountAmount,
-        total,
-        currency,
-        notes: input.notes ?? null,
-        items: {
-          create: input.items.map((item, i) => ({
-            description: item.description,
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            total: item.total != null ? roundMoney(item.total) : amounts.lineTotals[i],
-            productId: item.productId || null,
-          })),
+    // V1-45: with a key, its slot is taken first in the same transaction (see createInvoice).
+    const create = () => this.prisma.client.$transaction(async (tx) => {
+      if (claim) await this.claimCreateSlot(tx, input.businessId, claim);
+      const created = await tx.quote.create({
+        data: {
+          businessId: input.businessId,
+          contactId,
+          quoteNumber: input.quoteNumber ?? (await allocateDocumentNumber(tx, input.businessId, 'quote')),
+          status: 'DRAFT',
+          issueDate: new Date(),
+          expiryDate: input.expiryDate ? new Date(input.expiryDate) : null,
+          subtotal,
+          taxRate,
+          taxAmount,
+          discountType: input.discountType ?? null,
+          discountValue,
+          discountAmount,
+          total,
+          currency,
+          notes: input.notes ?? null,
+          items: {
+            create: input.items.map((item, i) => ({
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              total: item.total != null ? roundMoney(item.total) : amounts.lineTotals[i],
+              productId: item.productId || null,
+            })),
+          },
         },
-      },
-      include: { items: true, contact: true },
-    }));
-    const quote = await (input.quoteNumber != null ? create() : retryDocumentNumber('quote', create)).catch((err: unknown) => {
-      if ((err as { code?: string } | null)?.code === 'P2002') throw quoteNumberTaken();
-      throw err;
+        include: { items: true, contact: true },
+      });
+      if (claim) await this.settleCreateSlot(tx, input.businessId, claim, { quoteId: created.id });
+      return created;
     });
+    let quote: Awaited<ReturnType<typeof create>>;
+    try {
+      quote = await (input.quoteNumber != null ? create() : retryDocumentNumber('quote', create)).catch((err: unknown) => {
+        if ((err as { code?: string } | null)?.code === 'P2002') throw quoteNumberTaken();
+        throw err;
+      });
+    } catch (err) {
+      if (claim && err instanceof CreateSlotTaken) return this.takenCreateSlot(input.businessId, 'quote', claim, loadCreated);
+      throw err;
+    }
     this.events.emit('quote.created', { quote, businessId: input.businessId } as QuoteCreatedPayload);
     if (input.contactId) {
       await this.crm.logContactEvent({
