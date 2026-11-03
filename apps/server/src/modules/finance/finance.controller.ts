@@ -96,7 +96,8 @@ export class FinanceController {
     // FOLLOW3-A5 (F2 PF-03): the membership check every sibling Books write
     // runs. BusinessGuard lets a SUPER_ADMIN through, so without it a
     // SUPER_ADMIN with no Membership posted into any business's ledger.
-    await this.ensureAccess((req as any).user.id, businessId);
+    if (!userId) throw new ForbiddenException('No access to this business');
+    await this.ensureAccess(userId, businessId);
     const totalDebit = body.entries.reduce((sum, e) => sum + (e.debit ?? 0), 0);
     const input: PostingInput = {
       businessId,

@@ -202,7 +202,7 @@ beforeAll(async () => {
   for (const [id, role] of [
     [ID.ownerA, 'USER'], [ID.ownerB, 'USER'], [ID.staffA, 'USER'], [ID.superAdmin, 'SUPER_ADMIN'],
   ] as const) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, name: id, role } });
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role } });
   }
   for (const [biz, owner, tag] of [[ID.bizA, ID.ownerA, 'a'], [ID.bizB, ID.ownerB, 'b']] as const) {
     await db.business.create({ data: { id: biz, name: `V81E ${tag}`, slug: `${P}biz-${tag}`, ownerId: owner, currency: 'TTD' } });
@@ -245,7 +245,10 @@ describe('FOLLOW3-A5 (FWT-02): the per-account balance is bound to the route bus
     const leak = await accountBalance(ID.bizB, ACC.cashA, ID.ownerB);
     expect(leak.status, JSON.stringify(leak.body)).toBe(404);
     expect(leak.body).toMatchObject({ code: 'NOT_FOUND', message: 'Account not found' });
-    expect(JSON.stringify(leak.body), "no figure of A's account is served").not.toMatch(/"balance"|100/);
+    // No figure of A's account is served (the body echoes the path, so the
+    // account id may appear in it; a cuid can hold the digits "100").
+    expect(leak.body).not.toHaveProperty('balance');
+    expect(JSON.stringify(leak.body)).not.toMatch(/"balance"|:\s*"?100"?[,}]/);
 
     const unknown = await accountBalance(ID.bizB, `${P}no-such-account`, ID.ownerB);
     expect(unknown.status, JSON.stringify(unknown.body)).toBe(404);
