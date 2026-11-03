@@ -644,7 +644,7 @@ describe('CI-04 (review CR-1): the rule holds however many contacts the items na
 
   beforeAll(async () => {
     for (const id of [ID.ownerS, ID.staffS]) {
-      await db.user.create({ data: { id, email: `${id}@test.local`, role: 'USER' } });
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
     }
     await db.business.create({ data: { id: ID.bizS, name: 'V84J Biz S', ownerId: ID.ownerS } });
     await db.membership.create({ data: { id: `${P}m_ownerS`, userId: ID.ownerS, businessId: ID.bizS, role: 'OWNER' } });

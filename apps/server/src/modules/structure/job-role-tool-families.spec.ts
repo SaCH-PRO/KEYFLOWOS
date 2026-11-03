@@ -111,6 +111,7 @@
  *  finance_list_bills           ExpensesService          GET /finance/businesses/:businessId/bills                    expenses:read
  *  finance_pay_bill             ExpensesService          POST /finance/businesses/:businessId/bills/:billId/pay       expenses:write
  *  finance_view_payables        ExpensesService          GET /finance/businesses/:businessId/payables/aging           expenses:read
+ *  finance_view_receivables     ReceivablesService       GET /finance/businesses/:businessId/receivables/aging        revenue:read
  *  structure_create_delegation_rule StructureService     POST /structure/businesses/:businessId/delegation-rules      team:write
  *  contracts_create             ContractsService         POST /contracts/businesses/:businessId                       operations:write
  *  contracts_acknowledge_alert  ContractsService         POST /contracts/businesses/:businessId/:contractId/acknowledge-alert/:alertId  operations:write
@@ -1244,6 +1245,8 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
   { tool: 'expenses_list', service: 'ExpensesService', route: 'GET /expenses/businesses/:businessId/expenses', scope: 'expenses:read', file: 'modules/expenses/expenses.controller.ts' },
   { tool: 'finance_create_bill', service: 'ExpensesService', route: 'POST /finance/businesses/:businessId/bills', scope: 'expenses:write', file: 'modules/expenses/bills.controller.ts' },
   { tool: 'finance_list_bills', service: 'ExpensesService', route: 'GET /finance/businesses/:businessId/bills', scope: 'expenses:read', file: 'modules/expenses/bills.controller.ts' },
+  // FOLLOW3-A6 (D-57): every member route to ReceivablesService (aging, customer balance) needs revenue:read
+  { tool: 'finance_view_receivables', service: 'ReceivablesService', route: 'GET /finance/businesses/:businessId/receivables/aging', scope: 'revenue:read', file: 'modules/finance/finance.controller.ts' },
   { tool: 'finance_pay_bill', service: 'ExpensesService', route: 'POST /finance/businesses/:businessId/bills/:billId/pay', scope: 'expenses:write', file: 'modules/expenses/bills.controller.ts' },
   { tool: 'finance_view_payables', service: 'ExpensesService', route: 'GET /finance/businesses/:businessId/payables/aging', scope: 'expenses:read', file: 'modules/expenses/bills.controller.ts' },
   { tool: 'structure_create_delegation_rule', service: 'StructureService', route: 'POST /structure/businesses/:businessId/delegation-rules', scope: 'team:write', file: 'modules/structure/structure.controller.ts' },
@@ -1332,7 +1335,6 @@ const UNGRANTED: Record<string, string> = {
   finance_list_bank_accounts: 'FinanceAccountsService is reached by finance.controller, which is unscoped',
   finance_list_coa: 'FinanceCoaService is reached by finance.controller, which is unscoped',
   finance_post_journal_entry: 'PostingService.post is reached by finance.controller, which is unscoped',
-  finance_view_receivables: 'ReceivablesService is reached by finance.controller, which is unscoped',
   payroll_generate_run: 'PayrollService.generateRun backs no route (payroll.controller has list/get/approve/mark-paid only)',
   payroll_set_rate: 'PayrollService.setRate backs no route (payroll.controller has list/get/approve/mark-paid only)',
   // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: granted (operations write) since
@@ -1493,6 +1495,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         finance_profit_and_loss: 'read',
         finance_revenue_breakdown: 'read',
         finance_tax_summary: 'read',
+        // FOLLOW3-A6 (D-57): GET receivables/aging and customers/:contactId/balance need revenue:read
+        finance_view_receivables: 'read',
         payments_create_link: 'write',
         payments_list_gateways: 'read',
         payments_list_links: 'read',

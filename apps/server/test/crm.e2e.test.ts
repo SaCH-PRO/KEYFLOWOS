@@ -1054,8 +1054,8 @@ describe('CRM e2e', () => {
   // for audit, not even the contact); each needs the same gate in its own
   // controller.
   it.todo("contact-scoped reads outside crm.controller.ts apply the caller's CRM record visibility: insight-card and its recompute (crm-ai.controller.ts, also BestChannelService.explain, open task titles, LTV, AI call), ai-insight (crm-ai.controller.ts, AI call, no ModuleScopeGuard), contacts/:contactId/audit (privacy/contact-privacy.controller.ts), deals (crm-deals.controller.ts), account-suggestion (crm-accounts.controller.ts), custom-field-values (crm-custom-fields.controller.ts), order-history (marketplace.controller.ts), referral-stats (conversion.controller.ts), people-flow contacts/:contactId/health and momentum contacts/:contactId[/history] (review ST-4, follow-up packet)");
-  it.todo("the remaining contact-scoped routes of crm.controller.ts apply the caller's CRM record visibility: GET conversations/summary and conversations/insights, and the contact-scoped writes (notes, tasks, events, log-communication, favorite, playbook, next-action, merge, data-quality mark-verified, conversations read/reply/summary regenerate/suggest-replies) (review ST-4, follow-up packet)");
-  it.todo('DELETE relationships/:relationshipId refuses an edge with an end the member cannot open, like POST relationships (review ST-2 residual, follow-up packet)');
+  // Done in FOLLOW3-D2 (V1-84): the remaining contact-scoped routes of crm.controller.ts apply CRM record visibility, proven on a real database in test/crm-contact-routes-visibility.integration.test.ts (prefix v84b_). This it.todo was review ST-4's follow-up.
+  // Done in FOLLOW3-D2 (V1-84): DELETE relationships/:relationshipId refuses an edge with a hidden end (404 like an unknown id), test/crm-contact-routes-visibility.integration.test.ts.
 });
 
 // V1-54-CT-ROUTE-ORDER-CALLER: a call log's caller is the session member. POST
@@ -1289,7 +1289,7 @@ describe('call logs take the caller from the session (V1-54)', () => {
   // (resolveCrmAccess + visibilityClause through the contact) is a policy change
   // across every call-log route that V1-54's proof does not cover and V1-08's 14
   // sibling reads leave out. It needs its own packet.
-  it.todo('call-log routes apply the caller\'s CRM record visibility through the call log\'s contact (review ST-2, follow-up packet)');
+  // Done in FOLLOW3-D4 (V1-84): call-log routes apply CRM record visibility through the call log's contact, test/call-log-visibility.integration.test.ts (prefix v84d_).
 
   // Review ST-4 (hand-off, not fixed here): the KEY tool call_create_task passes
   // args.callerId, which the model chooses, to createCallLog, which stores it

@@ -537,10 +537,11 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
 
   it('the governed tools a legacy key loses, pinned (an owner decision whether to migrate such rows)', () => {
     const lost = (key: string) => reachedBefore(LEGACY[key], 'admin').filter((t) => ROUTE_GOVERNED.has(t));
-    // V1-81 (owner ruling D-57): the five money report tools are governed by revenue:read
+    // V1-81 (owner ruling D-57): the five money report tools and finance_view_receivables (FOLLOW3-A6) are governed by revenue:read
     expect(lost('finance')).toEqual([
       'expenses_create', 'expenses_list', 'finance_balance_sheet', 'finance_cashflow', 'finance_create_bill', 'finance_list_bills',
       'finance_pay_bill', 'finance_profit_and_loss', 'finance_revenue_breakdown', 'finance_tax_summary', 'finance_view_payables',
+      'finance_view_receivables',
     ]);
     expect(lost('commerce')).toEqual([
       'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_delete_invoice',
