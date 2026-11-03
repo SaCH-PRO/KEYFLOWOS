@@ -2060,6 +2060,10 @@ export class CommerceService {
     // moves exactly one wins and emits; this route only answers the request.
     // A sentAt / dueDate it carries is still applied, as the transition
     // applied it before.
+    // V1-42c (VR-01): this is therefore not a reminder. A caller that wants
+    // the customer reminded of a SENT or OVERDUE invoice uses
+    // sendInvoiceReminder (POST .../invoices/:id/send-reminder), which emails
+    // and logs invoice.payment_reminder_sent; the Collections panel does.
     const answerHeldStatus = async () => {
       const fields: { sentAt?: Date; dueDate?: Date } = {};
       if (params.sentAt) fields.sentAt = new Date(params.sentAt);

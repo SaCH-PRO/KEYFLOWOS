@@ -358,6 +358,11 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
   function fakeDb(invoice: Inv, label: string) {
     const calls: string[] = [];
     const db = {
+      // V1-42c review (SEC-V42C-1): the invoice row lock the no-tx path takes.
+      $queryRaw: vi.fn(async (strings: TemplateStringsArray) => {
+        calls.push(`${label}.$queryRaw ${strings.join('?').replace(/\s+/g, ' ').trim()}`);
+        return [{ id: invoice.id }];
+      }),
       invoice: {
         findUnique: vi.fn(async () => {
           calls.push(`${label}.invoice.findUnique`);
@@ -502,14 +507,59 @@ describe('InvoiceWorkflowService.reconcileFromPayments with tx / eventBuffer (R0
     expect(buffer.map((e) => e.name)).toEqual(['invoice.payment_recorded']);
   });
 
-  it('without options (webhook callers): unchanged behaviour, its own $transaction and an immediate emit', async () => {
+  it('without options (webhook callers): its own $transaction and an immediate emit; it reads and writes under the invoice row lock (V1-42c SEC-V42C-1)', async () => {
     const h = build(sent([{ amount: 100, status: 'SUCCESSFUL' }]));
     const result = await h.service.reconcileFromPayments('inv_1');
     expect(result).toMatchObject({ status: 'PAID', changed: true });
     expect(h.$transaction).toHaveBeenCalledTimes(1);
     expect(h.tx.calls).toEqual([]);
+    expect(h.client.calls).toEqual([
+      'client.$queryRaw SELECT id FROM invoices WHERE id = ? FOR NO KEY UPDATE',
+      'client.invoice.findUnique',
+      'client.invoice.update',
+      'client.invoiceItem.findMany',
+    ]);
     expect(h.events.emit).toHaveBeenCalledTimes(1);
     expect(h.events.emit.mock.calls[0][0]).toBe('invoice.paid');
+  });
+
+  // V1-42c review (SEC-V42C-1): the status write is compare-and-set on the
+  // status read, as transition() is since V1-42.
+  it('SEC-V42C-1: the status write is compare-and-set on the status it read (where { id, status })', async () => {
+    const h = build(sent([{ amount: 40, status: 'SUCCESSFUL' }]));
+    await h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: [] });
+    expect((h.tx.db.invoice.update.mock.calls[0] as unknown as [{ where: unknown }])[0].where).toEqual({ id: 'inv_1', status: 'SENT' });
+  });
+
+  it('SEC-V42C-1: a status moved by another writer between the read and the write (P2025) -> changed: false, the status now held, no posting, nothing buffered or emitted', async () => {
+    const h = build({ ...sent([{ amount: 100, status: 'SUCCESSFUL' }]), status: 'PARTIALLY_PAID' });
+    h.tx.db.invoice.update.mockRejectedValueOnce(Object.assign(new Error('Record to update not found.'), { code: 'P2025' }));
+    h.tx.db.invoice.findUnique
+      .mockImplementationOnce(async () => ({ ...sent([{ amount: 100, status: 'SUCCESSFUL' }]), status: 'PARTIALLY_PAID' }))
+      .mockImplementationOnce(async () => ({ ...sent([]), status: 'PAID' }));
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: buffer });
+    expect(result).toMatchObject({ status: 'PAID', changed: false });
+    expect(h.expensePosting.onProductSold).not.toHaveBeenCalled();
+    expect(h.tx.calls).not.toContain('tx.invoiceItem.findMany');
+    expect(buffer).toEqual([]);
+    expect(h.events.emit).not.toHaveBeenCalled();
+  });
+
+  it('SEC-V42C-1: without options, a lost compare-and-set emits nothing after the commit', async () => {
+    const h = build(sent([{ amount: 100, status: 'SUCCESSFUL' }]));
+    h.client.db.invoice.update.mockRejectedValueOnce(Object.assign(new Error('Record to update not found.'), { code: 'P2025' }));
+    const result = await h.service.reconcileFromPayments('inv_1');
+    expect(result).toMatchObject({ changed: false });
+    expect(h.events.emit).not.toHaveBeenCalled();
+  });
+
+  it('SEC-V42C-1: any other write error is not swallowed', async () => {
+    const h = build(sent([{ amount: 100, status: 'SUCCESSFUL' }]));
+    h.tx.db.invoice.update.mockRejectedValueOnce(Object.assign(new Error('deadlock'), { code: 'P2034' }));
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    await expect(h.service.reconcileFromPayments('inv_1', { tx: h.tx.db as never, eventBuffer: buffer })).rejects.toThrow('deadlock');
+    expect(buffer).toEqual([]);
   });
 });
 
@@ -601,7 +651,7 @@ describe('V1-29 refund convention (D-14)', () => {
     payments,
   });
 
-  it('RED-BEFORE: the refund reconcile moves a fully refunded PAID invoice to SENT, clears paidAt, posts no COGS and queues no event (no invoice.sent email, no paid event)', async () => {
+  it('RED-BEFORE: the refund reconcile moves a fully refunded PAID invoice to SENT, clears paidAt, posts no COGS and queues only invoice.reopened (no invoice.sent email, no paid event; V1-42c)', async () => {
     const h = build(paidInvoice([ok(100), refunded(100)]));
     const buffer: Array<{ name: string; payload: unknown }> = [];
     const result = await h.service.reconcileFromPayments('inv_1', { tx: h.tx as never, eventBuffer: buffer, onIllegalTransition: 'keep' });
@@ -609,8 +659,13 @@ describe('V1-29 refund convention (D-14)', () => {
     expect(h.update).toHaveBeenCalledTimes(1);
     expect(h.update.mock.calls[0][0].data).toEqual({ status: 'SENT', paidAt: null });
     expect(h.expensePosting.onProductSold).not.toHaveBeenCalled();
-    expect(buffer).toEqual([]);
-    expect(h.events.emit).not.toHaveBeenCalled();
+    // V1-42c-INVOICE-STATUS-EVENTS (VR-05): the reopen is a status event its
+    // listeners read (the calendar projection), never invoice.sent or a paid
+    // event. It was queued as nothing, which left the calendar's due item
+    // COMPLETED; the real-database proof is test/invoice-status-events.
+    expect(buffer.map((e) => e.name)).toEqual(['invoice.reopened']);
+    expect(buffer[0].payload).toMatchObject({ status: 'SENT', previousStatus: 'PAID', businessId: 'biz_1', eventName: 'invoice.reopened' });
+    expect(h.events.emit, 'buffered for the caller to emit after commit').not.toHaveBeenCalled();
   });
 
   it('the same reopen without onIllegalTransition (provider refund webhooks) also reaches SENT, not a 409', async () => {
