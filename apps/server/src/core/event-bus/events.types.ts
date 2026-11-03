@@ -150,13 +150,23 @@ export class RecurringInvoiceFailedPayload {
   error!: string;
 }
 
+/**
+ * V1-28 (M42): the invoice as InvoiceWorkflowService emits it (`include:
+ * { items, contact, booking }`). `booking` is the booking this invoice is the
+ * FINAL invoice of (Booking.invoiceId); a deposit invoice's booking is reached
+ * through Booking.depositInvoiceId, which the payload does not carry. There
+ * was a `bookingId` field here that no emitter ever set, and the invoice.paid
+ * confirm hook read it, so it never ran.
+ */
+export type InvoiceEventInvoice = Invoice & { items?: InvoiceItem[]; contact?: Contact; booking?: Booking | null };
+
 export class InvoicePaidPayload {
-  invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact; bookingId?: string | null };
+  invoice!: InvoiceEventInvoice;
   businessId!: string;
 }
 
 export class InvoiceStatusPayload {
-  invoice!: Invoice & { items?: InvoiceItem[]; contact?: Contact; bookingId?: string | null };
+  invoice!: InvoiceEventInvoice;
   businessId!: string;
   status!: string;
 }

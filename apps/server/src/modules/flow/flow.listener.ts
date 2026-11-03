@@ -111,9 +111,16 @@ export class FlowListener implements OnModuleInit, OnModuleDestroy {
   async handleInvoicePaid(payload: InvoicePaidPayload) {
     this.logger.debug(`Flow observed invoice.paid for business=${payload.businessId}`);
 
-    if (payload.invoice.bookingId) {
-      await this.bookingsService.confirmBooking(payload.invoice.bookingId);
-      this.logger.debug(`Booking ${payload.invoice.bookingId} confirmed via invoice.paid`);
+    // V1-28 (M42): this tested payload.invoice.bookingId, a field no
+    // invoice.paid payload carries, so paying never confirmed a booking. The
+    // booking is found through the relation (its final invoice, or its
+    // deposit invoice) under the event's business, and only one still waiting
+    // for confirmation moves; a completed or cancelled booking is left alone.
+    try {
+      const confirmed = await this.bookingsService.confirmBookingForPaidInvoice(payload.businessId, payload.invoice.id);
+      if (confirmed) this.logger.debug(`Booking ${confirmed.id} confirmed via invoice.paid`);
+    } catch (e) {
+      this.logger.error(`invoice.paid booking confirmation failed for invoice ${payload.invoice.id}: ${(e as Error).message}`);
     }
 
     this.logger.log(
