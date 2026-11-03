@@ -543,6 +543,16 @@
       "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
+      "prefix": "v82d_",
+      "owner": "apps/server/test/expense-currency-cents.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B4-EXPENSE-CURRENCY-CENTS)"
+    },
+    {
+      "prefix": "v82g_",
+      "owner": "apps/server/test/expense-edit-posted.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B7-EXPENSE-EDIT-POSTED)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
