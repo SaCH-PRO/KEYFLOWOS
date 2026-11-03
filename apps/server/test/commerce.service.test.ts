@@ -148,6 +148,8 @@ class PrismaMock implements Partial<PrismaService> {
     },
     // The payment transaction runs on the same in-memory store.
     $transaction: vi.fn(async (fn: any) => fn(this.client)),
+    // V1-43 allocateDocumentNumber: the per-business advisory lock (its max read is the $queryRaw below, no row -> 0001).
+    $executeRaw: vi.fn(async () => 1),
     // CommerceService.lockInvoiceForPayment: SELECT status, business_id, deleted_at ... FOR NO KEY UPDATE.
     $queryRaw: vi.fn(async (_sql: TemplateStringsArray, invoiceId: string) => {
       const inv = this.invoices.find((i) => i.id === invoiceId);

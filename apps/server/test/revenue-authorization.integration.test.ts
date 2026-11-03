@@ -34,9 +34,34 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { createHmac } from 'crypto';
+import { readdirSync, readFileSync } from 'fs';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+
+// R0-20b: the Stripe SDK the legacy WebhooksController builds is a stub, so no
+// provider traffic is possible. constructEvent verifies the Stripe-Signature
+// header the way the SDK does (t=<ts>,v1=<HMAC-SHA256(secret, `${t}.${payload}`)>)
+// and returns the parsed payload; anything else throws, as the SDK does.
+vi.mock('stripe', async () => {
+  const { createHmac: hmac, timingSafeEqual } = await import('crypto');
+  class Stripe {
+    webhooks = {
+      constructEvent: (payload: Buffer | string, header: string, secret: string) => {
+        const raw = Buffer.isBuffer(payload) ? payload.toString('utf8') : payload;
+        const parts = Object.fromEntries(String(header).split(',').map((p) => p.split('=').map((x) => x.trim())));
+        const expected = Buffer.from(hmac('sha256', secret).update(`${parts.t}.${raw}`).digest('hex'));
+        const given = Buffer.from(String(parts.v1 ?? ''));
+        if (!parts.t || given.length !== expected.length || !timingSafeEqual(given, expected)) {
+          throw new Error('No signatures found matching the expected signature for payload');
+        }
+        return JSON.parse(raw);
+      },
+    };
+  }
+  return { default: Stripe };
+});
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
 // shell / CI env wins because dotenv never overrides an existing variable).
@@ -155,6 +180,8 @@ async function cleanup() {
     `DELETE FROM org_units WHERE business_id LIKE '${P}%'`,
     `DELETE FROM payments WHERE business_id LIKE '${P}%' OR invoice_id LIKE '${P}%'`,
     `DELETE FROM payment_links WHERE business_id LIKE '${P}%'`,
+    // R0-20b: the Stripe ledger door claims its events with no business (the event ids carry the prefix).
+    `DELETE FROM webhook_events WHERE provider_event_id LIKE '${P}%'`,
     `DELETE FROM invoice_items WHERE invoice_id LIKE '${P}%'`,
     `DELETE FROM invoices WHERE business_id LIKE '${P}%'`,
     `DELETE FROM contacts WHERE business_id LIKE '${P}%'`,
@@ -381,6 +408,8 @@ beforeAll(async () => {
   const { PaymentsController } = await import('../src/modules/payments/payments.controller');
   const { PaymentsService } = await import('../src/modules/payments/payments.service');
   const { CommerceAdapterService } = await import('../src/modules/key-cortex/adapters/commerce-adapter.service');
+  const { WebhooksController } = await import('../src/modules/webhooks/webhooks.controller');
+  const { WebhookDispatcherService } = await import('../src/modules/webhooks/webhook-dispatcher.service');
   const { KEY_SYSTEM_ACTOR_ID } = await import('../src/core/auth/system-actor');
   CommerceAdapterServiceCtor = CommerceAdapterService;
   KEY_SYSTEM_ACTOR = KEY_SYSTEM_ACTOR_ID;
@@ -388,8 +417,12 @@ beforeAll(async () => {
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   // ---- the real HTTP path, wired before any row is seeded -----------------
+  // R0-20b: WebhooksController builds its (stubbed) Stripe SDK client from
+  // STRIPE_SECRET_KEY when it is constructed; the key is set for the compile only.
+  const previousStripeKey = process.env.STRIPE_SECRET_KEY;
+  process.env.STRIPE_SECRET_KEY = `sk_test_${P}stub`;
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController, PaymentsController],
+    controllers: [CommerceController, PaymentsController, WebhooksController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -420,10 +453,15 @@ beforeAll(async () => {
       { provide: CommerceVisionService, useValue: {} },
       { provide: StoreReadinessService, useValue: {} },
       { provide: PaymentEvidenceService, useValue: {} },
+      // R0-20b: the legacy Stripe route's other collaborator (its business webhook CRUD is not exercised here).
+      { provide: WebhookDispatcherService, useValue: {} },
     ],
   }).compile();
+  if (previousStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+  else process.env.STRIPE_SECRET_KEY = previousStripeKey;
 
-  app = moduleRef.createNestApplication();
+  // rawBody: the Stripe routes verify the exact bytes Stripe signed (as main.ts serves them).
+  app = moduleRef.createNestApplication({ rawBody: true });
   // Identity attachment only (§2.3). No guard is overridden.
   app.use(async (req: any, _res: any, next: any) => {
     const header = req.headers['x-rva-user'];
@@ -949,19 +987,6 @@ describe('List B: regression controls', () => {
       expect(res.body.message).toMatch(/No access to this business/);
       expectNoCanary(res.body);
     });
-  });
-
-  describe('G16 — deferred service-level tightening', () => {
-    // Skipped by design (matrix ruling 4), not a pass. 'KF-REVENUE-FINANCIAL-INTEGRITY'
-    // is not a queue id: it maps to R0-20 if owner decision D-05 authorizes the
-    // webhooks.controller.ts 86-91 change, otherwise to the INGRESS-001 row of
-    // the V1+ backlog. D-05's webhook half is not authorized (R0-02-REV-AUTH-CONFORM).
-    it.todo(
-      'RA-G16-01: a caller with no actor and no tenant cannot mark paid through the service. ' +
-        'DEFERRED: KF-REVENUE-FINANCIAL-INTEGRITY (webhooks.controller.ts 86-91) — the deprecated Stripe handler calls ' +
-        'commerce.markInvoicePaid(invoiceId) with no actor and no tenant and depends on both checks being skipped; ' +
-        'tightening the service is not released in KF-REVENUE-AUTH-PROJECTION-001.',
-    );
   });
 
   describe('Positive controls that must keep working', () => {
@@ -1710,5 +1735,149 @@ describe('Review repairs (R0-SEC3): the record-payment route projects the invoic
       'includes booking: true and contact: true; wrapToolResult and executeTool pass it through, and the chat path sends ' +
       'toolResults to the model, to the HTTP client and into the FlowSession. The fix belongs in flow-orchestrator.service.ts ' +
       '(project the tool result) or commerce.service.ts, neither in this write set.',
+  );
+});
+
+// ---------------------------------------------------------------------------
+// R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR (D-05, ruled 2026-11-02): RA-G16-01 leaves
+// deferral. The contract (§4.5) recorded one dependency: the deprecated POST
+// /webhooks/stripe called commerce.markInvoicePaid(invoiceId) with no actor and
+// no tenant, the only production caller of that shape. D-05 authorizes the
+// bounded change to that handler: after signature verification it hands the
+// verified event to the Stripe ledger door (PaymentsService.handleStripeWebhook,
+// what POST /payments/stripe/webhook runs), bound to the invoice's business and
+// currency with a positive amount, recorded as carried (R0-20b review
+// CR-R020B-1), and never calls markInvoicePaid.
+// ---------------------------------------------------------------------------
+describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: G16 — the anonymous, tenantless caller (D-05; RA-G16-01 leaves deferral)', () => {
+  const SECRET = `whsec_${P}legacy`;
+  const HINT = { deprecated: true, use: '/payments/stripe/webhook' };
+  let previousSecret: string | undefined;
+
+  beforeAll(() => {
+    previousSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    process.env.STRIPE_WEBHOOK_SECRET = SECRET;
+  });
+
+  afterAll(() => {
+    if (previousSecret === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
+    else process.env.STRIPE_WEBHOOK_SECRET = previousSecret;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function sign(raw: string) {
+    const t = Math.floor(Date.now() / 1000);
+    return `t=${t},v1=${createHmac('sha256', SECRET).update(`${t}.${raw}`).digest('hex')}`;
+  }
+
+  function sessionEvent(tag: string, invoiceId: string, businessId: string) {
+    return JSON.stringify({
+      id: `${P}evt_${tag}`,
+      object: 'event',
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: `${P}cs_${tag}`,
+          object: 'checkout.session',
+          amount_total: 10000,
+          currency: 'ttd',
+          client_reference_id: invoiceId,
+          metadata: { invoiceId, businessId },
+          payment_intent: `${P}pi_${tag}`,
+        },
+      },
+    });
+  }
+
+  function post(path: '/webhooks/stripe' | '/payments/stripe/webhook', raw: string, signed = true) {
+    const req = agent().post(path).set('content-type', 'application/json');
+    return (signed ? req.set('stripe-signature', sign(raw)) : req).send(raw);
+  }
+
+  it('RA-G16-01: a caller with no actor and no tenant cannot mark paid through the service: the deprecated POST /webhooks/stripe (no actor, no tenant) never reaches CommerceService.markInvoicePaid; unsigned, or signed naming another business, it writes nothing; signed for the invoice\'s own business it records the receipt once through the Stripe ledger door (provider stripe, recordedBy null), and the same event on POST /payments/stripe/webhook writes nothing more', async () => {
+    const copy = await createCopy('g16_01', { status: 'SENT' });
+    const markPaidSpy = vi.spyOn(commerce, 'markInvoicePaid');
+    const ledgerBefore = await ledgerCountA();
+
+    const unsigned = await post('/webhooks/stripe', sessionEvent('g16_01_unsigned', copy, ID.bizA), false);
+    expect(unsigned.status).toBe(400);
+    const foreign = await post('/webhooks/stripe', sessionEvent('g16_01_foreign', copy, ID.bizB));
+    expect(foreign.status, JSON.stringify(foreign.body)).toBe(400);
+    expectNoCanary(foreign.body);
+    expect(await invoiceStatus(copy)).toBe('SENT');
+    expect(await paymentCount(copy)).toBe(0);
+    expect(await ledgerCountA()).toBe(ledgerBefore);
+
+    const raw = sessionEvent('g16_01', copy, ID.bizA);
+    const res = await post('/webhooks/stripe', raw);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ received: true, processed: 'checkout.session.completed', ...HINT });
+    expectNoCanary(res.body);
+    const rows = await db.payment.findMany({ where: { invoiceId: copy } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      businessId: ID.bizA,
+      status: 'SUCCESSFUL',
+      amount: 100,
+      provider: 'stripe',
+      providerPaymentId: `${P}cs_g16_01`,
+      recordedBy: null,
+    });
+    expect(await invoiceStatus(copy)).toBe('PAID');
+    const postings = await paymentPostingsFor(copy);
+    expect(postings).toHaveLength(1);
+    expect(postings[0]).toMatchObject({ externalRef: `Payment:${rows[0].id}:payment_recorded`, status: 'POSTED' });
+
+    const replay = await post('/payments/stripe/webhook', raw);
+    expect(replay.status, JSON.stringify(replay.body)).toBe(201);
+    expect(replay.body).toMatchObject({ ok: true, received: true });
+    expect(await paymentCount(copy)).toBe(1);
+    expect((await paymentPostingsFor(copy)).map((t) => t.id)).toEqual(postings.map((t) => t.id));
+    expect(markPaidSpy).not.toHaveBeenCalled();
+  });
+
+  it('RA-G16-01 (census): no production caller of CommerceService.markInvoicePaid passes neither actor nor tenant: every call site in apps/server/src names a tenant (third argument), and the deprecated Stripe handler calls it nowhere', async () => {
+    const ts = (await import('typescript')).default;
+    const src = path.resolve(__dirname, '../src');
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (e.name.endsWith('.ts') && !e.name.endsWith('.spec.ts')) files.push(p);
+      }
+    };
+    walk(src);
+    // Call expressions only (comments and strings that name the method do not count).
+    const sites: Array<{ file: string; args: string[] }> = [];
+    for (const file of files) {
+      const text = readFileSync(file, 'utf8');
+      if (!text.includes('markInvoicePaid')) continue;
+      const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+      const visit = (n: import('typescript').Node) => {
+        if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === 'markInvoicePaid') {
+          sites.push({ file: path.relative(src, file).split(path.sep).join('/'), args: n.arguments.map((a) => a.getText(sf)) });
+        }
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+    }
+    expect(sites.length, 'the census is not vacuous').toBeGreaterThanOrEqual(4);
+    expect(sites.map((s) => s.file)).not.toContain('modules/webhooks/webhooks.controller.ts');
+    for (const s of sites) {
+      expect(s.args, `${s.file}: markInvoicePaid(${s.args.join(', ')})`).toHaveLength(3);
+      expect(s.args[2], `${s.file}: the tenant argument`).not.toMatch(/^(undefined|null)$/);
+    }
+  });
+
+  // The service-level half stays visible: the contract's request is the direct
+  // call itself, and refusing it is a commerce.service.ts change.
+  it.todo(
+    'RA-G16-01 (service half): commerce.markInvoicePaid(<copy>) called directly with no actor and no tenant still resolves ' +
+      '(payments-mark-paid MP-06s pins it). DEFERRED: refusing it is a commerce.service.ts change, outside the ' +
+      'R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR write set; no production caller passes that shape (RA-G16-01 census).',
   );
 });

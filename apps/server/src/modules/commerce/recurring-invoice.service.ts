@@ -3,6 +3,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
+import { allocateDocumentNumber, retryDocumentNumber } from './document-number';
 import { schedulersDisabled } from '../../core/config/env';
 import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
 
@@ -392,8 +393,14 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
         // from the scan snapshot: an amount changed after the scan bills at
         // the amount the schedule holds. The contact's tenant is checked again
         // on that row.
+        //
+        // V1-43 (D-15): the invoice takes the business's next number inside
+        // this transaction; a number collision rolls the whole period back
+        // (claim, invoice, posting) and reruns it, so it is billed once. The
+        // buffer is emptied by each attempt.
         const pendingEvents: Array<{ name: string; payload: unknown }> = [];
-        const billed = await this.prisma.client.$transaction(async (tx) => {
+        const billed = await retryDocumentNumber('invoice', () => this.prisma.client.$transaction(async (tx) => {
+          pendingEvents.length = 0;
           const claimed = await tx.recurringInvoice.updateMany({
             where: {
               id: recurring.id,
@@ -441,7 +448,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
             data: {
               businessId: schedule.businessId,
               contactId: schedule.contactId,
-              invoiceNumber: `INV-${Date.now()}`,
+              invoiceNumber: await allocateDocumentNumber(tx, schedule.businessId, 'invoice'),
               status: 'DRAFT',
               issueDate: new Date(),
               subtotal: schedule.amount,
@@ -473,7 +480,7 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
             eventBuffer: pendingEvents,
           });
           return { schedule, invoice: sent };
-        });
+        }));
 
         if (!billed) {
           this.logger.log(

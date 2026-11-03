@@ -123,21 +123,6 @@ const FINAL_INVOICE_LOCK_NAMESPACE = 'booking-final-invoice:';
 /** D-26: Booking.paymentStatus once a customer cancel has forfeited a paid deposit. */
 const DEPOSIT_FORFEITED = 'DEPOSIT_FORFEITED';
 
-/**
- * V1-28 review (SEC-V28-1): attempts at drawing up the final invoice when its
- * number collides. CommerceService numbers invoices INV-<Date.now()> under
- * @@unique([businessId, invoiceNumber]), so two completions in one business
- * in the same millisecond collide; nothing was written by the failed attempt,
- * and the next one takes a later millisecond.
- */
-const FINAL_INVOICE_NUMBER_ATTEMPTS = 3;
-
-/** A unique-constraint failure (P2002) on the invoice number, as Prisma reports it. */
-const isInvoiceNumberCollision = (err: unknown): boolean => {
-  const e = err as { code?: unknown; message?: unknown; meta?: { target?: unknown } } | null;
-  return e?.code === 'P2002' && /invoice_?number/i.test(`${String(e.meta?.target ?? '')} ${String(e.message ?? '')}`);
-};
-
 /** The completion answer's code for an invoice that was not drawn up (V1-28 review, SEC-V28-1). */
 export const INVOICE_NOT_CREATED = 'INVOICE_NOT_CREATED';
 
@@ -774,8 +759,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * two callers racing (two completions, or a completion and the Create-invoice
    * button) one draws the invoice up and the other finds it. The invoice is
    * created through CommerceService (its own connection, committed); if the
-   * link to the booking then fails, that DRAFT is withdrawn. An attempt whose
-   * invoice number collided wrote nothing and is retried (SEC-V28-1).
+   * link to the booking then fails, that DRAFT is withdrawn. A number
+   * collision is retried by CommerceService's allocator (V1-43, SEC-V28-1).
    */
   private async issueFinalInvoice(businessId: string, bookingId: string): Promise<FinalInvoiceOutcome> {
     const key = `${FINAL_INVOICE_LOCK_NAMESPACE}${bookingId}`;
@@ -830,17 +815,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         const options = deposit
           ? { kind: 'FULL' as const, amountOverride: amount, descriptionSuffix: ` (balance after deposit ${deposit.invoiceNumber})` }
           : undefined;
-        let invoice: Awaited<ReturnType<CommerceService['createInvoiceForService']>> | undefined;
-        for (let attempt = 1; ; attempt += 1) {
-          try {
-            invoice = await this.commerce.createInvoiceForService(businessId, contactId, service, options);
-            break;
-          } catch (err) {
-            if (attempt >= FINAL_INVOICE_NUMBER_ATTEMPTS || !isInvoiceNumberCollision(err)) throw err;
-            this.logger.warn(`Invoice number collided for booking ${booking.id} (attempt ${attempt}); retrying`);
-            await new Promise((resolve) => setTimeout(resolve, 2 + Math.floor(Math.random() * 8)));
-          }
-        }
+        // V1-43 (D-15): numbered by CommerceService's allocator, which retries a
+        // number collision itself (the SEC-V28-1 retry that lived here).
+        const invoice = await this.commerce.createInvoiceForService(businessId, contactId, service, options);
         if (!invoice) throw new BadRequestException('Failed to create invoice');
         drawn = invoice.id;
         await tx.booking.update({ where: { id: booking.id }, data: { invoiceId: invoice.id } });
