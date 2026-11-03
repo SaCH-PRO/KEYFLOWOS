@@ -15,6 +15,7 @@ import {
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { GatewayId, PaymentsOpsService } from './payments-ops.service';
 
@@ -39,26 +40,38 @@ export class PaymentsOpsController {
   ) {}
 
   /**
-   * FOLLOW3-A2-D46-PAYMENTS-OPS (D-46): a platform SUPER_ADMIN who is not a
-   * member of the business stays out of its writes. BusinessGuard and
-   * ModuleScopeGuard both admit SUPER_ADMIN to every tenant, so the gateway
-   * writes below (refund, payment-link create and revoke) require a Membership
-   * in :businessId for that role, checked before any gateway call: a refused
-   * request costs no provider traffic and moves no money. Every other caller
-   * is unchanged (the guards already require a member holding revenue:write);
-   * a SUPER_ADMIN who is a member keeps the platform bypass of the module
-   * scope. The reads are not affected.
+   * FOLLOW3-A2-D46-PAYMENTS-OPS (D-46): a platform SUPER_ADMIN acts on a
+   * business's money only with the authority that business gave it.
+   * BusinessGuard and ModuleScopeGuard both admit SUPER_ADMIN to every tenant
+   * and skip the module scope, so the gateway writes below (refund,
+   * payment-link create and revoke) apply ModuleScopeGuard's legacy rule to
+   * that role here: a Membership in :businessId whose scope map (or, without
+   * one, the role defaults) holds revenue:write. Checked before any gateway
+   * call: a refused request costs no provider traffic and moves no money.
+   * Review SEC-A2-1: a membership alone is not enough (a STAFF default of
+   * revenue:read, or an explicit revenue:'none' set by the business, is 403),
+   * as in payment-evidence.service.ts and undo.service.ts. Every other caller
+   * is unchanged (the guards already apply this rule to it). The reads are
+   * not affected.
    */
-  private async assertSuperAdminIsMember(req: ActorRequest, businessId: string): Promise<void> {
+  private async assertSuperAdminMayWriteRevenue(req: ActorRequest, businessId: string): Promise<void> {
     const user = req.user;
     if (user?.role !== 'SUPER_ADMIN') return;
     const membership = user.id
       ? await this.prisma.client.membership.findUnique({
           where: { userId_businessId: { userId: user.id, businessId } },
-          select: { id: true },
+          select: { role: true, permissionScopes: true },
         })
       : null;
     if (!membership) throw new ForbiddenException('Not a member of this business');
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
+    }
   }
 
   @RequireModuleScope('revenue', 'read')
@@ -98,7 +111,7 @@ export class PaymentsOpsController {
     @Param('businessId') businessId: string,
     @Body() body: { gateway: string; amount: number; currency: string; description: string; customerEmail?: string },
   ) {
-    await this.assertSuperAdminIsMember(req, businessId);
+    await this.assertSuperAdminMayWriteRevenue(req, businessId);
     const gw = assertGateway(body.gateway);
     return this.ops.createPaymentLink(businessId, gw, {
       amount: Number(body.amount),
@@ -116,7 +129,7 @@ export class PaymentsOpsController {
     @Param('gateway') gateway: string,
     @Param('linkId') linkId: string,
   ) {
-    await this.assertSuperAdminIsMember(req, businessId);
+    await this.assertSuperAdminMayWriteRevenue(req, businessId);
     const gw = assertGateway(gateway);
     return this.ops.revokePaymentLink(businessId, gw, linkId).then(() => ({ ok: true }));
   }
@@ -130,7 +143,7 @@ export class PaymentsOpsController {
     @Param('linkId') linkId: string,
     @Query('gateway') gateway?: string,
   ) {
-    await this.assertSuperAdminIsMember(req, businessId);
+    await this.assertSuperAdminMayWriteRevenue(req, businessId);
     if (!gateway) {
       throw new BadRequestException('Missing required query param: gateway');
     }
@@ -145,7 +158,7 @@ export class PaymentsOpsController {
     @Param('businessId') businessId: string,
     @Body() body: { gateway: string; chargeId: string; amount?: number; reason?: string },
   ) {
-    await this.assertSuperAdminIsMember(req, businessId);
+    await this.assertSuperAdminMayWriteRevenue(req, businessId);
     const gw = assertGateway(body.gateway);
     return this.ops.refundCharge(businessId, gw, {
       chargeId: body.chargeId,

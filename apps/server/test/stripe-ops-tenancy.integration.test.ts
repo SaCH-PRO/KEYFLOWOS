@@ -89,6 +89,17 @@
  *           SUPER_ADMIN creates and revokes (201/200)
  *   SOT-D46-03  READS: the non-member SUPER_ADMIN still lists A's transactions
  *           and links (D-46 covers writes only)
+ *   SOT-D46-04  MEMBER OF ANOTHER BUSINESS (review CR-D46PO-1): a SUPER_ADMIN
+ *           who is a member (ADMIN, revenue:admin) of B only is 403 on A's
+ *           refund, link create and both revokes, with zero provider calls:
+ *           the membership checked is the one in the route's business
+ *   SOT-D46-05  SCOPE MAP (review SEC-A2-1): a SUPER_ADMIN member of A whose
+ *           membership does not grant revenue:write (STAFF role default
+ *           revenue:read; an explicit {revenue:'none'} set by A) is 403 on the
+ *           refund, link create and both revokes with zero provider calls,
+ *           exactly as a plain STAFF user of A is (ModuleScopeGuard); a
+ *           SUPER_ADMIN STAFF member whose explicit map grants revenue:write
+ *           creates a link (201)
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, the global TenantInterceptor, GlobalHttpExceptionFilter and
@@ -151,6 +162,13 @@ const ID = {
   // FOLLOW3-A2-D46-PAYMENTS-OPS: platform SUPER_ADMINs (no Membership in A; a Membership in A) and A's D-46 invoices.
   saOutsider: `${P}saOutsider`,
   saMemberA: `${P}saMemberA`,
+  // Review CR-D46PO-1 / SEC-A2-1: a SUPER_ADMIN member of B only; SUPER_ADMIN STAFF members of A (role default,
+  // explicit revenue:'none', explicit revenue:'write'); a plain STAFF user of A.
+  saMemberB: `${P}saMemberB`,
+  saStaffA: `${P}saStaffA`,
+  saNoneA: `${P}saNoneA`,
+  saWriteA: `${P}saWriteA`,
+  staffA: `${P}staffA`,
   invA8: `${P}invA8`,
   invA9: `${P}invA9`,
 };
@@ -1217,8 +1235,9 @@ describe('V1-15d review: PayPal on the platform credentials', () => {
 // platform SUPER_ADMIN to every tenant. D-46 keeps one who is not a member of the
 // business out of its writes, so the payments-ops refund and payment-link writes
 // refuse that caller 403 before any gateway call: a refused request costs no
-// provider traffic and moves no money. A SUPER_ADMIN who is a member keeps the
-// platform bypass of the module scope; the reads are unchanged.
+// provider traffic and moves no money. A SUPER_ADMIN who is a member is held to
+// its membership's revenue scope (review SEC-A2-1: write, as ModuleScopeGuard
+// holds every other member); the reads are unchanged.
 // ---------------------------------------------------------------------------
 
 /** Activity (the D-08 feed) and BusinessEvent (the D-08 audit trail) rows of a business. */
@@ -1247,6 +1266,22 @@ describe('D-46: a platform SUPER_ADMIN who is not a member of the business is re
       await db.user.create({ data: { id, email, role: 'SUPER_ADMIN' } });
     }
     await db.membership.create({ data: { id: `${ID.saMemberA}_m`, userId: ID.saMemberA, businessId: ID.bizA, role: 'ADMIN' } });
+    // Review CR-D46PO-1: a platform admin who is a member (ADMIN: revenue:admin) of its own business B, acting on A.
+    // Review SEC-A2-1: SUPER_ADMINs who are members of A without revenue:write, one with it, and a plain STAFF user of A.
+    for (const [id, email, role] of [
+      [ID.saMemberB, `${P}sa_member_b@test.local`, 'SUPER_ADMIN'],
+      [ID.saStaffA, `${P}sa_staff_a@test.local`, 'SUPER_ADMIN'],
+      [ID.saNoneA, `${P}sa_none_a@test.local`, 'SUPER_ADMIN'],
+      [ID.saWriteA, `${P}sa_write_a@test.local`, 'SUPER_ADMIN'],
+      [ID.staffA, `${P}staff_a@test.local`, 'USER'],
+    ] as const) {
+      await db.user.create({ data: { id, email, role } });
+    }
+    await db.membership.create({ data: { id: `${ID.saMemberB}_m`, userId: ID.saMemberB, businessId: ID.bizB, role: 'ADMIN' } });
+    await db.membership.create({ data: { id: `${ID.saStaffA}_m`, userId: ID.saStaffA, businessId: ID.bizA, role: 'STAFF' } });
+    await db.membership.create({ data: { id: `${ID.saNoneA}_m`, userId: ID.saNoneA, businessId: ID.bizA, role: 'STAFF', permissionScopes: { revenue: 'none' } } });
+    await db.membership.create({ data: { id: `${ID.saWriteA}_m`, userId: ID.saWriteA, businessId: ID.bizA, role: 'STAFF', permissionScopes: { revenue: 'write' } } });
+    await db.membership.create({ data: { id: `${ID.staffA}_m`, userId: ID.staffA, businessId: ID.bizA, role: 'STAFF' } });
     for (const [id, n, total] of [[ID.invA8, 1, 50], [ID.invA9, 2, 40]] as const) {
       await db.invoice.create({
         data: {
@@ -1398,5 +1433,82 @@ describe('D-46: a platform SUPER_ADMIN who is not a member of the business is re
     const saLinks = await as(ID.saOutsider).get(`${ops(ID.bizA)}/links`);
     expect(saLinks.status, flat(saLinks.body)).toBe(200);
     expect(saLinks.body.map((l: any) => l.id)).toEqual(ownerLinks.body.map((l: any) => l.id));
+  }, 60_000);
+
+  /**
+   * Every gateway write of the controller on A, by `actor`: the Stripe refund of A's tagged charge, a link create, and
+   * both revoke routes on a live link of A. Returns status, message and the provider calls of each.
+   */
+  async function writesOnA(actor: string, linkId: string) {
+    const by = as(actor);
+    const observe = async (send: () => Promise<any>) => {
+      const mark = calls.length;
+      const res = await send();
+      return { status: res.status, message: res.body?.message, calls: callsSince(mark) };
+    };
+    return {
+      refund: await observe(() => by.post(`${ops(ID.bizA)}/refunds`, { gateway: 'stripe', chargeId: S.chA8, amount: 1 })),
+      create: await observe(() => by.post(`${ops(ID.bizA)}/links`, { gateway: 'stripe', amount: 7, currency: 'TTD', description: `V15D D-46 ${actor} link` })),
+      revokeByGateway: await observe(() => by.del(`${ops(ID.bizA)}/links/stripe/${linkId}`)),
+      revokeById: await observe(() => by.del(`${ops(ID.bizA)}/links/${linkId}?gateway=stripe`)),
+    };
+  }
+
+  /** A live link of A, created by owner A, and the state a refused write must leave untouched. */
+  async function liveLinkOfA() {
+    const own = await as(ID.ownerA).post(`${ops(ID.bizA)}/links`, { gateway: 'stripe', amount: 9, currency: 'TTD', description: 'V15D D-46 review link' });
+    expect(own.status, flat(own.body)).toBe(201);
+    return {
+      linkId: own.body.id as string,
+      snapshot: async () => ({
+        rows: await rowsOfBusiness(ID.bizA),
+        audit: await auditCounts(ID.bizA),
+        refunds: accounts[PLATFORM_KEY].refunds.length,
+        links: accounts[PLATFORM_KEY].links.length,
+        active: accounts[PLATFORM_KEY].links.find((l) => l.id === own.body.id)?.active,
+      }),
+    };
+  }
+
+  const refusedEverywhere = (message: string) => {
+    const refused = { status: 403, message, calls: [] };
+    return { refund: refused, create: refused, revokeByGateway: refused, revokeById: refused };
+  };
+
+  it('SOT-D46-04 (review CR-D46PO-1): a SUPER_ADMIN who is a member of B only is 403 on A\'s refund, link create and both revokes, with zero provider calls', async () => {
+    // The actor is a member of a business, with full revenue there: only the business of the route tells it apart.
+    expect(await db.membership.findMany({ where: { userId: ID.saMemberB }, select: { businessId: true, role: true, permissionScopes: true } }))
+      .toEqual([{ businessId: ID.bizB, role: 'ADMIN', permissionScopes: null }]);
+    await deliverRefundEvents();
+    const { linkId, snapshot } = await liveLinkOfA();
+    const before = await snapshot();
+
+    expect(await writesOnA(ID.saMemberB, linkId)).toEqual(refusedEverywhere('Not a member of this business'));
+    await deliverRefundEvents();
+    expect(await snapshot()).toEqual(before);
+    expect(before.active).toBe(true);
+  }, 60_000);
+
+  it('SOT-D46-05 (review SEC-A2-1): a SUPER_ADMIN member of A without revenue:write (STAFF default read; explicit revenue:none) is 403 on every gateway write with zero provider calls, as a plain STAFF user is; an explicit revenue:write map creates a link', async () => {
+    await deliverRefundEvents();
+    const { linkId, snapshot } = await liveLinkOfA();
+    const before = await snapshot();
+
+    // Parity: the plain STAFF user of A is refused by ModuleScopeGuard with the same rule and message.
+    expect(await writesOnA(ID.staffA, linkId)).toEqual(refusedEverywhere('Insufficient permissions: revenue requires write access (you have read)'));
+    // RED-BEFORE (membership-only check): refund 201 (POST /v1/refunds, a -1 REFUNDED row), create 201, revokes 200.
+    expect(await writesOnA(ID.saStaffA, linkId)).toEqual(refusedEverywhere('Insufficient permissions: revenue requires write access (you have read)'));
+    expect(await writesOnA(ID.saNoneA, linkId)).toEqual(refusedEverywhere('Insufficient permissions: revenue requires write access (you have none)'));
+    await deliverRefundEvents();
+    expect(await snapshot()).toEqual(before);
+    expect(before.active).toBe(true);
+
+    // Control: the scope map is read, not the role: a STAFF SUPER_ADMIN member whose explicit map grants
+    // revenue:write creates a link on A (tagged with A's id).
+    const mark = calls.length;
+    const created = await as(ID.saWriteA).post(`${ops(ID.bizA)}/links`, { gateway: 'stripe', amount: 7, currency: 'TTD', description: 'V15D D-46 write-map link' });
+    expect(created.status, flat(created.body)).toBe(201);
+    const post = calls.slice(mark).filter((c) => c.method === 'POST' && c.path === '/v1/payment_links');
+    expect(post.map((c) => new URLSearchParams(c.body).get('metadata[businessId]'))).toEqual([ID.bizA]);
   }, 60_000);
 });
