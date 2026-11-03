@@ -408,6 +408,11 @@
       "packet": "V1-35-DM-POLLER-CLAIM"
     },
     {
+      "prefix": "v40a_",
+      "owner": "apps/server/test/log-redaction.integration.test.ts",
+      "packet": "V1-40-SEC-TRUST-CENSUS-REDACTION"
+    },
+    {
       "prefix": "v46a_",
       "owner": "apps/server/test/pay-link-token-gate.integration.test.ts",
       "packet": "V1-46-PUB-PAY-LINK-TOKEN-GATE"

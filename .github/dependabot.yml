@@ -1,0 +1,54 @@
+# Dependabot version and security updates (V1-40-SEC-TRUST-CENSUS-REDACTION;
+# CF-32 secure-SDLC gates, IA-045 dependency vulnerability management).
+#
+# GitHub-native: Dependabot opens pull requests against the default branch and
+# nothing merges without the repository's normal review and required checks.
+# Its branches are dependabot/*, so the agent control gate (impl/*, pkt/*)
+# does not apply to them; ci-cd.yml's dependency audit and secret scan do.
+#
+# The workspace is pnpm 9 (pnpm-lock.yaml at the root); Dependabot's npm
+# ecosystem updates pnpm workspaces from the root directory. Minor and patch
+# updates are grouped so a week's churn is one pull request per ecosystem;
+# major updates stay separate, since each may need code changes.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      npm-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+    commit-message:
+      prefix: "chore(ci)"
+    # The secret scanner moves by hand, never through Dependabot. ci-cd.yml
+    # pins trufflesecurity/trufflehog to a tag commit AND its CLI image by
+    # digest (`with.version`), and scripts/security/tests/secret-scan-contract
+    # .spec.mjs asserts both. Dependabot would rewrite the commit pin only, so
+    # each release would open a PR that fails the security suite, run an
+    # action against a CLI image of another version, and hold back the rest
+    # of the grouped action bumps behind it.
+    ignore:
+      - dependency-name: "trufflesecurity/trufflehog"
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"

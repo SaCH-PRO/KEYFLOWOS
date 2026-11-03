@@ -48,7 +48,11 @@ required_pr_workflows:
   - CI/CD Pipeline
   - Agent Control Gate
   - Branch divergence
-  - DAST (HawkScan)
+  # The native DAST proof needs no account or secret and cannot conclude
+  # success without probing. 'DAST (HawkScan)' is manual-only
+  # (workflow_dispatch) and not an admission gate: without its key it skipped
+  # every scan step and still concluded success (PRS-M08; V1-30, D-22).
+  - DAST (Native)
   - Agent Control Worker Proof
 
 concurrency:

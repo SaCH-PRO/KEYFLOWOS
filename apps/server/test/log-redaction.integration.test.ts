@@ -1,0 +1,1370 @@
+/**
+ * V1-40-SEC-TRUST-CENSUS-REDACTION — log-redaction negative control (REAL
+ * database), the packet-branch agent gate, dependabot and the Release 0 trust
+ * census (CF-32, CF-33; owner ruling D-22).
+ *
+ * IA-044 (log_secret_pii_redaction, T0) asks for "negative tests for
+ * secret/token/PII leakage across logs". None existed. This suite runs three
+ * Release 0 flows through the production request path with every log surface
+ * the server writes to recorded, and fails if a log entry carries:
+ *
+ *   - a contact email (the invoice's customer, and the contact the operator
+ *     creates, with its duplicate-submit 409);
+ *   - a bearer token: the operator's `Authorization: Bearer <jwt>` (verified by
+ *     the real AuthMiddleware), and the public invoice link's token, which is
+ *     the customer's bearer credential for GET /commerce/public/invoice-link/:token;
+ *   - the providerPaymentId recordPayment derives (R0-D2), whole or its digest.
+ *
+ *   flow                                   window
+ *   POST .../invoices/:id/payments         operator, bearer JWT, idempotency key
+ *   POST .../contacts (+ the same again)   operator, bearer JWT; the second is the 409
+ *   GET  /commerce/public/invoice-link/:t  anonymous customer, link token in the path
+ *
+ * THE LOGGER SPY. During each window every log surface is replaced by a
+ * recorder: the Nest Logger instance methods (every `new Logger(ctx).x()` in
+ * src), the Logger statics, ConsoleLogger (a direct ConsoleLogger use) and
+ * console.log/info/warn/error/debug/trace. Each entry is rendered the way
+ * ConsoleLogger would print it (strings as they are, anything else through
+ * util.inspect), so an object or an Error that carries a secret is caught too.
+ * Every level is recorded, debug and verbose included: main.ts creates the app
+ * with no `logger` option, so Nest's default ConsoleLogger prints all six
+ * levels (DEFAULT_LOG_LEVELS, @nestjs/common console-logger.service.js).
+ * Each window first asserts the spy saw the window's own HTTP access line, so
+ * an empty capture can never pass as "nothing leaked".
+ *
+ * THE REQUEST PATH. As app.module.ts wires it: CorrelationIdMiddleware, the
+ * real AuthMiddleware (a locally signed HS256 token, SUPABASE_JWT_SECRET set
+ * for this suite and SUPABASE_URL unset, so no provider traffic), the three
+ * APP_INTERCEPTORs (LoggingInterceptor, BusinessEventInterceptor with the real
+ * ResilientEmitterService and BusinessEventService, TenantInterceptor with the
+ * Prisma tenant context provider installed), GlobalHttpExceptionFilter and
+ * ValidationPipe. AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard,
+ * CrmRateLimitGuard, PublicRateLimitGuard (real Redis at REDIS_URL, this
+ * suite's own key namespace), CommerceController/Service, InvoiceWorkflowService,
+ * the real ledger chain, CrmController/Service, CrmTimelineService,
+ * ContactAuditService and TimelineService are real against the database.
+ * Stand-ins: the BullMQ queue (its stand-in hands the job to the real
+ * BusinessEventService.emit, as the worker does), Gmail, Drive, AI, catalog,
+ * stats caches, the plan-limit count and the transactional-email sender.
+ *
+ * THE EVENT BUS. EventEmitterModule.forRoot with the options of
+ * src/core/event-bus/event-bus.module.ts, and the real
+ * AutomationExecutorService (with the real ActivityService) mounted on it: the
+ * contact.created / invoice.paid playbook listener, and the one listener on
+ * those events with a log call that names a contact field
+ * (automation-executor.service.ts:286, `Email sent to ${c.email}`). The other
+ * contact.created listeners (flow/activity-event.listener.ts,
+ * flow/flow.listener.ts, ai/ai.listener.ts,
+ * growth-intelligence/journey-listener.service.ts,
+ * webhooks/webhook-dispatcher.service.ts) are not mounted; their log calls
+ * were read, not run, and interpolate no contact field.
+ *
+ *   flow                                   window
+ *   POST .../contacts with a SEND_EMAIL    operator, bearer JWT; a playbook on
+ *     playbook on contact.created          contact.created (seeded, real listener)
+ *
+ * RESULT. No contact email, operator bearer JWT or providerPaymentId reaches
+ * the logs in the recordPayment, contact create (no playbook) and public link
+ * windows. Two leaks do, both from production log calls outside the packet's
+ * write set, so each negative control is it.todo naming the file and a
+ * CHARACTERIZATION case pins the leaking line until the fix lands:
+ *   - the public link token: LoggingInterceptor's access line is built from
+ *     req.url (apps/server/src/core/interceptors/logging.interceptor.ts:22);
+ *   - the contact email, when a SEND_EMAIL playbook runs on contact.created
+ *     (apps/server/src/modules/flow/automation-executor.service.ts:286).
+ *
+ * The req.url leak is not specific to the link token. Section 1b drives
+ * LoggingInterceptor and GlobalHttpExceptionFilter directly: the access line
+ * also carries platform secrets (the Chatwoot webhook secret in the path,
+ * WHATSAPP_VERIFY_TOKEN in hub.verify_token, an OAuth `code`), and the 500
+ * line (apps/server/src/core/filters/http-exception.filter.ts:65) logs
+ * request.url as well, so a fix to LoggingInterceptor alone leaves it open.
+ *
+ * Fixtures: prefix `v40a_` (registered in test/helpers/fixture-prefixes.json);
+ * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll and afterAll; no
+ * $transaction wrapping. Literals in globally unique columns embed the prefix.
+ *
+ * The file also carries the packet's static proofs, which need no database:
+ * the agent gate binds pkt/* heads (D-22; its scope and validation scripts are
+ * executed with bash against fixture artifacts), dependabot is configured and
+ * leaves the SHA-pinned secret scanner alone, and the Release 0 trust census
+ * cites an existing test path or OPEN on every row and a disposition on every
+ * T0 row.
+ */
+import 'reflect-metadata';
+import path from 'path';
+import os from 'os';
+import { existsSync, readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
+import { inspect } from 'util';
+import { createHmac } from 'crypto';
+import { spawnSync } from 'child_process';
+import { lastValueFrom, of, throwError } from 'rxjs';
+import { config as loadEnv } from 'dotenv';
+import request from 'supertest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { Logger, ConsoleLogger, ForbiddenException } from '@nestjs/common';
+import type { ArgumentsHost, CallHandler, ExecutionContext } from '@nestjs/common';
+import { sqlLikePrefix } from './helpers/sql-like.js';
+
+// Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
+// shell / CI env wins because dotenv never overrides an existing variable).
+loadEnv({ path: path.resolve(__dirname, '../../../.env') });
+
+const REPO_ROOT = path.resolve(__dirname, '../../..');
+
+const P = 'v40a_';
+
+// ---------------------------------------------------------------------------
+// The log recorder (the Logger spy)
+// ---------------------------------------------------------------------------
+
+interface LogEntry {
+  channel: string;
+  text: string;
+}
+
+const LOG_LEVELS = ['log', 'error', 'warn', 'debug', 'verbose', 'fatal'] as const;
+const CONSOLE_METHODS = ['log', 'info', 'warn', 'error', 'debug', 'trace'] as const;
+
+/** One argument the way ConsoleLogger prints it: a string as it is, anything else inspected in full. */
+function renderArg(arg: unknown): string {
+  if (typeof arg === 'string') return arg;
+  return inspect(arg, { depth: 12, breakLength: Infinity, maxArrayLength: null, maxStringLength: null });
+}
+
+function render(args: unknown[]): string {
+  return args.map(renderArg).join(' ');
+}
+
+/**
+ * Record every log call until stop(). Nothing recorded is printed: the
+ * recorder replaces the surface, so each entry is seen exactly once.
+ */
+function startCapture(): { entries: LogEntry[]; stop: () => void } {
+  const entries: LogEntry[] = [];
+  const spies: Array<{ mockRestore: () => void }> = [];
+  for (const level of LOG_LEVELS) {
+    spies.push(
+      vi.spyOn(Logger.prototype as any, level).mockImplementation(function (this: any, ...args: unknown[]) {
+        entries.push({ channel: `Logger#${level}[${this?.context ?? '-'}]`, text: render(args) });
+      }),
+    );
+    spies.push(
+      vi.spyOn(Logger as any, level).mockImplementation((...args: unknown[]) => {
+        entries.push({ channel: `Logger.${level}`, text: render(args) });
+      }),
+    );
+    spies.push(
+      vi.spyOn(ConsoleLogger.prototype as any, level).mockImplementation(function (this: any, ...args: unknown[]) {
+        entries.push({ channel: `ConsoleLogger#${level}[${this?.context ?? '-'}]`, text: render(args) });
+      }),
+    );
+  }
+  for (const method of CONSOLE_METHODS) {
+    spies.push(
+      vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+        entries.push({ channel: `console.${method}`, text: render(args) });
+      }),
+    );
+  }
+  return {
+    entries,
+    stop: () => {
+      for (const s of spies.reverse()) s.mockRestore();
+    },
+  };
+}
+
+/** The entries (channel + text) that contain any of the needles, case-insensitively. */
+function entriesContaining(entries: LogEntry[], needles: string[]): LogEntry[] {
+  const lowered = needles.filter((n) => n.length > 0).map((n) => n.toLowerCase());
+  return entries.filter((e) => lowered.some((n) => e.text.toLowerCase().includes(n)));
+}
+
+/** An email and the encodings it could take in a logged URL or JSON body. */
+function emailForms(email: string): string[] {
+  return [email, encodeURIComponent(email)];
+}
+
+// ---------------------------------------------------------------------------
+// Identity: a locally verified HS256 bearer token (no provider traffic)
+// ---------------------------------------------------------------------------
+
+/** Test-only HS256 secret for the real AuthMiddleware. Not a real secret. */
+const JWT_SECRET = 'v40a-test-only-hs256-secret-not-a-real-credential-000000';
+const b64url = (s: string) => Buffer.from(s).toString('base64url');
+
+/** An HS256 JWT shaped like a Supabase access token (no `iss`: accepted under NODE_ENV=test with no SUPABASE_URL). */
+function mintToken(sub: string, email: string): string {
+  const header = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const now = Math.floor(Date.now() / 1000);
+  const payload = b64url(JSON.stringify({ sub, email, aud: 'authenticated', role: 'authenticated', iat: now, exp: now + 3600 }));
+  const sig = createHmac('sha256', JWT_SECRET).update(`${header}.${payload}`).digest('base64url');
+  return `${header}.${payload}.${sig}`;
+}
+
+/** The parts of a JWT whose presence in a log is the token's: the whole, the signed input, the payload, the signature. */
+function tokenForms(token: string): string[] {
+  const [header, payload, signature] = token.split('.');
+  return [token, `${header}.${payload}`, payload, signature];
+}
+
+// ===========================================================================
+// 0. The recorder catches a planted leak on every surface (no database)
+// ===========================================================================
+
+describe('the log recorder: a planted secret is caught on every log surface', () => {
+  const SECRET = `${P}Planted.Secret@Test.Local`;
+
+  it('Logger instance (every level), Logger statics, ConsoleLogger, console and non-string arguments are recorded and matched', () => {
+    const cap = startCapture();
+    try {
+      const logger = new Logger('V40aProbe');
+      logger.log(`log ${SECRET}`);
+      logger.debug(`debug ${SECRET}`);
+      logger.verbose(`verbose ${SECRET}`);
+      logger.warn({ nested: { email: SECRET } }, 'object first');
+      logger.error('error with a stack', new Error(`boom ${SECRET}`).stack);
+      logger.fatal(`fatal ${SECRET}`);
+      Logger.warn(`static ${SECRET}`, 'V40aStatic');
+      new ConsoleLogger('V40aConsoleLogger').log(`console logger ${SECRET}`);
+      console.error('console error', new Error(`console ${SECRET}`));
+      console.log({ deep: { deeper: { deepest: [SECRET] } } });
+    } finally {
+      cap.stop();
+    }
+    const hits = entriesContaining(cap.entries, [SECRET.toUpperCase()]);
+    expect(hits.map((h) => h.channel)).toEqual([
+      'Logger#log[V40aProbe]',
+      'Logger#debug[V40aProbe]',
+      'Logger#verbose[V40aProbe]',
+      'Logger#warn[V40aProbe]',
+      'Logger#error[V40aProbe]',
+      'Logger#fatal[V40aProbe]',
+      'Logger.warn',
+      'ConsoleLogger#log[V40aConsoleLogger]',
+      'console.error',
+      'console.log',
+    ]);
+  });
+
+  it('stop() restores every surface: nothing is recorded after it', () => {
+    const cap = startCapture();
+    cap.stop();
+    const restored = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    try {
+      new Logger('V40aAfterStop').log(`after ${SECRET}`);
+    } finally {
+      restored.mockRestore();
+    }
+    expect(cap.entries).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// 1. Log-redaction negative control (real database)
+// ===========================================================================
+
+describe('log redaction: no contact email, bearer token or providerPaymentId in the log output (REAL database)', () => {
+  const HEADER_AUTH = 'authorization';
+
+  const ID = {
+    owner: `${P}owner`,
+    biz: `${P}biz`,
+    customer: `${P}customer`,
+    invoice: `${P}inv`,
+  };
+
+  /** The invoice's customer: on the invoice the payment and the public link read. */
+  const CUSTOMER_EMAIL = `${P}invoice.customer@test.local`;
+  /** The contact the operator creates through POST .../contacts. */
+  const NEW_CONTACT_EMAIL = `${P}new.contact@test.local`;
+  /** The contact created while a SEND_EMAIL playbook listens on contact.created. */
+  const PLAYBOOK_CONTACT_EMAIL = `${P}playbook.contact@test.local`;
+  const PLAYBOOK_NAME = 'V40A welcome email';
+  /** What the transactional-email stand-in was asked to send (the playbook's effect). */
+  const emailsSent: Array<{ recipientEmail: string; type: string }> = [];
+  const OWNER_EMAIL = `${P}owner@test.local`;
+  const IDEMPOTENCY_KEY = `${P}idem-0001`;
+  const TOTAL = 250;
+
+  // This suite's public rate-limit keys live under its own namespace.
+  const RATE_LIMIT_NS = P;
+
+  // Environment this suite sets and restores.
+  const ENV_KEYS = [
+    'RATE_LIMIT_KEY_NAMESPACE',
+    'SUPABASE_JWT_SECRET',
+    'SUPABASE_URL',
+    'NEXT_PUBLIC_SUPABASE_URL',
+    'SUPABASE_ANON_KEY',
+    'NEXT_PUBLIC_SUPABASE_ANON_KEY',
+  ] as const;
+  const previousEnv: Record<string, string | undefined> = {};
+
+  let db: any;
+  let app: any;
+  let redis: any;
+  let setTenantContextProvider: ((p: { getCurrentBusinessId: () => string | undefined }) => void) | undefined;
+
+  let bearer = '';
+  let linkToken = '';
+
+  /** What each window recorded, and what it read afterwards. */
+  const windows: Record<string, { entries: LogEntry[]; status: number[] }> = {};
+  /** The contact each contact-create window created. */
+  const windowContacts: Record<string, string> = {};
+  let providerPaymentId = '';
+
+  async function cleanup() {
+    for (const sql of [
+      `DELETE FROM business_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM automations WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM invoice_items WHERE invoice_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM users WHERE id LIKE ${sqlLikePrefix(P)}`,
+    ]) {
+      try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
+    }
+  }
+
+  async function clearRateLimits() {
+    const keys: string[] = await redis.keys(`pub_rate_limit:${RATE_LIMIT_NS}:*`);
+    if (keys.length) await redis.del(...keys);
+  }
+
+  function agent() {
+    return request(app.getHttpServer());
+  }
+
+  /** Wait for a fire-and-forget write to land, so its logging happens inside the window. */
+  async function until(check: () => Promise<boolean>, timeoutMs = 5_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (!(await check())) {
+      if (Date.now() > deadline) return;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
+
+  /** Let any other fire-and-forget work a request started reach its log calls. */
+  const settle = () => new Promise((r) => setTimeout(r, 400));
+
+  /** Run one flow inside a capture window. */
+  async function captureWindow(name: string, flow: () => Promise<number[]>) {
+    const cap = startCapture();
+    let status: number[] = [];
+    try {
+      status = await flow();
+      await settle();
+    } finally {
+      cap.stop();
+    }
+    windows[name] = { entries: cap.entries, status };
+  }
+
+  /** The access line LoggingInterceptor writes for a request (the spy's liveness check). */
+  function accessLines(entries: LogEntry[], method: string, pathPrefix: string): LogEntry[] {
+    return entries.filter((e) => e.channel.endsWith('[HTTP]') && e.text.includes(`${method} ${pathPrefix}`));
+  }
+
+  function describeLeaks(leaks: LogEntry[]): string {
+    return leaks.map((e) => `${e.channel}: ${e.text.slice(0, 300)}`).join('\n');
+  }
+
+  beforeAll(async () => {
+    for (const k of ENV_KEYS) previousEnv[k] = process.env[k];
+    process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
+    process.env.SUPABASE_JWT_SECRET = JWT_SECRET;
+    // No provider client: the real AuthMiddleware verifies the token locally.
+    delete process.env.SUPABASE_URL;
+    delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    delete process.env.SUPABASE_ANON_KEY;
+    delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+    const dbMod = await import('@keyflow/db');
+    db = dbMod.db;
+    setTenantContextProvider = dbMod.setTenantContextProvider;
+
+    const { Test } = await import('@nestjs/testing');
+    const { ValidationPipe } = await import('@nestjs/common');
+    const { APP_INTERCEPTOR } = await import('@nestjs/core');
+    const { EventEmitterModule } = await import('@nestjs/event-emitter');
+    const { AutomationExecutorService } = await import('../src/modules/flow/automation-executor.service');
+    const { ActivityService } = await import('../src/modules/flow/activity.service');
+    const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
+    const IORedis = (await import('ioredis')).default;
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+    const { AuthMiddleware } = await import('../src/core/auth/auth.middleware');
+    const { SupabaseAuthService } = await import('../src/core/auth/supabase-auth.service');
+    const { CorrelationIdMiddleware } = await import('../src/core/middleware/correlation-id.middleware');
+    const { LoggingInterceptor } = await import('../src/core/interceptors/logging.interceptor');
+    const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+    const { getCurrentBusinessId } = await import('../src/core/tenant/tenant-context');
+    const { BusinessEventInterceptor } = await import('../src/modules/business-events/business-event.interceptor');
+    const { ResilientEmitterService } = await import('../src/modules/business-events/resilient-emitter.service');
+    const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
+    const { BusinessEventQueueService } = await import('../src/modules/business-events/business-event.queue');
+    const { PublicRateLimitGuard } = await import('../src/core/guards/public-rate-limit.guard');
+    const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
+    const { TeamAuditInterceptor } = await import('../src/core/interceptors/team-audit.interceptor');
+    const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
+    const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
+    const { CommerceController } = await import('../src/modules/commerce/commerce.controller');
+    const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+    const { CommerceStatsService } = await import('../src/modules/commerce/commerce-stats.service');
+    const { InvoiceWorkflowService } = await import('../src/modules/commerce/invoice-workflow.service');
+    const { InvoiceReceiptBuilderService } = await import('../src/modules/commerce/invoice-receipt-builder.service');
+    const { GmailService } = await import('../src/modules/commerce/gmail.service');
+    const { CommerceVisionService } = await import('../src/modules/commerce/commerce-vision.service');
+    const { StoreReadinessService } = await import('../src/modules/commerce/store-readiness.service');
+    const { PaymentEvidenceService } = await import('../src/modules/commerce/payment-evidence.service');
+    const { DocumentIntelligenceService } = await import('../src/modules/ai/document-intelligence.service');
+    const { GoogleDriveService } = await import('../src/modules/google-drive/google-drive.service');
+    const { TimeEntryService } = await import('../src/modules/time-tracking/time-entry.service');
+    const { CatalogService } = await import('../src/modules/catalog/catalog.service');
+    const { PublicEventsService } = await import('../src/modules/public-events/public-events.service');
+    const { EvidenceService } = await import('../src/modules/evidence/evidence.service');
+    const { TaskAssignmentService } = await import('../src/modules/task-assignments/task-assignment.service');
+    const { RevenuePostingService } = await import('../src/modules/finance/revenue-posting.service');
+    const { PostingService } = await import('../src/modules/finance/posting.service');
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
+    const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+    const { EntityResolutionService } = await import('../src/core/connectors/entity-resolution.service');
+    const { CrmController } = await import('../src/modules/crm/crm.controller');
+    const { CrmService } = await import('../src/modules/crm/crm.service');
+    const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+    const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+    const { CrmCacheService } = await import('../src/modules/crm/crm-cache.service');
+    const { CrmListsService } = await import('../src/modules/crm/crm-lists.service');
+    const { CrmFlowService } = await import('../src/modules/crm/crm-flow.service');
+    const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
+    const { ContactCustomFieldValueService } = await import('../src/modules/crm/contact-custom-field-value.service');
+    const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+    const { FeatureFlagGuard } = await import('../src/modules/crm/guards/feature-flag.guard');
+    const { CrmImportService } = await import('../src/modules/crm/crm-import.service');
+    const { CrmPlaybookService } = await import('../src/modules/crm/crm-playbook.service');
+    const { CrmActionsService } = await import('../src/modules/crm/crm-actions.service');
+    const { CrmRevenueService } = await import('../src/modules/crm/crm-revenue.service');
+    const { CrmJourneyService } = await import('../src/modules/crm/crm-journey.service');
+    const { CrmDuplicateDetectionService } = await import('../src/modules/crm/crm-duplicate-detection.service');
+    const { CrmDataQualityService } = await import('../src/modules/crm/crm-data-quality.service');
+    const { CrmSavedViewsService } = await import('../src/modules/crm/crm-saved-views.service');
+    const { CrmRelationshipHealthService } = await import('../src/modules/crm/crm-relationship-health.service');
+    const { CrmCommunicationService } = await import('../src/modules/crm/crm-communication.service');
+    const { BestChannelService } = await import('../src/modules/crm/best-channel.service');
+    const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
+    const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
+    const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+
+    redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
+
+    const moduleRef = await Test.createTestingModule({
+      // The production event bus (src/core/event-bus/event-bus.module.ts), so
+      // the @OnEvent listeners mounted below run on the emits these flows make.
+      imports: [EventEmitterModule.forRoot({ wildcard: true, delimiter: '.', maxListeners: 50 })],
+      controllers: [CommerceController, CrmController],
+      providers: [
+        PrismaService,
+        { provide: REDIS_CLIENT, useValue: redis },
+        // Request path, as app.module.ts wires it.
+        SupabaseAuthService,
+        AuthMiddleware,
+        { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
+        { provide: APP_INTERCEPTOR, useClass: BusinessEventInterceptor },
+        { provide: APP_INTERCEPTOR, useClass: TenantInterceptor },
+        ResilientEmitterService,
+        BusinessEventService,
+        // BullMQ stand-in: hands the job to the real BusinessEventService, as the worker does.
+        {
+          provide: BusinessEventQueueService,
+          useFactory: (events: any) => ({
+            enqueue: async (job: any) => {
+              await events.emit({ ...job });
+              return { id: `${P}job` };
+            },
+          }),
+          inject: [BusinessEventService],
+        },
+        AuthGuard,
+        BusinessGuard,
+        ModuleScopeGuard,
+        PublicRateLimitGuard,
+        PlanLimitGuard,
+        CrmRateLimitGuard,
+        FeatureFlagGuard,
+        TeamAuditInterceptor,
+        // The contact.created / invoice.paid playbook listener, real, with the
+        // real ActivityService; only the email sender is a stand-in (no provider traffic).
+        AutomationExecutorService,
+        ActivityService,
+        {
+          provide: TransactionalEmailService,
+          useValue: {
+            send: async (input: { recipientEmail: string; type: string }) => {
+              emailsSent.push({ recipientEmail: input.recipientEmail, type: input.type });
+              return { sent: true };
+            },
+          },
+        },
+        // Commerce: the real payment, link and ledger chain.
+        CommerceService,
+        InvoiceWorkflowService,
+        InvoiceReceiptBuilderService,
+        RevenuePostingService,
+        PostingService,
+        ChartOfAccountsSeederService,
+        PaymentEvidenceService,
+        TimelineService,
+        { provide: ExpensePostingService, useValue: { onProductSold: async () => null } },
+        { provide: EvidenceService, useValue: {} },
+        { provide: TaskAssignmentService, useValue: {} },
+        { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
+        { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
+        { provide: CatalogService, useValue: {} },
+        { provide: PublicEventsService, useValue: {} },
+        { provide: TimeEntryService, useValue: {} },
+        { provide: GmailService, useValue: { sendEmail: async () => ({ messageId: `${P}msg` }) } },
+        { provide: CommerceVisionService, useValue: {} },
+        { provide: StoreReadinessService, useValue: {} },
+        { provide: DocumentIntelligenceService, useValue: {} },
+        { provide: GoogleDriveService, useValue: {} },
+        // CRM: the real contact write, its in-transaction event and its audit entry.
+        CrmService,
+        CrmStatsService,
+        CrmTimelineService,
+        ContactAuditService,
+        { provide: CrmCacheService, useValue: { invalidate: async () => undefined } },
+        { provide: CrmFlowService, useValue: { invalidateCache: () => undefined } },
+        { provide: CrmListsService, useValue: {} },
+        { provide: EntityResolutionService, useValue: {} },
+        { provide: ContactCustomFieldValueService, useValue: {} },
+        { provide: CrmImportService, useValue: {} },
+        { provide: CrmPlaybookService, useValue: {} },
+        { provide: CrmActionsService, useValue: {} },
+        { provide: CrmRevenueService, useValue: {} },
+        { provide: CrmJourneyService, useValue: {} },
+        { provide: CrmDuplicateDetectionService, useValue: {} },
+        { provide: CrmDataQualityService, useValue: {} },
+        { provide: CrmSavedViewsService, useValue: {} },
+        { provide: CrmRelationshipHealthService, useValue: {} },
+        { provide: CrmCommunicationService, useValue: {} },
+        { provide: BestChannelService, useValue: {} },
+        { provide: ConversationAiService, useValue: {} },
+        { provide: CrmNetworkService, useValue: {} },
+        { provide: ContactInsightService, useValue: {} },
+      ],
+    }).compile();
+
+    app = moduleRef.createNestApplication();
+    // app.module.ts: CorrelationIdMiddleware, then AuthMiddleware, on every route.
+    const correlation = new CorrelationIdMiddleware();
+    const auth = moduleRef.get(AuthMiddleware);
+    app.use((req: any, res: any, next: any) => correlation.use(req, res, next));
+    app.use((req: any, res: any, next: any) => {
+      auth.use(req, res, next).catch(next);
+    });
+    app.useGlobalFilters(new GlobalHttpExceptionFilter());
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await app.init();
+    // main.ts installs the tenant context provider before the app serves.
+    setTenantContextProvider({ getCurrentBusinessId });
+
+    await cleanup(); // in case a prior run aborted
+    await clearRateLimits();
+
+    // ---- one tenant: an owner, the invoice's customer, a SENT invoice ------
+    await db.user.create({ data: { id: ID.owner, email: OWNER_EMAIL, role: 'USER' } });
+    await db.business.create({ data: { id: ID.biz, name: 'V40A Biz', ownerId: ID.owner, currency: 'TTD' } });
+    await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
+    await db.contact.create({
+      data: { id: ID.customer, businessId: ID.biz, firstName: 'V40a', lastName: 'Customer', email: CUSTOMER_EMAIL, emailNormalized: CUSTOMER_EMAIL },
+    });
+    await moduleRef.get(ChartOfAccountsSeederService).ensureDefaults(ID.biz);
+    await db.invoice.create({
+      data: {
+        id: ID.invoice,
+        invoiceNumber: 'V40A-001',
+        status: 'SENT',
+        subtotal: TOTAL,
+        total: TOTAL,
+        currency: 'TTD',
+        businessId: ID.biz,
+        contactId: ID.customer,
+        items: { create: [{ id: `${ID.invoice}_item1`, description: 'V40A item', quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
+      },
+    });
+
+    bearer = mintToken(ID.owner, OWNER_EMAIL);
+
+    // ---- the customer's link, minted by the real route (outside any window) --
+    const link = await agent()
+      .post(`/commerce/businesses/${ID.biz}/invoices/${ID.invoice}/payment-link`)
+      .set(HEADER_AUTH, `Bearer ${bearer}`)
+      .send({});
+    if (link.status !== 201 || !link.body?.token) {
+      throw new Error(`payment link failed (is the bearer token verified?): ${link.status} ${JSON.stringify(link.body)}`);
+    }
+    linkToken = link.body.token;
+
+    // ---- window 1: recordPayment ---------------------------------------------
+    await captureWindow('recordPayment', async () => {
+      const res = await agent()
+        .post(`/commerce/businesses/${ID.biz}/invoices/${ID.invoice}/payments`)
+        .set(HEADER_AUTH, `Bearer ${bearer}`)
+        .send({ amount: 100, method: 'cash', reference: `${P}slip-0001`, idempotencyKey: IDEMPOTENCY_KEY });
+      // The keyed replay: the same submit again answers from the recorded row.
+      const replay = await agent()
+        .post(`/commerce/businesses/${ID.biz}/invoices/${ID.invoice}/payments`)
+        .set(HEADER_AUTH, `Bearer ${bearer}`)
+        .send({ amount: 100, method: 'cash', reference: `${P}slip-0001`, idempotencyKey: IDEMPOTENCY_KEY });
+      await until(async () => (await db.businessEvent.count({ where: { businessId: ID.biz } })) > 0);
+      return [res.status, replay.status];
+    });
+    const payment = await db.payment.findFirst({ where: { invoiceId: ID.invoice, businessId: ID.biz }, select: { providerPaymentId: true } });
+    providerPaymentId = payment?.providerPaymentId ?? '';
+
+    // ---- window 2: contact create, then the duplicate submit (409) ----------
+    await captureWindow('contactCreate', async () => {
+      const body = { firstName: `${P}Ada`, lastName: 'Lovelace', email: NEW_CONTACT_EMAIL, phone: '+1 868 555 0140' };
+      const created = await agent()
+        .post(`/crm/businesses/${ID.biz}/contacts`)
+        .set(HEADER_AUTH, `Bearer ${bearer}`)
+        .send(body);
+      const duplicate = await agent()
+        .post(`/crm/businesses/${ID.biz}/contacts`)
+        .set(HEADER_AUTH, `Bearer ${bearer}`)
+        .send(body);
+      const contactId = created.body?.id;
+      if (contactId) {
+        await until(async () => (await db.contactAuditEntry.count({ where: { businessId: ID.biz, contactId } })) > 0);
+        // The real contact.created listener writes its activity row: it ran inside the window.
+        await until(async () => (await db.activity.count({ where: { businessId: ID.biz, entityType: 'contact', entityId: contactId } })) > 0);
+        windowContacts.contactCreate = contactId;
+      }
+      return [created.status, duplicate.status];
+    });
+
+    // ---- window 2b: contact create while a SEND_EMAIL playbook listens -------
+    // Seeded outside the window, as an operator configures it; the real
+    // AutomationExecutorService runs it on the contact.created emit.
+    await db.automation.create({
+      data: {
+        id: `${P}playbook_email`,
+        businessId: ID.biz,
+        name: PLAYBOOK_NAME,
+        trigger: 'contact.created',
+        enabled: true,
+        actionData: { type: 'SEND_EMAIL', notificationType: 'invoice_sent' },
+      },
+    });
+    await captureWindow('contactCreatePlaybook', async () => {
+      const created = await agent()
+        .post(`/crm/businesses/${ID.biz}/contacts`)
+        .set(HEADER_AUTH, `Bearer ${bearer}`)
+        .send({ firstName: `${P}Grace`, lastName: 'Hopper', email: PLAYBOOK_CONTACT_EMAIL });
+      // The playbook's run is recorded after its action: it finished inside the window.
+      await until(async () => ((await db.automation.findUnique({ where: { id: `${P}playbook_email` }, select: { runCount: true } }))?.runCount ?? 0) > 0);
+      windowContacts.contactCreatePlaybook = created.body?.id ?? '';
+      return [created.status];
+    });
+    await db.automation.update({ where: { id: `${P}playbook_email` }, data: { enabled: false } });
+
+    // ---- window 3: the customer opens the public invoice link ----------------
+    await clearRateLimits();
+    await captureWindow('publicInvoiceLink', async () => {
+      const res = await agent().get(`/commerce/public/invoice-link/${encodeURIComponent(linkToken)}`);
+      await until(async () => (await db.contactEvent.count({ where: { businessId: ID.biz, contactId: ID.customer, type: 'invoice.viewed' } })) > 0);
+      return [res.status];
+    });
+  }, 180_000);
+
+  afterAll(async () => {
+    setTenantContextProvider?.({ getCurrentBusinessId: () => undefined });
+    if (app) await app.close();
+    if (db) await cleanup();
+    if (redis) {
+      try { await clearRateLimits(); } catch { /* best-effort */ }
+      await redis.quit();
+    }
+    for (const k of ENV_KEYS) {
+      if (previousEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = previousEnv[k];
+    }
+  });
+
+  // ---- recordPayment ---------------------------------------------------------
+
+  describe('POST /commerce/businesses/:businessId/invoices/:invoiceId/payments (recordPayment)', () => {
+    it('the window ran the real flow: 201 recorded, the keyed replay answered, a providerPaymentId was derived, and the spy saw the access lines', () => {
+      expect(windows.recordPayment.status).toEqual([201, 201]);
+      expect(providerPaymentId).toMatch(new RegExp(`^manual_${ID.invoice}_key_[0-9a-f]{32}$`));
+      expect(accessLines(windows.recordPayment.entries, 'POST', `/commerce/businesses/${ID.biz}/invoices/${ID.invoice}/payments`).length).toBe(2);
+    });
+
+    it('NEGATIVE CONTROL: no log entry carries the providerPaymentId, whole or its digest', () => {
+      const digest = providerPaymentId.split('_key_')[1] ?? '';
+      expect(digest).toHaveLength(32);
+      const leaks = entriesContaining(windows.recordPayment.entries, [providerPaymentId, digest]);
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    it('NEGATIVE CONTROL: no log entry carries the operator bearer token (whole, signed input, payload or signature)', () => {
+      const leaks = entriesContaining(windows.recordPayment.entries, tokenForms(bearer));
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    it("NEGATIVE CONTROL: no log entry carries the invoice customer's email", () => {
+      const leaks = entriesContaining(windows.recordPayment.entries, emailForms(CUSTOMER_EMAIL));
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+  });
+
+  // ---- contact create --------------------------------------------------------
+
+  describe('POST /crm/businesses/:businessId/contacts (contact create, and its duplicate 409)', () => {
+    it('the window ran the real flow: 201 created, the duplicate answered 409, and the spy saw both access lines', () => {
+      expect(windows.contactCreate.status).toEqual([201, 409]);
+      // One success line (debug) and one error line (the 409 reaches LoggingInterceptor's error branch).
+      expect(accessLines(windows.contactCreate.entries, 'POST', `/crm/businesses/${ID.biz}/contacts`).length).toBe(2);
+    });
+
+    it("NEGATIVE CONTROL: no log entry carries the new contact's email", () => {
+      const leaks = entriesContaining(windows.contactCreate.entries, emailForms(NEW_CONTACT_EMAIL));
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    it('NEGATIVE CONTROL: no log entry carries the operator bearer token', () => {
+      const leaks = entriesContaining(windows.contactCreate.entries, tokenForms(bearer));
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    it('the real contact.created listener ran inside the window (its activity row landed), with no playbook configured', async () => {
+      const contactId = windowContacts.contactCreate;
+      expect(contactId).toBeTruthy();
+      expect(await db.activity.count({ where: { businessId: ID.biz, entityType: 'contact', entityId: contactId, module: 'crm', action: 'created' } })).toBe(1);
+    });
+  });
+
+  // ---- contact create with a SEND_EMAIL playbook on contact.created ----------
+
+  describe('POST /crm/businesses/:businessId/contacts with a SEND_EMAIL playbook on contact.created (real listener)', () => {
+    it('the window ran the real flow: 201, the playbook ran once and asked the sender for exactly this contact, and the spy saw the access line', async () => {
+      expect(windows.contactCreatePlaybook.status).toEqual([201]);
+      expect(emailsSent).toEqual([{ recipientEmail: PLAYBOOK_CONTACT_EMAIL, type: 'invoice_sent' }]);
+      const playbook = await db.automation.findUnique({ where: { id: `${P}playbook_email` }, select: { runCount: true } });
+      expect(playbook?.runCount).toBe(1);
+      expect(accessLines(windows.contactCreatePlaybook.entries, 'POST', `/crm/businesses/${ID.biz}/contacts`).length).toBe(1);
+    });
+
+    it('NEGATIVE CONTROL: no log entry carries the operator bearer token', () => {
+      const leaks = entriesContaining(windows.contactCreatePlaybook.entries, tokenForms(bearer));
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    // RED when written as an `it` (this repair ran it first): the playbook's
+    // SEND_EMAIL action logs the recipient. The fix is a production logger
+    // call outside this packet's write set:
+    // apps/server/src/modules/flow/automation-executor.service.ts:286 logs
+    // `Email sent to ${c.email}` at log level (and :358 logs the phone for
+    // SEND_WHATSAPP). Logging the contact id instead closes it. When that
+    // lands, this todo becomes an `it` and the CHARACTERIZATION case goes.
+    it.todo(
+      "NEGATIVE CONTROL: no log entry carries the new contact's email when a SEND_EMAIL playbook runs on contact.created — " +
+        'fix outside the write set: apps/server/src/modules/flow/automation-executor.service.ts:286 logs c.email',
+    );
+
+    it('CHARACTERIZATION (open finding IA-044, automation-executor.service.ts:286): only the playbook\'s "Email sent to" line carries the email today', () => {
+      const leaks = entriesContaining(windows.contactCreatePlaybook.entries, emailForms(PLAYBOOK_CONTACT_EMAIL));
+      expect(leaks.map((e) => e.channel)).toEqual(['Logger#log[AutomationExecutorService]']);
+      expect(leaks[0].text).toBe(`Email sent to ${PLAYBOOK_CONTACT_EMAIL} for playbook "${PLAYBOOK_NAME}"`);
+    });
+  });
+
+  // ---- public invoice link ---------------------------------------------------
+
+  describe('GET /commerce/public/invoice-link/:token (the customer view)', () => {
+    it('the window ran the real flow: 200, the view event landed, and the spy saw the access line', () => {
+      expect(windows.publicInvoiceLink.status).toEqual([200]);
+      expect(accessLines(windows.publicInvoiceLink.entries, 'GET', '/commerce/public/invoice-link/').length).toBe(1);
+    });
+
+    it("NEGATIVE CONTROL: no log entry carries the invoice customer's email", () => {
+      const leaks = entriesContaining(windows.publicInvoiceLink.entries, emailForms(CUSTOMER_EMAIL));
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    it('NEGATIVE CONTROL: no log entry carries the providerPaymentId of the payment on the viewed invoice', () => {
+      const digest = providerPaymentId.split('_key_')[1] ?? '';
+      const leaks = entriesContaining(windows.publicInvoiceLink.entries, [providerPaymentId, digest]);
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    // RED at b1e8f5f5 (the tests-first commit ran this case as a real `it` and
+    // it failed): LoggingInterceptor's access line carries the token. The fix
+    // is in a production logger call outside this packet's write set:
+    // apps/server/src/core/interceptors/logging.interceptor.ts:22 builds the
+    // line from req.url (emitted at :25 slow, :27 debug, :31-33 error), and
+    // main.ts keeps Nest's default ConsoleLogger, which prints debug. Logging
+    // the route pattern (req.route?.path) instead of the URL closes it for
+    // every token-in-path route. The same req.url leak also covers platform
+    // secrets in paths and queries, and GlobalHttpExceptionFilter logs
+    // request.url on every 500 (section 1b, which has its own todos). When
+    // the fix lands, this todo becomes the `it` below with the
+    // CHARACTERIZATION case removed.
+    it.todo(
+      "NEGATIVE CONTROL: no log entry carries the link token (the customer's bearer credential) — " +
+        'fix outside the write set: apps/server/src/core/interceptors/logging.interceptor.ts:22 logs req.url',
+    );
+
+    it('CHARACTERIZATION (open finding IA-044, logging.interceptor.ts:22): only the HTTP access line carries the link token today', () => {
+      expect(linkToken.length).toBeGreaterThanOrEqual(32);
+      const leaks = entriesContaining(windows.publicInvoiceLink.entries, [linkToken, encodeURIComponent(linkToken)]);
+      // Exactly the one access line LoggingInterceptor writes for this GET, and
+      // nothing else: no service, guard or filter logs the token.
+      expect(leaks.map((e) => e.channel)).toEqual(['Logger#debug[HTTP]']);
+      expect(leaks[0].text).toMatch(new RegExp(`^GET /commerce/public/invoice-link/${linkToken.replace(/[-]/g, '\\-')} 200 \\d+ms \\[`));
+    });
+  });
+});
+
+// ===========================================================================
+// 1b. The req.url leak is a class: platform secrets, and the 500 line (no database)
+// ===========================================================================
+
+describe('the HTTP access line and the 500 line log request.url: platform secrets in paths and queries (IA-044 scope)', () => {
+  // Literals only: none of these is a real credential.
+  const CHATWOOT_SECRET = `${P}chatwoot-webhook-secret-0001`;
+  const VERIFY_TOKEN = `${P}whatsapp-verify-token-0001`;
+  const OAUTH_CODE = `${P}oauth-code-0001`;
+  const LINK_TOKEN = `${P}link-token-0001`;
+  const CORRELATION = `${P}corr`;
+
+  let LoggingInterceptorClass: typeof import('../src/core/interceptors/logging.interceptor').LoggingInterceptor;
+  let ExceptionFilterClass: typeof import('../src/core/filters/http-exception.filter').GlobalHttpExceptionFilter;
+
+  /** The slice of an Express response the filter writes to. */
+  interface FakeResponse {
+    status(code: number): FakeResponse;
+    json(body: unknown): FakeResponse;
+  }
+
+  beforeAll(async () => {
+    ({ LoggingInterceptor: LoggingInterceptorClass } = await import('../src/core/interceptors/logging.interceptor'));
+    ({ GlobalHttpExceptionFilter: ExceptionFilterClass } = await import('../src/core/filters/http-exception.filter'));
+  });
+
+  function http(req: Record<string, unknown>, res: unknown): ExecutionContext & ArgumentsHost {
+    return { switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }) } as unknown as ExecutionContext & ArgumentsHost;
+  }
+
+  /** One request through the production LoggingInterceptor; `error` makes the handler throw it. */
+  async function throughInterceptor(method: string, url: string, statusCode: number, error?: Error): Promise<LogEntry[]> {
+    const cap = startCapture();
+    try {
+      const ctx = http({ method, url, correlationId: CORRELATION }, { statusCode });
+      const next: CallHandler = { handle: () => (error ? throwError(() => error) : of({ ok: true })) };
+      await lastValueFrom(new LoggingInterceptorClass().intercept(ctx, next)).catch(() => undefined);
+    } finally {
+      cap.stop();
+    }
+    return cap.entries;
+  }
+
+  /** One exception through the production GlobalHttpExceptionFilter. */
+  function throughFilter(method: string, url: string, exception: unknown): { entries: LogEntry[]; status: number } {
+    const cap = startCapture();
+    let status = 0;
+    try {
+      const res: FakeResponse = {
+        status: (s: number) => {
+          status = s;
+          return res;
+        },
+        json: () => res,
+      };
+      new ExceptionFilterClass().catch(exception, http({ method, url, correlationId: CORRELATION }, res));
+    } finally {
+      cap.stop();
+    }
+    return { entries: cap.entries, status };
+  }
+
+  /** Mounted public routes whose URL carries a platform secret. */
+  const FLOWS = [
+    // apps/server/src/modules/chatwoot/chatwoot.controller.ts:14, POST /chatwoot/webhook/:secret
+    { name: 'the Chatwoot webhook secret in the path', method: 'POST', url: `/chatwoot/webhook/${CHATWOOT_SECRET}`, status: 202, secret: CHATWOOT_SECRET },
+    // apps/server/src/modules/whatsapp/whatsapp.controller.ts:234-237, WHATSAPP_VERIFY_TOKEN in hub.verify_token
+    { name: 'WHATSAPP_VERIFY_TOKEN in the query', method: 'GET', url: `/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=${VERIFY_TOKEN}&hub.challenge=1234`, status: 200, secret: VERIFY_TOKEN },
+    // apps/server/src/modules/google-drive/google-drive.controller.ts:26, an OAuth authorization code
+    { name: 'an OAuth code on a callback', method: 'GET', url: `/drive/callback?state=${P}state&code=${OAUTH_CODE}`, status: 302, secret: OAUTH_CODE },
+  ];
+
+  it.todo(
+    'NEGATIVE CONTROL: no HTTP access line carries a platform secret in the path or query (Chatwoot webhook secret, hub.verify_token, OAuth code) — ' +
+      'fix outside the write set: apps/server/src/core/interceptors/logging.interceptor.ts:22 and :32 log req.url',
+  );
+
+  it.todo(
+    'NEGATIVE CONTROL: no 500 line carries a token in the URL — fix outside the write set: ' +
+      'apps/server/src/core/filters/http-exception.filter.ts:65 logs request.url (a fix to LoggingInterceptor alone leaves it open)',
+  );
+
+  it('CHARACTERIZATION (open finding IA-044, logging.interceptor.ts:22): the success access line carries each platform secret verbatim', async () => {
+    for (const flow of FLOWS) {
+      const entries = await throughInterceptor(flow.method, flow.url, flow.status);
+      const leaks = entriesContaining(entries, [flow.secret]);
+      expect(leaks.map((e) => e.channel), flow.name).toEqual(['Logger#debug[HTTP]']);
+      expect(leaks[0].text, flow.name).toMatch(new RegExp(`^${flow.method} ${flow.url.replace(/[.*?+^$()[\]\\|{}]/g, '\\$&')} ${flow.status} \\d+ms \\[${CORRELATION}\\]$`));
+    }
+  });
+
+  it('CHARACTERIZATION (logging.interceptor.ts:32): the error access line carries it too (a refused hub.verify_token, 403)', async () => {
+    const flow = FLOWS[1];
+    const entries = await throughInterceptor(flow.method, flow.url, 403, new ForbiddenException('Invalid verify token'));
+    const leaks = entriesContaining(entries, [flow.secret]);
+    expect(leaks.map((e) => e.channel)).toEqual(['Logger#error[HTTP]']);
+    expect(leaks[0].text.startsWith(`${flow.method} ${flow.url} ERR `)).toBe(true);
+  });
+
+  it('CHARACTERIZATION (open finding IA-044, http-exception.filter.ts:65): an unhandled error on a token route logs the URL with the token', () => {
+    const { entries, status } = throughFilter('GET', `/commerce/public/invoice-link/${LINK_TOKEN}`, new Error('db down'));
+    expect(status).toBe(500);
+    const leaks = entriesContaining(entries, [LINK_TOKEN]);
+    expect(leaks.map((e) => e.channel)).toEqual(['Logger#error[GlobalHttpExceptionFilter]']);
+    expect(leaks[0].text.startsWith(`Unhandled exception on GET /commerce/public/invoice-link/${LINK_TOKEN} [${CORRELATION}]`)).toBe(true);
+  });
+
+  it('the filter writes the URL only on the 500 branch: a 4xx on the same route logs nothing', () => {
+    const { entries, status } = throughFilter('GET', `/commerce/public/invoice-link/${LINK_TOKEN}`, new ForbiddenException());
+    expect(status).toBe(403);
+    expect(entries).toEqual([]);
+  });
+});
+
+// ===========================================================================
+// 2. The agent gate binds packet branches (D-22)
+// ===========================================================================
+
+describe('agent control gate: pkt/* heads are packet PRs (D-22)', () => {
+  const GATE = path.join(REPO_ROOT, '.github/workflows/agent-control-gate.yml');
+
+  /** The `case` arm of the scope step that sets required=true. */
+  function requiredArm(): string {
+    const gate = readFileSync(GATE, 'utf8').replace(/\r\n/g, '\n');
+    const start = gate.indexOf('- name: Determine whether packet controls apply');
+    const end = gate.indexOf('- name: Validate control artifacts');
+    expect(start > 0 && end > start, 'the scope step exists').toBe(true);
+    const step = gate.slice(start, end);
+    const arm = /\n\s+([^\n]+)\)\n\s+echo "required=true" >> "\$GITHUB_OUTPUT"/.exec(step);
+    expect(arm, 'the scope step has a required=true arm').not.toBeNull();
+    return arm![1].trim();
+  }
+
+  /** Bash `case` patterns of the arm, evaluated for one head ref. */
+  function matches(arm: string, headRef: string): boolean {
+    return arm.split('|').map((p) => p.trim()).some((pattern) => {
+      const re = new RegExp(`^${pattern.replace(/[.+^${}()[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+      return re.test(headRef);
+    });
+  }
+
+  it('NEGATIVE CONTROL: a pkt/* head triggers the packet controls', () => {
+    const arm = requiredArm();
+    expect(matches(arm, 'pkt/V1-40-SEC-TRUST-CENSUS-REDACTION'), `required arm: ${arm}`).toBe(true);
+  });
+
+  it('impl/* heads still trigger the packet controls, and other heads do not', () => {
+    const arm = requiredArm();
+    expect(matches(arm, 'impl/kf-meta-control-parser-001')).toBe(true);
+    for (const head of ['main', 'claude/elegant-curie-7azpsb', 'dependabot/npm_and_yarn/foo-1.2.3', 'docs/x', 'int/trial-A', 'xpkt/x']) {
+      expect(matches(arm, head), head).toBe(false);
+    }
+  });
+
+  it('the gate still validates the artifacts and requires the #80 grant for every head the scope step admits', () => {
+    const gate = readFileSync(GATE, 'utf8').replace(/\r\n/g, '\n');
+    expect(gate).toMatch(/- name: Validate control artifacts\n\s+if: steps\.scope\.outputs\.required == 'true'\n/);
+    expect(gate).toMatch(/- name: Require ChatGPT admission before non-draft merge readiness\n\s+if: steps\.scope\.outputs\.required == 'true' && github\.event\.pull_request\.draft == false\n/);
+    expect(gate).toContain('grant="$(node scripts/agent-control/auto-merge-admitted.mjs --grant-only)" || grant_status=$?');
+  });
+
+  it('the head ref reaches the scope and validation scripts through env, never interpolated into a run block', () => {
+    const gate = readFileSync(GATE, 'utf8').replace(/\r\n/g, '\n');
+    // A branch name is attacker-chosen text; `${{ github.head_ref }}` inside run: is script injection.
+    const runBlocks = gate.split(/\n\s+run: \|\n/).slice(1).map((b) => b.split(/\n\s{6}- name: /)[0]);
+    expect(runBlocks.length).toBeGreaterThanOrEqual(4);
+    for (const block of runBlocks) expect(block).not.toContain('github.head_ref');
+    expect(gate).toMatch(/- name: Determine whether packet controls apply\n[\s\S]*?env:\n\s+HEAD_REF: \$\{\{ github\.head_ref \}\}\n\s+run: \|\n[\s\S]*?case "\$HEAD_REF" in/);
+    expect(gate).toMatch(/if \[ "\$declared_branch" != "\$HEAD_REF" \]; then/);
+    expect(gate).toMatch(/if \[ "\$return_branch" != "\$HEAD_REF" \]; then/);
+  });
+
+  // ---- the scripts themselves, executed with bash as the runner does --------
+
+  /** The `run: |` script of one step, de-indented, as the runner hands it to bash. */
+  function stepScript(stepName: string): string {
+    const lines = readFileSync(GATE, 'utf8').replace(/\r\n/g, '\n').split('\n');
+    const start = lines.findIndex((l) => l.trim() === `- name: ${stepName}`);
+    expect(start, `step "${stepName}"`).toBeGreaterThan(0);
+    const stepIndent = lines[start].search(/\S/);
+    let i = start + 1;
+    while (i < lines.length && !/^\s+run: \|\s*$/.test(lines[i])) {
+      expect(lines[i].trim() === '' || lines[i].search(/\S/) > stepIndent, `step "${stepName}" has a run block`).toBe(true);
+      i++;
+    }
+    const runIndent = lines[i].search(/\S/);
+    const body: string[] = [];
+    for (i += 1; i < lines.length; i++) {
+      if (lines[i].trim() !== '' && lines[i].search(/\S/) <= runIndent) break;
+      body.push(lines[i]);
+    }
+    const indent = Math.min(...body.filter((l) => l.trim() !== '').map((l) => l.search(/\S/)));
+    const script = body.map((l) => l.slice(indent)).join('\n').trimEnd() + '\n';
+    // An expression here would be substituted by the runner before bash sees it.
+    expect(script, `step "${stepName}" carries no \${{ }} expression`).not.toContain('${{');
+    return script;
+  }
+
+  /** `shell: bash` on a GitHub runner: bash --noprofile --norc -eo pipefail {0}. */
+  function bash(script: string, cwd: string, env: Record<string, string>) {
+    return spawnSync('bash', ['--noprofile', '--norc', '-eo', 'pipefail', '-c', script], {
+      cwd,
+      env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: cwd, ...env },
+      encoding: 'utf8',
+    });
+  }
+
+  function scope(headRef: string): { required: string; injected: boolean } {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'v40a-scope-'));
+    try {
+      const out = path.join(dir, 'github_output');
+      writeFileSync(out, '');
+      const r = bash(stepScript('Determine whether packet controls apply'), dir, { HEAD_REF: headRef, GITHUB_OUTPUT: out });
+      expect(r.status, r.stderr).toBe(0);
+      return { required: readFileSync(out, 'utf8').trim(), injected: existsSync(path.join(dir, 'PWNED')) };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('the scope step, executed: pkt/* and impl/* heads are packet PRs; no other head is, and a head ref cannot inject', () => {
+    for (const head of ['pkt/V1-40-SEC-TRUST-CENSUS-REDACTION', 'impl/kf-product-contacts-visibility-001']) {
+      expect(scope(head), head).toEqual({ required: 'required=true', injected: false });
+    }
+    for (const head of ['main', 'pkt', 'Pkt/x', 'feature/pkt/x', 'xpkt/x', 'dependabot/github_actions/x']) {
+      expect(scope(head), head).toEqual({ required: 'required=false', injected: false });
+    }
+    // A legal git ref name (no space) that would run a command if interpolated.
+    expect(scope('pkt/$(touch${IFS}PWNED)')).toEqual({ required: 'required=true', injected: false });
+    expect(scope('x";touch${IFS}PWNED;"')).toEqual({ required: 'required=false', injected: false });
+  });
+
+  /**
+   * A throwaway repository holding control artifacts that name `artifactBranch`,
+   * with the validation step run against it for the PR head `headRef`.
+   */
+  function validate(headRef: string, artifactBranch: string) {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'v40a-validate-'));
+    try {
+      const git = (...args: string[]) => {
+        const r = spawnSync('git', ['-c', 'user.name=v40a', '-c', 'user.email=v40a@test.local', '-c', 'commit.gpgsign=false', '-c', 'core.hooksPath=/dev/null', ...args], {
+          cwd: dir,
+          env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: dir, GIT_CONFIG_NOSYSTEM: '1' },
+          encoding: 'utf8',
+        });
+        expect(r.status, `git ${args.join(' ')}: ${r.stderr}`).toBe(0);
+        return r.stdout.trim();
+      };
+      git('init', '-q', '-b', 'work');
+      writeFileSync(path.join(dir, 'README.md'), 'v40a fixture\n');
+      git('add', '.');
+      git('commit', '-q', '-m', 'source head');
+      const sourceHead = git('rev-parse', 'HEAD');
+      mkdirSync(path.join(dir, '.agent-control'));
+      const common = [`implementation_branch: ${artifactBranch}`, 'state: PROVING', 'health: GREEN', 'scope_changed: false', 'production_touched: false'];
+      writeFileSync(path.join(dir, '.agent-control/active-packet.yaml'), ['packet_id: V40A-FIXTURE', `source_main: ${sourceHead}`, ...common, ''].join('\n'));
+      writeFileSync(
+        path.join(dir, '.agent-control/claude-return.yaml'),
+        ['packet_id: V40A-FIXTURE', `source_head: ${sourceHead}`, ...common, 'review_status: PENDING_CHATGPT_REVIEW', ''].join('\n'),
+      );
+      git('add', '.');
+      git('commit', '-q', '-m', 'control artifacts');
+      const r = bash(stepScript('Validate control artifacts'), dir, { HEAD_REF: headRef });
+      return { status: r.status, output: `${r.stdout}${r.stderr}` };
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('the validation step, executed: a pkt/* PR whose artifacts name an impl/* branch fails closed there, draft or not (CR-V140-2)', () => {
+    const r = validate('pkt/V1-40-SEC-TRUST-CENSUS-REDACTION', 'impl/kf-product-contacts-visibility-001');
+    expect(r.status).toBe(1);
+    expect(r.output).toContain('::error::active-packet.yaml implementation_branch does not match PR head');
+  });
+
+  it('the validation step, executed: artifacts that name the pkt/* head pass it (the remaining barrier for a non-draft PR is the grant step)', () => {
+    const r = validate('pkt/V1-40-SEC-TRUST-CENSUS-REDACTION', 'pkt/V1-40-SEC-TRUST-CENSUS-REDACTION');
+    expect(r.output).toBe('');
+    expect(r.status).toBe(0);
+  });
+
+  it("this checkout's own control artifacts name an impl/* branch, so a pkt/* PR off this base stops at the validation step", () => {
+    const active = path.join(REPO_ROOT, '.agent-control/active-packet.yaml');
+    if (!existsSync(active)) return;
+    const declared = /^implementation_branch:[ \t]*"?([^"\n]*)"?/m.exec(readFileSync(active, 'utf8'))?.[1] ?? '';
+    expect(declared.startsWith('pkt/'), `implementation_branch: ${declared}`).toBe(false);
+  });
+
+  it('CHARACTERIZATION (SEC-V40-2): the gate runs the PR\'s own workflow and script copies, and the comment and the census record that limit', () => {
+    const gate = readFileSync(GATE, 'utf8').replace(/\r\n/g, '\n');
+    // pull_request (not pull_request_target): the workflow file comes from the PR.
+    expect(gate).toMatch(/^on:\n\s+pull_request:\n/m);
+    expect(gate).not.toContain('pull_request_target');
+    // The checkout takes the PR merge ref (no `ref:`), and the grant step runs the checked-out copy.
+    expect(gate).toMatch(/- name: Checkout PR\n\s+uses: actions\/checkout@v4\n\s+with:\n\s+fetch-depth: 0\n/);
+    expect(gate).toContain('node scripts/agent-control/auto-merge-admitted.mjs --grant-only');
+    // The scope step's comment states where pkt/* stops and the self-modification limit, not "cannot pass".
+    const step = gate.slice(gate.indexOf('- name: Determine whether packet controls apply'), gate.indexOf('- name: Validate control artifacts'));
+    expect(step).not.toMatch(/cannot pass the grant step/);
+    expect(step).toContain('at "Validate control');
+    expect(step).toContain("executes the PR's own");
+    // The census carries the same limit on the rows that cite this gate as evidence.
+    const census = readFileSync(path.join(REPO_ROOT, 'docs/reconstruction/product/evidence/RELEASE0-TRUST-CENSUS-001.md'), 'utf8');
+    for (const id of ['IA-048', 'CF-023']) {
+      const row = census.split('\n').find((l) => l.startsWith(`| ${id} |`)) ?? '';
+      expect(row, id).toMatch(/self-modifiable/);
+    }
+  });
+});
+
+// ===========================================================================
+// 3. Dependabot
+// ===========================================================================
+
+describe('dependabot: version updates for the workspace and the workflows', () => {
+  const FILE = path.join(REPO_ROOT, '.github/dependabot.yml');
+
+  it('NEGATIVE CONTROL: .github/dependabot.yml exists (version 2)', () => {
+    expect(existsSync(FILE), '.github/dependabot.yml').toBe(true);
+    expect(readFileSync(FILE, 'utf8')).toMatch(/^version: 2$/m);
+  });
+
+  it('it watches the pnpm workspace (npm ecosystem at /) and the GitHub Actions workflows, on a schedule', () => {
+    const text = existsSync(FILE) ? readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n') : '';
+    const blocks = text.split(/\n\s*- package-ecosystem: /).slice(1);
+    const ecosystem = (name: string) => blocks.find((b) => b.replace(/["']/g, '').startsWith(name));
+    for (const name of ['npm', 'github-actions']) {
+      const block = ecosystem(name);
+      expect(block, `${name} entry`).toBeDefined();
+      expect(block!).toMatch(/directory: ["']?\/["']?\n/);
+      expect(block!).toMatch(/schedule:\n\s+interval: ["']?(daily|weekly|monthly)["']?/);
+    }
+  });
+
+  it('the github-actions entry ignores the SHA- and digest-pinned secret scanner, which moves by hand (CR-V140-1)', () => {
+    const text = existsSync(FILE) ? readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n') : '';
+    const actions = text.split(/\n\s*- package-ecosystem: /).slice(1).find((b) => b.replace(/["']/g, '').startsWith('github-actions')) ?? '';
+    // ci-cd.yml pins the action to a tag commit and the CLI image by digest; the
+    // security suite asserts both, and Dependabot would rewrite only the first.
+    const ciCd = readFileSync(path.join(REPO_ROOT, '.github/workflows/ci-cd.yml'), 'utf8');
+    expect(ciCd).toMatch(/uses: trufflesecurity\/trufflehog@[0-9a-f]{40} # v\d+\.\d+\.\d+\n\s+with:\n\s+path: \.\/\n\s+version: '[\d.]+@sha256:[0-9a-f]{64}'/);
+    expect(actions).toMatch(/\n\s+ignore:\n\s+- dependency-name: ["']?trufflesecurity\/trufflehog["']?\n/);
+    // Every other action in the workflows is pinned by tag, which Dependabot moves whole.
+    const shaPinned = new Set<string>();
+    const workflows = path.join(REPO_ROOT, '.github/workflows');
+    for (const name of readdirSync(workflows)) {
+      if (!/\.ya?ml$/.test(name)) continue;
+      for (const m of readFileSync(path.join(workflows, name), 'utf8').matchAll(/uses: ([\w.-]+\/[\w./-]+)@[0-9a-f]{40}\b/g)) shaPinned.add(m[1]);
+    }
+    expect([...shaPinned]).toEqual(['trufflesecurity/trufflehog']);
+  });
+});
+
+// ===========================================================================
+// 4. The Release 0 trust census
+// ===========================================================================
+
+describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
+  const FILE = path.join(REPO_ROOT, 'docs/reconstruction/product/evidence/RELEASE0-TRUST-CENSUS-001.md');
+
+  /** The ids of the source matrices: 68 assurance domains and 50 catastrophic-failure scenarios. */
+  const IA_IDS = Array.from({ length: 68 }, (_, i) => `IA-${String(i + 1).padStart(3, '0')}`);
+  const CF_IDS = Array.from({ length: 50 }, (_, i) => `CF-${String(i + 1).padStart(3, '0')}`);
+
+  const STATES = ['UNASSESSED', 'CHARACTERIZING', 'CHARACTERIZED', 'DESIGNED', 'IMPLEMENTED_NOT_PROVEN', 'PROVEN_AT_DECLARED_SCOPE', 'EXTERNALLY_VERIFIED', 'BLOCKED', 'NOT_APPLICABLE'];
+  const DISPOSITIONS = ['PREVENTED', 'DETECTED_AND_CONTAINED', 'RECOVERABLE', 'TRANSFERRED', 'ACCEPTED_RESIDUAL_RISK', 'NOT_APPLICABLE', 'RELEASE_BLOCKING'];
+  /** A disposition that claims a working control must stand on a cited test. */
+  const CLAIMING = ['PREVENTED', 'DETECTED_AND_CONTAINED', 'RECOVERABLE'];
+  const TEST_PATH = /\.(spec|test)\.[cm]?[jt]sx?$/;
+
+  interface Row {
+    id: string;
+    cells: string[];
+  }
+
+  function rows(prefix: 'IA' | 'CF'): Row[] {
+    const text = readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
+    return text
+      .split('\n')
+      .filter((l) => new RegExp(`^\\| ${prefix}-\\d{3} \\|`).test(l))
+      .map((l) => {
+        const cells = l.split('|').slice(1, -1).map((c) => c.trim());
+        return { id: cells[0], cells };
+      });
+  }
+
+  /**
+   * IA table:  | ID | Tier | Domain | Recorded | R0 touch | Evidence | Proposed state | Disposition |
+   * CF table:  | ID | Tier | Scenario | Domains | R0 touch | Evidence | Proposed disposition |
+   */
+  const IA_COL = { tier: 1, touch: 4, evidence: 5, state: 6, disposition: 7, width: 8 };
+  const CF_COL = { tier: 1, touch: 4, evidence: 5, disposition: 6, width: 7 };
+
+  function citedPaths(cell: string): string[] {
+    return [...cell.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  }
+
+  function checkEvidence(row: Row, cell: string): string[] {
+    const problems: string[] = [];
+    const paths = citedPaths(cell);
+    const open = /\bOPEN\b/.test(cell);
+    if (!open && paths.length === 0) problems.push(`${row.id}: evidence cites no test path and does not say OPEN`);
+    for (const p of paths) {
+      if (!TEST_PATH.test(p)) problems.push(`${row.id}: ${p} is not a test path`);
+      else if (!existsSync(path.join(REPO_ROOT, p))) problems.push(`${row.id}: ${p} does not exist`);
+    }
+    return problems;
+  }
+
+  it('NEGATIVE CONTROL: the census exists, names its owner of record (D-22) and was not posted by this worker', () => {
+    expect(existsSync(FILE), 'RELEASE0-TRUST-CENSUS-001.md').toBe(true);
+    const text = readFileSync(FILE, 'utf8');
+    expect(text).toMatch(/owner_of_record: owner\b/);
+    expect(text).toMatch(/posted: false\b/);
+  });
+
+  it('every assurance domain (IA-001..IA-068) and every catastrophic-failure scenario (CF-001..CF-050) has exactly one row', () => {
+    expect(rows('IA').map((r) => r.id)).toEqual(IA_IDS);
+    expect(rows('CF').map((r) => r.id)).toEqual(CF_IDS);
+  });
+
+  it('every IA row cites an existing test path or OPEN, proposes an allowed state, and every T0 row carries a disposition', () => {
+    const problems: string[] = [];
+    for (const row of rows('IA')) {
+      if (row.cells.length !== IA_COL.width) { problems.push(`${row.id}: ${row.cells.length} cells`); continue; }
+      const tier = row.cells[IA_COL.tier];
+      if (!/^T[0-3]$/.test(tier)) problems.push(`${row.id}: tier ${tier}`);
+      if (!/^(yes|no)\b/.test(row.cells[IA_COL.touch])) problems.push(`${row.id}: R0 touch must say yes or no`);
+      problems.push(...checkEvidence(row, row.cells[IA_COL.evidence]));
+      const state = row.cells[IA_COL.state].replace(/`/g, '');
+      if (!STATES.includes(state)) problems.push(`${row.id}: proposed state ${state}`);
+      const disposition = row.cells[IA_COL.disposition].replace(/`/g, '');
+      if (tier === 'T0' && !DISPOSITIONS.includes(disposition)) problems.push(`${row.id}: T0 disposition ${disposition || '(none)'}`);
+      if (disposition && disposition !== '-' && !DISPOSITIONS.includes(disposition)) problems.push(`${row.id}: disposition ${disposition}`);
+      if (CLAIMING.includes(disposition) && citedPaths(row.cells[IA_COL.evidence]).length === 0) {
+        problems.push(`${row.id}: ${disposition} claimed with no cited test`);
+      }
+      if (state === 'PROVEN_AT_DECLARED_SCOPE' && citedPaths(row.cells[IA_COL.evidence]).length === 0) {
+        problems.push(`${row.id}: PROVEN_AT_DECLARED_SCOPE with no cited test`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('every CF row cites an existing test path or OPEN, and every T0 scenario carries a disposition', () => {
+    const problems: string[] = [];
+    for (const row of rows('CF')) {
+      if (row.cells.length !== CF_COL.width) { problems.push(`${row.id}: ${row.cells.length} cells`); continue; }
+      const tier = row.cells[CF_COL.tier];
+      if (!/^T[0-3]$/.test(tier)) problems.push(`${row.id}: tier ${tier}`);
+      if (!/^(yes|no)\b/.test(row.cells[CF_COL.touch])) problems.push(`${row.id}: R0 touch must say yes or no`);
+      problems.push(...checkEvidence(row, row.cells[CF_COL.evidence]));
+      const disposition = row.cells[CF_COL.disposition].replace(/`/g, '');
+      if (tier === 'T0' && !DISPOSITIONS.includes(disposition)) problems.push(`${row.id}: T0 disposition ${disposition || '(none)'}`);
+      if (disposition && disposition !== '-' && !DISPOSITIONS.includes(disposition)) problems.push(`${row.id}: disposition ${disposition}`);
+      if (CLAIMING.includes(disposition) && citedPaths(row.cells[CF_COL.evidence]).length === 0) {
+        problems.push(`${row.id}: ${disposition} claimed with no cited test`);
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it('ACCEPTED_RESIDUAL_RISK is never proposed by the worker: only the owner of record may accept a risk', () => {
+    const accepted = [...rows('IA'), ...rows('CF')].filter((r) => r.cells.some((c) => c.replace(/`/g, '') === 'ACCEPTED_RESIDUAL_RISK'));
+    expect(accepted.map((r) => r.id)).toEqual([]);
+  });
+
+  it('the summary table matches the rows (no drift between the counts and the tables)', () => {
+    const text = readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n');
+    const summary = (label: string): [number, number] => {
+      const line = text.split('\n').find((l) => l.startsWith(`| ${label} |`));
+      expect(line, `summary row "${label}"`).toBeDefined();
+      const [ia, cf] = line!.split('|').slice(2, 4).map((c) => Number(/^\s*(\d+)/.exec(c)?.[1]));
+      return [ia, cf];
+    };
+    const ia = rows('IA');
+    const cf = rows('CF');
+    const t0 = (r: Row[]) => r.filter((x) => x.cells[1] === 'T0');
+    const disp = (r: Row[], col: number, values: string[]) => r.filter((x) => values.includes(x.cells[col]));
+    const openOnly = (r: Row[], col: number) => r.filter((x) => citedPaths(x.cells[col]).length === 0);
+    const touched = (r: Row[], col: number) => r.filter((x) => x.cells[col].startsWith('yes'));
+    expect(summary('Rows')).toEqual([ia.length, cf.length]);
+    expect(summary('T0 rows')).toEqual([t0(ia).length, t0(cf).length]);
+    expect(summary('T0 rows proposed PREVENTED or DETECTED_AND_CONTAINED')).toEqual([
+      disp(t0(ia), IA_COL.disposition, ['PREVENTED', 'DETECTED_AND_CONTAINED']).length,
+      disp(t0(cf), CF_COL.disposition, ['PREVENTED', 'DETECTED_AND_CONTAINED']).length,
+    ]);
+    expect(summary('T0 rows proposed NOT_APPLICABLE')).toEqual([
+      disp(t0(ia), IA_COL.disposition, ['NOT_APPLICABLE']).length,
+      disp(t0(cf), CF_COL.disposition, ['NOT_APPLICABLE']).length,
+    ]);
+    expect(summary('T0 rows RELEASE_BLOCKING')).toEqual([
+      disp(t0(ia), IA_COL.disposition, ['RELEASE_BLOCKING']).length,
+      disp(t0(cf), CF_COL.disposition, ['RELEASE_BLOCKING']).length,
+    ]);
+    expect(summary('Rows touched by Release 0 (`yes`)')).toEqual([touched(ia, IA_COL.touch).length, touched(cf, CF_COL.touch).length]);
+    expect(summary('Rows whose evidence is OPEN only')).toEqual([openOnly(ia, IA_COL.evidence).length, openOnly(cf, CF_COL.evidence).length]);
+  });
+
+  it('IA-044 (log redaction) cites this negative control', () => {
+    const row = rows('IA').find((r) => r.id === 'IA-044');
+    expect(row?.cells[IA_COL.evidence] ?? '').toContain('`apps/server/test/log-redaction.integration.test.ts`');
+  });
+
+  it('the IA-044, CF-011 and CF-029 OPEN notes name every leak this suite pins, not only the link token (SEC-V40-1, SEC-V40-3)', () => {
+    const notes: Record<string, string> = {
+      'IA-044': rows('IA').find((r) => r.id === 'IA-044')?.cells[IA_COL.evidence] ?? '',
+      'CF-011': rows('CF').find((r) => r.id === 'CF-011')?.cells[CF_COL.evidence] ?? '',
+      'CF-029': rows('CF').find((r) => r.id === 'CF-029')?.cells[CF_COL.evidence] ?? '',
+    };
+    for (const [id, note] of Object.entries(notes)) {
+      for (const needle of ['logging.interceptor.ts:22', 'http-exception.filter.ts:65', 'Chatwoot', 'hub.verify_token', 'OAuth']) {
+        expect(note, `${id} names ${needle}`).toContain(needle);
+      }
+    }
+    // The logged contact email is personal data, not a secret: IA-044 and CF-029 carry it (CF-011 is secrets only).
+    for (const id of ['IA-044', 'CF-029']) expect(notes[id], id).toContain('automation-executor.service.ts:286');
+    const findings = readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n').split('## 6.')[1] ?? '';
+    for (const needle of ['http-exception.filter.ts:65', 'chatwoot.controller.ts:14', 'whatsapp.controller.ts:234-237', 'automation-executor.service.ts:286', 'Validate control artifacts', 'self-modifiable']) {
+      expect(findings, `section 6 names ${needle}`).toContain(needle);
+    }
+    expect(findings).not.toMatch(/A non-draft pkt\/\* PR fails closed at the grant step/);
+  });
+});

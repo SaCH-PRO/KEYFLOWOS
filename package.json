@@ -17,6 +17,7 @@
     "test:integration": "turbo run test:integration",
     "test:e2e": "turbo run test:e2e",
     "test:local": "bash scripts/test-local.sh",
+    "test:security": "node --test scripts/security/tests/*.spec.mjs",
     "db:generate": "turbo run db:generate",
     "db:push": "pnpm --filter db exec prisma db push",
     "db:migrate": "pnpm --filter db exec prisma migrate dev",
@@ -28,6 +29,7 @@
     "ui:dev": "pnpm --filter ui exec storybook dev -p 6006",
     "test:db:soft-delete": "pnpm --filter db exec tsx --env-file .env src/test-soft-delete.ts",
     "verify:up": "bash scripts/verify-up.sh",
+    "test:verify-up": "node --test scripts/tests/verify-up-body.spec.mjs scripts/tests/verify-up-shell.spec.mjs",
     "monitor:uptime": "bash scripts/uptime-monitor.sh",
     "start:prod": "bash scripts/start-prod.sh"
   },

@@ -36,7 +36,11 @@ export const REQUIRED_WORKFLOWS = Object.freeze([
   'CI/CD Pipeline',
   'Agent Control Gate',
   'Branch divergence',
-  'DAST (HawkScan)',
+  // The native DAST proof (V1-13): it needs no third-party account or secret
+  // and cannot conclude success without probing. 'DAST (HawkScan)' is
+  // manual-only: without its key it skipped every scan step and still
+  // concluded success (PRS-M08; V1-30, owner ruling D-22).
+  'DAST (Native)',
   // Portable Ubuntu + Windows proof of the control plane and local worker
   // (WORKER-CI-PLATFORM-001). Deliberately NOT "KEYFLOWOS Agent Autopilot":
   // its workflow_run-triggered runs share the PR head sha but skip self-test,
