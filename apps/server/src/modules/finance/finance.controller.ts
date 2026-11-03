@@ -145,6 +145,14 @@ export class FinanceController {
   }
 
   // ---------- General Ledger & Trial Balance ----------
+  // FOLLOW3-A6 (owner ruling D-57): the Books reads that carry revenue and
+  // cash figures (general ledger, per-account balance, receivables aging,
+  // customer balance, overview, safe-to-spend) need revenue:read, the
+  // trial-balance gate below; no new module key. ModuleScopeGuard runs after
+  // the class guards and refuses a revenue:none member with 403 before the
+  // handler, so nothing is read or seeded for them.
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('general-ledger')
   async getGeneralLedger(
     @Param('businessId') businessId: string,
@@ -169,8 +177,8 @@ export class FinanceController {
    * V1-37b review SEC-V37b-1: the trial balance carries the REVENUE rows per
    * currency, so it needs revenue:read (ModuleScopeGuard, the gate of the
    * commerce revenue reads): a member whose revenue scope is none is refused
-   * with 403 before anything is read. The other Books reads here keep
-   * membership only (ensureAccess); no module key governs Books yet.
+   * with 403 before anything is read. FOLLOW3-A6 (D-57) applies the same
+   * gate to the sibling Books reads that carry revenue and cash figures.
    */
   @UseGuards(ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
@@ -200,6 +208,8 @@ export class FinanceController {
     };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('trial-balance/account/:accountId')
   async getAccountBalance(
     @Param('businessId') businessId: string,
@@ -229,6 +239,8 @@ export class FinanceController {
   }
 
   // ---------- Receivables (FIN2) ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('receivables/aging')
   async aging(@Param('businessId') businessId: string, @Query('asOf') asOf?: string) {
     const date = asOf ? (() => { const d = new Date(asOf); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid asOf date'); return d; })() : new Date();
@@ -239,6 +251,8 @@ export class FinanceController {
     return { ...report, ledgerArBalance: ledgerAr };
   }
 
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('customers/:contactId/balance')
   async customerBalance(
     @Param('businessId') businessId: string,
@@ -250,6 +264,8 @@ export class FinanceController {
   }
 
   // ---------- Overview ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('overview')
   async getOverview(@Param('businessId') businessId: string, @Req() req: any) {
     await this.ensureAccess(req.user.id, businessId);
@@ -1055,6 +1071,8 @@ export class FinanceController {
   }
 
   // ---------- Safe to Spend ----------
+  @UseGuards(ModuleScopeGuard)
+  @RequireModuleScope('revenue', 'read')
   @Get('safe-to-spend')
   async getSafeToSpend(@Param('businessId') businessId: string) {
     return this.safeToSpend.calculate(businessId);

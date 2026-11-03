@@ -289,7 +289,7 @@ beforeAll(async () => {
   await cleanup(); // in case a prior run aborted
 
   for (const id of [ID.owner, ID.staffNone, ID.staffRead, ID.staffDefault, ID.outsider]) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, name: id, role: 'USER' } });
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, name: id, role: 'USER' } });
   }
   await db.business.create({
     data: { id: ID.biz, name: 'V81F Books', slug: `${P}biz`, ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' },
@@ -309,7 +309,7 @@ beforeAll(async () => {
   ACC.cash = (await coa.getBySystemKey(ID.biz, 'CASH')).id;
 
   for (const [id, last] of [[ID.contactPaid, 'Paid'], [ID.contactOpen, 'Open']] as const) {
-    await db.contact.create({ data: { id, businessId: ID.biz, firstName: 'V81f', lastName: last, email: `${id}@test.local` } });
+    await db.contact.create({ data: { id, businessId: ID.biz, firstName: 'V81f', lastName: last, email: `${P}${id.slice(P.length)}@test.local` } });
   }
   const now = new Date();
   await db.invoice.create({
