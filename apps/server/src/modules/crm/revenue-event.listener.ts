@@ -37,6 +37,24 @@ type FulfillmentRoutedPayload = {
 };
 
 /**
+ * FOLLOW3-A9 review (SEC-A9-2 / CR-A9-1): the invoice status transitions
+ * whose timeline entries are deduped per transition, not per invoice (see
+ * log()): each names the type that takes it back and the data field that
+ * says when it happened.
+ */
+const INVOICE_TRANSITIONS: Partial<Record<ContactEventType, { counter: ContactEventType; mark: string }>> = {
+  'invoice.paid': { counter: 'invoice.reopened', mark: 'paidAt' },
+  'invoice.reopened': { counter: 'invoice.paid', mark: 'reopenedAt' },
+};
+
+/** A transition time (Date or its JSON string) as epoch ms, or null when absent / unreadable. */
+function transitionTime(v: unknown): number | null {
+  if (v == null || v === '') return null;
+  const t = new Date(v as string | number | Date).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+/**
  * Central listener that turns revenue/operations events on the bus into
  * canonical ContactEvent rows on the contact timeline (and triggers the
  * insight snapshot to recompute). Every other module emits — only this
@@ -45,7 +63,8 @@ type FulfillmentRoutedPayload = {
  *
  * Idempotency: each event carries (or is given) a stable `dedupeKey`
  * `rev:<type>:<entityId>`; before writing we check the contact's last 25
- * events of the same type for a matching key in `data.dedupeKey`.
+ * events of the same type for a matching key in `data.dedupeKey`
+ * (invoice.paid / invoice.reopened: per transition, INVOICE_TRANSITIONS).
  */
 @Injectable()
 export class RevenueEventListener {
@@ -204,6 +223,28 @@ export class RevenueEventListener {
       total: inv?.total,
       currency: inv?.currency,
       paidAt: inv?.paidAt,
+    });
+  }
+
+  /**
+   * FOLLOW3-A9: a refund's D-14 reopen (PAID / PARTIALLY_PAID -> SENT,
+   * InvoiceWorkflowService.reconcileFromPayments) is logged beside the
+   * invoice.paid entry it takes back, so the timeline does not keep a
+   * refunded invoice as paid. The write also marks the insight stale (log()).
+   */
+  @OnEvent('invoice.reopened', { async: true })
+  async onInvoiceReopened(p: InvoiceStatusPayload & { previousStatus?: string }) {
+    const inv = p.invoice as { id?: string; contactId?: string | null; invoiceNumber?: string; total?: unknown; currency?: string | null; updatedAt?: unknown } | undefined;
+    await this.log(p.businessId, inv?.contactId ?? null, 'invoice.reopened', {
+      invoiceId: inv?.id,
+      invoiceNumber: inv?.invoiceNumber,
+      total: inv?.total,
+      currency: inv?.currency,
+      previousStatus: p.previousStatus ?? null,
+      status: p.status,
+      // FOLLOW3-A9 review (SEC-A9-2 / CR-A9-1): the reopen write's time names
+      // this transition, as paidAt names an invoice.paid one (see log()).
+      reopenedAt: inv?.updatedAt ?? null,
     });
   }
 
@@ -369,26 +410,56 @@ export class RevenueEventListener {
       // commerce/bookings before the central listener took over) is treated
       // as a duplicate. This keeps us idempotent against both event-bus
       // re-emits AND direct-write callers we have not yet migrated.
+      //
+      // FOLLOW3-A9 review (SEC-A9-2 / CR-A9-1): invoice.paid and
+      // invoice.reopened are status transitions, and the reconcile writes
+      // each one compare-and-set, so pay -> full refund -> pay again inside
+      // the window is three real moves. A same-type row of the invoice is a
+      // duplicate only when it is this transition: no counter-transition
+      // (invoice.reopened for a paid, invoice.paid for a reopen) of the
+      // invoice was logged after it, and its transition time (paidAt /
+      // reopenedAt) is this event's when both carry one.
+      const transition = INVOICE_TRANSITIONS[type];
       const recents = await this.prisma.client.contactEvent.findMany({
         where: {
           businessId,
           contactId,
-          type,
+          type: transition ? { in: [type, transition.counter] } : type,
           createdAt: { gte: new Date(Date.now() - 10 * 60_000) },
         },
         orderBy: { createdAt: 'desc' },
-        take: 25,
+        take: transition ? 50 : 25,
       });
       const matchingId = String(entityId);
-      const isDup = recents.some((row) => {
-        const rd = (row.data ?? null) as Record<string, unknown> | null;
-        if (!rd) return false;
+      const sameEntity = (rd: Record<string, unknown>) => {
         if (rd.dedupeKey === dedupeKey) return true;
         for (const k of ['invoiceId', 'quoteId', 'recurringInvoiceId', 'orderId', 'externalId']) {
           if (rd[k] != null && String(rd[k]) === matchingId) return true;
         }
         return false;
-      });
+      };
+      const dataOf = (row: { data?: unknown }) => (row.data ?? null) as Record<string, unknown> | null;
+      let isDup: boolean;
+      if (!transition) {
+        isDup = recents.some((row) => {
+          const rd = dataOf(row);
+          return rd ? sameEntity(rd) : false;
+        });
+      } else {
+        // Newest first: the latest counter-transition of this invoice, if any.
+        const lastCounter = recents.find((row) => {
+          const rd = dataOf(row);
+          return row.type === transition.counter && rd != null && sameEntity(rd);
+        });
+        const at = transitionTime(data[transition.mark]);
+        isDup = recents.some((row) => {
+          const rd = dataOf(row);
+          if (row.type !== type || !rd || !sameEntity(rd)) return false;
+          if (lastCounter && !(new Date(row.createdAt).getTime() > new Date(lastCounter.createdAt).getTime())) return false;
+          const rowAt = transitionTime(rd[transition.mark]);
+          return at == null || rowAt == null || at === rowAt;
+        });
+      }
       if (isDup) return;
       await this.timeline.logEvent(
         businessId,
