@@ -17,7 +17,7 @@ import { ContentModule } from './modules/content/content.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { EventBusModule } from './core/event-bus/event-bus.module';
 import { AuthModule } from './core/auth/auth.module';
-import { TrpcModule } from './trpc.module';
+import { trpcModuleImports } from './trpc.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { CrmModule } from './modules/crm/crm.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
@@ -134,7 +134,8 @@ import { RiscModule } from './modules/risc/risc.module';
     AuthorityModule,
     EventBusModule,
     AuthModule,
-    TrpcModule,
+    // D-68: /trpc is mounted only when TRPC_ENABLED=1 (unmounted by default).
+    ...trpcModuleImports(),
     ConnectorModule,
     BusinessEventModule,
     EvidenceModule,

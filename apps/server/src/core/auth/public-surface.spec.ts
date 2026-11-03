@@ -32,6 +32,15 @@
  * looked plausible enough to write down. The 1,153 came from a regex that had
  * acquired a literal backspace character, so it matched nothing and every
  * controller looked unguarded.
+ *
+ * NOT COUNTED HERE: /trpc. TrpcModule (apps/server/src/trpc.module.ts) mounts
+ * @keyflow/api's router as Express middleware, not as controller handlers, so
+ * this parser cannot see it, and its procedures authenticate inside tRPC
+ * (protectedProcedure), outside AuthGuard. D-68 (2026-11-03): it is unmounted
+ * by default; AppModule imports TrpcModule only when TRPC_ENABLED=1, and
+ * otherwise every /trpc request answers the 404 an unknown route answers.
+ * Pinned by src/trpc.module.spec.ts (the wiring) and
+ * test/trpc-mount-flag.integration.test.ts (the built server, both ways).
  */
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
