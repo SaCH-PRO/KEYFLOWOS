@@ -349,6 +349,19 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
           throw new Error(CONTACT_OUTSIDE_BUSINESS);
         }
 
+        // V1-37d review (ST-V37D-2 / CR-V37D-2): a schedule stored before D-13
+        // in a currency its business may not write is refused here, before
+        // `due` is emitted (as ST-12-3 checks the contact above): `due` reaches
+        // automation (the KEY flow bridge, the 'Recurring Invoice Due -> Send
+        // Invoice' trigger). It is paused with the reason, so the next runs
+        // neither bill it nor report it again; its period stays due, and
+        // editing its currency (held to D-13) then resuming it bills that period.
+        const refusal = await this.d13Refusal(recurring);
+        if (refusal) {
+          await this.pauseRefusedSchedule(recurring, refusal, now);
+          continue;
+        }
+
         this.events.emit('recurring_invoice.due', {
           recurringInvoice: recurring,
           businessId: recurring.businessId,
@@ -410,10 +423,11 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
           }
           // V1-37d (D-13): a schedule stored before D-13 in a currency its
           // business may not write (JMD on a TTD business) generates no new
-          // document in it. The claim rolls back with this throw, the period
-          // stays due and the failure is recorded on the schedule; editing its
-          // currency (held to D-13) lets the next run bill it. On CASH no
-          // posting would have refused the invoice.
+          // document in it. Refused before `due` above (and paused); checked
+          // again on the claimed row, under its lock, in case the business
+          // currency changed since the scan. The claim rolls back with this
+          // throw, the period stays due and the failure is recorded on the
+          // schedule. On CASH no posting would have refused the invoice.
           const business = await tx.business.findUnique({
             where: { id: schedule.businessId },
             select: { currency: true },
@@ -517,6 +531,52 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     }
 
     return results;
+  }
+
+  /**
+   * V1-37d review (ST-V37D-2): why the scanned schedule may not bill in its
+   * currency (D-13), or null when it may. The business is read only for a
+   * currency outside D-13: no currency, TTD and USD are always billable.
+   */
+  private async d13Refusal(schedule: { businessId: string; currency: string | null }): Promise<string | null> {
+    const code = normalizeCurrency(schedule.currency);
+    if (!code || D13_CURRENCIES.includes(code)) return null;
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: schedule.businessId },
+      select: { currency: true },
+    });
+    if (d13DocumentCurrency(schedule.currency, business?.currency)) return null;
+    return `${unsupportedCurrency(schedule.currency, business?.currency)}; not billed`;
+  }
+
+  /**
+   * V1-37d review (ST-V37D-2): pause a schedule D-13 refuses, record why, and
+   * report it once. A compare-and-set on the row the scan read (still ACTIVE,
+   * still in that currency): a schedule edited or paused since is left alone.
+   * nextRunDate is kept, so resuming it after its currency is edited bills the
+   * period that was due.
+   */
+  private async pauseRefusedSchedule(
+    recurring: { id: string; businessId: string; currency: string; contact?: { businessId: string } | null },
+    reason: string,
+    now: Date,
+  ): Promise<void> {
+    this.logger.warn(`Recurring invoice ${recurring.id} paused: ${reason}`);
+    const paused = await this.prisma.client.recurringInvoice.updateMany({
+      where: { id: recurring.id, status: 'ACTIVE', deletedAt: null, currency: recurring.currency },
+      data: {
+        status: 'PAUSED',
+        failureCount: { increment: 1 },
+        lastFailureAt: now,
+        lastError: reason.slice(0, 500),
+      },
+    });
+    if (paused.count === 0) return;
+    this.events.emit('recurring_invoice.failed', {
+      recurringInvoice: scheduleForEvent(recurring),
+      businessId: recurring.businessId,
+      error: reason,
+    });
   }
 
   private calculateNextRunDate(currentDate: Date, frequency: string): Date {

@@ -134,13 +134,16 @@ export function normalizeCurrency(currency?: string | null): string {
  * one currency, and the trial balance groups by it (LedgerBalanceService).
  *
  * V1-37d-LEGACY-CURRENCY-PAYMENTS (verify-money VR-04): money that follows a
- * document already stored in a currency outside D-13 (a TTD business's JMD
- * invoice, written before D-13) posts in that document's own currency, as the
- * base did. `followedDocumentCurrency` is that stored currency, which post()
- * reads itself (followedDocumentCurrency below); a sourced posting in exactly
- * that currency is accepted. New documents are held to D-13 where they are
- * written (CommerceService.documentCurrency, RecurringInvoiceService), and a
- * posting that follows no stored document keeps the refusal above.
+ * legacy document, an invoice stored in a currency outside D-13 before D-13
+ * held it (a TTD business's JMD invoice), posts in that document's own
+ * currency, as the base did. `followedDocumentCurrency` is that stored
+ * currency, which post() reads itself (followedDocumentCurrency below); a
+ * sourced posting in exactly that currency is accepted. Every other document
+ * is new and held to D-13: where it is written (CommerceService.documentCurrency,
+ * RecurringInvoiceService) and, for the writers that do not check yet
+ * (storefront checkout, quote conversion, marketplace, KEY), here, where its
+ * money keeps the refusal above (V1-37d review ST-V37D-1 / CR-V37D-1). A
+ * posting that follows no legacy document keeps the refusal too.
  */
 export function resolvePostingCurrency(
   input: Pick<PostingInput, 'currency' | 'sourceType' | 'sourceId'>,
@@ -166,35 +169,98 @@ export function resolvePostingCurrency(
 }
 
 /**
- * V1-37d: the currency of the stored document a posting follows, read only
+ * V1-37d review (ST-V37D-1 / CR-V37D-1): the day D-13 began to hold new
+ * documents to its currencies (V1-37, CommerceService.documentCurrency). An
+ * invoice created before it was written when any currency was allowed: it is a
+ * legacy document. One created on or after it is a new document, whichever
+ * writer made it, so its money is held to D-13 at this door. It may be moved to
+ * the day D-13 reaches production, never later (a later day would let the money
+ * of a new document in an unsupported currency through again).
+ */
+export const D13_DOCUMENTS_FROM = new Date('2026-11-02T00:00:00.000Z');
+
+/**
+ * V1-37d: the currency of the legacy document a posting follows, read only
  * when the posting needs it (a currency that is neither the business's nor a
- * D-13 one). A Payment-sourced posting (the payment's recording, a partial
- * refund of it) follows the payment's invoice. Both are read from the posting
- * business's payment row, never taken from the caller: the invoice must be that
- * business's and not deleted, and the payment must carry the invoice's
- * currency. Anything else follows no stored document (null) and keeps the D-13
- * refusal: an invoice's own receivable is the document being issued; a void
- * and a full refund are reversals (reverse()), which copy the original's
- * currency and never come here.
+ * D-13 one). Read from the posting business's rows, never taken from the
+ * caller. Two postings follow an invoice:
+ *   - one sourced by a Payment (its recording, a partial refund of it) follows
+ *     the payment's invoice, when the payment carries the invoice's currency;
+ *   - an invoice's COGS (sourceType Invoice, kind 'cogs', posted when it
+ *     becomes PAID) follows that invoice (V1-37d review ST-V37D-3).
+ * The invoice must be that business's, not deleted, stored in the requested
+ * currency, and legacy: created before D13_DOCUMENTS_FROM, or already holding
+ * money in that currency in the ledger (its receivable, or the posting of one
+ * of its payments). A new document never gets that money: the door refuses
+ * its first posting in the currency, so the second test cannot open for it.
+ * Anything else follows no legacy document (null) and keeps the D-13 refusal:
+ * an invoice's receivable is the document being issued (a legacy draft issued
+ * now is a new document), and any other invoice-sourced posting is not money
+ * that follows it. A void and a full refund are reversals (reverse()), which
+ * copy the original's currency and never come here.
  */
 async function followedDocumentCurrency(
   tx: Prisma.TransactionClient,
-  input: Pick<PostingInput, 'businessId' | 'currency' | 'sourceType' | 'sourceId'>,
+  input: Pick<PostingInput, 'businessId' | 'currency' | 'sourceType' | 'sourceId' | 'kind'>,
   businessCurrency: string,
 ): Promise<string | null> {
   const requested = normalizeCurrency(input.currency);
   if (!requested || requested === normalizeCurrency(businessCurrency) || D13_CURRENCIES.includes(requested)) {
     return null;
   }
-  if (input.sourceType !== 'Payment' || !input.sourceId) return null;
-  const payment = await tx.payment.findFirst({
-    where: { id: input.sourceId, businessId: input.businessId },
-    select: { currency: true, invoice: { select: { businessId: true, currency: true, deletedAt: true } } },
+  if (!input.sourceId) return null;
+  const invoiceSelect = { id: true, businessId: true, currency: true, deletedAt: true, createdAt: true } as const;
+  let invoice: { id: string; businessId: string; currency: string; deletedAt: Date | null; createdAt: Date } | null;
+  if (input.sourceType === 'Payment') {
+    const payment = await tx.payment.findFirst({
+      where: { id: input.sourceId, businessId: input.businessId },
+      select: { currency: true, invoice: { select: invoiceSelect } },
+    });
+    if (!payment || normalizeCurrency(payment.currency) !== requested) return null;
+    invoice = payment.invoice ?? null;
+  } else if (input.sourceType === 'Invoice' && input.kind === 'cogs') {
+    invoice = await tx.invoice.findFirst({
+      where: { id: input.sourceId, businessId: input.businessId },
+      select: invoiceSelect,
+    });
+  } else {
+    return null;
+  }
+  if (!invoice || invoice.businessId !== input.businessId || invoice.deletedAt) return null;
+  if (normalizeCurrency(invoice.currency) !== requested) return null;
+  if (invoice.createdAt instanceof Date && invoice.createdAt.getTime() < D13_DOCUMENTS_FROM.getTime()) return requested;
+  return (await holdsMoneyIn(tx, input.businessId, invoice.id, requested)) ? requested : null;
+}
+
+/**
+ * V1-37d review: whether the ledger already holds money of `invoiceId` in
+ * `currency`: its receivable (or any other posting sourced by it) or the
+ * posting of one of its payments, all of `businessId`. The currency is compared
+ * case-insensitively (a row the base wrote may not be upper-case).
+ */
+async function holdsMoneyIn(
+  tx: Prisma.TransactionClient,
+  businessId: string,
+  invoiceId: string,
+  currency: string,
+): Promise<boolean> {
+  const payments = await tx.payment.findMany({
+    where: { invoiceId, businessId },
+    select: { id: true },
   });
-  const invoice = payment?.invoice;
-  if (!payment || !invoice || invoice.businessId !== input.businessId || invoice.deletedAt) return null;
-  const stored = normalizeCurrency(invoice.currency);
-  return stored && normalizeCurrency(payment.currency) === stored ? stored : null;
+  const paymentIds = payments.map((p) => p.id);
+  const prior = await tx.financialTransaction.findFirst({
+    where: {
+      businessId,
+      currency: { equals: currency, mode: 'insensitive' },
+      OR: [
+        { sourceType: 'Invoice', sourceId: invoiceId },
+        ...(paymentIds.length > 0 ? [{ sourceType: 'Payment', sourceId: { in: paymentIds } }] : []),
+      ],
+    },
+    select: { id: true },
+  });
+  return Boolean(prior);
 }
 
 /**
@@ -281,8 +347,9 @@ export class PostingService {
       // V1-37 (CF-38, D-13): the posting's one currency. Every account is the
       // posting business's here, so any row names its currency. A stub that
       // returns no business relation reads as the schema default.
-      // V1-37d: money that follows a stored legacy-currency invoice posts in
-      // that invoice's currency (read here, inside the posting transaction).
+      // V1-37d: money that follows a legacy invoice (stored in its currency
+      // before D-13) posts in that invoice's currency (read here, inside the
+      // posting transaction).
       const businessCurrency = accounts[0]?.business?.currency ?? 'TTD';
       const currency = resolvePostingCurrency(
         input,

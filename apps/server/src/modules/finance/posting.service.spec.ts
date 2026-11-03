@@ -354,12 +354,24 @@ describe('V1-37d money that follows a stored legacy-currency document (resolvePo
 });
 
 describe('V1-37d PostingService.post(): a payment posts in its stored invoice currency (hermetic)', () => {
-  type PaymentRow = { currency: string; invoice: { businessId: string; currency: string; deletedAt: Date | null } | null } | null;
-  function harness(businessCurrency: string, payment: PaymentRow) {
+  type InvoiceRow = { id?: string; businessId: string; currency: string; deletedAt: Date | null; createdAt?: Date } | null;
+  type PaymentRow = { currency: string; invoice: InvoiceRow } | null;
+  /**
+   * V1-37d review: the door also reads the invoice a COGS follows
+   * (invoice.findFirst) and, for an invoice created on or after
+   * D13_DOCUMENTS_FROM, whether the ledger already holds its money in the
+   * currency (payment.findMany, financialTransaction.findFirst).
+   */
+  function harness(
+    businessCurrency: string,
+    payment: PaymentRow,
+    opts: { invoice?: InvoiceRow; priorMoney?: boolean; invoicePayments?: string[] } = {},
+  ) {
     const created: any[] = [];
     const tx = {
       financialTransaction: {
         findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async (_args: any) => (opts.priorMoney ? { id: 'txn_prior' } : null)),
         create: vi.fn(async (args: any) => {
           created.push(args.data);
           return { id: `txn_${created.length}` };
@@ -371,14 +383,20 @@ describe('V1-37d PostingService.post(): a payment posts in its stored invoice cu
         ),
       },
       contact: { findUnique: vi.fn(async () => ({ businessId: 'biz_ttd' })) },
-      payment: { findFirst: vi.fn(async (_args: any) => payment) },
+      payment: {
+        findFirst: vi.fn(async (_args: any) => payment),
+        findMany: vi.fn(async (_args: any) => (opts.invoicePayments ?? []).map((id) => ({ id }))),
+      },
+      invoice: { findFirst: vi.fn(async (_args: any) => opts.invoice ?? null) },
     };
     const prisma = { client: { $transaction: async (cb: any) => cb(tx) } } as any;
     return { svc: new door.PostingService(prisma), created, tx };
   }
+  /** An invoice written before D-13 held new documents (a legacy row). */
+  const LEGACY_CREATED = new Date('2026-06-01T00:00:00Z');
   const legacyPayment = (over: Partial<NonNullable<PaymentRow>> = {}): PaymentRow => ({
     currency: 'JMD',
-    invoice: { businessId: 'biz_ttd', currency: 'JMD', deletedAt: null },
+    invoice: { id: 'inv_jmd', businessId: 'biz_ttd', currency: 'JMD', deletedAt: null, createdAt: LEGACY_CREATED },
     ...over,
   });
   const input = (over: Partial<door.PostingInput> = {}): door.PostingInput => ({
@@ -425,7 +443,7 @@ describe('V1-37d PostingService.post(): a payment posts in its stored invoice cu
 
   it('LD-03: a payment whose invoice is stored in another currency, or that disagrees with its invoice, is refused (400), nothing written', async () => {
     for (const row of [
-      legacyPayment({ invoice: { businessId: 'biz_ttd', currency: 'TTD', deletedAt: null } }),
+      legacyPayment({ invoice: { id: 'inv_jmd', businessId: 'biz_ttd', currency: 'TTD', deletedAt: null, createdAt: LEGACY_CREATED } }),
       legacyPayment({ currency: 'TTD' }),
     ]) {
       const h = harness('TTD', row);
@@ -438,8 +456,8 @@ describe('V1-37d PostingService.post(): a payment posts in its stored invoice cu
     for (const row of [
       null,
       legacyPayment({ invoice: null }),
-      legacyPayment({ invoice: { businessId: 'biz_other', currency: 'JMD', deletedAt: null } }),
-      legacyPayment({ invoice: { businessId: 'biz_ttd', currency: 'JMD', deletedAt: new Date('2026-09-01') } }),
+      legacyPayment({ invoice: { id: 'inv_jmd', businessId: 'biz_other', currency: 'JMD', deletedAt: null, createdAt: LEGACY_CREATED } }),
+      legacyPayment({ invoice: { id: 'inv_jmd', businessId: 'biz_ttd', currency: 'JMD', deletedAt: new Date('2026-09-01'), createdAt: LEGACY_CREATED } }),
     ]) {
       const h = harness('TTD', row);
       await expect(h.svc.post(input())).rejects.toThrow(/JMD/);
@@ -467,6 +485,163 @@ describe('V1-37d PostingService.post(): a payment posts in its stored invoice cu
       await h.svc.post(input({ currency }));
       expect(h.created[0].currency).toBe(currency ? currency.toUpperCase() : 'TTD');
       expect(h.tx.payment.findFirst).not.toHaveBeenCalled();
+    }
+  });
+});
+
+/**
+ * V1-37d review (ST-V37D-1 / CR-V37D-1, ST-V37D-3). The exception is bound to a
+ * legacy document: an invoice created before D13_DOCUMENTS_FROM, or one whose
+ * money the ledger already holds in that currency (its receivable, a payment's
+ * posting). A new invoice in an unsupported currency (the storefront checkout,
+ * quote conversion and the other writers that do not check yet) gets the D-13
+ * refusal for its money, as V1-37 gave it. The COGS a legacy invoice posts when
+ * it becomes PAID (Invoice-sourced, kind 'cogs') follows it like its payments.
+ */
+describe('V1-37d review: only money that follows a legacy invoice keeps its currency (hermetic)', () => {
+  /** Written before D-13 held new documents, and after (LR-03 pins both against D13_DOCUMENTS_FROM). */
+  const LEGACY_CREATED = new Date('2026-06-01T00:00:00Z');
+  const NEW_CREATED = new Date('2026-11-03T00:00:00Z');
+  const cutoff = (): Date => (door as any).D13_DOCUMENTS_FROM;
+  function harness(
+    payment: { currency: string; invoice: any } | null,
+    opts: { invoice?: any; priorMoney?: boolean; invoicePayments?: string[] } = {},
+  ) {
+    const created: any[] = [];
+    const tx = {
+      financialTransaction: {
+        findUnique: vi.fn(async () => null),
+        findFirst: vi.fn(async (_args: any) => (opts.priorMoney ? { id: 'txn_prior' } : null)),
+        create: vi.fn(async (args: any) => {
+          created.push(args.data);
+          return { id: `txn_${created.length}` };
+        }),
+      },
+      chartOfAccount: {
+        findMany: vi.fn(async (args: any) =>
+          (args.where.id.in as string[]).map((id) => ({ id, businessId: 'biz_ttd', business: { currency: 'TTD' } })),
+        ),
+      },
+      contact: { findUnique: vi.fn(async () => ({ businessId: 'biz_ttd' })) },
+      payment: {
+        findFirst: vi.fn(async (_args: any) => payment),
+        findMany: vi.fn(async (_args: any) => (opts.invoicePayments ?? []).map((id) => ({ id }))),
+      },
+      invoice: { findFirst: vi.fn(async (_args: any) => opts.invoice ?? null) },
+    };
+    const prisma = { client: { $transaction: async (cb: any) => cb(tx) } } as any;
+    return { svc: new door.PostingService(prisma), created, tx };
+  }
+  const invoiceRow = (currency: string, createdAt: Date, over: Record<string, unknown> = {}) => ({
+    id: 'inv_x', businessId: 'biz_ttd', currency, deletedAt: null, createdAt, ...over,
+  });
+  const paymentPosting = (currency: string, over: Partial<door.PostingInput> = {}): door.PostingInput => ({
+    businessId: 'biz_ttd',
+    type: 'INCOME',
+    date: new Date('2026-11-03'),
+    amount: 50,
+    currency,
+    sourceType: 'Payment',
+    sourceId: 'pay_x',
+    kind: 'payment_recorded',
+    entries: [
+      { accountId: 'acc_cash', debit: 50 },
+      { accountId: 'acc_revenue', credit: 50 },
+    ],
+    ...over,
+  });
+  const cogsPosting = (currency: string, over: Partial<door.PostingInput> = {}): door.PostingInput => ({
+    businessId: 'biz_ttd',
+    type: 'EXPENSE',
+    date: new Date('2026-11-03'),
+    amount: 5,
+    currency,
+    sourceType: 'Invoice',
+    sourceId: 'inv_x',
+    kind: 'cogs',
+    entries: [
+      { accountId: 'acc_cogs', debit: 5 },
+      { accountId: 'acc_inventory', credit: 5 },
+    ],
+    ...over,
+  });
+
+  it('LR-01 RED-BEFORE (ST-V37D-1 / CR-V37D-1): money on a NEW invoice in an unsupported currency (storefront checkout) is refused (400), nothing written', async () => {
+    for (const currency of ['JMD', 'EUR', 'ZZZ']) {
+      const h = harness({ currency, invoice: invoiceRow(currency, NEW_CREATED) }, { invoicePayments: ['pay_x'] });
+      await expect(h.svc.post(paymentPosting(currency))).rejects.toThrow(new RegExp(`Unsupported posting currency ${currency}`));
+      expect(h.tx.financialTransaction.create).not.toHaveBeenCalled();
+      // The ledger was asked, scoped to the business, the invoice, its payments and the currency.
+      expect(h.tx.payment.findMany.mock.calls[0][0].where).toEqual({ invoiceId: 'inv_x', businessId: 'biz_ttd' });
+      expect(h.tx.financialTransaction.findFirst.mock.calls[0][0].where).toEqual({
+        businessId: 'biz_ttd',
+        currency: { equals: currency, mode: 'insensitive' },
+        OR: [
+          { sourceType: 'Invoice', sourceId: 'inv_x' },
+          { sourceType: 'Payment', sourceId: { in: ['pay_x'] } },
+        ],
+      });
+    }
+  });
+
+  it('LR-02: an invoice created on or after D13_DOCUMENTS_FROM is legacy only when the ledger already holds its money in that currency (its receivable, a payment)', async () => {
+    const held = harness({ currency: 'JMD', invoice: invoiceRow('JMD', NEW_CREATED) }, { priorMoney: true });
+    await held.svc.post(paymentPosting('JMD'));
+    expect(held.created[0].currency).toBe('JMD');
+    expect(held.created[0].entries.create.map((e: any) => e.currency)).toEqual(['JMD', 'JMD']);
+    // No payment of it yet: only its own postings are asked about.
+    expect(held.tx.financialTransaction.findFirst.mock.calls[0][0].where.OR).toEqual([{ sourceType: 'Invoice', sourceId: 'inv_x' }]);
+  });
+
+  it('LR-03: the cutoff is exclusive: one millisecond before D13_DOCUMENTS_FROM is legacy without reading the ledger; at it, the ledger decides', async () => {
+    expect(cutoff()).toBeInstanceOf(Date);
+    expect(LEGACY_CREATED.getTime()).toBeLessThan(cutoff().getTime());
+    expect(NEW_CREATED.getTime()).toBeGreaterThanOrEqual(cutoff().getTime());
+    const before = harness({ currency: 'JMD', invoice: invoiceRow('JMD', new Date(cutoff().getTime() - 1)) });
+    await before.svc.post(paymentPosting('JMD'));
+    expect(before.created[0].currency).toBe('JMD');
+    expect(before.tx.financialTransaction.findFirst).not.toHaveBeenCalled();
+
+    const at = harness({ currency: 'JMD', invoice: invoiceRow('JMD', new Date(cutoff().getTime())) });
+    await expect(at.svc.post(paymentPosting('JMD'))).rejects.toBeInstanceOf(BadRequestException);
+    expect(at.tx.financialTransaction.findFirst).toHaveBeenCalledTimes(1);
+    expect(at.tx.financialTransaction.create).not.toHaveBeenCalled();
+  });
+
+  it('LR-04 RED-BEFORE (ST-V37D-3): the COGS of a legacy invoice (Invoice, kind cogs) posts in its currency, read from the posting business', async () => {
+    const legacy = harness(null, { invoice: invoiceRow('JMD', LEGACY_CREATED) });
+    await legacy.svc.post(cogsPosting('JMD'));
+    expect(legacy.created[0].currency).toBe('JMD');
+    expect(legacy.created[0].entries.create.map((e: any) => e.currency)).toEqual(['JMD', 'JMD']);
+    expect(legacy.tx.invoice.findFirst.mock.calls[0][0].where).toEqual({ id: 'inv_x', businessId: 'biz_ttd' });
+    expect(legacy.tx.payment.findFirst).not.toHaveBeenCalled();
+
+    // A newer invoice whose payment already posted in JMD (the PAID transaction's own payment posting).
+    const paid = harness(null, { invoice: invoiceRow('JMD', NEW_CREATED), priorMoney: true, invoicePayments: ['pay_x'] });
+    await paid.svc.post(cogsPosting('JMD'));
+    expect(paid.created[0].currency).toBe('JMD');
+  });
+
+  it('LR-05: a COGS is refused (400, nothing written) for a new invoice without money in the currency, another currency, another business, a deleted or missing invoice', async () => {
+    for (const opts of [
+      { invoice: invoiceRow('JMD', NEW_CREATED) },
+      { invoice: invoiceRow('TTD', LEGACY_CREATED) },
+      { invoice: invoiceRow('JMD', LEGACY_CREATED, { businessId: 'biz_other' }) },
+      { invoice: invoiceRow('JMD', LEGACY_CREATED, { deletedAt: new Date('2026-09-01') }) },
+      { invoice: null },
+    ]) {
+      const h = harness(null, opts);
+      await expect(h.svc.post(cogsPosting('JMD')), JSON.stringify(opts)).rejects.toThrow(/JMD/);
+      expect(h.tx.financialTransaction.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it('LR-06: any other invoice-sourced posting of a legacy invoice (its receivable when a draft is issued, an adjustment) keeps the D-13 refusal and never reads the invoice', async () => {
+    for (const kind of ['invoice_finalized', 'v37d-probe', null]) {
+      const h = harness(null, { invoice: invoiceRow('JMD', LEGACY_CREATED), priorMoney: true });
+      await expect(h.svc.post(cogsPosting('JMD', { kind }))).rejects.toBeInstanceOf(BadRequestException);
+      expect(h.tx.financialTransaction.create).not.toHaveBeenCalled();
+      expect(h.tx.invoice.findFirst).not.toHaveBeenCalled();
     }
   });
 });

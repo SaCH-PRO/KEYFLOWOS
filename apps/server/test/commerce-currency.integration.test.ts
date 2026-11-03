@@ -107,6 +107,23 @@
  *          a TTD schedule of that business is billed (RED-BEFORE: 201 JMD schedules and a SENT JMD
  *          invoice)
  *
+ * V1-37d review repairs (RED-BEFORE = the packet head 0e0c2c65):
+ *   LC-07d/e RED-BEFORE (ST-V37D-2 / CR-V37D-2) the legacy JMD schedule is refused before
+ *          recurring_invoice.due is emitted and paused with the reason: three runs emit no `due`
+ *          and one `failed`; edited to TTD and resumed, it bills the period that was due (the
+ *          packet head emitted `due` and `failed` on every run, forever). LC-07 schedules fall due
+ *          a year from now, never on a fixed date (CR-V37D-3).
+ *   LC-08 RED-BEFORE (ST-V37D-1 / CR-V37D-1) a NEW document in an unsupported currency gets no
+ *          ledger exception: the real storefront checkout of a product priced JMD or 'zzz' on a
+ *          CASH TTD business answers 400 and writes nothing (no invoice, payment or posting; the
+ *          order stays unpaid), and so does the storefront recipe for EUR. The packet head posted
+ *          them (JMD, ZZZ, EUR).
+ *   LC-09 the legacy marker on CASH, where no receivable exists: a payment on an invoice stored
+ *          in JMD before D13_DOCUMENTS_FROM posts in JMD through the real route (VR-04 on the
+ *          default basis), while one on a JMD invoice written now is refused (RED-BEFORE). Its
+ *          final payment, with an inventory-costed line, posts its COGS in JMD and keeps the
+ *          payment (RED-BEFORE, ST-V37D-3: 400 and nothing kept).
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed), CommerceService,
  * CommerceStatsService, InvoiceWorkflowService, RevenuePostingService,
@@ -160,6 +177,9 @@ const ID = {
   contactL: `${P}contactL`,
   bizCash: `${P}bizCash`,
   contactC: `${P}contactC`,
+  // V1-37d review: a CASH TTD business for the legacy marker and the storefront.
+  bizNew: `${P}bizNew`,
+  contactN: `${P}contactN`,
 };
 
 let db: any;
@@ -176,6 +196,10 @@ let bankRules: any;
 // V1-37d: the refund recipe the provider refund door calls, and a recurring run scoped to the CASH business.
 let revenuePosting: any;
 let recurringRunner: any;
+// V1-37d review: the real client, workflow and the CASH-scoped schedule client, for runners and services built in tests.
+let prismaRef: any;
+let invoiceWorkflow: any;
+let recurringClient: any;
 
 /**
  * V1-37b (ST-V37-2): the CommerceAiService stand-in. Every read the commerce-ai
@@ -214,12 +238,18 @@ async function cleanup() {
     `DELETE FROM financial_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM stock_movements WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
+    `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM quote_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM email_campaigns WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM recurring_invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM inventory_stocks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM warehouses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM expenses WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -453,6 +483,9 @@ beforeAll(async () => {
     eventStub as any,
     moduleRef.get(InvoiceWorkflowService),
   );
+  prismaRef = prismaService;
+  invoiceWorkflow = moduleRef.get(InvoiceWorkflowService);
+  recurringClient = scopedClient;
 
   /** Identity attachment only. No guard is overridden. */
   const attachIdentity = (target: any) => target.use(async (req: any, _res: any, next: any) => {
@@ -1403,13 +1436,15 @@ describe('V1-37d legacy currency: money against a stored JMD invoice is still re
  */
 describe('V1-37d recurring schedules are held to D-13 when created and when they generate', () => {
   const schedules = (biz: string) => `/commerce/businesses/${biz}/recurring-invoices`;
+  // V1-37d review (CR-V37D-3): due a year from now, never on a fixed date, so
+  // these ACTIVE schedules never fall due while the suite runs (LC-07d).
   const body = (contactId: string, over: Record<string, unknown> = {}) => ({
     contactId,
     name: 'V37D retainer',
     frequency: 'MONTHLY',
     amount: 75,
     startDate: '2026-11-01T00:00:00Z',
-    nextRunDate: '2027-01-01T00:00:00Z',
+    nextRunDate: new Date(Date.now() + 365 * 86_400_000).toISOString(),
     ...over,
   });
 
@@ -1467,8 +1502,8 @@ describe('V1-37d recurring schedules are held to D-13 when created and when they
     expect(ttd.body.currency).toBe('TTD');
   }, 30_000);
 
-  it('LC-07d RED-BEFORE: a legacy JMD schedule on a CASH business generates no invoice and records the failure; its TTD schedule is billed (control)', async () => {
-    // Nothing else of the business is due: the schedules created above start next year.
+  it('LC-07d RED-BEFORE: a legacy JMD schedule on a CASH business generates no invoice, records the failure and is paused; its TTD schedule is billed (control)', async () => {
+    // Nothing else of the business is due: the schedules created above fall due a year from now.
     const due = new Date(Date.now() - 60_000);
     for (const [key, currency] of [['recJmd', 'JMD'], ['recTtd', 'TTD']] as const) {
       await db.recurringInvoice.create({
@@ -1486,15 +1521,222 @@ describe('V1-37d recurring schedules are held to D-13 when created and when they
     expect(await db.invoice.count({ where: { recurringInvoiceId: `${P}recJmd` } })).toBe(0);
     const jmd = await db.recurringInvoice.findUnique({
       where: { id: `${P}recJmd` },
-      select: { nextRunDate: true, generatedCount: true, failureCount: true, lastError: true },
+      select: { nextRunDate: true, generatedCount: true, failureCount: true, lastError: true, status: true },
     });
     expect(jmd.nextRunDate.getTime()).toBe(due.getTime());
     expect(jmd.generatedCount).toBe(0);
     expect(jmd.failureCount).toBe(1);
     expect(jmd.lastError).toMatch(/JMD/);
+    // V1-37d review (ST-V37D-2): paused, so the next runs neither bill nor report it again.
+    expect(jmd.status).toBe('PAUSED');
 
     // The TTD schedule: one SENT TTD invoice.
     const billed = await db.invoice.findMany({ where: { recurringInvoiceId: `${P}recTtd` }, select: { status: true, currency: true, total: true } });
     expect(billed).toEqual([{ status: 'SENT', currency: 'TTD', total: 75 }]);
   }, 60_000);
+
+  it('LC-07e RED-BEFORE (ST-V37D-2 / CR-V37D-2): a legacy JMD schedule never emits recurring_invoice.due; it is reported once and paused; edited to TTD and resumed, it bills the period that was due', async () => {
+    const { RecurringInvoiceService } = await import('../src/modules/commerce/recurring-invoice.service');
+    const events: Array<{ name: string; payload: any }> = [];
+    const recorder = { ...eventStub, emit: (name: string, payload: any) => { events.push({ name, payload }); return true; } };
+    const runner = new RecurringInvoiceService({ client: recurringClient } as any, recorder as any, invoiceWorkflow);
+    const id = `${P}recJmd2`;
+    const due = new Date(Date.now() - 60_000);
+    await db.recurringInvoice.create({
+      data: {
+        id, businessId: ID.bizCash, contactId: ID.contactC, name: 'V37D JMD retainer 2', description: 'v37d JMD retainer 2',
+        frequency: 'MONTHLY', amount: 75, currency: 'JMD', startDate: new Date('2026-01-01T00:00:00Z'), nextRunDate: due, status: 'ACTIVE',
+      },
+    });
+    const mine = (name: string) => events.filter((e) => e.name === name && e.payload?.recurringInvoice?.id === id);
+
+    for (let run = 0; run < 3; run += 1) await runner.processRecurringInvoices();
+    expect(mine('recurring_invoice.due'), 'due is never emitted for a schedule D-13 refuses').toHaveLength(0);
+    expect(mine('recurring_invoice.failed')).toHaveLength(1);
+    expect(mine('recurring_invoice.failed')[0].payload.error).toMatch(/JMD/);
+    expect(await db.invoice.count({ where: { recurringInvoiceId: id } })).toBe(0);
+    const paused = await db.recurringInvoice.findUnique({
+      where: { id },
+      select: { status: true, nextRunDate: true, failureCount: true, generatedCount: true, lastError: true },
+    });
+    expect(paused.status).toBe('PAUSED');
+    expect(paused.nextRunDate.getTime()).toBe(due.getTime());
+    expect({ failureCount: paused.failureCount, generatedCount: paused.generatedCount }).toEqual({ failureCount: 1, generatedCount: 0 });
+    expect(paused.lastError).toMatch(/JMD/);
+
+    // The owner moves it to the business currency (held to D-13) and resumes it, through the real routes.
+    const edited = await agent().patch(`${schedules(ID.bizCash)}/${id}`).set(HEADER, ID.ownerL).send({ currency: 'TTD' });
+    expect(edited.status, JSON.stringify(edited.body)).toBe(200);
+    const resumed = await agent().post(`${schedules(ID.bizCash)}/${id}/resume`).set(HEADER, ID.ownerL).send({});
+    expect(resumed.status, JSON.stringify(resumed.body)).toBe(201);
+    events.length = 0;
+    const billed = await runner.processRecurringInvoices();
+    expect(billed.map((r: any) => r.recurringId)).toEqual([id]);
+    expect(mine('recurring_invoice.due')).toHaveLength(1);
+    expect(mine('recurring_invoice.failed')).toHaveLength(0);
+    expect(await db.invoice.findMany({ where: { recurringInvoiceId: id }, select: { status: true, currency: true, total: true } })).toEqual([
+      { status: 'SENT', currency: 'TTD', total: 75 },
+    ]);
+    const after = await db.recurringInvoice.findUnique({ where: { id }, select: { status: true, nextRunDate: true, generatedCount: true, failureCount: true } });
+    expect(after.status).toBe('ACTIVE');
+    expect(after.nextRunDate.getTime()).toBeGreaterThan(due.getTime());
+    expect({ generatedCount: after.generatedCount, failureCount: after.failureCount }).toEqual({ generatedCount: 1, failureCount: 0 });
+  }, 60_000);
+});
+
+/**
+ * V1-37d review (ST-V37D-1 / CR-V37D-1, ST-V37D-3): the ledger exception is
+ * bound to a legacy invoice: one stored before D13_DOCUMENTS_FROM, or whose
+ * money the ledger already holds in its currency (the receivables of LC-01).
+ * On CASH there is no receivable, so the date marks it. A new document in an
+ * unsupported currency, from a writer that does not check yet (the storefront
+ * checkout here), keeps the V1-37 refusal at the door.
+ */
+describe('V1-37d review: only money that follows a legacy invoice keeps its currency', () => {
+  /** A row the base wrote before D-13 held new documents. */
+  const LEGACY_CREATED = new Date('2026-06-01T00:00:00Z');
+
+  beforeAll(async () => {
+    await db.user.upsert({ where: { id: ID.ownerL }, update: {}, create: { id: ID.ownerL, email: `${P}owner-legacy@test.local`, role: 'USER' } });
+    await db.business.create({
+      data: { id: ID.bizNew, name: 'V37A new CASH TTD', slug: `${P}biz-new`, ownerId: ID.ownerL, currency: 'TTD', accountingBasis: 'CASH' },
+    });
+    await db.membership.create({ data: { id: `${ID.ownerL}_mn`, userId: ID.ownerL, businessId: ID.bizNew, role: 'OWNER' } });
+    await db.contact.create({
+      data: { id: ID.contactN, businessId: ID.bizNew, firstName: 'V37a', lastName: 'New', email: `${P}contact-new@test.local` },
+    });
+    await coa.ensureDefaults(ID.bizNew);
+  }, 60_000);
+
+  /** An invoice row as a writer leaves it: SENT, in `currency`, created at `createdAt`. */
+  async function storedInvoice(key: string, currency: string, total: number, createdAt: Date, productId?: string) {
+    return db.invoice.create({
+      data: {
+        id: `${P}inv_${key}`, businessId: ID.bizNew, contactId: ID.contactN, invoiceNumber: `${P}INV-${key}`, status: 'SENT',
+        subtotal: total, total, currency, issueDate: createdAt, createdAt,
+        items: { create: [{ description: `v37d ${key}`, quantity: 1, unitPrice: total, total, ...(productId ? { productId } : {}) }] },
+      },
+    });
+  }
+
+  it('LC-09 fixture: LEGACY_CREATED lies before the door\'s D13_DOCUMENTS_FROM, and now lies after it', async () => {
+    const { D13_DOCUMENTS_FROM } = (await import('../src/modules/finance/posting.service')) as any;
+    expect(D13_DOCUMENTS_FROM).toBeInstanceOf(Date);
+    expect(LEGACY_CREATED.getTime()).toBeLessThan(D13_DOCUMENTS_FROM.getTime());
+    expect(Date.now()).toBeGreaterThanOrEqual(D13_DOCUMENTS_FROM.getTime());
+  });
+
+  it('LC-08 RED-BEFORE (ST-V37D-1 / CR-V37D-1): a NEW storefront order priced JMD or zzz, and the storefront recipe in EUR, are refused at the door (400) and write nothing', async () => {
+    const { StoreOrderService } = await import('../src/modules/site/store-order.service');
+    for (const cur of ['JMD', 'zzz']) {
+      const product = await db.product.create({
+        data: { id: `${P}prod_${cur}`, businessId: ID.bizNew, name: `v37d ${cur} widget`, price: 25, currency: cur, category: 'PRODUCT', inventoryMode: 'untracked' },
+      });
+      const store = new StoreOrderService(
+        prismaRef,
+        eventStub as any,
+        { incrementUsage: async () => null, validate: async () => null } as any,
+        { findOrCreateContact: async () => ({ id: ID.contactN }) } as any,
+        { logStorefrontEvent: async () => null, upsertStorefrontContact: async () => ({ id: ID.contactN }), backstitchVisitor: async () => null } as any,
+        invoiceWorkflow,
+        { evaluateProduct: async () => null } as any,
+        { record: async () => null } as any,
+        revenuePosting,
+      );
+      const order = await store.createOrder({
+        businessId: ID.bizNew,
+        cartItems: [{ productId: product.id, quantity: 2 }],
+        customerInfo: { name: 'V37d Buyer', email: `${P}buyer-${cur}@test.local` },
+        paymentMethod: 'CARD',
+      });
+      // The unchecked writer: the order carries the product's currency as given.
+      expect(order.currency).toBe(cur);
+      const before = await ledgerCount(ID.bizNew);
+      const outcome = await store.completeCheckout({ orderId: order.id, provider: 'wipay', method: 'card', paymentRef: `${P}ref_${cur}` })
+        .then(() => ({ status: 201, message: 'completed' }), (e: any) => ({ status: e?.status, message: String(e?.message) }));
+      expect(outcome.status, outcome.message).toBe(400);
+      expect(outcome.message).toMatch(new RegExp(`Unsupported posting currency ${cur.toUpperCase()}`));
+      expect(await db.invoice.count({ where: { businessId: ID.bizNew, notes: { contains: order.orderNumber } } })).toBe(0);
+      expect(await db.payment.count({ where: { providerPaymentId: `${P}ref_${cur}` } })).toBe(0);
+      expect(await ledgerCount(ID.bizNew)).toEqual(before);
+      expect((await db.marketplaceOrder.findUnique({ where: { id: order.id }, select: { paymentStatus: true } })).paymentStatus).not.toBe('PAID');
+    }
+
+    // The storefront recipe for an ISO currency outside D-13: invoice, payment and posting in one transaction.
+    const before = await ledgerCount(ID.bizNew);
+    const eur = await db.$transaction(async (tx: any) => {
+      const inv = await tx.invoice.create({
+        data: { id: `${P}inv_eur`, businessId: ID.bizNew, contactId: ID.contactN, invoiceNumber: `${P}INV-eur`, status: 'PAID', subtotal: 30, total: 30, currency: 'EUR', issueDate: new Date() },
+      });
+      const row = await tx.payment.create({
+        data: { businessId: ID.bizNew, invoiceId: inv.id, amount: 30, currency: 'EUR', status: 'SUCCESSFUL', provider: 'wipay', method: 'card', providerPaymentId: `${P}ref_eur` },
+      });
+      await revenuePosting.onPaymentRecorded(row.id, { tx });
+      return 'posted';
+    }).catch((e: any) => ({ status: e?.status, message: String(e?.message) }));
+    expect(eur).toMatchObject({ status: 400 });
+    expect((eur as any).message).toMatch(/Unsupported posting currency EUR/);
+    expect(await db.invoice.count({ where: { id: `${P}inv_eur` } })).toBe(0);
+    expect(await db.payment.count({ where: { providerPaymentId: `${P}ref_eur` } })).toBe(0);
+    expect(await ledgerCount(ID.bizNew)).toEqual(before);
+  }, 60_000);
+
+  it('LC-09a (VR-04 on CASH): POST payments on a SENT JMD invoice stored before D-13 -> 201, posting [INCOME, JMD] (Dr CASH, Cr REVENUE); on one written now -> 400, nothing written (RED-BEFORE)', async () => {
+    const legacy = await storedInvoice('cash_legacy', 'JMD', 100, LEGACY_CREATED);
+    const before = await ledgerCount(ID.bizNew);
+    const res = await pay(ID.bizNew, ID.ownerL, legacy.id, 40);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const paymentId = res.body.payment.id;
+    expect(await db.payment.findUnique({ where: { id: paymentId }, select: { currency: true, amount: true, status: true } })).toEqual({
+      currency: 'JMD', amount: 40, status: 'SUCCESSFUL',
+    });
+    const [txn, ...rest] = await paymentTransactions(ID.bizNew, paymentId);
+    expect(rest).toHaveLength(0);
+    expect({ type: txn.type, currency: txn.currency, amount: Number(txn.amount) }).toEqual({ type: 'INCOME', currency: 'JMD', amount: 40 });
+    expect(new Set(txn.entries.map((e: any) => e.currency))).toEqual(new Set(['JMD']));
+    expect(txn.entries.filter((e: any) => Number(e.debit) > 0).map((e: any) => e.account.systemKey)).toEqual(['CASH']);
+    expect(txn.entries.filter((e: any) => Number(e.credit) > 0).map((e: any) => e.account.systemKey)).toEqual(['REVENUE']);
+    expect(await db.invoice.findUnique({ where: { id: legacy.id }, select: { status: true } })).toEqual({ status: 'PARTIALLY_PAID' });
+    expect(await ledgerCount(ID.bizNew)).toEqual({ transactions: before.transactions + 1, entries: before.entries + 2 });
+
+    // A JMD invoice written now (a writer that does not check D-13 yet) is a new document: its money is refused.
+    const fresh = await storedInvoice('cash_new', 'JMD', 100, new Date());
+    const refused = await pay(ID.bizNew, ID.ownerL, fresh.id, 40);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(400);
+    expect(JSON.stringify(refused.body)).toMatch(/JMD/);
+    expect(await db.payment.count({ where: { invoiceId: fresh.id } })).toBe(0);
+    expect(await db.invoice.findUnique({ where: { id: fresh.id }, select: { status: true } })).toEqual({ status: 'SENT' });
+    expect(await ledgerCount(ID.bizNew)).toEqual({ transactions: before.transactions + 1, entries: before.entries + 2 });
+  }, 30_000);
+
+  it('LC-09b RED-BEFORE (ST-V37D-3): the final payment of a legacy JMD invoice with an inventory-costed line posts its COGS in JMD and keeps the payment', async () => {
+    const { InvoiceWorkflowService } = await import('../src/modules/commerce/invoice-workflow.service');
+    const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
+    // CommerceService.recordPayment's recipe over the real COGS posting (the app's ExpensePostingService is a no-op stub).
+    const workflow = new InvoiceWorkflowService(prismaRef, eventStub as any, revenuePosting, new ExpensePostingService(prismaRef, posting, coa));
+    const product = await db.product.create({ data: { id: `${P}prod_cost`, businessId: ID.bizNew, name: 'v37d costed', price: 30, currency: 'JMD', category: 'PRODUCT' } });
+    const warehouse = await db.warehouse.create({ data: { id: `${P}wh`, businessId: ID.bizNew, name: 'v37d warehouse' } });
+    await db.inventoryStock.create({ data: { id: `${P}stock`, businessId: ID.bizNew, productId: product.id, warehouseId: warehouse.id, quantity: 10, costPerUnit: 5, currency: 'JMD' } });
+    const invoice = await storedInvoice('cash_cost', 'JMD', 30, LEGACY_CREATED, product.id);
+
+    const settled = await db.$transaction(async (tx: any) => {
+      const row = await tx.payment.create({
+        data: { businessId: ID.bizNew, invoiceId: invoice.id, amount: 30, currency: 'JMD', status: 'SUCCESSFUL', provider: 'cash', method: 'cash', providerPaymentId: `${P}cost` },
+      });
+      await revenuePosting.onPaymentRecorded(row.id, { tx });
+      return workflow.reconcileFromPayments(invoice.id, { tx, eventBuffer: [] });
+    }).catch((e: any) => ({ status: e?.status, message: String(e?.message) }));
+    expect(settled, JSON.stringify(settled)).toMatchObject({ status: 'PAID', changed: true });
+    expect(await db.payment.count({ where: { invoiceId: invoice.id } })).toBe(1);
+
+    const cogs = await db.financialTransaction.findUnique({
+      where: { businessId_externalRef: { businessId: ID.bizNew, externalRef: `Invoice:${invoice.id}:cogs` } },
+      include: { entries: { include: { account: { select: { systemKey: true } } } } },
+    });
+    expect(cogs, 'the COGS posted').not.toBeNull();
+    expect({ type: cogs.type, currency: cogs.currency, amount: Number(cogs.amount) }).toEqual({ type: 'EXPENSE', currency: 'JMD', amount: 5 });
+    expect(new Set(cogs.entries.map((e: any) => e.currency))).toEqual(new Set(['JMD']));
+    expect(cogs.entries.filter((e: any) => Number(e.debit) > 0).map((e: any) => e.account.systemKey)).toEqual(['COGS']);
+    expect(cogs.entries.filter((e: any) => Number(e.credit) > 0).map((e: any) => e.account.systemKey)).toEqual(['INVENTORY_ASSET']);
+  }, 30_000);
 });
