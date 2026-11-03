@@ -503,6 +503,11 @@
       "packet": "V1-42 / V1-42c-INVOICE-STATUS-EVENTS"
     },
     {
+      "prefix": "v43a_",
+      "owner": "apps/server/test/commerce-document-numbering.integration.test.ts",
+      "packet": "V1-43-DM-NUMBERING"
+    },
+    {
       "prefix": "v44a_",
       "owner": "apps/server/test/credit-note-reversal.integration.test.ts",
       "packet": "V1-44-DM-CREDIT-NOTE"
