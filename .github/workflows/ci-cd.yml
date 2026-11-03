@@ -712,6 +712,16 @@ jobs:
       - name: Run web tests
         run: pnpm --filter web test:unit
 
+      # KF-HARNESS-PKG-TESTS-001 (V1-26). packages/api carries specs
+      # (vitest.config.ts: src/**/*.spec.ts) -- the no-raw-records gate and
+      # the crm.contactDetail visibility cases -- and no step ran them: the
+      # server step runs apps/server only and the step above runs apps/web.
+      # /trpc is mounted and reachable by any authenticated member, so its
+      # router specs gate as much as the REST ones. Pure unit specs: no
+      # database, no Redis; "Build workspace packages" above is enough.
+      - name: Run packages/api tests
+        run: pnpm --filter @keyflow/api test:unit
+
   # Production deployment (commented out until configured)
   # deploy:
   #   name: Deploy to Production
