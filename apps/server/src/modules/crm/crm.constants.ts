@@ -1,5 +1,22 @@
+/**
+ * The one Contact.status vocabulary: what the CRM create/update DTOs admit.
+ * contact-status-vocabulary.spec.ts holds every writer to it (CF-49).
+ */
 export const CONTACT_STATUSES = ['LEAD', 'PROSPECT', 'CLIENT', 'LOST'] as const;
 export type ContactStatus = typeof CONTACT_STATUSES[number];
+
+export function isContactStatus(value: unknown): value is ContactStatus {
+  return typeof value === 'string' && (CONTACT_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * The status an external store adapter gives a contact it CREATES: a customer
+ * with orders is a CLIENT, one without is a LEAD. An adapter never overwrites
+ * the status of a contact that already exists; that status is the business's.
+ */
+export function contactStatusForExternalCustomer(ordersCount: number | null | undefined): ContactStatus {
+  return (ordersCount ?? 0) > 0 ? 'CLIENT' : 'LEAD';
+}
 
 export {
   CONTACT_AGE_GROUPS,

@@ -846,13 +846,15 @@ export class KeyCommandService {
       recentCustomers,
       openTasks,
     ] = await Promise.all([
-      // Stale contacts: no interaction in 14 days, not dormant
+      // Stale contacts: no interaction in 14 days, not lost. (CF-49: 'DORMANT'
+      // is a relationshipHealth value, never a Contact.status; the old filter
+      // excluded nothing.)
       (this.prisma.client as any).contact.findMany({
         where: {
           businessId,
           deletedAt: null,
           lastInteractionAt: { lt: fourteenDaysAgo },
-          status: { not: 'DORMANT' },
+          status: { not: 'LOST' },
         },
         select: { id: true, firstName: true, lastName: true, email: true, status: true, lastInteractionAt: true, leadScore: true },
         orderBy: { lastInteractionAt: 'asc' },
@@ -910,12 +912,13 @@ export class KeyCommandService {
         orderBy: { issueDate: 'asc' },
         take: 10,
       }),
-      // Recent customers for review requests
+      // Recent clients for review requests (CF-49: CLIENT is the canonical
+      // status; 'CUSTOMER' is not one the CRM admits).
       (this.prisma.client as any).contact.findMany({
         where: {
           businessId,
           deletedAt: null,
-          status: 'CUSTOMER',
+          status: 'CLIENT',
           updatedAt: { gte: thirtyDaysAgo },
         },
         select: { id: true, firstName: true, lastName: true, email: true },

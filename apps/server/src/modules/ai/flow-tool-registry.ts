@@ -489,7 +489,7 @@ export const FLOW_TOOLS: FlowTool[] = [
       properties: {
         name: { type: 'string', description: 'Segment name' },
         criteria: { type: 'string', description: 'Segment criteria description (e.g. "clients who spent over $5000 TTD")' },
-        status: { type: 'string', description: 'Filter by contact status', enum: ['LEAD', 'PROSPECT', 'CLIENT', 'INACTIVE'] },
+        status: { type: 'string', description: 'Filter by contact status', enum: ['LEAD', 'PROSPECT', 'CLIENT', 'LOST'] },
         tag: { type: 'string', description: 'Filter by tag' },
         minSpend: { type: 'number', description: 'Minimum total spend in TTD' },
       },
@@ -683,7 +683,7 @@ export const FLOW_TOOLS: FlowTool[] = [
         email: { type: 'string', description: 'Email address' },
         phone: { type: 'string', description: 'Phone number' },
         companyName: { type: 'string', description: 'Company or organization name' },
-        status: { type: 'string', description: 'Contact status', enum: ['LEAD', 'PROSPECT', 'CLIENT', 'INACTIVE'] },
+        status: { type: 'string', description: 'Contact status', enum: ['LEAD', 'PROSPECT', 'CLIENT', 'LOST'] },
       },
       required: [],
     },
@@ -705,7 +705,7 @@ export const FLOW_TOOLS: FlowTool[] = [
         lastName: { type: 'string', description: 'Updated last name' },
         email: { type: 'string', description: 'Updated email address' },
         phone: { type: 'string', description: 'Updated phone number' },
-        status: { type: 'string', description: 'Updated status', enum: ['LEAD', 'PROSPECT', 'CLIENT', 'INACTIVE'] },
+        status: { type: 'string', description: 'Updated status', enum: ['LEAD', 'PROSPECT', 'CLIENT', 'LOST'] },
         companyName: { type: 'string', description: 'Updated company name' },
       },
       required: ['contactId'],
@@ -777,7 +777,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     parameters: {
       type: 'object',
       properties: {
-        status: { type: 'string', description: 'Filter by status (LEAD, PROSPECT, CLIENT, INACTIVE)' },
+        status: { type: 'string', description: 'Filter by status (LEAD, PROSPECT, CLIENT, LOST)' },
         limit: { type: 'number', description: 'Maximum number of contacts to return (default 10)' },
       },
       required: [],
