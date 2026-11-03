@@ -54,6 +54,48 @@ vi.mock('bullmq', async (importOriginal) => {
 });
 
 // ---------------------------------------------------------------------------
+// FOLLOW3-C3: no unhandled 'Connection is closed' rejection, as a named case
+// ---------------------------------------------------------------------------
+
+/**
+ * About 1 run in 8 of this file ended with vitest's "Unhandled Rejection: Error:
+ * Connection is closed." while all 12 tests passed. The ioredis stack named
+ * only the socket close that flushed the command (event_handler.js:214), not
+ * the command or who issued it, so `redis()` below turns on
+ * showFriendlyErrorStack, which every BullMQ duplicate() inherits.
+ *
+ * Every unhandled rejection while this file runs is recorded here. process.on
+ * ADDS a listener next to vitest's. But vitest 2 (execute.js listenForErrors)
+ * leaves a rejection raised during a test to user code once a second listener
+ * exists, so this file must fail on EVERY rejection it records, not only the
+ * one it was written for: the afterAll below does both, by name, with the
+ * stack, and then removes the listener so vitest reports anything later.
+ */
+const unhandledRejections: unknown[] = [];
+const recordUnhandledRejection = (reason: unknown) => {
+  unhandledRejections.push(reason);
+};
+process.on('unhandledRejection', recordUnhandledRejection);
+
+const rejectionText = (r: unknown) => (r instanceof Error ? (r.stack ?? r.message) : String(r));
+
+// Registered before every other after-hook in this file, so it runs last
+// (vitest's default sequence.hooks 'stack' runs after-hooks in reverse): after
+// each describe's cleanQueue and the quit() of every connection below.
+afterAll(async () => {
+  // One turn of the event loop, so a rejection the teardown above left
+  // pending is delivered before the count.
+  await new Promise((r) => setImmediate(r));
+  process.off('unhandledRejection', recordUnhandledRejection);
+  const closed = unhandledRejections.filter((r) => /Connection is closed/.test(r instanceof Error ? r.message : String(r)));
+  expect(closed.map(rejectionText), "unhandled 'Connection is closed' rejections while this file ran (FOLLOW3-C3)").toEqual([]);
+  expect(
+    unhandledRejections.filter((r) => !closed.includes(r)).map(rejectionText),
+    'other unhandled rejections while this file ran (recorded here, so vitest did not report them)',
+  ).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------
 // env discipline
 // ---------------------------------------------------------------------------
 
@@ -153,7 +195,10 @@ describe('the AI cron triggers seeded at boot honour the scheduler switch (SEC-V
 const REDIS_URL = process.env.REDIS_URL;
 const connections: IORedis[] = [];
 function redis(): IORedis {
-  const c = new IORedis(REDIS_URL!, { maxRetriesPerRequest: null });
+  // showFriendlyErrorStack (FOLLOW3-C3): a rejected command carries the stack
+  // of the call that issued it (ioredis Commander.js:84), and BullMQ's
+  // duplicate() copies the option to every worker and events connection.
+  const c = new IORedis(REDIS_URL!, { maxRetriesPerRequest: null, showFriendlyErrorStack: true });
   connections.push(c);
   return c;
 }
