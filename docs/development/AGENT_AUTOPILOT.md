@@ -92,9 +92,10 @@ The evaluator requires all of:
   `.agent-control/**`;
 - `production_touched == false` in both artifacts;
 - no unresolved contradiction; no unexplained failed or skipped proof;
-- the latest runs of CI/CD Pipeline, Agent Control Gate, Branch divergence and
-  DAST (HawkScan) are successful **at the exact PR head** — green runs at any
-  other sha are reported as a stale head, not treated as satisfied;
+- the latest runs of CI/CD Pipeline, Agent Control Gate, Branch divergence,
+  DAST (Native) and Agent Control Worker Proof are successful **at the exact PR
+  head** — green runs at any other sha are reported as a stale head, not
+  treated as satisfied;
 - the independent semantic review is satisfied, and the PR timeline owes no
   re-run;
 - a distinct ChatGPT merge grant on issue #80 for this exact PR, packet,
@@ -107,6 +108,16 @@ The evaluator requires all of:
 
 The Agent Control Gate independently proves the semantic-head/control-tail
 contract. This package lives on `impl/*` and is therefore subject to it.
+
+The DAST gate is DAST (Native) (`native-dast.yml`). It needs no third-party
+account and no secret. It boots the API against its own Postgres and Redis and
+fails on any probe it cannot prove. DAST (HawkScan) (`hawkscan.yml`) is
+manual-only: it runs on `workflow_dispatch` and is not an admission gate. Its
+guard skipped every scan step when the StackHawk key was absent, and the run
+still concluded success, so as a required check it admitted PRs that were never
+scanned (PRS-M08; V1-30, owner ruling D-22). `tests/workflow-integrity.spec.mjs`
+proves the swap, the manual-only trigger and that the required DAST workflow
+cannot conclude success without probing.
 
 ## Concurrency
 

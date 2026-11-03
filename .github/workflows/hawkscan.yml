@@ -1,25 +1,24 @@
 # Dynamic application security testing (DAST) for KEYFLOW OS via StackHawk HawkScan.
 #
-# This is the missing half of the security surface. ci-cd.yml's "Security Scan"
-# job does SCA (pnpm audit) and secret scanning (trufflehog) — both STATIC. It
-# never exercises the running app, so an auth bypass, an IDOR, or a reflected
-# injection in a live route is invisible to it. HawkScan boots the API and
-# attacks it, which is the only way those show up.
+# MANUAL-ONLY. This workflow runs on workflow_dispatch and is NOT an admission
+# gate (V1-30-SEC-DAST-GATE-SWAP, owner ruling D-22). As the required check
+# 'DAST (HawkScan)' it passed without scanning: without the HAWK_API_KEY secret
+# the guard below short-circuits, every heavy step is skipped, and the job
+# concludes success (PRS-M08). The required DAST gate is 'DAST (Native)'
+# (native-dast.yml, V1-13): it needs no third-party account or secret and
+# cannot conclude success without probing. REQUIRED_WORKFLOWS in
+# scripts/agent-control/lib/events.mjs names it, and
+# scripts/agent-control/tests/workflow-integrity.spec.mjs proves that this
+# workflow has no trigger but workflow_dispatch.
 #
-# DARK BY DEFAULT. The scan runs only when the HAWK_API_KEY repo secret exists;
-# without it the guard short-circuits and every heavy step is skipped, so the
-# job goes green as a no-op. That keeps this safe to merge into a branch-
-# protected main today and activate later — see docs/SECURITY_DAST_SETUP.md.
-#
-# SEPARATE WORKFLOW, not a job in ci-cd.yml, on purpose: ci-cd.yml carries the
-# required status checks, and a scan that needs an external account must not be
-# able to turn those red. Promote this to a required check only after it has run
-# green with real credentials.
+# What it adds when run by hand with real credentials: ci-cd.yml's "Security
+# Scan" job is static (SCA and secret scanning) and the native proof sends a
+# fixed set of auth-boundary probes; HawkScan crawls and attacks the running
+# API for a broader surface. Activation: docs/SECURITY_DAST_SETUP.md. A manual
+# run without HAWK_API_KEY is still a green no-op and proves nothing.
 name: DAST (HawkScan)
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch: {}
 
 concurrency:
@@ -151,8 +150,9 @@ jobs:
       - name: Run HawkScan
         if: steps.guard.outputs.run == 'true'
         uses: stackhawk/hawkscan-action@v2
-        # Soft gate to start: surface findings without failing the build. Flip to
-        # false (and make this a required check) once the baseline is triaged.
+        # Soft gate: a manual run surfaces findings without failing. Flip to
+        # false once the baseline is triaged. Either way this workflow is not
+        # an admission gate; DAST (Native) is (V1-30).
         continue-on-error: true
         with:
           apiKey: ${{ secrets.HAWK_API_KEY }}

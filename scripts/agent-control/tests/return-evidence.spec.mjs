@@ -86,8 +86,8 @@ test('NC exact-head pending: a finished exact-head gate cannot be claimed before
 });
 
 test('NC exact-head complete: every exact-head gate must be listed', () => {
-  const exact_head_proof = EXACT_HEAD_GATES.filter((gate) => gate !== 'DAST (HawkScan)').map((gate) => ({ gate, status: 'PENDING' }));
-  assertOnly(artifact({ exact_head_proof }), /^exact_head_proof is missing DAST \(HawkScan\)$/);
+  const exact_head_proof = EXACT_HEAD_GATES.filter((gate) => gate !== 'DAST (Native)').map((gate) => ({ gate, status: 'PENDING' }));
+  assertOnly(artifact({ exact_head_proof }), /^exact_head_proof is missing DAST \(Native\)$/);
   const problems = problemsOf(artifact({ exact_head_proof: undefined }));
   assert.equal(problems[0], 'exact_head_proof must list every exact-head gate');
   assert.equal(problems.length, 1 + EXACT_HEAD_GATES.length);
@@ -127,7 +127,7 @@ test('NC missing scope: a proof_matrix entry without evidence_scope is rejected,
 });
 
 test('NC scope mislabel: an obligation that names an exact-head gate must be scoped exact_head', () => {
-  for (const obligation of ['all exact-head workflows green', 'DAST (HawkScan) on the final head', 'fresh Copilot review', 'required checks']) {
+  for (const obligation of ['all exact-head workflows green', 'DAST (Native) on the final head', 'fresh Copilot review', 'required checks']) {
     for (const result of ['PROVEN', 'PENDING']) {
       assertOnly(
         artifact({ proof_matrix: [{ obligation, evidence_scope: 'semantic_head', result }] }),
@@ -140,9 +140,13 @@ test('NC scope mislabel: an obligation that names an exact-head gate must be sco
 });
 
 test('NC pass prose: prose cannot claim an exact-head gate passed while it is PENDING', () => {
-  // Copilot r4117477551: the exact 6d8a6bd8 security prose.
+  // Copilot r4117477551: the exact 6d8a6bd8 security prose. It named the DAST gate of its day; HawkScan is
+  // manual-only since V1-30, so the sentence is now a claim through its umbrella phrase, and still caught.
   const security = { local_hawkscan: 'not run; no app running. DAST (HawkScan) is a required exact-head check and passed.' };
-  assertOnly(artifact({ security }), /^prose claims DAST \(HawkScan\) passed before the RETURN: "DAST \(HawkScan\) is a required exact-head check and passed\."$/);
+  assertOnly(artifact({ security }), /^prose claims exact-head check passed before the RETURN: "DAST \(HawkScan\) is a required exact-head check and passed\."$/);
+  // The same sentence about the required DAST gate is a claim about that gate by name.
+  const native = { local_dast: 'not run; no app running. DAST (Native) is a required exact-head check and passed.' };
+  assertOnly(artifact({ security: native }), /^prose claims DAST \(Native\) passed before the RETURN: "DAST \(Native\) is a required exact-head check and passed\."$/);
   // Every gate and every pass word, anywhere, in any case.
   for (const gate of EXACT_HEAD_GATES) {
     for (const word of ['passed', 'GREEN', 'succeeded', 'Proven']) {
@@ -150,26 +154,26 @@ test('NC pass prose: prose cannot claim an exact-head gate passed while it is PE
     }
   }
   // Referents: the same sentences in the vocabulary a pre-RETURN artifact may use.
-  assert.deepEqual(problemsOf(artifact({ security: { local_hawkscan: 'not run. DAST (HawkScan) is a required exact-head check and is PENDING.' } })), []);
+  assert.deepEqual(problemsOf(artifact({ security: { local_hawkscan: 'not run. DAST (Native) is a required exact-head check and is PENDING.' } })), []);
   // A pass word in another sentence, or with no gate named, is not a claim about a gate.
-  assert.deepEqual(problemsOf(artifact({ summary: 'The local suite passed. DAST (HawkScan) is PENDING.' })), []);
+  assert.deepEqual(problemsOf(artifact({ summary: 'The local suite passed. DAST (Native) is PENDING.' })), []);
   // An obligation states what must be proven; a previous_head_<sha> record is about that head.
-  assert.deepEqual(problemsOf(artifact({ ci: { previous_head_82454cce: 'DAST (HawkScan) green' } })), []);
+  assert.deepEqual(problemsOf(artifact({ ci: { previous_head_82454cce: 'DAST (Native) green' } })), []);
   assert.deepEqual(problemsOf(artifact({
     proof_matrix: [{ obligation: 'all exact-head workflows green and a fresh Copilot review', evidence_scope: 'exact_head', result: 'PENDING' }],
   })), []);
   // Only a real historical key is exempt.
-  assertOnly(artifact({ ci: { previous_head: 'DAST (HawkScan) green' } }), /^prose claims DAST/);
-  assertOnly(artifact({ ci: { previous_head_final: 'DAST (HawkScan) green' } }), /^prose claims DAST/);
+  assertOnly(artifact({ ci: { previous_head: 'DAST (Native) green' } }), /^prose claims DAST/);
+  assertOnly(artifact({ ci: { previous_head_final: 'DAST (Native) green' } }), /^prose claims DAST/);
 });
 
 test('NC completion prose: completion vocabulary claims a finished gate as surely as "passed"', () => {
   // Copilot r4117648609.
-  for (const claim of ['DAST (HawkScan) completed with zero failures', 'CI/CD Pipeline complete', 'Branch divergence: no failures', 'Agent Control Gate had 0 failed jobs']) {
+  for (const claim of ['DAST (Native) completed with zero failures', 'CI/CD Pipeline complete', 'Branch divergence: no failures', 'Agent Control Gate had 0 failed jobs']) {
     assertOnly(artifact({ summary: claim }), /^prose claims /);
   }
   // Referent: a completion word with no gate named is not a gate claim.
-  assert.deepEqual(problemsOf(artifact({ summary: 'The correction is complete. DAST (HawkScan) is PENDING.' })), []);
+  assert.deepEqual(problemsOf(artifact({ summary: 'The correction is complete. DAST (Native) is PENDING.' })), []);
 });
 
 test('NC umbrella prose: "exact-head workflows" and "required checks" name every gate at once', () => {
