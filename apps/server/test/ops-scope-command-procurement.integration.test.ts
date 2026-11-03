@@ -62,9 +62,26 @@
  * hard-deleted by raw SQL (sqlLikePrefix) in beforeAll and afterAll. No
  * $transaction wrapping. Cases tagged RED-BEFORE fail on the unmodified
  * controllers; the others are controls that pass before and after.
+ *
+ * FOLLOW3-D15-PROCUREMENT-BOUND-WRITES (V1-84) extends this suite (same prefix).
+ * ProcurementService itself binds the business on every write: each write is an
+ * updateMany where { id, businessId } that refuses (NotFound) unless it moved
+ * exactly one row, so a direct service call made with no TenantInterceptor armed
+ * (the KEY staff bridge) cannot move another business's request (OPS-11, OPS-12).
+ * Approve and reject stop writing approvedAt, approvedByUserId, rejectedAt,
+ * rejectedByUserId and rejectionReason, which the ProcurementRequest model does
+ * not have (they answered 500 to every caller: the former KNOWN_HANDLER_FAILURE),
+ * and record the decision in the audit trail, one BusinessEvent naming the
+ * member who decided (D-08: BusinessEvent is the audit trail, Activity the feed),
+ * beside the Activity feed row (OPS-13..OPS-15). With the writes bound, the three
+ * vendor transitions rejoin CANONICAL_MODULE_TOOLS.operations at write (OPS-10).
+ * BusinessEventService is real here (it writes business_events), and
+ * writableState() now includes business_events, so every "nothing written"
+ * comparison also proves a refused or failed call wrote no audit row.
  */
 import 'reflect-metadata';
 import path from 'path';
+import { readFileSync } from 'fs';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -139,10 +156,14 @@ let db: any;
 let app: any;
 let MODULE_SCOPE_KEY = '';
 const controllers: Record<string, any> = {};
+/** The real ProcurementService of the app under test, for the direct (no request, no tenant armed) calls. */
+let procurementService: any;
+let NotFound: any;
 
 async function cleanup() {
   // Hard-delete via raw SQL (bypasses the soft-delete extension), children first.
   for (const sql of [
+    `DELETE FROM business_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM procurement_requests WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM purchase_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM supplier_connections WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -281,19 +302,16 @@ const GATED_ROUTES = [...COMMAND_ROUTES, ...PROCUREMENT_ROUTES];
 const ALL_ROUTES = [...GATED_ROUTES, ...COCKPIT_ROUTES];
 
 /**
- * Found while proving this packet, outside its write set: procurement approve
- * and reject answer 500 to every caller the gate admits, OWNER included,
- * before and after D-40. ProcurementService.updateStatus writes approvedAt,
- * approvedByUserId, rejectedAt, rejectedByUserId and rejectionReason, and the
- * ProcurementRequest model (packages/db/prisma/schema.prisma) has none of them,
- * so Prisma refuses the update and the row is unchanged. The positive controls
- * pin that answer (the handler ran: a refused caller gets 401 or 403 instead);
- * a fix of the service or the schema flips these two entries to 201.
+ * Routes the gate admits whose handler fails for every caller. R0-13g found
+ * procurement approve and reject here (500 to every caller, OWNER included):
+ * ProcurementService.updateStatus wrote approvedAt, approvedByUserId,
+ * rejectedAt, rejectedByUserId and rejectionReason, which the
+ * ProcurementRequest model (packages/db/prisma/schema.prisma) does not have.
+ * FOLLOW3-D15 (V1-84) fixed the service: both answer 201 now (OPS-05, OPS-06,
+ * OPS-13, OPS-14), so the map is empty and any new entry is a regression to
+ * explain.
  */
-const KNOWN_HANDLER_FAILURE: Record<string, number> = {
-  'ProcurementController.approve': 500,
-  'ProcurementController.reject': 500,
-};
+const KNOWN_HANDLER_FAILURE: Record<string, number> = {};
 
 /**
  * Review CR-2: a case that seeds and sends every route for one or more actors makes up to ~70
@@ -335,6 +353,8 @@ async function writableState() {
     procurementRequests: await rows('procurement_requests'),
     purchaseOrders: await rows('purchase_orders'),
     supplierConnections: await rows('supplier_connections'),
+    // FOLLOW3-D15: approve and reject write the audit row; a refused or failed call writes none
+    businessEvents: await rows('business_events'),
     timeline: timeline.events.length,
     realtime: realtime.emits.length,
     notifications: notifications.created.length,
@@ -408,6 +428,9 @@ beforeAll(async () => {
   const { ProcurementService } = await import('../src/modules/procurement/procurement.service');
   const { BusinessCommandCenterController } = await import('../src/modules/business-command-center/business-command-center.controller');
   const { BusinessCommandCenterService } = await import('../src/modules/business-command-center/business-command-center.service');
+  // FOLLOW3-D15: the audit trail is real (BusinessEventModule is @Global in the app)
+  const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
+  NotFound = (await import('@nestjs/common')).NotFoundException;
   Object.assign(controllers, { CommandController, ProcurementController, BusinessCommandCenterController });
 
   // The parameter types tsc emits (emitDecoratorMetadata), which vitest's
@@ -430,6 +453,7 @@ beforeAll(async () => {
       CrmRateLimitGuard,
       CommandService,
       ProcurementService,
+      BusinessEventService,
       { provide: TimelineService, useValue: timeline },
       { provide: RealtimeService, useValue: realtime },
       { provide: NotificationsService, useValue: notifications },
@@ -438,6 +462,7 @@ beforeAll(async () => {
       { provide: BusinessCommandCenterService, useValue: cockpit },
     ],
   }).compile();
+  procurementService = moduleRef.get(ProcurementService);
 
   app = moduleRef.createNestApplication();
   // As app-bootstrap.ts: the client address comes from the proxy header.
@@ -605,7 +630,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
     }
   }, HEAVY_CASE_MS);
 
-  it("[OPS-05] operations 'write' reaches every command-centre and procurement route (GET 200, PATCH and DELETE 200, POST 201; procurement approve and reject 500, KNOWN_HANDLER_FAILURE): the gate refuses on scope, not on role", async () => {
+  it("[OPS-05] operations 'write' reaches every command-centre and procurement route (GET 200, PATCH and DELETE 200, POST 201; procurement approve and reject 201 since FOLLOW3-D15, RED-BEFORE 500): the gate refuses on scope, not on role", async () => {
     const built = await buildAll(GATED_ROUTES);
     const { statuses, bodies } = await sendAll(built, ID.opsWrite);
     expect(statuses, JSON.stringify(Object.fromEntries(Object.entries(bodies).filter(([k]) => statuses[k] >= 300)))).toEqual(
@@ -614,9 +639,12 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
     expect(bodies['ProcurementController.issuePO']).toMatchObject({ status: 'PO_ISSUED', purchaseOrder: { businessId: ID.bizA, supplierConnectionId: SUPPLIER.a } });
     expect(bodies['ProcurementController.submit']).toMatchObject({ status: 'SUBMITTED', businessId: ID.bizA });
     expect(bodies['CommandController.complete']).toMatchObject({ status: 'COMPLETED', businessId: ID.bizA });
+    // FOLLOW3-D15: approve and reject decide the request (they answered 500 before)
+    expect(bodies['ProcurementController.approve']).toMatchObject({ status: 'APPROVED', businessId: ID.bizA });
+    expect(bodies['ProcurementController.reject']).toMatchObject({ status: 'REJECTED', businessId: ID.bizA });
   }, HEAVY_CASE_MS);
 
-  it('[OPS-06] OWNER and ADMIN (role defaults, operations admin) keep every route, the cockpit snapshot included (procurement approve and reject 500, KNOWN_HANDLER_FAILURE)', async () => {
+  it('[OPS-06] OWNER and ADMIN (role defaults, operations admin) keep every route, the cockpit snapshot included (procurement approve and reject 201 since FOLLOW3-D15, RED-BEFORE 500)', async () => {
     for (const actor of [ID.owner, ID.admin]) {
       const built = await buildAll(ALL_ROUTES);
       const { statuses, bodies } = await sendAll(built, actor);
@@ -676,7 +704,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
     }
   }, HEAVY_CASE_MS);
 
-  it("[OPS-10] review SEC-R013g-1 / CR-1: KEY reaches a command or procurement tool only where HTTP admits the same member: the position envelope (JobRolePolicyService.envelopeForPosition, bounded by the holder's real membership row) gives no command_* or procurement_* tool to the members the gate refuses and only the read tools to operations read; the legacy 'procurement' family key reaches none of them; the three bare-id procurement transitions are reached by no key", async () => {
+  it("[OPS-10] review SEC-R013g-1 / CR-1: KEY reaches a command or procurement tool only where HTTP admits the same member: the position envelope (JobRolePolicyService.envelopeForPosition, bounded by the holder's real membership row) gives no command_* or procurement_* tool to the members the gate refuses and only the read tools to operations read; the legacy 'procurement' family key reaches none of them. RED-BEFORE FOLLOW3-D15 (PR-03): the three procurement vendor transitions, whose service writes now bind the business, are operations write: an operations:write envelope reaches them, operations:read and the members HTTP refuses do not", async () => {
     const { JobRolePolicyService, CANONICAL_MODULE_TOOLS, GOVERNED_UNGRANTED } = await import('../src/modules/structure/job-role-policy.service');
     const { FLOW_TOOLS } = await import('../src/modules/ai/flow-tool-registry');
     const policy = new JobRolePolicyService();
@@ -703,6 +731,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
       procurement_mark_invoiced: 'write',
     };
     expect(TOOLS).toEqual(Object.keys(ROUTE_LEVEL).sort());
+    // FOLLOW3-D15: bare-id writes before; ProcurementService now updates them where { id, businessId }
     const BARE_ID = ['procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced'];
     const READS = TOOLS.filter((t) => ROUTE_LEVEL[t] === 'read');
 
@@ -730,8 +759,9 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
       }
       if (httpLevel === 'none') expect(reached, userId).toEqual([]);
       if (httpLevel === 'read') expect(reached, userId).toEqual(READS);
-      if (httpLevel === 'write') expect(reached, userId).toEqual(expect.arrayContaining(READS));
-      for (const t of BARE_ID) expect(reached, `${userId} ${t}`).not.toContain(t);
+      if (httpLevel === 'write') expect(reached, userId).toEqual(expect.arrayContaining([...READS, ...BARE_ID]));
+      // FOLLOW3-D15 (PR-03): the vendor transitions only where HTTP gives write
+      for (const t of BARE_ID) expect(reached.includes(t), `${userId} ${t}`).toBe(httpLevel === 'write');
     }
 
     // The reviewer's probes: a legacy JobRole and holder map with procurement but no operations key
@@ -747,12 +777,17 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
     // ...and the governing key reaches them at its level and tier (issue-po is tier 3: admin)
     const job = (permissions: Record<string, string>) => policy.envelopeForJobRole({ id: `${P}jr_ops`, name: 'K13O ops', permissions: permissions as any });
     expect(TOOLS.filter((t) => reaches(job({ operations: 'read' }), t))).toEqual(READS);
-    expect(TOOLS.filter((t) => reaches(job({ operations: 'write' }), t))).toEqual(TOOLS.filter((t) => !BARE_ID.includes(t) && t !== 'procurement_issue_po'));
-    expect(TOOLS.filter((t) => reaches(job({ operations: 'admin' }), t))).toEqual(TOOLS.filter((t) => !BARE_ID.includes(t)));
+    expect(TOOLS.filter((t) => reaches(job({ operations: 'write' }), t))).toEqual(TOOLS.filter((t) => t !== 'procurement_issue_po'));
+    expect(TOOLS.filter((t) => reaches(job({ operations: 'admin' }), t))).toEqual(TOOLS);
+    for (const t of BARE_ID) {
+      expect(reaches(job({ operations: 'write' }), t), `operations:write ${t}`).toBe(true);
+      expect(reaches(job({ operations: 'read' }), t), `operations:read ${t}`).toBe(false);
+    }
 
-    // The reviewed tables say so (job-role-tool-families.spec.ts derives them from the route decorators).
-    for (const t of BARE_ID) expect(GOVERNED_UNGRANTED[t], t).toMatch(/bare id/);
-    for (const t of TOOLS.filter((x) => !BARE_ID.includes(x))) expect(CANONICAL_MODULE_TOOLS.operations[t], t).toBe(ROUTE_LEVEL[t]);
+    // The reviewed tables say so (job-role-tool-families.spec.ts derives them from the route decorators):
+    // every command and procurement tool, the three vendor transitions included, is operations at its route level.
+    for (const t of BARE_ID) expect(GOVERNED_UNGRANTED[t], t).toBeUndefined();
+    for (const t of TOOLS) expect(CANONICAL_MODULE_TOOLS.operations[t], t).toBe(ROUTE_LEVEL[t]);
   });
 
   it.todo(
@@ -770,4 +805,175 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
   it.todo(
     '[OPS-T02] the web hides the procurement nav entry and disables the command-item actions for a member without operations — not done: the entry points are apps/web/src/lib/nav-config.ts, components/layout/desktop-sidebar.tsx and mobile-drawer.tsx, components/command/command-card*.tsx and app/app/command-center/page.tsx (V1-25), all outside this packet\'s write set; apps/web/src/lib/module-access.ts holds the decision helpers they would call',
   );
+});
+
+/** One procurement request as a whole row (to_jsonb text): what "byte-identical" compares. */
+async function requestRow(id: string): Promise<string | undefined> {
+  const rows = await db.$queryRawUnsafe('SELECT to_jsonb(t)::text AS row FROM procurement_requests t WHERE id = $1', id);
+  return rows[0]?.row;
+}
+
+/** The audit trail (business_events) rows about one procurement request. */
+async function auditRows(subjectId: string) {
+  return db.businessEvent.findMany({ where: { subjectId }, orderBy: { createdAt: 'asc' } });
+}
+
+/** bizB's request carried to PO_ISSUED with its own supplier, so every transition would be a real change. */
+async function foreignPoIssued() {
+  const row = await seedProcurementRequest(ID.bizB, { supplier: SUPPLIER.b });
+  await db.procurementRequest.update({ where: { id: row.id }, data: { status: 'PO_ISSUED' } });
+  return row.id as string;
+}
+
+/** A method's text in a class source (two-space indented member, up to its closing brace). */
+function memberText(src: string, name: string): string | null {
+  const lines = src.split('\n');
+  const sig = new RegExp(`^ {2}(?:public |private |protected )?(?:async )?${name}\\s*[(<]`);
+  const s = lines.findIndex((l) => sig.test(l));
+  if (s < 0) return null;
+  let e = s + 1;
+  while (e < lines.length && !/^ {2}\}\s*$/.test(lines[e])) e++;
+  return lines.slice(s, e + 1).join('\n');
+}
+
+describe('FOLLOW3-D15-PROCUREMENT-BOUND-WRITES (V1-84): ProcurementService binds the business on every write; approve and reject decide and are audited', () => {
+  it("[OPS-11] RED-BEFORE PR-01: ProcurementService called directly (no HTTP request, no TenantInterceptor armed: how the KEY staff bridge calls it) with bizA's business id and bizB's request id refuses every write with NotFound, and bizB's row is byte-identical: update, submitForReview, updateStatus (approve and reject), selectVendor, issuePO, acknowledgeVendor, markFulfilled and markInvoiced; no purchase order, no audit row and no feed row is written", async () => {
+    const CALLS: Array<[string, (id: string) => Promise<unknown>]> = [
+      ['update', (id) => procurementService.update(ID.bizA, id, { status: 'APPROVED', internalNotes: `${P}moved` })],
+      ['submitForReview', (id) => procurementService.submitForReview(ID.bizA, id)],
+      ['updateStatus APPROVED', (id) => procurementService.updateStatus(ID.bizA, id, 'APPROVED', ID.owner)],
+      ['updateStatus REJECTED', (id) => procurementService.updateStatus(ID.bizA, id, 'REJECTED', ID.owner, `${P}no`)],
+      ['selectVendor', (id) => procurementService.selectVendor(ID.bizA, id, SUPPLIER.a)],
+      ['issuePO', (id) => procurementService.issuePO(ID.bizA, id, ID.owner)],
+      ['acknowledgeVendor', (id) => procurementService.acknowledgeVendor(ID.bizA, id)],
+      ['markFulfilled', (id) => procurementService.markFulfilled(ID.bizA, id)],
+      ['markInvoiced', (id) => procurementService.markInvoiced(ID.bizA, id)],
+    ];
+    const outcomes: Record<string, string> = {};
+    const moved: string[] = [];
+    const wrote: string[] = [];
+    for (const [name, call] of CALLS) {
+      const id = await foreignPoIssued();
+      const rowBefore = await requestRow(id);
+      const before = await writableState();
+      try {
+        const out = (await call(id)) as { status?: string; businessId?: string } | undefined;
+        outcomes[name] = `resolved (${out?.businessId} ${out?.status})`;
+      } catch (err) {
+        outcomes[name] = err instanceof NotFound ? 'NotFound' : `${(err as Error).constructor.name}: ${(err as Error).message}`;
+      }
+      if ((await requestRow(id)) !== rowBefore) moved.push(name);
+      if (JSON.stringify(await writableState()) !== JSON.stringify(before)) wrote.push(name);
+    }
+    expect({ outcomes, moved, wrote }).toEqual({ outcomes: Object.fromEntries(CALLS.map(([n]) => [n, 'NotFound'])), moved: [], wrote: [] });
+
+    // anti-vacuity: with the request's own business the same three transitions do move it
+    const own = await foreignPoIssued();
+    expect(await procurementService.acknowledgeVendor(ID.bizB, own)).toMatchObject({ id: own, businessId: ID.bizB, status: 'VENDOR_ACKNOWLEDGED' });
+    expect(await procurementService.markFulfilled(ID.bizB, own)).toMatchObject({ id: own, businessId: ID.bizB, status: 'FULFILLED' });
+    expect(await procurementService.markInvoiced(ID.bizB, own)).toMatchObject({ id: own, businessId: ID.bizB, status: 'INVOICED' });
+  }, HEAVY_CASE_MS);
+
+  it('[OPS-12] RED-BEFORE PR-01: every write ProcurementService makes to a procurement request is an updateMany whose where names { id, businessId } and is refused (NotFound) unless it moved exactly one row; each of the eight writing methods writes through one; none writes approvedAt, approvedByUserId, rejectedAt, rejectedByUserId or rejectionReason, which the model does not have', () => {
+    const src = readFileSync(path.join(__dirname, '../src/modules/procurement/procurement.service.ts'), 'utf8');
+    // no write that finds the request by its bare id
+    expect(src.match(/procurementRequest\.(update|upsert|delete|deleteMany)\(/g) ?? []).toEqual([]);
+    const sites = [...src.matchAll(/procurementRequest\.updateMany\(/g)].map((m) => src.slice(m.index!, m.index! + 400));
+    expect(sites.length).toBeGreaterThan(0);
+    for (const site of sites) {
+      expect(site).toMatch(/^procurementRequest\.updateMany\(\{\s*where: \{ id, businessId \},/);
+      expect(site).toMatch(/\bcount !== 1\)\s*throw new NotFoundException\(/);
+    }
+    // each writing method writes through such a site, itself or through an own-class helper
+    const writesThrough = (body: string) =>
+      body.includes('procurementRequest.updateMany(') ||
+      [...body.matchAll(/this\.([a-zA-Z0-9_]+)\(/g)].some((m) => (memberText(src, m[1]) ?? '').includes('procurementRequest.updateMany('));
+    for (const method of ['update', 'submitForReview', 'updateStatus', 'selectVendor', 'issuePO', 'acknowledgeVendor', 'markFulfilled', 'markInvoiced']) {
+      const body = memberText(src, method);
+      expect(body, method).not.toBeNull();
+      expect(writesThrough(body!), method).toBe(true);
+    }
+    expect(src).not.toMatch(/\b(approvedAt|approvedByUserId|rejectedAt|rejectedByUserId|rejectionReason)\s*:/);
+  });
+
+  it("[OPS-13] RED-BEFORE PR-02: POST procurement/businesses/A/:id/approve (the OWNER, and a STAFF member with operations write) answers 201 with status APPROVED, the row is APPROVED, and exactly one BusinessEvent records the decision: business A, subject procurement_request :id, action approved, the approving member as the (human) actor, the status before and after; the Activity feed row is still written and names the approver", async () => {
+    for (const actor of [ID.owner, ID.opsWrite]) {
+      const row = await seedProcurementRequest(ID.bizA);
+      await db.procurementRequest.update({ where: { id: row.id }, data: { status: 'SUBMITTED' } });
+      const feedFrom = timeline.events.length;
+      const res = await send('post', `${proc(ID.bizA)}/${row.id}/approve`, actor);
+      expect(res.status, `${actor} ${JSON.stringify(res.body)}`).toBe(201);
+      expect(res.body, actor).toMatchObject({ id: row.id, businessId: ID.bizA, status: 'APPROVED' });
+      expect((await db.procurementRequest.findUnique({ where: { id: row.id } })).status, actor).toBe('APPROVED');
+      const audit = await auditRows(row.id);
+      expect(audit, actor).toHaveLength(1);
+      expect(audit[0], actor).toMatchObject({
+        businessId: ID.bizA,
+        eventType: 'procurement_request.approved',
+        subjectType: 'procurement_request',
+        subjectId: row.id,
+        action: 'approved',
+        actorType: 'human',
+        actorId: actor,
+        before: { status: 'SUBMITTED' },
+        after: { status: 'APPROVED' },
+      });
+      const feed = timeline.events.slice(feedFrom).filter((e) => e.entityId === row.id);
+      expect(feed, actor).toEqual([
+        expect.objectContaining({ businessId: ID.bizA, module: 'procurement', action: 'request.approved', actorType: 'USER', actorId: actor }),
+      ]);
+    }
+  }, HEAVY_CASE_MS);
+
+  it('[OPS-14] RED-BEFORE PR-02: POST procurement/businesses/A/:id/reject with a reason answers 201 with status REJECTED, and exactly one BusinessEvent records the decision with the reason in its metadata (action rejected, the rejecting member as actor); the Activity feed row is still written and carries the reason', async () => {
+    const row = await seedProcurementRequest(ID.bizA);
+    await db.procurementRequest.update({ where: { id: row.id }, data: { status: 'SUBMITTED' } });
+    const reason = `${P}over budget this quarter`;
+    const feedFrom = timeline.events.length;
+    const res = await send('post', `${proc(ID.bizA)}/${row.id}/reject`, ID.owner, { reason });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ id: row.id, businessId: ID.bizA, status: 'REJECTED' });
+    expect((await db.procurementRequest.findUnique({ where: { id: row.id } })).status).toBe('REJECTED');
+    const audit = await auditRows(row.id);
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({
+      businessId: ID.bizA,
+      eventType: 'procurement_request.rejected',
+      subjectType: 'procurement_request',
+      subjectId: row.id,
+      action: 'rejected',
+      actorType: 'human',
+      actorId: ID.owner,
+      before: { status: 'SUBMITTED' },
+      after: { status: 'REJECTED' },
+      metadata: { reason },
+    });
+    const feed = timeline.events.slice(feedFrom).filter((e) => e.entityId === row.id);
+    expect(feed).toEqual([
+      expect.objectContaining({ businessId: ID.bizA, action: 'request.rejected', actorType: 'USER', actorId: ID.owner, data: { status: 'REJECTED', reason } }),
+    ]);
+  });
+
+  it("[OPS-15] a refused or failed approve or reject writes no BusinessEvent: refused by the gate (unauthenticated 401; STAFF operations read, no operations key, another tenant's owner 403) or failed (bizB's request through bizA's path, 404, as the OWNER), the request is unchanged and no audit, feed or other row is written", async () => {
+    const own = await seedProcurementRequest(ID.bizA);
+    await db.procurementRequest.update({ where: { id: own.id }, data: { status: 'SUBMITTED' } });
+    const foreign = await foreignPoIssued();
+    const cases: Array<[string, string | undefined, string, number]> = [];
+    for (const verb of ['approve', 'reject']) {
+      cases.push([`${verb} unauthenticated`, undefined, `${proc(ID.bizA)}/${own.id}/${verb}`, 401]);
+      cases.push([`${verb} operations read`, ID.opsRead, `${proc(ID.bizA)}/${own.id}/${verb}`, 403]);
+      cases.push([`${verb} no operations key`, ID.noOps, `${proc(ID.bizA)}/${own.id}/${verb}`, 403]);
+      cases.push([`${verb} other tenant's owner`, ID.outsider, `${proc(ID.bizA)}/${own.id}/${verb}`, 403]);
+      cases.push([`${verb} bizB's request via bizA`, ID.owner, `${proc(ID.bizA)}/${foreign}/${verb}`, 404]);
+    }
+    const before = await writableState();
+    const rows = { own: await requestRow(own.id), foreign: await requestRow(foreign) };
+    const statuses: Record<string, number> = {};
+    for (const [label, actor, url] of cases) statuses[label] = (await send('post', url, actor, { reason: `${P}refused` })).status;
+    expect(statuses).toEqual(Object.fromEntries(cases.map(([label, , , status]) => [label, status])));
+    expect(await auditRows(own.id)).toEqual([]);
+    expect(await auditRows(foreign)).toEqual([]);
+    expect({ own: await requestRow(own.id), foreign: await requestRow(foreign) }).toEqual(rows);
+    expect(await writableState()).toEqual(before);
+  }, HEAVY_CASE_MS);
 });

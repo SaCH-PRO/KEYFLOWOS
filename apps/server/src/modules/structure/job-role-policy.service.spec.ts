@@ -207,15 +207,15 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
     write: [
       'contracts_acknowledge_alert', 'inbox_mark_resolved', 'contracts_create', 'contract_create_tag', 'inbox_update_thread_status', 'performance_take_snapshot', 'inbox_brief',
       'command_discharge_obligation', 'procurement_create_request', 'procurement_update_request', 'procurement_submit_for_review', 'procurement_select_vendor',
+      // FOLLOW3-D15: ProcurementService writes the request where { id, businessId }, so the three vendor
+      // transitions rejoin operations at their route level (GOVERNED_UNGRANTED from R0-13g until then)
+      'procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced',
     ],
     // procurement_issue_po: its route needs operations:write, its tier (3) needs admin (C3 ladder)
     admin: ['contracts_delete', 'inbox_reply_thread', 'payroll_approve_run', 'payroll_mark_paid', 'procurement_issue_po'],
-    // PayrollService.setRate / generateRun and ContractClauseService.extractClauses back no route;
-    // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced update the request by its bare id
-    // (GOVERNED_UNGRANTED, R0-13g)
+    // PayrollService.setRate / generateRun and ContractClauseService.extractClauses back no route
     deny: [
       'payroll_set_rate', 'payroll_generate_run', 'contract_extract_clauses', 'helpdesk_create_ticket', 'commerce_create_invoice', 'structure_get_org_tree',
-      'procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced',
     ],
   },
   connect: {
@@ -2800,7 +2800,8 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
         'evidence_verify',
         'people_assign_task',
         // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: governed by operations since
-        // D-40, so GOVERNED_UNGRANTED instead (R0-13g); still reached by no key (below)
+        // D-40, so GOVERNED_UNGRANTED instead (R0-13g), and operations write since FOLLOW3-D15 bound
+        // ProcurementService's writes to the business; the legacy family still reaches none of them (below)
         'projects_update_task',
       ].sort(),
     );
