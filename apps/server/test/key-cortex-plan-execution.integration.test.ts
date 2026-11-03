@@ -632,3 +632,63 @@ describe('Trial-N repair round 2: KEY plans that write invoices or payments (D-4
     expect(await planner.executePlan(notes, {}, asSuperAdmin())).toMatchObject({ planId: notes, status: 'completed', executed: 1 });
   });
 });
+
+/**
+ * Trial-N repair round 2, recheck KEY-D46-NOMEMBER (blocking). The D-46 and revenue-write check
+ * above ran only when executePlan was handed a member (POST cortex/plans/:planId/execute). The
+ * query pipeline (POST cortex/chat: processQuery -> createPlanFromGoal(query.userId) ->
+ * executePlan(plan.id, { traceId })) and the cortex triggers call it with no member, and a
+ * member's plan then ran as plan.userId with no check: a non-member SUPER_ADMIN (BusinessGuard
+ * admits one) or a STAFF member holding revenue read had commerce steps run. Required (D-46 covers
+ * every path): with no member, a plan that writes the business's invoices or payments runs as its
+ * creator only when that creator could run it over HTTP: a SUPER_ADMIN who is a member, or a member
+ * holding revenue write (the OWNER by its role). Otherwise 403 before the claim: nothing routed,
+ * no saga, the plan left as it was. The creator's role is read from its User row.
+ */
+describe('Trial-N repair round 2 recheck: KEY plans run with no member (query pipeline, triggers) that write invoices or payments (D-46)', () => {
+  const INVOICE = { module: 'commerce', action: 'create_invoice' };
+  const PAYMENT = { module: 'commerce', action: 'process_payment' };
+
+  it('KP-04 a plan created by a platform SUPER_ADMIN who is not a member, run with no member (the query pipeline), is refused: 403, nothing routed, no saga, the plan still pending', async () => {
+    const planId = `${P}plan_d46_nomember_super`;
+    await seedPlan(planId, [INVOICE, PAYMENT], ID.superAdmin);
+    const from = routed.length;
+    const sagas = await sagaCount();
+
+    const err = await planner.executePlan(planId, { traceId: 'v10a_kp04' }).catch((e: unknown) => e);
+
+    expect(err, String(err)).toBeInstanceOf(ForbiddenException);
+    expect(String((err as Error).message)).toMatch(/not a member/i);
+    expect(routedPerStep(planId, from)).toEqual({});
+    expect(await sagaCount()).toBe(sagas);
+    expect(await planRow(planId)).toMatchObject({ status: 'pending', startedAt: null });
+  });
+
+  it('KP-05 a plan created by a STAFF member holding revenue read only, run with no member (a trigger), is refused: 403 and nothing routed', async () => {
+    const planId = `${P}plan_d46_nomember_staff`;
+    await seedPlan(planId, [INVOICE], ID.staff);
+    const from = routed.length;
+
+    const err = await planner.executePlan(planId, {}).catch((e: unknown) => e);
+
+    expect(err, String(err)).toBeInstanceOf(ForbiddenException);
+    expect(String((err as Error).message)).toMatch(/revenue requires write/);
+    expect(routedPerStep(planId, from)).toEqual({});
+    expect((await planRow(planId)).status).toBe('pending');
+  });
+
+  it("KP-06 regression control: with no member, the OWNER's invoice plan runs every step once as the OWNER, and a STAFF member's plan that writes no invoice runs as that member", async () => {
+    const planId = `${P}plan_d46_nomember_owner`;
+    await seedPlan(planId, [INVOICE, PAYMENT], ID.owner);
+    const from = routed.length;
+    expect(await planner.executePlan(planId, {})).toMatchObject({ planId, status: 'completed', executed: 2 });
+    expect(routedPerStep(planId, from)).toEqual({ [`${planId}_s1`]: 1, [`${planId}_s2`]: 1 });
+    expect(routed.slice(from).filter((r) => String(r.marker).startsWith(planId)).map((r) => r.userId)).toEqual([ID.owner, ID.owner]);
+
+    const notes = `${P}plan_d46_nomember_staff_notes`;
+    const notesFrom = routed.length;
+    await seedPlan(notes, [NOTE], ID.staff);
+    expect(await planner.executePlan(notes, {})).toMatchObject({ planId: notes, status: 'completed', executed: 1 });
+    expect(routed.slice(notesFrom).filter((r) => String(r.marker).startsWith(notes)).map((r) => r.userId)).toEqual([ID.staff]);
+  });
+});

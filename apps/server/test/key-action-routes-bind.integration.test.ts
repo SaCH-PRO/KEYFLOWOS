@@ -213,6 +213,18 @@ const ID = {
   sRunDel: `${P}sRunDel`, // crm_delete_contact (the governance stand-in asks for formal approval)
   taskG: `${P}taskG`, // awaiting approval; denied over HTTP
   taskH: `${P}taskH`, // awaiting approval; denied through the cortex autopilot adapter
+  // Trial-N repair round 2 recheck (bizR, proposed by rStaffOwned or rStaffW, so the QR-01 counts are unchanged)
+  planApvNoToolList: `${P}planApvNoToolList`, // rStaffOwned's draft plan: a step with no toolName whose action is crm_list_contacts
+  planApvNoToolInv: `${P}planApvNoToolInv`, // rStaffOwned's draft plan: a step with no toolName whose action is commerce_create_invoice
+  planApvNoToolText: `${P}planApvNoToolText`, // rStaffW's draft plan: an 'analyze' step (no tool, its action names no tool) and a crm_add_note
+  planROut: `${P}planROut`, // rStaffOwned's plan whose crm_list_contacts step the plan executor ran with no principal (its output names rPriv)
+  sROutList: `${P}sROutList`,
+  // CRM-DUP-HTTP: their own business, so no other count changes
+  bizDup: `${P}bizDup`,
+  dOwner: `${P}dOwner`, // OWNER of bizDup
+  dStaff: `${P}dStaff`, // STAFF of bizDup: crm read (crm_view all by default)
+  dTeam: `${P}dTeam`, // the OWNER's TEAM contact
+  dPriv: `${P}dPriv`, // the OWNER's PRIVATE contact, a duplicate of dTeam by email and by name
 };
 
 const STORED_ARGS = { contactId: `${P}contactA`, body: 'v31b stored note' };
@@ -516,7 +528,7 @@ beforeAll(async () => {
   await seedStep(ID.sApproval, ID.planA, 5, 'crm_delete_contact', { contactId: ID.contactA });
   await seedStep(ID.sForeign, ID.planB, 1, 'crm_add_note', { contactId: ID.contactB, body: 'b' });
   await db.aiPlan.create({ data: { id: ID.planC, businessId: ID.bizA, userId: ID.owner, objective: 'v31b plan C', status: 'draft' } });
-  await seedStep(ID.sPrivUpdate, ID.planC, 1, 'crm_update_contact', { contactId: ID.contactPriv, email: 'v31b-attacker@test.local' });
+  await seedStep(ID.sPrivUpdate, ID.planC, 1, 'crm_update_contact', { contactId: ID.contactPriv, email: `${P}attacker@test.local` });
   await seedStep(ID.sPrivDelete, ID.planC, 2, 'crm_delete_contact', { contactId: ID.contactPriv });
   await seedStep(ID.sPrivTag, ID.planC, 3, 'tag_contact', { contactId: ID.contactPriv, tag: 'v31b' });
   await seedStep(ID.sCreate, ID.planC, 4, 'crm_create_contact', { firstName: 'V31b Created' });
@@ -580,8 +592,8 @@ beforeAll(async () => {
   await m(ID.rStaffW, ID.bizR, 'STAFF', { crm: 'write', operations: 'write' });
   await m(ID.rStaffRev, ID.bizR, 'STAFF', { crm: 'write', revenue: 'read', operations: 'write' });
   // rTeam and rPriv share an email (emailNormalized left null, so the live unique index is not involved): one duplicate pair.
-  await db.contact.create({ data: { id: ID.rTeam, businessId: ID.bizR, firstName: 'Rdup', lastName: 'Person', email: 'v31b-rdup@test.local', visibility: 'TEAM', ownerId: ID.rOwner } });
-  await db.contact.create({ data: { id: ID.rPriv, businessId: ID.bizR, firstName: 'Rdup', lastName: 'Private', email: 'v31b-rdup@test.local', visibility: 'PRIVATE', ownerId: ID.rOwner } });
+  await db.contact.create({ data: { id: ID.rTeam, businessId: ID.bizR, firstName: 'Rdup', lastName: 'Person', email: `${P}rdup@test.local`, visibility: 'TEAM', ownerId: ID.rOwner } });
+  await db.contact.create({ data: { id: ID.rPriv, businessId: ID.bizR, firstName: 'Rdup', lastName: 'Private', email: `${P}rdup@test.local`, visibility: 'PRIVATE', ownerId: ID.rOwner } });
   await db.contact.create({ data: { id: ID.rOwnedC, businessId: ID.bizR, firstName: 'Rdup', lastName: 'Owned', visibility: 'TEAM', ownerId: ID.rStaffOwned } });
   const planR = (id: string, userId: string) =>
     db.aiPlan.create({ data: { id, businessId: ID.bizR, userId, objective: `v31b ${id.slice(P.length)}`, status: 'draft' } });
@@ -606,6 +618,40 @@ beforeAll(async () => {
   }
   await planR(ID.planRun, ID.rOwner);
   await seedStep(ID.sRunDel, ID.planRun, 1, 'crm_delete_contact', { contactId: ID.rTeam });
+
+  // Trial-N repair round 2 recheck. A step with no toolName, as PlannerService stores the model's
+  // step when its tool is not in the registry: PlanExecutorService runs `toolName ?? action`.
+  const noToolStep = (id: string, planId: string, order: number, action: string, inputPayload: Record<string, unknown>) =>
+    db.aiPlanStep.create({ data: { id, planId, order, toolName: null, action, description: 'v31b', riskTier: 1, inputPayload, status: 'pending' } });
+  await planR(ID.planApvNoToolList, ID.rStaffOwned);
+  await noToolStep(`${ID.planApvNoToolList}_s1`, ID.planApvNoToolList, 1, 'crm_list_contacts', { limit: 50 });
+  await planR(ID.planApvNoToolInv, ID.rStaffOwned);
+  await noToolStep(`${ID.planApvNoToolInv}_s1`, ID.planApvNoToolInv, 1, 'commerce_create_invoice', { contactId: ID.rTeam, items: [] });
+  await planR(ID.planApvNoToolText, ID.rStaffW);
+  await noToolStep(`${ID.planApvNoToolText}_s1`, ID.planApvNoToolText, 1, 'Analyze which contacts went quiet last month', {});
+  await seedStep(`${ID.planApvNoToolText}_s2`, ID.planApvNoToolText, 2, 'crm_add_note', { contactId: ID.rTeam, body: 'v31b analyze then note' });
+  // A contact read the plan executor ran with no principal after the OWNER approved it: its
+  // output is every contact, the OWNER's PRIVATE one included (what ai_plan_steps.output_result holds).
+  await db.aiPlan.create({ data: { id: ID.planROut, businessId: ID.bizR, userId: ID.rStaffOwned, objective: 'v31b planROut', status: 'completed' } });
+  await db.aiPlanStep.create({
+    data: {
+      id: ID.sROutList, planId: ID.planROut, order: 1, toolName: 'crm_list_contacts', action: 'v31b crm_list_contacts', description: 'v31b', riskTier: 1,
+      inputPayload: { limit: 50 }, status: 'completed',
+      outputResult: { contacts: [{ id: ID.rPriv, firstName: 'Rdup', lastName: 'Private' }, { id: ID.rTeam, firstName: 'Rdup', lastName: 'Person' }] },
+    },
+  });
+
+  // CRM-DUP-HTTP: bizDup.
+  for (const id of [ID.dOwner, ID.dStaff]) {
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
+  }
+  await db.business.create({ data: { id: ID.bizDup, name: 'V31b Biz Dup', ownerId: ID.dOwner } });
+  await m(ID.dOwner, ID.bizDup, 'OWNER');
+  await m(ID.dStaff, ID.bizDup, 'STAFF', { crm: 'read' });
+  // Same email (emailNormalized left null, so the live unique index is not involved) and same name:
+  // one pair for findCandidatesScoped and one name group for the legacy groups shape.
+  await db.contact.create({ data: { id: ID.dTeam, businessId: ID.bizDup, firstName: 'Ddup', lastName: 'Same', email: `${P}ddup@test.local`, visibility: 'TEAM', ownerId: ID.dOwner } });
+  await db.contact.create({ data: { id: ID.dPriv, businessId: ID.bizDup, firstName: 'Ddup', lastName: 'Same', email: `${P}ddup@test.local`, visibility: 'PRIVATE', ownerId: ID.dOwner } });
 }, 120_000);
 
 afterAll(async () => {
@@ -894,6 +940,68 @@ beforeAll(async () => {
 
 afterAll(async () => {
   if (aiApp) await aiApp.close();
+});
+
+/*
+ * Trial-N repair round 2 recheck (CRM-DUP-HTTP): a fourth app with CrmController, for GET
+ * crm/businesses/:b/duplicates. REAL: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
+ * CrmRateLimitGuard, CrmController, CrmDuplicateDetectionService (the pairs) and
+ * CrmStatsService.findDuplicates (the legacy groups, reached through CrmService.findDuplicates).
+ * Stand-ins: CrmService answers findDuplicates from the real CrmStatsService; CrmStatsService's
+ * timeline and cache, and every other collaborator of CrmController (no case reaches one).
+ */
+let crmApp: any;
+
+beforeAll(async () => {
+  const { Test } = await import('@nestjs/testing');
+  const { PrismaService } = await import('../src/core/prisma/prisma.service');
+  const { AuthGuard } = await import('../src/core/auth/auth.guard');
+  const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+  const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+  const { CrmController } = await import('../src/modules/crm/crm.controller');
+  const { CrmService } = await import('../src/modules/crm/crm.service');
+  const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+  const { CrmDuplicateDetectionService } = await import('../src/modules/crm/crm-duplicate-detection.service');
+
+  const moduleRef = await Test.createTestingModule({
+    controllers: [CrmController],
+    providers: [
+      PrismaService,
+      AuthGuard,
+      BusinessGuard,
+      ModuleScopeGuard,
+      CrmRateLimitGuard,
+      CrmDuplicateDetectionService,
+      {
+        provide: CrmStatsService,
+        inject: [PrismaService],
+        useFactory: (prisma: any) => new (CrmStatsService as any)(prisma, { logEvent: async () => undefined }, { invalidate: async () => undefined }),
+      },
+      {
+        provide: CrmService,
+        inject: [CrmStatsService],
+        useFactory: (stats: any) => ({ findDuplicates: (businessId: string) => stats.findDuplicates(businessId) }),
+      },
+    ],
+  })
+    .useMocker(() => ({}))
+    .compile();
+  crmApp = moduleRef.createNestApplication();
+  crmApp.use(async (req: any, _res: any, next: any) => {
+    const header = req.headers['x-test-user'];
+    const id = typeof header === 'string' ? header : undefined;
+    if (id && id.startsWith(P)) {
+      const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+      if (user) req.user = { id: user.id, email: user.email, role: user.role };
+    }
+    next();
+  });
+  await crmApp.init();
+}, 120_000);
+
+afterAll(async () => {
+  if (crmApp) await crmApp.close();
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -1411,6 +1519,132 @@ describe('Trial-N repair round 2: contact reads under the member\'s visibility, 
   });
 });
 
+function aiPlans(actor: string, suffix = '', businessId = ID.bizR) {
+  return request(aiApp.getHttpServer()).get(`/ai/businesses/${businessId}/ai/plans${suffix}`).set('x-test-user', actor);
+}
+
+function crmDuplicates(actor: string, businessId = ID.bizDup) {
+  return request(crmApp.getHttpServer()).get(`/crm/businesses/${businessId}/duplicates?minConfidence=0.5`).set('x-test-user', actor);
+}
+
+/**
+ * Trial-N repair round 2, recheck (items still open after round 1):
+ *   - APPROVE-NOTOOL: POST ai/plans/:planId/approve skipped a step whose toolName is null ("runs
+ *     nothing"), but PlanExecutorService runs `step.toolName ?? step.action`, and PlannerService
+ *     stores the model's action verbatim. So a step named only by its action skipped the scope,
+ *     owner-only, D-46 and no-principal contact-read checks. Required: the approval checks the tool
+ *     the executor will run; a step whose action names nothing the dispatcher runs (an analyze
+ *     step) still needs nothing.
+ *   - AI-PLANS-READ: GET ai/plans and GET ai/plans/:planId returned every plan's steps, inputPayload
+ *     and outputResult to any member (the QUEUE-READ rule, undone). Required: the queue's rule
+ *     (a plan to its proposer, the OWNER, an ADMIN or a SUPER_ADMIN; a step under its tool's module
+ *     read), another member's plan answered as an unknown one; and the output of a contact read
+ *     the plan executor ran with no principal (every contact, PRIVATE ones included) shown only
+ *     to the OWNER (or a SUPER_ADMIN), on the plans routes and the queue alike.
+ *   - CRM-DUP-HTTP: GET crm/.../duplicates returned findCandidatesScoped's pairs and the legacy
+ *     groups with no visibility clause, so a crm-read STAFF member got pairs and groups naming the
+ *     OWNER's PRIVATE contact. Required: what the dispatcher's crm_find_duplicates applies (D-37):
+ *     only pairs, and groups of at least two contacts, the member may open.
+ */
+describe('Trial-N repair round 2 recheck: plan approval of tool-less steps, the plans read, GET duplicates', () => {
+  it('PA-05 (APPROVE-NOTOOL) a step stored with no toolName runs its action as the tool, so approval checks that action: crm_list_contacts and commerce_create_invoice named only by their action are 403 for their STAFF proposer; nothing is approved or enqueued; the OWNER approves the contact read', async () => {
+    const list = await approvePlanRoute(ID.rStaffOwned, ID.planApvNoToolList);
+    expect(list.status, JSON.stringify(list.body)).toBe(403);
+    expect(JSON.stringify(list.body)).toMatch(/business owner/);
+    const inv = await approvePlanRoute(ID.rStaffOwned, ID.planApvNoToolInv);
+    expect(inv.status, JSON.stringify(inv.body)).toBe(403);
+    expect(JSON.stringify(inv.body)).toMatch(/revenue requires write/);
+    for (const planId of [ID.planApvNoToolList, ID.planApvNoToolInv]) {
+      expect(await planStatus(planId), planId).toBe('draft');
+      expect(planApprovedEvents.map((e) => e.planId), planId).not.toContain(planId);
+    }
+
+    const owner = await approvePlanRoute(ID.rOwner, ID.planApvNoToolList);
+    expect(owner.status, JSON.stringify(owner.body)).toBe(201);
+    expect(await planStatus(ID.planApvNoToolList)).toBe('approved');
+  });
+
+  it('PA-06 (APPROVE-NOTOOL) regression control: a step with no toolName whose action names no tool the dispatcher runs (an analyze step) needs nothing; its proposer approves the plan', async () => {
+    const res = await approvePlanRoute(ID.rStaffW, ID.planApvNoToolText);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(await planStatus(ID.planApvNoToolText)).toBe('approved');
+    expect(planApprovedEvents.filter((e) => e.planId === ID.planApvNoToolText)).toHaveLength(1);
+  });
+
+  it('AR-01 (AI-PLANS-READ) GET ai/plans shows a STAFF member only their own plans and only the steps whose module they may read: no other member\'s plan, step id or inputPayload', async () => {
+    const res = await aiPlans(ID.rStaff, '?limit=100');
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const text = JSON.stringify(res.body);
+    expect((res.body as Array<{ id: string }>).map((p) => p.id)).toEqual([ID.planRStaff]);
+    for (const hidden of [ID.planROwner, ID.sROwnerNote, ID.sROwnerInv, 'v31b owner-only note text', `${P}rinv_owner`, ID.planApvOther, ID.planRun, ID.sRunDel, ID.planROut]) {
+      expect(text, hidden).not.toContain(hidden);
+    }
+    const own = (res.body as Array<{ id: string; steps: Array<{ id: string }> }>)[0];
+    expect(own.steps.map((s) => s.id)).toContain(ID.sRSearch);
+    expect(own.steps.map((s) => s.id)).not.toContain(ID.sRStaffRev);
+    expect(text).not.toContain(`${P}rinv_staff`);
+  });
+
+  it('AR-02 (AI-PLANS-READ) GET ai/plans/:planId answers another member\'s plan exactly as an unknown id, and the viewer\'s own plan without the steps they may not read', async () => {
+    const hidden = await aiPlans(ID.rStaff, `/${ID.planROwner}`);
+    const unknown = await aiPlans(ID.rStaff, `/${P}no_such_plan`);
+    expect(hidden.status).toBe(unknown.status);
+    expect(hidden.text).toBe(unknown.text);
+    expect(hidden.text).not.toContain(ID.sROwnerInv);
+
+    const own = await aiPlans(ID.rStaff, `/${ID.planRStaff}`);
+    expect(own.status, JSON.stringify(own.body)).toBe(200);
+    expect(own.body).toMatchObject({ id: ID.planRStaff });
+    const stepIds = (own.body.steps as Array<{ id: string }>).map((s) => s.id);
+    expect(stepIds).toContain(ID.sRSearch);
+    expect(stepIds).not.toContain(ID.sRStaffRev);
+    expect(own.text).not.toContain(`${P}rinv_staff`);
+  });
+
+  it('AR-03 (AI-PLANS-READ) regression control: the OWNER and an ADMIN see every plan of the business, and the OWNER every step', async () => {
+    for (const actor of [ID.rOwner, ID.rAdmin]) {
+      const res = await aiPlans(actor, '?limit=100');
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      const planIds = (res.body as Array<{ id: string }>).map((p) => p.id);
+      for (const planId of [ID.planRStaff, ID.planROwner, ID.planApvOther, ID.planRun, ID.planROut]) expect(planIds, `${actor} ${planId}`).toContain(planId);
+      const detail = await aiPlans(actor, `/${ID.planROwner}`);
+      expect((detail.body.steps as Array<{ id: string }>).map((s) => s.id).sort(), actor).toEqual([ID.sROwnerInv, ID.sROwnerNote].sort());
+    }
+  });
+
+  it('AR-04 (AI-PLANS-READ) the output of a contact read the plan executor ran with no principal (it names the OWNER\'s PRIVATE contact) reaches only the OWNER: not its STAFF proposer on GET ai/plans, GET ai/plans/:planId or the queue, nor an ADMIN', async () => {
+    for (const res of [await queue(ID.rStaffOwned), await aiPlans(ID.rStaffOwned, '?limit=100'), await aiPlans(ID.rStaffOwned, `/${ID.planROut}`)]) {
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.text).toContain(ID.sROutList);
+      expect(res.text).not.toContain(ID.rPriv);
+    }
+    const admin = await aiPlans(ID.rAdmin, `/${ID.planROut}`);
+    expect(admin.status).toBe(200);
+    expect(JSON.stringify(admin.body.steps)).not.toContain(ID.rPriv);
+
+    const owner = await aiPlans(ID.rOwner, `/${ID.planROut}`);
+    expect(owner.status).toBe(200);
+    expect(JSON.stringify(owner.body.steps)).toContain(ID.rPriv);
+  });
+
+  it('DUP-01 (CRM-DUP-HTTP) GET crm/.../duplicates applies the member\'s visibility: a crm-read STAFF member gets no pair and no group naming the OWNER\'s PRIVATE contact; the OWNER gets both', async () => {
+    const pairKey = (p: { primaryId: string; duplicateId: string }) => [p.primaryId, p.duplicateId].sort().join('|');
+    const privPair = [ID.dPriv, ID.dTeam].sort().join('|');
+
+    const owner = await crmDuplicates(ID.dOwner);
+    expect(owner.status, JSON.stringify(owner.body)).toBe(200);
+    expect(owner.body.pairs.map(pairKey)).toContain(privPair);
+    expect(owner.body.groups.some((g: { contacts: Array<{ id: string }> }) => g.contacts.some((c) => c.id === ID.dPriv))).toBe(true);
+
+    const staff = await crmDuplicates(ID.dStaff);
+    expect(staff.status, JSON.stringify(staff.body)).toBe(200);
+    expect(staff.text).not.toContain(ID.dPriv);
+    expect(staff.body.pairs).toEqual([]);
+    expect(staff.body.total).toBe(0);
+    expect(staff.body.groups).toEqual([]);
+  });
+});
+
 describe('V1-31b AA: ai-approvals resolution records the real principal', () => {
   it('AA-01 resolve and bulk-resolve hand the authenticated user to oversight', async () => {
     resolutions.length = 0;
@@ -1645,7 +1879,7 @@ describe('V1-31c CX: POST execute and POST batch run a member-initiated command 
 
   it('CX-05 a crm command is the OWNER\'s only: the crm adapter writes contacts with no actor, so row visibility cannot be applied', async () => {
     const before = connectorCalls.length;
-    const staff = await cortex('execute', ID.cxStaffW, structuredCmd('crm', 'update_contact', { contactId: `${P}c`, email: 'x@test.local' }));
+    const staff = await cortex('execute', ID.cxStaffW, structuredCmd('crm', 'update_contact', { contactId: `${P}c`, email: `${P}x@test.local` }));
     expect(staff.status).toBe(403);
     expect(JSON.stringify(staff.body)).toMatch(/business owner/);
     expect(connectorCalls.length).toBe(before);

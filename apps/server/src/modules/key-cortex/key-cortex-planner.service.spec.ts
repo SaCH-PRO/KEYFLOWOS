@@ -77,6 +77,22 @@ const mkPrisma = () => {
         create: vi.fn(),
         updateMany: vi.fn(),
       },
+      // Trial-N repair round 2 recheck (KEY-D46-NOMEMBER): a plan run with no member that has a
+      // commerce step is checked against its creator. The plans these cases run were created by
+      // user_1, biz_1's OWNER (who holds revenue write), so they run as before.
+      user: {
+        findUnique: vi.fn(async () => ({ role: 'USER' })),
+      },
+      membership: {
+        findUnique: vi.fn(async ({ where }: any) =>
+          where.userId_businessId.userId === 'user_1' && where.userId_businessId.businessId === 'biz_1'
+            ? { role: 'OWNER', permissionScopes: null }
+            : null,
+        ),
+      },
+      business: {
+        findFirst: vi.fn(async () => null),
+      },
     },
     store,
   } as unknown as PrismaService;
