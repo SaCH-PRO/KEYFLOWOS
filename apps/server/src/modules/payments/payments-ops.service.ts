@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
@@ -146,14 +146,20 @@ export class PaymentsOpsService {
   ): Promise<RefundResult> {
     if (!input.chargeId) throw new BadRequestException('Charge id is required');
     const gw = this.getGateway(gatewayId);
+    // V1-15d-STRIPE-OPS-TENANCY (F1): only a charge of one of this business's
+    // own recorded payments is refunded; any other (another tenant's charge on
+    // the shared platform key, or a charge nobody recorded) is refused like an
+    // unknown charge, before the provider is asked to move money.
+    const orig = await this.ownRecordedPayment(businessId, gatewayId, input.chargeId);
+    if (!orig) throw new NotFoundException('Charge not found');
     try {
       const refund = await gw.refundCharge(businessId, input);
-      // Best-effort: record in our payments table
+      // Best-effort: record in our payments table. Only a payment recorded
+      // under the charge id itself, as before V1-15d: a refund of one recorded
+      // under its Checkout Session or PaymentIntent id is recorded, linked and
+      // posted by the provider's refund event (the V1-29c door).
       try {
-        const orig = await this.prisma.client.payment.findFirst({
-          where: { businessId, providerPaymentId: input.chargeId },
-        });
-        if (orig) {
+        if (orig.providerPaymentId === input.chargeId) {
           await this.prisma.client.payment.create({
             data: {
               businessId,
@@ -163,7 +169,7 @@ export class PaymentsOpsService {
               status: 'REFUNDED',
               provider: gatewayId,
               providerPaymentId: refund.id,
-              reference: input.chargeId,
+              reference: orig.providerPaymentId,
               notes: input.reason ?? null,
             },
           });
@@ -178,6 +184,32 @@ export class PaymentsOpsService {
       }
       throw err;
     }
+  }
+
+  /**
+   * V1-15d-STRIPE-OPS-TENANCY (F1): the SUCCESSFUL payment of this business a
+   * refund of `chargeId` refunds, matched by its providerPaymentId or its
+   * reference (a PaymentIntent row holds its charge there). A Stripe charge no
+   * row names is matched through its payment_intent (one read: a Checkout
+   * Session row holds that). Payment is outside the tenant extension (M31), so
+   * the match spans every tenant; null when no row matches, or when a payment
+   * of another business matches too (a tenant can sign any reference for
+   * itself with its own webhook secret, so the charge is provably no one's).
+   */
+  private async ownRecordedPayment(businessId: string, gatewayId: GatewayId, chargeId: string) {
+    const naming = (id: string) =>
+      this.prisma.client.payment.findMany({
+        where: { provider: gatewayId, status: 'SUCCESSFUL', OR: [{ providerPaymentId: id }, { reference: id }] },
+        select: { businessId: true, invoiceId: true, providerPaymentId: true },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+    let rows = await naming(chargeId);
+    if (rows.length === 0 && gatewayId === 'stripe') {
+      const paymentIntent = await this.stripe.paymentIntentOfCharge(businessId, chargeId);
+      if (paymentIntent) rows = await naming(paymentIntent);
+    }
+    if (rows.some((r) => r.businessId !== businessId)) return null;
+    return rows[0] ?? null;
   }
 
   async searchCharges(

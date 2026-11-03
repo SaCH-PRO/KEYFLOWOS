@@ -345,7 +345,7 @@
     {
       "prefix": "v15d_",
       "owner": "apps/server/test/stripe-ops-tenancy.integration.test.ts",
-      "packet": "V1-15d-STRIPE-OPS-TENANCY"
+      "packet": "V1-15 (V1-15d-STRIPE-OPS-TENANCY)"
     },
     {
       "prefix": "v16a_",

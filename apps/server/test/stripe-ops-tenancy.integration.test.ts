@@ -303,12 +303,13 @@ function stripeApi(method: string, url: URL, auth: string | null, body: string):
 
 function paypalApi(method: string, url: URL, body: string): Response {
   const p = url.pathname;
-  let m: RegExpMatchArray | null;
+  const capture = p.match(/^\/v2\/payments\/captures\/([^/]+)$/);
+  const captureRefund = p.match(/^\/v2\/payments\/captures\/([^/]+)\/refund$/);
   if (method === 'POST' && p === '/v1/oauth2/token') return json(200, { access_token: `pp_tok_${P}` });
-  if (method === 'GET' && (m = p.match(/^\/v2\/payments\/captures\/([^/]+)$/))) {
-    return json(200, { id: m[1], amount: { currency_code: 'TTD', value: '40.00' } });
+  if (method === 'GET' && capture) {
+    return json(200, { id: capture[1], amount: { currency_code: 'TTD', value: '40.00' } });
   }
-  if (method === 'POST' && (m = p.match(/^\/v2\/payments\/captures\/([^/]+)\/refund$/))) {
+  if (method === 'POST' && captureRefund) {
     const parsed = body ? JSON.parse(body) : {};
     seq += 1;
     return json(201, { id: `PPRF_${P}${seq}`, status: 'COMPLETED', amount: parsed.amount ?? { value: '40.00', currency_code: 'TTD' }, create_time: new Date().toISOString() });

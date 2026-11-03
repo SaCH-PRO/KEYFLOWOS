@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
@@ -203,15 +203,72 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     });
   }
 
-  private async getSecretKey(businessId: string): Promise<string> {
+  /**
+   * The key a per-tenant operation uses: the business's own, else the
+   * deployment's STRIPE_SECRET_KEY. V1-15d-STRIPE-OPS-TENANCY (F1): `shared`
+   * marks the deployment key, whose platform account holds the charges and
+   * links of every business without its own key, so an operation on it acts
+   * only on objects this business can show are its own (ownedIds, the
+   * businessId tag on links), never on another tenant's.
+   */
+  private async resolveKey(businessId: string): Promise<{ key: string; shared: boolean }> {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },
       select: { metaData: true },
     });
     const meta = (business?.metaData as Record<string, unknown>) ?? {};
-    const key = (meta.stripeSecretKey as string | undefined) || process.env.STRIPE_SECRET_KEY;
+    const own = meta.stripeSecretKey as string | undefined;
+    if (own) return { key: own, shared: false };
+    const key = process.env.STRIPE_SECRET_KEY;
     if (!key) throw new Error('Stripe is not configured for this business');
-    return key;
+    return { key, shared: true };
+  }
+
+  /**
+   * V1-15d-STRIPE-OPS-TENANCY (F1): of `ids` (Stripe charge, payment_intent,
+   * session or refund ids), those this business's own Stripe Payment rows name
+   * (providerPaymentId or reference) and no other business's row names.
+   * Payment is outside the tenant extension (M31), so the read spans every
+   * tenant; an id two businesses name is not provably either's (a tenant can
+   * sign any reference for itself with its own webhook secret).
+   */
+  private async ownedIds(businessId: string, ids: Array<string | null | undefined>): Promise<Set<string>> {
+    const wanted = [...new Set(ids.filter((v): v is string => typeof v === 'string' && v.length > 0))];
+    if (wanted.length === 0) return new Set();
+    const rows = await this.prisma.client.payment.findMany({
+      where: { provider: 'stripe', OR: [{ providerPaymentId: { in: wanted } }, { reference: { in: wanted } }] },
+      select: { businessId: true, providerPaymentId: true, reference: true },
+    });
+    const owners = new Map<string, Set<string>>();
+    for (const r of rows) {
+      for (const id of [r.providerPaymentId, r.reference]) {
+        if (!id) continue;
+        owners.set(id, (owners.get(id) ?? new Set<string>()).add(r.businessId));
+      }
+    }
+    return new Set(wanted.filter((id) => {
+      const by = owners.get(id);
+      return !!by && by.size === 1 && by.has(businessId);
+    }));
+  }
+
+  /**
+   * V1-15d-STRIPE-OPS-TENANCY: the payment_intent of a charge (one read, with
+   * this business's key), so a refund naming the charge of a payment recorded
+   * under its Checkout Session or PaymentIntent id can be matched to that
+   * payment. Null for an id that is not a charge, an unknown charge, a charge
+   * with no payment_intent, or a failed read.
+   */
+  async paymentIntentOfCharge(businessId: string, chargeId: string): Promise<string | null> {
+    if (!/^(ch|py)_/.test(chargeId)) return null;
+    try {
+      const { key } = await this.resolveKey(businessId);
+      const charge = (await this.stripeRequest(key, 'GET', `/charges/${encodeURIComponent(chargeId)}`)) as { payment_intent?: unknown } | null;
+      return typeof charge?.payment_intent === 'string' ? charge.payment_intent : null;
+    } catch (err) {
+      this.logger.warn(`Stripe charge lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
   }
 
   private async stripeRequest(
@@ -319,7 +376,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     businessId: string,
     limit: number,
   ): Promise<PaymentGatewayTransaction[]> {
-    const key = await this.getSecretKey(businessId);
+    const { key, shared } = await this.resolveKey(businessId);
     const charges = (await this.stripeRequest(key, 'GET', `/charges?limit=${Math.min(limit, 100)}`)) as {
       data?: Array<{
         id: string;
@@ -332,13 +389,22 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
         description?: string | null;
         billing_details?: { name?: string | null; email?: string | null };
         metadata?: { invoiceId?: string };
+        payment_intent?: string | null;
         created: number;
       }>;
     };
+    // V1-15d (F1): on the shared platform key the account holds every keyless
+    // tenant's charges; only those this business's own Payment rows name (by
+    // charge id, or by the payment_intent its Checkout / PaymentIntent row
+    // holds) are its own. On its own key the whole account is its own.
+    const owned = shared
+      ? await this.ownedIds(businessId, (charges.data ?? []).flatMap((c) => [c.id, c.payment_intent]))
+      : null;
     const out: PaymentGatewayTransaction[] = [];
     type StripeChargeRow = NonNullable<typeof charges.data>[number];
     const chargeById = new Map<string, StripeChargeRow>();
     for (const c of charges.data ?? []) {
+      if (owned && !owned.has(c.id) && !(c.payment_intent && owned.has(c.payment_intent))) continue;
       chargeById.set(c.id, c);
       out.push({
         id: c.id,
@@ -359,10 +425,20 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
       const refunds = (await this.stripeRequest(key, 'GET', `/refunds?limit=${Math.min(limit, 100)}`)) as {
         data?: Array<{
           id: string; charge: string; amount: number; currency: string; status: string;
-          reason?: string | null; created: number;
+          payment_intent?: string | null; reason?: string | null; created: number;
         }>;
       };
+      const ownedRefunds = shared
+        ? await this.ownedIds(businessId, (refunds.data ?? []).flatMap((r) => [r.id, r.charge, r.payment_intent]))
+        : null;
       for (const r of refunds.data ?? []) {
+        if (
+          ownedRefunds &&
+          !chargeById.has(r.charge) &&
+          ![r.id, r.charge, r.payment_intent].some((id) => !!id && ownedRefunds.has(id))
+        ) {
+          continue;
+        }
         const c = chargeById.get(r.charge);
         out.push({
           id: r.id,
@@ -386,7 +462,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
   }
 
   async createPaymentLink(businessId: string, input: PaymentLinkInput): Promise<PaymentLinkResult> {
-    const key = await this.getSecretKey(businessId);
+    const { key } = await this.resolveKey(businessId);
     const priceBody = new URLSearchParams();
     priceBody.append('currency', input.currency.toLowerCase());
     priceBody.append('unit_amount', String(Math.round(input.amount * 100)));
@@ -396,6 +472,10 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     const linkBody = new URLSearchParams();
     linkBody.append('line_items[0][price]', price.id);
     linkBody.append('line_items[0][quantity]', '1');
+    // V1-15d: the link names its business, so on the shared platform key it
+    // is listed and revoked for that business only (listPaymentLinks,
+    // revokePaymentLink).
+    linkBody.append('metadata[businessId]', businessId);
     if (input.customerEmail) {
       linkBody.append('metadata[customerEmail]', input.customerEmail);
     }
@@ -416,15 +496,19 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
   }
 
   async listPaymentLinks(businessId: string): Promise<PaymentLinkResult[]> {
-    const key = await this.getSecretKey(businessId);
+    const { key, shared } = await this.resolveKey(businessId);
     const list = (await this.stripeRequest(key, 'GET', '/payment_links?limit=50&active=true')) as {
       data?: Array<{
         id: string; url: string; active: boolean; created: number;
+        metadata?: Record<string, string> | null;
         line_items?: { data?: Array<{ price?: { unit_amount?: number; currency?: string }; description?: string }> };
       }>;
     };
     const links: PaymentLinkResult[] = [];
     for (const l of list.data ?? []) {
+      // V1-15d (F1): on the shared platform key, only the links tagged with
+      // this business (createPaymentLink); an untagged link is no one's.
+      if (shared && l.metadata?.businessId !== businessId) continue;
       let amount = 0;
       let currency = 'USD';
       let description = '';
@@ -456,14 +540,27 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
   }
 
   async revokePaymentLink(businessId: string, linkId: string): Promise<void> {
-    const key = await this.getSecretKey(businessId);
+    const { key, shared } = await this.resolveKey(businessId);
+    if (shared) {
+      // V1-15d (F1): on the shared platform key, a link not tagged with this
+      // business is answered like an unknown link, and nothing is written.
+      const link = (await this.stripeRequest(key, 'GET', `/payment_links/${encodeURIComponent(linkId)}`).catch(() => null)) as {
+        metadata?: Record<string, string> | null;
+      } | null;
+      if (link?.metadata?.businessId !== businessId) throw new NotFoundException('Payment link not found');
+    }
     const body = new URLSearchParams();
     body.append('active', 'false');
     await this.stripeRequest(key, 'POST', `/payment_links/${linkId}`, body);
   }
 
+  /**
+   * The caller (PaymentsOpsService.refundCharge) names only a charge of one of
+   * this business's own recorded payments (V1-15d); the key is its own, or
+   * the platform key its customers paid into.
+   */
   async refundCharge(businessId: string, input: RefundInput): Promise<RefundResult> {
-    const key = await this.getSecretKey(businessId);
+    const { key } = await this.resolveKey(businessId);
     const body = new URLSearchParams();
     body.append('charge', input.chargeId);
     if (input.amount !== undefined) {
