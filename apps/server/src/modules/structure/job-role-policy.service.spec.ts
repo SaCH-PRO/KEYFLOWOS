@@ -105,7 +105,11 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
   },
   revenue: {
     // commerce_list_invoices reads what GET .../invoices (revenue:read) lists (review 2 C2)
-    read: ['payments_list_links', 'payments_list_transactions', 'payments_list_gateways', 'payments_search_transactions', 'commerce_list_invoices'],
+    read: [
+      'payments_list_links', 'payments_list_transactions', 'payments_list_gateways', 'payments_search_transactions', 'commerce_list_invoices',
+      // the money report routes require revenue:read (owner ruling D-57, V1-81 FOLLOW3-A7 item 9)
+      'finance_profit_and_loss', 'finance_cashflow', 'finance_balance_sheet', 'finance_tax_summary', 'finance_revenue_breakdown', 'reports_generate',
+    ],
     // commerce_mark_invoice_paid: PATCH invoices/:id/paid needs revenue:write; the Stripe
     // webhook that also calls it is not a member route (review 2 C1)
     write: ['commerce_create_invoice', 'commerce_create_quote', 'commerce_convert_quote', 'commerce_update_invoice', 'payments_create_link', 'payments_revoke_link', 'commerce_mark_invoice_paid'],
@@ -116,7 +120,8 @@ const CASES: Record<CanonicalModule, { read: string[]; write: string[]; admin: s
       // reached unscoped (catalog.controller)
       'commerce_create_product',
       'finance_post_journal_entry',
-      'finance_profit_and_loss',
+      // GET reports/expense-by carries no revenue and declares no scope (V1-81 D-57)
+      'finance_expense_breakdown',
       'crm_create_contact',
       'expenses_create',
       'structure_get_org_tree',
@@ -490,8 +495,10 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
 
   it('a legacy key is still refused on write by V1-21, but an existing row is still read', () => {
     expect(jobRolePermissionsProblem({ finance: 'write' })).toMatch(/Invalid module: finance/);
-    expect(passes(envelope({ finance: 'write' }), 'finance_cashflow')).toBe(true);
+    expect(passes(envelope({ finance: 'write' }), 'finance_expense_breakdown')).toBe(true);
     expect(passes(envelope({ finance: 'write' }), 'finance_create_coa_account')).toBe(true);
+    // V1-81 (D-57): the money reports are governed by revenue:read now, so the legacy key loses them
+    expect(allows(envelope({ finance: 'write' }), 'finance_cashflow')).toBe(false);
     // Tier 3: {finance: 'write'} was refused it at the gate before (maxRiskTier 2); the
     // envelope now says so itself, and {finance: 'admin'} still reaches it.
     expect(allows(envelope({ finance: 'write' }), 'finance_post_journal_entry')).toBe(false);
@@ -530,7 +537,11 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
 
   it('the governed tools a legacy key loses, pinned (an owner decision whether to migrate such rows)', () => {
     const lost = (key: string) => reachedBefore(LEGACY[key], 'admin').filter((t) => ROUTE_GOVERNED.has(t));
-    expect(lost('finance')).toEqual(['expenses_create', 'expenses_list', 'finance_create_bill', 'finance_list_bills', 'finance_pay_bill', 'finance_view_payables']);
+    // V1-81 (owner ruling D-57): the five money report tools are governed by revenue:read
+    expect(lost('finance')).toEqual([
+      'expenses_create', 'expenses_list', 'finance_balance_sheet', 'finance_cashflow', 'finance_create_bill', 'finance_list_bills',
+      'finance_pay_bill', 'finance_profit_and_loss', 'finance_revenue_breakdown', 'finance_tax_summary', 'finance_view_payables',
+    ]);
     expect(lost('commerce')).toEqual([
       'commerce_convert_quote', 'commerce_create_invoice', 'commerce_create_quote', 'commerce_delete_invoice',
       'commerce_list_invoices', 'commerce_mark_invoice_paid', 'commerce_send_invoice', 'commerce_update_invoice',
@@ -561,7 +572,7 @@ describe('JobRolePolicyService — legacy tool-family keys keep working', () => 
     expect(allows(envelope({ Revenue: 'WRITE' }), 'commerce_create_invoice')).toBe(false);
     expect(allows(envelope({ revenue: 'WRITE' }), 'commerce_create_invoice')).toBe(false);
     expect(allows(envelope({ revenue: 'write' }), 'commerce_create_invoice')).toBe(true);
-    expect(allows(envelope({ FINANCE: 'Write' }), 'finance_cashflow')).toBe(true);
+    expect(allows(envelope({ FINANCE: 'Write' }), 'finance_expense_breakdown')).toBe(true);
     expect(allows(envelope({ HELPDESK: 'Write' }), 'helpdesk_create_ticket')).toBe(true);
     // `CRM` is the legacy crm_* family alone: every crm_* tool is governed, so it reaches none (review 2 ESC-5)
     expect(allows(envelope({ CRM: 'admin' }), 'crm_list_contacts')).toBe(false);
@@ -759,11 +770,45 @@ describe('V1-21b review 2 — KEY never exceeds HTTP on the same scope map (K2)'
       expect(await evaluate({ revenue: 'write', commerce: 'read' }, 'commerce_update_invoice')).toMatchObject({ allowed: true });
     });
 
-    it('a legacy key keeps the tools a member reaches over HTTP with no module (finance_cashflow, commerce_create_product, helpdesk_*)', async () => {
-      expect(await evaluate({ finance: 'write' }, 'finance_cashflow')).toMatchObject({ allowed: true });
+    it('a legacy key keeps the tools a member reaches over HTTP with no module (finance_expense_breakdown, commerce_create_product, helpdesk_*)', async () => {
+      expect(await evaluate({ finance: 'write' }, 'finance_expense_breakdown')).toMatchObject({ allowed: true });
       expect(await evaluate({ sales: 'read' }, 'commerce_create_product')).toMatchObject({ allowed: true });
       expect(await evaluate({ helpdesk: 'read' }, 'helpdesk_list_tickets')).toMatchObject({ allowed: true });
       expect(await evaluate({ helpdesk: 'write' }, 'helpdesk_create_ticket')).toMatchObject({ allowed: true });
+    });
+  });
+
+  /**
+   * V1-81 (FOLLOW3-A7-MONEY-REPORTS review A7-SEC-1 / CRR-A7-1, owner ruling D-57): GET
+   * reports/{pnl, cashflow, balance-sheet, tax-summary, revenue-by, generate} require
+   * revenue:read. Before the companion table change the legacy `finance` key (which carries no
+   * revenue scope) still reached the five finance report tools, and analytics reached
+   * reports_generate, while the same scope map got 403 over HTTP.
+   */
+  describe('V1-81 (D-57) — the money reports need revenue:read on KEY as over HTTP', () => {
+    const REPORT_TOOLS = ['finance_profit_and_loss', 'finance_balance_sheet', 'finance_cashflow', 'finance_tax_summary', 'finance_revenue_breakdown', 'reports_generate'];
+
+    it.each([
+      ...REPORT_TOOLS.map((t) => [{ finance: 'read' }, t] as const),
+      ...REPORT_TOOLS.map((t) => [{ revenue: 'none', finance: 'admin', expenses: 'admin' }, t] as const),
+      ...REPORT_TOOLS.map((t) => [{ revenue: 'none', analytics: 'admin' }, t] as const),
+      ...REPORT_TOOLS.map((t) => [{ Revenue: 'read' }, t] as const),
+    ])('%j: HTTP refuses %s (revenue:read), so KEY does too', async (permissions, tool) => {
+      expect(routeOf.get(tool)).toEqual({ module: 'revenue', level: 'read' });
+      expect(await httpAllows(permissions, 'revenue', 'read')).toBe(false);
+      for (const autonomyLevel of [undefined, 2, 3]) {
+        expect((await evaluate(permissions, tool, autonomyLevel)).allowed, `${tool} @ ${autonomyLevel}`).toBe(false);
+      }
+    });
+
+    it.each(REPORT_TOOLS)('revenue:read reaches %s, as the route does (positive control)', async (tool) => {
+      expect(await httpAllows({ revenue: 'read' }, 'revenue', 'read')).toBe(true);
+      expect(await evaluate({ revenue: 'read' }, tool)).toMatchObject({ allowed: true });
+    });
+
+    it('expense-by carries no revenue and declares no scope: the legacy key keeps finance_expense_breakdown', async () => {
+      expect(routeOf.has('finance_expense_breakdown')).toBe(false);
+      expect(await evaluate({ finance: 'read' }, 'finance_expense_breakdown')).toMatchObject({ allowed: true });
     });
   });
 

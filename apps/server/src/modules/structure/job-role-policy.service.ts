@@ -131,10 +131,16 @@ export const CANONICAL_MODULE_TOOLS: Readonly<
     commerce_convert_quote: 'write', commerce_create_invoice: 'write',
     commerce_create_quote: 'write', commerce_delete_invoice: 'write',
     commerce_list_invoices: 'read', commerce_mark_invoice_paid: 'write',
-    commerce_update_invoice: 'write', payments_create_link: 'write',
+    commerce_update_invoice: 'write',
+    // finance_* reports and reports_generate: GET reports/{pnl, cashflow, balance-sheet,
+    // tax-summary, revenue-by, generate} require revenue:read (owner ruling D-57, V1-81
+    // FOLLOW3-A7-MONEY-REPORTS item 9), so the legacy `finance` key and analytics no longer reach them
+    finance_balance_sheet: 'read', finance_cashflow: 'read', finance_profit_and_loss: 'read',
+    finance_revenue_breakdown: 'read', finance_tax_summary: 'read',
+    payments_create_link: 'write',
     payments_list_gateways: 'read', payments_list_links: 'read', payments_list_transactions: 'read',
     payments_refund_charge: 'write', payments_revoke_link: 'write',
-    payments_search_transactions: 'read',
+    payments_search_transactions: 'read', reports_generate: 'read',
   },
   bookings: {
     calendar_create_event: 'write', calendar_list_events: 'read',
