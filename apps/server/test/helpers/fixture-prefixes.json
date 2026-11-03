@@ -298,6 +298,11 @@
       "packet": "V1-03-KEY-CORTEX-PRINCIPAL"
     },
     {
+      "prefix": "v05a_",
+      "owner": "apps/server/test/payments-provider-callbacks.integration.test.ts",
+      "packet": "V1-05-PUB-PROVIDER-CALLBACKS"
+    },
+    {
       "prefix": "v06a_",
       "owner": "apps/server/test/bookings-core.integration.test.ts",
       "packet": "V1-06-BK-BASELINE-PARITY"
