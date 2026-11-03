@@ -377,8 +377,8 @@ export class InvoiceWorkflowService {
    * payment on a DRAFT invoice, rolls the payment back). With `eventBuffer`,
    * invoice.paid / invoice.payment_recorded / invoice.reopened (a refund's
    * return to SENT, V1-42c) are pushed to the buffer and the caller emits
-   * them after its commit. Without options the behaviour is unchanged: own
-   * $transaction, immediate emit.
+   * them after its commit. Without options: own $transaction, events emitted
+   * after it commits.
    *
    * R0-PL-03 review (ST-PL03-3 / CR-1): `onIllegalTransition` says what to do
    * when the status derived from the payment rows is not reachable from the
@@ -387,6 +387,22 @@ export class InvoiceWorkflowService {
    * PARTIAL). 'throw' (default, payments and webhooks): 409. 'keep' (the
    * manual refund): leave the status as it is, write nothing, queue no event,
    * and return changed: false with the fresh balance.
+   *
+   * V1-42c review (SEC-V42C-1): one move, one event. The provider webhooks
+   * call this without a transaction, after their payment / refund commit and
+   * outside the invoice lock, so two deliveries could reconcile side by side:
+   * each read PAID, each wrote SENT by id alone, each returned changed: true
+   * and each queued invoice.reopened (and a reconcile that read before a
+   * money door committed a payment wrote SENT over the PAID that door left).
+   * Without `tx` the read, the write and the posting now run in one
+   * transaction under the invoice row lock every money write takes
+   * (SELECT ... FOR NO KEY UPDATE, as CommerceService.lockInvoiceForPayment
+   * and PaymentsService.lockInvoice), so reconciles of one invoice run one
+   * after the other and each reads every payment committed before it. With
+   * `tx`, the caller's door holds that lock already. Either way the status
+   * write is compare-and-set on the status read, as transition() (V1-42): a
+   * writer that moved it in between leaves nothing to update, and this call
+   * returns changed: false with no write, posting or event.
    */
   async reconcileFromPayments(
     invoiceId: string,
@@ -396,8 +412,26 @@ export class InvoiceWorkflowService {
       onIllegalTransition?: 'throw' | 'keep';
     } = {},
   ): Promise<{ status: InvoiceStatus; balance: BalanceSummary; changed: boolean }> {
-    const reader = extra.tx ?? (this.prisma.client as unknown as Prisma.TransactionClient);
-    const invoice = await reader.invoice.findUnique({
+    if (extra.tx) return this.reconcileIn(extra.tx, invoiceId, extra);
+    const buffer: Array<{ name: string; payload: unknown }> = extra.eventBuffer ?? [];
+    const result = await this.prisma.client.$transaction(async (t) => {
+      const tx = t as unknown as Prisma.TransactionClient;
+      await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${invoiceId} FOR NO KEY UPDATE`;
+      return this.reconcileIn(tx, invoiceId, { ...extra, eventBuffer: buffer });
+    });
+    if (!extra.eventBuffer) for (const e of buffer) this.events.emit(e.name, e.payload);
+    return result;
+  }
+
+  private async reconcileIn(
+    db: Prisma.TransactionClient,
+    invoiceId: string,
+    extra: {
+      eventBuffer?: Array<{ name: string; payload: unknown }>;
+      onIllegalTransition?: 'throw' | 'keep';
+    },
+  ): Promise<{ status: InvoiceStatus; balance: BalanceSummary; changed: boolean }> {
+    const invoice = await db.invoice.findUnique({
       where: { id: invoiceId },
       include: { payments: true },
     });
@@ -423,26 +457,31 @@ export class InvoiceWorkflowService {
     // reopens it (PAID -> PARTIALLY_PAID, or back to SENT) clears it, and
     // the next settlement stamps it again.
     const paidAt = next === 'PAID' ? { paidAt: new Date() } : current === 'PAID' || next === 'SENT' ? { paidAt: null } : {};
-    // FIN3 — wrap status update + COGS posting in a single $transaction
-    // so a posting failure rolls back the PAID write. Listeners only see
-    // PAID after the ledger entries have been committed alongside it.
-    const apply = async (db: Prisma.TransactionClient) => {
-      const u = await db.invoice.update({
-        where: { id: invoiceId },
+    // FIN3 — status update + COGS posting in one transaction (`db`) so a
+    // posting failure rolls back the PAID write. Listeners only see PAID
+    // after the ledger entries have been committed alongside it.
+    // V1-42c review (SEC-V42C-1): compare-and-set on the status read above.
+    let updated;
+    try {
+      updated = await db.invoice.update({
+        where: { id: invoiceId, status: invoice.status },
         data: {
           status: next,
           ...paidAt,
         },
         include: { items: true, contact: true, booking: true },
       });
-      if (next === 'PAID') {
-        await this.postCogsForPaidInvoice(invoiceId, u.businessId, u.paidAt, u.currency, db);
-      }
-      return u;
-    };
-    const updated = extra.tx
-      ? await apply(extra.tx)
-      : await this.prisma.client.$transaction((tx) => apply(tx as unknown as Prisma.TransactionClient));
+    } catch (err) {
+      if ((err as { code?: string } | null)?.code !== 'P2025') throw err;
+      const now = await db.invoice.findUnique({ where: { id: invoiceId }, select: { status: true } });
+      this.logger.warn(
+        `reconcileFromPayments: invoice ${invoiceId} moved from ${current} while ${current} -> ${next} was in flight (now ${now?.status ?? 'gone'}); left as it is, no event`,
+      );
+      return { status: (now?.status ?? current) as InvoiceStatus, balance, changed: false };
+    }
+    if (next === 'PAID') {
+      await this.postCogsForPaidInvoice(invoiceId, updated.businessId, updated.paidAt, updated.currency, db);
+    }
     const queue = (name: string, payload: unknown) => {
       if (extra.eventBuffer) extra.eventBuffer.push({ name, payload });
       else this.events.emit(name, payload);

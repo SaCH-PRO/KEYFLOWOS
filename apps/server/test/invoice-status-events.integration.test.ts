@@ -51,11 +51,17 @@
  *           events ['invoice.reopened']; the calendar due item is back to SCHEDULED
  *   LEDGER  every refund case: each payment transaction balances and the tenant trial balance
  *           balances
+ *   SEC-V42C-1a (review, RED before the repair) three concurrent reconciles of one committed full
+ *           refund: one changed, one invoice.reopened (it was three of each)
+ *   SEC-V42C-1b (review, RED before the repair) a reconcile that starts while a money door holds the
+ *           invoice lock reads the door's payment: no SENT written over the settled PAID, no reopen
  *
- * Census of the other invoice-status listeners (outside this packet's write set, it.todo below):
- * the CRM revenue-event listener and ContactInsightListener (timeline / insight snapshot), the
- * webhook dispatcher (subscribers told invoice.paid are not told of the reopen), and
- * RevenueActionService (an OVERDUE_INVOICE action auto-completed on invoice.paid stays done).
+ * Census of the other invoice-status listeners (outside this packet's write set, it.todo below; the
+ * review, SEC-V42C-2, completed it): every one of the 21 invoice.paid handlers but the calendar,
+ * first ReferralRewardService (the referrer credit stays after a full refund), then CRM network /
+ * revenue-event / insight, projects, margin, attribution, gamification, webhooks, revenue actions,
+ * review solicitation, flow / activity / automation, receipts and the AI triggers. The Payments tab's
+ * own Send Reminder (review CR-V42C-1) is a todo in the web test: it is outside the write set.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard,
  * CommerceService, InvoiceWorkflowService, RevenuePostingService, PostingService,
@@ -101,6 +107,9 @@ const ID = {
   invPartRefund: `${P}invPartRefund`,
   invPartToSent: `${P}invPartToSent`,
   invStripe: `${P}invStripe`,
+  // SEC-V42C-1 (review): concurrent reconciles of one reopen
+  invRaceReopen: `${P}invRaceReopen`,
+  invRaceStale: `${P}invRaceStale`,
 };
 
 const CONTACT_OF: Record<string, string> = {
@@ -120,6 +129,7 @@ let db: any;
 let app: any;
 let redis: any;
 let paymentsSvc: any;
+let workflow: any;
 
 const sentEmails: Array<{ businessId: string; to: string; subject: string; htmlBody: string }> = [];
 let gmailStub: { sendEmail: (args: { businessId: string; to: string; subject: string; htmlBody: string }) => Promise<{ messageId: string }> };
@@ -331,6 +341,7 @@ beforeAll(async () => {
     ],
   }).compile();
 
+  workflow = moduleRef.get(workflowMod.InvoiceWorkflowService);
   const { PaymentsService } = await import('../src/modules/payments/payments.service');
   paymentsSvc = new PaymentsService(
     moduleRef.get(PrismaService),
@@ -605,10 +616,123 @@ describe('VR-05: a refund that reopens an invoice emits a status event its liste
     await expectLedgerBalanced(inv);
   });
 
-  // Census (V1-42c): the other invoice-status listeners. Each is outside this packet's write set
-  // (apps/server/src/modules/{crm,webhooks,commerce/revenue-action}.*, packages/shared ContactEventType),
-  // so each stays a todo for a follow-up packet.
+  // Census (V1-42c, completed by review SEC-V42C-2): every listener that acts on invoice.paid and is
+  // not told of the reopen. `grep -rn "OnEvent('invoice.paid'" apps/server/src` lists 21 handlers; only
+  // the calendar (CalendarCommerceListener, above) also listens to invoice.reopened. Each other one is
+  // outside this packet's write set (apps/server/src/modules/{conversion,crm,webhooks,projects,flow,
+  // gamification,growth-intelligence,ai,whatsapp}/**, commerce/{revenue-action,margin-on-payment,
+  // storefront-invoice-attribution,invoice-receipt}.*, packages/shared ContactEventType), so each stays a
+  // todo for a follow-up packet, in order of what a pay-then-full-refund leaves behind.
+  it.todo('VR-05 census (value credit, first): ReferralRewardService.onInvoicePaid (conversion/referral-reward.service.ts:42-100) credits the referrer custom.referralRewardBalance (+referrerReward) and referralRewardsEarned and marks the referred contact referralRewardEarned; after a full refund the credit stays (pay, refund leaves value behind). It must reverse the award on invoice.reopened when the reopened invoice was the one that earned it');
+  it.todo('VR-05 census: CrmNetworkService.onInvoicePaid (crm/crm-network.service.ts:396) bumps the referrer lead score and logs referral.deal_won on its timeline; neither is undone by the reopen');
+  it.todo('VR-05 census: ProjectRevenueListener.onInvoicePaid (projects/project-revenue.listener.ts:36) advances the invoice projects fromStatus -> toStatusOnInvoicePaid; a reopen leaves them advanced');
+  it.todo('VR-05 census: MarginOnPaymentListener.onInvoicePaid (commerce/margin-on-payment.listener.ts:29) captures the invoice margin snapshot; it stays for a refunded sale');
+  it.todo('VR-05 census: StorefrontInvoiceAttributionListener.handleInvoicePaid (commerce/storefront-invoice-attribution.listener.ts:30) and JourneyListenerService.onInvoicePaid (growth-intelligence/journey-listener.service.ts:117) record revenue attribution / a CONVERSION touchpoint with the invoice value; neither is reversed');
+  it.todo('VR-05 census: GamificationListener.handleInvoicePaid (gamification/gamification.listener.ts:12) sets business metaData.firstSaleMade; a refund of the only sale leaves it set (a ruling, not necessarily a reversal)');
   it.todo('VR-05 census: CRM RevenueEventListener / ContactInsightListener re-read a reopened invoice (a timeline entry needs an invoice.reopened ContactEventType in packages/shared; the insight snapshot is marked stale only on invoice.paid)');
   it.todo('VR-05 census: WebhookDispatcherService tells subscribers that received invoice.paid that the invoice reopened (needs an invoice.reopened webhook event type)');
-  it.todo('VR-05 census: RevenueActionService reopens the OVERDUE_INVOICE action it auto-completed on invoice.paid when the invoice is reopened');
+  it.todo('VR-05 census: RevenueActionService.onInvoicePaid (commerce/revenue-action.service.ts:125) upserts a PAID_INVOICE_NO_RECEIPT "Send receipt" action; it stays pending for a reopened invoice (the V1-42c draft said it auto-completes an OVERDUE_INVOICE action: it does not)');
+  it.todo('VR-05 census: ReviewSolicitationService.onInvoicePaid (conversion/review-solicitation.service.ts:42) schedules a review-request job to the customer; the reopen does not cancel it');
+  it.todo('VR-05 census: FlowListener (flow/flow.listener.ts:110 confirms the linked booking and notifies "Invoice Paid"; :324 revenue milestone notification; :483 payment_receipt to the customer), ActivityEventListener (flow/activity-event.listener.ts:58) and AutomationExecutorService.onInvoicePaid (flow/automation-executor.service.ts:650, playbooks / flows on trigger invoice.paid, and AutomationService rule invoice.paid -> "Send thank-you note" task): the booking stays confirmed and no invoice.reopened trigger or activity exists');
+  it.todo('VR-05 census: InvoiceReceiptListener (commerce/invoice-receipt.listener.ts:31) and WhatsappNotificationsListener (whatsapp/whatsapp-notifications.listener.ts:73) message the customer on paid; by this packet ruling the reopen messages nobody, so a follow-up rules whether the customer is told of a refund');
+  it.todo('VR-05 census: AiListener.onInvoicePaid (ai/ai.listener.ts:36) and AgentTriggerService (onAny, exact eventPattern, no cooldown; default trigger invoice.paid in ai/default-triggers.constants.ts:62) have no invoice.reopened trigger; a business trigger on it fires once per event, which SEC-V42C-1 below keeps to one per reopen');
+});
+
+/**
+ * Review SEC-V42C-1: a reopen is reconciled, and invoice.reopened emitted, once. The provider refund
+ * webhooks (PaymentsService Stripe / PayPal refund paths) call reconcileFromPayments after their refund
+ * transaction committed, outside the invoice lock, and a redelivery or a charge.refunded beside its
+ * refund.created can run two of them side by side. The reconcile wrote the status by id alone, so every
+ * concurrent call read PAID, wrote SENT, returned changed: true and queued invoice.reopened (consumers act
+ * once per event: AgentTriggerService.onAny, the calendar). The same gap let a reconcile that read before a
+ * money door committed a payment write SENT over the PAID that door left, and emit invoice.reopened for a
+ * settled invoice. Fix: without a caller's transaction the reconcile reads and writes under the invoice
+ * row lock every money write takes (SELECT ... FOR NO KEY UPDATE), and its status write is compare-and-set
+ * on the status it read (a P2025 is changed: false, no event), as transition() is since V1-42.
+ */
+describe('SEC-V42C-1: one reopen, one invoice.reopened (the reconcile reads under the invoice lock and writes compare-and-set)', () => {
+  /** What a provider refund door commits before its reconcile runs (V1-29c): a negative REFUNDED row linked to the payment; the invoice status is left to the reconcile. */
+  async function committedRefundRow(inv: string, paymentId: string, key: string) {
+    const original = await db.payment.findUnique({ where: { id: paymentId } });
+    await db.payment.create({
+      data: {
+        id: `${P}${key}`,
+        amount: -Number(original.amount),
+        currency: 'TTD',
+        status: 'REFUNDED',
+        provider: 'stripe',
+        method: 'card',
+        providerPaymentId: `${P}${key}`,
+        reference: original.providerPaymentId,
+        businessId: ID.biz,
+        invoiceId: inv,
+      },
+    });
+  }
+
+  it('SEC-V42C-1a (RED before the repair): three concurrent reconciles of one committed full refund -> one changed, one invoice.reopened; the invoice is SENT, paidAt null, the calendar due item SCHEDULED', async () => {
+    const inv = ID.invRaceReopen;
+    const original = await paid(inv, 100, 'V42C-RACE');
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'PAID' });
+    await waitForCalendar('invoice', inv, (row) => expect(row).toMatchObject({ status: 'COMPLETED' }));
+    await committedRefundRow(inv, original.id, 'race_refund');
+    expect((await invoiceRow(inv)).status, 'the refund row alone moves nothing').toBe('PAID');
+    emitted.length = 0;
+
+    const results = await Promise.all([1, 2, 3].map(() => workflow.reconcileFromPayments(inv)));
+
+    // Before the repair: [[SENT, true], [SENT, true], [SENT, true]] and three invoice.reopened.
+    expect(results.map((r: any) => r.status)).toEqual(['SENT', 'SENT', 'SENT']);
+    expect(results.filter((r: any) => r.changed), 'exactly one reconcile moves the invoice').toHaveLength(1);
+    expect(eventsFor(inv)).toEqual(['invoice.reopened']);
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null });
+    await waitForCalendar('invoice', inv, (cal) => {
+      expect(cal).toMatchObject({ status: 'SCHEDULED', deletedAt: null });
+      expect(cal.meta).toEqual({ status: 'SENT', paidAt: null });
+    });
+  });
+
+  it('SEC-V42C-1b (RED before the repair): a reconcile that starts while a money door holds the invoice lock waits for it and reads its payment: the invoice stays PAID, no invoice.reopened', async () => {
+    const inv = ID.invRaceStale;
+    const original = await paid(inv, 100, 'V42C-STALE');
+    await waitForCalendar('invoice', inv, (row) => expect(row).toMatchObject({ status: 'COMPLETED' }));
+    await committedRefundRow(inv, original.id, 'stale_refund');
+    emitted.length = 0;
+
+    // A money door in flight (CommerceService.recordPayment's shape): it holds the invoice row lock and
+    // writes a +100 payment, which leaves the invoice PAID, then commits. This transaction is the
+    // concurrency under test, not fixture wrapping.
+    let lockHeld!: () => void;
+    const held = new Promise<void>((resolve) => { lockHeld = resolve; });
+    const door = db.$transaction(async (tx: any) => {
+      await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${inv} FOR NO KEY UPDATE`;
+      await tx.payment.create({
+        data: {
+          id: `${P}stale_repay`,
+          amount: 100,
+          currency: 'TTD',
+          status: 'SUCCESSFUL',
+          provider: 'cash',
+          method: 'cash',
+          providerPaymentId: `${P}stale_repay`,
+          businessId: ID.biz,
+          invoiceId: inv,
+        },
+      });
+      lockHeld();
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }, { timeout: 10_000 });
+    await held;
+    const reconcile = workflow.reconcileFromPayments(inv);
+    await door;
+    const result = await reconcile;
+
+    // Before the repair: the reconcile read PAID with [100, -100] (the door's row not yet committed),
+    // derived SENT, waited on the row lock and then wrote SENT over the settled invoice: { SENT, true }
+    // and invoice.reopened, with 100 net received. A compare-and-set alone does not catch it (the status
+    // it read, PAID, is still the status when it writes).
+    expect(result).toMatchObject({ status: 'PAID', changed: false, balance: { net: 100, remaining: 0 } });
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'PAID' });
+    expect(eventsFor(inv)).toEqual([]);
+  });
 });
