@@ -608,6 +608,11 @@
       "packet": "V1-84 (FOLLOW3-D4-CALL-LOG-VIS)"
     },
     {
+      "prefix": "v84e_",
+      "owner": "apps/server/test/contact-reads-noncrm-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D5-CONTACT-READS-NONCRM)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

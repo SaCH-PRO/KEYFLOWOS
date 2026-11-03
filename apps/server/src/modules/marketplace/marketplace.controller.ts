@@ -7,6 +7,8 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { MarketplaceService } from './marketplace.service';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { CommerceIntegrationService } from './commerce-integration.service';
+import { PrismaService } from '../../core/prisma/prisma.service';
+import { assertContactVisible, contactVisibilityFilter, resolveCrmAccess } from '../crm/crm-permissions.helper';
 
 @Controller('marketplace')
 @UseGuards(AuthGuard, BusinessGuard, CrmRateLimitGuard)
@@ -14,6 +16,7 @@ export class MarketplaceController {
   constructor(
     @Inject(MarketplaceService) private readonly marketplaceService: MarketplaceService,
     @Inject(CommerceIntegrationService) private readonly commerceIntegration: CommerceIntegrationService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Get('businesses/:businessId/dashboard')
@@ -340,19 +343,36 @@ export class MarketplaceController {
     return this.marketplaceService.updateDeliveryConfig(businessId, body);
   }
 
+  // V1-84 review (FOLLOW3-D5 ST-4): the order's linked contact (id, name,
+  // email, phone) is shown only to a member who may open it (V1-08 rule,
+  // contactVisibilityFilter); otherwise `contact` is null, exactly as for an
+  // order with no linked or a deleted contact. The order, revenue, expenses,
+  // project and margin are the order's and stay. OWNER and SUPER_ADMIN get
+  // exactly today's answer.
   @Get('businesses/:businessId/orders/:orderId/cross-links')
-  getOrderCrossLinks(
+  async getOrderCrossLinks(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
+    @Req() req: { user: { id: string } },
   ) {
-    return this.commerceIntegration.getOrderCrossLinks(businessId, orderId);
+    const access = await resolveCrmAccess(this.prisma, businessId, req.user.id);
+    const links = await this.commerceIntegration.getOrderCrossLinks(businessId, orderId);
+    if (!links.contact) return links;
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, req.user.id, [links.contact.id]);
+    return !canOpen || canOpen(links.contact.id) ? links : { ...links, contact: null };
   }
 
+  // V1-84 (FOLLOW3-D5): a contact-keyed route answers only for a contact the
+  // caller may open by the GET crm contacts/:contactId rule (V1-08
+  // assertContactVisible): a hidden contact gets the same 404 'Contact not
+  // found' as an unknown id, before the service runs.
   @Get('businesses/:businessId/contacts/:contactId/order-history')
-  getContactOrderHistory(
+  async getContactOrderHistory(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     return this.commerceIntegration.getContactOrderHistory(businessId, contactId);
   }
 
