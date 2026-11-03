@@ -123,6 +123,24 @@ export function runOfRequiredGate(run) {
   return run.path.replace(REF_SUFFIX, '') === REQUIRED_WORKFLOW_FILES[run.name];
 }
 
+/**
+ * One run of the GitHub runs API, as admission reads it (the collector in
+ * auto-merge-admitted.mjs maps every run through this). `path` is the
+ * workflow file that produced the run: without it admission cannot tell a
+ * required gate from a second file that declares the same name, and counts
+ * the run for no gate (D-61). It lives here, not in the CLI, so a test reads
+ * it without loading the CLI, whose every load checks credentials and runs.
+ */
+export const toWorkflowRunSnapshot = (r) => ({
+  id: r.id,
+  name: r.name,
+  path: r.path,
+  head_sha: r.head_sha,
+  status: r.status,
+  conclusion: r.conclusion,
+  created_at: r.created_at,
+});
+
 /** Why a pair of control artifacts is not the pair for this PR. */
 export const BINDING_PROBLEMS = Object.freeze({
   PACKET_ID_MISSING: 'packet_id_missing',
@@ -377,4 +395,4 @@ export function recheckBeforeMerge(first, second) {
   return second;
 }
 
-export default { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, runOfRequiredGate, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS };
+export default { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, runOfRequiredGate, toWorkflowRunSnapshot, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS };

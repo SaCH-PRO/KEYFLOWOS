@@ -2,9 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
-import { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS } from '../lib/admission.mjs';
+import { evaluateAdmission, evaluateGrantGate, recheckBeforeMerge, artifactBindingProblems, toWorkflowRunSnapshot, ADMISSION_REASONS, BINDING_PROBLEMS, TRANSITION_TRIGGERS } from '../lib/admission.mjs';
 import { SEMANTIC_REVIEW_REASONS } from '../lib/semantic-review.mjs';
 import { REQUIRED_WORKFLOWS, REQUIRED_WORKFLOW_FILES } from '../lib/events.mjs';
 import { parseYaml } from '../lib/yaml.mjs';
@@ -517,21 +515,10 @@ test('NC impostor gate: the stale-head check matches by path too', () => {
   assert.deepEqual(stale.detail.runs_at_other_heads, [other]);
 });
 
-// The collector maps the GitHub runs API with toWorkflowRunSnapshot. It runs
-// in a child with no credentials and no repository: importing the CLI module
-// must run nothing, so the child can reach no network and merge nothing.
-const CLI_MODULE = pathToFileURL(path.resolve('scripts/agent-control/auto-merge-admitted.mjs')).href;
-function snapshotInChild(raw) {
-  const program = `const raw = ${JSON.stringify(raw)};\nimport(${JSON.stringify(CLI_MODULE)}).then((m) => process.stdout.write(JSON.stringify(raw.map((r) => m.toWorkflowRunSnapshot(r)))));`;
-  const child = spawnSync(process.execPath, ['--input-type=module', '-e', program], {
-    encoding: 'utf8',
-    timeout: 30000,
-    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot },
-  });
-  assert.equal(child.status, 0, `importing the CLI module and mapping runs must succeed; exit ${child.status}: ${child.stderr}`);
-  return JSON.parse(child.stdout);
-}
-
+// The collector maps the GitHub runs API with toWorkflowRunSnapshot, which
+// lives in lib/admission.mjs: the test reads it from there and never loads the
+// CLI, whose every load checks credentials and runs (review SEC-C5-1;
+// tests/merge-cli.spec.mjs 'NC CLI load').
 test('NC run snapshot: the collector keeps the workflow file path of each run', () => {
   // The fields the GitHub runs API returns for a run (abridged), and a few it adds.
   const raw = greenRuns().map((r) => ({
@@ -544,7 +531,7 @@ test('NC run snapshot: the collector keeps the workflow file path of each run', 
     html_url: `https://github.com/o/r/actions/runs/${r.id}`,
   }));
   raw.push({ ...raw[0], id: 799, name: NATIVE, path: IMPOSTOR_FILE, created_at: '2026-09-23T10:05:00Z' });
-  const mapped = snapshotInChild(raw);
+  const mapped = raw.map(toWorkflowRunSnapshot);
   assert.deepEqual(
     mapped,
     raw.map(({ id, name, path: file, head_sha, status, conclusion, created_at }) => ({ id, name, path: file, head_sha, status, conclusion, created_at })),
@@ -554,6 +541,11 @@ test('NC run snapshot: the collector keeps the workflow file path of each run', 
   assert.equal(evaluateAdmission(admissible({ workflow_runs: mapped })).eligible, true);
   const failedNative = mapped.map((r) => (r.name === NATIVE && r.path.startsWith(REQUIRED_WORKFLOW_FILES[NATIVE]) ? { ...r, conclusion: 'failure' } : r));
   assert.equal(evaluateAdmission(admissible({ workflow_runs: failedNative })).reason, ADMISSION_REASONS.WORKFLOWS_NOT_GREEN);
+  // The CLI's collector is this mapper, read from lib, and not a copy of its own.
+  const cli = fs.readFileSync('scripts/agent-control/auto-merge-admitted.mjs', 'utf8');
+  assert.match(cli, /^import \{[^}]*\btoWorkflowRunSnapshot\b[^}]*\} from '\.\/lib\/admission\.mjs';$/m);
+  assert.match(cli, /const workflow_runs = \(runs\.workflow_runs \|\| \[\]\)\.map\(toWorkflowRunSnapshot\);/);
+  assert.doesNotMatch(cli, /head_sha: r\.head_sha/, 'the CLI keeps no mapper of its own');
 });
 
 // ------------------------------------------ INDEPENDENT SEMANTIC REVIEW
@@ -818,7 +810,8 @@ test('grant gate: the non-draft check reads the PR, its artifacts and the grant,
   assert.equal(gate.eligible, true);
   assert.equal(gate.merge_grant.comment_id, snapshot.control_comments[0].id);
   // It cannot wait on its own run: a pending gate run at the head is not its input.
-  const pending = [{ id: 906, name: 'Agent Control Gate', head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
+  // The run comes from the gate's own file, so it would count if read (D-61).
+  const pending = [{ id: 906, name: 'Agent Control Gate', path: REQUIRED_WORKFLOW_FILES['Agent Control Gate'], head_sha: HEAD, status: 'in_progress', conclusion: null, created_at: '2026-09-23T10:00:09Z' }];
   assert.equal(evaluateGrantGate({ ...snapshot, workflow_runs: pending }).eligible, true);
   for (const [comments, reason] of [[[], GRANT_REASONS.ABSENT], [null, GRANT_REASONS.AUTHORITY_UNVERIFIED], [[grantFor(snapshot, { review_status: 'ACCEPT_FOR_ADMISSION' })], GRANT_REASONS.NOT_A_GRANT]]) {
     const v = evaluateGrantGate({ ...snapshot, control_comments: comments });

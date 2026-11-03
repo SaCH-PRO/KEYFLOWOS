@@ -3581,10 +3581,26 @@ negative_controls:
   - id: NC-FOLLOW3-C5-RUN-PATH-DROPPED
     claim: >
       The collector keeps each run's workflow file path. A snapshot that drops
-      it leaves admission unable to tell a gate from an impostor.
+      it leaves admission unable to tell a gate from an impostor. The mapper
+      lives in lib/admission.mjs (review SEC-C5-1) and the CLI maps with it.
     mutation:
-      file: scripts/agent-control/auto-merge-admitted.mjs
+      file: scripts/agent-control/lib/admission.mjs
       find: "  path: r.path,\n"
       replace: ""
     proof_command: node --test --test-name-pattern="NC run snapshot" scripts/agent-control/tests/admission.spec.mjs
     timeout_ms: 120000
+
+  # Review SEC-C5-1. Every load of auto-merge-admitted.mjs is a run: whatever
+  # name starts or imports it, without credentials it exits 2, because callers
+  # read exit 0 as a verdict (agent-control-gate.yml reads it as the #80 grant).
+  - id: NC-FOLLOW3-C5-CLI-LOAD-GUARDED
+    claim: >
+      The CLI's credential check runs on every load. Guarding it by the name
+      in argv[1] lets a symlink of another name or a wrapper that imports the
+      CLI start it with no credentials and no fail-closed exit 2.
+    mutation:
+      file: scripts/agent-control/auto-merge-admitted.mjs
+      find: "if (!token || !repo || !prNumber) {"
+      replace: "if (process.argv[1].endsWith('auto-merge-admitted.mjs') && (!token || !repo || !prNumber)) {"
+    proof_command: node --test --test-name-pattern="NC CLI load" scripts/agent-control/tests/merge-cli.spec.mjs
+    timeout_ms: 180000
