@@ -51,22 +51,45 @@
  *   EF-13  tenant B's feed, read the same way, holds none of A's rows (the paid
  *     row included), and owner A on B's feed is refused
  *   V1-25 review repairs:
- *   EF-11b (CR-V125-1) the second invoice.paid writer the full app registers
- *     (AutomationExecutorService.onInvoicePaid) is delivered the same payload:
- *     the feed then holds two paid rows for the invoice, same module, action
- *     and entity, milliseconds apart: the pair the cockpit reader shows once
+ *   EF-11b (CR-V125-1, contract since V1-55) the second invoice.paid listener
+ *     the full app registers (AutomationExecutorService.onInvoicePaid) is
+ *     delivered the same payload: it writes no feed row, so the feed holds ONE
+ *     paid row for the invoice, ActivityEventListener's (until V1-55 it wrote
+ *     a second, the pair the cockpit reader showed once)
  *   EF-11c (CR-V125-2) each payment's CRM contact mirror row (raw event name
  *     as title, JSON detail with reference and recordedBy) as the reader sees it
  *   EF-14..EF-16 it.todo: the scope filter (SEC-V125-1), CRM scope and contact
  *     visibility (SEC-V125-2) and the sibling-route bounds (SEC-V125-3) are
  *     server changes outside V1-25's write set
  *
- * CHARACTERIZATION ONLY (not a contract; V1-55 / D-08 own the dedupe):
- *   the Activity rows each payment writes in this harness, and the domain events
- *   it puts on the bus (which, in the full app, also drive the listener writers
- *   activity-event.listener.ts and automation-executor.service.ts; those are not
- *   wired here, except that EF-11 and EF-11b hand the one invoice.paid payload
- *   to each of the two).
+ * V1-55-EVT-ACTIVITY-DEDUPE (M50; owner ruling D-08: Activity is the
+ * user-visible feed, BusinessEvent the audit trail), on a third tenant C: each
+ * step's domain events, as the real services put them on the bus, are handed to
+ * the Activity writers the full app registers for them (ActivityEventListener,
+ * AutomationExecutorService and the CRM RevenueEventListener, subscribed by the
+ * real @nestjs/event-emitter loader on a real EventEmitter2 with the
+ * event-bus.module.ts options), and every Activity row the step wrote is pinned:
+ *   V55-01 contact create (the real CrmService.createContact; the CRM controller
+ *     is not mounted here): one crm created row, ActivityEventListener's
+ *   V55-02 invoice create (POST .../invoices): one commerce created row
+ *   V55-03 invoice send (PATCH .../status/sent): one commerce sent row
+ *   V55-04 a partial manual payment: its FINANCE payment_recorded row, no paid row
+ *   V55-05 the final manual payment: its FINANCE row and ONE commerce paid row
+ *     for the settled invoice, ActivityEventListener's ('Payment received')
+ *   flows are still dispatched: one ACTIVE published flow per trigger
+ *     (contact.created, invoice.sent, invoice.paid) runs once, through the
+ *     executor, with the step's ids
+ *   LEDGER: the feed writers add no FinancialTransaction or LedgerEntry; each
+ *     payment has exactly one Payment:<id>:payment_recorded posting, and C holds
+ *     only those two, balanced
+ *   V55-06 the cockpit read of C shows each of those rows once
+ *   V55-07 it.todo: the CRM contact mirror (crm-timeline.service.ts:106 ->
+ *     timeline.service.ts:51) still copies invoice.payment_recorded and
+ *     invoice.paid into the feed: outside V1-55's write set
+ *
+ * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
+ *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
+ *   V1-55 block above runs them), and the domain events it puts on the bus.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, CrmRateLimitGuard, CommerceService, InvoiceWorkflowService,
@@ -189,6 +212,10 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM business_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // V1-55: the flows seeded for tenant C and the team audit rows of its invoice create.
+    `DELETE FROM flow_versions WHERE flow_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM automation_flows WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -617,9 +644,9 @@ describe('step 4 audit trail: a manual payment is audited as a payment (R0-19, r
       owner: ID.ownerA, reference, audit,
     });
 
-    // CHARACTERIZATION (V1-55 / D-08). In the full app invoice.paid also
-    // drives ActivityEventListener.onInvoicePaid and the automation executor's
-    // feed write; neither is wired in this harness.
+    // CHARACTERIZATION. In the full app invoice.paid also drives
+    // ActivityEventListener.onInvoicePaid (the feed's one paid row since V1-55);
+    // no listener is wired in this harness (the V1-55 block below wires them).
     const activity = await newActivityRows(ID.bizA, activityBefore);
     expect(activity.map((a) => `${a.module}:${a.action}:${a.entityType}`).sort()).toEqual([
       'FINANCE:payment_recorded:payment',
@@ -859,33 +886,37 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     expect(big.body.map((row: any) => [row.action, row.entityId])).toEqual([['paid', ID.invA]]);
   });
 
-  it("EF-11b (CR-V125-1): in the full app invoice.paid also drives AutomationExecutorService.onInvoicePaid, so A's feed holds TWO paid rows for the invoice: same module, action and entity, written milliseconds apart, the same total; the cockpit reader shows the pair once (BT-08)", async () => {
+  it("EF-11b (CR-V125-1, V1-55): in the full app invoice.paid also drives AutomationExecutorService.onInvoicePaid; it writes no second feed row, so A's feed holds ONE paid row for the invoice, ActivityEventListener's, with the invoice total", async () => {
     // flow.module.ts registers both listeners of invoice.paid; EF-11 delivered
     // the payload to the first, this delivers the same payload to the second
     // (real ActivityService and Prisma; its CRM task, e-mail, adapter and flow
-    // runner collaborators are off the feed and stubbed).
+    // runner collaborators are off the feed and stubbed). Until V1-55 it wrote
+    // a second paid row ('Invoice paid') for the same invoice.
     const paid = bus.filter((e) => e.name === 'invoice.paid');
     expect(paid).toHaveLength(1);
     const { AutomationExecutorService } = await import('../src/modules/flow/automation-executor.service');
     const { ActivityService } = await import('../src/modules/flow/activity.service');
     const { PrismaService } = await import('../src/core/prisma/prisma.service');
     const prisma = app.get(PrismaService);
-    const crmStub = { addTask: async () => undefined, logContactEvent: async () => undefined };
+    const tasks: any[] = [];
+    const crmStub = { addTask: async (t: unknown) => { tasks.push(t); }, logContactEvent: async () => undefined };
     const executor = new AutomationExecutorService(prisma, new ActivityService(prisma), crmStub as never, {} as never, null, null);
+    const before = await activityRows(ID.bizA);
     await executor.onInvoicePaid(paid[0].payload);
+
+    // It ran (its built-in invoice.paid rule still adds the thank-you task) and wrote no Activity row.
+    expect(tasks.map((t) => [t.contactId, t.title])).toEqual([[ID.contactA, 'Send thank-you note']]);
+    expect((await activityRows(ID.bizA)).map((a) => a.id), "the executor's Activity writes for invoice.paid").toEqual(before.map((a) => a.id));
 
     const rows = await cockpitRead(ID.ownerA, ID.bizA);
     const paidRows = rows.filter((row) => row.action === 'paid' && row.entityId === ID.invA);
-    expect(paidRows, 'one invoice.paid, two feed rows (V1-55 / D-08 own the writer dedupe)').toHaveLength(2);
-    // The facts the cockpit's reader dedupe (business-timeline.tsx DOUBLE_WRITTEN) relies on.
-    for (const row of paidRows) {
-      expect(row).toMatchObject({ businessId: ID.bizA, module: 'commerce', action: 'paid', entityType: 'invoice', entityId: ID.invA });
-      expect(cents(row.data.total)).toBe(cents(INVOICE_A_TOTAL));
-      expect(row.data.currency).toBe('TTD');
-    }
-    expect(paidRows.map((row) => row.title).sort()).toEqual(['Invoice paid', 'Payment received']);
-    const [t1, t2] = paidRows.map((row) => new Date(row.occurredAt).getTime());
-    expect(Math.abs(t1 - t2), 'the two rows land within the reader dedupe window (10 s)').toBeLessThanOrEqual(10_000);
+    expect(paidRows, 'one invoice.paid, one feed row').toHaveLength(1);
+    expect(paidRows[0]).toMatchObject({
+      businessId: ID.bizA, module: 'commerce', action: 'paid', entityType: 'invoice', entityId: ID.invA,
+      title: 'Payment received', category: 'PAYMENT',
+    });
+    expect(cents(paidRows[0].data.total)).toBe(cents(INVOICE_A_TOTAL));
+    expect(paidRows[0].data.currency).toBe('TTD');
   });
 
   it("EF-11c (CR-V125-2): each payment's contact mirror in A's feed is the shape the cockpit reader leaves out (BT-09): module crm, entity the contact, title = action = 'invoice.payment_recorded', detail a JSON object carrying the reference and recordedBy", async () => {
@@ -964,4 +995,337 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
   it.todo("EF-14 (SEC-V125-1): a STAFF member with revenue 'none' gets no FINANCE / commerce / PAYMENT row (no amount, invoice total or number) from GET /timeline/businesses/:id/events, or a 403, as every revenue list route refuses that member: needs a module-scope row filter in TimelineController.queryEvents / TimelineService.queryTimeline (outside V1-25's write set)");
   it.todo("EF-15 (SEC-V125-2): a member with crm 'none' gets no contact-bearing row (?contactId= included), and a member without CRM view-all gets no row naming a PRIVATE or unshared contact it cannot list (visibilityClause, M7): needs the CRM scope and visibility filter in TimelineService.queryTimeline (outside V1-25's write set)");
   it.todo('EF-16 (SEC-V125-3): GET /timeline/businesses/:id/upcoming?limit=100000 and the legacy GET /api/flows/businesses/:id/activity?limit=100000 are bounded like /events (400 above TIMELINE_MAX_LIMIT): needs timeline.controller.ts and flow.controller.ts (outside V1-25\'s write set)');
+});
+
+describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through the feed writers the full app registers (real DB, tenant C)', () => {
+  const C = {
+    owner: `${P}${RUN}_ownerC`,
+    biz: `${P}${RUN}_bizC`,
+    contactEmail: `${P}${RUN}_cc@test.local`,
+  };
+  const INVOICE_C_TOTAL = 300;
+  /** One ACTIVE flow with a published version per trigger the executor dispatches in these steps. */
+  const FLOW_TRIGGERS = ['contact.created', 'invoice.sent', 'invoice.paid'] as const;
+  const flowId = (trigger: string) => `${P}${RUN}_flowC_${trigger.replace(/\./g, '_')}`;
+  const cents = (v: unknown) => Math.round(Number(v) * 100);
+
+  const SC: { contactId?: string; invoiceId?: string; invoiceNumber?: string; partialId?: string; fullId?: string } = {};
+  /** What the executor dispatched to the flow runner (the runner itself is off the feed). */
+  const flowRuns: Array<{ businessId: string; flowId: string; ctx: any }> = [];
+  /** What the executor's built-in rules asked CRM for. */
+  const crmTasks: any[] = [];
+  let feedModule: any;
+  let feedBus: any;
+  let crm: any;
+
+  type Row = { id: string; module: string; action: string; entityType: string; entityId: string | null; title: string; detail: string | null; data: any; category: string | null; contactId: string | null };
+  const kind = (r: Row) => `${r.module}:${r.action}:${r.entityType}`;
+
+  async function rowsOfC(): Promise<Row[]> {
+    return db.activity.findMany({
+      where: { businessId: C.biz },
+      orderBy: { occurredAt: 'asc' },
+      select: { id: true, module: true, action: true, entityType: true, entityId: true, title: true, detail: true, data: true, category: true, contactId: true },
+    });
+  }
+
+  async function ledgerOfC() {
+    return {
+      txns: await db.financialTransaction.count({ where: { businessId: C.biz } }),
+      entries: await db.ledgerEntry.count({ where: { businessId: C.biz } }),
+    };
+  }
+
+  /**
+   * One step of the journey: run `act` (the real route or service), take the
+   * domain events it put on the bus, hand them to the feed writers on the real
+   * EventEmitter2 (emit, as the services do), and return every Activity row C
+   * gained once the writers settle, with C's ledger counts around the delivery.
+   */
+  async function step(act: () => Promise<void>) {
+    const before = new Set((await rowsOfC()).map((r) => r.id));
+    bus.length = 0;
+    await act();
+    const events = bus.splice(0);
+    const ledgerBeforeDelivery = await ledgerOfC();
+    for (const e of events) feedBus.emit(e.name, e.payload);
+    // Settled: the same row count on four reads 250 ms apart.
+    let rows = await rowsOfC();
+    let stable = 0;
+    const deadline = Date.now() + 10_000;
+    while (stable < 4 && Date.now() < deadline) {
+      await sleep(250);
+      const next = await rowsOfC();
+      stable = next.length === rows.length ? stable + 1 : 0;
+      rows = next;
+    }
+    return {
+      events: events.map((e) => e.name),
+      rows: rows.filter((r) => !before.has(r.id)),
+      ledgerBeforeDelivery,
+      ledgerAfterDelivery: await ledgerOfC(),
+    };
+  }
+
+  async function runsOf(trigger: string, n: number) {
+    return waitFor(async () => flowRuns.filter((r) => r.flowId === flowId(trigger)), (runs) => runs.length >= n, 5_000);
+  }
+
+  beforeAll(async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { EventEmitterModule, EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { ActivityService } = await import('../src/modules/flow/activity.service');
+    const { ActivityEventListener } = await import('../src/modules/flow/activity-event.listener');
+    const { AutomationExecutorService } = await import('../src/modules/flow/automation-executor.service');
+    const { FlowRunnerService } = await import('../src/modules/flow/flow-runner.service');
+    const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
+    const { RevenueEventListener } = await import('../src/modules/crm/revenue-event.listener');
+    const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+    const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+    const { CrmService } = await import('../src/modules/crm/crm.service');
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+
+    await db.user.create({ data: { id: C.owner, email: `${P}${RUN}_ownerC@test.local`, role: 'USER' } });
+    await db.business.create({ data: { id: C.biz, name: 'K19A Biz C', ownerId: C.owner, currency: 'TTD' } });
+    await db.membership.create({ data: { id: `${P}${RUN}_mC`, userId: C.owner, businessId: C.biz, role: 'OWNER' } });
+    await app.get(ChartOfAccountsSeederService).ensureDefaults(C.biz);
+    for (const trigger of FLOW_TRIGGERS) {
+      await db.automationFlow.create({
+        data: {
+          id: flowId(trigger),
+          businessId: C.biz,
+          name: `K19A flow on ${trigger}`,
+          category: 'test',
+          status: 'ACTIVE',
+          versions: {
+            create: [{
+              id: `${flowId(trigger)}_v1`,
+              version: 1,
+              status: 'PUBLISHED',
+              publishedAt: new Date(),
+              nodes: [{ id: 'trigger', type: 'trigger', data: { triggerEvent: trigger } }],
+              edges: [],
+            }],
+          },
+        },
+      });
+    }
+
+    // The Activity writers the full app registers for these events, subscribed
+    // by @nestjs/event-emitter's own loader with event-bus.module.ts's options.
+    // Real: Prisma, ActivityService, the CRM timeline (contact events and their
+    // Activity mirror). Off the feed and stubbed: the flow runner (recorded),
+    // the executor's CRM task calls (recorded), e-mail, contact insights.
+    feedModule = await Test.createTestingModule({
+      imports: [EventEmitterModule.forRoot({ wildcard: true, delimiter: '.', maxListeners: 50 })],
+      providers: [
+        { provide: PrismaService, useValue: app.get(PrismaService) },
+        ActivityService,
+        ActivityEventListener,
+        AutomationExecutorService,
+        RevenueEventListener,
+        { provide: CrmTimelineService, useValue: app.get(CrmTimelineService) },
+        { provide: ContactInsightService, useValue: { markStale: async () => undefined } },
+        {
+          provide: CrmService,
+          useValue: {
+            addTask: async (task: unknown) => { crmTasks.push(task); return task; },
+            contactDetail: async () => ({ contact: null }),
+            updateContact: async () => undefined,
+            logContactEvent: async () => undefined,
+          },
+        },
+        { provide: TransactionalEmailService, useValue: {} },
+        {
+          provide: FlowRunnerService,
+          useValue: { runFlow: async (businessId: string, id: string, ctx: unknown) => { flowRuns.push({ businessId, flowId: id, ctx }); return {}; } },
+        },
+      ],
+    }).compile();
+    await feedModule.init();
+    feedBus = feedModule.get(EventEmitter2);
+
+    // The real contact-create service call (the CRM controller is not mounted
+    // in this harness); its collaborators off the contact row and its event
+    // are stubbed.
+    crm = new CrmService(
+      app.get(PrismaService),
+      eventRecorder as never,
+      { checkLimit: async () => ({ allowed: true }) } as never,
+      app.get(CrmTimelineService),
+      { invalidateCache: () => undefined } as never,
+      {} as never,
+      { invalidateCache: () => undefined } as never,
+      {} as never,
+      { write: async () => undefined } as never,
+      {} as never,
+    );
+  }, 120_000);
+
+  afterAll(async () => {
+    if (feedModule) await feedModule.close();
+  });
+
+  it('wiring: the feed bus subscribes the full app\'s Activity writers to each event of the steps below (invoice.paid: ActivityEventListener, AutomationExecutorService, RevenueEventListener)', () => {
+    for (const event of ['contact.created', 'invoice.created', 'invoice.sent', 'invoice.paid']) {
+      expect(feedBus.listeners(event).length, event).toBeGreaterThan(0);
+    }
+    expect(feedBus.listeners('invoice.paid')).toHaveLength(3);
+  });
+
+  it("V55-01 contact create: one crm created row for the contact, ActivityEventListener's ('New contact'); the contact.created flow is dispatched once", async () => {
+    const s = await step(async () => {
+      const contact = await crm.createContact({ businessId: C.biz, firstName: 'K19a', lastName: 'CustomerC', email: C.contactEmail, actorUserId: C.owner });
+      SC.contactId = contact.id;
+    });
+    expect(s.events).toContain('contact.created');
+    const created = s.rows.filter((r) => kind(r) === 'crm:created:contact' && r.entityId === SC.contactId);
+    expect(created.map((r) => r.title), 'crm created rows for the contact').toEqual(['New contact']);
+    expect(created[0]).toMatchObject({ contactId: SC.contactId, detail: 'K19a CustomerC added to CRM' });
+    // Every row the step wrote: the feed row and the CRM contact-event mirror (CrmService's own ContactEvent).
+    expect(s.rows.map(kind).sort()).toEqual(['crm:contact.created:contact', 'crm:created:contact']);
+
+    const runs = await runsOf('contact.created', 1);
+    expect(runs.map((r) => [r.businessId, r.ctx.trigger, r.ctx.contactId])).toEqual([[C.biz, 'contact.created', SC.contactId]]);
+    expect(s.ledgerAfterDelivery).toEqual(s.ledgerBeforeDelivery);
+  });
+
+  it('V55-02 invoice create (POST .../invoices): one commerce created row for the invoice', async () => {
+    const s = await step(async () => {
+      const res = await agent()
+        .post(`/commerce/businesses/${C.biz}/invoices`)
+        .set(HEADER, C.owner)
+        .send({ contactId: SC.contactId, currency: 'TTD', items: [{ description: 'K19A C item', quantity: 1, unitPrice: INVOICE_C_TOTAL }] });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      SC.invoiceId = res.body.id;
+      SC.invoiceNumber = res.body.invoiceNumber;
+    });
+    expect(SC.invoiceId).toBeTruthy();
+    expect(s.events).toContain('invoice.created');
+    const created = s.rows.filter((r) => kind(r) === 'commerce:created:invoice' && r.entityId === SC.invoiceId);
+    expect(created, 'commerce created rows for the invoice').toHaveLength(1);
+    expect(created[0]).toMatchObject({ title: `Invoice ${SC.invoiceNumber} created`, category: 'COMMERCE', contactId: SC.contactId });
+    expect(cents(created[0].data.total)).toBe(cents(INVOICE_C_TOTAL));
+    expect(s.rows.map(kind).sort()).toEqual(['commerce:created:invoice', 'crm:invoice.created:contact']);
+    expect(s.ledgerAfterDelivery).toEqual(s.ledgerBeforeDelivery);
+  });
+
+  it("V55-03 invoice send (PATCH .../status/sent): one commerce sent row for the invoice, ActivityEventListener's; the invoice.sent flow is dispatched once", async () => {
+    const s = await step(async () => {
+      const res = await agent()
+        .patch(`/commerce/invoices/${SC.invoiceId}/status/sent`)
+        .set(HEADER, C.owner)
+        .send({ businessId: C.biz, status: 'SENT' });
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+    });
+    expect(s.events).toContain('invoice.sent');
+    const sent = s.rows.filter((r) => kind(r) === 'commerce:sent:invoice' && r.entityId === SC.invoiceId);
+    expect(sent.map((r) => r.title), 'commerce sent rows for the invoice').toEqual(['Invoice sent']);
+    expect(sent[0]).toMatchObject({ detail: `Invoice ${SC.invoiceNumber} sent to K19a CustomerC`, contactId: SC.contactId });
+    expect(s.rows.filter((r) => r.module === 'commerce').map(kind)).toEqual(['commerce:sent:invoice']);
+
+    const runs = await runsOf('invoice.sent', 1);
+    expect(runs.map((r) => [r.businessId, r.ctx.trigger, r.ctx.invoiceId, r.ctx.contactId])).toEqual([[C.biz, 'invoice.sent', SC.invoiceId, SC.contactId]]);
+    expect(s.ledgerAfterDelivery).toEqual(s.ledgerBeforeDelivery);
+  });
+
+  it('V55-04 partial manual payment (100 of 300): its FINANCE payment_recorded row, no paid row; one posting; the feed writers add no ledger row', async () => {
+    const s = await step(async () => {
+      const res = await payAs(C.owner, C.biz, SC.invoiceId!, { amount: 100, method: 'cash', reference: `${P}${RUN}-c-partial` });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      SC.partialId = res.body.payment.id;
+    });
+    expect((await db.invoice.findUnique({ where: { id: SC.invoiceId } })).status).toBe('PARTIALLY_PAID');
+    expect(s.events).not.toContain('invoice.paid');
+    const finance = s.rows.filter((r) => kind(r) === 'FINANCE:payment_recorded:payment');
+    expect(finance.map((r) => r.entityId)).toEqual([SC.partialId]);
+    expect(cents(finance[0].data.amount)).toBe(10_000);
+    expect(s.rows.filter((r) => r.action === 'paid'), 'a partial payment settles nothing').toEqual([]);
+    expect(s.rows.map(kind).sort()).toEqual(['FINANCE:payment_recorded:payment', 'crm:invoice.payment_recorded:contact']);
+
+    expect(await postingsFor(C.biz, SC.partialId!), 'Payment:<id>:payment_recorded posting').toHaveLength(1);
+    expect(s.ledgerAfterDelivery).toEqual(s.ledgerBeforeDelivery);
+  });
+
+  it("V55-05 final manual payment (the remaining 200): its FINANCE row and ONE commerce paid row for the settled invoice, ActivityEventListener's ('Payment received'); the invoice.paid flow is dispatched once", async () => {
+    const s = await step(async () => {
+      const res = await payAs(C.owner, C.biz, SC.invoiceId!, { amount: 200, method: 'bank_transfer', reference: `${P}${RUN}-c-full` });
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      SC.fullId = res.body.payment.id;
+    });
+    expect((await db.invoice.findUnique({ where: { id: SC.invoiceId } })).status).toBe('PAID');
+    expect(s.events.filter((e) => e === 'invoice.paid')).toHaveLength(1);
+
+    const paid = s.rows.filter((r) => kind(r) === 'commerce:paid:invoice' && r.entityId === SC.invoiceId);
+    expect(paid.map((r) => r.title), 'commerce paid rows for the settled invoice').toEqual(['Payment received']);
+    expect(paid[0]).toMatchObject({ category: 'PAYMENT', contactId: SC.contactId });
+    expect(cents(paid[0].data.total)).toBe(cents(INVOICE_C_TOTAL));
+    const finance = s.rows.filter((r) => kind(r) === 'FINANCE:payment_recorded:payment');
+    expect(finance.map((r) => r.entityId)).toEqual([SC.fullId]);
+    expect(cents(finance[0].data.amount)).toBe(20_000);
+    // Every Activity row the settling payment wrote (the two crm rows are the
+    // contact-event mirror, V55-07): no second paid row.
+    expect(s.rows.map(kind).sort()).toEqual([
+      'FINANCE:payment_recorded:payment',
+      'commerce:paid:invoice',
+      'crm:invoice.paid:contact',
+      'crm:invoice.payment_recorded:contact',
+    ]);
+
+    const runs = await runsOf('invoice.paid', 1);
+    expect(runs.map((r) => [r.businessId, r.ctx.trigger, r.ctx.invoiceId, r.ctx.contactId, cents(r.ctx.total)])).toEqual([
+      [C.biz, 'invoice.paid', SC.invoiceId, SC.contactId, cents(INVOICE_C_TOTAL)],
+    ]);
+    // The executor's built-in invoice.paid rule still runs.
+    expect(crmTasks.map((t) => [t.businessId, t.contactId, t.title])).toEqual([[C.biz, SC.contactId, 'Send thank-you note']]);
+
+    expect(await postingsFor(C.biz, SC.fullId!), 'Payment:<id>:payment_recorded posting').toHaveLength(1);
+    expect(s.ledgerAfterDelivery).toEqual(s.ledgerBeforeDelivery);
+  });
+
+  it("V55-06 C's feed, read as the cockpit reads it, shows each step's row once; each flow ran once; LEDGER: C holds exactly the two payment postings, balanced, summing to the invoice", async () => {
+    const res = await agent().get(`/timeline/businesses/${C.biz}/events?limit=50`).set(HEADER, C.owner);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const rows: Row[] = res.body;
+    expect(rows.every((r: any) => r.businessId === C.biz)).toBe(true);
+    const count = (k: string, entityId: string | undefined) => rows.filter((r) => kind(r) === k && r.entityId === entityId).length;
+    expect(count('crm:created:contact', SC.contactId), 'contact created').toBe(1);
+    expect(count('commerce:created:invoice', SC.invoiceId), 'invoice created').toBe(1);
+    expect(count('commerce:sent:invoice', SC.invoiceId), 'invoice sent').toBe(1);
+    expect(count('commerce:paid:invoice', SC.invoiceId), 'invoice paid').toBe(1);
+    expect(count('FINANCE:payment_recorded:payment', SC.partialId), 'partial payment').toBe(1);
+    expect(count('FINANCE:payment_recorded:payment', SC.fullId), 'final payment').toBe(1);
+
+    expect(flowRuns.map((r) => r.flowId).sort()).toEqual(FLOW_TRIGGERS.map(flowId).sort());
+
+    const txns = await db.financialTransaction.findMany({ where: { businessId: C.biz }, orderBy: { createdAt: 'asc' } });
+    expect(txns.map((t: any) => t.externalRef)).toEqual([
+      `Payment:${SC.partialId}:payment_recorded`,
+      `Payment:${SC.fullId}:payment_recorded`,
+    ]);
+    const entries = await db.ledgerEntry.findMany({ where: { businessId: C.biz } });
+    const txnIds = new Set(txns.map((t: any) => t.id));
+    expect(entries.filter((e: any) => !txnIds.has(e.transactionId)), 'ledger entries outside the two postings').toEqual([]);
+    let total = 0;
+    for (const t of txns) {
+      const own = entries.filter((e: any) => e.transactionId === t.id);
+      const debit = own.reduce((sum: number, e: any) => sum + cents(e.debit ?? 0), 0);
+      const credit = own.reduce((sum: number, e: any) => sum + cents(e.credit ?? 0), 0);
+      expect(debit, `${t.externalRef} balanced`).toBe(credit);
+      expect(debit).toBe(cents(t.amount));
+      total += cents(t.amount);
+    }
+    expect(total).toBe(cents(INVOICE_C_TOTAL));
+  });
+
+  // The fourth writer the lane finding named, located: every ContactEvent is
+  // mirrored into Activity by CrmTimelineService.logEvent
+  // (crm-timeline.service.ts:106 -> timeline.service.ts:51), so the payment's
+  // ContactEvent (CommerceService.recordPayment) copies the FINANCE row and
+  // RevenueEventListener.onInvoicePaid's ContactEvent
+  // (revenue-event.listener.ts:198) copies the paid row (V55-04 / V55-05 pin
+  // them). Removing or folding the mirror changes the CRM timeline, outside
+  // V1-55's write set (automation-executor.service.ts only).
+  it.todo("V55-07: a settling manual payment writes no CRM contact-event mirror row (crm:invoice.payment_recorded:contact, crm:invoice.paid:contact) beside its FINANCE row and the one commerce paid row: needs crm-timeline.service.ts / revenue-event.listener.ts (outside V1-55's write set)");
 });
