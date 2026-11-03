@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, Inject, Param, Patch, Post, Put, Query, Req, Res, Sse, UnauthorizedException, UploadedFile, UseGuards, UseInterceptors, Logger } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, HttpException, Inject, NotFoundException, Param, Patch, Post, Put, Query, Req, Res, Sse, UnauthorizedException, UploadedFile, UseGuards, UseInterceptors, Logger } from '@nestjs/common';
 import type { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Observable } from 'rxjs';
@@ -150,7 +150,13 @@ export class CrmController {
    * contacts/:contactId applies. A contact outside that rule answers that
    * route's 404 for an unknown id and no child row is read; a request without
    * a member is 401 (V1-08, M13). It also gates both ends of a relationship
-   * write (POST relationships, POST refer). It returns the member and their
+   * write (POST relationships, POST refer), and every other route that names
+   * a contact by its path: the contact-scoped writes (notes, tasks, events,
+   * log-communication, favorite, playbook, next-action, data-quality
+   * mark-verified, relationship-health, list removal, both contacts of a
+   * merge) and the conversation routes (read, reply, summary, regenerate,
+   * suggest-replies, insights), whose collaborators also check the tenant
+   * only (FOLLOW3-D2, review ST-4). It returns the member and their
    * CRM access, which the relationship and network reads use to drop the
    * neighbours the member cannot open (review ST-1).
    */
@@ -279,10 +285,30 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Delete('businesses/:businessId/relationships/:relationshipId')
-  deleteContactRelationship(
+  async deleteContactRelationship(
     @Param('businessId') businessId: string,
     @Param('relationshipId') relationshipId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    // Both ends, as POST relationships (review ST-2 residual): an edge with an
+    // end the member cannot open answers the 404 of an unknown relationship id
+    // and nothing is deleted. An id outside this business is left to the
+    // service, which answers that same 404.
+    const actorUserId = this.requireActorUserId(req);
+    const edge = await this.prisma.client.contactRelationship.findFirst({
+      where: { id: relationshipId, businessId },
+      select: { fromContactId: true, toContactId: true },
+    });
+    if (edge) {
+      const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+      const canOpen = await contactVisibilityFilter(this.prisma, businessId, access, actorUserId, [
+        edge.fromContactId,
+        edge.toContactId,
+      ]);
+      if (canOpen && !(canOpen(edge.fromContactId) && canOpen(edge.toContactId))) {
+        throw new NotFoundException('Relationship not found');
+      }
+    }
     return this.network.deleteRelationship(businessId, relationshipId);
   }
 
@@ -647,13 +673,16 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/merge/:duplicateId')
-  mergeContact(
+  async mergeContact(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Param('duplicateId') duplicateId: string,
     @Body() body: { fieldOverrides?: Record<string, unknown> } | undefined,
     @Req() req: any,
   ) {
+    // Both contacts: a merge reads the duplicate into the primary and deletes it.
+    await this.assertVisibleContact(businessId, contactId, req);
+    await this.assertVisibleContact(businessId, duplicateId, req);
     return this.crm.mergeContacts({
       businessId,
       primaryId: contactId,
@@ -824,7 +853,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/data-quality/mark-verified')
-  async dqMarkVerified(@Param('businessId') businessId: string, @Param('contactId') contactId: string) {
+  async dqMarkVerified(
+    @Param('businessId') businessId: string,
+    @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
+  ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.dataQuality.markContactVerified(businessId, contactId);
   }
 
@@ -832,12 +866,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/notes')
-  addNote(
+  async addNote(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: CreateNoteDto,
     @Req() req: any,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.timeline.addNote({
       businessId,
       contactId,
@@ -933,7 +968,7 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(60, 60_000)
   @Put('businesses/:businessId/contacts/:contactId/relationship-health')
-  setRelationshipHealthOverride(
+  async setRelationshipHealthOverride(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: { value: ContactRelationshipHealth | null },
@@ -945,6 +980,7 @@ export class CrmController {
     ) {
       throw new BadRequestException('Invalid relationship health value');
     }
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.relationshipHealth.setManualOverride({
       businessId,
       contactId,
@@ -957,11 +993,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(60, 60_000)
   @Delete('businesses/:businessId/contacts/:contactId/relationship-health')
-  clearRelationshipHealthOverride(
+  async clearRelationshipHealthOverride(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Req() req: any,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.relationshipHealth.setManualOverride({
       businessId,
       contactId,
@@ -996,12 +1033,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/tasks')
-  addTask(
+  async addTask(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: CreateTaskDto,
     @Req() req: any,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.timeline.addTask({
       businessId,
       contactId,
@@ -1044,11 +1082,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(60, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/next-action/complete')
-  completeContactNextAction(
+  async completeContactNextAction(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Req() req: any,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.crm.completeNextAction({
       businessId,
       contactId,
@@ -1060,12 +1099,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(60, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/next-action/snooze')
-  snoozeContactNextAction(
+  async snoozeContactNextAction(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: { snoozeUntil?: string; days?: number },
     @Req() req: any,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.crm.snoozeNextAction({
       businessId,
       contactId,
@@ -1335,7 +1375,7 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/log-communication')
-  logCommunication(
+  async logCommunication(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: { channelType: string; outcome: string; duration?: number; notes?: string },
@@ -1344,6 +1384,7 @@ export class CrmController {
     if (!body.channelType || !body.outcome) {
       throw new BadRequestException('channelType and outcome are required');
     }
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.crm.logCommunication({
       businessId,
       contactId,
@@ -1359,12 +1400,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/events')
-  createEvent(
+  async createEvent(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: LogContactEventDto,
     @Req() req: any,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.crm.logContactEvent({
       businessId,
       contactId,
@@ -1438,11 +1480,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/playbook')
-  updatePlaybook(
+  async updatePlaybook(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: { data: any; type?: string },
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.playbook.updatePlaybook({
       businessId,
       contactId,
@@ -1587,11 +1631,13 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Delete('businesses/:businessId/lists/:listId/contacts/:contactId')
-  removeContactFromList(
+  async removeContactFromList(
     @Param('businessId') businessId: string,
     @Param('listId') listId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.crm.removeContactFromList({ businessId, listId, contactId });
   }
 
@@ -1794,10 +1840,12 @@ export class CrmController {
   @RequireModuleScope('crm', 'write')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/favorite')
-  toggleFavorite(
+  async toggleFavorite(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.crm.toggleFavorite(businessId, contactId);
   }
 
@@ -1844,6 +1892,7 @@ export class CrmController {
   ) {
     const userId = req?.user?.id;
     if (!userId) throw new BadRequestException('Authenticated user required');
+    await this.assertVisibleContact(businessId, contactId, req);
     const state = await this.communication.markRead(businessId, userId, contactId);
     return { ok: true, lastReadAt: state.lastReadAt.toISOString() };
   }
@@ -1865,6 +1914,7 @@ export class CrmController {
     if (!body?.body || !body.body.trim()) {
       throw new BadRequestException('Message body is required');
     }
+    await this.assertVisibleContact(businessId, contactId, req);
     return this.communication.reply({
       businessId,
       contactId,
@@ -1883,8 +1933,10 @@ export class CrmController {
   async getConversationSummary(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('refresh') refresh?: string,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     const force = refresh === '1' || refresh === 'true';
     const r = await this.conversationAi.summarizeThread(businessId, contactId, { force });
     return { summary: r.insight, cached: r.cached };
@@ -1897,7 +1949,9 @@ export class CrmController {
   async regenerateConversationSummary(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     const r = await this.conversationAi.summarizeThread(businessId, contactId, { force: true });
     return { summary: r.insight, cached: r.cached };
   }
@@ -1910,7 +1964,9 @@ export class CrmController {
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: { count?: number; preferredChannel?: string; tone?: string },
+    @Req() req: { user?: { id?: string } },
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     const replies = await this.conversationAi.suggestReplies(businessId, contactId, {
       count: typeof body?.count === 'number' ? body.count : undefined,
       preferredChannel: typeof body?.preferredChannel === 'string' ? body.preferredChannel : undefined,
@@ -1926,8 +1982,10 @@ export class CrmController {
   async getConversationInsights(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('messageRefs') messageRefs?: string,
   ) {
+    await this.assertVisibleContact(businessId, contactId, req);
     const refs = (messageRefs ?? '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 100);
     const [rollup, perMessage] = await Promise.all([
       this.conversationAi.getContactRollup(businessId, contactId),
