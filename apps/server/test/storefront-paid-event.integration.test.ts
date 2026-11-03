@@ -74,6 +74,18 @@
  *           provider, so the payment is that provider's and its deposit leg is
  *           PAYMENT_PROCESSOR (it was unknown:unknown, posted to CASH)
  *
+ * Trial-N repair round 2 (recheck G6RC-2, G6RC-3):
+ *
+ *   V18-12  PATCH .../orders/:id/status writes no payment field
+ *           (paymentStatus, paymentMethod, paymentRef) of a STOREFRONT order,
+ *           in any direction: a settled order cannot be set back to UNPAID.
+ *           Its payment fields are written only by completeCheckout (a
+ *           provider settlement, or the offline completion with revenue
+ *           write). Controls: the status alone still moves; a STANDARD
+ *           order's payment fields are still written
+ *   V18-13  POST /marketplace/businesses/:id/orders decides the type itself
+ *           (STANDARD): a body type STOREFRONT creates no STOREFRONT order
+ *
  * Still open (it.todo): the store_order.paid listeners that do not read the
  * stored payment status (for a STANDARD order), and the web caller of the
  * CASH / MANUAL offline completion (V1-33).
@@ -98,7 +110,7 @@
 import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -624,6 +636,97 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     expect(`${payment.provider}:${payment.method}:${payment.providerPaymentId}`).toBe(`wipay:wipay:${P}wtx_11`);
     const deposit = posting.entries.filter((e: any) => DEPOSIT_KEYS.has(e.account?.systemKey) && Number(e.debit) > 0).map((e: any) => e.account.systemKey);
     expect(deposit).toEqual(['PAYMENT_PROCESSOR']);
+  });
+
+  it('V18-12 (trial-N recheck G6RC-2) PATCH .../orders/:id/status writes no payment field of a STOREFRONT order: paymentStatus, paymentMethod and paymentRef are refused (400) in every direction, a settled order stays PAID with its books; controls: the status alone still moves, and a STANDARD order\'s payment fields are still written', async () => {
+    const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
+    const market = app.get(MarketplaceService);
+    const settled = await placeOrder('WIPAY');
+    await storeOrders.updatePaymentStatus(settled.id, 'PAID', `${P}wtx_12`, 'wipay');
+    await settle();
+    await expectOnePaidInvoice(settled);
+    const paidBefore = await db.marketplaceOrder.findUnique({ where: { id: settled.id } });
+    const unpaid = await placeOrder('CASH');
+    const unpaidBefore = await db.marketplaceOrder.findUnique({ where: { id: unpaid.id } });
+    const before = await counts();
+    seen = [];
+
+    // At 644bb6ad: each one is written verbatim (ZZPROBE-3: the settled order reads CONFIRMED/UNPAID with its books
+    // still on, so the provider paths treat it as payable again and its next settlement fails on INV-<orderNumber>).
+    const attempts: Array<[string, string, Record<string, unknown>]> = [
+      ['settled order set UNPAID', settled.id, { status: 'CONFIRMED', paymentStatus: 'UNPAID' }],
+      ['settled order set REFUNDED', settled.id, { status: 'CONFIRMED', paymentStatus: 'REFUNDED' }],
+      ['settled order paymentRef rewritten', settled.id, { status: 'CONFIRMED', paymentRef: `${P}forged_ref` }],
+      ['unpaid order paymentMethod rewritten', unpaid.id, { status: 'CONFIRMED', paymentMethod: 'WIPAY' }],
+      ['unpaid order paymentStatus FAILED', unpaid.id, { status: 'CONFIRMED', paymentStatus: 'FAILED' }],
+      ['unpaid order paymentRef cleared', unpaid.id, { status: 'CONFIRMED', paymentRef: null }],
+    ];
+    for (const [label, id, body] of attempts) {
+      await expect(market.updateOrderStatus(ID.biz, id, body.status as string, body), label).rejects.toThrow(/storefront order/i);
+    }
+    await settle();
+
+    const paidAfter = await db.marketplaceOrder.findUnique({ where: { id: settled.id } });
+    const unpaidAfter = await db.marketplaceOrder.findUnique({ where: { id: unpaid.id } });
+    const shape = (o: any) => `${o.status}/${o.paymentStatus}/${o.paymentMethod}/${o.paymentRef}`;
+    expect(shape(paidAfter), 'the settled order is unchanged').toBe(shape(paidBefore));
+    expect(shape(unpaidAfter), 'the unpaid order is unchanged').toBe(shape(unpaidBefore));
+    expect(await counts(), 'nothing written').toEqual(before);
+    expect(storeEvents(), 'no lifecycle event').toEqual([]);
+    await expectOnePaidInvoice(settled);
+
+    // Controls: the fulfilment status alone still moves, and a STANDARD order's payment fields are its own to write.
+    const moved = await market.updateOrderStatus(ID.biz, settled.id, 'PROCESSING', { status: 'PROCESSING' });
+    expect(`${moved.status}/${moved.paymentStatus}`).toBe('PROCESSING/PAID');
+    const standard = await db.marketplaceOrder.create({
+      data: {
+        businessId: ID.biz,
+        orderNumber: `${P}std_12`,
+        type: 'STANDARD',
+        status: 'placed',
+        paymentStatus: 'UNPAID',
+        customerName: 'Vee Eighteen',
+        customerEmail: CUSTOMER_EMAIL,
+        subtotal: ORDER_TOTAL,
+        total: ORDER_TOTAL,
+        currency: 'TTD',
+      },
+    });
+    const written = await market.updateOrderStatus(ID.biz, standard.id, 'CONFIRMED', { status: 'CONFIRMED', paymentMethod: 'BANK', paymentRef: `${P}std_ref` });
+    await settle();
+    expect(`${written.status}/${written.paymentMethod}/${written.paymentRef}`).toBe(`CONFIRMED/BANK/${P}std_ref`);
+  });
+
+  it('V18-13 (trial-N recheck G6RC-3, SEC-V18-3) POST /marketplace/businesses/:id/orders decides the order type itself: a body type STOREFRONT (any case) creates a STANDARD order, so no STOREFRONT order is created paid with no invoice and no store_order.paid names one', async () => {
+    const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
+    const market = app.get(MarketplaceService);
+    // Fulfilment auto-routing runs un-awaited after the create and is off this case's path: held so it writes nothing behind the case.
+    const routing = vi.spyOn(market as any, 'autoRouteOrder').mockImplementation(() => undefined);
+    seen = [];
+    const created: any[] = [];
+    try {
+      for (const type of ['STOREFRONT', 'storefront']) {
+        created.push(
+          await market.createOrder(ID.biz, {
+            type,
+            paymentOnCreation: true,
+            customerName: 'Vee Eighteen',
+            customerEmail: CUSTOMER_EMAIL,
+            items: [{ productId: ID.product, quantity: 1 }],
+          }),
+        );
+      }
+      await settle();
+    } finally {
+      routing.mockRestore();
+    }
+
+    // At 644bb6ad: STOREFRONT/paid/UNPAID with no invoice, payment or posting, and store_order.paid emitted for it (ZZPROBE-2).
+    const stored = await db.marketplaceOrder.findMany({ where: { id: { in: created.map((o) => o.id) } }, select: { type: true } });
+    expect(stored.map((o: any) => o.type), 'the stored type').toEqual(['STANDARD', 'STANDARD']);
+    expect(created.map((o) => o.type), 'the answered type').toEqual(['STANDARD', 'STANDARD']);
+    const paidStorefront = seen.filter((e) => e.name === 'store_order.paid' && String(e.payload?.order?.type ?? '').toUpperCase() === 'STOREFRONT');
+    expect(paidStorefront, 'no store_order.paid names a STOREFRONT order').toEqual([]);
   });
 
   it.todo(

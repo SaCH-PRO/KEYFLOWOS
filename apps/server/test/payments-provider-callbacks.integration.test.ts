@@ -104,6 +104,21 @@
  *   PC-16  the storefront Stripe checkout writes no PENDING payment naming the
  *          order as an invoice (it failed with P2003: G6ML-4)
  *
+ * Trial-N repair round 2 (recheck G6RC-1, G6RC-7, G6ML-2 under D-69):
+ *
+ *   PC-17  the WiPay key and the receiving account come from one source, the
+ *          business's own pair or the platform's pair, never mixed: a business
+ *          with its own key and no account of its own, on a platform that has
+ *          an account, is not offered WiPay and its checkouts are refused
+ *          before WiPay is called (it got a live checkout into the platform's
+ *          account whose callback its own key refused). Control: a business
+ *          with neither checks out into the platform's account (G6RC-1)
+ *   PC-18  the WiPay connector reports 'connected' exactly where the gateway
+ *          list offers WiPay (G6RC-7)
+ *   PC-19  D-69: a WiPay checkout, invoice or storefront, for an amount not in
+ *          TTD answers 400 before WiPay is called, and WiPay is not offered
+ *          for it (G6ML-2)
+ *
  * Nothing on the boundary is mocked: PrismaService, PublicRateLimitGuard (on a
  * real Redis, its keys namespaced to this run), PaymentsService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService,
@@ -1090,5 +1105,153 @@ describe('trial-N review: the storefront provider checkouts and settlements fail
     expect(sent.get('client_reference_id')).toBe(ID.storeOrder);
     expect(sent.get('line_items[0][price_data][currency]')).toBe('ttd');
     expect(await db.payment.count({ where: { OR: [{ invoiceId: ID.storeOrder }, { providerPaymentId: `${P}cs_store` }] } })).toBe(0);
+  });
+});
+
+describe('trial-N repair round 2: one WiPay merchant per checkout, TTD only (D-69)', () => {
+  /** The provider requests the checkouts made (global fetch stubbed; no network). */
+  let providerRequests: Array<{ url: string; body: string }> = [];
+  let fetchSpy: ReturnType<typeof vi.spyOn> | undefined;
+  const PLATFORM_ACCOUNT = `${P}platform_account`;
+
+  beforeEach(() => {
+    providerRequests = [];
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: any, init?: any) => {
+      const url = String(input?.url ?? input);
+      providerRequests.push({ url, body: String(init?.body ?? '') });
+      if (new URL(url).host.endsWith('wipayfinancial.com')) return new Response('OK', { status: 200 });
+      throw new Error(`v05a: unexpected network call to ${url}`);
+    }) as typeof fetch);
+  });
+
+  afterEach(() => {
+    fetchSpy?.mockRestore();
+    delete process.env.WIPAY_API_KEY;
+    delete process.env.WIPAY_ACCOUNT_NUMBER;
+  });
+
+  async function gatewayIds(invoiceId: string): Promise<string[]> {
+    await clearRateLimits();
+    const res = await agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(invoiceId))}/gateways`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    return res.body.map((g: { id: string }) => g.id);
+  }
+
+  async function wipayCheckout(invoiceId: string) {
+    await clearRateLimits();
+    return agent()
+      .post(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(invoiceId))}/checkout`)
+      .send({ gateway: 'wipay', returnUrl: RETURN_URL });
+  }
+
+  it("PC-17 (G6RC-1): with the platform's WiPay pair set, a business with its own key and no account of its own is not offered WiPay and gets no checkout into the platform's account; a business with neither checks out into the platform's account", async () => {
+    process.env.WIPAY_API_KEY = PLATFORM_KEY;
+    process.env.WIPAY_ACCOUNT_NUMBER = PLATFORM_ACCOUNT;
+
+    // At 644bb6ad: ['wipay'], then a live checkout naming the platform account, whose callback (keyed with the
+    // platform's key) bizKeyOnly's own key refuses: the payer is charged and nothing is recorded.
+    expect(await gatewayIds(ID.invKeyOnly)).not.toContain('wipay');
+    const res = await wipayCheckout(ID.invKeyOnly);
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.message).toBe('WiPay is not configured for this business: no WiPay account number');
+    await expect(
+      payments.createStorePayment({ orderId: `${P}store_key_only`, amount: 10, currency: 'TTD', method: 'WIPAY', businessId: ID.bizKeyOnly, returnUrl: RETURN_URL }),
+    ).rejects.toThrow('WiPay is not configured for this business: no WiPay account number');
+    expect(providerRequests, 'WiPay is never called for it').toEqual([]);
+
+    // The callback WiPay would return for a checkout into the platform's account is refused and writes nothing.
+    const txn = `${P}wtx_key_only_platform`;
+    const cb = await wipay({ transaction_id: txn, order_id: ID.invKeyOnly, status: 'success', total: TOTAL.toFixed(2), hash: keyedHash(txn, TOTAL, PLATFORM_KEY) });
+    expect(cb.status, JSON.stringify(cb.body)).toBe(400);
+    expect(await rowsOf(ID.invKeyOnly)).toEqual([]);
+    expect(await claims('wipay', txn)).toBe(0);
+    expect(await invoiceStatus(ID.invKeyOnly)).toBe('SENT');
+
+    // Control: a business with no WiPay settings of its own uses the platform's pair, key and account together.
+    expect(await gatewayIds(ID.invNoKey)).toContain('wipay');
+    const platform = await wipayCheckout(ID.invNoKey);
+    expect(platform.status, JSON.stringify(platform.body)).toBe(201);
+    expect(providerRequests).toHaveLength(1);
+    const sent = new URLSearchParams(providerRequests[0].body);
+    expect(`${sent.get('developer_id')}|${sent.get('account_number')}`).toBe(`${PLATFORM_ACCOUNT}|${PLATFORM_ACCOUNT}`);
+    expect(providerRequests[0].body).not.toContain(PLATFORM_KEY);
+  });
+
+  it("PC-18 (G6RC-7): the WiPay connector reports 'connected' exactly where the gateway list offers WiPay, for each business and platform setting", async () => {
+    const { WiPayConnector } = await import('../src/core/connectors/implementations/wipay.connector');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const connector = new WiPayConnector(app.get(PrismaService), eventStub as any, {} as any);
+    const invoiceOf: Record<string, string> = {
+      [ID.bizKeyed]: ID.invCheckout,
+      [ID.bizKeyOnly]: ID.invKeyOnly,
+      [ID.bizOwnAccount]: ID.invOwnAccount,
+      [ID.bizNoKey]: ID.invNoKey,
+    };
+    const platforms: Array<[string, string | undefined, string | undefined]> = [
+      ['no platform pair', undefined, undefined],
+      ['platform key only', PLATFORM_KEY, undefined],
+      ['platform pair', PLATFORM_KEY, PLATFORM_ACCOUNT],
+    ];
+    const mismatches: string[] = [];
+    for (const [label, key, account] of platforms) {
+      if (key) process.env.WIPAY_API_KEY = key;
+      else delete process.env.WIPAY_API_KEY;
+      if (account) process.env.WIPAY_ACCOUNT_NUMBER = account;
+      else delete process.env.WIPAY_ACCOUNT_NUMBER;
+      for (const [biz, inv] of Object.entries(invoiceOf)) {
+        const offered = (await gatewayIds(inv)).includes('wipay');
+        const health = await connector.healthCheck(biz);
+        if ((health.status === 'connected') !== offered) mismatches.push(`${label} / ${biz.slice(P.length)}: health ${health.status}, offered ${offered}`);
+      }
+    }
+    // At 644bb6ad: bizKeyOnly 'connected' under every setting but the pair it can use, and bizOwnAccount and bizNoKey
+    // 'connected' on the platform key alone, while WiPay is not offered to them (PC-13, PC-17).
+    expect(mismatches).toEqual([]);
+  });
+
+  it('PC-19 (G6ML-2, D-69): WiPay is offered and checked out for TTD amounts only: a USD invoice of a WiPay business is not offered WiPay and its checkout is 400; a USD storefront checkout is 400; WiPay is never called', async () => {
+    const invUsd = `${P}invKeyedUsd`;
+    await seedInvoice(invUsd, ID.bizKeyed, ID.contactKeyed, TOTAL, 'USD');
+    const usdOrder = `${P}storeUsd`;
+    await db.marketplaceOrder.create({
+      data: {
+        id: usdOrder,
+        businessId: ID.bizKeyed,
+        orderNumber: `${P}SO-0003`,
+        customerName: 'V05A Store Customer',
+        customerEmail: `${P}store@test.local`,
+        subtotal: STORE_TOTAL,
+        total: STORE_TOTAL,
+        currency: 'USD',
+        type: 'STOREFRONT',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'WIPAY',
+      },
+    });
+    const ttdOnly = /WiPay takes TTD only/;
+
+    // At 644bb6ad: ['wipay'] for the USD invoice, and a WiPay checkout of 100.00 with no currency (WiPay's default).
+    expect(await gatewayIds(invUsd), 'token gateway list').not.toContain('wipay');
+    await clearRateLimits();
+    const bare = await agent().get(`/payments/invoice/${encodeURIComponent(invUsd)}/gateways`);
+    expect(bare.status, JSON.stringify(bare.body)).toBe(200);
+    expect(bare.body.map((g: { id: string }) => g.id), 'bare-id gateway list').not.toContain('wipay');
+    const res = await wipayCheckout(invUsd);
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect(res.body.message).toMatch(ttdOnly);
+    await expect(
+      payments.createStorePayment({ orderId: usdOrder, amount: STORE_TOTAL, currency: 'USD', method: 'WIPAY', businessId: ID.bizKeyed, returnUrl: RETURN_URL }),
+    ).rejects.toThrow(ttdOnly);
+    await expect(
+      payments.createGenericCheckout({ payableType: 'storefront_order', payableId: usdOrder, gateway: 'wipay', returnUrl: RETURN_URL }),
+    ).rejects.toThrow(ttdOnly);
+    expect(providerRequests, 'WiPay is never called').toEqual([]);
+    expect(await rowsOf(invUsd)).toEqual([]);
+    expect(await invoiceStatus(invUsd)).toBe('SENT');
+
+    // Control: the same business's TTD invoice is offered WiPay, for TTD only.
+    await clearRateLimits();
+    const ttd = await agent().get(`/payments/public/invoice-link/${encodeURIComponent(tokenOf(ID.invCheckout))}/gateways`);
+    expect(ttd.body.find((g: { id: string }) => g.id === 'wipay')).toEqual({ id: 'wipay', name: 'WiPay', currencies: ['TTD'] });
   });
 });
