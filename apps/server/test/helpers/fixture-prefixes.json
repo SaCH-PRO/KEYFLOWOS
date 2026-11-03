@@ -543,6 +543,11 @@
       "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
+      "prefix": "v81g_",
+      "owner": "apps/server/test/money-reports.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A7-MONEY-REPORTS)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

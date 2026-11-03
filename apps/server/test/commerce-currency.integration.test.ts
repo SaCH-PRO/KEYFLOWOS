@@ -76,7 +76,11 @@
  *             (ModuleScopeGuard, the commerce revenue reads' gate): a revenue:none member gets 403
  *             and no rows; a revenue:read member and the owner still read it (RED-BEFORE: 200 with
  *             the REVENUE rows). The balance-sheet route and its CSV / PDF export and GET
- *             revenue-reports/:preset lie outside the V1-37b write set: it.todo below, each with why.
+ *             revenue-reports/:preset lay outside the V1-37b write set (it.todo here until V1-81).
+ *   SEC-V37b-1 (V1-81, FOLLOW3-A7-MONEY-REPORTS, owner ruling D-57) RED-BEFORE GET
+ *             reports/balance-sheet (JSON, CSV, PDF) and GET revenue-reports/:preset need
+ *             revenue:read: a revenue:none member gets 403 and no figure; a revenue:read member
+ *             and the owner read what the services answer (RED-BEFORE: 200 with the figures).
  *
  * V1-37d-LEGACY-CURRENCY-PAYMENTS (verify-money VR-04, a V1-37 regression confirmed on
  * int/trial-I): money against a document already stored in a currency outside D-13 is still
@@ -185,6 +189,9 @@ const ID = {
 let db: any;
 let app: any;
 let financeApp: any;
+// V1-81 (FOLLOW3-A7, D-57): the real report routes and the commerce revenue reports.
+let reportsApp: any;
+let revenueReporting: any;
 let redis: any;
 let commerce: any;
 let posting: any;
@@ -524,6 +531,33 @@ beforeAll(async () => {
   financeApp.useGlobalFilters(new GlobalHttpExceptionFilter());
   await financeApp.init();
 
+  // V1-81 (FOLLOW3-A7-MONEY-REPORTS, D-57; SEC-V37b-1 residual): the real report
+  // routes (the balance sheet and its CSV / PDF export) and the commerce revenue
+  // reports, behind the real AuthGuard, BusinessGuard and ModuleScopeGuard, over
+  // the real balance sheet and the real RevenueReportingService. The AI report
+  // (ReportsService) is off these routes.
+  const { ReportsController } = await import('../src/modules/reports/reports.controller');
+  const { ReportsService } = await import('../src/modules/reports/reports.service');
+  const { RevenueReportingController } = await import('../src/modules/commerce/revenue-reporting.controller');
+  const { RevenueReportingService } = await import('../src/modules/commerce/revenue-reporting.service');
+  revenueReporting = new RevenueReportingService(prismaService);
+  const reportsRef = await Test.createTestingModule({
+    controllers: [ReportsController, RevenueReportingController],
+    providers: [
+      PrismaService,
+      AuthGuard,
+      BusinessGuard,
+      ModuleScopeGuard,
+      { provide: LedgerReportingService, useValue: reporting },
+      { provide: ReportsService, useValue: {} },
+      { provide: RevenueReportingService, useValue: revenueReporting },
+    ],
+  }).compile();
+  reportsApp = reportsRef.createNestApplication();
+  attachIdentity(reportsApp);
+  reportsApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+  await reportsApp.init();
+
   await cleanup(); // in case a prior run aborted
 
   for (const [user, biz, currency, contact, tag] of [
@@ -584,6 +618,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (app) await app.close();
   if (financeApp) await financeApp.close();
+  if (reportsApp) await reportsApp.close();
   if (db) await cleanup();
   if (redis) await redis.quit().catch(() => undefined);
 }, 60_000);
@@ -1040,16 +1075,94 @@ describe('V1-37b review (SEC-V37b-1): a revenue:none member reads no revenue thr
     }
   }, 30_000);
 
-  it.todo(
-    'SEC-V37b-1 residual, outside the V1-37b write set: GET /businesses/:id/reports/balance-sheet (reports.controller.ts, '
-    + 'AuthGuard + BusinessGuard only) answers a revenue:none member 200 with accounts receivable per currency; it needs '
-    + 'revenue:read on the reports controller (with its CSV / PDF export and the P&L, the same class)',
-  );
-  it.todo(
-    'SEC-V37b-1 residual, outside the V1-37b write set: GET /commerce/businesses/:id/revenue-reports/:preset '
-    + '(revenue-reporting.controller.ts, AuthGuard + BusinessGuard only) answers a revenue:none member 200 with invoice '
-    + 'totals by contact; it needs ModuleScopeGuard + revenue:read like the commerce invoice reads',
-  );
+  /**
+   * V1-81 (FOLLOW3-A7-MONEY-REPORTS, owner ruling D-57): the two SEC-V37b-1
+   * residuals that lay outside the V1-37b write set, each an it.todo here until
+   * now. The full route matrix (every report route and format, every preset, role
+   * defaults, the outsider) is pinned by test/money-reports.integration.test.ts.
+   */
+  /** A refusal's body without the filter's request echo (timestamp, path with the query, correlation id). */
+  function refusal(res: any): string {
+    const text = Buffer.isBuffer(res.body) ? res.body.toString() : (res.text ?? '');
+    try {
+      const { timestamp: _t, path: _p, correlationId: _c, ...rest } = JSON.parse(text);
+      return JSON.stringify(rest);
+    } catch {
+      return text;
+    }
+  }
+  /** Raw body reader for the PDF export (supertest does not buffer application/pdf). */
+  function binary(res: any, cb: (err: Error | null, body: Buffer) => void) {
+    const chunks: Buffer[] = [];
+    res.on('data', (c: Buffer) => chunks.push(c));
+    res.on('end', () => cb(null, Buffer.concat(chunks)));
+  }
+
+  it('SEC-V37b-1 RED-BEFORE (V1-81): GET reports/balance-sheet and its CSV / PDF export answer 403 and no figure to a revenue:none member; a revenue:read member and the owner read the sheet', async () => {
+    const asOf = new Date(Date.now() + 60_000).toISOString();
+    const sheet = (as: string, format?: 'csv' | 'pdf', biz = ID.bizTtd) => {
+      const req = request(reportsApp.getHttpServer())
+        .get(`/businesses/${biz}/reports/balance-sheet`)
+        .query({ asOf, ...(format ? { format } : {}) })
+        .set(HEADER, as);
+      return format === 'pdf' ? req.buffer(true).parse(binary) : req;
+    };
+
+    for (const format of [undefined, 'csv', 'pdf'] as const) {
+      const refused = await sheet(ID.memberNone, format);
+      // RED-BEFORE: 200 with the sheet (cash, revenue-fed equity, receivables per currency).
+      expect(refused.status, `${format ?? 'json'}: ${refusal(refused).slice(0, 300)}`).toBe(403);
+      expect(refusal(refused)).toMatch(/Insufficient permissions: revenue requires read access \(you have none\)/);
+      expect(refusal(refused), `${format ?? 'json'}: no figure of the sheet`).not.toMatch(/777\.77|"assets"|"byCurrency"|%PDF|Assets/);
+    }
+
+    const expected = JSON.parse(JSON.stringify(await reporting.getBalanceSheet(ID.bizTtd, new Date(asOf))));
+    const cash = await coa.getBySystemKey(ID.bizTtd, 'CASH');
+    expect(expected.assets.lines.find((l: any) => l.accountId === cash.id)?.amount).toBeGreaterThanOrEqual(777.77);
+    for (const as of [ID.memberRead, ID.ownerT]) {
+      const res = await sheet(as);
+      expect(res.status, `${as}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect(res.body, `${as} reads the balance sheet`).toEqual(expected);
+      const csv = await sheet(as, 'csv');
+      expect(csv.status).toBe(200);
+      expect(csv.headers['content-type']).toMatch(/^text\/csv/);
+      const pdf = await sheet(as, 'pdf');
+      expect(pdf.status).toBe(200);
+      expect(pdf.headers['content-type']).toBe('application/pdf');
+      expect(Buffer.isBuffer(pdf.body) && pdf.body.subarray(0, 4).toString()).toBe('%PDF');
+    }
+    // Revenue read on one business is no access to another.
+    expect((await sheet(ID.memberRead, undefined, ID.bizUsd)).status).toBe(403);
+  }, 30_000);
+
+  it('SEC-V37b-1 RED-BEFORE (V1-81): GET revenue-reports/:preset answers 403 and no totals to a revenue:none member; a revenue:read member and the owner read the invoice totals by contact', async () => {
+    const start = new Date(Date.now() - 60 * 86400_000);
+    const end = new Date(Date.now() + 60_000);
+    const preset = (as: string, name = 'by-contact', biz = ID.bizTtd) =>
+      request(reportsApp.getHttpServer())
+        .get(`/commerce/businesses/${biz}/revenue-reports/${name}`)
+        .query({ startDate: start.toISOString(), endDate: end.toISOString() })
+        .set(HEADER, as);
+
+    for (const name of ['by-contact', 'by-source', 'by-product', 'aging-buckets', 'collected-vs-expected', 'days-to-pay']) {
+      const refused = await preset(ID.memberNone, name);
+      // RED-BEFORE: 200 with the invoice totals.
+      expect(refused.status, `${name}: ${refusal(refused).slice(0, 300)}`).toBe(403);
+      expect(refusal(refused)).toMatch(/revenue requires read access/);
+      expect(refusal(refused), `${name}: no total`).not.toMatch(/totalRevenue|"rows"|"buckets"/);
+    }
+
+    const expected = JSON.parse(JSON.stringify(await revenueReporting.generate(ID.bizTtd, 'by-contact', { start, end })));
+    expect(expected.totalRevenue).toBeGreaterThan(0);
+    expect(expected.rows.map((r: any) => r.contactId)).toContain(ID.contactT);
+    for (const as of [ID.memberRead, ID.ownerT]) {
+      const res = await preset(as);
+      expect(res.status, `${as}: ${JSON.stringify(res.body)}`).toBe(200);
+      expect(res.body, `${as} reads the totals by contact`).toEqual(expected);
+    }
+    // Revenue read on one business is no access to another.
+    expect((await preset(ID.memberRead, 'by-contact', ID.bizUsd)).status).toBe(403);
+  }, 30_000);
 });
 
 describe('V1-37 review residuals (V1-37b): the balance sheet never sums across currencies (RV37-02)', () => {
