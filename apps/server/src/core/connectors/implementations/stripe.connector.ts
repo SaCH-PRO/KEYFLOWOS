@@ -5,6 +5,17 @@ import { EntityResolutionService } from '../entity-resolution.service';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult } from '../connector.interface';
 import { IPaymentGatewayConnector, PaymentGatewayTransaction, PaymentLinkInput, PaymentLinkResult, RefundInput, RefundResult } from '../payment-gateway.interface';
 
+/** A Stripe API refusal, with its HTTP status (V1-15d review CR-V15D-3: only a 404 means "not found"). */
+class StripeApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'StripeApiError';
+  }
+}
+
+/** The owner a platform-written Stripe tag names: a business, or an invoice whose business it is. */
+type StripeOwnerTag = { businessId: string; invoiceId?: undefined } | { businessId?: undefined; invoiceId: string };
+
 @Injectable()
 export class StripeConnector implements IConnector, IPaymentGatewayConnector {
   private readonly logger = new Logger(StripeConnector.name);
@@ -208,8 +219,9 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
    * deployment's STRIPE_SECRET_KEY. V1-15d-STRIPE-OPS-TENANCY (F1): `shared`
    * marks the deployment key, whose platform account holds the charges and
    * links of every business without its own key, so an operation on it acts
-   * only on objects this business can show are its own (ownedIds, the
-   * businessId tag on links), never on another tenant's.
+   * only on objects the platform tagged with this business (ownerTag on
+   * charges and Checkout Sessions, the businessId tag on links), never on
+   * another tenant's.
    */
   private async resolveKey(businessId: string): Promise<{ key: string; shared: boolean }> {
     const business = await this.prisma.client.business.findUnique({
@@ -225,50 +237,144 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
   }
 
   /**
-   * V1-15d-STRIPE-OPS-TENANCY (F1): of `ids` (Stripe charge, payment_intent,
-   * session or refund ids), those this business's own Stripe Payment rows name
-   * (providerPaymentId or reference) and no other business's row names.
-   * Payment is outside the tenant extension (M31), so the read spans every
-   * tenant; an id two businesses name is not provably either's (a tenant can
-   * sign any reference for itself with its own webhook secret).
+   * V1-15d review (SEC-V15D-1/2): the owner tag the platform itself wrote on a
+   * Stripe object: metadata.businessId, else the invoice metadata.invoiceId
+   * (or a Checkout Session's client_reference_id) names. Only this server
+   * writes metadata on the platform account (createStripeCheckout and the
+   * storefront checkout tag their sessions, createPaymentLink its links, whose
+   * metadata Stripe copies onto each session they take); a payer cannot.
+   * Null when the object carries neither.
    */
-  private async ownedIds(businessId: string, ids: Array<string | null | undefined>): Promise<Set<string>> {
-    const wanted = [...new Set(ids.filter((v): v is string => typeof v === 'string' && v.length > 0))];
-    if (wanted.length === 0) return new Set();
-    const rows = await this.prisma.client.payment.findMany({
-      where: { provider: 'stripe', OR: [{ providerPaymentId: { in: wanted } }, { reference: { in: wanted } }] },
-      select: { businessId: true, providerPaymentId: true, reference: true },
+  private ownerTag(metadata: unknown, clientReferenceId?: unknown): StripeOwnerTag | null {
+    const meta = (metadata && typeof metadata === 'object' ? metadata : {}) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' && v.length > 0 ? v : null);
+    const businessId = str(meta.businessId);
+    if (businessId) return { businessId };
+    const invoiceId = str(meta.invoiceId) ?? str(meta.invoice_id) ?? str(clientReferenceId);
+    return invoiceId ? { invoiceId } : null;
+  }
+
+  /** Of `tags`, whether each names `businessId` (directly, or through an invoice of its own). */
+  private async tagsNameBusiness(businessId: string, tags: StripeOwnerTag[]): Promise<boolean[]> {
+    const invoiceIds = [...new Set(tags.map((t) => t.invoiceId).filter((v): v is string => !!v))];
+    const own = invoiceIds.length
+      ? new Set(
+          (
+            await this.prisma.client.invoice.findMany({
+              where: { businessId, id: { in: invoiceIds } },
+              select: { id: true },
+            })
+          ).map((i) => i.id),
+        )
+      : new Set<string>();
+    return tags.map((t) => (t.businessId ? t.businessId === businessId : !!t.invoiceId && own.has(t.invoiceId)));
+  }
+
+  /** Whether one of this business's own SUCCESSFUL Stripe payments names any of `ids` (by providerPaymentId or reference). */
+  private async ownRowNames(businessId: string, ids: string[]): Promise<boolean> {
+    const row = await this.prisma.client.payment.findFirst({
+      where: {
+        businessId,
+        provider: 'stripe',
+        status: 'SUCCESSFUL',
+        OR: [{ providerPaymentId: { in: ids } }, { reference: { in: ids } }],
+      },
+      select: { id: true },
     });
-    const owners = new Map<string, Set<string>>();
-    for (const r of rows) {
-      for (const id of [r.providerPaymentId, r.reference]) {
-        if (!id) continue;
-        owners.set(id, (owners.get(id) ?? new Set<string>()).add(r.businessId));
-      }
-    }
-    return new Set(wanted.filter((id) => {
-      const by = owners.get(id);
-      return !!by && by.size === 1 && by.has(businessId);
-    }));
+    return !!row;
   }
 
   /**
-   * V1-15d-STRIPE-OPS-TENANCY: the payment_intent of a charge (one read, with
-   * this business's key), so a refund naming the charge of a payment recorded
-   * under its Checkout Session or PaymentIntent id can be matched to that
-   * payment. Null for an id that is not a charge, an unknown charge, a charge
-   * with no payment_intent, or a failed read.
+   * V1-15d-STRIPE-OPS-TENANCY (F1), review repairs SEC-V15D-1/2/3, CR-V15D-1/2:
+   * whether `chargeId` is this business's own charge, asked before any refund.
+   *
+   * On the shared platform key the provider's own record decides: the owner
+   * tag (ownerTag) on the charge, else on the Checkout Session that took its
+   * payment_intent. Payment rows are not evidence there, for or against: a
+   * tenant writes its own (the manual payment route takes any method and
+   * reference; a delivery signed with its own webhook secret records any id),
+   * so a row can neither claim another tenant's charge nor take one from its
+   * owner. An untagged charge is no tenant's.
+   *
+   * On the business's own key the account is its own: a charge is its own when
+   * one of its own payments names it (by id, or through its payment_intent) or
+   * its tag names it; no other business's row is consulted.
+   *
+   * False for an id that is not a charge or that Stripe does not know (404);
+   * every other provider failure propagates (a refused read is not "not found").
    */
-  async paymentIntentOfCharge(businessId: string, chargeId: string): Promise<string | null> {
-    if (!/^(ch|py)_/.test(chargeId)) return null;
+  async isOwnCharge(businessId: string, chargeId: string): Promise<boolean> {
+    const { key, shared } = await this.resolveKey(businessId);
+    if (!shared && (await this.ownRowNames(businessId, [chargeId]))) return true;
+    if (!/^(ch|py)_/.test(chargeId)) return false;
+    let charge: { metadata?: unknown; payment_intent?: unknown } | null;
     try {
-      const { key } = await this.resolveKey(businessId);
-      const charge = (await this.stripeRequest(key, 'GET', `/charges/${encodeURIComponent(chargeId)}`)) as { payment_intent?: unknown } | null;
-      return typeof charge?.payment_intent === 'string' ? charge.payment_intent : null;
+      charge = (await this.stripeRequest(key, 'GET', `/charges/${encodeURIComponent(chargeId)}`)) as typeof charge;
     } catch (err) {
-      this.logger.warn(`Stripe charge lookup failed: ${err instanceof Error ? err.message : String(err)}`);
-      return null;
+      if (err instanceof StripeApiError && err.status === 404) return false;
+      throw err;
     }
+    const chargeTag = this.ownerTag(charge?.metadata);
+    if (chargeTag) return (await this.tagsNameBusiness(businessId, [chargeTag]))[0];
+    const pi = typeof charge?.payment_intent === 'string' ? charge.payment_intent : null;
+    if (!pi) return false;
+    if (!shared && (await this.ownRowNames(businessId, [pi]))) return true;
+    const sessions = (await this.stripeRequest(
+      key,
+      'GET',
+      `/checkout/sessions?payment_intent=${encodeURIComponent(pi)}&limit=1`,
+    )) as { data?: Array<{ metadata?: unknown; client_reference_id?: unknown }> } | null;
+    const session = sessions?.data?.[0];
+    const sessionTag = session ? this.ownerTag(session.metadata, session.client_reference_id) : null;
+    return sessionTag ? (await this.tagsNameBusiness(businessId, [sessionTag]))[0] : false;
+  }
+
+  /**
+   * isOwnCharge's shared-key rule over one page of the platform account's
+   * charges: the charges (and their payment_intents) tagged with this
+   * business, on the charge or on the Checkout Session of its payment_intent.
+   * The sessions are read once, the most recent 100; a charge whose session
+   * is older, or a failed read, leaves it unlisted (never another tenant's).
+   */
+  private async ownChargesOnSharedKey(
+    businessId: string,
+    key: string,
+    charges: Array<{ id: string; payment_intent?: string | null; metadata?: unknown }>,
+  ): Promise<{ charges: Set<string>; paymentIntents: Set<string> }> {
+    const tagged: Array<{ chargeId: string; pi: string | null; tag: StripeOwnerTag }> = [];
+    const untagged: Array<{ chargeId: string; pi: string }> = [];
+    for (const c of charges) {
+      const pi = typeof c.payment_intent === 'string' ? c.payment_intent : null;
+      const tag = this.ownerTag(c.metadata);
+      if (tag) tagged.push({ chargeId: c.id, pi, tag });
+      else if (pi) untagged.push({ chargeId: c.id, pi });
+    }
+    if (untagged.length > 0) {
+      const sessionTags = new Map<string, StripeOwnerTag>();
+      try {
+        const sessions = (await this.stripeRequest(key, 'GET', '/checkout/sessions?limit=100')) as {
+          data?: Array<{ payment_intent?: unknown; metadata?: unknown; client_reference_id?: unknown }>;
+        } | null;
+        for (const s of sessions?.data ?? []) {
+          const tag = typeof s.payment_intent === 'string' ? this.ownerTag(s.metadata, s.client_reference_id) : null;
+          if (tag && !sessionTags.has(s.payment_intent as string)) sessionTags.set(s.payment_intent as string, tag);
+        }
+      } catch (err) {
+        this.logger.warn(`Stripe Checkout Session list failed; untagged charges stay unlisted: ${err instanceof Error ? err.message : err}`);
+      }
+      for (const u of untagged) {
+        const tag = sessionTags.get(u.pi);
+        if (tag) tagged.push({ chargeId: u.chargeId, pi: u.pi, tag });
+      }
+    }
+    const mine = await this.tagsNameBusiness(businessId, tagged.map((t) => t.tag));
+    const out = { charges: new Set<string>(), paymentIntents: new Set<string>() };
+    tagged.forEach((t, i) => {
+      if (!mine[i]) return;
+      out.charges.add(t.chargeId);
+      if (t.pi) out.paymentIntents.add(t.pi);
+    });
+    return out;
   }
 
   private async stripeRequest(
@@ -291,7 +397,7 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     try { parsed = text ? JSON.parse(text) : null; } catch { parsed = null; }
     if (!res.ok) {
       const msg = (parsed as { error?: { message?: string } } | null)?.error?.message || text || `HTTP ${res.status}`;
-      throw new Error(`Stripe API error: ${msg}`);
+      throw new StripeApiError(`Stripe API error: ${msg}`, res.status);
     }
     return parsed;
   }
@@ -393,18 +499,17 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
         created: number;
       }>;
     };
-    // V1-15d (F1): on the shared platform key the account holds every keyless
-    // tenant's charges; only those this business's own Payment rows name (by
-    // charge id, or by the payment_intent its Checkout / PaymentIntent row
-    // holds) are its own. On its own key the whole account is its own.
-    const owned = shared
-      ? await this.ownedIds(businessId, (charges.data ?? []).flatMap((c) => [c.id, c.payment_intent]))
-      : null;
+    // V1-15d (F1, review SEC-V15D-1/2/4, CR-V15D-1): on the shared platform
+    // key the account holds every keyless tenant's charges; only those the
+    // platform tagged with this business (isOwnCharge's rule) are its own,
+    // its payment-link sales included (no Payment row records those). On its
+    // own key the whole account is its own.
+    const owned = shared ? await this.ownChargesOnSharedKey(businessId, key, charges.data ?? []) : null;
     const out: PaymentGatewayTransaction[] = [];
     type StripeChargeRow = NonNullable<typeof charges.data>[number];
     const chargeById = new Map<string, StripeChargeRow>();
     for (const c of charges.data ?? []) {
-      if (owned && !owned.has(c.id) && !(c.payment_intent && owned.has(c.payment_intent))) continue;
+      if (owned && !owned.charges.has(c.id)) continue;
       chargeById.set(c.id, c);
       out.push({
         id: c.id,
@@ -428,15 +533,10 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
           payment_intent?: string | null; reason?: string | null; created: number;
         }>;
       };
-      const ownedRefunds = shared
-        ? await this.ownedIds(businessId, (refunds.data ?? []).flatMap((r) => [r.id, r.charge, r.payment_intent]))
-        : null;
       for (const r of refunds.data ?? []) {
-        if (
-          ownedRefunds &&
-          !chargeById.has(r.charge) &&
-          ![r.id, r.charge, r.payment_intent].some((id) => !!id && ownedRefunds.has(id))
-        ) {
+        // On the shared key: a refund of one of the business's own charges
+        // (listed above, or by its payment_intent).
+        if (owned && !chargeById.has(r.charge) && !(r.payment_intent && owned.paymentIntents.has(r.payment_intent))) {
           continue;
         }
         const c = chargeById.get(r.charge);
@@ -474,8 +574,12 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     linkBody.append('line_items[0][quantity]', '1');
     // V1-15d: the link names its business, so on the shared platform key it
     // is listed and revoked for that business only (listPaymentLinks,
-    // revokePaymentLink).
+    // revokePaymentLink). Stripe copies the link's metadata onto each
+    // Checkout Session it takes, and payment_intent_data's onto each
+    // PaymentIntent, so its sales are that business's too (isOwnCharge;
+    // review CR-V15D-1: no Payment row records them).
     linkBody.append('metadata[businessId]', businessId);
+    linkBody.append('payment_intent_data[metadata][businessId]', businessId);
     if (input.customerEmail) {
       linkBody.append('metadata[customerEmail]', input.customerEmail);
     }
@@ -544,9 +648,16 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
     if (shared) {
       // V1-15d (F1): on the shared platform key, a link not tagged with this
       // business is answered like an unknown link, and nothing is written.
-      const link = (await this.stripeRequest(key, 'GET', `/payment_links/${encodeURIComponent(linkId)}`).catch(() => null)) as {
-        metadata?: Record<string, string> | null;
-      } | null;
+      // Review CR-V15D-3: only Stripe's 404 is "not found"; any other failed
+      // read (429, 5xx, network) fails the revoke as before, so a live link is
+      // never reported as nonexistent.
+      let link: { metadata?: Record<string, string> | null } | null;
+      try {
+        link = (await this.stripeRequest(key, 'GET', `/payment_links/${encodeURIComponent(linkId)}`)) as typeof link;
+      } catch (err) {
+        if (err instanceof StripeApiError && err.status === 404) throw new NotFoundException('Payment link not found');
+        throw err;
+      }
       if (link?.metadata?.businessId !== businessId) throw new NotFoundException('Payment link not found');
     }
     const body = new URLSearchParams();
@@ -555,8 +666,8 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
   }
 
   /**
-   * The caller (PaymentsOpsService.refundCharge) names only a charge of one of
-   * this business's own recorded payments (V1-15d); the key is its own, or
+   * The caller (PaymentsOpsService.refundCharge) names only a charge
+   * isOwnCharge holds is this business's own (V1-15d); the key is its own, or
    * the platform key its customers paid into.
    */
   async refundCharge(businessId: string, input: RefundInput): Promise<RefundResult> {

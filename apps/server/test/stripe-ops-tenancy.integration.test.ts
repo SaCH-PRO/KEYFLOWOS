@@ -23,18 +23,23 @@
  *   SOT-01  LIST: B's transactions (shared key) hold only B's own charges: none
  *           of A's charges, customers or invoice ids; A's list holds A's own
  *           (recorded by id, by reference, or through the payment_intent its
- *           Checkout Session row references) and not B's. The filter is the
- *           business's own Payment rows (providerPaymentId / reference)
+ *           Checkout Session row references) and not B's. The filter (review
+ *           repair SEC-V15D-1/2) is the provider's own record: the businessId
+ *           or invoiceId metadata the platform wrote on the charge or on the
+ *           Checkout Session of its payment_intent, never a Payment row (a
+ *           tenant writes its own rows)
  *   SOT-02  SEARCH: B's ?q= with A's customer email finds nothing; A's finds A's
  *   SOT-03  REFUND (F1 repro): B's refund of A's charge (recorded by A under the
  *           charge id, or as the reference of A's PaymentIntent row) is 404
- *           before any provider call (the stub records zero calls); A's invoice
- *           stays PAID and no row moves (the stub delivers, platform-signed, any
- *           refund it performed, as Stripe would)
+ *           with no write to the provider: the one call is the read of the
+ *           charge whose metadata names A's invoice; A's invoice stays PAID and
+ *           no row moves (the stub delivers, platform-signed, any refund it
+ *           performed, as Stripe would)
  *   SOT-04  REFUND, Checkout shape: B's refund of the charge of A's Checkout
  *           Session payment (the charge id is not stored; A's cs_ row holds its
- *           payment_intent) is 404 with no write to Stripe: the one call is the
- *           read that resolves the charge's payment_intent
+ *           payment_intent) is 404 with no write to Stripe: the calls are the
+ *           read of the charge and the read of the Checkout Session of its
+ *           payment_intent, whose metadata names A
  *   SOT-05  UNKNOWN: a charge nobody recorded is 404 exactly like another
  *           tenant's charge (same status and message), with no refund call
  *   SOT-06  LINKS: B's payment-link list (shared key) holds only links tagged
@@ -57,7 +62,12 @@
  *           writes no second row
  *   SOT-11  FORGED CLAIM: a row of B that names A's charge (a reference B could
  *           sign for itself with its own webhook secret) does not make A's
- *           charge B's: B's refund is 404 with zero calls, B's list omits it
+ *           charge B's: B's refund is 404 with no write (the one call is the
+ *           read of the charge, which names A's invoice), B's list omits it
+ *   RV-01..07 (review repairs, below): a manual or self-signed row neither
+ *           claims another tenant's charge nor takes one from its owner (Stripe
+ *           and PayPal); a business's own payment-link sales are listed and
+ *           refundable; a failed ownership read is an error, not "not found"
  *   SOT-12  PAYPAL: B's refund of A's PayPal capture (platform PayPal creds) is
  *           404 with zero PayPal calls (the ownership check is the service's,
  *           for every gateway)
@@ -120,6 +130,9 @@ const ID = {
   invA5: `${P}invA5`,
   invB1: `${P}invB1`,
   invB2: `${P}invB2`,
+  invA6: `${P}invA6`,
+  invB3: `${P}invB3`,
+  invB4: `${P}invB4`,
 };
 
 /** Stripe-shaped ids (the prefix inside, so every globally unique value carries it). */
@@ -132,10 +145,16 @@ const S = {
   chC1: `ch_${P}C1`,
   plinkA: `plink_${P}A`, plinkLegacy: `plink_${P}legacy`,
   capA5: `cap_${P}A5`,
+  csA6: `cs_${P}A6`, piA6: `pi_${P}A6`, chA6: `ch_${P}A6`,
+  chA7: `ch_${P}A7link`, piA7: `pi_${P}A7link`,
+  chBlink: `ch_${P}Blink`, piBlink: `pi_${P}Blink`,
 };
 
 const A_EMAIL = `alice.of.a.${P}@example.test`;
 const B_EMAIL = `bob.of.b.${P}@example.test`;
+const LINK_EMAIL = `link.payer.of.b.${P}@example.test`;
+/** The webhook secret B sets for itself (Settings > Payments) without a Stripe key of its own. */
+const B_WHSEC = `whsec_${P}B_own`;
 const DEPOSIT_KEYS = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
 
 let db: any;
@@ -165,8 +184,18 @@ interface FakeCharge {
   billing_details: { name: string | null; email: string | null }; metadata: Record<string, string>;
 }
 interface FakeRefund { id: string; object: 'refund'; amount: number; currency: string; charge: string; payment_intent: string | null; status: string; reason: string | null; created: number }
-interface FakeLink { id: string; object: 'payment_link'; url: string; active: boolean; created: number; metadata: Record<string, string>; line: { amount_total: number; currency: string; description: string } }
-interface FakeAccount { charges: FakeCharge[]; refunds: FakeRefund[]; links: FakeLink[]; prices: Record<string, { unit_amount: number; currency: string; name: string }> }
+interface FakeLink {
+  id: string; object: 'payment_link'; url: string; active: boolean; created: number; metadata: Record<string, string>;
+  line: { amount_total: number; currency: string; description: string };
+  /** payment_intent_data[metadata] the link was created with (the metadata Stripe sets on each PaymentIntent it takes). */
+  intentMetadata: Record<string, string>;
+}
+/** A completed Checkout Session: its metadata stays on the session (Stripe copies a payment link's metadata onto it). */
+interface FakeSession {
+  id: string; object: 'checkout.session'; status: 'complete'; payment_intent: string | null; payment_link: string | null;
+  client_reference_id: string | null; metadata: Record<string, string>; created: number;
+}
+interface FakeAccount { charges: FakeCharge[]; refunds: FakeRefund[]; links: FakeLink[]; sessions: FakeSession[]; prices: Record<string, { unit_amount: number; currency: string; name: string }> }
 
 const calls: Call[] = [];
 /** Refunds the fake Stripe performed and has not yet delivered as refund.created. */
@@ -199,8 +228,12 @@ function resetAccounts() {
     ],
     refunds: [],
     links: [
-      { id: S.plinkA, object: 'payment_link', url: `https://buy.stripe.test/${S.plinkA}`, active: true, created: t - 60, metadata: { businessId: ID.bizA }, line: { amount_total: 1500, currency: 'ttd', description: 'A link' } },
-      { id: S.plinkLegacy, object: 'payment_link', url: `https://buy.stripe.test/${S.plinkLegacy}`, active: true, created: t - 70, metadata: {}, line: { amount_total: 900, currency: 'ttd', description: 'legacy untagged link' } },
+      { id: S.plinkA, object: 'payment_link', url: `https://buy.stripe.test/${S.plinkA}`, active: true, created: t - 60, metadata: { businessId: ID.bizA }, intentMetadata: { businessId: ID.bizA }, line: { amount_total: 1500, currency: 'ttd', description: 'A link' } },
+      { id: S.plinkLegacy, object: 'payment_link', url: `https://buy.stripe.test/${S.plinkLegacy}`, active: true, created: t - 70, metadata: {}, intentMetadata: {}, line: { amount_total: 900, currency: 'ttd', description: 'legacy untagged link' } },
+    ],
+    // createStripeCheckout's session for A's invoice A2 (metadata invoiceId + businessId, client_reference_id).
+    sessions: [
+      { id: S.csA2, object: 'checkout.session', status: 'complete', payment_intent: S.piA2, payment_link: null, client_reference_id: ID.invA2, metadata: { invoiceId: ID.invA2, businessId: ID.bizA }, created: t - 41 },
     ],
     prices: {},
   };
@@ -209,8 +242,25 @@ function resetAccounts() {
     charges: [charge(S.chC1, 3000, { name: 'Cora Customer-of-C', email: `cora.of.c.${P}@example.test`, created: t - 5 })],
     refunds: [],
     links: [],
+    sessions: [],
     prices: {},
   };
+}
+
+/**
+ * A customer pays a payment link on the account `key`: Stripe creates a completed Checkout Session carrying the
+ * link's metadata and a charge whose own metadata is empty (the worst case: nothing copied onto the charge).
+ */
+function payLink(key: string, linkId: string, chargeId: string, pi: string, amountMinor: number, payer: { name: string; email: string }) {
+  const acct = accounts[key];
+  const link = acct.links.find((l) => l.id === linkId);
+  if (!link) throw new Error(`fake Stripe: no link ${linkId}`);
+  const t = now() + 5;
+  acct.sessions.push({
+    id: `cs_${chargeId.slice(3)}`, object: 'checkout.session', status: 'complete', payment_intent: pi, payment_link: linkId,
+    client_reference_id: null, metadata: { ...link.metadata }, created: t,
+  });
+  acct.charges.push(charge(chargeId, amountMinor, { pi, name: payer.name, email: payer.email, created: t }));
 }
 
 function json(status: number, body: unknown): Response {
@@ -232,6 +282,11 @@ function stripeApi(method: string, url: URL, auth: string | null, body: string):
   if (method === 'GET' && (m = p.match(/^\/v1\/charges\/([^/]+)$/))) {
     const c = acct.charges.find((x) => x.id === decodeURIComponent(m![1]));
     return c ? json(200, c) : json(404, { error: { message: `No such charge: '${m[1]}'` } });
+  }
+  if (method === 'GET' && p === '/v1/checkout/sessions') {
+    const pi = url.searchParams.get('payment_intent');
+    const rows = acct.sessions.filter((x) => pi === null || x.payment_intent === pi);
+    return json(200, { object: 'list', data: [...rows].sort((a, b) => b.created - a.created).slice(0, limit) });
   }
   if (method === 'GET' && p === '/v1/refunds') {
     return json(200, { object: 'list', data: [...acct.refunds].sort((a, b) => b.created - a.created).slice(0, limit) });
@@ -286,13 +341,16 @@ function stripeApi(method: string, url: URL, auth: string | null, body: string):
     if (!price) return json(400, { error: { message: 'No such price' } });
     seq += 1;
     const metadata: Record<string, string> = {};
+    const intentMetadata: Record<string, string> = {};
     for (const [k, v] of form.entries()) {
       const mm = k.match(/^metadata\[(.+)\]$/);
       if (mm) metadata[mm[1]] = v;
+      const im = k.match(/^payment_intent_data\[metadata\]\[(.+)\]$/);
+      if (im) intentMetadata[im[1]] = v;
     }
     const l: FakeLink = {
       id: `plink_${P}${seq}`, object: 'payment_link', url: `https://buy.stripe.test/plink_${P}${seq}`, active: true, created: now(),
-      metadata, line: { amount_total: price.unit_amount, currency: price.currency, description: price.name },
+      metadata, intentMetadata, line: { amount_total: price.unit_amount, currency: price.currency, description: price.name },
     };
     acct.links.push(l);
     const { line: _line, ...rest } = l;
@@ -557,6 +615,9 @@ beforeAll(async () => {
     [ID.invA5, ID.bizA, ID.contactA, 40],
     [ID.invB1, ID.bizB, ID.contactB, 80],
     [ID.invB2, ID.bizB, ID.contactB, 60],
+    [ID.invA6, ID.bizA, ID.contactA, 50],
+    [ID.invB3, ID.bizB, ID.contactB, 50],
+    [ID.invB4, ID.bizB, ID.contactB, 1],
   ];
   let n = 0;
   for (const [id, biz, contact, total] of invoices) {
@@ -641,8 +702,8 @@ describe('SOT-01/02: a tenant lists and searches only its own charges on the sha
   }, 60_000);
 });
 
-describe('SOT-03/04/05: a refund names one of the business\'s own recorded payments, or is 404 before any write to the provider', () => {
-  it('SOT-03 (F1): B\'s refund of A\'s charge, recorded by A under the charge id or as its PaymentIntent\'s reference, is 404 with zero provider calls; A\'s invoices stay PAID and no row moves', async () => {
+describe('SOT-03/04/05: a refund names the business\'s own charge, or is 404 before any write to the provider', () => {
+  it('SOT-03 (F1): B\'s refund of A\'s charge, recorded by A under the charge id or as its PaymentIntent\'s reference, is 404 with no provider write (one read of the charge); A\'s invoices stay PAID and no row moves', async () => {
     const aBefore = await rowsOfBusiness(ID.bizA);
     const bBefore = await rowsOfBusiness(ID.bizB);
     for (const chargeId of [S.chA1, S.chA3]) {
@@ -650,7 +711,9 @@ describe('SOT-03/04/05: a refund names one of the business\'s own recorded payme
       const res = await as(ID.ownerB).post(`${ops(ID.bizB)}/refunds`, { gateway: 'stripe', chargeId, amount: 10, reason: 'requested_by_customer' });
       // RED-BEFORE: 201, Stripe received POST /v1/refunds with the platform key for A's charge.
       expect(res.status, `${chargeId}: ${flat(res.body)}`).toBe(404);
-      expect(callsSince(mark), `${chargeId}: provider calls`).toEqual([]);
+      // The one call is the read of the provider's record (the charge's metadata names A's invoice); no write.
+      expect(callsSince(mark), `${chargeId}: provider calls`).toEqual([`GET api.stripe.com /v1/charges/${chargeId}`]);
+      expect(calls.slice(mark).map((c) => c.auth)).toEqual([`Bearer ${PLATFORM_KEY}`]);
       // Stripe sends refund.created for a refund it performed; RED-BEFORE it reopened A's invoice.
       await deliverRefundEvents();
     }
@@ -661,13 +724,15 @@ describe('SOT-03/04/05: a refund names one of the business\'s own recorded payme
     expect(accounts[PLATFORM_KEY].refunds).toEqual([]);
   }, 60_000);
 
-  it('SOT-04: B\'s refund of the charge of A\'s Checkout Session payment (charge id not stored) is 404 with no write to Stripe (one read resolves its payment_intent)', async () => {
+  it('SOT-04: B\'s refund of the charge of A\'s Checkout Session payment (charge id not stored) is 404 with no write to Stripe (reads of the charge and of the Checkout Session of its payment_intent)', async () => {
     const mark = calls.length;
     const res = await as(ID.ownerB).post(`${ops(ID.bizB)}/refunds`, { gateway: 'stripe', chargeId: S.chA2 });
     // RED-BEFORE: 201 and A's Checkout payment refunded in full at the provider.
     expect(res.status, flat(res.body)).toBe(404);
     expect(callsSince(mark).filter((c) => c.startsWith('POST'))).toEqual([]);
-    expect(callsSince(mark)).toEqual([`GET api.stripe.com /v1/charges/${S.chA2}`]);
+    // The charge carries no metadata; the session of its payment_intent names A (createStripeCheckout's tag).
+    expect(callsSince(mark)).toEqual([`GET api.stripe.com /v1/charges/${S.chA2}`, 'GET api.stripe.com /v1/checkout/sessions']);
+    expect(calls.slice(mark).at(-1)!.path).toBe(`/v1/checkout/sessions?payment_intent=${S.piA2}&limit=1`);
     await deliverRefundEvents();
     expect((await invoiceRow(ID.invA2)).status).toBe('PAID');
     expect(await rowsOf(ID.invA2)).toEqual([`stripe:${S.csA2}:SUCCESSFUL:100:${S.piA2}`]);
@@ -808,7 +873,7 @@ describe('SOT-09/10: the business\'s own refund still works, end to end through 
 });
 
 describe('SOT-11: a row of B naming A\'s charge does not make it B\'s', () => {
-  it('SOT-11: with B\'s own row referencing A\'s charge, B\'s refund of it is 404 with zero calls and B\'s list omits it', async () => {
+  it('SOT-11: with B\'s own row referencing A\'s charge, B\'s refund of it is 404 with no provider write and B\'s list omits it', async () => {
     // The row a delivery B signs with its own webhook secret can write (review SEC-V29C-1: a tenant can store any id in the reference).
     await db.payment.create({
       data: {
@@ -820,7 +885,8 @@ describe('SOT-11: a row of B naming A\'s charge does not make it B\'s', () => {
     const res = await as(ID.ownerB).post(`${ops(ID.bizB)}/refunds`, { gateway: 'stripe', chargeId: S.chA4 });
     // RED-BEFORE: 201 and A's charge refunded with the platform key.
     expect(res.status, flat(res.body)).toBe(404);
-    expect(callsSince(mark)).toEqual([]);
+    // B's row is not evidence on the shared key: the one call reads the charge, whose metadata names A's invoice.
+    expect(callsSince(mark)).toEqual([`GET api.stripe.com /v1/charges/${S.chA4}`]);
     await deliverRefundEvents();
     expect((await invoiceRow(ID.invA4)).status).toBe('PAID');
 
@@ -875,5 +941,251 @@ describe('SOT-13: a business with its own Stripe key (control)', () => {
     expect(refund.status, flat(refund.body)).toBe(404);
     expect(callsSince(mark).filter((x) => x.startsWith('POST'))).toEqual([]);
     expect(accounts[C_KEY].refunds).toEqual([]);
+  }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// V1-15d review repairs. On the shared platform key a Payment row is not proof
+// of ownership: a tenant writes its own rows (the manual payment route takes any
+// method and reference; a delivery signed with its own webhook secret records
+// any id). Ownership there is the provider's record: the businessId (or
+// invoiceId) metadata the platform itself wrote on the charge or on the
+// Checkout Session that took it (createStripeCheckout; a payment link, whose
+// metadata Stripe copies onto its sessions).
+// ---------------------------------------------------------------------------
+
+/** The row the manual payment route writes (commerce.service: provider = method, reference = the member's input, recordedBy = the member). */
+async function manualRow(businessId: string, invoiceId: string, provider: string, key: string, reference: string, recordedBy: string) {
+  return db.payment.create({
+    data: {
+      businessId, invoiceId, amount: 1, currency: 'TTD', status: 'SUCCESSFUL', provider, method: provider,
+      providerPaymentId: `${P}manual_${key}`, reference, recordedBy,
+    },
+  });
+}
+
+/** Runs `fn` with one Stripe GET answered `status` (a provider failure), every other call reaching the fake. */
+async function withFailingGet<T>(pathname: string, status: number, fn: () => Promise<T>): Promise<T> {
+  const inner = globalThis.fetch;
+  globalThis.fetch = (async (input: any, init: any = {}) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    if (String(init.method ?? 'GET').toUpperCase() === 'GET' && url.host === 'api.stripe.com' && url.pathname === pathname) {
+      calls.push({ method: 'GET', host: url.host, path: `${url.pathname}${url.search}`, auth: null, body: '' });
+      return json(status, { error: { message: `fake Stripe: ${status}` } });
+    }
+    return inner(input, init);
+  }) as typeof fetch;
+  try {
+    return await fn();
+  } finally {
+    globalThis.fetch = inner;
+  }
+}
+
+describe('V1-15d review: on the shared key a charge is the business\'s own by the provider\'s record, never by a tenant-writable row', () => {
+  it('RV-01 (SEC-V15D-1): a manual "stripe" payment B records with A\'s Checkout charge as its reference neither lists A\'s charge or customer for B nor lets B refund it', async () => {
+    // No row of A names ch_A2 (A's cs_A2 row holds its payment_intent): before the repair B's row was the only one, so it was B's.
+    await manualRow(ID.bizB, ID.invB3, 'stripe', 'B_A2', S.chA2, ID.ownerB);
+    const list = await as(ID.ownerB).get(`${ops(ID.bizB)}/transactions`);
+    expect(list.status, flat(list.body)).toBe(200);
+    // RED-BEFORE: ch_A2 listed for B with A's customer name and email.
+    expect(list.body.map((t: any) => t.id)).not.toContain(S.chA2);
+    for (const leak of [A_EMAIL, 'Alice Customer-of-A']) expect(flat(list.body), `B's list carries ${leak}`).not.toContain(leak);
+
+    const aRows = await rowsOfBusiness(ID.bizA);
+    const refundsBefore = accounts[PLATFORM_KEY].refunds.length;
+    const mark = calls.length;
+    const res = await as(ID.ownerB).post(`${ops(ID.bizB)}/refunds`, { gateway: 'stripe', chargeId: S.chA2 });
+    // RED-BEFORE: 201 and A's charge refunded in full with the platform key.
+    expect(res.status, flat(res.body)).toBe(404);
+    expect(res.body.message).toBe('Charge not found');
+    expect(callsSince(mark).filter((c) => !c.startsWith('GET'))).toEqual([]);
+    expect(accounts[PLATFORM_KEY].refunds.length).toBe(refundsBefore);
+    await deliverRefundEvents();
+    expect(await rowsOfBusiness(ID.bizA)).toEqual(aRows);
+  }, 60_000);
+
+  it('RV-02 (CR-V15D-2, SEC-V15D-3): a row of B naming A\'s charge or payment_intent does not take the charge from A: A lists it and refunds it, B still cannot', async () => {
+    // (a) SOT-11's row of B references A's ch_A4.
+    expect(await paymentBy(`cs_${P}Bforged`)).toMatchObject({ businessId: ID.bizB, reference: S.chA4 });
+    // (b) A takes a Checkout payment; B records a manual "stripe" payment naming its payment_intent.
+    accounts[PLATFORM_KEY].sessions.push({
+      id: S.csA6, object: 'checkout.session', status: 'complete', payment_intent: S.piA6, payment_link: null,
+      client_reference_id: ID.invA6, metadata: { invoiceId: ID.invA6, businessId: ID.bizA }, created: now(),
+    });
+    accounts[PLATFORM_KEY].charges.push(charge(S.chA6, 5000, { pi: S.piA6, name: 'Alice Customer-of-A', email: A_EMAIL }));
+    await stripeEvent('cs_A6', 'checkout.session.completed', {
+      id: S.csA6, client_reference_id: ID.invA6, amount_total: 5000, currency: 'ttd', payment_intent: S.piA6,
+      metadata: { invoiceId: ID.invA6, businessId: ID.bizA },
+    });
+    expect(await paymentBy(S.csA6)).toMatchObject({ businessId: ID.bizA, reference: S.piA6, status: 'SUCCESSFUL' });
+    await manualRow(ID.bizB, ID.invB3, 'stripe', 'B_A6', S.piA6, ID.ownerB);
+
+    const a = await as(ID.ownerA).get(`${ops(ID.bizA)}/transactions`);
+    // RED-BEFORE: both charges dropped from A's list (named by a row of another business).
+    expect(a.body.map((t: any) => t.id)).toEqual(expect.arrayContaining([S.chA4, S.chA6]));
+    for (const [chargeId, amount] of [[S.chA4, 60], [S.chA6, 10]] as const) {
+      const mark = calls.length;
+      const res = await as(ID.ownerA).post(`${ops(ID.bizA)}/refunds`, { gateway: 'stripe', chargeId, amount });
+      // RED-BEFORE: 404 'Charge not found' and no refund.
+      expect(res.status, `${chargeId}: ${flat(res.body)}`).toBe(201);
+      expect(res.body).toMatchObject({ chargeId, amount, provider: 'stripe' });
+      expect(calls.slice(mark).filter((c) => c.method === 'POST').map((c) => `${c.path} ${c.auth}`)).toEqual([`/v1/refunds Bearer ${PLATFORM_KEY}`]);
+    }
+    for (const chargeId of [S.chA4, S.chA6]) {
+      const mark = calls.length;
+      const res = await as(ID.ownerB).post(`${ops(ID.bizB)}/refunds`, { gateway: 'stripe', chargeId });
+      expect(res.status, `${chargeId}: ${flat(res.body)}`).toBe(404);
+      expect(callsSince(mark).filter((c) => !c.startsWith('GET'))).toEqual([]);
+    }
+    // Stripe's refund.created for A's two refunds goes through the V1-29c door, whose handling of
+    // ids two businesses' rows name (SEC-V29C-1) is payments.service.ts's, outside this write set.
+    await deliverRefundEvents();
+  }, 60_000);
+
+  it('RV-03 (SEC-V15D-2): a sale through A\'s tagged payment link that nobody recorded is A\'s by the provider\'s record; a delivery B signs with its own secret naming it does not make it B\'s', async () => {
+    payLink(PLATFORM_KEY, S.plinkA, S.chA7, S.piA7, 7000, { name: 'Alice Customer-of-A', email: A_EMAIL });
+    await db.business.update({ where: { id: ID.bizB }, data: { metaData: { stripeWebhookSecret: B_WHSEC } } });
+    try {
+      const raw = JSON.stringify({
+        id: `${P}evt_forged_B_A7`, type: 'charge.succeeded',
+        data: { object: { id: S.chA7, amount: 100, currency: 'ttd', payment_intent: S.piA7, metadata: { invoiceId: ID.invB4 } } },
+      });
+      const ts = Math.floor(Date.now() / 1000);
+      const sig = `t=${ts},v1=${createHmac('sha256', B_WHSEC).update(`${ts}.${raw}`).digest('hex')}`;
+      expect(await paymentsSvc.handleStripeWebhook(raw, sig)).toMatchObject({ ok: true, processed: 'charge.succeeded' });
+      // B's own row now names A's charge (B still has no Stripe key: it runs on the platform key).
+      expect(await paymentBy(S.chA7)).toMatchObject({ businessId: ID.bizB, invoiceId: ID.invB4, status: 'SUCCESSFUL' });
+
+      const list = await as(ID.ownerB).get(`${ops(ID.bizB)}/transactions`);
+      expect(list.status).toBe(200);
+      for (const leak of [A_EMAIL, 'Alice Customer-of-A']) expect(flat(list.body), `B's list carries ${leak}`).not.toContain(leak);
+
+      let mark = calls.length;
+      const b = await as(ID.ownerB).post(`${ops(ID.bizB)}/refunds`, { gateway: 'stripe', chargeId: S.chA7 });
+      // RED-BEFORE: 201 and POST /v1/refunds charge=ch_A7link with the platform key.
+      expect(b.status, flat(b.body)).toBe(404);
+      expect(callsSince(mark).filter((c) => !c.startsWith('GET'))).toEqual([]);
+
+      mark = calls.length;
+      const a = await as(ID.ownerA).post(`${ops(ID.bizA)}/refunds`, { gateway: 'stripe', chargeId: S.chA7, amount: 20 });
+      // RED-BEFORE: 404 (B's row was the only one naming it).
+      expect(a.status, flat(a.body)).toBe(201);
+      expect(calls.slice(mark).filter((c) => c.method === 'POST').map((c) => `${c.path} ${c.auth}`)).toEqual([`/v1/refunds Bearer ${PLATFORM_KEY}`]);
+    } finally {
+      await db.business.update({ where: { id: ID.bizB }, data: { metaData: {} } });
+    }
+    // The door's matching of a platform refund event to a row B forged is payments.service.ts's (outside this write set).
+    await deliverRefundEvents();
+  }, 60_000);
+
+  it('RV-04 (CR-V15D-1, SEC-V15D-4): a sale through B\'s own payment link (never recorded: it carries no invoiceId) is listed for B and refundable by B, never by A', async () => {
+    const created = await as(ID.ownerB).post(`${ops(ID.bizB)}/links`, { gateway: 'stripe', amount: 30, currency: 'TTD', description: 'V15D B link sale' });
+    expect(created.status, flat(created.body)).toBe(201);
+    const post = calls.filter((c) => c.method === 'POST' && c.path === '/v1/payment_links').at(-1)!;
+    const form = new URLSearchParams(post.body);
+    expect(form.get('metadata[businessId]')).toBe(ID.bizB);
+    expect(form.get('payment_intent_data[metadata][businessId]')).toBe(ID.bizB);
+
+    payLink(PLATFORM_KEY, created.body.id, S.chBlink, S.piBlink, 3000, { name: 'Link Payer', email: LINK_EMAIL });
+    const bRows = await rowsOfBusiness(ID.bizB);
+    const ack = await stripeEvent('cs_Blink', 'checkout.session.completed', {
+      id: `cs_${P}Blink`, payment_link: created.body.id, amount_total: 3000, currency: 'ttd', payment_intent: S.piBlink,
+      metadata: { businessId: ID.bizB },
+    });
+    expect(ack).toMatchObject({ ok: true, processed: 'checkout.session.completed' });
+    expect(await rowsOfBusiness(ID.bizB)).toEqual(bRows);
+
+    const b = await as(ID.ownerB).get(`${ops(ID.bizB)}/transactions`);
+    // RED-BEFORE: absent (no Payment row names it).
+    expect(b.body.find((t: any) => t.id === S.chBlink)).toMatchObject({ customerEmail: LINK_EMAIL, amount: 30, currency: 'TTD' });
+    const a = await as(ID.ownerA).get(`${ops(ID.bizA)}/transactions`);
+    expect(a.body.map((t: any) => t.id)).not.toContain(S.chBlink);
+    expect(flat(a.body)).not.toContain(LINK_EMAIL);
+
+    let mark = calls.length;
+    const byA = await as(ID.ownerA).post(`${ops(ID.bizA)}/refunds`, { gateway: 'stripe', chargeId: S.chBlink });
+    expect(byA.status, flat(byA.body)).toBe(404);
+    expect(callsSince(mark).filter((c) => !c.startsWith('GET'))).toEqual([]);
+
+    mark = calls.length;
+    const own = await as(ID.ownerB).post(`${ops(ID.bizB)}/refunds`, { gateway: 'stripe', chargeId: S.chBlink, amount: 5 });
+    // RED-BEFORE: 404 'Charge not found'.
+    expect(own.status, flat(own.body)).toBe(201);
+    const posts = calls.slice(mark).filter((c) => c.method === 'POST');
+    expect(posts.map((c) => `${c.path} ${c.auth}`)).toEqual([`/v1/refunds Bearer ${PLATFORM_KEY}`]);
+    expect(Object.fromEntries(new URLSearchParams(posts[0].body))).toMatchObject({ charge: S.chBlink, amount: '500' });
+    await deliverRefundEvents();
+    // The sale was never recorded, so its refund is not either.
+    expect(await rowsOfBusiness(ID.bizB)).toEqual(bRows);
+  }, 60_000);
+});
+
+describe('V1-15d review: a provider failure on an ownership read is an error, not "not found"', () => {
+  it('RV-05 (CR-V15D-3): a 429 on the read of A\'s own link fails the revoke (no write, the link stays active); only Stripe\'s 404 is "not found"', async () => {
+    const created = await as(ID.ownerA).post(`${ops(ID.bizA)}/links`, { gateway: 'stripe', amount: 12, currency: 'TTD', description: 'V15D A link 2' });
+    expect(created.status, flat(created.body)).toBe(201);
+    const linkPath = `/v1/payment_links/${created.body.id}`;
+    const mark = calls.length;
+    const res = await withFailingGet(linkPath, 429, () => as(ID.ownerA).del(`${ops(ID.bizA)}/links/stripe/${created.body.id}`));
+    // RED-BEFORE: 404 'Payment link not found' while the link keeps taking payments.
+    expect(res.status, flat(res.body)).toBe(500);
+    expect(res.body.message).not.toBe('Payment link not found');
+    expect(callsSince(mark).filter((c) => c.startsWith('POST'))).toEqual([]);
+    expect(accounts[PLATFORM_KEY].links.find((l) => l.id === created.body.id)?.active).toBe(true);
+
+    const unknown = await as(ID.ownerA).del(`${ops(ID.bizA)}/links/stripe/plink_${P}nope`);
+    expect(unknown.status, flat(unknown.body)).toBe(404);
+    expect(unknown.body.message).toBe('Payment link not found');
+
+    const again = await as(ID.ownerA).del(`${ops(ID.bizA)}/links/stripe/${created.body.id}`);
+    expect(again.status, flat(again.body)).toBe(200);
+    expect(accounts[PLATFORM_KEY].links.find((l) => l.id === created.body.id)?.active).toBe(false);
+  }, 60_000);
+
+  it('RV-06: a 500 on the read that resolves A\'s own Checkout charge fails the refund (no write), not "Charge not found"', async () => {
+    const mark = calls.length;
+    const res = await withFailingGet(`/v1/charges/${S.chA2}`, 500, () =>
+      as(ID.ownerA).post(`${ops(ID.bizA)}/refunds`, { gateway: 'stripe', chargeId: S.chA2, amount: 1 }),
+    );
+    expect(res.status, flat(res.body)).toBe(500);
+    expect(res.body.message).not.toBe('Charge not found');
+    expect(callsSince(mark).filter((c) => c.startsWith('POST'))).toEqual([]);
+  }, 60_000);
+
+  it('RV-06b (CR-V15D-4, rejected): the untagged legacy link names no business, so on the platform key it is no tenant\'s to revoke', async () => {
+    for (const [owner, biz] of [[ID.ownerA, ID.bizA], [ID.ownerB, ID.bizB]] as const) {
+      const mark = calls.length;
+      const res = await as(owner).del(`${ops(biz)}/links/stripe/${S.plinkLegacy}`);
+      expect(res.status, flat(res.body)).toBe(404);
+      expect(callsSince(mark).filter((c) => c.startsWith('POST'))).toEqual([]);
+    }
+    expect(accounts[PLATFORM_KEY].links.find((l) => l.id === S.plinkLegacy)?.active).toBe(true);
+  }, 60_000);
+});
+
+describe('V1-15d review: PayPal on the platform credentials', () => {
+  it('RV-07 (SEC-V15D-3 for PayPal): a manual "paypal" payment B records naming A\'s capture neither blocks A\'s refund nor makes the capture B\'s', async () => {
+    await manualRow(ID.bizB, ID.invB3, 'paypal', 'B_A5', S.capA5, ID.ownerB);
+    process.env.PAYPAL_CLIENT_ID = PAYPAL_PLATFORM_ID;
+    process.env.PAYPAL_CLIENT_SECRET = `pp_${P}platform_secret`;
+    try {
+      let mark = calls.length;
+      const b = await as(ID.ownerB).post(`${ops(ID.bizB)}/refunds`, { gateway: 'paypal', chargeId: S.capA5, amount: 40 });
+      expect(b.status, flat(b.body)).toBe(404);
+      expect(callsSince(mark)).toEqual([]);
+
+      mark = calls.length;
+      const a = await as(ID.ownerA).post(`${ops(ID.bizA)}/refunds`, { gateway: 'paypal', chargeId: S.capA5, amount: 40 });
+      // RED-BEFORE: 404 (B's row named the capture too).
+      expect(a.status, flat(a.body)).toBe(201);
+      expect(callsSince(mark)).toContain(`POST api-m.paypal.com /v2/payments/captures/${S.capA5}/refund`);
+      const rows = await rowsOf(ID.invA5);
+      expect(rows[0]).toBe(`paypal:${S.capA5}:SUCCESSFUL:40:null`);
+      expect(rows.slice(1)).toEqual([expect.stringMatching(new RegExp(`^paypal:PPRF_${P}\\d+:REFUNDED:-40:${S.capA5}$`))]);
+    } finally {
+      delete process.env.PAYPAL_CLIENT_ID;
+      delete process.env.PAYPAL_CLIENT_SECRET;
+    }
   }, 60_000);
 });

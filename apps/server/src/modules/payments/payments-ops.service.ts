@@ -146,20 +146,30 @@ export class PaymentsOpsService {
   ): Promise<RefundResult> {
     if (!input.chargeId) throw new BadRequestException('Charge id is required');
     const gw = this.getGateway(gatewayId);
-    // V1-15d-STRIPE-OPS-TENANCY (F1): only a charge of one of this business's
-    // own recorded payments is refunded; any other (another tenant's charge on
-    // the shared platform key, or a charge nobody recorded) is refused like an
-    // unknown charge, before the provider is asked to move money.
-    const orig = await this.ownRecordedPayment(businessId, gatewayId, input.chargeId);
-    if (!orig) throw new NotFoundException('Charge not found');
+    // V1-15d-STRIPE-OPS-TENANCY (F1): only the business's own charge is
+    // refunded; any other (another tenant's charge on the shared platform key,
+    // or a charge that is no one's) is refused like an unknown charge, before
+    // the provider is asked to move money. Stripe: the provider's own record
+    // on the shared key (StripeConnector.isOwnCharge; review SEC-V15D-1/2/3,
+    // CR-V15D-1/2). Other gateways: the business's own recorded payments.
+    const own =
+      gatewayId === 'stripe'
+        ? await this.stripe.isOwnCharge(businessId, input.chargeId)
+        : await this.ownsRecordedCharge(businessId, gatewayId, input.chargeId);
+    if (!own) throw new NotFoundException('Charge not found');
     try {
       const refund = await gw.refundCharge(businessId, input);
-      // Best-effort: record in our payments table. Only a payment recorded
-      // under the charge id itself, as before V1-15d: a refund of one recorded
-      // under its Checkout Session or PaymentIntent id is recorded, linked and
-      // posted by the provider's refund event (the V1-29c door).
+      // Best-effort: record in our payments table. Only a payment of this
+      // business recorded under the charge id itself, as before V1-15d: a
+      // refund of one recorded under its Checkout Session or PaymentIntent id
+      // is recorded, linked and posted by the provider's refund event (the
+      // V1-29c door).
       try {
-        if (orig.providerPaymentId === input.chargeId) {
+        const orig = await this.prisma.client.payment.findFirst({
+          where: { businessId, provider: gatewayId, status: 'SUCCESSFUL', providerPaymentId: input.chargeId },
+          select: { invoiceId: true, providerPaymentId: true },
+        });
+        if (orig) {
           await this.prisma.client.payment.create({
             data: {
               businessId,
@@ -187,29 +197,42 @@ export class PaymentsOpsService {
   }
 
   /**
-   * V1-15d-STRIPE-OPS-TENANCY (F1): the SUCCESSFUL payment of this business a
-   * refund of `chargeId` refunds, matched by its providerPaymentId or its
-   * reference (a PaymentIntent row holds its charge there). A Stripe charge no
-   * row names is matched through its payment_intent (one read: a Checkout
-   * Session row holds that). Payment is outside the tenant extension (M31), so
-   * the match spans every tenant; null when no row matches, or when a payment
-   * of another business matches too (a tenant can sign any reference for
-   * itself with its own webhook secret, so the charge is provably no one's).
+   * V1-15d-STRIPE-OPS-TENANCY (F1), for a gateway with no provider-side owner
+   * tag (PayPal): whether one of this business's SUCCESSFUL payments names
+   * `chargeId` (providerPaymentId or reference). Payment is outside the tenant
+   * extension (M31).
+   *
+   * On the business's own credentials only its own rows are read: no other
+   * tenant can reach that account. On the platform credentials only rows the
+   * provider's callback wrote (recordedBy null) count, and the charge is
+   * refused when such a row of another business names it too. A row a member
+   * typed through the manual payment route (recordedBy set, any method and
+   * reference) is no evidence there, for or against: it can neither claim
+   * another tenant's capture nor take one from its owner (review SEC-V15D-3).
    */
-  private async ownRecordedPayment(businessId: string, gatewayId: GatewayId, chargeId: string) {
-    const naming = (id: string) =>
-      this.prisma.client.payment.findMany({
-        where: { provider: gatewayId, status: 'SUCCESSFUL', OR: [{ providerPaymentId: id }, { reference: id }] },
-        select: { businessId: true, invoiceId: true, providerPaymentId: true },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-      });
-    let rows = await naming(chargeId);
-    if (rows.length === 0 && gatewayId === 'stripe') {
-      const paymentIntent = await this.stripe.paymentIntentOfCharge(businessId, chargeId);
-      if (paymentIntent) rows = await naming(paymentIntent);
-    }
-    if (rows.some((r) => r.businessId !== businessId)) return null;
-    return rows[0] ?? null;
+  private async ownsRecordedCharge(businessId: string, gatewayId: GatewayId, chargeId: string): Promise<boolean> {
+    const ownCredentials = await this.hasOwnCredentials(businessId, gatewayId);
+    const rows = await this.prisma.client.payment.findMany({
+      where: {
+        provider: gatewayId,
+        status: 'SUCCESSFUL',
+        OR: [{ providerPaymentId: chargeId }, { reference: chargeId }],
+        ...(ownCredentials ? { businessId } : { recordedBy: null }),
+      },
+      select: { businessId: true },
+    });
+    return rows.length > 0 && rows.every((r) => r.businessId === businessId);
+  }
+
+  /** Whether the business stores its own credentials for `gatewayId` (PayPal: client id and secret), so its operations never run on the platform's. */
+  private async hasOwnCredentials(businessId: string, gatewayId: GatewayId): Promise<boolean> {
+    if (gatewayId !== 'paypal') return false;
+    const business = await this.prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { metaData: true },
+    });
+    const meta = (business?.metaData as Record<string, unknown> | null) ?? {};
+    return !!meta.paypalClientId && !!meta.paypalClientSecret;
   }
 
   async searchCharges(
