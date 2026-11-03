@@ -28,6 +28,7 @@ import { TimelineService } from '../timeline/timeline.service';
 import { schedulersDisabled } from '../../core/config/env';
 import { getTenantContext } from '../../core/tenant/tenant-context';
 import {
+  DERIVATION_TX_TIMEOUT_MS,
   depositPosition,
   derivePaymentStatus,
   readSettlementInvoices,
@@ -522,17 +523,32 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // that read and this write (its forfeit included) left a live booking
     // DEPOSIT_FORFEITED, which no invoice.paid could advance. It is written
     // only while the booking is still not CANCELLED.
+    // Trial-N round 2 (recheck F4): the reinstatement reads the invoices and
+    // writes the status in one transaction under the booking row lock (FOR NO
+    // KEY UPDATE, the lock BookingPaymentStatusListener's derivations take,
+    // RC-DEP-3). Read without it, a refund and its re-derivation could land
+    // between the read and the write: the re-derivation found the booking still
+    // DEPOSIT_FORFEITED (never overwritten) and wrote nothing, then this wrote
+    // DEPOSIT_PAID with nothing held. Under the lock, that re-derivation waits
+    // for this write and re-derives the booking from the refunded deposit.
     let depositForfeit: DepositForfeit | null = null;
     if (status === 'CANCELLED') {
       depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
       if (depositForfeit) updated.paymentStatus = DEPOSIT_FORFEITED;
     } else if (updated.paymentStatus === DEPOSIT_FORFEITED) {
-      const reinstated = derivePaymentStatus(await readSettlementInvoices(this.prisma.client, businessId, updated));
-      const restored = await this.prisma.client.booking.updateMany({
-        where: { id: booking.id, businessId, paymentStatus: DEPOSIT_FORFEITED, status: { not: 'CANCELLED' } },
-        data: { paymentStatus: reinstated },
-      });
-      if (restored.count > 0) updated.paymentStatus = reinstated;
+      const reinstated = await this.prisma.client.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM bookings WHERE id = ${booking.id} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+          const derived = derivePaymentStatus(await readSettlementInvoices(tx, businessId, updated));
+          const restored = await tx.booking.updateMany({
+            where: { id: booking.id, businessId, paymentStatus: DEPOSIT_FORFEITED, status: { not: 'CANCELLED' } },
+            data: { paymentStatus: derived },
+          });
+          return restored.count > 0 ? derived : null;
+        },
+        { timeout: DERIVATION_TX_TIMEOUT_MS },
+      );
+      if (reinstated) updated.paymentStatus = reinstated;
     }
 
     if (status === 'CONFIRMED' && booking.contactId) {
@@ -643,33 +659,57 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * CANCELLED. A reinstatement that committed between the cancel's status
    * write and this one left a live booking DEPOSIT_FORFEITED; now nothing is
    * forfeit on it. The deposit's payment rows are its own tenant's (N1-SEC).
+   *
+   * Trial-N round 2 (recheck F3): what the deposit holds is read and the
+   * forfeit written in one transaction under the deposit's invoice row lock
+   * (FOR NO KEY UPDATE, the lock every payment and refund of the invoice takes
+   * first: CommerceService.lockInvoiceForPayment, PaymentsService.lockInvoice,
+   * the reconcile). The compare-and-set on paymentStatus did not cover the
+   * deposit read: a full refund that committed between the read and the write
+   * (its re-derivation having moved the booking to UNPAID) was forfeit, and a
+   * forfeit is never re-derived (D-26). Under the lock a payment or refund of
+   * the deposit is before the read (and seen) or after the forfeit commits (the
+   * owner's refund of a forfeit deposit, which leaves it forfeit). The invoice
+   * is locked before the booking row the write locks, the order a contact
+   * merge takes them in (invoices, then bookings).
    */
   private async forfeitPaidDeposit(
     businessId: string,
     booking: Pick<Booking, 'id' | 'contactId' | 'depositInvoiceId'>,
   ): Promise<DepositForfeit | null> {
-    if (!booking.depositInvoiceId) return null;
-    const deposit = await this.prisma.client.invoice.findFirst({
-      where: { id: booking.depositInvoiceId, businessId, deletedAt: null, status: { not: 'VOID' } },
-      select: settlementInvoiceSelect(businessId),
-    });
-    if (!deposit) return null;
-    const { heldCents } = depositPosition(deposit);
-    if (heldCents <= 0) return null;
-    const forfeit: DepositForfeit = {
-      depositInvoiceId: deposit.id,
-      invoiceNumber: deposit.invoiceNumber,
-      amount: heldCents / 100,
-      currency: deposit.currency,
-    };
-    const recorded = await this.prisma.client.booking.updateMany({
-      where: { id: booking.id, businessId, status: 'CANCELLED', paymentStatus: { in: ['UNPAID', 'DEPOSIT_PAID'] } },
-      data: { paymentStatus: DEPOSIT_FORFEITED },
-    });
-    if (recorded.count === 0) {
-      const current = await this.prisma.client.booking.findUnique({ where: { id: booking.id }, select: { status: true, paymentStatus: true } });
-      return current?.status === 'CANCELLED' && current.paymentStatus === DEPOSIT_FORFEITED ? forfeit : null;
-    }
+    const depositInvoiceId = booking.depositInvoiceId;
+    if (!depositInvoiceId) return null;
+    const decided = await this.prisma.client.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${depositInvoiceId} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+        const deposit = await tx.invoice.findFirst({
+          where: { id: depositInvoiceId, businessId, deletedAt: null, status: { not: 'VOID' } },
+          select: settlementInvoiceSelect(businessId),
+        });
+        if (!deposit) return null;
+        const { heldCents } = depositPosition(deposit);
+        if (heldCents <= 0) return null;
+        const forfeit: DepositForfeit = {
+          depositInvoiceId: deposit.id,
+          invoiceNumber: deposit.invoiceNumber,
+          amount: heldCents / 100,
+          currency: deposit.currency,
+        };
+        const recorded = await tx.booking.updateMany({
+          where: { id: booking.id, businessId, status: 'CANCELLED', paymentStatus: { in: ['UNPAID', 'DEPOSIT_PAID'] } },
+          data: { paymentStatus: DEPOSIT_FORFEITED },
+        });
+        if (recorded.count === 0) {
+          const current = await tx.booking.findUnique({ where: { id: booking.id }, select: { status: true, paymentStatus: true } });
+          return current?.status === 'CANCELLED' && current.paymentStatus === DEPOSIT_FORFEITED ? { forfeit, recorded: false } : null;
+        }
+        return { forfeit, recorded: true };
+      },
+      { timeout: DERIVATION_TX_TIMEOUT_MS },
+    );
+    if (!decided) return null;
+    const { forfeit } = decided;
+    if (!decided.recorded) return forfeit;
     if (booking.contactId) {
       await this.crm.logContactEvent({
         businessId,

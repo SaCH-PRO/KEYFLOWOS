@@ -12,9 +12,10 @@ type SettlementReader = Pick<PrismaTx, 'invoice'>;
 /**
  * Trial-N round 2 (RC-DEP-3): the bound on a derivation's transaction. It is
  * a few reads and one write under the booking row lock; the bound only ends
- * one that is stuck, so it never holds the lock for long.
+ * one that is stuck, so it never holds the lock for long. The forfeit and the
+ * reinstatement (BookingsService) take the same bound (recheck F3, F4).
  */
-const DERIVATION_TX_TIMEOUT_MS = 10_000;
+export const DERIVATION_TX_TIMEOUT_MS = 10_000;
 
 /** What one invoice.paid did to a booking's paymentStatus. */
 export interface BookingPaymentStatusOutcome {

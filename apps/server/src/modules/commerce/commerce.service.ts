@@ -4767,9 +4767,13 @@ export class CommerceService {
       if (locked.status === 'PAID') throw new ConflictException('Invoice is already paid');
       if (!CommerceService.INTENT_PAYABLE_STATUSES.has(locked.status)) throw notFound();
 
+      // Trial-N round 2 (recheck F1): what is still owed is read from the
+      // invoice's own-tenant rows (M31, as reconcileIn and recordPayment read
+      // them, RC-DEP-2): a row of another business is not money received or
+      // returned, so it neither answers 'already paid' nor moves the cap.
       const current = await tx.invoice.findFirst({
         where: { id: invoiceId },
-        select: { total: true, currency: true, payments: { select: { amount: true, status: true } } },
+        select: { total: true, currency: true, payments: { where: { businessId: invoice.businessId }, select: { amount: true, status: true } } },
       });
       // A row the manual refund flipped to REFUNDED before V1-29 is read as
       // its payment plus its refund (balanceOfStoredRows, V1-29 review
