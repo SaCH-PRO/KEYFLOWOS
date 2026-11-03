@@ -1117,8 +1117,14 @@ describe('V1-37b review (SEC-V37b-1): a revenue:none member reads no revenue thr
     }
 
     const expected = JSON.parse(JSON.stringify(await reporting.getBalanceSheet(ID.bizTtd, new Date(asOf))));
+    // The sheet holds figures: the TTD cash line is Postgres' own net of the CASH account (777.77 posted above among them).
     const cash = await coa.getBySystemKey(ID.bizTtd, 'CASH');
-    expect(expected.assets.lines.find((l: any) => l.accountId === cash.id)?.amount).toBeGreaterThanOrEqual(777.77);
+    const [cashNet] = await db.$queryRawUnsafe(
+      `SELECT SUM(debit - credit)::text AS net FROM ledger_entries WHERE business_id = $1 AND account_id = $2 AND currency = 'TTD'`,
+      ID.bizTtd, cash.id,
+    );
+    expect(Number(cashNet.net)).toBeGreaterThan(0);
+    expect(expected.assets.lines.find((l: any) => l.accountId === cash.id)?.amount).toBe(Math.round(Number(cashNet.net) * 100) / 100);
     for (const as of [ID.memberRead, ID.ownerT]) {
       const res = await sheet(as);
       expect(res.status, `${as}: ${JSON.stringify(res.body)}`).toBe(200);
