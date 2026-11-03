@@ -42,7 +42,9 @@
  *   5. AGENTS.md, README.md, DEPLOYMENT.md and docs/LAUNCH_GUIDE.md name
  *      Node 22 (as 22.x or the exact pin) and no other Node version, in prose,
  *      in node:<tag> image references and in shields.io node badges (review
- *      CR-V139-1).
+ *      CR-V139-1). AGENTS.md's Node line names as exceptions exactly the
+ *      recorded workflows below, so its caveats neither outlive an alignment
+ *      nor miss an exception.
  *   6. ci-cd.yml runs this spec in the Type Check job (lint-and-typecheck),
  *      and nothing can skip or neuter it while the job reports success
  *      (review SEC-V139-2): the job sets only name, runs-on, permissions and
@@ -61,7 +63,9 @@
  *      past module loading" step runs node with --no-experimental-require-module,
  *      so an ESM-only server dependency fails ci-cd the way it would kill that
  *      workflow's server at boot (ERR_REQUIRE_ESM). Once no workflow does, the
- *      flag must go (review CR-V139-2). The step sets a DATABASE_URL: main.ts
+ *      flag must go (review CR-V139-2): every workflow that boots the server
+ *      (native-dast.yml, e2e-live.yml) runs the pin, so the step runs without
+ *      it. The step sets a DATABASE_URL: main.ts
  *      exits at env validation before it imports AppModule, so without one
  *      the check only ever loaded main.ts's own imports.
  *   8. Negative controls: each way found in review to let a different Node
@@ -75,12 +79,12 @@
  *     own workflows; D-21 left open who authorizes changing them, and the
  *     packet records them rather than editing them. They run node scripts
  *     only (no pnpm install).
- *   - native-dast.yml and e2e-live.yml pin NODE_VERSION '20.18.1' and are
- *     outside the V1-39 write set. Their alignment is it.todo below, not
- *     claimed. Both run `pnpm install --frozen-lockfile`, which warns on the
- *     engines mismatch and does not fail, and both boot the server on
- *     20.18.1, so the required native DAST gate tests a different runtime
- *     than the shipped images until they are aligned (review SEC-V139-4).
+ *
+ * native-dast.yml and e2e-live.yml were recorded here at '20.18.1' while they
+ * sat outside the V1-39 write set (review SEC-V139-4: the required native
+ * DAST gate tested a different runtime than the shipped images). The V1-39
+ * follow-up aligned them; case 4 now holds them to the pin like every other
+ * workflow.
  *
  * Run: node --test scripts/ci/runtime-pin.spec.mjs
  */
@@ -111,18 +115,6 @@ const KNOWN_EXCEPTIONS = {
     reason: `${CONTROL_PLANE}; its agent-control job runs node scripts/agent-control/auto-merge-admitted.mjs --grant-only with no setup-node`,
   },
   'agent-control-worker-proof.yml': { pins: ['20.18.1'], reason: CONTROL_PLANE },
-};
-
-/** Workflows outside the V1-39 write set: recorded here, alignment is todo. */
-const OUTSIDE_WRITE_SET = {
-  'native-dast.yml': {
-    pins: ['20.18.1'],
-    reason: 'outside the V1-39 write set; its NODE_VERSION line needs a packet that may edit it',
-  },
-  'e2e-live.yml': {
-    pins: ['20.18.1'],
-    reason: 'outside the V1-39 write set; its NODE_VERSION line needs a packet that may edit it',
-  },
 };
 
 const DOCS = ['AGENTS.md', 'README.md', 'DEPLOYMENT.md', 'docs/LAUNCH_GUIDE.md'];
@@ -348,7 +340,7 @@ function workflowPins(source) {
 
 /** Case 4 over a set of workflow sources. */
 function workflowPinProblems(sources, pin) {
-  const recorded = { ...KNOWN_EXCEPTIONS, ...OUTSIDE_WRITE_SET };
+  const recorded = KNOWN_EXCEPTIONS;
   const problems = [];
   const seen = new Set();
   for (const [file, source] of Object.entries(sources)) {
@@ -450,6 +442,16 @@ function docProblems(sources, pin) {
     }
   }
   return problems;
+}
+
+/** Case 5, AGENTS.md: its Node line names as exceptions exactly the workflows recorded in KNOWN_EXCEPTIONS. */
+function agentsExceptionProblems(source) {
+  const lines = source.split(/\r?\n/).filter((line) => /^\s*- \*\*Node:\*\*/.test(line));
+  if (lines.length !== 1) return [`AGENTS.md must have exactly one '- **Node:**' line, found ${lines.length}`];
+  const named = [...new Set([...lines[0].matchAll(/[\w.-]+\.ya?ml\b/g)].map((m) => m[0]))].sort();
+  const recorded = Object.keys(KNOWN_EXCEPTIONS).sort();
+  if (JSON.stringify(named) === JSON.stringify(recorded)) return [];
+  return [`AGENTS.md's Node line names ${JSON.stringify(named)} as runtime exceptions; this spec records ${JSON.stringify(recorded)}`];
 }
 
 // ---------------------------------------------------------------------------
@@ -695,12 +697,12 @@ describe('V1-39 runtime pin: one declared Node runtime (D-21)', () => {
     assert.deepEqual(workflowPinProblems(allWorkflows(), nvmrcPin()), []);
   });
 
-  for (const [file, { reason }] of Object.entries(OUTSIDE_WRITE_SET)) {
-    it.todo(`${file} NODE_VERSION names the .nvmrc version (${reason})`);
-  }
-
   it('AGENTS.md, README.md, DEPLOYMENT.md and docs/LAUNCH_GUIDE.md name Node 22 and no other version', () => {
     assert.deepEqual(docProblems(docs(), nvmrcPin()), []);
+  });
+
+  it('AGENTS.md names as runtime exceptions exactly the recorded workflows', () => {
+    assert.deepEqual(agentsExceptionProblems(read('AGENTS.md')), []);
   });
 
   it('ci-cd.yml runs this spec in the Type Check job after Setup Node, and nothing can skip or neuter it', () => {
@@ -815,21 +817,47 @@ describe('V1-39 negative controls: review mutations are rejected', () => {
     });
   }
 
+  // SEC-V139-4: the workflows that boot the server for DAST and the live
+  // journey hold the pin; putting either back on 20.18.1 fails case 4, and
+  // so does keeping a record for one that is aligned.
+  const SERVER_BOOTS = ['native-dast.yml', 'e2e-live.yml'];
+  const backTo20 = (source) => mutate(source, `NODE_VERSION: '${nvmrcPin()}'`, "NODE_VERSION: '20.18.1'");
+  for (const file of SERVER_BOOTS) {
+    it(`workflow pins: rejects ${file} back on NODE_VERSION 20.18.1`, () => {
+      const sources = allWorkflows();
+      sources[file] = backTo20(sources[file]);
+      assert.notDeepEqual(workflowPinProblems(sources, nvmrcPin()), []);
+    });
+  }
+
   // CR-V139-2: the flag follows the workflows that boot the server.
-  const BOOT = 'timeout 45 node --no-experimental-require-module apps/server/dist/main.js';
-  it('module-loading check: rejects dropping the flag while native-dast and e2e-live boot on 20.18.1', () => {
-    const sources = allWorkflows();
-    sources['ci-cd.yml'] = mutate(sources['ci-cd.yml'], BOOT, 'timeout 45 node apps/server/dist/main.js');
-    assert.notDeepEqual(bootCheckProblems(sources), []);
-  });
+  const BOOT = 'timeout 45 node apps/server/dist/main.js';
+  const FLAGGED_BOOT = `timeout 45 node ${NO_REQUIRE_ESM} apps/server/dist/main.js`;
+  for (const file of SERVER_BOOTS) {
+    it(`module-loading check: rejects no flag while ${file} boots on 20.18.1`, () => {
+      const sources = allWorkflows();
+      sources[file] = backTo20(sources[file]);
+      assert.notDeepEqual(bootCheckProblems(sources), []);
+      sources['ci-cd.yml'] = mutate(sources['ci-cd.yml'], BOOT, FLAGGED_BOOT);
+      assert.deepEqual(bootCheckProblems(sources), [], `control: ${file} on 20.18.1 and the flag`);
+    });
+  }
   it('module-loading check: rejects keeping the flag once every server boot has require(esm)', () => {
     const sources = allWorkflows();
-    for (const file of Object.keys(OUTSIDE_WRITE_SET)) {
-      sources[file] = mutate(sources[file], "NODE_VERSION: '20.18.1'", `NODE_VERSION: '${nvmrcPin()}'`);
-    }
-    assert.notDeepEqual(bootCheckProblems(sources), []);
-    sources['ci-cd.yml'] = mutate(sources['ci-cd.yml'], BOOT, 'timeout 45 node apps/server/dist/main.js');
     assert.deepEqual(bootCheckProblems(sources), [], 'control: aligned workflows and no flag');
+    sources['ci-cd.yml'] = mutate(sources['ci-cd.yml'], BOOT, FLAGGED_BOOT);
+    assert.notDeepEqual(bootCheckProblems(sources), []);
+  });
+
+  // Case 5, AGENTS.md: a stale caveat, or an exception the doc forgets, fails.
+  const AGENTS_GATE = "and `agent-control-gate.yml` runs its merge-grant check with no setup-node, on the runner image's Node";
+  it('AGENTS.md exceptions: rejects a caveat for an aligned workflow', () => {
+    const source = mutate(read('AGENTS.md'), AGENTS_GATE, `${AGENTS_GATE}; \`native-dast.yml\` and \`e2e-live.yml\` pin \`20.18.1\``);
+    assert.notDeepEqual(agentsExceptionProblems(source), []);
+  });
+  it('AGENTS.md exceptions: rejects a recorded exception the doc leaves out', () => {
+    const source = mutate(read('AGENTS.md'), `, ${AGENTS_GATE}`, '');
+    assert.notDeepEqual(agentsExceptionProblems(source), []);
   });
   it('module-loading check: rejects a step with no DATABASE_URL (it stops before the AppModule graph)', () => {
     const sources = allWorkflows();
