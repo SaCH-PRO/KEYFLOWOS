@@ -49,8 +49,31 @@
  *              `activities` row naming its recorder and, beside KEY, the
  *              uploader (req.user, never the body) as data.initiatedBy; it
  *              stays after the confirmation; a keyed replay adds none.
- *   it.todo    CR-V41-3: no HTTP confirm route and no web copy for PENDING
- *              (outside the V1-41 write set).
+ *
+ * V1-41b-PENDING-PAYMENT-CONFIRM-ROUTE (CR-V41-3, DISC-V41-6, CR-V41-4): the
+ * it.todo V41-T1 is replaced by real cases on POST
+ * /commerce/businesses/:b/invoices/:i/payments/:paymentId/confirm, the HTTP
+ * door to confirmPendingPayment:
+ *   V41-T1a    mounted with the manual payment route's guard stack and its
+ *              revenue:write module scope.
+ *   V41-T1b    a revenue:write member confirms (binding the amount shown):
+ *              one SUCCESSFUL row, one payment_recorded posting and the
+ *              invoice.payment_recorded contact event name that member; the
+ *              pending row is retired; the invoice moves by the balance rule.
+ *   V41-T1c    DISC-V41-6: the answer is projected like the manual route
+ *              (toInvoiceWriteResponse): the contact's private fields are absent.
+ *   V41-T1d    CR-V41-4: GET .../payments lists the confirmed money once (a
+ *              CONFIRMED pending row is not a second money row).
+ *   V41-T1e    a confirm retried after the money was recorded but before the
+ *              row was retired answers the same payment and writes nothing new;
+ *              a confirm of a CONFIRMED row is 409 and writes nothing.
+ *   V41-T1f    revenue:read 403, a non-member 403, a non-member SUPER_ADMIN 403
+ *              (D-46), no identity 401; nothing written.
+ *   V41-T1g    another tenant's payment id, a row of another invoice, a
+ *              member-recorded SUCCESSFUL row and a pay-link intent: 404 / 409,
+ *              nothing written.
+ *   V41-T1h    the optional {amount}: malformed 400, mismatch 409, nothing
+ *              written; the matching amount confirms.
  *
  * Nothing on the authorization or money boundary is mocked: PrismaService,
  * AuthGuard, BusinessGuard, ModuleScopeGuard, CommerceService,
@@ -88,6 +111,7 @@ const ID = {
   writer: `${P}writer`, // STAFF of bizA, revenue:write
   reader: `${P}reader`, // STAFF of bizA, revenue:read
   ownerB: `${P}ownerB`, // OWNER of bizB only
+  superAdmin: `${P}superAdmin`, // SUPER_ADMIN, member of no business (D-46)
   bizA: `${P}bizA`,
   bizB: `${P}bizB`,
   contactA: `${P}contactA`,
@@ -108,8 +132,22 @@ const ID = {
   invBound: `${P}invBound`,
   invAuditEv: `${P}invAuditEv`,
   invAuditDrv: `${P}invAuditDrv`,
+  // V1-41b: the HTTP confirm route (CR-V41-3, DISC-V41-6, CR-V41-4)
+  invRouteEv: `${P}invRouteEv`,
+  invRouteDisc: `${P}invRouteDisc`,
+  invRouteList: `${P}invRouteList`,
+  invRouteDrv: `${P}invRouteDrv`,
+  invRouteAuth: `${P}invRouteAuth`,
+  invRouteKind: `${P}invRouteKind`,
+  invRouteOther: `${P}invRouteOther`,
+  invRouteBody: `${P}invRouteBody`,
   invB: `${P}invB`, // bizB
+  invRouteB: `${P}invRouteB`, // bizB
 };
+
+/** V1-41b (DISC-V41-6): contactA's private fields, which no invoice write answer may carry. */
+const CONTACT_A_PHONE = '+18685550141';
+const CONTACT_A_PRIVATE_NOTE = 'v41a private: owes the bank';
 
 /** The pay-link token of invIntentOther (globally unique column: embeds the prefix). */
 const LINK_TOKEN = `${P}tok1`;
@@ -123,6 +161,7 @@ let app: any;
 let redis: any;
 let evidence: any;
 let commerce: any;
+let commerceControllerClass: any;
 
 // Document intelligence (the LLM boundary) returns what the next receipt "says".
 let nextExtraction: Record<string, unknown> = {};
@@ -234,6 +273,24 @@ async function clearRateLimits() {
 /** The customer's anonymous offline intent through the live pay link (no identity header). */
 function publicIntent(token: string, body: Record<string, unknown>) {
   return agent().post(`/commerce/public/invoice-link/${encodeURIComponent(token)}/payment-intent`).send(body);
+}
+
+/** V1-41b: the HTTP confirm route (no identity header when `user` is null). */
+function confirmRouteAs(user: string | null, biz: string, inv: string, paymentId: string, body: Record<string, unknown> = {}) {
+  const req = agent().post(
+    `/commerce/businesses/${biz}/invoices/${inv}/payments/${encodeURIComponent(paymentId)}/confirm`,
+  );
+  if (user) req.set(HEADER, user);
+  return req.send(body);
+}
+
+/** The invoice.payment_recorded contact events of one invoice (fresh read). */
+async function paymentRecordedEventsOf(invoiceId: string): Promise<any[]> {
+  const rows = await db.contactEvent.findMany({
+    where: { businessId: ID.bizA, type: 'invoice.payment_recorded' },
+    orderBy: { createdAt: 'asc' },
+  });
+  return rows.filter((r: any) => (r.data as any)?.invoiceId === invoiceId);
 }
 
 /** The `activities` rows (real, fresh read) written for one payment row. */
@@ -388,6 +445,7 @@ beforeAll(async () => {
   }).compile();
   evidence = moduleRef.get(PaymentEvidenceService);
   commerce = moduleRef.get(CommerceService);
+  commerceControllerClass = CommerceController;
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -409,6 +467,7 @@ beforeAll(async () => {
   for (const [id, name] of [[ID.owner, 'owner'], [ID.writer, 'writer'], [ID.reader, 'reader'], [ID.ownerB, 'ownerB']]) {
     await db.user.create({ data: { id, email: `${P}${name}@test.local`, role: 'USER' } });
   }
+  await db.user.create({ data: { id: ID.superAdmin, email: `${P}superadmin@test.local`, role: 'SUPER_ADMIN' } });
   await db.business.create({ data: { id: ID.bizA, name: 'V41A Biz A', ownerId: ID.owner, currency: 'TTD' } });
   await db.business.create({ data: { id: ID.bizB, name: 'V41A Biz B', ownerId: ID.ownerB, currency: 'TTD' } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.bizA, role: 'OWNER' } });
@@ -419,7 +478,13 @@ beforeAll(async () => {
     data: { id: `${P}m_reader`, userId: ID.reader, businessId: ID.bizA, role: 'STAFF', permissionScopes: { revenue: 'read' } },
   });
   await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
-  await db.contact.create({ data: { id: ID.contactA, businessId: ID.bizA, firstName: 'Vfa', lastName: 'Customer', email: `${P}ca@test.local` } });
+  // V1-41b (DISC-V41-6): contactA carries private fields no invoice write answer may disclose.
+  await db.contact.create({
+    data: {
+      id: ID.contactA, businessId: ID.bizA, firstName: 'Vfa', lastName: 'Customer', email: `${P}ca@test.local`,
+      phone: CONTACT_A_PHONE, notesInternal: CONTACT_A_PRIVATE_NOTE,
+    },
+  });
   await db.contact.create({ data: { id: ID.contactB, businessId: ID.bizB, firstName: 'Vfb', lastName: 'Customer', email: `${P}cb@test.local` } });
   const seeder = moduleRef.get(ChartOfAccountsSeederService);
   await seeder.ensureDefaults(ID.bizA);
@@ -428,7 +493,7 @@ beforeAll(async () => {
   let n = 0;
   for (const id of Object.values(ID).filter((v) => v.startsWith(`${P}inv`))) {
     n += 1;
-    const inB = id === ID.invB;
+    const inB = id === ID.invB || id === ID.invRouteB;
     await db.invoice.create({
       data: {
         id,
@@ -819,12 +884,216 @@ describe('review repairs: who recorded and who uploaded a pending payment stays 
     expect(row.data).toMatchObject({ amount: 3, recordedBy: null });
     expect(row.data.initiatedBy).toBeUndefined();
   });
+});
 
-  // CR-V41-3: the confirm door has no HTTP route and the web callers still
-  // say "recorded" for a PENDING payment. Both are outside the V1-41 write set
-  // (payment-evidence.service.ts, drive-intake-orchestrator.service.ts, this suite).
-  it.todo(
-    'V41-T1 (CR-V41-3): a member confirms a pending extracted payment over HTTP (revenue:write) and the web evidence / Drive flows say "pending confirmation", not "recorded" - ' +
-      'needs a confirm route in commerce.controller.ts and copy in apps/web standalone-payment-recorder.tsx / payment-record-modal.tsx; outside the V1-41 write set',
-  );
+describe('V1-41b: a member confirms a pending extracted payment over HTTP (CR-V41-3; RED before V1-41b: no route)', () => {
+  const CONFIRM_PATH = 'businesses/:businessId/invoices/:invoiceId/payments/:paymentId/confirm';
+
+  it('V41-T1a: POST .../invoices/:invoiceId/payments/:paymentId/confirm is mounted beside the manual payment route with the same guard stack and the same revenue:write module scope', () => {
+    const proto = commerceControllerClass.prototype;
+    const manual = proto.recordPayment;
+    const confirmHandler = proto.confirmPendingPayment;
+    expect(typeof confirmHandler, 'CommerceController.confirmPendingPayment').toBe('function');
+    expect(Reflect.getMetadata('path', confirmHandler)).toBe(CONFIRM_PATH);
+    expect(Reflect.getMetadata('method', confirmHandler)).toBe(Reflect.getMetadata('method', manual));
+    const guards = Reflect.getMetadata('__guards__', confirmHandler);
+    expect(guards.map((g: any) => g.name)).toEqual(['AuthGuard', 'BusinessGuard', 'ModuleScopeGuard']);
+    expect(guards).toEqual(Reflect.getMetadata('__guards__', manual));
+    expect(Reflect.getMetadata('module_scope', confirmHandler)).toEqual({ module: 'revenue', minLevel: 'write' });
+    expect(Reflect.getMetadata('module_scope', confirmHandler)).toEqual(Reflect.getMetadata('module_scope', manual));
+  });
+
+  it('V41-T1b: the writer (STAFF, revenue:write) confirms an evidence-extracted pending payment binding the amount shown -> 201; one SUCCESSFUL row, one payment_recorded posting and one invoice.payment_recorded contact event, all naming the writer (never a body field); the pending row CONFIRMED and unposted; the invoice PARTIALLY_PAID', async () => {
+    const body = await evidencePayment(ID.owner, ID.bizA, ID.invRouteEv, 45, 'v41a-route-ev.pdf');
+    const pendingId = body.payment.id;
+    expect(body.requiresConfirmation).toBe(true);
+    expect(await paymentRecordedEventsOf(ID.invRouteEv)).toHaveLength(0);
+
+    const res = await confirmRouteAs(ID.writer, ID.bizA, ID.invRouteEv, pendingId, {
+      amount: 45, recordedBy: ID.owner, actorId: ID.owner, initiatedBy: ID.owner,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.payment).toMatchObject({ status: 'SUCCESSFUL', amount: 45, recordedBy: ID.writer });
+    expect(res.body.confirmedPaymentId).toBe(pendingId);
+    expect(res.body).toMatchObject({ paidAmount: 45, remaining: 55 });
+    expect(res.body.invoice).toMatchObject({ id: ID.invRouteEv, status: 'PARTIALLY_PAID' });
+    const confirmedId = res.body.payment.id;
+    expect(confirmedId).not.toBe(pendingId);
+
+    const rows = await paymentsOf(ID.invRouteEv);
+    expect(rows.map((r) => [r.id, r.status, r.amount, r.recordedBy])).toEqual([
+      [pendingId, 'CONFIRMED', 45, KEY_ACTOR],
+      [confirmedId, 'SUCCESSFUL', 45, ID.writer],
+    ]);
+    // LEDGER: exactly one Payment:<id>:payment_recorded, created by the writer; the pending row is never posted.
+    const postings = await paymentPostingsOf(ID.invRouteEv);
+    expect(postings).toHaveLength(1);
+    expect(postings[0]).toMatchObject({ externalRef: `Payment:${confirmedId}:payment_recorded`, status: 'POSTED', createdById: ID.writer });
+    expect(await postingsFor(pendingId)).toHaveLength(0);
+    // AUDIT: the contact event names the confirming member exactly as a manual payment names its recorder.
+    const events = await paymentRecordedEventsOf(ID.invRouteEv);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ actorType: 'USER', actorId: ID.writer, source: 'commerce' });
+    expect(events[0].data).toMatchObject({ invoiceId: ID.invRouteEv, amount: 45, recordedBy: ID.writer });
+    expect(events[0].data.initiatedBy).toBeUndefined();
+    expect(await invoiceStatus(ID.invRouteEv)).toBe('PARTIALLY_PAID');
+    expect(await balanceOf(ID.invRouteEv)).toEqual({ paidAmount: 45, remaining: 55 });
+  });
+
+  it('V41-T1c (DISC-V41-6): the confirm answer is projected like the manual payment route: the invoice contact carries id, businessId, firstName, lastName and email only (no phone, no internal notes, no booking); a confirm with no amount in the body confirms the pending amount', async () => {
+    const body = await evidencePayment(ID.owner, ID.bizA, ID.invRouteDisc, 30, 'v41a-route-disc.pdf');
+    const contact = await db.contact.findUnique({ where: { id: ID.contactA } });
+    expect(contact).toMatchObject({ phone: CONTACT_A_PHONE, notesInternal: CONTACT_A_PRIVATE_NOTE });
+
+    const res = await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteDisc, body.payment.id);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.payment).toMatchObject({ status: 'SUCCESSFUL', amount: 30, recordedBy: ID.owner });
+    expect(Object.keys(res.body.invoice.contact).sort()).toEqual(['businessId', 'email', 'firstName', 'id', 'lastName']);
+    expect(res.body.invoice.contact).toMatchObject({ id: ID.contactA, businessId: ID.bizA, firstName: 'Vfa', lastName: 'Customer' });
+    expect(res.body.invoice.contact.phone).toBeUndefined();
+    expect(res.body.invoice.contact.notesInternal).toBeUndefined();
+    expect('booking' in res.body.invoice).toBe(false);
+    const text = JSON.stringify(res.body);
+    expect(text).not.toContain(CONTACT_A_PHONE);
+    expect(text).not.toContain(CONTACT_A_PRIVATE_NOTE);
+  });
+
+  it('V41-T1d (CR-V41-4): after a confirm, GET .../invoices/:id/payments lists the confirmed money once: the SUCCESSFUL row, never the CONFIRMED pending row beside it; the figures are unchanged', async () => {
+    const body = await evidencePayment(ID.owner, ID.bizA, ID.invRouteList, 25, 'v41a-route-list.pdf');
+    const pendingId = body.payment.id;
+    const pendingList = await agent().get(`/commerce/businesses/${ID.bizA}/invoices/${ID.invRouteList}/payments`).set(HEADER, ID.reader);
+    expect(pendingList.status).toBe(200);
+    expect(pendingList.body.payments.map((p: any) => [p.id, p.status, p.provider])).toEqual([[pendingId, 'PENDING', 'extracted']]);
+
+    // Confirmed through the door itself, so this case isolates the list (CR-V41-4 was a listPayments defect).
+    const result = await confirm(pendingId, ID.bizA, ID.owner, { amount: 25 });
+    expect(result.payment).toMatchObject({ status: 'SUCCESSFUL', amount: 25 });
+
+    const list = await agent().get(`/commerce/businesses/${ID.bizA}/invoices/${ID.invRouteList}/payments`).set(HEADER, ID.reader);
+    expect(list.status).toBe(200);
+    expect(list.body.payments.map((p: any) => [p.id, p.status, p.amount])).toEqual([[result.payment.id, 'SUCCESSFUL', 25]]);
+    expect(list.body).toMatchObject({ paidAmount: 25, remaining: 75 });
+    // The CONFIRMED row is kept (what was extracted, and by whom); it is not money and is not listed as money.
+    expect((await paymentsOf(ID.invRouteList)).map((r) => r.status)).toEqual(['CONFIRMED', 'SUCCESSFUL']);
+  });
+
+  it('V41-T1e: a confirm retried after the money was recorded under the door\'s key but before the row was retired answers that same payment and writes nothing new; a further confirm of the CONFIRMED row is 409 and writes nothing (a Drive-intake row)', async () => {
+    const intakeId = `${P}drive_route`;
+    await seedDriveIntake(intakeId, ID.invRouteDrv, { amount: 60, method: 'cash', reference: 'V41A-DRV-ROUTE' });
+    const approved = await approveIntakeAs(ID.writer, intakeId);
+    expect(approved.status, JSON.stringify(approved.body)).toBe(201);
+    const pendingId = approved.body.results[0].entityId;
+    // What a first confirm commits before it retires the row (its keyed recordPayment).
+    const first = await commerce.recordPayment(
+      ID.invRouteDrv, ID.bizA,
+      { amount: 60, method: 'cash', reference: 'V41A-DRV-ROUTE', idempotencyKey: `extracted-confirm:${pendingId}` },
+      { actorId: ID.owner },
+    );
+    const before = await moneyStateOf(ID.invRouteDrv);
+    expect(before.payments.map((p) => p.status)).toEqual(['PENDING', 'SUCCESSFUL']);
+    expect(before.postings).toHaveLength(1);
+
+    const res = await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteDrv, pendingId, { amount: 60 });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.payment).toMatchObject({ id: first.payment.id, status: 'SUCCESSFUL', amount: 60, recordedBy: ID.owner });
+    expect(res.body.confirmedPaymentId).toBe(pendingId);
+    // The keyed replay reloads the invoice with the whole Contact row; the route projects it too.
+    expect(Object.keys(res.body.invoice.contact).sort()).toEqual(['businessId', 'email', 'firstName', 'id', 'lastName']);
+    const after = await moneyStateOf(ID.invRouteDrv);
+    expect(after.payments.map((p) => [p.id, p.status])).toEqual([
+      [pendingId, 'CONFIRMED'],
+      [first.payment.id, 'SUCCESSFUL'],
+    ]);
+    expect(after.postings).toEqual(before.postings);
+    expect(await paymentRecordedEventsOf(ID.invRouteDrv)).toHaveLength(1);
+
+    const again = await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteDrv, pendingId, { amount: 60 });
+    expect(again.status, JSON.stringify(again.body)).toBe(409);
+    expect(await moneyStateOf(ID.invRouteDrv)).toEqual(after);
+    expect(await balanceOf(ID.invRouteDrv)).toEqual({ paidAmount: 60, remaining: 40 });
+  });
+
+  it('V41-T1f: a revenue:read member 403, a member of another business 403, a SUPER_ADMIN who is not a member 403 (D-46), no identity 401, the owner through a business they are not in 403; the row stays PENDING and nothing is written', async () => {
+    const body = await evidencePayment(ID.owner, ID.bizA, ID.invRouteAuth, 15, 'v41a-route-auth.pdf');
+    const pendingId = body.payment.id;
+    const before = await moneyStateOf(ID.invRouteAuth);
+
+    const answers = {
+      reader: (await confirmRouteAs(ID.reader, ID.bizA, ID.invRouteAuth, pendingId, { amount: 15 })).status,
+      nonMember: (await confirmRouteAs(ID.ownerB, ID.bizA, ID.invRouteAuth, pendingId, { amount: 15 })).status,
+      superAdmin: (await confirmRouteAs(ID.superAdmin, ID.bizA, ID.invRouteAuth, pendingId, { amount: 15 })).status,
+      anonymous: (await confirmRouteAs(null, ID.bizA, ID.invRouteAuth, pendingId, { amount: 15 })).status,
+      ownerViaB: (await confirmRouteAs(ID.owner, ID.bizB, ID.invRouteAuth, pendingId, { amount: 15 })).status,
+    };
+    expect(answers).toEqual({ reader: 403, nonMember: 403, superAdmin: 403, anonymous: 401, ownerViaB: 403 });
+
+    expect(await moneyStateOf(ID.invRouteAuth)).toEqual(before);
+    expect(before.payments).toEqual([expect.objectContaining({ id: pendingId, status: 'PENDING' })]);
+    expect(before.postings).toHaveLength(0);
+    expect(await paymentRecordedEventsOf(ID.invRouteAuth)).toHaveLength(0);
+  });
+
+  it('V41-T1g: another tenant\'s pending row 404 (under this tenant\'s invoice or the foreign invoice id), a row of this tenant under another invoice\'s path 404, a member-recorded SUCCESSFUL row 409, a pay-link intent PENDING row 409; nothing is written in either tenant', async () => {
+    const foreign = await evidencePayment(ID.ownerB, ID.bizB, ID.invRouteB, 40, 'v41a-route-foreign.pdf');
+    const own = await evidencePayment(ID.owner, ID.bizA, ID.invRouteKind, 20, 'v41a-route-kind.pdf');
+    const manual = await agent()
+      .post(`/commerce/businesses/${ID.bizA}/invoices/${ID.invRouteKind}/payments`)
+      .set(HEADER, ID.owner)
+      .send({ amount: 10, method: 'cash', reference: 'V41A-ROUTE-MANUAL' });
+    expect(manual.status, JSON.stringify(manual.body)).toBe(201);
+    await commerce.recordPublicPaymentIntent(ID.invRouteKind, 'cash', 5);
+    const intent = (await paymentsOf(ID.invRouteKind)).find((p) => p.status === 'PENDING' && p.provider === 'cash');
+    expect(intent).toBeDefined();
+    const before = {
+      kind: await moneyStateOf(ID.invRouteKind),
+      other: await moneyStateOf(ID.invRouteOther),
+      foreign: await moneyStateOf(ID.invRouteB),
+    };
+
+    const answers = {
+      foreignUnderOwnInvoice: (await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteKind, foreign.payment.id, { amount: 40 })).status,
+      foreignUnderForeignInvoice: (await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteB, foreign.payment.id, { amount: 40 })).status,
+      ownUnderAnotherInvoice: (await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteOther, own.payment.id, { amount: 20 })).status,
+      memberRecorded: (await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteKind, manual.body.payment.id, { amount: 10 })).status,
+      payLinkIntent: (await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteKind, intent!.id, { amount: 5 })).status,
+    };
+    expect(answers).toEqual({
+      foreignUnderOwnInvoice: 404,
+      foreignUnderForeignInvoice: 404,
+      ownUnderAnotherInvoice: 404,
+      memberRecorded: 409,
+      payLinkIntent: 409,
+    });
+
+    expect({
+      kind: await moneyStateOf(ID.invRouteKind),
+      other: await moneyStateOf(ID.invRouteOther),
+      foreign: await moneyStateOf(ID.invRouteB),
+    }).toEqual(before);
+    expect(before.kind.payments.find((p) => p.id === own.payment.id)).toMatchObject({ status: 'PENDING' });
+    expect(before.foreign.payments).toEqual([expect.objectContaining({ id: foreign.payment.id, status: 'PENDING' })]);
+    expect(before.other.payments).toHaveLength(0);
+  });
+
+  it('V41-T1h: the optional {amount} is the amount the member approved: a string, null or non-numeric amount 400, a mismatch 409, nothing written; the matching amount confirms once', async () => {
+    const body = await evidencePayment(ID.owner, ID.bizA, ID.invRouteBody, 45, 'v41a-route-body.pdf');
+    const pendingId = body.payment.id;
+    const before = await moneyStateOf(ID.invRouteBody);
+
+    const answers = {
+      nonNumeric: (await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteBody, pendingId, { amount: 'abc' })).status,
+      numericString: (await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteBody, pendingId, { amount: '45' })).status,
+      nullAmount: (await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteBody, pendingId, { amount: null })).status,
+      mismatch: (await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteBody, pendingId, { amount: 100 })).status,
+    };
+    expect(answers).toEqual({ nonNumeric: 400, numericString: 400, nullAmount: 400, mismatch: 409 });
+    expect(await moneyStateOf(ID.invRouteBody)).toEqual(before);
+    expect(before.payments).toEqual([expect.objectContaining({ status: 'PENDING', amount: 45 })]);
+
+    const ok = await confirmRouteAs(ID.owner, ID.bizA, ID.invRouteBody, pendingId, { amount: 45 });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(201);
+    expect(ok.body.payment).toMatchObject({ status: 'SUCCESSFUL', amount: 45, recordedBy: ID.owner });
+    expect(await paymentPostingsOf(ID.invRouteBody)).toHaveLength(1);
+    expect(await balanceOf(ID.invRouteBody)).toEqual({ paidAmount: 45, remaining: 55 });
+  });
 });
