@@ -600,6 +600,10 @@
     {
       "file": "apps/server/test/token-encryption-coverage.integration.test.ts",
       "reason": "Reads schema.prisma and the encryption extension's coverage; touches no rows."
+    },
+    {
+      "file": "apps/server/test/trpc-mount-flag.integration.test.ts",
+      "reason": "Boots the built server twice in child processes (TRPC_ENABLED unset, then 1) and probes /trpc over HTTP; seeds and deletes no rows."
     }
   ]
 }
