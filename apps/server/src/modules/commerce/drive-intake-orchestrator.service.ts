@@ -9,6 +9,7 @@ import { InvoiceWorkflowService } from './invoice-workflow.service';
 import { CreditNoteService } from '../finance/credit-note.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 import type { DocumentExtractionResult } from '../ai/document-intelligence.service';
+import { PaymentEvidenceService } from './payment-evidence.service';
 
 export type DriveIntakeActionType =
   | 'create_invoice'
@@ -54,6 +55,7 @@ export class DriveIntakeOrchestrator {
     @Inject(InvoiceWorkflowService) private readonly invoiceWorkflow: InvoiceWorkflowService,
     @Inject(CreditNoteService) private readonly creditNotes: CreditNoteService,
     @Inject(TaskAssignmentService) private readonly taskAssignment: TaskAssignmentService,
+    @Inject(PaymentEvidenceService) private readonly paymentEvidence: PaymentEvidenceService,
   ) {}
 
   /**
@@ -262,6 +264,12 @@ export class DriveIntakeOrchestrator {
 
   /**
    * Execute an approved plan. This is the only path that writes financial records.
+   *
+   * V1-41-DM-UNTRUSTED-MONEY-INPUTS (M32, D-27): a record_payment step writes
+   * the payment PENDING (PaymentEvidenceService.recordPendingPayment): the
+   * amount is read from a document, so approving the plan moves no balance and
+   * posts nothing. A member with revenue:write confirms it through the
+   * operator door (PaymentEvidenceService.confirmPendingPayment).
    */
   async executePlan(
     businessId: string,
@@ -328,15 +336,20 @@ export class DriveIntakeOrchestrator {
             // and the intake flips to 'approved' only after every write, so
             // two concurrent approvals (or a re-run after a crash before that
             // flip) both reach this step. The key, derived from this intake
-            // file and this step, makes recordPayment answer the second with
-            // the first's payment instead of crediting the invoice twice.
-            const res = await this.commerce.recordPayment(invoiceId, businessId, {
+            // file and this step, makes the second answer with the first's
+            // payment instead of proposing it twice.
+            //
+            // V1-41 (D-27): the payment is recorded PENDING, never posted
+            // here; it moves no balance until a member confirms it. The key
+            // keeps answering the same row after that confirmation, so a
+            // re-run never proposes the payment again.
+            const pending = await this.paymentEvidence.recordPendingPayment(invoiceId, businessId, {
               amount: payload.amount,
               method: payload.method,
               reference: payload.reference,
               idempotencyKey: `drive:${intakeFileId}:${actionIndex}`,
             }, { actorId: DriveIntakeOrchestrator.approverActorId(userId) });
-            results.push({ action: 'record_payment', success: true, entityId: res.payment.id });
+            results.push({ action: 'record_payment', success: true, entityId: pending.id });
             break;
           }
           case 'apply_credit_note': {
