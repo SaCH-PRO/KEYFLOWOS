@@ -1788,11 +1788,9 @@ describe('provider webhooks and callbacks keep working (V1-46b)', () => {
   });
 
   it.todo(
-    'TG-22 (M35, V1-05; found here, not in this write set\'s remit): the WiPay callback "signature" is md5(transaction_id + order_id + total + status) with no ' +
-      'secret, so anyone holding an invoice id can forge a success callback and record a SUCCESSFUL, ledger-posted payment whatever the link state; ' +
-      'the fix needs WiPay\'s keyed hash spec. An unsigned FAILURE callback likewise writes a FAILED row and emails the contact (TG-18i: no link any more). ' +
-      'The token PayPal capture now captures only an order made for the invoice and its total (TG-14d, review SEC-V46B-3), but still records ' +
-      'invoice.total rather than the captured amount and posts nothing to the ledger (payment.create, not createPaymentWithPosting); a later ' +
-      'CAPTURE.COMPLETED webhook is then deduplicated and never posts.',
+    'TG-22 (M35; closed by V1-05 and V1-15c, pinned in payments-provider-callbacks.integration.test.ts, not here): the WiPay success callback ' +
+      'needs WiPay\'s keyed proof md5(transaction_id + total + API key) (D-19, PC-01..PC-05; TG-21 carries it) and an unsigned failure callback ' +
+      'writes and mails nothing (PC-04, TG-18i); the token PayPal capture is bound to the invoice, its total and its currency and recorded through ' +
+      'createPaymentWithPosting (PC-06..PC-09). What stays open is PC-11b (a WiPay proof is not bound to its order_id) and PC-08b (PayPal and TTD)',
   );
 });

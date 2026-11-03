@@ -9,7 +9,7 @@ import { normalizeCurrency } from '../finance/posting.service';
 import { fromCents, subtractMoney, toCents } from '../commerce/money';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
-import { StoreOrderService } from '../site/store-order.service';
+import { StoreOrderService, isClosedStorefrontOrder } from '../site/store-order.service';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
 
 interface WipayCallbackParams {
@@ -412,18 +412,43 @@ export class PaymentsService {
   private async maybeCompleteStorefrontOrder(
     orderId: string,
     providerPaymentId: string,
+    provider: 'stripe' | 'paypal',
+    /**
+     * Trial-N review (G6PUB-SEC-4): what the provider says it took, when the
+     * order is not bound to the payment by this server. A PayPal order can be
+     * made client-side with the public client id, so its capture names any
+     * storefront order in custom_id for any amount and currency; the order is
+     * settled (for its whole total) only by a capture of exactly its total in
+     * its currency. Any other capture is logged and nothing is recorded.
+     */
+    paid?: { amount: unknown; currency: unknown },
   ): Promise<boolean> {
     if (!this.storeOrderService) return false;
     const order = await this.prisma.client.marketplaceOrder.findUnique({
       where: { id: orderId },
-      select: { id: true, paymentStatus: true },
+      select: { id: true, paymentStatus: true, total: true, currency: true },
     });
     if (!order) return false;
     if (order.paymentStatus === 'PAID') {
       this.logger.debug(`Storefront order ${orderId} already PAID; idempotent no-op`);
       return true;
     }
-    await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', providerPaymentId);
+    if (paid) {
+      const value = Number(paid.amount);
+      const matches =
+        Number.isFinite(value) &&
+        value.toFixed(2) === Number(order.total).toFixed(2) &&
+        normalizeCurrency(typeof paid.currency === 'string' ? paid.currency : null) === normalizeCurrency(order.currency);
+      if (!matches) {
+        this.logger.error(
+          `${provider} payment ${providerPaymentId} for storefront order ${orderId} not recorded: it took ` +
+            `${String(paid.amount)} ${String(paid.currency)}, the order is ${Number(order.total).toFixed(2)} ${order.currency}`,
+        );
+        return true;
+      }
+    }
+    // Trial-N review (G6ML-3): the provider is the payment's (its deposit leg is PAYMENT_PROCESSOR, not CASH).
+    await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', providerPaymentId, provider);
     return true;
   }
 
@@ -547,9 +572,13 @@ export class PaymentsService {
     const gateways: GatewayInfo[] = [];
     const meta = (business?.metaData as Record<string, any>) || {};
 
-    const wipayKey = meta.wipayApiKey || process.env.WIPAY_API_KEY;
+    // Trial-N review (NEW-1, CR-V05-6): WiPay is offered only where its checkout
+    // starts and its callbacks can be verified (wipayCheckoutTarget): a key
+    // that verifies this business's payments (wipayApiKey) and an account
+    // number to pay into. An account number alone, or a business with its own
+    // account and only the platform's key, is not offered.
     const wipayAccount = meta.wipayAccountNumber || process.env.WIPAY_ACCOUNT_NUMBER;
-    if (wipayKey || wipayAccount) {
+    if (PaymentsService.wipayApiKey(meta) && wipayAccount) {
       gateways.push({
         id: 'wipay',
         name: 'WiPay',
@@ -811,7 +840,7 @@ export class PaymentsService {
       where: { id: invoiceId },
     });
     if (!invoice) {
-      const completed = await this.maybeCompleteStorefrontOrder(invoiceId, providerPaymentId);
+      const completed = await this.maybeCompleteStorefrontOrder(invoiceId, providerPaymentId, 'stripe');
       if (completed) return;
       this.logger.warn(`Stripe ${eventType} references unknown invoice ${invoiceId}`);
       return;
@@ -1292,7 +1321,10 @@ export class PaymentsService {
         resource?.purchase_units?.[0]?.custom_id ||
         resource?.purchase_units?.[0]?.reference_id;
       if (orderId) {
-        const completed = await this.maybeCompleteStorefrontOrder(orderId, captureId);
+        const completed = await this.maybeCompleteStorefrontOrder(orderId, captureId, 'paypal', {
+          amount: resource?.amount?.value,
+          currency: resource?.amount?.currency_code,
+        });
         if (completed) return;
       }
       this.logger.warn(`PayPal capture ${captureId} could not be linked to a local invoice or storefront order; skipping persist`);
@@ -1303,7 +1335,10 @@ export class PaymentsService {
       where: { id: link.invoiceId },
     });
     if (!invoice) {
-      const completed = await this.maybeCompleteStorefrontOrder(link.invoiceId, captureId);
+      const completed = await this.maybeCompleteStorefrontOrder(link.invoiceId, captureId, 'paypal', {
+        amount: resource?.amount?.value,
+        currency: resource?.amount?.currency_code,
+      });
       if (completed) return;
       return;
     }
@@ -1558,22 +1593,29 @@ export class PaymentsService {
    * The API key is the secret behind the callback proof (wipayResponseHash),
    * so it never leaves this server: it used to be sent as developer_id, and so
    * reached the anonymous payer in the request echo (createWipayCheckout,
-   * createStorePayment). developer_id is the merchant's WiPay account number
-   * (WiPay's sandbox developer id '1' in the sandbox); a live checkout with no
-   * account number configured is refused (400) before WiPay is called.
+   * createStorePayment). developer_id is the merchant's WiPay account number;
+   * a checkout with no account number configured is refused (400) before
+   * WiPay is called.
+   *
+   * Trial-N review (NEW-1, D-19 fails closed): a checkout whose callback no key
+   * can verify (wipayApiKey is null) is refused (400) before WiPay is called.
+   * A business with its own WiPay account and only the platform's key started
+   * a live checkout into its own account whose callback was always refused, so
+   * the payer was charged and nothing was recorded. The keyless sandbox
+   * checkout is gone with it: no key verifies a sandbox callback either (the
+   * public sandbox key is never a default), so it could settle nothing.
    */
   private static wipayCheckoutTarget(metaData: unknown): {
     apiUrl: string;
-    environment: 'sandbox' | 'live';
+    environment: 'live';
     developerId: string;
     accountNumber?: string;
   } {
     const meta = (metaData as Record<string, unknown> | null) ?? {};
-    const isSandbox = !meta.wipayApiKey && !process.env.WIPAY_API_KEY;
-    const accountNumber = (meta.wipayAccountNumber ? String(meta.wipayAccountNumber) : '') || process.env.WIPAY_ACCOUNT_NUMBER || undefined;
-    if (isSandbox) {
-      return { apiUrl: 'https://sandbox.wipayfinancial.com/v1/gateway', environment: 'sandbox', developerId: '1', accountNumber };
+    if (!PaymentsService.wipayApiKey(meta)) {
+      throw new BadRequestException('WiPay is not configured for this business: no WiPay API key to verify its payments');
     }
+    const accountNumber = (meta.wipayAccountNumber ? String(meta.wipayAccountNumber) : '') || process.env.WIPAY_ACCOUNT_NUMBER || undefined;
     if (!accountNumber) {
       throw new BadRequestException('WiPay is not configured for this business: no WiPay account number');
     }
@@ -1711,7 +1753,8 @@ export class PaymentsService {
       if (order) {
         // Storefront checkout path
         if (order.paymentStatus !== 'PAID' && this.storeOrderService) {
-          await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', transaction_id);
+          // Trial-N review (G6ML-3): settled by WiPay (its deposit leg is PAYMENT_PROCESSOR, not CASH).
+          await this.storeOrderService.updatePaymentStatus(order.id, 'PAID', transaction_id, 'wipay');
         }
         return { success: true, invoiceId: order_id, message: 'Payment successful' };
       }
@@ -1852,6 +1895,11 @@ export class PaymentsService {
     }
 
     if (input.method === 'WIPAY') {
+      // Trial-N review (G6PUB-SEC-5, V05-SEC-3): WiPay hands its keyed proof to
+      // the return URL, so the storefront checkout's must be on a platform
+      // origin too, as the invoice checkout's is (a missing one is refused).
+      const returnUrl = input.returnUrl ?? '';
+      PaymentsService.assertWipayReturnUrl(returnUrl);
       const business = await this.prisma.client.business.findUnique({
         where: { id: input.businessId },
         select: { metaData: true },
@@ -1865,7 +1913,7 @@ export class PaymentsService {
       params.append('email', 'customer@store.com');
       params.append('name', 'Store Customer');
       params.append('order_id', input.orderId);
-      params.append('return_url', input.returnUrl || '');
+      params.append('return_url', returnUrl);
       params.append('developer_id', developerId);
       params.append('environment', environment);
       if (accountNumber) params.append('account_number', accountNumber);
@@ -1963,19 +2011,12 @@ export class PaymentsService {
         throw new BadRequestException('Stripe checkout creation failed: no redirect URL');
       }
 
-      await this.prisma.client.payment.create({
-        data: {
-          provider: 'stripe',
-          providerPaymentId: json.id,
-          amount: input.amount,
-          currency: input.currency,
-          status: 'PENDING',
-          method: 'stripe',
-          invoiceId: input.orderId,
-          businessId: input.businessId,
-        },
-      });
-
+      // Trial-N review (G6ML-4): no PENDING payment row. It named the order as
+      // the payment's invoice (payments.invoice_id references invoices), so it
+      // failed with P2003 after the session was created and every storefront
+      // Stripe checkout answered 500 (and, under V1-33, each retry made another
+      // session). The session's own webhook settles the order through
+      // completeCheckout, which writes the payment; nothing read this row.
       return { paymentId: json.id, status: 'REDIRECT', redirectUrl: json.url };
     }
 
@@ -1999,7 +2040,11 @@ export class PaymentsService {
               customId: input.orderId,
               description: `Store Order - ${business?.name ?? 'Store'}`,
               amount: {
-                currencyCode: input.currency === 'USD' ? 'USD' : 'USD',
+                // Trial-N review (G6PUB-SEC-4): the order's own currency (it was USD whatever the order's), as
+                // createPaypalOrder does for an invoice; the capture webhook settles the order only for its total
+                // in that currency (maybeCompleteStorefrontOrder). PayPal refuses a currency it does not offer
+                // (TTD among them), so such a checkout fails closed here (PC-08b).
+                currencyCode: normalizeCurrency(input.currency),
                 value: input.amount.toFixed(2),
               },
             },
@@ -2276,7 +2321,8 @@ export class PaymentsService {
         select: { id: true, businessId: true, total: true, currency: true, paymentStatus: true, status: true },
       });
       if (!order) throw new BadRequestException('Storefront order not found');
-      if (order.paymentStatus === 'PAID' || order.status === 'CANCELLED') {
+      // Trial-N review (G6PUB-SEC-2): closed in either status vocabulary (the marketplace route writes 'cancelled').
+      if (order.paymentStatus === 'PAID' || isClosedStorefrontOrder(order)) {
         throw new BadRequestException('Storefront order is already paid or cancelled');
       }
       const result = await this.createStorePayment({

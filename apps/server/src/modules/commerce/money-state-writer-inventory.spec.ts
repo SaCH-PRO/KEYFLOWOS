@@ -96,10 +96,11 @@ export const MONEY_STATE_WRITERS: Inventory = {
       'member and retires the pending row PENDING -> CONFIRMED (compare-and-set on status)',
   },
   'apps/server/src/modules/payments/payments.service.ts': {
-    ops: { create: 6 },
+    ops: { create: 5 },
     why:
       'provider settlement: createPaymentWithPosting / createRefundWithPosting(ByInvoice) (row + posting in one ' +
-      'transaction); FAILED records (PayPal capture; the WiPay callback writes none since V1-05); PENDING store checkout intents. ' +
+      'transaction); FAILED records (PayPal capture; the WiPay callback writes none since V1-05); the CASH / MANUAL PENDING ' +
+      'store checkout intent (the Stripe store checkout writes none since the trial-N review, G6ML-4). ' +
       'Per function: PAYMENTS_MODULE_WRITERS below (V1-15c)',
   },
   'apps/server/src/modules/payments/payments-ops.service.ts': {
@@ -256,14 +257,15 @@ export const PAYMENTS_MODULE_WRITERS: Record<string, WriterClass> = {
   'apps/server/src/modules/payments/payments.service.ts#createStorePayment': {
     kind: 'no-money',
     why:
-      'PENDING checkout intents of a storefront order (CASH / MANUAL, Stripe store checkout); the settled row is written ' +
-      'through the door by StoreOrderService.completeCheckout',
+      'the PENDING checkout intent of a CASH / MANUAL storefront order; the settled row is written through the door by ' +
+      'StoreOrderService.completeCheckout (the offline completion). The Stripe store checkout writes no intent since the ' +
+      'trial-N review (G6ML-4)',
     todo: {
       owner: 'V1-33-PUB-CHECKOUT-RETRY-OFFLINE',
       what:
         'the intent puts the MarketplaceOrder id in payments.invoice_id, which has a foreign key to invoices, so the write ' +
-        'fails for a storefront order (the Stripe store checkout errors after its session was created), and nothing ' +
-        'settles or retires a PENDING intent',
+        'fails for a storefront order, and nothing settles or retires a PENDING intent. The storefront checkout never ' +
+        'reaches it (CASH / MANUAL start no session); only the generic checkout with a cash or manual gateway does, and gets 500',
     },
   },
   'apps/server/src/modules/payments/payments-ops.service.ts#refundCharge': {

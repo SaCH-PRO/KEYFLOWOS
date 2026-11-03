@@ -551,11 +551,37 @@ export class MarketplaceService {
     return order;
   }
 
+  /**
+   * Trial-N review (G6PUB-SEC-3, NEW-2, G6ML-1; V18-T1, SEC-V18-2/3): a
+   * STOREFRONT order is paid only through StoreOrderService.completeCheckout,
+   * which writes its invoice, its payment and that payment's posting with the
+   * PAID status: a provider settlement (WiPay callback, Stripe or PayPal
+   * webhook) or, for cash and manual orders, POST
+   * /site/businesses/:businessId/orders/:orderId/complete-offline (revenue
+   * write, a member). These routes (any member) set PAID with none of that,
+   * and every door after them (the offline completion, the provider
+   * settlements) answered "already paid" and recorded nothing, so the
+   * customer's money never reached the books; their store_order.paid reached
+   * listeners that do not read the stored payment status. Refused (400).
+   */
+  private assertNotPayingStorefrontOrder(order: { type?: string | null }, status?: string | null, paymentStatus?: unknown): void {
+    if ((order.type ?? '').toUpperCase() !== 'STOREFRONT') return;
+    const marksPaid =
+      (typeof status === 'string' && status.toLowerCase() === 'paid') ||
+      (typeof paymentStatus === 'string' && paymentStatus.toUpperCase() === 'PAID');
+    if (!marksPaid) return;
+    throw new BadRequestException(
+      'A storefront order is paid through its checkout: its payment provider settles it, or a cash or manual payment is ' +
+        'recorded with POST /site/businesses/:businessId/orders/:orderId/complete-offline. Marking it paid here records no invoice and no payment',
+    );
+  }
+
   async updateOrderStatus(businessId: string, orderId: string, status: string, paymentData?: any) {
     const order = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
     });
     if (!order) throw new NotFoundException('Order not found');
+    this.assertNotPayingStorefrontOrder(order, status, paymentData?.paymentStatus);
 
     const updateData: any = { status };
     if (paymentData) {
@@ -1101,6 +1127,7 @@ export class MarketplaceService {
       }
 
       case 'mark_paid': {
+        this.assertNotPayingStorefrontOrder(order, 'paid');
         if (!canTransitionOrder(order.status, 'paid')) {
           throw new BadRequestException(`Cannot transition order from ${order.status} to paid`);
         }

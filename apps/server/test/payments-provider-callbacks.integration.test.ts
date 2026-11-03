@@ -88,6 +88,22 @@
  *          equal its credits; payments.service.ts writes no SUCCESSFUL 'paypal'
  *          payment.create outside createPaymentWithPosting
  *
+ * Trial-N integration review (storefront provider paths):
+ *
+ *   PC-12  the storefront WiPay checkout's return URL must be on a platform
+ *          origin, as the invoice checkout's (G6PUB-SEC-5)
+ *   PC-13  a business with its own WiPay account and no key of its own (with
+ *          or without the platform key) is not offered WiPay and its checkouts
+ *          are refused before WiPay is called: no key could verify the
+ *          callback (NEW-1, CR-V05-6)
+ *   PC-14  an order the marketplace route cancelled ('cancelled') gets no
+ *          provider checkout (G6PUB-SEC-2)
+ *   PC-15  the storefront PayPal order is in the order's currency, and a
+ *          CAPTURE.COMPLETED settles a storefront order only for its total in
+ *          its currency, naming PayPal (G6PUB-SEC-4, G6ML-3)
+ *   PC-16  the storefront Stripe checkout writes no PENDING payment naming the
+ *          order as an invoice (it failed with P2003: G6ML-4)
+ *
  * Nothing on the boundary is mocked: PrismaService, PublicRateLimitGuard (on a
  * real Redis, its keys namespaced to this run), PaymentsService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService,

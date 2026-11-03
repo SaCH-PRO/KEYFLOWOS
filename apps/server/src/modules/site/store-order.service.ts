@@ -1,4 +1,4 @@
-import { Injectable, Inject, BadRequestException, ConflictException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException, ConflictException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'crypto';
 import { resolveInventoryMode } from '../../core/inventory/inventory-mode';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -11,6 +11,8 @@ import { InvoiceWorkflowService } from '../commerce/invoice-workflow.service';
 import { InventoryRiskService } from '../commerce/inventory-risk.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
+import { isSystemActor } from '../../core/auth/system-actor';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 
 /**
  * V1-33: what a storefront checkout's Idempotency-Key slot remembers, in the
@@ -81,8 +83,34 @@ const OFFLINE_PAYMENT_METHODS = new Set(['CASH', 'MANUAL']);
  * V1-33 review (V33-CR-3): order statuses that are fulfilment progress past
  * CONFIRMED. Settling an order's payment never rewinds them: a cash-on-delivery
  * order is SHIPPED or DELIVERED before its cash is recorded.
+ *
+ * Trial-N review (G6PUB-SEC-2): compared upper-cased, because the marketplace
+ * fulfil route writes its own lowercase vocabulary ('shipped', 'delivered',
+ * 'picking_packing', ...) on the same storefront orders (fulfillment-routing
+ * ORDER_STATUSES past 'paid').
  */
-const FULFILMENT_PAST_CONFIRMED = new Set(['PROCESSING', 'SHIPPED', 'DELIVERED', 'COMPLETED']);
+const FULFILMENT_PAST_CONFIRMED = new Set([
+  'PROCESSING',
+  'SHIPPED',
+  'DELIVERED',
+  'COMPLETED',
+  'AWAITING_FULFILLMENT',
+  'ROUTED',
+  'SUPPLIER_ORDERED',
+  'PICKING_PACKING',
+]);
+
+/**
+ * Trial-N review (G6PUB-SEC-2): an order nothing more is collected for:
+ * cancelled or refunded, in the site's uppercase vocabulary or the marketplace
+ * fulfil route's lowercase one, or with its payment refunded. Offline
+ * completion refuses it, a checkout retry starts no session for it and the
+ * generic storefront checkout sends it to no provider.
+ */
+export function isClosedStorefrontOrder(order: { status?: string | null; paymentStatus?: string | null }): boolean {
+  const status = (order.status ?? '').toUpperCase();
+  return status === 'CANCELLED' || status === 'REFUNDED' || (order.paymentStatus ?? '').toUpperCase() === 'REFUNDED';
+}
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -528,7 +556,7 @@ export class StoreOrderService {
         }
         // No session was handed out: the step threw (failed), or the call that
         // held it died after its order committed (pending, lease expired).
-        const settled = order.paymentStatus === 'PAID' || order.status === 'CANCELLED' || order.status === 'REFUNDED';
+        const settled = order.paymentStatus === 'PAID' || isClosedStorefrontOrder(order);
         if (settled || !startPayment) return { order, payment: null, replayed: true };
         const claim = await this.claimCheckoutPayment(businessId, slot, row, order.id);
         if (claim) {
@@ -698,15 +726,21 @@ export class StoreOrderService {
     return order;
   }
 
-  async updatePaymentStatus(orderId: string, paymentStatus: string, paymentRef?: string) {
+  /**
+   * @param provider The provider that settled the order (wipay, stripe,
+   *   paypal). Trial-N review (G6ML-3): it is the payment's provider and
+   *   method, so the posting's deposit leg is PAYMENT_PROCESSOR; recorded as
+   *   'unknown' it went to CASH and the row did not say who took the money.
+   */
+  async updatePaymentStatus(orderId: string, paymentStatus: string, paymentRef?: string, provider?: string) {
     if (paymentStatus === 'PAID') {
       // Route through completeCheckout so Invoice + Payment + stock decrement
       // + RevenueAttribution all land in one transaction.
       return this.completeCheckout({
         orderId,
         paymentRef,
-        provider: 'unknown',
-        method: 'unknown',
+        provider: provider ?? 'unknown',
+        method: provider ?? 'unknown',
       });
     }
 
@@ -749,8 +783,22 @@ export class StoreOrderService {
    * An order whose fulfilment is already past CONFIRMED (a cash-on-delivery
    * order SHIPPED or DELIVERED before its cash is recorded) keeps that status
    * (completeCheckout, V33-CR-3).
+   *
+   * Trial-N review:
+   *   - G6PUB-SEC-1 (D-46): the recorder must be a member of the business
+   *     with revenue write, as for every other recorded payment
+   *     (PaymentEvidenceService.confirmPendingPayment). The route's guards let
+   *     a platform SUPER_ADMIN through; a SUPER_ADMIN who is not a member is
+   *     refused (403) before anything is read or written.
+   *   - G6PUB-SEC-2: a cancelled or refunded order is refused in either
+   *     status vocabulary (isClosedStorefrontOrder); the marketplace fulfil
+   *     route writes lowercase 'cancelled'.
+   *   - SEC-V33-5: the refusal is checked again inside the transaction, on the
+   *     order row locked FOR UPDATE, so an order cancelled between this read
+   *     and the transaction is refused (409) and nothing is written.
    */
   async completeOfflineOrder(orderId: string, businessId: string, actorId: string | null) {
+    await this.assertMemberMayRecordPayments(businessId, actorId);
     const order = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
       select: { id: true, type: true, status: true, paymentStatus: true, paymentMethod: true },
@@ -764,7 +812,7 @@ export class StoreOrderService {
         'Only a storefront order paid in cash or manually is completed offline; this order is settled by its payment provider',
       );
     }
-    if (order.status === 'CANCELLED' || order.status === 'REFUNDED' || order.paymentStatus === 'REFUNDED') {
+    if (isClosedStorefrontOrder(order)) {
       throw new ConflictException(`This order is ${order.status.toLowerCase()} and cannot be completed`);
     }
 
@@ -775,6 +823,7 @@ export class StoreOrderService {
         provider: method.toLowerCase(),
         method: method.toLowerCase(),
         actorId,
+        refuseClosedOrder: true,
       });
     } catch (err) {
       if (isUniqueViolation(err)) {
@@ -785,6 +834,28 @@ export class StoreOrderService {
         if (settled?.paymentStatus === 'PAID') return settled;
       }
       throw err;
+    }
+  }
+
+  /**
+   * Trial-N review (G6PUB-SEC-1, D-46): ModuleScopeGuard's rule for revenue >=
+   * write, for the member who records an offline payment, with no SUPER_ADMIN
+   * bypass (PaymentEvidenceService.assertMemberMayRecordPayments). 403 otherwise.
+   */
+  private async assertMemberMayRecordPayments(businessId: string, actorId: string | null | undefined): Promise<void> {
+    if (!actorId || isSystemActor(actorId)) throw new ForbiddenException('A member must record this payment');
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actorId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) throw new ForbiddenException('Not a member of this business');
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
     }
   }
 
@@ -813,6 +884,14 @@ export class StoreOrderService {
     paidAmount?: number;
     /** V1-33: the operator who recorded an offline payment (Payment.recordedBy, the posting's createdById). */
     actorId?: string | null;
+    /**
+     * Trial-N review (SEC-V33-5): the offline completion only. Inside the
+     * transaction the order row is locked FOR UPDATE and a cancelled or
+     * refunded order is refused (409), so a cancel that landed after the
+     * caller's guard read is not revived. A provider settlement does not set
+     * it: the provider has taken the money and it is recorded.
+     */
+    refuseClosedOrder?: boolean;
   }) {
     const order = await this.prisma.client.marketplaceOrder.findUnique({
       where: { id: input.orderId },
@@ -923,6 +1002,19 @@ export class StoreOrderService {
     const pendingEvents: Array<{ name: string; payload: unknown }> = [];
 
     const result = await this.prisma.client.$transaction(async (tx) => {
+      // The order's status as of this transaction (SEC-V33-5): read under a
+      // row lock for the offline completion, which refuses a closed order.
+      let currentStatus = order.status;
+      if (input.refuseClosedOrder) {
+        const [locked] = await tx.$queryRaw<Array<{ status: string; payment_status: string }>>`
+          SELECT status, payment_status FROM marketplace_orders WHERE id = ${order.id} FOR UPDATE`;
+        if (!locked) throw new NotFoundException('Order not found');
+        if (isClosedStorefrontOrder({ status: locked.status, paymentStatus: locked.payment_status })) {
+          throw new ConflictException(`This order is ${locked.status.toLowerCase()} and cannot be completed`);
+        }
+        currentStatus = locked.status;
+      }
+
       // 1. Invoice — created DRAFT then immediately walked DRAFT→SENT→PAID
       // through the canonical InvoiceWorkflowService inside this same
       // transaction so the row is never observable in DRAFT outside the
@@ -1058,7 +1150,7 @@ export class StoreOrderService {
         where: { id: order.id },
         data: {
           paymentStatus: 'PAID',
-          status: FULFILMENT_PAST_CONFIRMED.has(order.status) ? order.status : 'CONFIRMED',
+          status: FULFILMENT_PAST_CONFIRMED.has(currentStatus.toUpperCase()) ? currentStatus : 'CONFIRMED',
           paymentRef,
         },
         include: { items: true },
