@@ -30,8 +30,10 @@ import {
   Settings,
   Receipt,
   CreditCard,
+  History,
   type LucideIcon,
 } from "lucide-react";
+import { BusinessActivityFeed } from "@/components/timeline/business-timeline";
 import { EmptyState } from "@/components/ui/empty-state";
 import { WorkspaceShell } from "@/components/ui/workspace-shell";
 import { getStoredBusinessId, ensureWorkspace } from "@/lib/workspace";
@@ -411,6 +413,17 @@ export default function CommandCenterPage() {
             onSnooze={handleSnooze}
             onReopen={handleReopen}
           />
+        </CommandSection>
+
+        {/* V1-25-EVT-BUSINESS-FEED (M49): what happened in the business, newest
+            first: payments recorded, invoices paid, contacts, bookings. Read from
+            the tenant-guarded /timeline/businesses/:id/events (Activity rows,
+            D-08); a feed that could not be read says so, never "no activity".
+            That read is not scope-filtered, so it is shown only to a caller the
+            V1-47 tiles report able to read revenue and CRM (SEC-V125-1/2):
+            otherwise "No access", and nothing is read. */}
+        <CommandSection icon={History} title="Business activity">
+          <BusinessActivityFeed businessId={businessId} results={snapshot.results} compact />
         </CommandSection>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
