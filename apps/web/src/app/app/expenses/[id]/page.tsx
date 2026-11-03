@@ -22,13 +22,13 @@ import {
 import {
   getExpense,
   deleteExpense,
-  updateExpense,
   fetchExpenseCategories,
   fetchExpenseBudgets,
   Expense,
   ExpenseCategory,
   ExpenseBudget,
 } from "@/lib/client";
+import { payBill, voidBill } from "@/lib/api/finance";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { formatCurrency, formatDate } from "../components/expense-utils";
 import { ExpenseFormSideSheet } from "../components/expense-form-sidesheet";
@@ -89,33 +89,34 @@ export default function ExpenseDetailPage() {
   const budget = useMemo(() => budgets.find((b) => b.categoryId === expense?.categoryId), [budgets, expense]);
   const status = useMemo(() => (expense ? deriveStatus(expense) : { label: "", color: "", bg: "" }), [expense]);
 
-  const handleApprove = async () => {
+  // FOLLOW3-B7 (owner ruling D-67): Approve pays the BILL (POST bills/:id/pay,
+  // Dr AP / Cr cash) and Reject voids it (POST bills/:id/void, the reversal).
+  // Both used to PATCH a `status` the server never reads and toast success
+  // regardless. The door answers the row as it now stands; an error is shown.
+  const runBillAction = async (
+    action: "approve" | "reject",
+    call: (businessId: string, billId: string) => Promise<{ data: Expense | null; error: string | null }>,
+    success: string,
+    failure: string,
+  ) => {
     if (!businessId || !expense) return;
-    setActionLoading("approve");
+    setActionLoading(action);
     try {
-      await updateExpense(businessId, expense.id, { status: "PAID", paidAt: new Date().toISOString() });
-      toast.success("Expense approved");
-      const res = await getExpense(businessId, expenseId);
-      if (res.data) setExpense(res.data);
+      const res = await call(businessId, expense.id);
+      if (res.error) {
+        toast.error(res.error);
+      } else {
+        toast.success(success);
+        if (res.data) setExpense({ ...expense, ...res.data });
+      }
     } catch {
-      toast.error("Failed to approve");
+      toast.error(failure);
     }
     setActionLoading(null);
   };
 
-  const handleReject = async () => {
-    if (!businessId || !expense) return;
-    setActionLoading("reject");
-    try {
-      await updateExpense(businessId, expense.id, { status: "VOID" });
-      toast.success("Expense rejected");
-      const res = await getExpense(businessId, expenseId);
-      if (res.data) setExpense(res.data);
-    } catch {
-      toast.error("Failed to reject");
-    }
-    setActionLoading(null);
-  };
+  const handleApprove = () => runBillAction("approve", payBill, "Bill approved and paid", "Failed to approve");
+  const handleReject = () => runBillAction("reject", voidBill, "Bill rejected and voided", "Failed to reject");
 
   const handleDelete = async () => {
     if (!businessId || !expense) return;

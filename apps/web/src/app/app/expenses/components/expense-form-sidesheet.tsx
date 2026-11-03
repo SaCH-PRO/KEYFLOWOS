@@ -136,12 +136,15 @@ export function ExpenseFormSideSheet({
     };
     try {
       let expenseId = editingExpense?.id;
-      if (editingExpense) {
-        await updateExpense(businessId, editingExpense.id, payload);
-      } else {
-        const res = await createExpense(businessId, payload);
-        if (res.data) expenseId = res.data.id;
+      const res = editingExpense
+        ? await updateExpense(businessId, editingExpense.id, payload)
+        : await createExpense(businessId, payload);
+      // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
+      if (res?.error) {
+        toast.error(res.error);
+        return;
       }
+      if (!editingExpense && res.data) expenseId = res.data.id;
 
       // Upload receipt to Google Drive if a file was selected
       if (expenseId && selectedFileRef.current && formData.receiptUrl) {

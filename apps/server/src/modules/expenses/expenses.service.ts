@@ -1,11 +1,11 @@
-import { Inject, Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpenseCreatedPayload } from '../../core/event-bus/events.types';
 import { ExpensePostingService } from '../finance/expense-posting.service';
 import { PostingService, normalizeCurrency } from '../finance/posting.service';
-import { roundMoney } from '../commerce/money';
+import { moneyEquals, roundMoney, toCents } from '../commerce/money';
 import { TimelineService } from '../timeline/timeline.service';
 
 type ExpenseItemInput = { amount: number; categoryId?: string | null; description?: string; taxRateId?: string | null };
@@ -23,6 +23,23 @@ function toCentsAmount<T>(amount: T): T {
 /** Split items with each amount in whole cents (FOLLOW3-B4). */
 function centsItems<T extends ExpenseItemInput[] | null | undefined>(items: T): T {
   return (Array.isArray(items) ? items.map((item) => ({ ...item, amount: toCentsAmount(item?.amount) })) : items) as T;
+}
+
+/**
+ * FOLLOW3-B7: the split items as their posting reads them (amounts in cents,
+ * account, memo, tax rate), so a PATCH that restates the stored items is not a
+ * change. No items and an empty list read the same.
+ */
+function itemsKey(items: unknown): string {
+  if (!Array.isArray(items)) return '[]';
+  return JSON.stringify(
+    items.map((item: Partial<ExpenseItemInput> | null) => ({
+      amount: toCents(Number(item?.amount)),
+      categoryId: item?.categoryId ?? null,
+      description: item?.description ?? null,
+      taxRateId: item?.taxRateId ?? null,
+    })),
+  );
 }
 
 /**
@@ -612,10 +629,64 @@ export class ExpensesService {
       }
     }
 
-    return this.prisma.client.expense.update({
-      where: { id: input.expenseId, businessId: input.businessId },
-      data: updateData,
-      include: { category: true },
+    // FOLLOW3-B7-EXPENSE-EDIT-POSTED (owner ruling D-67): the amount, items and
+    // currency of a posted expense are what its ledger posting carries, so they
+    // are not edited in place: such an edit is refused with 409 (void it, which
+    // posts the reversal, and record a new one), as deleteExpense refuses a
+    // posted expense. Every other field stays editable. A value that restates
+    // the stored one (the edit forms send the whole payload) is not a change.
+    // An unposted PAID or BILL expense whose amount becomes positive is posted
+    // once here, by the recipe createExpense uses, so no edit leaves the row
+    // and its ledger disagreeing. The row is held (FOR UPDATE) for the whole
+    // decision, so a concurrent edit, payment or void of it waits.
+    return this.prisma.client.$transaction(async (rawTx) => {
+      const tx = rawTx as unknown as Prisma.TransactionClient;
+      await tx.$queryRaw`SELECT id FROM expenses WHERE id = ${input.expenseId} AND business_id = ${input.businessId} FOR UPDATE`;
+      const existing = await tx.expense.findFirst({ where: { id: input.expenseId, businessId: input.businessId } });
+      if (!existing) throw new NotFoundException('Expense not found');
+
+      if ('amount' in updateData && moneyEquals(updateData.amount as number, existing.amount)) delete updateData.amount;
+      if ('currency' in updateData && updateData.currency === normalizeCurrency(existing.currency)) delete updateData.currency;
+      if ('items' in updateData && itemsKey(updateData.items) === itemsKey(existing.items)) delete updateData.items;
+      const changesMoney = 'amount' in updateData || 'currency' in updateData || 'items' in updateData;
+
+      if (changesMoney) {
+        const posted = await tx.financialTransaction.findFirst({
+          where: { businessId: input.businessId, sourceType: 'Expense', sourceId: existing.id },
+          select: { id: true },
+        });
+        if (posted) {
+          throw new ConflictException('Cannot change the amount or currency of a posted expense: void it and record a new one');
+        }
+      }
+
+      const updated = await tx.expense.update({
+        where: { id: existing.id, businessId: input.businessId },
+        data: updateData,
+        include: { category: true },
+      });
+
+      if (changesMoney && updated.amount > 0 && !updated.deletedAt && (updated.status === 'PAID' || updated.status === 'BILL')) {
+        const postPayload = {
+          id: updated.id,
+          businessId: updated.businessId,
+          amount: updated.amount,
+          currency: updated.currency,
+          date: updated.date,
+          categoryId: updated.categoryId,
+          paymentMethod: updated.paymentMethod,
+          description: updated.description,
+          contactId: updated.contactId,
+          vendor: updated.vendor,
+          items: Array.isArray(updated.items) ? (updated.items as unknown as ExpenseItemInput[]) : null,
+        };
+        if (updated.status === 'PAID') {
+          await this.posting.onExpensePaid(postPayload, tx);
+        } else {
+          await this.posting.onBillCreated(postPayload, tx);
+        }
+      }
+      return updated;
     });
   }
 

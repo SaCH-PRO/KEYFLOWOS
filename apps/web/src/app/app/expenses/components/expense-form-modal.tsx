@@ -63,10 +63,13 @@ export function ExpenseFormModal({ businessId, categories, editingExpense, proje
       serviceId: formData.serviceId || null,
     };
     try {
-      if (editingExpense) {
-        await updateExpense(businessId, editingExpense.id, payload);
-      } else {
-        await createExpense(businessId, payload);
+      const res = editingExpense
+        ? await updateExpense(businessId, editingExpense.id, payload)
+        : await createExpense(businessId, payload);
+      // FOLLOW3-B7 (D-67): a refused save (409 on a posted expense's amount) is shown, never reported as saved.
+      if (res?.error) {
+        toast.error(res.error);
+        return;
       }
       toast.success("Expense saved");
       onSaved();
