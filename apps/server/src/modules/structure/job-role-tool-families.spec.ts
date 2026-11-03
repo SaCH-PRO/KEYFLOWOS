@@ -99,6 +99,8 @@
  *  crm_list_contacts (eq.)      CrmService               GET /crm/businesses/:businessId/contacts                     crm:read
  *  calendar_list_events (eq.)   CalendarQueryService     GET /calendar/businesses/:businessId/events                  bookings:read
  *  payments_create_link         PaymentsOpsService       POST /payments/businesses/:businessId/links                  revenue:write
+ *  finance_profit_and_loss      LedgerReportingService   GET /businesses/:businessId/reports/pnl                      revenue:read
+ *  reports_generate             ReportsService           GET /businesses/:businessId/reports/generate                 revenue:read
  *  calendar_create_event        CalendarQueryService     POST /calendar/businesses/:businessId/events                 bookings:write
  *  assets_get (helper)          AssetService             GET /businesses/:businessId/assets/:assetId                  content:read
  *  assets_tag                   AssetService             POST /businesses/:businessId/assets/:assetId/tag             content:write
@@ -1230,6 +1232,8 @@ const EVIDENCE: Array<{ tool: string; service: string; route: string; scope: str
   { tool: 'commerce_mark_invoice_paid', service: 'CommerceService', route: 'PATCH /commerce/invoices/:invoiceId/paid', scope: 'revenue:write', file: 'modules/commerce/commerce.controller.ts' },
   { tool: 'commerce_list_invoices', service: 'CommerceService', route: 'GET /commerce/businesses/:businessId/invoices', scope: 'revenue:read', file: 'modules/commerce/commerce.controller.ts' },
   { tool: 'payments_create_link', service: 'PaymentsOpsService', route: 'POST /payments/businesses/:businessId/links', scope: 'revenue:write', file: 'modules/payments/payments-ops.controller.ts' },
+  { tool: 'finance_profit_and_loss', service: 'LedgerReportingService', route: 'GET /businesses/:businessId/reports/pnl', scope: 'revenue:read', file: 'modules/reports/reports.controller.ts' },
+  { tool: 'reports_generate', service: 'ReportsService', route: 'GET /businesses/:businessId/reports/generate', scope: 'revenue:read', file: 'modules/reports/reports.controller.ts' },
   { tool: 'calendar_create_event', service: 'CalendarQueryService', route: 'POST /calendar/businesses/:businessId/events', scope: 'bookings:write', file: 'modules/calendar/calendar.controller.ts' },
   { tool: 'calendar_list_events', service: 'CalendarQueryService', route: 'GET /calendar/businesses/:businessId/events', scope: 'bookings:read', file: 'modules/calendar/calendar.controller.ts' },
   { tool: 'crm_list_contacts', service: 'CrmService', route: 'GET /crm/businesses/:businessId/contacts', scope: 'crm:read', file: 'modules/crm/crm.controller.ts' },
@@ -1287,7 +1291,6 @@ const UNMAPPED: Record<string, string> = {
   projects: 'projects.controller declares no module scope (the legacy `projects` key still grants projects_*, time_*)',
   queue: 'EmailMarketingService.queueCampaign backs no route',
   reconcile: 'finance.controller declares no module scope',
-  reports: 'reports.controller declares no module scope',
   retainers: 'retainer.controller declares no module scope',
   save: 'onboarding-concierge.controller declares no module scope',
   segment: 'reads Prisma directly; no service call',
@@ -1322,18 +1325,13 @@ const UNGRANTED: Record<string, string> = {
   commerce_update_product: 'CatalogService.updateProduct is reached by catalog.controller and trash restore, both unscoped',
   contract_extract_clauses: 'ContractClauseService.extractClauses backs no route',
   finance_auto_match_bank: 'BankMatchingService.autoMatch is reached by finance.controller, which is unscoped',
-  finance_balance_sheet: 'LedgerReportingService is reached by reports.controller, which is unscoped',
-  finance_cashflow: 'LedgerReportingService is reached by reports.controller, which is unscoped',
   finance_create_coa_account: 'FinanceCoaService is reached by finance.controller, which is unscoped',
   finance_customer_balance: 'reads Prisma directly; no service call',
-  finance_expense_breakdown: 'LedgerReportingService is reached by reports.controller, which is unscoped',
+  finance_expense_breakdown: 'LedgerReportingService.getExpenseBy is reached by GET reports/expense-by, which is unscoped (it carries no revenue; V1-81 D-57)',
   finance_list_action_items: 'reads Prisma directly; no service call',
   finance_list_bank_accounts: 'FinanceAccountsService is reached by finance.controller, which is unscoped',
   finance_list_coa: 'FinanceCoaService is reached by finance.controller, which is unscoped',
   finance_post_journal_entry: 'PostingService.post is reached by finance.controller, which is unscoped',
-  finance_profit_and_loss: 'LedgerReportingService is reached by reports.controller, which is unscoped',
-  finance_revenue_breakdown: 'LedgerReportingService is reached by reports.controller, which is unscoped',
-  finance_tax_summary: 'LedgerReportingService is reached by reports.controller, which is unscoped',
   finance_view_receivables: 'ReceivablesService is reached by finance.controller, which is unscoped',
   payroll_generate_run: 'PayrollService.generateRun backs no route (payroll.controller has list/get/approve/mark-paid only)',
   payroll_set_rate: 'PayrollService.setRate backs no route (payroll.controller has list/get/approve/mark-paid only)',
@@ -1495,6 +1493,12 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         commerce_mark_invoice_paid: 'write',
         // commerce_send_invoice: GOVERNED_UNGRANTED (review 7 DRV5-2)
         commerce_update_invoice: 'write',
+        // the report routes require revenue:read (owner ruling D-57, V1-81 FOLLOW3-A7 item 9)
+        finance_balance_sheet: 'read',
+        finance_cashflow: 'read',
+        finance_profit_and_loss: 'read',
+        finance_revenue_breakdown: 'read',
+        finance_tax_summary: 'read',
         payments_create_link: 'write',
         payments_list_gateways: 'read',
         payments_list_links: 'read',
@@ -1502,6 +1506,7 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
         payments_refund_charge: 'write',
         payments_revoke_link: 'write',
         payments_search_transactions: 'read',
+        reports_generate: 'read',
       },
       bookings: {
         calendar_create_event: 'write',

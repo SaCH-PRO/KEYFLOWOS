@@ -13,6 +13,7 @@ import {
 } from './report-formatters';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 
 function parseRange(start?: string, end?: string): { from: Date; to: Date } {
   const now = new Date();
@@ -33,8 +34,18 @@ const pickRange = (start?: string, end?: string, from?: string, to?: string) =>
   parseRange(start ?? from, end ?? to);
 const pickAsOf = (asOf?: string, to?: string) => asOf ?? to;
 
+/**
+ * V1-81 (FOLLOW3-A7-MONEY-REPORTS, owner ruling D-57; SEC-V37b-1 residual):
+ * every report that carries revenue, receivables or the cash they bring in
+ * (the AI report, P&L, cash flow, balance sheet, tax summary, AR aging and
+ * revenue-by, each in every format) needs revenue:read, the gate of the
+ * commerce revenue reads and the trial balance. ModuleScopeGuard refuses
+ * before the handler runs, so a refused member reaches no read. ap-aging and
+ * expense-by carry no revenue and declare no scope (the guard lets a handler
+ * without RequireModuleScope through).
+ */
 @Controller()
-@UseGuards(AuthGuard, BusinessGuard)
+@UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
 export class ReportsController {
   constructor(
     @Inject(ReportsService) private readonly reports: ReportsService,
@@ -43,6 +54,7 @@ export class ReportsController {
 
   // ---------- Legacy AI report (frontend back-compat) ----------
   @Get('businesses/:businessId/reports/generate')
+  @RequireModuleScope('revenue', 'read')
   async generateReport(
     @Param('businessId') businessId: string,
     @Query('type') type: string = 'executive',
@@ -56,6 +68,7 @@ export class ReportsController {
   // ---------- FIN4: Ledger-derived reports ----------
 
   @Get('businesses/:businessId/reports/pnl')
+  @RequireModuleScope('revenue', 'read')
   async pnl(
     @Param('businessId') businessId: string,
     @Query('startDate') startDate?: string,
@@ -74,6 +87,7 @@ export class ReportsController {
   }
 
   @Get('businesses/:businessId/reports/cashflow')
+  @RequireModuleScope('revenue', 'read')
   async cashflow(
     @Param('businessId') businessId: string,
     @Query('startDate') startDate?: string,
@@ -92,6 +106,7 @@ export class ReportsController {
   }
 
   @Get('businesses/:businessId/reports/balance-sheet')
+  @RequireModuleScope('revenue', 'read')
   async balanceSheet(
     @Param('businessId') businessId: string,
     @Query('asOf') asOf?: string,
@@ -109,6 +124,7 @@ export class ReportsController {
   }
 
   @Get('businesses/:businessId/reports/tax-summary')
+  @RequireModuleScope('revenue', 'read')
   async taxSummary(
     @Param('businessId') businessId: string,
     @Query('startDate') startDate?: string,
@@ -126,6 +142,7 @@ export class ReportsController {
   }
 
   @Get('businesses/:businessId/reports/ar-aging')
+  @RequireModuleScope('revenue', 'read')
   async arAging(
     @Param('businessId') businessId: string,
     @Query('asOf') asOf?: string,
@@ -158,6 +175,7 @@ export class ReportsController {
   }
 
   @Get('businesses/:businessId/reports/revenue-by')
+  @RequireModuleScope('revenue', 'read')
   async revenueBy(
     @Param('businessId') businessId: string,
     @Query('dimension') dimension?: string,
