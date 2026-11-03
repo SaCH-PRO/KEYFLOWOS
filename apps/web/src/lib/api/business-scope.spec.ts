@@ -45,6 +45,10 @@ import { render, screen, waitFor, cleanup, fireEvent, act, within } from "@testi
 import * as client from "@/lib/client";
 import * as approvals from "@/lib/api/approvals";
 import * as productCost from "@/lib/api/product-cost";
+import * as transport from "@/lib/api";
+import * as finance from "@/lib/api/finance";
+import * as structure from "@/lib/api/structure";
+import * as businessGenome from "@/lib/api/business-genome";
 import { ContactDetail, type ContactDetailData } from "@/components/contacts/contact-detail";
 import CustomFieldsSettingsPage from "@/app/app/settings/custom-fields/page";
 import { PipelineTabContent } from "@/app/app/crm/pipeline/pipeline-tab-content";
@@ -390,9 +394,40 @@ function helpersOf(module: string, source: string, exports: unknown, selects?: R
     name,
     fn: (exports as Record<string, AnyFn>)[name],
     answersApiResult: ANSWERS_AN_API_RESULT.test(bodies.get(name) ?? ""),
+    params: parametersOf(name, bodies.get(name) ?? ""),
   }));
 }
-const HELPERS: Array<{ module: string; name: string; fn: AnyFn; answersApiResult: boolean }> = [
+
+/**
+ * The declared parameters of an exported function, from its source: the text
+ * between the parentheses after its name, split at top-level commas, each
+ * reduced to its name (or its destructuring pattern).
+ */
+function parametersOf(name: string, body: string): string[] {
+  const open = body.indexOf("(", body.indexOf(`function ${name}`) + `function ${name}`.length);
+  if (open === -1) return [];
+  const params: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (let i = open + 1; i < body.length; i += 1) {
+    const ch = body[i];
+    if (depth === 0 && ch === ")") {
+      if (current.trim()) params.push(current);
+      break;
+    }
+    if (depth === 0 && ch === ",") {
+      params.push(current);
+      current = "";
+      continue;
+    }
+    if ("([{".includes(ch) || ch === "<") depth += 1;
+    else if (")]}".includes(ch) || (ch === ">" && body[i - 1] !== "=")) depth -= 1;
+    current += ch;
+  }
+  return params.map((p) => p.trim().replace(/^\.\.\./, "").split(/\??\s*[:=]/)[0].trim()).filter((p) => p !== "");
+}
+
+const HELPERS: Array<{ module: string; name: string; fn: AnyFn; answersApiResult: boolean; params: string[] }> = [
   ...helpersOf("lib/client.ts", CLIENT_SOURCE, client),
   ...helpersOf("lib/api/approvals.ts", readText(path.join(WEB_SRC, "lib", "api", "approvals.ts")), approvals, RESOLVES_A_BUSINESS),
   ...helpersOf("lib/api/product-cost.ts", readText(path.join(WEB_SRC, "lib", "api", "product-cost.ts")), productCost, RESOLVES_A_BUSINESS),
@@ -405,8 +440,36 @@ const HELPERS: Array<{ module: string; name: string; fn: AnyFn; answersApiResult
  */
 const EMPTY_INPUT = { toString: () => "" };
 
-/** The argument shapes a helper is tried with: nothing at all, then an empty input object. */
-const ARG_SHAPES: unknown[][] = [[], [EMPTY_INPUT]];
+/** A parameter or input field that carries the business, which the census always leaves out. */
+const BUSINESS_PARAM = /business|^bid$|^biz$|tenant/i;
+
+/**
+ * A non-empty stand-in for an id the caller must name that is not the business
+ * (a contact, an invoice, a trigger, ...). Since FOLLOW3-D11 the lib/api.ts
+ * transports refuse a request with a missing id ("Missing id") before anything
+ * is sent, so a helper whose required id is left out no longer shows which
+ * business it resolves; this shape names those ids and still leaves the
+ * business out. Used as an id it spells "id_v84"; used as an input object
+ * (`input.contactId`, `input.quoteId`) every id field but the business reads
+ * "id_v84" and every other field, businessId included, is undefined.
+ */
+const ID = "id_v84";
+const ID_INPUT: unknown = new Proxy({ toString: () => ID }, {
+  get: (target, key) => {
+    if (key === "toString") return target.toString;
+    return typeof key === "string" && /(?:^id|Id)$/.test(key) && !BUSINESS_PARAM.test(key) ? ID : undefined;
+  },
+});
+
+/**
+ * The argument shapes a helper is tried with: nothing at all, then an empty
+ * input object, then every parameter but the business named (FOLLOW3-D11).
+ */
+function argShapesOf(helper: { params: string[] }): unknown[][] {
+  const shapes: unknown[][] = [[], [EMPTY_INPUT]];
+  if (helper.params.length > 0) shapes.push(helper.params.map((p) => (BUSINESS_PARAM.test(p) ? undefined : ID_INPUT)));
+  return shapes;
+}
 
 describe(`runtime census: the ${HELPERS.length} exported helpers that name a business route`, () => {
   beforeEach(() => {
@@ -447,7 +510,7 @@ describe(`runtime census: the ${HELPERS.length} exported helpers that name a bus
     // A business is selected: whatever a helper sends for a caller that named
     // none must name that business.
     for (const helper of HELPERS) {
-      for (const args of ARG_SHAPES) {
+      for (const args of argShapesOf(helper)) {
         window.localStorage.clear();
         window.localStorage.setItem("kf_business_id", SELECTED);
         const before = requests.length;
@@ -474,7 +537,7 @@ describe(`runtime census: the ${HELPERS.length} exported helpers that name a bus
     const sentWithout: string[] = [];
     const rejectedInstead: string[] = [];
     for (const helper of HELPERS) {
-      for (const args of shapeOf.has(helper.name) ? [shapeOf.get(helper.name) as unknown[]] : ARG_SHAPES) {
+      for (const args of shapeOf.has(helper.name) ? [shapeOf.get(helper.name) as unknown[]] : argShapesOf(helper)) {
         window.localStorage.clear();
         const before = requests.length;
         const settled = await settle(() => helper.fn(...args));
@@ -818,21 +881,66 @@ describe("the mounts read and write the business they are bound to", () => {
   });
 });
 
-describe("follow-ups outside this write set", () => {
+describe("the lib/api.ts transports refuse an unbound business for every lib/api/* module and screen (FOLLOW3-D11)", () => {
   // The census above proves every site of the helper layer (lib/client.ts, and
   // the resolving functions of lib/api/approvals.ts and product-cost.ts) refuses
   // an empty, null or undefined id, and that no site anywhere resolves to the
-  // demo tenant or another literal. It does not prove the rest: the other
-  // lib/api/* modules (business-genome, finance, structure, approvals'
-  // required-id functions, ...) take a required businessId and send through the
-  // lib/api.ts helpers directly, and about 60 screens pass
-  // `getStoredBusinessId() ?? ""` into them, so with no business selected they
-  // send /businesses//... (the server answers 403/404; nothing resolves to
-  // another tenant). The fix is one guard in lib/api.ts (apiGet, apiPost,
-  // apiPatch, apiPut, apiDelete, fetchWithAuthRetry refuse a URL for which
-  // _defaults.ts namesNoBusiness is true), plus the screens' raw fetch() sites:
-  // lib/api.ts is outside this packet's write set.
-  it.todo("lib/api.ts refuses a request whose /businesses/ segment is empty, undefined or null, so no lib/api/* module or screen can send an empty business id");
+  // demo tenant or another literal. The other lib/api/* modules
+  // (business-genome, finance, structure, approvals' required-id functions,
+  // ...) take a required businessId and send through the lib/api.ts transports
+  // directly, and about 60 screens pass `getStoredBusinessId() ?? ""` into
+  // them, so with no business selected they sent /businesses//... FOLLOW3-D11
+  // puts the guard in lib/api.ts itself: apiGet, apiPost, apiPostSimple,
+  // apiPatch, apiPut and apiDelete refuse a request for which _defaults.ts
+  // requestNamesNoBusiness is true (and one with any other missing id segment,
+  // lib/__tests__/api-empty-id-segment.test.ts). Still outside: the
+  // Response-returning fetchWithAuthRetry (lib/client.ts guards its own use of
+  // it) and the screens' raw fetch() sites.
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    window.localStorage.clear();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("lib/api.ts refuses a request whose /businesses/ segment is empty, undefined or null, so no lib/api/* module or screen can send an empty business id", async () => {
+    const requests = stubNetwork();
+    const unbound = ["", "undefined", "null"];
+    const transports = await Promise.all(unbound.flatMap((id) => [
+      transport.apiGet(`/finance/businesses/${id}/accounts`),
+      transport.apiPost({ path: `/finance/businesses/${id}/accounts`, body: { name: "x" } }),
+      transport.apiPostSimple(`/finance/businesses/${id}/accounts`, { name: "x" }),
+      transport.apiPatch(`/finance/businesses/${id}/accounts/acc_1`, { name: "x" }),
+      transport.apiPut(`/finance/businesses/${id}/accounts/acc_1`, { name: "x" }),
+      transport.apiDelete(`/finance/businesses/${id}/accounts/acc_1`),
+    ]));
+    // The lib/api/* modules a screen hands `getStoredBusinessId() ?? ""`, with
+    // no business selected; and the same modules handed undefined or null.
+    const modules = await Promise.all(["", undefined, null].flatMap((id) => {
+      const bid = id as unknown as string;
+      return [
+        finance.fetchReserveBuckets(bid),
+        finance.createReserveBucket(bid, { name: "x", purpose: "y" }),
+        structure.fetchOrgUnits(bid),
+        structure.deleteOrgUnit(bid, "ou_1"),
+        businessGenome.getGenome(bid),
+        approvals.fetchApprovalRequest(bid, "apr_1"),
+        approvals.escalateApproval(bid, "apr_1"),
+      ];
+    }));
+    expect(requests.map((r) => new URL(r.url, "http://localhost").pathname)).toEqual([]);
+    for (const answer of [...transports, ...modules]) expect(answer).toEqual({ data: null, error: NO_BUSINESS });
+
+    // Control: the same modules, handed the selected business, call it.
+    await finance.fetchReserveBuckets(SELECTED);
+    await structure.fetchOrgUnits(SELECTED);
+    await businessGenome.getGenome(SELECTED);
+    await approvals.fetchApprovalRequest(SELECTED, "apr_1");
+    expect(requests.map((r) => businessOf(r))).toEqual([SELECTED, SELECTED, SELECTED, SELECTED]);
+  });
 });
 
 // ---------------------------------------------------------------------------
