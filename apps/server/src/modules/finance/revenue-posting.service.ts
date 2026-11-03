@@ -49,6 +49,31 @@ function centsOf(value: unknown): number {
 }
 
 /**
+ * V1-82 (FOLLOW3-B3): `total` cents apportioned pro rata to `weights` (cents,
+ * none negative, summing above zero) by the largest-remainder method. Each
+ * share is the floor of total x weight / sum; the cents left over go one each
+ * to the largest remainders, a tie to the earlier weight, so the result is
+ * deterministic and the shares sum to `total` exactly. Spreading the discount
+ * (sum - total) pro rata gives the same shares. BigInt, so the products are
+ * exact at any ledger amount.
+ */
+function apportionCents(total: number, weights: readonly number[]): number[] {
+  const t = BigInt(total);
+  const sum = weights.reduce((s, w) => s + BigInt(w), BigInt(0));
+  const shares = weights.map((w) => (t * BigInt(w)) / sum);
+  let left = t - shares.reduce((s, x) => s + x, BigInt(0));
+  const byRemainder = weights
+    .map((w, i) => ({ i, r: (t * BigInt(w)) % sum }))
+    .sort((a, b) => (a.r === b.r ? a.i - b.i : a.r > b.r ? -1 : 1));
+  for (const { i } of byRemainder) {
+    if (left <= BigInt(0)) break;
+    shares[i] = shares[i]! + BigInt(1);
+    left -= BigInt(1);
+  }
+  return shares.map((s) => Number(s));
+}
+
+/**
  * FIN2 — Revenue posting recipes.
  *
  * Single owner of the mapping: invoice/payment/refund/void source events
@@ -218,8 +243,10 @@ export class RevenuePostingService {
   /**
    * Map invoice line items to per-category revenue COA splits. Falls back
    * to a single REVENUE credit when no items carry a recognised
-   * Product.category. Rounding drift is absorbed by the largest split so
-   * the credits sum exactly to `total`.
+   * Product.category. A positive drift (tax, rounding) is absorbed by the
+   * largest split so the credits sum exactly to `total`. A negative drift (a
+   * net document discount) across two or more splits is apportioned pro rata
+   * instead (V1-82), so no credit goes negative.
    */
   private async resolveRevenueSplits(
     businessId: string,
@@ -262,6 +289,17 @@ export class RevenuePostingService {
 
     const sum = splits.reduce((s, x) => s + x.amount, 0);
     const drift = +(total - sum).toFixed(2);
+    if (drift <= -0.01 && splits.length > 1) {
+      // V1-82 (FOLLOW3-B3): a net discount. On the largest split alone it
+      // made that credit negative once the discount exceeded the split, and
+      // validatePosting refused the recognition (the send rolled back). The
+      // credits are the total apportioned pro rata to the splits instead, in
+      // integer cents; a split whose share is no cent posts no leg.
+      const shares = apportionCents(toCents(total), splits.map((s) => toCents(s.amount)));
+      return splits
+        .map((s, i) => ({ accountId: s.accountId, amount: fromCents(shares[i]!), label: s.label }))
+        .filter((s) => s.amount > 0);
+    }
     if (Math.abs(drift) >= 0.01 && splits.length > 0) {
       let max = splits[0]!;
       for (const s of splits) if (s.amount > max.amount) max = s;
