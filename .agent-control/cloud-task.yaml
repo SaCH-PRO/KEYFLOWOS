@@ -1,0 +1,50 @@
+schema: keyflowos.cloud-task/v1
+task_id: CT-KF-META-CLOUD-DISPATCH-001-001
+packet_id: KF-META-CLOUD-DISPATCH-001
+provider: gemini
+agent_identity: gemini-cloud-builder-01
+role: builder
+repository: SaCH-PRO/KEYFLOWOS
+source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
+source_head: 62f1060b17b9c993f17a52d35bf603e2fbf7dfb3
+implementation_branch: impl/kf-meta-cloud-control-001
+allowed_scope:
+  - scripts/agent-control/**
+  - .github/workflows/agent-cloud-control.yml
+  - docs/development/CLOUD_AGENT_CONTROL_PLANE.md
+  - .agent-control/**
+prohibited_scope:
+  - apps/**
+  - packages/**
+  - .github/workflows/agent-control-autopilot.yml
+required_tests:
+  - node --test scripts/agent-control/tests/cloud-control.spec.mjs
+  - node --test scripts/agent-control/tests/*.spec.mjs
+  - node scripts/agent-control/validate-dag.mjs
+required_evidence:
+  - exact_head_ci_runs
+  - negative_controls_manifest
+  - cloud_handoff_record
+risk_level: MEDIUM
+approval_level: DRAFT_EVALUATION_ONLY
+authority:
+  kind: OPERATOR_CLOUD_HANDOFF
+  reference: KF-META-CLOUD-DISPATCH-001
+  author: SaCH-PRO
+  merge_authority: false
+  production_touched: false
+  triggers_legacy_issue80: false
+attempt: 1
+idempotency_key: "cloud_task:CT-KF-META-CLOUD-DISPATCH-001-001:KF-META-CLOUD-DISPATCH-001:b1948d2797e1bae3660a3d7173abb75397e05aad:1"
+state: COMPLETED_DRAFT
+lease:
+  lease_id: LEASE-CT-KF-META-CLOUD-DISPATCH-001-001
+  holder_provider: gemini
+  holder_agent_id: gemini-cloud-builder-01
+  implementation_branch: impl/kf-meta-cloud-control-001
+  acquired_at: "2026-11-07T20:30:00Z"
+  expires_at: "2099-12-31T23:59:59Z"
+  heartbeat_at: "2026-11-07T20:45:00Z"
+  revoked: false
+  revoked_reason: null
+  execution_uncertain: false

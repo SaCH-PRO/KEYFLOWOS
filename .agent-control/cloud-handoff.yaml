@@ -1,0 +1,59 @@
+schema: keyflowos.cloud-handoff/v1
+task_id: CT-KF-META-CLOUD-DISPATCH-001-001
+packet_id: KF-META-CLOUD-DISPATCH-001
+provider: gemini
+agent_identity: gemini-cloud-builder-01
+lease_id: LEASE-CT-KF-META-CLOUD-DISPATCH-001-001
+implementation_branch: impl/kf-meta-cloud-control-001
+source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
+semantic_head: 62f1060b17b9c993f17a52d35bf603e2fbf7dfb3
+pr_head: 62f1060b17b9c993f17a52d35bf603e2fbf7dfb3
+evidence_head: 62f1060b17b9c993f17a52d35bf603e2fbf7dfb3
+pr_number: 194
+changed_files:
+  - scripts/agent-control/lib/cloud-control.mjs
+  - scripts/agent-control/cloud-dispatch.mjs
+  - .github/workflows/agent-cloud-control.yml
+  - docs/development/CLOUD_AGENT_CONTROL_PLANE.md
+  - scripts/agent-control/tests/cloud-control.spec.mjs
+  - scripts/agent-control/negative-controls.yaml
+  - .agent-control/active-packet.yaml
+  - .agent-control/claude-return.yaml
+  - .agent-control/cloud-task.yaml
+  - .agent-control/cloud-handoff.yaml
+decisions:
+  - Keep Phase 1 cloud dispatch strictly read-only and draft-only with zero merge or production authority.
+  - Block replay of uncertain executions even after lease expiry until ChatGPT records a reconciliation clearance bound to the observed branch head.
+  - Explicitly mark unattended outbound provider API invocation as DEFERRED_PHASE_2 rather than faking remote execution.
+scope_ledger:
+  declared:
+    - Cloud task contract (keyflowos.cloud-task/v1)
+    - Durable lease ownership, branch/packet collision protection, and uncertain replay gate
+    - Provider-neutral cloud execution interface (Gemini, Kimi, Claude Cloud, ChatGPT)
+    - GitHub-native read-only preflight workflow and CLI
+    - Durable engineering continuity and cross-provider failover handoff (keyflowos.cloud-handoff/v1)
+  resolved:
+    - Cloud task contract (keyflowos.cloud-task/v1)
+    - Durable lease ownership, branch/packet collision protection, and uncertain replay gate
+    - Provider-neutral cloud execution interface (Gemini, Kimi, Claude Cloud, ChatGPT)
+    - GitHub-native read-only preflight workflow and CLI
+    - Durable engineering continuity and cross-provider failover handoff (keyflowos.cloud-handoff/v1)
+  remaining: []
+  deferred:
+    - Unattended outbound cloud provider API invocation (DEFERRED_PHASE_2)
+    - Recipient-bound Issue #80 envelope v2 and programme-state reducer integration after PR #193 admission
+proof_obligations:
+  - id: PROOF-CLOUD-SUITE
+    command: node --test scripts/agent-control/tests/cloud-control.spec.mjs
+    status: PASS
+  - id: PROOF-CLOUD-MUTATION
+    command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
+    status: PASS
+  - id: PROOF-CLOUD-PREFLIGHT
+    command: node scripts/agent-control/cloud-dispatch.mjs --preflight --dry-run --json
+    status: PASS
+next_authorized_action:
+  action: AWAIT_INDEPENDENT_ARCHITECTURE_AND_ADVERSARIAL_REVIEW
+  assigned_provider: chatgpt
+  merge_authority: false
+  production_touched: false
