@@ -6,15 +6,18 @@ agent_identity: gemini-cloud-builder-01
 lease_id: LEASE-CT-KF-META-CLOUD-DISPATCH-001-001
 implementation_branch: impl/kf-meta-cloud-control-001
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-semantic_head: 504d35178839459abebd7ac57213e4a65959264c
-pr_head: 504d35178839459abebd7ac57213e4a65959264c
-evidence_head: 504d35178839459abebd7ac57213e4a65959264c
+semantic_head: f79647748f6402c70d6362bc85009d4dcddc5c9b
+pr_head: f79647748f6402c70d6362bc85009d4dcddc5c9b
+evidence_head: f79647748f6402c70d6362bc85009d4dcddc5c9b
 pr_number: 194
 changed_files:
   - scripts/agent-control/lib/cloud-control.mjs
   - scripts/agent-control/cloud-dispatch.mjs
   - .github/workflows/agent-cloud-control.yml
   - docs/development/CLOUD_AGENT_CONTROL_PLANE.md
+  - architecture/dependency-map.md
+  - architecture/execution-paths.md
+  - architecture/architecture.json
   - scripts/agent-control/tests/cloud-control.spec.mjs
   - scripts/agent-control/negative-controls.yaml
   - .agent-control/active-packet.yaml
@@ -23,21 +26,25 @@ changed_files:
   - .agent-control/cloud-handoff.yaml
 decisions:
   - Keep Phase 1 cloud dispatch strictly read-only and draft-only with zero merge or production authority.
-  - Block replay of uncertain executions even after lease expiry until ChatGPT records a reconciliation clearance bound to the observed branch head.
-  - Explicitly mark unattended outbound provider API invocation as DEFERRED_PHASE_2 rather than faking remote execution.
+  - Require authenticated authority and clearance evidence bound to the SHA-256 immutable task contract digest; reject self-asserted YAML authority strings as cloud_authority_unverified.
+  - Enforce immutable task contracts across reconciliation and re-claim attempts and eliminate age-based lock stealing in FileBackedCloudRegistry (scoped to LOCAL_SINGLE_HOST_ONLY).
+  - Require positive git ancestry (source_main -> semantic_head -> pr_head) and passing proof obligations before completion transitions; keep cloud-task.yaml in HANDOFF_READY while awaiting exact-head CI and independent review.
+  - Record pre-reset commit 583a1e2dd83a4330879b887ce52c6a81d6a37edb under archive tag archive/impl-kf-meta-cloud-control-001-pre-reset-2026-11-07 and use strictly append-only commits thereafter.
 scope_ledger:
   declared:
-    - Cloud task contract (keyflowos.cloud-task/v1)
+    - Cloud task contract (keyflowos.cloud-task/v1) with authenticated authority digest binding
     - Durable lease ownership, branch/packet collision protection, and uncertain replay gate
     - Provider-neutral cloud execution interface (Gemini, Kimi, Claude Cloud, ChatGPT)
-    - GitHub-native read-only preflight workflow and CLI
+    - GitHub-native read-only preflight workflow and fail-closed CLI
     - Durable engineering continuity and cross-provider failover handoff (keyflowos.cloud-handoff/v1)
+    - Canonical architecture map synchronization (dependency-map.md, execution-paths.md, architecture.json)
   resolved:
-    - Cloud task contract (keyflowos.cloud-task/v1)
+    - Cloud task contract (keyflowos.cloud-task/v1) with authenticated authority digest binding
     - Durable lease ownership, branch/packet collision protection, and uncertain replay gate
     - Provider-neutral cloud execution interface (Gemini, Kimi, Claude Cloud, ChatGPT)
-    - GitHub-native read-only preflight workflow and CLI
+    - GitHub-native read-only preflight workflow and fail-closed CLI
     - Durable engineering continuity and cross-provider failover handoff (keyflowos.cloud-handoff/v1)
+    - Canonical architecture map synchronization (dependency-map.md, execution-paths.md, architecture.json)
   remaining: []
   deferred:
     - Unattended outbound cloud provider API invocation (DEFERRED_PHASE_2)
@@ -45,6 +52,12 @@ scope_ledger:
 proof_obligations:
   - id: PROOF-CLOUD-SUITE
     command: node --test scripts/agent-control/tests/cloud-control.spec.mjs
+    status: PASS
+  - id: PROOF-CONTROL-PLANE-SUITE
+    command: node --test scripts/agent-control/tests/*.spec.mjs
+    status: PASS
+  - id: PROOF-PROGRAMME-DAG
+    command: node scripts/agent-control/validate-dag.mjs
     status: PASS
   - id: PROOF-CLOUD-MUTATION
     command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml

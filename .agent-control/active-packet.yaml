@@ -17,20 +17,24 @@ merge_authority: false
 review_status: DRAFT_EVALUATION_ONLY
 
 objective: >
-  Implement Phase 1 of the Cloud-Native Multi-Agent Control Plane
-  (KF-META-CLOUD-DISPATCH-001) on isolated branch impl/kf-meta-cloud-control-001
-  from verified main b1948d2797e1bae3660a3d7173abb75397e05aad while preserving
-  Draft PR #193 and keeping the Claude capacity HOLD intact. Deliver a
-  provider-neutral cloud task contract, durable lease/ownership and branch
+  Implement and security-harden Phase 1 of the Cloud-Native Multi-Agent Control
+  Plane (KF-META-CLOUD-DISPATCH-001) on isolated branch
+  impl/kf-meta-cloud-control-001 from verified main
+  b1948d2797e1bae3660a3d7173abb75397e05aad while preserving Draft PR #193 and
+  keeping the Claude capacity HOLD intact. Deliver an authenticated cloud task
+  contract with immutable contract digests, safe lease/ownership and branch
   collision protection, uncertain-execution replay gate, manual-trigger GitHub
-  cloud handoff adapters, read-only GitHub Actions preflight workflow, and
-  cross-provider continuity/failover handoff contract.
+  cloud handoff adapters, fail-closed read-only GitHub Actions preflight
+  workflow, and cross-provider continuity/failover handoff contract.
 
 allowed_scope:
   - scripts/agent-control/lib/cloud-control.mjs
   - scripts/agent-control/cloud-dispatch.mjs
   - .github/workflows/agent-cloud-control.yml
   - docs/development/CLOUD_AGENT_CONTROL_PLANE.md
+  - architecture/dependency-map.md
+  - architecture/execution-paths.md
+  - architecture/architecture.json
   - scripts/agent-control/tests/cloud-control.spec.mjs
   - scripts/agent-control/negative-controls.yaml
   - .agent-control/active-packet.yaml

@@ -5,7 +5,7 @@ authority_status: PROVISIONAL_CLOUD_DISPATCH_TRACK_AWAITING_FORMAL_AUTHORITY
 current_authority_message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001
 current_authority_comment_id: 6692411347
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: 504d35178839459abebd7ac57213e4a65959264c
+source_head: f79647748f6402c70d6362bc85009d4dcddc5c9b
 implementation_branch: impl/kf-meta-cloud-control-001
 pr_number: 194
 state: PROVING
@@ -23,13 +23,18 @@ never_posted_return_message_ids: []
 
 semantic_commits:
   - sha: 504d35178839459abebd7ac57213e4a65959264c
-    what: Phase 1 cloud-native multi-agent control plane (cloud-control.mjs, cloud-dispatch.mjs, agent-cloud-control.yml, CLOUD_AGENT_CONTROL_PLANE.md, cloud-control.spec.mjs, and 11 live negative controls in negative-controls.yaml)
+    what: Phase 1 cloud-native multi-agent control plane initial foundation (cloud-control.mjs, cloud-dispatch.mjs, agent-cloud-control.yml, CLOUD_AGENT_CONTROL_PLANE.md, cloud-control.spec.mjs, and 11 live negative controls in negative-controls.yaml)
+  - sha: f79647748f6402c70d6362bc85009d4dcddc5c9b
+    what: Security hardening for PR #194 review (authenticated authority digest binding, immutable task contract verification, safe local-only registry locking without age-based lock steal, positive git ancestry and completion proof gates, revoked/double-failover protection, fail-closed CLI/workflow preflight, architecture map synchronization, and 10 additional live NC-CLOUD-* negative controls)
 
 diff_scope:
   - scripts/agent-control/lib/cloud-control.mjs
   - scripts/agent-control/cloud-dispatch.mjs
   - .github/workflows/agent-cloud-control.yml
   - docs/development/CLOUD_AGENT_CONTROL_PLANE.md
+  - architecture/dependency-map.md
+  - architecture/execution-paths.md
+  - architecture/architecture.json
   - scripts/agent-control/tests/cloud-control.spec.mjs
   - scripts/agent-control/negative-controls.yaml
   - .agent-control/active-packet.yaml
@@ -38,18 +43,18 @@ diff_scope:
   - .agent-control/cloud-handoff.yaml
 
 proof_matrix:
-  - obligation: cloud task contract, deterministic idempotency key, authority validation, and source_main binding
+  - obligation: authenticated cloud task contract, deterministic idempotency key, contract digest verification, and source_main binding
     evidence_scope: semantic_head
     result: PROVEN
-    proof: cloud-control.spec.mjs; NC-CLOUD-INVALID-SOURCE-COMMIT-ALLOWED, NC-CLOUD-MISSING-AUTHORITY-ALLOWED, NC-CLOUD-UNAUTHORIZED-MERGE-ALLOWED
-  - obligation: lease ownership, duplicate claim prevention, branch/packet collision protection, and expired/revoked lease rejection
+    proof: cloud-control.spec.mjs; NC-CLOUD-UNVERIFIED-AUTHORITY-ALLOWED, NC-CLOUD-INVALID-SOURCE-COMMIT-ALLOWED, NC-CLOUD-MISSING-AUTHORITY-ALLOWED, NC-CLOUD-UNAUTHORIZED-MERGE-ALLOWED
+  - obligation: lease ownership, duplicate claim prevention, branch/packet collision protection, expired/revoked lease rejection, and safe local-only registry lock token ownership
     evidence_scope: semantic_head
     result: PROVEN
-    proof: cloud-control.spec.mjs; NC-CLOUD-DUPLICATE-TASK-CLAIM, NC-CLOUD-BRANCH-COLLISION, NC-CLOUD-EXPIRED-LEASE-ALLOWED, NC-CLOUD-REVOKED-LEASE-ALLOWED, NC-CLOUD-WRONG-PROVIDER-ALLOWED
-  - obligation: uncertain execution replay gate and cross-provider continuity/failover handoff
+    proof: cloud-control.spec.mjs; NC-CLOUD-DUPLICATE-TASK-CLAIM, NC-CLOUD-BRANCH-COLLISION, NC-CLOUD-EXPIRED-LEASE-ALLOWED, NC-CLOUD-REVOKED-LEASE-ALLOWED, NC-CLOUD-WRONG-PROVIDER-ALLOWED, NC-CLOUD-STALE-LOCK-STEAL-ALLOWED
+  - obligation: uncertain execution replay gate, immutable contract enforcement under clearance, positive ancestry, completion proof gates, and safe cross-provider failover
     evidence_scope: semantic_head
     result: PROVEN
-    proof: cloud-control.spec.mjs; NC-CLOUD-UNCERTAIN-REPLAY-ALLOWED, NC-CLOUD-STALE-COMPLETION-EVIDENCE-ALLOWED, NC-CLOUD-PROVIDER-FAILOVER-UNSAFE
+    proof: cloud-control.spec.mjs; NC-CLOUD-UNCERTAIN-REPLAY-ALLOWED, NC-CLOUD-MUTATED-RECONCILIATION-CONTRACT-ALLOWED, NC-CLOUD-STALE-COMPLETION-EVIDENCE-ALLOWED, NC-CLOUD-UNVERIFIED-ANCESTRY-ALLOWED, NC-CLOUD-FAILED-PROOF-COMPLETION-ALLOWED, NC-CLOUD-PROVIDER-FAILOVER-UNSAFE, NC-CLOUD-REVOKED-FAILOVER-ALLOWED, NC-CLOUD-DOUBLE-FAILOVER-ALLOWED, NC-CLOUD-STALE-CONTINUITY-HEAD-ALLOWED, NC-CLOUD-MISSING-GIT-HEAD-ALLOWED, NC-CLOUD-MODIFIED-TASK-PREFLIGHT-SKIP-ALLOWED
   - obligation: every required workflow and the independent review at the PR head
     evidence_scope: exact_head
     result: PENDING

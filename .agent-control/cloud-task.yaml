@@ -6,12 +6,13 @@ agent_identity: gemini-cloud-builder-01
 role: builder
 repository: SaCH-PRO/KEYFLOWOS
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: 504d35178839459abebd7ac57213e4a65959264c
+source_head: f79647748f6402c70d6362bc85009d4dcddc5c9b
 implementation_branch: impl/kf-meta-cloud-control-001
 allowed_scope:
   - scripts/agent-control/**
   - .github/workflows/agent-cloud-control.yml
   - docs/development/CLOUD_AGENT_CONTROL_PLANE.md
+  - architecture/**
   - .agent-control/**
 prohibited_scope:
   - apps/**
@@ -31,12 +32,14 @@ authority:
   kind: OPERATOR_CLOUD_HANDOFF
   reference: KF-META-CLOUD-DISPATCH-001
   author: SaCH-PRO
+  approval_id: AUTH-KF-META-CLOUD-DISPATCH-001-001
+  contract_digest: d148a2fdba09d6f971ff8ee616d115efa0f00542f7ac2140ddf71b42d9f23a89
   merge_authority: false
   production_touched: false
   triggers_legacy_issue80: false
 attempt: 1
 idempotency_key: "cloud_task:CT-KF-META-CLOUD-DISPATCH-001-001:KF-META-CLOUD-DISPATCH-001:b1948d2797e1bae3660a3d7173abb75397e05aad:1"
-state: COMPLETED_DRAFT
+state: HANDOFF_READY
 lease:
   lease_id: LEASE-CT-KF-META-CLOUD-DISPATCH-001-001
   holder_provider: gemini
@@ -44,7 +47,7 @@ lease:
   implementation_branch: impl/kf-meta-cloud-control-001
   acquired_at: "2026-11-07T20:30:00Z"
   expires_at: "2099-12-31T23:59:59Z"
-  heartbeat_at: "2026-11-07T20:45:00Z"
+  heartbeat_at: "2026-11-07T23:30:00Z"
   revoked: false
   revoked_reason: null
   execution_uncertain: false
