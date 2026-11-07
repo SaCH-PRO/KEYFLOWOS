@@ -1,0 +1,85 @@
+name: Agent Cloud Control Preflight
+
+# Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH-001).
+#
+# Read-only / dry-run GitHub Actions workflow that:
+#   1. Runs the cloud-control unit, integration, and negative-control test suite.
+#   2. Validates cloud task envelopes (.agent-control/cloud-task.yaml) and
+#      continuity handoff records (.agent-control/cloud-handoff.yaml) when present.
+#   3. Verifies repository/branch integrity, lease ownership, and scope compliance.
+#   4. Reports structured execution status without merging, deploying, touching
+#      production, or posting action-triggering directives to Issue #80.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, edited]
+  workflow_dispatch:
+    inputs:
+      task_file:
+        description: 'Repository-relative path to cloud task YAML'
+        required: false
+        default: '.agent-control/cloud-task.yaml'
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+concurrency:
+  group: agent-cloud-control-preflight-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cloud-preflight:
+    name: Cloud control preflight (read-only)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.18.1'
+
+      - name: Run cloud-control unit and adversarial proof suite
+        shell: bash
+        run: node --test scripts/agent-control/tests/cloud-control.spec.mjs
+
+      - name: Probe cloud provider adapters (read-only)
+        shell: bash
+        run: node scripts/agent-control/cloud-dispatch.mjs --status --dry-run --json
+
+      - name: Run read-only cloud task and handoff preflight
+        shell: bash
+        env:
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+          TASK_FILE: ${{ inputs.task_file || '.agent-control/cloud-task.yaml' }}
+        run: |
+          set -euo pipefail
+          if [ -f "$TASK_FILE" ]; then
+            out="$(node scripts/agent-control/cloud-dispatch.mjs --preflight --task "$TASK_FILE" --dry-run --json)"
+            echo "$out"
+            {
+              echo "### Agent Cloud Control Preflight (Read-Only)"
+              echo ""
+              echo "- **Mode**: \`READ_ONLY_PREFLIGHT\`"
+              echo "- **Task File**: \`$TASK_FILE\`"
+              echo "- **Automated Provider Invocation**: \`DEFERRED_PHASE_2\`"
+              echo "- **Mutating Actions Performed**: \`0\`"
+              echo ""
+              echo "\`\`\`json"
+              echo "$out"
+              echo "\`\`\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No $TASK_FILE present on this branch; cloud-control suite passed."
+            {
+              echo "### Agent Cloud Control Preflight (Read-Only)"
+              echo ""
+              echo "- **Status**: Cloud-control proof suite passed; no branch-bound \`$TASK_FILE\` present."
+              echo "- **Mutating Actions Performed**: \`0\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
