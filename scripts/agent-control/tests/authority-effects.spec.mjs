@@ -21,7 +21,7 @@ import { collectAuthority, reconcile, reconcileProjection, FINDINGS } from '../l
 import { reduceAuthority, readEffect, applyEffect, coordinateOf, CONTROL_EFFECTS, CONTROL_EFFECT_ALIASES, EFFECT_PROBLEMS, FOLD_NOT_STARTED } from '../lib/authority-effects.mjs';
 import { compareAuthorityOrder, envelopeField, parseEnvelope } from '../lib/control-envelope.mjs';
 import { applicationPacketsOf, reconcileWithTruth } from '../lib/truth.mjs';
-import { DAG_PATH, loadDag } from '../lib/dag.mjs';
+import { DAG_PATH, loadDag, selectNext } from '../lib/dag.mjs';
 import { ROLES, AGENT_STATUS } from '../lib/adapters.mjs';
 import { buildStatus, renderHuman } from '../status.mjs';
 
@@ -1190,19 +1190,28 @@ test('recorded evidence (reducer): the RECONCILE-002 checkpoint is stale on real
 
 /**
  * The checkpoint anchored to CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021 (5993146604),
- * as committed in PR 120 (6fdffc26). Rebuilt here so historical RECOVERY-021 and
- * COMPAT-001 recorded-evidence tests retain their exact starting projection.
+ * as committed in PR 120 (6fdffc26). Frozen here as a self-contained historical literal
+ * (never reading loadState(process.cwd())) so RECOVERY-021, COMPAT-001, and the
+ * generation-151 reconstruction oracle derive from an independent starting checkpoint.
  */
 function checkpoint021() {
-  const state = loadState(process.cwd());
-  state.authority_basis = { ...ANCHOR_021 };
-  state.derivation = {
-    source_main: '110532883411007787f62de35e0a951aa1c16cfa',
-    review: ANCHOR_021.message_id,
-    recovery_authorized_by: ANCHOR_021.message_id,
-    anchor_created_at: '2026-10-05T11:02:59Z',
-    anchor_generation: 87,
-    previous_anchors: state.derivation.previous_anchors.slice(0, 3),
+  return normalizeState(structuredClone({
+    version: 1,
+    schema: 'keyflowos.programme-state/v1',
+    authority: 'derived-programme-projection',
+    updated_at: '2026-10-05T11:30:00Z',
+    authority_basis: { ...ANCHOR_021 },
+    derivation: {
+      source_main: '110532883411007787f62de35e0a951aa1c16cfa',
+      review: ANCHOR_021.message_id,
+      recovery_authorized_by: ANCHOR_021.message_id,
+      anchor_created_at: '2026-10-05T11:02:59Z',
+      anchor_generation: 87,
+    previous_anchors: [
+      'CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 (5963509515), generation 64',
+      'CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008 (5965390363), generation 73; incorporated CORRECTION-001 to CONTRACT-CORRECTION-008, with the malformed CORRECTION-004 by review',
+      'CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016 (5982685256), generation 81; incorporated CORRECTION-010 to EXACT-BINDING-016, with the malformed memory REVIEW (5982337036) by review',
+    ],
     incorporates: [
       'CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017 (5983193244), generation 82, PACKET_CORRECTION',
       'CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018 (5984704930), generation 83, PACKET_CORRECTION',
@@ -1211,10 +1220,28 @@ function checkpoint021() {
       'CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020 (5985754624), generation 86 (malformed; evidence only, no state transition, no permission)',
       'CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021 (5993146604), generation 87, PACKET_CORRECTION; the anchor',
     ],
-    malformed_authority_evidence: state.derivation.malformed_authority_evidence.slice(0, 7),
-    repository_evidence: state.derivation.repository_evidence,
-  };
-  Object.assign(state.programme, {
+    malformed_authority_evidence: [
+      'CG-REVIEW-META-STATE-RECONCILE-001 (5826124586), repeated merge_authority',
+      'CG-HOLD-ACTION-CONTROLLER-BRIDGE-001 (5826612913), no implementation_branch, scope_changed or production_touched',
+      'CG-PLAN-PLATFORM-CONVERGENCE-001 (5826799265), undeclared type PLAN',
+      'CG-REVIEW-META-CONTROL-PARSER-ADMIT-001 (5875440129), repeated merge_authority',
+      'CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-004 (5964575594), repeated column-0 prose key Required',
+      'CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001 (5982337036), repeated column-0 prose key Required',
+      'CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020 (5985754624), repeated column-0 prose key Reason',
+    ],
+    repository_evidence: [
+      'PR 103 merged 2026-09-28T19:09:40Z as 4eba59eb from head 5dbfac61',
+      'PR 104 merged 2026-10-03T00:15:35Z as 11053288 from exact admitted head abcdb8f9',
+      'main is 11053288, unchanged since the previous derivation',
+      'PR 94 (impl/kf-ai-pr-review-gate-001) open, superseded, not admitted',
+      'PR 109 (impl/kf-meta-state-reducer-001) open draft, reference input only',
+      'PR 120 (impl/kf-meta-state-reducer-live-001) open draft, this packet; not merged',
+      'PR 127 (impl/kf-meta-memory-truth-audit-001) open draft, not merged; the memory track, see parallel_tracks',
+      'PRs 128, 132, 133 and 134 open draft, not merged; no authority message after the previous anchor names another packet, so this checkpoint reads no state from them',
+    ],
+  },
+  programme: {
+    packets_total: 35,
     checkpointed: [...CHECKPOINTED_BEFORE],
     application_frontier: 'KF-EXEC-ACTION-001',
     active_packet: 'KF-META-STATE-REDUCER-LIVE-001',
@@ -1226,17 +1253,178 @@ function checkpoint021() {
     pr_number: 120,
     merge_authority: false,
     production_touched: false,
-  });
-  state.meta_package = {
-    ...state.meta_package,
+  },
+  meta_package: {
     packet_id: 'KF-META-AI-REVIEW-FAILOVER-001',
+    programme_credit: 'ZERO',
+    state: 'CHECKPOINTED',
+    directive: 'CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-001',
+    admission_review: 'CG-REVIEW-META-AI-REVIEW-FAILOVER-FINAL-005',
+    close: 'CG-CLOSE-META-AI-REVIEW-FAILOVER-001',
+    pr_number: 104,
+    implementation_branch: 'impl/kf-meta-ai-review-failover-001',
+    exact_source_head: '44e894c6f5de66202a76bc7a0449b580ee55bacb',
+    exact_pr_head: 'abcdb8f9af54da0c15f0805b1f9ae0054cfa196a',
+    merge_commit: '110532883411007787f62de35e0a951aa1c16cfa',
+    earlier: [
+      {
+        packet_id: 'KF-META-STATE-RECONCILE-002',
+        state: 'CHECKPOINTED',
+        admission_review: 'CG-REVIEW-META-STATE-RECONCILE-ADMIT-002',
+        pr_number: 103,
+        merge_commit: '4eba59ebc28230f2d114cad852304a9f791b47d2',
+      },
+      {
+        packet_id: 'KF-META-CONTROL-PARSER-001',
+        state: 'CHECKPOINTED',
+        close: 'CG-CLOSE-META-CONTROL-PARSER-001',
+        pr_number: 100,
+        merge_commit: '9c8e49791705361227135a9032a640199949113f',
+      },
+      {
+        packet_id: 'KF-META-AUTO-001',
+        state: 'CHECKPOINTED',
+        checkpoint_review: 'CG-REVIEW-LIVE-AUTHORITY-WAKE-001',
+        merged_prs: [87, 89, 92],
+      },
+      {
+        packet_id: 'KF-META-CONTROLLER-001',
+        state: 'SUPERSEDED',
+        superseded_by: 'CG-REVIEW-META-CONTROLLER-SUPERSEDE-001',
+      },
+    ],
     in_flight: 'KF-META-STATE-REDUCER-LIVE-001',
-  };
-  const actionHold = { ...state.holds['KF-EXEC-ACTION-001'], active: true };
-  delete actionHold.released_by;
-  delete actionHold.released_comment_id;
-  state.holds = { 'KF-EXEC-ACTION-001': actionHold };
-  return state;
+    queued: [
+      {
+        packet_id: 'KF-OBSERVABILITY-SENTRY-WEB-001',
+        queued_by: 'CG-REVIEW-OBSERVABILITY-SENTRY-WEB-QUEUE-001',
+        released: false,
+      },
+    ],
+    parallel_tracks: [
+      {
+        track: 'KEY memory programme',
+        governed_by: 'issues 106 and 122 to 127',
+        packet_id: 'KF-META-MEMORY-TRUTH-AUDIT-001',
+        pr_number: 127,
+        programme_credit: 'ZERO',
+        sequential_state_transition: false,
+        note: "Its M0 correction stays in force through issue 122 and the ChatGPT ruling CG-REVIEW-META-MEMORY-TRUTH-AUDIT-CORRECTION-001 (5982337036). That comment's envelope is malformed, so this checkpoint reads no state from it.",
+      },
+    ],
+  },
+  hold: null,
+  holds: {
+    'KF-EXEC-ACTION-001': {
+      active: true,
+      packet_id: 'KF-EXEC-ACTION-001',
+      reason: 'ACTION-001 was released for characterization by CG-RESUME-ACTION-001 and held again by CG-HOLD-ACTION-CONTROLLER-BRIDGE-001 (HOLD_AUTONOMY_BRIDGE): no implementation until a separate ChatGPT review accepts the preserved characterization and issues a bounded implementation directive. CG-CLOSE-META-AI-REVIEW-FAILOVER-001, CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001, CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRACT-CORRECTION-008, CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-REANCHOR-015, CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016 and CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021 restate the hold.',
+      hold_message_id: 'CG-HOLD-ACTION-CONTROLLER-BRIDGE-001',
+      hold_comment_id: 5826612913,
+      affirmed_by: 'CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001',
+      history: [
+        'CG-HOLD-ACTION-AUTO-001 held ACTION-001',
+        'CG-RESUME-ACTION-001 (5826160790) released it for CHARACTERIZING only',
+        'CG-HOLD-ACTION-CONTROLLER-BRIDGE-001 (5826612913) held implementation',
+      ],
+      preserved_characterization: {
+        return_message_id: 'CC-RETURN-ACTION-001-CHAR',
+        selected_family: 'helpdesk_create_ticket',
+        source_main: 'ad97ea48841a0a4acb13f9a170bae0e07159d6f4',
+      },
+      branch_cut: false,
+      local_work: 'none',
+      release_authority: 'ChatGPT only',
+      resume_condition: 'A ChatGPT RESUME on #80 with packet_id KF-EXEC-ACTION-001 and control_effect HOLD_CLEAR. Nothing else clears this hold: a packet effect naming ACTION-001 while it is held fails closed, and no release is ever inferred from prose or message ids.',
+    },
+  },
+  platform_programme: {
+    programme: 'KEYFLOWOS_PLATFORM_CONVERGENCE',
+    status: 'INACTIVE_SUCCESSOR',
+    activation_authorized: false,
+  },
+  unresolved_contradictions: [],
+  resolved_contradictions: [
+    {
+      id: 'META-C1',
+      resolved_by: 'CG-REVIEW-META-AUTO-001',
+      decision: 'R1_ADOPT_ON_GATED_CANONICAL_BRANCH',
+      detail: 'PR 86 is prototype input only. Its useful content is adopted onto the gated impl/* branch. One canonical autopilot package; 86 is not merged.',
+    },
+    {
+      id: 'CC-CONTRADICTION-META-CONTROL-PARSER-001',
+      resolved_by: 'CG-REVIEW-META-CONTROL-PARSER-DECISION-001',
+      decision: 'OPTION_T',
+      detail: 'One shared #80 envelope parser with an AUTHORITY profile for every consumer and an additive ACTIVATION profile; admitted in PR 100.',
+    },
+    {
+      id: 'CC-CONTRADICTION-AI-PR-REVIEW-GATE-001',
+      resolved_by: 'CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-001',
+      decision: 'SUPERSEDED_BY_REVIEWER_FAILOVER',
+      detail: "The directive's authority_decision (comment 5876689636) superseded the Codex re-review trigger question for PR 94. The provider-neutral review contract was admitted in PR 104; PR 94 stays historical evidence only.",
+    },
+    {
+      id: 'CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-001',
+      resolved_by: 'CG-DECISION-META-AI-REVIEW-FAILOVER-001',
+      decision: 'OPTION_A',
+      detail: 'Build the provider-neutral contract fresh on main with ChatGPT as the one fallback; affirmed by CG-REVIEW-META-AI-REVIEW-FAILOVER-CONTINUE-001.',
+    },
+    {
+      id: 'CC-CONTRADICTION-META-AI-REVIEW-FAILOVER-ADMIT-001',
+      resolved_by: 'CG-DIRECTIVE-META-AI-REVIEW-FAILOVER-LIVE-EVIDENCE-FIX-001',
+      decision: 'BOUNDED_LIVE_EVIDENCE_CORRECTION',
+      detail: "ChatGPT review evidence is keyed on the comment's html_url; admitted in PR 104.",
+    },
+  ],
+  momentum: {
+    operations_since_transition: 0,
+    consecutive_identical_failures: 0,
+    consecutive_ci_failures_without_new_root_cause: 0,
+    last_failure_signature: null,
+    last_transition_at: '2026-10-05T11:30:00Z',
+    alarm_active: false,
+  },
+  correction: {
+    attempts: 0,
+    last_signature: null,
+  },
+  agents: {
+    'claude-code-local': {
+      role: 'builder',
+      status: 'READY',
+      detail: 'contract-2 local worker proven live by CG-REVIEW-LIVE-AUTHORITY-WAKE-001 (dedicated worktree per wake, authenticated dispatch, completion marker)',
+    },
+    'openai-reviewer': {
+      role: 'adversarial_reviewer',
+      status: 'WAITING_EXTERNAL_AGENT',
+      detail: 'KEYFLOW_AGENT_OPENAI_API_KEY is not set',
+    },
+    'secondary-reviewer': {
+      role: 'adversarial_reviewer',
+      status: 'WAITING_EXTERNAL_AGENT',
+      detail: 'KEYFLOW_AGENT_SECONDARY_API_KEY is not set',
+    },
+  },
+  safety: {
+    production_release_authorized: false,
+    production_mutations_authorized: false,
+    real_provider_traffic_authorized: false,
+    platform_programme_activation_authorized: false,
+    forensic_rebaseline_authorized: false,
+    programme_map_refresh_authorized: false,
+    architecture_os_cycles_authorized: false,
+    forensic_baseline: '8f173bfe79f1418159cf4099ea18b0d60d203ec2',
+  },
+  last_processed_event_key: null,
+  processed_event_keys: [],
+  event_journal: [],
+  merge_authority_marker: null,
+  next_legal_action: {
+    action: 'WAIT_AUTHORITY',
+    reason: 'ACTION-001 is held; release is a ChatGPT authority action',
+    derived_at: '2026-10-05T11:30:00Z',
+  },
+}));
 }
 
 /**
@@ -2067,14 +2255,182 @@ function checkpoint107() {
   return reconcileProjection(checkpoint021(), collectAuthority(comments), repo, OPTIONS).effective_state;
 }
 
+/**
+ * Pre-malformed generation-146 projection, computed independently by folding
+ * the frozen RECOVERY-021 checkpoint (generation 87) over the exact 59 valid
+ * authority messages recorded in generations 88..146 (through 6512387171),
+ * then deriving application_frontier from the DAG over the folded credit list.
+ * Never reads loadState(process.cwd()).
+ */
+function projection146() {
+  const { comments, repo } = recordedThrough151();
+  const through146 = throughComment(comments, LAST_VALID_BEFORE_MALFORMED.comment_id);
+  const rec146 = reconcileProjection(checkpoint021(), collectAuthority(through146), repo, OPTIONS);
+  assert.equal(rec146.consistent, true, JSON.stringify(rec146.findings));
+  assert.equal(rec146.reduction.blocked, null);
+  assert.equal(rec146.reduction.applied.length, 59, 'exact valid generations 88..146');
+  assert.equal(rec146.reduction.applied.at(-1).comment_id, LAST_VALID_BEFORE_MALFORMED.comment_id);
+  const state146 = structuredClone(rec146.effective_state);
+  state146.programme.application_frontier = selectNext(DAG, state146.programme.checkpointed).selected.packet_id;
+  return state146;
+}
+
+/**
+ * Pre-HOLD generation-150 referent, constructed independently from
+ * projection146() without reading loadState(process.cwd()):
+ *   1. Explicitly accounts for malformed generations 147..149 (6514446571,
+ *      6514528789, 6519793805) as non-granting evidence: verifies they are the
+ *      exact three candidates following generation 146, verifies each fails
+ *      readEffect() with AUTHORITY_MALFORMED, verifies that a direct fold from
+ *      generation 146 stops at 6514446571 without skipping anything, and
+ *      applies zero state transition, zero packet credit, zero hold change, and
+ *      zero merge authority from 147..149.
+ *   2. Applies valid generation 150 (CG-DIR-RECOVERY-20261106-001, 6691596446,
+ *      NO_STATE_CHANGE) via readEffect() + applyEffect() over projection146().
+ *   3. Binds the independently specified repository-derived meta_package and
+ *      provisional derivation record for main b1948d2797e1bae3660a3d7173abb75397e05aad.
+ */
 function checkpoint150() {
-  const base = loadState(process.cwd());
-  return {
-    ...base,
-    authority_basis: { ...DIR_150 },
-    holds: { 'KF-EXEC-ACTION-001': { ...base.holds['KF-EXEC-ACTION-001'] } },
-    next_legal_action: { action: ACTIONS.DISPATCH_BUILDER, packet_id: AUTH_FC, role: ROLES.BUILDER, reason: 'FIXING_PROOF_FAILURES requires builder correction' },
+  const { comments, repo } = recordedThrough151();
+  const auth = collectAuthority(comments);
+  const state146 = projection146();
+
+  const idx146 = auth.candidates.findIndex((m) => m.comment_id === LAST_VALID_BEFORE_MALFORMED.comment_id);
+  const candidates147to149 = auth.candidates.slice(idx146 + 1, idx146 + 4);
+  assert.deepEqual(
+    candidates147to149.map((m) => ({ message_id: m.message_id, comment_id: m.comment_id })),
+    CONTACTS_MALFORMED,
+  );
+  for (const bad of candidates147to149) {
+    const effect = readEffect(bad);
+    assert.equal(effect.ok, false);
+    assert.equal(effect.code, EFFECT_PROBLEMS.AUTHORITY_MALFORMED);
+  }
+  const blockedAt147 = reconcileProjection(state146, auth, repo, OPTIONS);
+  assert.equal(blockedAt147.reduction.blocked?.comment_id, CONTACTS_MALFORMED[0].comment_id);
+  assert.equal(blockedAt147.reduction.blocked?.code, EFFECT_PROBLEMS.AUTHORITY_MALFORMED);
+
+  const msg150 = auth.messages.find((m) => m.comment_id === DIR_150.comment_id);
+  const read150 = readEffect(msg150);
+  assert.equal(read150.ok, true);
+  assert.equal(read150.effect, 'NO_STATE_CHANGE');
+  const applied150 = applyEffect(state146, msg150, read150, OPTIONS);
+  assert.equal(applied150.ok, true);
+
+  const base021 = checkpoint021();
+  const failoverClose = {
+    packet_id: base021.meta_package.packet_id,
+    state: base021.meta_package.state,
+    admission_review: base021.meta_package.admission_review,
+    close: base021.meta_package.close,
+    pr_number: base021.meta_package.pr_number,
+    merge_commit: base021.meta_package.merge_commit,
   };
+
+  return {
+    ...applied150.state,
+    updated_at: '2026-11-06T18:33:02Z',
+    meta_package: {
+      packet_id: 'KF-META-MERGE-AUTHORITY-001',
+      programme_credit: 'ZERO',
+      state: 'CHECKPOINTED',
+      directive: 'CG-DIR-F9-001',
+      admission_review: 'CG-REV-F9-013',
+      pr_number: 181,
+      implementation_branch: 'impl/kf-meta-merge-authority-001',
+      merge_commit: repo.main_sha,
+      earlier: [
+        {
+          packet_id: 'KF-META-AUTHORITY-EFFECT-COMPAT-001',
+          state: 'CHECKPOINTED',
+          directive: 'CG-DIRECTIVE-META-AUTHORITY-EFFECT-COMPAT-001',
+          admission_review: 'CG-REVIEW-KF159-EXACT-HEAD-MERGE-AUTH-001',
+          close: 'CG-DIRECTIVE-KF159-POSTMERGE-001',
+          pr_number: 159,
+          merge_commit: '98ee0202499ba87fa4ee13d58a2a9075016225bd',
+        },
+        {
+          packet_id: 'KF-META-STATE-REDUCER-LIVE-001',
+          state: 'CHECKPOINTED',
+          directive: 'CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001',
+          admission_review: 'CG-REVIEW-META-STATE-REDUCER-LIVE-ARTIFACT-PASS-024',
+          close: 'CG-REVIEW-META-STATE-REDUCER-LIVE-POST-MERGE-CHECKPOINT-026',
+          pr_number: 120,
+          merge_commit: '6fdffc26c7c7748d5c09900535c97c197864ab54',
+        },
+        failoverClose,
+        ...structuredClone(base021.meta_package.earlier),
+      ],
+      in_flight: RECOVERY_PKT,
+      queued: structuredClone(base021.meta_package.queued),
+      parallel_tracks: structuredClone(base021.meta_package.parallel_tracks),
+    },
+    derivation: {
+      source_main: repo.main_sha,
+      review: HOLD_151.message_id,
+      recovery_status: 'PROVISIONAL / UNAUTHORIZED FOR MERGE',
+      recovery_directive: DIR_150.message_id,
+      recovery_hold: HOLD_151.message_id,
+      recovery_authorized_by: null,
+      anchor_created_at: '2026-11-06T18:33:02Z',
+      anchor_generation: 151,
+      previous_anchors: [
+        ...base021.derivation.previous_anchors,
+        'CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021 (5993146604), generation 87; incorporated CHECKPOINT-VALIDATION-017 to RECOVERY-021, with the malformed RULING-020 (5985754624) by review',
+      ],
+      incorporates: [
+        ...auth.candidates.slice(idx146 - 58, idx146 + 1).map((m, idx) => {
+          const r = readEffect(m);
+          const spelled = r.declared_effect !== r.effect ? ` (declared ${r.declared_effect})` : '';
+          return `${m.message_id} (${m.comment_id}), generation ${88 + idx}, ${r.effect}${spelled}`;
+        }),
+        ...candidates147to149.map((m, idx) => `${m.message_id} (${m.comment_id}), generation ${147 + idx} (malformed; evidence only, no state transition, no permission)`),
+        `${DIR_150.message_id} (${DIR_150.comment_id}), generation 150, NO_STATE_CHANGE`,
+        `${HOLD_151.message_id} (${HOLD_151.comment_id}), generation 151, HOLD_SET; the anchor`,
+      ],
+      malformed_authority_evidence: [
+        ...base021.derivation.malformed_authority_evidence,
+        ...CONTACTS_MALFORMED.map((m) => `${m.message_id} (${m.comment_id}), absent state, health, scope_changed and production_touched`),
+      ],
+      repository_evidence: [
+        'PR 103 merged 2026-09-28T19:09:40Z as 4eba59eb from head 5dbfac61',
+        'PR 104 merged 2026-10-03T00:15:35Z as 11053288 from exact admitted head abcdb8f9',
+        'PR 120 (KF-META-STATE-REDUCER-LIVE-001) merged as 6fdffc26 from exact admitted head 0a793c0b; checkpointed by CG-REVIEW-META-STATE-REDUCER-LIVE-POST-MERGE-CHECKPOINT-026 (5998474832)',
+        'PR 147 (KF-EXEC-ACTION-001) merged as ac3a6384 from exact admitted head de47dd52; checkpointed by CG-REVIEW-ACTION-001-POST-MERGE-CHECKPOINT-004 (6010515405)',
+        'PR 166 (fix/agent-control-loop-recovery-001) merged as 7d2619c7',
+        'PR 159 (KF-META-AUTHORITY-EFFECT-COMPAT-001) merged as 98ee0202',
+        'PR 181 (KF-META-MERGE-AUTHORITY-001) merged as b1948d27',
+        `main is ${repo.main_sha}`,
+        'PR 94 (impl/kf-ai-pr-review-gate-001) open, superseded, not admitted',
+        'PR 109 (impl/kf-meta-state-reducer-001) open draft, reference input only',
+        'PR 127 (impl/kf-meta-memory-truth-audit-001) open draft, not merged; the memory track, see parallel_tracks',
+        'PR 155 (impl/kf-exec-auth-fail-closed-001) open draft, active packet KF-EXEC-AUTH-FAIL-CLOSED-001; not merged',
+        'PR 190 (fix/contacts-visibility-restore-001) open, not admitted; its three Oct 30 Contacts authority comments on issue 80 (6514446571, 6514528789, 6519793805) are malformed and grant no state transition or admission in this projection',
+        'PR 192 (docs/kf-control-recovery-evidence-20261106) open draft, recovery evidence document docs/development/CONTROL-PLANE-RECOVERY-EVIDENCE-2026-11-06.md; not an implementation branch',
+      ],
+    },
+    next_legal_action: {
+      action: ACTIONS.DISPATCH_BUILDER,
+      packet_id: AUTH_FC,
+      role: ROLES.BUILDER,
+      reason: 'FIXING_PROOF_FAILURES requires builder correction',
+    },
+  };
+}
+
+/**
+ * Compares the candidate checkpoint against the independently reconstructed
+ * generation-151 referent oracle across all authoritative and repository-bound sections.
+ */
+function assertMatchesIndependentOracle(candidate, oracle) {
+  assert.deepEqual(candidate.authority_basis, oracle.authority_basis);
+  assert.deepEqual(candidate.programme, oracle.programme);
+  assert.deepEqual(candidate.meta_package, oracle.meta_package);
+  assert.deepEqual(candidate.holds, oracle.holds);
+  assert.deepEqual(candidate.safety, oracle.safety);
+  assert.deepEqual(candidate.platform_programme, oracle.platform_programme);
+  assert.equal(candidate.merge_authority_marker, oracle.merge_authority_marker);
+  assert.deepEqual(candidate.derivation, oracle.derivation);
 }
 
 test('recorded evidence (recovery 2026-11-06): the continuation after COMPAT-ACK-002 is complete, minimized, unedited, and holds the three malformed Oct 30 Contacts reviews', () => {
@@ -2159,15 +2515,15 @@ test('recorded evidence (recovery 2026-11-06): the committed checkpoint is re-de
   assert.equal(act(rec).action, ACTIONS.WAIT_AUTHORITY);
   assert.equal(act(rec).reason, 'programme is held: HOLD_SET by CG-HOLD-CLAUDE-CAPACITY-20261106-001');
 
-  // Re-deriving generation 151 by folding CG-HOLD-CLAUDE-CAPACITY-20261106-001 over generation 150 produces the exact checkpoint projection.
+  // Re-deriving generation 151 from the independent generation-150 referent
+  // (built from checkpoint021() + valid generations 88..146 + non-granting
+  // malformed 147..149 + valid 150 NO_STATE_CHANGE) and folding 151 HOLD_SET
+  // matches the candidate across programme, meta_package, holds, authority_basis,
+  // safety, platform_programme, merge_authority_marker, and derivation.
   const from150 = reconcileProjection(checkpoint150(), auth, truth, OPTIONS);
   assert.equal(from150.consistent, true, JSON.stringify(from150.findings));
   assert.deepEqual(appliedOf(from150), [{ message_id: HOLD_151.message_id, comment_id: HOLD_151.comment_id, effect: 'HOLD_SET', declared_effect: 'HOLD_SET' }]);
-  assert.deepEqual(from150.effective_state.authority_basis, state.authority_basis);
-  assert.deepEqual(from150.effective_state.programme, state.programme);
-  assert.deepEqual(from150.effective_state.holds, state.holds);
-  assert.deepEqual(from150.effective_state.meta_package, state.meta_package);
-  assert.equal(from150.effective_state.merge_authority_marker, state.merge_authority_marker);
+  assertMatchesIndependentOracle(state, from150.effective_state);
 
   // Any malformed Contacts review placed after the new anchor still blocks the fold fail-closed,
   // both alone and when followed by a valid typed authority message.
@@ -2200,6 +2556,36 @@ test('recorded evidence (recovery 2026-11-06): the committed checkpoint is re-de
     assert.deepEqual(blockedWithValidAfter.reduction.unapplied.map((m) => m.message_id), [bad.message_id, 'CG-REVIEW-LATER-VALID-001']);
     assert.deepEqual(codes(blockedWithValidAfter), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY, FINDINGS.AUTHORITY_MALFORMED]);
     assert.equal(act(blockedWithValidAfter).action, ACTIONS.REPORT_DRIFT);
+  }
+});
+
+test('NC recorded evidence (recovery 2026-11-06): the independent reconstruction oracle rejects a candidate with a corrupted programme, meta_package, holds, safety, or repository binding', () => {
+  const { comments, repo: truth } = recordedThrough151();
+  const auth = collectAuthority(comments);
+  const oracle = reconcileProjection(checkpoint150(), auth, truth, OPTIONS).effective_state;
+  const candidate = loadState(process.cwd());
+
+  // Referent: the uncorrupted candidate matches the independent oracle across all compared sections.
+  assertMatchesIndependentOracle(candidate, oracle);
+
+  const corruptions = [
+    ['programme.source_main corrupted to another well-formed main SHA', (c) => { c.programme.source_main = '110532883411007787f62de35e0a951aa1c16cfa'; }],
+    ['programme.checkpointed missing KF-EXEC-ACTION-001', (c) => { c.programme.checkpointed = [...CHECKPOINTED_BEFORE]; }],
+    ['programme.pr_number corrupted to 190', (c) => { c.programme.pr_number = 190; }],
+    ['meta_package.merge_commit corrupted', (c) => { c.meta_package.merge_commit = '98ee0202499ba87fa4ee13d58a2a9075016225bd'; }],
+    ['holds.KF-META-STATE-RECOVERY-001 marked inactive', (c) => { c.holds[RECOVERY_PKT].active = false; }],
+    ['safety.production_release_authorized flipped to true', (c) => { c.safety.production_release_authorized = true; }],
+    ['derivation.repository_evidence missing PR 190 non-admission record', (c) => { c.derivation.repository_evidence = c.derivation.repository_evidence.filter((line) => !line.startsWith('PR 190')); }],
+  ];
+
+  for (const [label, corrupt] of corruptions) {
+    const mutated = structuredClone(candidate);
+    corrupt(mutated);
+    assert.throws(
+      () => assertMatchesIndependentOracle(mutated, oracle),
+      assert.AssertionError,
+      `${label}: independent oracle must reject the corrupted candidate`,
+    );
   }
 });
 

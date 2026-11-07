@@ -1288,6 +1288,22 @@ negative_controls:
     proof_command: node --test --test-name-pattern="stop at the malformed Contacts review 6514446571" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
+  - id: NC-RECOVERY-CANDIDATE-CORRUPTED-SOURCE-MAIN
+    claim: >
+      The generation-151 recovery proof compares the committed checkpoint
+      candidate against an independent reconstruction oracle folded from the
+      frozen RECOVERY-021 checkpoint through valid generations 88..146,
+      non-granting malformed 147..149, and valid 150..151 (PR #193 R1, Copilot
+      r4503242873). Corrupting programme.source_main in the candidate to
+      another well-formed main SHA passes validateState() and source_main_on_main
+      yet fails the independent oracle comparison.
+    mutation:
+      file: .agent-control/programme-state.yaml
+      find: "  state: FIXING_PROOF_FAILURES\n  health: YELLOW\n  source_main: ac3a6384417093f198bcc7d672b0dbc295db137c"
+      replace: "  state: FIXING_PROOF_FAILURES\n  health: YELLOW\n  source_main: 110532883411007787f62de35e0a951aa1c16cfa"
+    proof_command: node --test --test-name-pattern="the committed checkpoint is re-derived through CG-HOLD-CLAUDE-CAPACITY-20261106-001" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
   - id: NC-RECOVERY-RULING-020-SKIPPED
     claim: >
       The third reviewed recovery is a re-anchor, never a skip (RECOVERY-021).
