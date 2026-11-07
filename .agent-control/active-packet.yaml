@@ -19,7 +19,7 @@ held_claude_packet:
     KF-META-STATE-RECOVERY-001 and does not clear the Claude HOLD.
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
 implementation_branch: impl/kf-meta-state-recovery-gemini-001
-pr_number: null
+pr_number: 193
 state: PROVING
 health: YELLOW
 scope_changed: false

@@ -15,7 +15,7 @@ held_claude_status: HELD_NOT_CLEARED
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
 source_head: e674a1be13f5a4f3cfa26918f18630730f55fdb4
 implementation_branch: impl/kf-meta-state-recovery-gemini-001
-pr_number: null
+pr_number: 193
 state: PROVING
 health: YELLOW
 scope_changed: false
