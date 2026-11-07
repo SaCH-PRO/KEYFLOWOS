@@ -669,7 +669,7 @@ test('NC a checkpoint with health AMBER cannot reconcile as consistent on real #
   const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
   const auth = collectAuthority(recorded.comments);
   assert.equal(auth.newest.comment_id, ANCHOR_021.comment_id, 'the anchor is the newest recorded authority: nothing folds');
-  const state = loadState(process.cwd());
+  const state = checkpoint021();
   state.programme.health = 'AMBER';
   const rec = reconcileProjection(state, auth, recorded.repo, OPTIONS);
   assert.equal(rec.consistent, false);
@@ -681,8 +681,8 @@ test('NC a checkpoint with health AMBER cannot reconcile as consistent on real #
   assert.equal(rec.reduction.reason, FOLD_NOT_STARTED.CHECKPOINT_INVALID);
   assert.equal(rec.effective_state.programme.health, 'AMBER', 'never translated');
   assert.equal(act(rec).action, ACTIONS.REPORT_DRIFT);
-  // Referent: the committed checkpoint on the same recording reconciles and waits on the ACTION-001 hold.
-  const clean = reconcileProjection(loadState(process.cwd()), auth, recorded.repo, OPTIONS);
+  // Referent: the RECOVERY-021 checkpoint on the same recording reconciles and waits on the ACTION-001 hold.
+  const clean = reconcileProjection(checkpoint021(), auth, recorded.repo, OPTIONS);
   assert.equal(clean.consistent, true, JSON.stringify(clean.findings));
   assert.equal(act(clean).action, ACTIONS.WAIT_AUTHORITY);
 });
@@ -1085,22 +1085,26 @@ test('NC generation is stable: a later event keeps its generation and coordinate
 });
 
 test('the committed checkpoint keeps ACTION-001 held against any typed effect except an explicit RESUME HOLD_CLEAR', () => {
-  const state = loadState(process.cwd());
-  const anchor = authority('DIRECTIVE', state.authority_basis.message_id, 'KF-META-STATE-REDUCER-LIVE-001', {}, { id: state.authority_basis.comment_id, at: '2026-10-03T00:16:04Z' });
-  for (const [msg, code] of [
-    // The hold is the reason, ahead of any in-flight or not-active conflict.
-    [typed('DIRECTIVE', 'CG-X', 'KF-EXEC-ACTION-001', 'PACKET_RELEASE'), EFFECT_PROBLEMS.PACKET_HELD],
-    [typed('DIRECTIVE', 'CG-X', 'KF-EXEC-ACTION-001', 'PACKET_CORRECTION', { pr_number: 77 }), EFFECT_PROBLEMS.PACKET_HELD],
-    [typed('REVIEW', 'CG-X', 'KF-EXEC-ACTION-001', 'HOLD_CLEAR'), EFFECT_PROBLEMS.EFFECT_TYPE_MISMATCH],
+  for (const [state, heldPacket, activePacket] of [
+    [checkpoint021(), 'KF-EXEC-ACTION-001', 'KF-META-STATE-REDUCER-LIVE-001'],
+    [loadState(process.cwd()), 'KF-META-STATE-RECOVERY-001', 'KF-EXEC-AUTH-FAIL-CLOSED-001'],
   ]) {
-    const out = fold(state, [anchor, msg]);
-    assert.equal(out.blocked?.code, code, msg.body);
-    assert.deepEqual(activeHolds(out.state).map((h) => h.packet_id), ['KF-EXEC-ACTION-001']);
+    const anchor = authority('DIRECTIVE', state.authority_basis.message_id, activePacket, {}, { id: state.authority_basis.comment_id, at: '2026-10-03T00:16:04Z' });
+    for (const [msg, code] of [
+      // The hold is the reason, ahead of any in-flight or not-active conflict.
+      [typed('DIRECTIVE', 'CG-X', heldPacket, 'PACKET_RELEASE'), EFFECT_PROBLEMS.PACKET_HELD],
+      [typed('DIRECTIVE', 'CG-X', heldPacket, 'PACKET_CORRECTION', { pr_number: 77 }), EFFECT_PROBLEMS.PACKET_HELD],
+      [typed('REVIEW', 'CG-X', heldPacket, 'HOLD_CLEAR'), EFFECT_PROBLEMS.EFFECT_TYPE_MISMATCH],
+    ]) {
+      const out = fold(state, [anchor, msg]);
+      assert.equal(out.blocked?.code, code, msg.body);
+      assert.deepEqual(activeHolds(out.state).map((h) => h.packet_id), [heldPacket]);
+    }
+    // Referent: the explicit RESUME HOLD_CLEAR is the one thing that releases it.
+    const resume = fold(state, [anchor, typed('RESUME', 'CG-RESUME', heldPacket, 'HOLD_CLEAR')]);
+    assert.equal(resume.blocked, null);
+    assert.deepEqual(activeHolds(resume.state), []);
   }
-  // Referent: the explicit RESUME HOLD_CLEAR is the one thing that releases it.
-  const resume = fold(state, [anchor, typed('RESUME', 'CG-RESUME', 'KF-EXEC-ACTION-001', 'HOLD_CLEAR')]);
-  assert.equal(resume.blocked, null);
-  assert.deepEqual(activeHolds(resume.state), []);
 });
 
 // ------------------------------------------------------------------ repository truth is never overwritten
@@ -1169,7 +1173,7 @@ test('recorded evidence (reducer): the RECONCILE-002 checkpoint is stale on real
   const auth = collectAuthority(recorded.comments);
   assert.equal(auth.verified, true, auth.reason);
   assert.equal(auth.newest.message_id, 'CG-REVIEW-META-STATE-REDUCER-LIVE-CORRECTION-001');
-  const old = loadState(process.cwd());
+  const old = checkpoint021();
   old.authority_basis = { message_id: 'CG-DIRECTIVE-META-STATE-RECONCILE-002', comment_id: 5875639550 };
   Object.assign(old.programme, { active_packet: 'KF-META-CONTROL-PARSER-001', state: 'CHECKPOINTED', pr_number: 100, implementation_branch: 'impl/kf-meta-control-parser-001' });
   const rec = reconcileProjection(old, auth, repo(mergedPr(100, 'impl/kf-meta-control-parser-001')), OPTIONS);
@@ -1185,12 +1189,63 @@ test('recorded evidence (reducer): the RECONCILE-002 checkpoint is stale on real
 });
 
 /**
+ * The checkpoint anchored to CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021 (5993146604),
+ * as committed in PR 120 (6fdffc26). Rebuilt here so historical RECOVERY-021 and
+ * COMPAT-001 recorded-evidence tests retain their exact starting projection.
+ */
+function checkpoint021() {
+  const state = loadState(process.cwd());
+  state.authority_basis = { ...ANCHOR_021 };
+  state.derivation = {
+    source_main: '110532883411007787f62de35e0a951aa1c16cfa',
+    review: ANCHOR_021.message_id,
+    recovery_authorized_by: ANCHOR_021.message_id,
+    anchor_created_at: '2026-10-05T11:02:59Z',
+    anchor_generation: 87,
+    previous_anchors: state.derivation.previous_anchors.slice(0, 3),
+    incorporates: [
+      'CG-REVIEW-META-STATE-REDUCER-LIVE-CHECKPOINT-VALIDATION-017 (5983193244), generation 82, PACKET_CORRECTION',
+      'CG-REVIEW-META-STATE-REDUCER-LIVE-CONVERGED-CORRECTIONS-018 (5984704930), generation 83, PACKET_CORRECTION',
+      'CG-REVIEW-META-STATE-REDUCER-LIVE-SEMANTIC-ACCEPT-019 (5985390800), generation 84, NO_STATE_CHANGE',
+      'CG-REVIEW-META-STATE-REDUCER-LIVE-FINAL-CORRECTION-020 (5985751518), generation 85, PACKET_CORRECTION',
+      'CG-REVIEW-META-STATE-REDUCER-LIVE-CONTRADICTION-RULING-020 (5985754624), generation 86 (malformed; evidence only, no state transition, no permission)',
+      'CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021 (5993146604), generation 87, PACKET_CORRECTION; the anchor',
+    ],
+    malformed_authority_evidence: state.derivation.malformed_authority_evidence.slice(0, 7),
+    repository_evidence: state.derivation.repository_evidence,
+  };
+  Object.assign(state.programme, {
+    checkpointed: [...CHECKPOINTED_BEFORE],
+    application_frontier: 'KF-EXEC-ACTION-001',
+    active_packet: 'KF-META-STATE-REDUCER-LIVE-001',
+    active_phase: null,
+    state: 'FIXING_PROOF_FAILURES',
+    health: 'YELLOW',
+    source_main: '110532883411007787f62de35e0a951aa1c16cfa',
+    implementation_branch: 'impl/kf-meta-state-reducer-live-001',
+    pr_number: 120,
+    merge_authority: false,
+    production_touched: false,
+  });
+  state.meta_package = {
+    ...state.meta_package,
+    packet_id: 'KF-META-AI-REVIEW-FAILOVER-001',
+    in_flight: 'KF-META-STATE-REDUCER-LIVE-001',
+  };
+  const actionHold = { ...state.holds['KF-EXEC-ACTION-001'], active: true };
+  delete actionHold.released_by;
+  delete actionHold.released_comment_id;
+  state.holds = { 'KF-EXEC-ACTION-001': actionHold };
+  return state;
+}
+
+/**
  * The checkpoint this packet first committed, anchored to its release directive
  * CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001 (5963509515). It was re-derived under
- * CONTRACT-CORRECTION-008 (C8-F2) and is rebuilt here from the committed one.
+ * CONTRACT-CORRECTION-008 (C8-F2) and is rebuilt here from the RECOVERY-021 one.
  */
 function previousCheckpoint() {
-  const state = loadState(process.cwd());
+  const state = checkpoint021();
   state.authority_basis = { message_id: 'CG-DIRECTIVE-META-STATE-REDUCER-LIVE-001', comment_id: 5963509515 };
   Object.assign(state.programme, { state: 'CHARACTERIZING', health: 'GREEN', pr_number: null });
   return state;
@@ -1264,10 +1319,10 @@ const AFTER_RECORDING = '2026-10-06T00:00:00Z';
 /**
  * The checkpoint anchored to CONTRACT-CORRECTION-008, which RECOVERY-REANCHOR-015
  * replaced. Every REVIEW between the two anchors is a PACKET_CORRECTION that
- * projects the same programme, so only the anchor differs from the committed one.
+ * projects the same programme, so only the anchor differs from the RECOVERY-021 one.
  */
 function checkpoint008() {
-  const state = loadState(process.cwd());
+  const state = checkpoint021();
   state.authority_basis = { ...CONTRACT_008 };
   return state;
 }
@@ -1279,7 +1334,7 @@ function checkpoint008() {
  * anchor differs.
  */
 function checkpoint016() {
-  const state = loadState(process.cwd());
+  const state = checkpoint021();
   state.authority_basis = { ...ANCHOR_016 };
   return state;
 }
@@ -1426,7 +1481,7 @@ test('recorded evidence (recovery): the EXACT-BINDING-016 checkpoint folds four 
 
 test('recorded evidence (recovery): the committed checkpoint is re-derived at RECOVERY-021 and starts after all three malformed messages (C8-F2 2, R15, R16, R21)', () => {
   const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
-  const state = loadState(process.cwd());
+  const state = checkpoint021();
   const auth = collectAuthority(recorded.comments);
   const anchor = auth.messages.find((m) => m.message_id === ANCHOR_021.message_id);
   assert.deepEqual(state.authority_basis, ANCHOR_021);
@@ -1447,7 +1502,7 @@ test('recorded evidence (recovery): the committed checkpoint is re-derived at RE
   assert.equal(anchor.created_at, '2026-10-05T11:02:59Z');
   assert.equal(new Date(state.derivation.anchor_created_at).toISOString(), '2026-10-05T11:02:59.000Z');
 
-  // The anchor's own PACKET_CORRECTION projects exactly the committed programme.
+  // The anchor's own PACKET_CORRECTION projects exactly the RECOVERY-021 programme.
   const read = readEffect(anchor);
   assert.equal(read.ok, true);
   assert.equal(read.effect, 'PACKET_CORRECTION');
@@ -1482,7 +1537,7 @@ test('recorded evidence (recovery): the committed checkpoint is re-derived at RE
 
 test('recorded evidence (recovery): from the new checkpoint later typed authority folds, and later malformed authority still fails closed (C8-F2 3, 4, 5)', () => {
   const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
-  const state = loadState(process.cwd());
+  const state = checkpoint021();
   const typedLater = laterAuthority(5966000001, reducerEnvelope(1, ['control_effect: PACKET_CORRECTION']));
   const advanced = reconcileProjection(state, collectAuthority([...recorded.comments, typedLater]), recorded.repo, OPTIONS);
   assert.equal(advanced.consistent, true, JSON.stringify(advanced.findings));
@@ -1824,7 +1879,7 @@ test('recorded evidence (aliases): the continuation after RECOVERY-021 is comple
 test('recorded evidence (aliases): the frozen recording is not a current snapshot, says so, and nothing but this spec reads the file', () => {
   const { recorded, later } = recordedAfter021();
   // Read alone, as the tests that pin it do, it ends at the anchor and folds nothing: it is the past.
-  const alone = reconcileProjection(loadState(process.cwd()), collectAuthority(recorded.comments), recorded.repo, OPTIONS);
+  const alone = reconcileProjection(checkpoint021(), collectAuthority(recorded.comments), recorded.repo, OPTIONS);
   assert.equal(alone.authority_newest.comment_id, ANCHOR_021.comment_id);
   assert.deepEqual(alone.reduction.applied, []);
   assert.equal(alone.effective_state.programme.active_packet, 'KF-META-STATE-REDUCER-LIVE-001', 'a packet that has since been checkpointed');
@@ -1846,8 +1901,8 @@ test('recorded evidence (aliases): the frozen recording is not a current snapsho
 
 test('recorded evidence (aliases): the committed checkpoint folds every authority message from RECOVERY-021 to the newest, none skipped, and PR 155 is the active packet', () => {
   const { comments, repo: truth } = recordedAfter021();
-  const state = loadState(process.cwd());
-  assert.deepEqual(state.authority_basis, ANCHOR_021, 'referent: the committed checkpoint is still anchored to RECOVERY-021');
+  const state = checkpoint021();
+  assert.deepEqual(state.authority_basis, ANCHOR_021, 'referent: the historical RECOVERY-021 checkpoint is anchored to RECOVERY-021');
   const rec = reconcileProjection(state, collectAuthority(comments), truth, OPTIONS);
 
   // Every candidate after the anchor is applied, in #80 order, with its canonical effect.
@@ -1858,7 +1913,7 @@ test('recorded evidence (aliases): the committed checkpoint folds every authorit
   assert.deepEqual(rec.reduction.applied.map((a) => a.generation), AFTER_021.map((_, i) => first + i), 'consecutive generations: no message is skipped');
   assert.equal(rec.reduction.observed_generation, rec.reduction.generation, 'the fold reaches the newest authority');
   // Generations are global, not reset at the continuation: the anchor is where the frozen recording alone puts it,
-  // and on the live issue, read whole, the anchor is 87 and the newest recorded authority is 107.
+  // and on the live issue, read whole, the anchor is 87 and the newest recorded authority in after_recovery_021 is 107.
   assert.equal(rec.reduction.checkpoint_generation, collectAuthority(recordedAfter021().recorded.comments).candidates.length);
   assert.deepEqual([rec.reduction.checkpoint_generation + CANDIDATES_BEFORE_RECORDING, rec.reduction.observed_generation + CANDIDATES_BEFORE_RECORDING], [state.derivation.anchor_generation, 107]);
   assert.deepEqual(rec.effective_state.authority_basis, COMPAT_NEWEST);
@@ -1877,12 +1932,12 @@ test('recorded evidence (aliases): the committed checkpoint folds every authorit
   assert.equal(act(rec).action, ACTIONS.DISPATCH_BUILDER);
   assert.equal(act(rec).packet_id, AUTH_FC);
   // Nothing is written back.
-  assert.deepEqual(loadState(process.cwd()), state);
+  assert.deepEqual(checkpoint021(), state);
 });
 
 test('recorded evidence (aliases): the real 6011507550 folds with exactly the PACKET_CORRECTION semantics', () => {
   const { comments, repo: truth } = recordedAfter021();
-  const state = loadState(process.cwd());
+  const state = checkpoint021();
   const fc = (list) => reconcileProjection(state, collectAuthority(list), truth, OPTIONS);
   const upTo = throughComment(comments, BOUNDED_REVIEW.comment_id);
   const real = comments.find((c) => c.id === BOUNDED_REVIEW.comment_id);
@@ -1906,7 +1961,7 @@ test('recorded evidence (aliases): the real 6011507550 folds with exactly the PA
 
 test('recorded evidence (aliases): the real 6018421547 folds as NO_STATE_CHANGE and grants no admission, checkpoint, release, hold or merge authority', () => {
   const { comments, repo: truth } = recordedAfter021();
-  const state = loadState(process.cwd());
+  const state = checkpoint021();
   const fc = (list) => reconcileProjection(state, collectAuthority(list), truth, OPTIONS);
   const upTo = throughComment(comments, BINDING_REVIEW.comment_id);
   const real = comments.find((c) => c.id === BINDING_REVIEW.comment_id);
@@ -1943,7 +1998,7 @@ test('recorded evidence (aliases): the real 6018421547 folds as NO_STATE_CHANGE 
 
 test('NC recorded evidence (aliases): either real spelling, changed by one character, stops the fold at that exact message and skips nothing after it', () => {
   const { comments, repo: truth } = recordedAfter021();
-  const state = loadState(process.cwd());
+  const state = checkpoint021();
   const ids = AFTER_021.map((m) => m.message_id);
   for (const [ref, spelling, index] of [[BOUNDED_REVIEW, 'BOUNDED_CORRECTION', 14], [BINDING_REVIEW, 'AUTHORIZE_CONTROL_BINDING', 15]]) {
     const real = comments.find((c) => c.id === ref.comment_id);
@@ -1962,9 +2017,9 @@ test('NC recorded evidence (aliases): either real spelling, changed by one chara
 
 test('CLI end to end (aliases): orchestrate decides on, and status renders, the recorded #80 read through both spellings and report the PR 155 projection', () => {
   const { comments, repo: truth } = recordedAfter021();
-  const state = loadState(process.cwd());
+  const state = checkpoint021();
   const out = withBuilder(true, (env) => {
-    const res = cli('scripts/agent-control/orchestrate.mjs', ['--json'], { comments, repo: truth }, env);
+    const res = cliAt(state, 'scripts/agent-control/orchestrate.mjs', ['--json'], { comments, repo: truth }, env);
     assert.equal(res.status, 0, res.stderr);
     return JSON.parse(res.stdout);
   });
@@ -1977,8 +2032,175 @@ test('CLI end to end (aliases): orchestrate decides on, and status renders, the 
   assert.ok(text.includes('RECOVERY-021 (generation 24); 20 typed effect(s) applied; observed generation 44 of 44'), text);
   assert.ok(text.includes('State / health : FIXING_PROOF_FAILURES / YELLOW'), text);
   assert.ok(text.includes('impl/kf-exec-auth-fail-closed-001 / #155'), text);
-  // The fold is never written back: the committed checkpoint is unchanged.
-  assert.deepEqual(loadState(process.cwd()), state);
+  // The fold is never written back: the historical checkpoint is unchanged.
+  assert.deepEqual(checkpoint021(), state);
+});
+
+// ------------------------------------------------------------------ recorded evidence (recovery 2026-11-06)
+
+const LAST_VALID_BEFORE_MALFORMED = Object.freeze({ message_id: 'CG-REV-CONTACTS-VISIBILITY-REPAIR-002', comment_id: 6512387171 });
+const CONTACTS_MALFORMED = Object.freeze([
+  { message_id: 'CG-REV-PRODUCT-CONTACTS-MERGE-READINESS-001', comment_id: 6514446571 },
+  { message_id: 'CG-REV-PRODUCT-CONTACTS-ADMISSION-BLOCKER-002', comment_id: 6514528789 },
+  { message_id: 'CG-REV-PRODUCT-CONTACTS-ADMISSION-HOLD-003', comment_id: 6519793805 },
+]);
+const DIR_150 = Object.freeze({ message_id: 'CG-DIR-RECOVERY-20261106-001', comment_id: 6691596446 });
+const HOLD_151 = Object.freeze({ message_id: 'CG-HOLD-CLAUDE-CAPACITY-20261106-001', comment_id: 6692411347 });
+const RECOVERY_PKT = 'KF-META-STATE-RECOVERY-001';
+const AFTER_151 = '2026-11-07T00:00:00Z';
+
+function recordedThrough151() {
+  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const after021 = recorded.after_recovery_021;
+  const after107 = recorded.after_compat_002;
+  return {
+    recorded,
+    after021,
+    after107,
+    comments: [...recorded.comments, ...after021.comments, ...after107.comments],
+    repo: after107.repo,
+  };
+}
+
+function checkpoint107() {
+  const { comments, repo } = recordedAfter021();
+  return reconcileProjection(checkpoint021(), collectAuthority(comments), repo, OPTIONS).effective_state;
+}
+
+function checkpoint150() {
+  const base = loadState(process.cwd());
+  return {
+    ...base,
+    authority_basis: { ...DIR_150 },
+    holds: { 'KF-EXEC-ACTION-001': { ...base.holds['KF-EXEC-ACTION-001'] } },
+    next_legal_action: { action: ACTIONS.DISPATCH_BUILDER, packet_id: AUTH_FC, role: ROLES.BUILDER, reason: 'FIXING_PROOF_FAILURES requires builder correction' },
+  };
+}
+
+test('recorded evidence (recovery 2026-11-06): the continuation after COMPAT-ACK-002 is complete, minimized, unedited, and holds the three malformed Oct 30 Contacts reviews', () => {
+  const { after021, after107 } = recordedThrough151();
+  assert.equal(after107.comments.length, 666);
+  assert.equal(Object.keys(after107.live_source).length, 666);
+  assert.equal(after021.comments.at(-1).id, COMPAT_NEWEST.comment_id);
+  assert.ok(after107.comments[0].id > COMPAT_NEWEST.comment_id);
+  assert.equal(after107.comments.at(-1).id, HOLD_151.comment_id);
+  for (let i = 1; i < after107.comments.length; i += 1) {
+    assert.ok(after107.comments[i - 1].id < after107.comments[i].id, 'strictly increasing GitHub comment IDs');
+  }
+  for (const c of after107.comments) {
+    assert.deepEqual(Object.keys(c).sort(), ['body', 'created_at', 'html_url', 'id', 'updated_at', 'user']);
+    assert.deepEqual(Object.keys(c.user), ['login']);
+    const env = parseEnvelope(c.body);
+    assert.equal(env.keys.reduce((n, key) => n + env.values[key].length, 0), c.body === '' ? 0 : c.body.split('\n').length, `comment ${c.id} is minimized`);
+    assert.equal(c.created_at, c.updated_at, `comment ${c.id} is unedited on live #80`);
+    assert.equal(sha256(JSON.stringify(env)), after107.live_source[c.id].envelope_sha256, `comment ${c.id} is parse-equal to its live source`);
+    assert.match(after107.live_source[c.id].body_sha256, /^[0-9a-f]{64}$/);
+  }
+  const auth = collectAuthority(after107.comments);
+  assert.equal(auth.candidates.length, 44);
+  assert.equal(auth.messages.length, 41);
+  assert.deepEqual(
+    auth.malformed.map((m) => ({ message_id: m.message_id, comment_id: m.comment_id, problems: m.problems })),
+    CONTACTS_MALFORMED.map((m) => ({ ...m, problems: ['state (absent)', 'health (absent)', 'scope_changed (absent)', 'production_touched (absent)'] })),
+  );
+});
+
+test('recorded evidence (recovery 2026-11-06): the RECOVERY-021 and COMPAT-ACK-002 checkpoints fold through 6512387171, then stop at the malformed Contacts review 6514446571 and skip nothing after it', () => {
+  const { comments, repo: truth } = recordedThrough151();
+  const auth = collectAuthority(comments);
+
+  const from021 = reconcileProjection(checkpoint021(), auth, truth, OPTIONS);
+  assert.equal(from021.reduction.applied.length, 59, 'generations 88..146 apply');
+  assert.equal(from021.reduction.applied.at(-1).comment_id, LAST_VALID_BEFORE_MALFORMED.comment_id);
+  assert.deepEqual(
+    [from021.reduction.blocked.message_id, from021.reduction.blocked.comment_id, from021.reduction.blocked.code],
+    [CONTACTS_MALFORMED[0].message_id, CONTACTS_MALFORMED[0].comment_id, EFFECT_PROBLEMS.AUTHORITY_MALFORMED],
+  );
+  assert.deepEqual(
+    from021.reduction.unapplied.map((m) => m.comment_id),
+    [CONTACTS_MALFORMED[0].comment_id, CONTACTS_MALFORMED[1].comment_id, CONTACTS_MALFORMED[2].comment_id, DIR_150.comment_id, HOLD_151.comment_id],
+  );
+  assert.deepEqual(codes(from021), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY, FINDINGS.AUTHORITY_MALFORMED]);
+  assert.equal(act(from021).action, ACTIONS.REPORT_DRIFT);
+
+  const from107 = reconcileProjection(checkpoint107(), auth, truth, OPTIONS);
+  assert.equal(from107.reduction.applied.length, 39, 'generations 108..146 apply');
+  assert.equal(from107.reduction.applied.at(-1).comment_id, LAST_VALID_BEFORE_MALFORMED.comment_id);
+  assert.deepEqual(from107.reduction.blocked, from021.reduction.blocked);
+  assert.deepEqual(from107.reduction.unapplied, from021.reduction.unapplied);
+  assert.deepEqual(codes(from107), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY, FINDINGS.AUTHORITY_MALFORMED]);
+  assert.equal(act(from107).action, ACTIONS.REPORT_DRIFT);
+});
+
+test('recorded evidence (recovery 2026-11-06): the committed checkpoint is re-derived through CG-HOLD-CLAUDE-CAPACITY-20261106-001 and reconciles consistently with the active hold in force', () => {
+  const { comments, repo: truth } = recordedThrough151();
+  const state = loadState(process.cwd());
+  assert.deepEqual(state.authority_basis, HOLD_151);
+  assert.equal(state.derivation.anchor_generation, 151);
+  assert.equal(state.derivation.incorporates.length, 64);
+  assert.equal(state.derivation.malformed_authority_evidence.length, 10);
+
+  const auth = collectAuthority(comments);
+  assert.equal(auth.candidates.length + CANDIDATES_BEFORE_RECORDING, 151);
+  assert.equal(auth.messages.length + (CANDIDATES_BEFORE_RECORDING - 4), 141);
+  assert.equal(auth.malformed.length + 4, 10);
+
+  const rec = reconcileProjection(state, auth, truth, OPTIONS);
+  assert.equal(rec.consistent, true, JSON.stringify(rec.findings));
+  assert.deepEqual(rec.findings, []);
+  assert.equal(rec.reduction.blocked, null);
+  assert.deepEqual(rec.reduction.applied, []);
+  assert.deepEqual(rec.reduction.unapplied, []);
+  assert.equal(rec.reduction.checkpoint_generation + CANDIDATES_BEFORE_RECORDING, 151);
+  assert.equal(rec.reduction.observed_generation + CANDIDATES_BEFORE_RECORDING, 151);
+  assert.equal(rec.reduction.generation + CANDIDATES_BEFORE_RECORDING, 151);
+  assert.deepEqual(activeHolds(rec.effective_state).map((h) => h.packet_id), [RECOVERY_PKT]);
+  assert.equal(rec.effective_state.holds['KF-EXEC-ACTION-001'].active, false);
+  assert.equal(act(rec).action, ACTIONS.WAIT_AUTHORITY);
+  assert.equal(act(rec).reason, 'programme is held: HOLD_SET by CG-HOLD-CLAUDE-CAPACITY-20261106-001');
+
+  // Re-deriving generation 151 by folding CG-HOLD-CLAUDE-CAPACITY-20261106-001 over generation 150 produces the exact checkpoint projection.
+  const from150 = reconcileProjection(checkpoint150(), auth, truth, OPTIONS);
+  assert.equal(from150.consistent, true, JSON.stringify(from150.findings));
+  assert.deepEqual(appliedOf(from150), [{ message_id: HOLD_151.message_id, comment_id: HOLD_151.comment_id, effect: 'HOLD_SET', declared_effect: 'HOLD_SET' }]);
+  assert.deepEqual(from150.effective_state.authority_basis, state.authority_basis);
+  assert.deepEqual(from150.effective_state.programme, state.programme);
+  assert.deepEqual(from150.effective_state.holds, state.holds);
+  assert.deepEqual(from150.effective_state.meta_package, state.meta_package);
+  assert.equal(from150.effective_state.merge_authority_marker, state.merge_authority_marker);
+
+  // Any malformed Contacts review placed after the new anchor still blocks the fold fail-closed,
+  // both alone and when followed by a valid typed authority message.
+  const validAfter = {
+    id: 6700000099,
+    html_url: 'https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-6700000099',
+    created_at: '2026-11-07T01:00:00Z',
+    updated_at: '2026-11-07T01:00:00Z',
+    user: { login: 'SaCH-PRO' },
+    body: [
+      'message_id: CG-REVIEW-LATER-VALID-001', 'message_type: REVIEW', `packet_id: ${AUTH_FC}`, 'sender: chatgpt',
+      `source_main: ${state.programme.source_main}`, `implementation_branch: ${state.programme.implementation_branch}`,
+      'state: REVIEWED', 'health: GREEN', 'scope_changed: false', 'production_touched: false', 'control_effect: NO_STATE_CHANGE',
+    ].join('\n'),
+  };
+  for (const [idx, bad] of CONTACTS_MALFORMED.entries()) {
+    const raw = comments.find((c) => c.id === bad.comment_id);
+    const replayed = { ...raw, id: 6700000001 + idx, created_at: AFTER_151, updated_at: AFTER_151 };
+    const blocked = reconcileProjection(state, collectAuthority([...comments, replayed]), truth, OPTIONS);
+    assert.equal(blocked.consistent, false);
+    assert.equal(blocked.reduction.blocked.code, EFFECT_PROBLEMS.AUTHORITY_MALFORMED);
+    assert.equal(blocked.reduction.blocked.message_id, bad.message_id);
+    assert.deepEqual(codes(blocked), [FINDINGS.AUTHORITY_MALFORMED]);
+    assert.equal(act(blocked).action, ACTIONS.REPORT_DRIFT);
+
+    const blockedWithValidAfter = reconcileProjection(state, collectAuthority([...comments, replayed, validAfter]), truth, OPTIONS);
+    assert.equal(blockedWithValidAfter.consistent, false);
+    assert.equal(blockedWithValidAfter.reduction.blocked.code, EFFECT_PROBLEMS.AUTHORITY_MALFORMED);
+    assert.equal(blockedWithValidAfter.reduction.blocked.message_id, bad.message_id);
+    assert.deepEqual(blockedWithValidAfter.reduction.unapplied.map((m) => m.message_id), [bad.message_id, 'CG-REVIEW-LATER-VALID-001']);
+    assert.deepEqual(codes(blockedWithValidAfter), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY, FINDINGS.AUTHORITY_MALFORMED]);
+    assert.equal(act(blockedWithValidAfter).action, ACTIONS.REPORT_DRIFT);
+  }
 });
 
 // ------------------------------------------------------------------ live wiring
@@ -1995,6 +2217,24 @@ function cli(script, args, snapshot, extraEnv = {}) {
     return spawnSync(process.execPath, [script, ...args, '--truth-file', file], { encoding: 'utf8', env });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+function cliAt(state, script, args, snapshot, extraEnv = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-reducer-state-'));
+  try {
+    for (const file of [STATE_PATH, DAG_PATH]) fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    fs.writeFileSync(path.join(root, STATE_PATH), stringifyYaml(state));
+    fs.copyFileSync(DAG_PATH, path.join(root, DAG_PATH));
+    const file = path.join(root, 'truth.json');
+    fs.writeFileSync(file, JSON.stringify(snapshot));
+    const env = { ...process.env, ...extraEnv };
+    delete env.GITHUB_EVENT_NAME;
+    delete env.GITHUB_EVENT_PATH;
+    for (const [key, value] of Object.entries(extraEnv)) if (value === undefined) delete env[key];
+    return spawnSync(process.execPath, [path.resolve(script), ...args, '--truth-file', file], { encoding: 'utf8', env, cwd: root });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
@@ -2026,9 +2266,9 @@ function withBuilder(available, fn) {
 }
 
 test('CLI end to end: orchestrate decides on the effective projection, and a hold set by typed authority wins', () => {
-  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const { comments: baseComments, repo: baseRepo } = recordedThrough151();
   const state = loadState(process.cwd());
-  const at = AFTER_RECORDING;
+  const at = AFTER_151;
   const msg = (id, type, packet, effect, extra = []) => ({
     id, html_url: `https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-${id}`, created_at: at, updated_at: at, user: { login: 'SaCH-PRO' },
     body: ['```yaml', `message_id: ${type}-${id}`, `message_type: ${type}`, `packet_id: ${packet}`, 'sender: chatgpt',
@@ -2036,43 +2276,43 @@ test('CLI end to end: orchestrate decides on the effective projection, and a hol
       'health: GREEN', 'scope_changed: false', 'production_touched: false', `control_effect: ${effect}`, ...extra, '```'].join('\n'),
   });
   const run = (comments, env = { KEYFLOW_AGENT_CLAUDE_DISABLED: '1' }) => {
-    const res = cli('scripts/agent-control/orchestrate.mjs', ['--json'], { comments, repo: recorded.repo }, env);
+    const res = cli('scripts/agent-control/orchestrate.mjs', ['--json'], { comments, repo: baseRepo }, env);
     assert.equal(res.status, 0, res.stderr);
     return JSON.parse(res.stdout);
   };
 
-  const plain = run(recorded.comments);
+  const plain = run(baseComments);
   assert.equal(plain.reconciliation.consistent, true, JSON.stringify(plain.reconciliation.findings));
   assert.equal(plain.decision.action, ACTIONS.WAIT_AUTHORITY);
 
-  const observed = run([...recorded.comments, msg(5966100001, 'REVIEW', 'KF-META-STATE-REDUCER-LIVE-001', 'NO_STATE_CHANGE')]);
+  const observed = run([...baseComments, msg(6700100001, 'REVIEW', AUTH_FC, 'NO_STATE_CHANGE')]);
   assert.equal(observed.reconciliation.consistent, true, 'an observed typed REVIEW no longer makes the projection stale');
-  assert.equal(observed.reconciliation.effective_state.authority_basis.message_id, 'REVIEW-5966100001');
+  assert.equal(observed.reconciliation.effective_state.authority_basis.message_id, 'REVIEW-6700100001');
   assert.deepEqual(observed.reconciliation.reduction.applied.map((a) => a.effect), ['NO_STATE_CHANGE']);
 
-  // With ACTION-001 explicitly released and a test builder available, the
+  // With the active hold explicitly released and a test builder available, the
   // in-flight packet reaches DISPATCH_BUILDER. Readiness comes from the stub
   // seam, never from the host or the runner (CORRECTION-003 F2).
-  const resumeMsg = msg(5966100002, 'RESUME', 'KF-EXEC-ACTION-001', 'HOLD_CLEAR');
-  const resume = withBuilder(true, (env) => run([...recorded.comments, resumeMsg], env));
+  const resumeMsg = msg(6700100002, 'RESUME', RECOVERY_PKT, 'HOLD_CLEAR');
+  const resume = withBuilder(true, (env) => run([...baseComments, resumeMsg], env));
   assert.equal(resume.reconciliation.consistent, true);
-  assert.equal(resume.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, false);
+  assert.equal(resume.reconciliation.effective_state.holds[RECOVERY_PKT].active, false);
   assert.equal(resume.decision.action, ACTIONS.DISPATCH_BUILDER);
-  assert.equal(resume.decision.packet_id, 'KF-META-STATE-REDUCER-LIVE-001');
+  assert.equal(resume.decision.packet_id, AUTH_FC);
 
   // A subsequent typed HOLD_SET still wins, with the same builder available.
-  const reheld = withBuilder(true, (env) => run([...recorded.comments, resumeMsg, msg(5966100004, 'HOLD', 'KF-EXEC-ACTION-001', 'HOLD_SET')], env));
+  const reheld = withBuilder(true, (env) => run([...baseComments, resumeMsg, msg(6700100004, 'HOLD', RECOVERY_PKT, 'HOLD_SET')], env));
   assert.equal(reheld.reconciliation.consistent, true);
-  assert.equal(reheld.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, true);
+  assert.equal(reheld.reconciliation.effective_state.holds[RECOVERY_PKT].active, true);
   assert.equal(reheld.decision.action, ACTIONS.WAIT_AUTHORITY);
 
   // Referent: the same release with no builder available waits for one, so the
   // dispatch above is the seam's doing, not the host's.
-  const noBuilder = withBuilder(false, (env) => run([...recorded.comments, resumeMsg], env));
+  const noBuilder = withBuilder(false, (env) => run([...baseComments, resumeMsg], env));
   assert.equal(noBuilder.decision.action, ACTIONS.WAIT_EXTERNAL_AGENT);
   assert.equal(noBuilder.decision.role, ROLES.BUILDER);
 
-  const untyped = run([...recorded.comments, { ...msg(5966100003, 'REVIEW', 'KF-META-STATE-REDUCER-LIVE-001', 'NO_STATE_CHANGE'), body: msg(5966100003, 'REVIEW', 'KF-META-STATE-REDUCER-LIVE-001', 'X').body.replace('control_effect: X\n', '') }]);
+  const untyped = run([...baseComments, { ...msg(6700100003, 'REVIEW', AUTH_FC, 'NO_STATE_CHANGE'), body: msg(6700100003, 'REVIEW', AUTH_FC, 'X').body.replace('control_effect: X\n', '') }]);
   assert.equal(untyped.decision.action, ACTIONS.REPORT_DRIFT);
   assert.deepEqual(untyped.reconciliation.findings.map((f) => f.code), [FINDINGS.DERIVED_STATE_STALE_AUTHORITY]);
 
@@ -2106,54 +2346,54 @@ function wake(comment, snapshot, extraEnv = {}, action = 'created') {
 }
 
 test('wake path end to end: a typed RESUME and a typed HOLD each wake, and the fold reads HOLD_CLEAR and HOLD_SET from the comment that woke', () => {
-  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const { comments: baseComments, repo: baseRepo } = recordedThrough151();
   const state = loadState(process.cwd());
-  const at = AFTER_RECORDING;
+  const at = AFTER_151;
   const msg = (id, type, effect, lines = [`control_effect: ${effect}`]) => ({
     id, html_url: `https://github.com/SaCH-PRO/KEYFLOWOS/issues/80#issuecomment-${id}`, created_at: at, updated_at: at, user: { login: 'SaCH-PRO' },
-    body: ['```yaml', `message_id: ${type}-${id}`, `message_type: ${type}`, 'packet_id: KF-EXEC-ACTION-001', 'sender: chatgpt',
+    body: ['```yaml', `message_id: ${type}-${id}`, `message_type: ${type}`, `packet_id: ${RECOVERY_PKT}`, 'sender: chatgpt',
       `source_main: ${state.programme.source_main}`, `implementation_branch: ${state.programme.implementation_branch}`, 'state: HELD',
       'health: GREEN', 'scope_changed: false', 'production_touched: false', ...lines, '```'].join('\n'),
   });
   const applied = (out) => out.reconciliation.reduction.applied.map((a) => a.effect);
 
   // RESUME: the comment wakes, and the decision made in that wake has the hold released.
-  const resumeMsg = msg(5982400001, 'RESUME', 'HOLD_CLEAR');
-  const resume = withBuilder(true, (env) => wake(resumeMsg, { comments: [...recorded.comments, resumeMsg], repo: recorded.repo }, env));
+  const resumeMsg = msg(6700200001, 'RESUME', 'HOLD_CLEAR');
+  const resume = withBuilder(true, (env) => wake(resumeMsg, { comments: [...baseComments, resumeMsg], repo: baseRepo }, env));
   assert.equal(resume.event.actionable, true, resume.event.wake_refused);
   assert.equal(resume.event.kind, 'RESUME');
   assert.equal(resume.event.control_effect, 'HOLD_CLEAR');
-  assert.deepEqual(resume.out.event, { kind: 'RESUME', key: 'issue_comment:5982400001:created', actionable: true });
+  assert.deepEqual(resume.out.event, { kind: 'RESUME', key: 'issue_comment:6700200001:created', actionable: true });
   assert.deepEqual(applied(resume.out), ['HOLD_CLEAR']);
-  assert.equal(resume.out.reconciliation.effective_state.authority_basis.comment_id, 5982400001);
-  assert.equal(resume.out.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, false);
+  assert.equal(resume.out.reconciliation.effective_state.authority_basis.comment_id, 6700200001);
+  assert.equal(resume.out.reconciliation.effective_state.holds[RECOVERY_PKT].active, false);
   assert.equal(resume.out.decision.action, ACTIONS.DISPATCH_BUILDER);
 
   // HOLD: the comment wakes, and the decision made in that wake has the hold set again.
-  const holdMsg = msg(5982400002, 'HOLD', 'HOLD_SET');
-  const hold = withBuilder(true, (env) => wake(holdMsg, { comments: [...recorded.comments, resumeMsg, holdMsg], repo: recorded.repo }, env));
+  const holdMsg = msg(6700200002, 'HOLD', 'HOLD_SET');
+  const hold = withBuilder(true, (env) => wake(holdMsg, { comments: [...baseComments, resumeMsg, holdMsg], repo: baseRepo }, env));
   assert.equal(hold.event.actionable, true, hold.event.wake_refused);
   assert.equal(hold.event.kind, 'HOLD');
   assert.equal(hold.event.control_effect, 'HOLD_SET');
-  assert.deepEqual(hold.out.event, { kind: 'HOLD', key: 'issue_comment:5982400002:created', actionable: true });
+  assert.deepEqual(hold.out.event, { kind: 'HOLD', key: 'issue_comment:6700200002:created', actionable: true });
   assert.deepEqual(applied(hold.out), ['HOLD_CLEAR', 'HOLD_SET']);
-  assert.equal(hold.out.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, true);
-  assert.equal(hold.out.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].hold_message_id, 'HOLD-5982400002');
+  assert.equal(hold.out.reconciliation.effective_state.holds[RECOVERY_PKT].active, true);
+  assert.equal(hold.out.reconciliation.effective_state.holds[RECOVERY_PKT].hold_message_id, 'HOLD-6700200002');
   assert.equal(hold.out.decision.action, ACTIONS.WAIT_AUTHORITY);
 
   // NC: an untyped RESUME is valid authority and wakes nothing; read by any
   // later wake, it stops the fold and the hold stays.
-  const untyped = msg(5982400003, 'RESUME', null, []);
-  const stale = withBuilder(true, (env) => wake(untyped, { comments: [...recorded.comments, untyped], repo: recorded.repo }, env));
+  const untyped = msg(6700200003, 'RESUME', null, []);
+  const stale = withBuilder(true, (env) => wake(untyped, { comments: [...baseComments, untyped], repo: baseRepo }, env));
   assert.equal(stale.event.actionable, false);
   assert.equal(stale.event.kind, 'RESUME');
   assert.match(stale.event.wake_refused, /CONTROL_EFFECT_MISSING/);
   assert.equal(stale.out.event.actionable, false);
   assert.equal(stale.out.decision.action, ACTIONS.REPORT_DRIFT);
-  assert.equal(stale.out.reconciliation.effective_state.holds['KF-EXEC-ACTION-001'].active, true);
+  assert.equal(stale.out.reconciliation.effective_state.holds[RECOVERY_PKT].active, true);
 
   // NC: the same typed RESUME delivered as an edit wakes nothing.
-  const edited = withBuilder(true, (env) => wake(resumeMsg, { comments: [...recorded.comments, resumeMsg], repo: recorded.repo }, env, 'edited'));
+  const edited = withBuilder(true, (env) => wake(resumeMsg, { comments: [...baseComments, resumeMsg], repo: baseRepo }, env, 'edited'));
   assert.equal(edited.event.actionable, false);
   assert.match(edited.event.wake_refused, /only a created comment wakes/);
 
@@ -2167,7 +2407,7 @@ test('CLI end to end: status --verify renders the effective projection and how i
 });
 
 test('CLI end to end: an invalid checkpoint on disk is reported as drift by orchestrate and by the status rendering (017)', () => {
-  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const { comments: baseComments, repo: baseRepo } = recordedThrough151();
   const committed = loadState(process.cwd());
   const script = path.resolve('scripts/agent-control/orchestrate.mjs');
   // A repository root holding only what the CLI reads: the checkpoint and the programme DAG.
@@ -2179,7 +2419,7 @@ test('CLI end to end: an invalid checkpoint on disk is reported as drift by orch
       fs.writeFileSync(path.join(root, STATE_PATH), stringifyYaml(state));
       fs.copyFileSync(DAG_PATH, path.join(root, DAG_PATH));
       const truth = path.join(root, 'truth.json');
-      fs.writeFileSync(truth, JSON.stringify({ comments: recorded.comments, repo: recorded.repo }));
+      fs.writeFileSync(truth, JSON.stringify({ comments: baseComments, repo: baseRepo }));
       const env = { ...process.env, KEYFLOW_AGENT_CLAUDE_DISABLED: '1' };
       delete env.GITHUB_EVENT_NAME;
       delete env.GITHUB_EVENT_PATH;
@@ -2214,7 +2454,7 @@ test('CLI end to end: an invalid checkpoint on disk is reported as drift by orch
 });
 
 test('CLI end to end: a checkpoint on disk with a wrong-type container is drift for orchestrate, with or without an event, and for the status rendering (018 K2)', () => {
-  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const { comments: baseComments, repo: baseRepo } = recordedThrough151();
   const committedText = fs.readFileSync(STATE_PATH, 'utf8').replace(/\r\n/g, '\n');
   const script = path.resolve('scripts/agent-control/orchestrate.mjs');
   // One line of the committed document replaced; everything else is the reviewed checkpoint.
@@ -2229,7 +2469,7 @@ test('CLI end to end: a checkpoint on disk with a wrong-type container is drift 
       fs.writeFileSync(path.join(root, STATE_PATH), text);
       fs.copyFileSync(DAG_PATH, path.join(root, DAG_PATH));
       const truth = path.join(root, 'truth.json');
-      fs.writeFileSync(truth, JSON.stringify({ comments: recorded.comments, repo: recorded.repo }));
+      fs.writeFileSync(truth, JSON.stringify({ comments: baseComments, repo: baseRepo }));
       const env = { ...process.env, KEYFLOW_AGENT_CLAUDE_DISABLED: '1' };
       delete env.GITHUB_EVENT_NAME;
       delete env.GITHUB_EVENT_PATH;
@@ -2248,7 +2488,7 @@ test('CLI end to end: a checkpoint on disk with a wrong-type container is drift 
   };
 
   const cases = [
-    // The committed checkpoint holds ACTION-001 in `holds`. Read as `{}`, an empty list would release it.
+    // The committed checkpoint holds RECOVERY_PKT in `holds`. Read as `{}`, an empty list would release it.
     ['holds: []', rewritten(/^holds:\n(?: .*\n|\n)*?(?=^\S)/m, 'holds: []\n\n'), 'holds must be a mapping when present, found list'],
     ['processed_event_keys: {}', rewritten(/^processed_event_keys: \[\]$/m, 'processed_event_keys: {}'), 'processed_event_keys must be a list when present, found mapping'],
     ['event_journal: null', rewritten(/^event_journal: \[\]$/m, 'event_journal: null'), 'event_journal must be a list when present, found null'],
@@ -2284,7 +2524,7 @@ test('CLI end to end: --apply on an invalid checkpoint journals nothing, writes 
   // Copilot r4179736619: with `processed_event_keys: {}` or `event_journal: null`
   // the journal step threw a TypeError, and with any other invalid checkpoint
   // saveState() threw, so --apply exited 2 and printed no decision.
-  const recorded = JSON.parse(fs.readFileSync(RECOVERY, 'utf8'));
+  const { comments: baseComments, repo: baseRepo } = recordedThrough151();
   const committedText = fs.readFileSync(STATE_PATH, 'utf8').replace(/\r\n/g, '\n');
   const script = path.resolve('scripts/agent-control/orchestrate.mjs');
   const rewritten = (pattern, replacement) => {
@@ -2299,7 +2539,7 @@ test('CLI end to end: --apply on an invalid checkpoint journals nothing, writes 
       fs.writeFileSync(path.join(root, STATE_PATH), text);
       fs.copyFileSync(DAG_PATH, path.join(root, DAG_PATH));
       const truth = path.join(root, 'truth.json');
-      fs.writeFileSync(truth, JSON.stringify({ comments: recorded.comments, repo: recorded.repo }));
+      fs.writeFileSync(truth, JSON.stringify({ comments: baseComments, repo: baseRepo }));
       const eventFile = path.join(root, 'event.json');
       fs.writeFileSync(eventFile, JSON.stringify({ schedule_time: '2026-10-04T22:00:00Z' }));
       const env = { ...process.env, KEYFLOW_AGENT_CLAUDE_DISABLED: '1', GITHUB_EVENT_NAME: 'schedule', GITHUB_EVENT_PATH: eventFile };

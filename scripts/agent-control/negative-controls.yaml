@@ -1255,20 +1255,37 @@ negative_controls:
     claim: >
       The committed projection is anchored to the newest authority in the
       recorded #80 evidence. Restoring the obsolete
-      CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016 anchor, whose fold
-      stops at the malformed RULING-020 (5985754624), fails the
-      recorded-evidence recovery proof. (Retargeted by RECOVERY-021; under
-      RECOVERY-REANCHOR-015 and EXACT-BINDING-016 it restored the
-      CONTRACT-CORRECTION-008 anchor, under CONTRACT-CORRECTION-008 C8-F2 the
-      release-directive anchor, earlier the RECONCILE-002 anchor, and before
-      that the 2026-09-25 one.)
+      CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021 anchor, whose fold stops
+      at the malformed Contacts review 6514446571, fails the recorded-evidence
+      recovery proof. (Retargeted for the 2026-11-06 recovery candidate; under
+      RECOVERY-021 it restored EXACT-BINDING-016, under RECOVERY-REANCHOR-015
+      and EXACT-BINDING-016 it restored CONTRACT-CORRECTION-008, under
+      CONTRACT-CORRECTION-008 C8-F2 the release-directive anchor, earlier the
+      RECONCILE-002 anchor, and before that the 2026-09-25 one.)
     mutation:
       file: .agent-control/programme-state.yaml
-      find: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021\n  comment_id: 5993146604"
-      replace: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-EXACT-BINDING-016\n  comment_id: 5982685256"
+      find: "  message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001\n  comment_id: 6692411347"
+      replace: "  message_id: CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021\n  comment_id: 5993146604"
     # The committed-checkpoint recorded-evidence proof is the recovery test in
     # authority-effects.spec; the previous checkpoints are replayed in-test.
-    proof_command: node --test --test-name-pattern="the committed checkpoint is re-derived at RECOVERY-021" scripts/agent-control/tests/authority-effects.spec.mjs
+    proof_command: node --test --test-name-pattern="the committed checkpoint is re-derived through CG-HOLD-CLAUDE-CAPACITY-20261106-001" scripts/agent-control/tests/authority-effects.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-RECOVERY-CONTACTS-MALFORMED-SKIPPED
+    claim: >
+      The 2026-11-06 recovery past the three malformed Contacts reviews on PR
+      190 (6514446571, 6514528789, 6519793805) is a re-anchor, never a skip.
+      On the real #80 recording, folding only valid messages would carry the
+      RECOVERY-021 and COMPAT-ACK-002 checkpoints past all three malformed
+      Contacts reviews and apply CG-DIR-RECOVERY-20261106-001 and
+      CG-HOLD-CLAUDE-CAPACITY-20261106-001 behind them.
+    mutation:
+      file: scripts/agent-control/lib/authority-effects.mjs
+      find: |-
+              ? [...(Array.isArray(authority.candidates) ? authority.candidates : authority.messages || [])].sort(compareAuthorityOrder)
+      replace: |-
+              ? [...(authority.messages || [])].sort(compareAuthorityOrder)
+    proof_command: node --test --test-name-pattern="stop at the malformed Contacts review 6514446571" scripts/agent-control/tests/authority-effects.spec.mjs
     timeout_ms: 120000
 
   - id: NC-RECOVERY-RULING-020-SKIPPED

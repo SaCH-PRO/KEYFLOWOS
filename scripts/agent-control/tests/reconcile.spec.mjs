@@ -18,7 +18,7 @@ import { decide, derivedDecision, ACTIONS } from '../lib/orchestrator.mjs';
 import { collectAuthority, reconcile, FINDINGS, AUTHORIZED_AUTHORS } from '../lib/reconcile.mjs';
 import { fetchRepoTruth, reconcileWithTruth } from '../lib/truth.mjs';
 import { evaluateAdmission, ADMISSION_REASONS } from '../lib/admission.mjs';
-import { loadDag } from '../lib/dag.mjs';
+import { loadDag, selectNext } from '../lib/dag.mjs';
 import { parseYaml } from '../lib/yaml.mjs';
 import { ROLES, AGENT_STATUS } from '../lib/adapters.mjs';
 
@@ -396,17 +396,22 @@ test('the committed programme-state is anchored, valid, and keeps ACTION-001 hel
   assert.equal(validateState(state).ok, true, JSON.stringify(validateState(state).problems));
   assert.equal(state.authority, 'derived-programme-projection');
   assert.ok(state.authority_basis?.message_id && state.authority_basis?.comment_id, 'projection must name its authority anchor');
-  // Packet-keyed since KF-META-STATE-REDUCER-LIVE-001 (C1); ACTION-001 is the one active hold.
-  assert.equal(state.holds?.['KF-EXEC-ACTION-001']?.active, true);
+  // Packet-keyed since KF-META-STATE-REDUCER-LIVE-001 (C1); ACTION-001 was cleared and checkpointed,
+  // while KF-META-STATE-RECOVERY-001 is the active hold under CG-HOLD-CLAUDE-CAPACITY-20261106-001.
+  assert.equal(state.holds?.['KF-EXEC-ACTION-001']?.active, false);
   assert.equal(state.holds['KF-EXEC-ACTION-001'].packet_id, 'KF-EXEC-ACTION-001');
-  assert.deepEqual(activeHolds(state).map((h) => h.packet_id), ['KF-EXEC-ACTION-001']);
+  assert.equal(state.holds['KF-EXEC-ACTION-001'].released_by, 'CG-RESUME-ACTION-001-IMPLEMENTATION-001');
+  assert.equal(state.holds?.['KF-META-STATE-RECOVERY-001']?.active, true);
+  assert.equal(state.holds['KF-META-STATE-RECOVERY-001'].packet_id, 'KF-META-STATE-RECOVERY-001');
+  assert.deepEqual(activeHolds(state).map((h) => h.packet_id), ['KF-META-STATE-RECOVERY-001']);
   assert.equal(state.programme.merge_authority, false);
-  // CG-DIRECTIVE-META-STATE-RECONCILE-002 required_truth.
-  assert.deepEqual(state.programme.checkpointed, CHECKPOINTED_BEFORE, 'only admitted application packets earn credit');
-  for (const meta of ['KF-META-AUTO-001', 'KF-META-CONTROL-PARSER-001', 'KF-META-STATE-RECONCILE-002', 'KF-META-AI-REVIEW-FAILOVER-001', 'KF-META-STATE-REDUCER-LIVE-001']) {
+  // Checkpointed application packets: the original 4 plus KF-EXEC-ACTION-001 (closed at 6013250691).
+  assert.deepEqual(state.programme.checkpointed, [...CHECKPOINTED_BEFORE, 'KF-EXEC-ACTION-001'], 'only admitted application packets earn credit');
+  for (const meta of ['KF-META-AUTO-001', 'KF-META-CONTROL-PARSER-001', 'KF-META-STATE-RECONCILE-002', 'KF-META-AI-REVIEW-FAILOVER-001', 'KF-META-STATE-REDUCER-LIVE-001', 'KF-META-DISPATCH-RESILIENCE-001', 'KF-META-DEV-TRUTH-RECONCILE-001', 'KF-META-EXECUTION-PREFLIGHT-001', 'KF-META-UI-SMOKE-001', 'KF-META-DEPLOY-PARITY-001', 'KF-META-STATE-RECOVERY-001']) {
     assert.ok(!state.programme.checkpointed.includes(meta), `the meta-package ${meta} earns zero packet credit`);
   }
-  assert.equal(state.programme.application_frontier, 'KF-EXEC-ACTION-001');
+  assert.equal(state.programme.application_frontier, 'KF-EXEC-TIME-001');
+  assert.equal(selectNext(loadDag(process.cwd()), state.programme.checkpointed).selected?.packet_id, 'KF-EXEC-TIME-001');
   assert.equal(state.platform_programme?.status, 'INACTIVE_SUCCESSOR');
   for (const flag of ['production_release_authorized', 'production_mutations_authorized', 'real_provider_traffic_authorized', 'platform_programme_activation_authorized']) {
     assert.equal(state.safety?.[flag], false, `${flag} must stay false`);
@@ -499,7 +504,7 @@ test('CLI end to end: a newer #80 message makes the committed projection report 
 
   const consistent = cli({ comments: [anchor], repo: repo(pr) });
   assert.equal(consistent.reconciliation.consistent, true, JSON.stringify(consistent.reconciliation.findings));
-  assert.equal(consistent.decision.action, ACTIONS.WAIT_AUTHORITY, 'ACTION-001 stays held');
+  assert.equal(consistent.decision.action, ACTIONS.WAIT_AUTHORITY, 'hold stays in force');
 
   const stale = cli({ comments: [anchor, newer], repo: repo(pr) });
   assert.equal(stale.decision.action, ACTIONS.REPORT_DRIFT);
@@ -523,12 +528,18 @@ function reconcile002Checkpoint() {
   const state = loadState(process.cwd());
   state.authority_basis = { message_id: 'CG-DIRECTIVE-META-STATE-RECONCILE-002', comment_id: 5875639550 };
   Object.assign(state.programme, {
+    checkpointed: [...CHECKPOINTED_BEFORE],
+    application_frontier: 'KF-EXEC-ACTION-001',
     active_packet: 'KF-META-CONTROL-PARSER-001',
     state: 'CHECKPOINTED',
     source_main: '71a534b8944f4bb4191c9123e64a93e87c6db9d4',
     implementation_branch: 'impl/kf-meta-control-parser-001',
     pr_number: 100,
   });
+  const actionHold = { ...state.holds['KF-EXEC-ACTION-001'], active: true };
+  delete actionHold.released_by;
+  delete actionHold.released_comment_id;
+  state.holds = { 'KF-EXEC-ACTION-001': actionHold };
   return state;
 }
 
