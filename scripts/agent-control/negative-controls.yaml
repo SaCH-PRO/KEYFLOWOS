@@ -3223,3 +3223,131 @@ negative_controls:
           if (holdsTarget(e, t)) active.set(key, e);
     proof_command: node --test --test-name-pattern="NC CLI hold chronology" scripts/agent-control/tests/merge-cli.spec.mjs
     timeout_ms: 180000
+
+  # --- Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH-001) ---
+
+  - id: NC-CLOUD-DUPLICATE-TASK-CLAIM
+    claim: >
+      A cloud engineering task whose deterministic idempotency key has already
+      been claimed cannot be claimed again without an explicit reconciliation
+      clearance.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "  if (recordedIdempotencyKeys.includes(task.idempotency_key) && !reconciliationClearance) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC cloud duplicate task claim" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-BRANCH-COLLISION
+    claim: >
+      Two active cloud tasks may never target the same impl/* implementation
+      branch concurrently.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "      if (other.implementation_branch === task.implementation_branch) {"
+      replace: "      if (false) {"
+    proof_command: node --test --test-name-pattern="NC cloud branch collision" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-EXPIRED-LEASE-ALLOWED
+    claim: >
+      An expired cloud task lease authorizes nothing; ownership checks fail
+      closed once lease.expires_at has passed.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "  if (Date.parse(nowIso) >= Date.parse(task.lease.expires_at)) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC cloud expired lease" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-REVOKED-LEASE-ALLOWED
+    claim: >
+      A revoked cloud task lease authorizes nothing; ownership checks fail
+      closed when lease.revoked is true or task.state is REVOKED.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "  if (task.state === CLOUD_TASK_STATES.REVOKED || task.lease.revoked === true) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC cloud revoked lease" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-WRONG-PROVIDER-ALLOWED
+    claim: >
+      Only the provider bound to the task and active lease may exercise
+      ownership over the task.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "  if (actorProvider !== task.provider || actorProvider !== task.lease.holder_provider) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC cloud wrong provider" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-INVALID-SOURCE-COMMIT-ALLOWED
+    claim: >
+      Every cloud task envelope must bind a valid 40-character lowercase hex
+      source_main SHA.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "  if (!isSha40(task.source_main)) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC cloud invalid source commit" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-UNAUTHORIZED-MERGE-ALLOWED
+    claim: >
+      A Phase 1 cloud task envelope can never grant merge authority or use an
+      AUTONOMOUS_MERGE approval level.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "  if (task.merge_authority === true || task.approval_level === 'AUTONOMOUS_MERGE') {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC cloud unauthorized merge" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-STALE-COMPLETION-EVIDENCE-ALLOWED
+    claim: >
+      Completion handoff evidence whose evidence_head does not match pr_head is
+      rejected as stale completion evidence.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "  if (handoff.evidence_head !== handoff.pr_head) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC cloud stale completion evidence" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-UNCERTAIN-REPLAY-ALLOWED
+    claim: >
+      A task in UNCERTAIN_RESULT blocks replay or re-claim even after lease
+      expiry until an explicit ChatGPT reconciliation clearance is provided.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        // architecture_authority (chatgpt / SaCH-PRO) is provided.
+          if (task.state === CLOUD_TASK_STATES.UNCERTAIN_RESULT || task.lease?.execution_uncertain === true) {
+      replace: |-
+        // architecture_authority (chatgpt / SaCH-PRO) is provided.
+          if (false) {
+    proof_command: node --test --test-name-pattern="NC cloud uncertain execution replay" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-PROVIDER-FAILOVER-UNSAFE
+    claim: >
+      Cross-provider failover must transfer ownership to a distinct provider or
+      agent identity and revoke the prior lease.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "  if (nextProvider === task.provider && nextAgentIdentity === task.agent_identity) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC cloud provider failover" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-MISSING-AUTHORITY-ALLOWED
+    claim: >
+      A cloud task without a valid authority provenance block fails closed as
+      cloud_authority_missing.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "    return { ok: false, reason: CLOUD_REASONS.AUTHORITY_MISSING, problems: ['authority block is required'] };"
+      replace: "    return { ok: true, reason: CLOUD_REASONS.OK, problems: [] };"
+    proof_command: node --test --test-name-pattern="NC cloud missing authority" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
