@@ -682,3 +682,35 @@ Key files:
 - `apps/server/src/modules/ai/flow-orchestrator.service.ts` — `governToolCall()`, `confirmThroughBoundary()`, `executeToolAction()`
 - `apps/server/src/modules/helpdesk/helpdesk.service.ts` — `createTicketRow()`, `emitTicketCreated()`
 - Proof: `apps/server/test/key-action-boundary.integration.test.ts`, `apps/server/test/key-action-boundary-surfaces.integration.test.ts`, `scripts/proof-admission/manifests/action-001-negative-controls.json`
+
+## 14. Agent Control Plane: Cloud-Native Multi-Agent Dispatch & Preflight (Phase 1)
+
+Added by `KF-META-CLOUD-DISPATCH-001`. Provides provider-neutral cloud task contracts (`.agent-control/cloud-task.yaml`), lease ownership and collision gates, uncertain-execution replay protection, durable continuity/failover handoff records (`.agent-control/cloud-handoff.yaml`), and a read-only GitHub Actions preflight path (`.github/workflows/agent-cloud-control.yml`).
+
+```
+.github/workflows/agent-cloud-control.yml (pull_request / workflow_dispatch, read-only)
+  → node --test scripts/agent-control/tests/cloud-control.spec.mjs
+  → cloud-dispatch.mjs --status --dry-run --json
+      → defaultCloudProviderRegistry() (lib/cloud-control.mjs)
+          → probeStatus() for gemini, kimi, claude-cloud, chatgpt (automated_provider_invocation: DEFERRED_PHASE_2)
+  → shouldRunPullRequestPreflight(): runs preflight on workflow_dispatch, when implementation_branch == GITHUB_HEAD_REF,
+    or whenever .agent-control/cloud-task.yaml or .agent-control/cloud-handoff.yaml is modified in the PR diff
+  → cloud-dispatch.mjs --preflight --task .agent-control/cloud-task.yaml --dry-run --json
+      → fail closed if git HEAD SHA, branch name, trusted main SHA, or git diff / merge-base is missing or invalid
+      → resolveVerifiedAuthority() from --verified-authority or authenticated GITHUB_EVENT_PATH bound to computeTaskContractDigest(task)
+      → evaluateCloudPreflight() (lib/cloud-control.mjs)
+          → validateCloudTask() + validateTaskAuthority() (requires authenticated verifiedAuthority; rejects self-asserted YAML claims)
+          → verifyTaskOwnership() (rejects expired, revoked, wrong-provider, or unresolved UNCERTAIN_RESULT leases)
+          → verifyChangedFilesInScope() (enforces allowed_scope and prohibited_scope over source_main..HEAD)
+          → validateCloudHandoff() + verifyCompletionProofs() (requires positive source_main → semantic_head → pr_head ancestry,
+            control-only tail after semantic_head, and passing proof_obligations covering required_tests)
+```
+
+Key files:
+
+- `scripts/agent-control/lib/cloud-control.mjs` — `validateCloudTask()`, `validateTaskAuthority()`, `computeTaskContractDigest()`, `verifyImmutableTaskContract()`, `evaluateLeaseAcquisition()`, `verifyUncertainExecutionClearance()`, `verifyTaskOwnership()`, `validateCloudHandoff()`, `verifyCompletionProofs()`, `recordTaskCompletion()`, `prepareProviderFailoverHandoff()`, `FileBackedCloudRegistry`, `evaluateCloudPreflight()`
+- `scripts/agent-control/cloud-dispatch.mjs` — `runCloudDispatchCli()`, `resolveVerifiedAuthority()`
+- `.github/workflows/agent-cloud-control.yml` — read-only preflight workflow
+- `.agent-control/cloud-task.yaml`, `.agent-control/cloud-handoff.yaml` — branch-bound cloud task and continuity handoff artifacts
+- Contract: `docs/development/CLOUD_AGENT_CONTROL_PLANE.md`
+- Proof: `scripts/agent-control/tests/cloud-control.spec.mjs`, `scripts/agent-control/negative-controls.yaml` (`NC-CLOUD-*`)

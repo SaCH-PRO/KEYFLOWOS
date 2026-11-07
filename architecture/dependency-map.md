@@ -89,6 +89,16 @@ normalize-event.mjs, orchestrate.mjs → lib/events.mjs → lib/authority-effect
 
 `authority-effects.mjs` does no I/O. `truth.mjs` alone reads #80 and repository truth through `gh`.
 
+### Agent Control Plane: Cloud-Native Multi-Agent Dispatch (Phase 1)
+
+`KF-META-CLOUD-DISPATCH-001` (`execution-paths.md` §14). Read-only preflight and provider-neutral task/lease/continuity validation:
+
+```
+cloud-dispatch.mjs → lib/cloud-control.mjs → lib/control-envelope.mjs (AUTHORIZED_AUTHORS), lib/yaml.mjs (parseYaml, stringifyYaml)
+```
+
+`lib/cloud-control.mjs` is pure except for optional local single-host persistence in `FileBackedCloudRegistry` and YAML file helpers. `cloud-dispatch.mjs` performs read-only `git` inspection and never mutates repository state, merges PRs, touches production, or posts to #80.
+
 ## KEY Action Boundary
 
 KF-EXEC-ACTION-001 (`execution-paths.md` §13). `KeyActionBoundaryService` is provided and exported by `KeyAutonomyModule`.

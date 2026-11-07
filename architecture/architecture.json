@@ -1032,6 +1032,21 @@
       "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
       "target": "module:ai",
       "type": "depends_on"
+    },
+    {
+      "source": "scripts/agent-control/lib/cloud-control.mjs",
+      "target": "scripts/agent-control",
+      "type": "belongs_to"
+    },
+    {
+      "source": "scripts/agent-control/cloud-dispatch.mjs",
+      "target": "scripts/agent-control/lib/cloud-control.mjs",
+      "type": "imports"
+    },
+    {
+      "source": "scripts/agent-control/lib/cloud-control.mjs",
+      "target": "docs/development/CLOUD_AGENT_CONTROL_PLANE.md",
+      "type": "implements"
     }
   ],
   "risks": [

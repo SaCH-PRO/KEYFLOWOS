@@ -3,10 +3,10 @@
  * CLOUD-DISPATCH CLI — Read-Only / Dry-Run Cloud Control Plane Inspector
  * (KF-META-CLOUD-DISPATCH-001)
  *
- * Validates cloud engineering task envelopes, handoff continuity records,
- * branch/commit integrity, scope boundaries, and lease ownership without
- * mutating repository state, merging pull requests, touching production, or
- * posting action-triggering messages to Issue #80.
+ * Validates cloud engineering task envelopes, authenticated authority records,
+ * handoff continuity records, branch/commit ancestry integrity, scope boundaries,
+ * and lease ownership without mutating repository state, merging pull requests,
+ * touching production, or posting action-triggering messages to Issue #80.
  */
 
 import fs from 'node:fs';
@@ -14,6 +14,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   CLOUD_REASONS,
+  computeTaskContractDigest,
   defaultCloudProviderRegistry,
   dispatchCloudTask,
   evaluateCloudPreflight,
@@ -37,7 +38,7 @@ function gitOutput(args, cwd = process.cwd()) {
 }
 
 function gitIsAncestor(ancestor, descendant, cwd = process.cwd()) {
-  if (!ancestor || !descendant) return null;
+  if (!ancestor || !descendant) return false;
   const res = spawnSync('git', ['merge-base', '--is-ancestor', ancestor, descendant], {
     cwd,
     encoding: 'utf8',
@@ -56,6 +57,77 @@ function gitChangedFiles(baseRef, headRef = 'HEAD', cwd = process.cwd()) {
     .split(/\r?\n/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function loadStructuredFile(filePath) {
+  const raw = fs.readFileSync(filePath, 'utf8');
+  if (filePath.endsWith('.json')) {
+    return JSON.parse(raw);
+  }
+  return loadCloudYamlFile(filePath);
+}
+
+/**
+ * Resolves an authenticated authority record from explicit options, a
+ * `--verified-authority <file>` CLI argument, or a verified GitHub Actions
+ * event payload (`GITHUB_EVENT_PATH`) bound to the task's immutable contract
+ * digest. Returns `null` when only unverified YAML claims are available.
+ */
+export function resolveVerifiedAuthority(task, argv = [], cwd = process.cwd(), options = {}) {
+  if (options.verifiedAuthority) {
+    return options.verifiedAuthority;
+  }
+  const authFileArg = argValue(argv, '--verified-authority');
+  if (authFileArg) {
+    const full = path.resolve(cwd, authFileArg);
+    if (fs.existsSync(full)) {
+      return loadStructuredFile(full);
+    }
+    return null;
+  }
+  const eventPath =
+    options.githubEventPath !== undefined
+      ? options.githubEventPath
+      : process.env.GITHUB_EVENT_PATH || null;
+  if (eventPath && fs.existsSync(eventPath) && task && typeof task === 'object') {
+    try {
+      const event = JSON.parse(fs.readFileSync(eventPath, 'utf8'));
+      const actor =
+        event?.pull_request?.user?.login ||
+        event?.sender?.login ||
+        null;
+      const approvalId = task?.authority?.approval_id || null;
+      const declaredDigest = task?.authority?.contract_digest || null;
+      const computedDigest = computeTaskContractDigest(task);
+      const prHeadRef = event?.pull_request?.head?.ref || null;
+      const prBaseSha = event?.pull_request?.base?.sha || null;
+
+      if (
+        actor &&
+        approvalId &&
+        declaredDigest &&
+        declaredDigest === computedDigest &&
+        (!prHeadRef || prHeadRef === task.implementation_branch) &&
+        (!prBaseSha || prBaseSha === task.source_main)
+      ) {
+        return {
+          authenticated: true,
+          approval_id: approvalId,
+          actor,
+          source_kind: task.authority.kind,
+          reference: task.authority.reference,
+          task_id: task.task_id,
+          packet_id: task.packet_id,
+          implementation_branch: task.implementation_branch,
+          source_main: task.source_main,
+          contract_digest: declaredDigest,
+        };
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }
 
 export function runCloudDispatchCli(argv = process.argv.slice(2), options = {}) {
@@ -138,7 +210,8 @@ export function runCloudDispatchCli(argv = process.argv.slice(2), options = {}) 
       };
     }
     const task = loadCloudYamlFile(full);
-    const res = validateCloudTask(task);
+    const verifiedAuthority = resolveVerifiedAuthority(task, argv, cwd, options);
+    const res = validateCloudTask(task, { verifiedAuthority });
     return {
       exitCode: res.ok ? 0 : 1,
       payload: { mode: 'VALIDATE_TASK', ...res },
@@ -161,10 +234,28 @@ export function runCloudDispatchCli(argv = process.argv.slice(2), options = {}) 
     }
     const handoff = loadCloudYamlFile(full);
     const taskFile = argValue(argv, '--task');
-    const task = taskFile && fs.existsSync(path.resolve(cwd, taskFile))
-      ? loadCloudYamlFile(path.resolve(cwd, taskFile))
-      : null;
-    const res = validateCloudHandoff(handoff, { task });
+    const task =
+      taskFile && fs.existsSync(path.resolve(cwd, taskFile))
+        ? loadCloudYamlFile(path.resolve(cwd, taskFile))
+        : null;
+    const verifiedAncestry =
+      options.verifiedAncestry || {
+        sourceMainIsAncestorOfSemanticHead: gitIsAncestor(
+          handoff?.source_main,
+          handoff?.semantic_head,
+          cwd,
+        ),
+        semanticHeadIsAncestorOfPrHead: gitIsAncestor(
+          handoff?.semantic_head,
+          handoff?.pr_head,
+          cwd,
+        ),
+      };
+    const res = validateCloudHandoff(handoff, {
+      task,
+      verifiedAncestry,
+      verifiedCiEvidence: options.verifiedCiEvidence || null,
+    });
     return {
       exitCode: res.ok ? 0 : 1,
       payload: { mode: 'VALIDATE_HANDOFF', ...res },
@@ -186,11 +277,13 @@ export function runCloudDispatchCli(argv = process.argv.slice(2), options = {}) 
       };
     }
     const task = loadCloudYamlFile(full);
+    const verifiedAuthority = resolveVerifiedAuthority(task, argv, cwd, options);
     const requireUnattended = argv.includes('--require-unattended');
     const res = dispatchCloudTask({
       task,
       nowIso,
       requireUnattended,
+      verifiedAuthority,
     });
     return {
       exitCode: res.ok ? 0 : 1,
@@ -221,9 +314,37 @@ export function runCloudDispatchCli(argv = process.argv.slice(2), options = {}) 
   const activePacket = fs.existsSync(packetPath) ? loadCloudYamlFile(packetPath) : null;
   const returnArtifact = fs.existsSync(returnPath) ? loadCloudYamlFile(returnPath) : null;
 
-  const branchEnv = process.env.GITHUB_HEAD_REF || gitOutput(['symbolic-ref', '--short', 'HEAD'], cwd);
+  const branchEnv =
+    options.branchName ||
+    process.env.GITHUB_HEAD_REF ||
+    gitOutput(['symbolic-ref', '--short', 'HEAD'], cwd);
   const branchName = branchEnv && branchEnv !== 'HEAD' ? branchEnv : null;
-  const headSha = gitOutput(['rev-parse', 'HEAD'], cwd);
+  const headSha = options.headSha !== undefined ? options.headSha : gitOutput(['rev-parse', 'HEAD'], cwd);
+
+  // Fail closed when git HEAD or branch state is missing or detached without GITHUB_HEAD_REF.
+  if (!headSha || !/^[0-9a-f]{40}$/.test(headSha)) {
+    return {
+      exitCode: 1,
+      payload: {
+        ok: false,
+        mode: 'READ_ONLY_PREFLIGHT',
+        reason: CLOUD_REASONS.INVALID_SOURCE_COMMIT,
+        problems: ['unable to resolve a valid 40-hex git HEAD SHA; preflight fails closed'],
+      },
+    };
+  }
+  if (!branchName) {
+    return {
+      exitCode: 1,
+      payload: {
+        ok: false,
+        mode: 'READ_ONLY_PREFLIGHT',
+        reason: CLOUD_REASONS.TASK_INVALID,
+        problems: ['unable to resolve current git branch name; preflight fails closed'],
+      },
+    };
+  }
+
   const expectedMainSha =
     options.expectedMainSha ||
     argValue(argv, '--expected-main') ||
@@ -235,63 +356,104 @@ export function runCloudDispatchCli(argv = process.argv.slice(2), options = {}) 
     gitOutput(['rev-parse', '--verify', 'refs/heads/main'], cwd) ||
     null;
 
-  // Verify that task.source_main is an existing commit on trusted main when git is available.
+  // Verify that task.source_main is an existing commit on trusted main.
   const catType = task?.source_main ? gitOutput(['cat-file', '-t', task.source_main], cwd) : null;
-  if (headSha && task?.source_main && catType !== 'commit') {
+  if (!task?.source_main || catType !== 'commit') {
     return {
       exitCode: 1,
       payload: {
         ok: false,
         mode: 'READ_ONLY_PREFLIGHT',
         reason: CLOUD_REASONS.SOURCE_COMMIT_NOT_ON_MAIN,
-        problems: [`source_main ${task.source_main} does not resolve to a commit in git history`],
+        problems: [`source_main ${task?.source_main || '<missing>'} does not resolve to a commit in git history`],
       },
     };
   }
-  if (headSha && task?.source_main) {
-    if (!trustedMainSha || gitIsAncestor(task.source_main, trustedMainSha, cwd) !== true) {
-      return {
-        exitCode: 1,
-        payload: {
-          ok: false,
-          mode: 'READ_ONLY_PREFLIGHT',
-          reason: CLOUD_REASONS.SOURCE_COMMIT_NOT_ON_MAIN,
-          problems: [
-            `source_main ${task.source_main} is not on trusted main (${trustedMainSha || 'unresolved'})`,
-          ],
-        },
-      };
-    }
-    if (expectedMainSha && task.source_main !== expectedMainSha) {
-      return {
-        exitCode: 1,
-        payload: {
-          ok: false,
-          mode: 'READ_ONLY_PREFLIGHT',
-          reason: CLOUD_REASONS.SOURCE_COMMIT_NOT_ON_MAIN,
-          problems: [
-            `source_main ${task.source_main} does not match expected main SHA ${expectedMainSha}`,
-          ],
-        },
-      };
-    }
+  if (!trustedMainSha || gitIsAncestor(task.source_main, trustedMainSha, cwd) !== true) {
+    return {
+      exitCode: 1,
+      payload: {
+        ok: false,
+        mode: 'READ_ONLY_PREFLIGHT',
+        reason: CLOUD_REASONS.SOURCE_COMMIT_NOT_ON_MAIN,
+        problems: [
+          `source_main ${task.source_main} is not on trusted main (${trustedMainSha || 'unresolved'})`,
+        ],
+      },
+    };
+  }
+  if (expectedMainSha && task.source_main !== expectedMainSha) {
+    return {
+      exitCode: 1,
+      payload: {
+        ok: false,
+        mode: 'READ_ONLY_PREFLIGHT',
+        reason: CLOUD_REASONS.SOURCE_COMMIT_NOT_ON_MAIN,
+        problems: [
+          `source_main ${task.source_main} does not match expected main SHA ${expectedMainSha}`,
+        ],
+      },
+    };
+  }
+  if (gitIsAncestor(task.source_main, headSha, cwd) !== true) {
+    return {
+      exitCode: 1,
+      payload: {
+        ok: false,
+        mode: 'READ_ONLY_PREFLIGHT',
+        reason: CLOUD_REASONS.SOURCE_COMMIT_NOT_ON_MAIN,
+        problems: [`source_main ${task.source_main} is not an ancestor of current HEAD ${headSha}`],
+      },
+    };
   }
 
-  const changedFiles = task?.source_main ? gitChangedFiles(task.source_main, 'HEAD', cwd) : null;
+  const changedFiles = gitChangedFiles(task.source_main, headSha, cwd);
+  if (!Array.isArray(changedFiles)) {
+    return {
+      exitCode: 1,
+      payload: {
+        ok: false,
+        mode: 'READ_ONLY_PREFLIGHT',
+        reason: CLOUD_REASONS.SCOPE_VIOLATION,
+        problems: [`failed to compute changed files between ${task.source_main} and ${headSha}`],
+      },
+    };
+  }
+
+  const sourceMainIsAncestor =
+    handoff && handoff.semantic_head
+      ? gitIsAncestor(task.source_main, handoff.semantic_head, cwd)
+      : gitIsAncestor(task.source_main, headSha, cwd);
   const semanticHeadIsAncestor =
-    handoff && headSha && handoff.semantic_head
+    handoff && handoff.semantic_head
       ? gitIsAncestor(handoff.semantic_head, headSha, cwd)
       : null;
   if (handoff && semanticHeadIsAncestor === false) {
     handoff.semantic_head_is_ancestor = false;
   }
+  if (handoff && sourceMainIsAncestor === false) {
+    handoff.source_main_is_ancestor = false;
+  }
   const tailChangedFiles =
-    handoff && headSha && handoff.semantic_head
-      ? gitChangedFiles(handoff.semantic_head, 'HEAD', cwd)
+    handoff && handoff.semantic_head
+      ? gitChangedFiles(handoff.semantic_head, headSha, cwd)
       : null;
+  if (handoff && !Array.isArray(tailChangedFiles)) {
+    return {
+      exitCode: 1,
+      payload: {
+        ok: false,
+        mode: 'READ_ONLY_PREFLIGHT',
+        reason: CLOUD_REASONS.STALE_COMPLETION_EVIDENCE,
+        problems: [`failed to compute tail diff between semantic_head (${handoff.semantic_head}) and HEAD (${headSha})`],
+      },
+    };
+  }
   const nonControlTailFiles = Array.isArray(tailChangedFiles)
     ? tailChangedFiles.filter((filePath) => !filePath.startsWith('.agent-control/'))
     : null;
+
+  const verifiedAuthority = resolveVerifiedAuthority(task, argv, cwd, options);
 
   const result = evaluateCloudPreflight({
     task,
@@ -300,10 +462,13 @@ export function runCloudDispatchCli(argv = process.argv.slice(2), options = {}) 
     returnArtifact,
     branchName,
     headSha,
-    mainSha: expectedMainSha || task?.source_main || null,
+    mainSha: expectedMainSha || task.source_main,
     changedFiles,
+    sourceMainIsAncestor,
     semanticHeadIsAncestor,
     nonControlTailFiles,
+    verifiedAuthority,
+    verifiedCiEvidence: options.verifiedCiEvidence || null,
     nowIso,
   });
 
@@ -320,4 +485,4 @@ if (invokedDirectly) {
   process.exit(exitCode);
 }
 
-export default { runCloudDispatchCli };
+export default { runCloudDispatchCli, resolveVerifiedAuthority };

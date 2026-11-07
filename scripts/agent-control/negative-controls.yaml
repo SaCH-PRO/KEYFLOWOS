@@ -3322,10 +3322,10 @@ negative_controls:
     mutation:
       file: scripts/agent-control/lib/cloud-control.mjs
       find: |-
-        // architecture_authority (chatgpt / SaCH-PRO) is provided.
+        // from architecture_authority (chatgpt / SaCH-PRO) is provided.
           if (task.state === CLOUD_TASK_STATES.UNCERTAIN_RESULT || task.lease?.execution_uncertain === true) {
       replace: |-
-        // architecture_authority (chatgpt / SaCH-PRO) is provided.
+        // from architecture_authority (chatgpt / SaCH-PRO) is provided.
           if (false) {
     proof_command: node --test --test-name-pattern="NC cloud uncertain execution replay" scripts/agent-control/tests/cloud-control.spec.mjs
     timeout_ms: 120000
@@ -3347,7 +3347,200 @@ negative_controls:
       cloud_authority_missing.
     mutation:
       file: scripts/agent-control/lib/cloud-control.mjs
-      find: "    return { ok: false, reason: CLOUD_REASONS.AUTHORITY_MISSING, problems: ['authority block is required'] };"
-      replace: "    return { ok: true, reason: CLOUD_REASONS.OK, problems: [] };"
+      find: |-
+        if (!task.authority || typeof task.authority !== 'object' || Array.isArray(task.authority)) {
+            return { ok: false, reason: CLOUD_REASONS.AUTHORITY_MISSING, problems: ['authority block is required'] };
+      replace: |-
+        if (false) {
+            return { ok: false, reason: CLOUD_REASONS.AUTHORITY_MISSING, problems: ['authority block is required'] };
     proof_command: node --test --test-name-pattern="NC cloud missing authority" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-UNVERIFIED-AUTHORITY-ALLOWED
+    claim: >
+      Self-asserted YAML authority or clearance strings (author: SaCH-PRO or
+      cleared_by_provider: chatgpt) are rejected as cloud_authority_unverified
+      when authenticated verifiedAuthority evidence bound to the immutable task
+      contract digest is missing.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "  if (!verifiedAuthority || typeof verifiedAuthority !== 'object' || Array.isArray(verifiedAuthority)) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="NC cloud unverified authority" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-MUTATED-RECONCILIATION-CONTRACT-ALLOWED
+    claim: >
+      Re-claiming or reconciling an existing task cannot mutate the original
+      task contract (packet_id, implementation_branch, provider, source_main,
+      risk_level, or allowed/prohibited scopes).
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        if (persistedSameTask) {
+            const immutableCheck = verifyImmutableTaskContract(persistedSameTask, task);
+            if (!immutableCheck.ok) {
+              return immutableCheck;
+            }
+          }
+      replace: |-
+        if (false) {
+            const immutableCheck = verifyImmutableTaskContract(persistedSameTask, task);
+            if (!immutableCheck.ok) {
+              return immutableCheck;
+            }
+          }
+    proof_command: node --test --test-name-pattern="NC cloud mutated reconciliation contract" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-MISSING-GIT-HEAD-ALLOWED
+    claim: >
+      Read-only cloud preflight fails closed when the current git HEAD SHA is
+      missing or invalid rather than skipping repository commit checks.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        if (!isSha40(headSha)) {
+            return {
+              ok: false,
+              mode: 'READ_ONLY_PREFLIGHT',
+              reason: CLOUD_REASONS.INVALID_SOURCE_COMMIT,
+              problems: ['current git HEAD SHA (40-hex) is required for fail-closed preflight'],
+            };
+          }
+      replace: |-
+        if (false) {
+          }
+    proof_command: node --test --test-name-pattern="NC cloud missing git head" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-MODIFIED-TASK-PREFLIGHT-SKIP-ALLOWED
+    claim: >
+      Modifying .agent-control/cloud-task.yaml or .agent-control/cloud-handoff.yaml
+      in a pull request diff forces preflight execution even if
+      implementation_branch names a different branch.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        if (modifiedControlArtifact) {
+            return { shouldRun: true, reason: 'cloud_control_artifact_modified_in_pr' };
+          }
+      replace: |-
+        if (false) {
+            return { shouldRun: true, reason: 'cloud_control_artifact_modified_in_pr' };
+          }
+    proof_command: node --test --test-name-pattern="NC cloud modified task preflight skip" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-FAILED-PROOF-COMPLETION-ALLOWED
+    claim: >
+      A handoff with a non-PASS proof obligation, unsatisfied required_tests,
+      non-empty scope_ledger.remaining, or missing verifiedCiEvidence cannot
+      validate or transition a task to COMPLETED_DRAFT.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        if (problems.length > 0) {
+            return {
+              ok: false,
+              reason: CLOUD_REASONS.PROOF_INCOMPLETE,
+              problems,
+            };
+          }
+      replace: |-
+        if (false) {
+          }
+    proof_command: node --test --test-name-pattern="NC cloud failed proof completion" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-REVOKED-FAILOVER-ALLOWED
+    claim: >
+      Cross-provider failover is refused when the source task or lease is
+      already REVOKED.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        if (task.state === CLOUD_TASK_STATES.REVOKED || task.lease?.revoked === true) {
+            return {
+              ok: false,
+              reason: CLOUD_REASONS.LEASE_REVOKED,
+              problems: [`cannot failover from an already-revoked task or lease (${task.task_id})`],
+            };
+          }
+      replace: |-
+        if (false) {
+          }
+    proof_command: node --test --test-name-pattern="NC cloud revoked failover" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-DOUBLE-FAILOVER-ALLOWED
+    claim: >
+      A task that has already been failed over to a replacement task in the
+      registry cannot be failed over a second time to mint a competing lease.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        if (existingReplacement) {
+              return {
+                ok: false,
+                reason: CLOUD_REASONS.DUPLICATE_TASK_CLAIM,
+                problems: [`task ${task.task_id} has already been failed over to ${existingReplacement.task_id}`],
+              };
+            }
+      replace: |-
+        if (false) {
+            }
+    proof_command: node --test --test-name-pattern="NC cloud double failover" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-STALE-LOCK-STEAL-ALLOWED
+    claim: >
+      FileBackedCloudRegistry never steals or unlinks an existing lockfile based
+      on age when waiting for a lock.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        if (err.code !== 'EEXIST') throw err;
+                if (Date.now() >= deadline) {
+      replace: |-
+        if (err.code !== 'EEXIST') throw err;
+                fs.unlinkSync(this.lockPath);
+                if (false) {
+    proof_command: node --test --test-name-pattern="NC cloud stale lock steal" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-UNVERIFIED-ANCESTRY-ALLOWED
+    claim: >
+      Handoff validation requires positive verification that source_main is an
+      ancestor of semantic_head and semantic_head is an ancestor of pr_head.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        if (
+            handoff.source_main_is_ancestor === false ||
+            verifiedAncestry?.sourceMainIsAncestorOfSemanticHead !== true
+          ) {
+            staleProblems.push('handoff.source_main is not positively verified as an ancestor of handoff.semantic_head');
+          }
+      replace: |-
+        if (false) {
+          }
+    proof_command: node --test --test-name-pattern="NC cloud unverified ancestry" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-STALE-CONTINUITY-HEAD-ALLOWED
+    claim: >
+      Adapter prepareHandoff treats task.source_head (including null after
+      REPLAY_FROM_SOURCE_MAIN) as authoritative over historical
+      continuity_from.verified_semantic_head.
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        const continuityHead =
+                task.source_head !== undefined
+                  ? task.source_head
+                  : (task.continuity_from?.verified_semantic_head ?? null);
+      replace: |-
+        const continuityHead = task.continuity_from?.verified_semantic_head || task.source_head || null;
+    proof_command: node --test --test-name-pattern="NC cloud stale continuity head" scripts/agent-control/tests/cloud-control.spec.mjs
     timeout_ms: 120000
