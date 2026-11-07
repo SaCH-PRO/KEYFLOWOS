@@ -14,7 +14,7 @@ held_claude_hold_message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001
 held_claude_hold_comment_id: 6692411347
 held_claude_status: HELD_NOT_CLEARED
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: 737f0cd7b146bac5cf10418438a86ccdd6117882
+source_head: 3e00eb349dee7a95624faa1f358e5916e2744ecc
 implementation_branch: impl/kf-meta-state-recovery-gemini-001
 pr_number: 193
 state: PROVING
@@ -51,6 +51,13 @@ semantic_commits:
       authority_basis, safety, platform_programme, merge_authority_marker, and
       derivation, and add discriminating negative control
       NC-RECOVERY-CANDIDATE-CORRUPTED-SOURCE-MAIN
+  - sha: 3e00eb349dee7a95624faa1f358e5916e2744ecc
+    what: >
+      Copilot r4503447267 correction: update PR #190 repository_evidence in
+      .agent-control/programme-state.yaml and checkpoint150() oracle in
+      scripts/agent-control/tests/authority-effects.spec.mjs to observed branch
+      impl/kf-product-contacts-visibility-001 (open draft, not admitted) and add
+      PR #190 branch corruption check
 
 diff_scope:
   - .agent-control/programme-state.yaml
@@ -108,8 +115,8 @@ implementation_decisions:
       KF-EXEC-EXTFX-001, KF-EXEC-TENANT-001, KF-EXEC-AUTH-001,
       KF-EXEC-ACTION-001), application frontier KF-EXEC-TIME-001, active
       application packet KF-EXEC-AUTH-FAIL-CLOSED-001 on PR #155 in
-      FIXING_PROOF_FAILURES state, and PR #190 recorded as open and not
-      admitted with zero checkpoint credit.
+      FIXING_PROOF_FAILURES state, and PR #190 (impl/kf-product-contacts-visibility-001)
+      recorded as open draft and not admitted with zero checkpoint credit.
 
 characterization:
   baseline_at_main: >
@@ -124,7 +131,7 @@ characterization:
     hold CG-HOLD-CLAUDE-CAPACITY-20261106-001 on KF-META-STATE-RECOVERY-001.
 
 tests:
-  at: 737f0cd7b146bac5cf10418438a86ccdd6117882
+  at: 3e00eb349dee7a95624faa1f358e5916e2744ecc
   host: Linux Debian 12 container, Node 24.22.2, isolated cloud Gemini session, 2026-11-07
   portable:
     command: node --test scripts/agent-control/tests/*.spec.mjs
@@ -170,6 +177,13 @@ tests:
     branch_divergence_run: 42401751415 (jobs 128490881724 and 128490846837 PASS)
     dast_hawkscan_run: 42401751548 (job 128490847631 PASS)
     reviews_recorded: ChatGPT review 5814335443 (CHANGES REQUIRED BEFORE ANY ADMISSION; DRAFT EVIDENCE-ONLY PUBLICATION ACCEPTED, R1-R4) and Copilot review 5814369912 (inline comments 4503242854, 4503242873, 4503263655)
+  previous_head_657f596a73d1b705cd006cb4987036cbf49ba64e:
+    agent_control_gate_run: 42406702730 (PASS)
+    ci_cd_pipeline_run: 42406702746 (PASS: Lint 128505835749, Security Scan 128505836001, Type Check 128505836051, Build Web 128506761732, Build Server 128506761792, Run Tests 128506761963)
+    branch_divergence_run: 42406702745 and 42406697523 (PASS)
+    dast_hawkscan_run: 42406702741 (PASS)
+    portable_proof_ubuntu_job: 128505835961 in run 42406702744 (PASS)
+    reviews_recorded: Copilot review 5814590520 (marked 4503242873, 4503242854, 4503263655 resolved; flagged 4503447267 on PR #190 branch reference)
 
 proof_matrix:
   - obligation: independent generation-151 reconstruction oracle built from frozen RECOVERY-021 checkpoint + valid generations 88..146 + non-granting malformed 147..149 + valid 150 NO_STATE_CHANGE and 151 HOLD_SET matches the candidate state and rejects corrupted candidate fields
