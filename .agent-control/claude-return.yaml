@@ -4,6 +4,7 @@ authority_status: PROVISIONAL_UNAUTHORIZED_FOR_MERGE
 directive_message_id: null
 directive_comment_id: null
 review_comment_reference: https://github.com/SaCH-PRO/KEYFLOWOS/pull/192#issuecomment-6710863815
+exact_head_review_reference: https://github.com/SaCH-PRO/KEYFLOWOS/pull/193#pullrequestreview-5814335443
 current_authority_message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001
 current_authority_comment_id: 6692411347
 held_claude_packet_id: KF-META-STATE-RECOVERY-001
@@ -13,7 +14,7 @@ held_claude_hold_message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001
 held_claude_hold_comment_id: 6692411347
 held_claude_status: HELD_NOT_CLEARED
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: e674a1be13f5a4f3cfa26918f18630730f55fdb4
+source_head: 737f0cd7b146bac5cf10418438a86ccdd6117882
 implementation_branch: impl/kf-meta-state-recovery-gemini-001
 pr_number: 193
 state: PROVING
@@ -39,6 +40,17 @@ semantic_commits:
       and scripts/agent-control/tests/reconcile.spec.mjs, and negative controls
       NC-PROJECTION-OBSOLETE-ANCHOR and NC-RECOVERY-CONTACTS-MALFORMED-SKIPPED in
       scripts/agent-control/negative-controls.yaml
+  - sha: 737f0cd7b146bac5cf10418438a86ccdd6117882
+    what: >
+      R1 correction (PR #193 review 5814335443 and Copilot r4503242873): make
+      checkpoint021() self-contained without reading loadState(process.cwd()),
+      build projection146() and checkpoint150() as an independent reconstruction
+      oracle from checkpoint021() + valid generations 88..146 + non-granting
+      malformed 147..149 + valid 150 NO_STATE_CHANGE and 151 HOLD_SET, compare
+      the candidate against the oracle across programme, meta_package, holds,
+      authority_basis, safety, platform_programme, merge_authority_marker, and
+      derivation, and add discriminating negative control
+      NC-RECOVERY-CANDIDATE-CORRUPTED-SOURCE-MAIN
 
 diff_scope:
   - .agent-control/programme-state.yaml
@@ -69,6 +81,14 @@ implementation_decisions:
       foldAuthorityHistory output across the 151 authority candidates (141
       valid, 10 malformed) on Issue #80. Marked PROVISIONAL / UNAUTHORIZED FOR
       MERGE per PR #192 coordination note 6710863815.
+  - independent_reconstruction_oracle: >
+      Construct projection146() and checkpoint150() in
+      scripts/agent-control/tests/authority-effects.spec.mjs independently from
+      the frozen RECOVERY-021 checkpoint literal and recorded valid generations
+      88..146, accounting explicitly for malformed generations 147..149 as
+      non-granting evidence and applying valid 150 NO_STATE_CHANGE and 151
+      HOLD_SET via the reducer, with NC-RECOVERY-CANDIDATE-CORRUPTED-SOURCE-MAIN
+      catching candidate corruption (R1, Copilot r4503242873).
   - pre_anchor_malformed_quarantine: >
       Advancing authority_basis to 6692411347 places the three October 30, 2026
       malformed PR #190 authority comments (6514446571, 6514528789, 6519793805;
@@ -104,12 +124,12 @@ characterization:
     hold CG-HOLD-CLAUDE-CAPACITY-20261106-001 on KF-META-STATE-RECOVERY-001.
 
 tests:
-  at: e674a1be13f5a4f3cfa26918f18630730f55fdb4
-  host: Linux Debian 12 container, Node 24.14.0, isolated local Gemini session, 2026-11-07
+  at: 737f0cd7b146bac5cf10418438a86ccdd6117882
+  host: Linux Debian 12 container, Node 24.22.2, isolated cloud Gemini session, 2026-11-07
   portable:
     command: node --test scripts/agent-control/tests/*.spec.mjs
-    total: 582
-    passed: 544
+    total: 583
+    passed: 545
     failed: 0
     skipped: 38
     skip_reason: >
@@ -117,32 +137,45 @@ tests:
       worker.spec.mjs require PowerShell (pwsh or powershell.exe), which is not
       installed in this Linux container; they are NOT_RUN locally.
   windows_suite: >
-    NOT_RUN in this Linux container because PowerShell is unavailable; must be
-    executed on a Windows host before final merge authorization.
+    NOT_RUN locally in this Linux container because PowerShell is unavailable;
+    evaluated on hosted GitHub Actions windows-latest (see
+    previous_head_baf7f6f2b8c1a1cdad4f135a4a38061f3a2eee48 for the earlier head
+    and exact_head_proof for this head).
   focused:
     reconcile_spec: 12/12
-    authority_effects_spec: 16/16
+    authority_effects_spec: 93/93
     return_evidence_spec: 17/17
     yaml_spec: 18/18
   dag_validators: validate-dag.mjs OK (35 packets / 37 phases)
   negative_controls:
     command: node scripts/agent-control/proof-mutation.mjs --manifest scripts/agent-control/negative-controls.yaml
-    total_manifest_entries: 248
-    portable_entries_run: 226
-    portable_live: 226
+    total_manifest_entries: 249
+    portable_entries_run: 227
+    portable_live: 227
     portable_vacuous: 0
     powershell_entries_not_run_on_linux: 22
-    new_control_added: NC-RECOVERY-CONTACTS-MALFORMED-SKIPPED (LIVE)
+    new_controls_added:
+      - NC-RECOVERY-CONTACTS-MALFORMED-SKIPPED (LIVE)
+      - NC-RECOVERY-CANDIDATE-CORRUPTED-SOURCE-MAIN (LIVE)
     updated_control_anchor: NC-PROJECTION-OBSOLETE-ANCHOR (LIVE at 6692411347)
     return_artifact_controls: >
       NC-RETURN-ARTIFACT-PREMATURE-ID, NC-RETURN-ARTIFACT-PASS-PROSE, and
       NC-RETURN-ARTIFACT-MISSING-SCOPE verified LIVE against this file.
+  previous_head_baf7f6f2b8c1a1cdad4f135a4a38061f3a2eee48:
+    agent_control_worker_proof_run: 42401751425
+    portable_proof_ubuntu_job: 128490895889 (PASS, 59s, KF_REQUIRE_POWERSHELL=1, 0 skipped, DAG OK 35 packets / 37 phases)
+    windows_worker_proof_job: 128490896313 (PASS, 40m9s on windows-latest, Portable and Windows proofs PASS, 248/248 negative controls live)
+    agent_control_gate_run: 42401840859 (job 128491109835, PASS, 9s)
+    ci_cd_pipeline_run: 42401751484 (Security Scan 128490912658, Type Check 128490912810, Lint 128490912922, Run Tests 128491731292, Build Web 128491731313, Build Server 128491731323 all PASS)
+    branch_divergence_run: 42401751415 (jobs 128490881724 and 128490846837 PASS)
+    dast_hawkscan_run: 42401751548 (job 128490847631 PASS)
+    reviews_recorded: ChatGPT review 5814335443 (CHANGES REQUIRED BEFORE ANY ADMISSION; DRAFT EVIDENCE-ONLY PUBLICATION ACCEPTED, R1-R4) and Copilot review 5814369912 (inline comments 4503242854, 4503242873, 4503263655)
 
 proof_matrix:
-  - obligation: canonical reducer fold across Issue #80 authority history through generation 151 matches the generation-151 checkpoint state
+  - obligation: independent generation-151 reconstruction oracle built from frozen RECOVERY-021 checkpoint + valid generations 88..146 + non-granting malformed 147..149 + valid 150 NO_STATE_CHANGE and 151 HOLD_SET matches the candidate state and rejects corrupted candidate fields
     evidence_scope: semantic_head
     result: PROVEN
-    proof: authority-effects.spec.mjs and reconcile.spec.mjs against fixtures/reducer-recovery-truth.json
+    proof: authority-effects.spec.mjs (projection146, checkpoint150, assertMatchesIndependentOracle, and NC test) plus NC-RECOVERY-CANDIDATE-CORRUPTED-SOURCE-MAIN
   - obligation: post-anchor reconciliation at generation 151 (anchor 6692411347) returns CONSISTENT with 0 post-anchor malformed authority comments
     evidence_scope: semantic_head
     result: PROVEN
@@ -163,14 +196,14 @@ proof_matrix:
     evidence_scope: semantic_head
     result: PROVEN
     proof: return-evidence.spec.mjs, yaml.spec.mjs, NC-RETURN-ARTIFACT-PREMATURE-ID, NC-RETURN-ARTIFACT-PASS-PROSE, and NC-RETURN-ARTIFACT-MISSING-SCOPE
-  - obligation: all 226 Node-portable negative controls are LIVE with 0 VACUOUS controls
+  - obligation: all 227 Node-portable negative controls are LIVE locally with 0 VACUOUS controls
     evidence_scope: semantic_head
     result: PROVEN
-    proof: proof-mutation.mjs run across all 226 Node-portable entries in scripts/agent-control/negative-controls.yaml
-  - obligation: 38 PowerShell-dependent subtests across evaluate-run.spec.mjs, select-directive.spec.mjs, and worker.spec.mjs plus 22 PowerShell-dependent negative controls on a Windows host
+    proof: proof-mutation.mjs run across all 227 Node-portable entries in scripts/agent-control/negative-controls.yaml
+  - obligation: 38 PowerShell-dependent subtests across evaluate-run.spec.mjs, select-directive.spec.mjs, and worker.spec.mjs plus 22 PowerShell-dependent negative controls on a local Windows host
     evidence_scope: semantic_head
     result: NOT_RUN
-    proof: Linux container lacks pwsh/powershell.exe; deferred to Windows worker execution
+    proof: Linux container lacks pwsh/powershell.exe; see previous_head_baf7f6f2b8c1a1cdad4f135a4a38061f3a2eee48 for the earlier hosted Windows proof and exact_head_proof for this head
   - obligation: every required workflow and the independent review at the PR head
     evidence_scope: exact_head
     result: PENDING
@@ -178,24 +211,24 @@ proof_matrix:
 
 findings:
   - id: AUTHORITY_MALFORMED_OCT30_PR190
-    status: CANDIDATE_PREPARED_LOCAL_ONLY
+    status: EVIDENCE_ONLY_DRAFT_PR_193_PUBLISHED
     detail: >
       Three ChatGPT reviews on 2026-10-30 for PR #190 (6514446571, 6514528789,
       6519793805; generations 147..149) omitted required AUTHORITY envelope
       fields while programme-state.yaml remained anchored at 5993146604
-      (generation 87). Advancing the checkpoint to generation 151 (anchor
-      6692411347, CG-HOLD-CLAUDE-CAPACITY-20261106-001) restores post-anchor
-      reconciliation while preserving full-history audit visibility and keeping
-      the Claude HOLD intact.
+      (generation 87). Advancing the checkpoint candidate to generation 151
+      (anchor 6692411347, CG-HOLD-CLAUDE-CAPACITY-20261106-001) on isolated
+      Draft PR #193 restores post-anchor reconciliation while preserving
+      full-history audit visibility and keeping the Claude HOLD intact.
 
 residual_risks:
-  - select-directive.mjs and claude-worker.ps1 do not currently filter directives by target agent or implementation_owner; posting an unguarded DIRECTIVE on Issue #80 could wake the local Windows Claude worker unless worker dispatch is isolated or paused first
-  - 38 PowerShell-dependent subtests across evaluate-run.spec.mjs, select-directive.spec.mjs, and worker.spec.mjs and 22 PowerShell-dependent negative controls were not executed in this Linux environment
-  - this recovery candidate remains uncommitted and local-only until an explicit Issue #80 DIRECTIVE authorizes KF-META-STATE-RECOVERY-GEMINI-001 on impl/kf-meta-state-recovery-gemini-001
+  - 38 PowerShell-dependent subtests across evaluate-run.spec.mjs, select-directive.spec.mjs, and worker.spec.mjs and 22 PowerShell-dependent negative controls are NOT_RUN in the local Linux container; see previous_head_baf7f6f2b8c1a1cdad4f135a4a38061f3a2eee48 for the earlier hosted Windows run while the new head run is PENDING
+  - Draft PR #193 is published as an evidence-only draft under coordination note 6710863815 and review 5814335443; canonical Issue #80 recovery/re-anchor authority and an exact-head merge grant remain outstanding
+  - Claude HOLD CG-HOLD-CLAUDE-CAPACITY-20261106-001 (6692411347) on KF-META-STATE-RECOVERY-001 remains active and is not cleared by this draft candidate
 
 rollback_floor:
-  - before commit or push, checkout main or discard uncommitted changes on impl/kf-meta-state-recovery-gemini-001
-  - after merge, revert the recovery commits to return .agent-control/programme-state.yaml to generation 87
+  - before merge (published draft stage): close Draft PR #193 unmerged and delete isolated branch impl/kf-meta-state-recovery-gemini-001; main (b1948d2797e1bae3660a3d7173abb75397e05aad) and Issue #80 remain untouched
+  - after merge (if later authorized and merged): revert the recovery commits on main to return .agent-control/programme-state.yaml to generation 87
   - no production, database, schema, or application runtime files are touched
 
 security:

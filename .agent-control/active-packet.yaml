@@ -4,6 +4,7 @@ authority_status: PROVISIONAL_UNAUTHORIZED_FOR_MERGE
 directive_message_id: null
 directive_comment_id: null
 review_comment_reference: https://github.com/SaCH-PRO/KEYFLOWOS/pull/192#issuecomment-6710863815
+exact_head_review_reference: https://github.com/SaCH-PRO/KEYFLOWOS/pull/193#pullrequestreview-5814335443
 current_authority_message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001
 current_authority_comment_id: 6692411347
 held_claude_packet:
@@ -30,14 +31,15 @@ merge_authority: false
 review_status: PROVISIONAL_UNAUTHORIZED_FOR_MERGE
 
 objective: >
-  Prepare an isolated local Gemini recovery candidate on branch
-  impl/kf-meta-state-recovery-gemini-001 under distinct packet
-  KF-META-STATE-RECOVERY-GEMINI-001 to advance the committed programme-state
-  checkpoint from generation 87 (CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021,
-  5993146604) past the three October 30, 2026 malformed ChatGPT review comments
-  on PR #190 (6514446571, 6514528789, 6519793805; generations 147..149) to
-  generation 151 (CG-HOLD-CLAUDE-CAPACITY-20261106-001, 6692411347) while
-  preserving the five established application checkpoints, active PR #155
+  Prepare and publish an isolated evidence-only DRAFT Gemini recovery candidate
+  on branch impl/kf-meta-state-recovery-gemini-001 (Draft PR #193) under
+  distinct packet KF-META-STATE-RECOVERY-GEMINI-001 to advance the committed
+  programme-state checkpoint from generation 87
+  (CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021, 5993146604) past the three
+  October 30, 2026 malformed ChatGPT review comments on PR #190 (6514446571,
+  6514528789, 6519793805; generations 147..149) to generation 151
+  (CG-HOLD-CLAUDE-CAPACITY-20261106-001, 6692411347) while preserving the five
+  established application checkpoints, active PR #155
   (KF-EXEC-AUTH-FAIL-CLOSED-001), open non-admitted PR #190, and the active
   Claude capacity hold CG-HOLD-CLAUDE-CAPACITY-20261106-001 (6692411347) on
   KF-META-STATE-RECOVERY-001.
@@ -59,12 +61,25 @@ target_contract:
     and do not conflate this implementation branch with PR #192
     (docs/kf-control-recovery-evidence-20261106, which modifies only
     docs/development/CONTROL-PLANE-RECOVERY-EVIDENCE-2026-11-06.md).
+  draft_publication_authorization: >
+    Narrow evidence-only DRAFT publication — committing the semantic and
+    control-artifact layers locally, pushing isolated branch
+    impl/kf-meta-state-recovery-gemini-001, and opening/updating Draft PR #193
+    for hosted GitHub Actions CI and Windows proof evaluation — is explicitly
+    authorized and exercised under ChatGPT coordination note
+    https://github.com/SaCH-PRO/KEYFLOWOS/pull/192#issuecomment-6710863815 and
+    exact-head engineering review
+    https://github.com/SaCH-PRO/KEYFLOWOS/pull/193#pullrequestreview-5814335443.
+    No new Issue #80 directive is permitted or required for evidence-only draft
+    evaluation, and PC-based worker orchestration has been retired as a
+    workflow dependency.
   release_preconditions: >
-    No commit, push, remote PR creation, Issue #80 comment, merge, or deployment
-    is permitted until a new ChatGPT DIRECTIVE on Issue #80 explicitly assigns
-    KF-META-STATE-RECOVERY-GEMINI-001 on impl/kf-meta-state-recovery-gemini-001
-    and worker dispatch isolation is verified so claude-worker.ps1 cannot self-wake
-    on a Gemini-bound directive.
+    Draft PR #193 remains strictly PROVISIONAL / UNAUTHORIZED FOR MERGE.
+    Marking PR #193 ready for review, claiming formal recovery/re-anchor
+    admission, merging to main, or deploying remains prohibited until: (1)
+    canonical ChatGPT recovery/re-anchor authority is recorded on Issue #80,
+    (2) independent semantic review is satisfied on the exact PR head, and (3)
+    a separate exact-head merge grant is recorded on Issue #80.
 
 allowed_scope:
   - .agent-control/programme-state.yaml
@@ -100,14 +115,14 @@ invariants:
   - no historical test coverage or negative control is removed
 
 proof_obligations:
-  - canonical reducer fold across Issue #80 authority history through generation 151 matches the generation-151 checkpoint state
+  - independent generation-151 reconstruction oracle built from frozen RECOVERY-021 checkpoint + valid generations 88..146 + non-granting malformed 147..149 + valid 150 NO_STATE_CHANGE and 151 HOLD_SET matches the candidate across programme, meta_package, holds, authority_basis, safety, platform_programme, merge_authority_marker, and derivation, with discriminating negative control NC-RECOVERY-CANDIDATE-CORRUPTED-SOURCE-MAIN
   - post-anchor reconciliation at generation 151 (anchor 6692411347) returns CONSISTENT with 0 post-anchor malformed authority comments
   - full-history audit across all 151 authority candidates still surfaces all 10 historical malformed authority comments including 6514446571, 6514528789, and 6519793805
   - post-anchor malformed authority comments after 6692411347 still fail closed with AUTHORITY_MALFORMED
   - branch artifacts (.agent-control/active-packet.yaml and .agent-control/claude-return.yaml) validate cleanly and bind to KF-META-STATE-RECOVERY-GEMINI-001 and impl/kf-meta-state-recovery-gemini-001
-  - all 226 Node-portable negative controls in scripts/agent-control/negative-controls.yaml are LIVE with 0 VACUOUS controls
+  - all 227 Node-portable negative controls in scripts/agent-control/negative-controls.yaml are LIVE locally and all 249 negative controls (including 22 Windows PowerShell controls) are LIVE on hosted Windows CI
 
 stop_conditions:
   - main moves off b1948d2797e1bae3660a3d7173abb75397e05aad before release
   - any change to parser, reducer, admission, merge-grant, or DAG files is required
-  - worker dispatch isolation for claude-worker.ps1 vs Gemini directives is unresolved before posting a live Issue #80 DIRECTIVE
+  - any attempt to mark Draft PR #193 ready for review, claim formal admission, or merge before canonical Issue #80 recovery authority, independent semantic review, and exact-head merge grant are recorded
