@@ -174,7 +174,7 @@ derivation:
     - PR 109 (impl/kf-meta-state-reducer-001) open draft, reference input only
     - PR 127 (impl/kf-meta-memory-truth-audit-001) open draft, not merged; the memory track, see parallel_tracks
     - PR 155 (impl/kf-exec-auth-fail-closed-001) open draft, active packet KF-EXEC-AUTH-FAIL-CLOSED-001; not merged
-    - PR 190 (fix/contacts-visibility-restore-001) open, not admitted; its three Oct 30 Contacts authority comments on issue 80 (6514446571, 6514528789, 6519793805) are malformed and grant no state transition or admission in this projection
+    - PR 190 (impl/kf-product-contacts-visibility-001) open draft, not admitted; its three Oct 30 Contacts authority comments on issue 80 (6514446571, 6514528789, 6519793805) are malformed and grant no state transition or admission in this projection
     - PR 192 (docs/kf-control-recovery-evidence-20261106) open draft, recovery evidence document docs/development/CONTROL-PLANE-RECOVERY-EVIDENCE-2026-11-06.md; not an implementation branch
 
 programme:

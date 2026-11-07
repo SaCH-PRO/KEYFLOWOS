@@ -2405,7 +2405,7 @@ function checkpoint150() {
         'PR 109 (impl/kf-meta-state-reducer-001) open draft, reference input only',
         'PR 127 (impl/kf-meta-memory-truth-audit-001) open draft, not merged; the memory track, see parallel_tracks',
         'PR 155 (impl/kf-exec-auth-fail-closed-001) open draft, active packet KF-EXEC-AUTH-FAIL-CLOSED-001; not merged',
-        'PR 190 (fix/contacts-visibility-restore-001) open, not admitted; its three Oct 30 Contacts authority comments on issue 80 (6514446571, 6514528789, 6519793805) are malformed and grant no state transition or admission in this projection',
+        'PR 190 (impl/kf-product-contacts-visibility-001) open draft, not admitted; its three Oct 30 Contacts authority comments on issue 80 (6514446571, 6514528789, 6519793805) are malformed and grant no state transition or admission in this projection',
         'PR 192 (docs/kf-control-recovery-evidence-20261106) open draft, recovery evidence document docs/development/CONTROL-PLANE-RECOVERY-EVIDENCE-2026-11-06.md; not an implementation branch',
       ],
     },
@@ -2576,6 +2576,7 @@ test('NC recorded evidence (recovery 2026-11-06): the independent reconstruction
     ['holds.KF-META-STATE-RECOVERY-001 marked inactive', (c) => { c.holds[RECOVERY_PKT].active = false; }],
     ['safety.production_release_authorized flipped to true', (c) => { c.safety.production_release_authorized = true; }],
     ['derivation.repository_evidence missing PR 190 non-admission record', (c) => { c.derivation.repository_evidence = c.derivation.repository_evidence.filter((line) => !line.startsWith('PR 190')); }],
+    ['derivation.repository_evidence recording wrong PR 190 branch', (c) => { c.derivation.repository_evidence = c.derivation.repository_evidence.map((line) => line.replace('impl/kf-product-contacts-visibility-001', 'fix/contacts-visibility-restore-001')); }],
   ];
 
   for (const [label, corrupt] of corruptions) {
