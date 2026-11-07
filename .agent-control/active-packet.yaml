@@ -4,7 +4,7 @@ authority_status: PROVISIONAL_UNAUTHORIZED_FOR_MERGE
 directive_message_id: null
 directive_comment_id: null
 review_comment_reference: https://github.com/SaCH-PRO/KEYFLOWOS/pull/192#issuecomment-6710863815
-exact_head_review_reference: https://github.com/SaCH-PRO/KEYFLOWOS/pull/193#pullrequestreview-5814335443
+exact_head_review_reference: https://github.com/SaCH-PRO/KEYFLOWOS/pull/193#pullrequestreview-5814679107
 current_authority_message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001
 current_authority_comment_id: 6692411347
 held_claude_packet:
@@ -48,11 +48,20 @@ target_contract:
   checkpoint_advancement: >
     Advance .agent-control/programme-state.yaml from generation 87
     (authority_basis 5993146604) to generation 151 (authority_basis 6692411347,
-    CG-HOLD-CLAUDE-CAPACITY-20261106-001) across 151 authority candidates (141
-    valid, 10 malformed) on Issue #80 so canonical post-anchor authority
+    CG-HOLD-CLAUDE-CAPACITY-20261106-001) so canonical post-anchor authority
     reconciliation no longer stops at pre-anchor malformed comments 6514446571,
-    6514528789, and 6519793805, while full-history audit retains exact
-    visibility of all 10 malformed comments across 1,622 Issue #80 comments.
+    6514528789, and 6519793805. Distinguish four evidence scopes: (a) the full
+    live Issue #80 scan reported by Gemini during read-only investigation (1,840
+    comments through 6692411347, 151 authority candidates: 141 valid, 10
+    malformed); (b) frozen reviewed history inherited before generation 64
+    (5963509515), including the first 4 malformed entries carried forward in
+    derivation.malformed_authority_evidence; (c) locally replayed/fixture-backed
+    generations 64..151 (1,147 recorded comments across 205 + 276 + 666 blocks
+    in scripts/agent-control/fixtures/reducer-recovery-truth.json, covering 88
+    authority candidates: 82 valid, 6 malformed); and (d) newly proven
+    generation 88..151 effects (59 valid effects in 88..146, 3 non-granting
+    malformed October 30 Contacts reviews in 147..149, and valid 150
+    NO_STATE_CHANGE and 151 HOLD_SET).
   worker_and_branch_isolation: >
     Keep Gemini recovery work strictly isolated on branch
     impl/kf-meta-state-recovery-gemini-001 under packet
@@ -68,8 +77,10 @@ target_contract:
     for hosted GitHub Actions CI and Windows proof evaluation — is explicitly
     authorized and exercised under ChatGPT coordination note
     https://github.com/SaCH-PRO/KEYFLOWOS/pull/192#issuecomment-6710863815 and
-    exact-head engineering review
-    https://github.com/SaCH-PRO/KEYFLOWOS/pull/193#pullrequestreview-5814335443.
+    exact-head engineering reviews
+    https://github.com/SaCH-PRO/KEYFLOWOS/pull/193#pullrequestreview-5814335443
+    and
+    https://github.com/SaCH-PRO/KEYFLOWOS/pull/193#pullrequestreview-5814679107.
     No new Issue #80 directive is permitted or required for evidence-only draft
     evaluation, and PC-based worker orchestration has been retired as a
     workflow dependency.
@@ -117,7 +128,7 @@ invariants:
 proof_obligations:
   - independent generation-151 reconstruction oracle built from frozen RECOVERY-021 checkpoint + valid generations 88..146 + non-granting malformed 147..149 + valid 150 NO_STATE_CHANGE and 151 HOLD_SET matches the candidate across programme, meta_package, holds, authority_basis, safety, platform_programme, merge_authority_marker, and derivation, with discriminating negative control NC-RECOVERY-CANDIDATE-CORRUPTED-SOURCE-MAIN
   - post-anchor reconciliation at generation 151 (anchor 6692411347) returns CONSISTENT with 0 post-anchor malformed authority comments
-  - full-history audit across all 151 authority candidates still surfaces all 10 historical malformed authority comments including 6514446571, 6514528789, and 6519793805
+  - fixture-backed replay across the 1,147 recorded comments in scripts/agent-control/fixtures/reducer-recovery-truth.json (generations 64..151: 82 valid, 6 malformed including 6514446571, 6514528789, 6519793805) and preservation of all 10 entries in derivation.malformed_authority_evidence (4 inherited pre-64 checkpoint claims + 6 fixture-backed in 64..151), distinguished from the 1,840-comment / 151-candidate live Issue #80 scan reported by Gemini
   - post-anchor malformed authority comments after 6692411347 still fail closed with AUTHORITY_MALFORMED
   - branch artifacts (.agent-control/active-packet.yaml and .agent-control/claude-return.yaml) validate cleanly and bind to KF-META-STATE-RECOVERY-GEMINI-001 and impl/kf-meta-state-recovery-gemini-001
   - all 227 Node-portable negative controls in scripts/agent-control/negative-controls.yaml are LIVE locally and all 249 negative controls (including 22 Windows PowerShell controls) are LIVE on hosted Windows CI

@@ -4,7 +4,7 @@ authority_status: PROVISIONAL_UNAUTHORIZED_FOR_MERGE
 directive_message_id: null
 directive_comment_id: null
 review_comment_reference: https://github.com/SaCH-PRO/KEYFLOWOS/pull/192#issuecomment-6710863815
-exact_head_review_reference: https://github.com/SaCH-PRO/KEYFLOWOS/pull/193#pullrequestreview-5814335443
+exact_head_review_reference: https://github.com/SaCH-PRO/KEYFLOWOS/pull/193#pullrequestreview-5814679107
 current_authority_message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001
 current_authority_comment_id: 6692411347
 held_claude_packet_id: KF-META-STATE-RECOVERY-001
@@ -84,10 +84,18 @@ implementation_decisions:
       Advance .agent-control/programme-state.yaml from generation 87
       (authority_basis 5993146604, CG-REVIEW-META-STATE-REDUCER-LIVE-RECOVERY-021)
       to generation 151 (authority_basis 6692411347,
-      CG-HOLD-CLAUDE-CAPACITY-20261106-001) using the canonical
-      foldAuthorityHistory output across the 151 authority candidates (141
-      valid, 10 malformed) on Issue #80. Marked PROVISIONAL / UNAUTHORIZED FOR
-      MERGE per PR #192 coordination note 6710863815.
+      CG-HOLD-CLAUDE-CAPACITY-20261106-001). Distinguish four provenance
+      scopes (R5): (a) the full live Issue #80 scan reported by Gemini during
+      read-only investigation (1,840 comments through 6692411347, 151 authority
+      candidates: 141 valid, 10 malformed); (b) frozen reviewed checkpoint
+      history inherited before generation 64 (5963509515), including the first 4
+      malformed entries in derivation.malformed_authority_evidence; (c) locally
+      replayed/fixture-backed generations 64..151 (1,147 recorded comments across
+      205 + 276 + 666 blocks in reducer-recovery-truth.json, covering 88
+      authority candidates: 82 valid, 6 malformed); and (d) newly proven
+      generation 88..151 effects plus the three October 30 malformed Contacts
+      reviews. Marked PROVISIONAL / UNAUTHORIZED FOR MERGE per PR #192
+      coordination note 6710863815.
   - independent_reconstruction_oracle: >
       Construct projection146() and checkpoint150() in
       scripts/agent-control/tests/authority-effects.spec.mjs independently from
@@ -100,8 +108,10 @@ implementation_decisions:
       Advancing authority_basis to 6692411347 places the three October 30, 2026
       malformed PR #190 authority comments (6514446571, 6514528789, 6519793805;
       generations 147..149) prior to the checkpoint anchor so post-anchor
-      reconciliation is no longer blocked, while full-history audit continues to
-      report all 10 historical malformed authority comments.
+      reconciliation is no longer blocked, while
+      derivation.malformed_authority_evidence preserves all 10 historical
+      records (4 inherited pre-generation-64 reviewed records + 6 fixture-backed
+      records in generations 64..151).
   - claude_hold_preservation: >
       Preserve CG-HOLD-CLAUDE-CAPACITY-20261106-001 (6692411347) on
       KF-META-STATE-RECOVERY-001 as the active generation-151 anchor. Do not
@@ -184,6 +194,13 @@ tests:
     dast_hawkscan_run: 42406702741 (PASS)
     portable_proof_ubuntu_job: 128505835961 in run 42406702744 (PASS)
     reviews_recorded: Copilot review 5814590520 (marked 4503242873, 4503242854, 4503263655 resolved; flagged 4503447267 on PR #190 branch reference)
+  previous_head_565dc961608176b4670640aa78ffb0124962508d:
+    agent_control_gate_run: 42408178805 and 42408250874 (PASS)
+    ci_cd_pipeline_run: 42408178861 (PASS)
+    branch_divergence_run: 42408178834 and 42408175029 (PASS)
+    dast_hawkscan_run: 42408178803 (PASS)
+    portable_proof_ubuntu_job: in run 42408178774 (PASS)
+    reviews_recorded: ChatGPT review 5814679107 (R1/R2 and PR #190 branch identity substantively addressed; R5-R6 evidence-scope and archive-first rollback calibration requested) and Copilot review 5814657799 (0 open inline issues; 4 prior inline comments resolved)
 
 proof_matrix:
   - obligation: independent generation-151 reconstruction oracle built from frozen RECOVERY-021 checkpoint + valid generations 88..146 + non-granting malformed 147..149 + valid 150 NO_STATE_CHANGE and 151 HOLD_SET matches the candidate state and rejects corrupted candidate fields
@@ -194,10 +211,14 @@ proof_matrix:
     evidence_scope: semantic_head
     result: PROVEN
     proof: reconcile.spec.mjs and live status.mjs --verify / orchestrate.mjs --json checks
-  - obligation: full-history audit across all 151 authority candidates surfaces all 10 historical malformed authority comments including 6514446571, 6514528789, and 6519793805
+  - obligation: fixture-backed replay across the 1,147 recorded comments in reducer-recovery-truth.json (generations 64..151: 82 valid, 6 malformed) and newly proven generation 88..151 fold effects plus 3 non-granting Oct 30 malformed Contacts reviews (6514446571, 6514528789, 6519793805), with derivation.malformed_authority_evidence preserving all 10 historical records (4 inherited pre-64 checkpoint claims + 6 fixture-backed in 64..151)
     evidence_scope: semantic_head
     result: PROVEN
-    proof: reconcile.spec.mjs full-history audit test and NC-RECOVERY-CONTACTS-MALFORMED-SKIPPED
+    proof: authority-effects.spec.mjs, reconcile.spec.mjs, and NC-RECOVERY-CONTACTS-MALFORMED-SKIPPED
+  - obligation: independent raw-comment rederivation of pre-generation-64 authority candidates (generations 1..63, including the first 4 malformed entries 5826124586, 5826612913, 5826799265, 5875440129 inherited from reviewed RECOVERY-021 checkpoint claims; the 1,840-comment / 151-candidate live Issue #80 scan was reported by Gemini during read-only investigation, whereas reducer-recovery-truth.json starts at comment 5963509515 / generation 64)
+    evidence_scope: semantic_head
+    result: NOT_RUN
+    proof: pre-generation-64 raw comments predate 5963509515 in reducer-recovery-truth.json and are carried forward as frozen reviewed checkpoint claims from RECOVERY-021 rather than rederived by local fixture tests
   - obligation: malformed authority comments after checkpoint anchor 6692411347 fail closed with AUTHORITY_MALFORMED
     evidence_scope: semantic_head
     result: PROVEN
@@ -232,16 +253,19 @@ findings:
       fields while programme-state.yaml remained anchored at 5993146604
       (generation 87). Advancing the checkpoint candidate to generation 151
       (anchor 6692411347, CG-HOLD-CLAUDE-CAPACITY-20261106-001) on isolated
-      Draft PR #193 restores post-anchor reconciliation while preserving
-      full-history audit visibility and keeping the Claude HOLD intact.
+      Draft PR #193 restores post-anchor reconciliation while preserving all 10
+      historical malformed entries in derivation.malformed_authority_evidence
+      (4 inherited pre-64 checkpoint claims + 6 fixture-backed in 64..151) and
+      keeping the Claude HOLD intact.
 
 residual_risks:
   - 38 PowerShell-dependent subtests across evaluate-run.spec.mjs, select-directive.spec.mjs, and worker.spec.mjs and 22 PowerShell-dependent negative controls are NOT_RUN in the local Linux container; see previous_head_baf7f6f2b8c1a1cdad4f135a4a38061f3a2eee48 for the earlier hosted Windows run while the new head run is PENDING
-  - Draft PR #193 is published as an evidence-only draft under coordination note 6710863815 and review 5814335443; canonical Issue #80 recovery/re-anchor authority and an exact-head merge grant remain outstanding
+  - Pre-generation-64 raw comments (generations 1..63, including the first 4 malformed entries in derivation.malformed_authority_evidence) predate 5963509515 in reducer-recovery-truth.json and are inherited as frozen reviewed checkpoint claims from RECOVERY-021 rather than rederived by local fixture tests (R5)
+  - Draft PR #193 is published as an evidence-only draft under coordination note 6710863815 and reviews 5814335443 and 5814679107; canonical Issue #80 recovery/re-anchor authority and an exact-head merge grant remain outstanding
   - Claude HOLD CG-HOLD-CLAUDE-CAPACITY-20261106-001 (6692411347) on KF-META-STATE-RECOVERY-001 remains active and is not cleared by this draft candidate
 
 rollback_floor:
-  - before merge (published draft stage): close Draft PR #193 unmerged and delete isolated branch impl/kf-meta-state-recovery-gemini-001; main (b1948d2797e1bae3660a3d7173abb75397e05aad) and Issue #80 remain untouched
+  - before merge (published draft stage): close Draft PR #193 unmerged, create and verify an archive/impl/kf-meta-state-recovery-gemini-001-<YYYY-MM-DD> tag on origin per docs/branch-hygiene-policy.md Rule 4 to preserve all commits before any branch deletion, and only then delete isolated branch impl/kf-meta-state-recovery-gemini-001 if explicitly authorized (no branch deletion now); main (b1948d2797e1bae3660a3d7173abb75397e05aad) and Issue #80 remain untouched
   - after merge (if later authorized and merged): revert the recovery commits on main to return .agent-control/programme-state.yaml to generation 87
   - no production, database, schema, or application runtime files are touched
 
