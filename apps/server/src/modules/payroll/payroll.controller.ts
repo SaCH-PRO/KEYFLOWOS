@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   Inject,
@@ -55,7 +56,11 @@ export class PayrollController {
 
   @Post('runs/:runId/mark-paid')
   @RequireModuleScope('operations', 'write')
-  markRunPaid(@Param('businessId') businessId: string, @Param('runId') runId: string) {
-    return this.payroll.markRunPaid(businessId, runId);
+  markRunPaid(
+    @Param('businessId') businessId: string,
+    @Param('runId') runId: string,
+    @Body() body?: { paymentMethod?: string },
+  ) {
+    return this.payroll.markRunPaid(businessId, runId, body?.paymentMethod);
   }
 }

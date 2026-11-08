@@ -99,6 +99,20 @@ export interface BusinessGraphSnapshot {
     activeProductCount: number;
     averagePrice: number;
   };
+  treasury?: {
+    cashBalance: number;
+    unpaidBillsAmount: number;
+    unpaidBillsCount: number;
+    committedPayrollAmount: number;
+    committedPayrollRuns: number;
+  };
+  pipeline?: {
+    openDealCount: number;
+    openPipelineValue: number;
+  };
+  support?: {
+    openTicketCount: number;
+  };
   momentumScore: number;
   healthIndicators: Array<{ area: string; status: 'good' | 'warning' | 'critical'; detail: string }>;
   links: GraphEntityLink[];
@@ -173,6 +187,11 @@ export class BusinessGraphService {
       automationRuns,
       activeProducts,
       avgProductPrice,
+      cashAccountsAgg,
+      unpaidBillsAgg,
+      committedPayrollAgg,
+      openDealsAgg,
+      openTicketsCount,
     ] = await Promise.all([
       db.business.findUnique({
         where: { id: businessId },
@@ -212,6 +231,36 @@ export class BusinessGraphService {
       db.automation.aggregate({ where: { businessId, deletedAt: null }, _sum: { runCount: true } }),
       db.product.count({ where: { businessId, deletedAt: null, isActive: true } }),
       db.product.aggregate({ where: { businessId, deletedAt: null, isActive: true }, _avg: { price: true } }),
+      db.financialAccount?.aggregate
+        ? db.financialAccount.aggregate({
+            where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
+            _sum: { currentBalance: true },
+          })
+        : Promise.resolve({ _sum: { currentBalance: 0 } }),
+      db.expense.aggregate({
+        where: { businessId, deletedAt: null, status: 'BILL' },
+        _sum: { amount: true },
+        _count: true,
+      }),
+      db.payrollRun?.aggregate
+        ? db.payrollRun.aggregate({
+            where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
+            _sum: { totalGross: true },
+            _count: true,
+          })
+        : Promise.resolve({ _sum: { totalGross: 0 }, _count: 0 }),
+      db.deal?.aggregate
+        ? db.deal.aggregate({
+            where: { businessId, deletedAt: null, status: 'OPEN' },
+            _sum: { value: true },
+            _count: true,
+          })
+        : Promise.resolve({ _sum: { value: 0 }, _count: 0 }),
+      db.supportTicket?.count
+        ? db.supportTicket.count({
+            where: { businessId, deletedAt: null, status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING'] } },
+          })
+        : Promise.resolve(0),
     ]);
 
     const statusMap: Record<string, number> = {};
@@ -234,6 +283,14 @@ export class BusinessGraphService {
       ? (completedProjectTasks / totalProjectTasks) * 100
       : 0;
 
+    const cashBalance = Number(cashAccountsAgg?._sum?.currentBalance ?? 0);
+    const unpaidBillsAmount = Number(unpaidBillsAgg?._sum?.amount ?? 0);
+    const unpaidBillsCount = Number(unpaidBillsAgg?._count ?? 0);
+    const committedPayrollAmount = Number(committedPayrollAgg?._sum?.totalGross ?? 0);
+    const committedPayrollRuns = Number(committedPayrollAgg?._count ?? 0);
+    const openPipelineValue = Number(openDealsAgg?._sum?.value ?? 0);
+    const openDealCount = Number(openDealsAgg?._count ?? 0);
+
     const categoryNames = await this.resolveCategoryNames(businessId, expensesByCategory.map(e => e.categoryId).filter(Boolean) as string[]);
     const topCategories = expensesByCategory.map(e => ({
       name: (e.categoryId && categoryNames[e.categoryId]) || 'Uncategorized',
@@ -250,6 +307,10 @@ export class BusinessGraphService {
       budgetUtil,
       totalExpMonth,
       monthlyRev,
+      cashBalance,
+      unpaidBillsAmount,
+      committedPayrollAmount,
+      openTicketsCount,
     });
 
     const momentumSignals = [
@@ -320,6 +381,20 @@ export class BusinessGraphService {
       storefront: {
         activeProductCount: activeProducts,
         averagePrice: Math.round((avgProductPrice._avg.price ?? 0) * 100) / 100,
+      },
+      treasury: {
+        cashBalance,
+        unpaidBillsAmount,
+        unpaidBillsCount,
+        committedPayrollAmount,
+        committedPayrollRuns,
+      },
+      pipeline: {
+        openDealCount,
+        openPipelineValue,
+      },
+      support: {
+        openTicketCount: openTicketsCount,
       },
       momentumScore,
       healthIndicators,
@@ -494,6 +569,10 @@ export class BusinessGraphService {
     budgetUtil: number;
     totalExpMonth: number;
     monthlyRev: number;
+    cashBalance?: number;
+    unpaidBillsAmount?: number;
+    committedPayrollAmount?: number;
+    openTicketsCount?: number;
   }): BusinessGraphSnapshot['healthIndicators'] {
     const indicators: BusinessGraphSnapshot['healthIndicators'] = [];
 
@@ -550,6 +629,15 @@ export class BusinessGraphService {
       });
     }
 
+    const obligations = (data.unpaidBillsAmount ?? 0) + (data.committedPayrollAmount ?? 0);
+    if (obligations > 0 && data.cashBalance !== undefined && obligations > data.cashBalance) {
+      indicators.push({
+        area: 'treasury',
+        status: 'critical',
+        detail: `Committed bills and payroll ($${obligations.toLocaleString()}) exceed available cash ($${data.cashBalance.toLocaleString()})`,
+      });
+    }
+
     return indicators;
   }
 
@@ -563,9 +651,16 @@ export class BusinessGraphService {
       `Contacts: ${snapshot.contacts.total} total (${snapshot.contacts.staleLeadCount} stale leads)`,
       `Revenue: $${snapshot.revenue.totalCollected.toLocaleString()} collected, $${snapshot.revenue.monthlyRevenue.toLocaleString()} this month`,
       `Outstanding: $${snapshot.revenue.outstandingAmount.toLocaleString()} (${snapshot.revenue.outstandingCount} invoices, ${snapshot.revenue.overdueCount} overdue)`,
+      snapshot.treasury
+        ? `Cash & Obligations: $${snapshot.treasury.cashBalance.toLocaleString()} cash, $${snapshot.treasury.unpaidBillsAmount.toLocaleString()} unpaid bills (${snapshot.treasury.unpaidBillsCount}), $${snapshot.treasury.committedPayrollAmount.toLocaleString()} committed payroll (${snapshot.treasury.committedPayrollRuns} runs)`
+        : null,
+      snapshot.pipeline
+        ? `Pipeline: ${snapshot.pipeline.openDealCount} open deals ($${snapshot.pipeline.openPipelineValue.toLocaleString()})`
+        : null,
       `Bookings: ${snapshot.bookings.upcomingCount} upcoming, ${snapshot.bookings.completedThisMonth} completed this month`,
       `Expenses: $${snapshot.expenses.totalThisMonth.toLocaleString()} this month`,
       `Projects: ${snapshot.projects.activeCount} active, ${snapshot.projects.overdueTaskCount} overdue tasks`,
+      snapshot.support ? `Support: ${snapshot.support.openTicketCount} open tickets` : null,
       `Content: ${snapshot.content.draftPostCount} draft posts, ${snapshot.content.scheduledPostCount} scheduled, ${snapshot.content.draftCampaignCount} draft campaigns`,
       `Automations: ${snapshot.automations.activeCount} active flows`,
       `Store: ${snapshot.storefront.activeProductCount} active products`,

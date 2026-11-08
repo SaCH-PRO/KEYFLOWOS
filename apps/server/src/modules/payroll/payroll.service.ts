@@ -1,5 +1,7 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { ExpensePostingService } from '../finance/expense-posting.service';
 
 export interface PayRateInput {
   assignmentId: string;
@@ -23,7 +25,10 @@ export interface PayrollRunFilters {
 export class PayrollService {
   private readonly logger = new Logger(PayrollService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Optional() @Inject(ExpensePostingService) private readonly expensePosting?: ExpensePostingService,
+  ) {}
 
   // ── Rates ──────────────────────────────────────────────────────────────
 
@@ -215,14 +220,45 @@ export class PayrollService {
     });
   }
 
-  async markRunPaid(businessId: string, runId: string) {
+  async markRunPaid(businessId: string, runId: string, paymentMethod?: string) {
     const run = await this.getRun(businessId, runId);
     if (run.status !== 'APPROVED') {
       throw new BadRequestException(`Run is ${run.status} — it must be APPROVED before marking paid`);
     }
-    return this.prisma.client.payrollRun.update({
+    const paidAt = new Date();
+    const postPayload = {
+      id: run.id,
+      businessId,
+      totalGross: Number(run.totalGross),
+      currency: run.currency,
+      paidAt,
+      periodStart: new Date(run.periodStart),
+      periodEnd: new Date(run.periodEnd),
+      paymentMethod: paymentMethod ?? 'bank_transfer',
+      notes: run.notes ?? null,
+    };
+
+    if (typeof this.prisma.client.$transaction === 'function') {
+      return this.prisma.client.$transaction(async (rawTx) => {
+        const tx = rawTx as unknown as Prisma.TransactionClient;
+        const updated = await tx.payrollRun.update({
+          where: { id: runId },
+          data: { status: 'PAID', paidAt },
+        });
+        if (this.expensePosting) {
+          await this.expensePosting.onPayrollRunPaid(postPayload, tx);
+        }
+        return updated;
+      });
+    }
+
+    const updated = await this.prisma.client.payrollRun.update({
       where: { id: runId },
-      data: { status: 'PAID', paidAt: new Date() },
+      data: { status: 'PAID', paidAt },
     });
+    if (this.expensePosting) {
+      await this.expensePosting.onPayrollRunPaid(postPayload);
+    }
+    return updated;
   }
 }

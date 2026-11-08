@@ -4460,7 +4460,7 @@ export const FLOW_TOOLS: FlowTool[] = [
     family: 'organize',
     riskLevel: 'high',
     riskTier: 3 as RiskTier,
-    manualEquivalentRoute: '/app/finance',
+    manualEquivalentRoute: '/app/finance/journal',
     changedEntities: ['journalEntry', 'ledgerEntry'],
     parameters: {
       type: 'object',

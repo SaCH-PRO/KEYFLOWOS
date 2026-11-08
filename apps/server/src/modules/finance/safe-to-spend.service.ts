@@ -32,7 +32,7 @@ export class SafeToSpendService {
     const now = new Date();
     const next30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-    const [cashAccounts, taxPayableAccount, billsDue, reserveBuckets] = await Promise.all([
+    const [cashAccounts, taxPayableAccount, billsDue, reserveBuckets, committedPayrollRuns] = await Promise.all([
       this.prisma.client.financialAccount.findMany({
         where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
         select: { currentBalance: true },
@@ -50,6 +50,15 @@ export class SafeToSpendService {
         where: { businessId, status: 'ACTIVE' },
         select: { currentAmount: true, name: true },
       }),
+      this.prisma.client.payrollRun?.findMany
+        ? this.prisma.client.payrollRun.findMany({
+            where: {
+              businessId,
+              status: { in: ['DRAFT', 'APPROVED'] },
+            },
+            select: { totalGross: true, status: true },
+          })
+        : Promise.resolve([]),
     ]);
 
     const cashBalance = cashAccounts.reduce((sum, a) => sum + Number(a.currentBalance ?? 0), 0);
@@ -65,9 +74,11 @@ export class SafeToSpendService {
 
     const billsDueNext30Days = billsDue.reduce((sum, b) => sum + Number(b.amount ?? 0), 0);
 
-    // Payroll and debt schedules are not yet modeled; reserve these as 0 and
-    // surface that fact in the explanation so the KPI is not overstated.
-    const payrollReserved = 0;
+    // Reserve committed (DRAFT + APPROVED) payroll runs that have not yet been disbursed.
+    const payrollReserved = committedPayrollRuns.reduce(
+      (sum, r) => sum + Number(r.totalGross ?? 0),
+      0,
+    );
     const debtPaymentsDue = 0;
 
     // Operating buffer: minimum 10% of cash or 500 currency units
@@ -87,7 +98,11 @@ export class SafeToSpendService {
       `Operating buffer: ${currency} ${operatingBuffer.toFixed(2)}`,
     ];
 
-    explanation.push(`Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (not yet modeled)`);
+    explanation.push(
+      committedPayrollRuns.length > 0
+        ? `Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (${committedPayrollRuns.length} committed run${committedPayrollRuns.length === 1 ? '' : 's'})`
+        : `Payroll reserved: ${currency} ${payrollReserved.toFixed(2)} (no unpaid runs)`,
+    );
     explanation.push(`Debt payments due: ${currency} ${debtPaymentsDue.toFixed(2)} (not yet modeled)`);
     if (otherReserves > 0) explanation.push(`Other reserves: ${currency} ${otherReserves.toFixed(2)}`);
     if (reserveBuckets.length > 0) {

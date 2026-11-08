@@ -113,7 +113,11 @@ export class ExpensePostingService {
     paymentMethod: string | null | undefined,
   ): Promise<string> {
     const key = paymentMethodToCoaSystemKey(paymentMethod);
-    const row = await this.coa.getBySystemKey(businessId, key);
+    let row = await this.coa.getBySystemKey(businessId, key);
+    if (!row) {
+      await this.coa.ensureDefaults(businessId);
+      row = await this.coa.getBySystemKey(businessId, key);
+    }
     if (!row) {
       const cash = await this.coa.getBySystemKey(businessId, 'CASH');
       if (!cash) {
@@ -127,7 +131,11 @@ export class ExpensePostingService {
   }
 
   async resolveSystemCoa(businessId: string, systemKey: string): Promise<string> {
-    const row = await this.coa.getBySystemKey(businessId, systemKey);
+    let row = await this.coa.getBySystemKey(businessId, systemKey);
+    if (!row) {
+      await this.coa.ensureDefaults(businessId);
+      row = await this.coa.getBySystemKey(businessId, systemKey);
+    }
     if (!row) {
       throw new BadRequestException(
         `No ${systemKey} COA for business ${businessId} — chart of accounts not seeded`,
@@ -479,6 +487,68 @@ export class ExpensePostingService {
         entries: [
           { accountId: cogsCoaId, debit: Number(totalCogs.toFixed(4)), memo: 'Cost of goods sold' },
           { accountId: inventoryCoaId, credit: Number(totalCogs.toFixed(4)), memo: 'Inventory consumed' },
+        ],
+      },
+      txClient,
+    );
+  }
+
+  /**
+   * Payroll run paid — Dr Payroll & Contractors (EXPENSE_PAYROLL) / Cr Bank|Cash.
+   * Idempotent on `PayrollRun:{id}:paid`.
+   */
+  async onPayrollRunPaid(
+    run: {
+      id: string;
+      businessId: string;
+      totalGross: number;
+      currency: string;
+      paidAt: Date;
+      periodStart: Date;
+      periodEnd: Date;
+      paymentMethod?: string | null;
+      notes?: string | null;
+    },
+    txClient?: Prisma.TransactionClient,
+  ) {
+    const gross = Number(run.totalGross ?? 0);
+    if (gross <= 0) return null;
+
+    const payrollCoaId = await this.resolveSystemCoa(run.businessId, 'EXPENSE_PAYROLL');
+    const paymentCoaId = await this.resolvePaymentCoa(
+      run.businessId,
+      run.paymentMethod ?? 'bank_transfer',
+    );
+    const periodLabel = `${run.periodStart.toISOString().slice(0, 10)} → ${run.periodEnd.toISOString().slice(0, 10)}`;
+    const description = run.notes
+      ? `Payroll run (${periodLabel}) — ${run.notes}`
+      : `Payroll run (${periodLabel})`;
+
+    return this.posting.post(
+      {
+        businessId: run.businessId,
+        type: 'EXPENSE',
+        date: run.paidAt,
+        amount: gross,
+        currency: run.currency,
+        description,
+        sourceType: 'PayrollRun',
+        sourceId: run.id,
+        kind: 'paid',
+        reference: periodLabel,
+        entries: [
+          {
+            accountId: payrollCoaId,
+            debit: gross,
+            credit: 0,
+            memo: description,
+          },
+          {
+            accountId: paymentCoaId,
+            debit: 0,
+            credit: gross,
+            memo: `Payroll disbursement (${periodLabel})`,
+          },
         ],
       },
       txClient,

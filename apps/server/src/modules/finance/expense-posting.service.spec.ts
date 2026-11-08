@@ -20,6 +20,7 @@ function makeStubs() {
     EXPENSE_GENERAL: { id: 'coa_exp_gen' },
     EXPENSE_OTHER: { id: 'coa_exp_other' },
     EXPENSE_MARKETING: { id: 'coa_exp_mkt' },
+    EXPENSE_PAYROLL: { id: 'coa_exp_payroll' },
   };
   const coa = {
     getBySystemKey: vi.fn(async (_b: string, key: string) => coaByKey[key] ?? null),
@@ -203,6 +204,61 @@ describe('ExpensePostingService.onProductSold', () => {
       items: [{ productId: 'pX', quantity: 1 }],
     });
     expect(r).toBeNull();
+    expect(posting.post).not.toHaveBeenCalled();
+  });
+});
+
+describe('ExpensePostingService.onPayrollRunPaid', () => {
+  const baseRun = {
+    id: 'pr_1',
+    businessId: 'biz_1',
+    totalGross: 8500,
+    currency: 'TTD',
+    paidAt: new Date('2026-08-31'),
+    periodStart: new Date('2026-08-01'),
+    periodEnd: new Date('2026-08-31'),
+    paymentMethod: 'bank_transfer',
+    notes: 'August payroll',
+  };
+
+  it('posts Dr EXPENSE_PAYROLL / Cr BANK for a paid payroll run', async () => {
+    const { svc, posting } = makeStubs();
+    await svc.onPayrollRunPaid(baseRun);
+    expect(posting.post).toHaveBeenCalledOnce();
+    const input = posting.post.mock.calls[0][0];
+    expect(input.sourceType).toBe('PayrollRun');
+    expect(input.sourceId).toBe('pr_1');
+    expect(input.kind).toBe('paid');
+    expect(input.amount).toBe(8500);
+    const dr = input.entries.find((e: any) => e.debit > 0);
+    const cr = input.entries.find((e: any) => e.credit > 0);
+    expect(dr.accountId).toBe('coa_exp_payroll');
+    expect(cr.accountId).toBe('coa_bank');
+    expect(dr.debit).toBe(8500);
+    expect(cr.credit).toBe(8500);
+  });
+
+  it('self-heals via coa.ensureDefaults when EXPENSE_PAYROLL is missing on first lookup', async () => {
+    const { svc, posting, coa } = makeStubs();
+    let seeded = false;
+    coa.getBySystemKey = vi.fn(async (_b: string, key: string) => {
+      if (key === 'EXPENSE_PAYROLL' && !seeded) return null;
+      if (key === 'EXPENSE_PAYROLL') return { id: 'coa_exp_payroll' };
+      if (key === 'CASH') return { id: 'coa_cash' };
+      return null;
+    });
+    coa.ensureDefaults = vi.fn(async () => {
+      seeded = true;
+    });
+    await svc.onPayrollRunPaid({ ...baseRun, paymentMethod: 'cash' });
+    expect(coa.ensureDefaults).toHaveBeenCalledWith('biz_1');
+    expect(posting.post).toHaveBeenCalledOnce();
+  });
+
+  it('skips zero-gross payroll runs', async () => {
+    const { svc, posting } = makeStubs();
+    const res = await svc.onPayrollRunPaid({ ...baseRun, totalGross: 0 });
+    expect(res).toBeNull();
     expect(posting.post).not.toHaveBeenCalled();
   });
 });
