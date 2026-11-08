@@ -3233,8 +3233,13 @@ negative_controls:
       clearance.
     mutation:
       file: scripts/agent-control/lib/cloud-control.mjs
-      find: "  if (recordedIdempotencyKeys.includes(task.idempotency_key) && !reconciliationClearance) {"
-      replace: "  if (false) {"
+      find: |-
+        if (
+            (recordedIdempotencyKeys.includes(task.idempotency_key) && !reconciliationClearance) ||
+            recordedIdempotencyKeys.includes(effectiveIdempotencyKey)
+          ) {
+      replace: |-
+        if (false) {
     proof_command: node --test --test-name-pattern="NC cloud duplicate task claim" scripts/agent-control/tests/cloud-control.spec.mjs
     timeout_ms: 120000
 
@@ -3376,20 +3381,8 @@ negative_controls:
       risk_level, or allowed/prohibited scopes).
     mutation:
       file: scripts/agent-control/lib/cloud-control.mjs
-      find: |-
-        if (persistedSameTask) {
-            const immutableCheck = verifyImmutableTaskContract(persistedSameTask, task);
-            if (!immutableCheck.ok) {
-              return immutableCheck;
-            }
-          }
-      replace: |-
-        if (false) {
-            const immutableCheck = verifyImmutableTaskContract(persistedSameTask, task);
-            if (!immutableCheck.ok) {
-              return immutableCheck;
-            }
-          }
+      find: "  if (persistedSameTask) {"
+      replace: "  if (false) {"
     proof_command: node --test --test-name-pattern="NC cloud mutated reconciliation contract" scripts/agent-control/tests/cloud-control.spec.mjs
     timeout_ms: 120000
 

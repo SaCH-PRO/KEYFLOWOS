@@ -1840,7 +1840,7 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
       observed_branch_head: OBSERVED_INTERMEDIATE_SHA,
       disposition: 'CONTINUE_FROM_OBSERVED_HEAD',
     };
-    const continueFailover = prepareProviderFailoverHandoff({
+    const unverifiedObservedAncestry = prepareProviderFailoverHandoff({
       task: uncertainAtObserved,
       handoff: staleHandoff,
       nextProvider: CLOUD_PROVIDERS.KIMI,
@@ -1851,6 +1851,25 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
       verifiedAuthority: buildVerifiedAuthorityRecord(uncertainAtObserved),
       verifiedClearance: buildVerifiedClearanceRecord(uncertainAtObserved, continueClearance),
       verifiedAncestry: VALID_ANCESTRY,
+    });
+    assert.equal(unverifiedObservedAncestry.ok, false);
+    assert.equal(unverifiedObservedAncestry.reason, CLOUD_REASONS.ANCESTRY_UNVERIFIED);
+
+    const continueFailover = prepareProviderFailoverHandoff({
+      task: uncertainAtObserved,
+      handoff: staleHandoff,
+      nextProvider: CLOUD_PROVIDERS.KIMI,
+      nextAgentIdentity: 'kimi-cloud-builder-01',
+      nowIso: '2026-11-07T20:20:00Z',
+      reconciliationClearance: continueClearance,
+      observedBranchHead: OBSERVED_INTERMEDIATE_SHA,
+      verifiedAuthority: buildVerifiedAuthorityRecord(uncertainAtObserved),
+      verifiedClearance: buildVerifiedClearanceRecord(uncertainAtObserved, continueClearance),
+      verifiedAncestry: {
+        ...VALID_ANCESTRY,
+        sourceMainIsAncestorOfObservedHead: true,
+        observedHeadSha: OBSERVED_INTERMEDIATE_SHA,
+      },
     });
     assert.equal(continueFailover.ok, true);
     assert.equal(continueFailover.next_task.source_head, OBSERVED_INTERMEDIATE_SHA);

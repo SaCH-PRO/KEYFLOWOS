@@ -1144,12 +1144,25 @@ export function evaluateLeaseAcquisition({
     }
   }
 
+  const effectiveAttempt = reconciliationClearance
+    ? ((clearanceTarget.attempt ?? 1) + 1)
+    : (clearanceTarget.attempt ?? 1);
+  const effectiveIdempotencyKey = buildCloudIdempotencyKey({
+    task_id: clearanceTarget.task_id,
+    packet_id: clearanceTarget.packet_id,
+    source_main: clearanceTarget.source_main,
+    attempt: effectiveAttempt,
+  });
+
   // Gate 1: Duplicate task claim or replayed idempotency key.
-  if (recordedIdempotencyKeys.includes(task.idempotency_key) && !reconciliationClearance) {
+  if (
+    (recordedIdempotencyKeys.includes(task.idempotency_key) && !reconciliationClearance) ||
+    recordedIdempotencyKeys.includes(effectiveIdempotencyKey)
+  ) {
     return {
       ok: false,
       reason: CLOUD_REASONS.DUPLICATE_TASK_CLAIM,
-      problems: [`idempotency_key ${task.idempotency_key} has already been claimed`],
+      problems: [`idempotency_key ${effectiveIdempotencyKey} has already been claimed`],
     };
   }
 
@@ -1214,23 +1227,6 @@ export function evaluateLeaseAcquisition({
         };
       }
     }
-  }
-
-  const effectiveAttempt = reconciliationClearance
-    ? ((clearanceTarget.attempt ?? 1) + 1)
-    : (clearanceTarget.attempt ?? 1);
-  const effectiveIdempotencyKey = buildCloudIdempotencyKey({
-    task_id: clearanceTarget.task_id,
-    packet_id: clearanceTarget.packet_id,
-    source_main: clearanceTarget.source_main,
-    attempt: effectiveAttempt,
-  });
-  if (recordedIdempotencyKeys.includes(effectiveIdempotencyKey)) {
-    return {
-      ok: false,
-      reason: CLOUD_REASONS.DUPLICATE_TASK_CLAIM,
-      problems: [`idempotency_key ${effectiveIdempotencyKey} has already been claimed`],
-    };
   }
 
   const effectiveSourceHead = reconciliationClearance
@@ -2140,6 +2136,24 @@ export function prepareProviderFailoverHandoff({
       mutating_operations_authorized: verifiedAuthority.mutating_operations_authorized === true,
     });
 
+  const observedContinuationAncestryVerified =
+    nextSourceHead === handoff.semantic_head
+      ? verifiedAncestry?.sourceMainIsAncestorOfSemanticHead === true
+      : nextSourceHead === handoff.pr_head
+        ? verifiedAncestry?.sourceMainIsAncestorOfSemanticHead === true &&
+          verifiedAncestry?.semanticHeadIsAncestorOfPrHead === true
+        : verifiedAncestry?.sourceMainIsAncestorOfObservedHead === true &&
+          verifiedAncestry?.observedHeadSha === nextSourceHead;
+  if (isUncertainTask && nextSourceHead && !observedContinuationAncestryVerified) {
+    return {
+      ok: false,
+      reason: CLOUD_REASONS.ANCESTRY_UNVERIFIED,
+      problems: [
+        `CONTINUE_FROM_OBSERVED_HEAD failover requires independently verified ancestry from source_main (${effectiveTask.source_main}) to observed_branch_head (${nextSourceHead})`,
+      ],
+    };
+  }
+
   const verifiedContinuity = nextSourceHead
     ? {
         authenticated: true,
@@ -2147,7 +2161,7 @@ export function prepareProviderFailoverHandoff({
         verified_semantic_head: nextSourceHead,
         source_main: effectiveTask.source_main,
         ancestry_verified: isUncertainTask
-          ? verifiedClearance?.observed_branch_head === nextSourceHead
+          ? observedContinuationAncestryVerified
           : verifiedAncestry?.sourceMainIsAncestorOfSemanticHead === true &&
             verifiedAncestry?.semanticHeadIsAncestorOfPrHead === true,
       }
