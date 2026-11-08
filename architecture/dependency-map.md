@@ -73,9 +73,9 @@ The NestJS event bus decouples some cross-module workflows. Key event families:
 
 See `architecture/event-registry.yaml` for the full list of 276 event names.
 
-## Agent Control Plane: Authority Fold
+## Agent Control Plane: Authority Fold & Cloud-Native Dispatch
 
-`scripts/agent-control` is plain Node ESM with no workspace dependencies. The live typed-authority fold (KF-META-STATE-REDUCER-LIVE-001; path in `execution-paths.md` §12) imports in one direction only, as recorded in `dependencies.json`:
+`scripts/agent-control` is plain Node ESM with no workspace dependencies. Both the live typed-authority fold (`KF-META-STATE-REDUCER-LIVE-001`; path in `execution-paths.md` §12) and the Phase 1 cloud-native multi-agent dispatch plane (`KF-META-CLOUD-DISPATCH-001`; path in `execution-paths.md` §14) import in one direction only:
 
 ```
 orchestrate.mjs, status.mjs → lib/truth.mjs → lib/reconcile.mjs → lib/authority-effects.mjs
@@ -83,6 +83,8 @@ lib/reconcile.mjs, lib/authority-effects.mjs → lib/control-envelope.mjs (the o
 lib/authority-effects.mjs → lib/state-machine.mjs (HEALTH), lib/state.mjs (validateState)
 lib/reconcile.mjs → lib/state.mjs (validateState)
 normalize-event.mjs, orchestrate.mjs → lib/events.mjs → lib/authority-effects.mjs (readEffect), lib/control-envelope.mjs
+.github/workflows/agent-cloud-control.yml → cloud-dispatch.mjs → lib/cloud-control.mjs → lib/control-envelope.mjs (AUTHORIZED_AUTHORS), lib/yaml.mjs (parseYaml, stringifyYaml)
+tests/cloud-control.spec.mjs → cloud-dispatch.mjs, lib/cloud-control.mjs, .agent-control/cloud-task.yaml, .agent-control/cloud-handoff.yaml
 ```
 
 `lib/events.mjs` reads a HOLD or RESUME comment's effect with the fold's own `readEffect()`, so the wake decision and the fold cannot read the same comment differently.
@@ -91,13 +93,9 @@ normalize-event.mjs, orchestrate.mjs → lib/events.mjs → lib/authority-effect
 
 ### Agent Control Plane: Cloud-Native Multi-Agent Dispatch (Phase 1)
 
-`KF-META-CLOUD-DISPATCH-001` (`execution-paths.md` §14). Read-only preflight and provider-neutral task/lease/continuity validation:
+`KF-META-CLOUD-DISPATCH-001` (`execution-paths.md` §14, `architecture/architecture.json`). Read-only preflight and provider-neutral task/lease/continuity validation across `.agent-control/cloud-task.yaml`, `.agent-control/cloud-handoff.yaml`, `.github/workflows/agent-cloud-control.yml`, `scripts/agent-control/cloud-dispatch.mjs`, and `scripts/agent-control/lib/cloud-control.mjs`:
 
-```
-cloud-dispatch.mjs → lib/cloud-control.mjs → lib/control-envelope.mjs (AUTHORIZED_AUTHORS), lib/yaml.mjs (parseYaml, stringifyYaml)
-```
-
-`lib/cloud-control.mjs` is pure except for optional local single-host persistence in `FileBackedCloudRegistry` and YAML file helpers. `cloud-dispatch.mjs` performs read-only `git` inspection and never mutates repository state, merges PRs, touches production, or posts to #80.
+`lib/cloud-control.mjs` is pure except for optional local single-host persistence in `FileBackedCloudRegistry` (`LOCAL_SINGLE_HOST_ONLY`, `cross_machine_exclusivity: false`) and YAML file helpers. `cloud-dispatch.mjs` performs read-only `git` inspection and never mutates repository state, merges PRs, touches production, or posts to #80.
 
 ## KEY Action Boundary
 

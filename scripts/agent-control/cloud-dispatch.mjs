@@ -21,6 +21,7 @@ import {
   loadCloudYamlFile,
   validateCloudHandoff,
   validateCloudTask,
+  verifySignedAuthorityRecord,
 } from './lib/cloud-control.mjs';
 
 function argValue(argv, flag, fallback = null) {
@@ -67,24 +68,67 @@ function loadStructuredFile(filePath) {
   return loadCloudYamlFile(filePath);
 }
 
+function extractIndependentContractDigest(event) {
+  if (!event || typeof event !== 'object') return null;
+  const inputDigest = event?.inputs?.contract_digest;
+  if (typeof inputDigest === 'string' && /^[0-9a-f]{64}$/i.test(inputDigest.trim())) {
+    return inputDigest.trim().toLowerCase();
+  }
+  const bodies = [
+    event?.comment?.body,
+    event?.review?.body,
+    event?.pull_request?.body,
+  ].filter((b) => typeof b === 'string' && b.length > 0);
+  for (const body of bodies) {
+    const match = body.match(/cloud-contract-digest:\s*`?([0-9a-f]{64})`?/i);
+    if (match) {
+      return match[1].toLowerCase();
+    }
+  }
+  return null;
+}
+
 /**
- * Resolves an authenticated authority record from explicit options, a
- * `--verified-authority <file>` CLI argument, or a verified GitHub Actions
- * event payload (`GITHUB_EVENT_PATH`) bound to the task's immutable contract
- * digest. Returns `null` when only unverified YAML claims are available.
+ * Resolves an authenticated authority record from:
+ *   1. In-process `options.verifiedAuthority` (when explicitly permitted by programmatic callers),
+ *   2. A `--verified-authority <file>` CLI argument carrying a valid Ed25519 signature
+ *      verified against `trustedAuthorityPublicKey` (`CLOUD_AUTHORITY_PUBLIC_KEY`), or
+ *   3. An authenticated GitHub Actions event payload (`GITHUB_EVENT_PATH`) where
+ *      `event.sender.login` (never `pull_request.user.login` alone) matches the
+ *      authorized actor AND an independent contract digest from the GitHub event
+ *      record (`cloud-contract-digest: <64-hex>` or `inputs.contract_digest`) matches
+ *      `computeTaskContractDigest(task)`.
  */
 export function resolveVerifiedAuthority(task, argv = [], cwd = process.cwd(), options = {}) {
+  const trustedPublicKeyPem =
+    options.trustedAuthorityPublicKey || process.env.CLOUD_AUTHORITY_PUBLIC_KEY || null;
+
   if (options.verifiedAuthority) {
-    return options.verifiedAuthority;
-  }
-  const authFileArg = argValue(argv, '--verified-authority');
-  if (authFileArg) {
-    const full = path.resolve(cwd, authFileArg);
-    if (fs.existsSync(full)) {
-      return loadStructuredFile(full);
+    if (options.verifiedAuthority.algorithm === 'ed25519' || trustedPublicKeyPem) {
+      return verifySignedAuthorityRecord(options.verifiedAuthority, task, {
+        trustedPublicKeyPem,
+      });
+    }
+    if (options.allowInProcessVerifiedAuthority !== false) {
+      return options.verifiedAuthority;
     }
     return null;
   }
+
+  const authFileArg = argValue(argv, '--verified-authority');
+  if (authFileArg) {
+    const full = path.resolve(cwd, authFileArg);
+    if (!fs.existsSync(full)) {
+      return null;
+    }
+    try {
+      const loaded = loadStructuredFile(full);
+      return verifySignedAuthorityRecord(loaded, task, { trustedPublicKeyPem });
+    } catch {
+      return null;
+    }
+  }
+
   const eventPath =
     options.githubEventPath !== undefined
       ? options.githubEventPath
@@ -92,21 +136,35 @@ export function resolveVerifiedAuthority(task, argv = [], cwd = process.cwd(), o
   if (eventPath && fs.existsSync(eventPath) && task && typeof task === 'object') {
     try {
       const event = JSON.parse(fs.readFileSync(eventPath, 'utf8'));
-      const actor =
-        event?.pull_request?.user?.login ||
-        event?.sender?.login ||
-        null;
+      // Strictly authenticate the triggering sender (`event.sender.login`); never
+      // fall back to `event.pull_request.user.login` on `synchronize` events.
+      const actor = event?.sender?.login || null;
+      if (!actor) return null;
+      if (event?.pull_request?.user?.login && event.pull_request.user.login !== actor) {
+        return null;
+      }
+      if (event?.comment?.user?.login && event.comment.user.login !== actor) {
+        return null;
+      }
+      if (event?.review?.user?.login && event.review.user.login !== actor) {
+        return null;
+      }
+
       const approvalId = task?.authority?.approval_id || null;
       const declaredDigest = task?.authority?.contract_digest || null;
       const computedDigest = computeTaskContractDigest(task);
+      const independentDigest = extractIndependentContractDigest(event);
       const prHeadRef = event?.pull_request?.head?.ref || null;
       const prBaseSha = event?.pull_request?.base?.sha || null;
 
       if (
         actor &&
+        actor === task?.authority?.author &&
         approvalId &&
         declaredDigest &&
+        independentDigest &&
         declaredDigest === computedDigest &&
+        independentDigest === computedDigest &&
         (!prHeadRef || prHeadRef === task.implementation_branch) &&
         (!prBaseSha || prBaseSha === task.source_main)
       ) {
@@ -120,7 +178,7 @@ export function resolveVerifiedAuthority(task, argv = [], cwd = process.cwd(), o
           packet_id: task.packet_id,
           implementation_branch: task.implementation_branch,
           source_main: task.source_main,
-          contract_digest: declaredDigest,
+          contract_digest: computedDigest,
         };
       }
     } catch {
@@ -316,7 +374,9 @@ export function runCloudDispatchCli(argv = process.argv.slice(2), options = {}) 
 
   const branchEnv =
     options.branchName ||
+    argValue(argv, '--branch') ||
     process.env.GITHUB_HEAD_REF ||
+    process.env.GITHUB_REF_NAME ||
     gitOutput(['symbolic-ref', '--short', 'HEAD'], cwd);
   const branchName = branchEnv && branchEnv !== 'HEAD' ? branchEnv : null;
   const headSha = options.headSha !== undefined ? options.headSha : gitOutput(['rev-parse', 'HEAD'], cwd);

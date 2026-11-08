@@ -27,6 +27,11 @@
  *      bound to the immutable task contract digest.
  *   7. FileBackedCloudRegistry is a local single-host persistence utility only
  *      and never claims cross-machine distributed lock exclusivity.
+ *
+ * Canonical architecture memory synchronization:
+ *   - Dependency graph: architecture/dependency-map.md
+ *   - Execution path (§14): architecture/execution-paths.md
+ *   - Machine-readable cartography: architecture/architecture.json
  */
 
 import crypto from 'node:crypto';
@@ -390,6 +395,122 @@ export function buildVerifiedClearanceRecord(task, clearance, overrides = {}) {
     contract_digest: digest,
     ...overrides,
   };
+}
+
+/**
+ * Canonical signing payload for an authenticated authority record so external
+ * `--verified-authority` files can be cryptographically verified via Ed25519.
+ */
+export function canonicalAuthoritySigningPayload(record) {
+  if (!record || typeof record !== 'object') return '';
+  return JSON.stringify({
+    schema: 'keyflowos.cloud-authority-signature/v1',
+    approval_id: record.approval_id || null,
+    actor: record.actor || null,
+    source_kind: record.source_kind || null,
+    reference: record.reference || null,
+    task_id: record.task_id || null,
+    packet_id: record.packet_id || null,
+    implementation_branch: record.implementation_branch || null,
+    source_main: record.source_main || null,
+    contract_digest: record.contract_digest || null,
+  });
+}
+
+/**
+ * Signs an authenticated authority record using an Ed25519 private key (PEM).
+ */
+export function signVerifiedAuthorityRecord(record, privateKeyPem) {
+  const payload = canonicalAuthoritySigningPayload(record);
+  const signature = crypto
+    .sign(null, Buffer.from(payload, 'utf8'), privateKeyPem)
+    .toString('base64');
+  return {
+    ...record,
+    authenticated: true,
+    algorithm: 'ed25519',
+    signature,
+  };
+}
+
+/**
+ * Verifies that an external authority record carries a valid Ed25519 signature
+ * issued by `trustedPublicKeyPem` over the exact task contract digest.
+ */
+export function verifySignedAuthorityRecord(
+  record,
+  task,
+  { trustedPublicKeyPem = null } = {},
+) {
+  if (!record || typeof record !== 'object' || Array.isArray(record)) {
+    return null;
+  }
+  if (typeof trustedPublicKeyPem !== 'string' || trustedPublicKeyPem.trim() === '') {
+    return null;
+  }
+  if (record.algorithm !== 'ed25519' || !isNonEmptyString(record.signature)) {
+    return null;
+  }
+  const expectedDigest = computeTaskContractDigest(task);
+  if (!expectedDigest || record.contract_digest !== expectedDigest) {
+    return null;
+  }
+  try {
+    const payload = canonicalAuthoritySigningPayload(record);
+    const ok = crypto.verify(
+      null,
+      Buffer.from(payload, 'utf8'),
+      trustedPublicKeyPem,
+      Buffer.from(record.signature, 'base64'),
+    );
+    if (!ok) return null;
+    return {
+      authenticated: true,
+      approval_id: record.approval_id,
+      actor: record.actor,
+      source_kind: record.source_kind,
+      reference: record.reference,
+      task_id: record.task_id,
+      packet_id: record.packet_id,
+      implementation_branch: record.implementation_branch,
+      source_main: record.source_main,
+      contract_digest: record.contract_digest,
+      algorithm: 'ed25519',
+      signature: record.signature,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Constructs an independently approved replacement authority record for a
+ * cross-provider failover target task, computing the new task contract digest.
+ */
+export function buildFailoverAuthorityRecord(
+  previousTask,
+  {
+    nextProvider,
+    nextAgentIdentity,
+    nextTaskId = null,
+    nextAttempt = null,
+    authority = null,
+    overrides = {},
+  },
+) {
+  const effectiveNextAttempt = nextAttempt ?? ((previousTask?.attempt ?? 1) + 1);
+  const effectiveNextTaskId =
+    nextTaskId || buildDefaultFailoverTaskId(previousTask?.task_id, effectiveNextAttempt);
+  const baseAuthority = authority || previousTask?.authority || {};
+  const candidateNextTask = {
+    ...previousTask,
+    task_id: effectiveNextTaskId,
+    provider: nextProvider,
+    agent_identity: nextAgentIdentity,
+    attempt: effectiveNextAttempt,
+    authority: baseAuthority,
+  };
+  return buildVerifiedAuthorityRecord(candidateNextTask, overrides);
 }
 
 /**
@@ -1215,6 +1336,7 @@ export function verifyTaskOwnership({
   leaseId,
   nowIso,
   allowCompletedPreflight = false,
+  allowHandoffCompletion = false,
   verifiedAuthority = null,
 }) {
   const valid = validateCloudTask(task, { verifiedAuthority });
@@ -1261,7 +1383,16 @@ export function verifyTaskOwnership({
       problems: ['actor identity or lease_id does not match active lease holder'],
     };
   }
-  const permittedStates = allowCompletedPreflight ? RESERVED_BRANCH_STATES : ACTIVE_LEASE_STATES;
+  const handoffCompletionStates = new Set([
+    CLOUD_TASK_STATES.CLAIMED,
+    CLOUD_TASK_STATES.EXECUTING,
+    CLOUD_TASK_STATES.HANDOFF_READY,
+  ]);
+  const permittedStates = allowCompletedPreflight
+    ? RESERVED_BRANCH_STATES
+    : allowHandoffCompletion
+      ? handoffCompletionStates
+      : ACTIVE_LEASE_STATES;
   if (!permittedStates.has(task.state)) {
     return {
       ok: false,
@@ -1578,12 +1709,46 @@ export function recordTaskCompletion({
   verifiedAuthority = null,
   targetState = null,
 }) {
+  const nextState =
+    targetState !== null && targetState !== undefined
+      ? targetState
+      : handoff?.pr_number
+        ? CLOUD_TASK_STATES.COMPLETED_DRAFT
+        : CLOUD_TASK_STATES.HANDOFF_READY;
+
+  if (
+    nextState !== CLOUD_TASK_STATES.HANDOFF_READY &&
+    nextState !== CLOUD_TASK_STATES.COMPLETED_DRAFT
+  ) {
+    return {
+      ok: false,
+      reason: CLOUD_REASONS.HANDOFF_INVALID,
+      problems: [
+        `recordTaskCompletion targetState must be HANDOFF_READY or COMPLETED_DRAFT (got ${String(nextState)})`,
+      ],
+    };
+  }
+
+  if (
+    task?.state === CLOUD_TASK_STATES.HANDOFF_READY &&
+    nextState !== CLOUD_TASK_STATES.COMPLETED_DRAFT
+  ) {
+    return {
+      ok: false,
+      reason: CLOUD_REASONS.OWNER_MISMATCH,
+      problems: [
+        'task already in HANDOFF_READY may only transition to COMPLETED_DRAFT upon verified completion proofs',
+      ],
+    };
+  }
+
   const ownership = verifyTaskOwnership({
     task,
     actorProvider,
     actorAgentId,
     leaseId,
     nowIso,
+    allowHandoffCompletion: nextState === CLOUD_TASK_STATES.COMPLETED_DRAFT,
     verifiedAuthority,
   });
   if (!ownership.ok) return ownership;
@@ -1604,10 +1769,6 @@ export function recordTaskCompletion({
     verifiedCiEvidence,
   });
   if (!handoffCheck.ok) return handoffCheck;
-
-  const nextState =
-    targetState ||
-    (handoff.pr_number ? CLOUD_TASK_STATES.COMPLETED_DRAFT : CLOUD_TASK_STATES.HANDOFF_READY);
 
   if (nextState === CLOUD_TASK_STATES.COMPLETED_DRAFT) {
     if (!Number.isInteger(handoff.pr_number) || handoff.pr_number < 1) {
@@ -1692,8 +1853,9 @@ export function prepareProviderFailoverHandoff({
     };
   }
 
+  let persistedPrev = null;
   if (Array.isArray(existingTasks) && existingTasks.length > 0) {
-    const persistedPrev = existingTasks.find((t) => t && t.task_id === task.task_id);
+    persistedPrev = existingTasks.find((t) => t && t.task_id === task.task_id) || null;
     if (!persistedPrev) {
       return {
         ok: false,
@@ -1726,8 +1888,15 @@ export function prepareProviderFailoverHandoff({
     }
   }
 
-  if (task.state === CLOUD_TASK_STATES.UNCERTAIN_RESULT || task.lease?.execution_uncertain === true) {
-    const clearance = verifyUncertainExecutionClearance(task, reconciliationClearance, {
+  // Always use the persisted task state/lease/attempt when present so a stale
+  // caller-supplied CLAIMED snapshot cannot bypass persisted UNCERTAIN_RESULT or REVOKED state.
+  const effectiveTask = persistedPrev || task;
+
+  if (
+    effectiveTask.state === CLOUD_TASK_STATES.UNCERTAIN_RESULT ||
+    effectiveTask.lease?.execution_uncertain === true
+  ) {
+    const clearance = verifyUncertainExecutionClearance(effectiveTask, reconciliationClearance, {
       observedBranchHead,
       consumedClearanceIds,
       verifiedClearance,
@@ -1752,14 +1921,14 @@ export function prepareProviderFailoverHandoff({
   }
 
   const handoffCheck = validateCloudHandoff(handoff, {
-    task,
+    task: effectiveTask,
     currentMainSha,
     currentPrHeadSha,
     verifiedAncestry,
   });
   if (!handoffCheck.ok) return handoffCheck;
 
-  if (nextProvider === task.provider && nextAgentIdentity === task.agent_identity) {
+  if (nextProvider === effectiveTask.provider && nextAgentIdentity === effectiveTask.agent_identity) {
     return {
       ok: false,
       reason: CLOUD_REASONS.PROVIDER_FAILOVER_UNSAFE,
@@ -1768,11 +1937,11 @@ export function prepareProviderFailoverHandoff({
   }
 
   const revokedPreviousTask = {
-    ...task,
+    ...effectiveTask,
     state: CLOUD_TASK_STATES.REVOKED,
-    lease: task.lease
+    lease: effectiveTask.lease
       ? {
-          ...task.lease,
+          ...effectiveTask.lease,
           revoked: true,
           revoked_reason: `superseded by provider failover to ${nextProvider}:${nextAgentIdentity}`,
           heartbeat_at: nowIso,
@@ -1781,29 +1950,54 @@ export function prepareProviderFailoverHandoff({
       : null,
   };
 
-  const nextAttempt = (task.attempt ?? 1) + 1;
-  const effectiveNextTaskId = nextTaskId || buildDefaultFailoverTaskId(task.task_id, nextAttempt);
+  const nextAttempt = (effectiveTask.attempt ?? 1) + 1;
+  const effectiveNextTaskId =
+    nextTaskId || buildDefaultFailoverTaskId(effectiveTask.task_id, nextAttempt);
+
+  const hasPinnedDigest = Boolean(effectiveTask.authority?.contract_digest);
+  if ((hasPinnedDigest || (authority && authority !== effectiveTask.authority)) && !nextVerifiedAuthority) {
+    return {
+      ok: false,
+      reason: CLOUD_REASONS.UNVERIFIED_AUTHORITY,
+      problems: [
+        'independently verified replacement authority (nextVerifiedAuthority) is required to failover a contract-digest-bound task to a new provider/task_id',
+      ],
+    };
+  }
+
+  const baseReplacementAuthority = authority || { ...effectiveTask.authority };
+  const replacementAuthority = hasPinnedDigest
+    ? {
+        ...baseReplacementAuthority,
+        approval_id: nextVerifiedAuthority.approval_id || baseReplacementAuthority.approval_id,
+        author: nextVerifiedAuthority.actor || baseReplacementAuthority.author,
+        kind: nextVerifiedAuthority.source_kind || baseReplacementAuthority.kind,
+        reference: nextVerifiedAuthority.reference || baseReplacementAuthority.reference,
+        contract_digest: nextVerifiedAuthority.contract_digest,
+      }
+    : baseReplacementAuthority;
+
   const candidateNextTask = {
-    ...task,
+    ...effectiveTask,
     task_id: effectiveNextTaskId,
     provider: nextProvider,
     agent_identity: nextAgentIdentity,
     source_head: handoff.semantic_head,
     attempt: nextAttempt,
-    authority: authority || task.authority,
+    authority: replacementAuthority,
     state: CLOUD_TASK_STATES.ISSUED,
     lease: null,
     idempotency_key: buildCloudIdempotencyKey({
       task_id: effectiveNextTaskId,
-      packet_id: task.packet_id,
-      source_main: task.source_main,
+      packet_id: effectiveTask.packet_id,
+      source_main: effectiveTask.source_main,
       attempt: nextAttempt,
     }),
     continuity_from: {
-      previous_task_id: task.task_id,
-      previous_provider: task.provider,
-      previous_agent_identity: task.agent_identity,
-      previous_lease_id: task.lease?.lease_id || null,
+      previous_task_id: effectiveTask.task_id,
+      previous_provider: effectiveTask.provider,
+      previous_agent_identity: effectiveTask.agent_identity,
+      previous_lease_id: effectiveTask.lease?.lease_id || null,
       verified_semantic_head: handoff.semantic_head,
       verified_pr_head: handoff.pr_head,
       pr_number: handoff.pr_number,
@@ -1812,17 +2006,15 @@ export function prepareProviderFailoverHandoff({
 
   const effectiveNextVerifiedAuthority =
     nextVerifiedAuthority ||
-    (authority && authority !== task.authority
-      ? null
-      : buildVerifiedAuthorityRecord(candidateNextTask, {
-          approval_id: verifiedAuthority.approval_id,
-          actor: verifiedAuthority.actor,
-          source_kind: verifiedAuthority.source_kind,
-          reference: verifiedAuthority.reference,
-        }));
+    buildVerifiedAuthorityRecord(candidateNextTask, {
+      approval_id: verifiedAuthority.approval_id,
+      actor: verifiedAuthority.actor,
+      source_kind: verifiedAuthority.source_kind,
+      reference: verifiedAuthority.reference,
+    });
 
   const mergedExistingTasks = [
-    ...existingTasks.filter((t) => t && t.task_id !== task.task_id),
+    ...existingTasks.filter((t) => t && t.task_id !== effectiveTask.task_id),
     revokedPreviousTask,
   ];
 
@@ -2259,12 +2451,11 @@ export function shouldRunPullRequestPreflight({
   changedFilesSinceBase = null,
   taskFile = '.agent-control/cloud-task.yaml',
   handoffFile = '.agent-control/cloud-handoff.yaml',
+  taskFileExists = true,
+  handoffFileExists = false,
 }) {
   if (eventName !== 'pull_request') {
     return { shouldRun: true, reason: 'non_pull_request_event' };
-  }
-  if (declaredBranch === prHeadRef) {
-    return { shouldRun: true, reason: 'declared_branch_matches_pr_head' };
   }
   if (!Array.isArray(changedFilesSinceBase)) {
     return { shouldRun: true, reason: 'changed_files_unknown_fail_closed' };
@@ -2277,6 +2468,15 @@ export function shouldRunPullRequestPreflight({
   );
   if (modifiedControlArtifact) {
     return { shouldRun: true, reason: 'cloud_control_artifact_modified_in_pr' };
+  }
+  if (!taskFileExists && handoffFileExists) {
+    return { shouldRun: true, reason: 'orphan_handoff_without_task_fail_closed' };
+  }
+  if (!taskFileExists) {
+    return { shouldRun: false, reason: 'no_task_file_and_no_cloud_artifact_changes' };
+  }
+  if (declaredBranch === prHeadRef) {
+    return { shouldRun: true, reason: 'declared_branch_matches_pr_head' };
   }
   return { shouldRun: false, reason: 'untouched_other_branch_artifact' };
 }
@@ -2515,6 +2715,10 @@ export default {
   verifyImmutableTaskContract,
   buildVerifiedAuthorityRecord,
   buildVerifiedClearanceRecord,
+  canonicalAuthoritySigningPayload,
+  signVerifiedAuthorityRecord,
+  verifySignedAuthorityRecord,
+  buildFailoverAuthorityRecord,
   validateTaskAuthority,
   validateCloudLease,
   validateCloudTask,

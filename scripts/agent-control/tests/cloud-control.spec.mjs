@@ -19,6 +19,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -35,6 +36,7 @@ import {
   buildCloudIdempotencyKey,
   buildDefaultFailoverTaskId,
   buildDefaultLeaseId,
+  buildFailoverAuthorityRecord,
   buildVerifiedAuthorityRecord,
   buildVerifiedClearanceRecord,
   chatgptAuthorityAdapter,
@@ -52,6 +54,7 @@ import {
   recordTaskCompletion,
   saveCloudYamlFile,
   shouldRunPullRequestPreflight,
+  signVerifiedAuthorityRecord,
   validateCloudHandoff,
   validateCloudTask,
   verifyChangedFilesInScope,
@@ -60,7 +63,7 @@ import {
   verifyTaskOwnership,
   verifyUncertainExecutionClearance,
 } from '../lib/cloud-control.mjs';
-import { runCloudDispatchCli } from '../cloud-dispatch.mjs';
+import { resolveVerifiedAuthority, runCloudDispatchCli } from '../cloud-dispatch.mjs';
 
 const VERIFIED_MAIN_SHA = 'b1948d2797e1bae3660a3d7173abb75397e05aad';
 const SAMPLE_SEMANTIC_HEAD = '3e00eb349dee7a95624faa1f358e5916e2744ecc';
@@ -1422,5 +1425,286 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it('enforces Ed25519 signature on --verified-authority files and independent sender + contract_digest on GITHUB_EVENT_PATH', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kf-cloud-auth-'));
+    try {
+      const baseTask = makeTask();
+      const task = makeTask({
+        authority: {
+          ...baseTask.authority,
+          approval_id: 'KF-META-CLOUD-DISPATCH-001-AUTH-001',
+        },
+      });
+      const digest = computeTaskContractDigest(task);
+      const taskWithDigest = {
+        ...task,
+        authority: {
+          ...task.authority,
+          contract_digest: digest,
+        },
+      };
+
+      // 1. Unsigned caller-written --verified-authority JSON is rejected.
+      const unsignedAuthFile = path.join(tmpDir, 'unsigned-auth.json');
+      fs.writeFileSync(
+        unsignedAuthFile,
+        JSON.stringify(buildVerifiedAuthorityRecord(taskWithDigest), null, 2),
+        'utf8',
+      );
+      const unsignedResolved = resolveVerifiedAuthority(
+        taskWithDigest,
+        ['--verified-authority', unsignedAuthFile],
+        tmpDir,
+      );
+      assert.equal(unsignedResolved, null);
+
+      // 2. Ed25519-signed --verified-authority JSON succeeds with matching public key and fails with wrong key.
+      const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+      const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' });
+      const privateKeyPem = privateKey.export({ type: 'pkcs8', format: 'pem' });
+      const signedRecord = signVerifiedAuthorityRecord(
+        buildVerifiedAuthorityRecord(taskWithDigest),
+        privateKeyPem,
+      );
+      const signedAuthFile = path.join(tmpDir, 'signed-auth.json');
+      fs.writeFileSync(signedAuthFile, JSON.stringify(signedRecord, null, 2), 'utf8');
+
+      const signedResolved = resolveVerifiedAuthority(
+        taskWithDigest,
+        ['--verified-authority', signedAuthFile],
+        tmpDir,
+        { trustedAuthorityPublicKey: publicKeyPem },
+      );
+      assert.ok(signedResolved);
+      assert.equal(signedResolved.contract_digest, digest);
+
+      const { publicKey: wrongPublicKey } = crypto.generateKeyPairSync('ed25519');
+      const wrongKeyResolved = resolveVerifiedAuthority(
+        taskWithDigest,
+        ['--verified-authority', signedAuthFile],
+        tmpDir,
+        { trustedAuthorityPublicKey: wrongPublicKey.export({ type: 'spki', format: 'pem' }) },
+      );
+      assert.equal(wrongKeyResolved, null);
+
+      // 3. GITHUB_EVENT_PATH rejects synchronize event pushed by a different contributor even if PR opener is SaCH-PRO.
+      const spoofedSyncEventFile = path.join(tmpDir, 'spoofed-sync-event.json');
+      fs.writeFileSync(
+        spoofedSyncEventFile,
+        JSON.stringify({
+          sender: { login: 'external-contributor' },
+          pull_request: {
+            user: { login: 'SaCH-PRO' },
+            head: { ref: taskWithDigest.implementation_branch },
+            base: { sha: taskWithDigest.source_main },
+            body: `cloud-contract-digest: ${digest}`,
+          },
+        }),
+        'utf8',
+      );
+      assert.equal(
+        resolveVerifiedAuthority(taskWithDigest, [], tmpDir, {
+          githubEventPath: spoofedSyncEventFile,
+        }),
+        null,
+      );
+
+      // 4. GITHUB_EVENT_PATH rejects event when YAML digest was recomputed after modifying task but independent event digest does not match.
+      const mutatedTask = makeTask({
+        risk_level: 'LOW',
+      });
+      const mutatedDigest = computeTaskContractDigest(mutatedTask);
+      const mutatedWithDigest = {
+        ...mutatedTask,
+        authority: {
+          ...mutatedTask.authority,
+          approval_id: 'KF-META-CLOUD-DISPATCH-001-AUTH-001',
+          contract_digest: mutatedDigest,
+        },
+      };
+      const validPrEventFile = path.join(tmpDir, 'valid-pr-event.json');
+      fs.writeFileSync(
+        validPrEventFile,
+        JSON.stringify({
+          sender: { login: 'SaCH-PRO' },
+          pull_request: {
+            user: { login: 'SaCH-PRO' },
+            head: { ref: taskWithDigest.implementation_branch },
+            base: { sha: taskWithDigest.source_main },
+            body: `Approved contract\ncloud-contract-digest: ${digest}`,
+          },
+        }),
+        'utf8',
+      );
+      assert.equal(
+        resolveVerifiedAuthority(mutatedWithDigest, [], tmpDir, {
+          githubEventPath: validPrEventFile,
+        }),
+        null,
+      );
+
+      // 5. GITHUB_EVENT_PATH succeeds when sender === opener === SaCH-PRO and independent digest matches.
+      const validEventResolved = resolveVerifiedAuthority(taskWithDigest, [], tmpDir, {
+        githubEventPath: validPrEventFile,
+      });
+      assert.ok(validEventResolved);
+      assert.equal(validEventResolved.actor, 'SaCH-PRO');
+      assert.equal(validEventResolved.contract_digest, digest);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('prevents bypassing persisted UNCERTAIN_RESULT via a stale CLAIMED snapshot and supports digest-bearing task failover with replacement authority', () => {
+    const staleClaimed = makeLeasedTask();
+    const persistedUncertain = markExecutionUncertain(staleClaimed, {
+      reason: 'worker transport drop',
+      nowIso: '2026-11-07T20:10:00Z',
+      observedBranchHead: SAMPLE_SEMANTIC_HEAD,
+    });
+    const handoff = makeHandoff({ pr_number: null });
+    const verifiedAuthority = buildVerifiedAuthorityRecord(staleClaimed);
+
+    // Passing staleClaimed while existingTasks has persistedUncertain must still block without clearance!
+    const bypassedFailover = prepareProviderFailoverHandoff({
+      task: staleClaimed,
+      handoff,
+      nextProvider: CLOUD_PROVIDERS.KIMI,
+      nextAgentIdentity: 'kimi-cloud-builder-01',
+      nowIso: '2026-11-07T20:20:00Z',
+      existingTasks: [persistedUncertain],
+      verifiedAuthority,
+      verifiedAncestry: VALID_ANCESTRY,
+    });
+    assert.equal(bypassedFailover.ok, false);
+    assert.equal(bypassedFailover.reason, CLOUD_REASONS.UNCERTAIN_EXECUTION_REPLAY_BLOCKED);
+
+    // Digest-bearing task failover: rejects without nextVerifiedAuthority, succeeds with buildFailoverAuthorityRecord.
+    const digest = computeTaskContractDigest(staleClaimed);
+    const digestBearingTask = {
+      ...staleClaimed,
+      authority: {
+        ...staleClaimed.authority,
+        contract_digest: digest,
+      },
+    };
+    const digestVerifiedAuth = buildVerifiedAuthorityRecord(digestBearingTask);
+
+    const missingNextAuth = prepareProviderFailoverHandoff({
+      task: digestBearingTask,
+      handoff,
+      nextProvider: CLOUD_PROVIDERS.KIMI,
+      nextAgentIdentity: 'kimi-cloud-builder-01',
+      nowIso: '2026-11-07T20:20:00Z',
+      verifiedAuthority: digestVerifiedAuth,
+      verifiedAncestry: VALID_ANCESTRY,
+    });
+    assert.equal(missingNextAuth.ok, false);
+    assert.equal(missingNextAuth.reason, CLOUD_REASONS.UNVERIFIED_AUTHORITY);
+
+    const nextVerifiedAuthority = buildFailoverAuthorityRecord(digestBearingTask, {
+      nextProvider: CLOUD_PROVIDERS.KIMI,
+      nextAgentIdentity: 'kimi-cloud-builder-01',
+    });
+    const validDigestFailover = prepareProviderFailoverHandoff({
+      task: digestBearingTask,
+      handoff,
+      nextProvider: CLOUD_PROVIDERS.KIMI,
+      nextAgentIdentity: 'kimi-cloud-builder-01',
+      nowIso: '2026-11-07T20:20:00Z',
+      verifiedAuthority: digestVerifiedAuth,
+      nextVerifiedAuthority,
+      verifiedAncestry: VALID_ANCESTRY,
+    });
+    assert.equal(validDigestFailover.ok, true);
+    assert.equal(
+      validDigestFailover.next_task.authority.contract_digest,
+      computeTaskContractDigest(validDigestFailover.next_task),
+    );
+  });
+
+  it('permits HANDOFF_READY -> COMPLETED_DRAFT finalization and rejects arbitrary targetState values or missing-task artifact deletions', () => {
+    const leased = makeLeasedTask();
+    const handoff = makeHandoff();
+    const verifiedAuthority = buildVerifiedAuthorityRecord(leased);
+    const verifiedCiEvidence = makeVerifiedCiEvidence();
+
+    // First transition CLAIMED -> HANDOFF_READY while awaiting CI.
+    const handoffReadyRes = recordTaskCompletion({
+      task: leased,
+      handoff,
+      actorProvider: leased.provider,
+      actorAgentId: leased.agent_identity,
+      leaseId: leased.lease.lease_id,
+      nowIso: '2026-11-07T20:10:00Z',
+      currentMainSha: VERIFIED_MAIN_SHA,
+      currentPrHeadSha: SAMPLE_PR_HEAD,
+      verifiedAncestry: VALID_ANCESTRY,
+      verifiedAuthority,
+      targetState: CLOUD_TASK_STATES.HANDOFF_READY,
+    });
+    assert.equal(handoffReadyRes.ok, true);
+    assert.equal(handoffReadyRes.task.state, CLOUD_TASK_STATES.HANDOFF_READY);
+
+    // Reject arbitrary targetState such as MERGED or EXECUTING.
+    const invalidTarget = recordTaskCompletion({
+      task: leased,
+      handoff,
+      actorProvider: leased.provider,
+      actorAgentId: leased.agent_identity,
+      leaseId: leased.lease.lease_id,
+      nowIso: '2026-11-07T20:12:00Z',
+      currentMainSha: VERIFIED_MAIN_SHA,
+      currentPrHeadSha: SAMPLE_PR_HEAD,
+      verifiedAncestry: VALID_ANCESTRY,
+      verifiedCiEvidence,
+      verifiedAuthority,
+      targetState: 'MERGED',
+    });
+    assert.equal(invalidTarget.ok, false);
+    assert.equal(invalidTarget.reason, CLOUD_REASONS.HANDOFF_INVALID);
+
+    // Finalize HANDOFF_READY -> COMPLETED_DRAFT once verified exact-head CI arrives.
+    const finalized = recordTaskCompletion({
+      task: handoffReadyRes.task,
+      handoff,
+      actorProvider: leased.provider,
+      actorAgentId: leased.agent_identity,
+      leaseId: leased.lease.lease_id,
+      nowIso: '2026-11-07T20:15:00Z',
+      currentMainSha: VERIFIED_MAIN_SHA,
+      currentPrHeadSha: SAMPLE_PR_HEAD,
+      verifiedAncestry: VALID_ANCESTRY,
+      verifiedCiEvidence,
+      verifiedAuthority,
+      targetState: CLOUD_TASK_STATES.COMPLETED_DRAFT,
+    });
+    assert.equal(finalized.ok, true);
+    assert.equal(finalized.task.state, CLOUD_TASK_STATES.COMPLETED_DRAFT);
+
+    // Deleting cloud-task.yaml or having an orphan cloud-handoff.yaml forces preflight to run and fail closed.
+    assert.equal(
+      shouldRunPullRequestPreflight({
+        eventName: 'pull_request',
+        declaredBranch: null,
+        prHeadRef: 'impl/kf-meta-cloud-control-001',
+        changedFilesSinceBase: ['.agent-control/cloud-task.yaml'],
+        taskFileExists: false,
+      }).shouldRun,
+      true,
+    );
+    assert.equal(
+      shouldRunPullRequestPreflight({
+        eventName: 'pull_request',
+        declaredBranch: null,
+        prHeadRef: 'impl/kf-meta-cloud-control-001',
+        changedFilesSinceBase: ['README.md'],
+        taskFileExists: false,
+        handoffFileExists: true,
+      }).shouldRun,
+      true,
+    );
   });
 });

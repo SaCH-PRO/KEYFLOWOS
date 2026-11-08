@@ -3336,7 +3336,7 @@ negative_controls:
       agent identity and revoke the prior lease.
     mutation:
       file: scripts/agent-control/lib/cloud-control.mjs
-      find: "  if (nextProvider === task.provider && nextAgentIdentity === task.agent_identity) {"
+      find: "  if (nextProvider === effectiveTask.provider && nextAgentIdentity === effectiveTask.agent_identity) {"
       replace: "  if (false) {"
     proof_command: node --test --test-name-pattern="NC cloud provider failover" scripts/agent-control/tests/cloud-control.spec.mjs
     timeout_ms: 120000

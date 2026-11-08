@@ -20,6 +20,10 @@ on:
         description: 'Repository-relative path to cloud task YAML'
         required: false
         default: '.agent-control/cloud-task.yaml'
+      contract_digest:
+        description: 'Expected 64-hex immutable cloud task contract digest'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -58,20 +62,21 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
-          GITHUB_HEAD_REF: ${{ github.head_ref }}
+          GITHUB_HEAD_REF: ${{ github.head_ref || github.ref_name }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_EVENT_PATH: ${{ github.event_path }}
           EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
           TASK_FILE: ${{ inputs.task_file || '.agent-control/cloud-task.yaml' }}
         run: |
           set -euo pipefail
+          task_changed=""
+          if [ -n "$EXPECTED_BASE_SHA" ]; then
+            task_changed="$(git diff --name-only "${EXPECTED_BASE_SHA}..HEAD" -- "$TASK_FILE" .agent-control/cloud-task.yaml .agent-control/cloud-handoff.yaml || echo "changed")"
+          fi
           if [ -f "$TASK_FILE" ]; then
             declared_branch="$(sed -n 's/^implementation_branch:[[:space:]]*//p' "$TASK_FILE" | head -n1 | tr -d '"' | tr -d "'" | tr -d '\r')"
-            task_changed=""
-            if [ -n "$EXPECTED_BASE_SHA" ]; then
-              task_changed="$(git diff --name-only "${EXPECTED_BASE_SHA}..HEAD" -- "$TASK_FILE" .agent-control/cloud-handoff.yaml || echo "changed")"
-            fi
             if [ "$EVENT_NAME" != "pull_request" ] || [ "$declared_branch" = "$GITHUB_HEAD_REF" ] || [ -n "$task_changed" ]; then
-              out="$(node scripts/agent-control/cloud-dispatch.mjs --preflight --task "$TASK_FILE" --dry-run --json)"
+              out="$(node scripts/agent-control/cloud-dispatch.mjs --preflight --task "$TASK_FILE" --branch "$GITHUB_HEAD_REF" --dry-run --json)"
               echo "$out"
               {
                 echo "### Agent Cloud Control Preflight (Read-Only)"
@@ -96,7 +101,11 @@ jobs:
               } >> "$GITHUB_STEP_SUMMARY"
             fi
           else
-            echo "No $TASK_FILE present on this branch; cloud-control suite passed."
+            if [ "$EVENT_NAME" != "pull_request" ] || [ -n "$task_changed" ] || [ -f ".agent-control/cloud-handoff.yaml" ]; then
+              echo "Cloud-control artifacts changed or manual preflight requested, but $TASK_FILE is missing; failing closed."
+              node scripts/agent-control/cloud-dispatch.mjs --preflight --task "$TASK_FILE" --branch "$GITHUB_HEAD_REF" --dry-run --json
+            fi
+            echo "No $TASK_FILE present on this branch and no cloud-control artifacts changed; cloud-control suite passed."
             {
               echo "### Agent Cloud Control Preflight (Read-Only)"
               echo ""
