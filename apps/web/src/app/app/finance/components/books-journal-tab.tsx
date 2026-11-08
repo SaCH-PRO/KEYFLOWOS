@@ -92,10 +92,12 @@ function JournalBody({ businessId }: { businessId: string }) {
     ]);
     if (Array.isArray(eRes.data?.items)) setEntries(eRes.data.items);
     if (Array.isArray(aRes.data?.items)) setAccounts(aRes.data.items);
-    const faItems = Array.isArray(faRes.data?.items) ? faRes.data.items : [];
+    const faItems: FinancialAccountRow[] = Array.isArray(faRes.data?.items)
+      ? faRes.data.items
+      : [];
     setFinancialAccounts(faItems);
 
-    const rawRates = Array.isArray(fxRes.data)
+    const rawRates: ExchangeRateItem[] = Array.isArray(fxRes.data)
       ? fxRes.data
       : Array.isArray((fxRes.data as { items?: ExchangeRateItem[] } | null)?.items)
         ? (fxRes.data as { items: ExchangeRateItem[] }).items
@@ -104,7 +106,7 @@ function JournalBody({ businessId }: { businessId: string }) {
 
     const resolvedBizCurrency =
       (typeof settingsRes.data?.currency === "string" && settingsRes.data.currency.trim()) ||
-      faItems.find((fa) => fa.isActive !== false && fa.currency)?.currency ||
+      faItems.find((fa: FinancialAccountRow) => fa.isActive !== false && fa.currency)?.currency ||
       (Array.isArray(eRes.data?.items) && eRes.data.items[0]?.currency) ||
       "TTD";
     const normalizedBizCurrency = resolvedBizCurrency.trim().toUpperCase();

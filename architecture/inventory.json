@@ -41061,9 +41061,9 @@
         "react",
         "sonner"
       ],
-      "lines": 451,
+      "lines": 453,
       "path": "apps/web/src/app/app/finance/components/books-journal-tab.tsx",
-      "size_bytes": 19490
+      "size_bytes": 19566
     },
     {
       "exports": [
@@ -56602,6 +56602,7 @@
         "EmailValidationResult",
         "EndorsementData",
         "EodReportData",
+        "ExchangeRateItem",
         "Expense",
         "ExpenseBudget",
         "ExpenseCategory",
@@ -56924,9 +56925,9 @@
         "./workspace",
         "zod"
       ],
-      "lines": 15124,
+      "lines": 15139,
       "path": "apps/web/src/lib/client.ts",
-      "size_bytes": 537456
+      "size_bytes": 537994
     },
     {
       "exports": [
@@ -57948,7 +57949,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4234841
+      "size_bytes": 4235942
     },
     {
       "extension": ".md",
@@ -57970,9 +57971,9 @@
     },
     {
       "extension": ".json",
-      "lines": 63786,
+      "lines": 63801,
       "path": "architecture/inventory.json",
-      "size_bytes": 1651369
+      "size_bytes": 1651798
     },
     {
       "extension": ".md",
@@ -63796,6 +63797,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3481,
     "total_files": 4475,
-    "total_lines": 1160319
+    "total_lines": 1160351
   }
 }

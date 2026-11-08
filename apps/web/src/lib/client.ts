@@ -13419,6 +13419,21 @@ export async function createJournalEntry(businessId: string, body: {
   return apiPost<JournalEntryRow>({ path: `${finBase(businessId)}/journal-entries`, body });
 }
 
+export interface ExchangeRateItem {
+  id: string;
+  fromCurrency: string;
+  toCurrency: string;
+  rate: number;
+  date: string;
+  source?: string | null;
+  createdAt: string;
+}
+
+export async function fetchExchangeRates(businessId: string, fromCurrency?: string, toCurrency?: string) {
+  const qs = fromCurrency && toCurrency ? `?from=${encodeURIComponent(fromCurrency)}&to=${encodeURIComponent(toCurrency)}` : '';
+  return apiGetSimple<{ items: ExchangeRateItem[] } | ExchangeRateItem[]>(`${finBase(businessId)}/exchange-rates${qs}`);
+}
+
 export async function extractReceipt(businessId: string, body: { url: string; filename?: string }) {
   return apiPost<{ documentType: string; invoiceData?: { total: number; subtotal: number; currency: string; lineItems: Array<{ description: string; quantity: number; unitPrice: number; total: number }>; contactName?: string; issueDate?: string }; confidence: number; rawText?: string }>({
     path: `/expenses/businesses/${encodeURIComponent(businessId)}/expenses/extract-receipt`,
