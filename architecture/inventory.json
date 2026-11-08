@@ -31630,9 +31630,9 @@
         "@nestjs/event-emitter",
         "crypto"
       ],
-      "lines": 368,
+      "lines": 418,
       "path": "apps/server/src/modules/webhooks/webhook-dispatcher.service.ts",
-      "size_bytes": 11277
+      "size_bytes": 13302
     },
     {
       "exports": [
@@ -57861,7 +57861,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4228514
+      "size_bytes": 4228801
     },
     {
       "extension": ".md",
@@ -57883,9 +57883,9 @@
     },
     {
       "extension": ".json",
-      "lines": 63719,
+      "lines": 63720,
       "path": "architecture/inventory.json",
-      "size_bytes": 1649532
+      "size_bytes": 1649566
     },
     {
       "extension": ".md",
@@ -63715,6 +63715,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3476,
     "total_files": 4471,
-    "total_lines": 1156228
+    "total_lines": 1156279
   }
 }

@@ -50,12 +50,62 @@ export class WebhookDispatcherService {
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  getDeliveryLogs(businessId: string, webhookId?: string, limit = 50): WebhookDeliveryLog[] {
-    let logs = this.deliveryLogs.filter((l) => l.businessId === businessId);
+  async getDeliveryLogs(businessId: string, webhookId?: string, limit = 50): Promise<WebhookDeliveryLog[]> {
+    let inMemory = this.deliveryLogs.filter((l) => l.businessId === businessId);
     if (webhookId) {
-      logs = logs.filter((l) => l.webhookId === webhookId);
+      inMemory = inMemory.filter((l) => l.webhookId === webhookId);
     }
-    return logs.slice(-limit).reverse();
+
+    let persisted: WebhookDeliveryLog[] = [];
+    if (this.prisma.client.activityLog?.findMany) {
+      try {
+        const rows = await this.prisma.client.activityLog.findMany({
+          where: { businessId, type: 'webhook.delivery' },
+          orderBy: { createdAt: 'desc' },
+          take: Math.max(limit * 2, 100),
+        });
+        persisted = rows
+          .map((row: { id: string; businessId: string; metadata: unknown; createdAt: Date }) => {
+            const meta = (row.metadata ?? {}) as Partial<WebhookDeliveryLog>;
+            if (!meta.webhookId || !meta.event) return null;
+            return {
+              id: meta.id ?? row.id,
+              webhookId: meta.webhookId,
+              businessId: meta.businessId ?? row.businessId,
+              event: meta.event,
+              url: meta.url ?? '',
+              status: meta.status === 'success' ? 'success' : 'failed',
+              statusCode: meta.statusCode ?? null,
+              attempts: meta.attempts ?? 1,
+              duration: meta.duration ?? 0,
+              error: meta.error ?? null,
+              timestamp: meta.timestamp ?? row.createdAt.toISOString(),
+            } satisfies WebhookDeliveryLog;
+          })
+          .filter((item: WebhookDeliveryLog | null): item is WebhookDeliveryLog => item !== null);
+        if (webhookId) {
+          persisted = persisted.filter((l) => l.webhookId === webhookId);
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Failed to load persisted webhook delivery logs for ${businessId}: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    const mergedById = new Map<string, WebhookDeliveryLog>();
+    for (const entry of [...inMemory].reverse()) {
+      mergedById.set(entry.id, entry);
+    }
+    for (const entry of persisted) {
+      if (!mergedById.has(entry.id)) {
+        mergedById.set(entry.id, entry);
+      }
+    }
+
+    return Array.from(mergedById.values())
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, limit);
   }
 
   async sendTestEvent(webhookId: string, businessId: string): Promise<WebhookDeliveryLog> {
