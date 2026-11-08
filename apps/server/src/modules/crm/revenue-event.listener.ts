@@ -78,6 +78,7 @@ export class RevenueEventListener {
       total: quote?.total,
       currency: quote?.currency,
     });
+    await this.advanceContactLifecycle(p.businessId, quote?.contactId ?? null, 'PROSPECT', 'quote.sent');
   }
 
   @OnEvent('quote.accepted', { async: true })
@@ -90,6 +91,14 @@ export class RevenueEventListener {
       acceptedAt: p.acceptedAt,
       source: p.source,
     });
+    await this.advanceContactLifecycle(p.businessId, quote?.contactId ?? null, 'PROSPECT', 'quote.accepted');
+  }
+
+  @OnEvent('booking.created', { async: true })
+  async onBookingCreated(p: { businessId: string; booking?: { id?: string; contactId?: string | null } }) {
+    const contactId = p.booking?.contactId ?? null;
+    if (!contactId) return;
+    await this.advanceContactLifecycle(p.businessId, contactId, 'PROSPECT', 'booking.created');
   }
 
   @OnEvent('quote.rejected', { async: true })
@@ -205,6 +214,7 @@ export class RevenueEventListener {
       currency: inv?.currency,
       paidAt: inv?.paidAt,
     });
+    await this.advanceContactLifecycle(p.businessId, inv?.contactId ?? null, 'CLIENT', 'invoice.paid');
   }
 
   // ---- payment.* (connector-driven) ----
@@ -218,6 +228,7 @@ export class RevenueEventListener {
       invoiceId: p.invoiceId ?? null,
       externalId: p.externalId ?? null,
     });
+    await this.advanceContactLifecycle(p.businessId, p.contactId, 'CLIENT', 'payment.received');
   }
 
   @OnEvent('payment.failed', { async: true })
@@ -295,6 +306,7 @@ export class RevenueEventListener {
       total: order.total,
       currency: order.currency,
     });
+    await this.advanceContactLifecycle(p.businessId, contactId, 'CLIENT', 'store_order.paid');
   }
 
   @OnEvent('store_order.refunded', { async: true })
@@ -346,6 +358,89 @@ export class RevenueEventListener {
   // -----------------------------------------------------------------
   // Helpers
   // -----------------------------------------------------------------
+
+  private async advanceContactLifecycle(
+    businessId: string,
+    contactId: string | undefined | null,
+    targetStatus: 'PROSPECT' | 'CLIENT',
+    trigger: string,
+  ) {
+    if (!businessId || !contactId || !this.prisma.client.contact?.findFirst) return;
+    try {
+      const contact = await this.prisma.client.contact.findFirst({
+        where: { id: contactId, businessId, deletedAt: null },
+        select: { id: true, status: true },
+      });
+      if (!contact) return;
+
+      const currentStatus = (contact.status ?? 'LEAD').toUpperCase();
+      const shouldAdvance =
+        targetStatus === 'PROSPECT'
+          ? currentStatus === 'LEAD'
+          : currentStatus === 'LEAD' || currentStatus === 'PROSPECT';
+
+      if (!shouldAdvance) return;
+
+      if (this.prisma.client.contact.update) {
+        await this.prisma.client.contact.update({
+          where: { id: contactId },
+          data: {
+            status: targetStatus,
+            lifecycleStage: targetStatus.toLowerCase(),
+          },
+        });
+      }
+
+      await this.timeline.logEvent(
+        businessId,
+        contactId,
+        'status.changed' as ContactEventType,
+        {
+          from: currentStatus,
+          to: targetStatus,
+          trigger,
+          dedupeKey: `rev:lifecycle:${contactId}:${targetStatus}`,
+        },
+        { actorType: 'SYSTEM', source: 'lifecycle-automation' },
+      );
+
+      if (
+        targetStatus === 'CLIENT' &&
+        this.prisma.client.contactTask?.findFirst &&
+        this.prisma.client.contactTask?.create
+      ) {
+        const existingOpenTask = await this.prisma.client.contactTask.findFirst({
+          where: {
+            businessId,
+            contactId,
+            status: { not: 'COMPLETED' },
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+        if (!existingOpenTask) {
+          const dueDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+          await this.prisma.client.contactTask.create({
+            data: {
+              businessId,
+              contactId,
+              title: 'Post-payment customer check-in & follow-up',
+              priority: 'NORMAL',
+              status: 'OPEN',
+              dueDate,
+              source: 'lifecycle-automation',
+            },
+          });
+        }
+      }
+
+      await this.insights.markStale(businessId, contactId);
+    } catch (err: any) {
+      this.logger.warn(
+        `advanceContactLifecycle failed for contact=${contactId} target=${targetStatus}: ${(err as Error).message}`,
+      );
+    }
+  }
 
   private async log(
     businessId: string,

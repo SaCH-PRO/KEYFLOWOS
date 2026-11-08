@@ -99,6 +99,14 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
 
   return (
     <div className="space-y-4">
+      {businessId && projectId && (
+        <div className="rounded-xl border border-border/40 bg-card p-4">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            Budget & Hours Burn
+          </h4>
+          <ProjectBudgetView businessId={businessId} projectId={projectId} />
+        </div>
+      )}
       {invoiceId ? (
         <div className="rounded-xl border border-border/40 bg-card p-4">
           {loadingInvoice ? (

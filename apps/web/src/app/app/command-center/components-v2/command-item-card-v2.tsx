@@ -76,7 +76,15 @@ export function CommandItemCardV2({ item, index = 0, compact }: CommandItemCardV
           </Badge>
           <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wide">{item.source}</span>
         </div>
-        <h3 className={cn("font-semibold text-foreground", compact ? "text-xs" : "text-sm")}>{item.title}</h3>
+        <h3 className={cn("font-semibold text-foreground", compact ? "text-xs" : "text-sm")}>
+          <button
+            type="button"
+            onClick={() => router.push(`/app/command-center/${encodeURIComponent(item.id)}`)}
+            className="text-left hover:text-primary transition-colors"
+          >
+            {item.title}
+          </button>
+        </h3>
         <p
           className={cn(
             "text-muted-foreground leading-relaxed mt-0.5",
@@ -95,16 +103,25 @@ export function CommandItemCardV2({ item, index = 0, compact }: CommandItemCardV
             ))}
           </ul>
         )}
-        {primaryAction && (
+        <div className="mt-2 flex items-center gap-3">
+          {primaryAction && (
+            <button
+              onClick={() => primaryAction.href && router.push(primaryAction.href)}
+              disabled={!primaryAction.href}
+              className="inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+            >
+              {primaryAction.label}
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          )}
           <button
-            onClick={() => primaryAction.href && router.push(primaryAction.href)}
-            disabled={!primaryAction.href}
-            className="mt-2 inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors disabled:opacity-50"
+            type="button"
+            onClick={() => router.push(`/app/command-center/${encodeURIComponent(item.id)}`)}
+            className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors"
           >
-            {primaryAction.label}
-            <ArrowRight className="w-3 h-3" />
+            View details
           </button>
-        )}
+        </div>
       </Surface>
     </motion.div>
   );

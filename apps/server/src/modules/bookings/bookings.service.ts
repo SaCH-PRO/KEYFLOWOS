@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException, ForbiddenException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { BadRequestException, NotFoundException, ForbiddenException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { BookingStatus, Prisma } from '@prisma/client';
 import {
@@ -23,6 +23,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { BookingWaitlistService } from './booking-waitlist.service';
 
 interface DayHours {
   open: string;
@@ -80,12 +81,16 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
+    @Optional() @Inject(BookingWaitlistService) private readonly waitlist?: BookingWaitlistService,
   ) {}
 
   onModuleInit() {
     this.reminderInterval = setInterval(() => {
       this.processBookingReminders().catch((e) =>
         this.logger.error(`Booking reminder check failed: ${(e as Error).message}`),
+      );
+      this.waitlist?.expireStaleOffers().catch((e) =>
+        this.logger.error(`Waitlist offer expiry check failed: ${(e as Error).message}`),
       );
     }, REMINDER_CHECK_INTERVAL_MS);
     this.logger.log('Booking reminder scheduler started (5min interval)');
@@ -411,10 +416,24 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('Service has no price configured');
     }
 
+    const invoiceOptions = await this.resolveCompletionInvoiceOptions(booking, booking.service);
+    if (invoiceOptions.coveredByDepositInvoice) {
+      await this.prisma.client.booking.update({
+        where: { id: booking.id },
+        data: { invoiceId: invoiceOptions.coveredByDepositInvoice.id },
+      });
+      return {
+        invoiceId: invoiceOptions.coveredByDepositInvoice.id,
+        invoiceNumber: invoiceOptions.coveredByDepositInvoice.invoiceNumber,
+        alreadyExisted: true,
+      };
+    }
+
     const invoice = await this.commerce.createInvoiceForService(
       businessId,
       booking.contactId,
       booking.service,
+      invoiceOptions.options,
     );
     if (!invoice) {
       throw new BadRequestException('Failed to create invoice');
@@ -441,6 +460,53 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       invoiceNumber: invoiceWithNumber.invoiceNumber,
       alreadyExisted: false,
     };
+  }
+
+  private async resolveCompletionInvoiceOptions(
+    booking: { depositInvoiceId?: string | null },
+    service: { price: number; depositRequired?: boolean | null; depositType?: string | null; depositValue?: number | null },
+  ): Promise<{
+    coveredByDepositInvoice?: { id: string; invoiceNumber: string };
+    options?: { kind: 'BALANCE'; amountOverride: number };
+  }> {
+    if (!booking.depositInvoiceId) {
+      return {};
+    }
+    let depositAmount = 0;
+    let depositInvoiceRecord: { id: string; invoiceNumber: string; total: any; status: string } | null = null;
+    if (this.prisma.client.invoice?.findUnique) {
+      depositInvoiceRecord = await this.prisma.client.invoice.findUnique({
+        where: { id: booking.depositInvoiceId },
+        select: { id: true, invoiceNumber: true, total: true, status: true },
+      });
+    }
+    const status = (depositInvoiceRecord?.status ?? '').toUpperCase();
+    if (depositInvoiceRecord && status !== 'VOID' && status !== 'CANCELLED') {
+      depositAmount = Number(depositInvoiceRecord.total) || 0;
+    } else if (!depositInvoiceRecord && this.commerce.computeServiceDeposit) {
+      depositAmount = this.commerce.computeServiceDeposit(service);
+    }
+    if (depositAmount <= 0) {
+      return {};
+    }
+    const remainingBalance = Math.max(0, Math.round((service.price - depositAmount) * 100) / 100);
+    if (remainingBalance <= 0 && depositInvoiceRecord) {
+      return {
+        coveredByDepositInvoice: {
+          id: depositInvoiceRecord.id,
+          invoiceNumber: depositInvoiceRecord.invoiceNumber,
+        },
+      };
+    }
+    if (remainingBalance > 0) {
+      return {
+        options: {
+          kind: 'BALANCE',
+          amountOverride: remainingBalance,
+        },
+      };
+    }
+    return {};
   }
 
   async updateBookingNotes(businessId: string, bookingId: string, notes: string) {
@@ -1188,6 +1254,10 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // service price even if invoice/payment lands later — gives growth
     // dashboards an immediate view of pipeline value). Hard requirement
     // for storefront-originated revenue: failures propagate to the caller.
+    const resolvedCurrency =
+      (service as { currency?: string | null }).currency ||
+      (business as { currency?: string | null }).currency ||
+      'TTD';
     await this.revenueAttribution.record({
       businessId: input.businessId,
       source: 'storefront',
@@ -1195,7 +1265,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       revenueType: 'BOOKING',
       revenueId: booking.id,
       amount: service.price ?? 0,
-      currency: 'TTD',
+      currency: resolvedCurrency,
       contactId: contact.id,
       referralCode: input.referralCode ?? null,
       visitorId: input.visitorId ?? null,
@@ -1224,7 +1294,21 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       });
       if (!service || service.price <= 0) return;
 
-      const invoice = await this.commerce.createInvoiceForService(businessId, booking.contactId, service);
+      const invoiceOptions = await this.resolveCompletionInvoiceOptions(booking, service);
+      if (invoiceOptions.coveredByDepositInvoice) {
+        await this.prisma.client.booking.update({
+          where: { id: booking.id },
+          data: { invoiceId: invoiceOptions.coveredByDepositInvoice.id },
+        });
+        return;
+      }
+
+      const invoice = await this.commerce.createInvoiceForService(
+        businessId,
+        booking.contactId,
+        service,
+        invoiceOptions.options,
+      );
       if (invoice) {
         await this.prisma.client.booking.update({
           where: { id: booking.id },

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import type { OnboardingCardData, OnboardingStep } from "../types";
 import { updateBusinessBlueprint } from "@/lib/api/business-blueprint";
 import { updateBusinessProfile } from "@/lib/api/business-profile";
-import { seedDemoData } from "@/lib/api/onboarding-concierge";
+import { seedSampleContact } from "@/lib/api/onboarding-concierge";
 import {
   CardFrame,
   PrimaryButton,
@@ -848,7 +848,7 @@ export function PaymentsStorefrontContactsCard({ card, onAdvance }: Comprehensiv
   const handleSeedContact = async () => {
     if (!businessId) return;
     setLoading(true);
-    const { error } = await seedDemoData(businessId);
+    const { error } = await seedSampleContact(businessId);
     setLoading(false);
     if (error) {
       toast.error(error);

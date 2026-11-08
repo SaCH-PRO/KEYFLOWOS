@@ -11,6 +11,11 @@ export interface DemoSeedResult {
   invoiceNumber: string;
 }
 
+export interface SampleContactSeedResult {
+  contactId: string;
+  alreadyExisted: boolean;
+}
+
 /**
  * Seeds a single, clearly-labeled sample contact + invoice into a brand-new
  * workspace so the Command Center is not empty the first time the user arrives.
@@ -23,6 +28,38 @@ export class DemoDataSeederService {
   private readonly logger = new Logger(DemoDataSeederService.name);
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  async seedSampleContact(businessId: string, tx?: PrismaTx): Promise<SampleContactSeedResult> {
+    const run = async (db: PrismaTx): Promise<SampleContactSeedResult> => {
+      const existing = await db.contact.findFirst({
+        where: { businessId, source: 'demo' },
+        select: { id: true },
+      });
+      if (existing) {
+        return { contactId: existing.id, alreadyExisted: true };
+      }
+      const contact = await db.contact.create({
+        data: {
+          businessId,
+          firstName: 'Sample',
+          lastName: 'Client',
+          displayName: 'Sample Client (demo)',
+          email: 'sample-client@example.com',
+          emailNormalized: 'sample-client@example.com',
+          status: 'LEAD',
+          source: 'demo',
+          lifecycleStage: 'lead',
+          notesInternal: 'This is a sample contact created during onboarding. You can edit or delete it anytime.',
+        },
+      });
+      return { contactId: contact.id, alreadyExisted: false };
+    };
+
+    if (tx) {
+      return run(tx);
+    }
+    return this.prisma.client.$transaction(async (innerTx) => run(innerTx));
+  }
 
   async seedDemoData(businessId: string, tx?: PrismaTx): Promise<DemoSeedResult> {
     if (tx) {

@@ -67,7 +67,7 @@
 | Slim chat-driven funnel | Welcome step | P1 | ✅ Working | Seeds welcome bubble |
 | | Deep-link/resume into intake/template/configure | P1 | ✅ Working | Empty-chat step now auto-seeds its card |
 | | Template picker | P1 | ✅ Working | `TemplatePickerCard` + `autoConfigureFromTemplate` |
-| | Payments/storefront/contacts setup | P1 | ⚠️ Partial | Only path to satisfy contacts is `seedDemoData`, which also creates demo invoice |
+| | Payments/storefront/contacts setup | P1 | ✅ Working | Dedicated `POST /onboarding-concierge/businesses/:businessId/seed-sample-contact` seeds only sample contact without demo invoice |
 | Business Genesis idea extraction | Analyze idea | P1 | ✅ Working | `business-genesis.controller.ts:30-52` |
 | | Q&A flow | P1 | ✅ Working | `questions/next`, `answers` |
 | | Blueprint/Genome sync | P1 | ✅ Working | `business-genesis.service.ts:224-436` |
@@ -91,7 +91,7 @@
 | | Cross-domain panel | P1 | ✅ Working | |
 | Snapshot API | `GET /business-command-center/businesses/:id/snapshot` | P1 | ✅ Working | 29 unit tests pass |
 | Command item detail | Complete/dismiss/snooze/approve/execute/assign/reopen | P2 | ✅ Working | `command-center/[id]/page.tsx:76-411` |
-| | Reachability from priority cards | P2 | ⚠️ Partial | `CommandItemCardV2` does not link to detail |
+| | Reachability from priority cards | P2 | ✅ Working | `CommandItemCardV2` title and `View details` action navigate to `/app/command-center/[id]` |
 | Module launcher | Global `Shift+K` shortcut | P2 | ✅ Working | `use-keyboard-shortcuts.ts:39-46` |
 | | Bottom-edge swipe | P2 | ✅ Working | `mobile-gesture-provider.tsx:68-70` |
 | | Mobile "Flows" button | P2 | ✅ Working | `mobile-bottom-nav-v2.tsx:150-164` |
@@ -232,7 +232,8 @@
 | Availability / free-slot API | Public/internal endpoint | P1 | ✅ Working | `GET /public/businesses/:businessId/slots` is live |
 | Waitlist | Add/list/match/offer/convert/cancel | P2 | ✅ Working | `booking-waitlist.service.ts` |
 | | Auto-offer on cancel/reschedule | P2 | ✅ Working | `booking-waitlist.listener.ts:25` |
-| | Expiry/notification for offered slots | P2 | ❌ Broken | No listener/cron |
+| | Expiry/notification for offered slots | P2 | ✅ Working | `BookingWaitlistListener.onSlotOffered` sends transactional email + CRM event; `BookingWaitlistService.expireStaleOffers` runs on 5-min scheduler and cascades slot to next waitlisted contact |
+| | Deposit-aware completion invoicing | P1 | ✅ Working | `BookingsService.resolveCompletionInvoiceOptions` deducts `depositInvoiceId` amount and creates `BALANCE` invoice in service/business currency |
 | Google Calendar sync | OAuth/refresh/push/pull/conflict | P1 | ✅ Working | `calendar-sync.service.ts` |
 | Master Calendar | Read/write/filters/agenda/insights | P1 | ✅ Working | `calendar.controller.ts`, `calendar-query.service.ts` |
 | Booking reminders | 5-min scheduler | P2 | ✅ Working | `bookings.service.ts:85` |
@@ -282,8 +283,8 @@
 | Project milestones | UI | P1 | ✅ Working | Wired to existing create/update/delete endpoints |
 | Project notes | UI | P1 | ✅ Working | Wired to GET/POST/DELETE `/keyflow/businesses/:businessId/notes` with `targetType: 'Project'` |
 | Project deliverables | UI | P1 | ✅ Working | Wired to existing endpoints |
-| Project budget view | Component | P2 | 🔇 Orphaned | Exported but never imported |
-| Task kanban view | Component | P2 | 🔇 Orphaned | Exported but never imported |
+| Project budget view | Component | P2 | ✅ Working | Wired into `RevenueTab` (`apps/web/src/app/app/projects/components/project-detail-tabs/revenue-tab.tsx`) |
+| Task kanban view | Component | P2 | ✅ Working | Wired into `TasksTab` with List/Kanban toggle and `updateProjectTaskStatus` (`apps/web/src/app/app/projects/components/project-detail-tabs/tasks-tab.tsx`) |
 | Task assignments / workload | Backend | P2 | ✅ Working | `task-assignment.service.ts`, recommender |
 | | UI | P2 | 🚧 Stub | No assignment picker in UI; never built |
 | Project revenue auto-progression | Invoice.paid/booking.completed | P2 | ✅ Working | `project-revenue.listener.ts` |
@@ -360,10 +361,10 @@
 | Public payment links | `/pay/link/:token` | P1 | ✅ Working | |
 | Currency conversion | Live fetch + fallback | P1 | ⚠️ Partial | TTD rate missing |
 | Outgoing webhooks | HMAC dispatch | P2 | ✅ Working | `webhook-dispatcher.service.ts:45-58` |
-| | Delivery log persistence | P2 | ❌ Broken | In-memory array only |
+| | Delivery log persistence | P2 | ✅ Working | Persisted to `ActivityLog` (`type: 'webhook.delivery'`) and hydrated across restarts (`webhook-dispatcher.service.ts`) |
 | LiveKit in-app voice | Room/token/agent dispatch | P2 | ✅ Working | `livekit.service.ts:14-85` |
 | Phone voice | Twilio bridge | P2 | ✅ Working | Fail-closed without token |
-| WhatsApp connector health | Multi-tenant config | P2 | ❌ Broken | Reads global env instead of per-business config |
+| WhatsApp connector health | Multi-tenant config | P2 | ✅ Working | Reads decrypted per-business `business.metaData.whatsapp` config (`meta`/`twilio`/`mock`) with global env fallback (`whatsapp.connector.ts`) |
 | Social OAuth + publishing | Real publishers | P1 | ✅ Working | `social.controller.ts`, `social-publishing.service.ts` |
 | | Self-serve credentials | P2 | ⚠️ Partial | Requires env vars per business |
 
@@ -420,10 +421,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 43 | 9 | 0 | 0 | 0 | 52 |
-| P1 | 96 | 17 | 1 | 1 | 0 | 115 |
-| P2 | 52 | 12 | 4 | 10 | 9 | 87 |
+| P1 | 98 | 16 | 1 | 1 | 0 | 116 |
+| P2 | 58 | 12 | 1 | 10 | 6 | 87 |
 | P3 | 11 | 5 | 0 | 5 | 10 | 31 |
-| **Total** | **202** | **43** | **5** | **16** | **19** | **284** |
+| **Total** | **210** | **42** | **2** | **16** | **16** | **286** |
 
 ---
 

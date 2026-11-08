@@ -106,14 +106,36 @@ export class CommerceService {
     businessId: string,
     contactId: string,
     service: Service,
-    options?: { kind?: 'FULL' | 'DEPOSIT'; amountOverride?: number; descriptionSuffix?: string },
+    options?: {
+      kind?: 'FULL' | 'DEPOSIT' | 'BALANCE';
+      amountOverride?: number;
+      descriptionSuffix?: string;
+      currency?: string;
+    },
   ) {
     const kind = options?.kind ?? 'FULL';
     const total = options?.amountOverride ?? service.price;
     const description =
       kind === 'DEPOSIT'
         ? `Deposit — ${service.name}${options?.descriptionSuffix ?? ''}`
-        : `${service.name}${options?.descriptionSuffix ?? ''}`;
+        : kind === 'BALANCE'
+          ? `Balance — ${service.name}${options?.descriptionSuffix ?? ''}`
+          : `${service.name}${options?.descriptionSuffix ?? ''}`;
+    let resolvedCurrency = options?.currency || (service as { currency?: string | null }).currency || '';
+    if (!resolvedCurrency && this.prisma.client.business?.findUnique) {
+      const biz = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { currency: true },
+      });
+      resolvedCurrency = biz?.currency || 'TTD';
+    }
+    const currency = resolvedCurrency || 'TTD';
+    const notes =
+      kind === 'DEPOSIT'
+        ? `Deposit for service "${service.name}"`
+        : kind === 'BALANCE'
+          ? `Balance due for service "${service.name}" (less deposit)`
+          : null;
     return this.prisma.client.invoice.create({
       data: {
         businessId,
@@ -123,8 +145,8 @@ export class CommerceService {
         issueDate: new Date(),
         subtotal: total,
         total,
-        currency: 'TTD',
-        notes: kind === 'DEPOSIT' ? `Deposit for service "${service.name}"` : null,
+        currency,
+        notes,
         items: {
           create: [
             {

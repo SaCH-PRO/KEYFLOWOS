@@ -49,6 +49,11 @@ export class OnboardingConciergeController {
     return this.concierge.seedDemoData(businessId);
   }
 
+  @Post('seed-sample-contact')
+  async seedSampleContact(@Param('businessId') businessId: string) {
+    return this.concierge.seedSampleContact(businessId);
+  }
+
   @Get('welcome')
   async getWelcomeMessage(@Param('businessId') businessId: string) {
     return this.concierge.getWelcomeMessage(businessId);

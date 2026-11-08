@@ -131,9 +131,21 @@ export function autoConfigureFromTemplate(
   );
 }
 
+export interface SampleContactSeedResult {
+  contactId: string;
+  alreadyExisted: boolean;
+}
+
 export function seedDemoData(businessId: string) {
   return apiPost<DemoSeedResult>(
     `/onboarding-concierge/businesses/${businessId}/seed-demo`,
+    {},
+  );
+}
+
+export function seedSampleContact(businessId: string) {
+  return apiPost<SampleContactSeedResult>(
+    `/onboarding-concierge/businesses/${businessId}/seed-sample-contact`,
     {},
   );
 }

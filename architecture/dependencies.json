@@ -3676,6 +3676,20 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/core/connectors/implementations/whatsapp.connector.spec.ts",
+      "specifier": "./whatsapp.connector",
+      "target": "apps/server/src/core/connectors/implementations/whatsapp.connector.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/core/connectors/implementations/whatsapp.connector.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/core/connectors/implementations/whatsapp.connector.ts",
       "specifier": "@nestjs/common",
@@ -12524,6 +12538,27 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/bookings/booking-completion-invoice.spec.ts",
+      "specifier": "./booking-waitlist.listener",
+      "target": "apps/server/src/modules/bookings/booking-waitlist.listener.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/bookings/booking-completion-invoice.spec.ts",
+      "specifier": "./bookings.service",
+      "target": "apps/server/src/modules/bookings/bookings.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/bookings/booking-completion-invoice.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/bookings/booking-no-show.listener.ts",
       "specifier": "@nestjs/common",
@@ -12619,6 +12654,20 @@
       "source": "apps/server/src/modules/bookings/booking-waitlist.listener.ts",
       "specifier": "./booking-waitlist.service",
       "target": "apps/server/src/modules/bookings/booking-waitlist.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/bookings/booking-waitlist.listener.ts",
+      "specifier": "../crm/crm.service",
+      "target": "apps/server/src/modules/crm/crm.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/bookings/booking-waitlist.listener.ts",
+      "specifier": "../notifications/transactional-email.service",
+      "target": "apps/server/src/modules/notifications/transactional-email.service.ts",
       "type": "relative"
     },
     {
@@ -13186,6 +13235,13 @@
       "source": "apps/server/src/modules/bookings/bookings.service.ts",
       "specifier": "../../core/prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/bookings/bookings.service.ts",
+      "specifier": "./booking-waitlist.service",
+      "target": "apps/server/src/modules/bookings/booking-waitlist.service.ts",
       "type": "relative"
     },
     {
@@ -57604,6 +57660,20 @@
       "type": "external"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/webhooks/webhook-dispatcher.service.spec.ts",
+      "specifier": "./webhook-dispatcher.service",
+      "target": "apps/server/src/modules/webhooks/webhook-dispatcher.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/webhooks/webhook-dispatcher.service.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/webhooks/webhook-dispatcher.service.ts",
       "specifier": "@nestjs/common",
@@ -90056,6 +90126,13 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/web/src/app/app/projects/components/project-detail-tabs/tasks-tab.tsx",
+      "specifier": "../task-kanban",
+      "target": "apps/web/src/app/app/projects/components/task-kanban.tsx",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "apps/web/src/app/app/projects/components/project-detail-tabs/tasks-tab.tsx",
       "specifier": "lucide-react",
@@ -108356,6 +108433,13 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/lib/admission.mjs",
+      "specifier": "./merge-grant.mjs",
+      "target": "scripts/agent-control/lib/merge-grant.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/admission.mjs",
       "specifier": "./semantic-review.mjs",
       "target": "scripts/agent-control/lib/semantic-review.mjs",
       "type": "relative"
@@ -108435,6 +108519,41 @@
       "source": "scripts/agent-control/lib/events.mjs",
       "specifier": "./control-envelope.mjs",
       "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/merge-grant.mjs",
+      "specifier": "./authority-effects.mjs",
+      "target": "scripts/agent-control/lib/authority-effects.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/merge-grant.mjs",
+      "specifier": "./control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/merge-grant.mjs",
+      "specifier": "./events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/merge-record.mjs",
+      "specifier": "./control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/lib/merge-record.mjs",
+      "specifier": "./events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
       "type": "relative"
     },
     {
@@ -108718,6 +108837,20 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "scripts/agent-control/record-auto-merge.mjs",
+      "specifier": "./lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/record-auto-merge.mjs",
+      "specifier": "./lib/merge-record.mjs",
+      "target": "scripts/agent-control/lib/merge-record.mjs",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "scripts/agent-control/select-directive.mjs",
       "specifier": "node:fs",
@@ -108811,6 +108944,13 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "../lib/merge-grant.mjs",
+      "target": "scripts/agent-control/lib/merge-grant.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
       "specifier": "../lib/semantic-review.mjs",
       "target": "scripts/agent-control/lib/semantic-review.mjs",
       "type": "relative"
@@ -108820,6 +108960,13 @@
       "source": "scripts/agent-control/tests/admission.spec.mjs",
       "specifier": "../lib/yaml.mjs",
       "target": "scripts/agent-control/lib/yaml.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/admission.spec.mjs",
+      "specifier": "./helpers/merge-grant-fixture.mjs",
+      "target": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
       "type": "relative"
     },
     {
@@ -108939,6 +109086,62 @@
       "source": "scripts/agent-control/tests/authority-effects.spec.mjs",
       "specifier": "../status.mjs",
       "target": "scripts/agent-control/status.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "../lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "specifier": "../lib/yaml.mjs",
+      "target": "scripts/agent-control/lib/yaml.mjs",
       "type": "relative"
     },
     {
@@ -109108,6 +109311,153 @@
       "specifier": "node:child_process",
       "target": "node:child_process",
       "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/helpers/synthetic-github.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:os",
+      "target": "node:os",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "node:url",
+      "target": "node:url",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "../lib/events.mjs",
+      "target": "scripts/agent-control/lib/events.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "specifier": "./helpers/merge-grant-fixture.mjs",
+      "target": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "../lib/authority-effects.mjs",
+      "target": "scripts/agent-control/lib/authority-effects.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "../lib/control-envelope.mjs",
+      "target": "scripts/agent-control/lib/control-envelope.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "../lib/merge-grant.mjs",
+      "target": "scripts/agent-control/lib/merge-grant.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "specifier": "./helpers/merge-grant-fixture.mjs",
+      "target": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "specifier": "node:child_process",
+      "target": "node:child_process",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "specifier": "node:http",
+      "target": "node:http",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "specifier": "../lib/merge-record.mjs",
+      "target": "scripts/agent-control/lib/merge-record.mjs",
+      "type": "relative"
     },
     {
       "resolved": false,
@@ -109630,6 +109980,48 @@
     {
       "resolved": true,
       "source": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "specifier": "./harness.mjs",
+      "target": "scripts/agent-control/tests/windows/harness.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "specifier": "node:assert/strict",
+      "target": "node:assert/strict",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "specifier": "node:fs",
+      "target": "node:fs",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "specifier": "node:path",
+      "target": "node:path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "specifier": "node:test",
+      "target": "node:test",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "specifier": "../helpers/powershell.mjs",
+      "target": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
       "specifier": "./harness.mjs",
       "target": "scripts/agent-control/tests/windows/harness.mjs",
       "type": "relative"
@@ -110511,8 +110903,8 @@
     }
   ],
   "meta": {
-    "edges": 15787,
-    "nodes": 3861,
+    "edges": 15843,
+    "nodes": 3875,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"
   },
@@ -112233,6 +112625,11 @@
     },
     {
       "extension": ".ts",
+      "id": "apps/server/src/core/connectors/implementations/whatsapp.connector.spec.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
       "id": "apps/server/src/core/connectors/implementations/whatsapp.connector.ts",
       "type": "file"
     },
@@ -113569,6 +113966,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/blueprint/entity-type.helpers.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/bookings/booking-completion-invoice.spec.ts",
       "type": "file"
     },
     {
@@ -120289,6 +120691,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/webhooks/dto/stripe-webhook.dto.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/webhooks/webhook-dispatcher.service.spec.ts",
       "type": "file"
     },
     {
@@ -128405,6 +128812,10 @@
       "type": "external"
     },
     {
+      "id": "node:http",
+      "type": "external"
+    },
+    {
       "id": "node:module",
       "type": "external"
     },
@@ -128927,6 +129338,16 @@
     },
     {
       "extension": ".mjs",
+      "id": "scripts/agent-control/lib/merge-grant.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/lib/merge-record.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
       "id": "scripts/agent-control/lib/momentum.mjs",
       "type": "file"
     },
@@ -128992,6 +129413,11 @@
     },
     {
       "extension": ".mjs",
+      "id": "scripts/agent-control/record-auto-merge.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
       "id": "scripts/agent-control/select-directive.mjs",
       "type": "file"
     },
@@ -129008,6 +129434,11 @@
     {
       "extension": ".mjs",
       "id": "scripts/agent-control/tests/authority-effects.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
       "type": "file"
     },
     {
@@ -129037,7 +129468,32 @@
     },
     {
       "extension": ".mjs",
+      "id": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
       "id": "scripts/agent-control/tests/helpers/powershell.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/helpers/synthetic-github.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/merge-record.spec.mjs",
       "type": "file"
     },
     {
@@ -129093,6 +129549,11 @@
     {
       "extension": ".mjs",
       "id": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
+      "type": "file"
+    },
+    {
+      "extension": ".mjs",
+      "id": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
       "type": "file"
     },
     {

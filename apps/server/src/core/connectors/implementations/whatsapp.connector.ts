@@ -177,8 +177,31 @@ export class WhatsAppConnector implements IConnector {
   }
 
   async smokeTest(businessId: string): Promise<ConnectorSmokeResult> {
-    const token = process.env.WHATSAPP_ACCESS_TOKEN;
-    const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
+    const businessCfg = await this.getBusinessWhatsAppConfig(businessId);
+    if (businessCfg?.provider === 'mock') {
+      await this.trackActivity(businessId);
+      return {
+        success: true,
+        action: 'Verified tenant mock WhatsApp provider',
+        account: businessCfg.fromNumber ?? 'mock',
+        detail: 'Mock provider active for business',
+      };
+    }
+    if (businessCfg?.provider === 'twilio') {
+      if (!businessCfg.accountSid || !businessCfg.authToken || !businessCfg.fromNumber) {
+        return { success: false, error: 'Twilio WhatsApp configuration is incomplete for this business' };
+      }
+      await this.trackActivity(businessId);
+      return {
+        success: true,
+        action: 'Verified tenant Twilio WhatsApp configuration',
+        account: businessCfg.fromNumber,
+        detail: `Twilio SID ${businessCfg.accountSid.slice(0, 6)}…`,
+      };
+    }
+
+    const token = businessCfg?.accessToken || process.env.WHATSAPP_ACCESS_TOKEN;
+    const phoneNumberId = businessCfg?.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
     if (!token) return { success: false, error: 'WHATSAPP_ACCESS_TOKEN is not set' };
     if (!phoneNumberId) return { success: false, error: 'WHATSAPP_PHONE_NUMBER_ID is not set' };
     try {

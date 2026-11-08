@@ -22,6 +22,7 @@ describe('OnboardingConciergeController', () => {
     dismissConcierge: vi.fn().mockResolvedValue({ dismissed: true }),
     resumeConcierge: vi.fn().mockResolvedValue({ resumed: true }),
     seedDemoData: vi.fn().mockResolvedValue({ contactId: 'c1', invoiceId: 'i1', invoiceNumber: 'DEMO-001' }),
+    seedSampleContact: vi.fn().mockResolvedValue({ contactId: 'c1', alreadyExisted: false }),
     markOnboardingComplete: vi.fn().mockResolvedValue({ complete: true, demoData: { contactId: 'c1', invoiceId: 'i1', invoiceNumber: 'DEMO-001' } }),
   };
 
@@ -88,6 +89,12 @@ describe('OnboardingConciergeController', () => {
     expect(result.invoiceNumber).toBe('DEMO-001');
   });
 
+  it('POST seed-sample-contact triggers contact-only sample seeding', async () => {
+    const result = await controller.seedSampleContact('biz_1');
+    expect(conciergeMock.seedSampleContact).toHaveBeenCalledWith('biz_1');
+    expect(result).toEqual({ contactId: 'c1', alreadyExisted: false });
+  });
+
   it('POST complete marks onboarding complete and seeds demo data', async () => {
     const result = await controller.markComplete('biz_1');
     expect(conciergeMock.markOnboardingComplete).toHaveBeenCalledWith('biz_1');
@@ -100,3 +107,4 @@ describe('OnboardingConciergeController', () => {
     expect(result).toEqual([{ id: 'salon', label: 'Salon' }]);
   });
 });
+

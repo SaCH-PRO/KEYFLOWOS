@@ -927,9 +927,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 105,
+      "lines": 165,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 6259
+      "size_bytes": 10957
     },
     {
       "extension": ".yaml",
@@ -939,9 +939,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 64,
+      "lines": 437,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 2301
+      "size_bytes": 44808
     },
     {
       "extension": ".yaml",
@@ -3281,15 +3281,15 @@
     },
     {
       "extension": ".yml",
-      "lines": 322,
+      "lines": 349,
       "path": ".github/workflows/agent-control-autopilot.yml",
-      "size_bytes": 12492
+      "size_bytes": 13906
     },
     {
       "extension": ".yml",
-      "lines": 135,
+      "lines": 156,
       "path": ".github/workflows/agent-control-gate.yml",
-      "size_bytes": 5280
+      "size_bytes": 6460
     },
     {
       "extension": ".yml",
@@ -5082,6 +5082,17 @@
       "size_bytes": 3575
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./whatsapp.connector",
+        "vitest"
+      ],
+      "lines": 62,
+      "path": "apps/server/src/core/connectors/implementations/whatsapp.connector.spec.ts",
+      "size_bytes": 2085
+    },
+    {
       "exports": [
         "WhatsAppConnector"
       ],
@@ -5094,9 +5105,9 @@
         "@nestjs/event-emitter",
         "crypto"
       ],
-      "lines": 274,
+      "lines": 297,
       "path": "apps/server/src/core/connectors/implementations/whatsapp.connector.ts",
-      "size_bytes": 9889
+      "size_bytes": 10850
     },
     {
       "exports": [
@@ -9541,6 +9552,18 @@
       "size_bytes": 1954
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./booking-waitlist.listener",
+        "./bookings.service",
+        "vitest"
+      ],
+      "lines": 199,
+      "path": "apps/server/src/modules/bookings/booking-completion-invoice.spec.ts",
+      "size_bytes": 6147
+    },
+    {
       "exports": [
         "BookingNoShowListener"
       ],
@@ -9583,18 +9606,21 @@
     },
     {
       "exports": [
-        "BookingWaitlistListener"
+        "BookingWaitlistListener",
+        "WaitlistSlotOfferedPayload"
       ],
       "extension": ".ts",
       "imports": [
         "../../core/event-bus/events.types",
+        "../crm/crm.service",
+        "../notifications/transactional-email.service",
         "./booking-waitlist.service",
         "@nestjs/common",
         "@nestjs/event-emitter"
       ],
-      "lines": 76,
+      "lines": 158,
       "path": "apps/server/src/modules/bookings/booking-waitlist.listener.ts",
-      "size_bytes": 2698
+      "size_bytes": 5866
     },
     {
       "exports": [],
@@ -9606,9 +9632,9 @@
         "@nestjs/testing",
         "vitest"
       ],
-      "lines": 286,
+      "lines": 333,
       "path": "apps/server/src/modules/bookings/booking-waitlist.service.spec.ts",
-      "size_bytes": 11133
+      "size_bytes": 12942
     },
     {
       "exports": [
@@ -9624,9 +9650,9 @@
         "@nestjs/common",
         "@nestjs/event-emitter"
       ],
-      "lines": 414,
+      "lines": 497,
       "path": "apps/server/src/modules/bookings/booking-waitlist.service.ts",
-      "size_bytes": 13985
+      "size_bytes": 16778
     },
     {
       "exports": [
@@ -9763,14 +9789,15 @@
         "../public-events/public-events.service",
         "../subscriptions/subscriptions.service",
         "../timeline/timeline.service",
+        "./booking-waitlist.service",
         "@keyflow/shared",
         "@nestjs/common",
         "@nestjs/event-emitter",
         "@prisma/client"
       ],
-      "lines": 1269,
+      "lines": 1353,
       "path": "apps/server/src/modules/bookings/bookings.service.ts",
-      "size_bytes": 49096
+      "size_bytes": 52325
     },
     {
       "exports": [],
@@ -13692,9 +13719,9 @@
         "@nestjs/event-emitter",
         "crypto"
       ],
-      "lines": 2155,
+      "lines": 2177,
       "path": "apps/server/src/modules/commerce/commerce.service.ts",
-      "size_bytes": 79093
+      "size_bytes": 79823
     },
     {
       "exports": [
@@ -17807,9 +17834,9 @@
         "./revenue-event.listener",
         "vitest"
       ],
-      "lines": 134,
+      "lines": 207,
       "path": "apps/server/src/modules/crm/revenue-event.listener.spec.ts",
-      "size_bytes": 5264
+      "size_bytes": 8071
     },
     {
       "exports": [
@@ -17825,9 +17852,9 @@
         "@nestjs/common",
         "@nestjs/event-emitter"
       ],
-      "lines": 420,
+      "lines": 515,
       "path": "apps/server/src/modules/crm/revenue-event.listener.ts",
-      "size_bytes": 15831
+      "size_bytes": 19238
     },
     {
       "exports": [
@@ -27851,14 +27878,15 @@
         "./demo-data-seeder.service",
         "vitest"
       ],
-      "lines": 108,
+      "lines": 127,
       "path": "apps/server/src/modules/onboarding-concierge/demo-data-seeder.service.spec.ts",
-      "size_bytes": 3621
+      "size_bytes": 4459
     },
     {
       "exports": [
         "DemoDataSeederService",
-        "DemoSeedResult"
+        "DemoSeedResult",
+        "SampleContactSeedResult"
       ],
       "extension": ".ts",
       "imports": [
@@ -27867,9 +27895,9 @@
         "@prisma/client",
         "crypto"
       ],
-      "lines": 151,
+      "lines": 188,
       "path": "apps/server/src/modules/onboarding-concierge/demo-data-seeder.service.ts",
-      "size_bytes": 4802
+      "size_bytes": 6016
     },
     {
       "exports": [
@@ -27968,9 +27996,9 @@
         "@nestjs/testing",
         "vitest"
       ],
-      "lines": 102,
+      "lines": 110,
       "path": "apps/server/src/modules/onboarding-concierge/onboarding-concierge.controller.spec.ts",
-      "size_bytes": 4786
+      "size_bytes": 5183
     },
     {
       "exports": [
@@ -27985,9 +28013,9 @@
         "./onboarding-state.service",
         "@nestjs/common"
       ],
-      "lines": 123,
+      "lines": 128,
       "path": "apps/server/src/modules/onboarding-concierge/onboarding-concierge.controller.ts",
-      "size_bytes": 3598
+      "size_bytes": 3760
     },
     {
       "exports": [
@@ -28048,9 +28076,9 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 1209,
+      "lines": 1213,
       "path": "apps/server/src/modules/onboarding-concierge/onboarding-concierge.service.ts",
-      "size_bytes": 44323
+      "size_bytes": 44434
     },
     {
       "exports": [],
@@ -31578,6 +31606,17 @@
       "size_bytes": 143
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./webhook-dispatcher.service",
+        "vitest"
+      ],
+      "lines": 76,
+      "path": "apps/server/src/modules/webhooks/webhook-dispatcher.service.spec.ts",
+      "size_bytes": 2700
+    },
+    {
       "exports": [
         "WebhookDeliveryLog",
         "WebhookDispatcherService"
@@ -31590,9 +31629,9 @@
         "@nestjs/event-emitter",
         "crypto"
       ],
-      "lines": 354,
+      "lines": 368,
       "path": "apps/server/src/modules/webhooks/webhook-dispatcher.service.ts",
-      "size_bytes": 10752
+      "size_bytes": 11277
     },
     {
       "exports": [
@@ -31731,9 +31770,9 @@
         "@nestjs/event-emitter",
         "@nestjs/schedule"
       ],
-      "lines": 833,
+      "lines": 851,
       "path": "apps/server/src/modules/whatsapp/whatsapp.service.ts",
-      "size_bytes": 31360
+      "size_bytes": 32060
     },
     {
       "exports": [],
@@ -35165,9 +35204,9 @@
         "lucide-react",
         "next/navigation"
       ],
-      "lines": 111,
+      "lines": 128,
       "path": "apps/web/src/app/app/command-center/components-v2/command-item-card-v2.tsx",
-      "size_bytes": 3626
+      "size_bytes": 4310
     },
     {
       "exports": [
@@ -46380,9 +46419,9 @@
         "next/link",
         "react"
       ],
-      "lines": 361,
+      "lines": 369,
       "path": "apps/web/src/app/app/projects/components/project-detail-tabs/revenue-tab.tsx",
-      "size_bytes": 18474
+      "size_bytes": 18838
     },
     {
       "exports": [
@@ -46391,13 +46430,14 @@
       "extension": ".tsx",
       "imports": [
         "../project-constants",
+        "../task-kanban",
         "@/lib/client",
         "lucide-react",
         "react"
       ],
-      "lines": 229,
+      "lines": 287,
       "path": "apps/web/src/app/app/projects/components/project-detail-tabs/tasks-tab.tsx",
-      "size_bytes": 8610
+      "size_bytes": 11083
     },
     {
       "exports": [
@@ -46442,9 +46482,9 @@
         "react",
         "sonner"
       ],
-      "lines": 532,
+      "lines": 546,
       "path": "apps/web/src/app/app/projects/components/project-detail.tsx",
-      "size_bytes": 21396
+      "size_bytes": 21985
     },
     {
       "exports": [
@@ -52609,7 +52649,7 @@
       ],
       "lines": 1097,
       "path": "apps/web/src/components/key/chat/key-onboarding-cards/comprehensive-cards.tsx",
-      "size_bytes": 51417
+      "size_bytes": 51427
     },
     {
       "exports": [
@@ -55932,6 +55972,7 @@
         "NudgeItem",
         "OnboardingState",
         "OnboardingStep",
+        "SampleContactSeedResult",
         "SnoozeNudgeResult",
         "TemplatePreview",
         "autoConfigureFromTemplate",
@@ -55943,6 +55984,7 @@
         "markOnboardingComplete",
         "saveOnboardingStep",
         "seedDemoData",
+        "seedSampleContact",
         "sendConciergeMessage",
         "snoozeConciergeNudge"
       ],
@@ -55950,9 +55992,9 @@
       "imports": [
         "@/lib/api"
       ],
-      "lines": 172,
+      "lines": 184,
       "path": "apps/web/src/lib/api/onboarding-concierge.ts",
-      "size_bytes": 4264
+      "size_bytes": 4547
     },
     {
       "exports": [
@@ -57833,9 +57875,9 @@
     },
     {
       "extension": ".md",
-      "lines": 671,
+      "lines": 684,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 31631
+      "size_bytes": 32834
     },
     {
       "extension": ".json",
@@ -59113,15 +59155,15 @@
     },
     {
       "extension": ".md",
-      "lines": 271,
+      "lines": 278,
       "path": "docs/development/AGENT_AUTOPILOT.md",
-      "size_bytes": 13829
+      "size_bytes": 14283
     },
     {
       "extension": ".md",
-      "lines": 200,
+      "lines": 226,
       "path": "docs/development/AGENT_AUTOPILOT_OPERATIONS.md",
-      "size_bytes": 15019
+      "size_bytes": 19259
     },
     {
       "extension": ".yaml",
@@ -59131,9 +59173,9 @@
     },
     {
       "extension": ".md",
-      "lines": 700,
+      "lines": 845,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 34798
+      "size_bytes": 43465
     },
     {
       "extension": ".md",
@@ -59197,6 +59239,12 @@
     },
     {
       "extension": ".md",
+      "lines": 61,
+      "path": "docs/development/PRODUCT_COMPLETION_TRACKER.md",
+      "size_bytes": 10019
+    },
+    {
+      "extension": ".md",
       "lines": 144,
       "path": "docs/development/THIRD_PARTY_ACCOUNTS.md",
       "size_bytes": 10243
@@ -59215,9 +59263,9 @@
     },
     {
       "extension": ".md",
-      "lines": 437,
+      "lines": 438,
       "path": "docs/development/feature-inventory.md",
-      "size_bytes": 32611
+      "size_bytes": 33473
     },
     {
       "extension": ".md",
@@ -61787,15 +61835,15 @@
         "./lib/semantic-review.mjs",
         "./lib/yaml.mjs"
       ],
-      "lines": 236,
+      "lines": 280,
       "path": "scripts/agent-control/auto-merge-admitted.mjs",
-      "size_bytes": 9168
+      "size_bytes": 11411
     },
     {
       "extension": ".ps1",
-      "lines": 689,
+      "lines": 731,
       "path": "scripts/agent-control/claude-worker.ps1",
-      "size_bytes": 29852
+      "size_bytes": 32453
     },
     {
       "extension": ".ps1",
@@ -61865,16 +61913,18 @@
         "TRANSITION_TRIGGERS",
         "artifactBindingProblems",
         "evaluateAdmission",
+        "evaluateGrantGate",
         "recheckBeforeMerge"
       ],
       "extension": ".mjs",
       "imports": [
         "./events.mjs",
+        "./merge-grant.mjs",
         "./semantic-review.mjs"
       ],
-      "lines": 292,
+      "lines": 355,
       "path": "scripts/agent-control/lib/admission.mjs",
-      "size_bytes": 13822
+      "size_bytes": 17190
     },
     {
       "exports": [
@@ -61984,6 +62034,42 @@
       "lines": 315,
       "path": "scripts/agent-control/lib/events.mjs",
       "size_bytes": 13471
+    },
+    {
+      "exports": [
+        "GRANT_EFFECTS",
+        "GRANT_REASONS",
+        "GRANT_REVIEW_STATUS",
+        "evaluateMergeGrant",
+        "sameGrant"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./authority-effects.mjs",
+        "./control-envelope.mjs",
+        "./events.mjs"
+      ],
+      "lines": 395,
+      "path": "scripts/agent-control/lib/merge-grant.mjs",
+      "size_bytes": 20094
+    },
+    {
+      "exports": [
+        "MergeRecordConflict",
+        "RECORD_AUTHORS",
+        "RECORD_OUTCOMES",
+        "buildMergeRecord",
+        "mergeMarker",
+        "recordProblems"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./control-envelope.mjs",
+        "./events.mjs"
+      ],
+      "lines": 195,
+      "path": "scripts/agent-control/lib/merge-record.mjs",
+      "size_bytes": 8560
     },
     {
       "exports": [
@@ -62187,9 +62273,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 2214,
+      "lines": 3225,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 106661
+      "size_bytes": 152243
     },
     {
       "exports": [],
@@ -62236,6 +62322,17 @@
       "size_bytes": 5854
     },
     {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/events.mjs",
+        "./lib/merge-record.mjs"
+      ],
+      "lines": 90,
+      "path": "scripts/agent-control/record-auto-merge.mjs",
+      "size_bytes": 3624
+    },
+    {
       "exports": [
         "WAKE_TYPES",
         "selectDirective"
@@ -62278,16 +62375,18 @@
       "imports": [
         "../lib/admission.mjs",
         "../lib/events.mjs",
+        "../lib/merge-grant.mjs",
         "../lib/semantic-review.mjs",
         "../lib/yaml.mjs",
+        "./helpers/merge-grant-fixture.mjs",
         "node:assert/strict",
         "node:fs",
         "node:path",
         "node:test"
       ],
-      "lines": 532,
+      "lines": 711,
       "path": "scripts/agent-control/tests/admission.spec.mjs",
-      "size_bytes": 30189
+      "size_bytes": 41811
     },
     {
       "exports": [],
@@ -62314,6 +62413,23 @@
       "lines": 2410,
       "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
       "size_bytes": 157207
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/events.mjs",
+        "../lib/yaml.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 325,
+      "path": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "size_bytes": 16302
     },
     {
       "exports": [],
@@ -62386,6 +62502,30 @@
     },
     {
       "exports": [
+        "BASE",
+        "HEAD",
+        "PLAN_5826799265_BODY",
+        "REPO",
+        "SEMANTIC",
+        "body",
+        "claudeNote",
+        "comment",
+        "directiveComment",
+        "followUp",
+        "grantComment",
+        "grantFields",
+        "holdComment",
+        "realPlanComment",
+        "target"
+      ],
+      "extension": ".mjs",
+      "imports": [],
+      "lines": 208,
+      "path": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
+      "size_bytes": 7587
+    },
+    {
+      "exports": [
         "PS",
         "needsPowerShell",
         "requireWindows"
@@ -62397,6 +62537,63 @@
       "lines": 39,
       "path": "scripts/agent-control/tests/helpers/powershell.mjs",
       "size_bytes": 1465
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "node:fs"
+      ],
+      "lines": 80,
+      "path": "scripts/agent-control/tests/helpers/synthetic-github.mjs",
+      "size_bytes": 3922
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/events.mjs",
+        "./helpers/merge-grant-fixture.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test",
+        "node:url"
+      ],
+      "lines": 437,
+      "path": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "size_bytes": 24300
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/authority-effects.mjs",
+        "../lib/control-envelope.mjs",
+        "../lib/merge-grant.mjs",
+        "./helpers/merge-grant-fixture.mjs",
+        "node:assert/strict",
+        "node:test"
+      ],
+      "lines": 833,
+      "path": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "size_bytes": 53844
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/merge-record.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:http",
+        "node:test"
+      ],
+      "lines": 464,
+      "path": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "size_bytes": 21507
     },
     {
       "exports": [],
@@ -62554,9 +62751,9 @@
         "node:os",
         "node:path"
       ],
-      "lines": 164,
+      "lines": 166,
       "path": "scripts/agent-control/tests/windows/harness.mjs",
-      "size_bytes": 6380
+      "size_bytes": 6526
     },
     {
       "exports": [],
@@ -62588,6 +62785,21 @@
       "lines": 107,
       "path": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
       "size_bytes": 3590
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../helpers/powershell.mjs",
+        "./harness.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 128,
+      "path": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "size_bytes": 5623
     },
     {
       "exports": [],
@@ -63472,8 +63684,8 @@
       ".ico": 1,
       ".js": 11,
       ".json": 41,
-      ".md": 564,
-      ".mjs": 76,
+      ".md": 565,
+      ".mjs": 86,
       ".patch": 1,
       ".pdf": 1,
       ".pid": 3,
@@ -63487,7 +63699,7 @@
       ".svg": 6,
       ".template": 1,
       ".toml": 2,
-      ".ts": 2143,
+      ".ts": 2146,
       ".tsbuildinfo": 1,
       ".tsv": 1,
       ".tsx": 1233,
@@ -63499,8 +63711,8 @@
     },
     "root": ".",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3463,
-    "total_files": 4457,
-    "total_lines": 1149678
+    "source_files": 3476,
+    "total_files": 4471,
+    "total_lines": 1155968
   }
 }

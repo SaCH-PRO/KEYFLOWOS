@@ -229,6 +229,19 @@ export function ProjectDetail({
     } catch { toast.error("Failed to update task"); }
   }, [businessId, project, onProjectUpdate]);
 
+  const handleUpdateTaskStatus = useCallback(async (projectId: string, taskId: string, status: string, position?: number) => {
+    if (!businessId) return;
+    try {
+      const res = await updateProjectTaskStatus(businessId, taskId, { status, position });
+      if (res.data) {
+        onProjectUpdate({
+          ...project,
+          tasks: project.tasks.map((t) => (t.id === taskId ? res.data! : t)),
+        });
+      }
+    } catch { toast.error("Failed to update task status"); }
+  }, [businessId, project, onProjectUpdate]);
+
   const handleAddMilestone = useCallback(async (title: string, dueDate?: string) => {
     if (!businessId) return;
     try {
@@ -463,6 +476,7 @@ export function ProjectDetail({
             onToggleTask={handleToggleTask}
             onDeleteTask={handleDeleteTask}
             onUpdateTask={handleUpdateTask}
+            onUpdateTaskStatus={handleUpdateTaskStatus}
           />
         )}
         {activeTab === "milestones" && (

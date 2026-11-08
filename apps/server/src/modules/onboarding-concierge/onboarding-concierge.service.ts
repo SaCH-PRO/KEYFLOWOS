@@ -1112,6 +1112,10 @@ EXTRACTED: archetype=service_provider`;
     return this.demoSeeder.seedDemoData(businessId);
   }
 
+  async seedSampleContact(businessId: string) {
+    return this.demoSeeder.seedSampleContact(businessId);
+  }
+
   async markOnboardingComplete(businessId: string) {
     const business = await this.prisma.client.business.findUnique({
       where: { id: businessId },

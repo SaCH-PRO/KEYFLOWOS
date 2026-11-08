@@ -105,4 +105,23 @@ describe('DemoDataSeederService', () => {
     expect(tx.contact.create).not.toHaveBeenCalled();
     expect(tx.invoice.create).not.toHaveBeenCalled();
   });
+
+  it('seedSampleContact creates only a sample contact without a demo invoice', async () => {
+    const { service, tx, createdContact } = makeService();
+    const res = await service.seedSampleContact('biz_1');
+
+    expect(res).toEqual({ contactId: createdContact.id, alreadyExisted: false });
+    expect(tx.contact.create).toHaveBeenCalledTimes(1);
+    expect(tx.invoice.create).not.toHaveBeenCalled();
+  });
+
+  it('seedSampleContact is idempotent when a demo contact already exists', async () => {
+    const { service, tx } = makeService({ existingDemoContact: { id: 'c_existing' } });
+    const res = await service.seedSampleContact('biz_1');
+
+    expect(res).toEqual({ contactId: 'c_existing', alreadyExisted: true });
+    expect(tx.contact.create).not.toHaveBeenCalled();
+    expect(tx.invoice.create).not.toHaveBeenCalled();
+  });
 });
+

@@ -361,6 +361,89 @@ export class BookingWaitlistService {
   }
 
   /**
+   * Expire OFFERED waitlist entries that have exceeded their hold window
+   * without being converted, cancel their UNCONFIRMED placeholder booking,
+   * and cascade the freed slot to the next matching WAITING entry if the
+   * appointment start time is still in the future.
+   */
+  async expireStaleOffers(maxAgeMinutes = 120): Promise<{ expiredCount: number; cascadedCount: number }> {
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - maxAgeMinutes * 60_000);
+
+    const staleEntries = await this.prisma.client.bookingWaitlistEntry.findMany({
+      where: {
+        status: WAITLIST_STATUSES.OFFERED,
+        deletedAt: null,
+        offeredAt: { lte: cutoff },
+      },
+      orderBy: [{ offeredAt: 'asc' }],
+      take: 100,
+      include: {
+        offeredBooking: {
+          select: {
+            id: true,
+            startTime: true,
+            endTime: true,
+            serviceId: true,
+            staffId: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    let expiredCount = 0;
+    let cascadedCount = 0;
+
+    for (const entry of staleEntries) {
+      const [expiredEntry] = await this.prisma.client.$transaction(async (tx) => {
+        const entryUpdate = tx.bookingWaitlistEntry.update({
+          where: { id: entry.id },
+          data: { status: WAITLIST_STATUSES.EXPIRED },
+        });
+        if (
+          entry.offeredBookingId &&
+          (!entry.offeredBooking || entry.offeredBooking.status === 'UNCONFIRMED')
+        ) {
+          const bookingUpdate = tx.booking.update({
+            where: { id: entry.offeredBookingId },
+            data: { status: 'CANCELLED' },
+          });
+          return Promise.all([entryUpdate, bookingUpdate]);
+        }
+        return Promise.all([entryUpdate]);
+      });
+
+      expiredCount += 1;
+      this.events.emit('booking.waitlist.offer_expired', {
+        entry: expiredEntry,
+        expiredBookingId: entry.offeredBookingId ?? null,
+        businessId: entry.businessId,
+      });
+
+      const slotBooking = entry.offeredBooking;
+      if (slotBooking && new Date(slotBooking.startTime).getTime() > now.getTime()) {
+        const freedSlot: FreedSlot = {
+          startTime: new Date(slotBooking.startTime),
+          endTime: new Date(slotBooking.endTime),
+          serviceId: slotBooking.serviceId ?? entry.serviceId,
+          staffId: slotBooking.staffId ?? null,
+        };
+        const nextMatches = await this.findWaitlistMatchesForSlot(entry.businessId, freedSlot, {
+          limit: 1,
+          excludeEntryIds: [entry.id],
+        });
+        if (nextMatches.length > 0) {
+          await this.offerSlot(nextMatches[0].id, freedSlot, 'SYSTEM');
+          cascadedCount += 1;
+        }
+      }
+    }
+
+    return { expiredCount, cascadedCount };
+  }
+
+  /**
    * Preview which waitlist entries would match a proposed slot, without
    * creating any bookings or changing any state.
    */

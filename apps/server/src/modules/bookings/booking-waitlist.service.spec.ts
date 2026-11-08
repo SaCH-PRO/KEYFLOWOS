@@ -283,4 +283,51 @@ describe('BookingWaitlistService', () => {
       expect(emit).toHaveBeenCalledWith('booking.waitlist.cancelled', expect.any(Object));
     });
   });
+
+  describe('expireStaleOffers', () => {
+    it('expires stale OFFERED entries, cancels placeholder bookings, and cascades future slots to the next WAITING contact', async () => {
+      const futureStart = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const futureEnd = new Date(futureStart.getTime() + 60 * 60 * 1000);
+      const staleEntry = mockEntry({
+        id: 'stale_1',
+        status: WAITLIST_STATUSES.OFFERED,
+        offeredBookingId: 'booking_hold_1',
+        offeredAt: new Date(Date.now() - 180 * 60 * 1000),
+        offeredBooking: {
+          id: 'booking_hold_1',
+          startTime: futureStart,
+          endTime: futureEnd,
+          serviceId: 'service_1',
+          staffId: 'staff_1',
+          status: 'UNCONFIRMED',
+        },
+      });
+      const nextWaiting = mockEntry({
+        id: 'waiting_2',
+        contactId: 'contact_2',
+        status: WAITLIST_STATUSES.WAITING,
+      });
+
+      prismaMock.client.bookingWaitlistEntry.findMany
+        .mockResolvedValueOnce([staleEntry])
+        .mockResolvedValueOnce([nextWaiting]);
+      prismaMock.client.bookingWaitlistEntry.findFirst.mockResolvedValueOnce(nextWaiting);
+
+      const res = await service.expireStaleOffers(120);
+
+      expect(res).toEqual({ expiredCount: 1, cascadedCount: 1 });
+      expect(prismaMock.client.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'booking_hold_1' }, data: { status: 'CANCELLED' } }),
+      );
+      expect(emit).toHaveBeenCalledWith(
+        'booking.waitlist.offer_expired',
+        expect.objectContaining({ businessId: 'biz_1', expiredBookingId: 'booking_hold_1' }),
+      );
+      expect(emit).toHaveBeenCalledWith(
+        'booking.waitlist.slot_offered',
+        expect.objectContaining({ businessId: 'biz_1' }),
+      );
+    });
+  });
 });
+

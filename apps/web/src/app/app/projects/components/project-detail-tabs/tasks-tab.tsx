@@ -11,9 +11,12 @@ import {
   ChevronDown,
   ChevronRight,
   Timer,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { ProjectTask } from "@/lib/client";
 import { isOverdue, formatDate } from "../project-constants";
+import { TaskKanban } from "../task-kanban";
 
 interface TasksTabProps {
   tasks: ProjectTask[];
@@ -22,15 +25,17 @@ interface TasksTabProps {
   onToggleTask: (projectId: string, task: ProjectTask) => void;
   onDeleteTask: (projectId: string, taskId: string) => void;
   onUpdateTask: (projectId: string, taskId: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number }) => void;
+  onUpdateTaskStatus?: (projectId: string, taskId: string, status: string, position?: number) => void;
 }
 
 export function TasksTab({
-  tasks, projectId, onAddTask, onToggleTask, onDeleteTask, onUpdateTask,
+  tasks, projectId, onAddTask, onToggleTask, onDeleteTask, onUpdateTask, onUpdateTaskStatus,
 }: TasksTabProps) {
   const [newTitle, setNewTitle] = useState("");
   const [newDueDate, setNewDueDate] = useState("");
   const [showCompleted, setShowCompleted] = useState(true);
   const [filter, setFilter] = useState<"all" | "overdue" | "upcoming">("all");
+  const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
 
   const completed = tasks.filter((t) => t.isCompleted);
   const incomplete = tasks.filter((t) => !t.isCompleted);
@@ -49,6 +54,19 @@ export function TasksTab({
     setNewDueDate("");
   };
 
+  const kanbanTasks = tasks.map((t, idx) => ({
+    id: t.id,
+    title: t.title,
+    description: t.description ?? null,
+    status: (t as ProjectTask & { status?: string }).status || (t.isCompleted ? "DONE" : "TODO"),
+    position: t.sortOrder ?? idx,
+    priority: t.priority || "NORMAL",
+    dueDate: t.dueDate ?? null,
+    assigneeId: t.assigneeId ?? null,
+    estimatedHours: t.estimatedHours ?? null,
+    trackedHours: t.trackedHours ?? 0,
+  }));
+
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 flex-wrap">
@@ -58,16 +76,38 @@ export function TasksTab({
             {overdueTasks.length} overdue
           </span>
         )}
-        <div className="ml-auto flex items-center gap-1">
-          {(["all", "overdue", "upcoming"] as const).map((f) => (
+        <div className="ml-auto flex items-center gap-2">
+          {viewMode === "list" && (
+            <div className="flex items-center gap-1">
+              {(["all", "overdue", "upcoming"] as const).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`text-[10px] px-2 py-1 rounded-lg capitalize transition-colors ${filter === f ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center rounded-lg border border-border/50 p-0.5">
             <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={`text-[10px] px-2 py-1 rounded-lg capitalize transition-colors ${filter === f ? "bg-muted text-foreground font-medium" : "text-muted-foreground hover:text-foreground"}`}
+              type="button"
+              onClick={() => setViewMode("list")}
+              className={`p-1 rounded-md text-xs transition-colors ${viewMode === "list" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              title="List view"
             >
-              {f}
+              <List className="w-3.5 h-3.5" />
             </button>
-          ))}
+            <button
+              type="button"
+              onClick={() => setViewMode("kanban")}
+              className={`p-1 rounded-md text-xs transition-colors ${viewMode === "kanban" ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              title="Kanban board"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -95,48 +135,66 @@ export function TasksTab({
         </button>
       </div>
 
-      <div className="space-y-1">
-        {filtered.length === 0 && (
-          <div className="text-center py-6 text-sm text-muted-foreground">
-            {filter === "all" ? "No tasks remaining. Great work!" : `No ${filter} tasks.`}
+      {viewMode === "kanban" ? (
+        <TaskKanban
+          tasks={kanbanTasks}
+          onUpdate={(taskId, status, position) => {
+            if (onUpdateTaskStatus) {
+              onUpdateTaskStatus(projectId, taskId, status, position);
+            } else {
+              const target = tasks.find((t) => t.id === taskId);
+              if (target && (status === "DONE") !== target.isCompleted) {
+                onToggleTask(projectId, target);
+              }
+            }
+          }}
+        />
+      ) : (
+        <>
+          <div className="space-y-1">
+            {filtered.length === 0 && (
+              <div className="text-center py-6 text-sm text-muted-foreground">
+                {filter === "all" ? "No tasks remaining. Great work!" : `No ${filter} tasks.`}
+              </div>
+            )}
+            {filtered.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                projectId={projectId}
+                onToggle={onToggleTask}
+                onDelete={onDeleteTask}
+                onUpdate={onUpdateTask}
+              />
+            ))}
           </div>
-        )}
-        {filtered.map((task) => (
-          <TaskRow
-            key={task.id}
-            task={task}
-            projectId={projectId}
-            onToggle={onToggleTask}
-            onDelete={onDeleteTask}
-            onUpdate={onUpdateTask}
-          />
-        ))}
-      </div>
 
-      {completed.length > 0 && (
-        <div>
-          <button
-            onClick={() => setShowCompleted(!showCompleted)}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
-          >
-            {showCompleted ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
-            {completed.length} completed task{completed.length > 1 ? "s" : ""}
-          </button>
-          {showCompleted && (
-            <div className="space-y-1 mt-1">
-              {completed.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  projectId={projectId}
-                  onToggle={onToggleTask}
-                  onDelete={onDeleteTask}
-                  onUpdate={onUpdateTask}
-                />
-              ))}
+          {completed.length > 0 && (
+            <div>
+              <button
+                onClick={() => setShowCompleted(!showCompleted)}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors py-1"
+              >
+                {showCompleted ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                {completed.length} completed task{completed.length > 1 ? "s" : ""}
+              </button>
+              {showCompleted && (
+                <div className="space-y-1 mt-1">
+                  {completed.map((task) => (
+                    <TaskRow
+                      key={task.id}
+                      task={task}
+                      projectId={projectId}
+                      onToggle={onToggleTask}
+                      onDelete={onDeleteTask}
+                      onUpdate={onUpdateTask}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
-        </div>
+        </>
       )}
     </div>
   );

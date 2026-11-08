@@ -131,4 +131,77 @@ describe('RevenueEventListener (idempotency)', () => {
     });
     expect(logEvent).not.toHaveBeenCalled();
   });
+
+  it('quote.sent advances a LEAD contact to PROSPECT and logs status.changed', async () => {
+    const { listener, logEvent, markStale } = build();
+    const updateContact = vi.fn().mockResolvedValue({ id: 'c_lead', status: 'PROSPECT' });
+    (listener as any).prisma.client.contact.findFirst = vi.fn().mockResolvedValue({
+      id: 'c_lead',
+      status: 'LEAD',
+    });
+    (listener as any).prisma.client.contact.update = updateContact;
+
+    await listener.onQuoteSent({
+      businessId: 'biz_1',
+      quote: { id: 'q_10', contactId: 'c_lead', quoteNumber: 'Q-10', total: 500, currency: 'TTD' },
+    } as any);
+
+    expect(updateContact).toHaveBeenCalledWith({
+      where: { id: 'c_lead' },
+      data: { status: 'PROSPECT', lifecycleStage: 'prospect' },
+    });
+    expect(logEvent).toHaveBeenCalledWith(
+      'biz_1',
+      'c_lead',
+      'status.changed',
+      expect.objectContaining({ from: 'LEAD', to: 'PROSPECT', trigger: 'quote.sent' }),
+      expect.objectContaining({ source: 'lifecycle-automation' }),
+    );
+    expect(markStale).toHaveBeenCalledWith('biz_1', 'c_lead');
+  });
+
+  it('invoice.paid promotes a PROSPECT contact to CLIENT and schedules a post-payment follow-up task', async () => {
+    const { listener, logEvent, markStale } = build();
+    const updateContact = vi.fn().mockResolvedValue({ id: 'c_prospect', status: 'CLIENT' });
+    const createTask = vi.fn().mockResolvedValue({ id: 'task_1' });
+    (listener as any).prisma.client.contact.findFirst = vi.fn().mockResolvedValue({
+      id: 'c_prospect',
+      status: 'PROSPECT',
+    });
+    (listener as any).prisma.client.contact.update = updateContact;
+    (listener as any).prisma.client.contactTask = {
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: createTask,
+    };
+
+    await listener.onInvoicePaid({
+      businessId: 'biz_1',
+      invoice: { id: 'inv_10', contactId: 'c_prospect', invoiceNumber: 'INV-10', total: 500, currency: 'TTD' },
+    } as any);
+
+    expect(updateContact).toHaveBeenCalledWith({
+      where: { id: 'c_prospect' },
+      data: { status: 'CLIENT', lifecycleStage: 'client' },
+    });
+    expect(createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          businessId: 'biz_1',
+          contactId: 'c_prospect',
+          title: 'Post-payment customer check-in & follow-up',
+          status: 'OPEN',
+          source: 'lifecycle-automation',
+        }),
+      }),
+    );
+    expect(logEvent).toHaveBeenCalledWith(
+      'biz_1',
+      'c_prospect',
+      'status.changed',
+      expect.objectContaining({ from: 'PROSPECT', to: 'CLIENT', trigger: 'invoice.paid' }),
+      expect.objectContaining({ source: 'lifecycle-automation' }),
+    );
+    expect(markStale).toHaveBeenCalledWith('biz_1', 'c_prospect');
+  });
 });
+

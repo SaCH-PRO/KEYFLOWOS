@@ -253,10 +253,24 @@ export class WebhookDispatcherService {
   private static readonly MAX_RETRIES = 3;
   private static readonly BACKOFF_BASE_MS = 1000;
 
-  private addLog(log: WebhookDeliveryLog) {
+  private async addLog(log: WebhookDeliveryLog) {
     this.deliveryLogs.push(log);
     if (this.deliveryLogs.length > WebhookDispatcherService.MAX_LOG_SIZE) {
       this.deliveryLogs.splice(0, this.deliveryLogs.length - WebhookDispatcherService.MAX_LOG_SIZE);
+    }
+    if (this.prisma.client.activityLog?.create) {
+      await this.prisma.client.activityLog
+        .create({
+          data: {
+            businessId: log.businessId,
+            type: 'webhook.delivery',
+            description: `${log.event} -> ${log.url} (${log.status})`,
+            metadata: log as unknown as Record<string, any>,
+          },
+        })
+        .catch((err: Error) =>
+          this.logger.warn(`Failed to persist webhook delivery log ${log.id}: ${err.message}`),
+        );
     }
   }
 
@@ -303,7 +317,7 @@ export class WebhookDispatcherService {
             error: null,
             timestamp: new Date().toISOString(),
           };
-          this.addLog(log);
+          await this.addLog(log);
           return log;
         }
 
@@ -341,7 +355,7 @@ export class WebhookDispatcherService {
       error: lastError,
       timestamp: new Date().toISOString(),
     };
-    this.addLog(log);
+    await this.addLog(log);
     return log;
   }
 

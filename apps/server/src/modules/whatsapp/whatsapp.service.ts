@@ -286,6 +286,24 @@ export class WhatsAppService {
       where: { id: businessId },
       data: { metaData: { ...meta, whatsapp: encryptConfig(config) } },
     });
+    if (this.prisma.client.connectorStatus?.upsert) {
+      const connectedAccount = config.fromNumber ?? config.phoneNumberId ?? null;
+      await this.prisma.client.connectorStatus.upsert({
+        where: { businessId_connectorType: { businessId, connectorType: 'whatsapp' } },
+        create: {
+          businessId,
+          connectorType: 'whatsapp',
+          status: 'connected',
+          connectedAt: new Date(),
+          connectedAccount,
+        },
+        update: {
+          status: 'connected',
+          connectedAt: new Date(),
+          connectedAccount,
+        },
+      }).catch((e) => this.logger.warn(`Failed to sync WhatsApp connectorStatus: ${(e as Error).message}`));
+    }
   }
 
   // ── Conversation persistence ───────────────────────────────────────────
