@@ -5098,6 +5098,7 @@
       ],
       "extension": ".ts",
       "imports": [
+        "../../crypto/token-crypto",
         "../../prisma/prisma.service",
         "../connector.interface",
         "../entity-resolution.service",
@@ -5105,9 +5106,9 @@
         "@nestjs/event-emitter",
         "crypto"
       ],
-      "lines": 297,
+      "lines": 343,
       "path": "apps/server/src/core/connectors/implementations/whatsapp.connector.ts",
-      "size_bytes": 10850
+      "size_bytes": 12685
     },
     {
       "exports": [
@@ -57859,7 +57860,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4213840
+      "size_bytes": 4228252
     },
     {
       "extension": ".md",
@@ -57881,9 +57882,9 @@
     },
     {
       "extension": ".json",
-      "lines": 63506,
+      "lines": 63718,
       "path": "architecture/inventory.json",
-      "size_bytes": 1644264
+      "size_bytes": 1649495
     },
     {
       "extension": ".md",
@@ -63713,6 +63714,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3476,
     "total_files": 4471,
-    "total_lines": 1155968
+    "total_lines": 1156226
   }
 }

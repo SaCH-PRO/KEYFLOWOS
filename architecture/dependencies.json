@@ -3720,6 +3720,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/core/connectors/implementations/whatsapp.connector.ts",
+      "specifier": "../../crypto/token-crypto",
+      "target": "apps/server/src/core/crypto/token-crypto.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/core/connectors/implementations/whatsapp.connector.ts",
       "specifier": "../../prisma/prisma.service",
       "target": "apps/server/src/core/prisma/prisma.service.ts",
       "type": "relative"
@@ -110903,7 +110910,7 @@
     }
   ],
   "meta": {
-    "edges": 15843,
+    "edges": 15844,
     "nodes": 3875,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"

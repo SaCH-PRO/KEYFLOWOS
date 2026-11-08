@@ -2,8 +2,19 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EntityResolutionService } from '../entity-resolution.service';
+import { decryptToken } from '../../crypto/token-crypto';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { IConnector, ConnectorMeta, ConnectorHealth, ConnectorSyncResult, ConnectorStatusSummary, ConnectorSmokeResult, IngestionItemInput } from '../connector.interface';
+
+interface BusinessWhatsAppConfig {
+  provider?: 'twilio' | 'meta' | 'mock';
+  accountSid?: string;
+  authToken?: string;
+  fromNumber?: string;
+  accessToken?: string;
+  phoneNumberId?: string;
+  businessAccountId?: string;
+}
 
 interface WhatsAppWebhookBody {
   From?: string;
@@ -58,10 +69,24 @@ export class WhatsAppConnector implements IConnector {
   }
 
   async healthCheck(businessId: string): Promise<ConnectorHealth> {
-    const stored = await this.getConnectorStatus(businessId);
-    const hasBusinessConfig = stored?.status === 'connected';
+    const [stored, businessCfg] = await Promise.all([
+      this.getConnectorStatus(businessId),
+      this.getBusinessWhatsAppConfig(businessId),
+    ]);
+    const hasConfiguredProvider = Boolean(
+      (businessCfg?.provider === 'meta' && businessCfg.accessToken && businessCfg.phoneNumberId) ||
+      (businessCfg?.provider === 'twilio' && businessCfg.accountSid && businessCfg.authToken && businessCfg.fromNumber) ||
+      businessCfg?.provider === 'mock',
+    );
+    const hasBusinessConfig = stored?.status === 'connected' || hasConfiguredProvider;
     const hasGlobalToken = !!process.env.WHATSAPP_ACCESS_TOKEN;
     const realStatus = (hasBusinessConfig || hasGlobalToken) ? 'connected' : 'disconnected';
+    const tenantAccount =
+      businessCfg?.fromNumber ??
+      businessCfg?.phoneNumberId ??
+      stored?.connectedAccount ??
+      process.env.WHATSAPP_PHONE_NUMBER_ID ??
+      null;
 
     return {
       status: realStatus,
@@ -71,7 +96,7 @@ export class WhatsAppConnector implements IConnector {
       errorCount: stored?.errorCount ?? 0,
       syncCount: stored?.syncCount ?? 0,
       connectedAt: stored?.connectedAt ?? null,
-      connectedAccount: stored?.connectedAccount ?? process.env.WHATSAPP_PHONE_NUMBER_ID ?? null,
+      connectedAccount: tenantAccount,
     };
   }
 
@@ -293,5 +318,26 @@ export class WhatsAppConnector implements IConnector {
     return this.prisma.client.connectorStatus.findUnique({
       where: { businessId_connectorType: { businessId, connectorType: 'whatsapp' } },
     });
+  }
+
+  private async getBusinessWhatsAppConfig(businessId: string): Promise<BusinessWhatsAppConfig | null> {
+    try {
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { metaData: true },
+      });
+      const meta = (business?.metaData ?? {}) as Record<string, unknown>;
+      const raw = meta.whatsapp as BusinessWhatsAppConfig | undefined;
+      if (!raw || typeof raw !== 'object') return null;
+      return {
+        ...raw,
+        accountSid: raw.accountSid ? (decryptToken(raw.accountSid) ?? raw.accountSid) : undefined,
+        authToken: raw.authToken ? (decryptToken(raw.authToken) ?? raw.authToken) : undefined,
+        accessToken: raw.accessToken ? (decryptToken(raw.accessToken) ?? raw.accessToken) : undefined,
+      };
+    } catch (err) {
+      this.logger.warn(`Failed to read business WhatsApp config for ${businessId}: ${err instanceof Error ? err.message : String(err)}`);
+      return null;
+    }
   }
 }
