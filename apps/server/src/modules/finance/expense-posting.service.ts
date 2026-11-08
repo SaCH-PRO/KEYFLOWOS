@@ -545,7 +545,8 @@ export class ExpensePostingService {
 
     let resolvedPaymentAccountId = run.paymentAccountId ?? null;
     if (!resolvedPaymentAccountId) {
-      const rawDb = (txClient ?? this.prisma.client) as unknown as {
+      const rawClient: unknown = txClient ? (txClient as unknown) : (this.prisma.client as unknown);
+      const rawDb = rawClient as {
         financialAccount?: {
           findFirst?: (args: Record<string, unknown>) => Promise<{
             id: string;

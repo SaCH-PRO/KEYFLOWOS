@@ -19162,9 +19162,9 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 621,
+      "lines": 622,
       "path": "apps/server/src/modules/finance/expense-posting.service.ts",
-      "size_bytes": 21804
+      "size_bytes": 21871
     },
     {
       "exports": [
@@ -19183,9 +19183,9 @@
       "imports": [
         "@nestjs/common"
       ],
-      "lines": 333,
+      "lines": 335,
       "path": "apps/server/src/modules/finance/finance-accounting.util.ts",
-      "size_bytes": 11100
+      "size_bytes": 11157
     },
     {
       "exports": [
@@ -19553,7 +19553,7 @@
       ],
       "lines": 541,
       "path": "apps/server/src/modules/finance/posting.service.ts",
-      "size_bytes": 20232
+      "size_bytes": 20225
     },
     {
       "exports": [
@@ -57916,7 +57916,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4233392
+      "size_bytes": 4233650
     },
     {
       "extension": ".md",
@@ -57938,9 +57938,9 @@
     },
     {
       "extension": ".json",
-      "lines": 63765,
+      "lines": 63769,
       "path": "architecture/inventory.json",
-      "size_bytes": 1650729
+      "size_bytes": 1650892
     },
     {
       "extension": ".md",
@@ -63764,6 +63764,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3479,
     "total_files": 4473,
-    "total_lines": 1158335
+    "total_lines": 1158342
   }
 }

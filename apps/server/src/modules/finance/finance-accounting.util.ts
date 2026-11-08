@@ -35,16 +35,17 @@ export async function fetchAllPages<T>(
  * in a business so high-frequency snapshots of one pair never evict other pairs.
  */
 export async function loadLatestExchangeRates(
-  exchangeRateDelegate:
+  exchangeRateDelegate: unknown,
+  businessId: string,
+): Promise<ExchangeRateRow[]> {
+  const delegate = exchangeRateDelegate as
     | {
         findMany?: (args: Record<string, unknown>) => Promise<ExchangeRateRow[]>;
       }
-    | undefined,
-  businessId: string,
-): Promise<ExchangeRateRow[]> {
-  if (!exchangeRateDelegate?.findMany) return [];
+    | undefined;
+  if (!delegate?.findMany) return [];
   return fetchAllPages<ExchangeRateRow>(({ skip, take }) =>
-    exchangeRateDelegate.findMany!({
+    delegate.findMany!({
       where: { businessId },
       orderBy: { date: 'desc' },
       distinct: ['fromCurrency', 'toCurrency'],
@@ -187,7 +188,11 @@ export function extractFinancialAccountIdFromMetadata(
  * per-query pagination guard) for the given linked ChartOfAccount ids.
  */
 export async function loadCashLedgerMovements(
-  ledgerEntryDelegate:
+  ledgerEntryDelegate: unknown,
+  businessId: string,
+  linkedCoaIds: string[],
+): Promise<CashLedgerMovementRow[]> {
+  const delegate = ledgerEntryDelegate as
     | {
         findMany?: (args: Record<string, unknown>) => Promise<
           Array<{
@@ -200,15 +205,12 @@ export async function loadCashLedgerMovements(
           }>
         >;
       }
-    | undefined,
-  businessId: string,
-  linkedCoaIds: string[],
-): Promise<CashLedgerMovementRow[]> {
-  if (linkedCoaIds.length === 0 || !ledgerEntryDelegate?.findMany) {
+    | undefined;
+  if (linkedCoaIds.length === 0 || !delegate?.findMany) {
     return [];
   }
   const rows = await fetchAllPages(({ skip, take }) =>
-    ledgerEntryDelegate.findMany!({
+    delegate.findMany!({
       where: {
         businessId,
         accountId: { in: linkedCoaIds },

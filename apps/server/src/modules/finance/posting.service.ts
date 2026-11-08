@@ -86,7 +86,7 @@ async function resolveFinancialAccountTargets(
       type: string;
       currency?: string | null;
       currentBalance?: unknown;
-    } | null = null;
+    } | null;
 
     if (e.financialAccountId) {
       targetAccount = await faDelegate.findFirst({
