@@ -75,9 +75,10 @@ export default function PayrollPage() {
     else if (ratesRes.data) setRates(ratesRes.data);
     if (runsRes.error) toast.error(runsRes.error);
     else if (runsRes.data) setRuns(runsRes.data);
-    if (accountsRes?.items) {
-      const eligible = accountsRes.items.filter(
-        (a) => a.isActive && ["CASH", "BANK", "PAYMENT_PROCESSOR"].includes(a.type),
+    if (accountsRes?.data?.items) {
+      const eligible = accountsRes.data.items.filter(
+        (a: FinancialAccountRow) =>
+          a.isActive && ["CASH", "BANK", "PAYMENT_PROCESSOR"].includes(a.type),
       );
       setDisbursementAccounts(eligible);
     }
