@@ -111,13 +111,21 @@ export class SafeToSpendService {
           transaction: { select: { type: true } },
         },
       });
-      cashLedgerMovements = entries.map((e: any) => ({
-        accountId: e.accountId,
-        debit: e.debit,
-        credit: e.credit,
-        currency: e.currency,
-        transactionType: e.transaction?.type ?? null,
-      }));
+      cashLedgerMovements = entries.map(
+        (e: {
+          accountId: string;
+          debit: unknown;
+          credit: unknown;
+          currency?: string | null;
+          transaction?: { type?: string | null } | null;
+        }) => ({
+          accountId: e.accountId,
+          debit: e.debit,
+          credit: e.credit,
+          currency: e.currency,
+          transactionType: e.transaction?.type ?? null,
+        }),
+      );
     }
 
     const cashBalance = computeNormalizedCashBalance({

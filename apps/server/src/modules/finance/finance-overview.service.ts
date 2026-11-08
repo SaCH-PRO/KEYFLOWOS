@@ -3,7 +3,12 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 import { ReceivablesService } from './receivables.service';
-import { computeNormalizedCashBalance, normalizeCurrencyCode } from './finance-accounting.util';
+import {
+  type CashLedgerMovementRow,
+  computeNormalizedCashBalance,
+  type ExchangeRateRow,
+  normalizeCurrencyCode,
+} from './finance-accounting.util';
 
 /**
  * FIN5 — Compute the start of the current month in America/Port_of_Spain
@@ -238,13 +243,21 @@ export class FinanceOverviewService {
           })
         : Promise.resolve([] as ExchangeRateRow[]),
     ]);
-    const cashLedgerMovements: CashLedgerMovementRow[] = cashLedgerRows.map((e: any) => ({
-      accountId: e.accountId,
-      debit: e.debit,
-      credit: e.credit,
-      currency: e.currency,
-      transactionType: e.transaction?.type ?? null,
-    }));
+    const cashLedgerMovements: CashLedgerMovementRow[] = cashLedgerRows.map(
+      (e: {
+        accountId: string;
+        debit: unknown;
+        credit: unknown;
+        currency?: string | null;
+        transaction?: { type?: string | null } | null;
+      }) => ({
+        accountId: e.accountId,
+        debit: e.debit,
+        credit: e.credit,
+        currency: e.currency,
+        transactionType: e.transaction?.type ?? null,
+      }),
+    );
 
     const cashBalance = computeNormalizedCashBalance({
       accounts: cashAccounts,

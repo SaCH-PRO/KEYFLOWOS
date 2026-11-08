@@ -330,8 +330,9 @@ export class BusinessGraphService {
 
     const unconvertedTreasury: Record<string, { cash?: number; unpaidBills?: number; committedPayroll?: number }> = {};
     const unconvertedCash: Record<string, number> = {};
+    type AggregateFallback = { _sum?: Record<string, unknown>; _count?: number };
 
-    let cashBalance = 0;
+    let cashBalance: number;
     if (Array.isArray(cashAccountsData)) {
       const linkedCoaIds = Array.from(
         new Set(
@@ -352,13 +353,21 @@ export class BusinessGraphService {
             transaction: { select: { type: true } },
           },
         });
-        cashLedgerMovements = entries.map((e: any) => ({
-          accountId: e.accountId,
-          debit: e.debit,
-          credit: e.credit,
-          currency: e.currency,
-          transactionType: e.transaction?.type ?? null,
-        }));
+        cashLedgerMovements = entries.map(
+          (e: {
+            accountId: string;
+            debit: unknown;
+            credit: unknown;
+            currency?: string | null;
+            transaction?: { type?: string | null } | null;
+          }) => ({
+            accountId: e.accountId,
+            debit: e.debit,
+            credit: e.credit,
+            currency: e.currency,
+            transactionType: e.transaction?.type ?? null,
+          }),
+        );
       }
       cashBalance = computeNormalizedCashBalance({
         accounts: cashAccountsData,
@@ -372,11 +381,11 @@ export class BusinessGraphService {
         unconvertedTreasury[cur] = { ...(unconvertedTreasury[cur] ?? {}), cash: Math.round(amt * 100) / 100 };
       }
     } else {
-      cashBalance = Number((cashAccountsData as any)?._sum?.currentBalance ?? 0);
+      cashBalance = Number((cashAccountsData as AggregateFallback)?._sum?.currentBalance ?? 0);
     }
 
     let unpaidBillsAmount = 0;
-    let unpaidBillsCount = 0;
+    let unpaidBillsCount: number;
     if (Array.isArray(unpaidBillsData)) {
       unpaidBillsCount = unpaidBillsData.length;
       for (const bill of unpaidBillsData) {
@@ -394,12 +403,13 @@ export class BusinessGraphService {
       }
       unpaidBillsAmount = Math.round(unpaidBillsAmount * 100) / 100;
     } else {
-      unpaidBillsAmount = Number((unpaidBillsData as any)?._sum?.amount ?? 0);
-      unpaidBillsCount = Number((unpaidBillsData as any)?._count ?? 0);
+      const agg = unpaidBillsData as AggregateFallback;
+      unpaidBillsAmount = Number(agg?._sum?.amount ?? 0);
+      unpaidBillsCount = Number(agg?._count ?? 0);
     }
 
     let committedPayrollAmount = 0;
-    let committedPayrollRuns = 0;
+    let committedPayrollRuns: number;
     if (Array.isArray(committedPayrollData)) {
       committedPayrollRuns = committedPayrollData.length;
       for (const run of committedPayrollData) {
@@ -417,12 +427,13 @@ export class BusinessGraphService {
       }
       committedPayrollAmount = Math.round(committedPayrollAmount * 100) / 100;
     } else {
-      committedPayrollAmount = Number((committedPayrollData as any)?._sum?.totalGross ?? 0);
-      committedPayrollRuns = Number((committedPayrollData as any)?._count ?? 0);
+      const agg = committedPayrollData as AggregateFallback;
+      committedPayrollAmount = Number(agg?._sum?.totalGross ?? 0);
+      committedPayrollRuns = Number(agg?._count ?? 0);
     }
 
     let openPipelineValue = 0;
-    let openDealCount = 0;
+    let openDealCount: number;
     const unconvertedPipeline: Record<string, number> = {};
     if (Array.isArray(openDealsData)) {
       openDealCount = openDealsData.length;
@@ -438,8 +449,9 @@ export class BusinessGraphService {
       }
       openPipelineValue = Math.round(openPipelineValue * 100) / 100;
     } else {
-      openPipelineValue = Number((openDealsData as any)?._sum?.value ?? 0);
-      openDealCount = Number((openDealsData as any)?._count ?? 0);
+      const agg = openDealsData as AggregateFallback;
+      openPipelineValue = Number(agg?._sum?.value ?? 0);
+      openDealCount = Number(agg?._count ?? 0);
     }
 
     const categoryNames = await this.resolveCategoryNames(businessId, expensesByCategory.map(e => e.categoryId).filter(Boolean) as string[]);
