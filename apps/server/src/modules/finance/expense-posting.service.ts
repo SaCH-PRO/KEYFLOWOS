@@ -543,6 +543,45 @@ export class ExpensePostingService {
       paymentCoaId = await this.resolvePaymentCoa(run.businessId, method);
     }
 
+    let resolvedPaymentAccountId = run.paymentAccountId ?? null;
+    if (!resolvedPaymentAccountId) {
+      const rawDb = (txClient ?? this.prisma.client) as unknown as {
+        financialAccount?: {
+          findFirst?: (args: Record<string, unknown>) => Promise<{
+            id: string;
+            chartOfAccountId?: string | null;
+            currency?: string | null;
+            isActive?: boolean;
+          } | null>;
+        };
+      };
+      if (rawDb.financialAccount?.findFirst) {
+        const runCurrency = (run.currency ?? 'TTD').trim().toUpperCase() || 'TTD';
+        const matchedAccount = await rawDb.financialAccount.findFirst({
+          where: {
+            businessId: run.businessId,
+            chartOfAccountId: paymentCoaId,
+            isActive: true,
+            currency: runCurrency,
+          },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+          select: { id: true, chartOfAccountId: true, currency: true, isActive: true },
+        });
+        if (
+          !matchedAccount ||
+          matchedAccount.isActive === false ||
+          (matchedAccount.chartOfAccountId && matchedAccount.chartOfAccountId !== paymentCoaId) ||
+          (matchedAccount.currency &&
+            matchedAccount.currency.trim().toUpperCase() !== runCurrency)
+        ) {
+          throw new BadRequestException(
+            `No active ${runCurrency} financial account is linked to the ${run.paymentMethod ?? 'selected'} chart of account (${paymentCoaId}); specify paymentAccountId or configure an active account first`,
+          );
+        }
+        resolvedPaymentAccountId = matchedAccount.id;
+      }
+    }
+
     const periodLabel = `${run.periodStart.toISOString().slice(0, 10)} → ${run.periodEnd.toISOString().slice(0, 10)}`;
     const description = run.notes
       ? `Payroll run (${periodLabel}) — ${run.notes}`
@@ -569,7 +608,7 @@ export class ExpensePostingService {
           },
           {
             accountId: paymentCoaId,
-            financialAccountId: run.paymentAccountId ?? null,
+            financialAccountId: resolvedPaymentAccountId,
             debit: 0,
             credit: gross,
             memo: `Payroll disbursement (${periodLabel})`,

@@ -196,7 +196,12 @@ describe('Payroll-to-Ledger-to-Treasury E2E Financial Truth Journey', () => {
         update: vi.fn(async ({ where, data }: any) => {
           const acc = financialAccounts.find((a) => a.id === where.id);
           if (!acc) throw new Error('Account not found');
-          if (data.currentBalance !== undefined) {
+          const inc = data.currentBalance?.increment;
+          if (inc !== undefined) {
+            acc.currentBalance = new Prisma.Decimal(String(acc.currentBalance)).add(
+              new Prisma.Decimal(String(inc)),
+            );
+          } else if (data.currentBalance !== undefined) {
             acc.currentBalance = new Prisma.Decimal(String(data.currentBalance));
           }
           return acc;
@@ -230,6 +235,7 @@ describe('Payroll-to-Ledger-to-Treasury E2E Financial Truth Journey', () => {
             externalRef: data.externalRef ?? null,
             amount: data.amount,
             currency: data.currency,
+            metadata: data.metadata ?? null,
           };
           transactions.push(txn);
           for (const e of data.entries?.create ?? []) {
@@ -241,7 +247,7 @@ describe('Payroll-to-Ledger-to-Treasury E2E Financial Truth Journey', () => {
               debit: new Prisma.Decimal(String(e.debit ?? 0)),
               credit: new Prisma.Decimal(String(e.credit ?? 0)),
               currency: e.currency ?? 'TTD',
-              transaction: { type: data.type },
+              transaction: { type: data.type, metadata: data.metadata ?? null },
             });
           }
           return { id: txn.id };

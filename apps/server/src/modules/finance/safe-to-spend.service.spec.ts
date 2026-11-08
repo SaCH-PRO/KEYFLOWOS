@@ -26,6 +26,20 @@ describe('SafeToSpendService', () => {
     payrollRuns?: Array<{ totalGross: number; status: string; currency?: string }>;
     exchangeRates?: Array<{ fromCurrency: string; toCurrency: string; rate: number }>;
   }) {
+    const paginate = <T>(rows: T[]) =>
+      vi.fn(async (args?: { skip?: number; take?: number }) => {
+        const start = args?.skip ?? 0;
+        const count = args?.take ?? rows.length;
+        return rows.slice(start, start + count);
+      });
+
+    const billRows = (opts?.bills ?? [1_500]).map((b) =>
+      typeof b === 'number' ? { amount: b, currency: 'TTD' } : b,
+    );
+    const payrollRows = opts?.payrollRuns ?? [];
+    const rateRows = opts?.exchangeRates ?? [];
+    const ledgerRows = opts?.cashLedgerEntries ?? [];
+
     const prisma = {
       client: {
         business: {
@@ -37,23 +51,19 @@ describe('SafeToSpendService', () => {
           ),
         },
         expense: {
-          findMany: vi.fn(async () =>
-            (opts?.bills ?? [1_500]).map((b) =>
-              typeof b === 'number' ? { amount: b, currency: 'TTD' } : b,
-            ),
-          ),
+          findMany: paginate(billRows),
         },
         cashReserveBucket: {
           findMany: vi.fn(async () => opts?.reserves ?? [{ name: 'Equipment', currentAmount: 1_000, currency: 'TTD' }]),
         },
         payrollRun: {
-          findMany: vi.fn(async () => opts?.payrollRuns ?? []),
+          findMany: paginate(payrollRows),
         },
         exchangeRate: {
-          findMany: vi.fn(async () => opts?.exchangeRates ?? []),
+          findMany: paginate(rateRows),
         },
         ledgerEntry: {
-          findMany: vi.fn(async () => opts?.cashLedgerEntries ?? []),
+          findMany: paginate(ledgerRows),
           aggregate: vi.fn(async () => ({
             _sum: {
               credit: opts?.taxCredit ?? 2_000,
@@ -84,13 +94,15 @@ describe('SafeToSpendService', () => {
 
     const result = await svc.calculate('biz_1');
 
-    expect(prisma.client.payrollRun.findMany).toHaveBeenCalledWith({
-      where: {
-        businessId: 'biz_1',
-        status: { in: ['DRAFT', 'APPROVED'] },
-      },
-      select: { totalGross: true, currency: true, status: true },
-    });
+    expect(prisma.client.payrollRun.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          businessId: 'biz_1',
+          status: { in: ['DRAFT', 'APPROVED'] },
+        },
+        select: { totalGross: true, currency: true, status: true },
+      }),
+    );
     expect(result.payrollReserved).toBe(5_000);
     // 20,000 - 1,500 (tax) - 1,500 (bills) - 5,000 (payroll) - 2,000 (10% buffer) - 1,000 (reserves) = 9,000
     expect(result.safeToSpend).toBe(9_000);
@@ -145,6 +157,78 @@ describe('SafeToSpendService', () => {
     expect(after.cashBalance).toBe(before.cashBalance - 5_000);
   });
 
+  it('excludes ledger movements belonging to an archived FinancialAccount even when sharing a COA with an active account', async () => {
+    const { svc } = makeStubs({
+      accounts: [
+        { id: 'fa_bank_active', chartOfAccountId: 'coa_bank', openingBalance: 20_000, currentBalance: 20_000, currency: 'TTD' },
+      ],
+      cashLedgerEntries: [
+        {
+          accountId: 'coa_bank',
+          debit: 0,
+          credit: 3_000,
+          currency: 'TTD',
+          transaction: {
+            type: 'EXPENSE',
+            metadata: {
+              entryFinancialAccounts: [
+                { entryIndex: 1, accountId: 'coa_bank', financialAccountId: 'fa_bank_active' },
+              ],
+            },
+          } as any,
+        },
+        {
+          accountId: 'coa_bank',
+          debit: 9_000,
+          credit: 0,
+          currency: 'TTD',
+          transaction: {
+            type: 'INCOME',
+            metadata: {
+              entryFinancialAccounts: [
+                { entryIndex: 0, accountId: 'coa_bank', financialAccountId: 'fa_bank_archived' },
+              ],
+            },
+          } as any,
+        },
+      ],
+      taxCredit: 0,
+      taxDebit: 0,
+      bills: [],
+      reserves: [],
+      payrollRuns: [],
+    });
+
+    const result = await svc.calculate('biz_1');
+    // Only the -3,000 movement on fa_bank_active applies; +9,000 on fa_bank_archived is ignored
+    expect(result.cashBalance).toBe(17_000);
+  });
+
+  it('paginates beyond 1,000 ledger movements and bills without truncation', async () => {
+    const manyMovements = Array.from({ length: 1_250 }, () => ({
+      accountId: 'coa_bank',
+      debit: 10,
+      credit: 0,
+      currency: 'TTD',
+      transaction: { type: 'INCOME' },
+    }));
+    const manyBills = Array.from({ length: 1_100 }, () => ({ amount: 5, currency: 'TTD' }));
+
+    const { svc } = makeStubs({
+      accounts: [{ id: 'fa_bank', chartOfAccountId: 'coa_bank', openingBalance: 10_000, currentBalance: 10_000, currency: 'TTD' }],
+      cashLedgerEntries: manyMovements, // +12,500
+      bills: manyBills, // 5,500
+      taxCredit: 0,
+      taxDebit: 0,
+      reserves: [],
+      payrollRuns: [],
+    });
+
+    const result = await svc.calculate('biz_1');
+    expect(result.cashBalance).toBe(22_500);
+    expect(result.billsDueNext30Days).toBe(5_500);
+  });
+
   it('converts foreign-currency payroll reserves and bills into business base currency via ExchangeRate', async () => {
     const { svc } = makeStubs({
       cashBalance: 50_000,
@@ -172,3 +256,4 @@ describe('SafeToSpendService', () => {
     await expect(svc.calculate('biz_1')).rejects.toThrow(/missing exchange rate from EUR to TTD/);
   });
 });
+

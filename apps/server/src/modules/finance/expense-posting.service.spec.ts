@@ -293,4 +293,19 @@ describe('ExpensePostingService.onPayrollRunPaid', () => {
     ).rejects.toThrow(/paymentAccountId or paymentMethod/);
     expect(posting.post).not.toHaveBeenCalled();
   });
+
+  it('rejects method-only payroll disbursement when no active FinancialAccount exists for the resolved COA and currency', async () => {
+    const { svc, posting, prisma } = makeStubs();
+    prisma.client.financialAccount = {
+      findFirst: vi.fn(async () => null),
+    };
+    await expect(
+      svc.onPayrollRunPaid({
+        ...baseRun,
+        paymentMethod: 'stripe',
+      }),
+    ).rejects.toThrow(/No active TTD financial account is linked/);
+    expect(posting.post).not.toHaveBeenCalled();
+  });
 });
+

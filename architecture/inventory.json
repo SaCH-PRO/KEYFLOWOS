@@ -7011,9 +7011,9 @@
         "../finance/finance-accounting.util",
         "@nestjs/common"
       ],
-      "lines": 852,
+      "lines": 848,
       "path": "apps/server/src/modules/ai/business-graph.service.ts",
-      "size_bytes": 31602
+      "size_bytes": 31507
     },
     {
       "exports": [
@@ -19145,9 +19145,9 @@
         "./expense-posting.service",
         "vitest"
       ],
-      "lines": 296,
+      "lines": 311,
       "path": "apps/server/src/modules/finance/expense-posting.service.spec.ts",
-      "size_bytes": 11158
+      "size_bytes": 11667
     },
     {
       "exports": [
@@ -19162,17 +19162,20 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 582,
+      "lines": 621,
       "path": "apps/server/src/modules/finance/expense-posting.service.ts",
-      "size_bytes": 20160
+      "size_bytes": 21804
     },
     {
       "exports": [
         "CashAccountSnapshotRow",
         "CashLedgerMovementRow",
         "ExchangeRateRow",
+        "PRISMA_PAGE_CAP",
+        "PersistedEntryFinancialAccountTarget",
         "computeNormalizedCashBalance",
         "convertToBaseOrThrow",
+        "extractFinancialAccountIdFromMetadata",
         "normalizeCurrencyCode",
         "resolveConversionRate"
       ],
@@ -19180,9 +19183,9 @@
       "imports": [
         "@nestjs/common"
       ],
-      "lines": 179,
+      "lines": 333,
       "path": "apps/server/src/modules/finance/finance-accounting.util.ts",
-      "size_bytes": 6028
+      "size_bytes": 11100
     },
     {
       "exports": [
@@ -19283,9 +19286,9 @@
         "./receivables.service",
         "@nestjs/common"
       ],
-      "lines": 417,
+      "lines": 398,
       "path": "apps/server/src/modules/finance/finance-overview.service.ts",
-      "size_bytes": 14717
+      "size_bytes": 13981
     },
     {
       "exports": [
@@ -19491,9 +19494,9 @@
         "@prisma/client",
         "vitest"
       ],
-      "lines": 423,
+      "lines": 429,
       "path": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
-      "size_bytes": 16098
+      "size_bytes": 16419
     },
     {
       "exports": [
@@ -19514,9 +19517,9 @@
         "@prisma/client",
         "vitest"
       ],
-      "lines": 253,
+      "lines": 374,
       "path": "apps/server/src/modules/finance/posting.service.integration.spec.ts",
-      "size_bytes": 9073
+      "size_bytes": 14148
     },
     {
       "exports": [],
@@ -19543,13 +19546,14 @@
       "extension": ".ts",
       "imports": [
         "../../core/prisma/prisma.service",
+        "./finance-accounting.util",
         "@keyflow/db",
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 402,
+      "lines": 541,
       "path": "apps/server/src/modules/finance/posting.service.ts",
-      "size_bytes": 15623
+      "size_bytes": 20232
     },
     {
       "exports": [
@@ -19642,9 +19646,9 @@
         "@nestjs/common",
         "vitest"
       ],
-      "lines": 174,
+      "lines": 259,
       "path": "apps/server/src/modules/finance/safe-to-spend.service.spec.ts",
-      "size_bytes": 7251
+      "size_bytes": 9940
     },
     {
       "exports": [
@@ -19658,9 +19662,9 @@
         "./finance-accounting.util",
         "@nestjs/common"
       ],
-      "lines": 231,
+      "lines": 220,
       "path": "apps/server/src/modules/finance/safe-to-spend.service.ts",
-      "size_bytes": 7368
+      "size_bytes": 7069
     },
     {
       "exports": [],
@@ -28398,9 +28402,9 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 529,
+      "lines": 566,
       "path": "apps/server/src/modules/payroll/payroll.service.ts",
-      "size_bytes": 18500
+      "size_bytes": 20065
     },
     {
       "exports": [
@@ -44890,9 +44894,9 @@
         "react",
         "sonner"
       ],
-      "lines": 403,
+      "lines": 404,
       "path": "apps/web/src/app/app/payroll/page.tsx",
-      "size_bytes": 16587
+      "size_bytes": 16629
     },
     {
       "exports": [
@@ -57912,7 +57916,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4233125
+      "size_bytes": 4233392
     },
     {
       "extension": ".md",
@@ -57934,9 +57938,9 @@
     },
     {
       "extension": ".json",
-      "lines": 63764,
+      "lines": 63765,
       "path": "architecture/inventory.json",
-      "size_bytes": 1650692
+      "size_bytes": 1650729
     },
     {
       "extension": ".md",
@@ -63760,6 +63764,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3479,
     "total_files": 4473,
-    "total_lines": 1157771
+    "total_lines": 1158335
   }
 }

@@ -3,6 +3,14 @@ import { Prisma } from '@prisma/client';
 import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
+import {
+  extractFinancialAccountIdFromMetadata,
+  loadLatestExchangeRates,
+  normalizeCurrencyCode,
+  type PersistedEntryFinancialAccountTarget,
+  resolveConversionRate,
+} from './finance-accounting.util';
+
 export interface PostingEntryInput {
   /** ChartOfAccount.id this entry posts against. */
   accountId: string;
@@ -16,7 +24,24 @@ export interface PostingEntryInput {
 const ASSET_ACCOUNT_TYPES = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
 const LIABILITY_EQUITY_ACCOUNT_TYPES = new Set(['CREDIT_CARD', 'LOAN', 'EQUITY', 'TAX']);
 
-async function syncFinancialAccountBalances(
+interface ResolvedAccountDelta {
+  entryIndex: number;
+  accountId: string;
+  financialAccountId: string;
+  delta: Prisma.Decimal;
+}
+
+interface TxFinancialAccountDelegate {
+  findFirst?: (args: Record<string, unknown>) => Promise<{
+    id: string;
+    type: string;
+    currency?: string | null;
+    currentBalance?: unknown;
+  } | null>;
+  update?: (args: Record<string, unknown>) => Promise<unknown>;
+}
+
+async function resolveFinancialAccountTargets(
   tx: Prisma.TransactionClient,
   businessId: string,
   entries: Array<{
@@ -25,47 +50,138 @@ async function syncFinancialAccountBalances(
     debit?: Prisma.Decimal | number | string;
     credit?: Prisma.Decimal | number | string;
   }>,
+  postingCurrency: string,
   isOpeningBalance: boolean,
-): Promise<void> {
-  if (isOpeningBalance) return;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const faDelegate = (tx as any).financialAccount;
-  if (!faDelegate || typeof faDelegate.update !== 'function') return;
+): Promise<{
+  deltas: ResolvedAccountDelta[];
+  metadataTargets: PersistedEntryFinancialAccountTarget[];
+}> {
+  if (isOpeningBalance) return { deltas: [], metadataTargets: [] };
+  const rawTx = tx as unknown as {
+    financialAccount?: TxFinancialAccountDelegate;
+    exchangeRate?: {
+      findMany?: (args: Record<string, unknown>) => Promise<
+        Array<{ fromCurrency: string; toCurrency: string; rate: number | string | { toString(): string } }>
+      >;
+    };
+  };
+  const faDelegate = rawTx.financialAccount;
+  if (!faDelegate || typeof faDelegate.findFirst !== 'function' || typeof faDelegate.update !== 'function') {
+    return { deltas: [], metadataTargets: [] };
+  }
 
-  for (const e of entries) {
+  const normalizedPostingCurrency = normalizeCurrencyCode(postingCurrency, 'TTD');
+  const deltas: ResolvedAccountDelta[] = [];
+  const metadataTargets: PersistedEntryFinancialAccountTarget[] = [];
+
+  for (let idx = 0; idx < entries.length; idx += 1) {
+    const e = entries[idx];
     const dr = new D(String(e.debit ?? 0));
     const cr = new D(String(e.credit ?? 0));
     const netAssetDelta = dr.sub(cr);
     if (netAssetDelta.eq(ZERO)) continue;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let targetAccount: any = null;
-    if (e.financialAccountId && typeof faDelegate.findFirst === 'function') {
+    let targetAccount: {
+      id: string;
+      type: string;
+      currency?: string | null;
+      currentBalance?: unknown;
+    } | null = null;
+
+    if (e.financialAccountId) {
       targetAccount = await faDelegate.findFirst({
         where: { id: e.financialAccountId, businessId, isActive: true },
-        select: { id: true, type: true, currentBalance: true },
+        select: { id: true, type: true, currency: true, currentBalance: true },
       });
-    } else if (typeof faDelegate.findFirst === 'function') {
+    } else {
       targetAccount = await faDelegate.findFirst({
-        where: { businessId, chartOfAccountId: e.accountId, isActive: true },
+        where: {
+          businessId,
+          chartOfAccountId: e.accountId,
+          isActive: true,
+          currency: normalizedPostingCurrency,
+        },
         orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-        select: { id: true, type: true, currentBalance: true },
+        select: { id: true, type: true, currency: true, currentBalance: true },
       });
+      if (!targetAccount) {
+        targetAccount = await faDelegate.findFirst({
+          where: { businessId, chartOfAccountId: e.accountId, isActive: true },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+          select: { id: true, type: true, currency: true, currentBalance: true },
+        });
+      }
     }
     if (!targetAccount) continue;
 
-    const delta = LIABILITY_EQUITY_ACCOUNT_TYPES.has(targetAccount.type)
+    let delta = LIABILITY_EQUITY_ACCOUNT_TYPES.has(targetAccount.type)
       ? cr.sub(dr)
       : ASSET_ACCOUNT_TYPES.has(targetAccount.type)
         ? netAssetDelta
         : netAssetDelta;
 
-    const current = new D(String(targetAccount.currentBalance ?? 0));
-    await faDelegate.update({
-      where: { id: targetAccount.id },
-      data: { currentBalance: current.add(delta) },
+    const acctCurrency = normalizeCurrencyCode(targetAccount.currency, normalizedPostingCurrency);
+    if (acctCurrency !== normalizedPostingCurrency) {
+      const rates = await loadLatestExchangeRates(rawTx.exchangeRate, businessId);
+      const mult = resolveConversionRate(normalizedPostingCurrency, acctCurrency, rates);
+      if (mult == null) {
+        throw new BadRequestException(
+          `Currency mismatch between posting (${normalizedPostingCurrency}) and financial account ${targetAccount.id} (${acctCurrency}) with no configured exchange rate`,
+        );
+      }
+      const converted = Math.round(Number(delta.toString()) * mult * 10000) / 10000;
+      delta = new D(String(converted));
+    }
+
+    deltas.push({
+      entryIndex: idx,
+      accountId: e.accountId,
+      financialAccountId: targetAccount.id,
+      delta,
+    });
+    metadataTargets.push({
+      entryIndex: idx,
+      accountId: e.accountId,
+      financialAccountId: targetAccount.id,
     });
   }
+
+  return { deltas, metadataTargets };
+}
+
+async function applyFinancialAccountBalanceDeltas(
+  tx: Prisma.TransactionClient,
+  deltas: ResolvedAccountDelta[],
+): Promise<void> {
+  if (deltas.length === 0) return;
+  const faDelegate = (tx as unknown as { financialAccount?: TxFinancialAccountDelegate }).financialAccount;
+  if (!faDelegate?.update) return;
+  for (const item of deltas) {
+    await faDelegate.update({
+      where: { id: item.financialAccountId },
+      data: { currentBalance: { increment: item.delta } },
+    });
+  }
+}
+
+function mergeMetadataWithFinancialAccountTargets(
+  baseMetadata: Prisma.InputJsonValue | undefined,
+  metadataTargets: PersistedEntryFinancialAccountTarget[],
+): Prisma.InputJsonValue | undefined {
+  if (metadataTargets.length === 0) return baseMetadata;
+  const existingObj =
+    baseMetadata && typeof baseMetadata === 'object' && !Array.isArray(baseMetadata)
+      ? (baseMetadata as Record<string, unknown>)
+      : {};
+  const byCoa: Record<string, string> = {};
+  for (const t of metadataTargets) {
+    byCoa[t.accountId] = t.financialAccountId;
+  }
+  return {
+    ...existingObj,
+    entryFinancialAccounts: metadataTargets as unknown as Prisma.InputJsonValue,
+    entryFinancialAccountByCoa: byCoa as unknown as Prisma.InputJsonValue,
+  };
 }
 
 export interface PostingInput {
@@ -231,6 +347,19 @@ export class PostingService {
         }
       }
 
+      const postingCurrency = input.currency ?? 'TTD';
+      const { deltas, metadataTargets } = await resolveFinancialAccountTargets(
+        tx,
+        input.businessId,
+        input.entries,
+        postingCurrency,
+        input.type === 'OPENING_BALANCE',
+      );
+      const mergedMetadata = mergeMetadataWithFinancialAccountTargets(
+        input.metadata,
+        metadataTargets,
+      );
+
       const txn = await tx.financialTransaction.create({
         data: {
           businessId: input.businessId,
@@ -238,7 +367,7 @@ export class PostingService {
           status: 'POSTED',
           date: input.date,
           amount: new D(String(input.amount)),
-          currency: input.currency ?? 'TTD',
+          currency: postingCurrency,
           description: input.description ?? null,
           contactId: input.contactId ?? null,
           sourceType: input.sourceType ?? null,
@@ -246,7 +375,7 @@ export class PostingService {
           externalRef,
           reference: input.reference ?? null,
           notes: input.notes ?? null,
-          metadata: input.metadata,
+          metadata: mergedMetadata,
           postedAt: new Date(),
           createdById: input.createdById ?? null,
           entries: {
@@ -255,7 +384,7 @@ export class PostingService {
               accountId: e.accountId,
               debit: new D(String(e.debit ?? 0)),
               credit: new D(String(e.credit ?? 0)),
-              currency: input.currency ?? 'TTD',
+              currency: postingCurrency,
               date: input.date,
               memo: e.memo ?? null,
             })),
@@ -263,12 +392,7 @@ export class PostingService {
         },
         select: { id: true },
       });
-      await syncFinancialAccountBalances(
-        tx,
-        input.businessId,
-        input.entries,
-        input.type === 'OPENING_BALANCE',
-      );
+      await applyFinancialAccountBalanceDeltas(tx, deltas);
       return { transactionId: txn.id, externalRef, alreadyPosted: false };
     };
 
@@ -341,6 +465,29 @@ export class PostingService {
         );
       }
 
+      const reversalEntries = original.entries.map((e, idx) => ({
+        accountId: e.accountId,
+        financialAccountId: extractFinancialAccountIdFromMetadata(
+          (original as { metadata?: unknown }).metadata,
+          e.accountId,
+          idx,
+        ),
+        debit: e.credit,
+        credit: e.debit,
+      }));
+
+      const { deltas, metadataTargets } = await resolveFinancialAccountTargets(
+        tx,
+        original.businessId,
+        reversalEntries,
+        original.currency,
+        original.type === 'OPENING_BALANCE',
+      );
+      const reversalMetadata = mergeMetadataWithFinancialAccountTargets(
+        undefined,
+        metadataTargets,
+      );
+
       const reversal = await tx.financialTransaction.create({
         data: {
           businessId: original.businessId,
@@ -357,6 +504,7 @@ export class PostingService {
           reversalOfId: original.id,
           reference: original.reference,
           notes: opts.reason ?? null,
+          metadata: reversalMetadata,
           postedAt: new Date(),
           createdById: opts.createdById ?? null,
           entries: {
@@ -380,16 +528,7 @@ export class PostingService {
         data: { status: 'REVERSED' },
       });
 
-      await syncFinancialAccountBalances(
-        tx,
-        original.businessId,
-        original.entries.map((e) => ({
-          accountId: e.accountId,
-          debit: e.credit,
-          credit: e.debit,
-        })),
-        original.type === 'OPENING_BALANCE',
-      );
+      await applyFinancialAccountBalanceDeltas(tx, deltas);
 
       return { transactionId: reversal.id, externalRef: reversal.externalRef, alreadyPosted: false };
     };

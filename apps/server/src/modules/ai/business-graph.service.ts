@@ -2,10 +2,11 @@ import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import {
   computeNormalizedCashBalance,
+  fetchAllPages,
+  loadCashLedgerMovements,
+  loadLatestExchangeRates,
   normalizeCurrencyCode,
   resolveConversionRate,
-  type CashLedgerMovementRow,
-  type ExchangeRateRow,
 } from '../finance/finance-accounting.util';
 
 export interface GraphEntityLink {
@@ -242,16 +243,19 @@ export class BusinessGraphService {
       db.product.count({ where: { businessId, deletedAt: null, isActive: true } }),
       db.product.aggregate({ where: { businessId, deletedAt: null, isActive: true }, _avg: { price: true } }),
       db.financialAccount?.findMany
-        ? db.financialAccount.findMany({
-            where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-            select: {
-              id: true,
-              chartOfAccountId: true,
-              openingBalance: true,
-              currentBalance: true,
-              currency: true,
-            },
-          })
+        ? fetchAllPages(({ skip, take }) =>
+            db.financialAccount.findMany({
+              where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
+              select: {
+                id: true,
+                chartOfAccountId: true,
+                openingBalance: true,
+                currentBalance: true,
+                currency: true,
+              },
+              ...(skip > 0 ? { skip, take } : {}),
+            }),
+          )
         : db.financialAccount?.aggregate
           ? db.financialAccount.aggregate({
               where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
@@ -259,20 +263,26 @@ export class BusinessGraphService {
             })
           : Promise.resolve([]),
       db.expense?.findMany
-        ? db.expense.findMany({
-            where: { businessId, deletedAt: null, status: 'BILL' },
-            select: { amount: true, currency: true },
-          })
+        ? fetchAllPages(({ skip, take }) =>
+            db.expense.findMany({
+              where: { businessId, deletedAt: null, status: 'BILL' },
+              select: { amount: true, currency: true },
+              ...(skip > 0 ? { skip, take } : {}),
+            }),
+          )
         : db.expense.aggregate({
             where: { businessId, deletedAt: null, status: 'BILL' },
             _sum: { amount: true },
             _count: true,
           }),
       db.payrollRun?.findMany
-        ? db.payrollRun.findMany({
-            where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
-            select: { totalGross: true, currency: true },
-          })
+        ? fetchAllPages(({ skip, take }) =>
+            db.payrollRun.findMany({
+              where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
+              select: { totalGross: true, currency: true },
+              ...(skip > 0 ? { skip, take } : {}),
+            }),
+          )
         : db.payrollRun?.aggregate
           ? db.payrollRun.aggregate({
               where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
@@ -281,10 +291,13 @@ export class BusinessGraphService {
             })
           : Promise.resolve([]),
       db.deal?.findMany
-        ? db.deal.findMany({
-            where: { businessId, deletedAt: null, status: 'OPEN' },
-            select: { value: true, currency: true },
-          })
+        ? fetchAllPages(({ skip, take }) =>
+            db.deal.findMany({
+              where: { businessId, deletedAt: null, status: 'OPEN' },
+              select: { value: true, currency: true },
+              ...(skip > 0 ? { skip, take } : {}),
+            }),
+          )
         : db.deal?.aggregate
           ? db.deal.aggregate({
               where: { businessId, deletedAt: null, status: 'OPEN' },
@@ -297,13 +310,7 @@ export class BusinessGraphService {
             where: { businessId, deletedAt: null, status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING'] } },
           })
         : Promise.resolve(0),
-      db.exchangeRate?.findMany
-        ? db.exchangeRate.findMany({
-            where: { businessId },
-            orderBy: { date: 'desc' },
-            take: 100,
-          })
-        : Promise.resolve([] as ExchangeRateRow[]),
+      loadLatestExchangeRates(db.exchangeRate, businessId),
     ]);
 
     const baseCurrency = normalizeCurrencyCode(business?.currency, 'TTD');
@@ -341,34 +348,11 @@ export class BusinessGraphService {
             .filter(Boolean) as string[],
         ),
       );
-      let cashLedgerMovements: CashLedgerMovementRow[] = [];
-      if (linkedCoaIds.length > 0 && db.ledgerEntry?.findMany) {
-        const entries = await db.ledgerEntry.findMany({
-          where: { businessId, accountId: { in: linkedCoaIds } },
-          select: {
-            accountId: true,
-            debit: true,
-            credit: true,
-            currency: true,
-            transaction: { select: { type: true } },
-          },
-        });
-        cashLedgerMovements = entries.map(
-          (e: {
-            accountId: string;
-            debit: unknown;
-            credit: unknown;
-            currency?: string | null;
-            transaction?: { type?: string | null } | null;
-          }) => ({
-            accountId: e.accountId,
-            debit: e.debit,
-            credit: e.credit,
-            currency: e.currency,
-            transactionType: e.transaction?.type ?? null,
-          }),
-        );
-      }
+      const cashLedgerMovements = await loadCashLedgerMovements(
+        db.ledgerEntry,
+        businessId,
+        linkedCoaIds,
+      );
       cashBalance = computeNormalizedCashBalance({
         accounts: cashAccountsData,
         ledgerMovements: cashLedgerMovements,

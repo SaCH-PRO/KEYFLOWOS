@@ -4,9 +4,9 @@ import { RedisService } from '../../core/redis/redis.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 import { ReceivablesService } from './receivables.service';
 import {
-  type CashLedgerMovementRow,
   computeNormalizedCashBalance,
-  type ExchangeRateRow,
+  loadCashLedgerMovements,
+  loadLatestExchangeRates,
   normalizeCurrencyCode,
 } from './finance-accounting.util';
 
@@ -222,42 +222,10 @@ export class FinanceOverviewService {
           .filter(Boolean) as string[],
       ),
     );
-    const [cashLedgerRows, exchangeRates] = await Promise.all([
-      linkedCoaIds.length > 0 && this.prisma.client.ledgerEntry?.findMany
-        ? this.prisma.client.ledgerEntry.findMany({
-            where: { businessId, accountId: { in: linkedCoaIds } },
-            select: {
-              accountId: true,
-              debit: true,
-              credit: true,
-              currency: true,
-              transaction: { select: { type: true } },
-            },
-          })
-        : Promise.resolve([]),
-      this.prisma.client.exchangeRate?.findMany
-        ? this.prisma.client.exchangeRate.findMany({
-            where: { businessId },
-            orderBy: { date: 'desc' },
-            take: 100,
-          })
-        : Promise.resolve([] as ExchangeRateRow[]),
+    const [cashLedgerMovements, exchangeRates] = await Promise.all([
+      loadCashLedgerMovements(this.prisma.client.ledgerEntry, businessId, linkedCoaIds),
+      loadLatestExchangeRates(this.prisma.client.exchangeRate, businessId),
     ]);
-    const cashLedgerMovements: CashLedgerMovementRow[] = cashLedgerRows.map(
-      (e: {
-        accountId: string;
-        debit: unknown;
-        credit: unknown;
-        currency?: string | null;
-        transaction?: { type?: string | null } | null;
-      }) => ({
-        accountId: e.accountId,
-        debit: e.debit,
-        credit: e.credit,
-        currency: e.currency,
-        transactionType: e.transaction?.type ?? null,
-      }),
-    );
 
     const cashBalance = computeNormalizedCashBalance({
       accounts: cashAccounts,

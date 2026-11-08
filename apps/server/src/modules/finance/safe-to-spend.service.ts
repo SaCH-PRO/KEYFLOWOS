@@ -4,9 +4,10 @@ import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service
 import {
   computeNormalizedCashBalance,
   convertToBaseOrThrow,
+  fetchAllPages,
+  loadCashLedgerMovements,
+  loadLatestExchangeRates,
   normalizeCurrencyCode,
-  type CashLedgerMovementRow,
-  type ExchangeRateRow,
 } from './finance-accounting.util';
 
 export interface SafeToSpendDto {
@@ -47,45 +48,51 @@ export class SafeToSpendService {
       committedPayrollRuns,
       exchangeRates,
     ] = await Promise.all([
-      this.prisma.client.financialAccount.findMany({
-        where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-        select: {
-          id: true,
-          chartOfAccountId: true,
-          openingBalance: true,
-          currentBalance: true,
-          currency: true,
-        },
-      }),
+      fetchAllPages(({ skip, take }) =>
+        this.prisma.client.financialAccount.findMany({
+          where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
+          select: {
+            id: true,
+            chartOfAccountId: true,
+            openingBalance: true,
+            currentBalance: true,
+            currency: true,
+          },
+          ...(skip > 0 ? { skip, take } : {}),
+        }),
+      ),
       this.coaSeeder.getBySystemKey(businessId, 'TAX_PAYABLE'),
-      this.prisma.client.expense.findMany({
-        where: {
-          businessId,
-          status: 'BILL',
-          dueDate: { gte: now, lte: next30 },
-        },
-        select: { amount: true, currency: true },
-      }),
-      this.prisma.client.cashReserveBucket.findMany({
-        where: { businessId, status: 'ACTIVE' },
-        select: { currentAmount: true, currency: true, name: true },
-      }),
+      fetchAllPages(({ skip, take }) =>
+        this.prisma.client.expense.findMany({
+          where: {
+            businessId,
+            status: 'BILL',
+            dueDate: { gte: now, lte: next30 },
+          },
+          select: { amount: true, currency: true },
+          ...(skip > 0 ? { skip, take } : {}),
+        }),
+      ),
+      fetchAllPages(({ skip, take }) =>
+        this.prisma.client.cashReserveBucket.findMany({
+          where: { businessId, status: 'ACTIVE' },
+          select: { currentAmount: true, currency: true, name: true },
+          ...(skip > 0 ? { skip, take } : {}),
+        }),
+      ),
       this.prisma.client.payrollRun?.findMany
-        ? this.prisma.client.payrollRun.findMany({
-            where: {
-              businessId,
-              status: { in: ['DRAFT', 'APPROVED'] },
-            },
-            select: { totalGross: true, currency: true, status: true },
-          })
+        ? fetchAllPages(({ skip, take }) =>
+            this.prisma.client.payrollRun.findMany({
+              where: {
+                businessId,
+                status: { in: ['DRAFT', 'APPROVED'] },
+              },
+              select: { totalGross: true, currency: true, status: true },
+              ...(skip > 0 ? { skip, take } : {}),
+            }),
+          )
         : Promise.resolve([]),
-      this.prisma.client.exchangeRate?.findMany
-        ? this.prisma.client.exchangeRate.findMany({
-            where: { businessId },
-            orderBy: { date: 'desc' },
-            take: 100,
-          })
-        : Promise.resolve([] as ExchangeRateRow[]),
+      loadLatestExchangeRates(this.prisma.client.exchangeRate, businessId),
     ]);
 
     const linkedCoaIds = Array.from(
@@ -96,37 +103,11 @@ export class SafeToSpendService {
       ),
     );
 
-    let cashLedgerMovements: CashLedgerMovementRow[] = [];
-    if (linkedCoaIds.length > 0 && this.prisma.client.ledgerEntry?.findMany) {
-      const entries = await this.prisma.client.ledgerEntry.findMany({
-        where: {
-          businessId,
-          accountId: { in: linkedCoaIds },
-        },
-        select: {
-          accountId: true,
-          debit: true,
-          credit: true,
-          currency: true,
-          transaction: { select: { type: true } },
-        },
-      });
-      cashLedgerMovements = entries.map(
-        (e: {
-          accountId: string;
-          debit: unknown;
-          credit: unknown;
-          currency?: string | null;
-          transaction?: { type?: string | null } | null;
-        }) => ({
-          accountId: e.accountId,
-          debit: e.debit,
-          credit: e.credit,
-          currency: e.currency,
-          transactionType: e.transaction?.type ?? null,
-        }),
-      );
-    }
+    const cashLedgerMovements = await loadCashLedgerMovements(
+      this.prisma.client.ledgerEntry,
+      businessId,
+      linkedCoaIds,
+    );
 
     const cashBalance = computeNormalizedCashBalance({
       accounts: cashAccounts,

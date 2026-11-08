@@ -14,6 +14,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
 import {
   convertToBaseOrThrow,
+  loadLatestExchangeRates,
   normalizeCurrencyCode,
   type ExchangeRateRow,
 } from '../finance/finance-accounting.util';
@@ -168,13 +169,7 @@ export class PayrollService {
     const needsConversion = rateCurrencies.some((c) => c !== runCurrency);
     let exchangeRates: ExchangeRateRow[] = [];
     if (needsConversion) {
-      if (this.prisma.client.exchangeRate?.findMany) {
-        exchangeRates = await this.prisma.client.exchangeRate.findMany({
-          where: { businessId },
-          orderBy: { date: 'desc' },
-          take: 100,
-        });
-      }
+      exchangeRates = await loadLatestExchangeRates(this.prisma.client.exchangeRate, businessId);
       for (const rc of rateCurrencies) {
         if (rc !== runCurrency) {
           convertToBaseOrThrow(1, rc, runCurrency, exchangeRates, 'payroll run');
@@ -439,6 +434,48 @@ export class PayrollService {
               : account.type === 'PAYMENT_PROCESSOR'
                 ? account.subtype || 'processor'
                 : 'bank_transfer';
+        }
+      } else if (rawMethod) {
+        const faDelegate = tx.financialAccount ?? this.prisma.client.financialAccount;
+        if (faDelegate?.findFirst) {
+          const expectedType =
+            rawMethod === 'cash'
+              ? 'CASH'
+              : ['wipay', 'paypal', 'stripe', 'processor'].includes(rawMethod)
+                ? 'PAYMENT_PROCESSOR'
+                : 'BANK';
+          const runCurrency = normalizeCurrencyCode(currentRun.currency, 'TTD');
+          const matchedAccount = await faDelegate.findFirst({
+            where: {
+              businessId,
+              type: expectedType,
+              isActive: true,
+              currency: runCurrency,
+              chartOfAccountId: { not: null },
+            },
+            orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+            select: {
+              id: true,
+              businessId: true,
+              type: true,
+              subtype: true,
+              chartOfAccountId: true,
+              isActive: true,
+              currency: true,
+            },
+          });
+          if (
+            !matchedAccount ||
+            !matchedAccount.isActive ||
+            matchedAccount.type !== expectedType ||
+            normalizeCurrencyCode(matchedAccount.currency, runCurrency) !== runCurrency
+          ) {
+            throw new BadRequestException(
+              `No active ${runCurrency} ${expectedType} financial account found for paymentMethod "${rawMethod}"; specify paymentAccountId or configure an active account first`,
+            );
+          }
+          resolvedAccountId = matchedAccount.id;
+          resolvedCoaId = matchedAccount.chartOfAccountId ?? null;
         }
       }
 

@@ -213,12 +213,17 @@ describe('PostingService.post — DB integration paths', () => {
         financialAccount: {
           findFirst: vi.fn(async (args: any) => {
             if (args.where?.id === 'fa_bank_1' || args.where?.chartOfAccountId === 'acc_cash_b1') {
-              return { id: 'fa_bank_1', type: 'BANK', currentBalance: bankBalance };
+              return { id: 'fa_bank_1', type: 'BANK', currency: 'TTD', currentBalance: bankBalance };
             }
             return null;
           }),
           update: vi.fn(async (args: any) => {
-            bankBalance = args.data.currentBalance;
+            const inc = args.data?.currentBalance?.increment;
+            if (inc !== undefined) {
+              bankBalance = new Prisma.Decimal(String(bankBalance)).add(new Prisma.Decimal(String(inc)));
+            } else if (args.data?.currentBalance !== undefined) {
+              bankBalance = new Prisma.Decimal(String(args.data.currentBalance));
+            }
             return { id: 'fa_bank_1', currentBalance: bankBalance };
           }),
         },
@@ -250,4 +255,120 @@ describe('PostingService.post — DB integration paths', () => {
     expect(second.alreadyPosted).toBe(true);
     expect(Number(bankBalance.toString())).toBe(16_500);
   });
+
+  it('persists non-default FinancialAccount on post metadata and credits that exact account on reverse()', async () => {
+    const stub = makePrismaStub();
+    let defaultBankBalance = new Prisma.Decimal(50_000);
+    let secondaryBankBalance = new Prisma.Decimal(15_000);
+    let storedTxRecord: any = null;
+
+    (stub.prisma.client as any).$transaction = vi.fn(async (cb: any) => {
+      const txWithFa = {
+        financialTransaction: {
+          findUnique: vi.fn(async (args: any) => {
+            if (args.where?.id && storedTxRecord?.id === args.where.id) {
+              return storedTxRecord;
+            }
+            return stub.prisma.client.financialTransaction.findUnique(args);
+          }),
+          create: vi.fn(async (args: any) => {
+            const id = `txn_${stub.state.txns.size + 1}`;
+            stub.state.txns.set(id, {
+              id,
+              businessId: args.data.businessId,
+              externalRef: args.data.externalRef ?? null,
+            });
+            storedTxRecord = {
+              id,
+              businessId: args.data.businessId,
+              type: args.data.type,
+              amount: new Prisma.Decimal(String(args.data.amount)),
+              currency: args.data.currency,
+              description: args.data.description,
+              externalRef: args.data.externalRef ?? null,
+              metadata: args.data.metadata ?? null,
+              reversedById: null,
+              entries: (args.data.entries?.create ?? []).map((e: any, idx: number) => ({
+                id: `le_${idx + 1}`,
+                accountId: e.accountId,
+                debit: new Prisma.Decimal(String(e.debit ?? 0)),
+                credit: new Prisma.Decimal(String(e.credit ?? 0)),
+                currency: e.currency,
+                description: e.description ?? null,
+                contactId: null,
+              })),
+            };
+            return { id };
+          }),
+          update: vi.fn(async (args: any) => {
+            if (storedTxRecord && storedTxRecord.id === args.where?.id) {
+              storedTxRecord.reversedById = args.data?.reversedById ?? null;
+            }
+            return storedTxRecord;
+          }),
+        },
+        chartOfAccount: {
+          findMany: vi.fn(async () => [
+            { id: 'coa_payroll', businessId: 'biz_1' },
+            { id: 'acc_cash_b1', businessId: 'biz_1' },
+          ]),
+        },
+        contact: { findUnique: vi.fn(async () => null) },
+        financialAccount: {
+          findFirst: vi.fn(async (args: any) => {
+            if (args.where?.id === 'fa_bank_secondary') {
+              return { id: 'fa_bank_secondary', type: 'BANK', currency: 'TTD', currentBalance: secondaryBankBalance };
+            }
+            if (args.where?.id === 'fa_bank_default' || args.where?.chartOfAccountId === 'acc_cash_b1') {
+              return { id: 'fa_bank_default', type: 'BANK', currency: 'TTD', currentBalance: defaultBankBalance };
+            }
+            return null;
+          }),
+          update: vi.fn(async (args: any) => {
+            const inc = new Prisma.Decimal(String(args.data?.currentBalance?.increment ?? 0));
+            if (args.where?.id === 'fa_bank_secondary') {
+              secondaryBankBalance = secondaryBankBalance.add(inc);
+              return { id: 'fa_bank_secondary', currentBalance: secondaryBankBalance };
+            }
+            defaultBankBalance = defaultBankBalance.add(inc);
+            return { id: 'fa_bank_default', currentBalance: defaultBankBalance };
+          }),
+        },
+      };
+      return cb(txWithFa);
+    });
+
+    const svc = new PostingService(stub.prisma);
+    const posted = await svc.post({
+      businessId: 'biz_1',
+      type: 'EXPENSE',
+      date: new Date('2026-08-31'),
+      amount: 4_000,
+      currency: 'TTD',
+      sourceType: 'PayrollRun',
+      sourceId: 'run_secondary_1',
+      kind: 'paid',
+      entries: [
+        { accountId: 'coa_payroll', debit: 4_000 },
+        { accountId: 'acc_cash_b1', financialAccountId: 'fa_bank_secondary', credit: 4_000 },
+      ],
+    });
+
+    expect(Number(secondaryBankBalance.toString())).toBe(11_000);
+    expect(Number(defaultBankBalance.toString())).toBe(50_000);
+    expect(storedTxRecord.metadata?.entryFinancialAccounts).toEqual([
+      { entryIndex: 1, accountId: 'acc_cash_b1', financialAccountId: 'fa_bank_secondary' },
+    ]);
+
+    await svc.reverse({
+      businessId: 'biz_1',
+      transactionId: posted.transactionId,
+      reason: 'Payroll correction',
+    });
+
+    // Reversal must credit fa_bank_secondary back to 15,000 and leave fa_bank_default untouched
+    expect(Number(secondaryBankBalance.toString())).toBe(15_000);
+    expect(Number(defaultBankBalance.toString())).toBe(50_000);
+  });
 });
+

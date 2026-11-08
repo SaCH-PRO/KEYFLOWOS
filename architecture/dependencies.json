@@ -33363,6 +33363,13 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/posting.service.ts",
+      "specifier": "./finance-accounting.util",
+      "target": "apps/server/src/modules/finance/finance-accounting.util.ts",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/finance/receivables.service.ts",
       "specifier": "@nestjs/common",
@@ -111050,7 +111057,7 @@
     }
   ],
   "meta": {
-    "edges": 15864,
+    "edges": 15865,
     "nodes": 3878,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"
