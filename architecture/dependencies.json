@@ -90098,6 +90098,13 @@
       "type": "external"
     },
     {
+      "resolved": true,
+      "source": "apps/web/src/app/app/projects/components/project-detail-tabs/revenue-tab.tsx",
+      "specifier": "../project-budget-view",
+      "target": "apps/web/src/app/app/projects/components/project-budget-view.tsx",
+      "type": "relative"
+    },
+    {
       "resolved": false,
       "source": "apps/web/src/app/app/projects/components/project-detail-tabs/revenue-tab.tsx",
       "specifier": "lucide-react",
@@ -110910,7 +110917,7 @@
     }
   ],
   "meta": {
-    "edges": 15844,
+    "edges": 15845,
     "nodes": 3875,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"

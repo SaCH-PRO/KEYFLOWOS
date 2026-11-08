@@ -16,6 +16,7 @@ import {
   Paperclip,
 } from "lucide-react";
 import { fetchInvoices, fetchExpensesByProject, type Expense, type Invoice } from "@/lib/client";
+import { ProjectBudgetView } from "../project-budget-view";
 
 interface RevenueTabProps {
   invoiceId?: string;

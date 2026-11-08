@@ -46415,14 +46415,15 @@
       ],
       "extension": ".tsx",
       "imports": [
+        "../project-budget-view",
         "@/lib/client",
         "lucide-react",
         "next/link",
         "react"
       ],
-      "lines": 369,
+      "lines": 370,
       "path": "apps/web/src/app/app/projects/components/project-detail-tabs/revenue-tab.tsx",
-      "size_bytes": 18838
+      "size_bytes": 18898
     },
     {
       "exports": [
@@ -57860,7 +57861,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4228252
+      "size_bytes": 4228514
     },
     {
       "extension": ".md",
@@ -57882,9 +57883,9 @@
     },
     {
       "extension": ".json",
-      "lines": 63718,
+      "lines": 63719,
       "path": "architecture/inventory.json",
-      "size_bytes": 1649495
+      "size_bytes": 1649532
     },
     {
       "extension": ".md",
@@ -63714,6 +63715,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3476,
     "total_files": 4471,
-    "total_lines": 1156226
+    "total_lines": 1156228
   }
 }
