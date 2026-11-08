@@ -6,7 +6,7 @@ agent_identity: gemini-cloud-builder-01
 role: builder
 repository: SaCH-PRO/KEYFLOWOS
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: f79647748f6402c70d6362bc85009d4dcddc5c9b
+source_head: 0d4bb2043327f809826777c0c95f1680f2002abc
 implementation_branch: impl/kf-meta-cloud-control-001
 allowed_scope:
   - scripts/agent-control/**

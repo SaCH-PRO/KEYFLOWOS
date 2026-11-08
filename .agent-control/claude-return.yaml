@@ -5,7 +5,7 @@ authority_status: PROVISIONAL_CLOUD_DISPATCH_TRACK_AWAITING_FORMAL_AUTHORITY
 current_authority_message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001
 current_authority_comment_id: 6692411347
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: f79647748f6402c70d6362bc85009d4dcddc5c9b
+source_head: 0d4bb2043327f809826777c0c95f1680f2002abc
 implementation_branch: impl/kf-meta-cloud-control-001
 pr_number: 194
 state: PROVING
@@ -26,6 +26,8 @@ semantic_commits:
     what: Phase 1 cloud-native multi-agent control plane initial foundation (cloud-control.mjs, cloud-dispatch.mjs, agent-cloud-control.yml, CLOUD_AGENT_CONTROL_PLANE.md, cloud-control.spec.mjs, and 11 live negative controls in negative-controls.yaml)
   - sha: f79647748f6402c70d6362bc85009d4dcddc5c9b
     what: Security hardening for PR #194 review (authenticated authority digest binding, immutable task contract verification, safe local-only registry locking without age-based lock steal, positive git ancestry and completion proof gates, revoked/double-failover protection, fail-closed CLI/workflow preflight, architecture map synchronization, and 10 additional live NC-CLOUD-* negative controls)
+  - sha: 0d4bb2043327f809826777c0c95f1680f2002abc
+    what: Follow-up security hardening (Ed25519 signature verification on --verified-authority, independent sender and contract_digest verification on GITHUB_EVENT_PATH, persisted task state enforcement in failover, replacement authority binding for digest-bearing failovers, HANDOFF_READY to COMPLETED_DRAFT finalization, and missing-task workflow preflight enforcement)
 
 diff_scope:
   - scripts/agent-control/lib/cloud-control.mjs
