@@ -1,4 +1,4 @@
-import { Body, Controller, Inject, Param, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { BlueprintOnboardingService, OnboardingMessage } from './blueprint-onboarding.service';
@@ -9,6 +9,11 @@ export class BlueprintOnboardingController {
   constructor(
     @Inject(BlueprintOnboardingService) private readonly onboarding: BlueprintOnboardingService,
   ) {}
+
+  @Get('onboarding-history')
+  async onboardingHistory(@Param('businessId') businessId: string) {
+    return this.onboarding.getHistory(businessId);
+  }
 
   @Post('onboarding-chat')
   async onboardingChat(

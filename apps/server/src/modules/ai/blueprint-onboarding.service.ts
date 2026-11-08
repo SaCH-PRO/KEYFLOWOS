@@ -30,6 +30,7 @@ export interface BlueprintOnboardingState {
 
 interface OnboardingChatResult {
   reply: string;
+  messages?: OnboardingMessage[];
   blueprint: BlueprintData;
   completeness: number;
   threePillarMinimumMet: boolean;
@@ -48,6 +49,10 @@ const SECTION_ORDER: BlueprintSectionKey[] = [
   'brand',
   'customerModel',
   'financials',
+  'legalProfile',
+  'registrationProfile',
+  'taxProfile',
+  'ownershipProfile',
   'workflowModel',
   'aiPreferences',
 ];
@@ -88,6 +93,26 @@ const SECTION_FOCUS: Partial<Record<BlueprintSectionKey, { label: string; goal: 
     label: 'Financials',
     goal: 'pricing, targets, and cost structure',
     fields: ['currency', 'pricingModel', 'avgTicket', 'monthlyTarget'],
+  },
+  legalProfile: {
+    label: 'Legal Profile',
+    goal: 'jurisdiction, entity structure, and regulatory requirements',
+    fields: ['country', 'recommendedEntityType', 'regulatedIndustry'],
+  },
+  registrationProfile: {
+    label: 'Registration Profile',
+    goal: 'business name, company registry, BIR, NIS, and VAT registration status',
+    fields: ['businessNameStatus', 'companiesRegistryStatus', 'birStatus', 'nisEmployerStatus', 'vatStatus'],
+  },
+  taxProfile: {
+    label: 'Tax Profile',
+    goal: 'tax registration status and tax readiness',
+    fields: ['country', 'taxIdStatus', 'taxReadinessScore'],
+  },
+  ownershipProfile: {
+    label: 'Ownership Profile',
+    goal: 'whether there are co-founders or partners and how ownership is structured',
+    fields: ['hasPartners', 'owners'],
   },
   workflowModel: {
     label: 'Workflow Model',
@@ -173,6 +198,30 @@ export class BlueprintOnboardingService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
+  async getHistory(businessId: string): Promise<{
+    messages: OnboardingMessage[];
+    blueprint: BlueprintData;
+    completeness: number;
+    threePillarMinimumMet: boolean;
+    confidenceScores: Record<string, number>;
+    nextSection: BlueprintSectionKey | null;
+  }> {
+    const blueprint = await this.blueprint.getBlueprint(businessId);
+    const state = await this.getState(businessId);
+    const threePillarMinimumMet =
+      typeof this.blueprint.checkThreePillarMinimum === 'function'
+        ? this.blueprint.checkThreePillarMinimum((blueprint.genomeDnaScores ?? {}) as Record<DnaSectionKey, number>)
+        : false;
+    return {
+      messages: state.messages,
+      blueprint,
+      completeness: blueprint.completeness ?? 0,
+      threePillarMinimumMet,
+      confidenceScores: (blueprint.confidenceScores ?? {}) as Record<string, number>,
+      nextSection: state.currentSection,
+    };
+  }
+
   async chat(
     businessId: string,
     userMessage: string,
@@ -218,6 +267,7 @@ export class BlueprintOnboardingService {
 
       return {
         reply,
+        messages: state.messages,
         blueprint: updatedBlueprint,
         completeness: updatedBlueprint.completeness,
         threePillarMinimumMet: this.blueprint.checkThreePillarMinimum(
@@ -233,6 +283,7 @@ export class BlueprintOnboardingService {
       state.messages.push({ role: 'assistant', content: fallback });
       return {
         reply: fallback,
+        messages: state.messages,
         blueprint,
         completeness: blueprint.completeness,
         threePillarMinimumMet: this.blueprint.checkThreePillarMinimum(
@@ -247,14 +298,19 @@ export class BlueprintOnboardingService {
 
   async getState(businessId: string, history?: OnboardingMessage[]): Promise<BlueprintOnboardingState> {
     const cached = this.readCache(businessId);
-    if (cached) return cached;
+    if (cached) {
+      if (history && history.length > cached.messages.length) {
+        cached.messages = [...history];
+      }
+      return cached;
+    }
 
     const blueprint = await this.blueprint.getBlueprint(businessId);
     const completedSections = this.getCompletedSections(blueprint);
     const nextSection = this.chooseNextSection(blueprint, { completedSections, currentSection: null } as BlueprintOnboardingState);
 
     const state: BlueprintOnboardingState = {
-      messages: history || [],
+      messages: history ? [...history] : [],
       completedSections,
       currentSection: nextSection,
       currentQuestion: nextSection ? this.firstQuestionForSection(nextSection) : null,

@@ -6974,9 +6974,9 @@
         "./blueprint-onboarding.service",
         "@nestjs/common"
       ],
-      "lines": 26,
+      "lines": 31,
       "path": "apps/server/src/modules/ai/blueprint-onboarding.controller.ts",
-      "size_bytes": 971
+      "size_bytes": 1130
     },
     {
       "exports": [
@@ -6993,9 +6993,9 @@
         "./model-gateway.service",
         "@nestjs/common"
       ],
-      "lines": 439,
+      "lines": 495,
       "path": "apps/server/src/modules/ai/blueprint-onboarding.service.ts",
-      "size_bytes": 17942
+      "size_bytes": 19976
     },
     {
       "exports": [
@@ -8208,9 +8208,9 @@
         "./blueprint-onboarding.service",
         "vitest"
       ],
-      "lines": 95,
+      "lines": 126,
       "path": "apps/server/src/modules/ai/onboarding-state-cache.spec.ts",
-      "size_bytes": 4138
+      "size_bytes": 5515
     },
     {
       "exports": [
@@ -26825,6 +26825,17 @@
       "size_bytes": 3514
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./key-inbox-reply-sender.service",
+        "vitest"
+      ],
+      "lines": 103,
+      "path": "apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.spec.ts",
+      "size_bytes": 3103
+    },
+    {
       "exports": [
         "KeyInboxReplySenderService",
         "SendReplyResult",
@@ -26834,14 +26845,16 @@
       "imports": [
         "../../core/prisma/prisma.service",
         "../business-events/business-event.service",
+        "../communications/adapters/resend-email-adapter",
+        "../notifications/system-email.service",
         "./key-inbox.constants",
         "@nestjs/common",
         "@nestjs/core",
         "@prisma/client"
       ],
-      "lines": 304,
+      "lines": 368,
       "path": "apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.ts",
-      "size_bytes": 11025
+      "size_bytes": 13214
     },
     {
       "exports": [
@@ -45224,9 +45237,9 @@
         "react",
         "sonner"
       ],
-      "lines": 395,
+      "lines": 486,
       "path": "apps/web/src/app/app/profile/components/blueprint-onboarding-chat.tsx",
-      "size_bytes": 14610
+      "size_bytes": 17221
     },
     {
       "exports": [
@@ -46204,9 +46217,9 @@
         "lucide-react",
         "react"
       ],
-      "lines": 139,
+      "lines": 200,
       "path": "apps/web/src/app/app/projects/components/plan-generator.tsx",
-      "size_bytes": 5876
+      "size_bytes": 8903
     },
     {
       "exports": [
@@ -46437,9 +46450,9 @@
         "lucide-react",
         "react"
       ],
-      "lines": 287,
+      "lines": 340,
       "path": "apps/web/src/app/app/projects/components/project-detail-tabs/tasks-tab.tsx",
-      "size_bytes": 11083
+      "size_bytes": 13162
     },
     {
       "exports": [
@@ -46484,9 +46497,9 @@
         "react",
         "sonner"
       ],
-      "lines": 546,
+      "lines": 548,
       "path": "apps/web/src/app/app/projects/components/project-detail.tsx",
-      "size_bytes": 21985
+      "size_bytes": 22162
     },
     {
       "exports": [
@@ -46508,13 +46521,15 @@
       ],
       "extension": ".tsx",
       "imports": [
+        "./project-constants",
+        "@/lib/client",
         "framer-motion",
         "lucide-react",
         "react"
       ],
-      "lines": 176,
+      "lines": 296,
       "path": "apps/web/src/app/app/projects/components/project-intelligence-panel.tsx",
-      "size_bytes": 7666
+      "size_bytes": 11338
     },
     {
       "exports": [
@@ -46682,7 +46697,7 @@
       ],
       "lines": 320,
       "path": "apps/web/src/app/app/projects/page.tsx",
-      "size_bytes": 13635
+      "size_bytes": 13679
     },
     {
       "exports": [
@@ -52456,6 +52471,7 @@
         "./key-action-grid",
         "./key-genome-chip",
         "./key-genome-preview",
+        "./key-live-voice",
         "./open-genome-conversation",
         "./types",
         "@/components/key/chat",
@@ -52470,9 +52486,9 @@
         "next/link",
         "react"
       ],
-      "lines": 272,
+      "lines": 274,
       "path": "apps/web/src/components/key/chat/key-full-chat-shell-v2.tsx",
-      "size_bytes": 10423
+      "size_bytes": 10503
     },
     {
       "exports": [
@@ -57861,7 +57877,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4228801
+      "size_bytes": 4230803
     },
     {
       "extension": ".md",
@@ -57871,9 +57887,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 1917,
+      "lines": 1924,
       "path": "architecture/event-registry.yaml",
-      "size_bytes": 59008
+      "size_bytes": 59256
     },
     {
       "extension": ".md",
@@ -57883,9 +57899,9 @@
     },
     {
       "extension": ".json",
-      "lines": 63720,
+      "lines": 63736,
       "path": "architecture/inventory.json",
-      "size_bytes": 1649566
+      "size_bytes": 1650044
     },
     {
       "extension": ".md",
@@ -59243,7 +59259,7 @@
       "extension": ".md",
       "lines": 61,
       "path": "docs/development/PRODUCT_COMPLETION_TRACKER.md",
-      "size_bytes": 10019
+      "size_bytes": 10901
     },
     {
       "extension": ".md",
@@ -59267,7 +59283,7 @@
       "extension": ".md",
       "lines": 438,
       "path": "docs/development/feature-inventory.md",
-      "size_bytes": 33473
+      "size_bytes": 34135
     },
     {
       "extension": ".md",
@@ -63701,7 +63717,7 @@
       ".svg": 6,
       ".template": 1,
       ".toml": 2,
-      ".ts": 2146,
+      ".ts": 2147,
       ".tsbuildinfo": 1,
       ".tsv": 1,
       ".tsx": 1233,
@@ -63713,8 +63729,8 @@
     },
     "root": ".",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3476,
-    "total_files": 4471,
-    "total_lines": 1156279
+    "source_files": 3477,
+    "total_files": 4472,
+    "total_lines": 1156890
   }
 }

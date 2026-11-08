@@ -71,9 +71,9 @@
 | Business Genesis idea extraction | Analyze idea | P1 | ✅ Working | `business-genesis.controller.ts:30-52` |
 | | Q&A flow | P1 | ✅ Working | `questions/next`, `answers` |
 | | Blueprint/Genome sync | P1 | ✅ Working | `business-genesis.service.ts:224-436` |
-| Business Genome intake chat | Section coverage | P1 | ⚠️ Partial | Omits legal/registration/tax/ownership sections |
+| Business Genome intake chat | Section coverage | P1 | ✅ Working | Covers all 10 Genome sections including `legalProfile`, `registrationProfile`, `taxProfile`, and `ownershipProfile` |
 | | State durability | P1 | ✅ Working | Now persisted; refresh/restores interview state |
-| | Client history | P1 | ❌ Broken | Local React state only |
+| | Client history | P1 | ✅ Working | Hydrated from `GET /blueprint/businesses/:businessId/onboarding-history` and synced to `localStorage` |
 | BusinessBlueprint CRUD | Lazy create/update | P1 | ✅ Working | `blueprint.service.ts:194-355` |
 | | Integrity scoring | P1 | ✅ Working | `key-genome.service.ts:211-355` |
 | Genome gate guard | Blocks actions until 50% per pillar | P0 | ✅ Working | `core/auth/genome-gate.guard.ts:9-31` |
@@ -130,8 +130,8 @@
 | Key Cortex WebSocket gateway | `/key-cortex` namespace | P2 | 🔇 Orphaned | No web client connects |
 | Voice input / push-to-talk | STT endpoint | P1 | ⚠️ Partial | Depends on OpenAI Whisper |
 | | TTS playback | P1 | ⚠️ Partial | Depends on OpenAI TTS |
-| Full-duplex LiveKit voice | `KeyLiveVoice` component | P2 | 🔇 Orphaned | Implemented but never imported |
-| | Voice agent worker | P2 | ❌ Broken | Uses model `gpt-realtime`; realtime access unclear |
+| Full-duplex LiveKit voice | `KeyLiveVoice` component | P2 | ✅ Working | Wired into `KeyFullChatShellV2` header bar (`key-full-chat-shell-v2.tsx`) |
+| | Voice agent worker | P2 | ✅ Working | Uses `KEY_VOICE_REALTIME_MODEL ?? 'gpt-realtime'` per `AGENTS.md` (`apps/voice-agent/src/main.ts`) |
 | | LiveKit room/token dispatch | P2 | ✅ Working | `livekit.service.ts:14-85` |
 | Chat simulator | Dev-only canned scenarios | P3 | ✅ Working | `key/chat/simulator/page.tsx:39-134` |
 | Missing chat modes | support / marketing / operator | P2 | ✅ Working | Rendered in `KeyChatModeTabs` and `key-full-chat-shell-v2` |
@@ -252,7 +252,7 @@
 | | Actual delivery | P1 | ✅ Working | Platform-domain ESP fallback; `connect Gmail` remains the recommended path for branded sending; fixed in `c3cec37b` |
 | Transactional customer notifications | 25+ templates | P1 | ✅ Working | `transactional-email.service.ts` |
 | | Preference merge / do-not-contact | P1 | ✅ Working | |
-| | Gmail + Resend fallback | P1 | ✅ Working | |
+| | Gmail + Resend fallback | P1 | ✅ Working | Transactional Email, Campaigns, Sequences, and `KeyInboxReplySenderService` outbound email replies fall back to platform ESP (Resend) |
 | WhatsApp two-way inbox | Twilio/Meta/mock | P1 | ✅ Working | `whatsapp.service.ts:74-390` |
 | | 24h window + templates UI | P1 | ✅ Working | |
 | | Booking/invoice/payment event listeners | P1 | ✅ Working | `whatsapp-notifications.listener.ts` |
@@ -286,18 +286,18 @@
 | Project budget view | Component | P2 | ✅ Working | Wired into `RevenueTab` (`apps/web/src/app/app/projects/components/project-detail-tabs/revenue-tab.tsx`) |
 | Task kanban view | Component | P2 | ✅ Working | Wired into `TasksTab` with List/Kanban toggle and `updateProjectTaskStatus` (`apps/web/src/app/app/projects/components/project-detail-tabs/tasks-tab.tsx`) |
 | Task assignments / workload | Backend | P2 | ✅ Working | `task-assignment.service.ts`, recommender |
-| | UI | P2 | 🚧 Stub | No assignment picker in UI; never built |
+| | UI | P2 | ✅ Working | Staff assignee picker wired into `TasksTab` new-task bar and `TaskRow` (`tasks-tab.tsx`) |
 | Project revenue auto-progression | Invoice.paid/booking.completed | P2 | ✅ Working | `project-revenue.listener.ts` |
 | AI project plan generation | LLM → ProjectPlan | P2 | ✅ Working | `project-planner.service.ts:96-255` |
 | Plan materialization | Create project with tasks/milestones | P2 | ✅ Working | `project-plan-executor.service.ts:24-131` |
 | Plan event execution | Run tool | P2 | ✅ Working | Honest unavailable path: blocked + timeline + no task mutation |
 | Plan detail UI | `/app/projects/plans/[planId]` | P2 | ✅ Working | |
-| | Plans list in Projects tab | P2 | 🚧 Stub | List view not built; only generator shown |
+| | Plans list in Projects tab | P2 | ✅ Working | Saved Project Plans list with status, Open, Approve & Materialize, and Delete actions rendered in `PlanGenerator` (`plan-generator.tsx`) |
 | Legacy `/app/plans/[planId]` | Detail page | P3 | 🔇 Orphaned | No index; back link to non-existent `/app/plans` |
 | Time tracking | Timer/entries/summary | P1 | ✅ Working | `time-entry.service.ts` |
 | Time → invoice billing | Invoice unbilled time | P1 | ✅ Working | `time-entry.service.ts:352-460` |
 | AI tools for projects/time | Tool execution | P2 | ✅ Working | `flow-orchestrator.service.ts` |
-| Project intelligence tab | Metrics/insights | P2 | 🚧 Stub | Hard-coded demo data |
+| Project intelligence tab | Metrics/insights | P2 | ✅ Working | Computes live project metrics, overdue/milestone/unassigned insights, and staff workload capacity from active projects and staff (`project-intelligence-panel.tsx`) |
 
 ---
 
@@ -421,10 +421,10 @@
 | Tier | Working | Partial | Broken | Stub | Orphaned | Total |
 |------|---------|---------|--------|------|----------|-------|
 | P0 | 43 | 9 | 0 | 0 | 0 | 52 |
-| P1 | 98 | 16 | 1 | 1 | 0 | 116 |
-| P2 | 58 | 12 | 1 | 10 | 6 | 87 |
+| P1 | 100 | 15 | 0 | 1 | 0 | 116 |
+| P2 | 63 | 12 | 0 | 7 | 5 | 87 |
 | P3 | 11 | 5 | 0 | 5 | 10 | 31 |
-| **Total** | **210** | **42** | **2** | **16** | **16** | **286** |
+| **Total** | **217** | **41** | **0** | **13** | **15** | **286** |
 
 ---
 

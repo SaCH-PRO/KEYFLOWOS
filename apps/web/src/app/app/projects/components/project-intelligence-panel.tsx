@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Brain,
@@ -11,6 +11,8 @@ import {
   Users,
   CheckCircle2,
 } from "lucide-react";
+import { fetchStaff, type Project, type StaffMember } from "@/lib/client";
+import { normalizeStatus, isOverdue, isDueSoon, getProjectRisk } from "./project-constants";
 
 interface ProjectMetric {
   label: string;
@@ -36,27 +38,145 @@ interface TeamLoad {
   atRisk: boolean;
 }
 
-export function ProjectIntelligencePanel() {
-  const metrics: ProjectMetric[] = useMemo(() => [
-    { label: "Active Projects", value: "12", change: 2, icon: Target },
-    { label: "On Track", value: "9", change: 1, icon: CheckCircle2 },
-    { label: "At Risk", value: "2", change: -1, icon: AlertTriangle },
-    { label: "Completed", value: "24", change: 4, icon: TrendingUp },
-  ], []);
+interface ProjectIntelligencePanelProps {
+  projects?: Project[];
+  businessId?: string | null;
+}
 
-  const insights: ProjectInsight[] = useMemo(() => [
-    { id: "1", type: "risk", title: "Deadline Risk: Website Redesign", description: "3 tasks overdue, 2 dependencies blocked. 65% chance of missing Friday deadline.", project: "Website Redesign", impact: "2 days late" },
-    { id: "2", type: "optimization", title: "Resource Reallocation", description: "Sarah has 40% capacity while Mike is at 110%. Rebalancing could accelerate Project Alpha by 1 week.", project: "Project Alpha", impact: "+1 week saved" },
-    { id: "3", type: "milestone", title: "Milestone Approaching", description: "Q2 Campaign Launch reaches review stage in 3 days. 4 deliverables still pending.", project: "Q2 Campaign", impact: "3 days" },
-    { id: "4", type: "resource", title: "Skill Gap Detected", description: "No team member has advanced SEO skills needed for the Content Migration project. Consider external help.", project: "Content Migration", impact: "Blocking" },
-  ], []);
+export function ProjectIntelligencePanel({ projects = [], businessId }: ProjectIntelligencePanelProps) {
+  const [staffMembers, setStaffMembers] = useState<StaffMember[]>([]);
 
-  const teamLoads: TeamLoad[] = useMemo(() => [
-    { member: "Sarah Chen", role: "Designer", load: 45, tasks: 4, atRisk: false },
-    { member: "Mike Ross", role: "Developer", load: 110, tasks: 8, atRisk: true },
-    { member: "Emma Davis", role: "PM", load: 78, tasks: 6, atRisk: false },
-    { member: "James Wilson", role: "Marketing", load: 92, tasks: 7, atRisk: false },
-  ], []);
+  useEffect(() => {
+    if (!businessId) return;
+    let cancelled = false;
+    void fetchStaff(businessId).then((res) => {
+      if (!cancelled && res.data) {
+        setStaffMembers(res.data);
+      }
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [businessId]);
+
+  const metrics: ProjectMetric[] = useMemo(() => {
+    const activeProjects = projects.filter((p) => {
+      const s = normalizeStatus(p.status);
+      return s !== "COMPLETED" && s !== "ARCHIVED";
+    });
+    const onTrackCount = activeProjects.filter((p) => getProjectRisk(p) === "healthy").length;
+    const atRiskCount = activeProjects.filter((p) => {
+      const r = getProjectRisk(p);
+      return r === "critical" || r === "at-risk" || r === "blocked";
+    }).length;
+    const completedCount = projects.filter((p) => normalizeStatus(p.status) === "COMPLETED").length;
+
+    return [
+      { label: "Active Projects", value: String(activeProjects.length), change: activeProjects.length, icon: Target },
+      { label: "On Track", value: String(onTrackCount), change: onTrackCount, icon: CheckCircle2 },
+      { label: "At Risk", value: String(atRiskCount), change: -atRiskCount, icon: AlertTriangle },
+      { label: "Completed", value: String(completedCount), change: completedCount, icon: TrendingUp },
+    ];
+  }, [projects]);
+
+  const insights: ProjectInsight[] = useMemo(() => {
+    const items: ProjectInsight[] = [];
+
+    for (const p of projects) {
+      const s = normalizeStatus(p.status);
+      if (s === "COMPLETED" || s === "ARCHIVED") continue;
+
+      const tasks = p.tasks ?? [];
+      const overdueTasks = tasks.filter((t) => !t.isCompleted && isOverdue(t.dueDate));
+      if (overdueTasks.length > 0 || isOverdue(p.dueDate)) {
+        items.push({
+          id: `risk-${p.id}`,
+          type: "risk",
+          title: `Deadline Risk: ${p.name}`,
+          description: `${overdueTasks.length} task${overdueTasks.length === 1 ? "" : "s"} overdue${isOverdue(p.dueDate) ? " and project deadline has passed" : ""}. Prioritize completion or adjust schedule.`,
+          project: p.name,
+          impact: overdueTasks.length > 0 ? `${overdueTasks.length} overdue` : "Past due",
+        });
+      }
+
+      if (isDueSoon(p.dueDate, 7)) {
+        const remainingTasks = tasks.filter((t) => !t.isCompleted).length;
+        items.push({
+          id: `milestone-${p.id}`,
+          type: "milestone",
+          title: `Deadline Approaching: ${p.name}`,
+          description: `Project is due within 7 days with ${remainingTasks} deliverable${remainingTasks === 1 ? "" : "s"} still pending.`,
+          project: p.name,
+          impact: "Due soon",
+        });
+      }
+
+      const unassignedTasks = tasks.filter((t) => !t.isCompleted && !t.assigneeStaffId);
+      if (unassignedTasks.length >= 2) {
+        items.push({
+          id: `resource-${p.id}`,
+          type: "resource",
+          title: `Unassigned Tasks: ${p.name}`,
+          description: `${unassignedTasks.length} open tasks have no assigned team member. Assign owners to avoid delivery bottlenecks.`,
+          project: p.name,
+          impact: `${unassignedTasks.length} unassigned`,
+        });
+      }
+    }
+
+    if (items.length === 0) {
+      items.push({
+        id: "healthy-summary",
+        type: "optimization",
+        title: projects.length > 0 ? "All Active Projects On Track" : "Ready for Project Intelligence",
+        description:
+          projects.length > 0
+            ? "No overdue deliverables or blocked milestones detected across your active projects."
+            : "Create a project or generate a strategic plan to unlock real-time delivery risk and workload insights.",
+        impact: "Healthy",
+      });
+    }
+
+    return items.slice(0, 6);
+  }, [projects]);
+
+  const teamLoads: TeamLoad[] = useMemo(() => {
+    const openTasks = projects.flatMap((p) => {
+      const s = normalizeStatus(p.status);
+      if (s === "COMPLETED" || s === "ARCHIVED") return [];
+      return (p.tasks ?? []).filter((t) => !t.isCompleted);
+    });
+
+    if (staffMembers.length > 0) {
+      return staffMembers.map((s) => {
+        const assignedCount = openTasks.filter((t) => t.assigneeStaffId === s.id).length;
+        // Assume 6 concurrent open tasks = 100% nominal capacity
+        const load = Math.round((assignedCount / 6) * 100);
+        return {
+          member: s.name,
+          role: s.role || "Team Member",
+          load,
+          tasks: assignedCount,
+          atRisk: load > 90,
+        };
+      });
+    }
+
+    const unassignedCount = openTasks.filter((t) => !t.assigneeStaffId).length;
+    if (openTasks.length > 0) {
+      return [
+        {
+          member: "Unassigned Queue",
+          role: "Open Deliverables",
+          load: Math.min(100, Math.round((unassignedCount / 6) * 100)),
+          tasks: unassignedCount,
+          atRisk: unassignedCount > 5,
+        },
+      ];
+    }
+
+    return [];
+  }, [projects, staffMembers]);
 
   return (
     <div className="space-y-4">

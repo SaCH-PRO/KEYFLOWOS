@@ -48749,6 +48749,20 @@
       "type": "relative"
     },
     {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.spec.ts",
+      "specifier": "./key-inbox-reply-sender.service",
+      "target": "apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.spec.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
       "resolved": false,
       "source": "apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.ts",
       "specifier": "@nestjs/common",
@@ -48786,8 +48800,22 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.ts",
+      "specifier": "../communications/adapters/resend-email-adapter",
+      "target": "apps/server/src/modules/communications/adapters/resend-email-adapter.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.ts",
       "specifier": "./key-inbox.constants",
       "target": "apps/server/src/modules/key-inbox/key-inbox.constants.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.ts",
+      "specifier": "../notifications/system-email.service",
+      "target": "apps/server/src/modules/notifications/system-email.service.ts",
       "type": "relative"
     },
     {
@@ -90359,6 +90387,20 @@
     {
       "resolved": false,
       "source": "apps/web/src/app/app/projects/components/project-intelligence-panel.tsx",
+      "specifier": "@/lib/client",
+      "target": "@/lib/client",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/web/src/app/app/projects/components/project-intelligence-panel.tsx",
+      "specifier": "./project-constants",
+      "target": "apps/web/src/app/app/projects/components/project-constants.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/app/app/projects/components/project-intelligence-panel.tsx",
       "specifier": "framer-motion",
       "target": "framer-motion",
       "type": "external"
@@ -102518,6 +102560,13 @@
     {
       "resolved": true,
       "source": "apps/web/src/components/key/chat/key-full-chat-shell-v2.tsx",
+      "specifier": "./key-live-voice",
+      "target": "apps/web/src/components/key/chat/key-live-voice.tsx",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/web/src/components/key/chat/key-full-chat-shell-v2.tsx",
       "specifier": "./open-genome-conversation",
       "target": "apps/web/src/components/key/chat/open-genome-conversation.ts",
       "type": "relative"
@@ -110917,8 +110966,8 @@
     }
   ],
   "meta": {
-    "edges": 15845,
-    "nodes": 3875,
+    "edges": 15852,
+    "nodes": 3876,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"
   },
@@ -119175,6 +119224,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/src/modules/key-inbox/key-inbox-intelligence.types.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/src/modules/key-inbox/key-inbox-reply-sender.service.spec.ts",
       "type": "file"
     },
     {

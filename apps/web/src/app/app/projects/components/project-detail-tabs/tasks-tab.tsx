@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   CheckCircle2,
   Circle,
@@ -13,29 +13,42 @@ import {
   Timer,
   LayoutGrid,
   List,
+  UserCheck,
 } from "lucide-react";
-import { ProjectTask } from "@/lib/client";
+import { ProjectTask, StaffMember, fetchStaff } from "@/lib/client";
 import { isOverdue, formatDate } from "../project-constants";
 import { TaskKanban } from "../task-kanban";
 
 interface TasksTabProps {
   tasks: ProjectTask[];
   projectId: string;
-  onAddTask: (projectId: string, title: string, dueDate?: string) => void;
+  businessId?: string | null;
+  onAddTask: (projectId: string, title: string, dueDate?: string, assigneeId?: string) => void;
   onToggleTask: (projectId: string, task: ProjectTask) => void;
   onDeleteTask: (projectId: string, taskId: string) => void;
-  onUpdateTask: (projectId: string, taskId: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number }) => void;
+  onUpdateTask: (projectId: string, taskId: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number; assigneeId?: string | null }) => void;
   onUpdateTaskStatus?: (projectId: string, taskId: string, status: string, position?: number) => void;
 }
 
 export function TasksTab({
-  tasks, projectId, onAddTask, onToggleTask, onDeleteTask, onUpdateTask, onUpdateTaskStatus,
+  tasks, projectId, businessId, onAddTask, onToggleTask, onDeleteTask, onUpdateTask, onUpdateTaskStatus,
 }: TasksTabProps) {
   const [newTitle, setNewTitle] = useState("");
   const [newDueDate, setNewDueDate] = useState("");
+  const [newAssigneeId, setNewAssigneeId] = useState("");
+  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [showCompleted, setShowCompleted] = useState(true);
   const [filter, setFilter] = useState<"all" | "overdue" | "upcoming">("all");
   const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
+
+  useEffect(() => {
+    if (!businessId) return;
+    fetchStaff(businessId)
+      .then((res) => {
+        if (res.data) setStaff(res.data);
+      })
+      .catch(() => {});
+  }, [businessId]);
 
   const completed = tasks.filter((t) => t.isCompleted);
   const incomplete = tasks.filter((t) => !t.isCompleted);
@@ -49,9 +62,10 @@ export function TasksTab({
 
   const handleAdd = () => {
     if (!newTitle.trim()) return;
-    onAddTask(projectId, newTitle.trim(), newDueDate || undefined);
+    onAddTask(projectId, newTitle.trim(), newDueDate || undefined, newAssigneeId || undefined);
     setNewTitle("");
     setNewDueDate("");
+    setNewAssigneeId("");
   };
 
   const kanbanTasks = tasks.map((t, idx) => ({
@@ -111,14 +125,29 @@ export function TasksTab({
         </div>
       </div>
 
-      <div className="rounded-xl border border-primary/30 bg-card p-3 flex gap-2">
+      <div className="rounded-xl border border-primary/30 bg-card p-3 flex flex-wrap gap-2 items-center">
         <input
           placeholder="Add a new task..."
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-          className="flex-1 bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/50"
+          className="flex-1 min-w-[160px] bg-transparent text-sm focus:outline-none placeholder:text-muted-foreground/50"
         />
+        {staff.length > 0 && (
+          <select
+            value={newAssigneeId}
+            onChange={(e) => setNewAssigneeId(e.target.value)}
+            aria-label="Assign task"
+            className="bg-transparent text-xs text-muted-foreground border border-border/40 rounded-md px-2 py-1 focus:outline-none"
+          >
+            <option value="">Unassigned</option>
+            {staff.map((member) => (
+              <option key={member.id} value={member.id}>
+                {member.name}
+              </option>
+            ))}
+          </select>
+        )}
         <input
           type="date"
           value={newDueDate}
@@ -162,6 +191,7 @@ export function TasksTab({
                 key={task.id}
                 task={task}
                 projectId={projectId}
+                staff={staff}
                 onToggle={onToggleTask}
                 onDelete={onDeleteTask}
                 onUpdate={onUpdateTask}
@@ -185,6 +215,7 @@ export function TasksTab({
                       key={task.id}
                       task={task}
                       projectId={projectId}
+                      staff={staff}
                       onToggle={onToggleTask}
                       onDelete={onDeleteTask}
                       onUpdate={onUpdateTask}
@@ -200,12 +231,13 @@ export function TasksTab({
   );
 }
 
-function TaskRow({ task, projectId, onToggle, onDelete, onUpdate }: {
+function TaskRow({ task, projectId, staff, onToggle, onDelete, onUpdate }: {
   task: ProjectTask;
   projectId: string;
+  staff: StaffMember[];
   onToggle: (pid: string, task: ProjectTask) => void;
   onDelete: (pid: string, tid: string) => void;
-  onUpdate: (pid: string, tid: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number }) => void;
+  onUpdate: (pid: string, tid: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number; assigneeId?: string | null }) => void;
 }) {
   const overdue = !task.isCompleted && isOverdue(task.dueDate);
 
@@ -224,6 +256,27 @@ function TaskRow({ task, projectId, onToggle, onDelete, onUpdate }: {
       <span className={`text-sm flex-1 min-w-0 truncate ${task.isCompleted ? "line-through text-muted-foreground" : ""}`}>
         {task.title}
       </span>
+
+      {/* Assignee picker */}
+      <div className="flex items-center gap-1 shrink-0 opacity-75 group-hover:opacity-100 transition-opacity">
+        <UserCheck className="w-3 h-3 text-muted-foreground" />
+        <select
+          value={task.assigneeId ?? ""}
+          onChange={(e) => {
+            onUpdate(projectId, task.id, { assigneeId: e.target.value || null });
+          }}
+          aria-label={`Assign ${task.title}`}
+          className="bg-transparent text-[10px] text-muted-foreground focus:outline-none max-w-[110px] truncate cursor-pointer"
+          title="Assigned team member"
+        >
+          <option value="">Unassigned</option>
+          {staff.map((member) => (
+            <option key={member.id} value={member.id}>
+              {member.name}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* Time tracking inputs */}
       <div className="flex items-center gap-1.5 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity">

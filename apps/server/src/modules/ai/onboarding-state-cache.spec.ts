@@ -92,4 +92,35 @@ describe('the onboarding state cache is bounded', () => {
     const cache = (svc as unknown as { stateCache: Map<string, unknown> }).stateCache;
     expect(cache.has('biz_0'), 'a recently used entry must not be evicted first').toBe(true);
   });
+
+  it('tracks all 10 Business Genome sections including legal, registration, tax, and ownership', async () => {
+    const getBlueprint = vi.fn(async () => ({
+      identity: { legalName: 'KeyFlow Ltd' },
+      offering: { coreServices: ['Consulting'] },
+      customer: { idealClient: 'SMBs' },
+      operations: { deliveryModel: 'Remote' },
+      growth: { primaryChannel: 'Referral' },
+      finance: { baseCurrency: 'TTD' },
+      legalProfile: { entityType: 'LLC' },
+      registrationProfile: {},
+      taxProfile: {},
+      ownershipProfile: {},
+    }) as never);
+    const svc = new BlueprintOnboardingService({ getBlueprint } as never, {} as never, {} as never);
+    const state = await svc.getState('biz_full');
+    expect(state.completedSections).toContain('legalProfile');
+    expect(state.currentSection).toBe('registrationProfile');
+  });
+
+  it('returns cached transcript via getHistory and syncs incoming history in getState', async () => {
+    const { svc } = makeService();
+    const history = [
+      { role: 'assistant' as const, content: 'Welcome!' },
+      { role: 'user' as const, content: 'We are a design studio in Port of Spain.' },
+    ];
+    await svc.getState('biz_hist', history);
+    const saved = await svc.getHistory('biz_hist');
+    expect(saved.messages).toHaveLength(2);
+    expect(saved.messages[1].content).toContain('Port of Spain');
+  });
 });

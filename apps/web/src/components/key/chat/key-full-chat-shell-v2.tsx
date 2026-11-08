@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui-v2/badge";
 import { KeyActionGrid } from "./key-action-grid";
 import { KeyGenomePreview } from "./key-genome-preview";
 import { KeyGenomeChip } from "./key-genome-chip";
+import { KeyLiveVoice } from "./key-live-voice";
 import { openGenomeConversation, GENOME_SESSION_ID } from "./open-genome-conversation";
 import { fetchAiApprovals, type AiApprovalItem } from "@/lib/api/ai-approvals";
 import { getStoredBusinessId } from "@/lib/workspace";
@@ -199,6 +200,7 @@ export function KeyFullChatShellV2() {
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
+              <KeyLiveVoice />
               <KeyGenomeChip surface="page" />
               <Badge color={inGenomeThread ? "violet" : "muted"} className="hidden sm:inline-flex">
                 {inGenomeThread ? "Genome" : mode === "general" ? "General" : mode}

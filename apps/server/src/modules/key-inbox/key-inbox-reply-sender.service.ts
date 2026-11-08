@@ -149,59 +149,123 @@ export class KeyInboxReplySenderService {
       return result;
     }
 
-    const gmailService = await this.getGmailService();
-    if (!gmailService) {
-      const result: SendReplyResult = {
-        success: false,
-        status: KEY_INBOX_SEND_STATUSES.FAILED,
-        error: 'Gmail service is not available',
-        sentVia: 'gmail',
-      };
-      await this.persistSendResult(message.id, result, userId);
-      this.emitReplyEvent(businessId, thread.id, message.id, 'key_inbox.reply_failed', userId, result);
-      return result;
-    }
-
     const subject = thread.subject ?? 'Re:';
     const htmlBody = message.contentHtml ?? `<div>${this.escapeHtml(message.contentText ?? '')}</div>`;
 
-    try {
-      let providerResult: { messageId?: string; threadId?: string } | undefined;
+    const gmailService = await this.getGmailService();
+    if (gmailService) {
+      try {
+        let providerResult: { messageId?: string; threadId?: string } | undefined;
 
-      if (thread.externalThreadId && referenceMessage?.externalMessageId) {
-        providerResult = await gmailService.sendReply({
-          businessId,
-          threadId: thread.externalThreadId,
-          inReplyTo: referenceMessage.externalMessageId,
-          to,
-          subject,
-          htmlBody,
-        });
-      } else {
-        providerResult = await gmailService.sendEmail({
-          businessId,
-          to,
-          subject,
-          htmlBody,
-        });
+        if (thread.externalThreadId && referenceMessage?.externalMessageId) {
+          providerResult = await gmailService.sendReply({
+            businessId,
+            threadId: thread.externalThreadId,
+            inReplyTo: referenceMessage.externalMessageId,
+            to,
+            subject,
+            htmlBody,
+          });
+        } else {
+          providerResult = await gmailService.sendEmail({
+            businessId,
+            to,
+            subject,
+            htmlBody,
+          });
+        }
+
+        const result: SendReplyResult = {
+          success: true,
+          status: KEY_INBOX_SEND_STATUSES.SENT,
+          providerMessageId: providerResult?.messageId,
+          sentVia: 'gmail',
+        };
+        await this.persistSendResult(message.id, result, userId);
+        this.emitReplyEvent(businessId, thread.id, message.id, 'key_inbox.reply_sent', userId, result);
+        return result;
+      } catch (err: any) {
+        const error = err instanceof Error ? err.message : String(err);
+        if (!/gmail not connected/i.test(error)) {
+          this.logger.error(`Gmail reply failed for message ${message.id}: ${error}`);
+          const result: SendReplyResult = { success: false, status: 'FAILED', error, sentVia: 'gmail' };
+          await this.persistSendResult(message.id, result, userId);
+          this.emitReplyEvent(businessId, thread.id, message.id, 'key_inbox.reply_failed', userId, result);
+          return result;
+        }
       }
+    }
 
-      const result: SendReplyResult = {
+    // Platform ESP (Resend) fallback when Gmail OAuth is not connected for this business.
+    const espFallbackResult = await this.trySendViaPlatformEsp(businessId, to, subject, htmlBody, message.contentText ?? undefined);
+    if (espFallbackResult) {
+      await this.persistSendResult(message.id, espFallbackResult, userId);
+      this.emitReplyEvent(
+        businessId,
+        thread.id,
+        message.id,
+        espFallbackResult.success ? 'key_inbox.reply_sent' : 'key_inbox.reply_failed',
+        userId,
+        espFallbackResult,
+      );
+      return espFallbackResult;
+    }
+
+    const result: SendReplyResult = {
+      success: false,
+      status: KEY_INBOX_SEND_STATUSES.FAILED,
+      error: gmailService ? 'Gmail not connected' : 'Gmail service is not available',
+      sentVia: 'gmail',
+    };
+    await this.persistSendResult(message.id, result, userId);
+    this.emitReplyEvent(businessId, thread.id, message.id, 'key_inbox.reply_failed', userId, result);
+    return result;
+  }
+
+  private async trySendViaPlatformEsp(
+    businessId: string,
+    to: string,
+    subject: string,
+    html: string,
+    text?: string,
+  ): Promise<SendReplyResult | null> {
+    try {
+      const [{ ResendEmailAdapter }, { SystemEmailService }] = await Promise.all([
+        import('../communications/adapters/resend-email-adapter'),
+        import('../notifications/system-email.service'),
+      ]);
+      if (!ResendEmailAdapter.isEnabled()) return null;
+      const systemEmail = new SystemEmailService();
+      if (!systemEmail.isConfigured()) return null;
+
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { email: true },
+      });
+
+      const sent = await systemEmail.sendTransactional({
+        to,
+        subject: subject.startsWith('Re:') ? subject : `Re: ${subject}`,
+        html,
+        text,
+        replyTo: business?.email ?? undefined,
+      });
+
+      return {
         success: true,
         status: KEY_INBOX_SEND_STATUSES.SENT,
-        providerMessageId: providerResult?.messageId,
-        sentVia: 'gmail',
+        providerMessageId: sent.id,
+        sentVia: 'resend',
       };
-      await this.persistSendResult(message.id, result, userId);
-      this.emitReplyEvent(businessId, thread.id, message.id, 'key_inbox.reply_sent', userId, result);
-      return result;
     } catch (err: any) {
       const error = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Gmail reply failed for message ${message.id}: ${error}`);
-      const result: SendReplyResult = { success: false, status: 'FAILED', error, sentVia: 'gmail' };
-      await this.persistSendResult(message.id, result, userId);
-      this.emitReplyEvent(businessId, thread.id, message.id, 'key_inbox.reply_failed', userId, result);
-      return result;
+      this.logger.warn(`Platform ESP fallback failed for business ${businessId}: ${error}`);
+      return {
+        success: false,
+        status: KEY_INBOX_SEND_STATUSES.FAILED,
+        error,
+        sentVia: 'resend',
+      };
     }
   }
 

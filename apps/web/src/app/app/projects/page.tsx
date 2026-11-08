@@ -300,7 +300,7 @@ export default function ProjectsPage() {
 
           {activeTab === "intelligence" && (
             <motion.div key="intelligence" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
-              <ProjectIntelligencePanel />
+              <ProjectIntelligencePanel projects={projects} businessId={businessId} />
             </motion.div>
           )}
 

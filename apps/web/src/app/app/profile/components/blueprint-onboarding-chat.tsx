@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Send, RotateCcw, Loader2, CheckCircle2, Bot, User, ArrowRight } from "lucide-react";
-import { apiPostSimple as apiPost } from "@/lib/api";
+import { apiGet, apiPostSimple as apiPost } from "@/lib/api";
 import { getStoredBusinessId } from "@/lib/workspace";
 import { useTts, SpeakButton } from "@/components/tts";
 import { toast } from "sonner";
@@ -16,6 +16,7 @@ export interface OnboardingMessage {
 
 export interface OnboardingChatResult {
   reply: string;
+  messages?: OnboardingMessage[];
   blueprint: BlueprintData;
   completeness: number;
   threePillarMinimumMet: boolean;
@@ -27,6 +28,44 @@ export interface OnboardingChatResult {
     confidence: number;
   }>;
   nextSection: BlueprintSectionKey | null;
+}
+
+interface OnboardingHistoryResponse {
+  messages: OnboardingMessage[];
+  blueprint: BlueprintData;
+  completeness: number;
+  threePillarMinimumMet: boolean;
+  confidenceScores: Record<string, number>;
+  nextSection: BlueprintSectionKey | null;
+}
+
+function getLocalHistoryKey(businessId: string): string {
+  return `kf_blueprint_onboarding_history_${businessId}`;
+}
+
+function readLocalHistory(businessId: string): OnboardingMessage[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(getLocalHistoryKey(businessId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalHistory(businessId: string, messages: OnboardingMessage[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (messages.length === 0) {
+      window.localStorage.removeItem(getLocalHistoryKey(businessId));
+    } else {
+      window.localStorage.setItem(getLocalHistoryKey(businessId), JSON.stringify(messages));
+    }
+  } catch {
+    // ignore storage quota errors
+  }
 }
 
 interface BlueprintOnboardingChatProps {
@@ -91,6 +130,12 @@ export function BlueprintOnboardingChat({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  useEffect(() => {
+    if (businessId && messages.length > 0) {
+      writeLocalHistory(businessId, messages);
+    }
+  }, [businessId, messages]);
+
   // Auto-speak the latest assistant message
   useEffect(() => {
     const last = messages[messages.length - 1];
@@ -106,27 +151,64 @@ export function BlueprintOnboardingChat({
 
   useEffect(() => {
     if (!businessId) return;
-    // Seed the conversation with a welcome message from KEY.
-    apiPost<OnboardingChatResult>(`/blueprint/businesses/${businessId}/onboarding-chat`, {
-      message: "Hi KEY, I'm ready to build my Business Genome.",
-      history: [],
-    })
-      .then(({ data, error }) => {
-        if (error || !data) {
-          toast.error(error || "Failed to start onboarding.");
-          return;
+    let cancelled = false;
+
+    const init = async () => {
+      const localMessages = readLocalHistory(businessId);
+      const historyRes = await apiGet<OnboardingHistoryResponse>(
+        `/blueprint/businesses/${businessId}/onboarding-history`,
+      );
+      if (cancelled) return;
+
+      const serverMessages = historyRes.data?.messages ?? [];
+      const restoredMessages =
+        serverMessages.length >= localMessages.length ? serverMessages : localMessages;
+
+      if (restoredMessages.length > 0) {
+        setMessages(restoredMessages);
+        if (historyRes.data) {
+          setBlueprint(historyRes.data.blueprint);
+          setCompleteness(historyRes.data.completeness);
+          setCurrentSection(historyRes.data.nextSection);
         }
-        setMessages([
-          {
-            role: "assistant",
-            content: data.reply,
-          },
-        ]);
-        setBlueprint(data.blueprint);
-        setCompleteness(data.completeness);
-        setCurrentSection(data.nextSection);
-      })
-      .finally(() => setLoading(false));
+        setLoading(false);
+        return;
+      }
+
+      // Seed the conversation with a welcome message from KEY when no prior transcript exists.
+      const { data, error } = await apiPost<OnboardingChatResult>(
+        `/blueprint/businesses/${businessId}/onboarding-chat`,
+        {
+          message: "Hi KEY, I'm ready to build my Business Genome.",
+          history: [],
+        },
+      );
+      if (cancelled) return;
+      if (error || !data) {
+        toast.error(error || "Failed to start onboarding.");
+        setLoading(false);
+        return;
+      }
+      setMessages(
+        data.messages && data.messages.length > 0
+          ? data.messages
+          : [
+              {
+                role: "assistant",
+                content: data.reply,
+              },
+            ],
+      );
+      setBlueprint(data.blueprint);
+      setCompleteness(data.completeness);
+      setCurrentSection(data.nextSection);
+      setLoading(false);
+    };
+
+    void init();
+    return () => {
+      cancelled = true;
+    };
   }, [businessId]);
 
   const handleSend = useCallback(async () => {
@@ -148,7 +230,11 @@ export function BlueprintOnboardingChat({
       return;
     }
 
-    setMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+    setMessages((prev) =>
+      data.messages && data.messages.length > 0
+        ? data.messages
+        : [...prev, { role: "assistant", content: data.reply }],
+    );
     setBlueprint(data.blueprint);
     setCompleteness(data.completeness);
     setCurrentSection(data.nextSection);
@@ -161,6 +247,7 @@ export function BlueprintOnboardingChat({
   const handleReset = useCallback(async () => {
     if (!businessId) return;
     setLoading(true);
+    writeLocalHistory(businessId, []);
     await apiPost(`/blueprint/businesses/${businessId}/onboarding-reset`, {});
     setMessages([]);
     setCompleteness(0);
@@ -175,7 +262,11 @@ export function BlueprintOnboardingChat({
       toast.error(error || "Failed to restart onboarding.");
       return;
     }
-    setMessages([{ role: "assistant", content: data.reply }]);
+    setMessages(
+      data.messages && data.messages.length > 0
+        ? data.messages
+        : [{ role: "assistant", content: data.reply }],
+    );
     setBlueprint(data.blueprint);
     setCompleteness(data.completeness);
     setCurrentSection(data.nextSection);

@@ -179,10 +179,10 @@ export function ProjectDetail({
     setMenuOpen(false);
   };
 
-  const handleAddTask = useCallback(async (projectId: string, title: string, dueDate?: string) => {
+  const handleAddTask = useCallback(async (projectId: string, title: string, dueDate?: string, assigneeId?: string) => {
     if (!businessId || !title) return;
     try {
-      const res = await createProjectTask(businessId, projectId, { title, dueDate });
+      const res = await createProjectTask(businessId, projectId, { title, dueDate, assigneeId });
       if (res.data) {
         onProjectUpdate({ ...project, tasks: [...(project.tasks || []), res.data] });
       }
@@ -212,7 +212,7 @@ export function ProjectDetail({
     } catch { toast.error("Failed to delete task"); }
   }, [businessId, project, onProjectUpdate]);
 
-  const handleUpdateTask = useCallback(async (projectId: string, taskId: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number }) => {
+  const handleUpdateTask = useCallback(async (projectId: string, taskId: string, data: { dueDate?: string | null; estimatedHours?: number | null; trackedHours?: number; assigneeId?: string | null }) => {
     if (!businessId) return;
     try {
       const res = await updateProjectTask(businessId, taskId, data);
@@ -221,6 +221,7 @@ export function ProjectDetail({
         if (data.dueDate !== undefined) mapped.dueDate = data.dueDate ?? undefined;
         if (data.estimatedHours !== undefined) mapped.estimatedHours = data.estimatedHours;
         if (data.trackedHours !== undefined) mapped.trackedHours = data.trackedHours;
+        if (data.assigneeId !== undefined) mapped.assigneeId = data.assigneeId;
         onProjectUpdate({
           ...project,
           tasks: project.tasks.map((t) => (t.id === taskId ? { ...t, ...mapped } : t)),
@@ -472,6 +473,7 @@ export function ProjectDetail({
           <TasksTab
             tasks={project.tasks ?? []}
             projectId={project.id}
+            businessId={businessId}
             onAddTask={handleAddTask}
             onToggleTask={handleToggleTask}
             onDeleteTask={handleDeleteTask}
