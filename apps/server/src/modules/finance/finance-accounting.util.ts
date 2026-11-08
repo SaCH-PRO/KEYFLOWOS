@@ -133,6 +133,7 @@ export interface CashAccountSnapshotRow {
 }
 
 export interface CashLedgerMovementRow {
+  id?: string;
   accountId: string;
   financialAccountId?: string | null;
   debit?: unknown;
@@ -142,45 +143,80 @@ export interface CashLedgerMovementRow {
 }
 
 export interface PersistedEntryFinancialAccountTarget {
+  ledgerEntryId?: string;
   entryIndex: number;
   accountId: string;
   financialAccountId: string;
+  appliedDelta?: string;
 }
 
-export function extractFinancialAccountIdFromMetadata(
+export function extractFinancialAccountTargetFromMetadata(
   metadata: unknown,
   coaAccountId: string,
   entryIndex?: number,
-): string | null {
+  ledgerEntryId?: string | null,
+): PersistedEntryFinancialAccountTarget | null {
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
     return null;
   }
   const record = metadata as Record<string, unknown>;
   const targets = record.entryFinancialAccounts;
   if (Array.isArray(targets)) {
-    if (typeof entryIndex === 'number') {
-      const byIdx = targets.find(
-        (t): t is PersistedEntryFinancialAccountTarget =>
-          Boolean(t && typeof t === 'object' && (t as { entryIndex?: unknown }).entryIndex === entryIndex),
-      );
-      if (byIdx && typeof byIdx.financialAccountId === 'string') {
-        return byIdx.financialAccountId;
-      }
-    }
-    const byCoa = targets.find(
+    const validTargets = targets.filter(
       (t): t is PersistedEntryFinancialAccountTarget =>
-        Boolean(t && typeof t === 'object' && (t as { accountId?: unknown }).accountId === coaAccountId),
+        Boolean(
+          t &&
+            typeof t === 'object' &&
+            typeof (t as { financialAccountId?: unknown }).financialAccountId === 'string' &&
+            typeof (t as { accountId?: unknown }).accountId === 'string',
+        ),
     );
-    if (byCoa && typeof byCoa.financialAccountId === 'string') {
-      return byCoa.financialAccountId;
+    if (typeof ledgerEntryId === 'string' && ledgerEntryId.length > 0) {
+      const byLedgerId = validTargets.find((t) => t.ledgerEntryId === ledgerEntryId);
+      if (byLedgerId) return byLedgerId;
+    }
+    if (typeof entryIndex === 'number') {
+      const byIdxAndCoa = validTargets.find(
+        (t) => t.entryIndex === entryIndex && t.accountId === coaAccountId,
+      );
+      if (byIdxAndCoa) return byIdxAndCoa;
+    }
+    const byCoa = validTargets.filter((t) => t.accountId === coaAccountId);
+    if (byCoa.length === 1) {
+      return byCoa[0];
+    }
+    if (byCoa.length > 1) {
+      const distinctFaIds = new Set(byCoa.map((t) => t.financialAccountId));
+      if (distinctFaIds.size === 1) {
+        return byCoa[0];
+      }
+      return null;
     }
   }
   const mapByCoa = record.entryFinancialAccountByCoa;
   if (mapByCoa && typeof mapByCoa === 'object' && !Array.isArray(mapByCoa)) {
     const val = (mapByCoa as Record<string, unknown>)[coaAccountId];
-    if (typeof val === 'string' && val) return val;
+    if (typeof val === 'string' && val) {
+      return {
+        entryIndex: typeof entryIndex === 'number' ? entryIndex : 0,
+        accountId: coaAccountId,
+        financialAccountId: val,
+      };
+    }
   }
   return null;
+}
+
+export function extractFinancialAccountIdFromMetadata(
+  metadata: unknown,
+  coaAccountId: string,
+  entryIndex?: number,
+  ledgerEntryId?: string | null,
+): string | null {
+  return (
+    extractFinancialAccountTargetFromMetadata(metadata, coaAccountId, entryIndex, ledgerEntryId)
+      ?.financialAccountId ?? null
+  );
 }
 
 /**
@@ -196,6 +232,7 @@ export async function loadCashLedgerMovements(
     | {
         findMany?: (args: Record<string, unknown>) => Promise<
           Array<{
+            id?: string;
             accountId: string;
             financialAccountId?: string | null;
             debit: unknown;
@@ -216,6 +253,7 @@ export async function loadCashLedgerMovements(
         accountId: { in: linkedCoaIds },
       },
       select: {
+        id: true,
         accountId: true,
         debit: true,
         credit: true,
@@ -227,10 +265,11 @@ export async function loadCashLedgerMovements(
   );
 
   return rows.map((e) => ({
+    id: e.id,
     accountId: e.accountId,
     financialAccountId:
       e.financialAccountId ??
-      extractFinancialAccountIdFromMetadata(e.transaction?.metadata, e.accountId),
+      extractFinancialAccountIdFromMetadata(e.transaction?.metadata, e.accountId, undefined, e.id),
     debit: e.debit,
     credit: e.credit,
     currency: e.currency,

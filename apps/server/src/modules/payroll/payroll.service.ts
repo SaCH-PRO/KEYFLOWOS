@@ -438,20 +438,22 @@ export class PayrollService {
       } else if (rawMethod) {
         const faDelegate = tx.financialAccount ?? this.prisma.client.financialAccount;
         if (faDelegate?.findFirst) {
+          const namedProcessors = new Set(['wipay', 'paypal', 'stripe']);
           const expectedType =
             rawMethod === 'cash'
               ? 'CASH'
-              : ['wipay', 'paypal', 'stripe', 'processor'].includes(rawMethod)
+              : namedProcessors.has(rawMethod) || rawMethod === 'processor'
                 ? 'PAYMENT_PROCESSOR'
                 : 'BANK';
+          const expectedSubtype = namedProcessors.has(rawMethod) ? rawMethod : undefined;
           const runCurrency = normalizeCurrencyCode(currentRun.currency, 'TTD');
           const matchedAccount = await faDelegate.findFirst({
             where: {
               businessId,
               type: expectedType,
+              ...(expectedSubtype ? { subtype: expectedSubtype } : {}),
               isActive: true,
               currency: runCurrency,
-              chartOfAccountId: { not: null },
             },
             orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
             select: {
@@ -468,10 +470,13 @@ export class PayrollService {
             !matchedAccount ||
             !matchedAccount.isActive ||
             matchedAccount.type !== expectedType ||
+            (expectedSubtype &&
+              matchedAccount.subtype !== undefined &&
+              (matchedAccount.subtype ?? '').toLowerCase().trim() !== expectedSubtype) ||
             normalizeCurrencyCode(matchedAccount.currency, runCurrency) !== runCurrency
           ) {
             throw new BadRequestException(
-              `No active ${runCurrency} ${expectedType} financial account found for paymentMethod "${rawMethod}"; specify paymentAccountId or configure an active account first`,
+              `No active ${runCurrency} ${expectedType}${expectedSubtype ? ` (${expectedSubtype})` : ''} financial account found for paymentMethod "${rawMethod}"; specify paymentAccountId or configure an active account first`,
             );
           }
           resolvedAccountId = matchedAccount.id;

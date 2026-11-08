@@ -1,10 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { skipTenantIsolation } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 
 import {
-  extractFinancialAccountIdFromMetadata,
+  extractFinancialAccountTargetFromMetadata,
   loadLatestExchangeRates,
   normalizeCurrencyCode,
   type PersistedEntryFinancialAccountTarget,
@@ -25,6 +26,7 @@ const ASSET_ACCOUNT_TYPES = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
 const LIABILITY_EQUITY_ACCOUNT_TYPES = new Set(['CREDIT_CARD', 'LOAN', 'EQUITY', 'TAX']);
 
 interface ResolvedAccountDelta {
+  ledgerEntryId?: string;
   entryIndex: number;
   accountId: string;
   financialAccountId: string;
@@ -36,6 +38,7 @@ interface TxFinancialAccountDelegate {
     id: string;
     type: string;
     currency?: string | null;
+    isActive?: boolean;
     currentBalance?: unknown;
   } | null>;
   update?: (args: Record<string, unknown>) => Promise<unknown>;
@@ -45,13 +48,16 @@ async function resolveFinancialAccountTargets(
   tx: Prisma.TransactionClient,
   businessId: string,
   entries: Array<{
+    ledgerEntryId?: string;
     accountId: string;
     financialAccountId?: string | null;
+    overrideDelta?: Prisma.Decimal | null;
     debit?: Prisma.Decimal | number | string;
     credit?: Prisma.Decimal | number | string;
   }>,
   postingCurrency: string,
   isOpeningBalance: boolean,
+  allowArchivedExplicitTarget = false,
 ): Promise<{
   deltas: ResolvedAccountDelta[];
   metadataTargets: PersistedEntryFinancialAccountTarget[];
@@ -85,14 +91,22 @@ async function resolveFinancialAccountTargets(
       id: string;
       type: string;
       currency?: string | null;
+      isActive?: boolean;
       currentBalance?: unknown;
     } | null;
 
     if (e.financialAccountId) {
       targetAccount = await faDelegate.findFirst({
-        where: { id: e.financialAccountId, businessId, isActive: true },
-        select: { id: true, type: true, currency: true, currentBalance: true },
+        where: allowArchivedExplicitTarget
+          ? { id: e.financialAccountId, businessId }
+          : { id: e.financialAccountId, businessId, isActive: true },
+        select: { id: true, type: true, currency: true, isActive: true, currentBalance: true },
       });
+      if (!targetAccount || (!allowArchivedExplicitTarget && targetAccount.isActive === false)) {
+        throw new BadRequestException(
+          `Financial account ${e.financialAccountId} not found or inactive for business ${businessId}`,
+        );
+      }
     } else {
       targetAccount = await faDelegate.findFirst({
         where: {
@@ -102,47 +116,55 @@ async function resolveFinancialAccountTargets(
           currency: normalizedPostingCurrency,
         },
         orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-        select: { id: true, type: true, currency: true, currentBalance: true },
+        select: { id: true, type: true, currency: true, isActive: true, currentBalance: true },
       });
       if (!targetAccount) {
         targetAccount = await faDelegate.findFirst({
           where: { businessId, chartOfAccountId: e.accountId, isActive: true },
           orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-          select: { id: true, type: true, currency: true, currentBalance: true },
+          select: { id: true, type: true, currency: true, isActive: true, currentBalance: true },
         });
       }
+      if (!targetAccount) continue;
     }
-    if (!targetAccount) continue;
 
-    let delta = LIABILITY_EQUITY_ACCOUNT_TYPES.has(targetAccount.type)
-      ? cr.sub(dr)
-      : ASSET_ACCOUNT_TYPES.has(targetAccount.type)
-        ? netAssetDelta
-        : netAssetDelta;
+    let delta: Prisma.Decimal;
+    if (e.overrideDelta != null) {
+      delta = e.overrideDelta;
+    } else {
+      delta = LIABILITY_EQUITY_ACCOUNT_TYPES.has(targetAccount.type)
+        ? cr.sub(dr)
+        : ASSET_ACCOUNT_TYPES.has(targetAccount.type)
+          ? netAssetDelta
+          : netAssetDelta;
 
-    const acctCurrency = normalizeCurrencyCode(targetAccount.currency, normalizedPostingCurrency);
-    if (acctCurrency !== normalizedPostingCurrency) {
-      const rates = await loadLatestExchangeRates(rawTx.exchangeRate, businessId);
-      const mult = resolveConversionRate(normalizedPostingCurrency, acctCurrency, rates);
-      if (mult == null) {
-        throw new BadRequestException(
-          `Currency mismatch between posting (${normalizedPostingCurrency}) and financial account ${targetAccount.id} (${acctCurrency}) with no configured exchange rate`,
-        );
+      const acctCurrency = normalizeCurrencyCode(targetAccount.currency, normalizedPostingCurrency);
+      if (acctCurrency !== normalizedPostingCurrency) {
+        const rates = await loadLatestExchangeRates(rawTx.exchangeRate, businessId);
+        const mult = resolveConversionRate(normalizedPostingCurrency, acctCurrency, rates);
+        if (mult == null) {
+          throw new BadRequestException(
+            `Currency mismatch between posting (${normalizedPostingCurrency}) and financial account ${targetAccount.id} (${acctCurrency}) with no configured exchange rate`,
+          );
+        }
+        const converted = Math.round(Number(delta.toString()) * mult * 10000) / 10000;
+        delta = new D(String(converted));
       }
-      const converted = Math.round(Number(delta.toString()) * mult * 10000) / 10000;
-      delta = new D(String(converted));
     }
 
     deltas.push({
+      ledgerEntryId: e.ledgerEntryId,
       entryIndex: idx,
       accountId: e.accountId,
       financialAccountId: targetAccount.id,
       delta,
     });
     metadataTargets.push({
+      ...(e.ledgerEntryId ? { ledgerEntryId: e.ledgerEntryId } : {}),
       entryIndex: idx,
       accountId: e.accountId,
       financialAccountId: targetAccount.id,
+      appliedDelta: delta.toString(),
     });
   }
 
@@ -173,9 +195,17 @@ function mergeMetadataWithFinancialAccountTargets(
     baseMetadata && typeof baseMetadata === 'object' && !Array.isArray(baseMetadata)
       ? (baseMetadata as Record<string, unknown>)
       : {};
-  const byCoa: Record<string, string> = {};
+  const byCoaSet = new Map<string, Set<string>>();
   for (const t of metadataTargets) {
-    byCoa[t.accountId] = t.financialAccountId;
+    const s = byCoaSet.get(t.accountId) ?? new Set<string>();
+    s.add(t.financialAccountId);
+    byCoaSet.set(t.accountId, s);
+  }
+  const byCoa: Record<string, string> = {};
+  for (const [coaId, faSet] of byCoaSet.entries()) {
+    if (faSet.size === 1) {
+      byCoa[coaId] = Array.from(faSet)[0];
+    }
   }
   return {
     ...existingObj,
@@ -348,12 +378,17 @@ export class PostingService {
       }
 
       const postingCurrency = input.currency ?? 'TTD';
+      const preparedEntries = input.entries.map((e) => ({
+        ...e,
+        ledgerEntryId: randomUUID(),
+      }));
       const { deltas, metadataTargets } = await resolveFinancialAccountTargets(
         tx,
         input.businessId,
-        input.entries,
+        preparedEntries,
         postingCurrency,
         input.type === 'OPENING_BALANCE',
+        false,
       );
       const mergedMetadata = mergeMetadataWithFinancialAccountTargets(
         input.metadata,
@@ -379,7 +414,8 @@ export class PostingService {
           postedAt: new Date(),
           createdById: input.createdById ?? null,
           entries: {
-            create: input.entries.map((e) => ({
+            create: preparedEntries.map((e) => ({
+              id: e.ledgerEntryId,
               businessId: input.businessId,
               accountId: e.accountId,
               debit: new D(String(e.debit ?? 0)),
@@ -465,16 +501,27 @@ export class PostingService {
         );
       }
 
-      const reversalEntries = original.entries.map((e, idx) => ({
-        accountId: e.accountId,
-        financialAccountId: extractFinancialAccountIdFromMetadata(
+      const reversalEntries = original.entries.map((e, idx) => {
+        const persistedTarget = extractFinancialAccountTargetFromMetadata(
           (original as { metadata?: unknown }).metadata,
           e.accountId,
           idx,
-        ),
-        debit: e.credit,
-        credit: e.debit,
-      }));
+          e.id,
+        );
+        return {
+          ledgerEntryId: randomUUID(),
+          originalEntryId: e.id,
+          accountId: e.accountId,
+          financialAccountId: persistedTarget?.financialAccountId ?? null,
+          overrideDelta:
+            persistedTarget?.appliedDelta !== undefined
+              ? new D(String(persistedTarget.appliedDelta)).neg()
+              : null,
+          debit: e.credit,
+          credit: e.debit,
+          currency: e.currency,
+        };
+      });
 
       const { deltas, metadataTargets } = await resolveFinancialAccountTargets(
         tx,
@@ -482,6 +529,7 @@ export class PostingService {
         reversalEntries,
         original.currency,
         original.type === 'OPENING_BALANCE',
+        true,
       );
       const reversalMetadata = mergeMetadataWithFinancialAccountTargets(
         undefined,
@@ -508,15 +556,16 @@ export class PostingService {
           postedAt: new Date(),
           createdById: opts.createdById ?? null,
           entries: {
-            create: original.entries.map((e) => ({
+            create: reversalEntries.map((re) => ({
+              id: re.ledgerEntryId,
               businessId: original.businessId,
-              accountId: e.accountId,
+              accountId: re.accountId,
               // Flip debit/credit to offset the original.
-              debit: e.credit,
-              credit: e.debit,
-              currency: e.currency,
+              debit: re.debit,
+              credit: re.credit,
+              currency: re.currency,
               date: new Date(),
-              memo: `Reversal of entry ${e.id}`,
+              memo: `Reversal of entry ${re.originalEntryId}`,
             })),
           },
         },

@@ -33371,6 +33371,13 @@
     },
     {
       "resolved": false,
+      "source": "apps/server/src/modules/finance/posting.service.ts",
+      "specifier": "node:crypto",
+      "target": "node:crypto",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/server/src/modules/finance/receivables.service.ts",
       "specifier": "@nestjs/common",
       "target": "@nestjs/common",
@@ -111057,7 +111064,7 @@
     }
   ],
   "meta": {
-    "edges": 15865,
+    "edges": 15866,
     "nodes": 3878,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"

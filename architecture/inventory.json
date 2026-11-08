@@ -19162,9 +19162,9 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 622,
+      "lines": 638,
       "path": "apps/server/src/modules/finance/expense-posting.service.ts",
-      "size_bytes": 21871
+      "size_bytes": 22509
     },
     {
       "exports": [
@@ -19176,6 +19176,7 @@
         "computeNormalizedCashBalance",
         "convertToBaseOrThrow",
         "extractFinancialAccountIdFromMetadata",
+        "extractFinancialAccountTargetFromMetadata",
         "normalizeCurrencyCode",
         "resolveConversionRate"
       ],
@@ -19183,9 +19184,9 @@
       "imports": [
         "@nestjs/common"
       ],
-      "lines": 335,
+      "lines": 374,
       "path": "apps/server/src/modules/finance/finance-accounting.util.ts",
-      "size_bytes": 11157
+      "size_bytes": 12276
     },
     {
       "exports": [
@@ -19496,7 +19497,7 @@
       ],
       "lines": 429,
       "path": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
-      "size_bytes": 16419
+      "size_bytes": 16427
     },
     {
       "exports": [
@@ -19517,9 +19518,9 @@
         "@prisma/client",
         "vitest"
       ],
-      "lines": 372,
+      "lines": 492,
       "path": "apps/server/src/modules/finance/posting.service.integration.spec.ts",
-      "size_bytes": 14109
+      "size_bytes": 18692
     },
     {
       "exports": [],
@@ -19549,11 +19550,12 @@
         "./finance-accounting.util",
         "@keyflow/db",
         "@nestjs/common",
-        "@prisma/client"
+        "@prisma/client",
+        "node:crypto"
       ],
-      "lines": 541,
+      "lines": 590,
       "path": "apps/server/src/modules/finance/posting.service.ts",
-      "size_bytes": 20225
+      "size_bytes": 22065
     },
     {
       "exports": [
@@ -19648,7 +19650,7 @@
       ],
       "lines": 259,
       "path": "apps/server/src/modules/finance/safe-to-spend.service.spec.ts",
-      "size_bytes": 9940
+      "size_bytes": 10144
     },
     {
       "exports": [
@@ -28402,9 +28404,9 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 566,
+      "lines": 571,
       "path": "apps/server/src/modules/payroll/payroll.service.ts",
-      "size_bytes": 20065
+      "size_bytes": 20476
     },
     {
       "exports": [
@@ -63764,6 +63766,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3479,
     "total_files": 4473,
-    "total_lines": 1158340
+    "total_lines": 1158569
   }
 }

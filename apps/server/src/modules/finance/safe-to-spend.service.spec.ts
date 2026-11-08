@@ -157,41 +157,41 @@ describe('SafeToSpendService', () => {
     expect(after.cashBalance).toBe(before.cashBalance - 5_000);
   });
 
-  it('excludes ledger movements belonging to an archived FinancialAccount even when sharing a COA with an active account', async () => {
+  it('excludes ledger movements belonging to an archived FinancialAccount even when sharing a COA with an active account (including same-COA transfers resolved by ledgerEntryId)', async () => {
+    const sharedTransferMetadata = {
+      entryFinancialAccounts: [
+        { ledgerEntryId: 'le_transfer_out', entryIndex: 0, accountId: 'coa_bank', financialAccountId: 'fa_bank_active' },
+        { ledgerEntryId: 'le_transfer_in', entryIndex: 1, accountId: 'coa_bank', financialAccountId: 'fa_bank_archived' },
+      ],
+    };
     const { svc } = makeStubs({
       accounts: [
         { id: 'fa_bank_active', chartOfAccountId: 'coa_bank', openingBalance: 20_000, currentBalance: 20_000, currency: 'TTD' },
       ],
       cashLedgerEntries: [
         {
+          id: 'le_transfer_out',
           accountId: 'coa_bank',
           debit: 0,
           credit: 3_000,
           currency: 'TTD',
           transaction: {
-            type: 'EXPENSE',
-            metadata: {
-              entryFinancialAccounts: [
-                { entryIndex: 1, accountId: 'coa_bank', financialAccountId: 'fa_bank_active' },
-              ],
-            },
+            type: 'TRANSFER',
+            metadata: sharedTransferMetadata,
           } as any,
         },
         {
+          id: 'le_transfer_in',
           accountId: 'coa_bank',
-          debit: 9_000,
+          debit: 3_000,
           credit: 0,
           currency: 'TTD',
           transaction: {
-            type: 'INCOME',
-            metadata: {
-              entryFinancialAccounts: [
-                { entryIndex: 0, accountId: 'coa_bank', financialAccountId: 'fa_bank_archived' },
-              ],
-            },
+            type: 'TRANSFER',
+            metadata: sharedTransferMetadata,
           } as any,
         },
-      ],
+      ] as any,
       taxCredit: 0,
       taxDebit: 0,
       bills: [],
@@ -200,7 +200,7 @@ describe('SafeToSpendService', () => {
     });
 
     const result = await svc.calculate('biz_1');
-    // Only the -3,000 movement on fa_bank_active applies; +9,000 on fa_bank_archived is ignored
+    // Only the -3,000 movement on fa_bank_active (le_transfer_out) applies; +3,000 on fa_bank_archived (le_transfer_in) is excluded
     expect(result.cashBalance).toBe(17_000);
   });
 

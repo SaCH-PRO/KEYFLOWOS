@@ -289,7 +289,7 @@ describe('PostingService.post — DB integration paths', () => {
               metadata: args.data.metadata ?? null,
               reversedById: null,
               entries: (args.data.entries?.create ?? []).map((e: any, idx: number) => ({
-                id: `le_${idx + 1}`,
+                id: e.id ?? `le_${idx + 1}`,
                 accountId: e.accountId,
                 debit: new Prisma.Decimal(String(e.debit ?? 0)),
                 credit: new Prisma.Decimal(String(e.credit ?? 0)),
@@ -317,10 +317,10 @@ describe('PostingService.post — DB integration paths', () => {
         financialAccount: {
           findFirst: vi.fn(async (args: any) => {
             if (args.where?.id === 'fa_bank_secondary') {
-              return { id: 'fa_bank_secondary', type: 'BANK', currency: 'TTD', currentBalance: secondaryBankBalance };
+              return { id: 'fa_bank_secondary', type: 'BANK', currency: 'TTD', isActive: true, currentBalance: secondaryBankBalance };
             }
             if (args.where?.id === 'fa_bank_default' || args.where?.chartOfAccountId === 'acc_cash_b1') {
-              return { id: 'fa_bank_default', type: 'BANK', currency: 'TTD', currentBalance: defaultBankBalance };
+              return { id: 'fa_bank_default', type: 'BANK', currency: 'TTD', isActive: true, currentBalance: defaultBankBalance };
             }
             return null;
           }),
@@ -357,8 +357,16 @@ describe('PostingService.post — DB integration paths', () => {
     expect(Number(secondaryBankBalance.toString())).toBe(11_000);
     expect(Number(defaultBankBalance.toString())).toBe(50_000);
     expect(storedTxRecord.metadata?.entryFinancialAccounts).toEqual([
-      { entryIndex: 1, accountId: 'acc_cash_b1', financialAccountId: 'fa_bank_secondary' },
+      expect.objectContaining({
+        entryIndex: 1,
+        accountId: 'acc_cash_b1',
+        financialAccountId: 'fa_bank_secondary',
+        appliedDelta: '-4000',
+      }),
     ]);
+
+    // Simulate unordered DB query result by reversing the entries array before reverse()
+    storedTxRecord.entries.reverse();
 
     await svc.reverse('biz_1', posted.transactionId, {
       reason: 'Payroll correction',
@@ -368,5 +376,117 @@ describe('PostingService.post — DB integration paths', () => {
     expect(Number(secondaryBankBalance.toString())).toBe(15_000);
     expect(Number(defaultBankBalance.toString())).toBe(50_000);
   });
+
+  it('negates the exact original appliedDelta on reverse() even after exchange rates change or the target account is archived', async () => {
+    const stub = makePrismaStub();
+    let ttdBankBalance = new Prisma.Decimal(10_000);
+    let currentRate = 6.8;
+    let isBankActive = true;
+    let storedTxRecord: any = null;
+
+    (stub.prisma.client as any).$transaction = vi.fn(async (cb: any) => {
+      const txWithFa = {
+        financialTransaction: {
+          findUnique: vi.fn(async (args: any) => {
+            if (args.where?.id && storedTxRecord?.id === args.where.id) {
+              return storedTxRecord;
+            }
+            return stub.prisma.client.financialTransaction.findUnique(args);
+          }),
+          create: vi.fn(async (args: any) => {
+            const id = `txn_${stub.state.txns.size + 1}`;
+            stub.state.txns.set(id, {
+              id,
+              businessId: args.data.businessId,
+              externalRef: args.data.externalRef ?? null,
+            });
+            const record = {
+              id,
+              businessId: args.data.businessId,
+              type: args.data.type,
+              amount: new Prisma.Decimal(String(args.data.amount)),
+              currency: args.data.currency,
+              description: args.data.description,
+              externalRef: args.data.externalRef ?? null,
+              metadata: args.data.metadata ?? null,
+              reversedById: null,
+              entries: (args.data.entries?.create ?? []).map((e: any, idx: number) => ({
+                id: e.id ?? `le_${idx + 1}`,
+                accountId: e.accountId,
+                debit: new Prisma.Decimal(String(e.debit ?? 0)),
+                credit: new Prisma.Decimal(String(e.credit ?? 0)),
+                currency: e.currency,
+                description: e.description ?? null,
+                contactId: null,
+              })),
+            };
+            if (!storedTxRecord) storedTxRecord = record;
+            return { id, externalRef: record.externalRef };
+          }),
+          update: vi.fn(async () => storedTxRecord),
+        },
+        chartOfAccount: {
+          findMany: vi.fn(async () => [
+            { id: 'acc_cash_b1', businessId: 'biz_1' },
+            { id: 'acc_rev_b1', businessId: 'biz_1' },
+          ]),
+        },
+        contact: { findUnique: vi.fn(async () => null) },
+        exchangeRate: {
+          findMany: vi.fn(async () => [
+            { fromCurrency: 'USD', toCurrency: 'TTD', rate: currentRate },
+          ]),
+        },
+        financialAccount: {
+          findFirst: vi.fn(async (args: any) => {
+            if (args.where?.isActive === true && !isBankActive) return null;
+            if (args.where?.id === 'fa_ttd_bank' || args.where?.chartOfAccountId === 'acc_cash_b1') {
+              return {
+                id: 'fa_ttd_bank',
+                type: 'BANK',
+                currency: 'TTD',
+                isActive: isBankActive,
+                currentBalance: ttdBankBalance,
+              };
+            }
+            return null;
+          }),
+          update: vi.fn(async (args: any) => {
+            const inc = new Prisma.Decimal(String(args.data?.currentBalance?.increment ?? 0));
+            ttdBankBalance = ttdBankBalance.add(inc);
+            return { id: 'fa_ttd_bank', currentBalance: ttdBankBalance };
+          }),
+        },
+      };
+      return cb(txWithFa);
+    });
+
+    const svc = new PostingService(stub.prisma);
+    // Post USD 100 receipt into TTD bank at rate 6.8 => +680 TTD (balance = 10,680)
+    const posted = await svc.post({
+      businessId: 'biz_1',
+      type: 'INCOME',
+      date: new Date('2026-08-31'),
+      amount: 100,
+      currency: 'USD',
+      sourceType: 'Payment',
+      sourceId: 'pay_usd_1',
+      kind: 'received',
+      entries: [
+        { accountId: 'acc_cash_b1', financialAccountId: 'fa_ttd_bank', debit: 100 },
+        { accountId: 'acc_rev_b1', credit: 100 },
+      ],
+    });
+    expect(Number(ttdBankBalance.toString())).toBe(10_680);
+
+    // Rate changes to 7.0 and account is archived before reversal
+    currentRate = 7.0;
+    isBankActive = false;
+
+    await svc.reverse('biz_1', posted.transactionId, { reason: 'Refunded' });
+    // Balance must return to exact 10,000 (not 9,980)
+    expect(Number(ttdBankBalance.toString())).toBe(10_000);
+  });
 });
+
 

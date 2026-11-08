@@ -550,6 +550,7 @@ export class ExpensePostingService {
         financialAccount?: {
           findFirst?: (args: Record<string, unknown>) => Promise<{
             id: string;
+            subtype?: string | null;
             chartOfAccountId?: string | null;
             currency?: string | null;
             isActive?: boolean;
@@ -557,21 +558,36 @@ export class ExpensePostingService {
         };
       };
       if (rawDb.financialAccount?.findFirst) {
+        const normalizedMethod = (run.paymentMethod ?? '').toLowerCase().trim();
+        const namedProcessors = new Set(['wipay', 'paypal', 'stripe']);
+        const expectedSubtype = namedProcessors.has(normalizedMethod)
+          ? normalizedMethod
+          : undefined;
         const runCurrency = (run.currency ?? 'TTD').trim().toUpperCase() || 'TTD';
         const matchedAccount = await rawDb.financialAccount.findFirst({
           where: {
             businessId: run.businessId,
             chartOfAccountId: paymentCoaId,
+            ...(expectedSubtype ? { subtype: expectedSubtype } : {}),
             isActive: true,
             currency: runCurrency,
           },
           orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-          select: { id: true, chartOfAccountId: true, currency: true, isActive: true },
+          select: {
+            id: true,
+            subtype: true,
+            chartOfAccountId: true,
+            currency: true,
+            isActive: true,
+          },
         });
         if (
           !matchedAccount ||
           matchedAccount.isActive === false ||
           (matchedAccount.chartOfAccountId && matchedAccount.chartOfAccountId !== paymentCoaId) ||
+          (expectedSubtype &&
+            matchedAccount.subtype !== undefined &&
+            (matchedAccount.subtype ?? '').toLowerCase().trim() !== expectedSubtype) ||
           (matchedAccount.currency &&
             matchedAccount.currency.trim().toUpperCase() !== runCurrency)
         ) {

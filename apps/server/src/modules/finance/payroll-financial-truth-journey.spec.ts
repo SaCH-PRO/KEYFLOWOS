@@ -240,7 +240,7 @@ describe('Payroll-to-Ledger-to-Treasury E2E Financial Truth Journey', () => {
           transactions.push(txn);
           for (const e of data.entries?.create ?? []) {
             ledgerEntries.push({
-              id: `le_${ledgerEntries.length + 1}`,
+              id: e.id ?? `le_${ledgerEntries.length + 1}`,
               transactionId: txn.id,
               businessId: e.businessId,
               accountId: e.accountId,
