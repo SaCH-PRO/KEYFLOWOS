@@ -3628,17 +3628,18 @@ negative_controls:
 
   - id: NC-CLOUD-SELF-AUTHORED-PR-DIGEST-MINTS-LEASE
     claim: >
-      A PR author's self-supplied cloud-contract-digest in GITHUB_EVENT_PATH is
-      strictly scoped to READ_ONLY_EVENT_IDENTITY (mutating_operations_authorized:
-      false) and cannot mint authority for mutating lease claims, replay
-      clearances, failovers, or active dispatch (C7).
+      A PR author's self-supplied cloud-contract-digest in GITHUB_EVENT_PATH or
+      an incomplete authority record without mutating_operations_authorized ===
+      true and a supported mutating trust_level cannot mint authority for
+      mutating lease claims, replay clearances, failovers, or active dispatch
+      (C7; Copilot 4504710064).
     mutation:
       file: scripts/agent-control/lib/cloud-control.mjs
       find: |-
         if (
             requireMutatingAuthorization &&
-            (verifiedAuthority.mutating_operations_authorized === false ||
-              verifiedAuthority.trust_level === 'READ_ONLY_EVENT_IDENTITY')
+            (verifiedAuthority.mutating_operations_authorized !== true ||
+              !MUTATING_TRUST_LEVELS.includes(verifiedAuthority.trust_level))
           ) {
       replace: |-
         if (false) {

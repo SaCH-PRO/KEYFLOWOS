@@ -566,6 +566,11 @@ export function buildCloudIdempotencyKey({ task_id, packet_id, source_main, atte
   return `cloud_task:${task_id}:${packet_id}:${source_main}:${attempt}`;
 }
 
+export const MUTATING_TRUST_LEVELS = Object.freeze([
+  'CRYPTOGRAPHICALLY_SIGNED',
+  'INDEPENDENT_OPERATOR_APPROVAL',
+]);
+
 /**
  * Validates the authority provenance block of a cloud task AND verifies that an
  * independent authenticated authority evidence record (`verifiedAuthority`)
@@ -623,11 +628,11 @@ export function validateTaskAuthority(
   }
   if (
     requireMutatingAuthorization &&
-    (verifiedAuthority.mutating_operations_authorized === false ||
-      verifiedAuthority.trust_level === 'READ_ONLY_EVENT_IDENTITY')
+    (verifiedAuthority.mutating_operations_authorized !== true ||
+      !MUTATING_TRUST_LEVELS.includes(verifiedAuthority.trust_level))
   ) {
     authProblems.push(
-      'read-only PR-event identity (self-supplied PR body or workflow input digest) cannot authorize mutating lease claims, replay clearances, failovers, or active dispatch; independent operator or Ed25519-signed authority is required',
+      'read-only PR-event identity (self-supplied PR body or workflow input digest) or incomplete authority record cannot authorize mutating lease claims, replay clearances, failovers, or active dispatch; explicit mutating_operations_authorized === true and supported mutating trust_level are required',
     );
   }
   if (!APPROVAL_ID_RE.test(String(verifiedAuthority.approval_id || ''))) {
@@ -860,6 +865,21 @@ export function validateCloudTask(task, options = {}) {
   }
   if (task.source_head !== null && task.source_head !== undefined && !isSha40(task.source_head)) {
     problems.push('source_head must be null or a 40-character lowercase hex SHA');
+  } else if (
+    task.state === CLOUD_TASK_STATES.ISSUED &&
+    task.source_head !== null &&
+    task.source_head !== undefined &&
+    (!task.continuity_from ||
+      typeof task.continuity_from !== 'object' ||
+      task.continuity_from.verified_semantic_head !== task.source_head)
+  ) {
+    return {
+      ok: false,
+      reason: CLOUD_REASONS.INVALID_SOURCE_COMMIT,
+      problems: [
+        'fresh ISSUED task must have source_head: null unless bound to verified continuity_from.verified_semantic_head',
+      ],
+    };
   }
   if (!IMPL_BRANCH_RE.test(String(task.implementation_branch || ''))) {
     problems.push('implementation_branch must match /^impl\\/[a-z0-9._-]{3,120}$/');
@@ -987,6 +1007,7 @@ export function evaluateLeaseAcquisition({
   consumedClearanceIds = [],
   verifiedAuthority = null,
   verifiedClearance = null,
+  verifiedContinuity = null,
 }) {
   const valid = validateCloudTask(task, {
     verifiedAuthority,
@@ -1021,6 +1042,13 @@ export function evaluateLeaseAcquisition({
     if (!immutableCheck.ok) {
       return immutableCheck;
     }
+    if (!reconciliationClearance && (task.source_head ?? null) !== (persistedSameTask.source_head ?? null)) {
+      return {
+        ok: false,
+        reason: CLOUD_REASONS.INVALID_SOURCE_COMMIT,
+        problems: ['cannot modify source_head during lease acquisition without verified reconciliation clearance'],
+      };
+    }
   }
 
   const persistedUncertain =
@@ -1030,6 +1058,41 @@ export function evaluateLeaseAcquisition({
   const submittedUncertain =
     task.state === CLOUD_TASK_STATES.UNCERTAIN_RESULT || task.lease?.execution_uncertain === true;
   const clearanceTarget = persistedSameTask || task;
+
+  // Require null for fresh issuance and independently verified, commit-bound continuity evidence for non-null starting heads.
+  if (!reconciliationClearance && clearanceTarget.source_head !== null && clearanceTarget.source_head !== undefined) {
+    const revokedPredecessor = existingTasks.find(
+      (t) =>
+        t &&
+        typeof t === 'object' &&
+        t.task_id === clearanceTarget.continuity_from?.previous_task_id &&
+        t.state === CLOUD_TASK_STATES.REVOKED &&
+        t.packet_id === clearanceTarget.packet_id &&
+        t.implementation_branch === clearanceTarget.implementation_branch &&
+        t.source_main === clearanceTarget.source_main,
+    );
+    const continuityVerified =
+      Boolean(revokedPredecessor) &&
+      clearanceTarget.continuity_from &&
+      typeof clearanceTarget.continuity_from === 'object' &&
+      clearanceTarget.continuity_from.verified_semantic_head === clearanceTarget.source_head &&
+      verifiedContinuity &&
+      typeof verifiedContinuity === 'object' &&
+      verifiedContinuity.authenticated === true &&
+      verifiedContinuity.previous_task_id === revokedPredecessor.task_id &&
+      verifiedContinuity.verified_semantic_head === clearanceTarget.source_head &&
+      verifiedContinuity.source_main === clearanceTarget.source_main &&
+      verifiedContinuity.ancestry_verified === true;
+    if (!continuityVerified) {
+      return {
+        ok: false,
+        reason: CLOUD_REASONS.INVALID_SOURCE_COMMIT,
+        problems: [
+          'non-null starting source_head on lease acquisition requires a revoked predecessor task and independently verified, commit-bound continuity evidence (verifiedContinuity)',
+        ],
+      };
+    }
+  }
 
   // Gate 8: Replay after an uncertain execution result is blocked even if the
   // prior lease expired, unless an explicit authenticated reconciliation clearance
@@ -1162,11 +1225,11 @@ export function evaluateLeaseAcquisition({
     source_main: clearanceTarget.source_main,
     attempt: effectiveAttempt,
   });
-  if (reconciliationClearance && recordedIdempotencyKeys.includes(effectiveIdempotencyKey)) {
+  if (recordedIdempotencyKeys.includes(effectiveIdempotencyKey)) {
     return {
       ok: false,
       reason: CLOUD_REASONS.DUPLICATE_TASK_CLAIM,
-      problems: [`reconciled idempotency_key ${effectiveIdempotencyKey} has already been claimed`],
+      problems: [`idempotency_key ${effectiveIdempotencyKey} has already been claimed`],
     };
   }
 
@@ -1309,11 +1372,11 @@ export function verifyUncertainExecutionClearance(
     authProblems.push('verifiedClearance.authenticated must be true');
   }
   if (
-    verifiedClearance.mutating_operations_authorized === false ||
-    verifiedClearance.trust_level === 'READ_ONLY_EVENT_IDENTITY'
+    verifiedClearance.mutating_operations_authorized !== true ||
+    !MUTATING_TRUST_LEVELS.includes(verifiedClearance.trust_level)
   ) {
     authProblems.push(
-      'read-only PR-event identity cannot authorize uncertain execution clearance; independent operator or Ed25519-signed clearance is required',
+      'read-only PR-event identity or incomplete clearance record cannot authorize uncertain execution clearance; explicit mutating_operations_authorized === true and supported mutating trust_level are required',
     );
   }
   if (!APPROVAL_ID_RE.test(String(verifiedClearance.approval_id || ''))) {
@@ -1451,9 +1514,7 @@ export function markExecutionUncertain(task, { reason, nowIso, observedBranchHea
   return {
     ...task,
     state: CLOUD_TASK_STATES.UNCERTAIN_RESULT,
-    observed_branch_head: isSha40(observedBranchHead)
-      ? observedBranchHead
-      : (task.source_head || task.source_main),
+    observed_branch_head: isSha40(observedBranchHead) ? observedBranchHead : null,
     lease: {
       ...task.lease,
       heartbeat_at: isIsoUtc(nowIso) ? nowIso : task.lease.heartbeat_at,
@@ -2075,9 +2136,22 @@ export function prepareProviderFailoverHandoff({
       actor: verifiedAuthority.actor,
       source_kind: verifiedAuthority.source_kind,
       reference: verifiedAuthority.reference,
-      trust_level: verifiedAuthority.trust_level || 'INDEPENDENT_OPERATOR_APPROVAL',
-      mutating_operations_authorized: verifiedAuthority.mutating_operations_authorized !== false,
+      trust_level: verifiedAuthority.trust_level,
+      mutating_operations_authorized: verifiedAuthority.mutating_operations_authorized === true,
     });
+
+  const verifiedContinuity = nextSourceHead
+    ? {
+        authenticated: true,
+        previous_task_id: effectiveTask.task_id,
+        verified_semantic_head: nextSourceHead,
+        source_main: effectiveTask.source_main,
+        ancestry_verified: isUncertainTask
+          ? verifiedClearance?.observed_branch_head === nextSourceHead
+          : verifiedAncestry?.sourceMainIsAncestorOfSemanticHead === true &&
+            verifiedAncestry?.semanticHeadIsAncestorOfPrHead === true,
+      }
+    : null;
 
   const mergedExistingTasks = [
     ...existingTasks.filter((t) => t && t.task_id !== effectiveTask.task_id),
@@ -2095,6 +2169,7 @@ export function prepareProviderFailoverHandoff({
     recordedIdempotencyKeys,
     consumedClearanceIds,
     verifiedAuthority: effectiveNextVerifiedAuthority,
+    verifiedContinuity,
   });
   if (!acquired.ok) return acquired;
 

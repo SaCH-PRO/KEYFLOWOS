@@ -2118,4 +2118,126 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
     assert.equal(uncertainComplete.ok, false);
     assert.equal(uncertainComplete.reason, CLOUD_REASONS.UNCERTAIN_EXECUTION_REPLAY_BLOCKED);
   });
+
+  it('rejects missing/null mutating trust fields, unverified non-null starting heads, bumped-attempt idempotency replay, and preserves unknown branch heads as null', () => {
+    const task = makeTask();
+    const baseAuth = buildVerifiedAuthorityRecord(task);
+
+    // 1. Missing or null mutating_operations_authorized / trust_level on verifiedAuthority is rejected for mutating claims.
+    for (const incompleteOverride of [
+      { mutating_operations_authorized: undefined },
+      { mutating_operations_authorized: null },
+      { trust_level: undefined },
+      { trust_level: null },
+      { trust_level: 'UNKNOWN_TRUST_LEVEL' },
+    ]) {
+      const claimRes = evaluateLeaseAcquisition({
+        task,
+        claimantProvider: task.provider,
+        claimantAgentId: task.agent_identity,
+        nowIso: NOW_ISO,
+        verifiedAuthority: { ...baseAuth, ...incompleteOverride },
+      });
+      assert.equal(claimRes.ok, false);
+      assert.equal(claimRes.reason, CLOUD_REASONS.UNVERIFIED_AUTHORITY);
+    }
+
+    // 2. Fresh ISSUED task with non-null source_head (without verified continuity) is rejected.
+    const unverifiedStartingHeadTask = makeTask({
+      source_head: SAMPLE_SEMANTIC_HEAD,
+    });
+    const unverifiedHeadAuth = buildVerifiedAuthorityRecord(unverifiedStartingHeadTask);
+    const invalidFreshHead = evaluateLeaseAcquisition({
+      task: unverifiedStartingHeadTask,
+      claimantProvider: unverifiedStartingHeadTask.provider,
+      claimantAgentId: unverifiedStartingHeadTask.agent_identity,
+      nowIso: NOW_ISO,
+      verifiedAuthority: unverifiedHeadAuth,
+    });
+    assert.equal(invalidFreshHead.ok, false);
+    assert.equal(invalidFreshHead.reason, CLOUD_REASONS.INVALID_SOURCE_COMMIT);
+
+    // Even with a fabricated continuity_from, acquisition rejects a non-null starting head without a revoked predecessor and verifiedContinuity.
+    const fabricatedContinuityTask = makeTask({
+      source_head: SAMPLE_SEMANTIC_HEAD,
+      continuity_from: {
+        previous_task_id: 'CT-KF-META-CLOUD-DISPATCH-001-PREV',
+        verified_semantic_head: SAMPLE_SEMANTIC_HEAD,
+      },
+    });
+    const fabricatedContinuityRes = evaluateLeaseAcquisition({
+      task: fabricatedContinuityTask,
+      claimantProvider: fabricatedContinuityTask.provider,
+      claimantAgentId: fabricatedContinuityTask.agent_identity,
+      nowIso: NOW_ISO,
+      verifiedAuthority: buildVerifiedAuthorityRecord(fabricatedContinuityTask),
+    });
+    assert.equal(fabricatedContinuityRes.ok, false);
+    assert.equal(fabricatedContinuityRes.reason, CLOUD_REASONS.INVALID_SOURCE_COMMIT);
+
+    // 3. Submitting attempt 2 after a persisted attempt-1 lease expires is rejected when attempt 1's effectiveIdempotencyKey is already recorded.
+    const expiredAttempt1 = makeLeasedTask();
+    const bumpedAttempt2 = makeTask({
+      attempt: 2,
+      idempotency_key: buildCloudIdempotencyKey({
+        task_id: expiredAttempt1.task_id,
+        packet_id: expiredAttempt1.packet_id,
+        source_main: expiredAttempt1.source_main,
+        attempt: 2,
+      }),
+    });
+    const bumpedReplayRes = evaluateLeaseAcquisition({
+      task: bumpedAttempt2,
+      claimantProvider: bumpedAttempt2.provider,
+      claimantAgentId: bumpedAttempt2.agent_identity,
+      nowIso: '2026-11-07T23:00:00Z',
+      existingTasks: [expiredAttempt1],
+      recordedIdempotencyKeys: [expiredAttempt1.idempotency_key],
+      verifiedAuthority: buildVerifiedAuthorityRecord(bumpedAttempt2),
+    });
+    assert.equal(bumpedReplayRes.ok, false);
+    assert.equal(bumpedReplayRes.reason, CLOUD_REASONS.DUPLICATE_TASK_CLAIM);
+
+    // 4. markExecutionUncertain preserves unknown branch head as null so a worker commit pushed before transport drop can be cleared.
+    const uncertainUnknownHead = markExecutionUncertain(expiredAttempt1, {
+      reason: 'transport drop with unknown remote head',
+      nowIso: '2026-11-07T20:15:00Z',
+    });
+    assert.equal(uncertainUnknownHead.observed_branch_head, null);
+
+    const remoteClearance = {
+      clearance_id: 'CLR-CT-KF-META-CLOUD-DISPATCH-001-REMOTE',
+      task_id: uncertainUnknownHead.task_id,
+      packet_id: uncertainUnknownHead.packet_id,
+      uncertain_lease_id: uncertainUnknownHead.lease.lease_id,
+      cleared_attempt: uncertainUnknownHead.attempt,
+      cleared_by_provider: CLOUD_PROVIDERS.CHATGPT,
+      author: 'SaCH-PRO',
+      observed_branch_head: SAMPLE_SEMANTIC_HEAD,
+      disposition: 'CONTINUE_FROM_OBSERVED_HEAD',
+    };
+    const baseClearanceAuth = buildVerifiedClearanceRecord(uncertainUnknownHead, remoteClearance);
+
+    // Incomplete verifiedClearance (missing/null mutating_operations_authorized or trust_level) is rejected.
+    for (const badClearanceOverride of [
+      { mutating_operations_authorized: undefined },
+      { mutating_operations_authorized: null },
+      { trust_level: undefined },
+      { trust_level: null },
+    ]) {
+      const badClr = verifyUncertainExecutionClearance(uncertainUnknownHead, remoteClearance, {
+        observedBranchHead: SAMPLE_SEMANTIC_HEAD,
+        verifiedClearance: { ...baseClearanceAuth, ...badClearanceOverride },
+      });
+      assert.equal(badClr.ok, false);
+      assert.equal(badClr.reason, CLOUD_REASONS.UNVERIFIED_AUTHORITY);
+    }
+
+    // Complete verifiedClearance for the discovered remote head succeeds because observed_branch_head was preserved as null rather than guessed.
+    const validRemoteClr = verifyUncertainExecutionClearance(uncertainUnknownHead, remoteClearance, {
+      observedBranchHead: SAMPLE_SEMANTIC_HEAD,
+      verifiedClearance: baseClearanceAuth,
+    });
+    assert.equal(validRemoteClr.ok, true);
+  });
 });
