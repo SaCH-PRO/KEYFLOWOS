@@ -261,4 +261,36 @@ describe('ExpensePostingService.onPayrollRunPaid', () => {
     expect(res).toBeNull();
     expect(posting.post).not.toHaveBeenCalled();
   });
+
+  it('uses explicit paymentAccountId and paymentCoaId when provided', async () => {
+    const { svc, posting } = makeStubs();
+    await svc.onPayrollRunPaid({
+      ...baseRun,
+      paymentMethod: null,
+      paymentAccountId: 'fa_bank_custom',
+      paymentCoaId: 'coa_bank_custom',
+    });
+    expect(posting.post).toHaveBeenCalledOnce();
+    const input = posting.post.mock.calls[0][0];
+    const cr = input.entries.find((e: any) => e.credit > 0);
+    expect(cr.accountId).toBe('coa_bank_custom');
+    expect(cr.financialAccountId).toBe('fa_bank_custom');
+  });
+
+  it('rejects payroll disbursement when neither paymentCoaId nor a valid paymentMethod is supplied', async () => {
+    const { svc, posting } = makeStubs();
+    await expect(
+      svc.onPayrollRunPaid({
+        ...baseRun,
+        paymentMethod: null,
+      }),
+    ).rejects.toThrow(/paymentAccountId or paymentMethod/);
+    await expect(
+      svc.onPayrollRunPaid({
+        ...baseRun,
+        paymentMethod: 'credit_card',
+      }),
+    ).rejects.toThrow(/paymentAccountId or paymentMethod/);
+    expect(posting.post).not.toHaveBeenCalled();
+  });
 });

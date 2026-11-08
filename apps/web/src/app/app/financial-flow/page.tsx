@@ -252,7 +252,7 @@ export default function FinancialFlowPage() {
       {/* Safe-to-Spend Breakdown */}
       {safe && (
         <SectionCard title="Safe-to-Spend Breakdown" icon={ShieldCheck} compact>
-          <div className="p-4 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center">
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 text-center">
             <div className="kf-card p-2.5">
               <p className="text-sm font-semibold">{currency} {(safe.cashBalance ?? 0).toLocaleString()}</p>
               <p className="text-[10px] text-muted-foreground">Cash Balance</p>
@@ -272,6 +272,10 @@ export default function FinancialFlowPage() {
             <div className="kf-card p-2.5">
               <p className="text-sm font-semibold text-muted-foreground">− {currency} {(safe.operatingBuffer ?? 0).toLocaleString()}</p>
               <p className="text-[10px] text-muted-foreground">Operating Buffer</p>
+            </div>
+            <div className="kf-card p-2.5">
+              <p className="text-sm font-semibold text-muted-foreground">− {currency} {(safe.otherReserves ?? 0).toLocaleString()}</p>
+              <p className="text-[10px] text-muted-foreground">Other Reserves</p>
             </div>
             <div className="kf-card p-2.5 border-emerald-500/30">
               <p className="text-sm font-semibold text-emerald-500">{currency} {(safe.safeToSpend ?? 0).toLocaleString()}</p>

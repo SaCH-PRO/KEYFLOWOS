@@ -1,5 +1,12 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  computeNormalizedCashBalance,
+  normalizeCurrencyCode,
+  resolveConversionRate,
+  type CashLedgerMovementRow,
+  type ExchangeRateRow,
+} from '../finance/finance-accounting.util';
 
 export interface GraphEntityLink {
   fromType: string;
@@ -105,10 +112,12 @@ export interface BusinessGraphSnapshot {
     unpaidBillsCount: number;
     committedPayrollAmount: number;
     committedPayrollRuns: number;
+    unconvertedByCurrency?: Record<string, { cash?: number; unpaidBills?: number; committedPayroll?: number }>;
   };
   pipeline?: {
     openDealCount: number;
     openPipelineValue: number;
+    unconvertedByCurrency?: Record<string, number>;
   };
   support?: {
     openTicketCount: number;
@@ -187,11 +196,12 @@ export class BusinessGraphService {
       automationRuns,
       activeProducts,
       avgProductPrice,
-      cashAccountsAgg,
-      unpaidBillsAgg,
-      committedPayrollAgg,
-      openDealsAgg,
+      cashAccountsData,
+      unpaidBillsData,
+      committedPayrollData,
+      openDealsData,
       openTicketsCount,
+      exchangeRates,
     ] = await Promise.all([
       db.business.findUnique({
         where: { id: businessId },
@@ -231,37 +241,72 @@ export class BusinessGraphService {
       db.automation.aggregate({ where: { businessId, deletedAt: null }, _sum: { runCount: true } }),
       db.product.count({ where: { businessId, deletedAt: null, isActive: true } }),
       db.product.aggregate({ where: { businessId, deletedAt: null, isActive: true }, _avg: { price: true } }),
-      db.financialAccount?.aggregate
-        ? db.financialAccount.aggregate({
+      db.financialAccount?.findMany
+        ? db.financialAccount.findMany({
             where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-            _sum: { currentBalance: true },
+            select: {
+              id: true,
+              chartOfAccountId: true,
+              openingBalance: true,
+              currentBalance: true,
+              currency: true,
+            },
           })
-        : Promise.resolve({ _sum: { currentBalance: 0 } }),
-      db.expense.aggregate({
-        where: { businessId, deletedAt: null, status: 'BILL' },
-        _sum: { amount: true },
-        _count: true,
-      }),
-      db.payrollRun?.aggregate
-        ? db.payrollRun.aggregate({
+        : db.financialAccount?.aggregate
+          ? db.financialAccount.aggregate({
+              where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
+              _sum: { currentBalance: true },
+            })
+          : Promise.resolve([]),
+      db.expense?.findMany
+        ? db.expense.findMany({
+            where: { businessId, deletedAt: null, status: 'BILL' },
+            select: { amount: true, currency: true },
+          })
+        : db.expense.aggregate({
+            where: { businessId, deletedAt: null, status: 'BILL' },
+            _sum: { amount: true },
+            _count: true,
+          }),
+      db.payrollRun?.findMany
+        ? db.payrollRun.findMany({
             where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
-            _sum: { totalGross: true },
-            _count: true,
+            select: { totalGross: true, currency: true },
           })
-        : Promise.resolve({ _sum: { totalGross: 0 }, _count: 0 }),
-      db.deal?.aggregate
-        ? db.deal.aggregate({
+        : db.payrollRun?.aggregate
+          ? db.payrollRun.aggregate({
+              where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
+              _sum: { totalGross: true },
+              _count: true,
+            })
+          : Promise.resolve([]),
+      db.deal?.findMany
+        ? db.deal.findMany({
             where: { businessId, deletedAt: null, status: 'OPEN' },
-            _sum: { value: true },
-            _count: true,
+            select: { value: true, currency: true },
           })
-        : Promise.resolve({ _sum: { value: 0 }, _count: 0 }),
+        : db.deal?.aggregate
+          ? db.deal.aggregate({
+              where: { businessId, deletedAt: null, status: 'OPEN' },
+              _sum: { value: true },
+              _count: true,
+            })
+          : Promise.resolve([]),
       db.supportTicket?.count
         ? db.supportTicket.count({
             where: { businessId, deletedAt: null, status: { in: ['OPEN', 'IN_PROGRESS', 'WAITING'] } },
           })
         : Promise.resolve(0),
+      db.exchangeRate?.findMany
+        ? db.exchangeRate.findMany({
+            where: { businessId },
+            orderBy: { date: 'desc' },
+            take: 100,
+          })
+        : Promise.resolve([] as ExchangeRateRow[]),
     ]);
+
+    const baseCurrency = normalizeCurrencyCode(business?.currency, 'TTD');
 
     const statusMap: Record<string, number> = {};
     for (const s of contactsByStatus) {
@@ -283,19 +328,129 @@ export class BusinessGraphService {
       ? (completedProjectTasks / totalProjectTasks) * 100
       : 0;
 
-    const cashBalance = Number(cashAccountsAgg?._sum?.currentBalance ?? 0);
-    const unpaidBillsAmount = Number(unpaidBillsAgg?._sum?.amount ?? 0);
-    const unpaidBillsCount = Number(unpaidBillsAgg?._count ?? 0);
-    const committedPayrollAmount = Number(committedPayrollAgg?._sum?.totalGross ?? 0);
-    const committedPayrollRuns = Number(committedPayrollAgg?._count ?? 0);
-    const openPipelineValue = Number(openDealsAgg?._sum?.value ?? 0);
-    const openDealCount = Number(openDealsAgg?._count ?? 0);
+    const unconvertedTreasury: Record<string, { cash?: number; unpaidBills?: number; committedPayroll?: number }> = {};
+    const unconvertedCash: Record<string, number> = {};
+
+    let cashBalance = 0;
+    if (Array.isArray(cashAccountsData)) {
+      const linkedCoaIds = Array.from(
+        new Set(
+          cashAccountsData
+            .map((a: { chartOfAccountId?: string | null }) => a.chartOfAccountId)
+            .filter(Boolean) as string[],
+        ),
+      );
+      let cashLedgerMovements: CashLedgerMovementRow[] = [];
+      if (linkedCoaIds.length > 0 && db.ledgerEntry?.findMany) {
+        const entries = await db.ledgerEntry.findMany({
+          where: { businessId, accountId: { in: linkedCoaIds } },
+          select: {
+            accountId: true,
+            debit: true,
+            credit: true,
+            currency: true,
+            transaction: { select: { type: true } },
+          },
+        });
+        cashLedgerMovements = entries.map((e: any) => ({
+          accountId: e.accountId,
+          debit: e.debit,
+          credit: e.credit,
+          currency: e.currency,
+          transactionType: e.transaction?.type ?? null,
+        }));
+      }
+      cashBalance = computeNormalizedCashBalance({
+        accounts: cashAccountsData,
+        ledgerMovements: cashLedgerMovements,
+        baseCurrency,
+        rates: exchangeRates,
+        failClosedOnMissingRate: false,
+        unconvertedByCurrency: unconvertedCash,
+      });
+      for (const [cur, amt] of Object.entries(unconvertedCash)) {
+        unconvertedTreasury[cur] = { ...(unconvertedTreasury[cur] ?? {}), cash: Math.round(amt * 100) / 100 };
+      }
+    } else {
+      cashBalance = Number((cashAccountsData as any)?._sum?.currentBalance ?? 0);
+    }
+
+    let unpaidBillsAmount = 0;
+    let unpaidBillsCount = 0;
+    if (Array.isArray(unpaidBillsData)) {
+      unpaidBillsCount = unpaidBillsData.length;
+      for (const bill of unpaidBillsData) {
+        const amt = Number(bill.amount ?? 0);
+        const cur = normalizeCurrencyCode(bill.currency, baseCurrency);
+        const mult = resolveConversionRate(cur, baseCurrency, exchangeRates);
+        if (mult != null) {
+          unpaidBillsAmount += amt * mult;
+        } else {
+          unconvertedTreasury[cur] = {
+            ...(unconvertedTreasury[cur] ?? {}),
+            unpaidBills: Math.round(((unconvertedTreasury[cur]?.unpaidBills ?? 0) + amt) * 100) / 100,
+          };
+        }
+      }
+      unpaidBillsAmount = Math.round(unpaidBillsAmount * 100) / 100;
+    } else {
+      unpaidBillsAmount = Number((unpaidBillsData as any)?._sum?.amount ?? 0);
+      unpaidBillsCount = Number((unpaidBillsData as any)?._count ?? 0);
+    }
+
+    let committedPayrollAmount = 0;
+    let committedPayrollRuns = 0;
+    if (Array.isArray(committedPayrollData)) {
+      committedPayrollRuns = committedPayrollData.length;
+      for (const run of committedPayrollData) {
+        const amt = Number(run.totalGross ?? 0);
+        const cur = normalizeCurrencyCode(run.currency, baseCurrency);
+        const mult = resolveConversionRate(cur, baseCurrency, exchangeRates);
+        if (mult != null) {
+          committedPayrollAmount += amt * mult;
+        } else {
+          unconvertedTreasury[cur] = {
+            ...(unconvertedTreasury[cur] ?? {}),
+            committedPayroll: Math.round(((unconvertedTreasury[cur]?.committedPayroll ?? 0) + amt) * 100) / 100,
+          };
+        }
+      }
+      committedPayrollAmount = Math.round(committedPayrollAmount * 100) / 100;
+    } else {
+      committedPayrollAmount = Number((committedPayrollData as any)?._sum?.totalGross ?? 0);
+      committedPayrollRuns = Number((committedPayrollData as any)?._count ?? 0);
+    }
+
+    let openPipelineValue = 0;
+    let openDealCount = 0;
+    const unconvertedPipeline: Record<string, number> = {};
+    if (Array.isArray(openDealsData)) {
+      openDealCount = openDealsData.length;
+      for (const d of openDealsData) {
+        const val = Number(d.value ?? 0);
+        const cur = normalizeCurrencyCode(d.currency, baseCurrency);
+        const mult = resolveConversionRate(cur, baseCurrency, exchangeRates);
+        if (mult != null) {
+          openPipelineValue += val * mult;
+        } else {
+          unconvertedPipeline[cur] = Math.round(((unconvertedPipeline[cur] ?? 0) + val) * 100) / 100;
+        }
+      }
+      openPipelineValue = Math.round(openPipelineValue * 100) / 100;
+    } else {
+      openPipelineValue = Number((openDealsData as any)?._sum?.value ?? 0);
+      openDealCount = Number((openDealsData as any)?._count ?? 0);
+    }
 
     const categoryNames = await this.resolveCategoryNames(businessId, expensesByCategory.map(e => e.categoryId).filter(Boolean) as string[]);
     const topCategories = expensesByCategory.map(e => ({
       name: (e.categoryId && categoryNames[e.categoryId]) || 'Uncategorized',
       amount: e._sum.amount ?? 0,
     }));
+
+    const unmappedCurrencies = Array.from(
+      new Set([...Object.keys(unconvertedTreasury), ...Object.keys(unconvertedPipeline)]),
+    );
 
     const healthIndicators = this.computeHealthIndicators({
       overdueCount: overdueInvoices._count ?? 0,
@@ -311,6 +466,8 @@ export class BusinessGraphService {
       unpaidBillsAmount,
       committedPayrollAmount,
       openTicketsCount,
+      unmappedCurrencies,
+      baseCurrency,
     });
 
     const momentumSignals = [
@@ -332,7 +489,7 @@ export class BusinessGraphService {
         industry: business?.industry ?? null,
         archetype: business?.archetype ?? null,
         revenueModel: business?.revenueModel ?? null,
-        currency: business?.currency ?? 'TTD',
+        currency: baseCurrency,
         stage: business?.businessStage ?? null,
         teamSize: business?.teamSize ?? null,
       },
@@ -388,10 +545,16 @@ export class BusinessGraphService {
         unpaidBillsCount,
         committedPayrollAmount,
         committedPayrollRuns,
+        ...(Object.keys(unconvertedTreasury).length > 0
+          ? { unconvertedByCurrency: unconvertedTreasury }
+          : {}),
       },
       pipeline: {
         openDealCount,
         openPipelineValue,
+        ...(Object.keys(unconvertedPipeline).length > 0
+          ? { unconvertedByCurrency: unconvertedPipeline }
+          : {}),
       },
       support: {
         openTicketCount: openTicketsCount,
@@ -573,6 +736,8 @@ export class BusinessGraphService {
     unpaidBillsAmount?: number;
     committedPayrollAmount?: number;
     openTicketsCount?: number;
+    unmappedCurrencies?: string[];
+    baseCurrency?: string;
   }): BusinessGraphSnapshot['healthIndicators'] {
     const indicators: BusinessGraphSnapshot['healthIndicators'] = [];
 
@@ -635,6 +800,14 @@ export class BusinessGraphService {
         area: 'treasury',
         status: 'critical',
         detail: `Committed bills and payroll ($${obligations.toLocaleString()}) exceed available cash ($${data.cashBalance.toLocaleString()})`,
+      });
+    }
+
+    if (data.unmappedCurrencies && data.unmappedCurrencies.length > 0) {
+      indicators.push({
+        area: 'treasury',
+        status: 'warning',
+        detail: `Unconverted foreign currency balances (${data.unmappedCurrencies.join(', ')}) excluded from ${data.baseCurrency ?? 'base'} totals — configure exchange rates`,
       });
     }
 

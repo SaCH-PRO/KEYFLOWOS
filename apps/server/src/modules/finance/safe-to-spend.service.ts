@@ -1,6 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
+import {
+  computeNormalizedCashBalance,
+  convertToBaseOrThrow,
+  normalizeCurrencyCode,
+  type CashLedgerMovementRow,
+  type ExchangeRateRow,
+} from './finance-accounting.util';
 
 export interface SafeToSpendDto {
   cashBalance: number;
@@ -27,15 +34,28 @@ export class SafeToSpendService {
       where: { id: businessId },
       select: { currency: true },
     });
-    const currency = business?.currency ?? 'TTD';
+    const currency = normalizeCurrencyCode(business?.currency, 'TTD');
 
     const now = new Date();
     const next30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-    const [cashAccounts, taxPayableAccount, billsDue, reserveBuckets, committedPayrollRuns] = await Promise.all([
+    const [
+      cashAccounts,
+      taxPayableAccount,
+      billsDue,
+      reserveBuckets,
+      committedPayrollRuns,
+      exchangeRates,
+    ] = await Promise.all([
       this.prisma.client.financialAccount.findMany({
         where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-        select: { currentBalance: true },
+        select: {
+          id: true,
+          chartOfAccountId: true,
+          openingBalance: true,
+          currentBalance: true,
+          currency: true,
+        },
       }),
       this.coaSeeder.getBySystemKey(businessId, 'TAX_PAYABLE'),
       this.prisma.client.expense.findMany({
@@ -44,11 +64,11 @@ export class SafeToSpendService {
           status: 'BILL',
           dueDate: { gte: now, lte: next30 },
         },
-        select: { amount: true },
+        select: { amount: true, currency: true },
       }),
       this.prisma.client.cashReserveBucket.findMany({
         where: { businessId, status: 'ACTIVE' },
-        select: { currentAmount: true, name: true },
+        select: { currentAmount: true, currency: true, name: true },
       }),
       this.prisma.client.payrollRun?.findMany
         ? this.prisma.client.payrollRun.findMany({
@@ -56,12 +76,57 @@ export class SafeToSpendService {
               businessId,
               status: { in: ['DRAFT', 'APPROVED'] },
             },
-            select: { totalGross: true, status: true },
+            select: { totalGross: true, currency: true, status: true },
           })
         : Promise.resolve([]),
+      this.prisma.client.exchangeRate?.findMany
+        ? this.prisma.client.exchangeRate.findMany({
+            where: { businessId },
+            orderBy: { date: 'desc' },
+            take: 100,
+          })
+        : Promise.resolve([] as ExchangeRateRow[]),
     ]);
 
-    const cashBalance = cashAccounts.reduce((sum, a) => sum + Number(a.currentBalance ?? 0), 0);
+    const linkedCoaIds = Array.from(
+      new Set(
+        cashAccounts
+          .map((a: { chartOfAccountId?: string | null }) => a.chartOfAccountId)
+          .filter(Boolean) as string[],
+      ),
+    );
+
+    let cashLedgerMovements: CashLedgerMovementRow[] = [];
+    if (linkedCoaIds.length > 0 && this.prisma.client.ledgerEntry?.findMany) {
+      const entries = await this.prisma.client.ledgerEntry.findMany({
+        where: {
+          businessId,
+          accountId: { in: linkedCoaIds },
+        },
+        select: {
+          accountId: true,
+          debit: true,
+          credit: true,
+          currency: true,
+          transaction: { select: { type: true } },
+        },
+      });
+      cashLedgerMovements = entries.map((e: any) => ({
+        accountId: e.accountId,
+        debit: e.debit,
+        credit: e.credit,
+        currency: e.currency,
+        transactionType: e.transaction?.type ?? null,
+      }));
+    }
+
+    const cashBalance = computeNormalizedCashBalance({
+      accounts: cashAccounts,
+      ledgerMovements: cashLedgerMovements,
+      baseCurrency: currency,
+      rates: exchangeRates,
+      failClosedOnMissingRate: true,
+    });
 
     let taxReserved = 0;
     if (taxPayableAccount) {
@@ -72,11 +137,30 @@ export class SafeToSpendService {
       taxReserved = Number(agg._sum.credit ?? 0) - Number(agg._sum.debit ?? 0);
     }
 
-    const billsDueNext30Days = billsDue.reduce((sum, b) => sum + Number(b.amount ?? 0), 0);
+    const billsDueNext30Days = billsDue.reduce(
+      (sum, b: { amount?: number | null; currency?: string | null }) =>
+        sum +
+        convertToBaseOrThrow(
+          Number(b.amount ?? 0),
+          b.currency,
+          currency,
+          exchangeRates,
+          'safe-to-spend bills due',
+        ),
+      0,
+    );
 
     // Reserve committed (DRAFT + APPROVED) payroll runs that have not yet been disbursed.
     const payrollReserved = committedPayrollRuns.reduce(
-      (sum, r) => sum + Number(r.totalGross ?? 0),
+      (sum, r: { totalGross?: unknown; currency?: string | null }) =>
+        sum +
+        convertToBaseOrThrow(
+          Number(r.totalGross ?? 0),
+          r.currency,
+          currency,
+          exchangeRates,
+          'safe-to-spend payroll reserve',
+        ),
       0,
     );
     const debtPaymentsDue = 0;
@@ -84,7 +168,18 @@ export class SafeToSpendService {
     // Operating buffer: minimum 10% of cash or 500 currency units
     const operatingBuffer = Math.max(cashBalance * 0.1, 500);
 
-    const otherReserves = reserveBuckets.reduce((sum, r) => sum + Number(r.currentAmount ?? 0), 0);
+    const otherReserves = reserveBuckets.reduce(
+      (sum, r: { currentAmount?: unknown; currency?: string | null }) =>
+        sum +
+        convertToBaseOrThrow(
+          Number(r.currentAmount ?? 0),
+          r.currency,
+          currency,
+          exchangeRates,
+          'safe-to-spend reserve bucket',
+        ),
+      0,
+    );
 
     const safeToSpend = Math.max(
       0,
@@ -107,7 +202,14 @@ export class SafeToSpendService {
     if (otherReserves > 0) explanation.push(`Other reserves: ${currency} ${otherReserves.toFixed(2)}`);
     if (reserveBuckets.length > 0) {
       for (const rb of reserveBuckets) {
-        explanation.push(`  - ${rb.name}: ${currency} ${Number(rb.currentAmount ?? 0).toFixed(2)}`);
+        const rbAmt = convertToBaseOrThrow(
+          Number(rb.currentAmount ?? 0),
+          (rb as { currency?: string | null }).currency,
+          currency,
+          exchangeRates,
+          'safe-to-spend reserve bucket',
+        );
+        explanation.push(`  - ${rb.name}: ${currency} ${rbAmt.toFixed(2)}`);
       }
     }
 

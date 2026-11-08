@@ -112,6 +112,20 @@ The surfaces see the `ActionContext` type only through the orchestrator's method
 
 No new module edge: `AiModule`, `KeyAutonomyModule` and `KeyCortexModule` already `forwardRef` each other, which is why every cross-module collaborator above is resolved lazily.
 
+## Payroll → Finance Ledger & Treasury Sight
+
+Added in PR #195 (`execution-paths.md` §14). `PayrollModule` imports `FinanceModule` so payroll disbursements post synchronously into the double-entry ledger, and `SafeToSpendService`, `FinanceOverviewService`, and `BusinessGraphService` share `finance-accounting.util.ts` for ledger-derived cash position and multi-currency normalization:
+
+```
+payroll.module.ts                       → finance/finance.module.ts
+payroll.service.ts                      → finance/expense-posting.service.ts (onPayrollRunPaid)
+                                        → finance/finance-accounting.util.ts (convertToBaseOrThrow, normalizeCurrencyCode)
+expense-posting.service.ts              → finance/posting.service.ts (PostingService.post, syncFinancialAccountBalances)
+safe-to-spend.service.ts                → finance/finance-accounting.util.ts (computeNormalizedCashBalance, convertToBaseOrThrow)
+finance-overview.service.ts             → finance/finance-accounting.util.ts (computeNormalizedCashBalance)
+ai/business-graph.service.ts            → finance/finance-accounting.util.ts (computeNormalizedCashBalance, resolveConversionRate)
+```
+
 ## External Integration Dependencies
 
 | Integration | Primary Server Files | Primary Web Files |

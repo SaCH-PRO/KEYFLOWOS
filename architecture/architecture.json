@@ -28,6 +28,10 @@
       {
         "date": "2026-10-05",
         "change": "KF-EXEC-ACTION-001: key-action-boundary.service.ts node and its edges added for the Capability -> Control -> Clearance boundary, first adoption helpdesk_create_ticket (execution-paths.md section 13); the ai and key-cortex modules reach it and it reads KEY autonomy and policy from the ai module; inventory.json and dependencies.json regenerated"
+      },
+      {
+        "date": "2026-11-08",
+        "change": "PR #195: module:payroll and path:payroll-ledger nodes and module:payroll -> module:finance dependency edge added for payroll disbursement ledger posting, normalized cash balance accounting, and KEY treasury sight (execution-paths.md section 14); inventory.json and dependencies.json regenerated"
       }
     ],
     "root": "C:/Users/sachd/Downloads/KEYFLOWOS",
@@ -505,6 +509,16 @@
       "id": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
       "type": "file",
       "label": "KEY action boundary: envelope, control requirement, control evidence, clearance and the claim transaction that is the only KEY writer of a SupportTicket (helpdesk_create_ticket)"
+    },
+    {
+      "id": "module:payroll",
+      "type": "module",
+      "label": "Payroll & compensation"
+    },
+    {
+      "id": "path:payroll-ledger",
+      "type": "execution_path",
+      "label": "Payroll approval, ledger disbursement posting & treasury truth flow"
     }
   ],
   "edges": [
@@ -1032,6 +1046,31 @@
       "source": "apps/server/src/modules/key-autonomy/action-boundary/key-action-boundary.service.ts",
       "target": "module:ai",
       "type": "depends_on"
+    },
+    {
+      "source": "module:payroll",
+      "target": "module:finance",
+      "type": "depends_on"
+    },
+    {
+      "source": "module:ai",
+      "target": "module:finance",
+      "type": "depends_on"
+    },
+    {
+      "source": "module:ai",
+      "target": "module:payroll",
+      "type": "depends_on"
+    },
+    {
+      "source": "path:payroll-ledger",
+      "target": "module:payroll",
+      "type": "involves"
+    },
+    {
+      "source": "path:payroll-ledger",
+      "target": "module:finance",
+      "type": "involves"
     }
   ],
   "risks": [

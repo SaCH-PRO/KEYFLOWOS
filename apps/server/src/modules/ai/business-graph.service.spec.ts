@@ -141,4 +141,57 @@ describe('BusinessGraphService — Treasury, Pipeline & Support Sight', () => {
     expect(treasuryAlert?.status).toBe('critical');
     expect(treasuryAlert?.detail).toContain('exceed available cash');
   });
+
+  it('derives cashBalance from openingBalance plus non-OPENING_BALANCE ledger entries and normalizes multi-currency bills, payroll, and deals', async () => {
+    const { svc, prisma } = makeStubs();
+    prisma.client.financialAccount.findMany = vi.fn(async () => [
+      {
+        id: 'fa_bank_ttd',
+        chartOfAccountId: 'coa_bank',
+        openingBalance: 25_000,
+        currentBalance: 25_000,
+        currency: 'TTD',
+      },
+    ]);
+    prisma.client.ledgerEntry = {
+      findMany: vi.fn(async () => [
+        // OPENING_BALANCE must not double-count openingBalance
+        { accountId: 'coa_bank', debit: 25_000, credit: 0, currency: 'TTD', transaction: { type: 'OPENING_BALANCE' } },
+        // Paid payroll credit of 6,500 TTD reduces cash from 25,000 to 18,500
+        { accountId: 'coa_bank', debit: 0, credit: 6_500, currency: 'TTD', transaction: { type: 'EXPENSE' } },
+      ]),
+    };
+    prisma.client.expense.findMany = vi.fn(async () => [
+      { amount: 1_000, currency: 'TTD' },
+      { amount: 500, currency: 'USD' }, // 500 * 6.8 = 3,400 TTD -> total bills = 4,400 TTD
+    ]);
+    prisma.client.payrollRun.findMany = vi.fn(async () => [
+      { totalGross: 1_000, currency: 'USD' }, // 1,000 * 6.8 = 6,800 TTD
+      { totalGross: 2_000, currency: 'EUR' }, // Unmapped currency -> excluded from TTD total, reported in unconvertedByCurrency
+    ]);
+    prisma.client.deal.findMany = vi.fn(async () => [
+      { value: 10_000, currency: 'TTD' },
+      { value: 5_000, currency: 'USD' }, // 5,000 * 6.8 = 34,000 TTD -> total pipeline = 44,000 TTD
+    ]);
+    prisma.client.exchangeRate = {
+      findMany: vi.fn(async () => [{ fromCurrency: 'USD', toCurrency: 'TTD', rate: 6.8 }]),
+    };
+
+    const snapshot = await svc.getSnapshot('biz_1', true);
+    expect(snapshot.treasury?.cashBalance).toBe(18_500);
+    expect(snapshot.treasury?.unpaidBillsAmount).toBe(4_400);
+    expect(snapshot.treasury?.unpaidBillsCount).toBe(2);
+    expect(snapshot.treasury?.committedPayrollAmount).toBe(6_800);
+    expect(snapshot.treasury?.committedPayrollRuns).toBe(2);
+    expect(snapshot.treasury?.unconvertedByCurrency).toEqual({
+      EUR: { committedPayroll: 2_000 },
+    });
+    expect(snapshot.pipeline?.openPipelineValue).toBe(44_000);
+    expect(snapshot.pipeline?.openDealCount).toBe(2);
+
+    const warning = snapshot.healthIndicators.find(
+      (h) => h.area === 'treasury' && h.status === 'warning',
+    );
+    expect(warning?.detail).toContain('EUR');
+  });
 });

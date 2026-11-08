@@ -927,9 +927,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 105,
+      "lines": 165,
       "path": ".agent-control/active-packet.yaml",
-      "size_bytes": 6259
+      "size_bytes": 10957
     },
     {
       "extension": ".yaml",
@@ -939,9 +939,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 64,
+      "lines": 437,
       "path": ".agent-control/claude-return.yaml",
-      "size_bytes": 2301
+      "size_bytes": 44808
     },
     {
       "extension": ".yaml",
@@ -3281,15 +3281,15 @@
     },
     {
       "extension": ".yml",
-      "lines": 322,
+      "lines": 349,
       "path": ".github/workflows/agent-control-autopilot.yml",
-      "size_bytes": 12492
+      "size_bytes": 13906
     },
     {
       "extension": ".yml",
-      "lines": 135,
+      "lines": 156,
       "path": ".github/workflows/agent-control-gate.yml",
-      "size_bytes": 5280
+      "size_bytes": 6460
     },
     {
       "extension": ".yml",
@@ -6986,6 +6986,17 @@
       "size_bytes": 17942
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./business-graph.service",
+        "vitest"
+      ],
+      "lines": 197,
+      "path": "apps/server/src/modules/ai/business-graph.service.spec.ts",
+      "size_bytes": 7291
+    },
+    {
       "exports": [
         "BusinessGraphService",
         "BusinessGraphSnapshot",
@@ -6997,11 +7008,12 @@
       "extension": ".ts",
       "imports": [
         "../../core/prisma/prisma.service",
+        "../finance/finance-accounting.util",
         "@nestjs/common"
       ],
-      "lines": 584,
+      "lines": 852,
       "path": "apps/server/src/modules/ai/business-graph.service.ts",
-      "size_bytes": 21314
+      "size_bytes": 31602
     },
     {
       "exports": [
@@ -7618,9 +7630,9 @@
         "@nestjs/core",
         "crypto"
       ],
-      "lines": 6974,
+      "lines": 6977,
       "path": "apps/server/src/modules/ai/flow-orchestrator.service.ts",
-      "size_bytes": 298395
+      "size_bytes": 298504
     },
     {
       "exports": [],
@@ -7668,9 +7680,9 @@
       ],
       "extension": ".ts",
       "imports": [],
-      "lines": 6162,
+      "lines": 6171,
       "path": "apps/server/src/modules/ai/flow-tool-registry.ts",
-      "size_bytes": 277203
+      "size_bytes": 277811
     },
     {
       "exports": [
@@ -19133,9 +19145,9 @@
         "./expense-posting.service",
         "vitest"
       ],
-      "lines": 208,
+      "lines": 296,
       "path": "apps/server/src/modules/finance/expense-posting.service.spec.ts",
-      "size_bytes": 7951
+      "size_bytes": 11158
     },
     {
       "exports": [
@@ -19150,9 +19162,27 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 487,
+      "lines": 582,
       "path": "apps/server/src/modules/finance/expense-posting.service.ts",
-      "size_bytes": 17301
+      "size_bytes": 20160
+    },
+    {
+      "exports": [
+        "CashAccountSnapshotRow",
+        "CashLedgerMovementRow",
+        "ExchangeRateRow",
+        "computeNormalizedCashBalance",
+        "convertToBaseOrThrow",
+        "normalizeCurrencyCode",
+        "resolveConversionRate"
+      ],
+      "extension": ".ts",
+      "imports": [
+        "@nestjs/common"
+      ],
+      "lines": 179,
+      "path": "apps/server/src/modules/finance/finance-accounting.util.ts",
+      "size_bytes": 6028
     },
     {
       "exports": [
@@ -19248,13 +19278,14 @@
       "imports": [
         "../../core/prisma/prisma.service",
         "../../core/redis/redis.service",
+        "./finance-accounting.util",
         "./financial-account-seeder.service",
         "./receivables.service",
         "@nestjs/common"
       ],
-      "lines": 368,
+      "lines": 417,
       "path": "apps/server/src/modules/finance/finance-overview.service.ts",
-      "size_bytes": 13076
+      "size_bytes": 14717
     },
     {
       "exports": [
@@ -19448,6 +19479,23 @@
       "size_bytes": 7209
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "../ai/business-graph.service",
+        "../payroll/payroll.service",
+        "./expense-posting.service",
+        "./finance-overview.service",
+        "./posting.service",
+        "./safe-to-spend.service",
+        "@prisma/client",
+        "vitest"
+      ],
+      "lines": 423,
+      "path": "apps/server/src/modules/finance/payroll-financial-truth-journey.spec.ts",
+      "size_bytes": 16098
+    },
+    {
       "exports": [
         "PdfLine",
         "buildPdf"
@@ -19466,9 +19514,9 @@
         "@prisma/client",
         "vitest"
       ],
-      "lines": 188,
+      "lines": 253,
       "path": "apps/server/src/modules/finance/posting.service.integration.spec.ts",
-      "size_bytes": 6669
+      "size_bytes": 9073
     },
     {
       "exports": [],
@@ -19499,9 +19547,9 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 328,
+      "lines": 402,
       "path": "apps/server/src/modules/finance/posting.service.ts",
-      "size_bytes": 12989
+      "size_bytes": 15623
     },
     {
       "exports": [
@@ -19587,6 +19635,18 @@
       "size_bytes": 14845
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./safe-to-spend.service",
+        "@nestjs/common",
+        "vitest"
+      ],
+      "lines": 174,
+      "path": "apps/server/src/modules/finance/safe-to-spend.service.spec.ts",
+      "size_bytes": 7251
+    },
+    {
       "exports": [
         "SafeToSpendDto",
         "SafeToSpendService"
@@ -19595,11 +19655,12 @@
       "imports": [
         "../../core/prisma/prisma.service",
         "./chart-of-accounts-seeder.service",
+        "./finance-accounting.util",
         "@nestjs/common"
       ],
-      "lines": 114,
+      "lines": 231,
       "path": "apps/server/src/modules/finance/safe-to-spend.service.ts",
-      "size_bytes": 4091
+      "size_bytes": 7368
     },
     {
       "exports": [],
@@ -20512,6 +20573,17 @@
       "size_bytes": 299
     },
     {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./helpdesk.service",
+        "vitest"
+      ],
+      "lines": 50,
+      "path": "apps/server/src/modules/helpdesk/helpdesk.service.spec.ts",
+      "size_bytes": 1721
+    },
+    {
       "exports": [
         "CreateTicketBody",
         "HelpdeskService",
@@ -20523,9 +20595,9 @@
         "@nestjs/common",
         "@nestjs/event-emitter"
       ],
-      "lines": 189,
+      "lines": 190,
       "path": "apps/server/src/modules/helpdesk/helpdesk.service.ts",
-      "size_bytes": 6751
+      "size_bytes": 6836
     },
     {
       "exports": [
@@ -28278,9 +28350,9 @@
         "./payroll.service",
         "@nestjs/common"
       ],
-      "lines": 61,
+      "lines": 69,
       "path": "apps/server/src/modules/payroll/payroll.controller.ts",
-      "size_bytes": 1805
+      "size_bytes": 1999
     },
     {
       "exports": [
@@ -28289,16 +28361,30 @@
       "extension": ".ts",
       "imports": [
         "../../core/prisma/prisma.module",
+        "../finance/finance.module",
         "./payroll.controller",
         "./payroll.service",
         "@nestjs/common"
       ],
-      "lines": 12,
+      "lines": 13,
       "path": "apps/server/src/modules/payroll/payroll.module.ts",
-      "size_bytes": 382
+      "size_bytes": 486
+    },
+    {
+      "exports": [],
+      "extension": ".ts",
+      "imports": [
+        "./payroll.service",
+        "@nestjs/common",
+        "vitest"
+      ],
+      "lines": 298,
+      "path": "apps/server/src/modules/payroll/payroll.service.spec.ts",
+      "size_bytes": 11116
     },
     {
       "exports": [
+        "MarkRunPaidInput",
         "PayRateInput",
         "PayrollRunFilters",
         "PayrollService"
@@ -28306,11 +28392,15 @@
       "extension": ".ts",
       "imports": [
         "../../core/prisma/prisma.service",
-        "@nestjs/common"
+        "../finance/expense-posting.service",
+        "../finance/finance-accounting.util",
+        "@keyflow/db",
+        "@nestjs/common",
+        "@prisma/client"
       ],
-      "lines": 228,
+      "lines": 529,
       "path": "apps/server/src/modules/payroll/payroll.service.ts",
-      "size_bytes": 8351
+      "size_bytes": 18500
     },
     {
       "exports": [
@@ -41199,15 +41289,18 @@
     },
     {
       "exports": [
-        "JournalRedirectPage"
+        "GeneralJournalPage"
       ],
       "extension": ".tsx",
       "imports": [
-        "next/navigation"
+        "../components/books-journal-tab",
+        "@/components/layout/unified-page-shell",
+        "lucide-react",
+        "next/link"
       ],
-      "lines": 5,
+      "lines": 29,
       "path": "apps/web/src/app/app/finance/journal/page.tsx",
-      "size_bytes": 130
+      "size_bytes": 943
     },
     {
       "exports": [
@@ -41230,11 +41323,12 @@
         "@/lib/api/finance",
         "@/lib/workspace",
         "lucide-react",
+        "next/link",
         "react"
       ],
-      "lines": 151,
+      "lines": 161,
       "path": "apps/web/src/app/app/finance/ledger/page.tsx",
-      "size_bytes": 6606
+      "size_bytes": 7012
     },
     {
       "exports": [
@@ -41388,9 +41482,9 @@
         "next/navigation",
         "react"
       ],
-      "lines": 511,
+      "lines": 553,
       "path": "apps/web/src/app/app/financial-flow/page.tsx",
-      "size_bytes": 24489
+      "size_bytes": 27051
     },
     {
       "exports": [
@@ -44789,15 +44883,16 @@
         "@/components/ui/standard-module-layout",
         "@/components/ui/status-badge",
         "@/lib/api/payroll",
+        "@/lib/client",
         "@/lib/workspace",
         "@keyflow/ui",
         "lucide-react",
         "react",
         "sonner"
       ],
-      "lines": 319,
+      "lines": 403,
       "path": "apps/web/src/app/app/payroll/page.tsx",
-      "size_bytes": 12935
+      "size_bytes": 16587
     },
     {
       "exports": [
@@ -55099,9 +55194,9 @@
         "node:path",
         "vitest"
       ],
-      "lines": 212,
+      "lines": 211,
       "path": "apps/web/src/lib/__tests__/nav-reachability.spec.ts",
-      "size_bytes": 9823
+      "size_bytes": 9757
     },
     {
       "exports": [],
@@ -55992,9 +56087,9 @@
       "imports": [
         "@/lib/api"
       ],
-      "lines": 90,
+      "lines": 91,
       "path": "apps/web/src/lib/api/payroll.ts",
-      "size_bytes": 2481
+      "size_bytes": 2548
     },
     {
       "exports": [
@@ -56917,7 +57012,7 @@
       "imports": [],
       "lines": 167,
       "path": "apps/web/src/lib/disclosure-mode.ts",
-      "size_bytes": 7001
+      "size_bytes": 7039
     },
     {
       "exports": [
@@ -57162,9 +57257,9 @@
         "./feature-flags",
         "lucide-react"
       ],
-      "lines": 420,
+      "lines": 421,
       "path": "apps/web/src/lib/nav-config.ts",
-      "size_bytes": 16994
+      "size_bytes": 17076
     },
     {
       "exports": [
@@ -57791,9 +57886,9 @@
     },
     {
       "extension": ".json",
-      "lines": 1612,
+      "lines": 1651,
       "path": "architecture/architecture.json",
-      "size_bytes": 52769
+      "size_bytes": 53939
     },
     {
       "extension": ".yaml",
@@ -57817,13 +57912,13 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4213840
+      "size_bytes": 4233125
     },
     {
       "extension": ".md",
-      "lines": 132,
+      "lines": 146,
       "path": "architecture/dependency-map.md",
-      "size_bytes": 8755
+      "size_bytes": 9945
     },
     {
       "extension": ".yaml",
@@ -57833,15 +57928,15 @@
     },
     {
       "extension": ".md",
-      "lines": 671,
+      "lines": 737,
       "path": "architecture/execution-paths.md",
-      "size_bytes": 31631
+      "size_bytes": 36809
     },
     {
       "extension": ".json",
-      "lines": 63506,
+      "lines": 63764,
       "path": "architecture/inventory.json",
-      "size_bytes": 1644264
+      "size_bytes": 1650692
     },
     {
       "extension": ".md",
@@ -59113,15 +59208,15 @@
     },
     {
       "extension": ".md",
-      "lines": 271,
+      "lines": 278,
       "path": "docs/development/AGENT_AUTOPILOT.md",
-      "size_bytes": 13829
+      "size_bytes": 14283
     },
     {
       "extension": ".md",
-      "lines": 200,
+      "lines": 226,
       "path": "docs/development/AGENT_AUTOPILOT_OPERATIONS.md",
-      "size_bytes": 15019
+      "size_bytes": 19259
     },
     {
       "extension": ".yaml",
@@ -59131,9 +59226,9 @@
     },
     {
       "extension": ".md",
-      "lines": 700,
+      "lines": 845,
       "path": "docs/development/AGENT_CONTROL_PLANE.md",
-      "size_bytes": 34798
+      "size_bytes": 43465
     },
     {
       "extension": ".md",
@@ -61787,15 +61882,15 @@
         "./lib/semantic-review.mjs",
         "./lib/yaml.mjs"
       ],
-      "lines": 236,
+      "lines": 280,
       "path": "scripts/agent-control/auto-merge-admitted.mjs",
-      "size_bytes": 9168
+      "size_bytes": 11411
     },
     {
       "extension": ".ps1",
-      "lines": 689,
+      "lines": 731,
       "path": "scripts/agent-control/claude-worker.ps1",
-      "size_bytes": 29852
+      "size_bytes": 32453
     },
     {
       "extension": ".ps1",
@@ -61865,16 +61960,18 @@
         "TRANSITION_TRIGGERS",
         "artifactBindingProblems",
         "evaluateAdmission",
+        "evaluateGrantGate",
         "recheckBeforeMerge"
       ],
       "extension": ".mjs",
       "imports": [
         "./events.mjs",
+        "./merge-grant.mjs",
         "./semantic-review.mjs"
       ],
-      "lines": 292,
+      "lines": 355,
       "path": "scripts/agent-control/lib/admission.mjs",
-      "size_bytes": 13822
+      "size_bytes": 17190
     },
     {
       "exports": [
@@ -61984,6 +62081,42 @@
       "lines": 315,
       "path": "scripts/agent-control/lib/events.mjs",
       "size_bytes": 13471
+    },
+    {
+      "exports": [
+        "GRANT_EFFECTS",
+        "GRANT_REASONS",
+        "GRANT_REVIEW_STATUS",
+        "evaluateMergeGrant",
+        "sameGrant"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./authority-effects.mjs",
+        "./control-envelope.mjs",
+        "./events.mjs"
+      ],
+      "lines": 395,
+      "path": "scripts/agent-control/lib/merge-grant.mjs",
+      "size_bytes": 20094
+    },
+    {
+      "exports": [
+        "MergeRecordConflict",
+        "RECORD_AUTHORS",
+        "RECORD_OUTCOMES",
+        "buildMergeRecord",
+        "mergeMarker",
+        "recordProblems"
+      ],
+      "extension": ".mjs",
+      "imports": [
+        "./control-envelope.mjs",
+        "./events.mjs"
+      ],
+      "lines": 195,
+      "path": "scripts/agent-control/lib/merge-record.mjs",
+      "size_bytes": 8560
     },
     {
       "exports": [
@@ -62187,9 +62320,9 @@
     },
     {
       "extension": ".yaml",
-      "lines": 2214,
+      "lines": 3225,
       "path": "scripts/agent-control/negative-controls.yaml",
-      "size_bytes": 106661
+      "size_bytes": 152243
     },
     {
       "exports": [],
@@ -62236,6 +62369,17 @@
       "size_bytes": 5854
     },
     {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "./lib/events.mjs",
+        "./lib/merge-record.mjs"
+      ],
+      "lines": 90,
+      "path": "scripts/agent-control/record-auto-merge.mjs",
+      "size_bytes": 3624
+    },
+    {
       "exports": [
         "WAKE_TYPES",
         "selectDirective"
@@ -62278,16 +62422,18 @@
       "imports": [
         "../lib/admission.mjs",
         "../lib/events.mjs",
+        "../lib/merge-grant.mjs",
         "../lib/semantic-review.mjs",
         "../lib/yaml.mjs",
+        "./helpers/merge-grant-fixture.mjs",
         "node:assert/strict",
         "node:fs",
         "node:path",
         "node:test"
       ],
-      "lines": 532,
+      "lines": 711,
       "path": "scripts/agent-control/tests/admission.spec.mjs",
-      "size_bytes": 30189
+      "size_bytes": 41811
     },
     {
       "exports": [],
@@ -62314,6 +62460,23 @@
       "lines": 2410,
       "path": "scripts/agent-control/tests/authority-effects.spec.mjs",
       "size_bytes": 157207
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/events.mjs",
+        "../lib/yaml.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 325,
+      "path": "scripts/agent-control/tests/autopilot-workflow.spec.mjs",
+      "size_bytes": 16302
     },
     {
       "exports": [],
@@ -62386,6 +62549,30 @@
     },
     {
       "exports": [
+        "BASE",
+        "HEAD",
+        "PLAN_5826799265_BODY",
+        "REPO",
+        "SEMANTIC",
+        "body",
+        "claudeNote",
+        "comment",
+        "directiveComment",
+        "followUp",
+        "grantComment",
+        "grantFields",
+        "holdComment",
+        "realPlanComment",
+        "target"
+      ],
+      "extension": ".mjs",
+      "imports": [],
+      "lines": 208,
+      "path": "scripts/agent-control/tests/helpers/merge-grant-fixture.mjs",
+      "size_bytes": 7587
+    },
+    {
+      "exports": [
         "PS",
         "needsPowerShell",
         "requireWindows"
@@ -62397,6 +62584,63 @@
       "lines": 39,
       "path": "scripts/agent-control/tests/helpers/powershell.mjs",
       "size_bytes": 1465
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "node:fs"
+      ],
+      "lines": 80,
+      "path": "scripts/agent-control/tests/helpers/synthetic-github.mjs",
+      "size_bytes": 3922
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/events.mjs",
+        "./helpers/merge-grant-fixture.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:fs",
+        "node:os",
+        "node:path",
+        "node:test",
+        "node:url"
+      ],
+      "lines": 437,
+      "path": "scripts/agent-control/tests/merge-cli.spec.mjs",
+      "size_bytes": 24300
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/authority-effects.mjs",
+        "../lib/control-envelope.mjs",
+        "../lib/merge-grant.mjs",
+        "./helpers/merge-grant-fixture.mjs",
+        "node:assert/strict",
+        "node:test"
+      ],
+      "lines": 833,
+      "path": "scripts/agent-control/tests/merge-grant.spec.mjs",
+      "size_bytes": 53844
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../lib/merge-record.mjs",
+        "node:assert/strict",
+        "node:child_process",
+        "node:http",
+        "node:test"
+      ],
+      "lines": 464,
+      "path": "scripts/agent-control/tests/merge-record.spec.mjs",
+      "size_bytes": 21507
     },
     {
       "exports": [],
@@ -62554,9 +62798,9 @@
         "node:os",
         "node:path"
       ],
-      "lines": 164,
+      "lines": 166,
       "path": "scripts/agent-control/tests/windows/harness.mjs",
-      "size_bytes": 6380
+      "size_bytes": 6526
     },
     {
       "exports": [],
@@ -62588,6 +62832,21 @@
       "lines": 107,
       "path": "scripts/agent-control/tests/windows/worker-authority.spec.mjs",
       "size_bytes": 3590
+    },
+    {
+      "exports": [],
+      "extension": ".mjs",
+      "imports": [
+        "../helpers/powershell.mjs",
+        "./harness.mjs",
+        "node:assert/strict",
+        "node:fs",
+        "node:path",
+        "node:test"
+      ],
+      "lines": 128,
+      "path": "scripts/agent-control/tests/windows/worker-code-missing.spec.mjs",
+      "size_bytes": 5623
     },
     {
       "exports": [],
@@ -63473,7 +63732,7 @@
       ".js": 11,
       ".json": 41,
       ".md": 564,
-      ".mjs": 76,
+      ".mjs": 86,
       ".patch": 1,
       ".pdf": 1,
       ".pid": 3,
@@ -63487,7 +63746,7 @@
       ".svg": 6,
       ".template": 1,
       ".toml": 2,
-      ".ts": 2143,
+      ".ts": 2149,
       ".tsbuildinfo": 1,
       ".tsv": 1,
       ".tsx": 1233,
@@ -63499,8 +63758,8 @@
     },
     "root": ".",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3463,
-    "total_files": 4457,
-    "total_lines": 1149678
+    "source_files": 3479,
+    "total_files": 4473,
+    "total_lines": 1157771
   }
 }

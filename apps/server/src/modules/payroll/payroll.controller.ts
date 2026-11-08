@@ -59,8 +59,11 @@ export class PayrollController {
   markRunPaid(
     @Param('businessId') businessId: string,
     @Param('runId') runId: string,
-    @Body() body?: { paymentMethod?: string },
+    @Body() body?: { paymentAccountId?: string; paymentMethod?: string },
   ) {
-    return this.payroll.markRunPaid(businessId, runId, body?.paymentMethod);
+    return this.payroll.markRunPaid(businessId, runId, {
+      paymentAccountId: body?.paymentAccountId,
+      paymentMethod: body?.paymentMethod,
+    });
   }
 }

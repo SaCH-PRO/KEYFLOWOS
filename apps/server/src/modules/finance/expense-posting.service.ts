@@ -494,8 +494,9 @@ export class ExpensePostingService {
   }
 
   /**
-   * Payroll run paid — Dr Payroll & Contractors (EXPENSE_PAYROLL) / Cr Bank|Cash.
+   * Payroll run paid — Dr Payroll & Contractors (EXPENSE_PAYROLL) / Cr Bank|Cash|Processor.
    * Idempotent on `PayrollRun:{id}:paid`.
+   * Requires an explicit validated disbursement account or disbursement paymentMethod.
    */
   async onPayrollRunPaid(
     run: {
@@ -507,6 +508,8 @@ export class ExpensePostingService {
       periodStart: Date;
       periodEnd: Date;
       paymentMethod?: string | null;
+      paymentAccountId?: string | null;
+      paymentCoaId?: string | null;
       notes?: string | null;
     },
     txClient?: Prisma.TransactionClient,
@@ -515,10 +518,31 @@ export class ExpensePostingService {
     if (gross <= 0) return null;
 
     const payrollCoaId = await this.resolveSystemCoa(run.businessId, 'EXPENSE_PAYROLL');
-    const paymentCoaId = await this.resolvePaymentCoa(
-      run.businessId,
-      run.paymentMethod ?? 'bank_transfer',
-    );
+    let paymentCoaId = run.paymentCoaId ?? null;
+    if (!paymentCoaId) {
+      const method = (run.paymentMethod ?? '').toLowerCase().trim();
+      const allowedDisbursementMethods = new Set([
+        'cash',
+        'bank',
+        'bank_transfer',
+        'transfer',
+        'wire',
+        'ach',
+        'cheque',
+        'check',
+        'wipay',
+        'paypal',
+        'stripe',
+        'processor',
+      ]);
+      if (!method || !allowedDisbursementMethods.has(method)) {
+        throw new BadRequestException(
+          'Payroll disbursement requires an explicit valid paymentAccountId or paymentMethod (cash, bank_transfer, wire, ach, cheque, wipay, paypal, stripe)',
+        );
+      }
+      paymentCoaId = await this.resolvePaymentCoa(run.businessId, method);
+    }
+
     const periodLabel = `${run.periodStart.toISOString().slice(0, 10)} → ${run.periodEnd.toISOString().slice(0, 10)}`;
     const description = run.notes
       ? `Payroll run (${periodLabel}) — ${run.notes}`
@@ -545,6 +569,7 @@ export class ExpensePostingService {
           },
           {
             accountId: paymentCoaId,
+            financialAccountId: run.paymentAccountId ?? null,
             debit: 0,
             credit: gross,
             memo: `Payroll disbursement (${periodLabel})`,

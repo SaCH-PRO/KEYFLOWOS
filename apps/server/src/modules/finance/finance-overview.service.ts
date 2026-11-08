@@ -3,6 +3,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { RedisService } from '../../core/redis/redis.service';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 import { ReceivablesService } from './receivables.service';
+import { computeNormalizedCashBalance, normalizeCurrencyCode } from './finance-accounting.util';
 
 /**
  * FIN5 — Compute the start of the current month in America/Port_of_Spain
@@ -127,7 +128,13 @@ export class FinanceOverviewService {
     ] = await Promise.all([
       this.prisma.client.financialAccount.findMany({
         where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-        select: { currentBalance: true },
+        select: {
+          id: true,
+          chartOfAccountId: true,
+          openingBalance: true,
+          currentBalance: true,
+          currency: true,
+        },
       }),
       this.prisma.client.payment.aggregate({
         where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: monthStart } },
@@ -203,7 +210,49 @@ export class FinanceOverviewService {
       this.receivables ? this.receivables.getAging(businessId) : Promise.resolve(null),
     ]);
 
-    const cashBalance = cashAccounts.reduce((sum, a) => sum + Number(a.currentBalance ?? 0), 0);
+    const linkedCoaIds = Array.from(
+      new Set(
+        cashAccounts
+          .map((a: { chartOfAccountId?: string | null }) => a.chartOfAccountId)
+          .filter(Boolean) as string[],
+      ),
+    );
+    const [cashLedgerRows, exchangeRates] = await Promise.all([
+      linkedCoaIds.length > 0 && this.prisma.client.ledgerEntry?.findMany
+        ? this.prisma.client.ledgerEntry.findMany({
+            where: { businessId, accountId: { in: linkedCoaIds } },
+            select: {
+              accountId: true,
+              debit: true,
+              credit: true,
+              currency: true,
+              transaction: { select: { type: true } },
+            },
+          })
+        : Promise.resolve([]),
+      this.prisma.client.exchangeRate?.findMany
+        ? this.prisma.client.exchangeRate.findMany({
+            where: { businessId },
+            orderBy: { date: 'desc' },
+            take: 100,
+          })
+        : Promise.resolve([] as ExchangeRateRow[]),
+    ]);
+    const cashLedgerMovements: CashLedgerMovementRow[] = cashLedgerRows.map((e: any) => ({
+      accountId: e.accountId,
+      debit: e.debit,
+      credit: e.credit,
+      currency: e.currency,
+      transactionType: e.transaction?.type ?? null,
+    }));
+
+    const cashBalance = computeNormalizedCashBalance({
+      accounts: cashAccounts,
+      ledgerMovements: cashLedgerMovements,
+      baseCurrency: normalizeCurrencyCode(currency, 'TTD'),
+      rates: exchangeRates,
+      failClosedOnMissingRate: false,
+    });
 
     let taxReserved = 0;
     if (taxPayable) {

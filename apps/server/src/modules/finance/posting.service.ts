@@ -6,9 +6,66 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 export interface PostingEntryInput {
   /** ChartOfAccount.id this entry posts against. */
   accountId: string;
+  /** Optional explicit FinancialAccount.id when a specific cash/bank/processor account is targeted. */
+  financialAccountId?: string | null;
   debit?: Prisma.Decimal | number | string;
   credit?: Prisma.Decimal | number | string;
   memo?: string;
+}
+
+const ASSET_ACCOUNT_TYPES = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR']);
+const LIABILITY_EQUITY_ACCOUNT_TYPES = new Set(['CREDIT_CARD', 'LOAN', 'EQUITY', 'TAX']);
+
+async function syncFinancialAccountBalances(
+  tx: Prisma.TransactionClient,
+  businessId: string,
+  entries: Array<{
+    accountId: string;
+    financialAccountId?: string | null;
+    debit?: Prisma.Decimal | number | string;
+    credit?: Prisma.Decimal | number | string;
+  }>,
+  isOpeningBalance: boolean,
+): Promise<void> {
+  if (isOpeningBalance) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const faDelegate = (tx as any).financialAccount;
+  if (!faDelegate || typeof faDelegate.update !== 'function') return;
+
+  for (const e of entries) {
+    const dr = new D(String(e.debit ?? 0));
+    const cr = new D(String(e.credit ?? 0));
+    const netAssetDelta = dr.sub(cr);
+    if (netAssetDelta.eq(ZERO)) continue;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let targetAccount: any = null;
+    if (e.financialAccountId && typeof faDelegate.findFirst === 'function') {
+      targetAccount = await faDelegate.findFirst({
+        where: { id: e.financialAccountId, businessId, isActive: true },
+        select: { id: true, type: true, currentBalance: true },
+      });
+    } else if (typeof faDelegate.findFirst === 'function') {
+      targetAccount = await faDelegate.findFirst({
+        where: { businessId, chartOfAccountId: e.accountId, isActive: true },
+        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+        select: { id: true, type: true, currentBalance: true },
+      });
+    }
+    if (!targetAccount) continue;
+
+    const delta = LIABILITY_EQUITY_ACCOUNT_TYPES.has(targetAccount.type)
+      ? cr.sub(dr)
+      : ASSET_ACCOUNT_TYPES.has(targetAccount.type)
+        ? netAssetDelta
+        : netAssetDelta;
+
+    const current = new D(String(targetAccount.currentBalance ?? 0));
+    await faDelegate.update({
+      where: { id: targetAccount.id },
+      data: { currentBalance: current.add(delta) },
+    });
+  }
 }
 
 export interface PostingInput {
@@ -206,6 +263,12 @@ export class PostingService {
         },
         select: { id: true },
       });
+      await syncFinancialAccountBalances(
+        tx,
+        input.businessId,
+        input.entries,
+        input.type === 'OPENING_BALANCE',
+      );
       return { transactionId: txn.id, externalRef, alreadyPosted: false };
     };
 
@@ -316,6 +379,17 @@ export class PostingService {
         where: { id: original.id },
         data: { status: 'REVERSED' },
       });
+
+      await syncFinancialAccountBalances(
+        tx,
+        original.businessId,
+        original.entries.map((e) => ({
+          accountId: e.accountId,
+          debit: e.credit,
+          credit: e.debit,
+        })),
+        original.type === 'OPENING_BALANCE',
+      );
 
       return { transactionId: reversal.id, externalRef: reversal.externalRef, alreadyPosted: false };
     };

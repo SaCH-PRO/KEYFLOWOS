@@ -185,4 +185,69 @@ describe('PostingService.post — DB integration paths', () => {
     expect(stub.state.txns.size).toBe(0);
     expect(stub.state.ledger.length).toBe(0);
   });
+
+  it('synchronizes FinancialAccount.currentBalance atomically on post and skips duplicate idempotent retries', async () => {
+    const stub = makePrismaStub();
+    let bankBalance = new Prisma.Decimal(20_000);
+    (stub.prisma.client as any).$transaction = vi.fn(async (cb: any) => {
+      const txWithFa = {
+        financialTransaction: {
+          findUnique: stub.prisma.client.financialTransaction.findUnique,
+          create: vi.fn(async (args: any) => {
+            const id = `txn_${stub.state.txns.size + 1}`;
+            stub.state.txns.set(id, {
+              id,
+              businessId: args.data.businessId,
+              externalRef: args.data.externalRef ?? null,
+            });
+            return { id };
+          }),
+        },
+        chartOfAccount: {
+          findMany: vi.fn(async () => [
+            { id: 'coa_payroll', businessId: 'biz_1' },
+            { id: 'acc_cash_b1', businessId: 'biz_1' },
+          ]),
+        },
+        contact: { findUnique: vi.fn(async () => null) },
+        financialAccount: {
+          findFirst: vi.fn(async (args: any) => {
+            if (args.where?.id === 'fa_bank_1' || args.where?.chartOfAccountId === 'acc_cash_b1') {
+              return { id: 'fa_bank_1', type: 'BANK', currentBalance: bankBalance };
+            }
+            return null;
+          }),
+          update: vi.fn(async (args: any) => {
+            bankBalance = args.data.currentBalance;
+            return { id: 'fa_bank_1', currentBalance: bankBalance };
+          }),
+        },
+      };
+      return cb(txWithFa);
+    });
+
+    const svc = new PostingService(stub.prisma);
+    const payrollInput = {
+      businessId: 'biz_1',
+      type: 'EXPENSE' as const,
+      date: new Date('2026-08-31'),
+      amount: 3_500,
+      sourceType: 'PayrollRun',
+      sourceId: 'run_99',
+      kind: 'paid',
+      entries: [
+        { accountId: 'coa_payroll', debit: 3_500 },
+        { accountId: 'acc_cash_b1', financialAccountId: 'fa_bank_1', credit: 3_500 },
+      ],
+    };
+
+    const first = await svc.post(payrollInput);
+    expect(first.alreadyPosted).toBe(false);
+    expect(Number(bankBalance.toString())).toBe(16_500);
+
+    // Duplicate retry must be a no-op and must not decrement bankBalance a second time
+    const second = await svc.post(payrollInput);
+    expect(second.alreadyPosted).toBe(true);
+    expect(Number(bankBalance.toString())).toBe(16_500);
+  });
 });
