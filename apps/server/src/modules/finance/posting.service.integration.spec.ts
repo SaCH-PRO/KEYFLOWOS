@@ -360,9 +360,7 @@ describe('PostingService.post — DB integration paths', () => {
       { entryIndex: 1, accountId: 'acc_cash_b1', financialAccountId: 'fa_bank_secondary' },
     ]);
 
-    await svc.reverse({
-      businessId: 'biz_1',
-      transactionId: posted.transactionId,
+    await svc.reverse('biz_1', posted.transactionId, {
       reason: 'Payroll correction',
     });
 

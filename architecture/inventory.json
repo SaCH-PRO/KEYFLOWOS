@@ -19517,9 +19517,9 @@
         "@prisma/client",
         "vitest"
       ],
-      "lines": 374,
+      "lines": 372,
       "path": "apps/server/src/modules/finance/posting.service.integration.spec.ts",
-      "size_bytes": 14148
+      "size_bytes": 14109
     },
     {
       "exports": [],
@@ -63764,6 +63764,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3479,
     "total_files": 4473,
-    "total_lines": 1158342
+    "total_lines": 1158340
   }
 }
