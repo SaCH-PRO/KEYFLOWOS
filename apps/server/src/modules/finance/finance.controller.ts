@@ -87,24 +87,52 @@ export class FinanceController {
       description: string;
       reference?: string;
       notes?: string;
-      entries: Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>;
+      currency?: string;
+      entries: Array<{
+        accountId: string;
+        financialAccountId?: string | null;
+        debit?: number;
+        credit?: number;
+        memo?: string;
+      }>;
     },
     @Req() req: Request,
   ) {
-    const userId = (req as any).user?.id as string | undefined;
-    const totalDebit = body.entries.reduce((sum, e) => sum + (e.debit ?? 0), 0);
+    const userId = (req as any)?.user?.id as string | undefined;
+    if (!Array.isArray(body?.entries) || body.entries.length < 2) {
+      throw new BadRequestException('Journal entry requires at least 2 lines');
+    }
+    let resolvedCurrency: string | undefined;
+    if (body.currency !== undefined && body.currency !== null && String(body.currency).trim() !== '') {
+      const trimmed = String(body.currency).trim().toUpperCase();
+      if (!/^[A-Z]{3}$/.test(trimmed)) {
+        throw new BadRequestException(`Invalid currency code: ${String(body.currency)}`);
+      }
+      resolvedCurrency = trimmed;
+    } else if (typeof this.prisma?.client?.business?.findUnique === 'function') {
+      const biz = await this.prisma.client.business.findUnique({
+        where: { id: businessId },
+        select: { currency: true },
+      });
+      if (biz?.currency && typeof biz.currency === 'string' && biz.currency.trim()) {
+        resolvedCurrency = biz.currency.trim().toUpperCase();
+      }
+    }
+    const totalDebit = body.entries.reduce((sum, e) => sum + (Number(e.debit) || 0), 0);
     const input: PostingInput = {
       businessId,
       type: 'ADJUSTMENT',
       date: (() => { const d = new Date(body.date); if (Number.isNaN(d.getTime())) throw new BadRequestException('Invalid date'); return d; })(),
       amount: totalDebit,
+      currency: resolvedCurrency,
       description: body.description,
       reference: body.reference ?? null,
       notes: body.notes ?? null,
       entries: body.entries.map((e) => ({
         accountId: e.accountId,
-        debit: e.debit ?? 0,
-        credit: e.credit ?? 0,
+        ...(e.financialAccountId ? { financialAccountId: e.financialAccountId } : {}),
+        debit: Number(e.debit) || 0,
+        credit: Number(e.credit) || 0,
         memo: e.memo,
       })),
       createdById: userId ?? null,

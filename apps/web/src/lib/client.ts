@@ -13382,6 +13382,8 @@ export interface JournalEntryRow {
   entries: Array<{
     id: string;
     accountId: string;
+    financialAccountId?: string | null;
+    currency?: string;
     account: { id: string; name: string; type: string; code?: string };
     debit: number;
     credit: number;
@@ -13405,7 +13407,14 @@ export async function createJournalEntry(businessId: string, body: {
   description: string;
   reference?: string;
   notes?: string;
-  entries: Array<{ accountId: string; debit?: number; credit?: number; memo?: string }>;
+  currency?: string;
+  entries: Array<{
+    accountId: string;
+    financialAccountId?: string | null;
+    debit?: number;
+    credit?: number;
+    memo?: string;
+  }>;
 }) {
   return apiPost<JournalEntryRow>({ path: `${finBase(businessId)}/journal-entries`, body });
 }

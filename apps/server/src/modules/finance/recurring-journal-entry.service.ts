@@ -167,7 +167,9 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
     entry: { id: string; businessId: string; name: string; description: string | null; entries: Prisma.JsonValue; frequency: string; nextRunDate: Date },
     now: Date,
   ) {
-    const items = Array.isArray(entry.entries) ? entry.entries as Array<{ accountId: string; debit?: number; credit?: number; memo?: string }> : [];
+    const items = Array.isArray(entry.entries)
+      ? (entry.entries as Array<{ accountId: string; financialAccountId?: string | null; debit?: number; credit?: number; memo?: string }>)
+      : [];
     if (items.length < 2) {
       throw new BadRequestException('Recurring journal entry must have at least 2 line items');
     }
@@ -186,6 +188,7 @@ export class RecurringJournalEntryService implements OnModuleInit, OnModuleDestr
       kind: 'recurring_run',
       entries: items.map((e) => ({
         accountId: e.accountId,
+        ...(e.financialAccountId ? { financialAccountId: e.financialAccountId } : {}),
         debit: e.debit ?? 0,
         credit: e.credit ?? 0,
         memo: e.memo,

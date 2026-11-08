@@ -453,6 +453,7 @@
     "apps/web/src/app/app/finance/bank-rules",
     "apps/web/src/app/app/finance/cashflow",
     "apps/web/src/app/app/finance/components",
+    "apps/web/src/app/app/finance/components/__tests__",
     "apps/web/src/app/app/finance/components/records",
     "apps/web/src/app/app/finance/credit-notes",
     "apps/web/src/app/app/finance/exchange-rates",
@@ -19365,9 +19366,9 @@
         "express",
         "multer"
       ],
-      "lines": 1383,
+      "lines": 1411,
       "path": "apps/server/src/modules/finance/finance.controller.ts",
-      "size_bytes": 52771
+      "size_bytes": 53958
     },
     {
       "exports": [
@@ -19521,9 +19522,9 @@
         "@prisma/client",
         "vitest"
       ],
-      "lines": 602,
+      "lines": 794,
       "path": "apps/server/src/modules/finance/posting.service.integration.spec.ts",
-      "size_bytes": 22161
+      "size_bytes": 28966
     },
     {
       "exports": [],
@@ -19556,9 +19557,9 @@
         "@prisma/client",
         "node:crypto"
       ],
-      "lines": 640,
+      "lines": 740,
       "path": "apps/server/src/modules/finance/posting.service.ts",
-      "size_bytes": 23548
+      "size_bytes": 27569
     },
     {
       "exports": [
@@ -19610,9 +19611,9 @@
         "@nestjs/common",
         "@prisma/client"
       ],
-      "lines": 256,
+      "lines": 259,
       "path": "apps/server/src/modules/finance/recurring-journal-entry.service.ts",
-      "size_bytes": 8823
+      "size_bytes": 8960
     },
     {
       "exports": [],
@@ -32583,9 +32584,9 @@
         "path",
         "vitest"
       ],
-      "lines": 386,
+      "lines": 515,
       "path": "apps/server/test/payroll-financial-truth.integration.test.ts",
-      "size_bytes": 14884
+      "size_bytes": 19861
     },
     {
       "exports": [],
@@ -40997,6 +40998,18 @@
       "size_bytes": 137
     },
     {
+      "exports": [],
+      "extension": ".tsx",
+      "imports": [
+        "../books-journal-tab",
+        "@testing-library/react",
+        "vitest"
+      ],
+      "lines": 225,
+      "path": "apps/web/src/app/app/finance/components/__tests__/books-journal-tab.test.tsx",
+      "size_bytes": 7639
+    },
+    {
       "exports": [
         "BooksAccountsTab"
       ],
@@ -41035,7 +41048,8 @@
     },
     {
       "exports": [
-        "BooksJournalTab"
+        "BooksJournalTab",
+        "hasConfiguredExchangeRate"
       ],
       "extension": ".tsx",
       "imports": [
@@ -41047,9 +41061,9 @@
         "react",
         "sonner"
       ],
-      "lines": 256,
+      "lines": 451,
       "path": "apps/web/src/app/app/finance/components/books-journal-tab.tsx",
-      "size_bytes": 11345
+      "size_bytes": 19490
     },
     {
       "exports": [
@@ -41404,14 +41418,15 @@
         "@/components/layout/unified-page-shell",
         "@/components/ui/data-table",
         "@/lib/api/finance",
+        "@/lib/client",
         "@/lib/workspace",
         "lucide-react",
         "react",
         "sonner"
       ],
-      "lines": 297,
+      "lines": 303,
       "path": "apps/web/src/app/app/finance/recurring-journals/page.tsx",
-      "size_bytes": 12586
+      "size_bytes": 13083
     },
     {
       "exports": [],
@@ -56909,9 +56924,9 @@
         "./workspace",
         "zod"
       ],
-      "lines": 15115,
+      "lines": 15124,
       "path": "apps/web/src/lib/client.ts",
-      "size_bytes": 537313
+      "size_bytes": 537456
     },
     {
       "exports": [
@@ -57933,7 +57948,7 @@
       "extension": ".json",
       "lines": 0,
       "path": "architecture/dependencies.json",
-      "size_bytes": 4234574
+      "size_bytes": 4234841
     },
     {
       "extension": ".md",
@@ -57955,9 +57970,9 @@
     },
     {
       "extension": ".json",
-      "lines": 63785,
+      "lines": 63786,
       "path": "architecture/inventory.json",
-      "size_bytes": 1651332
+      "size_bytes": 1651369
     },
     {
       "extension": ".md",
@@ -63770,7 +63785,7 @@
       ".ts": 2150,
       ".tsbuildinfo": 1,
       ".tsv": 1,
-      ".tsx": 1233,
+      ".tsx": 1234,
       ".txt": 7,
       ".xlsx": 1,
       ".xsd": 39,
@@ -63779,8 +63794,8 @@
     },
     "root": ".",
     "scanner": "codebase-architect/inventory.py",
-    "source_files": 3480,
-    "total_files": 4474,
-    "total_lines": 1159431
+    "source_files": 3481,
+    "total_files": 4475,
+    "total_lines": 1160319
   }
 }

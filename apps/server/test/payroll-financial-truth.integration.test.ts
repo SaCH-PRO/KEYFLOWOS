@@ -383,4 +383,133 @@ describe('PostgreSQL Financial Truth & KEY Treasury Sight Integration', () => {
     expect(safeAfterReversal.cashBalance).toBe(27_000);
     expect(safeAfterReversal.taxReserved).toBe(0);
   });
+
+  it('requires explicit FinancialAccount selection when multiple bank accounts share a COA and respects non-TTD business currency and foreign-currency validation', async () => {
+    const bankCoa = await coaSeeder.getBySystemKey(ID.bizA, 'BANK');
+    const payrollCoa = await coaSeeder.getBySystemKey(ID.bizA, 'EXPENSE_PAYROLL');
+    const secondaryBankId = `${P}faBankSecondary`;
+
+    // Add a second active bank account sharing the same BANK COA on bizA
+    await db.financialAccount.create({
+      data: {
+        id: secondaryBankId,
+        businessId: ID.bizA,
+        chartOfAccountId: bankCoa.id,
+        name: 'First Citizens Reserve Checking',
+        type: 'BANK',
+        subtype: 'checking',
+        currency: 'TTD',
+        openingBalance: 15_000,
+        currentBalance: 15_000,
+        isDefault: false,
+        isActive: true,
+      },
+    });
+
+    // 1. Posting a journal entry on BANK COA without financialAccountId must fail closed
+    await expect(
+      postingService.post({
+        businessId: ID.bizA,
+        type: 'ADJUSTMENT',
+        date: new Date('2026-09-15T00:00:00.000Z'),
+        amount: 1_200,
+        description: 'Ambiguous shared COA bank entry',
+        entries: [
+          { accountId: payrollCoa.id, debit: 1_200 },
+          { accountId: bankCoa.id, credit: 1_200 },
+        ],
+      }),
+    ).rejects.toThrow(/Multiple active financial accounts .* share chart of account .*; specify financialAccountId explicitly to disambiguate/);
+
+    // 2. Specifying financialAccountId: secondaryBankId updates only secondaryBankId
+    await postingService.post({
+      businessId: ID.bizA,
+      type: 'ADJUSTMENT',
+      date: new Date('2026-09-15T00:00:00.000Z'),
+      amount: 1_200,
+      description: 'Disambiguated secondary bank entry',
+      entries: [
+        { accountId: payrollCoa.id, debit: 1_200 },
+        { accountId: bankCoa.id, financialAccountId: secondaryBankId, credit: 1_200 },
+      ],
+    });
+
+    const mainBankAfter = await db.financialAccount.findUnique({ where: { id: ID.faBankMain } });
+    const secondaryBankAfter = await db.financialAccount.findUnique({ where: { id: secondaryBankId } });
+    expect(Number(mainBankAfter.currentBalance)).toBe(22_000);
+    expect(Number(secondaryBankAfter.currentBalance)).toBe(13_800);
+
+    // 3. Non-TTD business (USD base currency) journal posting and foreign-currency validation
+    const usdBizId = `${P}bizUsd`;
+    await db.business.create({
+      data: { id: usdBizId, name: 'KeyFlow USD Operations', ownerId: ID.userA, currency: 'USD' },
+    });
+    await coaSeeder.ensureDefaults(usdBizId);
+    const usdExpCoa = await coaSeeder.getBySystemKey(usdBizId, 'EXPENSE_PAYROLL');
+    const usdTaxCoa = await coaSeeder.getBySystemKey(usdBizId, 'TAX_PAYABLE');
+
+    // Omitting currency on a USD business must default to USD (not TTD)
+    const usdJournal = await postingService.post({
+      businessId: usdBizId,
+      type: 'ADJUSTMENT',
+      date: new Date('2026-09-16T00:00:00.000Z'),
+      amount: 450,
+      description: 'USD base currency journal adjustment',
+      entries: [
+        { accountId: usdExpCoa.id, debit: 450 },
+        { accountId: usdTaxCoa.id, credit: 450 },
+      ],
+    });
+    const usdTxRow = await db.financialTransaction.findUnique({
+      where: { id: usdJournal.transactionId },
+      include: { entries: true },
+    });
+    expect(usdTxRow.currency).toBe('USD');
+    expect(usdTxRow.entries.every((e: { currency: string }) => e.currency === 'USD')).toBe(true);
+
+    // Supported foreign currency (EUR -> USD = 1.1) succeeds
+    await db.exchangeRate.create({
+      data: {
+        businessId: usdBizId,
+        fromCurrency: 'EUR',
+        toCurrency: 'USD',
+        rate: 1.1,
+        date: new Date('2026-09-16T00:00:00.000Z'),
+        source: 'manual',
+      },
+    });
+    const eurJournal = await postingService.post({
+      businessId: usdBizId,
+      type: 'ADJUSTMENT',
+      date: new Date('2026-09-16T00:00:00.000Z'),
+      amount: 200,
+      currency: 'EUR',
+      description: 'EUR foreign journal adjustment on USD business',
+      entries: [
+        { accountId: usdExpCoa.id, debit: 200 },
+        { accountId: usdTaxCoa.id, credit: 200 },
+      ],
+    });
+    const eurTxRow = await db.financialTransaction.findUnique({
+      where: { id: eurJournal.transactionId },
+    });
+    expect(eurTxRow.currency).toBe('EUR');
+
+    // Unsupported foreign currency (GBP with no exchange rate to USD) fails closed
+    await expect(
+      postingService.post({
+        businessId: usdBizId,
+        type: 'ADJUSTMENT',
+        date: new Date('2026-09-16T00:00:00.000Z'),
+        amount: 200,
+        currency: 'GBP',
+        description: 'Unsupported GBP journal adjustment',
+        entries: [
+          { accountId: usdExpCoa.id, debit: 200 },
+          { accountId: usdTaxCoa.id, credit: 200 },
+        ],
+      }),
+    ).rejects.toThrow(/Unsupported foreign currency GBP for business .* \(USD\): no configured exchange rate/);
+  });
 });
+

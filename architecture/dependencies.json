@@ -77863,6 +77863,27 @@
     },
     {
       "resolved": false,
+      "source": "apps/web/src/app/app/finance/components/__tests__/books-journal-tab.test.tsx",
+      "specifier": "@testing-library/react",
+      "target": "@testing-library/react",
+      "type": "external"
+    },
+    {
+      "resolved": true,
+      "source": "apps/web/src/app/app/finance/components/__tests__/books-journal-tab.test.tsx",
+      "specifier": "../books-journal-tab",
+      "target": "apps/web/src/app/app/finance/components/books-journal-tab.tsx",
+      "type": "relative"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/app/app/finance/components/__tests__/books-journal-tab.test.tsx",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
       "source": "apps/web/src/app/app/finance/components/books-accounts-tab.tsx",
       "specifier": "@/components/ui/empty-state",
       "target": "@/components/ui/empty-state",
@@ -78832,6 +78853,13 @@
       "source": "apps/web/src/app/app/finance/recurring-journals/page.tsx",
       "specifier": "@/lib/api/finance",
       "target": "@/lib/api/finance",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/web/src/app/app/finance/recurring-journals/page.tsx",
+      "specifier": "@/lib/client",
+      "target": "@/lib/client",
       "type": "external"
     },
     {
@@ -111092,8 +111120,8 @@
     }
   ],
   "meta": {
-    "edges": 15870,
-    "nodes": 3879,
+    "edges": 15874,
+    "nodes": 3880,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"
   },
@@ -123795,6 +123823,11 @@
     {
       "extension": ".tsx",
       "id": "apps/web/src/app/app/finance/cashflow/page.tsx",
+      "type": "file"
+    },
+    {
+      "extension": ".tsx",
+      "id": "apps/web/src/app/app/finance/components/__tests__/books-journal-tab.test.tsx",
       "type": "file"
     },
     {

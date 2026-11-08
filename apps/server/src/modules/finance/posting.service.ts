@@ -44,6 +44,17 @@ interface TxFinancialAccountDelegate {
     isActive?: boolean;
     currentBalance?: unknown;
   } | null>;
+  findMany?: (args: Record<string, unknown>) => Promise<
+    Array<{
+      id: string;
+      businessId?: string;
+      chartOfAccountId?: string | null;
+      type: string;
+      currency?: string | null;
+      isActive?: boolean;
+      currentBalance?: unknown;
+    }>
+  >;
   update?: (args: Record<string, unknown>) => Promise<unknown>;
 }
 
@@ -133,27 +144,44 @@ async function resolveFinancialAccountTargets(
         );
       }
     } else {
-      targetAccount = await faDelegate.findFirst({
-        where: {
-          businessId,
-          chartOfAccountId: e.accountId,
-          isActive: true,
-          currency: normalizedPostingCurrency,
-        },
-        orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-        select: {
-          id: true,
-          businessId: true,
-          chartOfAccountId: true,
-          type: true,
-          currency: true,
-          isActive: true,
-          currentBalance: true,
-        },
-      });
-      if (!targetAccount) {
+      if (typeof faDelegate.findMany === 'function') {
+        const candidateAccounts = await faDelegate.findMany({
+          where: {
+            businessId,
+            chartOfAccountId: e.accountId,
+            isActive: true,
+          },
+          orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            businessId: true,
+            chartOfAccountId: true,
+            type: true,
+            currency: true,
+            isActive: true,
+            currentBalance: true,
+          },
+        });
+        const matchingAccounts = (candidateAccounts ?? []).filter(
+          (a) =>
+            (!a.businessId || a.businessId === businessId) &&
+            a.chartOfAccountId === e.accountId &&
+            a.isActive !== false,
+        );
+        if (matchingAccounts.length > 1) {
+          throw new BadRequestException(
+            `Multiple active financial accounts (${matchingAccounts.map((a) => a.id).join(', ')}) share chart of account ${e.accountId}; specify financialAccountId explicitly to disambiguate`,
+          );
+        }
+        targetAccount = matchingAccounts[0] ?? null;
+      } else {
         targetAccount = await faDelegate.findFirst({
-          where: { businessId, chartOfAccountId: e.accountId, isActive: true },
+          where: {
+            businessId,
+            chartOfAccountId: e.accountId,
+            isActive: true,
+            currency: normalizedPostingCurrency,
+          },
           orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
           select: {
             id: true,
@@ -165,6 +193,21 @@ async function resolveFinancialAccountTargets(
             currentBalance: true,
           },
         });
+        if (!targetAccount) {
+          targetAccount = await faDelegate.findFirst({
+            where: { businessId, chartOfAccountId: e.accountId, isActive: true },
+            orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
+            select: {
+              id: true,
+              businessId: true,
+              chartOfAccountId: true,
+              type: true,
+              currency: true,
+              isActive: true,
+              currentBalance: true,
+            },
+          });
+        }
       }
       if (!targetAccount) continue;
     }
@@ -419,7 +462,64 @@ export class PostingService {
         }
       }
 
-      const postingCurrency = input.currency ?? 'TTD';
+      if (input.currency !== undefined && input.currency !== null && String(input.currency).trim() !== '') {
+        const trimmedCurrency = String(input.currency).trim();
+        if (!/^[A-Za-z]{3}$/.test(trimmedCurrency)) {
+          throw new BadRequestException(`Invalid currency code: ${String(input.currency)}`);
+        }
+      }
+
+      const rawTxWithBiz = tx as unknown as {
+        business?: {
+          findUnique?: (args: Record<string, unknown>) => Promise<{ currency?: string | null } | null>;
+        };
+        exchangeRate?: {
+          findMany?: (args: Record<string, unknown>) => Promise<
+            Array<{ fromCurrency: string; toCurrency: string; rate: number | string | { toString(): string } }>
+          >;
+        };
+      };
+      const rawClientWithBiz =
+        (this.prisma?.client as unknown as {
+          business?: {
+            findUnique?: (args: Record<string, unknown>) => Promise<{ currency?: string | null } | null>;
+          };
+          exchangeRate?: {
+            findMany?: (args: Record<string, unknown>) => Promise<
+              Array<{ fromCurrency: string; toCurrency: string; rate: number | string | { toString(): string } }>
+            >;
+          };
+        }) ?? {};
+
+      const bizDelegate = rawTxWithBiz.business ?? rawClientWithBiz.business;
+      const hasBusinessLookup = typeof bizDelegate?.findUnique === 'function';
+      const bizRecord = hasBusinessLookup
+        ? await bizDelegate!.findUnique!({
+            where: { id: input.businessId },
+            select: { currency: true },
+          })
+        : null;
+      const businessBaseCurrency = normalizeCurrencyCode(bizRecord?.currency, 'TTD');
+      const postingCurrency =
+        input.currency && String(input.currency).trim() !== ''
+          ? normalizeCurrencyCode(input.currency, businessBaseCurrency)
+          : businessBaseCurrency;
+
+      const fxDelegate = rawTxWithBiz.exchangeRate ?? rawClientWithBiz.exchangeRate;
+      if (
+        postingCurrency !== businessBaseCurrency &&
+        hasBusinessLookup &&
+        typeof fxDelegate?.findMany === 'function'
+      ) {
+        const rates = await loadLatestExchangeRates(fxDelegate, input.businessId);
+        const rateToBase = resolveConversionRate(postingCurrency, businessBaseCurrency, rates);
+        if (rateToBase == null) {
+          throw new BadRequestException(
+            `Unsupported foreign currency ${postingCurrency} for business ${input.businessId} (${businessBaseCurrency}): no configured exchange rate`,
+          );
+        }
+      }
+
       const preparedEntries = input.entries.map((e) => ({
         ...e,
         ledgerEntryId: randomUUID(),

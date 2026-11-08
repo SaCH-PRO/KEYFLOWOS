@@ -597,6 +597,198 @@ describe('PostingService.post — DB integration paths', () => {
       }),
     ).rejects.toThrow(/Financial account fa_other_biz does not belong to business biz_1/);
   });
+
+  it('rejects ambiguous COA posting when multiple active FinancialAccounts share a COA without financialAccountId, and attributes accurately when specified', async () => {
+    const stub = makePrismaStub();
+    let bank1Balance = new Prisma.Decimal(25_000);
+    let bank2Balance = new Prisma.Decimal(12_000);
+
+    (stub.prisma.client as any).$transaction = vi.fn(async (cb: any) => {
+      const sharedAccounts = [
+        {
+          id: 'fa_bank_1',
+          businessId: 'biz_1',
+          chartOfAccountId: 'acc_cash_b1',
+          type: 'BANK',
+          currency: 'TTD',
+          isActive: true,
+          currentBalance: bank1Balance,
+        },
+        {
+          id: 'fa_bank_2',
+          businessId: 'biz_1',
+          chartOfAccountId: 'acc_cash_b1',
+          type: 'BANK',
+          currency: 'TTD',
+          isActive: true,
+          currentBalance: bank2Balance,
+        },
+      ];
+      const txWithFa = {
+        financialTransaction: {
+          findUnique: stub.prisma.client.financialTransaction.findUnique,
+          create: vi.fn(async (args: any) => {
+            const id = `txn_${stub.state.txns.size + 1}`;
+            stub.state.txns.set(id, {
+              id,
+              businessId: args.data.businessId,
+              externalRef: args.data.externalRef ?? null,
+            });
+            return { id };
+          }),
+        },
+        chartOfAccount: {
+          findMany: vi.fn(async () => [
+            { id: 'coa_expense', businessId: 'biz_1' },
+            { id: 'acc_cash_b1', businessId: 'biz_1' },
+          ]),
+        },
+        contact: { findUnique: vi.fn(async () => null) },
+        financialAccount: {
+          findMany: vi.fn(async (args: any) =>
+            sharedAccounts.filter(
+              (a) =>
+                (!args.where?.businessId || a.businessId === args.where.businessId) &&
+                (!args.where?.chartOfAccountId || a.chartOfAccountId === args.where.chartOfAccountId) &&
+                a.isActive,
+            ),
+          ),
+          findFirst: vi.fn(async (args: any) =>
+            sharedAccounts.find((a) => a.id === args.where?.id) ?? null,
+          ),
+          update: vi.fn(async (args: any) => {
+            const inc = new Prisma.Decimal(String(args.data?.currentBalance?.increment ?? 0));
+            if (args.where?.id === 'fa_bank_2') {
+              bank2Balance = bank2Balance.add(inc);
+              return { id: 'fa_bank_2', currentBalance: bank2Balance };
+            }
+            bank1Balance = bank1Balance.add(inc);
+            return { id: 'fa_bank_1', currentBalance: bank1Balance };
+          }),
+        },
+      };
+      return cb(txWithFa);
+    });
+
+    const svc = new PostingService(stub.prisma);
+
+    // 1. Omitting financialAccountId on a COA shared by fa_bank_1 and fa_bank_2 must fail closed
+    await expect(
+      svc.post({
+        businessId: 'biz_1',
+        type: 'ADJUSTMENT',
+        date: new Date('2026-09-01'),
+        amount: 1_500,
+        description: 'Ambiguous bank journal entry',
+        entries: [
+          { accountId: 'coa_expense', debit: 1_500 },
+          { accountId: 'acc_cash_b1', credit: 1_500 },
+        ],
+      }),
+    ).rejects.toThrow(
+      /Multiple active financial accounts \(fa_bank_1, fa_bank_2\) share chart of account acc_cash_b1; specify financialAccountId explicitly to disambiguate/,
+    );
+    expect(Number(bank1Balance.toString())).toBe(25_000);
+    expect(Number(bank2Balance.toString())).toBe(12_000);
+
+    // 2. Specifying financialAccountId: 'fa_bank_2' updates only fa_bank_2
+    await svc.post({
+      businessId: 'biz_1',
+      type: 'ADJUSTMENT',
+      date: new Date('2026-09-01'),
+      amount: 1_500,
+      description: 'Disambiguated bank journal entry',
+      entries: [
+        { accountId: 'coa_expense', debit: 1_500 },
+        { accountId: 'acc_cash_b1', financialAccountId: 'fa_bank_2', credit: 1_500 },
+      ],
+    });
+    expect(Number(bank1Balance.toString())).toBe(25_000);
+    expect(Number(bank2Balance.toString())).toBe(10_500);
+  });
+
+  it('respects a non-TTD business currency (USD) by default and validates foreign-currency journal entries against configured exchange rates', async () => {
+    const stub = makePrismaStub();
+    const createdCurrencies: string[] = [];
+
+    (stub.prisma.client as any).$transaction = vi.fn(async (cb: any) => {
+      const txWithBiz = {
+        business: {
+          findUnique: vi.fn(async () => ({ id: 'biz_usd', currency: 'USD' })),
+        },
+        exchangeRate: {
+          findMany: vi.fn(async () => [
+            { fromCurrency: 'EUR', toCurrency: 'USD', rate: 1.1 },
+          ]),
+        },
+        financialTransaction: {
+          findUnique: stub.prisma.client.financialTransaction.findUnique,
+          create: vi.fn(async (args: any) => {
+            createdCurrencies.push(args.data.currency);
+            return { id: `txn_${createdCurrencies.length}` };
+          }),
+        },
+        chartOfAccount: {
+          findMany: vi.fn(async () => [
+            { id: 'coa_exp_usd', businessId: 'biz_usd' },
+            { id: 'coa_accrual_usd', businessId: 'biz_usd' },
+          ]),
+        },
+        contact: { findUnique: vi.fn(async () => null) },
+      };
+      return cb(txWithBiz);
+    });
+
+    const svc = new PostingService(stub.prisma);
+
+    // 1. Omitting currency on a USD business defaults to USD (not TTD)
+    await svc.post({
+      businessId: 'biz_usd',
+      type: 'ADJUSTMENT',
+      date: new Date('2026-09-05'),
+      amount: 250,
+      description: 'USD base journal adjustment',
+      entries: [
+        { accountId: 'coa_exp_usd', debit: 250 },
+        { accountId: 'coa_accrual_usd', credit: 250 },
+      ],
+    });
+    expect(createdCurrencies[0]).toBe('USD');
+
+    // 2. Supported foreign currency (EUR -> USD configured) succeeds
+    await svc.post({
+      businessId: 'biz_usd',
+      type: 'ADJUSTMENT',
+      date: new Date('2026-09-05'),
+      amount: 100,
+      currency: 'EUR',
+      description: 'EUR foreign journal adjustment',
+      entries: [
+        { accountId: 'coa_exp_usd', debit: 100 },
+        { accountId: 'coa_accrual_usd', credit: 100 },
+      ],
+    });
+    expect(createdCurrencies[1]).toBe('EUR');
+
+    // 3. Unsupported foreign currency (GBP with no exchange rate to USD) fails closed
+    await expect(
+      svc.post({
+        businessId: 'biz_usd',
+        type: 'ADJUSTMENT',
+        date: new Date('2026-09-05'),
+        amount: 100,
+        currency: 'GBP',
+        description: 'Unsupported GBP journal adjustment',
+        entries: [
+          { accountId: 'coa_exp_usd', debit: 100 },
+          { accountId: 'coa_accrual_usd', credit: 100 },
+        ],
+      }),
+    ).rejects.toThrow(
+      /Unsupported foreign currency GBP for business biz_usd \(USD\): no configured exchange rate/,
+    );
+  });
 });
+
 
 
