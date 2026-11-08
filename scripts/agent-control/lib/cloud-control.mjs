@@ -358,6 +358,8 @@ export function buildVerifiedAuthorityRecord(task, overrides = {}) {
     `AUTH-${String(task?.task_id || 'TASK').replace(/^CT-/, '').slice(0, 80)}`;
   return {
     authenticated: true,
+    trust_level: 'INDEPENDENT_OPERATOR_APPROVAL',
+    mutating_operations_authorized: true,
     approval_id: defaultApprovalId,
     actor: task?.authority?.author || null,
     source_kind: task?.authority?.kind || null,
@@ -382,6 +384,8 @@ export function buildVerifiedClearanceRecord(task, clearance, overrides = {}) {
     `AUTH-${String(clearance?.clearance_id || 'CLR').replace(/^CLR-/, '').slice(0, 80)}`;
   return {
     authenticated: true,
+    trust_level: 'INDEPENDENT_OPERATOR_APPROVAL',
+    mutating_operations_authorized: true,
     approval_id: defaultApprovalId,
     clearance_id: clearance?.clearance_id || null,
     actor: clearance?.author || null,
@@ -428,6 +432,8 @@ export function signVerifiedAuthorityRecord(record, privateKeyPem) {
   return {
     ...record,
     authenticated: true,
+    trust_level: 'CRYPTOGRAPHICALLY_SIGNED',
+    mutating_operations_authorized: true,
     algorithm: 'ed25519',
     signature,
   };
@@ -466,6 +472,8 @@ export function verifySignedAuthorityRecord(
     if (!ok) return null;
     return {
       authenticated: true,
+      trust_level: 'CRYPTOGRAPHICALLY_SIGNED',
+      mutating_operations_authorized: true,
       approval_id: record.approval_id,
       actor: record.actor,
       source_kind: record.source_kind,
@@ -568,7 +576,12 @@ export function buildCloudIdempotencyKey({ task_id, packet_id, source_main, atte
  */
 export function validateTaskAuthority(
   authority,
-  { allowlistedAuthors = AUTHOR_ALLOWLIST, task = null, verifiedAuthority = null } = {},
+  {
+    allowlistedAuthors = AUTHOR_ALLOWLIST,
+    task = null,
+    verifiedAuthority = null,
+    requireMutatingAuthorization = false,
+  } = {},
 ) {
   if (!authority || typeof authority !== 'object' || Array.isArray(authority)) {
     return { ok: false, reason: CLOUD_REASONS.AUTHORITY_MISSING, problems: ['authority block is required'] };
@@ -607,6 +620,15 @@ export function validateTaskAuthority(
   const authProblems = [];
   if (verifiedAuthority.authenticated !== true) {
     authProblems.push('verifiedAuthority.authenticated must be true');
+  }
+  if (
+    requireMutatingAuthorization &&
+    (verifiedAuthority.mutating_operations_authorized === false ||
+      verifiedAuthority.trust_level === 'READ_ONLY_EVENT_IDENTITY')
+  ) {
+    authProblems.push(
+      'read-only PR-event identity (self-supplied PR body or workflow input digest) cannot authorize mutating lease claims, replay clearances, failovers, or active dispatch; independent operator or Ed25519-signed authority is required',
+    );
   }
   if (!APPROVAL_ID_RE.test(String(verifiedAuthority.approval_id || ''))) {
     authProblems.push('verifiedAuthority.approval_id must match /^AUTH-[A-Za-z0-9._-]{4,120}$/');
@@ -966,7 +988,10 @@ export function evaluateLeaseAcquisition({
   verifiedAuthority = null,
   verifiedClearance = null,
 }) {
-  const valid = validateCloudTask(task, { verifiedAuthority });
+  const valid = validateCloudTask(task, {
+    verifiedAuthority,
+    requireMutatingAuthorization: true,
+  });
   if (!valid.ok) return valid;
 
   if (!isIsoUtc(nowIso)) {
@@ -1283,6 +1308,14 @@ export function verifyUncertainExecutionClearance(
   if (verifiedClearance.authenticated !== true) {
     authProblems.push('verifiedClearance.authenticated must be true');
   }
+  if (
+    verifiedClearance.mutating_operations_authorized === false ||
+    verifiedClearance.trust_level === 'READ_ONLY_EVENT_IDENTITY'
+  ) {
+    authProblems.push(
+      'read-only PR-event identity cannot authorize uncertain execution clearance; independent operator or Ed25519-signed clearance is required',
+    );
+  }
   if (!APPROVAL_ID_RE.test(String(verifiedClearance.approval_id || ''))) {
     authProblems.push('verifiedClearance.approval_id must match /^AUTH-[A-Za-z0-9._-]{4,120}$/');
   }
@@ -1339,7 +1372,10 @@ export function verifyTaskOwnership({
   allowHandoffCompletion = false,
   verifiedAuthority = null,
 }) {
-  const valid = validateCloudTask(task, { verifiedAuthority });
+  const valid = validateCloudTask(task, {
+    verifiedAuthority,
+    requireMutatingAuthorization: !allowCompletedPreflight,
+  });
   if (!valid.ok) return valid;
 
   if (!isIsoUtc(nowIso)) {
@@ -1386,6 +1422,7 @@ export function verifyTaskOwnership({
   const handoffCompletionStates = new Set([
     CLOUD_TASK_STATES.CLAIMED,
     CLOUD_TASK_STATES.EXECUTING,
+    CLOUD_TASK_STATES.PROVING,
     CLOUD_TASK_STATES.HANDOFF_READY,
   ]);
   const permittedStates = allowCompletedPreflight
@@ -1842,7 +1879,10 @@ export function prepareProviderFailoverHandoff({
   currentMainSha = null,
   currentPrHeadSha = null,
 }) {
-  const taskCheck = validateCloudTask(task, { verifiedAuthority });
+  const taskCheck = validateCloudTask(task, {
+    verifiedAuthority,
+    requireMutatingAuthorization: true,
+  });
   if (!taskCheck.ok) return taskCheck;
 
   if (task.state === CLOUD_TASK_STATES.REVOKED || task.lease?.revoked === true) {
@@ -1891,11 +1931,11 @@ export function prepareProviderFailoverHandoff({
   // Always use the persisted task state/lease/attempt when present so a stale
   // caller-supplied CLAIMED snapshot cannot bypass persisted UNCERTAIN_RESULT or REVOKED state.
   const effectiveTask = persistedPrev || task;
-
-  if (
+  const isUncertainTask =
     effectiveTask.state === CLOUD_TASK_STATES.UNCERTAIN_RESULT ||
-    effectiveTask.lease?.execution_uncertain === true
-  ) {
+    effectiveTask.lease?.execution_uncertain === true;
+
+  if (isUncertainTask) {
     const clearance = verifyUncertainExecutionClearance(effectiveTask, reconciliationClearance, {
       observedBranchHead,
       consumedClearanceIds,
@@ -1923,7 +1963,7 @@ export function prepareProviderFailoverHandoff({
   const handoffCheck = validateCloudHandoff(handoff, {
     task: effectiveTask,
     currentMainSha,
-    currentPrHeadSha,
+    currentPrHeadSha: isUncertainTask ? null : currentPrHeadSha,
     verifiedAncestry,
   });
   if (!handoffCheck.ok) return handoffCheck;
@@ -1977,12 +2017,28 @@ export function prepareProviderFailoverHandoff({
       }
     : baseReplacementAuthority;
 
+  // C2: Derive source_head and continuity checkpoint strictly from verified clearance for uncertain tasks,
+  // never from a stale historical handoff.semantic_head.
+  const nextSourceHead = isUncertainTask
+    ? reconciliationClearance.disposition === 'CONTINUE_FROM_OBSERVED_HEAD'
+      ? verifiedClearance.observed_branch_head
+      : null
+    : handoff.semantic_head;
+  const verifiedContinuitySemanticHead = isUncertainTask
+    ? reconciliationClearance.disposition === 'CONTINUE_FROM_OBSERVED_HEAD'
+      ? verifiedClearance.observed_branch_head
+      : null
+    : handoff.semantic_head;
+  const verifiedContinuityPrHead = isUncertainTask
+    ? verifiedClearance.observed_branch_head
+    : handoff.pr_head;
+
   const candidateNextTask = {
     ...effectiveTask,
     task_id: effectiveNextTaskId,
     provider: nextProvider,
     agent_identity: nextAgentIdentity,
-    source_head: handoff.semantic_head,
+    source_head: nextSourceHead,
     attempt: nextAttempt,
     authority: replacementAuthority,
     state: CLOUD_TASK_STATES.ISSUED,
@@ -1998,9 +2054,17 @@ export function prepareProviderFailoverHandoff({
       previous_provider: effectiveTask.provider,
       previous_agent_identity: effectiveTask.agent_identity,
       previous_lease_id: effectiveTask.lease?.lease_id || null,
-      verified_semantic_head: handoff.semantic_head,
-      verified_pr_head: handoff.pr_head,
+      verified_semantic_head: verifiedContinuitySemanticHead,
+      verified_pr_head: verifiedContinuityPrHead,
       pr_number: handoff.pr_number,
+      ...(isUncertainTask
+        ? {
+            reconciled_clearance_id: verifiedClearance.clearance_id,
+            reconciled_disposition: verifiedClearance.disposition,
+            reconciled_observed_branch_head: verifiedClearance.observed_branch_head,
+            reconciled_contract_digest: verifiedClearance.contract_digest,
+          }
+        : {}),
     },
   };
 
@@ -2011,6 +2075,8 @@ export function prepareProviderFailoverHandoff({
       actor: verifiedAuthority.actor,
       source_kind: verifiedAuthority.source_kind,
       reference: verifiedAuthority.reference,
+      trust_level: verifiedAuthority.trust_level || 'INDEPENDENT_OPERATOR_APPROVAL',
+      mutating_operations_authorized: verifiedAuthority.mutating_operations_authorized !== false,
     });
 
   const mergedExistingTasks = [
@@ -2142,6 +2208,12 @@ export function defaultCloudProviderRegistry() {
  * Dispatches a cloud task through the provider-neutral interface.
  * In Phase 1, unattended API invocation is explicitly deferred; if `requireUnattended`
  * is requested, it returns `DEFERRED_UNATTENDED_INVOCATION` without faking execution.
+ *
+ * When `task.lease` is present (already-leased task), `existingTasks` MUST contain
+ * a matching trusted persisted record with identical immutable contract fields
+ * (`verifyImmutableTaskContract`), and ownership is evaluated against the persisted
+ * task so a stale `CLAIMED` snapshot can never bypass persisted `UNCERTAIN_RESULT`
+ * or `REVOKED` state.
  */
 export function dispatchCloudTask({
   task,
@@ -2153,7 +2225,11 @@ export function dispatchCloudTask({
   requireUnattended = false,
   verifiedAuthority = null,
 }) {
-  const valid = validateCloudTask(task, { expectedMainSha, verifiedAuthority });
+  const valid = validateCloudTask(task, {
+    expectedMainSha,
+    verifiedAuthority,
+    requireMutatingAuthorization: true,
+  });
   if (!valid.ok) {
     return { status: CLOUD_DISPATCH_STATUS.REJECTED, ...valid };
   }
@@ -2177,37 +2253,61 @@ export function dispatchCloudTask({
     };
   }
 
-  const leaseResult = task.lease
-    ? verifyTaskOwnership({
-        task,
-        actorProvider: task.provider,
-        actorAgentId: task.agent_identity,
-        leaseId: task.lease.lease_id,
-        nowIso,
-        verifiedAuthority,
-      })
-    : evaluateLeaseAcquisition({
-        task,
-        claimantProvider: task.provider,
-        claimantAgentId: task.agent_identity,
-        nowIso,
-        existingTasks,
-        recordedIdempotencyKeys,
-        verifiedAuthority,
-      });
+  let effectiveTask = task;
+  let leaseResult;
+  if (task.lease) {
+    const persistedTask =
+      Array.isArray(existingTasks)
+        ? existingTasks.find((t) => t && typeof t === 'object' && t.task_id === task.task_id) || null
+        : null;
+    if (!persistedTask) {
+      return {
+        status: CLOUD_DISPATCH_STATUS.REJECTED,
+        ok: false,
+        reason: CLOUD_REASONS.LEASE_MISSING,
+        problems: [
+          `already-leased task ${task.task_id} cannot be dispatched without a matching trusted persisted task record in existingTasks`,
+        ],
+      };
+    }
+    const contractCheck = verifyImmutableTaskContract(persistedTask, task);
+    if (!contractCheck.ok) {
+      return { status: CLOUD_DISPATCH_STATUS.REJECTED, ...contractCheck };
+    }
+    effectiveTask = persistedTask;
+    leaseResult = verifyTaskOwnership({
+      task: persistedTask,
+      actorProvider: task.provider,
+      actorAgentId: task.agent_identity,
+      leaseId: task.lease.lease_id,
+      nowIso,
+      verifiedAuthority,
+    });
+  } else {
+    leaseResult = evaluateLeaseAcquisition({
+      task,
+      claimantProvider: task.provider,
+      claimantAgentId: task.agent_identity,
+      nowIso,
+      existingTasks,
+      recordedIdempotencyKeys,
+      verifiedAuthority,
+    });
+  }
 
   if (!leaseResult.ok) {
     return { status: CLOUD_DISPATCH_STATUS.REJECTED, ...leaseResult };
   }
 
-  const activeLease = task.lease || leaseResult.lease;
+  const dispatchedTask = leaseResult.task || effectiveTask;
+  const activeLease = dispatchedTask.lease || leaseResult.lease;
   if (requireUnattended) {
     return {
       status: CLOUD_DISPATCH_STATUS.DEFERRED_UNATTENDED_INVOCATION,
       ok: false,
       reason: CLOUD_DISPATCH_STATUS.DEFERRED_UNATTENDED_INVOCATION,
       automated_provider_invocation: 'DEFERRED_PHASE_2',
-      detail: `Unattended API invocation for ${task.provider} is deferred to Phase 2; use GitHub-native manual cloud handoff`,
+      detail: `Unattended API invocation for ${dispatchedTask.provider} is deferred to Phase 2; use GitHub-native manual cloud handoff`,
     };
   }
 
@@ -2215,8 +2315,8 @@ export function dispatchCloudTask({
     status: CLOUD_DISPATCH_STATUS.MANUAL_GITHUB_HANDOFF_READY,
     ok: true,
     reason: CLOUD_REASONS.OK,
-    handoff_bundle: adapter.prepareHandoff(leaseResult.task || task, activeLease),
-    task: leaseResult.task || task,
+    handoff_bundle: adapter.prepareHandoff(dispatchedTask, activeLease),
+    task: dispatchedTask,
     lease: activeLease,
   };
 }
@@ -2611,6 +2711,29 @@ export function evaluateCloudPreflight({
         problems: ['claude-return.yaml merge_authority must be false'],
       };
     }
+  }
+
+  // C4: Require a valid handoff artifact whenever task.state is HANDOFF_READY or
+  // COMPLETED_DRAFT, or when cloud-handoff.yaml was modified/deleted in changedFiles.
+  const handoffTouchedInDiff =
+    Array.isArray(changedFiles) &&
+    changedFiles.some(
+      (file) => file === '.agent-control/cloud-handoff.yaml' || file.endsWith('/cloud-handoff.yaml'),
+    );
+  const handoffRequiredByState =
+    task.state === CLOUD_TASK_STATES.HANDOFF_READY ||
+    task.state === CLOUD_TASK_STATES.COMPLETED_DRAFT;
+  if (!handoff && (handoffRequiredByState || handoffTouchedInDiff)) {
+    return {
+      ok: false,
+      mode: 'READ_ONLY_PREFLIGHT',
+      reason: CLOUD_REASONS.HANDOFF_INVALID,
+      problems: [
+        handoffRequiredByState
+          ? `cloud-handoff.yaml is required when task.state is ${task.state}`
+          : 'cloud-handoff.yaml was modified or deleted in changedFiles but handoff artifact is missing',
+      ],
+    };
   }
 
   if (handoff) {

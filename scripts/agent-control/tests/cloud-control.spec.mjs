@@ -1402,10 +1402,11 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
       assert.equal(unverifiedVal.exitCode, 1);
       assert.equal(unverifiedVal.payload.reason, CLOUD_REASONS.UNVERIFIED_AUTHORITY);
 
-      // With verifiedAuthority, --validate-task and --validate-handoff succeed.
+      // With verifiedAuthority (and explicit allowInProcessVerifiedAuthority: true), --validate-task and --validate-handoff succeed.
       const vTask = runCloudDispatchCli(['--validate-task', taskPath], {
         cwd: tmpDir,
         verifiedAuthority: buildVerifiedAuthorityRecord(handoffReadyTask),
+        allowInProcessVerifiedAuthority: true,
       });
       assert.equal(vTask.exitCode, 0);
 
@@ -1415,10 +1416,30 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
       });
       assert.equal(vHandoff.exitCode, 0);
 
+      // C1: Explicitly passing --task <missing> on --validate-handoff must fail closed (exitCode 2) instead of falling back to task: null.
+      const missingTaskOnHandoff = runCloudDispatchCli(
+        ['--validate-handoff', handoffPath, '--task', path.join(tmpDir, 'nonexistent-task.yaml')],
+        {
+          cwd: tmpDir,
+          verifiedAncestry: VALID_ANCESTRY,
+        },
+      );
+      assert.equal(missingTaskOnHandoff.exitCode, 2);
+      assert.equal(missingTaskOnHandoff.payload.ok, false);
+      assert.equal(missingTaskOnHandoff.payload.reason, CLOUD_REASONS.TASK_INVALID);
+
+      // Standalone --validate-handoff (without --task in argv) remains supported.
+      const standaloneHandoff = runCloudDispatchCli(['--validate-handoff', handoffPath], {
+        cwd: tmpDir,
+        verifiedAncestry: VALID_ANCESTRY,
+      });
+      assert.equal(standaloneHandoff.exitCode, 0);
+
       // Running --preflight in a non-git directory fails closed due to missing git HEAD.
       const nonGitPreflight = runCloudDispatchCli(['--preflight', '--task', taskPath], {
         cwd: tmpDir,
         verifiedAuthority: buildVerifiedAuthorityRecord(handoffReadyTask),
+        allowInProcessVerifiedAuthority: true,
       });
       assert.equal(nonGitPreflight.exitCode, 1);
       assert.equal(nonGitPreflight.payload.reason, CLOUD_REASONS.INVALID_SOURCE_COMMIT);
@@ -1434,7 +1455,7 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
       const task = makeTask({
         authority: {
           ...baseTask.authority,
-          approval_id: 'KF-META-CLOUD-DISPATCH-001-AUTH-001',
+          approval_id: 'AUTH-KF-META-CLOUD-DISPATCH-001-001',
         },
       });
       const digest = computeTaskContractDigest(task);
@@ -1446,7 +1467,13 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
         },
       };
 
-      // 1. Unsigned caller-written --verified-authority JSON is rejected.
+      // 1. Unsigned caller-written --verified-authority JSON is rejected, and unsigned in-process options.verifiedAuthority is rejected by default.
+      assert.equal(
+        resolveVerifiedAuthority(taskWithDigest, [], tmpDir, {
+          verifiedAuthority: buildVerifiedAuthorityRecord(taskWithDigest),
+        }),
+        null,
+      );
       const unsignedAuthFile = path.join(tmpDir, 'unsigned-auth.json');
       fs.writeFileSync(
         unsignedAuthFile,
@@ -1479,6 +1506,8 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
       );
       assert.ok(signedResolved);
       assert.equal(signedResolved.contract_digest, digest);
+      assert.equal(signedResolved.trust_level, 'CRYPTOGRAPHICALLY_SIGNED');
+      assert.equal(signedResolved.mutating_operations_authorized, true);
 
       const { publicKey: wrongPublicKey } = crypto.generateKeyPairSync('ed25519');
       const wrongKeyResolved = resolveVerifiedAuthority(
@@ -1520,7 +1549,7 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
         ...mutatedTask,
         authority: {
           ...mutatedTask.authority,
-          approval_id: 'KF-META-CLOUD-DISPATCH-001-AUTH-001',
+          approval_id: 'AUTH-KF-META-CLOUD-DISPATCH-001-001',
           contract_digest: mutatedDigest,
         },
       };
@@ -1545,13 +1574,48 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
         null,
       );
 
-      // 5. GITHUB_EVENT_PATH succeeds when sender === opener === SaCH-PRO and independent digest matches.
+      // 5. GITHUB_EVENT_PATH succeeds for read-only preflight when sender === opener === SaCH-PRO and digest matches,
+      //    but marks trust_level: 'READ_ONLY_EVENT_IDENTITY' (mutating_operations_authorized: false) so it CANNOT mint leases, clearances, or failovers (C7).
       const validEventResolved = resolveVerifiedAuthority(taskWithDigest, [], tmpDir, {
         githubEventPath: validPrEventFile,
       });
       assert.ok(validEventResolved);
       assert.equal(validEventResolved.actor, 'SaCH-PRO');
       assert.equal(validEventResolved.contract_digest, digest);
+      assert.equal(validEventResolved.trust_level, 'READ_ONLY_EVENT_IDENTITY');
+      assert.equal(validEventResolved.mutating_operations_authorized, false);
+
+      // Read-only preflight accepts READ_ONLY_EVENT_IDENTITY for an ISSUED task.
+      const roPreflight = evaluateCloudPreflight({
+        task: taskWithDigest,
+        handoff: null,
+        branchName: taskWithDigest.implementation_branch,
+        headSha: SAMPLE_PR_HEAD,
+        mainSha: VERIFIED_MAIN_SHA,
+        changedFiles: ['.agent-control/cloud-task.yaml'],
+        verifiedAuthority: validEventResolved,
+        nowIso: NOW_ISO,
+      });
+      assert.equal(roPreflight.ok, true);
+
+      // Mutating lease claim, dispatch, failover, and replay clearance MUST reject READ_ONLY_EVENT_IDENTITY!
+      const selfMintedClaim = evaluateLeaseAcquisition({
+        task: taskWithDigest,
+        claimantProvider: CLOUD_PROVIDERS.GEMINI,
+        claimantAgentId: 'gemini-cloud-builder-01',
+        nowIso: NOW_ISO,
+        verifiedAuthority: validEventResolved,
+      });
+      assert.equal(selfMintedClaim.ok, false);
+      assert.equal(selfMintedClaim.reason, CLOUD_REASONS.UNVERIFIED_AUTHORITY);
+
+      const selfMintedDispatch = dispatchCloudTask({
+        task: taskWithDigest,
+        nowIso: NOW_ISO,
+        verifiedAuthority: validEventResolved,
+      });
+      assert.equal(selfMintedDispatch.ok, false);
+      assert.equal(selfMintedDispatch.reason, CLOUD_REASONS.UNVERIFIED_AUTHORITY);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -1706,5 +1770,352 @@ describe('Phase 1 Cloud-Native Multi-Agent Control Plane (KF-META-CLOUD-DISPATCH
       }).shouldRun,
       true,
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // Final Phase 1 Hardening Regression Proofs (C2, C3, C4, C5, C7)
+  // -------------------------------------------------------------------------
+  it('C2: prepareProviderFailoverHandoff enforces uncertain-execution dispositions against a stale historical handoff', () => {
+    const leased = makeLeasedTask();
+    // Stale historical handoff from an earlier checkpoint before execution became uncertain.
+    const staleHandoff = makeHandoff({
+      semantic_head: SAMPLE_SEMANTIC_HEAD,
+      pr_head: SAMPLE_PR_HEAD,
+      evidence_head: SAMPLE_PR_HEAD,
+      pr_number: null,
+    });
+
+    // 1. REPLAY_FROM_SOURCE_MAIN must start at source_main (source_head: null), NOT staleHandoff.semantic_head.
+    const uncertainAtMain = markExecutionUncertain(leased, {
+      reason: 'provider crashed before pushing verified commit',
+      nowIso: '2026-11-07T20:15:00Z',
+      observedBranchHead: VERIFIED_MAIN_SHA,
+    });
+    const replayClearance = {
+      clearance_id: 'CLR-CT-KF-META-CLOUD-DISPATCH-001-C2-REPLAY',
+      task_id: uncertainAtMain.task_id,
+      packet_id: uncertainAtMain.packet_id,
+      uncertain_lease_id: uncertainAtMain.lease.lease_id,
+      cleared_attempt: uncertainAtMain.attempt,
+      cleared_by_provider: CLOUD_PROVIDERS.CHATGPT,
+      author: 'SaCH-PRO',
+      observed_branch_head: VERIFIED_MAIN_SHA,
+      disposition: 'REPLAY_FROM_SOURCE_MAIN',
+    };
+    const replayFailover = prepareProviderFailoverHandoff({
+      task: uncertainAtMain,
+      handoff: staleHandoff,
+      nextProvider: CLOUD_PROVIDERS.KIMI,
+      nextAgentIdentity: 'kimi-cloud-builder-01',
+      nowIso: '2026-11-07T20:20:00Z',
+      reconciliationClearance: replayClearance,
+      observedBranchHead: VERIFIED_MAIN_SHA,
+      verifiedAuthority: buildVerifiedAuthorityRecord(uncertainAtMain),
+      verifiedClearance: buildVerifiedClearanceRecord(uncertainAtMain, replayClearance),
+      verifiedAncestry: VALID_ANCESTRY,
+    });
+    assert.equal(replayFailover.ok, true);
+    assert.equal(replayFailover.next_task.source_head, null);
+    assert.equal(replayFailover.next_task.continuity_from.verified_semantic_head, null);
+    assert.equal(replayFailover.next_task.continuity_from.reconciled_disposition, 'REPLAY_FROM_SOURCE_MAIN');
+    const replayBundle = kimiCloudAdapter().prepareHandoff(replayFailover.next_task);
+    assert.equal(replayBundle.source_head, null);
+    assert.equal(replayBundle.starting_commit, VERIFIED_MAIN_SHA);
+
+    // 2. CONTINUE_FROM_OBSERVED_HEAD must start at verifiedClearance.observed_branch_head, NOT staleHandoff.semantic_head.
+    const OBSERVED_INTERMEDIATE_SHA = '4444444444444444444444444444444444444444';
+    const uncertainAtObserved = markExecutionUncertain(leased, {
+      reason: 'provider dropped after intermediate commit',
+      nowIso: '2026-11-07T20:15:00Z',
+      observedBranchHead: OBSERVED_INTERMEDIATE_SHA,
+    });
+    const continueClearance = {
+      clearance_id: 'CLR-CT-KF-META-CLOUD-DISPATCH-001-C2-CONT',
+      task_id: uncertainAtObserved.task_id,
+      packet_id: uncertainAtObserved.packet_id,
+      uncertain_lease_id: uncertainAtObserved.lease.lease_id,
+      cleared_attempt: uncertainAtObserved.attempt,
+      cleared_by_provider: CLOUD_PROVIDERS.CHATGPT,
+      author: 'SaCH-PRO',
+      observed_branch_head: OBSERVED_INTERMEDIATE_SHA,
+      disposition: 'CONTINUE_FROM_OBSERVED_HEAD',
+    };
+    const continueFailover = prepareProviderFailoverHandoff({
+      task: uncertainAtObserved,
+      handoff: staleHandoff,
+      nextProvider: CLOUD_PROVIDERS.KIMI,
+      nextAgentIdentity: 'kimi-cloud-builder-01',
+      nowIso: '2026-11-07T20:20:00Z',
+      reconciliationClearance: continueClearance,
+      observedBranchHead: OBSERVED_INTERMEDIATE_SHA,
+      verifiedAuthority: buildVerifiedAuthorityRecord(uncertainAtObserved),
+      verifiedClearance: buildVerifiedClearanceRecord(uncertainAtObserved, continueClearance),
+      verifiedAncestry: VALID_ANCESTRY,
+    });
+    assert.equal(continueFailover.ok, true);
+    assert.equal(continueFailover.next_task.source_head, OBSERVED_INTERMEDIATE_SHA);
+    assert.equal(
+      continueFailover.next_task.continuity_from.verified_semantic_head,
+      OBSERVED_INTERMEDIATE_SHA,
+    );
+    const continueBundle = kimiCloudAdapter().prepareHandoff(continueFailover.next_task);
+    assert.equal(continueBundle.source_head, OBSERVED_INTERMEDIATE_SHA);
+    assert.equal(continueBundle.starting_commit, OBSERVED_INTERMEDIATE_SHA);
+
+    // 3. ABORT_AND_REISSUE blocks failover continuation.
+    const abortClearance = {
+      ...replayClearance,
+      clearance_id: 'CLR-CT-KF-META-CLOUD-DISPATCH-001-C2-ABORT',
+      disposition: 'ABORT_AND_REISSUE',
+    };
+    const abortFailover = prepareProviderFailoverHandoff({
+      task: uncertainAtMain,
+      handoff: staleHandoff,
+      nextProvider: CLOUD_PROVIDERS.KIMI,
+      nextAgentIdentity: 'kimi-cloud-builder-01',
+      nowIso: '2026-11-07T20:20:00Z',
+      reconciliationClearance: abortClearance,
+      observedBranchHead: VERIFIED_MAIN_SHA,
+      verifiedAuthority: buildVerifiedAuthorityRecord(uncertainAtMain),
+      verifiedClearance: buildVerifiedClearanceRecord(uncertainAtMain, abortClearance),
+      verifiedAncestry: VALID_ANCESTRY,
+    });
+    assert.equal(abortFailover.ok, false);
+    assert.equal(abortFailover.reason, CLOUD_REASONS.UNCERTAIN_EXECUTION_REPLAY_BLOCKED);
+  });
+
+  it('C3: dispatchCloudTask rejects already-leased snapshots without matching persisted registry state or when persisted task is UNCERTAIN_RESULT/REVOKED', () => {
+    const staleClaimed = makeLeasedTask();
+    const verifiedAuthority = buildVerifiedAuthorityRecord(staleClaimed);
+
+    // 1. Already-leased task without existingTasks fails closed with LEASE_MISSING.
+    const noRegistryDispatch = dispatchCloudTask({
+      task: staleClaimed,
+      nowIso: '2026-11-07T20:05:00Z',
+      existingTasks: [],
+      verifiedAuthority,
+    });
+    assert.equal(noRegistryDispatch.ok, false);
+    assert.equal(noRegistryDispatch.status, CLOUD_DISPATCH_STATUS.REJECTED);
+    assert.equal(noRegistryDispatch.reason, CLOUD_REASONS.LEASE_MISSING);
+
+    // 2. Stale CLAIMED snapshot when persisted task is UNCERTAIN_RESULT fails closed.
+    const persistedUncertain = markExecutionUncertain(staleClaimed, {
+      reason: 'transport timeout',
+      nowIso: '2026-11-07T20:04:00Z',
+      observedBranchHead: VERIFIED_MAIN_SHA,
+    });
+    const staleAgainstUncertain = dispatchCloudTask({
+      task: staleClaimed,
+      nowIso: '2026-11-07T20:05:00Z',
+      existingTasks: [persistedUncertain],
+      verifiedAuthority,
+    });
+    assert.equal(staleAgainstUncertain.ok, false);
+    assert.equal(staleAgainstUncertain.reason, CLOUD_REASONS.UNCERTAIN_EXECUTION_REPLAY_BLOCKED);
+
+    // 3. Stale CLAIMED snapshot when persisted task is REVOKED fails closed.
+    const persistedRevoked = {
+      ...staleClaimed,
+      state: CLOUD_TASK_STATES.REVOKED,
+      lease: {
+        ...staleClaimed.lease,
+        revoked: true,
+        revoked_reason: 'superseded by failover',
+      },
+    };
+    const staleAgainstRevoked = dispatchCloudTask({
+      task: staleClaimed,
+      nowIso: '2026-11-07T20:05:00Z',
+      existingTasks: [persistedRevoked],
+      verifiedAuthority,
+    });
+    assert.equal(staleAgainstRevoked.ok, false);
+    assert.equal(staleAgainstRevoked.reason, CLOUD_REASONS.LEASE_REVOKED);
+
+    // 4. Stale CLAIMED snapshot with mutated contract against persisted task fails closed.
+    const mutatedClaimed = {
+      ...staleClaimed,
+      risk_level: 'LOW',
+    };
+    const mutatedAgainstPersisted = dispatchCloudTask({
+      task: mutatedClaimed,
+      nowIso: '2026-11-07T20:05:00Z',
+      existingTasks: [staleClaimed],
+      verifiedAuthority: buildVerifiedAuthorityRecord(mutatedClaimed),
+    });
+    assert.equal(mutatedAgainstPersisted.ok, false);
+    assert.equal(mutatedAgainstPersisted.reason, CLOUD_REASONS.RECONCILIATION_CLEARANCE_INVALID);
+
+    // 5. Valid persisted CLAIMED task in existingTasks succeeds.
+    const validPersistedDispatch = dispatchCloudTask({
+      task: staleClaimed,
+      nowIso: '2026-11-07T20:05:00Z',
+      existingTasks: [staleClaimed],
+      verifiedAuthority,
+    });
+    assert.equal(validPersistedDispatch.ok, true);
+    assert.equal(validPersistedDispatch.status, CLOUD_DISPATCH_STATUS.MANUAL_GITHUB_HANDOFF_READY);
+  });
+
+  it('C4: evaluateCloudPreflight fails closed when cloud-handoff.yaml is missing for HANDOFF_READY or COMPLETED_DRAFT tasks or deleted in PR diff', () => {
+    const leased = makeLeasedTask();
+    const handoffReadyTask = {
+      ...leased,
+      state: CLOUD_TASK_STATES.HANDOFF_READY,
+    };
+    const completedDraftTask = {
+      ...leased,
+      state: CLOUD_TASK_STATES.COMPLETED_DRAFT,
+    };
+
+    const missingOnReady = evaluateCloudPreflight({
+      task: handoffReadyTask,
+      handoff: null,
+      branchName: handoffReadyTask.implementation_branch,
+      headSha: SAMPLE_PR_HEAD,
+      mainSha: VERIFIED_MAIN_SHA,
+      changedFiles: ['.agent-control/cloud-task.yaml'],
+      verifiedAuthority: buildVerifiedAuthorityRecord(handoffReadyTask),
+      nowIso: '2026-11-07T20:15:00Z',
+    });
+    assert.equal(missingOnReady.ok, false);
+    assert.equal(missingOnReady.reason, CLOUD_REASONS.HANDOFF_INVALID);
+
+    const missingOnCompleted = evaluateCloudPreflight({
+      task: completedDraftTask,
+      handoff: null,
+      branchName: completedDraftTask.implementation_branch,
+      headSha: SAMPLE_PR_HEAD,
+      mainSha: VERIFIED_MAIN_SHA,
+      changedFiles: ['.agent-control/cloud-task.yaml'],
+      verifiedAuthority: buildVerifiedAuthorityRecord(completedDraftTask),
+      nowIso: '2026-11-07T20:15:00Z',
+    });
+    assert.equal(missingOnCompleted.ok, false);
+    assert.equal(missingOnCompleted.reason, CLOUD_REASONS.HANDOFF_INVALID);
+
+    // Even if task state is CLAIMED, if .agent-control/cloud-handoff.yaml is in changedFiles (deleted in PR) and handoff is null, preflight fails closed.
+    const deletedInDiff = evaluateCloudPreflight({
+      task: leased,
+      handoff: null,
+      branchName: leased.implementation_branch,
+      headSha: SAMPLE_PR_HEAD,
+      mainSha: VERIFIED_MAIN_SHA,
+      changedFiles: ['.agent-control/cloud-task.yaml', '.agent-control/cloud-handoff.yaml'],
+      verifiedAuthority: buildVerifiedAuthorityRecord(leased),
+      nowIso: '2026-11-07T20:15:00Z',
+    });
+    assert.equal(deletedInDiff.ok, false);
+    assert.equal(deletedInDiff.reason, CLOUD_REASONS.HANDOFF_INVALID);
+  });
+
+  it('C5: recordTaskCompletion supports PROVING -> HANDOFF_READY and PROVING -> COMPLETED_DRAFT while blocking REVOKED or UNCERTAIN_RESULT', () => {
+    const leased = makeLeasedTask();
+    const provingTask = {
+      ...leased,
+      state: CLOUD_TASK_STATES.PROVING,
+    };
+    const handoff = makeHandoff();
+    const verifiedAuthority = buildVerifiedAuthorityRecord(provingTask);
+    const verifiedCiEvidence = makeVerifiedCiEvidence();
+
+    // Positive: PROVING -> HANDOFF_READY
+    const provingToHandoff = recordTaskCompletion({
+      task: provingTask,
+      handoff,
+      actorProvider: provingTask.provider,
+      actorAgentId: provingTask.agent_identity,
+      leaseId: provingTask.lease.lease_id,
+      nowIso: '2026-11-07T20:12:00Z',
+      currentMainSha: VERIFIED_MAIN_SHA,
+      currentPrHeadSha: SAMPLE_PR_HEAD,
+      verifiedAncestry: VALID_ANCESTRY,
+      verifiedAuthority,
+      targetState: CLOUD_TASK_STATES.HANDOFF_READY,
+    });
+    assert.equal(provingToHandoff.ok, true);
+    assert.equal(provingToHandoff.task.state, CLOUD_TASK_STATES.HANDOFF_READY);
+
+    // Positive: PROVING -> COMPLETED_DRAFT when all mandatory proofs and exact-head CI pass
+    const provingToCompleted = recordTaskCompletion({
+      task: provingTask,
+      handoff,
+      actorProvider: provingTask.provider,
+      actorAgentId: provingTask.agent_identity,
+      leaseId: provingTask.lease.lease_id,
+      nowIso: '2026-11-07T20:15:00Z',
+      currentMainSha: VERIFIED_MAIN_SHA,
+      currentPrHeadSha: SAMPLE_PR_HEAD,
+      verifiedAncestry: VALID_ANCESTRY,
+      verifiedCiEvidence,
+      verifiedAuthority,
+      targetState: CLOUD_TASK_STATES.COMPLETED_DRAFT,
+    });
+    assert.equal(provingToCompleted.ok, true);
+    assert.equal(provingToCompleted.task.state, CLOUD_TASK_STATES.COMPLETED_DRAFT);
+
+    // Negative: PROVING -> COMPLETED_DRAFT without verifiedCiEvidence fails with PROOF_INCOMPLETE
+    const provingMissingCi = recordTaskCompletion({
+      task: provingTask,
+      handoff,
+      actorProvider: provingTask.provider,
+      actorAgentId: provingTask.agent_identity,
+      leaseId: provingTask.lease.lease_id,
+      nowIso: '2026-11-07T20:15:00Z',
+      currentMainSha: VERIFIED_MAIN_SHA,
+      currentPrHeadSha: SAMPLE_PR_HEAD,
+      verifiedAncestry: VALID_ANCESTRY,
+      verifiedCiEvidence: null,
+      verifiedAuthority,
+      targetState: CLOUD_TASK_STATES.COMPLETED_DRAFT,
+    });
+    assert.equal(provingMissingCi.ok, false);
+    assert.equal(provingMissingCi.reason, CLOUD_REASONS.PROOF_INCOMPLETE);
+
+    // Negative: REVOKED and UNCERTAIN_RESULT cannot transition via recordTaskCompletion
+    const revokedTask = {
+      ...provingTask,
+      state: CLOUD_TASK_STATES.REVOKED,
+      lease: { ...provingTask.lease, revoked: true, revoked_reason: 'revoked' },
+    };
+    const revokedComplete = recordTaskCompletion({
+      task: revokedTask,
+      handoff,
+      actorProvider: revokedTask.provider,
+      actorAgentId: revokedTask.agent_identity,
+      leaseId: revokedTask.lease.lease_id,
+      nowIso: '2026-11-07T20:15:00Z',
+      currentMainSha: VERIFIED_MAIN_SHA,
+      currentPrHeadSha: SAMPLE_PR_HEAD,
+      verifiedAncestry: VALID_ANCESTRY,
+      verifiedCiEvidence,
+      verifiedAuthority: buildVerifiedAuthorityRecord(revokedTask),
+      targetState: CLOUD_TASK_STATES.COMPLETED_DRAFT,
+    });
+    assert.equal(revokedComplete.ok, false);
+    assert.equal(revokedComplete.reason, CLOUD_REASONS.LEASE_REVOKED);
+
+    const uncertainTask = markExecutionUncertain(provingTask, {
+      reason: 'timeout',
+      nowIso: '2026-11-07T20:14:00Z',
+      observedBranchHead: SAMPLE_PR_HEAD,
+    });
+    const uncertainComplete = recordTaskCompletion({
+      task: uncertainTask,
+      handoff,
+      actorProvider: uncertainTask.provider,
+      actorAgentId: uncertainTask.agent_identity,
+      leaseId: uncertainTask.lease.lease_id,
+      nowIso: '2026-11-07T20:15:00Z',
+      currentMainSha: VERIFIED_MAIN_SHA,
+      currentPrHeadSha: SAMPLE_PR_HEAD,
+      verifiedAncestry: VALID_ANCESTRY,
+      verifiedCiEvidence,
+      verifiedAuthority: buildVerifiedAuthorityRecord(uncertainTask),
+      targetState: CLOUD_TASK_STATES.COMPLETED_DRAFT,
+    });
+    assert.equal(uncertainComplete.ok, false);
+    assert.equal(uncertainComplete.reason, CLOUD_REASONS.UNCERTAIN_EXECUTION_REPLAY_BLOCKED);
   });
 });

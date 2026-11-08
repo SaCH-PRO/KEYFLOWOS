@@ -3544,3 +3544,103 @@ negative_controls:
         const continuityHead = task.continuity_from?.verified_semantic_head || task.source_head || null;
     proof_command: node --test --test-name-pattern="NC cloud stale continuity head" scripts/agent-control/tests/cloud-control.spec.mjs
     timeout_ms: 120000
+
+  - id: NC-CLOUD-MISSING-EXPLICIT-TASK-ON-HANDOFF-ALLOWED
+    claim: >
+      Passing --task <missing> to --validate-handoff fails closed with exitCode
+      2 (cloud_task_invalid) rather than silently falling back to task: null
+      and bypassing contract, owner, and scope checks (C1; Copilot 4504280942).
+    mutation:
+      file: scripts/agent-control/cloud-dispatch.mjs
+      find: "      if (!taskFile || !fs.existsSync(resolvedTaskPath)) {"
+      replace: "      if (false) {"
+    proof_command: node --test --test-name-pattern="validates completion recording, CLI preflight/rejection flags" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-UNCERTAIN-FAILOVER-IGNORES-DISPOSITION
+    claim: >
+      Provider failover from an UNCERTAIN_RESULT task derives source_head and
+      continuity checkpoints from the verified clearance disposition (null for
+      REPLAY_FROM_SOURCE_MAIN, observed_branch_head for
+      CONTINUE_FROM_OBSERVED_HEAD), never from a stale historical
+      handoff.semantic_head (C2; Copilot 4504280958).
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        const nextSourceHead = isUncertainTask
+            ? reconciliationClearance.disposition === 'CONTINUE_FROM_OBSERVED_HEAD'
+              ? verifiedClearance.observed_branch_head
+              : null
+            : handoff.semantic_head;
+      replace: |-
+        const nextSourceHead = handoff.semantic_head;
+    proof_command: node --test --test-name-pattern="C2: prepareProviderFailoverHandoff enforces uncertain-execution dispositions" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-STALE-DISPATCH-SNAPSHOT-ALLOWED
+    claim: >
+      dispatchCloudTask rejects an already-leased task snapshot unless a
+      matching trusted persisted task exists in existingTasks with identical
+      immutable contract fields and valid active ownership (C3; Copilot
+      4504280964).
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "    if (!persistedTask) {"
+      replace: "    if (false) {"
+    proof_command: node --test --test-name-pattern="C3: dispatchCloudTask rejects already-leased snapshots" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-MISSING-HANDOFF-ON-READY-TASK-ALLOWED
+    claim: >
+      evaluateCloudPreflight fails closed as cloud_handoff_invalid when
+      cloud-handoff.yaml is missing for a HANDOFF_READY or COMPLETED_DRAFT task
+      or when cloud-handoff.yaml was modified/deleted in changedFiles (C4;
+      Copilot 4504280973).
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: "  if (!handoff && (handoffRequiredByState || handoffTouchedInDiff)) {"
+      replace: "  if (false) {"
+    proof_command: node --test --test-name-pattern="C4: evaluateCloudPreflight fails closed when cloud-handoff.yaml is missing" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-PROVING-COMPLETION-BLOCKED
+    claim: >
+      verifyTaskOwnership includes PROVING in handoffCompletionStates so a task
+      in PROVING can transition to COMPLETED_DRAFT once all mandatory proofs
+      and exact-head CI evidence pass (C5; Copilot 4504280987).
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        const handoffCompletionStates = new Set([
+            CLOUD_TASK_STATES.CLAIMED,
+            CLOUD_TASK_STATES.EXECUTING,
+            CLOUD_TASK_STATES.PROVING,
+            CLOUD_TASK_STATES.HANDOFF_READY,
+          ]);
+      replace: |-
+        const handoffCompletionStates = new Set([
+            CLOUD_TASK_STATES.CLAIMED,
+            CLOUD_TASK_STATES.EXECUTING,
+            CLOUD_TASK_STATES.HANDOFF_READY,
+          ]);
+    proof_command: node --test --test-name-pattern="C5: recordTaskCompletion supports PROVING -> HANDOFF_READY and PROVING -> COMPLETED_DRAFT" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000
+
+  - id: NC-CLOUD-SELF-AUTHORED-PR-DIGEST-MINTS-LEASE
+    claim: >
+      A PR author's self-supplied cloud-contract-digest in GITHUB_EVENT_PATH is
+      strictly scoped to READ_ONLY_EVENT_IDENTITY (mutating_operations_authorized:
+      false) and cannot mint authority for mutating lease claims, replay
+      clearances, failovers, or active dispatch (C7).
+    mutation:
+      file: scripts/agent-control/lib/cloud-control.mjs
+      find: |-
+        if (
+            requireMutatingAuthorization &&
+            (verifiedAuthority.mutating_operations_authorized === false ||
+              verifiedAuthority.trust_level === 'READ_ONLY_EVENT_IDENTITY')
+          ) {
+      replace: |-
+        if (false) {
+    proof_command: node --test --test-name-pattern="enforces Ed25519 signature on --verified-authority files" scripts/agent-control/tests/cloud-control.spec.mjs
+    timeout_ms: 120000

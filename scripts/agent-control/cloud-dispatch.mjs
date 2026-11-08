@@ -13,7 +13,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
+  CLOUD_DISPATCH_STATUS,
   CLOUD_REASONS,
+  FileBackedCloudRegistry,
   computeTaskContractDigest,
   defaultCloudProviderRegistry,
   dispatchCloudTask,
@@ -90,14 +92,18 @@ function extractIndependentContractDigest(event) {
 
 /**
  * Resolves an authenticated authority record from:
- *   1. In-process `options.verifiedAuthority` (when explicitly permitted by programmatic callers),
+ *   1. In-process `options.verifiedAuthority` ONLY when signed with Ed25519 or when
+ *      `options.allowInProcessVerifiedAuthority === true` is explicitly set by a
+ *      programmatic caller,
  *   2. A `--verified-authority <file>` CLI argument carrying a valid Ed25519 signature
  *      verified against `trustedAuthorityPublicKey` (`CLOUD_AUTHORITY_PUBLIC_KEY`), or
  *   3. An authenticated GitHub Actions event payload (`GITHUB_EVENT_PATH`) where
  *      `event.sender.login` (never `pull_request.user.login` alone) matches the
- *      authorized actor AND an independent contract digest from the GitHub event
- *      record (`cloud-contract-digest: <64-hex>` or `inputs.contract_digest`) matches
- *      `computeTaskContractDigest(task)`.
+ *      authorized actor AND the event's `cloud-contract-digest` matches
+ *      `computeTaskContractDigest(task)`. Because a PR author can supply both the
+ *      task file and PR body in the same action, event-derived records are strictly
+ *      scoped to `trust_level: 'READ_ONLY_EVENT_IDENTITY'` (`mutating_operations_authorized: false`)
+ *      and cannot authorize mutating lease claims, replay clearances, failovers, or dispatch.
  */
 export function resolveVerifiedAuthority(task, argv = [], cwd = process.cwd(), options = {}) {
   const trustedPublicKeyPem =
@@ -109,7 +115,7 @@ export function resolveVerifiedAuthority(task, argv = [], cwd = process.cwd(), o
         trustedPublicKeyPem,
       });
     }
-    if (options.allowInProcessVerifiedAuthority !== false) {
+    if (options.allowInProcessVerifiedAuthority === true) {
       return options.verifiedAuthority;
     }
     return null;
@@ -170,6 +176,8 @@ export function resolveVerifiedAuthority(task, argv = [], cwd = process.cwd(), o
       ) {
         return {
           authenticated: true,
+          trust_level: 'READ_ONLY_EVENT_IDENTITY',
+          mutating_operations_authorized: false,
           approval_id: approvalId,
           actor,
           source_kind: task.authority.kind,
@@ -291,11 +299,24 @@ export function runCloudDispatchCli(argv = process.argv.slice(2), options = {}) 
       };
     }
     const handoff = loadCloudYamlFile(full);
+    // C1: Fail closed when --task is explicitly provided on the CLI but the file is missing.
+    const hasTaskFlag = argv.includes('--task');
     const taskFile = argValue(argv, '--task');
-    const task =
-      taskFile && fs.existsSync(path.resolve(cwd, taskFile))
-        ? loadCloudYamlFile(path.resolve(cwd, taskFile))
-        : null;
+    if (hasTaskFlag) {
+      const resolvedTaskPath = taskFile ? path.resolve(cwd, taskFile) : null;
+      if (!taskFile || !fs.existsSync(resolvedTaskPath)) {
+        return {
+          exitCode: 2,
+          payload: {
+            ok: false,
+            mode: 'VALIDATE_HANDOFF',
+            reason: CLOUD_REASONS.TASK_INVALID,
+            problems: [`task file not found: ${taskFile || '<missing>'}`],
+          },
+        };
+      }
+    }
+    const task = hasTaskFlag ? loadCloudYamlFile(path.resolve(cwd, taskFile)) : null;
     const verifiedAncestry =
       options.verifiedAncestry || {
         sourceMainIsAncestorOfSemanticHead: gitIsAncestor(
@@ -337,10 +358,59 @@ export function runCloudDispatchCli(argv = process.argv.slice(2), options = {}) 
     const task = loadCloudYamlFile(full);
     const verifiedAuthority = resolveVerifiedAuthority(task, argv, cwd, options);
     const requireUnattended = argv.includes('--require-unattended');
+    const registryArg = argValue(argv, '--registry');
+    let existingTasks = Array.isArray(options.existingTasks) ? options.existingTasks : null;
+    let recordedIdempotencyKeys = Array.isArray(options.recordedIdempotencyKeys)
+      ? options.recordedIdempotencyKeys
+      : [];
+    if (registryArg) {
+      const regPath = path.resolve(cwd, registryArg);
+      if (!fs.existsSync(regPath)) {
+        return {
+          exitCode: 2,
+          payload: {
+            ok: false,
+            mode: 'DISPATCH_DRY_RUN',
+            reason: CLOUD_REASONS.REGISTRY_INTEGRITY_FAILED,
+            problems: [`registry file not found: ${registryArg}`],
+          },
+        };
+      }
+      try {
+        const regState = new FileBackedCloudRegistry(regPath).load();
+        existingTasks = regState.tasks;
+        recordedIdempotencyKeys = regState.idempotency_keys;
+      } catch (err) {
+        return {
+          exitCode: 1,
+          payload: {
+            ok: false,
+            mode: 'DISPATCH_DRY_RUN',
+            reason: err.reason || CLOUD_REASONS.REGISTRY_INTEGRITY_FAILED,
+            problems: [err.message],
+          },
+        };
+      }
+    } else if (!existingTasks) {
+      return {
+        exitCode: 1,
+        payload: {
+          ok: false,
+          mode: 'DISPATCH_DRY_RUN',
+          status: CLOUD_DISPATCH_STATUS.DEFERRED_UNATTENDED_INVOCATION,
+          reason: CLOUD_REASONS.LEASE_MISSING,
+          problems: [
+            'CLI --dispatch is disabled without a trusted persisted registry (--registry <file>); Phase 1 has no cross-machine distributed lease backend',
+          ],
+        },
+      };
+    }
     const res = dispatchCloudTask({
       task,
       nowIso,
       requireUnattended,
+      existingTasks,
+      recordedIdempotencyKeys,
       verifiedAuthority,
     });
     return {

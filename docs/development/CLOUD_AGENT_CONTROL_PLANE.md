@@ -48,11 +48,14 @@ Every task envelope requires:
 - `idempotency_key`: Deterministic `cloud_task:<task_id>:<packet_id>:<source_main>:<attempt>`
 - `state` & `lease`: Lifecycle state and active lease binding
 
-**Authenticated authority requirement (`CLOUD_REASONS.UNVERIFIED_AUTHORITY`):**
+**Authenticated authority & trust-boundary separation (`CLOUD_REASONS.UNVERIFIED_AUTHORITY`):**
 - Self-asserted YAML strings (`author: SaCH-PRO` or `cleared_by_provider: chatgpt`) are **never** trusted on their own.
 - `validateTaskAuthority` and `validateCloudTask` require an independent authenticated `verifiedAuthority` record (`authenticated: true`, `approval_id`, `actor`, `source_kind`, `reference`, `task_id`, `packet_id`, `implementation_branch`, `source_main`, and `contract_digest === computeTaskContractDigest(task)`).
-- `verifyUncertainExecutionClearance` requires both an independently observed git ref SHA (`observedBranchHead`) and an authenticated `verifiedClearance` record bound to `computeTaskContractDigest(task)`.
-- `verifyImmutableTaskContract` prevents any reconciliation re-claim or duplicate submission from altering `packet_id`, `implementation_branch`, `provider`, `agent_identity`, `role`, `source_main`, `risk_level`, `approval_level`, `authority`, or `allowed_scope`/`prohibited_scope`.
+- **Strict separation of event identity vs. mutating authorization (`C7`):**
+  1. `READ_ONLY_EVENT_IDENTITY` (`mutating_operations_authorized: false`): Resolved from `GITHUB_EVENT_PATH` when `event.sender.login` matches the allowlisted author and the PR body / workflow input carries `cloud-contract-digest: <64-hex>`. Because a PR author can supply both `.agent-control/cloud-task.yaml` and the PR body in the same action, this proves GitHub event identity for **read-only preflight inspection (`--preflight` / `--validate-task`) only** and is **rejected** (`CLOUD_REASONS.UNVERIFIED_AUTHORITY`) for any mutating lease acquisition (`evaluateLeaseAcquisition`), replay clearance (`verifyUncertainExecutionClearance`), provider failover (`prepareProviderFailoverHandoff`), completion transition (`recordTaskCompletion`), or active dispatch (`dispatchCloudTask`).
+  2. `CRYPTOGRAPHICALLY_SIGNED` / `INDEPENDENT_OPERATOR_APPROVAL` (`mutating_operations_authorized: true`): Required for all mutating or state-transitioning operations (`requireMutatingAuthorization: true`). External CLI authority files (`--verified-authority <file>`) must carry a valid Ed25519 signature (`verifySignedAuthorityRecord`) verified against `CLOUD_AUTHORITY_PUBLIC_KEY`; unsigned in-process `options.verifiedAuthority` objects are rejected by `resolveVerifiedAuthority` unless `allowInProcessVerifiedAuthority: true` is explicitly set by programmatic unit test harnesses.
+- `verifyUncertainExecutionClearance` requires an independently observed git ref SHA (`observedBranchHead`) and an authenticated `verifiedClearance` record (`mutating_operations_authorized: true`) bound to `computeTaskContractDigest(task)`.
+- `verifyImmutableTaskContract` prevents any reconciliation re-claim, failover, or already-leased dispatch from altering `packet_id`, `implementation_branch`, `provider`, `agent_identity`, `role`, `source_main`, `risk_level`, `approval_level`, `authority`, or `allowed_scope`/`prohibited_scope`.
 
 ### B. Ownership, Lease Semantics & Collision Protection
 
@@ -66,17 +69,20 @@ Implemented in `evaluateLeaseAcquisition`, `verifyTaskOwnership`, `verifyUncerta
 ### C. Provider-Neutral Cloud Execution Interface
 
 Implemented in `geminiCloudAdapter`, `kimiCloudAdapter`, `claudeCloudAdapter`, `chatgptAuthorityAdapter`, and `dispatchCloudTask`:
-- **Implemented in Phase 1:** Validated, lease-checked GitHub-native manual cloud handoff (`CLOUD_DISPATCH_STATUS.MANUAL_GITHUB_HANDOFF_READY`). In `prepareHandoff`, `task.source_head` is authoritative when defined (`null` after `REPLAY_FROM_SOURCE_MAIN` resets starting commit to `source_main`), falling back to `continuity_from.verified_semantic_head` only when `source_head` is undefined.
-- **Explicitly Deferred to Phase 2:** Unattended outbound API invocation of external cloud agents (`automated_provider_invocation: 'DEFERRED_PHASE_2'`). Calling `dispatchCloudTask(..., { requireUnattended: true })` fails closed with `DEFERRED_UNATTENDED_INVOCATION` rather than faking remote execution.
+- **Implemented in Phase 1:** Validated, lease-checked GitHub-native manual cloud handoff (`CLOUD_DISPATCH_STATUS.MANUAL_GITHUB_HANDOFF_READY`).
+  - When `task.lease` is already populated on a candidate passed to `dispatchCloudTask` (`C3`), `existingTasks` **must** contain a matching trusted persisted task record with identical immutable contract fields (`verifyImmutableTaskContract`), and `verifyTaskOwnership` is evaluated against the persisted task so a stale `CLAIMED` snapshot can never bypass persisted `UNCERTAIN_RESULT` or `REVOKED` state.
+  - In `prepareHandoff`, `task.source_head` is authoritative when defined (`null` after `REPLAY_FROM_SOURCE_MAIN` resets starting commit to `source_main`), falling back to `continuity_from.verified_semantic_head` only when `source_head` is undefined.
+- **Explicitly Disabled / Deferred to Phase 2:** Unattended outbound API invocation of external cloud agents (`automated_provider_invocation: 'DEFERRED_PHASE_2'`) and CLI `--dispatch` without an explicit persisted `--registry <file>`. Calling `dispatchCloudTask(..., { requireUnattended: true })` or `cloud-dispatch.mjs --dispatch` without `--registry` fails closed (`DEFERRED_UNATTENDED_INVOCATION` / `CLOUD_REASONS.LEASE_MISSING`) rather than simulating active execution permission.
 
 ### D. GitHub-Native Read-Only Control
 
 - **CLI (`scripts/agent-control/cloud-dispatch.mjs`):**
   - `node scripts/agent-control/cloud-dispatch.mjs --preflight --dry-run --json`
   - `node scripts/agent-control/cloud-dispatch.mjs --validate-task <path>`
-  - `node scripts/agent-control/cloud-dispatch.mjs --validate-handoff <path>`
+  - `node scripts/agent-control/cloud-dispatch.mjs --validate-handoff <path> [--task <path>]`
   - `node scripts/agent-control/cloud-dispatch.mjs --status --dry-run --json`
-  - Fails closed when git `HEAD`, branch name, `trustedMainSha`, `git merge-base`, `git diff`, or authenticated authority (`--verified-authority` or verified `GITHUB_EVENT_PATH`) is missing or invalid.
+  - Fails closed (`exitCode: 2`, `CLOUD_REASONS.TASK_INVALID`) when `--task <path>` is explicitly passed to `--validate-handoff` and the task file does not exist (`C1`), preserving standalone handoff validation (`task: null`) only when `--task` is omitted from `argv`.
+  - Fails closed when git `HEAD`, branch name, `trustedMainSha`, `git merge-base`, `git diff`, or authenticated authority (`--verified-authority` or verified `GITHUB_EVENT_PATH`) is missing or invalid, or when `.agent-control/cloud-handoff.yaml` is missing for a `HANDOFF_READY` or `COMPLETED_DRAFT` task or deleted in `changedFiles` (`C4`).
   - Rejects `--merge`, `--deploy`, `--touch-production`, and `--post-issue-80` with exit code `2`.
 - **Workflow (`.github/workflows/agent-cloud-control.yml`):**
   - Runs on `pull_request` and `workflow_dispatch` with `contents: read`, `pull-requests: read`, `issues: read`.
@@ -88,8 +94,8 @@ Implemented in `geminiCloudAdapter`, `kimiCloudAdapter`, `claudeCloudAdapter`, `
 Implemented in `validateCloudHandoff`, `verifyCompletionProofs`, `recordTaskCompletion`, and `prepareProviderFailoverHandoff` (`.agent-control/cloud-handoff.yaml`):
 - Records `source_main`, `semantic_head`, `pr_head`, `evidence_head`, `pr_number`, `changed_files`, `decisions`, `scope_ledger` (`declared`, `resolved`, `remaining`, `deferred`), `proof_obligations`, and `next_authorized_action` (`merge_authority: false`, `production_touched: false`).
 - Requires positive ancestry verification (`verifiedAncestry: { sourceMainIsAncestorOfSemanticHead: true, semanticHeadIsAncestorOfPrHead: true }`) and rejects stale evidence (`CLOUD_REASONS.STALE_COMPLETION_EVIDENCE`).
-- Requires all `proof_obligations` to have `status: 'PASS'` and cover every `task.required_tests` command (`verifyCompletionProofs` -> `CLOUD_REASONS.PROOF_INCOMPLETE`). Transitioning a task to `COMPLETED_DRAFT` additionally requires `scope_ledger.remaining` to be empty, all `scope_ledger.declared` items resolved, and `verifiedCiEvidence` at `currentPrHeadSha`. While a draft PR is awaiting exact-head CI completion, `.agent-control/cloud-task.yaml` remains in `state: HANDOFF_READY`.
-- `prepareProviderFailoverHandoff` rejects already-revoked tasks (`CLOUD_REASONS.LEASE_REVOKED`) and duplicate failover attempts against `existingTasks` (`CLOUD_REASONS.DUPLICATE_TASK_CLAIM`), revokes the prior provider's lease, increments `attempt`, binds a length-safe deterministic `task_id` (`buildDefaultFailoverTaskId`) and `lease_id` (`buildDefaultLeaseId`), and transfers continuity to a distinct backup provider.
+- Requires all `proof_obligations` to have `status: 'PASS'` and cover every `task.required_tests` command (`verifyCompletionProofs` -> `CLOUD_REASONS.PROOF_INCOMPLETE`). Transitioning a task (from `CLAIMED`, `EXECUTING`, `PROVING`, or `HANDOFF_READY` — `C5`) to `COMPLETED_DRAFT` additionally requires `scope_ledger.remaining` to be empty, all `scope_ledger.declared` items resolved, and `verifiedCiEvidence` at `currentPrHeadSha`. While a draft PR is awaiting exact-head CI completion, `.agent-control/cloud-task.yaml` remains in `state: HANDOFF_READY`.
+- `prepareProviderFailoverHandoff` rejects already-revoked tasks (`CLOUD_REASONS.LEASE_REVOKED`) and duplicate failover attempts against `existingTasks` (`CLOUD_REASONS.DUPLICATE_TASK_CLAIM`), revokes the prior provider's lease, increments `attempt`, binds a length-safe deterministic `task_id` (`buildDefaultFailoverTaskId`) and `lease_id` (`buildDefaultLeaseId`), and transfers continuity to a distinct backup provider. When failing over from an `UNCERTAIN_RESULT` task (`C2`), `source_head` and `continuity_from.verified_semantic_head` are derived strictly from the verified clearance disposition (`null` / `source_main` for `REPLAY_FROM_SOURCE_MAIN`, `verifiedClearance.observed_branch_head` for `CONTINUE_FROM_OBSERVED_HEAD`, and fail-closed rejection for `ABORT_AND_REISSUE`), never from a stale historical `handoff.semantic_head`.
 
 ---
 
