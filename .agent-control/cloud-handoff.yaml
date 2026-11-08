@@ -6,9 +6,9 @@ agent_identity: gemini-cloud-builder-01
 lease_id: LEASE-CT-KF-META-CLOUD-DISPATCH-001-001
 implementation_branch: impl/kf-meta-cloud-control-001
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-semantic_head: 352cf111192d837cdf6d1955c7b46d1f810690af
-pr_head: 352cf111192d837cdf6d1955c7b46d1f810690af
-evidence_head: 352cf111192d837cdf6d1955c7b46d1f810690af
+semantic_head: 23499c2b7dba614efbdfe20c6e778cc6cd0bb33a
+pr_head: 23499c2b7dba614efbdfe20c6e778cc6cd0bb33a
+evidence_head: 23499c2b7dba614efbdfe20c6e778cc6cd0bb33a
 pr_number: 194
 changed_files:
   - scripts/agent-control/lib/cloud-control.mjs

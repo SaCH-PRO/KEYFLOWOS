@@ -5,7 +5,7 @@ authority_status: PROVISIONAL_CLOUD_DISPATCH_TRACK_AWAITING_FORMAL_AUTHORITY
 current_authority_message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001
 current_authority_comment_id: 6692411347
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: 352cf111192d837cdf6d1955c7b46d1f810690af
+source_head: 23499c2b7dba614efbdfe20c6e778cc6cd0bb33a
 implementation_branch: impl/kf-meta-cloud-control-001
 pr_number: 194
 state: PROVING
@@ -32,6 +32,8 @@ semantic_commits:
     what: Final Phase 1 hardening C1-C7 (fail-closed missing explicit --task on --validate-handoff, uncertain-execution failover disposition enforcement, persisted registry lookup and immutable contract parity in dispatchCloudTask, required handoff artifact on HANDOFF_READY/COMPLETED_DRAFT or diff deletion in evaluateCloudPreflight, PROVING completion transitions, and strict separation of read-only PR event identity from mutating authorization with 6 additional live NC-CLOUD-* mutation controls)
   - sha: 352cf111192d837cdf6d1955c7b46d1f810690af
     what: Follow-up Copilot hardening on C1-C7 (require explicit mutating_operations_authorized === true and MUTATING_TRUST_LEVELS on authority and clearance records, require null starting source_head for fresh ISSUED tasks and commit-bound verifiedContinuity for failover starting heads, check effectiveIdempotencyKey on every lease acquisition, and preserve unknown branch heads as null in markExecutionUncertain)
+  - sha: 23499c2b7dba614efbdfe20c6e778cc6cd0bb33a
+    what: Verify ancestry from source_main to observed continuation head on CONTINUE_FROM_OBSERVED_HEAD failover and keep all 27 NC-CLOUD-* mutation targets live
 
 diff_scope:
   - scripts/agent-control/lib/cloud-control.mjs
