@@ -5,7 +5,7 @@ authority_status: PROVISIONAL_CLOUD_DISPATCH_TRACK_AWAITING_FORMAL_AUTHORITY
 current_authority_message_id: CG-HOLD-CLAUDE-CAPACITY-20261106-001
 current_authority_comment_id: 6692411347
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-source_head: 0d4bb2043327f809826777c0c95f1680f2002abc
+source_head: ed379a2d43a53e16c04c9241e62d64a5cb2dc476
 implementation_branch: impl/kf-meta-cloud-control-001
 pr_number: 194
 state: PROVING
@@ -28,6 +28,8 @@ semantic_commits:
     what: Security hardening for PR #194 review (authenticated authority digest binding, immutable task contract verification, safe local-only registry locking without age-based lock steal, positive git ancestry and completion proof gates, revoked/double-failover protection, fail-closed CLI/workflow preflight, architecture map synchronization, and 10 additional live NC-CLOUD-* negative controls)
   - sha: 0d4bb2043327f809826777c0c95f1680f2002abc
     what: Follow-up security hardening (Ed25519 signature verification on --verified-authority, independent sender and contract_digest verification on GITHUB_EVENT_PATH, persisted task state enforcement in failover, replacement authority binding for digest-bearing failovers, HANDOFF_READY to COMPLETED_DRAFT finalization, and missing-task workflow preflight enforcement)
+  - sha: ed379a2d43a53e16c04c9241e62d64a5cb2dc476
+    what: Final Phase 1 hardening C1-C7 (fail-closed missing explicit --task on --validate-handoff, uncertain-execution failover disposition enforcement, persisted registry lookup and immutable contract parity in dispatchCloudTask, required handoff artifact on HANDOFF_READY/COMPLETED_DRAFT or diff deletion in evaluateCloudPreflight, PROVING completion transitions, and strict separation of read-only PR event identity from mutating authorization with 6 additional live NC-CLOUD-* mutation controls)
 
 diff_scope:
   - scripts/agent-control/lib/cloud-control.mjs
@@ -45,18 +47,18 @@ diff_scope:
   - .agent-control/cloud-handoff.yaml
 
 proof_matrix:
-  - obligation: authenticated cloud task contract, deterministic idempotency key, contract digest verification, and source_main binding
+  - obligation: authenticated cloud task contract, deterministic idempotency key, contract digest verification, read-only event identity vs mutating authorization separation, and source_main binding
     evidence_scope: semantic_head
     result: PROVEN
-    proof: cloud-control.spec.mjs; NC-CLOUD-UNVERIFIED-AUTHORITY-ALLOWED, NC-CLOUD-INVALID-SOURCE-COMMIT-ALLOWED, NC-CLOUD-MISSING-AUTHORITY-ALLOWED, NC-CLOUD-UNAUTHORIZED-MERGE-ALLOWED
-  - obligation: lease ownership, duplicate claim prevention, branch/packet collision protection, expired/revoked lease rejection, and safe local-only registry lock token ownership
+    proof: cloud-control.spec.mjs; NC-CLOUD-UNVERIFIED-AUTHORITY-ALLOWED, NC-CLOUD-SELF-AUTHORED-PR-DIGEST-MINTS-LEASE, NC-CLOUD-INVALID-SOURCE-COMMIT-ALLOWED, NC-CLOUD-MISSING-AUTHORITY-ALLOWED, NC-CLOUD-UNAUTHORIZED-MERGE-ALLOWED
+  - obligation: lease ownership, duplicate claim prevention, branch/packet collision protection, expired/revoked lease rejection, persisted dispatch snapshot parity, and safe local-only registry lock token ownership
     evidence_scope: semantic_head
     result: PROVEN
-    proof: cloud-control.spec.mjs; NC-CLOUD-DUPLICATE-TASK-CLAIM, NC-CLOUD-BRANCH-COLLISION, NC-CLOUD-EXPIRED-LEASE-ALLOWED, NC-CLOUD-REVOKED-LEASE-ALLOWED, NC-CLOUD-WRONG-PROVIDER-ALLOWED, NC-CLOUD-STALE-LOCK-STEAL-ALLOWED
-  - obligation: uncertain execution replay gate, immutable contract enforcement under clearance, positive ancestry, completion proof gates, and safe cross-provider failover
+    proof: cloud-control.spec.mjs; NC-CLOUD-DUPLICATE-TASK-CLAIM, NC-CLOUD-BRANCH-COLLISION, NC-CLOUD-EXPIRED-LEASE-ALLOWED, NC-CLOUD-REVOKED-LEASE-ALLOWED, NC-CLOUD-WRONG-PROVIDER-ALLOWED, NC-CLOUD-STALE-LOCK-STEAL-ALLOWED, NC-CLOUD-STALE-DISPATCH-SNAPSHOT-ALLOWED
+  - obligation: uncertain execution replay gate, uncertain failover disposition enforcement, immutable contract enforcement under clearance, positive ancestry, completion proof gates, PROVING transitions, and fail-closed handoff/preflight checks
     evidence_scope: semantic_head
     result: PROVEN
-    proof: cloud-control.spec.mjs; NC-CLOUD-UNCERTAIN-REPLAY-ALLOWED, NC-CLOUD-MUTATED-RECONCILIATION-CONTRACT-ALLOWED, NC-CLOUD-STALE-COMPLETION-EVIDENCE-ALLOWED, NC-CLOUD-UNVERIFIED-ANCESTRY-ALLOWED, NC-CLOUD-FAILED-PROOF-COMPLETION-ALLOWED, NC-CLOUD-PROVIDER-FAILOVER-UNSAFE, NC-CLOUD-REVOKED-FAILOVER-ALLOWED, NC-CLOUD-DOUBLE-FAILOVER-ALLOWED, NC-CLOUD-STALE-CONTINUITY-HEAD-ALLOWED, NC-CLOUD-MISSING-GIT-HEAD-ALLOWED, NC-CLOUD-MODIFIED-TASK-PREFLIGHT-SKIP-ALLOWED
+    proof: cloud-control.spec.mjs; NC-CLOUD-UNCERTAIN-REPLAY-ALLOWED, NC-CLOUD-UNCERTAIN-FAILOVER-IGNORES-DISPOSITION, NC-CLOUD-MUTATED-RECONCILIATION-CONTRACT-ALLOWED, NC-CLOUD-STALE-COMPLETION-EVIDENCE-ALLOWED, NC-CLOUD-UNVERIFIED-ANCESTRY-ALLOWED, NC-CLOUD-FAILED-PROOF-COMPLETION-ALLOWED, NC-CLOUD-PROVING-COMPLETION-BLOCKED, NC-CLOUD-PROVIDER-FAILOVER-UNSAFE, NC-CLOUD-REVOKED-FAILOVER-ALLOWED, NC-CLOUD-DOUBLE-FAILOVER-ALLOWED, NC-CLOUD-STALE-CONTINUITY-HEAD-ALLOWED, NC-CLOUD-MISSING-GIT-HEAD-ALLOWED, NC-CLOUD-MODIFIED-TASK-PREFLIGHT-SKIP-ALLOWED, NC-CLOUD-MISSING-EXPLICIT-TASK-ON-HANDOFF-ALLOWED, NC-CLOUD-MISSING-HANDOFF-ON-READY-TASK-ALLOWED
   - obligation: every required workflow and the independent review at the PR head
     evidence_scope: exact_head
     result: PENDING

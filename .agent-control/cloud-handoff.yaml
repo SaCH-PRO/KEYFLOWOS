@@ -6,9 +6,9 @@ agent_identity: gemini-cloud-builder-01
 lease_id: LEASE-CT-KF-META-CLOUD-DISPATCH-001-001
 implementation_branch: impl/kf-meta-cloud-control-001
 source_main: b1948d2797e1bae3660a3d7173abb75397e05aad
-semantic_head: 0d4bb2043327f809826777c0c95f1680f2002abc
-pr_head: 0d4bb2043327f809826777c0c95f1680f2002abc
-evidence_head: 0d4bb2043327f809826777c0c95f1680f2002abc
+semantic_head: ed379a2d43a53e16c04c9241e62d64a5cb2dc476
+pr_head: ed379a2d43a53e16c04c9241e62d64a5cb2dc476
+evidence_head: ed379a2d43a53e16c04c9241e62d64a5cb2dc476
 pr_number: 194
 changed_files:
   - scripts/agent-control/lib/cloud-control.mjs
@@ -26,9 +26,9 @@ changed_files:
   - .agent-control/cloud-handoff.yaml
 decisions:
   - Keep Phase 1 cloud dispatch strictly read-only and draft-only with zero merge or production authority.
-  - Require authenticated authority and clearance evidence bound to the SHA-256 immutable task contract digest; reject self-asserted YAML authority strings as cloud_authority_unverified.
-  - Enforce immutable task contracts across reconciliation and re-claim attempts and eliminate age-based lock stealing in FileBackedCloudRegistry (scoped to LOCAL_SINGLE_HOST_ONLY).
-  - Require positive git ancestry (source_main -> semantic_head -> pr_head) and passing proof obligations before completion transitions; keep cloud-task.yaml in HANDOFF_READY while awaiting exact-head CI and independent review.
+  - Require authenticated authority and clearance evidence bound to the SHA-256 immutable task contract digest; strictly separate read-only PR-event identity (READ_ONLY_EVENT_IDENTITY) from mutating authorization (CRYPTOGRAPHICALLY_SIGNED / INDEPENDENT_OPERATOR_APPROVAL) so a PR author's self-supplied digest cannot mint lease claims, replay clearances, failovers, or dispatch (C7).
+  - Enforce immutable task contracts across reconciliation, failover, and already-leased dispatch (C3), derive uncertain-execution failover checkpoints strictly from verified clearance dispositions (C2), and eliminate age-based lock stealing in FileBackedCloudRegistry (scoped to LOCAL_SINGLE_HOST_ONLY).
+  - Fail closed on missing explicit --task files during handoff validation (C1), require cloud-handoff.yaml on HANDOFF_READY/COMPLETED_DRAFT tasks or when touched in changedFiles (C4), and support PROVING -> HANDOFF_READY / COMPLETED_DRAFT completion transitions with mandatory exact-head CI proof verification (C5).
   - Record pre-reset commit 583a1e2dd83a4330879b887ce52c6a81d6a37edb under archive tag archive/impl-kf-meta-cloud-control-001-pre-reset-2026-11-07 and use strictly append-only commits thereafter.
 scope_ledger:
   declared:
