@@ -213,7 +213,15 @@ describe('PostingService.post — DB integration paths', () => {
         financialAccount: {
           findFirst: vi.fn(async (args: any) => {
             if (args.where?.id === 'fa_bank_1' || args.where?.chartOfAccountId === 'acc_cash_b1') {
-              return { id: 'fa_bank_1', type: 'BANK', currency: 'TTD', currentBalance: bankBalance };
+              return {
+                id: 'fa_bank_1',
+                businessId: 'biz_1',
+                chartOfAccountId: 'acc_cash_b1',
+                type: 'BANK',
+                currency: 'TTD',
+                isActive: true,
+                currentBalance: bankBalance,
+              };
             }
             return null;
           }),
@@ -317,10 +325,26 @@ describe('PostingService.post — DB integration paths', () => {
         financialAccount: {
           findFirst: vi.fn(async (args: any) => {
             if (args.where?.id === 'fa_bank_secondary') {
-              return { id: 'fa_bank_secondary', type: 'BANK', currency: 'TTD', isActive: true, currentBalance: secondaryBankBalance };
+              return {
+                id: 'fa_bank_secondary',
+                businessId: 'biz_1',
+                chartOfAccountId: 'acc_cash_b1',
+                type: 'BANK',
+                currency: 'TTD',
+                isActive: true,
+                currentBalance: secondaryBankBalance,
+              };
             }
             if (args.where?.id === 'fa_bank_default' || args.where?.chartOfAccountId === 'acc_cash_b1') {
-              return { id: 'fa_bank_default', type: 'BANK', currency: 'TTD', isActive: true, currentBalance: defaultBankBalance };
+              return {
+                id: 'fa_bank_default',
+                businessId: 'biz_1',
+                chartOfAccountId: 'acc_cash_b1',
+                type: 'BANK',
+                currency: 'TTD',
+                isActive: true,
+                currentBalance: defaultBankBalance,
+              };
             }
             return null;
           }),
@@ -362,6 +386,7 @@ describe('PostingService.post — DB integration paths', () => {
         accountId: 'acc_cash_b1',
         financialAccountId: 'fa_bank_secondary',
         appliedDelta: '-4000',
+        accountCurrency: 'TTD',
       }),
     ]);
 
@@ -443,6 +468,8 @@ describe('PostingService.post — DB integration paths', () => {
             if (args.where?.id === 'fa_ttd_bank' || args.where?.chartOfAccountId === 'acc_cash_b1') {
               return {
                 id: 'fa_ttd_bank',
+                businessId: 'biz_1',
+                chartOfAccountId: 'acc_cash_b1',
                 type: 'BANK',
                 currency: 'TTD',
                 isActive: isBankActive,
@@ -486,6 +513,89 @@ describe('PostingService.post — DB integration paths', () => {
     await svc.reverse('biz_1', posted.transactionId, { reason: 'Refunded' });
     // Balance must return to exact 10,000 (not 9,980)
     expect(Number(ttdBankBalance.toString())).toBe(10_000);
+  });
+
+  it('rejects an explicitly targeted FinancialAccount when chartOfAccountId or businessId does not match the ledger entry', async () => {
+    const stub = makePrismaStub();
+    (stub.prisma.client as any).$transaction = vi.fn(async (cb: any) => {
+      const txWithFa = {
+        financialTransaction: stub.prisma.client.financialTransaction,
+        chartOfAccount: {
+          findMany: vi.fn(async () => [
+            { id: 'coa_payroll', businessId: 'biz_1' },
+            { id: 'acc_cash_b1', businessId: 'biz_1' },
+          ]),
+        },
+        contact: { findUnique: vi.fn(async () => null) },
+        financialAccount: {
+          findFirst: vi.fn(async (args: any) => {
+            if (args.where?.id === 'fa_wrong_coa') {
+              return {
+                id: 'fa_wrong_coa',
+                businessId: 'biz_1',
+                chartOfAccountId: 'coa_other_bank',
+                type: 'BANK',
+                currency: 'TTD',
+                isActive: true,
+                currentBalance: new Prisma.Decimal(10_000),
+              };
+            }
+            if (args.where?.id === 'fa_other_biz') {
+              return {
+                id: 'fa_other_biz',
+                businessId: 'biz_2',
+                chartOfAccountId: 'acc_cash_b1',
+                type: 'BANK',
+                currency: 'TTD',
+                isActive: true,
+                currentBalance: new Prisma.Decimal(10_000),
+              };
+            }
+            return null;
+          }),
+          update: vi.fn(),
+        },
+      };
+      return cb(txWithFa);
+    });
+
+    const svc = new PostingService(stub.prisma);
+
+    await expect(
+      svc.post({
+        businessId: 'biz_1',
+        type: 'EXPENSE',
+        date: new Date('2026-08-31'),
+        amount: 2_000,
+        currency: 'TTD',
+        sourceType: 'PayrollRun',
+        sourceId: 'run_bad_coa',
+        kind: 'paid',
+        entries: [
+          { accountId: 'coa_payroll', debit: 2_000 },
+          { accountId: 'acc_cash_b1', financialAccountId: 'fa_wrong_coa', credit: 2_000 },
+        ],
+      }),
+    ).rejects.toThrow(
+      /Financial account fa_wrong_coa is linked to chart of account coa_other_bank, which does not match ledger entry account acc_cash_b1/,
+    );
+
+    await expect(
+      svc.post({
+        businessId: 'biz_1',
+        type: 'EXPENSE',
+        date: new Date('2026-08-31'),
+        amount: 2_000,
+        currency: 'TTD',
+        sourceType: 'PayrollRun',
+        sourceId: 'run_bad_biz',
+        kind: 'paid',
+        entries: [
+          { accountId: 'coa_payroll', debit: 2_000 },
+          { accountId: 'acc_cash_b1', financialAccountId: 'fa_other_biz', credit: 2_000 },
+        ],
+      }),
+    ).rejects.toThrow(/Financial account fa_other_biz does not belong to business biz_1/);
   });
 });
 

@@ -3,6 +3,8 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import {
   computeNormalizedCashBalance,
   fetchAllPages,
+  getBusinessFinancialSnapshotRevision,
+  invalidateBusinessFinancialSnapshotCache,
   loadCashLedgerMovements,
   loadLatestExchangeRates,
   normalizeCurrencyCode,
@@ -138,27 +140,36 @@ const CACHE_TTL_MS = 120_000;
 @Injectable()
 export class BusinessGraphService {
   private readonly logger = new Logger(BusinessGraphService.name);
-  private readonly cache = new Map<string, { data: BusinessGraphSnapshot; expiresAt: number }>();
+  private readonly cache = new Map<
+    string,
+    { data: BusinessGraphSnapshot; expiresAt: number; revision: number }
+  >();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   async getSnapshot(businessId: string, forceRefresh = false): Promise<BusinessGraphSnapshot> {
+    const currentRevision = getBusinessFinancialSnapshotRevision(businessId);
     if (!forceRefresh) {
       const cached = this.cache.get(businessId);
-      if (cached && cached.expiresAt > Date.now()) {
+      if (cached && cached.expiresAt > Date.now() && cached.revision === currentRevision) {
         return cached.data;
       }
     }
 
     const snapshot = await this.assembleSnapshot(businessId);
-    this.cache.set(businessId, { data: snapshot, expiresAt: Date.now() + CACHE_TTL_MS });
+    this.cache.set(businessId, {
+      data: snapshot,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+      revision: getBusinessFinancialSnapshotRevision(businessId),
+    });
     return snapshot;
   }
 
   invalidateCache(businessId: string): void {
     this.cache.delete(businessId);
+    invalidateBusinessFinancialSnapshotCache(businessId);
   }
 
   private async assembleSnapshot(businessId: string): Promise<BusinessGraphSnapshot> {
@@ -246,6 +257,7 @@ export class BusinessGraphService {
         ? fetchAllPages(({ skip, take }) =>
             db.financialAccount.findMany({
               where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
+              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
               select: {
                 id: true,
                 chartOfAccountId: true,
@@ -266,6 +278,7 @@ export class BusinessGraphService {
         ? fetchAllPages(({ skip, take }) =>
             db.expense.findMany({
               where: { businessId, deletedAt: null, status: 'BILL' },
+              orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
               select: { amount: true, currency: true },
               ...(skip > 0 ? { skip, take } : {}),
             }),
@@ -279,6 +292,7 @@ export class BusinessGraphService {
         ? fetchAllPages(({ skip, take }) =>
             db.payrollRun.findMany({
               where: { businessId, status: { in: ['DRAFT', 'APPROVED'] } },
+              orderBy: [{ periodStart: 'asc' }, { id: 'asc' }],
               select: { totalGross: true, currency: true },
               ...(skip > 0 ? { skip, take } : {}),
             }),
@@ -294,6 +308,7 @@ export class BusinessGraphService {
         ? fetchAllPages(({ skip, take }) =>
             db.deal.findMany({
               where: { businessId, deletedAt: null, status: 'OPEN' },
+              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
               select: { value: true, currency: true },
               ...(skip > 0 ? { skip, take } : {}),
             }),

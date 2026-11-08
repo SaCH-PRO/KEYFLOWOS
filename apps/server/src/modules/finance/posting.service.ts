@@ -6,6 +6,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 
 import {
   extractFinancialAccountTargetFromMetadata,
+  invalidateBusinessFinancialSnapshotCache,
   loadLatestExchangeRates,
   normalizeCurrencyCode,
   type PersistedEntryFinancialAccountTarget,
@@ -36,6 +37,8 @@ interface ResolvedAccountDelta {
 interface TxFinancialAccountDelegate {
   findFirst?: (args: Record<string, unknown>) => Promise<{
     id: string;
+    businessId?: string;
+    chartOfAccountId?: string | null;
     type: string;
     currency?: string | null;
     isActive?: boolean;
@@ -89,6 +92,8 @@ async function resolveFinancialAccountTargets(
 
     let targetAccount: {
       id: string;
+      businessId?: string;
+      chartOfAccountId?: string | null;
       type: string;
       currency?: string | null;
       isActive?: boolean;
@@ -96,15 +101,35 @@ async function resolveFinancialAccountTargets(
     } | null;
 
     if (e.financialAccountId) {
-      targetAccount = await faDelegate.findFirst({
-        where: allowArchivedExplicitTarget
-          ? { id: e.financialAccountId, businessId }
-          : { id: e.financialAccountId, businessId, isActive: true },
-        select: { id: true, type: true, currency: true, isActive: true, currentBalance: true },
-      });
+      targetAccount = await faDelegate.findFirst(
+        skipTenantIsolation({
+          where: allowArchivedExplicitTarget
+            ? { id: e.financialAccountId }
+            : { id: e.financialAccountId, isActive: true },
+          select: {
+            id: true,
+            businessId: true,
+            chartOfAccountId: true,
+            type: true,
+            currency: true,
+            isActive: true,
+            currentBalance: true,
+          },
+        }),
+      );
       if (!targetAccount || (!allowArchivedExplicitTarget && targetAccount.isActive === false)) {
         throw new BadRequestException(
           `Financial account ${e.financialAccountId} not found or inactive for business ${businessId}`,
+        );
+      }
+      if (targetAccount.businessId && targetAccount.businessId !== businessId) {
+        throw new BadRequestException(
+          `Financial account ${e.financialAccountId} does not belong to business ${businessId}`,
+        );
+      }
+      if (!targetAccount.chartOfAccountId || targetAccount.chartOfAccountId !== e.accountId) {
+        throw new BadRequestException(
+          `Financial account ${e.financialAccountId} is linked to chart of account ${targetAccount.chartOfAccountId ?? 'none'}, which does not match ledger entry account ${e.accountId}`,
         );
       }
     } else {
@@ -116,18 +141,35 @@ async function resolveFinancialAccountTargets(
           currency: normalizedPostingCurrency,
         },
         orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-        select: { id: true, type: true, currency: true, isActive: true, currentBalance: true },
+        select: {
+          id: true,
+          businessId: true,
+          chartOfAccountId: true,
+          type: true,
+          currency: true,
+          isActive: true,
+          currentBalance: true,
+        },
       });
       if (!targetAccount) {
         targetAccount = await faDelegate.findFirst({
           where: { businessId, chartOfAccountId: e.accountId, isActive: true },
           orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
-          select: { id: true, type: true, currency: true, isActive: true, currentBalance: true },
+          select: {
+            id: true,
+            businessId: true,
+            chartOfAccountId: true,
+            type: true,
+            currency: true,
+            isActive: true,
+            currentBalance: true,
+          },
         });
       }
       if (!targetAccount) continue;
     }
 
+    const acctCurrency = normalizeCurrencyCode(targetAccount.currency, normalizedPostingCurrency);
     let delta: Prisma.Decimal;
     if (e.overrideDelta != null) {
       delta = e.overrideDelta;
@@ -138,7 +180,6 @@ async function resolveFinancialAccountTargets(
           ? netAssetDelta
           : netAssetDelta;
 
-      const acctCurrency = normalizeCurrencyCode(targetAccount.currency, normalizedPostingCurrency);
       if (acctCurrency !== normalizedPostingCurrency) {
         const rates = await loadLatestExchangeRates(rawTx.exchangeRate, businessId);
         const mult = resolveConversionRate(normalizedPostingCurrency, acctCurrency, rates);
@@ -165,6 +206,7 @@ async function resolveFinancialAccountTargets(
       accountId: e.accountId,
       financialAccountId: targetAccount.id,
       appliedDelta: delta.toString(),
+      accountCurrency: acctCurrency,
     });
   }
 
@@ -433,10 +475,13 @@ export class PostingService {
     };
 
     try {
-      if (txClient) return await exec(txClient);
-      return await this.prisma.client.$transaction(async (tx) =>
-        exec(tx as unknown as Prisma.TransactionClient),
-      );
+      const result = txClient
+        ? await exec(txClient)
+        : await this.prisma.client.$transaction(async (tx) =>
+            exec(tx as unknown as Prisma.TransactionClient),
+          );
+      invalidateBusinessFinancialSnapshotCache(input.businessId);
+      return result;
     } catch (err: any) {
       // Race: a concurrent caller wrote the same externalRef between our
       // check and our insert. Prisma raises P2002 on the unique index.
@@ -450,6 +495,7 @@ export class PostingService {
           select: { id: true },
         });
         if (existing) {
+          invalidateBusinessFinancialSnapshotCache(input.businessId);
           return { transactionId: existing.id, externalRef, alreadyPosted: true };
         }
         throw new ConflictException('Posting conflict on externalRef');
@@ -582,9 +628,13 @@ export class PostingService {
       return { transactionId: reversal.id, externalRef: reversal.externalRef, alreadyPosted: false };
     };
 
-    if (txClient) return exec(txClient);
-    return this.prisma.client.$transaction(async (tx) =>
-      exec(tx as unknown as Prisma.TransactionClient),
-    );
+    const result = txClient
+      ? await exec(txClient)
+      : await this.prisma.client.$transaction(async (tx) =>
+          exec(tx as unknown as Prisma.TransactionClient),
+        );
+    invalidateBusinessFinancialSnapshotCache(businessId);
+    return result;
   }
 }
+

@@ -357,6 +357,11 @@ describe('Payroll-to-Ledger-to-Treasury E2E Financial Truth Journey', () => {
     // 35,000 - 3,500 (10% buffer) = 31,500
     expect(initialSafe.safeToSpend).toBe(31_500);
 
+    // Prime KEY's BusinessGraphSnapshot cache with normal read (forceRefresh = false)
+    const initialGraph = await businessGraphService.getSnapshot(businessId);
+    expect(initialGraph.treasury?.cashBalance).toBe(35_000);
+    expect(initialGraph.treasury?.committedPayrollAmount).toBe(0);
+
     // 2. Generate payroll run (8,000 TTD DRAFT)
     const draftRun = await payrollService.generateRun(
       businessId,
@@ -367,14 +372,15 @@ describe('Payroll-to-Ledger-to-Treasury E2E Financial Truth Journey', () => {
     expect(draftRun.status).toBe('DRAFT');
     expect(Number(draftRun.totalGross)).toBe(8_000);
 
-    // While DRAFT, SafeToSpend reserves the 8,000 TTD and KEY sees 8,000 TTD committed payroll
+    // While DRAFT, SafeToSpend reserves the 8,000 TTD and a normal KEY getSnapshot(businessId) read
+    // (without forceRefresh = true) immediately reflects the invalidated cache!
     const afterDraftSafe = await safeToSpendService.calculate(businessId);
     expect(afterDraftSafe.cashBalance).toBe(35_000);
     expect(afterDraftSafe.payrollReserved).toBe(8_000);
     // 35,000 - 8,000 (payroll) - 3,500 (10% buffer) = 23,500
     expect(afterDraftSafe.safeToSpend).toBe(23_500);
 
-    const draftGraph = await businessGraphService.getSnapshot(businessId, true);
+    const draftGraph = await businessGraphService.getSnapshot(businessId);
     expect(draftGraph.treasury?.cashBalance).toBe(35_000);
     expect(draftGraph.treasury?.committedPayrollAmount).toBe(8_000);
     expect(draftGraph.treasury?.committedPayrollRuns).toBe(1);
@@ -398,11 +404,11 @@ describe('Payroll-to-Ledger-to-Treasury E2E Financial Truth Journey', () => {
     expect(Number(financialAccounts[0].currentBalance.toString())).toBe(22_000);
     expect(Number(financialAccounts[1].currentBalance.toString())).toBe(5_000);
 
-    // 6. Verify SafeToSpend, FinanceOverview, and KEY BusinessGraph all agree on 27,000 TTD cash
-    //    and 0 TTD committed payroll reserve!
+    // 6. Verify SafeToSpend, FinanceOverview, and a normal KEY BusinessGraph getSnapshot(businessId) read
+    //    (without forceRefresh = true) all agree on 27,000 TTD cash and 0 TTD committed payroll reserve!
     const afterPaidSafe = await safeToSpendService.calculate(businessId);
     const afterPaidOverview = await financeOverviewService.getOverview(businessId);
-    const afterPaidGraph = await businessGraphService.getSnapshot(businessId, true);
+    const afterPaidGraph = await businessGraphService.getSnapshot(businessId);
 
     expect(afterPaidSafe.cashBalance).toBe(27_000);
     expect(afterPaidOverview.cashBalance).toBe(27_000);

@@ -14,6 +14,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
 import {
   convertToBaseOrThrow,
+  invalidateBusinessFinancialSnapshotCache,
   loadLatestExchangeRates,
   normalizeCurrencyCode,
   type ExchangeRateRow,
@@ -240,7 +241,7 @@ export class PayrollService {
 
     const totalGross = Math.round(items.reduce((s, i) => s + i.grossPay, 0) * 100) / 100;
 
-    return this.prisma.client.payrollRun.create({
+    const createdRun = await this.prisma.client.payrollRun.create({
       data: {
         businessId,
         periodStart,
@@ -254,6 +255,8 @@ export class PayrollService {
       },
       include: { items: true },
     });
+    invalidateBusinessFinancialSnapshotCache(businessId);
+    return createdRun;
   }
 
   // ── Runs ───────────────────────────────────────────────────────────────
@@ -303,10 +306,12 @@ export class PayrollService {
     if (run.status !== 'DRAFT') {
       throw new BadRequestException(`Run is ${run.status} — only DRAFT runs can be approved`);
     }
-    return this.prisma.client.payrollRun.update({
+    const approvedRun = await this.prisma.client.payrollRun.update({
       where: { id: runId },
       data: { status: 'APPROVED', approvedAt: new Date(), approvedById: userId ?? null },
     });
+    invalidateBusinessFinancialSnapshotCache(businessId);
+    return approvedRun;
   }
 
   async markRunPaid(
@@ -344,7 +349,7 @@ export class PayrollService {
       );
     }
 
-    return this.prisma.client.$transaction(async (rawTx) => {
+    const paidRun = await this.prisma.client.$transaction(async (rawTx) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tx = rawTx as any;
 
@@ -567,5 +572,7 @@ export class PayrollService {
 
       return updated;
     });
+    invalidateBusinessFinancialSnapshotCache(businessId);
+    return paidRun;
   }
 }

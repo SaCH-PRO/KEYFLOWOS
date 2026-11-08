@@ -32420,6 +32420,13 @@
     {
       "resolved": true,
       "source": "apps/server/src/modules/finance/finance-accounts.service.ts",
+      "specifier": "./finance-accounting.util",
+      "target": "apps/server/src/modules/finance/finance-accounting.util.ts",
+      "type": "relative"
+    },
+    {
+      "resolved": true,
+      "source": "apps/server/src/modules/finance/finance-accounts.service.ts",
       "specifier": "./financial-account-seeder.service",
       "target": "apps/server/src/modules/finance/financial-account-seeder.service.ts",
       "type": "relative"
@@ -60161,6 +60168,27 @@
     {
       "resolved": false,
       "source": "apps/server/test/payments-webhooks.service.test.ts",
+      "specifier": "vitest",
+      "target": "vitest",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/payroll-financial-truth.integration.test.ts",
+      "specifier": "dotenv",
+      "target": "dotenv",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/payroll-financial-truth.integration.test.ts",
+      "specifier": "path",
+      "target": "path",
+      "type": "external"
+    },
+    {
+      "resolved": false,
+      "source": "apps/server/test/payroll-financial-truth.integration.test.ts",
       "specifier": "vitest",
       "target": "vitest",
       "type": "external"
@@ -111064,8 +111092,8 @@
     }
   ],
   "meta": {
-    "edges": 15866,
-    "nodes": 3878,
+    "edges": 15870,
+    "nodes": 3879,
     "root": ".",
     "scanner": "codebase-architect/dependency_scan.py"
   },
@@ -121172,6 +121200,11 @@
     {
       "extension": ".ts",
       "id": "apps/server/test/payments-webhooks.service.test.ts",
+      "type": "file"
+    },
+    {
+      "extension": ".ts",
+      "id": "apps/server/test/payroll-financial-truth.integration.test.ts",
       "type": "file"
     },
     {

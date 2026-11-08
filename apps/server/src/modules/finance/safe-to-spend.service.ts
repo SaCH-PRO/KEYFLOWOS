@@ -7,6 +7,7 @@ import {
   fetchAllPages,
   loadCashLedgerMovements,
   loadLatestExchangeRates,
+  loadNormalizedTaxReserved,
   normalizeCurrencyCode,
 } from './finance-accounting.util';
 
@@ -51,6 +52,7 @@ export class SafeToSpendService {
       fetchAllPages(({ skip, take }) =>
         this.prisma.client.financialAccount.findMany({
           where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           select: {
             id: true,
             chartOfAccountId: true,
@@ -69,6 +71,7 @@ export class SafeToSpendService {
             status: 'BILL',
             dueDate: { gte: now, lte: next30 },
           },
+          orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
           select: { amount: true, currency: true },
           ...(skip > 0 ? { skip, take } : {}),
         }),
@@ -76,6 +79,7 @@ export class SafeToSpendService {
       fetchAllPages(({ skip, take }) =>
         this.prisma.client.cashReserveBucket.findMany({
           where: { businessId, status: 'ACTIVE' },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           select: { currentAmount: true, currency: true, name: true },
           ...(skip > 0 ? { skip, take } : {}),
         }),
@@ -87,6 +91,7 @@ export class SafeToSpendService {
                 businessId,
                 status: { in: ['DRAFT', 'APPROVED'] },
               },
+              orderBy: [{ periodStart: 'asc' }, { id: 'asc' }],
               select: { totalGross: true, currency: true, status: true },
               ...(skip > 0 ? { skip, take } : {}),
             }),
@@ -103,11 +108,21 @@ export class SafeToSpendService {
       ),
     );
 
-    const cashLedgerMovements = await loadCashLedgerMovements(
-      this.prisma.client.ledgerEntry,
-      businessId,
-      linkedCoaIds,
-    );
+    const [cashLedgerMovements, taxReserved] = await Promise.all([
+      loadCashLedgerMovements(
+        this.prisma.client.ledgerEntry,
+        businessId,
+        linkedCoaIds,
+      ),
+      loadNormalizedTaxReserved({
+        ledgerEntryDelegate: this.prisma.client.ledgerEntry,
+        businessId,
+        taxPayableAccountId: taxPayableAccount?.id,
+        baseCurrency: currency,
+        rates: exchangeRates,
+        failClosedOnMissingRate: true,
+      }),
+    ]);
 
     const cashBalance = computeNormalizedCashBalance({
       accounts: cashAccounts,
@@ -116,15 +131,6 @@ export class SafeToSpendService {
       rates: exchangeRates,
       failClosedOnMissingRate: true,
     });
-
-    let taxReserved = 0;
-    if (taxPayableAccount) {
-      const agg = await this.prisma.client.ledgerEntry.aggregate({
-        where: { accountId: taxPayableAccount.id },
-        _sum: { debit: true, credit: true },
-      });
-      taxReserved = Number(agg._sum.credit ?? 0) - Number(agg._sum.debit ?? 0);
-    }
 
     const billsDueNext30Days = billsDue.reduce(
       (sum, b: { amount?: number | null; currency?: string | null }) =>

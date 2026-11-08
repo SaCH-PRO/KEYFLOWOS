@@ -30,6 +30,20 @@ export async function fetchAllPages<T>(
   return all;
 }
 
+const businessSnapshotRevisions = new Map<string, number>();
+
+export function invalidateBusinessFinancialSnapshotCache(businessId: string): void {
+  if (!businessId) return;
+  businessSnapshotRevisions.set(
+    businessId,
+    (businessSnapshotRevisions.get(businessId) ?? 0) + 1,
+  );
+}
+
+export function getBusinessFinancialSnapshotRevision(businessId: string): number {
+  return businessSnapshotRevisions.get(businessId) ?? 0;
+}
+
 /**
  * Load the latest ExchangeRate row for each `(fromCurrency, toCurrency)` pair
  * in a business so high-frequency snapshots of one pair never evict other pairs.
@@ -47,7 +61,7 @@ export async function loadLatestExchangeRates(
   return fetchAllPages<ExchangeRateRow>(({ skip, take }) =>
     delegate.findMany!({
       where: { businessId },
-      orderBy: { date: 'desc' },
+      orderBy: [{ date: 'desc' }, { id: 'desc' }],
       distinct: ['fromCurrency', 'toCurrency'],
       ...(skip > 0 ? { skip, take } : {}),
     }),
@@ -136,6 +150,8 @@ export interface CashLedgerMovementRow {
   id?: string;
   accountId: string;
   financialAccountId?: string | null;
+  appliedDelta?: unknown;
+  accountCurrency?: string | null;
   debit?: unknown;
   credit?: unknown;
   currency?: string | null;
@@ -148,6 +164,7 @@ export interface PersistedEntryFinancialAccountTarget {
   accountId: string;
   financialAccountId: string;
   appliedDelta?: string;
+  accountCurrency?: string;
 }
 
 export function extractFinancialAccountTargetFromMetadata(
@@ -235,6 +252,8 @@ export async function loadCashLedgerMovements(
             id?: string;
             accountId: string;
             financialAccountId?: string | null;
+            appliedDelta?: unknown;
+            accountCurrency?: string | null;
             debit: unknown;
             credit: unknown;
             currency?: string | null;
@@ -252,6 +271,7 @@ export async function loadCashLedgerMovements(
         businessId,
         accountId: { in: linkedCoaIds },
       },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
         id: true,
         accountId: true,
@@ -264,17 +284,126 @@ export async function loadCashLedgerMovements(
     }),
   );
 
-  return rows.map((e) => ({
-    id: e.id,
-    accountId: e.accountId,
-    financialAccountId:
-      e.financialAccountId ??
-      extractFinancialAccountIdFromMetadata(e.transaction?.metadata, e.accountId, undefined, e.id),
-    debit: e.debit,
-    credit: e.credit,
-    currency: e.currency,
-    transactionType: e.transaction?.type ?? null,
-  }));
+  return rows.map((e) => {
+    const target = extractFinancialAccountTargetFromMetadata(
+      e.transaction?.metadata,
+      e.accountId,
+      undefined,
+      e.id,
+    );
+    return {
+      id: e.id,
+      accountId: e.accountId,
+      financialAccountId: e.financialAccountId ?? target?.financialAccountId ?? null,
+      appliedDelta: e.appliedDelta ?? target?.appliedDelta ?? null,
+      accountCurrency: e.accountCurrency ?? target?.accountCurrency ?? null,
+      debit: e.debit,
+      credit: e.credit,
+      currency: e.currency,
+      transactionType: e.transaction?.type ?? null,
+    };
+  });
+}
+
+/**
+ * Normalize TAX_PAYABLE ledger entries into `baseCurrency` across all pages.
+ * Falls back to `ledgerEntry.aggregate` only when `findMany` returns no rows
+ * for `taxPayableAccountId` (e.g. hermetic aggregate-only unit test stubs).
+ */
+export async function loadNormalizedTaxReserved(params: {
+  ledgerEntryDelegate: unknown;
+  businessId: string;
+  taxPayableAccountId: string | null | undefined;
+  baseCurrency: string;
+  rates: ExchangeRateRow[];
+  failClosedOnMissingRate?: boolean;
+}): Promise<number> {
+  const {
+    ledgerEntryDelegate,
+    businessId,
+    taxPayableAccountId,
+    baseCurrency,
+    rates,
+    failClosedOnMissingRate = true,
+  } = params;
+  if (!taxPayableAccountId) return 0;
+
+  const delegate = ledgerEntryDelegate as
+    | {
+        findMany?: (args: Record<string, unknown>) => Promise<
+          Array<{
+            id?: string;
+            accountId?: string;
+            debit?: unknown;
+            credit?: unknown;
+            currency?: string | null;
+          }>
+        >;
+        aggregate?: (args: Record<string, unknown>) => Promise<{
+          _sum?: { debit?: unknown; credit?: unknown };
+        }>;
+      }
+    | undefined;
+  if (!delegate) return 0;
+
+  const base = normalizeCurrencyCode(baseCurrency);
+
+  if (typeof delegate.findMany === 'function') {
+    const rows = await fetchAllPages(({ skip, take }) =>
+      delegate.findMany!({
+        where: { businessId, accountId: taxPayableAccountId },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          accountId: true,
+          debit: true,
+          credit: true,
+          currency: true,
+        },
+        ...(skip > 0 ? { skip, take } : {}),
+      }),
+    );
+    const matchedRows = rows.filter(
+      (r) => !r.accountId || r.accountId === taxPayableAccountId,
+    );
+    if (matchedRows.length > 0) {
+      let total = 0;
+      for (const r of matchedRows) {
+        const dr = Number(r.debit?.toString?.() ?? r.debit ?? 0);
+        const cr = Number(r.credit?.toString?.() ?? r.credit ?? 0);
+        const netLiability = cr - dr;
+        if (!Number.isFinite(netLiability) || netLiability === 0) continue;
+        const from = normalizeCurrencyCode(r.currency, base);
+        if (from === base) {
+          total += netLiability;
+        } else if (failClosedOnMissingRate) {
+          total += convertToBaseOrThrow(
+            netLiability,
+            from,
+            base,
+            rates,
+            'safe-to-spend tax reserve',
+          );
+        } else {
+          const mult = resolveConversionRate(from, base, rates);
+          if (mult != null) {
+            total += netLiability * mult;
+          }
+        }
+      }
+      return Math.round(total * 100) / 100;
+    }
+  }
+
+  if (typeof delegate.aggregate === 'function') {
+    const agg = await delegate.aggregate({
+      where: { accountId: taxPayableAccountId },
+      _sum: { debit: true, credit: true },
+    });
+    return Number(agg?._sum?.credit ?? 0) - Number(agg?._sum?.debit ?? 0);
+  }
+
+  return 0;
 }
 
 /**
@@ -282,8 +411,12 @@ export async function loadCashLedgerMovements(
  * - When non-OPENING_BALANCE ledger movements are supplied for linked
  *   ChartOfAccount ids, cash is derived from each active FinancialAccount's
  *   `openingBalance` (falling back to `currentBalance` only if `openingBalance`
- *   is undefined in a legacy/stub row) plus the net `debit - credit` of
- *   non-OPENING_BALANCE ledger entries across distinct linked `chartOfAccountId`s.
+ *   is undefined in a legacy/stub row) plus the movement delta across linked
+ *   accounts.
+ * - When a movement carries a persisted `appliedDelta` (recorded in the target
+ *   FinancialAccount's currency at posting time), that exact account-currency
+ *   delta is used rather than re-converting the raw ledger entry with a later
+ *   exchange rate, preventing FX drift from fabricating or erasing cash.
  * - Movements that carry a resolved `financialAccountId` belonging to an
  *   archived/inactive FinancialAccount (not present in `accounts`) are excluded
  *   even when an active FinancialAccount shares the same `chartOfAccountId`.
@@ -310,9 +443,20 @@ export function computeNormalizedCashBalance(params: {
   const base = normalizeCurrencyCode(baseCurrency);
   const linkedCoaIds = new Set<string>();
   const activeAccountIds = new Set<string>();
+  const accountById = new Map<string, CashAccountSnapshotRow>();
+  const accountsByCoa = new Map<string, CashAccountSnapshotRow[]>();
+
   for (const acc of accounts) {
-    if (acc.chartOfAccountId) linkedCoaIds.add(acc.chartOfAccountId);
-    if (acc.id) activeAccountIds.add(acc.id);
+    if (acc.chartOfAccountId) {
+      linkedCoaIds.add(acc.chartOfAccountId);
+      const list = accountsByCoa.get(acc.chartOfAccountId) ?? [];
+      list.push(acc);
+      accountsByCoa.set(acc.chartOfAccountId, list);
+    }
+    if (acc.id) {
+      activeAccountIds.add(acc.id);
+      accountById.set(acc.id, acc);
+    }
   }
 
   const relevantMovements = ledgerMovements.filter((m) => {
@@ -324,13 +468,15 @@ export function computeNormalizedCashBalance(params: {
     return true;
   });
 
-  const hasLedgerMovements = relevantMovements.length > 0 || ledgerMovements.some(
-    (m) =>
-      m.accountId &&
-      linkedCoaIds.has(m.accountId) &&
-      m.transactionType !== 'OPENING_BALANCE' &&
-      Boolean(m.financialAccountId),
-  );
+  const hasLedgerMovements =
+    relevantMovements.length > 0 ||
+    ledgerMovements.some(
+      (m) =>
+        m.accountId &&
+        linkedCoaIds.has(m.accountId) &&
+        m.transactionType !== 'OPENING_BALANCE' &&
+        Boolean(m.financialAccountId),
+    );
 
   let total = 0;
 
@@ -364,6 +510,20 @@ export function computeNormalizedCashBalance(params: {
 
   if (hasLedgerMovements) {
     for (const m of relevantMovements) {
+      const parsedAppliedDelta =
+        m.appliedDelta !== undefined && m.appliedDelta !== null
+          ? Number(m.appliedDelta?.toString?.() ?? m.appliedDelta)
+          : NaN;
+      if (Number.isFinite(parsedAppliedDelta)) {
+        const targetAcc = m.financialAccountId
+          ? accountById.get(m.financialAccountId)
+          : accountsByCoa.get(m.accountId)?.length === 1
+            ? accountsByCoa.get(m.accountId)![0]
+            : undefined;
+        const deltaCurrency = m.accountCurrency ?? targetAcc?.currency ?? m.currency ?? base;
+        addAmount(parsedAppliedDelta, deltaCurrency);
+        continue;
+      }
       const dr = Number(m.debit?.toString?.() ?? m.debit ?? 0);
       const cr = Number(m.credit?.toString?.() ?? m.credit ?? 0);
       addAmount(dr - cr, m.currency);
@@ -372,3 +532,4 @@ export function computeNormalizedCashBalance(params: {
 
   return Math.round(total * 100) / 100;
 }
+

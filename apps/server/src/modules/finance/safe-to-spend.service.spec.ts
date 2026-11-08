@@ -13,11 +13,17 @@ describe('SafeToSpendService', () => {
       currency?: string;
     }>;
     cashLedgerEntries?: Array<{
+      id?: string;
       accountId: string;
       debit?: number;
       credit?: number;
       currency?: string;
-      transaction?: { type: string };
+      transaction?: { type: string; metadata?: Record<string, unknown> | null };
+    }>;
+    taxLedgerEntries?: Array<{
+      debit?: number;
+      credit?: number;
+      currency?: string;
     }>;
     taxCredit?: number;
     taxDebit?: number;
@@ -39,6 +45,7 @@ describe('SafeToSpendService', () => {
     const payrollRows = opts?.payrollRuns ?? [];
     const rateRows = opts?.exchangeRates ?? [];
     const ledgerRows = opts?.cashLedgerEntries ?? [];
+    const taxRows = opts?.taxLedgerEntries ?? [];
 
     const prisma = {
       client: {
@@ -63,7 +70,15 @@ describe('SafeToSpendService', () => {
           findMany: paginate(rateRows),
         },
         ledgerEntry: {
-          findMany: paginate(ledgerRows),
+          findMany: vi.fn(async (args?: { where?: { accountId?: string | { in?: string[] } }; skip?: number; take?: number }) => {
+            const start = args?.skip ?? 0;
+            if (args?.where?.accountId === 'coa_tax_payable') {
+              const count = args?.take ?? taxRows.length;
+              return taxRows.slice(start, start + count);
+            }
+            const count = args?.take ?? ledgerRows.length;
+            return ledgerRows.slice(start, start + count);
+          }),
           aggregate: vi.fn(async () => ({
             _sum: {
               credit: opts?.taxCredit ?? 2_000,
@@ -178,7 +193,7 @@ describe('SafeToSpendService', () => {
           transaction: {
             type: 'TRANSFER',
             metadata: sharedTransferMetadata,
-          } as any,
+          },
         },
         {
           id: 'le_transfer_in',
@@ -189,9 +204,9 @@ describe('SafeToSpendService', () => {
           transaction: {
             type: 'TRANSFER',
             metadata: sharedTransferMetadata,
-          } as any,
+          },
         },
-      ] as any,
+      ],
       taxCredit: 0,
       taxDebit: 0,
       bills: [],
@@ -254,6 +269,84 @@ describe('SafeToSpendService', () => {
     });
     await expect(svc.calculate('biz_1')).rejects.toThrow(BadRequestException);
     await expect(svc.calculate('biz_1')).rejects.toThrow(/missing exchange rate from EUR to TTD/);
+  });
+
+  it('reconstructs cashBalance using persisted appliedDelta so later FX rate changes cannot fabricate or erase cash', async () => {
+    // USD 100 receipt posted into a TTD bank account when USD->TTD was 6.8 (appliedDelta = +680 TTD).
+    // Later, USD->TTD changes to 7.5. Reconstructed cash must remain 10,680 TTD, not 10,750 TTD.
+    const { svc } = makeStubs({
+      accounts: [
+        {
+          id: 'fa_ttd_bank',
+          chartOfAccountId: 'coa_bank',
+          openingBalance: 10_000,
+          currentBalance: 10_680,
+          currency: 'TTD',
+        },
+      ],
+      cashLedgerEntries: [
+        {
+          id: 'le_usd_in',
+          accountId: 'coa_bank',
+          debit: 100,
+          credit: 0,
+          currency: 'USD',
+          transaction: {
+            type: 'INCOME',
+            metadata: {
+              entryFinancialAccounts: [
+                {
+                  ledgerEntryId: 'le_usd_in',
+                  entryIndex: 0,
+                  accountId: 'coa_bank',
+                  financialAccountId: 'fa_ttd_bank',
+                  appliedDelta: '680',
+                  accountCurrency: 'TTD',
+                },
+              ],
+            },
+          },
+        },
+      ],
+      exchangeRates: [{ fromCurrency: 'USD', toCurrency: 'TTD', rate: 7.5 }],
+      taxCredit: 0,
+      taxDebit: 0,
+      bills: [],
+      reserves: [],
+      payrollRuns: [],
+    });
+
+    const result = await svc.calculate('biz_1');
+    expect(result.cashBalance).toBe(10_680);
+  });
+
+  it('normalizes multi-currency TAX_PAYABLE ledger entries into business base currency and fails closed on missing rate', async () => {
+    const { svc } = makeStubs({
+      cashBalance: 30_000,
+      taxLedgerEntries: [
+        { credit: 1_000, debit: 0, currency: 'TTD' },
+        { credit: 250, debit: 50, currency: 'USD' }, // net 200 USD * 6.8 = 1,360 TTD
+      ],
+      exchangeRates: [{ fromCurrency: 'USD', toCurrency: 'TTD', rate: 6.8 }],
+      bills: [],
+      reserves: [],
+      payrollRuns: [],
+    });
+
+    const result = await svc.calculate('biz_1');
+    expect(result.taxReserved).toBe(2_360);
+
+    const missingRateStub = makeStubs({
+      cashBalance: 30_000,
+      taxLedgerEntries: [{ credit: 200, debit: 0, currency: 'EUR' }],
+      exchangeRates: [],
+      bills: [],
+      reserves: [],
+      payrollRuns: [],
+    });
+    await expect(missingRateStub.svc.calculate('biz_1')).rejects.toThrow(
+      /missing exchange rate from EUR to TTD/,
+    );
   });
 });
 

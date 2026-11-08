@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ChartOfAccountsSeederService } from './chart-of-accounts-seeder.service';
+import { invalidateBusinessFinancialSnapshotCache } from './finance-accounting.util';
 import { FinancialAccountSeederService } from './financial-account-seeder.service';
 
 const ALLOWED_TYPES = new Set(['CASH', 'BANK', 'PAYMENT_PROCESSOR', 'CREDIT_CARD', 'LOAN', 'EQUITY', 'TAX', 'OTHER']);
@@ -66,7 +67,7 @@ export class FinanceAccountsService {
       coaId = coa.id;
     }
     const opening = Number(input.openingBalance ?? 0);
-    return this.prisma.client.financialAccount.create({
+    const created = await this.prisma.client.financialAccount.create({
       data: {
         businessId,
         chartOfAccountId: coaId,
@@ -82,6 +83,8 @@ export class FinanceAccountsService {
         isActive: true,
       },
     });
+    invalidateBusinessFinancialSnapshotCache(businessId);
+    return created;
   }
 
   async update(businessId: string, id: string, input: UpdateAccountInput) {
@@ -104,7 +107,9 @@ export class FinanceAccountsService {
     if (input.isActive != null) data.isActive = input.isActive;
     if (input.chartOfAccountId != null) data.chartOfAccountId = input.chartOfAccountId;
 
-    return this.prisma.client.financialAccount.update({ where: { id }, data });
+    const updated = await this.prisma.client.financialAccount.update({ where: { id }, data });
+    invalidateBusinessFinancialSnapshotCache(businessId);
+    return updated;
   }
 
   async archive(businessId: string, id: string) {
@@ -113,9 +118,11 @@ export class FinanceAccountsService {
     });
     if (!existing) throw new NotFoundException('Account not found');
     // Soft archive — never hard-delete since LedgerEntry rows reference it.
-    return this.prisma.client.financialAccount.update({
+    const archived = await this.prisma.client.financialAccount.update({
       where: { id },
       data: { isActive: false },
     });
+    invalidateBusinessFinancialSnapshotCache(businessId);
+    return archived;
   }
 }

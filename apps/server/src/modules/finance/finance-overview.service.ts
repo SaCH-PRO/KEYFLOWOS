@@ -5,8 +5,10 @@ import { FinancialAccountSeederService } from './financial-account-seeder.servic
 import { ReceivablesService } from './receivables.service';
 import {
   computeNormalizedCashBalance,
+  fetchAllPages,
   loadCashLedgerMovements,
   loadLatestExchangeRates,
+  loadNormalizedTaxReserved,
   normalizeCurrencyCode,
 } from './finance-accounting.util';
 
@@ -131,16 +133,20 @@ export class FinanceOverviewService {
       recurringBills,
       receivablesAging,
     ] = await Promise.all([
-      this.prisma.client.financialAccount.findMany({
-        where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
-        select: {
-          id: true,
-          chartOfAccountId: true,
-          openingBalance: true,
-          currentBalance: true,
-          currency: true,
-        },
-      }),
+      fetchAllPages(({ skip, take }) =>
+        this.prisma.client.financialAccount.findMany({
+          where: { businessId, isActive: true, type: { in: ['CASH', 'BANK', 'PAYMENT_PROCESSOR'] } },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            chartOfAccountId: true,
+            openingBalance: true,
+            currentBalance: true,
+            currency: true,
+          },
+          ...(skip > 0 ? { skip, take } : {}),
+        }),
+      ),
       this.prisma.client.payment.aggregate({
         where: { businessId, status: 'SUCCESSFUL', createdAt: { gte: monthStart } },
         _sum: { amount: true },
@@ -235,15 +241,14 @@ export class FinanceOverviewService {
       failClosedOnMissingRate: false,
     });
 
-    let taxReserved = 0;
-    if (taxPayable) {
-      const agg = await this.prisma.client.ledgerEntry.aggregate({
-        where: { accountId: taxPayable.id },
-        _sum: { debit: true, credit: true },
-      });
-      // Liability accounts: positive = credit > debit.
-      taxReserved = Number(agg._sum.credit ?? 0) - Number(agg._sum.debit ?? 0);
-    }
+    const taxReserved = await loadNormalizedTaxReserved({
+      ledgerEntryDelegate: this.prisma.client.ledgerEntry,
+      businessId,
+      taxPayableAccountId: taxPayable?.id,
+      baseCurrency: normalizeCurrencyCode(currency, 'TTD'),
+      rates: exchangeRates,
+      failClosedOnMissingRate: false,
+    });
 
     const revenueThisMonth = Number(paidInvoices._sum.amount ?? 0);
     const expensesThisMonth = Number(monthExpenses._sum.amount ?? 0);
