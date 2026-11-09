@@ -12,11 +12,11 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { appUrl } from '../../core/config/runtime-urls';
-import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
+import { TeamAuditInterceptor, AuditAction, AuditOncePerEntity } from '../../core/interceptors/team-audit.interceptor';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { ConvertQuoteDto, CreateQuoteDto, UpdateQuoteDto } from './dto/create-quote.dto';
-import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
+import { AllowPlanLimitReplay, PlanLimitGuard, RequirePlanLimit, deferredPlanLimitDenial } from '../subscriptions/plan-limit.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { sanitizeString } from '../../core/utils/sanitize';
 import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
@@ -167,6 +167,31 @@ function toQuoteWriteResponse<Q extends { contact?: Record<QuoteWriteContactKey,
       QuoteWriteContactKey
     >,
   };
+}
+
+/**
+ * V1-45b-CREATE-IDEMPOTENCY-HTTP (owner ruling D-15; V1-45 review SEC-V45-2):
+ * the create's Idempotency-Key header, read as SiteController's
+ * checkoutIdempotencyKey reads it. The service trims it, treats a blank one as
+ * none and refuses one longer than 255 characters (400).
+ */
+function createIdempotencyKeyHeader(header: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(header) ? header[0] : header;
+  return typeof raw === 'string' ? raw : undefined;
+}
+
+/** The request the keyed create routes read: the header, the acting member. */
+type CreateRequest = { headers: Record<string, string | string[] | undefined>; user?: { id?: string } };
+
+/**
+ * V1-45b: what a create forwards for its key: the key and the acting member,
+ * whose id is part of the key's request hash (SEC-V45-3: another member
+ * presenting the same key is a 409). A request with no key forwards neither,
+ * exactly as before.
+ */
+function createIdempotency(req: CreateRequest): { idempotencyKey?: string; actorUserId?: string } {
+  const idempotencyKey = createIdempotencyKeyHeader(req.headers['idempotency-key']);
+  return idempotencyKey === undefined ? {} : { idempotencyKey, actorUserId: req.user?.id };
 }
 
 @Controller('commerce')
@@ -697,16 +722,32 @@ export class CommerceController {
   // against any businessId, and because PlanLimitGuard was absent here, the
   // `invoices` plan limit enforced elsewhere could be bypassed by calling this
   // route instead. Decorators match `invoiceProject` deliberately.
+  //
+  // V1-45b (D-15; V1-45 review SEC-V45-2, SEC-V45-3): the Idempotency-Key
+  // header is forwarded with the acting member, so the same key and body from
+  // the same member answer the invoice the first request created. A replay is
+  // audited once (AuditOncePerEntity) and, at the plan's invoice limit, answers
+  // the existing invoice instead of the guard's 403 (AllowPlanLimitReplay).
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
   @RequireModuleScope('revenue', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('revenue', 'invoice_created', 'invoice')
+  @AuditOncePerEntity()
   @RequirePlanLimit('invoices')
+  @AllowPlanLimitReplay()
   @Post('businesses/:businessId/invoices')
-  createInvoice(
+  async createInvoice(
     @Param('businessId') businessId: string,
     @Body(CREATE_INVOICE_BODY_PIPE) body: CreateInvoiceDto,
+    @Req() req: CreateRequest,
   ) {
+    const idempotency = createIdempotency(req);
+    // V1-45b: at the plan limit, PlanLimitGuard let a keyed request through
+    // with its refusal attached. Only a key that already created an invoice
+    // here is answered (the service then replays it, or 409s a different
+    // request); anything else is refused as the guard would have.
+    const planLimitDenial = deferredPlanLimitDenial(req);
+    if (planLimitDenial && !(await this.createSlotUsed(businessId, 'invoice', idempotency.idempotencyKey))) throw planLimitDenial;
     // R0-27: the body is a validated DTO (it was an inline type the
     // ValidationPipe could not see), and only its declared fields are
     // forwarded. The service computes subtotal, tax, discount and total; the
@@ -721,7 +762,25 @@ export class CommerceController {
       discountType: body.discountType,
       discountValue: body.discountValue,
       notes: body.notes,
+      ...idempotency,
     });
+  }
+
+  /**
+   * V1-45b: whether the key already created a document of this kind in this
+   * business: its completed slot on idempotency_keys, named as
+   * CommerceService's createClaim names it ('commerce.<kind>.create:<key>').
+   * A create commits its document and its slot together, so a completed slot
+   * means the create would answer (or 409), never write.
+   */
+  private async createSlotUsed(businessId: string, kind: 'invoice' | 'quote', key: string | undefined): Promise<boolean> {
+    const trimmed = key?.trim();
+    if (!trimmed) return false;
+    const slot = await this.prisma.client.idempotencyKey.findUnique({
+      where: { businessId_idempotencyKey: { businessId, idempotencyKey: `commerce.${kind}.create:${trimmed}` } },
+      select: { status: true },
+    });
+    return slot?.status === 'completed';
   }
 
   // R0-28 (M21, CF-15 authorization half): this bare-id write ran AuthGuard and
@@ -1006,12 +1065,20 @@ export class CommerceController {
     return this.commerce.respondToQuoteByToken(token, 'reject', body?.reason, visitorId);
   }
 
+  // V1-45b (D-15; V1-45 review SEC-V45-2, SEC-V45-3): the Idempotency-Key
+  // header is forwarded with the acting member, as on invoice create, and the
+  // route is audited like the invoice route: one quote_created row per quote,
+  // none for a replay.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'quote_created', 'quote')
+  @AuditOncePerEntity()
   @Post('businesses/:businessId/quotes')
   async createQuote(
     @Param('businessId') businessId: string,
     @Body(CREATE_QUOTE_BODY_PIPE) body: CreateQuoteDto,
+    @Req() req: CreateRequest,
   ) {
     // V1-53 (M19 quote half): the body is a validated DTO (it was an inline
     // type the ValidationPipe could not see), and only its declared fields are
@@ -1029,6 +1096,7 @@ export class CommerceController {
       discountValue: body.discountValue,
       notes: body.notes,
       quoteNumber: body.quoteNumber,
+      ...createIdempotency(req),
     });
     return toQuoteWriteResponse(quote);
   }

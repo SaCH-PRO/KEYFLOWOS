@@ -370,6 +370,17 @@ function createClaim(kind: CreateKind, key: unknown, material: Record<string, un
   };
 }
 
+/**
+ * V1-45b (V1-45 review SEC-V45-3): the acting member is part of the request,
+ * as in the KEY tool registry's fingerprint (fingerprintToolRequest): another
+ * member presenting the same key and body is a 409, never the first member's
+ * replay. A create with no acting member (the internal callers) hashes as the
+ * document fields alone, as before.
+ */
+function createActorMaterial(actorUserId: string | undefined): Record<string, unknown> {
+  return actorUserId ? { actor: actorUserId } : {};
+}
+
 /** A create's document lines in the fixed shape its request hash reads. */
 function createLinesMaterial(items: ReadonlyArray<{ description?: unknown; quantity?: unknown; unitPrice?: unknown; productId?: unknown; total?: unknown }> | undefined) {
   return Array.isArray(items)
@@ -858,6 +869,8 @@ export class CommerceService {
     total?: number;
     /** V1-45 (D-15): the client's Idempotency-Key. The same key and request answer the invoice it created. */
     idempotencyKey?: string;
+    /** V1-45b (SEC-V45-3): the member who sent the request; part of the key's request hash. */
+    actorUserId?: string;
   }) {
     // V1-45 (M22): a retry with a used key is answered before anything else runs.
     const claim = createClaim('invoice', input.idempotencyKey, {
@@ -873,6 +886,7 @@ export class CommerceService {
       subtotal: input.subtotal ?? null,
       taxAmount: input.taxAmount ?? null,
       total: input.total ?? null,
+      ...createActorMaterial(input.actorUserId),
     });
     const loadCreated = (id: string) =>
       this.prisma.client.invoice.findFirst({ where: { id, businessId: input.businessId }, include: { items: true, contact: true } });
@@ -2677,6 +2691,8 @@ export class CommerceService {
     quoteNumber?: string;
     /** V1-45 (D-15): the client's Idempotency-Key. The same key and request answer the quote it created. */
     idempotencyKey?: string;
+    /** V1-45b (SEC-V45-3): the member who sent the request; part of the key's request hash. */
+    actorUserId?: string;
   }) {
     // V1-45 (M22): a retry with a used key is answered before anything else runs.
     const claim = createClaim('quote', input.idempotencyKey, {
@@ -2689,6 +2705,7 @@ export class CommerceService {
       discountValue: input.discountValue ?? null,
       notes: input.notes ?? null,
       quoteNumber: input.quoteNumber ?? null,
+      ...createActorMaterial(input.actorUserId),
     });
     const loadCreated = (id: string) =>
       this.prisma.client.quote.findFirst({ where: { id, businessId: input.businessId }, include: { items: true, contact: true } });

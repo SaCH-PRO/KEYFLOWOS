@@ -30,6 +30,7 @@ import { refreshWorkspace, getStoredBusinessId, getCachedBusiness } from "@/lib/
 import { formatAmount } from "../../utils/commerce-utils";
 import { InvoiceLineItem, generateItemId, getDueDateFromTerms, PAYMENT_TERMS } from "../../components/commerce-types";
 import { useLineItemHandlers } from "../../hooks/use-line-item-handlers";
+import { newPaymentAttemptKey } from "../../../finance/components/payment-record-modal";
 
 export default function NewInvoicePage() {
   const router = useRouter();
@@ -55,6 +56,11 @@ export default function NewInvoicePage() {
 
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  // V1-45b (D-15): the create's Idempotency-Key, one per open of this page:
+  // minted by the first save and reused by every retry (Save Draft or Save &
+  // Send), so a save whose answer was lost is answered with the invoice it
+  // created. A new open of the page is a new mount and mints a new key.
+  const createKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     const init = async () => {
@@ -132,6 +138,7 @@ export default function NewInvoicePage() {
         dueDate: dueDate || undefined, taxRate: taxRate ? parseFloat(taxRate) : undefined,
         discountType: discountValue ? discountType : undefined, discountValue: discountValue ? parseFloat(discountValue) : undefined,
         notes: notes || undefined,
+        idempotencyKey: (createKeyRef.current ??= newPaymentAttemptKey()),
       });
       if (error || !data) { setFormError(error ?? "Failed"); toast.error(error ?? "Failed"); }
       else {

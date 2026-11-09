@@ -2651,14 +2651,12 @@ export function capturePayLinkPaypalOrder(token: string, orderId: string) {
  * created; the same key with a different body is a 409 idempotency_key_reused.
  * No key (or a blank one) sends no header: every call creates, as before.
  *
- * Not live yet, so no form passes a key. The API is cross-origin
- * (NEXT_PUBLIC_API_BASE_URL), and the server's CORS allowedHeaders
- * (app-bootstrap.ts) do not list Idempotency-Key, so the browser's preflight
- * would refuse the POST ("Failed to fetch"). commerce.controller.ts does not
- * forward the header to the service either. The packet that wires a form to
- * pass a key must first add 'Idempotency-Key' to allowedHeaders and forward
- * the header in the controller (V1-45 review SEC-V45-1, V45-CR-1, SEC-V45-2;
- * todo cases H-01..H-07 in commerce-create-idempotency.integration.test.ts).
+ * V1-45b-CREATE-IDEMPOTENCY-HTTP: live. The server's CORS allowedHeaders
+ * (app-bootstrap.ts) list Idempotency-Key, so the cross-origin preflight
+ * (NEXT_PUBLIC_API_BASE_URL) allows it, and the create routes forward it with
+ * the acting member (commerce-create-idempotency.integration.test.ts H-01..H-08).
+ * Every create form passes one key per open: invoices-panel, invoices/new,
+ * quotes-panel, revenue-composer, and usePipelineActions' Duplicate actions.
  */
 function createIdempotencyInit(idempotencyKey: string | undefined): RequestInit | undefined {
   const key = idempotencyKey?.trim();

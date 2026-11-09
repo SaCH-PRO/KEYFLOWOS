@@ -6,6 +6,7 @@ import { BillingFormModal } from "../../commerce/components/billing-form-modal";
 import { useQuoteForm } from "../../commerce/hooks/use-quote-form";
 import { useInvoiceForm } from "../../commerce/hooks/use-invoice-form";
 import { useLineItemHandlers } from "../../commerce/hooks/use-line-item-handlers";
+import { newPaymentAttemptKey } from "./payment-record-modal";
 import {
   createQuote,
   updateQuote,
@@ -115,6 +116,19 @@ export function RevenueComposer({
   const [savingQuote, setSavingQuote] = useState(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
 
+  // V1-45b (D-15): each create's Idempotency-Key, one per open of its form:
+  // minted by the open's first save and reused by every retry of that open,
+  // so a save whose answer was lost is answered with the document it created.
+  // Dropped when the form closes; the next open mints a new one.
+  const quoteKeyRef = useRef<string | null>(null);
+  const invoiceKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showQuoteBuilder) quoteKeyRef.current = null;
+  }, [showQuoteBuilder]);
+  useEffect(() => {
+    if (!showInvoiceBuilder) invoiceKeyRef.current = null;
+  }, [showInvoiceBuilder]);
+
   const handleSaveQuote = useCallback(async () => {
     if (!businessId || !quoteForm.contactId) return;
     setSavingQuote(true);
@@ -167,6 +181,7 @@ export function RevenueComposer({
           toast.error(res.error ?? "Failed to update quote");
         }
       } else {
+        quoteKeyRef.current ??= newPaymentAttemptKey();
         const res = await createQuote({
           businessId,
           contactId: quoteForm.contactId,
@@ -177,9 +192,12 @@ export function RevenueComposer({
           discountType: quoteForm.discountType,
           discountValue: parseFloat(quoteForm.discountValue) || 0,
           notes: quoteForm.notes || undefined,
+          idempotencyKey: quoteKeyRef.current,
         });
         if (res.data) {
-          setQuotes((q) => [res.data!, ...q]);
+          quoteKeyRef.current = null;
+          // A replay answers a quote that may already be listed.
+          setQuotes((q) => [res.data!, ...q.filter((quote) => quote.id !== res.data!.id)]);
           toast.success("Quote created");
           setShowQuoteBuilder(false);
           resetQuoteForm();
@@ -244,6 +262,7 @@ export function RevenueComposer({
           toast.error(res.error ?? "Failed to update invoice");
         }
       } else {
+        invoiceKeyRef.current ??= newPaymentAttemptKey();
         const res = await createInvoice({
           businessId,
           contactId: invoiceForm.contactId,
@@ -254,9 +273,12 @@ export function RevenueComposer({
           discountType: invoiceForm.discountType,
           discountValue: parseFloat(invoiceForm.discountValue) || 0,
           notes: invoiceForm.notes || undefined,
+          idempotencyKey: invoiceKeyRef.current,
         });
         if (res.data) {
-          setInvoices((prev) => [res.data!, ...prev]);
+          invoiceKeyRef.current = null;
+          // A replay answers an invoice that may already be listed.
+          setInvoices((prev) => [res.data!, ...prev.filter((inv) => inv.id !== res.data!.id)]);
           toast.success("Invoice created");
           setShowInvoiceBuilder(false);
           resetInvoiceForm();

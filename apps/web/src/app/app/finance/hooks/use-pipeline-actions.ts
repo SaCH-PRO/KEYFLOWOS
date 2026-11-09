@@ -20,6 +20,7 @@ import {
   type Quote,
 } from "@/lib/client";
 import { exportToCsv } from "../../commerce/components/bulk-action-bar";
+import { newPaymentAttemptKey } from "../components/payment-record-modal";
 import type { FinancialRecord } from "@/lib/finance/types";
 
 export interface PaymentForm {
@@ -35,6 +36,16 @@ export interface ConvertForm {
   taxRate: string;
   dueDate: string;
   notes: string;
+}
+
+/** V1-45b: the key of a document's pending Duplicate, minted on its first attempt. */
+function pendingDuplicateKey(keys: Map<string, string>, slot: string): string {
+  let key = keys.get(slot);
+  if (!key) {
+    key = newPaymentAttemptKey();
+    keys.set(slot, key);
+  }
+  return key;
 }
 
 export function usePipelineActions({
@@ -293,6 +304,12 @@ export function usePipelineActions({
   );
 
   /* ─── Duplicate ─── */
+  // V1-45b (D-15): each Duplicate of a document is one create with one
+  // Idempotency-Key, kept until it succeeds: a retry after a failed answer (a
+  // lost response) reuses it and is answered with the copy the first attempt
+  // made; the Duplicate after a success is a new copy and mints a new key.
+  const duplicateKeysRef = useRef(new Map<string, string>());
+
   const handleDuplicateQuote = useCallback(
     async (quote: Quote) => {
       if (!businessId) return;
@@ -308,9 +325,11 @@ export function usePipelineActions({
           discountType: quote.discountType ?? undefined,
           discountValue: quote.discountValue ?? undefined,
           notes: quote.notes ? `${quote.notes} (Copy)` : "Copy",
+          idempotencyKey: pendingDuplicateKey(duplicateKeysRef.current, `quote:${quote.id}`),
         });
         if (data) {
-          setQuotes((prev) => [data, ...prev]);
+          duplicateKeysRef.current.delete(`quote:${quote.id}`);
+          setQuotes((prev) => [data, ...prev.filter((q) => q.id !== data.id)]);
           toast.success("Quote duplicated");
         } else toast.error(error ?? "Failed to duplicate quote");
       } finally {
@@ -335,9 +354,11 @@ export function usePipelineActions({
           discountType: invoice.discountType ?? undefined,
           discountValue: invoice.discountValue ?? undefined,
           notes: invoice.notes ? `${invoice.notes} (Copy)` : "Copy",
+          idempotencyKey: pendingDuplicateKey(duplicateKeysRef.current, `invoice:${invoice.id}`),
         });
         if (data) {
-          setInvoices((prev) => [data, ...prev]);
+          duplicateKeysRef.current.delete(`invoice:${invoice.id}`);
+          setInvoices((prev) => [data, ...prev.filter((inv) => inv.id !== data.id)]);
           toast.success("Invoice duplicated");
         } else toast.error(error ?? "Failed to duplicate invoice");
       } finally {

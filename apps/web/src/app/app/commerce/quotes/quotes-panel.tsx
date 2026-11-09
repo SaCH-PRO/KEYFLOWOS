@@ -78,6 +78,7 @@ import { registerInterruptedTask, markTaskCompleted } from "@/lib/resume-task-re
 import { useNavigationContext } from "@/lib/navigation-context";
 import { useCompose } from "@/components/email/compose-context";
 import { quoteConvertDefaults, quoteConvertRequest, type QuoteConvertForm } from "../../finance/components/quote-convert-modal";
+import { newPaymentAttemptKey } from "../../finance/components/payment-record-modal";
 import { ArrowRightLeft, Eye } from "lucide-react";
 
 type QuoteBulkAction = "send" | "reject" | "delete";
@@ -175,6 +176,14 @@ export default function QuotesPanel({
   const { open: openComposer } = useCompose();
   const quoteTaskIdRef = useRef<string | null>(null);
   const quoteSessionIdRef = useRef<string | null>(null);
+  // V1-45b (D-15): the quote create's Idempotency-Key, one per open of the
+  // form: minted by the open's first save and reused by every retry of that
+  // open, so a save whose answer was lost is answered with the quote it
+  // created. Dropped when the form closes; the next open mints a new one.
+  const createKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showQuoteBuilder) createKeyRef.current = null;
+  }, [showQuoteBuilder]);
 
   const originContext = getOriginContext();
   const crossModuleOriginLabel = originContext && originContext.workspace && originContext.workspace !== "Revenue"
@@ -511,6 +520,7 @@ export default function QuotesPanel({
         toast.error("Failed to update quote");
       }
     } else {
+      createKeyRef.current ??= newPaymentAttemptKey();
       const res = await createQuote({
         businessId,
         contactId: quoteForm.contactId,
@@ -520,10 +530,13 @@ export default function QuotesPanel({
         discountType: quoteForm.discountType,
         discountValue: parseFloat(quoteForm.discountValue) || 0,
         notes: quoteForm.notes || undefined,
+        idempotencyKey: createKeyRef.current,
       });
       if (res.data) {
+        createKeyRef.current = null;
         if (quoteTaskIdRef.current) { markTaskCompleted(quoteTaskIdRef.current); quoteTaskIdRef.current = null; }
-        setQuotes((q) => [res.data!, ...q]);
+        // A replay answers the quote already listed (a double click sends one key).
+        setQuotes((q) => [res.data!, ...q.filter((quote) => quote.id !== res.data!.id)]);
         toast.success("Quote created");
         emitEvent("commerce:quote_created", "commerce", { quoteId: res.data.id });
 
@@ -532,6 +545,9 @@ export default function QuotesPanel({
         setPendingDriveUpload({ quoteId: res.data.id, templateId });
       } else if (res.error) {
         toast.error("Failed to create quote");
+        // V1-45b: the form, and its key, stay open for the retry (it closed
+        // and reset here, so the operator re-entered the quote under no key).
+        return;
       }
     }
     setShowQuoteBuilder(false);

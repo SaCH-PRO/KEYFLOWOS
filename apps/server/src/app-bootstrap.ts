@@ -69,7 +69,10 @@ export function configureNestApp(app: INestApplication): void {
         },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-business-id'],
+    // V1-45b (D-15; V1-45 review SEC-V45-1 / V45-CR-1): the web app calls the
+    // API cross-origin and sends Idempotency-Key on invoice and quote create,
+    // so the browser's preflight must allow it or every keyed create fails.
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-business-id', 'Idempotency-Key'],
   });
 
   // Rate limit everything EXCEPT the top-level health/readiness endpoints
@@ -111,7 +114,8 @@ export function configureNestApp(app: INestApplication): void {
     if (isPublic) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-business-id');
+      // V1-45b: the storefront checkout reads Idempotency-Key (V1-33) too.
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-business-id, Idempotency-Key');
       if (req.method === 'OPTIONS') {
         res.status(204).end();
         return;
