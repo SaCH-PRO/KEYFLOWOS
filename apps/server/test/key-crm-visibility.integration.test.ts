@@ -145,6 +145,9 @@ let briefings: any;
 let DEFAULT_AGENT_TRIGGERS: ReadonlyArray<{ name: string; eventPattern: string; objective: string; maxRiskTier: number }>;
 const plannedFor: Array<{ id?: string; objective: string; rawInput?: string; userId: unknown }> = [];
 
+/** W5-EXEC-LOGS-VISIBILITY: the real AiController (GET ai/execution-logs), started by its case. */
+let logsApp: any;
+
 async function cleanup() {
   for (const sql of [
     `DELETE FROM journey_instances WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -166,6 +169,17 @@ async function cleanup() {
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
+}
+
+/** Identity attachment (as AuthMiddleware does after token verification): the seeded user named by `x-test-user`. */
+async function attachTestUser(req: any, _res: any, next: any) {
+  const header = req.headers['x-test-user'];
+  const id = typeof header === 'string' ? header : undefined;
+  if (id && id.startsWith(P)) {
+    const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+    if (user) req.user = { id: user.id, email: user.email, role: user.role };
+  }
+  next();
 }
 
 let ipSeq = 0;
@@ -327,15 +341,7 @@ beforeAll(async () => {
   app = testing.createNestApplication();
   app.getHttpAdapter().getInstance().set('trust proxy', true);
   // Identity attachment only. No guard is overridden.
-  app.use(async (req: any, _res: any, next: any) => {
-    const header = req.headers['x-test-user'];
-    const id = typeof header === 'string' ? header : undefined;
-    if (id && id.startsWith(P)) {
-      const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
-      if (user) req.user = { id: user.id, email: user.email, role: user.role };
-    }
-    next();
-  });
+  app.use(attachTestUser);
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new GlobalHttpExceptionFilter());
   await app.init();
@@ -484,6 +490,7 @@ beforeAll(async () => {
 afterAll(async () => {
   if (db) await cleanup();
   if (app) await app.close();
+  if (logsApp) await logsApp.close();
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -896,9 +903,129 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
   // Residuals of review SEC-D93-1..3 outside this packet's write set (plan-step-authority, the default
   // triggers, the system plan creators' member field, the orchestrator's choice of the memberless view):
   it.todo("CV-08k TODO (review SEC-D93-1 residual; D-74): GET businesses/:businessId/journeys/:instanceId hands getJourneyInstance its viewer (ai.controller.ts, outside W4-D93-NO-MEMBER-CONTACTS's write set), so the plan read rule answers each viewer what it may read; until then the route withholds every step's input and output from every reader");
-  it.todo("CV-08l TODO (review SEC-D93-1, SEC-D93-2 residual; D-74): GET businesses/:businessId/ai/execution-logs answers only what its viewer may read: ActionDispatcherService (outside this write set) logs a plan step's whole result, so an owner-run system plan's output (and, before D-93, the owner's own plan's) reaches every member");
+  // CV-08l (GET ai/execution-logs) is live in W5-EXEC-LOGS-VISIBILITY below.
   it.todo("CV-08m TODO (review SEC-D93-3 residual): POST and PUT agent/triggers (agent.controller.ts, BusinessGuard only, outside this write set) let any member switch on a seeded default rule or write it word for word, and its plans run as the owner (D-93); who may switch on or write a system rule is that route's authority");
   it.todo("CV-08n TODO (review SEC-D93-1 residual; D-73): POST businesses/:businessId/journeys/:key/trigger records the requesting member as the journey plan's member (ai.controller.ts, outside this write set), so the journey runs as that member rather than as no member");
+});
+
+/**
+ * W5-EXEC-LOGS-VISIBILITY (FOLLOW6; owner rulings D-74, D-93; review SEC-D93-1, SEC-D93-2 residual,
+ * recorded as it.todo CV-08l by W4-D93-NO-MEMBER-CONTACTS): GET ai/execution-logs answered every row
+ * of the business, input and output, to every member. ActionDispatcherService logs each plan step's
+ * whole result, so the output of an owner-run plan (the OWNER's own, a journey, a default trigger, the
+ * daily briefing: D-93 runs the system's plans as the owner) reached every member, contact names a
+ * STAFF member may not open included. The route now applies the plan read rule (graphPlanReadScope +
+ * visiblePlanSteps, KEY-R3a/KEY-R3b): a member is served the rows of runs they may read (a plan's row
+ * to whoever may read the plan; a row with no plan to the member it ran for; every row to the OWNER,
+ * an ADMIN or a SUPER_ADMIN), each row judged as the plan step it ran, its output withheld when the
+ * step's output is the OWNER's only (a contact read) and otherwise filtered by the viewer's contact
+ * visibility (D-74). Driven through the real AiController (real guards, the real AiExecutionLogService)
+ * over rows the real plan-queue dispatcher writes.
+ */
+describe('W5-EXEC-LOGS-VISIBILITY (D-74, D-93): GET ai/execution-logs serves a member only the rows of runs they may read, outputs filtered by the plan read rule', () => {
+  /** GET ai/execution-logs as `actor`: every row of the business on one page. */
+  async function executionLogs(actor: string): Promise<{ logs: any[]; total: number }> {
+    if (!logsApp) {
+      const { Test } = await import('@nestjs/testing');
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { AuthGuard } = await import('../src/core/auth/auth.guard');
+      const { BusinessGuard } = await import('../src/core/auth/business.guard');
+      const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+      const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+      const { AiController } = await import('../src/modules/ai/ai.controller');
+      const { AiExecutionLogService } = await import('../src/modules/ai/ai-execution-log.service');
+      const ref = await Test.createTestingModule({
+        controllers: [AiController],
+        providers: [
+          { provide: PrismaService, useValue: prisma },
+          AuthGuard,
+          BusinessGuard,
+          ModuleScopeGuard,
+          CrmRateLimitGuard,
+          { provide: AiExecutionLogService, useValue: new AiExecutionLogService(prisma) },
+          { provide: EventEmitter2, useValue: { emit: () => true } },
+        ],
+      })
+        .useMocker(() => ({}))
+        .compile();
+      logsApp = ref.createNestApplication();
+      logsApp.getHttpAdapter().getInstance().set('trust proxy', true);
+      logsApp.use(attachTestUser);
+      await logsApp.init();
+    }
+    const res = await request(logsApp.getHttpServer())
+      .get(`/ai/businesses/${ID.biz}/ai/execution-logs?limit=1000`)
+      .set('x-test-user', actor)
+      .set('x-forwarded-for', nextIp());
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(200);
+    return res.body;
+  }
+
+  it("CV-08l RED-BEFORE (W5-EXEC-LOGS-VISIBILITY; D-74, D-93; review SEC-D93-1, SEC-D93-2): a STAFF member reading GET ai/execution-logs gets only the rows of runs they may read and no row output naming a contact they cannot open (the OWNER's plan's crm_list_contacts row is not theirs; their own plan's commerce_list_invoices row keeps only their own contact's invoices) and no output of an owner-only contact read (their plan's fetch_client_health row, written in the owner's view); an ADMIN sees every run without the OWNER's PRIVATE contact; the OWNER sees every row as before", async () => {
+    // The OWNER's plan: crm_list_contacts on the queue, every contact listed (the PRIVATE one included).
+    const ownerPlan = `${P}cv08l_owner_list`;
+    await seedPlan(ownerPlan, ID.owner, 'crm_list_contacts', { limit: 50 }, 'approved');
+    await runQueueStep(ownerPlan, 'crm_list_contacts', { limit: 50 });
+    expect((await stepRow(ownerPlan)).status).toBe('completed');
+    // The STAFF member's plan: commerce_list_invoices (revenue read, no contact read) runs on the queue
+    // with no principal, so it lists every invoice with its contact.
+    const staffInvoices = `${P}cv08l_staff_inv`;
+    await seedPlan(staffInvoices, ID.staffOwned, 'commerce_list_invoices', { limit: 20 }, 'approved');
+    await runQueueStep(staffInvoices, 'commerce_list_invoices', { limit: 20 });
+    expect((await stepRow(staffInvoices)).status).toBe('completed');
+    // The STAFF member's plan with fetch_client_health, as the plan-queue dispatcher logged it before
+    // W3-KEY-CRM-VISIBILITY refused it to them (run with no principal: the owner's view).
+    const staffHealth = `${P}cv08l_staff_health`;
+    await seedPlan(staffHealth, ID.staffOwned, 'fetch_client_health', {}, 'approved');
+    const health = await queue.actionDispatcher.dispatch({
+      businessId: ID.biz, toolName: 'fetch_client_health', args: {}, planId: staffHealth, planStepId: `${staffHealth}_s1`,
+      idempotencyKey: `${staffHealth}_job`, source: 'plan_worker', retryCount: 0, background: true,
+    });
+    expect(health.success, String(health.error)).toBe(true);
+
+    // What the dispatcher logged: each run's whole result.
+    const logged = async (planId: string) =>
+      JSON.stringify((await db.aiExecutionLog.findFirst({ where: { businessId: ID.biz, planId }, select: { outputSummary: true } }))?.outputSummary ?? null);
+    expect(await logged(ownerPlan)).toContain(NAME.priv);
+    expect(await logged(staffInvoices)).toContain(ID.cPriv);
+    expect(await logged(staffHealth)).toContain(NAME.priv);
+
+    const stored = await db.aiExecutionLog.findMany({ where: { businessId: ID.biz } });
+    const staffPlans = new Set(
+      (await db.aiPlan.findMany({ where: { businessId: ID.biz, userId: ID.staffOwned }, select: { id: true } })).map((p: { id: string }) => p.id),
+    );
+    const staffRuns = stored.filter((r: any) => (r.planId ? staffPlans.has(r.planId) : r.userId === ID.staffOwned));
+
+    // The STAFF member: the rows of their own runs only, and nothing of a contact they may not open.
+    const staff = await executionLogs(ID.staffOwned);
+    expectNoHidden(staff.logs);
+    expect(staff.total).toBe(staffRuns.length);
+    for (const row of staff.logs) {
+      expect(row.planId ? staffPlans.has(row.planId) : row.userId === ID.staffOwned, `${row.id} ${row.toolName} ${row.planId}`).toBe(true);
+    }
+    expect(staff.logs.find((r: any) => r.planId === ownerPlan)).toBeUndefined();
+    const ownInvoices = staff.logs.find((r: any) => r.planId === staffInvoices);
+    expect(ownInvoices, 'their own commerce_list_invoices row').toBeDefined();
+    expect(JSON.stringify(ownInvoices.outputSummary)).toContain(ID.cMine);
+    const ownHealth = staff.logs.find((r: any) => r.planId === staffHealth);
+    expect(ownHealth, 'their own fetch_client_health row').toBeDefined();
+    expect(ownHealth).toMatchObject({ toolName: 'fetch_client_health', success: true, outputSummary: null });
+
+    // An ADMIN: every run (seesEveryPlan), the contact read's output withheld, the OWNER's PRIVATE contact filtered out.
+    const admin = await executionLogs(ID.admin);
+    expectNoHidden(admin.logs, ['priv']);
+    expect(admin.logs.find((r: any) => r.planId === ownerPlan)).toMatchObject({ toolName: 'crm_list_contacts', outputSummary: null });
+    const adminInvoices = admin.logs.find((r: any) => r.planId === staffInvoices);
+    expect(JSON.stringify(adminInvoices?.outputSummary)).toContain(ID.cTeam);
+
+    // The OWNER: every row of the business, exactly as stored.
+    const owner = await executionLogs(ID.owner);
+    const byId = (rows: Array<{ id: string }>) => [...rows].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    expect(owner.total).toBe(stored.length);
+    expect(byId(owner.logs)).toEqual(byId(JSON.parse(JSON.stringify(stored))));
+    expect(JSON.stringify(owner.logs.find((r: any) => r.planId === ownerPlan)?.outputSummary)).toContain(NAME.priv);
+  });
 });
 
 describe("W3-KEY-CRM-VISIBILITY review repairs (D-37): every dispatcher case the principal's visibility bounds is the OWNER's only with no principal, and sequence_enroll honours the member's view", () => {
