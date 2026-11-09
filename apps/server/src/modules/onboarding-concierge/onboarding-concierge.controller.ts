@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Param, Body, UseGuards, Inject } from '@nestjs/common';
 import { OnboardingConciergeService, AutoConfigureResult } from './onboarding-concierge.service';
 import { OnboardingStateService } from './onboarding-state.service';
+import { DemoDataSeederService, type OwnerDemoSeedResult } from './demo-data-seeder.service';
 import {
   SaveOnboardingStepDto,
   ChatDto,
@@ -20,6 +21,8 @@ export class OnboardingConciergeController {
     private readonly concierge: OnboardingConciergeService,
     @Inject(OnboardingStateService)
     private readonly state: OnboardingStateService,
+    @Inject(DemoDataSeederService)
+    private readonly demoSeeder: DemoDataSeederService,
   ) {}
 
   @Get('status')
@@ -45,9 +48,21 @@ export class OnboardingConciergeController {
     return this.state.saveStep(businessId, body.step);
   }
 
+  /**
+   * PR196-SEED-DEMO-OWNER (owner ruling D-84, review OK-6-1, OK-6-2, OK-6-4):
+   * the demo seed writes a demo contact and a DRAFT demo invoice, so it is
+   * OWNER only (a non-member SUPER_ADMIN is refused, D-46) and audited in its
+   * own transaction, naming the owner; a repeated seed answers the existing
+   * demo data, and a unique violation is a 409, never a 500. It goes through
+   * the seeder's owner door with the authenticated caller. There is no
+   * separate sample-contact seeding route.
+   */
   @Post('seed-demo')
-  async seedDemoData(@Param('businessId') businessId: string) {
-    return this.concierge.seedDemoData(businessId);
+  async seedDemoData(
+    @Param('businessId') businessId: string,
+    @CurrentUser() user: AuthenticatedUser | undefined,
+  ): Promise<OwnerDemoSeedResult> {
+    return this.demoSeeder.seedDemoDataAsOwner(businessId, user);
   }
 
   @Get('welcome')
