@@ -4,14 +4,25 @@ import type { ContactStatus } from '../crm/crm.constants';
 
 /**
  * V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary
- * (crm.constants.ts). A row written before V1-38 may still hold the Shopify
- * adapter's legacy status CUSTOMER; it reads as CLIENT until it is repaired.
- * Dormancy is not a status (CF-49): it is a relationshipHealth value, so the
- * segments below decide it by silence alone, as they always did in practice.
+ * (crm.constants.ts). A row may still hold the legacy status CUSTOMER, and not
+ * only from before V1-38 (the Shopify adapter): the CSV/link import copies a
+ * file's status column verbatim (crm-import.service.ts), so it is still
+ * written. It reads as CLIENT while any writer can produce it or a row holds it.
  */
 const CLIENT_STATUS: ContactStatus = 'CLIENT';
 const LEGACY_CLIENT_STATUS = 'CUSTOMER';
 const isClientStatus = (status: string | null | undefined): boolean => status === CLIENT_STATUS || status === LEGACY_CLIENT_STATUS;
+
+/**
+ * Dormancy is not a Contact.status in the vocabulary (CF-49: it is a
+ * relationshipHealth value), and a canonical contact is Dormant or At Risk by
+ * silence alone. But the same import writes a status column of DORMANT
+ * verbatim, and the segments have always read that status: a contact imported
+ * as DORMANT is Dormant whatever its silence, and is not also At Risk
+ * (V1-38b review CR-1).
+ */
+const LEGACY_DORMANT_STATUS = 'DORMANT';
+const isImportedDormant = (status: string | null | undefined): boolean => status === LEGACY_DORMANT_STATUS;
 
 export interface RelationshipHealth {
   contactId: string;
@@ -201,14 +212,14 @@ export class RelationshipHealthService {
       {
         id: 'at-risk',
         name: 'At Risk',
-        criteria: 'No interaction in 30+ days',
+        criteria: 'No interaction in 30+ days, unless imported as dormant',
         count: 0,
         contacts: [],
       },
       {
         id: 'dormant',
         name: 'Dormant',
-        criteria: 'No interaction in 90+ days',
+        criteria: 'No interaction in 90+ days, or imported as dormant',
         count: 0,
         contacts: [],
       },
@@ -232,12 +243,13 @@ export class RelationshipHealthService {
       if (isClientStatus(contact.status) && daysSince < 30) {
         segments[2].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
+      const importedDormant = isImportedDormant(contact.status);
       // At risk
-      if (daysSince >= 30) {
+      if (daysSince >= 30 && !importedDormant) {
         segments[3].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
       // Dormant
-      if (daysSince >= 90) {
+      if (importedDormant || daysSince >= 90) {
         segments[4].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
     }

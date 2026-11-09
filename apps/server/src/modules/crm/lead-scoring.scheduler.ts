@@ -8,9 +8,11 @@ const DEFAULT_TARGET_HOUR_UTC = 4; // run at 04:00 UTC
 
 /**
  * V1-38b (CR-1): the customer bonus goes to Contact.status CLIENT, the one
- * vocabulary (crm.constants.ts). A row written before V1-38 may still hold the
- * Shopify adapter's legacy status CUSTOMER; it scores as CLIENT until it is
- * repaired.
+ * vocabulary (crm.constants.ts). A row may still hold the legacy status
+ * CUSTOMER, and not only from before V1-38 (the Shopify adapter): the CSV/link
+ * import copies a file's status column verbatim (crm-import.service.ts), so it
+ * is still written. It scores as CLIENT while any writer can produce it or a
+ * row holds it.
  */
 const CLIENT_STATUS: ContactStatus = 'CLIENT';
 const LEGACY_CLIENT_STATUS = 'CUSTOMER';

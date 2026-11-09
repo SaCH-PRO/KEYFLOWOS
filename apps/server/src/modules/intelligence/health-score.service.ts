@@ -4,8 +4,10 @@ import type { ContactStatus } from '../crm/crm.constants';
 
 /**
  * V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary
- * (crm.constants.ts). A row written before V1-38 may still hold the Shopify
- * adapter's legacy status CUSTOMER; it counts as CLIENT until it is repaired.
+ * (crm.constants.ts). A row may still hold the legacy status CUSTOMER, and not
+ * only from before V1-38 (the Shopify adapter): the CSV/link import copies a
+ * file's status column verbatim (crm-import.service.ts), so it is still
+ * written. It counts as CLIENT while any writer can produce it or a row holds it.
  */
 const CLIENT_STATUS: ContactStatus = 'CLIENT';
 const LEGACY_CLIENT_STATUS = 'CUSTOMER';

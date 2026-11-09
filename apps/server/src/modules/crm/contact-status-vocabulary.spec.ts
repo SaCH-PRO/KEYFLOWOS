@@ -19,8 +19,16 @@
  *     baseline that may shrink but never grow, and no new file joins it;
  *   - V1-38b (review CR-1): the readers that counted 'CUSTOMER' (lead scoring,
  *     the people health score, people-flow relationship health, the maturity
- *     assessment) count a CLIENT, and a legacy 'CUSTOMER' row the same, until
- *     it is repaired.
+ *     assessment) count a CLIENT, and a legacy 'CUSTOMER' row the same;
+ *   - V1-38b review repairs: the dialects are still WRITTEN. The CSV/link
+ *     import copies a file's status column into Contact.status verbatim
+ *     (crm-import.service.ts -> CrmService.createContact), so a 'CUSTOMER' or
+ *     'DORMANT' row can appear today, not only from before V1-38. The readers
+ *     keep their legacy spellings while any writer can produce them, and
+ *     people-flow keeps a contact imported as 'DORMANT' in Dormant and out of
+ *     At Risk, as it did before V1-38b (CR-1 of the V1-38b review). Real-DB
+ *     proof of the writer and the readers:
+ *     test/contact-status-readers-import.integration.test.ts.
  *
  * Pure: reads source files, imports constants and drives the readers over
  * in-memory stand-ins for Prisma; no database, no network.
@@ -81,14 +89,20 @@ const PACKET_WRITERS = [
  * this baseline.
  */
 const LEGACY_DIALECT_READERS: Record<string, { hits: number; why: string }> = {
-  'modules/ai/key-tool-registry.service.ts': { hits: 1, why: "status: { not: 'DORMANT' } filter (no-op: no contact holds DORMANT)" },
+  'modules/ai/key-tool-registry.service.ts': {
+    hits: 1,
+    why: "status: { not: 'DORMANT' } filter: excludes a contact the CSV/link import wrote as DORMANT (a file's status column is copied verbatim)",
+  },
   'modules/ai/flow-orchestrator.service.ts': { hits: 1, why: "an Automation's ACTIVE/INACTIVE, not Contact.status (scanner false positive)" },
 };
 
 /**
  * V1-38b (CR-1): the readers that counted only 'CUSTOMER' as a customer. Each
  * now reads CLIENT, the canonical status, and counts a legacy 'CUSTOMER' row
- * (written by the Shopify adapter before V1-38) the same until it is repaired.
+ * the same. Such a row is not only historical: the Shopify adapter wrote it
+ * before V1-38, and the CSV/link import still writes a file's status column
+ * verbatim. The legacy spelling may go only once no writer can produce it and
+ * no row holds it.
  */
 const STATUS_READERS = [
   'modules/crm/lead-scoring.scheduler.ts',
@@ -177,8 +191,23 @@ describe('Contact.status vocabulary (CF-49)', () => {
       expect(customerLiterals.length, `${file}: a 'CUSTOMER' literal other than const LEGACY_CLIENT_STATUS`).toBe(legacyDeclarations.length);
       expect(legacyDeclarations.length, `${file}: one legacy declaration at most`).toBeLessThanOrEqual(1);
       expect(src, `${file} takes CLIENT from the vocabulary (crm.constants.ts)`).toMatch(/from '\.{1,2}\/(?:crm\/)?crm\.constants'/);
+      // V1-38b review CR-2: the legacy spelling is not only historical, and
+      // the reader says so (the CSV/link import still writes it).
+      if (legacyDeclarations.length) {
+        expect(src, `${file}: the legacy note names the import that still writes CUSTOMER`).toMatch(/crm-import\.service\.ts/);
+      }
     },
   );
+
+  it("CR-1 (V1-38b review): people-flow relationship health reads a Contact.status 'DORMANT' only through one documented legacy constant", () => {
+    const src = read('modules/people-flow/relationship-health.service.ts');
+    // relationship-health has no relationshipHealth 'DORMANT' literal, so every
+    // 'DORMANT' literal in it is a Contact.status spelling.
+    const dormantLiterals = src.match(/['"`]DORMANT['"`]/g) ?? [];
+    const legacyDeclarations = src.match(/\bconst LEGACY_DORMANT_STATUS = 'DORMANT';/g) ?? [];
+    expect(legacyDeclarations.length, 'one documented LEGACY_DORMANT_STATUS').toBe(1);
+    expect(dormantLiterals.length, "a 'DORMANT' literal other than const LEGACY_DORMANT_STATUS").toBe(1);
+  });
 
   it('an external store buyer maps into the vocabulary: orders make a CLIENT, none a LEAD', () => {
     expect(contactStatusForExternalCustomer(3)).toBe('CLIENT');
@@ -212,7 +241,7 @@ function matchesWhere(row: Record<string, unknown>, where: Record<string, unknow
   });
 }
 
-describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a legacy 'CUSTOMER' row the same until it is repaired", () => {
+describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a legacy 'CUSTOMER' row (still written by the CSV/link import) the same", () => {
   const DAY = 86_400_000;
   const ago = (days: number) => new Date(Date.now() - days * DAY);
 
@@ -299,6 +328,36 @@ describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a 
         expect(CONTACT_STATUSES as readonly string[], `${s.id}: "${s.criteria}"`).toContain(named);
       }
     }
+  });
+
+  it("people-flow segments (V1-38b review CR-1): a contact imported as status 'DORMANT' is Dormant and not At Risk, whatever its silence, as before V1-38b; canonical rows are unchanged", async () => {
+    // The CSV/link import copies a file's status column verbatim, so a
+    // 'DORMANT' row is written today (real-DB proof:
+    // test/contact-status-readers-import.integration.test.ts).
+    const contact = (id: string, status: string, daysSilent: number) => ({
+      id, firstName: id, lastName: null, email: null, status, lastInteractionAt: ago(daysSilent), leadScore: 40,
+    });
+    const contacts = [
+      contact('dormant-recent', 'DORMANT', 5),
+      contact('dormant-quiet', 'DORMANT', 40),
+      contact('dormant-silent', 'DORMANT', 100),
+      contact('client-quiet', 'CLIENT', 40),
+      contact('client-silent', 'CLIENT', 100),
+      contact('client-active', 'CLIENT', 3),
+    ];
+    const segments = await new RelationshipHealthService({ client: { contact: { findMany: async () => contacts } } } as any).listSegments('biz');
+    const ids = (id: string) => (segments.find((s) => s.id === id)?.contacts.map((c) => c.id) ?? []).sort();
+    expect(ids('dormant')).toEqual(['client-silent', 'dormant-quiet', 'dormant-recent', 'dormant-silent']);
+    expect(ids('at-risk')).toEqual(['client-quiet', 'client-silent']);
+    expect(ids('high-value')).toEqual(['client-active']);
+    expect(ids('stale-leads')).toEqual([]);
+    for (const s of segments) {
+      for (const [, named] of s.criteria.matchAll(/\bstatus ([A-Z_]+)/gi)) {
+        expect(CONTACT_STATUSES as readonly string[], `${s.id}: "${s.criteria}"`).toContain(named);
+      }
+    }
+    expect(segments.find((s) => s.id === 'dormant')?.criteria, 'Dormant says it includes contacts imported as dormant').toMatch(/imported as dormant/i);
+    expect(segments.find((s) => s.id === 'at-risk')?.criteria, 'At Risk says it leaves them out').toMatch(/imported as dormant/i);
   });
 
   it('relationship health signals: a CLIENT with no bookings in 90 days is flagged, a legacy CUSTOMER the same, a PROSPECT is not', async () => {

@@ -623,6 +623,11 @@
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
     },
     {
+      "prefix": "v86e_",
+      "owner": "apps/server/test/contact-status-readers-import.integration.test.ts",
+      "packet": "V1-86 (V1-38b-STATUS-READERS)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
