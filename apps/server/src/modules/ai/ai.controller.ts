@@ -52,6 +52,7 @@ import { KeyAgentConfigService } from './key-agent-config.service';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { contactWhereBase } from '../crm/crm.helpers';
+import { activityPrefilter, readVisibleActivityPage, resolveTimelineViewer } from '../timeline/timeline-visibility';
 
 
 const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
@@ -1578,32 +1579,61 @@ export class AiController {
 
   // ── Briefings (Phase 7 MD) ──────────────────────────────────────────────
 
+  /**
+   * W5-BRIEFING-SCOPE (review SEC-W4TS-1 / ST-3; owner ruling D-63, the rule V1-84 built in
+   * timeline-visibility.ts): this served every member the last day's SCHEDULED Activity rows
+   * (revenueImpact, invoice numbers and contacts included), revenueToday, openInvoices and
+   * activeLeads, unfiltered. Each part now follows what the member may read, as the timeline reads
+   * do (filtered, not refused, so a partial-scope member keeps a working briefing):
+   *   - schedule: the rows the timeline rule serves them (canReadActivityRow and contact visibility,
+   *     filterVisibleActivity), the page filled as /upcoming fills it (readVisibleActivityPage);
+   *   - revenueToday and openInvoices: revenue figures, withheld (0, as the day summary reports a
+   *     revenueImpact of 0, V1-84 TS-04) from a member without revenue read;
+   *   - activeLeads: the leads the member may list (crm read and the CRM list rule, visibilityClause
+   *     M7), 0 without crm read.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/briefing/morning')
   @CrmRateLimit(30, 60_000)
-  async morningBriefing(@Param('businessId') businessId: string) {
+  async morningBriefing(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, this.planViewer(req).id);
+    const readsRevenue = viewer.readable.has('revenue');
+    const readsCrm = viewer.readable.has('crm');
+    const since = new Date(Date.now() - 86400000);
+    const prefilter = activityPrefilter(viewer);
+    const scheduleWhere = { businessId, occurredAt: { gte: since }, status: 'SCHEDULED', ...(prefilter.length ? { AND: prefilter } : {}) };
+    const leadClause = readsCrm ? visibilityClause(viewer.crmAccess, viewer.userId) : null;
     const [schedule, revenue, openInvoices, leads] = await Promise.all([
-      (this.prisma as any).client.activity.findMany({
-        where: { businessId, occurredAt: { gte: new Date(Date.now() - 86400000) }, status: 'SCHEDULED' },
-        orderBy: { occurredAt: 'asc' },
-        take: 10,
-      }),
-      (this.prisma as any).client.invoice.aggregate({
-        where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: new Date(Date.now() - 86400000) } },
-        _sum: { total: true },
-      }),
-      (this.prisma as any).client.invoice.count({
-        where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE'] } },
-      }),
-      (this.prisma as any).client.contact.count({
-        where: { businessId, deletedAt: null, leadScore: { gte: 60 } },
-      }),
+      readVisibleActivityPage(this.prisma, viewer, 10, (skip, take) =>
+        (this.prisma as any).client.activity.findMany({
+          where: scheduleWhere,
+          orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+          skip,
+          take,
+        }),
+      ),
+      readsRevenue
+        ? (this.prisma as any).client.invoice.aggregate({
+            where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: since } },
+            _sum: { total: true },
+          })
+        : null,
+      readsRevenue
+        ? (this.prisma as any).client.invoice.count({
+            where: { businessId, deletedAt: null, status: { in: ['SENT', 'OVERDUE'] } },
+          })
+        : 0,
+      readsCrm
+        ? (this.prisma as any).client.contact.count({
+            where: { ...contactWhereBase(businessId), leadScore: { gte: 60 }, ...(leadClause ? { AND: [leadClause] } : {}) },
+          })
+        : 0,
     ]);
 
     return {
       today: new Date().toISOString(),
       schedule,
-      revenueToday: Number(revenue._sum.total ?? 0),
+      revenueToday: Number(revenue?._sum?.total ?? 0),
       openInvoices,
       activeLeads: leads,
     };
