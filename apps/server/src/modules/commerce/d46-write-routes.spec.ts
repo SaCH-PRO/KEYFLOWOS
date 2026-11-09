@@ -72,9 +72,23 @@
  * three models (D46-S09f: a model filter naming one refuses a member below
  * revenue:read; D46-S09g: the every-model listing leaves them out for that
  * member). A SUPER_ADMIN keeps the guard's read admission, with no lookup.
+ *
+ * W6-TRASH-MODULE-SCOPE (owner ruling D-95; review SEC-TL500-3) carries the
+ * same rule to every trash model: restoring or permanently deleting a trashed
+ * record needs write access to the module the record belongs to, and seeing it
+ * in the trash needs that module's read access (one table, TRASH_MODULE in
+ * trash.controller.ts, restated here as D95_MODULE: CRM for contacts,
+ * accounts and opportunities; revenue for invoices, quotes and recurring
+ * invoices; people, the canonical 'team' module, for staff; marketing, the
+ * canonical 'content' module, for community posts and landing pages). D-46
+ * still refuses a non-member SUPER_ADMIN on the revenue models. The trashed
+ * rows of the models the client's soft-delete extension covers are read with a
+ * raw query the extension does not rewrite (the D46-S09g follow-up: the
+ * owner's listing shows trashed invoices and quotes). The HTTP half is
+ * d46-commerce-writes D95-*.
  */
 import 'reflect-metadata';
-import { readdirSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ForbiddenException } from '@nestjs/common';
@@ -445,10 +459,66 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     ({ TrashController: Trash } = await import('../trash/trash.controller'));
   }, 120_000);
 
-  /** Calls TrashController[handler] for `model` as `user`, with the Membership lookup answering `membership`. */
-  async function trashCall(handler: 'restore' | 'permanentDelete', model: string, user: { id: string; role: string }, membership: unknown) {
+  /**
+   * W6-TRASH-MODULE-SCOPE (owner ruling D-95): the module each trash model belongs to, restated from
+   * trash.controller.ts TRASH_MODULE. D-95 names CRM for contacts, accounts and opportunities; revenue for
+   * invoices, quotes and recurring invoices; people for staff (the canonical module key is 'team':
+   * core/authority/module-vocabulary.ts has no 'people'); marketing for community posts and landing pages
+   * (the canonical key is 'content', as D-63 maps marketing rows in timeline-visibility.ts). Every other
+   * model takes the module its own routes declare (deal: crm; product: revenue, its writes need
+   * revenue:write; expense: expenses; automationFlow: automations), else its product area (booking and
+   * service: bookings; project and projectTask: projects; socialPost, emailCampaign, leadForm and
+   * communityComment: content, the marketing area; site: settings, as D-63 maps site rows).
+   */
+  const D95_MODULE: Record<string, string> = {
+    contact: 'crm', account: 'crm', opportunity: 'crm', deal: 'crm',
+    invoice: 'revenue', quote: 'revenue', recurringInvoice: 'revenue', product: 'revenue',
+    staffMember: 'team',
+    communityPost: 'content', landingPage: 'content', communityComment: 'content',
+    socialPost: 'content', emailCampaign: 'content', leadForm: 'content',
+    booking: 'bookings', service: 'bookings',
+    project: 'projects', projectTask: 'projects',
+    expense: 'expenses',
+    automationFlow: 'automations',
+    site: 'settings',
+  };
+
+  /** W6-TRASH-MODULE-SCOPE: the trash's raw read (the client's soft-delete extension does not rewrite it). */
+  const RAW = 'prisma.client.$queryRawUnsafe';
+  const lcfirst = (name: string) => name.charAt(0).toLowerCase() + name.slice(1);
+  const TABLE_MODEL = new Map<string, string>(Prisma.dmmf.datamodel.models.map((m) => [m.dbName ?? m.name, lcfirst(m.name)]));
+
+  /**
+   * The trash models the client's soft-delete extension covers, read from its source
+   * (packages/db/src/client.ts softDelete([...])): their findMany, count and findFirst
+   * rewrite any deletedAt filter to deletedAt null, so the trash reads them raw.
+   */
+  const CLIENT_SOFT_DELETED: Set<string> = (() => {
+    const source = readFileSync(join(__dirname, '..', '..', '..', '..', '..', 'packages', 'db', 'src', 'client.ts'), 'utf8');
+    const list = /softDelete\(\[([\s\S]*?)\]\)/.exec(source)?.[1] ?? '';
+    return new Set([...list.matchAll(/"(\w+)"/g)].map((m) => lcfirst(m[1]!)).filter((model) => model in D95_MODULE));
+  })();
+
+  /** The trash model a recorded read names: prisma.client.<model>.<op>, or the table a raw query reads. */
+  function modelOf(call: { path: string; args: unknown[] }): string | undefined {
+    if (call.path !== RAW) return call.path.split('.')[2];
+    const table = /FROM "([^"]+)"/.exec(String(call.args[0]))?.[1];
+    return table ? TABLE_MODEL.get(table) : undefined;
+  }
+
+  /**
+   * Calls TrashController[handler] for `model` as `user`, with the Membership lookup answering `membership`
+   * (W6-TRASH-MODULE-SCOPE: and any other path `extra` answers).
+   */
+  async function trashCall(
+    handler: 'restore' | 'permanentDelete',
+    model: string,
+    user: { id: string; role: string },
+    membership: unknown,
+    extra: Record<string, (...args: unknown[]) => unknown> = {},
+  ) {
     const calls: Array<{ path: string; args: unknown[] }> = [];
-    const answers = { [MEMBERSHIP_LOOKUP]: async () => membership };
+    const answers = { [MEMBERSHIP_LOOKUP]: async () => membership, ...extra };
     const controller = new Trash(...TRASH_DEPS.map((name) => recorder(name, calls, answers)));
     const req = { user, headers: {}, params: { businessId: BIZ, model, id: `${model}_d46` }, body: {} };
     const meta: Record<string, { index: number; data?: unknown }> = Reflect.getMetadata(ROUTE_ARGS_METADATA, Trash, handler) ?? {};
@@ -514,7 +584,10 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     it(`D46-S09 TrashController.${handler} control: a model outside revenue (contact) is unchanged: no Membership lookup, even for a non-member SUPER_ADMIN`, async () => {
       const { calls } = await trashCall(handler, 'contact', { id: USER_ID, role: 'SUPER_ADMIN' }, null);
       expect(calls.map((c) => c.path)).not.toContain(MEMBERSHIP_LOOKUP);
-      expect(calls[0]?.path).toBe('prisma.client.contact.findFirst');
+      // W6-TRASH-MODULE-SCOPE (D46-S09g follow-up): the client soft-deletes Contact, so the
+      // trashed row is looked up with a raw query (it was prisma.client.contact.findFirst).
+      expect(calls[0]?.path).toBe(RAW);
+      expect(modelOf(calls[0]!)).toBe('contact');
     });
   }
 
@@ -532,14 +605,36 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
    * is admitted to reads without a lookup, as the guard admits it). The HTTP
    * half is d46-commerce-writes D46-S09f.
    */
-  async function listCall(user: { id: string; role: string }, membership: unknown, model?: string, rows: Record<string, unknown[]> = {}) {
+  /**
+   * W6-TRASH-MODULE-SCOPE: with `softDelete`, a Prisma findMany of a model the client soft-deletes answers
+   * what the extension makes it answer (the live rows only: it rewrites the trash filter to deletedAt null).
+   */
+  async function listCall(
+    user: { id: string; role: string },
+    membership: unknown,
+    model?: string,
+    rows: Record<string, unknown[]> = {},
+    softDelete = false,
+  ) {
     const calls: Array<{ path: string; args: unknown[] }> = [];
     const answers = new Proxy({} as Record<string, (...args: unknown[]) => unknown>, {
       get: (_target, path) => {
         if (path === MEMBERSHIP_LOOKUP) return async () => membership;
         // W5-TRASH-LIST-500: a model's findMany answers `rows[model]` (default none).
-        if (typeof path === 'string' && path.endsWith('.findMany')) return async () => rows[path.split('.')[2]!] ?? [];
+        if (typeof path === 'string' && path.endsWith('.findMany')) {
+          const name = path.split('.')[2]!;
+          const answered = rows[name] ?? [];
+          return async () =>
+            softDelete && CLIENT_SOFT_DELETED.has(name) ? answered.filter((r) => (r as { deletedAt?: unknown }).deletedAt == null) : answered;
+        }
         if (typeof path === 'string' && path.endsWith('.count')) return async () => 0;
+        // W6-TRASH-MODULE-SCOPE: a raw read of a model's table answers the same rows; a raw count, 0.
+        if (path === RAW) {
+          return async (sql: unknown) => {
+            const model = modelOf({ path: RAW, args: [sql] })!;
+            return /count\(/.test(String(sql)) ? [{ n: 0 }] : rows[model] ?? [];
+          };
+        }
         return undefined;
       },
     });
@@ -564,8 +659,7 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     return { calls, error, result };
   }
 
-  const queried = (calls: Array<{ path: string }>) =>
-    calls.map((c) => c.path).filter((p) => p !== MEMBERSHIP_LOOKUP).map((p) => p.split('.')[2]);
+  const queried = (calls: Array<{ path: string; args: unknown[] }>) => calls.filter((c) => c.path !== MEMBERSHIP_LOOKUP).map(modelOf);
 
   for (const model of Object.keys(TRASH_REVENUE)) {
     it(`D46-S09f TrashController.listTrashed ?model=${model} (SEC-TRASH-D46-1, revenue:read): a member below revenue:read (USER ADMIN with an explicit revenue:'none', SUPER_ADMIN is not one) is refused with the guard's 'requires read access' message after the lookup alone; a USER with no membership gets 'Not a member of this business'`, async () => {
@@ -601,32 +695,50 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     });
   }
 
-  it('D46-S09f TrashController.listTrashed control (SEC-TRASH-D46-1): a model outside revenue (contact) costs no Membership lookup, whatever the caller', async () => {
-    const { calls, error } = await listCall({ id: USER_ID, role: 'USER' }, null, 'contact');
-    expect(error, String(error)).toBeNull();
-    expect(calls.map((c) => c.path)).toEqual(['prisma.client.contact.findMany', 'prisma.client.contact.count']);
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): this control pinned that a model outside revenue cost no
+  // Membership lookup for any caller. D-95 holds every model to its own module's read access, so a
+  // contact now needs crm:read: a USER with no Membership is refused after the lookup alone, and only a
+  // SUPER_ADMIN (ModuleScopeGuard's read admission) still reads it with no lookup.
+  it("D46-S09f TrashController.listTrashed control (SEC-TRASH-D46-1; W6-TRASH-MODULE-SCOPE, D-95): a model outside revenue (contact) needs crm:read: a USER with no membership gets 'Not a member of this business' after the lookup alone; a SUPER_ADMIN reads it with no lookup", async () => {
+    const none = await listCall({ id: USER_ID, role: 'USER' }, null, 'contact');
+    expect(none.error, String(none.error)).toBeInstanceOf(ForbiddenException);
+    expect((none.error as Error).message).toBe('Not a member of this business');
+    expect(none.calls.map((c) => c.path)).toEqual([MEMBERSHIP_LOOKUP]);
+    const sa = await listCall({ id: USER_ID, role: 'SUPER_ADMIN' }, null, 'contact');
+    expect(sa.error, String(sa.error)).toBeNull();
+    expect(sa.calls.map((c) => c.path)).not.toContain(MEMBERSHIP_LOOKUP);
+    expect(queried(sa.calls)).toEqual(['contact', 'contact']);
   });
 
-  it("D46-S09g TrashController.listTrashed every model (SEC-TRASH-D46-1, revenue:read): a member below revenue:read gets 200 and no invoice, quote or recurringInvoice query runs (one lookup); a revenue:read member and a SUPER_ADMIN (no lookup) get every model queried", async () => {
-    const below = await listCall({ id: USER_ID, role: 'USER' }, { role: 'ADMIN', permissionScopes: { revenue: 'none', settings: 'admin' } });
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): every model is now held to its own module's read access,
+  // so the member below revenue:read holds every other module at admin (an explicit map names each one;
+  // it named only settings, which under D-95 reads the site alone), the STAFF reader's role defaults
+  // (team and settings 'none') read no staffMember or site, and product is a revenue model (its writes
+  // need revenue:write). The revenue claims are unchanged.
+  it("D46-S09g TrashController.listTrashed every model (SEC-TRASH-D46-1, revenue:read; W6-TRASH-MODULE-SCOPE, D-95): a member below revenue:read gets 200 and no invoice, quote, recurringInvoice or product query runs (one lookup); a revenue:read member gets every revenue model queried and a SUPER_ADMIN (no lookup) every model", async () => {
+    const allButRevenue = Object.fromEntries([...new Set(Object.values(D95_MODULE))].map((m) => [m, m === 'revenue' ? 'none' : 'admin']));
+    const below = await listCall({ id: USER_ID, role: 'USER' }, { role: 'ADMIN', permissionScopes: allButRevenue });
     expect(below.error, String(below.error)).toBeNull();
     expect(below.result).toEqual({ items: [], total: 0 });
     expect(below.calls.filter((c) => c.path === MEMBERSHIP_LOOKUP)).toHaveLength(1);
     const belowModels = queried(below.calls);
     for (const model of Object.keys(TRASH_REVENUE)) expect(belowModels, model).not.toContain(model);
+    expect(belowModels).not.toContain('product');
     expect(belowModels).toContain('contact');
     expect(belowModels).toContain('expense');
+    const revenueModels = Object.keys(D95_MODULE).filter((m) => D95_MODULE[m] === 'revenue');
 
     const reader = await listCall({ id: USER_ID, role: 'USER' }, { role: 'STAFF', permissionScopes: null });
     expect(reader.error, String(reader.error)).toBeNull();
+    const readerModels = queried(reader.calls);
+    for (const model of revenueModels) expect(readerModels, model).toContain(model);
+    for (const model of ['staffMember', 'site']) expect(readerModels, model).not.toContain(model);
     const sa = await listCall({ id: USER_ID, role: 'SUPER_ADMIN' }, null);
     expect(sa.error, String(sa.error)).toBeNull();
     expect(sa.calls.map((c) => c.path)).not.toContain(MEMBERSHIP_LOOKUP);
-    for (const { calls } of [reader, sa]) {
-      const models = queried(calls);
-      for (const model of Object.keys(TRASH_REVENUE)) expect(models, model).toContain(model);
-      expect(models).toHaveLength(belowModels.length + Object.keys(TRASH_REVENUE).length);
-    }
+    const models = queried(sa.calls);
+    for (const model of Object.keys(TRASH_REVENUE)) expect(models, model).toContain(model);
+    expect(models).toHaveLength(belowModels.length + revenueModels.length);
   });
 
   /**
@@ -658,15 +770,45 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     expect(where[model === 'opportunity' ? 'posterBusinessId' : 'businessId'], label).toBe(BIZ);
   }
 
+  /**
+   * W6-TRASH-MODULE-SCOPE (D46-S09g follow-up): a raw trash read of `model` (one the client's soft-delete
+   * extension covers, so a Prisma read could never see its trashed rows): its own table, :businessId ($1)
+   * on the model's tenant column, deleted_at IS NOT NULL, and every column it selects is a column of the
+   * model, aliased to the Prisma field name (the listing answers the shape a Prisma read answers).
+   */
+  function expectTrashedSql(model: string, args: unknown[], label: string) {
+    expect(CLIENT_SOFT_DELETED.has(model), `${label}: only a model the client soft-deletes is read raw`).toBe(true);
+    const [sql, ...values] = args as [string, ...unknown[]];
+    const meta = Prisma.dmmf.datamodel.models.find((m) => lcfirst(m.name) === model)!;
+    const column = (field: string) => meta.fields.find((f) => f.name === field)?.dbName ?? field;
+    expect(sql, label).toContain(`FROM "${meta.dbName ?? meta.name}"`);
+    expect(sql, label).toContain(`"${column('businessId')}" = $1`);
+    expect(sql, label).toContain(`"${column('deletedAt')}" IS NOT NULL`);
+    expect(values[0], label).toBe(BIZ);
+    const pairs = [...sql.matchAll(/"([^"]+)" AS "([^"]+)"/g)];
+    for (const [, col, field] of pairs) expect(column(field!), `${label}: ${col} AS ${field}`).toBe(col);
+    if (!/count\(/.test(sql)) {
+      const scalars = meta.fields.filter((f) => f.kind === 'scalar' || f.kind === 'enum').map((f) => f.name);
+      expect(pairs.map(([, , field]) => field).sort(), `${label}: every column, by its Prisma name`).toEqual(scalars.sort());
+    }
+  }
+
+  /** A trash read (Prisma or raw) of the model it names, scoped as expectTrashedWhere / expectTrashedSql say. */
+  function expectTrashedRead(call: { path: string; args: unknown[] }, label: string) {
+    const model = modelOf(call)!;
+    if (call.path === RAW) expectTrashedSql(model, call.args, label);
+    else expectTrashedWhere(model, (call.args[0] as { where: Record<string, unknown> }).where, label);
+  }
+
   it("D46-S09g W5-TRASH-LIST-500 TrashController.listTrashed every model: each model's query filters only columns the Prisma datamodel gives it (Opportunity by posterBusinessId, it has no businessId), scoped to :businessId and to trashed rows; ?model=opportunity is scoped the same way", async () => {
     const owner = await listCall({ id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null });
     expect(owner.error, String(owner.error)).toBeNull();
     const reads = owner.calls.filter((c) => c.path !== MEMBERSHIP_LOOKUP);
-    expect(reads.map((c) => c.path.split('.')[2])).toContain('opportunity');
-    for (const { path, args } of reads) {
-      const model = path.split('.')[2]!;
+    expect(reads.map(modelOf)).toContain('opportunity');
+    for (const call of reads) {
       // RED-BEFORE: opportunity.businessId (Prisma: Unknown argument `businessId`).
-      expectTrashedWhere(model, (args[0] as { where: Record<string, unknown> }).where, model);
+      // W6-TRASH-MODULE-SCOPE: a model the client soft-deletes is read raw, scoped the same way.
+      expectTrashedRead(call, String(modelOf(call)));
     }
 
     const one = await listCall({ id: USER_ID, role: 'USER' }, null, 'opportunity');
@@ -716,12 +858,18 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     for (const handler of ['restore', 'permanentDelete'] as const) {
       for (const model of models) {
         const { calls } = await trashCall(handler, model, { id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null });
-        const lookups = calls.filter((c) => c.path === `prisma.client.${model}.findFirst`);
+        // W6-TRASH-MODULE-SCOPE (D46-S09g follow-up): a model the client soft-deletes is looked up raw.
+        const lookups = calls.filter((c) => c.path === `prisma.client.${model}.findFirst` || (c.path === RAW && modelOf(c) === model));
         expect(lookups, `${handler} ${model}`).toHaveLength(1);
-        const where = (lookups[0]!.args[0] as { where: Record<string, unknown> }).where;
+        expect(lookups[0]!.path, `${handler} ${model}`).toBe(CLIENT_SOFT_DELETED.has(model) ? RAW : `prisma.client.${model}.findFirst`);
         // RED-BEFORE: opportunity.businessId (Prisma: Unknown argument `businessId`, a 500).
-        expectTrashedWhere(model, where, `${handler} ${model}`);
-        expect(where.id, `${handler} ${model}`).toBe(`${model}_d46`);
+        expectTrashedRead(lookups[0]!, `${handler} ${model}`);
+        if (lookups[0]!.path === RAW) {
+          expect(String(lookups[0]!.args[0]), `${handler} ${model}`).toContain('"id" = $2');
+          expect(lookups[0]!.args[2], `${handler} ${model}`).toBe(`${model}_d46`);
+        } else {
+          expect((lookups[0]!.args[0] as { where: Record<string, unknown> }).where.id, `${handler} ${model}`).toBe(`${model}_d46`);
+        }
       }
     }
   });
@@ -743,12 +891,158 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
       const trashed = { id: `${model}_trashed`, businessId: BIZ, deletedAt: new Date('2026-11-01T00:00:00Z') };
       const { calls, error, result } = await listCall({ id: USER_ID, role: 'SUPER_ADMIN' }, null, model, { [model]: [live, trashed] });
       expect(error, `${model}: ${String(error)}`).toBeNull();
-      expect(calls.map((c) => c.path), model).toEqual([`prisma.client.${model}.findMany`, `prisma.client.${model}.count`]);
+      // W6-TRASH-MODULE-SCOPE (D46-S09g follow-up): a model the client soft-deletes is read raw (its trashed rows show).
+      expect(calls.map((c) => c.path), model).toEqual(
+        CLIENT_SOFT_DELETED.has(model) ? [RAW, RAW] : [`prisma.client.${model}.findMany`, `prisma.client.${model}.count`],
+      );
       // RED-BEFORE: { businessId, deletedAt: { not: null } } alone, which the extension rewrites to deletedAt null.
-      for (const { path, args } of calls) expectTrashedWhere(model, (args[0] as { where: Record<string, unknown> }).where, path);
+      for (const call of calls) expectTrashedRead(call, `${model} ${call.path}`);
       // RED-BEFORE: `${model}_live` listed as trash.
       expect(result.items.map((i: any) => i.id), model).toEqual([`${model}_trashed`]);
       expect(result.model, model).toBe(model);
+    }
+  });
+
+  /**
+   * W6-TRASH-MODULE-SCOPE (owner ruling D-95; review SEC-TL500-3, its it.todo in d46-commerce-writes made
+   * live): restoring or permanently deleting a trashed record needs write access to the module the record
+   * belongs to, and seeing it in the trash needs that module's read access (D95_MODULE above). The
+   * controller applies ModuleScopeGuard's rule itself (it runs BusinessGuard alone), as SEC-TRASH-D46-1
+   * did for revenue; a SUPER_ADMIN keeps the guard's admission outside revenue, and D-46 still refuses a
+   * non-member one on the revenue models (D46-S09). The HTTP half is d46-commerce-writes D95-*.
+   */
+  const ALL_MODULES = [...new Set(Object.values(D95_MODULE))];
+  /** An explicit scope map: every module of the table at admin, `overrides` on top. */
+  const scopesWith = (overrides: Record<string, string>) => ({
+    ...Object.fromEntries(ALL_MODULES.map((m) => [m, 'admin'])),
+    ...overrides,
+  });
+
+  it("D95-U01 W6-TRASH-MODULE-SCOPE (D-95, SEC-TL500-3): a crm-none member (USER ADMIN, explicit crm:'none', every other module admin) cannot see a trashed contact (?model=contact: 403 'Insufficient permissions: crm requires read access (you have none)'; the every-model listing reads no contact, account, opportunity or deal) nor restore or permanently delete one (403 'crm requires write access (you have none)'), after the Membership lookup alone", async () => {
+    const crmNone = { role: 'ADMIN', permissionScopes: scopesWith({ crm: 'none' }) };
+    const listed = await listCall({ id: USER_ID, role: 'USER' }, crmNone, 'contact');
+    // RED-BEFORE: 200 and contact read (no lookup).
+    expect(listed.error, String(listed.error)).toBeInstanceOf(ForbiddenException);
+    expect((listed.error as Error).message).toBe('Insufficient permissions: crm requires read access (you have none)');
+    expect(listed.calls.map((c) => c.path)).toEqual([MEMBERSHIP_LOOKUP]);
+
+    const every = await listCall({ id: USER_ID, role: 'USER' }, crmNone);
+    expect(every.error, String(every.error)).toBeNull();
+    expect(every.calls.filter((c) => c.path === MEMBERSHIP_LOOKUP)).toHaveLength(1);
+    const models = queried(every.calls);
+    for (const model of ['contact', 'account', 'opportunity', 'deal']) expect(models, model).not.toContain(model);
+    expect(models).toContain('invoice');
+
+    for (const handler of ['restore', 'permanentDelete'] as const) {
+      const { calls, error } = await trashCall(handler, 'contact', { id: USER_ID, role: 'USER' }, crmNone);
+      // RED-BEFORE: no lookup; the trashed contact looked up (and, found, restored or deleted).
+      expect(error, `${handler}: ${String(error)}`).toBeInstanceOf(ForbiddenException);
+      expect((error as Error).message, handler).toBe('Insufficient permissions: crm requires write access (you have none)');
+      expect(calls.map((c) => c.path), handler).toEqual([MEMBERSHIP_LOOKUP]);
+    }
+  });
+
+  it("D95-U02 W6-TRASH-MODULE-SCOPE (D-95, SEC-TL500-3): a people-none member (explicit team:'none'; D-95's people is the canonical team module) cannot restore or permanently delete staff (403 'Insufficient permissions: team requires write access (you have none)') nor list it; a STAFF member (role defaults: team none) neither; a team:'read' member lists staff but is refused the writes", async () => {
+    for (const [membership, level] of [
+      [{ role: 'ADMIN', permissionScopes: scopesWith({ team: 'none' }) }, 'none'],
+      [{ role: 'STAFF', permissionScopes: null }, 'none'],
+      [{ role: 'ADMIN', permissionScopes: scopesWith({ team: 'read' }) }, 'read'],
+    ] as const) {
+      for (const handler of ['restore', 'permanentDelete'] as const) {
+        const { calls, error } = await trashCall(handler, 'staffMember', { id: USER_ID, role: 'USER' }, membership);
+        // RED-BEFORE: no lookup; the trashed staff member looked up.
+        expect(error, `${level} ${handler}: ${String(error)}`).toBeInstanceOf(ForbiddenException);
+        expect((error as Error).message, `${level} ${handler}`).toBe(`Insufficient permissions: team requires write access (you have ${level})`);
+        expect(calls.map((c) => c.path), `${level} ${handler}`).toEqual([MEMBERSHIP_LOOKUP]);
+      }
+      const listed = await listCall({ id: USER_ID, role: 'USER' }, membership, 'staffMember');
+      const every = await listCall({ id: USER_ID, role: 'USER' }, membership);
+      expect(every.error, String(every.error)).toBeNull();
+      if (level === 'none') {
+        expect(listed.error, String(listed.error)).toBeInstanceOf(ForbiddenException);
+        expect((listed.error as Error).message).toBe('Insufficient permissions: team requires read access (you have none)');
+        expect(queried(every.calls)).not.toContain('staffMember');
+      } else {
+        expect(listed.error, String(listed.error)).toBeNull();
+        expect(queried(listed.calls)).toEqual(['staffMember', 'staffMember']);
+        expect(queried(every.calls)).toContain('staffMember');
+      }
+    }
+  });
+
+  it('D95-U03 W6-TRASH-MODULE-SCOPE (D-95) module table: every trashable model is held to its own module (D95_MODULE): restore and permanentDelete by a member holding it at read are refused "<module> requires write access (you have read)" after the lookup alone and go on at write; ?model=<model> by a member holding it at none is refused "<module> requires read access (you have none)" after the lookup alone and is read at read', async () => {
+    expect((await trashModels()).sort()).toEqual(Object.keys(D95_MODULE).sort());
+    for (const [model, module] of Object.entries(D95_MODULE)) {
+      for (const handler of ['restore', 'permanentDelete'] as const) {
+        const reader = await trashCall(handler, model, { id: USER_ID, role: 'USER' }, { role: 'ADMIN', permissionScopes: scopesWith({ [module]: 'read' }) });
+        expect(reader.error, `${model} ${handler}: ${String(reader.error)}`).toBeInstanceOf(ForbiddenException);
+        expect((reader.error as Error).message, `${model} ${handler}`).toBe(`Insufficient permissions: ${module} requires write access (you have read)`);
+        expect(reader.calls.map((c) => c.path), `${model} ${handler}`).toEqual([MEMBERSHIP_LOOKUP]);
+
+        const writer = await trashCall(handler, model, { id: USER_ID, role: 'USER' }, { role: 'STAFF', permissionScopes: { [module]: 'write' } });
+        expect(writer.error, `${model} ${handler}: ${String(writer.error)}`).not.toBeInstanceOf(ForbiddenException);
+        expect(writer.calls[0]?.path, `${model} ${handler}`).toBe(MEMBERSHIP_LOOKUP);
+        expect(writer.calls.slice(1).map(modelOf), `${model} ${handler}: the lookup ran`).toContain(model);
+      }
+      const none = await listCall({ id: USER_ID, role: 'USER' }, { role: 'ADMIN', permissionScopes: scopesWith({ [module]: 'none' }) }, model);
+      expect(none.error, `${model}: ${String(none.error)}`).toBeInstanceOf(ForbiddenException);
+      expect((none.error as Error).message, model).toBe(`Insufficient permissions: ${module} requires read access (you have none)`);
+      expect(none.calls.map((c) => c.path), model).toEqual([MEMBERSHIP_LOOKUP]);
+      const read = await listCall({ id: USER_ID, role: 'USER' }, { role: 'STAFF', permissionScopes: { [module]: 'read' } }, model);
+      expect(read.error, `${model}: ${String(read.error)}`).toBeNull();
+      expect(queried(read.calls), model).toEqual([model, model]);
+    }
+  });
+
+  it("D95-U04 W6-TRASH-MODULE-SCOPE (D46-S09g follow-up) TrashController.listTrashed: the owner's every-model listing and ?model=invoice|quote list trashed invoices and quotes, read with a raw query the client's soft-delete extension does not rewrite (it rewrites a Prisma read of Invoice and Quote to deletedAt null, so those rows never showed); a live row is still not listed", async () => {
+    expect(CLIENT_SOFT_DELETED.has('invoice')).toBe(true);
+    expect(CLIENT_SOFT_DELETED.has('quote')).toBe(true);
+    const deletedAt = new Date('2026-11-03T00:00:00Z');
+    const rows = {
+      invoice: [{ id: 'invoice_live', businessId: BIZ, deletedAt: null }, { id: 'invoice_trashed', businessId: BIZ, deletedAt }],
+      quote: [{ id: 'quote_trashed', businessId: BIZ, deletedAt: new Date('2026-11-02T00:00:00Z') }],
+    };
+    const owner = await listCall({ id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null }, undefined, rows, true);
+    expect(owner.error, String(owner.error)).toBeNull();
+    // RED-BEFORE: [] (the Prisma read answers the live invoice only, which is not trash).
+    expect(owner.result.items.map((i: any) => `${i._model}:${i.id}`)).toEqual(['invoice:invoice_trashed', 'quote:quote_trashed']);
+    for (const model of ['invoice', 'quote']) {
+      const reads = owner.calls.filter((c) => modelOf(c) === model);
+      expect(reads.map((c) => c.path), model).toEqual([RAW]);
+      expectTrashedSql(model, reads[0]!.args, model);
+      const one = await listCall({ id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null }, model, rows, true);
+      expect(one.error, String(one.error)).toBeNull();
+      expect(one.result.items.map((i: any) => i.id), model).toEqual([`${model}_trashed`]);
+    }
+  });
+
+  it("D95-U05 W6-TRASH-MODULE-SCOPE: restore of a trashed product or service (now found: it is looked up raw) clears deletedAt with a Prisma update, then runs the catalog's update for its events; CatalogService.updateProduct ignores deletedAt, so the restore answered restored while the product stayed in the trash", async () => {
+    for (const [model, method, idKey] of [['product', 'updateProduct', 'productId'], ['service', 'updateService', 'serviceId']] as const) {
+      const row = { id: `${model}_d46`, businessId: BIZ, deletedAt: new Date('2026-11-01T00:00:00Z') };
+      const { calls, error } = await trashCall('restore', model, { id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null }, {
+        [RAW]: async () => [row],
+        [`prisma.client.${model}.update`]: async () => ({ ...row, deletedAt: null }),
+        [`catalog.${method}`]: async () => ({ ...row, deletedAt: null }),
+      });
+      // RED-BEFORE: the lookup is prisma.client.<model>.findFirst (unanswered here; the extension hides the row).
+      expect(error, `${model}: ${String(error)}`).toBeNull();
+      const paths = calls.map((c) => c.path);
+      expect(paths, model).toEqual([MEMBERSHIP_LOOKUP, RAW, `prisma.client.${model}.update`, `catalog.${method}`]);
+      expect(calls[2]!.args[0], model).toEqual({ where: { id: row.id }, data: { deletedAt: null } });
+      expect(calls[3]!.args[0], model).toEqual({ businessId: BIZ, [idKey]: row.id });
+    }
+  });
+
+  it("D95-U06 W6-TRASH-MODULE-SCOPE: permanentDelete of a trashed record of a model the client soft-deletes answers 409 and writes nothing: the client turns a delete of that model into a soft delete, so the trash answered 'deleted' while the row stayed in the trash", async () => {
+    for (const model of CLIENT_SOFT_DELETED) {
+      const row = { id: `${model}_d46`, businessId: BIZ, deletedAt: new Date('2026-11-01T00:00:00Z') };
+      const { calls, error } = await trashCall('permanentDelete', model, { id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null }, {
+        [RAW]: async () => [row],
+      });
+      // RED-BEFORE: the lookup is prisma.client.<model>.findFirst (the extension hides the trashed row: 404).
+      expect((error as { getStatus?: () => number })?.getStatus?.(), `${model}: ${String(error)}`).toBe(409);
+      expect((error as Error).message, model).toBe(`Permanent delete is not available for a trashed ${model}: it can only be restored`);
+      expect(calls.map((c) => c.path), model).toEqual([MEMBERSHIP_LOOKUP, RAW]);
     }
   });
 });

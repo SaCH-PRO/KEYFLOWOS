@@ -95,6 +95,30 @@
  *             GREEN-AFTER: 200; the revenue:'none' member gets no revenue
  *             model's row, owner A gets A's trashed records and no live row.
  *
+ * W6-TRASH-MODULE-SCOPE (V1-92, owner ruling D-95; review SEC-TL500-3, its
+ * it.todo made live): restoring or permanently deleting a trashed record needs
+ * write access to the module it belongs to (CRM for contacts, accounts and
+ * opportunities; revenue for invoices, quotes and recurring invoices; people,
+ * the canonical team module, for staff; marketing, the canonical content
+ * module, for community posts and landing pages), and seeing it in the trash
+ * needs that module's read access; D-46 still refuses a non-member SUPER_ADMIN
+ * on the revenue models (D46-S09 above).
+ *   D95-H01..H03  a crm-none member neither sees nor restores nor deletes a
+ *             trashed contact; a crm:read member sees it but is refused the
+ *             writes; a people-none (team 'none') member and a STAFF member
+ *             (team none by default) neither list nor restore nor delete a
+ *             trashed staff member. RED-BEFORE: 200 listings and 404 writes
+ *             (no module check; the trashed rows unreadable). GREEN-AFTER: the
+ *             guard's 403 '<module> requires read|write access (you have ..)',
+ *             every row unchanged.
+ *   D95-H04,H05  controls: owner A lists and restores a trashed contact and a
+ *             trashed staff member (read past the client's soft-delete
+ *             extension, D46-S09g follow-up); owner A's permanent delete of a
+ *             trashed contact answers 409 (the client turns a delete of that
+ *             model into a soft delete) and the row stays in the trash.
+ *   D46-S09g follow-up  owner A's every-model listing lists A's trashed
+ *             invoice and quote (it.todo made live).
+ *
  * Item 3 (V1-15d residual, D-55): recordPayment wrote provider = method, so a
  * hand-recorded payment with method 'stripe' and a reference naming another
  * tenant's PaymentIntent stored a SUCCESSFUL provider 'stripe' row. The Stripe
@@ -255,6 +279,8 @@ async function cleanup() {
     `DELETE FROM quote_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W6-TRASH-MODULE-SCOPE (D-95): the trashed staff members of A.
+    `DELETE FROM staff_members WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     // W5-TRASH-LIST-500 (D46-S09g): the trashed and live opportunities of A and B.
     `DELETE FROM community_opportunities WHERE poster_business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -1460,13 +1486,26 @@ describe('W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read): the trash l
     }
   });
 
-  it.todo(
-    "D46-S09g follow-up (W5-TRASH-LIST-500): GET trash (every model) by owner A lists A's trashed invoice and quote. " +
-      'Blocked outside this write set: the client soft-delete extension (packages/db/src/client.ts softDelete list: Contact, ' +
-      'Product, Quote, Invoice, StaffMember, Service, Booking, SocialPost, Project, ProjectTask, Site) rewrites the trash ' +
-      "filter to deletedAt null on findMany, count and findFirst, so trash.controller cannot read those models' trashed rows; " +
-      'the listing now leaves their live rows out instead of presenting them as trash. Needs a soft-delete opt-out in packages/db.',
-  );
+  // W6-TRASH-MODULE-SCOPE: the it.todo D46-S09g follow-up made live. The trash reads the trashed rows of
+  // the models the client's soft-delete extension covers with a raw query the extension does not rewrite.
+  it("D46-S09g follow-up (W5-TRASH-LIST-500; W6-TRASH-MODULE-SCOPE, D-95): GET trash (every model) by owner A lists A's trashed invoice and quote (read past the client's soft-delete extension), each a trashed record of A in the Prisma shape; GET trash?model=invoice|quote lists them too, with a total that counts them", async () => {
+    const res = await trashList(ID.ownerA);
+    expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(200);
+    const listed = res.body.items.map((i: any) => `${i._model}:${i.id}`);
+    // RED-BEFORE: neither listed (the extension rewrote the trash filter to deletedAt null).
+    expect(listed).toContain(`invoice:${fx.invoice}`);
+    expect(listed).toContain(`quote:${fx.quote}`);
+    expectOnlyTrashOfA(res.body, 'ownerA');
+    const invoice = res.body.items.find((i: any) => i.id === fx.invoice);
+    expect(invoice).toMatchObject({ businessId: ID.bizA, status: 'SENT', currency: 'TTD', total: TOTAL });
+    expect(typeof invoice.invoiceNumber).toBe('string');
+    for (const model of ['invoice', 'quote'] as const) {
+      const one = await trashList(ID.ownerA, model);
+      expect(one.status, `${model}: ${JSON.stringify(one.body).slice(0, 500)}`).toBe(200);
+      expect(one.body.items.map((i: any) => i.id), model).toContain(fx[model]);
+      expect(one.body.total, model).toBe(one.body.items.length);
+    }
+  });
 
   it('D46-S09 control (SEC-TRASH-D46-1): owner A, a revenue:read STAFF member and the non-member SUPER_ADMIN (ModuleScopeGuard admits a SUPER_ADMIN to reads; D-46 rules writes) keep 200 on GET trash?model=recurringInvoice|invoice|quote, the trashed schedule listed and every row of A', async () => {
     for (const actor of [ID.ownerA, ID.staffReadA, ID.saNon]) {
@@ -1601,8 +1640,15 @@ describe('W5-TRASH-LIST-500 review repair (D46-S09h, D46-S09i): an opportunity i
     expect(before[1][0].deleted_at).toBeNull();
   });
 
-  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2): GET trash?model=contact by a STAFF member of A whose crm, settings, expenses and revenue scopes are 'none' answers 200 with no live contact (A's contact and owner A's PRIVATE contact are not listed) and a total that counts none", async () => {
-    const res = await trashList(NO_SCOPE, 'contact');
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): seeing a contact in the trash needs crm:read, so this
+  // member (crm 'none') is refused the listing outright (it answered 200 with no live contact); the
+  // live-row check runs for a crm:read STAFF member, who is admitted.
+  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2; W6-TRASH-MODULE-SCOPE, D-95): GET trash?model=contact by a STAFF member of A whose crm, settings, expenses and revenue scopes are 'none' answers 403 'Insufficient permissions: crm requires read access (you have none)' with no row; a crm:read STAFF member gets 200 with no live contact (A's contact and owner A's PRIVATE contact are not listed) and a total that counts none", async () => {
+    const refused = await trashList(NO_SCOPE, 'contact');
+    expect(refused.status, JSON.stringify(refused.body).slice(0, 500)).toBe(403);
+    expect(refused.body.message).toBe('Insufficient permissions: crm requires read access (you have none)');
+    expect(refused.body.items).toBeUndefined();
+    const res = await trashList(ID.staffReadA, 'contact');
     expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(200);
     const ids = res.body.items.map((i: any) => i.id);
     // RED-BEFORE: [v81a_contactA (TEAM), v81a_contact_s09i_private (PRIVATE)], both live, total counting A's live contacts.
@@ -1625,9 +1671,18 @@ describe('W5-TRASH-LIST-500 review repair (D46-S09h, D46-S09i): an opportunity i
     }
   });
 
-  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2): the trash does not act on a live row: that member's POST restore and DELETE of owner A's live PRIVATE contact, and owner A's POST restore and DELETE of A's live SENT invoice, answer 404 'Trashed contact|invoice not found'; both rows stay live and unchanged", async () => {
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): restoring or deleting a contact needs crm:write, so the
+  // crm 'none' member is refused before any lookup (403, below); the live-row check acts as owner A.
+  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2; W6-TRASH-MODULE-SCOPE, D-95): the trash does not act on a live row: owner A's POST restore and DELETE of owner A's live PRIVATE contact and of A's live SENT invoice answer 404 'Trashed contact|invoice not found' (the crm-none member is refused first: 403 'crm requires write access (you have none)'); both rows stay live and unchanged", async () => {
+    const privateBefore = await rowOf('contacts', fx.privateContact);
+    for (const call of [trashRestore, trashDelete]) {
+      const res = await call(NO_SCOPE, 'contact', fx.privateContact);
+      expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(403);
+      expect(res.body.message).toBe('Insufficient permissions: crm requires write access (you have none)');
+    }
+    expect(await rowOf('contacts', fx.privateContact)).toEqual(privateBefore);
     for (const [actor, model, table, id] of [
-      [NO_SCOPE, 'contact', 'contacts', fx.privateContact],
+      [ID.ownerA, 'contact', 'contacts', fx.privateContact],
       [ID.ownerA, 'invoice', 'invoices', fx.liveInvoice],
     ] as const) {
       const before = await rowOf(table, id);
@@ -1642,11 +1697,148 @@ describe('W5-TRASH-LIST-500 review repair (D46-S09h, D46-S09i): an opportunity i
     }
   });
 
-  it.todo(
-    "SEC-TL500-3 follow-up (W5-TRASH-LIST-500 review repair): GET trash (every model and ?model=) holds each listed model's own module scope, " +
-      "or the declared settings scope, as SEC-TRASH-D46-1 does for revenue: a member with expenses and settings 'none' gets no trashed Expense " +
-      'row (amounts) and no trashed opportunity. Not done here: no ruling says which module governs each trash model (account, staffMember, ' +
-      'opportunity, community posts and comments, landing pages, ...), and enforcing settings (STAFF default none) would shut every STAFF member ' +
-      'out of the trash, against the D46-S09, D46-S09f and D46-S09g controls. Needs an owner ruling.',
-  );
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): the it.todo SEC-TL500-3 follow-up made live in the block below
+  // (D95-H01..H05), plus this member's expenses and opportunity rows, which the it.todo named.
+  it("SEC-TL500-3 (W6-TRASH-MODULE-SCOPE, D-95): GET trash by a member whose crm, settings, expenses and revenue scopes are 'none' reads no trashed opportunity (crm) and no expense (expenses); ?model=opportunity and ?model=expense answer the guard's 403 'requires read access (you have none)'", async () => {
+    const trashedOpp = await makeOpportunity(ID.bizA, 's09i_tl5003');
+    const every = await trashList(NO_SCOPE);
+    // RED-BEFORE: A's trashed opportunities listed to this member.
+    expect(every.status, JSON.stringify(every.body).slice(0, 500)).toBe(200);
+    const models = new Set(every.body.items.map((i: any) => i._model));
+    for (const model of ['opportunity', 'expense', 'contact', 'invoice', 'quote', 'recurringInvoice']) expect(models.has(model), model).toBe(false);
+    expect(every.body.items.map((i: any) => i.id)).not.toContain(trashedOpp);
+    for (const [model, module] of [['opportunity', 'crm'], ['expense', 'expenses']] as const) {
+      const res = await trashList(NO_SCOPE, model);
+      expect(res.status, `${model}: ${JSON.stringify(res.body).slice(0, 500)}`).toBe(403);
+      expect(res.body.message, model).toBe(`Insufficient permissions: ${module} requires read access (you have none)`);
+    }
+  });
+});
+
+/**
+ * W6-TRASH-MODULE-SCOPE (owner ruling D-95; review SEC-TL500-3): restoring or permanently deleting a
+ * trashed record needs write access to the module it belongs to, and seeing it in the trash needs that
+ * module's read access. CRM governs contacts; people (the canonical team module) governs staff. The
+ * trashed contacts and staff members here are read past the client's soft-delete extension (the trash
+ * reads those models raw), so the controls show that owner A sees and restores them.
+ */
+describe('W6-TRASH-MODULE-SCOPE (D-95, SEC-TL500-3): trash access follows the record\'s own module', () => {
+  /** USER, ADMIN member of A: every module admin but crm 'none'. */
+  const CRM_NONE = `${P}crmNoneA`;
+  /** USER, ADMIN member of A: every module admin but team (D-95 "people") 'none'. */
+  const TEAM_NONE = `${P}teamNoneA`;
+  const EVERY_MODULE = ['crm', 'revenue', 'bookings', 'projects', 'content', 'expenses', 'automations', 'storefront', 'settings', 'ai', 'team', 'analytics', 'operations'];
+  const allBut = (module: string) => Object.fromEntries(EVERY_MODULE.map((m) => [m, m === module ? 'none' : 'admin']));
+  const fx = { contact: `${P}contact_d95`, contactRestore: `${P}contact_d95_restore`, contactDelete: `${P}contact_d95_delete`, staff: `${P}staff_d95`, staffRestore: `${P}staff_d95_restore` };
+
+  /** The stored row as JSON, raw (the client hides a soft-deleted contact or staff member; contacts carry a tsvector). */
+  const rowOf = async (table: string, id: string): Promise<any[]> => {
+    const rows: Array<{ j: string }> = await db.$queryRawUnsafe(`SELECT row_to_json(t)::text AS j FROM ${table} t WHERE t.id = $1`, id);
+    return rows.map((r) => JSON.parse(r.j));
+  };
+
+  beforeAll(async () => {
+    for (const [id, email, scopes] of [
+      [CRM_NONE, `${P}crmnonea@test.local`, allBut('crm')],
+      [TEAM_NONE, `${P}teamnonea@test.local`, allBut('team')],
+    ] as const) {
+      await db.user.create({ data: { id, email, name: id, role: 'USER' } });
+      await db.membership.create({ data: { id: `${id}_m`, userId: id, businessId: ID.bizA, role: 'ADMIN', permissionScopes: scopes } });
+    }
+    const deletedAt = new Date();
+    for (const id of [fx.contact, fx.contactRestore, fx.contactDelete]) {
+      await db.contact.create({ data: { id, businessId: ID.bizA, firstName: 'V81a', lastName: id.slice(P.length), email: `${P}${id.slice(P.length)}@test.local`, deletedAt } });
+    }
+    for (const id of [fx.staff, fx.staffRestore]) {
+      await db.staffMember.create({ data: { id, businessId: ID.bizA, name: `V81A ${id.slice(P.length)}`, deletedAt } });
+    }
+  });
+
+  it("D95-H01 (D-95, SEC-TL500-3): a crm-none member of A cannot see a trashed contact (GET trash?model=contact: 403 'Insufficient permissions: crm requires read access (you have none)'; GET trash lists no contact) nor restore or permanently delete it (403 'crm requires write access (you have none)'); the contact is unchanged", async () => {
+    const before = await rowOf('contacts', fx.contact);
+    const one = await trashList(CRM_NONE, 'contact');
+    // RED-BEFORE: 200 (no module check; the trashed contact unreadable, so no row).
+    expect(one.status, JSON.stringify(one.body).slice(0, 500)).toBe(403);
+    expect(one.body.message).toBe('Insufficient permissions: crm requires read access (you have none)');
+    const every = await trashList(CRM_NONE);
+    expect(every.status, JSON.stringify(every.body).slice(0, 500)).toBe(200);
+    for (const model of ['contact', 'account', 'opportunity', 'deal']) expect(every.body.items.map((i: any) => i._model), model).not.toContain(model);
+    for (const call of [trashRestore, trashDelete]) {
+      const res = await call(CRM_NONE, 'contact', fx.contact);
+      // RED-BEFORE: 404 'Trashed contact not found' (no module check; the lookup could not see the trashed row).
+      expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(403);
+      expect(res.body.message).toBe('Insufficient permissions: crm requires write access (you have none)');
+    }
+    expect(await rowOf('contacts', fx.contact)).toEqual(before);
+    expect(before[0].deleted_at).not.toBeNull();
+  });
+
+  it("D95-H02 (D-95): a crm:read member of A (USER, STAFF role defaults) sees the trashed contact (GET trash?model=contact and GET trash list it) but is refused its restore and permanent delete (403 'Insufficient permissions: crm requires write access (you have read)'); the contact is unchanged", async () => {
+    const before = await rowOf('contacts', fx.contact);
+    const one = await trashList(ID.staffReadA, 'contact');
+    expect(one.status, JSON.stringify(one.body).slice(0, 500)).toBe(200);
+    // RED-BEFORE: not listed (the client's soft-delete extension rewrote the trash filter to deletedAt null).
+    expect(one.body.items.map((i: any) => i.id)).toContain(fx.contact);
+    const every = await trashList(ID.staffReadA);
+    expect(every.body.items.map((i: any) => `${i._model}:${i.id}`)).toContain(`contact:${fx.contact}`);
+    for (const call of [trashRestore, trashDelete]) {
+      const res = await call(ID.staffReadA, 'contact', fx.contact);
+      // RED-BEFORE: 404 (no module check; the trashed row unreadable).
+      expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(403);
+      expect(res.body.message).toBe('Insufficient permissions: crm requires write access (you have read)');
+    }
+    expect(await rowOf('contacts', fx.contact)).toEqual(before);
+  });
+
+  it("D95-H03 (D-95, SEC-TL500-3): a people-none member of A (team 'none'; D-95's people is the canonical team module) and a STAFF member (team none by default) cannot list a trashed staff member (403 'Insufficient permissions: team requires read access (you have none)'; GET trash lists no staffMember) nor restore or permanently delete it (403 'team requires write access (you have none)'); the staff member is unchanged", async () => {
+    const before = await rowOf('staff_members', fx.staff);
+    for (const actor of [TEAM_NONE, ID.staffReadA]) {
+      const one = await trashList(actor, 'staffMember');
+      // RED-BEFORE: 200 (no module check).
+      expect(one.status, `${actor}: ${JSON.stringify(one.body).slice(0, 500)}`).toBe(403);
+      expect(one.body.message, actor).toBe('Insufficient permissions: team requires read access (you have none)');
+      const every = await trashList(actor);
+      expect(every.status, actor).toBe(200);
+      expect(every.body.items.map((i: any) => i._model), actor).not.toContain('staffMember');
+      for (const call of [trashRestore, trashDelete]) {
+        const res = await call(actor, 'staffMember', fx.staff);
+        // RED-BEFORE: 404 (no module check; the lookup could not see the trashed row).
+        expect(res.status, `${actor}: ${JSON.stringify(res.body).slice(0, 500)}`).toBe(403);
+        expect(res.body.message, actor).toBe('Insufficient permissions: team requires write access (you have none)');
+      }
+    }
+    expect(await rowOf('staff_members', fx.staff)).toEqual(before);
+    expect(before[0].deleted_at).not.toBeNull();
+  });
+
+  it('D95-H04 control (D-95; D46-S09g follow-up): owner A lists the trashed contact and staff member (GET trash and ?model=), restores one of each (201, deleted_at cleared), and the restored rows leave the trash listing', async () => {
+    const every = await trashList(ID.ownerA);
+    expect(every.status, JSON.stringify(every.body).slice(0, 500)).toBe(200);
+    const listed = every.body.items.map((i: any) => `${i._model}:${i.id}`);
+    // RED-BEFORE: neither listed (the extension hid both models' trashed rows).
+    for (const key of [`contact:${fx.contactRestore}`, `staffMember:${fx.staffRestore}`]) expect(listed, key).toContain(key);
+    for (const [model, table, id] of [['contact', 'contacts', fx.contactRestore], ['staffMember', 'staff_members', fx.staffRestore]] as const) {
+      const one = await trashList(ID.ownerA, model);
+      expect(one.body.items.map((i: any) => i.id), model).toContain(id);
+      const res = await trashRestore(ID.ownerA, model, id);
+      // RED-BEFORE: 404 'Trashed <model> not found'.
+      expect(res.status, `${model}: ${JSON.stringify(res.body).slice(0, 500)}`).toBe(201);
+      expect(res.body).toMatchObject({ restored: true, model, id });
+      const [row] = await rowOf(table, id);
+      expect([row.deleted_at, row.business_id], model).toEqual([null, ID.bizA]);
+      const after = await trashList(ID.ownerA, model);
+      expect(after.body.items.map((i: any) => i.id), model).not.toContain(id);
+    }
+  });
+
+  it("D95-H05 control: owner A's permanent delete of a trashed contact answers 409 'Permanent delete is not available for a trashed contact: it can only be restored' (the client turns a delete of a contact into a soft delete, so it answered deleted while the row stayed in the trash); the contact is unchanged and still in the trash", async () => {
+    const before = await rowOf('contacts', fx.contactDelete);
+    const res = await trashDelete(ID.ownerA, 'contact', fx.contactDelete);
+    // RED-BEFORE: 404 'Trashed contact not found' (the extension hid the trashed row from the lookup).
+    expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(409);
+    expect(res.body.message).toBe('Permanent delete is not available for a trashed contact: it can only be restored');
+    expect(await rowOf('contacts', fx.contactDelete)).toEqual(before);
+    const listed = await trashList(ID.ownerA, 'contact');
+    expect(listed.body.items.map((i: any) => i.id)).toContain(fx.contactDelete);
+  });
 });
