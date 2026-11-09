@@ -10,6 +10,39 @@ export function isContactStatus(value: unknown): value is ContactStatus {
 }
 
 /**
+ * V1-38c (CF-49, V1-38b residuals): the one legacy spelling of a ContactStatus,
+ * and the predicate the status readers (lead scoring, the people health score,
+ * people-flow relationship health, the maturity assessment) count a customer
+ * by. The Shopify adapter wrote CUSTOMER for a buyer before V1-38, and the
+ * CSV/link import (crm-import.service.ts) copied a file's status column
+ * verbatim until V1-38c, so rows may hold it. No writer produces it now (the
+ * import stores CLIENT for it: canonicalContactStatus below), but a row that
+ * holds it counts as CLIENT while any row does.
+ */
+export const CLIENT_STATUS: ContactStatus = 'CLIENT';
+export const LEGACY_CLIENT_STATUS = 'CUSTOMER';
+
+export function isClientStatus(status: string | null | undefined): boolean {
+  return status === CLIENT_STATUS || status === LEGACY_CLIENT_STATUS;
+}
+
+/**
+ * V1-38c: the ContactStatus a value written from outside the CRM DTOs reads
+ * as (the CSV/link import's status, stage or pipeline_stage column). A
+ * ContactStatus in any case or padding is that status, and the legacy CLIENT
+ * spelling is CLIENT, the mapping isClientStatus reads rows by. Anything else
+ * is null: DORMANT (dormancy is a relationshipHealth value, CF-49), INACTIVE
+ * and any other word have no ContactStatus, and the caller treats the value as
+ * it treats any cell it does not recognise.
+ */
+export function canonicalContactStatus(value: string | null | undefined): ContactStatus | null {
+  if (typeof value !== 'string') return null;
+  const spelled = value.trim().toUpperCase();
+  if (isContactStatus(spelled)) return spelled;
+  return spelled === LEGACY_CLIENT_STATUS ? CLIENT_STATUS : null;
+}
+
+/**
  * The status an external store adapter gives a contact it CREATES: a customer
  * with orders is a CLIENT, one without is a LEAD. An adapter never overwrites
  * the status of a contact that already exists; that status is the business's.

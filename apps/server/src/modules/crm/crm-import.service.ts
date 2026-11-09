@@ -11,6 +11,7 @@ import { contactWhereBase } from './crm.helpers';
 import {
   CONTACT_AGE_GROUPS,
   CONTACT_AGE_GROUP_LABELS,
+  canonicalContactStatus,
   type ContactAgeGroup,
 } from './crm.constants';
 
@@ -725,9 +726,10 @@ Only return the JSON object, no markdown or explanation.`,
 
   private buildContactInput(row: ParsedRow, mapping: FieldMapping) {
     const contact: Record<string, unknown> = {};
-    const stringFields: (keyof Omit<FieldMapping, 'custom' | 'tags' | 'marketingOptIn' | 'doNotContact'>)[] = [
+    // 'status' is not copied verbatim: it is normalised below (V1-38c).
+    const stringFields: (keyof Omit<FieldMapping, 'custom' | 'tags' | 'marketingOptIn' | 'doNotContact' | 'status'>)[] = [
       'firstName', 'lastName', 'displayName', 'email', 'secondaryEmail',
-      'phone', 'secondaryPhone', 'whatsappNumber', 'status',
+      'phone', 'secondaryPhone', 'whatsappNumber',
       'addressLine1', 'addressLine2', 'city', 'state', 'postalCode',
       'country', 'timezone', 'companyName', 'jobTitle', 'department',
       'industry', 'segment', 'preferredChannel', 'language',
@@ -767,6 +769,16 @@ Only return the JSON object, no markdown or explanation.`,
         const code = normalizeAgeGroupValue(raw);
         if (code) contact.ageGroup = code;
       }
+    }
+    // V1-38c (CF-49): the status, stage or pipeline_stage column is stored as
+    // a ContactStatus, never verbatim: the vocabulary in any case, and the
+    // legacy CUSTOMER as CLIENT, the mapping the status readers use
+    // (crm.constants.ts). A cell with no ContactStatus (DORMANT, INACTIVE, an
+    // unknown stage) is dropped, as an unrecognised age group or flag is, so a
+    // new contact takes createContact's LEAD default.
+    if (mapping.status) {
+      const status = canonicalContactStatus(row[mapping.status]);
+      if (status) contact.status = status;
     }
     if (mapping.custom?.length) {
       const custom: Record<string, string | null> = {};
