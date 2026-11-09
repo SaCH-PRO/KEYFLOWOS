@@ -2,13 +2,18 @@
  * V1-26-CT-TRPC-VISIBILITY (PRS-M13, M06): tRPC crm.contactDetail applies CRM
  * record visibility before it reads a contact's child rows.
  *
- * The router is mounted (apps/server/src/trpc.module.ts) but no procedure is
- * reachable today: the Nest 11 exact-path mount `forRoutes({ path: '/trpc' })`
- * answers 404 for /trpc/<procedure> (apps/server/src/trpc.module.spec.ts).
- * The hole is latent, one mount-path fix away from live, and this spec gates
- * the procedure for that day. crm.contactDetail checks business access only
- * (assertBusinessAccess), then reads the contact and its events, notes and
- * tasks, so a STAFF member limited to their own book would read another
+ * No procedure is reachable today. Since owner ruling D-68 the server serves
+ * /trpc only when TRPC_ENABLED=1 (trpcModuleImports in
+ * apps/server/src/trpc.module.ts); unset, /trpc answers the same 404 as an
+ * unknown route. Even with the flag on, the Nest 11 exact-path mount
+ * `forRoutes({ path: '/trpc' })` answers 404 for /trpc/<procedure>
+ * (apps/server/src/trpc.module.spec.ts). The hole is latent, the flag and a
+ * mount-path fix away from live, and this spec gates the procedure for the
+ * day tRPC is re-enabled with fixes.
+ *
+ * crm.contactDetail checks business access only (assertBusinessAccess), then
+ * reads the contact and its events, notes and tasks, so a STAFF member
+ * limited to their own book would read another
  * member's PRIVATE contact in full. The REST detail route refuses that read
  * (V1-08: assertContactVisible in
  * apps/server/src/modules/crm/crm-permissions.helper.ts answers 404

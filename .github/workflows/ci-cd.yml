@@ -419,40 +419,84 @@ jobs:
       # above was satisfied by that build.
       #
       # This does NOT assert a full boot; CI has no database. It asserts the
-      # process gets PAST module loading, which is the part a missing or
-      # ESM-only dependency breaks. A DB connection failure afterwards is fine
-      # and expected here.
+      # process gets PAST module loading, which is the part a missing, broken
+      # or ESM-only dependency breaks, and it fails closed (PIN-R3, review
+      # RC2-1): the step passes only when the boot exits 0 AND prints the load
+      # marker. Every other outcome fails it and prints the boot output.
+      #
+      # How the boot reaches exit 0 without a database: the probe written
+      # below is preloaded (--require) and replaces NestFactory.create.
+      # main.ts calls NestFactory.create(AppModule) only after it has imported
+      # AppModule. The probe then has Nest scan the graph in preview mode,
+      # which instantiates no provider, so nothing reaches the database; the
+      # scan loads the modules reached only through forwardRef(async () =>
+      # import(...)), as notifications.module.ts reaches CommerceModule (review
+      # CR-PINR3-1). Then it yields one turn of the event loop, so Node reports
+      # a promise rejected while the graph loaded (a tsc-compiled unawaited
+      # import() of a missing or top-level-await dependency, an init promise
+      # started at load) and the boot dies of it as the real one does (review
+      # SEC-PINR3-1). Only then does it print KEYFLOW_MODULE_GRAPH_LOADED and
+      # exit 0 (it writes with fs.writeSync, which process.exit cannot cut
+      # short on a pipe). A load error, thrown or rejected by then, an exit
+      # before that point, a hang (timeout), a root module other than
+      # AppModule, or a non-zero exit after the marker all fail the step, and
+      # the step prints the whole boot output: a tail cut the error line off a
+      # dependency missing deep in a require chain (review CR-PINR3-2). Work
+      # that fails later than that turn (a timer, network I/O) is not module
+      # loading; native-dast.yml's full boot still catches it.
+      #
+      # This replaced a grep for a list of Node error codes, which passed
+      # whatever the list did not name: an ESM-only dependency importing a
+      # named export its dependency lacks (SyntaxError),
+      # ERR_PACKAGE_PATH_NOT_EXPORTED and a SyntaxError in a dependency all
+      # reported "loaded successfully" (RC2-1). scripts/ci/runtime-pin.spec.mjs
+      # case 7 reads this step strictly and RUNS it against server graphs that
+      # fail each of those ways and graphs that load, so flipping exit 1,
+      # dropping stderr from OUT or grepping anything but "$OUT" fails it
+      # (RC2-3).
       #
       # No --no-experimental-require-module (V1-39, review CR-V139-2): this job,
       # native-dast.yml (the required DAST gate) and e2e-live.yml all boot
       # dist/main.js on the pinned Node 22, where require(esm) is on by default,
-      # so this check loads the graph the way those boots do.
-      # scripts/ci/runtime-pin.spec.mjs requires the flag back while any
-      # workflow boots the server on a Node without require(esm) (where an
-      # ESM-only dependency dies with ERR_REQUIRE_ESM), and requires it gone
-      # once none does.
-      #
-      # With require(esm) on, an ESM-only dependency that uses top-level await
-      # dies with ERR_REQUIRE_ASYNC_MODULE and one required inside an import
-      # cycle with ERR_REQUIRE_CYCLE_MODULE, not ERR_REQUIRE_ESM (review
-      # RP-R1-1), so both greps name them. The exit code cannot tell: the boot
-      # fails at the database either way. runtime-pin.spec.mjs case 7 holds
-      # both greps to every code, and probes what the pinned Node prints.
+      # so this check loads the graph the way those boots do. runtime-pin.spec.mjs
+      # requires the flag back while any workflow boots the server on a Node
+      # without require(esm) (where an ESM-only dependency dies with
+      # ERR_REQUIRE_ESM), and requires it gone once none does.
       #
       # DATABASE_URL: main.ts validates the environment and exits before it
       # imports AppModule, so with no DATABASE_URL this step only loaded
       # main.ts's own imports. An unreachable one (port 1, no password) gets
-      # the process through the whole AppModule graph to NestFactory, which
-      # then fails to reach the database (Prisma P1001): expected here.
+      # the process through env validation to the AppModule import; the probe
+      # stops it before NestFactory would try the database.
       - name: Verify the server gets past module loading
         env:
           DATABASE_URL: postgresql://module-load-check@127.0.0.1:1/module-load-check
         run: |
           set +e
-          OUT=$(timeout 45 node apps/server/dist/main.js 2>&1)
-          if echo "$OUT" | grep -qE "ERR_REQUIRE_ESM|ERR_REQUIRE_ASYNC_MODULE|ERR_REQUIRE_CYCLE_MODULE|ERR_MODULE_NOT_FOUND|ERR_UNSUPPORTED_DIR_IMPORT|Cannot find module"; then
-            echo "::error::Server dies during module loading — it cannot start"
-            echo "$OUT" | grep -aE "ERR_REQUIRE_ESM|ERR_REQUIRE_ASYNC_MODULE|ERR_REQUIRE_CYCLE_MODULE|ERR_MODULE_NOT_FOUND|ERR_UNSUPPORTED_DIR_IMPORT|Cannot find module" | head -5
+          PROBE="$(mktemp -d)/module-load-probe.cjs"
+          cat > "$PROBE" <<'PROBE_EOF'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const fromServer = { paths: [path.resolve('apps/server/dist')] };
+          const { NestFactory } = require(require.resolve('@nestjs/core', fromServer));
+          const create = NestFactory.create.bind(NestFactory);
+          NestFactory.create = async (root, options) => {
+            const name = typeof root === 'function' ? root.name : typeof root;
+            if (name !== 'AppModule') {
+              fs.writeSync(2, 'module-load probe: NestFactory.create got ' + name + ', not AppModule\n');
+              process.exit(1);
+            }
+            await create(root, { ...options, preview: true, abortOnError: false, logger: ['error'] });
+            await new Promise((resolve) => setImmediate(resolve));
+            fs.writeSync(1, 'KEYFLOW_MODULE_GRAPH_LOADED\n');
+            process.exit(0);
+          };
+          PROBE_EOF
+          OUT=$(timeout 45 node --require "$PROBE" apps/server/dist/main.js 2>&1)
+          STATUS=$?
+          if [ "$STATUS" -ne 0 ] || ! echo "$OUT" | grep -qxF "KEYFLOW_MODULE_GRAPH_LOADED"; then
+            echo "::error::Server cannot load its module graph (exit $STATUS, or no load marker) — it cannot start"
+            echo "$OUT"
             exit 1
           fi
           echo "Server loaded its module graph successfully"
@@ -752,9 +796,11 @@ jobs:
       # (vitest.config.ts: src/**/*.spec.ts) -- the no-raw-records gate and
       # the crm.contactDetail visibility cases -- and no step ran them: the
       # server step runs apps/server only and the step above runs apps/web.
-      # /trpc is mounted, but the Nest exact-path mount answers 404 for
-      # /trpc/<procedure> today (apps/server/src/trpc.module.spec.ts), so
-      # these specs gate the routers for the day the mount path is fixed.
+      # No procedure is served: since D-68 the server serves /trpc only when
+      # TRPC_ENABLED=1 (trpcModuleImports in apps/server/src/trpc.module.ts),
+      # and even then the Nest exact-path mount answers 404 for
+      # /trpc/<procedure> (apps/server/src/trpc.module.spec.ts), so these
+      # specs gate the routers for the day tRPC is re-enabled with fixes.
       # The three crm.contactDetail visibility refusals are `it.fails` (RED,
       # blocked on a shared visibility helper): they fail this step the day
       # the rule lands, until they are turned back into `it`. Pure unit
