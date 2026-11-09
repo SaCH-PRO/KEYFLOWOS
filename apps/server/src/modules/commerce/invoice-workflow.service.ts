@@ -689,15 +689,25 @@ export class InvoiceWorkflowService {
     // Wrap in $transaction when caller did not provide one so the FIN2
     // posting either commits with the status update or rolls both back.
     const run = async (db: Prisma.TransactionClient) => {
+      // V1-82 (FOLLOW3-B1-VOID-NET-RECEIVED): a void takes the invoice row
+      // lock every money door and reconcileFromPayments take, before it reads
+      // the status and the payments, so no payment commits between the check
+      // below and the compare-and-set (see assertNothingReceivedNet).
+      if (to === 'VOID') {
+        await db.$queryRaw`SELECT id FROM invoices WHERE id = ${invoiceId} FOR NO KEY UPDATE`;
+      }
       const existing = await db.invoice.findUnique({
         where: { id: invoiceId },
-        select: { id: true, status: true, businessId: true },
+        select: { id: true, status: true, businessId: true, total: true, currency: true },
       });
       if (!existing) throw new NotFoundException('Invoice not found');
       const from = existing.status as InvoiceStatus;
       this.assertLegalTransition(from, to);
       if (from === to && !ALLOWED_TRANSITIONS[from]?.has(to)) {
         throw new ConflictException(`Invoice is already ${to}`);
+      }
+      if (to === 'VOID') {
+        await this.assertNothingReceivedNet(db, existing);
       }
 
       const data: Record<string, unknown> = { status: to };
@@ -770,6 +780,41 @@ export class InvoiceWorkflowService {
       });
     }
     return updated;
+  }
+
+  /**
+   * V1-82 (FOLLOW3-B1-VOID-NET-RECEIVED, VL-02): an invoice that still holds
+   * money received net of refunds is not voided. The map lets PARTIALLY_PAID
+   * move to OVERDUE and FAILED, and both of those to VOID, so a part-paid
+   * invoice reached VOID with its payment SUCCESSFUL and onInvoiceVoided then
+   * reversed the whole recognition: on ACCRUAL AR -40, income 0, cash 40; on
+   * CASH income 40 on a VOID invoice. Every VOID writer goes through
+   * transition() (the status route, bulk void and KEY's bulk path, the AI
+   * void_invoice, the KEY compensations, updateInvoice), so the check lives
+   * here. D-14: money received is returned by a refund row first; with
+   * nothing received net (no payment, or each refunded) VOID is allowed, so
+   * an OVERDUE or FAILED invoice that was never paid still voids. D-27:
+   * PENDING and FAILED rows are not money received (balanceOfStoredRows reads
+   * SUCCESSFUL less refunds). The rows are the invoice's own tenant's
+   * (RC-DEP-2, as reconcileFromCredits reads them). The caller holds the
+   * invoice row lock (transition takes it first for a void), so a payment
+   * door waits for this decision and then finds the invoice VOID, or this
+   * read sees its payment.
+   */
+  private async assertNothingReceivedNet(
+    db: Prisma.TransactionClient,
+    invoice: { id: string; businessId: string; status: string; total: unknown; currency: string },
+  ): Promise<void> {
+    const payments = await db.payment.findMany({
+      where: { invoiceId: invoice.id, businessId: invoice.businessId },
+      select: { amount: true, status: true },
+    });
+    const balance = balanceOfStoredRows(Number(invoice.total), payments, invoice.currency);
+    if (balance.net > 0) {
+      throw new ConflictException(
+        `Cannot void a ${invoice.status} invoice that still holds ${invoice.currency} ${balance.net.toFixed(2)} received net of refunds; refund the money received first, then void it`,
+      );
+    }
   }
 
   /**
