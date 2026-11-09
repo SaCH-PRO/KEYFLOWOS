@@ -1,22 +1,18 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 // V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary; a
-// row holding the legacy CLIENT spelling reads the same. V1-38c: that
-// spelling and the predicate are crm.constants.ts's.
-import { isClientStatus, LEGACY_DORMANT_STATUS } from '../crm/crm.constants';
-
-/**
- * Dormancy is not a Contact.status in the vocabulary (CF-49: it is a
- * relationshipHealth value), and a canonical contact is Dormant or At Risk by
- * silence alone. But the CSV/link import (crm-import.service.ts) wrote a
- * status column of DORMANT verbatim until V1-38c, and stores a DORMANT cell as
- * DORMANT since (crm.constants.ts importedContactStatus, V1-38c review
- * CR-V38c-1, pending an owner ruling); a playbook's update_status action can
- * write it too (review ST-38c-1). So rows hold it and are still given it, and
- * the segments have always read that status: a contact imported as DORMANT is
- * Dormant whatever its silence, and is not also At Risk (V1-38b review CR-1).
- */
-const isImportedDormant = (status: string | null | undefined): boolean => status === LEGACY_DORMANT_STATUS;
+// row holding a legacy CLIENT spelling reads the same. V1-38c: those
+// spellings and the predicate are crm.constants.ts's.
+//
+// D-92 (owner ruling): dormancy is not a Contact.status (CF-49: it is a
+// relationshipHealth value). It is always worked out from inactivity: the
+// Dormant segment is the clients with no interaction in 90+ days. A row still
+// holding the legacy DORMANT (the CSV/link import and a playbook's
+// update_status wrote it before D-92; rows are not migrated) is a CLIENT
+// through isClientStatus, so it is Dormant only by its silence, At Risk by its
+// silence like any contact, and never a lead. (Before D-92 such a row was
+// Dormant whatever its silence and left out of At Risk, V1-38b review CR-1.)
+import { isClientStatus } from '../crm/crm.constants';
 
 export interface RelationshipHealth {
   contactId: string;
@@ -206,14 +202,14 @@ export class RelationshipHealthService {
       {
         id: 'at-risk',
         name: 'At Risk',
-        criteria: 'No interaction in 30+ days, unless imported as dormant',
+        criteria: 'No interaction in 30+ days',
         count: 0,
         contacts: [],
       },
       {
         id: 'dormant',
         name: 'Dormant',
-        criteria: 'No interaction in 90+ days, or imported as dormant',
+        criteria: 'Status CLIENT with no interaction in 90+ days',
         count: 0,
         contacts: [],
       },
@@ -237,13 +233,12 @@ export class RelationshipHealthService {
       if (isClientStatus(contact.status) && daysSince < 30) {
         segments[2].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
-      const importedDormant = isImportedDormant(contact.status);
       // At risk
-      if (daysSince >= 30 && !importedDormant) {
+      if (daysSince >= 30) {
         segments[3].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
-      // Dormant
-      if (importedDormant || daysSince >= 90) {
+      // Dormant (D-92): a client, whatever the stored spelling, silent 90+ days.
+      if (isClientStatus(contact.status) && daysSince >= 90) {
         segments[4].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
     }

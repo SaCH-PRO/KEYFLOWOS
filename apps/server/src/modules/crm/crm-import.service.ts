@@ -12,7 +12,7 @@ import { contactWhereBase } from './crm.helpers';
 import {
   CONTACT_AGE_GROUPS,
   CONTACT_AGE_GROUP_LABELS,
-  importedContactStatus,
+  canonicalContactStatus,
   type ContactAgeGroup,
 } from './crm.constants';
 
@@ -835,16 +835,16 @@ Only return the JSON object, no markdown or explanation.`,
         if (code) contact.ageGroup = code;
       }
     }
-    // V1-38c (CF-49): the status, stage or pipeline_stage column is never
-    // stored verbatim (crm.constants.ts importedContactStatus): the vocabulary
-    // in any case, and the legacy CUSTOMER as CLIENT, the mapping the status
-    // readers use. A DORMANT cell in any case keeps the legacy DORMANT the
-    // people-flow segments read as imported dormant (review CR-V38c-1, pending
-    // an owner ruling). Any other cell (INACTIVE, an unknown stage) is
-    // dropped, as an unrecognised age group or flag is, so a new contact takes
-    // createContact's LEAD default.
+    // V1-38c (CF-49), D-92: the status, stage or pipeline_stage column is never
+    // stored verbatim (crm.constants.ts canonicalContactStatus): the
+    // vocabulary in any case, and the legacy CUSTOMER and DORMANT in any case
+    // as CLIENT, the mapping the status readers use. D-92: dormancy is worked
+    // out from inactivity, never stored (before D-92 a DORMANT cell kept the
+    // legacy DORMANT, review CR-V38c-1). Any other cell (INACTIVE, an unknown
+    // stage) is dropped, as an unrecognised age group or flag is, so a new
+    // contact takes createContact's LEAD default.
     if (mapping.status) {
-      const status = importedContactStatus(row[mapping.status]);
+      const status = canonicalContactStatus(row[mapping.status]);
       if (status) contact.status = status;
     }
     if (mapping.custom?.length) {
