@@ -263,8 +263,36 @@ export async function refreshAccessToken(): Promise<boolean> {
   return refreshPromise;
 }
 
+/**
+ * PR196-GENOME (PR #196 review OK-8B-2): the Business Genome interview
+ * transcript is kept in memory only and restored from the server
+ * (GET /blueprint/businesses/:id/onboarding-history). A build of PR #196 wrote
+ * it to localStorage under this prefix, keyed by business only and never
+ * removed, so the founder's partners, shares and tax status outlived the
+ * session on a shared device. Every copy under the prefix, in either storage,
+ * is dropped at sign-out and on a business switch. Never throws.
+ */
+export const ONBOARDING_TRANSCRIPT_KEY_PREFIX = "kf_blueprint_onboarding_history_";
+
+export function purgeOnboardingTranscripts() {
+  if (typeof window === "undefined") return;
+  for (const store of [window.localStorage, window.sessionStorage]) {
+    try {
+      const keys: string[] = [];
+      for (let i = 0; i < store.length; i++) {
+        const key = store.key(i);
+        if (key?.startsWith(ONBOARDING_TRANSCRIPT_KEY_PREFIX)) keys.push(key);
+      }
+      for (const key of keys) store.removeItem(key);
+    } catch {
+      // Storage unavailable (private mode, blocked): nothing was kept there.
+    }
+  }
+}
+
 export function clearStoredBusinessId() {
   if (typeof window === "undefined") return;
+  purgeOnboardingTranscripts();
   window.localStorage.removeItem(BUSINESS_ID_KEY);
   window.localStorage.removeItem(TOKEN_KEY);
   window.localStorage.removeItem(REFRESH_TOKEN_KEY);
@@ -309,6 +337,7 @@ export function selectBusiness(id: string) {
   setStoredBusinessId(id);
   window.localStorage.removeItem(BUSINESS_CACHE_KEY);
   window.localStorage.removeItem(USER_CACHE_KEY);
+  purgeOnboardingTranscripts();
   businessCache = null;
   userCache = null;
   window.dispatchEvent(new CustomEvent(BUSINESS_CHANGED_EVENT, { detail: { businessId: id } }));

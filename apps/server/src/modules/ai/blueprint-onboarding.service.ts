@@ -1,13 +1,15 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
 import { AiUsageService } from './ai-usage.service';
 import {
   BlueprintData,
+  BlueprintOwner,
   BlueprintPatch,
   BlueprintSectionKey,
   DnaSectionKey,
 } from '../blueprint/blueprint.types';
+import { normalizeRecommendedEntityType } from '../blueprint/entity-type.helpers';
 
 export interface OnboardingMessage {
   role: 'user' | 'assistant';
@@ -38,6 +40,19 @@ interface OnboardingChatResult {
   nextSection: BlueprintSectionKey | null;
 }
 
+/**
+ * PR196-GENOME: what GET .../onboarding-history answers. The transcript is the
+ * business's interview as the server cache holds it (bounded: STATE_TTL_MS
+ * after the last turn, STATE_MAX_ENTRIES businesses); progress is derived from
+ * the saved blueprint, so it survives when the transcript has expired.
+ */
+export interface OnboardingHistory {
+  messages: OnboardingMessage[];
+  completedSections: BlueprintSectionKey[];
+  nextSection: BlueprintSectionKey | null;
+  completeness: number;
+}
+
 const SECTION_ORDER: BlueprintSectionKey[] = [
   'identity',
   'founderProfile',
@@ -48,10 +63,133 @@ const SECTION_ORDER: BlueprintSectionKey[] = [
   'brand',
   'customerModel',
   'financials',
+  'legalProfile',
+  'registrationProfile',
+  'taxProfile',
+  'ownershipProfile',
   'workflowModel',
   'aiPreferences',
 ];
 // Note: 'intelligence' is intentionally excluded from onboarding; it is inferred from events.
+
+/** The sections the interview asks, in order (read-only view for tests and callers). */
+export const ONBOARDING_SECTION_ORDER: readonly BlueprintSectionKey[] = SECTION_ORDER;
+
+/**
+ * PR196-GENOME: the ten Business Genome sections the intake must cover, each
+ * on the real blueprint section that holds it. PR #196 named the first six
+ * (identity, offering, customer, operations, growth, finance) as if they were
+ * blueprint sections; they are not (OK-8A-1, OK-8A-5), so each is mapped onto
+ * the section the interview already asks for it. The four profiles are their
+ * own sections.
+ */
+export const GENOME_INTAKE_SECTIONS = {
+  identity: 'identity',
+  offering: 'operatingModel',
+  customer: 'customerModel',
+  operations: 'workflowModel',
+  growth: 'goals',
+  finance: 'financials',
+  legalProfile: 'legalProfile',
+  registrationProfile: 'registrationProfile',
+  taxProfile: 'taxProfile',
+  ownershipProfile: 'ownershipProfile',
+} as const satisfies Record<string, BlueprintSectionKey>;
+
+/**
+ * PR196-GENOME (OK-8A-4): the one vocabulary a registration or tax status takes
+ * when the interview writes it (the compliance item statuses the onboarding
+ * cards offer, plus UNKNOWN). Readiness readers treat anything outside their
+ * incomplete list as done (onboarding-concierge isRegistrationStepCompleteForReadiness),
+ * so a free-text status ('not registered yet') must never be stored raw.
+ */
+export const GENOME_STATUS_VOCABULARY = ['NOT_STARTED', 'IN_PROGRESS', 'DONE', 'NOT_APPLICABLE', 'UNKNOWN'] as const;
+export type GenomeStatus = (typeof GENOME_STATUS_VOCABULARY)[number];
+
+/** Status fields: every value written is one of GENOME_STATUS_VOCABULARY. */
+const STATUS_FIELDS: Partial<Record<BlueprintSectionKey, readonly string[]>> = {
+  registrationProfile: ['businessNameStatus', 'companiesRegistryStatus', 'birStatus', 'nisEmployerStatus', 'vatStatus', 'businessBankStatus'],
+  taxProfile: ['taxIdStatus'],
+};
+
+/** Yes/no fields: written as a boolean, or not written at all. */
+const BOOLEAN_FIELDS: Partial<Record<BlueprintSectionKey, readonly string[]>> = {
+  legalProfile: ['hasPhysicalLocation', 'regulatedIndustry'],
+  registrationProfile: ['hasEmployees'],
+  taxProfile: ['vatThresholdWatch', 'payrollExpected', 'contractorPaymentsExpected'],
+  ownershipProfile: ['hasPartners', 'needsShareholderAgreement'],
+};
+
+/**
+ * A tracked field that counts as answered by another answer: a solo founder
+ * (hasPartners false) owes no owners list (OK-8A-2), so ownershipProfile is
+ * complete once hasPartners is answered false.
+ */
+const ANSWERED_BY: Partial<Record<BlueprintSectionKey, Record<string, (data: Record<string, unknown>) => boolean>>> = {
+  ownershipProfile: { owners: (data) => data.hasPartners === false },
+};
+
+/**
+ * Map a status the model wrote onto GENOME_STATUS_VOCABULARY. Negations and
+ * "not applicable" are read before the words that mean done, so 'not
+ * registered yet' is NOT_STARTED, never DONE; anything unrecognised is UNKNOWN
+ * (which every readiness reader treats as incomplete).
+ */
+export function normalizeGenomeStatus(value: unknown): GenomeStatus {
+  if (typeof value !== 'string') return 'UNKNOWN';
+  const canonical = value.trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if ((GENOME_STATUS_VOCABULARY as readonly string[]).includes(canonical)) return canonical as GenomeStatus;
+  const text = value.trim().toLowerCase().replace(/[‘’]/g, "'");
+  if (/(\bn\/a\b|not applicable|not needed|not required|no need|does ?n[o']t apply|\bexempt\b)/.test(text)) return 'NOT_APPLICABLE';
+  if (/(\bnot\b|\bno\b|\bnever\b|\bnone\b|n't\b|\bdo not\b|\byet to\b)/.test(text)) return 'NOT_STARTED';
+  if (/(in progress|\bpending\b|\bapplied\b|\bsubmitted\b|\bprocessing\b|\bstarted\b|\bunderway\b|\bwaiting\b)/.test(text)) return 'IN_PROGRESS';
+  if (/(\bdone\b|\bcomplete(d)?\b|\bregistered\b|\byes\b|\bobtained\b|\bapproved\b|\bhave (it|one)\b|\bfinished\b)/.test(text)) return 'DONE';
+  return 'UNKNOWN';
+}
+
+function normalizeYesNo(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim().toLowerCase();
+  if (/^(no|false|nope|none|not)\b/.test(text)) return false;
+  if (/^(yes|true|yep|yeah)\b/.test(text)) return true;
+  return undefined;
+}
+
+function normalizeOwners(value: unknown): BlueprintOwner[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const owners: BlueprintOwner[] = [];
+  for (const item of value) {
+    if (typeof item === 'string' && item.trim()) {
+      owners.push({ name: item.trim() });
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    const raw = item as Record<string, unknown>;
+    const owner: BlueprintOwner = {};
+    if (typeof raw.name === 'string' && raw.name.trim()) owner.name = raw.name.trim();
+    if (typeof raw.role === 'string' && raw.role.trim()) owner.role = raw.role.trim();
+    const pct = typeof raw.sharePct === 'number' ? raw.sharePct : typeof raw.sharePct === 'string' ? Number(raw.sharePct.replace('%', '')) : NaN;
+    if (Number.isFinite(pct) && pct >= 0 && pct <= 100) owner.sharePct = pct;
+    if (Object.keys(owner).length > 0) owners.push(owner);
+  }
+  return owners;
+}
+
+/**
+ * PR196-GENOME (OK-8A-4): the value the interview writes for one extracted
+ * field, or undefined to write nothing. Statuses take the vocabulary, the
+ * entity type goes through the Genesis helper (normalizeRecommendedEntityType),
+ * yes/no fields become booleans, owners become BlueprintOwner rows. Every other
+ * field is written as extracted, as before.
+ */
+function normalizeExtractedValue(section: BlueprintSectionKey, field: string, value: unknown): unknown {
+  if (STATUS_FIELDS[section]?.includes(field)) return normalizeGenomeStatus(value);
+  if (BOOLEAN_FIELDS[section]?.includes(field)) return normalizeYesNo(value);
+  if (section === 'legalProfile' && field === 'recommendedEntityType') return normalizeRecommendedEntityType(value);
+  if (section === 'ownershipProfile' && field === 'owners') return normalizeOwners(value);
+  return value;
+}
 
 const SECTION_FOCUS: Partial<Record<BlueprintSectionKey, { label: string; goal: string; fields: string[] }>> = {
   identity: {
@@ -89,6 +227,27 @@ const SECTION_FOCUS: Partial<Record<BlueprintSectionKey, { label: string; goal: 
     goal: 'pricing, targets, and cost structure',
     fields: ['currency', 'pricingModel', 'avgTicket', 'monthlyTarget'],
   },
+  legalProfile: {
+    label: 'Legal Profile',
+    goal: 'the country the business operates in, its legal structure, and whether the industry is regulated',
+    fields: ['country', 'recommendedEntityType', 'regulatedIndustry'],
+  },
+  registrationProfile: {
+    label: 'Registration Profile',
+    goal: 'business name, companies registry, BIR, NIS employer and VAT registration status',
+    fields: ['businessNameStatus', 'companiesRegistryStatus', 'birStatus', 'nisEmployerStatus', 'vatStatus'],
+  },
+  taxProfile: {
+    label: 'Tax Profile',
+    goal: 'the tax country, tax ID status, and whether payroll is expected',
+    // taxReadinessScore is a derived score, not something to ask the founder.
+    fields: ['country', 'taxIdStatus', 'payrollExpected'],
+  },
+  ownershipProfile: {
+    label: 'Ownership Profile',
+    goal: 'whether there are co-founders or partners and how ownership is split',
+    fields: ['hasPartners', 'owners'],
+  },
   workflowModel: {
     label: 'Workflow Model',
     goal: 'how work moves through the business',
@@ -115,6 +274,11 @@ const SECTION_FOCUS: Partial<Record<BlueprintSectionKey, { label: string; goal: 
     fields: [],
   },
 };
+
+/** What the interview asks of each section (read-only view for tests and callers). */
+export const ONBOARDING_SECTION_FOCUS: Readonly<
+  Partial<Record<BlueprintSectionKey, { readonly label: string; readonly goal: string; readonly fields: readonly string[] }>>
+> = SECTION_FOCUS;
 
 @Injectable()
 export class BlueprintOnboardingService {
@@ -181,6 +345,7 @@ export class BlueprintOnboardingService {
     const blueprint = await this.blueprint.getBlueprint(businessId);
     const state = await this.getState(businessId, history);
 
+    const turnStart = state.messages.length;
     state.messages.push({ role: 'user', content: userMessage });
 
     const systemPrompt = this.buildSystemPrompt(blueprint, state);
@@ -211,6 +376,10 @@ export class BlueprintOnboardingService {
         ? await this.blueprint.updateBlueprint(businessId, patch)
         : blueprint;
 
+      // Progress is re-derived from the saved blueprint every turn, so a section
+      // this turn completed is left and the interview moves on in one sitting
+      // (it used to advance only after a cache miss rebuilt the state).
+      state.completedSections = this.getCompletedSections(updatedBlueprint);
       const nextSection = this.chooseNextSection(updatedBlueprint, state);
       state.currentSection = nextSection;
       state.currentQuestion = nextSection ? this.firstQuestionForSection(nextSection) : null;
@@ -228,6 +397,15 @@ export class BlueprintOnboardingService {
         nextSection,
       };
     } catch (err: any) {
+      // R0-07 / R0-P: a structured refusal (AI unavailable or switched off: the
+      // 503 provider_not_configured; also the rate-limit 429 and credit 403
+      // trackAndComplete raises) reaches the caller as itself, not as a 200
+      // carrying a made-up reply. The refused turn leaves the transcript as it
+      // was, so the history never shows a message KEY did not answer.
+      if (err instanceof HttpException) {
+        state.messages.splice(turnStart);
+        throw err;
+      }
       this.logger.error(`Blueprint onboarding chat failed: ${(err as Error).message}`);
       const fallback = "I'm having trouble thinking that through. Could you tell me a bit more about your business?";
       state.messages.push({ role: 'assistant', content: fallback });
@@ -254,7 +432,8 @@ export class BlueprintOnboardingService {
     const nextSection = this.chooseNextSection(blueprint, { completedSections, currentSection: null } as BlueprintOnboardingState);
 
     const state: BlueprintOnboardingState = {
-      messages: history || [],
+      // A copy: the cached transcript must not alias the caller's array.
+      messages: history ? [...history] : [],
       completedSections,
       currentSection: nextSection,
       currentQuestion: nextSection ? this.firstQuestionForSection(nextSection) : null,
@@ -262,6 +441,37 @@ export class BlueprintOnboardingService {
 
     this.writeCache(businessId, state);
     return state;
+  }
+
+  /**
+   * PR196-GENOME: GET .../onboarding-history. The business's own transcript as
+   * the server holds it, so a reload or another device resumes the interview
+   * without the browser keeping a copy (OK-8B-2), with progress derived from
+   * the saved blueprint.
+   *
+   * The transcript is cache-resident and bounded, and that is stated rather
+   * than hidden (OK-8B-4): it is kept STATE_TTL_MS after the last chat turn,
+   * for at most STATE_MAX_ENTRIES businesses, in this process. Past that the
+   * answer is an empty transcript with the progress still right; durable
+   * storage would be a new table (a migration and an owner decision).
+   *
+   * A read has no side effect: on a miss nothing is cached (the next chat
+   * turn seeds from the client's history as before).
+   */
+  async getHistory(businessId: string): Promise<OnboardingHistory> {
+    const cached = this.readCache(businessId);
+    const blueprint = await this.blueprint.getBlueprint(businessId);
+    const completedSections = this.getCompletedSections(blueprint);
+    const nextSection = this.chooseNextSection(blueprint, {
+      completedSections,
+      currentSection: cached?.currentSection ?? null,
+    });
+    return {
+      messages: (cached?.messages ?? []).map((m) => ({ role: m.role, content: m.content })),
+      completedSections,
+      nextSection,
+      completeness: blueprint.completeness ?? 0,
+    };
   }
 
   reset(businessId: string): void {
@@ -320,6 +530,10 @@ ${Object.entries(SECTION_FOCUS).map(([key, meta]) => `- ${key}: ${meta.fields.jo
 For array fields (e.g., channels, ninetyDayGoals, segments, painPoints, valueProps), return value as a JSON array of strings.
 For autonomyLevel, return an integer 1-5 where 1 = always ask first, 5 = act autonomously.
 For numeric fields, return a number.
+For status fields (${[...(STATUS_FIELDS.registrationProfile ?? []), ...(STATUS_FIELDS.taxProfile ?? [])].join(', ')}), return exactly one of: ${GENOME_STATUS_VOCABULARY.join(', ')}.
+For recommendedEntityType, return exactly one of: SOLE_TRADER, PARTNERSHIP, LIMITED_COMPANY, NONPROFIT, UNKNOWN.
+For yes/no fields (regulatedIndustry, hasPartners, payrollExpected), return true or false.
+For owners, return a JSON array of objects: {"name": string, "sharePct": number from 0 to 100, "role": string}.
 Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confirmed.`;
   }
 
@@ -339,10 +553,14 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
         for (const item of parsed) {
           if (!item.section || !item.field || item.value === undefined) continue;
           if (!SECTION_ORDER.includes(item.section as BlueprintSectionKey)) continue;
+          // OK-8A-4: statuses, the entity type and yes/no answers are written
+          // in their vocabulary, never as the model's free text.
+          const value = normalizeExtractedValue(item.section as BlueprintSectionKey, item.field, item.value);
+          if (value === undefined) continue;
           extractions.push({
             section: item.section as BlueprintSectionKey,
             field: item.field,
-            value: item.value,
+            value,
             confidence: typeof item.confidence === 'number' ? Math.min(item.confidence, 1) : 0.8,
           });
         }
@@ -376,10 +594,17 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
     return SECTION_ORDER.filter(section => {
       const focus = SECTION_FOCUS[section];
       if (!focus) return false;
-      const data = blueprint[section] as Record<string, unknown>;
-      const filled = focus.fields.filter(f => this.isPopulated(data?.[f])).length;
-      return filled >= Math.ceil(focus.fields.length * 0.6);
+      return this.answeredFields(blueprint, section) >= Math.ceil(focus.fields.length * 0.6);
     });
+  }
+
+  /** How many of a section's tracked fields are answered (ANSWERED_BY included). */
+  private answeredFields(blueprint: BlueprintData, section: BlueprintSectionKey): number {
+    const focus = SECTION_FOCUS[section];
+    if (!focus) return 0;
+    const data = ((blueprint as unknown as Record<string, unknown>)[section] ?? {}) as Record<string, unknown>;
+    const answeredBy = ANSWERED_BY[section] ?? {};
+    return focus.fields.filter(f => this.isPopulated(data[f]) || answeredBy[f]?.(data) === true).length;
   }
 
   private chooseNextSection(
@@ -406,10 +631,8 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
 
   private sectionFillScore(blueprint: BlueprintData, section: BlueprintSectionKey): number {
     const focus = SECTION_FOCUS[section];
-    if (!focus) return 0;
-    const data = blueprint[section] as Record<string, unknown>;
-    const filled = focus.fields.filter(f => this.isPopulated(data?.[f])).length;
-    return filled / focus.fields.length;
+    if (!focus || focus.fields.length === 0) return 0;
+    return this.answeredFields(blueprint, section) / focus.fields.length;
   }
 
   private firstQuestionForSection(section: BlueprintSectionKey): string {
@@ -423,6 +646,10 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
       financials: "What's your average transaction or project value?",
       workflowModel: 'How do customers typically move from first contact to delivered outcome?',
       aiPreferences: 'On a scale of 1-5, how much should KEY act on its own versus ask you first?',
+      legalProfile: 'Which country do you operate in, and is the business a sole trader, a partnership or a company?',
+      registrationProfile: 'Where are you with registration: business name, BIR, NIS and VAT?',
+      taxProfile: 'Do you have a tax ID yet, and do you expect to run payroll?',
+      ownershipProfile: 'Do you run the business alone, or do you have partners? If partners, how is ownership split?',
       intelligence: undefined,
     };
     return questions[section] || "Tell me more about your business.";
@@ -430,6 +657,10 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
 
   private isPopulated(value: unknown): boolean {
     if (value === null || value === undefined) return false;
+    // A yes/no answer is an answer: false (no partners, not regulated, no
+    // payroll) counts, as BusinessGenesisService's isPopulated already does.
+    // Without this a solo founder could never complete ownershipProfile (OK-8A-2).
+    if (typeof value === 'boolean') return true;
     if (typeof value === 'string') return value.trim().length > 0;
     if (Array.isArray(value)) return value.length > 0;
     if (typeof value === 'number') return !Number.isNaN(value);
