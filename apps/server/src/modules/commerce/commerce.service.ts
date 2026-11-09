@@ -423,6 +423,25 @@ function createDateMaterial(value: Date | string | null | undefined): string | n
  */
 class CreateSlotTaken extends Error {}
 
+/**
+ * W3-V1-45c-EVENT-REPLAY (V1-45b review SEC-V45b-1 / CR-V45b-1, D-15): the
+ * documents a create answered from a used or taken slot (a keyed replay, or a
+ * concurrent create that lost the slot). A WeakSet, not a field: the document
+ * the caller gets is unchanged, and the mark goes with that object only.
+ */
+const createReplays = new WeakSet<object>();
+
+/**
+ * Whether this document is a create's idempotent replay answer: it was
+ * created by an earlier (or concurrent) request under the same key, and this
+ * call wrote nothing. The HTTP create routes hand it to the business event
+ * audit (markIdempotentReplay), so a replay is not a second invoice.create /
+ * quote.create.
+ */
+export function isCreateReplay(document: unknown): boolean {
+  return typeof document === 'object' && document !== null && createReplays.has(document);
+}
+
 function idempotencyKeyReused(kind: CreateKind): ConflictException {
   return new ConflictException({
     code: 'idempotency_key_reused',
@@ -886,8 +905,12 @@ export class CommerceService {
    * free. A different request under the key is a 409 (idempotency_key_reused);
    * a slot whose document was deleted since answers 409 too
    * (idempotency_key_spent), never a second document.
+   *
+   * W3-V1-45c-EVENT-REPLAY: the document it answers is marked a replay
+   * (isCreateReplay), on both doors that reach here: a retry that finds the
+   * slot used, and a concurrent create that lost it (takenCreateSlot).
    */
-  private async usedCreateSlot<D>(
+  private async usedCreateSlot<D extends object>(
     businessId: string,
     kind: CreateKind,
     claim: CreateClaim,
@@ -901,11 +924,12 @@ export class CommerceService {
     const id = (row.response as Record<string, unknown> | null)?.[kind === 'invoice' ? 'invoiceId' : 'quoteId'];
     const document = typeof id === 'string' ? await load(id) : null;
     if (!document) throw idempotencyKeySpent(kind);
+    createReplays.add(document);
     return document;
   }
 
   /** V1-45: a create that lost its slot to a concurrent one answers with the winner's document. */
-  private async takenCreateSlot<D>(
+  private async takenCreateSlot<D extends object>(
     businessId: string,
     kind: CreateKind,
     claim: CreateClaim,

@@ -20,12 +20,32 @@ export const SKIP_BUSINESS_EVENT_KEY = 'skipBusinessEvent';
 export const SkipBusinessEvent = () =>
   Reflect.metadata(SKIP_BUSINESS_EVENT_KEY, true);
 
+/**
+ * W3-V1-45c-EVENT-REPLAY (V1-45b review SEC-V45b-1 / CR-V45b-1, D-15): the
+ * request-scoped mark a handler sets when it answered an idempotent replay,
+ * i.e. a document an earlier (or concurrent) request created. A symbol on the
+ * request object: it never reaches the response body, and it lives exactly as
+ * long as the request.
+ */
+const IDEMPOTENT_REPLAY = Symbol('businessEvent.idempotentReplay');
+
+/** Mark this request as answered by an idempotent replay (see IDEMPOTENT_REPLAY). */
+export function markIdempotentReplay(req: object): void {
+  (req as { [IDEMPOTENT_REPLAY]?: true })[IDEMPOTENT_REPLAY] = true;
+}
+
+function isMarkedIdempotentReplay(req: unknown): boolean {
+  return !!req && typeof req === 'object' && (req as { [IDEMPOTENT_REPLAY]?: true })[IDEMPOTENT_REPLAY] === true;
+}
+
 /** What a rule may know about the call it audits. */
 interface RouteCall {
   /** Date.now() when the interceptor took the request, before the handler ran. */
   startedAt: number;
   /** The authenticated user the handler acts for (req.user.id), or null. */
   userId: string | null;
+  /** The handler marked its answer an idempotent replay (markIdempotentReplay), read after it ran. */
+  markedReplay: boolean;
 }
 
 /**
@@ -51,6 +71,13 @@ function nested(response: unknown, key: string): Record<string, unknown> | undef
 /** The `id` of `response[key]`. */
 function nestedId(response: unknown, key: string): string | undefined {
   const id = nested(response, key)?.id;
+  return id ? String(id) : undefined;
+}
+
+/** The top-level `id` of the response (the created document), as the inferred labels read it. */
+function topLevelId(response: unknown): string | undefined {
+  if (!response || typeof response !== 'object') return undefined;
+  const id = (response as Record<string, unknown>).id;
   return id ? String(id) : undefined;
 }
 
@@ -113,8 +140,32 @@ function isPaymentReplay(response: unknown, call: RouteCall): boolean {
  * not record (the door's keyed replay after a confirm that recorded the money
  * but failed before retiring the row, or a manual payment that took the
  * door's key) is not audited as a record by this member (R19-ST-1).
+ *
+ * W3-V1-45c-EVENT-REPLAY (V1-45b review SEC-V45b-1 / CR-V45b-1, D-15): invoice
+ * and quote create honour an Idempotency-Key. A keyed replay answers the
+ * document the key already created, in the same 201 envelope as a fresh
+ * create, and writes nothing, so it is not a second invoice.create /
+ * quote.create. A createdAt rule cannot tell: the losers of a concurrent burst
+ * started before the winner stamped its createdAt, and every request is by the
+ * same member (another member's key is a 409, SEC-V45-3). So the handler marks
+ * its replay answer on the request (CommerceService.isCreateReplay ->
+ * markIdempotentReplay) and these rules read that mark. The label and subject
+ * are the ones the route always had (invoice.create / quote.create on the
+ * created document); a create without a key is never a replay.
  */
 const ROUTE_EVENT_RULES: Record<string, RouteEventRule> = {
+  'POST commerce/businesses/:businessId/invoices': {
+    subjectType: 'invoice',
+    action: 'create',
+    subjectId: topLevelId,
+    isReplay: (_response, call) => call.markedReplay,
+  },
+  'POST commerce/businesses/:businessId/quotes': {
+    subjectType: 'quote',
+    action: 'create',
+    subjectId: topLevelId,
+    isReplay: (_response, call) => call.markedReplay,
+  },
   'POST commerce/businesses/:businessId/invoices/:invoiceId/payments': {
     subjectType: 'payment',
     action: 'record',
@@ -178,7 +229,8 @@ export class BusinessEventInterceptor implements NestInterceptor {
       tap(async (response) => {
         try {
           // An idempotent replay wrote nothing; it is not a new mutation to audit.
-          if (rule?.isReplay?.(response, { startedAt, userId: req.user?.id ?? null })) return;
+          // The handler's replay mark (W3-V1-45c-EVENT-REPLAY) is read now, after it ran.
+          if (rule?.isReplay?.(response, { startedAt, userId: req.user?.id ?? null, markedReplay: isMarkedIdempotentReplay(req) })) return;
           const after = this.safeSnapshot(response);
           await this.resilient.emit({
             businessId,
