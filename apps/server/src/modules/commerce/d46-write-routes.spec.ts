@@ -80,6 +80,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { ForbiddenException } from '@nestjs/common';
 import { CONTROLLER_WATERMARK, PATH_METADATA, ROUTE_ARGS_METADATA } from '@nestjs/common/constants';
 import { RouteParamtypes } from '@nestjs/common/enums/route-paramtypes.enum';
+import { Prisma } from '@prisma/client';
 import { MODULE_SCOPE_KEY } from '../../core/auth/module-scope.guard';
 
 /** Every `businesses/:businessId` invoice, quote and payment write: the helper runs first. */
@@ -531,12 +532,13 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
    * is admitted to reads without a lookup, as the guard admits it). The HTTP
    * half is d46-commerce-writes D46-S09f.
    */
-  async function listCall(user: { id: string; role: string }, membership: unknown, model?: string) {
+  async function listCall(user: { id: string; role: string }, membership: unknown, model?: string, rows: Record<string, unknown[]> = {}) {
     const calls: Array<{ path: string; args: unknown[] }> = [];
     const answers = new Proxy({} as Record<string, (...args: unknown[]) => unknown>, {
       get: (_target, path) => {
         if (path === MEMBERSHIP_LOOKUP) return async () => membership;
-        if (typeof path === 'string' && path.endsWith('.findMany')) return async () => [];
+        // W5-TRASH-LIST-500: a model's findMany answers `rows[model]` (default none).
+        if (typeof path === 'string' && path.endsWith('.findMany')) return async () => rows[path.split('.')[2]!] ?? [];
         if (typeof path === 'string' && path.endsWith('.count')) return async () => 0;
         return undefined;
       },
@@ -625,5 +627,55 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
       for (const model of Object.keys(TRASH_REVENUE)) expect(models, model).toContain(model);
       expect(models).toHaveLength(belowModels.length + Object.keys(TRASH_REVENUE).length);
     }
+  });
+
+  /**
+   * W5-TRASH-LIST-500 (D46-S09g): the every-model listing answered 500 for
+   * every caller: queryModel('opportunity') filtered on businessId, which
+   * Opportunity does not have (it names its business posterBusinessId), so
+   * Prisma refused the query before it ran. Each model is now filtered on its
+   * own tenant column. The HTTP half is d46-commerce-writes D46-S09g.
+   */
+  const FIELDS = new Map<string, Set<string>>(
+    Prisma.dmmf.datamodel.models.map((m) => [m.name.charAt(0).toLowerCase() + m.name.slice(1), new Set(m.fields.map((f) => f.name))]),
+  );
+
+  it("D46-S09g W5-TRASH-LIST-500 TrashController.listTrashed every model: each model's query filters only columns the Prisma datamodel gives it (Opportunity by posterBusinessId, it has no businessId), scoped to :businessId and to trashed rows; ?model=opportunity is scoped the same way", async () => {
+    const owner = await listCall({ id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null });
+    expect(owner.error, String(owner.error)).toBeNull();
+    const reads = owner.calls.filter((c) => c.path !== MEMBERSHIP_LOOKUP);
+    expect(reads.map((c) => c.path.split('.')[2])).toContain('opportunity');
+    for (const { path, args } of reads) {
+      const model = path.split('.')[2]!;
+      const where = (args[0] as { where: Record<string, unknown> }).where;
+      expect(FIELDS.has(model), model).toBe(true);
+      // RED-BEFORE: opportunity.businessId (Prisma: Unknown argument `businessId`).
+      for (const column of Object.keys(where)) expect(FIELDS.get(model)!.has(column), `${model}.${column}`).toBe(true);
+      expect(where.deletedAt, model).toEqual({ not: null });
+      expect(where[model === 'opportunity' ? 'posterBusinessId' : 'businessId'], model).toBe(BIZ);
+    }
+
+    const one = await listCall({ id: USER_ID, role: 'USER' }, null, 'opportunity');
+    expect(one.error, String(one.error)).toBeNull();
+    expect(one.calls.map((c) => c.path)).toEqual(['prisma.client.opportunity.findMany', 'prisma.client.opportunity.count']);
+    for (const { args } of one.calls) {
+      expect((args[0] as { where: unknown }).where).toEqual({ posterBusinessId: BIZ, deletedAt: { not: null } });
+    }
+  });
+
+  it('D46-S09g W5-TRASH-LIST-500 TrashController.listTrashed every model: a row a model answers with deletedAt null (the soft-delete extension rewrites the trash filter to deletedAt null for Contact, Invoice, Quote and eight more) is a live record and is not listed; trashed rows are, newest first, and total counts them', async () => {
+    const live = { id: 'contact_live', businessId: BIZ, deletedAt: null };
+    const trashedContact = { id: 'contact_trashed', businessId: BIZ, deletedAt: new Date('2026-11-01T00:00:00Z') };
+    const trashedOpp = { id: 'opp_trashed', posterBusinessId: BIZ, deletedAt: new Date('2026-11-02T00:00:00Z') };
+    const liveInvoice = { id: 'invoice_live', businessId: BIZ, deletedAt: null };
+    const { error, result } = await listCall({ id: USER_ID, role: 'SUPER_ADMIN' }, null, undefined, {
+      contact: [live, trashedContact],
+      opportunity: [trashedOpp],
+      invoice: [liveInvoice],
+    });
+    expect(error, String(error)).toBeNull();
+    // RED-BEFORE: contact_live and invoice_live listed as trash (total 4).
+    expect(result.items.map((i: any) => `${i._model}:${i.id}`)).toEqual(['opportunity:opp_trashed', 'contact:contact_trashed']);
+    expect(result.total).toBe(2);
   });
 });

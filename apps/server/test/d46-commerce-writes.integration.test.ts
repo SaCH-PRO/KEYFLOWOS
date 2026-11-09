@@ -88,8 +88,12 @@
  *             holds revenue:'none'. RED-BEFORE: 200 and the rows.
  *             GREEN-AFTER: the guard's 403 'requires read access (you have
  *             none)', as GET recurring-invoices, invoices and quotes answer.
- *             D46-S09g (the every-model listing) is an it.todo here (a
- *             pre-existing 500, see its block) and live in the unit half.
+ *             D46-S09g (the every-model listing) was an it.todo here (a
+ *             pre-existing 500, see its block); W5-TRASH-LIST-500 makes it
+ *             live: RED-BEFORE 500 for every caller (queryModel('opportunity')
+ *             filtered on businessId, which Opportunity does not have).
+ *             GREEN-AFTER: 200; the revenue:'none' member gets no revenue
+ *             model's row, owner A gets A's trashed records and no live row.
  *
  * Item 3 (V1-15d residual, D-55): recordPayment wrote provider = method, so a
  * hand-recorded payment with method 'stripe' and a reference naming another
@@ -251,6 +255,8 @@ async function cleanup() {
     `DELETE FROM quote_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W5-TRASH-LIST-500 (D46-S09g): the trashed and live opportunities of A and B.
+    `DELETE FROM community_opportunities WHERE poster_business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -1354,16 +1360,32 @@ describe('W4-TRASH-D46 (D-46, D46-S09): trash restore and permanent delete of re
  * ?model=invoice|quote lists the business's LIVE rows (the client's
  * soft-delete extension overwrites the handler's deletedAt filter with null
  * for Invoice and Quote), and the every-model listing answers 500 for every
- * caller (queryModel('opportunity') filters on businessId and deletedAt, which
- * Opportunity does not have). The every-model omission is therefore proven in
- * the unit half (src/modules/commerce/d46-write-routes.spec.ts D46-S09g) and
- * its HTTP half stays an it.todo here.
+ * caller (queryModel('opportunity') filters on businessId, which Opportunity
+ * does not have: it names its business posterBusinessId). The every-model
+ * omission was therefore proven in the unit half
+ * (src/modules/commerce/d46-write-routes.spec.ts D46-S09g) and its HTTP half
+ * was an it.todo here.
+ *
+ * W5-TRASH-LIST-500 (D46-S09g) makes the HTTP half live: the every-model
+ * listing scopes Opportunity by posterBusinessId and answers 200, and it lists
+ * trashed records only (a model the soft-delete extension rewrites to
+ * deletedAt null answers live rows, which are not trash). Trashed opportunities
+ * of A and B and a live one of A are the fixtures that tell the scoping apart.
  */
 const trashList = (actor: string, model?: string) => as(actor, agent().get(model ? `${TRASH}?model=${model}` : TRASH));
 const REVENUE_TRASH_MODELS = ['recurringInvoice', 'invoice', 'quote'] as const;
 
+/** W5-TRASH-LIST-500 (D46-S09g): an opportunity posted by `biz`, trashed unless `live`. */
+async function makeOpportunity(biz: string, tag: string, live = false): Promise<string> {
+  const id = `${P}opp_${tag}`;
+  await db.opportunity.create({
+    data: { id, posterBusinessId: biz, title: `V81A ${tag}`, description: `V81A ${tag}`, ...(live ? {} : { deletedAt: new Date() }) },
+  });
+  return id;
+}
+
 describe('W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read): the trash listing of revenue records holds revenue:read', () => {
-  const fx = { recurringInvoice: '', invoice: '', quote: '' };
+  const fx = { recurringInvoice: '', invoice: '', quote: '', oppA: '', oppLiveA: '', oppB: '' };
 
   beforeAll(async () => {
     fx.recurringInvoice = await makeTrashedSchedule('s09fg', false);
@@ -1371,6 +1393,10 @@ describe('W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read): the trash l
     fx.quote = await makeQuote(ID.bizA, 's09fg');
     await trashDocument('invoices', fx.invoice);
     await trashDocument('quotes', fx.quote);
+    // W5-TRASH-LIST-500 (D46-S09g)
+    fx.oppA = await makeOpportunity(ID.bizA, 's09g_trashedA');
+    fx.oppLiveA = await makeOpportunity(ID.bizA, 's09g_liveA', true);
+    fx.oppB = await makeOpportunity(ID.bizB, 's09g_trashedB');
   });
 
   it("D46-S09f (SEC-TRASH-D46-1, revenue:read): GET trash?model=recurringInvoice|invoice|quote by a USER ADMIN member of A whose scope map holds revenue:'none' answers the guard's 403 'Insufficient permissions: revenue requires read access (you have none)', as GET recurring-invoices, invoices and quotes answer that member; no row in the body", async () => {
@@ -1390,11 +1416,49 @@ describe('W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read): the trash l
     }
   });
 
+  /** Every listed item is A's trashed record: a row of A (businessId, or posterBusinessId for Opportunity) with deletedAt set. */
+  function expectOnlyTrashOfA(body: any, label: string) {
+    for (const item of body.items) {
+      const key = `${label} ${item._model}:${item.id}`;
+      expect(item.deletedAt, `${key} is trash, not a live row`).not.toBeNull();
+      expect(item._model === 'opportunity' ? item.posterBusinessId : item.businessId, key).toBe(ID.bizA);
+    }
+  }
+
+  // W5-TRASH-LIST-500: the it.todo D46-S09g HTTP half made live.
+  it("D46-S09g (W5-TRASH-LIST-500, SEC-TRASH-D46-1, HTTP half): GET trash (every model) by that member answers 200 with no invoice, quote or recurringInvoice item; A's trashed opportunity is listed (scoped by posterBusinessId), A's live one and B's trashed one are not", async () => {
+    const res = await trashList(ID.userNoneA);
+    // RED-BEFORE: 500 for every caller (queryModel('opportunity') filtered on businessId).
+    expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(200);
+    const models = new Set(res.body.items.map((i: any) => i._model));
+    for (const model of REVENUE_TRASH_MODELS) expect(models.has(model), model).toBe(false);
+    const ids = res.body.items.map((i: any) => i.id);
+    expect(ids).toContain(fx.oppA);
+    for (const id of [fx.oppLiveA, fx.oppB, fx.recurringInvoice, fx.invoice, fx.quote]) expect(ids, id).not.toContain(id);
+    expectOnlyTrashOfA(res.body, 'userNoneA');
+    expect(res.body.total).toBe(res.body.items.length);
+  });
+
+  it("D46-S09g control (W5-TRASH-LIST-500): GET trash (every model) by owner A, a revenue:read STAFF member and the non-member SUPER_ADMIN answers 200 with A's trashed schedule and trashed opportunity, every item a trashed record of A (no live row, no row of B)", async () => {
+    for (const actor of [ID.ownerA, ID.staffReadA, ID.saNon]) {
+      const res = await trashList(actor);
+      // RED-BEFORE: 500 for every caller (queryModel('opportunity') filtered on businessId).
+      expect(res.status, `${actor}: ${JSON.stringify(res.body).slice(0, 500)}`).toBe(200);
+      const listed = res.body.items.map((i: any) => `${i._model}:${i.id}`);
+      expect(listed, actor).toContain(`recurringInvoice:${fx.recurringInvoice}`);
+      expect(listed, actor).toContain(`opportunity:${fx.oppA}`);
+      for (const id of [fx.oppLiveA, fx.oppB]) expect(listed, `${actor} ${id}`).not.toContain(`opportunity:${id}`);
+      expectOnlyTrashOfA(res.body, actor);
+      expect(res.body.total, actor).toBe(res.body.items.length);
+    }
+  });
+
   it.todo(
-    'D46-S09g (SEC-TRASH-D46-1, HTTP half): GET trash (every model) by that member answers 200 with no invoice, quote or recurringInvoice item. ' +
-      'Blocked by a pre-existing defect outside this repair: the every-model listing answers 500 for every caller, because ' +
-      "queryModel('opportunity') filters on businessId and deletedAt, which Opportunity does not have. The omission itself is " +
-      'proven by the unit half, d46-write-routes.spec D46-S09g.',
+    "D46-S09g follow-up (W5-TRASH-LIST-500): GET trash (every model) by owner A lists A's trashed invoice and quote. " +
+      'Blocked outside this write set: the client soft-delete extension (packages/db/src/client.ts softDelete list: Contact, ' +
+      'Product, Quote, Invoice, StaffMember, Service, Booking, SocialPost, Project, ProjectTask, Site) rewrites the trash ' +
+      "filter to deletedAt null on findMany, count and findFirst, so trash.controller cannot read those models' trashed rows; " +
+      'the listing now leaves their live rows out instead of presenting them as trash. Needs a soft-delete opt-out in packages/db.',
   );
 
   it('D46-S09 control (SEC-TRASH-D46-1): owner A, a revenue:read STAFF member and the non-member SUPER_ADMIN (ModuleScopeGuard admits a SUPER_ADMIN to reads; D-46 rules writes) keep 200 on GET trash?model=recurringInvoice|invoice|quote, the trashed schedule listed and every row of A', async () => {
