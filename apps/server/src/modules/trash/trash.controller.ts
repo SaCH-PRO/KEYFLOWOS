@@ -57,6 +57,8 @@ export class TrashController {
     @Inject(CatalogService) private readonly catalog: CatalogService,
   ) {}
 
+  // W4-TRASH-D46 review repair SEC-TRASH-D46-1: a revenue model is listed only
+  // to a caller revenueReadRefusal admits.
   @Get()
   @RequireModuleScope('settings')
   async listTrashed(
@@ -64,6 +66,7 @@ export class TrashController {
     @Query('limit', new DefaultValuePipe(50), ParseIntPipe) limit: number,
     @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset: number,
     @Query('model') model?: string,
+    @Req() req?: ActorRequest,
   ) {
     const where: Record<string, unknown> = { businessId, deletedAt: { not: null } };
 
@@ -71,13 +74,21 @@ export class TrashController {
       if (!isTrashableModel(model)) {
         throw new BadRequestException(`Model '${model}' is not trashable`);
       }
+      if (REVENUE_TRASH_SUBJECT[model]) {
+        const refusal = await this.revenueReadRefusal(req, businessId);
+        if (refusal) throw new ForbiddenException(refusal);
+      }
       const items = await this.queryModel(model, where, limit, offset);
       const total = await this.countModel(model, where);
       return { items, total, model };
     }
 
+    // Every model: one lookup at most; a caller below revenue:read gets the
+    // other models' rows and none of the revenue models'.
+    const mayReadRevenue = (await this.revenueReadRefusal(req, businessId)) === null;
     const allItems: Array<Record<string, unknown>> = [];
     for (const m of TRASHABLE_MODELS) {
+      if (REVENUE_TRASH_SUBJECT[m] && !mayReadRevenue) continue;
       const items = await this.queryModel(m, where, 10, 0);
       allItems.push(...items.map((item) => ({ ...item, _model: m })));
     }
@@ -115,25 +126,57 @@ export class TrashController {
     const subject = REVENUE_TRASH_SUBJECT[model];
     if (!subject) return;
     const user = req?.user;
-    const membership = user?.id
-      ? await this.prisma.client.membership.findUnique({
-          where: { userId_businessId: { userId: user.id, businessId } },
-          select: { role: true, permissionScopes: true },
-        })
-      : null;
-    if (!membership) {
+    const level = await this.memberRevenueLevel(user?.id, businessId);
+    if (level === null) {
       throw new ForbiddenException(
         user?.role === 'SUPER_ADMIN' ? `Not authorized to update this ${subject}` : 'Not a member of this business',
       );
     }
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
+    }
+  }
+
+  /**
+   * W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read; owner ruling
+   * D-46 rules writes only): listing the trash's revenue models (invoice,
+   * quote, recurringInvoice) is a revenue read, which GET recurring-invoices,
+   * invoices and quotes hold to revenue:read through ModuleScopeGuard. This
+   * controller has no such guard, so a member whose revenue level is 'none'
+   * read those rows here. ModuleScopeGuard's read rule, restated:
+   *   - a SUPER_ADMIN is admitted with no lookup (the guard admits it to every
+   *     read; D-46 refuses its writes, assertMayWriteRevenue above);
+   *   - any other caller with no Membership: 'Not a member of this business';
+   *   - a Membership below revenue:read: 'Insufficient permissions: revenue
+   *     requires read access (you have <level>)'.
+   * Returns that refusal, or null when the caller may read revenue.
+   */
+  private async revenueReadRefusal(req: ActorRequest | undefined, businessId: string): Promise<string | null> {
+    const user = req?.user;
+    if (user?.role === 'SUPER_ADMIN') return null;
+    const level = await this.memberRevenueLevel(user?.id, businessId);
+    if (level === null) return 'Not a member of this business';
+    if (rankOf(level) < LEVEL_RANK.read) return `Insufficient permissions: revenue requires read access (you have ${level})`;
+    return null;
+  }
+
+  /**
+   * The revenue level of `userId`'s Membership in `businessId`: its scope map,
+   * else its role defaults (ModuleScopeGuard's reading); null with no Membership.
+   */
+  private async memberRevenueLevel(userId: string | undefined, businessId: string): Promise<string | null> {
+    const membership = userId
+      ? await this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId, businessId } },
+          select: { role: true, permissionScopes: true },
+        })
+      : null;
+    if (!membership) return null;
     const scopes: Record<string, string> =
       membership.permissionScopes && typeof membership.permissionScopes === 'object'
         ? (membership.permissionScopes as Record<string, string>)
         : defaultScopesForRole(membership.role);
-    const level = scopes.revenue || 'none';
-    if (rankOf(level) < LEVEL_RANK.write) {
-      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
-    }
+    return scopes.revenue || 'none';
   }
 
   // W4-TRASH-D46 (D-46): a revenue model runs assertMayWriteRevenue first.

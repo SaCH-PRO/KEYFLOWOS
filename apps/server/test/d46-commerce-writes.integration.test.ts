@@ -83,6 +83,13 @@
  *             non-member SUPER_ADMIN: 403 before any lookup.
  *   controls  owner A and the SUPER_ADMIN ADMIN member restore (201) and
  *             permanently delete (200); owner B keeps BusinessGuard's 403.
+ *   D46-S09f  review repair SEC-TRASH-D46-1 (revenue:read): GET trash?model=
+ *             recurringInvoice|invoice|quote by a USER member whose scope map
+ *             holds revenue:'none'. RED-BEFORE: 200 and the rows.
+ *             GREEN-AFTER: the guard's 403 'requires read access (you have
+ *             none)', as GET recurring-invoices, invoices and quotes answer.
+ *             D46-S09g (the every-model listing) is an it.todo here (a
+ *             pre-existing 500, see its block) and live in the unit half.
  *
  * Item 3 (V1-15d residual, D-55): recordPayment wrote provider = method, so a
  * hand-recorded payment with method 'stripe' and a reference naming another
@@ -148,6 +155,8 @@ const ID = {
   saStaffA: `${P}saStaffA`, // SUPER_ADMIN, STAFF member of A (revenue:read by default)
   saNoneA: `${P}saNoneA`, // SUPER_ADMIN, ADMIN member of A with an explicit { revenue: 'none' } map
   staffReadA: `${P}staffReadA`, // USER, STAFF member of A (revenue:read by default)
+  // W4-TRASH-D46 review repair SEC-TRASH-D46-1: USER, ADMIN member of A with { revenue: 'none', settings: 'admin', crm: 'write' }
+  userNoneA: `${P}userNoneA`,
   ownerB: `${P}ownerB`,
   ownerC: `${P}ownerC`,
   bizA: `${P}bizA`,
@@ -543,7 +552,7 @@ beforeAll(async () => {
   for (const [id, role] of [
     [ID.ownerA, 'USER'], [ID.ownerB, 'USER'], [ID.ownerC, 'USER'],
     [ID.saNon, 'SUPER_ADMIN'], [ID.saAdminA, 'SUPER_ADMIN'], [ID.saStaffA, 'SUPER_ADMIN'],
-    [ID.saNoneA, 'SUPER_ADMIN'], [ID.staffReadA, 'USER'],
+    [ID.saNoneA, 'SUPER_ADMIN'], [ID.staffReadA, 'USER'], [ID.userNoneA, 'USER'],
   ] as const) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length).toLowerCase()}@test.local`, name: id, role } });
   }
@@ -563,6 +572,9 @@ beforeAll(async () => {
     data: { id: `${ID.saNoneA}_m`, userId: ID.saNoneA, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { revenue: 'none', crm: 'write' } },
   });
   await db.membership.create({ data: { id: `${ID.staffReadA}_m`, userId: ID.staffReadA, businessId: ID.bizA, role: 'STAFF' } });
+  await db.membership.create({
+    data: { id: `${ID.userNoneA}_m`, userId: ID.userNoneA, businessId: ID.bizA, role: 'ADMIN', permissionScopes: { revenue: 'none', settings: 'admin', crm: 'write' } },
+  });
 }, 180_000);
 
 afterAll(async () => {
@@ -1314,6 +1326,88 @@ describe('W4-TRASH-D46 (D-46, D46-S09): trash restore and permanent delete of re
       expect(res.status, JSON.stringify(res.body)).toBe(403);
       expect(res.body.message).toBe('No access to this business');
       expect(await stateOf(ID.bizA)).toEqual(before);
+    }
+  });
+});
+
+/**
+ * W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read; owner ruling D-46
+ * rules writes only): GET api/businesses/:b/trash ran behind BusinessGuard
+ * alone (its @RequireModuleScope('settings') has no ModuleScopeGuard), so a
+ * member whose revenue level is 'none' read whole invoice, quote and schedule
+ * rows (amount, contactId, metadata, lastError) that GET recurring-invoices,
+ * invoices and quotes refuse that member (revenue:read). The listing now
+ * applies ModuleScopeGuard's revenue:read rule to the revenue models: a model
+ * filter naming one refuses with the guard's message, and the every-model
+ * listing leaves those models out for that caller. A SUPER_ADMIN keeps
+ * ModuleScopeGuard's read admission (D-46 is about writes).
+ *
+ * Two pre-existing listing defects, outside this repair, shape the cases:
+ * ?model=invoice|quote lists the business's LIVE rows (the client's
+ * soft-delete extension overwrites the handler's deletedAt filter with null
+ * for Invoice and Quote), and the every-model listing answers 500 for every
+ * caller (queryModel('opportunity') filters on businessId and deletedAt, which
+ * Opportunity does not have). The every-model omission is therefore proven in
+ * the unit half (src/modules/commerce/d46-write-routes.spec.ts D46-S09g) and
+ * its HTTP half stays an it.todo here.
+ */
+const trashList = (actor: string, model?: string) => as(actor, agent().get(model ? `${TRASH}?model=${model}` : TRASH));
+const REVENUE_TRASH_MODELS = ['recurringInvoice', 'invoice', 'quote'] as const;
+
+describe('W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read): the trash listing of revenue records holds revenue:read', () => {
+  const fx = { recurringInvoice: '', invoice: '', quote: '' };
+
+  beforeAll(async () => {
+    fx.recurringInvoice = await makeTrashedSchedule('s09fg', false);
+    fx.invoice = await makeInvoice(ID.bizA, 's09fg', 'SENT');
+    fx.quote = await makeQuote(ID.bizA, 's09fg');
+    await trashDocument('invoices', fx.invoice);
+    await trashDocument('quotes', fx.quote);
+  });
+
+  it("D46-S09f (SEC-TRASH-D46-1, revenue:read): GET trash?model=recurringInvoice|invoice|quote by a USER ADMIN member of A whose scope map holds revenue:'none' answers the guard's 403 'Insufficient permissions: revenue requires read access (you have none)', as GET recurring-invoices, invoices and quotes answer that member; no row in the body", async () => {
+    for (const path of ['recurring-invoices', 'invoices', 'quotes']) {
+      const direct = await as(ID.userNoneA, agent().get(`/commerce/businesses/${ID.bizA}/${path}`));
+      expect(direct.status, `${path}: ${JSON.stringify(direct.body)}`).toBe(403);
+      expect(direct.body.message, path).toBe('Insufficient permissions: revenue requires read access (you have none)');
+    }
+    for (const model of REVENUE_TRASH_MODELS) {
+      const res = await trashList(ID.userNoneA, model);
+      // RED-BEFORE: 200 { items, total, model }: the trashed schedule (amount, contactId, metadata,
+      // lastError), and for invoice and quote A's live rows (the soft-delete extension, above).
+      expect(res.status, `${model}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body.message, model).toBe('Insufficient permissions: revenue requires read access (you have none)');
+      expect(res.body.items, model).toBeUndefined();
+      expect(JSON.stringify(res.body), model).not.toContain(fx[model]);
+    }
+  });
+
+  it.todo(
+    'D46-S09g (SEC-TRASH-D46-1, HTTP half): GET trash (every model) by that member answers 200 with no invoice, quote or recurringInvoice item. ' +
+      'Blocked by a pre-existing defect outside this repair: the every-model listing answers 500 for every caller, because ' +
+      "queryModel('opportunity') filters on businessId and deletedAt, which Opportunity does not have. The omission itself is " +
+      'proven by the unit half, d46-write-routes.spec D46-S09g.',
+  );
+
+  it('D46-S09 control (SEC-TRASH-D46-1): owner A, a revenue:read STAFF member and the non-member SUPER_ADMIN (ModuleScopeGuard admits a SUPER_ADMIN to reads; D-46 rules writes) keep 200 on GET trash?model=recurringInvoice|invoice|quote, the trashed schedule listed and every row of A', async () => {
+    for (const actor of [ID.ownerA, ID.staffReadA, ID.saNon]) {
+      for (const model of REVENUE_TRASH_MODELS) {
+        const res = await trashList(actor, model);
+        expect(res.status, `${actor} ${model}: ${JSON.stringify(res.body)}`).toBe(200);
+        expect(res.body.model, `${actor} ${model}`).toBe(model);
+        expect(res.body.items.length, `${actor} ${model}`).toBeGreaterThan(0);
+        expect(new Set(res.body.items.map((i: any) => i.businessId)), `${actor} ${model}`).toEqual(new Set([ID.bizA]));
+      }
+      const schedules = await trashList(actor, 'recurringInvoice');
+      expect(schedules.body.items.map((i: any) => i.id), actor).toContain(fx.recurringInvoice);
+    }
+  });
+
+  it('D46-S09 control (SEC-TRASH-D46-1): a non-member USER (owner B on A) is refused the listing by BusinessGuard (403 No access to this business)', async () => {
+    for (const model of [undefined, ...REVENUE_TRASH_MODELS]) {
+      const res = await trashList(ID.ownerB, model);
+      expect(res.status, `${String(model)}: ${JSON.stringify(res.body)}`).toBe(403);
+      expect(res.body.message, String(model)).toBe('No access to this business');
     }
   });
 });
