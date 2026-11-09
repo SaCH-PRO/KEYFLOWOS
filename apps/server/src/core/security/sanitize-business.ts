@@ -64,10 +64,34 @@ export const BUSINESS_META_PAYMENT_SECRET_KEYS = [
 
 export type BusinessMetaPaymentSecretKey = (typeof BUSINESS_META_PAYMENT_SECRET_KEYS)[number];
 
-/** What a Business read answers for a stored payment secret. */
+/** What a Business read answers for a stored payment secret or SEO connection entry. */
 export interface MaskedSecretMeta {
   configured: boolean;
 }
+
+/**
+ * W3-D12b-SEO-SECRET-MASK (FOLLOW3-D12 review D12-ST-2): the SEO connection
+ * entries Business.metaData carries, metaData.ga4 (SeoGoogleAnalyticsService)
+ * and metaData.gsc (SeoGoogleSearchConsoleService). Each holds the Google
+ * OAuth tokens (accessToken, refreshToken) beside the property id or site URL
+ * and the connect and sync stamps, so each is secret-bearing as a whole: a
+ * Business read answers the entry only as MaskedSecretMeta ({configured:true}),
+ * to every reader, the owner included, and leaves out a null or blank one (not
+ * connected), as for the payment secrets. The SEO services read their entries
+ * server side, straight from Prisma, never through this projection; the
+ * connection state (connected, the property id or site URL, lastSync, no
+ * token) is GET /seo/businesses/:businessId/connectors/ga4 and .../gsc, which
+ * the web SEO page reads.
+ */
+export const BUSINESS_META_SEO_CONNECTION_KEYS = ['ga4', 'gsc'] as const;
+
+export type BusinessMetaSeoConnectionKey = (typeof BUSINESS_META_SEO_CONNECTION_KEYS)[number];
+
+/** The metaData keys a Business read answers only as MaskedSecretMeta (or leaves out when nothing is stored). */
+const MASKED_SECRET_META_KEYS: readonly string[] = [
+  ...BUSINESS_META_PAYMENT_SECRET_KEYS,
+  ...BUSINESS_META_SEO_CONNECTION_KEYS,
+];
 
 /** Whether a stored metaData value holds a secret (anything but null, undefined or a blank string). */
 export function isStoredSecret(value: unknown): boolean {
@@ -75,17 +99,17 @@ export function isStoredSecret(value: unknown): boolean {
   return typeof value !== 'string' || value.trim() !== '';
 }
 
-/** metaData with its whatsapp entry and payment secrets masked; any other value is returned as it is. */
+/** metaData with its whatsapp entry, payment secrets and SEO connections masked; any other value is returned as it is. */
 function maskMetaData(metaData: unknown): unknown {
   if (metaData === null || typeof metaData !== 'object' || Array.isArray(metaData)) return metaData;
   const has = (key: string) => Object.prototype.hasOwnProperty.call(metaData, key);
-  if (!has('whatsapp') && !BUSINESS_META_PAYMENT_SECRET_KEYS.some(has)) return metaData;
+  if (!has('whatsapp') && !MASKED_SECRET_META_KEYS.some(has)) return metaData;
   const meta: Record<string, unknown> = { ...(metaData as Record<string, unknown>) };
   if (has('whatsapp')) {
     const whatsapp: MaskedWhatsAppMeta = { configured: Boolean(meta.whatsapp) };
     meta.whatsapp = whatsapp;
   }
-  for (const key of BUSINESS_META_PAYMENT_SECRET_KEYS) {
+  for (const key of MASKED_SECRET_META_KEYS) {
     if (!has(key)) continue;
     if (isStoredSecret(meta[key])) {
       const masked: MaskedSecretMeta = { configured: true };
@@ -99,8 +123,9 @@ function maskMetaData(metaData: unknown): unknown {
 
 /**
  * Return a shallow copy of a Business record with all secret token columns
- * removed, metaData.whatsapp masked (MaskedWhatsAppMeta; R0-SEC2b) and each
- * metaData payment secret masked (MaskedSecretMeta; R0-SEC2c). The input is
+ * removed, metaData.whatsapp masked (MaskedWhatsAppMeta; R0-SEC2b), each
+ * metaData payment secret masked (MaskedSecretMeta; R0-SEC2c) and each SEO
+ * connection entry masked (MaskedSecretMeta; W3-D12b, D12-ST-2). The input is
  * not modified, so a caller that writes the row back writes what it read from
  * the database. Preserves every other field (non-breaking for legitimate
  * consumers). Passes through null/undefined so it can wrap optional lookups
