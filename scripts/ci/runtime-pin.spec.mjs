@@ -170,6 +170,8 @@ const NO_REQUIRE_ESM = '--no-experimental-require-module';
  * AppModule to NestFactory.create: the module graph has loaded.
  */
 const BOOT_MARKER = 'KEYFLOW_MODULE_GRAPH_LOADED';
+/** How the probe prints it: a synchronous write, which the process.exit(0) after it cannot cut short on a pipe. */
+const PROBE_PRINTS = `fs.writeSync(1, '${BOOT_MARKER}\\n');`;
 /** The one line that boots the server: under a timeout, stdout and stderr into OUT. Group 1: node's options. */
 const BOOT_LINE = /^OUT=\$\(timeout [1-9]\d* node (.+?) apps\/server\/dist\/main\.js 2>&1\)$/;
 /** node's options on the boot line: the probe, and the legacy flag while a workflow needs it. */
@@ -682,7 +684,7 @@ function bootStepShapeProblems(lines) {
   }
   const fi = lines.indexOf('fi', at + 3);
   const branch = fi < 0 ? [] : lines.slice(at + 3, fi);
-  if (branch.at(-1) !== 'exit 1' || branch.slice(0, -1).some((l) => /\b(?:exit|return)\b/.test(l))) {
+  if (branch.at(-1) !== 'exit 1' || branch.slice(0, -1).some((l) => /(?:^|[;&|{]\s*)(?:exit|return)\b/.test(l))) {
     problems.push(`'${BOOT_STEP}': when the boot fails, the step must end with exit 1 (found ${JSON.stringify(branch)})`);
   }
   if (!branch.includes(BOOT_REPORT)) problems.push(`'${BOOT_STEP}': when the boot fails, the step must print the boot output (${BOOT_REPORT})`);
@@ -691,8 +693,8 @@ function bootStepShapeProblems(lines) {
     problems.push(`'${BOOT_STEP}' may only print a fixed message after its decision, found ${JSON.stringify(after)}`);
   }
   const markers = lines.filter((l) => l.includes(BOOT_MARKER));
-  if (markers.length !== 2 || !markers.includes(`console.log('${BOOT_MARKER}');`)) {
-    problems.push(`'${BOOT_STEP}': ${BOOT_MARKER} must appear exactly twice, printed by the probe (console.log('${BOOT_MARKER}');) and read by the decision; found ${JSON.stringify(markers)}`);
+  if (markers.length !== 2 || !markers.includes(PROBE_PRINTS)) {
+    problems.push(`'${BOOT_STEP}': ${BOOT_MARKER} must appear exactly twice, printed by the probe (${PROBE_PRINTS}) and read by the decision; found ${JSON.stringify(markers)}`);
   }
   return problems;
 }
@@ -766,8 +768,10 @@ function bootStep(source) {
  * then NestFactory.create(AppModule). The @nestjs/core stand-in's create()
  * fails the way the real one does against the step's unreachable database
  * (P1001), so only the probe can make a graph pass. Every failing case names
- * what the step's output must show; esmOnly loads with require(esm) and dies
- * with ERR_REQUIRE_ESM under --no-experimental-require-module.
+ * what the step's output must show. `esm` cases load an ESM-only dependency:
+ * without require(esm) (--no-experimental-require-module) each dies with
+ * ERR_REQUIRE_ESM instead, and the esmOnly graph, which loads with
+ * require(esm), must then fail.
  */
 let bootFixtureCache = null;
 function bootFixtures() {
@@ -797,9 +801,10 @@ function bootFixtures() {
   pkg('esm-missing', esm, { 'index.js': "import 'no-such-esm-dep';\nexport const x = 1;\n" });
   pkg('dir-import', esm, { 'index.js': "import './lib';\nexport const x = 1;\n", 'lib/index.js': 'export const y = 1;\n' });
   pkg('throws-dep', cjs, { 'index.js': "throw new Error('module-load fixture: thrown while loading');\n" });
-  pkg('exits-early', cjs, { 'index.js': "console.error('module-load fixture: exited before the app was created');\nprocess.exit(0);\n" });
+  // Synchronous writes: process.exit right after cannot cut them short on a pipe.
+  pkg('exits-early', cjs, { 'index.js': "require('node:fs').writeSync(2, 'module-load fixture: exited before the app was created\\n');\nprocess.exit(0);\n" });
   pkg('exit-hook', cjs, {
-    'index.js': "process.on('exit', (code) => {\n  if (code === 0) {\n    console.error('module-load fixture: exit hook failed');\n    process.exitCode = 1;\n  }\n});\n",
+    'index.js': "process.on('exit', (code) => {\n  if (code === 0) {\n    require('node:fs').writeSync(2, 'module-load fixture: exit hook failed\\n');\n    process.exitCode = 1;\n  }\n});\n",
   });
   const MAIN = [
     "'use strict';",
@@ -822,19 +827,27 @@ function bootFixtures() {
     return path.join(root, dir);
   };
   fs.mkdirSync(path.join(root, 'tmp'));
+  // The GitHub runner has coreutils `timeout`; a machine without it (stock
+  // macOS) gets a stand-in that runs the command unbounded, so the step's
+  // own logic is what this run judges.
+  const bin = path.join(root, 'bin');
+  fs.mkdirSync(bin);
+  if (spawnSync('sh', ['-c', 'command -v timeout'], { encoding: 'utf8' }).status !== 0) {
+    fs.writeFileSync(path.join(bin, 'timeout'), '#!/bin/sh\nshift\nexec "$@"\n', { mode: 0o755 });
+  }
   bootFixtureCache = {
     root,
     cases: [
       { label: 'a graph that loads', dir: graph('loads', 'cjs-dep'), loads: true },
-      { label: 'an ESM-only dependency', dir: graph('esm-only', 'plain-esm'), esmOnly: true, shows: 'ERR_REQUIRE_ESM' },
-      { label: 'an ESM-only dependency with top-level await', dir: graph('tla', 'tla-dep'), shows: 'ERR_REQUIRE_ASYNC_MODULE' },
-      { label: 'an ESM-only dependency in an import cycle', dir: graph('cycle', 'cycle-dep'), shows: 'ERR_REQUIRE_CYCLE_MODULE' },
-      { label: 'an ESM-only dependency importing a named export its CommonJS dependency lacks', dir: graph('named', 'esm-named'), shows: "does not provide an export named 'nope'" },
+      { esm: true, label: 'an ESM-only dependency', dir: graph('esm-only', 'plain-esm'), esmOnly: true, shows: 'ERR_REQUIRE_ESM' },
+      { esm: true, label: 'an ESM-only dependency with top-level await', dir: graph('tla', 'tla-dep'), shows: 'ERR_REQUIRE_ASYNC_MODULE' },
+      { esm: true, label: 'an ESM-only dependency in an import cycle', dir: graph('cycle', 'cycle-dep'), shows: 'ERR_REQUIRE_CYCLE_MODULE' },
+      { esm: true, label: 'an ESM-only dependency importing a named export its CommonJS dependency lacks', dir: graph('named', 'esm-named'), shows: "does not provide an export named 'nope'" },
       { label: "a deep import a dependency's exports map does not allow", dir: graph('subpath', 'deep-dep/v4'), shows: 'ERR_PACKAGE_PATH_NOT_EXPORTED' },
       { label: 'a dependency with a syntax error', dir: graph('syntax', 'bad-syntax'), shows: 'SyntaxError' },
       { label: 'a dependency that is not installed', dir: graph('missing', 'no-such-dep'), shows: "Cannot find module 'no-such-dep'" },
-      { label: 'an ESM-only dependency importing a package that is not installed', dir: graph('esm-missing', 'esm-missing'), shows: 'ERR_MODULE_NOT_FOUND' },
-      { label: 'an ESM-only dependency importing a directory', dir: graph('dir-import', 'dir-import'), shows: 'ERR_UNSUPPORTED_DIR_IMPORT' },
+      { esm: true, label: 'an ESM-only dependency importing a package that is not installed', dir: graph('esm-missing', 'esm-missing'), shows: 'ERR_MODULE_NOT_FOUND' },
+      { esm: true, label: 'an ESM-only dependency importing a directory', dir: graph('dir-import', 'dir-import'), shows: 'ERR_UNSUPPORTED_DIR_IMPORT' },
       { label: 'a dependency that throws while it loads', dir: graph('throws', 'throws-dep'), shows: 'module-load fixture: thrown while loading' },
       { label: 'a dependency that exits 0 before AppModule reaches NestFactory.create', dir: graph('exits-early', 'exits-early'), shows: 'module-load fixture: exited before the app was created' },
       { label: 'a root module other than AppModule', dir: graph('not-app-module', 'cjs-dep', 'StubModule'), shows: 'not AppModule' },
@@ -861,20 +874,23 @@ function bootBehaviourProblems({ run, env: stepEnv }, { firstOnly = false } = {}
   const env = {
     ...process.env,
     ...stepEnv,
-    PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}`,
+    PATH: [path.dirname(process.execPath), process.env.PATH ?? '', path.join(root, 'bin')].join(path.delimiter),
     TMPDIR: path.join(root, 'tmp'),
   };
   for (const name of ['NODE_OPTIONS', 'NODE_TEST_CONTEXT', 'BASH_ENV', 'ENV']) delete env[name];
   const problems = [];
+  const requireEsm = !flagged && process.features.require_module === true;
   for (const c of cases) {
-    const loads = c.esmOnly ? !flagged && process.features.require_module === true : c.loads === true;
+    const loads = c.esmOnly ? requireEsm : c.loads === true;
+    // Without require(esm), every ESM-only dependency dies at require() with ERR_REQUIRE_ESM first.
+    const shows = c.esm && !requireEsm ? 'ERR_REQUIRE_ESM' : c.shows;
     const r = spawnSync('bash', ['--noprofile', '--norc', '-e', script], { cwd: c.dir, env, encoding: 'utf8', timeout: 120000 });
     const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
     const shown = `\n--- step output (exit ${r.status}${r.signal ? `, ${r.signal}` : ''}) ---\n${out.split('\n').slice(-30).join('\n')}`;
     if (loads && r.status !== 0) problems.push(`${c.label}: the step fails a server whose module graph loads${shown}`);
     if (!loads && r.status === 0) problems.push(`${c.label}: the step passes a server that cannot boot${shown}`);
-    if (!loads && r.status !== 0 && !out.includes(c.shows)) {
-      problems.push(`${c.label}: the step fails without printing what the boot died of (${JSON.stringify(c.shows)})${shown}`);
+    if (!loads && r.status !== 0 && !out.includes(shows)) {
+      problems.push(`${c.label}: the step fails without printing what the boot died of (${JSON.stringify(shows)})${shown}`);
     }
     if (firstOnly && problems.length) break;
   }
@@ -1179,7 +1195,7 @@ describe('V1-39 negative controls: review mutations are rejected', () => {
   // the run does not wait out (45 s), so the read alone holds it.
   const RUN_INDENT = ' '.repeat(10);
   const bootMutations = [
-    ['exit 1 -> exit 0 in the failure branch (RC2-3 M1)', `${RUN_INDENT}  exit 1\n${RUN_INDENT}fi\n`, `${RUN_INDENT}  exit 0\n${RUN_INDENT}fi\n`],
+    ['exit 1 -> exit 0 in the failure branch (RC2-3 M1)', `${BOOT_REPORT}\n${RUN_INDENT}  exit 1\n`, `${BOOT_REPORT}\n${RUN_INDENT}  exit 0\n`],
     ['stderr dropped: 2>&1 -> 2>/dev/null (RC2-3 M2)', 'apps/server/dist/main.js 2>&1)', 'apps/server/dist/main.js 2>/dev/null)'],
     ['the marker grep reads nothing: echo "$OUT" -> echo "" (RC2-3 M3)', '! echo "$OUT" | grep -qxF', '! echo "" | grep -qxF'],
     ['the exit code ignored', 'if [ "$STATUS" -ne 0 ] || ! echo', 'if ! echo'],
@@ -1187,12 +1203,13 @@ describe('V1-39 negative controls: review mutations are rejected', () => {
     ["the boot's failure swallowed (|| true)", 'apps/server/dist/main.js 2>&1)', 'apps/server/dist/main.js 2>&1 || true)'],
     ['the marker not required (a grep that matches any line)', `grep -qxF "${BOOT_MARKER}"`, 'grep -q ""'],
     ['the probe not loaded', `node ${PROBE_OPTION} apps/server`, 'node apps/server'],
-    ['the probe printing the marker as soon as it loads', `${RUN_INDENT}const path = require('node:path');\n`, `${RUN_INDENT}console.log('${BOOT_MARKER}');\n${RUN_INDENT}const path = require('node:path');\n`],
+    ['the probe printing the marker as soon as it loads', `${RUN_INDENT}const path = require('node:path');\n`, `${RUN_INDENT}const path = require('node:path');\n${RUN_INDENT}${PROBE_PRINTS}\n`],
     ['the boot not under a timeout', `OUT=$(timeout 45 node ${PROBE_OPTION}`, `OUT=$(node ${PROBE_OPTION}`, 'read only'],
   ];
   for (const [name, from, to, readOnly] of bootMutations) {
     it(`module-loading check: rejects ${name}`, () => {
       const sources = allWorkflows();
+      assert.equal(sources['ci-cd.yml'].split(from).length, 2, `mutation anchor must occur once in ci-cd.yml: ${JSON.stringify(from)}`);
       sources['ci-cd.yml'] = mutate(sources['ci-cd.yml'], from, to);
       assert.notDeepEqual(bootCheckProblems(sources), [], 'the read of the step accepts it');
       if (!readOnly) {
