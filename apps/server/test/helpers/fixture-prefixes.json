@@ -618,6 +618,11 @@
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
     },
     {
+      "prefix": "v84q_",
+      "owner": "apps/server/test/job-runner-claims.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D17-JOB-RUNNER-CLAIMS)"
+    },
+    {
       "prefix": "v87c_",
       "owner": "apps/server/test/storefront-order-doors.integration.test.ts",
       "packet": "V1-87 (G6PUB-R3-STORE-ORDER-DOORS)"
