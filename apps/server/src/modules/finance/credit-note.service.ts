@@ -219,7 +219,7 @@ export class CreditNoteService {
 
       // The workflow moves the invoice first: a DRAFT or VOID one is refused
       // 409 before anything is looked up or posted (everything rolls back).
-      await this.workflow.reconcileFromCredits(cn.invoiceId, { tx });
+      await this.workflow.reconcileFromCredits(cn.invoiceId, { tx, businessId });
 
       // The invoice's recognition, as RevenuePostingService.onInvoiceFinalized wrote it.
       const recognitionRef = buildExternalRef('Invoice', cn.invoiceId, 'invoice_finalized');
@@ -313,7 +313,8 @@ export class CreditNoteService {
       const tx = t as unknown as Prisma.TransactionClient;
       // V1-44b (SEC-V44-6): the note's invoice must be this business's own.
       // The schema does not tie credit_notes.business_id to the invoice's, and
-      // reconcileFromCredits looks the invoice up by id alone, so a note whose
+      // reconcileFromCredits looked the invoice up by id alone (until
+      // W3-CREDIT-RECONCILE-BIND passed it the businessId), so a note whose
       // invoiceId names another tenant's invoice (legacy or seeded rows;
       // create() cannot make one) let this tenant's void move that invoice.
       // The lock and the lookup carry businessId; any other invoice is
@@ -354,7 +355,8 @@ export class CreditNoteService {
         // no note on it could be voided. The note is voided and its posting
         // reversed; the invoice keeps the status the undo gave it.
         if (invoice.status !== 'DRAFT' && invoice.status !== 'VOID') {
-          await this.workflow.reconcileFromCredits(cn.invoiceId, { tx });
+          // W3-CREDIT-RECONCILE-BIND (SEC-V44-6): the workflow reads and locks it in this business too.
+          await this.workflow.reconcileFromCredits(cn.invoiceId, { tx, businessId });
         }
       }
 

@@ -875,24 +875,49 @@ export class InvoiceWorkflowService {
    * compare-and-set on the status read, as transition() (V1-42). No posting
    * (the note's is the caller's) and no event: no listener reads a credit move,
    * and an invoice returning to PAID was paid already (no second invoice.paid,
-   * receipt or COGS). paidAt is kept; a return to PAID with none stamps it.
+   * receipt or COGS).
+   *
+   * W3-CREDIT-RECONCILE-BIND (V1-44 review SEC-V44-6, function half): the
+   * invoice is locked and read by { id, businessId }, the business the caller
+   * acts in. The schema does not tie credit_notes.business_id to the
+   * invoice's, so a lookup by id alone let a note naming another tenant's
+   * invoice move it (CN-21 refuses that at the caller; CN-30 here). Another
+   * business's invoice is a 404 with nothing locked or written. The lock is
+   * the one every money door takes; the caller already holds it, and a row
+   * lock its own transaction holds is granted again at once.
+   *
+   * W3-CREDIT-RECONCILE-BIND (V1-44b todo CR-V44-2; D-14, D-78): paidAt says
+   * when the invoice was settled, and the move clears it whenever the status
+   * it writes is not PAID and the payment rows no longer settle the invoice:
+   * a credited invoice whose money went back, returned by the void of its
+   * note to SENT or PARTIALLY_PAID (as reconcileFromPayments clears it on a
+   * refund's reopen, D-14), or credited further once nothing settles it (a
+   * credited status is never PAID, D-78). It only ever stamped paidAt before.
+   * A PAID invoice credited with its payment rows still settling the total
+   * keeps its paidAt, and so does its return to PAID once the note is voided
+   * (CN-06); a return to PAID with none stamps it.
    */
   async reconcileFromCredits(
     invoiceId: string,
-    extra: { tx: Prisma.TransactionClient },
+    extra: { tx: Prisma.TransactionClient; businessId: string },
   ): Promise<{ status: InvoiceStatus; changed: boolean }> {
     const db = extra.tx;
-    const invoice = await db.invoice.findUnique({
-      where: { id: invoiceId },
+    const { businessId } = extra;
+    // SEC-V44-6: the lock decides; no row in this business, nothing is read or written.
+    if (!businessId) throw new NotFoundException('Invoice not found');
+    const locked = await db.$queryRaw<Array<{ id: string }>>`SELECT id FROM invoices WHERE id = ${invoiceId} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+    if (locked.length === 0) throw new NotFoundException('Invoice not found');
+    const invoice = await db.invoice.findFirst({
+      where: { id: invoiceId, businessId },
       select: { id: true, businessId: true, status: true, total: true, currency: true, paidAt: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
     const payments = await db.payment.findMany({
-      where: { invoiceId, businessId: invoice.businessId },
+      where: { invoiceId, businessId },
       select: { amount: true, status: true },
     });
     const applied = await db.creditNote.aggregate({
-      where: { invoiceId, businessId: invoice.businessId, status: 'APPLIED' },
+      where: { invoiceId, businessId, status: 'APPLIED' },
       _sum: { amount: true },
     });
     const balance = balanceOfStoredRows(Number(invoice.total), payments, invoice.currency);
@@ -902,11 +927,21 @@ export class InvoiceWorkflowService {
     if (!isLegalCreditTransition(current, next)) {
       throw new ConflictException(`Illegal invoice status transition for a credit note: ${current} -> ${next}`);
     }
+    // CR-V44-2 (D-14, D-78): settled is PAID, or a credited status while the
+    // payment rows still settle the total (CN-06). Anything else holds no paidAt.
+    const settled = next === 'PAID' || (CREDITED_STATUSES.has(next) && balance.isFullyPaid);
+    const paidAt = settled
+      ? next === 'PAID' && !invoice.paidAt
+        ? { paidAt: new Date() }
+        : {}
+      : invoice.paidAt
+        ? { paidAt: null }
+        : {};
     await compareAndSet(
       () =>
         db.invoice.update({
           where: { id: invoiceId, status: invoice.status },
-          data: { status: next, ...(next === 'PAID' && !invoice.paidAt ? { paidAt: new Date() } : {}) },
+          data: { status: next, ...paidAt },
         }),
       `Invoice status changed while ${current} -> ${next} was in flight; reload it and try again`,
     );

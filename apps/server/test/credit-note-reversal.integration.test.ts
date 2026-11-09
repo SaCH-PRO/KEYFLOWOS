@@ -1384,7 +1384,7 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
           status: 'REFUNDED',
           provider: 'cash',
           method: 'cash',
-          providerPaymentId: `${P}rf_${key}`,
+          providerPaymentId: `${id}_pp`,
           reference: original.providerPaymentId,
           businessId: ID.biz,
           invoiceId,
