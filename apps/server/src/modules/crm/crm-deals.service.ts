@@ -1,8 +1,10 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { getTenantContext } from '../../core/tenant/tenant-context';
 import { CrmTimelineService } from './crm-timeline.service';
+import { contactVisibilityFilter, resolveCrmAccess, type CrmAccess } from './crm-permissions.helper';
 import { WonLostReasonService } from './won-lost-reason.service';
 import { CONTACT_EVENT } from '@keyflow/shared';
 
@@ -551,7 +553,42 @@ export class CrmDealsService {
       }),
       this.prisma.client.deal.count({ where }),
     ]);
-    return { deals: items, total, skip, take };
+    // V1-89 (FOLLOW3-D3 residual ST-1): a deal whose contact the member cannot
+    // open is listed without that contact (contact and contactId null), so the
+    // list names no contact GET crm contacts/:contactId would refuse.
+    const canOpen = await this.boundMemberContactFilter(input.businessId, items.map((d) => d.contactId));
+    const deals = canOpen
+      ? items.map((d) => (canOpen(d.contactId) ? d : { ...d, contactId: null, contact: null }))
+      : items;
+    return { deals, total, skip, take };
+  }
+
+  /**
+   * Which of `contactIds` the member the TenantInterceptor bound to this
+   * request may open, by the GET crm contacts/:contactId rule
+   * (contactVisibilityFilter: the tenant predicate, deletedAt null and the
+   * visibility clause). Null, so nothing is withheld, for the OWNER and
+   * SUPER_ADMIN, and for a call no member is bound to (a queue or plan run:
+   * the OWNER's view, as D-88 has KEY's reads take it). A member bound to
+   * another tenant, or one who is not a member of this business, opens none.
+   * The request's member is read as BusinessCommandCenterService reads it, so
+   * GET crm deals, whose handler does not pass its caller, is covered.
+   */
+  private async boundMemberContactFilter(
+    businessId: string,
+    contactIds: string[],
+  ): Promise<((contactId: string) => boolean) | null> {
+    const ctx = getTenantContext();
+    if (!ctx?.userId) return null;
+    if (ctx.businessId !== businessId) return () => false;
+    let access: CrmAccess;
+    try {
+      access = await resolveCrmAccess(this.prisma, businessId, ctx.userId);
+    } catch (err) {
+      if (err instanceof ForbiddenException) return () => false;
+      throw err;
+    }
+    return contactVisibilityFilter(this.prisma, businessId, access, ctx.userId, contactIds);
   }
 
   async listContactDeals(input: { businessId: string; contactId: string; status?: DealStatus | 'ALL' }) {

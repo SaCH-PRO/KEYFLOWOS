@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CrmSequenceService } from './crm-sequence.service';
@@ -36,6 +37,15 @@ type AiAnalysisResult = {
   automatedTasks: AutomatedTask[];
 };
 
+/**
+ * The caller's CRM record-visibility clause (crm-permissions.helper
+ * visibilityClause, the rule GET crm contacts applies), AND'd onto every
+ * Contact read a prompt or a scan is built from; null or absent when nothing
+ * is hidden from the caller (OWNER, SUPER_ADMIN), whose reads are unchanged
+ * (V1-89, FOLLOW3-D3 residual ST-2).
+ */
+export type ContactScope = Prisma.ContactWhereInput | null | undefined;
+
 @Injectable()
 export class CrmAiService {
   private readonly logger = new Logger(CrmAiService.name);
@@ -50,6 +60,11 @@ export class CrmAiService {
 
   private get db() {
     return this.prisma.client;
+  }
+
+  /** The tenant's live contacts, narrowed to `scope` when the caller's visibility restricts them (V1-89). */
+  private contactWhere(businessId: string, scope: ContactScope): Prisma.ContactWhereInput {
+    return scope ? { ...contactWhereBase(businessId), AND: [scope] } : { ...contactWhereBase(businessId) };
   }
 
   sanitizeAiInput(input: string, maxLen = 500): string {
@@ -79,10 +94,11 @@ export class CrmAiService {
     businessId: string,
     prompt: string,
     contactIds?: string[],
+    scope?: ContactScope,
   ): Promise<AiAnalysisResult> {
     const start = Date.now();
     const sanitizedPrompt = this.sanitizeAiInput(prompt, 2000);
-    const context = await this.buildCrmContext(businessId, contactIds);
+    const context = await this.buildCrmContext(businessId, contactIds, scope);
 
     const systemPrompt = `You are an expert CRM analyst and business advisor for a Caribbean service business (Trinidad & Tobago, TTD currency).
 You analyze customer relationship data and provide actionable business intelligence.
@@ -233,15 +249,21 @@ Respond in valid JSON with this exact structure:
     });
   }
 
-  private async buildCrmContext(businessId: string, contactIds?: string[]): Promise<string> {
-    const where: Record<string, unknown> = { ...contactWhereBase(businessId) };
+  /**
+   * The CRM context of an ai-analyze prompt. With a `scope` (V1-89, FOLLOW3-D3
+   * ST-2) every part of it reads only the contacts the caller may open: the
+   * contact list, the status breakdown, the recent events and open tasks (by
+   * their contact), and the invoice totals (invoices of those contacts).
+   */
+  private async buildCrmContext(businessId: string, contactIds?: string[], scope?: ContactScope): Promise<string> {
+    const where: Prisma.ContactWhereInput = this.contactWhere(businessId, scope);
     if (contactIds?.length) {
       where.id = { in: contactIds };
     }
 
     const [contacts, statusCounts, recentEvents, tasks, invoiceSummary] = await Promise.all([
       this.db.contact.findMany({
-        where: where as any,
+        where,
         take: 200,
         orderBy: { updatedAt: 'desc' },
         select: {
@@ -263,11 +285,11 @@ Respond in valid JSON with this exact structure:
       }),
       this.db.contact.groupBy({
         by: ['status'],
-        where: contactWhereBase(businessId),
+        where: this.contactWhere(businessId, scope),
         _count: true,
       }),
       this.db.contactEvent.findMany({
-        where: { contact: contactWhereBase(businessId) },
+        where: { contact: this.contactWhere(businessId, scope) },
         take: 50,
         orderBy: { createdAt: 'desc' },
         select: {
@@ -277,7 +299,7 @@ Respond in valid JSON with this exact structure:
         },
       }),
       this.db.contactTask.findMany({
-        where: { ...contactWhereBase(businessId), status: 'OPEN' },
+        where: { ...contactWhereBase(businessId), status: 'OPEN', ...(scope ? { contact: this.contactWhere(businessId, scope) } : {}) },
         take: 50,
         orderBy: { dueDate: 'asc' },
         select: {
@@ -288,7 +310,7 @@ Respond in valid JSON with this exact structure:
         },
       }),
       this.db.invoice.aggregate({
-        where: { businessId },
+        where: { businessId, ...(scope ? { contact: this.contactWhere(businessId, scope) } : {}) },
         _sum: { total: true },
         _count: true,
       }),
@@ -638,10 +660,10 @@ Respond in valid JSON:
     }
   }
 
-  async detectChurnRisk(businessId: string) {
+  async detectChurnRisk(businessId: string, scope?: ContactScope) {
     const now = new Date();
     const contacts = await this.db.contact.findMany({
-      where: { ...contactWhereBase(businessId), status: { in: ['CLIENT', 'PROSPECT'] } },
+      where: { ...this.contactWhere(businessId, scope), status: { in: ['CLIENT', 'PROSPECT'] } },
       take: 100,
       orderBy: { lastInteractionAt: 'asc' },
       select: {
@@ -724,10 +746,10 @@ Respond in valid JSON:
     }
   }
 
-  async naturalLanguageSearch(businessId: string, query: string) {
+  async naturalLanguageSearch(businessId: string, query: string, scope?: ContactScope) {
     const sanitizedQuery = this.sanitizeAiInput(query, 500);
     const contactFields = await this.db.contact.findMany({
-      where: contactWhereBase(businessId),
+      where: this.contactWhere(businessId, scope),
       take: 5,
       select: {
         status: true, tags: true, source: true, city: true,
@@ -782,6 +804,7 @@ Respond in valid JSON:
         where: {
           businessId,
           deletedAt: null,
+          ...(scope ? { AND: [scope] } : {}),
           ...(cleanFilters.status ? { status: cleanFilters.status as string } : {}),
           ...(cleanFilters.search ? {
             OR: [
@@ -1119,11 +1142,11 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     }
   }
 
-  async interpretCommand(businessId: string, command: string) {
+  async interpretCommand(businessId: string, command: string, scope?: ContactScope) {
     const sanitizedCommand = this.sanitizeAiInput(command, 500);
     const [contacts, sequencesList, contactLists] = await Promise.all([
       this.db.contact.findMany({
-        where: contactWhereBase(businessId),
+        where: this.contactWhere(businessId, scope),
         take: 200,
         orderBy: { updatedAt: 'desc' },
         select: {
@@ -1176,7 +1199,17 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     };
   }
 
-  async executeAiCommand(businessId: string, userId: string, command: { action: string; contactId?: string | null; params?: Record<string, unknown> }) {
+  /**
+   * `editableScope` narrows bulk_status_change to the contacts the caller may
+   * open and edit (V1-89 (d)); null or absent for the OWNER and SUPER_ADMIN.
+   * The single-contact actions are gated on their contactId by the controller.
+   */
+  async executeAiCommand(
+    businessId: string,
+    userId: string,
+    command: { action: string; contactId?: string | null; params?: Record<string, unknown> },
+    editableScope?: ContactScope,
+  ) {
     const { action, contactId, params } = command;
     this.logger.log(`[CRM AI] executeAiCommand action=${action} businessId=${businessId}`);
 
@@ -1238,7 +1271,7 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
           const fromStatus = (params?.fromStatus as string);
           const toStatus = (params?.toStatus as string);
           if (!fromStatus || !toStatus) return { success: false, message: 'fromStatus and toStatus are required', data: null };
-          const where: any = { ...contactWhereBase(businessId), status: fromStatus };
+          const where: any = { ...this.contactWhere(businessId, editableScope), status: fromStatus };
           const filterTag = params?.filter as string;
           if (filterTag) where.tags = { has: filterTag };
           const result = await this.db.contact.updateMany({ where, data: { status: toStatus } });
@@ -1315,9 +1348,9 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     }
   }
 
-  async dataQualityScan(businessId: string) {
+  async dataQualityScan(businessId: string, scope?: ContactScope) {
     const contacts = await this.db.contact.findMany({
-      where: contactWhereBase(businessId),
+      where: this.contactWhere(businessId, scope),
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true,
         companyName: true, tags: true, status: true, source: true,
@@ -1370,9 +1403,9 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     };
   }
 
-  async findDuplicatesAi(businessId: string) {
+  async findDuplicatesAi(businessId: string, scope?: ContactScope) {
     const contacts = await this.db.contact.findMany({
-      where: contactWhereBase(businessId),
+      where: this.contactWhere(businessId, scope),
       select: {
         id: true, firstName: true, lastName: true, email: true, phone: true,
         companyName: true, status: true,
@@ -1441,13 +1474,13 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     };
   }
 
-  async bulkReengagementSuggestions(businessId: string) {
+  async bulkReengagementSuggestions(businessId: string, scope?: ContactScope) {
     const now = new Date();
     const staleThreshold = new Date(now.getTime() - 30 * 86400000);
 
     const staleContacts = await this.db.contact.findMany({
       where: {
-        ...contactWhereBase(businessId),
+        ...this.contactWhere(businessId, scope),
         status: { in: ['CLIENT', 'PROSPECT', 'LEAD'] },
         OR: [
           { lastInteractionAt: { lt: staleThreshold } },
@@ -1514,9 +1547,9 @@ Be specific and reference actual data. Keep icebreakers relevant and professiona
     };
   }
 
-  async revenueOpportunityScan(businessId: string) {
+  async revenueOpportunityScan(businessId: string, scope?: ContactScope) {
     const contacts = await this.db.contact.findMany({
-      where: { ...contactWhereBase(businessId), status: { in: ['CLIENT', 'PROSPECT'] } },
+      where: { ...this.contactWhere(businessId, scope), status: { in: ['CLIENT', 'PROSPECT'] } },
       take: 100,
       select: {
         id: true, firstName: true, lastName: true, status: true,
