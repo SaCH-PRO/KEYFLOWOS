@@ -1,9 +1,22 @@
 import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { schedulersDisabled } from '../../core/config/env';
+import type { ContactStatus } from './crm.constants';
 
 const TICK_INTERVAL_MS = 60 * 60 * 1000; // hourly
 const DEFAULT_TARGET_HOUR_UTC = 4; // run at 04:00 UTC
+
+/**
+ * V1-38b (CR-1): the customer bonus goes to Contact.status CLIENT, the one
+ * vocabulary (crm.constants.ts). A row may still hold the legacy status
+ * CUSTOMER, and not only from before V1-38 (the Shopify adapter): the CSV/link
+ * import copies a file's status column verbatim (crm-import.service.ts), so it
+ * is still written. It scores as CLIENT while any writer can produce it or a
+ * row holds it.
+ */
+const CLIENT_STATUS: ContactStatus = 'CLIENT';
+const LEGACY_CLIENT_STATUS = 'CUSTOMER';
+const isClientStatus = (status: string | null): boolean => status === CLIENT_STATUS || status === LEGACY_CLIENT_STATUS;
 
 interface LeadScoreInput {
   relationshipHealth: string | null;
@@ -188,7 +201,7 @@ export class LeadScoringScheduler implements OnModuleInit, OnModuleDestroy {
     else if (input.eventCount >= 2) score += 2;
 
     // Status bonus/penalty
-    if (input.status === 'CUSTOMER') score += 5;
+    if (isClientStatus(input.status)) score += 5;
     if (input.status === 'LOST') score -= 10;
 
     return Math.max(0, Math.min(100, Math.round(score)));

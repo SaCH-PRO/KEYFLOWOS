@@ -137,18 +137,35 @@ export function visibilityClause(access: CrmAccess, userId: string) {
  * non-member 403 first. It reads the user, the membership and the contact row
  * only, so a caller it refuses never reaches the contact's child rows (V1-08,
  * M13).
+ *
+ * `includeDeleted` drops the deletedAt null term and keeps the tenant
+ * predicate and visibilityClause: for the privacy routes that act on a contact
+ * a forget soft-deleted for its grace period (audit, export, forget/cancel;
+ * FOLLOW3-D3), so the member who may open the contact keeps the cancel window
+ * (D-25). Every other caller leaves it unset.
  */
 export async function assertContactVisible(
   prisma: PrismaService,
   businessId: string,
   contactId: string,
   actorUserId: string,
+  options: { includeDeleted?: boolean } = {},
 ): Promise<CrmAccess> {
   const access = await resolveCrmAccess(prisma, businessId, actorUserId);
-  const where: Prisma.ContactWhereInput = { ...contactWhereWithId(businessId, contactId) };
   const visClause = visibilityClause(access, actorUserId);
-  if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
-  const visible = await prisma.client.contact.findFirst({ where, select: { id: true } });
+  let visible: boolean;
+  if (options.includeDeleted) {
+    const where: Prisma.ContactWhereInput = { id: contactId, businessId };
+    if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
+    // The soft-delete extension (packages/db) adds deletedAt null to every
+    // Contact find and count; aggregate is the read it leaves as written.
+    const found = await prisma.client.contact.aggregate({ where, _count: { _all: true } });
+    visible = found._count._all > 0;
+  } else {
+    const where: Prisma.ContactWhereInput = { ...contactWhereWithId(businessId, contactId) };
+    if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
+    visible = (await prisma.client.contact.findFirst({ where, select: { id: true } })) !== null;
+  }
   if (!visible) {
     throw new NotFoundException('Contact not found');
   }

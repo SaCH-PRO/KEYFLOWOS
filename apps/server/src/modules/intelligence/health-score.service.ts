@@ -2,6 +2,17 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 import { sumMoney } from '../commerce/money';
+import type { ContactStatus } from '../crm/crm.constants';
+
+/**
+ * V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary
+ * (crm.constants.ts). A row may still hold the legacy status CUSTOMER, and not
+ * only from before V1-38 (the Shopify adapter): the CSV/link import copies a
+ * file's status column verbatim (crm-import.service.ts), so it is still
+ * written. It counts as CLIENT while any writer can produce it or a row holds it.
+ */
+const CLIENT_STATUS: ContactStatus = 'CLIENT';
+const LEGACY_CLIENT_STATUS = 'CUSTOMER';
 
 export interface HealthAreaResult {
   area: string;
@@ -149,7 +160,7 @@ export class HealthScoreService {
     const [totalContacts, staleLeads, dormantCustomers, missingInfo] = await Promise.all([
       this.prisma.client.contact.count({ where: { businessId, deletedAt: null } }),
       this.prisma.client.contact.count({ where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: new Date(now.getTime() - 14 * 86400000) } } }),
-      this.prisma.client.contact.count({ where: { businessId, deletedAt: null, status: 'CUSTOMER', updatedAt: { lt: new Date(now.getTime() - 60 * 86400000) } } }),
+      this.prisma.client.contact.count({ where: { businessId, deletedAt: null, status: { in: [CLIENT_STATUS, LEGACY_CLIENT_STATUS] }, updatedAt: { lt: new Date(now.getTime() - 60 * 86400000) } } }),
       this.prisma.client.contact.count({ where: { businessId, deletedAt: null, OR: [{ email: null }, { phone: null }] } }),
     ]);
 

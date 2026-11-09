@@ -48,6 +48,16 @@
  * block of this file; its NEGATIVE CONTROL cases fail on the V1-08 head, where
  * re-adding the customer of a soft-deleted contact answers 409 with
  * existingContactId null.
+ *
+ * FOLLOW3-D8-PRIVACY-CANCEL-409 (V1-17 review CR-1 / V117-ST-2): a GDPR forget
+ * soft-deletes its contact for the grace period, so under D-16 another live
+ * contact can take its email or phone. POST .../contacts/:id/forget/cancel
+ * then meets the partial unique when it un-deletes the contact. The last block
+ * drives that through the real ContactPrivacyController and
+ * ContactPrivacyService; its NEGATIVE CONTROL cases answer 500 on the packet's
+ * source base (the P2002 reaches GlobalHttpExceptionFilter) and 409
+ * contact_email_taken / contact_phone_taken after it, with the holder bounded
+ * by the actor's visibility exactly as revertMerge answers.
  */
 import 'reflect-metadata';
 import fs from 'fs';
@@ -80,6 +90,7 @@ async function cleanup() {
   // created through the API with generated ids, so they go by business id.
   for (const sql of [
     `DELETE FROM contact_audit_entries WHERE business_id LIKE '${P}%'`,
+    `DELETE FROM contact_forget_requests WHERE business_id LIKE '${P}%'`,
     `DELETE FROM contact_events WHERE business_id LIKE '${P}%'`,
     `DELETE FROM merge_operations WHERE business_id LIKE '${P}%'`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE '${P}%'`,
@@ -163,11 +174,13 @@ beforeAll(async () => {
   const { ConversationAiService } = await import('../src/modules/crm/conversation-ai.service');
   const { CrmNetworkService } = await import('../src/modules/crm/crm-network.service');
   const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
+  const { ContactPrivacyController } = await import('../src/modules/crm/privacy/contact-privacy.controller');
+  const { ContactPrivacyService } = await import('../src/modules/crm/privacy/contact-privacy.service');
 
   // ---- the real HTTP path (wired before any row is seeded, so a wiring
   // fault is reported as itself and not as a seeding failure) -------------
   const moduleRef = await Test.createTestingModule({
-    controllers: [CrmController],
+    controllers: [CrmController, ContactPrivacyController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -180,6 +193,9 @@ beforeAll(async () => {
       CrmStatsService,
       CrmService,
       ContactAuditService,
+      // The forget / forget-cancel routes of the last block (FOLLOW3-D8). Its
+      // purge scheduler stays off under NODE_ENV=test; nothing of it is stubbed.
+      ContactPrivacyService,
       { provide: EventEmitter2, useValue: new EventEmitter2() },
       // Side channels off the contact write: the timeline row, the stats and
       // flow caches. The claim under test is the write and its answer; these
@@ -909,14 +925,189 @@ describe('V1-17 review repairs — un-deleting a contact whose email or phone a 
     expect(await revertedAt(merged.body.mergeId)).toBeNull();
   });
 
-  // CR-1 / V117-ST-2 need a change outside the V1-17 write set
-  // (apps/server/src/modules/crm/privacy/contact-privacy.service.ts):
-  // ContactPrivacyService.cancelForget un-deletes with a bare
-  // tx.contact.update({ deletedAt: null }), so the P2002 it now meets reaches
-  // GlobalHttpExceptionFilter as a 500. The database still refuses the second
-  // live holder (see 'the database refuses a second live holder' above), so it
-  // fails closed, but the client gets no reason.
-  it.todo(
-    "CR-1 / V117-ST-2 (companion change to contact-privacy.service.ts, outside the V1-17 write set): POST .../contacts/:id/forget/cancel while a live contact holds the forgotten contact's email or phone answers 409 contact_email_taken / contact_phone_taken naming the holder the actor may see, not 500; the request stays 'requested', the contact stays deleted, and the cancel succeeds once the value is free",
-  );
+  // CR-1 / V117-ST-2 (the same un-delete in ContactPrivacyService.cancelForget)
+  // is the next block (FOLLOW3-D8-PRIVACY-CANCEL-409).
+});
+
+describe('V1-17 review repairs CR-1 / V117-ST-2 (FOLLOW3-D8) — cancelling a GDPR forget whose email or phone a live contact now holds answers 409, not 500', () => {
+  // A forget soft-deletes its contact for the grace period (D-25) and D-16
+  // frees a soft-deleted contact's email and phone, so another live contact
+  // can take them before the operator cancels. ContactPrivacyService.cancelForget
+  // un-deletes the contact inside the transaction that marks the request
+  // 'cancelled'; the partial unique refuses that (P2002) and the transaction
+  // rolls back. Before FOLLOW3-D8 the P2002 reached GlobalHttpExceptionFilter
+  // as a 500 with no reason, while the request stayed 'requested' and the
+  // purge would later erase the contact the operator tried to keep. The answer
+  // now is the one every identity conflict gives (revertMerge included): 409
+  // contact_email_taken / contact_phone_taken with the live holder's id when
+  // the actor may open it on GET detail, null otherwise, and no database text.
+  //
+  // X is owned by STAFF_BOOK, a 'my book' member (crm write, crm_view owned),
+  // so the cancel route's FOLLOW3-D3 visibility gate (includeDeleted) lets that
+  // member reach the service; the holders are unowned TEAM contacts the member
+  // cannot open. bizE is a tenant of its own so the per-tenant rate-limit
+  // buckets of the blocks above stay below their ceilings.
+  const BIZ = `${P}bizE`;
+  const STAFF_BOOK = `${P}staffBookE`;
+  const X_EMAIL = `${P}forgotten@test.local`;
+  const X_PHONE = '+1 868 555 0301';
+  const X_PHONE_VARIANT = '+1 (868) 555-0301';
+  const X_PHONE_NORMALIZED = '+18685550301';
+  const LEAK = /invocation|prisma|unique constraint|\.ts\b|email_normalized|phone_normalized|business_id|node_modules/i;
+  let xId: string; // the forgotten contact
+  let emailHolderId: string; // Y: a live contact that took X's email
+  let phoneHolderId: string; // Z: a live contact that took X's phone
+
+  function route(contactId: string, suffix: string) {
+    return `/crm/businesses/${BIZ}/contacts/${contactId}${suffix}`;
+  }
+
+  function forget(actor: string, contactId: string) {
+    return request(app.getHttpServer()).post(route(contactId, '/forget')).set('x-test-user', actor).send({ reason: 'tcd test' });
+  }
+
+  function cancel(actor: string, contactId: string) {
+    return request(app.getHttpServer()).post(route(contactId, '/forget/cancel')).set('x-test-user', actor).send({});
+  }
+
+  function get(actor: string, contactId: string) {
+    return request(app.getHttpServer()).get(route(contactId, '')).set('x-test-user', actor);
+  }
+
+  function del(actor: string, contactId: string) {
+    return request(app.getHttpServer()).delete(route(contactId, '')).set('x-test-user', actor);
+  }
+
+  /** The row as stored, read past the soft-delete extension. */
+  async function deletedAt(id: string): Promise<Date | null> {
+    const rows = await db.$queryRawUnsafe(`SELECT deleted_at FROM contacts WHERE id = '${id}'`);
+    return rows[0].deleted_at;
+  }
+
+  function forgetRequests(contactId: string): Promise<Array<{ status: string; cancelled_at: Date | null }>> {
+    return db.$queryRawUnsafe(`SELECT status, cancelled_at FROM contact_forget_requests WHERE contact_id = '${contactId}'`);
+  }
+
+  function cancelledEntries(contactId: string): Promise<Array<{ actor: unknown }>> {
+    return db.$queryRawUnsafe(
+      `SELECT actor FROM contact_audit_entries WHERE business_id = '${BIZ}' AND contact_id = '${contactId}' AND action = 'forget_cancelled'`,
+    );
+  }
+
+  /** X stays exactly as the forget left it: deleted, one request still 'requested', no forget_cancelled entry. */
+  async function expectStillForgotten() {
+    expect(await deletedAt(xId)).not.toBeNull();
+    expect(await forgetRequests(xId)).toEqual([{ status: 'requested', cancelled_at: null }]);
+    expect(await cancelledEntries(xId)).toEqual([]);
+  }
+
+  beforeAll(async () => {
+    await db.business.create({ data: { id: BIZ, name: 'TCD Biz E', ownerId: ID.owner } });
+    await db.membership.create({ data: { id: `${P}m_owner_bizE`, userId: ID.owner, businessId: BIZ, role: 'OWNER' } });
+    await db.user.create({ data: { id: STAFF_BOOK, email: `${STAFF_BOOK}@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}m_staffBook_bizE`, userId: STAFF_BOOK, businessId: BIZ, role: 'STAFF', permissionScopes: { crm: 'write', crm_view: 'owned', crm_edit: 'owned' } } });
+
+    const x = await post(ID.owner, BIZ, { firstName: `${P}Forgotten`, email: X_EMAIL, phone: X_PHONE, ownerId: STAFF_BOOK });
+    expect(x.status).toBe(201);
+    xId = x.body.id;
+    expect(await db.contact.findUnique({ where: { id: xId }, select: { ownerId: true } })).toEqual({ ownerId: STAFF_BOOK });
+    const forgot = await forget(ID.owner, xId);
+    expect(forgot.status).toBe(201);
+    expect(await deletedAt(xId)).not.toBeNull();
+    expect(await forgetRequests(xId)).toEqual([{ status: 'requested', cancelled_at: null }]);
+  });
+
+  it("NEGATIVE CONTROL (PF-01) — a live contact takes the forgotten contact's email (201), and the OWNER's forget/cancel answers 409 contact_email_taken naming it, with no database text; the contact stays deleted, the request stays 'requested' and no forget_cancelled entry is written", async () => {
+    const y = await post(ID.owner, BIZ, { firstName: `${P}EmailTaker`, email: X_EMAIL.toUpperCase() });
+    expect(y.status).toBe(201);
+    emailHolderId = y.body.id;
+
+    const res = await cancel(ID.owner, xId);
+    expect(res.status).toBe(409);
+    expectTaken(res.body, 'contact_email_taken', emailHolderId);
+    expect(JSON.stringify(res.body)).not.toMatch(LEAK);
+    await expectStillForgotten();
+  });
+
+  it("NEGATIVE CONTROL (PF-01) — the holder id is bounded by the actor's CRM visibility: the 'my book' STAFF who owns the forgotten contact reaches the service, but cannot open the holder (GET 404), so the same 409 carries existingContactId null and the id nowhere in the body", async () => {
+    expect((await get(STAFF_BOOK, emailHolderId)).status).toBe(404);
+    expect((await get(ID.owner, emailHolderId)).status).toBe(200);
+
+    const res = await cancel(STAFF_BOOK, xId);
+    expect(res.status).toBe(409);
+    expectTaken(res.body, 'contact_email_taken', null);
+    expect(JSON.stringify(res.body)).not.toContain(emailHolderId);
+    expect(JSON.stringify(res.body)).not.toMatch(LEAK);
+    await expectStillForgotten();
+  });
+
+  it("NEGATIVE CONTROL (PF-03) — the phone variant: once the email is free again (DELETE of its holder) but a live contact holds a punctuation variant of the forgotten contact's phone, the cancel answers 409 contact_phone_taken naming it for the OWNER and null for the STAFF", async () => {
+    expect((await del(ID.owner, emailHolderId)).status).toBe(200);
+    const z = await post(ID.owner, BIZ, { firstName: `${P}PhoneTaker`, phone: X_PHONE_VARIANT });
+    expect(z.status).toBe(201);
+    phoneHolderId = z.body.id;
+    expect(await db.contact.findUnique({ where: { id: phoneHolderId }, select: { phoneNormalized: true } })).toEqual({ phoneNormalized: X_PHONE_NORMALIZED });
+
+    const owner = await cancel(ID.owner, xId);
+    expect(owner.status).toBe(409);
+    expectTaken(owner.body, 'contact_phone_taken', phoneHolderId);
+    expect(JSON.stringify(owner.body)).not.toMatch(LEAK);
+
+    const staff = await cancel(STAFF_BOOK, xId);
+    expect(staff.status).toBe(409);
+    expectTaken(staff.body, 'contact_phone_taken', null);
+    expect(JSON.stringify(staff.body)).not.toContain(phoneHolderId);
+    await expectStillForgotten();
+  });
+
+  it("PF-02 — with both values free again (the phone holder's phone changed by PATCH) the same cancel succeeds: the contact is live with its email and phone, the request is 'cancelled', one forget_cancelled entry names the actor, and a second cancel is refused 400", async () => {
+    const moved = await patch(ID.owner, BIZ, phoneHolderId, { phone: '+18685550399' });
+    expect(moved.status).toBe(200);
+
+    // The cancel route is a Nest @Post with no @HttpCode, so success is 201.
+    const res = await cancel(ID.owner, xId);
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ ok: true });
+    expect(await deletedAt(xId)).toBeNull();
+    expect(await db.contact.findUnique({ where: { id: xId }, select: { emailNormalized: true, phoneNormalized: true } }))
+      .toEqual({ emailNormalized: X_EMAIL, phoneNormalized: X_PHONE_NORMALIZED });
+    const requests = await forgetRequests(xId);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].status).toBe('cancelled');
+    expect(requests[0].cancelled_at).not.toBeNull();
+    const entries = await cancelledEntries(xId);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].actor).toMatchObject({ type: 'USER', id: ID.owner });
+
+    const again = await cancel(ID.owner, xId);
+    expect(again.status).toBe(400);
+  });
+
+  it("CONTROL (PF-04) — two concurrent POST .../forget on one live contact never answer 5xx: each is 2xx or 404 'Contact not found' (the live-only visibility check, when the other forget committed first), at least one is 2xx, and exactly one ContactForgetRequest row is left, 'requested' (the native upsert on the unique contactId); a later forget answers 404 the same way", async () => {
+    const w = await post(ID.owner, BIZ, { firstName: `${P}Twice`, email: `${P}twice@test.local` });
+    expect(w.status).toBe(201);
+    const [a, b] = await Promise.all([forget(ID.owner, w.body.id), forget(ID.owner, w.body.id)]);
+    // Which outcome the second call gets depends on whether it passes the
+    // controller's live-only assertContactVisible before or after the first
+    // forget's transaction commits: before, both reach the service and the
+    // upsert keeps one row (2xx twice); after, the contact is soft-deleted and
+    // the second call is a 404. Both orders are correct; a 5xx never is.
+    const isOkOrGone = (res: { status: number; body?: { message?: unknown } }) =>
+      (res.status >= 200 && res.status < 300) ||
+      (res.status === 404 && res.body?.message === 'Contact not found');
+    for (const res of [a, b]) {
+      expect(res.status, JSON.stringify(res.body)).toBeLessThan(500);
+      expect(isOkOrGone(res), JSON.stringify(res.body)).toBe(true);
+    }
+    expect([a, b].some((res) => res.status >= 200 && res.status < 300), JSON.stringify([a.body, b.body])).toBe(true);
+    expect(await forgetRequests(w.body.id)).toEqual([{ status: 'requested', cancelled_at: null }]);
+    expect(await deletedAt(w.body.id)).not.toBeNull();
+
+    // Deterministic cover of the 404 branch: once a forget has committed, a
+    // further forget is refused by the live-only check, and nothing changes.
+    const late = await forget(ID.owner, w.body.id);
+    expect(late.status, JSON.stringify(late.body)).toBe(404);
+    expect(late.body.message).toBe('Contact not found');
+    expect(await forgetRequests(w.body.id)).toEqual([{ status: 'requested', cancelled_at: null }]);
+  });
 });
