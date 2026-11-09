@@ -53,7 +53,9 @@ import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
-vi.setConfig({ testTimeout: 30_000 });
+// beforeAll imports the planner's AI collaborators (as tokens) and seeds; under a parallel run that
+// takes longer than vitest's 10 s hook default.
+vi.setConfig({ testTimeout: 30_000, hookTimeout: 120_000 });
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
