@@ -613,6 +613,11 @@
       "packet": "V1-84 (FOLLOW3-D5-CONTACT-READS-NONCRM)"
     },
     {
+      "prefix": "v84g_",
+      "owner": "apps/server/test/key-contact-reads-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D7-KEY-CONTACT-READS-VIS)"
+    },
+    {
       "prefix": "v84j_",
       "owner": "apps/server/test/command-item-contact-visibility.integration.test.ts",
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
