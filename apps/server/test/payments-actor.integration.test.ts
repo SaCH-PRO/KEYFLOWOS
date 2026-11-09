@@ -14,7 +14,10 @@
  *     -> Payment.recordedBy = U                                  (fresh Prisma read)
  *     -> posting FinancialTransaction.createdById = U            (column exists on the model)
  *     -> ContactEvent invoice.payment_recorded: actorId U, actorType USER, data.recordedBy U
- *        and the unified activity entry it writes carries actorId U
+ *        and the payment's FINANCE payment_recorded activity entry carries actorId U
+ *        (W3-V1-55c, owner ruling D-90: the FINANCE row is the payment's feed row
+ *        and names who recorded it; until then the actor was read on the CRM
+ *        invoice.payment_recorded copy, which D-90 retires)
  *   the same route by user V (STAFF, revenue:write)  -> V on every one of the above
  *   idempotent replay (R0-D2) by V of U's key       -> U's row, recordedBy still U, nothing new written
  *   POST /commerce/businesses/:b/payments/:id/refund by user V
@@ -308,8 +311,16 @@ async function contactEventsFor(invoiceId: string, type = 'invoice.payment_recor
   return rows.filter((r: any) => (r.data as any)?.invoiceId === invoiceId);
 }
 
-function crmActivityFor(invoiceId: string): Array<Record<string, any>> {
-  return activity.filter((a) => a.module === 'crm' && a.action === 'invoice.payment_recorded' && a.data?.invoiceId === invoiceId);
+/**
+ * W3-V1-55c (owner ruling D-90): the FINANCE payment_recorded activity entries
+ * RevenuePostingService handed the timeline for this invoice's payments. Each
+ * is its payment's one feed row and names who recorded it (USER for a person,
+ * SYSTEM for KEY); the PA cases read the actor here, no longer on the CRM
+ * invoice.payment_recorded copy.
+ */
+async function financeActivityFor(invoiceId: string): Promise<Array<Record<string, any>>> {
+  const ids = new Set((await paymentsOf(invoiceId)).map((p) => p.id));
+  return activity.filter((a) => a.module === 'FINANCE' && a.action === 'payment_recorded' && ids.has(a.entityId));
 }
 
 /** One posting for this payment, attributed to `actor`. */
@@ -320,14 +331,15 @@ async function expectPostingBy(paymentId: string, actor: string | null) {
   expect(txns[0].createdById, `posting creator for ${paymentId}`).toBe(actor);
 }
 
-/** One invoice.payment_recorded ContactEvent for this invoice, attributed to `actor`. */
+/** One invoice.payment_recorded ContactEvent for this invoice, and its payment's FINANCE feed row, attributed to `actor`. */
 async function expectContactEventBy(invoiceId: string, actor: string, actorType: 'USER' | 'SYSTEM') {
   const events = await contactEventsFor(invoiceId);
   expect(events, `contact events for ${invoiceId}`).toHaveLength(1);
   expect(events[0]).toMatchObject({ actorId: actor, actorType, source: 'commerce' });
   expect((events[0].data as any).recordedBy).toBe(actor);
-  const act = crmActivityFor(invoiceId);
-  expect(act, `crm activity for ${invoiceId}`).toHaveLength(1);
+  // W3-V1-55c (D-90): the same actor on the payment's FINANCE row.
+  const act = await financeActivityFor(invoiceId);
+  expect(act, `FINANCE payment_recorded activity for ${invoiceId}`).toHaveLength(1);
   expect(act[0]).toMatchObject({ actorId: actor, actorType });
 }
 
@@ -946,6 +958,8 @@ async function expectNoKeyActor(invoiceId: string) {
     expect((e.data as any)?.recordedBy, `contact event ${e.type} data.recordedBy`).not.toBe(KEY_ACTOR);
   }
   for (const a of activity.filter((x) => x.data?.invoiceId === invoiceId)) expect(a.actorId, `activity ${a.action}`).not.toBe(KEY_ACTOR);
+  // W3-V1-55c (D-90): the payments' FINANCE rows name their recorder too.
+  for (const a of await financeActivityFor(invoiceId)) expect(a.actorId, `activity ${a.module} ${a.action}`).not.toBe(KEY_ACTOR);
 }
 
 const messagesOf = (body: Record<string, unknown>) => [body.message].flat().map(String);
@@ -1580,7 +1594,7 @@ describe('R0-CMF2: drive-intake approval names the approver on the payment it re
     expect(rows[0]).toMatchObject({ status: 'PENDING', recordedBy: null });
     expect(await postingsFor(rows[0].id)).toHaveLength(0);
     expect(await contactEventsFor(ID.invDriveSystem)).toHaveLength(0);
-    expect(crmActivityFor(ID.invDriveSystem)).toEqual([]);
+    expect(await financeActivityFor(ID.invDriveSystem)).toEqual([]);
     expect(JSON.stringify(rows)).not.toContain('"system"');
     // No member, no money: the system placeholder cannot confirm it either.
     await expect(paymentEvidence.confirmPendingPayment(rows[0].id, ID.biz, 'system')).rejects.toMatchObject({ status: 403 });

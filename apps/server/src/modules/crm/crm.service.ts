@@ -664,12 +664,17 @@ export class CrmService {
         },
       });
 
+      // W3-V1-55c (CR-V155b-1, D-08): the feed's one row for this contact is
+      // ActivityEventListener's 'New contact', from the contact.created emit
+      // below, so this ContactEvent gets no Activity copy (V1-55b's
+      // meta.feedCopy). crm-network.service.ts's referral, which emits no
+      // contact.created, keeps its copy as its only row.
       await this.timeline.logEvent(input.businessId, created.id, 'contact.created', {
         firstName,
         lastName,
         email,
         source: input.source ?? 'manual',
-      }, this.eventActor(_audit), tx);
+      }, { ...this.eventActor(_audit), feedCopy: false }, tx);
 
       return created;
     }).catch((err: unknown) => this.rejectContactIdentityTaken(err, input.businessId, { emailNormalized, phoneNormalized }, input.actorUserId));

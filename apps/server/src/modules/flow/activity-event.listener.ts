@@ -233,9 +233,11 @@ export class ActivityEventListener {
    * invoice.payment_recorded copies. The cockpit shows that copy ('Booking
    * created') beside this row: two rows, as at base, where its DOUBLE_WRITTEN
    * rule already showed the listener/executor pair once. Closing it needs
-   * meta.feedCopy=false on that ContactEvent (bookings.service.ts) or the
-   * reader's MIRRORED_AS_OWN_ROW, both outside V1-55b's write set
-   * (evidence-feed.integration.test.ts V55-12 todo).
+   * meta.feedCopy=false on that ContactEvent (bookings.service.ts), which
+   * reaches CrmTimelineService only through CrmService.logContactEvent ->
+   * CrmTimelineService.logContactEvent, and that forwards no feedCopy yet
+   * (crm-timeline.service.ts, outside W3-V1-55c's write set;
+   * evidence-feed.integration.test.ts V55-12b todo).
    */
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
@@ -333,12 +335,12 @@ export class ActivityEventListener {
   /**
    * V1-55b-FEED-DEDUPE-REST (V55-08): the only crm created row for a new
    * contact (AutomationExecutorService no longer writes 'New contact added').
-   * It is NOT the feed's one row for the contact (CR-V155b-1, residual):
-   * CrmService.createContact also logs a contact.created ContactEvent whose
-   * Activity copy (crm:contact.created:contact) the cockpit shows beside this
-   * row ('Contact created'), as at base. crm-network.service.ts logs the same
-   * ContactEvent for a referral without this bus event, where the copy is the
-   * only row. See onBookingCreated and the V55-12 todo.
+   * Since W3-V1-55c (CR-V155b-1, V55-12) it is also the feed's one row for
+   * the contact: CrmService.createContact logs its contact.created
+   * ContactEvent with meta.feedCopy=false, so no Activity copy
+   * (crm:contact.created:contact) is shown beside it. crm-network.service.ts
+   * logs the same ContactEvent for a referral without this bus event; there
+   * the copy is kept, as the only row. See onBookingCreated.
    */
   @OnEvent('contact.created')
   async onContactCreated(payload: ContactCreatedPayload) {

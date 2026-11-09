@@ -409,6 +409,11 @@ export class RevenuePostingService {
       },
       opts.tx,
     );
+    // W3-V1-55c (owner ruling D-90, on D-08): this is the payment's one feed
+    // row, and it names who recorded the payment, as the CRM
+    // invoice.payment_recorded copy did: KEY is a SYSTEM actor, a person is
+    // USER; with no actor (a provider callback, a service caller) none is named.
+    const recordedBy = opts.createdById ?? null;
     this.timeline.recordEvent({
       businessId: payment.businessId,
       module: 'FINANCE',
@@ -419,6 +424,7 @@ export class RevenuePostingService {
       detail: `Invoice ${payment.invoice?.invoiceNumber ?? payment.invoiceId}`,
       contactId: payment.invoice?.contactId ?? undefined,
       data: { amount: gross, currency: payment.currency, provider: payment.provider },
+      ...(recordedBy ? { actorType: isSystemActor(recordedBy) ? 'SYSTEM' as const : 'USER' as const, actorId: recordedBy } : {}),
       occurredAt: new Date(),
     }).catch(() => {});
     return result;
