@@ -39,18 +39,17 @@
  *   L-01 RED-BEFORE LEDGER: after the retries above, issuing every invoice of the business posts one
  *                   invoice_finalized transaction per key, balanced; a create retried after its invoice
  *                   was issued answers that invoice and posts nothing more
- *   H-01..H-03      TODO the HTTP door: POST .../invoices and .../quotes with an Idempotency-Key header.
- *                   commerce.controller.ts (outside the V1-45 write set) does not forward the header
- *                   to the service yet; see the describe block at the end.
- *   H-04..H-07      TODO (V1-45 review SEC-V45-1, V45-CR-1, SEC-V45-2) what the packet that wires the
- *                   door must also hold: the browser's CORS preflight allows the Idempotency-Key
- *                   header (app-bootstrap.ts allowedHeaders lists only Content-Type, Authorization and
- *                   x-business-id today); a replay writes no second invoice_created audit row; a replay
- *                   at the plan's invoice limit answers the existing invoice, not PlanLimitGuard's 403;
- *                   the quote create route is audited once per quote. All outside the V1-45 write set.
+ *   H-01..H-08      V1-45b-CREATE-IDEMPOTENCY-HTTP (V1-45 review SEC-V45-1, V45-CR-1, SEC-V45-2,
+ *                   SEC-V45-3): the HTTP door. POST .../invoices and .../quotes forward the
+ *                   Idempotency-Key header (H-01..H-03); the browser's CORS preflight allows it (H-04);
+ *                   a replay writes no second team audit row (H-05, H-07: the quote route is audited
+ *                   like the invoice route); a replay at the plan's invoice limit answers the existing
+ *                   invoice, not PlanLimitGuard's 403 (H-06); another member of the business presenting
+ *                   the same key and body is a 409, never the first member's document (H-08). See the
+ *                   describe block at the end.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
- * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed), CommerceService,
+ * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed per business), TeamAuditInterceptor, CommerceService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService and
  * ChartOfAccountsSeederService write real rows, and the production
  * GlobalHttpExceptionFilter + ValidationPipe are installed. Identity
@@ -90,6 +89,15 @@ const ID = {
   contactC: `${P}contactC`,
   contactC2: `${P}contactC2`,
   contactQ: `${P}contactQ`,
+  // V1-45b: the HTTP door (H-01..H-08).
+  member: `${P}member`, // H-08: a STAFF member of bizH with revenue:write
+  bizH: `${P}bizH`, // H-01..H-05, H-07, H-08 (ACCRUAL, so the H-01 issue posts)
+  bizH2: `${P}bizH2`, // H-01: another tenant with the same key
+  bizL: `${P}bizL`, // H-06: at the plan's invoice limit
+  contactH: `${P}contactH`,
+  contactH2: `${P}contactH2`,
+  contactHB: `${P}contactHB`,
+  contactL: `${P}contactL`,
 };
 
 /** The client keys. One string is reused across tenants on purpose (I-04). */
@@ -103,10 +111,29 @@ const KEY = {
   late: `${P}late-0b77`,
 };
 
+/** V1-45b: the keys the HTTP door cases send in the Idempotency-Key header. */
+const HKEY = {
+  http: `${P}h-http-3a91`,
+  conflict: `${P}h-conflict-77c2`,
+  quote: `${P}h-quote-0d4e`,
+  audit: `${P}h-audit-5b18`,
+  auditBurst: `${P}h-audit-burst-c3f7`,
+  quoteAudit: `${P}h-quote-audit-91aa`,
+  limit: `${P}h-limit-e20b`,
+  limitNew: `${P}h-limit-new-6d35`,
+  member: `${P}h-member-a7c0`,
+  memberOwn: `${P}h-member-own-4f19`,
+};
+
+/** V1-45b (H-06): the businesses whose stubbed plan answers that the invoice limit is reached. */
+const planLimited = new Set<string>();
+
 let db: any;
 let app: any;
 let redis: any;
 let commerce: any;
+/** V1-45b (H-04): a second app configured by the production bootstrap (configureNestApp), for the CORS preflight. */
+let corsApp: any;
 
 const emitted: Array<{ name: string; payload: any }> = [];
 const eventStub = {
@@ -270,7 +297,13 @@ beforeAll(async () => {
       { provide: CrmService, useValue: { logContactEvent: async () => null } },
       { provide: EvidenceService, useValue: {} },
       { provide: TaskAssignmentService, useValue: {} },
-      { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
+      {
+        provide: SubscriptionsService,
+        useValue: {
+          checkLimit: async (businessId: string) =>
+            planLimited.has(businessId) ? { allowed: false, current: 1, limit: 1, upgradeTo: 'PRO' } : { allowed: true },
+        },
+      },
       { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
       { provide: CatalogService, useValue: {} },
       { provide: PublicEventsService, useValue: {} },
@@ -323,11 +356,33 @@ beforeAll(async () => {
     }
     if (basis === 'ACCRUAL') await coa.ensureDefaults(biz);
   }
+
+  // V1-45b: the HTTP door's businesses, and a second member of bizH (H-08).
+  const httpBusinesses: Array<[string, string[], 'ACCRUAL' | 'CASH']> = [
+    [ID.bizH, [ID.contactH, ID.contactH2], 'ACCRUAL'],
+    [ID.bizH2, [ID.contactHB], 'CASH'],
+    [ID.bizL, [ID.contactL], 'CASH'],
+  ];
+  for (const [biz, contacts, basis] of httpBusinesses) {
+    await db.business.create({
+      data: { id: biz, name: `V45A ${biz}`, slug: biz, ownerId: ID.owner, currency: 'TTD', accountingBasis: basis },
+    });
+    await db.membership.create({ data: { id: `${biz}_m_owner`, userId: ID.owner, businessId: biz, role: 'OWNER' } });
+    for (const contact of contacts) {
+      await db.contact.create({ data: { id: contact, businessId: biz, firstName: 'V45A', lastName: biz, email: `${P}${contact.slice(P.length)}@test.local` } });
+    }
+    if (basis === 'ACCRUAL') await coa.ensureDefaults(biz);
+  }
+  await db.user.create({ data: { id: ID.member, email: `${P}member@test.local`, role: 'USER' } });
+  await db.membership.create({
+    data: { id: `${ID.bizH}_m_member`, userId: ID.member, businessId: ID.bizH, role: 'STAFF', permissionScopes: { revenue: 'write' } },
+  });
 }, 180_000);
 
 afterAll(async () => {
   vi.restoreAllMocks();
   if (db) await cleanup();
+  if (corsApp) await corsApp.close();
   if (app) await app.close();
   if (redis) redis.disconnect();
 }, 60_000);
@@ -501,30 +556,228 @@ describe('V1-45 create idempotency — ledger', () => {
   }, 60_000);
 });
 
-// The HTTP door is outside the V1-45 write set. CommerceController.createInvoice
-// and .createQuote forward only the DTO's declared fields to the service, so the
-// Idempotency-Key header never reaches it; the claim above is live for every
-// caller that passes `idempotencyKey`, but the routes need two handler lines
-// each: read `req.headers['idempotency-key']` (as SiteController's
-// checkoutIdempotencyKey does) and forward it as `idempotencyKey`. These cases
-// ran red before and after this packet's service change (tests-first commit
-// 22a378b6 holds their bodies) and wait on a packet that releases
-// commerce.controller.ts.
-describe('V1-45 create idempotency — the HTTP door (Idempotency-Key header, D-15)', () => {
-  it.todo('H-01 RED-BEFORE: POST invoices twice with one Idempotency-Key answers one invoice (201, same id and number, one row) — needs commerce.controller.ts, outside the V1-45 write set');
-  it.todo('H-02 RED-BEFORE: POST invoices with a used Idempotency-Key and a different body is a 409 idempotency_key_reused, nothing written — needs commerce.controller.ts, outside the V1-45 write set');
-  it.todo('H-03 RED-BEFORE: POST quotes twice with one Idempotency-Key answers one quote (201, same id, one row) — needs commerce.controller.ts, outside the V1-45 write set');
-  // V1-45 review (SEC-V45-1, V45-CR-1): supertest sends no preflight, so H-01..H-03
-  // can pass while a browser still fails. The web app calls the API cross-origin
-  // and the CORS allowedHeaders in app-bootstrap.ts (and the public-route
-  // middleware's list) omit Idempotency-Key: OPTIONS with
-  // Access-Control-Request-Headers 'authorization,content-type,idempotency-key'
-  // answers Access-Control-Allow-Headers 'Content-Type,Authorization,x-business-id'.
-  // Probe: configureNestApp(app), then OPTIONS the route with an Origin header.
-  it.todo('H-04 RED-BEFORE: the CORS preflight for POST invoices and POST quotes from the web origin allows the Idempotency-Key request header — needs app-bootstrap.ts allowedHeaders, outside the V1-45 write set');
-  // V1-45 review (SEC-V45-2): the door's guards and interceptor run before and
-  // after the service, so a replay is still seen as a new create there.
-  it.todo('H-05 RED-BEFORE: a replayed POST invoices (same Idempotency-Key and body) writes no second invoice_created team audit row — needs commerce.controller.ts / TeamAuditInterceptor, outside the V1-45 write set');
-  it.todo('H-06 RED-BEFORE: a replayed POST invoices at the plan\'s invoice limit answers the existing invoice (same id), not PlanLimitGuard\'s 403 — needs commerce.controller.ts / PlanLimitGuard, outside the V1-45 write set');
-  it.todo('H-07 RED-BEFORE: POST quotes writes one quote_created team audit row and a replay writes none (the route has no audit today) — needs commerce.controller.ts, outside the V1-45 write set');
+// V1-45b-CREATE-IDEMPOTENCY-HTTP: the HTTP door. CommerceController.createInvoice
+// and .createQuote read the Idempotency-Key header (as SiteController's
+// checkoutIdempotencyKey does) and forward it, with the acting member, to the
+// claim above. At the base (int/trial-O 9f09d6c8) the routes forwarded only
+// the DTO's declared fields, so the header never reached the service
+// (SEC-V45-2), the browser's preflight refused it (SEC-V45-1 / V45-CR-1), the
+// door's audit and plan guard saw a replay as a new create, and the quote
+// route had no audit at all.
+
+const idempotencyHeader = 'Idempotency-Key';
+
+function httpInvoiceBody(contactId: string, extra: Record<string, unknown> = {}) {
+  return { contactId, items, currency: 'TTD', notes: 'v45a http invoice', ...extra };
+}
+function httpQuoteBody(contactId: string, extra: Record<string, unknown> = {}) {
+  return { contactId, items, currency: 'TTD', notes: 'v45a http quote', ...extra };
+}
+
+function postInvoice(businessId: string, body: Record<string, unknown>, opts: { key?: string; user?: string } = {}) {
+  const req = agent().post(`/commerce/businesses/${businessId}/invoices`).set(HEADER, opts.user ?? ID.owner);
+  return (opts.key === undefined ? req : req.set(idempotencyHeader, opts.key)).send(body);
+}
+function postQuote(businessId: string, body: Record<string, unknown>, opts: { key?: string; user?: string } = {}) {
+  const req = agent().post(`/commerce/businesses/${businessId}/quotes`).set(HEADER, opts.user ?? ID.owner);
+  return (opts.key === undefined ? req : req.set(idempotencyHeader, opts.key)).send(body);
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function auditRows(businessId: string, action: string, entityId: string): Promise<Array<{ user_id: string; entity_type: string | null }>> {
+  return db.$queryRawUnsafe(
+    'SELECT user_id, entity_type FROM team_activity_logs WHERE business_id = $1 AND action = $2 AND entity_id = $3',
+    businessId,
+    action,
+    entityId,
+  );
+}
+
+/**
+ * The audit rows of one entity once the interceptor's write has landed. The
+ * interceptor writes after the response, so wait for the first row, then long
+ * enough for a late second one to show.
+ */
+async function settledAuditRows(businessId: string, action: string, entityId: string) {
+  const deadline = Date.now() + 5_000;
+  while ((await auditRows(businessId, action, entityId)).length === 0 && Date.now() < deadline) await sleep(50);
+  await sleep(500);
+  return auditRows(businessId, action, entityId);
+}
+
+describe('V1-45b create idempotency — the HTTP door (Idempotency-Key header, D-15)', () => {
+  it('H-01 RED-BEFORE: POST invoices twice with one Idempotency-Key answers one invoice; issued, a late replay posts nothing more; another tenant is independent', async () => {
+    const before = (await invoiceRows(ID.bizH)).length;
+    const first = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH), { key: HKEY.http });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const retry = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH), { key: HKEY.http });
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.id, 'a retried POST answers the invoice the first one created').toBe(first.body.id);
+    expect(retry.body.invoiceNumber).toBe(first.body.invoiceNumber);
+    expect((await invoiceRows(ID.bizH)).length).toBe(before + 1);
+    const keys = (await keyRows(ID.bizH)).filter((k) => k.idempotency_key === `commerce.invoice.create:${HKEY.http}`);
+    expect(keys).toHaveLength(1);
+    expect(keys[0].status).toBe('completed');
+    expect(keys[0].response).toMatchObject({ invoiceId: first.body.id });
+
+    // Issued (ACCRUAL: one invoice_finalized posting), then replayed once more.
+    expect((await issue(ID.bizH, first.body.id)).status).toBe(200);
+    const late = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH), { key: HKEY.http });
+    expect(late.status).toBe(201);
+    expect(late.body.id).toBe(first.body.id);
+    expect(late.body.status).toBe('SENT');
+    await expectPostedOnce(first.body.id);
+    expect((await invoiceRows(ID.bizH)).length).toBe(before + 1);
+
+    // The same key in another tenant is that tenant's own create.
+    const other = await postInvoice(ID.bizH2, httpInvoiceBody(ID.contactHB), { key: HKEY.http });
+    expect(other.status, JSON.stringify(other.body)).toBe(201);
+    expect(other.body.id).not.toBe(first.body.id);
+    expect(other.body.businessId).toBe(ID.bizH2);
+    const otherRetry = await postInvoice(ID.bizH2, httpInvoiceBody(ID.contactHB), { key: HKEY.http });
+    expect(otherRetry.body.id).toBe(other.body.id);
+    expect((await invoiceRows(ID.bizH2)).map((r) => r.id)).toEqual([other.body.id]);
+  }, 60_000);
+
+  it('H-02 RED-BEFORE: POST invoices with a used Idempotency-Key and a different body is a 409 idempotency_key_reused; nothing is written', async () => {
+    const first = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-02' }), { key: HKEY.conflict });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const before = (await invoiceRows(ID.bizH)).length;
+    for (const extra of [{ notes: 'v45a h-02 another' }, { items: otherItems, notes: 'v45a h-02' }, { contactId: ID.contactH2, notes: 'v45a h-02' }]) {
+      const reused = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, extra), { key: HKEY.conflict });
+      expect(reused.status, `variant ${JSON.stringify(extra)}: ${JSON.stringify(reused.body)}`).toBe(409);
+      expect(JSON.stringify(reused.body)).toContain('idempotency_key_reused');
+    }
+    expect((await invoiceRows(ID.bizH)).length).toBe(before);
+  });
+
+  it('H-03 RED-BEFORE: POST quotes twice with one Idempotency-Key answers one quote; a different body is a 409', async () => {
+    const before = (await quoteRows(ID.bizH)).length;
+    const first = await postQuote(ID.bizH, httpQuoteBody(ID.contactH), { key: HKEY.quote });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const retry = await postQuote(ID.bizH, httpQuoteBody(ID.contactH), { key: HKEY.quote });
+    expect(retry.status, JSON.stringify(retry.body)).toBe(201);
+    expect(retry.body.id).toBe(first.body.id);
+    expect(retry.body.quoteNumber).toBe(first.body.quoteNumber);
+    expect((await quoteRows(ID.bizH)).length).toBe(before + 1);
+
+    const reused = await postQuote(ID.bizH, httpQuoteBody(ID.contactH, { items: otherItems }), { key: HKEY.quote });
+    expect(reused.status).toBe(409);
+    expect(JSON.stringify(reused.body)).toContain('idempotency_key_reused');
+    expect((await quoteRows(ID.bizH)).length).toBe(before + 1);
+  });
+
+  // Probe (V1-45 review): configureNestApp(app), then OPTIONS the route with an Origin header.
+  it('H-04 RED-BEFORE: the CORS preflight for POST invoices and POST quotes allows the Idempotency-Key request header (and the public-route list names it)', async () => {
+    const { Test } = await import('@nestjs/testing');
+    const { configureNestApp } = await import('../src/app-bootstrap');
+    const bare = await Test.createTestingModule({}).compile();
+    corsApp = bare.createNestApplication();
+    configureNestApp(corsApp);
+    await corsApp.init();
+
+    for (const route of [`/commerce/businesses/${ID.bizH}/invoices`, `/commerce/businesses/${ID.bizH}/quotes`]) {
+      const preflight = await request(corsApp.getHttpServer())
+        .options(route)
+        .set('Origin', 'http://localhost:3000')
+        .set('Access-Control-Request-Method', 'POST')
+        .set('Access-Control-Request-Headers', 'authorization,content-type,idempotency-key');
+      expect(preflight.status, route).toBe(204);
+      const allowed = String(preflight.headers['access-control-allow-headers'] ?? '').toLowerCase().split(/\s*,\s*/);
+      expect(allowed, `${route} preflight allows`).toContain('idempotency-key');
+      expect(allowed).toEqual(expect.arrayContaining(['content-type', 'authorization', 'x-business-id']));
+    }
+
+    // The public widget routes (storefront checkout reads the header too) answer with their own list.
+    const publicRoute = await request(corsApp.getHttpServer()).get('/widgets/v45a-probe').set('Origin', 'https://shop.example');
+    const publicAllowed = String(publicRoute.headers['access-control-allow-headers'] ?? '').toLowerCase().split(/\s*,\s*/);
+    expect(publicAllowed).toContain('idempotency-key');
+  });
+
+  it('H-05 RED-BEFORE: a replayed POST invoices writes no second invoice_created team audit row; a concurrent burst writes one', async () => {
+    const first = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-05' }), { key: HKEY.audit });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const rows = await settledAuditRows(ID.bizH, 'invoice_created', first.body.id);
+    expect(rows.map((r) => [r.user_id, r.entity_type])).toEqual([[ID.owner, 'invoice']]);
+
+    const replay = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-05' }), { key: HKEY.audit });
+    expect(replay.body.id).toBe(first.body.id);
+    expect(await settledAuditRows(ID.bizH, 'invoice_created', first.body.id), 'a replay is not audited again').toHaveLength(1);
+
+    const burst = await Promise.all(
+      Array.from({ length: 3 }, () => postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-05 burst' }), { key: HKEY.auditBurst })),
+    );
+    expect(burst.map((r) => r.status)).toEqual([201, 201, 201]);
+    const ids = new Set(burst.map((r) => r.body.id));
+    expect(ids.size, 'one invoice for the key').toBe(1);
+    expect(await settledAuditRows(ID.bizH, 'invoice_created', [...ids][0] as string), 'one audit row for the burst').toHaveLength(1);
+  }, 60_000);
+
+  it("H-06 RED-BEFORE: a replayed POST invoices at the plan's invoice limit answers the existing invoice, not PlanLimitGuard's 403; a new create is still refused", async () => {
+    const first = await postInvoice(ID.bizL, httpInvoiceBody(ID.contactL), { key: HKEY.limit });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    planLimited.add(ID.bizL);
+    try {
+      const replay = await postInvoice(ID.bizL, httpInvoiceBody(ID.contactL), { key: HKEY.limit });
+      expect(replay.status, JSON.stringify(replay.body)).toBe(201);
+      expect(replay.body.id).toBe(first.body.id);
+
+      const fresh = await postInvoice(ID.bizL, httpInvoiceBody(ID.contactL), { key: HKEY.limitNew });
+      expect(fresh.status).toBe(403);
+      expect(JSON.stringify(fresh.body)).toContain('PLAN_LIMIT_REACHED');
+      const unkeyed = await postInvoice(ID.bizL, httpInvoiceBody(ID.contactL));
+      expect(unkeyed.status).toBe(403);
+      expect(JSON.stringify(unkeyed.body)).toContain('PLAN_LIMIT_REACHED');
+      // The used key with another body creates nothing either.
+      const reused = await postInvoice(ID.bizL, httpInvoiceBody(ID.contactL, { notes: 'v45a h-06 other' }), { key: HKEY.limit });
+      expect(reused.status).toBe(409);
+
+      expect((await invoiceRows(ID.bizL)).map((r) => r.id)).toEqual([first.body.id]);
+      expect((await keyRows(ID.bizL)).map((k) => k.idempotency_key)).toEqual([`commerce.invoice.create:${HKEY.limit}`]);
+    } finally {
+      planLimited.delete(ID.bizL);
+    }
+  });
+
+  it('H-07 RED-BEFORE: POST quotes writes one quote_created team audit row and a replay writes none', async () => {
+    const first = await postQuote(ID.bizH, httpQuoteBody(ID.contactH, { notes: 'v45a h-07' }), { key: HKEY.quoteAudit });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    const rows = await settledAuditRows(ID.bizH, 'quote_created', first.body.id);
+    expect(rows.map((r) => [r.user_id, r.entity_type])).toEqual([[ID.owner, 'quote']]);
+
+    const replay = await postQuote(ID.bizH, httpQuoteBody(ID.contactH, { notes: 'v45a h-07' }), { key: HKEY.quoteAudit });
+    expect(replay.status).toBe(201);
+    expect(replay.body.id).toBe(first.body.id);
+    expect(await settledAuditRows(ID.bizH, 'quote_created', first.body.id)).toHaveLength(1);
+  }, 30_000);
+
+  it("H-08 RED-BEFORE (SEC-V45-3): another member presenting the same key and body is a 409, never the first member's document", async () => {
+    // The member can create: their own key answers their own invoice.
+    const own = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-08 member' }), { key: HKEY.memberOwn, user: ID.member });
+    expect(own.status, JSON.stringify(own.body)).toBe(201);
+
+    const ownerDoc = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-08' }), { key: HKEY.member });
+    expect(ownerDoc.status, JSON.stringify(ownerDoc.body)).toBe(201);
+    const before = (await invoiceRows(ID.bizH)).length;
+
+    const memberTry = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-08' }), { key: HKEY.member, user: ID.member });
+    expect(memberTry.status, JSON.stringify(memberTry.body)).toBe(409);
+    expect(JSON.stringify(memberTry.body)).toContain('idempotency_key_reused');
+    expect(JSON.stringify(memberTry.body)).not.toContain(ownerDoc.body.id);
+    expect((await invoiceRows(ID.bizH)).length).toBe(before);
+
+    // The owner's retry still answers the owner's invoice; the member's own retry answers theirs.
+    const ownerRetry = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-08' }), { key: HKEY.member });
+    expect(ownerRetry.body.id).toBe(ownerDoc.body.id);
+    const ownRetry = await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-08 member' }), { key: HKEY.memberOwn, user: ID.member });
+    expect(ownRetry.body.id).toBe(own.body.id);
+
+    // The same for quotes.
+    const ownerQuote = await postQuote(ID.bizH, httpQuoteBody(ID.contactH, { notes: 'v45a h-08' }), { key: HKEY.member });
+    expect(ownerQuote.status, JSON.stringify(ownerQuote.body)).toBe(201);
+    const memberQuote = await postQuote(ID.bizH, httpQuoteBody(ID.contactH, { notes: 'v45a h-08' }), { key: HKEY.member, user: ID.member });
+    expect(memberQuote.status).toBe(409);
+    expect(JSON.stringify(memberQuote.body)).not.toContain(ownerQuote.body.id);
+  });
 });
