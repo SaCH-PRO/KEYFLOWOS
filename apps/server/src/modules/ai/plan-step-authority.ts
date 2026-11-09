@@ -87,7 +87,9 @@ export interface PlanStepRunOptions {
 /**
  * planStepRunRefusal's answer and the member it judged: the plan's stored member (`AiPlan.userId`),
  * null for a plan with no member or not of `businessId`. A caller that runs the step as that member
- * (W4-PROPOSAL-PRINCIPAL) takes both from this one read of the plan.
+ * (W4-PROPOSAL-PRINCIPAL) takes both from this one read of the plan, and `principalId`: the member
+ * the dispatcher may take as the run's principal (memberIsPrincipal only; memberToolRunAuthority
+ * says when), null when the step runs with no principal.
  */
 export async function planStepRunAuthority(
   prisma: PrismaService,
@@ -95,29 +97,57 @@ export async function planStepRunAuthority(
   planId: string,
   toolName: string,
   options: PlanStepRunOptions = {},
-): Promise<{ memberId: string | null; refusal: string | null }> {
+): Promise<{ memberId: string | null; principalId: string | null; refusal: string | null }> {
   const plan = await prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: { userId: true } });
-  if (!plan) return { memberId: null, refusal: 'Plan not found in this business' };
-  if (!plan.userId) return { memberId: null, refusal: noMemberToolRefusal(toolName) };
+  if (!plan) return { memberId: null, principalId: null, refusal: 'Plan not found in this business' };
+  if (!plan.userId) return { memberId: null, principalId: null, refusal: noMemberToolRefusal(toolName) };
   const memberId = plan.userId;
-  // The business owner by Business.ownerId, the arm IdentityService.assertBusinessOwner admits beside
-  // the OWNER membership, holds every module (D-71), as the OWNER membership does below.
+  const run = await memberToolRunAuthority(prisma, businessId, memberId, toolName, { asPrincipal: !!options.memberIsPrincipal });
+  return { memberId, principalId: run.principal ? memberId : null, refusal: run.refusal };
+}
+
+/**
+ * Why `memberId` may not run `toolName` in `businessId` now, or null when they may, and whether the
+ * dispatcher may take them as the run's principal. The rule the plan queue applies to a plan's member
+ * (planStepRunAuthority), shared with KeyCortexActionExecutorPlugin for the member an approved
+ * proposal that is no plan step runs for (W4-PROPOSAL-PRINCIPAL review SEC-W4PP-2):
+ *   - the business owner by Business.ownerId, the arm IdentityService.assertBusinessOwner admits beside
+ *     the OWNER membership, holds every module (D-71), as the OWNER membership does, but a tool the
+ *     authority map never runs (execute_custom_logic) is refused to the owner too (KEY-R3b review
+ *     SEC-R3b-2). Review CR-W4PP-2: that owner is a principal only with a membership row. The
+ *     dispatcher's CRM reads resolve the principal's access (resolveCrmAccess), which refuses a
+ *     non-member, so an owner by Business.ownerId alone runs with no principal: the whole book, which
+ *     is the owner's own view, as the plan queue runs their steps;
+ *   - any other member: assertMayRunGraphAction with the member as the caller, either with no
+ *     principal (`asPrincipal` false: the rule POST ai/plans/:planId/approve applies, so a contact read
+ *     no visibility clause bounds is the OWNER's only) or as the principal (`asPrincipal`: the rule
+ *     POST .../execute applies to its caller); module scopes (D-71), the CRM sub-permission, D-46 for a
+ *     SUPER_ADMIN who is not a member.
+ */
+export async function memberToolRunAuthority(
+  prisma: PrismaService,
+  businessId: string,
+  memberId: string,
+  toolName: string,
+  options: { asPrincipal?: boolean } = {},
+): Promise<{ refusal: string | null; principal: boolean }> {
   const owned = await prisma.client.business.findFirst({ where: { id: businessId, ownerId: memberId }, select: { id: true } });
   if (owned) {
     const requirement = graphActionRequirement(toolName);
-    return {
-      memberId,
-      refusal: requirement && 'refused' in requirement ? `Tool "${toolName}" is not executed for a KEY plan, whoever asks: ${requirement.refused}` : null,
-    };
+    const refusal = requirement && 'refused' in requirement ? `Tool "${toolName}" is not executed for a KEY plan, whoever asks: ${requirement.refused}` : null;
+    const membership = options.asPrincipal
+      ? await prisma.client.membership.findUnique({ where: { userId_businessId: { userId: memberId, businessId } }, select: { id: true } })
+      : null;
+    return { refusal, principal: !!membership };
   }
   const user = await prisma.client.user.findUnique({ where: { id: memberId }, select: { role: true } });
   try {
     await assertMayRunGraphAction(prisma, businessId, { id: memberId, role: user?.role ?? undefined }, toolName, memberId, {
-      noPrincipal: !options.memberIsPrincipal,
+      noPrincipal: !options.asPrincipal,
     });
-    return { memberId, refusal: null };
+    return { refusal: null, principal: !!options.asPrincipal };
   } catch (err) {
-    if (err instanceof ForbiddenException) return { memberId, refusal: err.message };
+    if (err instanceof ForbiddenException) return { refusal: err.message, principal: false };
     throw err;
   }
 }

@@ -21,6 +21,7 @@
  * looks like the tool refusing rather than the wiring being wrong.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { KeyCortexActionExecutorPlugin } from './key-cortex-action-executor.plugin';
 
 class RegistryStub {
@@ -35,24 +36,48 @@ class OrchestratorStub {
   executeToolDirectly = vi.fn(() => Promise.resolve({ via: 'flow' }));
 }
 
+/**
+ * W4-PROPOSAL-PRINCIPAL: the rows the plugin's run authority reads (plan-step-authority): plan_1's
+ * member is user_1, who owns biz_1 and holds its OWNER membership.
+ */
+class PrismaStub {
+  client = {
+    aiPlan: { findFirst: vi.fn(async () => ({ userId: 'user_1' })) },
+    business: { findFirst: vi.fn(async () => ({ id: 'biz_1' })) },
+    membership: { findUnique: vi.fn(async () => ({ id: 'm_1' })) },
+    user: { findUnique: vi.fn(async () => ({ role: 'USER' })) },
+  };
+}
+
 class ModuleRefStub {
-  constructor(private readonly orchestrator: OrchestratorStub) {}
-  get = vi.fn(() => this.orchestrator);
+  constructor(
+    private readonly orchestrator: OrchestratorStub,
+    private readonly prisma: PrismaStub,
+  ) {}
+  get = vi.fn((token: unknown) => (token === PrismaService ? this.prisma : this.orchestrator));
 }
 
 function makePlugin() {
   const cortex = new CortexToolRegistryStub();
   const orchestrator = new OrchestratorStub();
+  const prisma = new PrismaStub();
   const plugin = new KeyCortexActionExecutorPlugin(
     new RegistryStub() as never,
     cortex as never,
-    new ModuleRefStub(orchestrator) as never,
+    new ModuleRefStub(orchestrator, prisma) as never,
   );
-  return { plugin, cortex, orchestrator };
+  return { plugin, cortex, orchestrator, prisma };
 }
 
+/**
+ * A plan step's proposal as PlanExecutorService.createStepProposal files it: the stored plan columns
+ * (W4-PROPOSAL-PRINCIPAL review SEC-W4PP-1: only they make a proposal a plan step's) and the payload.
+ */
 const PLAN_PROPOSAL = {
   userId: 'user_1',
+  sourceType: 'AI_PLAN',
+  planId: 'plan_1',
+  planStepId: 'step_1',
   payload: {
     toolName: 'commerce_create_invoice',
     inputPayload: { contactId: 'c_1', amount: 500 },
@@ -152,5 +177,33 @@ describe('guards', () => {
 
     expect(out.success).toBe(false);
     expect(out.error).toContain('missing payload.toolName');
+  });
+});
+
+describe('W4-PROPOSAL-PRINCIPAL review SEC-W4PP-1: only the stored plan makes a proposal a plan step', () => {
+  it("refuses a payload.planContext naming a plan the proposal was not filed for (no stored planId), whatever its sourceType; nothing dispatched, no plan read", async () => {
+    for (const sourceType of ['AI_PLAN', 'MANUAL']) {
+      const { plugin, orchestrator, prisma } = makePlugin();
+      const forged = {
+        userId: 'user_2',
+        sourceType,
+        payload: { toolName: 'crm_list_contacts', inputPayload: {}, planContext: { planId: 'plan_1', planStepId: 'step_1' } },
+      } as never;
+      const out = await plugin.execute('biz_1', forged, 'user_2');
+      expect(out.success, sourceType).toBe(false);
+      expect(out.error, sourceType).toMatch(/^Refused: .*names a plan it was not filed for/);
+      expect(orchestrator.executeToolDirectly).not.toHaveBeenCalled();
+      expect(prisma.client.aiPlan.findFirst).not.toHaveBeenCalled();
+    }
+  });
+
+  it('forwards the plan as stored, never another key of the payload planContext (an actorUserId the execution log would be attributed to)', async () => {
+    const { plugin, orchestrator } = makePlugin();
+    const proposal = {
+      ...(PLAN_PROPOSAL as object),
+      payload: { toolName: 'commerce_create_invoice', inputPayload: {}, planContext: { planId: 'plan_1', planStepId: 'step_1', actorUserId: 'u_forged', role: 'OWNER' } },
+    } as never;
+    await plugin.execute('biz_1', proposal);
+    expect(orchestrator.executeToolDirectly.mock.calls[0][3]).toEqual({ planId: 'plan_1', planStepId: 'step_1' });
   });
 });

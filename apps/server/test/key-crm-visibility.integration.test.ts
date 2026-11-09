@@ -32,6 +32,11 @@
  * wrote money. It now runs as the plan's member (the principal) under planStepRunRefusal, the rule
  * the plan queue applies, before it dispatches. The plugin is driven as KeyActionExecutorService
  * hands it a claimed proposal, with this suite's real orchestrator and PrismaService.
+ * Review repairs (CV-13d..CV-13f): only the stored AiPlan id (a column the HTTP route cannot set)
+ * names a proposal's member, and a payload.planContext naming a plan the proposal was not filed for
+ * is refused (SEC-W4PP-1, CR-W4PP-1); a flow-tool proposal that is no plan step runs only if the
+ * member it runs for may run the tool with no principal (SEC-W4PP-2); a plan of the owner by
+ * Business.ownerId alone runs with no principal, as the queue runs it (CR-W4PP-2).
  *
  * WHAT IS REAL: PrismaService and the Prisma client against DATABASE_URL; AuthGuard, BusinessGuard,
  * CrmRateLimitGuard and GraphActionsController (POST .../execute: assertMayRunGraphAction, the step
@@ -742,5 +747,119 @@ describe('W4-PROPOSAL-PRINCIPAL (D-73, D-71, D-46, D-37; review SEC-W3CV-3): an 
     const enrol = await runPlanProposal('owner_seq', ID.owner, 'sequence_enroll_overdue', { sequenceId: ID.seqPropOwner }, ID.owner);
     expect(enrol.outcome.success, enrol.outcome.error).toBe(true);
     expect(await enrolledIn(ID.seqPropOwner)).toEqual(ALL);
+  });
+});
+
+describe('W4-PROPOSAL-PRINCIPAL review repairs (SEC-W4PP-1, CR-W4PP-1, SEC-W4PP-2, CR-W4PP-2; D-73, D-71, D-37): only the stored plan names a proposal\'s member, and every other flow-tool proposal runs only for a member who may run the tool', () => {
+  /**
+   * An approved, claimed EXECUTE_TOOL proposal of `businessId` as KeyActionProposalService.execute
+   * hands it to the plugin. POST key-autonomy/businesses/:businessId/actions/proposals stores the
+   * client's sourceType (any of KEY_ACTION_SOURCE_TYPES, AI_PLAN included) and payload verbatim,
+   * with planId and planStepId null: only PlanExecutorService.createStepProposal (and the legacy
+   * approval-item migration) write those columns.
+   */
+  function filed(tag: string, over: Record<string, unknown>, payload: Record<string, unknown>, businessId: string = ID.biz) {
+    return {
+      id: `${P}prop_r_${tag}`,
+      businessId,
+      userId: null,
+      sourceType: 'MANUAL',
+      planId: null,
+      planStepId: null,
+      title: `v89k ${tag}`,
+      actionType: 'EXECUTE_TOOL',
+      status: 'EXECUTING',
+      requiresApproval: true,
+      approvedBy: null,
+      ...over,
+      payload,
+    };
+  }
+
+  async function run(row: Record<string, unknown>, executedBy: string | undefined) {
+    const before = proposalDispatched.length;
+    const outcome = await proposalExecutor.execute(row.businessId, row, executedBy);
+    return { outcome, sent: proposalDispatched.slice(before) };
+  }
+
+  it("CV-13d RED-BEFORE (W4-PROPOSAL-PRINCIPAL review SEC-W4PP-1, CR-W4PP-1; D-73, D-37): an AI_PLAN proposal with no stored planId whose payload.planContext names the OWNER's plan (what the HTTP route files for any member) is refused before dispatch, whoever files, approves and executes it: the STAFF member's crm_list_contacts and fetch_client_health do not run as the OWNER; nothing dispatched, no hidden contact named", async () => {
+    const ownerPlan = `${P}cv13d_owner`;
+    await seedPlan(ownerPlan, ID.owner, 'crm_list_contacts', {}, 'approved');
+    const planContext = { planId: ownerPlan, planStepId: `${ownerPlan}_s1` };
+    for (const [toolName, args] of [['crm_list_contacts', { limit: 50 }], ['fetch_client_health', {}]] as const) {
+      const staff = { userId: ID.staffOwned, approvedBy: ID.staffOwned, sourceType: 'AI_PLAN' };
+      const out = await run(filed(`cv13d_${toolName}`, staff, { toolName, inputPayload: args, planContext }), ID.staffOwned);
+      expect(out.sent, `${toolName} dispatched ${JSON.stringify(out.sent)}`).toEqual([]);
+      expect(out.outcome.success, toolName).toBe(false);
+      expect(String(out.outcome.error), toolName).toMatch(/^Refused: .*names a plan it was not filed for/);
+      expectNoHidden(out.outcome);
+    }
+    // The same forged attribution on a proposal of another source is refused alike: no payload names a plan the proposal was not filed for.
+    const manual = await run(
+      filed('cv13d_manual', { userId: ID.staffOwned, approvedBy: ID.staffOwned }, { toolName: 'crm_list_contacts', inputPayload: { limit: 50 }, planContext }),
+      ID.staffOwned,
+    );
+    expect(manual.sent).toEqual([]);
+    expect(String(manual.outcome.error)).toMatch(/^Refused: .*names a plan it was not filed for/);
+  });
+
+  it("CV-13e RED-BEFORE (W4-PROPOSAL-PRINCIPAL review SEC-W4PP-2; D-37, D-71, D-73): a flow-tool proposal that is no plan step (MANUAL, KEY_CORTEX) runs only if the member it runs for (executor, else approver, else requester) may run the tool with no principal (the approve rule): the STAFF member's self-approved crm_list_contacts and fetch_client_health and the ADMIN's crm_list_contacts are refused before dispatch, as is one with no member; the OWNER's lists the whole book (CONTROL)", async () => {
+    const staff = { userId: ID.staffOwned, approvedBy: ID.staffOwned };
+    for (const [tag, sourceType, toolName, args] of [
+      ['manual_list', 'MANUAL', 'crm_list_contacts', { limit: 50 }],
+      ['cortex_health', 'KEY_CORTEX', 'fetch_client_health', {}],
+    ] as const) {
+      const out = await run(filed(`cv13e_${tag}`, { ...staff, sourceType }, { toolName, inputPayload: args }), ID.staffOwned);
+      expect(out.sent, `${tag} dispatched ${JSON.stringify(out.sent)}`).toEqual([]);
+      expect(out.outcome.success, tag).toBe(false);
+      expect(String(out.outcome.error), tag).toMatch(/^Refused: Tool "(crm_list_contacts|fetch_client_health)" is executed from here only for the business owner/);
+      expectNoHidden(out.outcome);
+    }
+    // The ADMIN, who may not open the OWNER's PRIVATE contact, would read it with no principal.
+    const admin = await run(filed('cv13e_admin', { userId: ID.staffOwned, approvedBy: ID.admin }, { toolName: 'crm_list_contacts', inputPayload: { limit: 50 } }), ID.admin);
+    expect(admin.sent).toEqual([]);
+    expect(String(admin.outcome.error)).toMatch(/^Refused: Tool "crm_list_contacts" is executed from here only for the business owner/);
+    expectNoHidden(admin.outcome);
+    // No member at all (KEY executes, nobody approved or asked): D-73's memberless rule.
+    const none = await run(filed('cv13e_none', {}, { toolName: 'crm_list_contacts', inputPayload: { limit: 50 } }), 'key_ai');
+    expect(none.sent).toEqual([]);
+    expect(String(none.outcome.error)).toMatch(/^Refused: .*reads no contacts \(D-73\)/);
+
+    // CONTROL: the OWNER's proposal runs as before (surface PROPOSAL, no principal), over the whole book.
+    const owner = await run(filed('cv13e_owner', { userId: ID.owner, approvedBy: ID.owner }, { toolName: 'crm_list_contacts', inputPayload: { limit: 50 } }), ID.owner);
+    expect(owner.sent.map((d) => [d.surface, d.principal])).toEqual([['PROPOSAL', undefined]]);
+    expect(owner.outcome.success, owner.outcome.error).toBe(true);
+    expect((owner.outcome.result.contacts as Array<{ id: string }>).map((c) => c.id).sort()).toEqual(ALL);
+  });
+
+  it("CV-13f RED-BEFORE (W4-PROPOSAL-PRINCIPAL review CR-W4PP-2; D-71, D-73): a plan whose member owns the business by Business.ownerId alone (no membership row) runs its crm_list_contacts step proposal as the plan queue runs it: admitted by planStepRunRefusal and dispatched with no principal (the owner's view is the whole book), not refused 'Not a member of this business'; that owner's own MANUAL proposal runs alike", async () => {
+    const ownerC = `${P}owner_c`;
+    const bizC = `${P}biz_c`;
+    const planC = `${P}cv13f_plan`;
+    await db.user.create({ data: { id: ownerC, email: `${P}owner_c@test.local`, role: 'USER' } });
+    await db.business.create({ data: { id: bizC, name: 'V89K Biz C', ownerId: ownerC } });
+    await db.contact.create({ data: { id: `${P}c_c`, businessId: bizC, firstName: 'V89KC', lastName: 'V89K', email: `${P}c_c@test.local`, status: 'LEAD' } });
+    await db.aiPlan.create({
+      data: {
+        id: planC, businessId: bizC, userId: ownerC, objective: 'v89k cv13f', status: 'approved',
+        steps: { create: [{ id: `${planC}_s1`, order: 1, toolName: 'crm_list_contacts', action: 'crm_list_contacts', module: 'ai', status: 'pending', inputPayload: {} }] },
+      },
+    });
+    const { planStepRunRefusal } = await import('../src/modules/ai/plan-step-authority');
+    expect(await planStepRunRefusal(prisma, bizC, planC, 'crm_list_contacts')).toBeNull();
+
+    const step = await run(
+      filed('cv13f_plan', { sourceType: 'AI_PLAN', planId: planC, planStepId: `${planC}_s1`, approvedBy: ownerC }, {
+        toolName: 'crm_list_contacts', inputPayload: { limit: 50 }, planContext: { planId: planC, planStepId: `${planC}_s1` },
+      }, bizC),
+      ownerC,
+    );
+    expect(step.sent.map((d) => [d.surface, d.principal, d.planStepId])).toEqual([['PROPOSAL', undefined, `${planC}_s1`]]);
+    expect(step.outcome.success, step.outcome.error).toBe(true);
+    expect((step.outcome.result.contacts as Array<{ id: string }>).map((c) => c.id)).toEqual([`${P}c_c`]);
+
+    const manual = await run(filed('cv13f_manual', { userId: ownerC, approvedBy: ownerC }, { toolName: 'crm_list_contacts', inputPayload: { limit: 50 } }, bizC), ownerC);
+    expect(manual.outcome.success, manual.outcome.error).toBe(true);
+    expect((manual.outcome.result.contacts as Array<{ id: string }>).map((c) => c.id)).toEqual([`${P}c_c`]);
   });
 });

@@ -84,6 +84,11 @@
  *                   no member created (SYSTEM_PLAN_ACTOR) keeps the OWNER's view.
  *            KEY-04 an approved proposal (PROPOSAL) runs for its executor, else
  *                   its approver, else its requester.
+ *            KEY-04b (W4-PROPOSAL-PRINCIPAL review SEC-W4PP-1, CR-W4PP-1) a
+ *                   proposal's payload never chooses the member it runs as: an
+ *                   AI_PLAN proposal with no stored planId whose payload names
+ *                   the OWNER's plan is refused before dispatch (RED-BEFORE: it
+ *                   ran as the OWNER and bound the PRIVATE contact).
  *            KEY-05 an execute_custom_logic snippet's api.callTool (CUSTOM_LOGIC)
  *                   runs for the member whose turn ran the snippet.
  *            KEY-06 a KEY-cortex turn's bridged flow tool (CORTEX_BRIDGE) runs
@@ -451,7 +456,8 @@ beforeAll(async () => {
   });
   // Review SEC-W3D64-3a / CR-D64C-2: the real approved-proposal executor and efferent bridge over
   // the same dispatcher (resolved through ModuleRef, as both resolve FlowOrchestratorService).
-  const dispatcherRef = { get: () => dispatcher };
+  // W4-PROPOSAL-PRINCIPAL: the plugin also resolves PrismaService (the run authority it reads), as in the app.
+  const dispatcherRef = { get: (token: unknown) => (token === PrismaService ? moduleRef.get(PrismaService) : dispatcher) };
   proposalExecutor = new KeyCortexActionExecutorPlugin({ register: () => undefined } as any, {} as any, dispatcherRef as any);
   efferentBridge = new KeyCortexEfferentBridgeService({ register: () => undefined } as any, dispatcherRef as any);
 
@@ -954,6 +960,24 @@ describe('KEY acts as the member (D-88): KEY commerce commands apply D-64 to the
     const owner = await proposalExecutor.execute(ID.bizA, proposal('key04_owner', 'commerce_create_invoice', { contactId: ID.cPriv, items: KEY_ITEMS }, { approvedBy: ID.owner }), ID.owner);
     expect(owner.success, owner.error).toBe(true);
     expect((await db.invoice.findUnique({ where: { id: (owner.result as any).id } })).contactId).toBe(ID.cPriv);
+  });
+
+  it("KEY-04b (W4-PROPOSAL-PRINCIPAL review SEC-W4PP-1, CR-W4PP-1; D-64, D-88, D-73) an AI_PLAN proposal with no stored planId whose payload.planContext names the OWNER's plan (what POST .../actions/proposals files for any member) is refused before dispatch, whoever executes it: the STAFF member's and the ADMIN's commerce_create_invoice on the PRIVATE contact write nothing", async () => {
+    const ownerPlan = await seedPlan('key04b_owner', ID.owner, [['commerce_create_invoice', { contactId: ID.cPriv, items: KEY_ITEMS }]]);
+    const forged = (tag: string, who: { userId?: string; approvedBy?: string }) => {
+      const row = proposal(tag, 'commerce_create_invoice', { contactId: ID.cPriv, items: KEY_ITEMS }, who);
+      return { ...row, sourceType: 'AI_PLAN', planId: null, planStepId: null, payload: { ...row.payload, planContext: { planId: ownerPlan.planId, planStepId: ownerPlan.steps[0].id } } };
+    };
+    const before = await documentCounts();
+    for (const [label, row, executedBy] of [
+      ['filed, approved and executed by the STAFF member', forged('key04b_staff', { userId: ID.staff, approvedBy: ID.staff }), ID.staff],
+      ['executed by the ADMIN', forged('key04b_admin', { approvedBy: ID.admin }), ID.admin],
+    ] as const) {
+      const outcome = await proposalExecutor.execute(ID.bizA, row, executedBy);
+      expect(outcome.success, label).toBe(false);
+      expect(String(outcome.error), label).toMatch(/^Refused: .*names a plan it was not filed for/);
+    }
+    expect(await documentCounts()).toEqual(before);
   });
 
   it("KEY-05 (D-88; review SEC-W3D64-3b) an execute_custom_logic snippet's api.callTool binds for the member whose chat turn ran it: the STAFF member's inner commerce_create_quote and commerce_create_invoice on the PRIVATE contact are refused 'Contact not found'; the OWNER's bind it", async () => {
