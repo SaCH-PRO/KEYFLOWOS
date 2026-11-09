@@ -93,6 +93,16 @@ const STRIPE_PAYMENT_EVENTS = new Set([
  * its event type. It is not the door's dedupe claim (provider 'stripe').
  */
 const STRIPE_REFUSED_PROVIDER = 'stripe-refused';
+/**
+ * R0-20d (W3-STRIPE-LEGACY-BINDING; R0-20b review SEC-R020B-3): the label the
+ * deprecated POST /webhooks/stripe keeps its refused payment events under.
+ * That route has no binding of its own any more: it hands its verified event
+ * to handleStripeWebhook with this label, so the door's binding is the only
+ * one and each endpoint still keeps its own refusal row for an event.
+ */
+export const STRIPE_LEGACY_REFUSED_PROVIDER = 'stripe-legacy-refused';
+/** R0-20d: the webhook_events provider a refused Stripe payment event is kept under, by endpoint. */
+export type StripeRefusedProvider = typeof STRIPE_REFUSED_PROVIDER | typeof STRIPE_LEGACY_REFUSED_PROVIDER;
 /** R0-20c: the fields of a Stripe session, charge or payment intent the door's binding reads. */
 type StripePaymentObject = {
   metadata?: Record<string, unknown> | null;
@@ -956,6 +966,8 @@ export class PaymentsService {
   async handleStripeWebhook(
     rawPayload: string,
     signatureHeader: string | undefined,
+    /** R0-20d: the legacy POST /webhooks/stripe names its own refusal label; the door's endpoint keeps the default. */
+    opts: { refusedProvider?: StripeRefusedProvider } = {},
   ): Promise<{ ok: true; received?: boolean; processed?: string }> {
     if (!rawPayload) throw new BadRequestException('Missing Stripe webhook payload');
 
@@ -1011,8 +1023,11 @@ export class PaymentsService {
     // R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2): a payment event is bound
     // to the invoice or storefront order it names before the dedupe claim, so a
     // refused one writes nothing (no payment, no posting, no claim). The legacy
-    // POST /webhooks/stripe hands its verified events here too.
-    if (STRIPE_PAYMENT_EVENTS.has(eventType)) await this.bindStripePaymentEvent(event, signedForBusinessId);
+    // POST /webhooks/stripe hands its verified events here too, and since
+    // R0-20d this is its only binding (its refusals keep its own label).
+    if (STRIPE_PAYMENT_EVENTS.has(eventType)) {
+      await this.bindStripePaymentEvent(event, signedForBusinessId, opts.refusedProvider ?? STRIPE_REFUSED_PROVIDER);
+    }
 
     // Provider-event-id idempotency: if Stripe re-delivers this `evt_...`,
     // ack it as received but skip all side-effects. Belt-and-suspenders with
@@ -1082,12 +1097,16 @@ export class PaymentsService {
    * metadata.businessId and carry exactly O's total in O's currency.
    *
    * Anything else is refused (400) before the dedupe claim, so nothing is
-   * written, and the refusal is kept as one webhook_events row. An id that is
-   * neither is left to the dispatch, which records nothing for it.
+   * written, and the refusal is kept as one webhook_events row under
+   * `refusedProvider` (R0-20d: stripe-legacy-refused when the legacy POST
+   * /webhooks/stripe handed the event over; this is that route's only
+   * binding). An id that is neither is left to the dispatch, which records
+   * nothing for it.
    */
   private async bindStripePaymentEvent(
     event: { id?: string; type?: string; data?: { object?: unknown } },
     signedForBusinessId: string | null,
+    refusedProvider: StripeRefusedProvider,
   ): Promise<void> {
     const obj = (event.data?.object ?? {}) as StripePaymentObject;
     const id: unknown = obj.metadata?.invoiceId || obj.client_reference_id || obj.metadata?.invoice_id;
@@ -1103,8 +1122,8 @@ export class PaymentsService {
     });
     if (invoice) {
       // R0-20c review (SEC-R020C-1): a platform-signed event must name the
-      // invoice's business, as the legacy route demands of the same verified
-      // event (webhooks.controller.ts bindLegacyStripeEvent). Every session
+      // invoice's business (the legacy route's copy of this binding demanded
+      // it too; R0-20d removed that copy, both endpoints bind here). Every session
       // KeyFlow makes names it (createStripeCheckout, createStorePayment, a
       // Payment Link's metadata), and Stripe does not copy a session's
       // metadata onto its PaymentIntent or Charge, so one naming no business
@@ -1120,7 +1139,7 @@ export class PaymentsService {
           : !positiveAmount
             ? 'amount'
             : null;
-      if (reason) await this.refuseStripePaymentEvent(event, { kind: 'invoice', id, businessId: invoice.businessId }, reason);
+      if (reason) await this.refuseStripePaymentEvent(event, { kind: 'invoice', id, businessId: invoice.businessId }, reason, refusedProvider);
       return;
     }
 
@@ -1139,21 +1158,22 @@ export class PaymentsService {
             : !positiveAmount || amountMinor !== Math.round(Number(order.total) * 100)
               ? 'amount'
               : null;
-    if (reason) await this.refuseStripePaymentEvent(event, { kind: 'order', id, businessId: order.businessId }, reason);
+    if (reason) await this.refuseStripePaymentEvent(event, { kind: 'order', id, businessId: order.businessId }, reason, refusedProvider);
   }
 
-  /** R0-20c: keeps the refusal (one webhook_events row per event id), then refuses the delivery: 400, nothing recorded. */
+  /** R0-20c: keeps the refusal (one webhook_events row per event id and label), then refuses the delivery: 400, nothing recorded. */
   private async refuseStripePaymentEvent(
     event: { id?: string; type?: string },
     target: { kind: 'invoice' | 'order'; id: string; businessId: string },
     reason: string,
+    refusedProvider: StripeRefusedProvider,
   ): Promise<never> {
     this.logger.warn(`Stripe ${event.type} ${event.id ?? '(no event id)'} refused: its ${reason} does not match ${target.kind} ${target.id}`);
     if (event.id) {
       try {
         await this.prisma.client.webhookEvent.create({
           data: {
-            provider: STRIPE_REFUSED_PROVIDER,
+            provider: refusedProvider,
             providerEventId: event.id,
             eventType: `${event.type}:${reason}`,
             businessId: target.businessId,
