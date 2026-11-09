@@ -1060,6 +1060,12 @@ Raised by the wave-3 (FOLLOW4) packets' recorded residuals. All accepted as reco
 | D-93 | D-73 stands as written: a KEY plan with no member principal reads no contacts (and writes no money or invoices). The Pro Auto monitor and any other system-created plan run with the business owner as their member, so they keep working and their reads are attributed. D-88's "no member uses the OWNER's view" is narrowed to D-88's own writes, which D-73 already refuses to a memberless plan. | W4: plan-step authority, Pro Auto monitor principal, KEY CRM visibility CV-08b/CV-08c. |
 | D-94 | Only the business owner may connect, sync or disconnect Google Analytics and Search Console (as Gmail, GMAIL_OWNER_ONLY); anyone else gets 403. | W4: SEO controller (MW-27). |
 
+### Owner rulings, 2026-11-10 (wave-5 residuals)
+
+| Id | Ruling | Effect on the queue |
+|---|---|---|
+| D-95 | Restoring or permanently deleting a trashed record needs write access to the module the record belongs to (CRM for contacts, accounts and opportunities; revenue for invoices, quotes and recurring invoices; people for staff; marketing for community posts and landing pages); seeing it in the trash needs that module's read access. D-46 still refuses a non-member SUPER_ADMIN. | W6 trash packet (SEC-TL500-3). |
+
 ---
 
 ## (h) Judge dispositions
