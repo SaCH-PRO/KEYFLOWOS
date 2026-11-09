@@ -41,16 +41,23 @@
  *                  100 TTD
  *   DC-07 CONTROL  D-26: a customer cancel after the USD deposit was paid forfeits 25 USD, in the
  *                  deposit's own currency, as before
- *   DC-08 RED      review SEC-A10-1, RED at 11e3e491: a TTD final nets the DRAFT TTD deposit
- *                  (the button finds it again, CONTROL), then the deposit is PATCHed to USD: the
- *                  button answered 201 alreadyExisted naming the USD deposit; it answers 409
- *                  DEPOSIT_CURRENCY_MISMATCH (finalInvoiceId in details), nothing written; once
- *                  the final is voided it nets nothing and the button finds it again
- *   DC-09 RED      review SEC-A10-1, RED at 11e3e491: the button draws the 75 TTD final before
- *                  completion, then the DRAFT final is PATCHed to USD: completion answered
- *                  EXISTING; it answers FAILED / DEPOSIT_CURRENCY_MISMATCH and the button 409,
- *                  nothing written. (The commerce PATCH itself still accepts both switches: a
- *                  follow-up outside this packet's write set.)
+ *   DC-08 RED      W3-A10b (review SEC-A10-1, D-59), RED at ca12b6f5: a TTD final nets the
+ *                  DRAFT TTD deposit (the button finds it again, CONTROL), then the commerce
+ *                  PATCH switches the deposit to USD: it answered 200; it answers 409
+ *                  DEPOSIT_CURRENCY_MISMATCH (both ids and currencies in details), nothing
+ *                  written. CONTROLS: restating TTD on either invoice passes; FOLLOW3-A10's
+ *                  re-check stays (a pair mismatched outside the PATCH: the button 409); a PATCH
+ *                  bringing the pair back to one currency passes; once the final is voided it
+ *                  nets nothing, the deposit may switch and the button finds the final again
+ *   DC-09 RED      W3-A10b (review SEC-A10-1, D-59), RED at ca12b6f5: the button draws the 75
+ *                  TTD final before completion, then the commerce PATCH switches the DRAFT final
+ *                  to USD: it answered 200; it answers 409 DEPOSIT_CURRENCY_MISMATCH, nothing
+ *                  written. CONTROLS: FOLLOW3-A10's re-check stays (a pair mismatched outside the
+ *                  PATCH: completion FAILED / DEPOSIT_CURRENCY_MISMATCH, the button 409, nothing
+ *                  written); a PATCH bringing the pair back to one currency passes
+ *   DC-10 CONTROL  W3-A10b: a currency PATCH on a DRAFT that is neither a netted deposit nor a
+ *                  final that netted one passes: a deposit no final nets yet, an invoice outside
+ *                  any booking, a final drawn after its deposit was voided
  *
  * Nothing on the money path is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard, PublicRateLimitGuard (real Redis at
@@ -208,6 +215,15 @@ async function otherInvoicesOf(bookingId: string): Promise<any[]> {
     include: { items: true },
   });
 }
+
+/** What a refused write must leave as it was: the row's money, status and last write. */
+const invoiceSnapshot = (row: any) => ({
+  status: row.status,
+  currency: row.currency,
+  total: money(row.total),
+  deletedAt: row.deletedAt,
+  updatedAt: row.updatedAt?.toISOString?.() ?? row.updatedAt,
+});
 
 const describeInvoices = (rows: any[]) =>
   rows.map((i) => `${money(i.total)} ${i.currency}${i.deletedAt ? ' (withdrawn)' : ''}: ${i.items.map((x: any) => x.description).join(' | ')}`);
@@ -536,7 +552,7 @@ describe('V1-81 (FOLLOW3-A10, D-59) a final invoice never nets a deposit billed 
     expect({ status: after.status, currency: after.currency }, 'the deposit invoice keeps its status and currency').toEqual({ status: 'PAID', currency: 'USD' });
   });
 
-  it('DC-08 RED-BEFORE (review SEC-A10-1): the DRAFT deposit is PATCHed to USD after a TTD final netted it -> Create invoice answers 409 DEPOSIT_CURRENCY_MISMATCH, not alreadyExisted; nothing written', async () => {
+  it('DC-08 RED-BEFORE (W3-A10b, review SEC-A10-1, D-59): the commerce PATCH refuses to switch a DRAFT deposit a TTD final has netted to USD -> 409 DEPOSIT_CURRENCY_MISMATCH, nothing written; a same-currency PATCH on the pair passes', async () => {
     const b = await book(ID.biz, ID.svc, 'dc08');
     const deposit = await invoiceRow(b.depositInvoiceId);
     expect({ status: deposit.status, currency: deposit.currency }).toEqual({ status: 'DRAFT', currency: 'TTD' });
@@ -551,31 +567,59 @@ describe('V1-81 (FOLLOW3-A10, D-59) a final invoice never nets a deposit billed 
     expect(again.status, JSON.stringify(again.body)).toBe(201);
     expect(again.body).toMatchObject({ invoiceId: finalId, alreadyExisted: true, amount: 75, depositInvoiceId: deposit.id });
 
-    // The commerce PATCH still accepts the switch on the DRAFT deposit (the
-    // commerce-side re-check is a follow-up outside this packet's write set).
-    await depositToUsd(ID.biz, b.depositInvoiceId);
     const before = await ledgerCount(ID.biz);
+    const depositBefore = invoiceSnapshot(await invoiceRow(deposit.id));
+    const finalBefore = invoiceSnapshot(await invoiceRow(finalId));
 
-    const res = await createInvoiceRoute(ID.biz, b.bookingId);
-    expect(res.status, `RED-BEFORE: 201 alreadyExisted netting a USD deposit: ${JSON.stringify(res.body)}`).toBe(409);
+    // W3-A10b (D-59): the PATCH re-creates no mismatched pair.
+    const res = await patchInvoice(ID.biz, deposit.id, { currency: 'USD' });
+    expect(res.status, `RED-BEFORE: 200, the netted DRAFT deposit switched to USD: ${JSON.stringify(res.body)}`).toBe(409);
     expect(res.body.code).toBe(MISMATCH);
     expect(res.body.message).toContain('USD');
     expect(res.body.message).toContain('TTD');
-    expect(res.body.details).toMatchObject({ depositInvoiceId: deposit.id, depositCurrency: 'USD', invoiceCurrency: 'TTD', finalInvoiceId: finalId });
-
-    const final = await invoiceRow(finalId);
-    expect({ total: money(final.total), currency: final.currency, status: final.status, deletedAt: final.deletedAt }, 'the final invoice is untouched').toEqual({ total: 75, currency: 'TTD', status: 'DRAFT', deletedAt: null });
+    expect(res.body.details, 'the refusal names the pair and both currencies').toMatchObject({
+      depositInvoiceId: deposit.id,
+      finalInvoiceId: finalId,
+      depositCurrency: 'USD',
+      invoiceCurrency: 'TTD',
+    });
+    expect(invoiceSnapshot(await invoiceRow(deposit.id)), 'the deposit is untouched').toEqual(depositBefore);
+    expect(invoiceSnapshot(await invoiceRow(finalId)), 'the final invoice is untouched').toEqual(finalBefore);
     expect((await bookingRow(b.bookingId)).invoiceId, 'Booking.invoiceId keeps the final invoice').toBe(finalId);
     expect(await ledgerCount(ID.biz), 'nothing is posted').toEqual(before);
 
-    // A voided final nets nothing: the button finds it again, no refusal.
+    // CONTROL: a same-currency PATCH on the pair passes (an edit form restates the currency).
+    const restatedDeposit = await patchInvoice(ID.biz, deposit.id, { currency: 'TTD' });
+    expect(restatedDeposit.status, JSON.stringify(restatedDeposit.body)).toBe(200);
+    const restatedFinal = await patchInvoice(ID.biz, finalId, { currency: 'TTD' });
+    expect(restatedFinal.status, JSON.stringify(restatedFinal.body)).toBe(200);
+    const stillPaired = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(stillPaired.status, JSON.stringify(stillPaired.body)).toBe(201);
+    expect(stillPaired.body).toMatchObject({ invoiceId: finalId, alreadyExisted: true, amount: 75, depositInvoiceId: deposit.id });
+
+    // FOLLOW3-A10's after-the-fact re-check is kept: a pair mismatched outside
+    // the PATCH (a row written before W3-A10b) is refused by the button.
+    await db.invoice.update({ where: { id: deposit.id }, data: { currency: 'USD' } });
+    const button = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(button.status, JSON.stringify(button.body)).toBe(409);
+    expect(button.body.code).toBe(MISMATCH);
+    expect(button.body.details).toMatchObject({ depositInvoiceId: deposit.id, depositCurrency: 'USD', invoiceCurrency: 'TTD', finalInvoiceId: finalId });
+    expect(invoiceSnapshot(await invoiceRow(finalId)), 'the final invoice is untouched').toEqual(finalBefore);
+    expect(await ledgerCount(ID.biz), 'nothing is posted').toEqual(before);
+    // A PATCH that brings the pair back to one currency passes.
+    const repaired = await patchInvoice(ID.biz, deposit.id, { currency: 'TTD' });
+    expect(repaired.status, JSON.stringify(repaired.body)).toBe(200);
+    expect((await invoiceRow(deposit.id)).currency).toBe('TTD');
+
+    // A voided final nets nothing: the DRAFT deposit may switch, and the button finds the final again.
     await workflow.transition(finalId, 'VOID');
+    await depositToUsd(ID.biz, b.depositInvoiceId);
     const afterVoid = await createInvoiceRoute(ID.biz, b.bookingId);
     expect(afterVoid.status, JSON.stringify(afterVoid.body)).toBe(201);
     expect(afterVoid.body).toMatchObject({ invoiceId: finalId, alreadyExisted: true });
   });
 
-  it('DC-09 RED-BEFORE (review SEC-A10-1): the DRAFT final is PATCHed to USD after it netted a TTD deposit -> completion answers DEPOSIT_CURRENCY_MISMATCH and Create invoice 409; nothing written', async () => {
+  it('DC-09 RED-BEFORE (W3-A10b, review SEC-A10-1, D-59): the commerce PATCH refuses to switch the DRAFT final that netted a TTD deposit to USD -> 409 DEPOSIT_CURRENCY_MISMATCH, nothing written; a pair mismatched outside the PATCH is still refused at completion', async () => {
     const b = await book(ID.biz, ID.svc, 'dc09');
     const deposit = await invoiceRow(b.depositInvoiceId);
 
@@ -584,16 +628,40 @@ describe('V1-81 (FOLLOW3-A10, D-59) a final invoice never nets a deposit billed 
     expect(drawn.status, JSON.stringify(drawn.body)).toBe(201);
     expect(drawn.body).toMatchObject({ alreadyExisted: false, amount: 75, depositInvoiceId: deposit.id });
     const finalId = drawn.body.invoiceId as string;
-
-    const patched = await patchInvoice(ID.biz, finalId, { currency: 'USD' });
-    expect(patched.status, JSON.stringify(patched.body)).toBe(200);
-    expect((await invoiceRow(finalId)).currency).toBe('USD');
     const before = await ledgerCount(ID.biz);
+    const depositBefore = invoiceSnapshot(await invoiceRow(deposit.id));
+    const finalBefore = invoiceSnapshot(await invoiceRow(finalId));
 
+    // W3-A10b (D-59): the PATCH re-creates no mismatched pair.
+    const patched = await patchInvoice(ID.biz, finalId, { currency: 'USD' });
+    expect(patched.status, `RED-BEFORE: 200, the DRAFT final netting a TTD deposit switched to USD: ${JSON.stringify(patched.body)}`).toBe(409);
+    expect(patched.body.code).toBe(MISMATCH);
+    expect(patched.body.message).toContain('USD');
+    expect(patched.body.message).toContain('TTD');
+    expect(patched.body.details, 'the refusal names the pair and both currencies').toMatchObject({
+      depositInvoiceId: deposit.id,
+      finalInvoiceId: finalId,
+      depositCurrency: 'TTD',
+      invoiceCurrency: 'USD',
+    });
+    expect(invoiceSnapshot(await invoiceRow(finalId)), 'the final invoice is untouched').toEqual(finalBefore);
+    expect(invoiceSnapshot(await invoiceRow(deposit.id)), 'the deposit is untouched').toEqual(depositBefore);
+    expect((await bookingRow(b.bookingId)).invoiceId, 'Booking.invoiceId keeps the final invoice').toBe(finalId);
+    expect(await ledgerCount(ID.biz), 'nothing is posted').toEqual(before);
+    // CONTROL: the one-currency pairing is found again, unchanged.
+    const again = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body).toMatchObject({ invoiceId: finalId, alreadyExisted: true, amount: 75, depositInvoiceId: deposit.id });
+
+    // FOLLOW3-A10's after-the-fact re-check is kept: a pair mismatched outside
+    // the PATCH (a row written before W3-A10b) is refused at completion and by
+    // the button, nothing written.
+    await db.invoice.update({ where: { id: finalId }, data: { currency: 'USD' } });
+    const finalMismatched = invoiceSnapshot(await invoiceRow(finalId));
     const res = await setStatus(ID.biz, b.bookingId, 'COMPLETED');
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body.status, 'V1-28: the booking is completed whatever its invoicing').toBe('COMPLETED');
-    expect(res.body.invoicing, `RED-BEFORE: EXISTING netting a TTD deposit on a USD final: ${JSON.stringify(res.body.invoicing)}`).toMatchObject({ status: 'FAILED', invoiceId: null, code: MISMATCH });
+    expect(res.body.invoicing).toMatchObject({ status: 'FAILED', invoiceId: null, code: MISMATCH });
     expect(res.body.invoicing.error).toContain('USD');
     expect(res.body.invoicing.error).toContain('TTD');
     expect(res.body.invoiceErrorCode).toBe(MISMATCH);
@@ -602,10 +670,42 @@ describe('V1-81 (FOLLOW3-A10, D-59) a final invoice never nets a deposit billed 
     expect(button.status, JSON.stringify(button.body)).toBe(409);
     expect(button.body.code).toBe(MISMATCH);
     expect(button.body.details).toMatchObject({ depositInvoiceId: deposit.id, depositCurrency: 'TTD', invoiceCurrency: 'USD', finalInvoiceId: finalId });
-
-    const final = await invoiceRow(finalId);
-    expect({ total: money(final.total), currency: final.currency, status: final.status, deletedAt: final.deletedAt }, 'the final invoice is untouched').toEqual({ total: 75, currency: 'USD', status: 'DRAFT', deletedAt: null });
+    expect(invoiceSnapshot(await invoiceRow(finalId)), 'the final invoice is untouched').toEqual(finalMismatched);
     expect((await bookingRow(b.bookingId)).invoiceId, 'Booking.invoiceId keeps the final invoice').toBe(finalId);
     expect(await ledgerCount(ID.biz), 'nothing is posted').toEqual(before);
+
+    // A PATCH that brings the pair back to one currency passes, and the button finds the pairing.
+    const repaired = await patchInvoice(ID.biz, finalId, { currency: 'TTD' });
+    expect(repaired.status, JSON.stringify(repaired.body)).toBe(200);
+    const found = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(found.status, JSON.stringify(found.body)).toBe(201);
+    expect(found.body).toMatchObject({ invoiceId: finalId, alreadyExisted: true, amount: 75, depositInvoiceId: deposit.id });
+  });
+
+  it('DC-10 CONTROL (W3-A10b, D-59): a currency PATCH on a DRAFT invoice that is neither a netted deposit nor a final that netted one passes (a deposit no final nets yet, an invoice outside any booking, a final drawn after its deposit was voided)', async () => {
+    const b = await book(ID.biz, ID.svc, 'dc10');
+    // A DRAFT deposit no final has netted yet (DC-01..DC-03, DC-06 and DC-07 switch it the same way).
+    await depositToUsd(ID.biz, b.depositInvoiceId);
+
+    // A DRAFT invoice outside any booking.
+    const { contactId } = await bookingRow(b.bookingId);
+    const standalone = await commerce.createInvoice({
+      businessId: ID.biz,
+      contactId,
+      items: [{ description: `${P}standalone`, quantity: 1, unitPrice: 40 }],
+    });
+    expect(standalone.currency).toBe('TTD');
+    const loose = await patchInvoice(ID.biz, standalone.id, { currency: 'USD' });
+    expect(loose.status, JSON.stringify(loose.body)).toBe(200);
+    expect((await invoiceRow(standalone.id)).currency).toBe('USD');
+
+    // A final drawn after its deposit was voided nets nothing: it may switch.
+    await workflow.transition(b.depositInvoiceId, 'VOID');
+    const drawn = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(drawn.status, JSON.stringify(drawn.body)).toBe(201);
+    expect(drawn.body).toMatchObject({ alreadyExisted: false, amount: 100, depositInvoiceId: null });
+    const switched = await patchInvoice(ID.biz, drawn.body.invoiceId, { currency: 'USD' });
+    expect(switched.status, JSON.stringify(switched.body)).toBe(200);
+    expect((await invoiceRow(drawn.body.invoiceId)).currency).toBe('USD');
   });
 });
