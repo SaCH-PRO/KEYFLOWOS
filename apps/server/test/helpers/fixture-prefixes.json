@@ -738,6 +738,11 @@
       "packet": "V1-88 (PR196-CRM-LIFECYCLE)"
     },
     {
+      "prefix": "v89k_",
+      "owner": "apps/server/test/key-crm-visibility.integration.test.ts",
+      "packet": "V1-89 (W3-KEY-CRM-VISIBILITY)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
