@@ -1011,6 +1011,15 @@ All accepted as recommended, in one batch, by the owner directly (the FOLLOW3 re
 | D-68 | The tRPC endpoint (packages/api routers, no web consumer) is unmounted by default: the server serves /trpc only when TRPC_ENABLED=1. V1-26's blocked visibility cases stay it.fails until it is re-enabled with fixes. | Repair round 2 (trpc area); V1-26 closes as partial. |
 | D-69 | A WiPay checkout (invoice or storefront) for an amount not in TTD answers 400 and WiPay is not offered for it, until WiPay's currency parameter is verified from its documentation (D-19 fail closed). | Repair round 2 (g6pub area). |
 | D-70 | An approved queued KEY action step is run from a Run action on that queue item in the web control tower, executing exactly the stored step through the bound execute route (V1-31b), with no re-planning. | Repair round 2 (key area). |
+| D-71 | Each KEY plan step needs the creator's module scope for its module (write for writes, read for reads). OWNER and ADMIN keep every module; a STAFF creator's own-contact (owned-view) rules still apply. | Wave 2: KEY plan authority packet. |
+| D-72 | The approved-action queue with its Run action (D-70) is mounted on the Command Center page. | Wave 2: KEY web packet. |
+| D-73 | A KEY plan always runs as a member: a trigger records its creator and the plans it fires run as that member, with module scopes and D-46 checked at run time. A plan with no member principal may not write money or invoices and may not read contacts. | Wave 2: KEY plan authority packet. |
+| D-74 | A plan step's output is filtered by the viewer's visibility when it is read: a row the viewer cannot see is withheld, even when the OWNER approved the step. | Wave 2: KEY plan reads packet. |
+| D-75 | Every invoice read projection (operator detail, public page, payments list, payment status) and every money decision counts only the invoice's own business's payment rows. | Wave 2: deposit/read-contract packet. |
+| D-76 | A verified WiPay success for a non-TTD invoice or order (a checkout started before D-69) is not recorded as money: it is kept as a refused webhook event and the owner is told to reconcile by hand. | Wave 2: store/provider packet. |
+| D-77 | An operator-created (STANDARD) order marked paid on creation goes through the paid door (invoice, payment and ledger posting), like storefront orders. | Wave 2: store/provider packet. |
+| D-78 | Paying the remainder of a part-credited invoice leaves it PARTIALLY_CREDITED, not PAID. | Kept as built (V1-44). |
+| D-79 | Numbering continues from a business's highest existing number, legacy INV-<timestamp> numbers included; a scanned invoice number already in use falls back to the next sequence number. | Kept as built (V1-43). |
 
 ---
 
