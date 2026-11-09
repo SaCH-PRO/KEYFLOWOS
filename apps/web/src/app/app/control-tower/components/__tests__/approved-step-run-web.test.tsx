@@ -126,8 +126,31 @@ describe("ApprovedActionsQueue runs an approved queued step by its stored ids (D
     await waitFor(() => expect(screen.queryByRole("button", { name: `Run ${APPROVED.title}` })).toBeNull());
   });
 
-  it("D70-03 a refusal from the route (403) is shown as an error, the item stays, and nothing is re-planned", async () => {
-    const api = stubApi({ status: 403, body: { statusCode: 403, message: "This plan step is executed only for the member who proposed it or the business owner", error: "Forbidden" } });
+  /*
+   * D-72 (2026-11-03, KEY-R3c-APPROVED-QUEUE-MOUNT) changed this case: a 403 used to leave the item
+   * in place; the ruling's proof says a 403 shows the access message and removes the action (the
+   * member may not run it, so offering Run again would only repeat the refusal). A failure that is
+   * not a refusal still keeps the item: D70-05.
+   */
+  it("D70-03 a refusal from the route (403) shows the access message, removes the action, and nothing is re-planned", async () => {
+    const refusal = "This plan step is executed only for the member who proposed it or the business owner";
+    const api = stubApi({ status: 403, body: { statusCode: 403, message: refusal, error: "Forbidden" } });
+    const onRan = vi.fn();
+    render(<ApprovedActionsQueue businessId={BIZ} items={[APPROVED]} onRan={onRan} />);
+
+    fireEvent.click(screen.getByRole("button", { name: `Run ${APPROVED.title}` }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(refusal));
+    expect(api.plans()).toEqual([]);
+    expect(api.executes()).toHaveLength(1);
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(onRan).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole("button", { name: `Run ${APPROVED.title}` })).toBeNull());
+    expect(screen.getByText(refusal)).toBeTruthy();
+  });
+
+  it("D70-05 a failure that is not a refusal (500) is shown as an error and the item stays to be run again", async () => {
+    const api = stubApi({ status: 500, body: { statusCode: 500, message: "Internal server error" } });
     render(<ApprovedActionsQueue businessId={BIZ} items={[APPROVED]} />);
 
     fireEvent.click(screen.getByRole("button", { name: `Run ${APPROVED.title}` }));
@@ -136,7 +159,7 @@ describe("ApprovedActionsQueue runs an approved queued step by its stored ids (D
     expect(api.plans()).toEqual([]);
     expect(api.executes()).toHaveLength(1);
     expect(toast.success).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: `Run ${APPROVED.title}` })).toBeTruthy();
+    await waitFor(() => expect((screen.getByRole("button", { name: `Run ${APPROVED.title}` }) as HTMLButtonElement).disabled).toBe(false));
   });
 
   it("D70-04 a step the boundary still holds (asks for a confirmation) is reported as waiting, not as run", async () => {
