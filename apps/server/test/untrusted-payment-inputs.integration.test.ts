@@ -101,7 +101,9 @@
  *              under their own status; the CONFIRMED row itself is kept.
  *   V41C-02    a member of another business: 403 on bizC's list, and its own
  *              list carries no row of a bizC invoice (the bizB-carrying row
- *              disclosed bizC's invoice and customer).
+ *              disclosed bizC's invoice and customer), also when it names
+ *              bizC's contact (?contactId=, and the KEY Cortex payment
+ *              history, which always passes contactId).
  *   V41C-03    commerce-ai clientPaymentIntelligence.totalPayments and the
  *              revenue journey's "Total payments" count the payments received
  *              (the SUCCESSFUL entries balanceOfStoredRows adds into `paid`)
@@ -1424,6 +1426,21 @@ describe('V1-41c: the payments page and the payment counters read money rows onl
     const text = JSON.stringify(own.body);
     expect(text).not.toContain(C_CONTACT_EMAIL);
     expect(text).not.toContain('V41C-');
+
+    // Review repair (ST-V41C-1, V41C-CR-1): the ?contactId= branch replaces the
+    // base invoice filter, so it must keep the tenant bind itself. bizB naming
+    // bizC's contact on its own list, and the KEY Cortex payment history
+    // (CommerceAdapterService.getPaymentHistory, which always passes contactId),
+    // get nothing: not the row carrying bizB's id on bizC's invoice.
+    const byForeignContact = await agent()
+      .get(`/commerce/businesses/${ID.bizB}/payments`)
+      .query({ contactId: C.contact })
+      .set(HEADER, ID.ownerB);
+    expect(byForeignContact.status, JSON.stringify(byForeignContact.body)).toBe(200);
+    expect(byForeignContact.body).toEqual([]);
+    const { CommerceAdapterService } = await import('../src/modules/key-cortex/adapters/commerce-adapter.service');
+    const history = await new CommerceAdapterService(commerce).getPaymentHistory({ businessId: ID.bizB, contactId: C.contact });
+    expect(history).toEqual([]);
   });
 
   it('V41C-03: commerce-ai counts payments received only: clientPaymentIntelligence.totalPayments and the revenue journey\'s "Total payments" are 2 (the 40 later refunded and the 100), never the CONFIRMED, PENDING, FAILED, refund or bizB-carrying rows; another business gets 404 for bizC\'s contact', async () => {
