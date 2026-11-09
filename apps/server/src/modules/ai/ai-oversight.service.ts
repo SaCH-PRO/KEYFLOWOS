@@ -4,12 +4,12 @@ import { AiExecutionLogService } from './ai-execution-log.service';
 import { AiMemoryService } from './ai-memory.service';
 import { getToolByName } from './flow-tool-registry';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
-import { ApprovalRoutingService } from './approval-routing.service';
+// W6-LOG-ADDRESSES-AND-DOCS repair (9B-D2, review SEC-W6LOG-1): redactContactDetails
+// redacts addresses (the shared redactAddresses) and phone-shaped numbers.
+import { ApprovalRoutingService, redactContactDetails } from './approval-routing.service';
 import { JobRolePolicyService, JobRoleEnvelope, approvalTierForPosition } from '../structure/job-role-policy.service';
 import { HOLDER_ACCOUNT, holderMembershipHere, membersByPhone } from '../structure/position-holders';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
-// W6-LOG-ADDRESSES-AND-DOCS (9B-D2, review SEC-W5SEC-1): the shared address redactor for the notify-failure lines.
-import { redactAddresses } from '../../core/security/redaction';
 
 export type RiskTier = 1 | 2 | 3 | 4;
 
@@ -560,7 +560,10 @@ export class AiOversightService {
       // W6-LOG-ADDRESSES-AND-DOCS (9B-D2, review SEC-W5SEC-1): the error can be
       // the system email sender's provider text, which may quote the approver's
       // address. The line names the item id and logs that text redacted.
-      this.logger.warn(`Failed to notify approver for item ${item.id}: ${redactAddresses(notifyResult.error)}`);
+      // Repair (review SEC-W6LOG-1): on the WhatsApp leg it was the provider's
+      // response body, which may quote the approver's number; notifyApprover now
+      // returns only the provider code, and the line redacts numbers as well.
+      this.logger.warn(`Failed to notify approver for item ${item.id}: ${redactContactDetails(notifyResult.error)}`);
     }
 
     // Tier-4 (admin-level) actions always additionally notify the business
@@ -571,8 +574,10 @@ export class AiOversightService {
       if (ownerRoute) {
         const ownerNotify = await this.approvalRouting.notifyApprover(businessId, ownerRoute, { id: item.id, title: item.title, description: item.description, riskTier: tier });
         if (!ownerNotify.sent && ownerNotify.error) {
-          // W6-LOG-ADDRESSES-AND-DOCS (9B-D2, SEC-W5SEC-1): as above, for the owner's address.
-          this.logger.warn(`Failed to CC owner for tier-4 item ${item.id}: ${redactAddresses(ownerNotify.error)}`);
+          // W6-LOG-ADDRESSES-AND-DOCS (9B-D2, SEC-W5SEC-1, repair SEC-W6LOG-1): as
+          // above, for the owner's address, and the owner's number (resolveOwner
+          // takes the WhatsApp leg whenever the owner has a phone).
+          this.logger.warn(`Failed to CC owner for tier-4 item ${item.id}: ${redactContactDetails(ownerNotify.error)}`);
         }
       }
     }

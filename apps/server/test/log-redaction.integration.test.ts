@@ -2250,7 +2250,10 @@ describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
   // (ai-oversight.service.ts:558, :569; approval-routing.service.ts:188), which
   // W6-LOG-ADDRESSES-AND-DOCS closed. CF-029 records every one of them closed,
   // with no OPEN wording left for them, and keeps the other address-logging
-  // calls OPEN.
+  // calls OPEN. Its repair (review SEC-W6LOG-1) closed the same two lines'
+  // WhatsApp leg, which logged the recipient's number from the provider's raw
+  // response body (approval-routing.service.ts:175); the closed record names
+  // that leg too, so it does not claim the email leg alone.
   it('CF-029 records the W5-SYSTEM-EMAIL-CALLERS caller lines and the approval routing caller (ai-oversight.service.ts:558, :569; approval-routing.service.ts:188) CLOSED, in exactly that one state (9B-D2, SEC-W4HK-1; W6-LOG-ADDRESSES-AND-DOCS, review CR-W5SEC-2)', () => {
     const note = rows('CF').find((r) => r.id === 'CF-029')?.cells[CF_COL.evidence] ?? '';
     const SCOPE = "that closure covers the sink's own lines only";
@@ -2275,6 +2278,11 @@ describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
       'ai-oversight.service.ts:558',
       ':569',
       '`apps/server/src/modules/notifications/system-email.log-redaction.spec.ts`',
+      // W6-LOG-ADDRESSES-AND-DOCS repair (review SEC-W6LOG-1): the WhatsApp leg.
+      'review SEC-W6LOG-1',
+      'approval-routing.service.ts:175',
+      "the WhatsApp leg now returns the provider's error code only",
+      'redact the addresses and phone numbers in what they log',
     ]) {
       expect(closed, `CF-029 records ${needle} closed`).toContain(needle);
     }
