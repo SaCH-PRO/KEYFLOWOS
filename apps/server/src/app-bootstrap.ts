@@ -56,7 +56,8 @@ export function configureNestApp(app: INestApplication): void {
   // Public widget routes (storefront, bookings, payments, webhooks) must be
   // accessible from any origin because they are embedded in third-party sites.
   // This middleware runs before the global CORS and sets permissive headers
-  // for public paths only. Authenticated routes still use the strict allow-list.
+  // for public paths only. Authenticated routes still use the strict allow-list,
+  // those inside a public prefix included (AUTHENTICATED_UNDER_PUBLIC_PREFIXES).
   //
   // W3-CORS-IDEMPOTENCY-HEADER (G6PUB-R3, recheck G6PUB-RC2-4): it must be
   // registered BEFORE app.enableCors. The strict CORS middleware answers every
@@ -74,8 +75,19 @@ export function configureNestApp(app: INestApplication): void {
     '/widgets',
   ];
 
+  // W3-CORS-IDEMPOTENCY-HEADER review repair (SEC-CIH-1, CR-CIH-1): the
+  // '/webhooks' prefix also covers the authenticated, tenant-scoped webhook
+  // management routes (WebhooksController 'businesses/:businessId/webhooks...',
+  // AuthGuard + BusinessGuard; the list returns each webhook's HMAC secret).
+  // They are not public, so they get no allowance and keep the strict
+  // allow-list. Compared in lower case: Express routes paths case-insensitively.
+  const AUTHENTICATED_UNDER_PUBLIC_PREFIXES = ['/webhooks/businesses/'];
+
   expressApp.use((req: Request, res: Response, next: NextFunction) => {
-    const isPublic = PUBLIC_ROUTE_PREFIXES.some((p) => req.path.startsWith(p));
+    const lowerPath = req.path.toLowerCase();
+    const isPublic =
+      PUBLIC_ROUTE_PREFIXES.some((p) => req.path.startsWith(p)) &&
+      !AUTHENTICATED_UNDER_PUBLIC_PREFIXES.some((p) => lowerPath.startsWith(p));
     if (isPublic) {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
