@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { ActivityService } from './activity.service';
+import { ActivityService, type CreateActivityInput } from './activity.service';
 import {
   InvoiceCreatedPayload,
   InvoicePaidPayload,
@@ -15,11 +15,11 @@ import {
   BookingCompletedPayload,
   BookingCancelledPayload,
   BookingRescheduledPayload,
-  ContactCreatedPayload,
   ContactUpdatedPayload,
   ContactMergedPayload,
   ContactImportedPayload,
 } from '../../core/event-bus/events.types';
+import type { ContactCreatedEmit } from '../crm/crm.service';
 
 function contactName(contact?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null): string {
   if (!contact) return 'Someone';
@@ -233,9 +233,11 @@ export class ActivityEventListener {
    * invoice.payment_recorded copies. The cockpit shows that copy ('Booking
    * created') beside this row: two rows, as at base, where its DOUBLE_WRITTEN
    * rule already showed the listener/executor pair once. Closing it needs
-   * meta.feedCopy=false on that ContactEvent (bookings.service.ts) or the
-   * reader's MIRRORED_AS_OWN_ROW, both outside V1-55b's write set
-   * (evidence-feed.integration.test.ts V55-12 todo).
+   * meta.feedCopy=false on that ContactEvent (bookings.service.ts), which
+   * reaches CrmTimelineService only through CrmService.logContactEvent ->
+   * CrmTimelineService.logContactEvent, and that forwards no feedCopy yet
+   * (crm-timeline.service.ts, outside W3-V1-55c's write set;
+   * evidence-feed.integration.test.ts V55-12b todo).
    */
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
@@ -333,15 +335,22 @@ export class ActivityEventListener {
   /**
    * V1-55b-FEED-DEDUPE-REST (V55-08): the only crm created row for a new
    * contact (AutomationExecutorService no longer writes 'New contact added').
-   * It is NOT the feed's one row for the contact (CR-V155b-1, residual):
-   * CrmService.createContact also logs a contact.created ContactEvent whose
-   * Activity copy (crm:contact.created:contact) the cockpit shows beside this
-   * row ('Contact created'), as at base. crm-network.service.ts logs the same
-   * ContactEvent for a referral without this bus event, where the copy is the
-   * only row. See onBookingCreated and the V55-12 todo.
+   * Since W3-V1-55c (CR-V155b-1, V55-12) it is also the feed's one row for
+   * the contact: CrmService.createContact logs its contact.created
+   * ContactEvent with meta.feedCopy=false, so no Activity copy
+   * (crm:contact.created:contact) is shown beside it. crm-network.service.ts
+   * logs the same ContactEvent for a referral without this bus event; there
+   * the copy is kept, as the only row. See onBookingCreated.
+   *
+   * W3-V1-55c review (SEC-V55C-1, CR-V155c-1; D-90): being the one row, it
+   * names who created the contact, as the dropped copy did: the actor
+   * CrmService.createContact puts on the emit (ContactCreatedEmit, the
+   * ContactEvent's own actor; USER and the member for POST /contacts) and the
+   * copy's category CONTACT. With no actor on the emit none is invented
+   * (ActivityService.log's SYSTEM, no actorId), as the copy wrote it.
    */
   @OnEvent('contact.created')
-  async onContactCreated(payload: ContactCreatedPayload) {
+  async onContactCreated(payload: ContactCreatedEmit) {
     const c = payload.contact;
     await this.activity.log({
       businessId: payload.businessId,
@@ -355,6 +364,9 @@ export class ActivityEventListener {
       tone: 'info',
       data: { contactId: c.id },
       contactId: c.id,
+      category: 'CONTACT',
+      actorType: payload.actorType as CreateActivityInput['actorType'],
+      actorId: payload.actorId,
     });
   }
 

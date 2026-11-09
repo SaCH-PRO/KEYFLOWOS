@@ -37,6 +37,17 @@ export interface AuditContext {
   reason?: string | null;
 }
 
+/**
+ * W3-V1-55c review (SEC-V55C-1, CR-V155c-1; owner ruling D-90, on D-08): the
+ * contact.created bus payload createContact emits. Beside ContactCreatedPayload
+ * it carries the actor the contact's contact.created ContactEvent records
+ * (eventActor of the audit context: USER and the member for POST /contacts,
+ * none for a caller that names no actor). Since that ContactEvent has no
+ * Activity copy (meta.feedCopy=false), ActivityEventListener's 'New contact'
+ * is the create's one feed row, and it names this actor as the copy did.
+ */
+export type ContactCreatedEmit = ContactCreatedPayload & { actorType?: string; actorId?: string };
+
 type ContactSortBy = 'name' | 'newest' | 'oldest' | 'revenue' | 'score' | 'lastInteraction';
 
 export type ContactListOptions = {
@@ -664,19 +675,29 @@ export class CrmService {
         },
       });
 
+      // W3-V1-55c (CR-V155b-1, D-08): the feed's one row for this contact is
+      // ActivityEventListener's 'New contact', from the contact.created emit
+      // below, so this ContactEvent gets no Activity copy (V1-55b's
+      // meta.feedCopy). crm-network.service.ts's referral, which emits no
+      // contact.created, keeps its copy as its only row.
       await this.timeline.logEvent(input.businessId, created.id, 'contact.created', {
         firstName,
         lastName,
         email,
         source: input.source ?? 'manual',
-      }, this.eventActor(_audit), tx);
+      }, { ...this.eventActor(_audit), feedCopy: false }, tx);
 
       return created;
     }).catch((err: unknown) => this.rejectContactIdentityTaken(err, input.businessId, { emailNormalized, phoneNormalized }, input.actorUserId));
     if (contact) {
-      const payload: ContactCreatedPayload = {
+      // W3-V1-55c review (SEC-V55C-1, CR-V155c-1; D-90): the emit carries the
+      // actor the contact.created ContactEvent above records, so the feed's
+      // one row for the contact ('New contact') names who created it, as the
+      // dropped Activity copy did.
+      const payload: ContactCreatedEmit = {
         contact,
         businessId: input.businessId,
+        ...this.eventActor(_audit),
       };
       this.events.emit('contact.created', payload);
       this.auditContact({

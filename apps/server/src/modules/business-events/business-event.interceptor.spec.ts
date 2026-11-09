@@ -32,7 +32,7 @@ import 'reflect-metadata';
 import { describe, it, expect } from 'vitest';
 import { Reflector } from '@nestjs/core';
 import { defer, lastValueFrom, of } from 'rxjs';
-import { BusinessEventInterceptor, SKIP_BUSINESS_EVENT_KEY } from './business-event.interceptor';
+import { BusinessEventInterceptor, SKIP_BUSINESS_EVENT_KEY, auditOnClaim } from './business-event.interceptor';
 import type { BusinessEventJob } from './business-event.queue';
 
 const BIZ = 'biz_r19';
@@ -49,6 +49,8 @@ interface Call {
   respond?: () => unknown;
   user?: { id: string } | null;
   skip?: boolean;
+  /** W3-V1-45c-EVENT-REPLAY review CR-V45c-1: the handler hands the audit this claim (auditOnClaim) while it runs. */
+  claim?: () => Promise<boolean>;
 }
 
 /** Run the real interceptor once and return what it handed the emitter. */
@@ -81,7 +83,11 @@ async function run(call: Call): Promise<{ emitted: BusinessEventJob[]; result: u
   };
   const result = await lastValueFrom(
     interceptor.intercept(ctx as never, {
-      handle: () => defer(() => of(call.respond ? call.respond() : call.response ?? {})),
+      handle: () =>
+        defer(() => {
+          if (call.claim) auditOnClaim(req, call.claim);
+          return of(call.respond ? call.respond() : call.response ?? {});
+        }),
     }),
   );
   // The audit write is a tap(async ...): the response is not held for it.
@@ -470,5 +476,77 @@ describe('BusinessEventInterceptor: the pending-payment confirm route is audited
       response: paymentResponse('pay_c3b', 'inv_c3'),
     });
     expect(fromEvidence.emitted.map((e) => [e.eventType, e.subjectType])).toEqual([['invoice.create', 'invoice']]);
+  });
+});
+
+describe('BusinessEventInterceptor: an answer several requests share is audited by the one request that wins its claim (W3-V1-45c-EVENT-REPLAY review CR-V45c-1, D-15)', () => {
+  const INVOICES = '/commerce/businesses/:businessId/invoices';
+  const QUOTES = '/commerce/businesses/:businessId/quotes';
+
+  it('V45c-C01 (D-15): a won claim emits the route\'s one row, label and subject unchanged (invoice.create / quote.create on the created document)', async () => {
+    let claimed = 0;
+    const claim = async () => {
+      claimed += 1;
+      return true;
+    };
+    const invoice = await run({ method: 'POST', routePath: INVOICES, response: { id: 'inv_c1', status: 'DRAFT' }, claim });
+    expect(invoice.emitted.map((e) => [e.eventType, e.subjectType, e.subjectId, e.actorType, e.actorId])).toEqual([
+      ['invoice.create', 'invoice', 'inv_c1', 'human', USER],
+    ]);
+    const quote = await run({ method: 'POST', routePath: QUOTES, response: { id: 'q_c1' }, claim });
+    expect(quote.emitted.map((e) => [e.eventType, e.subjectId])).toEqual([['quote.create', 'q_c1']]);
+    expect(claimed, 'the claim is asked once per request').toBe(2);
+  });
+
+  it('V45c-C02 (D-15): a lost claim (another request answered with the document already wrote its event) emits nothing; the response passes through', async () => {
+    const { emitted, result } = await run({ method: 'POST', routePath: INVOICES, response: { id: 'inv_c2' }, claim: async () => false });
+    expect(emitted).toEqual([]);
+    expect(result).toEqual({ id: 'inv_c2' });
+  });
+
+  it('V45c-C03 (D-15): a claim that throws emits nothing and never fails the request (a retry may still win it)', async () => {
+    const { emitted, result } = await run({
+      method: 'POST',
+      routePath: QUOTES,
+      response: { id: 'q_c3' },
+      claim: async () => {
+        throw new Error('claim store unavailable');
+      },
+    });
+    expect(emitted).toEqual([]);
+    expect(result).toEqual({ id: 'q_c3' });
+  });
+
+  it('V45c-C04 (D-15): the claim is read after the handler ran, and a request without one is audited as before', async () => {
+    let asked = false;
+    const late = await run({
+      method: 'POST',
+      routePath: INVOICES,
+      respond: () => ({ id: 'inv_c4' }),
+      claim: async () => {
+        asked = true;
+        return false;
+      },
+    });
+    expect(asked).toBe(true);
+    expect(late.emitted).toEqual([]);
+    const unclaimed = await run({ method: 'POST', routePath: INVOICES, response: { id: 'inv_c4b' } });
+    expect(unclaimed.emitted.map((e) => [e.eventType, e.subjectId])).toEqual([['invoice.create', 'inv_c4b']]);
+  });
+
+  it('V45c-C05 (D-15): @SkipBusinessEvent still skips, and the claim is never asked', async () => {
+    let asked = false;
+    const { emitted } = await run({
+      method: 'POST',
+      routePath: INVOICES,
+      response: { id: 'inv_c5' },
+      skip: true,
+      claim: async () => {
+        asked = true;
+        return true;
+      },
+    });
+    expect(emitted).toEqual([]);
+    expect(asked).toBe(false);
   });
 });

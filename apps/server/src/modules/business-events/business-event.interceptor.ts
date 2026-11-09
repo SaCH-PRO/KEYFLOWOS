@@ -20,6 +20,38 @@ export const SKIP_BUSINESS_EVENT_KEY = 'skipBusinessEvent';
 export const SkipBusinessEvent = () =>
   Reflect.metadata(SKIP_BUSINESS_EVENT_KEY, true);
 
+/**
+ * W3-V1-45c-EVENT-REPLAY (V1-45b review SEC-V45b-1 / CR-V45b-1; review
+ * CR-V45c-1; D-15): a handler whose answer several requests share (an
+ * idempotent create: the request that created the document, its keyed
+ * replays and the losers of a concurrent burst all answer the one document)
+ * hands the audit a claim. The audit is written only by a request that wins
+ * it, and the claim is won once per document, by the first of those requests
+ * to reach the audit. So the document gets exactly one event: a replay is not
+ * a second one, and a request that committed the document but failed before
+ * its audit (a 5xx after the commit) leaves the event to its retry or to a
+ * loser of its burst, never to no one. A claim that cannot be decided (it
+ * throws) writes nothing, so a retry may still win it.
+ *
+ * A symbol on the request object: it never reaches the response body, and it
+ * lives exactly as long as the request. Read after the handler ran.
+ */
+const BUSINESS_EVENT_CLAIM = Symbol('businessEvent.claim');
+
+/** Resolves true for the one request that may write the shared answer's business event. */
+export type BusinessEventClaim = () => Promise<boolean>;
+
+/** Audit this request's answer only if it wins this claim (see BUSINESS_EVENT_CLAIM). */
+export function auditOnClaim(req: object, claim: BusinessEventClaim): void {
+  (req as { [BUSINESS_EVENT_CLAIM]?: BusinessEventClaim })[BUSINESS_EVENT_CLAIM] = claim;
+}
+
+function claimOf(req: unknown): BusinessEventClaim | undefined {
+  if (!req || typeof req !== 'object') return undefined;
+  const claim = (req as { [BUSINESS_EVENT_CLAIM]?: unknown })[BUSINESS_EVENT_CLAIM];
+  return typeof claim === 'function' ? (claim as BusinessEventClaim) : undefined;
+}
+
 /** What a rule may know about the call it audits. */
 interface RouteCall {
   /** Date.now() when the interceptor took the request, before the handler ran. */
@@ -113,6 +145,13 @@ function isPaymentReplay(response: unknown, call: RouteCall): boolean {
  * not record (the door's keyed replay after a confirm that recorded the money
  * but failed before retiring the row, or a manual payment that took the
  * door's key) is not audited as a record by this member (R19-ST-1).
+ *
+ * Invoice and quote create keep their inferred labels (invoice.create /
+ * quote.create on the created document). A keyed create's replays are not
+ * told apart by a rule: a createdAt rule cannot see the losers of a burst,
+ * which started before the winner stamped its createdAt, and every request is
+ * by the same member (another member's key is a 409, SEC-V45-3). The create
+ * routes hand the audit a claim instead (auditOnClaim, W3-V1-45c-EVENT-REPLAY).
  */
 const ROUTE_EVENT_RULES: Record<string, RouteEventRule> = {
   'POST commerce/businesses/:businessId/invoices/:invoiceId/payments': {
@@ -179,6 +218,11 @@ export class BusinessEventInterceptor implements NestInterceptor {
         try {
           // An idempotent replay wrote nothing; it is not a new mutation to audit.
           if (rule?.isReplay?.(response, { startedAt, userId: req.user?.id ?? null })) return;
+          // W3-V1-45c-EVENT-REPLAY review CR-V45c-1 (D-15): an answer several
+          // requests share is audited by the one that wins its claim. Read now,
+          // after the handler ran; a claim that throws writes nothing (catch).
+          const claim = claimOf(req);
+          if (claim && !(await claim())) return;
           const after = this.safeSnapshot(response);
           await this.resilient.emit({
             businessId,

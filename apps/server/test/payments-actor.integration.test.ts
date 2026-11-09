@@ -14,7 +14,10 @@
  *     -> Payment.recordedBy = U                                  (fresh Prisma read)
  *     -> posting FinancialTransaction.createdById = U            (column exists on the model)
  *     -> ContactEvent invoice.payment_recorded: actorId U, actorType USER, data.recordedBy U
- *        and the unified activity entry it writes carries actorId U
+ *        and the payment's FINANCE payment_recorded activity entry carries actorId U
+ *        (W3-V1-55c, owner ruling D-90: the FINANCE row is the payment's feed row
+ *        and names who recorded it; until then the actor was read on the CRM
+ *        invoice.payment_recorded copy, which D-90 retires)
  *   the same route by user V (STAFF, revenue:write)  -> V on every one of the above
  *   idempotent replay (R0-D2) by V of U's key       -> U's row, recordedBy still U, nothing new written
  *   POST /commerce/businesses/:b/payments/:id/refund by user V
@@ -180,6 +183,11 @@ const ID = {
   invRefundAuditFail: `${P}invRefundAuditFail`,
   invDriveRace: `${P}invDriveRace`,
   invDriveRerun: `${P}invDriveRerun`,
+  // W3-V1-55c review repairs (D-90): PA-19a..c (SEC-V55C-2, -3, -4).
+  invRecordRollback: `${P}invRecordRollback`,
+  invRecordRerun: `${P}invRecordRerun`,
+  invKeyInitiated: `${P}invKeyInitiated`,
+  invHumanInitiated: `${P}invHumanInitiated`,
 };
 
 const INVOICE_TOTAL = 100;
@@ -308,8 +316,22 @@ async function contactEventsFor(invoiceId: string, type = 'invoice.payment_recor
   return rows.filter((r: any) => (r.data as any)?.invoiceId === invoiceId);
 }
 
-function crmActivityFor(invoiceId: string): Array<Record<string, any>> {
-  return activity.filter((a) => a.module === 'crm' && a.action === 'invoice.payment_recorded' && a.data?.invoiceId === invoiceId);
+/**
+ * W3-V1-55c (owner ruling D-90): the FINANCE payment_recorded `activities` rows
+ * (real, fresh read) of this invoice's payments. Each is its payment's one feed
+ * row and names who recorded it (USER for a person, SYSTEM for KEY); the PA
+ * cases read the actor here, no longer on the CRM invoice.payment_recorded
+ * copy. The W3-V1-55c review (SEC-V55C-2) has RevenuePostingService write the
+ * row with the payment's transaction, not through the timeline, so the row is
+ * read from the table.
+ */
+async function financeActivityFor(invoiceId: string): Promise<Array<Record<string, any>>> {
+  const ids = (await paymentsOf(invoiceId)).map((p) => p.id);
+  if (ids.length === 0) return [];
+  return db.activity.findMany({
+    where: { businessId: ID.biz, module: 'FINANCE', action: 'payment_recorded', entityType: 'payment', entityId: { in: ids } },
+    orderBy: { occurredAt: 'asc' },
+  });
 }
 
 /** One posting for this payment, attributed to `actor`. */
@@ -320,14 +342,15 @@ async function expectPostingBy(paymentId: string, actor: string | null) {
   expect(txns[0].createdById, `posting creator for ${paymentId}`).toBe(actor);
 }
 
-/** One invoice.payment_recorded ContactEvent for this invoice, attributed to `actor`. */
+/** One invoice.payment_recorded ContactEvent for this invoice, and its payment's FINANCE feed row, attributed to `actor`. */
 async function expectContactEventBy(invoiceId: string, actor: string, actorType: 'USER' | 'SYSTEM') {
   const events = await contactEventsFor(invoiceId);
   expect(events, `contact events for ${invoiceId}`).toHaveLength(1);
   expect(events[0]).toMatchObject({ actorId: actor, actorType, source: 'commerce' });
   expect((events[0].data as any).recordedBy).toBe(actor);
-  const act = crmActivityFor(invoiceId);
-  expect(act, `crm activity for ${invoiceId}`).toHaveLength(1);
+  // W3-V1-55c (D-90): the same actor on the payment's FINANCE row.
+  const act = await financeActivityFor(invoiceId);
+  expect(act, `FINANCE payment_recorded activity for ${invoiceId}`).toHaveLength(1);
   expect(act[0]).toMatchObject({ actorId: actor, actorType });
 }
 
@@ -946,6 +969,8 @@ async function expectNoKeyActor(invoiceId: string) {
     expect((e.data as any)?.recordedBy, `contact event ${e.type} data.recordedBy`).not.toBe(KEY_ACTOR);
   }
   for (const a of activity.filter((x) => x.data?.invoiceId === invoiceId)) expect(a.actorId, `activity ${a.action}`).not.toBe(KEY_ACTOR);
+  // W3-V1-55c (D-90): the payments' FINANCE rows name their recorder too.
+  for (const a of await financeActivityFor(invoiceId)) expect(a.actorId, `activity ${a.module} ${a.action}`).not.toBe(KEY_ACTOR);
 }
 
 const messagesOf = (body: Record<string, unknown>) => [body.message].flat().map(String);
@@ -1580,7 +1605,7 @@ describe('R0-CMF2: drive-intake approval names the approver on the payment it re
     expect(rows[0]).toMatchObject({ status: 'PENDING', recordedBy: null });
     expect(await postingsFor(rows[0].id)).toHaveLength(0);
     expect(await contactEventsFor(ID.invDriveSystem)).toHaveLength(0);
-    expect(crmActivityFor(ID.invDriveSystem)).toEqual([]);
+    expect(await financeActivityFor(ID.invDriveSystem)).toEqual([]);
     expect(JSON.stringify(rows)).not.toContain('"system"');
     // No member, no money: the system placeholder cannot confirm it either.
     await expect(paymentEvidence.confirmPendingPayment(rows[0].id, ID.biz, 'system')).rejects.toMatchObject({ status: 403 });
@@ -1668,4 +1693,97 @@ describe('open gaps found by the R0-CMF2 review (outside the R0-CMF2 write set)'
       'with ModuleScopeGuard on DriveIntakeController.approve (drive-intake.controller.ts); the data-inbox approve route (operations:write, and ' +
       'correctItem rewrites proposedActions) needs the same review; outside the R0-CMF2 write set',
   );
+});
+
+// ---------------------------------------------------------------------------
+// W3-V1-55c review repairs (owner ruling D-90, on D-08): a payment's FINANCE
+// payment_recorded row is its one feed row naming who recorded it, so it is
+// part of the payment (SEC-V55C-2: written by the payment's transaction, a
+// payment that rolls back leaves none), written once per payment (SEC-V55C-3:
+// a re-run on a posted payment, as scripts/finance-backfill-revenue.ts does,
+// adds none) and keeps the human a KEY command ran for (SEC-V55C-4: data
+// .initiatedBy, as the CRM invoice.payment_recorded copy keeps it).
+// ---------------------------------------------------------------------------
+
+/** The FINANCE payment_recorded `activities` rows (real, fresh read) for one payment id. */
+async function financeRowsFor(paymentId: string): Promise<any[]> {
+  return db.activity.findMany({
+    where: { businessId: ID.biz, module: 'FINANCE', action: 'payment_recorded', entityType: 'payment', entityId: paymentId },
+    orderBy: { occurredAt: 'asc' },
+  });
+}
+
+/** The FINANCE payment_recorded entries handed to the best-effort unified timeline for one payment id. */
+function financeEntriesHanded(paymentId: string): Array<Record<string, any>> {
+  return activity.filter((a) => a.module === 'FINANCE' && a.action === 'payment_recorded' && a.entityId === paymentId);
+}
+
+/** Wait out any best-effort (not awaited) timeline write before reading the table. */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 400));
+
+describe('W3-V1-55c review repairs: the FINANCE payment_recorded row is part of the payment, once, and keeps the initiating human (PA-19, D-90)', () => {
+  it('PA-19a (SEC-V55C-2, D-90): a payment that rolls back (reconcile fails inside the payment transaction) leaves no FINANCE payment_recorded row naming its recorder: 500, no payment, posting or row, and nothing handed to the best-effort timeline; the retried payment then writes its one row naming V with the payment', async () => {
+    const invoice = await db.invoice.findUnique({ where: { id: ID.invRecordRollback }, select: { invoiceNumber: true } });
+    const rowsForInvoice = () => db.activity.findMany({
+      where: { businessId: ID.biz, module: 'FINANCE', action: 'payment_recorded', detail: `Invoice ${invoice.invoiceNumber}` },
+    });
+
+    const spy = vi.spyOn(workflow, 'reconcileFromPayments').mockRejectedValueOnce(new Error(`${P}forced reconcile failure`));
+    try {
+      const res = await postAs(ID.userV, ID.invRecordRollback, { amount: 10, method: 'cash', reference: 'PYA-RR-1' });
+      expect(res.status, JSON.stringify(res.body)).toBe(500);
+    } finally {
+      spy.mockRestore();
+    }
+    await settle();
+    expect(await paymentsOf(ID.invRecordRollback)).toHaveLength(0);
+    expect(await db.financialTransaction.count({ where: { businessId: ID.biz, reference: invoice.invoiceNumber } })).toBe(0);
+    expect(await rowsForInvoice(), 'FINANCE rows for the rolled-back payment').toEqual([]);
+    expect(activity.filter((a) => a.module === 'FINANCE' && a.action === 'payment_recorded'), 'FINANCE entries handed to the timeline').toEqual([]);
+
+    // The retry is recorded once, its row written with it and naming V.
+    const retried = await postAs(ID.userV, ID.invRecordRollback, { amount: 10, method: 'cash', reference: 'PYA-RR-2' });
+    expect(retried.status, JSON.stringify(retried.body)).toBe(201);
+    const paymentId = retried.body.payment.id;
+    await expectPostingBy(paymentId, ID.userV);
+    const rows = await financeRowsFor(paymentId);
+    expect(rows.map((r: any) => [r.actorType, r.actorId, r.contactId, r.title])).toEqual([['USER', ID.userV, ID.contact, 'Payment recorded: TTD 10']]);
+    expect(financeEntriesHanded(paymentId), 'written by the payment transaction, not the best-effort timeline').toEqual([]);
+    expect((await rowsForInvoice()).map((r: any) => r.entityId)).toEqual([paymentId]);
+  });
+
+  it('PA-19b (SEC-V55C-3, D-90): re-running onPaymentRecorded on a payment already posted (scripts/finance-backfill-revenue.ts, with or without a transaction) answers alreadyPosted and adds no second FINANCE row: the payment keeps ONE row, naming V, and one posting', async () => {
+    const res = await postAs(ID.userV, ID.invRecordRerun, { amount: 10, method: 'cash', reference: 'PYA-RE-1' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const paymentId = res.body.payment.id;
+
+    const again = await revenuePosting.onPaymentRecorded(paymentId);
+    expect(again).toMatchObject({ alreadyPosted: true });
+    const inTx = await db.$transaction((tx: any) => revenuePosting.onPaymentRecorded(paymentId, { tx }));
+    expect(inTx).toMatchObject({ alreadyPosted: true });
+    await settle();
+
+    await expectPostingBy(paymentId, ID.userV);
+    const rows = await financeRowsFor(paymentId);
+    expect(rows.map((r: any) => [r.actorType, r.actorId])).toEqual([['USER', ID.userV]]);
+  });
+
+  it("PA-19c (SEC-V55C-4, PL07-ST-3, D-90): KEY's process_payment for a member names KEY (SYSTEM) on the FINANCE row and keeps that member as data.initiatedBy, as the contact event does; a human recorder's row carries no initiatedBy (PA-15's rule)", async () => {
+    await adapter.processPayment({ businessId: ID.biz, invoiceId: ID.invKeyInitiated, amount: 10, method: 'cash', reference: 'PYA-KI-1', initiatedBy: ID.userU });
+    const [keyPayment] = await paymentsOf(ID.invKeyInitiated);
+    expect(keyPayment.recordedBy).toBe(KEY_ACTOR);
+    const keyRows = await financeRowsFor(keyPayment.id);
+    expect(keyRows.map((r: any) => [r.actorType, r.actorId])).toEqual([['SYSTEM', KEY_ACTOR]]);
+    expect(keyRows[0].data).toMatchObject({ amount: 10, currency: 'TTD', initiatedBy: ID.userU });
+    expect(((await contactEventsFor(ID.invKeyInitiated))[0].data as any).initiatedBy).toBe(ID.userU);
+
+    // A human recorder: initiatedBy is ignored, on the row as on the contact event.
+    const human = await commerce.recordPayment(
+      ID.invHumanInitiated, ID.biz, { amount: 10, method: 'cash', reference: 'PYA-HI-2' }, { actorId: ID.userU, initiatedBy: ID.userV },
+    );
+    const humanRows = await financeRowsFor(human.payment.id);
+    expect(humanRows.map((r: any) => [r.actorType, r.actorId])).toEqual([['USER', ID.userU]]);
+    expect((humanRows[0].data as any).initiatedBy).toBeUndefined();
+    expect(((await contactEventsFor(ID.invHumanInitiated))[0].data as any).initiatedBy).toBeUndefined();
+  });
 });

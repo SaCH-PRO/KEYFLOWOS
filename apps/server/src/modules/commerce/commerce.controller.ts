@@ -3,7 +3,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { Request, Response } from 'express';
 import { InvoiceFromTimeDto } from './dto/invoice-from-time.dto';
 import { TimeEntryService } from '../time-tracking/time-entry.service';
-import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT } from './commerce.service';
+import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT, createEventClaim } from './commerce.service';
 import { CommerceVisionService } from './commerce-vision.service';
 import { StoreReadinessService } from './store-readiness.service';
 import { PaymentEvidenceService } from './payment-evidence.service';
@@ -34,7 +34,7 @@ import { assertQuoteStatusAgreement } from './quote-workflow';
 import { buildInvoiceEmailHtml, emailLineItems } from './invoice-email.template';
 import type { InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import { SKIP_BUSINESS_EVENT_KEY } from '../business-events/business-event.interceptor';
+import { SKIP_BUSINESS_EVENT_KEY, auditOnClaim } from '../business-events/business-event.interceptor';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { BUSINESS_PROFILE_OWNER_ONLY, FinanceSettingsService } from '../finance/finance-settings.service';
 
@@ -816,6 +816,12 @@ export class CommerceController {
       notes: body.notes,
       ...idempotency,
     });
+    // W3-V1-45c-EVENT-REPLAY (SEC-V45b-1 / CR-V45b-1; review CR-V45c-1; D-15):
+    // a keyed create hands the global business event audit its invoice's
+    // claim, so of the create, its replays and a burst's losers exactly one
+    // writes invoice.create, even when the create failed after its commit.
+    const invoiceEventClaim = createEventClaim(invoice);
+    if (invoiceEventClaim) auditOnClaim(req, invoiceEventClaim);
     // V1-45b review SEC-V45b-2 (the SEC-CMF1-2 class): the service answers a
     // create, and a keyed replay, with the whole Contact row as it stands now;
     // the body carries only the projected contact, as every other invoice
@@ -1164,6 +1170,10 @@ export class CommerceController {
       quoteNumber: body.quoteNumber,
       ...createIdempotency(req),
     });
+    // W3-V1-45c-EVENT-REPLAY (SEC-V45b-1 / CR-V45b-1; review CR-V45c-1): as on
+    // invoice create, the quote's claim: exactly one quote.create business event.
+    const quoteEventClaim = createEventClaim(quote);
+    if (quoteEventClaim) auditOnClaim(req, quoteEventClaim);
     return toQuoteWriteResponse(quote);
   }
 
