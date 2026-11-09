@@ -13,6 +13,16 @@
  * transaction before it reads. This file is the reading of every writer, run
  * on every test run, so a writer that forgets the lock is named.
  *
+ * The other safe shape is one atomic statement (ATOMIC_STATEMENT_OWNERS): an
+ * `UPDATE businesses SET meta_data = <expression over the row's own
+ * meta_data>` that changes only its own key and reads nothing beforehand. The
+ * UPDATE takes the row lock itself and computes from the newest committed row
+ * after any wait, and it holds no lock or pooled connection across round trips.
+ * The public storefront event (SiteService.trackEvent) has that shape since
+ * review D12-ST-1 / CR-D12-1: under the row lock in an interactive
+ * transaction, an anonymous burst of events held the shared pool and failed
+ * other tenants' queries.
+ *
  * WHAT IS READ (typescript AST, every non-test .ts file under apps/server/src):
  *   - every `<x>.business.update|updateMany|updateManyAndReturn|upsert(...)`
  *     call (also `<x>['business'].<op>(`), and the keys of its `data` (for
@@ -22,7 +32,7 @@
  *     `name['key'] =` assignment). A computed key, a parameter or any other
  *     expression the reader cannot see into is OPAQUE.
  *   - a nested write under another model: `business: { update | upsert: ... }`.
- *   - raw SQL in a string or template literal: `UPDATE businesses SET ... meta_data`.
+ *   - raw SQL in a string or template literal: `UPDATE businesses [[AS] alias] SET ... meta_data`.
  * A write is a metaData write when its data has the key `metaData` or is
  * OPAQUE. Writers are keyed `<file under src>#<Class>.<method>`.
  *
@@ -33,7 +43,13 @@
  * call's result (directly, or through a local initialised from it): the copy
  * written back is the one read under the lock. IdentityService.updateBusiness
  * takes the same lock inline (INLINE_LOCK_OWNERS); it must still run the
- * `FOR NO KEY UPDATE` statement on the same client before its write.
+ * `FOR NO KEY UPDATE` statement on the same client before its write. A raw
+ * write is LOCKED (and ATOMIC) only when its writer is in
+ * ATOMIC_STATEMENT_OWNERS, its `SET meta_data =` expression reads the row's
+ * own meta_data (before the statement's last WHERE), no value interpolated
+ * into it mentions metaData, and its function reads no metaData before it
+ * (no business find* naming metaData, no lockBusinessMeta, no raw SELECT of
+ * meta_data).
  *
  * WHAT IS REQUIRED:
  *   MW-03a every unlocked metaData writer is in D13_ALLOWLIST (FOLLOW3-D13
@@ -69,7 +85,10 @@ const OPAQUE = '<opaque>';
 const RAW = 'raw meta_data';
 
 const WRITE_OPS = new Set(['update', 'updateMany', 'updateManyAndReturn', 'upsert']);
-const RAW_META_UPDATE = /\bupdate\s+(?:"?public"?\.)?"?businesses"?\s+set\b[\s\S]*?\bmeta_data\b/i;
+const RAW_META_UPDATE = /\bupdate\s+(?:only\s+)?(?:"?public"?\.)?"?businesses"?(?:\s+(?:as\s+)?(?!set\b)"?\w+"?)?\s+set\b[\s\S]*?\bmeta_data\b/i;
+/** `SET meta_data =` (optionally alias-qualified): where an atomic statement's new value starts. */
+const META_SET = /\bset\s+(?:"?\w+"?\.)?"?meta_data"?\s*=/i;
+const RAW_META_READ = /\bselect\b[\s\S]*\bmeta_data\b/i;
 const INLINE_LOCK = /\bSELECT\s+id\s+FROM\s+businesses\s+WHERE\s+id\s*=\s*\$\{[^}]+\}\s+FOR\s+NO\s+KEY\s+UPDATE\b/i;
 
 type Entry = { why: string };
@@ -90,10 +109,15 @@ export const D13_ALLOWLIST: Record<string, Entry> = {
   'modules/gamification/gamification.listener.ts#GamificationListener.handleProductCreated': { why: 'FOLLOW3-D13: gamification flag (event-driven).' },
   'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.checkAndGenerateNudges': { why: 'FOLLOW3-D13: concierge nudges.' },
   'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.snoozeNudge': { why: 'FOLLOW3-D13: concierge nudge snooze.' },
-  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.saveConnection': { why: 'FOLLOW3-D13: metaData GA4 connection.' },
-  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.disconnectGa4': { why: 'FOLLOW3-D13: metaData GA4 connection.' },
-  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.saveConnection': { why: 'FOLLOW3-D13: metaData Search Console connection.' },
-  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.disconnectGsc': { why: 'FOLLOW3-D13: metaData Search Console connection.' },
+  // SECRET-BEARING (review D12-ST-2): metaData.ga4 and metaData.gsc hold the
+  // Google OAuth accessToken and refreshToken in plaintext; FOLLOW3-D13
+  // converts these SEO writers first (a stale copy restores a disconnected
+  // token or a cleared payment secret). They are not masked on Business reads
+  // either: that is its own packet (see the it.todo below).
+  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.saveConnection': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2): metaData.ga4 GA4 connection with the Google OAuth accessToken/refreshToken.' },
+  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.disconnectGa4': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2): removes the metaData.ga4 OAuth tokens; a stale copy written after it restores them.' },
+  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.saveConnection': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2): metaData.gsc Search Console connection with the Google OAuth accessToken/refreshToken.' },
+  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.disconnectGsc': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2): removes the metaData.gsc OAuth tokens; a stale copy written after it restores them.' },
   'modules/site/case-study.service.ts#CaseStudyService.saveMeta': { why: 'FOLLOW3-D13: metaData.caseStudies.' },
   'modules/site/qualification.service.ts#QualificationService.updateQualificationConfig': { why: 'FOLLOW3-D13: metaData qualification config.' },
   // Found by this census, not in FOLLOW3-D13's evidence list: D13 converts
@@ -106,8 +130,8 @@ export const D13_ALLOWLIST: Record<string, Entry> = {
   'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.awardSetupMilestone': { why: 'FOLLOW3-D13 (found by this census): setup milestones (D-11 owner-only key).' },
   'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.dismissConcierge': { why: 'FOLLOW3-D13 (found by this census): concierge dismissal.' },
   'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.resumeConcierge': { why: 'FOLLOW3-D13 (found by this census): concierge resume.' },
-  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.syncAnalyticsData': { why: 'FOLLOW3-D13 (found by this census): metaData GA4 sync state.' },
-  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.syncSearchData': { why: 'FOLLOW3-D13 (found by this census): metaData Search Console sync state.' },
+  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.syncAnalyticsData': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2; found by this census): writes back a metaData copy (GA4 OAuth tokens, payment secrets) read before an external Google fetch: the widest stale-copy window.' },
+  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.syncSearchData': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2; found by this census): writes back a metaData copy (Search Console OAuth tokens, payment secrets) read before an external Google fetch.' },
 };
 
 /** The allow-list size at FOLLOW3-D12. It only goes down (FOLLOW3-D13 empties it). */
@@ -117,6 +141,17 @@ export const ALLOWLIST_CEILING = 24;
 const INLINE_LOCK_OWNERS: Record<string, Entry> = {
   'modules/identity/identity.service.ts#IdentityService.updateBusiness': {
     why: 'R0-SEC2c review SEC2c-ST-1: the profile PATCH locks the row FOR NO KEY UPDATE, reads and writes in one transaction.',
+  },
+};
+
+/**
+ * Writers that change metaData in one atomic SQL statement computed from the
+ * row's own meta_data (the shape the reader checks is in the header). Each
+ * entry is reviewed: the statement must write back no key but its own.
+ */
+export const ATOMIC_STATEMENT_OWNERS: Record<string, Entry> = {
+  'modules/site/site.service.ts#SiteService.trackEvent': {
+    why: 'FOLLOW3-D12 review D12-ST-1 / CR-D12-1: the public, unauthenticated storefront event appends its event to storefrontEvents (newest 1000 kept) in one UPDATE ... WHERE deleted_at IS NULL; no read lock or pooled connection held across round trips.',
   },
 };
 
@@ -150,6 +185,8 @@ export interface MetaWriter {
   locked: boolean;
   opaque: boolean;
   raw: boolean;
+  /** A registered single-statement writer of the checked shape (locked by its own UPDATE). */
+  atomic?: boolean;
 }
 
 function propName(name: ts.PropertyName | ts.MemberName | undefined): string | null {
@@ -377,6 +414,47 @@ function fromLockedRead(e: ts.Expression, at: ts.Node, locks: ts.CallExpression[
   return false;
 }
 
+/** Whether `fn` reads metaData before `pos`: a business find* naming metaData, a lockBusinessMeta call or a raw SELECT of meta_data. */
+function readsMetaBefore(fn: ts.Node, pos: number, sf: ts.SourceFile): boolean {
+  let found = false;
+  const visit = (n: ts.Node) => {
+    if (found) return;
+    if (n.getStart(sf) < pos) {
+      if (ts.isCallExpression(n)) {
+        const callee = unwrap(n.expression);
+        if (ts.isIdentifier(callee) && callee.text === LOCK_FN) found = true;
+        else if (ts.isPropertyAccessExpression(callee) && /^find/.test(callee.name.text) && isBusinessDelegate(callee.expression) && /\bmetaData\b/.test(n.getText(sf))) found = true;
+        else if (ts.isPropertyAccessExpression(callee) && /^\$queryRaw/.test(callee.name.text) && RAW_META_READ.test(n.getText(sf))) found = true;
+      } else if (ts.isTaggedTemplateExpression(n)) {
+        const tag = unwrap(n.tag);
+        if (ts.isPropertyAccessExpression(tag) && /^\$queryRaw/.test(tag.name.text) && RAW_META_READ.test(n.template.getText(sf))) found = true;
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(fn);
+  return found;
+}
+
+/**
+ * Whether the raw statement `lit` is an atomic metaData writer: its
+ * `SET meta_data =` value reads the row's own meta_data (before the
+ * statement's last WHERE), no interpolated value mentions metaData, and its
+ * function reads no metaData before it.
+ */
+function atomicStatement(lit: ts.Node, sf: ts.SourceFile): boolean {
+  const text = lit.getText(sf);
+  const set = META_SET.exec(text);
+  if (!set) return false;
+  const from = set.index + set[0].length;
+  const where = text.toLowerCase().lastIndexOf('where');
+  const value = text.slice(from, where > from ? where : undefined);
+  if (!/\bmeta_data\b/i.test(value)) return false;
+  if (ts.isTemplateExpression(lit) && lit.templateSpans.some((s) => /\bmetaData\b/.test(s.expression.getText(sf)))) return false;
+  const fn = functionsOf(lit)[0];
+  return !!fn && !readsMetaBefore(fn, lit.getStart(sf), sf);
+}
+
 /** Whether every value spread into the written metaData is the locked read. */
 function spreadsLockedRead(meta: ts.Expression | undefined, at: ts.Node, locks: ts.CallExpression[]): boolean {
   if (!meta) return false;
@@ -403,8 +481,12 @@ function ownerKey(rel: string, node: ts.Node): string {
   return `${rel}#${cls ?? '<module>'}.${method ?? '<top-level>'}`;
 }
 
-/** Every Business.metaData writer in one source file (`rel` is the path under src), one row per write. */
-export function scanMetaWrites(rel: string, source: string): MetaWriter[] {
+/**
+ * Every Business.metaData writer in one source file (`rel` is the path under
+ * src), one row per write. `atomicOwners` is the reviewed list of
+ * single-statement writers (ATOMIC_STATEMENT_OWNERS unless a test passes one).
+ */
+export function scanMetaWrites(rel: string, source: string, atomicOwners: Record<string, Entry> = ATOMIC_STATEMENT_OWNERS): MetaWriter[] {
   const sf = ts.createSourceFile(rel, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
   const found: MetaWriter[] = [];
   const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
@@ -444,7 +526,11 @@ export function scanMetaWrites(rel: string, source: string): MetaWriter[] {
         }
       }
     } else if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n) || ts.isTemplateExpression(n)) {
-      if (RAW_META_UPDATE.test(n.getText(sf))) found.push({ key: ownerKey(rel, n), line: lineOf(n), locked: false, opaque: false, raw: true });
+      if (RAW_META_UPDATE.test(n.getText(sf))) {
+        const key = ownerKey(rel, n);
+        const atomic = Boolean(atomicOwners[key]) && atomicStatement(n, sf);
+        found.push({ key, line: lineOf(n), locked: atomic, opaque: false, raw: true, ...(atomic ? { atomic } : {}) });
+      }
       return;
     }
     ts.forEachChild(n, visit);
@@ -523,6 +609,23 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
     }
   });
 
+  // Review D12-ST-2, outside the D12 write set (core/security/sanitize-business.ts
+  // and the SEO services): the SEO connections store Google OAuth tokens in
+  // metaData.ga4 / metaData.gsc, and maskMetaData masks only whatsapp and the
+  // four payment secrets, so GET /identity/businesses/:id answers the refresh
+  // tokens to any member. The writers are flagged first for FOLLOW3-D13 in
+  // D13_ALLOWLIST above; the read mask needs its own packet.
+  it.todo('[D12-ST-2] a Business read masks metaData.ga4 and metaData.gsc OAuth tokens (accessToken, refreshToken) as it masks the payment secrets (follow-up packet: sanitize-business.ts and the SEO writers are outside the FOLLOW3-D12 write set)');
+
+  it('[MW-03f] the public storefront event (SiteService.trackEvent) is one atomic statement, not a read under the row lock in an interactive transaction (review D12-ST-1 / CR-D12-1), and every ATOMIC_STATEMENT_OWNERS entry still is one', () => {
+    const trackEvent = WRITES.filter((w) => w.key === 'modules/site/site.service.ts#SiteService.trackEvent');
+    expect(trackEvent.map((w) => `${w.raw ? 'raw' : 'client'} ${w.atomic ? 'atomic' : 'not atomic'} ${w.locked ? 'locked' : 'unlocked'}`)).toEqual(['raw atomic locked']);
+    for (const key of Object.keys(ATOMIC_STATEMENT_OWNERS)) {
+      expect(WRITES.some((w) => w.key === key && w.atomic), `${key} is still an atomic metaData statement (else remove it from ATOMIC_STATEMENT_OWNERS)`).toBe(true);
+      expect(WRITES.filter((w) => w.key === key && !w.atomic), `${key} writes metaData only in its atomic statement`).toEqual([]);
+    }
+  });
+
   it('[MW-03c] RED-BEFORE: the helper takes the business row lock (FOR NO KEY UPDATE) on the caller\'s transaction client before it reads metaData', () => {
     const file = join(SRC, HELPER_FILE);
     expect(existsSync(file), `${HELPER_FILE} exists`).toBe(true);
@@ -597,10 +700,24 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
       "    await tx.business.findMany({ where: { metaData: { path: ['k'], equals: 1 } } });",
       "    await tx.business.create({ data: { metaData: {} } });",
       '  }',
+      '  async atomicMerge(tx: any, id: string, event: string) {',
+      "    await tx.$executeRaw`UPDATE businesses SET meta_data = COALESCE(meta_data, '{}'::jsonb) || jsonb_build_object('k', ${event}::jsonb) WHERE id = ${id}`;",
+      '  }',
+      '  async atomicAfterRead(tx: any, id: string) {',
+      '    const b = await tx.business.findUnique({ where: { id }, select: { metaData: true } });',
+      '    await tx.$executeRaw`UPDATE businesses SET meta_data = meta_data || ${JSON.stringify(b.metaData)}::jsonb WHERE id = ${id}`;',
+      '  }',
+      '  async aliased(tx: any, id: string) {',
+      "    await tx.$executeRaw`UPDATE businesses AS b SET meta_data = ${'{}'}::jsonb WHERE b.id = ${id}`;",
+      '  }',
       '}',
     ].join('\n');
+    const row = (w: MetaWriter) => `${w.key.split('#')[1]} ${w.line} ${w.locked ? 'locked' : 'unlocked'}${w.opaque ? ' opaque' : ''}${w.raw ? ' raw' : ''}${w.atomic ? ' atomic' : ''}`;
     const scanned = scanMetaWrites(rel, injected);
-    expect(scanned.map((w) => `${w.key.split('#')[1]} ${w.line} ${w.locked ? 'locked' : 'unlocked'}${w.opaque ? ' opaque' : ''}${w.raw ? ' raw' : ''}`)).toEqual([
+    expect(scanned.map(row)).toEqual([
+      'RogueMeta.aliased 55 unlocked raw',
+      'RogueMeta.atomicAfterRead 52 unlocked raw',
+      'RogueMeta.atomicMerge 48 unlocked raw',
       'RogueMeta.locked 39 locked',
       'RogueMeta.lockedOtherClient 16 unlocked',
       'RogueMeta.lockedStaleCopy 23 unlocked',
@@ -613,10 +730,29 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
     // Findings the injection adds (independent of what the tree holds today).
     const baseline = new Set(censusProblems(WRITES, D13_ALLOWLIST, OPAQUE_NOT_META));
     const added = censusProblems([...WRITES, ...scanned], D13_ALLOWLIST, OPAQUE_NOT_META).filter((p) => !baseline.has(p));
-    expect(added).toHaveLength(7);
+    expect(added).toHaveLength(10);
     expect(added).toContain(`${rel}#RogueMeta.unlocked (${rel}:6) writes Business.metaData without lockBusinessMeta on its client before the write (or spreads a metaData copy not read under it)`);
     expect(added).toContain(`${rel}#RogueMeta.raw (${rel}:33) writes Business.metaData with raw SQL`);
+    expect(added).toContain(`${rel}#RogueMeta.aliased (${rel}:55) writes Business.metaData with raw SQL`);
     expect(added).toContain(`${rel}#RogueMeta.opaque (${rel}:27) writes Business data the reader cannot see into (${OPAQUE}): it may write metaData`);
+
+    // A reviewed single-statement writer passes only in the atomic shape: an
+    // in-statement merge with no read before it. A registered writer that
+    // reads metaData first, or writes a constant (not the row's own value), is
+    // still a stale-copy writer.
+    const reviewed = {
+      [`${rel}#RogueMeta.atomicMerge`]: { why: 'self-test' },
+      [`${rel}#RogueMeta.atomicAfterRead`]: { why: 'self-test' },
+      [`${rel}#RogueMeta.raw`]: { why: 'self-test' },
+    };
+    const withReviewed = scanMetaWrites(rel, injected, reviewed);
+    expect(withReviewed.filter((w) => w.raw).map(row)).toEqual([
+      'RogueMeta.aliased 55 unlocked raw',
+      'RogueMeta.atomicAfterRead 52 unlocked raw',
+      'RogueMeta.atomicMerge 48 locked raw atomic',
+      'RogueMeta.raw 33 unlocked raw',
+    ]);
+    expect(censusProblems([...WRITES, ...withReviewed], D13_ALLOWLIST, OPAQUE_NOT_META).filter((p) => !baseline.has(p))).toHaveLength(9);
 
     // A stale allow-list entry fails too: the list shrinks with the code.
     const first = Object.keys(D13_ALLOWLIST)[0];

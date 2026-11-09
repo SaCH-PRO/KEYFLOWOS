@@ -10,6 +10,9 @@ interface StorefrontEvent {
   timestamp: string;
 }
 
+/** The newest storefront events Business.metaData.storefrontEvents keeps. */
+const STOREFRONT_EVENT_LIMIT = 1000;
+
 interface FunnelStage {
   stage: string;
   count: number;
@@ -210,36 +213,46 @@ export class SiteService {
     if (!type || !this.ALLOWED_EVENT_TYPES.has(type)) return { tracked: false };
     if (itemId && itemId.length > 100) return { tracked: false };
 
-    // FOLLOW3-D12 (R0-SEC2c review SEC2c-ST-1, case SEC2c-C03): this public,
-    // unauthenticated route read metaData without a lock and wrote the whole
-    // bag back, so an owner's payment secret cleared or rotated between the
-    // read and the write was stored again, and two events in flight together
-    // recorded one. The read and the write now run under the business row
-    // lock (lockBusinessMeta), the lock the profile PATCH takes.
-    const tracked = await this.prisma.client.$transaction(async (tx) => {
-      const business = await lockBusinessMeta(tx, businessId, { live: true });
-      if (!business) return false;
+    const event: StorefrontEvent = {
+      type,
+      itemId: itemId ?? null,
+      timestamp: new Date().toISOString(),
+    };
 
-      const meta = (business.metaData as Record<string, any>) ?? {};
-      const events: StorefrontEvent[] = meta.storefrontEvents ?? [];
-
-      events.push({
-        type,
-        itemId: itemId ?? null,
-        timestamp: new Date().toISOString(),
-      });
-
-      const bounded = events.slice(-1000);
-
-      await tx.business.update({
-        where: { id: businessId },
-        data: {
-          metaData: { ...meta, storefrontEvents: bounded },
-        },
-      });
-      return true;
-    });
-    if (!tracked) return;
+    // FOLLOW3-D12 (R0-SEC2c review SEC2c-ST-1, case SEC2c-C03; review
+    // D12-ST-1 / CR-D12-1): this public, unauthenticated route (60 per minute
+    // per IP) used to read metaData and write the whole bag back, so an
+    // owner's payment secret cleared or rotated between the read and the write
+    // was stored again, and two events in flight together recorded one. It is
+    // one statement now: it appends this event to the stored storefrontEvents
+    // (keeping the newest STOREFRONT_EVENT_LIMIT) and writes back no other key.
+    // The UPDATE takes the row lock itself and, under READ COMMITTED, computes
+    // the new value from the newest committed row after any wait, so nothing
+    // that commits meanwhile is undone and no event is lost; no read lock is
+    // held across round trips and no pooled connection is held by an
+    // interactive transaction, so a burst of events cannot exhaust the shared
+    // pool or time out the owner's PATCH. A soft-deleted or unknown business
+    // matches no row: nothing is written and the route answers nothing, as
+    // before.
+    const written = await this.prisma.client.$executeRaw`
+      UPDATE businesses
+         SET meta_data = (CASE WHEN jsonb_typeof(meta_data) = 'object' THEN meta_data ELSE '{}'::jsonb END)
+               || jsonb_build_object('storefrontEvents', (
+                    SELECT COALESCE(jsonb_agg(kept.value ORDER BY kept.n), '[]'::jsonb)
+                      FROM (
+                        SELECT e.value, e.n
+                          FROM jsonb_array_elements(
+                                 (CASE WHEN jsonb_typeof(meta_data -> 'storefrontEvents') = 'array'
+                                       THEN meta_data -> 'storefrontEvents' ELSE '[]'::jsonb END)
+                                 || jsonb_build_array(${JSON.stringify(event)}::jsonb)
+                               ) WITH ORDINALITY AS e(value, n)
+                         ORDER BY e.n DESC
+                         LIMIT ${STOREFRONT_EVENT_LIMIT}::int
+                      ) AS kept
+                  )),
+             updated_at = NOW()
+       WHERE id = ${businessId} AND deleted_at IS NULL`;
+    if (written === 0) return;
 
     return { tracked: true };
   }

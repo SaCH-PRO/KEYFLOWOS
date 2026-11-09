@@ -19,6 +19,15 @@ export type BusinessMetaTx = Parameters<Parameters<PrismaService['client']['$tra
  * transaction client. A concurrent writer that also locks first waits for
  * this transaction to commit and then reads its result.
  *
+ * The lock is held, with one pooled connection, from this read to the
+ * caller's commit. A public or high-rate writer that only adds its own key
+ * must not take it (review D12-ST-1 / CR-D12-1: a burst of anonymous
+ * storefront events queued on the row lock while each held one of the pool's
+ * connections, and other tenants' queries failed): write that key in one
+ * atomic statement over the row's own meta_data instead, as
+ * SiteService.trackEvent does (the census lists such writers in
+ * ATOMIC_STATEMENT_OWNERS).
+ *
  * Use it inside the transaction that writes, and spread the metaData it
  * returns (not an earlier read) into the write:
  *

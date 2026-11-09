@@ -9,24 +9,39 @@
  * transaction). The other writers did not: they read the stored value, and a
  * write that committed between their read and their write was undone when
  * they wrote their stale copy back. This suite proves the writers this packet
- * converts (SiteService.trackEvent, SiteService.updateStorefrontConfig,
+ * converts (SiteService.updateStorefrontConfig,
  * MarketplaceService.updateDeliveryConfig, WhatsAppService.saveConfig) now
  * take the same lock (lockBusinessMeta, apps/server/src/core/prisma/business-meta.ts)
- * before they read; apps/server/src/core/prisma/business-meta-writers.spec.ts
- * is the census of every other writer.
+ * before they read, and that SiteService.trackEvent, one atomic statement that
+ * writes only its own key, loses nothing and undoes nothing;
+ * apps/server/src/core/prisma/business-meta-writers.spec.ts is the census of
+ * every other writer.
  *
- * HOW THE INTERLEAVING IS MADE: the writer under test gets a PrismaService
- * whose client is the real one, except that one armed `business.update` call
- * (on the client or on an interactive transaction's client) stops before it
- * runs until the test releases it. The writer is started and the test waits
- * until it is stopped there: it has read metaData and is about to write. The
- * concurrent write (the owner's real PATCH through the real guards, or a
- * second call of the same writer) is then sent, and the test waits until it
- * has either committed or is waiting on the business row lock (pg_stat_activity),
- * then releases the writer. Unlocked, the concurrent write commits first and
- * the writer's stale copy overwrites it. Locked, the concurrent write waits for
- * the writer's commit and then reads the writer's result. Nothing else is
- * mocked; the services run against the database at DATABASE_URL.
+ * HOW THE INTERLEAVING IS MADE (MW-01, MW-04, MW-05): the writer under test
+ * gets a PrismaService whose client is the real one, except that one armed
+ * `business.update` call (on the client or on an interactive transaction's
+ * client) stops before it runs until the test releases it; when it stops
+ * inside a transaction, the test reads that transaction's backend pid. The
+ * writer is started and the test waits until it is stopped there: it has read
+ * metaData and is about to write. The owner's real PATCH (through the real
+ * guards) is then sent, and the test waits until it has either committed or
+ * waits, in Postgres, on a lock the writer's own backend holds
+ * (pg_blocking_pids; a waiter on any other lock, another suite's included, is
+ * not counted: review CR-D12-2), then releases the writer. Unlocked, the PATCH
+ * commits first and the writer's stale copy overwrites it. Locked, the PATCH
+ * waits for the writer's commit and then reads the writer's result; the test
+ * asserts that it waited.
+ *
+ * SiteService.trackEvent (the public, unauthenticated storefront event) is one
+ * atomic statement instead (review D12-ST-1 / CR-D12-1: an interactive
+ * transaction that held the row lock and a pooled connection across its round
+ * trips let an anonymous burst exhaust the shared pool). It has no read before
+ * its write to stop at, so MW-02 holds the row from a test transaction, queues
+ * the owner's clearing PATCH and two events behind it (counted by
+ * pg_blocking_pids from the holder's backend) and then commits. MW-06 floods
+ * one business with storefront events while another tenant reads and the
+ * owner clears a secret. Nothing else is mocked; the services run against the
+ * database at DATABASE_URL.
  *
  * The writers are called on their services directly: the public route
  * (POST /site/businesses/:businessId/analytics/event) passes its body to
@@ -70,6 +85,7 @@ let db: any;
 let app: any;
 let pausing: ReturnType<typeof pausingPrisma>;
 let site: any;
+let plainSite: any; // SiteService over the real PrismaService client (no pausing proxy)
 let marketplace: any;
 let whatsapp: any;
 
@@ -103,12 +119,14 @@ const patchBusiness = (body: Record<string, unknown>) =>
 /**
  * A PrismaService over the real client in which one armed `<model>.<op>` call
  * (on the client, or on the client an interactive $transaction hands its
- * callback) stops before it runs until the test releases it. Unarmed, every
- * call goes straight through.
+ * callback) stops before it runs until the test releases it. When it stops on
+ * a transaction's client, `reached` resolves with that transaction's backend
+ * pid (read on the stopped transaction, which is idle then); on the plain
+ * client, with undefined. Unarmed, every call goes straight through.
  */
 function pausingPrisma(client: any) {
-  let armed: { model: string; op: string; reached: () => void; release: Promise<void> } | undefined;
-  const delegate = (d: any, model: string) => new Proxy(d, {
+  let armed: { model: string; op: string; reached: (pid: number | undefined) => void; release: Promise<void> } | undefined;
+  const delegate = (d: any, model: string, owner: any, inTransaction: boolean) => new Proxy(d, {
     get(target, prop) {
       const value = Reflect.get(target, prop);
       if (typeof value !== 'function') return value;
@@ -116,19 +134,24 @@ function pausingPrisma(client: any) {
         const gate = armed;
         if (gate && gate.model === model && gate.op === prop) {
           armed = undefined;
-          gate.reached();
-          return gate.release.then(() => value.apply(target, args));
+          const pid: Promise<number | undefined> = inTransaction
+            ? owner.$queryRawUnsafe('SELECT pg_backend_pid() AS pid').then((r: any[]) => Number(r[0].pid))
+            : Promise.resolve(undefined);
+          return pid.then((p) => {
+            gate.reached(p);
+            return gate.release;
+          }).then(() => value.apply(target, args));
         }
         return value.apply(target, args);
       };
     },
   });
-  const wrap = (c: any): any => new Proxy(c, {
+  const wrap = (c: any, inTransaction: boolean): any => new Proxy(c, {
     get(target, prop) {
-      if (prop === 'business') return delegate(Reflect.get(target, prop), 'business');
+      if (prop === 'business') return delegate(Reflect.get(target, prop), 'business', target, inTransaction);
       if (prop === '$transaction') {
         return (arg: any, opts?: any) => (typeof arg === 'function'
-          ? target.$transaction((tx: any) => arg(wrap(tx)), opts)
+          ? target.$transaction((tx: any) => arg(wrap(tx, true)), opts)
           : target.$transaction(arg, opts));
       }
       const value = Reflect.get(target, prop);
@@ -136,12 +159,12 @@ function pausingPrisma(client: any) {
     },
   });
   return {
-    service: { client: wrap(client) },
+    service: { client: wrap(client, false) },
     /** Stop the next `<model>.<op>` call before it runs. */
     pauseNext(model: string, op: string) {
-      let reached!: () => void;
+      let reached!: (pid: number | undefined) => void;
       let release!: () => void;
-      const reachedP = new Promise<void>((r) => { reached = r; });
+      const reachedP = new Promise<number | undefined>((r) => { reached = r; });
       const releaseP = new Promise<void>((r) => { release = r; });
       armed = { model, op, reached, release: releaseP };
       return { reached: reachedP, release };
@@ -150,19 +173,49 @@ function pausingPrisma(client: any) {
   };
 }
 
-/** Resolve once `p` has settled ('committed') or a statement waits on a businesses row lock ('waiting'). */
-async function committedOrWaiting(p: Promise<unknown>): Promise<'committed' | 'waiting'> {
+/**
+ * How many backends wait in Postgres on a lock backend `pid` holds, directly
+ * or queued behind another such waiter (pg_blocking_pids, followed
+ * transitively). A backend waiting on anything else (another suite's lock on
+ * another row, an advisory lock) is not counted.
+ */
+async function waitersBehind(pid: number): Promise<number> {
+  const rows = await db.$queryRawUnsafe(
+    `WITH RECURSIVE behind(pid) AS (
+       SELECT a.pid FROM pg_stat_activity a WHERE $1::int = ANY(pg_blocking_pids(a.pid))
+       UNION
+       SELECT a.pid FROM pg_stat_activity a JOIN behind b ON b.pid = ANY(pg_blocking_pids(a.pid))
+     )
+     SELECT count(*)::int AS n FROM behind`,
+    pid,
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/** Wait until `n` backends wait behind the lock(s) backend `pid` holds. */
+async function waitForWaitersBehind(pid: number, n: number) {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const seen = await waitersBehind(pid);
+    if (seen >= n) return;
+    if (Date.now() > deadline) throw new Error(`expected ${n} backend(s) waiting behind backend ${pid}, saw ${seen}`);
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
+/**
+ * Resolve once `p` has settled ('committed') or a backend waits on a lock the
+ * writer's backend `writerPid` holds ('waiting'). A writer stopped outside a
+ * transaction holds no lock (writerPid undefined): only 'committed' is possible.
+ */
+async function committedOrWaiting(p: Promise<unknown>, writerPid: number | undefined): Promise<'committed' | 'waiting'> {
   let settled = false;
   p.then(() => { settled = true; }, () => { settled = true; });
   const deadline = Date.now() + 10_000;
   for (;;) {
     if (settled) return 'committed';
-    const rows = await db.$queryRawUnsafe(
-      `SELECT count(*)::int AS n FROM pg_stat_activity
-        WHERE datname = current_database() AND wait_event_type = 'Lock' AND position('businesses' in lower(query)) > 0`,
-    );
-    if (Number(rows[0]?.n ?? 0) > 0) return 'waiting';
-    if (Date.now() > deadline) throw new Error('the concurrent write neither committed nor waited on the business row');
+    if (writerPid !== undefined && (await waitersBehind(writerPid)) > 0) return 'waiting';
+    if (Date.now() > deadline) throw new Error('the concurrent write neither committed nor waited on the writer\'s lock');
     await new Promise((r) => setTimeout(r, 25));
   }
 }
@@ -170,26 +223,49 @@ async function committedOrWaiting(p: Promise<unknown>): Promise<'committed' | 'w
 /**
  * Run `writer` until it is stopped at its `business.update` (it has read
  * metaData), then start `concurrent`, wait until that has committed or waits
- * on the row, release the writer and settle both.
+ * on a lock the writer's transaction holds, release the writer and settle
+ * both. The concurrent write must have waited for the writer (review
+ * CR-D12-2): the row lock is held from the writer's read to its commit.
  */
 async function interleave<W, C>(writer: () => Promise<W>, concurrent: () => Promise<C>) {
   const pause = pausing.pauseNext('business', 'update');
   try {
     const w = writer();
     const first = await Promise.race([
-      pause.reached.then(() => 'stopped at its write' as const),
-      w.then(() => 'finished without writing' as const, (e) => `failed: ${e?.message ?? e}`),
+      pause.reached.then((pid) => ({ at: 'stopped at its write' as const, pid })),
+      w.then(() => ({ at: 'finished without writing', pid: undefined }), (e) => ({ at: `failed: ${e?.message ?? e}`, pid: undefined })),
     ]);
-    expect(first, 'the writer reaches business.update after its read').toBe('stopped at its write');
+    expect(first.at, 'the writer reaches business.update after its read').toBe('stopped at its write');
     const c = concurrent();
-    const order = await committedOrWaiting(c);
+    const order = await committedOrWaiting(c, first.pid);
     pause.release();
     const [writerResult, concurrentResult] = await Promise.all([w, c]);
+    expect(order, 'the concurrent write waited for the writer\'s row lock (held from its read to its commit)').toBe('waiting');
     return { writerResult, concurrentResult, order };
   } finally {
     pausing.disarm();
     pause.release(); // never leave a writer (and its transaction) stopped after a failure
   }
+}
+
+/**
+ * Hold the business row from a test transaction (the lock the PATCH and every
+ * locked writer take) until `commit`; `pid` is the holding backend. The
+ * transaction is the simulated concurrent writer, not a fixture wrapper.
+ */
+async function holdBusinessRow(businessId: string) {
+  let release!: () => void;
+  const released = new Promise<void>((r) => { release = r; });
+  let ready!: (pid: number) => void;
+  const held = new Promise<number>((r) => { ready = r; });
+  const done = db.$transaction(async (tx: any) => {
+    const rows = await tx.$queryRawUnsafe('SELECT pg_backend_pid() AS pid');
+    await tx.$queryRawUnsafe('SELECT id FROM businesses WHERE id = $1 FOR NO KEY UPDATE', businessId);
+    ready(Number(rows[0].pid));
+    await released;
+  }, { maxWait: 10_000, timeout: 30_000 });
+  const pid = await Promise.race([held, done.then(() => { throw new Error('the holding transaction ended before it held the row'); })]);
+  return { pid, commit: async () => { release(); await done; } };
 }
 
 beforeAll(async () => {
@@ -259,6 +335,7 @@ beforeAll(async () => {
   pausing = pausingPrisma(db);
   const prisma = pausing.service as any;
   site = new SiteService(prisma, {} as any);
+  plainSite = new SiteService({ client: db } as any, {} as any);
   marketplace = new MarketplaceService(prisma, {} as any, {} as any, new EventEmitter2(), {} as any);
   whatsapp = new WhatsAppService(prisma, new EventEmitter2(), {} as any, {} as any, {} as any);
 
@@ -308,19 +385,35 @@ describe('FOLLOW3-D12 metaData writers read and write under the business row loc
     }
   });
 
-  it('[MW-02] RED-BEFORE: two storefront events in flight together (the first has read metaData when the second arrives) record 2 events, not 1', async () => {
+  it('[MW-02] RED-BEFORE: two storefront events in flight together, queued with the owner\'s PATCH clearing stripeSecretKey behind a transaction that holds the business row: both events are recorded (2, not 1) and the clear holds (the secret is not stored again)', async () => {
     await reset();
+    const BANK = `${P}FirstCitizens`;
     try {
-      const { writerResult, concurrentResult } = await interleave(
-        () => site.trackEvent(ID.biz, 'page_view'),
-        () => site.trackEvent(ID.biz, 'add_to_cart', `${P}item-1`),
-      );
-      expect(writerResult).toEqual({ tracked: true });
-      expect(concurrentResult).toEqual({ tracked: true });
-      const events = ((await storedMeta()).storefrontEvents ?? []) as Array<{ type: string; itemId: string | null }>;
+      const hold = await holdBusinessRow(ID.biz);
+      let clear: Promise<any> | undefined;
+      let first: Promise<any> | undefined;
+      let second: Promise<any> | undefined;
+      try {
+        clear = patchBusiness({ metaData: { stripeSecretKey: null, bankName: BANK } }).then((r: any) => r);
+        await waitForWaitersBehind(hold.pid, 1);
+        first = site.trackEvent(ID.biz, 'page_view');
+        second = site.trackEvent(ID.biz, 'add_to_cart', `${P}item-1`);
+        await waitForWaitersBehind(hold.pid, 3);
+      } finally {
+        await hold.commit();
+      }
+      const [cleared, firstResult, secondResult] = await Promise.all([clear, first, second]);
+      expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+      expect(firstResult).toEqual({ tracked: true });
+      expect(secondResult).toEqual({ tracked: true });
+      const meta = await storedMeta();
+      const events = (meta.storefrontEvents ?? []) as Array<{ type: string; itemId: string | null }>;
       expect(events.map((e) => e.type).sort(), 'recorded storefront events').toEqual(['add_to_cart', 'page_view']);
       expect(events.find((e) => e.type === 'add_to_cart')?.itemId).toBe(`${P}item-1`);
-      expect((await storedMeta()).stripeSecretKey).toBe(STRIPE_SECRET);
+      expect(events.find((e) => e.type === 'page_view')?.itemId).toBeNull();
+      expect(has(meta, 'stripeSecretKey'), 'the cleared stripeSecretKey stored again').toBe(false);
+      expect(meta.bankName, 'the PATCH\'s bank name').toBe(BANK);
+      expect(meta.otherKey).toBe(SEEDED_META.otherKey);
     } finally {
       await reset();
     }
@@ -361,6 +454,55 @@ describe('FOLLOW3-D12 metaData writers read and write under the business row loc
       await reset();
     }
   });
+});
+
+describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1 / CR-D12-1)', () => {
+  // POST /site/businesses/:businessId/analytics/event is public and limited
+  // to 60 per minute per IP (site.controller.ts), so a few IPs send hundreds
+  // of events for one business at once. Each event must neither hold the
+  // business row lock across round trips nor hold a pooled connection while
+  // it waits (the pool, 20 connections in packages/db client.ts, is shared by
+  // every tenant): the events, another tenant's query and the owner's
+  // clearing PATCH all succeed, and no event is lost.
+  const FLOOD = 200;
+  const SEEDED_EVENTS = 1000; // the bound trackEvent keeps
+
+  it(`[MW-06] RED-BEFORE: ${FLOOD} concurrent storefront events on a business already holding ${SEEDED_EVENTS} events, sent with another tenant's read and the owner's PATCH clearing stripeSecretKey: every event is recorded (newest ${SEEDED_EVENTS} kept), none fails, the other tenant's read and the PATCH succeed and the clear holds`, async () => {
+    const seeded = Array.from({ length: SEEDED_EVENTS }, (_, i) => ({ type: 'page_view', itemId: `${P}seed-${i}`, timestamp: '2026-11-01T00:00:00.000Z' }));
+    await reset({ ...SEEDED_META, storefrontEvents: seeded });
+    try {
+      const events = Array.from({ length: FLOOD }, (_, i) => plainSite.trackEvent(ID.biz, 'item_view', `${P}flood-${i}`));
+      const startedAt = Date.now();
+      const otherTenant = db.user.findFirst({ where: { NOT: { id: { startsWith: P } } }, select: { id: true } })
+        .then(() => Date.now() - startedAt);
+      const clear = patchBusiness({ metaData: { stripeSecretKey: null } }).then((r: any) => r);
+      const [settled, other, cleared] = await Promise.all([
+        Promise.allSettled(events),
+        otherTenant.then((ms: number) => ({ ok: true as const, ms }), (e: any) => ({ ok: false as const, error: String(e?.message ?? e).slice(0, 160) })),
+        clear,
+      ]);
+
+      const failures = [...new Set(settled.flatMap((s) => (s.status === 'rejected' ? [String((s.reason as any)?.message ?? s.reason).slice(0, 160)] : [])))];
+      expect(failures, `failed storefront events (${settled.filter((s) => s.status === 'rejected').length} of ${FLOOD})`).toEqual([]);
+      expect(settled.every((s) => s.status === 'fulfilled' && (s.value as any)?.tracked === true), 'every event answers { tracked: true }').toBe(true);
+      expect(other, 'another tenant\'s query on the shared pool during the flood').toMatchObject({ ok: true });
+      expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+
+      const meta = await storedMeta();
+      expect(has(meta, 'stripeSecretKey'), 'the cleared stripeSecretKey stored again').toBe(false);
+      expect(meta.bankName).toBe(SEEDED_META.bankName);
+      const stored = (meta.storefrontEvents ?? []) as Array<{ type: string; itemId: string | null }>;
+      expect(stored.length, 'the bound').toBe(SEEDED_EVENTS);
+      const flood = stored.filter((e) => String(e.itemId).startsWith(`${P}flood-`));
+      expect(flood.length, 'flood events recorded (no event lost to another)').toBe(FLOOD);
+      expect(new Set(flood.map((e) => e.itemId)).size).toBe(FLOOD);
+      expect(stored.slice(-FLOOD).every((e) => String(e.itemId).startsWith(`${P}flood-`)), 'the new events are the newest').toBe(true);
+      expect(stored.slice(0, SEEDED_EVENTS - FLOOD).map((e) => e.itemId), 'the oldest seeded events trimmed, in order')
+        .toEqual(seeded.slice(FLOOD).map((e) => e.itemId));
+    } finally {
+      await reset();
+    }
+  }, 90_000);
 });
 
 describe('FOLLOW3-D12 controls (unchanged behaviour)', () => {

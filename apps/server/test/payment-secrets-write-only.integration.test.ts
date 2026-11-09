@@ -477,103 +477,51 @@ describe('R0-SEC2c PATCH /identity/businesses/:businessId writes payment secrets
  *
  * HOW THE INTERLEAVING IS MADE: the test holds the business row in a
  * transaction of its own (a concurrent metaData writer mid-write), sends the
- * PATCHes, waits until Postgres shows each one waiting on that row lock, then
- * commits. Nothing is mocked: the requests run the real guards and the real
+ * PATCHes, waits until Postgres shows each one waiting behind that
+ * transaction's backend (pg_blocking_pids, followed through waiters queued
+ * behind another waiter), then commits. A backend waiting on any other lock,
+ * another suite's included, is not counted (FOLLOW3-D12 review CR-D12-2: a
+ * count of every lock waiter whose query names businesses let a foreign
+ * waiter commit the hold before the PATCH was queued, so the race never
+ * happened). Nothing is mocked: the requests run the real guards and the real
  * IdentityService against the database. The transaction is the simulated
  * concurrent writer, not a fixture wrapper: fixtures are still reset by raw SQL.
  */
 async function holdBusinessRow(businessId: string, write?: (tx: any) => Promise<unknown>) {
   let release!: () => void;
   const released = new Promise<void>((r) => { release = r; });
-  let ready!: () => void;
-  const held = new Promise<void>((r) => { ready = r; });
+  let ready!: (pid: number) => void;
+  const held = new Promise<number>((r) => { ready = r; });
   const done = db.$transaction(async (tx: any) => {
+    const rows = await tx.$queryRawUnsafe('SELECT pg_backend_pid() AS pid');
     await tx.$queryRawUnsafe('SELECT id FROM businesses WHERE id = $1 FOR NO KEY UPDATE', businessId);
     if (write) await write(tx);
-    ready();
+    ready(Number(rows[0].pid));
     await released;
   }, { maxWait: 10_000, timeout: 30_000 });
-  await Promise.race([held, done]);
-  return { commit: async () => { release(); await done; } };
-}
-
-/** Wait until `n` statements on the businesses table are waiting on a lock (the held row). */
-async function waitForBusinessLockWaiters(n: number) {
-  const deadline = Date.now() + 10_000;
-  for (;;) {
-    const rows = await db.$queryRawUnsafe(
-      `SELECT count(*)::int AS n FROM pg_stat_activity
-        WHERE datname = current_database() AND wait_event_type = 'Lock' AND position('businesses' in lower(query)) > 0`,
-    );
-    const seen = Number(rows[0]?.n ?? 0);
-    if (seen >= n) return;
-    if (Date.now() > deadline) throw new Error(`expected ${n} statement(s) waiting on the business row, saw ${seen}`);
-    await new Promise((r) => setTimeout(r, 25));
-  }
+  const pid = await Promise.race([held, done.then(() => { throw new Error('the holding transaction ended before it held the row'); })]);
+  return { pid, commit: async () => { release(); await done; } };
 }
 
 /**
- * FOLLOW3-D12: a PrismaService over the real client in which one armed
- * `<model>.<op>` call (on the client, or on the client an interactive
- * $transaction hands its callback) stops before it runs until the test
- * releases it, so a writer can be held between its read and its write.
+ * Wait until `n` backends wait on the row `hold` holds: directly behind the
+ * holding backend, or queued behind another such waiter.
  */
-function pausingPrisma(client: any) {
-  let armed: { model: string; op: string; reached: () => void; release: Promise<void> } | undefined;
-  const delegate = (d: any, model: string) => new Proxy(d, {
-    get(target, prop) {
-      const value = Reflect.get(target, prop);
-      if (typeof value !== 'function') return value;
-      return (...args: unknown[]) => {
-        const gate = armed;
-        if (gate && gate.model === model && gate.op === prop) {
-          armed = undefined;
-          gate.reached();
-          return gate.release.then(() => value.apply(target, args));
-        }
-        return value.apply(target, args);
-      };
-    },
-  });
-  const wrap = (c: any): any => new Proxy(c, {
-    get(target, prop) {
-      if (prop === 'business') return delegate(Reflect.get(target, prop), 'business');
-      if (prop === '$transaction') {
-        return (arg: any, opts?: any) => (typeof arg === 'function'
-          ? target.$transaction((tx: any) => arg(wrap(tx)), opts)
-          : target.$transaction(arg, opts));
-      }
-      const value = Reflect.get(target, prop);
-      return typeof value === 'function' ? value.bind(target) : value;
-    },
-  });
-  return {
-    service: { client: wrap(client) },
-    pauseNext(model: string, op: string) {
-      let reached!: () => void;
-      let release!: () => void;
-      const reachedP = new Promise<void>((r) => { reached = r; });
-      const releaseP = new Promise<void>((r) => { release = r; });
-      armed = { model, op, reached, release: releaseP };
-      return { reached: reachedP, release };
-    },
-    disarm() { armed = undefined; },
-  };
-}
-
-/** Wait until `p` has settled or a statement waits on a businesses row lock. */
-async function committedOrWaitingOnBusinessRow(p: Promise<unknown>) {
-  let settled = false;
-  p.then(() => { settled = true; }, () => { settled = true; });
+async function waitForBusinessLockWaiters(hold: { pid: number }, n: number) {
   const deadline = Date.now() + 10_000;
   for (;;) {
-    if (settled) return 'committed';
     const rows = await db.$queryRawUnsafe(
-      `SELECT count(*)::int AS n FROM pg_stat_activity
-        WHERE datname = current_database() AND wait_event_type = 'Lock' AND position('businesses' in lower(query)) > 0`,
+      `WITH RECURSIVE behind(pid) AS (
+         SELECT a.pid FROM pg_stat_activity a WHERE $1::int = ANY(pg_blocking_pids(a.pid))
+         UNION
+         SELECT a.pid FROM pg_stat_activity a JOIN behind b ON b.pid = ANY(pg_blocking_pids(a.pid))
+       )
+       SELECT count(*)::int AS n FROM behind`,
+      hold.pid,
     );
-    if (Number(rows[0]?.n ?? 0) > 0) return 'waiting';
-    if (Date.now() > deadline) throw new Error('the PATCH neither committed nor waited on the business row');
+    const seen = Number(rows[0]?.n ?? 0);
+    if (seen >= n) return;
+    if (Date.now() > deadline) throw new Error(`expected ${n} statement(s) waiting on the held business row, saw ${seen}`);
     await new Promise((r) => setTimeout(r, 25));
   }
 }
@@ -588,9 +536,9 @@ describe('R0-SEC2c concurrent metaData writers cannot undo a secret write (revie
       let edit: Promise<any> | undefined;
       try {
         clear = patchBusiness(ID.owner, ID.bizP, { metaData: { paypalClientSecret: null } }).then((r: any) => r);
-        await waitForBusinessLockWaiters(1);
+        await waitForBusinessLockWaiters(hold, 1);
         edit = patchBusiness(ID.coOwner, ID.bizP, { metaData: { bankName: BANK } }).then((r: any) => r);
-        await waitForBusinessLockWaiters(2);
+        await waitForBusinessLockWaiters(hold, 2);
       } finally {
         await hold.commit();
       }
@@ -624,7 +572,7 @@ describe('R0-SEC2c concurrent metaData writers cannot undo a secret write (revie
       let rotate: Promise<any> | undefined;
       try {
         rotate = patchBusiness(ID.owner, ID.bizP, { metaData: { stripeSecretKey: NEW, wipayApiKey: null } }).then((r: any) => r);
-        await waitForBusinessLockWaiters(1);
+        await waitForBusinessLockWaiters(hold, 1);
       } finally {
         await hold.commit();
       }
@@ -649,28 +597,31 @@ describe('R0-SEC2c concurrent metaData writers cannot undo a secret write (revie
   // (SiteService.trackEvent, apps/server/src/modules/site/site.service.ts, no
   // authentication, 60 per minute) read the stored metaData without the row
   // lock and wrote the whole value back, so an event that read before an
-  // owner's clear and wrote after it wrote the cleared secret back. It now takes
-  // the row lock the profile PATCH takes (lockBusinessMeta, core/prisma/
-  // business-meta.ts) before it reads. The interleaving is made by a
-  // PrismaService that stops trackEvent's business.update until released (see
-  // test/business-meta-writers.integration.test.ts, which covers the other
-  // converted writers; core/prisma/business-meta-writers.spec.ts is the census).
-  it('[SEC2c-C03] RED-BEFORE: a storefront event (SiteService.trackEvent) that has read metaData when the owner\'s PATCH clears stripeSecretKey: the clear holds (the secret is not stored again) and the event is recorded', async () => {
+  // owner's clear and wrote after it wrote the cleared secret back. It is one
+  // atomic statement now (review D12-ST-1 / CR-D12-1): it appends its event to
+  // the stored storefrontEvents in the database and writes no other key back,
+  // computed from the newest committed row after it waits for the row lock.
+  // The interleaving: the test holds the row, the owner's clearing PATCH queues
+  // behind it, then the event (which, unfixed, has read the secret by then
+  // and waits only to write), then the hold commits; the PATCH goes first.
+  // test/business-meta-writers.integration.test.ts covers the other converted
+  // writers and the flood; core/prisma/business-meta-writers.spec.ts is the census.
+  it('[SEC2c-C03] RED-BEFORE: a storefront event (SiteService.trackEvent) in flight while the owner\'s PATCH clears stripeSecretKey and commits: the clear holds (the secret is not stored again) and the event is recorded', async () => {
     await reset(ID.bizP);
-    const pausing = pausingPrisma(db);
-    const site = new SiteServiceClass(pausing.service, {});
-    const pause = pausing.pauseNext('business', 'update');
+    const site = new SiteServiceClass({ client: db }, {});
     try {
-      const tracking = site.trackEvent(ID.bizP, 'page_view');
-      const first = await Promise.race([
-        pause.reached.then(() => 'stopped at its write'),
-        tracking.then(() => 'finished without writing', (e: any) => `failed: ${e?.message ?? e}`),
-      ]);
-      expect(first, 'trackEvent reaches business.update after its read').toBe('stopped at its write');
-      const clear = patchBusiness(ID.owner, ID.bizP, { metaData: { stripeSecretKey: null } }).then((r: any) => r);
-      await committedOrWaitingOnBusinessRow(clear);
-      pause.release();
-      const [tracked, cleared] = await Promise.all([tracking, clear]);
+      const hold = await holdBusinessRow(ID.bizP);
+      let clear: Promise<any> | undefined;
+      let tracking: Promise<any> | undefined;
+      try {
+        clear = patchBusiness(ID.owner, ID.bizP, { metaData: { stripeSecretKey: null } }).then((r: any) => r);
+        await waitForBusinessLockWaiters(hold, 1);
+        tracking = site.trackEvent(ID.bizP, 'page_view');
+        await waitForBusinessLockWaiters(hold, 2);
+      } finally {
+        await hold.commit();
+      }
+      const [cleared, tracked] = await Promise.all([clear, tracking]);
       expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
       expect(tracked).toEqual({ tracked: true });
 
@@ -680,8 +631,6 @@ describe('R0-SEC2c concurrent metaData writers cannot undo a secret write (revie
       for (const k of SECRET_KEYS.filter((s) => s !== 'stripeSecretKey')) expect(meta[k], `stored ${k}`).toBe(SECRET[k]);
       for (const [k, v] of Object.entries(PUBLIC_META)) expect(meta[k], `stored ${k} kept`).toEqual(v);
     } finally {
-      pausing.disarm();
-      pause.release(); // never leave trackEvent (and its transaction) stopped after a failure
       await reset(ID.bizP);
     }
   });
