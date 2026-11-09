@@ -1,6 +1,7 @@
 import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { isSystemActor } from '../../core/auth/system-actor';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { FlowOrchestratorService } from '../ai/flow-orchestrator.service';
 import type {
   ExecutionOutcome,
@@ -63,6 +64,30 @@ export class KeyCortexActionExecutorPlugin
     // validation — on top of the registry mismatch below.
     const args = payload.inputPayload ?? payload.parameters ?? {};
 
+    // W4-PROPOSAL-PRINCIPAL (owner rulings D-73, D-71, D-46; review
+    // SEC-W3CV-3): an AI_PLAN proposal is a stored plan step that needed
+    // approval, and a KEY plan always runs as its member (D-73). Before this it
+    // ran here with surface PROPOSAL, no principal and no plan-step rule, for
+    // every tool: a STAFF member's step read and wrote the whole book once
+    // someone approved it, and a plan with no member read contacts and wrote
+    // money. It now runs as the plan's member (the principal, so the
+    // dispatcher's contact reads apply that member's visibility) and only if
+    // the plan queue's run rule lets that member run it (planStepRunAuthority:
+    // module scopes D-71, owner-only tools, D-46); a plan with no member, or a
+    // proposal that names no plan, is held to noMemberToolRefusal (no contact
+    // read, no money or invoice write). Checked before either registry is
+    // reached, as the queue checks before it dispatches: a refused step runs
+    // nothing. Any other proposal runs as before.
+    let plan: { memberId: string | null; refusal: string | null } | undefined;
+    try {
+      plan = await this.planStepAuthority(businessId, proposal, payload.planContext?.planId, toolName);
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+    if (plan?.refusal) {
+      return { success: false, error: `Refused: ${plan.refusal}` };
+    }
+
     // Route by name shape. There are two disjoint tool vocabularies in this
     // server and they share ZERO names: the cortex registry uses dotted
     // namespaces (`cortex.create_task`, `key_inbox.send_reply`), while
@@ -105,10 +130,15 @@ export class KeyCortexActionExecutorPlugin
           // view, so an approver binds no contact they may not open. KEY's
           // own ids (executeApproved with no user runs as 'key_ai') are no
           // member.
+          //
+          // W4-PROPOSAL-PRINCIPAL (D-73): a plan step's proposal runs as the
+          // plan's member, its principal; the approver neither widens nor
+          // narrows that member's run.
           {
             surface: 'PROPOSAL',
             actionId: proposal.id,
             onBehalfOfUserId: [executedBy, proposal.approvedBy, proposal.userId].find((id): id is string => !!id && !isSystemActor(id)) ?? null,
+            ...(plan?.memberId ? { principalUserId: plan.memberId } : {}),
           },
         );
 
@@ -123,7 +153,8 @@ export class KeyCortexActionExecutorPlugin
 
     const ctx: KeyCortexToolContext = {
       businessId,
-      userId: executedBy ?? proposal.userId ?? undefined,
+      // W4-PROPOSAL-PRINCIPAL (D-73): a plan step's proposal runs as the plan's member.
+      userId: plan ? (plan.memberId ?? undefined) : (executedBy ?? proposal.userId ?? undefined),
       sessionId: payload.sessionId,
       correlationId: payload.correlationId,
       autonomyLevel: payload.autonomyLevel ?? 4,
@@ -142,5 +173,34 @@ export class KeyCortexActionExecutorPlugin
       result: result.data as Record<string, unknown> | undefined,
       error: result.error,
     };
+  }
+
+  /**
+   * W4-PROPOSAL-PRINCIPAL (D-73, D-71, D-46; review SEC-W3CV-3). For a plan
+   * step's proposal (sourceType AI_PLAN, or one that names a plan): the plan's
+   * member and why that member may not run `toolName` now, by the rule the
+   * plan queue applies at run time (planStepRunAuthority, read against the plan
+   * as stored, in this business), with the member as the run's principal. A
+   * proposal that names no plan has no member (noMemberToolRefusal). Undefined
+   * for any other proposal, which runs as before.
+   */
+  private async planStepAuthority(
+    businessId: string,
+    proposal: KeyActionProposalData,
+    payloadPlanId: string | undefined,
+    toolName: string,
+  ): Promise<{ memberId: string | null; refusal: string | null } | undefined> {
+    if (proposal.sourceType !== 'AI_PLAN' && !proposal.planId) return undefined;
+    // Kept off the static import graph, as the queue worker and the flow
+    // orchestrator load it: plan-step-authority imports graph-actions.controller.
+    const { noMemberToolRefusal, planStepRunAuthority } = await import('../ai/plan-step-authority');
+    // The plan the step is attributed to (payload.planContext, forwarded below) is the plan judged.
+    if (proposal.planId && payloadPlanId && proposal.planId !== payloadPlanId) {
+      return { memberId: null, refusal: 'This proposal names two different plans, so it is not run as a plan step' };
+    }
+    const planId = proposal.planId ?? payloadPlanId;
+    if (!planId) return { memberId: null, refusal: noMemberToolRefusal(toolName) };
+    const prisma = this.moduleRef.get(PrismaService, { strict: false });
+    return planStepRunAuthority(prisma, businessId, planId, toolName, { memberIsPrincipal: true });
   }
 }
