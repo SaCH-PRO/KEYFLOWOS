@@ -45,14 +45,16 @@
  * ContactAuditService and TimelineService are real against the database.
  * Stand-ins: the BullMQ queue (its stand-in hands the job to the real
  * BusinessEventService.emit, as the worker does), Gmail, Drive, AI, catalog,
- * stats caches, the plan-limit count and the transactional-email sender.
+ * stats caches, the plan-limit count, the transactional-email sender and the
+ * channel adapter registry.
  *
  * THE EVENT BUS. EventEmitterModule.forRoot with the options of
  * src/core/event-bus/event-bus.module.ts, and the real
  * AutomationExecutorService (with the real ActivityService) mounted on it: the
  * contact.created / invoice.paid playbook listener, and the one listener on
- * those events with a log call that names a contact field
- * (automation-executor.service.ts:286, `Email sent to ${c.email}`). The other
+ * those events whose log calls named a contact field
+ * (automation-executor.service.ts:286, `Email sent to ${c.email}`, and :358,
+ * `WhatsApp delivery queued for ${phone}`, before FOLLOW3-C2). The other
  * contact.created listeners (flow/activity-event.listener.ts,
  * flow/flow.listener.ts, ai/ai.listener.ts,
  * growth-intelligence/journey-listener.service.ts,
@@ -62,14 +64,24 @@
  *   flow                                   window
  *   POST .../contacts with a SEND_EMAIL    operator, bearer JWT; a playbook on
  *     playbook on contact.created          contact.created (seeded, real listener)
+ *   POST .../contacts with a SEND_WHATSAPP operator, bearer JWT; a playbook on
+ *     playbook on contact.created          contact.created and a WhatsApp
+ *                                          connection with one active destination
+ *                                          (seeded; the adapter registry is an
+ *                                          empty stand-in, only its presence is read)
  *
  * RESULT. No contact email, operator bearer JWT or providerPaymentId reaches
  * the logs in the recordPayment, contact create (no playbook) and public link
- * windows. One leak does, from a production log call outside V1-40's write
- * set, so its negative control is it.todo naming the file and a
- * CHARACTERIZATION case pins the leaking line until the fix lands: the
- * contact email, when a SEND_EMAIL playbook runs on contact.created
- * (apps/server/src/modules/flow/automation-executor.service.ts:286).
+ * windows. The playbook windows no longer leak either (FOLLOW3-C2-PLAYBOOK-LOG-CONTACT-ID):
+ * V1-40 found the SEND_EMAIL action logging the contact's email
+ * (apps/server/src/modules/flow/automation-executor.service.ts:286) and pinned
+ * it with a CHARACTERIZATION case; :358 logged the phone for SEND_WHATSAPP.
+ * Both lines now name the contact by id. The negative controls cover the
+ * email, and the phone as typed, in E.164 and as digits only; a positive case
+ * per action finds its line naming `contact <contactId>`, so an emptied log
+ * cannot pass, and the window checks prove each action still ran (the send
+ * the email stand-in was asked for; the playbook's run count and the queued
+ * outboundDelivery row).
  *
  * The public link token no longer reaches the logs (V1-83,
  * FOLLOW3-C1-HTTP-LOG-ROUTE-PATTERN). LoggingInterceptor's access line
@@ -291,6 +303,14 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
   /** The contact created while a SEND_EMAIL playbook listens on contact.created. */
   const PLAYBOOK_CONTACT_EMAIL = `${P}playbook.contact@test.local`;
   const PLAYBOOK_NAME = 'V40A welcome email';
+  /** The contact created while a SEND_WHATSAPP playbook listens on contact.created. */
+  const WA_CONTACT_EMAIL = `${P}playbook.whatsapp@test.local`;
+  /** Its phone as the operator typed it; the delivery row carries it as stored. */
+  const WA_CONTACT_PHONE = '+1 (868) 555-0183';
+  /** The same phone in E.164 and digits only: a log line in either form is the same leak. */
+  const WA_CONTACT_PHONE_E164 = '+18685550183';
+  const WA_CONTACT_PHONE_DIGITS = '18685550183';
+  const WA_PLAYBOOK_NAME = 'V40A welcome WhatsApp';
   /** What the transactional-email stand-in was asked to send (the playbook's effect). */
   const emailsSent: Array<{ recipientEmail: string; type: string }> = [];
   const OWNER_EMAIL = `${P}owner@test.local`;
@@ -350,6 +370,13 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
       `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
       `DELETE FROM automations WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      // The SEND_WHATSAPP window: the delivery the playbook queues, its content
+      // and variant, and the seeded WhatsApp connection and destination.
+      `DELETE FROM outbound_deliveries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM outbound_variants WHERE content_id IN (SELECT id FROM outbound_content WHERE business_id LIKE ${sqlLikePrefix(P)})`,
+      `DELETE FROM outbound_content WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM channel_destinations WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
+      `DELETE FROM channel_connections WHERE business_id LIKE ${sqlLikePrefix(P)} OR id LIKE ${sqlLikePrefix(P)}`,
       `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
       `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
       `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
@@ -430,6 +457,7 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
     const { AutomationExecutorService } = await import('../src/modules/flow/automation-executor.service');
     const { ActivityService } = await import('../src/modules/flow/activity.service');
     const { TransactionalEmailService } = await import('../src/modules/notifications/transactional-email.service');
+    const { AdapterRegistryService } = await import('../src/modules/communications/adapters/adapter-registry.service');
     const IORedis = (await import('ioredis')).default;
     const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
     const { PrismaService } = await import('../src/core/prisma/prisma.service');
@@ -550,6 +578,10 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
             },
           },
         },
+        // SEND_WHATSAPP only checks that a registry is present
+        // (automation-executor.service.ts:296); it queues an outboundDelivery
+        // row and sends nothing itself, so the stand-in is empty.
+        { provide: AdapterRegistryService, useValue: {} },
         // Commerce: the real payment, link and ledger chain.
         CommerceService,
         InvoiceWorkflowService,
@@ -728,6 +760,48 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
     });
     await db.automation.update({ where: { id: `${P}playbook_email` }, data: { enabled: false } });
 
+    // ---- window 2c: contact create while a SEND_WHATSAPP playbook listens ----
+    // Seeded outside the window: the playbook, and the business's WhatsApp
+    // connection with one active destination (the action queues a delivery to it).
+    await db.channelConnection.create({
+      data: {
+        id: `${P}wa_conn`,
+        businessId: ID.biz,
+        provider: 'WHATSAPP',
+        label: 'V40A WhatsApp',
+        destinations: {
+          create: [{ id: `${P}wa_dest`, businessId: ID.biz, platform: 'WHATSAPP', displayName: 'V40A WhatsApp line', isActive: true }],
+        },
+      },
+    });
+    await db.automation.create({
+      data: {
+        id: `${P}playbook_whatsapp`,
+        businessId: ID.biz,
+        name: WA_PLAYBOOK_NAME,
+        trigger: 'contact.created',
+        enabled: true,
+        actionData: { type: 'SEND_WHATSAPP', message: 'V40A welcome' },
+      },
+    });
+    await captureWindow('contactCreateWhatsApp', async () => {
+      const created = await agent()
+        .post(`/crm/businesses/${ID.biz}/contacts`)
+        .set(HEADER_AUTH, `Bearer ${bearer}`)
+        .send({ firstName: `${P}Katherine`, lastName: 'Johnson', email: WA_CONTACT_EMAIL, phone: WA_CONTACT_PHONE });
+      const contactId = created.body?.id;
+      if (contactId) {
+        // The playbook's run is recorded after its action, and the listener's
+        // whole run (playbooks, then flows) finished inside the window.
+        await until(async () => ((await db.automation.findUnique({ where: { id: `${P}playbook_whatsapp` }, select: { runCount: true } }))?.runCount ?? 0) > 0);
+        await until(async () => contactCreatedRuns.some((r) => r.contactId === contactId));
+        await Promise.all(contactCreatedRuns.filter((r) => r.contactId === contactId).map((r) => r.run));
+        windowContacts.contactCreateWhatsApp = contactId;
+      }
+      return [created.status];
+    });
+    await db.automation.update({ where: { id: `${P}playbook_whatsapp` }, data: { enabled: false } });
+
     // ---- window 3: the customer opens the public invoice link ----------------
     await clearRateLimits();
     await captureWindow('publicInvoiceLink', async () => {
@@ -854,22 +928,71 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       expect(leaks, describeLeaks(leaks)).toEqual([]);
     });
 
-    // RED when written as an `it` (this repair ran it first): the playbook's
-    // SEND_EMAIL action logs the recipient. The fix is a production logger
-    // call outside this packet's write set:
-    // apps/server/src/modules/flow/automation-executor.service.ts:286 logs
-    // `Email sent to ${c.email}` at log level (and :358 logs the phone for
-    // SEND_WHATSAPP). Logging the contact id instead closes it. When that
-    // lands, this todo becomes an `it` and the CHARACTERIZATION case goes.
-    it.todo(
-      "NEGATIVE CONTROL: no log entry carries the new contact's email when a SEND_EMAIL playbook runs on contact.created — " +
-        'fix outside the write set: apps/server/src/modules/flow/automation-executor.service.ts:286 logs c.email',
-    );
-
-    it('CHARACTERIZATION (open finding IA-044, automation-executor.service.ts:286): only the playbook\'s "Email sent to" line carries the email today', () => {
+    // RED at b1e8f5f5 (V1-40, then pinned by a CHARACTERIZATION case) and on
+    // the FOLLOW3-C2-PLAYBOOK-LOG-CONTACT-ID tests-first commit: the SEND_EMAIL
+    // action logged `Email sent to ${c.email}` at log level
+    // (apps/server/src/modules/flow/automation-executor.service.ts:286 before the fix).
+    it("NEGATIVE CONTROL: no log entry carries the new contact's email when a SEND_EMAIL playbook runs on contact.created", () => {
       const leaks = entriesContaining(windows.contactCreatePlaybook.entries, emailForms(PLAYBOOK_CONTACT_EMAIL));
-      expect(leaks.map((e) => e.channel)).toEqual(['Logger#log[AutomationExecutorService]']);
-      expect(leaks[0].text).toBe(`Email sent to ${PLAYBOOK_CONTACT_EMAIL} for playbook "${PLAYBOOK_NAME}"`);
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    it('the SEND_EMAIL action still logs its send, naming the contact by id (an emptied log cannot pass)', () => {
+      const contactId = windowContacts.contactCreatePlaybook;
+      expect(contactId).toBeTruthy();
+      const lines = windows.contactCreatePlaybook.entries.filter(
+        (e) => e.channel === 'Logger#log[AutomationExecutorService]' && e.text.startsWith('Email sent to '),
+      );
+      expect(lines.map((e) => e.text)).toEqual([`Email sent to contact ${contactId} for playbook "${PLAYBOOK_NAME}"`]);
+    });
+  });
+
+  // ---- contact create with a SEND_WHATSAPP playbook on contact.created -------
+
+  describe('POST /crm/businesses/:businessId/contacts with a SEND_WHATSAPP playbook on contact.created (real listener)', () => {
+    it('the window ran the real flow: 201, the playbook ran once and queued one WhatsApp delivery to this contact\'s phone, and the spy saw the access line', async () => {
+      expect(windows.contactCreateWhatsApp.status).toEqual([201]);
+      const contactId = windowContacts.contactCreateWhatsApp;
+      expect(contactId).toBeTruthy();
+      const playbook = await db.automation.findUnique({ where: { id: `${P}playbook_whatsapp` }, select: { runCount: true } });
+      expect(playbook?.runCount).toBe(1);
+      const deliveries = await db.outboundDelivery.findMany({
+        where: { businessId: ID.biz },
+        select: { recipientPhone: true, contactId: true, destinationId: true, status: true },
+      });
+      expect(deliveries).toEqual([{ recipientPhone: WA_CONTACT_PHONE, contactId, destinationId: `${P}wa_dest`, status: 'Queued' }]);
+      // The SEND_EMAIL playbook was disabled before this window: its one send is still the only one.
+      expect(emailsSent).toEqual([{ recipientEmail: PLAYBOOK_CONTACT_EMAIL, type: 'invoice_sent' }]);
+      expect(accessLines(windows.contactCreateWhatsApp.entries, 'POST', '/crm/businesses/:businessId/contacts').length).toBe(1);
+    });
+
+    it('NEGATIVE CONTROL: no log entry carries the operator bearer token', () => {
+      const leaks = entriesContaining(windows.contactCreateWhatsApp.entries, tokenForms(bearer));
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    // RED on the FOLLOW3-C2-PLAYBOOK-LOG-CONTACT-ID tests-first commit: the
+    // SEND_WHATSAPP action logged `WhatsApp delivery queued for ${phone}` at log
+    // level (apps/server/src/modules/flow/automation-executor.service.ts:358 before the fix).
+    it("NEGATIVE CONTROL: no log entry carries the new contact's phone (as typed, E.164 or digits only) or email when a SEND_WHATSAPP playbook runs on contact.created", () => {
+      const leaks = entriesContaining(windows.contactCreateWhatsApp.entries, [
+        WA_CONTACT_PHONE,
+        encodeURIComponent(WA_CONTACT_PHONE),
+        WA_CONTACT_PHONE_E164,
+        encodeURIComponent(WA_CONTACT_PHONE_E164),
+        WA_CONTACT_PHONE_DIGITS,
+        ...emailForms(WA_CONTACT_EMAIL),
+      ]);
+      expect(leaks, describeLeaks(leaks)).toEqual([]);
+    });
+
+    it('the SEND_WHATSAPP action still logs the queued delivery, naming the contact by id (an emptied log cannot pass)', () => {
+      const contactId = windowContacts.contactCreateWhatsApp;
+      expect(contactId).toBeTruthy();
+      const lines = windows.contactCreateWhatsApp.entries.filter(
+        (e) => e.channel === 'Logger#log[AutomationExecutorService]' && e.text.startsWith('WhatsApp delivery queued for '),
+      );
+      expect(lines.map((e) => e.text)).toEqual([`WhatsApp delivery queued for contact ${contactId} in playbook "${WA_PLAYBOOK_NAME}"`]);
     });
   });
 
