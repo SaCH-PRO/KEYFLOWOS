@@ -275,6 +275,22 @@ describe("D-72: the Command Center page mounts the approved-action queue with it
     expect(within(panel).queryByText("Pending note")).toBeNull();
   }, 30_000);
 
+  /*
+   * W4-FLAKE-HARDEN (D-72): CC-AQ-04 (and, less often, CC-AQ-05) failed under load because the
+   * page renders TWO approved-actions panels. page.tsx gives <ApprovedActionsPanel> and
+   * <CommandGenomeOutcomesCardV2>, siblings in the same motion.div, the same React key
+   * (businessId; React warns "Encountered two children with the same key"). When the page
+   * re-renders after its first paint, React reconciles those siblings through a key map in which
+   * the second entry replaced the first: it mounts a fresh panel and never removes the old one's
+   * DOM. The orphan stays frozen in whatever state it had (observed under induced load: index 6
+   * "Loading approved actions...", index 7 the live empty state), and renderCommandCenter() holds
+   * the first panel it found, the orphan. Unloaded, the orphan had already shown the answer, so the
+   * case passed with a stale duplicate on the page. Waiting longer or re-querying the live panel
+   * would only hide that defect, and the fix (a distinct key, e.g. `approved-actions:${businessId}`;
+   * checked locally: one panel) is in page.tsx, outside this packet's write set.
+   */
+  it.todo("CC-AQ-10 (W4-FLAKE-HARDEN, D-72) the Command Center page mounts exactly one approved-actions panel, and it is the one that shows the queue answer (blocked: page.tsx keys ApprovedActionsPanel and CommandGenomeOutcomesCardV2 both by businessId, so a re-render leaves an orphaned duplicate; the fix is in page.tsx, outside the write set)");
+
   it("CC-AQ-05 a queue that could not be read says so and is never shown as nothing approved", async () => {
     // A 500, not a 503: fetch-with-retry retries a 503 with backoff before answering.
     serve({ queue: [{ status: 500, body: { statusCode: 500, message: "Internal server error" } }] });
