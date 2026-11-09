@@ -6753,6 +6753,18 @@ ${triage.standingContext}`;
         return { id: sequence.id, name: sequence.name };
       }
       case 'sequence_enroll': {
+        // W3-KEY-CRM-VISIBILITY review SEC-W3CV-4 (D-37): a member enrols only contacts their CRM view
+        // opens (contactVisibilityFilter, the GET contacts/:id rule). One they may not open answers as
+        // an unknown contact does and nothing is enrolled, not even the others named with it.
+        // Unchanged with no principal (the OWNER's view; graphActionRequirement keeps it to the OWNER
+        // there) or for the OWNER and a SUPER_ADMIN.
+        const reader = await this.contactReadAccess(businessId, action);
+        if (reader && Array.isArray(args.contactIds)) {
+          const ids: unknown[] = args.contactIds;
+          const named = ids.filter((id): id is string => typeof id === 'string');
+          const canOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, named);
+          if (canOpen && ids.some((id) => typeof id !== 'string' || !canOpen(id))) throw new NotFoundException('Contact not found');
+        }
         const result = await this.getCrmSequences().enrollContacts(businessId, args.sequenceId, args.contactIds);
         return result;
       }

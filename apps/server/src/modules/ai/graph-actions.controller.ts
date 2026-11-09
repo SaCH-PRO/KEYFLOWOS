@@ -220,15 +220,28 @@ export function graphActionReadsContacts(toolName: string): boolean {
 /**
  * W3-KEY-CRM-VISIBILITY (D-37, D-88; KEY-R3b residuals): tools graphActionReadsContacts does not
  * know whose dispatcher case still bounds the contacts it reads or writes by the principal's
- * visibility clause (FlowOrchestratorService.contactReadAccess): fetch_client_health (an analytics
- * read that counts and names contacts) and sequence_enroll_overdue (a crm write that enrols every
- * contact with an overdue invoice). Run with no principal they reach the OWNER's view: kept for a run
- * with no member (D-88's convention; the Pro Auto monitor's client-health read), but a member's plan
- * the queue runs or an approval hands on with no principal would reach contacts the member may not
- * open, so there they are the OWNER's only, and their stored output is the OWNER's only, as a contact
- * read's is.
+ * visibility clause (FlowOrchestratorService.contactReadAccess, directly or through
+ * calendarContactScope): fetch_client_health (an analytics read that counts and names contacts),
+ * sequence_enroll_overdue (a crm write that enrols every contact with an overdue invoice), and, since
+ * the packet's review, sequence_enroll (SEC-W3CV-4: the contacts it is handed) and the V1-84 calendar
+ * and booking reads calendar_list_events, calendar_check_conflicts, bookings_list_bookings and
+ * bookings_list_waitlist (SEC-W3CV-1: an event or booking on a contact, and its contact). Run with no
+ * principal they reach the OWNER's view: kept for a run with no member (D-88's convention; the Pro
+ * Auto monitor's client-health read; whether D-73 refuses them there is open, review SEC-W3CV-2), but
+ * a member's plan the queue runs or an approval hands on with no principal would reach contacts the
+ * member may not open, so there they are the OWNER's only, and their stored output (rows and count)
+ * is the OWNER's only, as a contact read's is. graph-action-visibility-bound.spec.ts derives this
+ * from the dispatcher: every case that reaches contactReadAccess must be in it or be a contact read.
  */
-const GRAPH_ACTION_VISIBILITY_BOUND_TOOLS: ReadonlySet<string> = new Set(['fetch_client_health', 'sequence_enroll_overdue']);
+const GRAPH_ACTION_VISIBILITY_BOUND_TOOLS: ReadonlySet<string> = new Set([
+  'fetch_client_health',
+  'sequence_enroll_overdue',
+  'sequence_enroll',
+  'calendar_list_events',
+  'calendar_check_conflicts',
+  'bookings_list_bookings',
+  'bookings_list_waitlist',
+]);
 
 /**
  * Whether `toolName`'s contact rows are bounded only by the principal's visibility clause: a contact
@@ -408,10 +421,11 @@ export function planStepDispatchedTool(step: { toolName: string | null; action: 
  * unless it is itself a canonical module (a PlannerService step's module label, such as 'expenses'
  * or 'automations': no connector adapter has such a name, so nothing runs under it), which is
  * judged by that module's read. `stepOutput`: whether that step's stored output is shown
- * at all: not, to anyone but the OWNER or a SUPER_ADMIN, for a contact read (graphActionReadsContacts),
- * whose output the plan executor writes from a run with no principal (every contact, another member's
- * PRIVATE ones included). `seesEveryContact`: the OWNER and a SUPER_ADMIN, whom visibilityClause does
- * not restrict. `hiddenContacts` (D-74): the contacts among `ids` the viewer may not open (null when
+ * at all: not, to anyone but the OWNER or a SUPER_ADMIN, for a contact read or another tool whose
+ * contacts only the principal's visibility bounds (graphActionBoundByContactVisibility,
+ * W3-KEY-CRM-VISIBILITY), whose output the plan executor writes from a run with no principal (every
+ * contact, another member's PRIVATE ones included; their rows and their count). `seesEveryContact`:
+ * the OWNER and a SUPER_ADMIN, whom visibilityClause does not restrict. `hiddenContacts` (D-74): the contacts among `ids` the viewer may not open (null when
  * they open every contact), which visiblePlans withholds from every step input and output at read.
  */
 export interface GraphPlanReadScope {

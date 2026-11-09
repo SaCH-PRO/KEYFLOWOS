@@ -17,6 +17,14 @@
  * runs with no member (D-88's convention). One visibility clause (contactReadAccess: resolveCrmAccess
  * + visibilityClause, the rule GET contacts applies) bounds every case.
  *
+ * Review repairs (CV-09..CV-12): the V1-84 calendar and booking reads (calendar_list_events,
+ * calendar_check_conflicts, bookings_list_bookings, bookings_list_waitlist) and sequence_enroll are
+ * bounded by the same clause, so with no principal they are the OWNER's only too (SEC-W3CV-1;
+ * graph-action-visibility-bound.spec.ts derives the set from the dispatcher), and sequence_enroll
+ * refuses a contact the member may not open (SEC-W3CV-4). CV-08b characterizes the no-member run
+ * pending an owner ruling (SEC-W3CV-2, D-73 vs D-88); CV-13 (it.todo) records the proposal surface
+ * (SEC-W3CV-3), outside this packet's write set.
+ *
  * WHAT IS REAL: PrismaService and the Prisma client against DATABASE_URL; AuthGuard, BusinessGuard,
  * CrmRateLimitGuard and GraphActionsController (POST .../execute: assertMayRunGraphAction, the step
  * claim, the step's stored outcome through PlannerService.updateStepStatus, AiExecutionLogService);
@@ -60,6 +68,15 @@ const ID = {
   seqOwner: `${P}seq_owner`,
   seqQueueStaff: `${P}seq_q_staff`,
   seqQueueNone: `${P}seq_q_none`,
+  // Review repairs (SEC-W3CV-1, SEC-W3CV-4): a calendar event and a booking on the OWNER's PRIVATE
+  // contact (and an event on staffOwned's own), and the sequences sequence_enroll writes into.
+  evPriv: `${P}ev_priv`,
+  evMine: `${P}ev_mine`,
+  svc: `${P}svc`,
+  bkPriv: `${P}bk_priv`,
+  seqEnrolStaff: `${P}seq_e_staff`,
+  seqEnrolOwner: `${P}seq_e_owner`,
+  seqEnrolQueue: `${P}seq_e_queue`,
 };
 const NAME = { priv: 'V89KPrivate', team: 'V89KTeam', mine: 'V89KMine' };
 
@@ -83,6 +100,9 @@ async function cleanup() {
     `DELETE FROM crm_sequences WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM calendar_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM businesses WHERE id LIKE ${sqlLikePrefix(P)}`,
@@ -317,6 +337,23 @@ beforeAll(async () => {
       data: { id, businessId: ID.biz, name: `v89k dunning ${id}`, status: 'active', steps: [{ type: 'email', subject: 'v89k reminder', body: 'v89k', delayDays: 0 }] },
     });
   }
+
+  // Review repairs (SEC-W3CV-1): a meeting on the OWNER's PRIVATE contact (and one on staffOwned's
+  // own) tomorrow, and a booking on the PRIVATE contact (its contact's name is in the booking list).
+  const tomorrow = new Date(Date.now() + 86400000);
+  const event = (id: string, contactId: string, firstName: string) =>
+    db.calendarEvent.create({
+      data: {
+        id, businessId: ID.biz, title: `Meet ${firstName}`, type: 'BOOKING', module: 'BOOKINGS', startAt: tomorrow,
+        endAt: new Date(tomorrow.getTime() + 30 * 60_000), visibility: 'TEAM', sourceType: 'test', sourceId: id, contactId,
+      },
+    });
+  await event(ID.evPriv, ID.cPriv, NAME.priv);
+  await event(ID.evMine, ID.cMine, NAME.mine);
+  await db.service.create({ data: { id: ID.svc, businessId: ID.biz, name: 'V89K consult', duration: 30, price: 100 } });
+  await db.booking.create({
+    data: { id: ID.bkPriv, businessId: ID.biz, contactId: ID.cPriv, serviceId: ID.svc, startTime: tomorrow, endTime: new Date(tomorrow.getTime() + 30 * 60_000) },
+  });
 }, 180_000);
 
 afterAll(async () => {
@@ -419,14 +456,21 @@ describe("W3-KEY-CRM-VISIBILITY (D-37, D-88): a member's plan run with no princi
     await expect(assertMayRunGraphAction(prisma, ID.biz, { id: ID.staffOwned, role: 'USER' }, 'sequence_enroll_overdue', ID.staffOwned)).resolves.toBeUndefined();
   });
 
-  it("CV-08 CONTROL (D-88): the OWNER's plan runs fetch_client_health on the queue over the whole book; a plan with no member is not refused these tools and runs them in the OWNER's view (the PRIVATE top spender named, every overdue contact enrolled)", async () => {
+  it("CV-08 CONTROL (D-88): the OWNER's plan runs fetch_client_health on the queue over the whole book (the PRIVATE top spender named)", async () => {
     const owner = `${P}cv08_owner`;
     await seedPlan(owner, ID.owner, 'fetch_client_health', {}, 'approved');
     await runQueueStep(owner, 'fetch_client_health', {});
     const ownerRow = await stepRow(owner);
     expect(ownerRow.status, String(ownerRow.errorMessage)).toBe('completed');
     expect(JSON.stringify(ownerRow.outputResult)).toContain(NAME.priv);
+  });
 
+  // Review SEC-W3CV-2: D-73 says a plan with no member principal "may not read contacts", while this
+  // packet's rationale (D-88's convention) keeps the OWNER's view for a run with no member, and
+  // noMemberToolRefusal (plan-step-authority.ts, outside this packet's write set) already refuses
+  // create_followup_queue and segment_contacts there. Which rule governs these tools is an owner
+  // decision; until it is made, CV-08b characterizes what runs today and is not a ruling-backed control.
+  it("CV-08b CHARACTERIZATION pending an owner ruling (review SEC-W3CV-2, D-73 vs D-88): a plan with no member is not refused fetch_client_health or sequence_enroll_overdue and runs them in the OWNER's view (the PRIVATE top spender named, every overdue contact enrolled)", async () => {
     expect(noMemberToolRefusal('fetch_client_health')).toBeNull();
     expect(noMemberToolRefusal('sequence_enroll_overdue')).toBeNull();
     const none = `${P}cv08_none`;
@@ -443,4 +487,110 @@ describe("W3-KEY-CRM-VISIBILITY (D-37, D-88): a member's plan run with no princi
     expect((await stepRow(noneSeq)).status).toBe('completed');
     expect(await enrolledIn(ID.seqQueueNone)).toEqual(ALL);
   });
+
+  it.todo(
+    "CV-08c (D-73; review SEC-W3CV-2) pending an owner ruling: if D-73 governs, a plan with no member (and the Pro Auto monitor) is refused fetch_client_health, sequence_enroll_overdue, sequence_enroll and the calendar and booking reads, as it is create_followup_queue; noMemberToolRefusal lives in plan-step-authority.ts, outside this packet's write set, and the monitor's client-health read would stop",
+  );
+});
+
+describe("W3-KEY-CRM-VISIBILITY review repairs (D-37): every dispatcher case the principal's visibility bounds is the OWNER's only with no principal, and sequence_enroll honours the member's view", () => {
+  /** The V1-84 calendar and booking reads: contactReadAccess / calendarContactScope bound their contacts (SEC-W3CV-1). */
+  const CALENDAR_AND_BOOKING_READS = ['calendar_list_events', 'calendar_check_conflicts', 'bookings_list_bookings', 'bookings_list_waitlist'];
+  const activeSequence = (id: string) =>
+    db.crmSequence.create({ data: { id, businessId: ID.biz, name: `v89k ${id}`, status: 'active', steps: [{ type: 'email', subject: 'v89k', body: 'v89k', delayDays: 0 }] } });
+
+  it("CV-09 RED-BEFORE (D-37, review SEC-W3CV-1): a STAFF member's plan with calendar_list_events or bookings_list_bookings is refused by the queue worker at run time (it would run with no principal, in the OWNER's view): nothing dispatched, no hidden contact named", async () => {
+    for (const tool of ['calendar_list_events', 'bookings_list_bookings']) {
+      const planId = `${P}cv09_${tool}`;
+      await seedPlan(planId, ID.staffOwned, tool, {}, 'approved');
+      await runQueueStep(planId, tool, {});
+      expect(dispatched.filter((d) => d.planStepId === `${planId}_s1`), tool).toEqual([]);
+      const row = await stepRow(planId);
+      expect(row.status, tool).toBe('failed');
+      expect(String(row.errorMessage), tool).toMatch(/^Refused: .*business owner/);
+      expectNoHidden(row.outputResult, ['priv']);
+    }
+  });
+
+  it("CV-10 RED-BEFORE (D-37, review SEC-W3CV-1): POST ai/plans/:planId/approve's rule (no principal) refuses calendar_list_events, calendar_check_conflicts, bookings_list_bookings and bookings_list_waitlist to an ADMIN and to the STAFF member, the OWNER may; the plans read shows their stored output (rows and count) to the OWNER only; with the caller as principal the member still runs them over their own view", async () => {
+    const opts = { proposerOverrideRoles: PLAN_APPROVER_ROLES, noPrincipal: true };
+    const adminRead = await graphPlanReadScope(prisma, ID.biz, { id: ID.admin, role: 'USER' });
+    const staffRead = await graphPlanReadScope(prisma, ID.biz, { id: ID.staffOwned, role: 'USER' });
+    const ownerRead = await graphPlanReadScope(prisma, ID.biz, { id: ID.owner, role: 'USER' });
+    for (const tool of CALENDAR_AND_BOOKING_READS) {
+      for (const member of [ID.admin, ID.staffOwned]) {
+        const err = await assertMayRunGraphAction(prisma, ID.biz, { id: member, role: 'USER' }, tool, member, opts).then(() => null, (e: unknown) => e);
+        expect(err, `${tool} ${member}`).toBeInstanceOf(ForbiddenException);
+        expect(String((err as Error).message), `${tool} ${member}`).toMatch(/only for the business owner/);
+      }
+      await expect(assertMayRunGraphAction(prisma, ID.biz, { id: ID.owner, role: 'USER' }, tool, ID.owner, opts)).resolves.toBeUndefined();
+      expect(adminRead.stepOutput(tool), tool).toBe(false);
+      expect(staffRead.stepOutput(tool), tool).toBe(false);
+      expect(ownerRead.stepOutput(tool), tool).toBe(true);
+      // With the caller as principal (POST .../execute) the ADMIN still runs them (bounded by their view).
+      await expect(assertMayRunGraphAction(prisma, ID.biz, { id: ID.admin, role: 'USER' }, tool, ID.admin)).resolves.toBeUndefined();
+    }
+    // The STAFF member (bookings read) runs the calendar reads with the caller as principal, over their own view.
+    for (const tool of ['calendar_list_events', 'calendar_check_conflicts']) {
+      await expect(assertMayRunGraphAction(prisma, ID.biz, { id: ID.staffOwned, role: 'USER' }, tool, ID.staffOwned), tool).resolves.toBeUndefined();
+    }
+    const { body } = await memberExecutes(ID.staffOwned, `${P}cv10_exec`, 'calendar_list_events', {});
+    expect((body.result.events as Array<{ id: string }>).map((e) => e.id)).toEqual([ID.evMine]);
+    expectNoHidden(body, ['priv']);
+  });
+
+  it("CV-11 RED-BEFORE (D-37, review SEC-W3CV-4): sequence_enroll for the STAFF member kept to their own book refuses a contact they may not open (the OWNER's PRIVATE or TEAM contact, alone or beside their own) as an unknown contact and enrols nobody; their own contact is enrolled; the OWNER enrols the PRIVATE contact", async () => {
+    await activeSequence(ID.seqEnrolStaff);
+    await activeSequence(ID.seqEnrolOwner);
+    for (const [n, contactIds] of [[ID.cPriv], [ID.cTeam], [ID.cMine, ID.cPriv]].entries()) {
+      const planId = `${P}cv11_${n}`;
+      await seedPlan(planId, ID.staffOwned, 'sequence_enroll', { sequenceId: ID.seqEnrolStaff, contactIds });
+      const res = await request(app.getHttpServer())
+        .post(`/actions/businesses/${ID.biz}/execute`)
+        .set('x-test-user', ID.staffOwned)
+        .set('x-forwarded-for', nextIp())
+        .send({ planId, planStepId: `${planId}_s1` });
+      expect(res.status, String(contactIds)).toBe(201);
+      expect(res.body.success, `${contactIds} ${JSON.stringify(res.body).slice(0, 300)}`).toBe(false);
+      const row = await stepRow(planId);
+      expect(row.status, String(contactIds)).toBe('failed');
+      expect(String(row.errorMessage), String(contactIds)).toMatch(/Contact not found/);
+      expect(await enrolledIn(ID.seqEnrolStaff), String(contactIds)).toEqual([]);
+    }
+    const mine = await memberExecutes(ID.staffOwned, `${P}cv11_mine`, 'sequence_enroll', { sequenceId: ID.seqEnrolStaff, contactIds: [ID.cMine] });
+    expect(mine.body.result.enrolled).toBe(1);
+    expect(await enrolledIn(ID.seqEnrolStaff)).toEqual([ID.cMine]);
+    const owner = await memberExecutes(ID.owner, `${P}cv11_owner`, 'sequence_enroll', { sequenceId: ID.seqEnrolOwner, contactIds: [ID.cPriv] });
+    expect(owner.body.result.enrolled).toBe(1);
+    expect(await enrolledIn(ID.seqEnrolOwner)).toEqual([ID.cPriv]);
+  });
+
+  it("CV-12 RED-BEFORE (D-37, review SEC-W3CV-4): a STAFF member's plan with sequence_enroll is refused by the queue worker (it would run with no principal, unbounded), and neither an ADMIN nor the STAFF member may approve it with no principal, the OWNER may; nobody enrolled", async () => {
+    await activeSequence(ID.seqEnrolQueue);
+    const args = { sequenceId: ID.seqEnrolQueue, contactIds: [ID.cPriv] };
+    const planId = `${P}cv12`;
+    await seedPlan(planId, ID.staffOwned, 'sequence_enroll', args, 'approved');
+    await runQueueStep(planId, 'sequence_enroll', args);
+    expect(dispatched.filter((d) => d.planStepId === `${planId}_s1`)).toEqual([]);
+    const row = await stepRow(planId);
+    expect(row.status).toBe('failed');
+    expect(String(row.errorMessage)).toMatch(/^Refused: .*business owner/);
+    expect(await enrolledIn(ID.seqEnrolQueue)).toEqual([]);
+    const opts = { proposerOverrideRoles: PLAN_APPROVER_ROLES, noPrincipal: true };
+    for (const member of [ID.admin, ID.staffOwned]) {
+      const err = await assertMayRunGraphAction(prisma, ID.biz, { id: member, role: 'USER' }, 'sequence_enroll', member, opts).then(() => null, (e: unknown) => e);
+      expect(err, member).toBeInstanceOf(ForbiddenException);
+    }
+    await expect(assertMayRunGraphAction(prisma, ID.biz, { id: ID.owner, role: 'USER' }, 'sequence_enroll', ID.owner, opts)).resolves.toBeUndefined();
+  });
+
+  // Review SEC-W3CV-3, reproduced (a scratch probe through KeyCortexActionExecutorPlugin.execute with
+  // this suite's real orchestrator): an AI_PLAN EXECUTE_TOOL proposal PlanExecutorService files for a
+  // STAFF member's sequence_enroll_overdue step ran with surface PROPOSAL and no principal and enrolled
+  // every overdue contact, the OWNER's PRIVATE one included. The proposal surface runs no
+  // planStepRunRefusal for any tool (contact reads and money writes too), and the fix belongs in
+  // key-cortex-action-executor.plugin.ts / key-action-proposal.service.ts, outside this packet's write set.
+  it.todo(
+    "CV-13 (D-37, D-73; review SEC-W3CV-3): an AI_PLAN EXECUTE_TOOL proposal for a member's plan step is refused by planStepRunRefusal when it is executed (surface PROPOSAL, no principal): an ADMIN who approves and executes a STAFF member's sequence_enroll_overdue or fetch_client_health step reaches no contact the member may not open",
+  );
 });
