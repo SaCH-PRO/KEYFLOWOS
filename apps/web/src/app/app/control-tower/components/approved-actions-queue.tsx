@@ -17,10 +17,19 @@ import { fetchActionQueue, runApprovedQueueItem, type ActionQueueItem } from "@/
  * boundary holds for a confirmation is reported as waiting.
  *
  * D-72 (2026-11-03, KEY-R3c-APPROVED-QUEUE-MOUNT): the queue is mounted on the Command Center page
- * (ApprovedActionsPanel below reads GET .../queue for the current business). A run that succeeded
- * refreshes the queue; a 403 shows the access message and removes the action (the member may not
- * run it, so offering Run again would only repeat the refusal); any other failure keeps the item.
- * With nothing approved the card says so instead of disappearing.
+ * (ApprovedActionsPanel below reads GET .../queue?status=approved for the current business). Every
+ * answer from the bound route reads the queue again: the server decides what is still runnable. A
+ * run that succeeded removes the action; a 403 shows the access message and removes it (the member
+ * may not run it, so offering Run again would only repeat the refusal); a step that ran and failed
+ * shows the failure and removes it (the route marked the step failed, so it never runs again); any
+ * other failure keeps the item until the queue read says otherwise. With nothing approved the card
+ * says so instead of disappearing, and never while the server counts approved actions it did not
+ * list.
+ *
+ * KEY-R3c review repairs: the panel reads only the approved items (SEC-R3c-1, CR-R3c-1: the mixed
+ * queue is sorted newest first and cut to the limit, so 50 newer rows hid an approved step while
+ * counts.approved still counted it), and every Run answer, not only a success, reads the queue
+ * again (CR-R3c-2: a failed step kept its Run action and every later click was refused 409).
  */
 
 const TITLE = "Approved, ready to run";
@@ -40,30 +49,41 @@ function runnable(item: ActionQueueItem): boolean {
 export function ApprovedActionsQueue({
   businessId,
   items,
+  total,
   onRan,
+  onSettled,
 }: {
   businessId: string;
   items: ActionQueueItem[];
+  /** counts.approved from the same queue read: how many approved actions the server counted. */
+  total?: number;
+  /** A run succeeded. */
   onRan?: (item: ActionQueueItem) => void;
+  /** The bound route answered, whatever it answered: the owner of `items` reads the queue again. */
+  onSettled?: (item: ActionQueueItem) => void;
 }) {
   const [running, setRunning] = useState<string | null>(null);
   const [done, setDone] = useState<ReadonlySet<string>>(new Set());
-  const [denied, setDenied] = useState<{ title: string; message: string } | null>(null);
+  const [notice, setNotice] = useState<{ kind: "denied" | "failed"; title: string; message: string } | null>(null);
 
-  const approved = useMemo(() => items.filter((i) => runnable(i) && !done.has(i.id)), [items, done]);
+  const listed = useMemo(() => items.filter(runnable), [items]);
+  const approved = useMemo(() => listed.filter((i) => !done.has(i.id)), [listed, done]);
+  // Approved actions the server counted but did not list: never shown as "nothing approved".
+  const unlisted = typeof total === "number" ? Math.max(0, total - listed.length) : 0;
+  const waiting = approved.length + unlisted;
 
   const remove = (id: string) => setDone((prev) => new Set(prev).add(id));
 
   const run = async (item: ActionQueueItem) => {
     setRunning(item.id);
-    setDenied(null);
+    setNotice(null);
     try {
       const res = await runApprovedQueueItem(businessId, item);
       if (!res.data) {
         if (res.status === 403) {
           const message = accessMessage(res.error);
           toast.error(message);
-          setDenied({ title: item.title, message });
+          setNotice({ kind: "denied", title: item.title, message });
           remove(item.id);
           return;
         }
@@ -81,32 +101,59 @@ export function ApprovedActionsQueue({
         toast.info(res.data.reason ?? "This action is waiting before it can run");
         return;
       }
-      toast.error(res.data.error ?? res.data.reason ?? "The approved action failed");
+      const message = res.data.error ?? res.data.reason ?? "The approved action failed";
+      toast.error(message);
+      // An answer naming no boundary action means the step ran and failed: the route marked it
+      // failed, so it is never run again (a later Run would be refused 409). An answer from the
+      // action boundary (it carries confirmationId) gave the step back, so it stays.
+      if (res.data.confirmationId === undefined) {
+        setNotice({ kind: "failed", title: item.title, message });
+        remove(item.id);
+      }
     } finally {
       setRunning(null);
+      onSettled?.(item);
     }
   };
 
   return (
     <SectionCard
       title={TITLE}
-      subtitle={approved.length > 0 ? `${approved.length} approved action${approved.length > 1 ? "s" : ""}` : "Nothing waiting"}
+      subtitle={waiting > 0 ? `${waiting} approved action${waiting > 1 ? "s" : ""}` : "Nothing waiting"}
       icon={CheckCircle2}
     >
-      {denied ? (
+      {notice ? (
         <div
           role="alert"
-          data-testid="approved-actions-denied"
+          data-testid={notice.kind === "denied" ? "approved-actions-denied" : "approved-actions-failed"}
           className="mb-2 flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2"
         >
-          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+          {notice.kind === "denied" ? (
+            <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+          ) : (
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+          )}
           <div className="min-w-0">
-            <p className="text-xs font-medium text-foreground">Not run: {denied.title}</p>
-            <p className="text-xs text-muted-foreground">{denied.message}</p>
+            <p className="text-xs font-medium text-foreground">
+              {notice.kind === "denied" ? "Not run" : "Ran and failed"}: {notice.title}
+            </p>
+            <p className="text-xs text-muted-foreground">{notice.message}</p>
           </div>
         </div>
       ) : null}
-      {approved.length === 0 ? (
+      {unlisted > 0 ? (
+        <div
+          role="status"
+          data-testid="approved-actions-incomplete"
+          className="mb-2 flex items-start gap-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <p className="text-xs text-muted-foreground">
+            {unlisted} more approved action{unlisted > 1 ? "s" : ""} could not be listed here.
+          </p>
+        </div>
+      ) : null}
+      {approved.length === 0 && unlisted === 0 ? (
         <div data-testid="approved-actions-empty">
           <EmptyState
             icon={CheckCircle2}
@@ -143,25 +190,30 @@ export function ApprovedActionsQueue({
 
 /**
  * D-72: the approved-action queue for one business, as the Command Center page mounts it. It reads
- * GET actions/businesses/:b/queue (the server lists an approved step only for a member who may run
- * it) and reads it again after a step ran. A queue that could not be read says so: it is never
- * shown as "nothing approved".
+ * GET actions/businesses/:b/queue?status=approved (the server lists an approved step only for a
+ * member who may run it) and reads it again after every answer from the bound execute route. A
+ * queue that could not be read says so: it is never shown as "nothing approved".
+ *
+ * Only the approved items are asked for (SEC-R3c-1, CR-R3c-1): without a status the server merges
+ * approved steps, pending approvals, plans and history, sorts them newest first and keeps the first
+ * `limit`, so an approved step older than `limit` newer rows was cut from the list. With
+ * status=approved it keeps only approved items before cutting.
  */
 export function ApprovedActionsPanel({ businessId }: { businessId: string }) {
   // Each answer is kept with the business it was read for, so another business never shows it.
-  const [loaded, setLoaded] = useState<{ businessId: string; items: ActionQueueItem[] } | null>(null);
+  const [loaded, setLoaded] = useState<{ businessId: string; items: ActionQueueItem[]; total?: number } | null>(null);
   const [failed, setFailed] = useState<{ businessId: string; message: string } | null>(null);
   const latest = useRef(0);
-  const items = loaded?.businessId === businessId ? loaded.items : null;
+  const current = loaded?.businessId === businessId ? loaded : null;
   const loadError = failed?.businessId === businessId ? failed.message : null;
 
   // fetchActionQueue never throws: a network failure comes back as { data: null, error }.
   const load = useCallback(() => {
     const request = ++latest.current;
-    return fetchActionQueue(businessId, undefined, 50).then((res) => {
+    return fetchActionQueue(businessId, "approved", 50).then((res) => {
       if (request !== latest.current) return;
       if (res.data) {
-        setLoaded({ businessId, items: res.data.items ?? [] });
+        setLoaded({ businessId, items: res.data.items ?? [], total: res.data.counts?.approved });
         setFailed(null);
         return;
       }
@@ -176,7 +228,7 @@ export function ApprovedActionsPanel({ businessId }: { businessId: string }) {
     };
   }, [load]);
 
-  if (items === null) {
+  if (current === null) {
     return (
       <div data-testid="approved-actions-panel">
         <SectionCard title={TITLE} icon={CheckCircle2}>
@@ -209,7 +261,12 @@ export function ApprovedActionsPanel({ businessId }: { businessId: string }) {
 
   return (
     <div data-testid="approved-actions-panel">
-      <ApprovedActionsQueue businessId={businessId} items={items} onRan={() => void load()} />
+      <ApprovedActionsQueue
+        businessId={businessId}
+        items={current.items}
+        total={current.total}
+        onSettled={() => void load()}
+      />
     </div>
   );
 }

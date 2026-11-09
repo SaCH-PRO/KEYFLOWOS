@@ -171,4 +171,27 @@ describe("ApprovedActionsQueue runs an approved queued step by its stored ids (D
     await waitFor(() => expect(toast.info).toHaveBeenCalled());
     expect(toast.success).not.toHaveBeenCalled();
   });
+
+  /*
+   * KEY-R3c review CR-R3c-2: a 201 {success:false, error} means the step ran and failed; the route
+   * has already marked it failed, so it never runs again and every later Run would be refused 409.
+   * The failure is shown, the action is removed, and the owner of the list is told to read it again.
+   */
+  it("D70-06 a step that ran and failed is shown as failed, is not offered again, and the list is asked to refresh", async () => {
+    const api = stubApi({ status: 201, body: { success: false, error: "Tool failed", tier: 3 } });
+    const onRan = vi.fn();
+    const onSettled = vi.fn();
+    render(<ApprovedActionsQueue businessId={BIZ} items={[APPROVED]} onRan={onRan} onSettled={onSettled} />);
+
+    fireEvent.click(screen.getByRole("button", { name: `Run ${APPROVED.title}` }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Tool failed"));
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(onRan).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSettled).toHaveBeenCalledWith(APPROVED));
+    await waitFor(() => expect(screen.queryByRole("button", { name: `Run ${APPROVED.title}` })).toBeNull());
+    expect(screen.getByText("Tool failed")).toBeTruthy();
+    expect(api.executes()).toHaveLength(1);
+    expect(api.plans()).toEqual([]);
+  });
 });

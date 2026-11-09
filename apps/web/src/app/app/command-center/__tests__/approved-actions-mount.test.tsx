@@ -17,6 +17,18 @@
  *   CC-AQ-03  a 403 from the bound route shows the access message and removes the action
  *   CC-AQ-04  when nothing is approved the panel says so (empty state), with no Run action
  *   CC-AQ-05  a queue that could not be read says so; it is never shown as "nothing approved"
+ *
+ * Review repairs (KEY-R3c review SEC-R3c-1, CR-R3c-1, CR-R3c-2):
+ *   CC-AQ-06  the panel reads only the approved items (status=approved): the server sorts the mixed
+ *             queue newest first and keeps the first `limit`, so with 50 newer rows an approved step
+ *             fell out of the mixed list while counts.approved still said 1, and the panel showed
+ *             "nothing approved"
+ *   CC-AQ-07  when the server counts more approved actions than it listed, the panel never says
+ *             "nothing approved"; it says some could not be listed
+ *   CC-AQ-08  a step that ran and failed (201 {success:false}) is not offered again: the server marked
+ *             it failed, so the failure is shown and the queue is read again
+ *   CC-AQ-09  a 409 (the step was already executed or is being executed) reads the queue again, so
+ *             Run is not offered for a step the server no longer lists
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within, cleanup, fireEvent } from "@testing-library/react";
@@ -66,8 +78,8 @@ const APPROVED = {
 const PENDING = { id: "appr_pending", type: "pending_approval", toolName: "crm_add_note", title: "Pending note", description: null, riskTier: 2, module: "crm", status: "pending", createdAt: NOW, affectedEntities: [] };
 const EXECUTED = { id: "log_1", type: "executed", toolName: "create_task", title: "Done task", description: null, riskTier: 1, module: "projects", status: "completed", createdAt: NOW, affectedEntities: [] };
 
-function queueBody(items: unknown[]) {
-  return { items, counts: { pending: 0, approved: 0, scheduled: 0, active: 0, completed: 0, failed: 0 }, plans: [] };
+function queueBody(items: unknown[], approvedCount = 0) {
+  return { items, counts: { pending: 0, approved: approvedCount, scheduled: 0, active: 0, completed: 0, failed: 0 }, plans: [] };
 }
 
 /** The V1-47 snapshot shape (business-command-center.types.ts), minimal and healthy. */
@@ -108,7 +120,7 @@ type Answer = { status: number; body: unknown };
 
 function jsonResponse(status: number, body: unknown): Response {
   const text = JSON.stringify(body);
-  const statusText = status === 200 || status === 201 ? "OK" : status === 403 ? "Forbidden" : status === 500 ? "Internal Server Error" : "Service Unavailable";
+  const statusText = status === 200 || status === 201 ? "OK" : status === 403 ? "Forbidden" : status === 409 ? "Conflict" : status === 500 ? "Internal Server Error" : "Service Unavailable";
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -125,12 +137,22 @@ function jsonResponse(status: number, body: unknown): Response {
  * repeats) and the bound execute route. Every other read the cockpit's side panels make answers
  * 503: those panels are not under test here and each has its own unavailable state.
  */
-function serve({ queue, execute = { status: 201, body: { success: true, tier: 3, result: { ok: true } } } }: { queue: Answer[]; execute?: Answer }) {
+function serve({
+  queue,
+  execute = { status: 201, body: { success: true, tier: 3, result: { ok: true } } },
+}: {
+  /** Each GET in turn (the last repeats), or an answer computed from the query the panel sent. */
+  queue: Answer[] | ((query: URLSearchParams) => Answer);
+  /** One answer for every POST, or each POST in turn (the last repeats). */
+  execute?: Answer | Answer[];
+}) {
   const sent: Sent[] = [];
+  const queueQueries: URLSearchParams[] = [];
   let queueReads = 0;
+  let executeCalls = 0;
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    const { pathname } = new URL(url, "http://localhost");
+    const { pathname, searchParams } = new URL(url, "http://localhost");
     const method = (init?.method ?? "GET").toUpperCase();
     const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
     sent.push({ method, path: pathname, body });
@@ -138,17 +160,21 @@ function serve({ queue, execute = { status: 201, body: { success: true, tier: 3,
       return jsonResponse(200, cockpitSnapshot());
     }
     if (method === "GET" && pathname.endsWith(`/actions/businesses/${BIZ}/queue`)) {
-      const answer = queue[Math.min(queueReads, queue.length - 1)];
+      queueQueries.push(searchParams);
+      const answer = typeof queue === "function" ? queue(searchParams) : queue[Math.min(queueReads, queue.length - 1)];
       queueReads += 1;
       return jsonResponse(answer.status, answer.body);
     }
     if (method === "POST" && pathname.endsWith(`/actions/businesses/${BIZ}/execute`)) {
-      return jsonResponse(execute.status, execute.body);
+      const answer = Array.isArray(execute) ? execute[Math.min(executeCalls, execute.length - 1)] : execute;
+      executeCalls += 1;
+      return jsonResponse(answer.status, answer.body);
     }
     return jsonResponse(503, { message: "Service Unavailable" });
   }));
   return {
     sent,
+    queueQueries,
     queueReads: () => sent.filter((r) => r.method === "GET" && r.path.endsWith("/queue")),
     plans: () => sent.filter((r) => r.path.endsWith("/plan")),
     executes: () => sent.filter((r) => r.path.endsWith("/execute")),
@@ -257,5 +283,94 @@ describe("D-72: the Command Center page mounts the approved-action queue with it
     await waitFor(() => expect(within(panel).getByTestId("approved-actions-unavailable")).toBeTruthy(), { timeout: 10_000 });
     expect(within(panel).queryByTestId("approved-actions-empty")).toBeNull();
     expect(within(panel).queryAllByRole("button", { name: /^Run / })).toHaveLength(0);
+  }, 30_000);
+});
+
+describe("D-72 review repairs: the panel never hides an approved step and never offers Run for a spent one", () => {
+  /** 50 history rows, every one newer than the approval of APPROVED. */
+  const NEWER_HISTORY = Array.from({ length: 50 }, (_, i) => ({
+    ...EXECUTED,
+    id: `log_newer_${i}`,
+    title: `Newer run ${i}`,
+    createdAt: new Date(Date.UTC(2026, 10, 3, 12, i)).toISOString(),
+  }));
+
+  it("CC-AQ-06 reads only the approved items, so an approved step behind 50 newer rows is still offered with Run", async () => {
+    // As GET .../queue answers (graph-actions.controller getActionQueue): with status=approved it
+    // keeps only the approved items before slicing to the limit; without it, it merges every kind,
+    // sorts newest first and keeps the first `limit`, so the older approved step is cut while
+    // counts.approved still counts it.
+    const api = serve({
+      queue: (query) =>
+        query.get("status") === "approved"
+          ? { status: 200, body: queueBody([APPROVED], 1) }
+          : { status: 200, body: queueBody(NEWER_HISTORY.slice(0, Number(query.get("limit") ?? 30)), 1) },
+    });
+    const panel = await renderCommandCenter();
+
+    await waitFor(() => expect(runButton(panel)).toBeTruthy(), { timeout: 10_000 });
+    expect(within(panel).queryByTestId("approved-actions-empty")).toBeNull();
+    expect(api.queueQueries.length).toBeGreaterThan(0);
+    for (const query of api.queueQueries) expect(query.get("status")).toBe("approved");
+  }, 30_000);
+
+  it("CC-AQ-07 when the server counts approved actions it did not list, the panel never says nothing is approved", async () => {
+    serve({ queue: [{ status: 200, body: queueBody(NEWER_HISTORY, 1) }] });
+    const panel = await renderCommandCenter();
+
+    await waitFor(() => expect(within(panel).getByTestId("approved-actions-incomplete")).toBeTruthy(), { timeout: 10_000 });
+    expect(within(panel).queryByTestId("approved-actions-empty")).toBeNull();
+    expect(within(panel).queryByText("Nothing approved is waiting to run")).toBeNull();
+    expect(within(panel).queryAllByRole("button", { name: /^Run / })).toHaveLength(0);
+  }, 30_000);
+
+  it("CC-AQ-08 a step that ran and failed is shown as failed, the queue is read again, and Run is not offered again", async () => {
+    const api = serve({
+      queue: [
+        { status: 200, body: queueBody([APPROVED], 1) },
+        { status: 200, body: queueBody([], 0) },
+      ],
+      execute: [
+        { status: 201, body: { success: false, error: "Tool failed", tier: 3 } },
+        { status: 409, body: { statusCode: 409, message: "This plan step was already executed or is being executed", error: "Conflict" } },
+      ],
+    });
+    const panel = await renderCommandCenter();
+    await waitFor(() => expect(runButton(panel)).toBeTruthy(), { timeout: 10_000 });
+    const readsBefore = api.queueReads().length;
+
+    fireEvent.click(runButton(panel)!);
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Tool failed"));
+    expect(toast.success).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.queueReads().length).toBe(readsBefore + 1));
+    await waitFor(() => expect(runButton(panel)).toBeNull());
+    expect(within(panel).getByText("Tool failed")).toBeTruthy();
+    expect(api.executes()).toHaveLength(1);
+    expect(api.plans()).toEqual([]);
+  }, 30_000);
+
+  it("CC-AQ-09 a 409 (already executed or being executed) reads the queue again, so a step the server no longer lists loses its Run action", async () => {
+    const conflict = "This plan step was already executed or is being executed";
+    const api = serve({
+      queue: [
+        { status: 200, body: queueBody([APPROVED], 1) },
+        { status: 200, body: queueBody([], 0) },
+      ],
+      execute: { status: 409, body: { statusCode: 409, message: conflict, error: "Conflict" } },
+    });
+    const panel = await renderCommandCenter();
+    await waitFor(() => expect(runButton(panel)).toBeTruthy(), { timeout: 10_000 });
+    const readsBefore = api.queueReads().length;
+
+    fireEvent.click(runButton(panel)!);
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(conflict));
+    await waitFor(() => expect(api.queueReads().length).toBe(readsBefore + 1));
+    await waitFor(() => expect(runButton(panel)).toBeNull());
+    await waitFor(() => expect(within(panel).getByTestId("approved-actions-empty")).toBeTruthy());
+    expect(toast.success).not.toHaveBeenCalled();
+    expect(api.executes()).toHaveLength(1);
+    expect(api.plans()).toEqual([]);
   }, 30_000);
 });
