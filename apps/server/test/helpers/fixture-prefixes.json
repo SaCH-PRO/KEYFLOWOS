@@ -578,6 +578,11 @@
       "packet": "V1-81 (FOLLOW3-A7-MONEY-REPORTS)"
     },
     {
+      "prefix": "v82a_",
+      "owner": "apps/server/test/invoice-void-net-received.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B1-VOID-NET-RECEIVED)"
+    },
+    {
       "prefix": "v82c_",
       "owner": "apps/server/test/accrual-revenue-splits.integration.test.ts",
       "packet": "V1-82 (FOLLOW3-B3-ACCRUAL-SPLIT-DISCOUNT)"
