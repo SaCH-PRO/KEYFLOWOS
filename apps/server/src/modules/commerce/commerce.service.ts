@@ -4500,7 +4500,23 @@ export class CommerceService {
     }
     if (input.notes !== undefined) updateData.notes = input.notes;
 
-    if (input.items) {
+    // FOLLOW3-B2 (owner ruling D-60): once the invoice leaves DRAFT its lines,
+    // tax and discount are fixed, as its currency is (ST-V37-1 above). Issuing
+    // posted its receivable (accrual) at the stored total, idempotently, and
+    // the payment reconcile settles against that total: an edit rewrote the
+    // lines and total of a SENT, OVERDUE, FAILED, PENDING or VOID invoice and
+    // neither re-posted nor reconciled, so an ACCRUAL receivable of 100 edited
+    // to 80 and paid stayed at 20, and a CASH invoice paid 60 and edited to 50
+    // stayed OVERDUE. A change is refused (409) before anything is written;
+    // a correction is a void-and-reissue or a credit note (D-28). Restating the
+    // stored lines and terms (an edit form sends the whole document) is not a
+    // change: it passes, and neither branch below runs, so the stored lines
+    // (their productIds included, which the web form omits) and every amount
+    // are left exactly as they are.
+    const issued = invoice.status !== 'DRAFT';
+    if (issued) await this.assertIssuedInvoiceAmountsRestated(invoice, input);
+
+    if (input.items && !issued) {
       // R0-D3 review (ST-D3-2): InvoiceItem.productId is an FK to Product with
       // no tenant check, so a line could bind another tenant's product and
       // downstream catalog/inventory consumers of invoice_items.product_id
@@ -4556,7 +4572,7 @@ export class CommerceService {
           productId: item.productId || null,
         })),
       };
-    } else if (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined) {
+    } else if (!issued && (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined)) {
       const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
       const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
       const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
@@ -4596,6 +4612,67 @@ export class CommerceService {
     this.events.emit('invoice.updated', { invoice: result, businessId: input.businessId });
     this.statsCache.invalidateCache(input.businessId);
     return result;
+  }
+
+  /**
+   * FOLLOW3-B2 (owner ruling D-60): an edit of an issued (non-DRAFT) invoice
+   * may restate its lines, tax and discount but not change them. Throws 409
+   * unless:
+   *  - the effective tax rate (a sent one, else the stored one, as the edit
+   *    applies it) equals the stored one;
+   *  - the effective discount equals the stored one, where "no discount" is
+   *    any type other than PERCENT / FIXED or a zero/absent value, as
+   *    computeDocumentAmounts prices it (the web form sends {null, null} for
+   *    "none" whatever type is stored);
+   *  - when lines are sent, they are the stored lines: as many, each matching
+   *    one stored line on description, quantity and unitPrice, and on
+   *    productId when it names one (an omitted or empty productId keeps the
+   *    stored one). Lines are matched in any order: invoice reads return them
+   *    unordered, and an edit form sends them back in the order it read.
+   * Read-only: it runs before any write.
+   */
+  private async assertIssuedInvoiceAmountsRestated(
+    invoice: { id: string; status: string; taxRate: number | null; discountType: string | null; discountValue: number | null },
+    input: {
+      items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+      taxRate?: number;
+      discountType?: 'PERCENT' | 'FIXED' | null;
+      discountValue?: number | null;
+    },
+  ): Promise<void> {
+    const changed = () =>
+      new ConflictException(
+        `Cannot change the amounts of a ${invoice.status} invoice: its lines, tax and discount are fixed once it is issued; ` +
+          'correct it by voiding it and issuing a new invoice, or with a credit note',
+      );
+    if (Number(input.taxRate ?? invoice.taxRate ?? 0) !== Number(invoice.taxRate ?? 0)) throw changed();
+    const discount = (type: string | null | undefined, value: number | null | undefined) =>
+      (type === 'PERCENT' || type === 'FIXED') && value ? `${type}:${Number(value)}` : 'none';
+    const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
+    const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
+    if (discount(discountType, discountValue) !== discount(invoice.discountType, invoice.discountValue)) throw changed();
+
+    if (!input.items) return;
+    const stored = await this.prisma.client.invoiceItem.findMany({
+      where: { invoiceId: invoice.id },
+      select: { description: true, quantity: true, unitPrice: true, productId: true },
+    });
+    if (input.items.length !== stored.length) throw changed();
+    // Lines naming a product are matched first, so an unnamed line (which
+    // matches any product) never takes the stored line a named one needs.
+    const names = (item: { productId?: string }) => typeof item.productId === 'string' && item.productId.length > 0;
+    const unmatched = [...stored];
+    for (const item of [...input.items.filter(names), ...input.items.filter((i) => !names(i))]) {
+      const at = unmatched.findIndex(
+        (line) =>
+          line.description === item.description &&
+          Number(line.quantity) === Number(item.quantity) &&
+          Number(line.unitPrice) === Number(item.unitPrice) &&
+          (!names(item) || line.productId === item.productId),
+      );
+      if (at < 0) throw changed();
+      unmatched.splice(at, 1);
+    }
   }
 
   /**

@@ -33,10 +33,11 @@
  *                    actor (the commerce_update_invoice shape) -> ConflictException 409, nothing written
  *   IA-06 controls:  a DRAFT edit to 80, send, mark-paid -> AR 80 then 0; SENT {notes, dueDate} -> 200;
  *                    SENT restating its stored lines and tax/discount (productId omitted, as the web edit
- *                    form sends it) -> 200, total unchanged, stored productIds kept; the same with no
- *                    discount in the web form's {discountType:null, discountValue:null} shape -> 200; a
- *                    SENT line description edit with the amounts restated -> 200 (description written, money
- *                    and productIds kept); SENT {currency} change -> 409 currency (CUR-08 as before);
+ *                    form sends it) -> 200, total unchanged, stored productIds kept (in any line order); the
+ *                    same with no discount in the web form's {discountType:null, discountValue:null} shape ->
+ *                    200; a SENT line description edit, product swap or line split -> 409 (D-60: the lines
+ *                    are fixed), a line naming its stored productId -> 200; SENT {currency} change -> 409
+ *                    currency (CUR-08 as before);
  *                    PAID and PARTIALLY_PAID still 409 'Cannot edit a paid or partially paid invoice'
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
@@ -534,6 +535,14 @@ describe('V1-82 D-60 controls: DRAFT edits, restatements and non-money edits sta
     expect(money(after)).toEqual(money(before));
     expect(after.notes).toBe('V82B restated');
     expect(await ledgerArCents(ID.acc, inv.id)).toBe(10_000);
+
+    // Invoice reads return the lines unordered: the same lines in another order are a restatement too.
+    const reordered = await patchInvoice(ID.acc, inv.id, {
+      items: [...lines].reverse().map(({ description, quantity, unitPrice }) => ({ description, quantity, unitPrice })),
+      taxRate: 10,
+    });
+    expect(reordered.status, JSON.stringify(reordered.body)).toBe(200);
+    expect((await snapshot(inv.id)).items).toEqual(before.items);
   }, 60_000);
 
   it('IA-06d: a SENT invoice with no tax or discount, restated in the web form\'s shape ({taxRate omitted, discountType:null, discountValue:null}) -> 200, nothing in its money changes', async () => {
@@ -554,18 +563,28 @@ describe('V1-82 D-60 controls: DRAFT edits, restatements and non-money edits sta
     expect(money(after)).toEqual(money(before));
   }, 60_000);
 
-  it('IA-06e: a SENT invoice whose line description is edited with the amounts restated -> 200; the description is written, the money, line ids and productIds are kept', async () => {
+  it('IA-06e: a SENT invoice\'s lines are fixed (D-60 "changes its lines"): a line description edit, a swapped product and a split line are each refused 409 and write nothing; a line with its stored productId named is a restatement (200)', async () => {
     const inv = await createDraft(ID.acc, [{ description: 'V82B placeholder', quantity: 1, unitPrice: 1 }]);
-    const drafted = await patchInvoice(ID.acc, inv.id, { items: [{ description: 'V82B IA-06e typo', quantity: 1, unitPrice: 40, productId: ID.svc }] });
+    const drafted = await patchInvoice(ID.acc, inv.id, { items: [{ description: 'V82B IA-06e', quantity: 2, unitPrice: 20, productId: ID.svc }] });
     expect(drafted.status, JSON.stringify(drafted.body)).toBe(200);
     await send(ID.acc, inv.id);
     const before = await snapshot(inv.id);
 
-    const res = await patchInvoice(ID.acc, inv.id, { items: [{ description: 'V82B IA-06e fixed', quantity: 1, unitPrice: 40 }] });
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const after = await snapshot(inv.id);
-    expect(after.items).toEqual([{ ...before.items[0], description: 'V82B IA-06e fixed' }]);
-    expect(after.total).toBe(before.total);
+    for (const items of [
+      [{ description: 'V82B IA-06e renamed', quantity: 2, unitPrice: 20 }],
+      [{ description: 'V82B IA-06e', quantity: 2, unitPrice: 20, productId: ID.goods }],
+      [{ description: 'V82B IA-06e', quantity: 1, unitPrice: 20 }, { description: 'V82B IA-06e', quantity: 1, unitPrice: 20 }],
+    ]) {
+      emitted.length = 0;
+      const res = await patchInvoice(ID.acc, inv.id, { items });
+      expect(res.status, `${JSON.stringify(items)}: ${JSON.stringify(res.body)}`).toBe(409);
+      expect(res.body.message).toMatch(AMOUNTS_REFUSED('SENT'));
+      expect(await snapshot(inv.id)).toEqual(before);
+      expect(emitted).not.toContain('invoice.updated');
+    }
+    const named = await patchInvoice(ID.acc, inv.id, { items: [{ description: 'V82B IA-06e', quantity: 2, unitPrice: 20, productId: ID.svc }] });
+    expect(named.status, JSON.stringify(named.body)).toBe(200);
+    expect((await snapshot(inv.id)).items).toEqual(before.items);
     expect(await ledgerArCents(ID.acc, inv.id)).toBe(4_000);
   }, 60_000);
 
