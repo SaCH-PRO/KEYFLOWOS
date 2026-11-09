@@ -306,9 +306,24 @@ beforeAll(async () => {
   });
   const planner = Object.assign(Object.create(PlannerService.prototype), { prisma, logger: quiet });
 
+  // W5-AGENT-TRIGGERS-AUTHORITY (D-73, D-93): the real AgentController (POST and PUT agent/triggers,
+  // AuthGuard and BusinessGuard) over the real PrismaService; its collaborators for routes this suite
+  // does not call are inert.
+  const { AgentController } = await import('../src/modules/ai/agent.controller');
+  const agentControllerOffBoundary = await Promise.all([
+    import('../src/modules/ai/agent-state-machine.service').then((m) => m.AgentStateMachineService),
+    import('../src/modules/ai/agent-bus.service').then((m) => m.AgentBusService),
+    import('../src/modules/ai/pattern-detector.service').then((m) => m.PatternDetectorService),
+    import('../src/modules/ai/undo.service').then((m) => m.UndoService),
+    import('../src/modules/ai/calendar-intelligence.service').then((m) => m.CalendarIntelligenceService),
+    import('../src/modules/ai/document-intelligence.service').then((m) => m.DocumentIntelligenceService),
+    import('../src/modules/ai/semantic-memory.service').then((m) => m.SemanticMemoryService),
+  ]);
+
   const testing = await Test.createTestingModule({
-    controllers: [GraphActionsController],
+    controllers: [GraphActionsController, AgentController],
     providers: [
+      ...agentControllerOffBoundary.map((token) => ({ provide: token, useValue: {} })),
       { provide: PrismaService, useValue: prisma },
       AuthGuard,
       BusinessGuard,
@@ -893,11 +908,99 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
     }
   });
 
+  // W5-AGENT-TRIGGERS-AUTHORITY (owner rulings D-73, D-93; review SEC-D93-3, the CV-08m residual): POST
+  // and PUT agent/triggers (AuthGuard and BusinessGuard only) let any member switch on a seeded default
+  // rule or write it word for word, and a default rule's plans run as the business owner (D-93), so a
+  // STAFF member could make owner-run plans. Only the owner switches on, switches off or edits a rule
+  // that runs as the owner; a rule a member writes records that member (D-73) and is never the system's.
+  describe('W5-AGENT-TRIGGERS-AUTHORITY (D-73, D-93): only the owner turns on or edits an owner-run default trigger', () => {
+    const triggerUrl = (id?: string) => `/ai/businesses/${ID.biz}/agent/triggers${id ? `/${id}` : ''}`;
+    const paidDefault = () => DEFAULT_AGENT_TRIGGERS.find((t) => t.eventPattern === 'invoice.paid')!;
+    /** The seeded 'Payment Received' rule, every rule of biz switched off first so only the rule a case switches on fires. */
+    async function seededPaidRule() {
+      await defaultTriggers.seedForBusiness(ID.biz);
+      await db.agentTrigger.updateMany({ where: { businessId: ID.biz }, data: { enabled: false } });
+      const def = paidDefault();
+      const row = await db.agentTrigger.findFirst({ where: { businessId: ID.biz, name: def.name, eventPattern: def.eventPattern, objective: def.objective } });
+      expect(row, 'the seeded default rule').toBeTruthy();
+      return row;
+    }
+    /** The members AgentTriggerService records on the plans it writes for an invoice.paid event. */
+    async function firePaid() {
+      const from = plannedFor.length;
+      await agentTriggers.handleEvent('invoice.paid', { businessId: ID.biz, invoiceId: `${P}none` });
+      return plannedFor.slice(from).map((p) => ({ objective: p.objective, userId: p.userId ?? null }));
+    }
+
+    it("CV-08m RED-BEFORE (W5-AGENT-TRIGGERS-AUTHORITY; D-93, D-73; review SEC-D93-3): PUT agent/triggers answers 403 to the STAFF member and the ADMIN who switch on, switch off or edit a seeded default rule (it stays as seeded and fires nothing); the OWNER switching it on still fires its plan as the business owner", async () => {
+      const seeded = await seededPaidRule();
+      const def = paidDefault();
+      try {
+        for (const [actor, body] of [
+          [ID.staffOwned, { enabled: true }],
+          [ID.staffOwned, { enabled: true, objective: def.objective, maxRiskTier: 1 }],
+          [ID.admin, { enabled: true }],
+          [ID.admin, { autoExecute: false }],
+        ] as const) {
+          const res = await request(app.getHttpServer()).put(triggerUrl(seeded.id)).set('x-test-user', actor).send(body);
+          expect(res.status, `${actor} ${JSON.stringify(body)}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(403);
+        }
+        const after = await db.agentTrigger.findUnique({ where: { id: seeded.id } });
+        expect({ enabled: after.enabled, autoExecute: after.autoExecute, condition: after.condition, objective: after.objective, maxRiskTier: after.maxRiskTier })
+          .toEqual({ enabled: false, autoExecute: seeded.autoExecute, condition: null, objective: def.objective, maxRiskTier: def.maxRiskTier });
+        expect(await firePaid()).toEqual([]);
+
+        // A seeded rule the OWNER switched on is still one only the owner switches off.
+        const on = await request(app.getHttpServer()).put(triggerUrl(seeded.id)).set('x-test-user', ID.owner).send({ enabled: true });
+        expect(on.status, JSON.stringify(on.body).slice(0, 300)).toBe(200);
+        expect(await firePaid()).toEqual([{ objective: def.objective, userId: ID.owner }]);
+        const off = await request(app.getHttpServer()).put(triggerUrl(seeded.id)).set('x-test-user', ID.staffOwned).send({ enabled: false });
+        expect(off.status, JSON.stringify(off.body).slice(0, 300)).toBe(403);
+        expect((await db.agentTrigger.findUnique({ where: { id: seeded.id } })).enabled).toBe(true);
+      } finally {
+        await db.agentTrigger.updateMany({ where: { businessId: ID.biz }, data: { enabled: false } });
+      }
+    });
+
+    it("CV-08m2 RED-BEFORE (W5-AGENT-TRIGGERS-AUTHORITY; D-73, D-93; review SEC-D93-3): POST agent/triggers records the member who wrote the rule: a STAFF member's word-for-word copy of a default rule fires its plan as that STAFF member, never as the owner; a creator the body names is ignored; the STAFF member's own PUT of their copy keeps it theirs", async () => {
+      await seededPaidRule();
+      const def = paidDefault();
+      const created: string[] = [];
+      try {
+        const copy = await request(app.getHttpServer()).post(triggerUrl()).set('x-test-user', ID.staffOwned)
+          .send({ name: def.name, eventPattern: def.eventPattern, objective: def.objective, autoExecute: true, maxRiskTier: def.maxRiskTier });
+        expect(copy.status, JSON.stringify(copy.body).slice(0, 300)).toBe(201);
+        created.push(copy.body.id);
+        expect(await firePaid()).toEqual([{ objective: def.objective, userId: ID.staffOwned }]);
+
+        // A creator the body names (the reserved key, KEY-R3b's) is dropped and the writer recorded.
+        const forgedObjective = 'v89k cv08m2 forged creator';
+        const forged = await request(app.getHttpServer()).post(triggerUrl()).set('x-test-user', ID.staffOwned)
+          .send({ name: def.name, eventPattern: def.eventPattern, objective: forgedObjective, condition: { $createdBy: ID.owner }, maxRiskTier: def.maxRiskTier });
+        expect(forged.status, JSON.stringify(forged.body).slice(0, 300)).toBe(201);
+        created.push(forged.body.id);
+        expect((await firePaid()).sort((a, b) => a.objective.localeCompare(b.objective)))
+          .toEqual([{ objective: def.objective, userId: ID.staffOwned }, { objective: forgedObjective, userId: ID.staffOwned }].sort((a, b) => a.objective.localeCompare(b.objective)));
+
+        // The STAFF member switches their own copy off and on: theirs to edit, and still theirs.
+        for (const enabled of [false, true]) {
+          const res = await request(app.getHttpServer()).put(triggerUrl(copy.body.id)).set('x-test-user', ID.staffOwned)
+            .send({ enabled, condition: { $createdBy: ID.owner } });
+          expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+        }
+        await db.agentTrigger.update({ where: { id: forged.body.id }, data: { enabled: false } });
+        expect(await firePaid()).toEqual([{ objective: def.objective, userId: ID.staffOwned }]);
+      } finally {
+        await db.agentTrigger.deleteMany({ where: { id: { in: created } } });
+        await db.agentTrigger.updateMany({ where: { businessId: ID.biz }, data: { enabled: false } });
+      }
+    });
+  });
+
   // Residuals of review SEC-D93-1..3 outside this packet's write set (plan-step-authority, the default
   // triggers, the system plan creators' member field, the orchestrator's choice of the memberless view):
   it.todo("CV-08k TODO (review SEC-D93-1 residual; D-74): GET businesses/:businessId/journeys/:instanceId hands getJourneyInstance its viewer (ai.controller.ts, outside W4-D93-NO-MEMBER-CONTACTS's write set), so the plan read rule answers each viewer what it may read; until then the route withholds every step's input and output from every reader");
   it.todo("CV-08l TODO (review SEC-D93-1, SEC-D93-2 residual; D-74): GET businesses/:businessId/ai/execution-logs answers only what its viewer may read: ActionDispatcherService (outside this write set) logs a plan step's whole result, so an owner-run system plan's output (and, before D-93, the owner's own plan's) reaches every member");
-  it.todo("CV-08m TODO (review SEC-D93-3 residual): POST and PUT agent/triggers (agent.controller.ts, BusinessGuard only, outside this write set) let any member switch on a seeded default rule or write it word for word, and its plans run as the owner (D-93); who may switch on or write a system rule is that route's authority");
   it.todo("CV-08n TODO (review SEC-D93-1 residual; D-73): POST businesses/:businessId/journeys/:key/trigger records the requesting member as the journey plan's member (ai.controller.ts, outside this write set), so the journey runs as that member rather than as no member");
 });
 
