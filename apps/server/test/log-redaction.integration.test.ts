@@ -2007,6 +2007,16 @@ describe('dependabot: version updates for the workspace and the workflows', () =
 
 describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
   const FILE = path.join(REPO_ROOT, 'docs/reconstruction/product/evidence/RELEASE0-TRUST-CENSUS-001.md');
+  /**
+   * CF-029's two states for the platform sender's caller lines (SEC-W4HK-1,
+   * CR-W5SEC-2): OPEN before W5-SYSTEM-EMAIL-CALLERS; closed by it, and by
+   * W6-LOG-ADDRESSES-AND-DOCS for the approval routing caller, after. The
+   * other address-logging calls stay OPEN after them.
+   */
+  const CALLERS_OPEN = "OPEN: the platform sender's callers";
+  const CALLERS_CLOSED = "the platform sender's callers that logged the recipient or that error text were closed by W5-SYSTEM-EMAIL-CALLERS";
+  const APPROVAL_CLOSED = 'the approval routing caller was closed by W6-LOG-ADDRESSES-AND-DOCS';
+  const OTHERS_OPEN = 'OPEN: other production log calls';
 
   /** The ids of the source matrices: 68 assurance domains and 50 catastrophic-failure scenarios. */
   const IA_IDS = Array.from({ length: 68 }, (_, i) => `IA-${String(i + 1).padStart(3, '0')}`);
@@ -2200,19 +2210,23 @@ describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
     expect(findings).not.toMatch(/A non-draft pkt\/\* PR fails closed at the grant step/);
   });
 
-  it('CF-029 scopes the platform sender\'s closure (9B-D2, D-82) to its own lines and keeps the lines one hop up OPEN (SEC-W4HK-1)', () => {
+  it('CF-029 scopes the platform sender\'s closure (9B-D2, D-82) to its own lines and records the lines one hop up in exactly one state (SEC-W4HK-1, CR-W5SEC-2)', () => {
     // W4-HOUSEKEEPING review SEC-W4HK-1: SystemEmailService redacts addresses
     // on its own lines only. The SystemEmailSendError it throws still carries
-    // the provider text (system-email.service.ts:125, :144), and its callers log
-    // that text or the recipient themselves; system-email.log-redaction.spec.ts
-    // pins that boundary by CHARACTERIZATION. The callers are outside
-    // W4-HOUSEKEEPING's write set, so the census must not record the recipient
-    // leak as closed: it names the sink-only scope and lists those lines OPEN.
+    // the provider text (system-email.service.ts:125, :144), and its callers
+    // logged that text or the recipient themselves; system-email.log-redaction.spec.ts
+    // pins that boundary by CHARACTERIZATION. So the census names the sink-only
+    // scope, and records the caller lines after it either OPEN or closed by the
+    // packets that fixed them, never both (W5-SYSTEM-EMAIL-CALLERS review
+    // CR-W5SEC-2: the case below holds which state).
     const note = rows('CF').find((r) => r.id === 'CF-029')?.cells[CF_COL.evidence] ?? '';
     const SCOPE = "that closure covers the sink's own lines only";
     expect(note, `CF-029 says "${SCOPE}"`).toContain(SCOPE);
     const after = note.slice(note.indexOf(SCOPE));
-    expect(after).toContain("OPEN: the platform sender's callers");
+    expect(
+      [CALLERS_OPEN, CALLERS_CLOSED].filter((state) => after.includes(state)),
+      "CF-029 records the platform sender's caller lines in exactly one state (CR-W5SEC-2)",
+    ).toHaveLength(1);
     for (const needle of [
       'system-email.service.ts:125',
       ':144',
@@ -2227,15 +2241,50 @@ describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
   });
 
   // W5-SYSTEM-EMAIL-CALLERS review CR-W5SEC-2 / SEC-W5SEC-1 (9B-D2, SEC-W4HK-1):
-  // W5-SYSTEM-EMAIL-CALLERS closed the caller lines the case above still
-  // requires the census to list as OPEN (identity-signup :185/:266 and its
-  // Supabase-step lines :168/:236/:251, ai-usage-alert-scheduler :156,
-  // financial-briefing-scheduler :263/:269, accountant-export-email :103, the
-  // accountant export 500 line), and its review found a caller CF-029 does not
-  // list: AiOversightService.routeAndNotify relogs ApprovalRoutingService's
-  // SystemEmailSendError text (ai-oversight.service.ts:558, :569;
-  // approval-routing.service.ts:188). RELEASE0-TRUST-CENSUS-001.md is outside
-  // this packet's write set, so the docs follow-up rewrites CF-029 and the
-  // case above together and makes this case live.
-  it.todo('CF-029 records the W5-SYSTEM-EMAIL-CALLERS caller lines CLOSED and the approval routing caller (ai-oversight.service.ts:558, :569) OPEN (9B-D2, SEC-W4HK-1; docs follow-up, review CR-W5SEC-2)');
+  // W5-SYSTEM-EMAIL-CALLERS closed the caller lines the census listed OPEN
+  // (identity-signup :185/:266 and its Supabase-step lines :168/:236/:251,
+  // ai-usage-alert-scheduler :156, financial-briefing-scheduler :263/:269,
+  // accountant-export-email :103, the accountant export 500 line), and its
+  // review found a caller CF-029 did not list: AiOversightService.routeAndNotify
+  // relogged ApprovalRoutingService's SystemEmailSendError text
+  // (ai-oversight.service.ts:558, :569; approval-routing.service.ts:188), which
+  // W6-LOG-ADDRESSES-AND-DOCS closed. CF-029 records every one of them closed,
+  // with no OPEN wording left for them, and keeps the other address-logging
+  // calls OPEN.
+  it('CF-029 records the W5-SYSTEM-EMAIL-CALLERS caller lines and the approval routing caller (ai-oversight.service.ts:558, :569; approval-routing.service.ts:188) CLOSED, in exactly that one state (9B-D2, SEC-W4HK-1; W6-LOG-ADDRESSES-AND-DOCS, review CR-W5SEC-2)', () => {
+    const note = rows('CF').find((r) => r.id === 'CF-029')?.cells[CF_COL.evidence] ?? '';
+    const SCOPE = "that closure covers the sink's own lines only";
+    const after = note.slice(note.indexOf(SCOPE));
+    expect([CALLERS_OPEN, CALLERS_CLOSED].filter((state) => after.includes(state))).toEqual([CALLERS_CLOSED]);
+    expect(
+      after.indexOf(OTHERS_OPEN),
+      'CF-029 keeps the other address-logging calls OPEN after the closed callers',
+    ).toBeGreaterThan(after.indexOf(CALLERS_CLOSED));
+    const closed = after.slice(after.indexOf(CALLERS_CLOSED), after.indexOf(OTHERS_OPEN));
+    for (const needle of [
+      'identity-signup.service.ts:185, :266',
+      ':168, :236, :251',
+      'ai-usage-alert-scheduler.service.ts:156',
+      'financial-briefing-scheduler.service.ts:269',
+      ':263',
+      'accountant-export-email.service.ts:103',
+      'http-exception.filter.ts:71',
+      'finance.controller.ts:1169',
+      APPROVAL_CLOSED,
+      'approval-routing.service.ts:188',
+      'ai-oversight.service.ts:558',
+      ':569',
+      '`apps/server/src/modules/notifications/system-email.log-redaction.spec.ts`',
+    ]) {
+      expect(closed, `CF-029 records ${needle} closed`).toContain(needle);
+    }
+    // The closed lines are no longer listed among the OPEN address-logging calls.
+    const others = after.slice(after.indexOf(OTHERS_OPEN));
+    for (const stale of ['financial-briefing-scheduler.service.ts:263', 'identity-signup.service.ts:168', 'ai-oversight.service.ts', 'approval-routing.service.ts']) {
+      expect(others, `CF-029 no longer lists ${stale} OPEN`).not.toContain(stale);
+    }
+    for (const kept of ['cross-module-agent.service.ts:355', 'email-marketing.service.ts:428', 'key-cortex-phone.service.ts:296']) {
+      expect(others, `CF-029 still lists ${kept} OPEN`).toContain(kept);
+    }
+  });
 });

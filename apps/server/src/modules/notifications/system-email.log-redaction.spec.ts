@@ -23,6 +23,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SystemEmailService } from './system-email.service';
 import { IdentitySignupService } from '../identity/identity-signup.service';
 import { AiUsageAlertSchedulerService } from '../ai/ai-usage-alert-scheduler.service';
+import { AiOversightService } from '../ai/ai-oversight.service';
+import { ApprovalRoutingService } from '../ai/approval-routing.service';
 import { FinancialBriefingSchedulerService } from '../commerce/financial-briefing-scheduler.service';
 import { AccountantExportEmailService } from '../finance/accountant-export-email.service';
 import { FinanceController } from '../finance/finance.controller';
@@ -320,13 +322,75 @@ describe('SystemEmailService.sendTransactional logs no recipient address (9B-D2,
 
   // Review findings SEC-W5SEC-1 / CR-W5SEC-1: a seventh caller of the sink.
   // ApprovalRoutingService.notifyApprover (approval-routing.service.ts:188)
-  // returns the SystemEmailSendError message unchanged as `error`, and
-  // AiOversightService.routeAndNotify logs it at warn (ai-oversight.service.ts
+  // returned the SystemEmailSendError message unchanged as `error`, and
+  // AiOversightService.routeAndNotify logged it at warn (ai-oversight.service.ts
   // :558 approver, :569 tier-4 owner CC), so provider text that quotes the
-  // recipient reaches the log. Neither file is in W5-SYSTEM-EMAIL-CALLERS'
-  // write set (census CF-029 does not list them): a follow-up packet routes
-  // both lines through redactAddresses and makes this case live.
-  it.todo('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS follow-up (review SEC-W5SEC-1): AiOversightService.routeAndNotify logs no provider text address when the approver email (ai-oversight.service.ts:558) or the tier-4 owner CC (:569) fails, and names the item id (outside this packet\'s write set)');
+  // recipient reached the log. W6-LOG-ADDRESSES-AND-DOCS routes both lines (and
+  // the error text notifyApprover hands them) through redactAddresses. The case
+  // drives the real routing service and the real sink (stand-in Resend client):
+  // a tier-4 item delegated to an approver whose email is refused with text
+  // quoting the approver's address, then the owner CC whose response is lost
+  // with transport text quoting the owner's address.
+  it('[9B-D2, SEC-W4HK-1] W6-LOG-ADDRESSES-AND-DOCS (review SEC-W5SEC-1): AiOversightService.routeAndNotify logs no provider text address when the approver email (ai-oversight.service.ts:558) or the tier-4 owner CC (:569) fails, and names the item id', async () => {
+    const itemId = 'appr_w6log_tier4';
+    const OWNER = 'customer.d82.owner@example.test';
+    let sends = 0;
+    const { service: failing, calls } = serviceWith(async (payload) => {
+      sends += 1;
+      if (sends === 1) {
+        return { data: null, error: { name: 'validation_error', message: `"${String(payload.to)}" is on the suppression list` } };
+      }
+      throw new Error(`socket hang up while sending to ${String(payload.to)}`);
+    });
+    const prisma = {
+      client: {
+        delegationRule: {
+          findMany: vi.fn(async () => [{ id: 'rule_w6log', scope: 'ALL', maxTier: 4, delegateId: 'asg_w6log_approver' }]),
+        },
+        orgAssignment: {
+          findFirst: vi.fn(async () => ({
+            id: 'asg_w6log_approver',
+            membershipId: 'mem_w6log_approver',
+            userId: 'user_w6log_approver',
+            contactName: 'Approver W6',
+            contactEmail: RECIPIENT,
+            contactPhone: null,
+            preferredChannel: 'email',
+            jobRole: null,
+            membership: null,
+          })),
+        },
+        membership: {
+          findFirst: vi.fn(async () => ({ id: 'mem_w6log_owner', userId: 'user_w6log_owner', user: { name: 'Owner W6', email: OWNER, phone: null } })),
+        },
+        aiApprovalItem: { update: vi.fn(async () => ({})) },
+      },
+    };
+    const moduleRef = {
+      get: (token: unknown) => {
+        if (token === SystemEmailService) return failing;
+        throw new Error('not provided in this spec');
+      },
+    };
+    const routing = new ApprovalRoutingService(prisma as never, moduleRef as never);
+    const oversight = new AiOversightService(prisma as never, {} as never, {} as never, {} as never, routing, {} as never);
+
+    await Reflect.get(oversight, 'routeAndNotify').call(
+      oversight,
+      'biz_w6log_approval',
+      { id: itemId, title: 'Void invoice INV-W6', description: null },
+      4,
+      'commerce',
+    );
+
+    // Both mails still went to their recipients; only the logs change.
+    expect(calls.map((c) => c.to)).toEqual([RECIPIENT, OWNER]);
+    // The route was recorded; no notifiedAt, since neither send went out.
+    expect(prisma.client.aiApprovalItem.update).toHaveBeenCalledTimes(1);
+    expectNoAddressLogged();
+    expect(entries.some((e) => e.includes(`Failed to notify approver for item ${itemId}`) && e.includes('is on the suppression list'))).toBe(true);
+    expect(entries.some((e) => e.includes(`Failed to CC owner for tier-4 item ${itemId}`) && e.includes('socket hang up'))).toBe(true);
+  });
 
   it('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS: AiUsageAlertSchedulerService logs no provider text address when an alert email fails (:156), and names the alert id', async () => {
     const alert = {
