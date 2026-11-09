@@ -160,3 +160,37 @@ describe('no "remaining 0" receipt for a partial state (V1-49, M24)', () => {
     expect(commerce.recordReceiptSent).not.toHaveBeenCalled();
   });
 });
+
+describe('the receipt prints the stored line totals (FOLLOW3-B5-EMAIL-LINE-TOTALS, VL-09, D-13)', () => {
+  /** A PAID 4.37 invoice whose lines V1-22 stored as lineAmount: 7 x 0.145 = 1.02 and 3 x 1.115 = 3.35. */
+  function twoLineInvoice() {
+    return {
+      ...invoice('PAID', 4.37, [{ amount: 4.37, status: 'SUCCESSFUL' }]),
+      items: [
+        { description: 'L7', quantity: 7, unitPrice: 0.145, total: 1.02 },
+        { description: 'L3', quantity: 3, unitPrice: 1.115, total: 3.35 },
+      ],
+    };
+  }
+
+  it('RL-10: each mapped item carries the stored total (InvoiceItem.total), next to its quantity and unit price', async () => {
+    const { gmail, fire } = setup(twoLineInvoice() as any);
+    await fire();
+    expect(gmail.sendEmail).toHaveBeenCalledTimes(1);
+    expect(templateArgs()?.items).toEqual([
+      { description: 'L7', quantity: 7, unitPrice: 0.145, total: 1.02 },
+      { description: 'L3', quantity: 3, unitPrice: 1.115, total: 3.35 },
+    ]);
+  });
+
+  it('RL-11: the receipt rows print the stored totals (TT$1.02, TT$3.35) and cent-rounded unit prices (TT$0.15, TT$1.12), never the float products (TT$1.01, TT$3.34)', async () => {
+    const { gmail, fire } = setup(twoLineInvoice() as any);
+    await fire();
+    const html = (gmail.sendEmail.mock.calls[0] as any[])[0].htmlBody as string;
+    expect(html).toMatch(/>L7<\/td>[\s\S]*?>7<\/td>[\s\S]*?>TT\$0\.15<\/td>[\s\S]*?>TT\$1\.02<\/td>/);
+    expect(html).toMatch(/>L3<\/td>[\s\S]*?>3<\/td>[\s\S]*?>TT\$1\.12<\/td>[\s\S]*?>TT\$3\.35<\/td>/);
+    expect(html).not.toContain('TT$1.01');
+    expect(html).not.toContain('TT$3.34');
+    expect(html).toContain('received your payment of TT$4.37');
+  });
+});

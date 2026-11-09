@@ -598,6 +598,11 @@
       "packet": "V1-82 (FOLLOW3-B4-EXPENSE-CURRENCY-CENTS)"
     },
     {
+      "prefix": "v82e_",
+      "owner": "apps/server/test/document-email-line-totals.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B5-EMAIL-LINE-TOTALS)"
+    },
+    {
       "prefix": "v82f_",
       "owner": "apps/server/test/invoice-delete-ledger.integration.test.ts",
       "packet": "V1-82 (FOLLOW3-B6-DELETE-ISSUED-INVOICE)"
