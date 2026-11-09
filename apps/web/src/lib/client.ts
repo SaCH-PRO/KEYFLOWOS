@@ -6652,7 +6652,7 @@ export async function executePlanStep(
   businessId: string,
   planId: string,
   planStepId: string,
-): Promise<ApiResult<ActionExecuteResponse>> {
+): Promise<ApiResult<ActionExecuteResponse> & { status?: number }> {
   return apiPost<ActionExecuteResponse>({
     path: `/actions/businesses/${encodeURIComponent(businessId)}/execute`,
     body: { planId, planStepId },
@@ -6716,11 +6716,15 @@ export async function runPlannedAction(businessId: string, input: string): Promi
  * the stored planId and planStepId the server listed it with; exactly those ids go to the bound
  * execute route (V1-31b), which runs the stored step once. Nothing is planned again and no tool
  * name or argument is sent. An item without both ids is not run.
+ *
+ * D-72: the answer carries the HTTP status of a refusal, so the queue can tell a 403 (this member
+ * may not run the step: the access message is shown and the action removed) from a failure that
+ * may succeed when run again.
  */
 export async function runApprovedQueueItem(
   businessId: string,
   item: Pick<ActionQueueItem, 'type' | 'planId' | 'planStepId'>,
-): Promise<ApiResult<ActionExecuteResponse>> {
+): Promise<ApiResult<ActionExecuteResponse> & { status?: number }> {
   if (item.type !== 'approved_step' || !item.planId || !item.planStepId) {
     return { data: null, error: 'This queue item is not an approved step with stored ids' };
   }

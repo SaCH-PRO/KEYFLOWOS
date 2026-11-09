@@ -108,7 +108,7 @@ type Answer = { status: number; body: unknown };
 
 function jsonResponse(status: number, body: unknown): Response {
   const text = JSON.stringify(body);
-  const statusText = status === 200 || status === 201 ? "OK" : status === 403 ? "Forbidden" : "Service Unavailable";
+  const statusText = status === 200 || status === 201 ? "OK" : status === 403 ? "Forbidden" : status === 500 ? "Internal Server Error" : "Service Unavailable";
   return {
     ok: status >= 200 && status < 300,
     status,
@@ -250,7 +250,8 @@ describe("D-72: the Command Center page mounts the approved-action queue with it
   }, 30_000);
 
   it("CC-AQ-05 a queue that could not be read says so and is never shown as nothing approved", async () => {
-    serve({ queue: [{ status: 503, body: { message: "Service Unavailable" } }] });
+    // A 500, not a 503: fetch-with-retry retries a 503 with backoff before answering.
+    serve({ queue: [{ status: 500, body: { statusCode: 500, message: "Internal server error" } }] });
     const panel = await renderCommandCenter();
 
     await waitFor(() => expect(within(panel).getByTestId("approved-actions-unavailable")).toBeTruthy(), { timeout: 10_000 });

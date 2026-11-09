@@ -57,6 +57,7 @@ import {
   type CommandItem,
 } from "@/lib/api/command";
 import { DueObligationsPanel } from "./components/due-obligations-panel";
+import { ApprovedActionsPanel } from "../control-tower/components/approved-actions-queue";
 import { CommandQueueV2 } from "@/components/command/command-queue-v2";
 import { CommandHealthStripV2 } from "./components-v2/command-health-strip-v2";
 import { CommandSummaryCardV2 } from "./components-v2/command-summary-card-v2";
@@ -398,6 +399,13 @@ export default function CommandCenterPage() {
         <CommandSection icon={CalendarClock} title="Due this week">
           <DueObligationsPanel businessId={businessId} onDischarge={handleDischarge} />
         </CommandSection>
+
+        {/* D-72 (KEY-R3c-APPROVED-QUEUE-MOUNT): the approved KEY action steps
+            this member may run, each with its D-70 Run action (exactly the
+            stored step, through the bound execute route, no re-planning).
+            /app/control-tower redirects here, so this is where an approval
+            leads to the approved step running. */}
+        <ApprovedActionsPanel key={businessId} businessId={businessId} />
 
         <CommandSection icon={LayoutDashboard} title={`Command Queue (${queueTotal})`}>
           <CommandQueueV2
