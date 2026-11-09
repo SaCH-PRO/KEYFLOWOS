@@ -528,6 +528,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * KEY bookings_cancel_booking, undo, saga compensation and the cortex
    * adapter, which call with three arguments, never forfeit. The operator
    * status route passes CUSTOMER when its body names no initiator (D-65).
+   * FOLLOW3-D18 review: the cancel that moves the booking into CANCELLED
+   * decides; a re-cancel forfeits nothing and records nothing new.
    */
   async updateBookingStatus(
     businessId: string,
@@ -554,17 +556,34 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
     // V1-16: back from CANCELLED or NO_SHOW, the booking takes its slot again,
     // through the claim (writeBookingStatus).
-    const updated = await this.writeBookingStatus(booking, status, (db, where) =>
+    // FOLLOW3-D18 review (SEC-D18-1, CR-D18-1): the cancel that moves the
+    // booking into CANCELLED decides it. The write is conditional on the row
+    // not being CANCELLED yet, so of two cancels (a KEY, undo or compensation
+    // cancel and an operator's from a stale drawer) exactly one enters; the
+    // other, and any cancel of a booking already CANCELLED, is a re-cancel: it
+    // forfeits nothing and records nothing new (no booking.cancelled row or
+    // event), whoever it names. A re-cancel turned a business cancel, which
+    // keeps the deposit, into a customer forfeit.
+    let entersCancelled = status === 'CANCELLED';
+    const write = (db: Pick<PrismaTx, 'booking'>, where: Prisma.BookingWhereUniqueInput) =>
       db.booking.update({
-        where,
+        where: entersCancelled ? { ...where, status: { not: 'CANCELLED' } } : where,
         data: { status },
         include: {
           contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
           service: { select: { id: true, name: true, duration: true, price: true } },
           staff: { select: { id: true, name: true } },
         },
-      }),
-    );
+      });
+    let updated: Awaited<ReturnType<typeof write>>;
+    try {
+      updated = await this.writeBookingStatus(booking, status, write);
+    } catch (err) {
+      // P2025: the booking is CANCELLED already (read so, or cancelled meanwhile).
+      if (!entersCancelled || (err as { code?: unknown } | null)?.code !== 'P2025') throw err;
+      entersCancelled = false;
+      updated = await this.writeBookingStatus(booking, status, write);
+    }
 
     // D-26: a cancel after the deposit was paid forfeits it, recorded on the
     // booking. A booking brought back from CANCELLED takes the status its
@@ -585,9 +604,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // for this write and re-derives the booking from the refunded deposit.
     // V1-84 (D-65): only a customer cancel forfeits; a business cancel keeps
     // what the deposit holds (DEPOSIT_PAID stays) and writes no forfeit row.
+    // FOLLOW3-D18 review: and only the cancel that moved the booking into
+    // CANCELLED; a re-cancel leaves what the first cancel decided.
     let depositForfeit: DepositForfeit | null = null;
     if (status === 'CANCELLED') {
-      if (cancelledBy === 'CUSTOMER') depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
+      if (entersCancelled && cancelledBy === 'CUSTOMER') depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
       if (depositForfeit) updated.paymentStatus = DEPOSIT_FORFEITED;
     } else if (updated.paymentStatus === DEPOSIT_FORFEITED) {
       const reinstated = await this.prisma.client.$transaction(
@@ -645,7 +666,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       invoicing = await this.autoGenerateInvoiceForCompletedBooking(updated, businessId);
     }
 
-    if (status === 'CANCELLED' && booking.contactId) {
+    // FOLLOW3-D18 review: a re-cancel emits and records nothing (the customer
+    // heard of the cancel once). The row names the member whose request
+    // cancelled, or SYSTEM (SEC-D18-2): a BUSINESS cancel waives the forfeit,
+    // and the row claimed a USER with no actor.
+    if (status === 'CANCELLED' && entersCancelled && booking.contactId) {
       this.events.emit('booking.cancelled', {
         booking: updated,
         contact: updated.contact ?? undefined,
@@ -656,7 +681,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         contactId: booking.contactId,
         type: 'booking.cancelled',
         data: { bookingId, status, cancelledBy },
-        actorType: 'USER',
+        ...this.requestActor(businessId),
         source: 'bookings',
       });
     }
@@ -696,7 +721,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * negative refund row, D-14). What was paid is read from the live deposit
    * invoice in the table, not from Booking.paymentStatus, so a booking whose
    * paymentStatus was never written (before V1-28) is covered too.
-   * Cancelling again records nothing new.
+   * Cancelling again records nothing new (updateBookingStatus calls this only
+   * for the cancel that moved the booking into CANCELLED).
    *
    * V1-28 review: what is forfeit is the money the live deposit (not VOID,
    * not deleted) holds, by the rule the booking's status is derived from

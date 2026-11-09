@@ -108,6 +108,12 @@
  *   S-07d  a direct call now forfeits nothing (was: forfeit, actor SYSTEM); a direct CUSTOMER cancel
  *          names SYSTEM; the route half sends CUSTOMER. S-07, S-07c, S-07e send CUSTOMER; S-10's
  *          in-race direct cancel names CUSTOMER.
+ * FOLLOW3-D18 review repairs, red at 42c4f4c5:
+ *   CI-06  SEC-D18-1/CR-D18-1  the first cancel decides: a re-cancel (no initiator, CUSTOMER, direct)
+ *          of a business-cancelled booking forfeits nothing, writes no second booking.cancelled row
+ *          and emits no second event; CONTROL: a customer forfeit stands under a business re-cancel
+ *   CI-06b SEC-D18-1  a business cancel committing between a customer cancel's read and write wins
+ *   CI-07  SEC-D18-2  the booking.cancelled row names the member (USER + actorId), or SYSTEM
  *
  * Nothing on the money path is mocked: PrismaService, AuthGuard, BusinessGuard,
  * PlanLimitGuard, PublicRateLimitGuard (real Redis at REDIS_URL, this suite's
@@ -1121,6 +1127,106 @@ describe('V1-84 CR-V28-4 / D-65: who cancelled decides the forfeit (only a custo
     expect((await bookingRow(b.bookingId)).paymentStatus).toBe('DEPOSIT_FORFEITED');
     expect(forfeitRows(b.bookingId)).toEqual([expect.objectContaining({ actorType: 'USER', actorId: ID.owner, data: expect.objectContaining({ amount: 25 }) })]);
     expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('PAID');
+  });
+
+  // FOLLOW3-D18 review (SEC-D18-1, CR-D18-1): the first cancel decides. A cancel
+  // of a booking already CANCELLED is a re-cancel: it forfeits nothing, writes
+  // no booking.cancelled row and emits no booking.cancelled event, whoever it
+  // names. Red at 42c4f4c5: the re-cancel forfeit the deposit the business
+  // cancel kept and wrote a second, CUSTOMER row.
+  const cancelEvents = (bookingId: string) => emitted.filter((e) => e.name === 'booking.cancelled' && e.payload?.booking?.id === bookingId);
+
+  it('CI-06 SEC-D18-1/CR-D18-1: a business cancel sticks: a later cancel with no initiator or CUSTOMER (stale drawer, any member) forfeits nothing and records nothing new', async () => {
+    // KEY, undo or compensation cancels (three arguments); the stale drawer then sends {status:'CANCELLED'}.
+    const viaKey = await paidBooking('ci06_key');
+    await bookingsService.updateBookingStatus(ID.biz, viaKey.bookingId, 'CANCELLED');
+    const again = await setStatus(viaKey.bookingId, 'CANCELLED');
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body.status).toBe('CANCELLED');
+    expect(again.body.paymentStatus).toBe('DEPOSIT_PAID');
+    expect(again.body.depositForfeit ?? null).toBeNull();
+    await expectCancelledNotForfeit(viaKey);
+    expect(cancelRows(viaKey.bookingId).map((e) => e.data.cancelledBy), 'one booking.cancelled row, the first cancel').toEqual(['BUSINESS']);
+    expect(cancelEvents(viaKey.bookingId), 'the customer hears of the cancel once').toHaveLength(1);
+
+    // The route alone: BUSINESS, then CUSTOMER, then a direct CUSTOMER call.
+    const viaRoute = await paidBooking('ci06_route');
+    expect((await setStatus(viaRoute.bookingId, 'CANCELLED', { cancelledBy: 'BUSINESS' })).status).toBe(201);
+    const asCustomer = await setStatus(viaRoute.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
+    expect(asCustomer.status, JSON.stringify(asCustomer.body)).toBe(201);
+    expect(asCustomer.body.depositForfeit ?? null).toBeNull();
+    const direct = await bookingsService.updateBookingStatus(ID.biz, viaRoute.bookingId, 'CANCELLED', 'CUSTOMER');
+    expect(direct.paymentStatus).toBe('DEPOSIT_PAID');
+    expect(direct.depositForfeit ?? null).toBeNull();
+    await expectCancelledNotForfeit(viaRoute);
+    expect(cancelRows(viaRoute.bookingId).map((e) => e.data.cancelledBy)).toEqual(['BUSINESS']);
+    expect(cancelEvents(viaRoute.bookingId)).toHaveLength(1);
+
+    // CONTROL: the other way round, a customer cancel's forfeit stands; a business re-cancel neither undoes it nor records anything.
+    const forfeit = await paidBooking('ci06_customer_first');
+    expect((await setStatus(forfeit.bookingId, 'CANCELLED', CUSTOMER_CANCEL)).body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    const byBusiness = await setStatus(forfeit.bookingId, 'CANCELLED', { cancelledBy: 'BUSINESS' });
+    expect(byBusiness.status, JSON.stringify(byBusiness.body)).toBe(201);
+    expect(byBusiness.body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    await bookingsService.updateBookingStatus(ID.biz, forfeit.bookingId, 'CANCELLED');
+    expect(await bookingRow(forfeit.bookingId)).toMatchObject({ status: 'CANCELLED', paymentStatus: 'DEPOSIT_FORFEITED' });
+    expect(forfeitRows(forfeit.bookingId)).toHaveLength(1);
+    expect(cancelRows(forfeit.bookingId).map((e) => e.data.cancelledBy)).toEqual(['CUSTOMER']);
+    expect(cancelEvents(forfeit.bookingId)).toHaveLength(1);
+
+    // Brought back, the next cancel is a cancel again: the business-kept deposit is still held, and a customer cancel now forfeits it.
+    expect((await setStatus(viaKey.bookingId, 'CONFIRMED')).status).toBe(201);
+    expect((await bookingRow(viaKey.bookingId)).paymentStatus).toBe('DEPOSIT_PAID');
+    const later = await setStatus(viaKey.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
+    expect(later.body.depositForfeit).toMatchObject({ depositInvoiceId: viaKey.depositInvoiceId, amount: 25 });
+    expect(cancelRows(viaKey.bookingId).map((e) => e.data.cancelledBy)).toEqual(['BUSINESS', 'CUSTOMER']);
+    expect(forfeitRows(viaKey.bookingId)).toHaveLength(1);
+  });
+
+  it('CI-06b SEC-D18-1: a business cancel that commits between a customer cancel\'s read and its write wins: the customer cancel is a re-cancel (no forfeit, one row)', async () => {
+    const svc = bookingsService as any;
+    const b = await paidBooking('ci06b');
+    const writeBookingStatus = svc.writeBookingStatus;
+    let raced = false;
+    vi.spyOn(svc, 'writeBookingStatus').mockImplementation(async (...args: any[]) => {
+      if (!raced && args[1] === 'CANCELLED') {
+        raced = true;
+        // KEY cancels for the business while the operator's (customer) cancel is between its read and its write.
+        const key = await svc.updateBookingStatus(ID.biz, b.bookingId, 'CANCELLED');
+        expect(key.paymentStatus).toBe('DEPOSIT_PAID');
+      }
+      return writeBookingStatus.apply(svc, args);
+    });
+    const res = await setStatus(b.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(raced).toBe(true);
+    vi.restoreAllMocks();
+    expect(res.body.depositForfeit ?? null, 'the business cancel moved it into CANCELLED first').toBeNull();
+    await expectCancelledNotForfeit(b);
+    expect(cancelRows(b.bookingId).map((e) => e.data.cancelledBy)).toEqual(['BUSINESS']);
+    expect(cancelEvents(b.bookingId)).toHaveLength(1);
+  });
+
+  it('CI-07 SEC-D18-2: the booking.cancelled row names the member whose request cancelled (BUSINESS waives the forfeit); a cancel with no member behind it is SYSTEM', async () => {
+    const waived = await paidBooking('ci07_route');
+    expect((await setStatus(waived.bookingId, 'CANCELLED', { cancelledBy: 'BUSINESS' })).status).toBe(201);
+    await expectCancelledNotForfeit(waived);
+    expect(cancelRows(waived.bookingId)).toEqual([
+      expect.objectContaining({ actorType: 'USER', actorId: ID.owner, data: expect.objectContaining({ status: 'CANCELLED', cancelledBy: 'BUSINESS' }) }),
+    ]);
+
+    const customer = await paidBooking('ci07_customer');
+    expect((await setStatus(customer.bookingId, 'CANCELLED', CUSTOMER_CANCEL)).status).toBe(201);
+    expect(cancelRows(customer.bookingId)).toEqual([
+      expect.objectContaining({ actorType: 'USER', actorId: ID.owner, data: expect.objectContaining({ cancelledBy: 'CUSTOMER' }) }),
+    ]);
+
+    // KEY, undo or compensation outside a member's request: SYSTEM, never a USER with no actor.
+    const direct = await paidBooking('ci07_direct');
+    await bookingsService.updateBookingStatus(ID.biz, direct.bookingId, 'CANCELLED');
+    const [bySystem] = cancelRows(direct.bookingId);
+    expect(bySystem).toMatchObject({ actorType: 'SYSTEM', data: expect.objectContaining({ cancelledBy: 'BUSINESS' }) });
+    expect((bySystem as any).actorId).toBeUndefined();
   });
 });
 

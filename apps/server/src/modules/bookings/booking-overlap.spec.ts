@@ -468,11 +468,15 @@ describe('V1-16: every booking write claims its slot under a transaction-scoped 
       expect(h.calls).toEqual(['update:released', ...CLAIMED_UPDATE]);
     });
 
-    it('CONFIRMED -> CANCELLED gives the slot back: a plain update, no condition and no lock', async () => {
+    it('CONFIRMED -> CANCELLED gives the slot back: a plain update, no slot condition and no lock', async () => {
       const h = claimHarness({ status: 'CONFIRMED', outsideUpdate: 'write' });
       await h.service.updateBookingStatus(BIZ, 'bk_existing', 'CANCELLED');
       expect(h.calls).toEqual(['update']);
-      expect(h.prisma.client.booking.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'bk_existing' } }));
+      // FOLLOW3-D18 review (SEC-D18-1): its one condition is that the booking is
+      // not CANCELLED yet, so only the cancel that moves it there forfeits and records.
+      expect(h.prisma.client.booking.update).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'bk_existing', status: { not: 'CANCELLED' } } }),
+      );
       expect(h.prisma.client.$transaction).not.toHaveBeenCalled();
     });
 
