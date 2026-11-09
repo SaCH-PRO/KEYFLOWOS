@@ -784,11 +784,11 @@ describe('W5-D92-RESIDUALS (D-92): the KEY Cortex capability registry and the co
         /defaultStatus:\s*typeof obj\.defaultStatus === 'string' \? obj\.defaultStatus/,
       );
     }
-    // The Google Forms mapping writes no Contact.status: its defaultStatus is the quote's.
+    // The Google Forms mapping writes no Contact.status: its defaultStatus is the quote's
+    // (review SEC-D92R-1: a quote status, held to DRAFT in test/connect-default-status.e2e.test.ts).
     const forms = read('modules/connect/google-forms-mapping.service.ts');
     const createContact = forms.match(/this\.crm\.createContact\(\{([\s\S]*?)\}\);/);
     expect(createContact, 'google-forms-mapping creates its contact through CrmService.createContact').not.toBeNull();
     expect(createContact![1], 'google-forms-mapping names a contact status').not.toMatch(/\bstatus\b/);
-    expect(forms).toMatch(/status: \(opp\.defaultStatus as QuoteStatus \| undefined\) \?\? 'DRAFT'/);
   });
 });

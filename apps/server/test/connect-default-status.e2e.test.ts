@@ -26,9 +26,30 @@
  * them: its opportunityDefaults.defaultStatus is the status of the quote it
  * creates, and the contact it creates names no status (control case below).
  *
+ * Review repairs (W5-D92-RESIDUALS review):
+ *   - SEC-D92R-1: the Google Forms quote status was written as given, so a
+ *     mapping created quotes already ACCEPTED, PAID or CONVERTED, around the
+ *     quote transition table. A form now creates a DRAFT quote, as
+ *     CommerceService.createQuote does: the setting answers 400 for any other
+ *     status, and a mapping stored before is applied and read as DRAFT. Who may
+ *     create a form quote at all (revenue:write) is a follow-up (it.todo).
+ *   - SEC-D92R-2: a backfill overwrote the status of the contact a submission
+ *     was linked to, trashed or not. An existing contact's status is the
+ *     business's: the backfill only merges tags, into a live contact of this
+ *     business only.
+ *   - SEC-D92R-3: the contact-sync rules stored and applied defaultOwnerId
+ *     unchecked. The owner must be a member of the business (400), naming
+ *     another member needs crm_reassign (403), and a sync applies the owner only
+ *     while they are a member. The acting member comes from an x-test-user
+ *     header (AuthGuard is overridden).
+ *   - CR-D92R-1: the web Contact sync settings still offer ACTIVE, INACTIVE and
+ *     ARCHIVED; the web file is outside this packet's write set (it.todo).
+ *
  * Mocked HTTP: the real ConnectController and the real connect services over
  * an in-memory Prisma stand-in; AuthGuard and BusinessGuard are overridden
- * (authority on these routes is not this packet's), the provider APIs (People
+ * (route-level authority on these routes is not this packet's; the in-service
+ * default-owner checks of SEC-D92R-3 run for the x-test-user member, over
+ * in-memory user and membership rows), the provider APIs (People
  * API, Microsoft Graph) are a stubbed fetch and the token helpers return a fake
  * token. No database, no network.
  */
@@ -135,6 +156,8 @@ const TABLES = [
   'leadFormSubmission',
   'googleFormMapping',
   'quote',
+  'user',
+  'membership',
 ] as const;
 type TableName = (typeof TABLES)[number];
 
@@ -221,6 +244,13 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
       .useValue({ canActivate: () => true })
       .compile();
     app = moduleRef.createNestApplication();
+    // The authenticated member, as AuthGuard sets it (the guards are overridden):
+    // the x-test-user header names the user; no header, no user.
+    app.use((req: any, _res: unknown, next: () => void) => {
+      const id = req.headers['x-test-user'];
+      if (typeof id === 'string' && id) req.user = { id };
+      next();
+    });
     await app.init();
     vi.stubGlobal('fetch', fetchStub);
   });
@@ -250,14 +280,27 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
   }
 
   /** A rule written before D-92 (the setting stored it as given). */
-  function seedLegacyRules(businessId: string, connectorType: string, defaultStatus: unknown) {
+  function seedLegacyRules(businessId: string, connectorType: string, defaultStatus: unknown, defaultOwnerId: unknown = null) {
     db.business.insert({ id: businessId });
     db.connectorStatus.insert({
       businessId,
       connectorType,
       status: 'connected',
-      metadata: { mappingRules: { defaultTags: ['synced'], defaultStatus, defaultOwnerId: null, defaultLifecycleStage: null } },
+      metadata: { mappingRules: { defaultTags: ['synced'], defaultStatus, defaultOwnerId, defaultLifecycleStage: null } },
     });
+  }
+
+  /**
+   * SEC-D92R-3: the members of `businessId` (an OWNER, a STAFF member with crm
+   * write and so no crm_reassign, a second STAFF member) and a user who is a
+   * member of another business only.
+   */
+  function seedMembers(businessId: string) {
+    for (const id of ['u-owner', 'u-staff', 'u-rep', 'u-other-tenant']) db.user.insert({ id, role: 'USER' });
+    db.membership.insert({ userId: 'u-owner', businessId, role: 'OWNER', permissionScopes: null });
+    db.membership.insert({ userId: 'u-staff', businessId, role: 'STAFF', permissionScopes: { crm: 'write' } });
+    db.membership.insert({ userId: 'u-rep', businessId, role: 'STAFF', permissionScopes: { crm: 'write' } });
+    db.membership.insert({ userId: 'u-other-tenant', businessId: 'biz-elsewhere', role: 'OWNER', permissionScopes: null });
   }
 
   describe.each([
@@ -338,6 +381,71 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
         expect(created[0].tags, legacy).toEqual(['synced']);
       }
     });
+
+    it('SEC-D92R-3: the setting stores a default owner only if they are a member of the business (400 for another tenant\'s user or an unknown id), naming another member needs crm_reassign (403 without it), and a save that re-sends the stored owner keeps it', async () => {
+      const businessId = `biz-${connectorType}-owner`;
+      seedMembers(businessId);
+      const put = (actor: string, body: Record<string, unknown>) =>
+        agent().put(url(businessId)).set('x-test-user', actor).send(body);
+
+      for (const foreign of ['u-other-tenant', 'no-such-user', 42]) {
+        const res = await put('u-owner', { defaultOwnerId: foreign, defaultTags: ['changed'] });
+        expect(res.status, String(foreign)).toBe(400);
+        expect(JSON.stringify(res.body), String(foreign)).toContain('defaultOwnerId must belong to a member of this business');
+        expect(storedRules(businessId, connectorType), String(foreign)).toBeNull();
+      }
+
+      // A member may name themselves; naming another member needs crm_reassign.
+      const self = await put('u-staff', { defaultOwnerId: 'u-staff' });
+      expect(self.status).toBe(200);
+      expect(self.body.defaultOwnerId).toBe('u-staff');
+      const other = await put('u-staff', { defaultOwnerId: 'u-rep', defaultTags: ['changed'] });
+      expect(other.status).toBe(403);
+      expect(storedRules(businessId, connectorType)).toEqual(expect.objectContaining({ defaultOwnerId: 'u-staff', defaultTags: [] }));
+
+      // The OWNER may name any member.
+      const byOwner = await put('u-owner', { defaultOwnerId: 'u-rep' });
+      expect(byOwner.status).toBe(200);
+      expect(storedRules(businessId, connectorType)?.defaultOwnerId).toBe('u-rep');
+
+      // The web settings re-send the stored owner with every save: that is no reassignment.
+      const resent = await put('u-staff', { defaultOwnerId: 'u-rep', defaultTags: ['vip'], defaultStatus: 'LEAD' });
+      expect(resent.status, JSON.stringify(resent.body)).toBe(200);
+      expect(storedRules(businessId, connectorType)).toEqual(expect.objectContaining({ defaultOwnerId: 'u-rep', defaultTags: ['vip'] }));
+
+      // Null or a blank clears it.
+      for (const cleared of [null, '', '  ']) {
+        await put('u-owner', { defaultOwnerId: 'u-rep' }).expect(200);
+        const res = await put('u-staff', { defaultOwnerId: cleared });
+        expect(res.status, String(cleared)).toBe(200);
+        expect(storedRules(businessId, connectorType)?.defaultOwnerId, String(cleared)).toBeNull();
+      }
+    });
+
+    it('SEC-D92R-3: a sync gives a new contact the rule\'s default owner only while they are a member of the business: a rule stored before naming another tenant\'s user or an unknown id creates the contact with no owner', async () => {
+      const OWNERS: Array<[string, string | null]> = [
+        ['u-rep', 'u-rep'],
+        ['u-other-tenant', null],
+        ['no-such-user', null],
+      ];
+      for (const [ownerId, applied] of OWNERS) {
+        resetDb();
+        const businessId = `biz-${connectorType}-owner-apply`;
+        seedLegacyRules(businessId, connectorType, 'PROSPECT', ownerId);
+        seedMembers(businessId);
+        const handle = `owner.${ownerId}@example.test`;
+        peopleConnections = [{ resourceName: 'people/c1', names: [{ givenName: 'Ada' }], emailAddresses: [{ value: handle }] }];
+        graphContacts = [{ id: 'graph-c1', givenName: 'Ada', emailAddresses: [{ address: handle }] }];
+        const sync = await agent().post(`/connect/businesses/${businessId}/${route}/sync`);
+        expect(sync.status, `${ownerId}: ${JSON.stringify(sync.body)}`).toBe(201);
+        const created = db.contact.rows.filter((r) => r.businessId === businessId);
+        expect(created, ownerId).toHaveLength(1);
+        expect(created[0].ownerId ?? null, ownerId).toBe(applied);
+        // The rule's other defaults still apply.
+        expect(created[0].status, ownerId).toBe('PROSPECT');
+        expect(created[0].tags, ownerId).toEqual(['synced']);
+      }
+    });
   });
 
   describe('connector form mapping (Typeform, Jotform, webhook forms)', () => {
@@ -382,7 +490,7 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
       }
     });
 
-    it('D-92: a backfill applies a mapping stored before D-92 through canonicalContactStatus, to the contact a submission creates and the one it is linked to: a legacy DORMANT or customer is CLIENT, and partner, churned or ACTIVE writes no status', async () => {
+    it('D-92: a backfill applies a mapping stored before D-92 through canonicalContactStatus to the contact a submission creates: a legacy DORMANT or customer is CLIENT, and partner, churned or ACTIVE writes no status; the contact a submission is linked to keeps its own status (SEC-D92R-2)', async () => {
       const LEGACY: Array<[string, string | null]> = [
         ['DORMANT', 'CLIENT'],
         ['dormant', 'CLIENT'],
@@ -416,34 +524,114 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
         expect(res.body.contactsCreated, legacy).toBe(1);
         const created = db.contact.rows.find((r) => r.id !== linked.id)!;
         expect(created.status, legacy).toBe(stored ?? 'LEAD');
-        expect(linked.status, legacy).toBe(stored ?? 'LOST');
+        // SEC-D92R-2: an existing contact's status is the business's; a backfill only merges tags into it.
+        expect(linked.status, legacy).toBe('LOST');
         for (const row of db.contact.rows) expect(isContactStatus(row.status), `${legacy}: ${row.id}`).toBe(true);
         expect(linked.tags, legacy).toEqual(['old', 'web']);
       }
     });
+
+    it('SEC-D92R-2: a backfill never writes the status of a contact a submission is already linked to (an external adapter never overwrites an existing contact\'s status), and leaves a trashed contact or another business\'s contact untouched', async () => {
+      const businessId = 'biz-form-linked';
+      db.business.insert({ id: businessId });
+      const form = db.leadForm.insert({ businessId, name: 'Intake', embedCode: 'typeform:form-ext', deletedAt: null });
+      await agent().post(mappingUrl(businessId)).send({ fieldMappings, defaultStatus: 'LOST', defaultTags: ['web'] }).expect(201);
+      const live = db.contact.insert({ businessId, status: 'CLIENT', tags: ['old'], deletedAt: null });
+      const trashed = db.contact.insert({ businessId, status: 'CLIENT', tags: ['old'], deletedAt: new Date('2026-01-01T00:00:00Z') });
+      const foreign = db.contact.insert({ businessId: 'biz-elsewhere', status: 'PROSPECT', tags: ['theirs'], deletedAt: null });
+      for (const contact of [live, trashed, foreign]) {
+        db.leadFormSubmission.insert({ businessId, formId: form.id, data: { 'q-email': `${contact.id}@example.test` }, contactId: contact.id });
+      }
+
+      const res = await agent().post(`/connect/businesses/${businessId}/connector-forms/typeform/${form.id}/backfill`);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).toEqual(expect.objectContaining({ contactsCreated: 0, errors: [] }));
+      // The live linked contact keeps its CLIENT and gains the form's tags.
+      expect(live).toEqual(expect.objectContaining({ status: 'CLIENT', tags: ['old', 'web'] }));
+      // A trashed contact and another business's contact are not written at all.
+      expect(trashed).toEqual(expect.objectContaining({ status: 'CLIENT', tags: ['old'] }));
+      expect(foreign).toEqual(expect.objectContaining({ status: 'PROSPECT', tags: ['theirs'] }));
+      expect(db.contact.rows).toHaveLength(3);
+    });
   });
 
-  it('D-92 control: the Google Forms mapping writes no Contact.status: its opportunityDefaults.defaultStatus is the status of the quote it creates, and the contact it creates names no status (LEAD)', async () => {
-    const businessId = 'biz-gforms';
-    db.business.insert({ id: businessId });
-    const saved = await agent()
-      .post(`/connect/businesses/${businessId}/forms/gform-1/mapping`)
-      .send({
-        formTitle: 'Quote request',
-        fieldMappings: [{ questionId: 'q-email', crmField: 'email' }],
-        opportunityDefaults: { enabled: true, defaultStatus: 'SENT' },
+  describe('Google Forms mapping (SEC-D92R-1: its defaultStatus is a quote status, not a contact status)', () => {
+    const gformsUrl = (businessId: string) => `/connect/businesses/${businessId}/forms/gform-1/mapping`;
+    const gformFieldMappings = [{ questionId: 'q-email', crmField: 'email' }];
+    const respond = (responseId: string, email: string) =>
+      formResponses.push({
+        responseId,
+        answers: { 'q-email': { questionId: 'q-email', textAnswers: { answers: [{ value: email }] } } },
       });
-    expect(saved.status).toBe(201);
-    formResponses.push({
-      responseId: 'resp-1',
-      answers: { 'q-email': { questionId: 'q-email', textAnswers: { answers: [{ value: 'form.person@example.test' }] } } },
+
+    it('D-92 control: the Google Forms mapping writes no Contact.status: the contact it creates names no status (LEAD)', async () => {
+      const businessId = 'biz-gforms';
+      db.business.insert({ id: businessId });
+      const saved = await agent()
+        .post(gformsUrl(businessId))
+        .send({ formTitle: 'Quote request', fieldMappings: gformFieldMappings, opportunityDefaults: { enabled: true, defaultStatus: 'DRAFT' } });
+      expect(saved.status).toBe(201);
+      respond('resp-1', 'form.person@example.test');
+      const res = await agent().post(`/connect/businesses/${businessId}/forms/gform-1/backfill`);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).toEqual(expect.objectContaining({ contactsCreated: 1, opportunitiesCreated: 1 }));
+      expect(crmCreated).toHaveLength(1);
+      expect(crmCreated[0], 'the Google Forms contact names a status').not.toHaveProperty('status');
+      expect(db.contact.rows.map((r) => r.status)).toEqual(['LEAD']);
     });
-    const res = await agent().post(`/connect/businesses/${businessId}/forms/gform-1/backfill`);
-    expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body).toEqual(expect.objectContaining({ contactsCreated: 1, opportunitiesCreated: 1 }));
-    expect(crmCreated).toHaveLength(1);
-    expect(crmCreated[0], 'the Google Forms contact names a status').not.toHaveProperty('status');
-    expect(db.contact.rows.map((r) => r.status)).toEqual(['LEAD']);
-    expect(db.quote.rows.map((r) => r.status)).toEqual(['SENT']);
+
+    it('SEC-D92R-1: the Google Forms mapping creates its quote as DRAFT, as the quote door does: the setting answers 400 for any other quote status (SENT, ACCEPTED, PAID, CONVERTED...) and stores nothing; DRAFT in any case, null or no status is a DRAFT', async () => {
+      const businessId = 'biz-gforms-setting';
+      db.business.insert({ id: businessId });
+      for (const given of ['SENT', 'VIEWED', 'ACCEPTED', 'REJECTED', 'EXPIRED', 'INVOICED', 'PAID', 'CONVERTED', 'bogus', 7]) {
+        const res = await agent()
+          .post(gformsUrl(businessId))
+          .send({ fieldMappings: gformFieldMappings, opportunityDefaults: { enabled: true, defaultStatus: given, defaultBudget: 5000 } });
+        expect(res.status, String(given)).toBe(400);
+        expect(JSON.stringify(res.body), String(given)).toContain('DRAFT');
+        expect(db.googleFormMapping.rows, String(given)).toHaveLength(0);
+      }
+      for (const given of ['DRAFT', ' draft ', null, undefined]) {
+        const res = await agent()
+          .post(gformsUrl(businessId))
+          .send({ fieldMappings: gformFieldMappings, opportunityDefaults: { enabled: true, defaultStatus: given, defaultBudget: 5000 } });
+        expect(res.status, String(given)).toBe(201);
+        expect(db.googleFormMapping.rows[0].opportunityDefaults.defaultStatus, String(given)).toBe('DRAFT');
+      }
+    });
+
+    it('SEC-D92R-1: a mapping stored before that names PAID, ACCEPTED, CONVERTED or SENT creates a DRAFT quote on backfill, and reads back as DRAFT', async () => {
+      for (const legacy of ['PAID', 'ACCEPTED', 'CONVERTED', 'SENT']) {
+        resetDb();
+        const businessId = 'biz-gforms-legacy';
+        db.business.insert({ id: businessId });
+        db.googleFormMapping.insert({
+          businessId,
+          formId: 'gform-1',
+          formTitle: 'Quote request',
+          fieldMappings: gformFieldMappings,
+          opportunityDefaults: { enabled: true, defaultStatus: legacy, defaultBudget: 5000 },
+          autoCreate: true,
+          lastSeenResponseTime: null,
+          processedResponseIds: [],
+        });
+        const read = await agent().get(gformsUrl(businessId));
+        expect(read.body.opportunityDefaults.defaultStatus, legacy).toBe('DRAFT');
+        respond(`resp-${legacy}`, `${legacy.toLowerCase()}.person@example.test`);
+        const res = await agent().post(`/connect/businesses/${businessId}/forms/gform-1/backfill`);
+        expect(res.status, `${legacy}: ${JSON.stringify(res.body)}`).toBe(201);
+        expect(res.body.opportunitiesCreated, legacy).toBe(1);
+        expect(db.quote.rows.map((r) => [r.status, r.total]), legacy).toEqual([['DRAFT', 5000]]);
+        formResponses.length = 0;
+      }
+    });
+
+    it.todo(
+      'SEC-D92R-1 follow-up: a Google Forms backfill or process-new run by a member without revenue:write creates no quote (the forms routes carry AuthGuard and BusinessGuard only, and the quote is written with prisma.quote.create, outside CommerceService.createQuote); which member a form-created quote needs, and what the scheduled poller runs as, is an authority decision outside W5-D92-RESIDUALS',
+    );
   });
+
+  it.todo(
+    'CR-D92R-1 (web companion): the Contact sync settings status select (apps/web/src/app/app/key-connect/components/contact-sync-settings.tsx STATUS_OPTIONS) offers exactly CONTACT_STATUSES; it offers ACTIVE, INACTIVE and ARCHIVED, which the setting now answers 400 for, and no CLIENT or LOST. The web file is outside the W5-D92-RESIDUALS write set',
+  );
 });

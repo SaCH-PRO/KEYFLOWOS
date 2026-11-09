@@ -264,23 +264,29 @@ export class ConnectorFormMappingService {
       values[entry.crmField] = text;
     }
     if (submission.contactId) {
-      // Existing contact already linked — merge (never replace) tags / status.
+      // Existing contact already linked: merge (never replace) its tags.
+      // W5-D92-RESIDUALS review SEC-D92R-2: the mapping's default status is for
+      // the contacts it creates. An existing contact's status is the business's
+      // (an external adapter never overwrites it, crm.constants.ts), so it is
+      // never written here; this overwrote it by id before (a LOST contact
+      // became CLIENT, a trashed one was rewritten). And only a live contact of
+      // this business is enriched: a trashed contact, or a contact id that is
+      // not this business's, is left as it is.
       try {
-        if (tags.length || defaultStatus) {
-          const existing = await this.prisma.client.contact.findUnique({
-            where: { id: submission.contactId },
-            select: { tags: true },
+        if (tags.length) {
+          const existing = await this.prisma.client.contact.findFirst({
+            where: { id: submission.contactId, businessId, deletedAt: null },
+            select: { id: true, tags: true },
           });
-          const merged = Array.from(
-            new Set([...(existing?.tags ?? []), ...tags].map((t) => t.trim()).filter(Boolean)),
-          );
-          await this.prisma.client.contact.update({
-            where: { id: submission.contactId },
-            data: {
-              ...(tags.length ? { tags: { set: merged } } : {}),
-              ...(defaultStatus ? { status: defaultStatus } : {}),
-            },
-          });
+          if (existing) {
+            const merged = Array.from(
+              new Set([...(existing.tags ?? []), ...tags].map((t) => t.trim()).filter(Boolean)),
+            );
+            await this.prisma.client.contact.update({
+              where: { id: existing.id },
+              data: { tags: { set: merged } },
+            });
+          }
         }
       } catch (err: any) {
         this.logger.warn(`Could not enrich contact ${submission.contactId}: ${(err as Error).message}`);

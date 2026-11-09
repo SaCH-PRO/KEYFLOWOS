@@ -2,7 +2,11 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { canonicalContactStatus } from '../crm/crm.constants';
-import { settingDefaultContactStatus } from './google-contacts-sync.service';
+import {
+  memberDefaultOwnerId,
+  settingDefaultContactStatus,
+  settingDefaultOwnerId,
+} from './google-contacts-sync.service';
 import { MicrosoftTokenHelper } from './microsoft-token.helper';
 
 interface MsContact {
@@ -88,13 +92,24 @@ export class OutlookContactsSyncService {
   async saveMappingRules(
     businessId: string,
     rules: Partial<OutlookContactMappingRules>,
+    actorUserId?: string,
   ): Promise<OutlookContactMappingRules> {
     // D-92: refuse a status with no ContactStatus (400) before anything is read or written.
     const defaultStatus = settingDefaultContactStatus(rules.defaultStatus);
+    const current = await this.getMappingRules(businessId);
+    // SEC-D92R-3: a default owner is a member, and naming another needs crm_reassign (as on Google).
+    const defaultOwnerId = await settingDefaultOwnerId(
+      this.prisma,
+      businessId,
+      rules.defaultOwnerId,
+      current.defaultOwnerId,
+      actorUserId,
+    );
     const next = parseRules({
-      ...(await this.getMappingRules(businessId)),
+      ...current,
       ...rules,
       ...(defaultStatus !== undefined ? { defaultStatus } : {}),
+      ...(defaultOwnerId !== undefined ? { defaultOwnerId } : {}),
     });
     const existing = await this.prisma.client.connectorStatus.findUnique({
       where: { businessId_connectorType: { businessId, connectorType: 'outlook_contacts' } },
@@ -203,7 +218,12 @@ export class OutlookContactsSyncService {
       where: { id: businessId },
       select: { msContactsDeltaLink: true },
     });
-    const rules = await this.getMappingRules(businessId);
+    const stored = await this.getMappingRules(businessId);
+    // SEC-D92R-3: the default owner is applied only while they are a member of this business.
+    const rules: OutlookContactMappingRules = {
+      ...stored,
+      defaultOwnerId: await memberDefaultOwnerId(this.prisma, businessId, stored.defaultOwnerId),
+    };
     const hasRules =
       rules.defaultTags.length > 0 ||
       !!rules.defaultStatus ||
