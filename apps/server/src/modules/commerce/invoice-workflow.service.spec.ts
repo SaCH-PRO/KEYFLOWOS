@@ -1018,3 +1018,113 @@ describe('V1-44 InvoiceWorkflowService.reconcileFromCredits (fakes)', () => {
     h.quiet();
   });
 });
+
+/**
+ * V1-82 (FOLLOW3-B1-VOID-NET-RECEIVED, VL-02): transition(id, 'VOID') refuses
+ * an invoice that still holds money received net of refunds (D-14: refund it
+ * first; D-27: PENDING and FAILED rows are not money received). The check runs
+ * on the caller's transaction under the invoice row lock every money door
+ * takes, taken before the status read, so a payment cannot commit between the
+ * check and the compare-and-set. The real-database proof (OVERDUE and FAILED
+ * part-paid invoices, the bulk path, the race) is
+ * test/invoice-void-net-received.integration.test.ts.
+ */
+describe('V1-82 transition(id, VOID) refuses money received net (fakes)', () => {
+  function build(status: string, payments: Array<{ amount: number; status: string }>) {
+    const row = { id: 'inv_1', status, businessId: 'biz_1', total: 100, currency: 'USD' };
+    const order: string[] = [];
+    const tx = {
+      $queryRaw: vi.fn(async (..._args: unknown[]) => {
+        order.push('lock');
+        return [{ id: 'inv_1' }];
+      }),
+      invoice: {
+        findUnique: vi.fn(async () => {
+          order.push('read');
+          return row;
+        }),
+        update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          order.push('update');
+          return { ...row, ...data, items: [], contact: null, booking: null };
+        }),
+      },
+      payment: {
+        findMany: vi.fn(async (_args: unknown) => {
+          order.push('payments');
+          return payments;
+        }),
+      },
+    };
+    const $transaction = vi.fn();
+    const events = { emit: vi.fn() };
+    const revenuePosting = {
+      onInvoiceFinalized: vi.fn(),
+      onInvoiceVoided: vi.fn(async (..._args: unknown[]) => {
+        order.push('reverse');
+        return null;
+      }),
+    };
+    const expensePosting = { onProductSold: vi.fn(async () => null) };
+    const service = new InvoiceWorkflowService(
+      { client: { $transaction } } as never,
+      events as never,
+      revenuePosting as never,
+      expensePosting as never,
+    );
+    return { service, tx, order, events, revenuePosting, $transaction };
+  }
+
+  it('VN-U1 RED-BEFORE: an OVERDUE invoice holding 40 received net (a PENDING and a FAILED row beside it) -> ConflictException naming USD 40.00 and saying to refund first; no invoice.update, no onInvoiceVoided, nothing buffered or emitted; the row lock is taken before the reads', async () => {
+    const h = build('OVERDUE', [
+      { amount: 40, status: 'SUCCESSFUL' },
+      { amount: 25, status: 'PENDING' },
+      { amount: 35, status: 'FAILED' },
+    ]);
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const err = await h.service.transition('inv_1', 'VOID', { tx: h.tx as never, eventBuffer: buffer }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ConflictException);
+    expect((err as Error).message).toBe(
+      'Cannot void a OVERDUE invoice that still holds USD 40.00 received net of refunds; refund the money received first, then void it',
+    );
+    expect(h.tx.invoice.update).not.toHaveBeenCalled();
+    expect(h.revenuePosting.onInvoiceVoided).not.toHaveBeenCalled();
+    expect(buffer).toEqual([]);
+    expect(h.events.emit).not.toHaveBeenCalled();
+    expect(h.$transaction, 'runs on the caller transaction').not.toHaveBeenCalled();
+    // The lock every money door takes, on this invoice, before the status and payment reads.
+    expect(h.order).toEqual(['lock', 'read', 'payments']);
+    const [strings, ...values] = h.tx.$queryRaw.mock.calls[0] as unknown as [TemplateStringsArray, ...unknown[]];
+    expect(strings.join('?').replace(/\s+/g, ' ').trim()).toBe('SELECT id FROM invoices WHERE id = ? FOR NO KEY UPDATE');
+    expect(values).toEqual(['inv_1']);
+    // The invoice's own-tenant rows (RC-DEP-2).
+    expect(h.tx.payment.findMany).toHaveBeenCalledTimes(1);
+    expect(h.tx.payment.findMany.mock.calls[0][0]).toEqual({
+      where: { invoiceId: 'inv_1', businessId: 'biz_1' },
+      select: { amount: true, status: true },
+    });
+  });
+
+  it('VN-U2: the same OVERDUE invoice with its 40 refunded (net 0, a PENDING row beside it) -> one compare-and-set VOID write, the recognition reversed once on the same tx, invoice.void buffered; the lock is taken first', async () => {
+    const h = build('OVERDUE', [
+      { amount: 40, status: 'SUCCESSFUL' },
+      { amount: -40, status: 'REFUNDED' },
+      { amount: 25, status: 'PENDING' },
+    ]);
+    const buffer: Array<{ name: string; payload: unknown }> = [];
+    const updated = await h.service.transition('inv_1', 'VOID', { tx: h.tx as never, eventBuffer: buffer });
+    expect(updated).toMatchObject({ id: 'inv_1', status: 'VOID' });
+    expect(h.tx.invoice.update).toHaveBeenCalledTimes(1);
+    expect(h.tx.invoice.update.mock.calls[0][0]).toEqual({
+      where: { id: 'inv_1', status: 'OVERDUE' },
+      data: { status: 'VOID' },
+      include: { items: true, contact: true, booking: true },
+    });
+    expect(h.revenuePosting.onInvoiceVoided).toHaveBeenCalledTimes(1);
+    expect(h.revenuePosting.onInvoiceVoided).toHaveBeenCalledWith('inv_1', { tx: h.tx });
+    expect(h.revenuePosting.onInvoiceFinalized).not.toHaveBeenCalled();
+    expect(h.order).toEqual(['lock', 'read', 'payments', 'update', 'reverse']);
+    expect(buffer.map((e) => e.name)).toEqual(['invoice.void']);
+    expect(buffer[0].payload).toMatchObject({ businessId: 'biz_1', status: 'VOID', eventName: 'invoice.void' });
+    expect(h.events.emit).not.toHaveBeenCalled();
+  });
+});

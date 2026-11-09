@@ -58,10 +58,48 @@
  *         payment, its posting and the receivable to 0 commit; the status stays credited);
  *         money beyond it, the credit-unaware total mark-paid records, and any payment on a
  *         FULLY_CREDITED invoice -> 409 with nothing written
- *   it.todo: the halves that live outside the V1-44 write set (finance.controller.ts route
- *         scopes and void actor, drive-intake-orchestrator.service.ts apply_credit_note key,
- *         the credit-unaware share / pay-link / mark-paid readers in commerce.service.ts and
- *         payments.service.ts)
+ *   it.todo: the credit-unaware share / pay-link / mark-paid readers in commerce.service.ts
+ *         and payments.service.ts (CR-V44-1 reader half)
+ *
+ * V1-44b-CREDIT-NOTE-ROUTES-AND-INTAKE (the V1-44 review halves outside its write set):
+ *   CN-17 SEC-V44-1 (route half, D-57, D-46) every credit-note write (create, PATCH, apply, void,
+ *         DELETE) needs revenue:write and every read (list, detail) revenue:read: a STAFF member
+ *         (revenue:read) is refused the writes 403, a revenue:none member everything 403, a
+ *         non-member SUPER_ADMIN everything 403; a refused call writes nothing. A member granted
+ *         revenue:write does all of it
+ *   CN-18 SEC-V44-5 (route half) POST /:id/void names the member: the reversal's createdById
+ *   CN-19 SEC-V44-3 two concurrent approvals of one Drive-intake plan credit the invoice once (the
+ *         approval is a compare-and-set claim: exactly one runs); a re-run of the same plan (the
+ *         intake put back to reviewing) answers the step's own note: one note, one apply, one
+ *         REVERSAL; credited + remaining = total
+ *   CN-20 SEC-V44-4 the intake applies as the approving member (approverActorId, as its payment
+ *         step): the ingestion auto-execute ('system') and the data-inbox fallback ('user') post
+ *         nothing (the note stays DRAFT, no posting names a placeholder)
+ *   CN-21 SEC-V44-6 a note whose invoice belongs to another business cannot move that invoice:
+ *         void refused 400 with nothing written (the invoice lock and lookup carry businessId)
+ *   CN-22 CR-V44-3 a credit smaller than one cent per revenue split posts no zero or negative leg:
+ *         0.01 on a 50/50 SERVICE/PRODUCT invoice applies (201), balanced
+ *   CN-23 CR-V44-4 an invoice the AI undo returned to DRAFT with two notes applied: each note is
+ *         voided (201), its posting reversed, the invoice left DRAFT (a credit note never moves a
+ *         DRAFT or VOID invoice)
+ *   it.todo CR-V44-2: reconcileFromCredits clears no paidAt on a credited return to SENT or
+ *         PARTIALLY_PAID (invoice-workflow.service.ts, outside this write set)
+ *
+ * V1-44b review repairs:
+ *   CN-20 (amended by SEC-V44b-R2) the placeholders are refused 403 BEFORE the claim: no note,
+ *         no posting, the intake stays 'reviewing' and a member with revenue:write then runs it
+ *   CN-24 SEC-V44b-R1 / CRR-V44b-1 (route half) POST credit-notes refuses a 'CN-DRIVE-' number
+ *         (any case, padded) 400 with nothing written, so no member pre-creates a plan step's note;
+ *         the owner's approval then credits exactly the plan's amount, in the owner's name
+ *   CN-25 SEC-V44b-R1 / CRR-V44b-1 a note carrying the step's number for another amount (a DRAFT a
+ *         failed run left, or an APPLIED one from the plan before a re-sync) is not adopted: the
+ *         re-planned step is refused 409, nothing applied or posted, nothing reported as credited
+ *   CN-26 SEC-V44b-R2 a member with revenue:read (or none) approving a credit plan is refused 403
+ *         before the claim: no note, the intake stays 'reviewing', the owner then runs it
+ *   CN-27 SEC-V44b-R1 (apply half) apply with expectedAmount refuses 409 a note PATCHed since it
+ *         was read, with nothing written; at the note's amount it applies
+ *   CN-28 SEC-V44b-R3 the reads (list, detail, and the PATCH and DELETE answers) never disclose
+ *         another tenant's invoice through a note's invoiceId: `invoice: null`
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor, FinanceController (credit-note routes), CreditNoteService,
@@ -97,6 +135,7 @@ const ID = {
   staff: `${P}staff`, // STAFF, role defaults (revenue:read)
   norev: `${P}norev`, // STAFF, an explicit scope map with revenue:none
   writer: `${P}writer`, // STAFF, an explicit scope map granting revenue:write
+  admin: `${P}admin`, // a platform SUPER_ADMIN with no Membership anywhere (D-46)
   biz: `${P}biz`, // ACCRUAL, the tenant under test
   bizCash: `${P}bizCash`, // CASH basis
   bizF: `${P}bizF`, // a foreign tenant
@@ -124,6 +163,8 @@ let app: any;
 let workflow: any;
 let revenuePosting: any;
 let creditNotes: any;
+let prismaService: any;
+let DriveIntakeOrchestratorClass: any;
 
 async function cleanup() {
   for (const sql of [
@@ -133,6 +174,9 @@ async function cleanup() {
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM drive_intake_files WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM ai_approval_items WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM accounting_periods WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -312,7 +356,9 @@ beforeAll(async () => {
   const { PrismaService } = await import('../src/core/prisma/prisma.service');
   const { AuthGuard } = await import('../src/core/auth/auth.guard');
   const { BusinessGuard } = await import('../src/core/auth/business.guard');
+  const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
   const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+  DriveIntakeOrchestratorClass = (await import('../src/modules/commerce/drive-intake-orchestrator.service')).DriveIntakeOrchestrator;
   const { FinanceController } = await import('../src/modules/finance/finance.controller');
   const { CreditNoteService } = await import('../src/modules/finance/credit-note.service');
   const { PostingService } = await import('../src/modules/finance/posting.service');
@@ -365,6 +411,7 @@ beforeAll(async () => {
       PrismaService,
       AuthGuard,
       BusinessGuard,
+      ModuleScopeGuard,
       ...real,
       ...collaborators.filter((token) => !real.includes(token)).map((token) => ({ provide: token, useValue: {} })),
       { provide: ExpensePostingService, useValue: { onProductSold: async () => null } },
@@ -375,6 +422,7 @@ beforeAll(async () => {
   workflow = moduleRef.get(InvoiceWorkflowService);
   revenuePosting = moduleRef.get(RevenuePostingService);
   creditNotes = moduleRef.get(CreditNoteService);
+  prismaService = moduleRef.get(PrismaService);
   const coa = moduleRef.get(ChartOfAccountsSeederService);
 
   app = moduleRef.createNestApplication();
@@ -420,6 +468,8 @@ beforeAll(async () => {
       data: { id: `${user}_m`, userId: user, businessId: ID.biz, role: 'STAFF', ...(scopes ? { permissionScopes: scopes } : {}) },
     });
   }
+  // V1-44b (D-46): a platform SUPER_ADMIN with no Membership in any tenant.
+  await db.user.create({ data: { id: ID.admin, email: `${P}admin@test.local`, role: 'SUPER_ADMIN' } });
 }, 180_000);
 
 afterAll(async () => {
@@ -845,17 +895,469 @@ describe('V1-44 review: who may apply, the DRAFT-only delete, the void actor, co
     expect((await invoiceRow(inv3)).status).toBe('FULLY_CREDITED');
   });
 
-  // Outside the V1-44 write set (credit-note.service.ts, invoice-workflow.service.ts and their tests):
-  it.todo(
-    'SEC-V44-1 (route half): POST/PATCH credit-notes, /:id/apply, /:id/void and DELETE /:id carry ModuleScopeGuard + RequireModuleScope(revenue, write) and the GETs RequireModuleScope(revenue, read), so a revenue:read member cannot create, edit, void or delete a note and a revenue:none member cannot list them (finance.controller.ts; apply itself is enforced in CreditNoteService by CN-13)',
-  );
-  it.todo(
-    'SEC-V44-3: two concurrent approvals of one Drive intake plan credit the invoice once: the apply_credit_note step needs a key drive:<intakeFileId>:<actionIndex> as record_payment has, or must leave the note DRAFT for a member to apply (drive-intake-orchestrator.service.ts)',
-  );
-  it.todo(
-    'SEC-V44-5 (route half): POST credit-notes/:id/void passes { userId: req.user.id } so the reversal names the member (finance.controller.ts:1197; the service records it, CN-15)',
-  );
+  // Outside the V1-44 and V1-44b write sets (the route halves moved to CN-17..CN-19 below):
   it.todo(
     'CR-V44-1 (reader half): the share surfaces, the token pay link and mark-paid net the APPLIED credit notes (commerce.service.ts markPaidRemaining / public views / INTENT_PAYABLE_STATUSES, payments.service.ts payLinkInvoice); until then PARTIALLY_CREDITED stays out of SHAREABLE_INVOICE_STATUSES and mark-paid is refused 409 (CN-16) rather than collecting the credited part again',
+  );
+});
+
+/**
+ * V1-44b-CREDIT-NOTE-ROUTES-AND-INTAKE: the V1-44 review halves that lived
+ * outside V1-44's write set (finance.controller.ts credit-note routes,
+ * drive-intake-orchestrator.service.ts) and the credit-note.service.ts nits
+ * still live at this head.
+ */
+describe('V1-44b: the credit-note routes carry the revenue scope, void names its actor, the Drive-intake credit step cannot apply twice', () => {
+  it('CN-17 SEC-V44-1 (route half, D-57, D-46): writes need revenue:write, reads revenue:read; revenue:read, revenue:none and a non-member SUPER_ADMIN are refused 403 and a refused call writes nothing; revenue:write does it all', async () => {
+    const inv = await seedInvoice('routes', 'SENT');
+    const draft = await createNote(inv, 10);
+    const applied = await createNote(inv, 20);
+    expect((await applyNote(applied.id)).status).toBe(201);
+
+    const snapshot = async () => ({
+      notes: await db.creditNote.findMany({
+        where: { businessId: ID.biz },
+        orderBy: { id: 'asc' },
+        select: { id: true, status: true, amount: true, reason: true, reversalTransactionId: true },
+      }),
+      ledger: await ledgerCounts(ID.biz),
+      invoice: (await invoiceRow(inv)).status,
+    });
+    const before = await snapshot();
+    expect(before.invoice).toBe('PARTIALLY_CREDITED');
+
+    const writesAs = (who: string): Array<[string, () => Promise<any>]> => [
+      ['POST credit-notes', () => api('post', '', ID.biz, who).send({ invoiceId: inv, creditNoteNumber: `${P}CN-R-${who.slice(P.length)}`, amount: 5 })],
+      ['PATCH /:id', () => api('patch', `/${draft.id}`, ID.biz, who).send({ amount: 7, reason: 'edited' })],
+      ['POST /:id/apply', () => api('post', `/${draft.id}/apply`, ID.biz, who).send({})],
+      ['POST /:id/void', () => api('post', `/${applied.id}/void`, ID.biz, who).send({})],
+      ['DELETE /:id', () => api('delete', `/${draft.id}`, ID.biz, who)],
+    ];
+
+    // RED-BEFORE (V1-44 head): the STAFF member (revenue:read) and the revenue:none member got
+    // 201 on create, 200 on PATCH, 201 on void and 200 on DELETE (only apply was refused, CN-13).
+    for (const who of [ID.staff, ID.norev, ID.admin]) {
+      for (const [label, call] of writesAs(who)) {
+        const res = await call();
+        expect(res.status, `${who} ${label}: ${JSON.stringify(res.body)}`).toBe(403);
+      }
+    }
+    // RED-BEFORE: the revenue:none member read the list and the detail (invoice total, status, contactId).
+    for (const who of [ID.norev, ID.admin]) {
+      for (const route of ['', `/${draft.id}`]) {
+        const res = await api('get', route, ID.biz, who);
+        expect(res.status, `${who} GET credit-notes${route}: ${JSON.stringify(res.body)}`).toBe(403);
+      }
+    }
+    expect(await snapshot(), 'a refused call writes nothing').toEqual(before);
+
+    // revenue:read reads.
+    const listed = await api('get', '', ID.biz, ID.staff);
+    expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+    expect(listed.body.items.map((n: any) => n.id)).toEqual(expect.arrayContaining([draft.id, applied.id]));
+    expect((await api('get', `/${draft.id}`, ID.biz, ID.staff)).status).toBe(200);
+
+    // revenue:write does every write.
+    const created = await api('post', '', ID.biz, ID.writer).send({ invoiceId: inv, creditNoteNumber: `${P}CN-R-writer`, amount: 5 });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const patched = await api('patch', `/${draft.id}`, ID.biz, ID.writer).send({ amount: 7 });
+    expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+    expect(Number((await noteRow(draft.id)).amount)).toBe(7);
+    expect((await api('get', `/${draft.id}`, ID.biz, ID.writer)).status).toBe(200);
+    expect((await api('post', `/${applied.id}/void`, ID.biz, ID.writer).send({})).status).toBe(201);
+    expect((await api('delete', `/${draft.id}`, ID.biz, ID.writer)).status).toBe(200);
+    expect(await noteRow(draft.id)).toBeNull();
+    expect((await api('post', `/${created.body.id}/apply`, ID.biz, ID.writer).send({})).status).toBe(201);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_CREDITED');
+    const ledger = await ledgerOf(inv);
+    expect(ledger).toEqual({ receivable: 95, revenue: 95, credited: 5 });
+    expect(money(ledger.credited + ledger.receivable), 'credited + remaining = invoice total').toBe(TOTAL);
+    await expectBalanced(ID.biz);
+  });
+
+  it('CN-18 SEC-V44-5 (route half): POST /:id/void names the member on the reversal', async () => {
+    const inv = await seedInvoice('voidroute', 'SENT');
+    const note = await createNote(inv, 40, ID.biz, ID.writer);
+    expect((await applyNote(note.id, ID.biz, ID.writer)).status).toBe(201);
+    const res = await voidNote(note.id, ID.biz, ID.writer);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const postings = await notePostings(note.id);
+    const original = postings.find((t: any) => t.reversalOfId === null);
+    const reversal = postings.find((t: any) => t.reversalOfId !== null);
+    expect(original?.createdById).toBe(ID.writer);
+    // RED-BEFORE (V1-44 head): null: the route called creditNotes.void(businessId, id) with no actor.
+    expect(reversal?.createdById).toBe(ID.writer);
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+    expect(await ledgerOf(inv)).toEqual({ receivable: TOTAL, revenue: TOTAL, credited: 0 });
+    await expectBalanced(ID.biz);
+  });
+
+  /** The Drive-intake orchestrator with the REAL CreditNoteService and InvoiceWorkflowService; its other collaborators are stubs off the credit path. */
+  function orchestrator() {
+    return new DriveIntakeOrchestratorClass(
+      prismaService,
+      {} as any, // CrmService: these plans carry no contact (no follow-up task)
+      {} as any, // CrmCommunicationService: no send_notification step
+      {} as any, // TransactionalEmailService
+      { resolveApproval: async () => null } as any, // AiOversightService: no approval item is seeded
+      {} as any, // CommerceService: no create_invoice step
+      workflow,
+      creditNotes,
+      {} as any, // TaskAssignmentService
+      {} as any, // PaymentEvidenceService: no record_payment step
+    );
+  }
+
+  /** A Drive intake file in 'reviewing' whose plan is one apply_credit_note step against `invoiceId`. */
+  async function seedIntake(key: string, invoiceId: string, amount: number): Promise<string> {
+    const id = `${P}intake_${key}`;
+    await db.driveIntakeFile.create({
+      data: {
+        id,
+        businessId: ID.biz,
+        driveFileId: `${P}drive_${key}`,
+        name: `v44a ${key}.pdf`,
+        mimeType: 'application/pdf',
+        modifiedTime: new Date(),
+        status: 'reviewing',
+        documentType: 'credit_note',
+        proposedActions: {
+          intakeFileId: id,
+          documentType: 'credit_note',
+          originalInvoiceId: invoiceId,
+          summary: `v44a ${key}`,
+          actions: [{ type: 'apply_credit_note', payload: { invoiceId, amount, reason: `v44a ${key}` } }],
+        },
+      },
+    });
+    return id;
+  }
+
+  it("CN-19 SEC-V44-3: two concurrent approvals of one Drive-intake plan credit the invoice once; a re-run answers the step's own note (one note, one apply, one REVERSAL)", async () => {
+    const inv = await seedInvoice('intake', 'SENT');
+    const intake = await seedIntake('race', inv, 50);
+    const orch = orchestrator();
+
+    const first = orch.executePlan(ID.biz, intake, ID.writer);
+    await new Promise((r) => setTimeout(r, 5));
+    const second = orch.executePlan(ID.biz, intake, ID.writer);
+    const settled = await Promise.allSettled([first, second]);
+    const ok = (s: PromiseSettledResult<any>) => s.status === 'fulfilled' && s.value?.success === true;
+    // RED-BEFORE (V1-44 head): both runs read 'reviewing', each created CN-<Date.now()> of 50 and
+    // applied it: two APPLIED notes, FULLY_CREDITED, the receivable written off.
+    expect(settled.filter(ok), JSON.stringify(settled)).toHaveLength(1);
+    const refused = settled.find((s) => !ok(s));
+    expect(refused?.status, JSON.stringify(refused)).toBe('rejected');
+    expect((refused as PromiseRejectedResult).reason).toMatchObject({ status: 400 });
+
+    const notes = await db.creditNote.findMany({ where: { invoiceId: inv } });
+    expect(notes, 'one note for the one plan step').toHaveLength(1);
+    expect(notes[0].status).toBe('APPLIED');
+    const postings = await notePostings(notes[0].id);
+    expect(postings, 'one REVERSAL').toHaveLength(1);
+    expect(postings[0].type).toBe('REVERSAL');
+    expect(postings[0].createdById, 'the approving member').toBe(ID.writer);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_CREDITED');
+    const ledger = await ledgerOf(inv);
+    expect(ledger).toEqual({ receivable: 50, revenue: 50, credited: 50 });
+    expect(money(ledger.credited + ledger.receivable), 'credited + remaining = invoice total').toBe(TOTAL);
+    expect((await db.driveIntakeFile.findUnique({ where: { id: intake } })).status).toBe('approved');
+
+    // The same plan run again (the intake put back to reviewing, as a crash before the flip left
+    // it at the base): the step answers its own note, applies nothing, posts nothing.
+    await db.driveIntakeFile.update({ where: { id: intake }, data: { status: 'reviewing' } });
+    const before = await ledgerCounts(ID.biz);
+    const rerun = await orch.executePlan(ID.biz, intake, ID.writer);
+    expect(rerun.success, JSON.stringify(rerun)).toBe(true);
+    expect(rerun.results).toEqual([{ action: 'apply_credit_note', success: true, entityId: notes[0].id }]);
+    // RED-BEFORE: a second CN-<Date.now()> of 50 created and applied.
+    expect(await db.creditNote.count({ where: { invoiceId: inv } })).toBe(1);
+    expect(await notePostings(notes[0].id)).toHaveLength(1);
+    expect(await ledgerCounts(ID.biz)).toEqual(before);
+    expect(await ledgerOf(inv)).toEqual({ receivable: 50, revenue: 50, credited: 50 });
+    await expectBalanced(ID.biz);
+  });
+
+  it("CN-20 SEC-V44-4: the intake applies as the approving member: the ingestion auto-execute ('system') and the data-inbox fallback ('user') post nothing and name no placeholder", async () => {
+    const orch = orchestrator();
+    for (const placeholder of ['system', 'user']) {
+      const inv = await seedInvoice(`intake_${placeholder}`, 'SENT');
+      const intake = await seedIntake(placeholder, inv, 30);
+      const before = await ledgerCounts(ID.biz);
+      // V1-44b review (SEC-V44b-R2): refused before the claim (V1-44b head: success:false after
+      // the claim, a DRAFT step note left behind and the intake 'error', approvable by no one).
+      await expect(orch.executePlan(ID.biz, intake, placeholder)).rejects.toMatchObject({ status: 403 });
+      expect(await db.creditNote.findMany({ where: { invoiceId: inv } }), 'no note created').toEqual([]);
+      expect(await ledgerCounts(ID.biz)).toEqual(before);
+      expect(await db.financialTransaction.count({ where: { createdById: placeholder } })).toBe(0);
+      expect((await invoiceRow(inv)).status).toBe('SENT');
+      expect((await db.driveIntakeFile.findUnique({ where: { id: intake } })).status, 'the claim is not used up').toBe('reviewing');
+      // A member with revenue:write then approves the same plan.
+      const res = await orch.executePlan(ID.biz, intake, ID.writer);
+      expect(res.success, JSON.stringify(res)).toBe(true);
+      const [note] = await db.creditNote.findMany({ where: { invoiceId: inv } });
+      expect(note.status).toBe('APPLIED');
+      expect((await notePostings(note.id)).map((t: any) => t.createdById)).toEqual([ID.writer]);
+    }
+  });
+
+  it('CN-21 SEC-V44-6: a note whose invoice belongs to another business cannot move it: void refused 400, nothing written in either tenant', async () => {
+    const foreignInv = await seedInvoice('xtenant', 'SENT', { businessId: ID.bizF, contactId: ID.contactF });
+    await db.invoice.update({ where: { id: foreignInv }, data: { status: 'FULLY_CREDITED' } });
+    // An inconsistent row (legacy or seeded data; create() cannot make one): A's note, B's invoice.
+    const noteId = `${P}cn_xtenant`;
+    await db.creditNote.create({
+      data: { id: noteId, businessId: ID.biz, invoiceId: foreignInv, creditNoteNumber: `${P}CN-XTENANT`, status: 'APPLIED', amount: TOTAL, appliedAt: new Date() },
+    });
+    const before = { a: await ledgerCounts(ID.biz), b: await ledgerCounts(ID.bizF) };
+
+    const res = await voidNote(noteId);
+    // RED-BEFORE (V1-44 head): 201 and B's invoice moved FULLY_CREDITED -> SENT by A's route.
+    expect(res.status, JSON.stringify(res.body)).toBe(400);
+    expect((await invoiceRow(foreignInv)).status).toBe('FULLY_CREDITED');
+    expect((await noteRow(noteId)).status).toBe('APPLIED');
+    expect({ a: await ledgerCounts(ID.biz), b: await ledgerCounts(ID.bizF) }).toEqual(before);
+  });
+
+  it('CN-22 CR-V44-3: a credit too small to reach every revenue split posts no zero or negative leg: 0.01 on a 50/50 SERVICE/PRODUCT invoice applies, balanced', async () => {
+    const id = `${P}inv_split`;
+    for (const [key, category] of [['svc', 'SERVICE'], ['prd', 'PRODUCT']] as const) {
+      await db.product.create({ data: { id: `${P}prod_${key}`, businessId: ID.biz, name: `v44a ${category}`, price: 50, category } });
+    }
+    invoiceSeq += 1;
+    await db.invoice.create({
+      data: {
+        id,
+        invoiceNumber: `${P}INV-${String(invoiceSeq).padStart(3, '0')}`,
+        businessId: ID.biz,
+        contactId: ID.contact,
+        status: 'DRAFT',
+        subtotal: TOTAL,
+        total: TOTAL,
+        currency: 'TTD',
+        dueDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000),
+        items: {
+          create: [
+            { description: 'v44a service', quantity: 1, unitPrice: 50, total: 50, productId: `${P}prod_svc` },
+            { description: 'v44a product', quantity: 1, unitPrice: 50, total: 50, productId: `${P}prod_prd` },
+          ],
+        },
+      },
+    });
+    await workflow.transition(id, 'SENT', { sentAt: new Date() });
+    const recognition = await db.financialTransaction.findMany({
+      where: { sourceType: 'Invoice', sourceId: id },
+      include: { entries: { include: { account: { select: { systemKey: true } } } } },
+    });
+    expect(netBySystemKey(recognition), 'two revenue splits of 50').toEqual({ ACCOUNTS_RECEIVABLE: 100, REVENUE_SERVICE: -50, REVENUE_PRODUCT: -50 });
+
+    const note = await createNote(id, 0.01);
+    const res = await applyNote(note.id);
+    // RED-BEFORE (V1-44 head): 400 'Entry 1: must have a non-zero debit or credit' (the first share
+    // rounded up to 0.01 left the last one 0).
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const postings = await notePostings(note.id);
+    expect(postings).toHaveLength(1);
+    for (const e of postings[0].entries) {
+      expect(Number(e.debit) >= 0 && Number(e.credit) >= 0, 'no negative leg').toBe(true);
+      expect(Number(e.debit) + Number(e.credit), 'no zero leg').toBeGreaterThan(0);
+    }
+    const net = netBySystemKey(postings);
+    expect(net.ACCOUNTS_RECEIVABLE).toBe(-0.01);
+    expect(money((net.REVENUE_SERVICE ?? 0) + (net.REVENUE_PRODUCT ?? 0))).toBe(0.01);
+    expect((await invoiceRow(id)).status).toBe('PARTIALLY_CREDITED');
+    await expectBalanced(ID.biz);
+  });
+
+  it('CN-23 CR-V44-4: an invoice the AI undo returned to DRAFT with two notes applied: each note voids (201), its posting reversed, the invoice left DRAFT', async () => {
+    const inv = await seedInvoice('undo', 'SENT');
+    const a = await createNote(inv, 20);
+    const b = await createNote(inv, 30);
+    expect((await applyNote(a.id)).status).toBe(201);
+    expect((await applyNote(b.id)).status).toBe(201);
+    await workflow.returnToDraftOnUndo(inv);
+    expect((await invoiceRow(inv)).status).toBe('DRAFT');
+
+    for (const note of [a, b]) {
+      const res = await voidNote(note.id);
+      // RED-BEFORE (V1-44 head): 409 'Illegal invoice status transition for a credit note: DRAFT -> PARTIALLY_CREDITED'.
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect((await noteRow(note.id)).status).toBe('VOID');
+      const postings = await notePostings(note.id);
+      expect(postings).toHaveLength(2);
+      expect(netBySystemKey(postings), 'the note nets to nothing').toEqual({ REVENUE: 0, ACCOUNTS_RECEIVABLE: 0 });
+      expect((await invoiceRow(inv)).status, 'a credit note never moves a DRAFT invoice').toBe('DRAFT');
+    }
+    expect(await ledgerOf(inv)).toEqual({ receivable: TOTAL, revenue: TOTAL, credited: 0 });
+    await expectBalanced(ID.biz);
+  });
+
+  /** What a Drive re-sync does to the SAME DriveIntakeFile row: back to 'reviewing' with a new plan (connector-intelligence upsert, then buildPlan). */
+  async function replan(intake: string, invoiceId: string, amount: number) {
+    await db.driveIntakeFile.update({
+      where: { id: intake },
+      data: {
+        status: 'reviewing',
+        errorMessage: null,
+        processedAt: null,
+        proposedActions: {
+          intakeFileId: intake,
+          documentType: 'credit_note',
+          originalInvoiceId: invoiceId,
+          summary: 'v44a re-synced',
+          actions: [{ type: 'apply_credit_note', payload: { invoiceId, amount, reason: 'v44a re-synced' } }],
+        },
+      },
+    });
+  }
+
+  it("CN-24 SEC-V44b-R1 / CRR-V44b-1 (route half): no member mints a plan step's number; the owner's approval credits exactly the plan's amount", async () => {
+    const inv = await seedInvoice('squat', 'SENT');
+    const intake = await seedIntake('squat', inv, 30);
+    const step = `CN-DRIVE-${intake}-0`;
+    const before = { notes: await db.creditNote.count({ where: { businessId: ID.biz } }), ledger: await ledgerCounts(ID.biz) };
+    for (const creditNoteNumber of [step, step.toLowerCase(), `  ${step}`, 'CN-DRIVE-anything']) {
+      const res = await api('post', '', ID.biz, ID.writer).send({ invoiceId: inv, creditNoteNumber, amount: 100, reason: 'squat' });
+      // RED-BEFORE (V1-44b head): 201; the owner's approval of 30 then applied this 100 in the owner's name.
+      expect(res.status, `${JSON.stringify(creditNoteNumber)}: ${JSON.stringify(res.body)}`).toBe(400);
+    }
+    expect({ notes: await db.creditNote.count({ where: { businessId: ID.biz } }), ledger: await ledgerCounts(ID.biz) }).toEqual(before);
+
+    const res = await orchestrator().executePlan(ID.biz, intake, ID.owner);
+    expect(res.success, JSON.stringify(res)).toBe(true);
+    const notes = await db.creditNote.findMany({ where: { invoiceId: inv } });
+    expect(notes.map((n: any) => [n.creditNoteNumber, n.status, Number(n.amount)])).toEqual([[step, 'APPLIED', 30]]);
+    const postings = await notePostings(notes[0].id);
+    expect(postings.map((t: any) => [Number(t.amount), t.createdById])).toEqual([[30, ID.owner]]);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_CREDITED');
+    expect(await ledgerOf(inv)).toEqual({ receivable: 70, revenue: 70, credited: 30 });
+    await expectBalanced(ID.biz);
+  });
+
+  it('CN-25 SEC-V44b-R1 / CRR-V44b-1: a step note of another amount (a stale DRAFT, or the APPLIED note of the plan before a re-sync) is refused 409: nothing applied, posted or reported credited', async () => {
+    const orch = orchestrator();
+
+    // (a) A DRAFT of 80 a failed run left under the step's number; the re-synced plan credits 30.
+    const invA = await seedInvoice('stale', 'SENT');
+    const intakeA = await seedIntake('stale', invA, 80);
+    const stale = await creditNotes.create(ID.biz, { invoiceId: invA, creditNoteNumber: `CN-DRIVE-${intakeA}-0`, amount: 80, reason: 'v44a stale' });
+    await replan(intakeA, invA, 30);
+    const beforeA = await ledgerCounts(ID.biz);
+    const resA = await orch.executePlan(ID.biz, intakeA, ID.writer);
+    // RED-BEFORE (V1-44b head): success:true with the stale note's id; one posting of 80 named v44a_writer.
+    expect(resA.success, JSON.stringify(resA)).toBe(false);
+    expect(resA.results).toEqual([]);
+    const rowA = await db.driveIntakeFile.findUnique({ where: { id: intakeA } });
+    expect(rowA.status).toBe('error');
+    expect(rowA.errorMessage).toMatch(/credits 80, not the 30/);
+    expect((await noteRow(stale.id)).status).toBe('DRAFT');
+    expect(await notePostings(stale.id)).toEqual([]);
+    expect(await ledgerCounts(ID.biz)).toEqual(beforeA);
+    expect((await invoiceRow(invA)).status).toBe('SENT');
+
+    // (b) The plan of 80 ran (APPLIED); the file is re-synced with a corrected 30.
+    const invB = await seedInvoice('resync', 'SENT');
+    const intakeB = await seedIntake('resync', invB, 80);
+    expect((await orch.executePlan(ID.biz, intakeB, ID.writer)).success).toBe(true);
+    await replan(intakeB, invB, 30);
+    const beforeB = await ledgerCounts(ID.biz);
+    const resB = await orch.executePlan(ID.biz, intakeB, ID.owner);
+    // RED-BEFORE (V1-44b head): success:true with the old note's id; the 30 credit reported done, nothing credited.
+    expect(resB.success, JSON.stringify(resB)).toBe(false);
+    expect(resB.results).toEqual([]);
+    expect((await db.driveIntakeFile.findUnique({ where: { id: intakeB } })).errorMessage).toMatch(/credits 80, not the 30/);
+    expect(await ledgerCounts(ID.biz)).toEqual(beforeB);
+    expect(await ledgerOf(invB)).toEqual({ receivable: 20, revenue: 20, credited: 80 });
+
+    // Control: a re-sync that keeps the amount is the same step: answered, nothing posted again.
+    await replan(intakeB, invB, 80);
+    const again = await orch.executePlan(ID.biz, intakeB, ID.owner);
+    expect(again.success, JSON.stringify(again)).toBe(true);
+    expect(await ledgerCounts(ID.biz)).toEqual(beforeB);
+    await expectBalanced(ID.biz);
+  });
+
+  it('CN-26 SEC-V44b-R2: a member who may not apply a credit note (revenue:read, revenue:none) approving a credit plan is refused 403 before the claim; the owner then runs it', async () => {
+    const inv = await seedInvoice('staffplan', 'SENT');
+    const intake = await seedIntake('staffplan', inv, 30);
+    const orch = orchestrator();
+    const before = await ledgerCounts(ID.biz);
+    for (const who of [ID.staff, ID.norev]) {
+      // RED-BEFORE (V1-44b head): success:false after the claim, the DRAFT note CN-DRIVE-<intake>-0
+      // created and the intake 'error': the owner's approval was then refused 400.
+      await expect(orch.executePlan(ID.biz, intake, who)).rejects.toMatchObject({ status: 403 });
+      expect(await db.creditNote.findMany({ where: { invoiceId: inv } })).toEqual([]);
+      expect((await db.driveIntakeFile.findUnique({ where: { id: intake } })).status).toBe('reviewing');
+    }
+    expect(await ledgerCounts(ID.biz)).toEqual(before);
+
+    const res = await orch.executePlan(ID.biz, intake, ID.owner);
+    expect(res.success, JSON.stringify(res)).toBe(true);
+    const [note] = await db.creditNote.findMany({ where: { invoiceId: inv } });
+    expect([note.status, Number(note.amount)]).toEqual(['APPLIED', 30]);
+    expect((await notePostings(note.id)).map((t: any) => t.createdById)).toEqual([ID.owner]);
+    expect((await db.driveIntakeFile.findUnique({ where: { id: intake } })).status).toBe('approved');
+    await expectBalanced(ID.biz);
+  });
+
+  it('CN-27 SEC-V44b-R1 (apply half): apply with the approved amount refuses 409 a note PATCHed since it was read; nothing written. At the note amount it applies', async () => {
+    const inv = await seedInvoice('expected', 'SENT');
+    const note = await createNote(inv, 40, ID.biz, ID.writer);
+    expect((await api('patch', `/${note.id}`, ID.biz, ID.writer).send({ amount: 45 })).status).toBe(200);
+    const before = await ledgerCounts(ID.biz);
+    await expect(creditNotes.apply(ID.biz, note.id, { userId: ID.writer, expectedAmount: 40 })).rejects.toMatchObject({ status: 409 });
+    expect((await noteRow(note.id)).status, 'the claim rolled back').toBe('DRAFT');
+    expect(await ledgerCounts(ID.biz)).toEqual(before);
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+
+    const applied = await creditNotes.apply(ID.biz, note.id, { userId: ID.writer, expectedAmount: 45 });
+    expect(applied.creditNote.status).toBe('APPLIED');
+    expect(await ledgerOf(inv)).toEqual({ receivable: 55, revenue: 55, credited: 45 });
+    await expectBalanced(ID.biz);
+  });
+
+  it("CN-28 SEC-V44b-R3: a note whose invoiceId names another tenant's invoice discloses nothing of it on the reads (list, detail) or the PATCH and DELETE answers", async () => {
+    const foreignInv = await seedInvoice('xread', 'SENT', { businessId: ID.bizF, contactId: ID.contactF });
+    const foreign = await invoiceRow(foreignInv);
+    const own = await createNote(await seedInvoice('ownread', 'SENT'), 10);
+    const noteId = `${P}cn_xread`;
+    await db.creditNote.create({ data: { id: noteId, businessId: ID.biz, invoiceId: foreignInv, creditNoteNumber: `${P}CN-XREAD`, status: 'DRAFT', amount: 1 } });
+    const leaks = (body: unknown) => {
+      const text = JSON.stringify(body);
+      return [foreign.invoiceNumber, ID.contactF].filter((needle) => text.includes(needle));
+    };
+
+    const list = await api('get', '', ID.biz, ID.staff);
+    expect(list.status).toBe(200);
+    // RED-BEFORE (V1-44b head): invoice {invoiceNumber: B's, contactId: v44a_contactF, total: 100, status: 'SENT'}.
+    expect(list.body.items.find((n: any) => n.id === noteId)?.invoice).toBeNull();
+    expect(leaks(list.body)).toEqual([]);
+    expect(list.body.items.find((n: any) => n.id === own.id)?.invoice, "the business's own invoice still reads").toMatchObject({ status: 'SENT', contactId: ID.contact });
+
+    const one = await api('get', `/${noteId}`, ID.biz, ID.staff);
+    expect(one.status).toBe(200);
+    expect(one.body.invoice).toBeNull();
+    expect(leaks(one.body)).toEqual([]);
+    expect((await api('get', `/${own.id}`, ID.biz, ID.staff)).body.invoice).toMatchObject({ status: 'SENT' });
+
+    const patched = await api('patch', `/${noteId}`, ID.biz, ID.writer).send({ reason: 'v44a xread' });
+    expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+    expect(patched.body.invoice).toBeNull();
+    expect(leaks(patched.body)).toEqual([]);
+    const ownPatched = await api('patch', `/${own.id}`, ID.biz, ID.writer).send({ reason: 'v44a own' });
+    expect(ownPatched.body.invoice).toEqual({ invoiceNumber: (await invoiceRow(own.invoiceId)).invoiceNumber });
+
+    const deleted = await api('delete', `/${noteId}`, ID.biz, ID.writer);
+    expect(deleted.status, JSON.stringify(deleted.body)).toBe(200);
+    expect(leaks(deleted.body)).toEqual([]);
+    expect((await invoiceRow(foreignInv)).status, "B's invoice untouched").toBe('SENT');
+  });
+
+  // Outside the V1-44b write set (invoice-workflow.service.ts):
+  it.todo(
+    'CR-V44-2: reconcileFromCredits clears paidAt when a credited invoice returns to SENT or PARTIALLY_PAID (as reconcileIn does, D-14); it only ever stamps paidAt on a return to PAID (invoice-workflow.service.ts, outside the V1-44b write set; CreditNoteService writes no Invoice column, CN-12)',
+  );
+  it.todo(
+    "SEC-V44-6 (function half): InvoiceWorkflowService.reconcileFromCredits takes the businessId and looks the invoice up by { id, businessId } (invoice-workflow.service.ts, outside the V1-44b write set; its one caller, CreditNoteService, locks and reads the invoice in the note's business before calling it, CN-21)",
   );
 });

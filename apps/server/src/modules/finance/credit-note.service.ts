@@ -25,6 +25,17 @@ const D = Prisma.Decimal;
 const APPLIED_KIND = 'credit_note_applied';
 
 /**
+ * V1-44b review (SEC-V44b-R1, CRR-V44b-1): the credit note numbers a
+ * Drive-intake plan step mints for itself ('CN-DRIVE-<intakeFileId>-<index>',
+ * DriveIntakeOrchestrator). The step answers a note carrying its number as its
+ * own, so no member may create one: POST credit-notes refuses the prefix.
+ */
+export const RESERVED_CREDIT_NOTE_NUMBER_PREFIX = 'CN-DRIVE-';
+
+/** The invoice summary the credit-note reads answer (list, detail): always read in the note's business. */
+const INVOICE_SUMMARY = { invoiceNumber: true, contactId: true, total: true, status: true } as const;
+
+/**
  * Credit notes against an invoice (CF-42, V1-44-DM-CREDIT-NOTE, owner ruling
  * D-28). Applying a note posts a REVERSAL of kind credit_note_applied through
  * the ledger door (Dr revenue, pro rata over the invoice's recognition, / Cr
@@ -43,21 +54,38 @@ export class CreditNoteService {
     @Inject(forwardRef(() => InvoiceWorkflowService)) private readonly workflow: InvoiceWorkflowService,
   ) {}
 
+  /**
+   * V1-44b review (SEC-V44b-R3): the note's invoice is read in the note's
+   * business, never through the relation alone. The schema does not tie
+   * credit_notes.business_id to the invoice's, so a note whose invoiceId names
+   * another tenant's invoice (legacy or seeded rows, CN-21) answered that
+   * tenant's invoiceNumber, contactId, total and status to any revenue:read
+   * member; such a note now answers `invoice: null`.
+   */
   async list(businessId: string) {
-    return this.prisma.client.creditNote.findMany({
+    const notes = await this.prisma.client.creditNote.findMany({
       where: { businessId },
       orderBy: { createdAt: 'desc' },
-      include: { invoice: { select: { invoiceNumber: true, contactId: true, total: true, status: true } } },
     });
+    const invoiceIds = [...new Set(notes.map((n) => n.invoiceId))];
+    const invoices = invoiceIds.length
+      ? await this.prisma.client.invoice.findMany({
+          where: { id: { in: invoiceIds }, businessId },
+          select: { id: true, ...INVOICE_SUMMARY },
+        })
+      : [];
+    const byId = new Map(invoices.map(({ id, ...summary }) => [id, summary]));
+    return notes.map((n) => ({ ...n, invoice: byId.get(n.invoiceId) ?? null }));
   }
 
   async get(businessId: string, id: string) {
-    const cn = await this.prisma.client.creditNote.findFirst({
-      where: { id, businessId },
-      include: { invoice: { select: { invoiceNumber: true, contactId: true, total: true, status: true } } },
-    });
+    const cn = await this.prisma.client.creditNote.findFirst({ where: { id, businessId } });
     if (!cn) throw new NotFoundException('Credit note not found');
-    return cn;
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { id: cn.invoiceId, businessId },
+      select: INVOICE_SUMMARY,
+    });
+    return { ...cn, invoice };
   }
 
   async create(businessId: string, input: CreateCreditNoteInput) {
@@ -108,15 +136,16 @@ export class CreditNoteService {
     // V1-44: compare-and-set on DRAFT, so a PATCH racing an apply cannot change
     // the amount of a note whose posting is already written.
     try {
-      return await this.prisma.client.creditNote.update({
+      const updated = await this.prisma.client.creditNote.update({
         where: { id, status: 'DRAFT' },
         data: {
           ...(input.amount !== undefined && { amount: new D(String(input.amount)) }),
           ...(input.reason !== undefined && { reason: input.reason }),
           ...(input.items !== undefined && { items: input.items as unknown as Prisma.InputJsonValue }),
         },
-        include: { invoice: { select: { invoiceNumber: true } } },
       });
+      // V1-44b review (SEC-V44b-R3): the invoice number only from this business's invoice.
+      return { ...updated, invoice: cn.invoice ? { invoiceNumber: cn.invoice.invoiceNumber } : null };
     } catch (err) {
       if ((err as { code?: string } | null)?.code === 'P2025') throw new BadRequestException('Can only update draft credit notes');
       throw err;
@@ -144,15 +173,22 @@ export class CreditNoteService {
    * from the ingestion auto-execute, 'user' from the data-inbox fallback, KEY's
    * 'key_ai'), so the posting's createdById is always that member and a credit
    * read from a document never posts without one.
+   *
+   * V1-44b review (SEC-V44b-R1): `opts.expectedAmount` is the amount the
+   * caller approved (a Drive-intake plan step). The note's amount is read as
+   * claimed, so a note PATCHed after the caller read it is refused 409 with
+   * nothing written, rather than posted in the approver's name at an amount
+   * the approver never saw.
    */
-  async apply(businessId: string, id: string, opts: { userId?: string | null } = {}) {
+  async apply(businessId: string, id: string, opts: { userId?: string | null; expectedAmount?: number | string } = {}) {
     await this.assertMemberMayApply(businessId, opts.userId);
     const cn = await this.get(businessId, id);
     if (cn.status !== 'DRAFT') throw new BadRequestException('Credit note already applied or voided');
 
     return this.prisma.client.$transaction(async (t) => {
       const tx = t as unknown as Prisma.TransactionClient;
-      await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${cn.invoiceId} FOR NO KEY UPDATE`;
+      // V1-44b (SEC-V44-6): only this business's invoice is locked (the lookup below refuses any other).
+      await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${cn.invoiceId} AND business_id = ${businessId} FOR NO KEY UPDATE`;
 
       const appliedAt = new Date();
       const claimed = await tx.creditNote.updateMany({
@@ -163,6 +199,11 @@ export class CreditNoteService {
       // The amount as claimed: a PATCH committed since `get` is in it, a later one is refused.
       const note = await tx.creditNote.findFirst({ where: { id: cn.id, businessId }, select: { amount: true } });
       const amount = new D(String(note?.amount ?? cn.amount));
+      if (opts.expectedAmount !== undefined && !amount.equals(new D(String(opts.expectedAmount)))) {
+        throw new ConflictException(
+          `Credit note ${cn.creditNoteNumber} credits ${amount.toString()}, not the approved ${String(opts.expectedAmount)}; it is not applied`,
+        );
+      }
 
       const invoice = await tx.invoice.findFirst({ where: { id: cn.invoiceId, businessId }, select: { total: true } });
       if (!invoice) throw new BadRequestException('Invoice not found');
@@ -198,15 +239,22 @@ export class CreditNoteService {
 
       const totalRevenue = revEntries.reduce((sum, e) => sum.add(new D(String(e.credit))), new D(0));
 
-      // Pro-rate credit note amount across revenue accounts
+      // Pro-rate credit note amount across revenue accounts.
+      // V1-44b (CR-V44-3): each share but the last is rounded DOWN to whole
+      // cents, so the shares before the last never exceed their exact part and
+      // the last (the remainder) is always above 0 for a positive amount; a
+      // share that rounds to no cent posts no leg (validatePosting refuses a
+      // zero line, and a 0.01 credit across two splits rounded the first up
+      // to 0.01 and left the last 0).
       const postingEntries: PostingInput['entries'] = [];
       let allocated = new D(0);
       for (let i = 0; i < revEntries.length; i++) {
         const entry = revEntries[i];
         const share = i === revEntries.length - 1
           ? amount.sub(allocated) // last entry gets remainder to avoid rounding drift
-          : amount.mul(new D(String(entry.credit))).div(totalRevenue).toDecimalPlaces(2); // whole cents (D-13), so the stored entries balance
+          : amount.mul(new D(String(entry.credit))).div(totalRevenue).toDecimalPlaces(2, D.ROUND_DOWN); // whole cents (D-13), so the stored entries balance
         allocated = allocated.add(share);
+        if (!share.greaterThan(0)) continue;
         postingEntries.push({
           accountId: entry.accountId,
           debit: share,
@@ -263,7 +311,16 @@ export class CreditNoteService {
 
     return this.prisma.client.$transaction(async (t) => {
       const tx = t as unknown as Prisma.TransactionClient;
-      await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${cn.invoiceId} FOR NO KEY UPDATE`;
+      // V1-44b (SEC-V44-6): the note's invoice must be this business's own.
+      // The schema does not tie credit_notes.business_id to the invoice's, and
+      // reconcileFromCredits looks the invoice up by id alone, so a note whose
+      // invoiceId names another tenant's invoice (legacy or seeded rows;
+      // create() cannot make one) let this tenant's void move that invoice.
+      // The lock and the lookup carry businessId; any other invoice is
+      // refused 400 (as apply refuses it) before anything is written.
+      await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${cn.invoiceId} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+      const invoice = await tx.invoice.findFirst({ where: { id: cn.invoiceId, businessId }, select: { status: true } });
+      if (!invoice) throw new BadRequestException('Invoice not found');
 
       const voided = await tx.creditNote.updateMany({
         where: { id: cn.id, businessId, status: cn.status },
@@ -289,7 +346,16 @@ export class CreditNoteService {
             tx,
           );
         }
-        await this.workflow.reconcileFromCredits(cn.invoiceId, { tx });
+        // V1-44b (CR-V44-4): a credit note never moves a DRAFT or VOID invoice
+        // (CREDIT_TRANSITIONS has no move out of either). An invoice the AI
+        // undo returned to DRAFT while notes were applied (UNDO_RETURNS_TO_DRAFT
+        // takes the credited states) kept its status, and with another note
+        // still applied the workflow refused DRAFT -> PARTIALLY_CREDITED 409, so
+        // no note on it could be voided. The note is voided and its posting
+        // reversed; the invoice keeps the status the undo gave it.
+        if (invoice.status !== 'DRAFT' && invoice.status !== 'VOID') {
+          await this.workflow.reconcileFromCredits(cn.invoiceId, { tx });
+        }
       }
 
       return tx.creditNote.findFirst({ where: { id: cn.id, businessId } });
@@ -321,8 +387,12 @@ export class CreditNoteService {
    * UndoService do. A membership is required (no SUPER_ADMIN bypass, D-46), so
    * an absent actor and the placeholders that are no User id ('system',
    * 'user', 'key_ai') have none and are refused.
+   *
+   * V1-44b review (SEC-V44b-R2): public so a caller that will apply a note
+   * for a member (the Drive-intake approval) refuses before it writes
+   * anything, with the same rule apply itself enforces.
    */
-  private async assertMemberMayApply(businessId: string, userId: string | null | undefined): Promise<void> {
+  async assertMemberMayApply(businessId: string, userId: string | null | undefined): Promise<void> {
     if (!userId) throw new ForbiddenException('A member with revenue write access must apply this credit note');
     const membership = await this.prisma.client.membership.findUnique({
       where: { userId_businessId: { userId, businessId } },
