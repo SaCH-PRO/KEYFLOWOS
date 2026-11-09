@@ -424,22 +424,26 @@ function createDateMaterial(value: Date | string | null | undefined): string | n
 class CreateSlotTaken extends Error {}
 
 /**
- * W3-V1-45c-EVENT-REPLAY (V1-45b review SEC-V45b-1 / CR-V45b-1, D-15): the
- * documents a create answered from a used or taken slot (a keyed replay, or a
- * concurrent create that lost the slot). A WeakSet, not a field: the document
- * the caller gets is unchanged, and the mark goes with that object only.
+ * W3-V1-45c-EVENT-REPLAY (V1-45b review SEC-V45b-1 / CR-V45b-1; review
+ * CR-V45c-1; D-15): the business event claim of each document a keyed create
+ * answered, whichever door answered it: the create that wrote it, a keyed
+ * replay, or a concurrent create that lost the slot. A WeakMap, not a field:
+ * the document the caller gets is unchanged, and the claim goes with that
+ * object only.
  */
-const createReplays = new WeakSet<object>();
+const createEventClaims = new WeakMap<object, () => Promise<boolean>>();
 
 /**
- * Whether this document is a create's idempotent replay answer: it was
- * created by an earlier (or concurrent) request under the same key, and this
- * call wrote nothing. The HTTP create routes hand it to the business event
- * audit (markIdempotentReplay), so a replay is not a second invoice.create /
- * quote.create.
+ * The claim on the one invoice.create / quote.create business event of the
+ * document a keyed create answered; undefined for a create without a key
+ * (always a new document, audited as before). The HTTP create routes hand it
+ * to the business event audit (auditOnClaim): of every request answered with
+ * the document, the first to reach the audit writes the event and the others
+ * write none, so a replay is not a second event and a create that failed
+ * after its commit does not leave the document with none (CR-V45c-1).
  */
-export function isCreateReplay(document: unknown): boolean {
-  return typeof document === 'object' && document !== null && createReplays.has(document);
+export function createEventClaim(document: unknown): (() => Promise<boolean>) | undefined {
+  return typeof document === 'object' && document !== null ? createEventClaims.get(document) : undefined;
 }
 
 function idempotencyKeyReused(kind: CreateKind): ConflictException {
@@ -906,9 +910,10 @@ export class CommerceService {
    * a slot whose document was deleted since answers 409 too
    * (idempotency_key_spent), never a second document.
    *
-   * W3-V1-45c-EVENT-REPLAY: the document it answers is marked a replay
-   * (isCreateReplay), on both doors that reach here: a retry that finds the
-   * slot used, and a concurrent create that lost it (takenCreateSlot).
+   * W3-V1-45c-EVENT-REPLAY: the document it answers carries its slot's
+   * business event claim (createEventClaim), on both doors that reach here: a
+   * retry that finds the slot used, and a concurrent create that lost it
+   * (takenCreateSlot).
    */
   private async usedCreateSlot<D extends object>(
     businessId: string,
@@ -924,7 +929,32 @@ export class CommerceService {
     const id = (row.response as Record<string, unknown> | null)?.[kind === 'invoice' ? 'invoiceId' : 'quoteId'];
     const document = typeof id === 'string' ? await load(id) : null;
     if (!document) throw idempotencyKeySpent(kind);
-    createReplays.add(document);
+    return this.withCreateEventClaim(document, businessId, claim);
+  }
+
+  /**
+   * W3-V1-45c-EVENT-REPLAY review CR-V45c-1 (D-15): bind the document a keyed
+   * create answers to its slot's business event claim (createEventClaim). The
+   * claim marks the slot's idempotency_keys row (`response.businessEvent`) in
+   * one conditional UPDATE, so of every request answered with the document,
+   * concurrent or later, exactly one wins it: a concurrent UPDATE waits on the
+   * row lock and then finds the mark. A request that never reaches the audit
+   * (it failed after the document committed) never claims, so its retry, or a
+   * loser of its burst, still writes the event. The slot's invoiceId / quoteId
+   * are kept; nothing else reads the mark.
+   */
+  private withCreateEventClaim<D extends object>(document: D, businessId: string, claim: CreateClaim): D {
+    createEventClaims.set(document, async () => {
+      const won = await this.prisma.client.$executeRaw`
+        UPDATE idempotency_keys
+           SET response = COALESCE(response, '{}'::jsonb) || jsonb_build_object('businessEvent', true),
+               updated_at = now()
+         WHERE business_id = ${businessId}
+           AND idempotency_key = ${claim.slot}
+           AND status = 'completed'
+           AND (response -> 'businessEvent') IS NULL`;
+      return won === 1;
+    });
     return document;
   }
 
@@ -1068,6 +1098,8 @@ export class CommerceService {
       if (claim && err instanceof CreateSlotTaken) return this.takenCreateSlot(input.businessId, 'invoice', claim, loadCreated);
       throw err;
     }
+    // W3-V1-45c-EVENT-REPLAY review CR-V45c-1: the create that wrote it claims its one event too.
+    if (claim) this.withCreateEventClaim(invoice, input.businessId, claim);
     this.events.emit('invoice.created', {
       invoice,
       businessId: input.businessId,
@@ -3055,6 +3087,8 @@ export class CommerceService {
       if (claim && err instanceof CreateSlotTaken) return this.takenCreateSlot(input.businessId, 'quote', claim, loadCreated);
       throw err;
     }
+    // W3-V1-45c-EVENT-REPLAY review CR-V45c-1: the create that wrote it claims its one event too.
+    if (claim) this.withCreateEventClaim(quote, input.businessId, claim);
     this.events.emit('quote.created', { quote, businessId: input.businessId } as QuoteCreatedPayload);
     if (input.contactId) {
       await this.crm.logContactEvent({
