@@ -623,6 +623,11 @@
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
     },
     {
+      "prefix": "v84p_",
+      "owner": "apps/server/test/key-chat-ops-scope.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
