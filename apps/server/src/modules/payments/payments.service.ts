@@ -3,13 +3,14 @@ import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
-import { InvoiceWorkflowService, computeBalance, isShareableInvoiceStatus } from '../commerce/invoice-workflow.service';
+import { InvoiceWorkflowService, balanceOfStoredRows, isShareableInvoiceStatus, ownTenantPayments } from '../commerce/invoice-workflow.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { normalizeCurrency } from '../finance/posting.service';
 import { fromCents, subtractMoney, toCents } from '../commerce/money';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
 import { WIPAY_CURRENCY, resolveWipayMerchant, wipayMerchantComplete, wipayTakesCurrency } from '../../core/connectors/implementations/wipay-merchant';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
+import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { StoreOrderService, isClosedStorefrontOrder } from '../site/store-order.service';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
 
@@ -66,6 +67,55 @@ type ProviderRefund = { providerPaymentId: string; provider: string; currency: s
 const SYNTHETIC_REFUND_ID_PREFIX = 're_synth_';
 /** The providerPaymentId prefix of a manual refund row (CommerceService.markPaymentRefunded). */
 const MANUAL_REFUND_ID_PREFIX = 'manual_refund_';
+/**
+ * FOLLOW3-A3-REFUND-DOOR-TENANCY: the providerPaymentId prefix of every
+ * hand-recorded payment (CommerceService.recordPayment: the manual payment
+ * route, KEY processPayment, the evidence confirm, mark-paid).
+ */
+const MANUAL_PAYMENT_ID_PREFIX = 'manual_';
+
+/**
+ * R0-20c: the Stripe event types the door records as a payment of an invoice or a storefront order.
+ * R0-20c review (SEC-R020C-2): checkout.session.async_payment_succeeded is the one that settles a
+ * session completed with a delayed payment method (payment_status 'unpaid'), so it is bound too.
+ */
+const STRIPE_PAYMENT_EVENTS = new Set([
+  'checkout.session.completed',
+  'checkout.session.async_payment_succeeded',
+  'charge.succeeded',
+  'payment_intent.succeeded',
+]);
+/**
+ * R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2, as the legacy route's
+ * SEC-R020B-3): the webhook_events provider under which the door keeps a
+ * payment event it refused, one row per Stripe event id (a retry adds none),
+ * with the business of the invoice or order it named and `<type>:<reason>` as
+ * its event type. It is not the door's dedupe claim (provider 'stripe').
+ */
+const STRIPE_REFUSED_PROVIDER = 'stripe-refused';
+/** R0-20c: the fields of a Stripe session, charge or payment intent the door's binding reads. */
+type StripePaymentObject = {
+  metadata?: Record<string, unknown> | null;
+  client_reference_id?: unknown;
+  amount_total?: unknown;
+  amount_received?: unknown;
+  amount?: unknown;
+  currency?: unknown;
+  payment_link?: unknown;
+};
+
+/**
+ * R0-20c review (SEC-R020C-2): whether a Checkout Session has taken its money.
+ * A session completed with a delayed payment method arrives with payment_status
+ * 'unpaid' (the money is due, not taken) and is settled later by
+ * checkout.session.async_payment_succeeded ('paid') or failed by
+ * checkout.session.async_payment_failed. Stripe always sends payment_status on
+ * a session; a charge or payment intent event carries none and is taken by its
+ * type (succeeded).
+ */
+function stripeSessionTookMoney(obj: { payment_status?: unknown } | null | undefined): boolean {
+  return obj?.payment_status === undefined || obj.payment_status === 'paid';
+}
 
 @Injectable()
 export class PaymentsService {
@@ -79,6 +129,8 @@ export class PaymentsService {
     @Optional() @Inject(WiPayConnector) private readonly wipayConnector?: WiPayConnector,
     @Optional() @Inject(PayPalConnector) private readonly paypalConnector?: PayPalConnector,
     @Optional() @Inject(forwardRef(() => StoreOrderService)) private readonly storeOrderService?: StoreOrderService,
+    // FOLLOW3-A3 (D-56): the provider read that binds a platform-signed refund to its business.
+    @Optional() @Inject(StripeConnector) private readonly stripeConnector?: StripeConnector,
   ) {}
 
   /**
@@ -787,6 +839,12 @@ export class PaymentsService {
       throw new BadRequestException('Invalid Stripe webhook signature');
     }
 
+    // R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2): a payment event is bound
+    // to the invoice or storefront order it names before the dedupe claim, so a
+    // refused one writes nothing (no payment, no posting, no claim). The legacy
+    // POST /webhooks/stripe hands its verified events here too.
+    if (STRIPE_PAYMENT_EVENTS.has(eventType)) await this.bindStripePaymentEvent(event, signedForBusinessId);
+
     // Provider-event-id idempotency: if Stripe re-delivers this `evt_...`,
     // ack it as received but skip all side-effects. Belt-and-suspenders with
     // the per-Payment.providerPaymentId unique constraint downstream.
@@ -806,9 +864,18 @@ export class PaymentsService {
     return this.underProviderEventClaim<WebhookAck>('stripe', event.id, async () => {
       switch (eventType) {
         case 'checkout.session.completed':
+        case 'checkout.session.async_payment_succeeded':
           // Note: Stripe Payment Links surface as `checkout.session.completed`
           // events with `payment_link` set on the session — there is no
           // separate `payment_link.completed` event in the Stripe API.
+          // R0-20c review (SEC-R020C-2): a session that has not taken its
+          // money (payment_status 'unpaid': a delayed payment method) records
+          // nothing; its async_payment_succeeded records it, and an
+          // async_payment_failed (acknowledged below) has nothing to undo.
+          if (!stripeSessionTookMoney(obj)) {
+            this.logger.log(`Stripe ${eventType} ${event.id ?? ''} is ${String(obj?.payment_status)}; nothing recorded until it is paid`);
+            return { ok: true, received: true };
+          }
           await this.processStripeChargeOrSession(eventType, obj, event.id);
           return { ok: true, received: true, processed: eventType };
         case 'charge.succeeded':
@@ -824,6 +891,113 @@ export class PaymentsService {
           return { ok: true, received: true };
       }
     });
+  }
+
+  /**
+   * R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2; the binding R0-20b gave the
+   * legacy route alone). A verified event the door would record as a payment
+   * must be one made for the invoice or storefront order it names; the id is
+   * read exactly as processStripeChargeOrSession reads it.
+   *
+   * Invoice X (createStripeCheckout): the business is X's. metadata.businessId,
+   * when the event carries one, is X's business; a platform-signed event (a
+   * session, Payment Link or not, a charge or a payment intent) must carry it
+   * (R0-20c review SEC-R020C-1, as the legacy route); a delivery a tenant
+   * signed with its own secret speaks for that tenant only.
+   * The currency is X's and the amount a positive number of minor units. The
+   * amount recorded is the one the event carries (D-05, R0-20b review
+   * CR-R020B-1), never a fallback to X's total.
+   *
+   * Storefront order O (createStorePayment): the door settles O for its whole
+   * total, so the event must name O in metadata.orderId and O's business in
+   * metadata.businessId and carry exactly O's total in O's currency.
+   *
+   * Anything else is refused (400) before the dedupe claim, so nothing is
+   * written, and the refusal is kept as one webhook_events row. An id that is
+   * neither is left to the dispatch, which records nothing for it.
+   */
+  private async bindStripePaymentEvent(
+    event: { id?: string; type?: string; data?: { object?: unknown } },
+    signedForBusinessId: string | null,
+  ): Promise<void> {
+    const obj = (event.data?.object ?? {}) as StripePaymentObject;
+    const id: unknown = obj.metadata?.invoiceId || obj.client_reference_id || obj.metadata?.invoice_id;
+    if (!id || typeof id !== 'string') return;
+    const amountMinor: unknown = obj.amount_total ?? obj.amount_received ?? obj.amount;
+    const positiveAmount = typeof amountMinor === 'number' && Number.isFinite(amountMinor) && amountMinor > 0;
+    const currency = normalizeCurrency(typeof obj.currency === 'string' ? obj.currency : null);
+    const namedBusiness: unknown = obj.metadata?.businessId;
+
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id },
+      select: { businessId: true, currency: true },
+    });
+    if (invoice) {
+      // R0-20c review (SEC-R020C-1): a platform-signed event must name the
+      // invoice's business, as the legacy route demands of the same verified
+      // event (webhooks.controller.ts bindLegacyStripeEvent). Every session
+      // KeyFlow makes names it (createStripeCheckout, createStorePayment, a
+      // Payment Link's metadata), and Stripe does not copy a session's
+      // metadata onto its PaymentIntent or Charge, so one naming no business
+      // is not KeyFlow's: its client_reference_id or metadata.invoiceId is
+      // the payer's or another account's choice.
+      const foreign =
+        (signedForBusinessId !== null && signedForBusinessId !== invoice.businessId) ||
+        (namedBusiness != null ? namedBusiness !== invoice.businessId : signedForBusinessId === null);
+      const reason = foreign
+        ? 'business'
+        : currency === '' || currency !== normalizeCurrency(invoice.currency)
+          ? 'currency'
+          : !positiveAmount
+            ? 'amount'
+            : null;
+      if (reason) await this.refuseStripePaymentEvent(event, { kind: 'invoice', id, businessId: invoice.businessId }, reason);
+      return;
+    }
+
+    const order = await this.prisma.client.marketplaceOrder.findUnique({
+      where: { id },
+      select: { id: true, businessId: true, total: true, currency: true },
+    });
+    if (!order) return;
+    const reason =
+      obj.metadata?.orderId !== order.id
+        ? 'order'
+        : namedBusiness !== order.businessId
+          ? 'business'
+          : currency === '' || currency !== normalizeCurrency(order.currency)
+            ? 'currency'
+            : !positiveAmount || amountMinor !== Math.round(Number(order.total) * 100)
+              ? 'amount'
+              : null;
+    if (reason) await this.refuseStripePaymentEvent(event, { kind: 'order', id, businessId: order.businessId }, reason);
+  }
+
+  /** R0-20c: keeps the refusal (one webhook_events row per event id), then refuses the delivery: 400, nothing recorded. */
+  private async refuseStripePaymentEvent(
+    event: { id?: string; type?: string },
+    target: { kind: 'invoice' | 'order'; id: string; businessId: string },
+    reason: string,
+  ): Promise<never> {
+    this.logger.warn(`Stripe ${event.type} ${event.id ?? '(no event id)'} refused: its ${reason} does not match ${target.kind} ${target.id}`);
+    if (event.id) {
+      try {
+        await this.prisma.client.webhookEvent.create({
+          data: {
+            provider: STRIPE_REFUSED_PROVIDER,
+            providerEventId: event.id,
+            eventType: `${event.type}:${reason}`,
+            businessId: target.businessId,
+          },
+        });
+      } catch (e: unknown) {
+        // A retry of an event already kept (unique provider + event id) adds nothing.
+        if ((e as { code?: string } | null)?.code !== 'P2002') {
+          this.logger.error(`Stripe refusal of ${event.id} could not be kept: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+    throw new BadRequestException(`Stripe event does not match the ${target.kind}`);
   }
 
   private async processStripeChargeOrSession(
@@ -972,6 +1146,8 @@ export class PaymentsService {
       });
     }
 
+    // FOLLOW3-A3 (D-56): the provider's answer per business and charge, read once per event.
+    const ownsCharge = new Map<string, boolean>();
     for (const refund of refunds) {
       if (!refund.charge || (!refund.cumulative && !refund.id)) continue;
       const charge = refund.charge;
@@ -996,23 +1172,33 @@ export class PaymentsService {
       // tenant is not found, and nothing is written or reversed.
       // V1-29c: only a SUCCESSFUL payment is an original; a refund row
       // carries its original's id in reference and must never match.
+      // FOLLOW3-A3-REFUND-DOOR-TENANCY: a hand-recorded row (recordedBy set,
+      // or a manual_ id: the manual payment route, KEY processPayment, the
+      // evidence confirm, which store the method typed as provider and any
+      // reference) is no provider evidence (the V1-15d rule of payments-ops):
+      // it is never an original and never an ambiguity witness below, so a
+      // member who typed another tenant's charge or payment_intent can neither
+      // take that tenant's refund nor block it. Rows the provider's own
+      // deliveries wrote (recordedBy null, the provider's id) stay originals.
       const lookupIds = [charge, refund.paymentIntent].filter((v): v is string => !!v);
-      const originalWhere = {
+      const originalWhere: Prisma.PaymentWhereInput = {
         provider: 'stripe',
         status: 'SUCCESSFUL',
+        recordedBy: null,
+        NOT: { providerPaymentId: { startsWith: MANUAL_PAYMENT_ID_PREFIX } },
         ...(signedForBusinessId ? { businessId: signedForBusinessId } : {}),
         OR: [
           { providerPaymentId: { in: lookupIds } },
           { reference: { in: lookupIds } },
         ],
       };
-      const original = await this.prisma.client.payment.findFirst({
+      const found: RefundOriginal | null = await this.prisma.client.payment.findFirst({
         where: originalWhere,
         orderBy: { createdAt: 'asc' },
         select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
       }).catch(() => null);
 
-      if (!original) {
+      if (!found) {
         this.logger.warn(
           `Stripe ${eventType} could not locate original payment for charge ${charge} (pi=${refund.paymentIntent ?? 'none'})` +
             `${signedForBusinessId ? ` of business ${signedForBusinessId}, whose secret signed it` : ''}; skipping`,
@@ -1029,7 +1215,16 @@ export class PaymentsService {
       // tenant's refund into another tenant's books. Not caught: a failed
       // read fails the delivery (its claim is released) rather than letting
       // an ambiguous refund through.
-      if (!signedForBusinessId) {
+      // FOLLOW3-A3 (owner ruling D-56): with the Stripe connector (always, as
+      // the container builds this service) the provider's record binds the
+      // refund to its business instead (platformRefundOriginal), whether one
+      // business matches or several; the rule above holds for a service built
+      // without it.
+      const original = !signedForBusinessId && this.stripeConnector
+        ? await this.platformRefundOriginal(eventType, charge, refund.paymentIntent ?? null, originalWhere, ownsCharge)
+        : found;
+      if (!original) continue;
+      if (!signedForBusinessId && !this.stripeConnector) {
         const other = await this.prisma.client.payment.findFirst({
           where: { ...originalWhere, businessId: { not: original.businessId } },
           select: { id: true, businessId: true },
@@ -1068,6 +1263,105 @@ export class PaymentsService {
         });
       }
     }
+  }
+
+  /**
+   * FOLLOW3-A3-REFUND-DOOR-TENANCY (owner ruling D-56): the payment a Stripe
+   * refund event verified by the deployment's own secret refunds. Such an
+   * event carries no owner tag (a Refund object has no charge metadata;
+   * createStripeCheckout tags the Checkout Session, not the charge), and a
+   * row of another business can name its ids: a tenant records any
+   * payment_intent in the reference of a payment it signs for itself with its
+   * own secret, and Payment does not store which secret verified it. So the
+   * provider's record decides: StripeConnector.isOwnCharge reads the charge
+   * (then the Checkout Session of its payment_intent) and says whether the
+   * platform tagged it with a business. Of the businesses whose payments
+   * match (`originalWhere`), the one it names is the refund's, its oldest
+   * matching payment the original. When it names none of them, or more than
+   * one, nothing is written and the refusal is logged: a refund is never
+   * booked into, or blocked by, another tenant's self-signed row. A failed
+   * read is not caught: the delivery fails (its claim is released) and Stripe
+   * delivers it again. `owns` keeps the answer per business and charge, so a
+   * charge.refunded listing several refunds reads the provider once.
+   *
+   * Review SEC-A3-1/2, CR-A3-2: such an event is about a charge on the
+   * platform account, so only a business that takes Stripe payments there (no
+   * Stripe key of its own, onPlatformAccount) is asked. For a business with
+   * its own key, isOwnCharge reads that business's own account with that key
+   * and counts that business's own rows (which a delivery it signs itself
+   * writes) as proof: its answer, or its failure, is never the platform's
+   * record, and asking it would let a tenant fail every delivery of another
+   * tenant's refund (an invalid key) or claim or block it (a self-signed row
+   * naming the charge). A business that saves a key of its own while it is
+   * being asked is treated the same: its answer does not count and its failed
+   * read does not fail the delivery. Residual (review CR-A3-1): a payment a
+   * business took on the platform account before it saved its own key is not
+   * bound either; the refund is refused and logged, as StripeConnector has no
+   * platform-account read for such a business.
+   */
+  private async platformRefundOriginal(
+    eventType: string,
+    charge: string,
+    paymentIntent: string | null,
+    originalWhere: Prisma.PaymentWhereInput,
+    owns: Map<string, boolean>,
+  ): Promise<RefundOriginal | null> {
+    const connector = this.stripeConnector;
+    if (!connector) return null;
+    const matches = await this.prisma.client.payment.findMany({
+      where: originalWhere,
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
+    });
+    const businesses = [...new Set(matches.map((m) => m.businessId))];
+    const onPlatform = await this.onPlatformAccount(businesses);
+    const owners: string[] = [];
+    for (const businessId of businesses) {
+      if (!onPlatform.has(businessId)) continue;
+      const key = `${businessId} ${charge}`;
+      let own = owns.get(key);
+      if (own === undefined) {
+        own = await connector.isOwnCharge(businessId, charge).catch(async (err: unknown) => {
+          // A read on the platform account failed: the delivery fails. A read
+          // on a key the business saved meanwhile is no answer at all.
+          if ((await this.onPlatformAccount([businessId])).has(businessId)) throw err;
+          return false;
+        });
+        owns.set(key, own);
+      }
+      if (own) owners.push(businessId);
+    }
+    // An owner that saved a key of its own while it was asked answered from its own account.
+    const stillOnPlatform = owners.length > 0 ? await this.onPlatformAccount(owners) : new Set<string>();
+    const confirmed = owners.filter((b) => stillOnPlatform.has(b));
+    if (confirmed.length !== 1) {
+      const notAsked = businesses.filter((b) => !onPlatform.has(b) || (owners.includes(b) && !stillOnPlatform.has(b)));
+      this.logger.warn(
+        `Stripe ${eventType} for charge ${charge} (pi=${paymentIntent ?? 'none'}) matches payments of ${businesses.join(', ')}, ` +
+          `but the platform account's record of the charge names ${confirmed.length ? `more than one of them (${confirmed.join(', ')})` : 'none of them'}` +
+          `${notAsked.length ? ` (not asked, as they hold a Stripe key of their own: ${notAsked.join(', ')})` : ''}; ` +
+          'refusing to record it',
+      );
+      return null;
+    }
+    return matches.find((m) => m.businessId === confirmed[0]) ?? null;
+  }
+
+  /**
+   * Review SEC-A3-1: of `businessIds`, the ones that take Stripe payments on
+   * the platform account, i.e. hold no Stripe key of their own (the rule by
+   * which StripeConnector.resolveKey, createStripeCheckout and the gateway
+   * list choose the deployment's STRIPE_SECRET_KEY).
+   */
+  private async onPlatformAccount(businessIds: string[]): Promise<Set<string>> {
+    if (businessIds.length === 0) return new Set();
+    const rows = await this.prisma.client.business.findMany({
+      where: { id: { in: businessIds } },
+      select: { id: true, metaData: true },
+    });
+    return new Set(
+      rows.filter((b) => !(b.metaData as Record<string, unknown> | null)?.stripeSecretKey).map((b) => b.id),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -1481,22 +1775,34 @@ export class PaymentsService {
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
       select: {
+        businessId: true,
         status: true,
         total: true,
         currency: true,
-        payments: { select: { amount: true, status: true, createdAt: true } },
+        payments: { select: { amount: true, status: true, createdAt: true, businessId: true } },
       },
     });
     if (!invoice || !isShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Invoice not found');
-    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    // DEP-R3-OWN-ROW-READS (D-75): the invoice's own-tenant rows (M31), as the
+    // pay page's intent decides from them: a row of another business told the
+    // customer nothing was due (RC2-DEP-1) and dated a payment the business
+    // never received.
+    const own = ownTenantPayments(invoice);
+    // FOLLOW3-A4-PUBLIC-PAID-NET (CR-29b-1): the stored rows as every balance
+    // reader reads them (balanceOfStoredRows: a pre-V1-29 flipped REFUNDED row
+    // is its payment plus its refund, not a refund subtracted twice), and
+    // `paid` is the net received, max(0, net), the figure the public receipt
+    // and the token view state. It was computeBalance's gross: 60 + 40 paid
+    // with the 40 refunded polled "paid 100" beside a receipt of 60.
+    const balance = balanceOfStoredRows(Number(invoice.total), own, invoice.currency);
     let lastPaymentAt: Date | null = null;
-    for (const p of invoice.payments) {
+    for (const p of own) {
       if (p.status !== 'SUCCESSFUL') continue;
       if (!lastPaymentAt || p.createdAt > lastPaymentAt) lastPaymentAt = p.createdAt;
     }
     return {
       status: invoice.status,
-      paid: balance.paid,
+      paid: Math.max(0, balance.net),
       remaining: balance.remaining,
       currency: invoice.currency,
       lastPaymentAt,

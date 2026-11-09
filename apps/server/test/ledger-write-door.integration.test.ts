@@ -142,6 +142,19 @@
  *   LWD-27  AP aging reads every AP entry and every bill past the cap: 1001
  *           open bills age into their bucket in full (at cb50b388: 1000)
  *
+ *   R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2):
+ *
+ *   LWD-28  the Stripe ledger door binds a platform-signed checkout session to
+ *           its invoice: one naming another business in metadata.businessId (the
+ *           review's repro: business A's session, 1 TTD, client_reference_id =
+ *           bizBind's invoice), another currency, or no or a non-positive amount
+ *           is refused (400) and writes no Payment, no posting and no dedupe
+ *           claim in either business (each refusal kept as one webhook_events
+ *           row, provider stripe-refused); the matching session writes exactly
+ *           one Payment and exactly one Payment:<id>:payment_recorded posting,
+ *           balanced, and its redelivery writes nothing. At the R0-20c base the
+ *           repro recorded a 1 TTD stripe payment on bizBind's invoice
+ *
  *   TB-01  trial balance after payments (two currencies), a refund and an
  *           expense void: sum(debit) = sum(credit) per currency, every
  *           transaction balanced, entry currency = transaction currency
@@ -244,6 +257,11 @@ const ID = {
   vendorBreak: `${P}vendorBreak`,
   projectBreak: `${P}projectBreak`,
   productBreak: `${P}productBreak`,
+  // R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2): the Stripe ledger door binds a session to its invoice
+  bizBind: `${P}bizBind`,
+  contactBind: `${P}contactBind`,
+  invBindRefused: `${P}invBindRefused`,
+  invBindPaid: `${P}invBindPaid`,
 };
 
 const TB_INVOICES: Array<{ id: string; total: number; currency: string }> = [
@@ -2124,6 +2142,109 @@ describe('V1-15c: the dimension breakdowns and AP aging read every ledger row, p
     expect(aging.vendors).toEqual([
       expect.objectContaining({ key: ID.vendorBreak, label: 'V15A Vendor', total: ROWS * 10, d1to30: ROWS * 10 }),
     ]);
+  });
+});
+
+describe('R0-20c (review SEC-R020B-2): the Stripe ledger door binds a platform-signed session to its invoice before anything is written', () => {
+  /** The deployment's Stripe webhook secret (STRIPE_WEBHOOK_SECRET), set only while these cases run. */
+  const PLATFORM_SECRET = `whsec_${P}platform_r020c`;
+  let previousSecret: string | undefined;
+
+  beforeAll(async () => {
+    previousSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    process.env.STRIPE_WEBHOOK_SECRET = PLATFORM_SECRET;
+    await seedTenant(ID.bizBind, 'CASH');
+    await db.contact.create({ data: { id: ID.contactBind, businessId: ID.bizBind, firstName: 'V15A', lastName: 'Bind', email: `${P}bind@test.local` } });
+    await seedInvoice(ID.invBindRefused, ID.bizBind, ID.contactBind, 60, 100, 'TTD', 'SENT');
+    await seedInvoice(ID.invBindPaid, ID.bizBind, ID.contactBind, 61, 100, 'TTD', 'SENT');
+  }, 60_000);
+
+  afterAll(() => {
+    if (previousSecret === undefined) delete process.env.STRIPE_WEBHOOK_SECRET;
+    else process.env.STRIPE_WEBHOOK_SECRET = previousSecret;
+  });
+
+  /** A checkout.session.completed for `invoiceId` as createStripeCheckout makes it (bizBind's, 100 TTD); `object` overrides fields. */
+  function session(tag: string, invoiceId: string, object: Record<string, unknown> = {}): string {
+    return JSON.stringify({
+      id: `${P}evt_bind_${tag}`,
+      type: 'checkout.session.completed',
+      data: {
+        object: {
+          id: `${P}cs_bind_${tag}`,
+          amount_total: 10000,
+          currency: 'ttd',
+          client_reference_id: invoiceId,
+          metadata: { invoiceId, businessId: ID.bizBind },
+          payment_intent: `${P}pi_bind_${tag}`,
+          ...object,
+        },
+      },
+    });
+  }
+
+  /** The delivery as Stripe signs it with the deployment's secret, handed to the door (what POST /payments/stripe/webhook runs). */
+  function deliver(raw: string) {
+    const t = Math.floor(Date.now() / 1000);
+    return payments.handleStripeWebhook(raw, `t=${t},v1=${createHmac('sha256', PLATFORM_SECRET).update(`${t}.${raw}`).digest('hex')}`);
+  }
+
+  async function claimsOf(tag: string): Promise<number> {
+    return db.webhookEvent.count({ where: { provider: 'stripe', providerEventId: `${P}evt_bind_${tag}` } });
+  }
+
+  async function refusalsOf(tag: string): Promise<any[]> {
+    return db.webhookEvent.findMany({ where: { provider: 'stripe-refused', providerEventId: `${P}evt_bind_${tag}` } });
+  }
+
+  it('LWD-28 (R0-20c): a session naming another business, another currency, or no or a non-positive amount is refused (400) and writes no Payment, no posting and no claim in either business; the matching session writes exactly one Payment and one balanced Payment:<id>:payment_recorded posting, once', async () => {
+    const inv = ID.invBindRefused;
+    const bindBefore = await ledgerCounts(ID.bizBind);
+    const otherBefore = await ledgerCounts(ID.bizA);
+    const otherPaymentsBefore = await db.payment.count({ where: { businessId: ID.bizA } });
+    const refusals: Array<[string, string, Record<string, unknown>]> = [
+      // The review's repro: another business's session (1 TTD) whose client_reference_id names this invoice.
+      ['repro', 'business', { amount_total: 100, metadata: { businessId: ID.bizA } }],
+      ['otherbiz', 'business', { metadata: { invoiceId: inv, businessId: ID.bizA } }],
+      ['usd', 'currency', { currency: 'usd' }],
+      ['noamount', 'amount', { amount_total: null }],
+      ['zero', 'amount', { amount_total: 0 }],
+    ];
+    for (const [tag, reason, object] of refusals) {
+      const outcome: any = await deliver(session(tag, inv, object)).then(
+        (ack: unknown) => ({ accepted: ack }),
+        (e: unknown) => e,
+      );
+      // At the R0-20c base: { ok: true, processed: 'checkout.session.completed' } and a stripe payment on the invoice.
+      expect(outcome?.accepted, `${tag}: refused`).toBeUndefined();
+      expect(outcome?.getStatus?.(), `${tag}: ${outcome?.message}`).toBe(400);
+      expect(await claimsOf(tag), `${tag}: no dedupe claim`).toBe(0);
+      expect((await refusalsOf(tag)).map((r: any) => `${r.businessId}:${r.eventType}`), tag).toEqual([`${ID.bizBind}:checkout.session.completed:${reason}`]);
+    }
+    expect(await db.payment.findMany({ where: { invoiceId: inv } })).toEqual([]);
+    expect(await db.payment.count({ where: { businessId: ID.bizBind } })).toBe(0);
+    expect(await db.payment.count({ where: { businessId: ID.bizA } })).toBe(otherPaymentsBefore);
+    expect(await ledgerCounts(ID.bizBind), 'no posting in the invoice business').toEqual(bindBefore);
+    expect(await ledgerCounts(ID.bizA), 'no posting in the business the session named').toEqual(otherBefore);
+    expect((await db.invoice.findUnique({ where: { id: inv } })).status).toBe('SENT');
+
+    // The matching session: exactly one Payment and exactly one payment_recorded posting, once.
+    const raw = session('ok', ID.invBindPaid);
+    expect(await deliver(raw)).toEqual({ ok: true, received: true, processed: 'checkout.session.completed' });
+    expect(await deliver(raw)).toEqual({ ok: true, received: true });
+    const rows = await db.payment.findMany({ where: { invoiceId: ID.invBindPaid } });
+    expect(rows.map((p: any) => `${p.provider}:${p.providerPaymentId}:${p.status}:${Number(p.amount)}:${p.businessId}`)).toEqual([
+      `stripe:${P}cs_bind_ok:SUCCESSFUL:100:${ID.bizBind}`,
+    ]);
+    const postings = await paymentPostings(rows[0].id);
+    expect(postings.map((t: any) => `${t.externalRef}:${t.type}:${t.status}:${Number(t.amount)}`)).toEqual([
+      `Payment:${rows[0].id}:payment_recorded:INCOME:POSTED:100`,
+    ]);
+    expect((await ledgerCounts(ID.bizBind)).txns, 'one posting in all').toBe(bindBefore.txns + 1);
+    expect(await claimsOf('ok')).toBe(1);
+    expect(await refusalsOf('ok')).toEqual([]);
+    expect((await db.invoice.findUnique({ where: { id: ID.invBindPaid } })).status).toBe('PAID');
+    await expectBalanced(ID.bizBind);
   });
 });
 

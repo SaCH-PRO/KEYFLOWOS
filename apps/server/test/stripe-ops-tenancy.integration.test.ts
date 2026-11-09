@@ -672,11 +672,11 @@ beforeAll(async () => {
   }
 
   // Each payment recorded through the real webhook door, platform-signed, as Stripe delivers it.
-  await stripeEvent('ch_A1', 'charge.succeeded', { id: S.chA1, amount: 25000, currency: 'ttd', payment_intent: S.piA1, metadata: { invoiceId: ID.invA1 } });
+  await stripeEvent('ch_A1', 'charge.succeeded', { id: S.chA1, amount: 25000, currency: 'ttd', payment_intent: S.piA1, metadata: { invoiceId: ID.invA1, businessId: ID.bizA } });
   await stripeEvent('cs_A2', 'checkout.session.completed', { id: S.csA2, client_reference_id: ID.invA2, amount_total: 10000, currency: 'ttd', payment_intent: S.piA2, metadata: { invoiceId: ID.invA2, businessId: ID.bizA } });
-  await stripeEvent('pi_A3', 'payment_intent.succeeded', { id: S.piA3, amount_received: 10000, currency: 'ttd', latest_charge: S.chA3, metadata: { invoiceId: ID.invA3 } });
-  await stripeEvent('pi_A4', 'payment_intent.succeeded', { id: S.piA4, amount_received: 6000, currency: 'ttd', latest_charge: S.chA4, metadata: { invoiceId: ID.invA4 } });
-  await stripeEvent('ch_B1', 'charge.succeeded', { id: S.chB1, amount: 8000, currency: 'ttd', payment_intent: S.piB1, metadata: { invoiceId: ID.invB1 } });
+  await stripeEvent('pi_A3', 'payment_intent.succeeded', { id: S.piA3, amount_received: 10000, currency: 'ttd', latest_charge: S.chA3, metadata: { invoiceId: ID.invA3, businessId: ID.bizA } });
+  await stripeEvent('pi_A4', 'payment_intent.succeeded', { id: S.piA4, amount_received: 6000, currency: 'ttd', latest_charge: S.chA4, metadata: { invoiceId: ID.invA4, businessId: ID.bizA } });
+  await stripeEvent('ch_B1', 'charge.succeeded', { id: S.chB1, amount: 8000, currency: 'ttd', payment_intent: S.piB1, metadata: { invoiceId: ID.invB1, businessId: ID.bizB } });
 }, 180_000);
 
 afterAll(async () => {
@@ -1293,7 +1293,7 @@ describe('D-46: a platform SUPER_ADMIN who is not a member of the business is re
     }
     // A's tagged charge on the platform account, recorded under its charge id through the door (as ch_A1 is).
     accounts[PLATFORM_KEY].charges.push(charge(S.chA8, 5000, { pi: S.piA8, name: 'Alice Customer-of-A', email: A_EMAIL, invoiceId: ID.invA8 }));
-    await stripeEvent('ch_A8', 'charge.succeeded', { id: S.chA8, amount: 5000, currency: 'ttd', payment_intent: S.piA8, metadata: { invoiceId: ID.invA8 } });
+    await stripeEvent('ch_A8', 'charge.succeeded', { id: S.chA8, amount: 5000, currency: 'ttd', payment_intent: S.piA8, metadata: { invoiceId: ID.invA8, businessId: ID.bizA } });
     // A's PayPal capture on the platform credentials, as the provider's callback records it (recordedBy null).
     await db.payment.create({
       data: {

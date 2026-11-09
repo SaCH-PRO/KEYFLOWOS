@@ -568,6 +568,11 @@
       "packet": "V1-81 (FOLLOW3-A1-D46-COMMERCE-WRITES)"
     },
     {
+      "prefix": "v81c_",
+      "owner": "apps/server/test/refund-door-tenancy.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A3-REFUND-DOOR-TENANCY)"
+    },
+    {
       "prefix": "v81e_",
       "owner": "apps/server/test/finance-write-tenancy.integration.test.ts",
       "packet": "V1-81 (FOLLOW3-A5-FINANCE-WRITE-TENANCY)"
@@ -641,6 +646,11 @@
       "prefix": "v84j_",
       "owner": "apps/server/test/command-item-contact-visibility.integration.test.ts",
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
+    },
+    {
+      "prefix": "v87d_",
+      "owner": "apps/server/test/own-row-reads.integration.test.ts",
+      "packet": "V1-87 (DEP-R3-OWN-ROW-READS)"
     },
     {
       "prefix": "zz_credit_",

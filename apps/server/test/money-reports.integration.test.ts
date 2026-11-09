@@ -173,10 +173,14 @@ function stripe(id: string, type: string, object: Record<string, unknown>) {
   });
 }
 
-/** A PaymentIntent payment of `amount` (stored as pi_, its charge in reference). */
-function payByIntent(inv: string, n: string, amount: number) {
+/**
+ * A PaymentIntent payment of `amount` (stored as pi_, its charge in reference). It names the
+ * invoice's business, as a platform-signed payment event must (R0-20c review SEC-R020C-1).
+ */
+async function payByIntent(inv: string, n: string, amount: number) {
+  const { businessId } = await db.invoice.findUnique({ where: { id: inv }, select: { businessId: true } });
   return stripe(`evt_pi_${n}`, 'payment_intent.succeeded', {
-    id: `${P}pi_${n}`, amount_received: amount * 100, currency: 'ttd', latest_charge: `${P}ch_${n}`, metadata: { invoiceId: inv },
+    id: `${P}pi_${n}`, amount_received: amount * 100, currency: 'ttd', latest_charge: `${P}ch_${n}`, metadata: { invoiceId: inv, businessId },
   });
 }
 

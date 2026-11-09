@@ -90,11 +90,32 @@
  * SEC-V29-2 (the refund audit named the payment's full amount) is a real case since
  * V1-29c-REFUND-WRITE-DOOR, which also links the Stripe webhook's refund rows to their payment
  * (RF-11, RF-12 assert reference = the original's providerPaymentId).
- * Outside the V1-29b write set (it.todo, queued follow-up): CR-29b-1 (the public token view
- * still states the gross paid beside the receipt's net).
+ * CR-29b-1 (review of V1-29b; was it.todo, made real by FOLLOW3-A4-PUBLIC-PAID-NET, V1-81): every
+ * public reader of the pay link states the net received as paid, max(0, balanceOfStoredRows(...).net)
+ * over the invoice's own-tenant rows, the figure the public receipt states beside it. Read through the
+ * real routes, anonymous: the token view (GET commerce/public/invoice-link/:token, balance.amountPaid),
+ * the token pay page (GET .../:token/pay, paid), the bare-id public read (GET commerce/invoices/:id,
+ * paid), the token status poll (GET payments/public/invoice-link/:token/status, paid) and the bare-id
+ * status route (GET payments/invoice/:id/status, paid); amountDue / remaining is the contract's
+ * remaining, unchanged:
+ *   PN-01  60 + 40 paid, the 40 refunded -> every reader 60 paid, 40 due = the receipt's amountPaid
+ *          and amountDue = balance.net = the ledger cash net (RED-BEFORE: 100 paid on all five)
+ *   PN-02  100 paid and refunded in full -> every reader 0 paid (never negative), 100 due; the
+ *          receipt answers 409 (nothing received) (RED-BEFORE: 100 paid)
+ *   PN-03  a pre-V1-29 flipped 60 (CR-V29-4) -> every reader 0 paid, 100 due (RED-BEFORE: the token
+ *          view and the pay page read 60 paid; the status polls, through computeBalance alone, read
+ *          0 paid and 160 due)
+ *   PN-04  M31 control: the PN-01 shape plus a SUCCESSFUL 25 and a REFUNDED -60 row tagged with tenant
+ *          B, seeded directly -> every reader still 60 paid, 40 due (the foreign rows move nothing;
+ *          RED-BEFORE: the gross 100 paid, the foreign rows already ignored since DEP-R3-OWN-ROW-READS)
+ *
+ * The anonymous public routes are rate limited per route (PublicRateLimitGuard, real Redis); this
+ * suite's limiter keys carry its own namespace (RATE_LIMIT_KEY_NAMESPACE = the prefix) and are
+ * cleared in beforeAll and afterAll.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
- * ModuleScopeGuard, CommerceService, InvoiceWorkflowService,
+ * ModuleScopeGuard, PublicRateLimitGuard, CommerceController, PaymentsController,
+ * CommerceService, PaymentsService, InvoiceWorkflowService,
  * RevenuePostingService, PostingService and ChartOfAccountsSeederService write
  * real rows, and the production GlobalHttpExceptionFilter + ValidationPipe are
  * installed. Identity attachment is the one stand-in: a test middleware reads
@@ -124,6 +145,11 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v29a_';
 const HEADER = 'x-v29a-user';
+
+// CR-29b-1 reads the anonymous public routes (PublicRateLimitGuard): this suite's limiter keys.
+const RATE_LIMIT_NS = P;
+const PREVIOUS_RATE_LIMIT_NS = process.env.RATE_LIMIT_KEY_NAMESPACE;
+process.env.RATE_LIMIT_KEY_NAMESPACE = RATE_LIMIT_NS;
 
 const ID = {
   ownerA: `${P}ownerA`,
@@ -169,6 +195,11 @@ const ID = {
   invOpsForeign: `${P}invOpsForeign`,
   invOpsForeignRefund: `${P}invOpsForeignRefund`,
   invAuditLeft: `${P}invAuditLeft`,
+  // CR-29b-1 (FOLLOW3-A4-PUBLIC-PAID-NET): the public pay-link readers (PN-01 .. PN-04)
+  invPublicPart: `${P}invPublicPart`,
+  invPublicFull: `${P}invPublicFull`,
+  invPublicLegacy: `${P}invPublicLegacy`,
+  invPublicForeign: `${P}invPublicForeign`,
 };
 
 /**
@@ -245,6 +276,12 @@ async function cleanup() {
   ]) {
     try { await db.$executeRawUnsafe(sql); } catch { /* best-effort */ }
   }
+}
+
+/** This suite's PublicRateLimitGuard keys (RATE_LIMIT_KEY_NAMESPACE = the prefix). */
+async function clearRateLimits() {
+  const keys: string[] = await redis.keys(`pub_rate_limit:${RATE_LIMIT_NS}:*`);
+  if (keys.length) await redis.del(...keys);
 }
 
 function agent() {
@@ -383,6 +420,8 @@ beforeAll(async () => {
   const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
   const { CommerceController } = await import('../src/modules/commerce/commerce.controller');
   const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+  const { PaymentsController } = await import('../src/modules/payments/payments.controller');
+  const { PaymentsService } = await import('../src/modules/payments/payments.service');
   const { CommerceStatsService } = await import('../src/modules/commerce/commerce-stats.service');
   const workflowMod = await import('../src/modules/commerce/invoice-workflow.service');
   const { InvoiceReceiptBuilderService } = await import('../src/modules/commerce/invoice-receipt-builder.service');
@@ -409,7 +448,8 @@ beforeAll(async () => {
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController],
+    // CR-29b-1: PaymentsController serves the token and bare-id status polls.
+    controllers: [CommerceController, PaymentsController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -420,6 +460,7 @@ beforeAll(async () => {
       TeamAuditInterceptor,
       { provide: REDIS_CLIENT, useValue: redis },
       CommerceService,
+      PaymentsService,
       workflowMod.InvoiceWorkflowService,
       InvoiceReceiptBuilderService,
       // Real ledger chain: the proof is the rows it posts and reverses.
@@ -448,9 +489,9 @@ beforeAll(async () => {
   commerce = moduleRef.get(CommerceService);
   workflow = moduleRef.get(workflowMod.InvoiceWorkflowService);
   revenuePosting = moduleRef.get(RevenuePostingService);
-  // The Stripe webhook handlers over the same real Prisma, workflow and ledger chain.
-  const { PaymentsService } = await import('../src/modules/payments/payments.service');
-  paymentsSvc = new PaymentsService(moduleRef.get(PrismaService), commerce, workflow, revenuePosting);
+  // The Stripe webhook handlers over the same real Prisma, workflow and ledger chain (the module's
+  // PaymentsService, the one PaymentsController serves; no provider connector is provided).
+  paymentsSvc = moduleRef.get(PaymentsService);
   // V1-29b-REFUND-READERS: the module's receipt builder and evidence service, the invoice.paid
   // receipt listener, CASH-basis receivables and the open payables over the same real Prisma (the
   // payment gateways are never called by listOpenPayables).
@@ -480,6 +521,7 @@ beforeAll(async () => {
   await app.init();
 
   await cleanup(); // in case a prior run aborted
+  await clearRateLimits();
 
   for (const [user, biz, name, email] of [
     [ID.ownerA, ID.bizA, 'V29A Biz A', `${P}owner_a@test.local`],
@@ -517,7 +559,12 @@ beforeAll(async () => {
 afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
-  if (redis) await redis.quit();
+  if (redis) {
+    try { await clearRateLimits(); } catch { /* best-effort */ }
+    await redis.quit();
+  }
+  if (PREVIOUS_RATE_LIMIT_NS === undefined) delete process.env.RATE_LIMIT_KEY_NAMESPACE;
+  else process.env.RATE_LIMIT_KEY_NAMESPACE = PREVIOUS_RATE_LIMIT_NS;
 });
 
 beforeEach(() => {
@@ -1300,7 +1347,132 @@ describe('V1-29 review findings outside the V1-29 and V1-29b write sets (owner d
     // The recording and (review CRR-V29C-2) the provider's partial refund posting are each reversed once.
     await expectLedgerAgrees(inv, { net: 0, reversals: 2 });
   });
-  it.todo(
-    'CR-29b-1 (review of V1-29b): the public token view (GET public/invoice-link/:token, CommerceService.getPaymentLinkBalance) states the net received as amountPaid, the figure the public receipt states beside it on /public/invoice/[token] (60 for 60 + 40 paid with the 40 refunded; the token view reads the gross 100, the receipt 60): needs amountPaid: balance.net in getPaymentLinkBalance (commerce/commerce.service.ts) and public-invoice-link.integration L-14 (pins the gross 160), both outside the V1-29b write set; queued follow-up',
-  );
+  // CR-29b-1: was it.todo; made real by FOLLOW3-A4-PUBLIC-PAID-NET (V1-81). The cases are PN-01 .. PN-04 below.
+});
+
+/**
+ * CR-29b-1 (FOLLOW3-A4-PUBLIC-PAID-NET): a payment link minted through the real operator route, while the
+ * invoice is SENT; the token the customer holds.
+ */
+async function mintLink(inv: string): Promise<string> {
+  const res = await agent().post(`/commerce/businesses/${ID.bizA}/invoices/${inv}/payment-link`).set(HEADER, ID.ownerA).send({});
+  expect(res.status, JSON.stringify(res.body)).toBe(201);
+  expect(typeof res.body.token).toBe('string');
+  return res.body.token;
+}
+
+type Figures = { paid: number; due: number };
+
+/**
+ * What every anonymous public reader of the pay link states for one invoice, through the real routes:
+ * the token view (balance.amountPaid / amountDue), the token pay page, the bare-id public read (both
+ * getInvoicePublicView: paid / remaining), the token status poll and the bare-id status route (both
+ * PaymentsService.invoicePaymentStatus: paid / remaining), and the public receipt (its status, and its
+ * amountPaid / amountDue when it answers 200).
+ */
+async function publicFigures(inv: string, token: string) {
+  const t = encodeURIComponent(token);
+  const view = await agent().get(`/commerce/public/invoice-link/${t}`);
+  const payPage = await agent().get(`/commerce/public/invoice-link/${t}/pay`);
+  const bareView = await agent().get(`/commerce/invoices/${inv}`);
+  const tokenStatus = await agent().get(`/payments/public/invoice-link/${t}/status`);
+  const bareStatus = await agent().get(`/payments/invoice/${inv}/status`);
+  const receipt = await agent().get(`/commerce/public/invoice-link/${t}/receipt`);
+  for (const [label, res] of Object.entries({ view, payPage, bareView, tokenStatus, bareStatus })) {
+    expect(res.status, `${inv} ${label}: ${JSON.stringify(res.body)}`).toBe(200);
+  }
+  expect(view.body.ok, JSON.stringify(view.body)).toBe(true);
+  const readers: Record<string, Figures> = {
+    tokenView: { paid: view.body.balance.amountPaid, due: view.body.balance.amountDue },
+    payPage: { paid: payPage.body.paid, due: payPage.body.remaining },
+    bareView: { paid: bareView.body.paid, due: bareView.body.remaining },
+    tokenStatus: { paid: tokenStatus.body.paid, due: tokenStatus.body.remaining },
+    bareStatus: { paid: bareStatus.body.paid, due: bareStatus.body.remaining },
+  };
+  return {
+    readers,
+    receipt: { status: receipt.status, paid: receipt.body?.amountPaid, due: receipt.body?.amountDue },
+  };
+}
+
+/** The same figures from every reader. */
+function everyReader(f: Figures): Record<string, Figures> {
+  return { tokenView: f, payPage: f, bareView: f, tokenStatus: f, bareStatus: f };
+}
+
+describe('CR-29b-1 (FOLLOW3-A4-PUBLIC-PAID-NET): every public reader of the pay link states the net received as paid', () => {
+  it('PN-01: 60 + 40 paid, the 40 refunded through POST .../payments/:id/refund -> the token view, the token pay page, the bare-id public read, the token status poll and the bare-id status route state 60 paid, 40 due: the receipt\'s amountPaid and amountDue, balanceOfStoredRows(...).net and the ledger cash net', async () => {
+    const inv = ID.invPublicPart;
+    const token = await mintLink(inv);
+    await seedPartRefund(inv, 'V29A-PN');
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_PAID');
+    const balance = await balanceOf(inv);
+    expect(balance).toMatchObject({ paid: 100, refunded: 40, net: 60, remaining: 40 });
+    const { cashNet } = await expectLedgerAgrees(inv, { net: 60, reversals: 1 });
+
+    const { readers, receipt } = await publicFigures(inv, token);
+    expect(receipt, 'the public receipt').toEqual({ status: 200, paid: 60, due: 40 });
+    // RED-BEFORE (pkt/DEP-R3-OWN-ROW-READS-repair 1d3979f8): paid 100 (computeBalance's gross) on all
+    // five readers beside the receipt's 60; due 40 on all five.
+    expect(readers).toEqual(everyReader({ paid: 60, due: 40 }));
+    for (const [label, f] of Object.entries(readers)) {
+      expect(f.paid, `${label}: the receipt's amountPaid`).toBe(receipt.paid);
+      expect(f.paid, `${label}: balanceOfStoredRows(...).net`).toBe(balance.net);
+      expect(f.paid, `${label}: the ledger cash net`).toBe(cashNet);
+      expect(f.due, `${label}: the receipt's amountDue`).toBe(receipt.due);
+      expect(f.due, `${label}: balanceOfStoredRows(...).remaining (unchanged)`).toBe(balance.remaining);
+    }
+    expect((await listPayments(inv)).body).toMatchObject({ paidAmount: 60, remaining: 40 });
+  });
+
+  it('PN-02: 100 paid and refunded in full -> SENT; every reader states 0 paid (never negative), 100 due; the receipt answers 409 (nothing received)', async () => {
+    const inv = ID.invPublicFull;
+    const token = await mintLink(inv);
+    await seedFullRefund(inv, 'V29A-PNF');
+    expect((await invoiceRow(inv)).status).toBe('SENT');
+    expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 100, net: 0, remaining: 100 });
+    await expectLedgerAgrees(inv, { net: 0, reversals: 1 });
+
+    const { readers, receipt } = await publicFigures(inv, token);
+    expect(receipt.status, 'the public receipt: nothing received').toBe(409);
+    // RED-BEFORE: paid 100 (the gross) on all five, beside due 100.
+    expect(readers).toEqual(everyReader({ paid: 0, due: 100 }));
+    for (const [label, f] of Object.entries(readers)) expect(f.paid, `${label}: never negative`).toBeGreaterThanOrEqual(0);
+  });
+
+  it('PN-03 (CR-V29-4): a pre-V1-29 flipped 60 is read through balanceOfStoredRows as its payment plus its refund -> every reader states 0 paid (never negative), 100 due; the receipt answers 409', async () => {
+    const inv = ID.invPublicLegacy;
+    const token = await mintLink(inv);
+    const sixty = await paid(inv, 60, 'V29A-PNL-60');
+    await flipLegacy(sixty.id);
+    expect(await rawBalanceOf(inv), 'computeBalance alone subtracts the flipped row twice').toMatchObject({ paid: 0, refunded: 60, net: -60, remaining: 160 });
+    expect(await balanceOf(inv)).toMatchObject({ paid: 60, refunded: 60, net: 0, remaining: 100 });
+    await expectLedgerAgrees(inv, { net: 0, reversals: 1 });
+
+    const { readers, receipt } = await publicFigures(inv, token);
+    expect(receipt.status, 'the public receipt: nothing received').toBe(409);
+    // RED-BEFORE: the token view, the pay page and the bare-id read state paid 60 (the gross of the
+    // stored rows); both status polls state paid 0 and due 160 (computeBalance alone, net -60).
+    expect(readers).toEqual(everyReader({ paid: 0, due: 100 }));
+  });
+
+  it('PN-04 (M31 control): the PN-01 shape plus a SUCCESSFUL 25 and a REFUNDED -60 row tagged with tenant B, seeded directly -> every reader still states 60 paid, 40 due; the foreign rows move none of the figures', async () => {
+    const inv = ID.invPublicForeign;
+    const token = await mintLink(inv);
+    await seedPartRefund(inv, 'V29A-PNX');
+    await foreignRow(inv, 'pn_s25', 25, 'SUCCESSFUL');
+    await foreignRow(inv, 'pn_r60', -60, 'REFUNDED');
+    expect((await paymentsOf(inv)).map((r) => r.businessId).filter((b) => b !== ID.bizA)).toEqual([ID.bizB, ID.bizB]);
+    // Read with every tenant's rows, the foreign rows would move every figure.
+    expect(await rawBalanceOf(inv), 'every tenant\'s rows').toMatchObject({ paid: 125, refunded: 100, net: 25, remaining: 75 });
+    expect(await balanceOf(inv)).toMatchObject({ paid: 100, refunded: 40, net: 60, remaining: 40 });
+    const { cashNet } = await expectLedgerAgrees(inv, { net: 60, reversals: 1 });
+
+    const { readers, receipt } = await publicFigures(inv, token);
+    expect(receipt, 'the public receipt (own-tenant rows)').toEqual({ status: 200, paid: 60, due: 40 });
+    // RED-BEFORE: paid 100 (the gross of A's own rows) on all five; the foreign rows were already
+    // ignored on this base (DEP-R3-OWN-ROW-READS, D-75), so the figures they would give (25 / 75) appear nowhere.
+    expect(readers).toEqual(everyReader({ paid: 60, due: 40 }));
+    for (const [label, f] of Object.entries(readers)) expect(f.paid, `${label}: the ledger cash net`).toBe(cashNet);
+  });
 });

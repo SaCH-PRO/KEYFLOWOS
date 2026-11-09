@@ -16,7 +16,7 @@ import { Service, Prisma, Payment, QuoteStatus as StoredQuoteStatus } from '@key
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isLegalTransition, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isLegalTransition, isShareableInvoiceStatus, ownTenantPayments, roundMoney } from './invoice-workflow.service';
 import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -78,6 +78,8 @@ const OPERATOR_INVOICE_INCLUDE = Prisma.validator<Prisma.InvoiceInclude>()({
   // Required by buildInvoiceEmailContext so amountPaid/remaining
   // render correctly on invoice/reminder/receipt emails — without
   // payments the customer-facing template falls back to 0 paid.
+  // DEP-R3-OWN-ROW-READS (D-75): every reader of this include serves the
+  // invoice's own-tenant rows only (readOperatorInvoice), never this raw list.
   payments: true,
   business: {
     select: {
@@ -1060,7 +1062,9 @@ export class CommerceService {
       this.prisma.client.invoice.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        include: { contact: true, quote: true, payments: true, items: true },
+        // DEP-R3-OWN-ROW-READS (D-75): the list row's payments are the invoice's
+        // own tenant's (the web reads its paid share from them, M31).
+        include: { contact: true, quote: true, payments: { where: { businessId } }, items: true },
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -1405,11 +1409,36 @@ export class CommerceService {
     return { id: invoiceId, status: 'reverted_to_draft', invoice: reverted };
   }
 
-  async getInvoiceWithBusiness(invoiceId: string, requireShareable = false) {
-    const invoice = await this.prisma.client.invoice.findUnique({
-      where: { id: invoiceId },
+  /**
+   * DEP-R3-OWN-ROW-READS (D-75): the one read of OPERATOR_INVOICE_INCLUDE,
+   * shared by `getInvoiceWithBusiness` and `getInvoiceForBusiness`. Its
+   * payment rows are the invoice's own tenant's (ownTenantPayments, the
+   * contract the reconcile and getBalance read by): Payment sits outside the
+   * tenant extension and has no FK to Business (M31), so a row carrying
+   * another businessId is not this invoice's money. Served, it showed a SENT
+   * invoice nothing was received on as paid to the operator (paidAmount,
+   * the Payment Summary the pages draw from the rows) and in every email
+   * built from this read.
+   *
+   * Review SEC-OR-1 / CR-1: fails closed on an absent id. This is a findFirst,
+   * and Prisma drops an `id: undefined` key, so a missing id would read the
+   * first invoice in scope (any tenant's outside a request: the KEY
+   * get_invoice command passes `parameters.invoiceId` unchecked) where the
+   * findUnique it replaced threw. A non-string id (a filter object) is refused
+   * the same way.
+   */
+  private async readOperatorInvoice(invoiceId: string, scope: Prisma.InvoiceWhereInput = {}) {
+    if (typeof invoiceId !== 'string' || invoiceId.length === 0) return null;
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { ...scope, id: invoiceId },
       include: OPERATOR_INVOICE_INCLUDE,
     });
+    if (!invoice) return null;
+    return { ...invoice, payments: ownTenantPayments(invoice) };
+  }
+
+  async getInvoiceWithBusiness(invoiceId: string, requireShareable = false) {
+    const invoice = await this.readOperatorInvoice(invoiceId);
 
     if (!invoice) return null;
 
@@ -1434,10 +1463,7 @@ export class CommerceService {
    * Summary needs no second call.
    */
   async getInvoiceForBusiness(invoiceId: string, businessId: string) {
-    const invoice = await this.prisma.client.invoice.findFirst({
-      where: { id: invoiceId, businessId, deletedAt: null },
-      include: OPERATOR_INVOICE_INCLUDE,
-    });
+    const invoice = await this.readOperatorInvoice(invoiceId, { businessId, deletedAt: null });
     if (!invoice) return null;
     // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
     // CR-V22-1: remaining is 0 once the paid sum settles the stored total.
@@ -1634,7 +1660,7 @@ export class CommerceService {
         dueDate: true,
         notes: true,
         items: { select: { id: true, description: true, quantity: true, unitPrice: true, total: true } },
-        payments: { select: { amount: true, status: true } },
+        payments: { select: { amount: true, status: true, businessId: true } },
         contact: { select: { firstName: true, lastName: true } },
         business: {
           select: {
@@ -1660,7 +1686,11 @@ export class CommerceService {
 
     if (!isShareableInvoiceStatus(invoice.status)) return null;
 
-    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
+    // DEP-R3-OWN-ROW-READS (D-75): paid/remaining from the invoice's own-tenant
+    // rows, as the intent this page posts decides from them (trial-N round 2
+    // F1): a row of another business (M31) showed the customer nothing due on
+    // an invoice the business has received nothing on (RC2-DEP-1).
+    const balance = balanceOfStoredRows(Number(invoice.total), ownTenantPayments(invoice), invoice.currency);
     // Same legacy-row fallback as getInvoiceWithBusiness: older invoices stored
     // subtotal 0 with priced items.
     const subtotal =
@@ -1710,7 +1740,10 @@ export class CommerceService {
             whatsapp: invoice.business.whatsapp,
           }
         : null,
-      paid: balance.paid,
+      // FOLLOW3-A4-PUBLIC-PAID-NET (CR-29b-1): the net received, max(0, net),
+      // the figure the public receipt states. It was the gross `paid`, so a
+      // refunded payment still read as paid on the customer's pay page.
+      paid: Math.max(0, balance.net),
       remaining: balance.remaining,
     };
   }
@@ -3667,9 +3700,11 @@ export class CommerceService {
     const invoiceTotal = Number(invoice.total);
     const overPaid = overpaidMoney(invoiceTotal, newPaidTotal);
     const newStatus = reconciled.status;
+    // DEP-R3-OWN-ROW-READS (D-75): the invoice answered carries its own-tenant
+    // rows, the ones paidAmount above was reconciled from (M31).
     const updatedInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      include: { payments: true, contact: true, items: true },
+      include: { payments: { where: { businessId } }, contact: true, items: true },
     });
 
     if (invoice.contactId) {
@@ -3869,9 +3904,13 @@ export class CommerceService {
         `A payment with this ${slot} was already recorded on this invoice and was refunded; use a new ${fresh} to record another payment`,
       );
     }
+    // DEP-R3-OWN-ROW-READS (D-75): the invoice's own-tenant rows (M31), so a
+    // row of another business neither appears in the replay nor counts in its
+    // paidAmount/remaining. `existing` was found under the caller's tenant and
+    // this invoice (findRecordedPayment), so its businessId is the invoice's.
     const updatedInvoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
-      include: { payments: true, contact: true, items: true },
+      include: { payments: { where: { businessId: existing.businessId } }, contact: true, items: true },
     });
     // V1-29 (CF-17): the figures every balance reader serves (computeBalance):
     // paidAmount is what is received net of refunds, remaining is total - net.
@@ -3912,7 +3951,9 @@ export class CommerceService {
       where.createdAt = createdAt;
     }
     if (filters.contactId) {
-      where.invoice = { is: { contactId: filters.contactId } };
+      // Review SEC-OR-2 (M31): the contact filter matches this business's own
+      // invoices only, so another tenant's customer id finds nothing here.
+      where.invoice = { is: { contactId: filters.contactId, businessId } };
     }
 
     const payments = await this.prisma.client.payment.findMany({
@@ -3923,6 +3964,7 @@ export class CommerceService {
         invoice: {
           select: {
             id: true,
+            businessId: true,
             invoiceNumber: true,
             status: true,
             currency: true,
@@ -3936,7 +3978,15 @@ export class CommerceService {
         },
       },
     });
-    return payments;
+    // Review SEC-OR-2 (M31, the payment side of D-75): Payment sits outside the
+    // tenant extension and has no FK to Business, so this business's row can
+    // name another business's invoice. The row is this business's and is
+    // listed; the invoice is not, so its number, total and customer (name,
+    // email) are not served with it. The relation include is not narrowed by
+    // the tenant extension, hence the check here.
+    return payments.map((payment) =>
+      payment.invoice && payment.invoice.businessId !== businessId ? { ...payment, invoice: null } : payment,
+    );
   }
 
   /**
@@ -4219,7 +4269,8 @@ export class CommerceService {
   async getInvoiceTimeline(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
       where: { id: invoiceId, businessId, deletedAt: null },
-      include: { payments: { orderBy: { createdAt: 'asc' } } },
+      // DEP-R3-OWN-ROW-READS (D-75): the invoice's own-tenant payment rows (M31).
+      include: { payments: { where: { businessId }, orderBy: { createdAt: 'asc' } } },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
 
@@ -4500,8 +4551,11 @@ export class CommerceService {
       // A cross-tenant read answered 500 here (plain Error); it is a 404.
       throw new NotFoundException('Invoice not found');
     }
+    // DEP-R3-OWN-ROW-READS (D-75): the invoice's own-tenant rows (M31): a row
+    // of another business was listed as this invoice's money and counted in
+    // paidAmount (trial-N round 2, F2).
     const payments = await this.prisma.client.payment.findMany({
-      where: { invoiceId },
+      where: { invoiceId, businessId },
       orderBy: { createdAt: 'desc' },
     });
     // V1-22: summed and subtracted in cents (the float sum read 0.01 + 33.33 x 3 as 99.99999999999999).
@@ -5206,10 +5260,11 @@ export class CommerceService {
    * amount per payment leaves here. `paidAt` only when the invoice is PAID.
    *
    * V1-29: a refund is a separate negative row (D-14), so `amountDue` is
-   * total - net. `amountPaid` stays computeBalance's gross `paid`, the figure
-   * the receipt and the status route serve too; with a refund on the invoice
-   * amountPaid + amountDue exceeds the total by the refunded amount. One
-   * public read contract for both is V1-36.
+   * total - net. FOLLOW3-A4-PUBLIC-PAID-NET (CR-29b-1): `amountPaid` is the
+   * net received, max(0, balanceOfStoredRows(...).net), the figure the public
+   * receipt states beside it on /public/invoice/[token] and the pay page and
+   * the status poll serve. It was computeBalance's gross `paid`: 60 + 40 paid
+   * with the 40 refunded showed "Paid 100" beside the receipt's "Received 60".
    */
   async getPaymentLinkBalance(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
@@ -5225,7 +5280,7 @@ export class CommerceService {
     if (!invoice) return null;
     const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     return {
-      amountPaid: balance.paid,
+      amountPaid: Math.max(0, balance.net),
       amountDue: balance.remaining,
       paidAt: invoice.status === 'PAID' ? invoice.paidAt ?? null : null,
     };
