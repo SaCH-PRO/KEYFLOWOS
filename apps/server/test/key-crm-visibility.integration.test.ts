@@ -154,6 +154,7 @@ async function cleanup() {
     `DELETE FROM agent_triggers WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM autopilot_settings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM cortex_action_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM crm_sequence_enrollments WHERE sequence_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM crm_sequences WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -916,15 +917,19 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
  * daily briefing: D-93 runs the system's plans as the owner) reached every member, contact names a
  * STAFF member may not open included. The route now applies the plan read rule (graphPlanReadScope +
  * visiblePlanSteps, KEY-R3a/KEY-R3b): a member is served the rows of runs they may read (a plan's row
- * to whoever may read the plan; a row with no plan to the member it ran for; every row to the OWNER,
- * an ADMIN or a SUPER_ADMIN), each row judged as the plan step it ran, its output withheld when the
- * step's output is the OWNER's only (a contact read) and otherwise filtered by the viewer's contact
- * visibility (D-74). Driven through the real AiController (real guards, the real AiExecutionLogService)
- * over rows the real plan-queue dispatcher writes.
+ * to whoever may read the plan; a row with no plan to the member it ran for; the rows of every run to
+ * the OWNER, an ADMIN or a SUPER_ADMIN), each row judged as the plan step it ran, its output withheld
+ * when the step's output is the OWNER's only (a contact read) and otherwise filtered by the viewer's
+ * contact visibility (D-74). Driven through the real AiController (real guards, the real
+ * AiExecutionLogService) over rows the real plan-queue dispatcher writes.
+ * Review repairs (CV-08l-a..CV-08l-c): a cut-down (_truncated) input or output cannot be judged by
+ * the contacts it names, so a member who may not open every contact is served it withheld
+ * (SEC-W5EL-1); a plan's own plan:start and plan:complete rows are served with the plan, not judged
+ * as a step (CR-EXL-2); the page is read and counted over the rows served (CR-EXL-1).
  */
 describe('W5-EXEC-LOGS-VISIBILITY (D-74, D-93): GET ai/execution-logs serves a member only the rows of runs they may read, outputs filtered by the plan read rule', () => {
-  /** GET ai/execution-logs as `actor`: every row of the business on one page. */
-  async function executionLogs(actor: string): Promise<{ logs: any[]; total: number }> {
+  /** GET ai/execution-logs as `actor`: every row of the business on one page (or the page `query` names). */
+  async function executionLogs(actor: string, query = 'limit=1000'): Promise<{ logs: any[]; total: number; limit: number; offset: number }> {
     if (!logsApp) {
       const { Test } = await import('@nestjs/testing');
       const { EventEmitter2 } = await import('@nestjs/event-emitter');
@@ -955,7 +960,7 @@ describe('W5-EXEC-LOGS-VISIBILITY (D-74, D-93): GET ai/execution-logs serves a m
       await logsApp.init();
     }
     const res = await request(logsApp.getHttpServer())
-      .get(`/ai/businesses/${ID.biz}/ai/execution-logs?limit=1000`)
+      .get(`/ai/businesses/${ID.biz}/ai/execution-logs?${query}`)
       .set('x-test-user', actor)
       .set('x-forwarded-for', nextIp());
     expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(200);
@@ -1025,6 +1030,173 @@ describe('W5-EXEC-LOGS-VISIBILITY (D-74, D-93): GET ai/execution-logs serves a m
     expect(owner.total).toBe(stored.length);
     expect(byId(owner.logs)).toEqual(byId(JSON.parse(JSON.stringify(stored))));
     expect(JSON.stringify(owner.logs.find((r: any) => r.planId === ownerPlan)?.outputSummary)).toContain(NAME.priv);
+  });
+
+  /** A payload cut down as AiExecutionLogService.sanitizePayload and KEY-cortex auditJson store one past 5000 characters. */
+  const cutDown = (value: unknown) => {
+    const text = JSON.stringify(value);
+    return { _truncated: true, _size: text.length, _preview: text.slice(0, 500) };
+  };
+
+  it("CV-08l-a RED-BEFORE (W5-EXEC-LOGS-VISIBILITY review SEC-W5EL-1; D-74): a row whose input or output the log stored cut down to a preview (_truncated, past 5000 characters) cannot be judged by the contacts it names, so a member who may not open every contact is served that input and output withheld (null), as the plan read rule withholds the step: the STAFF member's own commerce_list_invoices row whose preview shows the OWNER's PRIVATE contact's invoice note, and to the ADMIN the OWNER's crm_add_note row and crm.add_note KEY-cortex command whose input preview shows the note's body; the OWNER is served each row as stored", async () => {
+    const { visiblePlanSteps, graphPlanReadScope: readScope } = (await import('../src/modules/ai/graph-actions.controller')) as any;
+    const executionLog = queue.executionLog;
+    const noteSecret = 'v89kCV08laSECRETNOTE';
+    const bodySecret = 'v89kCV08laSECRETBODY';
+    const cmdSecret = 'v89kCV08laSECRETCMD';
+    // The newest invoice of the business: the OWNER's PRIVATE contact's, its note long enough that the
+    // dispatcher's row keeps only a preview, which ends before the invoice names its contact.
+    const inv = `${P}cv08la_inv_priv`;
+    await db.invoice.create({
+      data: { id: inv, businessId: ID.biz, contactId: ID.cPriv, invoiceNumber: 'V89K-0090', status: 'DRAFT', subtotal: 7777, total: 7777, currency: 'TTD', notes: `${noteSecret} ${'n'.repeat(6000)}` },
+    });
+    try {
+      // (A) The STAFF member's own plan: commerce_list_invoices on the queue (no principal: every invoice).
+      const staffPlan = `${P}cv08la_staff_inv`;
+      await seedPlan(staffPlan, ID.staffOwned, 'commerce_list_invoices', { limit: 20 }, 'approved');
+      await runQueueStep(staffPlan, 'commerce_list_invoices', { limit: 20 });
+      expect((await stepRow(staffPlan)).status).toBe('completed');
+      const staffRow = await db.aiExecutionLog.findFirst({ where: { businessId: ID.biz, planId: staffPlan } });
+      expect(staffRow.outputSummary).toMatchObject({ _truncated: true });
+      expect(staffRow.outputSummary._preview).toContain(noteSecret);
+      expect(staffRow.outputSummary._preview).not.toContain(ID.cPriv);
+      // The plan read rule judges the step's whole output, and withholds the PRIVATE contact's invoice.
+      const staffScope = await readScope(prisma, ID.biz, { id: ID.staffOwned });
+      const staffStep = await db.aiPlanStep.findUnique({ where: { id: `${staffPlan}_s1` } });
+      expect(JSON.stringify(staffStep.outputResult)).toContain(noteSecret);
+      expect(JSON.stringify(await visiblePlanSteps([staffStep], staffScope))).not.toContain(noteSecret);
+
+      // (B) The OWNER's plan: crm_add_note on the PRIVATE contact, its row written by the real
+      // AiExecutionLogService.logToolExecution as the dispatcher writes it (args as stored: body first).
+      const ownerNote = `${P}cv08la_owner_note`;
+      const noteArgs = { body: `${bodySecret} ${'b'.repeat(6000)}`, contactId: ID.cPriv };
+      await seedPlan(ownerNote, ID.owner, 'crm_add_note', noteArgs, 'completed');
+      await executionLog.logToolExecution(ID.biz, 'crm_add_note', noteArgs, { success: true, noteId: `${P}cv08la_note` }, true, 3, { planId: ownerNote, planStepId: `${ownerNote}_s1` });
+      const noteRow = await db.aiExecutionLog.findFirst({ where: { businessId: ID.biz, planId: ownerNote } });
+      expect(noteRow.inputSummary).toMatchObject({ _truncated: true });
+      expect(noteRow.inputSummary._preview).toContain(bodySecret);
+      expect(noteRow.inputSummary._preview).not.toContain(ID.cPriv);
+      const adminScope = await readScope(prisma, ID.biz, { id: ID.admin });
+      const noteStep = await db.aiPlanStep.findUnique({ where: { id: `${ownerNote}_s1` } });
+      expect((await visiblePlanSteps([noteStep], adminScope))[0]).toMatchObject({ inputPayload: null });
+
+      // (C) A KEY-cortex command (crm.add_note) the OWNER ran, as KeyCortexExecutorService.logExecution
+      // writes it: its parameters cut down (auditJson) inside the input.
+      await executionLog.log({
+        businessId: ID.biz, action: 'add_note', toolName: 'crm.add_note', module: 'crm', userId: ID.owner, actor: 'user',
+        inputSummary: { actorId: ID.owner, parameters: cutDown({ body: `${cmdSecret} ${'c'.repeat(6000)}`, contactId: ID.cPriv }), source: 'v89k', traceId: `${P}cv08la_trace` },
+        outputSummary: { data: { noteId: `${P}cv08la_cmd_note` }, rolledBack: false, rollbackError: null },
+        success: true,
+      });
+      const cmdRow = await db.aiExecutionLog.findFirst({ where: { businessId: ID.biz, toolName: 'crm.add_note', userId: ID.owner } });
+      expect(JSON.stringify(cmdRow.inputSummary)).toContain(cmdSecret);
+
+      const staff = await executionLogs(ID.staffOwned);
+      const ownRow = staff.logs.find((r: any) => r.planId === staffPlan);
+      expect(ownRow, 'their own commerce_list_invoices row').toBeDefined();
+      expect(ownRow).toMatchObject({ toolName: 'commerce_list_invoices', success: true, outputSummary: null });
+      expect(JSON.stringify(staff.logs)).not.toContain(noteSecret);
+      expect(JSON.stringify(staff.logs)).not.toContain('7777');
+      expectNoHidden(staff.logs);
+
+      const admin = await executionLogs(ID.admin);
+      expect(admin.logs.find((r: any) => r.planId === ownerNote)).toMatchObject({ toolName: 'crm_add_note', inputSummary: null, outputSummary: null });
+      expect(admin.logs.find((r: any) => r.id === cmdRow.id)).toMatchObject({ toolName: 'crm.add_note', inputSummary: null, outputSummary: null });
+      for (const secret of [noteSecret, bodySecret, cmdSecret]) expect(JSON.stringify(admin.logs), secret).not.toContain(secret);
+      expectNoHidden(admin.logs, ['priv']);
+
+      // The OWNER opens every contact: each row as stored.
+      const owner = await executionLogs(ID.owner);
+      for (const row of [staffRow, noteRow, cmdRow]) {
+        expect(owner.logs.find((r: any) => r.id === row.id)).toEqual(JSON.parse(JSON.stringify(row)));
+      }
+    } finally {
+      await db.invoice.delete({ where: { id: inv } });
+    }
+  });
+
+  it("CV-08l-b RED-BEFORE (W5-EXEC-LOGS-VISIBILITY review CR-EXL-2; D-74): the rows FlowOrchestratorService.executePlan writes for a plan itself (plan:start, plan:complete: module planner, no tool, its objective) are no plan step and are served with the plan, to whoever may read it: the STAFF member's plan's rows reach that member and the ADMIN, the OWNER's plan's rows the ADMIN and not the STAFF member; a KEY-cortex command of a module the plan read rule maps to nothing (genome) is still served to the OWNER only, the member who ran it included (CONTROL, KEY-R3a review SEC-R3a-1); KeyCortexLifecycleService.recordExecution writes no KEY chat tool row here (AiExecutionLog has no startedAt column, so its create is refused)", async () => {
+    const executionLog = queue.executionLog;
+    // The plans, with the rows FlowOrchestratorService.executePlan writes for each plan itself.
+    const staffPlan = `${P}cv08lb_staff_plan`;
+    const ownerPlan = `${P}cv08lb_owner_plan`;
+    await seedPlan(staffPlan, ID.staffOwned, 'commerce_list_invoices', { limit: 5 }, 'completed');
+    await seedPlan(ownerPlan, ID.owner, 'commerce_list_invoices', { limit: 5 }, 'completed');
+    for (const planId of [staffPlan, ownerPlan]) {
+      await executionLog.log({ businessId: ID.biz, action: 'plan:start', module: 'planner', riskTier: 1, mode: 'plan_execution', actor: 'flow', rationale: `Executing plan: v89k ${planId}`, planId, success: true });
+      await executionLog.log({ businessId: ID.biz, action: 'plan:complete', module: 'planner', mode: 'plan_execution', actor: 'flow', rationale: 'Plan finished: 1 executed, 0 failed, 0 skipped', planId, success: true });
+    }
+    // A KEY-cortex command of the genome module (the business's DNA) the STAFF member ran, as
+    // KeyCortexExecutorService.logExecution writes it.
+    await executionLog.log({
+      businessId: ID.biz, action: 'get_dna', toolName: 'genome.get_dna', module: 'genome', userId: ID.staffOwned, actor: 'user',
+      inputSummary: { actorId: ID.staffOwned, parameters: {}, source: 'v89k', traceId: `${P}cv08lb_trace` },
+      outputSummary: { data: { dna: 'v89k business dna' }, rolledBack: false, rollbackError: null }, success: true,
+    });
+    const genome = await db.aiExecutionLog.findFirst({ where: { businessId: ID.biz, toolName: 'genome.get_dna', userId: ID.staffOwned } });
+    expect(genome).toBeTruthy();
+    // A KEY chat tool call, recorded by the real KeyCortexLifecycleService as KeyCortexToolLoopService
+    // records it: its execution log row is refused, so no such row reaches GET ai/execution-logs.
+    const { KeyCortexLifecycleService } = await import('../src/modules/key-cortex/key-cortex-lifecycle.service');
+    const lifecycle = new KeyCortexLifecycleService(prisma, {} as any, { emit() {} } as any, {} as any);
+    await expect(
+      lifecycle.recordExecution({
+        identity: { correlationId: `${P}cv08lb_corr`, sessionId: `${P}cv08lb_sess`, commandId: `${P}cv08lb_cmd`, businessId: ID.biz, userId: ID.staffOwned },
+        toolName: 'cortex.create_task', module: 'workflow', riskTier: 1, requiresApproval: false, input: { title: 'v89k call back' },
+        output: { taskId: `${P}cv08lb_task` }, success: true, durationMs: 4, startedAt: new Date(), completedAt: new Date(),
+      } as any),
+    ).rejects.toThrow(/startedAt/);
+    expect(await db.aiExecutionLog.count({ where: { businessId: ID.biz, correlationId: `${P}cv08lb_corr` } })).toBe(0);
+
+    const shown = (logs: any[]) => ({
+      staffStart: logs.some((r) => r.planId === staffPlan && r.action === 'plan:start'),
+      staffComplete: logs.some((r) => r.planId === staffPlan && r.action === 'plan:complete'),
+      ownerStart: logs.some((r) => r.planId === ownerPlan && r.action === 'plan:start'),
+      ownerComplete: logs.some((r) => r.planId === ownerPlan && r.action === 'plan:complete'),
+      genome: logs.some((r) => r.id === genome.id),
+    });
+
+    const staff = await executionLogs(ID.staffOwned);
+    expect(shown(staff.logs)).toEqual({ staffStart: true, staffComplete: true, ownerStart: false, ownerComplete: false, genome: false });
+    expect(staff.logs.find((r: any) => r.planId === staffPlan && r.action === 'plan:start')).toMatchObject({ module: 'planner', toolName: null, rationale: `Executing plan: v89k ${staffPlan}` });
+    expectNoHidden(staff.logs);
+
+    const admin = await executionLogs(ID.admin);
+    expect(shown(admin.logs)).toEqual({ staffStart: true, staffComplete: true, ownerStart: true, ownerComplete: true, genome: false });
+    expect(admin.logs.find((r: any) => r.planId === ownerPlan && r.action === 'plan:complete')).toMatchObject({ module: 'planner', rationale: 'Plan finished: 1 executed, 0 failed, 0 skipped' });
+    expectNoHidden(admin.logs, ['priv']);
+
+    const owner = await executionLogs(ID.owner);
+    expect(shown(owner.logs)).toEqual({ staffStart: true, staffComplete: true, ownerStart: true, ownerComplete: true, genome: true });
+    expect(owner.logs.find((r: any) => r.id === genome.id)).toEqual(JSON.parse(JSON.stringify(genome)));
+  });
+
+  it("CV-08l-c RED-BEFORE (W5-EXEC-LOGS-VISIBILITY review CR-EXL-1): GET ai/execution-logs pages and counts only the rows it serves: for the STAFF member and the ADMIN every page holds `limit` rows while more exist, `total` is the number of rows served, and the pages together are the whole listing in order, though the newest rows of the business are ones they are not served", async () => {
+    const executionLog = queue.executionLog;
+    // The newest rows: the STAFF member's own KEY-cortex genome commands, served to the OWNER only.
+    for (let n = 1; n <= 3; n += 1) {
+      await executionLog.log({
+        businessId: ID.biz, action: 'get_dna', toolName: 'genome.get_dna', module: 'genome', userId: ID.staffOwned, actor: 'user',
+        inputSummary: { actorId: ID.staffOwned, parameters: { n }, source: 'v89k', traceId: `${P}cv08lc_trace_${n}` }, success: true,
+      });
+    }
+    for (const actor of [ID.staffOwned, ID.admin]) {
+      const all = await executionLogs(actor);
+      expect(all.logs.length, `${actor}: rows served`).toBeGreaterThan(2);
+      expect(all.total, `${actor}: total counts the rows served`).toBe(all.logs.length);
+      expect(all.logs.some((r: any) => r.toolName === 'genome.get_dna'), `${actor}: genome rows`).toBe(false);
+      const paged: string[] = [];
+      for (let offset = 0; offset <= all.total; offset += 2) {
+        const page = await executionLogs(actor, `limit=2&offset=${offset}`);
+        expect(page.total, `${actor} offset ${offset}: total`).toBe(all.total);
+        expect(page.logs.length, `${actor} offset ${offset}: rows on the page`).toBe(Math.min(2, all.total - offset));
+        paged.push(...page.logs.map((r: any) => r.id));
+      }
+      expect(paged, `${actor}: the pages together`).toEqual(all.logs.map((r: any) => r.id));
+    }
+    const owner = await executionLogs(ID.owner);
+    expect(owner.total).toBe(await db.aiExecutionLog.count({ where: { businessId: ID.biz } }));
+    expect(owner.logs.filter((r: any) => r.toolName === 'genome.get_dna').length).toBeGreaterThanOrEqual(4);
   });
 });
 

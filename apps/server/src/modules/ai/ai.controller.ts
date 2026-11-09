@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, forwardRef, Get, Inject, NotFoundException, Param, Post, Put, Query, Req, UseGuards, UnauthorizedException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { Prisma } from '@prisma/client';
 import { CrmRateLimit, CrmRateLimitGuard } from '../crm/guards/rate-limit.guard';
 import { AiAdvisorService } from './ai-advisor.service';
 import { AiUsageService } from './ai-usage.service';
@@ -72,11 +73,15 @@ function safeInt(val: string | undefined, fallback: number): number {
   return Number.isNaN(n) || n < 0 ? fallback : n;
 }
 
-/** An execution log row as GET ai/execution-logs reads it (AiExecutionLog). */
-interface ExecutionLogRow {
+/** The columns of an execution log row (AiExecutionLog) that say which plan step it is judged as. */
+interface ExecutionLogStepKey {
   toolName: string | null;
   action: string;
   module: string | null;
+}
+
+/** An execution log row as GET ai/execution-logs reads it (AiExecutionLog). */
+interface ExecutionLogRow extends ExecutionLogStepKey {
   inputSummary: unknown;
 }
 
@@ -88,28 +93,69 @@ interface ExecutionLogRow {
 const EXECUTION_LOG_OUTPUT_FIELDS = ['outputSummary', 'toolResult', 'nextStepSuggested', 'errorMessage'] as const;
 
 /**
+ * The module FlowOrchestratorService.executePlan writes a plan's own rows under (plan:start,
+ * plan:complete: no tool, no input or output, the plan's objective as their rationale).
+ */
+const PLAN_RECORD_MODULE = 'planner';
+
+/**
+ * W5-EXEC-LOGS-VISIBILITY review CR-EXL-2: the plan step a row is judged as (visiblePlanSteps). A
+ * plan's own row (PLAN_RECORD_MODULE, no tool) is no step: it records the plan, which the plan read
+ * rule shows with its objective to whoever may read the plan (GET ai/plans), so it is judged as a
+ * step that names no tool and no module (shown with its plan, its input and output filtered by the
+ * viewer's contact visibility, D-74). Any other row is the step it ran: its tool, or, for a
+ * KEY-cortex command's row (it names its tool `module.action`), a step KeyCortexPlannerService
+ * stores with no tool and the plan read rule judges by its module (KEY-R3a review SEC-R3a-1: a module
+ * the rule maps to nothing is denied by default).
+ */
+function executionLogStep(row: ExecutionLogStepKey): { toolName: string | null; action: string | null; module: string | null } {
+  if (row.module === PLAN_RECORD_MODULE && !row.toolName) return { toolName: null, action: null, module: null };
+  return {
+    toolName: row.module && row.toolName === `${row.module}.${row.action}` ? null : row.toolName,
+    action: row.action,
+    module: row.module,
+  };
+}
+
+/**
+ * W5-EXEC-LOGS-VISIBILITY review SEC-W5EL-1: whether `value` holds a payload its writer stored cut
+ * down to a preview ({ _truncated, _size, _preview }: AiExecutionLogService.sanitizePayload and
+ * KEY-cortex auditJson keep the first 500 characters of one past 5000). A preview cannot be judged by
+ * the contacts it names (the id naming its row may be past its end), so it is withheld from a viewer
+ * who may not open every contact.
+ */
+function holdsCutDownPayload(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some(holdsCutDownPayload);
+  const record = value as Record<string, unknown>;
+  if (record._truncated === true && '_preview' in record) return true;
+  return Object.values(record).some(holdsCutDownPayload);
+}
+
+/**
  * W5-EXEC-LOGS-VISIBILITY (CV-08l; D-74, D-93): execution log rows as `scope` lets its viewer read
  * them, by the plan read rule (visiblePlanSteps; KEY-R3a/KEY-R3b), not a second one. Each row is the
- * plan step it ran: its tool (a KEY-cortex command's row names it `module.action`, a step that
- * KeyCortexPlannerService stores with no tool and judges by its module), its input (inputSummary)
- * and its output (EXECUTION_LOG_OUTPUT_FIELDS). A row whose step the viewer may not see is not
- * served; a row whose output only the OWNER and a SUPER_ADMIN read (a contact read) is served with
- * that output null; every other output loses the rows naming a contact the viewer may not open, and
- * a row whose input names one is served with input and output null (D-74). The OWNER's rows are
- * unchanged.
+ * plan step it ran (executionLogStep), its input (inputSummary) and its output
+ * (EXECUTION_LOG_OUTPUT_FIELDS). A row whose step the viewer may not see is not served; a row whose
+ * output only the OWNER and a SUPER_ADMIN read (a contact read) is served with that output null;
+ * every other output loses the rows naming a contact the viewer may not open, and a row whose input
+ * names one is served with input and output null (D-74). Review SEC-W5EL-1: for a viewer who may not
+ * open every contact, a cut-down input (holdsCutDownPayload) may name one, so the row is served with
+ * input and output null, and a cut-down output is served null, as the plan read rule withholds the
+ * step whose whole value names one. The OWNER's rows are unchanged.
  */
 async function visibleExecutionLogs<L extends ExecutionLogRow>(logs: readonly L[], scope: GraphPlanReadScope): Promise<L[]> {
+  const judgesContacts = scope.hiddenContacts !== null;
   const steps = logs.map((log) => {
     const fields = log as unknown as Record<string, unknown>;
+    const outputs = EXECUTION_LOG_OUTPUT_FIELDS.filter((f) => f in fields);
+    const inputCutDown = judgesContacts && holdsCutDownPayload(log.inputSummary);
+    const outputWithheld = inputCutDown || (judgesContacts && outputs.some((f) => holdsCutDownPayload(fields[f])));
     return {
       log,
-      toolName: log.module && log.toolName === `${log.module}.${log.action}` ? null : log.toolName,
-      action: log.action,
-      module: log.module,
-      inputPayload: log.inputSummary,
-      outputResult: Object.fromEntries(
-        EXECUTION_LOG_OUTPUT_FIELDS.filter((f) => f in fields).map((f) => [f, fields[f] ?? null]),
-      ) as Record<string, unknown> | null,
+      ...executionLogStep(log),
+      inputPayload: inputCutDown ? null : log.inputSummary,
+      outputResult: outputWithheld ? null : (Object.fromEntries(outputs.map((f) => [f, fields[f] ?? null])) as Record<string, unknown>),
     };
   });
   const shown = await visiblePlanSteps(steps, scope);
@@ -119,6 +165,26 @@ async function visibleExecutionLogs<L extends ExecutionLogRow>(logs: readonly L[
     for (const f of EXECUTION_LOG_OUTPUT_FIELDS) if (f in row) row[f] = output[f] ?? null;
     return row as unknown as L;
   });
+}
+
+/**
+ * W5-EXEC-LOGS-VISIBILITY review CR-EXL-1: the rows among `keys` (each distinct step key of the rows a
+ * page is read from) whose step `scope` shows, as a filter on those keys, or null when it shows every
+ * one. visibleExecutionLogs drops a row only by its step (executionLogStep), which its key decides,
+ * so a page read with this filter holds `limit` rows while more are served and its count is the
+ * number served. The plan read rule judges each key once (visiblePlanSteps over keys with no input or
+ * output: no contact is looked up).
+ */
+async function servedExecutionLogKeys(
+  keys: readonly ExecutionLogStepKey[],
+  scope: GraphPlanReadScope,
+): Promise<Prisma.AiExecutionLogWhereInput[] | null> {
+  const shown = await visiblePlanSteps(
+    keys.map((key, index) => ({ ...executionLogStep(key), index })),
+    scope,
+  );
+  if (shown.length === keys.length) return null;
+  return shown.map(({ index }) => ({ toolName: keys[index].toolName, action: keys[index].action, module: keys[index].module }));
 }
 
 @Controller('ai')
@@ -561,11 +627,13 @@ export class AiController {
    * journey, a default trigger, the daily briefing: D-93 runs the system's plans as the owner)
    * reached every member, contacts a STAFF member may not open included. It now applies the plan
    * read rule (graphPlanReadScope, as GET ai/plans): a viewer who sees every plan (the OWNER, an
-   * ADMIN, a SUPER_ADMIN) is served every row, anyone else the rows of their own runs
-   * (memberRunExecutionLogs); each row is then judged as the plan step it ran (visibleExecutionLogs:
+   * ADMIN, a SUPER_ADMIN) is served the rows of every run, anyone else the rows of their own runs
+   * (memberRunsFilter); each row is then judged as the plan step it ran (visibleExecutionLogs:
    * visiblePlanSteps' rule, its output withheld when only the OWNER reads that step's output and
-   * otherwise filtered by the viewer's contact visibility, D-74). The OWNER is served every row as
-   * stored.
+   * otherwise filtered by the viewer's contact visibility, D-74), a plan's own row with its plan
+   * (review CR-EXL-2). Review CR-EXL-1: the page is read and counted over the rows served
+   * (servedExecutionLogPage), so it holds `limit` rows while more are served and `total` counts
+   * those. The OWNER is served every row as stored.
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/execution-logs')
@@ -579,43 +647,57 @@ export class AiController {
   ) {
     const viewer = this.planViewer(req);
     const mayRead = await graphPlanReadScope(this.prisma, businessId, viewer);
-    const filter = { module, toolName };
-    const page = mayRead.seesEveryPlan
-      ? await this.executionLog.getHistory(businessId, filter, safeInt(limit, 50), safeInt(offset, 0))
-      : await this.memberRunExecutionLogs(businessId, viewer.id, filter, safeInt(limit, 50), safeInt(offset, 0));
+    const page = await this.servedExecutionLogPage(businessId, viewer.id, mayRead, { module, toolName }, safeInt(limit, 50), safeInt(offset, 0));
     return { ...page, logs: await visibleExecutionLogs(page.logs, mayRead) };
   }
 
   /**
-   * W5-EXEC-LOGS-VISIBILITY (D-74): the execution log rows of the runs `memberId` may read when they
-   * do not see every plan, as getHistory pages them (newest first; `total` counts them): a row of a
-   * plan they proposed (the plan read rule: a plan to its proposer), and a row of no plan that ran
-   * for them (its userId: the member a tool ran for, as the orchestrator and the execute route
-   * attribute it). A row of another member's plan, or of none that ran for nobody (the system's
-   * runs), is not theirs.
+   * W5-EXEC-LOGS-VISIBILITY review CR-EXL-1: one page of the execution log rows `scope` serves its
+   * viewer, newest first, and their count. The rows are those of the runs the viewer may read (every
+   * run for a viewer who sees every plan, else memberRunsFilter) whose step the plan read rule shows
+   * (servedExecutionLogKeys), so visibleExecutionLogs drops none of them. When every row of every run
+   * is served, getHistory reads the page as before.
    */
-  private async memberRunExecutionLogs(
+  private async servedExecutionLogPage(
     businessId: string,
-    memberId: string,
+    viewerId: string,
+    scope: GraphPlanReadScope,
     filter: { module?: string; toolName?: string },
     limit: number,
     offset: number,
   ) {
-    const plans = await this.prisma.client.aiPlan.findMany({ where: { businessId, userId: memberId }, select: { id: true } });
-    const where = {
+    const runs = scope.seesEveryPlan ? null : await this.memberRunsFilter(businessId, viewerId);
+    const where: Prisma.AiExecutionLogWhereInput = {
       businessId,
       ...(filter.module ? { module: filter.module } : {}),
       ...(filter.toolName ? { toolName: filter.toolName } : {}),
-      OR: [
-        { planId: null, userId: memberId },
-        ...(plans.length > 0 ? [{ planId: { in: plans.map((p) => p.id) } }] : []),
-      ],
+      ...(runs ? { OR: runs } : {}),
     };
+    const keys = await this.prisma.client.aiExecutionLog.groupBy({ by: ['toolName', 'action', 'module'], where });
+    const served = await servedExecutionLogKeys(keys, scope);
+    if (!runs && !served) return this.executionLog.getHistory(businessId, filter, limit, offset);
+    if (served && served.length === 0) return { logs: [], total: 0, limit, offset };
+    const page: Prisma.AiExecutionLogWhereInput = served ? { AND: [where, { OR: served }] } : where;
     const [logs, total] = await Promise.all([
-      this.prisma.client.aiExecutionLog.findMany({ where, orderBy: { createdAt: 'desc' }, take: limit, skip: offset }),
-      this.prisma.client.aiExecutionLog.count({ where }),
+      this.prisma.client.aiExecutionLog.findMany({ where: page, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: limit, skip: offset }),
+      this.prisma.client.aiExecutionLog.count({ where: page }),
     ]);
     return { logs, total, limit, offset };
+  }
+
+  /**
+   * W5-EXEC-LOGS-VISIBILITY (D-74): the execution log rows of the runs `memberId` may read when they
+   * do not see every plan: a row of a plan they proposed (the plan read rule: a plan to its
+   * proposer), and a row of no plan that ran for them (its userId: the member a tool ran for, as the
+   * orchestrator and the execute route attribute it). A row of another member's plan, or of none that
+   * ran for nobody (the system's runs), is not theirs.
+   */
+  private async memberRunsFilter(businessId: string, memberId: string): Promise<Prisma.AiExecutionLogWhereInput[]> {
+    const plans = await this.prisma.client.aiPlan.findMany({ where: { businessId, userId: memberId }, select: { id: true } });
+    return [
+      { planId: null, userId: memberId },
+      ...(plans.length > 0 ? [{ planId: { in: plans.map((p) => p.id) } }] : []),
+    ];
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
