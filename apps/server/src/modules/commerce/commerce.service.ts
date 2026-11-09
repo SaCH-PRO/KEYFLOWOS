@@ -3932,10 +3932,13 @@ export class CommerceService {
    * full amount beside the SUCCESSFUL payment the member recorded from it, so
    * the payments page showed the same money twice. A status filter cannot
    * bring it back. PENDING, FAILED and refund rows stay listed under their own
-   * status. Only rows of this tenant's own invoices are listed (Payment sits
-   * outside the tenant extension with no FK to Business, M31): a row carrying
-   * this businessId on another business's invoice disclosed that invoice and
-   * its customer here (ownTenantPayments reads it the same way).
+   * status.
+   *
+   * Payment sits outside the tenant extension with no FK to Business (M31), so
+   * a row carrying this businessId can name another business's invoice. That
+   * row is this business's own and is listed, but without the invoice: never
+   * that invoice's number, total or customer (review SEC-OR-2, D-75, below).
+   * No invoice balance or counter of this business counts it (ownTenantPayments).
    */
   async listAllPayments(businessId: string, filters: {
     status?: string;
@@ -3951,7 +3954,6 @@ export class CommerceService {
       businessId,
       // The literal avoids importing payment-evidence.service (see listPayments).
       NOT: { status: 'CONFIRMED' },
-      invoice: { is: { businessId } },
     };
     if (filters.status) where.status = filters.status;
     if (filters.method) where.method = filters.method;

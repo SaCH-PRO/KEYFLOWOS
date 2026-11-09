@@ -100,8 +100,10 @@
  *              ?status=CONFIRMED; PENDING, FAILED and refund rows stay listed
  *              under their own status; the CONFIRMED row itself is kept.
  *   V41C-02    a member of another business: 403 on bizC's list, and its own
- *              list carries no row of a bizC invoice (the bizB-carrying row
- *              disclosed bizC's invoice and customer), also when it names
+ *              list serves the bizB-carrying row on a bizC invoice as its own
+ *              row with no invoice (it disclosed bizC's invoice and customer;
+ *              trial-P seam, D-75 as DEP-R3 OR-11 reads it); nothing of bizC's
+ *              invoice or customer, also when it names
  *              bizC's contact (?contactId=, and the KEY Cortex payment
  *              history, which always passes contactId).
  *   V41C-03    commerce-ai clientPaymentIntelligence.totalPayments and the
@@ -1415,14 +1417,19 @@ describe('V1-41c: the payments page and the payment counters read money rows onl
     expect((await db.payment.findUnique({ where: { id: confirmedRowId } })).status).toBe('CONFIRMED');
   });
 
-  it('V41C-02: a member of another business sees none of it: 403 on bizC\'s list, and its own list carries no row of a bizC invoice and nothing of bizC\'s customer', async () => {
+  it('V41C-02: a member of another business sees none of it: 403 on bizC\'s list, and its own list serves its row on a bizC invoice with no invoice and nothing of bizC\'s customer', async () => {
     const denied = await agent().get(`/commerce/businesses/${C.biz}/payments`).set(HEADER, ID.ownerB);
     expect(denied.status).toBe(403);
 
     const own = await agent().get(`/commerce/businesses/${ID.bizB}/payments`).set(HEADER, ID.ownerB);
     expect(own.status, JSON.stringify(own.body)).toBe(200);
     const bizCInvoices = [C.invRefunded, C.invAttempts, C.invPaid];
-    expect(own.body.filter((p: any) => bizCInvoices.includes(p.invoiceId))).toEqual([]);
+    // Trial-P seam (D-75, DEP-R3 OR-11): a row carrying bizB's id on a bizC
+    // invoice is bizB's own row and is listed, but with no invoice: nothing
+    // of bizC's invoice or customer is served with it.
+    expect(own.body.filter((p: any) => bizCInvoices.includes(p.invoiceId)).map((p: any) => ({ id: p.id, businessId: p.businessId, invoice: p.invoice })))
+      .toEqual([{ id: expect.any(String), businessId: ID.bizB, invoice: null }]);
+    expect(own.body.find((p: any) => bizCInvoices.includes(p.invoiceId)).providerPaymentId).toBe(`${P}c_foreign_row`);
     const text = JSON.stringify(own.body);
     expect(text).not.toContain(C_CONTACT_EMAIL);
     expect(text).not.toContain('V41C-');
