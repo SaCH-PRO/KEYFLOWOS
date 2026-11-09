@@ -74,6 +74,8 @@ function makeOrchestrator(plan: DriveIntakePlan) {
       creditNoteNumber: input.creditNoteNumber,
     })),
     apply: vi.fn().mockResolvedValue({ creditNote: { id: 'cn_dio', status: 'APPLIED' }, transactionId: 'txn_dio' }),
+    // V1-44b review (SEC-V44b-R2): the approver may apply a credit note (revenue:write).
+    assertMemberMayApply: vi.fn().mockResolvedValue(undefined),
   };
   const orchestrator = new DriveIntakeOrchestrator(
     prisma as any,
@@ -271,7 +273,7 @@ describe('V1-44b: the Drive-intake approval is claimed once and its credit step 
 
   it('DIO-09: a re-run whose step note is already APPLIED creates and applies nothing; the step answers that note', async () => {
     const { orchestrator, prisma, creditNotes } = makeOrchestrator(creditPlan([STEP]));
-    prisma.client.creditNote.findFirst.mockResolvedValue({ id: 'cn_prev', status: 'APPLIED', invoiceId: 'inv_dio' });
+    prisma.client.creditNote.findFirst.mockResolvedValue({ id: 'cn_prev', status: 'APPLIED', invoiceId: 'inv_dio', amount: 50 });
     const result = await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
     expect(result.success).toBe(true);
     expect(prisma.client.creditNote.findFirst).toHaveBeenCalledWith(
@@ -285,12 +287,12 @@ describe('V1-44b: the Drive-intake approval is claimed once and its credit step 
 
   it('DIO-10: a step note left DRAFT by a failed run is applied, not created again', async () => {
     const { orchestrator, prisma, creditNotes } = makeOrchestrator(creditPlan([STEP]));
-    prisma.client.creditNote.findFirst.mockResolvedValue({ id: 'cn_draft', status: 'DRAFT', invoiceId: 'inv_dio' });
+    prisma.client.creditNote.findFirst.mockResolvedValue({ id: 'cn_draft', status: 'DRAFT', invoiceId: 'inv_dio', amount: 50 });
     const result = await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
     expect(result.success).toBe(true);
     expect(creditNotes.create).not.toHaveBeenCalled();
     expect(creditNotes.apply).toHaveBeenCalledTimes(1);
-    expect(creditNotes.apply).toHaveBeenCalledWith(BIZ, 'cn_draft', { userId: APPROVER });
+    expect(creditNotes.apply).toHaveBeenCalledWith(BIZ, 'cn_draft', { userId: APPROVER, expectedAmount: 50 });
     expect(result.results).toEqual([{ action: 'apply_credit_note', success: true, entityId: 'cn_draft' }]);
   });
 
@@ -298,15 +300,15 @@ describe('V1-44b: the Drive-intake approval is claimed once and its credit step 
     const { orchestrator, prisma, creditNotes } = makeOrchestrator(creditPlan([STEP]));
     prisma.client.creditNote.findFirst
       .mockResolvedValueOnce(null) // before the create
-      .mockResolvedValueOnce({ id: 'cn_won', status: 'DRAFT', invoiceId: 'inv_dio' }) // the other run created it
-      .mockResolvedValueOnce({ id: 'cn_won', status: 'APPLIED', invoiceId: 'inv_dio' }); // and applied it
+      .mockResolvedValueOnce({ id: 'cn_won', status: 'DRAFT', invoiceId: 'inv_dio', amount: 50 }) // the other run created it
+      .mockResolvedValueOnce({ id: 'cn_won', status: 'APPLIED', invoiceId: 'inv_dio', amount: 50 }); // and applied it
     creditNotes.create.mockRejectedValueOnce(Object.assign(new Error('Credit note number already exists'), { status: 400 }));
     creditNotes.apply.mockRejectedValueOnce(Object.assign(new Error('Credit note already applied or voided'), { status: 409 }));
     const result = await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
     expect(result.success).toBe(true);
     expect(creditNotes.create).toHaveBeenCalledTimes(1);
     expect(creditNotes.apply).toHaveBeenCalledTimes(1);
-    expect(creditNotes.apply).toHaveBeenCalledWith(BIZ, 'cn_won', { userId: APPROVER });
+    expect(creditNotes.apply).toHaveBeenCalledWith(BIZ, 'cn_won', { userId: APPROVER, expectedAmount: 50 });
     expect(result.results).toEqual([{ action: 'apply_credit_note', success: true, entityId: 'cn_won' }]);
   });
 
@@ -315,7 +317,7 @@ describe('V1-44b: the Drive-intake approval is claimed once and its credit step 
     creditNotes.apply.mockRejectedValueOnce(Object.assign(new Error('A member with revenue write access must apply this credit note'), { status: 403 }));
     prisma.client.creditNote.findFirst
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: 'cn_dio', status: 'DRAFT', invoiceId: 'inv_dio' });
+      .mockResolvedValueOnce({ id: 'cn_dio', status: 'DRAFT', invoiceId: 'inv_dio', amount: 50 });
     const result = await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
     expect(result.success).toBe(false);
     expect(result.results).toEqual([]);
@@ -323,8 +325,8 @@ describe('V1-44b: the Drive-intake approval is claimed once and its credit step 
   });
 
   for (const [label, row] of [
-    ['VOIDed by a member', { id: 'cn_void', status: 'VOID', invoiceId: 'inv_dio' }],
-    ['numbered for another invoice', { id: 'cn_other', status: 'DRAFT', invoiceId: 'inv_other' }],
+    ['VOIDed by a member', { id: 'cn_void', status: 'VOID', invoiceId: 'inv_dio', amount: 50 }],
+    ['numbered for another invoice', { id: 'cn_other', status: 'DRAFT', invoiceId: 'inv_other', amount: 50 }],
   ] as const) {
     it(`DIO-12: a step note ${label} is not applied again; the plan fails`, async () => {
       const { orchestrator, prisma, creditNotes } = makeOrchestrator(creditPlan([STEP]));
@@ -340,17 +342,112 @@ describe('V1-44b: the Drive-intake approval is claimed once and its credit step 
   it('DIO-13 (SEC-V44-4): the credit step applies as the approving member', async () => {
     const { orchestrator, creditNotes } = makeOrchestrator(creditPlan([STEP]));
     await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
-    expect(creditNotes.apply).toHaveBeenCalledWith(BIZ, 'cn_dio', { userId: APPROVER });
+    expect(creditNotes.apply).toHaveBeenCalledWith(BIZ, 'cn_dio', { userId: APPROVER, expectedAmount: 50 });
   });
 
   for (const placeholder of ['system', 'user']) {
     it(`DIO-13 (SEC-V44-4): a plan run with no human approver ("${placeholder}") applies with no actor; the placeholder is never the actor`, async () => {
       const { orchestrator, creditNotes } = makeOrchestrator(creditPlan([STEP]));
+      // The authority stub admits every approver here; the real rule refuses a placeholder
+      // before the claim (DIO-14). This pins what apply would be handed regardless.
       await orchestrator.executePlan(BIZ, INTAKE, placeholder);
       expect(creditNotes.apply).toHaveBeenCalledTimes(1);
       // RED-BEFORE (V1-44 head): { userId: 'system' } / { userId: 'user' }.
-      expect(creditNotes.apply.mock.calls[0][2]).toEqual({ userId: null });
+      expect(creditNotes.apply.mock.calls[0][2]).toEqual({ userId: null, expectedAmount: 50 });
       expect(JSON.stringify([...creditNotes.apply.mock.calls, ...creditNotes.create.mock.calls])).not.toContain(`"${placeholder}"`);
     });
   }
+});
+
+/**
+ * V1-44b review repairs (SEC-V44b-R1, SEC-V44b-R2, CRR-V44b-1).
+ *
+ *   DIO-14 SEC-V44b-R2 a plan with a credit step is approved only by a member who may apply a
+ *          credit note: the check (CreditNoteService.assertMemberMayApply, with approverActorId)
+ *          runs before the claim; a refused approver (revenue:read, a placeholder) is refused 403
+ *          and nothing is claimed, created, applied or flipped, so the intake stays approvable.
+ *          A plan with no credit step is not asked for it
+ *   DIO-15 SEC-V44b-R1 / CRR-V44b-1 a note carrying the step's number that credits another amount
+ *          (a DRAFT or APPLIED note left by an earlier plan of the same intake file) is not this
+ *          step's: refused 409, nothing created or applied, the plan fails
+ *   DIO-16 the same holds when a concurrent run's note turns up APPLIED after this run's apply was
+ *          refused: it is this step's only at the step's amount
+ * The real rows are proven in test/credit-note-reversal.integration.test.ts CN-24..CN-26.
+ */
+describe('V1-44b review: the credit step answers only its own amount; the approver is checked before the claim', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const STEP = { invoiceId: 'inv_dio', amount: 50, reason: 'DIO credit' };
+  const forbidden = () => Object.assign(new Error('Insufficient permissions: revenue requires write access (you have read)'), { status: 403 });
+
+  it('DIO-14 (SEC-V44b-R2): an approver who may not apply a credit note is refused before the claim; nothing is claimed, created, applied or flipped', async () => {
+    const { orchestrator, prisma, creditNotes } = makeOrchestrator(creditPlan([STEP]));
+    creditNotes.assertMemberMayApply.mockRejectedValueOnce(forbidden());
+    // RED-BEFORE (V1-44b head): claimed, the step note created, apply refused, the intake 'error'.
+    await expect(orchestrator.executePlan(BIZ, INTAKE, 'user_dio_staff')).rejects.toMatchObject({ status: 403 });
+    expect(creditNotes.assertMemberMayApply).toHaveBeenCalledWith(BIZ, 'user_dio_staff');
+    expect(prisma.client.driveIntakeFile.updateMany).not.toHaveBeenCalled();
+    expect(creditNotes.create).not.toHaveBeenCalled();
+    expect(creditNotes.apply).not.toHaveBeenCalled();
+    expect(prisma.client.driveIntakeFile.update).not.toHaveBeenCalled();
+  });
+
+  for (const placeholder of ['system', 'user']) {
+    it(`DIO-14 (SEC-V44b-R2): the authority check names no placeholder ("${placeholder}" is checked as no actor)`, async () => {
+      const { orchestrator, prisma, creditNotes } = makeOrchestrator(creditPlan([STEP]));
+      creditNotes.assertMemberMayApply.mockRejectedValueOnce(Object.assign(new Error('A member with revenue write access must apply this credit note'), { status: 403 }));
+      await expect(orchestrator.executePlan(BIZ, INTAKE, placeholder)).rejects.toMatchObject({ status: 403 });
+      expect(creditNotes.assertMemberMayApply).toHaveBeenCalledWith(BIZ, null);
+      expect(prisma.client.driveIntakeFile.updateMany).not.toHaveBeenCalled();
+      expect(creditNotes.create).not.toHaveBeenCalled();
+    });
+  }
+
+  it('DIO-14 (SEC-V44b-R2): the check runs before the claim; a plan with no credit step is not asked for it', async () => {
+    const credit = makeOrchestrator(creditPlan([STEP]));
+    await credit.orchestrator.executePlan(BIZ, INTAKE, APPROVER);
+    expect(credit.creditNotes.assertMemberMayApply).toHaveBeenCalledWith(BIZ, APPROVER);
+    expect(credit.creditNotes.assertMemberMayApply.mock.invocationCallOrder[0]).toBeLessThan(
+      credit.prisma.client.driveIntakeFile.updateMany.mock.invocationCallOrder[0],
+    );
+
+    const payment = makeOrchestrator(paymentPlan({ invoiceId: 'inv_dio', amount: 5, method: 'cash' }));
+    expect((await payment.orchestrator.executePlan(BIZ, INTAKE, 'system')).success).toBe(true);
+    expect(payment.creditNotes.assertMemberMayApply).not.toHaveBeenCalled();
+  });
+
+  for (const status of ['DRAFT', 'APPLIED'] as const) {
+    it(`DIO-15 (SEC-V44b-R1, CRR-V44b-1): a ${status} note with the step's number for another amount is refused 409; nothing created or applied, the plan fails`, async () => {
+      const { orchestrator, prisma, creditNotes } = makeOrchestrator(creditPlan([STEP]));
+      prisma.client.creditNote.findFirst.mockResolvedValue({ id: 'cn_stale', status, invoiceId: 'inv_dio', amount: '80' });
+      const result = await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
+      // RED-BEFORE (V1-44b head): success with entityId cn_stale (a DRAFT one applied at 80).
+      expect(result.success).toBe(false);
+      expect(result.results).toEqual([]);
+      expect(creditNotes.create).not.toHaveBeenCalled();
+      expect(creditNotes.apply).not.toHaveBeenCalled();
+      const errorFlip = prisma.client.driveIntakeFile.update.mock.calls.find((c: any[]) => c[0]?.data?.status === 'error');
+      expect(errorFlip?.[0].data.errorMessage).toMatch(/credits 80, not the 50/);
+    });
+  }
+
+  it('DIO-15: the same note at the step amount (another spelling of 50) is the step\'s own', async () => {
+    const { orchestrator, prisma, creditNotes } = makeOrchestrator(creditPlan([STEP]));
+    prisma.client.creditNote.findFirst.mockResolvedValue({ id: 'cn_same', status: 'APPLIED', invoiceId: 'inv_dio', amount: '50.0000' });
+    const result = await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
+    expect(result.success).toBe(true);
+    expect(result.results).toEqual([{ action: 'apply_credit_note', success: true, entityId: 'cn_same' }]);
+    expect(creditNotes.apply).not.toHaveBeenCalled();
+  });
+
+  it('DIO-16: a note found APPLIED after this run\'s apply was refused is this step\'s only at the step amount', async () => {
+    const { orchestrator, prisma, creditNotes } = makeOrchestrator(creditPlan([STEP]));
+    prisma.client.creditNote.findFirst
+      .mockResolvedValueOnce({ id: 'cn_x', status: 'DRAFT', invoiceId: 'inv_dio', amount: 50 })
+      .mockResolvedValueOnce({ id: 'cn_x', status: 'APPLIED', invoiceId: 'inv_dio', amount: 70 });
+    creditNotes.apply.mockRejectedValueOnce(Object.assign(new Error('Credit note already applied or voided'), { status: 409 }));
+    const result = await orchestrator.executePlan(BIZ, INTAKE, APPROVER);
+    expect(result.success).toBe(false);
+    expect(result.results).toEqual([]);
+  });
 });

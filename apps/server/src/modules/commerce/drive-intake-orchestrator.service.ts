@@ -1,4 +1,5 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
 import { CrmCommunicationService } from '../crm/crm-communication.service';
@@ -6,7 +7,7 @@ import { TransactionalEmailService } from '../notifications/transactional-email.
 import { AiOversightService } from '../ai/ai-oversight.service';
 import { CommerceService } from './commerce.service';
 import { InvoiceWorkflowService } from './invoice-workflow.service';
-import { CreditNoteService } from '../finance/credit-note.service';
+import { CreditNoteService, RESERVED_CREDIT_NOTE_NUMBER_PREFIX } from '../finance/credit-note.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 import type { DocumentExtractionResult } from '../ai/document-intelligence.service';
 import { PaymentEvidenceService } from './payment-evidence.service';
@@ -291,6 +292,19 @@ export class DriveIntakeOrchestrator {
     const plan = planOverride ?? (intake.proposedActions as unknown as DriveIntakePlan | null);
     if (!plan) throw new BadRequestException('No action plan found for this intake file');
 
+    // V1-44b review (SEC-V44b-R2): a plan that credits an invoice is approved
+    // only by a member who may apply a credit note (revenue:write, the rule
+    // CreditNoteService.apply enforces), and that is checked BEFORE the claim.
+    // Checked only at apply, a member with revenue:read (refused POST
+    // credit-notes) still created the step's note through the plan, and their
+    // run used up the one-shot claim: the intake ended 'error' and the member
+    // who may approve it never could. The placeholders ('system', 'user') name
+    // no member and are refused here too. A refused approval writes nothing
+    // and leaves the intake 'reviewing'.
+    if (plan.actions.some((a) => a.type === 'apply_credit_note')) {
+      await this.creditNotes.assertMemberMayApply(businessId, DriveIntakeOrchestrator.approverActorId(userId));
+    }
+
     // V1-44b (V1-44 review SEC-V44-3): the approval is a compare-and-set
     // claim. The status checks above are reads and 'approved' was written only
     // after every step, so two concurrent approvals (two members, a double
@@ -385,22 +399,26 @@ export class DriveIntakeOrchestrator {
             // instead of crediting the invoice again: one note, one apply, one
             // REVERSAL. CN-<Date.now()> was a new note on every run.
             const creditNoteNumber = DriveIntakeOrchestrator.creditNoteNumberFor(intakeFileId, actionIndex);
-            const cn = await this.keyedCreditNote(businessId, creditNoteNumber, {
-              invoiceId,
-              amount: payload.amount,
-              reason: payload.reason,
-            });
+            const step = { invoiceId, amount: payload.amount, reason: payload.reason };
+            const cn = await this.keyedCreditNote(businessId, creditNoteNumber, step);
             if (cn.status === 'DRAFT') {
               // V1-44b (SEC-V44-4): applied as the approving member, never as a
               // placeholder ('system', 'user'), as the payment step records
               // its payment; with no member CreditNoteService.apply refuses 403
-              // and the note stays DRAFT for a member to apply.
+              // (and executePlan refused such an approver before the claim,
+              // SEC-V44b-R2).
+              // V1-44b review (SEC-V44b-R1): at the amount this step approves;
+              // a note PATCHed since it was read is refused 409, not posted.
               try {
-                await this.creditNotes.apply(businessId, cn.id, { userId: DriveIntakeOrchestrator.approverActorId(userId) });
+                await this.creditNotes.apply(businessId, cn.id, {
+                  userId: DriveIntakeOrchestrator.approverActorId(userId),
+                  expectedAmount: payload.amount,
+                });
               } catch (applyErr) {
                 // A concurrent run of this same step applied it first: that is this step done.
                 const now = await this.findKeyedCreditNote(businessId, creditNoteNumber);
                 if (now?.status !== 'APPLIED') throw applyErr;
+                DriveIntakeOrchestrator.assertSameStep(creditNoteNumber, now, step);
               }
             } else if (cn.status !== 'APPLIED') {
               throw new ConflictException(`Credit note ${creditNoteNumber} is ${cn.status}; this plan step does not apply it again`);
@@ -479,32 +497,59 @@ export class DriveIntakeOrchestrator {
 
   /** V1-44b (SEC-V44-3): the credit note number of one apply_credit_note step: the step's identity, never the approver's. */
   private static creditNoteNumberFor(intakeFileId: string, actionIndex: number): string {
-    return `CN-DRIVE-${intakeFileId}-${actionIndex}`;
+    return `${RESERVED_CREDIT_NOTE_NUMBER_PREFIX}${intakeFileId}-${actionIndex}`;
   }
 
   private findKeyedCreditNote(businessId: string, creditNoteNumber: string) {
     return this.prisma.client.creditNote.findFirst({
       where: { businessId, creditNoteNumber },
-      select: { id: true, status: true, invoiceId: true },
+      select: { id: true, status: true, invoiceId: true, amount: true },
     });
+  }
+
+  /**
+   * V1-44b review (SEC-V44b-R1, CRR-V44b-1): a note carrying the step's
+   * number is this step's only when it credits what the step approves: the
+   * same invoice and the same amount. The number outlives the document
+   * version (a re-synced Drive file keeps its DriveIntakeFile id and returns to
+   * 'reviewing' with a new plan), so a note left by an earlier plan of another
+   * amount (a DRAFT whose apply failed, or an APPLIED one) is refused 409, as
+   * record_payment refuses a key replayed with another amount
+   * (PaymentEvidenceService): never applied in this approver's name, never
+   * reported as this step's credit.
+   */
+  private static assertSameStep(
+    creditNoteNumber: string,
+    note: { status: string; invoiceId: string; amount: unknown },
+    input: { invoiceId: string; amount: number },
+  ): void {
+    if (note.invoiceId !== input.invoiceId) {
+      throw new ConflictException(`Credit note ${creditNoteNumber} belongs to another invoice`);
+    }
+    const noted = note.amount == null ? null : new Prisma.Decimal(String(note.amount));
+    if (!noted || !noted.equals(new Prisma.Decimal(String(input.amount)))) {
+      throw new ConflictException(
+        `Credit note ${creditNoteNumber} (${note.status}) credits ${String(noted)}, not the ${String(input.amount)} this plan step approves; it is not applied for this plan`,
+      );
+    }
   }
 
   /**
    * V1-44b (SEC-V44-3): the step's note, created on its first execution. A
    * note already carrying the step's number is that step's (a re-run, or a
    * concurrent run that created it first; the number is unique per business,
-   * so of two creates one is refused and reads the other's). A note with the
-   * number for another invoice is not this step's and is refused 409.
+   * so of two creates one is refused and reads the other's) when it credits
+   * the same invoice and amount (assertSameStep); any other is refused 409.
+   * No member can mint the number: POST credit-notes refuses the
+   * RESERVED_CREDIT_NOTE_NUMBER_PREFIX.
    */
   private async keyedCreditNote(
     businessId: string,
     creditNoteNumber: string,
     input: { invoiceId: string; amount: number; reason?: string },
   ): Promise<{ id: string; status: string; invoiceId: string }> {
-    const sameStep = (note: { id: string; status: string; invoiceId: string }) => {
-      if (note.invoiceId !== input.invoiceId) {
-        throw new ConflictException(`Credit note ${creditNoteNumber} belongs to another invoice`);
-      }
+    const sameStep = (note: { id: string; status: string; invoiceId: string; amount: unknown }) => {
+      DriveIntakeOrchestrator.assertSameStep(creditNoteNumber, note, input);
       return note;
     };
     const existing = await this.findKeyedCreditNote(businessId, creditNoteNumber);

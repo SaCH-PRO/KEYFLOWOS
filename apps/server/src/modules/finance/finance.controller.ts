@@ -34,7 +34,7 @@ import { MoneyMovesService } from './money-moves.service';
 import { CashReserveService } from './cash-reserve.service';
 import { BankRuleService, type CreateBankRuleInput, type UpdateBankRuleInput } from './bank-rule.service';
 import { RecurringJournalEntryService, type CreateRecurringJournalEntryInput, type UpdateRecurringJournalEntryInput } from './recurring-journal-entry.service';
-import { CreditNoteService, type CreateCreditNoteInput, type UpdateCreditNoteInput } from './credit-note.service';
+import { CreditNoteService, RESERVED_CREDIT_NOTE_NUMBER_PREFIX, type CreateCreditNoteInput, type UpdateCreditNoteInput } from './credit-note.service';
 import { AccountingPeriodService, type CreateAccountingPeriodInput, type CloseAccountingPeriodInput } from './accounting-period.service';
 import { BankConnectionService, type CreateBankConnectionInput, type UpdateBankConnectionInput } from './bank-connection.service';
 import { ExchangeRateService, type CreateExchangeRateInput } from './exchange-rate.service';
@@ -1244,6 +1244,15 @@ export class FinanceController {
     @Req() req: any,
   ) {
     await this.ensureAccess(req.user.id, businessId);
+    // V1-44b review (SEC-V44b-R1, CRR-V44b-1): 'CN-DRIVE-' numbers belong to
+    // the Drive-intake plan steps, which answer a note carrying their number
+    // as their own; a member-made one would be applied in the approver's name.
+    if (
+      typeof body?.creditNoteNumber === 'string' &&
+      body.creditNoteNumber.trim().toUpperCase().startsWith(RESERVED_CREDIT_NOTE_NUMBER_PREFIX)
+    ) {
+      throw new BadRequestException(`Credit note numbers starting ${RESERVED_CREDIT_NOTE_NUMBER_PREFIX} are reserved for Drive intake`);
+    }
     return this.creditNotes.create(businessId, body);
   }
 
