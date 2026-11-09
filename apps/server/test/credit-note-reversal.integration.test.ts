@@ -166,6 +166,21 @@
  *   CAP-05 RED-BEFORE FULLY_CREDITED stays unpayable: the token routes, the receipt and the bare-id
  *         status 404; the bare-id checkout 409 with no provider called
  *
+ * W5-CREDIT-AWARE-PAY review repairs (D-13, D-19, D-75, D-78): the WiPay callback is verified against the
+ * amounts the invoice's checkouts asked for, kept before WiPay is called (webhook_events 'wipay-requested'),
+ * or the whole total a pre-W5 checkout asked for; never a remainder worked out when the callback arrives:
+ *   CAP-02 (amended) the payer's WiPay checkout asks for the 50 before its callback arrives
+ *   CAP-06 SEC-CAP-1 / CR-CAP-1 a payment recorded between the checkout and its callback, and a second
+ *          paid checkout of the same amount: each callback records the amount asked (packet head: 400
+ *          'Invalid WiPay callback signature', nothing written); a refused checkout keeps nothing
+ *   CAP-07 SEC-CAP-1 / CR-CAP-1 a credit note applied between the checkout and its callback: the 70 asked is
+ *          recorded, the invoice stays PARTIALLY_CREDITED
+ *   CAP-08 SEC-CAP-2 the redelivery of a recorded transaction after its credit note is voided is the
+ *          duplicate answer, nothing more written
+ *   CAP-09 SEC-CAP-3 invoice A's transaction sent with B's order_id, B owing the same 50 but never asked
+ *          for it, is refused 400 with no row and no claim; A's own callback then records it on A
+ *   (CR-CAP-2: cleanup() deletes this suite's webhook_events rows, so a second run starts clean)
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor, FinanceController (credit-note routes), CreditNoteService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService,
@@ -241,6 +256,9 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W5-CREDIT-AWARE-PAY review CR-CAP-2: the WiPay claims (CAP-02) and the amounts the WiPay checkouts asked
+    // for (CAP-06..CAP-09) are this suite's rows too; left behind, a second run read 'Duplicate callback ignored'.
+    `DELETE FROM webhook_events WHERE provider_event_id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM credit_notes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
@@ -2399,6 +2417,11 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
     it('CAP-02 RED-BEFORE W5-CREDIT-AWARE-PAY CR-V44-1 (D-78): the WiPay callback for the 50 it was asked for records 50 and leaves the invoice PARTIALLY_CREDITED; its redelivery is a duplicate; then the poll and the receipt state 0 due beside the 30 credited, and every checkout of the settled invoice answers 409 with no provider called', async () => {
       const X = await seedCreditedWithLink('cap_wipay', 20, 30);
       const txn = `${P}wipay_tx_cap`;
+      // Review SEC-CAP-1 / CR-CAP-1: the callback is verified against the amount the checkout asked WiPay for,
+      // kept when it asked (not worked out again when the callback arrives), so the payer's checkout comes first.
+      const asked = await checkout(X.token, WIPAY_BODY);
+      expect(asked.status, JSON.stringify(asked.body)).toBe(201);
+      expect(wipayTotal()).toBe('50.00');
       // Base: 400 'Invalid WiPay callback signature' (the proof was checked over the 100 total).
       const res = await wipayCallback(X.inv, txn, 50);
       expect(res.status, JSON.stringify(res.body)).toBe(200);
@@ -2488,6 +2511,125 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
       expect(providerCalls.length, 'no provider called').toBe(calls);
       expect(await db.payment.count({ where: { invoiceId: F.inv } }), 'nothing written').toBe(0);
       expect(await invoiceRow(F.inv)).toMatchObject({ status: 'FULLY_CREDITED', paidAt: null });
+    });
+
+    /** The amounts the WiPay checkouts asked for on an invoice, as kept (webhook_events 'wipay-requested'), in cents. */
+    async function wipayAsked(inv: string): Promise<string[]> {
+      const rows = await db.webhookEvent.findMany({ where: { provider: 'wipay-requested', providerEventId: { startsWith: `${inv}:` } }, select: { providerEventId: true, businessId: true } });
+      expect(rows.every((r: { businessId: string }) => r.businessId === ID.biz), 'kept with the invoice business').toBe(true);
+      return rows.map((r: { providerEventId: string }) => r.providerEventId.slice(inv.length + 1)).sort();
+    }
+    const claimsOf = (txn: string) => db.webhookEvent.count({ where: { provider: 'wipay', providerEventId: txn } });
+
+    it('CAP-06 W5-CREDIT-AWARE-PAY review SEC-CAP-1 / CR-CAP-1 (D-13, D-19): the WiPay callback is verified against the amount its checkout asked for, kept when it asked, so a payment recorded between the checkout and the callback, or a second paid checkout, does not turn the money WiPay took into a refused signature: each is recorded at the amount asked', async () => {
+      // An uncredited invoice part-paid 40: the checkout asks for 60, then the operator records 10.
+      const inv = await seedInvoice('cap06_part', 'SENT');
+      const link = await createLink(inv);
+      expect(link.status, JSON.stringify(link.body)).toBe(201);
+      expect((await recordPaymentRoute(inv, 40, 'cap06_part_pay1')).status).toBe(201);
+      const asked = await checkout(link.body.token, WIPAY_BODY);
+      expect(asked.status, JSON.stringify(asked.body)).toBe(201);
+      expect(wipayTotal()).toBe('60.00');
+      expect(await wipayAsked(inv), 'kept before WiPay was called').toEqual(['6000']);
+      expect((await recordPaymentRoute(inv, 10, 'cap06_part_pay2')).status).toBe(201);
+      // Packet head: 400 'Invalid WiPay callback signature' (the remainder had become 50), nothing written.
+      const res = await wipayCallback(inv, `${P}wipay_tx_cap06a`, 60);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toMatchObject({ success: true, invoiceId: inv, message: 'Payment successful' });
+      expect((await paymentsOf(inv)).map((p) => [Number(p.amount), p.status, p.provider])).toEqual([
+        [40, 'SUCCESSFUL', 'cash'],
+        [10, 'SUCCESSFUL', 'cash'],
+        [60, 'SUCCESSFUL', 'wipay'],
+      ]);
+      expect(await claimsOf(`${P}wipay_tx_cap06a`)).toBe(1);
+
+      // A credited invoice (20 paid, 30 credited): two checkouts (two tabs) both ask for 50 and both are paid.
+      const X = await seedCreditedWithLink('cap06_twice', 20, 30);
+      for (let i = 0; i < 2; i += 1) {
+        await clearRateLimits();
+        const again = await checkout(X.token, WIPAY_BODY);
+        expect(again.status, JSON.stringify(again.body)).toBe(201);
+        expect(wipayTotal()).toBe('50.00');
+      }
+      expect(await wipayAsked(X.inv), 'one kept row per amount asked').toEqual(['5000']);
+      const first = await wipayCallback(X.inv, `${P}wipay_tx_cap06b1`, 50);
+      expect(first.body).toMatchObject({ success: true, message: 'Payment successful' });
+      // Packet head: 400 'Invalid WiPay callback signature' (the remainder had become 0, so only the 100 total was tried).
+      const second = await wipayCallback(X.inv, `${P}wipay_tx_cap06b2`, 50);
+      expect(second.status, JSON.stringify(second.body)).toBe(200);
+      expect(second.body).toMatchObject({ success: true, message: 'Payment successful' });
+      expect((await paymentsOf(X.inv)).map((p) => [Number(p.amount), p.status, p.provider])).toEqual([
+        [20, 'SUCCESSFUL', 'cash'],
+        [50, 'SUCCESSFUL', 'wipay'],
+        [50, 'SUCCESSFUL', 'wipay'],
+      ]);
+      expect(await invoiceRow(X.inv), 'D-78: still PARTIALLY_CREDITED').toMatchObject({ status: 'PARTIALLY_CREDITED' });
+      // A checkout refused before WiPay is called keeps nothing.
+      await clearRateLimits();
+      expect((await checkout(X.token, WIPAY_BODY)).status).toBe(409);
+      expect(await wipayAsked(X.inv)).toEqual(['5000']);
+      await expectBalanced(ID.biz);
+    });
+
+    it('CAP-07 W5-CREDIT-AWARE-PAY review SEC-CAP-1 / CR-CAP-1 (D-13, D-78): a credit note applied between the WiPay checkout and its callback does not refuse the money WiPay took: the 70 asked is recorded and the invoice stays PARTIALLY_CREDITED', async () => {
+      const X = await seedCreditedWithLink('cap07_credit', 0, 30);
+      const asked = await checkout(X.token, WIPAY_BODY);
+      expect(asked.status, JSON.stringify(asked.body)).toBe(201);
+      expect(wipayTotal()).toBe('70.00');
+      const note = await createNote(X.inv, 10);
+      expect((await applyNote(note.id)).status).toBe(201);
+      expect((await tokenStatus(X.token)).body).toMatchObject({ remaining: 60, credited: 40 });
+      // Packet head: 400 'Invalid WiPay callback signature', no rows.
+      const res = await wipayCallback(X.inv, `${P}wipay_tx_cap07`, 70);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toMatchObject({ success: true, message: 'Payment successful' });
+      expect((await paymentsOf(X.inv)).map((p) => [Number(p.amount), p.status, p.provider])).toEqual([[70, 'SUCCESSFUL', 'wipay']]);
+      expect(await invoiceRow(X.inv)).toMatchObject({ status: 'PARTIALLY_CREDITED' });
+      await expectBalanced(ID.biz);
+    });
+
+    it('CAP-08 W5-CREDIT-AWARE-PAY review SEC-CAP-2 (D-19): the redelivery of a recorded WiPay transaction is the duplicate answer after the balance moved: the credit note voided after the payment, the same callback is "Duplicate callback ignored", not a refused signature, and nothing more is written', async () => {
+      const X = await seedCreditedWithLink('cap08_void', 20, 30);
+      const asked = await checkout(X.token, WIPAY_BODY);
+      expect(asked.status, JSON.stringify(asked.body)).toBe(201);
+      expect(wipayTotal()).toBe('50.00');
+      const txn = `${P}wipay_tx_cap08`;
+      expect((await wipayCallback(X.inv, txn, 50)).body).toMatchObject({ success: true, message: 'Payment successful' });
+      const note = await db.creditNote.findFirst({ where: { invoiceId: X.inv, businessId: ID.biz, status: 'APPLIED' } });
+      expect((await voidNote(note.id)).status).toBe(201);
+      expect((await tokenStatus(X.token)).body).toMatchObject({ status: 'PARTIALLY_PAID', paid: 70, remaining: 30 });
+      const ledgerBefore = await ledgerCounts(ID.biz);
+      // Packet head: 400 'Invalid WiPay callback signature' (the remainder without this row had become 80).
+      const again = await wipayCallback(X.inv, txn, 50);
+      expect(again.status, JSON.stringify(again.body)).toBe(200);
+      expect(again.body).toMatchObject({ success: true, message: 'Duplicate callback ignored' });
+      expect((await paymentsOf(X.inv)).map((p) => [Number(p.amount), p.provider])).toEqual([[20, 'cash'], [50, 'wipay']]);
+      expect(await claimsOf(txn)).toBe(1);
+      expect(await ledgerCounts(ID.biz), 'nothing posted').toEqual(ledgerBefore);
+    });
+
+    it("CAP-09 W5-CREDIT-AWARE-PAY review SEC-CAP-3 (D-19, D-75): a WiPay proof binds only the amounts this server asked for on the invoice it names: invoice A's transaction for its 50 sent with B's order_id, where B owes 50 but no checkout asked B for 50, is refused 400 with nothing written on either (no row, no claim); A's own callback then records it on A", async () => {
+      const A = await seedCreditedWithLink('cap09_a', 20, 30);
+      const asked = await checkout(A.token, WIPAY_BODY);
+      expect(asked.status, JSON.stringify(asked.body)).toBe(201);
+      expect(wipayTotal()).toBe('50.00');
+      const B = await seedInvoice('cap09_b', 'SENT');
+      expect((await recordPaymentRoute(B, 50, 'cap09_b_pay')).status).toBe(201);
+      expect(await wipayAsked(B), 'no checkout asked anything for B').toEqual([]);
+      const txn = `${P}wipay_tx_cap09`;
+      const ledgerBefore = await ledgerCounts(ID.biz);
+      // Packet head: 200 'Payment successful', B PAID with [50 cash, 50 wipay] and A left owing.
+      const replay = await wipayCallback(B, txn, 50);
+      expect(replay.status, JSON.stringify(replay.body)).toBe(400);
+      expect(replay.body.message).toBe('Invalid WiPay callback signature');
+      expect((await paymentsOf(B)).map((p) => [Number(p.amount), p.provider])).toEqual([[50, 'cash']]);
+      expect((await invoiceRow(B)).status).toBe('PARTIALLY_PAID');
+      expect(await claimsOf(txn), 'no claim on the transaction').toBe(0);
+      expect(await ledgerCounts(ID.biz), 'nothing posted').toEqual(ledgerBefore);
+
+      const own = await wipayCallback(A.inv, txn, 50);
+      expect(own.body).toMatchObject({ success: true, invoiceId: A.inv, message: 'Payment successful' });
+      expect((await paymentsOf(A.inv)).map((p) => [Number(p.amount), p.provider])).toEqual([[20, 'cash'], [50, 'wipay']]);
     });
   });
 

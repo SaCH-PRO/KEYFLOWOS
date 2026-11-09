@@ -111,6 +111,18 @@ const STRIPE_REFUSED_PROVIDER = 'stripe-refused';
 export const STRIPE_LEGACY_REFUSED_PROVIDER = 'stripe-legacy-refused';
 /** R0-20d: the webhook_events provider a refused Stripe payment event is kept under, by endpoint. */
 export type StripeRefusedProvider = typeof STRIPE_REFUSED_PROVIDER | typeof STRIPE_LEGACY_REFUSED_PROVIDER;
+/**
+ * W5-CREDIT-AWARE-PAY review (SEC-CAP-1, SEC-CAP-2, SEC-CAP-3, CR-CAP-1; D-13,
+ * D-19): the webhook_events provider under which createWipayCheckout keeps,
+ * before WiPay is called, each amount it asked WiPay for on an invoice: one
+ * row per invoice and amount (`<invoiceId>:<integer cents>`, event type
+ * 'requested'), with the invoice's business. WiPay's proof binds the amount
+ * this server requested, and the remainder an invoice checkout asks for moves
+ * with the invoice; so handleWipayCallback verifies against these kept
+ * amounts, never against a remainder worked out again when the callback
+ * arrives. It is not a dedupe claim (provider 'wipay').
+ */
+const WIPAY_REQUESTED_PROVIDER = 'wipay-requested';
 /** R0-20c: the fields of a Stripe session, charge or payment intent the door's binding reads. */
 type StripePaymentObject = {
   metadata?: Record<string, unknown> | null;
@@ -904,19 +916,15 @@ export class PaymentsService {
    * only for a credited status, only the invoice's business), in integer
    * cents (creditAwareBalance). `remaining` is what is still owed and
    * `credited` the notes netted; with nothing credited it is the balance
-   * unchanged. `exceptProviderPaymentId` leaves out the row one provider
-   * transaction recorded, so a redelivery of that transaction reads the
-   * remainder its checkout asked for (handleWipayCallback).
+   * unchanged.
    */
   private async creditAwareBalanceOf(
     invoice: { id: string; businessId: string; status: string; total: unknown; currency: string | null },
-    exceptProviderPaymentId?: string,
   ): Promise<CreditAwareBalance> {
-    const rows = await this.prisma.client.payment.findMany({
+    const own = await this.prisma.client.payment.findMany({
       where: { invoiceId: invoice.id, businessId: invoice.businessId },
-      select: { amount: true, status: true, providerPaymentId: true },
+      select: { amount: true, status: true },
     });
-    const own = exceptProviderPaymentId ? rows.filter((p) => p.providerPaymentId !== exceptProviderPaymentId) : rows;
     const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, invoice);
     return creditAwareBalance(balanceOfStoredRows(Number(invoice.total), own, invoice.currency), credited);
   }
@@ -2210,6 +2218,10 @@ export class PaymentsService {
       params.append('account_number', accountNumber);
     }
 
+    // W5-CREDIT-AWARE-PAY review (SEC-CAP-1, CR-CAP-1; D-19): the amount asked is kept before WiPay is
+    // called (a failed write starts no checkout), so the callback verifies against what was asked.
+    await this.keepWipayRequestedAmount(invoice, due);
+
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -2236,6 +2248,30 @@ export class PaymentsService {
 
     this.logger.error(`WiPay checkout creation failed: ${response.status} - ${body}`);
     throw new Error('Failed to create WiPay checkout');
+  }
+
+  /**
+   * W5-CREDIT-AWARE-PAY review (SEC-CAP-1, SEC-CAP-2, CR-CAP-1; D-13, D-19):
+   * keeps `amount`, the total createWipayCheckout is about to ask WiPay for on
+   * the invoice, under WIPAY_REQUESTED_PROVIDER: one row per invoice and amount
+   * in integer cents (a second checkout for the same amount adds none), with
+   * the invoice's business. Written before WiPay is called and never removed,
+   * so the callback of every checkout, and each redelivery of it, verifies
+   * against the amount that checkout asked for whatever has happened to the
+   * invoice since (wipayRequestedInvoiceTotals).
+   */
+  private async keepWipayRequestedAmount(invoice: { id: string; businessId: string }, amount: number): Promise<void> {
+    await this.prisma.client.webhookEvent.createMany({
+      data: [
+        {
+          provider: WIPAY_REQUESTED_PROVIDER,
+          providerEventId: `${invoice.id}:${toCents(amount)}`,
+          eventType: 'requested',
+          businessId: invoice.businessId,
+        },
+      ],
+      skipDuplicates: true,
+    });
   }
 
   /**
@@ -2355,24 +2391,39 @@ export class PaymentsService {
 
   /**
    * W5-CREDIT-AWARE-PAY (V1-44 review CR-V44-1 rest; D-13, D-78): the totals
-   * this server can have asked WiPay for on an invoice, which a success
-   * callback's keyed proof is verified against (the callback's own `total`
-   * is never trusted, V1-05). First the remainder createWipayCheckout asks
-   * for (checkoutAmountOf: net of the payments received and the APPLIED
-   * credit notes), read without the row this transaction may already have
-   * recorded, so its redelivery verifies against the same amount and reaches
-   * the duplicate answer. Then the whole total, which a checkout made before
+   * this server asked WiPay for on an invoice, which a success callback's
+   * keyed proof is verified against (the callback's own `total` is never
+   * trusted, V1-05). First each amount a createWipayCheckout of this invoice
+   * asked for (the remainder net of the payments received and the APPLIED
+   * credit notes when it asked), as keepWipayRequestedAmount kept it under the
+   * invoice's business. Then the whole total, which a checkout made before
    * W5-CREDIT-AWARE-PAY asked for: WiPay took that money, and the proof binds
-   * it. Both are amounts this server requested; a proof over any other
-   * amount is refused as before.
+   * it. A proof over any other amount is refused as before.
+   *
+   * Review SEC-CAP-1 / CR-CAP-1 / SEC-CAP-2: the remainder used to be worked
+   * out again when the callback arrived, so a payment, a second paid checkout
+   * or a credit note between the checkout and its callback (or the
+   * redelivery of a recorded transaction) refused WiPay's genuine proof and
+   * recorded nothing of the money WiPay took. Review SEC-CAP-3: WiPay's proof
+   * does not cover order_id, and the invoice's current remainder bound a
+   * proof to any invoice that happened to owe its amount; a kept amount binds
+   * it to an invoice a checkout asked that amount for (as the total did on
+   * the base).
    */
-  private async wipayRequestedInvoiceTotals(
-    invoice: { id: string; businessId: string; status: string; total: unknown; currency: string },
-    transactionId: string | undefined,
-  ): Promise<number[]> {
+  private async wipayRequestedInvoiceTotals(invoice: { id: string; businessId: string; total: unknown }): Promise<number[]> {
     const total = Number(invoice.total);
-    const { remaining } = await this.creditAwareBalanceOf(invoice, transactionId);
-    return toCents(remaining) > 0 && toCents(remaining) !== toCents(total) ? [remaining, total] : [total];
+    const prefix = `${invoice.id}:`;
+    const kept = await this.prisma.client.webhookEvent.findMany({
+      where: { provider: WIPAY_REQUESTED_PROVIDER, businessId: invoice.businessId, providerEventId: { startsWith: prefix } },
+      select: { providerEventId: true },
+    });
+    const asked = new Set<number>();
+    for (const { providerEventId } of kept) {
+      // Exactly this invoice's rows (startsWith reads `_` and `%` in an id as LIKE wildcards).
+      const cents = providerEventId.startsWith(prefix) ? providerEventId.slice(prefix.length) : '';
+      if (/^[1-9]\d*$/.test(cents) && Number(cents) !== toCents(total)) asked.add(Number(cents));
+    }
+    return [...[...asked].sort((a, b) => a - b).map(fromCents), total];
   }
 
   /** Whether `hash` is WiPay's keyed response hash for this transaction (constant-time compare). */
@@ -2453,9 +2504,10 @@ export class PaymentsService {
     const businessId = invoice?.businessId ?? order!.businessId;
     const apiKey = PaymentsService.wipayApiKey(invoice ? invoice.business.metaData : order!.business.metaData);
     // The total this server sent WiPay for this payable (createWipayCheckout, createStorePayment).
-    // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): for an invoice that is the remainder the checkout asked
-    // for (wipayRequestedInvoiceTotals), or the whole total a checkout made before it asked for.
-    const requestedTotal = (invoice ? await this.wipayRequestedInvoiceTotals(invoice, transaction_id) : [Number(order!.total)]).find((t) =>
+    // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): for an invoice that is an amount a checkout of it asked for,
+    // as kept when it asked (review SEC-CAP-1..3, CR-CAP-1: wipayRequestedInvoiceTotals), or the whole
+    // total a checkout made before it asked for.
+    const requestedTotal = (invoice ? await this.wipayRequestedInvoiceTotals(invoice) : [Number(order!.total)]).find((t) =>
       PaymentsService.wipayProofVerifies(apiKey, transaction_id, t, hash),
     );
     if (requestedTotal === undefined) {
