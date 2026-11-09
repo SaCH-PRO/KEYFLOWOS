@@ -184,9 +184,12 @@ export class AgentController {
     }>,
     @Req() req: AuthenticatedRequest,
   ) {
-    // W5-AGENT-TRIGGERS-AUTHORITY (D-93, D-73; CV-08m): only the business owner switches on, switches
-    // off or edits a default rule that runs as the owner (403 AGENT_TRIGGER_OWNER_ONLY); any other rule
-    // records the member who changed it. Only the member-writable fields of the body are written.
+    // W5-AGENT-TRIGGERS-AUTHORITY (D-93, D-73; CV-08m; review SEC-W5AT-1..3, CR-W5AT-1): only the
+    // business owner switches on, switches off or edits a default rule that runs as the owner (403
+    // AGENT_TRIGGER_OWNER_ONLY), schedules a rule or changes a scheduled one (403
+    // AGENT_TRIGGER_SCHEDULE_OWNER_ONLY); a rule a member created is theirs and the owner's to write (403
+    // AGENT_TRIGGER_CREATOR_ONLY) and keeps its creator, whoever writes it. Only the member-writable
+    // fields of the body are written.
     return updateAgentTrigger(this.prisma, businessId, triggerId, triggerWriter(req), body);
   }
 

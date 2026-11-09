@@ -995,6 +995,134 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
         await db.agentTrigger.updateMany({ where: { businessId: ID.biz }, data: { enabled: false } });
       }
     });
+
+    // Review repairs (SEC-W5AT-1, SEC-W5AT-2, SEC-W5AT-3, CR-W5AT-1).
+    const put = (actor: string, id: string, body: Record<string, unknown>) =>
+      request(app.getHttpServer()).put(triggerUrl(id)).set('x-test-user', actor).send(body);
+    const storedCondition = async (id: string) => (await db.agentTrigger.findUnique({ where: { id } })).condition;
+
+    it("CV-08m3 RED-BEFORE (W5-AGENT-TRIGGERS-AUTHORITY review SEC-W5AT-1; D-73): a rule keeps the member who created it: the OWNER switching a STAFF member's rule off and on, or rewriting its objective, leaves it the STAFF member's (its plans run as them, never as the owner); the ADMIN, neither its creator nor the owner, is refused (403) any write to it, as the STAFF member is to the OWNER's own rule", async () => {
+      await seededPaidRule();
+      const created: string[] = [];
+      try {
+        const staffRule = await request(app.getHttpServer()).post(triggerUrl()).set('x-test-user', ID.staffOwned)
+          .send({ name: 'v89k cv08m3 staff rule', eventPattern: 'invoice.paid', objective: 'v89k cv08m3 staff-authored objective', autoExecute: true });
+        expect(staffRule.status, JSON.stringify(staffRule.body).slice(0, 300)).toBe(201);
+        created.push(staffRule.body.id);
+        expect(await firePaid()).toEqual([{ objective: 'v89k cv08m3 staff-authored objective', userId: ID.staffOwned }]);
+
+        for (const enabled of [false, true]) {
+          const res = await put(ID.owner, staffRule.body.id, { enabled });
+          expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+        }
+        expect(await storedCondition(staffRule.body.id)).toEqual({ $createdBy: ID.staffOwned });
+        expect(await firePaid()).toEqual([{ objective: 'v89k cv08m3 staff-authored objective', userId: ID.staffOwned }]);
+
+        const rewritten = await put(ID.owner, staffRule.body.id, { objective: 'v89k cv08m3 owner-rewritten objective' });
+        expect(rewritten.status, JSON.stringify(rewritten.body).slice(0, 300)).toBe(200);
+        expect(await firePaid()).toEqual([{ objective: 'v89k cv08m3 owner-rewritten objective', userId: ID.staffOwned }]);
+
+        for (const body of [{ enabled: false }, { objective: 'v89k cv08m3 admin objective' }, { autoExecute: false }]) {
+          const res = await put(ID.admin, staffRule.body.id, body);
+          expect(res.status, `admin ${JSON.stringify(body)}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(403);
+          expect(res.body.code ?? res.body.error?.code ?? JSON.stringify(res.body)).toContain('AGENT_TRIGGER_CREATOR_ONLY');
+        }
+
+        const ownerRule = await request(app.getHttpServer()).post(triggerUrl()).set('x-test-user', ID.owner)
+          .send({ name: 'v89k cv08m3 owner rule', eventPattern: 'invoice.paid', objective: 'v89k cv08m3 owner-authored objective' });
+        expect(ownerRule.status, JSON.stringify(ownerRule.body).slice(0, 300)).toBe(201);
+        created.push(ownerRule.body.id);
+        await put(ID.owner, ownerRule.body.id, { enabled: false }).expect(200);
+        for (const body of [{ enabled: true }, { autoExecute: true }, { objective: 'v89k cv08m3 staff takes over' }]) {
+          const res = await put(ID.staffOwned, ownerRule.body.id, body);
+          expect(res.status, `staff ${JSON.stringify(body)}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(403);
+        }
+        const ownerRow = await db.agentTrigger.findUnique({ where: { id: ownerRule.body.id } });
+        expect({ enabled: ownerRow.enabled, autoExecute: ownerRow.autoExecute, objective: ownerRow.objective, condition: ownerRow.condition })
+          .toEqual({ enabled: false, autoExecute: false, objective: 'v89k cv08m3 owner-authored objective', condition: { $createdBy: ID.owner } });
+        expect(await firePaid()).toEqual([{ objective: 'v89k cv08m3 owner-rewritten objective', userId: ID.staffOwned }]);
+      } finally {
+        await db.agentTrigger.deleteMany({ where: { id: { in: created } } });
+        await db.agentTrigger.updateMany({ where: { businessId: ID.biz }, data: { enabled: false } });
+      }
+    });
+
+    it("CV-08m4 RED-BEFORE (W5-AGENT-TRIGGERS-AUTHORITY review SEC-W5AT-2; D-93, D-73): only the business owner schedules a rule, and a scheduled rule is the owner's alone to write (403 to anyone else): a STAFF member cannot put their own rule on a schedule (whose cron tick would emit its event for the whole business, firing the owner-run defaults), nor change the event, switch or tier of their rule once the owner has scheduled it", async () => {
+      await seededPaidRule();
+      const created: string[] = [];
+      try {
+        const staffRule = await request(app.getHttpServer()).post(triggerUrl()).set('x-test-user', ID.staffOwned)
+          .send({ name: 'v89k cv08m4 staff rule', eventPattern: 'invoice.paid', objective: 'v89k cv08m4 staff objective', condition: { 'payload.never': 'x' } });
+        expect(staffRule.status, JSON.stringify(staffRule.body).slice(0, 300)).toBe(201);
+        created.push(staffRule.body.id);
+
+        for (const body of [{ schedule: '* * * * *', enabled: true }, { schedule: '0 * * * *' }]) {
+          const res = await put(ID.staffOwned, staffRule.body.id, body);
+          expect(res.status, `staff ${JSON.stringify(body)}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(403);
+          expect(res.body.code ?? res.body.error?.code ?? JSON.stringify(res.body)).toContain('AGENT_TRIGGER_SCHEDULE_OWNER_ONLY');
+        }
+        expect((await db.agentTrigger.findUnique({ where: { id: staffRule.body.id } })).schedule).toBeNull();
+        // Unscheduled, the rule is still its creator's to write.
+        await put(ID.staffOwned, staffRule.body.id, { enabled: false, schedule: null }).expect(200);
+
+        // The OWNER schedules it: the rule stays the STAFF member's (D-73), and is now the owner's to write.
+        await put(ID.owner, staffRule.body.id, { schedule: '0 9 * * *', enabled: true }).expect(200);
+        expect(await storedCondition(staffRule.body.id)).toEqual({ 'payload.never': 'x', $createdBy: ID.staffOwned });
+        for (const body of [{ eventPattern: 'invoice.overdue' }, { enabled: false }, { maxRiskTier: 3 }, { schedule: '* * * * *' }]) {
+          const res = await put(ID.staffOwned, staffRule.body.id, body);
+          expect(res.status, `staff ${JSON.stringify(body)}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(403);
+        }
+        const row = await db.agentTrigger.findUnique({ where: { id: staffRule.body.id } });
+        expect({ eventPattern: row.eventPattern, enabled: row.enabled, schedule: row.schedule, maxRiskTier: row.maxRiskTier })
+          .toEqual({ eventPattern: 'invoice.paid', enabled: true, schedule: '0 9 * * *', maxRiskTier: 2 });
+      } finally {
+        await db.agentTrigger.deleteMany({ where: { id: { in: created } } });
+        await db.agentTrigger.updateMany({ where: { businessId: ID.biz }, data: { enabled: false } });
+      }
+    });
+
+    it("CV-08m5 RED-BEFORE (W5-AGENT-TRIGGERS-AUTHORITY review CR-W5AT-1, SEC-W5AT-3; D-93): a seeded default the OWNER switches on stays the system's: no member is recorded in it (its condition stays as seeded), so its plan runs as whoever owns the business when it fires (an ownership transfer and a user-id re-key are followed) and it stays owner-only: the STAFF member and the former owner are refused (403), the current owner switches it off", async () => {
+      const seeded = await seededPaidRule();
+      const def = paidDefault();
+      const rekeyed = `${P}owner_rekeyed`;
+      try {
+        await put(ID.owner, seeded.id, { enabled: true }).expect(200);
+        expect(await storedCondition(seeded.id)).toBeNull();
+        expect(await firePaid()).toEqual([{ objective: def.objective, userId: ID.owner }]);
+
+        // Ownership moves to the ADMIN.
+        await db.business.update({ where: { id: ID.biz }, data: { ownerId: ID.admin } });
+        await db.membership.update({ where: { id: `${P}m_owner` }, data: { role: 'ADMIN' } });
+        await db.membership.update({ where: { id: `${P}m_admin` }, data: { role: 'OWNER' } });
+        expect(await firePaid()).toEqual([{ objective: def.objective, userId: ID.admin }]);
+        for (const actor of [ID.staffOwned, ID.owner]) {
+          const res = await put(actor, seeded.id, { enabled: false });
+          expect(res.status, `${actor}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(403);
+        }
+        await put(ID.admin, seeded.id, { enabled: false }).expect(200);
+        await put(ID.admin, seeded.id, { enabled: true }).expect(200);
+        expect(await storedCondition(seeded.id)).toBeNull();
+
+        // Back to the OWNER, then the owner's user id is re-keyed as IdentityService's reconcile does
+        // (membership and Business.ownerId re-pointed; the stored rule untouched).
+        await db.business.update({ where: { id: ID.biz }, data: { ownerId: ID.owner } });
+        await db.membership.update({ where: { id: `${P}m_owner` }, data: { role: 'OWNER' } });
+        await db.membership.update({ where: { id: `${P}m_admin` }, data: { role: 'ADMIN' } });
+        await db.user.create({ data: { id: rekeyed, email: `${P}owner_rekeyed@test.local`, role: 'USER' } });
+        await db.membership.update({ where: { id: `${P}m_owner` }, data: { userId: rekeyed } });
+        await db.business.update({ where: { id: ID.biz }, data: { ownerId: rekeyed } });
+        expect(await firePaid()).toEqual([{ objective: def.objective, userId: rekeyed }]);
+        const staffOff = await put(ID.staffOwned, seeded.id, { enabled: false });
+        expect(staffOff.status, JSON.stringify(staffOff.body).slice(0, 300)).toBe(403);
+        expect((await db.agentTrigger.findUnique({ where: { id: seeded.id } })).enabled).toBe(true);
+      } finally {
+        await db.business.update({ where: { id: ID.biz }, data: { ownerId: ID.owner } });
+        await db.membership.update({ where: { id: `${P}m_owner` }, data: { userId: ID.owner, role: 'OWNER' } });
+        await db.membership.update({ where: { id: `${P}m_admin` }, data: { role: 'ADMIN' } });
+        await db.user.deleteMany({ where: { id: rekeyed } });
+        await db.agentTrigger.updateMany({ where: { businessId: ID.biz }, data: { enabled: false } });
+      }
+    });
   });
 
   // Residuals of review SEC-D93-1..3 outside this packet's write set (plan-step-authority, the default

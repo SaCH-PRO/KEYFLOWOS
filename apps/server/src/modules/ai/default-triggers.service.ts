@@ -18,12 +18,13 @@ export { DEFAULT_AGENT_TRIGGERS } from './default-triggers.constants';
  * copy this answers null for fires plans that run as no member.
  *
  * W5-AGENT-TRIGGERS-AUTHORITY (D-73, D-93; review SEC-D93-3, case CV-08m): the shape alone no longer
- * decides. POST and PUT agent/triggers now record the member who wrote the rule in its stored
- * condition (agent-trigger.service.ts, agentTriggerWriter; a client's own key of that name is
- * dropped), and the seeded rules never carry one, so a rule a member wrote (an exact copy of a
- * default included) is never recognised here: it runs as that member. Switching a seeded rule on,
- * off or editing it is the business owner's alone (ownerRunDefaultTrigger, which asks this on the
- * rule's content with the recorded writer aside).
+ * decides. POST agent/triggers records the member who created the rule in its stored condition
+ * (agent-trigger.service.ts, agentTriggerWriter; a client's own key of that name is dropped), and the
+ * seeded rules never carry one, so a rule a member created (an exact copy of a default included) is
+ * never recognised here: it runs as that member. Switching a seeded rule on, off or editing it is the
+ * business owner's alone (ownerRunDefaultTrigger, which asks this on the rule's content with the
+ * recorded creator aside), and the owner's write records no member in it (review CR-W5AT-1,
+ * SEC-W5AT-3), so it stays the system's and runs as whoever owns the business when it fires.
  */
 export function defaultAgentTriggerFor(trigger: {
   name: string;
@@ -45,8 +46,12 @@ export function defaultAgentTriggerFor(trigger: {
   );
 }
 
-/** `value` as JSON with every object's keys in order, so a stored JSON column compares by content. */
-function canonicalJson(value: unknown): string {
+/**
+ * `value` as JSON with every object's keys in order, so a stored JSON column compares by content
+ * (W5-AGENT-TRIGGERS-AUTHORITY review SEC-W5AT-1: updateAgentTrigger asks whether a write changed a
+ * rule's filter with it).
+ */
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (value && typeof value === 'object') {
     const entries = Object.keys(value as Record<string, unknown>)
