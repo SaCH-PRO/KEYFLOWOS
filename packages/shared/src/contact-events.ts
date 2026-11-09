@@ -91,6 +91,8 @@ export const CONTACT_EVENT_TYPES_BY_CATEGORY = {
     'booking.rescheduled',
     'booking.no_show',
     'booking.status.followup',
+    // PR196-WAITLIST-EXPIRY (D-86): a waitlisted contact was offered a held slot.
+    'booking.waitlist_offered',
     'store_order.created',
     'store_order.paid',
     'store_order.shipped',
@@ -284,6 +286,7 @@ export const CONTACT_EVENT_LABELS: Record<ContactEventType, string> = {
   'booking.cancelled': 'Booking cancelled',
   'booking.rescheduled': 'Booking rescheduled',
   'booking.status.followup': 'Booking follow-up',
+  'booking.waitlist_offered': 'Waitlist slot offered',
   'store_order.created': 'Order placed',
   'store_order.paid': 'Order paid',
   'store_order.shipped': 'Order shipped',

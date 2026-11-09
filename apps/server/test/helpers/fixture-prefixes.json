@@ -713,6 +713,16 @@
       "packet": "V1-87 (DEP-R3-OWN-ROW-READS)"
     },
     {
+      "prefix": "v88a_",
+      "owner": "apps/server/test/booking-attribution-currency.integration.test.ts",
+      "packet": "V1-88 (PR196-ATTRIB-CURRENCY)"
+    },
+    {
+      "prefix": "v88b_",
+      "owner": "apps/server/test/booking-waitlist-expiry.integration.test.ts",
+      "packet": "V1-88 (PR196-WAITLIST-EXPIRY)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
