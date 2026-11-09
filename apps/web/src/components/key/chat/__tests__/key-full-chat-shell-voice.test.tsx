@@ -18,9 +18,14 @@
  *     appears, and not before the probe answers;
  *   - LiveKit not configured (the server's structured voice 503): no control,
  *     and the probe cost one request (the R0-P path hands the 503 back
- *     without retrying);
- *   - the probe refused (403) or no business selected: no control (no probe
- *     at all without a business);
+ *     without retrying). The assertion waits until the shell's probe has
+ *     settled (listVoiceRooms resolved), not a fixed delay: fetchWithRetry's
+ *     first backoff is at least 300 ms, so a short wait could neither see a
+ *     retry nor tell "hidden on the answer" from "hidden while pending"
+ *     (PR196-VOICE review RV-VOICE-2). The old plain-string 503 (code
+ *     UNKNOWN_ERROR) is retried three times before it settles, and fails here;
+ *   - the probe refused (403) or no business selected: no control, on the
+ *     settled answer (no probe at all without a business);
  *   - clicking the control asks the server for a session with an empty body:
  *     the client never names the room or the identity (OK-9A-2).
  */
@@ -86,6 +91,24 @@ vi.mock("@/lib/api/ai-approvals", () => ({
   fetchAiApprovals: async () => ({ data: { items: [] }, error: null }),
 }));
 
+/**
+ * The real voice API client (its requests still go through apiGet and
+ * fetchWithRetry to the stubbed fetch below), with the rooms probe's
+ * settlement counted: a probe has settled once the shell holds its answer, and
+ * fetchWithRetry makes no further attempt for it after that.
+ */
+const probe = vi.hoisted(() => ({ settled: 0 }));
+vi.mock("@/lib/api/livekit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api/livekit")>();
+  return {
+    ...actual,
+    listVoiceRooms: (businessId: string) =>
+      actual.listVoiceRooms(businessId).finally(() => {
+        probe.settled++;
+      }),
+  };
+});
+
 import { KeyFullChatShellV2 } from "@/components/key/chat/key-full-chat-shell-v2";
 
 const BIZ = "pr196v_biz_A";
@@ -129,8 +152,16 @@ function answer(fn: Answer) {
 
 const probes = () => calls.filter((c) => c.path.endsWith(ROOMS_PATH) && c.method === "GET");
 
+/** Waits until the shell's rooms probe has settled: long enough for a retried (plain) 503 to exhaust fetchWithRetry's backoff (~2.1-2.4 s). */
+async function probeSettled() {
+  await waitFor(() => expect(probe.settled).toBe(1), { timeout: 5_000 });
+  // Let the shell re-render on the settled answer.
+  await act(async () => {});
+}
+
 beforeEach(() => {
   calls = [];
+  probe.settled = 0;
   window.localStorage.clear();
   window.localStorage.setItem("kf_business_id", BIZ);
   fetchSpy = vi.spyOn(globalThis, "fetch");
@@ -172,27 +203,23 @@ describe("KEY chat shell: the live voice control appears only when the server re
     answer((path) => (path.endsWith(ROOMS_PATH) ? voiceNotConfigured(path) : json(404, {})));
 
     render(<KeyFullChatShellV2 />);
-    await waitFor(() => expect(probes()).toHaveLength(1));
-    // Let the probe settle and the shell re-render on its answer.
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
-    expect(screen.queryByRole("button", CONTROL)).toBeNull();
+    // Settled, not merely sent: a retried 503 settles only after fetchWithRetry's
+    // backoff has re-sent it, so the count below sees every attempt.
+    await probeSettled();
     expect(probes()).toHaveLength(1);
+    expect(screen.queryByRole("button", CONTROL)).toBeNull();
     // The header still renders: the gate hides one control, not the shell.
     expect(screen.getByRole("heading", { name: "KEY" })).toBeInTheDocument();
-  });
+  }, 10_000);
 
-  it("the probe refused (403): no control", async () => {
+  it("the probe refused (403): no control, on the settled answer", async () => {
     answer((path) => (path.endsWith(ROOMS_PATH) ? json(403, { statusCode: 403, message: "No access to this business" }) : json(404, {})));
 
     render(<KeyFullChatShellV2 />);
-    await waitFor(() => expect(probes()).toHaveLength(1));
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 50));
-    });
+    await probeSettled();
+    expect(probes()).toHaveLength(1);
     expect(screen.queryByRole("button", CONTROL)).toBeNull();
-  });
+  }, 10_000);
 
   it("no business selected: no probe and no control", async () => {
     window.localStorage.removeItem("kf_business_id");

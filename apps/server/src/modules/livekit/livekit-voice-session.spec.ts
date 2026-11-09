@@ -281,3 +281,37 @@ describe('PR196-VOICE OK-9A-2: the server alone chooses the room and the identit
     expect(create).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * PR196-VOICE review findings that need behaviour outside this packet's write
+ * set (livekit.service.ts assertConfigured and createVoiceSession, the KEY
+ * chat shell, specs). Both were reproduced on a real Nest app with the real
+ * AuthGuard and BusinessGuard (LiveKit network clients recorded):
+ *
+ *   RV-VOICE-1  With KEY_DISABLED set and LiveKit configured, GET
+ *               /livekit/businesses/:id/rooms (the shell's availability
+ *               probe) answers 200, so the shell shows the mic, while every
+ *               click is refused with the KEY-disabled 503 (reason
+ *               key_disabled). The probe has to refuse in listRooms (or the
+ *               roomClient helper it shares with createVoiceSession). Putting
+ *               the KEY check in assertConfigured instead would also refuse the
+ *               signature-verified webhook (handleWebhook calls it), so
+ *               room_finished would no longer end VoiceSession rows while KEY
+ *               is off. The refusal's text names KEY_DISABLED: that is the V1-24
+ *               (D-17) refusal every KEY path shares, pinned by
+ *               livekit.service.spec.ts (SEC-V124b-2), and not changed here.
+ *   SEC-PR196V-1  POST /livekit/businesses/:id/voice-session has no rate limit
+ *               (15 sequential POSTs from one STAFF member: 15 rooms, 15 agent
+ *               dispatches). This was already true before the packet. The
+ *               existing control is the controller-level CrmRateLimitGuard with
+ *               @CrmRateLimit, which the KEY text chat routes carry
+ *               (flow.controller.ts). livekit.controller.ts is outside the write set.
+ */
+describe('PR196-VOICE review follow-ups that need a scope release', () => {
+  it.todo(
+    'RV-VOICE-1: with KEY_DISABLED set and LiveKit configured, listRooms (the shell probe) answers the structured 503 before any LiveKit call, so the mic stays hidden, while handleWebhook still verifies and syncs room_finished. Needs listRooms or roomClient, which are outside the write set',
+  );
+  it.todo(
+    'SEC-PR196V-1: one member cannot create LiveKit rooms and agent dispatches without bound. Repeated POST voice-session answers 429 past the limit, with no room or dispatch. Needs @UseGuards(CrmRateLimitGuard) and @CrmRateLimit on LivekitController.createVoiceSession, which is outside the write set',
+  );
+});
