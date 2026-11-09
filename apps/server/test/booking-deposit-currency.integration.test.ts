@@ -85,6 +85,13 @@
  *                  the final's row lock taken) and writes after the link step ran: the link
  *                  committed and the PATCH then wrote USD. Now the link step waits for the
  *                  final's row, reads the switched currency and refuses as DC-14
+ *   DC-16 RED      W4-A10c-FINAL-LINK-WINDOW review CR-A10c-1 (D-59/D-91), RED at c9bbe04a: the
+ *                  link wrote Booking.invoiceId (the booking row lock) and only then took the
+ *                  final's row, the reverse of a contact merge (invoices, then bookings), so a
+ *                  merge that held the final and then repointed the booking deadlocked against it
+ *                  and completion answered FAILED INVOICE_NOT_CREATED. Now the final's row is
+ *                  locked before the booking's: the link waits for the merge, the merge commits
+ *                  and completion draws the 75 TTD final (CREATED)
  *
  * Nothing on the money path is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard, PublicRateLimitGuard (real Redis at
@@ -1058,5 +1065,69 @@ describe('V1-81 (FOLLOW3-A10, D-59) a final invoice never nets a deposit billed 
     // the completion, which waited for it, is the one refused.
     expect(patched.status, JSON.stringify(patched.body)).toBe(200);
     await expectCompletionRefusedTheSwitchedFinal('completion', b, done, drawnId!, before);
+  });
+
+  it('DC-16 RED-BEFORE (W4-A10c-FINAL-LINK-WINDOW review CR-A10c-1, D-59/D-91): a contact merge that repoints the drawn final and then the booking while completion links them does not deadlock -> the link locks the final before the booking (the merge order: invoices, then bookings), waits for the merge, and completion draws the 75 TTD final (CREATED); the merge commits', async () => {
+    const b = await book(ID.biz, ID.svc, 'dc16');
+    const original = commerce.createInvoiceForService.bind(commerce);
+    let drawnId: string | undefined;
+    let merge: Promise<{ committed: boolean; waited?: boolean; error?: string }> | undefined;
+    // issueFinalInvoice holds the booking's final-invoice lock and has read the
+    // TTD deposit; the final is created on its own connection (committed). A
+    // merge of the booking's contact (CrmService.mergeContacts repoints the
+    // contact's invoices, then its bookings) takes the final's row here; once a
+    // session waits for a row lock (the link step waiting for the final's row),
+    // or after 2 s, it repoints the booking and commits.
+    const spy = vi.spyOn(commerce, 'createInvoiceForService').mockImplementationOnce(async (...args: any[]) => {
+      const invoice = await original(...args);
+      drawnId = invoice.id;
+      let invoicesRepointed: () => void = () => undefined;
+      const repointed = new Promise<void>((resolve) => { invoicesRepointed = resolve; });
+      merge = db
+        .$transaction(
+          async (tx: any) => {
+            await tx.$executeRawUnsafe(`UPDATE invoices SET contact_id = contact_id WHERE id = $1`, invoice.id);
+            invoicesRepointed();
+            const waited = await rowLockWaiterSeen(2_000);
+            await tx.$executeRawUnsafe(`UPDATE bookings SET contact_id = contact_id WHERE id = $1`, b.bookingId);
+            return waited;
+          },
+          { timeout: 15_000 },
+        )
+        .then(
+          (waited: boolean) => ({ committed: true, waited }),
+          (err: unknown) => ({ committed: false, error: String(err) }),
+        );
+      await Promise.race([repointed, merge]);
+      return invoice;
+    });
+    let done: any;
+    let merged: { committed: boolean; waited?: boolean; error?: string } | undefined;
+    try {
+      done = await setStatus(ID.biz, b.bookingId, 'COMPLETED');
+      merged = await merge;
+    } finally {
+      spy.mockRestore();
+    }
+    expect(drawnId, 'completion drew a final up').toBeDefined();
+    expect(merged, 'the merge ran between the creation and the link').toBeDefined();
+    expect(merged!.committed, `the merge commits: ${merged!.error}`).toBe(true);
+    expect(merged!.waited, 'the link step waited for the final row the merge holds').toBe(true);
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect(done.body.invoicing, 'RED-BEFORE: the link took the booking row first and deadlocked against the merge (FAILED INVOICE_NOT_CREATED)').toMatchObject({
+      status: 'CREATED',
+      invoiceId: drawnId,
+      amount: 75,
+      depositInvoiceId: b.depositInvoiceId,
+      depositAmount: 25,
+    });
+    expect((await bookingRow(b.bookingId)).invoiceId, 'Booking.invoiceId is the drawn final').toBe(drawnId);
+    const final = await rawInvoice(drawnId!);
+    expect({ status: final.status, currency: final.currency, withdrawn: final.deletedAt !== null }, 'the drawn final stands').toEqual({
+      status: 'DRAFT',
+      currency: 'TTD',
+      withdrawn: false,
+    });
+    await expectNoMismatchedPair('completion', b.bookingId);
   });
 });
