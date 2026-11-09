@@ -600,11 +600,12 @@ describe('V1-81 (FOLLOW3-A10, D-59) a final invoice never nets a deposit billed 
     // FOLLOW3-A10's after-the-fact re-check is kept: a pair mismatched outside
     // the PATCH (a row written before W3-A10b) is refused by the button.
     await db.invoice.update({ where: { id: deposit.id }, data: { currency: 'USD' } });
+    const finalPaired = invoiceSnapshot(await invoiceRow(finalId)); // the restating PATCH above wrote it
     const button = await createInvoiceRoute(ID.biz, b.bookingId);
     expect(button.status, JSON.stringify(button.body)).toBe(409);
     expect(button.body.code).toBe(MISMATCH);
     expect(button.body.details).toMatchObject({ depositInvoiceId: deposit.id, depositCurrency: 'USD', invoiceCurrency: 'TTD', finalInvoiceId: finalId });
-    expect(invoiceSnapshot(await invoiceRow(finalId)), 'the final invoice is untouched').toEqual(finalBefore);
+    expect(invoiceSnapshot(await invoiceRow(finalId)), 'the final invoice is untouched').toEqual(finalPaired);
     expect(await ledgerCount(ID.biz), 'nothing is posted').toEqual(before);
     // A PATCH that brings the pair back to one currency passes.
     const repaired = await patchInvoice(ID.biz, deposit.id, { currency: 'TTD' });

@@ -48,6 +48,14 @@ import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helpe
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { appUrl } from '../../core/config/runtime-urls';
+import { depositPosition, readSettlementInvoices } from '../bookings/booking-payment-status.listener';
+
+/**
+ * D-59 (W3-A10b): the code of a currency switch refused because it would net a
+ * booking deposit across currencies; the same code BookingsService answers for
+ * a final invoice it refuses (DEPOSIT_CURRENCY_MISMATCH in bookings.service).
+ */
+const DEPOSIT_CURRENCY_MISMATCH = 'DEPOSIT_CURRENCY_MISMATCH';
 
 /**
  * The customer fields an operator invoice read discloses: the customer's name
@@ -4743,6 +4751,11 @@ export class CommerceService {
         if (currency !== normalizeCurrency(current.currency) && issued) {
           throw new ConflictException(`Cannot change the currency of ${issuedAs}: the currency is fixed once the invoice is issued`);
         }
+        // W3-A10b (review SEC-A10-1, D-59 as built per D-91): nor may a DRAFT
+        // switch away from the other half of a booking's deposit/final pair.
+        if (currency !== normalizeCurrency(current.currency)) {
+          await CommerceService.assertDepositPairKeepsCurrency(tx, current, currency);
+        }
         updateData.currency = currency;
       }
       if (input.dueDate !== undefined) {
@@ -4866,6 +4879,56 @@ export class CommerceService {
     this.events.emit('invoice.updated', { invoice: result, businessId: input.businessId });
     this.statsCache.invalidateCache(input.businessId);
     return result;
+  }
+
+  /**
+   * W3-A10b (review SEC-A10-1, owner ruling D-59 as built per D-91): a DRAFT
+   * booking deposit a final invoice has netted, or the DRAFT final that netted
+   * a deposit, keeps the currency of the other half of the pair. A booking's
+   * final invoice bills the price less what its live deposit covers
+   * (BookingsService.issueFinalInvoice, depositPosition), and D-13 is one
+   * currency per business, so a deposit is never netted across currencies:
+   * completion and the Create-invoice button refuse such a pair and re-check
+   * one already drawn up, but this PATCH switched either half afterwards (a
+   * USD deposit netted as TTD by a TTD final), re-creating the pair they
+   * refuse. The pair is the one issueFinalInvoice re-checks: a booking of
+   * this business whose deposit or final this invoice is, its final not VOID
+   * nor withdrawn, and its live deposit (not VOID, not withdrawn) covering
+   * something of the price; a booking withdrawn since leaves its two
+   * documents netted all the same. A switch that brings the pair to one
+   * currency passes, as does any switch on an invoice outside such a pair.
+   * Refused with 409 DEPOSIT_CURRENCY_MISMATCH (the code BookingsService
+   * answers, not imported: bookings.service imports this module) on the
+   * edit's transaction, before anything is written.
+   */
+  private static async assertDepositPairKeepsCurrency(
+    tx: PrismaTx,
+    invoice: { id: string; businessId: string },
+    currency: string,
+  ): Promise<void> {
+    const bookings = await tx.booking.findMany({
+      where: { businessId: invoice.businessId, OR: [{ invoiceId: invoice.id }, { depositInvoiceId: invoice.id }] },
+      select: { invoiceId: true, depositInvoiceId: true },
+    });
+    for (const booking of bookings) {
+      const { final, deposit } = await readSettlementInvoices(tx, invoice.businessId, booking);
+      if (!final || final.status === 'VOID' || !deposit || depositPosition(deposit).coversCents <= 0) continue;
+      const isDeposit = deposit.id === invoice.id;
+      const depositCurrency = isDeposit ? currency : normalizeCurrency(deposit.currency);
+      const invoiceCurrency = isDeposit ? normalizeCurrency(final.currency) : currency;
+      if (depositCurrency === invoiceCurrency) continue;
+      const message = isDeposit
+        ? `Cannot change the currency of the deposit invoice ${deposit.invoiceNumber} to ${currency}: the final invoice ${final.invoiceNumber} nets it in ${invoiceCurrency}, and a deposit is never netted across currencies`
+        : `Cannot change the currency of the final invoice ${final.invoiceNumber} to ${currency}: it nets the deposit invoice ${deposit.invoiceNumber} in ${depositCurrency}, and a deposit is never netted across currencies`;
+      throw new ConflictException({
+        code: DEPOSIT_CURRENCY_MISMATCH,
+        message,
+        depositInvoiceId: deposit.id,
+        finalInvoiceId: final.id,
+        depositCurrency,
+        invoiceCurrency,
+      });
+    }
   }
 
   /**
