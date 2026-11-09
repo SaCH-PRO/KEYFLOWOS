@@ -99,8 +99,9 @@ export class AccountantExportEmailService {
       savedAsDefault = true;
     }
 
+    // W5-SYSTEM-EMAIL-CALLERS (SE-3, 9B-D2): the business and provider ids, never the recipient.
     this.logger.log(
-      `Sent accountant export to ${to} (business=${input.businessId}, bytes=${pkg.bytes}, period=${periodStr})`,
+      `Sent accountant export (business=${input.businessId}, id=${result.id}, bytes=${pkg.bytes}, period=${periodStr})`,
     );
 
     return {
