@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException, ForbiddenException, HttpException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { BadRequestException, NotFoundException, ForbiddenException, HttpException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Booking, BookingStatus, Invoice, Prisma } from '@prisma/client';
 import {
@@ -26,6 +26,7 @@ import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { BookingWaitlistService } from './booking-waitlist.service';
 import { schedulersDisabled } from '../../core/config/env';
 import { getTenantContext } from '../../core/tenant/tenant-context';
 import {
@@ -265,6 +266,10 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     @Inject(TransactionalEmailService) private readonly emailService: TransactionalEmailService,
     @Inject(PublicEventsService) private readonly publicEvents: PublicEventsService,
     @Inject(TimelineService) private readonly timeline: TimelineService,
+    // PR196-WAITLIST-EXPIRY: the waitlist expiry this scheduler runs. Optional
+    // only so suites that build BookingsService without it keep working;
+    // BookingsModule provides it.
+    @Optional() @Inject(BookingWaitlistService) private readonly waitlist?: BookingWaitlistService,
   ) {}
 
   onModuleInit() {
@@ -276,8 +281,14 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       this.processBookingReminders().catch((e) =>
         this.logger.error(`Booking reminder check failed: ${(e as Error).message}`),
       );
+      // PR196-WAITLIST-EXPIRY (D-86, F1-D3): offers past their 120-minute hold
+      // expire on the same gated tick. Every replica may run it: each expiry
+      // is a compare-and-set under the slot lock, so an offer expires once.
+      Promise.resolve()
+        .then(() => this.waitlist?.expireStaleOffers())
+        .catch((e) => this.logger.error(`Waitlist offer expiry failed: ${(e as Error).message}`));
     }, REMINDER_CHECK_INTERVAL_MS);
-    this.logger.log('Booking reminder scheduler started (5min interval)');
+    this.logger.log('Booking reminder and waitlist expiry scheduler started (5min interval)');
   }
 
   onModuleDestroy() {
