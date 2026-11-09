@@ -125,6 +125,14 @@
  *         (CN-31); a reconcile that leaves the payment settling the total keeps it, and another
  *         business's REFUNDED row on the invoice unsettles nothing (RC-DEP-2)
  *
+ * W5-REFUND-DOORS-KEEP (the W4-CREDIT-REFUND-PAIDAT review todo SEC-CRP-1 / CR-REG-2):
+ *   CRP-1 RED-BEFORE CR-V44-2 (D-14, D-78) the provider refund doors reconcile a credited invoice under
+ *         'keep', as the manual door does: a Stripe refund (refund.created, or charge.refunded with only
+ *         its cumulative) or a PayPal refund (by capture, or by invoice) that leaves more received than
+ *         the credits leave owing keeps the credited status and clears the paidAt (base: the reconcile
+ *         was refused 409, swallowed by the webhook, and the stale paidAt stayed); the same money
+ *         position ends with one paidAt through the manual and the provider doors
+ *
  * W4-CREDIT-AWARE-READERS (the V1-44 review todo CR-V44-1, reader half; D-13, D-28, D-75, D-78),
  * on a second app (CommerceController + PaymentsController, see its describe):
  *   CN-32 RED-BEFORE a 100 invoice with 20 paid and 30 credited (PARTIALLY_CREDITED) is shown on
@@ -151,6 +159,10 @@
  * AuthMiddleware would). EventEmitter2 is a recorder; TimelineService and
  * ExpensePostingService (COGS: no product lines here) are stubs off the
  * ledger path; every other FinanceController collaborator is an empty stub.
+ * W5-REFUND-DOORS-KEEP: the module's PaymentsService is real (its provider
+ * refund doors, called as the webhooks call them); its CommerceService (the
+ * pay-link reads, off those doors) is an empty stub and no provider connector
+ * is provided.
  *
  * Fixtures: prefix `v44a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL (patterns built by sqlLikePrefix) in dependency
@@ -205,6 +217,7 @@ let workflow: any;
 let revenuePosting: any;
 let creditNotes: any;
 let prismaService: any;
+let paymentsSvc: any;
 let DriveIntakeOrchestratorClass: any;
 
 async function cleanup() {
@@ -410,6 +423,11 @@ beforeAll(async () => {
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { InvoiceWorkflowService } = await import('../src/modules/commerce/invoice-workflow.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  // W5-REFUND-DOORS-KEEP (SEC-CRP-1 / CR-REG-2): the provider refund doors (processStripeRefund,
+  // processPaypalRefund) over the same real Prisma, workflow and ledger chain; CommerceService is
+  // off those doors (the pay-link reads only) and is an empty stub; no provider connector is provided.
+  const { PaymentsService } = await import('../src/modules/payments/payments.service');
+  const { CommerceService } = await import('../src/modules/commerce/commerce.service');
 
   const real: any[] = [
     CreditNoteService,
@@ -418,6 +436,7 @@ beforeAll(async () => {
     ChartOfAccountsSeederService,
     RevenuePostingService,
     InvoiceWorkflowService,
+    PaymentsService,
   ];
   // FinanceController's other collaborators: empty stubs off the credit-note path.
   const collaborators = await Promise.all([
@@ -458,11 +477,13 @@ beforeAll(async () => {
       ...collaborators.filter((token) => !real.includes(token)).map((token) => ({ provide: token, useValue: {} })),
       { provide: ExpensePostingService, useValue: { onProductSold: async () => null } },
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
+      { provide: CommerceService, useValue: {} },
       { provide: EventEmitter2, useValue: recorder },
     ],
   }).compile();
   workflow = moduleRef.get(InvoiceWorkflowService);
   revenuePosting = moduleRef.get(RevenuePostingService);
+  paymentsSvc = moduleRef.get(PaymentsService);
   creditNotes = moduleRef.get(CreditNoteService);
   prismaService = moduleRef.get(PrismaService);
   const coa = moduleRef.get(ChartOfAccountsSeederService);
@@ -1434,8 +1455,9 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
    * clears in reconcileFromCredits. This checks the refund cleared it, then
    * puts back the paidAt the refunded payment stamped: the stale paidAt a row
    * refunded before W4-CREDIT-REFUND-PAIDAT still carries, as does one a
-   * provider refund webhook leaves when its reconcile is refused 409 (review
-   * SEC-CRP-1, the it.todo after CRB-CR-1). The credit move must clear it.
+   * provider refund webhook left before W5-REFUND-DOORS-KEEP, when its
+   * reconcile was refused 409 (review SEC-CRP-1, CRP-1 after CRB-CR-1). The
+   * credit move must clear it.
    */
   async function putBackStalePaidAt(invoiceId: string, paidAt: Date | null) {
     expect(paidAt, 'the paid invoice was stamped').not.toBeNull();
@@ -1670,13 +1692,108 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
     await expectBalanced(ID.biz);
   });
 
-  // W4-CREDIT-REFUND-PAIDAT review SEC-CRP-1 / CR-REG-2: outside this packet's write set (payments.service.ts).
-  // Reproduced: paid 100, credited 30, a committed REFUNDED -10 row, then reconcileFromPayments(inv) with no options
-  // (as processStripeRefund runs it) rejects 409 '... still owes after its credit notes (70 owed)' and the row stays
-  // PARTIALLY_CREDITED with its paidAt; refundPayment (the manual door, 'keep') ends the same position with none (CRB-CR-1 (c)).
-  it.todo(
-    "SEC-CRP-1 / CR-REG-2 W4-CREDIT-REFUND-PAIDAT CR-V44-2 (D-14, D-78), provider refund door: a Stripe or PayPal refund webhook on a credited invoice that leaves more received than its credits leave owing (paid 100, credited 30, 10 refunded) clears its paidAt as the manual refund door does; today processStripeRefund and processPaypalRefund (payments.service.ts) reconcile without onIllegalTransition 'keep', reconcileCreditedFromPayments refuses 409 before the paidAt rule, the webhook swallows it and the stale paidAt stays until the next credit move clears it (CN-29, CN-31); follow-up: those two doors reconcile under 'keep'",
-  );
+  // W5-REFUND-DOORS-KEEP: the W4-CREDIT-REFUND-PAIDAT review todo SEC-CRP-1 / CR-REG-2 (payments.service.ts).
+  // Reproduced at the todo: paid 100, credited 30, a committed REFUNDED -10 row, then reconcileFromPayments(inv) with no
+  // options (as processStripeRefund ran it) rejected 409 '... still owes after its credit notes (70 owed)' and the row
+  // stayed PARTIALLY_CREDITED with its paidAt; refundPayment (the manual door, 'keep') ends the same position with none
+  // (CRB-CR-1 (c)). Here the provider doors themselves run: the original is written by the provider's own delivery
+  // (processStripeChargeOrSession, processPaypalCaptureCompleted: recordedBy null, the provider's id), the refund by the
+  // provider refund door, whose reconcile runs after its refund transaction commits.
+  it("CRP-1 SEC-CRP-1 / CR-REG-2 W5-REFUND-DOORS-KEEP CR-V44-2 (D-14, D-78), provider refund doors: a Stripe or PayPal refund webhook on a credited invoice that leaves more received than its credits leave owing (paid 100, credited 30 or 100, 10 refunded) clears its paidAt as the manual refund door does; processStripeRefund and processPaypalRefund reconcile under onIllegalTransition 'keep', so reconcileCreditedFromPayments keeps the credited status (D-78) and re-derives the paidAt (D-14) instead of refusing 409, and one money position ends with one paidAt whatever the door", async () => {
+    /** A 100 invoice paid in full by the provider's own delivery, then `credited` applied (the paidAt kept, CN-06). */
+    async function providerPaidAndCredited(key: string, provider: 'stripe' | 'paypal', credited: number) {
+      const inv = await seedInvoice(key, 'SENT');
+      if (provider === 'stripe') {
+        await paymentsSvc.processStripeChargeOrSession(
+          'payment_intent.succeeded',
+          { id: `${P}pi_${key}`, amount_received: 10000, currency: 'ttd', latest_charge: `${P}ch_${key}`, metadata: { invoiceId: inv } },
+          `${P}evt_${key}`,
+        );
+      } else {
+        await paymentsSvc.processPaypalCaptureCompleted({ id: `${P}CAP_${key}`, custom_id: inv, amount: { value: '100.00', currency_code: 'TTD' } });
+      }
+      const [original] = await db.payment.findMany({ where: { invoiceId: inv } });
+      expect(original, `${key}: the provider's own row`).toMatchObject({ provider, status: 'SUCCESSFUL', recordedBy: null });
+      expect(Number(original.amount), `${key}: 100 received`).toBe(TOTAL);
+      const paid = await invoiceRow(inv);
+      expect(paid.status, `${key}: paid in full`).toBe('PAID');
+      expect(paid.paidAt, `${key}: stamped`).not.toBeNull();
+      const note = await createNote(inv, credited);
+      expect((await applyNote(note.id)).status).toBe(201);
+      const status = credited < TOTAL ? 'PARTIALLY_CREDITED' : 'FULLY_CREDITED';
+      expect(await invoiceRow(inv), `${key}: credited with its payment in place, paidAt kept (CN-06)`).toMatchObject({ status, paidAt: paid.paidAt });
+      emitted.length = 0;
+      return { inv, original };
+    }
+
+    /** The refund row the door committed: -10, REFUNDED, linked to the original (V1-29c). */
+    async function expectRefundRow(inv: string, original: any) {
+      const refunds = await db.payment.findMany({ where: { invoiceId: inv, status: 'REFUNDED' } });
+      expect(refunds.map((r: any) => [Number(r.amount), r.reference, r.businessId]), 'one refund row of 10, linked to its payment').toEqual([
+        [-10, original.providerPaymentId, ID.biz],
+      ]);
+    }
+
+    // (a) Stripe refund.created (the Refund object) on PARTIALLY_CREDITED: 90 received net, 70 owed after the credit.
+    const a = await providerPaidAndCredited('crp_stripe_part', 'stripe', 30);
+    await paymentsSvc.processStripeRefund(
+      'refund.created',
+      { id: `${P}re_crp_stripe_part`, amount: 1000, currency: 'ttd', charge: `${P}ch_crp_stripe_part`, payment_intent: `${P}pi_crp_stripe_part`, status: 'succeeded' },
+      ID.biz,
+    );
+    await expectRefundRow(a.inv, a.original);
+    // RED-BEFORE (base db5656e7): PARTIALLY_CREDITED still carrying the refunded payment's paidAt (the reconcile refused 409, swallowed).
+    expect(await invoiceRow(a.inv), "Stripe door, kept under 'keep': credited status kept (D-78), no paidAt (D-14)").toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+
+    // (b) PayPal refund naming its capture, the same position.
+    const b = await providerPaidAndCredited('crp_paypal_part', 'paypal', 30);
+    const paypalPartRefund = {
+      id: `${P}RF_crp_paypal_part`,
+      amount: { value: '10.00', currency_code: 'TTD' },
+      supplementary_data: { related_ids: { capture_id: `${P}CAP_crp_paypal_part` } },
+    };
+    await paymentsSvc.processPaypalRefund(paypalPartRefund);
+    await expectRefundRow(b.inv, b.original);
+    // RED-BEFORE (base db5656e7): PARTIALLY_CREDITED with the stale paidAt.
+    expect(await invoiceRow(b.inv), "PayPal door (by capture), kept under 'keep': no paidAt").toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+
+    // (c) Stripe charge.refunded with no refunds.data (the charge's cumulative amount_refunded) on FULLY_CREDITED: 90 net, 0 owed.
+    const c = await providerPaidAndCredited('crp_stripe_full', 'stripe', TOTAL);
+    await paymentsSvc.processStripeRefund(
+      'charge.refunded',
+      { id: `${P}ch_crp_stripe_full`, payment_intent: `${P}pi_crp_stripe_full`, amount_refunded: 1000, currency: 'ttd' },
+      ID.biz,
+    );
+    await expectRefundRow(c.inv, c.original);
+    // RED-BEFORE (base db5656e7): FULLY_CREDITED with the stale paidAt.
+    expect(await invoiceRow(c.inv), "Stripe door (cumulative), over-settled FULLY_CREDITED kept under 'keep': no paidAt").toMatchObject({ status: 'FULLY_CREDITED', paidAt: null });
+
+    // (d) PayPal refund naming no capture (createRefundWithPostingByInvoice, resolved by custom_id) on FULLY_CREDITED.
+    const d = await providerPaidAndCredited('crp_paypal_full', 'paypal', TOTAL);
+    await paymentsSvc.processPaypalRefund({ id: `${P}RF_crp_paypal_full`, custom_id: d.inv, amount: { value: '10.00', currency_code: 'TTD' } });
+    await expectRefundRow(d.inv, d.original);
+    // RED-BEFORE (base db5656e7): FULLY_CREDITED with the stale paidAt.
+    expect(await invoiceRow(d.inv), "PayPal door (by invoice), over-settled FULLY_CREDITED kept under 'keep': no paidAt").toMatchObject({ status: 'FULLY_CREDITED', paidAt: null });
+
+    expect(emitted.filter((ev) => ev.name.startsWith('invoice.')), 'a credited status is kept: no status move, no invoice event').toEqual([]);
+
+    // (e) One money position (paid 100, credited 30, 10 back), three doors: the manual door ends it as the provider doors do.
+    const m = await seedInvoice('crp_manual', 'PAID');
+    const noteM = await createNote(m, 30);
+    expect((await applyNote(noteM.id)).status).toBe(201);
+    await expect(refundPayment(m, 10, 'rf_ten')).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+    const rowM = await invoiceRow(m);
+    for (const [door, inv] of [['Stripe', a.inv], ['PayPal', b.inv]] as const) {
+      const row = await invoiceRow(inv);
+      expect({ status: row.status, paidAt: row.paidAt }, `${door} door and the manual door: one money position, one paidAt`).toEqual({ status: rowM.status, paidAt: rowM.paidAt });
+    }
+
+    // A redelivery records nothing more and moves nothing (the door's dedupe on the refund id).
+    await paymentsSvc.processPaypalRefund(paypalPartRefund);
+    await expectRefundRow(b.inv, b.original);
+    expect(await invoiceRow(b.inv)).toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+    await expectBalanced(ID.biz);
+  });
 });
 
 /**
