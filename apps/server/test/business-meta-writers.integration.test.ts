@@ -65,9 +65,20 @@
  * does not undo the owner's PATCH that clears stripeSecretKey and changes the
  * bank name (other metaData keys), and the PATCH waits for its row lock.
  *
+ * W3-D12b-SEO-SECRET-MASK (FOLLOW3-D12 review D12-ST-2; cases MW-20..MW-23,
+ * values tagged `v84l_d12b_`): the GA4 and Search Console entries the SEO
+ * services keep in metaData (ga4, gsc) hold the Google OAuth tokens. Every
+ * Business read sanitizeBusiness builds (GET /identity/businesses/:id, GET
+ * /identity/businesses, the PATCH response, the POST /identity/bootstrap
+ * business, IdentityService.getBusinessBySlug and the getBusiness the KEY
+ * settings adapter answers) answers each entry only as {configured:true}, to
+ * the OWNER, an ADMIN and a STAFF member alike (the suite adds the two
+ * members for these cases), while the SEO services keep reading their own
+ * entries, tokens included, straight from Prisma (MW-23).
+ *
  * FIXTURES: every user, business and membership id has the `v84l_` prefix
  * (registered in test/helpers/fixture-prefixes.json), every unique column
- * written here (User.email, User.referralCode) contains it, and every row is
+ * written here (User.email, User.referralCode, Business.slug) contains it, and every row is
  * hard-deleted with LIKE ${sqlLikePrefix(P)} in beforeAll and afterAll. No
  * $transaction wrapping.
  */
@@ -1021,4 +1032,194 @@ describe('W3-D13b-META-WRITERS controls (unchanged behaviour)', () => {
       await reset();
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// W3-D12b-SEO-SECRET-MASK (FOLLOW3-D12 review D12-ST-2; values tagged `v84l_d12b_`)
+// ---------------------------------------------------------------------------
+
+const D12B = `${P}d12b_`; // W3-D12b-SEO-SECRET-MASK values carry this tag inside the suite's prefix
+const SEO_READER = { admin: `${D12B}admin`, staff: `${D12B}staff` };
+/** The GA4 and Search Console entries as the SEO services store them (saveConnection, then a sync's lastSync stamp). */
+const SEO_GA4 = {
+  propertyId: `${D12B}property`,
+  accessToken: `${D12B}ga4_ACCESS_ya29`,
+  refreshToken: `${D12B}ga4_REFRESH_1g`,
+  connectedAt: '2026-11-01T00:00:00.000Z',
+  lastSync: '2026-11-02T00:00:00.000Z',
+};
+const SEO_GSC = {
+  siteUrl: `https://${D12B}site.test.local/`,
+  accessToken: `${D12B}gsc_ACCESS_ya29`,
+  refreshToken: `${D12B}gsc_REFRESH_1g`,
+  connectedAt: '2026-11-01T00:00:00.000Z',
+};
+const SEO_META = { ...SEEDED_META, ga4: SEO_GA4, gsc: SEO_GSC };
+const SEO_TOKENS = [SEO_GA4.accessToken, SEO_GA4.refreshToken, SEO_GSC.accessToken, SEO_GSC.refreshToken];
+const CONFIGURED = { configured: true };
+const SEO_SLUG = `${D12B}slug`;
+
+/** The stored GA4 / Search Console OAuth token values a response body carries. */
+const seoTokensIn = (body: unknown): string[] => {
+  const text = JSON.stringify(body ?? null);
+  return SEO_TOKENS.filter((token) => text.includes(token));
+};
+
+/** The checks every masked Business read passes: ga4 and gsc as {configured:true} only, the other keys as before. */
+function expectSeoMasked(business: any, label: string) {
+  expect(seoTokensIn(business), `${label}: GA4/GSC token values in the body`).toEqual([]);
+  expect(business?.metaData?.ga4, `${label}: metaData.ga4`).toEqual(CONFIGURED);
+  expect(business?.metaData?.gsc, `${label}: metaData.gsc`).toEqual(CONFIGURED);
+  expect(business?.metaData?.stripeSecretKey, `${label}: metaData.stripeSecretKey (R0-SEC2c)`).toEqual(CONFIGURED);
+  for (const k of ['stripePublishableKey', 'otherKey'] as const) expect(business?.metaData?.[k], `${label}: metaData.${k} kept`).toBe(SEEDED_META[k]);
+}
+
+const getAs = (actor: string, url: string) => request(app.getHttpServer()).get(url).set('x-test-user', actor);
+
+describe('W3-D12b-SEO-SECRET-MASK Business reads never serve the GA4 or Search Console OAuth tokens (review D12-ST-2)', () => {
+  let identity: any;
+  const READERS = [ID.owner, SEO_READER.admin, SEO_READER.staff];
+
+  beforeAll(async () => {
+    const { IdentityService } = await import('../src/modules/identity/identity.service');
+    identity = app.get(IdentityService);
+    for (const [id, role] of [[SEO_READER.admin, 'ADMIN'], [SEO_READER.staff, 'STAFF']] as const) {
+      await db.user.create({ data: { id, email: emailOf(id), name: id, role: 'USER', referralCode: `${id}_ref` } });
+      await db.membership.create({ data: { id: `${P}m_${id.slice(P.length)}_biz`, userId: id, businessId: ID.biz, role } });
+    }
+  });
+
+  it('[MW-20] RED-BEFORE (W3-D12b-SEO-SECRET-MASK, D12-ST-2): GET /identity/businesses/:businessId answers metaData.ga4 and metaData.gsc as {configured:true} only, to the OWNER, an ADMIN and a STAFF member: no GA4 or Search Console OAuth token (accessToken, refreshToken) in the body, the other metaData keys as before', async () => {
+    await reset(SEO_META);
+    try {
+      // The census: which reader received which token.
+      const census: Record<string, string[]> = {};
+      const bodies: Record<string, any> = {};
+      for (const actor of READERS) {
+        const res = await getAs(actor, `/identity/businesses/${ID.biz}`);
+        expect(res.status, `${actor} GET: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+        const leaked = seoTokensIn(res.body);
+        if (leaked.length > 0) census[actor.slice(P.length)] = leaked.map((t) => t.slice(D12B.length));
+        bodies[actor] = res.body;
+      }
+      expect(census, 'reader -> GA4/GSC token values received').toEqual({});
+      for (const actor of READERS) expectSeoMasked(bodies[actor], `${actor} GET /identity/businesses/${ID.biz}`);
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-21] RED-BEFORE (W3-D12b-SEO-SECRET-MASK, D12-ST-2): the other sanitized Business reads carry no GA4 or Search Console token either: GET /identity/businesses (the workspace list) for the OWNER, ADMIN and STAFF, the owner\'s PATCH /identity/businesses/:businessId response, POST /identity/bootstrap (the owner\'s sign-in answer), IdentityService.getBusinessBySlug and the IdentityService.getBusiness the KEY settings adapter answers', async () => {
+    await reset(SEO_META);
+    await db.$executeRawUnsafe('UPDATE businesses SET slug = $2 WHERE id = $1', ID.biz, SEO_SLUG);
+    try {
+      const census: Record<string, string[]> = {};
+      const note = (read: string, body: unknown) => {
+        const leaked = seoTokensIn(body);
+        if (leaked.length > 0) census[read] = leaked.map((t) => t.slice(D12B.length));
+      };
+      const lists: Record<string, any> = {};
+      for (const actor of READERS) {
+        const res = await getAs(actor, '/identity/businesses');
+        expect(res.status, `${actor} list`).toBe(200);
+        note(`GET /identity/businesses as ${actor.slice(P.length)}`, res.body);
+        lists[actor] = res.body.find((b: any) => b.id === ID.biz);
+      }
+      const BANK = `${D12B}Republic Bank`;
+      const patched = await patchBusiness({ metaData: { bankName: BANK } });
+      expect(patched.status, JSON.stringify(patched.body).slice(0, 300)).toBe(200);
+      note('PATCH /identity/businesses/:id response', patched.body);
+      const boot = await request(app.getHttpServer()).post('/identity/bootstrap').set('x-test-user', ID.owner).send({});
+      expect(boot.status, JSON.stringify(boot.body).slice(0, 300)).toBe(201);
+      expect(boot.body.business?.id).toBe(ID.biz);
+      note('POST /identity/bootstrap', boot.body);
+      const bySlug = await identity.getBusinessBySlug(SEO_SLUG);
+      note('IdentityService.getBusinessBySlug', bySlug);
+      const keyRead = await identity.getBusiness(ID.biz);
+      note('IdentityService.getBusiness (KEY settings adapter)', keyRead);
+      expect(census, 'read -> GA4/GSC token values received').toEqual({});
+
+      for (const actor of READERS) expectSeoMasked(lists[actor], `${actor} GET /identity/businesses`);
+      expect(patched.body.metaData.bankName).toBe(BANK);
+      expectSeoMasked(patched.body, 'PATCH response');
+      expectSeoMasked(boot.body.business, 'POST /identity/bootstrap business');
+      expectSeoMasked(bySlug, 'getBusinessBySlug');
+      expectSeoMasked(keyRead, 'getBusiness');
+      // The PATCH that changed the bank name left the stored connections whole.
+      const stored = await storedMeta();
+      expect(stored.ga4).toEqual(SEO_GA4);
+      expect(stored.gsc).toEqual(SEO_GSC);
+    } finally {
+      await db.$executeRawUnsafe('UPDATE businesses SET slug = NULL WHERE id = $1', ID.biz);
+      await reset();
+    }
+  });
+
+  it('[MW-22] RED-BEFORE (W3-D12b-SEO-SECRET-MASK, D12-ST-2): a stored entry is masked whatever it holds: an entry with no token (a site URL only) and a bare string read as {configured:true}; a null or blank entry reads as absent (not connected), never as the stored value', async () => {
+    const BARE = `${D12B}bare-token-string`;
+    await reset({ ...SEEDED_META, ga4: BARE, gsc: { siteUrl: SEO_GSC.siteUrl } });
+    try {
+      const res = await getAs(SEO_READER.staff, `/identity/businesses/${ID.biz}`);
+      expect(res.status).toBe(200);
+      expect(JSON.stringify(res.body).includes(BARE), 'the bare string in the body').toBe(false);
+      expect(res.body.metaData.ga4, 'metaData.ga4 (a bare string stored)').toEqual(CONFIGURED);
+      expect(res.body.metaData.gsc, 'metaData.gsc (a site URL only stored)').toEqual(CONFIGURED);
+
+      await reset({ ...SEEDED_META, ga4: null, gsc: '  ' });
+      const empty = await getAs(ID.owner, `/identity/businesses/${ID.biz}`);
+      expect(empty.status).toBe(200);
+      expect(empty.body.metaData, 'metaData.ga4 (null stored)').not.toHaveProperty('ga4');
+      expect(empty.body.metaData, 'metaData.gsc (blank stored)').not.toHaveProperty('gsc');
+      expect(empty.body.metaData.otherKey).toBe(SEEDED_META.otherKey);
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-23] CONTROL (W3-D12b-SEO-SECRET-MASK): a read never changes the stored row, and the SEO services keep reading their own entries server side: after the masked reads the stored ga4 and gsc entries still hold their tokens; getConnectionStatus answers connected with the property id or site URL and no token; each sync hands the (stubbed) Google fetch the stored access token and stamps lastSync', async () => {
+    await reset(SEO_META);
+    try {
+      const before = JSON.stringify(await storedMeta());
+      for (const actor of READERS) await getAs(actor, `/identity/businesses/${ID.biz}`);
+      await getAs(SEO_READER.staff, '/identity/businesses');
+      expect(JSON.stringify(await storedMeta()), 'the stored metaData after the reads').toBe(before);
+
+      const ingest = async () => ({ updated: 0 });
+      const ga4 = new SeoGa4({ client: db }, { ingestAnalyticsData: ingest });
+      const gsc = new SeoGsc({ client: db }, { ingestSearchConsoleData: ingest });
+      const ga4Status = await ga4.getConnectionStatus(ID.biz);
+      const gscStatus = await gsc.getConnectionStatus(ID.biz);
+      expect(ga4Status).toEqual({ connected: true, propertyId: SEO_GA4.propertyId, lastSync: SEO_GA4.lastSync });
+      expect(gscStatus).toEqual({ connected: true, siteUrl: SEO_GSC.siteUrl, lastSync: null });
+      expect(seoTokensIn([ga4Status, gscStatus]), 'connector status carries no token').toEqual([]);
+
+      // Google is a stub (no Google traffic): it records the token it is handed.
+      const handed: string[] = [];
+      ga4.fetchAnalyticsData = async (token: string, propertyId: string) => { handed.push(`ga4 ${token} ${propertyId}`); return []; };
+      gsc.fetchSearchAnalytics = async (token: string, siteUrl: string, dimension: string) => { handed.push(`gsc ${token} ${siteUrl} ${dimension}`); return []; };
+      expect(await ga4.syncAnalyticsData(ID.biz)).toEqual({ synced: true, pagesUpdated: 0 });
+      expect(await gsc.syncSearchData(ID.biz)).toEqual({ synced: true, queriesUpdated: 0, pagesUpdated: 0 });
+      expect(handed).toEqual([
+        `ga4 ${SEO_GA4.accessToken} ${SEO_GA4.propertyId}`,
+        `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} query`,
+        `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} page`,
+      ]);
+      const after = await storedMeta();
+      expect(after.ga4).toEqual({ ...SEO_GA4, lastSync: expect.any(String) });
+      expect(after.ga4.lastSync).not.toBe(SEO_GA4.lastSync);
+      expect(after.gsc).toEqual({ ...SEO_GSC, lastSync: expect.any(String) });
+    } finally {
+      await reset();
+    }
+  });
+
+  // Outside the W3-D12b write set (modules/identity/identity.service.ts). The
+  // mask makes an echo destructive: a client that PATCHes the read metaData
+  // back sends ga4/gsc as {configured:true}, and the profile PATCH merges the
+  // caller's bag over the stored one, so the marker would replace the stored
+  // connection (tokens gone, the SEO connectors disconnected). No web client
+  // echoes it today (the payments tab sends only the keys it edits; the KEY
+  // onboarding card selects no metaData). metaData.whatsapp is protected the
+  // same way by PROFILE_PATCH_RESERVED_META_KEYS (R0-SEC2b).
+  it.todo('[MW-24] OPEN (W3-D12b-SEO-SECRET-MASK follow-up, outside its write set: identity.service.ts): PATCH /identity/businesses/:businessId never writes metaData.ga4 or metaData.gsc (reserved like metaData.whatsapp, or the {configured} marker ignored as for the payment secrets), so echoing the masked read back cannot replace a stored GA4 or Search Console connection; the SEO connector routes stay their only writers');
 });

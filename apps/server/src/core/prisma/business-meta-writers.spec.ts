@@ -103,6 +103,7 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import * as ts from 'typescript';
+import { BUSINESS_META_SEO_CONNECTION_KEYS, sanitizeBusiness } from '../security/sanitize-business';
 
 const SRC = resolve(__dirname, '../..');
 const HELPER_FILE = 'core/prisma/business-meta.ts';
@@ -949,14 +950,31 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
     }
   });
 
-  // Review D12-ST-2, outside the D12 write set (core/security/sanitize-business.ts
-  // and the SEO services): the SEO connections store Google OAuth tokens in
-  // metaData.ga4 / metaData.gsc, and maskMetaData masks only whatsapp and the
-  // four payment secrets, so GET /identity/businesses/:id answers the refresh
-  // tokens to any member. FOLLOW3-D13 put the writers under the row lock (a
-  // stale copy no longer restores a disconnected token); the read mask needs
-  // its own packet.
-  it.todo('[D12-ST-2] a Business read masks metaData.ga4 and metaData.gsc OAuth tokens (accessToken, refreshToken) as it masks the payment secrets (follow-up packet: sanitize-business.ts and the SEO writers are outside the FOLLOW3-D12 write set)');
+  // Review D12-ST-2: the SEO connections store Google OAuth tokens in
+  // metaData.ga4 / metaData.gsc (the six SEO writers above), and maskMetaData
+  // masked only whatsapp and the four payment secrets, so GET
+  // /identity/businesses/:id answered the refresh tokens to any member.
+  // FOLLOW3-D13 put the writers under the row lock (a stale copy no longer
+  // restores a disconnected token); W3-D12b-SEO-SECRET-MASK adds the read mask
+  // (real-database proof: MW-20..MW-23 of
+  // test/business-meta-writers.integration.test.ts).
+  it('[D12-ST-2] RED-BEFORE (W3-D12b-SEO-SECRET-MASK): a Business read masks metaData.ga4 and metaData.gsc, which hold the OAuth tokens (accessToken, refreshToken), as it masks the payment secrets ({configured:true}; a null or blank entry left out, the input untouched), and the masked keys are the ones the SEO services keep', () => {
+    const ga4 = { propertyId: 'prop-1', accessToken: 'ya29.ga4-access', refreshToken: '1//ga4-refresh', connectedAt: 'c', lastSync: 's' };
+    const gsc = { siteUrl: 'https://site.test/', accessToken: 'ya29.gsc-access', refreshToken: '1//gsc-refresh' };
+    const stored = { id: 'b1', name: 'B', metaData: { ga4, gsc, bankName: 'Bank', nested: { k: 1 } } };
+    const read = sanitizeBusiness(stored) as typeof stored;
+    expect(JSON.stringify(read), 'a token value in the read').not.toMatch(/ya29\.|1\/\//);
+    expect(read).toEqual({ id: 'b1', name: 'B', metaData: { ga4: { configured: true }, gsc: { configured: true }, bankName: 'Bank', nested: { k: 1 } } });
+    expect(stored.metaData.ga4, 'the stored copy is not modified').toBe(ga4);
+    expect(stored.metaData.gsc.refreshToken).toBe('1//gsc-refresh');
+    expect(sanitizeBusiness({ metaData: { ga4: 'ya29.bare', gsc: { siteUrl: 'https://site.test/' } } }).metaData).toEqual({ ga4: { configured: true }, gsc: { configured: true } });
+    expect(sanitizeBusiness({ metaData: { ga4: null, gsc: '  ', other: 1 } }).metaData).toEqual({ other: 1 });
+
+    expect([...BUSINESS_META_SEO_CONNECTION_KEYS]).toEqual(['ga4', 'gsc']);
+    for (const [file, key] of [['modules/seo/seo-ga4.service.ts', 'ga4'], ['modules/seo/seo-gsc.service.ts', 'gsc']] as const) {
+      expect(readFileSync(join(SRC, file), 'utf8'), `${file} keeps its connection in metaData.${key}`).toMatch(new RegExp(`\\bmeta\\.${key}\\b`));
+    }
+  });
 
   it('[MW-03f] the public storefront event (SiteService.trackEvent) is one atomic statement, not a read under the row lock in an interactive transaction (review D12-ST-1 / CR-D12-1), and every ATOMIC_STATEMENT_OWNERS entry still is one', () => {
     const trackEvent = WRITES.filter((w) => w.key === 'modules/site/site.service.ts#SiteService.trackEvent');
