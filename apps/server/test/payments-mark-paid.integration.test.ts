@@ -118,7 +118,11 @@
  *          stripe-refused, the invoice's or order's business, `<type>:<reason>`; a retry adds none)
  *   MP-06h a matching session through the door is recorded once (one SUCCESSFUL stripe payment,
  *          one posting, PAID; a redelivery on either endpoint writes nothing); the legacy route
- *          hands its verified event to the same door binding (it runs once, for that event)
+ *          hands its verified event to the same door binding (it runs once, for that event).
+ *          R0-20d (W3-STRIPE-LEGACY-BINDING): that binding is the legacy route's only one (the
+ *          controller's copy, bindLegacyStripeEvent, is gone): a payment event the route refuses is
+ *          refused by the door binding, once, and kept as one row under the route's own label
+ *          stripe-legacy-refused (never stripe-refused), checkout.session.async_payment_succeeded too
  *   MP-06i (R0-20c review SEC-R020C-1) a platform-signed payment event of an invoice that names no
  *          business (an API-made session, a charge.succeeded, a payment_intent.succeeded) is refused
  *          by the door as by the legacy route (MP-06c 'nobiz'): the two endpoints agree; KeyFlow's
@@ -1854,7 +1858,7 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     expect(await doorRefusalsOf('door_ord_ok')).toHaveLength(0);
   });
 
-  it('MP-06h: a matching session through the Stripe ledger door is recorded once (one SUCCESSFUL stripe payment posted once, PAID; a redelivery on either endpoint writes nothing; no refusal row); the legacy route hands its verified event to the same door binding', async () => {
+  it('MP-06h: a matching session through the Stripe ledger door is recorded once (one SUCCESSFUL stripe payment posted once, PAID; a redelivery on either endpoint writes nothing; no refusal row); the legacy route hands its verified event to the same door binding, its only binding (R0-20d): a payment event the legacy route refuses is refused by that binding and kept once under the legacy label stripe-legacy-refused, never the door label', async () => {
     const inv = ID.invDoorBoundOk;
     const raw = sessionEvent('door_ok', inv);
     await expect(door(raw)).resolves.toEqual({ ok: true, received: true, processed: 'checkout.session.completed' });
@@ -1890,6 +1894,44 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     expectStripeRow(legacyRows[0], viaLegacy, 'door_legacy');
     await expectPostedOnce(legacyRows[0].id, INVOICE_TOTAL, null);
     expect(await doorRefusalsOf('door_legacy')).toHaveLength(0);
+
+    // R0-20d (W3-STRIPE-LEGACY-BINDING): the door binding is the legacy route's only binding. A payment event the
+    // route refuses reaches that binding once and is refused by it (400, nothing recorded, no claim); the refusal is
+    // kept once under the legacy label, so each endpoint still keeps its own row, and never under the door label.
+    binding.mockClear();
+    const foreignMeta = { metadata: { invoiceId: viaLegacy, businessId: ID.bizB } };
+    const foreign = await legacy(sessionEvent('door_legacy_foreign', viaLegacy, foreignMeta));
+    expect(foreign.status, JSON.stringify(foreign.body)).toBe(400);
+    expect(foreign.body.message).toMatch(/does not match the invoice/);
+    expect(binding, 'the door binding refuses the legacy delivery').toHaveBeenCalledTimes(1);
+    expect(binding.mock.calls[0][0]).toMatchObject({ id: `${P}evt_door_legacy_foreign`, type: 'checkout.session.completed' });
+    await expect(binding.mock.results[0].value).rejects.toThrow(/does not match the invoice/);
+    const kept = await refusalsOf('door_legacy_foreign');
+    expect(kept, 'one refusal row under the legacy label').toHaveLength(1);
+    expect(kept[0]).toMatchObject({ businessId: ID.biz, eventType: 'checkout.session.completed:business' });
+    expect(await doorRefusalsOf('door_legacy_foreign'), 'no row under the door label').toHaveLength(0);
+    expect(await claimsOf('door_legacy_foreign')).toBe(0);
+    // A retry is refused by the same binding and keeps no second row.
+    expect((await legacy(sessionEvent('door_legacy_foreign', viaLegacy, foreignMeta))).status).toBe(400);
+    expect(binding).toHaveBeenCalledTimes(2);
+    expect(await refusalsOf('door_legacy_foreign')).toHaveLength(1);
+    // checkout.session.async_payment_succeeded, which only the door binding binds, keeps the same legacy label.
+    const asyncForeign = JSON.stringify({
+      ...JSON.parse(sessionEvent('door_legacy_async_foreign', viaLegacy, foreignMeta)),
+      type: 'checkout.session.async_payment_succeeded',
+    });
+    expect((await legacy(asyncForeign)).status).toBe(400);
+    expect(binding).toHaveBeenCalledTimes(3);
+    const asyncKept = await refusalsOf('door_legacy_async_foreign');
+    expect(asyncKept, 'one refusal row under the legacy label').toHaveLength(1);
+    expect(asyncKept[0]).toMatchObject({ businessId: ID.biz, eventType: 'checkout.session.async_payment_succeeded:business' });
+    expect(await doorRefusalsOf('door_legacy_async_foreign')).toHaveLength(0);
+    expect((await paymentsOf(viaLegacy)).map((r) => r.id), 'nothing recorded by a refusal').toEqual([legacyRows[0].id]);
+    // The controller keeps no copy of the binding or of its refusal.
+    const { WebhooksController } = await import('../src/modules/webhooks/webhooks.controller');
+    const legacyController = app.get(WebhooksController) as Record<string, unknown>;
+    expect(legacyController.bindLegacyStripeEvent, 'no binding copy on the controller').toBeUndefined();
+    expect(legacyController.refuseLegacyStripeEvent, 'no refusal copy on the controller').toBeUndefined();
   });
 
   it('MP-06i (R0-20c review SEC-R020C-1): the Stripe ledger door refuses (400) a platform-signed payment event of an invoice that names no business (metadata.businessId absent): an API-made checkout session (no payment_link), a charge.succeeded and a payment_intent.succeeded; nothing recorded, no claim, one refusal row each; the legacy route refuses the same event, so the two endpoints agree; the session KeyFlow made for the invoice still records once', async () => {
