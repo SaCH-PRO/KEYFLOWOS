@@ -1476,8 +1476,17 @@ export class PaymentsService {
         [charge],
       ).catch(this.refundAlreadyRecorded('Stripe', refundId));
       // Reopen the invoice if the refund moves the balance below total.
+      // W5-REFUND-DOORS-KEEP (review SEC-CRP-1 / CR-REG-2; D-14, D-78): under
+      // 'keep', as the manual refund door reconciles. A refund is money already
+      // gone back: a credited invoice it leaves holding more than its credit
+      // notes leave owing keeps its credited status (D-78) and
+      // reconcileCreditedFromPayments re-derives its paidAt (cleared once the
+      // payment rows no longer settle the total, D-14) instead of refusing 409,
+      // which the catch below swallowed with the stale paidAt left in place.
+      // An illegal move out of any other status is kept and logged, nothing
+      // written, as that refusal already left it.
       if (persisted) {
-        await this.invoiceWorkflow.reconcileFromPayments(original.invoiceId).catch((e) => {
+        await this.invoiceWorkflow.reconcileFromPayments(original.invoiceId, { onIllegalTransition: 'keep' }).catch((e) => {
           this.logger.warn(`Stripe refund reconcile failed for invoice ${original.invoiceId}: ${e instanceof Error ? e.message : e}`);
         });
       }
@@ -2001,7 +2010,11 @@ export class PaymentsService {
       return;
     }
     if (persisted) {
-      await this.invoiceWorkflow.reconcileFromPayments(target.invoiceId).catch((e) => {
+      // W5-REFUND-DOORS-KEEP (review SEC-CRP-1 / CR-REG-2; D-14, D-78): under
+      // 'keep', as the manual refund door and processStripeRefund reconcile, so a
+      // credited invoice the refund unsettles keeps its credited status and has
+      // its paidAt re-derived by reconcileCreditedFromPayments, not refused 409.
+      await this.invoiceWorkflow.reconcileFromPayments(target.invoiceId, { onIllegalTransition: 'keep' }).catch((e) => {
         this.logger.warn(`PayPal refund reconcile failed for invoice ${target.invoiceId}: ${e instanceof Error ? e.message : e}`);
       });
     }
