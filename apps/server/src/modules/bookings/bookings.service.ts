@@ -21,6 +21,7 @@ import { contactWhereWithId } from '../crm/crm.helpers';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { CommerceService } from '../commerce/commerce.service';
 import { RevenueAttributionService } from '../commerce/revenue-attribution.service';
+import { normalizeCurrency } from '../finance/posting.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -1879,6 +1880,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // service price even if invoice/payment lands later — gives growth
     // dashboards an immediate view of pipeline value). Hard requirement
     // for storefront-originated revenue: failures propagate to the caller.
+    // V1-88 (PR #196 F2c; D-13): in the business currency, as the booking's
+    // invoices are (CommerceService.documentCurrency). It was the literal
+    // 'TTD', so a USD business's storefront bookings were attributed in TTD.
     await this.revenueAttribution.record({
       businessId: input.businessId,
       source: 'storefront',
@@ -1886,7 +1890,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       revenueType: 'BOOKING',
       revenueId: booking.id,
       amount: service.price ?? 0,
-      currency: 'TTD',
+      currency: normalizeCurrency(business.currency) || 'TTD',
       contactId: contact.id,
       referralCode: input.referralCode ?? null,
       visitorId: input.visitorId ?? null,
