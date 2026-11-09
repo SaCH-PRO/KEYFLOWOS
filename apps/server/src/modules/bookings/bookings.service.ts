@@ -132,8 +132,38 @@ export const INVOICE_NOT_CREATED = 'INVOICE_NOT_CREATED';
  * booking's live deposit is in another currency than the final invoice (the
  * business currency). D-13 is one currency per business: a deposit is never
  * netted across currencies, nothing is written, the operator settles by hand.
+ *
+ * Shipped envelope (review CR-A10-1): POST create-invoice answers 409 with this
+ * code. The status route keeps V1-28's contract (completion never fails on
+ * its invoicing): the booking is COMPLETED and the answer carries invoicing
+ * FAILED with this code, no final invoice. D-59's text ("completion refuses
+ * with 409") is to be reconciled with this envelope in BUILD-MAP-001.
  */
 export const DEPOSIT_CURRENCY_MISMATCH = 'DEPOSIT_CURRENCY_MISMATCH';
+
+/**
+ * D-59: the refusal of a final invoice that nets (or would net) the live
+ * deposit in another currency. `final` is the final invoice already drawn up
+ * when the pairing is re-checked after the fact (review SEC-A10-1).
+ */
+function depositCurrencyMismatch(
+  deposit: { id: string; invoiceNumber: string | null },
+  depositCurrency: string,
+  invoiceCurrency: string,
+  final?: { id: string; invoiceNumber: string | null },
+): ConflictException {
+  const finalPart = final
+    ? `the final invoice ${final.invoiceNumber} that nets it is in ${invoiceCurrency}`
+    : `the final invoice would be in ${invoiceCurrency}`;
+  return new ConflictException({
+    code: DEPOSIT_CURRENCY_MISMATCH,
+    message: `The deposit invoice ${deposit.invoiceNumber} is in ${depositCurrency} but ${finalPart}; a deposit is never netted across currencies. Settle the balance by hand.`,
+    depositInvoiceId: deposit.id,
+    depositCurrency,
+    invoiceCurrency,
+    ...(final ? { finalInvoiceId: final.id } : {}),
+  });
+}
 
 /** The completion answer's code for a final invoice that was not drawn up: D-59's refusal keeps its own code. */
 function completionInvoiceCode(err: unknown): typeof INVOICE_NOT_CREATED | typeof DEPOSIT_CURRENCY_MISMATCH {
@@ -151,7 +181,11 @@ function completionInvoiceCode(err: unknown): typeof INVOICE_NOT_CREATED | typeo
  * excerpts and column names) a fixed sentence. The detail is logged.
  */
 function completionInvoiceError(err: unknown): string {
-  const lead = 'The booking is completed, but its invoice could not be created';
+  // D-59: a refused pairing may concern a final invoice already drawn up
+  // (review SEC-A10-1), so its lead does not say "could not be created".
+  const lead = completionInvoiceCode(err) === DEPOSIT_CURRENCY_MISMATCH
+    ? 'The booking is completed, but its final invoice is refused'
+    : 'The booking is completed, but its invoice could not be created';
   if (err instanceof HttpException && err.getStatus() < 500 && err.message) return `${lead}: ${err.message}`;
   return `${lead}. Use Create invoice on the booking to try again.`;
 }
@@ -807,9 +841,21 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         if (booking.invoiceId) {
           const existing = await tx.invoice.findFirst({
             where: { id: booking.invoiceId, businessId },
-            select: { id: true, invoiceNumber: true, total: true },
+            select: { id: true, invoiceNumber: true, total: true, currency: true, status: true, deletedAt: true },
           });
           if (existing) {
+            // D-59 after the fact (review SEC-A10-1): a DRAFT deposit or a
+            // DRAFT final may still have its currency PATCHed once the final
+            // has netted the deposit, so the pairing is re-checked here and a
+            // cross-currency netting is refused, never reported as drawn up.
+            // Nothing is written; a VOID or withdrawn final nets nothing.
+            if (deposit && existing.status !== 'VOID' && !existing.deletedAt) {
+              const depositCurrency = normalizeCurrency(deposit.currency);
+              const finalCurrency = normalizeCurrency(existing.currency);
+              if (depositCurrency !== finalCurrency) {
+                throw depositCurrencyMismatch(deposit, depositCurrency, finalCurrency, existing);
+              }
+            }
             return {
               status: 'EXISTING' as const,
               invoiceId: existing.id,
@@ -833,13 +879,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
           const invoiceCurrency = normalizeCurrency(business?.currency) || 'TTD';
           const depositCurrency = normalizeCurrency(deposit.currency);
           if (depositCurrency !== invoiceCurrency) {
-            throw new ConflictException({
-              code: DEPOSIT_CURRENCY_MISMATCH,
-              message: `The deposit invoice ${deposit.invoiceNumber} is in ${depositCurrency} but the final invoice would be in ${invoiceCurrency}; a deposit is never netted across currencies. Settle the balance by hand.`,
-              depositInvoiceId: deposit.id,
-              depositCurrency,
-              invoiceCurrency,
-            });
+            throw depositCurrencyMismatch(deposit, depositCurrency, invoiceCurrency);
           }
         }
         const finalCents = toCents(service.price) - depositCents;
