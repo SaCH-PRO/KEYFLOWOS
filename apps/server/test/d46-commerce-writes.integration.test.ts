@@ -287,10 +287,15 @@ async function platformStripe(id: string, type: string, object: Record<string, u
   }
 }
 
-/** C's Stripe Checkout payment of `amount` (stored as cs_, its pi_ in reference). */
-function payBySession(inv: string, n: string, amount: number) {
+/**
+ * C's Stripe Checkout payment of `amount` (stored as cs_, its pi_ in reference). Its metadata names
+ * the invoice's business, as every session createStripeCheckout makes does and as a platform-signed
+ * payment event must (R0-20c review SEC-R020C-1).
+ */
+async function payBySession(inv: string, n: string, amount: number) {
+  const { businessId } = await db.invoice.findUnique({ where: { id: inv }, select: { businessId: true } });
   return platformStripe(`evt_cs_${n}`, 'checkout.session.completed', {
-    id: `${P}cs_${n}`, client_reference_id: inv, amount_total: amount * 100, currency: 'ttd', payment_intent: `${P}pi_${n}`, metadata: { invoiceId: inv },
+    id: `${P}cs_${n}`, client_reference_id: inv, amount_total: amount * 100, currency: 'ttd', payment_intent: `${P}pi_${n}`, metadata: { invoiceId: inv, businessId },
   });
 }
 

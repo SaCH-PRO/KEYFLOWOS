@@ -11,9 +11,10 @@
  * Two kinds of rows can name another tenant's ids:
  *
  *   (a) a hand-recorded row: the manual payment route, KEY processPayment and
- *       the evidence confirm (CommerceService.recordPayment) store provider =
- *       the method typed ('stripe'), providerPaymentId 'manual_...', recordedBy
- *       the actor, and any reference. Such a row is no provider evidence (the
+ *       the evidence confirm (CommerceService.recordPayment) store the method
+ *       typed ('stripe'; provider 'manual' since owner ruling D-55, provider
+ *       'stripe' on rows stored before it), providerPaymentId 'manual_...',
+ *       recordedBy the actor, and any reference. Such a row is no provider evidence (the
  *       V1-15d rule of payments-ops): it is never an original and never an
  *       ambiguity witness.
  *   (b) a self-signed row: a delivery a tenant signs with the webhook secret it
@@ -710,11 +711,13 @@ describe('controls: rows the provider wrote stay originals; the tenant-secret co
     const pending = await evidenceSvc.recordPendingPayment(ID.invB6e, ID.bizB, { amount: 50, method: 'stripe', reference: S.chA6 }, { actorId: KEY_ACTOR });
     await evidenceSvc.confirmPendingPayment(pending.id, ID.bizB, ID.ownerB, { amount: 50 });
     const bRows = (await db.payment.findMany({ where: { businessId: ID.bizB, invoiceId: { in: [ID.invB6, ID.invB6e] }, status: 'SUCCESSFUL' } }))
-      .map((r: any) => ({ provider: r.provider, reference: r.reference, recordedBy: r.recordedBy, manual: r.providerPaymentId.startsWith('manual_') }));
-    // The witnesses as stored at this head (before D-55's provider 'manual'): provider 'stripe', a manual_ id, recordedBy set.
+      .map((r: any) => ({ provider: r.provider, method: r.method, reference: r.reference, recordedBy: r.recordedBy, manual: r.providerPaymentId.startsWith('manual_') }));
+    // The witnesses as stored (owner ruling D-55, FOLLOW3-A1): the method typed ('stripe') is kept, the
+    // provider is 'manual', the id a manual_ one and recordedBy set. The door's hand-row rule (recordedBy
+    // set or a manual_ id) also keeps rows stored before D-55 with provider 'stripe' out.
     expect(bRows).toEqual(expect.arrayContaining([
-      { provider: 'stripe', reference: S.piA6, recordedBy: KEY_ACTOR, manual: true },
-      { provider: 'stripe', reference: S.chA6, recordedBy: ID.ownerB, manual: true },
+      { provider: 'manual', method: 'stripe', reference: S.piA6, recordedBy: KEY_ACTOR, manual: true },
+      { provider: 'manual', method: 'stripe', reference: S.chA6, recordedBy: ID.ownerB, manual: true },
     ]));
     const bBefore = await booksOf(ID.bizB);
 
