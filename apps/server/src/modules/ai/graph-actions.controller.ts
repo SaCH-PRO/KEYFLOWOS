@@ -217,6 +217,28 @@ export function graphActionReadsContacts(toolName: string): boolean {
   return scope?.module === 'crm' && scope.minLevel === 'read';
 }
 
+/**
+ * W3-KEY-CRM-VISIBILITY (D-37, D-88; KEY-R3b residuals): tools graphActionReadsContacts does not
+ * know whose dispatcher case still bounds the contacts it reads or writes by the principal's
+ * visibility clause (FlowOrchestratorService.contactReadAccess): fetch_client_health (an analytics
+ * read that counts and names contacts) and sequence_enroll_overdue (a crm write that enrols every
+ * contact with an overdue invoice). Run with no principal they reach the OWNER's view: kept for a run
+ * with no member (D-88's convention; the Pro Auto monitor's client-health read), but a member's plan
+ * the queue runs or an approval hands on with no principal would reach contacts the member may not
+ * open, so there they are the OWNER's only, and their stored output is the OWNER's only, as a contact
+ * read's is.
+ */
+const GRAPH_ACTION_VISIBILITY_BOUND_TOOLS: ReadonlySet<string> = new Set(['fetch_client_health', 'sequence_enroll_overdue']);
+
+/**
+ * Whether `toolName`'s contact rows are bounded only by the principal's visibility clause: a contact
+ * read (graphActionReadsContacts) or one of GRAPH_ACTION_VISIBILITY_BOUND_TOOLS (W3-KEY-CRM-VISIBILITY,
+ * D-37). Run with no principal for a member, such a tool is the OWNER's only.
+ */
+export function graphActionBoundByContactVisibility(toolName: string): boolean {
+  return graphActionReadsContacts(toolName) || GRAPH_ACTION_VISIBILITY_BOUND_TOOLS.has(toolName);
+}
+
 /** What a member must hold to execute a stored step of `toolName` from this route. */
 export interface GraphActionRequirement {
   /** Every module scope, as ModuleScopeGuard reads it. */
@@ -252,8 +274,9 @@ export function graphActionRequirement(toolName: string): GraphActionRequirement
     requirement.ownerOnlyWithoutPrincipal = CONTACT_READ_NO_PRINCIPAL;
   } else if (Object.prototype.hasOwnProperty.call(GOVERNED_UNGRANTED, toolName)) {
     requirement.ownerOnly = GOVERNED_UNGRANTED[toolName];
-  } else if (graphActionReadsContacts(toolName)) {
-    // KEY-R3b review SEC-R3b-1: every other contact read, known by what the tool does.
+  } else if (graphActionBoundByContactVisibility(toolName)) {
+    // KEY-R3b review SEC-R3b-1: every other contact read, known by what the tool does; and
+    // (W3-KEY-CRM-VISIBILITY, D-37) every tool whose contacts only the principal's visibility bounds.
     requirement.ownerOnlyWithoutPrincipal = CONTACT_READ_NO_PRINCIPAL;
   }
   if (CRM_SUBPERMISSION_TOOLS.crm_delete.includes(toolName)) requirement.crmSubPermission = 'crm_delete';
@@ -454,8 +477,9 @@ export async function graphPlanReadScope(
       // scopes, as `step` holds it for a registry tool graphActionRequirement maps to nothing).
       return isCanonicalModule(module) && reads(module);
     },
-    // KEY-R3b review SEC-R3b-1: every contact read, known by what the tool does.
-    stepOutput: (toolName) => !graphActionReadsContacts(toolName),
+    // KEY-R3b review SEC-R3b-1: every contact read, known by what the tool does; and
+    // (W3-KEY-CRM-VISIBILITY, D-37) every tool whose contacts only the principal's visibility bounds.
+    stepOutput: (toolName) => !graphActionBoundByContactVisibility(toolName),
     seesEveryContact: !clause,
     hiddenContacts: clause ? (ids) => hiddenBusinessContacts(prisma, businessId, clause, ids) : null,
   };
