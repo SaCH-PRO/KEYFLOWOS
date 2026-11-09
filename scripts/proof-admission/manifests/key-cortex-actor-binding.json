@@ -187,7 +187,13 @@
     "KeyCortexPlannerService.executePlan — the executing member (R0-09e, review ST-5 / CR-2) RED-BEFORE: the claim is one conditional write over the runnable statuses; a running plan (or one in any status outside them) is refused 409 and left as it is",
     "KeyCortexPlannerService.executePlan — the executing member (R0-09e, review ST-5 / CR-2) each runnable status is claimed and run once: a plan not yet run, and a failed or approval-stopped plan run again",
     "KeyCortexPlannerService.executePlan — the executing member (R0-09e, review ST-5 / CR-2) RED-BEFORE: two concurrent executes of one pending plan: exactly one runs it, the other is refused 409",
-    "KeyCortexPlannerService.executePlan — the executing member (R0-09e, review ST-5 / CR-2) an error after the claim releases a still-running plan as 'failed' (runnable again) and rethrows; it never reopens a plan already marked completed"
+    "KeyCortexPlannerService.executePlan — the executing member (R0-09e, review ST-5 / CR-2) an error after the claim releases a still-running plan as 'failed' (runnable again) and rethrows; it never reopens a plan already marked completed",
+    "KeyCortexExecutorService — FOLLOW3-D14 review repairs (D14-CR-1, SEC-D14-1) D14-CR-1: the real orchestrator's default-tenant verdict is supervised, and execute(skipApproval) then lets the business policy decide (no settings, neverRequire, legacy 'supervised': each runs)",
+    "KeyCortexExecutorService — FOLLOW3-D14 review repairs (D14-CR-1, SEC-D14-1) D14-CR-1: under the same verdict the policy can still ask for approval (aiAlwaysRequireApproval, or a spend over the threshold) although the caller skipped approval",
+    "KeyCortexExecutorService — FOLLOW3-D14 review repairs (D14-CR-1, SEC-D14-1) D14-CR-1: a usable manual-tier verdict goes to approval whatever the policy or the caller says (neverRequire listed, skipApproval)",
+    "KeyCortexExecutorService — FOLLOW3-D14 review repairs (D14-CR-1, SEC-D14-1) SEC-D14-1: executeBatch asks every verdict before running any command; an unusable verdict or a throwing evaluation on a later command refuses the whole batch, each command on record",
+    "KeyCortexExecutorService — FOLLOW3-D14 review repairs (D14-CR-1, SEC-D14-1) SEC-D14-1: a usable batch runs each command under the verdict asked up front (still one evaluateAction per command); a usable deny refuses only its own command",
+    "KeyCortexGoalsController trigger rules creating or changing a trigger rule with no authenticated user is 401 and writes nothing"
   ],
   "maxReportAgeSeconds": 600
 }
