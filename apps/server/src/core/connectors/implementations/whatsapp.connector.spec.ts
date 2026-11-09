@@ -119,9 +119,14 @@ function makeDb() {
         const b = store.businesses.get(where.id);
         return b ? { metaData: clone(b.metaData) } : null;
       },
-      findFirst: async ({ where }: { where: { id?: { not?: string }; metaData?: { path: string[]; equals: unknown } } }) => {
+      findFirst: async ({ where }: { where: { id?: string | { not?: string }; metaData?: { path: string[]; equals: unknown } } }) => {
+        // lockBusinessMeta (FOLLOW3-D12) reads the locked row as findFirst({ where: { id } }).
+        if (typeof where.id === 'string') {
+          const b = store.businesses.get(where.id);
+          return b ? { metaData: clone(b.metaData) } : null;
+        }
         for (const [id, b] of store.businesses) {
-          if (where.id?.not === id) continue;
+          if ((where.id as { not?: string } | undefined)?.not === id) continue;
           if (where.metaData) {
             let cur: unknown = b.metaData;
             for (const p of where.metaData.path) cur = (cur as Row | null)?.[p];
