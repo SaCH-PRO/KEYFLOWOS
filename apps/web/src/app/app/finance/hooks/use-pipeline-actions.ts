@@ -38,6 +38,50 @@ export interface ConvertForm {
   notes: string;
 }
 
+/**
+ * W3-B6-WEB-BULK-SKIPPED (owner ruling D-66, review CR-B6-1): the answer of
+ * PATCH invoices/bulk {action:"delete"}. Only DRAFT and VOID invoices are
+ * deleted; each invoice the server refused is listed in `skipped` with its
+ * status and the single route's reason ("void it first", "refund ... first"),
+ * and counted in `skippedCount` (FOLLOW3-B6).
+ */
+export interface InvoiceBulkDeleteAnswer {
+  updated: number;
+  skipped?: Array<{ id: string; invoiceStatus?: string; reason?: string }>;
+  skippedCount?: number;
+}
+
+/**
+ * W3-B6-WEB-BULK-SKIPPED (D-66, CR-B6-1): shows what a bulk invoice delete did
+ * (the count deleted, and each skipped invoice with its reason) and returns
+ * the requested ids that are gone: every id the answer does not list in
+ * `skipped` (an id the server did not find is not live there either). When
+ * `skippedCount` counts refusals the answer does not list, which ids were kept
+ * is unknown, so none is removed. The callers dropped every selected invoice
+ * and toasted "N invoice(s) updated", hiding the issued invoices kept.
+ */
+export function reportInvoiceBulkDelete(
+  answer: InvoiceBulkDeleteAnswer,
+  requestedIds: string[],
+  invoices: Pick<Invoice, "id" | "invoiceNumber">[],
+): Set<string> {
+  const skipped = Array.isArray(answer.skipped) ? answer.skipped : [];
+  const unlisted = Math.max(0, (answer.skippedCount ?? skipped.length) - skipped.length);
+  if (answer.updated > 0 || skipped.length + unlisted === 0) toast.success(`${answer.updated} invoice(s) deleted`);
+  for (const skip of skipped) {
+    const label = invoices.find((inv) => inv.id === skip.id)?.invoiceNumber ?? skip.id.slice(0, 8);
+    toast.warning(`Invoice ${label} was not deleted`, {
+      description: skip.reason ?? `Only DRAFT and VOID invoices can be deleted (it is ${skip.invoiceStatus ?? "issued"})`,
+    });
+  }
+  if (unlisted > 0) {
+    toast.warning(`${unlisted} more invoice(s) were not deleted`, { description: "Refresh the list to see which invoices remain." });
+    return new Set();
+  }
+  const skippedIds = new Set(skipped.map((skip) => skip.id));
+  return new Set(requestedIds.filter((id) => !skippedIds.has(id)));
+}
+
 /** V1-45b: the key of a document's pending Duplicate, minted on its first attempt. */
 function pendingDuplicateKey(keys: Map<string, string>, slot: string): string {
   let key = keys.get(slot);
@@ -388,10 +432,13 @@ export function usePipelineActions({
       if (invoiceIds.length > 0) {
         const action = status === "SENT" ? "send" : status === "VOID" ? "void" : "delete";
         const { data, error } = await bulkUpdateInvoices(businessId, invoiceIds, action as "send" | "void" | "delete");
-        if (data) {
+        if (data && action === "delete") {
+          // W3-B6-WEB-BULK-SKIPPED (D-66, CR-B6-1): only the invoices deleted leave the list.
+          const deleted = reportInvoiceBulkDelete(data, invoiceIds, invoices);
+          setInvoices((prev) => prev.filter((inv) => !deleted.has(inv.id)));
+        } else if (data) {
           toast.success(`${data.updated} invoice(s) updated`);
-          if (action === "delete") setInvoices((prev) => prev.filter((inv) => !invoiceIds.includes(inv.id)));
-          else setInvoices((prev) => prev.map((inv) => (invoiceIds.includes(inv.id) ? { ...inv, status } : inv)));
+          setInvoices((prev) => prev.map((inv) => (invoiceIds.includes(inv.id) ? { ...inv, status } : inv)));
         } else toast.error(error ?? "Bulk update failed");
       }
     },

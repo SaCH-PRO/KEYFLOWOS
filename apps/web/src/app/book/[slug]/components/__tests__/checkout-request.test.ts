@@ -7,8 +7,10 @@
  * its retry key (V1-33). The storefront sent none, so every retry (a second
  * press of Place Order after an error, a dropped connection) wrote another
  * UNPAID order and counted the promo again. The key travels in the body
- * (`idempotencyKey`): the API is cross-origin and its CORS preflight does not
- * allow an Idempotency-Key header (app-bootstrap.ts allowedHeaders).
+ * (`idempotencyKey`) and, since W3-CORS-IDEMPOTENCY-HEADER, in the
+ * Idempotency-Key header too: the API's CORS preflight for the public
+ * storefront routes allows that header from any origin (app-bootstrap.ts); the
+ * body field stays, with the same key, as the server's fallback.
  *
  *   CIK-01  one key per checkout: the same checkout asks again with the same
  *           key; a different checkout (cart, customer, method) gets a new one;
@@ -17,6 +19,8 @@
  *           order fields, to the slug's checkout route
  *   CIK-03  a request with no key sends none (the server then creates, as
  *           before)
+ *   CIK-04  W3-CORS-IDEMPOTENCY-HEADER: the Idempotency-Key header is sent
+ *           with the same key as the body field
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -66,17 +70,34 @@ describe("storefront checkout retry key (G6PUB-RC2-4)", () => {
     const [{ path, body, init }] = apiPost.mock.calls[0] as [{ path: string; body: Record<string, unknown>; init?: RequestInit }];
     expect(path).toBe("/site/storefront/public/cik-store/checkout");
     expect(body).toEqual({ ...payload(), idempotencyKey: "key_cik_02" });
-    // No custom header: the cross-origin preflight would refuse it.
-    expect(JSON.stringify(init?.headers ?? {})).not.toMatch(/idempotency/i);
+    // The header carries the same key (CIK-04, W3-CORS-IDEMPOTENCY-HEADER); it was refused here before.
+    expect(new Headers(init?.headers).get("Idempotency-Key")).toBe("key_cik_02");
     expect(out).toEqual({ order: { id: "ord_cik" }, payment: null });
   });
 
   it("CIK-03: no key sends none, and a refusal is thrown with the server's message", async () => {
     await postStorefrontCheckout("cik-store", payload(), null);
-    const [{ body }] = apiPost.mock.calls[0] as [{ body: Record<string, unknown> }];
+    const [{ body, init }] = apiPost.mock.calls[0] as [{ body: Record<string, unknown>; init?: RequestInit }];
     expect(body).not.toHaveProperty("idempotencyKey");
+    expect(new Headers(init?.headers).has("Idempotency-Key"), "no key, no header").toBe(false);
 
     apiPost.mockResolvedValueOnce({ data: null, error: "WiPay is not configured for this business" });
     await expect(postStorefrontCheckout("cik-store", payload(), "key_cik_03")).rejects.toThrow(/WiPay is not configured/);
+  });
+
+  it("CIK-04: W3-CORS-IDEMPOTENCY-HEADER: the Idempotency-Key header is sent with the same key as the body field", async () => {
+    const keyring = createCheckoutKeyring();
+    const key = keyring.keyFor(payload());
+    await postStorefrontCheckout("cik-store", payload(), key);
+    // A retry of the same checkout sends the same key, in both places.
+    await postStorefrontCheckout("cik-store", payload(), keyring.keyFor(payload()));
+
+    expect(apiPost).toHaveBeenCalledTimes(2);
+    for (const [{ path, body, init }] of apiPost.mock.calls as [{ path: string; body: Record<string, unknown>; init?: RequestInit }][]) {
+      expect(path).toBe("/site/storefront/public/cik-store/checkout");
+      // The body field stays, with the same key (the server's fallback when no header arrives).
+      expect(body.idempotencyKey).toBe(key);
+      expect(new Headers(init?.headers).get("Idempotency-Key"), "the header carries the body's key").toBe(key);
+    }
   });
 });

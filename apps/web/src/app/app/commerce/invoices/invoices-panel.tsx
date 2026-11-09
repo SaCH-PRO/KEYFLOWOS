@@ -72,6 +72,7 @@ import {
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
 import { attemptIdempotencyKey, newPaymentAttempt, newPaymentAttemptKey, type PaymentAttempt } from "../../finance/components/payment-record-modal";
+import { reportInvoiceBulkDelete } from "../../finance/hooks/use-pipeline-actions";
 import { InvoiceDriveUploader, buildTemplateData } from "../components/invoice-drive-uploader";
 import { RecordRowCard, OverflowMenu, OverflowMenuItem } from "../components/standardized-cards";
 import { getInvoiceSmartCTA } from "../utils/smart-cta";
@@ -284,26 +285,29 @@ export default function InvoicesPanel({
   const handleBulkStatusChange = useCallback(async (status: string) => {
     if (!businessId || selectedIds.size === 0) return;
     const action = status === "SENT" ? "send" : status === "VOID" ? "void" : "delete";
-    const { data, error } = await bulkUpdateInvoices(businessId, Array.from(selectedIds), action as "send" | "void" | "delete");
-    if (data) {
+    const requestedIds = Array.from(selectedIds);
+    const { data, error } = await bulkUpdateInvoices(businessId, requestedIds, action as "send" | "void" | "delete");
+    if (data && action === "delete") {
+      // W3-B6-WEB-BULK-SKIPPED (D-66, CR-B6-1): the server deletes only DRAFT and
+      // VOID invoices and lists each one it kept in `skipped` with its reason;
+      // only the invoices deleted leave the list (a VOID one included).
+      clearSelection();
+      const deleted = reportInvoiceBulkDelete(data, requestedIds, invoices);
+      setInvoices((prev) => prev.filter((i) => !deleted.has(i.id)));
+    } else if (data) {
       toast.success(`${data.updated} invoice(s) updated`);
       clearSelection();
       if (data.updated > 0) {
         const eligibleStatuses: Record<string, string[]> = {
           send: ["DRAFT"],
           void: ["DRAFT", "SENT", "OVERDUE"],
-          delete: ["DRAFT", "SENT", "OVERDUE"],
         };
         const eligible = new Set(
           invoices
             .filter((i) => selectedIds.has(i.id) && (eligibleStatuses[action] ?? []).includes(i.status))
             .map((i) => i.id)
         );
-        if (action === "delete") {
-          setInvoices((prev) => prev.filter((i) => !eligible.has(i.id)));
-        } else {
-          setInvoices((prev) => prev.map((i) => eligible.has(i.id) ? { ...i, status: status as Invoice["status"] } : i));
-        }
+        setInvoices((prev) => prev.map((i) => eligible.has(i.id) ? { ...i, status: status as Invoice["status"] } : i));
       }
     } else {
       toast.error(error ?? "Bulk action failed");

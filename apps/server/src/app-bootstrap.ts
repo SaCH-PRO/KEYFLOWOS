@@ -53,6 +53,55 @@ export function configureNestApp(app: INestApplication): void {
     }),
   );
 
+  // Public widget routes (storefront, bookings, payments, webhooks) must be
+  // accessible from any origin because they are embedded in third-party sites.
+  // This middleware runs before the global CORS and sets permissive headers
+  // for public paths only. Authenticated routes still use the strict allow-list,
+  // those inside a public prefix included (AUTHENTICATED_UNDER_PUBLIC_PREFIXES).
+  //
+  // W3-CORS-IDEMPOTENCY-HEADER (G6PUB-R3, recheck G6PUB-RC2-4): it must be
+  // registered BEFORE app.enableCors. The strict CORS middleware answers every
+  // preflight itself (204), so registered after it this allowance never
+  // answered one: in production a storefront on a site origin outside the
+  // allow-list got a preflight with no Access-Control-Allow-Origin, and the
+  // browser sent no checkout (nor its Idempotency-Key header). On a public
+  // path's actual request the strict middleware still runs after this one and
+  // only narrows '*' to the caller's origin when that origin is allow-listed.
+  const PUBLIC_ROUTE_PREFIXES = [
+    '/site/storefront/public',
+    '/bookings/public',
+    '/payments/create-checkout',
+    '/webhooks',
+    '/widgets',
+  ];
+
+  // W3-CORS-IDEMPOTENCY-HEADER review repair (SEC-CIH-1, CR-CIH-1): the
+  // '/webhooks' prefix also covers the authenticated, tenant-scoped webhook
+  // management routes (WebhooksController 'businesses/:businessId/webhooks...',
+  // AuthGuard + BusinessGuard; the list returns each webhook's HMAC secret).
+  // They are not public, so they get no allowance and keep the strict
+  // allow-list. Compared in lower case: Express routes paths case-insensitively.
+  const AUTHENTICATED_UNDER_PUBLIC_PREFIXES = ['/webhooks/businesses/'];
+
+  expressApp.use((req: Request, res: Response, next: NextFunction) => {
+    const lowerPath = req.path.toLowerCase();
+    const isPublic =
+      PUBLIC_ROUTE_PREFIXES.some((p) => req.path.startsWith(p)) &&
+      !AUTHENTICATED_UNDER_PUBLIC_PREFIXES.some((p) => lowerPath.startsWith(p));
+    if (isPublic) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      // V1-45b: the storefront checkout reads Idempotency-Key (V1-33) too;
+      // W3-CORS-IDEMPOTENCY-HEADER: the storefront sends it as a header.
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-business-id, Idempotency-Key');
+      if (req.method === 'OPTIONS') {
+        res.status(204).end();
+        return;
+      }
+    }
+    next();
+  });
+
   // CORS allow-list. `allowedCorsOrigins()` already encapsulates the full
   // env-driven precedence chain (APP_URL / NEXT_PUBLIC_SITE_URL / PUBLIC_BASE_URL
   // / CORS_ALLOWED_ORIGINS / localhost), so app-bootstrap
@@ -96,33 +145,6 @@ export function configureNestApp(app: INestApplication): void {
       skip: (req) => req.path === '/healthz' || req.path === '/readyz',
     }),
   );
-
-  // Public widget routes (storefront, bookings, payments, webhooks) must be
-  // accessible from any origin because they are embedded in third-party sites.
-  // This middleware runs before the global CORS and sets permissive headers
-  // for public paths only. Authenticated routes still use the strict allow-list.
-  const PUBLIC_ROUTE_PREFIXES = [
-    '/site/storefront/public',
-    '/bookings/public',
-    '/payments/create-checkout',
-    '/webhooks',
-    '/widgets',
-  ];
-
-  expressApp.use((req: Request, res: Response, next: NextFunction) => {
-    const isPublic = PUBLIC_ROUTE_PREFIXES.some((p) => req.path.startsWith(p));
-    if (isPublic) {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      // V1-45b: the storefront checkout reads Idempotency-Key (V1-33) too.
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-business-id, Idempotency-Key');
-      if (req.method === 'OPTIONS') {
-        res.status(204).end();
-        return;
-      }
-    }
-    next();
-  });
 
   // Request timeout: abort connections that hang longer than 60s.
   // This prevents resource exhaustion from slow clients or stuck queries.
