@@ -1019,6 +1019,41 @@ describe('V1-44 InvoiceWorkflowService.reconcileFromCredits (fakes)', () => {
     await expect(h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).rejects.toBeInstanceOf(ConflictException);
     h.quiet();
   });
+
+  it('CR-07 W3CRB-ST-1 CR-V44-2 still part-credited with a paidAt and nothing paid net: one compare-and-set write of paidAt null, no status written, changed false', async () => {
+    const paidAt = new Date('2026-10-01T12:00:00Z');
+    const h = build({ status: 'PARTIALLY_CREDITED', total: 100, paidAt }, 50, [
+      { amount: 100, status: 'SUCCESSFUL' },
+      { amount: -100, status: 'REFUNDED' },
+    ]);
+    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).toEqual({ status: 'PARTIALLY_CREDITED', changed: false });
+    expect(h.tx.invoice.update).toHaveBeenCalledTimes(1);
+    expect(h.tx.invoice.update.mock.calls[0][0]).toEqual({ where: { id: 'inv_1', status: 'PARTIALLY_CREDITED' }, data: { paidAt: null } });
+    h.quiet();
+  });
+
+  it('CR-08 W3CRB-ST-1 CR-V44-2 still part-credited with a paidAt its payment settles (CN-06): no write', async () => {
+    const paidAt = new Date('2026-10-01T12:00:00Z');
+    const h = build({ status: 'PARTIALLY_CREDITED', total: 100, paidAt }, 50, [{ amount: 100, status: 'SUCCESSFUL' }]);
+    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).toEqual({ status: 'PARTIALLY_CREDITED', changed: false });
+    expect(h.tx.invoice.update).not.toHaveBeenCalled();
+    h.quiet();
+  });
+
+  it('CR-09 W3CRB-ST-1 a status the credits leave as it is and is not credited (no APPLIED note) keeps its paidAt: the payment doors own it', async () => {
+    const paidAt = new Date('2026-10-01T12:00:00Z');
+    const h = build({ status: 'SENT', total: 100, paidAt }, null);
+    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).toEqual({ status: 'SENT', changed: false });
+    expect(h.tx.invoice.update).not.toHaveBeenCalled();
+    h.quiet();
+  });
+
+  it('CR-10 W3CRB-ST-1 the paidAt clear is compare-and-set too: a status moved in between (P2025) is a 409', async () => {
+    const h = build({ status: 'PARTIALLY_CREDITED', total: 100, paidAt: new Date('2026-10-01T12:00:00Z') }, 50);
+    h.tx.invoice.update.mockRejectedValueOnce(Object.assign(new Error('Record to update not found.'), { code: 'P2025' }));
+    await expect(h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).rejects.toBeInstanceOf(ConflictException);
+    h.quiet();
+  });
 });
 
 /**

@@ -887,15 +887,20 @@ export class InvoiceWorkflowService {
    * lock its own transaction holds is granted again at once.
    *
    * W3-CREDIT-RECONCILE-BIND (V1-44b todo CR-V44-2; D-14, D-78): paidAt says
-   * when the invoice was settled, and the move clears it whenever the status
-   * it writes is not PAID and the payment rows no longer settle the invoice:
-   * a credited invoice whose money went back, returned by the void of its
-   * note to SENT or PARTIALLY_PAID (as reconcileFromPayments clears it on a
-   * refund's reopen, D-14), or credited further once nothing settles it (a
-   * credited status is never PAID, D-78). It only ever stamped paidAt before.
-   * A PAID invoice credited with its payment rows still settling the total
-   * keeps its paidAt, and so does its return to PAID once the note is voided
-   * (CN-06); a return to PAID with none stamps it.
+   * when the invoice was settled, and the credit move clears it whenever the
+   * status it leaves is not PAID and the payment rows no longer settle the
+   * invoice: a credited invoice whose money went back, returned by the void
+   * of its note to SENT or PARTIALLY_PAID (as reconcileFromPayments clears it
+   * on a refund's reopen, D-14), or credited further once nothing settles it
+   * (a credited status is never PAID, D-78), including a move that leaves it
+   * in the credited status it holds (review W3CRB-ST-1, CN-31). It only ever
+   * stamped paidAt before. A PAID invoice credited with its payment rows still
+   * settling the total keeps its paidAt, and so does its return to PAID once
+   * the note is voided (CN-06); a return to PAID with none stamps it. This
+   * covers credit moves only: the refund that unsettles a credited invoice
+   * goes through reconcileCreditedFromPayments, which writes nothing, so its
+   * paidAt stays until the next credit move (review CRB-CR-1, an it.todo in
+   * credit-note-reversal.integration.test.ts).
    */
   async reconcileFromCredits(
     invoiceId: string,
@@ -923,13 +928,29 @@ export class InvoiceWorkflowService {
     const balance = balanceOfStoredRows(Number(invoice.total), payments, invoice.currency);
     const current = invoice.status as InvoiceStatus;
     const next = deriveStatusAfterCredit(current, Number(invoice.total), Number(applied._sum.amount ?? 0), balance);
-    if (next === current) return { status: current, changed: false };
+    // CR-V44-2 (D-14, D-78): settled is PAID, or a credited status while the
+    // payment rows still settle the total (CN-06). After a credit move,
+    // anything else holds no paidAt (the refund door's half is CRB-CR-1).
+    const settled = next === 'PAID' || (CREDITED_STATUSES.has(next) && balance.isFullyPaid);
+    if (next === current) {
+      // W3CRB-ST-1 (CR-V44-2): a credit move that leaves a credited invoice
+      // in its credited status (a second partial note, or one of two voided)
+      // still clears a paidAt nothing settles, so one money position ends
+      // with one paidAt whatever the path (CN-31). The status is not
+      // written, and changed stays false (it reports a status move). A
+      // status the credits leave as it is and is not credited (no APPLIED
+      // note) belongs to the payment doors and is left alone.
+      if (CREDITED_STATUSES.has(current) && !settled && invoice.paidAt) {
+        await compareAndSet(
+          () => db.invoice.update({ where: { id: invoiceId, status: invoice.status }, data: { paidAt: null } }),
+          `Invoice status changed while ${current} was being reconciled; reload it and try again`,
+        );
+      }
+      return { status: current, changed: false };
+    }
     if (!isLegalCreditTransition(current, next)) {
       throw new ConflictException(`Illegal invoice status transition for a credit note: ${current} -> ${next}`);
     }
-    // CR-V44-2 (D-14, D-78): settled is PAID, or a credited status while the
-    // payment rows still settle the total (CN-06). Anything else holds no paidAt.
-    const settled = next === 'PAID' || (CREDITED_STATUSES.has(next) && balance.isFullyPaid);
     const paidAt = settled
       ? next === 'PAID' && !invoice.paidAt
         ? { paidAt: new Date() }
