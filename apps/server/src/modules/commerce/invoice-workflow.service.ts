@@ -636,13 +636,24 @@ export class InvoiceWorkflowService {
    * holds no paidAt. A refund that unsettles a credited invoice (in full, in
    * part, or kept under 'keep' above what the credits leave owing) clears it
    * here, as reconcileIn clears it on a refund's reopen (D-14), rather than
-   * at the next credit move, so one money position ends with one paidAt
-   * whatever the path (CN-31). Nothing is stamped: a credited status is never
+   * at the next credit move, so a money position reached through the manual
+   * refund door and the credit moves ends with one paidAt whatever their
+   * order (CRB-CR-1 (e), CN-31). Nothing is stamped: a credited status is never
    * PAID (D-78). The write is tenant-bound and compare-and-set,
    * { id, businessId, status } as read (the invoice's own business, whose
    * rows and notes were read); a writer that moved the status in between
    * leaves it as it is (logged, as reconcileIn). No posting, no event, and
    * changed stays false (it reports a status move).
+   *
+   * Not yet the provider refund webhooks (review SEC-CRP-1 / CR-REG-2, an
+   * it.todo in credit-note-reversal.integration.test.ts): processStripeRefund
+   * and processPaypalRefund (payments.service.ts, outside this packet)
+   * reconcile without 'keep', so a refund that still leaves more received
+   * than the credits leave owing is refused 409 above, before this rule. The
+   * webhook swallows it, the reconcile's own transaction rolls back, the
+   * refund row it committed earlier stays, and so does the paidAt, until the
+   * next credit move clears it (reconcileFromCredits, CN-29 / CN-31). A
+   * refund that leaves no more than is owed reaches the rule on every door.
    */
   private async reconcileCreditedFromPayments(
     db: Prisma.TransactionClient,
@@ -934,7 +945,11 @@ export class InvoiceWorkflowService {
    * the note is voided (CN-06); a return to PAID with none stamps it. This
    * covers credit moves only: the refund that unsettles a credited invoice
    * goes through reconcileCreditedFromPayments, which clears its paidAt by the
-   * same rule (W4-CREDIT-REFUND-PAIDAT, review CRB-CR-1).
+   * same rule (W4-CREDIT-REFUND-PAIDAT, review CRB-CR-1). The clears here still
+   * meet a stale paidAt: on rows refunded before that packet, and where a
+   * provider refund webhook's reconcile was refused 409 (review SEC-CRP-1 /
+   * CR-REG-2); CN-29 and CN-31 put one back after the refund to prove them
+   * (review CR-REG-1).
    */
   async reconcileFromCredits(
     invoiceId: string,
