@@ -42,10 +42,16 @@ export class JourneyOrchestratorService implements OnModuleInit {
     const templates = getTemplatesForEvent(eventName);
     if (templates.length === 0) return [];
 
+    // W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): an event the system emitted starts these journeys,
+    // so each is system-created: its plan records the business owner as its member (read now, so an
+    // ownership transfer is followed) and runs as the owner on the plan queue, rather than as no
+    // member (D-73).
+    const owner = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
+
     const results: JourneyExecutionResult[] = [];
     for (const template of templates) {
       try {
-        const result = await this.executeJourney(businessId, template, payload);
+        const result = await this.executeJourney(businessId, template, payload, { memberId: owner?.ownerId ?? null });
         if (result) results.push(result);
       } catch (err: any) {
         this.logger.error(`Journey ${template.key} failed for event ${eventName}: ${(err as Error).message}`);
@@ -59,6 +65,14 @@ export class JourneyOrchestratorService implements OnModuleInit {
     businessId: string,
     template: JourneyTemplate,
     payload: Record<string, any>,
+    /**
+     * W4-D93-NO-MEMBER-CONTACTS (D-93; review SEC-D93-1): the member the journey's plan records and
+     * runs as. handleEvent names the business owner for an event the system emitted. A caller that
+     * names none (POST journeys/:key/trigger, whose client body.payload becomes the steps' arguments)
+     * starts a journey a member's payload shapes, which is no system-created plan: it records no
+     * member, so the plan queue refuses its contact reads and money writes (D-73).
+     */
+    options: { memberId?: string | null } = {},
   ): Promise<JourneyExecutionResult | null> {
     // Check daily auto-action limit
     const settings = await this.prisma.client.autopilotSettings.findUnique({ where: { businessId } });
@@ -93,11 +107,6 @@ export class JourneyOrchestratorService implements OnModuleInit {
       return null;
     }
 
-    // W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): a journey is system-created, so its plan records
-    // the business owner as its member (read now, so an ownership transfer is followed) and runs as the
-    // owner on the plan queue, rather than as no member (D-73).
-    const owner = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
-
     // Create AiPlan for the journey
     const planResult = await this.planner.createPlan(
       businessId,
@@ -112,7 +121,8 @@ export class JourneyOrchestratorService implements OnModuleInit {
         missingInfo: [],
         clarificationNeeded: false,
       } as any,
-      owner?.ownerId ?? undefined,
+      // W4-D93-NO-MEMBER-CONTACTS (D-93; review SEC-D93-1): the owner for a system event, else no member.
+      options.memberId || undefined,
     );
 
     if (!planResult) {
@@ -219,11 +229,35 @@ export class JourneyOrchestratorService implements OnModuleInit {
     });
   }
 
-  async getJourneyInstance(instanceId: string, businessId: string): Promise<any | null> {
-    return this.prisma.client.journeyInstance.findFirst({
+  /**
+   * W4-D93-NO-MEMBER-CONTACTS (D-93, D-74; review SEC-D93-1): a journey the system started runs as the
+   * business owner, so its steps' stored inputs and outputs are the owner's view (another member's
+   * PRIVATE contacts named). The journey's plan is answered as every plan read route answers one
+   * (graphPlanReadScope + visiblePlanSteps; GET ai/plans/:planId): to a `viewer` who does not see every
+   * plan, only their own plan's steps; each step shown as that viewer may read it. With no viewer to
+   * judge (GET journeys/:instanceId hands none), every step is answered without its input or output.
+   */
+  async getJourneyInstance(
+    instanceId: string,
+    businessId: string,
+    viewer?: { id: string; role?: string },
+  ): Promise<any | null> {
+    const instance = await this.prisma.client.journeyInstance.findFirst({
       where: { id: instanceId, businessId },
       include: { plan: { include: { steps: { orderBy: { order: 'asc' } } } } },
     });
+    if (!instance?.plan) return instance;
+    let steps: unknown[];
+    if (viewer) {
+      // Imported at call time: graph-actions.controller sits on the orchestrator's import graph.
+      const { graphPlanReadScope, visiblePlanSteps } = await import('./graph-actions.controller');
+      const scope = await graphPlanReadScope(this.prisma, businessId, viewer);
+      steps =
+        scope.seesEveryPlan || instance.plan.userId === viewer.id ? await visiblePlanSteps(instance.plan.steps, scope) : [];
+    } else {
+      steps = instance.plan.steps.map((step) => ({ ...step, inputPayload: null, outputResult: null }));
+    }
+    return { ...instance, plan: { ...instance.plan, steps } };
   }
 
   async updateJourneyStatus(instanceId: string, status: string): Promise<void> {

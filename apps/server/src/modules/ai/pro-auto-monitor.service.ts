@@ -227,7 +227,10 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
                 this.logger.log(`Tool ${insight.suggestedTool} blocked by governance for ${businessId}, creating approval item`);
               } else if (result.success) {
                 insight.escalated = true;
-                insight.autoExecuteResult = result;
+                // W4-D93-NO-MEMBER-CONTACTS (D-93; review SEC-D93-2): the insight is cached and served to
+                // every member (GET ai/monitoring/insights), and the tool ran for the business owner, so
+                // its answer (the owner's view: another member's PRIVATE contacts named) is not kept on it.
+                insight.autoExecuteResult = { success: true };
                 this.autoExecCooldowns.set(cooldownKey, Date.now());
                 this.logger.log(`Auto-executed ${insight.suggestedTool} for ${businessId}: success`);
                 continue;

@@ -69,8 +69,9 @@ export function noMemberToolRefusal(toolName: string): string | null {
 /**
  * Why the plan queue may not run a step of `toolName` from plan `planId` now, or null when it may.
  * Checked when the worker runs the step (D-71: at run time), against the plan as stored:
- *   - a plan with no member (userId null): noMemberToolRefusal (D-73), unless the system wrote it
- *     (systemPlanMember, D-93): then the business owner is its member, as below;
+ *   - a plan with no member (userId null): noMemberToolRefusal (D-73), unless only the system can
+ *     have written it (a daily briefing; systemPlanMember, D-93): then the business owner is its
+ *     member, as below;
  *   - a member's plan: what that member would need to have the step run with no principal
  *     (assertMayRunGraphAction with noPrincipal, the rule POST ai/plans/:planId/approve applies to
  *     the approver): every module scope of the tool (D-71), the OWNER for an owner-only tool and for
@@ -117,47 +118,60 @@ export async function planStepRunAuthority(
   toolName: string,
   options: PlanStepRunOptions = {},
 ): Promise<{ memberId: string | null; principalId: string | null; refusal: string | null }> {
-  const plan = await prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: { userId: true } });
+  const plan = await prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: SYSTEM_PLAN_MARKERS });
   if (!plan) return { memberId: null, principalId: null, refusal: 'Plan not found in this business' };
-  // W4-D93-NO-MEMBER-CONTACTS (D-93): a plan the system stored with no member runs as the owner.
-  const memberId = plan.userId ?? (await systemPlanMember(prisma, businessId, planId));
+  // W4-D93-NO-MEMBER-CONTACTS (D-93): a plan only the system can have stored with no member runs as the owner.
+  const memberId = plan.userId ?? (await systemPlanOwner(prisma, businessId, plan));
   if (!memberId) return { memberId: null, principalId: null, refusal: noMemberToolRefusal(toolName) };
   const run = await memberToolRunAuthority(prisma, businessId, memberId, toolName, { asPrincipal: !!options.memberIsPrincipal });
   return { memberId, principalId: run.principal ? memberId : null, refusal: run.refusal };
 }
 
+/** What systemPlanOwner reads of a stored plan: its member and the markers its source writes. */
+const SYSTEM_PLAN_MARKERS = { userId: true, objective: true, rawInput: true, scope: true } as const;
+
 /**
  * W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): the member a plan stored with no member runs as,
- * when the system wrote it, or null. The Pro Auto monitor and every system-created plan run with the
- * business owner (Business.ownerId, read now, so an ownership transfer is followed) as their member.
- * Since D-93 the system writers record the owner on the plan (AgentTriggerService for a default rule,
- * JourneyOrchestratorService, MorningBriefingService); a plan one of them stored with no member before
- * D-93 is known by its source and resolved to the owner when it runs, rather than by migrating rows:
- *   - the daily briefing: the scope, objective prefix and raw input MorningBriefingService writes;
- *   - a journey's plan: a JourneyInstance of this business names it (only JourneyOrchestratorService
- *     writes them);
- *   - a default agent trigger's plan: the seeded rule's objective and the raw input AgentTriggerService
- *     writes for it (isDefaultAgentTriggerPlan).
+ * when only the system can have written it, or null. The Pro Auto monitor and every system-created
+ * plan run with the business owner (Business.ownerId, read now, so an ownership transfer is followed)
+ * as their member. Since D-93 the system writers record the owner on the plan they write
+ * (AgentTriggerService for a default rule, JourneyOrchestratorService for a journey an event the
+ * system emitted starts, MorningBriefingService); a plan stored with no member before D-93 is resolved
+ * to the owner when it runs, rather than by migrating rows, only when its stored markers are ones no
+ * member can have shaped: the daily briefing's scope, objective prefix and raw input, which only
+ * MorningBriefingService writes, over cards it computes itself.
+ *
+ * Review SEC-D93-1 and SEC-D93-3: a memberless journey plan or a plan with a default rule's objective
+ * and raw input is not taken as the system's. A journey's plan may come from POST
+ * journeys/:key/trigger, whose client payload becomes its steps' arguments, and a plan with a default
+ * rule's markers may come from a member's copy of the rule at a higher risk tier, another condition
+ * or with auto-approval; the stored plan tells neither apart from the system's, so D-73 holds for them.
  * Any other plan with no member (a trigger a member created that records no creator, a KEY-cortex plan
  * no member created) has none, and D-73 holds for it, as it does for a plan that names a member (this
  * answers null for it: its member is the one it names) or is not of `businessId`.
  */
 export async function systemPlanMember(prisma: PrismaService, businessId: string, planId: string): Promise<string | null> {
-  const plan = await prisma.client.aiPlan.findFirst({
-    where: { id: planId, businessId },
-    select: { id: true, userId: true, objective: true, rawInput: true, scope: true },
-  });
+  const plan = await prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: SYSTEM_PLAN_MARKERS });
   if (!plan || plan.userId) return null;
-  // Imported at call time, as this file is: these services sit on the orchestrator's import graph.
+  return systemPlanOwner(prisma, businessId, plan);
+}
+
+/**
+ * systemPlanMember for a plan already read. Review CR-D93-1: a row is judged by the markers it holds,
+ * so a partial row (a caller's mock that holds only `userId`) is no system plan rather than a TypeError.
+ */
+async function systemPlanOwner(
+  prisma: PrismaService,
+  businessId: string,
+  plan: { objective?: string | null; rawInput?: string | null; scope?: readonly string[] | null },
+): Promise<string | null> {
+  // Imported at call time, as this file is: the briefing service sits on the orchestrator's import graph.
   const { BRIEFING_OBJECTIVE_PREFIX, BRIEFING_RAW_INPUT, BRIEFING_SCOPE } = await import('./morning-briefing.service');
-  const { isDefaultAgentTriggerPlan } = await import('./default-triggers.service');
   const briefing =
-    plan.scope.includes(BRIEFING_SCOPE) && plan.objective.startsWith(BRIEFING_OBJECTIVE_PREFIX) && plan.rawInput === BRIEFING_RAW_INPUT;
-  const system =
-    briefing ||
-    isDefaultAgentTriggerPlan(plan) ||
-    !!(await prisma.client.journeyInstance.findFirst({ where: { planId: plan.id, businessId }, select: { id: true } }));
-  if (!system) return null;
+    (plan.scope ?? []).includes(BRIEFING_SCOPE) &&
+    (plan.objective ?? '').startsWith(BRIEFING_OBJECTIVE_PREFIX) &&
+    plan.rawInput === BRIEFING_RAW_INPUT;
+  if (!briefing) return null;
   const business = await prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
   return business?.ownerId ?? null;
 }

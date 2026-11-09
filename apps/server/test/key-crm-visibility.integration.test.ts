@@ -120,6 +120,8 @@ let assertMayRunGraphAction: (...args: any[]) => Promise<void>;
 let graphPlanReadScope: (...args: any[]) => Promise<{ stepOutput: (toolName: string) => boolean }>;
 let PLAN_APPROVER_ROLES: ReadonlySet<string>;
 let noMemberToolRefusal: (toolName: string) => string | null;
+let systemPlanMember: (prisma: unknown, businessId: string, planId: string) => Promise<string | null>;
+let planStepRunAuthority: (prisma: unknown, businessId: string, planId: string, toolName: string) => Promise<{ memberId: string | null; refusal: string | null }>;
 
 /** Every tool the plan-queue dispatcher handed the flow orchestrator. */
 const dispatched: Array<{ toolName: string; planStepId?: string; principal: unknown }> = [];
@@ -135,13 +137,13 @@ const proposalDispatched: Array<{ toolName: string; planStepId?: string; princip
  */
 let monitor: any;
 let monitorFlow: any;
-const monitorDispatched: Array<{ toolName: string; principal: unknown; onBehalfOf: unknown; surface?: string }> = [];
+const monitorDispatched: Array<{ toolName: string; principal: unknown; onBehalfOf: unknown; surface?: string; result?: unknown }> = [];
 let agentTriggers: any;
 let defaultTriggers: any;
 let journeys: any;
 let briefings: any;
 let DEFAULT_AGENT_TRIGGERS: ReadonlyArray<{ name: string; eventPattern: string; objective: string; maxRiskTier: number }>;
-const plannedFor: Array<{ objective: string; rawInput?: string; userId: unknown }> = [];
+const plannedFor: Array<{ id?: string; objective: string; rawInput?: string; userId: unknown }> = [];
 
 async function cleanup() {
   for (const sql of [
@@ -205,8 +207,7 @@ async function memberExecutes(actor: string, planId: string, toolName: string, a
 }
 
 /** Runs the plan-queue worker body on the plan's one step, as BullMQ hands it a job. */
-async function runQueueStep(planId: string, toolName: string, args: Record<string, unknown>) {
-  const stepId = `${planId}_s1`;
+async function runQueueStep(planId: string, toolName: string, args: Record<string, unknown>, stepId = `${planId}_s1`) {
   const job = {
     data: {
       planId, stepId, businessId: ID.biz, toolName, args, order: 1, dependsOn: [], retryCount: 0,
@@ -252,7 +253,7 @@ beforeAll(async () => {
   const graphActions = (await import('../src/modules/ai/graph-actions.controller')) as any;
   const { GraphActionsController } = graphActions;
   ({ assertMayRunGraphAction, graphPlanReadScope, PLAN_APPROVER_ROLES } = graphActions);
-  ({ noMemberToolRefusal } = (await import('../src/modules/ai/plan-step-authority')) as any);
+  ({ noMemberToolRefusal, systemPlanMember, planStepRunAuthority } = (await import('../src/modules/ai/plan-step-authority')) as any);
   const { BusinessGraphService } = await import('../src/modules/ai/business-graph.service');
   const { IntentParserService } = await import('../src/modules/ai/intent-parser.service');
   const { PlannerService } = await import('../src/modules/ai/planner.service');
@@ -386,9 +387,13 @@ beforeAll(async () => {
     businessGraph: { invalidateCache() {} },
   });
   const runToolAction = (FlowOrchestratorService.prototype as any).executeToolAction;
-  monitorFlow.executeToolAction = function (businessId: string, toolName: string, args: Record<string, unknown>, action?: any) {
-    monitorDispatched.push({ toolName, principal: action?.principalUserId, onBehalfOf: action?.onBehalfOfUserId, surface: action?.surface });
-    return runToolAction.call(this, businessId, toolName, args, action);
+  monitorFlow.executeToolAction = async function (businessId: string, toolName: string, args: Record<string, unknown>, action?: any) {
+    const call: (typeof monitorDispatched)[number] = { toolName, principal: action?.principalUserId, onBehalfOf: action?.onBehalfOfUserId, surface: action?.surface };
+    monitorDispatched.push(call);
+    // Review SEC-D93-2: what the tool answered (the owner's view), kept here so a case can tell it from
+    // what the monitor stores where every member reads it.
+    call.result = await runToolAction.call(this, businessId, toolName, args, action);
+    return call.result;
   };
   monitor = new ProAutoMonitorService(prisma, { getSnapshot: async () => ({}) } as any, governance as any, executionLog, monitorFlow);
 
@@ -403,8 +408,8 @@ beforeAll(async () => {
   let plannedSeq = 0;
   const recordingPlanner = {
     createPlan: async (businessId: string, intent: { objective: string; rawInput?: string; scope?: string[] }, userId?: string) => {
-      plannedFor.push({ objective: intent.objective, rawInput: intent.rawInput, userId });
       plannedSeq += 1;
+      plannedFor.push({ id: `${P}planned_${plannedSeq}`, objective: intent.objective, rawInput: intent.rawInput, userId });
       return db.aiPlan.create({
         data: { id: `${P}planned_${plannedSeq}`, businessId, userId: userId ?? null, objective: intent.objective, rawInput: intent.rawInput ?? null, scope: intent.scope ?? [], status: 'draft' },
       });
@@ -648,28 +653,72 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
   // The owner rides as the member the call is run for (onBehalfOfUserId), not as its principal: the
   // monitor authenticates no human, so the action boundary must not take a write it adopted as one a
   // trusted principal asked for (control-clearance: no principal, a human approves).
-  it("CV-08d RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93): the Pro Auto monitor runs as the business owner: ProAutoMonitorService.escalateInsights runs fetch_client_health over the owner's view (the PRIVATE top spender named), handed to the orchestrator on the owner's behalf (no authenticated principal), and its execution log row is attributed to the owner", async () => {
+  // Review SEC-D93-2: what the monitor runs for the owner answers in the owner's view, and the monitor
+  // keeps it where every member reads it: the cached insight (GET ai/monitoring/insights) and the
+  // execution log row (GET ai/execution-logs). Neither keeps a tool's input or output that only the
+  // owner's membership let it run (one D-73 refuses a run with no member).
+  it("CV-08d RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93; review SEC-D93-2): the Pro Auto monitor runs as the business owner: ProAutoMonitorService.escalateInsights runs fetch_client_health over the owner's view (the PRIVATE top spender named in what the tool answered), handed to the orchestrator on the owner's behalf (no authenticated principal); its execution log row is attributed to the owner, and neither that row nor the cached insight every member reads names the PRIVATE contact", async () => {
     const from = monitorDispatched.length;
     const insight: any = {
       id: `${P}cv08d`, category: 'client_risk', severity: 'warning', title: 'v89k clients at risk', description: 'v89k cv08d',
       suggestedTool: 'fetch_client_health', riskTier: 1, module: 'crm', timestamp: new Date().toISOString(),
     };
     await monitor.escalateInsights(ID.biz, [insight], { mode: 'pro_auto', maxAutoTier: 2 });
-    expect(insight.autoExecuteResult?.success, JSON.stringify(insight.autoExecuteResult ?? null).slice(0, 400)).toBe(true);
-    expect(JSON.stringify(insight.autoExecuteResult)).toContain(NAME.priv);
+    expect(insight.autoExecuteResult, JSON.stringify(insight.autoExecuteResult ?? null).slice(0, 400)).toEqual({ success: true });
+    expectNoHidden(insight);
     const calls = monitorDispatched.slice(from);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ toolName: 'fetch_client_health', surface: 'PRO_AUTO_MONITOR', onBehalfOf: ID.owner });
     expect(calls[0].principal ?? null).toBeNull();
+    expect(JSON.stringify(calls[0].result)).toContain(NAME.priv);
     const logged = await db.aiExecutionLog.findFirst({
       where: { businessId: ID.biz, toolName: 'fetch_client_health', mode: 'pro_auto', success: true },
       orderBy: { createdAt: 'desc' },
-      select: { userId: true },
+      select: { userId: true, inputSummary: true, outputSummary: true },
     });
     expect(logged?.userId).toBe(ID.owner);
+    expectNoHidden(logged);
   });
 
-  it("CV-08e RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93): a system-created plan stored with no member (the daily briefing, a journey's plan, a default agent trigger's plan, written before D-93) runs on the queue as the business owner: its crm_list_contacts step completes over the owner's book (the PRIVATE contact listed); a plan with no member that its source does not mark as the system's (a trigger with a default's name and another objective) is still refused", async () => {
+  it("CV-08g RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93; review SEC-D93-2): the monitor's draft_followup_message for the stalest lead (the OWNER's PRIVATE contact) runs as the owner, but GET ai/monitoring/insights' cached insight and the execution log row name neither that contact nor its id", async () => {
+    await db.$executeRawUnsafe(`UPDATE contacts SET updated_at = now() - interval '90 days' WHERE id = '${ID.cPriv}'`);
+    const ai = monitorFlow.aiUsage;
+    monitorFlow.aiUsage = { callAi: async () => ({ content: JSON.stringify({ subject: 'v89k cv08g', body: 'v89k cv08g draft', callToAction: 'v89k' }) }) };
+    try {
+      const from = monitorDispatched.length;
+      const insight: any = {
+        id: `${P}cv08g`, category: 'stale_leads', severity: 'warning', title: 'v89k stale leads', description: 'v89k cv08g',
+        suggestedTool: 'draft_followup_message', riskTier: 1, module: 'crm', timestamp: new Date().toISOString(),
+      };
+      monitor.insightCache.set(ID.biz, { insights: [insight], expiresAt: Date.now() + 600_000 });
+      await monitor.escalateInsights(ID.biz, await monitor.scanInsights(ID.biz), { mode: 'pro_auto', maxAutoTier: 2 });
+      const calls = monitorDispatched.slice(from);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]).toMatchObject({ toolName: 'draft_followup_message', surface: 'PRO_AUTO_MONITOR', onBehalfOf: ID.owner });
+      expect(JSON.stringify(calls[0].result)).toContain(NAME.priv);
+      const served = await monitor.scanInsights(ID.biz);
+      expect(served[0].autoExecuteResult).toEqual({ success: true });
+      expectNoHidden(served, ['priv']);
+      const logged = await db.aiExecutionLog.findFirst({
+        where: { businessId: ID.biz, toolName: 'draft_followup_message', mode: 'pro_auto', success: true },
+        orderBy: { createdAt: 'desc' },
+        select: { userId: true, inputSummary: true, outputSummary: true },
+      });
+      expect(logged?.userId).toBe(ID.owner);
+      expectNoHidden(logged, ['priv']);
+    } finally {
+      monitorFlow.aiUsage = ai;
+      monitor.insightCache.delete(ID.biz);
+      await db.$executeRawUnsafe(`UPDATE contacts SET updated_at = now() - interval '40 days' WHERE id = '${ID.cPriv}'`);
+    }
+  });
+
+  // Review SEC-D93-1 and SEC-D93-3: a memberless plan is taken as the owner's only when nothing but
+  // the system can have written it. The daily briefing's markers are written by MorningBriefingService
+  // alone; a journey's plan may come from POST journeys/:key/trigger with a member's payload, and a
+  // plan with a default rule's objective and raw input may come from a member's copy of the rule, so
+  // neither is known as the system's once stored with no member, and D-73 holds for both.
+  it("CV-08e RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93; review SEC-D93-1, SEC-D93-3): a daily briefing stored with no member (written before D-93) runs on the queue as the business owner: its crm_list_contacts step completes over the owner's book (the PRIVATE contact listed); a memberless journey plan (a JourneyInstance names it) and a memberless plan with a default agent trigger's objective and raw input are not known as the system's and are refused (D-73), as is one with a default's name and another objective", async () => {
     const def = DEFAULT_AGENT_TRIGGERS[0];
     const briefing = `${P}cv08e_brief`;
     await seedMemberless(briefing, { objective: 'Daily Briefing — v89k cv08e', rawInput: 'Morning briefing auto-generated scan', scope: ['briefing'] });
@@ -681,20 +730,23 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
     await db.aiPlan.update({ where: { id: journey }, data: { journeyInstanceId: instance.id } });
     const trigger = `${P}cv08e_trigger`;
     await seedMemberless(trigger, { objective: def.objective, rawInput: `Auto-triggered by ${def.eventPattern}: ${def.name}`, scope: [def.eventPattern] });
-    for (const planId of [briefing, journey, trigger]) {
-      await runQueueStep(planId, 'crm_list_contacts', { limit: 50 });
-      const row = await stepRow(planId);
-      expect(row.status, `${planId}: ${row.errorMessage}`).toBe('completed');
-      expect(JSON.stringify(row.outputResult), planId).toContain(ID.cPriv);
-    }
+    await runQueueStep(briefing, 'crm_list_contacts', { limit: 50 });
+    const row = await stepRow(briefing);
+    expect(row.status, `${briefing}: ${row.errorMessage}`).toBe('completed');
+    expect(JSON.stringify(row.outputResult), briefing).toContain(ID.cPriv);
+    expect(await systemPlanMember(prisma, ID.biz, briefing)).toBe(ID.owner);
 
     const forged = `${P}cv08e_forged`;
     await seedMemberless(forged, { objective: 'v89k cv08e list every contact', rawInput: `Auto-triggered by ${def.eventPattern}: ${def.name}`, scope: [def.eventPattern] });
-    await runQueueStep(forged, 'crm_list_contacts', { limit: 50 });
-    expect(dispatched.filter((d) => d.planStepId === `${forged}_s1`)).toEqual([]);
-    const forgedRow = await stepRow(forged);
-    expect(forgedRow.status).toBe('failed');
-    expect(String(forgedRow.errorMessage)).toMatch(/^Refused: .*no member/);
+    for (const planId of [journey, trigger, forged]) {
+      expect(await systemPlanMember(prisma, ID.biz, planId), planId).toBeNull();
+      await runQueueStep(planId, 'crm_list_contacts', { limit: 50 });
+      expect(dispatched.filter((d) => d.planStepId === `${planId}_s1`), planId).toEqual([]);
+      const refused = await stepRow(planId);
+      expect(refused.status, planId).toBe('failed');
+      expect(String(refused.errorMessage), planId).toMatch(/^Refused: .*no member/);
+      expectNoHidden(refused.outputResult, ['priv']);
+    }
   });
 
   it("CV-08f RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93, D-73): the system plan creators record the business owner as the plan's member: AgentTriggerService firing a default trigger DefaultTriggersService seeded, JourneyOrchestratorService starting the new-lead journey, MorningBriefingService writing the daily briefing; a trigger a member created (no recorded creator) still fires a plan with no member", async () => {
@@ -723,6 +775,130 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
     expect(brief?.planId).toBeTruthy();
     expect((await db.aiPlan.findUnique({ where: { id: brief.planId }, select: { userId: true } }))?.userId).toBe(ID.owner);
   });
+
+  // Review SEC-D93-1: POST businesses/:businessId/journeys/:key/trigger (AuthGuard and BusinessGuard
+  // only) calls executeJourney with the client's body.payload, which becomes the steps' arguments. A
+  // journey a member's payload shapes is not system-created: executeJourney records no member unless
+  // its caller names one, and only handleEvent (an event the system emitted) names the owner.
+  it("CV-08h RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93, D-73; review SEC-D93-1): a journey started with a payload a member wrote (executeJourney with no member, as POST journeys/:key/trigger calls it) records no member: its auto-approved create_followup_queue step is refused on the queue (no task written, no hidden contact named) and the post-booking journey's commerce_create_invoice on the OWNER's PRIVATE contact is refused (D-73); a system event (handleEvent) still records the owner", async () => {
+    const { getJourneyTemplate } = await import('../src/modules/ai/journey-templates');
+    const tasksBefore = await db.contactTask.count({ where: { businessId: ID.biz } });
+
+    const fromLead = plannedFor.length;
+    const lead = await journeys.executeJourney(ID.biz, getJourneyTemplate('new-lead'), { status: 'LEAD', contactId: ID.cPriv });
+    expect(lead?.planId).toBeTruthy();
+    expect(plannedFor.slice(fromLead).map((p) => p.userId ?? null)).toEqual([null]);
+    const leadPlan = await db.aiPlan.findUnique({ where: { id: lead.planId }, select: { userId: true, status: true } });
+    expect(leadPlan).toEqual({ userId: null, status: 'approved' });
+    expect(await systemPlanMember(prisma, ID.biz, lead.planId)).toBeNull();
+    const queueStep = await db.aiPlanStep.findFirst({ where: { planId: lead.planId, toolName: 'create_followup_queue' }, select: { id: true, inputPayload: true } });
+    await runQueueStep(lead.planId, 'create_followup_queue', queueStep.inputPayload, queueStep.id);
+    expect(dispatched.filter((d) => d.planStepId === queueStep.id)).toEqual([]);
+    const queueRow = await db.aiPlanStep.findUnique({ where: { id: queueStep.id }, select: { status: true, errorMessage: true, outputResult: true } });
+    expect(queueRow.status).toBe('failed');
+    expect(String(queueRow.errorMessage)).toMatch(/^Refused: .*reads the business's contacts.*no member/);
+    expectNoHidden(queueRow.outputResult);
+    expect(await db.contactTask.count({ where: { businessId: ID.biz } })).toBe(tasksBefore);
+
+    const booking = await journeys.executeJourney(ID.biz, getJourneyTemplate('post-booking'), { contactId: ID.cPriv, amount: 10 });
+    expect((await db.aiPlan.findUnique({ where: { id: booking.planId }, select: { userId: true } }))?.userId ?? null).toBeNull();
+    const money = await planStepRunAuthority(prisma, ID.biz, booking.planId, 'commerce_create_invoice');
+    expect(money.memberId).toBeNull();
+    expect(String(money.refusal)).toMatch(/writes the business's money or invoices.*D-73/);
+
+    const fromEvent = plannedFor.length;
+    await journeys.handleEvent('contact.created', { businessId: ID.biz, contactId: ID.cMine, status: 'LEAD' });
+    const evented = plannedFor.slice(fromEvent);
+    expect(evented.length).toBeGreaterThan(0);
+    for (const p of evented) expect(p.userId, p.objective).toBe(ID.owner);
+  });
+
+  // Review SEC-D93-1: GET businesses/:businessId/journeys/:instanceId (AuthGuard and BusinessGuard
+  // only) answered the journey's plan with every step's stored input and output, whoever asked. A
+  // journey the system ran as the owner stores the owner's view there.
+  it("CV-08i RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93, D-74; review SEC-D93-1): getJourneyInstance does not answer an owner-run journey step's input or output to a reader it cannot judge (no viewer: what GET journeys/:instanceId passes), nor to the STAFF member or the ADMIN who may not open the OWNER's PRIVATE contact (the plan read rule, D-74); the OWNER reads it", async () => {
+    const planId = `${P}cv08i_plan`;
+    await db.aiPlan.create({
+      data: {
+        id: planId, businessId: ID.biz, userId: ID.owner, status: 'completed', objective: 'Journey: v89k cv08i', rawInput: 'Auto-triggered by contact.created: v89k cv08i', scope: ['contact.created'],
+        steps: {
+          create: [{
+            id: `${planId}_s1`, order: 1, toolName: 'create_followup_queue', action: 'create_followup_queue', module: 'organize', status: 'completed',
+            inputPayload: { contactId: ID.cPriv },
+            outputResult: { queued: [{ contactId: ID.cPriv, name: `${NAME.priv} V89K` }, { contactId: ID.cTeam, name: `${NAME.team} V89K` }] },
+          }],
+        },
+      },
+    });
+    const instance = await db.journeyInstance.create({
+      data: { id: `${P}cv08i_ji`, businessId: ID.biz, templateKey: 'new-lead', triggerEvent: 'contact.created', planId, steps: [] },
+    });
+
+    const unjudged = await journeys.getJourneyInstance(instance.id, ID.biz);
+    expect(unjudged?.id).toBe(instance.id);
+    expect(unjudged.plan.steps).toHaveLength(1);
+    expect(unjudged.plan.steps[0]).toMatchObject({ status: 'completed', inputPayload: null, outputResult: null });
+    expectNoHidden(unjudged);
+
+    const staff = await journeys.getJourneyInstance(instance.id, ID.biz, { id: ID.staffOwned, role: 'USER' });
+    expect(staff?.id).toBe(instance.id);
+    expectNoHidden(staff);
+    const admin = await journeys.getJourneyInstance(instance.id, ID.biz, { id: ID.admin, role: 'USER' });
+    expectNoHidden(admin, ['priv']);
+    const owner = await journeys.getJourneyInstance(instance.id, ID.biz, { id: ID.owner, role: 'USER' });
+    expect(JSON.stringify(owner.plan.steps)).toContain(NAME.priv);
+    expect(await journeys.getJourneyInstance(instance.id, `${P}other_biz`)).toBeNull();
+  });
+
+  // Review SEC-D93-3: a member's rule is the system's only when it is the seeded rule word for word:
+  // name, event, objective and condition, at no higher risk tier. A copy that differs in any of them
+  // fires a plan with no member, and no plan stored with no member is taken as a default rule's at
+  // run time (CV-08e), so the tier guard holds.
+  it("CV-08j RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93, D-73; review SEC-D93-3): a member's copy of a default rule at a higher risk tier, or with another condition, fires a plan with no member, whose crm_list_contacts step is refused on the queue (D-73): no hidden contact listed", async () => {
+    const paid = DEFAULT_AGENT_TRIGGERS.find((t) => t.eventPattern === 'invoice.paid')!;
+    const lead = DEFAULT_AGENT_TRIGGERS.find((t) => t.eventPattern === 'contact.created')!;
+    expect(paid.maxRiskTier).toBe(1);
+    // Only the copies fire here: the rules seeded earlier (CV-08f) are switched off.
+    await db.agentTrigger.updateMany({ where: { businessId: ID.biz }, data: { enabled: false } });
+    await db.agentTrigger.create({
+      data: { id: `${P}cv08j_tier`, businessId: ID.biz, name: paid.name, eventPattern: paid.eventPattern, objective: paid.objective, maxRiskTier: 2, autoExecute: true, enabled: true },
+    });
+    await db.agentTrigger.create({
+      data: { id: `${P}cv08j_cond`, businessId: ID.biz, name: lead.name, eventPattern: lead.eventPattern, objective: lead.objective, maxRiskTier: lead.maxRiskTier, autoExecute: true, enabled: true },
+    });
+    try {
+      for (const [event, payload] of [
+        [paid.eventPattern, { businessId: ID.biz, invoiceId: `${P}none` }],
+        [lead.eventPattern, { businessId: ID.biz, contactId: ID.cMine, status: 'CLIENT' }],
+      ] as const) {
+        const from = plannedFor.length;
+        await agentTriggers.handleEvent(event, payload);
+        const fired = plannedFor.slice(from);
+        expect(fired, event).toHaveLength(1);
+        expect(fired[0].userId ?? null, event).toBeNull();
+        const planId = fired[0].id!;
+        expect(await db.aiPlan.findUnique({ where: { id: planId }, select: { userId: true, status: true } }), event).toEqual({ userId: null, status: 'approved' });
+        await db.aiPlanStep.create({
+          data: { id: `${planId}_s1`, planId, order: 1, toolName: 'crm_list_contacts', action: 'crm_list_contacts', module: 'ai', status: 'pending', inputPayload: { limit: 50 } },
+        });
+        await runQueueStep(planId, 'crm_list_contacts', { limit: 50 });
+        expect(dispatched.filter((d) => d.planStepId === `${planId}_s1`), event).toEqual([]);
+        const row = await stepRow(planId);
+        expect(row.status, event).toBe('failed');
+        expect(String(row.errorMessage), event).toMatch(/^Refused: .*no member/);
+        expectNoHidden(row.outputResult);
+      }
+    } finally {
+      await db.agentTrigger.deleteMany({ where: { id: { in: [`${P}cv08j_tier`, `${P}cv08j_cond`] } } });
+    }
+  });
+
+  // Residuals of review SEC-D93-1..3 outside this packet's write set (plan-step-authority, the default
+  // triggers, the system plan creators' member field, the orchestrator's choice of the memberless view):
+  it.todo("CV-08k TODO (review SEC-D93-1 residual; D-74): GET businesses/:businessId/journeys/:instanceId hands getJourneyInstance its viewer (ai.controller.ts, outside W4-D93-NO-MEMBER-CONTACTS's write set), so the plan read rule answers each viewer what it may read; until then the route withholds every step's input and output from every reader");
+  it.todo("CV-08l TODO (review SEC-D93-1, SEC-D93-2 residual; D-74): GET businesses/:businessId/ai/execution-logs answers only what its viewer may read: ActionDispatcherService (outside this write set) logs a plan step's whole result, so an owner-run system plan's output (and, before D-93, the owner's own plan's) reaches every member");
+  it.todo("CV-08m TODO (review SEC-D93-3 residual): POST and PUT agent/triggers (agent.controller.ts, BusinessGuard only, outside this write set) let any member switch on a seeded default rule or write it word for word, and its plans run as the owner (D-93); who may switch on or write a system rule is that route's authority");
+  it.todo("CV-08n TODO (review SEC-D93-1 residual; D-73): POST businesses/:businessId/journeys/:key/trigger records the requesting member as the journey plan's member (ai.controller.ts, outside this write set), so the journey runs as that member rather than as no member");
 });
 
 describe("W3-KEY-CRM-VISIBILITY review repairs (D-37): every dispatcher case the principal's visibility bounds is the OWNER's only with no principal, and sequence_enroll honours the member's view", () => {

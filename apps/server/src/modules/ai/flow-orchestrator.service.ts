@@ -655,6 +655,15 @@ type DispatcherTenantModel =
   | 'staffMember'
   | 'procurementRequest';
 
+/**
+ * W4-D93-NO-MEMBER-CONTACTS (D-93; review SEC-D93-2): what the Pro Auto monitor's execution log row
+ * keeps for the arguments and answer of a tool that ran only because the monitor runs for the business
+ * owner (autoExecuteToolForMonitoring): GET ai/execution-logs answers every member.
+ */
+const MONITOR_MEMBER_VIEW_WITHHELD: Readonly<Record<string, string>> = Object.freeze({
+  withheld: "Run for the business owner (D-93): the owner's view is not kept where every member reads it",
+});
+
 @Injectable()
 export class FlowOrchestratorService {
   private readonly logger = new Logger(FlowOrchestratorService.name);
@@ -8007,6 +8016,12 @@ ${triage.standingContext}`;
     const action: KeyDispatchAction = memberId
       ? { surface: 'PRO_AUTO_MONITOR', onBehalfOfUserId: memberId }
       : { surface: 'PRO_AUTO_MONITOR' };
+    // W4-D93-NO-MEMBER-CONTACTS (D-93; review SEC-D93-2): a tool that runs only because the monitor runs
+    // for a member (one D-73 refuses a run with no member: a contact read, a money write) takes its
+    // arguments from, and answers in, that member's view (the owner's: another member's PRIVATE
+    // contacts). GET ai/execution-logs answers every member, so its row keeps neither.
+    const memberView = !!memberId && noMemberToolRefusal(toolName) !== null;
+    const loggedArgs: Record<string, unknown> = memberView ? MONITOR_MEMBER_VIEW_WITHHELD : args;
 
     const decision = await this.governance.evaluate(businessId, toolName, 'pro_auto');
     if (!decision.allowed) {
@@ -8020,7 +8035,8 @@ ${triage.standingContext}`;
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      const logged = this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
+      const loggedEnvelope = memberView ? { ...envelope, result: MONITOR_MEMBER_VIEW_WITHHELD } : envelope;
+      const logged = this.executionLog.logToolExecution(businessId, toolName, loggedArgs, loggedEnvelope, true, durationMs, {
         riskTier: tier,
         mode: 'pro_auto',
         rationale: 'Auto-executed by Pro Auto monitoring engine (governance approved)',
@@ -8033,7 +8049,7 @@ ${triage.standingContext}`;
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      const logged = this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
+      const logged = this.executionLog.logToolExecution(businessId, toolName, loggedArgs, (error as Error).message, false, durationMs, {
         riskTier: tier,
         mode: 'pro_auto',
         rationale: 'Auto-execution attempt by Pro Auto monitoring engine',

@@ -10,36 +10,43 @@ export { DEFAULT_AGENT_TRIGGERS } from './default-triggers.constants';
  * as their member (AgentTriggerService.handleEvent records the owner on the plan). AgentTrigger has no
  * member column, and its condition JSON is stored as POST/PUT agent/triggers receive it, so a member
  * recorded in the row could be forged by any member; the rule is known as the system's by its source
- * instead: the seeded name, event and objective, at no higher risk tier than seeded. A rule whose
- * objective a member changed is theirs and fires plans with no member (D-73); a member who copies a
- * default rule word for word gets only what that default does.
+ * instead: the seeded name, event, objective and condition, at no higher risk tier than seeded. A rule
+ * a member changed in any of them is theirs and fires plans with no member (D-73); a member who copies
+ * a default rule word for word gets only what that default does. Review SEC-D93-3: the condition is
+ * part of the rule (a copy of 'New Lead' with no condition fires on every contact created), and a
+ * plan stored with no member is never taken as a default rule's at run time (systemPlanMember), so a
+ * copy this answers null for fires plans that run as no member.
  */
 export function defaultAgentTriggerFor(trigger: {
   name: string;
   eventPattern: string;
   objective: string;
+  condition?: unknown;
   maxRiskTier?: number | null;
 }): (typeof DEFAULT_AGENT_TRIGGERS)[number] | null {
+  const condition = canonicalJson(trigger.condition ?? null);
   return (
     DEFAULT_AGENT_TRIGGERS.find(
       (rule) =>
         rule.name === trigger.name &&
         rule.eventPattern === trigger.eventPattern &&
         rule.objective === trigger.objective &&
+        canonicalJson(('condition' in rule ? rule.condition : null) ?? null) === condition &&
         (trigger.maxRiskTier == null || trigger.maxRiskTier <= rule.maxRiskTier),
     ) ?? null
   );
 }
 
-/**
- * W4-D93-NO-MEMBER-CONTACTS (D-93): whether a plan is one a default rule fired, by what
- * AgentTriggerService writes for it (the rule's objective, and `Auto-triggered by <event>: <name>`
- * as its raw input). Used for a plan stored with no member before D-93, which runs as the owner.
- */
-export function isDefaultAgentTriggerPlan(plan: { objective: string; rawInput: string | null }): boolean {
-  return DEFAULT_AGENT_TRIGGERS.some(
-    (rule) => plan.objective === rule.objective && plan.rawInput === `Auto-triggered by ${rule.eventPattern}: ${rule.name}`,
-  );
+/** `value` as JSON with every object's keys in order, so a stored JSON column compares by content. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.keys(value as Record<string, unknown>)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
 }
 
 
