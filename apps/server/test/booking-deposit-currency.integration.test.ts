@@ -72,6 +72,26 @@
  *                  passed, and completion answered CREATED for a TTD final netting a USD deposit;
  *                  the switch now waits for the booking's final-invoice lock, reads the linked
  *                  final and answers 409; the pair stays TTD
+ *   DC-14 RED      W4-A10c-FINAL-LINK-WINDOW (review SEC-A10b-3, D-59/D-91), RED at b51d33a4:
+ *                  issueFinalInvoice creates the final on its own connection (committed) before
+ *                  it links Booking.invoiceId, so a currency PATCH of the final committed in that
+ *                  window finds no booking (200) and completion answered CREATED for a USD final
+ *                  netting the TTD deposit. Now the link re-reads the final it links and refuses:
+ *                  completion FAILED / DEPOSIT_CURRENCY_MISMATCH, Booking.invoiceId stays null,
+ *                  the drawn final is withdrawn, nothing posted; the button then draws a 75 TTD
+ *                  final (CONTROL)
+ *   DC-15 RED      W4-A10c-FINAL-LINK-WINDOW (review SEC-A10b-3, D-59/D-91), RED at b51d33a4: a
+ *                  currency PATCH of the final that read no pair before the link (held there,
+ *                  the final's row lock taken) and writes after the link step ran: the link
+ *                  committed and the PATCH then wrote USD. Now the link step waits for the
+ *                  final's row, reads the switched currency and refuses as DC-14
+ *   DC-16 RED      W4-A10c-FINAL-LINK-WINDOW review CR-A10c-1 (D-59/D-91), RED at c9bbe04a: the
+ *                  link wrote Booking.invoiceId (the booking row lock) and only then took the
+ *                  final's row, the reverse of a contact merge (invoices, then bookings), so a
+ *                  merge that held the final and then repointed the booking deadlocked against it
+ *                  and completion answered FAILED INVOICE_NOT_CREATED. Now the final's row is
+ *                  locked before the booking's: the link waits for the merge, the merge commits
+ *                  and completion draws the 75 TTD final (CREATED)
  *
  * Nothing on the money path is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard, PublicRateLimitGuard (real Redis at
@@ -315,6 +335,43 @@ async function advisoryLockWaiterSeen(limitMs: number): Promise<boolean> {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   return false;
+}
+
+/**
+ * W4-A10c-FINAL-LINK-WINDOW (review SEC-A10b-3): whether a session of this
+ * database waits for a row lock (a transaction id or tuple lock) within
+ * `limitMs`: the link step waiting for the final invoice's row.
+ */
+async function rowLockWaiterSeen(limitMs: number): Promise<boolean> {
+  const until = Date.now() + limitMs;
+  while (Date.now() < until) {
+    const rows: Array<{ n: number }> = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+       WHERE l.locktype IN ('transactionid', 'tuple') AND NOT l.granted AND a.datname = current_database()`,
+    );
+    if (rows[0]?.n > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return false;
+}
+
+/**
+ * W4-A10c-FINAL-LINK-WINDOW (D-59/D-91, D-13): what is committed must never
+ * pair a deposit with a final in another currency. The booking and both
+ * invoices are read raw, withdrawn rows included; a VOID half nets nothing.
+ */
+async function expectNoMismatchedPair(label: string, bookingId: string) {
+  const rows: any[] = await db.$queryRawUnsafe(
+    `SELECT invoice_id AS "invoiceId", deposit_invoice_id AS "depositInvoiceId" FROM bookings WHERE id = $1`,
+    bookingId,
+  );
+  const final = rows[0]?.invoiceId ? await rawInvoice(rows[0].invoiceId) : null;
+  const deposit = rows[0]?.depositInvoiceId ? await rawInvoice(rows[0].depositInvoiceId) : null;
+  const paired = !!final && !!deposit && final.status !== 'VOID' && deposit.status !== 'VOID';
+  expect(
+    paired ? final.currency : deposit?.currency,
+    `${label}: RED-BEFORE: Booking.invoiceId links a ${final?.currency} final netting the ${deposit?.currency} deposit`,
+  ).toBe(deposit?.currency);
 }
 
 beforeAll(async () => {
@@ -872,5 +929,205 @@ describe('V1-81 (FOLLOW3-A10, D-59) a final invoice never nets a deposit billed 
     const again = await createInvoiceRoute(ID.biz, b.bookingId);
     expect(again.status, JSON.stringify(again.body)).toBe(201);
     expect(again.body).toMatchObject({ invoiceId: finalId, alreadyExisted: true, amount: 75, depositInvoiceId: b.depositInvoiceId });
+  });
+
+  /**
+   * W4-A10c-FINAL-LINK-WINDOW (D-59/D-91): the completion that drew `drawnId`
+   * and found it switched to USD refused it: FAILED with the D-59 code naming
+   * both currencies, no link, the drawn final withdrawn, nothing posted, the
+   * TTD deposit untouched. The operator's button then draws a fresh 75 TTD
+   * final netting the TTD deposit (CONTROL).
+   */
+  async function expectCompletionRefusedTheSwitchedFinal(
+    label: string,
+    b: { bookingId: string; depositInvoiceId: string },
+    done: any,
+    drawnId: string,
+    before: { transactions: number; entries: number },
+  ) {
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect(done.body.status, 'V1-28: the booking is completed whatever its invoicing').toBe('COMPLETED');
+    expect(done.body.invoicing, `${label}: completion refuses the final switched to USD`).toMatchObject({ status: 'FAILED', invoiceId: null, code: MISMATCH });
+    expect(done.body.invoicing.error).toContain('USD');
+    expect(done.body.invoicing.error).toContain('TTD');
+    expect(done.body.invoiceErrorCode).toBe(MISMATCH);
+    expect((await bookingRow(b.bookingId)).invoiceId, `${label}: Booking.invoiceId stays null`).toBeNull();
+    const drawn = await rawInvoice(drawnId);
+    expect({ status: drawn.status, currency: drawn.currency, withdrawn: drawn.deletedAt !== null }, `${label}: the drawn final is withdrawn`).toEqual({
+      status: 'DRAFT',
+      currency: 'USD',
+      withdrawn: true,
+    });
+    const deposit = await invoiceRow(b.depositInvoiceId);
+    expect({ status: deposit.status, currency: deposit.currency, total: money(deposit.total) }, `${label}: the deposit is untouched`).toEqual({
+      status: 'DRAFT',
+      currency: 'TTD',
+      total: 25,
+    });
+    expect(await ledgerCount(ID.biz), `${label}: nothing is posted`).toEqual(before);
+
+    // CONTROL: the operator's button draws a fresh final in the deposit's currency.
+    const button = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(button.status, JSON.stringify(button.body)).toBe(201);
+    expect(button.body).toMatchObject({ alreadyExisted: false, amount: 75, depositInvoiceId: b.depositInvoiceId });
+    expect(button.body.invoiceId).not.toBe(drawnId);
+    expect((await invoiceRow(button.body.invoiceId)).currency).toBe('TTD');
+    expect((await bookingRow(b.bookingId)).invoiceId).toBe(button.body.invoiceId);
+    await expectNoMismatchedPair(`${label}, after the button`, b.bookingId);
+  }
+
+  it('DC-14 RED-BEFORE (W4-A10c-FINAL-LINK-WINDOW, review SEC-A10b-3, D-59/D-91): a currency PATCH of the final committed between its creation and the booking link -> the PATCH finds no booking (200), completion refuses (FAILED DEPOSIT_CURRENCY_MISMATCH), links nothing and withdraws the drawn final; never a USD final netting the TTD deposit', async () => {
+    const b = await book(ID.biz, ID.svc, 'dc14');
+    const before = await ledgerCount(ID.biz);
+    const original = commerce.createInvoiceForService.bind(commerce);
+    let drawnId: string | undefined;
+    let patched: any;
+    // issueFinalInvoice holds the booking's final-invoice lock and has read the
+    // TTD deposit; the final is created on its own connection (committed) and
+    // linked to the booking as the next step. The switch is sent and answered
+    // in that window, before the link.
+    const spy = vi.spyOn(commerce, 'createInvoiceForService').mockImplementationOnce(async (...args: any[]) => {
+      const invoice = await original(...args);
+      drawnId = invoice.id;
+      patched = await patchInvoice(ID.biz, invoice.id, { currency: 'USD' });
+      return invoice;
+    });
+    let done: any;
+    try {
+      done = await setStatus(ID.biz, b.bookingId, 'COMPLETED');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(drawnId, 'completion drew a final up').toBeDefined();
+    expect(patched, 'the switch was sent between the creation and the link').toBeDefined();
+
+    // D-59/D-91: never a committed pair in two currencies.
+    await expectNoMismatchedPair('completion', b.bookingId);
+    // Either the PATCH or the completion is refused. The PATCH committed
+    // before the link existed, so it found no booking to pair: the completion
+    // is the one refused.
+    expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+    await expectCompletionRefusedTheSwitchedFinal('completion', b, done, drawnId!, before);
+  });
+
+  it('DC-15 RED-BEFORE (W4-A10c-FINAL-LINK-WINDOW, review SEC-A10b-3, D-59/D-91): a currency PATCH of the final that read no pair before the link and writes after the link step -> the link waits for the final row, completion refuses (FAILED DEPOSIT_CURRENCY_MISMATCH) and links nothing; never a USD final netting the TTD deposit', async () => {
+    const b = await book(ID.biz, ID.svc, 'dc15');
+    const before = await ledgerCount(ID.biz);
+    const Commerce = commerce.constructor as any;
+    const originalCreate = commerce.createInvoiceForService.bind(commerce);
+    const originalPairCheck = Commerce.assertDepositPairKeepsCurrency.bind(Commerce);
+    let releasePatch: () => void = () => undefined;
+    const patchReleased = new Promise<void>((resolve) => { releasePatch = resolve; });
+    let pairReadSeen: () => void = () => undefined;
+    const pairRead = new Promise<void>((resolve) => { pairReadSeen = resolve; });
+    // The PATCH holds the final's row lock (lockInvoiceForPayment) and reads no
+    // pair (the link is not committed); it is held there until released.
+    const pairSpy = vi.spyOn(Commerce, 'assertDepositPairKeepsCurrency').mockImplementationOnce(async (...args: any[]) => {
+      await originalPairCheck(...args);
+      pairReadSeen();
+      await patchReleased;
+    });
+    let drawnId: string | undefined;
+    let pending: Promise<any> | undefined;
+    let watcher: Promise<boolean> | undefined;
+    const createSpy = vi.spyOn(commerce, 'createInvoiceForService').mockImplementationOnce(async (...args: any[]) => {
+      const invoice = await originalCreate(...args);
+      drawnId = invoice.id;
+      pending = patchInvoice(ID.biz, invoice.id, { currency: 'USD' }).then((r) => r);
+      await Promise.race([pairRead, new Promise((resolve) => setTimeout(resolve, 3_000))]);
+      // The link step runs next; the PATCH is released once a session waits
+      // for a row lock (the link step waiting for the final's row), or after 2 s.
+      watcher = rowLockWaiterSeen(2_000).then((seen) => {
+        releasePatch();
+        return seen;
+      });
+      return invoice;
+    });
+    let done: any;
+    let patched: any;
+    let waited: boolean | undefined;
+    try {
+      done = await setStatus(ID.biz, b.bookingId, 'COMPLETED');
+      patched = await pending;
+      waited = await watcher;
+    } finally {
+      releasePatch();
+      createSpy.mockRestore();
+      pairSpy.mockRestore();
+    }
+    expect(drawnId, 'completion drew a final up').toBeDefined();
+    expect(patched, 'the switch was sent between the creation and the link').toBeDefined();
+
+    // D-59/D-91: never a committed pair in two currencies.
+    await expectNoMismatchedPair('completion', b.bookingId);
+    expect(waited, 'RED-BEFORE: the link step did not wait for the final row the PATCH holds').toBe(true);
+    // The PATCH read its pair before the link existed: it writes (200) and
+    // the completion, which waited for it, is the one refused.
+    expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+    await expectCompletionRefusedTheSwitchedFinal('completion', b, done, drawnId!, before);
+  });
+
+  it('DC-16 RED-BEFORE (W4-A10c-FINAL-LINK-WINDOW review CR-A10c-1, D-59/D-91): a contact merge that repoints the drawn final and then the booking while completion links them does not deadlock -> the link locks the final before the booking (the merge order: invoices, then bookings), waits for the merge, and completion draws the 75 TTD final (CREATED); the merge commits', async () => {
+    const b = await book(ID.biz, ID.svc, 'dc16');
+    const original = commerce.createInvoiceForService.bind(commerce);
+    let drawnId: string | undefined;
+    let merge: Promise<{ committed: boolean; waited?: boolean; error?: string }> | undefined;
+    // issueFinalInvoice holds the booking's final-invoice lock and has read the
+    // TTD deposit; the final is created on its own connection (committed). A
+    // merge of the booking's contact (CrmService.mergeContacts repoints the
+    // contact's invoices, then its bookings) takes the final's row here; once a
+    // session waits for a row lock (the link step waiting for the final's row),
+    // or after 2 s, it repoints the booking and commits.
+    const spy = vi.spyOn(commerce, 'createInvoiceForService').mockImplementationOnce(async (...args: any[]) => {
+      const invoice = await original(...args);
+      drawnId = invoice.id;
+      let invoicesRepointed: () => void = () => undefined;
+      const repointed = new Promise<void>((resolve) => { invoicesRepointed = resolve; });
+      merge = db
+        .$transaction(
+          async (tx: any) => {
+            await tx.$executeRawUnsafe(`UPDATE invoices SET contact_id = contact_id WHERE id = $1`, invoice.id);
+            invoicesRepointed();
+            const waited = await rowLockWaiterSeen(2_000);
+            await tx.$executeRawUnsafe(`UPDATE bookings SET contact_id = contact_id WHERE id = $1`, b.bookingId);
+            return waited;
+          },
+          { timeout: 15_000 },
+        )
+        .then(
+          (waited: boolean) => ({ committed: true, waited }),
+          (err: unknown) => ({ committed: false, error: String(err) }),
+        );
+      await Promise.race([repointed, merge]);
+      return invoice;
+    });
+    let done: any;
+    let merged: { committed: boolean; waited?: boolean; error?: string } | undefined;
+    try {
+      done = await setStatus(ID.biz, b.bookingId, 'COMPLETED');
+      merged = await merge;
+    } finally {
+      spy.mockRestore();
+    }
+    expect(drawnId, 'completion drew a final up').toBeDefined();
+    expect(merged, 'the merge ran between the creation and the link').toBeDefined();
+    expect(merged!.committed, `the merge commits: ${merged!.error}`).toBe(true);
+    expect(merged!.waited, 'the link step waited for the final row the merge holds').toBe(true);
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect(done.body.invoicing, 'RED-BEFORE: the link took the booking row first and deadlocked against the merge (FAILED INVOICE_NOT_CREATED)').toMatchObject({
+      status: 'CREATED',
+      invoiceId: drawnId,
+      amount: 75,
+      depositInvoiceId: b.depositInvoiceId,
+      depositAmount: 25,
+    });
+    expect((await bookingRow(b.bookingId)).invoiceId, 'Booking.invoiceId is the drawn final').toBe(drawnId);
+    const final = await rawInvoice(drawnId!);
+    expect({ status: final.status, currency: final.currency, withdrawn: final.deletedAt !== null }, 'the drawn final stands').toEqual({
+      status: 'DRAFT',
+      currency: 'TTD',
+      withdrawn: false,
+    });
+    await expectNoMismatchedPair('completion', b.bookingId);
   });
 });

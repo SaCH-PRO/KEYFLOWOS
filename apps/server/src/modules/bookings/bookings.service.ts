@@ -868,6 +868,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * created through CommerceService (its own connection, committed); if the
    * link to the booking then fails, that DRAFT is withdrawn. A number
    * collision is retried by CommerceService's allocator (V1-43, SEC-V28-1).
+   * W4-A10c-FINAL-LINK-WINDOW (SEC-A10b-3, D-59/D-91): with a deposit, the
+   * final's currency is re-read under its row lock before the link, and a
+   * final switched before the link is refused (assertLinkedFinalKeepsDepositCurrency);
+   * review CR-A10c-1: that lock is taken before the booking row the link
+   * writes, the order a contact merge takes them in (invoices, then bookings).
    */
   private async issueFinalInvoice(businessId: string, bookingId: string): Promise<FinalInvoiceOutcome> {
     const key = `${FINAL_INVOICE_LOCK_NAMESPACE}${bookingId}`;
@@ -951,6 +956,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         const invoice = await this.commerce.createInvoiceForService(businessId, contactId, service, options);
         if (!invoice) throw new BadRequestException('Failed to create invoice');
         drawn = invoice.id;
+        // W4-A10c-FINAL-LINK-WINDOW review (CR-A10c-1): the final's row lock is
+        // taken before the booking row the link writes (invoices, then bookings).
+        if (deposit) await this.assertLinkedFinalKeepsDepositCurrency(tx, businessId, deposit, invoice);
         await tx.booking.update({ where: { id: booking.id }, data: { invoiceId: invoice.id } });
         created = { invoice, booking: { ...booking, invoiceId: invoice.id } };
         return {
@@ -975,6 +983,49 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       this.events.emit('booking.invoice_created', payload);
     }
     return outcome;
+  }
+
+  /**
+   * W4-A10c-FINAL-LINK-WINDOW (review SEC-A10b-3, D-59 as built per D-91,
+   * D-13): the final invoice is created through CommerceService on its own
+   * connection and committed before this transaction links it to the booking
+   * (Booking.invoiceId). A currency PATCH of the final in that window finds no
+   * booking to pair it with (assertDepositPairKeepsCurrency reads committed
+   * links), so it is not refused, and completion linked a USD final netting a
+   * TTD deposit. Before the link, the final's row is taken with the lock every
+   * invoice edit takes first (FOR NO KEY UPDATE, lockInvoiceForPayment) and its
+   * currency re-read under it; the lock is held until this transaction commits:
+   *  - an edit that committed before reads here as switched, and one that
+   *    holds the row (it read no pair) is waited for and read the same way:
+   *    the pairing is refused (DEPOSIT_CURRENCY_MISMATCH), this transaction
+   *    rolls back with nothing linked and the caller withdraws the drawn DRAFT;
+   *  - an edit that comes after waits for this transaction to commit, then
+   *    reads the link, takes the booking's final-invoice lock and is refused.
+   * So no committed state pairs the deposit with a final in another currency.
+   * Lock order (review CR-A10c-1): this runs before the booking update that
+   * writes the link, so the final's row is locked before the booking's, the
+   * order a contact merge takes them in (CrmService.mergeContacts repoints
+   * invoices, then bookings) and forfeitPaidDeposit's. Linking first took the
+   * booking row, then waited on the final's row a merge held, and the merge's
+   * booking repoint then waited on the link: a deadlock. An edit of this new
+   * final takes the final-invoice advisory lock only for a link it reads
+   * committed, which this one is not until the commit, so it never waits on
+   * the advisory lock this transaction holds while holding the final's row.
+   */
+  private async assertLinkedFinalKeepsDepositCurrency(
+    tx: PrismaTx,
+    businessId: string,
+    deposit: { id: string; invoiceNumber: string | null; currency: string | null },
+    final: { id: string; invoiceNumber: string | null },
+  ): Promise<void> {
+    const rows = await tx.$queryRaw<Array<{ currency: string | null }>>`
+      SELECT currency FROM invoices WHERE id = ${final.id} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+    if (!rows[0]) throw new BadRequestException('Failed to create invoice');
+    const depositCurrency = normalizeCurrency(deposit.currency);
+    const finalCurrency = normalizeCurrency(rows[0].currency);
+    if (depositCurrency !== finalCurrency) {
+      throw depositCurrencyMismatch(deposit, depositCurrency, finalCurrency, final);
+    }
   }
 
   async updateBookingNotes(businessId: string, bookingId: string, notes: string) {
@@ -1745,6 +1796,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         },
         actorType: 'SYSTEM',
         source: 'bookings',
+        // W4-FEED-COPY-COMPLETE (owner ruling D-90, on D-08; CR-V155b-1,
+        // V55-12b): the booking's one feed row is ActivityEventListener's
+        // 'New booking', from the booking.created emit above; this
+        // ContactEvent stays on the contact's timeline with no Activity copy.
+        feedCopy: false,
       });
     }
     return booking;

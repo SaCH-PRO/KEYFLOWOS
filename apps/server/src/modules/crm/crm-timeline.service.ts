@@ -18,6 +18,39 @@ type TimelineEntry = {
   meta?: Record<string, unknown>;
 };
 
+/**
+ * The top-level ContactEvent data fields that carry an amount, as the copy
+ * writers put them (an invoice or order total, a payment, a refund, a
+ * storefront booking's deposit, a referral's invoice total).
+ */
+const MONEY_DATA_KEYS = ['amount', 'total', 'subtotal', 'invoiceTotal', 'totalPaid', 'paymentAmount', 'refundAmount', 'depositAmount'] as const;
+
+/**
+ * W4-FEED-COPY-COMPLETE review SEC-FCC-1 (owner rulings D-90 and D-63, the
+ * V1-84 timeline rule): the Activity category of a ContactEvent's CRM copy.
+ *
+ * A copy that carries money is COMMERCE, which canReadActivityRow
+ * (timeline-visibility.ts) reads as a revenue row, so a member without revenue
+ * read is not served its amount: every sales_revenue type (@keyflow/shared
+ * getContactEventCategory), and any other type whose data carries an amount
+ * (MONEY_DATA_KEYS: store_order.paid / refunded, checkout.*, payment.completed,
+ * a storefront booking.created's deposit, a referral note.created's invoice
+ * total). The map this replaces was keyed by category names @keyflow/shared no
+ * longer uses ('revenue', 'booking', 'payment', ...), so every copy was CONTACT
+ * and a member with crm read and revenue 'none' read those amounts.
+ *
+ * Every other copy stays CONTACT, as it has been written since those names
+ * changed, so ?category=CONTACT keeps returning it (V55-12a parity).
+ */
+function contactEventCopyCategory(type: string, data: unknown): 'COMMERCE' | 'CONTACT' {
+  if (getContactEventCategory(type) === 'sales_revenue') return 'COMMERCE';
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    const fields = data as Record<string, unknown>;
+    if (MONEY_DATA_KEYS.some((key) => fields[key] !== null && fields[key] !== undefined)) return 'COMMERCE';
+  }
+  return 'CONTACT';
+}
+
 @Injectable()
 export class CrmTimelineService {
   private readonly logger = new Logger(CrmTimelineService.name);
@@ -99,17 +132,6 @@ export class CrmTimelineService {
 
     // Also write to unified Activity ledger (Wave 1), unless the caller says
     // another writer puts this event's feed row there (V1-55b, meta.feedCopy).
-    const categoryMap: Record<string, 'CONTACT' | 'COMMERCE' | 'BOOKING' | 'PAYMENT' | 'AI' | 'SYSTEM' | 'STORE' | 'TASK'> = {
-      communication: 'CONTACT',
-      revenue: 'COMMERCE',
-      booking: 'BOOKING',
-      payment: 'PAYMENT',
-      ai: 'AI',
-      system: 'SYSTEM',
-      store: 'STORE',
-      task: 'TASK',
-    };
-    const contactEventCat = getContactEventCategory(normalized.canonical);
     if (meta?.feedCopy !== false) {
       this.timeline.recordEvent({
         businessId,
@@ -120,7 +142,7 @@ export class CrmTimelineService {
         title: normalized.canonical,
         detail: typeof data === 'string' ? data : JSON.stringify(data ?? {}),
         contactId,
-        category: (contactEventCat ? categoryMap[contactEventCat] : undefined) ?? 'CONTACT',
+        category: contactEventCopyCategory(normalized.canonical, data),
         type: normalized.canonical,
         actorType: (meta?.actorType as any) ?? 'SYSTEM',
         actorId: meta?.actorId,
@@ -446,12 +468,21 @@ export class CrmTimelineService {
     actorType?: string;
     actorId?: string;
     source?: string;
+    /**
+     * W4-FEED-COPY-COMPLETE (owner ruling D-90, on D-08): logEvent's
+     * meta.feedCopy (V1-55b), carried for callers that reach the timeline
+     * through CrmService.logContactEvent. false: another writer puts this
+     * event's feed row in Activity, so the ContactEvent (and its emit) is
+     * written and its Activity copy is not. Absent: copied, as before.
+     */
+    feedCopy?: boolean;
   }) {
     await this.assertContact(input.businessId, input.contactId);
     return this.logEvent(input.businessId, input.contactId, input.type, input.data, {
       actorType: input.actorType,
       actorId: input.actorId,
       source: input.source,
+      ...(input.feedCopy === false ? { feedCopy: false } : {}),
     });
   }
 

@@ -3841,6 +3841,12 @@ export class CommerceService {
         actorType: isSystemActor(actorId) ? 'SYSTEM' : 'USER',
         actorId: actorId ?? undefined,
         source: 'commerce',
+        // W4-FEED-COPY-COMPLETE (owner ruling D-90, on D-08; V55-07b): the
+        // payment's one feed row is the FINANCE payment_recorded row
+        // RevenuePostingService wrote with it above, naming who recorded it
+        // (W3-V1-55c). This ContactEvent stays on the contact's timeline; it
+        // gets no Activity copy.
+        feedCopy: false,
       });
     }
 
