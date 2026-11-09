@@ -4104,6 +4104,8 @@ ${triage.standingContext}`;
         const items = args.items ?? [];
         // V1-43 (D-15): numbered by CommerceService's allocator, the business's
         // one sequence. INV-<count+1> skipped soft-deleted rows and collided.
+        // W3-D64-COMMERCE-CREATE (D-88): KEY acts as the member the command runs for, so the
+        // contact must be one that member may open (D-64); no member: the OWNER's view.
         const invoice = await this.getCommerce().createInvoice({
           businessId,
           contactId: args.contactId,
@@ -4115,6 +4117,7 @@ ${triage.standingContext}`;
           currency: args.currency ?? 'TTD',
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           notes: args.notes ?? undefined,
+          actorUserId: action?.principalUserId ?? undefined,
         });
         // V1-21d (SEC3-ST-2): the write projection, not createInvoice's row with the whole Contact
         return { invoice: toKeyInvoiceResult(businessId, invoice), id: invoice.id, invoiceNumber: invoice.invoiceNumber };
@@ -4145,6 +4148,7 @@ ${triage.standingContext}`;
         await this.contactWithinBusiness(businessId, args.contactId);
         const items = args.items ?? [];
         // V1-43 (D-15): numbered by CommerceService's allocator, as commerce_create_invoice.
+        // W3-D64-COMMERCE-CREATE (D-88): as commerce_create_invoice, for the member the command runs for.
         const quote = await this.getCommerce().createQuote({
           businessId,
           contactId: args.contactId,
@@ -4155,6 +4159,7 @@ ${triage.standingContext}`;
           })),
           currency: args.currency ?? 'TTD',
           expiryDate: args.expiryDate ? new Date(args.expiryDate) : undefined,
+          actorUserId: action?.principalUserId ?? undefined,
         });
         // V1-21d (SEC3-ST-2): the write projection, as POST .../quotes answers (toQuoteWriteResponse)
         return { quote: toKeyQuoteResult(businessId, quote), id: quote.id, quoteNumber: quote.quoteNumber };
@@ -6635,9 +6640,12 @@ ${triage.standingContext}`;
         return { updated: (result as { count?: number }).count ?? (Array.isArray(result) ? result.length : 0) };
       }
       case 'commerce_convert_quote': {
+        // W3-D64-COMMERCE-CREATE (D-88): converted for the member the command runs for, so the
+        // quote's contact must be one that member may open (D-64); no member: the OWNER's view.
         const invoice = await this.getCommerce().convertQuoteToInvoice({
           quoteId: args.quoteId,
           businessId,
+          actorUserId: action?.principalUserId ?? undefined,
         });
         return { invoiceId: (invoice as { id: string }).id };
       }
@@ -6823,12 +6831,15 @@ ${triage.standingContext}`;
 
       // === COMMERCE UPDATES ===
       case 'commerce_update_invoice': {
+        // W3-D64-COMMERCE-CREATE (D-88): the member the command runs for judges any new contact
+        // (D-64); a status change stays KEY's (no actorId, R0-CMF1).
         const invoice = await this.getCommerce().updateInvoice({
           invoiceId: args.invoiceId,
           businessId,
           status: args.status,
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           notes: args.notes ?? undefined,
+          actorUserId: action?.principalUserId ?? undefined,
         });
         return { id: invoice.id, status: invoice.status };
       }

@@ -187,12 +187,17 @@ type CreateRequest = { headers: Record<string, string | string[] | undefined>; u
 /**
  * V1-45b: what a create forwards for its key: the key and the acting member,
  * whose id is part of the key's request hash (SEC-V45-3: another member
- * presenting the same key is a 409). A request with no key forwards neither,
- * exactly as before.
+ * presenting the same key is a 409).
+ *
+ * W3-D64-COMMERCE-CREATE (D-64; review CR-D6-3): the acting member is
+ * forwarded with or without a key, so the service judges the contact by that
+ * member's CRM view whether or not the optional header is sent. A request with
+ * no key still forwards no key (no request hash is taken).
  */
 function createIdempotency(req: CreateRequest): { idempotencyKey?: string; actorUserId?: string } {
   const idempotencyKey = createIdempotencyKeyHeader(req.headers['idempotency-key']);
-  return idempotencyKey === undefined ? {} : { idempotencyKey, actorUserId: req.user?.id };
+  const actorUserId = req.user?.id;
+  return idempotencyKey === undefined ? { actorUserId } : { idempotencyKey, actorUserId };
 }
 
 @Controller('commerce')
@@ -756,6 +761,9 @@ export class CommerceController {
     @Req() req?: { user?: { id?: string; role?: string } },
   ) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
+    // W3-D64-COMMERCE-CREATE (D-64; review CR-D6-1 restored): the invoice is
+    // created for the acting member, so the contact must be one they may open.
+    const actorUserId = req?.user?.id;
     return this.timeEntries.invoiceUnbilledTime(businessId, {
       projectId: body.projectId,
       contactId: body.contactId,
@@ -763,7 +771,7 @@ export class CommerceController {
       dueDate: body.dueDate,
       taxRate: body.taxRate,
       notes: body.notes,
-      createInvoice: (args) => this.commerce.createInvoice(args),
+      createInvoice: (args) => this.commerce.createInvoice({ ...args, actorUserId }),
     });
   }
 
@@ -974,6 +982,7 @@ export class CommerceController {
     await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     const actorId = req?.user?.id;
     if (!actorId) throw new ForbiddenException('Authentication required');
+    // W3-D64-COMMERCE-CREATE (D-64): actorId is also the member whose CRM view judges a new contactId.
     return toInvoiceWriteResponse(await this.commerce.updateInvoice({ ...body, invoiceId, businessId }, actorId));
   }
 
@@ -1214,7 +1223,10 @@ export class CommerceController {
     // revenue:write member with crm:none received a PRIVATE contact's internal
     // notes, phone, owner and visibility. The 201 body is the invoice write
     // response every other invoice write route answers.
-    return toInvoiceWriteResponse(await this.commerce.convertQuoteToInvoice({ ...body, quoteId, businessId }));
+    // W3-D64-COMMERCE-CREATE (D-64): the quote's contact must be one the acting member may open.
+    return toInvoiceWriteResponse(
+      await this.commerce.convertQuoteToInvoice({ ...body, quoteId, businessId, actorUserId: req?.user?.id }),
+    );
   }
 
   // V1-52-QUOTE-PUBLIC-LINK (CF-16): the quote's customer link, { token, url },

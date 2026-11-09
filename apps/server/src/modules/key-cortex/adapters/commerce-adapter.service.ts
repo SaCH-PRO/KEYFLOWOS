@@ -22,6 +22,12 @@ export class CommerceAdapterService {
     notes?: string;
     sendImmediately?: boolean;
     source?: string;
+    /**
+     * W3-D64-COMMERCE-CREATE (D-88): the member the KEY command runs for
+     * (ConnectorCommand.userId); the contact must be one they may open (D-64).
+     * KEY's system actors (a plan no member created) keep the OWNER's view.
+     */
+    actorUserId?: string;
   }) {
     const invoice = await this.commerce.createInvoice({
       businessId: input.businessId,
@@ -34,6 +40,7 @@ export class CommerceAdapterService {
       })),
       dueDate: input.dueDate,
       notes: input.notes,
+      actorUserId: input.actorUserId,
     });
 
     if (input.sendImmediately) {
@@ -127,6 +134,8 @@ export class CommerceAdapterService {
     contactId: string;
     items: Array<Record<string, unknown>>;
     notes?: string;
+    /** W3-D64-COMMERCE-CREATE (D-88): as createInvoice. */
+    actorUserId?: string;
   }) {
     // Commerce module does not yet expose a dedicated order service, so we
     // create an invoice as the canonical order record.
@@ -135,6 +144,7 @@ export class CommerceAdapterService {
       contactId: input.contactId,
       items: input.items,
       notes: input.notes,
+      actorUserId: input.actorUserId,
     });
   }
 
@@ -162,6 +172,8 @@ export class CommerceAdapterService {
     items: Array<Record<string, unknown>>;
     validUntil?: string;
     notes?: string;
+    /** W3-D64-COMMERCE-CREATE (D-88): as createInvoice. */
+    actorUserId?: string;
   }) {
     return this.commerce.createQuote({
       businessId: input.businessId,
@@ -174,6 +186,7 @@ export class CommerceAdapterService {
       })),
       expiryDate: input.validUntil,
       notes: input.notes,
+      actorUserId: input.actorUserId,
     });
   }
 
@@ -314,6 +327,8 @@ export class CommerceAdapterService {
           notes: command.parameters.notes as string,
           sendImmediately: (command.parameters.sendImmediately as boolean) || false,
           source: 'key_cortex',
+          // W3-D64-COMMERCE-CREATE (D-88): from the command envelope, never from the tool parameters.
+          actorUserId: command.userId,
         });
         return connectorOk(command, start, invoice);
       }
@@ -366,6 +381,8 @@ export class CommerceAdapterService {
           contactId: command.parameters.contactId as string,
           items: command.parameters.items as Array<Record<string, unknown>>,
           notes: command.parameters.notes as string,
+          // W3-D64-COMMERCE-CREATE (D-88): from the command envelope, never from the tool parameters.
+          actorUserId: command.userId,
         });
         return connectorOk(command, start, order);
       }
@@ -388,6 +405,8 @@ export class CommerceAdapterService {
           items: command.parameters.items as Array<Record<string, unknown>>,
           validUntil: command.parameters.validUntil as string,
           notes: command.parameters.notes as string,
+          // W3-D64-COMMERCE-CREATE (D-88): from the command envelope, never from the tool parameters.
+          actorUserId: command.userId,
         });
         return connectorOk(command, start, quote);
       }
