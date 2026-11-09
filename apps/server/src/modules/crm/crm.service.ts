@@ -137,9 +137,11 @@ const CONTACT_IDENTITY_UNIQUE: Record<'email' | 'phone', readonly string[]> = {
 
 /**
  * The identity field a Prisma P2002 landed on ('email' or 'phone'), or null
- * when `err` is not a P2002 on a contact identity unique.
+ * when `err` is not a P2002 on a contact identity unique. Exported for the
+ * other un-delete of a contact, ContactPrivacyService.cancelForget
+ * (FOLLOW3-D8).
  */
-function contactIdentityViolation(err: unknown): 'email' | 'phone' | null {
+export function contactIdentityViolation(err: unknown): 'email' | 'phone' | null {
   const known = err as { code?: unknown; meta?: { target?: unknown } } | null;
   if (!known || typeof known !== 'object' || known.code !== 'P2002') return null;
   const target = known.meta?.target;

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
@@ -23,6 +24,9 @@ import {
   ContactAuditActor,
 } from './contact-audit.service';
 import { buildZip, sha256Hex } from './contact-zip.util';
+import { contactIdentityViolation } from '../crm.service';
+import { contactWhereBase } from '../crm.helpers';
+import { resolveCrmAccess, visibilityClause } from '../crm-permissions.helper';
 import { safeInterval } from '../../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../../core/config/env';
 
@@ -481,24 +485,39 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException(`Forget request already ${req.status}`);
     }
 
-    await this.prisma.client.$transaction(async (tx) => {
-      // Bound to the same claim the purge takes (SEC-V138-2): only a request
-      // that is still 'requested' and still names this contact can be
-      // cancelled. If the purge committed after the read above, nothing
-      // matches and the cancel aborts, so it can neither overwrite 'purged'
-      // nor un-delete the anonymised row.
-      const cancelled = await tx.contactForgetRequest.updateMany({
-        where: { id: req.id, businessId: input.businessId, contactId: input.contactId, status: 'requested' },
-        data: { status: 'cancelled', cancelledAt: new Date() },
+    try {
+      await this.prisma.client.$transaction(async (tx) => {
+        // Bound to the same claim the purge takes (SEC-V138-2): only a request
+        // that is still 'requested' and still names this contact can be
+        // cancelled. If the purge committed after the read above, nothing
+        // matches and the cancel aborts, so it can neither overwrite 'purged'
+        // nor un-delete the anonymised row.
+        const cancelled = await tx.contactForgetRequest.updateMany({
+          where: { id: req.id, businessId: input.businessId, contactId: input.contactId, status: 'requested' },
+          data: { status: 'cancelled', cancelledAt: new Date() },
+        });
+        if (cancelled.count === 0) {
+          throw new BadRequestException('Forget request is no longer open (already purged or cancelled)');
+        }
+        await tx.contact.updateMany({
+          where: { id: input.contactId, businessId: input.businessId },
+          data: { deletedAt: null },
+        });
       });
-      if (cancelled.count === 0) {
-        throw new BadRequestException('Forget request is no longer open (already purged or cancelled)');
+    } catch (err: unknown) {
+      // Since D-16 a forgotten contact releases its email and phone for the
+      // grace period, so another live contact may hold one of them by now; the
+      // un-delete is then a P2002 on an identity unique and the transaction has
+      // rolled back (the request is still 'requested', the contact still
+      // deleted, nothing is audited). It answers like every other identity
+      // conflict, revertMerge's included: 409 contact_email_taken /
+      // contact_phone_taken naming the live holder the actor may see
+      // (FOLLOW3-D8). Anything else is rethrown untouched.
+      if (contactIdentityViolation(err)) {
+        await this.rejectIdentityTaken(err, input.businessId, input.contactId, input.actor);
       }
-      await tx.contact.updateMany({
-        where: { id: input.contactId, businessId: input.businessId },
-        data: { deletedAt: null },
-      });
-    });
+      throw err;
+    }
 
     await this.audit.write({
       businessId: input.businessId,
@@ -510,6 +529,54 @@ export class ContactPrivacyService implements OnModuleInit, OnModuleDestroy {
     });
 
     return { ok: true };
+  }
+
+  /**
+   * The 409 of a cancel whose un-delete met a contact identity unique: the
+   * body CrmService.rejectContactIdentityTaken gives every other identity
+   * conflict (same code, message and existingContactId field). The value is
+   * the forgotten contact's own normalized email or phone, read past the
+   * soft-delete extension (it hides the deleted row from every find). The
+   * live holder is looked up after the rolled-back transaction, tenant-scoped
+   * and, for a USER actor, under the M7 visibility clause GET detail applies:
+   * the id is a working key, so a member who may not open the holder gets
+   * existingContactId null with the same message. A SYSTEM or API actor is
+   * tenant-scoped only, as rejectContactIdentityTaken treats a call without
+   * an actor.
+   */
+  private async rejectIdentityTaken(
+    err: unknown,
+    businessId: string,
+    contactId: string,
+    actor: ContactAuditActor | undefined,
+  ): Promise<never> {
+    const field = contactIdentityViolation(err);
+    if (!field) throw err;
+
+    const rows = await this.prisma.client.$queryRaw<Array<{ email: string | null; phone: string | null }>>`
+      SELECT email_normalized AS "email", phone_normalized AS "phone"
+        FROM contacts
+       WHERE id = ${contactId} AND business_id = ${businessId}`;
+    const value = field === 'email' ? rows[0]?.email : rows[0]?.phone;
+    let existing: { id: string } | null = null;
+    if (value) {
+      const where: Prisma.ContactWhereInput = field === 'email'
+        ? { ...contactWhereBase(businessId), emailNormalized: value }
+        : { ...contactWhereBase(businessId), phoneNormalized: value };
+      const actorUserId = actor?.type === 'USER' ? actor.id : null;
+      if (actorUserId) {
+        const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+        const visClause = visibilityClause(access, actorUserId);
+        if (visClause) where.AND = [visClause as Prisma.ContactWhereInput];
+      }
+      existing = await this.prisma.client.contact.findFirst({ where, select: { id: true } });
+    }
+    const label = field === 'email' ? 'email' : 'phone number';
+    throw new ConflictException({
+      code: field === 'email' ? 'contact_email_taken' : 'contact_phone_taken',
+      message: `A contact with this ${label} already exists in this business`,
+      existingContactId: existing?.id ?? null,
+    });
   }
 
   /** Run-once helper exposed for ops + tests. */
