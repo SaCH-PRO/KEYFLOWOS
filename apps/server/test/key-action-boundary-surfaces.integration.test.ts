@@ -268,8 +268,12 @@ describe('P7 — no surface reaches the ticket write around the boundary', () =>
 
     it('E8 — the executor plugin admits a proposal by its id against its sealed envelope, or not at all', async () => {
       const { KeyCortexActionExecutorPlugin } = await import('../src/modules/key-cortex/key-cortex-action-executor.plugin');
+      // W4-PROPOSAL-PRINCIPAL review SEC-W4PP-2: the plugin reads who the proposal runs for (the
+      // executing ADMIN, who holds operations write) through PrismaService, as in the app.
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      fx.provide(PrismaService, fx.prisma);
       const plugin = new KeyCortexActionExecutorPlugin({ register() {} } as any, {} as any, fx.moduleRef as any);
-      const wrapper = { sourceType: 'AI_PLAN' as const, title: 'Step', actionType: 'EXECUTE_TOOL' as const, payload: { toolName: TOOL, inputPayload: { ...ARGS } } };
+      const wrapper ={ sourceType: 'AI_PLAN' as const, title: 'Step', actionType: 'EXECUTE_TOOL' as const, payload: { toolName: TOOL, inputPayload: { ...ARGS } } };
 
       // Not approved: refused.
       const pending = await fx.proposals.create(ID.bizA, wrapper);

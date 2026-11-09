@@ -655,6 +655,15 @@ type DispatcherTenantModel =
   | 'staffMember'
   | 'procurementRequest';
 
+/**
+ * W4-D93-NO-MEMBER-CONTACTS (D-93; review SEC-D93-2): what the Pro Auto monitor's execution log row
+ * keeps for the arguments and answer of a tool that ran only because the monitor runs for the business
+ * owner (autoExecuteToolForMonitoring): GET ai/execution-logs answers every member.
+ */
+const MONITOR_MEMBER_VIEW_WITHHELD: Readonly<Record<string, string>> = Object.freeze({
+  withheld: "Run for the business owner (D-93): the owner's view is not kept where every member reads it",
+});
+
 @Injectable()
 export class FlowOrchestratorService {
   private readonly logger = new Logger(FlowOrchestratorService.name);
@@ -3411,19 +3420,27 @@ ${triage.standingContext}`;
    *   - the member a surface with no principal runs the call for (KeyDispatchAction.onBehalfOfUserId:
    *     an approved proposal's executor, a KEY-cortex turn's member, an execute_custom_logic snippet's
    *     caller);
-   *   - on the plan queue, the stored plan's member (D-73: a KEY plan always runs as its member). The
-   *     queue dispatches with no principal, and a plan with no member is refused these tools before
-   *     dispatch (noMemberToolRefusal), so every PLAN_QUEUE run that reaches a bind is a member's
-   *     plan; the plan id is the one ActionDispatcher hands the dispatcher, read in this business.
+   *   - on the plan queue, the stored plan's member (D-73: a KEY plan always runs as its member), or
+   *     for a plan the system stored with no member the business owner (systemPlanMember, D-93). The
+   *     queue dispatches with no principal, and any other plan with no member is refused these tools
+   *     before dispatch (noMemberToolRefusal), so every PLAN_QUEUE run that reaches a bind is a
+   *     member's plan; the plan id is the one ActionDispatcher hands the dispatcher, read in this
+   *     business.
    * Undefined when none applies (a run with no member: an inbound conversation, a plan id that names
-   * no plan of this business): the OWNER's view (D-88). Never a value from the tool's arguments.
+   * no plan of this business): the OWNER's view (D-88; D-93 narrows it to these writes, which D-73
+   * refuses to a plan with no member). Never a value from the tool's arguments.
    */
   private async contactBindMember(businessId: string, action?: KeyDispatchAction): Promise<string | undefined> {
     if (action?.principalUserId) return action.principalUserId;
     if (action?.onBehalfOfUserId) return action.onBehalfOfUserId;
     if (action?.surface === 'PLAN_QUEUE' && action.planId) {
       const plan = await this.prisma.client.aiPlan.findFirst({ where: { id: action.planId, businessId }, select: { userId: true } });
-      return plan?.userId ?? undefined;
+      if (plan?.userId) return plan.userId;
+      if (!plan) return undefined;
+      // W4-D93-NO-MEMBER-CONTACTS (D-93). Imported at call time: plan-step-authority imports
+      // graph-actions.controller, which imports this file.
+      const { systemPlanMember } = await import('./plan-step-authority');
+      return (await systemPlanMember(this.prisma, businessId, action.planId)) ?? undefined;
     }
     return undefined;
   }
@@ -7962,25 +7979,49 @@ ${triage.standingContext}`;
     businessId: string,
     toolName: string,
     args: Record<string, any>,
+    /**
+     * W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): the member the monitor runs for. ProAutoMonitorService
+     * passes the business owner (the monitor is system-created). Absent: the monitor acts for no member.
+     */
+    options: { memberId?: string | null } = {},
   ): Promise<{ success: boolean; result?: any; error?: string; blocked?: boolean }> {
-    // KEY-R3b-PLAN-AUTHORITY (D-73, NOPRINCIPAL-SURFACES): the monitor acts for no member, so it
-    // reads no contacts (with no principal contactReadAccess reads every contact, PRIVATE ones
-    // included) and writes no money or invoices; nor does it run a tool the authority map refuses
-    // or does not map (KEY-R3b review SEC-R3b-2). Refused before anything runs, and recorded.
-    // (Imported at call time: plan-step-authority imports graph-actions.controller, which imports
-    // this file.)
-    const { noMemberToolRefusal } = await import('./plan-step-authority');
-    const refusal = noMemberToolRefusal(toolName);
+    // KEY-R3b-PLAN-AUTHORITY (D-73, NOPRINCIPAL-SURFACES): run for no member, the monitor reads no
+    // contacts (with no principal contactReadAccess reads every contact, PRIVATE ones included; D-93:
+    // the tools only a principal's visibility bounds too) and writes no money or invoices; nor does it
+    // run a tool the authority map refuses or does not map (KEY-R3b review SEC-R3b-2).
+    // W4-D93-NO-MEMBER-CONTACTS (D-93): run for a member (the owner), the member is held to the rule the
+    // plan queue applies to a plan's member (memberToolRunAuthority, no principal), and the tool runs on
+    // their behalf: KeyDispatchAction.onBehalfOfUserId (the member KEY's commerce binds act for) and the
+    // execution log row names them. The member is not the run's principal: the monitor authenticates no
+    // human, so the action boundary still sends a write it adopted to a human for approval.
+    // Refused before anything runs, and recorded. (Imported at call time: plan-step-authority imports
+    // graph-actions.controller, which imports this file.)
+    const { memberToolRunAuthority, noMemberToolRefusal } = await import('./plan-step-authority');
+    const memberId = options.memberId || undefined;
+    const refusal = memberId
+      ? (await memberToolRunAuthority(this.prisma, businessId, memberId, toolName)).refusal
+      : noMemberToolRefusal(toolName);
     if (refusal) {
       await this.executionLog.logToolExecution(businessId, toolName, args, `Refused: ${refusal}`, false, 0, {
         riskTier: this.governance.getToolTier(toolName),
         mode: 'pro_auto',
-        rationale: 'Refused for Pro Auto monitoring: it acts for no member (D-73)',
-      }).catch((e: unknown) => {
+        rationale: memberId
+          ? 'Refused for Pro Auto monitoring, run for the business owner (D-93)'
+          : 'Refused for Pro Auto monitoring: it acts for no member (D-73)',
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, memberId)).catch((e: unknown) => {
         this.logger.error(`Failed to log refused auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
       return { success: false, error: `Refused: ${refusal}`, blocked: true };
     }
+    const action: KeyDispatchAction = memberId
+      ? { surface: 'PRO_AUTO_MONITOR', onBehalfOfUserId: memberId }
+      : { surface: 'PRO_AUTO_MONITOR' };
+    // W4-D93-NO-MEMBER-CONTACTS (D-93; review SEC-D93-2): a tool that runs only because the monitor runs
+    // for a member (one D-73 refuses a run with no member: a contact read, a money write) takes its
+    // arguments from, and answers in, that member's view (the owner's: another member's PRIVATE
+    // contacts). GET ai/execution-logs answers every member, so its row keeps neither.
+    const memberView = !!memberId && noMemberToolRefusal(toolName) !== null;
+    const loggedArgs: Record<string, unknown> = memberView ? MONITOR_MEMBER_VIEW_WITHHELD : args;
 
     const decision = await this.governance.evaluate(businessId, toolName, 'pro_auto');
     if (!decision.allowed) {
@@ -7990,29 +8031,32 @@ ${triage.standingContext}`;
     const startTime = Date.now();
     try {
       this.validateToolInput(toolName, args);
-      const rawResult = await this.executeToolAction(businessId, toolName, args, { surface: 'PRO_AUTO_MONITOR' });
+      const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, envelope, true, durationMs, {
+      const loggedEnvelope = memberView ? { ...envelope, result: MONITOR_MEMBER_VIEW_WITHHELD } : envelope;
+      const logged = this.executionLog.logToolExecution(businessId, toolName, loggedArgs, loggedEnvelope, true, durationMs, {
         riskTier: tier,
         mode: 'pro_auto',
         rationale: 'Auto-executed by Pro Auto monitoring engine (governance approved)',
-      }).catch((e: unknown) => {
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, memberId)).catch((e: unknown) => {
         this.logger.error(`Failed to log auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
+      if (memberId) await logged;
       this.businessGraph.invalidateCache(businessId);
       return { success: true, result: envelope.result };
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
       const tier = this.governance.getToolTier(toolName);
-      this.executionLog.logToolExecution(businessId, toolName, args, (error as Error).message, false, durationMs, {
+      const logged = this.executionLog.logToolExecution(businessId, toolName, loggedArgs, (error as Error).message, false, durationMs, {
         riskTier: tier,
         mode: 'pro_auto',
         rationale: 'Auto-execution attempt by Pro Auto monitoring engine',
-      }).catch((e: unknown) => {
+      }).then((logId) => this.attributeExecutionLog(businessId, logId, memberId)).catch((e: unknown) => {
         this.logger.error(`Failed to log auto-execution error for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
       });
+      if (memberId) await logged;
       return { success: false, error: (error as Error).message };
     }
   }

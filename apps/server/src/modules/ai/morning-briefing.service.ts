@@ -22,11 +22,12 @@ export interface BriefingCard {
 
 /**
  * What marks the daily briefing among a business's ai plans (generateBriefing writes them; KEY-R3b
- * review SEC-R3b-4: POST briefing/:planId/execute-all takes no other plan).
+ * review SEC-R3b-4: POST briefing/:planId/execute-all takes no other plan). W4-D93-NO-MEMBER-CONTACTS
+ * (D-93): plan-step-authority.ts reads them too, to run a briefing stored with no member as the owner.
  */
-const BRIEFING_OBJECTIVE_PREFIX = 'Daily Briefing — ';
-const BRIEFING_RAW_INPUT = 'Morning briefing auto-generated scan';
-const BRIEFING_SCOPE = 'briefing';
+export const BRIEFING_OBJECTIVE_PREFIX = 'Daily Briefing — ';
+export const BRIEFING_RAW_INPUT = 'Morning briefing auto-generated scan';
+export const BRIEFING_SCOPE = 'briefing';
 
 export interface BriefingResult {
   planId: string;
@@ -106,10 +107,16 @@ export class MorningBriefingService implements OnModuleInit {
       return null;
     }
 
+    // W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): the daily briefing is system-created, so it records
+    // the business owner as its member (read now, so an ownership transfer is followed) and its approved
+    // steps run as the owner on the plan queue, rather than as no member (D-73).
+    const owner = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
+
     // Create plan with briefing cards as steps
     const plan = await this.prisma.client.aiPlan.create({
       data: {
         businessId,
+        userId: owner?.ownerId ?? null,
         objective: `${BRIEFING_OBJECTIVE_PREFIX}${today}`,
         rawInput: BRIEFING_RAW_INPUT,
         urgency: 'normal',
@@ -186,8 +193,12 @@ export class MorningBriefingService implements OnModuleInit {
   }
 
   /**
+   * W4-D93-NO-MEMBER-CONTACTS (D-93): since D-93 generateBriefing records the business owner as the
+   * briefing's member, so the rules below for a plan another member runs apply to it; a briefing stored
+   * with no member before D-93 is still taken by the member who runs it.
+   *
    * KEY-R3b-PLAN-AUTHORITY (D-73, NOPRINCIPAL-SURFACES): POST briefing/:planId/execute-all approved
-   * the briefing's steps for no member (the daily briefing is written with no userId), so the plan
+   * the briefing's steps for no member (the daily briefing was written with no userId), so the plan
    * queue ran them with no principal: a contact read read every contact. The plan must be of the
    * business the route checked (it was read by id alone), and the member who runs it is recorded as
    * the plan's member when it has none, so the plan queue checks every step against that member when

@@ -6,6 +6,7 @@ import { PlannerService } from './planner.service';
 import { PlanExecutorService } from './plan-executor.service';
 import { AiExecutionLogService } from './ai-execution-log.service';
 import { JourneyOrchestratorService } from './journey-orchestrator.service';
+import { defaultAgentTriggerFor } from './default-triggers.service';
 
 export interface TriggerMatch {
   triggerId: string;
@@ -94,6 +95,14 @@ export class AgentTriggerService implements OnModuleInit {
           }
         }
 
+        // W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93; D-73): a default rule DefaultTriggersService
+        // seeded is the system's, so its plan records the business owner as its member (read now, so an
+        // ownership transfer is followed) and runs as the owner. A rule a member created records no
+        // creator here, so its plan has no member and reads no contacts (D-73).
+        const member = defaultAgentTriggerFor(trigger)
+          ? (await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } }))?.ownerId ?? undefined
+          : undefined;
+
         // Create plan
         const planResult = await this.planner.createPlan(
           businessId,
@@ -108,7 +117,7 @@ export class AgentTriggerService implements OnModuleInit {
             missingInfo: [],
             clarificationNeeded: false,
           } as any,
-          undefined,
+          member,
         );
         const plan = planResult ?? null;
 
