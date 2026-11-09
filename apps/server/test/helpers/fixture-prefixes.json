@@ -618,6 +618,11 @@
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
     },
     {
+      "prefix": "v88d_",
+      "owner": "apps/server/test/demo-seed-owner.integration.test.ts",
+      "packet": "V1-88 (PR196-SEED-DEMO-OWNER)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
