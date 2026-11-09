@@ -22,8 +22,16 @@
  * bounded by the same clause, so with no principal they are the OWNER's only too (SEC-W3CV-1;
  * graph-action-visibility-bound.spec.ts derives the set from the dispatcher), and sequence_enroll
  * refuses a contact the member may not open (SEC-W3CV-4). CV-08b characterizes the no-member run
- * pending an owner ruling (SEC-W3CV-2, D-73 vs D-88); CV-13 (it.todo) records the proposal surface
- * (SEC-W3CV-3), outside this packet's write set.
+ * pending an owner ruling (SEC-W3CV-2, D-73 vs D-88).
+ *
+ * W4-PROPOSAL-PRINCIPAL (FOLLOW5; owner rulings D-73, D-71, D-46, D-37; review SEC-W3CV-3), CV-13..CV-13c:
+ * an approved AI_PLAN EXECUTE_TOOL proposal (PlanExecutorService.createStepProposal files one for a
+ * plan step that needs approval) ran through KeyCortexActionExecutorPlugin with surface PROPOSAL, no
+ * principal and no plan-step run refusal, for every tool: a STAFF member's step read and wrote the
+ * whole book once an ADMIN (or the OWNER) approved it, and a plan with no member read contacts and
+ * wrote money. It now runs as the plan's member (the principal) under planStepRunRefusal, the rule
+ * the plan queue applies, before it dispatches. The plugin is driven as KeyActionExecutorService
+ * hands it a claimed proposal, with this suite's real orchestrator and PrismaService.
  *
  * WHAT IS REAL: PrismaService and the Prisma client against DATABASE_URL; AuthGuard, BusinessGuard,
  * CrmRateLimitGuard and GraphActionsController (POST .../execute: assertMayRunGraphAction, the step
@@ -77,6 +85,11 @@ const ID = {
   seqEnrolStaff: `${P}seq_e_staff`,
   seqEnrolOwner: `${P}seq_e_owner`,
   seqEnrolQueue: `${P}seq_e_queue`,
+  // W4-PROPOSAL-PRINCIPAL (D-46): a platform SUPER_ADMIN who is not a member of biz; and the
+  // sequences the proposal runs enrol into.
+  superAdmin: `${P}super_admin`,
+  seqPropStaff: `${P}seq_p_staff`,
+  seqPropOwner: `${P}seq_p_owner`,
 };
 const NAME = { priv: 'V89KPrivate', team: 'V89KTeam', mine: 'V89KMine' };
 
@@ -91,6 +104,10 @@ let noMemberToolRefusal: (toolName: string) => string | null;
 
 /** Every tool the plan-queue dispatcher handed the flow orchestrator. */
 const dispatched: Array<{ toolName: string; planStepId?: string; principal: unknown }> = [];
+
+/** W4-PROPOSAL-PRINCIPAL: the executor plugin for approved EXECUTE_TOOL proposals, and every tool it handed the orchestrator. */
+let proposalExecutor: any;
+const proposalDispatched: Array<{ toolName: string; planStepId?: string; principal: unknown; surface?: string }> = [];
 
 async function cleanup() {
   for (const sql of [
@@ -300,11 +317,32 @@ beforeAll(async () => {
     logger: quiet,
   });
 
+  // W4-PROPOSAL-PRINCIPAL: the real executor plugin for an approved EXECUTE_TOOL proposal, as
+  // KeyActionExecutorService hands it a claimed one. Its ModuleRef resolves the real orchestrator
+  // (each dispatch recorded with the principal it carries) and the real PrismaService.
+  const { KeyCortexActionExecutorPlugin } = await import('../src/modules/key-cortex/key-cortex-action-executor.plugin');
+  const flowForProposals = {
+    executeToolDirectly: (businessId: string, toolName: string, args: Record<string, unknown>, planContext?: { planStepId: string }, action?: any) => {
+      proposalDispatched.push({ toolName, planStepId: planContext?.planStepId, principal: action?.principalUserId, surface: action?.surface });
+      return orchestrator.executeToolDirectly(businessId, toolName, args, planContext, action);
+    },
+  };
+  const proposalRef = {
+    get(token: any) {
+      if (token === FlowOrchestratorService) return flowForProposals;
+      if (token === PrismaService) return prisma;
+      throw new Error(`test moduleRef has no provider for ${token?.name ?? String(token)}`);
+    },
+  };
+  proposalExecutor = new KeyCortexActionExecutorPlugin({ register() {} } as any, {} as any, proposalRef as any);
+
   await cleanup(); // in case a prior run aborted
 
   for (const name of ['owner', 'admin', 'staffOwned'] as const) {
     await db.user.create({ data: { id: ID[name], email: `${P}${name}@test.local`, role: 'USER' } });
   }
+  // W4-PROPOSAL-PRINCIPAL (D-46): a platform SUPER_ADMIN with no membership in biz.
+  await db.user.create({ data: { id: ID.superAdmin, email: `${P}super_admin@test.local`, role: 'SUPER_ADMIN' } });
   await db.business.create({ data: { id: ID.biz, name: 'V89K Biz', ownerId: ID.owner } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
   await db.membership.create({ data: { id: `${P}m_admin`, userId: ID.admin, businessId: ID.biz, role: 'ADMIN' } });
@@ -584,13 +622,125 @@ describe("W3-KEY-CRM-VISIBILITY review repairs (D-37): every dispatcher case the
     await expect(assertMayRunGraphAction(prisma, ID.biz, { id: ID.owner, role: 'USER' }, 'sequence_enroll', ID.owner, opts)).resolves.toBeUndefined();
   });
 
-  // Review SEC-W3CV-3, reproduced (a scratch probe through KeyCortexActionExecutorPlugin.execute with
-  // this suite's real orchestrator): an AI_PLAN EXECUTE_TOOL proposal PlanExecutorService files for a
-  // STAFF member's sequence_enroll_overdue step ran with surface PROPOSAL and no principal and enrolled
-  // every overdue contact, the OWNER's PRIVATE one included. The proposal surface runs no
-  // planStepRunRefusal for any tool (contact reads and money writes too), and the fix belongs in
-  // key-cortex-action-executor.plugin.ts / key-action-proposal.service.ts, outside this packet's write set.
-  it.todo(
-    "CV-13 (D-37, D-73; review SEC-W3CV-3): an AI_PLAN EXECUTE_TOOL proposal for a member's plan step is refused by planStepRunRefusal when it is executed (surface PROPOSAL, no principal): an ADMIN who approves and executes a STAFF member's sequence_enroll_overdue or fetch_client_health step reaches no contact the member may not open",
-  );
+  // Review SEC-W3CV-3 (the proposal surface) was recorded here as it.todo CV-13; W4-PROPOSAL-PRINCIPAL
+  // makes it live below (CV-13..CV-13c).
+});
+
+describe('W4-PROPOSAL-PRINCIPAL (D-73, D-71, D-46, D-37; review SEC-W3CV-3): an approved AI_PLAN EXECUTE_TOOL proposal runs as its plan\'s member, under the plan-step run rules, before it dispatches', () => {
+  const activeSequence = (id: string) =>
+    db.crmSequence.create({ data: { id, businessId: ID.biz, name: `v89k ${id}`, status: 'active', steps: [{ type: 'email', subject: 'v89k', body: 'v89k', delayDays: 0 }] } });
+  const INVOICE_ARGS = { contactId: ID.cMine, items: [{ description: 'v89k proposal', quantity: 1, unitPrice: 10 }] };
+
+  /**
+   * An approved, claimed KEY action proposal as PlanExecutorService.createStepProposal files it for
+   * the plan's one step (sourceType AI_PLAN; userId null: "requester unknown at this layer") and
+   * KeyActionProposalService.execute hands it to the executor plugin. `planId` null: an AI_PLAN
+   * proposal that names no plan.
+   */
+  function planProposal(tag: string, planId: string | null, toolName: string, args: Record<string, unknown>, approvedBy: string) {
+    const planStepId = planId ? `${planId}_s1` : null;
+    return {
+      id: `${P}prop_${tag}`,
+      businessId: ID.biz,
+      userId: null,
+      sourceType: 'AI_PLAN',
+      sourceId: planId,
+      planId,
+      planStepId,
+      title: `Plan step: ${toolName}`,
+      actionType: 'EXECUTE_TOOL',
+      status: 'EXECUTING',
+      requiresApproval: true,
+      approvedBy,
+      payload: { toolName, inputPayload: args, ...(planId ? { planContext: { planId, planStepId } } : {}) },
+    };
+  }
+
+  /** Seeds a plan of `member` with one step of `toolName`, then executes its approved proposal as `approver`. */
+  async function runPlanProposal(tag: string, member: string | null, toolName: string, args: Record<string, unknown>, approver: string) {
+    const planId = `${P}cv13_${tag}`;
+    await seedPlan(planId, member, toolName, args, 'approved');
+    const before = proposalDispatched.length;
+    const outcome = await proposalExecutor.execute(ID.biz, planProposal(tag, planId, toolName, args, approver), approver);
+    return { outcome, sent: proposalDispatched.slice(before) };
+  }
+
+  it("CV-13 RED-BEFORE (W4-PROPOSAL-PRINCIPAL; D-73, D-37; review SEC-W3CV-3): a STAFF member's plan step proposal, approved and executed by the ADMIN (or the OWNER), runs with that STAFF member as its principal (surface PROPOSAL): sequence_enroll_overdue enrols only their own overdue contact, fetch_client_health and crm_list_contacts count and name only it, create_followup_queue queues a task only on it; no hidden contact named", async () => {
+    await activeSequence(ID.seqPropStaff);
+    const enrol = await runPlanProposal('staff_seq', ID.staffOwned, 'sequence_enroll_overdue', { sequenceId: ID.seqPropStaff }, ID.admin);
+    expect(enrol.sent.map((d) => [d.surface, d.principal]), JSON.stringify(enrol.outcome).slice(0, 300)).toEqual([['PROPOSAL', ID.staffOwned]]);
+    expect(enrol.outcome.success, enrol.outcome.error).toBe(true);
+    expect(await enrolledIn(ID.seqPropStaff)).toEqual([ID.cMine]);
+
+    const health = await runPlanProposal('staff_health', ID.staffOwned, 'fetch_client_health', {}, ID.admin);
+    expect(health.sent.map((d) => d.principal)).toEqual([ID.staffOwned]);
+    expect(health.outcome.success, health.outcome.error).toBe(true);
+    expect(health.outcome.result.totalContacts).toBe(1);
+    expect((health.outcome.result.topSpenders as Array<{ contactId: string }>).map((s) => s.contactId)).toEqual([ID.cMine]);
+    expectNoHidden(health.outcome);
+
+    // The approver does not widen the member's run: the OWNER approving and executing it reads the STAFF member's book.
+    const list = await runPlanProposal('staff_list', ID.staffOwned, 'crm_list_contacts', { limit: 50 }, ID.owner);
+    expect(list.sent.map((d) => d.principal)).toEqual([ID.staffOwned]);
+    expect(list.outcome.success, list.outcome.error).toBe(true);
+    expect((list.outcome.result.contacts as Array<{ id: string }>).map((c) => c.id)).toEqual([ID.cMine]);
+    expectNoHidden(list.outcome);
+
+    const followups = await runPlanProposal('staff_fq', ID.staffOwned, 'create_followup_queue', { taskTitle: 'v89k cv13 {name}' }, ID.admin);
+    expect(followups.outcome.success, followups.outcome.error).toBe(true);
+    expect(await tasksTitled('v89k cv13')).toEqual([ID.cMine]);
+    expectNoHidden(followups.outcome);
+  });
+
+  it("CV-13a RED-BEFORE (W4-PROPOSAL-PRINCIPAL; D-71, D-46): the plan's member is held to the plan-step rules before dispatch: the STAFF member's commerce_create_invoice step (revenue write they do not hold) and a non-member platform SUPER_ADMIN's (D-46) are refused, whoever approved them; nothing dispatched, no invoice written", async () => {
+    const invoicesBefore = await db.invoice.count({ where: { businessId: ID.biz } });
+    const staff = await runPlanProposal('staff_inv', ID.staffOwned, 'commerce_create_invoice', INVOICE_ARGS, ID.owner);
+    expect(staff.sent).toEqual([]);
+    expect(staff.outcome.success).toBe(false);
+    expect(String(staff.outcome.error)).toMatch(/^Refused: Insufficient permissions: revenue requires write access/);
+
+    const superAdmin = await runPlanProposal('super_inv', ID.superAdmin, 'commerce_create_invoice', INVOICE_ARGS, ID.owner);
+    expect(superAdmin.sent).toEqual([]);
+    expect(superAdmin.outcome.success).toBe(false);
+    expect(String(superAdmin.outcome.error)).toMatch(/^Refused: .*\(D-46\)/);
+    expect(await db.invoice.count({ where: { businessId: ID.biz } })).toBe(invoicesBefore);
+  });
+
+  it("CV-13b RED-BEFORE (W4-PROPOSAL-PRINCIPAL; D-73): a plan proposal with no member (a plan with no userId, or an AI_PLAN proposal that names no plan) is refused a contact read (crm_list_contacts) and a money/invoice write (commerce_create_invoice), as the plan queue refuses a memberless plan; nothing dispatched, no invoice written", async () => {
+    const invoicesBefore = await db.invoice.count({ where: { businessId: ID.biz } });
+    const read = await runPlanProposal('none_list', null, 'crm_list_contacts', { limit: 50 }, ID.owner);
+    expect(read.sent).toEqual([]);
+    expect(read.outcome.success).toBe(false);
+    expect(String(read.outcome.error)).toMatch(/^Refused: .*reads no contacts \(D-73\)/);
+    expectNoHidden(read.outcome);
+
+    const write = await runPlanProposal('none_inv', null, 'commerce_create_invoice', INVOICE_ARGS, ID.owner);
+    expect(write.sent).toEqual([]);
+    expect(write.outcome.success).toBe(false);
+    expect(String(write.outcome.error)).toMatch(/^Refused: .*writes neither \(D-73\)/);
+
+    const before = proposalDispatched.length;
+    const noPlan = await proposalExecutor.execute(ID.biz, planProposal('noplan_list', null, 'crm_list_contacts', { limit: 50 }, ID.owner), ID.owner);
+    expect(proposalDispatched.slice(before)).toEqual([]);
+    expect(noPlan.success).toBe(false);
+    expect(String(noPlan.error)).toMatch(/^Refused: .*reads no contacts \(D-73\)/);
+    expectNoHidden(noPlan);
+    expect(await db.invoice.count({ where: { businessId: ID.biz } })).toBe(invoicesBefore);
+  });
+
+  it("CV-13c CONTROL (W4-PROPOSAL-PRINCIPAL; D-37): the OWNER's plan step proposal, approved and executed by the OWNER, still covers the whole book: fetch_client_health names the PRIVATE top spender, crm_list_contacts lists every contact, sequence_enroll_overdue enrols every overdue contact", async () => {
+    const health = await runPlanProposal('owner_health', ID.owner, 'fetch_client_health', {}, ID.owner);
+    expect(health.outcome.success, health.outcome.error).toBe(true);
+    expect(health.outcome.result.totalContacts).toBe(3);
+    expect(health.outcome.result.topSpenders[0]).toMatchObject({ contactId: ID.cPriv, name: `${NAME.priv} V89K` });
+
+    const list = await runPlanProposal('owner_list', ID.owner, 'crm_list_contacts', { limit: 50 }, ID.owner);
+    expect(list.outcome.success, list.outcome.error).toBe(true);
+    expect((list.outcome.result.contacts as Array<{ id: string }>).map((c) => c.id).sort()).toEqual(ALL);
+
+    await activeSequence(ID.seqPropOwner);
+    const enrol = await runPlanProposal('owner_seq', ID.owner, 'sequence_enroll_overdue', { sequenceId: ID.seqPropOwner }, ID.owner);
+    expect(enrol.outcome.success, enrol.outcome.error).toBe(true);
+    expect(await enrolledIn(ID.seqPropOwner)).toEqual(ALL);
+  });
 });
