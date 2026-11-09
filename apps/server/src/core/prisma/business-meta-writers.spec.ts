@@ -40,8 +40,17 @@
  * transaction callback), a call `lockBusinessMeta(<rx>, ...)` on the same
  * client `<rx>` as the write comes before the write, and every value spread
  * into the written metaData (`{ ...meta, key }`) is the `.metaData` of that
- * call's result (directly, or through a local initialised from it): the copy
- * written back is the one read under the lock. IdentityService.updateBusiness
+ * call's result (directly, through a local initialised from it, or through a
+ * pass-through normaliser: a top-level function of the same file, of one
+ * parameter, whose every `return` is that parameter or `{}`, such as
+ * `parseMetaData`): the copy written back is the one read under the lock
+ * (FOLLOW3-D13). The written metaData may also be that locked copy itself,
+ * changed in place (`delete meta.ga4`), or a local initialised with an object
+ * literal over it; neither may be reassigned or `Object.assign`ed into. A private method whose write's client and spread values are its
+ * parameters (CaseStudyService.saveMeta) is LOCKED when it is reached only by
+ * direct `this.<method>(...)` calls in its class, and every such call passes a
+ * client its calling function locked first (lockBusinessMeta) and the
+ * metaData read under that lock. IdentityService.updateBusiness
  * takes the same lock inline (INLINE_LOCK_OWNERS); it must still run the
  * `FOR NO KEY UPDATE` statement on the same client before its write. A raw
  * write is LOCKED (and ATOMIC) only when its writer is in
@@ -52,12 +61,15 @@
  * meta_data).
  *
  * WHAT IS REQUIRED:
- *   MW-03a every unlocked metaData writer is in D13_ALLOWLIST (FOLLOW3-D13
- *          converts them); a new one fails, naming it. Every entry still
- *          matches an unlocked writer (a converted writer is removed), and
- *          the list never grows: at most ALLOWLIST_CEILING entries.
+ *   MW-03a every unlocked metaData writer is in D13_ALLOWLIST; a new one
+ *          fails, naming it. Every entry still matches an unlocked writer (a
+ *          converted writer is removed), and the list never grows: at most
+ *          ALLOWLIST_CEILING entries. FOLLOW3-D13 converted every writer in
+ *          its write set; the four left are outside it (it.todo MW-03h).
  *   MW-03b no D12 write-set file has an unlocked metaData writer
  *          (SiteService, MarketplaceService, WhatsAppService).
+ *   MW-03g no FOLLOW3-D13 write-set file has an unlocked metaData writer, and
+ *          each writer FOLLOW3-D13 converted writes under the lock.
  *   MW-03c the helper takes the row lock before it reads, and
  *          IdentityService.updateBusiness still locks inline.
  *   MW-03d every OPAQUE writer (data the reader cannot see into) is in
@@ -95,47 +107,63 @@ type Entry = { why: string };
 
 /**
  * The Business.metaData writers that still read and write without the row
- * lock, at FOLLOW3-D12. Each is converted by FOLLOW3-D13-METADATA-LOCKED-WRITES-REST
- * (outside this packet's write set). Shrink-only: remove an entry when its
- * writer takes the lock, and lower ALLOWLIST_CEILING with it.
+ * lock. FOLLOW3-D12 listed 24; FOLLOW3-D13-METADATA-LOCKED-WRITES-REST
+ * converted the 20 in its write set (D13_CONVERTED, checked by MW-03g). The
+ * four left were found by this census and sit outside FOLLOW3-D13's write set:
+ * a follow-up packet converts them and empties this list (it.todo MW-03h).
+ * Shrink-only: remove an entry when its writer takes the lock, and lower
+ * ALLOWLIST_CEILING with it.
  */
 export const D13_ALLOWLIST: Record<string, Entry> = {
-  // Named by FOLLOW3-D13's evidence (bb6b86d4).
-  'modules/autopilot/autopilot.service.ts#AutopilotService.updateSettings': { why: "FOLLOW3-D13 (MW-11): metaData.autopilot, the owner's autopilot settings." },
-  'modules/conversion/lead-magnet.service.ts#LeadMagnetService.createLeadMagnet': { why: 'FOLLOW3-D13 (MW-11): metaData lead magnets.' },
-  'modules/gamification/gamification.listener.ts#GamificationListener.handleInvoicePaid': { why: 'FOLLOW3-D13 (MW-10): firstSaleMade on invoice.paid (event-driven).' },
-  'modules/gamification/gamification.listener.ts#GamificationListener.handlePostPublished': { why: 'FOLLOW3-D13: gamification flag (event-driven).' },
-  'modules/gamification/gamification.listener.ts#GamificationListener.handleFirstBooking': { why: 'FOLLOW3-D13: gamification flag (event-driven).' },
-  'modules/gamification/gamification.listener.ts#GamificationListener.handleProductCreated': { why: 'FOLLOW3-D13: gamification flag (event-driven).' },
-  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.checkAndGenerateNudges': { why: 'FOLLOW3-D13: concierge nudges.' },
-  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.snoozeNudge': { why: 'FOLLOW3-D13: concierge nudge snooze.' },
-  // SECRET-BEARING (review D12-ST-2): metaData.ga4 and metaData.gsc hold the
-  // Google OAuth accessToken and refreshToken in plaintext; FOLLOW3-D13
-  // converts these SEO writers first (a stale copy restores a disconnected
-  // token or a cleared payment secret). They are not masked on Business reads
-  // either: that is its own packet (see the it.todo below).
-  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.saveConnection': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2): metaData.ga4 GA4 connection with the Google OAuth accessToken/refreshToken.' },
-  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.disconnectGa4': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2): removes the metaData.ga4 OAuth tokens; a stale copy written after it restores them.' },
-  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.saveConnection': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2): metaData.gsc Search Console connection with the Google OAuth accessToken/refreshToken.' },
-  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.disconnectGsc': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2): removes the metaData.gsc OAuth tokens; a stale copy written after it restores them.' },
-  'modules/site/case-study.service.ts#CaseStudyService.saveMeta': { why: 'FOLLOW3-D13: metaData.caseStudies.' },
-  'modules/site/qualification.service.ts#QualificationService.updateQualificationConfig': { why: 'FOLLOW3-D13: metaData qualification config.' },
-  // Found by this census, not in FOLLOW3-D13's evidence list: D13 converts
-  // them too to empty this list ("the remaining internal writers").
-  'modules/conversion/sales-team.service.ts#SalesTeamService.setCommissionRate': { why: 'FOLLOW3-D13 (found by this census): metaData sales-team commission rate.' },
-  'modules/crm/crm-ai.service.ts#CrmAiService.saveGuidelines': { why: 'FOLLOW3-D13 (found by this census): metaData CRM AI guidelines.' },
-  'modules/gamification/gamification.service.ts#GamificationService.awardXp': { why: 'FOLLOW3-D13 (found by this census): metaData gamification XP.' },
-  'modules/gamification/gamification.service.ts#GamificationService.updateStreak': { why: 'FOLLOW3-D13 (found by this census): metaData gamification streak.' },
-  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.autoConfigureFromTemplate': { why: 'FOLLOW3-D13 (found by this census): concierge setup configuration (D-11 owner-only keys).' },
-  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.awardSetupMilestone': { why: 'FOLLOW3-D13 (found by this census): setup milestones (D-11 owner-only key).' },
-  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.dismissConcierge': { why: 'FOLLOW3-D13 (found by this census): concierge dismissal.' },
-  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.resumeConcierge': { why: 'FOLLOW3-D13 (found by this census): concierge resume.' },
-  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.syncAnalyticsData': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2; found by this census): writes back a metaData copy (GA4 OAuth tokens, payment secrets) read before an external Google fetch: the widest stale-copy window.' },
-  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.syncSearchData': { why: 'FOLLOW3-D13, first (secret-bearing, D12-ST-2; found by this census): writes back a metaData copy (Search Console OAuth tokens, payment secrets) read before an external Google fetch.' },
+  'modules/conversion/sales-team.service.ts#SalesTeamService.setCommissionRate': { why: 'Found by this census (FOLLOW3-D12), outside the FOLLOW3-D13 write set: metaData sales-team commission rate. Follow-up packet.' },
+  'modules/crm/crm-ai.service.ts#CrmAiService.saveGuidelines': { why: 'Found by this census (FOLLOW3-D12), outside the FOLLOW3-D13 write set: metaData CRM AI guidelines. Follow-up packet.' },
+  'modules/gamification/gamification.service.ts#GamificationService.awardXp': { why: 'Found by this census (FOLLOW3-D12), outside the FOLLOW3-D13 write set (which holds gamification.listener.ts only): metaData gamification XP. Follow-up packet.' },
+  'modules/gamification/gamification.service.ts#GamificationService.updateStreak': { why: 'Found by this census (FOLLOW3-D12), outside the FOLLOW3-D13 write set (which holds gamification.listener.ts only): metaData gamification streak. Follow-up packet.' },
 };
 
-/** The allow-list size at FOLLOW3-D12. It only goes down (FOLLOW3-D13 empties it). */
-export const ALLOWLIST_CEILING = 24;
+/** The allow-list size after FOLLOW3-D13 (24 at FOLLOW3-D12). It only goes down. */
+export const ALLOWLIST_CEILING = 4;
+
+/** The FOLLOW3-D13 write-set files: none of them may carry an unlocked metaData writer. */
+const D13_WRITE_SET = [
+  'modules/gamification/gamification.listener.ts',
+  'modules/autopilot/autopilot.service.ts',
+  'modules/conversion/lead-magnet.service.ts',
+  'modules/onboarding-concierge/onboarding-concierge.service.ts',
+  'modules/seo/seo-ga4.service.ts',
+  'modules/seo/seo-gsc.service.ts',
+  'modules/site/case-study.service.ts',
+  'modules/site/qualification.service.ts',
+];
+
+/**
+ * The writers FOLLOW3-D13 took off the allow-list (its evidence at bb6b86d4,
+ * plus those this census found in the same files). Each now writes metaData
+ * under the row lock (MW-03g). The SEO writers carry the Google OAuth tokens
+ * (review D12-ST-2): a stale copy written after a disconnect restored them.
+ */
+const D13_CONVERTED = [
+  'modules/autopilot/autopilot.service.ts#AutopilotService.updateSettings',
+  'modules/conversion/lead-magnet.service.ts#LeadMagnetService.createLeadMagnet',
+  'modules/gamification/gamification.listener.ts#GamificationListener.handleFirstBooking',
+  'modules/gamification/gamification.listener.ts#GamificationListener.handleInvoicePaid',
+  'modules/gamification/gamification.listener.ts#GamificationListener.handlePostPublished',
+  'modules/gamification/gamification.listener.ts#GamificationListener.handleProductCreated',
+  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.autoConfigureFromTemplate',
+  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.awardSetupMilestone',
+  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.checkAndGenerateNudges',
+  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.dismissConcierge',
+  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.resumeConcierge',
+  'modules/onboarding-concierge/onboarding-concierge.service.ts#OnboardingConciergeService.snoozeNudge',
+  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.disconnectGa4',
+  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.saveConnection',
+  'modules/seo/seo-ga4.service.ts#SeoGoogleAnalyticsService.syncAnalyticsData',
+  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.disconnectGsc',
+  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.saveConnection',
+  'modules/seo/seo-gsc.service.ts#SeoGoogleSearchConsoleService.syncSearchData',
+  'modules/site/case-study.service.ts#CaseStudyService.saveMeta',
+  'modules/site/qualification.service.ts#QualificationService.updateQualificationConfig',
+];
 
 /** Writers that lock the business row inline (the same statement the helper runs). */
 const INLINE_LOCK_OWNERS: Record<string, Entry> = {
@@ -394,13 +422,71 @@ function inlineLockBefore(fn: ts.Node, rx: string, pos: number, sf: ts.SourceFil
   return found;
 }
 
-/** Whether `e` is (a local holding) the `.metaData` of a value returned by one of `locks`. */
+function isAssignment(kind: ts.SyntaxKind): boolean {
+  return kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
+}
+
+/**
+ * Whether the name `name` (seen from `at`) is reassigned (`name = ...`,
+ * `name ??= ...`) or has values `Object.assign`ed into it anywhere in the
+ * outermost function enclosing `at`. Any same-named variable there counts.
+ */
+function overwritten(name: string, at: ts.Node): boolean {
+  const fns = functionsOf(at);
+  const outer = fns[fns.length - 1];
+  if (!outer?.body) return false;
+  let hit = false;
+  const named = (e: ts.Expression | undefined) => !!e && ts.isIdentifier(unwrap(e)) && (unwrap(e) as ts.Identifier).text === name;
+  const visit = (n: ts.Node) => {
+    if (hit) return;
+    if (ts.isBinaryExpression(n) && isAssignment(n.operatorToken.kind) && named(n.left)) hit = true;
+    else if (ts.isCallExpression(n) && unwrap(n.expression).getText() === 'Object.assign' && named(n.arguments[0])) hit = true;
+    ts.forEachChild(n, visit);
+  };
+  visit(outer.body);
+  return hit;
+}
+
+/**
+ * Whether `name` is a pass-through normaliser of the file holding `at`
+ * (FOLLOW3-D13: `parseMetaData`): a top-level function of one parameter,
+ * never reassigned, whose every `return` (nested functions aside) is that
+ * parameter or `{}`. Its result is its argument or an empty bag, never
+ * another copy.
+ */
+function passThrough(name: string, at: ts.Node): boolean {
+  const fn = at.getSourceFile().statements.find((s): s is ts.FunctionDeclaration => ts.isFunctionDeclaration(s) && s.name?.text === name);
+  if (!fn?.body || fn.parameters.length !== 1 || !ts.isIdentifier(fn.parameters[0].name)) return false;
+  const param = fn.parameters[0].name.text;
+  const returns: ts.ReturnStatement[] = [];
+  let assigned = false;
+  const visit = (n: ts.Node) => {
+    if (ts.isFunctionLike(n)) return;
+    if (ts.isReturnStatement(n)) returns.push(n);
+    if (ts.isBinaryExpression(n) && isAssignment(n.operatorToken.kind) && ts.isIdentifier(unwrap(n.left)) && (unwrap(n.left) as ts.Identifier).text === param) assigned = true;
+    ts.forEachChild(n, visit);
+  };
+  ts.forEachChild(fn.body, visit);
+  return !assigned && returns.length > 0 && returns.every((r) => {
+    const v = r.expression ? unwrap(r.expression) : undefined;
+    return !!v && ((ts.isIdentifier(v) && v.text === param) || (ts.isObjectLiteralExpression(v) && v.properties.length === 0));
+  });
+}
+
+/**
+ * Whether `e` is (a local holding, or a pass-through normaliser of) the
+ * `.metaData` of a value returned by one of `locks`.
+ */
 function fromLockedRead(e: ts.Expression, at: ts.Node, locks: ts.CallExpression[], depth = 0): boolean {
   if (depth > 6) return false;
   const x = unwrapValue(e);
   if (ts.isIdentifier(x)) {
+    if (overwritten(x.text, at)) return false;
     const init = declaredInit(x.text, at);
     return init ? fromLockedRead(init, at, locks, depth + 1) : false;
+  }
+  if (ts.isCallExpression(x) && x.arguments.length === 1 && ts.isIdentifier(unwrap(x.expression)) && passThrough((unwrap(x.expression) as ts.Identifier).text, at)) {
+    return fromLockedRead(x.arguments[0], at, locks, depth + 1);
   }
   if (ts.isPropertyAccessExpression(x) && x.name.text === 'metaData') {
     const base = unwrapValue(x.expression);
@@ -455,12 +541,71 @@ function atomicStatement(lit: ts.Node, sf: ts.SourceFile): boolean {
   return !!fn && !readsMetaBefore(fn, lit.getStart(sf), sf);
 }
 
-/** Whether every value spread into the written metaData is the locked read. */
-function spreadsLockedRead(meta: ts.Expression | undefined, at: ts.Node, locks: ts.CallExpression[]): boolean {
-  if (!meta) return false;
+/**
+ * Whether the written metaData copies only the locked read: an object literal
+ * whose every spread is the locked read; or (FOLLOW3-D13) the locked copy
+ * itself, changed in place (`delete meta.ga4; ... metaData: meta`); or a local
+ * initialised with such an object literal (later `name.key = ...` adds keys).
+ * A name reassigned or `Object.assign`ed into is not.
+ */
+function spreadsLockedRead(meta: ts.Expression | undefined, at: ts.Node, locks: ts.CallExpression[], depth = 0): boolean {
+  if (!meta || depth > 4) return false;
   const m = unwrap(meta);
-  if (!ts.isObjectLiteralExpression(m)) return false;
-  return m.properties.every((p) => !ts.isSpreadAssignment(p) || fromLockedRead(p.expression, at, locks));
+  if (ts.isObjectLiteralExpression(m)) return m.properties.every((p) => !ts.isSpreadAssignment(p) || fromLockedRead(p.expression, at, locks));
+  if (!ts.isIdentifier(m) || overwritten(m.text, at)) return false;
+  if (fromLockedRead(m, at, locks)) return true;
+  const init = declaredInit(m.text, at);
+  return !!init && ts.isObjectLiteralExpression(unwrap(init)) && spreadsLockedRead(init, at, locks, depth + 1);
+}
+
+/**
+ * FOLLOW3-D13 (CaseStudyService.saveMeta): whether the write in the private
+ * method `fn`, whose client `rx` and every value spread into the written
+ * metaData are `fn`'s parameters, is locked by its callers. `fn` must be
+ * reached only by direct `this.<name>(...)` calls in its class (at least one;
+ * any other reference fails), and each call must pass a client its calling
+ * function locked first (lockBusinessMeta on it, before the call) and, for
+ * each spread parameter, the metaData read under that lock.
+ */
+function lockedByCallers(fn: ts.FunctionLikeDeclaration, rx: string, meta: ts.Expression | undefined, sf: ts.SourceFile): boolean {
+  if (!ts.isMethodDeclaration(fn) || !meta) return false;
+  const isPrivate = ts.isPrivateIdentifier(fn.name) || (ts.getModifiers(fn) ?? []).some((mod) => mod.kind === ts.SyntaxKind.PrivateKeyword);
+  const name = propName(fn.name);
+  const m = unwrap(meta);
+  if (!isPrivate || !name || !ts.isObjectLiteralExpression(m)) return false;
+  const paramAt = (p: string) => fn.parameters.findIndex((q) => ts.isIdentifier(q.name) && q.name.text === p);
+  const clientAt = paramAt(rx);
+  if (clientAt < 0 || overwritten(rx, m)) return false;
+  const spreadAt: number[] = [];
+  for (const p of m.properties) {
+    if (!ts.isSpreadAssignment(p)) continue;
+    const v = unwrap(p.expression);
+    const i = ts.isIdentifier(v) ? paramAt(v.text) : -1;
+    if (i < 0 || overwritten((v as ts.Identifier).text, m)) return false;
+    spreadAt.push(i);
+  }
+  const cls = fn.parent;
+  if (!ts.isClassDeclaration(cls) && !ts.isClassExpression(cls)) return false;
+  const calls: ts.CallExpression[] = [];
+  let stray = false;
+  const visit = (n: ts.Node) => {
+    if (ts.isPropertyAccessExpression(n) && n.name.text === name) {
+      if (n.expression.kind === ts.SyntaxKind.ThisKeyword && ts.isCallExpression(n.parent) && n.parent.expression === n) calls.push(n.parent);
+      else stray = true;
+    } else if (ts.isElementAccessExpression(n) && ts.isStringLiteralLike(n.argumentExpression) && n.argumentExpression.text === name) {
+      stray = true;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(cls);
+  if (stray || calls.length === 0) return false;
+  return calls.every((call) => {
+    const client = call.arguments[clientAt] ? unwrap(call.arguments[clientAt]) : undefined;
+    const caller = functionsOf(call)[0];
+    if (!client || !ts.isIdentifier(client) || !caller) return false;
+    const locks = lockCallsBefore(caller, client.text, call.getStart(sf), sf);
+    return locks.length > 0 && spreadAt.every((i) => !!call.arguments[i] && fromLockedRead(call.arguments[i], call, locks));
+  });
 }
 
 function ownerKey(rel: string, node: ts.Node): string {
@@ -507,8 +652,10 @@ export function scanMetaWrites(rel: string, source: string, atomicOwners: Record
           let locked = false;
           if (fn && keys.has('metaData')) {
             const locks = lockCallsBefore(fn, rx, pos, sf);
-            locked = locks.length > 0 && spreadsLockedRead(metaValue(dataExpr, n), n, locks);
+            const meta = metaValue(dataExpr, n);
+            locked = locks.length > 0 && spreadsLockedRead(meta, n, locks);
             if (!locked && INLINE_LOCK_OWNERS[key]) locked = inlineLockBefore(fn, rx, pos, sf);
+            if (!locked) locked = lockedByCallers(fn, rx, meta, sf);
           }
           found.push({ key, line: lineOf(n), locked, opaque: !keys.has('metaData'), raw: false });
         }
@@ -590,8 +737,24 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
 
   it('[MW-03a] the allow-list is shrink-only (at most ALLOWLIST_CEILING entries)', () => {
     expect(Object.keys(D13_ALLOWLIST).length).toBeLessThanOrEqual(ALLOWLIST_CEILING);
-    expect(ALLOWLIST_CEILING, 'the FOLLOW3-D12 ceiling; lower it, never raise it').toBeLessThanOrEqual(24);
+    expect(ALLOWLIST_CEILING, 'the FOLLOW3-D13 ceiling (24 at FOLLOW3-D12); lower it, never raise it').toBeLessThanOrEqual(4);
   });
+
+  it('[MW-03g] RED-BEFORE: no FOLLOW3-D13 write-set file writes Business.metaData unlocked, none is on the allow-list, and every writer FOLLOW3-D13 converted writes under the lock', () => {
+    const unlocked = WRITES.filter((w) => D13_WRITE_SET.includes(w.key.split('#')[0]) && !w.locked).map((w) => `${w.key} (line ${w.line})`);
+    expect(unlocked).toEqual([]);
+    for (const k of Object.keys(D13_ALLOWLIST)) expect(D13_WRITE_SET).not.toContain(k.split('#')[0]);
+    const locked = new Set(WRITES.filter((w) => w.locked).map((w) => w.key));
+    expect(D13_CONVERTED.filter((writer) => !locked.has(writer)), 'converted writers not found writing metaData under the row lock').toEqual([]);
+    expect(D13_CONVERTED.filter((writer) => D13_ALLOWLIST[writer])).toEqual([]);
+  });
+
+  // FOLLOW3-D13's proof asks for an empty allow-list. Four writers this census
+  // found (FOLLOW3-D12) are in files outside FOLLOW3-D13's write set
+  // (conversion/sales-team.service.ts, crm/crm-ai.service.ts,
+  // gamification/gamification.service.ts): a follow-up packet converts them,
+  // then sets ALLOWLIST_CEILING to 0 and turns this into a test.
+  it.todo('[MW-03h] the allow-list is empty: SalesTeamService.setCommissionRate, CrmAiService.saveGuidelines, GamificationService.awardXp and updateStreak write under the lock (outside the FOLLOW3-D13 write set)');
 
   it('[MW-03b] RED-BEFORE: no D12 write-set file writes Business.metaData unlocked (SiteService, MarketplaceService, WhatsAppService), and each still writes it under the lock', () => {
     const unlocked = WRITES.filter((w) => D12_WRITE_SET.includes(w.key.split('#')[0]) && !w.locked).map((w) => `${w.key} (line ${w.line})`);
@@ -613,8 +776,9 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
   // and the SEO services): the SEO connections store Google OAuth tokens in
   // metaData.ga4 / metaData.gsc, and maskMetaData masks only whatsapp and the
   // four payment secrets, so GET /identity/businesses/:id answers the refresh
-  // tokens to any member. The writers are flagged first for FOLLOW3-D13 in
-  // D13_ALLOWLIST above; the read mask needs its own packet.
+  // tokens to any member. FOLLOW3-D13 put the writers under the row lock (a
+  // stale copy no longer restores a disconnected token); the read mask needs
+  // its own packet.
   it.todo('[D12-ST-2] a Business read masks metaData.ga4 and metaData.gsc OAuth tokens (accessToken, refreshToken) as it masks the payment secrets (follow-up packet: sanitize-business.ts and the SEO writers are outside the FOLLOW3-D12 write set)');
 
   it('[MW-03f] the public storefront event (SiteService.trackEvent) is one atomic statement, not a read under the row lock in an interactive transaction (review D12-ST-1 / CR-D12-1), and every ATOMIC_STATEMENT_OWNERS entry still is one', () => {
@@ -710,6 +874,73 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
       '  async aliased(tx: any, id: string) {',
       "    await tx.$executeRaw`UPDATE businesses AS b SET meta_data = ${'{}'}::jsonb WHERE b.id = ${id}`;",
       '  }',
+      // FOLLOW3-D13 forms: a pass-through normaliser, the locked copy changed
+      // in place, a local over it, and a private write helper whose callers lock.
+      '  async normalised(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = asBag(business?.metaData);',
+      "      await tx.business.update({ where: { id }, data: { metaData: { ...meta, k: 6 } } });",
+      '    });',
+      '  }',
+      '  async notPassThrough(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = cached(business?.metaData);',
+      "      await tx.business.update({ where: { id }, data: { metaData: { ...meta, k: 7 } } });",
+      '    });',
+      '  }',
+      '  async inPlace(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = (business?.metaData as Record<string, unknown> | null) ?? {};',
+      '      delete meta.k;',
+      "      await tx.business.update({ where: { id }, data: { metaData: meta } });",
+      '    });',
+      '  }',
+      '  async localOverLocked(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = (business?.metaData as Record<string, unknown> | null) ?? {};',
+      '      const next = { ...meta };',
+      '      next.k = 8;',
+      "      await tx.business.update({ where: { id }, data: { metaData: next } });",
+      '    });',
+      '  }',
+      '  async localMergedStale(db: any, id: string, stale: any) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const next = { ...((business?.metaData as Record<string, unknown> | null) ?? {}) };',
+      '      Object.assign(next, stale);',
+      "      await tx.business.update({ where: { id }, data: { metaData: next } });",
+      '    });',
+      '  }',
+      '  async viaHelper(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      await this.writeBag(tx, id, (business?.metaData as Record<string, unknown> | null) ?? {});',
+      '    });',
+      '  }',
+      '  private async writeBag(tx: any, id: string, meta: Record<string, unknown>) {',
+      "    await tx.business.update({ where: { id }, data: { metaData: { ...meta, k: 9 } } });",
+      '  }',
+      '  async viaHelperStale(db: any, id: string) {',
+      "    const stale = await db.business.findUnique({ where: { id }, select: { metaData: true } });",
+      '    await db.$transaction(async (tx: any) => {',
+      '      await lockBusinessMeta(tx, id);',
+      '      await this.writeBagStale(tx, id, stale.metaData);',
+      '    });',
+      '  }',
+      '  private async writeBagStale(tx: any, id: string, meta: Record<string, unknown>) {',
+      "    await tx.business.update({ where: { id }, data: { metaData: { ...meta, k: 10 } } });",
+      '  }',
+      '}',
+      'function asBag(raw: unknown) {',
+      "  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;",
+      '  return {};',
+      '}',
+      'function cached(raw: unknown) {',
+      '  return raw ? CACHE : {};',
       '}',
     ].join('\n');
     const row = (w: MetaWriter) => `${w.key.split('#')[1]} ${w.line} ${w.locked ? 'locked' : 'unlocked'}${w.opaque ? ' opaque' : ''}${w.raw ? ' raw' : ''}${w.atomic ? ' atomic' : ''}`;
@@ -718,19 +949,32 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
       'RogueMeta.aliased 55 unlocked raw',
       'RogueMeta.atomicAfterRead 52 unlocked raw',
       'RogueMeta.atomicMerge 48 unlocked raw',
+      'RogueMeta.inPlace 76 locked',
+      'RogueMeta.localMergedStale 93 unlocked',
+      'RogueMeta.localOverLocked 85 locked',
       'RogueMeta.locked 39 locked',
       'RogueMeta.lockedOtherClient 16 unlocked',
       'RogueMeta.lockedStaleCopy 23 unlocked',
       'RogueMeta.nested 30 unlocked',
+      'RogueMeta.normalised 61 locked',
+      'RogueMeta.notPassThrough 68 unlocked',
       'RogueMeta.opaque 27 unlocked opaque',
       'RogueMeta.raw 33 unlocked raw',
       'RogueMeta.unlocked 6 unlocked',
       'RogueMeta.viaVariable 11 unlocked',
+      'RogueMeta.writeBag 103 locked',
+      'RogueMeta.writeBagStale 113 unlocked',
     ]);
     // Findings the injection adds (independent of what the tree holds today).
     const baseline = new Set(censusProblems(WRITES, D13_ALLOWLIST, OPAQUE_NOT_META));
     const added = censusProblems([...WRITES, ...scanned], D13_ALLOWLIST, OPAQUE_NOT_META).filter((p) => !baseline.has(p));
-    expect(added).toHaveLength(10);
+    expect(added).toHaveLength(13);
+    // FOLLOW3-D13 forms that must still fail: a one-argument call that is not
+    // a pass-through, a local the stale copy is Object.assign'ed into, and a
+    // private helper whose caller passes a copy read before its lock.
+    for (const [method, line] of [['notPassThrough', 68], ['localMergedStale', 93], ['writeBagStale', 113]] as const) {
+      expect(added).toContain(`${rel}#RogueMeta.${method} (${rel}:${line}) writes Business.metaData without lockBusinessMeta on its client before the write (or spreads a metaData copy not read under it)`);
+    }
     expect(added).toContain(`${rel}#RogueMeta.unlocked (${rel}:6) writes Business.metaData without lockBusinessMeta on its client before the write (or spreads a metaData copy not read under it)`);
     expect(added).toContain(`${rel}#RogueMeta.raw (${rel}:33) writes Business.metaData with raw SQL`);
     expect(added).toContain(`${rel}#RogueMeta.aliased (${rel}:55) writes Business.metaData with raw SQL`);
@@ -752,7 +996,22 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
       'RogueMeta.atomicMerge 48 locked raw atomic',
       'RogueMeta.raw 33 unlocked raw',
     ]);
-    expect(censusProblems([...WRITES, ...withReviewed], D13_ALLOWLIST, OPAQUE_NOT_META).filter((p) => !baseline.has(p))).toHaveLength(9);
+    expect(censusProblems([...WRITES, ...withReviewed], D13_ALLOWLIST, OPAQUE_NOT_META).filter((p) => !baseline.has(p))).toHaveLength(12);
+
+    // A private write helper is locked by its callers only while every
+    // reference to it is a direct call from a caller that locked first: one
+    // more caller without the lock, or the helper passed as a value, fails it.
+    const helperRow = (src: string) => scanMetaWrites(rel, src).filter((w) => w.key.endsWith('#RogueMeta.writeBag')).map((w) => w.locked);
+    const unlockedCaller = injected.replace(
+      '  private async writeBag(',
+      '  async writeBagUnlocked(db: any, id: string) { await this.writeBag(db, id, {}); }\n  private async writeBag(',
+    );
+    const asValue = injected.replace(
+      '  private async writeBag(',
+      '  handOff() { return this.writeBag; }\n  private async writeBag(',
+    );
+    const notPrivate = injected.replace('  private async writeBag(', '  async writeBag(');
+    expect([helperRow(injected), helperRow(unlockedCaller), helperRow(asValue), helperRow(notPrivate)]).toEqual([[true], [false], [false], [false]]);
 
     // A stale allow-list entry fails too: the list shrinks with the code.
     const first = Object.keys(D13_ALLOWLIST)[0];

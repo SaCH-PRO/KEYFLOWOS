@@ -48,6 +48,16 @@
  * SiteService.trackEvent unchanged, and the WhatsApp config route calls
  * saveConfig after its owner check (proven by whatsapp-config-authority).
  *
+ * FOLLOW3-D13-METADATA-LOCKED-WRITES-REST (cases MW-10..MW-15 and MW-C03,
+ * values tagged `v84l_f3d13_`) proves the same for the remaining internal
+ * writers it converts, with the same paused-writer harness: the invoice.paid
+ * gamification handler (firstSaleMade), the autopilot settings against a
+ * lead-magnet write, the GA4 and Search Console syncs (which read metaData,
+ * then wait on Google: the fetch is a stub here, no Google traffic) against a
+ * disconnect, case-study publishes, the concierge nudge snooze and the
+ * qualification config. A new case asserts the data first and that the
+ * concurrent write waited last, so a RED run names the lost write.
+ *
  * FIXTURES: every user, business and membership id has the `v84l_` prefix
  * (registered in test/helpers/fixture-prefixes.json), every unique column
  * written here (User.email, User.referralCode) contains it, and every row is
@@ -88,6 +98,17 @@ let site: any;
 let plainSite: any; // SiteService over the real PrismaService client (no pausing proxy)
 let marketplace: any;
 let whatsapp: any;
+// FOLLOW3-D13 writers: over the pausing PrismaService, and (plain*) over the real client.
+let gamification: any;
+let autopilot: any;
+let plainLeadMagnet: any;
+let concierge: any;
+let caseStudy: any;
+let plainCaseStudy: any;
+let qualification: any;
+let SeoGa4: any;
+let SeoGsc: any;
+const D13 = `${P}f3d13_`; // FOLLOW3-D13 values carry this tag inside the suite's prefix
 
 async function cleanup() {
   for (const sql of [
@@ -225,9 +246,11 @@ async function committedOrWaiting(p: Promise<unknown>, writerPid: number | undef
  * metaData), then start `concurrent`, wait until that has committed or waits
  * on a lock the writer's transaction holds, release the writer and settle
  * both. The concurrent write must have waited for the writer (review
- * CR-D12-2): the row lock is held from the writer's read to its commit.
+ * CR-D12-2): the row lock is held from the writer's read to its commit. With
+ * `assertWaited: false` the caller asserts the returned `order` itself (after
+ * its data checks, so a RED run names the lost write first).
  */
-async function interleave<W, C>(writer: () => Promise<W>, concurrent: () => Promise<C>) {
+async function interleave<W, C>(writer: () => Promise<W>, concurrent: () => Promise<C>, opts: { assertWaited?: boolean } = {}) {
   const pause = pausing.pauseNext('business', 'update');
   try {
     const w = writer();
@@ -240,7 +263,7 @@ async function interleave<W, C>(writer: () => Promise<W>, concurrent: () => Prom
     const order = await committedOrWaiting(c, first.pid);
     pause.release();
     const [writerResult, concurrentResult] = await Promise.all([w, c]);
-    expect(order, 'the concurrent write waited for the writer\'s row lock (held from its read to its commit)').toBe('waiting');
+    if (opts.assertWaited !== false) expect(order, 'the concurrent write waited for the writer\'s row lock (held from its read to its commit)').toBe('waiting');
     return { writerResult, concurrentResult, order };
   } finally {
     pausing.disarm();
@@ -293,6 +316,14 @@ beforeAll(async () => {
   const { SiteService } = await import('../src/modules/site/site.service');
   const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
   const { WhatsAppService } = await import('../src/modules/whatsapp/whatsapp.service');
+  const { GamificationListener } = await import('../src/modules/gamification/gamification.listener');
+  const { AutopilotService } = await import('../src/modules/autopilot/autopilot.service');
+  const { LeadMagnetService } = await import('../src/modules/conversion/lead-magnet.service');
+  const { OnboardingConciergeService } = await import('../src/modules/onboarding-concierge/onboarding-concierge.service');
+  const { CaseStudyService } = await import('../src/modules/site/case-study.service');
+  const { QualificationService } = await import('../src/modules/site/qualification.service');
+  ({ SeoGoogleAnalyticsService: SeoGa4 } = await import('../src/modules/seo/seo-ga4.service'));
+  ({ SeoGoogleSearchConsoleService: SeoGsc } = await import('../src/modules/seo/seo-gsc.service'));
 
   // The owner's PATCH: the real IdentityController, IdentityService, guards and
   // PrismaService (as test/payment-secrets-write-only composes it).
@@ -338,6 +369,16 @@ beforeAll(async () => {
   plainSite = new SiteService({ client: db } as any, {} as any);
   marketplace = new MarketplaceService(prisma, {} as any, {} as any, new EventEmitter2(), {} as any);
   whatsapp = new WhatsAppService(prisma, new EventEmitter2(), {} as any, {} as any, {} as any);
+  // FOLLOW3-D13 writers. Their other collaborators (CRM timeline, business
+  // events, AI usage, catalog, blueprint, demo seeder, CRM, public events) are
+  // not on the paths called here.
+  gamification = new GamificationListener(prisma);
+  autopilot = new AutopilotService(prisma, {} as any, {} as any);
+  plainLeadMagnet = new LeadMagnetService({ client: db } as any);
+  concierge = new OnboardingConciergeService(prisma, {} as any, {} as any, {} as any, {} as any);
+  caseStudy = new CaseStudyService(prisma);
+  plainCaseStudy = new CaseStudyService({ client: db } as any);
+  qualification = new QualificationService(prisma, {} as any, {} as any);
 
   await cleanup(); // in case a prior run aborted
 
@@ -533,6 +574,275 @@ describe('FOLLOW3-D12 controls (unchanged behaviour)', () => {
       for (const [k, v] of Object.entries(SEEDED_META)) expect(meta[k], `metaData.${k} kept`).toEqual(v);
       expect(meta.whatsapp.phoneNumberId).toBe(`${P}pn_02`);
       expect(meta.storefront).toEqual({ deliveryConfig: { digital: { enabled: true } } });
+    } finally {
+      await reset();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FOLLOW3-D13-METADATA-LOCKED-WRITES-REST (values tagged `v84l_f3d13_`)
+// ---------------------------------------------------------------------------
+
+/**
+ * A GA4 or Search Console service over the real client whose Google fetch is
+ * a stub (no Google traffic): the first fetch resolves `reached` (the sync has
+ * read metaData, OAuth tokens included, and waits on Google) and answers []
+ * when the test calls `answer`; a later fetch answers [] at once. The ingest
+ * into SeoService is a stub too.
+ */
+function seoWithStubbedGoogle(kind: 'ga4' | 'gsc') {
+  let fetching!: () => void;
+  const reached = new Promise<void>((r) => { fetching = r; });
+  let answer!: () => void;
+  const answered = new Promise<unknown[]>((r) => { answer = () => r([]); });
+  let first = true;
+  const ingest = async () => ({ updated: 0 });
+  const svc: any = kind === 'ga4'
+    ? new SeoGa4({ client: db }, { ingestAnalyticsData: ingest })
+    : new SeoGsc({ client: db }, { ingestSearchConsoleData: ingest });
+  svc[kind === 'ga4' ? 'fetchAnalyticsData' : 'fetchSearchAnalytics'] = () => {
+    if (!first) return Promise.resolve([]);
+    first = false;
+    fetching();
+    return answered;
+  };
+  return { svc, reached, answer };
+}
+
+const SEO = {
+  ga4: { label: 'GA4', connection: { propertyId: `${D13}property` }, sync: 'syncAnalyticsData', disconnect: 'disconnectGa4' },
+  gsc: { label: 'Search Console', connection: { siteUrl: `https://${D13}site.test.local/` }, sync: 'syncSearchData', disconnect: 'disconnectGsc' },
+} as const;
+
+const caseStudyDraft = (id: string) => ({
+  id,
+  businessId: ID.biz,
+  headline: `${D13}${id}`,
+  location: '',
+  industry: null,
+  metrics: {
+    windowDays: 60, recentOrders: 1, priorOrders: 0, recentRevenue: 100, priorRevenue: 0, currency: 'TTD',
+    recentBookings: 0, priorBookings: 0, orderGrowthPct: null, revenueGrowthPct: null, bookingGrowthPct: null,
+    topService: null, topProduct: null,
+  },
+  status: 'draft' as const,
+  consent: false,
+  consentedAt: null,
+  consentedBy: null,
+  generatedAt: '2026-11-01T00:00:00.000Z',
+  publishedAt: null,
+});
+
+const magnetInput = (n: number) => ({
+  title: `${D13}magnet-${n}`,
+  contentType: 'pdf' as const,
+  publicSlug: `${D13}magnet-${n}`,
+  isActive: true,
+});
+
+const QUALIFICATION_FLOW = { enabled: true, title: `${D13}flow`, questions: [{ id: 'q1', text: `${D13}budget?` }] };
+
+describe('FOLLOW3-D13 the remaining metaData writers read and write under the business row lock', () => {
+  it('[MW-10] RED-BEFORE: the invoice.paid gamification handler (firstSaleMade) that has read metaData when the owner\'s PATCH clears stripeSecretKey: after both commit the clear holds (the secret is not stored again) and firstSaleMade is set', async () => {
+    await reset();
+    try {
+      const { concurrentResult: patched, order } = await interleave(
+        () => gamification.handleInvoicePaid({ businessId: ID.biz, invoice: { id: `${D13}invoice` } }),
+        () => patchBusiness({ metaData: { stripeSecretKey: null } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      const meta = await storedMeta();
+      expect(has(meta, 'stripeSecretKey'), 'the cleared stripeSecretKey stored again by the invoice.paid handler').toBe(false);
+      expect(meta.firstSaleMade).toBe(true);
+      expect(meta.bankName).toBe(SEEDED_META.bankName);
+      expect(order, 'the PATCH waited for the handler\'s row lock (held from its read to its commit)').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-11] RED-BEFORE: an autopilot settings save (AutopilotService.updateSettings) that has read metaData while a lead magnet is created (LeadMagnetService.createLeadMagnet): both keys persist (no write lost)', async () => {
+    await reset();
+    try {
+      const { writerResult, concurrentResult: magnet, order } = await interleave(
+        () => autopilot.updateSettings(ID.biz, { quietHoursStart: '21:00' }),
+        () => plainLeadMagnet.createLeadMagnet(ID.biz, magnetInput(1)),
+        { assertWaited: false },
+      );
+      const meta = await storedMeta();
+      const lost: string[] = [];
+      if (!((meta.leadMagnets ?? []) as Array<{ id: string }>).some((m) => m.id === magnet.id)) lost.push('lead magnet (metaData.leadMagnets)');
+      if (meta.autopilot?.quietHoursStart !== '21:00') lost.push('autopilot settings (metaData.autopilot)');
+      expect(lost, 'writes lost to the interleaving').toEqual([]);
+      expect(writerResult.quietHoursStart).toBe('21:00');
+      expect(meta.stripeSecretKey).toBe(STRIPE_SECRET);
+      expect(order, 'the lead-magnet write waited for the settings save\'s row lock').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+
+  for (const kind of ['ga4', 'gsc'] as const) {
+    const s = SEO[kind];
+    it(`[MW-12${kind === 'ga4' ? 'a' : 'b'}] RED-BEFORE (review D12-ST-2): a ${s.label} sync that has read metaData (the OAuth tokens) and waits on Google while the owner disconnects ${s.label} and clears stripeSecretKey: neither the disconnected tokens nor the cleared secret is stored again, and the sync held no lock while it waited`, async () => {
+      const connection = { ...s.connection, accessToken: `${D13}${kind}_ACCESS`, refreshToken: `${D13}${kind}_REFRESH`, connectedAt: '2026-11-01T00:00:00.000Z' };
+      await reset({ ...SEEDED_META, [kind]: connection });
+      const { svc, reached, answer } = seoWithStubbedGoogle(kind);
+      try {
+        const sync = svc[s.sync](ID.biz);
+        await reached;
+        // Both commit while the sync waits on Google: it holds no lock then.
+        expect(await svc[s.disconnect](ID.biz)).toEqual({ disconnected: true });
+        const cleared = await patchBusiness({ metaData: { stripeSecretKey: null } });
+        expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+        answer();
+        expect(await sync).toMatchObject({ synced: true });
+        const meta = await storedMeta();
+        const restored: string[] = [];
+        if (has(meta, kind)) restored.push(`metaData.${kind} (the disconnected OAuth tokens)`);
+        if (has(meta, 'stripeSecretKey')) restored.push('stripeSecretKey (cleared by the PATCH)');
+        expect(restored, 'stored again by the sync\'s copy').toEqual([]);
+        expect(meta.bankName).toBe(SEEDED_META.bankName);
+      } finally {
+        answer();
+        await reset();
+      }
+    });
+  }
+
+  it('[MW-13] RED-BEFORE: a case-study publish (CaseStudyService.publish) that has read metaData while another case study is published: both are published (no publish lost)', async () => {
+    await reset({ ...SEEDED_META, caseStudies: [caseStudyDraft('cs_a'), caseStudyDraft('cs_b')] });
+    try {
+      const { writerResult, concurrentResult, order } = await interleave(
+        () => caseStudy.publish(ID.biz, 'cs_a', { consent: true, userId: ID.owner }),
+        () => plainCaseStudy.publish(ID.biz, 'cs_b', { consent: true, userId: ID.owner }),
+        { assertWaited: false },
+      );
+      expect(writerResult).toMatchObject({ id: 'cs_a', status: 'published' });
+      expect(concurrentResult).toMatchObject({ id: 'cs_b', status: 'published' });
+      const meta = await storedMeta();
+      const status = Object.fromEntries(((meta.caseStudies ?? []) as Array<{ id: string; status: string }>).map((c) => [c.id, c.status]));
+      expect(status, 'stored case-study statuses').toEqual({ cs_a: 'published', cs_b: 'published' });
+      expect(meta.stripeSecretKey).toBe(STRIPE_SECRET);
+      expect(order, 'the second publish waited for the first one\'s row lock').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-14] RED-BEFORE: a concierge nudge snooze (OnboardingConciergeService.snoozeNudge) that has read metaData when the owner\'s PATCH clears stripeSecretKey: the clear holds and the snooze is saved', async () => {
+    await reset();
+    try {
+      const { writerResult, concurrentResult: patched, order } = await interleave(
+        () => concierge.snoozeNudge(ID.biz, 'products', 3),
+        () => patchBusiness({ metaData: { stripeSecretKey: null } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      expect(writerResult).toMatchObject({ snoozed: true });
+      const meta = await storedMeta();
+      expect(has(meta, 'stripeSecretKey'), 'the cleared stripeSecretKey stored again by the snooze').toBe(false);
+      expect(meta.snoozedNudges?.products).toBe(writerResult.until);
+      expect(order, 'the PATCH waited for the snooze\'s row lock').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-15] RED-BEFORE: a qualification config save (QualificationService.updateQualificationConfig) that has read metaData when the owner\'s PATCH clears stripeSecretKey: the clear holds and the config is saved', async () => {
+    await reset();
+    try {
+      const { writerResult, concurrentResult: patched, order } = await interleave(
+        () => qualification.updateQualificationConfig(ID.biz, QUALIFICATION_FLOW),
+        () => patchBusiness({ metaData: { stripeSecretKey: null } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      expect(writerResult).toEqual(QUALIFICATION_FLOW);
+      const meta = await storedMeta();
+      expect(has(meta, 'stripeSecretKey'), 'the cleared stripeSecretKey stored again by the config save').toBe(false);
+      expect(meta.qualificationFlow).toEqual(QUALIFICATION_FLOW);
+      expect(order, 'the PATCH waited for the config save\'s row lock').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+});
+
+describe('FOLLOW3-D13 controls (unchanged behaviour)', () => {
+  it('[MW-C03] CONTROL: each FOLLOW3-D13 writer on its own writes its key and keeps every other metaData key; a disconnect removes only its key; a repeated invoice.paid changes nothing; an unknown business answers as before', async () => {
+    await reset();
+    try {
+      await gamification.handleInvoicePaid({ businessId: ID.biz, invoice: { id: `${D13}invoice-c` } });
+      await gamification.handlePostPublished({ businessId: ID.biz });
+      await gamification.handleFirstBooking({ businessId: ID.biz });
+      await gamification.handleProductCreated({ businessId: ID.biz });
+      const settings = await autopilot.updateSettings(ID.biz, { quietHoursEnd: '06:00', triggers: { follow_up: false, birthday: true, payment_reminder: true, check_in: true, offer: true } });
+      expect(settings).toMatchObject({ quietHoursEnd: '06:00', triggers: { follow_up: false, birthday: true } });
+      const magnet = await plainLeadMagnet.createLeadMagnet(ID.biz, magnetInput(2));
+      expect(await plainLeadMagnet.listLeadMagnets(ID.biz)).toEqual([magnet]);
+      expect(await qualification.updateQualificationConfig(ID.biz, QUALIFICATION_FLOW)).toEqual(QUALIFICATION_FLOW);
+      expect(await qualification.getQualificationConfig(ID.biz)).toEqual(QUALIFICATION_FLOW);
+      const snoozed = await concierge.snoozeNudge(ID.biz, 'storefront', 3);
+      expect(await concierge.dismissConcierge(ID.biz)).toEqual({ dismissed: true });
+      expect(await concierge.resumeConcierge(ID.biz)).toEqual({ resumed: true });
+
+      const ga4 = new SeoGa4({ client: db }, {} as any);
+      const GA4 = { propertyId: `${D13}prop-c`, accessToken: `${D13}ga4_ACCESS_C`, refreshToken: `${D13}ga4_REFRESH_C` };
+      expect(await ga4.saveConnection(ID.biz, GA4)).toEqual({ connected: true, propertyId: GA4.propertyId });
+      expect(await ga4.getConnectionStatus(ID.biz)).toMatchObject({ connected: true, propertyId: GA4.propertyId });
+      const gsc = new SeoGsc({ client: db }, {} as any);
+      const GSC = { siteUrl: `https://${D13}site-c.test.local/`, accessToken: `${D13}gsc_ACCESS_C`, refreshToken: `${D13}gsc_REFRESH_C` };
+      expect(await gsc.saveConnection(ID.biz, GSC)).toEqual({ connected: true, siteUrl: GSC.siteUrl });
+      // A sync while still connected stamps lastSync (Google stubbed).
+      const stubbed = seoWithStubbedGoogle('gsc');
+      stubbed.answer();
+      expect(await stubbed.svc.syncSearchData(ID.biz)).toMatchObject({ synced: true });
+
+      const meta = await storedMeta();
+      for (const [k, v] of Object.entries(SEEDED_META)) expect(meta[k], `metaData.${k} kept`).toEqual(v);
+      expect(meta).toMatchObject({
+        firstSaleMade: true, firstPostPublished: true, firstBooking: true, firstProductCreated: true,
+        conciergeDismissed: false, conciergeDismissedAt: expect.any(String),
+        qualificationFlow: QUALIFICATION_FLOW,
+        leadMagnets: [magnet],
+        snoozedNudges: { storefront: snoozed.until },
+        ga4: { ...GA4, connectedAt: expect.any(String) },
+        gsc: { ...GSC, connectedAt: expect.any(String), lastSync: expect.any(String) },
+      });
+      expect(meta.autopilot).toMatchObject({ quietHoursEnd: '06:00', trigger_follow_up: false, trigger_birthday: true });
+
+      // A disconnect removes its key only.
+      expect(await ga4.disconnectGa4(ID.biz)).toEqual({ disconnected: true });
+      const disconnected = await storedMeta();
+      expect(has(disconnected, 'ga4')).toBe(false);
+      expect({ ...disconnected, ga4: meta.ga4 }).toEqual(meta);
+
+      // A second invoice.paid with firstSaleMade set changes nothing.
+      const before = JSON.stringify(await storedMeta());
+      await gamification.handleInvoicePaid({ businessId: ID.biz, invoice: { id: `${D13}invoice-d` } });
+      expect(JSON.stringify(await storedMeta())).toBe(before);
+
+      // Case studies: publish, list, unpublish; an unknown study is refused.
+      await reset({ ...SEEDED_META, caseStudies: [caseStudyDraft('cs_c')] });
+      expect(await caseStudy.publish(ID.biz, 'cs_c', { consent: true, userId: ID.owner })).toMatchObject({ status: 'published', consent: true, consentedBy: ID.owner });
+      expect((await caseStudy.list(ID.biz)).map((c: any) => c.status)).toEqual(['published']);
+      expect(await caseStudy.unpublish(ID.biz, 'cs_c')).toMatchObject({ status: 'draft', publishedAt: null, consent: true });
+      await expect(caseStudy.publish(ID.biz, 'cs_missing', { consent: true })).rejects.toThrow('Case study not found');
+      await expect(caseStudy.publish(ID.biz, 'cs_c', { consent: false })).rejects.toThrow('Explicit consent');
+      const afterStudies = await storedMeta();
+      for (const [k, v] of Object.entries(SEEDED_META)) expect(afterStudies[k], `metaData.${k} kept`).toEqual(v);
+      expect((afterStudies.caseStudies as any[]).map((c) => c.status)).toEqual(['draft']);
+
+      // An unknown business answers as before, with nothing written.
+      const NO = `${P}no-such-business`;
+      await expect(gamification.handleInvoicePaid({ businessId: NO, invoice: { id: `${D13}invoice-e` } })).resolves.toBeUndefined();
+      await expect(ga4.saveConnection(NO, GA4)).rejects.toThrow('Business not found');
+      expect(await ga4.disconnectGa4(NO)).toEqual({ disconnected: true });
+      await expect(caseStudy.publish(NO, 'cs_c', { consent: true })).rejects.toThrow('Business not found');
+      expect(await db.business.count({ where: { id: NO } })).toBe(0);
     } finally {
       await reset();
     }
