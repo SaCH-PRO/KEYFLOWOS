@@ -33,8 +33,30 @@
  *            commerce module: each revenue:write handler outside
  *            CommerceController is SERVICE_REFUSED, EXEMPT with a reason, or
  *            OPEN (a known, unruled gap naming its follow-up packet). The OPEN
- *            set is pinned (D46-S06b) and its behaviour is an it.todo (D46-S07,
- *            D46-S08), so the gap shows rather than reading as covered.
+ *            set was pinned (D46-S06b) and its behaviour an it.todo (D46-S07,
+ *            D46-S08), so the gap showed rather than reading as covered.
+ *
+ * W3-D46-CREATE-AND-RECURRING (owner ruling D-46: a platform SUPER_ADMIN who
+ * is not a member stays refused on tenant invoice writes) closes that gap:
+ * createInvoice (POST businesses/:b/invoices) moves from EXEMPT to GUARDED, and
+ * the five RecurringInvoiceController writes from OPEN to GUARDED (each calls
+ * RecurringInvoiceController.assertSuperAdminMayWriteRevenue, the same rule, first).
+ *   D46-S06b  no OPEN entry remains.
+ *   D46-S07   (unit half) each GUARDED write of another controller holds the
+ *             D46-S02..S05 contract; the HTTP half is
+ *             test/d46-commerce-writes.integration.test.ts D46-S07a..e.
+ *   D46-S08   (unit half) createInvoice is GUARDED, so D46-S02..S05 run on
+ *             it; the HTTP half is d46-commerce-writes D46-S08.
+ *
+ * The census reads src/modules/commerce only, so D46-S06b's "no OPEN entry"
+ * holds inside that module. Review SEC-W3D46R-3 found the schedule rows
+ * written outside it: TrashController (src/modules/trash) restores and
+ * permanently deletes recurringInvoice rows behind BusinessGuard alone (its
+ * @RequireModuleScope('settings') has no ModuleScopeGuard to enforce it), so a
+ * non-member SUPER_ADMIN and a revenue:read STAFF member restore a soft-deleted
+ * ACTIVE schedule, which then bills again. trash.controller.ts is outside the
+ * W3-D46-CREATE-AND-RECURRING write set: D46-S09 keeps it visible as an
+ * it.todo for its follow-up packet.
  */
 import 'reflect-metadata';
 import { readdirSync } from 'fs';
@@ -71,6 +93,9 @@ const GUARDED: Record<string, 'invoice' | 'quote'> = {
   resendReceipt: 'invoice',
   createPaymentLink: 'invoice',
   deactivatePaymentLink: 'invoice',
+  // W3-D46-CREATE-AND-RECURRING (D-46): was EXEMPT, pinned by CC-FORWARD's
+  // non-member SUPER_ADMIN 201 (now aligned to the refusal).
+  createInvoice: 'invoice',
 };
 
 const PRODUCTS = 'products/*: the catalog, not an invoice, quote or payment write (D-46 is ruled for invoice writes)';
@@ -90,8 +115,6 @@ const EXEMPT: Record<string, string> = {
   sendGmailMessage: GMAIL,
   replyGmailThread: GMAIL,
   backfillStoreLinks: 'store/backfill-links: storefront link maintenance, not an invoice, quote or payment write',
-  createInvoice:
-    'PINNED, not ruled here: commerce-authorization.e2e.test.ts CC-FORWARD forwards a non-member SUPER_ADMIN\'s invoice create (201), and that suite must stay green (outside this write set). It creates a DRAFT and moves no money; extending D-46 to it needs that control changed (follow-up).',
 };
 
 /**
@@ -108,20 +131,20 @@ const SERVICE_REFUSED: Record<string, string> = {
   updateQuoteStatus: 'CommerceService.updateQuoteStatus: the actor\'s Membership holding revenue:write (QS-07, D46-R04)',
 };
 
-type OtherKind = 'SERVICE_REFUSED' | 'EXEMPT' | 'OPEN';
+type OtherKind = 'GUARDED' | 'SERVICE_REFUSED' | 'EXEMPT' | 'OPEN';
 
 const LEVERAGE_ATTRIBUTION = 'revenue attribution override (which source, campaign or staff member earned a booking or invoice): reporting metadata, not an invoice, quote or payment write';
 const LEVERAGE_TIME = 'time-cost entries (minutes and cost rate logged against a reference): margin reporting, not an invoice, quote or payment write';
-const RECURRING_OPEN =
-  'OPEN (review SEC-A1-2, unruled): an invoice schedule the scheduler turns into real invoices. Neither RecurringInvoiceController nor ' +
-  'RecurringInvoiceService checks a SUPER_ADMIN\'s Membership, so a non-member SUPER_ADMIN creates an ACTIVE schedule in any tenant. ' +
-  'recurring-invoice.controller.ts and recurring-invoice.service.ts are outside this packet\'s write set: needs a D-46 ruling and a follow-up packet';
+const RECURRING_GUARDED =
+  'GUARDED (W3-D46-CREATE-AND-RECURRING, D-46; was OPEN, review SEC-A1-2): an invoice schedule the scheduler turns into real invoices. ' +
+  'RecurringInvoiceController.assertSuperAdminMayWriteRevenue runs first: a SUPER_ADMIN needs a Membership in :businessId holding revenue:write';
 
 /**
  * Review repair SEC-A1-2: the census covers every revenue:write handler of
  * every controller in the commerce module, not only CommerceController, so a
  * gap shows here by name. OPEN entries are known gaps waiting on a ruling and
- * a follow-up packet (see the it.todo below), never a claim of coverage.
+ * a follow-up packet, never a claim of coverage (none remains: D46-S06b).
+ * GUARDED entries call their controller's D-46 helper first (D46-S07).
  */
 const OTHER_CONTROLLERS: Record<string, Record<string, { kind: OtherKind; why: string }>> = {
   CommerceAiController: {
@@ -140,12 +163,17 @@ const OTHER_CONTROLLERS: Record<string, Record<string, { kind: OtherKind; why: s
     remove: { kind: 'EXEMPT', why: LEVERAGE_TIME },
   },
   RecurringInvoiceController: {
-    create: { kind: 'OPEN', why: RECURRING_OPEN },
-    update: { kind: 'OPEN', why: RECURRING_OPEN },
-    pause: { kind: 'OPEN', why: RECURRING_OPEN },
-    resume: { kind: 'OPEN', why: RECURRING_OPEN },
-    cancel: { kind: 'OPEN', why: RECURRING_OPEN },
+    create: { kind: 'GUARDED', why: RECURRING_GUARDED },
+    update: { kind: 'GUARDED', why: RECURRING_GUARDED },
+    pause: { kind: 'GUARDED', why: RECURRING_GUARDED },
+    resume: { kind: 'GUARDED', why: RECURRING_GUARDED },
+    cancel: { kind: 'GUARDED', why: RECURRING_GUARDED },
   },
+};
+
+/** The constructor dependencies of each other controller with GUARDED writes, by name, in order. */
+const OTHER_CONSTRUCTOR_DEPS: Record<string, string[]> = {
+  RecurringInvoiceController: ['service', 'prisma'],
 };
 
 const BIZ = 'biz_d46';
@@ -171,8 +199,8 @@ function recorder(name: string, calls: Array<{ path: string; args: unknown[] }>,
 }
 
 /** The handler's arguments, built from its route-argument metadata, as the router would pass them. */
-function argsFor(handler: string, req: unknown): unknown[] {
-  const meta: Record<string, { index: number; data?: unknown }> = Reflect.getMetadata(ROUTE_ARGS_METADATA, Controller, handler) ?? {};
+function argsFor(handler: string, req: unknown, cls: any = Controller): unknown[] {
+  const meta: Record<string, { index: number; data?: unknown }> = Reflect.getMetadata(ROUTE_ARGS_METADATA, cls, handler) ?? {};
   const args: unknown[] = [];
   for (const [key, { index, data }] of Object.entries(meta)) {
     const type = Number(key.split(':')[0]);
@@ -186,14 +214,19 @@ function argsFor(handler: string, req: unknown): unknown[] {
 
 /** Calls one handler as `user`, with the Membership lookup answering `membership`. */
 async function callAs(handler: string, user: { id: string; role: string }, membership: unknown) {
+  return callOn(Controller, CONSTRUCTOR_DEPS, handler, user, membership);
+}
+
+/** callAs for any controller class, built over recorders named `depNames` (its constructor dependencies, in order). */
+async function callOn(cls: any, depNames: string[], handler: string, user: { id: string; role: string }, membership: unknown) {
   const calls: Array<{ path: string; args: unknown[] }> = [];
   const answers = { [MEMBERSHIP_LOOKUP]: async () => membership };
-  const deps = CONSTRUCTOR_DEPS.map((name) => recorder(name, calls, answers));
-  const controller = new Controller(...deps);
+  const deps = depNames.map((name) => recorder(name, calls, answers));
+  const controller = new cls(...deps);
   const req = { user, headers: {}, params: { businessId: BIZ }, body: {} };
   let error: unknown = null;
   try {
-    await controller[handler](...argsFor(handler, req));
+    await controller[handler](...argsFor(handler, req, cls));
   } catch (err) {
     error = err;
   }
@@ -308,24 +341,79 @@ describe('D-46 write-route census, the whole commerce module (review SEC-A1-2)',
     }
   });
 
-  it('D46-S06b: the OPEN entries are exactly the RecurringInvoiceController writes (the known SEC-A1-2 gap), so a new gap cannot hide among them', () => {
-    const open = Object.entries(OTHER_CONTROLLERS).flatMap(([name, handlers]) =>
-      Object.entries(handlers).filter(([, v]) => v.kind === 'OPEN').map(([h]) => `${name}.${h}`),
-    );
-    expect(open.sort()).toEqual(
+  it('D46-S06b: no OPEN entry remains (W3-D46-CREATE-AND-RECURRING, D-46: the RecurringInvoiceController writes, the SEC-A1-2 gap, are GUARDED), so a new gap fails here', () => {
+    const ofKind = (kind: OtherKind) =>
+      Object.entries(OTHER_CONTROLLERS).flatMap(([name, handlers]) =>
+        Object.entries(handlers).filter(([, v]) => v.kind === kind).map(([h]) => `${name}.${h}`),
+      );
+    expect(ofKind('OPEN')).toEqual([]);
+    expect(ofKind('GUARDED').sort()).toEqual(
       ['cancel', 'create', 'pause', 'resume', 'update'].map((h) => `RecurringInvoiceController.${h}`),
     );
   });
 
-  it.todo(
-    'D46-S07 (SEC-A1-2, needs a ruling and a follow-up packet): a SUPER_ADMIN with no Membership in :businessId, or one below revenue:write, ' +
-      'is refused on POST/PATCH/pause/resume/DELETE commerce/businesses/:businessId/recurring-invoices and no recurring_invoices row is written. ' +
-      'Not implementable here: recurring-invoice.controller.ts and recurring-invoice.service.ts are outside the FOLLOW3-A1 write set.',
-  );
+  // W3-D46-CREATE-AND-RECURRING (D-46): the it.todo D46-S07 made live. The HTTP
+  // half (real guards, real rows) is test/d46-commerce-writes.integration.test.ts D46-S07a..e.
+  for (const [name, handlers] of Object.entries(OTHER_CONTROLLERS)) {
+    for (const [handler, { kind }] of Object.entries(handlers)) {
+      if (kind !== 'GUARDED') continue;
+      it(`D46-S07 (unit half) ${name}.${handler} (D-46): a SUPER_ADMIN with no membership is refused 403 'Not authorized to update this invoice' after the Membership lookup alone; below revenue:write, the guard's message; a revenue:write member passes the helper; a role USER costs no Membership query`, async () => {
+        const cls = moduleControllers.get(name);
+        const deps = OTHER_CONSTRUCTOR_DEPS[name];
+        expect(cls, name).toBeDefined();
+        expect(deps, `${name}: list its constructor dependencies in OTHER_CONSTRUCTOR_DEPS`).toBeDefined();
+        expect(String(Reflect.getMetadata(PATH_METADATA, cls.prototype[handler])), handler).toMatch(/^businesses\/:businessId\//);
+        const sa = { id: USER_ID, role: 'SUPER_ADMIN' };
 
+        const none = await callOn(cls, deps!, handler, sa, null);
+        expect(none.error, String(none.error)).toBeInstanceOf(ForbiddenException);
+        expect((none.error as Error).message).toBe('Not authorized to update this invoice');
+        expect(none.calls.map((c) => c.path)).toEqual([MEMBERSHIP_LOOKUP]);
+        expect(none.calls[0]!.args[0]).toMatchObject({ where: { userId_businessId: { userId: USER_ID, businessId: BIZ } } });
+
+        for (const [membership, level] of [
+          [{ role: 'STAFF', permissionScopes: null }, 'read'],
+          [{ role: 'ADMIN', permissionScopes: { revenue: 'none', crm: 'write' } }, 'none'],
+        ] as const) {
+          const below = await callOn(cls, deps!, handler, sa, membership);
+          expect(below.error, `${level}: ${String(below.error)}`).toBeInstanceOf(ForbiddenException);
+          expect((below.error as Error).message).toBe(`Insufficient permissions: revenue requires write access (you have ${level})`);
+          expect(below.calls.map((c) => c.path)).toEqual([MEMBERSHIP_LOOKUP]);
+        }
+
+        for (const membership of [{ role: 'ADMIN', permissionScopes: null }, { role: 'STAFF', permissionScopes: { revenue: 'write' } }]) {
+          const ok = await callOn(cls, deps!, handler, sa, membership);
+          expect(ok.error, String(ok.error)).not.toBeInstanceOf(ForbiddenException);
+          expect(ok.calls[0]?.path).toBe(MEMBERSHIP_LOOKUP);
+          expect(ok.calls.length, 'the handler went on past the helper').toBeGreaterThan(1);
+          expect(ok.calls.slice(1).map((c) => c.path)).not.toContain(MEMBERSHIP_LOOKUP);
+        }
+
+        const user = await callOn(cls, deps!, handler, { id: USER_ID, role: 'USER' }, null);
+        expect(user.error, String(user.error)).not.toBeInstanceOf(ForbiddenException);
+        expect(user.calls.map((c) => c.path)).not.toContain(MEMBERSHIP_LOOKUP);
+      });
+    }
+  }
+
+  // W3-D46-CREATE-AND-RECURRING (D-46): the it.todo D46-S08 made live. The HTTP
+  // half is test/d46-commerce-writes.integration.test.ts D46-S08; CC-FORWARD's
+  // non-member SUPER_ADMIN expectation is aligned to the refusal.
+  it('D46-S08 (unit half, D-46): createInvoice (POST businesses/:businessId/invoices) is GUARDED, not EXEMPT, so D46-S02..S05 hold it to the helper', () => {
+    expect(GUARDED.createInvoice).toBe('invoice');
+    expect(EXEMPT).not.toHaveProperty('createInvoice');
+    expect(pathOf('createInvoice')).toBe('businesses/:businessId/invoices');
+  });
+
+  // W3-D46-CREATE-AND-RECURRING review SEC-W3D46R-3 (D-46): reproduced on the
+  // repair branch with a real-database probe (TrashController, real
+  // BusinessGuard): the non-member SUPER_ADMIN's POST
+  // api/businesses/A/trash/recurringInvoice/:id/restore answered 201 and the row
+  // came back {status ACTIVE, deletedAt null} (the commerce resume route answers
+  // that SUPER_ADMIN 403), its DELETE .../recurringInvoice/:id answered 200 and
+  // the row was gone, and a STAFF member holding revenue:'read' restored another
+  // schedule with 201. Outside this packet's write set (src/modules/trash).
   it.todo(
-    'D46-S08 (SEC-A1-2 / builder deviation, needs a ruling): POST commerce/businesses/:businessId/invoices refuses a non-member SUPER_ADMIN. ' +
-      'Not implementable here: commerce-authorization.e2e.test.ts CC-FORWARD pins a non-member SUPER_ADMIN\'s invoice create as 201, ' +
-      'and changing that control is outside the FOLLOW3-A1 write set.',
+    "D46-S09 (D-46; review SEC-W3D46R-3; follow-up packet: D-46 plus module scope on trash for revenue models) TrashController restore and permanent delete of a recurringInvoice refuse a SUPER_ADMIN that is not a member of the business (403) and a member below revenue:write; a restored schedule never bills again on their call. Not implementable here: trash.controller.ts is outside the W3-D46-CREATE-AND-RECURRING write set",
   );
 });

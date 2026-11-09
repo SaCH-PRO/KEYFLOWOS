@@ -6,6 +6,8 @@ import { InvoiceWorkflowService } from './invoice-workflow.service';
 import { allocateDocumentNumber, retryDocumentNumber } from './document-number';
 import { schedulersDisabled } from '../../core/config/env';
 import { D13_CURRENCIES, normalizeCurrency } from '../finance/posting.service';
+import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
+import { isSystemActor } from '../../core/auth/system-actor';
 
 /** lastError of a schedule whose contact belongs to another business (V1-12 review ST-12-3). */
 const CONTACT_OUTSIDE_BUSINESS = "the schedule's contact does not belong to its business; not billed";
@@ -85,8 +87,16 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
     endDate?: Date | string | null;
     nextRunDate: Date | string;
     metadata?: Record<string, unknown> | null;
+    /**
+     * W3-D46-CREATE-AND-RECURRING (owner ruling D-64; FOLLOW3-D6 review
+     * SEC-D6-2): the member the HTTP route acts for. The contact must be one
+     * they may open (memberContactClause); a hidden one answers the 404 of an
+     * unknown id and nothing is written. None (no member): the tenant's check.
+     */
+    actorUserId?: string;
   }) {
-    const contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
+    const memberClause = await this.memberContactClause(input.businessId, input.actorUserId);
+    const contactId = await this.assertContactInBusiness(input.contactId, input.businessId, memberClause);
     // V1-37d (D-13): the business currency unless one is named (it was the
     // literal 'TTD'); a named one is upper-cased and held to D-13.
     const currency = await this.scheduleCurrency(input.businessId, input.currency);
@@ -123,19 +133,45 @@ export class RecurringInvoiceService implements OnModuleInit, OnModuleDestroy {
    * Same rule and answers as CommerceService.assertContactInBusiness (private
    * there): a foreign, soft-deleted or unknown id is the same 404 and nothing
    * is written. V1-12 review ST-12-3 (ST-27-1).
+   *
+   * W3-D46-CREATE-AND-RECURRING (D-64): `memberClause` (memberContactClause)
+   * narrows the lookup to the contacts the acting member may open, as
+   * CommerceService.assertContactInBusiness does for the invoice and quote
+   * binds; a hidden contact then answers exactly the 404 of an unknown one.
    */
-  private async assertContactInBusiness(contactId: unknown, businessId: string): Promise<string> {
+  private async assertContactInBusiness(
+    contactId: unknown,
+    businessId: string,
+    memberClause?: Prisma.ContactWhereInput,
+  ): Promise<string> {
     if (typeof contactId !== 'string' || contactId.length === 0) {
       throw new BadRequestException('contactId must be a non-empty string');
     }
+    const where: Prisma.ContactWhereInput = { id: contactId, businessId };
+    if (memberClause) where.AND = [memberClause];
     const contact = await this.prisma.client.contact.findFirst({
-      where: { id: contactId, businessId },
+      where,
       select: { id: true },
     });
     if (!contact) {
       throw new NotFoundException('Contact not found');
     }
     return contactId;
+  }
+
+  /**
+   * W3-D46-CREATE-AND-RECURRING (owner ruling D-64; FOLLOW3-D6 review
+   * SEC-D6-2): the contacts the acting member may open, by the rule GET
+   * contacts/:id applies (resolveCrmAccess + visibilityClause), the rule
+   * CommerceService.memberContactClause applies to the invoice and quote
+   * binds (private there; restated here). Undefined when there is no member
+   * actor (a system actor included) or the member sees every contact (OWNER,
+   * SUPER_ADMIN). resolveCrmAccess refuses a non-member 403 first.
+   */
+  private async memberContactClause(businessId: string, actorUserId?: string): Promise<Prisma.ContactWhereInput | undefined> {
+    if (!actorUserId || isSystemActor(actorUserId)) return undefined;
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    return (visibilityClause(access, actorUserId) as Prisma.ContactWhereInput | null) ?? undefined;
   }
 
   /**

@@ -896,8 +896,25 @@ describe('V1-53 review repairs', () => {
     expect(body.contact).not.toHaveProperty('ownerId');
   }
 
-  it("RR-PROJECT-CREATE (SEC-V53-1): a revenue:write STAFF member with crm:none creating a quote on a PRIVATE contact gets 201 with contact { id, businessId, firstName, lastName, email } only, the operator detail's customer fields; the quote.created listener still receives the whole contact", async () => {
-    const res = await as(RR.staffB, agent().post(routes.create(ID.bizB))).send({
+  // W3-D64-COMMERCE-CREATE (owner ruling D-64): quote create refuses (404) a
+  // contact the acting member cannot open under CRM visibility, so the crm:none
+  // STAFF member no longer creates on the owner's PRIVATE contact (it answered
+  // 201 with the projected contact). The SEC-V53-1 projection stays proven on
+  // the create of a member who may open it: the OWNER.
+  it("RR-PROJECT-CREATE (SEC-V53-1, D-64): a revenue:write STAFF member with crm:none creating a quote on a PRIVATE contact gets 404 Contact not found and nothing is written; the OWNER's create gets 201 with contact { id, businessId, firstName, lastName, email } only, the operator detail's customer fields; the quote.created listener still receives the whole contact", async () => {
+    const quotesBefore = await db.quote.count({ where: { businessId: ID.bizB } });
+    const refused = await as(RR.staffB, agent().post(routes.create(ID.bizB))).send({
+      contactId: RR.contactPrivateB,
+      quoteNumber: nextNumber('PROJ-C'),
+      items: [line()],
+    });
+    expect(refused.status, JSON.stringify(refused.body)).toBe(404);
+    expect(refused.body.message).toBe('Contact not found');
+    expect(JSON.stringify(refused.body)).not.toContain('V53aPrivate');
+    expect(await db.quote.count({ where: { businessId: ID.bizB } })).toBe(quotesBefore);
+    expect(recordedEvents.filter((e) => e.name === 'quote.created')).toEqual([]);
+
+    const res = await as(ID.ownerB, agent().post(routes.create(ID.bizB))).send({
       contactId: RR.contactPrivateB,
       quoteNumber: nextNumber('PROJ-C'),
       items: [line()],
@@ -909,7 +926,7 @@ describe('V1-53 review repairs', () => {
     expect(created).toHaveLength(1);
     expect(created[0].payload.quote.contact).toMatchObject({ id: RR.contactPrivateB, phone: CANARY_PHONE });
 
-    const detail = await as(RR.staffB, agent().get(routes.one(ID.bizB, res.body.id)));
+    const detail = await as(ID.ownerB, agent().get(routes.one(ID.bizB, res.body.id)));
     expect(detail.status, JSON.stringify(detail.body)).toBe(200);
     const { firstName, lastName, email } = res.body.contact;
     expect({ firstName, lastName, email }).toEqual(detail.body.contact);

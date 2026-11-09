@@ -783,19 +783,29 @@ export class CommerceService {
    * FOLLOW3-D6 (owner ruling D-64; R0-27 review ST-27-5): the contacts the
    * acting member may open, by the rule GET contacts/:id applies
    * (resolveCrmAccess + visibilityClause), as bookings create does since V1-06.
-   * Undefined when there is no member actor (KEY's system actor included) or
+   * Undefined when there is no member actor (KEY's system actors included) or
    * the member sees every contact (OWNER, SUPER_ADMIN). resolveCrmAccess refuses a
    * non-member 403 first.
    *
-   * Applied today by updateQuote only. Every other bind (createInvoice,
-   * createQuote, the convert re-check, updateInvoice) is also reached by a
-   * granted KEY tool whose dispatcher passes no actor (commerce_create_invoice,
-   * commerce_create_quote, commerce_convert_quote, commerce_update_invoice), so
-   * applying the clause there makes KEY bind what HTTP refuses: the K2
-   * derivation in job-role-tool-families.spec.ts (CRM_ROW_VISIBILITY_TOOLS)
-   * fails. Those binds wait for an owner decision (withhold the tools from KEY
-   * positions, or a holder-aware dispatcher), and existing suites pin their
-   * pre-D-64 answers (commerce-contact-bind-visibility.integration.test.ts).
+   * W3-D64-COMMERCE-CREATE (D-64, D-88): every bind applies it (createInvoice,
+   * createQuote, updateQuote, updateInvoice and the convert re-check of the
+   * quote's stored contact). KEY acts as the member (D-88): the flow dispatcher
+   * hands commerce_create_invoice, commerce_create_quote, commerce_convert_quote
+   * and commerce_update_invoice the member its command runs for, and the
+   * KEY-cortex commerce adapter the command's member.
+   *
+   * Review SEC-W3D64-1/-3, CR-D64C-2: "the member its command runs for" is
+   * FlowOrchestratorService.contactBindMember: the surface's principal; else
+   * the member a principal-less surface runs for (an approved proposal's
+   * executor, a KEY-cortex turn's member on the efferent bridge, an
+   * execute_custom_logic snippet's caller); else, on the plan queue, the
+   * stored plan's member (D-73). Undefined here, the OWNER's view, only for a
+   * run with no member: an inbound conversation, a KEY-cortex plan no member
+   * created (SYSTEM_PLAN_ACTOR), document intake and events. NOT covered: the
+   * staff bridge (a position's WhatsApp/SMS turn) runs the dispatcher with a
+   * job-role envelope and no member, so it binds with the OWNER's view (open,
+   * outside this packet: withhold the tools from positions or carry the
+   * position's member).
    */
   private async memberContactClause(businessId: string, actorUserId?: string): Promise<Prisma.ContactWhereInput | undefined> {
     if (!actorUserId || isSystemActor(actorUserId)) return undefined;
@@ -986,7 +996,13 @@ export class CommerceService {
     total?: number;
     /** V1-45 (D-15): the client's Idempotency-Key. The same key and request answer the invoice it created. */
     idempotencyKey?: string;
-    /** V1-45b (SEC-V45-3): the member who sent the request; part of the key's request hash. */
+    /**
+     * V1-45b (SEC-V45-3): the member who sent the request; part of the key's
+     * request hash. W3-D64-COMMERCE-CREATE (D-64, D-88): the contact must be one
+     * this member may open (memberContactClause). The HTTP routes forward it
+     * with or without a key; KEY passes the member its command runs for. None
+     * (intake, events, a KEY run with no member): the tenant check alone.
+     */
     actorUserId?: string;
   }) {
     // V1-45 (M22): a retry with a used key is answered before anything else runs.
@@ -1061,8 +1077,10 @@ export class CommerceService {
     // contactId under bizB's path created bizB's invoice linked to (and
     // echoing) bizA's contact. Every caller passes through here: the HTTP
     // route, invoice-from-time, KEY and the intake flows.
+    // W3-D64-COMMERCE-CREATE (D-64, D-88): and one the acting member may open.
     if (input.contactId !== undefined) {
-      data.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
+      const memberClause = await this.memberContactClause(input.businessId, input.actorUserId);
+      data.contactId = await this.assertContactInBusiness(input.contactId, input.businessId, memberClause);
     }
     // V1-43 (D-15): a number the caller names (document intake) is kept as
     // given; otherwise the business's next number is drawn in this create's
@@ -2987,7 +3005,11 @@ export class CommerceService {
     quoteNumber?: string;
     /** V1-45 (D-15): the client's Idempotency-Key. The same key and request answer the quote it created. */
     idempotencyKey?: string;
-    /** V1-45b (SEC-V45-3): the member who sent the request; part of the key's request hash. */
+    /**
+     * V1-45b (SEC-V45-3): the member who sent the request; part of the key's
+     * request hash. W3-D64-COMMERCE-CREATE (D-64, D-88): the contact must be one
+     * this member may open, as on invoice create.
+     */
     actorUserId?: string;
   }) {
     // V1-45 (M22): a retry with a used key is answered before anything else runs.
@@ -3016,7 +3038,9 @@ export class CommerceService {
     // bizA's contactId under bizB's path created bizB's quote linked to (and
     // echoing) bizA's contact, and converting it created an Invoice bound to
     // that contact. Resolve it inside the tenant before anything is written.
-    const contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
+    // W3-D64-COMMERCE-CREATE (D-64, D-88): and one the acting member may open.
+    const memberClause = await this.memberContactClause(input.businessId, input.actorUserId);
+    const contactId = await this.assertContactInBusiness(input.contactId, input.businessId, memberClause);
     // V1-53: at least one line, each product inside the tenant (404).
     await this.assertQuoteLines(input.items, input.businessId);
     const taxRate = input.taxRate ?? 0;
@@ -3314,6 +3338,13 @@ export class CommerceService {
     discountValue?: number;
     notes?: string;
     dueDate?: Date | string;
+    /**
+     * W3-D64-COMMERCE-CREATE (D-64, D-88): the member who converts; the quote's
+     * contact must be one they may open (memberContactClause). The HTTP route
+     * forwards the authenticated member, KEY the member its command runs for.
+     * None (a KEY run with no member): the tenant check alone.
+     */
+    actorUserId?: string;
   }) {
     const quote = await this.prisma.client.quote.findFirst({
       where: { id: input.quoteId, businessId: input.businessId, deletedAt: null },
@@ -3394,7 +3425,10 @@ export class CommerceService {
     // written before quote create/update checked the tenant can still hold a
     // foreign (or since deleted) contact; it must not become an Invoice bound
     // to it. Same 404 as invoice create, and nothing is written.
-    await this.assertContactInBusiness(quote.contactId, input.businessId);
+    // W3-D64-COMMERCE-CREATE (D-64, D-88): nor become one for a member who
+    // cannot open that contact (the invoice answers it, projected).
+    const memberClause = await this.memberContactClause(input.businessId, input.actorUserId);
+    await this.assertContactInBusiness(quote.contactId, input.businessId, memberClause);
     // V1-53 review (SEC-V53-3): so is a stored line's product (404, nothing written).
     await this.assertStoredLineProductsInBusiness(quote.items, input.businessId);
 
@@ -4686,6 +4720,12 @@ export class CommerceService {
     discountValue?: number | null;
     notes?: string | null;
     status?: PatchableInvoiceStatus;
+    /**
+     * W3-D64-COMMERCE-CREATE (D-88): the member a KEY command runs for, whose
+     * CRM view judges a new contactId (D-64). KEY's status changes stay KEY's
+     * (`actorId` omitted). Over HTTP the acting member is `actorId` itself.
+     */
+    actorUserId?: string;
   }, actorId?: string) {
     // R0-CMF1 review SEC-CMF1-1: the DTO's @IsIn does not protect this path.
     // KEY's commerce_update_invoice calls this with the model's raw
@@ -4747,8 +4787,16 @@ export class CommerceService {
     // contact (email, phone, notes, every field). Resolve it inside the
     // caller's tenant first; a foreign, deleted or unknown id answers like
     // a missing one, and nothing is written.
+    // W3-D64-COMMERCE-CREATE (D-64; review CR-D6-1 restored): a new contact
+    // must be one the editing member may open. The stored one is not
+    // re-judged (review CR-D6-2, as updateQuote): the web edit flows send it
+    // back, and the same PATCH without contactId is allowed.
+    const memberClause =
+      typeof input.contactId !== 'string' || input.contactId === invoice.contactId
+        ? undefined
+        : await this.memberContactClause(input.businessId, input.actorUserId ?? actorId);
     const contactId =
-      input.contactId !== undefined ? await this.assertContactInBusiness(input.contactId, input.businessId) : undefined;
+      input.contactId !== undefined ? await this.assertContactInBusiness(input.contactId, input.businessId, memberClause) : undefined;
     // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
     const currency = input.currency !== undefined ? await this.documentCurrency(input.businessId, input.currency) : undefined;
 

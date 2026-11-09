@@ -116,6 +116,21 @@ import {
 } from '../key-autonomy/action-boundary/key-action-boundary.service';
 import { canonicalJson } from '../key-autonomy/action-boundary/action-envelope';
 
+/**
+ * W3-D64-COMMERCE-CREATE review (SEC-W3D64-3, CR-D64C-2; owner rulings D-64, D-88): what a
+ * dispatcher call carries beside the action boundary's ActionContext.
+ *
+ * `onBehalfOfUserId` is the member a surface with no established principal runs this call for,
+ * as the caller knows it: an approved proposal's executor (PROPOSAL), the member whose KEY-cortex
+ * turn called a bridged flow tool (CORTEX_BRIDGE), the member whose call ran an
+ * execute_custom_logic snippet (CUSTOM_LOGIC). It is never a principal and grants nothing: the
+ * action boundary never reads it (an inner CUSTOM_LOGIC call stays requested by nobody), and the
+ * dispatcher reads it only in contactBindMember, to judge the contact a KEY commerce write binds
+ * by that member's CRM view (D-64). A member's view can only narrow what the OWNER's view, the
+ * no-member answer, would bind, so a stale or unauthenticated id here refuses, never widens.
+ */
+export type KeyDispatchAction = ActionContext & { onBehalfOfUserId?: string | null };
+
 
 export interface FlowAttachment {
   type: 'image' | 'document' | 'audio' | 'spreadsheet';
@@ -3180,7 +3195,7 @@ ${triage.standingContext}`;
     toolName: string,
     args: Record<string, any>,
     planContext?: { planId: string; planStepId: string },
-    action?: ActionContext,
+    action?: KeyDispatchAction,
   ): Promise<any> {
     const result = await this.executeTool(businessId, toolName, args, `direct_${toolName}`, planContext, action);
     if (!result.success) {
@@ -3211,7 +3226,7 @@ ${triage.standingContext}`;
      * when the confirmation returns.
      */
     planContext?: { planId: string; planStepId: string; role?: string; actorUserId?: string },
-    action?: ActionContext,
+    action?: KeyDispatchAction,
   ): Promise<FlowToolResult> {
     const id = toolCallId ?? `manual_${toolName}`;
     const actorUserId = planContext?.actorUserId;
@@ -3320,7 +3335,7 @@ ${triage.standingContext}`;
     businessId: string,
     toolName: string,
     args: Record<string, any>,
-    action?: ActionContext,
+    action?: KeyDispatchAction,
   ): Promise<unknown> {
     return this.executeToolAction(businessId, toolName, args, action);
   }
@@ -3386,6 +3401,31 @@ ${triage.standingContext}`;
     const access = await resolveCrmAccess(this.prisma, businessId, userId);
     const clause = visibilityClause(access, userId) as Prisma.ContactWhereInput | null;
     return clause ? { userId, access, clause } : null;
+  }
+
+  /**
+   * W3-D64-COMMERCE-CREATE review (SEC-W3D64-1, SEC-W3D64-3, CR-D64C-2; owner rulings D-64, D-88,
+   * D-73). The member the command runs for, whose CRM view judges the contact a KEY commerce write
+   * binds (CommerceService.memberContactClause): KEY acts as that member (D-88). In order:
+   *   - the principal the surface established (a member's chat turn, PLAN_HTTP, GRAPH_ACTION);
+   *   - the member a surface with no principal runs the call for (KeyDispatchAction.onBehalfOfUserId:
+   *     an approved proposal's executor, a KEY-cortex turn's member, an execute_custom_logic snippet's
+   *     caller);
+   *   - on the plan queue, the stored plan's member (D-73: a KEY plan always runs as its member). The
+   *     queue dispatches with no principal, and a plan with no member is refused these tools before
+   *     dispatch (noMemberToolRefusal), so every PLAN_QUEUE run that reaches a bind is a member's
+   *     plan; the plan id is the one ActionDispatcher hands the dispatcher, read in this business.
+   * Undefined when none applies (a run with no member: an inbound conversation, a plan id that names
+   * no plan of this business): the OWNER's view (D-88). Never a value from the tool's arguments.
+   */
+  private async contactBindMember(businessId: string, action?: KeyDispatchAction): Promise<string | undefined> {
+    if (action?.principalUserId) return action.principalUserId;
+    if (action?.onBehalfOfUserId) return action.onBehalfOfUserId;
+    if (action?.surface === 'PLAN_QUEUE' && action.planId) {
+      const plan = await this.prisma.client.aiPlan.findFirst({ where: { id: action.planId, businessId }, select: { userId: true } });
+      return plan?.userId ?? undefined;
+    }
+    return undefined;
   }
 
   /**
@@ -3525,7 +3565,7 @@ ${triage.standingContext}`;
     // KF-EXEC-ACTION-001: what the calling surface knows about the action.
     // Read only by a capability the action boundary has adopted. A surface
     // that passes nothing arrives there undeclared and is refused.
-    action?: ActionContext,
+    action?: KeyDispatchAction,
   ): Promise<any> {
     // Bridged MCP tools route to the allowlisted remote server.
     if (isMcpToolName(toolName)) {
@@ -4104,6 +4144,10 @@ ${triage.standingContext}`;
         const items = args.items ?? [];
         // V1-43 (D-15): numbered by CommerceService's allocator, the business's
         // one sequence. INV-<count+1> skipped soft-deleted rows and collided.
+        // W3-D64-COMMERCE-CREATE (D-88): KEY acts as the member the command runs for, so the
+        // contact must be one that member may open (D-64); no member: the OWNER's view. Review
+        // SEC-W3D64-1/-3: that member on every surface that runs for one (contactBindMember).
+        const bindMember = await this.contactBindMember(businessId, action);
         const invoice = await this.getCommerce().createInvoice({
           businessId,
           contactId: args.contactId,
@@ -4115,6 +4159,7 @@ ${triage.standingContext}`;
           currency: args.currency ?? 'TTD',
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           notes: args.notes ?? undefined,
+          actorUserId: bindMember,
         });
         // V1-21d (SEC3-ST-2): the write projection, not createInvoice's row with the whole Contact
         return { invoice: toKeyInvoiceResult(businessId, invoice), id: invoice.id, invoiceNumber: invoice.invoiceNumber };
@@ -4145,6 +4190,8 @@ ${triage.standingContext}`;
         await this.contactWithinBusiness(businessId, args.contactId);
         const items = args.items ?? [];
         // V1-43 (D-15): numbered by CommerceService's allocator, as commerce_create_invoice.
+        // W3-D64-COMMERCE-CREATE (D-88): as commerce_create_invoice, for the member the command runs for.
+        const bindMember = await this.contactBindMember(businessId, action);
         const quote = await this.getCommerce().createQuote({
           businessId,
           contactId: args.contactId,
@@ -4155,6 +4202,7 @@ ${triage.standingContext}`;
           })),
           currency: args.currency ?? 'TTD',
           expiryDate: args.expiryDate ? new Date(args.expiryDate) : undefined,
+          actorUserId: bindMember,
         });
         // V1-21d (SEC3-ST-2): the write projection, as POST .../quotes answers (toQuoteWriteResponse)
         return { quote: toKeyQuoteResult(businessId, quote), id: quote.id, quoteNumber: quote.quoteNumber };
@@ -6635,9 +6683,14 @@ ${triage.standingContext}`;
         return { updated: (result as { count?: number }).count ?? (Array.isArray(result) ? result.length : 0) };
       }
       case 'commerce_convert_quote': {
+        // W3-D64-COMMERCE-CREATE (D-88): converted for the member the command runs for, so the
+        // quote's contact must be one that member may open (D-64); no member: the OWNER's view.
+        // Review SEC-W3D64-1/-3: that member on every surface that runs for one (contactBindMember).
+        const bindMember = await this.contactBindMember(businessId, action);
         const invoice = await this.getCommerce().convertQuoteToInvoice({
           quoteId: args.quoteId,
           businessId,
+          actorUserId: bindMember,
         });
         return { invoiceId: (invoice as { id: string }).id };
       }
@@ -6650,11 +6703,16 @@ ${triage.standingContext}`;
           const refusal = await this.operationsScopeRefusal(bizId, name, action);
           if (refusal) throw new Error(refusal);
         };
+        // W3-D64-COMMERCE-CREATE review (SEC-W3D64-3b; D-64, D-88): and a contact an inner commerce
+        // write binds is judged by that same member's CRM view. The member rides as onBehalfOfUserId,
+        // never as the inner call's principal: the action boundary keeps an inner call requested by
+        // nobody (KF-EXEC-ACTION-001), and no other check reads it.
+        const onBehalfOfUserId = (await this.contactBindMember(businessId, action)) ?? null;
         const result = await this.getCodeExecutor().execute({
           businessId,
           code: args.code,
           inputs: args.inputs,
-          innerToolExecutor: (bizId, name, toolArgs) => withinMemberScope(bizId, name).then(() => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC' })),
+          innerToolExecutor: (bizId, name, toolArgs) => withinMemberScope(bizId, name).then(() => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC', onBehalfOfUserId })),
         });
         return result;
       }
@@ -6823,12 +6881,17 @@ ${triage.standingContext}`;
 
       // === COMMERCE UPDATES ===
       case 'commerce_update_invoice': {
+        // W3-D64-COMMERCE-CREATE (D-88): the member the command runs for judges any new contact
+        // (D-64); a status change stays KEY's (no actorId, R0-CMF1). This tool forwards no contact,
+        // so KEY's invoice edit binds none and the stored one is not re-judged (CR-D6-2).
+        const bindMember = await this.contactBindMember(businessId, action);
         const invoice = await this.getCommerce().updateInvoice({
           invoiceId: args.invoiceId,
           businessId,
           status: args.status,
           dueDate: args.dueDate ? new Date(args.dueDate) : undefined,
           notes: args.notes ?? undefined,
+          actorUserId: bindMember,
         });
         return { id: invoice.id, status: invoice.status };
       }
@@ -7861,7 +7924,7 @@ ${triage.standingContext}`;
     args: Record<string, any>,
     planId?: string,
     planStepId?: string,
-    action?: ActionContext,
+    action?: KeyDispatchAction,
   ): Promise<FlowToolResult> {
     const planContext = planId && planStepId ? { planId, planStepId } : undefined;
     return this.executeTool(businessId, toolName, args, undefined, planContext, action);

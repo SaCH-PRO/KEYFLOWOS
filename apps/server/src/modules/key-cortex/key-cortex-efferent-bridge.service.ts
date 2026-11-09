@@ -143,7 +143,13 @@ export class KeyCortexEfferentBridgeService implements OnModuleInit {
         // KF-EXEC-ACTION-001: `ctx.userId` is optional and set by callers
         // that did not authenticate anyone, so it is not presented as a
         // principal. The bridge has a business and nothing else.
-        { surface: 'CORTEX_BRIDGE' },
+        //
+        // W3-D64-COMMERCE-CREATE review (CR-D64C-2; D-64, D-88): it rides
+        // beside the call instead, read only to judge the contact a KEY
+        // commerce write binds by that member's CRM view. That can only
+        // narrow the bind (an id that is no member of the business is
+        // refused), never widen it, so an unauthenticated id grants nothing.
+        ctx.userId ? { surface: 'CORTEX_BRIDGE', onBehalfOfUserId: ctx.userId } : { surface: 'CORTEX_BRIDGE' },
       );
       return { success: true, data: result as KeyCortexToolResult['data'] };
     } catch (err: unknown) {

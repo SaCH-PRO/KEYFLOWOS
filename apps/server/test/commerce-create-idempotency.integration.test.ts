@@ -50,7 +50,8 @@
  *   H-09 RED-BEFORE V1-45b review SEC-V45b-2: the invoice create body (a first create and a keyed
  *                   replay) carries the contact projected as every other invoice write projects it
  *                   (id, businessId, firstName, lastName, email), never the whole Contact row; the
- *                   quote create twin already did (control)
+ *                   quote create twin already did (control, the OWNER's); the member's quote twin on
+ *                   the now PRIVATE contact is refused 404 (D-64, W3-D64-COMMERCE-CREATE)
  *   H-10 RED-BEFORE W3-V1-45c-EVENT-REPLAY (V1-45b review SEC-V45b-1 / CR-V45b-1, D-15): with the
  *                   production BusinessEventInterceptor installed globally, a keyed replay of POST
  *                   invoices / POST quotes, and the losers of a 3-way concurrent burst, write no second
@@ -876,7 +877,7 @@ describe('V1-45b create idempotency — the HTTP door (Idempotency-Key header, D
   // stands now (`include: { contact: true }`), and the invoice route handed it
   // back unprojected, so a revenue:write member with no CRM scope read a
   // PRIVATE contact's internal notes, phone, owner and visibility.
-  it('H-09 RED-BEFORE (SEC-V45b-2): the invoice create body, first and replayed, carries only the projected contact; the quote create twin is the control', async () => {
+  it('H-09 RED-BEFORE (SEC-V45b-2, D-64): the invoice create body, first and replayed, carries only the projected contact; the quote create twin is the control, the OWNER first and replayed, and the member who cannot open the now PRIVATE contact is refused 404', async () => {
     const projected = { id: ID.contactHP, businessId: ID.bizH, firstName: 'V45A', lastName: 'Projected', email: `${P}contactHP@test.local` };
     const body = httpInvoiceBody(ID.contactHP, { notes: 'v45a h-09' });
     const first = await postInvoice(ID.bizH, body, { key: HKEY.projection, user: ID.member });
@@ -905,11 +906,26 @@ describe('V1-45b create idempotency — the HTTP door (Idempotency-Key header, D
     expect(read.status, JSON.stringify(read.body)).toBe(200);
     expect(Object.keys(replay.body.contact)).toEqual(expect.arrayContaining(Object.keys(read.body.contact)));
 
-    // Control: the quote create twin already projects, first and replayed.
+    // W3-D64-COMMERCE-CREATE (owner ruling D-64): quote create refuses (404) a
+    // contact the acting member cannot open, so the member's quote twin on the
+    // now PRIVATE contact (it answered 201) is refused, keyed and repeated,
+    // and writes no quote and no key slot.
     const quoteBody = httpQuoteBody(ID.contactHP, { notes: 'v45a h-09' });
-    const quote = await postQuote(ID.bizH, quoteBody, { key: HKEY.projectionQuote, user: ID.member });
+    const quotesBefore = await db.quote.count({ where: { businessId: ID.bizH } });
+    for (const attempt of ['first', 'repeated']) {
+      const refused = await postQuote(ID.bizH, quoteBody, { key: HKEY.projectionQuote, user: ID.member });
+      expect(refused.status, `${attempt}: ${JSON.stringify(refused.body)}`).toBe(404);
+      expect(refused.body.message).toBe('Contact not found');
+      expect(JSON.stringify(refused.body)).not.toContain('secret internal note');
+    }
+    expect(await db.quote.count({ where: { businessId: ID.bizH } })).toBe(quotesBefore);
+    const slot = await db.idempotencyKey.findFirst({ where: { businessId: ID.bizH, idempotencyKey: { endsWith: HKEY.projectionQuote } } });
+    expect(slot).toBeNull();
+
+    // Control: the quote create twin projects, first and replayed, for a member who may open the contact (the OWNER).
+    const quote = await postQuote(ID.bizH, quoteBody, { key: HKEY.projectionQuote, user: ID.owner });
     expect(quote.status, JSON.stringify(quote.body)).toBe(201);
-    const quoteReplay = await postQuote(ID.bizH, quoteBody, { key: HKEY.projectionQuote, user: ID.member });
+    const quoteReplay = await postQuote(ID.bizH, quoteBody, { key: HKEY.projectionQuote, user: ID.owner });
     expect(quoteReplay.body.id).toBe(quote.body.id);
     for (const res of [quote, quoteReplay]) {
       expect(res.body.contact).toEqual(projected);
