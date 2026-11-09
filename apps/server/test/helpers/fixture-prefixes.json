@@ -748,6 +748,11 @@
       "packet": "V1-89 (W3-D17b-REVIEW-SOLICIT-DEDUPE)"
     },
     {
+      "prefix": "v92f_",
+      "owner": "apps/server/test/connect-sync-actor.integration.test.ts",
+      "packet": "V1-92 (W6-CONNECT-TAG-MERGE)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
