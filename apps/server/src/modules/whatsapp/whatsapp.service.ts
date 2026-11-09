@@ -466,20 +466,27 @@ export class WhatsAppService {
       // write runs on this transaction, so it lands with the config or not at
       // all, and it records the sending number only, never the phoneNumberId
       // (4-D1). No row is created: none already reads as not connected.
+      // Review SEC-WAH-1/CR-PR196-3: the reset runs after the config UPDATE,
+      // so this transaction takes the business row before the status row, as
+      // WhatsAppConnector's disconnect and its recording of a passed check do
+      // (they lock the business row first); the opposite order could deadlock
+      // with them. The connector also reads a check as verified only for the
+      // config fingerprint it checked, so a check in flight across this save
+      // never vouches for the new config.
       const same = (a: unknown, b: unknown) => (plain(a) || undefined) === (plain(b) || undefined);
       const identityChanged = (['provider', 'phoneNumberId', 'fromNumber', ...SENSITIVE_FIELDS] as const).some(
         (field) => !same(next[field], stored[field]),
       );
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: { ...meta, whatsapp: encryptConfig(next) } },
+      });
       if (identityChanged) {
         await tx.connectorStatus.updateMany({
           where: { businessId, connectorType: 'whatsapp' },
           data: { status: 'disconnected', connectedAt: null, connectedAccount: next.fromNumber || null },
         });
       }
-      await tx.business.update({
-        where: { id: businessId },
-        data: { metaData: { ...meta, whatsapp: encryptConfig(next) } },
-      });
     });
   }
 
