@@ -121,4 +121,11 @@ describe('SystemEmailService.sendTransactional logs no recipient address (9B-D2,
       html: '<p>Hi</p>',
     });
   });
+
+  // Review finding SE-3: the sink no longer logs the recipient, but two
+  // callers log it themselves right after a successful sendTransactional. Both
+  // files are outside this packet's write set (system-email.service.ts,
+  // sendTransactional logging only), so the fix needs a follow-up packet.
+  it.todo('[9B-D2] OPEN (outside write set): FinancialBriefingScheduler logs no owner address after the Monday briefing send (apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts:263, `Email sent to ${owner.email}`)');
+  it.todo('[9B-D2] OPEN (outside write set): AccountantExportEmailService logs no recipient after the export send (apps/server/src/modules/finance/accountant-export-email.service.ts:102-104, `Sent accountant export to ${to}`)');
 });

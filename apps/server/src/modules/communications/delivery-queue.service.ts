@@ -835,9 +835,26 @@ export class DeliveryQueueService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
-  /** True when EXTFX-001 bound this delivery to a platform (Resend) send. */
-  private isBoundToPlatformSend(delivery: { effectSnapshot?: unknown; providerIdempotencyKey?: string | null }): boolean {
-    return Boolean(delivery.effectSnapshot || delivery.providerIdempotencyKey);
+  /**
+   * True when this delivery has platform (Resend) send history: EXTFX-001 bound
+   * it (snapshot, fingerprint or idempotency key), or the Resend path recorded
+   * a provider outcome on it. Only the Resend path writes providerOutcome, and
+   * markResendBindingAmbiguous (LEGACY_RESEND_OUTCOME_AMBIGUOUS,
+   * PARTIAL_EFFECT_BINDING) leaves OUTCOME_UNKNOWN on rows it never bound: an
+   * earlier platform send of those may have landed too.
+   */
+  private isBoundToPlatformSend(delivery: {
+    effectSnapshot?: unknown;
+    effectFingerprint?: string | null;
+    providerIdempotencyKey?: string | null;
+    providerOutcome?: string | null;
+  }): boolean {
+    return Boolean(
+      delivery.effectSnapshot ||
+        delivery.effectFingerprint ||
+        delivery.providerIdempotencyKey ||
+        delivery.providerOutcome,
+    );
   }
 
   private async blockUnresolvedPlatformSend(delivery: ResendDeliveryRuntime): Promise<void> {

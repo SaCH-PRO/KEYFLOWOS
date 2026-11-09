@@ -16,9 +16,11 @@
  * same "correct in isolation" failure this codebase keeps producing.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { ServiceUnavailableException } from '@nestjs/common';
 import { AdapterRegistryService } from './adapter-registry.service';
 import { ResendEmailAdapter } from './resend-email-adapter';
-import { SystemEmailSendError } from '../../notifications/system-email.service';
+import { SystemEmailSendError, SystemEmailService } from '../../notifications/system-email.service';
+import { AiMessageSenderService } from '../../ai/ai-message-sender.service';
 
 const registry = () => new AdapterRegistryService();
 
@@ -236,11 +238,36 @@ describe('D-82: business email never relays through the platform sender', () => 
     expect(r.resolveEmailFor({ provider: 'EMAIL', token: 'ya29.token' })?.provider).toBe('GOOGLE');
   });
 
-  // Outside this packet's write set (apps/server/src/modules/ai/): the AI
-  // message sender falls back to SystemEmailService.sendTransactional, the
-  // platform sender, when Gmail fails (ai-message-sender.service.ts:101-123,
-  // `// Fallback to Resend (system email)`), sending business email to the
-  // contact from the platform address. D-82 forbids it; the fix belongs to a
-  // packet that owns modules/ai.
-  it.todo('[D-82] OPEN (outside write set): AiMessageSenderService email to a contact fails visibly without Gmail instead of relaying through SystemEmailService (apps/server/src/modules/ai/ai-message-sender.service.ts:101-123)');
+  // Review repair SE-1: the AI message sender (the 1:1 email path behind
+  // communications drafts/:id/send, the intake send_reply action and
+  // CommunicationsService.sendMessage) fell back to
+  // SystemEmailService.sendTransactional, the platform sender, when Gmail
+  // failed. It no longer does; the full cases are in
+  // apps/server/src/modules/ai/ai-message-sender.service.spec.ts.
+  it('[D-82] RED-BEFORE: AiMessageSenderService email to a contact fails visibly without Gmail instead of relaying through SystemEmailService', async () => {
+    const platformSend = vi.spyOn(SystemEmailService.prototype, 'sendTransactional').mockResolvedValue({ id: 'platform_relay_1' });
+    const gmail = {
+      sendEmail: vi.fn(async () => {
+        throw new ServiceUnavailableException({ code: 'provider_not_configured', service: 'gmail', message: 'Gmail not connected' });
+      }),
+    };
+    const client = {
+      contact: { findFirst: vi.fn(async () => ({ id: 'c1', email: 'customer@example.test', firstName: null, lastName: null, phone: null, whatsappNumber: null, preferredChannel: null })) },
+    };
+    const sender = new AiMessageSenderService(
+      { client } as never,
+      { emit: vi.fn() } as never,
+      gmail as never,
+      undefined,
+      { recordContactEvent: vi.fn(async () => undefined) } as never,
+    );
+    try {
+      const result = await sender.sendMessage({ businessId: 'biz_a', contactId: 'c1', channel: 'email', body: 'Hello' });
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('EMAIL_ACCOUNT_NOT_CONNECTED');
+      expect(platformSend).not.toHaveBeenCalled();
+    } finally {
+      platformSend.mockRestore();
+    }
+  });
 });

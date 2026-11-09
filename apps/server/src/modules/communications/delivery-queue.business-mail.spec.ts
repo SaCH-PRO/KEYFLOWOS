@@ -123,6 +123,22 @@ function boundToPlatformSend(connection: Row, overrides: Row = {}): Row {
   });
 }
 
+/**
+ * A platform send the queue marked reconciliation-required without binding it,
+ * as markResendBindingAmbiguous (LEGACY_RESEND_OUTCOME_AMBIGUOUS) leaves it:
+ * providerOutcome OUTCOME_UNKNOWN, no snapshot, fingerprint or idempotency key.
+ */
+function legacyAmbiguous(connection: Row, overrides: Row = {}): Row {
+  return delivery(connection, {
+    status: 'Failed',
+    retryCount: 1,
+    providerOutcome: 'OUTCOME_UNKNOWN',
+    errorCode: 'PROVIDER_OUTCOME_UNKNOWN_RECONCILIATION_REQUIRED',
+    errorMessage: 'Resend effect binding is ambiguous: LEGACY_RESEND_OUTCOME_AMBIGUOUS',
+    ...overrides,
+  });
+}
+
 function harness(row: Row) {
   const events: Row[] = [];
   const apply = (data: Row) => {
@@ -267,6 +283,78 @@ describe('the outbound email queue never relays business email through the platf
     await expect(h.service.retry('biz_d82', h.row.id)).rejects.toBeInstanceOf(BadRequestException);
     expect(h.client.outboundDelivery.update).not.toHaveBeenCalled();
     expect(h.row.status).toBe('Failed');
+  });
+
+  // Review repair SE-2 / CR-SE-1: a platform send the queue marked
+  // reconciliation-required WITHOUT binding it. markResendBindingAmbiguous
+  // (LEGACY_RESEND_OUTCOME_AMBIGUOUS, PARTIAL_EFFECT_BINDING) writes
+  // providerOutcome OUTCOME_UNKNOWN and no snapshot or idempotency key; only
+  // the Resend path writes providerOutcome, so that is platform-send history
+  // too. Before the repair the packet re-queued these rows (the base refused
+  // them), the no-Gmail failure overwrote the reconciliation code, and a later
+  // retry with Gmail connected sent the email a second time.
+  for (const [label, connection] of [
+    ['no Gmail', { id: 'connection_d82', provider: 'EMAIL', token: null }],
+    ['Gmail connected since', { id: 'connection_d82', provider: 'GOOGLE', token: 'ya29.test-token' }],
+  ] as const) {
+    it(`[D-82] RED-BEFORE: ${label}: manual retry of an unbound reconciliation-required platform send is refused (400), its marker kept`, async () => {
+      const h = harness(legacyAmbiguous({ ...connection }));
+
+      await expect(h.service.retry('biz_d82', h.row.id)).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(h.client.outboundDelivery.update).not.toHaveBeenCalled();
+      expect(h.row.status).toBe('Failed');
+      expect(h.row.errorCode).toBe('PROVIDER_OUTCOME_UNKNOWN_RECONCILIATION_REQUIRED');
+      expect(h.row.providerOutcome).toBe('OUTCOME_UNKNOWN');
+    });
+
+    it(`[D-82] RED-BEFORE: ${label}: retryAllFailed counts an unbound reconciliation-required platform send as blocked`, async () => {
+      const h = harness(legacyAmbiguous({ ...connection }));
+      h.client.outboundDelivery.findMany.mockImplementation(async () => [{ ...h.row }]);
+
+      const result = await h.service.retryAllFailed('biz_d82', 'content_d82');
+
+      expect(result).toEqual({ retried: 0, blocked: 1 });
+      expect(h.client.outboundDelivery.updateMany).not.toHaveBeenCalled();
+      expect(h.row.status).toBe('Failed');
+      expect(h.row.errorCode).toBe('PROVIDER_OUTCOME_UNKNOWN_RECONCILIATION_REQUIRED');
+    });
+
+    it(`[D-82] RED-BEFORE: ${label}: if such a row is picked up anyway it is sent through neither sender and stays reconciliation-required`, async () => {
+      const h = harness(legacyAmbiguous({ ...connection }, { status: 'Sending' }));
+
+      await (h.service as any).executeDelivery({ ...h.row });
+
+      expect(resendSend).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(h.row.status).toBe('Failed');
+      expect(h.row.errorCode).toBe('PROVIDER_OUTCOME_UNKNOWN_RECONCILIATION_REQUIRED');
+      expect(h.row.providerOutcome).toBe('OUTCOME_UNKNOWN');
+    });
+  }
+
+  it('[D-82] RED-BEFORE: chain: no-Gmail retry, then Gmail connected and retried again: never re-sent', async () => {
+    const h = harness(legacyAmbiguous({ id: 'connection_d82', provider: 'EMAIL', token: null }));
+    await expect(h.service.retry('biz_d82', h.row.id)).rejects.toBeInstanceOf(BadRequestException);
+
+    h.row.destination.connection = { id: 'connection_d82', provider: 'GOOGLE', token: 'ya29.test-token' };
+    await expect(h.service.retry('biz_d82', h.row.id)).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(resendSend).not.toHaveBeenCalled();
+    expect(h.row.errorCode).toBe('PROVIDER_OUTCOME_UNKNOWN_RECONCILIATION_REQUIRED');
+  });
+
+  it('[D-82] a plain Gmail delivery (no platform history) that lost its token still fails as EMAIL_ACCOUNT_NOT_CONNECTED and stays retryable', async () => {
+    const h = harness(delivery({ id: 'connection_d82', provider: 'GOOGLE', token: null }, { retryCount: 1 }));
+
+    await (h.service as any).executeDelivery({ ...h.row });
+    expect(h.row.status).toBe('Failed');
+    expect(h.row.errorCode).toBe('EMAIL_ACCOUNT_NOT_CONNECTED');
+
+    h.row.destination.connection = { id: 'connection_d82', provider: 'GOOGLE', token: 'ya29.test-token' };
+    await h.service.retry('biz_d82', h.row.id);
+    expect(h.row.status).toBe('Queued');
   });
 
   it('[D-82] a pre-D-82 platform send proven failed may be retried; it then goes through Gmail, never the platform sender', async () => {

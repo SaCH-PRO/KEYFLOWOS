@@ -2,9 +2,17 @@ import { Injectable, Logger, Inject, Optional, forwardRef } from '@nestjs/common
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GmailService } from '../commerce/gmail.service';
-import { SystemEmailService } from '../notifications/system-email.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { TimelineService } from '../timeline/timeline.service';
+
+/**
+ * D-82 (2026-11-09): business email to a contact leaves only from the
+ * business's own Gmail. Without it the send fails with this message; it is
+ * never relayed through the platform sender (the platform's own sign-in
+ * address).
+ */
+export const EMAIL_ACCOUNT_NOT_CONNECTED_ERROR =
+  "Gmail is not connected for this business, so this email was not sent. Business email goes out only from the business's own Gmail: connect it in Settings > Connections, then retry.";
 
 export interface SendMessageParams {
   businessId: string;
@@ -20,7 +28,8 @@ export interface SendMessageResult {
   messageId?: string;
   channel: string;
   error?: string;
-  fallback?: string;
+  /** EMAIL_ACCOUNT_NOT_CONNECTED when an email could not go out because the business has no usable Gmail. */
+  errorCode?: string;
 }
 
 @Injectable()
@@ -31,7 +40,6 @@ export class AiMessageSenderService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Optional() @Inject(GmailService) private readonly gmail: GmailService | undefined,
-    @Optional() @Inject(SystemEmailService) private readonly systemEmail: SystemEmailService | undefined,
     @Optional() @Inject(forwardRef(() => WhatsAppService)) private readonly whatsapp: WhatsAppService | undefined,
     @Inject(TimelineService) private readonly timeline: TimelineService,
   ) {}
@@ -77,11 +85,14 @@ export class AiMessageSenderService {
 
     const subject = params.subject ?? 'Message from your business';
 
+    // D-82: the business's own Gmail is the only sender. There is no fallback
+    // to the platform sender (it used to relay through the notifications
+    // module's system email sender, from "Keyflow <EMAIL_FROM_ADDRESS>").
+    if (!this.gmail) {
+      return { success: false, channel: 'email', error: EMAIL_ACCOUNT_NOT_CONNECTED_ERROR, errorCode: 'EMAIL_ACCOUNT_NOT_CONNECTED' };
+    }
+
     try {
-      // Try Gmail first (business-connected account)
-      if (!this.gmail) {
-        throw new Error('Gmail service not available');
-      }
       const result = await this.gmail.sendEmail({
         businessId: params.businessId,
         to,
@@ -98,33 +109,21 @@ export class AiMessageSenderService {
 
       return { success: true, channel: 'email', messageId: result.messageId };
     } catch (gmailErr) {
-      this.logger.warn(`Gmail send failed, trying fallback: ${(gmailErr as Error).message}`);
-
-      // Fallback to Resend (system email)
-      if (this.systemEmail?.isConfigured()) {
-        try {
-          const result = await this.systemEmail!.sendTransactional({
-            to,
-            subject,
-            html: this.wrapHtmlBody(params.body, params.fromName),
-          });
-
-          await this.logCommunication(params.businessId, params.contactId, 'email', 'out', {
-            to,
-            subject,
-            messageId: result.id,
-            body: params.body,
-            source: 'resend_fallback',
-          });
-
-          return { success: true, channel: 'email', messageId: result.id, fallback: 'resend' };
-        } catch (resendErr) {
-          this.logger.error(`Resend fallback also failed: ${(resendErr as Error).message}`);
-        }
+      const raw = gmailErr instanceof Error ? gmailErr.message : String(gmailErr);
+      this.logger.warn(`Gmail send failed for business ${params.businessId}: ${raw}`);
+      if (this.isGmailNotConnected(gmailErr)) {
+        return { success: false, channel: 'email', error: EMAIL_ACCOUNT_NOT_CONNECTED_ERROR, errorCode: 'EMAIL_ACCOUNT_NOT_CONNECTED' };
       }
-
-      return { success: false, channel: 'email', error: (gmailErr as Error).message };
+      return { success: false, channel: 'email', error: raw };
     }
+  }
+
+  /** GmailService's 503 for a business with no usable mailbox (gmail.service.ts gmailNotConfigured). */
+  private isGmailNotConnected(err: unknown): boolean {
+    const response = (err as { getResponse?: () => unknown })?.getResponse?.();
+    if (!response || typeof response !== 'object') return false;
+    const r = response as { code?: unknown; service?: unknown; message?: unknown };
+    return r.code === 'provider_not_configured' && r.service === 'gmail' && r.message === 'Gmail not connected';
   }
 
   private async sendWhatsApp(
