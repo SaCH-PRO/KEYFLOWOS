@@ -197,14 +197,27 @@
  *     longer uses), so a member with crm read and revenue 'none' was served a
  *     money copy's amount. A copy that carries money (a sales_revenue type, or
  *     data with an amount field) is now COMMERCE; any other copy stays CONTACT.
- *     V55-13b it.todo: copies already stored as CONTACT need a backfill or the
- *     visibility rule (outside the write set).
+ *     V55-13b it.todo then: copies already stored as CONTACT need a backfill
+ *     or the visibility rule (outside the write set; closed by
+ *     W5-FEED-CATEGORIES, below).
  *   V55-14 (CR-FCC-1) ?contactId= still returns the one row a manual payment
- *     and a booking create keep; V55-14b it.todo: those rows carry no category
- *     and name the contact by contactId only, so ?category= and
+ *     and a booking create keep; V55-14b it.todo then: those rows carry no
+ *     category and name the contact by contactId only, so ?category= and
  *     ?entityType=contact&entityId= no longer find them (the fix is in
  *     revenue-posting.service.ts and activity-event.listener.ts, outside the
- *     write set).
+ *     write set; the category closed by W5-FEED-CATEGORIES, below).
+ *
+ * W5-FEED-CATEGORIES (owner rulings D-90 and D-63, the V1-84 timeline rule;
+ * V55-13b, V55-14b, were it.todo):
+ *   V55-13b (SEC-FCC-1) a stored row whose data carries a money field (the
+ *     V55-13 list: amount, total, subtotal, invoiceTotal, totalPaid,
+ *     paymentAmount, refundAmount, depositAmount) is a revenue row whatever
+ *     its category, so the CRM copies already stored as CONTACT (or with no
+ *     category) are not served to a member with crm read and revenue 'none';
+ *     no data migration, the stored rows are unchanged.
+ *   V55-14b (CR-FCC-1) the FINANCE payment_recorded row is written with
+ *     category PAYMENT and onBookingCreated's 'New booking' with BOOKING, so
+ *     ?category= finds a manual payment's and a booking create's one row.
  *
  * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
  *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
@@ -2202,9 +2215,101 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     ]);
   });
 
-  it.todo(
-    "V55-13b (SEC-FCC-1 residual, outside the write set): a CRM copy already stored with category CONTACT (crm:invoice.payment_recorded:contact rows written before D-90, money copies written before V55-13) is still served, its amount included, to a member with crm read and revenue 'none': closing it needs a backfill of those rows' category (a data migration, which this packet may not add) or canReadActivityRow (timeline-visibility.ts, outside the write set) reading a crm row of a sales_revenue type as money",
-  );
+  // W5-FEED-CATEGORIES (SEC-FCC-1 residual; owner rulings D-90 and D-63, the
+  // V1-84 timeline rule): V55-13 fixed the category of copies written from
+  // then on; the copies already stored keep category CONTACT (or none, before
+  // categories existed) with their amount in data. No data migration:
+  // canReadActivityRow (timeline-visibility.ts) reads a stored row whose data
+  // carries a money field (the field list V55-13 uses) as a revenue row
+  // whatever its category. The rows here are written as those older writers
+  // stored them.
+  it("V55-13b (SEC-FCC-1, D-90 / D-63, W5-FEED-CATEGORIES, was it.todo): a CRM copy already stored with category CONTACT or none whose data carries money (a crm:invoice.payment_recorded:contact row written before D-90, invoice.paid / store_order.paid / storefront booking.created copies written before V55-13) is not served to a member with crm read and revenue 'none' (no amount) on /events, ?category=CONTACT, the day's summary or the legacy feed, and is served to the owner; the stored rows are unchanged (no backfill), and copies with no money field stay served to that member", async () => {
+    const staff = `${P}${RUN}_staffC13b`;
+    const contactId = `${P}${RUN}_cTeamC13b`;
+    await db.user.create({ data: { id: staff, email: `${P}${RUN}_staffC13b@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}${RUN}_mC13b`, userId: staff, businessId: C.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none' } } });
+    await db.contact.create({ data: { id: contactId, businessId: C.biz, firstName: 'K19a', lastName: 'TeamC13b', visibility: 'TEAM', ownerId: C.owner } });
+
+    /** A CRM copy as CrmTimelineService.logEvent stored it: raw event name as title, data as JSON detail. */
+    const stored = (key: string, action: string, category: string | null, data: Record<string, unknown>) => ({
+      id: `${P}${RUN}_c13b_${key}`,
+      businessId: C.biz,
+      module: 'crm',
+      action,
+      entityType: 'contact',
+      entityId: contactId,
+      title: action,
+      detail: JSON.stringify(data),
+      contactId,
+      category,
+      type: action,
+      actorType: 'SYSTEM',
+      data,
+    });
+    const MONEY = [
+      // The pre-D-90 copy of a manual payment's ContactEvent (CommerceService.recordPayment's data).
+      stored('payRec', 'invoice.payment_recorded', 'CONTACT', {
+        invoiceId: SC.invoiceId, amount: 1357.91, method: 'bank_transfer', reference: `${P}${RUN}-c13b`,
+        totalPaid: 1357.91, invoiceTotal: 2468.02, newStatus: 'PARTIALLY_PAID', overPaid: 0, recordedBy: C.owner,
+      }),
+      // Pre-V55-13 copies: mark-paid's invoice.paid (sales_revenue) and a store order's paid copy.
+      stored('paid', 'invoice.paid', 'CONTACT', { invoiceId: SC.invoiceId, total: 6543.21, currency: 'TTD' }),
+      stored('order', 'store_order.paid', 'CONTACT', { orderId: `${P}${RUN}_orderC13b`, total: 98.76, currency: 'TTD' }),
+      // A copy stored before Activity.category existed: no category at all.
+      stored('deposit', 'booking.created', null, { bookingId: `${P}${RUN}_bkC13b`, depositAmount: 24.68, currency: 'TTD' }),
+    ];
+    const PLAIN = [
+      stored('call', 'communication.call', 'CONTACT', { summary: 'K19a C13b call' }),
+      stored('note', 'note.created', null, { body: 'K19a C13b note' }),
+    ];
+    await db.activity.createMany({ data: [...MONEY, ...PLAIN] });
+    const moneyIds = MONEY.map((r) => r.id).sort();
+    const plainIds = PLAIN.map((r) => r.id).sort();
+    const LEAKS = ['1357.91', '2468.02', '6543.21', '98.76', '24.68', '"amount"', '"total"', '"depositAmount"', '"invoiceTotal"', '"totalPaid"'];
+    const expectNoAmount = (served: unknown, where: string) => {
+      const text = JSON.stringify(served);
+      for (const leak of LEAKS) expect(text.includes(leak), `${where} mentions ${leak}`).toBe(false);
+    };
+    const read = async (user: string, query = '') => {
+      const res = await agent().get(`/timeline/businesses/${C.biz}/events?limit=200&contactId=${contactId}${query}`).set(HEADER, user);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return res.body as Row[];
+    };
+    const ids = (rows: Row[]) => rows.map((r) => r.id).sort();
+
+    // crm read, revenue 'none': the copies with no money field only, no amount anywhere.
+    const served = await read(staff);
+    expect(ids(served)).toEqual(plainIds);
+    expectNoAmount(served, '/events');
+    // ?category=CONTACT (the stored category of the money copies) does not reach them either.
+    const contactCategory = await read(staff, '&category=CONTACT');
+    expect(ids(contactCategory)).toEqual([`${P}${RUN}_c13b_call`]);
+    expectNoAmount(contactCategory, '?category=CONTACT');
+
+    // The day's summary and the legacy feed apply the same rule.
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T12:00:00`;
+    const day = await agent().get(`/timeline/businesses/${C.biz}/summary/${today}`).set(HEADER, staff);
+    expect(day.status, JSON.stringify(day.body).slice(0, 300)).toBe(200);
+    const dayOwn = (day.body.events as Row[]).filter((r) => r.contactId === contactId);
+    expect(ids(dayOwn)).toEqual(plainIds);
+    expectNoAmount(dayOwn, "the day's summary");
+    const legacy = await agent().get(`/api/flows/businesses/${C.biz}/activity?limit=200&module=crm`).set(HEADER, staff);
+    expect(legacy.status, JSON.stringify(legacy.body).slice(0, 300)).toBe(200);
+    const legacyOwn = (legacy.body as Row[]).filter((r) => r.contactId === contactId);
+    expect(ids(legacyOwn)).toEqual(plainIds);
+    expectNoAmount(legacyOwn, 'the legacy feed');
+
+    // The owner reads every copy, the amounts included.
+    const owner = await read(C.owner);
+    expect(ids(owner)).toEqual([...moneyIds, ...plainIds].sort());
+    expect(cents((owner.find((r) => r.id === `${P}${RUN}_c13b_payRec`)!.data as any).amount)).toBe(cents(1357.91));
+
+    // No backfill: the stored rows keep the category they were written with.
+    const after = await db.activity.findMany({ where: { id: { in: moneyIds } }, select: { id: true, category: true } });
+    expect(after.map((r: any) => [r.id, r.category]).sort()).toEqual(MONEY.map((r) => [r.id, r.category]).sort());
+  });
 
   // W4-FEED-COPY-COMPLETE review CR-FCC-1 (D-90): the copies D-90 removed were
   // the only rows of a manual payment and of a booking create with a category
@@ -2219,7 +2324,37 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(rows.filter((r) => kind(r) === 'crm:invoice.payment_recorded:contact' || kind(r) === 'crm:booking.created:contact')).toEqual([]);
   });
 
-  it.todo(
-    "V55-14b (CR-FCC-1, outside the write set): ?category= and ?entityType=contact&entityId=<contact> return no row for a manual payment or a booking create since D-90 removed their CRM copies (category CONTACT, entityType contact): the rows that remain carry no category (RevenuePostingService's FINANCE payment_recorded row, entityType payment; ActivityEventListener's 'New booking'), where V55-12a kept CONTACT on 'New contact'. Closing it needs category PAYMENT on the FINANCE row (revenue-posting.service.ts) and BOOKING on onBookingCreated's row (activity-event.listener.ts), outside this packet's write set",
-  );
+  // W5-FEED-CATEGORIES (CR-FCC-1; D-90): the one row a manual payment keeps
+  // (RevenuePostingService's FINANCE payment_recorded row) and the one a booking
+  // create keeps (ActivityEventListener.onBookingCreated's 'New booking') are
+  // written with a category, PAYMENT and BOOKING, so ?category= finds them as
+  // it found the CRM copies D-90 removed (category CONTACT), where V55-12a kept
+  // CONTACT on 'New contact'. Their entity stays the payment / the booking;
+  // they name the contact by contactId (?contactId=, V55-14).
+  it("V55-14b (CR-FCC-1, D-90, W5-FEED-CATEGORIES, was it.todo): each manual payment's FINANCE payment_recorded row is stored with category PAYMENT and the booking create's 'New booking' row with category BOOKING, so ?category=PAYMENT&contactId=<contact> returns both payments' FINANCE rows and ?category=BOOKING&contactId=<contact> the 'New booking' row; their entity stays the payment / the booking", async () => {
+    // As written (fresh read of the stored rows): the two manual payments' rows,
+    // and every other FINANCE payment_recorded row of C (V55-13's mark-paid
+    // posts one through the same writer) is PAYMENT too.
+    const finance = await db.activity.findMany({ where: { businessId: C.biz, module: 'FINANCE', action: 'payment_recorded', entityType: 'payment' }, select: { entityId: true, category: true, contactId: true } });
+    expect(finance.filter((r: any) => r.entityId === SC.partialId || r.entityId === SC.fullId).map((r: any) => [r.entityId, r.category, r.contactId]).sort()).toEqual(
+      [[SC.partialId, 'PAYMENT', SC.contactId], [SC.fullId, 'PAYMENT', SC.contactId]].sort(),
+    );
+    expect(finance.length, 'FINANCE payment_recorded rows of C').toBeGreaterThanOrEqual(2);
+    expect(finance.filter((r: any) => r.category !== 'PAYMENT')).toEqual([]);
+    const booked = await db.activity.findMany({ where: { businessId: C.biz, module: 'bookings', action: 'created', entityId: SC.bookingId }, select: { title: true, category: true, contactId: true } });
+    expect(booked.map((r: any) => [r.title, r.category, r.contactId])).toEqual([['New booking', 'BOOKING', SC.contactId]]);
+
+    const read = async (query: string) => {
+      const res = await agent().get(`/timeline/businesses/${C.biz}/events?limit=200&contactId=${SC.contactId}&${query}`).set(HEADER, C.owner);
+      expect(res.status, `${query}: ${JSON.stringify(res.body)}`).toBe(200);
+      return res.body as Row[];
+    };
+    const payments = await read('category=PAYMENT');
+    expect(payments.filter((r) => kind(r) === 'FINANCE:payment_recorded:payment').map((r) => r.entityId).sort()).toEqual([SC.partialId, SC.fullId].sort());
+    const bookingRows = await read('category=BOOKING');
+    expect(bookingRows.filter((r) => kind(r) === 'bookings:created:booking').map((r) => [r.entityId, r.title])).toEqual([[SC.bookingId, 'New booking']]);
+    // By entity: the payment's and the booking's own rows.
+    expect((await read('entityType=payment')).filter((r) => kind(r) === 'FINANCE:payment_recorded:payment').map((r) => r.entityId).sort()).toEqual([SC.partialId, SC.fullId].sort());
+    expect((await read(`entityType=booking&entityId=${SC.bookingId}`)).filter((r) => kind(r) === 'bookings:created:booking').map((r) => r.title)).toEqual(['New booking']);
+  });
 });
