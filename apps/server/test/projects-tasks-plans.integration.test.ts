@@ -238,7 +238,7 @@ beforeAll(async () => {
     [ID.owner, 'USER'], [ID.admin, 'USER'], [ID.staffRead, 'USER'], [ID.staffWrite, 'USER'],
     [ID.ownerB, 'USER'], [ID.superA, 'SUPER_ADMIN'],
   ] as const) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role } });
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V88C Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V88C Biz B', ownerId: ID.ownerB } });

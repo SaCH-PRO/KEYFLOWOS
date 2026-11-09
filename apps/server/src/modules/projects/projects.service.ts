@@ -1,9 +1,39 @@
-import { Inject, Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { isSystemActor } from '../../core/auth/system-actor';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { TimelineService } from '../timeline/timeline.service';
 import { EvidenceService } from '../evidence/evidence.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
+
+/** ProjectTaskStatus in schema.prisma: the Kanban columns. DONE is the completed column. */
+const PROJECT_TASK_STATUSES: readonly string[] = ['TODO', 'IN_PROGRESS', 'REVIEW', 'DONE', 'BLOCKED'];
+
+function assertTaskStatus(status: unknown): asserts status is string {
+  if (typeof status !== 'string' || !PROJECT_TASK_STATUSES.includes(status)) {
+    throw new BadRequestException(`status must be one of ${PROJECT_TASK_STATUSES.join(', ')}`);
+  }
+}
+
+function assertPosition(position: unknown): void {
+  if (position !== undefined && !Number.isInteger(position)) {
+    throw new BadRequestException('position must be an integer');
+  }
+}
+
+/** Who besides a member holding projects:write approves or deletes a project plan (D-85). */
+const PLAN_GOVERNOR_ROLES: ReadonlySet<string> = new Set(['OWNER', 'ADMIN']);
+
+/** The plan states only the approve door writes (WPD-12): PATCH may not set them. */
+const PLAN_STATUSES_SET_BY_APPROVAL: readonly string[] = ['approved', 'materialized'];
+
+/** The Activity actor type of a write's actor: a member, KEY, or no one (an internal caller). */
+function feedActorType(actorId: string | null | undefined): 'USER' | 'AI' | 'SYSTEM' {
+  if (!actorId) return 'SYSTEM';
+  return isSystemActor(actorId) ? 'AI' : 'USER';
+}
 
 /**
  * The goal a project names, only when it is `businessId`'s (V1-21c review ST-2). The goal include
@@ -174,6 +204,50 @@ export class ProjectsService {
     return result;
   }
 
+  /**
+   * The TaskAssignment type of `assigneeId` when it may be assigned a task of `businessId`
+   * (PR196-PROJECTS-SERVER, WPD-09, D-87): one of the business's booking staff (a StaffMember of
+   * the business, not removed) or a member of the business (a Membership in it). Anything else is
+   * 404 and the caller writes nothing. addTask and updateTask resolved the id with findUnique and no
+   * business, defaulted an unknown id to 'User' and wrote it, so another business's staff member or
+   * user, or any string, became the assignee.
+   *
+   * One exception keeps KEY's projects_create_task working (it files the task to itself,
+   * KEY_SYSTEM_ACTOR_ID): KEY is accepted as the assignee only on a path no person drives (no
+   * actor, or KEY as the actor). Over HTTP the actor is always the member, so a member naming
+   * KEY is refused like any other id.
+   */
+  private async assignableTypeInBusiness(
+    businessId: string,
+    assigneeId: unknown,
+    actorId: string | null | undefined,
+  ): Promise<'StaffMember' | 'User' | 'KEY'> {
+    if (typeof assigneeId !== 'string' || !assigneeId) {
+      throw new BadRequestException('assigneeId must be a non-empty string');
+    }
+    if (isSystemActor(assigneeId) && (!actorId || isSystemActor(actorId))) return 'KEY';
+    const [staff, member] = await Promise.all([
+      this.prisma.client.staffMember.findFirst({ where: { id: assigneeId, businessId, deletedAt: null }, select: { id: true } }),
+      this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId: assigneeId, businessId } },
+        select: { userId: true },
+      }),
+    ]);
+    if (staff) return 'StaffMember';
+    if (member) return 'User';
+    throw new NotFoundException('Assignee not found');
+  }
+
+  /** The evidence gate on completing a task that requires evidence (Phase 2). */
+  private async assertCompletionEvidence(taskId: string, evidenceIds?: string[]) {
+    const check = await this.evidence.checkTaskEvidence('ProjectTask', taskId);
+    if (!check.hasEvidence && (!evidenceIds || evidenceIds.length === 0)) {
+      throw new BadRequestException(
+        `This task requires evidence before completion. Please submit proof (photo, file, note, etc.) and try again.`
+      );
+    }
+  }
+
   async addTask(businessId: string, projectId: string, body: {
     title: string;
     description?: string;
@@ -182,7 +256,7 @@ export class ProjectsService {
     assigneeId?: string;
     estimatedHours?: number;
     trackedHours?: number;
-  }) {
+  }, actorId?: string | null) {
     // V1-21b review 9 TD9-1: the task is the project's, so the project must be this business's.
     // The row was written as { businessId, projectId } with the project never looked up, and
     // relation includes do not filter by business, so another business saw the task in its
@@ -193,6 +267,8 @@ export class ProjectsService {
       select: { id: true },
     });
     if (!project) throw new NotFoundException('Project not found');
+    // D-87: checked before anything is written.
+    const assignableType = body.assigneeId ? await this.assignableTypeInBusiness(businessId, body.assigneeId, actorId) : null;
 
     const maxSort = await this.prisma.client.projectTask.aggregate({
       where: { projectId, businessId, deletedAt: null },
@@ -215,23 +291,15 @@ export class ProjectsService {
         },
       });
 
-      // Phase 3: polymorphic task assignment (atomic)
-      if (body.assigneeId) {
-        let assignableType = 'User';
-        const [user, staff] = await Promise.all([
-          tx.user.findUnique({ where: { id: body.assigneeId }, select: { id: true } }),
-          tx.staffMember.findUnique({ where: { id: body.assigneeId }, select: { id: true } }),
-        ]);
-        if (staff) assignableType = 'StaffMember';
-        else if (user) assignableType = 'User';
-
+      // Phase 3: polymorphic task assignment (atomic), naming the member who made it (WPD-09)
+      if (body.assigneeId && assignableType) {
         await tx.taskAssignment.create({
           data: {
             taskType: 'ProjectTask',
             taskId: created.id,
             assignableType,
             assignableId: body.assigneeId,
-            assignedBy: 'system',
+            assignedBy: actorId ?? 'system',
             reason: 'task_created',
           },
         });
@@ -240,7 +308,7 @@ export class ProjectsService {
       return created;
     });
 
-    this.events.emit('project_task.created', { task, businessId });
+    this.events.emit('project_task.created', { task, businessId, actorId: actorId ?? undefined });
     return task;
   }
 
@@ -255,44 +323,62 @@ export class ProjectsService {
     estimatedHours?: number | null;
     trackedHours?: number;
     evidenceIds?: string[];
-  }) {
+    /** The Kanban column. When given it decides completion: DONE completes, any other reopens. */
+    status?: string;
+    position?: number;
+  }, actorId?: string | null) {
     const existing = await this.prisma.client.projectTask.findFirst({
       where: { id: taskId, businessId },
     });
     if (!existing) throw new NotFoundException('Task not found');
 
+    // PR196-PROJECTS-SERVER (WPD-08): a status change comes through this door, so completion by
+    // column is gated, evented and attributed exactly like completion by the checkbox.
+    let isCompleted = body.isCompleted;
+    if (body.status !== undefined) {
+      assertTaskStatus(body.status);
+      isCompleted = body.status === 'DONE' ? true : existing.isCompleted ? false : undefined;
+    }
+    assertPosition(body.position);
+
+    // WPD-09 / D-87: a new assignee is this business's member or booking staff, checked before
+    // anything is written.
+    const assigneeChanges = body.assigneeId !== undefined && body.assigneeId !== existing.assigneeId;
+    const assignableType = assigneeChanges && body.assigneeId
+      ? await this.assignableTypeInBusiness(businessId, body.assigneeId, actorId)
+      : null;
+
     // Phase 2: Check evidence requirement before marking complete
-    if (body.isCompleted === true && !existing.isCompleted && existing.evidenceRequired) {
-      const check = await this.evidence.checkTaskEvidence('ProjectTask', taskId);
-      if (!check.hasEvidence && (!body.evidenceIds || body.evidenceIds.length === 0)) {
-        throw new BadRequestException(
-          `This task requires evidence before completion. Please submit proof (photo, file, note, etc.) and try again.`
-        );
-      }
+    if (isCompleted === true && !existing.isCompleted && existing.evidenceRequired) {
+      await this.assertCompletionEvidence(taskId, body.evidenceIds);
     }
 
-    const { evidenceIds, ...updateData } = body;
-    const data: any = { ...updateData };
-    if (body.dueDate !== undefined) {
-      data.dueDate = body.dueDate ? new Date(body.dueDate) : null;
-    }
+    // Named fields only. The controller's body is an inline type, which ValidationPipe does not
+    // strip, and spreading it wrote any key it carried: {businessId} or {projectId} moved the task
+    // to another business or project.
+    const data: Record<string, unknown> = {
+      ...(body.title !== undefined && { title: body.title }),
+      ...(body.description !== undefined && { description: body.description }),
+      ...(isCompleted !== undefined && { isCompleted }),
+      ...(body.priority !== undefined && { priority: body.priority }),
+      ...(body.dueDate !== undefined && { dueDate: body.dueDate ? new Date(body.dueDate) : null }),
+      ...(body.sortOrder !== undefined && { sortOrder: body.sortOrder }),
+      ...(body.assigneeId !== undefined && { assigneeId: body.assigneeId }),
+      ...(body.estimatedHours !== undefined && { estimatedHours: body.estimatedHours }),
+      ...(body.trackedHours !== undefined && { trackedHours: body.trackedHours }),
+      ...(body.status !== undefined && { status: body.status }),
+      ...(body.position !== undefined && { position: body.position }),
+    };
     const task = await this.prisma.client.$transaction(async (tx) => {
       const updated = await tx.projectTask.update({
         where: { id: taskId, businessId },
-        data,
+        data: data as Prisma.ProjectTaskUncheckedUpdateInput,
       });
 
-      // Phase 3: update polymorphic assignment when assignee changes (atomic)
-      if (body.assigneeId !== undefined && body.assigneeId !== existing.assigneeId) {
-        if (body.assigneeId) {
-          let assignableType = 'User';
-          const [user, staff] = await Promise.all([
-            tx.user.findUnique({ where: { id: body.assigneeId }, select: { id: true } }),
-            tx.staffMember.findUnique({ where: { id: body.assigneeId }, select: { id: true } }),
-          ]);
-          if (staff) assignableType = 'StaffMember';
-          else if (user) assignableType = 'User';
-
+      // Phase 3: update polymorphic assignment when assignee changes (atomic), naming the member
+      // who made it (WPD-09)
+      if (assigneeChanges) {
+        if (body.assigneeId && assignableType) {
           await tx.taskAssignment.updateMany({
             where: { taskType: 'ProjectTask', taskId: updated.id, unassignedAt: null },
             data: { unassignedAt: new Date(), reason: 'reassigned' },
@@ -303,7 +389,7 @@ export class ProjectsService {
               taskId: updated.id,
               assignableType,
               assignableId: body.assigneeId,
-              assignedBy: 'system',
+              assignedBy: actorId ?? 'system',
               reason: 'task_updated',
             },
           });
@@ -318,51 +404,90 @@ export class ProjectsService {
       return updated;
     });
 
-    this.events.emit('project_task.updated', { task, businessId });
+    const actor = actorId ?? undefined;
+    this.events.emit('project_task.updated', { task, businessId, actorId: actor });
     const prevDue = existing.dueDate?.getTime() ?? null;
     const newDue = task.dueDate?.getTime() ?? null;
     if (body.dueDate !== undefined && prevDue !== newDue) {
-      this.events.emit('project_task.rescheduled', { task, businessId });
+      this.events.emit('project_task.rescheduled', { task, businessId, actorId: actor });
     }
-    if (body.isCompleted === true && !existing.isCompleted) {
-      this.events.emit('project_task.completed', { task, businessId, evidenceIds: body.evidenceIds ?? [] });
+    const becameCompleted = isCompleted === true && !existing.isCompleted;
+    if (becameCompleted) {
+      this.events.emit('project_task.completed', { task, businessId, evidenceIds: body.evidenceIds ?? [], actorId: actor });
+    }
+    // WPD-08: the feed names who completed, reopened or moved the task.
+    if (task.status !== existing.status || task.isCompleted !== existing.isCompleted) {
+      await this.timeline.recordEvent({
+        businessId,
+        module: 'PROJECT',
+        action: becameCompleted ? 'task_completed' : 'task_status_changed',
+        entityType: 'project_task',
+        entityId: task.id,
+        title: becameCompleted ? `Task completed: ${task.title}` : `Task moved to ${task.status}: ${task.title}`,
+        data: { projectId: task.projectId, from: existing.status, to: task.status, isCompleted: task.isCompleted },
+        actorType: feedActorType(actorId),
+        actorId: actor,
+        occurredAt: new Date(),
+      });
     }
     return task;
   }
 
-  async updateTaskStatus(businessId: string, taskId: string, status: string, position?: number) {
-    const task = await this.prisma.client.projectTask.findFirst({
-      where: { id: taskId, businessId },
-    });
-    if (!task) throw new NotFoundException('Task not found');
-
-    const data: Record<string, unknown> = { status };
-    if (status === 'DONE') data.isCompleted = true;
-    else if (task.isCompleted && status !== 'DONE') data.isCompleted = false;
-    if (position !== undefined) data.position = position;
-
-    return this.prisma.client.projectTask.update({ where: { id: taskId }, data });
+  /**
+   * PR196-PROJECTS-SERVER (WPD-08): the Kanban status route. It wrote status and isCompleted
+   * directly, so a task was completed with no evidence gate, no project_task.completed (the
+   * calendar projection and the default trigger listen for it) and no actor. It is now
+   * updateTask's door with the column as the change.
+   */
+  async updateTaskStatus(businessId: string, taskId: string, status: string, position?: number, actorId?: string | null) {
+    assertTaskStatus(status);
+    return this.updateTask(businessId, taskId, { status, position }, actorId);
   }
 
-  async reorderTasks(businessId: string, projectId: string, updates: { taskId: string; status: string; position: number }[]) {
+  /**
+   * The bulk Kanban move. A status change in the batch goes through updateTask's door (WPD-08); a
+   * move within a column only repositions. The whole batch is checked first (ownership, statuses,
+   * positions, the evidence gate of every task it would complete), so a refused batch writes none
+   * of its moves.
+   */
+  async reorderTasks(
+    businessId: string,
+    projectId: string,
+    updates: { taskId: string; status: string; position: number }[],
+    actorId?: string | null,
+  ) {
+    if (!Array.isArray(updates)) throw new BadRequestException('updates must be an array');
+    for (const update of updates) {
+      assertTaskStatus(update?.status);
+      assertPosition(update?.position);
+    }
     const taskIds = updates.map(u => u.taskId);
     const tasks = await this.prisma.client.projectTask.findMany({
       where: { id: { in: taskIds }, projectId, businessId },
-      select: { id: true },
+      select: { id: true, status: true, isCompleted: true, evidenceRequired: true },
     });
     if (tasks.length !== taskIds.length) {
       throw new BadRequestException('Some tasks do not belong to this project');
     }
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+
+    for (const update of updates) {
+      const task = byId.get(update.taskId)!;
+      if (update.status === 'DONE' && !task.isCompleted && task.evidenceRequired) {
+        await this.assertCompletionEvidence(task.id);
+      }
+    }
 
     const results = [];
     for (const update of updates) {
-      const data: Record<string, unknown> = { status: update.status, position: update.position };
-      if (update.status === 'DONE') data.isCompleted = true;
-      else data.isCompleted = false;
-      const result = await this.prisma.client.projectTask.update({
-        where: { id: update.taskId },
-        data,
-      });
+      const task = byId.get(update.taskId)!;
+      const statusChanges = update.status !== task.status || (update.status === 'DONE') !== task.isCompleted;
+      const result = statusChanges
+        ? await this.updateTask(businessId, update.taskId, { status: update.status, position: update.position }, actorId)
+        : await this.prisma.client.projectTask.update({
+          where: { id: update.taskId, businessId },
+          data: { position: update.position },
+        });
       results.push(result);
     }
     return results;
@@ -682,5 +807,144 @@ export class ProjectsService {
       where: { id: eventId },
       data,
     });
+  }
+
+  /**
+   * D-85 (PR196-PROJECTS-SERVER): approving or deleting a project plan needs the business OWNER,
+   * an ADMIN, or a member holding projects:write (the membership's explicit scope map, else its
+   * role defaults, as ModuleScopeGuard computes it). A membership is required, so a platform
+   * SUPER_ADMIN who is not a member is refused (D-46; BusinessGuard admits them to every tenant).
+   * 403 otherwise, before anything is read or written.
+   */
+  private async assertMayGovernPlans(businessId: string, actorId: string | null | undefined) {
+    if (!actorId || isSystemActor(actorId)) throw new ForbiddenException('A member must approve or delete a project plan');
+    const membership = await this.prisma.client.membership.findUnique({
+      where: { userId_businessId: { userId: actorId, businessId } },
+      select: { role: true, permissionScopes: true },
+    });
+    if (!membership) throw new ForbiddenException('Not a member of this business');
+    if (PLAN_GOVERNOR_ROLES.has(membership.role)) return;
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object' && !Array.isArray(membership.permissionScopes)
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.projects || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(
+        `Insufficient permissions: approving or deleting a project plan needs the owner, an admin or projects write access (you have ${level})`,
+      );
+    }
+  }
+
+  /**
+   * PATCH .../plans/:planId may not write the states only the approve door sets (WPD-12, D-85):
+   * 'approved' without the approver's authority, and 'materialized' with no project.
+   */
+  assertPlanPatchStatus(status: unknown) {
+    if (status === undefined) return;
+    if (typeof status !== 'string') throw new BadRequestException('status must be a string');
+    if (PLAN_STATUSES_SET_BY_APPROVAL.includes(status)) {
+      throw new BadRequestException(`A plan becomes ${status} only through POST .../plans/:planId/approve`);
+    }
+  }
+
+  /**
+   * PR196-PROJECTS-SERVER (WPD-12, D-85): approve a plan once. The approve route wrote status
+   * 'approved' over any status and then materialized, so a double click, concurrent requests or a
+   * re-approve each made another Project with its tasks and milestones. Now: the actor's authority
+   * (assertMayGovernPlans), then a compare-and-set from the plan's current status to 'approved',
+   * only while it is neither approved nor materialized and has no project. One request wins; any
+   * other is 409 and materializes nothing. `materialize` (ProjectPlanExecutorService.materializePlan)
+   * runs only for the winner; if it fails before the plan is linked to a project, the claim is
+   * given back so the plan can be approved again. The feed names the approver.
+   */
+  async approvePlan<T extends { id: string }>(
+    businessId: string,
+    planId: string,
+    actorId: string | null | undefined,
+    materialize: () => Promise<T>,
+  ): Promise<T> {
+    await this.assertMayGovernPlans(businessId, actorId);
+    const plan = await this.prisma.client.projectPlan.findFirst({
+      where: { id: planId, businessId },
+      select: { status: true, projectId: true },
+    });
+    if (!plan) throw new NotFoundException('Plan not found');
+
+    const approvable = plan.projectId === null && !PLAN_STATUSES_SET_BY_APPROVAL.includes(plan.status);
+    const claimed = approvable
+      ? await this.prisma.client.projectPlan.updateMany({
+        where: { id: planId, businessId, status: plan.status, projectId: null },
+        data: { status: 'approved' },
+      })
+      : { count: 0 };
+    if (claimed.count !== 1) {
+      throw new ConflictException('This plan has already been approved; a plan is approved once');
+    }
+
+    let project: T;
+    try {
+      project = await materialize();
+    } catch (err) {
+      await this.prisma.client.projectPlan
+        .updateMany({ where: { id: planId, businessId, status: 'approved', projectId: null }, data: { status: plan.status } })
+        .catch(() => undefined);
+      throw err;
+    }
+
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'PROJECT',
+      action: 'plan_approved',
+      entityType: 'project_plan',
+      entityId: planId,
+      title: 'Project plan approved',
+      data: { planId, projectId: project.id },
+      actorType: feedActorType(actorId),
+      actorId: actorId ?? undefined,
+      occurredAt: new Date(),
+    });
+    return project;
+  }
+
+  /**
+   * PR196-PROJECTS-SERVER (WPD-14, D-85): only a draft plan with no project is deleted, by an
+   * actor assertMayGovernPlans admits. ProjectPlannerService.deletePlan hard-deleted any plan,
+   * materialized ones too, which dropped the plan-to-project and event-to-task provenance. The
+   * delete is one conditional statement, so it cannot race an approve; the plan's events go with
+   * it (project_plan_events.plan_id ON DELETE CASCADE). Anything else is 409 and kept; another
+   * business's plan is 404. The feed names the actor.
+   */
+  async deleteDraftPlan(businessId: string, planId: string, actorId: string | null | undefined) {
+    await this.assertMayGovernPlans(businessId, actorId);
+    const deleted = await this.prisma.client.projectPlan.deleteMany({
+      where: { id: planId, businessId, status: 'draft', projectId: null },
+    });
+    if (deleted.count !== 1) {
+      const plan = await this.prisma.client.projectPlan.findFirst({
+        where: { id: planId, businessId },
+        select: { status: true, projectId: true },
+      });
+      if (!plan) throw new NotFoundException('Plan not found');
+      throw new ConflictException(
+        plan.projectId
+          ? 'This plan was materialized into a project and is not deleted'
+          : `Only a draft plan can be deleted; this plan is ${plan.status}`,
+      );
+    }
+
+    await this.timeline.recordEvent({
+      businessId,
+      module: 'PROJECT',
+      action: 'plan_deleted',
+      entityType: 'project_plan',
+      entityId: planId,
+      title: 'Project plan deleted',
+      data: { planId },
+      actorType: feedActorType(actorId),
+      actorId: actorId ?? undefined,
+      occurredAt: new Date(),
+    });
+    return { success: true };
   }
 }

@@ -1,10 +1,13 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ProjectsService } from './projects.service';
 import { ProjectPlannerService } from './project-planner.service';
 import { ProjectPlanExecutorService } from './project-plan-executor.service';
 import { GeneratePlanDto, UpdatePlanEventDto, ReorderEventsDto, AnalyzeImpactDto } from './dto/generate-plan.dto';
+
+/** The authenticated member a write acts for (AuthMiddleware attaches it; AuthGuard requires it). */
+type ActorRequest = { user?: { id?: string } };
 
 @Controller('projects')
 @UseGuards(AuthGuard, BusinessGuard)
@@ -92,8 +95,10 @@ export class ProjectsController {
       estimatedHours?: number;
       trackedHours?: number;
     },
+    @Req() req: ActorRequest,
   ) {
-    return this.projects.addTask(businessId, projectId, body);
+    // PR196-PROJECTS-SERVER: the assignment names the member (WPD-09).
+    return this.projects.addTask(businessId, projectId, body, req?.user?.id ?? null);
   }
 
   @Patch('businesses/:businessId/tasks/:taskId')
@@ -111,9 +116,12 @@ export class ProjectsController {
       estimatedHours?: number | null;
       trackedHours?: number;
       evidenceIds?: string[];
+      status?: string;
+      position?: number;
     },
+    @Req() req: ActorRequest,
   ) {
-    return this.projects.updateTask(businessId, taskId, body);
+    return this.projects.updateTask(businessId, taskId, body, req?.user?.id ?? null);
   }
 
   @Delete('businesses/:businessId/tasks/:taskId')
@@ -129,8 +137,10 @@ export class ProjectsController {
     @Param('businessId') businessId: string,
     @Param('taskId') taskId: string,
     @Body() body: { status: string; position?: number },
+    @Req() req: ActorRequest,
   ) {
-    return this.projects.updateTaskStatus(businessId, taskId, body.status, body.position);
+    // PR196-PROJECTS-SERVER (WPD-08): updateTask's door, as the member.
+    return this.projects.updateTaskStatus(businessId, taskId, body?.status, body?.position, req?.user?.id ?? null);
   }
 
   @Post('businesses/:businessId/projects/:projectId/tasks/reorder')
@@ -138,8 +148,9 @@ export class ProjectsController {
     @Param('businessId') businessId: string,
     @Param('projectId') projectId: string,
     @Body() body: { updates: { taskId: string; status: string; position: number }[] },
+    @Req() req: ActorRequest,
   ) {
-    return this.projects.reorderTasks(businessId, projectId, body.updates);
+    return this.projects.reorderTasks(businessId, projectId, body?.updates, req?.user?.id ?? null);
   }
 
   @Get('businesses/:businessId/projects/:projectId/budget')
@@ -294,16 +305,22 @@ export class ProjectsController {
       swotAnalysis?: Record<string, unknown>;
     },
   ) {
+    // 'approved' and 'materialized' are written only by the approve door (WPD-12, D-85).
+    this.projects.assertPlanPatchStatus(body?.status);
     return this.planner.updatePlan(businessId, planId, body);
   }
 
+  // PR196-PROJECTS-SERVER (WPD-12, D-85, D-46): OWNER/ADMIN or projects:write, a compare-and-set
+  // so a plan is approved and materialized once (409 after), and the approver on the feed.
   @Post('businesses/:businessId/plans/:planId/approve')
-  async approvePlan(
+  approvePlan(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
+    @Req() req: ActorRequest,
   ) {
-    await this.planner.updatePlan(businessId, planId, { status: 'approved' });
-    return this.executor.materializePlan(businessId, planId);
+    return this.projects.approvePlan(businessId, planId, req?.user?.id ?? null, () =>
+      this.executor.materializePlan(businessId, planId),
+    );
   }
 
   @Post('businesses/:businessId/plans/:planId/reject')
@@ -314,12 +331,15 @@ export class ProjectsController {
     return this.planner.updatePlan(businessId, planId, { status: 'rejected' });
   }
 
+  // PR196-PROJECTS-SERVER (WPD-14, D-85, D-46): only a draft plan, by OWNER/ADMIN or
+  // projects:write, with the actor on the feed.
   @Delete('businesses/:businessId/plans/:planId')
   deletePlan(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
+    @Req() req: ActorRequest,
   ) {
-    return this.planner.deletePlan(businessId, planId);
+    return this.projects.deleteDraftPlan(businessId, planId, req?.user?.id ?? null);
   }
 
   @Patch('businesses/:businessId/plans/:planId/events/:eventId')
