@@ -29,7 +29,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
 import { ActionExecutedPayload, ActionBlockedPayload } from '../../core/event-bus/events.types';
-import { CanonicalModule, LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { CanonicalModule, LEVEL_RANK, defaultScopesForRole, isCanonicalModule, rankOf } from '../../core/authority/module-vocabulary';
 import type { Prisma } from '@prisma/client';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { KEY_PLAN_MODULE_SCOPES, planStepReadsContacts } from '../key-cortex/key-cortex-plan-authority';
@@ -379,12 +379,17 @@ export function planStepDispatchedTool(step: { toolName: string | null; action: 
  * otherwise a step whose tool graphActionRequirement maps, with each of its module scopes held at
  * read as ModuleScopeGuard computes them). `cortexStep`: the same for a KEY-cortex step stored as
  * module.action with no tool (KeyCortexPlannerService), by its module (KEY_PLAN_MODULE_SCOPES; the
- * settings adapter's module is 'settings'). `stepOutput`: whether that step's stored output is shown
+ * settings adapter's module is 'settings'). A module the map does not hold is denied by default, as
+ * the executor refuses it to a member held to module scopes (memberPlanStepScopeRefusal; KEY-R3a
+ * review SEC-R3a-1: the connector runs 'activity' and 'genome', which the map holds no scope for),
+ * unless it is itself a canonical module (a PlannerService step's module label, such as 'expenses'
+ * or 'automations': no connector adapter has such a name, so nothing runs under it), which is
+ * judged by that module's read. `stepOutput`: whether that step's stored output is shown
  * at all: not, to anyone but the OWNER or a SUPER_ADMIN, for a contact read (graphActionReadsContacts),
  * whose output the plan executor writes from a run with no principal (every contact, another member's
  * PRIVATE ones included). `seesEveryContact`: the OWNER and a SUPER_ADMIN, whom visibilityClause does
  * not restrict. `hiddenContacts` (D-74): the contacts among `ids` the viewer may not open (null when
- * they open every contact), which visiblePlans withholds from every step output at read.
+ * they open every contact), which visiblePlans withholds from every step input and output at read.
  */
 export interface GraphPlanReadScope {
   seesEveryPlan: boolean;
@@ -444,8 +449,10 @@ export async function graphPlanReadScope(
     },
     cortexStep: (module) => {
       const scope = Object.prototype.hasOwnProperty.call(KEY_PLAN_MODULE_SCOPES, module) ? KEY_PLAN_MODULE_SCOPES[module] : null;
-      if (!scope) return true;
-      return reads(scope === 'adapter' ? 'settings' : scope);
+      if (scope) return reads(scope === 'adapter' ? 'settings' : scope);
+      // KEY-R3a review SEC-R3a-1: deny by default (an ADMIN too: the read rule holds it to its
+      // scopes, as `step` holds it for a registry tool graphActionRequirement maps to nothing).
+      return isCanonicalModule(module) && reads(module);
     },
     // KEY-R3b review SEC-R3b-1: every contact read, known by what the tool does.
     stepOutput: (toolName) => !graphActionReadsContacts(toolName),
@@ -538,14 +545,21 @@ function namesHiddenContact(value: unknown, hidden: ReadonlySet<string>): boolea
 const WITHHELD_ROW: unique symbol = Symbol('withheld row');
 
 /**
- * `value` without the rows that name a hidden contact (D-74): an array element that names one is
- * dropped, an object key that names one is dropped with its value, and an object that names one in
- * any other place is itself such a row (WITHHELD_ROW: dropped by the nearest array that holds it, or
- * the whole output withheld when no array holds it).
+ * `value` without the rows that name a hidden contact (D-74). A row is an object or an array held
+ * by an array (a list of rows), or the whole output. An object key that names one is dropped with
+ * its value (a map keyed by contact id). Any other place that names one makes the row holding it
+ * WITHHELD_ROW, dropped whole by the nearest list that holds it, or the whole output withheld when
+ * no list does. KEY-R3a review R3a-CR-1: an array holding a string that names one is such a place
+ * too: a tuple row ([id, name, email]) and a list of ids or texts held by a row cannot be told apart
+ * by their shape, and dropping only the id would leave the rest of a tuple (the hidden contact's
+ * name and email) and shift it against its columns. An array of rows keeps every row naming none.
  */
 function withholdHiddenRows(value: unknown, hidden: ReadonlySet<string>): unknown {
   if (typeof value === 'string') return stringNamesHidden(value, hidden) ? WITHHELD_ROW : value;
-  if (Array.isArray(value)) return value.map((v) => withholdHiddenRows(v, hidden)).filter((v) => v !== WITHHELD_ROW);
+  if (Array.isArray(value)) {
+    if (value.some((v) => typeof v === 'string' && stringNamesHidden(v, hidden))) return WITHHELD_ROW;
+    return value.map((v) => withholdHiddenRows(v, hidden)).filter((v) => v !== WITHHELD_ROW);
+  }
   if (isJsonObject(value)) {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
@@ -565,8 +579,11 @@ function withholdHiddenRows(value: unknown, hidden: ReadonlySet<string>): unknow
  * action names a tool is that tool). A KEY-cortex step with no tool (module.action, the step
  * KeyCortexPlannerService runs) is judged by its module, and its output, when it reads contacts
  * (planStepReadsContacts: every crm read), is the OWNER's and a SUPER_ADMIN's only, as a registry
- * contact read's is (KEY-R3a, PLANREAD-TOOLLESS-OUTPUT). A step that dispatches nothing and names
- * no KEY module (an 'analyze' step) is shown with its plan.
+ * contact read's is (KEY-R3a, PLANREAD-TOOLLESS-OUTPUT). KEY-R3a review SEC-R3a-1: every module is
+ * judged (cortexStep), a module KEY_PLAN_MODULE_SCOPES does not hold included, which is denied by
+ * default to a viewer held to module scopes (it was shown with its output: 'activity' and 'genome'
+ * steps, the business-wide audit log and DNA, reached a STAFF proposer). A step that dispatches
+ * nothing and names no module (an 'analyze' step) is shown with its plan.
  */
 function planStepReadRule(step: PlanStepView, scope: GraphPlanReadScope): { shown: boolean; output: boolean } {
   const tool = planStepDispatchedTool(step);
@@ -574,7 +591,7 @@ function planStepReadRule(step: PlanStepView, scope: GraphPlanReadScope): { show
     return scope.step(tool) ? { shown: true, output: scope.stepOutput(tool) } : { shown: false, output: false };
   }
   const module = step.module;
-  if (module && Object.prototype.hasOwnProperty.call(KEY_PLAN_MODULE_SCOPES, module)) {
+  if (module) {
     if (!scope.cortexStep(module)) return { shown: false, output: false };
     return { shown: true, output: scope.seesEveryContact || !planStepReadsContacts(module, step.action ?? '') };
   }
@@ -587,9 +604,11 @@ function planStepReadRule(step: PlanStepView, scope: GraphPlanReadScope): { show
  * shown with outputResult null. D-74: a step output is then filtered by the viewer's CRM visibility
  * at read time, whatever tool or module.action produced it and whoever approved the step: the output
  * of a step whose input names a contact the viewer may not open is withheld (null: it is about that
- * row, even when it names no contact itself, as a note's text), and every other output loses the rows
- * that name such a contact (withholdHiddenRows; null when the output itself is such a row). One
- * contact lookup serves every plan.
+ * row, even when it names no contact itself, as a note's text), and so is that input (KEY-R3a review
+ * SEC-R3a-2: inputPayload null, whether or not the step has run: it carries the values written into
+ * that row, as a new email or notes); every other output loses the rows that name such a contact
+ * (withholdHiddenRows; null when the output itself is such a row). One contact lookup serves every
+ * plan.
  */
 export async function visiblePlans<T extends { steps?: readonly PlanStepView[] | null }>(
   plans: readonly T[],
@@ -606,9 +625,8 @@ export async function visiblePlans<T extends { steps?: readonly PlanStepView[] |
     const candidates = new Set<string>();
     for (const steps of judged) {
       for (const step of steps) {
-        if (step.outputResult === null || step.outputResult === undefined) continue;
         collectIdCandidates(step.inputPayload, candidates);
-        collectIdCandidates(step.outputResult, candidates);
+        if (step.outputResult !== null && step.outputResult !== undefined) collectIdCandidates(step.outputResult, candidates);
       }
     }
     if (candidates.size > 0) hidden = await scope.hiddenContacts(candidates);
@@ -616,9 +634,9 @@ export async function visiblePlans<T extends { steps?: readonly PlanStepView[] |
   return plans.map((plan, i) => ({
     ...plan,
     steps: judged[i].map((step) => {
-      if (hidden.size === 0 || step.outputResult === null || step.outputResult === undefined) return step;
-      if (namesHiddenContact(step.inputPayload, hidden)) return { ...step, outputResult: null };
-      if (!namesHiddenContact(step.outputResult, hidden)) return step;
+      if (hidden.size === 0) return step;
+      if (namesHiddenContact(step.inputPayload, hidden)) return { ...step, inputPayload: null, outputResult: null };
+      if (step.outputResult === null || step.outputResult === undefined || !namesHiddenContact(step.outputResult, hidden)) return step;
       const kept = withholdHiddenRows(step.outputResult, hidden);
       return { ...step, outputResult: kept === WITHHELD_ROW ? null : kept };
     }) as Array<PlanStepsOf<T>>,

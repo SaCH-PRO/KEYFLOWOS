@@ -84,6 +84,20 @@ const ID = {
   planOther2: `${P}planOther2`,
   planOther3: `${P}planOther3`,
   planOther4: `${P}planOther4`,
+  // KEY-R3a review repairs
+  // SEC-R3a-1: the STAFF member's KEY-cortex plan with steps under modules mapped to no module scope
+  planCxUnmapped: `${P}planCxUnmapped`,
+  sUnActivity: `${P}sUnActivity`, // activity.export_audit_log, toolName null (the business-wide audit log)
+  sUnGenome: `${P}sUnGenome`, // genome.get_dna, toolName null (the business DNA)
+  sUnOps: `${P}sUnOps`, // toolName null, labelled 'operations' (a canonical module the STAFF member writes): shown
+  // SEC-R3a-2: the OWNER's plan whose step inputs name the OWNER's PRIVATE contact
+  planOwnerInput: `${P}planOwnerInput`,
+  sInUpdate: `${P}sInUpdate`, // crm_update_contact on cPriv, run: its input carries the new email and notes
+  sInPending: `${P}sInPending`, // crm_add_note on cPriv, not yet run (no output)
+  sInTeam: `${P}sInTeam`, // crm_update_contact on cTeam (input and output shown)
+  // R3a-CR-1: the OWNER's KEY-cortex plan whose output holds rows as arrays
+  planCxTuple: `${P}planCxTuple`,
+  sTuple: `${P}sTuple`,
 };
 
 const PRIV_NOTES = 'v87a private contact notes';
@@ -91,6 +105,16 @@ const PRIV_NOTE_BODY = 'v87a private note body';
 const PRIV_EMAIL = `${P}priv@test.local`;
 const SECRET_INVOICE = `${P}inv_secret`;
 const TEAM_NOTE = `${P}note_team`;
+const AUDIT_SECRET = `${P}audit_secret_invoice_paid_9999`;
+const DNA_SECRET = `${P}dna_secret_revenue`;
+const OPS_OUTPUT = `${P}ops_summary`;
+const NEW_PRIV_EMAIL = `${P}newpriv@test.local`;
+const NEW_PRIV_NOTE = 'v87a secret note written into the private row';
+const PENDING_PRIV_NOTE = 'v87a pending note on the private row';
+const TUPLE_PRIV_NAME = 'V87a Tuple Private';
+const TUPLE_PRIV_EMAIL = `${P}tuple_priv@secret.test`;
+const TUPLE_TEAM_ROW = [`${P}cTeam`, 'V87a Tuple Team', `${P}tuple_team@test.local`];
+const CELLS_PRIV_NAME = 'V87a Cells Private';
 
 let db: any;
 let aiApp: any;
@@ -189,6 +213,38 @@ beforeAll(async () => {
   // QUEUE-PLAN-WINDOW: one old plan of `win`, four newer plans of `other`.
   await plan(ID.planWin, ID.win, 'pending', new Date('2020-01-01T00:00:00.000Z'));
   for (const id of [ID.planOther1, ID.planOther2, ID.planOther3, ID.planOther4]) await plan(id, ID.other, 'pending');
+
+  // SEC-R3a-1: the STAFF member's KEY-cortex plan (run by the OWNER) with steps under modules the
+  // connector runs (KeyCortexConnectorService.adapterMap) but KEY_PLAN_MODULE_SCOPES maps to nothing.
+  await plan(ID.planCxUnmapped, ID.staff);
+  await step(ID.sUnActivity, ID.planCxUnmapped, 1, {
+    toolName: null, module: 'activity', action: 'export_audit_log', inputPayload: {},
+    outputResult: { data: [{ type: 'invoice', description: `Invoice paid ${AUDIT_SECRET}` }] },
+  });
+  await step(ID.sUnGenome, ID.planCxUnmapped, 2, { toolName: null, module: 'genome', action: 'get_dna', inputPayload: {}, outputResult: { revenue: 123456, marker: DNA_SECRET } });
+  await step(ID.sUnOps, ID.planCxUnmapped, 3, { toolName: null, module: 'operations', action: 'Analyze the inbox backlog', inputPayload: {}, outputResult: { summary: OPS_OUTPUT } });
+
+  // SEC-R3a-2: the OWNER's plan; its inputs carry what the OWNER writes into the PRIVATE row.
+  await plan(ID.planOwnerInput, ID.owner);
+  await step(ID.sInUpdate, ID.planOwnerInput, 1, {
+    toolName: 'crm_update_contact', action: 'Update the contact',
+    inputPayload: { contactId: ID.cPriv, email: NEW_PRIV_EMAIL, notes: NEW_PRIV_NOTE },
+    outputResult: { ...PRIV_ROW, email: NEW_PRIV_EMAIL },
+  });
+  await step(ID.sInPending, ID.planOwnerInput, 2, { toolName: 'crm_add_note', action: 'Add a note', inputPayload: { contactId: ID.cPriv, body: PENDING_PRIV_NOTE } });
+  await step(ID.sInTeam, ID.planOwnerInput, 3, { toolName: 'crm_update_contact', action: 'Update the contact', inputPayload: { contactId: ID.cTeam, jobTitle: 'v87a team title' }, outputResult: TEAM_ROW });
+
+  // R3a-CR-1: rows held as arrays (a tuple per row; an array of cells inside a record).
+  await plan(ID.planCxTuple, ID.owner);
+  await step(ID.sTuple, ID.planCxTuple, 1, {
+    toolName: null, module: 'bookings', action: 'list_bookings', inputPayload: {},
+    outputResult: {
+      columns: ['contactId', 'name', 'email'],
+      rows: [[ID.cPriv, TUPLE_PRIV_NAME, TUPLE_PRIV_EMAIL], TUPLE_TEAM_ROW],
+      records: [{ cells: [ID.cPriv, CELLS_PRIV_NAME] }, { cells: [ID.cTeam, 'V87a Cells Team'] }],
+      total: 2,
+    },
+  });
 
   const { Test } = await import('@nestjs/testing');
   const { EventEmitter2 } = await import('@nestjs/event-emitter');
@@ -337,8 +393,8 @@ const stepOf = (plan: PlanView | null, stepId: string) => plan?.steps.find((s) =
 
 describe('KEY-R3a-PLAN-READS: one visible-step rule on every plan read route (D-74, D-37)', () => {
   it('fixture sanity (real rows): the plans and steps are seeded', async () => {
-    expect(await db.aiPlan.count({ where: { businessId: ID.biz } })).toBe(8);
-    expect(await db.aiPlanStep.count({ where: { plan: { businessId: ID.biz } } })).toBe(8);
+    expect(await db.aiPlan.count({ where: { businessId: ID.biz } })).toBe(11);
+    expect(await db.aiPlanStep.count({ where: { plan: { businessId: ID.biz } } })).toBe(15);
   });
 
   it('PR-01 (PLANREAD-TOOLLESS-OUTPUT) the output of a KEY-cortex crm.list_contacts step (toolName null) names no PRIVATE contact to an ADMIN on any route; the step is shown', async () => {
@@ -447,5 +503,82 @@ describe('KEY-R3a-PLAN-READS: one visible-step rule on every plan read route (D-
     const owner = await preview(ID.owner, ID.cTeam, ID.cPriv);
     expect(owner.status, owner.text).toBe(200);
     expect(owner.text).toContain(PRIV_EMAIL);
+  });
+});
+
+/**
+ * KEY-R3a-PLAN-READS review repairs (REAL database, the same four routes):
+ *   - SEC-R3a-1: a KEY-cortex step with no tool whose module KEY_PLAN_MODULE_SCOPES maps to nothing
+ *     (activity, genome: the connector runs both) was shown with its output to every viewer, though
+ *     the executor refuses such a module to a member held to module scopes (deny by default).
+ *   - SEC-R3a-2: D-74 withheld the output of a step whose input names a contact the viewer cannot
+ *     open, but answered its inputPayload verbatim, carrying what the OWNER wrote into that row.
+ *   - R3a-CR-1: the D-74 row filter read an array inside a list (a tuple row) as a list, so it
+ *     dropped only the hidden contact's id and kept the rest of that row.
+ */
+describe('KEY-R3a-PLAN-READS review repairs', () => {
+  it('RR-01 (SEC-R3a-1) a KEY-cortex step with no tool under a module mapped to no module scope (activity, genome) is shown to no member held to module scopes, on any route: not its STAFF proposer, not an ADMIN; a step labelled with a module the viewer reads stays; the OWNER reads every step', async () => {
+    for (const actor of [ID.staff, ID.admin]) {
+      for (const { route, plan, status } of await planOnEveryRoute(actor, ID.planCxUnmapped)) {
+        const where = `${actor} ${route}`;
+        expect(status, where).toBe(200);
+        expect(plan, where).not.toBeNull();
+        expect(stepOf(plan, ID.sUnActivity), where).toBeUndefined();
+        expect(stepOf(plan, ID.sUnGenome), where).toBeUndefined();
+        const text = JSON.stringify(plan);
+        for (const hidden of [AUDIT_SECRET, DNA_SECRET, 'export_audit_log', 'get_dna']) expect(text, `${where} ${hidden}`).not.toContain(hidden);
+        expect(stepOf(plan, ID.sUnOps)?.outputResult, where).toEqual({ summary: OPS_OUTPUT });
+      }
+    }
+    for (const { route, plan, status } of await planOnEveryRoute(ID.owner, ID.planCxUnmapped)) {
+      expect(status, route).toBe(200);
+      expect(stepOf(plan, ID.sUnActivity)?.outputResult, route).toEqual({ data: [{ type: 'invoice', description: `Invoice paid ${AUDIT_SECRET}` }] });
+      expect(stepOf(plan, ID.sUnGenome)?.outputResult, route).toEqual({ revenue: 123456, marker: DNA_SECRET });
+    }
+  });
+
+  it('RR-02 (SEC-R3a-2, D-74) a step whose input names a contact the viewer cannot open is answered with its inputPayload withheld as well as its output, run or not yet run, to an ADMIN and to the proposer on every route; a step on a TEAM contact keeps its input; the OWNER reads every input', async () => {
+    for (const { route, plan, status } of await planOnEveryRoute(ID.admin, ID.planOwnerInput)) {
+      expect(status, route).toBe(200);
+      for (const stepId of [ID.sInUpdate, ID.sInPending, ID.sInTeam]) expect(stepOf(plan, stepId), `${route} ${stepId}`).toBeDefined();
+      for (const stepId of [ID.sInUpdate, ID.sInPending]) {
+        expect(stepOf(plan, stepId)?.inputPayload ?? null, `${route} ${stepId}`).toBeNull();
+        expect(stepOf(plan, stepId)?.outputResult ?? null, `${route} ${stepId}`).toBeNull();
+      }
+      const text = JSON.stringify(plan);
+      for (const hidden of [NEW_PRIV_EMAIL, NEW_PRIV_NOTE, PENDING_PRIV_NOTE, ID.cPriv, PRIV_EMAIL]) expect(text, `${route} ${hidden}`).not.toContain(hidden);
+      expect(stepOf(plan, ID.sInTeam)?.inputPayload, route).toEqual({ contactId: ID.cTeam, jobTitle: 'v87a team title' });
+      expect(stepOf(plan, ID.sInTeam)?.outputResult, route).toEqual(TEAM_ROW);
+    }
+    // The proposer of a plan whose steps reached the OWNER's PRIVATE contact (PR-03's plan).
+    for (const { route, plan } of await planOnEveryRoute(ID.staff, ID.planRowVis)) {
+      expect(stepOf(plan, ID.sRvUpdate)?.inputPayload ?? null, route).toBeNull();
+      expect(stepOf(plan, ID.sRvNote)?.inputPayload ?? null, route).toBeNull();
+      expect(JSON.stringify(plan), route).not.toContain(ID.cPriv);
+      expect(stepOf(plan, ID.sRvTeam)?.inputPayload, route).toEqual({ contactId: ID.cTeam, jobTitle: 'v87a' });
+    }
+    for (const { route, plan } of await planOnEveryRoute(ID.owner, ID.planOwnerInput)) {
+      expect(stepOf(plan, ID.sInUpdate)?.inputPayload, route).toEqual({ contactId: ID.cPriv, email: NEW_PRIV_EMAIL, notes: NEW_PRIV_NOTE });
+      expect(stepOf(plan, ID.sInPending)?.inputPayload, route).toEqual({ contactId: ID.cPriv, body: PENDING_PRIV_NOTE });
+    }
+  });
+
+  it('RR-03 (R3a-CR-1, D-74) a row held as an array (a tuple in a list of rows, or an array of cells inside a record) that names a contact the viewer cannot open is removed whole, for an ADMIN on every route; the OWNER reads every row', async () => {
+    for (const { route, plan, status } of await planOnEveryRoute(ID.admin, ID.planCxTuple)) {
+      expect(status, route).toBe(200);
+      expect(stepOf(plan, ID.sTuple)?.outputResult, route).toEqual({
+        columns: ['contactId', 'name', 'email'],
+        rows: [TUPLE_TEAM_ROW],
+        records: [{ cells: [ID.cTeam, 'V87a Cells Team'] }],
+        total: 2,
+      });
+      const text = JSON.stringify(plan);
+      for (const hidden of [ID.cPriv, TUPLE_PRIV_NAME, TUPLE_PRIV_EMAIL, CELLS_PRIV_NAME]) expect(text, `${route} ${hidden}`).not.toContain(hidden);
+    }
+    for (const { route, plan } of await planOnEveryRoute(ID.owner, ID.planCxTuple)) {
+      const out = stepOf(plan, ID.sTuple)?.outputResult as { rows: unknown[]; records: unknown[] } | undefined;
+      expect(out?.rows, route).toEqual([[ID.cPriv, TUPLE_PRIV_NAME, TUPLE_PRIV_EMAIL], TUPLE_TEAM_ROW]);
+      expect(out?.records, route).toHaveLength(2);
+    }
   });
 });
