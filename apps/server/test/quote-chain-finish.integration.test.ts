@@ -45,8 +45,10 @@
  *   QCF-06  an accept racing a terms edit that commits first answers 409
  *           quote_terms_changed; the quote stays SENT with the edited terms
  *   QCF-07  convert by a revenue:write, crm:none member of a quote on a PRIVATE
- *           contact: 201 with contact { id, businessId, firstName, lastName,
- *           email } only (SEC-2 / SEC-V51-3)
+ *           contact: 404 Contact not found, nothing written (D-64,
+ *           W3-D64-COMMERCE-CREATE); the OWNER's convert: 201 with contact
+ *           { id, businessId, firstName, lastName, email } only (SEC-2 /
+ *           SEC-V51-3)
  *   QCF-08  follow-up by the same member: 201 with the same projection (SEC-6)
  *   QCF-09  bulk delete skips a converted quote (quote_converted) whatever its
  *           stored status, and deletes the rest (SEC-4 / CR-W10-1)
@@ -615,11 +617,26 @@ describe('SEC-2 / SEC-6: convert and follow-up answer with the projected contact
     expect(raw).not.toContain('PRIVATE');
   }
 
-  it('QCF-07 (SEC-2 / SEC-V51-3): a revenue:write, crm:none member converting a quote on a PRIVATE contact gets 201 with contact { id, businessId, firstName, lastName, email } only; the invoice.created listener still receives the whole contact', async () => {
+  // W3-D64-COMMERCE-CREATE (owner ruling D-64): convert refuses (404) a quote
+  // whose contact the acting member cannot open under CRM visibility, so the
+  // crm:none member no longer converts it (it answered 201 with the projected
+  // contact). The SEC-2 projection stays proven on the convert of a member who
+  // may open the contact: the OWNER.
+  it('QCF-07 (SEC-2 / SEC-V51-3, D-64): a revenue:write, crm:none member converting a quote on a PRIVATE contact gets 404 Contact not found, no invoice and the quote stays unconverted; the OWNER converting it gets 201 with contact { id, businessId, firstName, lastName, email } only; the invoice.created listener still receives the whole contact', async () => {
     const { id } = await acceptedQuote(ID.contactPrivate);
     recordedEvents.length = 0;
 
-    const res = await convert(ID.staffW, id);
+    const invoicesBefore = await db.invoice.count({ where: { businessId: ID.bizA } });
+    const refused = await convert(ID.staffW, id);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(404);
+    expect(refused.body.message).toBe('Contact not found');
+    expectNothingPrivate(refused.body);
+    expect(JSON.stringify(refused.body)).not.toContain('V53bPrivate');
+    expect(await db.invoice.count({ where: { businessId: ID.bizA } })).toBe(invoicesBefore);
+    expect(await db.quote.findUnique({ where: { id } })).toMatchObject({ status: 'ACCEPTED', invoiceId: null });
+    expect(recordedEvents.filter((e) => e.name === 'invoice.created')).toEqual([]);
+
+    const res = await convert(ID.ownerA, id);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toMatchObject({ quoteId: id, contactId: ID.contactPrivate, status: 'DRAFT' });
     expectWriteProjection(res.body.contact);

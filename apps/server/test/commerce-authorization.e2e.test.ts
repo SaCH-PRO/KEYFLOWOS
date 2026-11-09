@@ -941,7 +941,9 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       expect(res.status).toBe(201);
       expect(commerceMock.createInvoice).toHaveBeenCalledTimes(1);
       const forwarded = commerceMock.createInvoice.mock.calls[0]![0] as Record<string, unknown>;
-      expect(forwarded).toEqual({ businessId: ID.bizA, ...valid() });
+      // W3-D64-COMMERCE-CREATE (D-64): the acting member is forwarded with or without an
+      // Idempotency-Key, so the service judges the contact by that member's CRM view.
+      expect(forwarded).toEqual({ businessId: ID.bizA, ...valid(), actorUserId: ID.ownerA });
       const keys = Object.entries(forwarded).filter(([, v]) => v !== undefined).map(([k]) => k);
       for (const k of ['total', 'subtotal', 'taxAmount', 'discountAmount', 'status', 'invoiceNumber']) expect(keys, k).not.toContain(k);
       for (const item of forwarded.items as Array<Record<string, unknown>>) expect(item).not.toHaveProperty('total');
@@ -953,7 +955,8 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
         const res = await create(actor, full);
         expect(res.status, actor).toBe(201);
         expect(res.body).toMatchObject({ id: `${P}invNew`, status: 'DRAFT' });
-        expect(commerceMock.createInvoice).toHaveBeenLastCalledWith({ businessId: ID.bizA, ...full });
+        // W3-D64-COMMERCE-CREATE (D-64): forwarded with the acting member, whose CRM view judges the contact.
+        expect(commerceMock.createInvoice).toHaveBeenLastCalledWith({ businessId: ID.bizA, ...full, actorUserId: actor });
       }
       expect(commerceMock.createInvoice).toHaveBeenCalledTimes(3);
     });
@@ -969,7 +972,8 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       const body = { ...valid(), items: [{ description: 'At the bound', quantity: 2147483647, unitPrice: 99999999999999 }] };
       await create(ID.ownerA, body).expect(201);
       expect(commerceMock.createInvoice).toHaveBeenCalledTimes(1);
-      expect(commerceMock.createInvoice).toHaveBeenLastCalledWith({ businessId: ID.bizA, ...body });
+      // W3-D64-COMMERCE-CREATE (D-64): forwarded with the acting member, whose CRM view judges the contact.
+      expect(commerceMock.createInvoice).toHaveBeenLastCalledWith({ businessId: ID.bizA, ...body, actorUserId: ID.ownerA });
     });
 
     it('CC-GUARDS (control): unauthenticated 401; a non-member, a member of another tenant and revenue:read are refused 403; the service is not called', async () => {
