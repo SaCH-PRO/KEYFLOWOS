@@ -618,6 +618,11 @@
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
     },
     {
+      "prefix": "v87c_",
+      "owner": "apps/server/test/storefront-order-doors.integration.test.ts",
+      "packet": "V1-87 (G6PUB-R3-STORE-ORDER-DOORS)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

@@ -24,6 +24,14 @@
  *   OCO-05  the Operations snapshot offers Complete offline on every unpaid
  *           CASH storefront order it loaded (five here), not only on the 3
  *           active and 2 completed panels it shows
+ *
+ * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-3): the list loads the latest
+ * 100 orders and searched them in the browser, so an older unpaid cash order
+ * had no Complete offline anywhere.
+ *
+ *   OCO-06  a search asks the server (GET .../orders?search=), so an unpaid
+ *           CASH order outside the latest 100 is found and offers Complete
+ *           offline; clearing the search shows the latest orders again
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import React from "react";
@@ -151,6 +159,40 @@ describe("store order list: Complete offline on every unpaid cash storefront ord
 
     await waitFor(() => expect(toastError).toHaveBeenCalledWith(expect.stringMatching(/revenue requires write access/)));
     expect(completeOffline(), "still unpaid: the action stays").not.toBeNull();
+  });
+});
+
+describe("store order list: Complete offline reaches orders outside the latest page (G6PUB-RC2-3)", () => {
+  it("OCO-06: a search is answered by the server, so an older unpaid CASH order is found and offers Complete offline", async () => {
+    const latest = Array.from({ length: 100 }, (_, i) => apiOrder(i + 1, { paymentStatus: "PAID", status: "DELIVERED" }));
+    const older = apiOrder(500, { orderNumber: "ORD-OCO-OLD-500", customerName: "Olive Older", customerEmail: "older@test.local" });
+    apiGet.mockImplementation(async (path: string) => {
+      if (!path.startsWith(`/site/businesses/${BIZ}/orders`)) return { data: null, error: null };
+      const search = new URL(`https://x.test${path}`).searchParams.get("search");
+      const rows = search ? [older].filter((o) => String(o.orderNumber).toLowerCase().includes(search.toLowerCase())) : latest;
+      return { data: { data: rows, total: search ? rows.length : 101, page: 1, pageSize: 100, totalPages: search ? 1 : 2 }, error: null };
+    });
+    render(<OrdersPanel />);
+    await screen.findByText("ORD-OCO-1");
+    expect(screen.queryByText("ORD-OCO-OLD-500"), "not among the latest 100").toBeNull();
+
+    fireEvent.change(screen.getByLabelText("Search orders"), { target: { value: "OLD-500" } });
+
+    // At 9f09d6c8: the search filters the 100 loaded orders in the browser, so the older order is never found.
+    await openOrder("ORD-OCO-OLD-500");
+    expect(completeOffline(), "the older unpaid cash order offers Complete offline").not.toBeNull();
+    const searched = apiGet.mock.calls.map(([p]) => String(p)).filter((p) => p.includes("search="));
+    expect(searched.some((p) => p.includes("search=OLD-500")), "the search went to the server").toBe(true);
+
+    apiPost.mockResolvedValue({ data: { ...older, status: "CONFIRMED", paymentStatus: "PAID" }, error: null });
+    fireEvent.click(completeOffline()!);
+    await waitFor(() => expect(apiPost).toHaveBeenCalledTimes(1));
+    expect((apiPost.mock.calls[0] as [{ path: string }])[0].path).toBe(`/site/businesses/${BIZ}/orders/ord_oco_500/complete-offline`);
+    await waitFor(() => expect(completeOffline()).toBeNull());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.change(screen.getByLabelText("Search orders"), { target: { value: "" } });
+    expect(await screen.findByText("ORD-OCO-1"), "the latest orders again").toBeInTheDocument();
   });
 });
 
