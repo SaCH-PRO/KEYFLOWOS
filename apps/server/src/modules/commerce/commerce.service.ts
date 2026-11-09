@@ -352,6 +352,22 @@ interface CreateClaim {
 const CREATE_IDEMPOTENCY_KEY_MAX = 255;
 
 /**
+ * FOLLOW3-A1-D46-COMMERCE-WRITES (owner ruling D-55): the provider ids the
+ * gateway doors match on, spelled exactly as they match (Prisma equality is
+ * case-sensitive; payments.service.ts processStripeRefund matches provider
+ * 'stripe'). A payment recordPayment writes by hand (the manual route, KEY's
+ * processPayment) with one of these as its method is stored with provider
+ * 'manual', so no gateway door can take it for a gateway payment: a hand row
+ * naming another tenant's PaymentIntent made that tenant's platform-signed
+ * refund ambiguous, and its books never showed it. The method is kept, so the
+ * receipt still posts to the payment-processor account
+ * (RevenuePostingService.depositSystemKey reads the method too). Exact
+ * comparison, never case-folded: 'PayPal' (the web form) and 'PAYPAL' (an
+ * evidence confirm) are stored as before.
+ */
+const GATEWAY_PROVIDER_IDS: ReadonlySet<string> = new Set(['stripe', 'paypal', 'wipay']);
+
+/**
  * The create's claim, or null when it carries no key (absent or blank, as the
  * base: every call creates). `material` is every field the caller sent, in a
  * fixed shape (absent is null), so its JSON is the same for the same request.
@@ -3223,7 +3239,9 @@ export class CommerceService {
     /**
      * R0-PL-04: Payment.provider when it is not the method. markInvoicePaid
      * keeps its historical row shape (provider 'manual', method 'MANUAL').
-     * Internal: an option, never part of `input`. Default: the method.
+     * Internal: an option, never part of `input`. Default: the method, except
+     * that a gateway id ('stripe', 'paypal', 'wipay' exactly) is stored as
+     * 'manual' (D-55, GATEWAY_PROVIDER_IDS).
      */
     provider?: string;
     /**
@@ -3373,7 +3391,8 @@ export class CommerceService {
             amount: paymentAmount,
             currency: invoice.currency,
             status: 'SUCCESSFUL',
-            provider: options.provider ?? input.method,
+            // D-55: a hand-recorded gateway method is never a gateway row.
+            provider: options.provider ?? (GATEWAY_PROVIDER_IDS.has(input.method) ? 'manual' : input.method),
             method: input.method,
             providerPaymentId: providerPaymentId.value,
             reference: input.reference ?? null,
