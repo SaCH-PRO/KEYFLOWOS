@@ -271,9 +271,13 @@ describe('KeyCortexPlannerService', () => {
 describe('KeyCortexPlannerService.executePlan — the executing member (R0-09e, review ST-5 / CR-2)', () => {
   const STAFF = 'user_staff';
   const OWNER = 'user_owner';
+  // KEY-R3b-PLAN-AUTHORITY: step 2 was crm.list_contacts, a contact read, which a plan with no member
+  // principal may no longer run (D-73) and a STAFF member's plan may not run through the crm adapter
+  // (D-71, owned-view). These cases pin who a step runs as, so step 2 is a read every member here
+  // holds (STAFF role defaults: bookings read).
   const planSteps = () => [
     { id: 's1', order: 1, module: 'settings', action: 'update_business_profile', inputPayload: { name: 'x' }, toolName: 'settings.update_business_profile', dependsOn: [] },
-    { id: 's2', order: 2, module: 'crm', action: 'list_contacts', inputPayload: {}, toolName: 'crm.list_contacts', dependsOn: [] },
+    { id: 's2', order: 2, module: 'bookings', action: 'get_services', inputPayload: {}, toolName: 'bookings.get_services', dependsOn: [] },
   ];
   let prisma: any;
   let executor: any;
@@ -366,7 +370,8 @@ describe('KeyCortexPlannerService.executePlan — the executing member (R0-09e, 
   });
 
   it("with no member (a system trigger), a member's plan runs as that member and a plan no member created runs as the system actor 'key_cortex'", async () => {
-    build({ id: 'plan_1', businessId: 'biz_1', userId: STAFF });
+    // KEY-R3b-PLAN-AUTHORITY (D-73): a plan runs only as a member of its business, so the creator is one.
+    build({ id: 'plan_1', businessId: 'biz_1', userId: STAFF }, { [STAFF]: 'STAFF' });
     await service.executePlan('plan_1');
     expect(actorsRun()).toEqual([STAFF, STAFF]);
 

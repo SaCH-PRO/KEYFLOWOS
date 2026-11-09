@@ -20,6 +20,7 @@ import { CurrentUser, type AuthenticatedUser } from '../../core/decorators/curre
 import { KeyCortexPlannerService, CreateGoalInput } from './key-cortex-planner.service';
 import { KeyCortexTriggerService } from './key-cortex-trigger.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { graphPlanReadScope, visiblePlanSteps } from '../ai/graph-actions.controller';
 import {
   Allow,
   IsArray,
@@ -276,9 +277,29 @@ export class KeyCortexGoalsController {
     return this.planner.createPlanFromCommand(businessId, dto, actor.id);
   }
 
+  /**
+   * KEY-R3a-PLAN-READS (KEY-CORTEX-PLAN-READ, D-74): this returned any plan by id alone, with its
+   * steps, inputPayload and outputResult, to any member (a member of another business naming their
+   * own reached it too). The plan is read in the guarded business and answered by the rule of every
+   * plan read route (graphPlanReadScope / visiblePlanSteps, as GET ai/plans/:planId): to its
+   * proposer, the business OWNER, an ADMIN or a SUPER_ADMIN, another member's plan answered exactly
+   * as an unknown id; within it the steps whose module the viewer reads, and each step's output
+   * filtered by the viewer's contact visibility at read.
+   */
   @Get('plans/:planId')
-  async getPlan(@Param('planId') planId: string) {
-    return this.planner.getPlan(planId);
+  async getPlan(
+    @Param('planId') planId: string,
+    @GuardedBusinessId() businessId: string,
+    @CurrentUser() user?: AuthenticatedUser,
+  ) {
+    if (!businessId) throw new BadRequestException('businessId is required');
+    const viewer = requestActor(user);
+    const [mayRead, plan] = await Promise.all([
+      graphPlanReadScope(this.prisma, businessId, { id: viewer.id, role: viewer.role }),
+      this.planner.getPlan(planId, businessId),
+    ]);
+    if (!plan || (!mayRead.seesEveryPlan && plan.userId !== viewer.id)) return null;
+    return { ...plan, steps: await visiblePlanSteps(plan.steps, mayRead) };
   }
 
   /**
@@ -324,21 +345,29 @@ export class KeyCortexGoalsController {
     return this.triggerService.listRules(businessId);
   }
 
+  /**
+   * KEY-R3b-PLAN-AUTHORITY (D-73): the rule records the authenticated member who creates it (a
+   * creator in the body's filterJson is dropped), and the plans it fires run as that member.
+   */
   @Post('triggers')
-  async createTriggerRule(@Body() dto: CreateTriggerRuleDto) {
+  async createTriggerRule(@Body() dto: CreateTriggerRuleDto, @CurrentUser() user?: AuthenticatedUser) {
     if (!dto.businessId || !dto.eventType) {
       throw new BadRequestException('businessId and eventType are required');
     }
-    return this.triggerService.createRule(dto);
+    const actor = requestActor(user);
+    return this.triggerService.createRule(dto, actor.id);
   }
 
+  /** D-73: the member who changes a rule is the member its plans run as from then on. */
   @Patch('triggers/:id')
   async updateTriggerRule(
     @Param('id') id: string,
     @Body() dto: UpdateTriggerRuleDto,
     @GuardedBusinessId() businessId: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ) {
     if (!businessId) throw new BadRequestException('businessId is required');
-    return this.triggerService.updateRule(businessId, id, dto);
+    const actor = requestActor(user);
+    return this.triggerService.updateRule(businessId, id, dto, actor.id);
   }
 }

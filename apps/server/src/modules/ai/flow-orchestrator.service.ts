@@ -7694,6 +7694,25 @@ ${triage.standingContext}`;
     toolName: string,
     args: Record<string, any>,
   ): Promise<{ success: boolean; result?: any; error?: string; blocked?: boolean }> {
+    // KEY-R3b-PLAN-AUTHORITY (D-73, NOPRINCIPAL-SURFACES): the monitor acts for no member, so it
+    // reads no contacts (with no principal contactReadAccess reads every contact, PRIVATE ones
+    // included) and writes no money or invoices; nor does it run a tool the authority map refuses
+    // or does not map (KEY-R3b review SEC-R3b-2). Refused before anything runs, and recorded.
+    // (Imported at call time: plan-step-authority imports graph-actions.controller, which imports
+    // this file.)
+    const { noMemberToolRefusal } = await import('./plan-step-authority');
+    const refusal = noMemberToolRefusal(toolName);
+    if (refusal) {
+      await this.executionLog.logToolExecution(businessId, toolName, args, `Refused: ${refusal}`, false, 0, {
+        riskTier: this.governance.getToolTier(toolName),
+        mode: 'pro_auto',
+        rationale: 'Refused for Pro Auto monitoring: it acts for no member (D-73)',
+      }).catch((e: unknown) => {
+        this.logger.error(`Failed to log refused auto-execution for ${toolName}: ${e instanceof Error ? e.message : String(e)}`);
+      });
+      return { success: false, error: `Refused: ${refusal}`, blocked: true };
+    }
+
     const decision = await this.governance.evaluate(businessId, toolName, 'pro_auto');
     if (!decision.allowed) {
       return { success: false, error: decision.reason || `Tool ${toolName} blocked by governance`, blocked: true };

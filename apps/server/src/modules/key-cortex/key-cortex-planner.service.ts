@@ -13,6 +13,15 @@ import { KeyCortexSagaService } from './key-cortex-saga.service';
 import { KeyCortexCompensationService } from './key-cortex-compensation.service';
 import { ConnectorCommand } from './key-cortex-connector.types';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { contactVisibilityFilter, resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-permissions.helper';
+import {
+  CRM_DELETE_ACTIONS,
+  memberPlanStepScopeRefusal,
+  noMemberPlanStepRefusal,
+  planStepContactIds,
+  planStepIsRead,
+  planStepTaskIds,
+} from './key-cortex-plan-authority';
 
 export interface CreateGoalInput {
   title: string;
@@ -460,6 +469,12 @@ export class KeyCortexPlannerService {
    * business OWNER or SUPER_ADMIN (V1-10 review ST-3). A plan stopped at an
    * approval pause runs none of its completed or parked steps again (review
    * ST-2), and its saga is closed SAGA_STOPPED_FOR_APPROVAL (review ST-1).
+   *
+   * KEY-R3b-PLAN-AUTHORITY (D-71, D-73): every step is then checked, before
+   * the claim, against the member it runs as (the executing member, else the
+   * creator): its module scope (assertStepsWithinAuthority). A plan with no
+   * member principal may not write money or invoices or read contacts; such a
+   * plan is refused and the refusal recorded on it (refuseNoMemberSteps).
    */
   async executePlan(planId: string, options: ExecuteOptions = {}, member?: PlanExecutionActor) {
     const plan = member
@@ -474,6 +489,14 @@ export class KeyCortexPlannerService {
     if (!plan) throw new NotFoundException('Plan not found');
     if (member) await this.assertMayExecutePlan(plan, member);
     else await this.assertCreatorMayWriteInvoices(plan);
+    // With no member the creator's platform role is read only if a step would be refused.
+    const principal = member
+      ? { userId: member.userId, role: member.role ?? null }
+      : plan.userId
+        ? { userId: plan.userId }
+        : null;
+    if (principal) await this.assertStepsWithinAuthority(plan, principal);
+    else await this.refuseNoMemberSteps(plan);
     const actorId = member ? member.userId : (plan.userId ?? SYSTEM_PLAN_ACTOR);
 
     // V1-10 review ST-3: skipApproval skips the executor's whole approval
@@ -709,9 +732,14 @@ export class KeyCortexPlannerService {
     });
   }
 
-  async getPlan(planId: string) {
-    return this.prisma.client.aiPlan.findUnique({
-      where: { id: planId },
+  /**
+   * KEY-R3a-PLAN-READS (KEY-CORTEX-PLAN-READ): the plan `planId` of `businessId` only. It was read
+   * by id alone, so GET cortex/plans/:planId answered another business's plan to a member naming
+   * their own. businessId is required, so a caller cannot read a plan by id alone.
+   */
+  async getPlan(planId: string, businessId: string) {
+    return this.prisma.client.aiPlan.findFirst({
+      where: { id: planId, businessId },
       include: { steps: true, result: true, goal: true },
     });
   }
@@ -784,6 +812,176 @@ export class KeyCortexPlannerService {
     if (!plan.userId || !planWritesInvoices(plan)) return;
     const creator = await this.prisma.client.user.findUnique({ where: { id: plan.userId }, select: { role: true } });
     await this.assertMayWriteInvoices(plan.businessId, { userId: plan.userId, role: creator?.role ?? null });
+  }
+
+  /** A user's platform role (SUPER_ADMIN keeps the platform bypass), or null for no such user. */
+  private async userRole(userId: string): Promise<string | null> {
+    const user = await this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } });
+    return user?.role ?? null;
+  }
+
+  /**
+   * KEY-R3b-PLAN-AUTHORITY, D-71 (PLAN-MODULE-RULE): every step of the plan needs the scope of its
+   * module held by the member it runs as (`principal`: the executing member over HTTP, else the
+   * plan's creator), write for a write and read for a read, as ModuleScopeGuard computes scopes
+   * (memberPlanStepScopeRefusal). This used to hold a plan only to revenue write, and only for
+   * commerce steps. The business OWNER (either arm) and SUPER_ADMIN (the platform bypass; D-46 is
+   * checked above) pass every step; an ADMIN keeps every module (D-71). A crm step also keeps to the
+   * member's own-contact rules (assertCrmStepWithinView), an ADMIN's included: D-71 keeps an ADMIN
+   * every module scope, not another member's PRIVATE contact, which an ADMIN's visibility excludes
+   * (D-37; KEY-R3b review CR-R3b-1, kept deliberately). Checked before the claim: a refused plan
+   * is left as it was, 403. `principal.role` undefined: the creator on the no-member path, whose
+   * platform role is read only when a step would be refused.
+   */
+  private async assertStepsWithinAuthority(
+    plan: { businessId: string; steps?: Array<{ module: string | null; action: string; inputPayload?: unknown }> },
+    principal: { userId: string; role?: string | null },
+  ): Promise<void> {
+    if (principal.role === 'SUPER_ADMIN') return;
+    if (await this.isBusinessOwner(plan.businessId, principal.userId)) return;
+    try {
+      await this.assertMemberSteps(plan, principal.userId);
+    } catch (err) {
+      if (principal.role === undefined && err instanceof ForbiddenException && (await this.userRole(principal.userId)) === 'SUPER_ADMIN') return;
+      throw err;
+    }
+  }
+
+  /** D-71 for a member who is neither the business OWNER nor SUPER_ADMIN (assertStepsWithinAuthority). */
+  private async assertMemberSteps(
+    plan: { businessId: string; steps?: Array<{ module: string | null; action: string; inputPayload?: unknown }> },
+    userId: string,
+  ): Promise<void> {
+    const membership = await this.membershipOf(plan.businessId, userId);
+    if (!membership) {
+      throw new ForbiddenException('Not a member of this business: a KEY plan runs only as a member of its business (D-73)');
+    }
+    const explicit = membership.permissionScopes;
+    const scopes: Record<string, string> =
+      explicit && typeof explicit === 'object' && !Array.isArray(explicit)
+        ? (explicit as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    let crm: { access: CrmAccess; clause: unknown } | undefined;
+    for (const step of plan.steps ?? []) {
+      if (membership.role !== 'ADMIN') {
+        const refusal = memberPlanStepScopeRefusal(step.module, step.action, scopes);
+        if (refusal) throw new ForbiddenException(refusal);
+      }
+      if (step.module === 'crm') {
+        if (!crm) {
+          const access = await resolveCrmAccess(this.prisma, plan.businessId, userId);
+          crm = { access, clause: visibilityClause(access, userId) };
+        }
+        await this.assertCrmStepWithinView(plan.businessId, userId, step, crm);
+      }
+    }
+  }
+
+  /**
+   * D-71: a member's own-contact (owned-view) rules apply to a crm step. The crm adapter reads and
+   * writes contacts with no actor, so the rows a step reaches are checked here, as GET contacts and
+   * PATCH contacts/:id check them: a contact the step names must be one the member can open
+   * (visibilityClause: another member's PRIVATE contact, or any contact outside the book of a member
+   * kept to its own), and a write on it needs crm_edit (crm_delete to delete or merge) for that
+   * contact ('owned': the member owns it). A read that names no contact reads the whole book, which
+   * no visibility clause can bound, so it runs only for a member who sees every contact (the OWNER
+   * returned earlier; an ADMIN, whose visibility excludes another member's PRIVATE contact, does
+   * not). Nothing here applies to the OWNER or SUPER_ADMIN, whose clause is empty.
+   *
+   * KEY-R3b review SEC-R3b-3 / CR-R3b-2: a step that names a task (crm.complete_task, which the
+   * adapter reaches by taskId alone) reaches that task's contact, whatever contact it names beside
+   * it, so the task is looked up in the business (as POST tasks/:taskId/complete does with
+   * assertVisibleChildRow) and its contact checked with the ones the step names. A task id not in
+   * the business is refused: there is no contact to check it against.
+   */
+  private async assertCrmStepWithinView(
+    businessId: string,
+    userId: string,
+    step: { action: string; inputPayload?: unknown },
+    crm: { access: CrmAccess; clause: unknown },
+  ): Promise<void> {
+    if (!crm.clause) return;
+    const label = `crm.${step.action}`;
+    const ids = planStepContactIds(step.inputPayload);
+    const taskIds = planStepTaskIds(step.inputPayload);
+    if (taskIds.length > 0) {
+      const tasks = await this.prisma.client.contactTask.findMany({
+        where: { businessId, id: { in: taskIds } },
+        select: { id: true, contactId: true },
+      });
+      if (tasks.length !== new Set(taskIds).size) {
+        throw new ForbiddenException(`Plan step "${label}" names a task this member cannot open, so it is not run (D-71)`);
+      }
+      ids.push(...tasks.map((task: { contactId: string }) => task.contactId));
+    }
+    const read = planStepIsRead('crm', step.action);
+    if (ids.length === 0) {
+      if (read) {
+        throw new ForbiddenException(
+          `Plan step "${label}" reads the contact book through the crm adapter, which applies no member's contact visibility, so it runs only for the business owner (D-71, D-37)`,
+        );
+      }
+      return;
+    }
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, crm.access, userId, ids);
+    if (canOpen && ids.some((id) => !canOpen(id))) {
+      throw new ForbiddenException(`Plan step "${label}" names a contact this member cannot open, so it is not run (D-71)`);
+    }
+    if (read) return;
+    const deletes = CRM_DELETE_ACTIONS.has(step.action);
+    const scope = deletes ? crm.access.deleteScope : crm.access.editScope;
+    if (scope === 'any') return;
+    if (scope === 'owned') {
+      const owned = await this.prisma.client.contact.count({ where: { businessId, id: { in: ids }, ownerId: userId } });
+      if (owned === new Set(ids).size) return;
+    }
+    throw new ForbiddenException(
+      `Insufficient permissions: plan step "${label}" needs ${deletes ? 'crm_delete' : 'crm_edit'} on this contact (you have ${scope}), so it is not run (D-71)`,
+    );
+  }
+
+  /**
+   * KEY-R3b-PLAN-AUTHORITY, D-73 (KEY-SYSACTOR-COMMERCE): a plan no member created, run with no
+   * member (a trigger rule that recorded no creator, a system caller), may not write the business's
+   * money or invoices and may not read its contacts (noMemberPlanStepRefusal). It ran every step as
+   * SYSTEM_PLAN_ACTOR with no check. Such a plan is refused, and the refusal is recorded on it before
+   * anything runs: the plan, claimed out of RUNNABLE_PLAN_STATUSES, is 'failed', each refused step
+   * 'failed' with the reason, the others 'skipped'. Nothing is routed and no saga starts. 403.
+   */
+  private async refuseNoMemberSteps(plan: {
+    id: string;
+    businessId: string;
+    steps?: Array<{ id: string; module: string | null; action: string; status?: string | null }>;
+  }): Promise<void> {
+    const refusals = new Map<string, string>();
+    for (const step of plan.steps ?? []) {
+      const why = noMemberPlanStepRefusal(step.module, step.action);
+      if (why) refusals.set(step.id, why);
+    }
+    if (refusals.size === 0) return;
+    const claimed = await this.prisma.client.aiPlan.updateMany({
+      where: { id: plan.id, businessId: plan.businessId, status: { in: [...RUNNABLE_PLAN_STATUSES] } },
+      data: { status: 'failed', completedAt: null },
+    });
+    if (claimed.count === 1) {
+      for (const step of plan.steps ?? []) {
+        const why = refusals.get(step.id);
+        if (why) {
+          await this.prisma.client.aiPlanStep.update({
+            where: { id: step.id },
+            data: { status: 'failed', errorMessage: `Refused: ${why}`, completedAt: new Date() },
+          });
+        } else if (step.status !== 'completed') {
+          await this.prisma.client.aiPlanStep.update({
+            where: { id: step.id },
+            data: { status: 'skipped', errorMessage: 'Not run: another step of this plan was refused (D-73)' },
+          });
+        }
+      }
+    }
+    const first = refusals.values().next().value as string;
+    this.logger.warn(`[plans] ${plan.id} refused (no member principal): ${first}`);
+    throw new ForbiddenException(`This KEY plan has no member principal, so it is not run: ${first}`);
   }
 
   /**

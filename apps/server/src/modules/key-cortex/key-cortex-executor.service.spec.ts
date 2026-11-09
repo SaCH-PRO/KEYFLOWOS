@@ -3,6 +3,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { KeyCortexExecutorService, type ExecutionRecord } from './key-cortex-executor.service';
 import type { ConnectorCommand } from './key-cortex-connector.types';
+import { AutonomyOrchestratorService } from '../key-autonomy/autonomy-orchestrator.service';
+import { AutonomyLevelService } from '../key-autonomy/autonomy-level.service';
 
 /**
  * R0-09e-KEY-PLAN-ACTOR (R0-09c review ST-7): the execute audit row.
@@ -79,7 +81,7 @@ function build(create: (args: any) => Promise<unknown>, users: string[] = [HUMAN
     execute: vi.fn(async (c: ConnectorCommand) => ({ success: true, data: { id: 'row_1' }, executionTimeMs: 1, command: c })),
     getAllCapabilities: () => [],
   };
-  const orchestrator = { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false })) };
+  const orchestrator = { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false, tier: 'full' })) };
   executor = new KeyCortexExecutorService(connector as any, prisma as any, { emit: vi.fn() } as any, {} as any, orchestrator as any);
   return { prisma, connector };
 }
@@ -182,7 +184,7 @@ describe('KeyCortexExecutorService.execute — a refused execute writes its ai_e
     };
     const orchestrator = 'orchestrator' in opts
       ? opts.orchestrator
-      : { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false })) };
+      : { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false, tier: 'full' })) };
     executor = new KeyCortexExecutorService(connector as any, prisma as any, { emit: vi.fn() } as any, (opts.gate ?? {}) as any, orchestrator);
     return { prisma, connector };
   }
@@ -203,7 +205,7 @@ describe('KeyCortexExecutorService.execute — a refused execute writes its ai_e
   });
 
   it('RED-BEFORE: an autonomy-orchestrator deny writes one row with the reason; the connector is not called', async () => {
-    const { prisma, connector } = buildWith({ orchestrator: { evaluateAction: vi.fn(async () => ({ allowed: false, reason: 'tier 4 is locked' })) } });
+    const { prisma, connector } = buildWith({ orchestrator: { evaluateAction: vi.fn(async () => ({ allowed: false, requiresApproval: true, tier: 'manual', reason: 'tier 4 is locked' })) } });
     const rec = await executor.execute(command(), { skipApproval: true });
     expect(rec.result).toMatchObject({ success: false, error: 'tier 4 is locked' });
     expect(connector.execute).not.toHaveBeenCalled();
@@ -319,5 +321,149 @@ describe('KeyCortexExecutorService.requiresApproval — the business approval po
       expect(await executor.requiresApproval(command({ parameters: { amount: 1500 } }))).toBe(true);
       expect(await executor.requiresApproval(command({ parameters: { amount: 500 } }))).toBe(false);
     }
+  });
+});
+
+/**
+ * FOLLOW3-D14 review repairs.
+ *
+ * D14-CR-1: the REAL AutonomyOrchestratorService answers {allowed:true, requiresApproval:true,
+ * tier:'supervised'} for every action of a business with no autonomy settings (the default level 2).
+ * That answer keeps its pre-D14 meaning: it clears the caller's skipApproval and the business approval
+ * policy decides; only a manual tier sends the command to approval whatever the policy says.
+ *
+ * SEC-D14-1: executeBatch asks every command's verdict (once each) before any command runs; an evaluation
+ * that throws or answers an unusable verdict refuses the whole batch, each command on record.
+ */
+describe('KeyCortexExecutorService — FOLLOW3-D14 review repairs (D14-CR-1, SEC-D14-1)', () => {
+  function buildReal(setting: Record<string, unknown> | null) {
+    const prisma: any = {
+      client: {
+        autopilotSettings: { findUnique: vi.fn(async () => null) },
+        businessBlueprint: { findUnique: vi.fn(async () => null) },
+        businessSetting: { findUnique: vi.fn(async () => setting) },
+        toolOutcomeScore: { findUnique: vi.fn(async () => null) },
+        autonomyVerdict: { create: vi.fn(async () => ({})) },
+        aiExecutionLog: { create: vi.fn(async () => ({})), count: vi.fn(async () => 0) },
+        user: { findUnique: vi.fn(async ({ where }: any) => ({ id: where.id })) },
+      },
+    };
+    const allowOversight = { evaluate: async () => ({ allowed: true, tier: 1, reason: 'ok', requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false }) };
+    const genomeGate = { checkGate: async () => ({ decision: 'ALLOW', blockingReasons: [], approvalReasons: [], confidenceScore: 100 }) };
+    const orchestrator = new AutonomyOrchestratorService(
+      prisma, allowOversight as any, genomeGate as any, { getPolicy: () => { throw new Error('n/a'); } } as any,
+      { evaluateExecution: async () => ({ allowed: true }) } as any, new AutonomyLevelService(prisma),
+      { checkAction: async () => ({ severity: 'none', reason: 'none', matchedTerms: [] }) } as any,
+      { hasValidGrant: async () => false } as any, { findMatchingRules: async () => [] } as any,
+    );
+    const connector = {
+      execute: vi.fn(async (c: ConnectorCommand) => ({ success: true, data: { id: 'p1' }, executionTimeMs: 1, command: c })),
+      getAllCapabilities: () => [],
+    };
+    const approvals = { propose: vi.fn(async () => ({ id: 'proposal_1' })) };
+    executor = new KeyCortexExecutorService(connector as any, prisma, { emit: vi.fn() } as any, {} as any, orchestrator, undefined, approvals as any);
+    return { connector, orchestrator, approvals };
+  }
+  const project = (parameters: Record<string, unknown> = { name: 'x' }) =>
+    command({ module: 'projects' as any, action: 'create_project', parameters, businessId: 'biz_default' });
+
+  function buildWithVerdict(verdictFor: unknown, setting: unknown = null) {
+    const prisma = {
+      client: {
+        aiExecutionLog: { create: vi.fn(async (_args: any) => ({})), count: vi.fn(async () => 0) },
+        user: { findUnique: vi.fn(async ({ where }: any) => ({ id: where.id })) },
+        businessSetting: { findUnique: vi.fn(async () => setting) },
+      },
+    };
+    const connector = {
+      execute: vi.fn(async (c: ConnectorCommand) => ({ success: true, data: { id: 'row_1' }, executionTimeMs: 1, command: c })),
+      getAllCapabilities: () => [],
+    };
+    const orchestrator = {
+      evaluateAction: vi.fn(async (_b: unknown, _k: unknown, params: any) =>
+        (typeof verdictFor === 'function' ? (verdictFor as (p: any) => unknown)(params) : verdictFor)),
+    };
+    executor = new KeyCortexExecutorService(connector as any, prisma as any, { emit: vi.fn() } as any, {} as any, orchestrator as any);
+    return { prisma, connector, orchestrator };
+  }
+  const rowsOf = (prisma: any) =>
+    prisma.client.aiExecutionLog.create.mock.calls.map((c: any[]) => c[0].data).filter((d: any) => d.module !== 'batch');
+  const FULL = { allowed: true, requiresApproval: false, tier: 'full' };
+
+  it("D14-CR-1: the real orchestrator's default-tenant verdict is supervised, and execute(skipApproval) then lets the business policy decide (no settings, neverRequire, legacy 'supervised': each runs)", async () => {
+    const { orchestrator } = buildReal(null);
+    const verdict = await orchestrator.evaluateAction('biz_default', 'projects.create_project', {}, { proposedBy: HUMAN });
+    expect(verdict).toMatchObject({ allowed: true, requiresApproval: true, tier: 'supervised' });
+    for (const setting of [null, { aiNeverRequireApproval: ['projects.create_project'] }, { aiAutonomyLevel: 'supervised' }]) {
+      const { connector, approvals } = buildReal(setting);
+      const rec = await executor.execute(project(), { skipApproval: true });
+      const label = JSON.stringify(setting);
+      expect(rec.result, label).toMatchObject({ success: true });
+      expect(connector.execute, label).toHaveBeenCalledTimes(1);
+      expect(approvals.propose, label).not.toHaveBeenCalled();
+    }
+  });
+
+  it('D14-CR-1: under the same verdict the policy can still ask for approval (aiAlwaysRequireApproval, or a spend over the threshold) although the caller skipped approval', async () => {
+    const cases: Array<[Record<string, unknown> | null, Record<string, unknown>]> = [
+      [{ aiAlwaysRequireApproval: ['projects.create_project'] }, { name: 'x' }],
+      [null, { name: 'x', budget: 5000 }],
+    ];
+    for (const [setting, params] of cases) {
+      const { connector, approvals } = buildReal(setting);
+      const rec = await executor.execute(project(params), { skipApproval: true });
+      const label = JSON.stringify([setting, params]);
+      expect(rec.result, label).toMatchObject({ success: false, error: 'Approval pending' });
+      expect(connector.execute, label).not.toHaveBeenCalled();
+      expect(approvals.propose, label).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('D14-CR-1: a usable manual-tier verdict goes to approval whatever the policy or the caller says (neverRequire listed, skipApproval)', async () => {
+    const { connector } = buildWithVerdict({ allowed: true, requiresApproval: false, tier: 'manual' }, { aiNeverRequireApproval: ['settings.update_business_profile'] });
+    const rec = await executor.execute(command(), { skipApproval: true });
+    expect(rec.result).toMatchObject({ success: false, error: 'Approval pending' });
+    expect(connector.execute).not.toHaveBeenCalled();
+  });
+
+  it('SEC-D14-1: executeBatch asks every verdict before running any command; an unusable verdict or a throwing evaluation on a later command refuses the whole batch, each command on record', async () => {
+    const cases: Array<[() => unknown, RegExp]> = [
+      [() => ({ allowed: true }), /unusable autonomy verdict for settings\.update_business_profile.*blocked for safety/i],
+      [() => { throw new Error('authority down'); }, /autonomy gate unavailable.*blocked for safety/i],
+    ];
+    for (const [answer, pattern] of cases) {
+      const { prisma, connector, orchestrator } = buildWithVerdict((p: any) => (p?.name === 'second' ? answer() : FULL));
+      const batch = await executor.executeBatch(
+        [command({ parameters: { name: 'first' } }), command({ parameters: { name: 'second' } }), command({ parameters: { name: 'third' } })],
+        { skipApproval: true, stopOnFailure: false },
+      );
+      const label = String(pattern);
+      expect(connector.execute, label).not.toHaveBeenCalled();
+      // At most one evaluation per command: the third is not asked once the batch has failed closed.
+      expect(orchestrator.evaluateAction, label).toHaveBeenCalledTimes(2);
+      expect(batch, label).toMatchObject({ totalCommands: 3, succeededCount: 0, failedCount: 3 });
+      expect(batch.results, label).toHaveLength(3);
+      for (const r of batch.results) {
+        expect(r.result.success, label).toBe(false);
+        expect(String(r.result.error), label).toMatch(pattern);
+      }
+      expect(String(batch.results[0].result.error), label).toMatch(/batch failed closed/i);
+      const rows = rowsOf(prisma);
+      expect(rows, label).toHaveLength(3);
+      for (const row of rows) expect(row, label).toMatchObject({ userId: HUMAN, success: false });
+    }
+  });
+
+  it('SEC-D14-1: a usable batch runs each command under the verdict asked up front (still one evaluateAction per command); a usable deny refuses only its own command', async () => {
+    const deny = { allowed: false, requiresApproval: true, tier: 'manual', reason: 'denied here' };
+    const { connector, orchestrator } = buildWithVerdict((p: any) => (p?.name === 'denied' ? deny : FULL));
+    const batch = await executor.executeBatch(
+      [command({ parameters: { name: 'first' } }), command({ parameters: { name: 'denied' } }), command({ parameters: { name: 'third' } })],
+      { skipApproval: true, stopOnFailure: false },
+    );
+    expect(orchestrator.evaluateAction).toHaveBeenCalledTimes(3);
+    expect(connector.execute.mock.calls.map((c: any[]) => c[0].parameters.name)).toEqual(['first', 'third']);
+    expect(batch.results.map((r: any) => r.result.success)).toEqual([true, false, true]);
+    expect(batch.results[1].result.error).toBe('denied here');
   });
 });

@@ -209,7 +209,7 @@ describe('V1-03: the KEY cortex principal is the one AuthGuard admitted, never a
         execute: vi.fn(async (c: ConnectorCommand) => ({ success: true, data: {}, executionTimeMs: 1, command: c })),
         getAllCapabilities: () => [],
       };
-      const orchestrator = { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false })) };
+      const orchestrator = { evaluateAction: vi.fn(async () => ({ allowed: true, requiresApproval: false, tier: 'full' })) };
       executor = new KeyCortexExecutorService(connector as any, prisma as any, { emit: vi.fn() } as any, {} as any, orchestrator as any);
       return { orchestrator, connector };
     }

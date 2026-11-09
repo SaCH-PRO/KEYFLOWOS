@@ -433,7 +433,8 @@ beforeAll(async () => {
   // The trailing Object is the @CurrentUser() principal the two plan handlers take since R0-09e.
   emitHandlerParamTypes(KeyCortexGoalsController, 'createPlanFromGoal', [String, goalsDtos.CreatePlanFromGoalDto, String, Object]);
   emitHandlerParamTypes(KeyCortexGoalsController, 'createPlanFromCommand', [goalsDtos.CreatePlanFromCommandDto, String, Object]);
-  emitHandlerParamTypes(KeyCortexGoalsController, 'updateTriggerRule', [String, goalsDtos.UpdateTriggerRuleDto, String]);
+  // KEY-R3b-PLAN-AUTHORITY (D-73): PATCH triggers/:id takes the @CurrentUser() principal too (the member it records).
+  emitHandlerParamTypes(KeyCortexGoalsController, 'updateTriggerRule', [String, goalsDtos.UpdateTriggerRuleDto, String, Object]);
 
   // The consciousness pipeline is not under test; it answers at once and records the session it was handed.
   const consciousnessFor = (pipeline: Pipeline) => ({

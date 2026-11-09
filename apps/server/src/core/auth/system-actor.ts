@@ -42,6 +42,14 @@
 export const KEY_SYSTEM_ACTOR_ID = 'key_ai';
 
 /**
+ * KEY-R3b-PLAN-AUTHORITY (DENY-SYSTEM-ACTOR): the other ids KEY acts under, none of them a User:
+ * 'key_cortex', the actor a KEY-cortex plan no member created runs as
+ * (KeyCortexPlannerService.SYSTEM_PLAN_ACTOR), and 'key-cortex', the autopilot adapter's fallback
+ * when a command names no member. A task either of them denied was recorded as a human's denial.
+ */
+const KEY_SYSTEM_ACTOR_ALIASES: ReadonlySet<string> = new Set(['key_cortex', 'key-cortex']);
+
+/**
  * Is this actor KEY itself rather than a person?
  *
  * Callers must have already established and enforced the tenant scope; see the
@@ -49,5 +57,5 @@ export const KEY_SYSTEM_ACTOR_ID = 'key_ai';
  * "is this action permitted".
  */
 export function isSystemActor(actorId?: string | null): boolean {
-  return actorId === KEY_SYSTEM_ACTOR_ID;
+  return actorId === KEY_SYSTEM_ACTOR_ID || (!!actorId && KEY_SYSTEM_ACTOR_ALIASES.has(actorId));
 }
