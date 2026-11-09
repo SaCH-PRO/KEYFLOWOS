@@ -189,3 +189,59 @@ describe("PR196-GENOME: the onboarding transcript on the device", () => {
     expect(window.localStorage.getItem(LEGACY_KEY)).toBeNull();
   });
 });
+
+describe("PR196-GENOME review: the restore shows only text from a known role, and the client sends no history", () => {
+  it("W6 a restored entry that is not text, or has an unknown role, is dropped and the chat stays usable (CR-1)", async () => {
+    api.apiGet.mockResolvedValue({
+      data: {
+        messages: [
+          { role: "assistant", content: { boom: true } },
+          { role: "system", content: "planted system line" },
+          { role: "assistant", content: 42 },
+          null,
+          { role: "user", content: SENSITIVE },
+          { role: "assistant", content: KEY_TURN },
+        ],
+        completedSections: [],
+        nextSection: "customerModel",
+        completeness: 30,
+      },
+      error: null,
+      status: 200,
+    });
+    render(<BlueprintOnboardingChat businessId={BIZ_A} />);
+
+    expect(await screen.findByText(SENSITIVE)).toBeInTheDocument();
+    expect(screen.getByText(KEY_TURN)).toBeInTheDocument();
+    expect(screen.queryByText("planted system line")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Tell KEY about your business...")).toBeInTheDocument();
+    expect(onboardingChatCalls(), "a restored conversation must not be re-opened").toHaveLength(0);
+  });
+
+  it("W7 a history that is not a list restores nothing and KEY opens the conversation", async () => {
+    api.apiGet.mockResolvedValue({
+      data: { messages: { role: "assistant", content: "x" }, completedSections: [], nextSection: "identity", completeness: 0 },
+      error: null,
+      status: 200,
+    });
+    render(<BlueprintOnboardingChat businessId={BIZ_A} />);
+    expect(await screen.findByText("Hi! What is your business called?")).toBeInTheDocument();
+    expect(onboardingChatCalls()).toHaveLength(1);
+  });
+
+  it("W8 the opening line and every turn send only the message: the server keeps the transcript (SEC-GEN-1)", async () => {
+    render(<BlueprintOnboardingChat businessId={BIZ_B} />);
+    await screen.findByText("Hi! What is your business called?");
+
+    fireEvent.change(screen.getByPlaceholderText("Tell KEY about your business..."), {
+      target: { value: "Coral Studio" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send/i }));
+    await waitFor(() => expect(onboardingChatCalls()).toHaveLength(2));
+
+    for (const [, body] of onboardingChatCalls()) {
+      expect(body).not.toHaveProperty("history");
+      expect(Object.keys(body as object)).toEqual(["message"]);
+    }
+  });
+});

@@ -1,4 +1,4 @@
-import { HttpException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, HttpException, Inject, Injectable, Logger } from '@nestjs/common';
 import { BlueprintService } from '../blueprint/blueprint.service';
 import { ModelGatewayService, GatewayMessage } from './model-gateway.service';
 import { AiUsageService } from './ai-usage.service';
@@ -42,8 +42,9 @@ interface OnboardingChatResult {
 
 /**
  * PR196-GENOME: what GET .../onboarding-history answers. The transcript is the
- * business's interview as the server cache holds it (bounded: STATE_TTL_MS
- * after the last turn, STATE_MAX_ENTRIES businesses); progress is derived from
+ * CALLER's own interview with KEY in that business, as the server cache holds
+ * it (bounded: STATE_TTL_MS after the last turn, STATE_MAX_ENTRIES
+ * conversations, STATE_MAX_MESSAGES messages each); progress is derived from
  * the saved blueprint, so it survives when the transcript has expired.
  */
 export interface OnboardingHistory {
@@ -129,21 +130,49 @@ const ANSWERED_BY: Partial<Record<BlueprintSectionKey, Record<string, (data: Rec
   ownershipProfile: { owners: (data) => data.hasPartners === false },
 };
 
+/** Words that say the founder does not know: nothing is recorded for them. */
+const STATUS_UNCERTAIN = /(not sure|unsure|uncertain|not certain|n't know|do not know|don't know|no idea|can't remember|cannot remember|can't recall)/;
+const STATUS_NOT_APPLICABLE = /(\bn\/a\b|not applicable|not needed|not required|no need|does ?n[o']t apply|\bexempt\b)/;
+/** A status word, as the thing a negation can deny ("not registered", "haven't applied"). */
+const STATUS_WORD = String.raw`(?:registered|register|registration|started|start|done|complete|completed|applied|apply|application|submitted|submit|filed|file|obtained|approved|finished|have|got|gotten)\b`;
 /**
- * Map a status the model wrote onto GENOME_STATUS_VOCABULARY. Negations and
- * "not applicable" are read before the words that mean done, so 'not
- * registered yet' is NOT_STARTED, never DONE; anything unrecognised is UNKNOWN
- * (which every readiness reader treats as incomplete).
+ * A negation that denies a status word: the negator, at most a few filler
+ * words ("not yet", "haven't even", "never been"), then the status word. Only
+ * these phrases are read as negating the status; a "no" elsewhere ("registered
+ * in 2023, no issues") negates something else (CR-2).
+ */
+const NEGATED_STATUS = new RegExp(
+  String.raw`(?:\bnot\b|\bnever\b|\bcannot\b|n't\b|\byet to\b|\bno longer\b)(?:\s+(?:yet|even|been|ever|really|already|got|be|we|i|it|to))*\s+${STATUS_WORD}|\bno\s+${STATUS_WORD}`,
+  'g',
+);
+const STATUS_NEGATIVE = /(\bno\b|\bnot\b|\bnever\b|\bnone\b|\bnope\b|\bcannot\b|n't\b|\byet to\b)/;
+const STATUS_IN_PROGRESS = /(in progress|in process|\bpending\b|\bapplied\b|\bsubmitted\b|\bprocessing\b|\bstarted\b|\bunderway\b|\bwaiting\b)/;
+const STATUS_DONE = /(\bdone\b|\bcomplete(d)?\b|\bregistered\b|\byes\b|\bobtained\b|\bapproved\b|\bhave (it|one)\b|\bfinished\b)/;
+
+/**
+ * Map a status the model wrote onto GENOME_STATUS_VOCABULARY. Free text never
+ * reads as done unless it says so with nothing against it: a status word that
+ * is negated ('not registered yet', "haven't started") is NOT_STARTED; signals
+ * that disagree ('registered in 2023, no issues', 'applied and approved'),
+ * uncertainty ('not sure') and anything unrecognised are UNKNOWN, which the
+ * interview never writes (normalizeExtractedValue) and every readiness reader
+ * treats as incomplete.
  */
 export function normalizeGenomeStatus(value: unknown): GenomeStatus {
   if (typeof value !== 'string') return 'UNKNOWN';
   const canonical = value.trim().toUpperCase().replace(/[\s-]+/g, '_');
   if ((GENOME_STATUS_VOCABULARY as readonly string[]).includes(canonical)) return canonical as GenomeStatus;
   const text = value.trim().toLowerCase().replace(/[‘’]/g, "'");
-  if (/(\bn\/a\b|not applicable|not needed|not required|no need|does ?n[o']t apply|\bexempt\b)/.test(text)) return 'NOT_APPLICABLE';
-  if (/(\bnot\b|\bno\b|\bnever\b|\bnone\b|n't\b|\bdo not\b|\byet to\b)/.test(text)) return 'NOT_STARTED';
-  if (/(in progress|\bpending\b|\bapplied\b|\bsubmitted\b|\bprocessing\b|\bstarted\b|\bunderway\b|\bwaiting\b)/.test(text)) return 'IN_PROGRESS';
-  if (/(\bdone\b|\bcomplete(d)?\b|\bregistered\b|\byes\b|\bobtained\b|\bapproved\b|\bhave (it|one)\b|\bfinished\b)/.test(text)) return 'DONE';
+  if (STATUS_UNCERTAIN.test(text)) return 'UNKNOWN';
+  if (STATUS_NOT_APPLICABLE.test(text)) return 'NOT_APPLICABLE';
+  // Read what is left once the negated status phrases are taken out.
+  const rest = text.replace(NEGATED_STATUS, ' ');
+  const negated = rest !== text || STATUS_NEGATIVE.test(rest);
+  const inProgress = STATUS_IN_PROGRESS.test(rest);
+  const done = STATUS_DONE.test(rest);
+  if (inProgress && !done) return 'IN_PROGRESS';
+  if (done && !inProgress && !negated) return 'DONE';
+  if (!done && !inProgress && negated) return 'NOT_STARTED';
   return 'UNKNOWN';
 }
 
@@ -173,7 +202,13 @@ function normalizeOwners(value: unknown): BlueprintOwner[] | undefined {
     if (Number.isFinite(pct) && pct >= 0 && pct <= 100) owner.sharePct = pct;
     if (Object.keys(owner).length > 0) owners.push(owner);
   }
-  return owners;
+  // Nothing usable is nothing to write, not an empty list over saved owners.
+  return owners.length > 0 ? owners : undefined;
+}
+
+/** A field whose value is a vocabulary in which UNKNOWN means "not answered". */
+function isVocabularyField(section: BlueprintSectionKey, field: string): boolean {
+  return Boolean(STATUS_FIELDS[section]?.includes(field)) || (section === 'legalProfile' && field === 'recommendedEntityType');
 }
 
 /**
@@ -182,13 +217,31 @@ function normalizeOwners(value: unknown): BlueprintOwner[] | undefined {
  * entity type goes through the Genesis helper (normalizeRecommendedEntityType),
  * yes/no fields become booleans, owners become BlueprintOwner rows. Every other
  * field is written as extracted, as before.
+ *
+ * A value that cannot be mapped is not written (CR-2): updateBlueprint merges
+ * field by field, so writing UNKNOWN (or an empty owners list) would replace
+ * what the onboarding cards or Genesis already saved (DONE, LIMITED_COMPANY)
+ * with no information at all.
  */
 function normalizeExtractedValue(section: BlueprintSectionKey, field: string, value: unknown): unknown {
-  if (STATUS_FIELDS[section]?.includes(field)) return normalizeGenomeStatus(value);
+  if (STATUS_FIELDS[section]?.includes(field)) {
+    const status = normalizeGenomeStatus(value);
+    return status === 'UNKNOWN' ? undefined : status;
+  }
   if (BOOLEAN_FIELDS[section]?.includes(field)) return normalizeYesNo(value);
-  if (section === 'legalProfile' && field === 'recommendedEntityType') return normalizeRecommendedEntityType(value);
+  if (section === 'legalProfile' && field === 'recommendedEntityType') {
+    const entityType = normalizeRecommendedEntityType(value);
+    return entityType === 'UNKNOWN' ? undefined : entityType;
+  }
   if (section === 'ownershipProfile' && field === 'owners') return normalizeOwners(value);
   return value;
+}
+
+/** A transcript entry as the interview stores it: a role it knows and text. */
+function isTranscriptEntry(value: unknown): value is OnboardingMessage {
+  if (!value || typeof value !== 'object') return false;
+  const entry = value as Record<string, unknown>;
+  return (entry.role === 'user' || entry.role === 'assistant') && typeof entry.content === 'string';
 }
 
 const SECTION_FOCUS: Partial<Record<BlueprintSectionKey, { label: string; goal: string; fields: string[] }>> = {
@@ -295,40 +348,56 @@ export class BlueprintOnboardingService {
    * refresh restarts the interview" — and that part is not right. getState
    * REBUILDS from the persisted blueprint on a miss: completedSections and
    * currentSection are derived from saved data, so progress survives a restart.
-   * Only the transcript is cache-resident, and the caller passes that in.
+   * Only the transcript is cache-resident.
    *
    * That rebuild is exactly what makes eviction safe, and it is why this is a
    * cache and not storage. A miss costs one blueprint read.
+   *
+   * PR196-GENOME review (SEC-GEN-1/3, CR-1): an entry is ONE member's
+   * conversation with KEY in one business, keyed by (businessId, userId), and
+   * the server is the only author of its transcript. The client's `history`
+   * is never read: a member's own words and KEY's replies are the only
+   * entries, so no caller can plant a "KEY" line, a non-text entry or another
+   * member's words in anybody's transcript. The blueprint the interview fills
+   * stays business-level and any-member, as every blueprint route is; the raw
+   * typed text is the member's own.
    */
   private static readonly STATE_TTL_MS = 60 * 60_000;
   private static readonly STATE_MAX_ENTRIES = 500;
+  /** The most messages one transcript keeps (the oldest go first). */
+  private static readonly STATE_MAX_MESSAGES = 200;
   private readonly stateCache = new Map<string, { state: BlueprintOnboardingState; touchedAt: number }>();
 
+  /** The cache key of one member's conversation in one business. */
+  private static transcriptKey(businessId: string, userId: string): string {
+    return `${businessId}::${userId}`;
+  }
+
   /** A live entry, or nothing — an expired one is a miss, not stale data. */
-  private readCache(businessId: string): BlueprintOnboardingState | undefined {
-    const hit = this.stateCache.get(businessId);
+  private readCache(key: string): BlueprintOnboardingState | undefined {
+    const hit = this.stateCache.get(key);
     if (!hit) return undefined;
     if (Date.now() - hit.touchedAt > BlueprintOnboardingService.STATE_TTL_MS) {
-      this.stateCache.delete(businessId);
+      this.stateCache.delete(key);
       return undefined;
     }
     // A READ counts as use. Without this the cache evicts by insertion order,
     // so a business part-way through onboarding can be dropped while an idle
     // one written later survives — which is the opposite of what a cap is for.
-    this.stateCache.delete(businessId);
-    this.stateCache.set(businessId, { state: hit.state, touchedAt: hit.touchedAt });
+    this.stateCache.delete(key);
+    this.stateCache.set(key, { state: hit.state, touchedAt: hit.touchedAt });
     return hit.state;
   }
 
-  private writeCache(businessId: string, state: BlueprintOnboardingState): void {
+  private writeCache(key: string, state: BlueprintOnboardingState): void {
     // Map iterates in insertion order, so the first key is the oldest write.
     // Deleting before setting keeps a refreshed entry from counting as old.
-    this.stateCache.delete(businessId);
+    this.stateCache.delete(key);
     if (this.stateCache.size >= BlueprintOnboardingService.STATE_MAX_ENTRIES) {
       const oldest = this.stateCache.keys().next().value;
       if (oldest !== undefined) this.stateCache.delete(oldest);
     }
-    this.stateCache.set(businessId, { state, touchedAt: Date.now() });
+    this.stateCache.set(key, { state, touchedAt: Date.now() });
   }
 
   constructor(
@@ -337,16 +406,26 @@ export class BlueprintOnboardingService {
     @Inject(AiUsageService) private readonly aiUsage: AiUsageService,
   ) {}
 
-  async chat(
-    businessId: string,
-    userMessage: string,
-    history: OnboardingMessage[] = [],
-  ): Promise<OnboardingChatResult> {
+  /**
+   * One interview turn of `userId` in `businessId`. The transcript the model
+   * sees and the one GET onboarding-history returns are the server's own
+   * (getState), never a copy the client sends.
+   */
+  async chat(businessId: string, userId: string, userMessage: string): Promise<OnboardingChatResult> {
+    // The route's DTO checks this; the transcript must hold text whatever the caller.
+    if (typeof userMessage !== 'string' || userMessage.length === 0) {
+      throw new BadRequestException('message must be text');
+    }
+    const key = BlueprintOnboardingService.transcriptKey(businessId, userId);
     const blueprint = await this.blueprint.getBlueprint(businessId);
-    const state = await this.getState(businessId, history);
+    const state = await this.getState(businessId, userId);
 
-    const turnStart = state.messages.length;
-    state.messages.push({ role: 'user', content: userMessage });
+    // This turn's own entry. Turns of the same conversation can overlap (two
+    // tabs), so the turn finds its place by this object, never by an index
+    // taken before the model call (SEC-GEN-2).
+    const turn: OnboardingMessage = { role: 'user', content: userMessage };
+    state.messages.push(turn);
+    this.boundTranscript(state);
 
     const systemPrompt = this.buildSystemPrompt(blueprint, state);
     const gatewayMessages: GatewayMessage[] = [
@@ -369,7 +448,7 @@ export class BlueprintOnboardingService {
       const rawReply = completion.content || "Let's keep building your Business Genome. What else should I know?";
       const { reply, extractions } = this.parseExtractions(rawReply);
 
-      state.messages.push({ role: 'assistant', content: reply });
+      this.answerTurn(state, turn, reply);
 
       const patch = this.buildPatchFromExtractions(extractions);
       const updatedBlueprint = Object.keys(patch).length > 0
@@ -383,7 +462,7 @@ export class BlueprintOnboardingService {
       const nextSection = this.chooseNextSection(updatedBlueprint, state);
       state.currentSection = nextSection;
       state.currentQuestion = nextSection ? this.firstQuestionForSection(nextSection) : null;
-      this.writeCache(businessId, state);
+      this.writeCache(key, state);
 
       return {
         reply,
@@ -401,14 +480,16 @@ export class BlueprintOnboardingService {
       // 503 provider_not_configured; also the rate-limit 429 and credit 403
       // trackAndComplete raises) reaches the caller as itself, not as a 200
       // carrying a made-up reply. The refused turn leaves the transcript as it
-      // was, so the history never shows a message KEY did not answer.
+      // was, so the history never shows a message KEY did not answer. Only this
+      // turn's own entry is taken out: a turn that finished meanwhile stays.
       if (err instanceof HttpException) {
-        state.messages.splice(turnStart);
+        const at = state.messages.indexOf(turn);
+        if (at >= 0) state.messages.splice(at, 1);
         throw err;
       }
       this.logger.error(`Blueprint onboarding chat failed: ${(err as Error).message}`);
       const fallback = "I'm having trouble thinking that through. Could you tell me a bit more about your business?";
-      state.messages.push({ role: 'assistant', content: fallback });
+      this.answerTurn(state, turn, fallback);
       return {
         reply: fallback,
         blueprint,
@@ -423,8 +504,32 @@ export class BlueprintOnboardingService {
     }
   }
 
-  async getState(businessId: string, history?: OnboardingMessage[]): Promise<BlueprintOnboardingState> {
-    const cached = this.readCache(businessId);
+  /**
+   * KEY's reply goes right after the turn it answers, so overlapping turns
+   * still read question, answer, question, answer. A turn no longer in the
+   * transcript (bounded away) has its reply appended.
+   */
+  private answerTurn(state: BlueprintOnboardingState, turn: OnboardingMessage, reply: string): void {
+    const at = state.messages.indexOf(turn);
+    const entry: OnboardingMessage = { role: 'assistant', content: reply };
+    if (at >= 0) state.messages.splice(at + 1, 0, entry);
+    else state.messages.push(entry);
+    this.boundTranscript(state);
+  }
+
+  private boundTranscript(state: BlueprintOnboardingState): void {
+    const excess = state.messages.length - BlueprintOnboardingService.STATE_MAX_MESSAGES;
+    if (excess > 0) state.messages.splice(0, excess);
+  }
+
+  /**
+   * The interview state of `userId` in `businessId`: from the cache, or on a
+   * miss rebuilt from the saved blueprint with an empty transcript. Nothing a
+   * client sends seeds it (SEC-GEN-1, CR-1).
+   */
+  async getState(businessId: string, userId: string): Promise<BlueprintOnboardingState> {
+    const key = BlueprintOnboardingService.transcriptKey(businessId, userId);
+    const cached = this.readCache(key);
     if (cached) return cached;
 
     const blueprint = await this.blueprint.getBlueprint(businessId);
@@ -432,34 +537,35 @@ export class BlueprintOnboardingService {
     const nextSection = this.chooseNextSection(blueprint, { completedSections, currentSection: null } as BlueprintOnboardingState);
 
     const state: BlueprintOnboardingState = {
-      // A copy: the cached transcript must not alias the caller's array.
-      messages: history ? [...history] : [],
+      messages: [],
       completedSections,
       currentSection: nextSection,
       currentQuestion: nextSection ? this.firstQuestionForSection(nextSection) : null,
     };
 
-    this.writeCache(businessId, state);
+    this.writeCache(key, state);
     return state;
   }
 
   /**
-   * PR196-GENOME: GET .../onboarding-history. The business's own transcript as
-   * the server holds it, so a reload or another device resumes the interview
-   * without the browser keeping a copy (OK-8B-2), with progress derived from
-   * the saved blueprint.
+   * PR196-GENOME: GET .../onboarding-history. The caller's own transcript in
+   * that business as the server holds it, so a reload or another device
+   * resumes the interview without the browser keeping a copy (OK-8B-2), with
+   * progress derived from the saved blueprint. Another member's typed text is
+   * never in it (SEC-GEN-3): each member's conversation is their own entry.
    *
    * The transcript is cache-resident and bounded, and that is stated rather
    * than hidden (OK-8B-4): it is kept STATE_TTL_MS after the last chat turn,
-   * for at most STATE_MAX_ENTRIES businesses, in this process. Past that the
-   * answer is an empty transcript with the progress still right; durable
-   * storage would be a new table (a migration and an owner decision).
+   * for at most STATE_MAX_ENTRIES conversations of STATE_MAX_MESSAGES
+   * messages, in this process. Past that the answer is an empty transcript
+   * with the progress still right; durable storage would be a new table (a
+   * migration and an owner decision).
    *
-   * A read has no side effect: on a miss nothing is cached (the next chat
-   * turn seeds from the client's history as before).
+   * A read has no side effect: on a miss nothing is cached. Only a known role
+   * with text is returned, whatever the cache holds (CR-1).
    */
-  async getHistory(businessId: string): Promise<OnboardingHistory> {
-    const cached = this.readCache(businessId);
+  async getHistory(businessId: string, userId: string): Promise<OnboardingHistory> {
+    const cached = this.readCache(BlueprintOnboardingService.transcriptKey(businessId, userId));
     const blueprint = await this.blueprint.getBlueprint(businessId);
     const completedSections = this.getCompletedSections(blueprint);
     const nextSection = this.chooseNextSection(blueprint, {
@@ -467,15 +573,16 @@ export class BlueprintOnboardingService {
       currentSection: cached?.currentSection ?? null,
     });
     return {
-      messages: (cached?.messages ?? []).map((m) => ({ role: m.role, content: m.content })),
+      messages: (cached?.messages ?? []).filter(isTranscriptEntry).map((m) => ({ role: m.role, content: m.content })),
       completedSections,
       nextSection,
       completeness: blueprint.completeness ?? 0,
     };
   }
 
-  reset(businessId: string): void {
-    this.stateCache.delete(businessId);
+  /** Starts `userId`'s conversation in `businessId` over; nobody else's. */
+  reset(businessId: string, userId: string): void {
+    this.stateCache.delete(BlueprintOnboardingService.transcriptKey(businessId, userId));
   }
 
   private buildSystemPrompt(blueprint: BlueprintData, state: BlueprintOnboardingState): string {
@@ -532,6 +639,7 @@ For autonomyLevel, return an integer 1-5 where 1 = always ask first, 5 = act aut
 For numeric fields, return a number.
 For status fields (${[...(STATUS_FIELDS.registrationProfile ?? []), ...(STATUS_FIELDS.taxProfile ?? [])].join(', ')}), return exactly one of: ${GENOME_STATUS_VOCABULARY.join(', ')}.
 For recommendedEntityType, return exactly one of: SOLE_TRADER, PARTNERSHIP, LIMITED_COMPANY, NONPROFIT, UNKNOWN.
+UNKNOWN is never saved: if the founder does not know a status or the structure, leave the field out and ask again later.
 For yes/no fields (regulatedIndustry, hasPartners, payrollExpected), return true or false.
 For owners, return a JSON array of objects: {"name": string, "sharePct": number from 0 to 100, "role": string}.
 Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confirmed.`;
@@ -604,7 +712,7 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
     if (!focus) return 0;
     const data = ((blueprint as unknown as Record<string, unknown>)[section] ?? {}) as Record<string, unknown>;
     const answeredBy = ANSWERED_BY[section] ?? {};
-    return focus.fields.filter(f => this.isPopulated(data[f]) || answeredBy[f]?.(data) === true).length;
+    return focus.fields.filter(f => this.isAnswered(section, f, data[f]) || answeredBy[f]?.(data) === true).length;
   }
 
   private chooseNextSection(
@@ -653,6 +761,17 @@ Confidence: 0.6 for inferred, 0.85 for stated clearly, 1.0 for explicitly confir
       intelligence: undefined,
     };
     return questions[section] || "Tell me more about your business.";
+  }
+
+  /**
+   * A tracked field is answered when it holds a value; for a status or the
+   * entity type, UNKNOWN is not an answer (CR-2), as the concierge and
+   * readiness readers already treat it, so the interview asks it again rather
+   * than calling the section complete.
+   */
+  private isAnswered(section: BlueprintSectionKey, field: string, value: unknown): boolean {
+    if (value === 'UNKNOWN' && isVocabularyField(section, field)) return false;
+    return this.isPopulated(value);
   }
 
   private isPopulated(value: unknown): boolean {

@@ -31,7 +31,8 @@ export interface OnboardingChatResult {
 
 /** GET /blueprint/businesses/:businessId/onboarding-history (PR196-GENOME). */
 interface OnboardingHistoryResponse {
-  messages: OnboardingMessage[];
+  /** Checked entry by entry on restore (isTranscriptEntry), not trusted as typed. */
+  messages: unknown;
   completedSections: BlueprintSectionKey[];
   nextSection: BlueprintSectionKey | null;
   completeness: number;
@@ -39,6 +40,17 @@ interface OnboardingHistoryResponse {
 
 /** The line the client sends to open a conversation; it is not something the member typed. */
 const OPENING_LINE = "Hi KEY, I'm ready to build my Business Genome.";
+
+/**
+ * A transcript entry this chat can show: a known role with text. Anything else
+ * the history route returns is dropped on restore rather than rendered (an
+ * object as a React child unmounts the whole chat; PR196-GENOME review CR-1).
+ */
+function isTranscriptEntry(value: unknown): value is OnboardingMessage {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as { role?: unknown; content?: unknown };
+  return (entry.role === "user" || entry.role === "assistant") && typeof entry.content === "string";
+}
 
 interface BlueprintOnboardingChatProps {
   businessId?: string;
@@ -188,9 +200,9 @@ export function BlueprintOnboardingChat({
         setLoading(false);
         return;
       }
-      const restored = history.data.messages.filter(
-        (m, i) => !(i === 0 && m.role === "user" && m.content === OPENING_LINE),
-      );
+      const restored = (Array.isArray(history.data.messages) ? history.data.messages : [])
+        .filter(isTranscriptEntry)
+        .filter((m, i) => !(i === 0 && m.role === "user" && m.content === OPENING_LINE));
       if (restored.length > 0) {
         setMessages(restored);
         setCompleteness(history.data.completeness);
@@ -200,9 +212,11 @@ export function BlueprintOnboardingChat({
       }
 
       // No transcript yet (or older than the server keeps): KEY opens.
+      // The server keeps the transcript (one per member); the client sends
+      // only the message, never a history (PR196-GENOME review SEC-GEN-1).
       const { data, error } = await apiPost<OnboardingChatResult>(
         `/blueprint/businesses/${businessId}/onboarding-chat`,
-        { message: OPENING_LINE, history: [] },
+        { message: OPENING_LINE },
       );
       if (cancelled) return;
       setLoading(false);
@@ -229,10 +243,9 @@ export function BlueprintOnboardingChat({
     setMessages((prev) => [...prev, { role: "user", content: userMsg }]);
     setLoading(true);
 
-    const history = messages.map((m) => m);
     const { data, error } = await apiPost<OnboardingChatResult>(
       `/blueprint/businesses/${businessId}/onboarding-chat`,
-      { message: userMsg, history },
+      { message: userMsg },
     );
 
     if (activeBusinessRef.current !== businessId) return;
@@ -250,7 +263,7 @@ export function BlueprintOnboardingChat({
     if (data.threePillarMinimumMet && onComplete) {
       onComplete();
     }
-  }, [businessId, input, loading, messages, onComplete]);
+  }, [businessId, input, loading, onComplete]);
 
   const handleReset = useCallback(async () => {
     if (!businessId) return;
@@ -262,7 +275,7 @@ export function BlueprintOnboardingChat({
     setBlueprint(null);
     const { data, error } = await apiPost<OnboardingChatResult>(
       `/blueprint/businesses/${businessId}/onboarding-chat`,
-      { message: OPENING_LINE, history: [] },
+      { message: OPENING_LINE },
     );
     if (activeBusinessRef.current !== businessId) return;
     setLoading(false);
