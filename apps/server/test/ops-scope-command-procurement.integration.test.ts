@@ -811,7 +811,7 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
   });
 
   it.todo(
-    "[OPS-T03] review SEC-R013g-3: KEY chat (POST /ai/businesses/:id/flow/chat) selects tools by the crew detected from the message (FlowOrchestratorService.selectToolsForRequest; RoleEngine ROLE_BASELINE_TOOLS gives every crew command_list_due_obligations and command_discharge_obligation, the operations crew procurement_*) with no member module scope, and POST /ai/businesses/:id/key/command (do, draft) reaches CommandService.create for any member — not done: pre-existing, in role-engine.service.ts, flow-orchestrator.service.ts and ai.controller.ts, outside this packet's write set; D-40 over KEY chat needs its own packet",
+    "[OPS-T03] review SEC-R013g-3: POST /ai/businesses/:id/key/command (do, draft) reaches CommandService.create for any member — not done: KeyCommandService is outside this packet's write set (FOLLOW3-D9-DOITFORME-SCOPE). The member-chat half (POST /ai/businesses/:id/flow/chat, its stream and flow/confirm offered and ran command_* and procurement_* by the crew detected from the message, with no member module scope) is done in FOLLOW3-D16-KEY-CHAT-OPS-SCOPE and proved by test/key-chat-ops-scope.integration.test.ts; whichever of D9 and D16 lands last removes this todo",
   );
 
   it.todo(

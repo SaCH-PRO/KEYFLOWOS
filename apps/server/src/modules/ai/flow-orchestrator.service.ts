@@ -36,7 +36,8 @@ import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
 import { isMcpToolName } from '../mcp/mcp.types';
 import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
-import { JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
+import { CANONICAL_MODULE_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { PayrollService } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
 import { CrmSequenceService } from '../crm/crm-sequence.service';
@@ -367,6 +368,19 @@ function readFlowBoundConfirmation(value: unknown): { bound: FlowBoundConfirmati
   if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
   return { bound: v as unknown as FlowBoundConfirmation, args: args as Record<string, unknown> };
 }
+
+/**
+ * V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE, owner ruling D-40). The level the routes require for a
+ * KEY tool CANONICAL_MODULE_TOOLS.operations lists (the command-centre items, procurement and the
+ * other operations routes); undefined for every other tool, which this rule leaves alone.
+ */
+function operationsLevelFor(toolName: string): 'read' | 'write' | 'admin' | undefined {
+  const tools = CANONICAL_MODULE_TOOLS.operations;
+  return Object.prototype.hasOwnProperty.call(tools, toolName) ? tools[toolName] : undefined;
+}
+
+/** The surfaces a member's own chat turn arrives on (E1 to E3); their principal is that member. */
+const MEMBER_CHAT_SURFACES: ReadonlySet<string> = new Set(['CHAT', 'CHAT_STREAM', 'CHAT_CONFIRM']);
 
 /** The page context without any position envelope a caller put in it (V1-21b review 7 ENV-FORGE). */
 function withoutClientEnvelope(ctx: FlowPageContext | undefined): FlowPageContext | undefined {
@@ -1532,6 +1546,8 @@ export class FlowOrchestratorService {
     crew: readonly BusinessRole[],
     contextText: string,
     envelope?: JobRoleEnvelope,
+    /** The member whose chat turn this is (member chat only; the staff bridge passes none). */
+    principalUserId?: string | null,
   ): Promise<ReturnType<typeof getOpenAiToolDefinitions>> {
     const all = getOpenAiToolDefinitions();
     let candidates: ReturnType<typeof getOpenAiToolDefinitions>;
@@ -1551,6 +1567,18 @@ export class FlowOrchestratorService {
       candidates = all.filter((t) => this.roleEngine.crewAllows(crew, t.function.name));
     } else {
       candidates = all;
+    }
+
+    // V1-84 (FOLLOW3-D16, owner ruling D-40): in a member's own chat, an operations tool is offered
+    // only when the member's operations level reaches the level its routes require, as
+    // ModuleScopeGuard would let them do the same work by hand. A position envelope already bounds
+    // a staff-bridge turn by its holder's membership (JobRolePolicyService), so it is left alone.
+    if (!envelope && principalUserId) {
+      const level = await this.memberOperationsLevel(businessId, principalUserId);
+      candidates = candidates.filter((t) => {
+        const required = operationsLevelFor(t.function.name);
+        return !required || rankOf(level) >= LEVEL_RANK[required];
+      });
     }
 
     // MCP IS DELIBERATELY NOT BRIDGED HERE. See the comment below — this is a
@@ -1871,6 +1899,7 @@ export class FlowOrchestratorService {
       crew,
       `${enrichedMessage}\n${pageContext?.route ?? ''}`,
       envelope,
+      userId,
     );
 
     let systemPrompt: string;
@@ -2321,6 +2350,7 @@ ${triage.standingContext}`;
       crew,
       `${enrichedMessage}\n${pageContext?.route ?? ''}`,
       envelope,
+      userId,
     );
 
     let systemPrompt: string;
@@ -2778,6 +2808,17 @@ ${triage.standingContext}`;
   ): Promise<GovernedToolCall> {
     const boundary = this.getActionBoundary();
     if (!legacy.allowed) return { tc, decision: legacy };
+    // V1-84 (FOLLOW3-D16, owner ruling D-40): a call the member's operations scope does not reach is
+    // neither proposed for confirmation nor filed for approval. It goes to the executor, which
+    // refuses it as a tool error before anything is written (operationsScopeRefusal), so the
+    // member and the model are told why.
+    if (await this.operationsScopeRefusal(businessId, tc.name, ctx)) {
+      return {
+        tc,
+        decision: { ...legacy, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false },
+        action: ctx,
+      };
+    }
     // V1-84 (FOLLOW3-D7, owner ruling D-37): a tool the boundary has not adopted still runs as the
     // member this surface established, so the dispatcher's contact and calendar reads apply that
     // member's visibility (contactReadAccess, calendar_list_events). The context used to be dropped
@@ -3176,6 +3217,10 @@ ${triage.standingContext}`;
     const actorUserId = planContext?.actorUserId;
     const startTime = Date.now();
     try {
+      // V1-84 (FOLLOW3-D16, D-40): read when the call runs, as the route reads it per request, so a
+      // confirmation issued before the member's operations scope was lowered runs nothing either.
+      const refusal = await this.operationsScopeRefusal(businessId, toolName, action);
+      if (refusal) throw new Error(refusal);
       this.validateToolInput(toolName, args);
       const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
@@ -3278,6 +3323,47 @@ ${triage.standingContext}`;
     action?: ActionContext,
   ): Promise<unknown> {
     return this.executeToolAction(businessId, toolName, args, action);
+  }
+
+  /**
+   * V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE, owner ruling D-40). The member's `operations` level, read
+   * exactly as ModuleScopeGuard reads it for the routes behind CANONICAL_MODULE_TOOLS.operations
+   * (the command-centre items, procurement and the other operations routes): a platform
+   * SUPER_ADMIN passes every requirement; else the membership's explicit permissionScopes map,
+   * where a missing key is none; else the role defaults (OWNER and ADMIN admin, STAFF read). No
+   * membership is none.
+   */
+  private async memberOperationsLevel(businessId: string, userId: string): Promise<string> {
+    const [user, membership] = await Promise.all([
+      this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } }),
+      this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true, permissionScopes: true },
+      }),
+    ]);
+    if (user?.role === 'SUPER_ADMIN') return 'admin';
+    if (!membership) return 'none';
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    return scopes.operations || 'none';
+  }
+
+  /**
+   * V1-84 (FOLLOW3-D16, D-40). Why a member's chat call may not run `toolName`, in the words
+   * ModuleScopeGuard answers the route with: an operations tool whose routes require a level above
+   * the member's operations level. null for every other tool, for a level that reaches it, and for
+   * a call with no member or from another surface: the staff bridge (whose issued envelope
+   * JobRolePolicyService already bounds by the holder's membership), the support desk and the
+   * system surfaces are unchanged.
+   */
+  private async operationsScopeRefusal(businessId: string, toolName: string, action?: ActionContext): Promise<string | null> {
+    const required = operationsLevelFor(toolName);
+    if (!required || !action?.principalUserId || !MEMBER_CHAT_SURFACES.has(action.surface)) return null;
+    const level = await this.memberOperationsLevel(businessId, action.principalUserId);
+    if (rankOf(level) >= LEVEL_RANK[required]) return null;
+    return `Insufficient permissions: ${toolName} needs operations ${required} access (you have ${level})`;
   }
 
   /**
