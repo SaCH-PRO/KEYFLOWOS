@@ -1,4 +1,5 @@
 import { Inject, Injectable, Logger, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { AccessToken, AgentDispatchClient, RoomServiceClient, WebhookReceiver } from 'livekit-server-sdk';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { keyDisabled } from '../../core/config/env';
@@ -15,6 +16,8 @@ export const KEY_VOICE_AGENT_NAME = 'key-voice-agent';
 @Injectable()
 export class LivekitService {
   private readonly logger = new Logger(LivekitService.name);
+  /** The not-configured warning is logged once per process: the chat shell probes on every visit. */
+  private unconfiguredLogged = false;
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
@@ -27,9 +30,28 @@ export class LivekitService {
     return !!(this.apiKey && this.apiSecret);
   }
 
+  /**
+   * PR196-VOICE (pr196-review OK-9A-1): an unconfigured LiveKit answers the
+   * R0-07/R0-P structured 503, which the global filter renders as
+   * { statusCode: 503, code: 'provider_not_configured', message, details: { service: 'voice' } }.
+   * The web's providerUnavailableOf classifies it (and fetchWithRetry hands it
+   * back without retrying), so the KEY chat shell hides its live voice control
+   * when its rooms probe gets this answer. It used to be a plain-string 503
+   * naming the server's env vars, rendered as code UNKNOWN_ERROR and toasted
+   * verbatim. The env var names now go to the server log only.
+   */
   private assertConfigured() {
     if (!this.isConfigured()) {
-      throw new ServiceUnavailableException('LiveKit is not configured (LIVEKIT_API_KEY/LIVEKIT_API_SECRET missing)');
+      if (!this.unconfiguredLogged) {
+        this.unconfiguredLogged = true;
+        this.logger.warn('LiveKit is not configured (LIVEKIT_API_KEY/LIVEKIT_API_SECRET missing): live KEY voice answers 503 provider_not_configured');
+      }
+      throw new ServiceUnavailableException({
+        code: 'provider_not_configured',
+        service: 'voice',
+        message: 'Live voice is not set up on this server',
+        error: 'Service Unavailable',
+      });
     }
   }
 
@@ -41,8 +63,17 @@ export class LivekitService {
   /**
    * Create a voice room for the business, dispatch the KEY voice agent into
    * it, mint a user join token, and record a VoiceSession for history.
+   *
+   * PR196-VOICE (pr196-review OK-9A-2): the room and the identity are derived
+   * here, from the guarded business and the authenticated member, never from
+   * the request. The route's body ({ identity?, roomName? }) is accepted for
+   * compatibility and ignored: a client-chosen room name let a member join
+   * another member's live call (or a guessed room of another tenant) with
+   * publish/subscribe rights, and a client-chosen 'agent-*' identity posed as
+   * KEY to the client. The room name carries a random UUID, so it cannot be
+   * guessed, and the identity is user-<member id>, never agent-*.
    */
-  async createVoiceSession(businessId: string, userId: string | undefined, opts: { identity?: string; roomName?: string } = {}) {
+  async createVoiceSession(businessId: string, userId: string | undefined, _clientOpts: unknown = {}) {
     // V1-24b review (SEC-V124b-2): a KEY voice session dispatches the KEY voice
     // agent, which streams the member's audio to OpenAI Realtime with the
     // business blueprint in its instructions. With KEY switched off
@@ -50,9 +81,10 @@ export class LivekitService {
     // dispatch, join token or VoiceSession row: the gateway's KEY-disabled 503.
     if (keyDisabled()) throw keyDisabledRefusal();
     this.assertConfigured();
-    const roomName = opts.roomName ?? `key-voice-${businessId.slice(0, 8)}-${Date.now().toString(36)}`;
-    const identity = opts.identity ?? `user-${userId ?? 'anon'}-${Math.random().toString(36).slice(2, 6)}`;
-    const metadata = JSON.stringify({ businessId, userId: userId ?? null });
+    if (!userId) throw new UnauthorizedException('A signed-in member is required to start a voice session');
+    const roomName = `key-voice-${randomUUID()}`;
+    const identity = `user-${userId}`;
+    const metadata = JSON.stringify({ businessId, userId });
 
     await this.roomClient().createRoom({
       name: roomName,
@@ -81,7 +113,7 @@ export class LivekitService {
     const session = await this.prisma.client.voiceSession.create({
       data: {
         businessId,
-        userId: userId ?? null,
+        userId,
         mode: 'livekit_full_duplex',
         status: 'ACTIVE',
         commandItems: [{ roomName, identity, event: 'created', at: new Date().toISOString() }],
