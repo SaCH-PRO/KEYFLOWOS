@@ -305,6 +305,30 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
    */
   async isOwnCharge(businessId: string, chargeId: string): Promise<boolean> {
     const { key, shared } = await this.resolveKey(businessId);
+    return this.chargeOwnedBy(businessId, chargeId, key, shared);
+  }
+
+  /**
+   * W3-PLATFORM-CHARGE-BIND (review CR-A3-1, owner ruling D-56): isOwnCharge's
+   * shared-key rule on the platform account itself, whatever key the business
+   * holds now. A business that saved a Stripe key of its own keeps the charges
+   * it took on the platform account before (createStripeCheckout and the
+   * payment links chose the deployment's key while it had none), and
+   * isOwnCharge would read its own account for them. Here the charge is read
+   * with the deployment's STRIPE_SECRET_KEY and only the tag the platform wrote
+   * (on the charge, else on the Checkout Session of its payment_intent)
+   * decides; no payment row is evidence, and the business's own key is never
+   * used. False for an id that is not a charge or that the platform account
+   * does not know (404); every other failure propagates.
+   */
+  async isOwnPlatformCharge(businessId: string, chargeId: string): Promise<boolean> {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) throw new Error('Stripe is not configured for the platform account');
+    return this.chargeOwnedBy(businessId, chargeId, key, true);
+  }
+
+  /** isOwnCharge's rule with `key`: `shared` when it is the platform account's (tags only), else the business's own. */
+  private async chargeOwnedBy(businessId: string, chargeId: string, key: string, shared: boolean): Promise<boolean> {
     if (!shared && (await this.ownRowNames(businessId, [chargeId]))) return true;
     if (!/^(ch|py)_/.test(chargeId)) return false;
     let charge: { metadata?: unknown; payment_intent?: unknown } | null;

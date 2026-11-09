@@ -1500,10 +1500,17 @@ export class PaymentsService {
    * tenant's refund (an invalid key) or claim or block it (a self-signed row
    * naming the charge). A business that saves a key of its own while it is
    * being asked is treated the same: its answer does not count and its failed
-   * read does not fail the delivery. Residual (review CR-A3-1): a payment a
-   * business took on the platform account before it saved its own key is not
-   * bound either; the refund is refused and logged, as StripeConnector has no
-   * platform-account read for such a business.
+   * read does not fail the delivery.
+   *
+   * W3-PLATFORM-CHARGE-BIND (review CR-A3-1, owner ruling D-56): a business
+   * that holds a key of its own may still own a charge on the platform
+   * account, one it took there before it saved that key. When its matching
+   * payment predates the key (paidBeforeOwnKey), the platform account itself
+   * is read (StripeConnector.isOwnPlatformCharge: the deployment's key, the
+   * platform's tag only, no payment row as evidence), and its answer counts as
+   * that of a business on the platform account does; a failed read fails the
+   * delivery. A business whose matching payments all postdate its key is not
+   * asked: they were taken on its own account, never on the platform's.
    */
   private async platformRefundOriginal(
     eventType: string,
@@ -1517,12 +1524,26 @@ export class PaymentsService {
     const matches = await this.prisma.client.payment.findMany({
       where: originalWhere,
       orderBy: { createdAt: 'asc' },
-      select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
+      select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true, createdAt: true },
     });
     const businesses = [...new Set(matches.map((m) => m.businessId))];
     const onPlatform = await this.onPlatformAccount(businesses);
+    // W3-PLATFORM-CHARGE-BIND (CR-A3-1, D-56): a business with a key of its own whose matching payment predates it.
+    const preKey = await this.paidBeforeOwnKey(matches.filter((m) => !onPlatform.has(m.businessId)));
     const owners: string[] = [];
+    const platformOwners: string[] = [];
     for (const businessId of businesses) {
+      if (preKey.has(businessId)) {
+        const key = `${businessId} ${charge} platform`;
+        let own = owns.get(key);
+        if (own === undefined) {
+          // The platform account's own record: a failed read fails the delivery.
+          own = await connector.isOwnPlatformCharge(businessId, charge);
+          owns.set(key, own);
+        }
+        if (own) platformOwners.push(businessId);
+        continue;
+      }
       if (!onPlatform.has(businessId)) continue;
       const key = `${businessId} ${charge}`;
       let own = owns.get(key);
@@ -1539,13 +1560,15 @@ export class PaymentsService {
     }
     // An owner that saved a key of its own while it was asked answered from its own account.
     const stillOnPlatform = owners.length > 0 ? await this.onPlatformAccount(owners) : new Set<string>();
-    const confirmed = owners.filter((b) => stillOnPlatform.has(b));
+    const confirmed = [...owners.filter((b) => stillOnPlatform.has(b)), ...platformOwners];
     if (confirmed.length !== 1) {
-      const notAsked = businesses.filter((b) => !onPlatform.has(b) || (owners.includes(b) && !stillOnPlatform.has(b)));
+      const notAsked = businesses.filter(
+        (b) => (!onPlatform.has(b) && !preKey.has(b)) || (owners.includes(b) && !stillOnPlatform.has(b)),
+      );
       this.logger.warn(
         `Stripe ${eventType} for charge ${charge} (pi=${paymentIntent ?? 'none'}) matches payments of ${businesses.join(', ')}, ` +
           `but the platform account's record of the charge names ${confirmed.length ? `more than one of them (${confirmed.join(', ')})` : 'none of them'}` +
-          `${notAsked.length ? ` (not asked, as they hold a Stripe key of their own: ${notAsked.join(', ')})` : ''}; ` +
+          `${notAsked.length ? ` (not counted, as they hold a Stripe key of their own and the platform account was not read for them: ${notAsked.join(', ')})` : ''}; ` +
           'refusing to record it',
       );
       return null;
@@ -1568,6 +1591,32 @@ export class PaymentsService {
     return new Set(
       rows.filter((b) => !(b.metaData as Record<string, unknown> | null)?.stripeSecretKey).map((b) => b.id),
     );
+  }
+
+  /**
+   * W3-PLATFORM-CHARGE-BIND (review CR-A3-1, owner ruling D-56): of the
+   * businesses of `matches` (each holding a Stripe key of its own), the ones
+   * whose oldest matching payment predates that key. A key is saved by a
+   * write of the business row (Settings > Payments), so it is in place since
+   * the row's last write (updatedAt) at the latest: a payment recorded at or
+   * after that write was taken with the key in place, on the business's own
+   * account. A payment recorded before it may have been taken on the platform
+   * account, and the platform account's own record then decides
+   * (StripeConnector.isOwnPlatformCharge), so this only narrows who is asked.
+   */
+  private async paidBeforeOwnKey(matches: Array<{ businessId: string; createdAt: Date }>): Promise<Set<string>> {
+    const businessIds = [...new Set(matches.map((m) => m.businessId))];
+    if (businessIds.length === 0) return new Set();
+    const rows = await this.prisma.client.business.findMany({
+      where: { id: { in: businessIds } },
+      select: { id: true, updatedAt: true },
+    });
+    const out = new Set<string>();
+    for (const b of rows) {
+      const oldest = matches.find((m) => m.businessId === b.id);
+      if (oldest && oldest.createdAt.getTime() < b.updatedAt.getTime()) out.add(b.id);
+    }
+    return out;
   }
 
   // ---------------------------------------------------------------------------
