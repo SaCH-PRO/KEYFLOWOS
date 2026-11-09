@@ -18,9 +18,16 @@
  * The mail itself still goes to the recipient: only the logs change. No
  * provider traffic: the Resend client is a stand-in set on the service.
  */
-import { ConsoleLogger, Logger } from '@nestjs/common';
+import { BadRequestException, ConsoleLogger, Logger } from '@nestjs/common';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SystemEmailService } from './system-email.service';
+import { IdentitySignupService } from '../identity/identity-signup.service';
+import { AiUsageAlertSchedulerService } from '../ai/ai-usage-alert-scheduler.service';
+import { FinancialBriefingSchedulerService } from '../commerce/financial-briefing-scheduler.service';
+import { AccountantExportEmailService } from '../finance/accountant-export-email.service';
+import { FinanceController } from '../finance/finance.controller';
+import { GlobalHttpExceptionFilter } from '../../core/filters/http-exception.filter';
+import { errorRegistry } from '../../core/observability/error-registry';
 
 const RECIPIENT = 'customer.d82@example.test';
 
@@ -38,6 +45,73 @@ function serviceWith(send: (payload: SendPayload) => Promise<unknown>) {
     },
   });
   return { service, calls };
+}
+
+// W5-SYSTEM-EMAIL-CALLERS (SEC-W4HK-1): the two failures the sink rethrows as
+// SystemEmailSendError, each with provider text that quotes the recipient.
+const rejectQuotingAddress = async () => ({
+  data: null,
+  error: { name: 'validation_error', message: `"${RECIPIENT}" is on the suppression list` },
+});
+const loseQuotingAddress = async () => {
+  throw new Error(`socket hang up while sending to ${RECIPIENT}`);
+};
+
+/** A Monday-07:00 FinancialBriefingScheduler over stand-ins for one business whose owner is RECIPIENT. */
+function briefingSchedulerWith(email: SystemEmailService, businessId: string) {
+  const prisma = {
+    client: {
+      business: {
+        findMany: vi.fn(async () => [
+          { id: businessId, timezone: 'America/Port_of_Spain', name: 'Briefing Test Biz', ownerId: 'owner_w5sec_briefing' },
+        ]),
+      },
+      notification: { findFirst: vi.fn(async () => null), create: vi.fn(async () => ({})) },
+      invoice: { aggregate: vi.fn(async () => ({ _sum: { total: 0 }, _count: 0 })) },
+      expense: { aggregate: vi.fn(async () => ({ _sum: { amount: 0 } })) },
+      financeActionItem: { findMany: vi.fn(async () => []) },
+      user: { findUnique: vi.fn(async () => ({ email: RECIPIENT })) },
+    },
+  };
+  const copilot = {
+    generateWeeklyBriefing: vi.fn(async () => ({
+      summary: 'A quiet week.',
+      lastWeekRevenue: 0,
+      lastWeekExpenses: 0,
+      lastWeekNet: 0,
+      outstandingReceivables: 0,
+      cashPosition: 0,
+      highlights: [],
+      concerns: [],
+      recommendation: 'Keep going.',
+      outlook: 'Steady.',
+    })),
+  };
+  const scheduler = new FinancialBriefingSchedulerService(prisma as never, copilot as never, email);
+  // The sweep only runs at Monday 07:00 local: pin the clock read, not the wall clock.
+  Reflect.set(scheduler, 'getLocalTimeInfo', () => ({ hour: 7, dayOfWeek: 1, dateKey: '2026-11-09' }));
+  return { scheduler, prisma };
+}
+
+/** An AccountantExportEmailService over stand-ins: the business has no saved accountant address. */
+function accountantExportWith(email: SystemEmailService, businessId: string) {
+  const prisma = {
+    client: {
+      business: {
+        findUnique: vi.fn(async () => ({ id: businessId, name: 'Export Test Biz', currency: 'TTD', accountantEmail: null })),
+        update: vi.fn(async () => ({})),
+      },
+    },
+  };
+  const exportSvc = {
+    build: vi.fn(async () => ({
+      filename: 'accountant-export-w5sec.zip',
+      buffer: Buffer.from('zip'),
+      bytes: 3,
+      generatedAt: '2026-11-09T00:00:00.000Z',
+    })),
+  };
+  return new AccountantExportEmailService(prisma as never, exportSvc as never, email);
 }
 
 describe('SystemEmailService.sendTransactional logs no recipient address (9B-D2, D-82)', () => {
@@ -63,6 +137,8 @@ describe('SystemEmailService.sendTransactional logs no recipient address (9B-D2,
   afterEach(() => {
     delete process.env.RESEND_API_KEY;
     delete process.env.EMAIL_FROM_ADDRESS;
+    delete process.env.AUTH_REQUIRE_EMAIL_VERIFICATION;
+    delete process.env.SITE_URL;
     vi.restoreAllMocks();
   });
 
@@ -122,21 +198,13 @@ describe('SystemEmailService.sendTransactional logs no recipient address (9B-D2,
     });
   });
 
-  // Review finding SE-3: the sink no longer logs the recipient, but two
-  // callers log it themselves right after a successful sendTransactional. Both
-  // files are outside this packet's write set (system-email.service.ts,
-  // sendTransactional logging only), so the fix needs a follow-up packet.
-  it.todo('[9B-D2] OPEN (outside write set): FinancialBriefingScheduler logs no owner address after the Monday briefing send (apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts:263, `Email sent to ${owner.email}`)');
-  it.todo('[9B-D2] OPEN (outside write set): AccountantExportEmailService logs no recipient after the export send (apps/server/src/modules/finance/accountant-export-email.service.ts:102-104, `Sent accountant export to ${to}`)');
-
   // Review finding SEC-W4HK-1 (W4-HOUSEKEEPING): the redaction above holds on
   // the sink's own lines only. The SystemEmailSendError the sink throws still
   // carries the provider text (system-email.service.ts:125 on a confirmed
   // rejection; :144 `Failed to send email: <message>` on an unknown outcome),
   // so a caller that logs err.message, or a 500 line that logs the stack,
-  // relogs any address in it. The census (CF-029) records the closure as the
-  // sink's lines only and keeps the caller lines OPEN. Those callers are outside
-  // W4-HOUSEKEEPING's write set, so their negative controls stay it.todo.
+  // relogs any address in it. That error's message contract is unchanged: the
+  // callers redact (W5-SYSTEM-EMAIL-CALLERS, the negative controls below).
   it('[9B-D2] CHARACTERIZATION (SEC-W4HK-1): the redaction covers the sink\'s own lines only; the error it throws still carries the provider text, address included', async () => {
     const { service: rejecting } = serviceWith(async () => ({
       data: null,
@@ -165,8 +233,156 @@ describe('SystemEmailService.sendTransactional logs no recipient address (9B-D2,
     expectNoAddressLogged();
   });
 
-  it.todo('[9B-D2] OPEN (outside write set, SEC-W4HK-1): IdentitySignupService logs no address when a verification send fails (apps/server/src/modules/identity/identity-signup.service.ts:185 on sign-up and :266 on resend, `... failed for ${email}: ${err.message}`, which also relogs the provider text)');
-  it.todo('[9B-D2] OPEN (outside write set, SEC-W4HK-1): AiUsageAlertSchedulerService logs no provider text when an alert email fails (apps/server/src/modules/ai/ai-usage-alert-scheduler.service.ts:156, `Email notification failed for alert ...: ${err.message}`)');
-  it.todo('[9B-D2] OPEN (outside write set, SEC-W4HK-1): FinancialBriefingScheduler logs no provider text when the briefing email fails (apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts:269, `Email send failed for ...: ${emailErr.message}`)');
-  it.todo('[9B-D2] OPEN (outside write set, SEC-W4HK-1): a failed accountant export send logs no provider text on the 500 line (POST accountant-export/email lets the SystemEmailSendError escape at apps/server/src/modules/finance/finance.controller.ts:1169; apps/server/src/core/filters/http-exception.filter.ts:71 logs its stack)');
+  // W5-SYSTEM-EMAIL-CALLERS (SEC-W4HK-1, review finding SE-3): the platform
+  // sender's callers. Each one drives the real SystemEmailService (stand-in
+  // Resend client) so the sink's own redacted line is logged too, and the
+  // failure cases use provider text that quotes the recipient. Each caller line
+  // keeps a non-identifying id (user, alert, business) and logs no address.
+  it('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS: IdentitySignupService logs no address when a verification send fails, on sign-up (:185) and on resend (:266), and names the user id', async () => {
+    process.env.AUTH_REQUIRE_EMAIL_VERIFICATION = 'true';
+    process.env.SITE_URL = 'https://app.example.test';
+    const userId = 'user_w5sec_signup';
+    const supabaseAdmin = {
+      isConfigured: () => true,
+      describeMissingConfig: () => null,
+      createUser: vi.fn(async () => ({ id: userId, email: RECIPIENT })),
+      generateSignupLink: vi.fn(async () => 'https://app.example.test/verify?t=fake_link'),
+      generateConfirmationLink: vi.fn(async () => 'https://app.example.test/verify?t=fake_link_two'),
+      findUserByEmail: vi.fn(async () => ({ id: userId, email: RECIPIENT, email_confirmed_at: null, user_metadata: {} })),
+      deleteUser: vi.fn(async () => true),
+    };
+    const passwordPolicy = { validate: vi.fn(async () => undefined) };
+
+    const { service: rejecting } = serviceWith(rejectQuotingAddress);
+    const onSignup = new IdentitySignupService(supabaseAdmin as never, rejecting, passwordPolicy as never);
+    const refused = await onSignup.signup({ email: RECIPIENT, password: 'Not-A-Real-Pass-91' }).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(BadRequestException);
+    expect((refused as BadRequestException).getResponse()).toMatchObject({ code: 'email_send_failed' });
+    expect(supabaseAdmin.deleteUser).toHaveBeenCalledWith(userId);
+
+    const { service: losing } = serviceWith(loseQuotingAddress);
+    const onResend = new IdentitySignupService(supabaseAdmin as never, losing, passwordPolicy as never);
+    await expect(onResend.resendVerification({ email: RECIPIENT })).resolves.toEqual({ ok: true });
+
+    expectNoAddressLogged();
+    expect(entries.some((e) => e.includes('sendVerificationEmail failed') && e.includes(userId))).toBe(true);
+    expect(entries.some((e) => e.includes('resendVerification send failed') && e.includes(userId))).toBe(true);
+  });
+
+  it('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS: AiUsageAlertSchedulerService logs no provider text address when an alert email fails (:156), and names the alert id', async () => {
+    const alert = {
+      id: 'alert_w5sec_1',
+      businessId: 'biz_w5sec_alert',
+      type: 'budget_threshold',
+      threshold: 80,
+      metadata: { used: 80, limit: 100, pct: 80 },
+      triggeredAt: new Date('2026-11-09T07:00:00.000Z'),
+    };
+    const prisma = {
+      client: {
+        aiUsageAlert: { findMany: vi.fn(async () => [alert]), update: vi.fn(async () => ({})) },
+        business: { findUnique: vi.fn(async () => ({ name: 'Alert Test Biz', email: RECIPIENT, ownerId: null })) },
+        user: { findUnique: vi.fn(async () => null) },
+      },
+    };
+    const { service: rejecting, calls } = serviceWith(rejectQuotingAddress);
+    const moduleRef = {
+      get: (token: unknown) => {
+        if (token === SystemEmailService) return rejecting;
+        throw new Error('not provided in this spec');
+      },
+    };
+    const scheduler = new AiUsageAlertSchedulerService(prisma as never, moduleRef as never);
+
+    await expect(scheduler.tick()).resolves.toEqual({ dispatched: 1 });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ to: RECIPIENT });
+    expectNoAddressLogged();
+    expect(entries.some((e) => e.includes('Email notification failed for alert alert_w5sec_1'))).toBe(true);
+  });
+
+  it('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS: FinancialBriefingScheduler logs no owner address after the Monday briefing send (:263, review finding SE-3), and names the business id', async () => {
+    const { service: accepting, calls } = serviceWith(async () => ({ data: { id: 'resend_ok_briefing' }, error: null }));
+    const { scheduler, prisma } = briefingSchedulerWith(accepting, 'biz_w5sec_briefing_ok');
+
+    await Reflect.get(scheduler, 'checkAndRunBriefings').call(scheduler);
+
+    expect(prisma.client.notification.create).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ to: RECIPIENT });
+    expectNoAddressLogged();
+    expect(entries.some((e) => e.includes('Email sent') && e.includes('biz_w5sec_briefing_ok'))).toBe(true);
+  });
+
+  it('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS: FinancialBriefingScheduler logs no provider text address when the briefing email fails (:269), and names the business id', async () => {
+    const { service: losing, calls } = serviceWith(loseQuotingAddress);
+    const { scheduler, prisma } = briefingSchedulerWith(losing, 'biz_w5sec_briefing_fail');
+
+    await Reflect.get(scheduler, 'checkAndRunBriefings').call(scheduler);
+
+    // The in-app notification still lands; only the email failed.
+    expect(prisma.client.notification.create).toHaveBeenCalledTimes(1);
+    expect(calls).toHaveLength(1);
+    expectNoAddressLogged();
+    expect(entries.some((e) => e.includes('Email send failed for biz_w5sec_briefing_fail'))).toBe(true);
+  });
+
+  it('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS: AccountantExportEmailService logs no recipient after the export send (:103, review finding SE-3), and names the business id; the response still names the recipient', async () => {
+    const { service: accepting, calls } = serviceWith(async () => ({ data: { id: 'resend_ok_export' }, error: null }));
+    const exporter = accountantExportWith(accepting, 'biz_w5sec_export_ok');
+
+    const result = await exporter.send({
+      businessId: 'biz_w5sec_export_ok',
+      periodStart: new Date('2026-10-01T00:00:00.000Z'),
+      periodEnd: new Date('2026-10-31T23:59:59.999Z'),
+      to: RECIPIENT,
+    });
+
+    expect(result).toMatchObject({ to: RECIPIENT, messageId: 'resend_ok_export' });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ to: RECIPIENT });
+    expectNoAddressLogged();
+    expect(entries.some((e) => e.includes('Sent accountant export') && e.includes('business=biz_w5sec_export_ok'))).toBe(true);
+  });
+
+  it('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS: a failed accountant export send logs no provider text address on the 500 line or in the error registry (finance.controller.ts:1169, http-exception.filter.ts:71); the 500 body and the error class, outcome and code are unchanged', async () => {
+    const businessId = 'biz_w5sec_export_fail';
+    const { service: rejecting } = serviceWith(rejectQuotingAddress);
+    const controller = Object.create(FinanceController.prototype) as FinanceController;
+    Reflect.set(controller, 'prisma', { client: { business: { findFirst: vi.fn(async () => ({ id: businessId })) } } });
+    Reflect.set(controller, 'accountantExportEmail', accountantExportWith(rejecting, businessId));
+
+    const thrown = await controller
+      .accountantExportEmailSend(
+        businessId,
+        { periodStart: '2026-10-01', periodEnd: '2026-10-31', to: RECIPIENT },
+        { user: { id: 'user_w5sec_finance' } },
+      )
+      .catch((e: unknown) => e);
+    expect(thrown).toMatchObject({ name: 'SystemEmailSendError', outcome: 'FAILED_CONFIRMED', providerCode: 'validation_error' });
+
+    // What the route does with it: the global filter answers 500 and logs the stack.
+    const res = { status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const req = {
+      method: 'POST',
+      url: `/finance/businesses/${businessId}/accountant-export/email`,
+      route: { path: '/finance/businesses/:businessId/accountant-export/email' },
+      correlationId: 'cid_w5sec_export',
+    };
+    const host = { switchToHttp: () => ({ getResponse: () => res, getRequest: () => req }) };
+    errorRegistry.reset();
+    new GlobalHttpExceptionFilter().catch(thrown, host as never);
+
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith(
+      expect.objectContaining({ statusCode: 500, code: 'INTERNAL_SERVER_ERROR', message: 'Internal server error' }),
+    );
+    expect(entries.some((e) => e.includes('Unhandled exception on POST /finance/businesses/:businessId/accountant-export/email'))).toBe(true);
+    expectNoAddressLogged();
+    const recorded = JSON.stringify(errorRegistry.snapshot());
+    expect(recorded).toContain('is on the suppression list');
+    expect(recorded).not.toContain(RECIPIENT);
+    errorRegistry.reset();
+  });
 });
