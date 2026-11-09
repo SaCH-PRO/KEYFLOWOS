@@ -10,13 +10,15 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   NotFoundException,
   Req,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { RequireModuleScope } from '../../core/auth/module-scope.guard';
-import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
+import { LEVEL_RANK, defaultScopesForRole, rankOf, type CanonicalModule } from '../../core/authority/module-vocabulary';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CatalogService } from '../catalog/catalog.service';
 
@@ -48,6 +50,62 @@ type TrashableModel = (typeof TRASHABLE_MODELS)[number];
 function isTrashableModel(value: string): value is TrashableModel {
   return TRASHABLE_MODELS.includes(value as TrashableModel);
 }
+
+/**
+ * W6-TRASH-MODULE-SCOPE (owner ruling D-95; review SEC-TL500-3): the module
+ * each trash model belongs to, in one table. Restoring or permanently deleting
+ * a trashed record needs write access to that module, and seeing it in the
+ * trash needs its read access (ModuleScopeGuard's levels: the Membership's
+ * scope map, else its role defaults). D-95 names CRM for contacts, accounts
+ * and opportunities; revenue for invoices, quotes and recurring invoices;
+ * people for staff; marketing for community posts and landing pages. People
+ * and marketing are not module keys (core/authority/module-vocabulary.ts), so
+ * they read as their canonical keys: team, the people module, and content, as
+ * D-63 maps marketing rows (timeline-visibility.ts). Every other model takes
+ * the module its own routes declare (deal: crm; product: revenue, its writes
+ * need revenue:write; expense: expenses; automationFlow: automations), else
+ * its product area (booking and service: bookings; project and projectTask:
+ * projects; socialPost, emailCampaign, leadForm and communityComment: content,
+ * the marketing area; site: settings, as D-63 maps site rows).
+ */
+const TRASH_MODULE: Readonly<Record<TrashableModel, CanonicalModule>> = {
+  contact: 'crm',
+  account: 'crm',
+  opportunity: 'crm',
+  deal: 'crm',
+  invoice: 'revenue',
+  quote: 'revenue',
+  recurringInvoice: 'revenue',
+  product: 'revenue',
+  staffMember: 'team',
+  communityPost: 'content',
+  landingPage: 'content',
+  communityComment: 'content',
+  socialPost: 'content',
+  emailCampaign: 'content',
+  leadForm: 'content',
+  booking: 'bookings',
+  service: 'bookings',
+  project: 'projects',
+  projectTask: 'projects',
+  expense: 'expenses',
+  automationFlow: 'automations',
+  site: 'settings',
+};
+
+/**
+ * W6-TRASH-MODULE-SCOPE (W5-TRASH-LIST-500 it.todo D46-S09g follow-up): the
+ * trash models the client's soft-delete extension covers (packages/db/src/
+ * client.ts, softDelete([...])). Their findMany, count and findFirst overwrite
+ * any deletedAt filter with null, so a Prisma read never sees their trashed
+ * rows (the owner's listing showed no trashed invoice or quote): the trash
+ * reads them raw (trashedSql). Their delete is rewritten into a soft delete,
+ * so the trash cannot delete them permanently either (permanentDelete: 409).
+ */
+const CLIENT_SOFT_DELETED: ReadonlySet<TrashableModel> = new Set<TrashableModel>([
+  'contact', 'product', 'quote', 'invoice', 'staffMember', 'service',
+  'booking', 'socialPost', 'project', 'projectTask', 'site',
+]);
 
 /**
  * W5-TRASH-LIST-500 (D46-S09g): the column a trashable model names its
@@ -83,6 +141,55 @@ function isTrashed(row: { deletedAt?: unknown } | null | undefined): boolean {
   return row != null && row.deletedAt != null;
 }
 
+type TrashSql = { list: string; count: string; find: string };
+const TRASH_SQL = new Map<TrashableModel, TrashSql>();
+
+/**
+ * W6-TRASH-MODULE-SCOPE (D46-S09g follow-up): the raw reads of `model`'s
+ * trashed rows in one business ($1), for a model in CLIENT_SOFT_DELETED. The
+ * table and its columns come from the Prisma datamodel, never from the
+ * request; each column is aliased to its Prisma field name, so a row reads as
+ * a Prisma read of the model answers it. Filtered on the model's own tenant
+ * column and on deleted_at IS NOT NULL (the trash filter trashedWhere states).
+ * `list` takes LIMIT $2 OFFSET $3, `find` the id as $2.
+ */
+function trashedSql(model: TrashableModel): TrashSql {
+  const cached = TRASH_SQL.get(model);
+  if (cached) return cached;
+  const meta = Prisma.dmmf.datamodel.models.find((m) => m.name.charAt(0).toLowerCase() + m.name.slice(1) === model);
+  if (!meta) throw new Error(`No datamodel for the trash model '${model}'`);
+  const column = (field: string) => `"${meta.fields.find((f) => f.name === field)?.dbName ?? field}"`;
+  const select = meta.fields
+    .filter((f) => f.kind === 'scalar' || f.kind === 'enum')
+    .map((f) => `${column(f.name)} AS "${f.name}"`)
+    .join(', ');
+  const from = `FROM "${meta.dbName ?? meta.name}" WHERE ${column(TENANT_COLUMN[model] ?? 'businessId')} = $1 AND ${column('deletedAt')} IS NOT NULL`;
+  const sql: TrashSql = {
+    list: `SELECT ${select} ${from} ORDER BY ${column('deletedAt')} DESC LIMIT $2 OFFSET $3`,
+    count: `SELECT count(*)::int AS "n" ${from}`,
+    find: `SELECT ${select} ${from} AND ${column('id')} = $2 LIMIT 1`,
+  };
+  TRASH_SQL.set(model, sql);
+  return sql;
+}
+
+/** What a caller may read: every module (a SUPER_ADMIN), a Membership's scope map, or nothing (no Membership). */
+type ReadAccess = 'all' | Record<string, string> | null;
+
+/**
+ * W6-TRASH-MODULE-SCOPE (owner ruling D-95): ModuleScopeGuard's read rule for
+ * `model`'s module (TRASH_MODULE). The guard's refusal, or null when `access`
+ * may read it: 'Not a member of this business' with no Membership; 'Insufficient
+ * permissions: <module> requires read access (you have <level>)' below read.
+ */
+function readRefusal(access: ReadAccess, model: TrashableModel): string | null {
+  if (access === 'all') return null;
+  if (access === null) return 'Not a member of this business';
+  const module = TRASH_MODULE[model];
+  const level = access[module] || 'none';
+  return rankOf(level) < LEVEL_RANK.read ? `Insufficient permissions: ${module} requires read access (you have ${level})` : null;
+}
+
 @Controller('api/businesses/:businessId/trash')
 @UseGuards(BusinessGuard)
 export class TrashController {
@@ -92,10 +199,13 @@ export class TrashController {
   ) {}
 
   // W4-TRASH-D46 review repair SEC-TRASH-D46-1: a revenue model is listed only
-  // to a caller revenueReadRefusal admits.
+  // to a caller its revenue:read rule admits (now readRefusal).
   // W5-TRASH-LIST-500 (D46-S09g): each model is filtered on its own tenant
   // column (trashedWhere), and the every-model listing lists trashed rows only.
   // W5-TRASH-LIST-500 review repair SEC-TL500-2 (D46-S09i): so does ?model=.
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): every model is listed only to a
+  // caller holding read access to its module (TRASH_MODULE; readRefusal), and
+  // the trashed rows of a model the client soft-deletes are read raw (readTrashed).
   @Get()
   @RequireModuleScope('settings')
   async listTrashed(
@@ -109,29 +219,28 @@ export class TrashController {
       if (!isTrashableModel(model)) {
         throw new BadRequestException(`Model '${model}' is not trashable`);
       }
-      if (REVENUE_TRASH_SUBJECT[model]) {
-        const refusal = await this.revenueReadRefusal(req, businessId);
-        if (refusal) throw new ForbiddenException(refusal);
-      }
-      const where = trashedWhere(model, businessId);
-      const items = (await this.queryModel(model, where, limit, offset)).filter(isTrashed);
-      const total = await this.countModel(model, where);
+      const refusal = readRefusal(await this.readAccess(req, businessId), model);
+      if (refusal) throw new ForbiddenException(refusal);
+      const items = (await this.readTrashed(model, businessId, limit, offset)).filter(isTrashed);
+      const total = await this.countTrashed(model, businessId);
       return { items, total, model };
     }
 
-    // Every model: one lookup at most; a caller below revenue:read gets the
-    // other models' rows and none of the revenue models'.
-    const mayReadRevenue = (await this.revenueReadRefusal(req, businessId)) === null;
+    // Every model: one lookup at most; a caller gets the models whose module
+    // it may read (D-95) and none of the others'.
+    const access = await this.readAccess(req, businessId);
+    if (access === null) throw new ForbiddenException('Not a member of this business');
     const allItems: Array<Record<string, unknown>> = [];
     for (const m of TRASHABLE_MODELS) {
-      if (REVENUE_TRASH_SUBJECT[m] && !mayReadRevenue) continue;
-      const items = await this.queryModel(m, trashedWhere(m, businessId), 10, 0);
+      if (readRefusal(access, m)) continue;
+      const items = await this.readTrashed(m, businessId, 10, 0);
       // W5-TRASH-LIST-500 (D46-S09g): a row with no deletedAt is live, not
       // trash. The client's soft-delete extension rewrites the filter to
       // deletedAt null for the models it covers (Contact, Invoice, Quote and
       // eight more), so those answer live rows here; none is listed as trash.
       // (Since the review repair SEC-TL500-2 trashedWhere's NOT clause keeps
-      // them from answering any row; this check stays as the last word.)
+      // them from answering any row; since W6-TRASH-MODULE-SCOPE they are read
+      // raw, trashed rows only; this check stays as the last word.)
       for (const item of items) {
         if (isTrashed(item)) allItems.push({ ...item, _model: m });
       }
@@ -163,52 +272,51 @@ export class TrashController {
    *   - a Membership below revenue:write: the guard's 'Insufficient
    *     permissions: revenue requires write access (you have <level>)'.
    * Checked before any read or write, so a refused call restores nothing and
-   * a trashed schedule never bills again on that call. Every other trash model
-   * is unchanged and costs no query.
+   * a trashed schedule never bills again on that call.
+   *
+   * W6-TRASH-MODULE-SCOPE (owner ruling D-95; review SEC-TL500-3): every other
+   * trash model is held to write access to its own module (TRASH_MODULE), the
+   * same rule and messages with that module named. A SUPER_ADMIN keeps
+   * ModuleScopeGuard's admission there (no lookup); D-46 still refuses a
+   * non-member SUPER_ADMIN on the revenue models above.
    */
-  private async assertMayWriteRevenue(req: ActorRequest | undefined, businessId: string, model: TrashableModel): Promise<void> {
+  private async assertMayWrite(req: ActorRequest | undefined, businessId: string, model: TrashableModel): Promise<void> {
+    const module = TRASH_MODULE[model];
     const subject = REVENUE_TRASH_SUBJECT[model];
-    if (!subject) return;
     const user = req?.user;
-    const level = await this.memberRevenueLevel(user?.id, businessId);
-    if (level === null) {
+    if (user?.role === 'SUPER_ADMIN' && !subject) return;
+    const scopes = await this.memberScopes(user?.id, businessId);
+    if (scopes === null) {
       throw new ForbiddenException(
         user?.role === 'SUPER_ADMIN' ? `Not authorized to update this ${subject}` : 'Not a member of this business',
       );
     }
+    const level = scopes[module] || 'none';
     if (rankOf(level) < LEVEL_RANK.write) {
-      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
+      throw new ForbiddenException(`Insufficient permissions: ${module} requires write access (you have ${level})`);
     }
   }
 
   /**
-   * W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read; owner ruling
-   * D-46 rules writes only): listing the trash's revenue models (invoice,
-   * quote, recurringInvoice) is a revenue read, which GET recurring-invoices,
-   * invoices and quotes hold to revenue:read through ModuleScopeGuard. This
-   * controller has no such guard, so a member whose revenue level is 'none'
-   * read those rows here. ModuleScopeGuard's read rule, restated:
-   *   - a SUPER_ADMIN is admitted with no lookup (the guard admits it to every
-   *     read; D-46 refuses its writes, assertMayWriteRevenue above);
-   *   - any other caller with no Membership: 'Not a member of this business';
-   *   - a Membership below revenue:read: 'Insufficient permissions: revenue
-   *     requires read access (you have <level>)'.
-   * Returns that refusal, or null when the caller may read revenue.
+   * W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read) and
+   * W6-TRASH-MODULE-SCOPE (owner ruling D-95, every model): listing a trash
+   * model is a read of its module, which that module's routes hold to read
+   * access through ModuleScopeGuard. What the caller may read, as the guard
+   * reads it: a SUPER_ADMIN every module with no lookup (the guard admits it to
+   * every read; D-46 rules writes only); any other caller its Membership's
+   * scope map (else role defaults), or null with no Membership (readRefusal).
    */
-  private async revenueReadRefusal(req: ActorRequest | undefined, businessId: string): Promise<string | null> {
+  private async readAccess(req: ActorRequest | undefined, businessId: string): Promise<ReadAccess> {
     const user = req?.user;
-    if (user?.role === 'SUPER_ADMIN') return null;
-    const level = await this.memberRevenueLevel(user?.id, businessId);
-    if (level === null) return 'Not a member of this business';
-    if (rankOf(level) < LEVEL_RANK.read) return `Insufficient permissions: revenue requires read access (you have ${level})`;
-    return null;
+    if (user?.role === 'SUPER_ADMIN') return 'all';
+    return this.memberScopes(user?.id, businessId);
   }
 
   /**
-   * The revenue level of `userId`'s Membership in `businessId`: its scope map,
+   * The scope map of `userId`'s Membership in `businessId`: its explicit map,
    * else its role defaults (ModuleScopeGuard's reading); null with no Membership.
    */
-  private async memberRevenueLevel(userId: string | undefined, businessId: string): Promise<string | null> {
+  private async memberScopes(userId: string | undefined, businessId: string): Promise<Record<string, string> | null> {
     const membership = userId
       ? await this.prisma.client.membership.findUnique({
           where: { userId_businessId: { userId, businessId } },
@@ -216,18 +324,58 @@ export class TrashController {
         })
       : null;
     if (!membership) return null;
-    const scopes: Record<string, string> =
-      membership.permissionScopes && typeof membership.permissionScopes === 'object'
-        ? (membership.permissionScopes as Record<string, string>)
-        : defaultScopesForRole(membership.role);
-    return scopes.revenue || 'none';
+    return membership.permissionScopes && typeof membership.permissionScopes === 'object'
+      ? (membership.permissionScopes as Record<string, string>)
+      : defaultScopesForRole(membership.role);
   }
 
-  // W4-TRASH-D46 (D-46): a revenue model runs assertMayWriteRevenue first.
+  /**
+   * W6-TRASH-MODULE-SCOPE (D46-S09g follow-up): the trashed rows of `model` in
+   * `businessId`, newest first. A model the client soft-deletes is read raw
+   * (trashedSql), its page bounded as the client's findMany bounds one.
+   */
+  private async readTrashed(model: TrashableModel, businessId: string, take: number, skip: number): Promise<Array<Record<string, unknown>>> {
+    if (!CLIENT_SOFT_DELETED.has(model)) {
+      return (await this.queryModel(model, trashedWhere(model, businessId), take, skip)) as Array<Record<string, unknown>>;
+    }
+    const rows = await this.prisma.client.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      trashedSql(model).list,
+      businessId,
+      Math.min(Math.max(take, 0), 1000),
+      Math.max(skip, 0),
+    );
+    return rows ?? [];
+  }
+
+  /** W6-TRASH-MODULE-SCOPE: how many trashed rows `model` has in `businessId` (raw where readTrashed reads raw). */
+  private async countTrashed(model: TrashableModel, businessId: string): Promise<number> {
+    if (!CLIENT_SOFT_DELETED.has(model)) return this.countModel(model, trashedWhere(model, businessId));
+    const rows = await this.prisma.client.$queryRawUnsafe<Array<{ n: number }>>(trashedSql(model).count, businessId);
+    return Number(rows?.[0]?.n ?? 0);
+  }
+
+  /**
+   * The trashed row `id` of `model` in `businessId`, or null (a live row, or
+   * another business's, is never found). W5-TRASH-LIST-500 review repair
+   * SEC-TL500-1: this lookup is the only tenant check before the write, which
+   * keys on the id alone. W6-TRASH-MODULE-SCOPE: raw where readTrashed reads raw.
+   */
+  private async findTrashed(model: TrashableModel, businessId: string, id: string): Promise<Record<string, unknown> | null> {
+    if (!CLIENT_SOFT_DELETED.has(model)) {
+      return (await this.findUnique(model, { id, ...trashedWhere(model, businessId) })) as Record<string, unknown> | null;
+    }
+    const rows = await this.prisma.client.$queryRawUnsafe<Array<Record<string, unknown>>>(trashedSql(model).find, businessId, id);
+    return rows?.[0] ?? null;
+  }
+
+  // W4-TRASH-D46 (D-46): a revenue model runs assertMayWrite first.
   // W5-TRASH-LIST-500 review repair SEC-TL500-1 / CR-TL500-1 (D46-S09h): the
   // row is looked up with the listing's filter (trashedWhere), so a trashed
   // opportunity (no businessId column) is restored instead of answering 500;
   // SEC-TL500-2 (D46-S09i): a live row is never acted on.
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): every model runs assertMayWrite
+  // (write access to its module) first, and the trashed row of a model the
+  // client soft-deletes is found (findTrashed reads it raw).
   @Post(':model/:id/restore')
   @RequireModuleScope('settings')
   async restore(
@@ -239,25 +387,35 @@ export class TrashController {
     if (!isTrashableModel(model)) {
       throw new BadRequestException(`Model '${model}' is not trashable`);
     }
-    await this.assertMayWriteRevenue(req, businessId, model);
-    const existing = await this.findUnique(model, { id, ...trashedWhere(model, businessId) });
+    await this.assertMayWrite(req, businessId, model);
+    const existing = await this.findTrashed(model, businessId, id);
     if (!isTrashed(existing)) throw new NotFoundException(`Trashed ${model} not found`);
 
     let restored: any;
+    // W6-TRASH-MODULE-SCOPE: CatalogService.updateProduct ignores deletedAt (the
+    // restore answered restored while the product stayed in the trash) and
+    // updateService cannot find a trashed service, so deletedAt is cleared here
+    // and the catalog's update then runs with no change, for its events.
     if (model === 'product') {
-      restored = await this.catalog.updateProduct({ businessId, productId: id, deletedAt: null } as any);
+      await this.updateModel(model, id, { deletedAt: null });
+      restored = await this.catalog.updateProduct({ businessId, productId: id });
     } else if (model === 'service') {
-      restored = await this.catalog.updateService({ businessId, serviceId: id, deletedAt: null } as any);
+      await this.updateModel(model, id, { deletedAt: null });
+      restored = await this.catalog.updateService({ businessId, serviceId: id });
     } else {
       restored = await this.updateModel(model, id, { deletedAt: null } as any);
     }
     return { restored: true, model, id, item: restored };
   }
 
-  // W4-TRASH-D46 (D-46): a revenue model runs assertMayWriteRevenue first.
+  // W4-TRASH-D46 (D-46): a revenue model runs assertMayWrite first.
   // W5-TRASH-LIST-500 review repair SEC-TL500-1 / CR-TL500-1 (D46-S09h): the
   // row is looked up with the listing's filter (trashedWhere), as restore does;
   // SEC-TL500-2 (D46-S09i): a live row is never deleted from here.
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): every model runs assertMayWrite
+  // first. A model the client soft-deletes answers 409: the client rewrites its
+  // delete into a soft delete, so the row stayed in the trash (re-stamped) while
+  // this answered deleted. Such a record can only be restored from here.
   @Delete(':model/:id')
   @RequireModuleScope('settings')
   async permanentDelete(
@@ -269,17 +427,14 @@ export class TrashController {
     if (!isTrashableModel(model)) {
       throw new BadRequestException(`Model '${model}' is not trashable`);
     }
-    await this.assertMayWriteRevenue(req, businessId, model);
-    const existing = await this.findUnique(model, { id, ...trashedWhere(model, businessId) });
+    await this.assertMayWrite(req, businessId, model);
+    const existing = await this.findTrashed(model, businessId, id);
     if (!isTrashed(existing)) throw new NotFoundException(`Trashed ${model} not found`);
-
-    if (model === 'product') {
-      await this.catalog.deleteProduct(businessId, id);
-    } else if (model === 'service') {
-      await this.catalog.deleteService(businessId, id);
-    } else {
-      await this.deleteModel(model, id);
+    if (CLIENT_SOFT_DELETED.has(model)) {
+      throw new ConflictException(`Permanent delete is not available for a trashed ${model}: it can only be restored`);
     }
+
+    await this.deleteModel(model, id);
     return { deleted: true, model, id };
   }
 
@@ -371,6 +526,9 @@ export class TrashController {
   private async updateModel(model: TrashableModel, id: string, data: any) {
     switch (model) {
       case 'contact': return this.prisma.client.contact.update({ where: { id }, data });
+      // W6-TRASH-MODULE-SCOPE: the restore of a product or service clears deletedAt here (see restore).
+      case 'product': return this.prisma.client.product.update({ where: { id }, data });
+      case 'service': return this.prisma.client.service.update({ where: { id }, data });
       case 'deal': return this.prisma.client.deal.update({ where: { id }, data });
       case 'quote': return this.prisma.client.quote.update({ where: { id }, data });
       case 'invoice': return this.prisma.client.invoice.update({ where: { id }, data });

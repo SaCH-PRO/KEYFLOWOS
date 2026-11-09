@@ -31,8 +31,11 @@ const MODEL_LABELS: Record<string, string> = {
   opportunity: "Opportunities",
 };
 
-function formatDeletedItem(item: Record<string, unknown>) {
-  const model = (item._model as string) || "item";
+// W6-TRASH-MODULE-SCOPE: a row listed under a model filter carries no _model
+// (the server's ?model= rows are bare), so it is that filter's model; restoring
+// it as 'item' was refused 400 'not trashable'.
+function formatDeletedItem(item: Record<string, unknown>, filteredModel = "") {
+  const model = (item._model as string) || filteredModel || "item";
   const name =
     (item.name as string) ||
     (item.title as string) ||
@@ -67,6 +70,10 @@ export default function TrashPage() {
   const [restoring, setRestoring] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): the server's refusal of the last
+  // listing, restore or permanent delete (403 '<module> requires read|write
+  // access', 404, 409), shown instead of passing for success or an empty trash.
+  const [error, setError] = useState<string | null>(null);
   const limit = 25;
 
   const load = useCallback(async () => {
@@ -78,6 +85,7 @@ export default function TrashPage() {
         limit,
         offset,
       });
+      setError(res.error);
       if (res.data) {
         setItems(res.data.items);
         setTotal(res.data.total);
@@ -97,7 +105,13 @@ export default function TrashPage() {
     if (!businessId) return;
     setRestoring(id);
     try {
-      await restoreTrashItem(businessId, model, id);
+      // W6-TRASH-MODULE-SCOPE (D-95): a refused restore keeps its row and shows why.
+      const res = await restoreTrashItem(businessId, model, id);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setError(null);
       setItems((prev) => prev.filter((i) => (i.id as string) !== id));
       setTotal((t) => t - 1);
     } catch (e) {
@@ -112,7 +126,13 @@ export default function TrashPage() {
     if (!confirm("Permanently delete this item? This cannot be undone.")) return;
     setDeleting(id);
     try {
-      await permanentDeleteTrashItem(businessId, model, id);
+      // W6-TRASH-MODULE-SCOPE (D-95): a refused delete keeps its row and shows why.
+      const res = await permanentDeleteTrashItem(businessId, model, id);
+      if (res.error) {
+        setError(res.error);
+        return;
+      }
+      setError(null);
       setItems((prev) => prev.filter((i) => (i.id as string) !== id));
       setTotal((t) => t - 1);
     } catch (e) {
@@ -157,15 +177,21 @@ export default function TrashPage() {
         ))}
       </div>
 
+      {error && (
+        <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-500">
+          {error}
+        </div>
+      )}
+
       <div className="rounded-2xl border border-border/40 bg-card/40 backdrop-blur-sm overflow-hidden">
         {loading && items.length === 0 ? (
           <div className="py-12 text-center text-muted-foreground text-sm">Loading...</div>
-        ) : items.length === 0 ? (
+        ) : items.length === 0 && error ? null : items.length === 0 ? (
           <div className="py-12 text-center text-muted-foreground text-sm">Trash is empty.</div>
         ) : (
           <div className="divide-y divide-border/30">
             {items.map((item, i) => {
-              const { model, name } = formatDeletedItem(item);
+              const { model, name } = formatDeletedItem(item, selectedModel);
               const id = item.id as string;
               const deletedAt = item.deletedAt
                 ? new Date(item.deletedAt as string).toLocaleDateString()

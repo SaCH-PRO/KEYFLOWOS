@@ -811,10 +811,12 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
       expectTrashedRead(call, String(modelOf(call)));
     }
 
-    const one = await listCall({ id: USER_ID, role: 'USER' }, null, 'opportunity');
+    // W6-TRASH-MODULE-SCOPE (owner ruling D-95): an opportunity is a CRM record, so ?model=opportunity
+    // needs crm:read; the caller is the owner (it was a USER with no Membership, now refused).
+    const one = await listCall({ id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null }, 'opportunity');
     expect(one.error, String(one.error)).toBeNull();
-    expect(one.calls.map((c) => c.path)).toEqual(['prisma.client.opportunity.findMany', 'prisma.client.opportunity.count']);
-    for (const { args } of one.calls) {
+    expect(one.calls.map((c) => c.path)).toEqual([MEMBERSHIP_LOOKUP, 'prisma.client.opportunity.findMany', 'prisma.client.opportunity.count']);
+    for (const { args } of one.calls.slice(1)) {
       // W5-TRASH-LIST-500 review repair (SEC-TL500-2): with the NOT clause.
       expect((args[0] as { where: unknown }).where).toEqual({ posterBusinessId: BIZ, deletedAt: { not: null }, NOT: { deletedAt: null } });
     }
