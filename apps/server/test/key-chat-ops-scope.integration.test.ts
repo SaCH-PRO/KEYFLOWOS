@@ -326,6 +326,9 @@ beforeAll(async () => {
   registry.set(JobRolePolicyService, jobRolePolicy);
   registry.set(CommandService, commands);
   registry.set(ProcurementService, procurement);
+  // execute_custom_logic's sandbox (KO-04): the real executor, local child-process backend.
+  const { CodeExecutorService } = await import('../src/modules/ai/code-executor.service');
+  registry.set(CodeExecutorService, new CodeExecutorService());
 
   const quiet = { log() {}, warn() {}, error() {}, debug() {}, verbose() {} };
   // The real class: chat, streamChat, the confirmation claim, resolveTurnAuthority (the crew),
@@ -597,5 +600,117 @@ describe('KO-03 parity with the routes, and what stays unchanged', () => {
     await bridgeTurn(position('read'));
     for (const t of READS) expect(gateway.menus[0], t).toContain(t);
     for (const t of WRITES) expect(gateway.menus[0], t).not.toContain(t);
+  });
+});
+
+/**
+ * Review SEC-D16-1 / D16-CR-1: execute_custom_logic runs a snippet whose api.callTool re-enters the
+ * dispatcher on the CUSTOM_LOGIC surface with no principal, so the scope rule above never saw the
+ * inner call. A message that staffs the operator crew (ceiling 3, execute_custom_logic allowed) in a
+ * business that auto-executes tier 3 ran it in the member's own turn. Each inner call is now held
+ * to the operations scope of the member whose chat turn ran the snippet.
+ */
+describe("KO-04 execute_custom_logic: every api.callTool in the snippet is held to the member's operations scope (review SEC-D16-1)", () => {
+  /** resolveCrew staffs the operator crew first: its ceiling (3) admits execute_custom_logic. */
+  const OPERATOR = 'execute it: run, process, handle and complete the work';
+  let backend: string | undefined;
+
+  beforeAll(async () => {
+    // The local child-process sandbox, whatever the environment configures: no provider is called.
+    backend = process.env.CODE_EXECUTOR_BACKEND;
+    process.env.CODE_EXECUTOR_BACKEND = 'local';
+    // The business auto-executes up to tier 3 (AutopilotSettings autonomyLevel 3 gives the same).
+    await db.aiMemory.update({ where: { id: `${P}autonomy` }, data: { value: JSON.stringify({ mode: 'assisted', maxAutoTier: 3 }) } });
+  });
+
+  afterAll(async () => {
+    if (backend === undefined) delete process.env.CODE_EXECUTOR_BACKEND;
+    else process.env.CODE_EXECUTOR_BACKEND = backend;
+    await db.aiMemory.update({ where: { id: `${P}autonomy` }, data: { value: JSON.stringify({ mode: 'assisted', maxAutoTier: 2 }) } });
+  });
+
+  /** The one execute_custom_logic result of a member's turn: the snippet ran in the turn. */
+  async function snippet(actor: string, code: string) {
+    const body = await chatTurn(actor, OPERATOR, { name: 'execute_custom_logic', args: { code } });
+    expect(body.requiresConfirmation, JSON.stringify(body).slice(0, 400)).toBeFalsy();
+    return onlyResult(body, 'execute_custom_logic') as { ok: boolean; value?: any; error?: string };
+  }
+
+  it('CONTROL: the operator crew is staffed first, and the operations-none member is offered execute_custom_logic and no operations tool', async () => {
+    expect((await roleEngine.resolveCrew({ message: OPERATOR })).crew[0]).toBe('operator');
+    const menu = await menuFor(ID.staffNone, OPERATOR);
+    expect(menu).toContain('execute_custom_logic');
+    expect(menu.filter((t) => Object.prototype.hasOwnProperty.call(OPERATIONS, t))).toEqual([]);
+  });
+
+  it("KO-04a RED-BEFORE: STAFF { operations: 'none' }: a snippet calling procurement_create_request is refused inside the sandbox and no ProcurementRequest row is created", async () => {
+    const before = await requestCount();
+    const r = await snippet(ID.staffNone, `return await api.callTool('procurement_create_request', { userPrompt: '${P}via custom logic' });`);
+    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(false);
+    expectScopeRefusal(r.error as string, 'write', 'none');
+    expect(await requestCount()).toBe(before);
+  });
+
+  it("KO-04b RED-BEFORE: STAFF { operations: 'none' }: a snippet calling command_discharge_obligation is refused and the item is unchanged (dischargedAt stays null); a read (command_list_due_obligations) is refused too", async () => {
+    const item = await seedObligation();
+    const before = await itemRow(item.id);
+    const r = await snippet(ID.staffNone, `return await api.callTool('command_discharge_obligation', { obligationId: '${item.id}' });`);
+    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(false);
+    expectScopeRefusal(r.error as string, 'write', 'none');
+    expect(await itemRow(item.id)).toBe(before);
+    expect((await db.commandItem.findUnique({ where: { id: item.id } })).dischargedAt).toBeNull();
+
+    const read = await snippet(ID.staffNone, `return await api.callTool('command_list_due_obligations', {});`);
+    expect(read.ok).toBe(false);
+    expectScopeRefusal(read.error as string, 'read', 'none');
+    expect(JSON.stringify(read)).not.toContain(item.id);
+  });
+
+  it('KO-04c RED-BEFORE: STAFF on role defaults (operations read): in one snippet the operations read runs and the write is refused (no row), the snippet seeing the refusal as a rejected api.callTool', async () => {
+    const req = await seedRequest();
+    const before = await requestCount();
+    const r = await snippet(
+      ID.staffDefault,
+      `const list = await api.callTool('procurement_list_requests', {});
+       let refused = null;
+       try { await api.callTool('procurement_create_request', { userPrompt: '${P}via custom logic read' }); } catch (e) { refused = e.message; }
+       return { listed: list.requests.map((x) => x.id), refused };`,
+    );
+    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(true);
+    expect(r.value.listed).toContain(req.id);
+    expectScopeRefusal(r.value.refused, 'write', 'read');
+    expect(await requestCount()).toBe(before);
+  });
+
+  it('KO-04d RED-BEFORE: the streamed member chat (POST flow/chat/stream) holds the snippet to the same scope: the discharge is refused and the item is unchanged', async () => {
+    const item = await seedObligation();
+    const before = await itemRow(item.id);
+    const chunks = await streamTurn(ID.staffNone, OPERATOR, {
+      name: 'execute_custom_logic',
+      args: { code: `return await api.callTool('command_discharge_obligation', { obligationId: '${item.id}' });` },
+    });
+    const results = chunks.find((c) => c.type === 'tool_results');
+    expect(results, JSON.stringify(chunks).slice(0, 400)).toBeTruthy();
+    expect(results.toolResults).toHaveLength(1);
+    expect(results.toolResults[0].name).toBe('execute_custom_logic');
+    expect(results.toolResults[0].result.ok).toBe(false);
+    expectScopeRefusal(results.toolResults[0].result.error, 'write', 'none');
+    expect(await itemRow(item.id)).toBe(before);
+  });
+
+  it('KO-04e CONTROL: the OWNER is unchanged: the snippet creates the request and discharges the item', async () => {
+    const item = await seedObligation();
+    const before = await requestCount();
+    const r = await snippet(
+      ID.owner,
+      `const created = await api.callTool('procurement_create_request', { userPrompt: '${P}owner via custom logic' });
+       const done = await api.callTool('command_discharge_obligation', { obligationId: '${item.id}' });
+       return { created: created.id, discharged: done.id };`,
+    );
+    expect(r.ok, JSON.stringify(r).slice(0, 400)).toBe(true);
+    expect(await requestCount()).toBe(before + 1);
+    expect((await db.procurementRequest.findUnique({ where: { id: r.value.created } })).businessId).toBe(ID.bizA);
+    expect(r.value.discharged).toBe(item.id);
+    expect((await db.commandItem.findUnique({ where: { id: item.id } })).dischargedAt).not.toBeNull();
   });
 });

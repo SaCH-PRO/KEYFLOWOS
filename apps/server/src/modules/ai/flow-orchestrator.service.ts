@@ -3356,7 +3356,9 @@ ${triage.standingContext}`;
    * the member's operations level. null for every other tool, for a level that reaches it, and for
    * a call with no member or from another surface: the staff bridge (whose issued envelope
    * JobRolePolicyService already bounds by the holder's membership), the support desk and the
-   * system surfaces are unchanged.
+   * system surfaces are unchanged. execute_custom_logic asks it for each inner api.callTool with
+   * the member's outer chat context (review SEC-D16-1), so a snippet reaches no further than the
+   * member's own calls do.
    */
   private async operationsScopeRefusal(businessId: string, toolName: string, action?: ActionContext): Promise<string | null> {
     const required = operationsLevelFor(toolName);
@@ -6640,11 +6642,19 @@ ${triage.standingContext}`;
         return { invoiceId: (invoice as { id: string }).id };
       }
       case 'execute_custom_logic': {
+        // V1-84 (FOLLOW3-D16 review SEC-D16-1, D-40): every api.callTool the snippet makes is a call
+        // of the member whose chat turn ran it, so the operations scope that turn's own calls are
+        // held to (operationsScopeRefusal on this outer context) refuses it before it runs. The
+        // inner call itself still arrives on CUSTOM_LOGIC.
+        const withinMemberScope = async (bizId: string, name: string): Promise<void> => {
+          const refusal = await this.operationsScopeRefusal(bizId, name, action);
+          if (refusal) throw new Error(refusal);
+        };
         const result = await this.getCodeExecutor().execute({
           businessId,
           code: args.code,
           inputs: args.inputs,
-          innerToolExecutor: (bizId, name, toolArgs) => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC' }),
+          innerToolExecutor: (bizId, name, toolArgs) => withinMemberScope(bizId, name).then(() => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC' })),
         });
         return result;
       }
