@@ -29,7 +29,6 @@ import { TimelineService } from '../timeline/timeline.service';
 import { BookingWaitlistService } from './booking-waitlist.service';
 import { schedulersDisabled } from '../../core/config/env';
 import { getTenantContext } from '../../core/tenant/tenant-context';
-import { normalizeCurrency } from '../finance/posting.service';
 import {
   DERIVATION_TX_TIMEOUT_MS,
   depositPosition,
