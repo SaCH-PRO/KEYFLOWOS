@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
-import { ActivityService } from './activity.service';
+import { ActivityService, type CreateActivityInput } from './activity.service';
 import {
   InvoiceCreatedPayload,
   InvoicePaidPayload,
@@ -15,11 +15,11 @@ import {
   BookingCompletedPayload,
   BookingCancelledPayload,
   BookingRescheduledPayload,
-  ContactCreatedPayload,
   ContactUpdatedPayload,
   ContactMergedPayload,
   ContactImportedPayload,
 } from '../../core/event-bus/events.types';
+import type { ContactCreatedEmit } from '../crm/crm.service';
 
 function contactName(contact?: { firstName?: string | null; lastName?: string | null; email?: string | null } | null): string {
   if (!contact) return 'Someone';
@@ -341,9 +341,16 @@ export class ActivityEventListener {
    * (crm:contact.created:contact) is shown beside it. crm-network.service.ts
    * logs the same ContactEvent for a referral without this bus event; there
    * the copy is kept, as the only row. See onBookingCreated.
+   *
+   * W3-V1-55c review (SEC-V55C-1, CR-V155c-1; D-90): being the one row, it
+   * names who created the contact, as the dropped copy did: the actor
+   * CrmService.createContact puts on the emit (ContactCreatedEmit, the
+   * ContactEvent's own actor; USER and the member for POST /contacts) and the
+   * copy's category CONTACT. With no actor on the emit none is invented
+   * (ActivityService.log's SYSTEM, no actorId), as the copy wrote it.
    */
   @OnEvent('contact.created')
-  async onContactCreated(payload: ContactCreatedPayload) {
+  async onContactCreated(payload: ContactCreatedEmit) {
     const c = payload.contact;
     await this.activity.log({
       businessId: payload.businessId,
@@ -357,6 +364,9 @@ export class ActivityEventListener {
       tone: 'info',
       data: { contactId: c.id },
       contactId: c.id,
+      category: 'CONTACT',
+      actorType: payload.actorType as CreateActivityInput['actorType'],
+      actorId: payload.actorId,
     });
   }
 

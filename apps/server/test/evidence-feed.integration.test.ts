@@ -1666,6 +1666,48 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(settled.map((r: any) => [kind(r), r.title])).toEqual([['crm:contact.created:contact', 'contact.created']]);
   });
 
+  // W3-V1-55c review (SEC-V55C-1, CR-V155c-1; D-90, D-08): once the CRM copy
+  // is gone, 'New contact' is the contact create's one feed row, so it names
+  // who created the contact, as the copy did (USER and the member, category
+  // CONTACT), not SYSTEM.
+  it("V55-12a (SEC-V55C-1, CR-V155c-1, D-90, W3-V1-55c): a member's contact create, as POST /crm/businesses/:b/contacts calls it (audit actor USER), shows ONE cockpit row and it names the member: ActivityEventListener's 'New contact' carries actorType USER, actorId the member and category CONTACT, as its ContactEvent does, so ?actorType=USER and ?category=CONTACT return it and ?actorType=SYSTEM does not; a create with no audit actor (V55-01) names none, as its ContactEvent", async () => {
+    let id = '';
+    const s = await step(async () => {
+      const contact = await crm.createContact(
+        { businessId: C.biz, firstName: 'K19a', lastName: 'Member', email: `${P}${RUN}_member@test.local`, actorUserId: C.owner },
+        // The audit context crm.controller.ts's createContact passes (userAuditContext).
+        { actor: { type: 'USER', id: C.owner } },
+      );
+      id = contact.id;
+    });
+    expect(s.events).toContain('contact.created');
+    // The one feed row the create wrote names the member.
+    expect(s.rows.filter((r) => r.entityId === id).map((r) => [kind(r), r.title, r.actorType, r.actorId, r.category])).toEqual([
+      ['crm:created:contact', 'New contact', 'USER', C.owner, 'CONTACT'],
+    ]);
+    // The same actor its ContactEvent records (and no Activity copy of it).
+    const ce = await db.contactEvent.findMany({ where: { businessId: C.biz, contactId: id, type: 'contact.created' } });
+    expect(ce.map((e: any) => [e.actorType, e.actorId])).toEqual([['USER', C.owner]]);
+    expect(await db.activity.count({ where: { businessId: C.biz, module: 'crm', action: 'contact.created', entityId: id } })).toBe(0);
+
+    // The cockpit's filtered reads: by actor and by category.
+    const read = async (query: string) => {
+      const res = await agent().get(`/timeline/businesses/${C.biz}/events?limit=50&${query}`).set(HEADER, C.owner);
+      expect(res.status, `${query}: ${JSON.stringify(res.body)}`).toBe(200);
+      return (res.body as Row[]).filter((r) => r.entityId === id).map((r) => [kind(r), r.title, r.actorType, r.actorId]);
+    };
+    expect(await read('actorType=USER')).toEqual([['crm:created:contact', 'New contact', 'USER', C.owner]]);
+    expect(await read('category=CONTACT')).toEqual([['crm:created:contact', 'New contact', 'USER', C.owner]]);
+    expect(await read('actorType=SYSTEM')).toEqual([]);
+
+    // Control: V55-01's create names no audit actor; its ContactEvent names
+    // none, and its row invents none (SYSTEM, no actorId), category CONTACT.
+    const control = STEP.contactCreate!.rows.filter((r) => r.entityId === SC.contactId);
+    expect(control.map((r) => [r.title, r.actorType, r.actorId, r.category])).toEqual([['New contact', 'SYSTEM', null, 'CONTACT']]);
+    const controlEvent = await db.contactEvent.findMany({ where: { businessId: C.biz, contactId: SC.contactId, type: 'contact.created' } });
+    expect(controlEvent.map((e: any) => [e.actorType, e.actorId])).toEqual([[null, null]]);
+  });
+
   // V55-12b, the CR-V155b-1 residual for booking create, outside this packet's write set.
   it.todo("V55-12b (CR-V155b-1): booking create shows ONE row in the cockpit, ActivityEventListener's 'New booking': today the feed also holds the CRM copy of BookingsService.createBooking's booking.created ContactEvent (crm:booking.created:contact; V55-06 pins it), which the cockpit shows as 'Booking created': needs CrmTimelineService.logContactEvent (crm-timeline.service.ts, outside W3-V1-55c's write set) to forward meta.feedCopy and CrmService.logContactEvent to accept it, then feedCopy:false on that ContactEvent (bookings.service.ts); the storefront booking's copy (PublicEventsService.logStorefrontEvent) is the same class");
 });

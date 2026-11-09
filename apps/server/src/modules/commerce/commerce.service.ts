@@ -3704,6 +3704,9 @@ export class CommerceService {
         await this.revenuePosting.onPaymentRecorded(created.id, {
           tx: txClient,
           createdById: actorId,
+          // W3-V1-55c review (SEC-V55C-4, D-90): the payment's FINANCE feed
+          // row keeps the human KEY acted for, as this payment's contact event does.
+          initiatedBy,
         });
         // Single source of truth: workflow recomputes status from payment rows
         // and queues the appropriate event (invoice.paid / invoice.payment_recorded).

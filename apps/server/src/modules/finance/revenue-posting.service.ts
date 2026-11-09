@@ -16,6 +16,17 @@ interface PostingOpts {
   createdById?: string | null;
 }
 
+interface PaymentPostingOpts extends PostingOpts {
+  /**
+   * W3-V1-55c review (SEC-V55C-4, PL07-ST-3; D-90): the person on whose
+   * behalf a SYSTEM recorder (KEY) recorded the payment, kept as
+   * data.initiatedBy on the payment's FINANCE payment_recorded row, as the CRM
+   * invoice.payment_recorded copy keeps it. Ignored unless `createdById` is the
+   * system actor, and never the system actor itself. Audit data, never authority.
+   */
+  initiatedBy?: string | null;
+}
+
 interface RefundPostingOpts extends PostingOpts {
   /**
    * R0-CMF2-PAYMENT-ACTOR-GAPS: write the refund's audit row, posted or not,
@@ -341,7 +352,7 @@ export class RevenuePostingService {
    * the credit goes to Revenue directly. Processor fees (when present)
    * are debited to EXPENSE_BANK_FEES so the deposit account math nets.
    */
-  async onPaymentRecorded(paymentId: string, opts: PostingOpts = {}) {
+  async onPaymentRecorded(paymentId: string, opts: PaymentPostingOpts = {}) {
     const payment = await this.db(opts).payment.findUnique({
       where: { id: paymentId },
       select: {
@@ -409,12 +420,21 @@ export class RevenuePostingService {
       },
       opts.tx,
     );
+    // W3-V1-55c review (SEC-V55C-3, D-90): a payment already posted already
+    // has its one feed row; a re-run (scripts/finance-backfill-revenue.ts)
+    // writes no second one.
+    if (result.alreadyPosted) return result;
     // W3-V1-55c (owner ruling D-90, on D-08): this is the payment's one feed
     // row, and it names who recorded the payment, as the CRM
     // invoice.payment_recorded copy did: KEY is a SYSTEM actor, a person is
     // USER; with no actor (a provider callback, a service caller) none is named.
+    // Review SEC-V55C-4 (PL07-ST-3): beside KEY only, the person its command
+    // ran for is kept as data.initiatedBy, as the copy keeps it (audit data,
+    // never authority; never a system actor itself).
     const recordedBy = opts.createdById ?? null;
-    this.timeline.recordEvent({
+    const initiatedBy =
+      isSystemActor(recordedBy) && opts.initiatedBy && !isSystemActor(opts.initiatedBy) ? opts.initiatedBy : null;
+    const entry: RecordEventInput = {
       businessId: payment.businessId,
       module: 'FINANCE',
       action: 'payment_recorded',
@@ -423,10 +443,38 @@ export class RevenuePostingService {
       title: `Payment recorded: ${payment.currency} ${gross}`,
       detail: `Invoice ${payment.invoice?.invoiceNumber ?? payment.invoiceId}`,
       contactId: payment.invoice?.contactId ?? undefined,
-      data: { amount: gross, currency: payment.currency, provider: payment.provider },
+      data: { amount: gross, currency: payment.currency, provider: payment.provider, ...(initiatedBy ? { initiatedBy } : {}) },
       ...(recordedBy ? { actorType: isSystemActor(recordedBy) ? 'SYSTEM' as const : 'USER' as const, actorId: recordedBy } : {}),
       occurredAt: new Date(),
-    }).catch(() => {});
+    };
+    if (opts.tx) {
+      // Review SEC-V55C-2: inside the caller's payment transaction the row is
+      // written with it, as the manual refund's row is (SEC-CMF2-1 /
+      // CR-CMF2-1, onPaymentRefunded): it commits with the payment, a payment
+      // that rolls back leaves none, and a failed insert fails the payment
+      // instead of leaving one no feed row names (not caught; the best-effort
+      // TimelineService swallows every error, so it is not used here).
+      await opts.tx.activity.create({
+        data: {
+          businessId: entry.businessId,
+          module: entry.module,
+          action: entry.action,
+          entityType: entry.entityType,
+          entityId: entry.entityId,
+          title: entry.title,
+          detail: entry.detail,
+          contactId: entry.contactId,
+          data: entry.data as Prisma.InputJsonValue,
+          actorType: entry.actorType,
+          actorId: entry.actorId,
+          occurredAt: entry.occurredAt,
+        },
+      });
+    } else {
+      // No transaction to join (a direct call): the posting has committed on
+      // its own, so the row is recorded best-effort after it, as before.
+      Promise.resolve(this.timeline.recordEvent(entry)).catch(() => {});
+    }
     return result;
   }
 
