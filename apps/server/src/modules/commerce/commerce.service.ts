@@ -48,7 +48,7 @@ import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helpe
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { appUrl } from '../../core/config/runtime-urls';
-import { depositPosition, readSettlementInvoices } from '../bookings/booking-payment-status.listener';
+import { depositPosition, type SettlementInvoice } from '../bookings/booking-payment-status.listener';
 
 /**
  * D-59 (W3-A10b): the code of a currency switch refused because it would net a
@@ -56,6 +56,15 @@ import { depositPosition, readSettlementInvoices } from '../bookings/booking-pay
  * a final invoice it refuses (DEPOSIT_CURRENCY_MISMATCH in bookings.service).
  */
 const DEPOSIT_CURRENCY_MISMATCH = 'DEPOSIT_CURRENCY_MISMATCH';
+
+/**
+ * D-59 (W3-A10b review, SEC-A10b-3): the advisory-lock namespace a booking's
+ * final invoice is drawn up under (FINAL_INVOICE_LOCK_NAMESPACE in
+ * bookings.service, not imported: bookings.service imports this module). The
+ * two strings must stay equal: the currency PATCH takes the same lock, so it
+ * never reads a pair while BookingsService.issueFinalInvoice is drawing one up.
+ */
+const BOOKING_FINAL_INVOICE_LOCK_NAMESPACE = 'booking-final-invoice:';
 
 /**
  * The customer fields an operator invoice read discloses: the customer's name
@@ -4891,28 +4900,63 @@ export class CommerceService {
    * completion and the Create-invoice button refuse such a pair and re-check
    * one already drawn up, but this PATCH switched either half afterwards (a
    * USD deposit netted as TTD by a TTD final), re-creating the pair they
-   * refuse. The pair is the one issueFinalInvoice re-checks: a booking of
-   * this business whose deposit or final this invoice is, its final not VOID
-   * nor withdrawn, and its live deposit (not VOID, not withdrawn) covering
-   * something of the price; a booking withdrawn since leaves its two
-   * documents netted all the same. A switch that brings the pair to one
-   * currency passes, as does any switch on an invoice outside such a pair.
-   * Refused with 409 DEPOSIT_CURRENCY_MISMATCH (the code BookingsService
-   * answers, not imported: bookings.service imports this module) on the
-   * edit's transaction, before anything is written.
+   * refuse. The pair is a booking of this business whose deposit or final
+   * this invoice is, its final not VOID, and its deposit not VOID and
+   * covering something of the price (depositPosition). A switch that brings
+   * the pair to one currency passes, as does any switch on an invoice outside
+   * such a pair. Refused with 409 DEPOSIT_CURRENCY_MISMATCH (the code
+   * BookingsService answers, not imported: bookings.service imports this
+   * module) on the edit's transaction, before anything is written.
+   *
+   * W3-A10b review (D-59):
+   *   SEC-A10b-1  only VOID ends a pairing. A withdrawn (soft-deleted) final
+   *               or deposit still pairs: a restore (TrashController.restore
+   *               writes deletedAt back to null) re-checks nothing, so a
+   *               switch accepted while it was withdrawn left a TTD final
+   *               netting a USD deposit once restored, and that final could
+   *               be sent.
+   *   SEC-A10b-2  a withdrawn booking still pairs its two documents (trash
+   *               restore brings a booking back too). Bookings and invoices
+   *               are read raw (pairedBookings, readPairedInvoice): the
+   *               soft-delete extension hides a withdrawn row from every
+   *               find, inside a transaction as well.
+   *   SEC-A10b-3  the pair is read under each booking's final-invoice
+   *               advisory lock, the one issueFinalInvoice draws the final up
+   *               under (BOOKING_FINAL_INVOICE_LOCK_NAMESPACE). It creates the
+   *               final on its own connection before it links
+   *               Booking.invoiceId, so a deposit switch that committed in
+   *               between read no final and passed, and completion answered
+   *               CREATED for a TTD final netting a USD deposit. Now the
+   *               switch waits for the draw to commit and reads the final it
+   *               linked; a draw that waits for the switch reads the switched
+   *               deposit and refuses (FOLLOW3-A10). No deadlock: the draw
+   *               never waits on the invoice row lock this edit holds.
    */
   private static async assertDepositPairKeepsCurrency(
     tx: PrismaTx,
     invoice: { id: string; businessId: string },
     currency: string,
   ): Promise<void> {
-    const bookings = await tx.booking.findMany({
-      where: { businessId: invoice.businessId, OR: [{ invoiceId: invoice.id }, { depositInvoiceId: invoice.id }] },
-      select: { invoiceId: true, depositInvoiceId: true },
-    });
-    for (const booking of bookings) {
-      const { final, deposit } = await readSettlementInvoices(tx, invoice.businessId, booking);
-      if (!final || final.status === 'VOID' || !deposit || depositPosition(deposit).coversCents <= 0) continue;
+    const pairedBookings = () =>
+      tx.$queryRaw<Array<{ id: string; invoiceId: string | null; depositInvoiceId: string | null }>>`
+        SELECT id, invoice_id AS "invoiceId", deposit_invoice_id AS "depositInvoiceId"
+        FROM bookings
+        WHERE business_id = ${invoice.businessId}
+          AND (invoice_id = ${invoice.id} OR deposit_invoice_id = ${invoice.id})
+        ORDER BY id`;
+    const linked = await pairedBookings();
+    if (linked.length === 0) return;
+    // SEC-A10b-3: taken in id order, so two edits never wait on each other.
+    for (const { id } of linked) {
+      const key = `${BOOKING_FINAL_INVOICE_LOCK_NAMESPACE}${id}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    }
+    // Re-read under the locks: a final linked meanwhile has committed.
+    for (const booking of await pairedBookings()) {
+      const final = await CommerceService.readPairedInvoice(tx, invoice.businessId, booking.invoiceId);
+      const deposit = await CommerceService.readPairedInvoice(tx, invoice.businessId, booking.depositInvoiceId);
+      if (!final || final.status === 'VOID') continue;
+      if (!deposit || deposit.status === 'VOID' || depositPosition(deposit).coversCents <= 0) continue;
       const isDeposit = deposit.id === invoice.id;
       const depositCurrency = isDeposit ? currency : normalizeCurrency(deposit.currency);
       const invoiceCurrency = isDeposit ? normalizeCurrency(final.currency) : currency;
@@ -4929,6 +4973,35 @@ export class CommerceService {
         invoiceCurrency,
       });
     }
+  }
+
+  /**
+   * W3-A10b review (SEC-A10b-1, D-59): one half of a booking's deposit/final
+   * pair, under its business, in the settlement shape depositPosition reads
+   * (settlementInvoiceSelect: status, total, currency, the business's payment
+   * rows in the order they were written, the APPLIED credit notes), withdrawn
+   * (soft-deleted) or not. Read raw: the soft-delete extension hides a
+   * withdrawn invoice from every find, and the default take caps a findMany.
+   */
+  private static async readPairedInvoice(
+    tx: PrismaTx,
+    businessId: string,
+    invoiceId: string | null,
+  ): Promise<SettlementInvoice | null> {
+    if (!invoiceId) return null;
+    const rows = await tx.$queryRaw<Array<Pick<SettlementInvoice, 'id' | 'invoiceNumber' | 'status' | 'total' | 'currency'>>>`
+      SELECT id, invoice_number AS "invoiceNumber", status::text AS "status", total, currency
+      FROM invoices WHERE id = ${invoiceId} AND business_id = ${businessId}`;
+    const row = rows[0];
+    if (!row) return null;
+    const payments = await tx.$queryRaw<SettlementInvoice['payments']>`
+      SELECT amount, status FROM payments
+      WHERE invoice_id = ${invoiceId} AND business_id = ${businessId}
+      ORDER BY created_at ASC, id ASC`;
+    const creditNotes = await tx.$queryRaw<SettlementInvoice['creditNotes']>`
+      SELECT amount FROM credit_notes
+      WHERE invoice_id = ${invoiceId} AND business_id = ${businessId} AND status = 'APPLIED'`;
+    return { ...row, payments, creditNotes };
   }
 
   /**

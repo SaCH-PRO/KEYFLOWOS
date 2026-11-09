@@ -58,6 +58,20 @@
  *   DC-10 CONTROL  W3-A10b: a currency PATCH on a DRAFT that is neither a netted deposit nor a
  *                  final that netted one passes: a deposit no final nets yet, an invoice outside
  *                  any booking, a final drawn after its deposit was voided
+ *   DC-11 RED      W3-A10b review SEC-A10b-1 (D-59), RED at d7051936: only VOID ends a pairing.
+ *                  With the DRAFT final withdrawn (the real DELETE route), the PATCH switching the
+ *                  deposit to USD answered 200 and trash restore left a TTD final netting a USD
+ *                  deposit; with the deposit withdrawn, the final switched the same way. Both
+ *                  answer 409 DEPOSIT_CURRENCY_MISMATCH, nothing written; restored, the pair is
+ *                  in one currency and the button finds it
+ *   DC-12 RED      W3-A10b review SEC-A10b-2 (D-59), RED at d7051936: a withdrawn booking still
+ *                  pairs its deposit and final (the soft-delete extension hid it from the pair
+ *                  lookup, and either half switched with 200); both answer 409, nothing written
+ *   DC-13 RED      W3-A10b review SEC-A10b-3 (D-59), RED at d7051936: a deposit switch sent while
+ *                  completion draws the final (after the final-invoice lock, before the link)
+ *                  passed, and completion answered CREATED for a TTD final netting a USD deposit;
+ *                  the switch now waits for the booking's final-invoice lock, reads the linked
+ *                  final and answers 409; the pair stays TTD
  *
  * Nothing on the money path is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard, PublicRateLimitGuard (real Redis at
@@ -81,7 +95,7 @@ import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL (the
@@ -264,6 +278,43 @@ async function expectRefusedAndUnwritten(
   expect(describeInvoices(await otherInvoicesOf(bookingId)), `${label}: no final invoice nets the deposit across currencies`).toEqual([]);
   expect((await bookingRow(bookingId)).invoiceId, `${label}: Booking.invoiceId stays null`).toBeNull();
   expect(await ledgerCount(businessId), `${label}: nothing is posted`).toEqual(before);
+}
+
+/** W3-A10b review (SEC-A10b-1): withdraw a DRAFT invoice through the real commerce DELETE route (a soft delete). */
+function deleteInvoice(businessId: string, invoiceId: string) {
+  return agent().delete(`/commerce/businesses/${businessId}/invoices/${invoiceId}`).set(HEADER, ID.owner).send();
+}
+
+/** An invoice row read raw, so a withdrawn one is seen too (the soft-delete extension hides it from every find). */
+async function rawInvoice(id: string): Promise<any> {
+  const rows: any[] = await db.$queryRawUnsafe(
+    `SELECT status::text AS status, currency, total, deleted_at AS "deletedAt", updated_at AS "updatedAt" FROM invoices WHERE id = $1`,
+    id,
+  );
+  return rows[0] ?? null;
+}
+
+/** What TrashController.restore writes for an invoice or a booking: deletedAt back to null, no other check. */
+async function restoreFromTrash(model: 'invoice' | 'booking', id: string) {
+  if (model === 'invoice') await db.invoice.update({ where: { id }, data: { deletedAt: null } });
+  else await db.booking.update({ where: { id }, data: { deletedAt: null } });
+}
+
+/**
+ * W3-A10b review (SEC-A10b-3): whether a session of this database is waiting
+ * for an advisory lock (the booking's final-invoice lock) within `limitMs`.
+ */
+async function advisoryLockWaiterSeen(limitMs: number): Promise<boolean> {
+  const until = Date.now() + limitMs;
+  while (Date.now() < until) {
+    const rows: Array<{ n: number }> = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM pg_locks l JOIN pg_database d ON d.oid = l.database
+       WHERE l.locktype = 'advisory' AND NOT l.granted AND d.datname = current_database()`,
+    );
+    if (rows[0]?.n > 0) return true;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return false;
 }
 
 beforeAll(async () => {
@@ -708,5 +759,118 @@ describe('V1-81 (FOLLOW3-A10, D-59) a final invoice never nets a deposit billed 
     const switched = await patchInvoice(ID.biz, drawn.body.invoiceId, { currency: 'USD' });
     expect(switched.status, JSON.stringify(switched.body)).toBe(200);
     expect((await invoiceRow(drawn.body.invoiceId)).currency).toBe('USD');
+  });
+
+  it('DC-11 RED-BEFORE (W3-A10b review SEC-A10b-1, D-59): a withdrawn (soft-deleted) final or deposit still pairs: the PATCH refuses to switch the other half to USD -> 409 DEPOSIT_CURRENCY_MISMATCH, nothing written; restored from trash, the pair is in one currency', async () => {
+    const b = await book(ID.biz, ID.svc, 'dc11');
+    const drawn = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(drawn.status, JSON.stringify(drawn.body)).toBe(201);
+    expect(drawn.body).toMatchObject({ alreadyExisted: false, amount: 75, depositInvoiceId: b.depositInvoiceId });
+    const finalId = drawn.body.invoiceId as string;
+    const before = await ledgerCount(ID.biz);
+
+    // The DRAFT final is withdrawn (the real DELETE route): it still nets the deposit.
+    const withdrawnFinal = await deleteInvoice(ID.biz, finalId);
+    expect(withdrawnFinal.status, JSON.stringify(withdrawnFinal.body)).toBe(200);
+    expect((await rawInvoice(finalId)).deletedAt, 'the final is withdrawn, not voided').not.toBeNull();
+    const depositBefore = invoiceSnapshot(await invoiceRow(b.depositInvoiceId));
+    const finalBefore = invoiceSnapshot(await rawInvoice(finalId));
+    const res = await patchInvoice(ID.biz, b.depositInvoiceId, { currency: 'USD' });
+    expect(res.status, `RED-BEFORE: 200, the deposit a withdrawn final nets switched to USD: ${JSON.stringify(res.body)}`).toBe(409);
+    expect(res.body.code).toBe(MISMATCH);
+    expect(res.body.details).toMatchObject({ depositInvoiceId: b.depositInvoiceId, finalInvoiceId: finalId, depositCurrency: 'USD', invoiceCurrency: 'TTD' });
+    expect(invoiceSnapshot(await invoiceRow(b.depositInvoiceId)), 'the deposit is untouched').toEqual(depositBefore);
+    expect(invoiceSnapshot(await rawInvoice(finalId)), 'the withdrawn final is untouched').toEqual(finalBefore);
+
+    // Restored from trash, the final nets the deposit in its own currency: the button finds the pair.
+    await restoreFromTrash('invoice', finalId);
+    const restored = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(restored.status, JSON.stringify(restored.body)).toBe(201);
+    expect(restored.body).toMatchObject({ invoiceId: finalId, alreadyExisted: true, amount: 75, depositInvoiceId: b.depositInvoiceId });
+
+    // The other half: the DRAFT deposit is withdrawn; the final that nets it may not switch either.
+    const withdrawnDeposit = await deleteInvoice(ID.biz, b.depositInvoiceId);
+    expect(withdrawnDeposit.status, JSON.stringify(withdrawnDeposit.body)).toBe(200);
+    const finalSnap = invoiceSnapshot(await invoiceRow(finalId));
+    const finalSwitch = await patchInvoice(ID.biz, finalId, { currency: 'USD' });
+    expect(finalSwitch.status, `RED-BEFORE: 200, the final netting a withdrawn deposit switched to USD: ${JSON.stringify(finalSwitch.body)}`).toBe(409);
+    expect(finalSwitch.body.code).toBe(MISMATCH);
+    expect(finalSwitch.body.details).toMatchObject({ depositInvoiceId: b.depositInvoiceId, finalInvoiceId: finalId, depositCurrency: 'TTD', invoiceCurrency: 'USD' });
+    expect(invoiceSnapshot(await invoiceRow(finalId)), 'the final is untouched').toEqual(finalSnap);
+    await restoreFromTrash('invoice', b.depositInvoiceId);
+    expect([(await invoiceRow(b.depositInvoiceId)).currency, (await invoiceRow(finalId)).currency], 'the restored pair is in one currency').toEqual(['TTD', 'TTD']);
+    const found = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(found.status, JSON.stringify(found.body)).toBe(201);
+    expect(found.body).toMatchObject({ invoiceId: finalId, alreadyExisted: true, amount: 75, depositInvoiceId: b.depositInvoiceId });
+    expect(await ledgerCount(ID.biz), 'nothing is posted').toEqual(before);
+  });
+
+  it('DC-12 RED-BEFORE (W3-A10b review SEC-A10b-2, D-59): a withdrawn (soft-deleted) booking still pairs its deposit and final: the PATCH refuses to switch either to USD -> 409 DEPOSIT_CURRENCY_MISMATCH, nothing written; restored, the pair is in one currency', async () => {
+    const b = await book(ID.biz, ID.svc, 'dc12');
+    const done = await setStatus(ID.biz, b.bookingId, 'COMPLETED');
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect(done.body.invoicing).toMatchObject({ status: 'CREATED', amount: 75, depositInvoiceId: b.depositInvoiceId, depositAmount: 25 });
+    const finalId = done.body.invoicing.invoiceId as string;
+    const before = await ledgerCount(ID.biz);
+
+    // The booking is withdrawn: Prisma's delete, which the soft-delete extension turns into deletedAt = now().
+    await db.booking.delete({ where: { id: b.bookingId } });
+    expect(await bookingRow(b.bookingId), 'the booking is withdrawn').toBeNull();
+    const depositBefore = invoiceSnapshot(await invoiceRow(b.depositInvoiceId));
+    const finalBefore = invoiceSnapshot(await invoiceRow(finalId));
+
+    const dep = await patchInvoice(ID.biz, b.depositInvoiceId, { currency: 'USD' });
+    expect(dep.status, `RED-BEFORE: 200, the deposit of a withdrawn booking switched to USD: ${JSON.stringify(dep.body)}`).toBe(409);
+    expect(dep.body.code).toBe(MISMATCH);
+    expect(dep.body.details).toMatchObject({ depositInvoiceId: b.depositInvoiceId, finalInvoiceId: finalId, depositCurrency: 'USD', invoiceCurrency: 'TTD' });
+    const fin = await patchInvoice(ID.biz, finalId, { currency: 'USD' });
+    expect(fin.status, `RED-BEFORE: 200, the final of a withdrawn booking switched to USD: ${JSON.stringify(fin.body)}`).toBe(409);
+    expect(fin.body.code).toBe(MISMATCH);
+    expect(fin.body.details).toMatchObject({ depositInvoiceId: b.depositInvoiceId, finalInvoiceId: finalId, depositCurrency: 'TTD', invoiceCurrency: 'USD' });
+    expect(invoiceSnapshot(await invoiceRow(b.depositInvoiceId)), 'the deposit is untouched').toEqual(depositBefore);
+    expect(invoiceSnapshot(await invoiceRow(finalId)), 'the final is untouched').toEqual(finalBefore);
+
+    // Restored from trash, the booking's pair is in one currency and the button finds it.
+    await restoreFromTrash('booking', b.bookingId);
+    const found = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(found.status, JSON.stringify(found.body)).toBe(201);
+    expect(found.body).toMatchObject({ invoiceId: finalId, alreadyExisted: true, amount: 75, depositInvoiceId: b.depositInvoiceId });
+    expect(await ledgerCount(ID.biz), 'nothing is posted').toEqual(before);
+  });
+
+  it('DC-13 RED-BEFORE (W3-A10b review SEC-A10b-3, D-59): a deposit switch sent while completion draws the final waits for the booking final-invoice lock and is refused -> 409 DEPOSIT_CURRENCY_MISMATCH; completion draws the 75 TTD final netting the TTD deposit', async () => {
+    const b = await book(ID.biz, ID.svc, 'dc13');
+    const original = commerce.createInvoiceForService.bind(commerce);
+    let pending: Promise<any> | undefined;
+    let waited = false;
+    // issueFinalInvoice holds the booking's final-invoice lock here and has read
+    // the TTD deposit; the final is created next, on its own connection, and
+    // linked to the booking after that. The switch is sent in that window.
+    const spy = vi.spyOn(commerce, 'createInvoiceForService').mockImplementationOnce(async (...args: any[]) => {
+      pending = patchInvoice(ID.biz, b.depositInvoiceId, { currency: 'USD' }).then((r) => r);
+      waited = await advisoryLockWaiterSeen(3_000);
+      return original(...args);
+    });
+    let done: any;
+    try {
+      done = await setStatus(ID.biz, b.bookingId, 'COMPLETED');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(pending, 'the switch was sent while the final was being drawn up').toBeDefined();
+    const patched = await pending!;
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect(done.body.invoicing).toMatchObject({ status: 'CREATED', amount: 75, depositInvoiceId: b.depositInvoiceId, depositAmount: 25 });
+    const finalId = done.body.invoicing.invoiceId as string;
+    expect(waited, 'RED-BEFORE: the switch did not wait for the booking final-invoice lock').toBe(true);
+    expect(patched.status, `RED-BEFORE: 200, the deposit switched to USD while its TTD final was drawn up: ${JSON.stringify(patched.body)}`).toBe(409);
+    expect(patched.body.code).toBe(MISMATCH);
+    expect(patched.body.details).toMatchObject({ depositInvoiceId: b.depositInvoiceId, finalInvoiceId: finalId, depositCurrency: 'USD', invoiceCurrency: 'TTD' });
+    expect([(await invoiceRow(b.depositInvoiceId)).currency, (await invoiceRow(finalId)).currency], 'the pair is in one currency').toEqual(['TTD', 'TTD']);
+    expect((await bookingRow(b.bookingId)).invoiceId, 'Booking.invoiceId is the final').toBe(finalId);
+    // CONTROL: the button finds the one-currency pair.
+    const again = await createInvoiceRoute(ID.biz, b.bookingId);
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body).toMatchObject({ invoiceId: finalId, alreadyExisted: true, amount: 75, depositInvoiceId: b.depositInvoiceId });
   });
 });
