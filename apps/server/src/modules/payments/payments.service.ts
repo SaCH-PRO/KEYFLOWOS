@@ -74,6 +74,27 @@ const MANUAL_REFUND_ID_PREFIX = 'manual_refund_';
  */
 const MANUAL_PAYMENT_ID_PREFIX = 'manual_';
 
+/** R0-20c: the Stripe event types the door records as a payment of an invoice or a storefront order. */
+const STRIPE_PAYMENT_EVENTS = new Set(['checkout.session.completed', 'charge.succeeded', 'payment_intent.succeeded']);
+/**
+ * R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2, as the legacy route's
+ * SEC-R020B-3): the webhook_events provider under which the door keeps a
+ * payment event it refused, one row per Stripe event id (a retry adds none),
+ * with the business of the invoice or order it named and `<type>:<reason>` as
+ * its event type. It is not the door's dedupe claim (provider 'stripe').
+ */
+const STRIPE_REFUSED_PROVIDER = 'stripe-refused';
+/** R0-20c: the fields of a Stripe session, charge or payment intent the door's binding reads. */
+type StripePaymentObject = {
+  metadata?: Record<string, unknown> | null;
+  client_reference_id?: unknown;
+  amount_total?: unknown;
+  amount_received?: unknown;
+  amount?: unknown;
+  currency?: unknown;
+  payment_link?: unknown;
+};
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -796,6 +817,12 @@ export class PaymentsService {
       throw new BadRequestException('Invalid Stripe webhook signature');
     }
 
+    // R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2): a payment event is bound
+    // to the invoice or storefront order it names before the dedupe claim, so a
+    // refused one writes nothing (no payment, no posting, no claim). The legacy
+    // POST /webhooks/stripe hands its verified events here too.
+    if (STRIPE_PAYMENT_EVENTS.has(eventType)) await this.bindStripePaymentEvent(event, signedForBusinessId);
+
     // Provider-event-id idempotency: if Stripe re-delivers this `evt_...`,
     // ack it as received but skip all side-effects. Belt-and-suspenders with
     // the per-Payment.providerPaymentId unique constraint downstream.
@@ -833,6 +860,104 @@ export class PaymentsService {
           return { ok: true, received: true };
       }
     });
+  }
+
+  /**
+   * R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2; the binding R0-20b gave the
+   * legacy route alone). A verified event the door would record as a payment
+   * must be one made for the invoice or storefront order it names; the id is
+   * read exactly as processStripeChargeOrSession reads it.
+   *
+   * Invoice X (createStripeCheckout): the business is X's. metadata.businessId,
+   * when the event carries one, is X's business; a platform-signed Payment Link
+   * session, whose client_reference_id the payer chooses, must carry it; a
+   * delivery a tenant signed with its own secret speaks for that tenant only.
+   * The currency is X's and the amount a positive number of minor units. The
+   * amount recorded is the one the event carries (D-05, R0-20b review
+   * CR-R020B-1), never a fallback to X's total.
+   *
+   * Storefront order O (createStorePayment): the door settles O for its whole
+   * total, so the event must name O in metadata.orderId and O's business in
+   * metadata.businessId and carry exactly O's total in O's currency.
+   *
+   * Anything else is refused (400) before the dedupe claim, so nothing is
+   * written, and the refusal is kept as one webhook_events row. An id that is
+   * neither is left to the dispatch, which records nothing for it.
+   */
+  private async bindStripePaymentEvent(
+    event: { id?: string; type?: string; data?: { object?: unknown } },
+    signedForBusinessId: string | null,
+  ): Promise<void> {
+    const obj = (event.data?.object ?? {}) as StripePaymentObject;
+    const id: unknown = obj.metadata?.invoiceId || obj.client_reference_id || obj.metadata?.invoice_id;
+    if (!id || typeof id !== 'string') return;
+    const amountMinor: unknown = obj.amount_total ?? obj.amount_received ?? obj.amount;
+    const positiveAmount = typeof amountMinor === 'number' && Number.isFinite(amountMinor) && amountMinor > 0;
+    const currency = normalizeCurrency(typeof obj.currency === 'string' ? obj.currency : null);
+    const namedBusiness: unknown = obj.metadata?.businessId;
+
+    const invoice = await this.prisma.client.invoice.findUnique({
+      where: { id },
+      select: { businessId: true, currency: true },
+    });
+    if (invoice) {
+      const foreign =
+        (signedForBusinessId !== null && signedForBusinessId !== invoice.businessId) ||
+        (namedBusiness != null ? namedBusiness !== invoice.businessId : signedForBusinessId === null && !!obj.payment_link);
+      const reason = foreign
+        ? 'business'
+        : currency === '' || currency !== normalizeCurrency(invoice.currency)
+          ? 'currency'
+          : !positiveAmount
+            ? 'amount'
+            : null;
+      if (reason) await this.refuseStripePaymentEvent(event, { kind: 'invoice', id, businessId: invoice.businessId }, reason);
+      return;
+    }
+
+    const order = await this.prisma.client.marketplaceOrder.findUnique({
+      where: { id },
+      select: { id: true, businessId: true, total: true, currency: true },
+    });
+    if (!order) return;
+    const reason =
+      obj.metadata?.orderId !== order.id
+        ? 'order'
+        : namedBusiness !== order.businessId
+          ? 'business'
+          : currency === '' || currency !== normalizeCurrency(order.currency)
+            ? 'currency'
+            : !positiveAmount || amountMinor !== Math.round(Number(order.total) * 100)
+              ? 'amount'
+              : null;
+    if (reason) await this.refuseStripePaymentEvent(event, { kind: 'order', id, businessId: order.businessId }, reason);
+  }
+
+  /** R0-20c: keeps the refusal (one webhook_events row per event id), then refuses the delivery: 400, nothing recorded. */
+  private async refuseStripePaymentEvent(
+    event: { id?: string; type?: string },
+    target: { kind: 'invoice' | 'order'; id: string; businessId: string },
+    reason: string,
+  ): Promise<never> {
+    this.logger.warn(`Stripe ${event.type} ${event.id ?? '(no event id)'} refused: its ${reason} does not match ${target.kind} ${target.id}`);
+    if (event.id) {
+      try {
+        await this.prisma.client.webhookEvent.create({
+          data: {
+            provider: STRIPE_REFUSED_PROVIDER,
+            providerEventId: event.id,
+            eventType: `${event.type}:${reason}`,
+            businessId: target.businessId,
+          },
+        });
+      } catch (e: unknown) {
+        // A retry of an event already kept (unique provider + event id) adds nothing.
+        if ((e as { code?: string } | null)?.code !== 'P2002') {
+          this.logger.error(`Stripe refusal of ${event.id} could not be kept: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+    }
+    throw new BadRequestException(`Stripe event does not match the ${target.kind}`);
   }
 
   private async processStripeChargeOrSession(
