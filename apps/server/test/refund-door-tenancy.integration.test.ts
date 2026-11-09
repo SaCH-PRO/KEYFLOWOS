@@ -64,11 +64,13 @@
  *           after (PRD-05 / PRD-10 keep the tenant-secret contract)
  *   RDT-08..13 (review SEC-A3-1/2, CR-A3-1/2) a platform-signed event is
  *           about a charge on the platform account, so only a business with
- *           no Stripe key of its own is asked. B with its own key (even an
- *           invalid one) and a self-signed row naming A's ids neither fails A's
- *           delivery (RDT-08), blocks it (RDT-09) nor takes it (RDT-10); B
- *           saving a key while the door reads the provider for A changes
- *           nothing (RDT-11 its answer, RDT-12 its failed read).
+ *           no Stripe key of its own is asked through isOwnCharge; a business
+ *           with one is answered by the platform account's record alone
+ *           (W3-PLATFORM-CHARGE-BIND), never by its own key or rows. B with its
+ *           own key (even an invalid one) and a self-signed row naming A's ids
+ *           neither fails A's delivery (RDT-08), blocks it (RDT-09) nor takes
+ *           it (RDT-10); B saving a key while the door reads the provider for A
+ *           changes nothing (RDT-11 its answer, RDT-12 its failed read).
  *   RDT-13..13c (W3-PLATFORM-CHARGE-BIND, review CR-A3-1, owner ruling D-56)
  *           a payment A took on the platform account before it saved a Stripe
  *           key of its own is bound by the platform account's own record
@@ -78,6 +80,14 @@
  *           self-signed row naming the same payment_intent), and a row A
  *           self-signed before saving its key does not take another business's
  *           pre-key charge (RDT-13c, refused and logged)
+ *   RDT-14..15 (W3-PLATFORM-CHARGE-BIND review repairs SEC-PCB-1, PCB-CR-1,
+ *           PCB-CR-2) the platform account's record is read for a business
+ *           holding a key of its own whenever its payment row was recorded: a
+ *           platform Checkout Session paid (its completion recorded) after A
+ *           saved its key is refunded into A, before and after an unrelated
+ *           write of A's business row (RDT-14); a failed read of that record
+ *           fails the delivery, and the redelivery books exactly one row
+ *           (RDT-15)
  *   RDT-07  every v81c_ row is gone after cleanup
  *
  * Nothing on the boundary is mocked: PrismaService, PaymentsService (built by
@@ -177,6 +187,8 @@ const ID = {
   invB13b: `${P}invB13b`,
   invA13c: `${P}invA13c`,
   invB13c: `${P}invB13c`,
+  invA14: `${P}invA14`,
+  invA15: `${P}invA15`,
 };
 const TENANT_B_INVOICES = new Set([ID.invB1, ID.invB2, ID.invB3, ID.invB6, ID.invB6e, ID.invB7, ID.invB8, ID.invB9, ID.invB10, ID.invB11, ID.invB12, ID.invB13b, ID.invB13c]);
 
@@ -196,6 +208,8 @@ const S = {
   csA12: `cs_${P}A12`, piA12: `pi_${P}A12`, chA12: `ch_${P}A12`, reA12: `re_${P}A12`, csBforged12: `cs_${P}Bforged12`,
   csA13: `cs_${P}A13`, piA13: `pi_${P}A13`, chA13: `ch_${P}A13`, reA13: `re_${P}A13`,
   csA13b: `cs_${P}A13b`, piA13b: `pi_${P}A13b`, chA13b: `ch_${P}A13b`, reA13b: `re_${P}A13b`, csBforged13b: `cs_${P}Bforged13b`,
+  csA14: `cs_${P}A14`, piA14: `pi_${P}A14`, chA14: `ch_${P}A14`, reA14: `re_${P}A14`, reA14b: `re_${P}A14b`,
+  csA15: `cs_${P}A15`, piA15: `pi_${P}A15`, chA15: `ch_${P}A15`, reA15: `re_${P}A15`,
   csB13c: `cs_${P}B13c`, piB13c: `pi_${P}B13c`, chB13c: `ch_${P}B13c`, reB13c: `re_${P}B13c`, csAforged13c: `cs_${P}Aforged13c`,
 };
 
@@ -760,7 +774,7 @@ describe('controls: rows the provider wrote stay originals; the tenant-secret co
   }, 60_000);
 });
 
-describe('review SEC-A3-1/2, CR-A3-1/2: only a business that takes payments on the platform account is asked about a platform-signed refund', () => {
+describe("review SEC-A3-1/2, CR-A3-1/2, SEC-PCB-1: only a business that takes payments on the platform account is asked about a platform-signed refund through isOwnCharge; one holding a key of its own is answered by the platform account's record, never by its own key or rows", () => {
   const PROCESSED = { ok: true, received: true, processed: 'refund.created' };
   const PLATFORM = `Bearer ${PLATFORM_KEY}`;
 
@@ -784,9 +798,13 @@ describe('review SEC-A3-1/2, CR-A3-1/2: only a business that takes payments on t
       expect(await postingsOf(a.id)).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:40']);
       await expectLedgerAgrees(ID.invA8, 60);
       expect(await booksOf(ID.bizB)).toEqual(bBefore);
-      // Only A is asked, on the platform account: the charge, then the Checkout Session of its payment_intent.
-      expect(callsSince(mark)).toEqual([`GET api.stripe.com /v1/charges/${S.chA8}`, 'GET api.stripe.com /v1/checkout/sessions']);
-      expect(keysSince(mark)).toEqual([PLATFORM, PLATFORM]);
+      // A through isOwnCharge, then B (a key of its own) through the platform account's record (W3-PLATFORM-CHARGE-BIND,
+      // review SEC-PCB-1): each the charge, then the Checkout Session of its payment_intent, all with the deployment's key.
+      expect(callsSince(mark)).toEqual([
+        `GET api.stripe.com /v1/charges/${S.chA8}`, 'GET api.stripe.com /v1/checkout/sessions',
+        `GET api.stripe.com /v1/charges/${S.chA8}`, 'GET api.stripe.com /v1/checkout/sessions',
+      ]);
+      expect(keysSince(mark)).toEqual([PLATFORM, PLATFORM, PLATFORM, PLATFORM]);
     } finally {
       await setStripeSettings(ID.bizB, null);
     }
@@ -811,13 +829,14 @@ describe('review SEC-A3-1/2, CR-A3-1/2: only a business that takes payments on t
       expect(await postingsOf(a.id)).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:30']);
       await expectLedgerAgrees(ID.invA9, 70);
       expect(await booksOf(ID.bizB)).toEqual(bBefore);
-      expect(keysSince(mark)).toEqual([PLATFORM, PLATFORM]);
+      // A through isOwnCharge, then B through the platform account's record (its own key and row never consulted).
+      expect(keysSince(mark)).toEqual([PLATFORM, PLATFORM, PLATFORM, PLATFORM]);
     } finally {
       await setStripeSettings(ID.bizB, null);
     }
   }, 60_000);
 
-  it("RDT-10 (SEC-A3-2 R3): B holds a Stripe key of its own and its self-signed row naming A's ch_A10 is the only match: nothing is written in either tenant, no provider call is made, and the refusal is logged", async () => {
+  it("RDT-10 (SEC-A3-2 R3, review SEC-PCB-1): B holds a Stripe key of its own and its self-signed row naming A's ch_A10 is the only match: nothing is written in either tenant, only the platform account's record is read (with the deployment's key, never B's), and the refusal is logged", async () => {
     try {
       await setStripeSettings(ID.bizB, B_OWN_KEY);
       checkoutOnPlatform(ID.invA10, S.csA10, S.piA10, S.chA10, 10000);
@@ -839,7 +858,9 @@ describe('review SEC-A3-1/2, CR-A3-1/2: only a business that takes payments on t
       expect(await rowsOf(ID.invA10)).toEqual([]);
       expect(await booksOf(ID.bizA)).toEqual(aBefore);
       expect(await booksOf(ID.bizB)).toEqual(bBefore);
-      expect(callsSince(mark)).toEqual([]);
+      // W3-PLATFORM-CHARGE-BIND (review SEC-PCB-1): B is answered by the platform account's record, which names A.
+      expect(callsSince(mark)).toEqual([`GET api.stripe.com /v1/charges/${S.chA10}`, 'GET api.stripe.com /v1/checkout/sessions']);
+      expect(keysSince(mark)).toEqual([PLATFORM, PLATFORM]);
       const refusal = warnedSince(warned, S.chA10);
       expect(refusal, 'the refusal is logged').toHaveLength(1);
       expect(refusal[0]).toContain(ID.bizB);
@@ -991,6 +1012,79 @@ describe('review SEC-A3-1/2, CR-A3-1/2: only a business that takes payments on t
       expect(refusal, 'the refusal is logged').toHaveLength(1);
       expect(refusal[0]).toContain(ID.bizA);
     } finally {
+      await setStripeSettings(ID.bizA, null);
+    }
+  }, 60_000);
+
+  it("RDT-14 (review SEC-PCB-1, PCB-CR-1; CR-A3-1, D-56): A's customer opened a platform Checkout Session before A saved a Stripe key of its own and paid after the save (its completion is recorded after it, as a session paid later or a retried delivery is): a platform-signed refund.created of that payment is booked into A by the platform account's record, and a later refund of the same charge after an unrelated write of A's business row is booked the same way", async () => {
+    try {
+      checkoutOnPlatform(ID.invA14, S.csA14, S.piA14, S.chA14, 10000);
+      await setStripeSettings(ID.bizA, A_OWN_KEY);
+      await new Promise((r) => setTimeout(r, 20));
+      await paySession('A14', ID.invA14, S.csA14, S.piA14, 100);
+      const a = await paymentBy(S.csA14);
+      expect(a).toMatchObject({ businessId: ID.bizA, invoiceId: ID.invA14, status: 'SUCCESSFUL', reference: S.piA14 });
+      // The case under test: the payment row is recorded after the key save (the business row's last write).
+      const keySavedAt = (await db.business.findUnique({ where: { id: ID.bizA }, select: { updatedAt: true } })).updatedAt;
+      expect(a.createdAt.getTime()).toBeGreaterThan(keySavedAt.getTime());
+      const bBefore = await booksOf(ID.bizB);
+
+      const mark = calls.length;
+      expect(await refundCreated('re_A14', S.reA14, S.chA14, S.piA14, 40)).toEqual(PROCESSED);
+      // RED-BEFORE (f27b3531): paidBeforeOwnKey compared the payment row's createdAt with the business row's updatedAt, so the platform account was not read for A: refused and logged, no row, no provider call.
+      expect(await paymentBy(S.reA14)).toMatchObject({ businessId: ID.bizA, invoiceId: ID.invA14, status: 'REFUNDED', amount: -40, reference: S.csA14 });
+      expect(callsSince(mark)).toEqual([`GET api.stripe.com /v1/charges/${S.chA14}`, 'GET api.stripe.com /v1/checkout/sessions']);
+      expect(keysSince(mark)).toEqual([PLATFORM, PLATFORM]);
+
+      // An unrelated write of A's business row (a rename) changes nothing: the next refund of the charge is booked the same way.
+      await db.business.update({ where: { id: ID.bizA }, data: { name: 'V81C Biz A renamed' } });
+      expect(await refundCreated('re_A14b', S.reA14b, S.chA14, S.piA14, 10)).toEqual(PROCESSED);
+      expect(await rowsOf(ID.invA14)).toEqual([
+        `stripe:${S.csA14}:SUCCESSFUL:100:${S.piA14}`,
+        `stripe:${S.reA14}:REFUNDED:-40:${S.csA14}`,
+        `stripe:${S.reA14b}:REFUNDED:-10:${S.csA14}`,
+      ]);
+      expect(await postingsOf(a.id)).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:40', 'REFUND:POSTED:10']);
+      await expectLedgerAgrees(ID.invA14, 50);
+      expect(await booksOf(ID.bizB)).toEqual(bBefore);
+      expect(keysSince(mark).every((k) => k === PLATFORM), "A's own key is never used").toBe(true);
+    } finally {
+      await db.business.update({ where: { id: ID.bizA }, data: { name: 'V81C Biz A' } });
+      await setStripeSettings(ID.bizA, null);
+    }
+  }, 60_000);
+
+  it("RDT-15 (review PCB-CR-2; CR-A3-1, D-56): A took a payment on the platform account and then saved a Stripe key of its own, and the platform account's read fails on the first delivery of a platform-signed refund.created: that delivery fails with nothing written (its claim is released), and Stripe's redelivery books exactly one -40 row into A", async () => {
+    try {
+      checkoutOnPlatform(ID.invA15, S.csA15, S.piA15, S.chA15, 10000);
+      await paySession('A15', ID.invA15, S.csA15, S.piA15, 100);
+      const a = await paymentBy(S.csA15);
+      await setStripeSettings(ID.bizA, A_OWN_KEY);
+
+      const mark = calls.length;
+      beforeNextAnswer = async () => {
+        throw new Error(`${P}platform read down`);
+      };
+      await expect(refundCreated('re_A15', S.reA15, S.chA15, S.piA15, 40)).rejects.toThrow(`${P}platform read down`);
+      expect(await paymentBy(S.reA15)).toBeNull();
+      expect(await rowsOf(ID.invA15)).toEqual([`stripe:${S.csA15}:SUCCESSFUL:100:${S.piA15}`]);
+      expect(await postingsOf(a.id)).toEqual(['INCOME:POSTED:100']);
+
+      // Stripe delivers it again: its claim was released, and the platform account's record binds it to A; the next redelivery is acknowledged.
+      expect(await refundCreated('re_A15', S.reA15, S.chA15, S.piA15, 40)).toEqual(PROCESSED);
+      expect(await refundCreated('re_A15', S.reA15, S.chA15, S.piA15, 40)).toEqual({ ok: true, received: true });
+      expect(await rowsOf(ID.invA15)).toEqual([`stripe:${S.csA15}:SUCCESSFUL:100:${S.piA15}`, `stripe:${S.reA15}:REFUNDED:-40:${S.csA15}`]);
+      expect(await postingsOf(a.id)).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:40']);
+      await expectLedgerAgrees(ID.invA15, 60);
+      // The failed read of the charge, then the redelivery's reads: all on the platform account with the deployment's key.
+      expect(callsSince(mark)).toEqual([
+        `GET api.stripe.com /v1/charges/${S.chA15}`,
+        `GET api.stripe.com /v1/charges/${S.chA15}`,
+        'GET api.stripe.com /v1/checkout/sessions',
+      ]);
+      expect(keysSince(mark)).toEqual([PLATFORM, PLATFORM, PLATFORM]);
+    } finally {
+      beforeNextAnswer = null;
       await setStripeSettings(ID.bizA, null);
     }
   }, 60_000);
