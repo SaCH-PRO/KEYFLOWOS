@@ -74,11 +74,16 @@
  *          fails, naming it. Every entry still matches an unlocked writer (a
  *          converted writer is removed), and the list never grows: at most
  *          ALLOWLIST_CEILING entries. FOLLOW3-D13 converted every writer in
- *          its write set; the four left are outside it (it.todo MW-03h).
+ *          its write set; W3-D13b-META-WRITERS the four left (MW-03h).
  *   MW-03b no D12 write-set file has an unlocked metaData writer
  *          (SiteService, MarketplaceService, WhatsAppService).
  *   MW-03g no FOLLOW3-D13 write-set file has an unlocked metaData writer, and
  *          each writer FOLLOW3-D13 converted writes under the lock.
+ *   MW-03h the allow-list is empty (ALLOWLIST_CEILING 0): the four writers
+ *          W3-D13b-META-WRITERS converted (SalesTeamService.setCommissionRate,
+ *          CrmAiService.saveGuidelines, GamificationService.awardXp and
+ *          updateStreak) write under the lock, and no file of its write set
+ *          has an unlocked metaData writer.
  *   MW-03c the helper takes the row lock before it reads, and
  *          IdentityService.updateBusiness still locks inline.
  *   MW-03d every OPAQUE writer (data the reader cannot see into) is in
@@ -117,21 +122,14 @@ type Entry = { why: string };
 /**
  * The Business.metaData writers that still read and write without the row
  * lock. FOLLOW3-D12 listed 24; FOLLOW3-D13-METADATA-LOCKED-WRITES-REST
- * converted the 20 in its write set (D13_CONVERTED, checked by MW-03g). The
- * four left were found by this census and sit outside FOLLOW3-D13's write set:
- * a follow-up packet converts them and empties this list (it.todo MW-03h).
- * Shrink-only: remove an entry when its writer takes the lock, and lower
- * ALLOWLIST_CEILING with it.
+ * converted the 20 in its write set (D13_CONVERTED, checked by MW-03g), and
+ * W3-D13b-META-WRITERS the four left outside it (D13B_CONVERTED, MW-03h). The
+ * list is empty and stays empty: a new unlocked writer fails MW-03a.
  */
-export const D13_ALLOWLIST: Record<string, Entry> = {
-  'modules/conversion/sales-team.service.ts#SalesTeamService.setCommissionRate': { why: 'Found by this census (FOLLOW3-D12), outside the FOLLOW3-D13 write set: metaData sales-team commission rate. Follow-up packet.' },
-  'modules/crm/crm-ai.service.ts#CrmAiService.saveGuidelines': { why: 'Found by this census (FOLLOW3-D12), outside the FOLLOW3-D13 write set: metaData CRM AI guidelines. Follow-up packet.' },
-  'modules/gamification/gamification.service.ts#GamificationService.awardXp': { why: 'Found by this census (FOLLOW3-D12), outside the FOLLOW3-D13 write set (which holds gamification.listener.ts only): metaData gamification XP. Follow-up packet.' },
-  'modules/gamification/gamification.service.ts#GamificationService.updateStreak': { why: 'Found by this census (FOLLOW3-D12), outside the FOLLOW3-D13 write set (which holds gamification.listener.ts only): metaData gamification streak. Follow-up packet.' },
-};
+export const D13_ALLOWLIST: Record<string, Entry> = {};
 
-/** The allow-list size after FOLLOW3-D13 (24 at FOLLOW3-D12). It only goes down. */
-export const ALLOWLIST_CEILING = 4;
+/** The allow-list size: 24 at FOLLOW3-D12, 4 after FOLLOW3-D13, 0 since W3-D13b-META-WRITERS. It only goes down. */
+export const ALLOWLIST_CEILING = 0;
 
 /**
  * W3-D13b-META-WRITERS (MW-03h): the four writers FOLLOW3-D13 left on the
@@ -908,7 +906,7 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
 
   it('[MW-03a] the allow-list is shrink-only (at most ALLOWLIST_CEILING entries)', () => {
     expect(Object.keys(D13_ALLOWLIST).length).toBeLessThanOrEqual(ALLOWLIST_CEILING);
-    expect(ALLOWLIST_CEILING, 'the FOLLOW3-D13 ceiling (24 at FOLLOW3-D12); lower it, never raise it').toBeLessThanOrEqual(4);
+    expect(ALLOWLIST_CEILING, 'the W3-D13b-META-WRITERS ceiling (24 at FOLLOW3-D12, 4 after FOLLOW3-D13); never raise it').toBeLessThanOrEqual(0);
   });
 
   it('[MW-03g] RED-BEFORE: no FOLLOW3-D13 write-set file writes Business.metaData unlocked, none is on the allow-list, and every writer FOLLOW3-D13 converted writes under the lock', () => {

@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 
 interface Achievement {
   id: string;
@@ -184,81 +185,94 @@ export class GamificationService {
     return { level, currentXp, xpToNextLevel };
   }
 
+  /**
+   * W3-D13b-META-WRITERS (MW-03h): metaData is read and written under the
+   * business row lock (lockBusinessMeta), so a metaData write that commits
+   * meanwhile (the owner's PATCH clearing a payment secret, another XP gain)
+   * is not undone by this one's copy (RED-before MW-18: the cleared secret was
+   * stored again).
+   */
   async awardXp(businessId: string, action: string, xp: number): Promise<void> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
+    const awarded = await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    if (!business) return;
+      if (!business) return false;
 
-    const metaData = (business.metaData as Record<string, unknown>) || {};
-    const recentXpGains = (metaData.recentXpGains as { action: string; xp: number; timestamp: string }[]) || [];
+      const metaData = (business.metaData as Record<string, unknown>) || {};
+      const recentXpGains = (metaData.recentXpGains as { action: string; xp: number; timestamp: string }[]) || [];
 
-    recentXpGains.unshift({
-      action,
-      xp,
-      timestamp: new Date().toISOString(),
-    });
+      recentXpGains.unshift({
+        action,
+        xp,
+        timestamp: new Date().toISOString(),
+      });
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: {
-          ...metaData,
-          recentXpGains: recentXpGains.slice(0, 20),
-          lastActivityAt: new Date().toISOString(),
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: {
+            ...metaData,
+            recentXpGains: recentXpGains.slice(0, 20),
+            lastActivityAt: new Date().toISOString(),
+          },
         },
-      },
+      });
+      return true;
     });
 
-    this.logger.debug(`Awarded ${xp} XP to business ${businessId} for action: ${action}`);
+    if (awarded) this.logger.debug(`Awarded ${xp} XP to business ${businessId} for action: ${action}`);
   }
 
+  /**
+   * W3-D13b-META-WRITERS (MW-03h): metaData is read and written under the
+   * business row lock (lockBusinessMeta), so a metaData write that commits
+   * meanwhile (the owner's PATCH clearing a payment secret, an XP award) is
+   * not undone by this one's copy (RED-before MW-19: the cleared secret was
+   * stored again), and two updates in flight together count one day once.
+   */
   async updateStreak(businessId: string): Promise<number> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
+    return this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    if (!business) return 0;
+      if (!business) return 0;
 
-    const metaData = (business.metaData as Record<string, unknown>) || {};
-    const lastActivityAt = metaData.lastActivityAt as string | undefined;
-    const currentStreak = (metaData.streakDays as number) || 0;
+      const metaData = (business.metaData as Record<string, unknown>) || {};
+      const lastActivityAt = metaData.lastActivityAt as string | undefined;
+      const currentStreak = (metaData.streakDays as number) || 0;
 
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    let newStreak: number;
+      let newStreak: number;
 
-    if (lastActivityAt) {
-      const lastActivity = new Date(lastActivityAt);
-      const lastActivityDate = new Date(lastActivity.getFullYear(), lastActivity.getMonth(), lastActivity.getDate());
-      const diffDays = Math.floor((today.getTime() - lastActivityDate.getTime()) / (24 * 60 * 60 * 1000));
+      if (lastActivityAt) {
+        const lastActivity = new Date(lastActivityAt);
+        const lastActivityDate = new Date(lastActivity.getFullYear(), lastActivity.getMonth(), lastActivity.getDate());
+        const diffDays = Math.floor((today.getTime() - lastActivityDate.getTime()) / (24 * 60 * 60 * 1000));
 
-      if (diffDays === 0) {
-        return currentStreak;
-      } else if (diffDays === 1) {
-        newStreak = currentStreak + 1;
+        if (diffDays === 0) {
+          return currentStreak;
+        } else if (diffDays === 1) {
+          newStreak = currentStreak + 1;
+        } else {
+          newStreak = 1;
+        }
       } else {
         newStreak = 1;
       }
-    } else {
-      newStreak = 1;
-    }
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: {
-          ...metaData,
-          streakDays: newStreak,
-          lastActivityAt: now.toISOString(),
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: {
+            ...metaData,
+            streakDays: newStreak,
+            lastActivityAt: now.toISOString(),
+          },
         },
-      },
-    });
+      });
 
-    return newStreak;
+      return newStreak;
+    });
   }
 }
