@@ -623,6 +623,11 @@
       "packet": "V1-88 (PR196-ATTRIB-CURRENCY)"
     },
     {
+      "prefix": "v88b_",
+      "owner": "apps/server/test/booking-waitlist-expiry.integration.test.ts",
+      "packet": "V1-88 (PR196-WAITLIST-EXPIRY)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
