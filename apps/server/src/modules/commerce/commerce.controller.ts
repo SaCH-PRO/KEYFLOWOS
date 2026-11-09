@@ -801,6 +801,11 @@ export class CommerceController {
     @Body(CREATE_INVOICE_BODY_PIPE) body: CreateInvoiceDto,
     @Req() req: CreateRequest,
   ) {
+    // W3-D46-CREATE-AND-RECURRING (owner ruling D-46): a platform SUPER_ADMIN
+    // who is not a member of the business stays refused on tenant invoice
+    // writes, create included (FOLLOW3-A1 left it EXEMPT while CC-FORWARD
+    // pinned that 201). First, before the plan-limit replay read and any write.
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     const idempotency = createIdempotency(req);
     // V1-45b: at the plan limit, PlanLimitGuard let a keyed request through
     // with its refusal attached. Only a key that already created an invoice
