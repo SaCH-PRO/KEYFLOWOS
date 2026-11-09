@@ -9,6 +9,7 @@ import { AiOversightService } from './ai-oversight.service';
 import { getToolByName } from './flow-tool-registry';
 import { KeyAutonomySafetyService } from '../key-autonomy/key-autonomy-safety.service';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
+import { contactWhereBase } from '../crm/crm.helpers';
 import { CANONICAL_MODULES, LEVEL_RANK, defaultScopesForRole, rankOf, type CanonicalModule } from '../../core/authority/module-vocabulary';
 import type { KeyCommand, Prisma } from '@prisma/client';
 
@@ -56,10 +57,12 @@ export interface DoItForMeResult {
 }
 
 /**
- * What generateDoItForMe returns: the items it filed, and `dataWithheld` when
- * the caller's scope narrowed what it read (FOLLOW3-D9).
+ * What generateDoItForMe returns: its answer and the items it filed, the shape
+ * the controller persists as executionResult. It carries no `dataWithheld`:
+ * the controller would not persist it, so projectDoItForMe derives the flag by
+ * the rule listCommands applies to that row (CR-D9-1).
  */
-export type DoItForMeOutcome = DoItForMeResult & { commandItemIds: string[]; dataWithheld?: true };
+export type DoItForMeOutcome = DoItForMeResult & { commandItemIds: string[] };
 
 /**
  * One step's outcome. `notExecuted` means nothing ran: the step was refused or
@@ -689,12 +692,16 @@ export class KeyCommandService {
       take,
     });
     if (viewer.unrestricted) return rows;
-    const visibleContacts = await this.visibleActionContacts(businessId, rows.map((r) => r.executionResult), viewer);
+    const results = rows.map((r) => r.executionResult);
+    const [visibleContacts, contactsWithheld] = await Promise.all([
+      this.visibleActionContacts(businessId, results, viewer),
+      this.contactsWithheld(businessId, results, viewer),
+    ]);
     return rows.map((row): ListedKeyCommand => {
       const projected = {
         ...row,
         groundedData: this.projectGrounded(row.groundedData, viewer),
-        executionResult: this.projectExecutionResult(row.executionResult, viewer, visibleContacts),
+        executionResult: this.projectExecutionResult(row.executionResult, viewer, visibleContacts, contactsWithheld),
         executionLogs: null,
       };
       if (row.userId === userId) return projected;
@@ -708,7 +715,9 @@ export class KeyCommandService {
    * exactly as listCommands projects the executionResult that POST wrote, so a
    * member cannot read by POSTing what GET key/commands withholds from them.
    * Since FOLLOW3-D9 generateDoItForMe reads only what the caller may read, so
-   * the row holds no more than this projection lets its author see.
+   * the row holds no more than this projection lets its author see, and
+   * `dataWithheld` is decided here, by listCommands' rule, never carried in
+   * from the result: the controller does not persist it (CR-D9-1).
    */
   async projectDoItForMe(
     businessId: string,
@@ -719,8 +728,11 @@ export class KeyCommandService {
     const viewer = await this.commandViewer(businessId, userId);
     if (viewer.unrestricted) return result;
     const asRow = result as unknown as Prisma.JsonObject;
-    const visibleContacts = await this.visibleActionContacts(businessId, [asRow], viewer);
-    return this.projectExecutionResult(asRow, viewer, visibleContacts) as unknown as ProjectedDoItForMe;
+    const [visibleContacts, contactsWithheld] = await Promise.all([
+      this.visibleActionContacts(businessId, [asRow], viewer),
+      this.contactsWithheld(businessId, [asRow], viewer),
+    ]);
+    return this.projectExecutionResult(asRow, viewer, visibleContacts, contactsWithheld) as unknown as ProjectedDoItForMe;
   }
 
   private async commandViewer(businessId: string, userId: string): Promise<CommandViewer> {
@@ -775,6 +787,30 @@ export class KeyCommandService {
     return new Set(visible.map((c) => c.id));
   }
 
+  /**
+   * CR-D9-1. Whether this business has a contact the viewer may not open (the
+   * rule assertContactVisible applies: the tenant predicate, deletedAt null and
+   * visibilityClause), asked only when one of `results` is a 'do'/'draft'
+   * answer. Since FOLLOW3-D9 such an answer is built from the contacts its
+   * author may open, so its row holds nothing for the projection to strip;
+   * this is what marks it `dataWithheld`, on the POST answer and on GET alike.
+   */
+  private async contactsWithheld(
+    businessId: string,
+    results: readonly Prisma.JsonValue[],
+    viewer: CommandViewer,
+  ): Promise<boolean> {
+    if (!results.some((r) => isJsonObject(r) && Array.isArray(r.actions))) return false;
+    if (!viewer.reads('crm')) return true;
+    if (!viewer.contactScope) return false;
+    const live = contactWhereBase(businessId);
+    const [all, visible] = await Promise.all([
+      this.prisma.client.contact.count({ where: { ...live } }),
+      this.prisma.client.contact.count({ where: { ...live, AND: [viewer.contactScope] } }),
+    ]);
+    return visible < all;
+  }
+
   private projectGrounded(grounded: Prisma.JsonValue, viewer: CommandViewer): Prisma.JsonValue {
     if (grounded === null) return null;
     if (!isJsonObject(grounded)) return { dataWithheld: true };
@@ -793,6 +829,7 @@ export class KeyCommandService {
     result: Prisma.JsonValue,
     viewer: CommandViewer,
     visibleContacts: ReadonlySet<string> | null,
+    contactsWithheld: boolean,
   ): Prisma.JsonValue {
     if (result === null) return null;
     if (!isJsonObject(result)) return { dataWithheld: true };
@@ -805,6 +842,8 @@ export class KeyCommandService {
         // 'ask': the rule executeApprovedPlan persists by, applied again for rows written before it.
         out.outputs = value.map((o) => (isJsonObject(o) ? this.persistableOutput(o as unknown as KeyCommandStepResult) : { dataWithheld: true }));
       } else if (key === 'actions' && Array.isArray(value)) {
+        // A 'do'/'draft' answer: built from, or projected to, the contacts this viewer may open.
+        if (contactsWithheld) withheld = true;
         const kept: JsonObject[] = [];
         for (const action of value) {
           const projected = this.projectAction(action, viewer, visibleContacts);
@@ -847,8 +886,13 @@ export class KeyCommandService {
    * the caller (visibilityClause). An action is built only when the caller
    * reads every module it names (ACTION_READS), and states an amount only with
    * revenue read. So the KeyCommand row the controller writes from this result
-   * holds nothing its author may not read, and `dataWithheld` says the answer
-   * was narrowed. CommandItems are filed only for a caller with operations
+   * holds nothing its author may not read (projectDoItForMe marks the answer
+   * `dataWithheld` by listCommands' rule, CR-D9-1). An invoice, booking, quote
+   * or task is read only when the contact it names is one the caller may open
+   * by the rule assertContactVisible applies: this business, deletedAt null,
+   * then visibilityClause; an unrestricted caller included, so no soft-deleted
+   * contact and no other business's contact (a legacy row) is named (SEC-D9-1).
+   * CommandItems are filed only for a caller with operations
    * write, the level ModuleScopeGuard requires on POST command items (D-40).
    * Fails closed: no caller, an unknown user or a non-member reads nothing.
    */
@@ -856,9 +900,11 @@ export class KeyCommandService {
     if (!userId) throw new ForbiddenException('Authentication required');
     const viewer = await this.commandViewer(businessId, userId);
     const scope = viewer.contactScope;
-    // The contacts the caller may open, as a Contact where and as the relation filter of a row that names one.
+    // The contacts the caller may open, as a Contact where (beside its own businessId and deletedAt
+    // null) and as the relation filter of a row that names one: the tenant predicate and deletedAt
+    // null for every caller, then visibilityClause (SEC-D9-1).
     const visibleContact = scope ? { AND: [scope] } : {};
-    const ofVisibleContact = scope ? { contact: scope } : {};
+    const ofVisibleContact = { contact: { ...contactWhereBase(businessId), ...visibleContact } };
     const readsCrm = viewer.reads('crm');
     const readsRevenue = viewer.reads('revenue');
     const readsBookings = viewer.reads('bookings');
@@ -1122,10 +1168,7 @@ export class KeyCommandService {
       }
     }
 
-    // The answer was narrowed whenever the caller does not see every contact or
-    // cannot read one of the modules it summarises.
-    const narrowed = scope !== null || FINDINGS_READS.some((m) => !viewer.reads(m));
-    return { goal, findings, actions, commandItemIds, ...(narrowed ? { dataWithheld: true as const } : {}) };
+    return { goal, findings, actions, commandItemIds };
   }
 
   private contactName(contact: any): string {

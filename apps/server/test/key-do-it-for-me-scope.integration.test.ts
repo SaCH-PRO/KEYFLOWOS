@@ -25,6 +25,16 @@
  * amount only with revenue read. CommandItems are filed only when the caller's
  * operations level, read as ModuleScopeGuard reads it, is write or above.
  *
+ * Review repairs. SEC-D9-1: an invoice, booking, quote or task is read only
+ * when the contact it names is one the caller may open by the rule
+ * assertContactVisible applies (this business, deletedAt null, then
+ * visibilityClause), for an unrestricted caller too: no soft-deleted contact
+ * and no other business's contact (a legacy row) reaches the row, the answer or
+ * an item. CR-D9-1: the POST answer carries `dataWithheld` exactly as GET
+ * key/commands lists the row it wrote (SEC-V109b-2): when the business has a
+ * contact the caller may not open, or a module the answer summarises is one
+ * the caller may not read, and not otherwise.
+ *
  * Nothing on the authorization or persistence path is mocked: PrismaService,
  * the user, business, membership, contact, invoice, quote, service, booking,
  * contact task, KeyCommand and CommandItem rows, AuthGuard, BusinessGuard,
@@ -71,6 +81,12 @@ const ID = {
   invoice: `${P}invoice`, // overdue, on cPriv
   quote: `${P}quote`, // SENT, on cTeam
   task: `${P}task`, // OPEN, on cPriv
+  // SEC-D9-1 / CR-D9-1: a second business of the OWNER, where staffTen may open every live contact.
+  staffTen: `${P}staffTen`, // STAFF of bizTen { crm: read (view all), revenue: read, bookings: read, operations: write }
+  bizTen: `${P}bizTen`,
+  cLive: `${P}cLive`, // a stale TEAM contact of bizTen
+  cDel: `${P}cDel`, // a soft-deleted TEAM contact of bizTen: an overdue invoice, a pending booking, a sent quote, an open task
+  serviceTen: `${P}serviceTen`,
 };
 const PRIVATE_NAME = 'Priya Privatecontact';
 const TEAM_NAME = 'Theo Teamcontact';
@@ -82,6 +98,15 @@ const TASK_TITLE = `${P}renewal paperwork`;
 const EVERYTHING = 'handle everything';
 /** No intent keyword: generateDoItForMe falls back to the open contact tasks. */
 const NO_INTENT = 'what needs doing today';
+const LIVE_NAME = 'Vera Visiblecontact';
+const DELETED_NAME = 'Dora Deletedcontact';
+const ORPHAN_NAME = 'Olive Orphancontact';
+const DELETED_TOTAL = 4321.09;
+const DELETED_QUOTE_TOTAL = 2468.13;
+const DELETED_SERVICE_PRICE = 135.79;
+const FOREIGN_TOTAL = 555.44;
+const DELETED_TASK = `${P}deleted contact paperwork`;
+const FOREIGN_TASK = `${P}foreign contact paperwork`;
 
 // ---- recorders behind CommandService ----------------------------------------
 const recorder = {
@@ -145,6 +170,26 @@ async function run(actor: string, intent: string, tag: string, mode: Mode, busin
 }
 
 const pairs = (actions: any[]) => (actions ?? []).map((a) => `${a.actionType}:${a.contactId}`).sort();
+
+/** The row GET key/commands lists `actor` for the KeyCommand `rowId`. */
+async function listedRow(actor: string, rowId: string, businessId = ID.biz) {
+  const res = await request(app.getHttpServer()).get(`/ai/businesses/${businessId}/key/commands`).set(HEADER, actor);
+  expect(res.status, JSON.stringify(res.body)).toBe(200);
+  const row = (res.body as any[]).find((r) => r.id === rowId);
+  expect(row, `GET key/commands lists ${rowId}`).toBeTruthy();
+  return row;
+}
+
+/** Nothing of bizTen's soft-deleted contact, nor of the other business's contact its legacy rows name. */
+function expectNoClosedContact(value: unknown, label: string) {
+  const text = JSON.stringify(value);
+  for (const needle of [
+    ID.cDel, DELETED_NAME, String(DELETED_TOTAL), String(DELETED_QUOTE_TOTAL), String(DELETED_SERVICE_PRICE), DELETED_TASK,
+    ID.cOrphan, ORPHAN_NAME, String(FOREIGN_TOTAL), FOREIGN_TASK,
+  ]) {
+    expect(text, `${label}: ${needle}`).not.toContain(needle);
+  }
+}
 
 /** No PRIVATE contact id or name, and no invoice or quote figure. */
 function expectNoPrivateNoMoney(value: unknown, label: string) {
@@ -277,6 +322,63 @@ beforeAll(async () => {
     },
   });
   await db.contactTask.create({ data: { id: ID.task, businessId: ID.biz, contactId: ID.cPriv, title: TASK_TITLE, status: 'OPEN' } });
+
+  // ---- SEC-D9-1 / CR-D9-1: bizTen ---------------------------------------------
+  await db.user.create({ data: { id: ID.staffTen, email: `${P}staffTen@test.local`, role: 'USER' } });
+  await db.business.create({ data: { id: ID.bizTen, name: 'V84I tenant', ownerId: ID.owner, currency: 'TTD' } });
+  await db.membership.create({ data: { id: `${P}m_ownerTen`, userId: ID.owner, businessId: ID.bizTen, role: 'OWNER' } });
+  await db.membership.create({
+    data: {
+      id: `${P}m_staffTen`, userId: ID.staffTen, businessId: ID.bizTen, role: 'STAFF',
+      permissionScopes: { crm: 'read', revenue: 'read', bookings: 'read', operations: 'write' },
+    },
+  });
+  const [liveFirst, liveLast] = LIVE_NAME.split(' ');
+  const [delFirst, delLast] = DELETED_NAME.split(' ');
+  await db.contact.create({
+    data: {
+      id: ID.cLive, businessId: ID.bizTen, firstName: liveFirst, lastName: liveLast, email: `${P}vera@test.local`,
+      visibility: 'TEAM', ownerId: ID.owner, status: 'ACTIVE', lastInteractionAt: stale,
+    },
+  });
+  await db.contact.create({
+    data: {
+      id: ID.cDel, businessId: ID.bizTen, firstName: delFirst, lastName: delLast, email: `${P}dora@test.local`,
+      visibility: 'TEAM', ownerId: ID.owner, status: 'ACTIVE', lastInteractionAt: stalest, deletedAt: new Date(),
+    },
+  });
+  await db.invoice.create({
+    data: {
+      id: `${P}invDel`, businessId: ID.bizTen, contactId: ID.cDel, invoiceNumber: `${P}INV-DEL`,
+      status: 'SENT', subtotal: DELETED_TOTAL, total: DELETED_TOTAL, currency: 'TTD', dueDate: stale,
+    },
+  });
+  await db.quote.create({
+    data: {
+      id: `${P}quoteDel`, businessId: ID.bizTen, contactId: ID.cDel, quoteNumber: `${P}Q-DEL`,
+      status: 'SENT', subtotal: DELETED_QUOTE_TOTAL, total: DELETED_QUOTE_TOTAL, currency: 'TTD',
+    },
+  });
+  await db.service.create({
+    data: { id: ID.serviceTen, businessId: ID.bizTen, name: `${P}Fitting`, duration: 60, price: DELETED_SERVICE_PRICE },
+  });
+  await db.booking.create({
+    data: {
+      id: `${P}bookingDel`, businessId: ID.bizTen, contactId: ID.cDel, serviceId: ID.serviceTen,
+      status: 'PENDING', startTime: start, endTime: new Date(start.getTime() + 3600000),
+    },
+  });
+  await db.contactTask.create({ data: { id: `${P}taskDel`, businessId: ID.bizTen, contactId: ID.cDel, title: DELETED_TASK, status: 'OPEN' } });
+  // Legacy rows: an invoice and a task of bizTen naming bizOrphan's contact (raw SQL, as a writer
+  // before the contact tenancy checks could leave them).
+  await db.$executeRawUnsafe(
+    `INSERT INTO invoices (id, business_id, contact_id, invoice_number, status, subtotal, total, currency, due_date, created_at, updated_at)
+     VALUES ('${P}invForeign', '${ID.bizTen}', '${ID.cOrphan}', '${P}INV-FOREIGN', 'SENT', ${FOREIGN_TOTAL}, ${FOREIGN_TOTAL}, 'TTD', now() - interval '61 days', now(), now())`,
+  );
+  await db.$executeRawUnsafe(
+    `INSERT INTO contact_tasks (id, business_id, contact_id, title, status)
+     VALUES ('${P}taskForeign', '${ID.bizTen}', '${ID.cOrphan}', '${FOREIGN_TASK}', 'OPEN')`,
+  );
 }, 180_000);
 
 afterAll(async () => {
@@ -424,5 +526,103 @@ describe('DF-05 the D-40 rule is the one ModuleScopeGuard applies to POST comman
     expect(body).not.toHaveProperty('dataWithheld');
     expect(items).toEqual([]);
     expect(stored.commandItemIds).toEqual([]);
+  });
+});
+
+describe('SEC-D9-1 an invoice, booking, quote or task is read only when its contact is one the caller may open (this business, not deleted, visible)', () => {
+  it("RED-BEFORE: a member's invoice reminders name no soft-deleted contact and no other business's contact, in the row, the answer or an item", async () => {
+    const { body, row, stored, items } = await run(ID.staffTen, 'remind invoice payment', 'sec1-staff', 'do', ID.bizTen);
+
+    // Before: 'Collect: Olive Orphancontact' (ownerId the other business's contact, 555.44) was filed in
+    // bizTen, and the row named both contacts with their totals, while the answer withheld them.
+    expectNoClosedContact(stored, 'stored executionResult');
+    expectNoClosedContact(body, 'response');
+    expectNoClosedContact(items, 'command items');
+    expect(stored.actions).toEqual([]);
+    expect(items).toEqual([]);
+    expect(body.actions).toEqual((await listedRow(ID.staffTen, row.id, ID.bizTen)).executionResult.actions);
+  });
+
+  it("RED-BEFORE: the OWNER (visibilityClause null) is held to this business's live contacts as well", async () => {
+    const { body, stored, items } = await run(ID.owner, 'remind invoice payment', 'sec1-owner', 'do', ID.bizTen);
+
+    // Before: the OWNER's answer itself listed 'Olive Orphancontact' and the deleted contact.
+    expectNoClosedContact(stored, 'stored executionResult');
+    expectNoClosedContact(body, 'response');
+    expectNoClosedContact(items, 'command items');
+    expect(stored.actions).toEqual([]);
+    expect(items).toEqual([]);
+  });
+
+  it("RED-BEFORE: 'handle everything': the deleted contact's booking, quote and invoice and the legacy invoice are neither actions, findings nor items", async () => {
+    const { body, stored, items } = await run(ID.owner, EVERYTHING, 'sec1-all', 'do', ID.bizTen);
+
+    expectNoClosedContact({ body, stored, items }, 'handle everything');
+    expect(pairs(stored.actions)).toEqual([`follow_up:${ID.cLive}`]);
+    expect(stored.findings).toEqual(["1 contact haven't been reached in 2+ weeks"]);
+    expect(items.map((i) => `${i.title}|${i.ownerType}:${i.ownerId}`)).toEqual([`Follow up: ${LIVE_NAME}|CONTACT:${ID.cLive}`]);
+    expect(body.findings).toEqual(stored.findings);
+  });
+
+  it("RED-BEFORE: the open-task fallback names no task of a deleted or another business's contact", async () => {
+    const { body, stored, items } = await run(ID.owner, NO_INTENT, 'sec1-tasks', 'do', ID.bizTen);
+
+    expectNoClosedContact({ body, stored, items }, 'open-task fallback');
+    expect(stored.actions).toEqual([]);
+    expect(stored.findings).toEqual(["1 contact haven't been reached in 2+ weeks"]);
+    expect(items).toEqual([]);
+  });
+
+  it("RED-BEFORE: 'draft' reads by the same rule", async () => {
+    const { body, stored, items } = await run(ID.staffTen, EVERYTHING, 'sec1-draft', 'draft', ID.bizTen);
+
+    expectNoClosedContact({ body, stored, items }, 'draft');
+    expect(pairs(body.drafts)).toEqual([`follow_up:${ID.cLive}`]);
+    expect(pairs(stored.actions)).toEqual(pairs(body.drafts));
+  });
+});
+
+describe('CR-D9-1 the answer carries dataWithheld exactly as GET key/commands lists the row it wrote (SEC-V109b-2)', () => {
+  it("RED-BEFORE: an ADMIN's 'do' where the OWNER's PRIVATE contact is not theirs to open: withheld in the answer and in the listed row", async () => {
+    const { body, row } = await run(ID.admin, EVERYTHING, 'cr1-admin', 'do');
+    const listed = await listedRow(ID.admin, row.id);
+
+    // Before: the answer said dataWithheld and the row GET listed did not (the controller drops the flag).
+    expect(body.dataWithheld).toBe(true);
+    expect(listed.executionResult.dataWithheld).toBe(true);
+    expect(body.actions).toEqual(listed.executionResult.actions);
+    expect(body.findings).toEqual(listed.executionResult.findings);
+  });
+
+  it("RED-BEFORE: a member who may open every live contact and read every module summarised: no dataWithheld in the answer or the listed row ('do')", async () => {
+    const { body, row } = await run(ID.staffTen, 'follow up', 'cr1-do', 'do', ID.bizTen);
+    const listed = await listedRow(ID.staffTen, row.id, ID.bizTen);
+
+    // Before: every non-OWNER answer said dataWithheld, whether or not anything was.
+    expect(pairs(body.actions)).toEqual([`follow_up:${ID.cLive}`]);
+    expect(body).not.toHaveProperty('dataWithheld');
+    expect(listed.executionResult).not.toHaveProperty('dataWithheld');
+    expect(body.actions).toEqual(listed.executionResult.actions);
+    expect(body.findings).toEqual(listed.executionResult.findings);
+  });
+
+  it("RED-BEFORE: the same for 'draft'", async () => {
+    const { body, row } = await run(ID.staffTen, 'follow up', 'cr1-draft', 'draft', ID.bizTen);
+    const listed = await listedRow(ID.staffTen, row.id, ID.bizTen);
+
+    expect(pairs(body.drafts)).toEqual([`follow_up:${ID.cLive}`]);
+    expect(body).not.toHaveProperty('dataWithheld');
+    expect(listed.executionResult).not.toHaveProperty('dataWithheld');
+    expect(body.drafts).toEqual(listed.executionResult.actions);
+  });
+
+  it('CONTROL: a member without revenue read: withheld in both (the findings are)', async () => {
+    const { body, row } = await run(ID.staff, EVERYTHING, 'cr1-staff', 'do');
+    const listed = await listedRow(ID.staff, row.id);
+
+    expect(body.dataWithheld).toBe(true);
+    expect(listed.executionResult.dataWithheld).toBe(true);
+    expect(body).not.toHaveProperty('findings');
+    expect(listed.executionResult).not.toHaveProperty('findings');
   });
 });
