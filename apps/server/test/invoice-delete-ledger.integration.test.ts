@@ -44,6 +44,20 @@
  *                    FOLLOW3-B1 left it: DELETE and bulk delete -> refused "refund ... first" (not "void it");
  *                    refund, then DELETE -> 200 with income and cash 0
  *
+ * Review repairs (FOLLOW3-B6 review; RED-BEFORE marks a case that fails at 4b997343):
+ *
+ *   DL-09 RED-BEFORE (SEC-B6-1) the AI undo of a DRAFT (CommerceService.undoInvoice) is a delete door too: an
+ *                    ACCRUAL invoice sent and paid 40, undone to DRAFT, then undone again -> 409 "refund ...
+ *                    first", nothing written (it answered { status: 'deleted' } with AR 60, income 100 and
+ *                    cash 40 left on the deleted row); sent, undone and undone again -> 409 "void it first",
+ *                    AR 100 kept POSTED on a live row; a clean DRAFT undo still soft-deletes
+ *   DL-10 RED-BEFORE (SEC-B6-2) PATCH invoices/bulk with ids missing, null, empty, not an array or holding a
+ *                    non-string -> 400 invoice_bulk_ids_required for delete, send and void alike, and the KEY
+ *                    shape refuses the same; no invoice of the business changes (Prisma drops
+ *                    `id: { in: undefined }`, so a bulk delete naming no invoice deleted every clean DRAFT and
+ *                    VOID invoice of the business, and null or [123] answered 500)
+ *   CR-B6-1 it.todo  the web bulk-delete callers (apps/web, outside this packet's write set) read `skipped`
+ *
  * Ledger invariant asserted after every case (booksAgree, over the invoices the
  * case created): for each live ACCRUAL invoice its own ledger AR equals
  * listPayments `remaining` while its recognition is POSTED (0 otherwise), the
@@ -729,6 +743,110 @@ describe('V1-82 D-66: a VOID invoice still holding money received is not deleted
       expect(await ledgerOf(ID.cash, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: null });
     }
   }, 60_000);
+});
+
+/** The error a call threw (null when it resolved). */
+async function thrown(call: () => Promise<unknown>): Promise<any> {
+  try {
+    await call();
+    return null;
+  } catch (err) {
+    return err;
+  }
+}
+
+/** Every invoice of the business as stored (status and deletedAt), read raw. */
+async function invoicesOf(biz: string) {
+  return db.$queryRawUnsafe(
+    `SELECT id, status::text AS status, deleted_at AS "deletedAt" FROM invoices WHERE business_id = $1 ORDER BY id`,
+    biz,
+  );
+}
+
+describe('V1-82 review SEC-B6-1: the AI undo of a DRAFT is a delete door and takes the D-66 check (real rows)', () => {
+  const RETURNED_REFUND_FIRST = /^Cannot delete an issued invoice returned to DRAFT: it holds TTD 40\.00 received; refund .* first/;
+
+  it('DL-09 RED-BEFORE: ACCRUAL sent, paid 40, undone to DRAFT, undone again -> 409 "refund ... first", nothing written; sent, undone, undone again -> 409 "void it first", AR 100 kept POSTED; a clean DRAFT undo still soft-deletes', async () => {
+    // Paid 40, then returned to DRAFT by the AI undo: the second undo would soft-delete the DRAFT.
+    const paid = await sent(ID.acc, 'DL-09 paid');
+    await pay(ID.acc, paid, 40);
+    expect((await commerce.undoInvoice(paid, ID.acc)).status).toBe('reverted_to_draft');
+    expect((await invoiceRow(paid)).status).toBe('DRAFT');
+    expect(await ledgerOf(ID.acc, paid)).toEqual({ ar: 6_000, income: 10_000, cash: 4_000, finalized: 'POSTED' });
+    const tbBefore = await trialBalanceArCents(ID.acc);
+    let before = await books(ID.acc);
+    emitted.length = 0;
+    let err = await thrown(() => commerce.undoInvoice(paid, ID.acc));
+    expect.soft(err?.getStatus?.(), `the second undo is refused 409: ${String(err?.message ?? 'it resolved')}`).toBe(409);
+    expect.soft(String(err?.message ?? '')).toMatch(RETURNED_REFUND_FIRST);
+    expect.soft((await invoiceRow(paid)).deletedAt, 'deletedAt stays null').toBeNull();
+    expect.soft((await invoiceRow(paid)).status).toBe('DRAFT');
+    expect.soft(await books(ID.acc), 'Payment, FinancialTransaction and LedgerEntry rows byte-identical').toEqual(before);
+    expect.soft(await ledgerOf(ID.acc, paid)).toEqual({ ar: 6_000, income: 10_000, cash: 4_000, finalized: 'POSTED' });
+    expect.soft(await netReceivedCents(paid)).toBe(4_000);
+    expect.soft(await trialBalanceArCents(ID.acc), 'trial-balance AR unchanged').toBe(tbBefore);
+    expect.soft(emitted.map((e) => e.name), 'no invoice.deleted').not.toContain('invoice.deleted');
+
+    // Unpaid: sent (AR 100 posted), undone to DRAFT, undone again.
+    const unpaid = await sent(ID.acc, 'DL-09 unpaid');
+    expect((await commerce.undoInvoice(unpaid, ID.acc)).status).toBe('reverted_to_draft');
+    before = await books(ID.acc);
+    const tbUnpaid = await trialBalanceArCents(ID.acc);
+    err = await thrown(() => commerce.undoInvoice(unpaid, ID.acc));
+    expect.soft(err?.getStatus?.(), `the second undo is refused 409: ${String(err?.message ?? 'it resolved')}`).toBe(409);
+    expect.soft(String(err?.message ?? '')).toMatch(RETURNED_VOID_FIRST);
+    expect.soft((await invoiceRow(unpaid)).deletedAt, 'deletedAt stays null').toBeNull();
+    expect.soft(await books(ID.acc)).toEqual(before);
+    expect.soft(await ledgerOf(ID.acc, unpaid)).toEqual({ ar: 10_000, income: 10_000, cash: 0, finalized: 'POSTED' });
+    expect.soft(await trialBalanceArCents(ID.acc), 'trial-balance AR unchanged').toBe(tbUnpaid);
+
+    // The remedy the refusal names, then the delete closes the books at 0.
+    if (!(await invoiceRow(unpaid)).deletedAt) {
+      await moveTo(ID.acc, unpaid, 'VOID');
+      const ok = await del(ID.acc, unpaid);
+      expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+      expect(await ledgerOf(ID.acc, unpaid)).toEqual({ ar: 0, income: 0, cash: 0, finalized: 'REVERSED' });
+    }
+
+    // Control: a DRAFT that never left DRAFT is still soft-deleted by its undo.
+    const clean = await draft(ID.acc, 'DL-09 clean');
+    expect(await commerce.undoInvoice(clean, ID.acc)).toMatchObject({ id: clean, status: 'deleted' });
+    expect((await invoiceRow(clean)).deletedAt).not.toBeNull();
+  }, 90_000);
+});
+
+describe('V1-82 review SEC-B6-2: a bulk request names its invoices (real rows)', () => {
+  it('DL-10 RED-BEFORE: PATCH invoices/bulk with ids missing, null, empty, not an array or holding a non-string -> 400 invoice_bulk_ids_required for delete, send and void alike; the KEY shape refuses the same; no invoice of the business changes', async () => {
+    await draft(ID.acc, 'DL-10 draft');
+    await voided(ID.acc, 'DL-10 void');
+    await sent(ID.acc, 'DL-10 sent');
+    const rowsBefore = await invoicesOf(ID.acc);
+    const booksBefore = await books(ID.acc);
+    emitted.length = 0;
+
+    for (const action of ['delete', 'send', 'void']) {
+      for (const ids of [undefined, null, [], 'v82f_inv', [123], [''], [{ id: 'x' }]]) {
+        const body = ids === undefined ? { action } : { action, ids };
+        const res = await as(agent().patch(`/commerce/businesses/${ID.acc}/invoices/bulk`)).send(body);
+        expect.soft(res.status, `${JSON.stringify(body)}: ${JSON.stringify(res.body)}`).toBe(400);
+        expect.soft(res.body.code, JSON.stringify(body)).toBe('invoice_bulk_ids_required');
+      }
+    }
+    for (const ids of [undefined, null, [], [123]]) {
+      const err = await thrown(() => commerce.bulkUpdateInvoices(ID.acc, ids, 'delete'));
+      expect.soft(err?.getStatus?.(), `KEY shape ids ${JSON.stringify(ids)}: ${String(err?.message ?? 'it resolved')}`).toBe(400);
+    }
+
+    expect.soft(await invoicesOf(ID.acc), 'no invoice of the business was deleted, sent or voided').toEqual(rowsBefore);
+    expect.soft(await books(ID.acc), 'Payment, FinancialTransaction and LedgerEntry rows byte-identical').toEqual(booksBefore);
+    expect.soft(emitted.map((e) => e.name)).toEqual([]);
+  }, 90_000);
+});
+
+describe('V1-82 review CR-B6-1: the web bulk-delete callers (outside this packet\'s write set)', () => {
+  it.todo(
+    'CR-B6-1 (apps/web, outside the FOLLOW3-B6 write set): use-pipeline-actions.ts handleBulkStatusChange (delete) and invoices-panel.tsx handleBulkStatusChange must read `skipped` / `skippedCount` from PATCH invoices/bulk {action:"delete"}, remove only the ids that were deleted and show each skipped reason; today they toast "N invoice(s) updated" and drop every selected SENT / OVERDUE row the server refused (D-66) from the list',
+  );
 });
 
 describe('V1-82 D-66: the books of both businesses agree over every invoice, deleted ones included (real rows)', () => {

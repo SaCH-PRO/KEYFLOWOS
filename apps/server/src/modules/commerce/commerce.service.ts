@@ -1059,7 +1059,9 @@ export class CommerceService {
     return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
-  async bulkUpdateInvoices(businessId: string, ids: string[], action: 'send' | 'void' | 'delete') {
+  async bulkUpdateInvoices(businessId: string, rawIds: unknown, action: 'send' | 'void' | 'delete') {
+    // FOLLOW3-B6 review SEC-B6-2: checked before any read (requireInvoiceBulkIds).
+    const ids = CommerceService.requireInvoiceBulkIds(rawIds);
     if (action === 'delete') {
       // Delete is not a state transition (FOLLOW3-B6, D-66: bulkDeleteInvoices).
       return this.bulkDeleteInvoices(businessId, ids);
@@ -1261,8 +1263,28 @@ export class CommerceService {
   }
 
   /**
+   * FOLLOW3-B6 review SEC-B6-2: the ids of a bulk invoice request, or a 400
+   * (invoice_bulk_ids_required) unless they are a non-empty array of non-empty
+   * strings, as quotes check theirs (requireQuoteBulkRequest). The route's
+   * body is a plain type, so the ValidationPipe checks nothing, and Prisma
+   * drops `id: { in: undefined }`: a request naming no invoice reached every
+   * invoice of the business (a delete deleted every clean DRAFT and VOID one,
+   * a void voided every voidable one), and null or [123] answered 500.
+   */
+  private static requireInvoiceBulkIds(ids: unknown): string[] {
+    if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id) => typeof id === 'string' && id.length > 0)) {
+      throw new BadRequestException({
+        code: 'invoice_bulk_ids_required',
+        message: 'ids must be a non-empty array of invoice ids.',
+      });
+    }
+    return ids as string[];
+  }
+
+  /**
    * FOLLOW3-B6 (D-66): the soft delete of one invoice, shared by the single
-   * DELETE (deleteInvoice) and the bulk / KEY delete (bulkUpdateInvoices). One
+   * DELETE (deleteInvoice), the bulk / KEY delete (bulkUpdateInvoices) and the
+   * AI undo of a DRAFT (undoInvoice, review SEC-B6-1). One
    * transaction that first takes the invoice row lock every money door takes
    * (lockInvoiceForPayment) and decides on the row and its payments as they
    * stand under it, so a payment, a Send or a void that commits meanwhile is
@@ -1347,6 +1369,12 @@ export class CommerceService {
    * whether money is on the invoice (an OVERDUE or FAILED invoice may carry a
    * payment). The invoice's payments and its accrual recognition are left as
    * they are; re-issuing it posts nothing twice.
+   *
+   * FOLLOW3-B6 review SEC-B6-1 (D-66): the undo of a DRAFT is a delete, so it
+   * takes the delete's locked check (softDeleteInvoiceRow). A DRAFT an earlier
+   * undo returned from an issued status still holds its recognition or the
+   * money received on it, and is refused 409 as the DELETE route refuses it;
+   * it soft-deleted any DRAFT, leaving that AR, income and cash in the books.
    */
   async undoInvoice(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
@@ -1357,10 +1385,9 @@ export class CommerceService {
       throw new NotFoundException('Invoice not found');
     }
     if (invoice.status === 'DRAFT') {
-      await this.prisma.client.invoice.update({
-        where: { id: invoiceId },
-        data: { deletedAt: new Date() },
-      });
+      const outcome = await this.softDeleteInvoiceRow(invoiceId, businessId, { liveOnly: false });
+      if (outcome.kind === 'missing') throw new NotFoundException('Invoice not found');
+      if (outcome.kind === 'refused') throw new ConflictException(outcome.reason);
       return { id: invoiceId, status: 'deleted' };
     }
     const reverted = await this.invoiceWorkflow.returnToDraftOnUndo(invoiceId);
