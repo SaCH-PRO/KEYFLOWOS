@@ -14,15 +14,16 @@
  *     ignoring the principal (tasks written on, and names returned of, contacts the member may not
  *     open). segment_contacts already applies the principal's visibility since V1-84; it is pinned.
  * The rule is KEY-R3a/R3b's: the member the command runs for; the OWNER's view when the plan queue
- * runs with no member (D-88's convention). One visibility clause (contactReadAccess: resolveCrmAccess
+ * runs with no member (D-88's convention, narrowed by D-93: a plan with no member reads no
+ * contacts). One visibility clause (contactReadAccess: resolveCrmAccess
  * + visibilityClause, the rule GET contacts applies) bounds every case.
  *
  * Review repairs (CV-09..CV-12): the V1-84 calendar and booking reads (calendar_list_events,
  * calendar_check_conflicts, bookings_list_bookings, bookings_list_waitlist) and sequence_enroll are
  * bounded by the same clause, so with no principal they are the OWNER's only too (SEC-W3CV-1;
  * graph-action-visibility-bound.spec.ts derives the set from the dispatcher), and sequence_enroll
- * refuses a contact the member may not open (SEC-W3CV-4). CV-08b characterizes the no-member run
- * pending an owner ruling (SEC-W3CV-2, D-73 vs D-88).
+ * refuses a contact the member may not open (SEC-W3CV-4). CV-08b characterized the no-member run
+ * pending an owner ruling (SEC-W3CV-2, D-73 vs D-88), since given as D-93 (below).
  *
  * W4-PROPOSAL-PRINCIPAL (FOLLOW5; owner rulings D-73, D-71, D-46, D-37; review SEC-W3CV-3), CV-13..CV-13c:
  * an approved AI_PLAN EXECUTE_TOOL proposal (PlanExecutorService.createStepProposal files one for a
@@ -37,6 +38,19 @@
  * is refused (SEC-W4PP-1, CR-W4PP-1); a flow-tool proposal that is no plan step runs only if the
  * member it runs for may run the tool with no principal (SEC-W4PP-2); a plan of the owner by
  * Business.ownerId alone runs with no principal, as the queue runs it (CR-W4PP-2).
+ *
+ * W4-D93-NO-MEMBER-CONTACTS (FOLLOW5; owner ruling D-93, D-73 as written; review SEC-W3CV-2),
+ * CV-08b..CV-08f: a KEY plan with no member principal reads no contacts, so it is refused the tools
+ * only the principal's visibility bounds (fetch_client_health, sequence_enroll_overdue,
+ * sequence_enroll, the calendar and booking reads), as it is create_followup_queue; CV-08b, which
+ * characterized the OWNER's view for such a run, is now that refusal. The Pro Auto monitor and every
+ * system-created plan run with the business owner as their member: the monitor runs its reads as the
+ * owner and its execution log names the owner; the plans the system writes (a default agent trigger's,
+ * a journey's, the daily briefing) record the owner, and such a plan stored with no member (written
+ * before D-93) is resolved to the owner when it runs. A trigger a member created that records no
+ * creator still fires a plan with no member (D-73). Driven with the real ProAutoMonitorService,
+ * AgentTriggerService, DefaultTriggersService, JourneyOrchestratorService and MorningBriefingService
+ * against this suite's rows; their planner and event emitter are stand-ins.
  *
  * WHAT IS REAL: PrismaService and the Prisma client against DATABASE_URL; AuthGuard, BusinessGuard,
  * CrmRateLimitGuard and GraphActionsController (POST .../execute: assertMayRunGraphAction, the step
@@ -114,8 +128,26 @@ const dispatched: Array<{ toolName: string; planStepId?: string; principal: unkn
 let proposalExecutor: any;
 const proposalDispatched: Array<{ toolName: string; planStepId?: string; principal: unknown; surface?: string }> = [];
 
+/**
+ * W4-D93-NO-MEMBER-CONTACTS: the Pro Auto monitor (the real service over an orchestrator whose
+ * execution log is the real AiExecutionLogService), every tool the monitor's orchestrator ran (with the
+ * member it ran for), the system plan creators, and the member each asked the planner to record.
+ */
+let monitor: any;
+let monitorFlow: any;
+const monitorDispatched: Array<{ toolName: string; principal: unknown; onBehalfOf: unknown; surface?: string }> = [];
+let agentTriggers: any;
+let defaultTriggers: any;
+let journeys: any;
+let briefings: any;
+let DEFAULT_AGENT_TRIGGERS: ReadonlyArray<{ name: string; eventPattern: string; objective: string; maxRiskTier: number }>;
+const plannedFor: Array<{ objective: string; rawInput?: string; userId: unknown }> = [];
+
 async function cleanup() {
   for (const sql of [
+    `DELETE FROM journey_instances WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM agent_triggers WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM autopilot_settings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_execution_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_plans WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM crm_sequence_enrollments WHERE sequence_id LIKE ${sqlLikePrefix(P)}`,
@@ -341,6 +373,51 @@ beforeAll(async () => {
   };
   proposalExecutor = new KeyCortexActionExecutorPlugin({ register() {} } as any, {} as any, proposalRef as any);
 
+  // W4-D93-NO-MEMBER-CONTACTS: the real Pro Auto monitor over the real orchestrator class, whose
+  // execution log is the real AiExecutionLogService (the row the monitor's read is attributed on).
+  // Each tool the monitor's orchestrator runs is recorded with the member it runs for.
+  const { ProAutoMonitorService } = await import('../src/modules/ai/pro-auto-monitor.service');
+  monitorFlow = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+    logger: quiet,
+    prisma,
+    moduleRef,
+    governance,
+    executionLog,
+    businessGraph: { invalidateCache() {} },
+  });
+  const runToolAction = (FlowOrchestratorService.prototype as any).executeToolAction;
+  monitorFlow.executeToolAction = function (businessId: string, toolName: string, args: Record<string, unknown>, action?: any) {
+    monitorDispatched.push({ toolName, principal: action?.principalUserId, onBehalfOf: action?.onBehalfOfUserId, surface: action?.surface });
+    return runToolAction.call(this, businessId, toolName, args, action);
+  };
+  monitor = new ProAutoMonitorService(prisma, { getSnapshot: async () => ({}) } as any, governance as any, executionLog, monitorFlow);
+
+  // The system plan creators (D-93): the real AgentTriggerService, DefaultTriggersService,
+  // JourneyOrchestratorService and MorningBriefingService, with a planner that writes the plan row
+  // (no steps) and records the member it was asked to record.
+  const { AgentTriggerService } = await import('../src/modules/ai/agent-trigger.service');
+  const triggerDefaults = await import('../src/modules/ai/default-triggers.service');
+  const { JourneyOrchestratorService } = await import('../src/modules/ai/journey-orchestrator.service');
+  const { MorningBriefingService } = await import('../src/modules/ai/morning-briefing.service');
+  DEFAULT_AGENT_TRIGGERS = triggerDefaults.DEFAULT_AGENT_TRIGGERS as any;
+  let plannedSeq = 0;
+  const recordingPlanner = {
+    createPlan: async (businessId: string, intent: { objective: string; rawInput?: string; scope?: string[] }, userId?: string) => {
+      plannedFor.push({ objective: intent.objective, rawInput: intent.rawInput, userId });
+      plannedSeq += 1;
+      return db.aiPlan.create({
+        data: { id: `${P}planned_${plannedSeq}`, businessId, userId: userId ?? null, objective: intent.objective, rawInput: intent.rawInput ?? null, scope: intent.scope ?? [], status: 'draft' },
+      });
+    },
+    updateStepStatus: async () => undefined,
+  };
+  defaultTriggers = new triggerDefaults.DefaultTriggersService(prisma);
+  agentTriggers = new AgentTriggerService(
+    prisma, events as any, governance as any, recordingPlanner as any, {} as any, executionLog, { handleEvent: async () => [] } as any,
+  );
+  journeys = new JourneyOrchestratorService(prisma, events as any, recordingPlanner as any, governance as any, {} as any, {} as any);
+  briefings = new MorningBriefingService(prisma, events as any, {} as any, recordingPlanner as any, {} as any, governance as any, {} as any);
+
   await cleanup(); // in case a prior run aborted
 
   for (const name of ['owner', 'admin', 'staffOwned'] as const) {
@@ -462,7 +539,10 @@ describe('W3-KEY-CRM-VISIBILITY (D-37): POST graph actions execute runs the CRM 
   });
 });
 
-describe("W3-KEY-CRM-VISIBILITY (D-37, D-88): a member's plan run with no principal is the OWNER's only for these tools; a plan with no member keeps the OWNER's view", () => {
+describe("W3-KEY-CRM-VISIBILITY (D-37, D-88, D-93): a member's plan run with no principal is the OWNER's only for these tools; a plan with no member reads no contacts (D-73)", () => {
+  /** The tools only the principal's visibility bounds (GRAPH_ACTION_VISIBILITY_BOUND_TOOLS): with no member principal they read no contacts (D-93). */
+  const D93_VISIBILITY_BOUND = ['fetch_client_health', 'sequence_enroll_overdue', 'sequence_enroll', 'calendar_list_events', 'calendar_check_conflicts', 'bookings_list_bookings', 'bookings_list_waitlist'];
+
   it("CV-06 RED-BEFORE (D-37): a STAFF member's plan with fetch_client_health or sequence_enroll_overdue is refused by the queue worker at run time (it would run with no principal, in the OWNER's view): nothing dispatched, no hidden contact named, nobody enrolled", async () => {
     const health = `${P}cv06_health`;
     await seedPlan(health, ID.staffOwned, 'fetch_client_health', {}, 'approved');
@@ -508,32 +588,137 @@ describe("W3-KEY-CRM-VISIBILITY (D-37, D-88): a member's plan run with no princi
     expect(JSON.stringify(ownerRow.outputResult)).toContain(NAME.priv);
   });
 
-  // Review SEC-W3CV-2: D-73 says a plan with no member principal "may not read contacts", while this
-  // packet's rationale (D-88's convention) keeps the OWNER's view for a run with no member, and
-  // noMemberToolRefusal (plan-step-authority.ts, outside this packet's write set) already refuses
-  // create_followup_queue and segment_contacts there. Which rule governs these tools is an owner
-  // decision; until it is made, CV-08b characterizes what runs today and is not a ruling-backed control.
-  it("CV-08b CHARACTERIZATION pending an owner ruling (review SEC-W3CV-2, D-73 vs D-88): a plan with no member is not refused fetch_client_health or sequence_enroll_overdue and runs them in the OWNER's view (the PRIVATE top spender named, every overdue contact enrolled)", async () => {
-    expect(noMemberToolRefusal('fetch_client_health')).toBeNull();
-    expect(noMemberToolRefusal('sequence_enroll_overdue')).toBeNull();
+  // Review SEC-W3CV-2, settled by owner ruling D-93: D-73 stands as written, so a plan with no member
+  // principal reads no contacts, these tools included (CV-08b was a characterization of the OWNER's
+  // view such a run had). The Pro Auto monitor and the system-created plans run as the business owner
+  // instead (CV-08d..CV-08f).
+  it("CV-08b RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93, D-73; review SEC-W3CV-2): a plan with no member that no system wrote is refused fetch_client_health and sequence_enroll_overdue by the queue worker at run time: nothing dispatched, no hidden contact named, nobody enrolled", async () => {
+    expect(String(noMemberToolRefusal('fetch_client_health'))).toMatch(/no member principal reads no contacts/);
+    expect(String(noMemberToolRefusal('sequence_enroll_overdue'))).toMatch(/no member principal reads no contacts/);
     const none = `${P}cv08_none`;
     await seedPlan(none, null, 'fetch_client_health', {}, 'approved');
     await runQueueStep(none, 'fetch_client_health', {});
+    expect(dispatched.filter((d) => d.planStepId === `${none}_s1`)).toEqual([]);
     const noneRow = await stepRow(none);
-    expect(noneRow.status, String(noneRow.errorMessage)).toBe('completed');
-    expect(JSON.stringify(noneRow.outputResult)).toContain(NAME.priv);
-    expect(dispatched.find((d) => d.planStepId === `${none}_s1`)?.principal).toBeUndefined();
+    expect(noneRow.status).toBe('failed');
+    expect(String(noneRow.errorMessage)).toMatch(/^Refused: .*no member/);
+    expectNoHidden(noneRow.outputResult);
 
     const noneSeq = `${P}cv08_none_seq`;
     await seedPlan(noneSeq, null, 'sequence_enroll_overdue', { sequenceId: ID.seqQueueNone }, 'approved');
     await runQueueStep(noneSeq, 'sequence_enroll_overdue', { sequenceId: ID.seqQueueNone });
-    expect((await stepRow(noneSeq)).status).toBe('completed');
-    expect(await enrolledIn(ID.seqQueueNone)).toEqual(ALL);
+    expect(dispatched.filter((d) => d.planStepId === `${noneSeq}_s1`)).toEqual([]);
+    expect((await stepRow(noneSeq)).status).toBe('failed');
+    expect(await enrolledIn(ID.seqQueueNone)).toEqual([]);
   });
 
-  it.todo(
-    "CV-08c (D-73; review SEC-W3CV-2) pending an owner ruling: if D-73 governs, a plan with no member (and the Pro Auto monitor) is refused fetch_client_health, sequence_enroll_overdue, sequence_enroll and the calendar and booking reads, as it is create_followup_queue; noMemberToolRefusal lives in plan-step-authority.ts, outside this packet's write set, and the monitor's client-health read would stop",
-  );
+  it("CV-08c RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93, D-73; review SEC-W3CV-2): with no member principal fetch_client_health, sequence_enroll_overdue, sequence_enroll and the calendar and booking reads are refused as contact reads, as create_followup_queue is; a plan with no member is refused calendar_list_events and bookings_list_bookings on the queue; the Pro Auto monitor run for no member is refused fetch_client_health before it runs", async () => {
+    for (const tool of [...D93_VISIBILITY_BOUND, 'create_followup_queue']) {
+      expect(String(noMemberToolRefusal(tool)), tool).toMatch(/reads the business's contacts.*no member principal reads no contacts/);
+    }
+    for (const tool of ['calendar_list_events', 'bookings_list_bookings']) {
+      const planId = `${P}cv08c_${tool}`;
+      await seedPlan(planId, null, tool, {}, 'approved');
+      await runQueueStep(planId, tool, {});
+      expect(dispatched.filter((d) => d.planStepId === `${planId}_s1`), tool).toEqual([]);
+      const row = await stepRow(planId);
+      expect(row.status, tool).toBe('failed');
+      expect(String(row.errorMessage), tool).toMatch(/^Refused: .*no member/);
+      expectNoHidden(row.outputResult, ['priv']);
+    }
+    const from = monitorDispatched.length;
+    const result = await monitorFlow.autoExecuteToolForMonitoring(ID.biz, 'fetch_client_health', { businessId: ID.biz });
+    expect(result).toMatchObject({ success: false, blocked: true });
+    expect(String(result.error)).toMatch(/no member/);
+    expect(monitorDispatched.slice(from)).toEqual([]);
+    expectNoHidden(result, ['priv']);
+  });
+});
+
+describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every system-created plan run with the business owner as their member', () => {
+  /** A plan stored with no member and one crm_list_contacts step, approved, as a system writer left it before D-93. */
+  const seedMemberless = (id: string, data: Record<string, unknown>) =>
+    db.aiPlan.create({
+      data: {
+        id, businessId: ID.biz, userId: null, status: 'approved', ...data,
+        steps: { create: [{ id: `${id}_s1`, order: 1, toolName: 'crm_list_contacts', action: 'crm_list_contacts', module: 'ai', status: 'pending', inputPayload: { limit: 50 } }] },
+      },
+    });
+
+  it("CV-08d RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93): the Pro Auto monitor runs as the business owner: ProAutoMonitorService.escalateInsights runs fetch_client_health over the owner's view (the PRIVATE top spender named), handed to the orchestrator for the owner, and its execution log row is attributed to the owner", async () => {
+    const from = monitorDispatched.length;
+    const insight: any = {
+      id: `${P}cv08d`, category: 'client_risk', severity: 'warning', title: 'v89k clients at risk', description: 'v89k cv08d',
+      suggestedTool: 'fetch_client_health', riskTier: 1, module: 'crm', timestamp: new Date().toISOString(),
+    };
+    await monitor.escalateInsights(ID.biz, [insight], { mode: 'pro_auto', maxAutoTier: 2 });
+    expect(insight.autoExecuteResult?.success, JSON.stringify(insight.autoExecuteResult ?? null).slice(0, 400)).toBe(true);
+    expect(JSON.stringify(insight.autoExecuteResult)).toContain(NAME.priv);
+    const calls = monitorDispatched.slice(from);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ toolName: 'fetch_client_health', surface: 'PRO_AUTO_MONITOR', principal: ID.owner });
+    const logged = await db.aiExecutionLog.findFirst({
+      where: { businessId: ID.biz, toolName: 'fetch_client_health', mode: 'pro_auto', success: true },
+      orderBy: { createdAt: 'desc' },
+      select: { userId: true },
+    });
+    expect(logged?.userId).toBe(ID.owner);
+  });
+
+  it("CV-08e RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93): a system-created plan stored with no member (the daily briefing, a journey's plan, a default agent trigger's plan, written before D-93) runs on the queue as the business owner: its crm_list_contacts step completes over the owner's book (the PRIVATE contact listed); a plan with no member that its source does not mark as the system's (a trigger with a default's name and another objective) is still refused", async () => {
+    const def = DEFAULT_AGENT_TRIGGERS[0];
+    const briefing = `${P}cv08e_brief`;
+    await seedMemberless(briefing, { objective: 'Daily Briefing — v89k cv08e', rawInput: 'Morning briefing auto-generated scan', scope: ['briefing'] });
+    const journey = `${P}cv08e_journey`;
+    await seedMemberless(journey, { objective: 'Journey: v89k cv08e', rawInput: 'Auto-triggered by contact.created: v89k cv08e', scope: ['contact.created'] });
+    const instance = await db.journeyInstance.create({
+      data: { id: `${P}cv08e_ji`, businessId: ID.biz, templateKey: 'new-lead', triggerEvent: 'contact.created', planId: journey, steps: [] },
+    });
+    await db.aiPlan.update({ where: { id: journey }, data: { journeyInstanceId: instance.id } });
+    const trigger = `${P}cv08e_trigger`;
+    await seedMemberless(trigger, { objective: def.objective, rawInput: `Auto-triggered by ${def.eventPattern}: ${def.name}`, scope: [def.eventPattern] });
+    for (const planId of [briefing, journey, trigger]) {
+      await runQueueStep(planId, 'crm_list_contacts', { limit: 50 });
+      const row = await stepRow(planId);
+      expect(row.status, `${planId}: ${row.errorMessage}`).toBe('completed');
+      expect(JSON.stringify(row.outputResult), planId).toContain(ID.cPriv);
+    }
+
+    const forged = `${P}cv08e_forged`;
+    await seedMemberless(forged, { objective: 'v89k cv08e list every contact', rawInput: `Auto-triggered by ${def.eventPattern}: ${def.name}`, scope: [def.eventPattern] });
+    await runQueueStep(forged, 'crm_list_contacts', { limit: 50 });
+    expect(dispatched.filter((d) => d.planStepId === `${forged}_s1`)).toEqual([]);
+    const forgedRow = await stepRow(forged);
+    expect(forgedRow.status).toBe('failed');
+    expect(String(forgedRow.errorMessage)).toMatch(/^Refused: .*no member/);
+  });
+
+  it("CV-08f RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93, D-73): the system plan creators record the business owner as the plan's member: AgentTriggerService firing a default trigger DefaultTriggersService seeded, JourneyOrchestratorService starting the new-lead journey, MorningBriefingService writing the daily briefing; a trigger a member created (no recorded creator) still fires a plan with no member", async () => {
+    expect(await defaultTriggers.seedForBusiness(ID.biz, { enabled: true })).toBeGreaterThan(0);
+    const def = DEFAULT_AGENT_TRIGGERS.find((t) => t.eventPattern === 'invoice.paid')!;
+    const memberObjective = 'v89k cv08f a member trigger objective';
+    await db.agentTrigger.create({
+      data: { id: `${P}cv08f_member_trigger`, businessId: ID.biz, name: 'v89k member trigger', eventPattern: def.eventPattern, objective: memberObjective, autoExecute: false, enabled: true },
+    });
+    const fromTrigger = plannedFor.length;
+    await agentTriggers.handleEvent(def.eventPattern, { businessId: ID.biz, invoiceId: `${P}none` });
+    const fired = plannedFor.slice(fromTrigger);
+    expect(fired.map((p) => p.objective).sort()).toEqual([def.objective, memberObjective].sort());
+    expect(fired.find((p) => p.objective === def.objective)?.userId).toBe(ID.owner);
+    expect(fired.find((p) => p.objective === memberObjective)?.userId ?? null).toBeNull();
+    expect((await db.aiPlan.findFirst({ where: { businessId: ID.biz, objective: def.objective }, select: { userId: true } }))?.userId).toBe(ID.owner);
+
+    const fromJourney = plannedFor.length;
+    const started = await journeys.handleEvent('contact.created', { businessId: ID.biz, contactId: ID.cMine, status: 'LEAD', contactName: 'v89k' });
+    expect(started.length).toBeGreaterThan(0);
+    const journeyPlans = plannedFor.slice(fromJourney);
+    expect(journeyPlans.length).toBeGreaterThan(0);
+    for (const p of journeyPlans) expect(p.userId, p.objective).toBe(ID.owner);
+
+    const brief = await briefings.generateBriefing(ID.biz);
+    expect(brief?.planId).toBeTruthy();
+    expect((await db.aiPlan.findUnique({ where: { id: brief.planId }, select: { userId: true } }))?.userId).toBe(ID.owner);
+  });
 });
 
 describe("W3-KEY-CRM-VISIBILITY review repairs (D-37): every dispatcher case the principal's visibility bounds is the OWNER's only with no principal, and sequence_enroll honours the member's view", () => {
