@@ -27,8 +27,25 @@ export function isContactStatus(value: unknown): value is ContactStatus {
  * status only through canonicalContactStatus below, which reads CUSTOMER and
  * DORMANT as CLIENT. Rows are not migrated: a row that still holds either
  * spelling counts as CLIENT, and the spellings may go only once no row holds
- * them. (CrmService.createContact and updateContact still store a status as
- * they are given it; the CRM DTOs admit only CONTACT_STATUSES.)
+ * them.
+ *
+ * CrmService.createContact, updateContact and bulkUpdateContacts store a
+ * status as they are given it, so each caller outside the CRM DTOs (which
+ * admit only CONTACT_STATUSES) holds the invariant itself:
+ *   - through canonicalContactStatus: the CSV/link import, a playbook's
+ *     update_status, KEY Cortex's CRM adapter (create_contact, update_contact,
+ *     update_status; key-cortex/adapters/crm-adapter.service.ts) and KEY's
+ *     update_status_with_confirmation (ai/flow-orchestrator.service.ts). The
+ *     last two stored the status verbatim until D-92 review CR-D92-1, so a row
+ *     may hold a lowercase spelling ('dormant', 'customer', 'lead'); the
+ *     readers do not count one (isClientStatus is exact), and such rows are
+ *     not migrated.
+ *   - through the tool schema: KEY's crm_create_contact and crm_update_contact
+ *     (status enum CONTACT_STATUSES, checked before the call) and KEY's
+ *     bulk_status_change (isContactStatus).
+ *   - residual, outside W4-D92-DORMANT-AS-CLIENT: the Google and Outlook
+ *     contact-sync rules and the connector form mapping store an operator's
+ *     configured defaultStatus as given (connect/*.service.ts).
  */
 export const CLIENT_STATUS: ContactStatus = 'CLIENT';
 export const LEGACY_CLIENT_STATUS = 'CUSTOMER';

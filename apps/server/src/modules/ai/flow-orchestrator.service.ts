@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
+import { canonicalContactStatus } from '../crm/crm.constants';
 import { CommerceService, OPERATOR_INVOICE_CONTACT_SELECT, OPERATOR_QUOTE_CONTACT_SELECT } from '../commerce/commerce.service';
 import { BookingsService } from '../bookings/bookings.service';
 import { BookingWaitlistService } from '../bookings/booking-waitlist.service';
@@ -5225,12 +5226,20 @@ ${triage.standingContext}`;
         const newStatus = args.newStatus;
 
         if (entityType === 'contact') {
+          // D-92 (owner ruling; W4-D92-DORMANT-AS-CLIENT review CR-D92-1):
+          // newStatus has no enum (the tool also moves invoices), so it is
+          // stored only through canonicalContactStatus, as the CSV/link import
+          // and a playbook's update_status store one: DORMANT and CUSTOMER in
+          // any case are CLIENT. A status with no ContactStatus is refused, as
+          // an unsupported invoice transition is, and nothing is written.
+          const status = canonicalContactStatus(typeof newStatus === 'string' ? newStatus : null);
+          if (!status) throw new Error(`Unsupported contact status: ${String(newStatus)}`);
           const result = await this.getCrm().bulkUpdateContacts({
             businessId,
             contactIds: ids,
-            status: newStatus,
+            status,
           });
-          return { entityType, updatedCount: result.updated, newStatus };
+          return { entityType, updatedCount: result.updated, newStatus: status };
         }
 
         if (entityType === 'invoice') {

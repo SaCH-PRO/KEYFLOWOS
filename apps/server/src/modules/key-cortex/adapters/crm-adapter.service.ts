@@ -1,7 +1,31 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConnectorCommand, ConnectorResult } from '../key-cortex-connector.types';
 import { connectorOk, connectorFail } from '../key-cortex-connector.utils';
 import { CrmService } from '../../crm/crm.service';
+import { CONTACT_STATUSES, canonicalContactStatus, type ContactStatus } from '../../crm/crm.constants';
+
+/**
+ * D-92 (owner ruling; W4-D92-DORMANT-AS-CLIENT review CR-D92-1): KEY Cortex
+ * writes Contact.status outside the CRM DTOs (create_contact, update_contact,
+ * update_status), so it stores a status only through canonicalContactStatus,
+ * the helper the CSV/link import and a playbook's update_status use: a
+ * ContactStatus in any case or padding as itself, the legacy CUSTOMER and
+ * DORMANT in any case as CLIENT. A status with no ContactStatus (ACTIVE,
+ * INACTIVE, the registry's 'churned' and 'partner', any other word) is refused
+ * and nothing is written. Before D-92 the status was stored verbatim, so
+ * 'dormant' or 'customer' reached a row that no status reader counts as CLIENT.
+ */
+function refuseStatus(status: unknown): never {
+  throw new BadRequestException(
+    `"${String(status)}" is not a contact status: use one of ${CONTACT_STATUSES.join(', ')}`,
+  );
+}
+
+/** A status the caller named, as stored; undefined when it names none. */
+function namedContactStatus(status: string | null | undefined): ContactStatus | undefined {
+  if (status === undefined || status === null || status === '') return undefined;
+  return canonicalContactStatus(status) ?? refuseStatus(status);
+}
 
 /**
  * Typed adapter that exposes the CRM methods expected by
@@ -24,6 +48,8 @@ export class CrmAdapterService {
     status?: string;
     source?: string;
   }) {
+    // D-92 (CR-D92-1): checked before anything is written.
+    const status = namedContactStatus(input.status);
     return this.crm.createContact({
       businessId: input.businessId,
       firstName: input.firstName,
@@ -32,7 +58,7 @@ export class CrmAdapterService {
       phone: input.phone,
       companyName: input.company,
       tags: input.tags,
-      status: input.status,
+      status,
       source: input.source ?? 'key_cortex',
     });
   }
@@ -51,6 +77,8 @@ export class CrmAdapterService {
     status?: string;
     tags?: string[];
   }) {
+    // D-92 (CR-D92-1): a refused status writes no field at all.
+    const status = namedContactStatus(input.status);
     return this.crm.updateContact({
       businessId: input.businessId,
       contactId: input.contactId,
@@ -58,7 +86,7 @@ export class CrmAdapterService {
       lastName: input.lastName,
       email: input.email,
       phone: input.phone,
-      status: input.status,
+      status,
       tags: input.tags,
     });
   }
@@ -158,10 +186,13 @@ export class CrmAdapterService {
     status: string;
     reason?: string;
   }) {
+    // D-92 (CR-D92-1): update_status must name a ContactStatus; with none (a
+    // blank or missing status included) it writes nothing.
+    const status = canonicalContactStatus(input.status) ?? refuseStatus(input.status);
     return this.updateContact({
       businessId: input.businessId,
       contactId: input.contactId,
-      status: input.status,
+      status,
     });
   }
 
@@ -286,7 +317,8 @@ export class CrmAdapterService {
           phone: command.parameters.phone as string,
           company: command.parameters.company as string,
           tags: command.parameters.tags as string[],
-          status: (command.parameters.status as string) || 'lead',
+          // D-92 (CR-D92-1): the default is the vocabulary's LEAD (was 'lead').
+          status: (command.parameters.status as string) || 'LEAD',
           source: 'key_cortex',
         });
         return connectorOk(command, start, contact);

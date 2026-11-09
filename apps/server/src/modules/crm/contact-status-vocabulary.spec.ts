@@ -53,6 +53,12 @@
  *     ContactStatus. Rows are not migrated: a row still holding DORMANT reads
  *     as CLIENT (isClientStatus), and no reader puts it in Dormant by its
  *     spelling. The cases below that pinned the pre-D-92 behaviour say so.
+ *     Review CR-D92-1: two more writers outside the DTOs stored a status
+ *     verbatim, lowercase included ('dormant', 'customer', 'lead'), which no
+ *     reader counts: KEY Cortex's CRM adapter (create_contact, update_contact,
+ *     update_status; crm-adapter.service.spec.ts) and KEY's
+ *     update_status_with_confirmation (CrmService.bulkUpdateContacts). Both
+ *     store through canonicalContactStatus now and refuse a status with none.
  *
  * Pure: reads source files, imports constants and drives the readers over
  * in-memory stand-ins for Prisma; no database, no network.
@@ -362,6 +368,40 @@ describe('Contact.status vocabulary (CF-49)', () => {
     for (const w of written) expect(isContactStatus(w.status), w.contactId).toBe(true);
     // A skipped action says so, as a playbook action with an invalid config does.
     expect(warned, 'one warning per update_status that names no ContactStatus').toHaveLength(4);
+  });
+
+  // D-92 review CR-D92-1: before this repair the tool handed bulkUpdateContacts
+  // its newStatus verbatim ('DORMANT', 'dormant', 'customer', 'ACTIVE').
+  it("D-92 (review CR-D92-1): KEY's update_status_with_confirmation hands CrmService.bulkUpdateContacts only a ContactStatus: DORMANT and CUSTOMER in any case as CLIENT, a canonical status in any case as itself, and refuses ACTIVE, INACTIVE, an unknown or a blank status writing nothing", { timeout: 60_000 }, async () => {
+    const { FlowOrchestratorService } = await import('../ai/flow-orchestrator.service');
+    const written: Array<{ contactIds: string[]; status?: string }> = [];
+    const self = {
+      getCrm: () => ({
+        bulkUpdateContacts: async (input: { contactIds: string[]; status?: string }) => {
+          written.push({ contactIds: input.contactIds, status: input.status });
+          return { updated: input.contactIds.length };
+        },
+      }),
+    };
+    const executeToolAction = (FlowOrchestratorService.prototype as any).executeToolAction as (...args: unknown[]) => Promise<any>;
+    const run = (newStatus: unknown) =>
+      executeToolAction.call(self, 'biz', 'update_status_with_confirmation', { entityType: 'contact', ids: ['c1', 'c2'], newStatus });
+    const CANONICAL: Array<[string, string]> = [
+      ['DORMANT', 'CLIENT'], ['dormant', 'CLIENT'], [' Dormant ', 'CLIENT'], ['CUSTOMER', 'CLIENT'], ['customer', 'CLIENT'],
+      ['lead', 'LEAD'], ['Prospect', 'PROSPECT'], ['CLIENT', 'CLIENT'], ['LOST', 'LOST'],
+    ];
+    for (const [newStatus, stored] of CANONICAL) {
+      const result = await run(newStatus);
+      // The tool answers with the status it wrote.
+      expect(result, newStatus).toEqual({ entityType: 'contact', updatedCount: 2, newStatus: stored });
+    }
+    expect(written.map((w) => w.status)).toEqual(CANONICAL.map(([, stored]) => stored));
+    for (const w of written) expect(isContactStatus(w.status), String(w.status)).toBe(true);
+    const before = written.length;
+    for (const newStatus of ['ACTIVE', 'INACTIVE', 'churned', 'VIP', '', '   ', undefined, 7]) {
+      await expect(run(newStatus), String(newStatus)).rejects.toThrow(/Unsupported contact status/);
+    }
+    expect(written, 'a refused status writes nothing').toHaveLength(before);
   });
 
   it('an external store buyer maps into the vocabulary: orders make a CLIENT, none a LEAD', () => {

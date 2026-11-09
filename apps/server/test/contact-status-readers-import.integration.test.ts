@@ -449,6 +449,84 @@ describe("D-92 (ST-38c-1): a playbook's update_status action stores only a Conta
 });
 
 /**
+ * D-92 review CR-D92-1: two more writers outside the CRM DTOs stored a status
+ * verbatim: KEY Cortex's CRM adapter (update_status, create_contact) and KEY's
+ * update_status_with_confirmation (CrmService.bulkUpdateContacts). Driven here
+ * through the real CrmAdapterService and the tool's real handler over the real
+ * CrmService of the app under test, on bizB rows (out of bizA's reader counts).
+ */
+describe('D-92 (review CR-D92-1): KEY Cortex and KEY update_status_with_confirmation store only a ContactStatus on a real row', () => {
+  const kcCommand = (action: string, parameters: Record<string, unknown>) => ({
+    module: 'crm', action, parameters, businessId: ID.bizB, userId: ID.owner, source: 'key_cortex', timestamp: new Date(), correlationId: `${P}kc`,
+  });
+  async function statusesOf(likePrefix: string): Promise<Record<string, string>> {
+    const rows: Array<{ id: string; first_name: string; status: string }> = await db.$queryRawUnsafe(
+      `SELECT id, first_name, status FROM contacts WHERE business_id = $1 AND (id LIKE ${sqlLikePrefix(likePrefix)} OR first_name LIKE ${sqlLikePrefix(likePrefix)})`,
+      ID.bizB,
+    );
+    return Object.fromEntries(rows.map((r) => [r.id.startsWith(likePrefix) ? r.id : r.first_name, r.status]));
+  }
+
+  it("D-92: KEY Cortex update_status stores 'dormant' and 'customer' as CLIENT and 'lost' as LOST, and refuses ACTIVE and 'churned' leaving the row as it was", async () => {
+    const { CrmAdapterService } = await import('../src/modules/key-cortex/adapters/crm-adapter.service');
+    const { CONTACT_STATUSES } = await import('../src/modules/crm/crm.constants');
+    const CASES = [
+      { id: `${P}kcs_dormant_lower`, seeded: 'LEAD', status: 'dormant', stored: 'CLIENT' },
+      { id: `${P}kcs_dormant`, seeded: 'PROSPECT', status: 'DORMANT', stored: 'CLIENT' },
+      { id: `${P}kcs_customer`, seeded: 'PROSPECT', status: 'customer', stored: 'CLIENT' },
+      { id: `${P}kcs_lost`, seeded: 'CLIENT', status: 'lost', stored: 'LOST' },
+      { id: `${P}kcs_active`, seeded: 'PROSPECT', status: 'ACTIVE', stored: 'PROSPECT', refused: true },
+      { id: `${P}kcs_churned`, seeded: 'CLIENT', status: 'churned', stored: 'CLIENT', refused: true },
+    ];
+    for (const c of CASES) {
+      await db.contact.create({ data: { id: c.id, businessId: ID.bizB, firstName: c.id, status: c.seeded } });
+    }
+    const adapter = new CrmAdapterService(crmService);
+    for (const c of CASES) {
+      const run = adapter.execute(kcCommand('update_status', { contactId: c.id, status: c.status }) as any);
+      if (c.refused) await expect(run, c.id).rejects.toThrow(/not a contact status/);
+      else expect((await run).success, c.id).toBe(true);
+    }
+    const stored = await statusesOf(`${P}kcs_`);
+    for (const c of CASES) {
+      expect(stored[c.id], `${c.id}: update_status '${c.status}' on a ${c.seeded}`).toBe(c.stored);
+      expect(CONTACT_STATUSES as readonly string[], c.id).toContain(stored[c.id]);
+    }
+  }, 60_000);
+
+  it("D-92: KEY Cortex create_contact stores LEAD when it names no status (was 'lead') and 'Dormant' as CLIENT, and creates no contact for 'partner'", async () => {
+    const { CrmAdapterService } = await import('../src/modules/key-cortex/adapters/crm-adapter.service');
+    const adapter = new CrmAdapterService(crmService);
+    expect((await adapter.execute(kcCommand('create_contact', { firstName: `${P}kcc_default` }) as any)).success).toBe(true);
+    expect((await adapter.execute(kcCommand('create_contact', { firstName: `${P}kcc_dormant`, status: 'Dormant' }) as any)).success).toBe(true);
+    await expect(adapter.execute(kcCommand('create_contact', { firstName: `${P}kcc_partner`, status: 'partner' }) as any)).rejects.toThrow(/not a contact status/);
+    expect(await statusesOf(`${P}kcc_`)).toEqual({ [`${P}kcc_default`]: 'LEAD', [`${P}kcc_dormant`]: 'CLIENT' });
+  }, 60_000);
+
+  it("D-92: KEY update_status_with_confirmation stores 'dormant' as CLIENT on every named contact and refuses ACTIVE leaving the rows as they were", async () => {
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const ROWS_KB = [
+      { id: `${P}kcb_a`, seeded: 'LEAD' },
+      { id: `${P}kcb_b`, seeded: 'PROSPECT' },
+    ];
+    for (const r of ROWS_KB) {
+      await db.contact.create({ data: { id: r.id, businessId: ID.bizB, firstName: r.id, status: r.seeded } });
+    }
+    // The tool's real handler, over the real CrmService (getCrm resolves it from the module ref in the app).
+    const executeToolAction = (FlowOrchestratorService.prototype as any).executeToolAction as (...args: unknown[]) => Promise<any>;
+    const self = { getCrm: () => crmService };
+    const ids = ROWS_KB.map((r) => r.id);
+    await expect(
+      executeToolAction.call(self, ID.bizB, 'update_status_with_confirmation', { entityType: 'contact', ids, newStatus: 'ACTIVE' }),
+    ).rejects.toThrow(/Unsupported contact status/);
+    expect(await statusesOf(`${P}kcb_`)).toEqual({ [`${P}kcb_a`]: 'LEAD', [`${P}kcb_b`]: 'PROSPECT' });
+    const result = await executeToolAction.call(self, ID.bizB, 'update_status_with_confirmation', { entityType: 'contact', ids, newStatus: 'dormant' });
+    expect(result).toEqual({ entityType: 'contact', updatedCount: 2, newStatus: 'CLIENT' });
+    expect(await statusesOf(`${P}kcb_`)).toEqual({ [`${P}kcb_a`]: 'CLIENT', [`${P}kcb_b`]: 'CLIENT' });
+  }, 120_000);
+});
+
+/**
  * V1-38c: the status cells the import is given, and the ContactStatus each must
  * be stored as. `kind` groups them by the case that asserts them.
  */
