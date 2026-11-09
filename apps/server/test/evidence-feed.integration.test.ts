@@ -229,8 +229,8 @@
  *     with data.amount keeps D-63's binding and is served on expenses read.
  *   V55-13e it.todo then (SEC-W5FC-1, outside the write set): GET
  *     /crm/businesses/:b/contacts/:c/events served the ContactEvent rows,
- *     amounts included, on crm read alone (closed by W6-CONTACT-EVENTS-MONEY,
- *     below).
+ *     amounts included, on crm read alone (closed for that one route by
+ *     W6-CONTACT-EVENTS-MONEY, below; the sibling reads are V55-13f..h).
  *
  * W6-CONTACT-EVENTS-MONEY (SEC-W5FC-1; owner rulings D-90 and D-63, the V1-84
  * timeline rule; V55-13e, was it.todo): GET /crm/businesses/:b/contacts/:c/events
@@ -243,6 +243,14 @@
  * The real CrmController, CrmService and CrmTimelineService are mounted on
  * their own app over this suite's PrismaService and identity header; the
  * controller's other collaborators are empty stand-ins the route never calls.
+ *   This closes SEC-W5FC-1 for the /events route only, not the disclosure
+ *   class. Review repairs (SEC-W6CEM-1, SEC-W6CEM-2, CR-W6CEM-1; D-90 / D-63):
+ *   V55-13f..h it.todo (outside this packet's write set, they need a ruling
+ *   and a follow-up packet): the same member still reads the same
+ *   ContactEvents and amounts, one sibling GET away on the same contact, from
+ *   cross-journey / story / dossier (V55-13f), revenue-summary and journey
+ *   (V55-13g), and the contact detail the web Timeline tab draws from
+ *   (V55-13h).
  *
  * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
  *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
@@ -2807,6 +2815,25 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     const anonymous = await request(crmApp.getHttpServer()).get(`/crm/businesses/${C.biz}/contacts/${contactId}/events`);
     expect([401, 403]).toContain(anonymous.status);
   });
+
+  // W6-CONTACT-EVENTS-MONEY review repairs (SEC-W6CEM-1, SEC-W6CEM-2,
+  // CR-W6CEM-1; owner rulings D-90 and D-63, the V1-84 timeline rule). V55-13e
+  // closes the /events route only. Reproduced on db6bc4b9 by a temporary probe
+  // in this describe (removed): the real CrmController and guards with the real
+  // CrmTimelineService, CrmJourneyService, CrmRevenueService and
+  // CrmStatsService; a STAFF member {crm: 'read', revenue: 'none'}; a TEAM
+  // contact with a SENT invoice (4975.5) paid 1357.91 through the real manual
+  // payment route (its invoice.payment_recorded ContactEvent), a PAID invoice
+  // (4321.87) with an invoice.paid ContactEvent {amount: 4321.87}, and a
+  // note.created. GET .../events served the note only (V55-13e holds); every
+  // read below answered 200 with the amounts. Each needs a ruling on what a
+  // crm-read, revenue-'none' member sees of a contact's money, and a follow-up
+  // packet: the services are outside this packet's write set
+  // (crm-timeline.service.ts listContactEvents and crm.controller.ts
+  // contactEvents only).
+  it.todo("V55-13f (SEC-W6CEM-1, D-90 / D-63, residual of W6-CONTACT-EVENTS-MONEY): GET /crm/businesses/:b/contacts/:c/cross-journey (CrmJourneyService.getContactCrossJourney, crm read only; the web calls it, client.ts) and the two routes built on it, .../story (any ?filter=, money included) and .../dossier, withhold from a member with crm read and revenue 'none' the money ContactEvents V55-13e withholds (reproduced: timeline item invoice.paid value 4321.87 with description 'TTD 4,321.87', invoice.payment_recorded value 1357.91), summary.totalRevenue (4321.87) and the dossier's insight summary ('payments totaling TTD 4,321.87'); the owner and a member with revenue read keep them. Outside the write set (crm-journey.service.ts, crm.controller.ts getContactCrossJourney / getContactStory / getContactDossier): needs a ruling and a follow-up packet");
+  it.todo("V55-13g (SEC-W6CEM-2, D-90 / D-63, residual of W6-CONTACT-EVENTS-MONEY): GET /crm/businesses/:b/contacts/:c/revenue-summary (CrmRevenueService.getContactRevenueSummary, crm read only; the web calls it, client.ts) and .../journey (CrmJourneyService.getContactJourney) withhold the contact's amounts from a member with crm read and revenue 'none' (reproduced: lifetimeRevenue 1357.91, lastPaymentAmount 1357.91, recentRevenueActions[].amount 1357.91 and 4321.87 read from the money ContactEvents; the journey's 'Payment Received' milestone value 4321.87): revenue-gate the money fields, or judge the events by canReadActivityRow / crmRowCarriesMoney as V55-13e does; the owner and a member with revenue read keep them. Outside the write set (crm-revenue.service.ts, crm-journey.service.ts, crm.controller.ts): needs a ruling and a follow-up packet");
+  it.todo("V55-13h (CR-W6CEM-1, D-90 / D-63, residual of W6-CONTACT-EVENTS-MONEY): GET /crm/businesses/:b/contacts/:c (CrmStatsService.contactDetail, the 50 newest ContactEvents with no viewer filter, returned as `events`, which the web contact page's Timeline tab draws from: contact-detail-tabs.tsx, timeline-tab-panel.tsx) serves a member with crm read and revenue 'none' only the ContactEvents V55-13e serves them (reproduced: events held invoice.payment_recorded {amount 1357.91, totalPaid, invoiceTotal 4975.5} and invoice.paid {amount 4321.87}); the same response's invoices[].total and meta.totalRevenue / outstandingBalance (also the dossier's meta) need the same ruling; the owner and a member with revenue read keep them. Outside the write set (crm-stats.service.ts, crm.controller.ts getContactDetail): needs a ruling and a follow-up packet");
 
   // W4-FEED-COPY-COMPLETE review CR-FCC-1 (D-90): the copies D-90 removed were
   // the only rows of a manual payment and of a booking create with a category

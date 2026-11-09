@@ -196,6 +196,13 @@ export class CrmTimelineService {
    * from older events. Before it the route served every event, amounts
    * included, on crm read alone. A read that names no member is refused: there
    * is no one to judge the events for.
+   *
+   * This route only. The contact's sibling reads still serve the same events
+   * and amounts on crm read without this filter (review SEC-W6CEM-1,
+   * SEC-W6CEM-2, CR-W6CEM-1; it.todo V55-13f..h in
+   * test/evidence-feed.integration.test.ts): CrmStatsService.contactDetail,
+   * CrmJourneyService.getContactCrossJourney / getContactJourney and
+   * CrmRevenueService.getContactRevenueSummary.
    */
   async listContactEvents(params: { businessId: string; contactId: string; limit?: number; viewerUserId?: string | null }) {
     await this.assertContact(params.businessId, params.contactId);
