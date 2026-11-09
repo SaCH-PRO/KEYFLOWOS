@@ -1,5 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Resend } from 'resend';
+// W4-HOUSEKEEPING (9B-D2): the one address redactor, shared with TransactionalEmailService.
+import { redactAddresses } from '../../core/security/redaction';
 
 export type SystemEmailProviderOutcome = 'FAILED_CONFIRMED' | 'OUTCOME_UNKNOWN';
 
@@ -21,11 +23,6 @@ export function resolveSystemEmailFrom(env: NodeJS.ProcessEnv = process.env): st
   const rawName = env.EMAIL_FROM_NAME?.trim();
   const name = (rawName && rawName.length > 0 ? rawName : 'Keyflow').replace(/"/g, '');
   return `${name} <${addr}>`;
-}
-
-/** Replace anything shaped like an email address, for log lines. */
-function redactAddresses(text: string): string {
-  return text.replace(/[^\s<>"'`(),;:[\]]+@[^\s<>"'`(),;:[\]]+/g, '<address>');
 }
 
 /**

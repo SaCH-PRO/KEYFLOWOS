@@ -810,19 +810,22 @@ export class InvoiceWorkflowService {
    * granted, and this read sees its payment, or waits for this decision and
    * then finds the invoice VOID (recordPayment refuses it 409).
    *
-   * Review SEC-V82-1 / CR-B1-1: it does NOT order the provider settlement
-   * doors. The Stripe charge / session webhook, the PayPal capture webhook,
-   * the WiPay callback and capturePaypalOrder record a SUCCESSFUL payment
-   * through PaymentsService.createPaymentWithPosting, which takes no invoice
-   * lock and does not re-check for VOID inside its transaction. The insert's
-   * foreign-key check takes FOR KEY SHARE, which FOR NO KEY UPDATE does not
-   * block, so a provider payment still uncommitted when this read runs, or
-   * committed after it, leaves the invoice VOID with money received net (on
-   * ACCRUAL AR -40, income 0, cash 40). That gap predates V1-82 and its fix
-   * lies outside this file. Follow-up: those doors take
-   * PaymentsService.lockInvoice and refuse (or flag) a VOID invoice inside
-   * their transaction; VN-08 in invoice-void-net-received.integration.test.ts
-   * is the todo for it.
+   * The provider settlement doors (review SEC-V82-1 / CR-B1-1) are ordered
+   * too, since W3-VOID-PROVIDER-RACE (VN-08, the D-76 pattern). The Stripe
+   * charge / session webhook, the PayPal capture webhook, the WiPay callback
+   * and capturePaypalOrder record a SUCCESSFUL payment through
+   * PaymentsService.createPaymentWithPosting, which now takes
+   * PaymentsService.lockInvoice (the same invoice row lock) and reads the
+   * status under it. A provider payment that arrives while this void decides
+   * waits for it and then finds the invoice VOID: nothing is recorded as money
+   * on it, and the delivery is kept refused (`refused:invoice_void`) with one
+   * owner notice (refuseVoidInvoicePayment). A payment that committed first is
+   * seen by this read, and the void is refused. Before that packet the insert's
+   * foreign-key check (FOR KEY SHARE, which FOR NO KEY UPDATE does not block)
+   * let such a payment leave the invoice VOID with money received net (on
+   * ACCRUAL AR -40, income 0, cash 40). VN-08 in
+   * invoice-void-net-received.integration.test.ts proves the closed gap
+   * (W4-HOUSEKEEPING corrected this comment).
    */
   private async assertNothingReceivedNet(
     db: Prisma.TransactionClient,

@@ -1131,7 +1131,12 @@ export interface DealStage {
 export interface Deal {
   id: string;
   businessId: string;
-  contactId: string;
+  /**
+   * Null when GET crm deals lists a deal whose contact the member cannot open
+   * (V1-89 W3-CRM-AI-VISIBILITY: contactId and contact are both null).
+   * W4-HOUSEKEEPING: typed so every reader handles it.
+   */
+  contactId: string | null;
   title: string;
   description?: string | null;
   companyName?: string | null;
@@ -1139,7 +1144,7 @@ export interface Deal {
   currency: string;
   stageId: string;
   stage?: DealStage;
-  contact?: { id: string; firstName?: string | null; lastName?: string | null; displayName?: string | null; email?: string | null; companyName?: string | null };
+  contact?: { id: string; firstName?: string | null; lastName?: string | null; displayName?: string | null; email?: string | null; companyName?: string | null } | null;
   status: 'OPEN' | 'WON' | 'LOST';
   probability?: number | null;
   ownerUserId?: string | null;
