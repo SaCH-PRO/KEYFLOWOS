@@ -563,6 +563,11 @@
       "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
+      "prefix": "v81c_",
+      "owner": "apps/server/test/refund-door-tenancy.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A3-REFUND-DOOR-TENANCY)"
+    },
+    {
       "prefix": "v81e_",
       "owner": "apps/server/test/finance-write-tenancy.integration.test.ts",
       "packet": "V1-81 (FOLLOW3-A5-FINANCE-WRITE-TENANCY)"
