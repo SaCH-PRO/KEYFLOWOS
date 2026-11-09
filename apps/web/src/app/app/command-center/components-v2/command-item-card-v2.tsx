@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import { ArrowRight } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { Surface } from "@/components/ui-v2/surface";
@@ -76,7 +77,20 @@ export function CommandItemCardV2({ item, index = 0, compact }: CommandItemCardV
           </Badge>
           <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wide">{item.source}</span>
         </div>
-        <h3 className={cn("font-semibold text-foreground", compact ? "text-xs" : "text-sm")}>{item.title}</h3>
+        {/*
+          PR196-PROJECTS-WEB (WPD-01): the title opens the screen the server names for this item
+          (item.href). A snapshot item's id is made up (`approval-${proposal.id}`, 'constitution-stale',
+          ...), not a CommandItem row, so /app/command-center/${item.id} would 404. No href, no link.
+        */}
+        <h3 className={cn("font-semibold text-foreground", compact ? "text-xs" : "text-sm")}>
+          {item.href ? (
+            <Link href={item.href} className="hover:text-primary transition-colors">
+              {item.title}
+            </Link>
+          ) : (
+            item.title
+          )}
+        </h3>
         <p
           className={cn(
             "text-muted-foreground leading-relaxed mt-0.5",

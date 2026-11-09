@@ -183,7 +183,7 @@ describe("column order is kept (WPD-06)", () => {
 
   it("a reorder inside a column sends every task of the column with its new position", async () => {
     const onUpdate = vi.fn(async () => true);
-    const onReorder = vi.fn(async () => true);
+    const onReorder = vi.fn(async (_updates: unknown) => true);
     const { container } = render(<TaskKanban tasks={TASKS} onUpdate={onUpdate} onReorder={onReorder} />);
     await drop("t_c", "t_a");
     expect(onUpdate).not.toHaveBeenCalled();
