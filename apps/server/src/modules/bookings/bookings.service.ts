@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException, ForbiddenException, HttpException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, ForbiddenException, HttpException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Booking, BookingStatus, Invoice, Prisma } from '@prisma/client';
 import {
@@ -27,6 +27,7 @@ import { PublicEventsService } from '../public-events/public-events.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { schedulersDisabled } from '../../core/config/env';
 import { getTenantContext } from '../../core/tenant/tenant-context';
+import { normalizeCurrency } from '../finance/posting.service';
 import {
   DERIVATION_TX_TIMEOUT_MS,
   depositPosition,
@@ -127,6 +128,22 @@ const DEPOSIT_FORFEITED = 'DEPOSIT_FORFEITED';
 export const INVOICE_NOT_CREATED = 'INVOICE_NOT_CREATED';
 
 /**
+ * D-59 (FOLLOW3-A10): the code of a final invoice refused because the
+ * booking's live deposit is in another currency than the final invoice (the
+ * business currency). D-13 is one currency per business: a deposit is never
+ * netted across currencies, nothing is written, the operator settles by hand.
+ */
+export const DEPOSIT_CURRENCY_MISMATCH = 'DEPOSIT_CURRENCY_MISMATCH';
+
+/** The completion answer's code for a final invoice that was not drawn up: D-59's refusal keeps its own code. */
+function completionInvoiceCode(err: unknown): typeof INVOICE_NOT_CREATED | typeof DEPOSIT_CURRENCY_MISMATCH {
+  const response = err instanceof ConflictException ? err.getResponse() : null;
+  return response && typeof response === 'object' && (response as { code?: unknown }).code === DEPOSIT_CURRENCY_MISMATCH
+    ? DEPOSIT_CURRENCY_MISMATCH
+    : INVOICE_NOT_CREATED;
+}
+
+/**
  * V1-28 review (SEC-V28-1): the invoiceError an operator reads, at the level
  * GlobalHttpExceptionFilter would answer the same failure: a 4xx
  * HttpException's own message (a refusal meant for the caller); anything else
@@ -162,7 +179,7 @@ export type FinalInvoiceOutcome =
 /** The completion response's invoicing outcome: FAILED is explicit, never swallowed (V1-28), and never the raw error text. */
 export type CompletionInvoicing =
   | FinalInvoiceOutcome
-  | { status: 'FAILED'; invoiceId: null; code: typeof INVOICE_NOT_CREATED; error: string };
+  | { status: 'FAILED'; invoiceId: null; code: typeof INVOICE_NOT_CREATED | typeof DEPOSIT_CURRENCY_MISMATCH; error: string };
 
 /** D-26: the forfeit recorded on a booking cancelled after its deposit was paid. */
 export interface DepositForfeit {
@@ -807,6 +824,24 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         const service = await tx.service.findFirst({ where: { id: booking.serviceId, businessId, deletedAt: null } });
         if (!service) return notRequired('Booking is missing a contact or service');
         if ((service.price ?? 0) <= 0) return notRequired('Service has no price configured');
+        // D-59 (FOLLOW3-A10): the final invoice is drawn up in the business
+        // currency (createInvoiceForService, D-13); a deposit it would net in
+        // another currency (a DRAFT deposit PATCHed to USD, or the business
+        // currency changed since booking) is refused, nothing written.
+        if (deposit) {
+          const business = await tx.business.findUnique({ where: { id: businessId }, select: { currency: true } });
+          const invoiceCurrency = normalizeCurrency(business?.currency) || 'TTD';
+          const depositCurrency = normalizeCurrency(deposit.currency);
+          if (depositCurrency !== invoiceCurrency) {
+            throw new ConflictException({
+              code: DEPOSIT_CURRENCY_MISMATCH,
+              message: `The deposit invoice ${deposit.invoiceNumber} is in ${depositCurrency} but the final invoice would be in ${invoiceCurrency}; a deposit is never netted across currencies. Settle the balance by hand.`,
+              depositInvoiceId: deposit.id,
+              depositCurrency,
+              invoiceCurrency,
+            });
+          }
+        }
         const finalCents = toCents(service.price) - depositCents;
         if (finalCents <= 0) return notRequired('The deposit covers the price; there is no balance to invoice');
 
@@ -1946,14 +1981,20 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       // V1-28 review (SEC-V28-1): the detail is logged; the answer carries a
       // code and a sentence fit for any member (completionInvoiceError).
-      this.logger.error(
-        `Failed to auto-generate invoice for booking ${booking.id}: ${(err as Error)?.message || 'Unknown error'}`,
-        (err as Error)?.stack,
-      );
+      // D-59's refusal is policy, not a fault: a warning, with no stack.
+      const code = completionInvoiceCode(err);
+      if (code === DEPOSIT_CURRENCY_MISMATCH) {
+        this.logger.warn(`No final invoice for booking ${booking.id}: ${(err as Error).message}`);
+      } else {
+        this.logger.error(
+          `Failed to auto-generate invoice for booking ${booking.id}: ${(err as Error)?.message || 'Unknown error'}`,
+          (err as Error)?.stack,
+        );
+      }
       return {
         status: 'FAILED',
         invoiceId: null,
-        code: INVOICE_NOT_CREATED,
+        code,
         error: completionInvoiceError(err),
       };
     }
