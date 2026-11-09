@@ -1229,6 +1229,14 @@ export class IdentityService {
         // (KEY-R3b-PLAN-AUTHORITY). Left on the old id, the rule fires a plan for a deleted user whose
         // ai_plans insert fails on the user foreign key. jsonb_set changes that one key in place, in
         // every business, and leaves the rule's own filter as it is.
+        // Reach (review SEC-RKC-1, RK-CR-1): this method's one caller moves a never-signed-in invite
+        // placeholder, and every rule writer records the authenticated member as the creator, so through
+        // the API these match no row today; they keep this re-key complete. A real account moves to a new
+        // subject only by the manual operator step in docs/auth-pathway.md ("Fixed by R0-SEC-01", step 4),
+        // which has to run these same two statements with the old and the new id, or that member's rules
+        // keep the deleted id: their plans fail on the user foreign key and the member gets 403
+        // AGENT_TRIGGER_CREATOR_ONLY on their own rule (it.todo RK-03 in
+        // test/identity-rekey-creator.integration.test.ts until that step names them).
         await tx.$executeRaw`UPDATE agent_triggers
           SET condition = jsonb_set(condition, ARRAY[${TRIGGER_CREATOR_KEY}::text], to_jsonb(${newId}::text))
           WHERE condition ->> ${TRIGGER_CREATOR_KEY}::text = ${oldId}::text`;

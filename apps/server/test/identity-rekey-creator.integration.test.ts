@@ -230,4 +230,17 @@ describe("W6-IDENTITY-REKEY-CREATOR (D-73): IdentityService's user-id re-key car
     expect((await cortexPlansOfRule(RULE.cortexOther)).plans.map((p: any) => p.userId)).toEqual([ID.other]);
     expect((await cortexPlansOfRule(RULE.cortexLegacy)).plans.map((p: any) => p.userId)).toEqual([null]);
   });
+
+  // Review SEC-RKC-1 / RK-CR-1. In production the re-key above runs only for a never-signed-in invite
+  // placeholder (adoptInvitePlaceholder), which no rule writer can record as a creator. A real member
+  // moves to a new subject only by the manual operator step in docs/auth-pathway.md ("Fixed by
+  // R0-SEC-01", step 4). That step re-points "every column that holds the old id", found in
+  // schema.prisma, and repeats reconcileUserId's list. '$createdBy' is a JSON key, not a column, so it
+  // is found in neither place. An operator who follows the step leaves the member's rules on the deleted
+  // id, which is the failure RK-01 and RK-02 show RED on the base. docs/ is outside the
+  // W6-IDENTITY-REKEY-CREATOR write set, so this stays a todo until a docs follow-up fixes it. The live
+  // case reads that step and expects it to name agent_triggers.condition and
+  // key_cortex_trigger_rules.filter_json with the '$createdBy' jsonb_set statement, and expects
+  // reconcileUserId's list there to include the trigger creator.
+  it.todo("RK-03 (W6-IDENTITY-REKEY-CREATOR; D-73; review SEC-RKC-1, RK-CR-1): the manual operator re-key in docs/auth-pathway.md (step 4) re-points $createdBy in agent_triggers.condition and key_cortex_trigger_rules.filter_json with the same jsonb_set statements reconcileUserId runs (follow-up: docs/ is outside this packet's write set)");
 });
