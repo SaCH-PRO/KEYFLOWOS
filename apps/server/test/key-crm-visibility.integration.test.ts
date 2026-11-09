@@ -645,7 +645,10 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
       },
     });
 
-  it("CV-08d RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93): the Pro Auto monitor runs as the business owner: ProAutoMonitorService.escalateInsights runs fetch_client_health over the owner's view (the PRIVATE top spender named), handed to the orchestrator for the owner, and its execution log row is attributed to the owner", async () => {
+  // The owner rides as the member the call is run for (onBehalfOfUserId), not as its principal: the
+  // monitor authenticates no human, so the action boundary must not take a write it adopted as one a
+  // trusted principal asked for (control-clearance: no principal, a human approves).
+  it("CV-08d RED-BEFORE (W4-D93-NO-MEMBER-CONTACTS; D-93): the Pro Auto monitor runs as the business owner: ProAutoMonitorService.escalateInsights runs fetch_client_health over the owner's view (the PRIVATE top spender named), handed to the orchestrator on the owner's behalf (no authenticated principal), and its execution log row is attributed to the owner", async () => {
     const from = monitorDispatched.length;
     const insight: any = {
       id: `${P}cv08d`, category: 'client_risk', severity: 'warning', title: 'v89k clients at risk', description: 'v89k cv08d',
@@ -656,7 +659,8 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
     expect(JSON.stringify(insight.autoExecuteResult)).toContain(NAME.priv);
     const calls = monitorDispatched.slice(from);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ toolName: 'fetch_client_health', surface: 'PRO_AUTO_MONITOR', principal: ID.owner });
+    expect(calls[0]).toMatchObject({ toolName: 'fetch_client_health', surface: 'PRO_AUTO_MONITOR', onBehalfOf: ID.owner });
+    expect(calls[0].principal ?? null).toBeNull();
     const logged = await db.aiExecutionLog.findFirst({
       where: { businessId: ID.biz, toolName: 'fetch_client_health', mode: 'pro_auto', success: true },
       orderBy: { createdAt: 'desc' },

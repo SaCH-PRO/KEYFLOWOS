@@ -4,6 +4,44 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 
 export { DEFAULT_AGENT_TRIGGERS } from './default-triggers.constants';
 
+/**
+ * W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93; D-73): the default rule an agent trigger is, or null.
+ * A rule seedForBusiness wrote is system-created, so the plans it fires run with the business owner
+ * as their member (AgentTriggerService.handleEvent records the owner on the plan). AgentTrigger has no
+ * member column, and its condition JSON is stored as POST/PUT agent/triggers receive it, so a member
+ * recorded in the row could be forged by any member; the rule is known as the system's by its source
+ * instead: the seeded name, event and objective, at no higher risk tier than seeded. A rule whose
+ * objective a member changed is theirs and fires plans with no member (D-73); a member who copies a
+ * default rule word for word gets only what that default does.
+ */
+export function defaultAgentTriggerFor(trigger: {
+  name: string;
+  eventPattern: string;
+  objective: string;
+  maxRiskTier?: number | null;
+}): (typeof DEFAULT_AGENT_TRIGGERS)[number] | null {
+  return (
+    DEFAULT_AGENT_TRIGGERS.find(
+      (rule) =>
+        rule.name === trigger.name &&
+        rule.eventPattern === trigger.eventPattern &&
+        rule.objective === trigger.objective &&
+        (trigger.maxRiskTier == null || trigger.maxRiskTier <= rule.maxRiskTier),
+    ) ?? null
+  );
+}
+
+/**
+ * W4-D93-NO-MEMBER-CONTACTS (D-93): whether a plan is one a default rule fired, by what
+ * AgentTriggerService writes for it (the rule's objective, and `Auto-triggered by <event>: <name>`
+ * as its raw input). Used for a plan stored with no member before D-93, which runs as the owner.
+ */
+export function isDefaultAgentTriggerPlan(plan: { objective: string; rawInput: string | null }): boolean {
+  return DEFAULT_AGENT_TRIGGERS.some(
+    (rule) => plan.objective === rule.objective && plan.rawInput === `Auto-triggered by ${rule.eventPattern}: ${rule.name}`,
+  );
+}
+
 
 @Injectable()
 export class DefaultTriggersService {

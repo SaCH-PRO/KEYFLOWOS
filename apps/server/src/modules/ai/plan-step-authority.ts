@@ -1,7 +1,12 @@
 import { ForbiddenException } from '@nestjs/common';
 import { LEVEL_RANK } from '../../core/authority/module-vocabulary';
 import type { PrismaService } from '../../core/prisma/prisma.service';
-import { assertMayRunGraphAction, graphActionReadsContacts, graphActionRequirement } from './graph-actions.controller';
+import {
+  assertMayRunGraphAction,
+  graphActionBoundByContactVisibility,
+  graphActionReadsContacts,
+  graphActionRequirement,
+} from './graph-actions.controller';
 
 /**
  * KEY-R3b-PLAN-AUTHORITY (owner rulings D-71 and D-73, 2026-11-03; D-46): who a stored ai plan step
@@ -14,6 +19,12 @@ import { assertMayRunGraphAction, graphActionReadsContacts, graphActionRequireme
  * invoices and may not read contacts. NOPRINCIPAL-SURFACES: with no principal the dispatcher's
  * contact reads (contactReadAccess) read every contact, PRIVATE ones included, and money writes ran
  * for no member.
+ *
+ * W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): D-73 stands as written. A plan with no member reads
+ * no contacts, the tools only the principal's visibility bounds included (fetch_client_health,
+ * sequence_enroll_overdue, sequence_enroll, the calendar and booking reads), which ran in the OWNER's
+ * view before (D-88's convention, now narrowed to D-88's own writes). The Pro Auto monitor and every
+ * system-created plan run with the business owner as their member instead (systemPlanMember).
  *
  * Kept in its own file, imported by the queue worker and (at call time) by the flow orchestrator,
  * which graph-actions.controller.ts itself imports.
@@ -40,6 +51,12 @@ export function noMemberToolRefusal(toolName: string): string | null {
   if (graphActionReadsContacts(toolName)) {
     return `"${toolName}" reads the business's contacts, and a KEY plan or monitor with no member principal reads no contacts (D-73)`;
   }
+  // W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): a tool whose contact rows only the principal's visibility
+  // bounds (GRAPH_ACTION_VISIBILITY_BOUND_TOOLS) reads every contact with no principal, so a plan or
+  // monitor with no member runs none of them either (review SEC-W3CV-2).
+  if (graphActionBoundByContactVisibility(toolName)) {
+    return `"${toolName}" reads the business's contacts (only a member principal's visibility bounds them), and a KEY plan or monitor with no member principal reads no contacts (D-73, D-93)`;
+  }
   const money = requirement.scopes.find(
     (s) => (s.module === 'revenue' || s.module === 'expenses') && LEVEL_RANK[s.minLevel] >= LEVEL_RANK.write,
   );
@@ -52,7 +69,8 @@ export function noMemberToolRefusal(toolName: string): string | null {
 /**
  * Why the plan queue may not run a step of `toolName` from plan `planId` now, or null when it may.
  * Checked when the worker runs the step (D-71: at run time), against the plan as stored:
- *   - a plan with no member (userId null): noMemberToolRefusal (D-73);
+ *   - a plan with no member (userId null): noMemberToolRefusal (D-73), unless the system wrote it
+ *     (systemPlanMember, D-93): then the business owner is its member, as below;
  *   - a member's plan: what that member would need to have the step run with no principal
  *     (assertMayRunGraphAction with noPrincipal, the rule POST ai/plans/:planId/approve applies to
  *     the approver): every module scope of the tool (D-71), the OWNER for an owner-only tool and for
@@ -86,7 +104,8 @@ export interface PlanStepRunOptions {
 
 /**
  * planStepRunRefusal's answer and the member it judged: the plan's stored member (`AiPlan.userId`),
- * null for a plan with no member or not of `businessId`. A caller that runs the step as that member
+ * the business owner for a plan the system stored with no member (systemPlanMember, D-93), null for
+ * any other plan with no member or one not of `businessId`. A caller that runs the step as that member
  * (W4-PROPOSAL-PRINCIPAL) takes both from this one read of the plan, and `principalId`: the member
  * the dispatcher may take as the run's principal (memberIsPrincipal only; memberToolRunAuthority
  * says when), null when the step runs with no principal.
@@ -100,10 +119,47 @@ export async function planStepRunAuthority(
 ): Promise<{ memberId: string | null; principalId: string | null; refusal: string | null }> {
   const plan = await prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: { userId: true } });
   if (!plan) return { memberId: null, principalId: null, refusal: 'Plan not found in this business' };
-  if (!plan.userId) return { memberId: null, principalId: null, refusal: noMemberToolRefusal(toolName) };
-  const memberId = plan.userId;
+  // W4-D93-NO-MEMBER-CONTACTS (D-93): a plan the system stored with no member runs as the owner.
+  const memberId = plan.userId ?? (await systemPlanMember(prisma, businessId, planId));
+  if (!memberId) return { memberId: null, principalId: null, refusal: noMemberToolRefusal(toolName) };
   const run = await memberToolRunAuthority(prisma, businessId, memberId, toolName, { asPrincipal: !!options.memberIsPrincipal });
   return { memberId, principalId: run.principal ? memberId : null, refusal: run.refusal };
+}
+
+/**
+ * W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): the member a plan stored with no member runs as,
+ * when the system wrote it, or null. The Pro Auto monitor and every system-created plan run with the
+ * business owner (Business.ownerId, read now, so an ownership transfer is followed) as their member.
+ * Since D-93 the system writers record the owner on the plan (AgentTriggerService for a default rule,
+ * JourneyOrchestratorService, MorningBriefingService); a plan one of them stored with no member before
+ * D-93 is known by its source and resolved to the owner when it runs, rather than by migrating rows:
+ *   - the daily briefing: the scope, objective prefix and raw input MorningBriefingService writes;
+ *   - a journey's plan: a JourneyInstance of this business names it (only JourneyOrchestratorService
+ *     writes them);
+ *   - a default agent trigger's plan: the seeded rule's objective and the raw input AgentTriggerService
+ *     writes for it (isDefaultAgentTriggerPlan).
+ * Any other plan with no member (a trigger a member created that records no creator, a KEY-cortex plan
+ * no member created) has none, and D-73 holds for it, as it does for a plan that names a member (this
+ * answers null for it: its member is the one it names) or is not of `businessId`.
+ */
+export async function systemPlanMember(prisma: PrismaService, businessId: string, planId: string): Promise<string | null> {
+  const plan = await prisma.client.aiPlan.findFirst({
+    where: { id: planId, businessId },
+    select: { id: true, userId: true, objective: true, rawInput: true, scope: true },
+  });
+  if (!plan || plan.userId) return null;
+  // Imported at call time, as this file is: these services sit on the orchestrator's import graph.
+  const { BRIEFING_OBJECTIVE_PREFIX, BRIEFING_RAW_INPUT, BRIEFING_SCOPE } = await import('./morning-briefing.service');
+  const { isDefaultAgentTriggerPlan } = await import('./default-triggers.service');
+  const briefing =
+    plan.scope.includes(BRIEFING_SCOPE) && plan.objective.startsWith(BRIEFING_OBJECTIVE_PREFIX) && plan.rawInput === BRIEFING_RAW_INPUT;
+  const system =
+    briefing ||
+    isDefaultAgentTriggerPlan(plan) ||
+    !!(await prisma.client.journeyInstance.findFirst({ where: { planId: plan.id, businessId }, select: { id: true } }));
+  if (!system) return null;
+  const business = await prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
+  return business?.ownerId ?? null;
 }
 
 /**

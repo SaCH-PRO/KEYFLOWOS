@@ -93,6 +93,11 @@ export class JourneyOrchestratorService implements OnModuleInit {
       return null;
     }
 
+    // W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): a journey is system-created, so its plan records
+    // the business owner as its member (read now, so an ownership transfer is followed) and runs as the
+    // owner on the plan queue, rather than as no member (D-73).
+    const owner = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
+
     // Create AiPlan for the journey
     const planResult = await this.planner.createPlan(
       businessId,
@@ -107,7 +112,7 @@ export class JourneyOrchestratorService implements OnModuleInit {
         missingInfo: [],
         clarificationNeeded: false,
       } as any,
-      undefined,
+      owner?.ownerId ?? undefined,
     );
 
     if (!planResult) {

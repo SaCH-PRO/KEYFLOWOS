@@ -190,6 +190,18 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
       : [];
     const existingTools = new Set(recentProposals.map(p => p.toolName).filter(Boolean));
 
+    // W4-D93-NO-MEMBER-CONTACTS (owner ruling D-93): the monitor is system-created, so it runs with the
+    // business owner as its member (read once per scan, so an ownership transfer is followed): its reads
+    // are the owner's and attributed to them. A business with no owner leaves it with no member (D-73).
+    let ownerId: string | null | undefined;
+    const monitorMember = async () => {
+      if (ownerId === undefined) {
+        const business = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
+        ownerId = business?.ownerId ?? null;
+      }
+      return ownerId;
+    };
+
     for (const insight of actionableInsights) {
       const toolKey = `monitoring_${insight.category}`;
       if (existingTools.has(toolKey)) continue;
@@ -209,6 +221,7 @@ export class ProAutoMonitorService implements OnModuleInit, OnModuleDestroy {
                 businessId,
                 insight.suggestedTool,
                 args,
+                { memberId: await monitorMember() },
               );
               if (result.blocked) {
                 this.logger.log(`Tool ${insight.suggestedTool} blocked by governance for ${businessId}, creating approval item`);
