@@ -104,10 +104,10 @@
  *     (RevenueEventListener, from the invoice.paid emit) but writes no Activity
  *     copy of it: the settlement's one feed row is ActivityEventListener's paid
  *     row
- *   V55-07b it.todo: the CRM copy of a payment's invoice.payment_recorded
- *     contact event is still written: it is the only Activity row naming the
+ *   V55-07b it.todo then: the CRM copy of a payment's invoice.payment_recorded
+ *     contact event was still written: it was the only Activity row naming the
  *     payment's actor, and payments-actor.integration.test.ts (outside the
- *     write set) pins it
+ *     write set) pinned it (closed by W4-FEED-COPY-COMPLETE, below)
  *   V55-08 contact create writes ONE crm created row, ActivityEventListener's
  *     'New contact' (the executor's 'New contact added' is gone;
  *     log-redaction.integration.test.ts observes the executor's run itself)
@@ -140,12 +140,23 @@
  *     ActivityEventListener's 'New contact' and no crm:contact.created copy;
  *     the referral path (crm-network.service.ts), which emits no
  *     contact.created, keeps its copy as its only row.
- *   STILL OPEN (it.todo, outside this packet's write set): V55-07b (no CRM
- *     copy of a payment's invoice.payment_recorded) and V55-12b (no CRM copy
- *     of booking create's booking.created): both ContactEvents reach
- *     CrmTimelineService only through CrmService.logContactEvent ->
- *     CrmTimelineService.logContactEvent, which forwards no feedCopy
- *     (crm-timeline.service.ts is outside the write set).
+ *   Left open by W3-V1-55c (outside its write set): V55-07b and V55-12b.
+ *
+ * W4-FEED-COPY-COMPLETE (owner ruling D-90, on D-08; V55-07b, V55-12b): one
+ * feed row per payment and per booking create. CrmService.logContactEvent ->
+ * CrmTimelineService.logContactEvent now carries meta.feedCopy (the V1-55b
+ * switch), and both ContactEvents are written with feedCopy=false:
+ *   V55-07b a manual payment (CommerceService.recordPayment) writes ONE feed
+ *     row, its FINANCE payment_recorded row naming the recorder (V55-07a); its
+ *     invoice.payment_recorded ContactEvent and its payment.record audit row
+ *     stay, and no crm:invoice.payment_recorded:contact copy is written
+ *     (EF-01 / EF-02 / EF-11c, V55-04 / V55-05 pin the same in each harness)
+ *   V55-12b booking create (BookingsService.createBooking) shows ONE row in the
+ *     cockpit, ActivityEventListener's 'New booking': its booking.created
+ *     ContactEvent stays on the contact's timeline with no Activity copy
+ *     (V55-09 / V55-06 pin the same); booking confirm's copy is not in D-90
+ *     and stays (V55-10). The storefront booking's copy
+ *     (PublicEventsService.logStorefrontEvent) is outside this packet.
  *
  * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
  *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
@@ -691,11 +702,12 @@ describe('step 4 audit trail: a manual payment is audited as a payment (R0-19, r
     });
 
     // CHARACTERIZATION (V1-55 / D-08): what this payment wrote to Activity in
-    // this harness, and what it put on the bus.
+    // this harness, and what it put on the bus. Since W4-FEED-COPY-COMPLETE
+    // (D-90, V55-07b) its FINANCE row is its only one: the ContactEvent above
+    // gets no crm:invoice.payment_recorded:contact copy.
     const activity = await newActivityRows(ID.bizA, activityBefore);
     expect(activity.map((a) => `${a.module}:${a.action}:${a.entityType}`).sort()).toEqual([
       'FINANCE:payment_recorded:payment',
-      'crm:invoice.payment_recorded:contact',
     ]);
     expect(activity.find((a) => a.module === 'FINANCE')?.entityId).toBe(S.partialId);
     // Sorted: business_event.created is the audit worker's fan-out and lands after the response.
@@ -727,10 +739,10 @@ describe('step 4 audit trail: a manual payment is audited as a payment (R0-19, r
     // CHARACTERIZATION. In the full app invoice.paid also drives
     // ActivityEventListener.onInvoicePaid (the feed's one paid row since V1-55);
     // no listener is wired in this harness (the V1-55 block below wires them).
+    // W4-FEED-COPY-COMPLETE (D-90, V55-07b): no CRM contact-event copy.
     const activity = await newActivityRows(ID.bizA, activityBefore);
     expect(activity.map((a) => `${a.module}:${a.action}:${a.entityType}`).sort()).toEqual([
       'FINANCE:payment_recorded:payment',
-      'crm:invoice.payment_recorded:contact',
     ]);
     expect(activity.find((a) => a.module === 'FINANCE')?.entityId).toBe(S.fullId);
     expect(bus.map((e) => e.name).sort()).toEqual(['business_event.created', 'crm.contact_event.logged', 'invoice.paid']);
@@ -1003,23 +1015,31 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     expect(paidRows[0].data.currency).toBe('TTD');
   });
 
-  it("EF-11c (CR-V125-2): each payment's contact mirror in A's feed is the shape the cockpit reader leaves out (BT-09): module crm, entity the contact, title = action = 'invoice.payment_recorded', detail a JSON object carrying the reference and recordedBy", async () => {
-    // Still written (V55-07b todo): D-90 retires this copy, but its source,
-    // CommerceService.recordPayment -> CrmService.logContactEvent ->
-    // CrmTimelineService.logContactEvent, forwards no meta.feedCopy.
+  it("EF-11c (CR-V125-2; D-90, W4-FEED-COPY-COMPLETE V55-07b): A's feed holds no CRM contact mirror of a payment (no crm invoice.payment_recorded row, the shape the cockpit reader left out, BT-09): each payment's one row is its FINANCE row naming the owner; its invoice.payment_recorded ContactEvent, carrying the reference and recordedBy, stays on the contact's timeline", async () => {
+    // Until W4-FEED-COPY-COMPLETE each payment also wrote a mirror (module crm,
+    // entity the contact, title = action = 'invoice.payment_recorded', detail
+    // the ContactEvent's JSON): CommerceService.recordPayment ->
+    // CrmService.logContactEvent -> CrmTimelineService.logContactEvent carried
+    // no meta.feedCopy. D-90 retires it.
     const rows = await cockpitRead(ID.ownerA, ID.bizA);
     const mirrors = rows.filter((row) => row.module === 'crm' && row.action === 'invoice.payment_recorded');
-    expect(mirrors, 'one mirror per payment (EF-01, EF-02)').toHaveLength(2);
-    for (const row of mirrors) {
-      expect(row).toMatchObject({ entityType: 'contact', entityId: ID.contactA, contactId: ID.contactA, title: 'invoice.payment_recorded' });
-      const detail = JSON.parse(row.detail);
-      expect(detail).toMatchObject({ invoiceId: ID.invA, recordedBy: ID.ownerA });
-      expect(String(detail.reference)).toContain(`${P}${RUN}-`);
-    }
-    // Each is a second copy of a payment the feed already shows as its FINANCE row.
-    expect(mirrors.map((row) => cents(JSON.parse(row.detail).amount)).sort()).toEqual([10_000, 15_000]);
+    expect(mirrors, 'no mirror of either payment (EF-01, EF-02) in the feed').toEqual([]);
+    expect(await db.activity.count({ where: { businessId: ID.bizA, module: 'crm', action: 'invoice.payment_recorded' } }), 'no mirror in the table').toBe(0);
+
+    // Each payment's one feed row: its FINANCE row, naming who recorded it.
     const finance = rows.filter((row) => row.module === 'FINANCE' && row.action === 'payment_recorded');
     expect(finance.map((row) => cents(row.data.amount)).sort()).toEqual([10_000, 15_000]);
+    for (const row of finance) expect(row).toMatchObject({ entityType: 'payment', contactId: ID.contactA, actorType: 'USER', actorId: ID.ownerA });
+
+    // The ContactEvents themselves stay, with what the mirror carried.
+    const events = await db.contactEvent.findMany({ where: { businessId: ID.bizA, contactId: ID.contactA, type: 'invoice.payment_recorded' } });
+    expect(events, 'one ContactEvent per payment (EF-01, EF-02)').toHaveLength(2);
+    for (const e of events) {
+      expect(e).toMatchObject({ actorType: 'USER', actorId: ID.ownerA, source: 'commerce' });
+      expect(e.data).toMatchObject({ invoiceId: ID.invA, recordedBy: ID.ownerA });
+      expect(String((e.data as any).reference)).toContain(`${P}${RUN}-`);
+    }
+    expect(events.map((e: any) => cents((e.data as any).amount)).sort()).toEqual([10_000, 15_000]);
   });
 
   it('EF-12 LEDGER: each feed amount equals its Payment row and its posting (balanced entries), in integer cents; the paid row total equals the invoice, the two payments and the two postings', async () => {
@@ -1310,7 +1330,7 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
   });
 
   /** V55-08 / V55-11: what the step wrote, kept for the case that pins it after the step. */
-  const STEP: { contactCreate?: Awaited<ReturnType<typeof step>>; bookingCreate?: Awaited<ReturnType<typeof step>>; settlingPayment?: Awaited<ReturnType<typeof step>> } = {};
+  const STEP: { contactCreate?: Awaited<ReturnType<typeof step>>; bookingCreate?: Awaited<ReturnType<typeof step>>; partialPayment?: Awaited<ReturnType<typeof step>>; settlingPayment?: Awaited<ReturnType<typeof step>> } = {};
 
   it("V55-01 contact create: ActivityEventListener's crm created row ('New contact') for the contact; the contact.created flow is dispatched once", async () => {
     const s = await step(async () => {
@@ -1389,6 +1409,7 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
       expect(res.status, JSON.stringify(res.body)).toBe(201);
       SC.partialId = res.body.payment.id;
     });
+    STEP.partialPayment = s;
     expect((await db.invoice.findUnique({ where: { id: SC.invoiceId } })).status).toBe('PARTIALLY_PAID');
     expect(s.events).not.toContain('invoice.paid');
     const finance = s.rows.filter((r) => kind(r) === 'FINANCE:payment_recorded:payment');
@@ -1397,8 +1418,9 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     // W3-V1-55c (D-90): the FINANCE row names who recorded the payment.
     expect(finance[0]).toMatchObject({ actorType: 'USER', actorId: C.owner });
     expect(s.rows.filter((r) => r.action === 'paid'), 'a partial payment settles nothing').toEqual([]);
-    // The CRM copy of the payment's contact event is still written (V55-07b todo below).
-    expect(s.rows.map(kind).sort()).toEqual(['FINANCE:payment_recorded:payment', 'crm:invoice.payment_recorded:contact']);
+    // W4-FEED-COPY-COMPLETE (D-90, V55-07b below): the FINANCE row is the payment's
+    // one row; its contact event gets no CRM copy.
+    expect(s.rows.map(kind).sort()).toEqual(['FINANCE:payment_recorded:payment']);
 
     expect(await postingsFor(C.biz, SC.partialId!), 'Payment:<id>:payment_recorded posting').toHaveLength(1);
     expect(s.ledgerAfterDelivery).toEqual(s.ledgerBeforeDelivery);
@@ -1424,16 +1446,16 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     // W3-V1-55c (D-90): the FINANCE row names who recorded the payment.
     expect(finance[0]).toMatchObject({ actorType: 'USER', actorId: C.owner });
     // Every Activity row the settling payment wrote: no second paid row, and
-    // (V1-55b, V55-07) no CRM contact-event copy of invoice.paid; the CRM copy of
-    // the payment's contact event is still written (V55-07b todo below). Since
-    // PR196-CRM-LIFECYCLE (D-81) the paid invoice also moves its LEAD contact
-    // (createContact's default status) to CLIENT, and that move writes ONE row,
-    // ActivityEventListener's status row on its contact.updated (D-08); its
-    // follow-up task writes none (review CR-1 / SEC-L81-1).
+    // (V1-55b, V55-07) no CRM contact-event copy of invoice.paid; since
+    // W4-FEED-COPY-COMPLETE (D-90, V55-07b below) no CRM copy of the payment's
+    // own contact event either. Since PR196-CRM-LIFECYCLE (D-81) the paid
+    // invoice also moves its LEAD contact (createContact's default status) to
+    // CLIENT, and that move writes ONE row, ActivityEventListener's status row
+    // on its contact.updated (D-08); its follow-up task writes none (review
+    // CR-1 / SEC-L81-1).
     expect(s.rows.map(kind).sort()).toEqual([
       'FINANCE:payment_recorded:payment',
       'commerce:paid:invoice',
-      'crm:invoice.payment_recorded:contact',
       'crm:updated:contact',
     ]);
     const moved = s.rows.filter((r) => kind(r) === 'crm:updated:contact');
@@ -1501,15 +1523,50 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(events.map((e: any) => [e.actorType, e.actorId]).sort()).toEqual([['USER', C.owner], ['USER', C.owner]]);
   });
 
-  // V55-07b (D-90), outside this packet's write set: CommerceService.recordPayment's
-  // invoice.payment_recorded ContactEvent is still copied into the feed beside
-  // the payment's FINANCE row. Since W3-V1-55c the FINANCE row names the actor
-  // (V55-07a) and payments-actor.integration.test.ts reads it there, so the copy
-  // is no longer the only row naming the actor; what is missing is the switch:
-  // the ContactEvent reaches CrmTimelineService.logEvent only through
-  // CrmService.logContactEvent -> CrmTimelineService.logContactEvent, and the
-  // latter forwards actorType / actorId / source only, never meta.feedCopy.
-  it.todo("V55-07b (D-90): a manual payment writes no CRM contact-event copy (crm:invoice.payment_recorded:contact) beside its FINANCE row; the ContactEvent and the payment.record audit row stay: needs CrmTimelineService.logContactEvent (crm-timeline.service.ts, outside W3-V1-55c's write set) to forward meta.feedCopy and CrmService.logContactEvent to accept it, then feedCopy:false on recordPayment's contact event (commerce.service.ts)");
+  // V55-07b (D-90; W3-V1-55c todo, closed by W4-FEED-COPY-COMPLETE): since
+  // W3-V1-55c the FINANCE row names the actor (V55-07a) and
+  // payments-actor.integration.test.ts reads it there; CommerceService.recordPayment
+  // now logs its invoice.payment_recorded ContactEvent with meta.feedCopy=false,
+  // which CrmService.logContactEvent -> CrmTimelineService.logContactEvent carry
+  // to CrmTimelineService.logEvent (the V1-55b switch).
+  it("V55-07b (D-90, W4-FEED-COPY-COMPLETE, was it.todo): each manual payment writes ONE feed row, its FINANCE payment_recorded row naming who recorded it, and no CRM contact-event copy (crm:invoice.payment_recorded:contact); the invoice.payment_recorded ContactEvent (USER, the owner) and the payment.record audit row stay", async () => {
+    const steps = [
+      { label: 'partial', s: STEP.partialPayment!, paymentId: SC.partialId! },
+      { label: 'final', s: STEP.settlingPayment!, paymentId: SC.fullId! },
+    ];
+    for (const { label, s, paymentId } of steps) {
+      expect(s, `the ${label} payment step ran (V55-04 / V55-05)`).toBeTruthy();
+      // What the payment wrote to Activity about itself: its FINANCE row only.
+      expect(s.rows.filter((r) => kind(r) === 'crm:invoice.payment_recorded:contact'), `${label}: no CRM copy`).toEqual([]);
+      const own = s.rows.filter((r) => kind(r) === 'FINANCE:payment_recorded:payment');
+      expect(own.map((r) => [r.entityId, r.actorType, r.actorId]), `${label}: its FINANCE row`).toEqual([[paymentId, 'USER', C.owner]]);
+      // The audit trail keeps its payment.record row (D-08: BusinessEvent is the audit).
+      const audit = await waitFor(
+        () => db.businessEvent.findMany({ where: { businessId: C.biz, eventType: 'payment.record', subjectId: paymentId } }),
+        (rows: any[]) => rows.length >= 1,
+        10_000,
+      );
+      expect(audit.map((a: any) => [a.subjectType, a.actorType, a.actorId]), `${label}: payment.record audit row`).toEqual([['payment', 'human', C.owner]]);
+    }
+    // No copy in the table either, for any payment of C.
+    expect(await db.activity.count({ where: { businessId: C.biz, module: 'crm', action: 'invoice.payment_recorded' } })).toBe(0);
+
+    // The ContactEvents stay on the contact's own timeline, one per payment, naming the owner.
+    const events = await db.contactEvent.findMany({ where: { businessId: C.biz, contactId: SC.contactId, type: 'invoice.payment_recorded' }, orderBy: { createdAt: 'asc' } });
+    expect(events.map((e: any) => [(e.data as any).invoiceId, (e.data as any).recordedBy, e.actorType, e.actorId, e.source])).toEqual([
+      [SC.invoiceId, C.owner, 'USER', C.owner, 'commerce'],
+      [SC.invoiceId, C.owner, 'USER', C.owner, 'commerce'],
+    ]);
+    expect(events.map((e: any) => cents((e.data as any).amount))).toEqual([10_000, 20_000]);
+
+    // The cockpit read: one row per payment.
+    const res = await agent().get(`/timeline/businesses/${C.biz}/events?limit=50`).set(HEADER, C.owner);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const paymentRows = (res.body as Row[]).filter((r) => r.action === 'payment_recorded' || r.action === 'invoice.payment_recorded');
+    expect(paymentRows.map((r) => [kind(r), r.entityId]).sort()).toEqual(
+      [['FINANCE:payment_recorded:payment', SC.partialId], ['FINANCE:payment_recorded:payment', SC.fullId]].sort(),
+    );
+  });
 
   it("V55-09 booking create (BookingsService.createBooking): the feed says when the booking is: ActivityEventListener's bookings created row ('New booking') names the contact and carries the start time; the booking.created flow is dispatched once", async () => {
     const s = await step(async () => {
@@ -1532,9 +1589,9 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(timed, `a bookings created row whose detail carries the start time (${when})`).toHaveLength(1);
     expect(timed[0]).toMatchObject({ title: 'New booking', contactId: SC.contactId });
     expect(timed[0].detail).toContain('K19a CustomerC');
-    // Every row the step wrote: that one (V55-11) and the CRM copy of BookingsService's own
-    // booking.created ContactEvent (not in V1-55b).
-    expect(s.rows.map(kind).sort()).toEqual(['bookings:created:booking', 'crm:booking.created:contact']);
+    // Every row the step wrote: that one (V55-11). Since W4-FEED-COPY-COMPLETE (D-90,
+    // V55-12b below) BookingsService's own booking.created ContactEvent gets no CRM copy.
+    expect(s.rows.map(kind).sort()).toEqual(['bookings:created:booking']);
 
     const runs = await runsOf('booking.created', 1);
     expect(runs.map((r) => [r.businessId, r.ctx.trigger, r.ctx.bookingId, r.ctx.contactId])).toEqual([[C.biz, 'booking.created', SC.bookingId, SC.contactId]]);
@@ -1597,13 +1654,14 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     // W3-V1-55c (CR-V155b-1, V55-12): contact create's CRM ContactEvent copy is
     // no longer written, so the cockpit shows contact create once.
     expect(rows.filter((r) => kind(r) === 'crm:contact.created:contact' && r.entityId === SC.contactId), 'contact.created: no CRM copy').toEqual([]);
-    // CR-V155b-1 RESIDUAL (V55-12b todo): beside the booking created row above,
-    // the feed still holds the CRM ContactEvent copy of booking.created, in the
-    // shape the cockpit reader keeps (module crm, entity the contact, title =
-    // action; business-timeline.tsx leaves out only invoice.payment_recorded
-    // copies). So the cockpit shows booking create twice, as at base.
+    // W4-FEED-COPY-COMPLETE (CR-V155b-1, D-90, V55-12b): booking create's CRM
+    // ContactEvent copy is no longer written, so the cockpit shows booking
+    // create once (until then the copy, in the shape the cockpit reader keeps,
+    // stood beside the listener's row: two rows, as at base).
     const bookingCopies = rows.filter((r) => kind(r) === 'crm:booking.created:contact' && r.entityId === SC.contactId);
-    expect(bookingCopies.map((r) => [r.title, r.contactId]), "booking.created: its CRM copy, shown beside the listener's row").toEqual([['booking.created', SC.contactId]]);
+    expect(bookingCopies.map((r) => [r.title, r.contactId]), 'booking.created: no CRM copy').toEqual([]);
+    // W4-FEED-COPY-COMPLETE (D-90, V55-07b): no CRM copy of either payment's contact event.
+    expect(rows.filter((r) => kind(r) === 'crm:invoice.payment_recorded:contact'), 'invoice.payment_recorded: no CRM copy').toEqual([]);
 
     expect(flowRuns.map((r) => r.flowId).sort()).toEqual(FLOW_TRIGGERS.map(flowId).sort());
 
@@ -1708,6 +1766,31 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(controlEvent.map((e: any) => [e.actorType, e.actorId])).toEqual([[null, null]]);
   });
 
-  // V55-12b, the CR-V155b-1 residual for booking create, outside this packet's write set.
-  it.todo("V55-12b (CR-V155b-1): booking create shows ONE row in the cockpit, ActivityEventListener's 'New booking': today the feed also holds the CRM copy of BookingsService.createBooking's booking.created ContactEvent (crm:booking.created:contact; V55-06 pins it), which the cockpit shows as 'Booking created': needs CrmTimelineService.logContactEvent (crm-timeline.service.ts, outside W3-V1-55c's write set) to forward meta.feedCopy and CrmService.logContactEvent to accept it, then feedCopy:false on that ContactEvent (bookings.service.ts); the storefront booking's copy (PublicEventsService.logStorefrontEvent) is the same class");
+  // V55-12b, the CR-V155b-1 residual for booking create (W3-V1-55c todo, closed by
+  // W4-FEED-COPY-COMPLETE, D-90): BookingsService.createBooking logs its
+  // booking.created ContactEvent with meta.feedCopy=false, which
+  // CrmService.logContactEvent -> CrmTimelineService.logContactEvent now carry.
+  // The storefront booking's copy (PublicEventsService.logStorefrontEvent) is the
+  // same class and outside this packet.
+  it("V55-12b (CR-V155b-1, D-90, W4-FEED-COPY-COMPLETE, was it.todo): booking create shows ONE row in the cockpit, ActivityEventListener's 'New booking': BookingsService.createBooking's booking.created ContactEvent stays on the contact's timeline with no Activity copy (meta.feedCopy=false through CrmService.logContactEvent, as V55-12 for contact create); booking confirm's copy is not in D-90 and stays", async () => {
+    const s = STEP.bookingCreate!;
+    expect(s, 'V55-09 ran').toBeTruthy();
+    // What the booking create wrote to Activity: the listener's row, no copy.
+    expect(s.rows.map((r) => [kind(r), r.entityId, r.title])).toEqual([['bookings:created:booking', SC.bookingId, 'New booking']]);
+    // The ContactEvent itself stays on the contact's own timeline.
+    const created = await db.contactEvent.findMany({ where: { businessId: C.biz, contactId: SC.contactId, type: 'booking.created' } });
+    expect(created.map((e: any) => [(e.data as any).bookingId, new Date((e.data as any).startTime).getTime(), e.actorType, e.source])).toEqual([
+      [SC.bookingId, BOOKING_C.start.getTime(), 'SYSTEM', 'bookings'],
+    ]);
+    expect(await db.activity.count({ where: { businessId: C.biz, module: 'crm', action: 'booking.created' } })).toBe(0);
+    // The cockpit read: one row for the booking's creation.
+    const res = await agent().get(`/timeline/businesses/${C.biz}/events?limit=50`).set(HEADER, C.owner);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    const creation = (res.body as Row[]).filter((r) => (kind(r) === 'bookings:created:booking' && r.entityId === SC.bookingId) || kind(r) === 'crm:booking.created:contact');
+    expect(creation.map((r) => [kind(r), r.title])).toEqual([['bookings:created:booking', 'New booking']]);
+
+    // Control: only booking create's copy goes. Booking confirm (V55-10) keeps
+    // its CRM ContactEvent copy beside the listener's row (not in D-90).
+    expect(await db.activity.count({ where: { businessId: C.biz, module: 'crm', action: 'booking.confirmed', entityId: SC.contactId } })).toBe(1);
+  });
 });
