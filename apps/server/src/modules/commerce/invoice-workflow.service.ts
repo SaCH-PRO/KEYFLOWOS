@@ -47,6 +47,26 @@ export function isShareableInvoiceStatus(status: string): boolean {
 }
 
 /**
+ * W4-CREDIT-AWARE-READERS (V1-44 review CR-V44-1, reader half; D-28, D-78):
+ * the statuses a customer-facing reader that nets the APPLIED credit notes
+ * (creditAwareBalance over appliedCreditsOf) may show: the shareable ones plus
+ * PARTIALLY_CREDITED, which still owes what its notes leave and stays
+ * PARTIALLY_CREDITED once that is paid (D-78). FULLY_CREDITED owes nothing and
+ * is not shown (it answers like an unknown id). The commerce share surfaces
+ * (the bare-id public view, the token pay page and token view) and the token
+ * offline intent read this list. SHAREABLE_INVOICE_STATUSES keeps
+ * PARTIALLY_CREDITED out while it has readers that do not net credits (the
+ * payment status poll and the token money routes in payments.service.ts, the
+ * public receipt in InvoiceReceiptBuilderService): those answer 404 for it
+ * rather than a false amount due.
+ */
+export const CREDIT_AWARE_SHAREABLE_INVOICE_STATUSES: ReadonlyArray<InvoiceStatus> = [...SHAREABLE_INVOICE_STATUSES, 'PARTIALLY_CREDITED'];
+
+export function isCreditAwareShareableInvoiceStatus(status: string): boolean {
+  return (CREDIT_AWARE_SHAREABLE_INVOICE_STATUSES as ReadonlyArray<string>).includes(status);
+}
+
+/**
  * Allowed transitions. Server-side enforcement; UI/clients can request
  * a transition but the workflow throws 409 ConflictException for anything
  * not in this map.
@@ -295,6 +315,55 @@ export function balanceOfStoredRows(
  */
 export function ownTenantPayments<T extends { businessId: string }>(invoice: { businessId: string; payments: T[] }): T[] {
   return invoice.payments.filter((p) => p.businessId === invoice.businessId);
+}
+
+/**
+ * W4-CREDIT-AWARE-READERS (V1-44 review CR-V44-1, reader half; D-13, D-78):
+ * the balance contract (computeBalance / balanceOfStoredRows) net of the
+ * invoice's APPLIED credit notes. `remaining` is what is still owed: the total
+ * less `credited` less the money received net of refunds, in integer cents and
+ * never below zero, which is what reconcileCreditedFromPayments accepts money
+ * up to (owed = total - credited). Every other figure is the balance's own:
+ * `paid`, `refunded` and `net` are what the payment rows did, and
+ * `isFullyPaid` says whether the rows alone settle the total (the paidAt rule
+ * of reconcileFromCredits). With nothing credited it is the balance unchanged.
+ */
+export interface CreditAwareBalance extends BalanceSummary {
+  /** The APPLIED credit notes netted (appliedCreditsOf), rounded to cents. */
+  credited: number;
+}
+
+export function creditAwareBalance(balance: BalanceSummary, credited: number): CreditAwareBalance {
+  const creditedCents = Math.max(0, toCents(Number(credited) || 0));
+  if (creditedCents === 0) return { ...balance, credited: 0 };
+  const owedCents = Math.max(0, toCents(balance.total) - creditedCents);
+  return {
+    ...balance,
+    credited: fromCents(creditedCents),
+    remaining: fromCents(Math.max(0, owedCents - toCents(balance.net))),
+  };
+}
+
+/**
+ * W4-CREDIT-AWARE-READERS (CR-V44-1 reader half; D-13, D-75): the sum of the
+ * invoice's APPLIED credit notes as the payment reconcile reads it
+ * (reconcileCreditedFromPayments), so a reader and the money decision agree:
+ * only for a credited invoice (PARTIALLY_CREDITED, FULLY_CREDITED; any other
+ * status reconciles from its payment rows alone, so 0), and only the notes of
+ * the invoice's own business (D-75: credit_notes.business_id is not tied to
+ * the invoice's, SEC-V44-6). Rounded to cents. `db` is the caller's client or
+ * transaction (the reconcile's lock holder reads through its own tx).
+ */
+export async function appliedCreditsOf(
+  db: Pick<Prisma.TransactionClient, 'creditNote'>,
+  invoice: { id: string; businessId: string; status: string },
+): Promise<number> {
+  if (!CREDITED_STATUSES.has(invoice.status as InvoiceStatus)) return 0;
+  const applied = await db.creditNote.aggregate({
+    where: { invoiceId: invoice.id, businessId: invoice.businessId, status: 'APPLIED' },
+    _sum: { amount: true },
+  });
+  return fromCents(Math.max(0, toCents(Number(applied._sum.amount ?? 0) || 0)));
 }
 
 /**
