@@ -76,6 +76,16 @@
  * members for these cases), while the SEO services keep reading their own
  * entries, tokens included, straight from Prisma (MW-23).
  *
+ * W3-D12b review repairs (values tagged `v84l_d12b_`, `v84l_d12b_r_`): the
+ * owner's profile PATCH refuses metaData.ga4 and metaData.gsc (400
+ * BUSINESS_METADATA_KEY_RESERVED, as for metaData.whatsapp), so echoing the
+ * masked read back cannot replace a stored connection (MW-24; CR-D12b-1,
+ * D12b-ST-1). Through the real SeoController (D12b-ST-2), a connection save
+ * keeps the stored entry, tokens included, only for the same property id or
+ * site URL, so a member who sends only another target no longer points the
+ * stored Google tokens at it (MW-25, MW-26); who may save, sync or disconnect
+ * is open (MW-27, it.todo).
+ *
  * FIXTURES: every user, business and membership id has the `v84l_` prefix
  * (registered in test/helpers/fixture-prefixes.json), every unique column
  * written here (User.email, User.referralCode, Business.slug) contains it, and every row is
@@ -84,6 +94,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { isDeepStrictEqual } from 'node:util';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -350,12 +361,30 @@ beforeAll(async () => {
   const { SalesTeamService } = await import('../src/modules/conversion/sales-team.service');
   const { CrmAiService } = await import('../src/modules/crm/crm-ai.service');
   const { GamificationService } = await import('../src/modules/gamification/gamification.service');
+  const { SeoController } = await import('../src/modules/seo/seo.controller');
+  const { SeoAdminGuard } = await import('../src/modules/seo/seo-admin.guard');
+  const { SeoService } = await import('../src/modules/seo/seo.service');
+  const { SeoContentService } = await import('../src/modules/seo/seo-content.service');
+  const { FeatureFlagsService } = await import('../src/modules/feature-flags/feature-flags.service');
 
   // The owner's PATCH: the real IdentityController, IdentityService, guards and
   // PrismaService (as test/payment-secrets-write-only composes it).
   const moduleRef = await Test.createTestingModule({
-    controllers: [IdentityController],
+    controllers: [IdentityController, SeoController],
     providers: [
+      // W3-D12b review repair (D12b-ST-2; MW-25, MW-26): the SEO connector
+      // routes through the real SeoController, its guards (AuthGuard,
+      // SeoAdminGuard, BusinessGuard) and the real GA4 and Search Console
+      // services over the real PrismaService. The SEO module flag row is
+      // absent (SeoAdminGuard open, as in production with no flag row);
+      // ingestion is a stub, and the cases that sync stub Google on these
+      // services and make global fetch a failing recorder (no Google traffic).
+      SeoAdminGuard,
+      SeoGa4,
+      SeoGsc,
+      { provide: FeatureFlagsService, useValue: { hasBypass: async () => ({ exists: false, comingSoon: false, bypass: false }) } },
+      { provide: SeoService, useValue: { ingestAnalyticsData: async () => ({ updated: 0 }), ingestSearchConsoleData: async () => ({ updated: 0 }) } },
+      { provide: SeoContentService, useValue: {} },
       PrismaService,
       AuthGuard,
       BusinessGuard,
@@ -1213,13 +1242,207 @@ describe('W3-D12b-SEO-SECRET-MASK Business reads never serve the GA4 or Search C
     }
   });
 
-  // Outside the W3-D12b write set (modules/identity/identity.service.ts). The
-  // mask makes an echo destructive: a client that PATCHes the read metaData
-  // back sends ga4/gsc as {configured:true}, and the profile PATCH merges the
-  // caller's bag over the stored one, so the marker would replace the stored
-  // connection (tokens gone, the SEO connectors disconnected). No web client
-  // echoes it today (the payments tab sends only the keys it edits; the KEY
-  // onboarding card selects no metaData). metaData.whatsapp is protected the
-  // same way by PROFILE_PATCH_RESERVED_META_KEYS (R0-SEC2b).
-  it.todo('[MW-24] OPEN (W3-D12b-SEO-SECRET-MASK follow-up, outside its write set: identity.service.ts): PATCH /identity/businesses/:businessId never writes metaData.ga4 or metaData.gsc (reserved like metaData.whatsapp, or the {configured} marker ignored as for the payment secrets), so echoing the masked read back cannot replace a stored GA4 or Search Console connection; the SEO connector routes stay their only writers');
+  // W3-D12b review repair (CR-D12b-1, D12b-ST-1). The mask made an echo of the
+  // read destructive: a client that PATCHes the read metaData back sends
+  // ga4/gsc as {configured:true}, and the profile PATCH merges the caller's
+  // bag over the stored one, so the marker replaced the stored connection
+  // (tokens gone, both SEO connectors disconnected, while the read went on
+  // answering {configured:true}). No web client echoes it today (the payments
+  // tab sends only the keys it edits; the KEY onboarding card selects no
+  // metaData). PROFILE_PATCH_RESERVED_META_KEYS now lists ga4 and gsc beside
+  // whatsapp (R0-SEC2b): the SEO connector routes are their only writers.
+  it('[MW-24] RED-BEFORE (W3-D12b review CR-D12b-1 / D12b-ST-1): PATCH /identity/businesses/:businessId refuses metaData.ga4 and metaData.gsc as it refuses metaData.whatsapp (400 BUSINESS_METADATA_KEY_RESERVED, nothing written): the owner echoing the masked read back, the {configured} marker alone, a token-bearing entry and null, alone or beside a profile field and another metaData key; the stored connections keep their tokens, both SEO connectors stay connected, and a PATCH naming neither key still writes', async () => {
+    await reset(SEO_META);
+    const NAME = `${ID.biz}-name`;
+    try {
+      const read = await getAs(ID.owner, `/identity/businesses/${ID.biz}`);
+      expect(read.status).toBe(200);
+      expectSeoMasked(read.body, 'the owner\'s read');
+      const before = JSON.stringify(await storedMeta());
+      const FORGED = { accessToken: `${D12B}forged_ACCESS`, refreshToken: `${D12B}forged_REFRESH` };
+      const bodies: Array<[string, Record<string, unknown>]> = [
+        ['the masked read echoed back (bank name changed)', { metaData: { ...read.body.metaData, bankName: `${D12B}echo-bank` } }],
+        ['ga4 as the {configured} marker', { metaData: { ga4: CONFIGURED } }],
+        ['gsc as the {configured} marker, with the name and another key', { name: `${D12B}renamed`, metaData: { gsc: CONFIGURED, bankName: `${D12B}other-bank` } }],
+        ['a token-bearing ga4 entry', { metaData: { ga4: { propertyId: `${D12B}forged-prop`, ...FORGED } } }],
+        ['a token-bearing gsc entry', { metaData: { gsc: { siteUrl: `https://${D12B}forged.test.local/`, ...FORGED } } }],
+        ['ga4 null', { metaData: { ga4: null } }],
+        ['gsc null, with the name', { name: `${D12B}renamed`, metaData: { gsc: null } }],
+      ];
+      const answered: Record<string, string> = {};
+      for (const [label, body] of bodies) {
+        const res = await patchBusiness(body);
+        answered[label] = `${res.status} ${res.body?.code ?? JSON.stringify(res.body).slice(0, 80)}`;
+      }
+      // The data first, so a RED run names the lost connection.
+      const after = await storedMeta();
+      const lost: string[] = [];
+      for (const [key, stored] of [['ga4', SEO_GA4], ['gsc', SEO_GSC]] as const) {
+        if (!isDeepStrictEqual(after[key], stored)) lost.push(`metaData.${key} now ${JSON.stringify(after[key])}`);
+      }
+      expect(lost, 'stored SEO connections replaced by the profile PATCH').toEqual([]);
+      expect(JSON.stringify(after), 'the stored metaData after the refused PATCHes').toBe(before);
+      const row = await db.business.findUnique({ where: { id: ID.biz }, select: { name: true } });
+      expect(row.name, 'Business.name (sent beside a reserved key)').toBe(NAME);
+      expect(answered).toEqual(Object.fromEntries(bodies.map(([label]) => [label, '400 BUSINESS_METADATA_KEY_RESERVED'])));
+
+      const ga4 = new SeoGa4({ client: db }, {});
+      const gsc = new SeoGsc({ client: db }, {});
+      expect(await ga4.getConnectionStatus(ID.biz)).toEqual({ connected: true, propertyId: SEO_GA4.propertyId, lastSync: SEO_GA4.lastSync });
+      expect(await gsc.getConnectionStatus(ID.biz)).toEqual({ connected: true, siteUrl: SEO_GSC.siteUrl, lastSync: null });
+
+      // A PATCH that names neither key writes as before and leaves the connections whole.
+      const BANK = `${D12B}kept-bank`;
+      const ok = await patchBusiness({ metaData: { bankName: BANK } });
+      expect(ok.status, JSON.stringify(ok.body).slice(0, 300)).toBe(200);
+      expectSeoMasked(ok.body, 'PATCH response');
+      const written = await storedMeta();
+      expect(written.bankName).toBe(BANK);
+      expect(written.ga4).toEqual(SEO_GA4);
+      expect(written.gsc).toEqual(SEO_GSC);
+      expect(written.stripeSecretKey).toBe(STRIPE_SECRET);
+    } finally {
+      await db.$executeRawUnsafe('UPDATE businesses SET name = $2 WHERE id = $1', ID.biz, NAME);
+      await reset();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W3-D12b review repair D12b-ST-2 (values tagged `v84l_d12b_r_`): the SEO
+// connector routes (SeoController: AuthGuard, SeoAdminGuard, BusinessGuard, no
+// role or module scope) let any member save a connection, and saveConnection
+// kept the stored tokens when only the property id or site URL was sent. A
+// STAFF member could point the owner's Google tokens at a property or site of
+// their choosing and sync it (the owner's access token sent for it, the data
+// readable on the SEO pages). A connection save now keeps the stored entry
+// only for the same property id or site URL; a new target stores only what
+// the request sends. Who may save, sync or disconnect is open (MW-27).
+// ---------------------------------------------------------------------------
+
+describe('W3-D12b review repair: a connection save never points the stored Google tokens at another property or site (D12b-ST-2)', () => {
+  const R = `${D12B}r_`;
+  const STAFF = `${R}staff`;
+  let ga4Svc: any;
+  let gscSvc: any;
+
+  beforeAll(async () => {
+    await db.user.create({ data: { id: STAFF, email: emailOf(STAFF), name: STAFF, role: 'USER', referralCode: `${STAFF}_ref` } });
+    await db.membership.create({ data: { id: `${P}m_${STAFF.slice(P.length)}_biz`, userId: STAFF, businessId: ID.biz, role: 'STAFF' } });
+    ga4Svc = app.get(SeoGa4);
+    gscSvc = app.get(SeoGsc);
+  });
+
+  const postAs = (actor: string, url: string, body: Record<string, unknown> = {}) =>
+    request(app.getHttpServer()).post(url).set('x-test-user', actor).send(body);
+  const route = (suffix: string) => `/seo/businesses/${ID.biz}/connectors/${suffix}`;
+
+  /**
+   * Stub Google on the route's GA4 and Search Console services: each records
+   * the token and target it is handed. Global fetch is a failing recorder, so
+   * nothing leaves the machine.
+   */
+  function stubGoogle() {
+    const handed: string[] = [];
+    const saved = { ga4: ga4Svc.fetchAnalyticsData, gsc: gscSvc.fetchSearchAnalytics, fetch: globalThis.fetch };
+    ga4Svc.fetchAnalyticsData = async (token: string, propertyId: string) => { handed.push(`ga4 ${token} ${propertyId}`); return []; };
+    gscSvc.fetchSearchAnalytics = async (token: string, siteUrl: string, dimension: string) => { handed.push(`gsc ${token} ${siteUrl} ${dimension}`); return []; };
+    globalThis.fetch = (async (input: unknown) => { handed.push(`fetch ${String(input)}`); throw new Error('no network in this suite'); }) as typeof fetch;
+    return {
+      handed,
+      restore() {
+        ga4Svc.fetchAnalyticsData = saved.ga4;
+        gscSvc.fetchSearchAnalytics = saved.gsc;
+        globalThis.fetch = saved.fetch;
+      },
+    };
+  }
+
+  it('[MW-25] RED-BEFORE (W3-D12b review D12b-ST-2): a STAFF member who sends only another property id to POST /seo/businesses/:businessId/connectors/ga4, or only another site URL to .../gsc, no longer points the stored Google tokens at it: the saved entry keeps nothing of the old connection (no token, no lastSync), both connectors read not connected, and the STAFF member\'s syncs hand Google no token', async () => {
+    await reset(SEO_META);
+    const google = stubGoogle();
+    try {
+      const OTHER_PROPERTY = `${R}victim-other-property-999`;
+      const OTHER_SITE = `https://${R}another-site-the-owner-verified.test.local/`;
+      const saves = [
+        await postAs(STAFF, route('ga4'), { propertyId: OTHER_PROPERTY }),
+        await postAs(STAFF, route('gsc'), { siteUrl: OTHER_SITE }),
+      ];
+      const syncs = [await postAs(STAFF, route('ga4/sync')), await postAs(STAFF, route('gsc/sync'))];
+      // The data first, so a RED run names what the owner's tokens were used for.
+      expect(google.handed, 'Google calls (token, target) the STAFF member\'s syncs made').toEqual([]);
+      const meta = await storedMeta();
+      expect(seoTokensIn(meta), 'the owner\'s GA4/GSC tokens stored beside the STAFF member\'s property or site').toEqual([]);
+      expect(meta.ga4).toEqual({ propertyId: OTHER_PROPERTY, connectedAt: expect.any(String) });
+      expect(meta.gsc).toEqual({ siteUrl: OTHER_SITE, connectedAt: expect.any(String) });
+      // Still admitted (who may save is open: MW-27); the syncs report not connected.
+      expect(saves.map((r) => r.status), JSON.stringify(saves.map((r) => r.body))).toEqual([201, 201]);
+      expect(syncs.map((r) => r.status)).toEqual([201, 201]);
+      expect(syncs.map((r) => r.body.synced)).toEqual([false, false]);
+      const status = [await getAs(STAFF, route('ga4')), await getAs(STAFF, route('gsc'))];
+      expect(status.map((r) => r.body)).toEqual([
+        { connected: false, propertyId: OTHER_PROPERTY, lastSync: null },
+        { connected: false, siteUrl: OTHER_SITE, lastSync: null },
+      ]);
+      expect(meta.stripeSecretKey).toBe(STRIPE_SECRET);
+      expect(meta.bankName).toBe(SEEDED_META.bankName);
+    } finally {
+      google.restore();
+      await reset();
+    }
+  });
+
+  it('[MW-26] RED-BEFORE (W3-D12b review D12b-ST-2): a connection save keeps the stored entry only for the same property id or site URL: the owner re-saving the connected property and site with no token stays connected with the stored tokens and lastSync; a new property or site sent with a new access token only stores that token alone (the old refresh token is not carried over: not connected); one sent with both new tokens connects with exactly those, and its sync hands Google the new access token', async () => {
+    await reset(SEO_META);
+    const google = stubGoogle();
+    try {
+      const resaved = [
+        await postAs(ID.owner, route('ga4'), { propertyId: SEO_GA4.propertyId }),
+        await postAs(ID.owner, route('gsc'), { siteUrl: SEO_GSC.siteUrl }),
+      ];
+      expect(resaved.map((r) => r.status)).toEqual([201, 201]);
+      let meta = await storedMeta();
+      expect(meta.ga4, 'the same property re-saved').toEqual({ ...SEO_GA4, connectedAt: expect.any(String) });
+      expect(meta.gsc, 'the same site re-saved').toEqual({ ...SEO_GSC, connectedAt: expect.any(String) });
+
+      const GA4_2 = { propertyId: `${R}property-2`, accessToken: `${R}ga4_ACCESS_2` };
+      const GSC_2 = { siteUrl: `https://${R}site-2.test.local/`, accessToken: `${R}gsc_ACCESS_2` };
+      await postAs(ID.owner, route('ga4'), GA4_2);
+      await postAs(ID.owner, route('gsc'), GSC_2);
+      meta = await storedMeta();
+      expect(meta.ga4, 'a new property with a new access token only').toEqual({ ...GA4_2, connectedAt: expect.any(String) });
+      expect(meta.gsc, 'a new site with a new access token only').toEqual({ ...GSC_2, connectedAt: expect.any(String) });
+      expect((await getAs(ID.owner, route('ga4'))).body.connected).toBe(false);
+      expect((await getAs(ID.owner, route('gsc'))).body.connected).toBe(false);
+
+      const GA4_3 = { propertyId: `${R}property-3`, accessToken: `${R}ga4_ACCESS_3`, refreshToken: `${R}ga4_REFRESH_3` };
+      const GSC_3 = { siteUrl: `https://${R}site-3.test.local/`, accessToken: `${R}gsc_ACCESS_3`, refreshToken: `${R}gsc_REFRESH_3` };
+      await postAs(ID.owner, route('ga4'), GA4_3);
+      await postAs(ID.owner, route('gsc'), GSC_3);
+      meta = await storedMeta();
+      expect(meta.ga4).toEqual({ ...GA4_3, connectedAt: expect.any(String) });
+      expect(meta.gsc).toEqual({ ...GSC_3, connectedAt: expect.any(String) });
+      expect((await getAs(ID.owner, route('ga4'))).body).toEqual({ connected: true, propertyId: GA4_3.propertyId, lastSync: null });
+      expect((await getAs(ID.owner, route('gsc'))).body).toEqual({ connected: true, siteUrl: GSC_3.siteUrl, lastSync: null });
+      expect((await postAs(ID.owner, route('ga4/sync'))).body).toEqual({ synced: true, pagesUpdated: 0 });
+      expect((await postAs(ID.owner, route('gsc/sync'))).body).toEqual({ synced: true, queriesUpdated: 0, pagesUpdated: 0 });
+      expect(google.handed).toEqual([
+        `ga4 ${GA4_3.accessToken} ${GA4_3.propertyId}`,
+        `gsc ${GSC_3.accessToken} ${GSC_3.siteUrl} query`,
+        `gsc ${GSC_3.accessToken} ${GSC_3.siteUrl} page`,
+      ]);
+      expect(meta.stripeSecretKey).toBe(STRIPE_SECRET);
+    } finally {
+      google.restore();
+      await reset();
+    }
+  });
+
+  // Review D12b-ST-2, the authority half: SeoController guards its connector
+  // routes with AuthGuard, SeoAdminGuard and BusinessGuard only, so any member
+  // (STAFF included) can still replace the stored connection with their own
+  // tokens, sync it or disconnect it. Which role or scope may (OWNER, OWNER and
+  // ADMIN, or a connect/seo write scope) is an authority decision no owner
+  // ruling covers, and seo.controller.ts is outside the W3-D12b write set.
+  it.todo('[MW-27] OPEN (W3-D12b review D12b-ST-2 follow-up: needs an owner ruling on who may connect, sync or disconnect the SEO connectors; seo.controller.ts is outside the W3-D12b write set): POST and DELETE /seo/businesses/:businessId/connectors/ga4 and .../gsc, and their /sync, are refused to a member without that authority, with the stored connection unchanged');
 });

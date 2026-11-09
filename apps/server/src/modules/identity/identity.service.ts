@@ -46,8 +46,18 @@ const roleRank = (role: string) => ROLE_RANK[role] ?? 0;
  * business holds (the shared webhook's routing key), past every refusal
  * WhatsAppService.saveConfig (PATCH /whatsapp/businesses/:businessId/config)
  * applies. The d11-owner-writes static guard (D11W-09) reads this list.
+ *
+ * W3-D12b-SEO-SECRET-MASK review repair (CR-D12b-1, D12b-ST-1): ga4 and gsc,
+ * the SEO connection entries (BUSINESS_META_SEO_CONNECTION_KEYS) whose only
+ * writers are the SEO connector routes (SeoGoogleAnalyticsService and
+ * SeoGoogleSearchConsoleService). A Business read answers each only as
+ * {configured:true}, so without this a client echoing the read back would
+ * merge that marker over the stored connection: the Google tokens lost, both
+ * connectors disconnected, while the read went on answering configured.
+ * business-meta-writers.spec.ts ([D12b-R1]) keeps this list a superset of
+ * BUSINESS_META_SEO_CONNECTION_KEYS.
  */
-export const PROFILE_PATCH_RESERVED_META_KEYS = ['whatsapp'] as const;
+export const PROFILE_PATCH_RESERVED_META_KEYS = ['whatsapp', 'ga4', 'gsc'] as const;
 
 /** The 400 code updateBusiness answers a metaData bag naming a reserved key with. */
 export const BUSINESS_METADATA_KEY_RESERVED = 'BUSINESS_METADATA_KEY_RESERVED';
@@ -434,7 +444,8 @@ export class IdentityService {
     positioningStatement?: string;
   }) {
     // R0-SEC2b: a reserved metaData key (present at all, null included) refuses
-    // the whole PATCH before anything is read or written.
+    // the whole PATCH before anything is read or written (W3-D12b review
+    // CR-D12b-1: the masked SEO connections too, so an echoed read writes nothing).
     if (input.metaData && typeof input.metaData === 'object') {
       for (const key of PROFILE_PATCH_RESERVED_META_KEYS) {
         if (Object.prototype.hasOwnProperty.call(input.metaData, key)) {

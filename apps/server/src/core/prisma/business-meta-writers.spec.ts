@@ -976,6 +976,32 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
     }
   });
 
+  // W3-D12b review repair (CR-D12b-1, D12b-ST-1): a masked SEO connection
+  // echoed back through the profile PATCH (which merges the caller's metaData
+  // bag over the stored one) replaced the stored connection with the
+  // {configured} marker. The PATCH refuses every masked SEO key, as it refuses
+  // metaData.whatsapp; the real-database proof is MW-24 of
+  // test/business-meta-writers.integration.test.ts.
+  it('[D12b-R1] RED-BEFORE (W3-D12b review CR-D12b-1): every SEO connection key a Business read masks (BUSINESS_META_SEO_CONNECTION_KEYS) is a key the profile PATCH refuses (PROFILE_PATCH_RESERVED_META_KEYS in identity.service.ts), so the SEO connector routes stay its only writers', () => {
+    const file = join(SRC, 'modules/identity/identity.service.ts');
+    const sf = ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    let reserved: string[] | undefined;
+    const find = (n: ts.Node) => {
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === 'PROFILE_PATCH_RESERVED_META_KEYS' && n.initializer) {
+        const init = unwrap(n.initializer);
+        if (ts.isArrayLiteralExpression(init)) {
+          reserved = init.elements.filter((e): e is ts.StringLiteral => ts.isStringLiteral(e)).map((e) => e.text);
+        }
+      }
+      ts.forEachChild(n, find);
+    };
+    find(sf);
+    expect(reserved, 'identity.service.ts declares PROFILE_PATCH_RESERVED_META_KEYS as a string array literal').toBeDefined();
+    const unreserved = BUSINESS_META_SEO_CONNECTION_KEYS.filter((key) => !reserved!.includes(key));
+    expect(unreserved, 'masked SEO connection keys the profile PATCH would write').toEqual([]);
+    expect(reserved, 'metaData.whatsapp stays reserved (R0-SEC2b)').toContain('whatsapp');
+  });
+
   it('[MW-03f] the public storefront event (SiteService.trackEvent) is one atomic statement, not a read under the row lock in an interactive transaction (review D12-ST-1 / CR-D12-1), and every ATOMIC_STATEMENT_OWNERS entry still is one', () => {
     const trackEvent = WRITES.filter((w) => w.key === 'modules/site/site.service.ts#SiteService.trackEvent');
     expect(trackEvent.map((w) => `${w.raw ? 'raw' : 'client'} ${w.atomic ? 'atomic' : 'not atomic'} ${w.locked ? 'locked' : 'unlocked'}`)).toEqual(['raw atomic locked']);

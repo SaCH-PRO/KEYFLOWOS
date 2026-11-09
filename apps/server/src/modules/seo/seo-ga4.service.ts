@@ -52,8 +52,15 @@ export class SeoGoogleAnalyticsService {
       if (!business) throw new Error('Business not found');
 
       const meta = (business.metaData as Record<string, any>) ?? {};
+      // W3-D12b review repair (D12b-ST-2): the stored entry (its tokens and
+      // lastSync) carries over only when the same property is saved again. A
+      // save that names another property stores only what it sends, so a
+      // member who sends just a property id cannot point the stored Google
+      // tokens at a property of their choosing and sync it with them.
+      const stored = meta.ga4;
+      const sameProperty = Boolean(stored) && typeof stored === 'object' && stored.propertyId === data.propertyId;
       const ga4 = {
-        ...(meta.ga4 ?? {}),
+        ...(sameProperty ? stored : {}),
         propertyId: data.propertyId,
         ...(data.accessToken ? { accessToken: data.accessToken } : {}),
         ...(data.refreshToken ? { refreshToken: data.refreshToken } : {}),

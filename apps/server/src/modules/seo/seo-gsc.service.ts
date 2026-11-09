@@ -52,8 +52,15 @@ export class SeoGoogleSearchConsoleService {
       if (!business) throw new Error('Business not found');
 
       const meta = (business.metaData as Record<string, any>) ?? {};
+      // W3-D12b review repair (D12b-ST-2): the stored entry (its tokens and
+      // lastSync) carries over only when the same site is saved again. A save
+      // that names another site stores only what it sends, so a member who
+      // sends just a site URL cannot point the stored Google tokens at a site
+      // of their choosing and sync it with them.
+      const stored = meta.gsc;
+      const sameSite = Boolean(stored) && typeof stored === 'object' && stored.siteUrl === data.siteUrl;
       const gsc = {
-        ...(meta.gsc ?? {}),
+        ...(sameSite ? stored : {}),
         siteUrl: data.siteUrl,
         ...(data.accessToken ? { accessToken: data.accessToken } : {}),
         ...(data.refreshToken ? { refreshToken: data.refreshToken } : {}),
