@@ -9,6 +9,7 @@ import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingDto } from './dto/update-booking.dto';
+import { UpdateBookingStatusDto } from './dto/update-booking-status.dto';
 import { CreateWaitlistEntryDto } from './dto/create-waitlist-entry.dto';
 import { OfferWaitlistSlotDto } from './dto/offer-waitlist-slot.dto';
 import { WaitlistQueryDto } from './dto/waitlist-query.dto';
@@ -52,14 +53,19 @@ export class BookingsController {
     return this.bookings.getBookingStats(businessId, orgUnitId);
   }
 
+  /**
+   * V1-84 (CR-V28-4): the body says who cancelled (cancelledBy). Only a
+   * customer cancel forfeits a paid deposit (D-26); a CANCELLED sent without
+   * an initiator is a customer cancel (D-65), as before the field existed.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/bookings/:bookingId/status')
   updateBookingStatus(
     @Param('businessId') businessId: string,
     @Param('bookingId') bookingId: string,
-    @Body('status') status: string,
+    @Body() body: UpdateBookingStatusDto,
   ) {
-    return this.bookings.updateBookingStatus(businessId, bookingId, status as BookingStatus);
+    return this.bookings.updateBookingStatus(businessId, bookingId, body?.status as BookingStatus, body?.cancelledBy ?? 'CUSTOMER');
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

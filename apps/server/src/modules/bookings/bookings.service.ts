@@ -36,6 +36,7 @@ import {
   settlementInvoiceSelect,
   toCents,
 } from './booking-payment-status.listener';
+import { CANCEL_INITIATORS, CancelInitiator } from './dto/update-booking-status.dto';
 
 interface DayHours {
   open: string;
@@ -521,7 +522,22 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     this.events.emit(WORK_OBLIGATION_SETTLED, payload);
   }
 
-  async updateBookingStatus(businessId: string, bookingId: string, status: BookingStatus) {
+  /**
+   * V1-84 (CR-V28-4, D-65): `cancelledBy` says who cancelled, and only a
+   * CUSTOMER cancel forfeits a paid deposit (D-26). It defaults to BUSINESS, so
+   * KEY bookings_cancel_booking, undo, saga compensation and the cortex
+   * adapter, which call with three arguments, never forfeit. The operator
+   * status route passes CUSTOMER when its body names no initiator (D-65).
+   */
+  async updateBookingStatus(
+    businessId: string,
+    bookingId: string,
+    status: BookingStatus,
+    cancelledBy: CancelInitiator = 'BUSINESS',
+  ) {
+    if (!CANCEL_INITIATORS.includes(cancelledBy)) {
+      throw new BadRequestException(`Invalid cancelledBy. Must be one of: ${CANCEL_INITIATORS.join(', ')}`);
+    }
     const booking = await this.prisma.client.booking.findFirst({
       where: { id: bookingId, businessId, deletedAt: null },
     });
@@ -567,9 +583,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // DEPOSIT_FORFEITED (never overwritten) and wrote nothing, then this wrote
     // DEPOSIT_PAID with nothing held. Under the lock, that re-derivation waits
     // for this write and re-derives the booking from the refunded deposit.
+    // V1-84 (D-65): only a customer cancel forfeits; a business cancel keeps
+    // what the deposit holds (DEPOSIT_PAID stays) and writes no forfeit row.
     let depositForfeit: DepositForfeit | null = null;
     if (status === 'CANCELLED') {
-      depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
+      if (cancelledBy === 'CUSTOMER') depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
       if (depositForfeit) updated.paymentStatus = DEPOSIT_FORFEITED;
     } else if (updated.paymentStatus === DEPOSIT_FORFEITED) {
       const reinstated = await this.prisma.client.$transaction(
@@ -637,7 +655,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         businessId,
         contactId: booking.contactId,
         type: 'booking.cancelled',
-        data: { bookingId, status },
+        data: { bookingId, status, cancelledBy },
         actorType: 'USER',
         source: 'bookings',
       });
@@ -688,8 +706,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * deposit refunded in full forfeits nothing, and one refunded in part
    * forfeits what it still holds. The timeline row names who cancelled (SEC-V28-2): the authenticated member
    * whose request this is (TenantInterceptor's context for this business), or
-   * SYSTEM for a caller with none (a KEY tool, undo or compensation run
-   * outside a member's request); it claimed USER with no actor.
+   * SYSTEM for a caller with none; it claimed USER with no actor. V1-84: only
+   * a customer cancel reaches this (updateBookingStatus's cancelledBy), so a
+   * KEY tool, undo or compensation, which cancel for the business, never do.
    *
    * Trial-N (N2-SEC): the forfeit is written only while the booking is still
    * CANCELLED. A reinstatement that committed between the cancel's status
