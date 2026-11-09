@@ -563,6 +563,11 @@
       "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
+      "prefix": "v81a_",
+      "owner": "apps/server/test/d46-commerce-writes.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A1-D46-COMMERCE-WRITES)"
+    },
+    {
       "prefix": "v81e_",
       "owner": "apps/server/test/finance-write-tenancy.integration.test.ts",
       "packet": "V1-81 (FOLLOW3-A5-FINANCE-WRITE-TENANCY)"
