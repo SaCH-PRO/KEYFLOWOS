@@ -36,11 +36,21 @@
  * either sends), so the race is deterministic. No provider is called.
  *
  * The review and cart runners and the cross-module poller are not
- * tenant-scoped (they read every business's due jobs, take 50, oldest first),
- * so this suite's jobs are due in 2000 to sort first, every recorder assertion
- * filters by this suite's businesses, and the poller's read in the hand-off
- * case is narrowed to this suite's business (its claim and execution are the
- * real code).
+ * tenant-scoped (they read every business's due jobs, take 50, oldest first).
+ * So that this suite never claims or sends another suite's rows when files run
+ * in parallel on one database (review SEC-D17-2, CR-D17-1), every runner read
+ * made through gatedPrisma is narrowed to this suite's businesses (ANDed with
+ * the runner's own where clause), and so is the poller's read in the hand-off
+ * case; the claims and executions are the real code. Recorder assertions also
+ * filter by this suite's businesses. cross-module-job-poller.integration.test.ts
+ * narrows its own global reads the same way (review CR-D17-2), so it never
+ * claims this suite's due rows either.
+ *
+ * The failure fence has two predicates, each pinned by its own case: JR-05
+ * (status) re-arms the row the way its real writer does (status and
+ * scheduledFor only, so executedAt still holds the claim's stamp), and JR-05b
+ * (executedAt) has another claimant take the re-armed row (COMPLETED, its own
+ * stamp) while this claim's execution is still running.
  *
  * Fixtures: prefix `v84q_` (registered in test/helpers/fixture-prefixes.json),
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll, beforeEach (jobs
@@ -72,7 +82,7 @@ const CONTACT_EMAIL = `${P}contact@test.local`;
 const ORDER_NUMBER = `${P}ORD-1`;
 const REVIEW_TASK_TITLE = `Request product review for order ${ORDER_NUMBER}`;
 
-/** Due long ago, so these rows sort ahead of anything else in the shared table (take 50, oldest first). */
+/** Due long ago (plainly due at any clock). The runners' reads are narrowed to this suite's businesses, so the order does not matter. */
 function dueAt(offsetSeconds: number) {
   return new Date(Date.UTC(2000, 0, 1, 0, 0, offsetSeconds));
 }
@@ -154,7 +164,12 @@ function gatedPrisma(opts: {
     get(target, prop) {
       if (prop === 'findMany') {
         return async (args: any) => {
-          const rows = opts.overrideRead ? await opts.overrideRead() : await target.findMany(args);
+          // Narrowed to this suite's businesses (the review and cart runners read every business's
+          // due jobs); the runner's own where clause, including the business-scoped runner's
+          // businessId, still applies in full.
+          const rows = opts.overrideRead
+            ? await opts.overrideRead()
+            : await target.findMany({ ...args, where: { AND: [args?.where ?? {}, { businessId: { in: [...BUSINESSES] } }] } });
           reads += 1;
           if (opts.afterRead) await opts.afterRead(rows);
           return rows;
@@ -214,8 +229,9 @@ async function job(id: string, businessId: string, jobType: string, entityId: st
   });
 }
 
+/** Keyed as its real writer keys it (businessId, the order, checkpoint 'review_request'), so that writer's upsert re-arms this row. */
 function postPurchaseReviewJob(id = 'pp', businessId = ID.bizA) {
-  return job(id, businessId, 'post_purchase_review_request', ID.orderA, `review_${id}`, {
+  return job(id, businessId, 'post_purchase_review_request', ID.orderA, 'review_request', {
     contactId: ID.contactA,
     orderId: ID.orderA,
     orderNumber: ORDER_NUMBER,
@@ -252,12 +268,35 @@ async function reviewTasks() {
   return db.contactTask.findMany({ where: { businessId: ID.bizA, contactId: ID.contactA, title: REVIEW_TASK_TITLE } });
 }
 
-/** Another writer sets the row back to PENDING (a new run, due later) while its claimed execution is still running. */
-async function rearm(id: string) {
+/**
+ * The real re-arming writer of a post-purchase review request, while its claimed execution is still
+ * running: CommerceIntegrationService.scheduleReviewRequest (store_order.delivered) upserts the row
+ * back to PENDING, due in 3 days. It sets only status and scheduledFor, so executedAt keeps the
+ * running claim's stamp: only the failure fence's status predicate tells the re-armed row apart.
+ */
+async function rearmPostPurchaseByItsWriter() {
+  const writer = postPurchaseRunner(prismaService);
+  await writer.scheduleReviewRequest(ID.bizA, { id: ID.orderA, orderNumber: ORDER_NUMBER, customerEmail: CONTACT_EMAIL, items: [] }, ID.contactA);
+}
+
+/** The same write shape for the review and cart jobs (their writers create once and never re-arm): PENDING, due in 3 days, executedAt untouched. */
+async function rearmLikeTheWriter(id: string) {
   await db.scheduledAgentJob.update({
     where: { id: `${P}${id}` },
-    data: { status: 'PENDING', executedAt: null, scheduledFor: new Date(Date.now() + 3 * 86_400_000) },
+    data: { status: 'PENDING', scheduledFor: new Date(Date.now() + 3 * 86_400_000) },
   });
+}
+
+/** The stamp of another claimant that took the row while this claim's execution was still running. */
+const OTHER_CLAIM_STAMP = new Date(Date.UTC(2000, 0, 2));
+
+/**
+ * The row is re-armed due now and another claimant takes it (COMPLETED with its own stamp) while this
+ * claim's execution is still running: only the failure fence's executedAt predicate tells it apart.
+ */
+async function rearmAndReclaim(id: string) {
+  await db.scheduledAgentJob.update({ where: { id: `${P}${id}` }, data: { status: 'PENDING', executedAt: null, scheduledFor: new Date() } });
+  await db.scheduledAgentJob.updateMany({ where: { id: `${P}${id}`, status: 'PENDING' }, data: { status: 'COMPLETED', executedAt: OTHER_CLAIM_STAMP } });
 }
 
 // The three runners as one table: each case below runs for every runner.
@@ -268,6 +307,7 @@ const RUNNERS = [
     sendType: 'review_request',
     seed: () => postPurchaseReviewJob('pp'),
     run: (prisma?: any) => postPurchaseRunner(prisma).processPostPurchaseJobs(ID.bizA),
+    rearm: () => rearmPostPurchaseByItsWriter(),
   },
   {
     name: 'ReviewSolicitationService.processPendingJobs (review_solicitation)',
@@ -275,6 +315,7 @@ const RUNNERS = [
     sendType: 'review_request',
     seed: () => reviewSolicitationJob('rs'),
     run: (prisma?: any) => reviewRunner(prisma).processPendingJobs(),
+    rearm: () => rearmLikeTheWriter('rs'),
   },
   {
     name: 'AbandonedCartRecoveryService.sendRecoveryEmails (abandoned_cart_recovery)',
@@ -282,6 +323,7 @@ const RUNNERS = [
     sendType: 'booking_created',
     seed: () => cartJob('cart'),
     run: (prisma?: any) => cartRunner(prisma).sendRecoveryEmails(),
+    rearm: () => rearmLikeTheWriter('cart'),
   },
 ] as const;
 
@@ -528,13 +570,15 @@ describe('JR-04: a job the cross-module poller claimed is not re-run', () => {
 // JR-05..07: failure handling
 // ---------------------------------------------------------------------------
 describe.each(RUNNERS)('JR-05..07 $name', (runner) => {
-  it('JR-05 (executedAt fence): an execution that fails after another writer set the row back to PENDING leaves the row as that writer set it (PENDING, executedAt null), not FAILED', async () => {
+  it('JR-05 (status fence): an execution that fails after its writer set the row back to PENDING (status and scheduledFor only, so executedAt still holds this claim\'s stamp) leaves the row as that writer set it, not FAILED', async () => {
     await runner.seed();
     let rearmed = false;
+    let midway: any = null;
     sendHook = async () => {
       if (rearmed) return;
       rearmed = true;
-      await rearm(runner.jobId);
+      await runner.rearm();
+      midway = await row(runner.jobId);
       throw new Error(`${P} recorder: send refused`);
     };
 
@@ -542,9 +586,34 @@ describe.each(RUNNERS)('JR-05..07 $name', (runner) => {
 
     expect(rearmed).toBe(true);
     expect(ownSends('runner', runner.sendType)).toHaveLength(1);
+    const claims = completionWrites(`${P}${runner.jobId}`);
+    expect(claims).toHaveLength(1);
+    const claimStamp = (claims[0].data.executedAt as Date).toISOString();
+    // Non-vacuity: mid-execution the writer had re-armed the row and left executedAt at this claim's
+    // stamp, so the fence's executedAt predicate alone would still match it.
+    expect({ status: midway?.status, executedAt: midway?.executedAt?.toISOString() }).toEqual({ status: 'PENDING', executedAt: claimStamp });
     const r = await row(runner.jobId);
-    expect({ status: r.status, executedAt: r.executedAt }).toEqual({ status: 'PENDING', executedAt: null });
+    expect({ status: r.status, executedAt: r.executedAt?.toISOString() }).toEqual({ status: 'PENDING', executedAt: claimStamp });
     expect(r.scheduledFor.getTime()).toBeGreaterThan(Date.now() + 2 * 86_400_000);
+  }, 30_000);
+
+  it('JR-05b (executedAt fence): an execution that fails after the row was re-armed and taken by another claimant (COMPLETED, that claimant\'s stamp) leaves the other claim standing, not FAILED', async () => {
+    await runner.seed();
+    let reclaimed = false;
+    sendHook = async () => {
+      if (reclaimed) return;
+      reclaimed = true;
+      await rearmAndReclaim(runner.jobId);
+      throw new Error(`${P} recorder: send refused`);
+    };
+
+    await runner.run();
+
+    expect(reclaimed).toBe(true);
+    expect(ownSends('runner', runner.sendType)).toHaveLength(1);
+    expect(completionWrites(`${P}${runner.jobId}`)).toHaveLength(1);
+    const r = await row(runner.jobId);
+    expect({ status: r.status, executedAt: r.executedAt?.toISOString() }).toEqual({ status: 'COMPLETED', executedAt: OTHER_CLAIM_STAMP.toISOString() });
   }, 30_000);
 
   it('JR-06 (control): an execution that fails ends FAILED after one attempt, and a later run does not run it again', async () => {
