@@ -618,6 +618,11 @@
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
     },
     {
+      "prefix": "v88e_",
+      "owner": "apps/server/test/crm-lifecycle-paid-invoice.integration.test.ts",
+      "packet": "V1-88 (PR196-CRM-LIFECYCLE)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
