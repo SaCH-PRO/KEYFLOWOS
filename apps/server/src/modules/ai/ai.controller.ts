@@ -52,7 +52,8 @@ import { KeyAgentConfigService } from './key-agent-config.service';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { contactWhereBase } from '../crm/crm.helpers';
-import { activityPrefilter, readVisibleActivityPage, resolveTimelineViewer } from '../timeline/timeline-visibility';
+import { activityPrefilter, readVisibleActivityPage, resolveTimelineViewer, TIMELINE_SCAN_LIMIT } from '../timeline/timeline-visibility';
+import { CANONICAL_MODULES } from '../../core/authority/module-vocabulary';
 
 
 const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
@@ -1639,26 +1640,70 @@ export class AiController {
     };
   }
 
+  /**
+   * W6-BRIEFINGS-SCOPE (review SEC-W5BS-1; owner ruling D-63, the rule V1-84 built in
+   * timeline-visibility.ts, as W5-BRIEFING-SCOPE applied it to the morning briefing): this counted the
+   * day's Activity rows, summed the day's paid invoices and counted the day's bookings and updated
+   * contacts over the whole business, for every member (the control tower's End of Day report). Each
+   * figure now follows what the member may read (filtered, not refused):
+   *   - events: the day's rows the timeline rule serves them (canReadActivityRow and contact visibility,
+   *     filterVisibleActivity). A member the rule withholds nothing from (every module, the unmapped ones
+   *     and every contact) gets the plain count; any other member the count readVisibleActivityPage
+   *     serves from the day's first TIMELINE_SCAN_LIMIT rows, as a feed page reads them;
+   *   - revenueCollected: a revenue figure, withheld (0, as V1-84 TS-04 reports a day's revenueImpact)
+   *     from a member without revenue read;
+   *   - bookingsCompleted: 0 without bookings read (GET bookings' module scope);
+   *   - contactsUpdated: the contacts the member may list (crm read and the CRM list rule,
+   *     visibilityClause M7), 0 without crm read.
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/briefing/eod')
   @CrmRateLimit(30, 60_000)
-  async endOfDayBriefing(@Param('businessId') businessId: string) {
+  async endOfDayBriefing(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, this.planViewer(req).id);
+    const readsCrm = viewer.readable.has('crm');
     const start = new Date();
     start.setHours(0, 0, 0, 0);
+    const dayWhere = { businessId, occurredAt: { gte: start } };
+    const contactClause = visibilityClause(viewer.crmAccess, viewer.userId);
+    const seesEveryRow = viewer.readsUnmapped && !contactClause && CANONICAL_MODULES.every((m) => viewer.readable.has(m));
+    const prefilter = activityPrefilter(viewer);
     const [events, revenue, bookings, contactsUpdated] = await Promise.all([
-      (this.prisma as any).client.activity.count({ where: { businessId, occurredAt: { gte: start } } }),
-      (this.prisma as any).client.invoice.aggregate({
-        where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: start } },
-        _sum: { total: true },
-      }),
-      (this.prisma as any).client.booking.count({ where: { businessId, deletedAt: null, createdAt: { gte: start } } }),
-      (this.prisma as any).client.contact.count({ where: { businessId, deletedAt: null, updatedAt: { gte: start } } }),
+      seesEveryRow
+        ? this.prisma.client.activity.count({ where: dayWhere })
+        : readVisibleActivityPage(this.prisma, viewer, TIMELINE_SCAN_LIMIT, (skip, take) =>
+            this.prisma.client.activity.findMany({
+              where: { ...dayWhere, ...(prefilter.length ? { AND: prefilter } : {}) },
+              select: { id: true, module: true, category: true, contactId: true, entityType: true, entityId: true, revenueImpact: true, action: true, type: true, data: true },
+              orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+              skip,
+              take,
+            }),
+          ).then((rows) => rows.length),
+      viewer.readable.has('revenue')
+        ? (this.prisma as any).client.invoice.aggregate({
+            where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: start } },
+            _sum: { total: true },
+          })
+        : null,
+      viewer.readable.has('bookings')
+        ? (this.prisma as any).client.booking.count({ where: { businessId, deletedAt: null, createdAt: { gte: start } } })
+        : 0,
+      readsCrm
+        ? this.prisma.client.contact.count({
+            where: {
+              ...contactWhereBase(businessId),
+              updatedAt: { gte: start },
+              ...(contactClause ? { AND: [contactClause as Prisma.ContactWhereInput] } : {}),
+            },
+          })
+        : 0,
     ]);
 
     return {
       date: start.toISOString(),
       events,
-      revenueCollected: Number(revenue._sum.total ?? 0),
+      revenueCollected: Number(revenue?._sum?.total ?? 0),
       bookingsCompleted: bookings,
       contactsUpdated,
     };
@@ -1775,11 +1820,19 @@ export class AiController {
 
   // ── Morning Briefing (Phase 7) ──────────────────────────────────────────
 
+  /**
+   * W6-BRIEFINGS-SCOPE (review SEC-W5BS-2; owner ruling D-63): this built the daily briefing's cards
+   * with no viewer, so every member got overdue invoice numbers and totals (card titles), the contact
+   * and the amount (card args) and totalAtStake. The briefing is still written once a day for the
+   * business (D-93), and the member who asks is now its viewer: they get the cards the timeline rule
+   * serves them (MorningBriefingService.generateBriefing -> forViewer).
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/briefing')
   @CrmRateLimit(10, 60_000)
-  async getBriefing(@Param('businessId') businessId: string) {
-    return this.morningBriefingSvc.generateBriefing(businessId);
+  async getBriefing(@Param('businessId') businessId: string, @Req() req: AuthenticatedRequest) {
+    const viewer = await resolveTimelineViewer(this.prisma, businessId, this.planViewer(req).id);
+    return this.morningBriefingSvc.generateBriefing(businessId, viewer);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

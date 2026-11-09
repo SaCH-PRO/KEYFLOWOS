@@ -6,6 +6,7 @@ import { PlannerService } from './planner.service';
 import { RoleEngineService, BusinessRole } from './role-engine.service';
 import { AiOversightService } from './ai-oversight.service';
 import { WorkloadAggregatorService } from './workload-aggregator.service';
+import { filterVisibleActivity, type TimelineViewer } from '../timeline/timeline-visibility';
 
 export interface BriefingCard {
   stepOrder: number;
@@ -58,7 +59,12 @@ export class MorningBriefingService implements OnModuleInit {
     // A separate scheduler would register them; for now, we provide manual generation
   }
 
-  async generateBriefing(businessId: string): Promise<BriefingResult | null> {
+  /**
+   * W6-BRIEFINGS-SCOPE (review SEC-W5BS-2; owner ruling D-63): the daily briefing is the business's
+   * (written once a day with every card, run as the owner, D-93); what it answers is the cards `viewer`
+   * may read (forViewer). With no viewer (a system caller) it answers every card, as before.
+   */
+  async generateBriefing(businessId: string, viewer?: TimelineViewer): Promise<BriefingResult | null> {
     const settings = await this.prisma.client.autopilotSettings.findUnique({ where: { businessId } });
     if (settings && !settings.briefingEnabled) {
       this.logger.log(`Briefing disabled for business ${businessId}`);
@@ -74,7 +80,7 @@ export class MorningBriefingService implements OnModuleInit {
       include: { steps: true },
     });
     if (existing) {
-      return this.formatBriefingResult(existing);
+      return this.forViewer(this.formatBriefingResult(existing), viewer);
     }
 
     const cards: BriefingCard[] = [];
@@ -161,7 +167,37 @@ export class MorningBriefingService implements OnModuleInit {
     // Trigger immediate execution — briefing plans are pre-approved
     this.events.emit('plan.approved', { planId: plan.id, businessId });
 
-    return result;
+    return this.forViewer(result, viewer);
+  }
+
+  /**
+   * W6-BRIEFINGS-SCOPE (review SEC-W5BS-2; owner ruling D-63, the rule V1-84 built in
+   * timeline-visibility.ts, as W5-BRIEFING-SCOPE applied it to the morning briefing): GET briefing
+   * answered every card to every member: overdue invoice numbers and totals in titles, the contact and
+   * the amount in args. A card is now served to `viewer` as the timeline serves a row
+   * (filterVisibleActivity, filtered, not refused): by its module (ACTIVITY_MODULE_SCOPES; a commerce
+   * card, which carries invoice or quote numbers and totals, needs revenue read; a module the table
+   * does not map, such as 'system', OWNER / ADMIN only), its args as the row's data, and the contact its
+   * args.contactId names (crm read and a contact the viewer may open, visibilityClause M7).
+   * totalCards, highImpactCards and totalAtStake are worked out over the cards served, and totalAtStake
+   * is withheld (0, as V1-84 TS-04 withholds a day's revenueImpact) from a viewer without revenue read.
+   */
+  private async forViewer(result: BriefingResult, viewer?: TimelineViewer): Promise<BriefingResult> {
+    if (!viewer) return result;
+    const rows = result.cards.map((card) => ({
+      card,
+      module: card.module,
+      contactId: typeof card.args?.contactId === 'string' ? card.args.contactId : null,
+      data: card.args,
+    }));
+    const cards = (await filterVisibleActivity(this.prisma, viewer, rows)).map((row) => row.card);
+    return {
+      ...result,
+      totalCards: cards.length,
+      highImpactCards: cards.filter((c) => c.impact === 'HIGH').length,
+      totalAtStake: viewer.readable.has('revenue') ? cards.reduce((sum, c) => sum + (c.args?.amount ?? 0), 0) : 0,
+      cards,
+    };
   }
 
   async executeBriefingCard(businessId: string, planId: string, stepId: string): Promise<{ success: boolean; error?: string }> {
