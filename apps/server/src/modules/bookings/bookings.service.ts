@@ -868,6 +868,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * created through CommerceService (its own connection, committed); if the
    * link to the booking then fails, that DRAFT is withdrawn. A number
    * collision is retried by CommerceService's allocator (V1-43, SEC-V28-1).
+   * W4-A10c-FINAL-LINK-WINDOW (SEC-A10b-3, D-59/D-91): with a deposit, the
+   * link re-reads the final under its row lock and refuses a final whose
+   * currency was switched before the link (assertLinkedFinalKeepsDepositCurrency).
    */
   private async issueFinalInvoice(businessId: string, bookingId: string): Promise<FinalInvoiceOutcome> {
     const key = `${FINAL_INVOICE_LOCK_NAMESPACE}${bookingId}`;
@@ -952,6 +955,7 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         if (!invoice) throw new BadRequestException('Failed to create invoice');
         drawn = invoice.id;
         await tx.booking.update({ where: { id: booking.id }, data: { invoiceId: invoice.id } });
+        if (deposit) await this.assertLinkedFinalKeepsDepositCurrency(tx, businessId, deposit, invoice);
         created = { invoice, booking: { ...booking, invoiceId: invoice.id } };
         return {
           status: 'CREATED' as const,
@@ -975,6 +979,42 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       this.events.emit('booking.invoice_created', payload);
     }
     return outcome;
+  }
+
+  /**
+   * W4-A10c-FINAL-LINK-WINDOW (review SEC-A10b-3, D-59 as built per D-91,
+   * D-13): the final invoice is created through CommerceService on its own
+   * connection and committed before this transaction links it to the booking
+   * (Booking.invoiceId). A currency PATCH of the final in that window finds no
+   * booking to pair it with (assertDepositPairKeepsCurrency reads committed
+   * links), so it is not refused, and completion linked a USD final netting a
+   * TTD deposit. After the link, the final's row is taken with the lock every
+   * invoice edit takes first (FOR NO KEY UPDATE, lockInvoiceForPayment) and its
+   * currency re-read under it:
+   *  - an edit that committed before reads here as switched, and one that
+   *    holds the row (it read no pair) is waited for and read the same way:
+   *    the pairing is refused (DEPOSIT_CURRENCY_MISMATCH), this transaction
+   *    rolls the link back and the caller withdraws the drawn DRAFT;
+   *  - an edit that comes after waits for this transaction to commit, then
+   *    reads the link, takes the booking's final-invoice lock and is refused.
+   * So no committed state pairs the deposit with a final in another currency.
+   * No deadlock: an edit of this new final takes the final-invoice lock only
+   * for a link it reads committed, which this one is not until the commit.
+   */
+  private async assertLinkedFinalKeepsDepositCurrency(
+    tx: PrismaTx,
+    businessId: string,
+    deposit: { id: string; invoiceNumber: string | null; currency: string | null },
+    final: { id: string; invoiceNumber: string | null },
+  ): Promise<void> {
+    const rows = await tx.$queryRaw<Array<{ currency: string | null }>>`
+      SELECT currency FROM invoices WHERE id = ${final.id} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+    if (!rows[0]) throw new BadRequestException('Failed to create invoice');
+    const depositCurrency = normalizeCurrency(deposit.currency);
+    const finalCurrency = normalizeCurrency(rows[0].currency);
+    if (depositCurrency !== finalCurrency) {
+      throw depositCurrencyMismatch(deposit, depositCurrency, finalCurrency, final);
+    }
   }
 
   async updateBookingNotes(businessId: string, bookingId: string, notes: string) {
