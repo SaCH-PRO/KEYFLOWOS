@@ -563,6 +563,11 @@
       "packet": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
+      "prefix": "v81a_",
+      "owner": "apps/server/test/d46-commerce-writes.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A1-D46-COMMERCE-WRITES)"
+    },
+    {
       "prefix": "v81e_",
       "owner": "apps/server/test/finance-write-tenancy.integration.test.ts",
       "packet": "V1-81 (FOLLOW3-A5-FINANCE-WRITE-TENANCY)"
@@ -578,6 +583,11 @@
       "packet": "V1-81 (FOLLOW3-A7-MONEY-REPORTS)"
     },
     {
+      "prefix": "v82b_",
+      "owner": "apps/server/test/invoice-issued-amounts.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B2-ISSUED-INVOICE-AMOUNTS)"
+    },
+    {
       "prefix": "v82c_",
       "owner": "apps/server/test/accrual-revenue-splits.integration.test.ts",
       "packet": "V1-82 (FOLLOW3-B3-ACCRUAL-SPLIT-DISCOUNT)"
@@ -586,6 +596,16 @@
       "prefix": "v82d_",
       "owner": "apps/server/test/expense-currency-cents.integration.test.ts",
       "packet": "V1-82 (FOLLOW3-B4-EXPENSE-CURRENCY-CENTS)"
+    },
+    {
+      "prefix": "v82e_",
+      "owner": "apps/server/test/document-email-line-totals.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B5-EMAIL-LINE-TOTALS)"
+    },
+    {
+      "prefix": "v82f_",
+      "owner": "apps/server/test/invoice-delete-ledger.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B6-DELETE-ISSUED-INVOICE)"
     },
     {
       "prefix": "v82g_",
@@ -611,6 +631,11 @@
       "prefix": "v84e_",
       "owner": "apps/server/test/contact-reads-noncrm-visibility.integration.test.ts",
       "packet": "V1-84 (FOLLOW3-D5-CONTACT-READS-NONCRM)"
+    },
+    {
+      "prefix": "v84f_",
+      "owner": "apps/server/test/commerce-contact-bind-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D6-COMMERCE-CONTACT-BIND-VIS)"
     },
     {
       "prefix": "v84j_",

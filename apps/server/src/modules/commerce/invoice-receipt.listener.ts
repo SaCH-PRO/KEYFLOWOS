@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { CommerceService } from './commerce.service';
 import { GmailService } from './gmail.service';
-import { buildInvoiceEmailHtml } from './invoice-email.template';
+import { buildInvoiceEmailHtml, emailLineItems } from './invoice-email.template';
 import type { InvoiceForEmail } from './invoice-email.types';
 import { isSettledForReceiptEmail, ownTenantReceiptBalance } from './invoice-receipt-builder.service';
 import { appUrl } from '../../core/config/runtime-urls';
@@ -86,11 +86,9 @@ export class InvoiceReceiptListener {
         dueDate: invoice.dueDate
           ? new Date(invoice.dueDate).toLocaleDateString('en-TT', { dateStyle: 'medium' })
           : null,
-        items: (invoice.items ?? []).map((it) => ({
-          description: it.description,
-          quantity: Number(it.quantity),
-          unitPrice: Number(it.unitPrice),
-        })),
+        // FOLLOW3-B5-EMAIL-LINE-TOTALS (D-13): each line carries its stored
+        // InvoiceItem.total, which the template prints.
+        items: emailLineItems(invoice.items),
         subtotal: Number(invoice.subtotal ?? invoice.total),
         taxRate: invoice.taxRate != null ? Number(invoice.taxRate) : null,
         taxAmount: invoice.taxAmount != null ? Number(invoice.taxAmount) : null,

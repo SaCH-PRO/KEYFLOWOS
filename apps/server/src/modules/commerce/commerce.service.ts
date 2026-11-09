@@ -16,7 +16,7 @@ import { Service, Prisma, Payment, QuoteStatus as StoredQuoteStatus } from '@key
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isLegalTransition, isShareableInvoiceStatus, roundMoney } from './invoice-workflow.service';
 import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -44,6 +44,7 @@ import {
   type QuoteTermsSubject,
 } from './quote-workflow';
 import { getTenantContext } from '../../core/tenant/tenant-context';
+import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { appUrl } from '../../core/config/runtime-urls';
@@ -352,6 +353,22 @@ interface CreateClaim {
 const CREATE_IDEMPOTENCY_KEY_MAX = 255;
 
 /**
+ * FOLLOW3-A1-D46-COMMERCE-WRITES (owner ruling D-55): the provider ids the
+ * gateway doors match on, spelled exactly as they match (Prisma equality is
+ * case-sensitive; payments.service.ts processStripeRefund matches provider
+ * 'stripe'). A payment recordPayment writes by hand (the manual route, KEY's
+ * processPayment) with one of these as its method is stored with provider
+ * 'manual', so no gateway door can take it for a gateway payment: a hand row
+ * naming another tenant's PaymentIntent made that tenant's platform-signed
+ * refund ambiguous, and its books never showed it. The method is kept, so the
+ * receipt still posts to the payment-processor account
+ * (RevenuePostingService.depositSystemKey reads the method too). Exact
+ * comparison, never case-folded: 'PayPal' (the web form) and 'PAYPAL' (an
+ * evidence confirm) are stored as before.
+ */
+const GATEWAY_PROVIDER_IDS: ReadonlySet<string> = new Set(['stripe', 'paypal', 'wipay']);
+
+/**
  * The create's claim, or null when it carries no key (absent or blank, as the
  * base: every call creates). `material` is every field the caller sent, in a
  * fixed shape (absent is null), so its JSON is the same for the same request.
@@ -368,6 +385,17 @@ function createClaim(kind: CreateKind, key: unknown, material: Record<string, un
     slot: `commerce.${kind}.create:${trimmed}`,
     requestHash: createHash('sha256').update(JSON.stringify(material), 'utf8').digest('hex'),
   };
+}
+
+/**
+ * V1-45b (V1-45 review SEC-V45-3): the acting member is part of the request,
+ * as in the KEY tool registry's fingerprint (fingerprintToolRequest): another
+ * member presenting the same key and body is a 409, never the first member's
+ * replay. A create with no acting member (the internal callers) hashes as the
+ * document fields alone, as before.
+ */
+function createActorMaterial(actorUserId: string | undefined): Record<string, unknown> {
+  return actorUserId ? { actor: actorUserId } : {};
 }
 
 /** A create's document lines in the fixed shape its request hash reads. */
@@ -701,19 +729,53 @@ export class CommerceService {
    * caller writes nothing. R0-D3 review (ST-D3-1) for invoice update; R0-27 for
    * invoice create; R0-27 review (ST-27-2) for quote create, quote update and
    * quote convert, the second path by which a contact reaches an Invoice.
+   *
+   * FOLLOW3-D6 (D-64): `memberClause` (memberContactClause) narrows the lookup
+   * to the contacts the acting member may open; a hidden contact then answers
+   * exactly the 404 of an unknown one. Without it the check is the tenant's.
    */
-  private async assertContactInBusiness(contactId: unknown, businessId: string): Promise<string> {
+  private async assertContactInBusiness(
+    contactId: unknown,
+    businessId: string,
+    memberClause?: Prisma.ContactWhereInput,
+  ): Promise<string> {
     if (typeof contactId !== 'string' || contactId.length === 0) {
       throw new BadRequestException('contactId must be a non-empty string');
     }
+    const where: Prisma.ContactWhereInput = { id: contactId, businessId };
+    if (memberClause) where.AND = [memberClause];
     const contact = await this.prisma.client.contact.findFirst({
-      where: { id: contactId, businessId },
+      where,
       select: { id: true },
     });
     if (!contact) {
       throw new NotFoundException('Contact not found');
     }
     return contactId;
+  }
+
+  /**
+   * FOLLOW3-D6 (owner ruling D-64; R0-27 review ST-27-5): the contacts the
+   * acting member may open, by the rule GET contacts/:id applies
+   * (resolveCrmAccess + visibilityClause), as bookings create does since V1-06.
+   * Undefined when there is no member actor (KEY's system actor included) or
+   * the member sees every contact (OWNER, SUPER_ADMIN). resolveCrmAccess refuses a
+   * non-member 403 first.
+   *
+   * Applied today by updateQuote only. Every other bind (createInvoice,
+   * createQuote, the convert re-check, updateInvoice) is also reached by a
+   * granted KEY tool whose dispatcher passes no actor (commerce_create_invoice,
+   * commerce_create_quote, commerce_convert_quote, commerce_update_invoice), so
+   * applying the clause there makes KEY bind what HTTP refuses: the K2
+   * derivation in job-role-tool-families.spec.ts (CRM_ROW_VISIBILITY_TOOLS)
+   * fails. Those binds wait for an owner decision (withhold the tools from KEY
+   * positions, or a holder-aware dispatcher), and existing suites pin their
+   * pre-D-64 answers (commerce-contact-bind-visibility.integration.test.ts).
+   */
+  private async memberContactClause(businessId: string, actorUserId?: string): Promise<Prisma.ContactWhereInput | undefined> {
+    if (!actorUserId || isSystemActor(actorUserId)) return undefined;
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    return (visibilityClause(access, actorUserId) as Prisma.ContactWhereInput | null) ?? undefined;
   }
 
   /**
@@ -868,6 +930,8 @@ export class CommerceService {
     total?: number;
     /** V1-45 (D-15): the client's Idempotency-Key. The same key and request answer the invoice it created. */
     idempotencyKey?: string;
+    /** V1-45b (SEC-V45-3): the member who sent the request; part of the key's request hash. */
+    actorUserId?: string;
   }) {
     // V1-45 (M22): a retry with a used key is answered before anything else runs.
     const claim = createClaim('invoice', input.idempotencyKey, {
@@ -883,6 +947,7 @@ export class CommerceService {
       subtotal: input.subtotal ?? null,
       taxAmount: input.taxAmount ?? null,
       total: input.total ?? null,
+      ...createActorMaterial(input.actorUserId),
     });
     const loadCreated = (id: string) =>
       this.prisma.client.invoice.findFirst({ where: { id, businessId: input.businessId }, include: { items: true, contact: true } });
@@ -1004,15 +1069,12 @@ export class CommerceService {
     return { data, total, page, pageSize, totalPages: Math.ceil(total / pageSize) };
   }
 
-  async bulkUpdateInvoices(businessId: string, ids: string[], action: 'send' | 'void' | 'delete') {
+  async bulkUpdateInvoices(businessId: string, rawIds: unknown, action: 'send' | 'void' | 'delete') {
+    // FOLLOW3-B6 review SEC-B6-2: checked before any read (requireInvoiceBulkIds).
+    const ids = CommerceService.requireInvoiceBulkIds(rawIds);
     if (action === 'delete') {
-      // Delete is not a state transition; gated by status check.
-      const result = await this.prisma.client.invoice.updateMany({
-        where: { id: { in: ids }, businessId, deletedAt: null, status: { notIn: ['PAID', 'PARTIALLY_PAID'] } },
-        data: { deletedAt: new Date() },
-      });
-      this.statsCache.invalidateCache(businessId);
-      return { updated: result.count, action };
+      // Delete is not a state transition (FOLLOW3-B6, D-66: bulkDeleteInvoices).
+      return this.bulkDeleteInvoices(businessId, ids);
     }
     // 'send' / 'void' route through the workflow so the state machine is
     // enforced per-row; illegal transitions silently no-op (the bulk caller
@@ -1157,24 +1219,149 @@ export class CommerceService {
     return { updated, action: bulkAction, skipped, skippedCount: skipped.length };
   }
 
+  /**
+   * FOLLOW3-B6 (owner ruling D-66): only a DRAFT or a VOID invoice may be
+   * deleted; an issued invoice is voided first (the void reverses its
+   * recognition). The guard was PAID / PARTIALLY_PAID alone, and a delete
+   * reverses nothing, while every reader (listInvoices, receivables, aging)
+   * drops a deleted invoice: an ACCRUAL invoice of 100 sent and deleted left
+   * AR 100 in the trial balance for an invoice nothing listed, and an OVERDUE
+   * or FAILED invoice with 40 received left that cash (and AR 60, or CASH
+   * income 40) against a deleted document. The refusal (409, nothing written,
+   * no invoice.deleted) names the status and the remedy (invoiceDeleteRefusal).
+   */
   async deleteInvoice(invoiceId: string, businessId: string) {
-    const invoice = await this.prisma.client.invoice.findFirst({
-      where: { id: invoiceId, businessId },
-    });
-    if (!invoice) {
+    const outcome = await this.softDeleteInvoiceRow(invoiceId, businessId, { liveOnly: false });
+    if (outcome.kind === 'missing') {
       throw new NotFoundException('Invoice not found');
     }
-    if (invoice.status === 'PAID' || invoice.status === 'PARTIALLY_PAID') {
+    if (outcome.kind === 'refused') {
       // R0-D3: a state guard is a 409, not a 500.
-      throw new ConflictException('Cannot delete a paid or partially paid invoice');
+      throw new ConflictException(outcome.reason);
     }
-    const result = await this.prisma.client.invoice.update({
-      where: { id: invoiceId },
-      data: { deletedAt: new Date() },
-    });
     this.events.emit('invoice.deleted', { businessId, invoiceId });
     this.statsCache.invalidateCache(businessId);
-    return result;
+    return outcome.row;
+  }
+
+  /**
+   * FOLLOW3-B6 (owner ruling D-66): the bulk and KEY delete deletes only what
+   * the single DELETE deletes, row by row through the same locked check
+   * (softDeleteInvoiceRow): a DRAFT or VOID invoice that holds no money
+   * received and no issued recognition. It was one updateMany over
+   * `status notIn [PAID, PARTIALLY_PAID]`, so a SENT invoice with its
+   * receivable posted, or an OVERDUE one with money received, was soft-deleted
+   * with both left in the books. Each refused row is listed in `skipped` with
+   * its status and the single route's reason, as bulk quote delete lists its
+   * own; ids of another business, unknown or already deleted are left out, as
+   * before, and no invoice.deleted is emitted, as before.
+   */
+  private async bulkDeleteInvoices(businessId: string, ids: string[]) {
+    const candidates = await this.prisma.client.invoice.findMany({
+      where: { id: { in: ids }, businessId, deletedAt: null },
+      select: { id: true },
+    });
+    let updated = 0;
+    const skipped: Array<{ id: string; invoiceStatus: string; reason: string }> = [];
+    for (const row of candidates) {
+      const outcome = await this.softDeleteInvoiceRow(row.id, businessId, { liveOnly: true });
+      if (outcome.kind === 'deleted') updated++;
+      else if (outcome.kind === 'refused') skipped.push({ id: row.id, invoiceStatus: outcome.status, reason: outcome.reason });
+    }
+    this.statsCache.invalidateCache(businessId);
+    return { updated, action: 'delete' as const, skipped, skippedCount: skipped.length };
+  }
+
+  /**
+   * FOLLOW3-B6 review SEC-B6-2: the ids of a bulk invoice request, or a 400
+   * (invoice_bulk_ids_required) unless they are a non-empty array of non-empty
+   * strings, as quotes check theirs (requireQuoteBulkRequest). The route's
+   * body is a plain type, so the ValidationPipe checks nothing, and Prisma
+   * drops `id: { in: undefined }`: a request naming no invoice reached every
+   * invoice of the business (a delete deleted every clean DRAFT and VOID one,
+   * a void voided every voidable one), and null or [123] answered 500.
+   */
+  private static requireInvoiceBulkIds(ids: unknown): string[] {
+    if (!Array.isArray(ids) || ids.length === 0 || !ids.every((id) => typeof id === 'string' && id.length > 0)) {
+      throw new BadRequestException({
+        code: 'invoice_bulk_ids_required',
+        message: 'ids must be a non-empty array of invoice ids.',
+      });
+    }
+    return ids as string[];
+  }
+
+  /**
+   * FOLLOW3-B6 (D-66): the soft delete of one invoice, shared by the single
+   * DELETE (deleteInvoice), the bulk / KEY delete (bulkUpdateInvoices) and the
+   * AI undo of a DRAFT (undoInvoice, review SEC-B6-1). One
+   * transaction that first takes the invoice row lock every money door takes
+   * (lockInvoiceForPayment) and decides on the row and its payments as they
+   * stand under it, so a payment, a Send or a void that commits meanwhile is
+   * either seen or waits for the delete. `liveOnly` (bulk) leaves an invoice
+   * already deleted alone; the single route re-stamps one, as before. Emits
+   * nothing: the caller does, after the commit.
+   */
+  private async softDeleteInvoiceRow(invoiceId: string, businessId: string, opts: { liveOnly: boolean }) {
+    return this.prisma.client.$transaction(async (tx) => {
+      const txClient = tx as unknown as Prisma.TransactionClient;
+      const locked = await CommerceService.lockInvoiceForPayment(txClient, invoiceId);
+      if (!locked || locked.businessId !== businessId) return { kind: 'missing' as const };
+      const invoice = await tx.invoice.findFirst({
+        where: { id: invoiceId, businessId, ...(opts.liveOnly ? { deletedAt: null } : {}) },
+      });
+      if (!invoice) return { kind: 'missing' as const };
+      const reason = await CommerceService.invoiceDeleteRefusal(txClient, invoice);
+      if (reason) return { kind: 'refused' as const, status: invoice.status, reason };
+      const row = await tx.invoice.update({ where: { id: invoiceId }, data: { deletedAt: new Date() } });
+      return { kind: 'deleted' as const, row };
+    });
+  }
+
+  /**
+   * FOLLOW3-B6 (owner ruling D-66): why this invoice may not be deleted, or
+   * null when it may. Read on the delete's transaction, under the invoice row
+   * lock. Deletable: a DRAFT or VOID invoice that holds no money received net
+   * of refunds (balanceOfStoredRows over its own-tenant Payment rows) and, for
+   * a DRAFT, no issued recognition or credit note (holdsIssuedMoney: the AI
+   * undo returns an issued invoice to DRAFT with its recognition kept, as
+   * D-60 reads it, FOLLOW3-B2). Refused:
+   *  - PAID and PARTIALLY_PAID, with the message they always had;
+   *  - money received on it: refund it first (then void it, when it may be
+   *    voided); a VOID invoice still holding money (voided before FOLLOW3-B1
+   *    closed that door) is refused too;
+   *  - any other issued invoice: void it first (DRAFT, SENT, PENDING, OVERDUE
+   *    and FAILED may be voided, and the void reverses the recognition); a
+   *    credited invoice cannot be voided and stays on the books.
+   */
+  private static async invoiceDeleteRefusal(
+    tx: Prisma.TransactionClient,
+    invoice: { id: string; businessId: string; status: string; total: number; currency: string | null },
+  ): Promise<string | null> {
+    if (invoice.status === 'PAID' || invoice.status === 'PARTIALLY_PAID') {
+      return 'Cannot delete a paid or partially paid invoice';
+    }
+    const payments = await tx.payment.findMany({
+      where: { invoiceId: invoice.id, businessId: invoice.businessId },
+      select: { amount: true, status: true },
+    });
+    const { net } = balanceOfStoredRows(Number(invoice.total), payments, invoice.currency);
+    const holdsMoney = net > 0;
+    const returnedToDraft = invoice.status === 'DRAFT' && (await CommerceService.holdsIssuedMoney(tx, invoice));
+    const deletableStatus = invoice.status === 'DRAFT' || invoice.status === 'VOID';
+    if (deletableStatus && !holdsMoney && !returnedToDraft) return null;
+
+    const article = /^[AEIOU]/.test(invoice.status) ? 'an' : 'a';
+    const what = returnedToDraft ? 'an issued invoice returned to DRAFT' : `${article} ${invoice.status} invoice`;
+    const mayVoid = invoice.status !== 'VOID' && isLegalTransition(invoice.status as InvoiceStatus, 'VOID');
+    if (holdsMoney) {
+      const received = `${normalizeCurrency(invoice.currency)} ${net.toFixed(2)}`;
+      return `Cannot delete ${what}: it holds ${received} received; refund the money received first${mayVoid ? ', then void it' : ''}`;
+    }
+    if (returnedToDraft) {
+      return `Cannot delete ${what}: its issued total is still on the books; void it first`;
+    }
+    return `Cannot delete ${what}: only DRAFT and VOID invoices can be deleted${mayVoid ? '; void it first' : ''}`;
   }
 
   /**
@@ -1192,6 +1379,12 @@ export class CommerceService {
    * whether money is on the invoice (an OVERDUE or FAILED invoice may carry a
    * payment). The invoice's payments and its accrual recognition are left as
    * they are; re-issuing it posts nothing twice.
+   *
+   * FOLLOW3-B6 review SEC-B6-1 (D-66): the undo of a DRAFT is a delete, so it
+   * takes the delete's locked check (softDeleteInvoiceRow). A DRAFT an earlier
+   * undo returned from an issued status still holds its recognition or the
+   * money received on it, and is refused 409 as the DELETE route refuses it;
+   * it soft-deleted any DRAFT, leaving that AR, income and cash in the books.
    */
   async undoInvoice(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
@@ -1202,10 +1395,9 @@ export class CommerceService {
       throw new NotFoundException('Invoice not found');
     }
     if (invoice.status === 'DRAFT') {
-      await this.prisma.client.invoice.update({
-        where: { id: invoiceId },
-        data: { deletedAt: new Date() },
-      });
+      const outcome = await this.softDeleteInvoiceRow(invoiceId, businessId, { liveOnly: false });
+      if (outcome.kind === 'missing') throw new NotFoundException('Invoice not found');
+      if (outcome.kind === 'refused') throw new ConflictException(outcome.reason);
       return { id: invoiceId, status: 'deleted' };
     }
     const reverted = await this.invoiceWorkflow.returnToDraftOnUndo(invoiceId);
@@ -1350,6 +1542,41 @@ export class CommerceService {
         ? (membership.permissionScopes as Record<string, string>)
         : defaultScopesForRole(membership.role);
     return rankOf(scopes.revenue || 'none') >= LEVEL_RANK.read;
+  }
+
+  /**
+   * FOLLOW3-A1-D46-COMMERCE-WRITES review (SEC-A1-1): the authority check of a
+   * human actor on the bare-id writes (markInvoicePaid,
+   * markInvoicePaymentFailed, updateInvoiceStatus, updateQuoteStatus). Their
+   * routes carry no :businessId and ModuleScopeGuard admits SUPER_ADMIN without
+   * a scope, so this is that role's only barrier there and on ai-execute. It
+   * used to require only that a Membership exist, so a SUPER_ADMIN member whose
+   * revenue level was read or none marked invoices paid, voided them and moved
+   * quote status, where every guarded twin refused it (FOLLOW3-A2: a membership
+   * alone is not enough). It is now ModuleScopeGuard's legacy rule, restated as
+   * payment-evidence.service.ts and CommerceController do: the Membership in
+   * `businessId` (the document's own) whose scope map, or without one the role
+   * defaults, holds revenue:write. No membership keeps its answer ('Not
+   * authorized to update this invoice' / '... quote'); one below write gets the
+   * guard's message. Every other human caller already passed the guard's
+   * revenue:write check on the same business, so its outcome is unchanged.
+   * The lookup stays findFirst on (businessId, userId), as before.
+   */
+  private async assertActorMayWriteRevenue(businessId: string, actorId: string, subject: 'invoice' | 'quote'): Promise<void> {
+    const membership = await this.prisma.client.membership.findFirst({
+      where: { businessId, userId: actorId },
+    });
+    if (!membership) {
+      throw new ForbiddenException(`Not authorized to update this ${subject}`);
+    }
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
+    }
   }
 
   /**
@@ -1525,12 +1752,8 @@ export class CommerceService {
         throw new ForbiddenException('Not authorized to update this invoice');
       }
     } else if (actorId) {
-      const membership = await this.prisma.client.membership.findFirst({
-        where: { businessId: existingInvoice.businessId, userId: actorId },
-      });
-      if (!membership) {
-        throw new ForbiddenException('Not authorized to update this invoice');
-      }
+      // SEC-A1-1: a Membership holding revenue:write, not a Membership alone.
+      await this.assertActorMayWriteRevenue(existingInvoice.businessId, actorId, 'invoice');
     }
     const reload = () =>
       this.prisma.client.invoice.findUnique({
@@ -1667,12 +1890,8 @@ export class CommerceService {
       throw new NotFoundException('Invoice not found');
     }
     if (actorId) {
-      const membership = await this.prisma.client.membership.findFirst({
-        where: { businessId: existingInvoice.businessId, userId: actorId },
-      });
-      if (!membership) {
-        throw new ForbiddenException('Not authorized to update this invoice');
-      }
+      // SEC-A1-1: a Membership holding revenue:write, not a Membership alone.
+      await this.assertActorMayWriteRevenue(existingInvoice.businessId, actorId, 'invoice');
     }
     // V1-42 review (CR-V42-1): a failed attempt on an invoice that is already
     // FAILED (a second attempt failed, or a concurrent report of a failure won
@@ -1771,12 +1990,8 @@ export class CommerceService {
       throw new NotFoundException('Quote not found');
     }
     if (params.actorId) {
-      const membership = await this.prisma.client.membership.findFirst({
-        where: { businessId: existingQuote.businessId, userId: params.actorId },
-      });
-      if (!membership) {
-        throw new ForbiddenException('Not authorized to update this quote');
-      }
+      // SEC-A1-1: a Membership holding revenue:write, not a Membership alone.
+      await this.assertActorMayWriteRevenue(existingQuote.businessId, params.actorId, 'quote');
     }
     const now = new Date();
     // R0-CMF3 review (ST-CMF3-1, CR-CMF3-1): the status route, send-email and
@@ -2255,12 +2470,8 @@ export class CommerceService {
         throw new ForbiddenException('Not authorized to update this invoice');
       }
     } else if (params.actorId) {
-      const membership = await this.prisma.client.membership.findFirst({
-        where: { businessId: existingInvoice.businessId, userId: params.actorId },
-      });
-      if (!membership) {
-        throw new ForbiddenException('Not authorized to update this invoice');
-      }
+      // SEC-A1-1: a Membership holding revenue:write, not a Membership alone.
+      await this.assertActorMayWriteRevenue(existingInvoice.businessId, params.actorId, 'invoice');
     }
     // V1-42-DM-LIFECYCLE-OWNER-CAS: asking for the status the invoice already
     // holds is answered idempotently (the send-email of a DRAFT that another
@@ -2687,6 +2898,8 @@ export class CommerceService {
     quoteNumber?: string;
     /** V1-45 (D-15): the client's Idempotency-Key. The same key and request answer the quote it created. */
     idempotencyKey?: string;
+    /** V1-45b (SEC-V45-3): the member who sent the request; part of the key's request hash. */
+    actorUserId?: string;
   }) {
     // V1-45 (M22): a retry with a used key is answered before anything else runs.
     const claim = createClaim('quote', input.idempotencyKey, {
@@ -2699,6 +2912,7 @@ export class CommerceService {
       discountValue: input.discountValue ?? null,
       notes: input.notes ?? null,
       quoteNumber: input.quoteNumber ?? null,
+      ...createActorMaterial(input.actorUserId),
     });
     const loadCreated = (id: string) =>
       this.prisma.client.quote.findFirst({ where: { id, businessId: input.businessId }, include: { items: true, contact: true } });
@@ -2810,6 +3024,12 @@ export class CommerceService {
     discountType?: 'PERCENT' | 'FIXED';
     discountValue?: number;
     notes?: string;
+    /**
+     * FOLLOW3-D6 (D-64): the member who edits; a contactId other than the
+     * stored one must be one they may open (memberContactClause). None, or
+     * KEY's system actor: the tenant check alone.
+     */
+    actorUserId?: string;
   }) {
     const quote = await this.prisma.client.quote.findFirst({
       where: { id: input.quoteId, businessId: input.businessId },
@@ -2831,7 +3051,16 @@ export class CommerceService {
 
     const updateData: any = {};
     // R0-27 review (ST-27-2): same tenant check as quote create, before any write.
-    if (input.contactId) updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
+    if (input.contactId) {
+      // FOLLOW3-D6 (D-64): a new contact must be one the editing member may
+      // open. The stored one is not re-judged (review CR-D6-2): every web edit
+      // (Extend expiry, the composer) sends it back, and refusing it would
+      // block a notes or dates edit of a quote already bound to a contact the
+      // member cannot open, which the same PATCH without contactId allows.
+      const memberClause =
+        input.contactId === quote.contactId ? undefined : await this.memberContactClause(input.businessId, input.actorUserId);
+      updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId, memberClause);
+    }
     // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
     if (input.currency) updateData.currency = await this.documentCurrency(input.businessId, input.currency);
     if (input.expiryDate !== undefined) {
@@ -3216,7 +3445,9 @@ export class CommerceService {
     /**
      * R0-PL-04: Payment.provider when it is not the method. markInvoicePaid
      * keeps its historical row shape (provider 'manual', method 'MANUAL').
-     * Internal: an option, never part of `input`. Default: the method.
+     * Internal: an option, never part of `input`. Default: the method, except
+     * that a gateway id ('stripe', 'paypal', 'wipay' exactly) is stored as
+     * 'manual' (D-55, GATEWAY_PROVIDER_IDS).
      */
     provider?: string;
     /**
@@ -3366,7 +3597,8 @@ export class CommerceService {
             amount: paymentAmount,
             currency: invoice.currency,
             status: 'SUCCESSFUL',
-            provider: options.provider ?? input.method,
+            // D-55: a hand-recorded gateway method is never a gateway row.
+            provider: options.provider ?? (GATEWAY_PROVIDER_IDS.has(input.method) ? 'manual' : input.method),
             method: input.method,
             providerPaymentId: providerPaymentId.value,
             reference: input.reference ?? null,
@@ -4374,133 +4606,295 @@ export class CommerceService {
       });
     }
 
-    const updateData: any = {};
-    if (input.contactId !== undefined) {
-      // R0-D3 review (ST-D3-1): the id is bound to the row and the row is
-      // returned with `include: { contact: true }`, so an id from another
-      // tenant both bound a foreign reference and disclosed that tenant's
-      // contact (email, phone, notes, every field). Resolve it inside the
-      // caller's tenant first; a foreign, deleted or unknown id answers like
-      // a missing one, and nothing is written.
-      updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
-    }
+    // R0-D3 review (ST-D3-1): the id is bound to the row and the row is
+    // returned with `include: { contact: true }`, so an id from another
+    // tenant both bound a foreign reference and disclosed that tenant's
+    // contact (email, phone, notes, every field). Resolve it inside the
+    // caller's tenant first; a foreign, deleted or unknown id answers like
+    // a missing one, and nothing is written.
+    const contactId =
+      input.contactId !== undefined ? await this.assertContactInBusiness(input.contactId, input.businessId) : undefined;
     // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
-    if (input.currency !== undefined) {
-      const currency = await this.documentCurrency(input.businessId, input.currency);
-      // V1-37 review (ST-V37-1): the currency is fixed once the invoice leaves
-      // DRAFT. Issuing posts accounts receivable in the invoice's currency
-      // (accrual), and that posting is idempotent on its key, so a SENT USD
-      // invoice switched to TTD took its payment in TTD while the USD
-      // receivable stayed open for ever. Restating the stored currency is not
-      // a change (an edit form sends the whole document) and stays allowed.
-      if (currency !== normalizeCurrency(invoice.currency) && invoice.status !== 'DRAFT') {
-        throw new ConflictException(
-          `Cannot change the currency of a ${invoice.status} invoice: the currency is fixed once the invoice is issued`,
-        );
-      }
-      updateData.currency = currency;
-    }
-    if (input.dueDate !== undefined) {
-      updateData.dueDate = input.dueDate ? new Date(input.dueDate) : null;
-    }
-    if (input.notes !== undefined) updateData.notes = input.notes;
+    const currency = input.currency !== undefined ? await this.documentCurrency(input.businessId, input.currency) : undefined;
 
-    if (input.items) {
-      // R0-D3 review (ST-D3-2): InvoiceItem.productId is an FK to Product with
-      // no tenant check, so a line could bind another tenant's product and
-      // downstream catalog/inventory consumers of invoice_items.product_id
-      // would act on it. Every referenced product must resolve inside the
-      // caller's tenant before the existing items are deleted below, so a
-      // denied path writes nothing. The validated set is exactly the set
-      // written: an empty productId is "no product", never an FK value.
-      const productIds = Array.from(
-        new Set(
-          input.items
-            .map((item) => item.productId)
-            .filter((id): id is string => typeof id === 'string' && id.length > 0),
-        ),
-      );
-      if (productIds.length > 0) {
-        const products = await this.prisma.client.product.findMany({
-          where: { id: { in: productIds }, businessId: input.businessId },
-          select: { id: true },
-        });
-        if (products.length !== productIds.length) {
-          throw new NotFoundException('Product not found');
+    // FOLLOW3-B2 review (SEC-B2-2, B2-CR-2): the edit is one transaction that
+    // first takes the invoice row lock every money door takes (SELECT ... FOR
+    // NO KEY UPDATE, lockInvoiceForPayment) and re-reads the invoice under it,
+    // and every guard below decides on that row, not on the read above. The
+    // edit used to decide "DRAFT" on that earlier read, then delete the lines
+    // and write the new lines and total by id alone, so a Send that committed
+    // in between (a double submit, a second member, KEY sending while a person
+    // edits) left a SENT invoice whose total was not the receivable the Send
+    // had posted. Now a Send's status write (InvoiceWorkflowService.transition)
+    // waits for the edit to commit and posts the edited total, and an edit
+    // that waited for a Send reads SENT and is held to D-60 below.
+    const { result, previousDueDate } = await this.prisma.client.$transaction(async (tx) => {
+      const txClient = tx as unknown as Prisma.TransactionClient;
+      const locked = await CommerceService.lockInvoiceForPayment(txClient, input.invoiceId);
+      if (!locked || locked.businessId !== input.businessId) {
+        throw new NotFoundException('Invoice not found');
+      }
+      const current = await tx.invoice.findFirst({ where: { id: input.invoiceId, businessId: input.businessId } });
+      if (!current) {
+        throw new NotFoundException('Invoice not found');
+      }
+      if (current.status === 'PAID' || current.status === 'PARTIALLY_PAID') {
+        throw new ConflictException('Cannot edit a paid or partially paid invoice');
+      }
+      // FOLLOW3-B2 review (SEC-B2-1, B2-CR-1): an invoice is issued when it
+      // has left DRAFT, or when it is a DRAFT whose issued total the ledger or
+      // a credit note still holds (holdsIssuedMoney): the AI undo returns an
+      // issued invoice to DRAFT and leaves its recognition in place. That is
+      // read only when the edit names the currency or the amounts.
+      const touchesMoney =
+        currency !== undefined ||
+        input.items !== undefined ||
+        input.taxRate !== undefined ||
+        input.discountType !== undefined ||
+        input.discountValue !== undefined;
+      const issued =
+        current.status !== 'DRAFT' || (touchesMoney && (await CommerceService.holdsIssuedMoney(txClient, current)));
+      const issuedAs = current.status === 'DRAFT' ? 'an issued invoice returned to DRAFT' : `a ${current.status} invoice`;
+
+      const updateData: any = {};
+      if (contactId !== undefined) updateData.contactId = contactId;
+      if (currency !== undefined) {
+        // V1-37 review (ST-V37-1): the currency is fixed once the invoice is
+        // issued. Issuing posts accounts receivable in the invoice's currency
+        // (accrual), and that posting is idempotent on its key, so a SENT USD
+        // invoice switched to TTD took its payment in TTD while the USD
+        // receivable stayed open for ever. Restating the stored currency is
+        // not a change (an edit form sends the whole document) and stays
+        // allowed.
+        if (currency !== normalizeCurrency(current.currency) && issued) {
+          throw new ConflictException(`Cannot change the currency of ${issuedAs}: the currency is fixed once the invoice is issued`);
         }
+        updateData.currency = currency;
       }
-      const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
-      const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
-      const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
-      // V1-22 (D-13): in integer cents, the same rules as create.
-      const amounts = computeDocumentAmounts({
-        lines: input.items.map((item) => lineAmount(item.quantity, item.unitPrice)),
-        taxRate,
-        discountType,
-        discountValue,
-      });
-      const { subtotal, taxAmount, discountAmount, total } = amounts;
-      // R0-27 review (ST-27-3): the same amount rules as create, checked before
-      // the existing items are deleted, so a refused edit writes nothing.
-      this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
-      await this.prisma.client.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
+      if (input.dueDate !== undefined) {
+        updateData.dueDate = input.dueDate ? new Date(input.dueDate) : null;
+      }
+      if (input.notes !== undefined) updateData.notes = input.notes;
 
-      updateData.subtotal = subtotal;
-      updateData.taxRate = taxRate;
-      updateData.taxAmount = taxAmount;
-      updateData.discountType = discountType;
-      updateData.discountValue = discountValue;
-      updateData.discountAmount = discountAmount;
-      updateData.total = total;
-      updateData.items = {
-        create: input.items.map((item, i) => ({
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          total: amounts.lineTotals[i],
-          productId: item.productId || null,
-        })),
-      };
-    } else if (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined) {
-      const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
-      const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
-      const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
-      // V1-22 (D-13): recomputed in cents from the stored subtotal (a legacy
-      // row may hold the raw float sum; it is rewritten in cents with the rest).
-      const { subtotal, taxAmount, discountAmount, total } = computeDocumentAmounts({
-        lines: [invoice.subtotal],
-        taxRate,
-        discountType,
-        discountValue,
-      });
-      // R0-27 review (ST-27-3): a FIXED discount above the stored subtotal is refused.
-      this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
-      updateData.subtotal = subtotal;
-      updateData.taxRate = taxRate;
-      updateData.taxAmount = taxAmount;
-      updateData.discountType = discountType;
-      updateData.discountValue = discountValue;
-      updateData.discountAmount = discountAmount;
-      updateData.total = total;
-    }
+      // FOLLOW3-B2 (owner ruling D-60): once the invoice is issued its lines,
+      // tax and discount are fixed, as its currency is (ST-V37-1 above).
+      // Issuing posted its receivable (accrual) at the stored total,
+      // idempotently, and the payment reconcile settles against that total: an
+      // edit rewrote the lines and total of a SENT, OVERDUE, FAILED, PENDING or
+      // VOID invoice and neither re-posted nor reconciled, so an ACCRUAL
+      // receivable of 100 edited to 80 and paid stayed at 20, and a CASH
+      // invoice paid 60 and edited to 50 stayed OVERDUE. A change is refused
+      // (409) before anything is written; a correction is a void-and-reissue
+      // or a credit note (D-28). Restating the stored lines and terms (an edit
+      // form sends the whole document) is not a change: it passes, and neither
+      // branch below runs, so the stored lines (their productIds included,
+      // which the web form omits) and every amount are left exactly as they
+      // are.
+      if (issued) await this.assertIssuedInvoiceAmountsRestated(txClient, current, issuedAs, input);
 
-    const result = await this.prisma.client.invoice.update({
-      where: { id: input.invoiceId },
-      data: updateData,
-      include: { items: true, contact: true },
+      if (input.items && !issued) {
+        // R0-D3 review (ST-D3-2): InvoiceItem.productId is an FK to Product with
+        // no tenant check, so a line could bind another tenant's product and
+        // downstream catalog/inventory consumers of invoice_items.product_id
+        // would act on it. Every referenced product must resolve inside the
+        // caller's tenant before the existing items are deleted below, so a
+        // denied path writes nothing. The validated set is exactly the set
+        // written: an empty productId is "no product", never an FK value.
+        const productIds = Array.from(
+          new Set(
+            input.items
+              .map((item) => item.productId)
+              .filter((id): id is string => typeof id === 'string' && id.length > 0),
+          ),
+        );
+        if (productIds.length > 0) {
+          const products = await tx.product.findMany({
+            where: { id: { in: productIds }, businessId: input.businessId },
+            select: { id: true },
+          });
+          if (products.length !== productIds.length) {
+            throw new NotFoundException('Product not found');
+          }
+        }
+        const taxRate = input.taxRate ?? current.taxRate ?? 0;
+        const discountType = input.discountType !== undefined ? input.discountType : current.discountType;
+        const discountValue = input.discountValue !== undefined ? input.discountValue : current.discountValue;
+        // V1-22 (D-13): in integer cents, the same rules as create.
+        const amounts = computeDocumentAmounts({
+          lines: input.items.map((item) => lineAmount(item.quantity, item.unitPrice)),
+          taxRate,
+          discountType,
+          discountValue,
+        });
+        const { subtotal, taxAmount, discountAmount, total } = amounts;
+        // R0-27 review (ST-27-3): the same amount rules as create, checked before
+        // the existing items are deleted, so a refused edit writes nothing.
+        this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+        await tx.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
+
+        updateData.subtotal = subtotal;
+        updateData.taxRate = taxRate;
+        updateData.taxAmount = taxAmount;
+        updateData.discountType = discountType;
+        updateData.discountValue = discountValue;
+        updateData.discountAmount = discountAmount;
+        updateData.total = total;
+        updateData.items = {
+          create: input.items.map((item, i) => ({
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            total: amounts.lineTotals[i],
+            productId: item.productId || null,
+          })),
+        };
+      } else if (!issued && (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined)) {
+        const taxRate = input.taxRate ?? current.taxRate ?? 0;
+        const discountType = input.discountType !== undefined ? input.discountType : current.discountType;
+        const discountValue = input.discountValue !== undefined ? input.discountValue : current.discountValue;
+        // V1-22 (D-13): recomputed in cents from the stored subtotal (a legacy
+        // row may hold the raw float sum; it is rewritten in cents with the rest).
+        const { subtotal, taxAmount, discountAmount, total } = computeDocumentAmounts({
+          lines: [current.subtotal],
+          taxRate,
+          discountType,
+          discountValue,
+        });
+        // R0-27 review (ST-27-3): a FIXED discount above the stored subtotal is refused.
+        this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+        updateData.subtotal = subtotal;
+        updateData.taxRate = taxRate;
+        updateData.taxAmount = taxAmount;
+        updateData.discountType = discountType;
+        updateData.discountValue = discountValue;
+        updateData.discountAmount = discountAmount;
+        updateData.total = total;
+      }
+
+      const updated = await tx.invoice.update({
+        where: { id: input.invoiceId },
+        data: updateData,
+        include: { items: true, contact: true },
+      });
+      return { result: updated, previousDueDate: current.dueDate };
     });
-    const prevDue = invoice.dueDate ? new Date(invoice.dueDate).getTime() : null;
+    // Events and the cache follow the commit, so no listener reads a refused
+    // or rolled-back edit.
+    const prevDue = previousDueDate ? new Date(previousDueDate).getTime() : null;
     const newDue = result.dueDate ? new Date(result.dueDate).getTime() : null;
     if (input.dueDate !== undefined && prevDue !== newDue) {
       this.events.emit('invoice.due_date_changed', {
         invoice: result,
         businessId: input.businessId,
-        previousDueDate: invoice.dueDate ?? null,
+        previousDueDate: previousDueDate ?? null,
       });
     }
     this.events.emit('invoice.updated', { invoice: result, businessId: input.businessId });
     this.statsCache.invalidateCache(input.businessId);
     return result;
+  }
+
+  /**
+   * FOLLOW3-B2 review (SEC-B2-1, B2-CR-1): whether the ledger or a credit note
+   * holds the invoice's issued total: a posting sourced on the invoice (its
+   * accrual recognition, Invoice:<id>:invoice_finalized, or any other), or a
+   * credit note issued against it (D-28). A DRAFT holding either was issued
+   * and then returned to DRAFT by the AI undo (CommerceService.undoInvoice ->
+   * InvoiceWorkflowService.returnToDraftOnUndo), which writes the status alone
+   * and leaves them in place. Re-pricing it left the posted receivable at the
+   * old total, and sending it again posts nothing (onInvoiceFinalized is
+   * idempotent per invoice): ACCRUAL 100 undone, edited to 80, re-sent and
+   * paid left 20.00 of receivable open, and an undone PAID ACCRUAL invoice
+   * escaped the paid-invoice guard the same way. Such an invoice keeps its
+   * amounts and currency as an issued one does (D-60).
+   *
+   * A payment alone is not such a record. On the CASH basis a payment posts
+   * the money it received (sourced on the payment, not the invoice), nothing
+   * stands at the old total, and the next payment door reconciles against the
+   * edited one: paid, undone, edited, re-issued and marked paid again is a
+   * pinned flow (payments-mark-paid MP-16, R0-PL-04 review CR-PL04-2). A DRAFT
+   * never issued, or a CASH one undone (with or without payments), stays
+   * editable. Read on the edit's transaction under the invoice row lock, which
+   * the credit-note writers take and the status writers wait for.
+   */
+  private static async holdsIssuedMoney(
+    tx: Prisma.TransactionClient,
+    invoice: { id: string; businessId: string },
+  ): Promise<boolean> {
+    const businessId = invoice.businessId;
+    const posting = await tx.financialTransaction.findFirst({
+      where: { businessId, sourceType: 'Invoice', sourceId: invoice.id },
+      select: { id: true },
+    });
+    if (posting) return true;
+    const creditNote = await tx.creditNote.findFirst({ where: { businessId, invoiceId: invoice.id }, select: { id: true } });
+    return Boolean(creditNote);
+  }
+
+  /**
+   * FOLLOW3-B2 (owner ruling D-60): an edit of an issued invoice (one that
+   * left DRAFT, or a DRAFT whose issued total is still held: holdsIssuedMoney)
+   * may restate its lines, tax and discount but not change them. `issuedAs`
+   * names it in the refusal ("a SENT invoice", "an issued invoice returned to
+   * DRAFT"). Throws 409 unless:
+   *  - the effective tax rate (a sent one, else the stored one, as the edit
+   *    applies it) equals the stored one;
+   *  - the effective discount equals the stored one, where "no discount" is
+   *    any type other than PERCENT / FIXED or a zero/absent value, as
+   *    computeDocumentAmounts prices it (the web form sends {null, null} for
+   *    "none" whatever type is stored);
+   *  - when lines are sent, they are the stored lines: as many, each matching
+   *    one stored line on description, quantity and unitPrice, and on
+   *    productId when it names one (an omitted or empty productId keeps the
+   *    stored one). Lines are matched in any order: invoice reads return them
+   *    unordered, and an edit form sends them back in the order it read.
+   * Read-only: it runs before any write, on the edit's transaction (the stored
+   * lines are read under the invoice row lock).
+   */
+  private async assertIssuedInvoiceAmountsRestated(
+    tx: Prisma.TransactionClient,
+    invoice: { id: string; taxRate: number | null; discountType: string | null; discountValue: number | null },
+    issuedAs: string,
+    input: {
+      items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
+      taxRate?: number;
+      discountType?: 'PERCENT' | 'FIXED' | null;
+      discountValue?: number | null;
+    },
+  ): Promise<void> {
+    const changed = () =>
+      new ConflictException(
+        `Cannot change the amounts of ${issuedAs}: its lines, tax and discount are fixed once it is issued; ` +
+          'correct it by voiding it and issuing a new invoice, or with a credit note',
+      );
+    if (Number(input.taxRate ?? invoice.taxRate ?? 0) !== Number(invoice.taxRate ?? 0)) throw changed();
+    const discount = (type: string | null | undefined, value: number | null | undefined) =>
+      (type === 'PERCENT' || type === 'FIXED') && value ? `${type}:${Number(value)}` : 'none';
+    const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
+    const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
+    if (discount(discountType, discountValue) !== discount(invoice.discountType, invoice.discountValue)) throw changed();
+
+    if (!input.items) return;
+    const stored = await tx.invoiceItem.findMany({
+      where: { invoiceId: invoice.id },
+      select: { description: true, quantity: true, unitPrice: true, productId: true },
+    });
+    if (input.items.length !== stored.length) throw changed();
+    // Lines naming a product are matched first, so an unnamed line (which
+    // matches any product) never takes the stored line a named one needs.
+    const names = (item: { productId?: string }) => typeof item.productId === 'string' && item.productId.length > 0;
+    const unmatched = [...stored];
+    for (const item of [...input.items.filter(names), ...input.items.filter((i) => !names(i))]) {
+      const at = unmatched.findIndex(
+        (line) =>
+          line.description === item.description &&
+          Number(line.quantity) === Number(item.quantity) &&
+          Number(line.unitPrice) === Number(item.unitPrice) &&
+          (!names(item) || line.productId === item.productId),
+      );
+      if (at < 0) throw changed();
+      unmatched.splice(at, 1);
+    }
   }
 
   /**

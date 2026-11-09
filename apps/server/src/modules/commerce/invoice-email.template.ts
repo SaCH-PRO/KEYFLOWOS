@@ -1,3 +1,67 @@
+import { fromCents, lineAmount, toCents } from './money';
+
+/**
+ * FOLLOW3-B5-EMAIL-LINE-TOTALS (VL-09; owner ruling D-13: cents at every
+ * boundary): one line of a customer document as the emails print it.
+ *
+ * `total` is the line total the document stores (InvoiceItem.total,
+ * QuoteItem.total): V1-22 writes it as lineAmount(quantity, unitPrice), the
+ * exact decimal product rounded half away from zero to cents, and the
+ * subtotal is the sum of those stored lines. The templates print it, so the
+ * printed lines add up to the printed Subtotal and agree with the public
+ * invoice page. They used to print the binary float product toFixed(2)
+ * (7 x 0.145 read TT$1.01 and 3 x 1.115 read TT$3.34 above a Subtotal of
+ * TT$4.37). A line without a stored total is printed as lineAmount(quantity,
+ * unitPrice).
+ */
+export interface DocumentEmailItem {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  /** The stored line total; absent, the line is lineAmount(quantity, unitPrice). */
+  total?: number | null;
+}
+
+/** A stored document line as the loaders return it (Prisma Float columns, or a slim projection). */
+export interface StoredDocumentLine {
+  description: string;
+  quantity: number | string;
+  unitPrice: number | string;
+  total?: number | string | null;
+}
+
+/**
+ * The lines handed to an email template: every builder (the invoice, reminder
+ * and resend-receipt emails, the invoice.paid receipt, the quote email) maps
+ * the stored rows through here, so each line carries its stored total.
+ */
+export function emailLineItems(items: ReadonlyArray<StoredDocumentLine> | null | undefined): DocumentEmailItem[] {
+  return (items ?? []).map((it) => ({
+    description: it.description,
+    quantity: Number(it.quantity),
+    unitPrice: Number(it.unitPrice),
+    ...(it.total != null ? { total: Number(it.total) } : {}),
+  }));
+}
+
+/** The line total an email prints: the stored total, or lineAmount(quantity, unitPrice) when there is none. */
+export function emailLineTotal(item: DocumentEmailItem): number {
+  if (item.total != null && Number.isFinite(item.total)) return item.total;
+  return lineAmount(item.quantity, item.unitPrice);
+}
+
+/**
+ * An amount's digits as the emails print them: its decimal value rounded half
+ * away from zero to cents (toCents / fromCents, money.ts), the rule the public
+ * invoice page's Intl formatting matches. A unit price of 0.145 reads 0.15 and
+ * a legacy stored total of 1.015 reads 1.02 (toFixed(2) on the binary value
+ * read 0.14 and 1.01). An absent or non-finite amount reads 0.00, as before.
+ */
+export function emailMoneyDigits(amount: number | null | undefined): string {
+  const cents = toCents(Number(amount) || 0);
+  return fromCents(Number.isFinite(cents) ? cents : 0).toFixed(2);
+}
+
 export interface InvoiceEmailData {
   businessName: string;
   businessLogo?: string | null;
@@ -8,7 +72,7 @@ export interface InvoiceEmailData {
   invoiceNumber: string;
   invoiceDate: string;
   dueDate?: string | null;
-  items: Array<{ description: string; quantity: number; unitPrice: number }>;
+  items: DocumentEmailItem[];
   subtotal: number;
   taxRate?: number | null;
   taxAmount?: number | null;
@@ -28,7 +92,7 @@ export interface InvoiceEmailData {
 
 function fmt(amount: number, currency: string) {
   const sym = currency === 'TTD' ? 'TT$' : currency === 'USD' ? '$' : `${currency} `;
-  return `${sym}${(amount || 0).toFixed(2)}`;
+  return `${sym}${emailMoneyDigits(amount)}`;
 }
 
 export function buildInvoiceEmailHtml(data: InvoiceEmailData): string {
@@ -56,7 +120,7 @@ export function buildInvoiceEmailHtml(data: InvoiceEmailData): string {
       <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb">${it.description}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:center">${it.quantity}</td>
       <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:right">${fmt(it.unitPrice, data.currency)}</td>
-      <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:right">${fmt(it.unitPrice * it.quantity, data.currency)}</td>
+      <td style="padding:10px 12px;border-bottom:1px solid #e5e7eb;text-align:right">${fmt(emailLineTotal(it), data.currency)}</td>
     </tr>`,
     )
     .join('');

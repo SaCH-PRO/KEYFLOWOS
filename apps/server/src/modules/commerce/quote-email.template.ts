@@ -1,3 +1,5 @@
+import { emailLineTotal, emailMoneyDigits, type DocumentEmailItem } from './invoice-email.template';
+
 interface QuoteEmailData {
   businessName: string;
   businessLogo?: string | null;
@@ -10,11 +12,8 @@ interface QuoteEmailData {
   quoteNumber: string;
   quoteDate: string;
   expiryDate?: string | null;
-  items: Array<{
-    description: string;
-    quantity: number;
-    unitPrice: number;
-  }>;
+  /** FOLLOW3-B5: each line carries its stored QuoteItem.total (emailLineItems). */
+  items: DocumentEmailItem[];
   subtotal: number;
   taxRate?: number | null;
   taxAmount?: number | null;
@@ -32,8 +31,11 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
   const primaryColor = data.primaryColor || '#F97316';
   const currencySymbol = data.currency === 'TTD' ? 'TT$' : '$';
 
+  // FOLLOW3-B5-EMAIL-LINE-TOTALS (D-13): every amount is printed in cents,
+  // half away from zero on its decimal value, and a line prints its stored
+  // total (emailLineTotal), so the lines add up to the Subtotal.
   const formatCurrency = (amount: number) => {
-    return `${currencySymbol}${amount.toFixed(2)}`;
+    return `${currencySymbol}${emailMoneyDigits(amount)}`;
   };
 
   const itemsHtml = data.items.map(item => `
@@ -41,7 +43,7 @@ export function buildQuoteEmailHtml(data: QuoteEmailData): string {
       <td style="padding: 12px; border-bottom: 1px solid #e5e7eb;">${item.description}</td>
       <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: center;">${item.quantity}</td>
       <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCurrency(item.unitPrice)}</td>
-      <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCurrency(item.quantity * item.unitPrice)}</td>
+      <td style="padding: 12px; border-bottom: 1px solid #e5e7eb; text-align: right;">${formatCurrency(emailLineTotal(item))}</td>
     </tr>
   `).join('');
 

@@ -10,13 +10,14 @@ import { PaymentEvidenceService } from './payment-evidence.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { GuardedBusinessId } from '../../core/auth/request-business-id';
 import { appUrl } from '../../core/config/runtime-urls';
-import { TeamAuditInterceptor, AuditAction } from '../../core/interceptors/team-audit.interceptor';
+import { TeamAuditInterceptor, AuditAction, AuditOncePerEntity } from '../../core/interceptors/team-audit.interceptor';
 import { CreateProductDto } from './dto/create-product.dto';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { ConvertQuoteDto, CreateQuoteDto, UpdateQuoteDto } from './dto/create-quote.dto';
-import { PlanLimitGuard, RequirePlanLimit } from '../subscriptions/plan-limit.guard';
+import { AllowPlanLimitReplay, PlanLimitGuard, RequirePlanLimit, deferredPlanLimitDenial } from '../subscriptions/plan-limit.guard';
 import { PublicRateLimitGuard, PublicRateLimit } from '../../core/guards/public-rate-limit.guard';
 import { sanitizeString } from '../../core/utils/sanitize';
 import { readVisitorIdFromRequest } from '../../core/utils/visitor-cookie';
@@ -30,7 +31,7 @@ import { RecordPaymentDto } from './dto/record-payment.dto';
 import { ConfirmPendingPaymentDto } from './dto/confirm-pending-payment.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
 import { assertQuoteStatusAgreement } from './quote-workflow';
-import { buildInvoiceEmailHtml } from './invoice-email.template';
+import { buildInvoiceEmailHtml, emailLineItems } from './invoice-email.template';
 import type { InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SKIP_BUSINESS_EVENT_KEY } from '../business-events/business-event.interceptor';
@@ -169,6 +170,31 @@ function toQuoteWriteResponse<Q extends { contact?: Record<QuoteWriteContactKey,
   };
 }
 
+/**
+ * V1-45b-CREATE-IDEMPOTENCY-HTTP (owner ruling D-15; V1-45 review SEC-V45-2):
+ * the create's Idempotency-Key header, read as SiteController's
+ * checkoutIdempotencyKey reads it. The service trims it, treats a blank one as
+ * none and refuses one longer than 255 characters (400).
+ */
+function createIdempotencyKeyHeader(header: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(header) ? header[0] : header;
+  return typeof raw === 'string' ? raw : undefined;
+}
+
+/** The request the keyed create routes read: the header, the acting member. */
+type CreateRequest = { headers: Record<string, string | string[] | undefined>; user?: { id?: string } };
+
+/**
+ * V1-45b: what a create forwards for its key: the key and the acting member,
+ * whose id is part of the key's request hash (SEC-V45-3: another member
+ * presenting the same key is a 409). A request with no key forwards neither,
+ * exactly as before.
+ */
+function createIdempotency(req: CreateRequest): { idempotencyKey?: string; actorUserId?: string } {
+  const idempotencyKey = createIdempotencyKeyHeader(req.headers['idempotency-key']);
+  return idempotencyKey === undefined ? {} : { idempotencyKey, actorUserId: req.user?.id };
+}
+
 @Controller('commerce')
 export class CommerceController {
   private readonly logger = new Logger(CommerceController.name);
@@ -203,6 +229,55 @@ export class CommerceController {
     });
     if (!business) {
       throw new ForbiddenException('You do not have access to this resource');
+    }
+  }
+
+  /**
+   * FOLLOW3-A1-D46-COMMERCE-WRITES (D-46, FOLLOW3-A2's rule): a platform
+   * SUPER_ADMIN acts on a business's invoices, quotes and payments only with
+   * the authority that business gave it. BusinessGuard and ModuleScopeGuard
+   * both admit SUPER_ADMIN to every tenant and skip the module scope, and the
+   * services behind the `businesses/:businessId` writes check no Membership,
+   * so a SUPER_ADMIN who was not a member recorded payments, refunded,
+   * bulk-voided, deleted, edited, converted quotes and minted payment links in
+   * any business (F2 SA-01..SA-07). Every such handler calls this first: that
+   * role needs a Membership in :businessId whose scope map (or, without one,
+   * the role defaults) holds revenue:write, exactly ModuleScopeGuard's legacy
+   * rule (as payments-ops.controller.ts, payment-evidence.service.ts and
+   * undo.service.ts apply it). No membership answers 403 'Not authorized to
+   * update this invoice' ('... quote'), the bare-id services' refusal; a
+   * membership without revenue:write answers the guard's message. Refused
+   * before any read or write, so a refused call leaves no row, posting,
+   * Activity or BusinessEvent. Every other caller is unchanged and costs no
+   * query (the guards already applied this rule to it). The guards are not
+   * changed: that would rewrite RA-G4-13's guard half and QS-07, and refuse
+   * SUPER_ADMIN on every other module. d46-write-routes.spec.ts lists every
+   * revenue:write handler as calling this, exempt (with the reason) or
+   * service-refused; a service-refused (bare-id) route's service applies this
+   * same rule to its actor, membership and revenue:write both (review
+   * SEC-A1-1, CommerceService.assertActorMayWriteRevenue).
+   */
+  private async assertSuperAdminMayWriteRevenue(
+    req: { user?: { id?: string; role?: string } } | undefined,
+    businessId: string,
+    subject: 'invoice' | 'quote',
+  ): Promise<void> {
+    const user = req?.user;
+    if (user?.role !== 'SUPER_ADMIN') return;
+    const membership = user.id
+      ? await this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId: user.id, businessId } },
+          select: { role: true, permissionScopes: true },
+        })
+      : null;
+    if (!membership) throw new ForbiddenException(`Not authorized to update this ${subject}`);
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
     }
   }
 
@@ -675,10 +750,12 @@ export class CommerceController {
    * CommerceService, which is what keeps time-tracking a leaf at all.
    */
   @Post('businesses/:businessId/invoices/from-time')
-  invoiceUnbilledTime(
+  async invoiceUnbilledTime(
     @Param('businessId') businessId: string,
     @Body() body: InvoiceFromTimeDto,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     return this.timeEntries.invoiceUnbilledTime(businessId, {
       projectId: body.projectId,
       contactId: body.contactId,
@@ -697,21 +774,37 @@ export class CommerceController {
   // against any businessId, and because PlanLimitGuard was absent here, the
   // `invoices` plan limit enforced elsewhere could be bypassed by calling this
   // route instead. Decorators match `invoiceProject` deliberately.
+  //
+  // V1-45b (D-15; V1-45 review SEC-V45-2, SEC-V45-3): the Idempotency-Key
+  // header is forwarded with the acting member, so the same key and body from
+  // the same member answer the invoice the first request created. A replay is
+  // audited once (AuditOncePerEntity) and, at the plan's invoice limit, answers
+  // the existing invoice instead of the guard's 403 (AllowPlanLimitReplay).
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, PlanLimitGuard)
   @RequireModuleScope('revenue', 'write')
   @UseInterceptors(TeamAuditInterceptor)
   @AuditAction('revenue', 'invoice_created', 'invoice')
+  @AuditOncePerEntity()
   @RequirePlanLimit('invoices')
+  @AllowPlanLimitReplay()
   @Post('businesses/:businessId/invoices')
-  createInvoice(
+  async createInvoice(
     @Param('businessId') businessId: string,
     @Body(CREATE_INVOICE_BODY_PIPE) body: CreateInvoiceDto,
+    @Req() req: CreateRequest,
   ) {
+    const idempotency = createIdempotency(req);
+    // V1-45b: at the plan limit, PlanLimitGuard let a keyed request through
+    // with its refusal attached. Only a key that already created an invoice
+    // here is answered (the service then replays it, or 409s a different
+    // request); anything else is refused as the guard would have.
+    const planLimitDenial = deferredPlanLimitDenial(req);
+    if (planLimitDenial && !(await this.createSlotUsed(businessId, 'invoice', idempotency.idempotencyKey))) throw planLimitDenial;
     // R0-27: the body is a validated DTO (it was an inline type the
     // ValidationPipe could not see), and only its declared fields are
     // forwarded. The service computes subtotal, tax, discount and total; the
     // tenant is the guarded path param, never a body field.
-    return this.commerce.createInvoice({
+    const invoice = await this.commerce.createInvoice({
       businessId,
       contactId: body.contactId,
       items: body.items.map(({ description, quantity, unitPrice, productId }) => ({ description, quantity, unitPrice, productId })),
@@ -721,7 +814,30 @@ export class CommerceController {
       discountType: body.discountType,
       discountValue: body.discountValue,
       notes: body.notes,
+      ...idempotency,
     });
+    // V1-45b review SEC-V45b-2 (the SEC-CMF1-2 class): the service answers a
+    // create, and a keyed replay, with the whole Contact row as it stands now;
+    // the body carries only the projected contact, as every other invoice
+    // write does (the quote create twin uses toQuoteWriteResponse).
+    return toInvoiceWriteResponse(invoice);
+  }
+
+  /**
+   * V1-45b: whether the key already created a document of this kind in this
+   * business: its completed slot on idempotency_keys, named as
+   * CommerceService's createClaim names it ('commerce.<kind>.create:<key>').
+   * A create commits its document and its slot together, so a completed slot
+   * means the create would answer (or 409), never write.
+   */
+  private async createSlotUsed(businessId: string, kind: 'invoice' | 'quote', key: string | undefined): Promise<boolean> {
+    const trimmed = key?.trim();
+    if (!trimmed) return false;
+    const slot = await this.prisma.client.idempotencyKey.findUnique({
+      where: { businessId_idempotencyKey: { businessId, idempotencyKey: `commerce.${kind}.create:${trimmed}` } },
+      select: { status: true },
+    });
+    return slot?.status === 'completed';
   }
 
   // R0-28 (M21, CF-15 authorization half): this bare-id write ran AuthGuard and
@@ -803,30 +919,36 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/invoices/bulk')
-  bulkUpdateInvoices(
+  async bulkUpdateInvoices(
     @Param('businessId') businessId: string,
     @Body() body: { ids: string[]; action: 'send' | 'void' | 'delete' },
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     return this.commerce.bulkUpdateInvoices(businessId, body.ids, body.action);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Patch('businesses/:businessId/quotes/bulk')
-  bulkUpdateQuotes(
+  async bulkUpdateQuotes(
     @Param('businessId') businessId: string,
     @Body() body: { ids: string[]; action: 'send' | 'reject' | 'delete' },
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'quote');
     return this.commerce.bulkUpdateQuotes(businessId, body.ids, body.action);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Delete('businesses/:businessId/invoices/:invoiceId')
-  deleteInvoice(
+  async deleteInvoice(
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     return this.commerce.deleteInvoice(invoiceId, businessId);
   }
 
@@ -847,8 +969,9 @@ export class CommerceController {
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
     @Body(new ValidationPipe({ whitelist: true, transform: true, expectedType: UpdateInvoiceDto })) body: UpdateInvoiceDto,
-    @Req() req: { user?: { id?: string } },
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     const actorId = req?.user?.id;
     if (!actorId) throw new ForbiddenException('Authentication required');
     return toInvoiceWriteResponse(await this.commerce.updateInvoice({ ...body, invoiceId, businessId }, actorId));
@@ -901,6 +1024,7 @@ export class CommerceController {
     @Param('quoteId') quoteId: string,
     @Req() req: any,
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'quote');
     const actorId = req?.user?.id ?? null;
     const quote = await this.commerce.markQuoteFollowedUp({ quoteId, businessId, actorId });
     // Resolve any pending stale-quote Action Queue cards for this quote.
@@ -1006,13 +1130,22 @@ export class CommerceController {
     return this.commerce.respondToQuoteByToken(token, 'reject', body?.reason, visitorId);
   }
 
+  // V1-45b (D-15; V1-45 review SEC-V45-2, SEC-V45-3): the Idempotency-Key
+  // header is forwarded with the acting member, as on invoice create, and the
+  // route is audited like the invoice route: one quote_created row per quote,
+  // none for a replay.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
+  @UseInterceptors(TeamAuditInterceptor)
+  @AuditAction('revenue', 'quote_created', 'quote')
+  @AuditOncePerEntity()
   @Post('businesses/:businessId/quotes')
   async createQuote(
     @Param('businessId') businessId: string,
     @Body(CREATE_QUOTE_BODY_PIPE) body: CreateQuoteDto,
+    @Req() req: CreateRequest,
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'quote');
     // V1-53 (M19 quote half): the body is a validated DTO (it was an inline
     // type the ValidationPipe could not see), and only its declared fields are
     // forwarded. The service computes subtotal, tax, discount, total and every
@@ -1029,6 +1162,7 @@ export class CommerceController {
       discountValue: body.discountValue,
       notes: body.notes,
       quoteNumber: body.quoteNumber,
+      ...createIdempotency(req),
     });
     return toQuoteWriteResponse(quote);
   }
@@ -1042,19 +1176,24 @@ export class CommerceController {
     // V1-53: the edit contract (UpdateQuoteDto); unknown keys are stripped,
     // replacement lines obey the create rules. The tenant stays after the spread.
     @Body(UPDATE_QUOTE_BODY_PIPE) body: UpdateQuoteDto,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'quote');
     // V1-53 review (SEC-V53-1): the 200 body's contact is projected.
-    const quote = await this.commerce.updateQuote({ ...body, quoteId, businessId });
+    // FOLLOW3-D6 (D-64): a contactId other than the stored one must be one the acting member may open.
+    const quote = await this.commerce.updateQuote({ ...body, quoteId, businessId, actorUserId: req?.user?.id });
     return toQuoteWriteResponse(quote);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Delete('businesses/:businessId/quotes/:quoteId')
-  deleteQuote(
+  async deleteQuote(
     @Param('businessId') businessId: string,
     @Param('quoteId') quoteId: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'quote');
     return this.commerce.deleteQuote(quoteId, businessId);
   }
 
@@ -1066,7 +1205,9 @@ export class CommerceController {
     @Param('quoteId') quoteId: string,
     // V1-53: the convert contract (ConvertQuoteDto); every field optional.
     @Body(CONVERT_QUOTE_BODY_PIPE) body: ConvertQuoteDto,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'quote');
     // V1-QUOTE-CHAIN-finish (review SEC-2 / SEC-V51-3, the SEC-CMF1-2 class):
     // convertQuoteToInvoice returns the invoice with its whole Contact row
     // (the invoice.created listener reads it), and the route handed it back: a
@@ -1103,10 +1244,12 @@ export class CommerceController {
   @RequireModuleScope('revenue', 'write')
   @SetMetadata(SKIP_BUSINESS_EVENT_KEY, true)
   @Post('businesses/:businessId/quotes/:quoteId/public-link')
-  createQuotePublicLink(
+  async createQuotePublicLink(
     @Param('businessId') businessId: string,
     @Param('quoteId') quoteId: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'quote');
     return this.commerce.getQuotePublicLink(quoteId, businessId);
   }
 
@@ -1319,7 +1462,9 @@ export class CommerceController {
     @Param('businessId') businessId: string,
     @Param('quoteId') quoteId: string,
     @Body() body: { recipientEmail: string; message?: string },
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'quote');
     const existing = await this.commerce.getQuote(quoteId);
     if (!existing || existing.businessId !== businessId) {
       // V1-53: an unknown or foreign id is a 404 (a plain Error answered 500).
@@ -1356,11 +1501,9 @@ export class CommerceController {
         quoteNumber: quote.quoteNumber,
         quoteDate: new Date(quote.createdAt).toLocaleDateString('en-TT', { dateStyle: 'medium' }),
         expiryDate: quote.expiryDate ? new Date(quote.expiryDate).toLocaleDateString('en-TT', { dateStyle: 'medium' }) : null,
-        items: quote.items.map((item: { description: string; quantity: number; unitPrice: number }) => ({
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-        })),
+        // FOLLOW3-B5-EMAIL-LINE-TOTALS (D-13): each line carries its stored
+        // QuoteItem.total, which the template prints.
+        items: emailLineItems(quote.items),
         subtotal: quote.subtotal,
         taxRate: quote.taxRate,
         taxAmount: quote.taxAmount,
@@ -1449,11 +1592,10 @@ export class CommerceController {
       dueDate: invoice.dueDate
         ? new Date(invoice.dueDate).toLocaleDateString('en-TT', { dateStyle: 'medium' })
         : null,
-      items: (invoice.items ?? []).map((it) => ({
-        description: it.description,
-        quantity: Number(it.quantity),
-        unitPrice: Number(it.unitPrice),
-      })),
+      // FOLLOW3-B5-EMAIL-LINE-TOTALS (D-13): each line carries its stored
+      // InvoiceItem.total (V1-22 lineAmount), which the template prints, so the
+      // printed lines add up to the printed Subtotal.
+      items: emailLineItems(invoice.items),
       subtotal: Number(invoice.subtotal ?? invoice.total),
       taxRate: invoice.taxRate != null ? Number(invoice.taxRate) : null,
       taxAmount: invoice.taxAmount != null ? Number(invoice.taxAmount) : null,
@@ -1481,6 +1623,7 @@ export class CommerceController {
     @Body() body: { recipientEmail?: string; message?: string },
     @Req() req: any,
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     // Allow drafts: sending the email is precisely what transitions DRAFT -> SENT.
     const invoice = (await this.commerce.getInvoiceWithBusiness(invoiceId, false)) as
       | InvoiceForEmail
@@ -1526,6 +1669,7 @@ export class CommerceController {
     @Body() body: { recipientEmail?: string; message?: string; channel?: 'email' | 'whatsapp' | 'manual' },
     @Req() req: any,
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     return this.commerce.sendInvoiceReminder({
       invoiceId,
       businessId,
@@ -1558,6 +1702,7 @@ export class CommerceController {
     @Body() body: { recipientEmail?: string },
     @Req() req: any,
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     // Receipts are only meaningful for paid invoices; explicit guard.
     const invoice = (await this.commerce.getInvoiceWithBusiness(invoiceId, false)) as
       | InvoiceForEmail
@@ -1691,8 +1836,9 @@ export class CommerceController {
     // whitelists the existing fields untouched and validates only the new
     // optional idempotencyKey.
     @Body() body: RecordPaymentDto,
-    @Req() req: { user?: { id?: string } },
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     // R0-D2 review (CR-1): only this route keys a manual record on its
     // reference + amount. Here `reference` is the operator's payment
     // reference (the journey's duplicate slip); internal callers pass a
@@ -1711,7 +1857,7 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/invoices/:invoiceId/payments/from-evidence')
-  recordPaymentFromEvidence(
+  async recordPaymentFromEvidence(
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
     @Body() body: {
@@ -1721,8 +1867,9 @@ export class CommerceController {
       source: 'drive' | 'upload';
       driveFileId?: string;
     },
-    @Req() req: { user?: { id?: string } },
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     // R0-PL-07 review (PL07-ST-3): KEY stays the recorder of the extracted
     // payment; the authenticated uploader is kept as its initiator. Taken from
     // req.user, never from the body.
@@ -1753,8 +1900,9 @@ export class CommerceController {
     @Param('invoiceId') invoiceId: string,
     @Param('paymentId') paymentId: string,
     @Body(CONFIRM_PENDING_PAYMENT_BODY_PIPE) body: ConfirmPendingPaymentDto,
-    @Req() req: { user?: { id?: string } },
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     const result = await this.paymentEvidence.confirmPendingPayment(paymentId, businessId, req?.user?.id ?? null, {
       amount: body?.amount,
       invoiceId,
@@ -1777,7 +1925,9 @@ export class CommerceController {
       source: 'drive' | 'upload';
       driveFileId?: string;
     },
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     const { extracted, raw } = await this.paymentEvidence.extractEvidence({ ...body, businessId,
     });
 
@@ -1894,12 +2044,13 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/payments/:paymentId/refund')
-  refundPayment(
+  async refundPayment(
     @Param('businessId') businessId: string,
     @Param('paymentId') paymentId: string,
     @Body() body: { reason?: string },
-    @Req() req: { user?: { id?: string } },
+    @Req() req: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     // R0-PL-07: the refunding user is recorded on the reversal transaction.
     return this.commerce.markPaymentRefunded(paymentId, businessId, body?.reason, req?.user?.id ?? null);
   }
@@ -1907,20 +2058,24 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/payments/:paymentId/retry')
-  retryPayment(
+  async retryPayment(
     @Param('businessId') businessId: string,
     @Param('paymentId') paymentId: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     return this.commerce.retryPayment(paymentId, businessId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/invoices/:invoiceId/receipt/resend')
-  resendReceipt(
+  async resendReceipt(
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     return this.commerce.markReceiptSent(invoiceId, businessId);
   }
 
@@ -1929,11 +2084,13 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Post('businesses/:businessId/invoices/:invoiceId/payment-link')
-  createPaymentLink(
+  async createPaymentLink(
     @Param('businessId') businessId: string,
     @Param('invoiceId') invoiceId: string,
     @Body() body: { expiresInDays?: number },
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     return this.commerce.createPaymentLink(invoiceId, businessId, body.expiresInDays);
   }
 
@@ -1947,10 +2104,12 @@ export class CommerceController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'write')
   @Delete('businesses/:businessId/payment-links/:id')
-  deactivatePaymentLink(
+  async deactivatePaymentLink(
     @Param('businessId') businessId: string,
     @Param('id') id: string,
+    @Req() req?: { user?: { id?: string; role?: string } },
   ) {
+    await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
     return this.commerce.deactivatePaymentLink(id, businessId);
   }
 

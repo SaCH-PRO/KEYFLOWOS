@@ -9,6 +9,11 @@
  *    remaining from the list row it was opened with rather than from the
  *    server's status-aware figures (GET .../payments: paidAmount, remaining).
  *
+ * 3. V1-45b-CREATE-IDEMPOTENCY-HTTP (D-15): the invoice create carries one
+ *    Idempotency-Key per open of the form (crypto.randomUUID, kept in a ref),
+ *    reused by every retry of that open; the next open gets a new key. At the
+ *    base no form minted a key, so a retried save created a second invoice.
+ *
  * The panel is mounted with its real form modal, real hooks and the real
  * client; fetch is stubbed at the network edge. Only the panel's unrelated
  * side panels (drive upload, tax summary, dunning, detail drawer, payment plan,
@@ -70,7 +75,7 @@ function invoiceWith(payments: PaymentRecord[], status = "PARTIALLY_PAID", total
   };
 }
 
-type Call = { method: string; path: string; body: Record<string, unknown> | null };
+type Call = { method: string; path: string; body: Record<string, unknown> | null; key: string | null };
 
 function installServer(opts: {
   list?: { payments: PaymentRecord[]; paidAmount: number; remaining: number };
@@ -78,16 +83,24 @@ function installServer(opts: {
   listResponse?: () => Promise<Response>;
   pay?: Array<() => Promise<Response>>;
   create?: () => Promise<Response>;
+  /** A queue of answers for POST .../invoices (the last one repeats); overrides `create`. */
+  creates?: Array<() => Promise<Response>>;
 } = {}) {
   const calls: Call[] = [];
   const pays = opts.pay ?? [];
   let payIndex = 0;
+  let createIndex = 0;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(typeof input === "string" ? input : (input as Request).url ?? String(input));
     const method = (init?.method ?? "GET").toUpperCase();
     const body = typeof init?.body === "string" ? (JSON.parse(init.body) as Record<string, unknown>) : null;
-    calls.push({ method, path: url.pathname, body });
+    calls.push({ method, path: url.pathname, body, key: new Headers(init?.headers).get("Idempotency-Key") });
     if (method === "POST" && url.pathname === CREATE_PATH) {
+      if (opts.creates?.length) {
+        const answer = opts.creates[Math.min(createIndex, opts.creates.length - 1)]!;
+        createIndex += 1;
+        return answer();
+      }
       if (opts.create) return opts.create();
       return jsonResponse(201, { ...invoiceWith([], "DRAFT", 112.5), id: "inv_created" });
     }
@@ -125,7 +138,7 @@ function recorded(amount: number) {
   };
 }
 
-function Panel(props: { invoices?: Invoice[]; prefill?: boolean }) {
+function Panel(props: { invoices?: Invoice[]; prefill?: boolean; prefillToken?: number }) {
   const [invoices, setInvoices] = React.useState<Invoice[]>(props.invoices ?? []);
   const [products, setProducts] = React.useState<import("@/lib/client").Product[]>([]);
   const prefillItems = React.useMemo(
@@ -143,7 +156,7 @@ function Panel(props: { invoices?: Invoice[]; prefill?: boolean }) {
       setInvoices={setInvoices}
       gmailStatus={null}
       currency="TTD"
-      {...(props.prefill ? { prefillContactId: "ct_r021", prefillItems, prefillToken: 1 } : {})}
+      {...(props.prefill ? { prefillContactId: "ct_r021", prefillItems, prefillToken: props.prefillToken ?? 1 } : {})}
     />
   );
 }
@@ -213,6 +226,58 @@ describe("R0-21 invoices-panel: a double click on save gives one POST", () => {
     await waitFor(() => expect(createButton()).not.toBeDisabled());
     fireEvent.click(createButton());
     await waitFor(() => expect(server.creates()).toHaveLength(2));
+  });
+});
+
+describe("V1-45b invoices-panel: the invoice create carries one Idempotency-Key per form open", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem("kf_token", "token-r021p");
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+    window.localStorage.clear();
+  });
+
+  it("the open's first save mints one crypto.randomUUID key, a retry of that open reuses it, the next open gets a new one", async () => {
+    let n = 0;
+    const minted: string[] = [];
+    vi.spyOn(globalThis.crypto, "randomUUID").mockImplementation(() => {
+      const uuid = `0000000${++n}-aaaa-4aaa-8aaa-aaaaaaaaaaaa` as `${string}-${string}-${string}-${string}-${string}`;
+      minted.push(uuid);
+      return uuid;
+    });
+    const created = async () => jsonResponse(201, { ...invoiceWith([], "DRAFT", 112.5), id: "inv_created" });
+    const server = installServer({
+      creates: [async () => jsonResponse(502, { message: "Bad gateway" }), created, created],
+    });
+    const { rerender } = render(<Panel prefill />);
+    await screen.findByRole("button", { name: /^Create Invoice$/ });
+
+    fireEvent.click(createButton());
+    await waitFor(() => expect(server.creates()).toHaveLength(1));
+    // The failed save leaves the form open; the retry is the same open.
+    await waitFor(() => expect(createButton()).not.toBeDisabled());
+    fireEvent.click(createButton());
+    await waitFor(() => expect(server.creates()).toHaveLength(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^(Create Invoice|Saving\.\.\.)$/ })).toBeNull());
+
+    // A new open of the form (the next prefill) is a new invoice.
+    rerender(<Panel prefill prefillToken={2} />);
+    await screen.findByRole("button", { name: /^Create Invoice$/ });
+    fireEvent.click(createButton());
+    await waitFor(() => expect(server.creates()).toHaveLength(3));
+
+    const keys = server.creates().map((c) => c.key);
+    expect(keys[0], "the first save sends a key").toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/));
+    expect(minted).toContain(keys[0]);
+    expect(keys[1], "the retry of the same open reuses it").toBe(keys[0]);
+    expect(keys[2], "the next open mints a new one").toEqual(expect.stringMatching(/^[0-9a-f-]{36}$/));
+    expect(keys[2]).not.toBe(keys[0]);
+    // The key travels in the header, never in the body.
+    for (const c of server.creates()) expect(c.body).not.toHaveProperty("idempotencyKey");
   });
 });
 

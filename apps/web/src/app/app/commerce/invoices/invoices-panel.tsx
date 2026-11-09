@@ -71,7 +71,7 @@ import {
 } from "../components/commerce-types";
 import { BillingDetailModal } from "../components/billing-detail-modal";
 import { BillingFormModal } from "../components/billing-form-modal";
-import { attemptIdempotencyKey, newPaymentAttempt, type PaymentAttempt } from "../../finance/components/payment-record-modal";
+import { attemptIdempotencyKey, newPaymentAttempt, newPaymentAttemptKey, type PaymentAttempt } from "../../finance/components/payment-record-modal";
 import { InvoiceDriveUploader, buildTemplateData } from "../components/invoice-drive-uploader";
 import { RecordRowCard, OverflowMenu, OverflowMenuItem } from "../components/standardized-cards";
 import { getInvoiceSmartCTA } from "../utils/smart-cta";
@@ -263,6 +263,14 @@ export default function InvoicesPanel({
   const recordingPaymentRef = useRef(false);
   const [savingInvoice, setSavingInvoice] = useState(false);
   const savingInvoiceRef = useRef(false);
+  // V1-45b (D-15): the invoice create's Idempotency-Key, one per open of the
+  // form: minted by the open's first save and reused by every retry of that
+  // open, so a save whose answer was lost is answered with the invoice it
+  // created. Dropped when the form closes; the next open mints a new one.
+  const createKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!showInvoiceBuilder) createKeyRef.current = null;
+  }, [showInvoiceBuilder]);
   const [paymentHistory, setPaymentHistory] = useState<Record<string, PaymentRecord[]>>({});
   const [mobileSheetFor, setMobileSheetFor] = useState<Invoice | null>(null);
   const [timelineRefreshTick, setTimelineRefreshTick] = useState(0);
@@ -539,9 +547,11 @@ export default function InvoicesPanel({
         toast.success("Invoice updated");
       }
     } else {
-      const { data, error } = await createInvoice(invoicePayload);
+      createKeyRef.current ??= newPaymentAttemptKey();
+      const { data, error } = await createInvoice({ ...invoicePayload, idempotencyKey: createKeyRef.current });
       if (error) { setFormError(error); toast.error("Failed to create invoice"); }
       if (data) {
+        createKeyRef.current = null;
         if (invoiceTaskIdRef.current) { markTaskCompleted(invoiceTaskIdRef.current); invoiceTaskIdRef.current = null; }
         setInvoices((prev) => [data, ...prev]);
         resetInvoiceForm();
