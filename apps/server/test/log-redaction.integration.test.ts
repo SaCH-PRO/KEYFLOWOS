@@ -2225,4 +2225,17 @@ describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
       expect(after, `CF-029 names ${needle} under the sink-only scope`).toContain(needle);
     }
   });
+
+  // W5-SYSTEM-EMAIL-CALLERS review CR-W5SEC-2 / SEC-W5SEC-1 (9B-D2, SEC-W4HK-1):
+  // W5-SYSTEM-EMAIL-CALLERS closed the caller lines the case above still
+  // requires the census to list as OPEN (identity-signup :185/:266 and its
+  // Supabase-step lines :168/:236/:251, ai-usage-alert-scheduler :156,
+  // financial-briefing-scheduler :263/:269, accountant-export-email :103, the
+  // accountant export 500 line), and its review found a caller CF-029 does not
+  // list: AiOversightService.routeAndNotify relogs ApprovalRoutingService's
+  // SystemEmailSendError text (ai-oversight.service.ts:558, :569;
+  // approval-routing.service.ts:188). RELEASE0-TRUST-CENSUS-001.md is outside
+  // this packet's write set, so the docs follow-up rewrites CF-029 and the
+  // case above together and makes this case live.
+  it.todo('CF-029 records the W5-SYSTEM-EMAIL-CALLERS caller lines CLOSED and the approval routing caller (ai-oversight.service.ts:558, :569) OPEN (9B-D2, SEC-W4HK-1; docs follow-up, review CR-W5SEC-2)');
 });

@@ -269,6 +269,65 @@ describe('SystemEmailService.sendTransactional logs no recipient address (9B-D2,
     expect(entries.some((e) => e.includes('resendVerification send failed') && e.includes(userId))).toBe(true);
   });
 
+  // Review finding SEC-W5SEC-2: the same verification flow logged the address
+  // on the Supabase steps before the send (generateSignupLink, the resend
+  // lookup, generateConfirmationLink). The failure text here quotes the
+  // address too, so the case also proves it is redacted.
+  it('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS (review SEC-W5SEC-2): IdentitySignupService logs no address when a Supabase link or lookup step fails, on sign-up (:169) and on resend (:239, :254), and names the user id where it has one', async () => {
+    process.env.AUTH_REQUIRE_EMAIL_VERIFICATION = 'true';
+    process.env.SITE_URL = 'https://app.example.test';
+    const userId = 'user_w5sec_signup_link';
+    const linkDown = async () => {
+      throw new Error(`link service down for ${RECIPIENT}`);
+    };
+    const supabaseAdminWith = (overrides: Record<string, unknown>) => ({
+      isConfigured: () => true,
+      describeMissingConfig: () => null,
+      createUser: vi.fn(async () => ({ id: userId, email: RECIPIENT })),
+      generateSignupLink: vi.fn(async () => 'https://app.example.test/verify?t=fake_link'),
+      generateConfirmationLink: vi.fn(async () => 'https://app.example.test/verify?t=fake_link_two'),
+      findUserByEmail: vi.fn(async () => ({ id: userId, email: RECIPIENT, email_confirmed_at: null, user_metadata: {} })),
+      deleteUser: vi.fn(async () => true),
+      ...overrides,
+    });
+    const passwordPolicy = { validate: vi.fn(async () => undefined) };
+    const { service: accepting, calls } = serviceWith(async () => ({ data: { id: 'resend_ok_never' }, error: null }));
+
+    // Sign-up: generateSignupLink fails, the half-created user is rolled back.
+    const signupAdmin = supabaseAdminWith({ generateSignupLink: vi.fn(linkDown) });
+    const onSignup = new IdentitySignupService(signupAdmin as never, accepting, passwordPolicy as never);
+    const refused = await onSignup.signup({ email: RECIPIENT, password: 'Not-A-Real-Pass-91' }).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(BadRequestException);
+    expect((refused as BadRequestException).getResponse()).toMatchObject({ code: 'email_send_failed' });
+    expect(signupAdmin.deleteUser).toHaveBeenCalledWith(userId);
+
+    // Resend: the user lookup fails (no user id to name yet).
+    const lookupAdmin = supabaseAdminWith({ findUserByEmail: vi.fn(linkDown) });
+    const onLookup = new IdentitySignupService(lookupAdmin as never, accepting, passwordPolicy as never);
+    await expect(onLookup.resendVerification({ email: RECIPIENT })).resolves.toEqual({ ok: true });
+
+    // Resend: generateConfirmationLink fails.
+    const confirmAdmin = supabaseAdminWith({ generateConfirmationLink: vi.fn(linkDown) });
+    const onConfirm = new IdentitySignupService(confirmAdmin as never, accepting, passwordPolicy as never);
+    await expect(onConfirm.resendVerification({ email: RECIPIENT })).resolves.toEqual({ ok: true });
+
+    expect(calls).toHaveLength(0);
+    expectNoAddressLogged();
+    expect(entries.some((e) => e.includes('generateSignupLink failed') && e.includes(userId))).toBe(true);
+    expect(entries.some((e) => e.includes('resendVerification lookup failed') && e.includes('link service down'))).toBe(true);
+    expect(entries.some((e) => e.includes('resendVerification link gen failed') && e.includes(userId))).toBe(true);
+  });
+
+  // Review findings SEC-W5SEC-1 / CR-W5SEC-1: a seventh caller of the sink.
+  // ApprovalRoutingService.notifyApprover (approval-routing.service.ts:188)
+  // returns the SystemEmailSendError message unchanged as `error`, and
+  // AiOversightService.routeAndNotify logs it at warn (ai-oversight.service.ts
+  // :558 approver, :569 tier-4 owner CC), so provider text that quotes the
+  // recipient reaches the log. Neither file is in W5-SYSTEM-EMAIL-CALLERS'
+  // write set (census CF-029 does not list them): a follow-up packet routes
+  // both lines through redactAddresses and makes this case live.
+  it.todo('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS follow-up (review SEC-W5SEC-1): AiOversightService.routeAndNotify logs no provider text address when the approver email (ai-oversight.service.ts:558) or the tier-4 owner CC (:569) fails, and names the item id (outside this packet\'s write set)');
+
   it('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS: AiUsageAlertSchedulerService logs no provider text address when an alert email fails (:156), and names the alert id', async () => {
     const alert = {
       id: 'alert_w5sec_1',

@@ -165,8 +165,10 @@ export class IdentitySignupService {
         redirectTo,
       });
     } catch (err: any) {
+      // W5-SYSTEM-EMAIL-CALLERS review SEC-W5SEC-2 (SEC-W4HK-1, 9B-D2): user id,
+      // no address; the Supabase error text is redacted too.
       this.logger.warn(
-        `generateSignupLink failed for ${email}: ${err instanceof Error ? err.message : err}`,
+        `generateSignupLink failed for user ${user.id}: ${redactAddresses(err instanceof Error ? err.message : String(err))}`,
       );
       await this.supabaseAdmin.deleteUser(user.id);
       throw new BadRequestException({
@@ -235,8 +237,10 @@ export class IdentitySignupService {
     try {
       user = await this.supabaseAdmin.findUserByEmail(email);
     } catch (err: any) {
+      // W5-SYSTEM-EMAIL-CALLERS review SEC-W5SEC-2 (SEC-W4HK-1, 9B-D2): no user
+      // id yet, so the line names no one; the Supabase error text is redacted.
       this.logger.warn(
-        `resendVerification lookup failed for ${email}: ${err instanceof Error ? err.message : err}`,
+        `resendVerification lookup failed: ${redactAddresses(err instanceof Error ? err.message : String(err))}`,
       );
       return { ok: true };
     }
@@ -250,8 +254,10 @@ export class IdentitySignupService {
     try {
       link = await this.supabaseAdmin.generateConfirmationLink({ email, redirectTo });
     } catch (err: any) {
+      // W5-SYSTEM-EMAIL-CALLERS review SEC-W5SEC-2 (SEC-W4HK-1, 9B-D2): user id,
+      // no address; the Supabase error text is redacted too.
       this.logger.warn(
-        `resendVerification link gen failed for ${email}: ${err instanceof Error ? err.message : err}`,
+        `resendVerification link gen failed for user ${user.id}: ${redactAddresses(err instanceof Error ? err.message : String(err))}`,
       );
       return { ok: true };
     }
