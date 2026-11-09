@@ -10,12 +10,30 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
+  Req,
 } from '@nestjs/common';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CatalogService } from '../catalog/catalog.service';
+
+/** The caller as AuthMiddleware attaches it. */
+type ActorRequest = { user?: { id?: string; role?: string } };
+
+/**
+ * W4-TRASH-D46 (owner ruling D-46): the trashable models that are revenue
+ * records (an invoice, a quote, an invoice schedule the scheduler turns into
+ * real invoices; the trash holds no payment model), with the subject a
+ * non-member SUPER_ADMIN's refusal names, as the commerce writes name it.
+ */
+const REVENUE_TRASH_SUBJECT: Readonly<Record<string, 'invoice' | 'quote'>> = {
+  invoice: 'invoice',
+  quote: 'quote',
+  recurringInvoice: 'invoice',
+};
 
 const TRASHABLE_MODELS = [
   'contact', 'deal', 'product', 'quote', 'invoice', 'booking',
@@ -72,16 +90,65 @@ export class TrashController {
     return { items: allItems.slice(offset, offset + limit), total: allItems.length };
   }
 
+  /**
+   * W4-TRASH-D46 (owner ruling D-46; review SEC-W3D46R-3, census D46-S09):
+   * restoring or permanently deleting a revenue record is a revenue write.
+   * This controller runs BusinessGuard alone (its @RequireModuleScope has no
+   * ModuleScopeGuard to enforce it), and BusinessGuard admits a platform
+   * SUPER_ADMIN to every tenant, so a non-member SUPER_ADMIN and a
+   * revenue:read member brought a trashed ACTIVE schedule back (it then
+   * billed again) or erased it. For a revenue model, every caller needs a
+   * Membership in :businessId whose scope map (or, without one, the role
+   * defaults) holds revenue:write, ModuleScopeGuard's rule restated:
+   *   - a SUPER_ADMIN with no Membership: 403 'Not authorized to update this
+   *     invoice|quote' (D-46, as CommerceController and
+   *     RecurringInvoiceController answer it);
+   *   - any other caller with no Membership: the guard's 'Not a member of
+   *     this business';
+   *   - a Membership below revenue:write: the guard's 'Insufficient
+   *     permissions: revenue requires write access (you have <level>)'.
+   * Checked before any read or write, so a refused call restores nothing and
+   * a trashed schedule never bills again on that call. Every other trash model
+   * is unchanged and costs no query.
+   */
+  private async assertMayWriteRevenue(req: ActorRequest | undefined, businessId: string, model: TrashableModel): Promise<void> {
+    const subject = REVENUE_TRASH_SUBJECT[model];
+    if (!subject) return;
+    const user = req?.user;
+    const membership = user?.id
+      ? await this.prisma.client.membership.findUnique({
+          where: { userId_businessId: { userId: user.id, businessId } },
+          select: { role: true, permissionScopes: true },
+        })
+      : null;
+    if (!membership) {
+      throw new ForbiddenException(
+        user?.role === 'SUPER_ADMIN' ? `Not authorized to update this ${subject}` : 'Not a member of this business',
+      );
+    }
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    const level = scopes.revenue || 'none';
+    if (rankOf(level) < LEVEL_RANK.write) {
+      throw new ForbiddenException(`Insufficient permissions: revenue requires write access (you have ${level})`);
+    }
+  }
+
+  // W4-TRASH-D46 (D-46): a revenue model runs assertMayWriteRevenue first.
   @Post(':model/:id/restore')
   @RequireModuleScope('settings')
   async restore(
     @Param('businessId') businessId: string,
     @Param('model') model: string,
     @Param('id') id: string,
+    @Req() req?: ActorRequest,
   ) {
     if (!isTrashableModel(model)) {
       throw new BadRequestException(`Model '${model}' is not trashable`);
     }
+    await this.assertMayWriteRevenue(req, businessId, model);
     const existing = await this.findUnique(model, { id, businessId, deletedAt: { not: null } });
     if (!existing) throw new NotFoundException(`Trashed ${model} not found`);
 
@@ -96,16 +163,19 @@ export class TrashController {
     return { restored: true, model, id, item: restored };
   }
 
+  // W4-TRASH-D46 (D-46): a revenue model runs assertMayWriteRevenue first.
   @Delete(':model/:id')
   @RequireModuleScope('settings')
   async permanentDelete(
     @Param('businessId') businessId: string,
     @Param('model') model: string,
     @Param('id') id: string,
+    @Req() req?: ActorRequest,
   ) {
     if (!isTrashableModel(model)) {
       throw new BadRequestException(`Model '${model}' is not trashable`);
     }
+    await this.assertMayWriteRevenue(req, businessId, model);
     const existing = await this.findUnique(model, { id, businessId, deletedAt: { not: null } });
     if (!existing) throw new NotFoundException(`Trashed ${model} not found`);
 
