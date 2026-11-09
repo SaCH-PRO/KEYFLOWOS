@@ -51,12 +51,16 @@
  *                   replay) carries the contact projected as every other invoice write projects it
  *                   (id, businessId, firstName, lastName, email), never the whole Contact row; the
  *                   quote create twin already did (control)
- *   H-10 (todo)     V1-45b review SEC-V45b-1 / CR-V45b-1: a replay (or a lost burst race) emits no
- *                   second invoice.create / quote.create business event. Outside this packet's write
- *                   set (BusinessEventInterceptor); see the it.todo.
+ *   H-10 RED-BEFORE W3-V1-45c-EVENT-REPLAY (V1-45b review SEC-V45b-1 / CR-V45b-1, D-15): with the
+ *                   production BusinessEventInterceptor installed globally, a keyed replay of POST
+ *                   invoices / POST quotes, and the losers of a 3-way concurrent burst, write no second
+ *                   invoice.create / quote.create business event (one per document, by the member who
+ *                   created it, as the invoice.created / quote.created domain events already are); an
+ *                   unkeyed create is still audited once
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
- * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed per business), TeamAuditInterceptor, CommerceService,
+ * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed per business), TeamAuditInterceptor,
+ * BusinessEventInterceptor (global, as app.module.ts installs it; its emitter a recorder), CommerceService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService and
  * ChartOfAccountsSeederService write real rows, and the production
  * GlobalHttpExceptionFilter + ValidationPipe are installed. Identity
@@ -134,6 +138,11 @@ const HKEY = {
   memberOwn: `${P}h-member-own-4f19`,
   projection: `${P}h-projection-2e6b`,
   projectionQuote: `${P}h-projection-quote-8c41`,
+  // W3-V1-45c-EVENT-REPLAY (H-10).
+  event: `${P}h-event-1c5d`,
+  eventBurst: `${P}h-event-burst-7e2a`,
+  quoteEvent: `${P}h-quote-event-4b90`,
+  quoteEventBurst: `${P}h-quote-event-burst-d36f`,
 };
 
 /** V1-45b (H-06): the businesses whose stubbed plan answers that the invoice limit is reached. */
@@ -157,6 +166,26 @@ const eventStub = {
   off: () => undefined,
   once: () => undefined,
   removeListener: () => undefined,
+};
+
+/**
+ * W3-V1-45c-EVENT-REPLAY (H-10): every business event the real
+ * BusinessEventInterceptor (installed as APP_INTERCEPTOR, as app.module.ts
+ * does) hands its emitter. The emitter is this recorder: the BullMQ write
+ * behind it is evidence-feed.integration.test.ts's concern.
+ */
+const businessEvents: Array<{ businessId: string; eventType: string; subjectType: string; subjectId: string; actorType: string; actorId: string }> = [];
+const businessEventRecorder = {
+  emit: async (job: any) => {
+    businessEvents.push({
+      businessId: job.businessId,
+      eventType: job.eventType,
+      subjectType: job.subjectType,
+      subjectId: String(job.subjectId),
+      actorType: job.actorType,
+      actorId: job.actorId,
+    });
+  },
 };
 
 async function cleanup() {
@@ -283,6 +312,9 @@ beforeAll(async () => {
   const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  const { APP_INTERCEPTOR } = await import('@nestjs/core');
+  const { BusinessEventInterceptor } = await import('../src/modules/business-events/business-event.interceptor');
+  const { ResilientEmitterService } = await import('../src/modules/business-events/resilient-emitter.service');
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
@@ -326,6 +358,10 @@ beforeAll(async () => {
       PaymentEvidenceService,
       { provide: DocumentIntelligenceService, useValue: {} },
       { provide: GoogleDriveService, useValue: {} },
+      // W3-V1-45c-EVENT-REPLAY (H-10): the real business event interceptor,
+      // global as in app.module.ts; its emitter is the recorder above.
+      { provide: APP_INTERCEPTOR, useClass: BusinessEventInterceptor },
+      { provide: ResilientEmitterService, useValue: businessEventRecorder },
     ],
   }).compile();
   commerce = moduleRef.get(CommerceService);
@@ -853,14 +889,81 @@ describe('V1-45b create idempotency — the HTTP door (Idempotency-Key header, D
   // production BusinessEventInterceptor installed globally: three keyed POSTs
   // of one invoice emitted three invoice.create events, a Promise.all burst of
   // three emitted three for one invoice, two keyed POST quotes emitted two
-  // quote.create). The global BusinessEventInterceptor (APP_INTERCEPTOR) has
-  // an isReplay rule only for the payment routes (R19-ST-1); the create routes
-  // need one too, and a lost burst race (whose startedAt precedes the winner's
-  // createdAt) needs the handler to mark its replay answer. That file, and a
-  // service-side replay mark, are outside the V1-45b write set (commerce
-  // controller, app-bootstrap, the service's request hash, TeamAuditInterceptor
-  // / PlanLimitGuard): a follow-up packet.
-  it.todo(
-    'H-10 (SEC-V45b-1 / CR-V45b-1): a keyed replay, or the losers of a concurrent burst, emit no second invoice.create / quote.create business event (outside the write set: BusinessEventInterceptor ROUTE_EVENT_RULES has no isReplay rule for the create routes; follow-up packet)',
-  );
+  // quote.create). The global BusinessEventInterceptor (APP_INTERCEPTOR) had
+  // an isReplay rule only for the payment routes (R19-ST-1); a lost burst race
+  // (whose startedAt precedes the winner's createdAt) is invisible to a
+  // createdAt rule, so the handler marks its replay answer.
+  // W3-V1-45c-EVENT-REPLAY: the create routes' rules read that mark.
+  it('H-10 RED-BEFORE (W3-V1-45c-EVENT-REPLAY, SEC-V45b-1 / CR-V45b-1): a keyed replay and a 3-way concurrent burst each leave exactly one invoice.create / quote.create business event; an unkeyed create is still audited', async () => {
+    const eventsOf = (eventType: string, subjectId: string) =>
+      businessEvents
+        .filter((e) => e.businessId === ID.bizH && e.eventType === eventType && e.subjectId === subjectId)
+        .map((e) => [e.subjectType, e.actorType, e.actorId]);
+    const domainEventsOf = (name: 'invoice.created' | 'quote.created', id: string) =>
+      emitted.filter((e) => e.name === name && (name === 'invoice.created' ? e.payload?.invoice?.id : e.payload?.quote?.id) === id);
+
+    // Invoices: a create and its keyed replay, then a 3-way concurrent burst on another key.
+    const invoiceBody = httpInvoiceBody(ID.contactH, { notes: 'v45a h-10' });
+    const invoice = await postInvoice(ID.bizH, invoiceBody, { key: HKEY.event });
+    expect(invoice.status, JSON.stringify(invoice.body)).toBe(201);
+    const invoiceReplay = await postInvoice(ID.bizH, invoiceBody, { key: HKEY.event });
+    expect(invoiceReplay.status, JSON.stringify(invoiceReplay.body)).toBe(201);
+    expect(invoiceReplay.body.id).toBe(invoice.body.id);
+    const invoiceBurst = await Promise.all(
+      Array.from({ length: 3 }, () => postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-10 burst' }), { key: HKEY.eventBurst })),
+    );
+    expect(invoiceBurst.map((r) => r.status)).toEqual([201, 201, 201]);
+    const invoiceBurstIds = new Set(invoiceBurst.map((r) => r.body.id));
+    expect(invoiceBurstIds.size, 'one invoice for the burst key').toBe(1);
+    const invoiceBurstId = [...invoiceBurstIds][0] as string;
+
+    // Quotes: the same.
+    const quoteBody = httpQuoteBody(ID.contactH, { notes: 'v45a h-10' });
+    const quote = await postQuote(ID.bizH, quoteBody, { key: HKEY.quoteEvent });
+    expect(quote.status, JSON.stringify(quote.body)).toBe(201);
+    const quoteReplay = await postQuote(ID.bizH, quoteBody, { key: HKEY.quoteEvent });
+    expect(quoteReplay.status, JSON.stringify(quoteReplay.body)).toBe(201);
+    expect(quoteReplay.body.id).toBe(quote.body.id);
+    const quoteBurst = await Promise.all(
+      Array.from({ length: 3 }, () => postQuote(ID.bizH, httpQuoteBody(ID.contactH, { notes: 'v45a h-10 burst' }), { key: HKEY.quoteEventBurst })),
+    );
+    expect(quoteBurst.map((r) => r.status)).toEqual([201, 201, 201]);
+    const quoteBurstIds = new Set(quoteBurst.map((r) => r.body.id));
+    expect(quoteBurstIds.size, 'one quote for the burst key').toBe(1);
+    const quoteBurstId = [...quoteBurstIds][0] as string;
+
+    // The interceptor's write is a tap after the handler; let it land.
+    await sleep(300);
+    const counts = {
+      invoiceReplay: eventsOf('invoice.create', invoice.body.id).length,
+      invoiceBurst: eventsOf('invoice.create', invoiceBurstId).length,
+      quoteReplay: eventsOf('quote.create', quote.body.id).length,
+      quoteBurst: eventsOf('quote.create', quoteBurstId).length,
+    };
+    expect(counts, 'one business event per created document').toEqual({ invoiceReplay: 1, invoiceBurst: 1, quoteReplay: 1, quoteBurst: 1 });
+    // The one event names the document and the member who created it.
+    for (const [eventType, id] of [
+      ['invoice.create', invoice.body.id],
+      ['invoice.create', invoiceBurstId],
+      ['quote.create', quote.body.id],
+      ['quote.create', quoteBurstId],
+    ] as const) {
+      expect(eventsOf(eventType, id), `${eventType} ${id}`).toEqual([[eventType.split('.')[0], 'human', ID.owner]]);
+    }
+    // As the domain events already were (I-01, Q-01): one invoice.created / quote.created per document.
+    for (const id of [invoice.body.id, invoiceBurstId]) expect(domainEventsOf('invoice.created', id), `invoice.created ${id}`).toHaveLength(1);
+    for (const id of [quote.body.id, quoteBurstId]) expect(domainEventsOf('quote.created', id), `quote.created ${id}`).toHaveLength(1);
+
+    // Control: a create without a key is audited as before, once per document.
+    const unkeyed = [
+      await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-10 unkeyed' })),
+      await postInvoice(ID.bizH, httpInvoiceBody(ID.contactH, { notes: 'v45a h-10 unkeyed' })),
+    ];
+    const unkeyedQuote = await postQuote(ID.bizH, httpQuoteBody(ID.contactH, { notes: 'v45a h-10 unkeyed' }));
+    expect([...unkeyed, unkeyedQuote].map((r) => r.status)).toEqual([201, 201, 201]);
+    expect(unkeyed[0].body.id).not.toBe(unkeyed[1].body.id);
+    await sleep(300);
+    for (const r of unkeyed) expect(eventsOf('invoice.create', r.body.id)).toEqual([['invoice', 'human', ID.owner]]);
+    expect(eventsOf('quote.create', unkeyedQuote.body.id)).toEqual([['quote', 'human', ID.owner]]);
+  }, 60_000);
 });
