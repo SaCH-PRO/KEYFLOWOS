@@ -128,4 +128,45 @@ describe('SystemEmailService.sendTransactional logs no recipient address (9B-D2,
   // sendTransactional logging only), so the fix needs a follow-up packet.
   it.todo('[9B-D2] OPEN (outside write set): FinancialBriefingScheduler logs no owner address after the Monday briefing send (apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts:263, `Email sent to ${owner.email}`)');
   it.todo('[9B-D2] OPEN (outside write set): AccountantExportEmailService logs no recipient after the export send (apps/server/src/modules/finance/accountant-export-email.service.ts:102-104, `Sent accountant export to ${to}`)');
+
+  // Review finding SEC-W4HK-1 (W4-HOUSEKEEPING): the redaction above holds on
+  // the sink's own lines only. The SystemEmailSendError the sink throws still
+  // carries the provider text (system-email.service.ts:125 on a confirmed
+  // rejection; :144 `Failed to send email: <message>` on an unknown outcome),
+  // so a caller that logs err.message, or a 500 line that logs the stack,
+  // relogs any address in it. The census (CF-029) records the closure as the
+  // sink's lines only and keeps the caller lines OPEN. Those callers are outside
+  // W4-HOUSEKEEPING's write set, so their negative controls stay it.todo.
+  it('[9B-D2] CHARACTERIZATION (SEC-W4HK-1): the redaction covers the sink\'s own lines only; the error it throws still carries the provider text, address included', async () => {
+    const { service: rejecting } = serviceWith(async () => ({
+      data: null,
+      error: { name: 'validation_error', message: `"${RECIPIENT}" is on the suppression list` },
+    }));
+    const confirmed = await rejecting
+      .sendTransactional({ to: RECIPIENT, subject: 'Verify your email', html: '<p>Hi</p>' })
+      .catch((e: unknown) => e);
+    expect(confirmed).toMatchObject({ name: 'SystemEmailSendError', outcome: 'FAILED_CONFIRMED', providerCode: 'validation_error' });
+    expect((confirmed as Error).message).toContain(RECIPIENT);
+    expect((confirmed as Error).stack ?? '').toContain(RECIPIENT);
+
+    const { service: losing } = serviceWith(async () => {
+      throw new Error(`socket hang up while sending to ${RECIPIENT}`);
+    });
+    const unknown = await losing
+      .sendTransactional({ to: RECIPIENT, subject: 'Reset your password', html: '<p>Reset</p>' })
+      .catch((e: unknown) => e);
+    expect(unknown).toMatchObject({
+      name: 'SystemEmailSendError',
+      outcome: 'OUTCOME_UNKNOWN',
+      message: `Failed to send email: socket hang up while sending to ${RECIPIENT}`,
+    });
+
+    // The sink's own lines still carry no address: that is what the census closes.
+    expectNoAddressLogged();
+  });
+
+  it.todo('[9B-D2] OPEN (outside write set, SEC-W4HK-1): IdentitySignupService logs no address when a verification send fails (apps/server/src/modules/identity/identity-signup.service.ts:185 on sign-up and :266 on resend, `... failed for ${email}: ${err.message}`, which also relogs the provider text)');
+  it.todo('[9B-D2] OPEN (outside write set, SEC-W4HK-1): AiUsageAlertSchedulerService logs no provider text when an alert email fails (apps/server/src/modules/ai/ai-usage-alert-scheduler.service.ts:156, `Email notification failed for alert ...: ${err.message}`)');
+  it.todo('[9B-D2] OPEN (outside write set, SEC-W4HK-1): FinancialBriefingScheduler logs no provider text when the briefing email fails (apps/server/src/modules/commerce/financial-briefing-scheduler.service.ts:269, `Email send failed for ...: ${emailErr.message}`)');
+  it.todo('[9B-D2] OPEN (outside write set, SEC-W4HK-1): a failed accountant export send logs no provider text on the 500 line (POST accountant-export/email lets the SystemEmailSendError escape at apps/server/src/modules/finance/finance.controller.ts:1169; apps/server/src/core/filters/http-exception.filter.ts:71 logs its stack)');
 });
