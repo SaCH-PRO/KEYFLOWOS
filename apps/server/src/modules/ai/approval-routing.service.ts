@@ -3,6 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { SystemEmailService } from '../notifications/system-email.service';
+import { redactAddresses } from '../../core/security/redaction';
 
 export type ApprovalRouteMethod = 'delegation_rule' | 'job_role_match' | 'owner_fallback' | 'unresolved';
 
@@ -185,7 +186,11 @@ export class ApprovalRoutingService {
         });
         return { sent: true };
       } catch (err: any) {
-        return { sent: false, error: err?.message ?? 'Email send failed' };
+        // W6-LOG-ADDRESSES-AND-DOCS (9B-D2, review SEC-W5SEC-1): this text is
+        // only ever logged (AiOversightService.routeAndNotify), and the system
+        // email sender's error can quote the recipient, so it leaves here with
+        // every address redacted.
+        return { sent: false, error: redactAddresses(String(err?.message ?? 'Email send failed')) };
       }
     }
     return { sent: false, error: 'No usable contact channel for the resolved approver' };
