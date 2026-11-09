@@ -81,7 +81,15 @@
  * per action finds its line naming `contact <contactId>`, so an emptied log
  * cannot pass, and the window checks prove each action still ran (the send
  * the email stand-in was asked for; the playbook's run count and the queued
- * outboundDelivery row).
+ * outboundDelivery row). For SEND_EMAIL these windows prove the executor's own
+ * line only: the transactional-email sender is a stand-in here, and the real
+ * one logs the recipient email itself
+ * (apps/server/src/modules/notifications/transactional-email.service.ts:760 on
+ * a send, :764 on each failed attempt, :771 after the last). Section 1c runs
+ * the real sender under the SEND_EMAIL action (no database) and pins those
+ * lines by CHARACTERIZATION, with the negative control as it.todo: the fix is
+ * outside the FOLLOW3-C2 write set, and the census keeps it OPEN (section 6,
+ * item 3).
  *
  * The public link token no longer reaches the logs (V1-83,
  * FOLLOW3-C1-HTTP-LOG-ROUTE-PATTERN). LoggingInterceptor's access line
@@ -932,7 +940,9 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
     // the FOLLOW3-C2-PLAYBOOK-LOG-CONTACT-ID tests-first commit: the SEND_EMAIL
     // action logged `Email sent to ${c.email}` at log level
     // (apps/server/src/modules/flow/automation-executor.service.ts:286 before the fix).
-    it("NEGATIVE CONTROL: no log entry carries the new contact's email when a SEND_EMAIL playbook runs on contact.created", () => {
+    // The sender is a stand-in in this window, so this proves the executor's
+    // own line only; the real sender's lines are section 1c (OPEN).
+    it("NEGATIVE CONTROL: with the sender stood in, no log entry in the window carries the new contact's email when a SEND_EMAIL playbook runs on contact.created (the executor's own line; the real sender's lines are section 1c, OPEN)", () => {
       const leaks = entriesContaining(windows.contactCreatePlaybook.entries, emailForms(PLAYBOOK_CONTACT_EMAIL));
       expect(leaks, describeLeaks(leaks)).toEqual([]);
     });
@@ -1372,6 +1382,130 @@ describe('the HTTP access line and the 500 line log the route pattern, never req
 });
 
 // ===========================================================================
+// 1c. The SEND_EMAIL action's real sender logs the recipient email (no database)
+// ===========================================================================
+
+/**
+ * FOLLOW3-C2 review (SEC-C2-1, F1). Section 1's SEND_EMAIL window replaces
+ * TransactionalEmailService with a stand-in (no provider traffic), so its
+ * negative control sees the executor's own line only. Here the real
+ * AutomationExecutorService runs one SEND_EMAIL playbook through the real
+ * TransactionalEmailService. Stand-ins: Prisma (the playbook, the business, a
+ * contact that may be contacted, the notification log), CrmService (the
+ * contact's detail), ActivityService, and GmailService, which reports connected
+ * and sends nothing. The sender's retry wait is skipped.
+ *
+ * The sender logs the recipient email itself
+ * (apps/server/src/modules/notifications/transactional-email.service.ts:760 on a
+ * send, :764 on each failed attempt, :771 after the last). The fix is in that
+ * file, outside the FOLLOW3-C2 write set, so the leak is pinned by
+ * CHARACTERIZATION and the negative control is it.todo; the census keeps it
+ * OPEN (section 6, item 3; IA-044, CF-029).
+ */
+describe('the SEND_EMAIL action through the real transactional-email sender (no database): the sender logs the recipient email (OPEN, census section 6 item 3)', () => {
+  const BIZ = `${P}sender_biz`;
+  const CONTACT_ID = `${P}sender_contact`;
+  const EMAIL = `${P}sender.contact@test.local`;
+  const PLAYBOOK = 'V40A sender characterization';
+  const SEND_EMAIL_ACTION = {
+    type: 'SEND_EMAIL',
+    notificationType: 'invoice_sent',
+    templateData: { invoiceNumber: `${P}INV-1`, total: 100, currency: 'TTD', dueDate: '2026-12-01', invoiceUrl: 'https://example.test/i', items: [] },
+  };
+
+  let Executor: typeof import('../src/modules/flow/automation-executor.service').AutomationExecutorService;
+  let Sender: typeof import('../src/modules/notifications/transactional-email.service').TransactionalEmailService;
+
+  beforeAll(async () => {
+    ({ AutomationExecutorService: Executor } = await import('../src/modules/flow/automation-executor.service'));
+    ({ TransactionalEmailService: Sender } = await import('../src/modules/notifications/transactional-email.service'));
+  });
+
+  /** Run the SEND_EMAIL playbook on contact.created through the real sender, every log surface recorded. */
+  async function runPlaybook(gmailSend: () => Promise<{ messageId: string }>): Promise<{ entries: LogEntry[]; gmailCalls: number; runs: number }> {
+    let gmailCalls = 0;
+    let runs = 0;
+    const prisma = {
+      client: {
+        automation: {
+          findMany: async () => [{ id: `${P}sender_playbook`, name: PLAYBOOK, condition: null, actionData: SEND_EMAIL_ACTION }],
+          update: async () => {
+            runs++;
+            return {};
+          },
+        },
+        business: { findUnique: async () => ({ id: BIZ, name: 'V40A Sender Biz', notificationPreferences: {} }) },
+        contact: { findFirst: async () => ({ doNotContact: false }) },
+        customerNotificationLog: { findFirst: async () => null, create: async () => ({}) },
+      },
+    };
+    const gmail = {
+      getGmailStatus: async () => ({ connected: true }),
+      sendEmail: async () => {
+        gmailCalls++;
+        return gmailSend();
+      },
+    };
+    const crm = { contactDetail: async () => ({ contact: { id: CONTACT_ID, email: EMAIL, firstName: 'Ada', lastName: 'Sender' } }) };
+    const activity = { log: async () => undefined };
+    const sender = new Sender(prisma as never, gmail as never);
+    const executor = new Executor(prisma as never, activity as never, crm as never, sender, null, null);
+    // The sender waits attempt * 1000 ms between attempts; skip the wait.
+    const wait = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void) => {
+      fn();
+      return 0;
+    }) as never);
+    const cap = startCapture();
+    try {
+      await (executor as unknown as { executePlaybooks: (b: string, t: string, c: Record<string, unknown>) => Promise<void> }).executePlaybooks(
+        BIZ,
+        'contact.created',
+        { contactId: CONTACT_ID },
+      );
+    } finally {
+      cap.stop();
+      wait.mockRestore();
+    }
+    return { entries: cap.entries, gmailCalls, runs };
+  }
+
+  it('the run is real: the playbook ran once, the real sender reached Gmail once, and the executor line names the contact id', async () => {
+    const { entries, gmailCalls, runs } = await runPlaybook(async () => ({ messageId: `${P}msg` }));
+    expect(runs).toBe(1);
+    expect(gmailCalls).toBe(1);
+    expect(entries.filter((e) => e.channel === 'Logger#log[AutomationExecutorService]' && e.text.startsWith('Email sent to ')).map((e) => e.text)).toEqual([
+      `Email sent to contact ${CONTACT_ID} for playbook "${PLAYBOOK}"`,
+    ]);
+  });
+
+  it('CHARACTERIZATION (SEC-C2-1, F1): a send logs the recipient email once, on the sender line (transactional-email.service.ts:760), and nowhere else', async () => {
+    const { entries } = await runPlaybook(async () => ({ messageId: `${P}msg` }));
+    expect(entriesContaining(entries, emailForms(EMAIL))).toEqual([
+      { channel: 'Logger#log[TransactionalEmailService]', text: `Sent invoice_sent to ${EMAIL} for business ${BIZ}` },
+    ]);
+  });
+
+  it('CHARACTERIZATION (SEC-C2-1, F1): a failed send logs the recipient email on each attempt at warn (:764) and after the last at error (:771), and nowhere else', async () => {
+    const { entries, gmailCalls } = await runPlaybook(async () => {
+      throw new Error('V40A gmail stand-in refused');
+    });
+    expect(gmailCalls).toBe(3);
+    expect(entriesContaining(entries, emailForms(EMAIL))).toEqual([
+      { channel: 'Logger#warn[TransactionalEmailService]', text: `Attempt 1/3 failed for invoice_sent to ${EMAIL}: V40A gmail stand-in refused` },
+      { channel: 'Logger#warn[TransactionalEmailService]', text: `Attempt 2/3 failed for invoice_sent to ${EMAIL}: V40A gmail stand-in refused` },
+      { channel: 'Logger#warn[TransactionalEmailService]', text: `Attempt 3/3 failed for invoice_sent to ${EMAIL}: V40A gmail stand-in refused` },
+      { channel: 'Logger#error[TransactionalEmailService]', text: `All 3 attempts failed for invoice_sent to ${EMAIL}: V40A gmail stand-in refused` },
+    ]);
+  });
+
+  // Outside the FOLLOW3-C2 write set: the fix is in
+  // apps/server/src/modules/notifications/transactional-email.service.ts
+  // (:760, :764, :771; also :262 and :361). Convert this and delete the two
+  // CHARACTERIZATION cases above when it lands.
+  it.todo("NEGATIVE CONTROL: the real sender logs no recipient email on a send, a failed attempt or the last failure when a SEND_EMAIL playbook runs (transactional-email.service.ts:760, :764, :771)");
+});
+
+// ===========================================================================
 // 2. The agent gate binds packet branches (D-22)
 // ===========================================================================
 
@@ -1774,8 +1908,19 @@ describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
     }
     // The logged contact email is personal data, not a secret: IA-044 and CF-029 carry it (CF-011 is secrets only).
     for (const id of ['IA-044', 'CF-029']) expect(notes[id], id).toContain('automation-executor.service.ts:286');
+    // FOLLOW3-C2 review (SEC-C2-1, F1): the SEND_EMAIL sender's own lines stay OPEN
+    // (section 1c pins them), and CF-029 keeps the log calls outside these windows
+    // OPEN (SEC-C2-2).
+    for (const id of ['IA-044', 'CF-029']) {
+      for (const needle of ['OPEN: the SEND_EMAIL action\'s sender', 'transactional-email.service.ts:760', ':764', ':771']) {
+        expect(notes[id], `${id} names ${needle}`).toContain(needle);
+      }
+    }
+    for (const needle of ['outside the suite\'s windows', 'cross-module-agent.service.ts:355', 'system-email.service.ts:130', 'email-marketing.service.ts:428', 'key-cortex-phone.service.ts:296']) {
+      expect(notes['CF-029'], `CF-029 names ${needle}`).toContain(needle);
+    }
     const findings = readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n').split('## 6.')[1] ?? '';
-    for (const needle of ['http-exception.filter.ts:65', 'chatwoot.controller.ts:14', 'whatsapp.controller.ts:234-237', 'automation-executor.service.ts:286', 'Validate control artifacts', 'self-modifiable']) {
+    for (const needle of ['http-exception.filter.ts:65', 'chatwoot.controller.ts:14', 'whatsapp.controller.ts:234-237', 'automation-executor.service.ts:286', 'transactional-email.service.ts:760', 'the SEND_EMAIL sender\'s lines are OPEN', 'Validate control artifacts', 'self-modifiable']) {
       expect(findings, `section 6 names ${needle}`).toContain(needle);
     }
     expect(findings).not.toMatch(/A non-draft pkt\/\* PR fails closed at the grant step/);
