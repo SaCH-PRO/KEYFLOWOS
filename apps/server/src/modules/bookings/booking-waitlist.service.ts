@@ -385,8 +385,16 @@ export class BookingWaitlistService {
    *
    * The placeholder booking is UNCONFIRMED: the contact still has to accept it
    * (via `convertWaitlistEntry`) before it becomes a real appointment.
+   *
+   * `actorType` (review SEC-WX-1): left out, the offer is the request's, as
+   * BookingsService.requestActor records a write: the member the
+   * TenantInterceptor bound for this business, else SYSTEM (offerActor). KEY's
+   * bookings_offer_waitlist_slot passes nothing, so a member's KEY offer is
+   * theirs, and on the staff bridge or a monitor (no member bound) it is the
+   * SYSTEM's. An offer the system makes on its own (the expiry cascade, the
+   * booking.cancelled listener) passes 'SYSTEM', even inside a member's request.
    */
-  async offerSlot(entryId: string, slot: FreedSlot, actorType: 'SYSTEM' | 'USER' = 'SYSTEM') {
+  async offerSlot(entryId: string, slot: FreedSlot, actorType: 'SYSTEM' | 'USER' = 'USER') {
     const entry = await this.prisma.client.bookingWaitlistEntry.findFirst({
       where: { id: entryId, deletedAt: null },
       include: {
@@ -493,7 +501,7 @@ export class BookingWaitlistService {
 
   /**
    * F1-D5: the actor an offer is recorded under. A USER offer names the member
-   * the TenantInterceptor bound for this business (the staff route); with no
+   * the TenantInterceptor bound for this business (the staff route, KEY); with no
    * request bound to this business it is the SYSTEM's, never a nameless USER
    * (BookingsService.requestActor's rule).
    */

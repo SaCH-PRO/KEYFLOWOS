@@ -539,6 +539,55 @@ describe('BookingWaitlistService', () => {
       expect(offered.actorId).toBeUndefined();
     });
 
+    // Review SEC-WX-1: KEY's bookings_offer_waitlist_slot passes no actor.
+    it('an offer with no actor named, in a request bound to this business, is the member\'s (KEY)', async () => {
+      const { runWithTenant } = await import('../../core/tenant/tenant-context');
+      prismaMock.client.bookingWaitlistEntry.findFirst.mockResolvedValueOnce(mockEntry());
+
+      await runWithTenant('biz_1', 'user_1', () =>
+        service.offerSlot('entry_1', {
+          startTime: new Date('2031-08-12T10:00:00Z'),
+          endTime: new Date('2031-08-12T11:00:00Z'),
+          serviceId: 'service_1',
+        }),
+      );
+
+      const offered = emit.mock.calls.find((c: any[]) => c[0] === 'booking.waitlist.slot_offered')![1];
+      expect(offered.actorType).toBe('USER');
+      expect(offered.actorId).toBe('user_1');
+    });
+
+    it('an offer with no actor named and no request bound is the SYSTEM\'s', async () => {
+      prismaMock.client.bookingWaitlistEntry.findFirst.mockResolvedValueOnce(mockEntry());
+
+      await service.offerSlot('entry_1', {
+        startTime: new Date('2031-08-12T10:00:00Z'),
+        endTime: new Date('2031-08-12T11:00:00Z'),
+        serviceId: 'service_1',
+      });
+
+      const offered = emit.mock.calls.find((c: any[]) => c[0] === 'booking.waitlist.slot_offered')![1];
+      expect(offered.actorType).toBe('SYSTEM');
+      expect(offered.actorId).toBeUndefined();
+    });
+
+    it('a SYSTEM offer inside a member\'s request stays the SYSTEM\'s', async () => {
+      const { runWithTenant } = await import('../../core/tenant/tenant-context');
+      prismaMock.client.bookingWaitlistEntry.findFirst.mockResolvedValueOnce(mockEntry());
+
+      await runWithTenant('biz_1', 'user_1', () =>
+        service.offerSlot(
+          'entry_1',
+          { startTime: new Date('2031-08-12T10:00:00Z'), endTime: new Date('2031-08-12T11:00:00Z'), serviceId: 'service_1' },
+          'SYSTEM',
+        ),
+      );
+
+      const offered = emit.mock.calls.find((c: any[]) => c[0] === 'booking.waitlist.slot_offered')![1];
+      expect(offered.actorType).toBe('SYSTEM');
+      expect(offered.actorId).toBeUndefined();
+    });
+
     it('the WAITING to OFFERED write is a compare-and-set in the slot claim', async () => {
       prismaMock.client.bookingWaitlistEntry.findFirst.mockResolvedValueOnce(mockEntry());
 
@@ -654,6 +703,29 @@ describe('BookingWaitlistListener offer notifications (PR196-WAITLIST-EXPIRY)', 
     });
     expect(event.data).toMatchObject({ waitlistEntryId: 'entry_1', bookingId: 'booking_1', offerExpiresAt: deadline.toISOString() });
     expect(isCanonicalContactEventType('booking.waitlist_offered')).toBe(true);
+  });
+
+  it('a freed slot is offered as the SYSTEM\'s, not the cancelling member\'s (review SEC-WX-1)', async () => {
+    const { BookingWaitlistListener } = await import('./booking-waitlist.listener');
+    const waitlist = {
+      findWaitlistMatchesForSlot: vi.fn(async () => [{ id: 'entry_1' }]),
+      offerSlot: vi.fn(async () => ({ booking: { id: 'booking_1' } })),
+    };
+    const listener = new (BookingWaitlistListener as any)(waitlist, undefined, undefined);
+
+    await listener.onCancelled({
+      businessId: 'biz_1',
+      booking: {
+        id: 'booking_0',
+        startTime: new Date('2031-03-05T14:00:00.000Z'),
+        endTime: new Date('2031-03-05T15:00:00.000Z'),
+        serviceId: 'service_1',
+        staffId: 'staff_1',
+      },
+    });
+
+    expect(waitlist.offerSlot).toHaveBeenCalledTimes(1);
+    expect((waitlist.offerSlot.mock.calls as any[])[0][2]).toBe('SYSTEM');
   });
 
   it('a failing timeline write does not stop the staff notification', async () => {

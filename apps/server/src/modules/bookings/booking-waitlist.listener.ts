@@ -253,12 +253,18 @@ export class BookingWaitlistListener {
       if (matches.length === 0) return;
 
       const entry = matches[0];
-      const result = await this.waitlist.offerSlot(entry.id, {
-        startTime: new Date(booking.startTime),
-        endTime: new Date(booking.endTime),
-        serviceId: booking.serviceId,
-        staffId: booking.staffId ?? null,
-      });
+      // Review SEC-WX-1: the system offers the freed slot, not the member whose
+      // cancel or reschedule freed it (this runs inside their request context).
+      const result = await this.waitlist.offerSlot(
+        entry.id,
+        {
+          startTime: new Date(booking.startTime),
+          endTime: new Date(booking.endTime),
+          serviceId: booking.serviceId,
+          staffId: booking.staffId ?? null,
+        },
+        'SYSTEM',
+      );
 
       this.logger.log(
         `Offered freed slot ${booking.startTime.toISOString()} to waitlist entry ${entry.id} as booking ${result.booking.id}`,

@@ -572,3 +572,116 @@ describe('staff are notified, the customer is not (D-86, F1-D4, F1-D5)', () => {
     expect(notes[0].data).toMatchObject({ actorType: 'USER', actorId: ID.owner });
   });
 });
+
+/**
+ * Review SEC-WX-1: KEY's bookings_offer_waitlist_slot calls offerSlot with no
+ * actor (flow-orchestrator.service.ts, outside this packet's write set). The
+ * offer a member made through KEY was recorded as SYSTEM's, with no actorId, on
+ * the canonical ContactEvent and the staff notification. offerSlot's default
+ * now follows BookingsService.requestActor's rule (the member TenantInterceptor
+ * bound for this business, else SYSTEM); the system's own offers (the expiry
+ * cascade, the booking.cancelled listener) say SYSTEM.
+ *
+ * The dispatcher is the real FlowOrchestratorService.executeToolAction (the
+ * prototype with the real PrismaService and this suite's real waitlist service,
+ * as test/key-dispatcher-tenant.integration.test.ts composes it).
+ */
+describe('a KEY offer names the member it was made for (review SEC-WX-1)', () => {
+  let dispatcher: any;
+
+  beforeAll(async () => {
+    const { FlowOrchestratorService } = await import('../src/modules/ai/flow-orchestrator.service');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { BookingWaitlistService } = await import('../src/modules/bookings/booking-waitlist.service');
+    const prisma = moduleRef.get(PrismaService);
+    dispatcher = Object.assign(Object.create(FlowOrchestratorService.prototype), {
+      prisma,
+      moduleRef: {
+        get: (token: unknown) => {
+          if (token === BookingWaitlistService) return waitlist;
+          throw new Error(`unexpected service ${String((token as { name?: string })?.name ?? token)}`);
+        },
+      },
+    });
+  });
+
+  const keyOffer = (entryId: string, day: number) => {
+    const slot = slotAt(day);
+    return dispatcher.executeToolAction(ID.biz, 'bookings_offer_waitlist_slot', {
+      entryId,
+      serviceId: ID.svc,
+      staffId: ID.staff,
+      startTime: slot.startTime.toISOString(),
+      endTime: slot.endTime.toISOString(),
+    });
+  };
+
+  it('RED-BEFORE: a member offering through KEY (member chat, tenant bound) is named on the event, the ContactEvent and the staff notification', async () => {
+    const e = await waiting(ID.contacts[4]);
+    const out = await runWithTenant(ID.biz, ID.owner, () => keyOffer(e.id, 20));
+    expect(out.entryId).toBe(e.id);
+
+    const offeredEvent = emitted.find((x) => x.name === 'booking.waitlist.slot_offered');
+    expect(offeredEvent!.payload).toMatchObject({ businessId: ID.biz, actorType: 'USER', actorId: ID.owner });
+    await listener.onSlotOffered(offeredEvent!.payload);
+
+    const events = await db.contactEvent.findMany({ where: { businessId: ID.biz, contactId: ID.contacts[4] } });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'booking.waitlist_offered', actorType: 'USER', actorId: ID.owner, source: 'bookings' });
+    const notes = await db.notification.findMany({ where: { businessId: ID.biz, type: 'booking.waitlist_offered' } });
+    expect(notes).toHaveLength(1);
+    expect(notes[0].data).toMatchObject({ actorType: 'USER', actorId: ID.owner });
+  });
+
+  it('CONTROL: KEY with no member bound (the staff bridge, a monitor) records SYSTEM, never a nameless USER', async () => {
+    const e = await waiting(ID.contacts[4]);
+    await keyOffer(e.id, 21);
+
+    const offeredEvent = emitted.find((x) => x.name === 'booking.waitlist.slot_offered');
+    expect(offeredEvent!.payload.actorType).toBe('SYSTEM');
+    expect(offeredEvent!.payload).not.toHaveProperty('actorId');
+    await listener.onSlotOffered(offeredEvent!.payload);
+    const events = await db.contactEvent.findMany({ where: { businessId: ID.biz, contactId: ID.contacts[4] } });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ actorType: 'SYSTEM', actorId: null });
+  });
+
+  it('CONTROL: KEY in a request bound to another business records SYSTEM, not that member', async () => {
+    const e = await waiting(ID.contacts[4]);
+    await runWithTenant(`${P}other_biz`, ID.owner, () => keyOffer(e.id, 22));
+
+    const offeredEvent = emitted.find((x) => x.name === 'booking.waitlist.slot_offered');
+    expect(offeredEvent!.payload.actorType).toBe('SYSTEM');
+    expect(offeredEvent!.payload).not.toHaveProperty('actorId');
+  });
+
+  it("CONTROL: the booking.cancelled listener's offer, run inside the cancelling member's request, is the system's", async () => {
+    const e = await waiting(ID.contacts[5]);
+    const slot = slotAt(23);
+    await runWithTenant(ID.biz, ID.owner, () =>
+      listener.onCancelled({
+        businessId: ID.biz,
+        booking: { id: `${P}freed`, startTime: slot.startTime, endTime: slot.endTime, serviceId: ID.svc, staffId: ID.staff },
+      }),
+    );
+
+    expect((await entry(e.id)).status).toBe('OFFERED');
+    const offeredEvent = emitted.find((x) => x.name === 'booking.waitlist.slot_offered');
+    expect(offeredEvent!.payload.actorType).toBe('SYSTEM');
+    expect(offeredEvent!.payload).not.toHaveProperty('actorId');
+  });
+
+  it('CONTROL: the expiry cascade, run inside a member request, offers as SYSTEM', async () => {
+    const slot = slotAt(24);
+    await offered(ID.contacts[0], slot);
+    const next = await waiting(ID.contacts[1]);
+    emitted.length = 0;
+
+    await runWithTenant(ID.biz, ID.owner, () => waitlist.expireStaleOffers({ businessId: ID.biz }));
+
+    expect((await entry(next.id)).status).toBe('OFFERED');
+    const offeredEvent = emitted.find((x) => x.name === 'booking.waitlist.slot_offered');
+    expect(offeredEvent!.payload.actorType).toBe('SYSTEM');
+    expect(offeredEvent!.payload).not.toHaveProperty('actorId');
+  });
+});
