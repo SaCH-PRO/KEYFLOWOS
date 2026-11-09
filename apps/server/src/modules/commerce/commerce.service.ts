@@ -4469,144 +4469,187 @@ export class CommerceService {
       });
     }
 
-    const updateData: any = {};
-    if (input.contactId !== undefined) {
-      // R0-D3 review (ST-D3-1): the id is bound to the row and the row is
-      // returned with `include: { contact: true }`, so an id from another
-      // tenant both bound a foreign reference and disclosed that tenant's
-      // contact (email, phone, notes, every field). Resolve it inside the
-      // caller's tenant first; a foreign, deleted or unknown id answers like
-      // a missing one, and nothing is written.
-      updateData.contactId = await this.assertContactInBusiness(input.contactId, input.businessId);
-    }
+    // R0-D3 review (ST-D3-1): the id is bound to the row and the row is
+    // returned with `include: { contact: true }`, so an id from another
+    // tenant both bound a foreign reference and disclosed that tenant's
+    // contact (email, phone, notes, every field). Resolve it inside the
+    // caller's tenant first; a foreign, deleted or unknown id answers like
+    // a missing one, and nothing is written.
+    const contactId =
+      input.contactId !== undefined ? await this.assertContactInBusiness(input.contactId, input.businessId) : undefined;
     // V1-37 (D-13): a named currency is held to the create rule, upper-cased.
-    if (input.currency !== undefined) {
-      const currency = await this.documentCurrency(input.businessId, input.currency);
-      // V1-37 review (ST-V37-1): the currency is fixed once the invoice leaves
-      // DRAFT. Issuing posts accounts receivable in the invoice's currency
-      // (accrual), and that posting is idempotent on its key, so a SENT USD
-      // invoice switched to TTD took its payment in TTD while the USD
-      // receivable stayed open for ever. Restating the stored currency is not
-      // a change (an edit form sends the whole document) and stays allowed.
-      if (currency !== normalizeCurrency(invoice.currency) && invoice.status !== 'DRAFT') {
-        throw new ConflictException(
-          `Cannot change the currency of a ${invoice.status} invoice: the currency is fixed once the invoice is issued`,
-        );
+    const currency = input.currency !== undefined ? await this.documentCurrency(input.businessId, input.currency) : undefined;
+
+    // FOLLOW3-B2 review (SEC-B2-2, B2-CR-2): the edit is one transaction that
+    // first takes the invoice row lock every money door takes (SELECT ... FOR
+    // NO KEY UPDATE, lockInvoiceForPayment) and re-reads the invoice under it,
+    // and every guard below decides on that row, not on the read above. The
+    // edit used to decide "DRAFT" on that earlier read, then delete the lines
+    // and write the new lines and total by id alone, so a Send that committed
+    // in between (a double submit, a second member, KEY sending while a person
+    // edits) left a SENT invoice whose total was not the receivable the Send
+    // had posted. Now a Send's status write (InvoiceWorkflowService.transition)
+    // waits for the edit to commit and posts the edited total, and an edit
+    // that waited for a Send reads SENT and is held to D-60 below.
+    const { result, previousDueDate } = await this.prisma.client.$transaction(async (tx) => {
+      const txClient = tx as unknown as Prisma.TransactionClient;
+      const locked = await CommerceService.lockInvoiceForPayment(txClient, input.invoiceId);
+      if (!locked || locked.businessId !== input.businessId) {
+        throw new NotFoundException('Invoice not found');
       }
-      updateData.currency = currency;
-    }
-    if (input.dueDate !== undefined) {
-      updateData.dueDate = input.dueDate ? new Date(input.dueDate) : null;
-    }
-    if (input.notes !== undefined) updateData.notes = input.notes;
+      const current = await tx.invoice.findFirst({ where: { id: input.invoiceId, businessId: input.businessId } });
+      if (!current) {
+        throw new NotFoundException('Invoice not found');
+      }
+      if (current.status === 'PAID' || current.status === 'PARTIALLY_PAID') {
+        throw new ConflictException('Cannot edit a paid or partially paid invoice');
+      }
+      // FOLLOW3-B2 review (SEC-B2-1, B2-CR-1): an invoice is issued when it
+      // has left DRAFT, or when it is a DRAFT whose issued total the ledger or
+      // a credit note still holds (holdsIssuedMoney): the AI undo returns an
+      // issued invoice to DRAFT and leaves its recognition in place. That is
+      // read only when the edit names the currency or the amounts.
+      const touchesMoney =
+        currency !== undefined ||
+        input.items !== undefined ||
+        input.taxRate !== undefined ||
+        input.discountType !== undefined ||
+        input.discountValue !== undefined;
+      const issued =
+        current.status !== 'DRAFT' || (touchesMoney && (await CommerceService.holdsIssuedMoney(txClient, current)));
+      const issuedAs = current.status === 'DRAFT' ? 'an issued invoice returned to DRAFT' : `a ${current.status} invoice`;
 
-    // FOLLOW3-B2 (owner ruling D-60): once the invoice leaves DRAFT its lines,
-    // tax and discount are fixed, as its currency is (ST-V37-1 above). Issuing
-    // posted its receivable (accrual) at the stored total, idempotently, and
-    // the payment reconcile settles against that total: an edit rewrote the
-    // lines and total of a SENT, OVERDUE, FAILED, PENDING or VOID invoice and
-    // neither re-posted nor reconciled, so an ACCRUAL receivable of 100 edited
-    // to 80 and paid stayed at 20, and a CASH invoice paid 60 and edited to 50
-    // stayed OVERDUE. A change is refused (409) before anything is written;
-    // a correction is a void-and-reissue or a credit note (D-28). Restating the
-    // stored lines and terms (an edit form sends the whole document) is not a
-    // change: it passes, and neither branch below runs, so the stored lines
-    // (their productIds included, which the web form omits) and every amount
-    // are left exactly as they are.
-    const issued = invoice.status !== 'DRAFT';
-    if (issued) await this.assertIssuedInvoiceAmountsRestated(invoice, input);
-
-    if (input.items && !issued) {
-      // R0-D3 review (ST-D3-2): InvoiceItem.productId is an FK to Product with
-      // no tenant check, so a line could bind another tenant's product and
-      // downstream catalog/inventory consumers of invoice_items.product_id
-      // would act on it. Every referenced product must resolve inside the
-      // caller's tenant before the existing items are deleted below, so a
-      // denied path writes nothing. The validated set is exactly the set
-      // written: an empty productId is "no product", never an FK value.
-      const productIds = Array.from(
-        new Set(
-          input.items
-            .map((item) => item.productId)
-            .filter((id): id is string => typeof id === 'string' && id.length > 0),
-        ),
-      );
-      if (productIds.length > 0) {
-        const products = await this.prisma.client.product.findMany({
-          where: { id: { in: productIds }, businessId: input.businessId },
-          select: { id: true },
-        });
-        if (products.length !== productIds.length) {
-          throw new NotFoundException('Product not found');
+      const updateData: any = {};
+      if (contactId !== undefined) updateData.contactId = contactId;
+      if (currency !== undefined) {
+        // V1-37 review (ST-V37-1): the currency is fixed once the invoice is
+        // issued. Issuing posts accounts receivable in the invoice's currency
+        // (accrual), and that posting is idempotent on its key, so a SENT USD
+        // invoice switched to TTD took its payment in TTD while the USD
+        // receivable stayed open for ever. Restating the stored currency is
+        // not a change (an edit form sends the whole document) and stays
+        // allowed.
+        if (currency !== normalizeCurrency(current.currency) && issued) {
+          throw new ConflictException(`Cannot change the currency of ${issuedAs}: the currency is fixed once the invoice is issued`);
         }
+        updateData.currency = currency;
       }
-      const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
-      const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
-      const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
-      // V1-22 (D-13): in integer cents, the same rules as create.
-      const amounts = computeDocumentAmounts({
-        lines: input.items.map((item) => lineAmount(item.quantity, item.unitPrice)),
-        taxRate,
-        discountType,
-        discountValue,
-      });
-      const { subtotal, taxAmount, discountAmount, total } = amounts;
-      // R0-27 review (ST-27-3): the same amount rules as create, checked before
-      // the existing items are deleted, so a refused edit writes nothing.
-      this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
-      await this.prisma.client.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
+      if (input.dueDate !== undefined) {
+        updateData.dueDate = input.dueDate ? new Date(input.dueDate) : null;
+      }
+      if (input.notes !== undefined) updateData.notes = input.notes;
 
-      updateData.subtotal = subtotal;
-      updateData.taxRate = taxRate;
-      updateData.taxAmount = taxAmount;
-      updateData.discountType = discountType;
-      updateData.discountValue = discountValue;
-      updateData.discountAmount = discountAmount;
-      updateData.total = total;
-      updateData.items = {
-        create: input.items.map((item, i) => ({
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-          total: amounts.lineTotals[i],
-          productId: item.productId || null,
-        })),
-      };
-    } else if (!issued && (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined)) {
-      const taxRate = input.taxRate ?? invoice.taxRate ?? 0;
-      const discountType = input.discountType !== undefined ? input.discountType : invoice.discountType;
-      const discountValue = input.discountValue !== undefined ? input.discountValue : invoice.discountValue;
-      // V1-22 (D-13): recomputed in cents from the stored subtotal (a legacy
-      // row may hold the raw float sum; it is rewritten in cents with the rest).
-      const { subtotal, taxAmount, discountAmount, total } = computeDocumentAmounts({
-        lines: [invoice.subtotal],
-        taxRate,
-        discountType,
-        discountValue,
-      });
-      // R0-27 review (ST-27-3): a FIXED discount above the stored subtotal is refused.
-      this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
-      updateData.subtotal = subtotal;
-      updateData.taxRate = taxRate;
-      updateData.taxAmount = taxAmount;
-      updateData.discountType = discountType;
-      updateData.discountValue = discountValue;
-      updateData.discountAmount = discountAmount;
-      updateData.total = total;
-    }
+      // FOLLOW3-B2 (owner ruling D-60): once the invoice is issued its lines,
+      // tax and discount are fixed, as its currency is (ST-V37-1 above).
+      // Issuing posted its receivable (accrual) at the stored total,
+      // idempotently, and the payment reconcile settles against that total: an
+      // edit rewrote the lines and total of a SENT, OVERDUE, FAILED, PENDING or
+      // VOID invoice and neither re-posted nor reconciled, so an ACCRUAL
+      // receivable of 100 edited to 80 and paid stayed at 20, and a CASH
+      // invoice paid 60 and edited to 50 stayed OVERDUE. A change is refused
+      // (409) before anything is written; a correction is a void-and-reissue
+      // or a credit note (D-28). Restating the stored lines and terms (an edit
+      // form sends the whole document) is not a change: it passes, and neither
+      // branch below runs, so the stored lines (their productIds included,
+      // which the web form omits) and every amount are left exactly as they
+      // are.
+      if (issued) await this.assertIssuedInvoiceAmountsRestated(txClient, current, issuedAs, input);
 
-    const result = await this.prisma.client.invoice.update({
-      where: { id: input.invoiceId },
-      data: updateData,
-      include: { items: true, contact: true },
+      if (input.items && !issued) {
+        // R0-D3 review (ST-D3-2): InvoiceItem.productId is an FK to Product with
+        // no tenant check, so a line could bind another tenant's product and
+        // downstream catalog/inventory consumers of invoice_items.product_id
+        // would act on it. Every referenced product must resolve inside the
+        // caller's tenant before the existing items are deleted below, so a
+        // denied path writes nothing. The validated set is exactly the set
+        // written: an empty productId is "no product", never an FK value.
+        const productIds = Array.from(
+          new Set(
+            input.items
+              .map((item) => item.productId)
+              .filter((id): id is string => typeof id === 'string' && id.length > 0),
+          ),
+        );
+        if (productIds.length > 0) {
+          const products = await tx.product.findMany({
+            where: { id: { in: productIds }, businessId: input.businessId },
+            select: { id: true },
+          });
+          if (products.length !== productIds.length) {
+            throw new NotFoundException('Product not found');
+          }
+        }
+        const taxRate = input.taxRate ?? current.taxRate ?? 0;
+        const discountType = input.discountType !== undefined ? input.discountType : current.discountType;
+        const discountValue = input.discountValue !== undefined ? input.discountValue : current.discountValue;
+        // V1-22 (D-13): in integer cents, the same rules as create.
+        const amounts = computeDocumentAmounts({
+          lines: input.items.map((item) => lineAmount(item.quantity, item.unitPrice)),
+          taxRate,
+          discountType,
+          discountValue,
+        });
+        const { subtotal, taxAmount, discountAmount, total } = amounts;
+        // R0-27 review (ST-27-3): the same amount rules as create, checked before
+        // the existing items are deleted, so a refused edit writes nothing.
+        this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+        await tx.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
+
+        updateData.subtotal = subtotal;
+        updateData.taxRate = taxRate;
+        updateData.taxAmount = taxAmount;
+        updateData.discountType = discountType;
+        updateData.discountValue = discountValue;
+        updateData.discountAmount = discountAmount;
+        updateData.total = total;
+        updateData.items = {
+          create: input.items.map((item, i) => ({
+            description: item.description,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            total: amounts.lineTotals[i],
+            productId: item.productId || null,
+          })),
+        };
+      } else if (!issued && (input.taxRate !== undefined || input.discountType !== undefined || input.discountValue !== undefined)) {
+        const taxRate = input.taxRate ?? current.taxRate ?? 0;
+        const discountType = input.discountType !== undefined ? input.discountType : current.discountType;
+        const discountValue = input.discountValue !== undefined ? input.discountValue : current.discountValue;
+        // V1-22 (D-13): recomputed in cents from the stored subtotal (a legacy
+        // row may hold the raw float sum; it is rewritten in cents with the rest).
+        const { subtotal, taxAmount, discountAmount, total } = computeDocumentAmounts({
+          lines: [current.subtotal],
+          taxRate,
+          discountType,
+          discountValue,
+        });
+        // R0-27 review (ST-27-3): a FIXED discount above the stored subtotal is refused.
+        this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+        updateData.subtotal = subtotal;
+        updateData.taxRate = taxRate;
+        updateData.taxAmount = taxAmount;
+        updateData.discountType = discountType;
+        updateData.discountValue = discountValue;
+        updateData.discountAmount = discountAmount;
+        updateData.total = total;
+      }
+
+      const updated = await tx.invoice.update({
+        where: { id: input.invoiceId },
+        data: updateData,
+        include: { items: true, contact: true },
+      });
+      return { result: updated, previousDueDate: current.dueDate };
     });
-    const prevDue = invoice.dueDate ? new Date(invoice.dueDate).getTime() : null;
+    // Events and the cache follow the commit, so no listener reads a refused
+    // or rolled-back edit.
+    const prevDue = previousDueDate ? new Date(previousDueDate).getTime() : null;
     const newDue = result.dueDate ? new Date(result.dueDate).getTime() : null;
     if (input.dueDate !== undefined && prevDue !== newDue) {
       this.events.emit('invoice.due_date_changed', {
         invoice: result,
         businessId: input.businessId,
-        previousDueDate: invoice.dueDate ?? null,
+        previousDueDate: previousDueDate ?? null,
       });
     }
     this.events.emit('invoice.updated', { invoice: result, businessId: input.businessId });
@@ -4615,9 +4658,48 @@ export class CommerceService {
   }
 
   /**
-   * FOLLOW3-B2 (owner ruling D-60): an edit of an issued (non-DRAFT) invoice
-   * may restate its lines, tax and discount but not change them. Throws 409
-   * unless:
+   * FOLLOW3-B2 review (SEC-B2-1, B2-CR-1): whether the ledger or a credit note
+   * holds the invoice's issued total: a posting sourced on the invoice (its
+   * accrual recognition, Invoice:<id>:invoice_finalized, or any other), or a
+   * credit note issued against it (D-28). A DRAFT holding either was issued
+   * and then returned to DRAFT by the AI undo (CommerceService.undoInvoice ->
+   * InvoiceWorkflowService.returnToDraftOnUndo), which writes the status alone
+   * and leaves them in place. Re-pricing it left the posted receivable at the
+   * old total, and sending it again posts nothing (onInvoiceFinalized is
+   * idempotent per invoice): ACCRUAL 100 undone, edited to 80, re-sent and
+   * paid left 20.00 of receivable open, and an undone PAID ACCRUAL invoice
+   * escaped the paid-invoice guard the same way. Such an invoice keeps its
+   * amounts and currency as an issued one does (D-60).
+   *
+   * A payment alone is not such a record. On the CASH basis a payment posts
+   * the money it received (sourced on the payment, not the invoice), nothing
+   * stands at the old total, and the next payment door reconciles against the
+   * edited one: paid, undone, edited, re-issued and marked paid again is a
+   * pinned flow (payments-mark-paid MP-16, R0-PL-04 review CR-PL04-2). A DRAFT
+   * never issued, or a CASH one undone (with or without payments), stays
+   * editable. Read on the edit's transaction under the invoice row lock, which
+   * the credit-note writers take and the status writers wait for.
+   */
+  private static async holdsIssuedMoney(
+    tx: Prisma.TransactionClient,
+    invoice: { id: string; businessId: string },
+  ): Promise<boolean> {
+    const businessId = invoice.businessId;
+    const posting = await tx.financialTransaction.findFirst({
+      where: { businessId, sourceType: 'Invoice', sourceId: invoice.id },
+      select: { id: true },
+    });
+    if (posting) return true;
+    const creditNote = await tx.creditNote.findFirst({ where: { businessId, invoiceId: invoice.id }, select: { id: true } });
+    return Boolean(creditNote);
+  }
+
+  /**
+   * FOLLOW3-B2 (owner ruling D-60): an edit of an issued invoice (one that
+   * left DRAFT, or a DRAFT whose issued total is still held: holdsIssuedMoney)
+   * may restate its lines, tax and discount but not change them. `issuedAs`
+   * names it in the refusal ("a SENT invoice", "an issued invoice returned to
+   * DRAFT"). Throws 409 unless:
    *  - the effective tax rate (a sent one, else the stored one, as the edit
    *    applies it) equals the stored one;
    *  - the effective discount equals the stored one, where "no discount" is
@@ -4629,10 +4711,13 @@ export class CommerceService {
    *    productId when it names one (an omitted or empty productId keeps the
    *    stored one). Lines are matched in any order: invoice reads return them
    *    unordered, and an edit form sends them back in the order it read.
-   * Read-only: it runs before any write.
+   * Read-only: it runs before any write, on the edit's transaction (the stored
+   * lines are read under the invoice row lock).
    */
   private async assertIssuedInvoiceAmountsRestated(
-    invoice: { id: string; status: string; taxRate: number | null; discountType: string | null; discountValue: number | null },
+    tx: Prisma.TransactionClient,
+    invoice: { id: string; taxRate: number | null; discountType: string | null; discountValue: number | null },
+    issuedAs: string,
     input: {
       items?: { description: string; quantity: number; unitPrice: number; productId?: string }[];
       taxRate?: number;
@@ -4642,7 +4727,7 @@ export class CommerceService {
   ): Promise<void> {
     const changed = () =>
       new ConflictException(
-        `Cannot change the amounts of a ${invoice.status} invoice: its lines, tax and discount are fixed once it is issued; ` +
+        `Cannot change the amounts of ${issuedAs}: its lines, tax and discount are fixed once it is issued; ` +
           'correct it by voiding it and issuing a new invoice, or with a credit note',
       );
     if (Number(input.taxRate ?? invoice.taxRate ?? 0) !== Number(invoice.taxRate ?? 0)) throw changed();
@@ -4653,7 +4738,7 @@ export class CommerceService {
     if (discount(discountType, discountValue) !== discount(invoice.discountType, invoice.discountValue)) throw changed();
 
     if (!input.items) return;
-    const stored = await this.prisma.client.invoiceItem.findMany({
+    const stored = await tx.invoiceItem.findMany({
       where: { invoiceId: invoice.id },
       select: { description: true, quantity: true, unitPrice: true, productId: true },
     });

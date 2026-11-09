@@ -40,6 +40,24 @@
  *                    currency (CUR-08 as before);
  *                    PAID and PARTIALLY_PAID still 409 'Cannot edit a paid or partially paid invoice'
  *
+ * Review repairs (SEC-B2-1 / B2-CR-1, SEC-B2-2 / B2-CR-2):
+ *
+ *   IA-07a an ACCRUAL SENT 100 returned to DRAFT by the AI undo (CommerceService.undoInvoice, recognition
+ *          kept): PATCH items to 80, tax or currency -> 409 'an issued invoice returned to DRAFT', nothing
+ *          written; notes and a restatement -> 200; re-sent and paid -> AR 100 then 0 (was 200, total 80,
+ *          AR 20.00 stranded after mark-paid)
+ *   IA-07b an ACCRUAL invoice marked paid and undone to DRAFT keeps its recognition: PATCH items to 70
+ *          -> 409 (the undo no longer escapes the paid-invoice guard)
+ *   IA-07c control: a CASH invoice sent and undone before any money arrived holds no posting or credit
+ *          note: its DRAFT edit to 80 -> 200, and it is re-sent and paid at 80. (A CASH invoice paid and
+ *          undone stays editable too: payments-mark-paid MP-16, R0-PL-04 review CR-PL04-2, pins paid ->
+ *          undo -> edit to 200 -> re-issue -> mark-paid; on the CASH basis nothing is posted at the old total)
+ *   IA-08a a Send that commits inside the edit's window (after its first read, before its writes) -> the
+ *          edit reads SENT under the row lock and is refused 409; the invoice stays SENT at 100 with AR 100
+ *          (was 200: SENT, total 80, AR 100)
+ *   IA-08b ten concurrent {PATCH items to 80, Send} pairs on DRAFT 100: every invoice ends SENT with its
+ *          ledger AR equal to its total (80 when the edit won, 100 when the Send won and the edit got 409)
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed: the plan allows
  * invoices), CommerceController, CommerceService, InvoiceWorkflowService,
@@ -82,6 +100,8 @@ const ID = {
 };
 
 const AMOUNTS_REFUSED = (status: string) => new RegExp(`^Cannot change the amounts of a ${status} invoice: `);
+/** The D-60 refusal of a DRAFT that holds issued money (the AI undo returned it to DRAFT). */
+const RETURNED_REFUSED = /^Cannot change the amounts of an issued invoice returned to DRAFT: /;
 const PAID_REFUSED = 'Cannot edit a paid or partially paid invoice';
 
 let db: any;
@@ -231,9 +251,9 @@ async function balances(biz: string, invoiceId: string) {
  * byte-identical, no invoice.updated event. Soft assertions, so a RED run
  * reports every drift at once.
  */
-async function expectRefused(res: request.Response, status: string, before: unknown, invoiceId: string, events: string[]) {
+async function expectRefused(res: request.Response, status: string | RegExp, before: unknown, invoiceId: string, events: string[]) {
   expect.soft(res.status, JSON.stringify(res.body)).toBe(409);
-  expect.soft(String(res.body?.message ?? '')).toMatch(AMOUNTS_REFUSED(status));
+  expect.soft(String(res.body?.message ?? '')).toMatch(typeof status === 'string' ? AMOUNTS_REFUSED(status) : status);
   expect.soft(await snapshot(invoiceId), 'items, subtotal, tax, discount and total byte-identical on reload').toEqual(before);
   expect.soft(events, 'no invoice.updated event').not.toContain('invoice.updated');
 }
@@ -612,4 +632,142 @@ describe('V1-82 D-60 controls: DRAFT edits, restatements and non-money edits sta
       }
     }
   }, 60_000);
+});
+
+describe('V1-82 review repairs: an invoice issued and undone to DRAFT keeps its amounts (SEC-B2-1, B2-CR-1; real rows)', () => {
+  it('IA-07a: an ACCRUAL invoice of 100 sent, then returned to DRAFT by the AI undo with its recognition kept: PATCH items to 80, tax or currency -> 409, nothing written; notes and a restatement -> 200; re-sent and paid -> AR 100, then 0', async () => {
+    const id = await sent100(ID.acc, 'IA-07a');
+    expect(await ledgerArCents(ID.acc, id), 'AR 100 posted at send').toBe(10_000);
+    const undone = await commerce.undoInvoice(id, ID.acc);
+    expect(undone.status).toBe('reverted_to_draft');
+    const before = await snapshot(id);
+    expect(before.status, 'the undo writes the status alone').toBe('DRAFT');
+    expect(await ledgerArCents(ID.acc, id), 'the recognition stays posted').toBe(10_000);
+
+    for (const body of [
+      { items: [{ description: 'V82B IA-07a', quantity: 1, unitPrice: 80 }] },
+      { taxRate: 10 },
+      { discountType: 'FIXED', discountValue: 10 },
+    ]) {
+      emitted.length = 0;
+      const res = await patchInvoice(ID.acc, id, body);
+      await expectRefused(res, RETURNED_REFUSED, before, id, [...emitted]);
+    }
+    emitted.length = 0;
+    const switched = await patchInvoice(ID.acc, id, { currency: 'USD' });
+    expect.soft(switched.status, JSON.stringify(switched.body)).toBe(409);
+    expect.soft(switched.body.message).toBe(
+      'Cannot change the currency of an issued invoice returned to DRAFT: the currency is fixed once the invoice is issued',
+    );
+    expect.soft(await snapshot(id)).toEqual(before);
+    expect.soft(emitted).not.toContain('invoice.updated');
+
+    const restated = await patchInvoice(ID.acc, id, {
+      contactId: ID.contactAcc,
+      items: [{ description: 'V82B IA-07a', quantity: 1, unitPrice: 100 }],
+      currency: 'TTD',
+      notes: 'V82B reviewed after undo',
+    });
+    expect(restated.status, JSON.stringify(restated.body)).toBe(200);
+    expect(restated.body.total).toBe(100);
+    const after = await snapshot(id);
+    expect(after.items, 'the lines are untouched').toEqual(before.items);
+    expect(after.notes).toBe('V82B reviewed after undo');
+
+    await send(ID.acc, id);
+    const b = await balances(ID.acc, id);
+    expect.soft(b, 'receivables, listPayments and the invoice agree at 100').toEqual({ total: 10_000, net: 0, remaining: 10_000, outstanding: 10_000 });
+    expect.soft(await ledgerArCents(ID.acc, id), 'ledger AR == remaining (posted once)').toBe(b.remaining);
+    const paid = await markPaid(ID.acc, id);
+    expect(paid.status, JSON.stringify(paid.body)).toBe(200);
+    expect.soft(await ledgerArCents(ID.acc, id), 'ledger AR closes at 0 (was 20.00 stranded)').toBe(0);
+    expect.soft(await balances(ID.acc, id)).toEqual({ total: 10_000, net: 10_000, remaining: 0, outstanding: 0 });
+  }, 60_000);
+
+  it('IA-07b: an ACCRUAL invoice marked paid (PAID, AR closed at 0) and undone to DRAFT keeps its recognition: PATCH items to 70 -> 409, nothing written (the undo no longer escapes the paid-invoice guard)', async () => {
+    const id = await sent100(ID.acc, 'IA-07b');
+    const paid = await markPaid(ID.acc, id);
+    expect(paid.status, JSON.stringify(paid.body)).toBe(200);
+    expect(await ledgerArCents(ID.acc, id)).toBe(0);
+    const undone = await commerce.undoInvoice(id, ID.acc);
+    expect(undone.status).toBe('reverted_to_draft');
+    const before = await snapshot(id);
+    expect(before.status).toBe('DRAFT');
+
+    emitted.length = 0;
+    const res = await patchInvoice(ID.acc, id, { items: [{ description: 'V82B IA-07b', quantity: 1, unitPrice: 70 }] });
+    await expectRefused(res, RETURNED_REFUSED, before, id, [...emitted]);
+    expect.soft(await ledgerArCents(ID.acc, id), 'the settled receivable stays closed').toBe(0);
+    expect.soft((await balances(ID.acc, id)).total, 'the total its payment settled is kept').toBe(10_000);
+  }, 60_000);
+
+  it('IA-07c control: a CASH invoice sent and undone before any money arrived holds no posting or credit note: its DRAFT edit to 80 -> 200; re-sent and paid 80 -> PAID', async () => {
+    const id = await sent100(ID.cash, 'IA-07c');
+    const undone = await commerce.undoInvoice(id, ID.cash);
+    expect(undone.status).toBe('reverted_to_draft');
+    expect(await db.financialTransaction.count({ where: { businessId: ID.cash, sourceId: id } })).toBe(0);
+
+    const edited = await patchInvoice(ID.cash, id, { items: [{ description: 'V82B IA-07c', quantity: 1, unitPrice: 80 }] });
+    expect(edited.status, JSON.stringify(edited.body)).toBe(200);
+    expect(edited.body.total).toBe(80);
+    await send(ID.cash, id);
+    await pay(ID.cash, id, 80);
+    const row = await snapshot(id);
+    expect({ status: row.status, total: row.total }).toEqual({ status: 'PAID', total: 80 });
+    expect(await balances(ID.cash, id)).toEqual({ total: 8_000, net: 8_000, remaining: 0, outstanding: 0 });
+  }, 60_000);
+});
+
+describe('V1-82 review repairs: an edit racing a Send cannot leave an issued total off its receivable (SEC-B2-2, B2-CR-2; real rows)', () => {
+  it('IA-08a: a Send that commits after the edit\'s first read and before its writes -> the edit is refused 409 and the invoice stays SENT at 100 with AR 100', async () => {
+    const inv = await createDraft(ID.acc, [{ description: 'V82B IA-08a', quantity: 1, unitPrice: 100 }]);
+    // The window: the edit resolves the named contact after its first read of
+    // the invoice and before any write. A second request (Send) lands there.
+    const original = commerce.assertContactInBusiness;
+    let sentInWindow = false;
+    commerce.assertContactInBusiness = async function (...args: unknown[]) {
+      if (!sentInWindow) {
+        sentInWindow = true;
+        await send(ID.acc, inv.id);
+      }
+      return original.apply(commerce, args);
+    };
+    emitted.length = 0;
+    let res: request.Response;
+    try {
+      res = await patchInvoice(ID.acc, inv.id, {
+        contactId: ID.contactAcc,
+        items: [{ description: 'V82B IA-08a', quantity: 1, unitPrice: 80 }],
+      });
+    } finally {
+      commerce.assertContactInBusiness = original;
+    }
+    expect(sentInWindow, 'the Send ran inside the edit').toBe(true);
+    expect.soft(res.status, JSON.stringify(res.body)).toBe(409);
+    expect.soft(String(res.body?.message ?? '')).toMatch(AMOUNTS_REFUSED('SENT'));
+    expect.soft(emitted).not.toContain('invoice.updated');
+    const row = await snapshot(inv.id);
+    expect.soft({ status: row.status, total: row.total }, 'RED: SENT with total 80 and AR 100').toEqual({ status: 'SENT', total: 100 });
+    expect.soft(await ledgerArCents(ID.acc, inv.id)).toBe(10_000);
+  }, 60_000);
+
+  it('IA-08b: ten concurrent {PATCH items to 80, Send} pairs on DRAFT 100: each invoice ends SENT with its ledger AR equal to its total', async () => {
+    for (let n = 0; n < 10; n += 1) {
+      const inv = await createDraft(ID.acc, [{ description: `V82B IA-08b ${n}`, quantity: 1, unitPrice: 100 }]);
+      const [edit, sent] = await Promise.all([
+        patchInvoice(ID.acc, inv.id, { items: [{ description: `V82B IA-08b ${n}`, quantity: 1, unitPrice: 80 }] }),
+        as(agent().patch(`/commerce/invoices/${inv.id}/status/sent`)).send({ businessId: ID.acc, status: 'SENT' }),
+      ]);
+      // Both orders are legal: the edit commits first (the Send posts 80) or
+      // the Send does (the edit reads SENT and is refused 409).
+      expect(sent.status, JSON.stringify(sent.body)).toBe(200);
+      expect([200, 409], JSON.stringify(edit.body)).toContain(edit.status);
+      const expected = edit.status === 200 ? 8_000 : 10_000;
+      const row = await snapshot(inv.id);
+      expect.soft(
+        { status: row.status, total: cents(row.total), ar: await ledgerArCents(ID.acc, inv.id) },
+        `pair ${n}: edit answered ${edit.status}`,
+      ).toEqual({ status: 'SENT', total: expected, ar: expected });
+    }
+  }, 120_000);
 });
