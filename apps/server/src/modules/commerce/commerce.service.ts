@@ -17,7 +17,7 @@ import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isLegalTransition, isShareableInvoiceStatus, ownTenantPayments, roundMoney } from './invoice-workflow.service';
-import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
+import { computeDocumentAmounts, fromCents, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
@@ -48,6 +48,23 @@ import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helpe
 import { isSystemActor, KEY_SYSTEM_ACTOR_ID } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { appUrl } from '../../core/config/runtime-urls';
+import { depositPosition, type SettlementInvoice } from '../bookings/booking-payment-status.listener';
+
+/**
+ * D-59 (W3-A10b): the code of a currency switch refused because it would net a
+ * booking deposit across currencies; the same code BookingsService answers for
+ * a final invoice it refuses (DEPOSIT_CURRENCY_MISMATCH in bookings.service).
+ */
+const DEPOSIT_CURRENCY_MISMATCH = 'DEPOSIT_CURRENCY_MISMATCH';
+
+/**
+ * D-59 (W3-A10b review, SEC-A10b-3): the advisory-lock namespace a booking's
+ * final invoice is drawn up under (FINAL_INVOICE_LOCK_NAMESPACE in
+ * bookings.service, not imported: bookings.service imports this module). The
+ * two strings must stay equal: the currency PATCH takes the same lock, so it
+ * never reads a pair while BookingsService.issueFinalInvoice is drawing one up.
+ */
+const BOOKING_FINAL_INVOICE_LOCK_NAMESPACE = 'booking-final-invoice:';
 
 /**
  * The customer fields an operator invoice read discloses: the customer's name
@@ -4852,6 +4869,11 @@ export class CommerceService {
         if (currency !== normalizeCurrency(current.currency) && issued) {
           throw new ConflictException(`Cannot change the currency of ${issuedAs}: the currency is fixed once the invoice is issued`);
         }
+        // W3-A10b (review SEC-A10-1, D-59 as built per D-91): nor may a DRAFT
+        // switch away from the other half of a booking's deposit/final pair.
+        if (currency !== normalizeCurrency(current.currency)) {
+          await CommerceService.assertDepositPairKeepsCurrency(tx, current, currency);
+        }
         updateData.currency = currency;
       }
       if (input.dueDate !== undefined) {
@@ -4913,6 +4935,8 @@ export class CommerceService {
         // R0-27 review (ST-27-3): the same amount rules as create, checked before
         // the existing items are deleted, so a refused edit writes nothing.
         this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+        // W3-D89-OVERPAID-EDIT (D-89): nor below the money it holds.
+        await CommerceService.assertTotalCoversHeldMoney(txClient, current, total);
         await tx.invoiceItem.deleteMany({ where: { invoiceId: input.invoiceId } });
 
         updateData.subtotal = subtotal;
@@ -4945,6 +4969,8 @@ export class CommerceService {
         });
         // R0-27 review (ST-27-3): a FIXED discount above the stored subtotal is refused.
         this.assertInvoiceAmounts({ subtotal, total, discountType, discountValue });
+        // W3-D89-OVERPAID-EDIT (D-89): nor a total below the money it holds.
+        await CommerceService.assertTotalCoversHeldMoney(txClient, current, total);
         updateData.subtotal = subtotal;
         updateData.taxRate = taxRate;
         updateData.taxAmount = taxAmount;
@@ -4975,6 +5001,120 @@ export class CommerceService {
     this.events.emit('invoice.updated', { invoice: result, businessId: input.businessId });
     this.statsCache.invalidateCache(input.businessId);
     return result;
+  }
+
+  /**
+   * W3-A10b (review SEC-A10-1, owner ruling D-59 as built per D-91): a DRAFT
+   * booking deposit a final invoice has netted, or the DRAFT final that netted
+   * a deposit, keeps the currency of the other half of the pair. A booking's
+   * final invoice bills the price less what its live deposit covers
+   * (BookingsService.issueFinalInvoice, depositPosition), and D-13 is one
+   * currency per business, so a deposit is never netted across currencies:
+   * completion and the Create-invoice button refuse such a pair and re-check
+   * one already drawn up, but this PATCH switched either half afterwards (a
+   * USD deposit netted as TTD by a TTD final), re-creating the pair they
+   * refuse. The pair is a booking of this business whose deposit or final
+   * this invoice is, its final not VOID, and its deposit not VOID and
+   * covering something of the price (depositPosition). A switch that brings
+   * the pair to one currency passes, as does any switch on an invoice outside
+   * such a pair. Refused with 409 DEPOSIT_CURRENCY_MISMATCH (the code
+   * BookingsService answers, not imported: bookings.service imports this
+   * module) on the edit's transaction, before anything is written.
+   *
+   * W3-A10b review (D-59):
+   *   SEC-A10b-1  only VOID ends a pairing. A withdrawn (soft-deleted) final
+   *               or deposit still pairs: a restore (TrashController.restore
+   *               writes deletedAt back to null) re-checks nothing, so a
+   *               switch accepted while it was withdrawn left a TTD final
+   *               netting a USD deposit once restored, and that final could
+   *               be sent.
+   *   SEC-A10b-2  a withdrawn booking still pairs its two documents (trash
+   *               restore brings a booking back too). Bookings and invoices
+   *               are read raw (pairedBookings, readPairedInvoice): the
+   *               soft-delete extension hides a withdrawn row from every
+   *               find, inside a transaction as well.
+   *   SEC-A10b-3  the pair is read under each booking's final-invoice
+   *               advisory lock, the one issueFinalInvoice draws the final up
+   *               under (BOOKING_FINAL_INVOICE_LOCK_NAMESPACE). It creates the
+   *               final on its own connection before it links
+   *               Booking.invoiceId, so a deposit switch that committed in
+   *               between read no final and passed, and completion answered
+   *               CREATED for a TTD final netting a USD deposit. Now the
+   *               switch waits for the draw to commit and reads the final it
+   *               linked; a draw that waits for the switch reads the switched
+   *               deposit and refuses (FOLLOW3-A10). No deadlock: the draw
+   *               never waits on the invoice row lock this edit holds.
+   */
+  private static async assertDepositPairKeepsCurrency(
+    tx: PrismaTx,
+    invoice: { id: string; businessId: string },
+    currency: string,
+  ): Promise<void> {
+    const pairedBookings = () =>
+      tx.$queryRaw<Array<{ id: string; invoiceId: string | null; depositInvoiceId: string | null }>>`
+        SELECT id, invoice_id AS "invoiceId", deposit_invoice_id AS "depositInvoiceId"
+        FROM bookings
+        WHERE business_id = ${invoice.businessId}
+          AND (invoice_id = ${invoice.id} OR deposit_invoice_id = ${invoice.id})
+        ORDER BY id`;
+    const linked = await pairedBookings();
+    if (linked.length === 0) return;
+    // SEC-A10b-3: taken in id order, so two edits never wait on each other.
+    for (const { id } of linked) {
+      const key = `${BOOKING_FINAL_INVOICE_LOCK_NAMESPACE}${id}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${key}))`;
+    }
+    // Re-read under the locks: a final linked meanwhile has committed.
+    for (const booking of await pairedBookings()) {
+      const final = await CommerceService.readPairedInvoice(tx, invoice.businessId, booking.invoiceId);
+      const deposit = await CommerceService.readPairedInvoice(tx, invoice.businessId, booking.depositInvoiceId);
+      if (!final || final.status === 'VOID') continue;
+      if (!deposit || deposit.status === 'VOID' || depositPosition(deposit).coversCents <= 0) continue;
+      const isDeposit = deposit.id === invoice.id;
+      const depositCurrency = isDeposit ? currency : normalizeCurrency(deposit.currency);
+      const invoiceCurrency = isDeposit ? normalizeCurrency(final.currency) : currency;
+      if (depositCurrency === invoiceCurrency) continue;
+      const message = isDeposit
+        ? `Cannot change the currency of the deposit invoice ${deposit.invoiceNumber} to ${currency}: the final invoice ${final.invoiceNumber} nets it in ${invoiceCurrency}, and a deposit is never netted across currencies`
+        : `Cannot change the currency of the final invoice ${final.invoiceNumber} to ${currency}: it nets the deposit invoice ${deposit.invoiceNumber} in ${depositCurrency}, and a deposit is never netted across currencies`;
+      throw new ConflictException({
+        code: DEPOSIT_CURRENCY_MISMATCH,
+        message,
+        depositInvoiceId: deposit.id,
+        finalInvoiceId: final.id,
+        depositCurrency,
+        invoiceCurrency,
+      });
+    }
+  }
+
+  /**
+   * W3-A10b review (SEC-A10b-1, D-59): one half of a booking's deposit/final
+   * pair, under its business, in the settlement shape depositPosition reads
+   * (settlementInvoiceSelect: status, total, currency, the business's payment
+   * rows in the order they were written, the APPLIED credit notes), withdrawn
+   * (soft-deleted) or not. Read raw: the soft-delete extension hides a
+   * withdrawn invoice from every find, and the default take caps a findMany.
+   */
+  private static async readPairedInvoice(
+    tx: PrismaTx,
+    businessId: string,
+    invoiceId: string | null,
+  ): Promise<SettlementInvoice | null> {
+    if (!invoiceId) return null;
+    const rows = await tx.$queryRaw<Array<Pick<SettlementInvoice, 'id' | 'invoiceNumber' | 'status' | 'total' | 'currency'>>>`
+      SELECT id, invoice_number AS "invoiceNumber", status::text AS "status", total, currency
+      FROM invoices WHERE id = ${invoiceId} AND business_id = ${businessId}`;
+    const row = rows[0];
+    if (!row) return null;
+    const payments = await tx.$queryRaw<SettlementInvoice['payments']>`
+      SELECT amount, status FROM payments
+      WHERE invoice_id = ${invoiceId} AND business_id = ${businessId}
+      ORDER BY created_at ASC, id ASC`;
+    const creditNotes = await tx.$queryRaw<SettlementInvoice['creditNotes']>`
+      SELECT amount FROM credit_notes
+      WHERE invoice_id = ${invoiceId} AND business_id = ${businessId} AND status = 'APPLIED'`;
+    return { ...row, payments, creditNotes };
   }
 
   /**
@@ -5012,6 +5152,60 @@ export class CommerceService {
     if (posting) return true;
     const creditNote = await tx.creditNote.findFirst({ where: { businessId, invoiceId: invoice.id }, select: { id: true } });
     return Boolean(creditNote);
+  }
+
+  /**
+   * W3-D89-OVERPAID-EDIT (owner ruling D-89): an edit may not bring the
+   * invoice's total below the money it holds, received net of refunds
+   * (balanceOfStoredRows, the balance contract every reader uses, D-14) over
+   * its own tenant's Payment rows only (D-75: Payment has no FK to Business,
+   * M31), compared in integer cents (D-13: isOverpaid). The FOLLOW3-B2
+   * residual: a CASH invoice holding payments, returned to DRAFT by the AI
+   * undo, holds no invoice-sourced posting, so D-60 (holdsIssuedMoney) leaves
+   * its amounts editable, and an edit to 50 of an invoice holding 60 left it
+   * overpaid with nothing to refund it. Called by every write of a new total
+   * in updateInvoice (the items edit and the tax/discount edit; an issued
+   * invoice changes no total, D-60), on the edit's transaction under the
+   * invoice row lock every money door takes, so a payment or refund committed
+   * before the edit is counted and one after it waits. A total equal to the
+   * money held passes. Refused 409 before anything is written.
+   *
+   * D-89 review repairs:
+   *  - CR-D89-1: only an edit that lowers the stored total can bring it below
+   *    the money held. An invoice already holding more than its total (an
+   *    overpayment, which recordPayment records on purpose) keeps its total
+   *    on a restatement (the web edit form sends the items with every edit,
+   *    D-60 reads that as no change) and may raise it; lowering it further is
+   *    refused. So the floor is the lower of the stored total and the money
+   *    held.
+   *  - SEC-D89-1: the money held is read raw, filtered in the database to the
+   *    invoice's own business and to the rows that count (SUCCESSFUL and
+   *    REFUNDED; PENDING and FAILED are not money), with no row cap. A
+   *    findMany is capped at 1000 rows by the db client's default take, also
+   *    inside a transaction, so 1000 FAILED rows, or another tenant's rows
+   *    filtered out only in memory, sorted before the payment hid it and let
+   *    the edit through.
+   */
+  private static async assertTotalCoversHeldMoney(
+    tx: Prisma.TransactionClient,
+    invoice: { id: string; businessId: string; currency: string | null; total: number },
+    newTotal: number,
+  ): Promise<void> {
+    const storedCents = toCents(Number(invoice.total));
+    if (toCents(newTotal) >= storedCents) return;
+    const rows = await tx.$queryRaw<Array<{ amount: number; status: string }>>`
+      SELECT amount, status FROM payments
+      WHERE invoice_id = ${invoice.id} AND business_id = ${invoice.businessId}
+        AND status IN ('SUCCESSFUL', 'REFUNDED')`;
+    const balance = balanceOfStoredRows(newTotal, rows, invoice.currency);
+    if (!balance.isOverpaid) return;
+    const currency = normalizeCurrency(invoice.currency);
+    const held = `${currency} ${balance.net.toFixed(2)}`;
+    const floor = fromCents(Math.min(storedCents, toCents(balance.net)));
+    throw new ConflictException(
+      `Cannot set the total of this invoice below the money it holds: it holds ${held} received net of refunds, ` +
+        `and the edit would make its total ${currency} ${balance.total.toFixed(2)}; refund the difference first, or keep the total at ${currency} ${floor.toFixed(2)} or more`,
+    );
   }
 
   /**
