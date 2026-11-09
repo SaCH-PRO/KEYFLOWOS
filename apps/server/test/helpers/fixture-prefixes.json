@@ -618,6 +618,11 @@
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
     },
     {
+      "prefix": "v88a_",
+      "owner": "apps/server/test/booking-attribution-currency.integration.test.ts",
+      "packet": "V1-88 (PR196-ATTRIB-CURRENCY)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
