@@ -603,6 +603,11 @@
       "packet": "V1-84 (FOLLOW3-D2-CRM-CONTACT-ROUTES-VIS)"
     },
     {
+      "prefix": "v84c_",
+      "owner": "apps/server/test/crm-sibling-controllers-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D3-CRM-SIBLING-CONTROLLERS-VIS)"
+    },
+    {
       "prefix": "v84d_",
       "owner": "apps/server/test/call-log-visibility.integration.test.ts",
       "packet": "V1-84 (FOLLOW3-D4-CALL-LOG-VIS)"
