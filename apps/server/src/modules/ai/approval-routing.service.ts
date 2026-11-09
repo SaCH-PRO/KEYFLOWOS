@@ -3,6 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { SystemEmailService } from '../notifications/system-email.service';
+import { redactAddresses } from '../../core/security/redaction';
 
 export type ApprovalRouteMethod = 'delegation_rule' | 'job_role_match' | 'owner_fallback' | 'unresolved';
 
@@ -16,6 +17,63 @@ export interface ApprovalRouteResult {
   contactEmail: string | null;
   method: ApprovalRouteMethod;
   reason: string;
+}
+
+/**
+ * A phone-shaped number in free text: an optional '+', then at least seven
+ * digits with at most two separators (space, parenthesis, dot or hyphen)
+ * between any two of them.
+ */
+const PHONE_PATTERN = /\+?\d(?:[\s().-]{0,2}\d){6,}/g;
+
+/**
+ * W6-LOG-ADDRESSES-AND-DOCS repair (9B-D2, review SEC-W6LOG-1): free text with
+ * every address-shaped token (`<address>`, the shared redactAddresses) and
+ * every phone-shaped number (`<phone>`) replaced. The approval notify-failure
+ * text carries no recipient on either leg: notifyApprover returns it this way,
+ * and AiOversightService.routeAndNotify's two notify-failure lines log through
+ * it. Short numbers such as a provider error code stay.
+ */
+export function redactContactDetails(text: string): string {
+  return redactAddresses(text).replace(PHONE_PATTERN, '<phone>');
+}
+
+/**
+ * The error code in a provider's JSON error body (Twilio `code`, Meta
+ * `error.code`): '' for a JSON body with none, undefined for text that is not
+ * a JSON object.
+ */
+function providerErrorCode(text: string): string | undefined {
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+  if (!body || typeof body !== 'object') return undefined;
+  const record = body as { code?: unknown; error?: unknown };
+  const nested = record.error && typeof record.error === 'object' ? (record.error as { code?: unknown }).code : undefined;
+  const code = record.code ?? nested;
+  if (typeof code === 'number' && Number.isFinite(code)) return redactContactDetails(String(code));
+  if (typeof code === 'string' && /^[A-Za-z0-9_.-]{1,32}$/.test(code)) return redactContactDetails(code);
+  return '';
+}
+
+/**
+ * W6-LOG-ADDRESSES-AND-DOCS repair (9B-D2, review SEC-W6LOG-1): the WhatsApp
+ * leg's failure as notifyApprover returns it. WhatsAppService.sendMessage
+ * returns the provider's raw response body as `error` when Twilio or Meta
+ * refuse a send (sendViaTwilio, sendViaMeta), and that body can quote the
+ * recipient's number (Twilio's invalid-To text names `whatsapp:+...`). A
+ * provider body leaves as its error code only, never its text; any other text
+ * (WhatsAppService's own reasons, a transport error, a body that is not JSON)
+ * keeps its words with every phone number and address redacted.
+ */
+function whatsAppFailure(error: string | undefined): string {
+  if (!error) return 'WhatsApp send failed';
+  const code = providerErrorCode(error);
+  if (code === undefined) return redactContactDetails(error);
+  return code ? `WhatsApp provider refused the send (code ${code})` : 'WhatsApp provider refused the send (no error code)';
 }
 
 /**
@@ -172,7 +230,12 @@ export class ApprovalRoutingService {
       const wa = this.getWhatsApp();
       if (!wa) return { sent: false, error: 'WhatsApp service unavailable' };
       const result = await wa.sendMessage(businessId, { to: route.contactPhone, body });
-      return { sent: result.success, error: result.error };
+      // W6-LOG-ADDRESSES-AND-DOCS repair (9B-D2, review SEC-W6LOG-1): the
+      // provider's response body can quote the recipient's number, and this
+      // text is only ever logged (routeAndNotify), so it leaves as the
+      // provider code, or redacted (whatsAppFailure). The message itself and
+      // the conversation history row are unchanged.
+      return result.success ? { sent: true } : { sent: false, error: whatsAppFailure(result.error) };
     }
     if (route.channel === 'email' && route.contactEmail) {
       const email = this.getSystemEmail();
@@ -185,7 +248,12 @@ export class ApprovalRoutingService {
         });
         return { sent: true };
       } catch (err: any) {
-        return { sent: false, error: err?.message ?? 'Email send failed' };
+        // W6-LOG-ADDRESSES-AND-DOCS (9B-D2, review SEC-W5SEC-1): this text is
+        // only ever logged (AiOversightService.routeAndNotify), and the system
+        // email sender's error can quote the recipient, so it leaves here with
+        // every address redacted (and, since the repair for SEC-W6LOG-1, every
+        // phone-shaped number, as on the WhatsApp leg).
+        return { sent: false, error: redactContactDetails(String(err?.message ?? 'Email send failed')) };
       }
     }
     return { sent: false, error: 'No usable contact channel for the resolved approver' };

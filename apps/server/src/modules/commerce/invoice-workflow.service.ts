@@ -39,12 +39,13 @@ export type InvoiceStatus =
  * answer itself (that the id exists, what state it is in, what it is worth) is
  * the disclosure. KF-REVENUE-AUTH-PROJECTION-001 review (ST-3): the status
  * route carried its own copy of this rule and had lost it; one list now.
+ *
+ * W6-LOG-ADDRESSES-AND-DOCS (the W5-CREDIT-AWARE-PAY deviations; D-78): every
+ * one of those surfaces now gates on CREDIT_AWARE_SHAREABLE_INVOICE_STATUSES
+ * below, so this list is read only as that list's base. Its predicate,
+ * isShareableInvoiceStatus, was left with no reader and was removed.
  */
 export const SHAREABLE_INVOICE_STATUSES: ReadonlyArray<InvoiceStatus> = ['SENT', 'PAID', 'OVERDUE', 'PARTIALLY_PAID'];
-
-export function isShareableInvoiceStatus(status: string): boolean {
-  return (SHAREABLE_INVOICE_STATUSES as ReadonlyArray<string>).includes(status);
-}
 
 /**
  * W4-CREDIT-AWARE-READERS (V1-44 review CR-V44-1, reader half; D-28, D-78):
@@ -54,11 +55,17 @@ export function isShareableInvoiceStatus(status: string): boolean {
  * PARTIALLY_CREDITED once that is paid (D-78). FULLY_CREDITED owes nothing and
  * is not shown (it answers like an unknown id). The commerce share surfaces
  * (the bare-id public view, the token pay page and token view) and the token
- * offline intent read this list. SHAREABLE_INVOICE_STATUSES keeps
- * PARTIALLY_CREDITED out while it has readers that do not net credits (the
- * payment status poll and the token money routes in payments.service.ts, the
- * public receipt in InvoiceReceiptBuilderService): those answer 404 for it
- * rather than a false amount due.
+ * offline intent read this list.
+ *
+ * W5-CREDIT-AWARE-PAY (V1-44 review CR-V44-1 rest; D-13, D-75, D-78) moved
+ * the readers that had kept to SHAREABLE_INVOICE_STATUSES onto this list once
+ * each netted the APPLIED notes: the payment status poll
+ * (invoicePaymentStatus), the token pay link and its provider checkouts
+ * (payLinkInvoice, checkoutAmountOf) in payments.service.ts, and the public
+ * receipt (InvoiceReceiptBuilderService). A PARTIALLY_CREDITED invoice is
+ * shown, and payable, on every customer-facing surface for what its credits
+ * leave owing (W6-LOG-ADDRESSES-AND-DOCS: this note replaces the one that
+ * still listed those readers as 404 for it).
  */
 export const CREDIT_AWARE_SHAREABLE_INVOICE_STATUSES: ReadonlyArray<InvoiceStatus> = [...SHAREABLE_INVOICE_STATUSES, 'PARTIALLY_CREDITED'];
 
@@ -691,10 +698,13 @@ export class InvoiceWorkflowService {
    * credited one, as deriveStatusAfterCredit holds it whatever was paid (D-28;
    * V1-28's depositPosition reads the settlement from the rows). No status
    * write, no posting, no event (paidAt: below). Money beyond it is a 409 under 'throw' (the caller's
-   * payment rolls back, nothing written) and kept under 'keep' (a refund): the
-   * balance readers and mark-paid's remaining do not net credits, so an
-   * over-settlement here would be an over-collection nobody sees. A fully
-   * credited invoice owes nothing, so a payment on it is refused as on PAID.
+   * payment rolls back, nothing written) and kept under 'keep' (a refund). The
+   * 409 keeps a payment door from collecting more than the notes leave owing,
+   * the figure the share surfaces, the status poll, mark-paid's remaining and
+   * the provider checkouts state since W4-CREDIT-AWARE-READERS and
+   * W5-CREDIT-AWARE-PAY (they net the APPLIED notes; W6-LOG-ADDRESSES-AND-DOCS
+   * replaced the note that said they did not). A fully credited invoice owes
+   * nothing, so a payment on it is refused as on PAID.
    *
    * W4-CREDIT-REFUND-PAIDAT (review CRB-CR-1; CR-V44-2, D-14, D-78): paidAt
    * follows the rule reconcileFromCredits uses for a credited status. The
@@ -714,15 +724,16 @@ export class InvoiceWorkflowService {
    * leaves it as it is (logged, as reconcileIn). No posting, no event, and
    * changed stays false (it reports a status move).
    *
-   * Not yet the provider refund webhooks (review SEC-CRP-1 / CR-REG-2, an
-   * it.todo in credit-note-reversal.integration.test.ts): processStripeRefund
-   * and processPaypalRefund (payments.service.ts, outside this packet)
-   * reconcile without 'keep', so a refund that still leaves more received
-   * than the credits leave owing is refused 409 above, before this rule. The
-   * webhook swallows it, the reconcile's own transaction rolls back, the
-   * refund row it committed earlier stays, and so does the paidAt, until the
-   * next credit move clears it (reconcileFromCredits, CN-29 / CN-31). A
-   * refund that leaves no more than is owed reaches the rule on every door.
+   * W5-REFUND-DOORS-KEEP (review SEC-CRP-1 / CR-REG-2; D-14, D-78; CRP-1 in
+   * credit-note-reversal.integration.test.ts): the provider refund webhooks
+   * reach this rule too. processStripeRefund and processPaypalRefund
+   * (payments.service.ts) reconcile under 'keep', as the manual refund door
+   * does, so a refund that still leaves more received than the credits leave
+   * owing keeps the credited status and has its paidAt re-derived here; the
+   * 409 the webhook swallowed, which left the stale paidAt until the next
+   * credit move, is gone. Every refund door reaches the rule
+   * (W6-LOG-ADDRESSES-AND-DOCS: this note replaces the one that still
+   * described that 409).
    */
   private async reconcileCreditedFromPayments(
     db: Prisma.TransactionClient,
@@ -1018,10 +1029,11 @@ export class InvoiceWorkflowService {
    * covers credit moves only: the refund that unsettles a credited invoice
    * goes through reconcileCreditedFromPayments, which clears its paidAt by the
    * same rule (W4-CREDIT-REFUND-PAIDAT, review CRB-CR-1). The clears here still
-   * meet a stale paidAt: on rows refunded before that packet, and where a
-   * provider refund webhook's reconcile was refused 409 (review SEC-CRP-1 /
-   * CR-REG-2); CN-29 and CN-31 put one back after the refund to prove them
-   * (review CR-REG-1).
+   * meet a stale paidAt on rows refunded before that packet, and on rows a
+   * provider refund webhook refunded before W5-REFUND-DOORS-KEEP, when its
+   * reconcile was refused 409 (review SEC-CRP-1 / CR-REG-2; the webhooks now
+   * reconcile under 'keep' and clear it there, CRP-1); CN-29 and CN-31 put
+   * one back after the refund to prove them (review CR-REG-1).
    */
   async reconcileFromCredits(
     invoiceId: string,

@@ -23,6 +23,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SystemEmailService } from './system-email.service';
 import { IdentitySignupService } from '../identity/identity-signup.service';
 import { AiUsageAlertSchedulerService } from '../ai/ai-usage-alert-scheduler.service';
+import { AiOversightService } from '../ai/ai-oversight.service';
+import { ApprovalRoutingService } from '../ai/approval-routing.service';
+import { WhatsAppService } from '../whatsapp/whatsapp.service';
 import { FinancialBriefingSchedulerService } from '../commerce/financial-briefing-scheduler.service';
 import { AccountantExportEmailService } from '../finance/accountant-export-email.service';
 import { FinanceController } from '../finance/finance.controller';
@@ -320,13 +323,247 @@ describe('SystemEmailService.sendTransactional logs no recipient address (9B-D2,
 
   // Review findings SEC-W5SEC-1 / CR-W5SEC-1: a seventh caller of the sink.
   // ApprovalRoutingService.notifyApprover (approval-routing.service.ts:188)
-  // returns the SystemEmailSendError message unchanged as `error`, and
-  // AiOversightService.routeAndNotify logs it at warn (ai-oversight.service.ts
+  // returned the SystemEmailSendError message unchanged as `error`, and
+  // AiOversightService.routeAndNotify logged it at warn (ai-oversight.service.ts
   // :558 approver, :569 tier-4 owner CC), so provider text that quotes the
-  // recipient reaches the log. Neither file is in W5-SYSTEM-EMAIL-CALLERS'
-  // write set (census CF-029 does not list them): a follow-up packet routes
-  // both lines through redactAddresses and makes this case live.
-  it.todo('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS follow-up (review SEC-W5SEC-1): AiOversightService.routeAndNotify logs no provider text address when the approver email (ai-oversight.service.ts:558) or the tier-4 owner CC (:569) fails, and names the item id (outside this packet\'s write set)');
+  // recipient reached the log. W6-LOG-ADDRESSES-AND-DOCS routes both lines (and
+  // the error text notifyApprover hands them) through redactAddresses (since its
+  // repair for SEC-W6LOG-1, redactContactDetails: addresses and numbers). The case
+  // drives the real routing service and the real sink (stand-in Resend client):
+  // a tier-4 item delegated to an approver whose email is refused with text
+  // quoting the approver's address, then the owner CC whose response is lost
+  // with transport text quoting the owner's address.
+  it('[9B-D2, SEC-W4HK-1] W6-LOG-ADDRESSES-AND-DOCS (review SEC-W5SEC-1): AiOversightService.routeAndNotify logs no provider text address when the approver email (ai-oversight.service.ts:558) or the tier-4 owner CC (:569) fails, and names the item id', async () => {
+    const itemId = 'appr_w6log_tier4';
+    const OWNER = 'customer.d82.owner@example.test';
+    let sends = 0;
+    const { service: failing, calls } = serviceWith(async (payload) => {
+      sends += 1;
+      if (sends === 1) {
+        return { data: null, error: { name: 'validation_error', message: `"${String(payload.to)}" is on the suppression list` } };
+      }
+      throw new Error(`socket hang up while sending to ${String(payload.to)}`);
+    });
+    const prisma = {
+      client: {
+        delegationRule: {
+          findMany: vi.fn(async () => [{ id: 'rule_w6log', scope: 'ALL', maxTier: 4, delegateId: 'asg_w6log_approver' }]),
+        },
+        orgAssignment: {
+          findFirst: vi.fn(async () => ({
+            id: 'asg_w6log_approver',
+            membershipId: 'mem_w6log_approver',
+            userId: 'user_w6log_approver',
+            contactName: 'Approver W6',
+            contactEmail: RECIPIENT,
+            contactPhone: null,
+            preferredChannel: 'email',
+            jobRole: null,
+            membership: null,
+          })),
+        },
+        membership: {
+          findFirst: vi.fn(async () => ({ id: 'mem_w6log_owner', userId: 'user_w6log_owner', user: { name: 'Owner W6', email: OWNER, phone: null } })),
+        },
+        aiApprovalItem: { update: vi.fn(async () => ({})) },
+      },
+    };
+    const moduleRef = {
+      get: (token: unknown) => {
+        if (token === SystemEmailService) return failing;
+        throw new Error('not provided in this spec');
+      },
+    };
+    const routing = new ApprovalRoutingService(prisma as never, moduleRef as never);
+    const oversight = new AiOversightService(prisma as never, {} as never, {} as never, {} as never, routing, {} as never);
+
+    await Reflect.get(oversight, 'routeAndNotify').call(
+      oversight,
+      'biz_w6log_approval',
+      { id: itemId, title: 'Void invoice INV-W6', description: null },
+      4,
+      'commerce',
+    );
+
+    // Both mails still went to their recipients; only the logs change.
+    expect(calls.map((c) => c.to)).toEqual([RECIPIENT, OWNER]);
+    // The route was recorded; no notifiedAt, since neither send went out.
+    expect(prisma.client.aiApprovalItem.update).toHaveBeenCalledTimes(1);
+    expectNoAddressLogged();
+    expect(entries.some((e) => e.includes(`Failed to notify approver for item ${itemId}`) && e.includes('is on the suppression list'))).toBe(true);
+    expect(entries.some((e) => e.includes(`Failed to CC owner for tier-4 item ${itemId}`) && e.includes('socket hang up'))).toBe(true);
+  });
+
+  // Review finding SEC-W6LOG-1 (9B-D2, IA-044/CF-029): the same two lines take
+  // the WhatsApp leg when the approver's preferred channel is WhatsApp, and the
+  // tier-4 owner CC takes it whenever the owner has a phone (resolveOwner).
+  // WhatsAppService.sendMessage returns the provider's raw response body as
+  // `error` on a refusal (sendViaTwilio, sendViaMeta), notifyApprover handed it
+  // on unchanged, and both providers' bodies can quote the recipient's number,
+  // which redactAddresses does not touch. The case drives the real
+  // WhatsAppService (config and history stubbed, fetch a stand-in, no provider
+  // traffic), the real ApprovalRoutingService and the real routeAndNotify, for
+  // each provider.
+  const APPROVER_PHONE = '+18685550142';
+  const OWNER_PHONE = '+18685550199';
+  function expectNoPhoneLogged() {
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      for (const digits of ['8685550142', '8685550199', '555-0142', '555-0199']) expect(entry).not.toContain(digits);
+    }
+  }
+
+  it.each([
+    {
+      provider: 'twilio' as const,
+      code: '21211',
+      // A stand-in in the shape of Twilio's invalid-To body, which names the To parameter.
+      refuse: (url: string, body: string) => {
+        expect(url).toContain('api.twilio.com');
+        const to = new URLSearchParams(body).get('To') ?? '';
+        return { code: 21211, message: `The 'To' number ${to} is not a valid phone number.`, more_info: 'https://www.twilio.com/docs/errors/21211', status: 400 };
+      },
+      sentTo: (body: string) => new URLSearchParams(body).get('To'),
+      expectedTo: [`whatsapp:${APPROVER_PHONE}`, `whatsapp:${OWNER_PHONE}`],
+    },
+    {
+      provider: 'meta' as const,
+      code: '131030',
+      // A stand-in in the shape of Meta's Graph error body, quoting the number without its '+'.
+      refuse: (url: string, body: string) => {
+        expect(url).toContain('graph.facebook.com');
+        const to = String((JSON.parse(body) as { to: string }).to).replace('+', '');
+        return {
+          error: {
+            message: '(#131030) Recipient phone number not in allowed list',
+            type: 'OAuthException',
+            code: 131030,
+            error_data: { messaging_product: 'whatsapp', details: `Recipient phone number ${to} not in allowed list` },
+            fbtrace_id: 'Aw6LogFakeTraceId',
+          },
+        };
+      },
+      sentTo: (body: string) => (JSON.parse(body) as { to: string }).to,
+      expectedTo: [APPROVER_PHONE, OWNER_PHONE],
+    },
+  ])('[9B-D2] W6-LOG-ADDRESSES-AND-DOCS repair (review SEC-W6LOG-1): routeAndNotify logs no recipient phone when the approver or the tier-4 owner CC takes the WhatsApp leg and $provider refuses with text quoting the number; both lines name the item id and the provider code', async ({ provider, code, refuse, sentTo, expectedTo }) => {
+    const itemId = `appr_w6log_wa_${provider}`;
+    const prisma = {
+      client: {
+        delegationRule: {
+          findMany: vi.fn(async () => [{ id: 'rule_w6log_wa', scope: 'ALL', maxTier: 4, delegateId: 'asg_w6log_wa' }]),
+        },
+        orgAssignment: {
+          findFirst: vi.fn(async () => ({
+            id: 'asg_w6log_wa',
+            membershipId: 'mem_w6log_wa',
+            userId: 'user_w6log_wa',
+            contactName: 'Approver W6 WhatsApp',
+            contactEmail: null,
+            contactPhone: APPROVER_PHONE,
+            preferredChannel: 'whatsapp',
+            jobRole: null,
+            membership: null,
+          })),
+        },
+        membership: {
+          findFirst: vi.fn(async () => ({ id: 'mem_w6log_wa_owner', userId: 'user_w6log_wa_owner', user: { name: 'Owner W6', email: null, phone: OWNER_PHONE } })),
+        },
+        aiApprovalItem: { update: vi.fn(async () => ({})) },
+      },
+    };
+    const whatsapp = new WhatsAppService({} as never, {} as never, {} as never, {} as never, {} as never);
+    vi.spyOn(whatsapp, 'getConfig').mockResolvedValue(
+      provider === 'twilio'
+        ? { provider, accountSid: 'AC_w6log_not_a_sid', authToken: 'w6log-not-a-token', fromNumber: '+18685550100' }
+        : { provider, phoneNumberId: 'pnid_w6log_not_real', accessToken: 'w6log-not-a-token', fromNumber: '+18685550100' },
+    );
+    const recorded: Array<{ errorMessage?: string | null }> = [];
+    Reflect.set(whatsapp, 'recordMessage', vi.fn(async (_b: string, _p: string, data: { errorMessage?: string | null }) => { recorded.push(data); }));
+    const fetchCalls: Array<{ url: string; body: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init: { body: string }) => {
+      fetchCalls.push({ url, body: init.body });
+      return new Response(JSON.stringify(refuse(url, init.body)), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }));
+    try {
+      const moduleRef = {
+        get: (token: unknown) => {
+          if (token === WhatsAppService) return whatsapp;
+          throw new Error('not provided in this spec');
+        },
+      };
+      const routing = new ApprovalRoutingService(prisma as never, moduleRef as never);
+      const oversight = new AiOversightService(prisma as never, {} as never, {} as never, {} as never, routing, {} as never);
+
+      await Reflect.get(oversight, 'routeAndNotify').call(
+        oversight,
+        'biz_w6log_wa',
+        { id: itemId, title: 'Void invoice INV-W6-WA', description: null },
+        4,
+        'commerce',
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    // Both messages still went to their numbers; only the logs change.
+    expect(fetchCalls.map((c) => sentTo(c.body))).toEqual(expectedTo);
+    // The route was recorded; no notifiedAt, since neither send went out.
+    expect(prisma.client.aiApprovalItem.update).toHaveBeenCalledTimes(1);
+    // The provider text quoted each number (the stand-in is faithful), so the history row's error still does.
+    expect(recorded.map((r) => r.errorMessage ?? '').every((m) => /8685550(142|199)/.test(m))).toBe(true);
+    expectNoPhoneLogged();
+    expect(entries.some((e) => e.includes(`Failed to notify approver for item ${itemId}`) && e.includes(code))).toBe(true);
+    expect(entries.some((e) => e.includes(`Failed to CC owner for tier-4 item ${itemId}`) && e.includes(code))).toBe(true);
+  });
+
+  it('[9B-D2] W6-LOG-ADDRESSES-AND-DOCS repair (review SEC-W6LOG-1): notifyApprover returns a WhatsApp provider refusal as its code only, and any other WhatsApp failure text with every phone number and address redacted', async () => {
+    const route = {
+      approverAssignmentId: 'asg_w6log_wa_direct',
+      approverMembershipId: null,
+      approverUserId: null,
+      displayName: 'Approver W6',
+      channel: 'whatsapp' as const,
+      contactPhone: APPROVER_PHONE,
+      contactEmail: null,
+      method: 'delegation_rule' as const,
+      reason: 'test',
+    };
+    const item = { id: 'appr_w6log_wa_direct', title: 'Void invoice INV-W6-WA', description: null, riskTier: 4 };
+    const errorFor = async (error: string | undefined) => {
+      const sendMessage = vi.fn(async () => ({ success: false, error }));
+      const routing = new ApprovalRoutingService({} as never, { get: () => ({ sendMessage }) } as never);
+      const result = await routing.notifyApprover('biz_w6log_wa_direct', route, item);
+      expect(sendMessage).toHaveBeenCalledWith('biz_w6log_wa_direct', expect.objectContaining({ to: APPROVER_PHONE }));
+      expect(result.sent).toBe(false);
+      return result.error ?? '';
+    };
+
+    // A provider body: the code, never the text.
+    const twilio = await errorFor(JSON.stringify({ code: 21211, message: `The 'To' number whatsapp:${APPROVER_PHONE} is not a valid phone number.` }));
+    expect(twilio).toContain('21211');
+    expect(twilio).not.toContain('8685550142');
+    expect(twilio).not.toContain('is not a valid phone number');
+    const meta = await errorFor(JSON.stringify({ error: { code: 131030, message: 'Recipient phone number not in allowed list', error_data: { details: 'Recipient 18685550142' } } }));
+    expect(meta).toContain('131030');
+    expect(meta).not.toContain('8685550142');
+    const noCode = await errorFor(JSON.stringify({ detail: `rejected ${APPROVER_PHONE}` }));
+    expect(noCode).not.toContain('8685550142');
+    expect(noCode).not.toContain('rejected');
+
+    // Not a provider body: the words stay, every number and address in them is redacted.
+    for (const spelling of [APPROVER_PHONE, 'whatsapp:+18685550142', '18685550142', '+1 (868) 555-0142', '868-555-0142']) {
+      const text = await errorFor(`Bad gateway while sending to ${spelling} for approver.w6log@example.test`);
+      expect(text).toContain('Bad gateway while sending to');
+      expect(text).not.toMatch(/555.?0142/);
+      expect(text).not.toContain('approver.w6log@example.test');
+    }
+    // WhatsAppService's own reasons carry no number and pass unchanged.
+    expect(await errorFor('WhatsApp not configured')).toBe('WhatsApp not configured');
+    expect(await errorFor('Invalid phone number')).toBe('Invalid phone number');
+    // A refusal with no text still says so.
+    expect(await errorFor(undefined)).toBeTruthy();
+  });
 
   it('[9B-D2, SEC-W4HK-1] W5-SYSTEM-EMAIL-CALLERS: AiUsageAlertSchedulerService logs no provider text address when an alert email fails (:156), and names the alert id', async () => {
     const alert = {
