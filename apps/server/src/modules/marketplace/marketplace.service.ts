@@ -1,9 +1,11 @@
 import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import ExcelJS from 'exceljs';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { lockBusinessMeta } from '../../core/prisma/business-meta';
+import { StoreOrderService } from '../site/store-order.service';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, canTransitionOrder } from './fulfillment-routing.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
@@ -28,7 +30,18 @@ export class MarketplaceService {
     @Inject(FulfillmentRoutingService) private readonly fulfillmentRoutingService: FulfillmentRoutingService,
     @Inject(EventEmitter2) private readonly events: EventEmitter2,
     @Inject(ExpensePostingService) private readonly expensePosting: ExpensePostingService,
+    @Inject(ModuleRef) private readonly moduleRef: ModuleRef,
   ) {}
+
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS: the order money doors, StoreOrderService's
+   * paid door (completeCheckout) and refund door (refundOrder, the D-14
+   * refund). It lives in SiteModule, which this module does not import, so it
+   * is resolved from the application when a door is used.
+   */
+  private storeOrders(): StoreOrderService {
+    return this.moduleRef.get(StoreOrderService, { strict: false });
+  }
 
   /**
    * FIN3 — post the COGS leg (Dr COGS / Cr Inventory) for a storefront/
@@ -346,51 +359,104 @@ export class MarketplaceService {
     }));
   }
 
-  async createOrder(businessId: string, data: any) {
+  /**
+   * @param actorId the authenticated member (MarketplaceController). An order
+   *   created paid (`paymentOnCreation`) records its payment through the paid
+   *   door with this member as the recorder.
+   *
+   * G6PUB-R3-STORE-ORDER-DOORS (D-77, recheck G6PUB-RC1-5): an order created
+   * paid goes through the paid door, StoreOrderService.completeCheckout: one
+   * PAID invoice INV-<orderNumber>, one SUCCESSFUL payment of the order total
+   * recorded by the member, its payment_recorded posting and the revenue
+   * attribution, in one transaction, then the order paid / PAID and one
+   * store_order.paid carrying the invoice. It used to be created 'paid' with
+   * paymentStatus UNPAID, no invoice and no payment, and its store_order.paid
+   * made the listener write a raw PAID invoice INV-ORD-<n> with no payment and
+   * no posting. Recording a payment takes a member with revenue write (D-46:
+   * 403 otherwise) and an invoice is made out to a customer (an email or a
+   * phone; 400 otherwise); both are checked before anything is written. The
+   * order's stock still moves through its fulfilment routes, and its COGS is
+   * posted once the payment is recorded.
+   */
+  async createOrder(businessId: string, data: any, actorId: string | null = null) {
+    const paidOnCreation = !!data.paymentOnCreation;
+    if (paidOnCreation) {
+      await this.storeOrders().assertMemberMayRecordPayments(businessId, actorId);
+      if (!data.customerEmail && !data.customerPhone) {
+        throw new BadRequestException(
+          'An order created paid records an invoice for its customer: give the customer an email or a phone',
+        );
+      }
+    }
     const orderNumber = this.generateOrderNumber();
 
-    const items = data.items || [];
+    // G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-4): the order's figures are
+    // checked before anything is read or written. A paid order records its
+    // total as the invoice and the payment, so a negative quantity, fee, tax,
+    // duty or discount (or a discount above the order) made a PAID invoice and
+    // a SUCCESSFUL payment of a negative amount: a refund recorded through the
+    // paid door, with no posting (onPaymentRecorded skips gross <= 0).
+    const items: Array<{ productId?: unknown; quantity?: unknown }> = data.items || [];
+    const quantities = items.map((item) => {
+      const quantity = Number(item?.quantity);
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        throw new BadRequestException(`Each order line needs a whole quantity of 1 or more (got ${JSON.stringify(item?.quantity)})`);
+      }
+      return quantity;
+    });
+    const shippingFee = this.orderAmount(data, 'shippingFee');
+    const taxAmount = this.orderAmount(data, 'taxAmount');
+    const dutyAmount = this.orderAmount(data, 'dutyAmount');
+    const discountAmount = this.orderAmount(data, 'discountAmount');
+
     let subtotal = 0;
     const orderItems: any[] = [];
 
-    for (const item of items) {
+    for (const [index, item] of items.entries()) {
       const product = await this.prisma.client.product.findFirst({
-        where: { id: item.productId, businessId },
+        where: { id: item.productId as string, businessId },
       });
       if (!product) throw new BadRequestException(`Product ${item.productId} not found`);
 
+      const quantity = quantities[index];
       const unitPrice = product.price;
-      const total = unitPrice * item.quantity;
+      const total = unitPrice * quantity;
       subtotal += total;
 
       orderItems.push({
         productId: product.id,
         name: product.name,
         sku: product.sku,
-        quantity: item.quantity,
+        quantity,
         unitPrice,
         total,
         currency: data.currency || product.currency,
       });
     }
 
-    const shippingFee = data.shippingFee || 0;
-    const taxAmount = data.taxAmount || 0;
-    const dutyAmount = data.dutyAmount || 0;
-    const discountAmount = data.discountAmount || 0;
     const total = subtotal + shippingFee + taxAmount + dutyAmount - discountAmount;
+    if (total < 0) {
+      throw new BadRequestException(`The discount (${discountAmount}) is more than the order (${total + discountAmount})`);
+    }
+    if (paidOnCreation && !(total > 0)) {
+      throw new BadRequestException(
+        'An order created paid records a payment of its total, and this order totals 0: create it unpaid',
+      );
+    }
 
-    const initialStatus = data.paymentOnCreation ? 'paid' : 'placed';
+    const initialStatus = paidOnCreation ? 'paid' : 'placed';
+    // D-77: an offline method only (the payment is recorded here, not taken by a provider).
+    const requestedMethod = String(data.paymentMethod ?? 'manual').trim().toLowerCase();
+    const offlineMethod = ['cash', 'bank_transfer', 'check', 'manual'].includes(requestedMethod) ? requestedMethod : 'manual';
 
-    // FIN3 — order create + (when paid-on-creation) COGS posting share
-    // a single transaction so listeners only ever see the order after
-    // its ledger entries have committed.
+    // D-77: the order is written placed; the paid door below moves it to paid / PAID with its books.
     const order = await this.prisma.client.$transaction(async (tx) => {
       const created = await tx.marketplaceOrder.create({
         data: {
           businessId,
           orderNumber,
-          status: initialStatus,
+          status: 'placed',
+          ...(paidOnCreation ? { paymentMethod: offlineMethod.toUpperCase() } : {}),
           // Trial-N repair round 2 (G6RC-3, SEC-V18-3): the server decides the type. A STOREFRONT order is created
           // by the storefront checkout only (StoreOrderService.createOrder); body.type was copied verbatim, so any
           // member made a STOREFRONT order 'paid' with no invoice, payment or posting, and store_order.paid named it.
@@ -416,24 +482,6 @@ export class MarketplaceService {
         },
         include: { items: { include: { product: true } }, shipments: true },
       });
-      if (initialStatus === 'paid') {
-        const items = created.items
-          .filter((i) => i.productId && i.quantity > 0)
-          .map((i) => ({ productId: i.productId as string, quantity: i.quantity }));
-        if (items.length > 0) {
-          await this.expensePosting.onProductSold(
-            {
-              businessId,
-              sourceType: 'MarketplaceOrder',
-              sourceId: created.id,
-              date: new Date(),
-              currency: created.currency,
-              items,
-            },
-            tx as unknown as import('@prisma/client').Prisma.TransactionClient,
-          );
-        }
-      }
       return created;
     });
 
@@ -442,13 +490,49 @@ export class MarketplaceService {
     );
 
     this.events.emit('store_order.created', { order, businessId } as StoreOrderCreatedPayload);
-    if (initialStatus === 'paid') {
-      this.events.emit('store_order.paid', { order, businessId } as StoreOrderPaidPayload);
+    if (!paidOnCreation) {
+      this.autoRouteOrder(businessId, order.id, false);
+      return order;
     }
 
-    this.autoRouteOrder(businessId, order.id, initialStatus === 'paid');
+    // D-77: the paid door. It emits store_order.paid with the invoice once the
+    // invoice, the payment and its posting have committed. A failure leaves the
+    // order placed and unpaid, with nothing recorded, and is answered as it is.
+    await this.storeOrders().completeCheckout({
+      orderId: order.id,
+      paymentRef: `marketplace_paid_${order.id}_${randomBytes(16).toString('hex')}`,
+      provider: offlineMethod,
+      method: offlineMethod,
+      actorId,
+      paidStatus: 'paid',
+      stockMovesOnFulfilment: true,
+    });
+    // FIN3: the COGS leg (idempotent on MarketplaceOrder:<id>:cogs), once the sale is paid.
+    await this.postOrderCogs(order).catch((err) =>
+      this.logger.error(`COGS posting failed for paid order ${order.id}: ${(err as Error).message}`),
+    );
 
-    return order;
+    this.autoRouteOrder(businessId, order.id, true);
+
+    return this.prisma.client.marketplaceOrder.findFirstOrThrow({
+      where: { id: order.id, businessId },
+      include: { items: { include: { product: true } }, shipments: true },
+    });
+  }
+
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-4): an order figure from the
+   * request body (shippingFee, taxAmount, dutyAmount, discountAmount): absent
+   * is 0; otherwise a finite number of 0 or more (400 otherwise).
+   */
+  private orderAmount(data: Record<string, unknown>, field: string): number {
+    const raw = data[field];
+    if (raw === undefined || raw === null || raw === '') return 0;
+    const amount = typeof raw === 'number' || typeof raw === 'string' ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(amount) || amount < 0) {
+      throw new BadRequestException(`${field} must be a number of 0 or more (got ${JSON.stringify(raw)})`);
+    }
+    return amount;
   }
 
   private autoRouteOrder(businessId: string, orderId: string, isPaid: boolean): void {
@@ -556,6 +640,22 @@ export class MarketplaceService {
   }
 
   /**
+   * G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-1, SEC-R3-3): whether the
+   * order's money moves only through the paid door (completeCheckout) and the
+   * refund door (StoreOrderService.refundOrder): a STOREFRONT order, or an
+   * order with a checkout invoice (StoreOrderService.hasCheckoutInvoice), which
+   * is what a STANDARD order created paid (D-77) has: a PAID invoice, a
+   * SUCCESSFUL payment and its posting. The guards below read the STOREFRONT
+   * type only, so the recorded sale of a D-77 order could be set back to
+   * UNPAID, marked paid again or refunded by any member, its invoice still
+   * PAID and its payment still SUCCESSFUL.
+   */
+  private async moneyOnTheDoors(order: { businessId: string; type?: string | null; orderNumber: string }): Promise<boolean> {
+    if ((order.type ?? '').toUpperCase() === 'STOREFRONT') return true;
+    return this.storeOrders().hasCheckoutInvoice(order.businessId, order.orderNumber);
+  }
+
+  /**
    * Trial-N review (G6PUB-SEC-3, NEW-2, G6ML-1; V18-T1, SEC-V18-2/3): a
    * STOREFRONT order is paid only through StoreOrderService.completeCheckout,
    * which writes its invoice, its payment and that payment's posting with the
@@ -567,16 +667,18 @@ export class MarketplaceService {
    * settlements) answered "already paid" and recorded nothing, so the
    * customer's money never reached the books; their store_order.paid reached
    * listeners that do not read the stored payment status. Refused (400).
+   * G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-3): so is an order created paid
+   * (`onDoors`, moneyOnTheDoors).
    */
-  private assertNotPayingStorefrontOrder(order: { type?: string | null }, status?: string | null, paymentStatus?: unknown): void {
-    if ((order.type ?? '').toUpperCase() !== 'STOREFRONT') return;
+  private assertNotPayingDoorOrder(onDoors: boolean, status?: string | null, paymentStatus?: unknown): void {
+    if (!onDoors) return;
     const marksPaid =
       (typeof status === 'string' && status.toLowerCase() === 'paid') ||
       (typeof paymentStatus === 'string' && paymentStatus.toUpperCase() === 'PAID');
     if (!marksPaid) return;
     throw new BadRequestException(
-      'A storefront order is paid through its checkout: its payment provider settles it, or a cash or manual payment is ' +
-        'recorded with POST /site/businesses/:businessId/orders/:orderId/complete-offline. Marking it paid here records no invoice and no payment',
+      'A storefront order (or an order created paid) is paid through its checkout: its payment provider settles it, or a cash or manual ' +
+        'payment is recorded with POST /site/businesses/:businessId/orders/:orderId/complete-offline. Marking it paid here records no invoice and no payment',
     );
   }
 
@@ -588,15 +690,40 @@ export class MarketplaceService {
    * member). PATCH .../status (any member) copied them verbatim in every
    * direction but PAID, so a settled order could be set back to UNPAID with
    * its books still on, and the provider paths then took it as payable again.
-   * Refused (400); the status alone still moves.
+   * Refused (400); the status alone still moves. G6PUB-R3-STORE-ORDER-DOORS
+   * review (SEC-R3-3): so are an order created paid's (`onDoors`).
    */
-  private assertNoStorefrontPaymentFields(order: { type?: string | null }, paymentData?: Record<string, unknown> | null): void {
-    if ((order.type ?? '').toUpperCase() !== 'STOREFRONT' || !paymentData) return;
+  private assertNoDoorPaymentFields(onDoors: boolean, paymentData?: Record<string, unknown> | null): void {
+    if (!onDoors || !paymentData) return;
     const written = ['paymentStatus', 'paymentMethod', 'paymentRef'].filter((k) => paymentData[k] !== undefined);
     if (written.length === 0) return;
     throw new BadRequestException(
-      `A storefront order's payment fields (${written.join(', ')}) are set by its checkout only: its payment provider settles it, ` +
-        'or a cash or manual payment is recorded with POST /site/businesses/:businessId/orders/:orderId/complete-offline',
+      `A storefront order's (or an order created paid's) payment fields (${written.join(', ')}) are set by its checkout only: its payment ` +
+        'provider settles it, or a cash or manual payment is recorded with POST /site/businesses/:businessId/orders/:orderId/complete-offline; ' +
+        'it is refunded with POST /site/businesses/:businessId/orders/:orderId/refund',
+    );
+  }
+
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-1): a STOREFRONT order is
+   * refunded only through the D-14 refund door (StoreOrderService.refundOrder:
+   * a member with revenue write, a negative REFUNDED row on its checkout
+   * invoice, the posting reversed, the invoice reopened). PATCH .../status
+   * 'refunded' (any member) wrote the status and emitted store_order.refunded
+   * with no refund recorded, whose listener booked the order total as an
+   * Expense beside a PAID invoice. Refused (400).
+   *
+   * Review (SEC-R3-1): for every order. An order created paid (D-77) is
+   * refunded on its invoice the same way, and any other order's refund books
+   * an Expense, which takes revenue write and an amount (the fulfil 'refund'
+   * action); this route checks neither.
+   */
+  private assertNotRefundingThroughStatus(status?: string | null): void {
+    if (typeof status !== 'string' || status.trim().toLowerCase() !== 'refunded') return;
+    throw new BadRequestException(
+      "An order is refunded with the fulfil 'refund' action (POST .../orders/:orderId/fulfill) or, for a storefront order or an " +
+        'order created paid, POST /site/businesses/:businessId/orders/:orderId/refund, which record the refund. Setting its status ' +
+        'to refunded records no refund',
     );
   }
 
@@ -605,8 +732,10 @@ export class MarketplaceService {
       where: { id: orderId, businessId },
     });
     if (!order) throw new NotFoundException('Order not found');
-    this.assertNotPayingStorefrontOrder(order, status, paymentData?.paymentStatus);
-    this.assertNoStorefrontPaymentFields(order, paymentData);
+    this.assertNotRefundingThroughStatus(status);
+    const onDoors = await this.moneyOnTheDoors(order);
+    this.assertNotPayingDoorOrder(onDoors, status, paymentData?.paymentStatus);
+    this.assertNoDoorPaymentFields(onDoors, paymentData);
 
     const updateData: any = { status };
     if (paymentData) {
@@ -1118,12 +1247,35 @@ export class MarketplaceService {
     return token;
   }
 
-  async fulfillOrder(businessId: string, orderId: string, action: string, data?: any) {
+  /**
+   * @param actorId the authenticated member (MarketplaceController); the
+   *   refunder of a 'refund' (refundThroughDoor, or the Expense refund below).
+   *
+   * G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-1): the 'refund' of an order
+   * whose money is on its checkout invoice (moneyOnTheDoors: a STOREFRONT
+   * order, or a STANDARD order created paid, D-77) is the D-14 refund door,
+   * refundThroughDoor. Only STOREFRONT orders went there, so a D-77 order's
+   * refund set paymentStatus REFUNDED for any member (also one the paid create
+   * refuses, revenue:read) and booked the client's refundAmount as an Expense,
+   * its invoice still PAID and its payment SUCCESSFUL. Any other order's
+   * refund books an Expense of the amount refunded: it takes revenue write
+   * (D-46: 403 otherwise) and an amount above 0 up to the order total (400
+   * otherwise), both checked before anything is written.
+   */
+  async fulfillOrder(businessId: string, orderId: string, action: string, data?: any, actorId: string | null = null) {
     const order = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
       include: { items: { include: { product: true } }, shipments: true },
     });
     if (!order) throw new NotFoundException('Order not found');
+    let expenseRefundAmount: number | undefined;
+    if (action === 'refund') {
+      if (await this.moneyOnTheDoors(order)) {
+        return this.refundThroughDoor(businessId, order, data, actorId);
+      }
+      await this.storeOrders().assertMemberMayRecordPayments(businessId, actorId);
+      expenseRefundAmount = this.expenseRefundAmount(order, data?.refundAmount);
+    }
 
     const meta = (order.metadata as Record<string, any>) ?? {};
     const timeline: any[] = meta.statusTimeline ?? [];
@@ -1152,7 +1304,7 @@ export class MarketplaceService {
       }
 
       case 'mark_paid': {
-        this.assertNotPayingStorefrontOrder(order, 'paid');
+        this.assertNotPayingDoorOrder(await this.moneyOnTheDoors(order), 'paid');
         if (!canTransitionOrder(order.status, 'paid')) {
           throw new BadRequestException(`Cannot transition order from ${order.status} to paid`);
         }
@@ -1361,7 +1513,7 @@ export class MarketplaceService {
         timeline.push({
           status: 'refunded',
           timestamp: now,
-          refundAmount: data?.refundAmount ?? order.total,
+          refundAmount: expenseRefundAmount,
           reason: data?.reason,
           note: data?.note,
         });
@@ -1418,13 +1570,97 @@ export class MarketplaceService {
     });
 
     this.emitOrderLifecycleEvent(businessId, updated, newStatus, {
-      refundAmount: action === 'refund' ? (data?.refundAmount ?? updated.total) : undefined,
+      refundAmount: action === 'refund' ? expenseRefundAmount : undefined,
     });
 
     this.sendFulfillmentNotification(businessId, updated, newStatus, data).catch((err) =>
       this.logger.error(`Failed to send fulfillment notification: ${(err as Error).message}`),
     );
 
+    return updated;
+  }
+
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-1): the amount the fulfil
+   * 'refund' of an order with no payment on its books (no checkout invoice)
+   * records: its store_order.refunded books this amount as an Expense. Absent,
+   * the order total; otherwise a number above 0 and up to the order total
+   * (400 otherwise). It was the client's refundAmount as sent, any amount.
+   */
+  private expenseRefundAmount(order: { total: number; currency: string }, requested: unknown): number {
+    const total = Number(order.total);
+    if (requested === undefined || requested === null || requested === '') return total;
+    const amount = typeof requested === 'number' || typeof requested === 'string' ? Number(requested) : Number.NaN;
+    if (!Number.isFinite(amount) || amount <= 0 || Math.round(amount * 100) > Math.round(total * 100)) {
+      throw new BadRequestException(
+        `A refund of this order is above 0 and at most its total (${total.toFixed(2)} ${order.currency}); got ${JSON.stringify(requested)}`,
+      );
+    }
+    return amount;
+  }
+
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-1): the fulfil 'refund' of a
+   * STOREFRONT order is the D-14 refund door, StoreOrderService.refundOrder: a
+   * member with revenue write (D-46: 403 otherwise, checked first), the order's
+   * SUCCESSFUL payments refunded on its checkout invoice (one negative REFUNDED
+   * row each, naming the refunder, the posting reversed, the invoice back to
+   * SENT), the order REFUNDED and one store_order.refunded naming the invoice,
+   * so no Expense is booked. An order nothing was paid on is 409, one already
+   * refunded 400, and nothing is written. The door refunds the order in full:
+   * a refundAmount other than the order total is refused (400) rather than
+   * recorded as the full amount. This action used to set paymentStatus REFUNDED
+   * for any member, with no refund recorded, also on an UNPAID order, and its
+   * store_order.refunded booked the client's refundAmount as an Expense.
+   * G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-1): also a STANDARD order
+   * created paid (D-77), whose money is on its checkout invoice the same way
+   * (moneyOnTheDoors).
+   */
+  private async refundThroughDoor(
+    businessId: string,
+    order: { id: string; total: number; currency: string; paymentStatus: string },
+    data: { refundAmount?: unknown; reason?: unknown; note?: unknown } | undefined,
+    actorId: string | null,
+  ) {
+    const storeOrders = this.storeOrders();
+    await storeOrders.assertMemberMayRecordPayments(businessId, actorId);
+    // The amount is checked on a paid order; any other is answered by the door (409 nothing paid, 400 already refunded).
+    const requested = (order.paymentStatus ?? '').toUpperCase() === 'PAID' ? data?.refundAmount : undefined;
+    if (requested !== undefined && requested !== null && requested !== '') {
+      const amount = Number(requested);
+      if (!Number.isFinite(amount) || amount.toFixed(2) !== Number(order.total).toFixed(2)) {
+        throw new BadRequestException(
+          `This order is refunded in full (${Number(order.total).toFixed(2)} ${order.currency}) on its checkout invoice; ` +
+            'this refund amount is not the order total',
+        );
+      }
+    }
+
+    await storeOrders.refundOrder(order.id, businessId, actorId);
+
+    // The fulfilment timeline (not money state): what the other fulfil actions record, on the metadata as it is now.
+    const current = await this.prisma.client.marketplaceOrder.findFirst({ where: { id: order.id, businessId }, select: { metadata: true } });
+    const meta = (current?.metadata as Record<string, unknown> | null) ?? {};
+    const timeline: unknown[] = Array.isArray(meta.statusTimeline) ? meta.statusTimeline : [];
+    await this.prisma.client.marketplaceOrder.update({
+      where: { id: order.id },
+      data: {
+        metadata: {
+          ...meta,
+          statusTimeline: [
+            ...timeline,
+            { status: 'refunded', timestamp: new Date().toISOString(), refundAmount: order.total, reason: data?.reason, note: data?.note },
+          ],
+        } as import('@prisma/client').Prisma.InputJsonValue,
+      },
+    });
+    const updated = await this.prisma.client.marketplaceOrder.findFirstOrThrow({
+      where: { id: order.id, businessId },
+      include: { items: { include: { product: true } }, shipments: true, business: { select: { name: true } } },
+    });
+    this.sendFulfillmentNotification(businessId, updated, 'refunded', data).catch((err) =>
+      this.logger.error(`Failed to send refund notification: ${(err as Error).message}`),
+    );
     return updated;
   }
 

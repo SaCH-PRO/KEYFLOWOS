@@ -281,10 +281,8 @@ export function OrdersPanel() {
   const businessId = getStoredBusinessId() ?? "";
 
   /**
-   * Filtering stays client-side even though the endpoint supports it: the panel
-   * already had working filter UI over an in-memory list, and a page of 100 is
-   * enough for a storefront's recent orders. Server-side paging is the change to
-   * make when a business outgrows that, not before.
+   * The latest 100 orders; the status and date filters run over them here. A
+   * text search asks the server (below), so it reaches every order.
    */
   const load = useCallback(async () => {
     if (!businessId) {
@@ -302,17 +300,54 @@ export function OrdersPanel() {
     void load();
   }, [load]);
 
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-3): a search asks the server
+   * (the orders route's own `search`: customer name, email or order number),
+   * so an order outside the latest 100 is found, and an unpaid cash order
+   * there can be completed offline. Debounced; the latest answer for the
+   * current text wins. Until it answers, the loaded orders are filtered here.
+   */
+  const [serverSearch, setServerSearch] = useState<{ q: string; orders: Order[] } | null>(null);
+  const query = search.trim();
+  useEffect(() => {
+    if (!query || !businessId) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetchStoreOrders(businessId, { search: query, pageSize: 100 })
+        .then(({ data, error }) => {
+          if (cancelled) return;
+          if (error) {
+            toast.error(error);
+            return;
+          }
+          setServerSearch({ q: query, orders: (data?.data ?? []).map(fromApi) });
+        })
+        .catch(() => undefined);
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, businessId]);
+  const serverHits = query && serverSearch?.q === query ? serverSearch.orders : null;
+
   const filtered = useMemo(() => {
-    let result = orders;
+    let result = serverHits ?? orders;
     if (statusFilter !== "all") result = result.filter((o) => o.status === statusFilter);
     if (dateFrom) result = result.filter((o) => o.date >= dateFrom);
     if (dateTo) result = result.filter((o) => o.date <= dateTo + "T23:59:59Z");
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (query && !serverHits) {
+      const q = query.toLowerCase();
       result = result.filter((o) => o.customerName.toLowerCase().includes(q) || o.ref.toLowerCase().includes(q) || o.customerEmail.toLowerCase().includes(q));
     }
-    return result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [orders, search, statusFilter, dateFrom, dateTo]);
+    return [...result].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [orders, serverHits, query, statusFilter, dateFrom, dateTo]);
+
+  /** An order the server answered replaces its row in the loaded list and in the search answer. */
+  const replaceOrder = useCallback((orderId: string, updated: Order) => {
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+    setServerSearch((prev) => (prev ? { ...prev, orders: prev.orders.map((o) => (o.id === orderId ? updated : o)) } : prev));
+  }, []);
 
   const handleStatusUpdate = useCallback(async (orderId: string, newStatus: OrderStatus) => {
     if (!businessId) return;
@@ -339,10 +374,10 @@ export function OrdersPanel() {
     // Render what came back, not what was requested. The server decides the
     // resulting status; assuming it matched the request is how a screen ends up
     // showing a state the database never reached.
-    setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+    replaceOrder(orderId, updated);
     setSelectedOrder((prev) => (prev && prev.id === orderId ? updated : prev));
     toast.success(`Order ${updated.ref} is now ${updated.status}`);
-  }, [businessId, load]);
+  }, [businessId, load, replaceOrder]);
 
   const handleCompleteOffline = useCallback(async (orderId: string) => {
     if (!businessId) return;
@@ -353,10 +388,10 @@ export function OrdersPanel() {
     }
     // Render the order the server answered (paid, its status kept or CONFIRMED).
     const updated = fromApi(data);
-    setOrders((prev) => prev.map((o) => (o.id === orderId ? updated : o)));
+    replaceOrder(orderId, updated);
     setSelectedOrder((prev) => (prev && prev.id === orderId ? updated : prev));
     toast.success(`Payment recorded for ${updated.ref}`);
-  }, [businessId]);
+  }, [businessId, replaceOrder]);
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: orders.length };

@@ -156,6 +156,8 @@ export class SiteController {
       notes?: string;
       visitorId?: string;
       referralCode?: string;
+      /** The checkout's retry key, when the Idempotency-Key header cannot be sent (see checkoutIdempotencyKey). */
+      idempotencyKey?: string;
     },
     @Req() req: Request,
   ) {
@@ -207,7 +209,7 @@ export class SiteController {
     // the first call created. Without the header nothing changes. A retry
     // while the first call is still starting the session, past the wait, is
     // 409 with Retry-After (V1-33 review, V33-CR-1).
-    const idempotencyKey = SiteController.checkoutIdempotencyKey(req.headers['idempotency-key']);
+    const idempotencyKey = SiteController.checkoutIdempotencyKey(req.headers['idempotency-key'] ?? body.idempotencyKey);
     if (idempotencyKey) {
       const result = await this.storeOrderService
         .createOrderOnce(orderInput, idempotencyKey, startPayment)
@@ -228,13 +230,39 @@ export class SiteController {
     };
   }
 
-  /** V1-33: the checkout's Idempotency-Key header, trimmed; absent or blank means none. At most 255 characters. */
-  private static checkoutIdempotencyKey(header: string | string[] | undefined): string | null {
+  /**
+   * V1-33: the checkout's Idempotency-Key header, trimmed; absent or blank means none. At most 255 characters.
+   *
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-4): or, when no header is sent, the body's `idempotencyKey`.
+   * The storefront calls this API cross-origin and the CORS preflight allows no Idempotency-Key header
+   * (app-bootstrap.ts allowedHeaders), so the storefront's one key per checkout travels in the body. The header,
+   * when present, wins. The key is not part of the checkout's request hash (createOrderOnce).
+   */
+  private static checkoutIdempotencyKey(header: unknown): string | null {
     const raw = Array.isArray(header) ? header[0] : header;
     const key = typeof raw === 'string' ? raw.trim() : '';
     if (!key) return null;
     if (key.length > 255) throw new BadRequestException('Idempotency-Key must be at most 255 characters');
     return key;
+  }
+
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-4, RC1-1; D-69): the
+   * gateways a storefront takes for an amount in `currency` (the cart's;
+   * without one, the business currency), by the same rule as the invoice pay
+   * page (PaymentsService.getAvailableGateways): WiPay only for a business with
+   * a WiPay merchant pair and a TTD amount. The storefront checkout offers WiPay
+   * from this answer only; it listed WiPay, as the default, for every TTD cart.
+   * Ids, names and currencies only: no key, account number or other setting.
+   */
+  @UseGuards(PublicRateLimitGuard)
+  @PublicRateLimit(30, 60_000)
+  @Get('storefront/public/:slug/gateways')
+  async getPublicGateways(@Param('slug') slug: string, @Query('currency') currency?: string) {
+    const storefront = await this.siteService.getPublicStorefront(slug);
+    const payable = typeof currency === 'string' && currency.trim() ? sanitize(currency.trim(), 8) : null;
+    const gateways = await this.paymentsService.getAvailableGateways(storefront.business.id, payable);
+    return gateways.map((g) => ({ id: g.id, name: g.name, currencies: g.currencies }));
   }
 
   @UseGuards(PublicRateLimitGuard)

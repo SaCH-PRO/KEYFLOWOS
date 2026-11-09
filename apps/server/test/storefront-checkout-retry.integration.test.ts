@@ -467,8 +467,19 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.staffRead, email: `${P}staff_read@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.ownerB, email: `${P}owner_b@test.local`, role: 'USER' } });
   await db.user.create({ data: { id: ID.superAdmin, email: `${P}super_admin@test.local`, role: 'SUPER_ADMIN' } });
+  // G6PUB-R3-STORE-ORDER-DOORS (RC2-4): the order door takes a WiPay checkout only for a business with a WiPay merchant
+  // pair, so store A (whose WiPay checkouts this suite retries) has its own pair.
   await db.business.create({
-    data: { id: ID.bizA, name: 'V33A Store A', slug: SLUG.a, ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH', storeEnabled: true },
+    data: {
+      id: ID.bizA,
+      name: 'V33A Store A',
+      slug: SLUG.a,
+      ownerId: ID.owner,
+      currency: 'TTD',
+      accountingBasis: 'CASH',
+      storeEnabled: true,
+      metaData: { wipayApiKey: `${P}wipay_key`, wipayAccountNumber: `${P}wipay_account` },
+    },
   });
   await db.business.create({
     data: { id: ID.bizB, name: 'V33A Store B', slug: SLUG.b, ownerId: ID.ownerB, currency: 'TTD', accountingBasis: 'CASH', storeEnabled: true },

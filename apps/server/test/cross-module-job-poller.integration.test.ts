@@ -33,6 +33,13 @@
  * The poller is not tenant-scoped (it reads every business's due jobs, take 50,
  * oldest first), so this suite's jobs are scheduled in 2001 to sort first, and
  * every assertion filters recorder calls and rows by this suite's business.
+ * The job reads of the poller and of the cart runner (V35-02) are also narrowed
+ * to this suite's business, ANDed with their own where clause (review
+ * CR-D17-2): a suite running beside this one on the same database (for example
+ * job-runner-claims, whose due post-purchase, review and cart rows date from
+ * 2000) is never claimed here. The where clause, the claim and the execution
+ * are the real code; the job-type filter V35-01 pins still applies, since the
+ * other modules' rows it seeds belong to this suite's business.
  *
  * Fixtures: prefix `v35a_` (registered in test/helpers/fixture-prefixes.json),
  * hard-deleted by raw SQL with sqlLikePrefix() in beforeAll, beforeEach (jobs,
@@ -142,6 +149,26 @@ async function cleanup() {
   }
 }
 
+/** The client with its scheduledAgentJob reads narrowed to this suite's business (ANDed with the caller's where clause). */
+function scopeJobReads(client: any) {
+  const jobs = new Proxy(client.scheduledAgentJob, {
+    get(target, prop) {
+      if (prop === 'findMany') {
+        return (args: any) => target.findMany({ ...args, where: { AND: [args?.where ?? {}, { businessId: ID.biz }] } });
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return new Proxy(client, {
+    get(target, prop) {
+      if (prop === 'scheduledAgentJob') return jobs;
+      const value = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 function newAgent(prisma: any = prismaService) {
   const svc = new AgentClass(prisma, activityService, crmStub, gmailStub, emailStub);
   // The constructor arms the 60 s poller; stop it so only the calls below run jobs.
@@ -222,6 +249,9 @@ beforeAll(async () => {
   }).compile();
 
   prismaService = moduleRef.get(PrismaService);
+  // The one PrismaService instance the module's agent, every newAgent() and the cart runner use:
+  // their job reads see this suite's business only (review CR-D17-2). Fixtures still use `db`.
+  prismaService.client = scopeJobReads(prismaService.client);
   activityService = moduleRef.get(ActivityService);
   agent = moduleRef.get(AgentClass);
   agent.onModuleDestroy();

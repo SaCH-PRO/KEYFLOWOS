@@ -146,10 +146,15 @@ export class MarketplaceController {
     return this.marketplaceService.getOrder(businessId, orderId);
   }
 
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS (D-77): an order created paid records its
+   * payment through the paid door, with the authenticated member as the
+   * recorder (revenue write, D-46); never a body field.
+   */
   @CrmRateLimit(20, 60_000)
   @Post('businesses/:businessId/orders')
-  createOrder(@Param('businessId') businessId: string, @Body() body: any) {
-    return this.marketplaceService.createOrder(businessId, body);
+  createOrder(@Param('businessId') businessId: string, @Body() body: any, @Req() req: { user?: { id?: string } }) {
+    return this.marketplaceService.createOrder(businessId, body, req?.user?.id ?? null);
   }
 
   @Patch('businesses/:businessId/orders/:orderId/status')
@@ -263,15 +268,24 @@ export class MarketplaceController {
     return this.marketplaceService.updatePurchaseOrder(businessId, poId, body);
   }
 
+  /**
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-1): the 'refund' of a
+   * STOREFRONT order is the D-14 refund door (StoreOrderService.refundOrder),
+   * which takes a member with revenue write; the refunder is the authenticated
+   * member, never a body field. Review (SEC-R3-1): so is the refund of an
+   * order created paid (D-77), and any other order's refund (an Expense) takes
+   * revenue write too (MarketplaceService.fulfillOrder).
+   */
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/orders/:orderId/fulfill')
   fulfillOrder(
     @Param('businessId') businessId: string,
     @Param('orderId') orderId: string,
     @Body() body: { action: string; [key: string]: any },
+    @Req() req: { user?: { id?: string } },
   ) {
     const { action, ...data } = body;
-    return this.marketplaceService.fulfillOrder(businessId, orderId, action, data);
+    return this.marketplaceService.fulfillOrder(businessId, orderId, action, data, req?.user?.id ?? null);
   }
 
   @CrmRateLimit(10, 60_000)

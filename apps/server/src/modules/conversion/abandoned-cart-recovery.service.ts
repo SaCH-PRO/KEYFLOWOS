@@ -103,6 +103,16 @@ export class AbandonedCartRecoveryService implements OnModuleInit, OnModuleDestr
     }
   }
 
+  /**
+   * V1-84 (FOLLOW3-D17-JOB-RUNNER-CLAIMS): the V1-35 claim, unchanged. Each job
+   * is claimed before any effect by a compare-and-set on the version read
+   * (PENDING, same updatedAt, still due; count === 1), so overlapping ticks or a
+   * second server instance never send a recovery email twice. A job with no
+   * recipient is closed by its claim. A failed execution marks the row FAILED
+   * only while it is still this claim's. A claim that throws leaves the row
+   * PENDING and ends this tick (logged by the interval). A lease for a crash
+   * after the claim is V1+.
+   */
   async sendRecoveryEmails() {
     const jobs = await this.prisma.client.scheduledAgentJob.findMany({
       where: {
@@ -115,15 +125,15 @@ export class AbandonedCartRecoveryService implements OnModuleInit, OnModuleDestr
     });
 
     for (const job of jobs) {
+      const claimedAt = new Date();
+      const claim = await this.prisma.client.scheduledAgentJob.updateMany({
+        where: { id: job.id, status: 'PENDING', updatedAt: job.updatedAt, scheduledFor: { lte: claimedAt } },
+        data: { status: 'COMPLETED', executedAt: claimedAt },
+      });
+      if (claim.count !== 1) continue; // taken by another claimant, cancelled, or re-armed after the read
       try {
         const p = job.payload as Record<string, any>;
-        if (!p.contactEmail) {
-          await this.prisma.client.scheduledAgentJob.update({
-            where: { id: job.id },
-            data: { status: 'COMPLETED', executedAt: new Date() },
-          });
-          continue;
-        }
+        if (!p.contactEmail) continue; // nothing to send; the claim closed it COMPLETED
 
         const base = appUrl();
         const recoveryUrl = base ? `${base}/storefront/${job.businessId}?recover=${p.visitorId}` : undefined;
@@ -142,17 +152,16 @@ export class AbandonedCartRecoveryService implements OnModuleInit, OnModuleDestr
           },
           dedupeKey: `cart-recovery_${job.entityId}_${p.hour}`,
         });
-
-        await this.prisma.client.scheduledAgentJob.update({
-          where: { id: job.id },
-          data: { status: 'COMPLETED', executedAt: new Date() },
-        });
       } catch (e) {
         this.logger.error(`Cart recovery failed for job ${job.id}: ${(e as Error).message}`);
-        await this.prisma.client.scheduledAgentJob.update({
-          where: { id: job.id },
+        // Fenced to this claim: a row its writer re-armed during the execution keeps its new run.
+        const failed = await this.prisma.client.scheduledAgentJob.updateMany({
+          where: { id: job.id, status: 'COMPLETED', executedAt: claimedAt },
           data: { status: 'FAILED' },
-        }).catch(() => {});
+        }).catch(() => null);
+        if (failed && failed.count !== 1) {
+          this.logger.warn(`Cart recovery job ${job.id} changed during its failed execution; left as its writer set it`);
+        }
       }
     }
   }

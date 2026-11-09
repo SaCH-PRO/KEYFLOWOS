@@ -24,6 +24,7 @@ import {
   Award,
 } from "lucide-react";
 import { formatPrice } from "@/lib/format";
+import { apiGet } from "@/lib/api";
 import type {
   CartItem,
   Staff,
@@ -79,10 +80,39 @@ const paymentMethods: { id: PaymentMethod; name: string; description: string; ic
  * D-69 (trial-N recheck G6PUB-RC1-1): WiPay takes TTD only, until its currency
  * parameter is verified from its docs. The server refuses a WiPay checkout of
  * any other currency (400), so WiPay is offered only for a TTD cart.
+ *
+ * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-4): and only when the server
+ * says this storefront takes WiPay for the cart's currency (a business with a
+ * WiPay merchant pair; GET /site/storefront/public/:slug/gateways). Until it
+ * answers, or when it cannot, WiPay is not offered, so it is never the silent
+ * default of a checkout the server would refuse.
  */
-function paymentMethodsFor(currency: string) {
-  const takesWipay = (currency ?? "").trim().toUpperCase() === "TTD";
+function paymentMethodsFor(currency: string, wipayTaken: boolean) {
+  const takesWipay = wipayTaken && (currency ?? "").trim().toUpperCase() === "TTD";
   return paymentMethods.filter((pm) => pm.id !== "wipay" || takesWipay);
+}
+
+/** Whether the storefront takes WiPay for this currency, as the server answers it (false until it does). */
+function useWipayTaken(slug: string, currency: string): boolean {
+  const code = (currency ?? "").trim().toUpperCase();
+  const key = `${slug}|${code}`;
+  const [answer, setAnswer] = useState<{ key: string; wipay: boolean } | null>(null);
+  useEffect(() => {
+    if (!slug) return;
+    let cancelled = false;
+    const path = `/site/storefront/public/${encodeURIComponent(slug)}/gateways?currency=${encodeURIComponent(code)}`;
+    apiGet<Array<{ id: string }>>(path)
+      .then(({ data }) => {
+        if (!cancelled) setAnswer({ key, wipay: Array.isArray(data) && data.some((g) => g?.id === "wipay") });
+      })
+      .catch(() => {
+        if (!cancelled) setAnswer({ key, wipay: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, code, key]);
+  return answer?.key === key ? answer.wipay : false;
 }
 
 export function CheckoutFlow({
@@ -119,10 +149,12 @@ export function CheckoutFlow({
   });
 
   const [selectedShippingZone, setSelectedShippingZone] = useState<string | null>(null);
-  const offeredPaymentMethods = paymentMethodsFor(cartCurrency);
-  const [chosenPayment, setSelectedPayment] = useState<PaymentMethod>(offeredPaymentMethods[0].id);
-  // A method this cart is not offered (WiPay for a non-TTD cart) is never the one sent.
-  const selectedPayment: PaymentMethod = offeredPaymentMethods.some((pm) => pm.id === chosenPayment)
+  const wipayTaken = useWipayTaken(business.slug, cartCurrency);
+  const offeredPaymentMethods = paymentMethodsFor(cartCurrency, wipayTaken);
+  // Null until the customer picks one: the first offered method is the default, re-read once the server answers.
+  const [chosenPayment, setSelectedPayment] = useState<PaymentMethod | null>(null);
+  // A method this cart is not offered (WiPay for a non-TTD cart, or for a business without WiPay) is never the one sent.
+  const selectedPayment: PaymentMethod = chosenPayment && offeredPaymentMethods.some((pm) => pm.id === chosenPayment)
     ? chosenPayment
     : offeredPaymentMethods[0].id;
   const [termsAccepted, setTermsAccepted] = useState(false);

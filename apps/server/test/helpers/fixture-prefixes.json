@@ -678,6 +678,11 @@
       "packet": "V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE)"
     },
     {
+      "prefix": "v84q_",
+      "owner": "apps/server/test/job-runner-claims.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D17-JOB-RUNNER-CLAIMS)"
+    },
+    {
       "prefix": "v86e_",
       "owner": "apps/server/test/contact-status-readers-import.integration.test.ts",
       "packet": "V1-86 (V1-38b-STATUS-READERS)"
@@ -691,6 +696,11 @@
       "prefix": "v87b_",
       "owner": "apps/server/test/key-plan-authority.integration.test.ts",
       "packet": "V1-87 (KEY-R3b-PLAN-AUTHORITY)"
+    },
+    {
+      "prefix": "v87c_",
+      "owner": "apps/server/test/storefront-order-doors.integration.test.ts",
+      "packet": "V1-87 (G6PUB-R3-STORE-ORDER-DOORS)"
     },
     {
       "prefix": "v87d_",

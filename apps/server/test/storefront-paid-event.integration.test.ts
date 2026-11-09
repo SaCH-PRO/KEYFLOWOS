@@ -386,7 +386,18 @@ beforeAll(async () => {
   await cleanup();
 
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
-  await db.business.create({ data: { id: ID.biz, name: 'V18A Storefront', ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' } });
+  // G6PUB-R3-STORE-ORDER-DOORS (RC2-4): the order door takes a WiPay order only for a business with a WiPay merchant
+  // pair (V18-11 and V18-12 place WiPay orders), so this business has its own pair.
+  await db.business.create({
+    data: {
+      id: ID.biz,
+      name: 'V18A Storefront',
+      ownerId: ID.owner,
+      currency: 'TTD',
+      accountingBasis: 'CASH',
+      metaData: { wipayApiKey: `${P}wipay_key`, wipayAccountNumber: `${P}wipay_account` },
+    },
+  });
   await db.membership.create({ data: { id: `${ID.owner}_m`, userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
   await app.get(ChartOfAccountsSeederService).ensureDefaults(ID.biz);
   await db.contact.create({
@@ -742,13 +753,19 @@ describe('V1-18 storefront paid-event integrity (real database, real event bus)'
     try {
       for (const type of ['STOREFRONT', 'storefront']) {
         created.push(
-          await market.createOrder(ID.biz, {
-            type,
-            paymentOnCreation: true,
-            customerName: 'Vee Eighteen',
-            customerEmail: CUSTOMER_EMAIL,
-            items: [{ productId: ID.product, quantity: 1 }],
-          }),
+          await market.createOrder(
+            ID.biz,
+            {
+              type,
+              paymentOnCreation: true,
+              customerName: 'Vee Eighteen',
+              customerEmail: CUSTOMER_EMAIL,
+              items: [{ productId: ID.product, quantity: 1 }],
+            },
+            // G6PUB-R3-STORE-ORDER-DOORS (D-77): a paid create records its payment through the paid door, by a member
+            // with revenue write (the route passes the authenticated member).
+            ID.owner,
+          ),
         );
       }
       await settle();
