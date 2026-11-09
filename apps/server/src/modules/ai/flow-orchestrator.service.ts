@@ -179,7 +179,10 @@ export interface PendingConfirmation {
 interface GovernedToolCall {
   tc: FlowToolCall;
   decision: GovernanceDecision;
-  /** Context for the executor, when the action boundary prepared the call. */
+  /**
+   * Context for the executor: the surface's own (its member as principalUserId) for a tool the
+   * action boundary has not adopted, and the boundary's, with its action id, for one it prepared.
+   */
   action?: ActionContext;
   /** The boundary is waiting for the requester to confirm this id. */
   confirmationId?: string;
@@ -1999,8 +2002,14 @@ ${triage.standingContext}`;
               usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
             };
           }
+          // It runs as the member who confirmed it (V1-84, D-37): the Flow binds only calls the
+          // action boundary has not adopted (issuePendingConfirmations), and for those the executor
+          // reads the principal only to apply that member's contact and calendar visibility.
+          const confirmedAction: ActionContext | undefined = this.getActionBoundary().adopts(pendingConfirmation.toolName)
+            ? undefined
+            : { surface: 'CHAT', principalUserId: confirmedBy, crew: claim.crew, sourceId: pendingConfirmation.toolCallId || null, sessionId: effectiveSessionId };
           // A call the provider sent with no id keeps the executor's own id (CR-2).
-          const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, pendingConfirmation.toolCallId || undefined, { planId: '', planStepId: '', role: claim.role ?? detectedRole ?? undefined, actorUserId: confirmedBy });
+          const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, pendingConfirmation.toolCallId || undefined, { planId: '', planStepId: '', role: claim.role ?? detectedRole ?? undefined, actorUserId: confirmedBy }, confirmedAction);
           await claim.settle(result.success ? 'completed' : 'failed', result.success ? undefined : (result.error ?? 'Unknown error'));
           return {
             reply: result.success
@@ -2768,7 +2777,13 @@ ${triage.standingContext}`;
     ctx: ActionContext,
   ): Promise<GovernedToolCall> {
     const boundary = this.getActionBoundary();
-    if (!legacy.allowed || !boundary.adopts(tc.name)) return { tc, decision: legacy };
+    if (!legacy.allowed) return { tc, decision: legacy };
+    // V1-84 (FOLLOW3-D7, owner ruling D-37): a tool the boundary has not adopted still runs as the
+    // member this surface established, so the dispatcher's contact and calendar reads apply that
+    // member's visibility (contactReadAccess, calendar_list_events). The context used to be dropped
+    // here, and member chat read the whole business. A surface with no member (the staff bridge,
+    // the support desk) passes principalUserId null and keeps the business-wide read.
+    if (!boundary.adopts(tc.name)) return { tc, decision: legacy, action: ctx };
 
     const flags = { requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false };
     try {
@@ -4049,7 +4064,15 @@ ${triage.standingContext}`;
           take: args.limit ?? 10,
           orderBy: { startTime: 'asc' },
         });
-        const bookings = rows.map((booking) => ownRelations(businessId, booking, ['contact', 'service']));
+        const owned = rows.map((booking) => ownRelations(businessId, booking, ['contact', 'service']));
+        // V1-84 (FOLLOW3-D7, D-37): the booking stays, but its contact is named only when the
+        // member may open it (contactVisibilityFilter, the GET contacts/:id rule); otherwise it reads
+        // as none, as a contact of another business does. Unchanged with no principal or for the OWNER.
+        const reader = await this.contactReadAccess(businessId, action);
+        const canOpen = reader
+          ? await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, owned.map((b) => (b.contact ? b.contactId : null)))
+          : null;
+        const bookings = canOpen ? owned.map((b) => (b.contact && !canOpen(b.contactId) ? { ...b, contact: null } : b)) : owned;
         return { bookings, count: bookings.length };
       }
 
@@ -5639,6 +5662,23 @@ ${triage.standingContext}`;
         if (args.endDate) where.startAt = { ...(where.startAt ?? {}), lte: new Date(args.endDate) };
         if (args.module) where.module = args.module;
         if (args.status) where.status = args.status;
+        // V1-84 (FOLLOW3-D7, D-37): for a member, no event on a contact their CRM view does not
+        // open (contactVisibilityFilter, the GET contacts/:id rule; the cascade GET calendar events
+        // applies through CalendarEvent.contactId). An event with no contact stays. Unchanged with
+        // no principal or for the OWNER and a SUPER_ADMIN (canOpen null).
+        const reader = await this.contactReadAccess(businessId, action);
+        if (reader) {
+          const linked = await this.prisma.client.calendarEvent.findMany({
+            where: { ...where, contactId: { not: null } },
+            select: { contactId: true },
+            distinct: ['contactId'],
+          });
+          const ids = linked.map((e: { contactId: string | null }) => e.contactId);
+          const canOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, ids);
+          if (canOpen) {
+            where.AND = [{ OR: [{ contactId: null }, { contactId: { in: ids.filter((id): id is string => !!id && canOpen(id)) } }] }];
+          }
+        }
         const events = await this.prisma.client.calendarEvent.findMany({
           where,
           orderBy: { startAt: 'asc' },

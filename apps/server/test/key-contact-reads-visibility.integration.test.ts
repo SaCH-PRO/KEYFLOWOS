@@ -19,9 +19,8 @@
  * contact, share, calendar-event, service, booking, policy and confirmation rows, AuthGuard,
  * BusinessGuard, CrmRateLimitGuard, the global ValidationPipe, AiFlowController, AiOversightService
  * (the governance decision), KeyActionBoundaryService (which tools it adopts),
- * JobRolePolicyService (the staff-bridge envelope), CalendarPermissionService and
- * FlowOrchestratorService's chat, streamChat, confirmation, governToolCall and executor paths are
- * real against DATABASE_URL. The stand-ins: identity attachment (a test middleware loads the seeded
+ * JobRolePolicyService (the staff-bridge envelope) and FlowOrchestratorService's chat,
+ * streamChat, confirmation, governToolCall and executor paths are real against DATABASE_URL. The stand-ins: identity attachment (a test middleware loads the seeded
  * user named by `x-test-user` and attaches `{ id, email, role }`, as AuthMiddleware does after
  * token verification); the model gateway (AiUsageService.trackAndComplete / trackAndStream), which
  * emits exactly one scripted tool call and then a fixed reply, so no provider is called; and the
@@ -198,7 +197,6 @@ beforeAll(async () => {
   const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
   const { KeyActionBoundaryService } = await import('../src/modules/key-autonomy/action-boundary/key-action-boundary.service');
   const { JobRolePolicyService } = await import('../src/modules/structure/job-role-policy.service');
-  const { CalendarPermissionService } = await import('../src/modules/calendar/calendar-permission.service');
 
   Logger.overrideLogger(false);
   const prisma = new PrismaService();
@@ -214,7 +212,6 @@ beforeAll(async () => {
   };
   registry.set(KeyActionBoundaryService, new KeyActionBoundaryService(prisma as any, moduleRef as any));
   registry.set(JobRolePolicyService, jobRolePolicy);
-  registry.set(CalendarPermissionService, new CalendarPermissionService(prisma as any));
 
   const quiet = { log() {}, warn() {}, error() {}, debug() {}, verbose() {} };
   // The real class: chat, streamChat, the confirmation claim, governToolCall, executeTool and
@@ -273,10 +270,8 @@ beforeAll(async () => {
 
   await cleanup(); // in case a prior run aborted
 
-  for (const [id, role] of [
-    [ID.owner, 'USER'], [ID.admin, 'USER'], [ID.staffOwned, 'USER'], [ID.staffAll, 'USER'], [ID.ownerB, 'USER'],
-  ] as const) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role } });
+  for (const name of ['owner', 'admin', 'staffOwned', 'staffAll', 'ownerB'] as const) {
+    await db.user.create({ data: { id: ID[name], email: `${P}${name}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V84G Biz A', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V84G Biz B', ownerId: ID.ownerB } });
@@ -423,7 +418,7 @@ describe('KC-01 member-chat contact reads apply the member’s CRM visibility', 
 });
 
 describe('KC-02 member-chat calendar reads apply the member’s visibility', () => {
-  it("KC-02a RED-BEFORE: calendar_list_events answers what GET calendar events shows the member (CalendarPermissionService): the ADMIN and the view-all STAFF member see no event on the owner's PRIVATE contact; the member kept to their own book sees only their own contact's and the contactless event", async () => {
+  it("KC-02a RED-BEFORE: calendar_list_events leaves out every event on a contact the member's CRM view does not open (the contact cascade GET calendar events applies): the ADMIN and the view-all STAFF member see no event on the owner's PRIVATE contact; the member kept to their own book sees only their own contact's and the contactless event", async () => {
     const ids = (body: any) => (onlyResult(body, 'calendar_list_events').events as Array<{ id: string }>).map((e) => e.id).sort();
     const admin = await chatTurn(ID.admin, 'calendar_list_events', { limit: 50 });
     expect(ids(admin)).toEqual([ID.evMine, ID.evNone, ID.evTeam].sort());
