@@ -58,9 +58,36 @@
  *     a second, the pair the cockpit reader showed once)
  *   EF-11c (CR-V125-2) each payment's CRM contact mirror row (raw event name
  *     as title, JSON detail with reference and recordedBy) as the reader sees it
- *   EF-14..EF-16 it.todo: the scope filter (SEC-V125-1), CRM scope and contact
- *     visibility (SEC-V125-2) and the sibling-route bounds (SEC-V125-3) are
- *     server changes outside V1-25's write set
+ *   EF-14..EF-16 were it.todo there: the scope filter (SEC-V125-1), CRM scope
+ *     and contact visibility (SEC-V125-2) and the sibling-route bounds
+ *     (SEC-V125-3) were server changes outside V1-25's write set. Live since
+ *     W4-TIMELINE-SCOPE, below.
+ *
+ * W4-TIMELINE-SCOPE (EF-14..EF-16; owner ruling D-63, the rule V1-84
+ * FOLLOW3-D1-TIMELINE-SCOPE built in timeline-visibility.ts): the business
+ * feed's rows follow the caller's module scopes and contact visibility, and
+ * every feed limit is bounded. On A, after EF-13, three STAFF members (explicit
+ * scope maps), two PRIVATE contacts and five rows written through the real
+ * TimelineService are added (scopeFixture):
+ *   EF-14 (SEC-V125-1) a STAFF member with revenue 'none' gets no FINANCE /
+ *     commerce / PAYMENT row (no amount, invoice total or number) from /events
+ *     (?category=, ?minRevenueImpact=, ?entityType= included), the day's
+ *     summary (revenueImpact 0) or the legacy route, and keeps the rows of the
+ *     modules it reads; the OWNER's feed still holds every money row
+ *   EF-15 (SEC-V125-2) a member with crm 'none' gets no row naming a contact
+ *     (?contactId= answers []), on /events and the legacy route; a crm_view
+ *     'owned' member gets only rows naming contacts it can list
+ *     (visibilityClause, M7): not A's unshared TEAM contact's money rows nor the
+ *     owner's PRIVATE contact's row, until contact A is shared with it; the
+ *     OWNER sees every row and the ADMIN (view-all) every row except those
+ *     naming a PRIVATE contact it neither owns nor is shared (M7, V1-84 TS-03)
+ *   EF-16 (SEC-V125-3) GET .../upcoming and the legacy
+ *     GET /api/flows/businesses/:id/activity answer 400 above TIMELINE_MAX_LIMIT
+ *     (limit=100000 included) as /events does, serve at most 200 rows at 200,
+ *     and /upcoming is filtered by the same rule
+ *   FlowController (its activity route and the real ActivityService) is
+ *   mounted for the legacy route; its other collaborators are stubs that route
+ *   never calls.
  *
  * V1-55-EVT-ACTIVITY-DEDUPE (M50; owner ruling D-08: Activity is the
  * user-visible feed, BusinessEvent the audit trail), on a third tenant C: each
@@ -180,6 +207,7 @@
  * ModuleScopeGuard, CrmRateLimitGuard, CommerceService, InvoiceWorkflowService,
  * RevenuePostingService, PostingService, ChartOfAccountsSeederService,
  * CrmTimelineService, TimelineService (Activity rows), TimelineController,
+ * FlowController's activity route and ActivityService (W4-TIMELINE-SCOPE),
  * BusinessEventInterceptor (installed as APP_INTERCEPTOR, as app.module.ts
  * does), ResilientEmitterService, BusinessEventQueueService (its BullMQ queue and
  * worker on REDIS_URL) and BusinessEventService write and read real rows, and the
@@ -314,6 +342,8 @@ async function cleanup() {
     // V1-55 review (CR-V155-1): tenant C's booking and its service (Booking.contact is NoAction).
     `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W4-TIMELINE-SCOPE (EF-15): the share of contact A with the owned-view member.
+    `DELETE FROM contact_shares WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM chart_of_accounts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -513,6 +543,23 @@ beforeAll(async () => {
   const { BusinessEventQueueService } = await import('../src/modules/business-events/business-event.queue');
   const { BusinessEventService } = await import('../src/modules/business-events/business-event.service');
   const { BusinessEventAnomalyService } = await import('../src/modules/business-events/business-event-anomaly.service');
+  // W4-TIMELINE-SCOPE (EF-14..EF-16): the legacy feed route, GET /api/flows/businesses/:id/activity.
+  const { FlowController } = await import('../src/modules/flow/flow.controller');
+  const { FlowService } = await import('../src/modules/flow/flow.service');
+  const { ActivityService } = await import('../src/modules/flow/activity.service');
+  const { CrossModuleAgentService } = await import('../src/modules/flow/cross-module-agent.service');
+  const { FlowEngineService } = await import('../src/modules/flow/flow-engine.service');
+  const { FlowRunnerService } = await import('../src/modules/flow/flow-runner.service');
+  const { FlowTemplateService } = await import('../src/modules/flow/flow-template.service');
+
+  // What tsc emits for FlowController's constructor (its last three
+  // collaborators are injected by type only).
+  if (!Reflect.getMetadata('design:paramtypes', FlowController)) {
+    Reflect.defineMetadata('design:paramtypes', [
+      FlowService, ActivityService, CrossModuleAgentService, PrismaService,
+      FlowEngineService, FlowRunnerService, FlowTemplateService,
+    ], FlowController);
+  }
 
   // What tsc emits for `constructor(private readonly timeline: TimelineService)`.
   if (!Reflect.getMetadata('design:paramtypes', TimelineController)) {
@@ -532,7 +579,7 @@ beforeAll(async () => {
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: null, lazyConnect: false });
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController, TimelineController],
+    controllers: [CommerceController, TimelineController, FlowController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -580,6 +627,15 @@ beforeAll(async () => {
       { provide: PaymentEvidenceService, useValue: {} },
       { provide: DocumentIntelligenceService, useValue: {} },
       { provide: GoogleDriveService, useValue: {} },
+      // W4-TIMELINE-SCOPE: the legacy feed route reads real rows through the
+      // real ActivityService; FlowController's other collaborators are stubs
+      // that route never calls.
+      ActivityService,
+      { provide: FlowService, useValue: {} },
+      { provide: CrossModuleAgentService, useValue: {} },
+      { provide: FlowEngineService, useValue: {} },
+      { provide: FlowRunnerService, useValue: {} },
+      { provide: FlowTemplateService, useValue: {} },
     ],
   }).compile();
 
@@ -1106,16 +1162,242 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     expect(JSON.stringify(refused.body)).not.toContain(S.bPaymentId!);
   });
 
-  // V1-25 review findings whose fix is server-side in files outside this
-  // packet's write set (timeline.controller.ts, timeline.service.ts,
-  // flow.controller.ts). Kept as todo, never as a test pinning today's answer.
-  // Meanwhile the cockpit does not read the feed for a member whom the V1-47
-  // snapshot reports without revenue or CRM read (BusinessActivityFeed, BT-06;
-  // the snapshot's RESTRICTED tiles for such a member are proven on a real
-  // database by release0-journey.integration.test.ts).
-  it.todo("EF-14 (SEC-V125-1): a STAFF member with revenue 'none' gets no FINANCE / commerce / PAYMENT row (no amount, invoice total or number) from GET /timeline/businesses/:id/events, or a 403, as every revenue list route refuses that member: needs a module-scope row filter in TimelineController.queryEvents / TimelineService.queryTimeline (outside V1-25's write set)");
-  it.todo("EF-15 (SEC-V125-2): a member with crm 'none' gets no contact-bearing row (?contactId= included), and a member without CRM view-all gets no row naming a PRIVATE or unshared contact it cannot list (visibilityClause, M7): needs the CRM scope and visibility filter in TimelineService.queryTimeline (outside V1-25's write set)");
-  it.todo('EF-16 (SEC-V125-3): GET /timeline/businesses/:id/upcoming?limit=100000 and the legacy GET /api/flows/businesses/:id/activity?limit=100000 are bounded like /events (400 above TIMELINE_MAX_LIMIT): needs timeline.controller.ts and flow.controller.ts (outside V1-25\'s write set)');
+  // W4-TIMELINE-SCOPE (EF-14..EF-16; SEC-V125-1..3; owner ruling D-63, the
+  // rule V1-84 FOLLOW3-D1-TIMELINE-SCOPE built in timeline-visibility.ts): the
+  // three V1-25 review todos, live. Each reads A after EF-13, with the members,
+  // contacts and rows scopeFixture adds (the rows through the real
+  // TimelineService writers, so they carry what those writers store).
+  // Meanwhile the cockpit still does not read the feed for a member whom the
+  // V1-47 snapshot reports without revenue or CRM read (BusinessActivityFeed,
+  // BT-06); the server no longer relies on that.
+  const SC = {
+    staffRevNone: `${P}${RUN}_staffRevNone`, // STAFF, revenue 'none', crm read (view-all)
+    staffCrmNone: `${P}${RUN}_staffCrmNone`, // STAFF, crm 'none', revenue read
+    staffOwned: `${P}${RUN}_staffOwned`,     // STAFF, crm read with crm_view 'owned', revenue read
+    cPriv: `${P}${RUN}_cPriv`,               // PRIVATE contact owned by the owner
+    cOwn: `${P}${RUN}_cOwn`,                 // PRIVATE contact owned by staffOwned
+  };
+
+  /** The rows scopeFixture adds to A, and the money rows A held already (EF-11). */
+  type ScopeRows = {
+    noteA: string; notePriv: string; noteOwn: string; booking: string; due: string;
+    /** Every row of A carrying money: the two FINANCE rows, the paid row (EF-11) and `due`. */
+    money: string[];
+    /** Every row of A naming contact A (it is TEAM and owned by no one). */
+    namingA: string[];
+  };
+  let scopeRows: Promise<ScopeRows> | undefined;
+
+  /** Today's local date at noon, as the summary route reads a day. */
+  function todayParam(): string {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T12:00:00`;
+  }
+
+  function scopeFixture(): Promise<ScopeRows> {
+    scopeRows ??= (async () => {
+      const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
+      const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+      const staff = defaultScopesForRole('STAFF');
+      const members: Array<[keyof typeof SC, Record<string, string>]> = [
+        ['staffRevNone', { ...staff, revenue: 'none', crm: 'read', crm_view: 'all' }],
+        ['staffCrmNone', { ...staff, crm: 'none', revenue: 'read' }],
+        ['staffOwned', { ...staff, crm: 'read', crm_view: 'owned', revenue: 'read' }],
+      ];
+      for (const [key, permissionScopes] of members) {
+        const id = SC[key];
+        await db.user.create({ data: { id, email: `${P}${RUN}_${key}@test.local`, role: 'USER' } });
+        await db.membership.create({ data: { id: `${id}_m`, userId: id, businessId: ID.bizA, role: 'STAFF', permissionScopes } });
+      }
+      await db.contact.create({ data: { id: SC.cPriv, businessId: ID.bizA, firstName: 'K19a', lastName: 'Private', visibility: 'PRIVATE', ownerId: ID.ownerA } });
+      await db.contact.create({ data: { id: SC.cOwn, businessId: ID.bizA, firstName: 'K19a', lastName: 'StaffOwn', visibility: 'PRIVATE', ownerId: SC.staffOwned } });
+
+      const timeline = app.get(TimelineService);
+      const tomorrow = new Date(Date.now() + 86_400_000);
+      const written = async (row: Promise<any>) => {
+        const r = await row;
+        expect(r?.id, 'TimelineService wrote the row').toBeTruthy();
+        return r.id as string;
+      };
+      const noteA = await written(timeline.recordContactEvent(ID.bizA, ID.contactA, 'note_added', { detail: 'K19a note on customer A' }));
+      const notePriv = await written(timeline.recordContactEvent(ID.bizA, SC.cPriv, 'note_added', { detail: 'K19a private note' }));
+      const noteOwn = await written(timeline.recordContactEvent(ID.bizA, SC.cOwn, 'note_added', { detail: 'K19a staff-owned note' }));
+      const booking = await written(timeline.recordEvent({
+        businessId: ID.bizA, module: 'bookings', action: 'scheduled', entityType: 'booking', entityId: `${P}${RUN}_bk`,
+        title: 'K19a booking (no contact)', category: 'BOOKING', status: 'SCHEDULED', startsAt: tomorrow,
+      }));
+      const due = await written(timeline.recordEvent({
+        businessId: ID.bizA, module: 'commerce', action: 'due', entityType: 'invoice', entityId: ID.invA,
+        title: `Invoice K19A-${RUN}-1 due`, detail: `TTD ${INVOICE_A_TOTAL}`, category: 'PAYMENT', status: 'SCHEDULED',
+        startsAt: new Date(tomorrow.getTime() + 3_600_000), revenueImpact: INVOICE_A_TOTAL, contactId: ID.contactA,
+      }));
+
+      const finance = await db.activity.findMany({ where: { businessId: ID.bizA, module: 'FINANCE', action: 'payment_recorded' }, select: { id: true } });
+      const paid = await db.activity.findMany({ where: { businessId: ID.bizA, module: 'commerce', action: 'paid' }, select: { id: true } });
+      expect(finance, 'the two FINANCE rows of EF-01 / EF-02').toHaveLength(2);
+      expect(paid, 'the paid row of EF-11').toHaveLength(1);
+      const money = [...finance.map((r: any) => r.id), paid[0].id, due];
+      return { noteA, notePriv, noteOwn, booking, due, money, namingA: [...money, noteA] };
+    })();
+    return scopeRows;
+  }
+
+  /** The ids of a 200 array answer, sorted. */
+  async function idsOf(res: request.Response | Promise<request.Response>): Promise<string[]> {
+    const r = await res;
+    expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(200);
+    expect(Array.isArray(r.body)).toBe(true);
+    return r.body.map((row: { id: string }) => row.id).sort();
+  }
+
+  function legacyFeed(user: string, query = 'limit=200') {
+    return agent().get(`/api/flows/businesses/${ID.bizA}/activity?${query}`).set(HEADER, user);
+  }
+
+  function upcomingFeed(user: string, query = 'limit=200') {
+    return agent().get(`/timeline/businesses/${ID.bizA}/upcoming?${query}`).set(HEADER, user);
+  }
+
+  /** The contacts a served row names: its contactId, and its entityId when its entityType is contact. */
+  const contactsNamed = (row: any): string[] =>
+    [row.contactId, String(row.entityType ?? '').toLowerCase() === 'contact' ? row.entityId : null].filter((v): v is string => typeof v === 'string' && v.length > 0);
+
+  it("EF-14 (SEC-V125-1, D-63 / V1-84, W4-TIMELINE-SCOPE, was it.todo): a STAFF member with revenue 'none' gets no FINANCE / commerce / PAYMENT row (no amount, invoice total or number) from GET /timeline/businesses/:id/events, its filters, the day's summary or the legacy feed, and keeps the rows of the modules it reads; the OWNER's feed still holds every money row", async () => {
+    const rows = await scopeFixture();
+
+    const res = await feed(SC.staffRevNone, ID.bizA, 'limit=200');
+    expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+    const served: any[] = res.body;
+    // Rows filtered, not the read refused: it keeps the bookings row and the TEAM contact's note.
+    expect(served.map((row) => row.id).sort()).toEqual([rows.booking, rows.noteA].sort());
+    for (const row of served) {
+      expect(['finance', 'commerce', 'revenue', 'payments', 'invoicing'], `module of ${row.id}`).not.toContain(String(row.module).toLowerCase());
+      expect(['COMMERCE', 'PAYMENT', 'FINANCE'], `category of ${row.id}`).not.toContain(String(row.category).toUpperCase());
+      expect(row.revenueImpact ?? null, `revenueImpact of ${row.id}`).toBeNull();
+    }
+    const text = JSON.stringify(served);
+    for (const leak of [S.partialId!, S.fullId!, ID.invA, `K19A-${RUN}-1`, ...rows.money]) {
+      expect(text.includes(leak), `the feed mentions ${leak}`).toBe(false);
+    }
+
+    // No filter reaches a money row.
+    for (const query of ['category=PAYMENT', 'category=FINANCE', 'minRevenueImpact=1', 'entityType=payment', `entityType=invoice&entityId=${ID.invA}`, `contactId=${ID.contactA}`]) {
+      const filtered = await idsOf(feed(SC.staffRevNone, ID.bizA, `limit=50&${query}`));
+      expect(filtered.filter((id) => rows.money.includes(id)), `?${query}`).toEqual([]);
+    }
+
+    // The day's summary: no money row, so revenueImpact 0; the owner's counts the paid row and `due`.
+    const day = await agent().get(`/timeline/businesses/${ID.bizA}/summary/${todayParam()}`).set(HEADER, SC.staffRevNone);
+    expect(day.status, JSON.stringify(day.body).slice(0, 300)).toBe(200);
+    expect(day.body.events.filter((e: any) => rows.money.includes(e.id))).toEqual([]);
+    expect(day.body.revenueImpact).toBe(0);
+    const ownerDay = await agent().get(`/timeline/businesses/${ID.bizA}/summary/${todayParam()}`).set(HEADER, ID.ownerA);
+    expect(ownerDay.status).toBe(200);
+    expect(ownerDay.body.revenueImpact, 'the paid row and the due row').toBe(INVOICE_A_TOTAL * 2);
+
+    // The legacy feed applies the same rule.
+    const legacy = await idsOf(legacyFeed(SC.staffRevNone));
+    expect(legacy).toEqual([rows.booking, rows.noteA].sort());
+
+    // OWNER control: unchanged, every money row is served.
+    const owner = await idsOf(feed(ID.ownerA, ID.bizA, 'limit=200'));
+    expect(rows.money.filter((id) => !owner.includes(id)), "money rows missing from the owner's feed").toEqual([]);
+  });
+
+  it("EF-15 (SEC-V125-2, D-63 / V1-84, W4-TIMELINE-SCOPE, was it.todo): a member with crm 'none' gets no contact-bearing row (?contactId= included), and a crm_view 'owned' member gets no row naming a PRIVATE or unshared contact it cannot list (visibilityClause, M7) until the contact is shared; OWNER sees every row, the view-all ADMIN every row but those naming a PRIVATE contact it may not open", async () => {
+    const rows = await scopeFixture();
+    const all = [rows.noteA, rows.notePriv, rows.noteOwn, rows.booking, ...rows.money];
+
+    // crm 'none' (revenue read): no row naming a contact, on /events and the legacy route.
+    // One request at a time: supertest listens on the shared server per request.
+    for (const read of [() => feed(SC.staffCrmNone, ID.bizA, 'limit=200'), () => legacyFeed(SC.staffCrmNone)]) {
+      const r = await read();
+      expect(r.status, JSON.stringify(r.body).slice(0, 300)).toBe(200);
+      expect(r.body.flatMap(contactsNamed), 'contacts named by rows served to crm none').toEqual([]);
+      expect(r.body.map((row: any) => row.id).sort()).toEqual([rows.booking]);
+    }
+    for (const contactId of [ID.contactA, SC.cPriv, SC.cOwn]) {
+      expect(await idsOf(feed(SC.staffCrmNone, ID.bizA, `limit=50&contactId=${contactId}`)), `?contactId=${contactId}`).toEqual([]);
+    }
+    expect(await idsOf(feed(SC.staffCrmNone, ID.bizA, `limit=50&entityType=contact&entityId=${ID.contactA}`))).toEqual([]);
+
+    // crm_view 'owned': only rows naming contacts it can list (the CRM list rule, M7).
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { resolveCrmAccess, visibilityClause } = await import('../src/modules/crm/crm-permissions.helper');
+    const listable = async (user: string) => {
+      const clause = visibilityClause(await resolveCrmAccess(app.get(PrismaService), ID.bizA, user), user);
+      const contacts = await db.contact.findMany({ where: { businessId: ID.bizA, ...(clause ? { AND: [clause] } : {}) }, select: { id: true } });
+      return new Set<string>(contacts.map((c: any) => c.id));
+    };
+    const ownedList = await listable(SC.staffOwned);
+    expect([...ownedList], 'the owned-view member lists only its own contact').toEqual([SC.cOwn]);
+    const ownedRes = await feed(SC.staffOwned, ID.bizA, 'limit=200');
+    expect(ownedRes.status).toBe(200);
+    expect(ownedRes.body.flatMap(contactsNamed).filter((id: string) => !ownedList.has(id)), 'rows naming contacts it cannot list').toEqual([]);
+    expect(ownedRes.body.map((row: any) => row.id).sort()).toEqual([rows.booking, rows.noteOwn].sort());
+    for (const contactId of [ID.contactA, SC.cPriv]) {
+      expect(await idsOf(feed(SC.staffOwned, ID.bizA, `limit=50&contactId=${contactId}`)), `?contactId=${contactId}`).toEqual([]);
+    }
+    expect(await idsOf(legacyFeed(SC.staffOwned))).toEqual([rows.booking, rows.noteOwn].sort());
+
+    // Shared with it, contact A becomes listable, and its rows (money rows included: it reads revenue) are served.
+    await db.contactShare.create({ data: { id: `${P}${RUN}_shareA`, businessId: ID.bizA, contactId: ID.contactA, userId: SC.staffOwned, createdBy: ID.ownerA } });
+    try {
+      expect((await listable(SC.staffOwned)).has(ID.contactA)).toBe(true);
+      expect(await idsOf(feed(SC.staffOwned, ID.bizA, 'limit=200'))).toEqual([rows.booking, rows.noteOwn, ...rows.namingA].sort());
+      expect(await idsOf(feed(SC.staffOwned, ID.bizA, `limit=50&contactId=${ID.contactA}`))).toEqual([...rows.namingA].sort());
+    } finally {
+      await db.contactShare.delete({ where: { id: `${P}${RUN}_shareA` } });
+    }
+    expect(await idsOf(feed(SC.staffOwned, ID.bizA, `limit=50&contactId=${ID.contactA}`)), 'unshared again').toEqual([]);
+
+    // OWNER control: every row, the PRIVATE contacts' included.
+    const owner = await idsOf(feed(ID.ownerA, ID.bizA, 'limit=200'));
+    expect(all.filter((id) => !owner.includes(id)), "rows missing from the owner's feed").toEqual([]);
+
+    // ADMIN control (view-all): every row of A but those naming a PRIVATE
+    // contact it neither owns nor is shared (M7: PRIVATE is restricted even
+    // under view-all; V1-84 TS-03). The money rows and contact A's rows stay.
+    const adminList = await listable(ID.adminA);
+    expect(adminList.has(ID.contactA) && !adminList.has(SC.cPriv) && !adminList.has(SC.cOwn)).toBe(true);
+    const admin = await idsOf(feed(ID.adminA, ID.bizA, 'limit=200'));
+    expect(admin).toEqual(owner.filter((id) => id !== rows.notePriv && id !== rows.noteOwn));
+    expect(rows.namingA.filter((id) => !admin.includes(id)), "contact A's rows missing from the ADMIN's feed").toEqual([]);
+  });
+
+  it('EF-16 (SEC-V125-3, V1-84, W4-TIMELINE-SCOPE, was it.todo): GET /timeline/businesses/:id/upcoming?limit=100000 and the legacy GET /api/flows/businesses/:id/activity?limit=100000 are bounded like /events (400 above TIMELINE_MAX_LIMIT, and for a limit that is not a positive integer); within the bound they answer at most that many rows, and /upcoming is filtered by the same rule', async () => {
+    const rows = await scopeFixture();
+    const { TIMELINE_MAX_LIMIT } = await import('../src/modules/timeline/dto/query-timeline.dto');
+    expect(TIMELINE_MAX_LIMIT).toBe(MAX_LIMIT);
+
+    for (const [name, read] of [['upcoming', upcomingFeed], ['legacy activity', legacyFeed]] as const) {
+      for (const limit of ['100000', String(MAX_LIMIT + 1), '0', '-1', '2.5', 'abc']) {
+        const res = await read(ID.ownerA, `limit=${limit}`);
+        expect(res.status, `${name} limit=${limit}: ${JSON.stringify(res.body).slice(0, 200)}`).toBe(400);
+        expect(Array.isArray(res.body), `${name} limit=${limit} answered rows`).toBe(false);
+        const text = JSON.stringify(res.body);
+        for (const id of rows.money) expect(text.includes(id), `${name} limit=${limit} mentions ${id}`).toBe(false);
+      }
+      for (const limit of [MAX_LIMIT, 1]) {
+        const res = await read(ID.ownerA, `limit=${limit}`);
+        expect(res.status, `${name} limit=${limit}: ${JSON.stringify(res.body).slice(0, 200)}`).toBe(200);
+        expect(Array.isArray(res.body)).toBe(true);
+        expect(res.body.length).toBeGreaterThan(0);
+        expect(res.body.length).toBeLessThanOrEqual(limit);
+        expect(res.body.every((row: any) => row.businessId === ID.bizA)).toBe(true);
+      }
+    }
+
+    // /upcoming: the SCHEDULED rows, soonest first; a member without revenue
+    // read, or without crm read (the due row names contact A), gets no money row.
+    expect(await idsOf(upcomingFeed(ID.ownerA))).toEqual([rows.booking, rows.due].sort());
+    const ordered = await upcomingFeed(ID.ownerA, '');
+    expect(ordered.status).toBe(200);
+    expect(ordered.body.map((row: any) => row.id)).toEqual([rows.booking, rows.due]);
+    expect(await idsOf(upcomingFeed(SC.staffRevNone))).toEqual([rows.booking]);
+    expect(await idsOf(upcomingFeed(SC.staffCrmNone)), 'the due row names contact A').toEqual([rows.booking]);
+  });
 });
 
 describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through the feed writers the full app registers (real DB, tenant C)', () => {
