@@ -43,6 +43,16 @@
  *     reading the legacy spellings, through one legacy CLIENT spelling, one
  *     legacy dormant spelling and one predicate (LEGACY_CLIENT_STATUS,
  *     LEGACY_DORMANT_STATUS, isClientStatus) in crm.constants.ts.
+ *   - W4-D92-DORMANT-AS-CLIENT (owner ruling D-92): an imported (or legacy)
+ *     DORMANT contact status is stored as CLIENT, so every stored status is one
+ *     of CONTACT_STATUSES, and "dormant" is always worked out from inactivity
+ *     (the Dormant segment shows clients with no recent activity). The import
+ *     and a playbook's update_status action store a status only through
+ *     canonicalContactStatus, which reads DORMANT, like CUSTOMER, as CLIENT,
+ *     and update_status writes nothing for ACTIVE or any word with no
+ *     ContactStatus. Rows are not migrated: a row still holding DORMANT reads
+ *     as CLIENT (isClientStatus), and no reader puts it in Dormant by its
+ *     spelling. The cases below that pinned the pre-D-92 behaviour say so.
  *
  * Pure: reads source files, imports constants and drives the readers over
  * in-memory stand-ins for Prisma; no database, no network.
@@ -56,7 +66,6 @@ import {
   LEGACY_DORMANT_STATUS,
   canonicalContactStatus,
   contactStatusForExternalCustomer,
-  importedContactStatus,
   isClientStatus,
   isContactStatus,
 } from './crm.constants';
@@ -114,7 +123,7 @@ const PACKET_WRITERS = [
 const LEGACY_DIALECT_READERS: Record<string, { hits: number; why: string }> = {
   'modules/ai/key-tool-registry.service.ts': {
     hits: 1,
-    why: "status: { not: 'DORMANT' } filter: excludes a contact the CSV/link import wrote as DORMANT (verbatim before V1-38c; a DORMANT cell still, review CR-V38c-1) or a playbook's update_status action wrote (review ST-38c-1)",
+    why: "status: { not: 'DORMANT' } filter: excludes a row the CSV/link import or a playbook's update_status action wrote as DORMANT before D-92 (neither writes it since); D-92 reads such a row as CLIENT, so this KEY tool filter is a residual outside W4-D92-DORMANT-AS-CLIENT",
   },
   'modules/ai/flow-orchestrator.service.ts': { hits: 1, why: "an Automation's ACTIVE/INACTIVE, not Contact.status (scanner false positive)" },
 };
@@ -245,37 +254,44 @@ describe('Contact.status vocabulary (CF-49)', () => {
     expect(LEGACY_CLIENT_STATUS).toBe('CUSTOMER');
     expect(isClientStatus('CLIENT')).toBe(true);
     expect(isClientStatus(LEGACY_CLIENT_STATUS)).toBe(true);
-    for (const s of ['LEAD', 'PROSPECT', 'LOST', 'DORMANT', 'client', 'customer', '', null, undefined]) {
+    // D-92: a row still holding the legacy DORMANT (written before D-92; rows
+    // are not migrated) reads as CLIENT. Before D-92 this case pinned
+    // isClientStatus('DORMANT') false.
+    expect(isClientStatus(LEGACY_DORMANT_STATUS)).toBe(true);
+    for (const s of ['LEAD', 'PROSPECT', 'LOST', 'client', 'customer', 'dormant', '', null, undefined]) {
       expect(isClientStatus(s), String(s)).toBe(false);
     }
   });
 
-  it('V1-38c: canonicalContactStatus reads a written value as a ContactStatus: the vocabulary in any case or padding as itself, the legacy CUSTOMER as CLIENT, and DORMANT, INACTIVE, an unknown or a blank value as none', () => {
+  // D-92: before D-92 this case read DORMANT as none (a status with no
+  // ContactStatus, which the import then kept as the legacy DORMANT).
+  it('V1-38c, D-92: canonicalContactStatus reads a written value as a ContactStatus: the vocabulary in any case or padding as itself, the legacy CUSTOMER and DORMANT as CLIENT, and INACTIVE, ACTIVE, an unknown or a blank value as none', () => {
     for (const s of CONTACT_STATUSES) {
       expect(canonicalContactStatus(s)).toBe(s);
       expect(canonicalContactStatus(s.toLowerCase())).toBe(s);
       expect(canonicalContactStatus(` ${s[0]}${s.slice(1).toLowerCase()} `)).toBe(s);
     }
-    for (const v of ['CUSTOMER', 'customer', ' Customer ']) {
+    for (const v of ['CUSTOMER', 'customer', ' Customer ', 'DORMANT', 'dormant', ' Dormant ']) {
       expect(canonicalContactStatus(v), v).toBe('CLIENT');
       // The mapping the readers use: what they count as CLIENT, the import stores as CLIENT.
       expect(isClientStatus(canonicalContactStatus(v))).toBe(true);
     }
-    for (const v of [...DIALECTS.filter((d) => d !== LEGACY_CLIENT_STATUS), 'dormant', 'VIP', 'Negotiation', 'CLIENTS', 'C L I E N T', '', '   ', null, undefined]) {
+    for (const v of ['INACTIVE', 'inactive', 'ACTIVE', 'Active', 'VIP', 'Negotiation', 'CLIENTS', 'C L I E N T', 'DORMANTS', 'D O R M A N T', '', '   ', null, undefined]) {
       expect(canonicalContactStatus(v), String(v)).toBeNull();
     }
   });
 
-  it("CR-1 (V1-38b review): people-flow relationship health reads a Contact.status 'DORMANT' only through one documented legacy constant", () => {
+  // D-92: before D-92 this case required relationship-health to import
+  // LEGACY_DORMANT_STATUS and keep a contact imported as DORMANT in Dormant
+  // whatever its silence (V1-38b review CR-1, V1-38c review CR-V38c-1).
+  it("D-92 (was CR-1, V1-38b review): people-flow relationship health spells no Contact.status 'DORMANT' and reads no LEGACY_DORMANT_STATUS of its own: a stored legacy DORMANT is a CLIENT through isClientStatus", () => {
     const src = read('modules/people-flow/relationship-health.service.ts');
     // relationship-health has no relationshipHealth 'DORMANT' literal, so every
-    // 'DORMANT' literal in it would be a Contact.status spelling. Since the V1-38c
-    // review (CR-V38c-1) the one documented constant is crm.constants.ts's, which
-    // the import writes and the segments read: relationship-health imports it and
-    // spells no 'DORMANT' of its own.
+    // 'DORMANT' literal in it would be a Contact.status spelling.
     expect(src.match(/['"`]DORMANT['"`]/g) ?? [], "relationship-health: a 'DORMANT' literal of its own").toEqual([]);
-    expect(src, 'relationship-health takes LEGACY_DORMANT_STATUS from crm.constants.ts').toMatch(
-      /import \{[^}]*\bLEGACY_DORMANT_STATUS\b[^}]*\} from '\.\.\/crm\/crm\.constants'/,
+    expect(src, 'relationship-health singles out the legacy DORMANT spelling (D-92: it is a CLIENT)').not.toMatch(/\bLEGACY_DORMANT_STATUS\b/);
+    expect(src, 'relationship-health reads a client through isClientStatus from crm.constants.ts').toMatch(
+      /import \{[^}]*\bisClientStatus\b[^}]*\} from '\.\.\/crm\/crm\.constants'/,
     );
     const constants = read('modules/crm/crm.constants.ts');
     expect(constants.match(/\bexport const LEGACY_DORMANT_STATUS = 'DORMANT';/g) ?? [], 'one documented LEGACY_DORMANT_STATUS').toHaveLength(1);
@@ -285,45 +301,67 @@ describe('Contact.status vocabulary (CF-49)', () => {
       .map(rel);
     expect(copies).toEqual(['modules/crm/crm.constants.ts']);
     expect(LEGACY_DORMANT_STATUS).toBe('DORMANT');
+    expect(isClientStatus(LEGACY_DORMANT_STATUS)).toBe(true);
   });
 
-  it("V1-38c (review CR-V38c-1): importedContactStatus, what the CSV/link import stores, is canonicalContactStatus but for a DORMANT cell in any case or padding, which keeps the legacy DORMANT the people-flow segments read; INACTIVE, an unknown and a blank value are none", () => {
-    for (const s of CONTACT_STATUSES) {
-      expect(importedContactStatus(s)).toBe(s);
-      expect(importedContactStatus(` ${s.toLowerCase()} `)).toBe(s);
-    }
-    for (const v of ['CUSTOMER', 'customer', ' Customer ']) expect(importedContactStatus(v), v).toBe('CLIENT');
+  // D-92: replaces the V1-38c (review CR-V38c-1) case that pinned
+  // importedContactStatus keeping the legacy DORMANT for a DORMANT cell.
+  it('D-92 (was V1-38c review CR-V38c-1): what the CSV/link import stores for a DORMANT cell in any case or padding is CLIENT, a ContactStatus, and crm.constants.ts keeps no separate import mapping (importedContactStatus) that could store DORMANT', () => {
     for (const v of ['DORMANT', 'dormant', ' Dormant ']) {
-      expect(importedContactStatus(v), v).toBe(LEGACY_DORMANT_STATUS);
-      // Not a ContactStatus: the vocabulary itself does not grow.
-      expect(canonicalContactStatus(v), v).toBeNull();
-      expect(isContactStatus(importedContactStatus(v)), v).toBe(false);
+      expect(canonicalContactStatus(v), v).toBe('CLIENT');
+      expect(isContactStatus(canonicalContactStatus(v)), v).toBe(true);
     }
-    for (const v of ['INACTIVE', 'inactive', 'VIP', 'Negotiation', 'DORMANTS', 'D O R M A N T', '', '   ', null, undefined]) {
-      expect(importedContactStatus(v), String(v)).toBeNull();
+    const constants = read('modules/crm/crm.constants.ts');
+    expect(constants, 'crm.constants.ts: importedContactStatus').not.toMatch(/\bimportedContactStatus\b/);
+    for (const file of sourceFiles(SRC)) {
+      expect(readFileSync(file, 'utf8'), `${rel(file)}: importedContactStatus`).not.toMatch(/\bimportedContactStatus\b/);
     }
   });
 
-  it('V1-38c: the CSV/link import stores its status cell through importedContactStatus, and copies no status cell verbatim', () => {
+  it('V1-38c, D-92: the CSV/link import stores its status cell through canonicalContactStatus, the helper a playbook update_status uses, and copies no status cell verbatim', () => {
     const src = read('modules/crm/crm-import.service.ts');
-    expect(src).toMatch(/importedContactStatus\(row\[mapping\.status\]\)/);
+    expect(src).toMatch(/canonicalContactStatus\(row\[mapping\.status\]\)/);
     const stringFields = src.match(/const stringFields[^=]*= \[([^\]]*)\]/);
     expect(stringFields, 'buildContactInput lists the cells it copies verbatim').not.toBeNull();
     expect(stringFields![1]).not.toMatch(/'status'/);
   });
 
-  it("ST-38c-1 (V1-38c review, characterization for a follow-up packet): a playbook's update_status action still hands CrmService.updateContact a status outside the vocabulary - 'ACTIVE' by default, or the CUSTOMER or DORMANT the action names - so the legacy spellings can still be written", async () => {
+  // D-92: replaces the ST-38c-1 characterization (V1-38c review), which pinned
+  // update_status handing updateContact 'ACTIVE' by default, or the CUSTOMER or
+  // DORMANT the action named.
+  it("D-92 (ST-38c-1, V1-38c review): a playbook's update_status action hands CrmService.updateContact only a ContactStatus: DORMANT and CUSTOMER in any case as CLIENT, a canonical status as itself, and nothing at all for ACTIVE (the old default), no status, INACTIVE or an unknown word", async () => {
     const { AutomationExecutorService } = await import('../flow/automation-executor.service');
-    const written: Array<string | undefined> = [];
+    const written: Array<{ contactId: string; status: string | undefined }> = [];
+    const warned: string[] = [];
     const self = {
-      crm: { updateContact: async (input: { status?: string }) => { written.push(input.status); return {}; } },
-      logger: { warn: () => undefined, log: () => undefined, error: () => undefined },
+      crm: {
+        updateContact: async (input: { contactId: string; status?: string }) => {
+          written.push({ contactId: input.contactId, status: input.status });
+          return {};
+        },
+      },
+      logger: { warn: (m: string) => { warned.push(m); }, log: () => undefined, error: () => undefined },
     };
     const executeAction = (AutomationExecutorService.prototype as any).executeAction as (...args: unknown[]) => Promise<unknown>;
-    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status' }, { contactId: 'c1' });
-    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status', status: 'CUSTOMER' }, { contactId: 'c2' });
-    await executeAction.call(self, 'biz', 'playbook', { type: 'UPDATE_STATUS', value: 'DORMANT' }, { contactId: 'c3' });
-    expect(written).toEqual(['ACTIVE', 'CUSTOMER', 'DORMANT']);
+    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status' }, { contactId: 'none' });
+    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status', status: 'ACTIVE' }, { contactId: 'active' });
+    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status', status: 'INACTIVE' }, { contactId: 'inactive' });
+    await executeAction.call(self, 'biz', 'playbook', { type: 'UPDATE_STATUS', value: 'VIP' }, { contactId: 'vip' });
+    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status', status: 'CUSTOMER' }, { contactId: 'customer' });
+    await executeAction.call(self, 'biz', 'playbook', { type: 'UPDATE_STATUS', value: 'DORMANT' }, { contactId: 'dormant' });
+    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status', status: ' dormant ' }, { contactId: 'dormant-padded' });
+    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status', status: 'lost' }, { contactId: 'lost' });
+    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status', value: 'PROSPECT' }, { contactId: 'prospect' });
+    expect(written).toEqual([
+      { contactId: 'customer', status: 'CLIENT' },
+      { contactId: 'dormant', status: 'CLIENT' },
+      { contactId: 'dormant-padded', status: 'CLIENT' },
+      { contactId: 'lost', status: 'LOST' },
+      { contactId: 'prospect', status: 'PROSPECT' },
+    ]);
+    for (const w of written) expect(isContactStatus(w.status), w.contactId).toBe(true);
+    // A skipped action says so, as a playbook action with an invalid config does.
+    expect(warned, 'one warning per update_status that names no ContactStatus').toHaveLength(4);
   });
 
   it('an external store buyer maps into the vocabulary: orders make a CLIENT, none a LEAD', () => {
@@ -447,11 +485,10 @@ describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a 
     }
   });
 
-  it("people-flow segments (V1-38b review CR-1): a contact imported as status 'DORMANT' is Dormant and not At Risk, whatever its silence, as before V1-38b; canonical rows are unchanged", async () => {
-    // The CSV/link import copied a file's status column verbatim until V1-38c,
-    // and stores a DORMANT cell as DORMANT since (review CR-V38c-1), so
-    // 'DORMANT' rows are held and written (real-DB proof:
-    // test/contact-status-readers-import.integration.test.ts).
+  // D-92: replaces the V1-38b review CR-1 case, which pinned a contact stored
+  // as DORMANT in Dormant whatever its silence (the one active 5 days ago
+  // included) and out of At Risk.
+  it("D-92 (was V1-38b review CR-1): people-flow segments read a stored legacy 'DORMANT' as CLIENT, and Dormant is the clients silent 90+ days whatever the stored spelling (CLIENT, CUSTOMER, DORMANT), never a contact by its status alone", async () => {
     const contact = (id: string, status: string, daysSilent: number) => ({
       id, firstName: id, lastName: null, email: null, status, lastInteractionAt: ago(daysSilent), leadScore: 40,
     });
@@ -459,23 +496,32 @@ describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a 
       contact('dormant-recent', 'DORMANT', 5),
       contact('dormant-quiet', 'DORMANT', 40),
       contact('dormant-silent', 'DORMANT', 100),
+      contact('customer-silent', 'CUSTOMER', 100),
       contact('client-quiet', 'CLIENT', 40),
       contact('client-silent', 'CLIENT', 100),
       contact('client-active', 'CLIENT', 3),
+      contact('lead-silent', 'LEAD', 100),
+      contact('lost-silent', 'LOST', 100),
     ];
     const segments = await new RelationshipHealthService({ client: { contact: { findMany: async () => contacts } } } as any).listSegments('biz');
     const ids = (id: string) => (segments.find((s) => s.id === id)?.contacts.map((c) => c.id) ?? []).sort();
-    expect(ids('dormant')).toEqual(['client-silent', 'dormant-quiet', 'dormant-recent', 'dormant-silent']);
-    expect(ids('at-risk')).toEqual(['client-quiet', 'client-silent']);
-    expect(ids('high-value')).toEqual(['client-active']);
-    expect(ids('stale-leads')).toEqual([]);
+    // Dormant: clients with no interaction in 90+ days, whatever the spelling.
+    // The legacy DORMANT active 5 days ago is no longer in Dormant, and a lead
+    // or a lost contact silent as long is not a client.
+    expect(ids('dormant')).toEqual(['client-silent', 'customer-silent', 'dormant-silent']);
+    // At Risk: silence alone, a legacy DORMANT row no longer left out.
+    expect(ids('at-risk')).toEqual(['client-quiet', 'client-silent', 'customer-silent', 'dormant-quiet', 'dormant-silent', 'lead-silent', 'lost-silent']);
+    // A legacy DORMANT active in the last 30 days is a High-Value Customer as a CLIENT is.
+    expect(ids('high-value')).toEqual(['client-active', 'dormant-recent']);
+    // A legacy DORMANT is a client, never a lead.
+    expect(ids('stale-leads')).toEqual(['lead-silent']);
     for (const s of segments) {
       for (const [, named] of s.criteria.matchAll(/\bstatus ([A-Z_]+)/gi)) {
         expect(CONTACT_STATUSES as readonly string[], `${s.id}: "${s.criteria}"`).toContain(named);
       }
+      expect(s.criteria, `${s.id}: the criteria names an "imported as dormant" rule D-92 removed`).not.toMatch(/imported as dormant/i);
     }
-    expect(segments.find((s) => s.id === 'dormant')?.criteria, 'Dormant says it includes contacts imported as dormant').toMatch(/imported as dormant/i);
-    expect(segments.find((s) => s.id === 'at-risk')?.criteria, 'At Risk says it leaves them out').toMatch(/imported as dormant/i);
+    expect(segments.find((s) => s.id === 'dormant')?.criteria, 'Dormant says it is clients').toMatch(/\bCLIENT\b/);
   });
 
   it('relationship health signals: a CLIENT with no bookings in 90 days is flagged, a legacy CUSTOMER the same, a PROSPECT is not', async () => {
@@ -529,5 +575,97 @@ describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a 
     expect(await customerMaturity(eleven('PROSPECT'))).toBe(10);
     expect(await customerMaturity(eleven('CLIENT'))).toBe(20);
     expect(await customerMaturity([...Array.from({ length: 6 }, () => 'CLIENT'), ...Array.from({ length: 5 }, () => 'CUSTOMER')])).toBe(20);
+  });
+});
+
+/**
+ * W4-D92-DORMANT-AS-CLIENT (owner ruling D-92): an imported (or legacy) DORMANT
+ * status is stored as CLIENT, and rows are not migrated, so a row still holding
+ * the legacy DORMANT (written by the CSV/link import or a playbook's
+ * update_status before D-92) reads as CLIENT in every status reader; dormancy
+ * comes from inactivity only. Real-DB proof on rows the import wrote:
+ * test/contact-status-readers-import.integration.test.ts.
+ */
+describe("D-92: a stored legacy 'DORMANT' reads as CLIENT in every status reader; dormancy comes from inactivity only", () => {
+  const DAY = 86_400_000;
+  const ago = (days: number) => new Date(Date.now() - days * DAY);
+
+  it('D-92: lead scoring scores a legacy DORMANT row as a CLIENT (the +5 customer bonus), not as a status of its own', async () => {
+    const statuses = ['PROSPECT', 'CLIENT', 'DORMANT'];
+    const scores = new Map<string, number>();
+    const db = {
+      business: { findMany: async () => [{ id: 'biz' }] },
+      contact: {
+        findMany: async () =>
+          statuses.map((status) => ({ id: status, relationshipHealth: null, lastInteractionAt: null, lastContactedAt: null, status })),
+        update: async ({ where, data }: { where: { id: string }; data: { leadScore: number } }) => {
+          scores.set(where.id, data.leadScore);
+        },
+      },
+      deal: { groupBy: async () => [] },
+      invoice: { groupBy: async () => [] },
+      contactEvent: { groupBy: async () => [] },
+    };
+    const scheduler = new LeadScoringScheduler({ client: db } as any);
+    expect(await scheduler.tick(new Date('2026-11-09T23:00:00Z'))).toEqual({ ran: true, updated: 3 });
+    expect(scores.get('DORMANT'), 'legacy DORMANT vs CLIENT').toBe(scores.get('CLIENT'));
+    expect(scores.get('CLIENT'), 'CLIENT vs PROSPECT').toBe(scores.get('PROSPECT')! + 5);
+  });
+
+  it('D-92: the people health score counts a legacy DORMANT row untouched for 60+ days as a dormant customer, as a CLIENT, and a fresh one not', async () => {
+    const row = (id: string, status: string, updatedDaysAgo: number) => ({
+      id, businessId: 'biz', deletedAt: null, status, updatedAt: ago(updatedDaysAgo), email: `${id}@example.test`, phone: '+18685550100',
+    });
+    const contacts = [
+      row('client-stale', 'CLIENT', 90),
+      row('dormant-stale', 'DORMANT', 90),
+      row('dormant-fresh', 'DORMANT', 5),
+      row('lead-stale', 'LEAD', 90),
+    ];
+    const count = async ({ where }: { where: Record<string, unknown> }) => contacts.filter((c) => matchesWhere(c, where)).length;
+    const health: any = new HealthScoreService({ client: { contact: { count } } } as any);
+    const people = await health.calculatePeopleHealth('biz');
+    expect(people.metrics.dormantCustomers).toBe(2);
+    expect(people.reasons).toContain('2 dormant customers');
+  });
+
+  it('D-92: relationship health signals flag a legacy DORMANT row with no bookings in 90 days as they flag a CLIENT', async () => {
+    const prisma = {
+      client: {
+        contact: {
+          findUnique: async () => ({
+            id: 'c1', businessId: 'biz', firstName: 'Ada', lastName: null, email: null, status: 'DORMANT', lastInteractionAt: ago(3), createdAt: ago(400),
+          }),
+        },
+        invoice: { findMany: async () => [] },
+        booking: { findMany: async () => [] },
+        contactTask: { findMany: async () => [] },
+        contactNote: { findMany: async () => [] },
+        deal: { findMany: async () => [] },
+      },
+    };
+    const health = await new RelationshipHealthService(prisma as any).computeHealth('biz', 'c1');
+    expect(health, 'computeHealth(DORMANT)').not.toBeNull();
+    expect(health!.signals).toContain('No bookings in 90 days');
+  });
+
+  it('D-92: the maturity assessment counts legacy DORMANT rows as customers, as CLIENT rows', async () => {
+    const statuses = [...Array.from({ length: 6 }, () => 'CLIENT'), ...Array.from({ length: 5 }, () => 'DORMANT')];
+    const business = {
+      invoices: [], bookings: [], products: [], services: [],
+      members: [{ id: 'm1', role: 'OWNER' }],
+      channelConnections: [],
+      contacts: statuses.map((status) => ({ status, createdAt: ago(10) })),
+      _count: { invoices: 0, contacts: statuses.length, bookings: 0, products: 0, services: 0 },
+    };
+    const prisma = {
+      client: {
+        business: { findUnique: async () => business },
+        maturityScore: { findMany: async () => [], create: async ({ data }: { data: Record<string, unknown> }) => data },
+      },
+    };
+    const { assessment } = await new MaturityAssessmentService(prisma as any).assessBusiness('biz');
+    // 11 contacts score 10 on their own; more than 10 customers add 10.
+    expect((assessment as any).customerMaturity).toBe(20);
   });
 });

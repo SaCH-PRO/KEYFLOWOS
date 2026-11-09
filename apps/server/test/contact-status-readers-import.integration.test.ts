@@ -27,25 +27,38 @@
  * playbook's update_status action, review ST-38c-1, follow-up packet).
  *
  * What this suite proves, on rows the real import route wrote:
- *   - WRITER (V1-38c): an owner's CSV import stores CLIENT for a CUSTOMER cell
- *     and DORMANT for a DORMANT cell (review CR-V38c-1). The CUSTOMER row the
- *     readers below read is then given back the spelling the import wrote
- *     before V1-38c (raw SQL), as a row held from before it; the DORMANT rows
- *     are read as the import writes them today.
- *   - CR-1: people-flow puts a contact imported as 'DORMANT' in Dormant whatever
- *     its silence and leaves it out of At Risk and Stale Leads, as before
- *     V1-38b, for a contact imported now as for one imported before V1-38c
- *     (CR-V38c-1); a canonical CLIENT is segmented by silence alone, as before.
- *   - CR-2: the readers count an imported 'CUSTOMER' as a CLIENT: people-flow's
- *     High-Value Customers and the people health score's dormant customers.
- *   - V1-38c: the CSV and link imports store every status cell as a
- *     ContactStatus or the legacy dormant status: canonical values in the
- *     vocabulary's spelling, the legacy CUSTOMER as CLIENT (the readers'
- *     mapping), DORMANT in any case as DORMANT (the readers' mapping, review
- *     CR-V38c-1), and INACTIVE, an unknown or a blank cell as the LEAD
- *     default, the import's convention for a cell it does not recognise (as
- *     for age group). Those rows go to a second business, so the reader cases
- *     above count only their own.
+ *   - WRITER (V1-38c, D-92): an owner's CSV import stores CLIENT for a CUSTOMER
+ *     cell and (D-92) for a DORMANT cell. The CUSTOMER and DORMANT rows the
+ *     readers below read are then given back the spelling the import wrote
+ *     before V1-38c and before D-92 (raw SQL), as rows held from before.
+ *   - D-92 (was CR-1, which kept a contact imported as 'DORMANT' in Dormant
+ *     whatever its silence and out of At Risk): people-flow reads a stored
+ *     'DORMANT' as CLIENT; Dormant is the clients silent 90+ days whatever the
+ *     stored spelling, At Risk and Stale Leads go by silence and status alone.
+ *   - CR-2, D-92: the readers count an imported 'CUSTOMER' and a stored
+ *     'DORMANT' as a CLIENT: people-flow's High-Value Customers and the people
+ *     health score's dormant customers.
+ *   - V1-38c, D-92: the CSV and link imports store every status cell as a
+ *     ContactStatus: canonical values in the vocabulary's spelling, the legacy
+ *     CUSTOMER and (D-92) DORMANT in any case as CLIENT (the readers' mapping),
+ *     and INACTIVE, an unknown or a blank cell as the LEAD default, the
+ *     import's convention for a cell it does not recognise (as for age group).
+ *     Those rows go to a second business, so the reader cases above count
+ *     only their own.
+ *   - D-92 (review ST-38c-1): a playbook's update_status action stores only a
+ *     ContactStatus on a real row (bizB as well).
+ *   - W4-D92-DORMANT-AS-CLIENT (owner ruling D-92): an imported (or legacy)
+ *     DORMANT status is stored as CLIENT, so every stored status is one of
+ *     LEAD, PROSPECT, CLIENT, LOST, and "dormant" is always worked out from
+ *     inactivity (the Dormant segment shows clients with no recent activity).
+ *     The CSV and link imports store CLIENT for a DORMANT cell in any case, and
+ *     a playbook's update_status action stores only a ContactStatus (review
+ *     ST-38c-1). Rows are not migrated: a row still holding DORMANT (given back
+ *     by SQL below, as a row the import wrote before D-92) reads as CLIENT in
+ *     the segments and the people health score, and is in Dormant only when it
+ *     has been silent 90+ days, as any client. The cases that pinned the
+ *     pre-D-92 behaviour (a DORMANT contact active 5 days ago in Dormant, out
+ *     of At Risk) are replaced, each naming D-92.
  *   - ST-38c-2 (V1-38c review): import/link reaches only a public address. An
  *     IP literal for a loopback, private, link-local, unspecified or metadata
  *     address (IPv6 bracketed, IPv4-mapped or NAT64 too) and a localhost name
@@ -87,13 +100,20 @@ const ID = {
   bizB: `${P}bizB`, // V1-38c: the import normalisation rows, kept out of bizA's reader counts
 };
 
-/** The imported rows: one per case, keyed by a short name. */
+/**
+ * The imported rows: one per case, keyed by a short name. D-92 added the rows
+ * silent 90+ days (dormSilent, clientSilent, leadSilent), so Dormant is proved
+ * as the clients past the threshold whatever the stored spelling.
+ */
 const ROWS = {
   dormRecent: { first: `${P}DormRecent`, email: `${P}dorm-recent@test.local`, status: 'DORMANT', silentDays: 5 },
   dormQuiet: { first: `${P}DormQuiet`, email: `${P}dorm-quiet@test.local`, status: 'DORMANT', silentDays: 40 },
+  dormSilent: { first: `${P}DormSilent`, email: `${P}dorm-silent@test.local`, status: 'DORMANT', silentDays: 100 },
   cust: { first: `${P}Cust`, email: `${P}cust@test.local`, status: 'CUSTOMER', silentDays: 3 },
   client: { first: `${P}Client`, email: `${P}client@test.local`, status: 'CLIENT', silentDays: 3 },
   clientQuiet: { first: `${P}ClientQuiet`, email: `${P}client-quiet@test.local`, status: 'CLIENT', silentDays: 40 },
+  clientSilent: { first: `${P}ClientSilent`, email: `${P}client-silent@test.local`, status: 'CLIENT', silentDays: 100 },
+  leadSilent: { first: `${P}LeadSilent`, email: `${P}lead-silent@test.local`, status: 'LEAD', silentDays: 100 },
 } as const;
 type RowKey = keyof typeof ROWS;
 
@@ -101,8 +121,13 @@ const DAY = 86_400_000;
 
 let db: any;
 let app: any;
+/** The real CrmService and PrismaService of the app under test (D-92: the update_status case drives them). */
+let crmService: any;
+let prismaService: any;
 /** contact id per imported row, filled by the import case. */
 const contactId: Partial<Record<RowKey, string>> = {};
+/** The status the import stored per row, before any SQL rewrite. */
+const storedAtImport: Partial<Record<RowKey, string>> = {};
 
 /** A fresh client address per request: each gets its own rate-limit bucket. */
 let ipN = 0;
@@ -245,6 +270,8 @@ beforeAll(async () => {
     ],
   }).compile();
 
+  crmService = moduleRef.get(CrmService);
+  prismaService = moduleRef.get(PrismaService);
   app = moduleRef.createNestApplication();
   // As app-bootstrap.ts: the client address comes from the proxy header.
   app.getHttpAdapter().getInstance().set('trust proxy', true);
@@ -287,15 +314,17 @@ async function segmentIds(segmentId: string): Promise<string[]> {
 const idsOf = (...keys: RowKey[]) => keys.map((k) => contactId[k]!).sort();
 
 /**
- * V1-38c: what the import stores for each file status above. Before V1-38c it
- * stored the cell verbatim; a row whose stored status differs is given that
- * spelling back by SQL. A DORMANT cell is stored as DORMANT (review CR-V38c-1),
- * so the DORMANT rows are read as the import writes them today.
+ * D-92: what the import stores for each file status above (V1-38c for
+ * CUSTOMER). Before V1-38c it stored the cell verbatim, and before D-92 a
+ * DORMANT cell as DORMANT; a row whose stored status differs from the file's
+ * is given that spelling back by SQL, as a row held from before.
  */
-const STORED_SINCE_V1_38C: Record<string, string> = { DORMANT: 'DORMANT', CUSTOMER: 'CLIENT', CLIENT: 'CLIENT' };
+const STORED_SINCE_D92: Record<string, string> = { DORMANT: 'CLIENT', CUSTOMER: 'CLIENT', CLIENT: 'CLIENT', LEAD: 'LEAD' };
 
-describe('WRITER (V1-38c): the CSV import no longer writes CUSTOMER and keeps DORMANT as the readers read it; rows it wrote before V1-38c still hold their spelling', () => {
-  it("V1-38c (CR-V38c-1): an owner's CSV import stores CLIENT for a CUSTOMER cell, DORMANT for a DORMANT cell and CLIENT as written; the CUSTOMER row the readers below read is given back its pre-V1-38c spelling by SQL", async () => {
+describe('WRITER (V1-38c, D-92): the CSV import writes neither CUSTOMER nor DORMANT; rows it wrote before still hold their spelling', () => {
+  // The explicit timeout: this case imports through the real route and seeds
+  // the reader rows, and timed out at the 5 s default in a loaded full run.
+  it("V1-38c, D-92: an owner's CSV import of DORMANT, CUSTOMER, CLIENT and LEAD cells completes, one live contact per row; the DORMANT and CUSTOMER rows the readers below read are given back their legacy spelling by SQL", async () => {
     const keys = Object.keys(ROWS) as RowKey[];
     const content = ['first_name,email,status', ...keys.map((k) => `${ROWS[k].first},${ROWS[k].email},${ROWS[k].status}`)].join('\n');
     const res = await csvFile(ID.owner, content);
@@ -307,58 +336,116 @@ describe('WRITER (V1-38c): the CSV import no longer writes CUSTOMER and keeps DO
         'SELECT id, status FROM contacts WHERE business_id = $1 AND email_normalized = $2 AND deleted_at IS NULL', ID.bizA, ROWS[k].email,
       );
       expect(rows, `${k}: one live contact`).toHaveLength(1);
-      expect(rows[0].status, `${k}: the status column ${ROWS[k].status}, as the import stores it since V1-38c`).toBe(STORED_SINCE_V1_38C[ROWS[k].status]);
+      storedAtImport[k] = rows[0].status;
       contactId[k] = rows[0].id;
     }
 
-    // Rows the import wrote before V1-38c hold the file's spelling. The
-    // readers keep reading it, so the cases below read such rows. The DORMANT
-    // rows need no rewrite: the import still stores DORMANT (CR-V38c-1).
+    // Rows the import wrote before V1-38c (CUSTOMER) and before D-92 (DORMANT)
+    // hold the file's spelling, and rows are not migrated (D-92). The readers
+    // read such rows as CLIENT, so the cases below read them.
     for (const k of keys) {
-      if (ROWS[k].status === STORED_SINCE_V1_38C[ROWS[k].status]) continue;
+      if (ROWS[k].status === storedAtImport[k]) continue;
       await db.$executeRawUnsafe(`UPDATE contacts SET status = $2 WHERE id = $1`, contactId[k], ROWS[k].status);
     }
 
-    // Silence per row, and every customer row untouched for 90 days (the
-    // people health score's dormant-customer test reads updated_at).
+    // Silence per row, and every row untouched for 90 days (the people health
+    // score's dormant-customer test reads updated_at).
     for (const k of keys) {
       await db.$executeRawUnsafe(
         `UPDATE contacts SET last_interaction_at = $2, updated_at = $3 WHERE id = $1`,
         contactId[k], new Date(Date.now() - ROWS[k].silentDays * DAY), new Date(Date.now() - 90 * DAY),
       );
     }
+  }, 60_000);
+
+  // D-92: replaces the V1-38c (CR-V38c-1) assertion that a DORMANT cell was stored as DORMANT.
+  it('D-92: the CSV import stored CLIENT for every DORMANT cell and for the CUSTOMER cell, CLIENT and LEAD as written: no status outside the vocabulary', async () => {
+    const keys = Object.keys(ROWS) as RowKey[];
+    expect(Object.keys(storedAtImport).sort(), 'the import case ran').toEqual([...keys].sort());
+    for (const k of keys) {
+      expect(storedAtImport[k], `${k}: the status column ${ROWS[k].status}, as the import stores it since D-92`).toBe(STORED_SINCE_D92[ROWS[k].status]);
+    }
   });
 });
 
-describe('CR-1: people-flow segments read an imported DORMANT status as before V1-38b', () => {
-  it('Dormant holds both contacts imported as DORMANT, the one active 5 days ago included (CR-V38c-1: as the import writes them now, no SQL rewrite)', async () => {
+describe('D-92 (was CR-1): people-flow segments read a stored legacy DORMANT as CLIENT; dormancy comes from inactivity only', () => {
+  it('D-92: Dormant holds the clients silent 90+ days whatever the stored spelling (CLIENT, legacy DORMANT), and not the LEAD silent as long', async () => {
+    expect(contactId.dormSilent, 'the import case ran').toBeTruthy();
+    expect(await segmentIds('dormant')).toEqual(idsOf('dormSilent', 'clientSilent'));
+  });
+
+  // D-92: before D-92 the contact stored as DORMANT and active 5 days ago was in Dormant.
+  it('D-92: a contact stored as DORMANT and active 5 days ago is no longer in Dormant, nor is the one silent 40 days', async () => {
     expect(contactId.dormRecent, 'the import case ran').toBeTruthy();
-    expect(await segmentIds('dormant')).toEqual(idsOf('dormRecent', 'dormQuiet'));
+    const dormant = await segmentIds('dormant');
+    expect(dormant).not.toContain(contactId.dormRecent);
+    expect(dormant).not.toContain(contactId.dormQuiet);
   });
 
-  it('At Risk leaves out the contact imported as DORMANT that has been silent 40 days, and keeps the canonical CLIENT silent as long', async () => {
-    expect(await segmentIds('at-risk')).toEqual(idsOf('clientQuiet'));
+  // D-92: before D-92 At Risk left out a contact stored as DORMANT.
+  it('D-92: At Risk holds every contact silent 30+ days, the ones stored as DORMANT included, as a canonical CLIENT silent as long', async () => {
+    expect(await segmentIds('at-risk')).toEqual(idsOf('dormQuiet', 'dormSilent', 'clientQuiet', 'clientSilent', 'leadSilent'));
   });
 
-  it('CR-V38c-1: Stale Leads holds no contact imported as DORMANT, however long silent, as before V1-38c', async () => {
+  it('CR-V38c-1, D-92: Stale Leads holds no contact stored as DORMANT, however long silent (it reads as CLIENT, not a lead), and holds the LEAD silent as long', async () => {
     expect(contactId.dormQuiet, 'the import case ran').toBeTruthy();
-    const stale = await segmentIds('stale-leads');
-    expect(stale).not.toContain(contactId.dormQuiet);
-    expect(stale).not.toContain(contactId.dormRecent);
+    expect(await segmentIds('stale-leads')).toEqual(idsOf('leadSilent'));
   });
 });
 
-describe("CR-2: the readers count an imported 'CUSTOMER' as a CLIENT", () => {
-  it('people-flow High-Value Customers holds the imported CUSTOMER and the CLIENT, both active 3 days ago', async () => {
-    expect(await segmentIds('high-value')).toEqual(idsOf('cust', 'client'));
+describe("CR-2, D-92: the readers count an imported 'CUSTOMER', and a stored legacy 'DORMANT', as a CLIENT", () => {
+  // D-92: before D-92 the contact stored as DORMANT and active 5 days ago was not a High-Value Customer.
+  it('D-92: people-flow High-Value Customers holds the imported CUSTOMER, the CLIENT and the contact stored as DORMANT, all active in the last 30 days', async () => {
+    expect(await segmentIds('high-value')).toEqual(idsOf('cust', 'client', 'dormRecent'));
   });
 
-  it('the people health score counts the imported CUSTOMER and both CLIENT rows untouched for 60+ days as dormant customers', async () => {
+  // D-92: before D-92 the rows stored as DORMANT were not counted (3 dormant customers then).
+  it('D-92: the people health score counts the imported CUSTOMER, the CLIENT rows and the rows stored as DORMANT, all untouched for 60+ days, as dormant customers, and not the LEAD', async () => {
     const { HealthScoreService } = await import('../src/modules/intelligence/health-score.service');
     const people = await (new HealthScoreService({ client: db } as any) as any).calculatePeopleHealth(ID.bizA);
     expect(people.metrics.totalContacts).toBe(Object.keys(ROWS).length);
-    expect(people.metrics.dormantCustomers).toBe(3);
+    expect(people.metrics.dormantCustomers).toBe(Object.keys(ROWS).length - 1);
   });
+});
+
+/**
+ * D-92 (V1-38c review ST-38c-1): a playbook's update_status action, driven
+ * through the real AutomationExecutorService.executeAction and the real
+ * CrmService.updateContact of the app under test, on bizB rows (out of bizA's
+ * reader counts). Before D-92 it stored 'ACTIVE' by default, or the CUSTOMER
+ * or DORMANT the action named.
+ */
+describe("D-92 (ST-38c-1): a playbook's update_status action stores only a ContactStatus on a real row", () => {
+  const AUTO = [
+    { id: `${P}auto_dormant`, seeded: 'LEAD', action: { type: 'UPDATE_STATUS', value: 'DORMANT' }, stored: 'CLIENT' },
+    { id: `${P}auto_dormant_lower`, seeded: 'PROSPECT', action: { type: 'update_status', status: 'dormant' }, stored: 'CLIENT' },
+    { id: `${P}auto_customer`, seeded: 'LEAD', action: { type: 'update_status', status: 'CUSTOMER' }, stored: 'CLIENT' },
+    { id: `${P}auto_active`, seeded: 'PROSPECT', action: { type: 'update_status', status: 'ACTIVE' }, stored: 'PROSPECT' },
+    { id: `${P}auto_default`, seeded: 'LEAD', action: { type: 'update_status' }, stored: 'LEAD' },
+    { id: `${P}auto_lost`, seeded: 'CLIENT', action: { type: 'update_status', status: 'lost' }, stored: 'LOST' },
+  ];
+
+  it('D-92: DORMANT and CUSTOMER in any case store CLIENT, a canonical status in any case is stored in the vocabulary spelling, and ACTIVE or no status leaves the stored status as it was', async () => {
+    const { AutomationExecutorService } = await import('../src/modules/flow/automation-executor.service');
+    const { CONTACT_STATUSES } = await import('../src/modules/crm/crm.constants');
+    for (const a of AUTO) {
+      await db.contact.create({ data: { id: a.id, businessId: ID.bizB, firstName: a.id, status: a.seeded } });
+    }
+    // Activity and e-mail are never reached by an update_status action.
+    const executor = new AutomationExecutorService(prismaService, {} as any, crmService, {} as any, null, null);
+    const executeAction = (executor as any).executeAction.bind(executor) as (...args: unknown[]) => Promise<unknown>;
+    for (const a of AUTO) {
+      await executeAction(ID.bizB, `${P}playbook`, a.action, { contactId: a.id });
+    }
+    const rows: Array<{ id: string; status: string }> = await db.$queryRawUnsafe(
+      `SELECT id, status FROM contacts WHERE id LIKE ${sqlLikePrefix(`${P}auto_`)}`,
+    );
+    const stored = Object.fromEntries(rows.map((r) => [r.id, r.status]));
+    for (const a of AUTO) {
+      expect(stored[a.id], `${a.id}: ${JSON.stringify(a.action)} on a ${a.seeded}`).toBe(a.stored);
+      expect(CONTACT_STATUSES as readonly string[], a.id).toContain(stored[a.id]);
+    }
+  }, 60_000);
 });
 
 /**
@@ -375,9 +462,10 @@ const V38C_FILE_ROWS = [
   { key: 'lost-lower', cell: 'lost', stored: 'LOST', kind: 'spelled' },
   { key: 'customer', cell: 'CUSTOMER', stored: 'CLIENT', kind: 'legacy' },
   { key: 'customer-lower', cell: 'customer', stored: 'CLIENT', kind: 'legacy' },
-  { key: 'dormant', cell: 'DORMANT', stored: 'DORMANT', kind: 'dormant' },
-  { key: 'dormant-lower', cell: 'dormant', stored: 'DORMANT', kind: 'dormant' },
-  { key: 'dormant-mixed', cell: 'Dormant', stored: 'DORMANT', kind: 'dormant' },
+  // D-92: a DORMANT cell is stored as CLIENT (it was the legacy DORMANT before D-92).
+  { key: 'dormant', cell: 'DORMANT', stored: 'CLIENT', kind: 'dormant' },
+  { key: 'dormant-lower', cell: 'dormant', stored: 'CLIENT', kind: 'dormant' },
+  { key: 'dormant-mixed', cell: 'Dormant', stored: 'CLIENT', kind: 'dormant' },
   { key: 'inactive', cell: 'INACTIVE', stored: 'LEAD', kind: 'unrecognised' },
   { key: 'vip', cell: 'VIP', stored: 'LEAD', kind: 'unrecognised' },
   { key: 'stage', cell: 'Negotiation', stored: 'LEAD', kind: 'unrecognised' },
@@ -391,8 +479,9 @@ const V38C_LINK_ROWS = [
   { key: 'customer-padded', cell: ' customer ', stored: 'CLIENT' },
   { key: 'prospect-title', cell: 'Prospect', stored: 'PROSPECT' },
   { key: 'lost', cell: 'LOST', stored: 'LOST' },
-  { key: 'dormant', cell: 'DORMANT', stored: 'DORMANT' },
-  { key: 'dormant-padded', cell: ' dormant ', stored: 'DORMANT' },
+  // D-92: a DORMANT cell is stored as CLIENT.
+  { key: 'dormant', cell: 'DORMANT', stored: 'CLIENT' },
+  { key: 'dormant-padded', cell: ' dormant ', stored: 'CLIENT' },
   { key: 'stage', cell: 'Qualified', stored: 'LEAD' },
 ] as const;
 const V38C_LINK_URL = 'https://v86e-import.example.test/status.csv';
@@ -409,7 +498,7 @@ describe('V1-38c (W3-V1-38c-IMPORT-STATUS, CF-49): the CSV and link imports stor
     }
   }
 
-  it("V1-38c: an owner's CSV import of canonical, legacy, unrecognised and blank status cells completes, every row CREATED with no error", async () => {
+  it("V1-38c: an owner's CSV import of canonical, legacy, unrecognised and blank status cells completes, every row CREATED with no error", { timeout: 60_000 }, async () => {
     const content = [
       'first_name,email,status',
       ...V38C_FILE_ROWS.map((r) => `${P}V38c ${r.key},${v38cEmail('file', r.key)},${r.cell}`),
@@ -441,22 +530,21 @@ describe('V1-38c (W3-V1-38c-IMPORT-STATUS, CF-49): the CSV and link imports stor
     await expectStored('unrecognised');
   });
 
-  it("V1-38c (CR-V38c-1): a DORMANT cell in any case ('DORMANT', 'dormant', 'Dormant') is stored as DORMANT, the legacy status people-flow reads as imported dormant, not the LEAD default, pending an owner ruling", async () => {
+  // D-92: replaces the V1-38c (CR-V38c-1) case that pinned a DORMANT cell stored as DORMANT, pending an owner ruling.
+  it("D-92 (was V1-38c CR-V38c-1): a DORMANT cell in any case ('DORMANT', 'dormant', 'Dormant') is stored as CLIENT, not the legacy DORMANT and not the LEAD default", async () => {
     await expectStored('dormant');
   });
 
-  it('V1-38c (CR-V38c-1): no contact the CSV import wrote holds a status outside CONTACT_STATUSES but the DORMANT cells, stored as LEGACY_DORMANT_STATUS', async () => {
-    const { CONTACT_STATUSES, LEGACY_DORMANT_STATUS } = await import('../src/modules/crm/crm.constants');
-    expect(LEGACY_DORMANT_STATUS).toBe('DORMANT');
+  // D-92: before D-92 the DORMANT cells were the one exception, stored as LEGACY_DORMANT_STATUS.
+  it('D-92 (was V1-38c CR-V38c-1): no contact the CSV import wrote holds a status outside CONTACT_STATUSES, the DORMANT cells included', async () => {
+    const { CONTACT_STATUSES } = await import('../src/modules/crm/crm.constants');
     expect(fileImportId, 'the V1-38c CSV import case ran').toBeTruthy();
     const rows: Array<{ status: string }> = await db.$queryRawUnsafe(
       'SELECT c.status FROM contacts c JOIN contact_import_contacts r ON r.contact_id = c.id WHERE r.import_id = $1', fileImportId,
     );
     expect(rows).toHaveLength(V38C_FILE_ROWS.length);
     const outside = rows.map((r) => r.status).filter((s) => !(CONTACT_STATUSES as readonly string[]).includes(s));
-    expect(outside, 'statuses outside the vocabulary').toEqual(
-      V38C_FILE_ROWS.filter((r) => r.kind === 'dormant').map(() => LEGACY_DORMANT_STATUS),
-    );
+    expect(outside, 'statuses outside the vocabulary').toEqual([]);
   });
 
   describe('import/link (global fetch stood in for one fixed URL)', () => {
@@ -476,7 +564,8 @@ describe('V1-38c (W3-V1-38c-IMPORT-STATUS, CF-49): the CSV and link imports stor
 
     afterAll(() => fetchSpy.mockRestore());
 
-    it("V1-38c (CR-V38c-1): the link import stores the same: a padded ' customer ' as CLIENT, 'Prospect' as PROSPECT, LOST as written, DORMANT and a padded ' dormant ' as DORMANT, an unknown stage as the LEAD default", async () => {
+    // D-92: before D-92 this case pinned DORMANT and ' dormant ' stored as DORMANT.
+    it("V1-38c, D-92: the link import stores the same: a padded ' customer ' as CLIENT, 'Prospect' as PROSPECT, LOST as written, DORMANT and a padded ' dormant ' as CLIENT, an unknown stage as the LEAD default", { timeout: 60_000 }, async () => {
       const res = await linkImport(ID.owner, V38C_LINK_URL, ID.bizB);
       expect(res.status).toBe(201);
       expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: V38C_LINK_ROWS.length, processedRows: V38C_LINK_ROWS.length });
