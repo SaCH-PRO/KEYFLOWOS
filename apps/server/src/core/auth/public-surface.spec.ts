@@ -191,7 +191,10 @@ const ACKNOWLEDGED_PUBLIC: Record<string, number> = {
   'modules/push-notifications/push-notification.controller.ts': 4,
   'modules/risc/risc.controller.ts': 1,
   'modules/site/presence/presence.controller.ts': 3,
-  'modules/site/site.controller.ts': 16,
+  // 16 -> 17: GET storefront/public/:slug/gateways (G6PUB-R3-STORE-ORDER-DOORS). The storefront's
+  // gateway ids, names and currencies only (the invoice pay page's public list, PaymentsService.
+  // getAvailableGateways), for a store that is on (getPublicStorefront 404s otherwise); rate limited.
+  'modules/site/site.controller.ts': 17,
   'modules/social/social.controller.ts': 5,
   'modules/subscriptions/subscriptions.controller.ts': 2,
   'modules/templates/templates.controller.ts': 2,

@@ -14,7 +14,12 @@ import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { CommerceService } from '../commerce/commerce.service';
 import { isSystemActor } from '../../core/auth/system-actor';
 import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
-import { WIPAY_CURRENCY, wipayTakesCurrency } from '../../core/connectors/implementations/wipay-merchant';
+import {
+  WIPAY_CURRENCY,
+  resolveWipayMerchant,
+  wipayMerchantComplete,
+  wipayTakesCurrency,
+} from '../../core/connectors/implementations/wipay-merchant';
 
 /**
  * V1-33: what a storefront checkout's Idempotency-Key slot remembers, in the
@@ -100,6 +105,25 @@ const FULFILMENT_PAST_CONFIRMED = new Set([
   'ROUTED',
   'SUPPLIER_ORDERED',
   'PICKING_PACKING',
+]);
+
+/**
+ * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-2): the statuses PATCH
+ * /site/businesses/:businessId/orders/:orderId/status may write, the site's
+ * fulfilment vocabulary (the store order list's own statuses, plus COMPLETED).
+ * Payment states are not statuses here: an order is paid only through
+ * completeCheckout and refunded only through refundOrder. The route copied any
+ * string, so 'paid' opened the marketplace refund and 'REFUNDED' on a PAID order
+ * made the D-14 refund route answer "already refunded" with the books still on.
+ */
+export const SITE_FULFILMENT_STATUSES: ReadonlySet<string> = new Set([
+  'PENDING',
+  'CONFIRMED',
+  'PROCESSING',
+  'SHIPPED',
+  'DELIVERED',
+  'COMPLETED',
+  'CANCELLED',
 ]);
 
 /**
@@ -305,10 +329,24 @@ export class StoreOrderService {
     // order is written and its promo use counted. createStorePayment refuses
     // it too, but only after the order had committed, so every such checkout
     // left an UNPAID order behind.
-    if ((input.paymentMethod ?? '').toUpperCase() === 'WIPAY' && !wipayTakesCurrency(totals.currency)) {
-      throw new BadRequestException(
-        `WiPay takes ${WIPAY_CURRENCY} only: this order is in ${(totals.currency ?? '').toUpperCase() || 'no currency'}`,
-      );
+    if ((input.paymentMethod ?? '').toUpperCase() === 'WIPAY') {
+      if (!wipayTakesCurrency(totals.currency)) {
+        throw new BadRequestException(
+          `WiPay takes ${WIPAY_CURRENCY} only: this order is in ${(totals.currency ?? '').toUpperCase() || 'no currency'}`,
+        );
+      }
+      // G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-4): nor for a business
+      // with no WiPay merchant pair (the one rule the gateway list and the
+      // checkouts read, resolveWipayMerchant). createStorePayment refused it
+      // too, but only after the order and its promo use had committed, so every
+      // attempt (and every retry) left another UNPAID order.
+      const business = await this.prisma.client.business.findUnique({
+        where: { id: input.businessId },
+        select: { metaData: true },
+      });
+      if (!wipayMerchantComplete(resolveWipayMerchant(business?.metaData))) {
+        throw new BadRequestException('WiPay is not configured for this business: choose another payment method');
+      }
     }
 
     const orderNumber = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
@@ -709,7 +747,20 @@ export class StoreOrderService {
     };
   }
 
+  /**
+   * PATCH /site/businesses/:businessId/orders/:orderId/status: a fulfilment
+   * status only (SITE_FULFILMENT_STATUSES, any case, stored upper-case).
+   * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-2): a payment state or any
+   * other string is refused (400) before anything is read or written.
+   */
   async updateOrderStatus(orderId: string, status: string, businessId: string) {
+    const normalized = typeof status === 'string' ? status.trim().toUpperCase() : '';
+    if (!SITE_FULFILMENT_STATUSES.has(normalized)) {
+      throw new BadRequestException(
+        `An order's status here is one of ${[...SITE_FULFILMENT_STATUSES].join(', ')}. It is paid through its checkout ` +
+          '(its payment provider, or POST .../orders/:orderId/complete-offline) and refunded with POST .../orders/:orderId/refund',
+      );
+    }
     const existing = await this.prisma.client.marketplaceOrder.findFirst({
       where: { id: orderId, businessId },
     });
@@ -717,7 +768,7 @@ export class StoreOrderService {
 
     const order = await this.prisma.client.marketplaceOrder.update({
       where: { id: orderId },
-      data: { status },
+      data: { status: normalized },
       include: { items: true },
     });
 
@@ -733,7 +784,7 @@ export class StoreOrderService {
       CANCELLED: 'store_order.cancelled',
     };
 
-    const eventName = eventMap[status];
+    const eventName = eventMap[normalized];
     if (eventName) {
       this.events.emit(eventName, { order, businessId: order.businessId });
     }
@@ -856,8 +907,11 @@ export class StoreOrderService {
    * Trial-N review (G6PUB-SEC-1, D-46): ModuleScopeGuard's rule for revenue >=
    * write, for the member who records an offline payment, with no SUPER_ADMIN
    * bypass (PaymentEvidenceService.assertMemberMayRecordPayments). 403 otherwise.
+   * G6PUB-R3-STORE-ORDER-DOORS: public, so the marketplace doors that record or
+   * refund an order's money (MarketplaceService.createOrder paid on creation,
+   * D-77) check the same rule before they write anything.
    */
-  private async assertMemberMayRecordPayments(businessId: string, actorId: string | null | undefined): Promise<void> {
+  async assertMemberMayRecordPayments(businessId: string, actorId: string | null | undefined): Promise<void> {
     if (!actorId || isSystemActor(actorId)) throw new ForbiddenException('A member must record this payment');
     const membership = await this.prisma.client.membership.findUnique({
       where: { userId_businessId: { userId: actorId, businessId } },
@@ -907,6 +961,19 @@ export class StoreOrderService {
      * it: the provider has taken the money and it is recorded.
      */
     refuseClosedOrder?: boolean;
+    /**
+     * G6PUB-R3-STORE-ORDER-DOORS (D-77): the status a paid order not yet past
+     * CONFIRMED takes, in its own vocabulary. A STANDARD (marketplace) order
+     * created paid is 'paid', the state its fulfilment transitions start from;
+     * the storefront's is CONFIRMED (the default).
+     */
+    paidStatus?: string;
+    /**
+     * D-77: a STANDARD order's stock moves through its fulfilment routes
+     * (reserved when routed, decremented when shipped), so the paid door does
+     * not decrement it again here.
+     */
+    stockMovesOnFulfilment?: boolean;
   }) {
     const order = await this.prisma.client.marketplaceOrder.findUnique({
       where: { id: input.orderId },
@@ -1086,16 +1153,18 @@ export class StoreOrderService {
       //    we never sell stock we can't fulfill. Untracked / virtual
       //    products are explicitly skipped per their inventoryMode.
       const decrementedProductIds: string[] = [];
-      const trackedItems = order.items.filter((i) => {
-        const mode = productMode.get(i.productId) ?? 'untracked';
-        return mode === 'tracked';
-      });
+      const trackedItems = input.stockMovesOnFulfilment
+        ? []
+        : order.items.filter((i) => {
+            const mode = productMode.get(i.productId) ?? 'untracked';
+            return mode === 'tracked';
+          });
       if (trackedItems.length > 0 && !defaultWarehouse) {
         throw new BadRequestException(
           'Cannot finalize checkout: no active warehouse configured for tracked products.',
         );
       }
-      for (const item of order.items) {
+      for (const item of input.stockMovesOnFulfilment ? [] : order.items) {
         const mode = productMode.get(item.productId) ?? 'untracked';
         if (mode !== 'tracked') {
           this.logger.debug(`[store-order] skipping stock decrement for ${mode} product ${item.productId}`);
@@ -1165,7 +1234,7 @@ export class StoreOrderService {
         where: { id: order.id },
         data: {
           paymentStatus: 'PAID',
-          status: FULFILMENT_PAST_CONFIRMED.has(currentStatus.toUpperCase()) ? currentStatus : 'CONFIRMED',
+          status: FULFILMENT_PAST_CONFIRMED.has(currentStatus.toUpperCase()) ? currentStatus : (input.paidStatus ?? 'CONFIRMED'),
           paymentRef,
         },
         include: { items: true },

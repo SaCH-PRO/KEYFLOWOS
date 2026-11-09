@@ -1767,6 +1767,22 @@ export class PaymentsService {
       throw new BadRequestException('Invalid WiPay callback signature');
     }
 
+    // D-76 (recheck G6PUB-RC1-4): WiPay takes TTD only (D-69). A verified
+    // success for a payable in another currency (a checkout started before
+    // D-69) was settled by WiPay in its default currency, so it is not recorded
+    // as money in the payable's.
+    const payableCurrency = invoice ? invoice.currency : order!.currency;
+    if (!PaymentsService.wipayTakesCurrency(payableCurrency)) {
+      return this.refuseWipayCurrency({
+        transactionId: transaction_id!,
+        payableType: invoice ? 'invoice' : 'order',
+        payableId: order_id,
+        businessId,
+        currency: payableCurrency,
+        total: requestedTotal,
+      });
+    }
+
     // Provider-event-id idempotency. WiPay's transaction_id (verified above)
     // identifies a callback delivery; re-deliveries become no-ops.
     const wipayEventId = transaction_id!;
@@ -1841,6 +1857,68 @@ export class PaymentsService {
       await this.releaseProviderEvent('wipay', wipayEventId);
       return { success: false, invoiceId: order_id, message: 'Payment processing error' };
     }
+  }
+
+  /**
+   * D-76 (G6PUB-R3-STORE-ORDER-DOORS, recheck G6PUB-RC1-4): a verified WiPay
+   * success for a payable not in TTD records no money: no Payment row, no
+   * posting, the invoice and the storefront order as they were. Its
+   * transaction's webhook_events row is kept, marked refused
+   * (`refused:currency:<CUR>`), so every redelivery is a no-op, and the
+   * business is told once (a 'payment.refused' notification) that WiPay
+   * reported money this server did not record, to settle by hand. The payer
+   * is answered { success: false }.
+   */
+  private async refuseWipayCurrency(input: {
+    transactionId: string;
+    payableType: 'invoice' | 'order';
+    payableId: string;
+    businessId: string;
+    currency: string | null | undefined;
+    total: number;
+  }): Promise<{ success: boolean; invoiceId?: string; message: string }> {
+    const currency = normalizeCurrency(input.currency) || 'no currency';
+    const fresh = await this.invoiceWorkflow.assertNewProviderEvent(
+      'wipay',
+      input.transactionId,
+      `refused:currency:${currency}`,
+      input.businessId,
+    );
+    if (fresh) {
+      this.logger.error(
+        `WiPay transaction ${input.transactionId} for ${input.payableType} ${input.payableId} not recorded: ` +
+          `WiPay takes ${PaymentsService.WIPAY_CURRENCY} only (D-69) and the ${input.payableType} is in ${currency} (D-76)`,
+      );
+      await this.prisma.client.notification
+        .create({
+          data: {
+            businessId: input.businessId,
+            type: 'payment.refused',
+            title: 'WiPay payment not recorded',
+            body:
+              `WiPay reported a successful payment (transaction ${input.transactionId}) for ${input.payableType} ` +
+              `${input.payableId}, which is in ${currency}. WiPay takes ${PaymentsService.WIPAY_CURRENCY} only, so it ` +
+              'was not recorded. Check the payment in your WiPay account and record or refund it by hand.',
+            data: {
+              provider: 'wipay',
+              transactionId: input.transactionId,
+              payableType: input.payableType,
+              payableId: input.payableId,
+              currency,
+              total: input.total,
+              reason: 'currency',
+            },
+          },
+        })
+        .catch((e: unknown) =>
+          this.logger.error(`Could not notify business ${input.businessId} of refused WiPay transaction ${input.transactionId}: ${e instanceof Error ? e.message : e}`),
+        );
+    }
+    return {
+      success: false,
+      invoiceId: input.payableId,
+      message: `WiPay takes ${PaymentsService.WIPAY_CURRENCY} only: this ${input.payableType} is in ${currency}, so the payment was not recorded`,
+    };
   }
 
   async getPaypalClientToken(): Promise<{ clientToken: string }> {

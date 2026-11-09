@@ -29,6 +29,7 @@ import { BusinessHero } from "./components/business-hero";
 import { CatalogGrid } from "./components/catalog-grid";
 import { CartDrawer } from "./components/cart-drawer";
 import { CheckoutFlow } from "./components/checkout-flow";
+import { createCheckoutKeyring, postStorefrontCheckout } from "./components/checkout-request";
 import { TrustBar, SecurityFooter } from "./components/trust-bar";
 import { StoreSectionWrapper } from "./components/store-section-wrapper";
 import { OrderConfirmation } from "./components/order-confirmation";
@@ -567,6 +568,9 @@ function PublicBookingPageInner() {
   const pageUrl = typeof window !== "undefined" ? window.location.href : "";
   const _baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
+  // G6PUB-R3-STORE-ORDER-DOORS (RC2-4, V1-33): one retry key per checkout. A second press of Place Order for the same
+  // checkout (after an error or a dropped connection) is answered with the order the first one created, not a new one.
+  const checkoutKeyring = useMemo(() => createCheckoutKeyring(), []);
   const submitStoreOrder = useCallback(async (payload: {
     items: { productId: string; quantity: number }[];
     customer: { name: string; email?: string; phone?: string };
@@ -574,14 +578,11 @@ function PublicBookingPageInner() {
     shipping?: { zoneId?: string; address?: DeliveryAddress };
     paymentMethod: string;
     returnUrl?: string;
-  }): Promise<StoreOrderResponse | null> => {
-    const { data: orderRes, error: orderErr } = await apiPost<StoreOrderResponse>({
-      path: `/site/storefront/public/${encodeURIComponent(slug)}/checkout`,
-      body: payload,
-    });
-    if (orderErr) throw new Error(orderErr);
-    return orderRes ?? null;
-  }, [slug]);
+  }, opts?: { newAttempt?: boolean }): Promise<StoreOrderResponse | null> => {
+    // An explicit payment retry after the provider failed is a new checkout attempt (a new order), as before.
+    if (opts?.newAttempt) checkoutKeyring.reset();
+    return postStorefrontCheckout(slug, payload, checkoutKeyring.keyFor(payload));
+  }, [slug, checkoutKeyring]);
 
   const handleStoreOrderResult = useCallback((
     storeOrder: StoreOrderResponse | null,
@@ -778,6 +779,8 @@ function PublicBookingPageInner() {
       storeOrder = await submitStoreOrder(orderPayload);
       const handled = handleStoreOrderResult(storeOrder, bookingRefs, data.paymentMethod, data.shippingZoneId, orderPayload, computedServiceDetails);
       if (handled) return;
+      // The order is placed: the next checkout gets its own key.
+      checkoutKeyring.reset();
     } else {
       setConfirmedOrderItems([...cart]);
       setConfirmedOrderTotal(cartTotal);
@@ -805,7 +808,7 @@ function PublicBookingPageInner() {
     }
 
     try {
-      const storeOrder = await submitStoreOrder(failedOrderPayload);
+      const storeOrder = await submitStoreOrder(failedOrderPayload, { newAttempt: true });
       handleStoreOrderResult(
         storeOrder,
         completedBookingResults,
