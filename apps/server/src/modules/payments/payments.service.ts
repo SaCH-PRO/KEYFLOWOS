@@ -3,7 +3,15 @@ import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
-import { InvoiceWorkflowService, balanceOfStoredRows, isShareableInvoiceStatus, ownTenantPayments } from '../commerce/invoice-workflow.service';
+import {
+  InvoiceWorkflowService,
+  appliedCreditsOf,
+  balanceOfStoredRows,
+  creditAwareBalance,
+  isCreditAwareShareableInvoiceStatus,
+  ownTenantPayments,
+  type CreditAwareBalance,
+} from '../commerce/invoice-workflow.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { normalizeCurrency } from '../finance/posting.service';
 import { fromCents, subtractMoney, toCents } from '../commerce/money';
@@ -717,18 +725,17 @@ export class PaymentsService {
    * refusal is one 404 body, the one an unknown token gets, and nothing
    * downstream (no provider, no row) is reached.
    *
-   * W4-CREDIT-AWARE-READERS (V1-44 review CR-V44-1, reader half; D-78): this
-   * gate stays SHAREABLE_INVOICE_STATUSES, not the credit-aware list the
-   * commerce share surfaces read (isCreditAwareShareableInvoiceStatus). A
-   * PARTIALLY_CREDITED invoice is shown on the token pay page with what its
-   * APPLIED credit notes leave owing, and takes the offline intent there
-   * (CommerceService), but the routes behind this gate do not net credits:
-   * the status poll serves a credit-unaware `remaining` (invoicePaymentStatus)
-   * and the provider checkouts charge invoice.total (assertInvoicePayable
-   * refuses a credited invoice). So a credited invoice reads as absent here,
-   * no gateway is offered for it and no provider is reached, rather than a
-   * false amount due or a checkout for the credited part
-   * (credit-note-reversal CN-32 / CN-35; the residual is that suite's it.todo).
+   * W5-CREDIT-AWARE-PAY (V1-44 review CR-V44-1, the rest W4-CREDIT-AWARE-
+   * READERS left closed; D-13, D-75, D-78): the gate is the credit-aware list
+   * the commerce share surfaces read (isCreditAwareShareableInvoiceStatus),
+   * now that every route behind it nets the invoice's own APPLIED credit
+   * notes: the status poll states the credited figure and the remainder
+   * (invoicePaymentStatus), and every provider checkout asks for that
+   * remainder, never invoice.total (checkoutAmountOf). So a PARTIALLY_CREDITED
+   * invoice is payable here for exactly what its credits leave owing, and
+   * paying it leaves the invoice PARTIALLY_CREDITED (D-78). FULLY_CREDITED
+   * owes nothing and still reads as absent (credit-note-reversal CN-35,
+   * CAP-05).
    */
   private async payLinkInvoice(token: string): Promise<{ invoiceId: string; businessId: string }> {
     const link = await this.commerceService.getPaymentLinkByToken(token);
@@ -737,7 +744,7 @@ export class PaymentsService {
       where: { id: link.invoiceId, businessId: link.businessId, deletedAt: null },
       select: { status: true },
     });
-    if (!invoice || !isShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Invoice not found');
+    if (!invoice || !isCreditAwareShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Invoice not found');
     return { invoiceId: link.invoiceId, businessId: link.businessId };
   }
 
@@ -869,11 +876,17 @@ export class PaymentsService {
    * must call this before creating an external session — DRAFT invoices
    * MUST NOT be paid (they have no commitment), and PAID/VOID/FAILED are
    * terminal. Allowed states: SENT, OVERDUE, PARTIALLY_PAID, PENDING.
+   *
+   * W5-CREDIT-AWARE-PAY (CR-V44-1; D-78): and PARTIALLY_CREDITED, which owes
+   * what its APPLIED credit notes leave and is collected for exactly that
+   * (checkoutAmountOf answers 409 once nothing is owed). FULLY_CREDITED owes
+   * nothing: 409, before any provider is called.
    */
   private assertInvoicePayable(status: string, invoiceId: string): void {
-    const allowed = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PENDING']);
+    const allowed = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PENDING', 'PARTIALLY_CREDITED']);
     if (allowed.has(status)) return;
     if (status === 'PAID') throw new BadRequestException('Invoice is already paid');
+    if (status === 'FULLY_CREDITED') throw new ConflictException('Invoice is fully credited; nothing is owed');
     if (status === 'VOID') throw new BadRequestException('Invoice is void');
     if (status === 'DRAFT') {
       throw new BadRequestException(
@@ -881,6 +894,53 @@ export class PaymentsService {
       );
     }
     throw new BadRequestException(`Invoice ${invoiceId} is not in a payable state (${status})`);
+  }
+
+  /**
+   * W5-CREDIT-AWARE-PAY (V1-44 review CR-V44-1 rest; D-13, D-75, D-78): the
+   * invoice's balance as the share views state it: its own-tenant payment
+   * rows (Payment has no FK to Business, M31; D-75) read by
+   * balanceOfStoredRows, net of its own APPLIED credit notes (appliedCreditsOf:
+   * only for a credited status, only the invoice's business), in integer
+   * cents (creditAwareBalance). `remaining` is what is still owed and
+   * `credited` the notes netted; with nothing credited it is the balance
+   * unchanged. `exceptProviderPaymentId` leaves out the row one provider
+   * transaction recorded, so a redelivery of that transaction reads the
+   * remainder its checkout asked for (handleWipayCallback).
+   */
+  private async creditAwareBalanceOf(
+    invoice: { id: string; businessId: string; status: string; total: unknown; currency: string | null },
+    exceptProviderPaymentId?: string,
+  ): Promise<CreditAwareBalance> {
+    const rows = await this.prisma.client.payment.findMany({
+      where: { invoiceId: invoice.id, businessId: invoice.businessId },
+      select: { amount: true, status: true, providerPaymentId: true },
+    });
+    const own = exceptProviderPaymentId ? rows.filter((p) => p.providerPaymentId !== exceptProviderPaymentId) : rows;
+    const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, invoice);
+    return creditAwareBalance(balanceOfStoredRows(Number(invoice.total), own, invoice.currency), credited);
+  }
+
+  /**
+   * W5-CREDIT-AWARE-PAY (CR-V44-1 rest; D-13, D-78): the amount every invoice
+   * checkout asks its provider for (Stripe, WiPay, PayPal) and the PayPal
+   * capture binds: the remainder net of payments received and APPLIED credit
+   * notes (creditAwareBalanceOf), never invoice.total, which charged a
+   * part-paid or part-credited invoice again for what it no longer owes. With
+   * nothing owed (a part-credited invoice whose remainder is paid stays
+   * PARTIALLY_CREDITED, D-78) the checkout is refused 409 before any provider
+   * is called.
+   */
+  private async checkoutAmountOf(invoice: {
+    id: string;
+    businessId: string;
+    status: string;
+    total: unknown;
+    currency: string | null;
+  }): Promise<number> {
+    const { remaining } = await this.creditAwareBalanceOf(invoice);
+    if (toCents(remaining) <= 0) throw new ConflictException('Invoice is already paid');
+    return remaining;
   }
 
   async createStripeCheckout(
@@ -897,6 +957,8 @@ export class PaymentsService {
     });
     if (!invoice) throw new BadRequestException('Invoice not found');
     this.assertInvoicePayable(invoice.status, invoiceId);
+    // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): the remainder net of payments and APPLIED credit notes.
+    const due = await this.checkoutAmountOf(invoice);
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const secretKey = meta.stripeSecretKey || process.env.STRIPE_SECRET_KEY;
@@ -923,7 +985,7 @@ export class PaymentsService {
     }
 
     const currency = (invoice.currency || 'USD').toLowerCase();
-    const amount = Math.round(Number(invoice.total) * 100);
+    const amount = toCents(due);
     const description = `Invoice ${invoice.invoiceNumber || invoice.id} — ${invoice.business.name || ''}`.trim();
 
     const body = new URLSearchParams();
@@ -2044,17 +2106,28 @@ export class PaymentsService {
     remaining: number;
     currency: string;
     lastPaymentAt: Date | null;
+    credited?: number;
   }> {
     await this.assertBareIdInvoiceOpen(invoiceId);
     return this.invoicePaymentStatus(invoiceId);
   }
 
+  /**
+   * W5-CREDIT-AWARE-PAY (V1-44 review CR-V44-1 rest; D-13, D-75, D-78): the
+   * credit-aware shareable statuses (PARTIALLY_CREDITED as well), and
+   * `remaining` net of the invoice's own APPLIED credit notes, as the token
+   * view and pay page state it (creditAwareBalance over appliedCreditsOf). A
+   * credited invoice also carries `credited`, the notes netted, so the pay
+   * page can show total, paid, credited and due adding up; an invoice with
+   * nothing credited keeps the five keys. FULLY_CREDITED reads as absent.
+   */
   private async invoicePaymentStatus(invoiceId: string): Promise<{
     status: string;
     paid: number;
     remaining: number;
     currency: string;
     lastPaymentAt: Date | null;
+    credited?: number;
   }> {
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
@@ -2066,7 +2139,7 @@ export class PaymentsService {
         payments: { select: { amount: true, status: true, createdAt: true, businessId: true } },
       },
     });
-    if (!invoice || !isShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Invoice not found');
+    if (!invoice || !isCreditAwareShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Invoice not found');
     // DEP-R3-OWN-ROW-READS (D-75): the invoice's own-tenant rows (M31), as the
     // pay page's intent decides from them: a row of another business told the
     // customer nothing was due (RC2-DEP-1) and dated a payment the business
@@ -2078,7 +2151,12 @@ export class PaymentsService {
     // `paid` is the net received, max(0, net), the figure the public receipt
     // and the token view state. It was computeBalance's gross: 60 + 40 paid
     // with the 40 refunded polled "paid 100" beside a receipt of 60.
-    const balance = balanceOfStoredRows(Number(invoice.total), own, invoice.currency);
+    const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, {
+      id: invoiceId,
+      businessId: invoice.businessId,
+      status: invoice.status,
+    });
+    const balance = creditAwareBalance(balanceOfStoredRows(Number(invoice.total), own, invoice.currency), credited);
     let lastPaymentAt: Date | null = null;
     for (const p of own) {
       if (p.status !== 'SUCCESSFUL') continue;
@@ -2090,6 +2168,7 @@ export class PaymentsService {
       remaining: balance.remaining,
       currency: invoice.currency,
       lastPaymentAt,
+      ...(balance.credited > 0 ? { credited: balance.credited } : {}),
     };
   }
 
@@ -2106,6 +2185,9 @@ export class PaymentsService {
     this.assertInvoicePayable(invoice.status, invoiceId);
     PaymentsService.assertWipayCurrency(invoice.currency, 'invoice');
     PaymentsService.assertWipayReturnUrl(returnUrl);
+    // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): the remainder net of payments and APPLIED credit notes,
+    // the amount handleWipayCallback verifies WiPay's proof against.
+    const due = await this.checkoutAmountOf(invoice);
 
     const { apiUrl, environment, developerId, accountNumber } = PaymentsService.wipayCheckoutTarget(invoice.business.metaData);
 
@@ -2116,7 +2198,7 @@ export class PaymentsService {
     const contactPhone = invoice.contact?.phone || '0000000000';
 
     const params = new URLSearchParams();
-    params.append('total', invoice.total.toFixed(2));
+    params.append('total', due.toFixed(2));
     params.append('phone', contactPhone);
     params.append('email', contactEmail);
     params.append('name', contactName);
@@ -2271,6 +2353,28 @@ export class PaymentsService {
     if (!onAllowedOrigin) throw new BadRequestException('Invalid return URL');
   }
 
+  /**
+   * W5-CREDIT-AWARE-PAY (V1-44 review CR-V44-1 rest; D-13, D-78): the totals
+   * this server can have asked WiPay for on an invoice, which a success
+   * callback's keyed proof is verified against (the callback's own `total`
+   * is never trusted, V1-05). First the remainder createWipayCheckout asks
+   * for (checkoutAmountOf: net of the payments received and the APPLIED
+   * credit notes), read without the row this transaction may already have
+   * recorded, so its redelivery verifies against the same amount and reaches
+   * the duplicate answer. Then the whole total, which a checkout made before
+   * W5-CREDIT-AWARE-PAY asked for: WiPay took that money, and the proof binds
+   * it. Both are amounts this server requested; a proof over any other
+   * amount is refused as before.
+   */
+  private async wipayRequestedInvoiceTotals(
+    invoice: { id: string; businessId: string; status: string; total: unknown; currency: string },
+    transactionId: string | undefined,
+  ): Promise<number[]> {
+    const total = Number(invoice.total);
+    const { remaining } = await this.creditAwareBalanceOf(invoice, transactionId);
+    return toCents(remaining) > 0 && toCents(remaining) !== toCents(total) ? [remaining, total] : [total];
+  }
+
   /** Whether `hash` is WiPay's keyed response hash for this transaction (constant-time compare). */
   private static wipayProofVerifies(
     apiKey: string | null,
@@ -2347,10 +2451,14 @@ export class PaymentsService {
     }
 
     const businessId = invoice?.businessId ?? order!.businessId;
-    // The total this server sent WiPay for this payable (createWipayCheckout, createStorePayment).
-    const requestedTotal = invoice ? Number(invoice.total) : Number(order!.total);
     const apiKey = PaymentsService.wipayApiKey(invoice ? invoice.business.metaData : order!.business.metaData);
-    if (!PaymentsService.wipayProofVerifies(apiKey, transaction_id, requestedTotal, hash)) {
+    // The total this server sent WiPay for this payable (createWipayCheckout, createStorePayment).
+    // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): for an invoice that is the remainder the checkout asked
+    // for (wipayRequestedInvoiceTotals), or the whole total a checkout made before it asked for.
+    const requestedTotal = (invoice ? await this.wipayRequestedInvoiceTotals(invoice, transaction_id) : [Number(order!.total)]).find((t) =>
+      PaymentsService.wipayProofVerifies(apiKey, transaction_id, t, hash),
+    );
+    if (requestedTotal === undefined) {
       this.logger.error(
         `WiPay callback for ${order_id} refused: ${apiKey ? 'its hash is not WiPay\'s keyed response hash' : 'no WiPay API key is configured to verify it'}`,
       );
@@ -2568,6 +2676,9 @@ export class PaymentsService {
 
     if (!invoice) throw new Error('Invoice not found');
     this.assertInvoicePayable(invoice.status, invoiceId);
+    // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): the remainder net of payments and APPLIED credit notes,
+    // the amount capturePaypalOrder binds the order to.
+    const due = await this.checkoutAmountOf(invoice);
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const paypalClientId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
@@ -2590,7 +2701,7 @@ export class PaymentsService {
                 // PayPal does not offer every currency (TTD among them): it refuses such an order and the checkout
                 // fails closed here; the up-front 400 is held by pay-link-token-gate TG-14/TG-14b (review V05-COR-4).
                 currencyCode: normalizeCurrency(invoice.currency),
-                value: invoice.total.toFixed(2),
+                value: due.toFixed(2),
               },
             },
           ],
@@ -2816,6 +2927,10 @@ export class PaymentsService {
 
     if (!invoice) throw new Error('Invoice not found');
     this.assertInvoicePayable(invoice.status, invoiceId);
+    // W5-CREDIT-AWARE-PAY (CR-V44-1; D-13, D-78): the amount createPaypalOrder asked for (the remainder
+    // net of payments and APPLIED credit notes, never invoice.total): the order must be for it, and it is
+    // what is recorded.
+    const due = await this.checkoutAmountOf(invoice);
 
     const meta = (invoice.business.metaData as Record<string, any>) || {};
     const paypalClientId = meta.paypalClientId || process.env.PAYPAL_CLIENT_ID;
@@ -2825,7 +2940,7 @@ export class PaymentsService {
     if (!paypal) throw new Error('PayPal is not configured');
 
     // V1-46b review (SEC-V46B-3): before anything is captured or written.
-    await this.assertPaypalOrderForInvoice(paypal.ordersController, orderId, invoice);
+    await this.assertPaypalOrderForInvoice(paypal.ordersController, orderId, { id: invoice.id, total: due, currency: invoice.currency });
 
     // Review (SEC-V15C-2, CR-V15C-1): this try covers PayPal's capture call
     // alone. Only a capture that did not happen is recorded FAILED and
@@ -2845,7 +2960,7 @@ export class PaymentsService {
           data: {
             provider: 'paypal',
             providerPaymentId: `paypal_fail_${orderId}_${Date.now()}`,
-            amount: invoice.total,
+            amount: due,
             currency: invoice.currency,
             status: 'FAILED',
             invoiceId,
@@ -2854,7 +2969,7 @@ export class PaymentsService {
         });
 
         this.paypalConnector?.emitPaymentFailed(invoice.businessId, {
-          amount: Number(invoice.total),
+          amount: due,
           currency: invoice.currency,
           error: errMsg,
           invoiceId,
@@ -2888,7 +3003,7 @@ export class PaymentsService {
           const created = await this.createPaymentWithPosting({
             provider: 'paypal',
             providerPaymentId: captureId,
-            amount: invoice.total,
+            amount: due,
             currency: invoice.currency,
             status: 'SUCCESSFUL',
             invoiceId,
@@ -2917,7 +3032,7 @@ export class PaymentsService {
           providerPaymentId: captureId,
           invoiceId,
           businessId: invoice.businessId,
-          amount: Number(invoice.total),
+          amount: due,
           currency: invoice.currency,
         });
         throw new ConflictException(
@@ -2935,7 +3050,7 @@ export class PaymentsService {
       if (recorded === 'here') {
         const payer = result.payer as { emailAddress?: string; name?: { givenName?: string; surname?: string } } | undefined;
         this.paypalConnector?.emitPaymentReceived(invoice.businessId, {
-          amount: Number(invoice.total),
+          amount: due,
           currency: invoice.currency,
           invoiceId,
           payerEmail: payer?.emailAddress,
@@ -2968,6 +3083,10 @@ export class PaymentsService {
    * currency, so an order in another currency (every order was USD, a TTD
    * invoice's included) recorded X TTD for X USD taken; an order whose
    * currency cannot be read is refused too.
+   *
+   * W5-CREDIT-AWARE-PAY (CR-V44-1; D-13): `total` is the amount the order was
+   * made for, the remainder createPaypalOrder asks for (checkoutAmountOf),
+   * not invoice.total; an order for any other amount is refused here.
    */
   private async assertPaypalOrderForInvoice(
     ordersController: OrdersController,
