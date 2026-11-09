@@ -31,7 +31,7 @@ import { RecordPaymentDto } from './dto/record-payment.dto';
 import { ConfirmPendingPaymentDto } from './dto/confirm-pending-payment.dto';
 import { buildQuoteEmailHtml } from './quote-email.template';
 import { assertQuoteStatusAgreement } from './quote-workflow';
-import { buildInvoiceEmailHtml } from './invoice-email.template';
+import { buildInvoiceEmailHtml, emailLineItems } from './invoice-email.template';
 import type { InvoiceForEmail } from './invoice-email.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { SKIP_BUSINESS_EVENT_KEY } from '../business-events/business-event.interceptor';
@@ -1501,11 +1501,9 @@ export class CommerceController {
         quoteNumber: quote.quoteNumber,
         quoteDate: new Date(quote.createdAt).toLocaleDateString('en-TT', { dateStyle: 'medium' }),
         expiryDate: quote.expiryDate ? new Date(quote.expiryDate).toLocaleDateString('en-TT', { dateStyle: 'medium' }) : null,
-        items: quote.items.map((item: { description: string; quantity: number; unitPrice: number }) => ({
-          description: item.description,
-          quantity: item.quantity,
-          unitPrice: item.unitPrice,
-        })),
+        // FOLLOW3-B5-EMAIL-LINE-TOTALS (D-13): each line carries its stored
+        // QuoteItem.total, which the template prints.
+        items: emailLineItems(quote.items),
         subtotal: quote.subtotal,
         taxRate: quote.taxRate,
         taxAmount: quote.taxAmount,
@@ -1594,11 +1592,10 @@ export class CommerceController {
       dueDate: invoice.dueDate
         ? new Date(invoice.dueDate).toLocaleDateString('en-TT', { dateStyle: 'medium' })
         : null,
-      items: (invoice.items ?? []).map((it) => ({
-        description: it.description,
-        quantity: Number(it.quantity),
-        unitPrice: Number(it.unitPrice),
-      })),
+      // FOLLOW3-B5-EMAIL-LINE-TOTALS (D-13): each line carries its stored
+      // InvoiceItem.total (V1-22 lineAmount), which the template prints, so the
+      // printed lines add up to the printed Subtotal.
+      items: emailLineItems(invoice.items),
       subtotal: Number(invoice.subtotal ?? invoice.total),
       taxRate: invoice.taxRate != null ? Number(invoice.taxRate) : null,
       taxAmount: invoice.taxAmount != null ? Number(invoice.taxAmount) : null,
