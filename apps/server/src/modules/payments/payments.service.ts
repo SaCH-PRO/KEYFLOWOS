@@ -1174,8 +1174,10 @@ export class PaymentsService {
       // carries its original's id in reference and must never match.
       // FOLLOW3-A3-REFUND-DOOR-TENANCY: a hand-recorded row (recordedBy set,
       // or a manual_ id: the manual payment route, KEY processPayment, the
-      // evidence confirm, which store the method typed as provider and any
-      // reference) is no provider evidence (the V1-15d rule of payments-ops):
+      // evidence confirm, which keep the method typed and any reference; since
+      // owner ruling D-55 a 'stripe' method is stored with provider 'manual',
+      // and rows stored before it carry provider 'stripe', so this rule still
+      // decides for them) is no provider evidence (the V1-15d rule of payments-ops):
       // it is never an original and never an ambiguity witness below, so a
       // member who typed another tenant's charge or payment_intent can neither
       // take that tenant's refund nor block it. Rows the provider's own
