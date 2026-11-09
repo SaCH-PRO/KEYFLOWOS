@@ -1503,7 +1503,10 @@ export class CommerceService {
             whatsapp: invoice.business.whatsapp,
           }
         : null,
-      paid: balance.paid,
+      // FOLLOW3-A4-PUBLIC-PAID-NET (CR-29b-1): the net received, max(0, net),
+      // the figure the public receipt states. It was the gross `paid`, so a
+      // refunded payment still read as paid on the customer's pay page.
+      paid: Math.max(0, balance.net),
       remaining: balance.remaining,
     };
   }
@@ -4853,10 +4856,11 @@ export class CommerceService {
    * amount per payment leaves here. `paidAt` only when the invoice is PAID.
    *
    * V1-29: a refund is a separate negative row (D-14), so `amountDue` is
-   * total - net. `amountPaid` stays computeBalance's gross `paid`, the figure
-   * the receipt and the status route serve too; with a refund on the invoice
-   * amountPaid + amountDue exceeds the total by the refunded amount. One
-   * public read contract for both is V1-36.
+   * total - net. FOLLOW3-A4-PUBLIC-PAID-NET (CR-29b-1): `amountPaid` is the
+   * net received, max(0, balanceOfStoredRows(...).net), the figure the public
+   * receipt states beside it on /public/invoice/[token] and the pay page and
+   * the status poll serve. It was computeBalance's gross `paid`: 60 + 40 paid
+   * with the 40 refunded showed "Paid 100" beside the receipt's "Received 60".
    */
   async getPaymentLinkBalance(invoiceId: string, businessId: string) {
     const invoice = await this.prisma.client.invoice.findFirst({
@@ -4872,7 +4876,7 @@ export class CommerceService {
     if (!invoice) return null;
     const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
     return {
-      amountPaid: balance.paid,
+      amountPaid: Math.max(0, balance.net),
       amountDue: balance.remaining,
       paidAt: invoice.status === 'PAID' ? invoice.paidAt ?? null : null,
     };

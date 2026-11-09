@@ -3,7 +3,7 @@ import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
-import { InvoiceWorkflowService, computeBalance, isShareableInvoiceStatus, ownTenantPayments } from '../commerce/invoice-workflow.service';
+import { InvoiceWorkflowService, balanceOfStoredRows, isShareableInvoiceStatus, ownTenantPayments } from '../commerce/invoice-workflow.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { normalizeCurrency } from '../finance/posting.service';
 import { fromCents, subtractMoney, toCents } from '../commerce/money';
@@ -1788,7 +1788,13 @@ export class PaymentsService {
     // customer nothing was due (RC2-DEP-1) and dated a payment the business
     // never received.
     const own = ownTenantPayments(invoice);
-    const balance = computeBalance(Number(invoice.total), own, invoice.currency);
+    // FOLLOW3-A4-PUBLIC-PAID-NET (CR-29b-1): the stored rows as every balance
+    // reader reads them (balanceOfStoredRows: a pre-V1-29 flipped REFUNDED row
+    // is its payment plus its refund, not a refund subtracted twice), and
+    // `paid` is the net received, max(0, net), the figure the public receipt
+    // and the token view state. It was computeBalance's gross: 60 + 40 paid
+    // with the 40 refunded polled "paid 100" beside a receipt of 60.
+    const balance = balanceOfStoredRows(Number(invoice.total), own, invoice.currency);
     let lastPaymentAt: Date | null = null;
     for (const p of own) {
       if (p.status !== 'SUCCESSFUL') continue;
@@ -1796,7 +1802,7 @@ export class PaymentsService {
     }
     return {
       status: invoice.status,
-      paid: balance.paid,
+      paid: Math.max(0, balance.net),
       remaining: balance.remaining,
       currency: invoice.currency,
       lastPaymentAt,
