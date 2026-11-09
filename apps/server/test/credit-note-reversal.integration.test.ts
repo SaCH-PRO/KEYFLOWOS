@@ -56,10 +56,10 @@
  *   CN-15 SEC-V44-5 (service) a void that names its member records that member on the reversal
  *   CN-16 CR-V44-1 a PARTIALLY_CREDITED invoice collects what its credits leave owing (the
  *         payment, its posting and the receivable to 0 commit; the status stays credited);
- *         money beyond it, the credit-unaware total mark-paid records, and any payment on a
+ *         money beyond it, a payment of the whole total (what mark-paid recorded before the
+ *         CR-V44-1 reader half: now the remainder net of credits, CN-34), and any payment on a
  *         FULLY_CREDITED invoice -> 409 with nothing written
- *   it.todo: the credit-unaware share / pay-link / mark-paid readers in commerce.service.ts
- *         and payments.service.ts (CR-V44-1 reader half)
+ *   (the CR-V44-1 reader half: CN-32..CN-35 below, W4-CREDIT-AWARE-READERS)
  *
  * V1-44b-CREDIT-NOTE-ROUTES-AND-INTAKE (the V1-44 review halves outside its write set):
  *   CN-17 SEC-V44-1 (route half, D-57, D-46) every credit-note write (create, PATCH, apply, void,
@@ -124,6 +124,23 @@
  *         stays credited (D-78); refund-then-credit and credit-then-refund end with one paidAt
  *         (CN-31); a reconcile that leaves the payment settling the total keeps it, and another
  *         business's REFUNDED row on the invoice unsettles nothing (RC-DEP-2)
+ *
+ * W4-CREDIT-AWARE-READERS (the V1-44 review todo CR-V44-1, reader half; D-13, D-28, D-75, D-78),
+ * on a second app (CommerceController + PaymentsController, see its describe):
+ *   CN-32 RED-BEFORE a 100 invoice with 20 paid and 30 credited (PARTIALLY_CREDITED) is shown on
+ *         the share surfaces with what is due net of the APPLIED credit notes: the bare-id public
+ *         view and the token pay page remaining 50, the token view amountDue 50 (base: 404 /
+ *         not_found). Another business's APPLIED note and payment row on it move nothing (D-75).
+ *         The token money routes behind payLinkInvoice (status poll, gateways, checkout) stay
+ *         closed 404: their readers are credit-unaware and outside the write set (it.todo below)
+ *   CN-33 RED-BEFORE the token offline intent is accepted on it and capped at the 50 net of
+ *         credits (INTENT_PAYABLE_STATUSES); no status move, no posting
+ *   CN-34 RED-BEFORE mark-paid records exactly the 50 the credits leave owing (one SUCCESSFUL
+ *         mark-paid row and its posting; base: 409, it recorded the credit-unaware 80) and the
+ *         invoice stays PARTIALLY_CREDITED (D-78) with the receivable at 0; then the share
+ *         surfaces show 0 due, the intent is 409 and a second mark-paid writes nothing
+ *   CN-35 a FULLY_CREDITED invoice stays unpayable: mark-paid 409 with nothing written; the
+ *         share surfaces, the intent and the token money routes answer 404 (not shareable)
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor, FinanceController (credit-note routes), CreditNoteService,
@@ -196,6 +213,7 @@ async function cleanup() {
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM credit_notes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
+    `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -900,7 +918,9 @@ describe('V1-44 review: who may apply, the DRAFT-only delete, the void actor, co
     expect(await db.payment.count({ where: { invoiceId: inv } })).toBe(1);
     expect(await ledgerCounts(ID.biz)).toEqual(before);
 
-    // What mark-paid records today (the whole total; it does not net credits) is refused, not over-collected.
+    // CR-V44-1: a payment of the whole total (what mark-paid recorded before the W4-CREDIT-AWARE-READERS
+    // reader half, which did not net credits) is refused, not over-collected. Mark-paid now records the
+    // remainder net of the APPLIED credit notes and leaves the invoice PARTIALLY_CREDITED (CN-34, D-78).
     const inv2 = await seedInvoice('collect_markpaid', 'SENT');
     const note2 = await createNote(inv2, 40);
     expect((await applyNote(note2.id)).status).toBe(201);
@@ -919,10 +939,8 @@ describe('V1-44 review: who may apply, the DRAFT-only delete, the void actor, co
     expect((await invoiceRow(inv3)).status).toBe('FULLY_CREDITED');
   });
 
-  // Outside the V1-44 and V1-44b write sets (the route halves moved to CN-17..CN-19 below):
-  it.todo(
-    'CR-V44-1 (reader half): the share surfaces, the token pay link and mark-paid net the APPLIED credit notes (commerce.service.ts markPaidRemaining / public views / INTENT_PAYABLE_STATUSES, payments.service.ts payLinkInvoice); until then PARTIALLY_CREDITED stays out of SHAREABLE_INVOICE_STATUSES and mark-paid is refused 409 (CN-16) rather than collecting the credited part again',
-  );
+  // The CR-V44-1 reader half (the share surfaces, the token pay link, mark-paid) is live as
+  // CN-32..CN-35 (W4-CREDIT-AWARE-READERS, at the end of this file).
 });
 
 /**
@@ -1658,5 +1676,322 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
   // PARTIALLY_CREDITED with its paidAt; refundPayment (the manual door, 'keep') ends the same position with none (CRB-CR-1 (c)).
   it.todo(
     "SEC-CRP-1 / CR-REG-2 W4-CREDIT-REFUND-PAIDAT CR-V44-2 (D-14, D-78), provider refund door: a Stripe or PayPal refund webhook on a credited invoice that leaves more received than its credits leave owing (paid 100, credited 30, 10 refunded) clears its paidAt as the manual refund door does; today processStripeRefund and processPaypalRefund (payments.service.ts) reconcile without onIllegalTransition 'keep', reconcileCreditedFromPayments refuses 409 before the paidAt rule, the webhook swallows it and the stale paidAt stays until the next credit move clears it (CN-29, CN-31); follow-up: those two doors reconcile under 'keep'",
+  );
+});
+
+/**
+ * W4-CREDIT-AWARE-READERS (the V1-44 review todo CR-V44-1, reader half; owner
+ * rulings D-13, D-28, D-75, D-78). The workflow half (reconcileCreditedFromPayments)
+ * already let a PARTIALLY_CREDITED invoice collect what its APPLIED credit notes
+ * leave owing; the readers did not net those notes, so PARTIALLY_CREDITED was kept
+ * off the share surfaces and mark-paid (which recorded total - paid) was refused
+ * 409 (CN-16) rather than collecting the credited part again.
+ *
+ * A second app on the same database: CommerceController + PaymentsController
+ * behind the real AuthGuard, BusinessGuard, ModuleScopeGuard and
+ * PublicRateLimitGuard (real Redis, its keys namespaced to this suite's prefix)
+ * and the global TenantInterceptor and GlobalHttpExceptionFilter; the real
+ * CommerceService, PaymentsService, InvoiceWorkflowService,
+ * RevenuePostingService, PostingService and ChartOfAccountsSeederService. CRM,
+ * timeline, stats, subscriptions and the AI / Drive collaborators are stubs off
+ * the money path. Payments are recorded through the operator route and credits
+ * through the credit-note routes of the first app.
+ */
+describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the share surfaces, the token pay link and mark-paid net the APPLIED credit notes', () => {
+  let commerceApp: any;
+  let redis: any;
+  const previousRateLimitNs = process.env.RATE_LIMIT_KEY_NAMESPACE;
+
+  async function clearRateLimits() {
+    if (!redis) return;
+    const keys: string[] = await redis.keys(`pub_rate_limit:${P}:*`);
+    if (keys.length) await redis.del(...keys);
+  }
+
+  beforeAll(async () => {
+    process.env.RATE_LIMIT_KEY_NAMESPACE = P;
+    const { Test } = await import('@nestjs/testing');
+    const { ValidationPipe } = await import('@nestjs/common');
+    const { EventEmitter2 } = await import('@nestjs/event-emitter');
+    const IORedis = (await import('ioredis')).default;
+    const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+    const { PublicRateLimitGuard } = await import('../src/core/guards/public-rate-limit.guard');
+    const { REDIS_CLIENT } = await import('../src/core/redis/redis.constants');
+    const { TeamAuditInterceptor } = await import('../src/core/interceptors/team-audit.interceptor');
+    const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+    const { PlanLimitGuard } = await import('../src/modules/subscriptions/plan-limit.guard');
+    const { SubscriptionsService } = await import('../src/modules/subscriptions/subscriptions.service');
+    const { CommerceController } = await import('../src/modules/commerce/commerce.controller');
+    const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+    const { PaymentsController } = await import('../src/modules/payments/payments.controller');
+    const { PaymentsService } = await import('../src/modules/payments/payments.service');
+    const { CommerceStatsService } = await import('../src/modules/commerce/commerce-stats.service');
+    const { InvoiceWorkflowService } = await import('../src/modules/commerce/invoice-workflow.service');
+    const { InvoiceReceiptBuilderService } = await import('../src/modules/commerce/invoice-receipt-builder.service');
+    const { GmailService } = await import('../src/modules/commerce/gmail.service');
+    const { CommerceVisionService } = await import('../src/modules/commerce/commerce-vision.service');
+    const { StoreReadinessService } = await import('../src/modules/commerce/store-readiness.service');
+    const { PaymentEvidenceService } = await import('../src/modules/commerce/payment-evidence.service');
+    const { DocumentIntelligenceService } = await import('../src/modules/ai/document-intelligence.service');
+    const { GoogleDriveService } = await import('../src/modules/google-drive/google-drive.service');
+    const { TimeEntryService } = await import('../src/modules/time-tracking/time-entry.service');
+    const { CatalogService } = await import('../src/modules/catalog/catalog.service');
+    const { PublicEventsService } = await import('../src/modules/public-events/public-events.service');
+    const { CrmService } = await import('../src/modules/crm/crm.service');
+    const { EvidenceService } = await import('../src/modules/evidence/evidence.service');
+    const { TaskAssignmentService } = await import('../src/modules/task-assignments/task-assignment.service');
+    const { RevenuePostingService } = await import('../src/modules/finance/revenue-posting.service');
+    const { PostingService } = await import('../src/modules/finance/posting.service');
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
+    const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+
+    redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
+    const moduleRef = await Test.createTestingModule({
+      controllers: [CommerceController, PaymentsController],
+      providers: [
+        PrismaService,
+        AuthGuard,
+        BusinessGuard,
+        ModuleScopeGuard,
+        PublicRateLimitGuard,
+        PlanLimitGuard,
+        TeamAuditInterceptor,
+        { provide: REDIS_CLIENT, useValue: redis },
+        CommerceService,
+        PaymentsService,
+        InvoiceWorkflowService,
+        InvoiceReceiptBuilderService,
+        RevenuePostingService,
+        PostingService,
+        ChartOfAccountsSeederService,
+        // COGS: no fixture invoice carries a product line, so nothing is sold.
+        { provide: ExpensePostingService, useValue: { onProductSold: async () => null } },
+        { provide: EventEmitter2, useValue: recorder },
+        { provide: CrmService, useValue: { logContactEvent: async () => null } },
+        { provide: EvidenceService, useValue: {} },
+        { provide: TaskAssignmentService, useValue: {} },
+        { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
+        { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
+        { provide: CatalogService, useValue: {} },
+        { provide: PublicEventsService, useValue: {} },
+        { provide: TimelineService, useValue: { recordEvent: async () => null } },
+        { provide: TimeEntryService, useValue: {} },
+        { provide: GmailService, useValue: {} },
+        { provide: CommerceVisionService, useValue: {} },
+        { provide: StoreReadinessService, useValue: {} },
+        PaymentEvidenceService,
+        { provide: DocumentIntelligenceService, useValue: {} },
+        { provide: GoogleDriveService, useValue: {} },
+      ],
+    }).compile();
+    commerceApp = moduleRef.createNestApplication();
+    // Identity attachment only. No guard is overridden.
+    commerceApp.use(async (req: any, _res: any, next: any) => {
+      const header = req.headers[HEADER];
+      const id = typeof header === 'string' ? header : undefined;
+      if (id && id.startsWith(P)) {
+        const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+        if (user) req.user = { id: user.id, email: user.email, role: user.role };
+      }
+      next();
+    });
+    commerceApp.useGlobalInterceptors(new TenantInterceptor(moduleRef.get(PrismaService)));
+    commerceApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+    commerceApp.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+    await commerceApp.init();
+    await clearRateLimits();
+  }, 180_000);
+
+  afterAll(async () => {
+    if (commerceApp) await commerceApp.close();
+    if (redis) {
+      try { await clearRateLimits(); } catch { /* best-effort */ }
+      await redis.quit();
+    }
+    if (previousRateLimitNs === undefined) delete process.env.RATE_LIMIT_KEY_NAMESPACE;
+    else process.env.RATE_LIMIT_KEY_NAMESPACE = previousRateLimitNs;
+  });
+
+  const c = () => request(commerceApp.getHttpServer());
+  /** The bare-id public read, anonymous (getInvoiceForViewer's projection branch). */
+  const publicView = (inv: string) => c().get(`/commerce/invoices/${inv}`);
+  /** The customer pay page's read (/pay/link/[token]). */
+  const payPage = (token: string) => c().get(`/commerce/public/invoice-link/${encodeURIComponent(token)}/pay`);
+  /** The public token view (/public/invoice/[token]): the invoice block plus `balance`. */
+  const tokenView = (token: string) => c().get(`/commerce/public/invoice-link/${encodeURIComponent(token)}`);
+  const intent = (token: string, body: Record<string, unknown>) =>
+    c().post(`/commerce/public/invoice-link/${encodeURIComponent(token)}/payment-intent`).send(body);
+  const tokenStatus = (token: string) => c().get(`/payments/public/invoice-link/${encodeURIComponent(token)}/status`);
+  const tokenGateways = (token: string) => c().get(`/payments/public/invoice-link/${encodeURIComponent(token)}/gateways`);
+  const tokenCheckout = (token: string) =>
+    c().post(`/payments/public/invoice-link/${encodeURIComponent(token)}/checkout`).send({ gateway: 'wipay', returnUrl: 'https://example.test/return' });
+  const markPaid = (inv: string, actor = ID.owner) => c().patch(`/commerce/invoices/${inv}/paid`).set(HEADER, actor).send({ businessId: ID.biz });
+  const recordPaymentRoute = (inv: string, amount: number, key: string) =>
+    c().post(`/commerce/businesses/${ID.biz}/invoices/${inv}/payments`).set(HEADER, ID.owner).send({ amount, method: 'cash', idempotencyKey: `${P}${key}` });
+  const createLink = (inv: string) => c().post(`/commerce/businesses/${ID.biz}/invoices/${inv}/payment-link`).set(HEADER, ID.owner).send({});
+
+  async function paymentsOf(invoiceId: string): Promise<any[]> {
+    return db.payment.findMany({ where: { invoiceId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  }
+
+  /** A 100 invoice with a live pay link, `paid` recorded through the operator route, then `credited` applied. */
+  async function seedCreditedWithLink(key: string, paid: number, credited: number): Promise<{ inv: string; token: string }> {
+    const inv = await seedInvoice(key, 'SENT');
+    const link = await createLink(inv);
+    expect(link.status, JSON.stringify(link.body)).toBe(201);
+    if (paid > 0) {
+      const res = await recordPaymentRoute(inv, paid, `${key}_pay`);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+    }
+    const note = await createNote(inv, credited);
+    expect((await applyNote(note.id)).status).toBe(201);
+    emitted.length = 0;
+    return { inv, token: link.body.token };
+  }
+
+  let A: { inv: string; token: string };
+
+  it("CN-32 RED-BEFORE W4-CREDIT-AWARE-READERS CR-V44-1 (D-13, D-75): a 100 invoice with 20 paid and 30 credited shows 50 due on the bare-id public view, the token pay page and the token view; another business's APPLIED note and payment on it move nothing; the credit-unaware token money routes stay closed 404", async () => {
+    A = await seedCreditedWithLink('cr_readers', 20, 30);
+    expect((await invoiceRow(A.inv)).status).toBe('PARTIALLY_CREDITED');
+
+    // RED-BEFORE (pkt/W4-CREDIT-REFUND-PAIDAT-repair 18014bef): 404, PARTIALLY_CREDITED was not shareable.
+    const view = await publicView(A.inv);
+    expect(view.status, JSON.stringify(view.body)).toBe(200);
+    expect(view.body).toMatchObject({ status: 'PARTIALLY_CREDITED', total: TOTAL, paid: 20, remaining: 50 });
+    const page = await payPage(A.token);
+    expect(page.status, JSON.stringify(page.body)).toBe(200);
+    expect(page.body).toMatchObject({ status: 'PARTIALLY_CREDITED', total: TOTAL, paid: 20, remaining: 50 });
+    expect(page.body.id, 'the token read carries no invoice id (V1-46b)').toBeUndefined();
+    const tv = await tokenView(A.token);
+    expect(tv.status).toBe(200);
+    expect(tv.body, JSON.stringify(tv.body)).toMatchObject({ ok: true, invoice: { status: 'PARTIALLY_CREDITED', total: TOTAL } });
+    expect(tv.body.balance).toEqual({ amountPaid: 20, amountDue: 50, paidAt: null });
+
+    // D-75: another business's APPLIED credit note and SUCCESSFUL payment naming this invoice are not its money.
+    await db.creditNote.create({
+      data: {
+        id: `${P}cn_foreign_cr_readers`,
+        businessId: ID.bizF,
+        invoiceId: A.inv,
+        creditNoteNumber: `${P}CN-F-READERS`,
+        status: 'APPLIED',
+        amount: 10,
+        appliedAt: new Date(),
+      },
+    });
+    await db.payment.create({
+      data: {
+        id: `${P}pay_foreign_cr_readers`,
+        amount: 10,
+        currency: 'TTD',
+        status: 'SUCCESSFUL',
+        provider: 'cash',
+        method: 'cash',
+        providerPaymentId: `${P}pp_foreign_cr_readers`,
+        businessId: ID.bizF,
+        invoiceId: A.inv,
+      },
+    });
+    expect((await publicView(A.inv)).body, 'own-tenant rows only').toMatchObject({ paid: 20, remaining: 50 });
+    expect((await payPage(A.token)).body).toMatchObject({ paid: 20, remaining: 50 });
+    expect((await tokenView(A.token)).body.balance).toEqual({ amountPaid: 20, amountDue: 50, paidAt: null });
+
+    // The token money routes behind payLinkInvoice stay closed: the status poll reads a credit-unaware
+    // balance and the provider checkouts charge invoice.total (payments.service.ts, outside this write
+    // set; it.todo below). One 404 body, as an unknown token; no provider is reached.
+    for (const res of [await tokenStatus(A.token), await tokenGateways(A.token), await tokenCheckout(A.token)]) {
+      expect(res.status, JSON.stringify(res.body)).toBe(404);
+    }
+    expect(await db.payment.count({ where: { invoiceId: A.inv, businessId: ID.biz } }), 'only the operator payment').toBe(1);
+  });
+
+  it('CN-33 RED-BEFORE W4-CREDIT-AWARE-READERS CR-V44-1: the token offline intent is accepted on the PARTIALLY_CREDITED invoice and capped at the 50 its credits leave owing; no status move, no posting', async () => {
+    const before = await ledgerCounts(ID.biz);
+    // RED-BEFORE (18014bef): 404, PARTIALLY_CREDITED was not in INTENT_PAYABLE_STATUSES.
+    const res = await intent(A.token, { method: 'bank_transfer', amount: 80 });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ success: true, method: 'bank_transfer' });
+    const pending = (await paymentsOf(A.inv)).filter((p) => p.status === 'PENDING' && p.businessId === ID.biz);
+    expect(pending.map((p) => Number(p.amount)), 'capped at the remainder net of credits').toEqual([50]);
+    expect((await invoiceRow(A.inv)).status).toBe('PARTIALLY_CREDITED');
+    expect(await ledgerCounts(ID.biz), 'an intent posts nothing').toEqual(before);
+    expect((await publicView(A.inv)).body, 'a PENDING intent is not money received').toMatchObject({ paid: 20, remaining: 50 });
+  });
+
+  it('CN-34 RED-BEFORE W4-CREDIT-AWARE-READERS CR-V44-1 (D-78): mark-paid records exactly the 50 the credits leave owing and leaves the invoice PARTIALLY_CREDITED with the receivable at 0; then 0 is due, the intent is 409 and a second mark-paid writes nothing', async () => {
+    const before = await paymentsOf(A.inv);
+    // RED-BEFORE (18014bef): 409; mark-paid tried to record the credit-unaware 80 and the reconcile refused it.
+    const res = await markPaid(A.inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.status, 'D-78: paying the remainder leaves it PARTIALLY_CREDITED').toBe('PARTIALLY_CREDITED');
+
+    const added = (await paymentsOf(A.inv)).filter((p) => !before.some((b) => b.id === p.id));
+    expect(added, 'one mark-paid payment').toHaveLength(1);
+    const [mp] = added;
+    expect({ amount: Number(mp.amount), status: mp.status, businessId: mp.businessId, recordedBy: mp.recordedBy }).toEqual({
+      amount: 50, // not 40: the foreign note is not this invoice's credit (D-75)
+      status: 'SUCCESSFUL',
+      businessId: ID.biz,
+      recordedBy: ID.owner,
+    });
+    expect(mp.providerPaymentId).toMatch(new RegExp(`^manual_${A.inv}_markpaid_[0-9a-f]{32}$`));
+    const posting = await db.financialTransaction.findMany({ where: { sourceType: 'Payment', sourceId: mp.id } });
+    expect(posting.map((t: any) => t.externalRef), 'its posting').toEqual([`Payment:${mp.id}:payment_recorded`]);
+    expect(await invoiceRow(A.inv)).toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+    expect(emitted.filter((e) => e.name === 'invoice.paid'), 'no invoice.paid: the invoice is not PAID').toEqual([]);
+
+    // Nothing is due any more on any share surface (own-tenant rows: 20 + 50 paid, 30 credited).
+    expect((await publicView(A.inv)).body).toMatchObject({ status: 'PARTIALLY_CREDITED', paid: 70, remaining: 0 });
+    expect((await payPage(A.token)).body).toMatchObject({ paid: 70, remaining: 0 });
+    expect((await tokenView(A.token)).body.balance).toEqual({ amountPaid: 70, amountDue: 0, paidAt: null });
+    const settled = await intent(A.token, { method: 'cash', amount: 5 });
+    expect(settled.status, JSON.stringify(settled.body)).toBe(409);
+
+    // A second mark-paid has nothing to collect: the invoice as it is, nothing written.
+    const counts = await ledgerCounts(ID.biz);
+    const again = await markPaid(A.inv);
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body.status).toBe('PARTIALLY_CREDITED');
+    expect(await db.payment.count({ where: { invoiceId: A.inv, status: 'SUCCESSFUL', businessId: ID.biz } })).toBe(2);
+    expect(await ledgerCounts(ID.biz)).toEqual(counts);
+
+    // The ledger, once the foreign rows (not this invoice's money) are gone: credited 30 + received 70 = 100.
+    await db.creditNote.delete({ where: { id: `${P}cn_foreign_cr_readers` } });
+    await db.payment.delete({ where: { id: `${P}pay_foreign_cr_readers` } });
+    expect(await ledgerOf(A.inv)).toEqual({ receivable: 0, revenue: 70, credited: 30 });
+    await expectBalanced(ID.biz);
+  });
+
+  it('CN-35 W4-CREDIT-AWARE-READERS CR-V44-1: a FULLY_CREDITED invoice stays unpayable: mark-paid 409 with nothing written; the share surfaces, the intent and the token money routes answer 404', async () => {
+    const F = await seedCreditedWithLink('cr_full', 0, TOTAL);
+    expect((await invoiceRow(F.inv)).status).toBe('FULLY_CREDITED');
+    const before = await ledgerCounts(ID.biz);
+    const res = await markPaid(F.inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(await db.payment.count({ where: { invoiceId: F.inv } }), 'no payment').toBe(0);
+    expect(await ledgerCounts(ID.biz), 'no posting').toEqual(before);
+    expect(await invoiceRow(F.inv)).toMatchObject({ status: 'FULLY_CREDITED', paidAt: null });
+
+    expect((await publicView(F.inv)).status).toBe(404);
+    expect((await payPage(F.token)).status).toBe(404);
+    expect((await tokenView(F.token)).body).toMatchObject({ ok: false });
+    expect((await intent(F.token, { method: 'cash', amount: 10 })).status).toBe(404);
+    for (const r of [await tokenStatus(F.token), await tokenGateways(F.token), await tokenCheckout(F.token)]) {
+      expect(r.status, JSON.stringify(r.body)).toBe(404);
+    }
+    expect(await db.payment.count({ where: { invoiceId: F.inv } }), 'nothing written').toBe(0);
+  });
+
+  // Outside the W4-CREDIT-AWARE-READERS write set (payments.service.ts beyond payLinkInvoice,
+  // invoice-receipt-builder.service.ts): SHAREABLE_INVOICE_STATUSES keeps PARTIALLY_CREDITED out, so
+  // these credit-unaware readers answer 404 rather than a false amount due (CN-32).
+  it.todo(
+    'CR-V44-1 (reader half, residual) W4-CREDIT-AWARE-READERS: the token and bare-id status poll (payments.service.ts invoicePaymentStatus) and the public receipt (invoice-receipt-builder.service.ts buildPublicReceipt) net the APPLIED credit notes (creditAwareBalance) and serve a PARTIALLY_CREDITED invoice, and the provider checkouts behind payLinkInvoice charge the remainder net of credits instead of invoice.total (assertInvoicePayable refuses PARTIALLY_CREDITED until then); then SHAREABLE_INVOICE_STATUSES admits PARTIALLY_CREDITED and payLinkInvoice opens the token money routes for it',
   );
 });
