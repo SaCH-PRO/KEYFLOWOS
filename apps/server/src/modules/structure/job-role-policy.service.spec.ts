@@ -2848,7 +2848,8 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
         // procurement_acknowledge_vendor / mark_fulfilled / mark_invoiced: governed by operations since
         // D-40, so GOVERNED_UNGRANTED instead (R0-13g), and operations write since FOLLOW3-D15 bound
         // ProcurementService's writes to the business; the legacy family still reaches none of them (below)
-        'projects_update_task',
+        // projects_update_task: ProjectsService.updateTask resolves the assignee within the business since
+        // PR196-PROJECTS-SERVER (D-87), so it left the list and a projects key reaches it again (below)
       ].sort(),
     );
     for (const t of Object.keys(UNBOUND)) expect(REGISTRY, t).toContain(t);
@@ -2859,7 +2860,6 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
     [{ marketing: 'admin' }, CONTENT],
     [{ bookings: 'admin' }, ['bookings_offer_waitlist_slot']],
     [{ procurement: 'admin' }, ['procurement_acknowledge_vendor', 'procurement_mark_fulfilled', 'procurement_mark_invoiced']],
-    [{ projects: 'admin' }, ['projects_update_task']],
   ])('%j matches them by family, and reaches none of them', (permissions, tools) => {
     const env = envelope(permissions);
     expect(env.maxRiskTier).toBe(3);
@@ -2884,7 +2884,6 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
       [{ content: 'admin' }, 'content_deliver_request'],
       [{ bookings: 'admin' }, 'bookings_offer_waitlist_slot'],
       [{ procurement: 'admin' }, 'procurement_mark_fulfilled'],
-      [{ projects: 'admin' }, 'projects_update_task'],
     ] as const) {
       const d = await oversight.evaluate('biz_1', tool, undefined, [], envelope(permissions), reader(5));
       expect(d.allowed, tool).toBe(false);
@@ -2897,6 +2896,8 @@ describe('V1-21b review 8 — no key reaches a tool that finds its row by a bare
     expect(passes(envelope({ content: 'read' }), 'content_list_requests')).toBe(true);
     expect(passes(envelope({ bookings: 'write' }), 'bookings_create_booking')).toBe(true);
     expect(passes(envelope({ projects: 'write' }), 'projects_create_task')).toBe(true);
+    // PR196-PROJECTS-SERVER (D-87): updateTask binds the assignee to the business, so the key reaches it
+    expect(passes(envelope({ projects: 'write' }), 'projects_update_task')).toBe(true);
     // D-40 (R0-13g): the procurement routes require operations, so the sibling procurement tools are
     // reached through operations and no longer through the legacy `procurement` family key
     expect(passes(envelope({ operations: 'write' }), 'procurement_create_request')).toBe(true);

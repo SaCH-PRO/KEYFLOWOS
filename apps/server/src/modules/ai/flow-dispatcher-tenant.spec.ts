@@ -562,8 +562,8 @@ const SERVICE_BINDS_ALLOWLIST: Record<string, string> = {
     'TaskAssignmentService.assign is handed businessId and refuses a task of another business (assertTaskInBusiness, NotFound) before it writes anything; the tool is listed for the existence probes (validateTask) that run first',
   'people_assign_task:assignableId':
     'TaskAssignmentService.assign is handed businessId and refuses a staff member or user outside the business (assertAssignableInBusiness, NotFound) before it writes anything; Contractor and KeyflowStaff ids name no row',
-  'projects_update_task:taskId':
-    'ProjectsService.updateTask finds the task with findFirst({ where: { id: taskId, businessId } }) and updates where { id, businessId }; the tool is listed for its assigneeId',
+  // 'projects_update_task:taskId' left with its tool: PR196-PROJECTS-SERVER (D-87) took projects_update_task
+  // off TENANT_UNBOUND_TOOLS once ProjectsService.updateTask resolved the assignee within the business
 };
 
 /** Relations a dispatcher read includes without a business filter, `${tool}:${Model}.${relation}` -> why. */
@@ -775,7 +775,7 @@ describe('V1-21d IDS — every model-supplied id is resolved inside the business
   it('review SEC-V21D-1: a TENANT_UNBOUND_TOOLS case resolves every id it hands its service inside the business, in the dispatcher', () => {
     const unbound = Object.keys(TENANT_UNBOUND_TOOLS);
     // the rule is not vacuous: the job-role ceiling's list is read, and the census sees each of its cases
-    expect(unbound.length, 'TENANT_UNBOUND_TOOLS entries').toBeGreaterThan(10);
+    expect(unbound.length, 'TENANT_UNBOUND_TOOLS entries').toBeGreaterThanOrEqual(10);
     const seen = new Set(live.cases.flatMap((t) => t.split('|')));
     for (const tool of unbound) expect(seen, `${tool} is a dispatcher case`).toContain(tool);
     const offenders = trustedServiceIds(live, unbound).filter((s) => !ID_ALLOWLIST[idKey(s)] && !SERVICE_BINDS_ALLOWLIST[idKey(s)]);

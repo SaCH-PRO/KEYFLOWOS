@@ -260,7 +260,8 @@ export const TENANT_UNBOUND_TOOLS: Readonly<Record<string, string>> = {
   content_upload_deliverables: 'ContentRequestService.uploadDeliverables finds the content request by its bare id',
   evidence_verify: 'EvidenceService.verify finds the evidence by its bare id',
   people_assign_task: 'TaskAssignmentService.assign finds the task and the staff assignee by bare ids',
-  projects_update_task: 'ProjectsService.updateTask finds the staff assignee (args.assigneeId) by its bare id',
+  // projects_update_task left the list when PR196-PROJECTS-SERVER (D-87) made ProjectsService.updateTask
+  // resolve the assignee where { id, businessId } (staff) or by the business's membership
 };
 
 /** Baseline reads every position keeps regardless of grants (tools no route governs). */

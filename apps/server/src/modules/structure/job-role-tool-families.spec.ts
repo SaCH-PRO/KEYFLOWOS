@@ -2336,7 +2336,8 @@ describe('job role tools — derived from the route decorators (V1-21b)', () => 
           'people_assign_task -> TaskAssignmentService.assign -> staffMember.findUnique',
           // FOLLOW3-D15: ProcurementService.acknowledgeVendor / markFulfilled / markInvoiced write the request
           // where { id, businessId } now, so the three procurement transitions are no longer here
-          'projects_update_task -> ProjectsService.updateTask -> staffMember.findUnique',
+          // PR196-PROJECTS-SERVER (D-87): ProjectsService.updateTask resolves the assignee within the business,
+          // so projects_update_task is no longer here
         ].sort(),
       );
     });
