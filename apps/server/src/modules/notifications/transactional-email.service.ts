@@ -132,6 +132,44 @@ const DEFAULT_PREFERENCES: NotificationPreferences = {
   quote_sent: true,
 };
 
+/**
+ * Log lines name no recipient address and no message content (SEC-C2-1,
+ * W3-C2b-EMAIL-LOG-LEAK; IA-044, CF-029). main.ts creates the app with no
+ * `logger` option, so every level reaches the default ConsoleLogger.
+ *
+ * The recipient is named by contact id, as the playbook executor's lines do
+ * since FOLLOW3-C2; a send with no contact (an owner or seller notice, or a
+ * queued row without one) names no recipient at all.
+ */
+function recipientForLog(contactId?: string | null): string {
+  return contactId ? `contact ${contactId}` : 'a recipient with no contact';
+}
+
+/** Anything shaped like an email address: the pattern SystemEmailService redacts (9B-D2). */
+const ADDRESS_PATTERN = /[^\s<>"'`(),;:[\]]+@[^\s<>"'`(),;:[\]]+/g;
+
+/**
+ * Error text from Gmail, a template or a lookup, for a log line: the message's
+ * subject (when given) and every address-shaped token are replaced, so an
+ * error that quotes the message cannot put its recipient or content in the
+ * logs. The rest of the text stays: it is what an operator needs.
+ */
+function redactForLog(text: string, subject?: string): string {
+  const withoutSubject = subject ? text.split(subject).join('<subject>') : text;
+  return withoutSubject.replace(ADDRESS_PATTERN, '<address>');
+}
+
+/**
+ * A failed notification-log write, for a log line: the error class and the
+ * Prisma code only. A Prisma validation error quotes its whole argument (the
+ * recipient, the subject, the template data).
+ */
+function errorClassForLog(err: unknown): string {
+  const name = err instanceof Error ? err.name : typeof err;
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === 'string' ? `${name} ${code}` : name;
+}
+
 const QUEUE_DRAIN_INTERVAL_MS = 5 * 60 * 1000;
 const QUEUE_DRAIN_BATCH_SIZE = 20;
 const QUEUE_MAX_AGE_HOURS = 48;
@@ -153,7 +191,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
     }
     this.drainInterval = setInterval(() => {
       this.drainQueue().catch((e) =>
-        this.logger.error(`Queue drain failed: ${(e as Error).message}`),
+        this.logger.error(`Queue drain failed: ${redactForLog(String((e as Error)?.message ?? e))}`),
       );
     }, QUEUE_DRAIN_INTERVAL_MS);
     this.logger.log('Notification queue drain scheduler started (5min interval)');
@@ -221,6 +259,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
     businessId: string,
     recipientEmail: string,
     templateData: Record<string, any>,
+    contactId?: string,
   ): Promise<boolean> {
     if (!recipientEmail) return false;
     if (templateData.referUrl) return false;
@@ -259,7 +298,10 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
       templateData.referUrl = url;
       return true;
     } catch (err: any) {
-      this.logger.warn(`Referral CTA injection skipped for ${businessId}/${recipientEmail}: ${(err as Error).message}`);
+      // SEC-C2-1: the contact by id; a lookup error that quotes the marker key is redacted.
+      this.logger.warn(
+        `Referral CTA injection skipped for ${recipientForLog(contactId)} in business ${businessId}: ${redactForLog(String((err as Error)?.message ?? err))}`,
+      );
       return false;
     }
   }
@@ -293,7 +335,10 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
         },
       });
     } catch (err: any) {
-      this.logger.error(`Failed to log notification: ${(err as Error).message}`);
+      // SEC-C2-1: the error class only; a Prisma validation error quotes the row.
+      this.logger.error(
+        `Failed to log notification (${params.status} ${params.type} to ${recipientForLog(params.contactId)}): ${errorClassForLog(err)}`,
+      );
     }
   }
 
@@ -359,7 +404,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
       });
       if (existing) {
         this.logger.debug(
-          `Skipping duplicate ${params.type} for ${params.recipientEmail} (dedupeKey=${params.dedupeKey})`,
+          `Skipping duplicate ${params.type} for ${recipientForLog(params.contactId)} (dedupeKey=${redactForLog(params.dedupeKey)})`,
         );
         return { status: existing.status as 'SENT' | 'QUEUED', messageId: existing.messageId ?? undefined };
       }
@@ -394,6 +439,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
         params.businessId,
         params.recipientEmail,
         data,
+        params.contactId,
       );
     }
 
@@ -707,7 +753,9 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
           return { status: 'FAILED' };
       }
     } catch (err: any) {
-      this.logger.error(`Template rendering failed for ${params.type}: ${(err as Error).message}`);
+      this.logger.error(
+        `Template rendering failed for ${params.type} to ${recipientForLog(params.contactId)}: ${redactForLog(String((err as Error)?.message ?? err))}`,
+      );
       await this.logNotification({
         businessId: params.businessId,
         contactId: params.contactId,
@@ -757,18 +805,23 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
           });
         }
 
-        this.logger.log(`Sent ${params.type} to ${params.recipientEmail} for business ${params.businessId}`);
+        // SEC-C2-1: the contact by id, never the address (IA-044, CF-029).
+        this.logger.log(`Sent ${params.type} to ${recipientForLog(params.contactId)} for business ${params.businessId}`);
         return { status: 'SENT', messageId: result.messageId };
       } catch (err: any) {
         lastError = err as Error;
-        this.logger.warn(`Attempt ${attempt}/${MAX_RETRIES} failed for ${params.type} to ${params.recipientEmail}: ${lastError.message}`);
+        this.logger.warn(
+          `Attempt ${attempt}/${MAX_RETRIES} failed for ${params.type} to ${recipientForLog(params.contactId)}: ${redactForLog(String(lastError?.message ?? err), rendered.subject)}`,
+        );
         if (attempt < MAX_RETRIES) {
           await new Promise((r) => setTimeout(r, attempt * 1000));
         }
       }
     }
 
-    this.logger.error(`All ${MAX_RETRIES} attempts failed for ${params.type} to ${params.recipientEmail}: ${lastError?.message}`);
+    this.logger.error(
+      `All ${MAX_RETRIES} attempts failed for ${params.type} to ${recipientForLog(params.contactId)}: ${redactForLog(lastError?.message ?? 'unknown error', rendered.subject)}`,
+    );
     await this.logNotification({
       businessId: params.businessId,
       contactId: params.contactId,
@@ -854,7 +907,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
           sent++;
         }
       } catch (err: any) {
-        this.logger.error(`Queue drain failed for entry ${entry.id}: ${(err as Error).message}`);
+        this.logger.error(`Queue drain failed for entry ${entry.id}: ${redactForLog(String((err as Error)?.message ?? err))}`);
       }
     }
 
