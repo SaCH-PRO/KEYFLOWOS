@@ -3,7 +3,7 @@ import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CommerceService } from '../commerce/commerce.service';
-import { InvoiceWorkflowService, computeBalance, isShareableInvoiceStatus } from '../commerce/invoice-workflow.service';
+import { InvoiceWorkflowService, computeBalance, isShareableInvoiceStatus, ownTenantPayments } from '../commerce/invoice-workflow.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
 import { normalizeCurrency } from '../finance/posting.service';
 import { fromCents, subtractMoney, toCents } from '../commerce/money';
@@ -1775,16 +1775,22 @@ export class PaymentsService {
     const invoice = await this.prisma.client.invoice.findUnique({
       where: { id: invoiceId },
       select: {
+        businessId: true,
         status: true,
         total: true,
         currency: true,
-        payments: { select: { amount: true, status: true, createdAt: true } },
+        payments: { select: { amount: true, status: true, createdAt: true, businessId: true } },
       },
     });
     if (!invoice || !isShareableInvoiceStatus(invoice.status)) throw new NotFoundException('Invoice not found');
-    const balance = computeBalance(Number(invoice.total), invoice.payments, invoice.currency);
+    // DEP-R3-OWN-ROW-READS (D-75): the invoice's own-tenant rows (M31), as the
+    // pay page's intent decides from them: a row of another business told the
+    // customer nothing was due (RC2-DEP-1) and dated a payment the business
+    // never received.
+    const own = ownTenantPayments(invoice);
+    const balance = computeBalance(Number(invoice.total), own, invoice.currency);
     let lastPaymentAt: Date | null = null;
-    for (const p of invoice.payments) {
+    for (const p of own) {
       if (p.status !== 'SUCCESSFUL') continue;
       if (!lastPaymentAt || p.createdAt > lastPaymentAt) lastPaymentAt = p.createdAt;
     }
