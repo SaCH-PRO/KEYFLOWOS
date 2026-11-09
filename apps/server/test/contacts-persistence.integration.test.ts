@@ -827,3 +827,77 @@ describe('REGRESSION CONTROL: an owner DELETE then a refresh', () => {
     expect(tracesAfter.live).toBe(tracesBefore.live + 1);
   });
 });
+
+/**
+ * W4-FLAKE-HARDEN review CR-FH-2: hold `tables` in EXCLUSIVE mode (inserts
+ * wait, reads do not) from a test transaction until release() is called or
+ * `ms` has passed, whichever is first. The transaction is the simulated slow
+ * database, not a fixture wrapper. `locked` resolves once the lock is held.
+ */
+function holdTables(tables: string[], ms: number) {
+  let release!: () => void;
+  const released = new Promise<void>((r) => { release = r; });
+  const timer = setTimeout(() => release(), ms);
+  let ready!: () => void;
+  const lockTaken = new Promise<void>((r) => { ready = r; });
+  const done: Promise<void> = db.$transaction(async (tx: any) => {
+    await tx.$executeRawUnsafe(`LOCK TABLE ${tables.join(', ')} IN EXCLUSIVE MODE`);
+    ready();
+    await released;
+  }, { maxWait: 10_000, timeout: ms + 30_000 });
+  const locked = Promise.race([
+    lockTaken,
+    done.then(() => { throw new Error('holdTables: the transaction ended before it held the lock'); }),
+  ]);
+  return {
+    locked,
+    done,
+    release() {
+      clearTimeout(timer);
+      release();
+    },
+  };
+}
+
+describe('W4-FLAKE-HARDEN review CR-FH-2: a refusal is not charged with an earlier write\'s late audit entry and team log', () => {
+  // The load flake this packet fixed (a), reproduced inside the suite (it took
+  // an outside load harness before): the owner's create is answered while its
+  // fire-and-forget audit entry (DEC-CONTACTS-002) and team log still wait on
+  // the held audit and team-log tables. The tables are released after
+  // LATE_MS, and at the latest just before the refused request is sent.
+  // settle() waits for those writes, so they land before the refusal's
+  // baseline. With the fixed 300 ms sleep settle() used to be, the baseline
+  // was read while they still waited: red, checked by putting the sleep back.
+  const LATE_MS = 1_500;
+
+  it('[CP-FH-01] the owner creates a contact while the audit and team-log tables are held, so its audit entry and team log land late: settle() waits for them, and the POST by STAFF with crm_edit none that follows answers 403 with every trace count unchanged', async () => {
+    await settle();
+    const hold = holdTables(['contact_audit_entries', 'team_activity_logs'], LATE_MS);
+    try {
+      await hold.locked;
+      const atStart = await traceCounts();
+      const created = await post(ID.owner, { firstName: `${P}LateAudit`, email: `${P}late-audit@test.local` });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const answered = await traceCounts();
+      expect({ audits: answered.audits, teamLogs: answered.teamLogs }, 'the create answered before its audit entry and team log landed')
+        .toEqual({ audits: atStart.audits, teamLogs: atStart.teamLogs });
+      expect(asyncWrites!.inFlight(), 'its audit entry and team log are still in flight').toBeGreaterThan(0);
+
+      await settle();
+      const tracesBefore = await traceCounts();
+      expect({ audits: tracesBefore.audits, teamLogs: tracesBefore.teamLogs }, 'settle() waited for the late audit entry and team log')
+        .toEqual({ audits: atStart.audits + 1, teamLogs: atStart.teamLogs + 1 });
+
+      hold.release(); // never later than the refused request
+      const res = await post(ID.staffNoEdit, { firstName: `${P}DeniedLate`, email: `${P}denied-late@test.local` });
+      expect(res.status).toBe(403);
+      expect(res.body.statusCode).toBe(403);
+      expect(res.body).not.toHaveProperty('id');
+      await settle();
+      expect(await traceCounts(), 'the refusal wrote no contact, event, audit entry or team log').toEqual(tracesBefore);
+    } finally {
+      hold.release();
+      await hold.done.catch(() => undefined);
+    }
+  }, 30_000);
+});

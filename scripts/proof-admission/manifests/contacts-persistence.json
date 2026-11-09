@@ -32,6 +32,7 @@
     "REGRESSION CONTROL: an owner DELETE then a refresh after the DELETE a fresh GET of the detail answers 404 and the list no longer returns the contact",
     "REGRESSION CONTROL: an owner DELETE then a refresh the linked invoice is intact after the DELETE: the same row, still linked to the contact, not deleted (raw SQL)",
     "REGRESSION CONTROL: an owner DELETE then a refresh a PATCH of the deleted contact answers 404 and writes nothing",
-    "REGRESSION CONTROL: an owner DELETE then a refresh V1-17 (D-16): re-creating the deleted contact's email answers 201 with a new live contact, and the deleted row keeps its deleted_at and its email"
+    "REGRESSION CONTROL: an owner DELETE then a refresh V1-17 (D-16): re-creating the deleted contact's email answers 201 with a new live contact, and the deleted row keeps its deleted_at and its email",
+    "W4-FLAKE-HARDEN review CR-FH-2: a refusal is not charged with an earlier write's late audit entry and team log [CP-FH-01] the owner creates a contact while the audit and team-log tables are held, so its audit entry and team log land late: settle() waits for them, and the POST by STAFF with crm_edit none that follows answers 403 with every trace count unchanged"
   ]
 }

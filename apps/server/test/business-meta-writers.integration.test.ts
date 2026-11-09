@@ -582,24 +582,42 @@ describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1
   const SEEDED_EVENTS = 1000; // the bound trackEvent keeps
 
   /**
-   * W4-FLAKE-HARDEN (MW-06): under load this case failed with 'timeout exceeded
-   * when trying to connect'. The flood is serialized on the business row, so a
-   * request queued behind it waits for the pool about (queue length) x (one
-   * UPDATE); the pool gives up after connectionTimeoutMillis (5 s), and a loaded
-   * database makes one UPDATE slow enough to pass that. The case is about what
-   * each event holds (no row lock across round trips, no interactive
-   * transaction), not about how fast Postgres is, so for this case only the
-   * shared pool waits long enough for the whole queue. The flood size, the pool
-   * size (max 20) and every assertion are unchanged. The pre-D12 interactive
-   * transaction still fails here: Prisma's own $transaction maxWait/timeout,
-   * not the pool's, is what times its queued transactions out.
+   * W4-FLAKE-HARDEN review repair (SEC-FH-1, CR-FH-1): this case runs on the
+   * shared pool exactly as packages/db/src/client.ts builds it (20
+   * connections, 5 s to wait for one) and changes nothing about it: a flood
+   * that exhausts that pool is what the case exists to catch. (The first
+   * W4-FLAKE-HARDEN commit raised the pool's wait to 120 s for this case. With
+   * that, the D12-ST-1 shape, an interactive transaction holding the row lock
+   * and a pooled connection across its round trips, passed once Prisma's
+   * maxWait and timeout were raised too, and another tenant's read that waited
+   * past the production 5 s passed.)
+   *
+   * The pool's verdict depends on how fast Postgres runs the flood, so the
+   * case also checks directly what each event holds, which does not:
+   *  - the client trackEvent runs on records every $transaction it is handed,
+   *    and the flood hands it none (D12: one atomic statement per event);
+   *  - while the flood runs, a sampler on a connection of its own (outside the
+   *    shared pool, so it neither queues behind the flood nor takes one of its
+   *    connections) records every transaction of this process's pool seen
+   *    idle in transaction while another of the pool's backends waits on a lock
+   *    it holds: a lock and a pooled connection held across a round trip. The
+   *    owner's PATCH locks the row by design (IdentityService.updateBusiness),
+   *    so at most that one transaction may be seen;
+   *  - another tenant's read on the shared pool answers within the pool's own
+   *    connection wait (an explicit bound, not only "did not fail").
+   * The flood size, the pool and every earlier assertion are unchanged.
    */
-  const FLOOD_POOL_WAIT_MS = 120_000;
+  const POOL = { max: 20, connectionTimeoutMillis: 5_000 }; // packages/db/src/client.ts
+
+  /** require() as @keyflow/db resolves it (its pg and pg-pool). */
+  function requireFromDb(): NodeRequire {
+    const fromHere = createRequire(path.join(__dirname, 'business-meta-writers.integration.test.ts'));
+    return createRequire(fromHere.resolve('@keyflow/db'));
+  }
 
   /** The pg Pool behind @keyflow/db, read off the next connect() it serves (the package does not export it). */
-  async function sharedPool(): Promise<{ options: { connectionTimeoutMillis?: number; max?: number } }> {
-    const fromHere = createRequire(path.join(__dirname, 'business-meta-writers.integration.test.ts'));
-    const fromDb = createRequire(fromHere.resolve('@keyflow/db'));
+  async function sharedPool(): Promise<{ options: { connectionTimeoutMillis?: number; max?: number }; _clients: Array<{ processID: number | null }> }> {
+    const fromDb = requireFromDb();
     const PgPool = createRequire(fromDb.resolve('pg'))('pg-pool');
     const original = PgPool.prototype.connect;
     let seen: any;
@@ -612,18 +630,81 @@ describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1
     } finally {
       PgPool.prototype.connect = original;
     }
-    if (!seen?.options) throw new Error('W4-FLAKE-HARDEN: the @keyflow/db pool was not found');
+    if (!seen?.options || !Array.isArray(seen._clients)) throw new Error('W4-FLAKE-HARDEN: the @keyflow/db pool was not found');
     return seen;
+  }
+
+  /**
+   * Sample, every ~10 ms on a connection of its own, the transactions of the
+   * pool's backends seen idle in transaction while another of the pool's
+   * backends waits on a lock they hold (pg_blocking_pids). Only this process's
+   * backends are looked at, so another suite's work on the same database is
+   * not counted. stop() ends the sampling (and rethrows a sampling error) and
+   * answers the distinct transactions seen (backend pid @ transaction start:
+   * its last statement) and the number of samples taken.
+   */
+  async function sampleIdleLockHolders(pool: { _clients: Array<{ processID: number | null }> }) {
+    const { Client } = requireFromDb()('pg');
+    const sampler = new Client({ connectionString: process.env.DATABASE_URL });
+    await sampler.connect();
+    const seen = new Map<string, string>();
+    let samples = 0;
+    let running = true;
+    const loop = (async () => {
+      while (running) {
+        const pids = pool._clients.map((c) => c.processID).filter((pid): pid is number => typeof pid === 'number');
+        const { rows } = await sampler.query(
+          `SELECT h.pid, h.xact_start::text AS xs, left(h.query, 100) AS query
+             FROM pg_stat_activity h
+            WHERE h.pid = ANY ($1::int[])
+              AND h.state IN ('idle in transaction', 'idle in transaction (aborted)')
+              AND EXISTS (SELECT 1 FROM pg_stat_activity w
+                           WHERE w.pid = ANY ($1::int[]) AND h.pid = ANY (pg_blocking_pids(w.pid)))`,
+          [pids],
+        );
+        samples += 1;
+        for (const r of rows) seen.set(`${r.pid}@${r.xs}`, String(r.query));
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    })();
+    let stopped: Promise<{ samples: number; holders: string[] }> | undefined;
+    return {
+      stop() {
+        running = false;
+        stopped ??= loop
+          .finally(() => sampler.end())
+          .then(() => ({ samples, holders: [...seen].map(([tx, query]) => `${tx}: ${query}`) }));
+        return stopped;
+      },
+    };
   }
 
   it(`[MW-06] RED-BEFORE: ${FLOOD} concurrent storefront events on a business already holding ${SEEDED_EVENTS} events, sent with another tenant's read and the owner's PATCH clearing stripeSecretKey: every event is recorded (newest ${SEEDED_EVENTS} kept), none fails, the other tenant's read and the PATCH succeed and the clear holds`, async () => {
     const seeded = Array.from({ length: SEEDED_EVENTS }, (_, i) => ({ type: 'page_view', itemId: `${P}seed-${i}`, timestamp: '2026-11-01T00:00:00.000Z' }));
     await reset({ ...SEEDED_META, storefrontEvents: seeded });
+    // W4-FLAKE-HARDEN review repair (SEC-FH-1, CR-FH-1): the production pool, unchanged.
     const pool = await sharedPool();
-    const poolWaitBefore = pool.options.connectionTimeoutMillis;
-    pool.options.connectionTimeoutMillis = FLOOD_POOL_WAIT_MS;
+    expect({ max: pool.options.max, connectionTimeoutMillis: pool.options.connectionTimeoutMillis }, 'the shared pool as packages/db/src/client.ts builds it')
+      .toEqual(POOL);
+    // trackEvent's client, recording every $transaction it is handed (D12-ST-1).
+    const transactions: string[] = [];
+    const recorded = new Proxy(db, {
+      get(target, prop) {
+        if (prop === '$transaction') {
+          return (arg: unknown, opts?: unknown) => {
+            transactions.push(typeof arg === 'function' ? 'interactive $transaction' : 'batch $transaction');
+            return target.$transaction(arg, opts);
+          };
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const floodSite = new plainSite.constructor({ client: recorded }, {});
+    const sampler = await sampleIdleLockHolders(pool);
+    let sampled: { samples: number; holders: string[] } | undefined;
     try {
-      const events = Array.from({ length: FLOOD }, (_, i) => plainSite.trackEvent(ID.biz, 'item_view', `${P}flood-${i}`));
+      const events = Array.from({ length: FLOOD }, (_, i) => floodSite.trackEvent(ID.biz, 'item_view', `${P}flood-${i}`));
       const startedAt = Date.now();
       const otherTenant = db.user.findFirst({ where: { NOT: { id: { startsWith: P } } }, select: { id: true } })
         .then(() => Date.now() - startedAt);
@@ -633,12 +714,21 @@ describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1
         otherTenant.then((ms: number) => ({ ok: true as const, ms }), (e: any) => ({ ok: false as const, error: String(e?.message ?? e).slice(0, 160) })),
         clear,
       ]);
+      sampled = await sampler.stop();
 
       const failures = [...new Set(settled.flatMap((s) => (s.status === 'rejected' ? [String((s.reason as any)?.message ?? s.reason).slice(0, 160)] : [])))];
       expect(failures, `failed storefront events (${settled.filter((s) => s.status === 'rejected').length} of ${FLOOD})`).toEqual([]);
       expect(settled.every((s) => s.status === 'fulfilled' && (s.value as any)?.tracked === true), 'every event answers { tracked: true }').toBe(true);
       expect(other, 'another tenant\'s query on the shared pool during the flood').toMatchObject({ ok: true });
+      expect((other as { ms: number }).ms, 'another tenant\'s read answered within the shared pool\'s connection wait (ms)')
+        .toBeLessThan(POOL.connectionTimeoutMillis);
       expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+
+      // What each event holds (W4-FLAKE-HARDEN review repair: SEC-FH-1, CR-FH-1).
+      expect(transactions, 'the storefront events open no transaction (D12-ST-1: one atomic statement each)').toEqual([]);
+      expect(sampled.samples, 'the sampler ran while the flood was in flight').toBeGreaterThan(1);
+      expect(sampled.holders.length, `transactions seen idle in transaction holding a lock another pooled backend waited on (only the owner's PATCH may be): ${JSON.stringify(sampled.holders)}`)
+        .toBeLessThanOrEqual(1);
 
       const meta = await storedMeta();
       expect(has(meta, 'stripeSecretKey'), 'the cleared stripeSecretKey stored again').toBe(false);
@@ -652,10 +742,10 @@ describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1
       expect(stored.slice(0, SEEDED_EVENTS - FLOOD).map((e) => e.itemId), 'the oldest seeded events trimmed, in order')
         .toEqual(seeded.slice(FLOOD).map((e) => e.itemId));
     } finally {
-      pool.options.connectionTimeoutMillis = poolWaitBefore;
+      if (!sampled) await sampler.stop().catch(() => undefined); // a failure before the flood settled
       await reset();
     }
-  }, 180_000);
+  }, 90_000);
 });
 
 describe('FOLLOW3-D12 controls (unchanged behaviour)', () => {
