@@ -566,6 +566,10 @@ describe('W5-D92-RESIDUALS (D-92): connector contact rules and form mapping stor
       const res = await agent().post(`/connect/businesses/${businessId}/connector-forms/typeform/${form.id}/backfill`);
       expect(res.status, JSON.stringify(res.body)).toBe(201);
       expect(res.body).toEqual(expect.objectContaining({ contactsCreated: 0, errors: [] }));
+      // W6-CONNECT-TAG-MERGE review CR-CTM-1: a submission linked to no live
+      // contact of this business is processed with nothing written, not left
+      // pending as a refusal.
+      expect(res.body).toEqual(expect.objectContaining({ responsesProcessed: 3, responsesSkipped: 0 }));
       // The live linked contact keeps its CLIENT and gains the form's tags.
       expect(live).toEqual(expect.objectContaining({ status: 'CLIENT', tags: ['old', 'web'] }));
       // A trashed contact and another business's contact are not written at all.
