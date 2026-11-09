@@ -283,7 +283,8 @@ export class AutomationExecutorService {
                   ...(action.templateData ?? {}),
                 },
               });
-              this.logger.log(`Email sent to ${c.email} for playbook "${playbookName}"`);
+              // The contact by id: its email is personal data (IA-044, CF-029).
+              this.logger.log(`Email sent to contact ${context.contactId} for playbook "${playbookName}"`);
             }
           } catch (e) {
             this.logger.warn(`Failed to send email for playbook "${playbookName}": ${(e as Error).message}`);
@@ -355,7 +356,8 @@ export class AutomationExecutorService {
               },
             });
 
-            this.logger.log(`WhatsApp delivery queued for ${phone} in playbook "${playbookName}"`);
+            // The contact by id: its phone is personal data (IA-044, CF-029).
+            this.logger.log(`WhatsApp delivery queued for contact ${context.contactId} in playbook "${playbookName}"`);
           } catch (e) {
             this.logger.warn(`Failed to send WhatsApp for playbook "${playbookName}": ${(e as Error).message}`);
           }
