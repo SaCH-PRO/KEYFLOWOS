@@ -227,9 +227,22 @@
  *   V55-13d (SEC-W5FC-2 / CR-W5FC-1) the money-in-data and type terms read
  *     crm-scope rows only (the CRM copies SEC-FCC-1 is about): an EXPENSE row
  *     with data.amount keeps D-63's binding and is served on expenses read.
- *   V55-13e it.todo (SEC-W5FC-1, outside the write set): GET
- *     /crm/businesses/:b/contacts/:c/events serves the ContactEvent rows,
- *     amounts included, on crm read alone.
+ *   V55-13e it.todo then (SEC-W5FC-1, outside the write set): GET
+ *     /crm/businesses/:b/contacts/:c/events served the ContactEvent rows,
+ *     amounts included, on crm read alone (closed by W6-CONTACT-EVENTS-MONEY,
+ *     below).
+ *
+ * W6-CONTACT-EVENTS-MONEY (SEC-W5FC-1; owner rulings D-90 and D-63, the V1-84
+ * timeline rule; V55-13e, was it.todo): GET /crm/businesses/:b/contacts/:c/events
+ * (CrmController.contactEvents -> CrmService -> CrmTimelineService
+ * .listContactEvents) serves a member without revenue read only the
+ * ContactEvents the feed would serve them a copy of: an event of a
+ * sales_revenue type or whose data carries a money field (crmRowCarriesMoney,
+ * timeline-visibility.ts, the one MONEY_DATA_FIELDS list) is withheld, the
+ * page filled from older events; a member with revenue read gets every event.
+ * The real CrmController, CrmService and CrmTimelineService are mounted on
+ * their own app over this suite's PrismaService and identity header; the
+ * controller's other collaborators are empty stand-ins the route never calls.
  *
  * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
  *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
@@ -2623,9 +2636,177 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(ids(await events(C.owner, `contactId=${contactId}`))).toEqual([crmRow.id]);
   });
 
-  it.todo(
-    "V55-13e (SEC-W5FC-1, D-90 / D-63, outside the write set): GET /crm/businesses/:b/contacts/:c/events (crm.controller.ts contactEvents, RequireModuleScope('crm', 'read')) returns the contact's ContactEvent rows with their full data through CrmTimelineService.listContactEvents, e.g. invoice.payment_recorded {amount, totalPaid, invoiceTotal}, which D-90 still writes (feedCopy false), so a member with crm read and revenue 'none' reads the amounts the feed withholds (V55-13 / V55-13b / V55-13c); closing it needs a follow-up packet that revenue-gates sales_revenue and money-carrying ContactEvents on that route (crm.controller.ts, crm-timeline.service.ts)",
-  );
+  // W6-CONTACT-EVENTS-MONEY (W5-FEED-CATEGORIES review SEC-W5FC-1; owner
+  // rulings D-90 and D-63, the V1-84 timeline rule). Before it, GET
+  // /crm/businesses/:b/contacts/:c/events (CrmController.contactEvents,
+  // RequireModuleScope('crm', 'read')) returned the contact's ContactEvent rows
+  // with their full data through CrmTimelineService.listContactEvents, e.g. a
+  // manual payment's invoice.payment_recorded {amount, totalPaid, invoiceTotal},
+  // which D-90 still writes (feedCopy false), so a member with crm read and
+  // revenue 'none' read the amounts the feed withholds (V55-13 / V55-13b /
+  // V55-13c). The real CrmController is mounted on its own app over this
+  // suite's PrismaService and identity header, with the real CrmService (`crm`,
+  // over the suite's real CrmTimelineService); its other collaborators are
+  // empty stand-ins the route never calls.
+  let crmApp: any;
+  afterAll(async () => {
+    if (crmApp) await crmApp.close();
+  });
+
+  /** GET /crm/businesses/:biz/contacts/:contactId/events as `user`, through the real CrmController. */
+  async function contactEventsRoute(user: string, contactId: string, biz = C.biz): Promise<request.Response> {
+    if (!crmApp) {
+      const { Test } = await import('@nestjs/testing');
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { AuthGuard } = await import('../src/core/auth/auth.guard');
+      const { BusinessGuard } = await import('../src/core/auth/business.guard');
+      const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+      const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+      const { CrmController } = await import('../src/modules/crm/crm.controller');
+      const { CrmService } = await import('../src/modules/crm/crm.service');
+      const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+      const ref = await Test.createTestingModule({
+        controllers: [CrmController],
+        providers: [
+          { provide: PrismaService, useValue: app.get(PrismaService) },
+          AuthGuard,
+          BusinessGuard,
+          ModuleScopeGuard,
+          CrmRateLimitGuard,
+          { provide: CrmService, useValue: crm },
+          { provide: CrmTimelineService, useValue: app.get(CrmTimelineService) },
+          { provide: EventEmitter2, useValue: { emit: () => true } },
+        ],
+      })
+        .useMocker(() => ({}))
+        .compile();
+      crmApp = ref.createNestApplication();
+      // Identity attachment only, as the suite's app does. No guard is overridden.
+      crmApp.use(async (req: any, _res: any, next: any) => {
+        const header = req.headers[HEADER];
+        const id = typeof header === 'string' ? header : undefined;
+        if (id && id.startsWith(P)) {
+          const found = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+          if (found) req.user = { id: found.id, email: found.email, role: found.role };
+        }
+        next();
+      });
+      crmApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+      await crmApp.init();
+    }
+    return request(crmApp.getHttpServer()).get(`/crm/businesses/${biz}/contacts/${contactId}/events`).set(HEADER, user);
+  }
+
+  it("V55-13e (SEC-W5FC-1, D-90 / D-63, W6-CONTACT-EVENTS-MONEY, was it.todo): GET /crm/businesses/:b/contacts/:c/events (CrmController.contactEvents -> CrmTimelineService.listContactEvents) withholds from a member with crm read and revenue 'none' every ContactEvent the feed reads as a money row (a manual payment's invoice.payment_recorded {amount, totalPaid, invoiceTotal}, which D-90 still writes; invoice.paid; store_order.paid; a storefront booking.created's deposit; deal.won by its type), fills that member's page from older events, and serves the owner and a member with revenue read every event, amounts included", async () => {
+    const staff = `${P}${RUN}_staffC13e`;
+    const staffRev = `${P}${RUN}_staffC13eRev`;
+    const contactId = `${P}${RUN}_cTeamC13e`;
+    const invoiceId = `${P}${RUN}_invC13e`;
+    const TOTAL = 4975.5;
+    const PAID = 1357.91;
+    await db.user.create({ data: { id: staff, email: `${P}${RUN}_staffC13e@test.local`, role: 'USER' } });
+    await db.user.create({ data: { id: staffRev, email: `${P}${RUN}_staffC13eRev@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}${RUN}_mC13e`, userId: staff, businessId: C.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none' } } });
+    await db.membership.create({ data: { id: `${P}${RUN}_mC13eRev`, userId: staffRev, businessId: C.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'read' } } });
+    await db.contact.create({ data: { id: contactId, businessId: C.biz, firstName: 'K19a', lastName: 'TeamC13e', visibility: 'TEAM', ownerId: C.owner } });
+    await db.invoice.create({
+      data: {
+        id: invoiceId,
+        invoiceNumber: `K19A-${RUN}-C13e`,
+        status: 'SENT',
+        subtotal: TOTAL,
+        total: TOTAL,
+        currency: 'TTD',
+        businessId: C.biz,
+        contactId,
+        items: { create: [{ id: `${invoiceId}_item1`, description: 'K19A C13e item', quantity: 1, unitPrice: TOTAL, total: TOTAL }] },
+      },
+    });
+
+    // ContactEvents as their writers store them: two with no amount (oldest),
+    // then four money events (newer).
+    const t0 = Date.now() - 60 * 60_000;
+    const at = (minutes: number) => new Date(t0 + minutes * 60_000);
+    const event = (key: string, type: string, data: Record<string, unknown>, createdAt: Date) => ({
+      id: `${P}${RUN}_c13e_${key}`, businessId: C.biz, contactId, type, data, actorType: 'SYSTEM', source: 'k19a', createdAt,
+    });
+    const PLAIN = [
+      event('call', 'communication.call', { summary: 'K19a C13e call' }, at(0)),
+      event('note', 'note.created', { body: 'K19a C13e note' }, at(1)),
+    ];
+    const MONEY = [
+      // mark-paid's invoice.paid (sales_revenue), RevenueEventListener.onStoreOrderPaid's order total,
+      // a storefront booking.created's deposit, CrmDealsService's deal.won (sales_revenue; amount in data.value).
+      event('paid', 'invoice.paid', { invoiceId, total: 6543.21, currency: 'TTD' }, at(10)),
+      event('order', 'store_order.paid', { orderId: `${P}${RUN}_orderC13e`, total: 9876.54, currency: 'TTD' }, at(11)),
+      event('deposit', 'booking.created', { bookingId: `${P}${RUN}_bkC13e`, depositAmount: 2468.68, currency: 'TTD' }, at(12)),
+      event('won', 'deal.won', { dealId: `${P}${RUN}_dealC13e`, title: 'K19a C13e deal', value: 5000.37, currency: 'TTD' }, at(13)),
+    ];
+    await db.contactEvent.createMany({ data: [...PLAIN, ...MONEY] });
+    // The newest: a manual payment through the real route, whose
+    // invoice.payment_recorded ContactEvent D-90 still writes (no Activity copy).
+    const reference = `${P}${RUN}-c13e`;
+    const paid = await payAs(C.owner, C.biz, invoiceId, { amount: PAID, method: 'bank_transfer', reference });
+    expect(paid.status, JSON.stringify(paid.body)).toBe(201);
+    const [payment] = await contactEventsFor(C.biz, contactId, reference);
+    expect(payment, 'the payment\'s ContactEvent').toBeTruthy();
+    expect(cents((payment.data as any).amount)).toBe(cents(PAID));
+    expect(cents((payment.data as any).totalPaid)).toBe(cents(PAID));
+    expect(cents((payment.data as any).invoiceTotal)).toBe(cents(TOTAL));
+
+    type EventRow = { id: string; type: string; data: any };
+    const read = async (user: string) => {
+      const res = await contactEventsRoute(user, contactId);
+      expect(res.status, `${user}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+      return res.body as EventRow[];
+    };
+    const LEAKS = ['1357.91', '4975.5', '6543.21', '9876.54', '2468.68', '5000.37', '"amount"', '"total"', '"totalPaid"', '"invoiceTotal"', '"depositAmount"', '"value"'];
+    const expectNoAmount = (served: unknown, where: string) => {
+      const text = JSON.stringify(served);
+      for (const leak of LEAKS) expect(text.includes(leak), `${where} mentions ${leak}`).toBe(false);
+    };
+    const plainNewestFirst = PLAIN.map((e) => e.id).reverse();
+    const everyNewestFirst = [payment.id, ...MONEY.map((e) => e.id).reverse(), ...plainNewestFirst];
+
+    // crm read, revenue 'none': the events with no amount only, newest first, no amount anywhere.
+    const served = await read(staff);
+    expect(served.map((e) => e.id)).toEqual(plainNewestFirst);
+    expectNoAmount(served, "revenue 'none'");
+
+    // The owner, and a STAFF member with revenue read, get every event, newest first, the amounts included.
+    for (const user of [C.owner, staffRev]) {
+      const all = await read(user);
+      expect(all.map((e) => e.id), user).toEqual(everyNewestFirst);
+      expect(cents(all[0].data.amount), user).toBe(cents(PAID));
+      expect(cents(all.find((e) => e.type === 'deal.won')!.data.value), user).toBe(cents(5000.37));
+    }
+
+    // The page (20 events by default): twenty more money events, newer than
+    // every other. The owner's page is those twenty; the member without
+    // revenue read still gets the events with no amount (the page is filled
+    // from older events, as the feed fills its page).
+    const base = new Date(payment.createdAt).getTime();
+    await db.contactEvent.createMany({
+      data: Array.from({ length: 20 }, (_, i) =>
+        event(`more${i}`, 'store_order.paid', { orderId: `${P}${RUN}_orderC13e${i}`, total: 7000 + i, currency: 'TTD' }, new Date(base + (i + 1) * 1000)),
+      ),
+    });
+    const ownerPage = await read(C.owner);
+    expect(ownerPage.map((e) => e.id)).toEqual(Array.from({ length: 20 }, (_, i) => `${P}${RUN}_c13e_more${19 - i}`));
+    const staffPage = await read(staff);
+    expect(staffPage.map((e) => e.id)).toEqual(plainNewestFirst);
+    expectNoAmount(staffPage, "revenue 'none', page 2");
+
+    // Tenant control: owner B on C's contact is refused, and the route still
+    // refuses a request with no identity.
+    const foreign = await contactEventsRoute(ID.ownerB, contactId);
+    expect(foreign.status).toBe(403);
+    expectNoAmount(foreign.body, 'the refusal');
+    const anonymous = await request(crmApp.getHttpServer()).get(`/crm/businesses/${C.biz}/contacts/${contactId}/events`);
+    expect([401, 403]).toContain(anonymous.status);
+  });
 
   // W4-FEED-COPY-COMPLETE review CR-FCC-1 (D-90): the copies D-90 removed were
   // the only rows of a manual payment and of a booking create with a category
