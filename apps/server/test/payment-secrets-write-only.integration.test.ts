@@ -681,6 +681,7 @@ describe('R0-SEC2c concurrent metaData writers cannot undo a secret write (revie
       for (const [k, v] of Object.entries(PUBLIC_META)) expect(meta[k], `stored ${k} kept`).toEqual(v);
     } finally {
       pausing.disarm();
+      pause.release(); // never leave trackEvent (and its transaction) stopped after a failure
       await reset(ID.bizP);
     }
   });

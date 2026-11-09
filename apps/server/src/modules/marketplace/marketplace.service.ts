@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { createHash } from 'crypto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { TransactionalEmailService, NotificationType } from '../notifications/transactional-email.service';
 import { FulfillmentRoutingService, canTransitionOrder } from './fulfillment-routing.service';
 import { ExpensePostingService } from '../finance/expense-posting.service';
@@ -1530,20 +1531,25 @@ export class MarketplaceService {
     };
   }
 
+  /**
+   * FOLLOW3-D12: metaData is read and written under the business row lock
+   * (lockBusinessMeta), so a metaData write that commits meanwhile (an owner's
+   * cleared payment secret, a storefront config save) is not undone by this
+   * one's copy.
+   */
   async updateDeliveryConfig(businessId: string, config: Record<string, any>) {
-    const business = await this.prisma.client.business.findFirst({
-      where: { id: businessId, deletedAt: null },
-      select: { metaData: true },
-    });
-    if (!business) throw new NotFoundException('Business not found');
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId, { live: true });
+      if (!business) throw new NotFoundException('Business not found');
 
-    const meta = (business.metaData as Record<string, any>) ?? {};
-    const storefront = meta.storefront ?? {};
-    storefront.deliveryConfig = config;
+      const meta = (business.metaData as Record<string, any>) ?? {};
+      const storefront = meta.storefront ?? {};
+      storefront.deliveryConfig = config;
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { metaData: { ...meta, storefront } },
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: { ...meta, storefront } },
+      });
     });
 
     return config;

@@ -1,5 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { PUBLIC_PRODUCT_SELECT, PUBLIC_SERVICE_SELECT } from '../catalog/catalog.service';
 
@@ -75,50 +76,54 @@ export class SiteService {
     return meta.storefront ?? {};
   }
 
+  /**
+   * FOLLOW3-D12: metaData is read and written under the business row lock
+   * (lockBusinessMeta), so a metaData write that commits meanwhile (an owner's
+   * cleared payment secret, a storefront event) is not undone by this one's copy.
+   */
   async updateStorefrontConfig(businessId: string, config: Record<string, any>) {
-    const business = await this.prisma.client.business.findFirst({
-      where: { id: businessId, deletedAt: null },
-      select: { metaData: true },
-    });
-    if (!business) throw new NotFoundException('Business not found');
+    return this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId, { live: true });
+      if (!business) throw new NotFoundException('Business not found');
 
-    const meta = (business.metaData as Record<string, any>) ?? {};
-    const existing = meta.storefront ?? {};
+      const meta = (business.metaData as Record<string, any>) ?? {};
+      const existing = meta.storefront ?? {};
 
-    const ARRAY_KEYS = new Set(['sections', 'faqEntries']);
-    const DIRECT_REPLACE_KEYS = new Set(['policies', 'storeSettings', 'contactOptions']);
+      const ARRAY_KEYS = new Set(['sections', 'faqEntries']);
+      const DIRECT_REPLACE_KEYS = new Set(['policies', 'storeSettings', 'contactOptions']);
 
-    const merged: Record<string, any> = { ...existing };
-    for (const key of Object.keys(config)) {
-      if (ARRAY_KEYS.has(key) || Array.isArray(config[key])) {
-        merged[key] = config[key];
-      } else if (DIRECT_REPLACE_KEYS.has(key)) {
-        merged[key] = { ...(existing[key] ?? {}), ...config[key] };
-      } else if (config[key] && typeof config[key] === 'object' && !Array.isArray(config[key])) {
-        merged[key] = { ...(existing[key] ?? {}), ...config[key] };
-      } else {
-        merged[key] = config[key];
+      const merged: Record<string, any> = { ...existing };
+      for (const key of Object.keys(config)) {
+        if (ARRAY_KEYS.has(key) || Array.isArray(config[key])) {
+          merged[key] = config[key];
+        } else if (DIRECT_REPLACE_KEYS.has(key)) {
+          merged[key] = { ...(existing[key] ?? {}), ...config[key] };
+        } else if (config[key] && typeof config[key] === 'object' && !Array.isArray(config[key])) {
+          merged[key] = { ...(existing[key] ?? {}), ...config[key] };
+        } else {
+          merged[key] = config[key];
+        }
       }
-    }
 
-    if (merged.faqEntries && Array.isArray(merged.faqEntries)) {
-      merged.faqEntries = merged.faqEntries.slice(0, 50);
-    }
-    if (merged.sections && Array.isArray(merged.sections)) {
-      merged.sections = merged.sections.slice(0, 20);
-    }
-    if (merged.merchandising?.featuredItemIds) {
-      merged.merchandising.featuredItemIds = merged.merchandising.featuredItemIds.slice(0, 8);
-    }
+      if (merged.faqEntries && Array.isArray(merged.faqEntries)) {
+        merged.faqEntries = merged.faqEntries.slice(0, 50);
+      }
+      if (merged.sections && Array.isArray(merged.sections)) {
+        merged.sections = merged.sections.slice(0, 20);
+      }
+      if (merged.merchandising?.featuredItemIds) {
+        merged.merchandising.featuredItemIds = merged.merchandising.featuredItemIds.slice(0, 8);
+      }
 
-    const updated = await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: { ...meta, storefront: merged },
-      },
-      select: { metaData: true },
+      const updated = await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: { ...meta, storefront: merged },
+        },
+        select: { metaData: true },
+      });
+      return ((updated.metaData as Record<string, any>) ?? {}).storefront ?? {};
     });
-    return ((updated.metaData as Record<string, any>) ?? {}).storefront ?? {};
   }
 
   async getPublicStorefront(slug: string) {
@@ -205,29 +210,36 @@ export class SiteService {
     if (!type || !this.ALLOWED_EVENT_TYPES.has(type)) return { tracked: false };
     if (itemId && itemId.length > 100) return { tracked: false };
 
-    const business = await this.prisma.client.business.findFirst({
-      where: { id: businessId, deletedAt: null },
-      select: { metaData: true },
+    // FOLLOW3-D12 (R0-SEC2c review SEC2c-ST-1, case SEC2c-C03): this public,
+    // unauthenticated route read metaData without a lock and wrote the whole
+    // bag back, so an owner's payment secret cleared or rotated between the
+    // read and the write was stored again, and two events in flight together
+    // recorded one. The read and the write now run under the business row
+    // lock (lockBusinessMeta), the lock the profile PATCH takes.
+    const tracked = await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId, { live: true });
+      if (!business) return false;
+
+      const meta = (business.metaData as Record<string, any>) ?? {};
+      const events: StorefrontEvent[] = meta.storefrontEvents ?? [];
+
+      events.push({
+        type,
+        itemId: itemId ?? null,
+        timestamp: new Date().toISOString(),
+      });
+
+      const bounded = events.slice(-1000);
+
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: { ...meta, storefrontEvents: bounded },
+        },
+      });
+      return true;
     });
-    if (!business) return;
-
-    const meta = (business.metaData as Record<string, any>) ?? {};
-    const events: StorefrontEvent[] = meta.storefrontEvents ?? [];
-
-    events.push({
-      type,
-      itemId: itemId ?? null,
-      timestamp: new Date().toISOString(),
-    });
-
-    const bounded = events.slice(-1000);
-
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: { ...meta, storefrontEvents: bounded },
-      },
-    });
+    if (!tracked) return;
 
     return { tracked: true };
   }

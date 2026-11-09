@@ -188,6 +188,7 @@ async function interleave<W, C>(writer: () => Promise<W>, concurrent: () => Prom
     return { writerResult, concurrentResult, order };
   } finally {
     pausing.disarm();
+    pause.release(); // never leave a writer (and its transaction) stopped after a failure
   }
 }
 
