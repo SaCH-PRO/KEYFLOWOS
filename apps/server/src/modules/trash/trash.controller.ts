@@ -49,6 +49,20 @@ function isTrashableModel(value: string): value is TrashableModel {
   return TRASHABLE_MODELS.includes(value as TrashableModel);
 }
 
+/**
+ * W5-TRASH-LIST-500 (D46-S09g): the column a trashable model names its
+ * business by, where it is not businessId. Opportunity names its business
+ * posterBusinessId and has no businessId, so the listing's businessId filter
+ * made Prisma refuse queryModel('opportunity') and GET trash with no model
+ * answered 500 for every caller.
+ */
+const TENANT_COLUMN: Partial<Record<TrashableModel, 'posterBusinessId'>> = { opportunity: 'posterBusinessId' };
+
+/** The listing's filter for `model`: its trashed rows in `businessId`, on the model's own tenant column. */
+function trashedWhere(model: TrashableModel, businessId: string): Record<string, unknown> {
+  return { [TENANT_COLUMN[model] ?? 'businessId']: businessId, deletedAt: { not: null } };
+}
+
 @Controller('api/businesses/:businessId/trash')
 @UseGuards(BusinessGuard)
 export class TrashController {
@@ -59,6 +73,8 @@ export class TrashController {
 
   // W4-TRASH-D46 review repair SEC-TRASH-D46-1: a revenue model is listed only
   // to a caller revenueReadRefusal admits.
+  // W5-TRASH-LIST-500 (D46-S09g): each model is filtered on its own tenant
+  // column (trashedWhere), and the every-model listing lists trashed rows only.
   @Get()
   @RequireModuleScope('settings')
   async listTrashed(
@@ -68,8 +84,6 @@ export class TrashController {
     @Query('model') model?: string,
     @Req() req?: ActorRequest,
   ) {
-    const where: Record<string, unknown> = { businessId, deletedAt: { not: null } };
-
     if (model) {
       if (!isTrashableModel(model)) {
         throw new BadRequestException(`Model '${model}' is not trashable`);
@@ -78,6 +92,7 @@ export class TrashController {
         const refusal = await this.revenueReadRefusal(req, businessId);
         if (refusal) throw new ForbiddenException(refusal);
       }
+      const where = trashedWhere(model, businessId);
       const items = await this.queryModel(model, where, limit, offset);
       const total = await this.countModel(model, where);
       return { items, total, model };
@@ -89,8 +104,14 @@ export class TrashController {
     const allItems: Array<Record<string, unknown>> = [];
     for (const m of TRASHABLE_MODELS) {
       if (REVENUE_TRASH_SUBJECT[m] && !mayReadRevenue) continue;
-      const items = await this.queryModel(m, where, 10, 0);
-      allItems.push(...items.map((item) => ({ ...item, _model: m })));
+      const items = await this.queryModel(m, trashedWhere(m, businessId), 10, 0);
+      // W5-TRASH-LIST-500 (D46-S09g): a row with no deletedAt is live, not
+      // trash. The client's soft-delete extension rewrites the filter to
+      // deletedAt null for the models it covers (Contact, Invoice, Quote and
+      // eight more), so those answer live rows here; none is listed as trash.
+      for (const item of items) {
+        if (item.deletedAt != null) allItems.push({ ...item, _model: m });
+      }
     }
     allItems.sort((a, b) => {
       const aDate = new Date((a.deletedAt as string) || 0).getTime();
