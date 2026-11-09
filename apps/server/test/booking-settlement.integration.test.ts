@@ -94,8 +94,26 @@
  *             issued right after that read waits for the forfeit (which then stands, D-26)
  *   S-19  F4  a refund landing right after the reinstatement's read of the deposit is not lost: the
  *             booking brought back from a forfeit ends UNPAID, not DEPOSIT_PAID with nothing held
- *   TODO  CR-V28-4  a business-initiated cancel forfeits nothing (needs a cancel-initiator input)
  *   TODO  CR-V28-3   the storefront passes the token link into the confirmation (book/[slug]/page.tsx)
+ *
+ * V1-84 (FOLLOW3-D18-CANCEL-INITIATOR, CR-V28-4, D-65): the cancel says who cancelled; only a
+ * customer cancel forfeits a paid deposit. Red at the FOLLOW3-A10 head:
+ *   CI-01  a direct updateBookingStatus(..., 'CANCELLED') (KEY bookings_cancel_booking, undo, saga
+ *          compensation, the cortex adapter) is business-initiated: nothing forfeit, DEPOSIT_PAID kept
+ *   CI-01b CONTROL (source check) those four callers cancel with three arguments (the default)
+ *   CI-02  the route with cancelledBy BUSINESS forfeits nothing
+ *   CI-03  cancelledBy CUSTOMER forfeits as S-07 and S-07e (25, or 15 part-refunded), naming the member
+ *   CI-04  any other cancelledBy answers 400 and writes nothing (route and direct call)
+ *   CI-05  CONTROL: the route with no cancelledBy is a customer cancel (D-65), as today
+ *   S-07d  a direct call now forfeits nothing (was: forfeit, actor SYSTEM); a direct CUSTOMER cancel
+ *          names SYSTEM; the route half sends CUSTOMER. S-07, S-07c, S-07e send CUSTOMER; S-10's
+ *          in-race direct cancel names CUSTOMER.
+ * FOLLOW3-D18 review repairs, red at 42c4f4c5:
+ *   CI-06  SEC-D18-1/CR-D18-1  the first cancel decides: a re-cancel (no initiator, CUSTOMER, direct)
+ *          of a business-cancelled booking forfeits nothing, writes no second booking.cancelled row
+ *          and emits no second event; CONTROL: a customer forfeit stands under a business re-cancel
+ *   CI-06b SEC-D18-1  a business cancel committing between a customer cancel's read and write wins
+ *   CI-07  SEC-D18-2  the booking.cancelled row names the member (USER + actorId), or SYSTEM
  *
  * Nothing on the money path is mocked: PrismaService, AuthGuard, BusinessGuard,
  * PlanLimitGuard, PublicRateLimitGuard (real Redis at REDIS_URL, this suite's
@@ -260,12 +278,18 @@ async function book(serviceId: string, who: string) {
   };
 }
 
-function setStatus(bookingId: string, status: string) {
+/**
+ * The operator's status route. `extra` carries the rest of the body, the
+ * cancel's initiator (V1-84, `cancelledBy`) among it; a case that sends none
+ * is an operator cancel without one (D-65: a customer cancel).
+ */
+function setStatus(bookingId: string, status: string, extra: Record<string, unknown> = {}) {
   return agent()
     .post(`/bookings/businesses/${ID.biz}/bookings/${bookingId}/status`)
     .set(HEADER, ID.owner)
-    .send({ status });
+    .send({ status, ...extra });
 }
+const CUSTOMER_CANCEL = { cancelledBy: 'CUSTOMER' };
 
 function createInvoiceRoute(bookingId: string) {
   return agent().post(`/bookings/businesses/${ID.biz}/bookings/${bookingId}/create-invoice`).set(HEADER, ID.owner).send({});
@@ -369,11 +393,17 @@ beforeAll(async () => {
   // V1-28 adds this file; at the V1-16 head it does not exist and the
   // paymentStatus cases fail on its absence instead of the suite failing to load.
   const listenerMod: any = await import('../src/modules/bookings/booking-payment-status.listener').catch(() => null);
+  // V1-84 adds the status route's body DTO; before it the route read
+  // @Body('status') alone (a string, which the ValidationPipe skips).
+  const statusDtoMod: any = await import('../src/modules/bookings/dto/update-booking-status.dto').catch(() => null);
 
   // The create handlers' parameter types as tsc emits them for the production
   // build (emitDecoratorMetadata), which vitest's esbuild transform does not.
   Reflect.defineMetadata('design:paramtypes', [String, CreateBookingDto, Object], BookingsController.prototype, 'createBooking');
   Reflect.defineMetadata('design:paramtypes', [String, PublicCreateBookingDto], BookingsController.prototype, 'publicCreateBooking');
+  if (statusDtoMod?.UpdateBookingStatusDto) {
+    Reflect.defineMetadata('design:paramtypes', [String, String, statusDtoMod.UpdateBookingStatusDto], BookingsController.prototype, 'updateBookingStatus');
+  }
 
   Logger.overrideLogger(false);
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
@@ -803,10 +833,12 @@ describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
   // D-26 rules on a CUSTOMER cancel. The server has no customer-cancel route:
   // the operator's status route (here) records every cancel, so these cases
   // prove the forfeit on a cancel recorded there, not on a customer's own.
+  // V1-84 (CR-V28-4, D-65): the route says who cancelled (cancelledBy), and
+  // these cases send CUSTOMER; CI-01..CI-05 below prove the initiator.
   it('S-07 RED-BEFORE: the forfeit is recorded on the booking; the deposit stays PAID; nothing is refunded or credited', async () => {
     const b = await book(ID.svcDep, 's07');
     await settle(b.depositInvoiceId!, 25);
-    const res = await setStatus(b.bookingId, 'CANCELLED');
+    const res = await setStatus(b.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body.status).toBe('CANCELLED');
     expect(res.body.paymentStatus).toBe('DEPOSIT_FORFEITED');
@@ -823,7 +855,7 @@ describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
     expect(contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === b.bookingId)).toHaveLength(1);
 
     // Cancelling again records nothing new.
-    await setStatus(b.bookingId, 'CANCELLED');
+    await setStatus(b.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
     expect(contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === b.bookingId)).toHaveLength(1);
 
     // Reinstated, the deposit is held for the booking again.
@@ -855,7 +887,7 @@ describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
     // Forfeited, then refunded by hand (D-26), then reinstated and completed.
     const b = await book(ID.svcDep, 's07c');
     await settle(b.depositInvoiceId!, 25);
-    expect((await setStatus(b.bookingId, 'CANCELLED')).body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    expect((await setStatus(b.bookingId, 'CANCELLED', CUSTOMER_CANCEL)).body.paymentStatus).toBe('DEPOSIT_FORFEITED');
     await refundDeposit(b.depositInvoiceId!);
     const back = await setStatus(b.bookingId, 'CONFIRMED');
     expect(back.status, JSON.stringify(back.body)).toBe(201);
@@ -876,7 +908,7 @@ describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
     const early = await book(ID.svcDep, 's07c_early');
     await settle(early.depositInvoiceId!, 25);
     await refundDeposit(early.depositInvoiceId!);
-    const cancel = await setStatus(early.bookingId, 'CANCELLED');
+    const cancel = await setStatus(early.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
     expect(cancel.status).toBe(201);
     expect(cancel.body.depositForfeit ?? null).toBeNull();
     expect((await bookingRow(early.bookingId)).paymentStatus).not.toBe('DEPOSIT_FORFEITED');
@@ -893,7 +925,7 @@ describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
     await commerce.markPaymentRefunded(ten.id, ID.biz, 'goodwill', ID.owner);
     expect((await invoiceRow(b.depositInvoiceId!)).status, 'a partial refund reopens the deposit (D-14)').toBe('PARTIALLY_PAID');
 
-    const res = await setStatus(b.bookingId, 'CANCELLED');
+    const res = await setStatus(b.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body.paymentStatus).toBe('DEPOSIT_FORFEITED');
     expect(res.body.depositForfeit).toMatchObject({ depositInvoiceId: b.depositInvoiceId, amount: 15 });
@@ -909,33 +941,293 @@ describe('V1-28 D-26: a cancel after a paid deposit forfeits it', () => {
     const owed = await book(ID.svcDep, 's07e_owed');
     await sendAndPay(owed.depositInvoiceId!, 10);
     expect((await invoiceRow(owed.depositInvoiceId!)).status).toBe('PARTIALLY_PAID');
-    const cancel = await setStatus(owed.bookingId, 'CANCELLED');
+    const cancel = await setStatus(owed.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
     expect(cancel.status, JSON.stringify(cancel.body)).toBe(201);
     expect(cancel.body.depositForfeit ?? null).toBeNull();
     expect((await bookingRow(owed.bookingId)).paymentStatus).toBe('UNPAID');
     expect(contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === owed.bookingId)).toHaveLength(0);
   });
 
-  it('S-07d SEC-V28-2: the forfeit row names the member who cancelled; a call with no member (KEY tool, undo, compensation) is SYSTEM', async () => {
+  it('S-07d SEC-V28-2: the forfeit row names the member who cancelled; a direct call (KEY tool, undo, compensation) forfeits nothing (V1-84, D-65); a customer cancel with no member is SYSTEM', async () => {
     const viaRoute = await book(ID.svcDep, 's07d_route');
     await settle(viaRoute.depositInvoiceId!, 25);
-    expect((await setStatus(viaRoute.bookingId, 'CANCELLED')).status).toBe(201);
+    expect((await setStatus(viaRoute.bookingId, 'CANCELLED', CUSTOMER_CANCEL)).status).toBe(201);
     const [byOwner] = contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === viaRoute.bookingId);
     expect(byOwner).toMatchObject({ actorType: 'USER', actorId: ID.owner });
 
-    // As flow-orchestrator's bookings_cancel_booking, undo and compensation call it.
+    // As flow-orchestrator's bookings_cancel_booking, undo and compensation call
+    // it: a business-initiated cancel (D-65), so nothing is forfeit. Before
+    // V1-84 this forfeit the 25 with actor SYSTEM (the defect CR-V28-4 named).
     const direct = await book(ID.svcDep, 's07d_direct');
     await settle(direct.depositInvoiceId!, 25);
     await bookingsService.updateBookingStatus(ID.biz, direct.bookingId, 'CANCELLED');
-    const [bySystem] = contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === direct.bookingId);
+    expect(contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === direct.bookingId)).toHaveLength(0);
+    expect((await bookingRow(direct.bookingId)).paymentStatus).toBe('DEPOSIT_PAID');
+
+    // A customer cancel recorded with no member's request behind it names SYSTEM, never a USER with no actor.
+    const noMember = await book(ID.svcDep, 's07d_system');
+    await settle(noMember.depositInvoiceId!, 25);
+    await bookingsService.updateBookingStatus(ID.biz, noMember.bookingId, 'CANCELLED', 'CUSTOMER');
+    const [bySystem] = contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === noMember.bookingId);
     expect(bySystem).toMatchObject({ actorType: 'SYSTEM' });
     expect((bySystem as any).actorId).toBeUndefined();
   });
+});
 
-  it.todo(
-    'CR-V28-4: a cancel the BUSINESS initiates (operator, KEY bookings_cancel_booking, undo, saga compensation) forfeits nothing; ' +
-      'needs a cancel-initiator input on the status route (bookings.controller.ts) and its callers, all outside the V1-28 write set',
-  );
+describe('V1-84 CR-V28-4 / D-65: who cancelled decides the forfeit (only a customer cancel forfeits a paid deposit)', () => {
+  const forfeitRows = (bookingId: string) => contactEvents.filter((e) => e.type === 'booking.deposit_forfeited' && e.data?.bookingId === bookingId);
+  const cancelRows = (bookingId: string) => contactEvents.filter((e) => e.type === 'booking.cancelled' && e.data?.bookingId === bookingId);
+
+  /** A booking whose 25 deposit is paid: CONFIRMED and DEPOSIT_PAID. */
+  async function paidBooking(who: string) {
+    const b = await book(ID.svcDep, who);
+    await settle(b.depositInvoiceId!, 25);
+    expect(await bookingRow(b.bookingId)).toMatchObject({ status: 'CONFIRMED', paymentStatus: 'DEPOSIT_PAID' });
+    return b;
+  }
+
+  /** Cancelled, nothing forfeit: still DEPOSIT_PAID, no forfeit row, and the deposit, its payment rows and credit notes as paid (nothing moves, D-26). */
+  async function expectCancelledNotForfeit(b: { bookingId: string; depositInvoiceId?: string }) {
+    expect(await bookingRow(b.bookingId)).toMatchObject({ status: 'CANCELLED', paymentStatus: 'DEPOSIT_PAID' });
+    expect(forfeitRows(b.bookingId), 'no booking.deposit_forfeited row').toHaveLength(0);
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('PAID');
+    const payments = await db.payment.findMany({ where: { invoiceId: b.depositInvoiceId } });
+    expect(payments.map((p: any) => `${p.status} ${money(p.amount)}`)).toEqual(['SUCCESSFUL 25']);
+    expect(await db.creditNote.count({ where: { invoiceId: b.depositInvoiceId } })).toBe(0);
+  }
+
+  it('CI-01 RED-BEFORE: a direct cancel (KEY bookings_cancel_booking, undo, saga compensation, the cortex adapter) is business-initiated: a paid deposit is not forfeit', async () => {
+    const b = await paidBooking('ci01');
+    const res = await bookingsService.updateBookingStatus(ID.biz, b.bookingId, 'CANCELLED');
+    expect(res.status).toBe('CANCELLED');
+    expect(res.paymentStatus).toBe('DEPOSIT_PAID');
+    expect(res.depositForfeit ?? null).toBeNull();
+    await expectCancelledNotForfeit(b);
+    // The cancel itself is on the contact's timeline, saying who cancelled.
+    expect(cancelRows(b.bookingId).map((e) => e.data)).toEqual([expect.objectContaining({ status: 'CANCELLED', cancelledBy: 'BUSINESS' })]);
+
+    // The same with the initiator named.
+    const named = await paidBooking('ci01_named');
+    await bookingsService.updateBookingStatus(ID.biz, named.bookingId, 'CANCELLED', 'BUSINESS');
+    await expectCancelledNotForfeit(named);
+
+    // Brought back, the deposit is still held for the booking, and the final invoice nets it: 75.
+    const back = await setStatus(b.bookingId, 'CONFIRMED');
+    expect(back.status, JSON.stringify(back.body)).toBe(201);
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('DEPOSIT_PAID');
+    const done = await setStatus(b.bookingId, 'COMPLETED');
+    expect(done.status, JSON.stringify(done.body)).toBe(201);
+    expect(done.body.invoicing).toMatchObject({ status: 'CREATED', amount: 75, depositAmount: 25, depositInvoiceId: b.depositInvoiceId });
+  });
+
+  it('CI-01b CONTROL (source check): KEY bookings_cancel_booking, undo, saga compensation and the cortex adapter cancel through the service default (three arguments, no initiator)', () => {
+    const SRC = path.resolve(__dirname, '../src/modules');
+    const callers: Record<string, number> = {
+      'ai/flow-orchestrator.service.ts': 1,
+      'ai/undo.service.ts': 1,
+      'key-cortex/key-cortex-compensation.service.ts': 2,
+      'key-cortex/adapters/bookings-adapter.service.ts': 1,
+    };
+    const CALL = 'updateBookingStatus(';
+    for (const [file, expected] of Object.entries(callers)) {
+      const text = fs.readFileSync(path.join(SRC, file), 'utf8');
+      const cancels: string[][] = [];
+      for (let at = text.indexOf(CALL); at >= 0; at = text.indexOf(CALL, at + 1)) {
+        // The call's argument list, split on its top-level commas.
+        let depth = 0;
+        let arg = '';
+        const args: string[] = [];
+        for (let i = at + CALL.length; i < text.length; i++) {
+          const ch = text[i];
+          if (ch === ')' && depth === 0) break;
+          if (ch === '(' || ch === '[' || ch === '{') depth++;
+          if (ch === ')' || ch === ']' || ch === '}') depth--;
+          if (ch === ',' && depth === 0) {
+            args.push(arg.trim());
+            arg = '';
+          } else arg += ch;
+        }
+        if (arg.trim()) args.push(arg.trim());
+        if (args.some((a) => /CANCELLED/.test(a))) cancels.push(args);
+      }
+      expect(cancels.length, `${file}: CANCELLED calls`).toBe(expected);
+      for (const args of cancels) expect(args, `${file}: ${args.join(', ')}`).toHaveLength(3);
+    }
+  });
+
+  it('CI-02 RED-BEFORE: the operator route with cancelledBy BUSINESS forfeits nothing', async () => {
+    const b = await paidBooking('ci02');
+    const res = await setStatus(b.bookingId, 'CANCELLED', { cancelledBy: 'BUSINESS' });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.status).toBe('CANCELLED');
+    expect(res.body.paymentStatus).toBe('DEPOSIT_PAID');
+    expect(res.body.depositForfeit ?? null).toBeNull();
+    await expectCancelledNotForfeit(b);
+    expect(cancelRows(b.bookingId).map((e) => e.data)).toEqual([expect.objectContaining({ status: 'CANCELLED', cancelledBy: 'BUSINESS' })]);
+
+    // Cancelling again as the business still forfeits nothing.
+    expect((await setStatus(b.bookingId, 'CANCELLED', { cancelledBy: 'BUSINESS' })).status).toBe(201);
+    await expectCancelledNotForfeit(b);
+  });
+
+  it('CI-03: cancelledBy CUSTOMER forfeits what the deposit holds (25; 15 once part-refunded under D-14), naming the member who recorded it', async () => {
+    const full = await paidBooking('ci03');
+    const r1 = await setStatus(full.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
+    expect(r1.status, JSON.stringify(r1.body)).toBe(201);
+    expect(r1.body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    expect(r1.body.depositForfeit).toMatchObject({ depositInvoiceId: full.depositInvoiceId, amount: 25 });
+    expect((await bookingRow(full.bookingId)).paymentStatus).toBe('DEPOSIT_FORFEITED');
+    expect(forfeitRows(full.bookingId)).toEqual([
+      expect.objectContaining({ actorType: 'USER', actorId: ID.owner, data: expect.objectContaining({ depositInvoiceId: full.depositInvoiceId, amount: 25 }) }),
+    ]);
+    expect(cancelRows(full.bookingId).map((e) => e.data)).toEqual([expect.objectContaining({ status: 'CANCELLED', cancelledBy: 'CUSTOMER' })]);
+    // Nothing moves (D-26).
+    expect((await invoiceRow(full.depositInvoiceId!)).status).toBe('PAID');
+    expect(await db.creditNote.count({ where: { invoiceId: full.depositInvoiceId } })).toBe(0);
+
+    const part = await book(ID.svcDep, 'ci03_part');
+    await sendAndPay(part.depositInvoiceId!, 15);
+    await settle(part.depositInvoiceId!, 10);
+    const ten = await db.payment.findFirst({ where: { invoiceId: part.depositInvoiceId, status: 'SUCCESSFUL', amount: 10 } });
+    await commerce.markPaymentRefunded(ten.id, ID.biz, 'goodwill', ID.owner);
+    expect((await invoiceRow(part.depositInvoiceId!)).status).toBe('PARTIALLY_PAID');
+    const r2 = await setStatus(part.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
+    expect(r2.status, JSON.stringify(r2.body)).toBe(201);
+    expect(r2.body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    expect(r2.body.depositForfeit).toMatchObject({ depositInvoiceId: part.depositInvoiceId, amount: 15 });
+    expect(forfeitRows(part.bookingId)).toEqual([
+      expect.objectContaining({ actorType: 'USER', actorId: ID.owner, data: expect.objectContaining({ amount: 15 }) }),
+    ]);
+  });
+
+  it('CI-04 RED-BEFORE: an initiator other than CUSTOMER or BUSINESS answers 400 and writes nothing (route and direct call)', async () => {
+    const b = await paidBooking('ci04');
+    for (const cancelledBy of ['OTHER', 'customer', 'SYSTEM', '', 7, ['CUSTOMER']]) {
+      const res = await setStatus(b.bookingId, 'CANCELLED', { cancelledBy });
+      expect(res.status, `cancelledBy ${JSON.stringify(cancelledBy)}: ${JSON.stringify(res.body)}`).toBe(400);
+    }
+    // Not a cancel either: the body is refused whole.
+    const notCancel = await setStatus(b.bookingId, 'COMPLETED', { cancelledBy: 'OTHER' });
+    expect(notCancel.status, JSON.stringify(notCancel.body)).toBe(400);
+    await expect(bookingsService.updateBookingStatus(ID.biz, b.bookingId, 'CANCELLED', 'OTHER')).rejects.toMatchObject({ status: 400 });
+
+    expect(await bookingRow(b.bookingId)).toMatchObject({ status: 'CONFIRMED', paymentStatus: 'DEPOSIT_PAID' });
+    expect(forfeitRows(b.bookingId)).toHaveLength(0);
+    expect(cancelRows(b.bookingId)).toHaveLength(0);
+    expect(await finalInvoicesOf(b.bookingId), 'no completion invoice').toHaveLength(0);
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('PAID');
+  });
+
+  it('CI-05 CONTROL (D-65): the operator route without an initiator is a customer cancel: the paid deposit is forfeit, as today, naming the member', async () => {
+    const b = await paidBooking('ci05');
+    const res = await setStatus(b.bookingId, 'CANCELLED');
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    expect(res.body.depositForfeit).toMatchObject({ depositInvoiceId: b.depositInvoiceId, amount: 25 });
+    expect((await bookingRow(b.bookingId)).paymentStatus).toBe('DEPOSIT_FORFEITED');
+    expect(forfeitRows(b.bookingId)).toEqual([expect.objectContaining({ actorType: 'USER', actorId: ID.owner, data: expect.objectContaining({ amount: 25 }) })]);
+    expect((await invoiceRow(b.depositInvoiceId!)).status).toBe('PAID');
+  });
+
+  // FOLLOW3-D18 review (SEC-D18-1, CR-D18-1): the first cancel decides. A cancel
+  // of a booking already CANCELLED is a re-cancel: it forfeits nothing, writes
+  // no booking.cancelled row and emits no booking.cancelled event, whoever it
+  // names. Red at 42c4f4c5: the re-cancel forfeit the deposit the business
+  // cancel kept and wrote a second, CUSTOMER row.
+  const cancelEvents = (bookingId: string) => emitted.filter((e) => e.name === 'booking.cancelled' && e.payload?.booking?.id === bookingId);
+
+  it('CI-06 SEC-D18-1/CR-D18-1: a business cancel sticks: a later cancel with no initiator or CUSTOMER (stale drawer, any member) forfeits nothing and records nothing new', async () => {
+    // KEY, undo or compensation cancels (three arguments); the stale drawer then sends {status:'CANCELLED'}.
+    const viaKey = await paidBooking('ci06_key');
+    await bookingsService.updateBookingStatus(ID.biz, viaKey.bookingId, 'CANCELLED');
+    const again = await setStatus(viaKey.bookingId, 'CANCELLED');
+    expect(again.status, JSON.stringify(again.body)).toBe(201);
+    expect(again.body.status).toBe('CANCELLED');
+    expect(again.body.paymentStatus).toBe('DEPOSIT_PAID');
+    expect(again.body.depositForfeit ?? null).toBeNull();
+    await expectCancelledNotForfeit(viaKey);
+    expect(cancelRows(viaKey.bookingId).map((e) => e.data.cancelledBy), 'one booking.cancelled row, the first cancel').toEqual(['BUSINESS']);
+    expect(cancelEvents(viaKey.bookingId), 'the customer hears of the cancel once').toHaveLength(1);
+
+    // The route alone: BUSINESS, then CUSTOMER, then a direct CUSTOMER call.
+    const viaRoute = await paidBooking('ci06_route');
+    expect((await setStatus(viaRoute.bookingId, 'CANCELLED', { cancelledBy: 'BUSINESS' })).status).toBe(201);
+    const asCustomer = await setStatus(viaRoute.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
+    expect(asCustomer.status, JSON.stringify(asCustomer.body)).toBe(201);
+    expect(asCustomer.body.depositForfeit ?? null).toBeNull();
+    const direct = await bookingsService.updateBookingStatus(ID.biz, viaRoute.bookingId, 'CANCELLED', 'CUSTOMER');
+    expect(direct.paymentStatus).toBe('DEPOSIT_PAID');
+    expect(direct.depositForfeit ?? null).toBeNull();
+    await expectCancelledNotForfeit(viaRoute);
+    expect(cancelRows(viaRoute.bookingId).map((e) => e.data.cancelledBy)).toEqual(['BUSINESS']);
+    expect(cancelEvents(viaRoute.bookingId)).toHaveLength(1);
+
+    // CONTROL: the other way round, a customer cancel's forfeit stands; a business re-cancel neither undoes it nor records anything.
+    const forfeit = await paidBooking('ci06_customer_first');
+    expect((await setStatus(forfeit.bookingId, 'CANCELLED', CUSTOMER_CANCEL)).body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    const byBusiness = await setStatus(forfeit.bookingId, 'CANCELLED', { cancelledBy: 'BUSINESS' });
+    expect(byBusiness.status, JSON.stringify(byBusiness.body)).toBe(201);
+    expect(byBusiness.body.paymentStatus).toBe('DEPOSIT_FORFEITED');
+    await bookingsService.updateBookingStatus(ID.biz, forfeit.bookingId, 'CANCELLED');
+    expect(await bookingRow(forfeit.bookingId)).toMatchObject({ status: 'CANCELLED', paymentStatus: 'DEPOSIT_FORFEITED' });
+    expect(forfeitRows(forfeit.bookingId)).toHaveLength(1);
+    expect(cancelRows(forfeit.bookingId).map((e) => e.data.cancelledBy)).toEqual(['CUSTOMER']);
+    expect(cancelEvents(forfeit.bookingId)).toHaveLength(1);
+
+    // Brought back, the next cancel is a cancel again: the business-kept deposit is still held, and a customer cancel now forfeits it.
+    expect((await setStatus(viaKey.bookingId, 'CONFIRMED')).status).toBe(201);
+    expect((await bookingRow(viaKey.bookingId)).paymentStatus).toBe('DEPOSIT_PAID');
+    const later = await setStatus(viaKey.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
+    expect(later.body.depositForfeit).toMatchObject({ depositInvoiceId: viaKey.depositInvoiceId, amount: 25 });
+    expect(cancelRows(viaKey.bookingId).map((e) => e.data.cancelledBy)).toEqual(['BUSINESS', 'CUSTOMER']);
+    expect(forfeitRows(viaKey.bookingId)).toHaveLength(1);
+  });
+
+  it('CI-06b SEC-D18-1: a business cancel that commits between a customer cancel\'s read and its write wins: the customer cancel is a re-cancel (no forfeit, one row)', async () => {
+    const svc = bookingsService as any;
+    const b = await paidBooking('ci06b');
+    const writeBookingStatus = svc.writeBookingStatus;
+    let raced = false;
+    vi.spyOn(svc, 'writeBookingStatus').mockImplementation(async (...args: any[]) => {
+      if (!raced && args[1] === 'CANCELLED') {
+        raced = true;
+        // KEY cancels for the business while the operator's (customer) cancel is between its read and its write.
+        const key = await svc.updateBookingStatus(ID.biz, b.bookingId, 'CANCELLED');
+        expect(key.paymentStatus).toBe('DEPOSIT_PAID');
+      }
+      return writeBookingStatus.apply(svc, args);
+    });
+    const res = await setStatus(b.bookingId, 'CANCELLED', CUSTOMER_CANCEL);
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(raced).toBe(true);
+    vi.restoreAllMocks();
+    expect(res.body.depositForfeit ?? null, 'the business cancel moved it into CANCELLED first').toBeNull();
+    await expectCancelledNotForfeit(b);
+    expect(cancelRows(b.bookingId).map((e) => e.data.cancelledBy)).toEqual(['BUSINESS']);
+    expect(cancelEvents(b.bookingId)).toHaveLength(1);
+  });
+
+  it('CI-07 SEC-D18-2: the booking.cancelled row names the member whose request cancelled (BUSINESS waives the forfeit); a cancel with no member behind it is SYSTEM', async () => {
+    const waived = await paidBooking('ci07_route');
+    expect((await setStatus(waived.bookingId, 'CANCELLED', { cancelledBy: 'BUSINESS' })).status).toBe(201);
+    await expectCancelledNotForfeit(waived);
+    expect(cancelRows(waived.bookingId)).toEqual([
+      expect.objectContaining({ actorType: 'USER', actorId: ID.owner, data: expect.objectContaining({ status: 'CANCELLED', cancelledBy: 'BUSINESS' }) }),
+    ]);
+
+    const customer = await paidBooking('ci07_customer');
+    expect((await setStatus(customer.bookingId, 'CANCELLED', CUSTOMER_CANCEL)).status).toBe(201);
+    expect(cancelRows(customer.bookingId)).toEqual([
+      expect.objectContaining({ actorType: 'USER', actorId: ID.owner, data: expect.objectContaining({ cancelledBy: 'CUSTOMER' }) }),
+    ]);
+
+    // KEY, undo or compensation outside a member's request: SYSTEM, never a USER with no actor.
+    const direct = await paidBooking('ci07_direct');
+    await bookingsService.updateBookingStatus(ID.biz, direct.bookingId, 'CANCELLED');
+    const [bySystem] = cancelRows(direct.bookingId);
+    expect(bySystem).toMatchObject({ actorType: 'SYSTEM', data: expect.objectContaining({ cancelledBy: 'BUSINESS' }) });
+    expect((bySystem as any).actorId).toBeUndefined();
+  });
 });
 
 describe('Trial-N integration review: the deposit rule under D-14 (V1-28 x V1-29)', () => {
@@ -993,7 +1285,8 @@ describe('Trial-N integration review: the deposit rule under D-14 (V1-28 x V1-29
     vi.spyOn(svc, 'writeBookingStatus').mockImplementation(async (...args: any[]) => {
       if (!raced && args[1] === 'PENDING') {
         raced = true;
-        const cancel = await svc.updateBookingStatus(ID.biz, b.bookingId, 'CANCELLED');
+        // A customer cancel: a direct call names it (V1-84); with none it is the business's, which forfeits nothing.
+        const cancel = await svc.updateBookingStatus(ID.biz, b.bookingId, 'CANCELLED', 'CUSTOMER');
         expect(cancel.paymentStatus, 'the cancel in between forfeits the deposit').toBe('DEPOSIT_FORFEITED');
       }
       return writeBookingStatus.apply(svc, args);

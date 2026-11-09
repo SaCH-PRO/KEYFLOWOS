@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException, ForbiddenException, HttpException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException, ForbiddenException, HttpException, Inject, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Booking, BookingStatus, Invoice, Prisma } from '@prisma/client';
 import {
@@ -27,6 +27,7 @@ import { PublicEventsService } from '../public-events/public-events.service';
 import { TimelineService } from '../timeline/timeline.service';
 import { schedulersDisabled } from '../../core/config/env';
 import { getTenantContext } from '../../core/tenant/tenant-context';
+import { normalizeCurrency } from '../finance/posting.service';
 import {
   DERIVATION_TX_TIMEOUT_MS,
   depositPosition,
@@ -35,6 +36,7 @@ import {
   settlementInvoiceSelect,
   toCents,
 } from './booking-payment-status.listener';
+import { CANCEL_INITIATORS, CancelInitiator } from './dto/update-booking-status.dto';
 
 interface DayHours {
   open: string;
@@ -127,6 +129,52 @@ const DEPOSIT_FORFEITED = 'DEPOSIT_FORFEITED';
 export const INVOICE_NOT_CREATED = 'INVOICE_NOT_CREATED';
 
 /**
+ * D-59 (FOLLOW3-A10): the code of a final invoice refused because the
+ * booking's live deposit is in another currency than the final invoice (the
+ * business currency). D-13 is one currency per business: a deposit is never
+ * netted across currencies, nothing is written, the operator settles by hand.
+ *
+ * Shipped envelope (review CR-A10-1): POST create-invoice answers 409 with this
+ * code. The status route keeps V1-28's contract (completion never fails on
+ * its invoicing): the booking is COMPLETED and the answer carries invoicing
+ * FAILED with this code, no final invoice. D-59's text ("completion refuses
+ * with 409") is to be reconciled with this envelope in BUILD-MAP-001.
+ */
+export const DEPOSIT_CURRENCY_MISMATCH = 'DEPOSIT_CURRENCY_MISMATCH';
+
+/**
+ * D-59: the refusal of a final invoice that nets (or would net) the live
+ * deposit in another currency. `final` is the final invoice already drawn up
+ * when the pairing is re-checked after the fact (review SEC-A10-1).
+ */
+function depositCurrencyMismatch(
+  deposit: { id: string; invoiceNumber: string | null },
+  depositCurrency: string,
+  invoiceCurrency: string,
+  final?: { id: string; invoiceNumber: string | null },
+): ConflictException {
+  const finalPart = final
+    ? `the final invoice ${final.invoiceNumber} that nets it is in ${invoiceCurrency}`
+    : `the final invoice would be in ${invoiceCurrency}`;
+  return new ConflictException({
+    code: DEPOSIT_CURRENCY_MISMATCH,
+    message: `The deposit invoice ${deposit.invoiceNumber} is in ${depositCurrency} but ${finalPart}; a deposit is never netted across currencies. Settle the balance by hand.`,
+    depositInvoiceId: deposit.id,
+    depositCurrency,
+    invoiceCurrency,
+    ...(final ? { finalInvoiceId: final.id } : {}),
+  });
+}
+
+/** The completion answer's code for a final invoice that was not drawn up: D-59's refusal keeps its own code. */
+function completionInvoiceCode(err: unknown): typeof INVOICE_NOT_CREATED | typeof DEPOSIT_CURRENCY_MISMATCH {
+  const response = err instanceof ConflictException ? err.getResponse() : null;
+  return response && typeof response === 'object' && (response as { code?: unknown }).code === DEPOSIT_CURRENCY_MISMATCH
+    ? DEPOSIT_CURRENCY_MISMATCH
+    : INVOICE_NOT_CREATED;
+}
+
+/**
  * V1-28 review (SEC-V28-1): the invoiceError an operator reads, at the level
  * GlobalHttpExceptionFilter would answer the same failure: a 4xx
  * HttpException's own message (a refusal meant for the caller); anything else
@@ -134,7 +182,11 @@ export const INVOICE_NOT_CREATED = 'INVOICE_NOT_CREATED';
  * excerpts and column names) a fixed sentence. The detail is logged.
  */
 function completionInvoiceError(err: unknown): string {
-  const lead = 'The booking is completed, but its invoice could not be created';
+  // D-59: a refused pairing may concern a final invoice already drawn up
+  // (review SEC-A10-1), so its lead does not say "could not be created".
+  const lead = completionInvoiceCode(err) === DEPOSIT_CURRENCY_MISMATCH
+    ? 'The booking is completed, but its final invoice is refused'
+    : 'The booking is completed, but its invoice could not be created';
   if (err instanceof HttpException && err.getStatus() < 500 && err.message) return `${lead}: ${err.message}`;
   return `${lead}. Use Create invoice on the booking to try again.`;
 }
@@ -162,7 +214,7 @@ export type FinalInvoiceOutcome =
 /** The completion response's invoicing outcome: FAILED is explicit, never swallowed (V1-28), and never the raw error text. */
 export type CompletionInvoicing =
   | FinalInvoiceOutcome
-  | { status: 'FAILED'; invoiceId: null; code: typeof INVOICE_NOT_CREATED; error: string };
+  | { status: 'FAILED'; invoiceId: null; code: typeof INVOICE_NOT_CREATED | typeof DEPOSIT_CURRENCY_MISMATCH; error: string };
 
 /** D-26: the forfeit recorded on a booking cancelled after its deposit was paid. */
 export interface DepositForfeit {
@@ -470,7 +522,24 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     this.events.emit(WORK_OBLIGATION_SETTLED, payload);
   }
 
-  async updateBookingStatus(businessId: string, bookingId: string, status: BookingStatus) {
+  /**
+   * V1-84 (CR-V28-4, D-65): `cancelledBy` says who cancelled, and only a
+   * CUSTOMER cancel forfeits a paid deposit (D-26). It defaults to BUSINESS, so
+   * KEY bookings_cancel_booking, undo, saga compensation and the cortex
+   * adapter, which call with three arguments, never forfeit. The operator
+   * status route passes CUSTOMER when its body names no initiator (D-65).
+   * FOLLOW3-D18 review: the cancel that moves the booking into CANCELLED
+   * decides; a re-cancel forfeits nothing and records nothing new.
+   */
+  async updateBookingStatus(
+    businessId: string,
+    bookingId: string,
+    status: BookingStatus,
+    cancelledBy: CancelInitiator = 'BUSINESS',
+  ) {
+    if (!CANCEL_INITIATORS.includes(cancelledBy)) {
+      throw new BadRequestException(`Invalid cancelledBy. Must be one of: ${CANCEL_INITIATORS.join(', ')}`);
+    }
     const booking = await this.prisma.client.booking.findFirst({
       where: { id: bookingId, businessId, deletedAt: null },
     });
@@ -487,17 +556,34 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     }
     // V1-16: back from CANCELLED or NO_SHOW, the booking takes its slot again,
     // through the claim (writeBookingStatus).
-    const updated = await this.writeBookingStatus(booking, status, (db, where) =>
+    // FOLLOW3-D18 review (SEC-D18-1, CR-D18-1): the cancel that moves the
+    // booking into CANCELLED decides it. The write is conditional on the row
+    // not being CANCELLED yet, so of two cancels (a KEY, undo or compensation
+    // cancel and an operator's from a stale drawer) exactly one enters; the
+    // other, and any cancel of a booking already CANCELLED, is a re-cancel: it
+    // forfeits nothing and records nothing new (no booking.cancelled row or
+    // event), whoever it names. A re-cancel turned a business cancel, which
+    // keeps the deposit, into a customer forfeit.
+    let entersCancelled = status === 'CANCELLED';
+    const write = (db: Pick<PrismaTx, 'booking'>, where: Prisma.BookingWhereUniqueInput) =>
       db.booking.update({
-        where,
+        where: entersCancelled ? { ...where, status: { not: 'CANCELLED' } } : where,
         data: { status },
         include: {
           contact: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } },
           service: { select: { id: true, name: true, duration: true, price: true } },
           staff: { select: { id: true, name: true } },
         },
-      }),
-    );
+      });
+    let updated: Awaited<ReturnType<typeof write>>;
+    try {
+      updated = await this.writeBookingStatus(booking, status, write);
+    } catch (err) {
+      // P2025: the booking is CANCELLED already (read so, or cancelled meanwhile).
+      if (!entersCancelled || (err as { code?: unknown } | null)?.code !== 'P2025') throw err;
+      entersCancelled = false;
+      updated = await this.writeBookingStatus(booking, status, write);
+    }
 
     // D-26: a cancel after the deposit was paid forfeits it, recorded on the
     // booking. A booking brought back from CANCELLED takes the status its
@@ -516,9 +602,13 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     // DEPOSIT_FORFEITED (never overwritten) and wrote nothing, then this wrote
     // DEPOSIT_PAID with nothing held. Under the lock, that re-derivation waits
     // for this write and re-derives the booking from the refunded deposit.
+    // V1-84 (D-65): only a customer cancel forfeits; a business cancel keeps
+    // what the deposit holds (DEPOSIT_PAID stays) and writes no forfeit row.
+    // FOLLOW3-D18 review: and only the cancel that moved the booking into
+    // CANCELLED; a re-cancel leaves what the first cancel decided.
     let depositForfeit: DepositForfeit | null = null;
     if (status === 'CANCELLED') {
-      depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
+      if (entersCancelled && cancelledBy === 'CUSTOMER') depositForfeit = await this.forfeitPaidDeposit(businessId, booking);
       if (depositForfeit) updated.paymentStatus = DEPOSIT_FORFEITED;
     } else if (updated.paymentStatus === DEPOSIT_FORFEITED) {
       const reinstated = await this.prisma.client.$transaction(
@@ -576,7 +666,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
       invoicing = await this.autoGenerateInvoiceForCompletedBooking(updated, businessId);
     }
 
-    if (status === 'CANCELLED' && booking.contactId) {
+    // FOLLOW3-D18 review: a re-cancel emits and records nothing (the customer
+    // heard of the cancel once). The row names the member whose request
+    // cancelled, or SYSTEM (SEC-D18-2): a BUSINESS cancel waives the forfeit,
+    // and the row claimed a USER with no actor.
+    if (status === 'CANCELLED' && entersCancelled && booking.contactId) {
       this.events.emit('booking.cancelled', {
         booking: updated,
         contact: updated.contact ?? undefined,
@@ -586,8 +680,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         businessId,
         contactId: booking.contactId,
         type: 'booking.cancelled',
-        data: { bookingId, status },
-        actorType: 'USER',
+        data: { bookingId, status, cancelledBy },
+        ...this.requestActor(businessId),
         source: 'bookings',
       });
     }
@@ -627,7 +721,8 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * negative refund row, D-14). What was paid is read from the live deposit
    * invoice in the table, not from Booking.paymentStatus, so a booking whose
    * paymentStatus was never written (before V1-28) is covered too.
-   * Cancelling again records nothing new.
+   * Cancelling again records nothing new (updateBookingStatus calls this only
+   * for the cancel that moved the booking into CANCELLED).
    *
    * V1-28 review: what is forfeit is the money the live deposit (not VOID,
    * not deleted) holds, by the rule the booking's status is derived from
@@ -637,8 +732,9 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
    * deposit refunded in full forfeits nothing, and one refunded in part
    * forfeits what it still holds. The timeline row names who cancelled (SEC-V28-2): the authenticated member
    * whose request this is (TenantInterceptor's context for this business), or
-   * SYSTEM for a caller with none (a KEY tool, undo or compensation run
-   * outside a member's request); it claimed USER with no actor.
+   * SYSTEM for a caller with none; it claimed USER with no actor. V1-84: only
+   * a customer cancel reaches this (updateBookingStatus's cancelledBy), so a
+   * KEY tool, undo or compensation, which cancel for the business, never do.
    *
    * Trial-N (N2-SEC): the forfeit is written only while the booking is still
    * CANCELLED. A reinstatement that committed between the cancel's status
@@ -790,9 +886,21 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         if (booking.invoiceId) {
           const existing = await tx.invoice.findFirst({
             where: { id: booking.invoiceId, businessId },
-            select: { id: true, invoiceNumber: true, total: true },
+            select: { id: true, invoiceNumber: true, total: true, currency: true, status: true, deletedAt: true },
           });
           if (existing) {
+            // D-59 after the fact (review SEC-A10-1): a DRAFT deposit or a
+            // DRAFT final may still have its currency PATCHed once the final
+            // has netted the deposit, so the pairing is re-checked here and a
+            // cross-currency netting is refused, never reported as drawn up.
+            // Nothing is written; a VOID or withdrawn final nets nothing.
+            if (deposit && existing.status !== 'VOID' && !existing.deletedAt) {
+              const depositCurrency = normalizeCurrency(deposit.currency);
+              const finalCurrency = normalizeCurrency(existing.currency);
+              if (depositCurrency !== finalCurrency) {
+                throw depositCurrencyMismatch(deposit, depositCurrency, finalCurrency, existing);
+              }
+            }
             return {
               status: 'EXISTING' as const,
               invoiceId: existing.id,
@@ -807,6 +915,18 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         const service = await tx.service.findFirst({ where: { id: booking.serviceId, businessId, deletedAt: null } });
         if (!service) return notRequired('Booking is missing a contact or service');
         if ((service.price ?? 0) <= 0) return notRequired('Service has no price configured');
+        // D-59 (FOLLOW3-A10): the final invoice is drawn up in the business
+        // currency (createInvoiceForService, D-13); a deposit it would net in
+        // another currency (a DRAFT deposit PATCHed to USD, or the business
+        // currency changed since booking) is refused, nothing written.
+        if (deposit) {
+          const business = await tx.business.findUnique({ where: { id: businessId }, select: { currency: true } });
+          const invoiceCurrency = normalizeCurrency(business?.currency) || 'TTD';
+          const depositCurrency = normalizeCurrency(deposit.currency);
+          if (depositCurrency !== invoiceCurrency) {
+            throw depositCurrencyMismatch(deposit, depositCurrency, invoiceCurrency);
+          }
+        }
         const finalCents = toCents(service.price) - depositCents;
         if (finalCents <= 0) return notRequired('The deposit covers the price; there is no balance to invoice');
 
@@ -1946,14 +2066,20 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
     } catch (err) {
       // V1-28 review (SEC-V28-1): the detail is logged; the answer carries a
       // code and a sentence fit for any member (completionInvoiceError).
-      this.logger.error(
-        `Failed to auto-generate invoice for booking ${booking.id}: ${(err as Error)?.message || 'Unknown error'}`,
-        (err as Error)?.stack,
-      );
+      // D-59's refusal is policy, not a fault: a warning, with no stack.
+      const code = completionInvoiceCode(err);
+      if (code === DEPOSIT_CURRENCY_MISMATCH) {
+        this.logger.warn(`No final invoice for booking ${booking.id}: ${(err as Error).message}`);
+      } else {
+        this.logger.error(
+          `Failed to auto-generate invoice for booking ${booking.id}: ${(err as Error)?.message || 'Unknown error'}`,
+          (err as Error)?.stack,
+        );
+      }
       return {
         status: 'FAILED',
         invoiceId: null,
-        code: INVOICE_NOT_CREATED,
+        code,
         error: completionInvoiceError(err),
       };
     }

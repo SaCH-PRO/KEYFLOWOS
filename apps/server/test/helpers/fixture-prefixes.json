@@ -588,6 +588,11 @@
       "packet": "V1-81 (FOLLOW3-A7-MONEY-REPORTS)"
     },
     {
+      "prefix": "v81j_",
+      "owner": "apps/server/test/booking-deposit-currency.integration.test.ts",
+      "packet": "V1-81 (FOLLOW3-A10-DEPOSIT-CURRENCY)"
+    },
+    {
       "prefix": "v82b_",
       "owner": "apps/server/test/invoice-issued-amounts.integration.test.ts",
       "packet": "V1-82 (FOLLOW3-B2-ISSUED-INVOICE-AMOUNTS)"
