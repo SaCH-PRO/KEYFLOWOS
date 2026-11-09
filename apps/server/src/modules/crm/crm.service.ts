@@ -9,7 +9,7 @@ import {
 } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { sanitize } from '../../core/utils/sanitize';
-import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from './crm.constants';
+import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, TASK_PRIORITY, type ContactStatus } from './crm.constants';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { ContactCustomFieldValueService } from './contact-custom-field-value.service';
@@ -148,6 +148,14 @@ function contactIdentityViolation(err: unknown): 'email' | 'phone' | null {
     : names.some((n) => CONTACT_IDENTITY_UNIQUE.phone.includes(n)) ? 'phone'
       : null;
 }
+
+/**
+ * PR196-CRM-LIFECYCLE (owner ruling D-81): the statuses a paid invoice moves
+ * to CLIENT. Forward-only: every other status (CLIENT, LOST, ...) is left as it is.
+ */
+const PAID_INVOICE_MOVES_FROM: readonly ContactStatus[] = ['LEAD', 'PROSPECT'];
+/** The source of the D-81 status event and follow-up task (as PR #196 named it). */
+const LIFECYCLE_SOURCE = 'lifecycle-automation';
 
 @Injectable()
 export class CrmService {
@@ -1115,6 +1123,92 @@ export class CrmService {
     this.logger.log(`[CRM] updateContact businessId=${input.businessId} contactId=${input.contactId} duration=${duration}ms`);
     if (duration > 1000) this.logger.warn(`[CRM] updateContact slow businessId=${input.businessId} duration=${duration}ms`);
     return updated;
+  }
+
+  /**
+   * PR196-CRM-LIFECYCLE (owner ruling D-81): the one status move the system
+   * makes on its own. A paid invoice of the contact moves a LEAD or PROSPECT to
+   * CLIENT; any other status is left as it is, lifecycleStage is never written,
+   * and nothing moves it back (a refund's reopen is not a counter-move).
+   *
+   * The write is a compare-and-set on the status read here (PR #196 MC-14): a
+   * concurrent or replayed delivery, a human edit or a merge that changed the
+   * status first leaves this call with no row, and it writes nothing else. Only
+   * the call that moved the contact records:
+   *   - a status.changed ContactEvent naming the invoice, in the same
+   *     transaction. It is written here, not through CrmTimelineService.logEvent,
+   *     whose Activity mirror would show the move in the feed a second time: the
+   *     feed row is ActivityEventListener's on contact.updated (D-08, MC-15);
+   *   - a ContactAuditEntry by SYSTEM naming the invoice (D-25, MC-16);
+   *   - contact.updated with fromStatus/toStatus (automations, webhooks, sync; MC-16);
+   *   - one follow-up task through addTask (task_added audit, the canonical OPEN
+   *     status), assigned to the contact's owner. It is gated by the
+   *     compare-and-set, never by the contact's other tasks (MC-21, MC-22, MC-23).
+   * Tenant-bound: the contact is read and written only in `businessId`.
+   * Returns the moved contact, or null when nothing moved.
+   */
+  async advanceToClientOnInvoicePaid(input: {
+    businessId: string;
+    contactId: string;
+    invoiceId: string;
+    invoiceNumber?: string | null;
+  }): Promise<Contact | null> {
+    const { businessId, contactId, invoiceId } = input;
+    const invoiceNumber = input.invoiceNumber ?? null;
+    const where = contactWhereWithId(businessId, contactId);
+    const current = await this.prisma.client.contact.findFirst({ where, select: { status: true } });
+    if (!current || !(PAID_INVOICE_MOVES_FROM as readonly string[]).includes(current.status)) return null;
+    const from = current.status;
+    const to: ContactStatus = 'CLIENT';
+
+    const moved = await this.prisma.client.$transaction(async (tx) => {
+      const rows = await tx.contact.updateManyAndReturn({ where: { ...where, status: from }, data: { status: to } });
+      if (rows.length !== 1) return null;
+      await tx.contactEvent.create({
+        data: {
+          businessId,
+          contactId,
+          type: CONTACT_EVENT.STATUS_CHANGED,
+          data: { from, to, trigger: 'invoice.paid', invoiceId, invoiceNumber },
+          actorType: 'SYSTEM',
+          source: LIFECYCLE_SOURCE,
+        },
+      });
+      return rows[0];
+    });
+    if (!moved) return null;
+
+    const audit: AuditContext = { actor: { type: 'SYSTEM', label: LIFECYCLE_SOURCE } };
+    await this.contactAudit.write({
+      businessId,
+      contactId,
+      action: 'updated',
+      entityType: 'invoice',
+      entityId: invoiceId,
+      before: { status: from },
+      after: { status: to },
+      actor: audit.actor,
+      reason: `invoice.paid ${invoiceNumber ?? invoiceId}: ${from} -> ${to} (D-81)`,
+    });
+    const payload: ContactUpdatedPayload = { contact: moved, businessId, fromStatus: from, toStatus: to };
+    this.events.emit('contact.updated', payload);
+    this.stats.invalidateCache(businessId);
+    this.flow.invalidateCache(businessId);
+
+    try {
+      await this.addTask({
+        businessId,
+        contactId,
+        title: 'Post-payment customer check-in & follow-up',
+        dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        priority: TASK_PRIORITY.NORMAL,
+        assigneeId: moved.ownerId ?? null,
+        source: LIFECYCLE_SOURCE,
+      }, audit);
+    } catch (err) {
+      this.logger.warn(`[CRM] D-81 follow-up task failed for contact=${contactId}: ${(err as Error).message}`);
+    }
+    return moved;
   }
 
   async softDeleteContact(input: { businessId: string; contactId: string; actorUserId?: string }, _audit?: AuditContext) {

@@ -490,4 +490,9 @@ describe('PR196-CRM-LIFECYCLE: a paid invoice moves its contact LEAD/PROSPECT ->
     expect(s.followUps[0].businessId).toBe(ID.bizB);
     expect(s.audits.every((a: any) => a.businessId === ID.bizB)).toBe(true);
   });
+
+  // Found while writing L-10 / L-11, outside D-81's move (no status, task, audit or status row is
+  // written across tenants, which is what L-10 / L-11 pin).
+  it.todo("L-12 (found here, outside this packet): RevenueEventListener.log() writes every event's timeline entry (a ContactEvent and its Activity mirror) for the payload's contactId under the payload's businessId without checking the contact is in that business, so L-10 / L-11's foreign payloads still put an invoice.paid entry on the other tenant's contact (ActivityEventListener's commerce paid row likewise takes the payload's contactId); binding log() to the business changes all its handlers and the revenue-event.listener.spec.ts cases whose contact mock answers null: a separate packet");
+  it.todo("L-13 (found here, outside this packet's write set): in the full app AutomationExecutorService.onContactUpdated runs its built-in stage-change rule on this move's contact.updated, as on every status change: an unassigned 'Follow up after stage change' task (source autopilot) and a tags update with its own feed rows, beside the one D-81 follow-up for the owner; folding them needs automation-executor.service.ts");
 });

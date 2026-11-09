@@ -4,6 +4,7 @@ import type { ContactEventType } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { ContactInsightService } from './contact-insight.service';
+import { CrmService } from './crm.service';
 import type {
   QuoteCreatedPayload,
   QuoteSentPayload,
@@ -74,6 +75,7 @@ export class RevenueEventListener {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(CrmTimelineService) private readonly timeline: CrmTimelineService,
     @Inject(ContactInsightService) private readonly insights: ContactInsightService,
+    @Inject(CrmService) private readonly crm: CrmService,
   ) {}
 
   // ---- quote.* ----
@@ -224,6 +226,34 @@ export class RevenueEventListener {
       currency: inv?.currency,
       paidAt: inv?.paidAt,
     });
+    await this.advanceLifecycleOnPaid(p.businessId, inv?.id ?? null);
+  }
+
+  /**
+   * PR196-CRM-LIFECYCLE (owner ruling D-81): a paid invoice moves its own
+   * contact LEAD/PROSPECT -> CLIENT. Only invoice.paid does (not
+   * booking.confirmed, store_order.paid or payment.received). The contact is the
+   * invoice row's, read in the event's business, never the payload's contactId;
+   * the move is CrmService's audited compare-and-set, so replays and concurrent
+   * deliveries move it once, and a later invoice.reopened does not move it back.
+   */
+  private async advanceLifecycleOnPaid(businessId: string, invoiceId: string | null) {
+    if (!businessId || !invoiceId) return;
+    try {
+      const invoice = await this.prisma.client.invoice.findFirst({
+        where: { id: invoiceId, businessId },
+        select: { contactId: true, invoiceNumber: true },
+      });
+      if (!invoice?.contactId) return;
+      await this.crm.advanceToClientOnInvoicePaid({
+        businessId,
+        contactId: invoice.contactId,
+        invoiceId,
+        invoiceNumber: invoice.invoiceNumber,
+      });
+    } catch (err) {
+      this.logger.warn(`D-81 lifecycle advance failed for invoice=${invoiceId}: ${(err as Error).message}`);
+    }
   }
 
   /**
