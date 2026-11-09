@@ -2028,9 +2028,105 @@ describe('V1-31c CX: POST execute and POST batch run a member-initiated command 
     expect(rows[0]).toMatchObject({ businessId: ID.cxBiz, userId: ID.cxSuper, module: 'commerce', action: 'process_payment', success: false });
   });
 
-  it.todo(
-    'CX-09 (deviation, outside the write set) V1-02 isUsableAutonomyVerdict on POST execute and batch: the autonomy gate these routes run is KeyCortexExecutorService.execute\'s (one evaluateAction per command, fail closed on a throw or a deny, audited), which reads only verdict.allowed and verdict.requiresApproval; a verdict that omits requiresApproval or tier still runs. Making it V1-02-strict is a change to key-cortex-executor.service.ts, and the k34c suite (key-cortex-actor-binding) and key-cortex.controller.principal.spec.ts pin exactly one evaluateAction per command with a tier-less allow, so a second, controller-side evaluation cannot be added without editing them.',
-  );
+  /*
+   * FOLLOW3-D14-CORTEX-USABLE-VERDICT (V1-84) converts the V1-31c CX-09 todo. POST execute and batch reach
+   * KeyCortexExecutorService.execute, whose single autonomy gate read only verdict.allowed and
+   * verdict.requiresApproval, so a verdict that did not state requiresApproval or a tier ran the command.
+   * The gate now applies V1-02 isUsableAutonomyVerdict (as the legacy gate, the query pipeline and
+   * flows/:id/execute do): an unusable verdict fails closed with one audit row, and a usable one goes to
+   * approval when it asks for it or its tier is manual. Still one evaluateAction per command.
+   */
+  /** POST execute or a one-command POST batch for cxStaffW (projects write) under `verdict`: what the route answered, ran and wrote. */
+  async function cx09Run(route: 'execute' | 'batch', verdict: unknown, name: string) {
+    const before = { connector: connectorCalls.length, autonomy: cortexAutonomyCalls.length };
+    const audit = await cxAuditIds();
+    cortexVerdict = verdict;
+    let res: any;
+    try {
+      res = route === 'execute'
+        ? await cortex('execute', ID.cxStaffW, structuredCmd('projects', 'create_project', { name }))
+        : await cortex('batch', ID.cxStaffW, {
+          businessId: ID.cxBiz,
+          commands: [{ type: 'structured', module: 'projects', action: 'create_project', parameters: { name } }],
+        });
+    } finally {
+      cortexVerdict = ALLOW;
+    }
+    const label = `${route} ${JSON.stringify(verdict)} ${JSON.stringify(res.body)}`;
+    expect(res.status, label).toBe(200);
+    if (route === 'batch') expect(res.body.summary, label).toMatchObject({ total: 1 });
+    // The executor's per-command rows (a batch-level row, if one is ever written, is module 'batch').
+    const rows = (await cxAuditSince(audit)).filter((r: any) => r.module !== 'batch');
+    return {
+      label,
+      result: route === 'execute' ? res.body.result : res.body.results?.[0],
+      connector: connectorCalls.slice(before.connector),
+      autonomy: cortexAutonomyCalls.slice(before.autonomy),
+      rows,
+    };
+  }
+  const cx09GateCall = () => ({ businessId: ID.cxBiz, actionKey: 'projects.create_project', proposedBy: ID.cxStaffW });
+
+  it('CX-09a (FOLLOW3-D14) an unusable verdict ({allowed:true}: no requiresApproval, no tier) fails closed on POST execute and batch: nothing reaches the connector, one evaluateAction per command, and exactly one row records the failed-closed reason', async () => {
+    for (const route of ['execute', 'batch'] as const) {
+      const run = await cx09Run(route, { allowed: true }, `v31c unusable ${route}`);
+      expect(run.connector, run.label).toEqual([]);
+      expect(run.result, run.label).toMatchObject({ success: false });
+      expect(String(run.result?.error), run.label).toMatch(/unusable autonomy verdict.*blocked for safety/i);
+      expect(run.autonomy, run.label).toEqual([cx09GateCall()]);
+      expect(run.rows, run.label).toHaveLength(1);
+      expect(run.rows[0], run.label).toMatchObject({
+        businessId: ID.cxBiz, userId: ID.cxStaffW, actor: 'user', module: 'projects', action: 'create_project', success: false,
+      });
+      expect(String(run.rows[0].errorMessage), run.label).toMatch(/unusable autonomy verdict.*blocked for safety/i);
+    }
+    // Other answers the authority did not fully state fail closed the same way on POST execute.
+    for (const verdict of [
+      { allowed: true, requiresApproval: false }, // no tier
+      { allowed: true, tier: 'full' }, // no requiresApproval
+      { allowed: true, requiresApproval: false, tier: 'auto' }, // a tier the authority does not have
+      { allowed: 'true', requiresApproval: false, tier: 'full' }, // allowed is not a boolean
+    ]) {
+      const run = await cx09Run('execute', verdict, 'v31c unusable shape');
+      expect(run.connector, run.label).toEqual([]);
+      expect(run.result, run.label).toMatchObject({ success: false });
+      expect(String(run.result?.error), run.label).toMatch(/unusable autonomy verdict/i);
+      expect(run.autonomy, run.label).toEqual([cx09GateCall()]);
+      expect(run.rows, run.label).toHaveLength(1);
+      expect(run.rows[0], run.label).toMatchObject({ userId: ID.cxStaffW, success: false });
+    }
+  });
+
+  it("CX-09b (FOLLOW3-D14) a usable allow ({allowed:true, requiresApproval:false, tier:'full'}) runs on POST execute and batch: once, for the member, one evaluateAction, one success row", async () => {
+    for (const route of ['execute', 'batch'] as const) {
+      const run = await cx09Run(route, { allowed: true, requiresApproval: false, tier: 'full' }, `v31c full ${route}`);
+      expect(run.result, run.label).toMatchObject({ success: true });
+      expect(run.connector, run.label).toEqual([
+        { module: 'projects', action: 'create_project', businessId: ID.cxBiz, userId: ID.cxStaffW, parameters: { name: `v31c full ${route}` } },
+      ]);
+      expect(run.autonomy, run.label).toEqual([cx09GateCall()]);
+      expect(run.rows, run.label).toHaveLength(1);
+      expect(run.rows[0], run.label).toMatchObject({ userId: ID.cxStaffW, actor: 'user', module: 'projects', action: 'create_project', success: true });
+    }
+  });
+
+  it("CX-09c (FOLLOW3-D14) a usable verdict whose tier is manual ({allowed:true, requiresApproval:false, tier:'manual'}), or which asks for approval, is sent to approval on POST execute and batch and not executed", async () => {
+    for (const verdict of [
+      { allowed: true, requiresApproval: false, tier: 'manual' },
+      { allowed: true, requiresApproval: true, tier: 'supervised', reason: 'v31c approve first' },
+    ]) {
+      for (const route of ['execute', 'batch'] as const) {
+        const run = await cx09Run(route, verdict, `v31c approval ${route}`);
+        expect(run.connector, run.label).toEqual([]);
+        expect(run.result, run.label).toMatchObject({ success: false, error: 'Approval pending', data: { approvalStatus: 'pending' } });
+        expect(run.autonomy, run.label).toEqual([cx09GateCall()]);
+        expect(run.rows, run.label).toHaveLength(1);
+        expect(run.rows[0], run.label).toMatchObject({
+          userId: ID.cxStaffW, actor: 'user', module: 'projects', action: 'create_project', success: false, errorMessage: 'Approval pending',
+        });
+      }
+    }
+  });
 });
 
 describe('V1-31c SB: client code is not executed (the cortex sandbox is not bounded)', () => {
