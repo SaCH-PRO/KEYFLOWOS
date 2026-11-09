@@ -95,6 +95,63 @@
  *             GREEN-AFTER: 200; the revenue:'none' member gets no revenue
  *             model's row, owner A gets A's trashed records and no live row.
  *
+ * W6-TRASH-MODULE-SCOPE (V1-92, owner ruling D-95; review SEC-TL500-3, its
+ * it.todo made live): restoring or permanently deleting a trashed record needs
+ * write access to the module it belongs to (CRM for contacts, accounts and
+ * opportunities; revenue for invoices, quotes and recurring invoices; people,
+ * the canonical team module, for staff; marketing, the canonical content
+ * module, for community posts and landing pages), and seeing it in the trash
+ * needs that module's read access; D-46 still refuses a non-member SUPER_ADMIN
+ * on the revenue models (D46-S09 above).
+ *   D95-H01..H03  a crm-none member neither sees nor restores nor deletes a
+ *             trashed contact; a crm:read member sees it but is refused the
+ *             writes; a people-none (team 'none') member and a STAFF member
+ *             (team none by default) neither list nor restore nor delete a
+ *             trashed staff member. RED-BEFORE: 200 listings and 404 writes
+ *             (no module check; the trashed rows unreadable). GREEN-AFTER: the
+ *             guard's 403 '<module> requires read|write access (you have ..)',
+ *             every row unchanged.
+ *   D95-H04,H05  controls: owner A lists and restores a trashed contact and a
+ *             trashed staff member (read past the client's soft-delete
+ *             extension, D46-S09g follow-up); owner A's permanent delete of a
+ *             trashed contact answers 409 (the client turns a delete of that
+ *             model into a soft delete) and the row stays in the trash.
+ *   D46-S09g follow-up  owner A's every-model listing lists A's trashed
+ *             invoice and quote (it.todo made live).
+ *
+ * W6-TRASH-MODULE-SCOPE review repairs (D-95 with R0-01/V1-08/D-74 contact
+ * visibility, SEC-V52-1, D-25, D-46): the trash now reads the trashed rows of
+ * the models the client soft-deletes, so it must apply what those modules'
+ * own routes apply.
+ *   D95-R01  SEC-W6T-1 / CR-W6T-1: a crm:read member lists only the trashed
+ *             contacts visibilityClause lets them open (TEAM and SHARED, their
+ *             own, those shared with them; never another member's PRIVATE one,
+ *             notesInternal included); a 'my book' member (crm_view 'owned')
+ *             only their own. RED-BEFORE: every trashed contact of A listed.
+ *   D95-R02  the same rule on restore and permanent delete (404, as GET
+ *             contacts/:id answers a contact the caller may not open), then
+ *             crm_edit 'owned' (403 'You can only edit contacts you own').
+ *             RED-BEFORE: restore 201 and deleted_at NULL.
+ *   D95-R03  SEC-W6T-2: a trashed quote is listed without its viewToken (the
+ *             customer's bearer credential, SEC-V52-1); restore answers it
+ *             without the token too. RED-BEFORE: the token in the listing.
+ *   D95-R04  SEC-W6T-3: a contact held by a GDPR forget (an open request,
+ *             or a purged one, anonymised) and a merged duplicate (the purge
+ *             erases those in place) are not trash: neither listed nor
+ *             restored nor deleted (404); the forget request stays
+ *             'requested' and no forget_cancelled audit row is written.
+ *             RED-BEFORE: listed and restored (deleted_at NULL).
+ *   D95-R05  SEC-W6T-4 (D-95: "D-46 still refuses a non-member SUPER_ADMIN"):
+ *             the non-member SUPER_ADMIN is refused restore and permanent
+ *             delete of every trash model (403 'Not a member of this
+ *             business'), not only the revenue ones; its reads are unchanged.
+ *             RED-BEFORE: 201 / 200 and the rows written.
+ *   D95-R06  CR-W6T-2: restoring a contact whose email or phone a live contact
+ *             now holds answers 409 contact_email_taken / contact_phone_taken
+ *             (existingContactId only when the caller may open the holder),
+ *             as cancelForget and every other identity conflict answer.
+ *             RED-BEFORE: 500 INTERNAL_SERVER_ERROR (an unmapped P2002).
+ *
  * Item 3 (V1-15d residual, D-55): recordPayment wrote provider = method, so a
  * hand-recorded payment with method 'stripe' and a reference naming another
  * tenant's PaymentIntent stored a SUCCESSFUL provider 'stripe' row. The Stripe
@@ -139,7 +196,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
-import { createHmac } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -254,7 +311,14 @@ async function cleanup() {
     `DELETE FROM recurring_invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM quote_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W6-TRASH-MODULE-SCOPE review repairs (D95-R01..R06): shares, forget requests, their audit rows and a merged duplicate.
+    `DELETE FROM contact_shares WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_forget_requests WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `UPDATE contacts SET merged_into_id = NULL WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // W6-TRASH-MODULE-SCOPE (D-95): the trashed staff members of A.
+    `DELETE FROM staff_members WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     // W5-TRASH-LIST-500 (D46-S09g): the trashed and live opportunities of A and B.
     `DELETE FROM community_opportunities WHERE poster_business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE business_id LIKE ${sqlLikePrefix(P)} OR user_id LIKE ${sqlLikePrefix(P)}`,
@@ -1460,13 +1524,26 @@ describe('W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read): the trash l
     }
   });
 
-  it.todo(
-    "D46-S09g follow-up (W5-TRASH-LIST-500): GET trash (every model) by owner A lists A's trashed invoice and quote. " +
-      'Blocked outside this write set: the client soft-delete extension (packages/db/src/client.ts softDelete list: Contact, ' +
-      'Product, Quote, Invoice, StaffMember, Service, Booking, SocialPost, Project, ProjectTask, Site) rewrites the trash ' +
-      "filter to deletedAt null on findMany, count and findFirst, so trash.controller cannot read those models' trashed rows; " +
-      'the listing now leaves their live rows out instead of presenting them as trash. Needs a soft-delete opt-out in packages/db.',
-  );
+  // W6-TRASH-MODULE-SCOPE: the it.todo D46-S09g follow-up made live. The trash reads the trashed rows of
+  // the models the client's soft-delete extension covers with a raw query the extension does not rewrite.
+  it("D46-S09g follow-up (W5-TRASH-LIST-500; W6-TRASH-MODULE-SCOPE, D-95): GET trash (every model) by owner A lists A's trashed invoice and quote (read past the client's soft-delete extension), each a trashed record of A in the Prisma shape; GET trash?model=invoice|quote lists them too, with a total that counts them", async () => {
+    const res = await trashList(ID.ownerA);
+    expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(200);
+    const listed = res.body.items.map((i: any) => `${i._model}:${i.id}`);
+    // RED-BEFORE: neither listed (the extension rewrote the trash filter to deletedAt null).
+    expect(listed).toContain(`invoice:${fx.invoice}`);
+    expect(listed).toContain(`quote:${fx.quote}`);
+    expectOnlyTrashOfA(res.body, 'ownerA');
+    const invoice = res.body.items.find((i: any) => i.id === fx.invoice);
+    expect(invoice).toMatchObject({ businessId: ID.bizA, status: 'SENT', currency: 'TTD', total: TOTAL });
+    expect(typeof invoice.invoiceNumber).toBe('string');
+    for (const model of ['invoice', 'quote'] as const) {
+      const one = await trashList(ID.ownerA, model);
+      expect(one.status, `${model}: ${JSON.stringify(one.body).slice(0, 500)}`).toBe(200);
+      expect(one.body.items.map((i: any) => i.id), model).toContain(fx[model]);
+      expect(one.body.total, model).toBe(one.body.items.length);
+    }
+  });
 
   it('D46-S09 control (SEC-TRASH-D46-1): owner A, a revenue:read STAFF member and the non-member SUPER_ADMIN (ModuleScopeGuard admits a SUPER_ADMIN to reads; D-46 rules writes) keep 200 on GET trash?model=recurringInvoice|invoice|quote, the trashed schedule listed and every row of A', async () => {
     for (const actor of [ID.ownerA, ID.staffReadA, ID.saNon]) {
@@ -1601,8 +1678,15 @@ describe('W5-TRASH-LIST-500 review repair (D46-S09h, D46-S09i): an opportunity i
     expect(before[1][0].deleted_at).toBeNull();
   });
 
-  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2): GET trash?model=contact by a STAFF member of A whose crm, settings, expenses and revenue scopes are 'none' answers 200 with no live contact (A's contact and owner A's PRIVATE contact are not listed) and a total that counts none", async () => {
-    const res = await trashList(NO_SCOPE, 'contact');
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): seeing a contact in the trash needs crm:read, so this
+  // member (crm 'none') is refused the listing outright (it answered 200 with no live contact); the
+  // live-row check runs for a crm:read STAFF member, who is admitted.
+  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2; W6-TRASH-MODULE-SCOPE, D-95): GET trash?model=contact by a STAFF member of A whose crm, settings, expenses and revenue scopes are 'none' answers 403 'Insufficient permissions: crm requires read access (you have none)' with no row; a crm:read STAFF member gets 200 with no live contact (A's contact and owner A's PRIVATE contact are not listed) and a total that counts none", async () => {
+    const refused = await trashList(NO_SCOPE, 'contact');
+    expect(refused.status, JSON.stringify(refused.body).slice(0, 500)).toBe(403);
+    expect(refused.body.message).toBe('Insufficient permissions: crm requires read access (you have none)');
+    expect(refused.body.items).toBeUndefined();
+    const res = await trashList(ID.staffReadA, 'contact');
     expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(200);
     const ids = res.body.items.map((i: any) => i.id);
     // RED-BEFORE: [v81a_contactA (TEAM), v81a_contact_s09i_private (PRIVATE)], both live, total counting A's live contacts.
@@ -1625,9 +1709,18 @@ describe('W5-TRASH-LIST-500 review repair (D46-S09h, D46-S09i): an opportunity i
     }
   });
 
-  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2): the trash does not act on a live row: that member's POST restore and DELETE of owner A's live PRIVATE contact, and owner A's POST restore and DELETE of A's live SENT invoice, answer 404 'Trashed contact|invoice not found'; both rows stay live and unchanged", async () => {
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): restoring or deleting a contact needs crm:write, so the
+  // crm 'none' member is refused before any lookup (403, below); the live-row check acts as owner A.
+  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2; W6-TRASH-MODULE-SCOPE, D-95): the trash does not act on a live row: owner A's POST restore and DELETE of owner A's live PRIVATE contact and of A's live SENT invoice answer 404 'Trashed contact|invoice not found' (the crm-none member is refused first: 403 'crm requires write access (you have none)'); both rows stay live and unchanged", async () => {
+    const privateBefore = await rowOf('contacts', fx.privateContact);
+    for (const call of [trashRestore, trashDelete]) {
+      const res = await call(NO_SCOPE, 'contact', fx.privateContact);
+      expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(403);
+      expect(res.body.message).toBe('Insufficient permissions: crm requires write access (you have none)');
+    }
+    expect(await rowOf('contacts', fx.privateContact)).toEqual(privateBefore);
     for (const [actor, model, table, id] of [
-      [NO_SCOPE, 'contact', 'contacts', fx.privateContact],
+      [ID.ownerA, 'contact', 'contacts', fx.privateContact],
       [ID.ownerA, 'invoice', 'invoices', fx.liveInvoice],
     ] as const) {
       const before = await rowOf(table, id);
@@ -1642,11 +1735,393 @@ describe('W5-TRASH-LIST-500 review repair (D46-S09h, D46-S09i): an opportunity i
     }
   });
 
-  it.todo(
-    "SEC-TL500-3 follow-up (W5-TRASH-LIST-500 review repair): GET trash (every model and ?model=) holds each listed model's own module scope, " +
-      "or the declared settings scope, as SEC-TRASH-D46-1 does for revenue: a member with expenses and settings 'none' gets no trashed Expense " +
-      'row (amounts) and no trashed opportunity. Not done here: no ruling says which module governs each trash model (account, staffMember, ' +
-      'opportunity, community posts and comments, landing pages, ...), and enforcing settings (STAFF default none) would shut every STAFF member ' +
-      'out of the trash, against the D46-S09, D46-S09f and D46-S09g controls. Needs an owner ruling.',
-  );
+  // W6-TRASH-MODULE-SCOPE (owner ruling D-95): the it.todo SEC-TL500-3 follow-up made live in the block below
+  // (D95-H01..H05), plus this member's expenses and opportunity rows, which the it.todo named.
+  it("SEC-TL500-3 (W6-TRASH-MODULE-SCOPE, D-95): GET trash by a member whose crm, settings, expenses and revenue scopes are 'none' reads no trashed opportunity (crm) and no expense (expenses); ?model=opportunity and ?model=expense answer the guard's 403 'requires read access (you have none)'", async () => {
+    const trashedOpp = await makeOpportunity(ID.bizA, 's09i_tl5003');
+    const every = await trashList(NO_SCOPE);
+    // RED-BEFORE: A's trashed opportunities listed to this member.
+    expect(every.status, JSON.stringify(every.body).slice(0, 500)).toBe(200);
+    const models = new Set(every.body.items.map((i: any) => i._model));
+    for (const model of ['opportunity', 'expense', 'contact', 'invoice', 'quote', 'recurringInvoice']) expect(models.has(model), model).toBe(false);
+    expect(every.body.items.map((i: any) => i.id)).not.toContain(trashedOpp);
+    for (const [model, module] of [['opportunity', 'crm'], ['expense', 'expenses']] as const) {
+      const res = await trashList(NO_SCOPE, model);
+      expect(res.status, `${model}: ${JSON.stringify(res.body).slice(0, 500)}`).toBe(403);
+      expect(res.body.message, model).toBe(`Insufficient permissions: ${module} requires read access (you have none)`);
+    }
+  });
+});
+
+/**
+ * W6-TRASH-MODULE-SCOPE (owner ruling D-95; review SEC-TL500-3): restoring or permanently deleting a
+ * trashed record needs write access to the module it belongs to, and seeing it in the trash needs that
+ * module's read access. CRM governs contacts; people (the canonical team module) governs staff. The
+ * trashed contacts and staff members here are read past the client's soft-delete extension (the trash
+ * reads those models raw), so the controls show that owner A sees and restores them.
+ */
+describe('W6-TRASH-MODULE-SCOPE (D-95, SEC-TL500-3): trash access follows the record\'s own module', () => {
+  /** USER, ADMIN member of A: every module admin but crm 'none'. */
+  const CRM_NONE = `${P}crmNoneA`;
+  /** USER, ADMIN member of A: every module admin but team (D-95 "people") 'none'. */
+  const TEAM_NONE = `${P}teamNoneA`;
+  const EVERY_MODULE = ['crm', 'revenue', 'bookings', 'projects', 'content', 'expenses', 'automations', 'storefront', 'settings', 'ai', 'team', 'analytics', 'operations'];
+  const allBut = (module: string) => Object.fromEntries(EVERY_MODULE.map((m) => [m, m === module ? 'none' : 'admin']));
+  const fx = { contact: `${P}contact_d95`, contactRestore: `${P}contact_d95_restore`, contactDelete: `${P}contact_d95_delete`, staff: `${P}staff_d95`, staffRestore: `${P}staff_d95_restore` };
+
+  /** The stored row as JSON, raw (the client hides a soft-deleted contact or staff member; contacts carry a tsvector). */
+  const rowOf = async (table: string, id: string): Promise<any[]> => {
+    const rows: Array<{ j: string }> = await db.$queryRawUnsafe(`SELECT row_to_json(t)::text AS j FROM ${table} t WHERE t.id = $1`, id);
+    return rows.map((r) => JSON.parse(r.j));
+  };
+
+  beforeAll(async () => {
+    for (const [id, email, scopes] of [
+      [CRM_NONE, `${P}crmnonea@test.local`, allBut('crm')],
+      [TEAM_NONE, `${P}teamnonea@test.local`, allBut('team')],
+    ] as const) {
+      await db.user.create({ data: { id, email, name: id, role: 'USER' } });
+      await db.membership.create({ data: { id: `${id}_m`, userId: id, businessId: ID.bizA, role: 'ADMIN', permissionScopes: scopes } });
+    }
+    const deletedAt = new Date();
+    for (const id of [fx.contact, fx.contactRestore, fx.contactDelete]) {
+      await db.contact.create({ data: { id, businessId: ID.bizA, firstName: 'V81a', lastName: id.slice(P.length), email: `${P}${id.slice(P.length)}@test.local`, deletedAt } });
+    }
+    for (const id of [fx.staff, fx.staffRestore]) {
+      await db.staffMember.create({ data: { id, businessId: ID.bizA, name: `V81A ${id.slice(P.length)}`, deletedAt } });
+    }
+  });
+
+  it("D95-H01 (D-95, SEC-TL500-3): a crm-none member of A cannot see a trashed contact (GET trash?model=contact: 403 'Insufficient permissions: crm requires read access (you have none)'; GET trash lists no contact) nor restore or permanently delete it (403 'crm requires write access (you have none)'); the contact is unchanged", async () => {
+    const before = await rowOf('contacts', fx.contact);
+    const one = await trashList(CRM_NONE, 'contact');
+    // RED-BEFORE: 200 (no module check; the trashed contact unreadable, so no row).
+    expect(one.status, JSON.stringify(one.body).slice(0, 500)).toBe(403);
+    expect(one.body.message).toBe('Insufficient permissions: crm requires read access (you have none)');
+    const every = await trashList(CRM_NONE);
+    expect(every.status, JSON.stringify(every.body).slice(0, 500)).toBe(200);
+    for (const model of ['contact', 'account', 'opportunity', 'deal']) expect(every.body.items.map((i: any) => i._model), model).not.toContain(model);
+    for (const call of [trashRestore, trashDelete]) {
+      const res = await call(CRM_NONE, 'contact', fx.contact);
+      // RED-BEFORE: 404 'Trashed contact not found' (no module check; the lookup could not see the trashed row).
+      expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(403);
+      expect(res.body.message).toBe('Insufficient permissions: crm requires write access (you have none)');
+    }
+    expect(await rowOf('contacts', fx.contact)).toEqual(before);
+    expect(before[0].deleted_at).not.toBeNull();
+  });
+
+  it("D95-H02 (D-95): a crm:read member of A (USER, STAFF role defaults) sees the trashed contact (GET trash?model=contact and GET trash list it) but is refused its restore and permanent delete (403 'Insufficient permissions: crm requires write access (you have read)'); the contact is unchanged", async () => {
+    const before = await rowOf('contacts', fx.contact);
+    const one = await trashList(ID.staffReadA, 'contact');
+    expect(one.status, JSON.stringify(one.body).slice(0, 500)).toBe(200);
+    // RED-BEFORE: not listed (the client's soft-delete extension rewrote the trash filter to deletedAt null).
+    expect(one.body.items.map((i: any) => i.id)).toContain(fx.contact);
+    const every = await trashList(ID.staffReadA);
+    expect(every.body.items.map((i: any) => `${i._model}:${i.id}`)).toContain(`contact:${fx.contact}`);
+    for (const call of [trashRestore, trashDelete]) {
+      const res = await call(ID.staffReadA, 'contact', fx.contact);
+      // RED-BEFORE: 404 (no module check; the trashed row unreadable).
+      expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(403);
+      expect(res.body.message).toBe('Insufficient permissions: crm requires write access (you have read)');
+    }
+    expect(await rowOf('contacts', fx.contact)).toEqual(before);
+  });
+
+  it("D95-H03 (D-95, SEC-TL500-3): a people-none member of A (team 'none'; D-95's people is the canonical team module) and a STAFF member (team none by default) cannot list a trashed staff member (403 'Insufficient permissions: team requires read access (you have none)'; GET trash lists no staffMember) nor restore or permanently delete it (403 'team requires write access (you have none)'); the staff member is unchanged", async () => {
+    const before = await rowOf('staff_members', fx.staff);
+    for (const actor of [TEAM_NONE, ID.staffReadA]) {
+      const one = await trashList(actor, 'staffMember');
+      // RED-BEFORE: 200 (no module check).
+      expect(one.status, `${actor}: ${JSON.stringify(one.body).slice(0, 500)}`).toBe(403);
+      expect(one.body.message, actor).toBe('Insufficient permissions: team requires read access (you have none)');
+      const every = await trashList(actor);
+      expect(every.status, actor).toBe(200);
+      expect(every.body.items.map((i: any) => i._model), actor).not.toContain('staffMember');
+      for (const call of [trashRestore, trashDelete]) {
+        const res = await call(actor, 'staffMember', fx.staff);
+        // RED-BEFORE: 404 (no module check; the lookup could not see the trashed row).
+        expect(res.status, `${actor}: ${JSON.stringify(res.body).slice(0, 500)}`).toBe(403);
+        expect(res.body.message, actor).toBe('Insufficient permissions: team requires write access (you have none)');
+      }
+    }
+    expect(await rowOf('staff_members', fx.staff)).toEqual(before);
+    expect(before[0].deleted_at).not.toBeNull();
+  });
+
+  it('D95-H04 control (D-95; D46-S09g follow-up): owner A lists the trashed contact and staff member (GET trash and ?model=), restores one of each (201, deleted_at cleared), and the restored rows leave the trash listing', async () => {
+    const every = await trashList(ID.ownerA);
+    expect(every.status, JSON.stringify(every.body).slice(0, 500)).toBe(200);
+    const listed = every.body.items.map((i: any) => `${i._model}:${i.id}`);
+    // RED-BEFORE: neither listed (the extension hid both models' trashed rows).
+    for (const key of [`contact:${fx.contactRestore}`, `staffMember:${fx.staffRestore}`]) expect(listed, key).toContain(key);
+    for (const [model, table, id] of [['contact', 'contacts', fx.contactRestore], ['staffMember', 'staff_members', fx.staffRestore]] as const) {
+      const one = await trashList(ID.ownerA, model);
+      expect(one.body.items.map((i: any) => i.id), model).toContain(id);
+      const res = await trashRestore(ID.ownerA, model, id);
+      // RED-BEFORE: 404 'Trashed <model> not found'.
+      expect(res.status, `${model}: ${JSON.stringify(res.body).slice(0, 500)}`).toBe(201);
+      expect(res.body).toMatchObject({ restored: true, model, id });
+      const [row] = await rowOf(table, id);
+      expect([row.deleted_at, row.business_id], model).toEqual([null, ID.bizA]);
+      const after = await trashList(ID.ownerA, model);
+      expect(after.body.items.map((i: any) => i.id), model).not.toContain(id);
+    }
+  });
+
+  it("D95-H05 control: owner A's permanent delete of a trashed contact answers 409 'Permanent delete is not available for a trashed contact: it can only be restored' (the client turns a delete of a contact into a soft delete, so it answered deleted while the row stayed in the trash); the contact is unchanged and still in the trash", async () => {
+    const before = await rowOf('contacts', fx.contactDelete);
+    const res = await trashDelete(ID.ownerA, 'contact', fx.contactDelete);
+    // RED-BEFORE: 404 'Trashed contact not found' (the extension hid the trashed row from the lookup).
+    expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(409);
+    expect(res.body.message).toBe('Permanent delete is not available for a trashed contact: it can only be restored');
+    expect(await rowOf('contacts', fx.contactDelete)).toEqual(before);
+    const listed = await trashList(ID.ownerA, 'contact');
+    expect(listed.body.items.map((i: any) => i.id)).toContain(fx.contactDelete);
+  });
+});
+
+/**
+ * W6-TRASH-MODULE-SCOPE review repairs (owner ruling D-95, with the contact visibility rule of
+ * R0-01/V1-08/D-74, SEC-V52-1's viewToken rule, D-25's forget flow and D-46). The trash reads the
+ * trashed rows of every model the client soft-deletes, so it applies what those modules' own routes
+ * apply: CRM record visibility and crm_edit on contacts, the withheld quote viewToken, the forget and
+ * merge flows' hold on their contacts, D-46 on a non-member SUPER_ADMIN, and the 409 every other
+ * contact un-delete gives an identity conflict.
+ */
+describe('W6-TRASH-MODULE-SCOPE review repairs (D-95, SEC-W6T-1..4, CR-W6T-1..2): the trash applies what the record\'s own module applies', () => {
+  /** USER, STAFF member of A: crm write, 'my book' only (crm_view and crm_edit 'owned'). */
+  const OWNED = `${P}crmOwnedA`;
+  /** USER, STAFF member of A: crm write, every TEAM/SHARED contact visible, edits only owned or shared ones. */
+  const EDIT_OWNED = `${P}crmEditOwnedA`;
+  /** USER, STAFF member of A: crm write (role defaults for the rest of crm). */
+  const WRITER = `${P}crmWriterA`;
+  const CANARY = 'v81a PRIVATE_NOTE_CANARY';
+  const VIEW_TOKEN = `${P}view_token_d95r03_not_a_real_link`;
+  const c = {
+    priv: `${P}c_r_priv`, // PRIVATE, owner A, notesInternal canary
+    shared: `${P}c_r_shared`, // PRIVATE, owner A, shared with staffReadA
+    team: `${P}c_r_team`, // TEAM, owner A
+    own: `${P}c_r_own`, // TEAM, owner OWNED
+    sharedEdit: `${P}c_r_shared_edit`, // PRIVATE, owner A, shared with EDIT_OWNED
+    forget: `${P}c_r_forget`, // held by an open forget request
+    purged: `${P}c_r_purged`, // erased by a purged forget request
+    merged: `${P}c_r_merged`, // merged into contactA
+    sa: `${P}c_r_sa`, // TEAM, for the SUPER_ADMIN cases
+    dupEmail: `${P}c_r_dup_email`, // trashed; a live contact now holds its email
+    dupEmailLive: `${P}c_r_dup_email_live`,
+    dupPhone: `${P}c_r_dup_phone`, // trashed; a live PRIVATE contact of owner A now holds its phone
+    dupPhoneLive: `${P}c_r_dup_phone_live`,
+  };
+  const fx = { quote: '', staff: `${P}staff_r_sa`, opp: '' };
+  const PHONE = '+18685550147';
+
+  const rowOf = async (table: string, id: string): Promise<any[]> => {
+    const rows: Array<{ j: string }> = await db.$queryRawUnsafe(`SELECT row_to_json(t)::text AS j FROM ${table} t WHERE t.id = $1`, id);
+    return rows.map((r) => JSON.parse(r.j));
+  };
+  const listedIds = (res: any) => (res.body.items ?? []).map((i: any) => i.id);
+
+  beforeAll(async () => {
+    for (const [id, scopes] of [
+      [OWNED, { crm: 'write', crm_view: 'owned', crm_edit: 'owned' }],
+      [EDIT_OWNED, { crm: 'write', crm_edit: 'owned' }],
+      [WRITER, { crm: 'write' }],
+    ] as const) {
+      await db.user.create({ data: { id, email: `${P}${id.slice(P.length).toLowerCase()}@test.local`, name: id, role: 'USER' } });
+      await db.membership.create({ data: { id: `${id}_m`, userId: id, businessId: ID.bizA, role: 'STAFF', permissionScopes: scopes } });
+    }
+    const base = Date.now();
+    // Newest first in the trash, so the every-model listing (ten rows per model) reaches each of them.
+    const contact = async (id: string, ageSeconds: number, extra: Record<string, unknown> = {}) =>
+      db.contact.create({
+        data: {
+          id,
+          businessId: ID.bizA,
+          firstName: 'V81a',
+          lastName: id.slice(P.length),
+          email: `${P}${id.slice(P.length)}@test.local`,
+          deletedAt: new Date(base - ageSeconds * 1000),
+          ...extra,
+        },
+      });
+    await contact(c.priv, 0, { visibility: 'PRIVATE', ownerId: ID.ownerA, notesInternal: CANARY, phone: '+18685550101' });
+    await contact(c.shared, 1, { visibility: 'PRIVATE', ownerId: ID.ownerA });
+    await contact(c.team, 2, { visibility: 'TEAM', ownerId: ID.ownerA });
+    await contact(c.own, 3, { visibility: 'TEAM', ownerId: OWNED });
+    await contact(c.forget, 4, { visibility: 'TEAM', ownerId: ID.ownerA });
+    await contact(c.purged, 5, { firstName: null, lastName: null, email: null });
+    await contact(c.merged, 6, { visibility: 'TEAM', mergedIntoId: ID.contactA });
+    await contact(c.sharedEdit, 7, { visibility: 'PRIVATE', ownerId: ID.ownerA });
+    await contact(c.sa, 8, { visibility: 'TEAM' });
+    await contact(c.dupEmail, 9, { visibility: 'TEAM', email: `${P}dup_r@test.local`, emailNormalized: `${P}dup_r@test.local` });
+    await contact(c.dupPhone, 10, { visibility: 'TEAM', phone: PHONE, phoneNormalized: PHONE });
+    // The live holders: the partial unique indexes cover live rows only, so both rows exist.
+    await contact(c.dupEmailLive, 0, { visibility: 'TEAM', email: `${P}dup_r@test.local`, emailNormalized: `${P}dup_r@test.local`, deletedAt: null });
+    await contact(c.dupPhoneLive, 0, { visibility: 'PRIVATE', ownerId: ID.ownerA, phone: PHONE, phoneNormalized: PHONE, deletedAt: null });
+    await db.contactShare.create({ data: { businessId: ID.bizA, contactId: c.shared, userId: ID.staffReadA } });
+    await db.contactShare.create({ data: { businessId: ID.bizA, contactId: c.sharedEdit, userId: EDIT_OWNED } });
+    // D-25: an open forget request (the contact soft-deleted for its grace period), and a purged one
+    // (detached from the anonymised row, which only its hash still names).
+    await db.contactForgetRequest.create({
+      data: { businessId: ID.bizA, contactId: c.forget, status: 'requested', purgeAt: new Date(base + 24 * 3600_000), reason: 'v81a forget' },
+    });
+    await db.contactForgetRequest.create({
+      data: {
+        businessId: ID.bizA,
+        contactId: null,
+        contactHash: `sha256:${createHash('sha256').update(`${ID.bizA}:${c.purged}`).digest('hex')}`,
+        status: 'purged',
+        purgeAt: new Date(base - 3600_000),
+        purgedAt: new Date(base - 60_000),
+      },
+    });
+    fx.quote = await makeQuote(ID.bizA, 'd95r03', 'SENT');
+    await db.$executeRawUnsafe('UPDATE quotes SET view_token = $2, deleted_at = now() WHERE id = $1', fx.quote, VIEW_TOKEN);
+    await db.staffMember.create({ data: { id: fx.staff, businessId: ID.bizA, name: 'V81A staff r sa', deletedAt: new Date() } });
+    fx.opp = await makeOpportunity(ID.bizA, 'd95r05_sa');
+  });
+
+  it("D95-R01 (D-95 with V1-08 visibilityClause; SEC-W6T-1, CR-W6T-1): a crm:read member (STAFF defaults) lists the trashed TEAM contacts and the PRIVATE one shared with them, never owner A's PRIVATE contact (no notesInternal), on GET trash?model=contact and GET trash; a 'my book' member (crm_view 'owned') lists only their own; owner A and the non-member SUPER_ADMIN list every one", async () => {
+    const one = await trashList(ID.staffReadA, 'contact');
+    expect(one.status, JSON.stringify(one.body).slice(0, 500)).toBe(200);
+    const ids = listedIds(one);
+    for (const id of [c.team, c.shared, c.own]) expect(ids, id).toContain(id);
+    // RED-BEFORE: owner A's PRIVATE contact listed with its email, phone and notesInternal.
+    for (const id of [c.priv, c.sharedEdit]) expect(ids, id).not.toContain(id);
+    expect(JSON.stringify(one.body)).not.toContain(CANARY);
+    expect(one.body.total).toBe(ids.length);
+    const every = await trashList(ID.staffReadA);
+    expect(every.status, JSON.stringify(every.body).slice(0, 500)).toBe(200);
+    const everyKeys = every.body.items.map((i: any) => `${i._model}:${i.id}`);
+    for (const id of [c.team, c.shared]) expect(everyKeys, id).toContain(`contact:${id}`);
+    for (const id of [c.priv, c.sharedEdit]) expect(everyKeys, id).not.toContain(`contact:${id}`);
+    expect(JSON.stringify(every.body)).not.toContain(CANARY);
+
+    const book = await trashList(OWNED, 'contact');
+    expect(book.status, JSON.stringify(book.body).slice(0, 500)).toBe(200);
+    // RED-BEFORE: every trashed contact of A.
+    expect(listedIds(book)).toEqual([c.own]);
+    expect(book.body.total).toBe(1);
+    const bookEvery = await trashList(OWNED);
+    expect(bookEvery.body.items.filter((i: any) => i._model === 'contact').map((i: any) => i.id)).toEqual([c.own]);
+
+    for (const actor of [ID.ownerA, ID.saNon]) {
+      const all = await trashList(actor, 'contact');
+      expect(all.status, `${actor}: ${JSON.stringify(all.body).slice(0, 300)}`).toBe(200);
+      for (const id of [c.priv, c.shared, c.team, c.own, c.sharedEdit]) expect(listedIds(all), `${actor} ${id}`).toContain(id);
+      expect(all.body.items.find((i: any) => i.id === c.priv).notesInternal, actor).toBe(CANARY);
+    }
+  });
+
+  it("D95-R02 (D-95 with V1-08; SEC-W6T-1, CR-W6T-1): restore and permanent delete apply the contact's visibility (404 'Trashed contact not found' for a contact the member may not open) and then crm_edit 'owned' (403 'You can only edit contacts you own'); the member's own contact and one shared with them are restored", async () => {
+    const before = { priv: await rowOf('contacts', c.priv), team: await rowOf('contacts', c.team) };
+    for (const [actor, id] of [[OWNED, c.priv], [OWNED, c.team], [EDIT_OWNED, c.priv]] as const) {
+      for (const call of [trashRestore, trashDelete]) {
+        const res = await call(actor, 'contact', id);
+        // RED-BEFORE: restore 201 and deleted_at NULL (delete 409): the module level alone was checked.
+        expect(res.status, `${actor} ${id} ${call === trashDelete ? 'delete' : 'restore'}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(404);
+        expect(res.body.message).toBe('Trashed contact not found');
+      }
+    }
+    const editOwned = await trashRestore(EDIT_OWNED, 'contact', c.team);
+    // RED-BEFORE: 201.
+    expect(editOwned.status, JSON.stringify(editOwned.body).slice(0, 300)).toBe(403);
+    expect(editOwned.body.message).toBe('You can only edit contacts you own');
+    expect(await rowOf('contacts', c.priv)).toEqual(before.priv);
+    expect(await rowOf('contacts', c.team)).toEqual(before.team);
+    expect(before.priv[0].deleted_at).not.toBeNull();
+    expect(before.team[0].deleted_at).not.toBeNull();
+
+    for (const [actor, id] of [[OWNED, c.own], [EDIT_OWNED, c.sharedEdit]] as const) {
+      const res = await trashRestore(actor, 'contact', id);
+      expect(res.status, `${actor} ${id}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(201);
+      expect(res.body).toMatchObject({ restored: true, model: 'contact', id });
+      expect((await rowOf('contacts', id))[0].deleted_at, id).toBeNull();
+    }
+  });
+
+  it("D95-R03 (SEC-V52-1; SEC-W6T-2): a trashed SENT quote is listed to a revenue:read member without its viewToken (GET trash?model=quote and GET trash), and owner A's restore answers the quote without it", async () => {
+    for (const res of [await trashList(ID.staffReadA, 'quote'), await trashList(ID.staffReadA)]) {
+      expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+      const item = res.body.items.find((i: any) => i.id === fx.quote);
+      expect(item, 'the trashed quote is listed').toBeDefined();
+      // RED-BEFORE: item.viewToken === VIEW_TOKEN.
+      expect('viewToken' in item).toBe(false);
+      expect(JSON.stringify(res.body)).not.toContain(VIEW_TOKEN);
+    }
+    const restored = await trashRestore(ID.ownerA, 'quote', fx.quote);
+    expect(restored.status, JSON.stringify(restored.body).slice(0, 300)).toBe(201);
+    expect(restored.body).toMatchObject({ restored: true, model: 'quote', id: fx.quote });
+    expect(JSON.stringify(restored.body)).not.toContain(VIEW_TOKEN);
+    const [row] = await rowOf('quotes', fx.quote);
+    expect([row.deleted_at, row.view_token]).toEqual([null, VIEW_TOKEN]);
+  });
+
+  it("D95-R04 (D-25; SEC-W6T-3): a contact held by an open forget request, one a purged forget request erased, and a merged duplicate are not trash: owner A's listings omit them and restore and permanent delete answer 404 'Trashed contact not found'; each stays deleted, the forget request stays 'requested' and no forget_cancelled audit row is written", async () => {
+    const before = await Promise.all([c.forget, c.purged, c.merged].map((id) => rowOf('contacts', id)));
+    for (const model of ['contact', undefined]) {
+      const res = await trashList(ID.ownerA, model);
+      expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+      // RED-BEFORE: all three listed.
+      for (const id of [c.forget, c.purged, c.merged]) expect(listedIds(res), `${model} ${id}`).not.toContain(id);
+    }
+    for (const id of [c.forget, c.purged, c.merged]) {
+      for (const call of [trashRestore, trashDelete]) {
+        const res = await call(ID.ownerA, 'contact', id);
+        // RED-BEFORE: restore 201 with deleted_at NULL (bypassing cancelForget); delete 409.
+        expect(res.status, `${id} ${call === trashDelete ? 'delete' : 'restore'}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(404);
+        expect(res.body.message).toBe('Trashed contact not found');
+      }
+    }
+    expect(await Promise.all([c.forget, c.purged, c.merged].map((id) => rowOf('contacts', id)))).toEqual(before);
+    for (const rows of before) expect(rows[0].deleted_at).not.toBeNull();
+    const requests: Array<{ status: string }> = await db.$queryRawUnsafe('SELECT status FROM contact_forget_requests WHERE contact_id = $1', c.forget);
+    expect(requests).toEqual([{ status: 'requested' }]);
+    const cancelled: Array<{ n: number }> = await db.$queryRawUnsafe(
+      "SELECT count(*)::int AS n FROM contact_audit_entries WHERE business_id = $1 AND action = 'forget_cancelled'",
+      ID.bizA,
+    );
+    expect(cancelled[0]!.n).toBe(0);
+  });
+
+  it("D95-R05 (D-95: 'D-46 still refuses a non-member SUPER_ADMIN'; SEC-W6T-4): the non-member SUPER_ADMIN is refused restore and permanent delete of a trashed contact, staff member and opportunity (403 'Not a member of this business'), every row unchanged; it still lists them, and the SUPER_ADMIN that is an ADMIN member of A restores the contact (201)", async () => {
+    const targets = [['contact', 'contacts', c.sa], ['staffMember', 'staff_members', fx.staff], ['opportunity', 'community_opportunities', fx.opp]] as const;
+    const before = await Promise.all(targets.map(([, table, id]) => rowOf(table, id)));
+    for (const [model, , id] of targets) {
+      for (const call of [trashRestore, trashDelete]) {
+        const res = await call(ID.saNon, model, id);
+        // RED-BEFORE: restore 201 (deleted_at NULL); delete 200 (the opportunity erased) or 409.
+        expect(res.status, `${model} ${call === trashDelete ? 'delete' : 'restore'}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(403);
+        expect(res.body.message, model).toBe('Not a member of this business');
+      }
+    }
+    expect(await Promise.all(targets.map(([, table, id]) => rowOf(table, id)))).toEqual(before);
+    const listed = await trashList(ID.saNon);
+    expect(listed.status).toBe(200);
+    for (const [model, , id] of targets) expect(listed.body.items.map((i: any) => `${i._model}:${i.id}`), model).toContain(`${model}:${id}`);
+    const member = await trashRestore(ID.saAdminA, 'contact', c.sa);
+    expect(member.status, JSON.stringify(member.body).slice(0, 300)).toBe(201);
+    expect((await rowOf('contacts', c.sa))[0].deleted_at).toBeNull();
+  });
+
+  it("D95-R06 (CR-W6T-2): restoring a contact whose email or phone a live contact now holds answers 409 contact_email_taken / contact_phone_taken, naming the live holder only to a caller who may open it; the contact stays in the trash", async () => {
+    const email = await trashRestore(ID.ownerA, 'contact', c.dupEmail);
+    // RED-BEFORE: 500 INTERNAL_SERVER_ERROR (P2002 on contacts_business_id_email_normalized_live_key).
+    expect(email.status, JSON.stringify(email.body).slice(0, 300)).toBe(409);
+    expect(email.body.code).toBe('contact_email_taken');
+    expect(email.body.message).toBe('A contact with this email already exists in this business');
+    expect(email.body.details).toEqual({ existingContactId: c.dupEmailLive });
+    for (const [actor, holder] of [[WRITER, null], [ID.ownerA, c.dupPhoneLive]] as const) {
+      const phone = await trashRestore(actor, 'contact', c.dupPhone);
+      expect(phone.status, `${actor}: ${JSON.stringify(phone.body).slice(0, 300)}`).toBe(409);
+      expect(phone.body.code, actor).toBe('contact_phone_taken');
+      expect(phone.body.message, actor).toBe('A contact with this phone number already exists in this business');
+      // The holder is owner A's PRIVATE contact: the crm:write member may not open it.
+      expect(phone.body.details, actor).toEqual({ existingContactId: holder });
+    }
+    for (const id of [c.dupEmail, c.dupPhone]) expect((await rowOf('contacts', id))[0].deleted_at, id).not.toBeNull();
+    const listed = await trashList(ID.ownerA, 'contact');
+    for (const id of [c.dupEmail, c.dupPhone]) expect(listedIds(listed), id).toContain(id);
+  });
 });
