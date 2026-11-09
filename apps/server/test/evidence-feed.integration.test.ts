@@ -75,7 +75,9 @@
  *     summary (revenueImpact 0) or the legacy route, and keeps the rows of the
  *     modules it reads; the OWNER's feed still holds every money row
  *   EF-15 (SEC-V125-2) a member with crm 'none' gets no row naming a contact
- *     (?contactId= answers []), on /events and the legacy route; a crm_view
+ *     (?contactId= answers []), on /events and the legacy route; that member
+ *     has crm_view 'all' (review CR-W4TS-1), so visibilityClause lists TEAM
+ *     contact A and only the crm-read rule withholds A's rows; a crm_view
  *     'owned' member gets only rows naming contacts it can list
  *     (visibilityClause, M7): not A's unshared TEAM contact's money rows nor the
  *     owner's PRIVATE contact's row, until contact A is shared with it; the
@@ -88,6 +90,11 @@
  *   FlowController (its activity route and the real ActivityService) is
  *   mounted for the legacy route; its other collaborators are stubs that route
  *   never calls.
+ *   EF-17 (it.todo, review SEC-W4TS-1, = timeline-scope TS-14): the scope is
+ *   these four timeline reads, not every Activity reader. GET
+ *   /ai/businesses/:id/briefing/morning (ai.controller.ts, outside this
+ *   packet's write set) still serves the SCHEDULED rows, the `due` row's
+ *   amount and contact included, and revenueToday, unfiltered.
  *
  * V1-55-EVT-ACTIVITY-DEDUPE (M50; owner ruling D-08: Activity is the
  * user-visible feed, BusinessEvent the audit trail), on a third tenant C: each
@@ -1169,10 +1176,11 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
   // TimelineService writers, so they carry what those writers store).
   // Meanwhile the cockpit still does not read the feed for a member whom the
   // V1-47 snapshot reports without revenue or CRM read (BusinessActivityFeed,
-  // BT-06); the server no longer relies on that.
+  // BT-06); these four timeline reads no longer rely on that. Other Activity
+  // readers do: the morning briefing (EF-17, it.todo; SEC-W4TS-1, TS-14).
   const SC = {
     staffRevNone: `${P}${RUN}_staffRevNone`, // STAFF, revenue 'none', crm read (view-all)
-    staffCrmNone: `${P}${RUN}_staffCrmNone`, // STAFF, crm 'none', revenue read
+    staffCrmNone: `${P}${RUN}_staffCrmNone`, // STAFF, crm 'none' with crm_view 'all' (CR-W4TS-1), revenue read
     staffOwned: `${P}${RUN}_staffOwned`,     // STAFF, crm read with crm_view 'owned', revenue read
     cPriv: `${P}${RUN}_cPriv`,               // PRIVATE contact owned by the owner
     cOwn: `${P}${RUN}_cOwn`,                 // PRIVATE contact owned by staffOwned
@@ -1202,7 +1210,10 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
       const staff = defaultScopesForRole('STAFF');
       const members: Array<[keyof typeof SC, Record<string, string>]> = [
         ['staffRevNone', { ...staff, revenue: 'none', crm: 'read', crm_view: 'all' }],
-        ['staffCrmNone', { ...staff, crm: 'none', revenue: 'read' }],
+        // crm_view 'all' (review CR-W4TS-1): visibilityClause then lists TEAM
+        // contact A for this member, so contact visibility does not mask the
+        // crm-read rule (D-63): only that rule withholds A's rows (EF-15, EF-16).
+        ['staffCrmNone', { ...staff, crm: 'none', crm_view: 'all', revenue: 'read' }],
         ['staffOwned', { ...staff, crm: 'read', crm_view: 'owned', revenue: 'read' }],
       ];
       for (const [key, permissionScopes] of members) {
@@ -1305,9 +1316,24 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     expect(rows.money.filter((id) => !owner.includes(id)), "money rows missing from the owner's feed").toEqual([]);
   });
 
-  it("EF-15 (SEC-V125-2, D-63 / V1-84, W4-TIMELINE-SCOPE, was it.todo): a member with crm 'none' gets no contact-bearing row (?contactId= included), and a crm_view 'owned' member gets no row naming a PRIVATE or unshared contact it cannot list (visibilityClause, M7) until the contact is shared; OWNER sees every row, the view-all ADMIN every row but those naming a PRIVATE contact it may not open", async () => {
+  it("EF-15 (SEC-V125-2, D-63 / V1-84, W4-TIMELINE-SCOPE, was it.todo): a member with crm 'none' gets no contact-bearing row (?contactId= included), even with crm_view 'all' so that contact visibility would list contact A (CR-W4TS-1), and a crm_view 'owned' member gets no row naming a PRIVATE or unshared contact it cannot list (visibilityClause, M7) until the contact is shared; OWNER sees every row, the view-all ADMIN every row but those naming a PRIVATE contact it may not open", async () => {
     const rows = await scopeFixture();
     const all = [rows.noteA, rows.notePriv, rows.noteOwn, rows.booking, ...rows.money];
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { resolveCrmAccess, visibilityClause } = await import('../src/modules/crm/crm-permissions.helper');
+    const listable = async (user: string) => {
+      const clause = visibilityClause(await resolveCrmAccess(app.get(PrismaService), ID.bizA, user), user);
+      const contacts = await db.contact.findMany({ where: { businessId: ID.bizA, ...(clause ? { AND: [clause] } : {}) }, select: { id: true } });
+      return new Set<string>(contacts.map((c: any) => c.id));
+    };
+
+    // CR-W4TS-1 control: contact visibility alone (crm_view 'all') lists TEAM
+    // contact A for the crm 'none' member, so what withholds A's rows below is
+    // the crm-read rule (D-63; canReadActivityRow, activityPrefilter), not
+    // visibilityClause. The PRIVATE contacts stay unlisted (M7).
+    const crmNoneList = await listable(SC.staffCrmNone);
+    expect(crmNoneList.has(ID.contactA), 'visibilityClause lists contact A for the crm none member').toBe(true);
+    expect(crmNoneList.has(SC.cPriv) || crmNoneList.has(SC.cOwn)).toBe(false);
 
     // crm 'none' (revenue read): no row naming a contact, on /events and the legacy route.
     // One request at a time: supertest listens on the shared server per request.
@@ -1323,13 +1349,6 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     expect(await idsOf(feed(SC.staffCrmNone, ID.bizA, `limit=50&entityType=contact&entityId=${ID.contactA}`))).toEqual([]);
 
     // crm_view 'owned': only rows naming contacts it can list (the CRM list rule, M7).
-    const { PrismaService } = await import('../src/core/prisma/prisma.service');
-    const { resolveCrmAccess, visibilityClause } = await import('../src/modules/crm/crm-permissions.helper');
-    const listable = async (user: string) => {
-      const clause = visibilityClause(await resolveCrmAccess(app.get(PrismaService), ID.bizA, user), user);
-      const contacts = await db.contact.findMany({ where: { businessId: ID.bizA, ...(clause ? { AND: [clause] } : {}) }, select: { id: true } });
-      return new Set<string>(contacts.map((c: any) => c.id));
-    };
     const ownedList = await listable(SC.staffOwned);
     expect([...ownedList], 'the owned-view member lists only its own contact').toEqual([SC.cOwn]);
     const ownedRes = await feed(SC.staffOwned, ID.bizA, 'limit=200');
@@ -1390,7 +1409,8 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     }
 
     // /upcoming: the SCHEDULED rows, soonest first; a member without revenue
-    // read, or without crm read (the due row names contact A), gets no money row.
+    // read, or without crm read (the due row names contact A, which that
+    // member's crm_view 'all' would list: CR-W4TS-1), gets no money row.
     expect(await idsOf(upcomingFeed(ID.ownerA))).toEqual([rows.booking, rows.due].sort());
     const ordered = await upcomingFeed(ID.ownerA, '');
     expect(ordered.status).toBe(200);
@@ -1398,6 +1418,16 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     expect(await idsOf(upcomingFeed(SC.staffRevNone))).toEqual([rows.booking]);
     expect(await idsOf(upcomingFeed(SC.staffCrmNone)), 'the due row names contact A').toEqual([rows.booking]);
   });
+
+  // Review SEC-W4TS-1 (confirmed on this fixture: AiController.morningBriefing,
+  // guards AuthGuard + BusinessGuard + the class CrmRateLimitGuard, answered
+  // the `due` row with category PAYMENT, revenueImpact 250, the invoice number
+  // and contact A, and revenueToday 250). The fix is in ai.controller.ts,
+  // outside W4-TIMELINE-SCOPE's write set; the same follow-up as
+  // timeline-scope.integration.test.ts TS-14.
+  it.todo(
+    "EF-17 (SEC-W4TS-1, D-63, follow-up = TS-14, outside W4-TIMELINE-SCOPE's write set): GET /ai/businesses/:businessId/briefing/morning (ai.controller.ts) reads its SCHEDULED Activity rows through filterVisibleActivity and withholds revenueToday from a member without revenue read, so staffRevNone and staffCrmNone get no `due` row (amount, revenueImpact, invoice number, contactId) there, as /upcoming answers them only [booking]; EF-14..EF-16 cover the four timeline reads only",
+  );
 });
 
 describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through the feed writers the full app registers (real DB, tenant C)', () => {
