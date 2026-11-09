@@ -20,7 +20,8 @@
  * Contract pinned here:
  *
  *   token payload            -> { ok, token, invoice: <the eleven keys PC-02 pins>, balance }
- *   balance                  -> { amountPaid, amountDue, paidAt }: computeBalance's paid and
+ *   balance                  -> { amountPaid, amountDue, paidAt }: the net received
+ *                               (max(0, balanceOfStoredRows(...).net), FOLLOW3-A4) and the
  *                               remaining over this tenant's Payment rows; paidAt only when PAID
  *   100 paid of 250          -> amountPaid 100, amountDue 150, paidAt null; still no payment
  *                               rows, no references and no customer email anywhere (canary)
@@ -37,8 +38,10 @@
  *   expired / inactive / foreign-tenant link -> the same body as an unknown token
  *   LEDGER (no refund row)   -> amountPaid = computeBalance.paid = sum(SUCCESSFUL) = the
  *                               ledger cash net of the invoice's payment postings
- *   LEDGER (refund row)      -> the payload still equals computeBalance; V1-29 (D-14) counts the
- *                               separate refund row once, so amountDue = total - the ledger cash net
+ *   LEDGER (refund row)      -> amountPaid = computeBalance.net = the ledger cash net = the public
+ *                               receipt's amountPaid (FOLLOW3-A4, CR-29b-1: was the gross paid);
+ *                               V1-29 (D-14) counts the separate refund row once, so amountDue =
+ *                               total - the ledger cash net
  *   read-only                -> viewing writes no FinancialTransaction, LedgerEntry or Payment
  *                               and leaves the invoice row as it was
  *   TENANT (M31)             -> Payment sits outside the tenant extension: a Payment row
@@ -687,11 +690,10 @@ describe('LEDGER and TENANT (V1-48)', () => {
     expect(res.body.balance).toEqual({ amountPaid: 100, amountDue: 150, paidAt: null });
   });
 
-  it('L-14 LEDGER (refund row, V1-29): the payload still equals computeBalance, which counts the separate refund row once; amountDue = total - the ledger cash net', async () => {
+  it('L-14 LEDGER (refund row, V1-29; FOLLOW3-A4): amountPaid is the net received, computeBalance.net = the ledger cash net = the public receipt\'s amountPaid; amountDue = total - the ledger cash net', async () => {
     const res = await view(TOKEN[ID.invRefund]);
     expect(res.status).toBe(200);
     const balance = await balanceOf(ID.invRefund);
-    expect(res.body.balance.amountPaid).toBe(balance.paid);
     expect(res.body.balance.amountDue).toBe(balance.remaining);
     // 100 + 60 received, 60 refunded through the operator route: the ledger nets 100.
     const cashNet = await ledgerCashNet(ID.invRefund, ID.bizA);
@@ -699,10 +701,19 @@ describe('LEDGER and TENANT (V1-48)', () => {
     // computeBalance (V1-29, D-14): paid 160 (the refunded 60 stays SUCCESSFUL), refunded 60, net 100 = the ledger.
     expect(balance).toMatchObject({ paid: 160, refunded: 60, net: 100, remaining: 150 });
     expect(balance.net).toBe(cashNet);
-    // The base read net 40, remaining 210 (M28). amountPaid is the gross paid (160):
-    // characterization, the net display is V1-36 (one balance read contract).
-    expect(res.body.balance).toEqual({ amountPaid: 160, amountDue: 150, paidAt: null });
+    // The base read net 40, remaining 210 (M28). FOLLOW3-A4 (CR-29b-1): amountPaid is the net received
+    // (100), the figure the public receipt states beside it. RED-BEFORE: the gross paid 160, pinned
+    // here as characterization until this change.
+    expect(res.body.balance.amountPaid).toBe(balance.net);
+    expect(res.body.balance.amountPaid).toBe(cashNet);
+    expect(res.body.balance).toEqual({ amountPaid: 100, amountDue: 150, paidAt: null });
     expect(res.body.balance.amountDue).toBe(TOTAL - cashNet);
+    const receipt = await agent().get(`/commerce/public/invoice-link/${encodeURIComponent(TOKEN[ID.invRefund])}/receipt`);
+    expect(receipt.status, JSON.stringify(receipt.body)).toBe(200);
+    expect({ amountPaid: receipt.body.amountPaid, amountDue: receipt.body.amountDue }, 'the public receipt').toEqual({
+      amountPaid: res.body.balance.amountPaid,
+      amountDue: res.body.balance.amountDue,
+    });
   });
 
   it('L-15 read-only: viewing a link three times writes no FinancialTransaction, LedgerEntry or Payment and leaves the invoice row as it was', async () => {
