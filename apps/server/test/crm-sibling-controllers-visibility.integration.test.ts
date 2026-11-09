@@ -57,6 +57,24 @@
  * owns (forget targets); and two PROSPECT twins with the same name, the owner's
  * PRIVATE one and STAFF_OWNED's TEAM one, which every business scan lists.
  *
+ * V1-89 W3-CRM-AI-VISIBILITY (the FOLLOW3-D3 residuals ST-1 and ST-2) adds:
+ * the TenantInterceptor, as in production (it binds the request's member,
+ * whose CRM visibility CrmDealsService.listDeals applies to the deals'
+ * contacts); a prompt on each AI gateway record; three contacts tagged
+ * `v84c-bulk-scope` for bulk_status_change (the owner's PRIVATE and TEAM ones
+ * and a TEAM one STAFF_OWNED owns); and live cases for the unfiltered deal
+ * list, the AI prompts, the scans' aggregate counts, ai-analyze's body
+ * contactIds and a member's bulk_status_change, which replace the residual
+ * todos and the earlier bulk_status_change refusal.
+ *
+ * V1-89 review repairs (SEC-V89-1..5) add: CrmAiService over the real
+ * CrmService (bulk_status_change writes through bulkUpdateContacts; the stats
+ * and flow caches are recorders); ai-execute change_status and toggle_favorite
+ * under PATCH contacts/:contactId's edit scope; bulk_status_change's audit,
+ * events and param checks; and listDeals withholding a hidden contact's copied
+ * company and account, and matching nothing on a hidden contactId. Each of
+ * these cases creates its own contacts and removes them when it ends.
+ *
  * Requires DATABASE_URL. Every seeded row has the `v84c_` prefix (or belongs to
  * a v84c_ business) and is hard-deleted by raw SQL in beforeAll and afterAll.
  */
@@ -99,6 +117,20 @@ const ID = {
   hTeamWrite: `${P}hTeamWrite`, // TEAM, STAFF_WRITE's: STAFF_WRITE's permitted forget
   tPriv: `${P}tPriv`,           // PRIVATE, the owner's PROSPECT twin (hidden from STAFF_OWNED)
   tTeam: `${P}tTeam`,           // TEAM, STAFF_OWNED's PROSPECT twin
+  // bulk_status_change targets (V1-89), LEAD and tagged BULK_TAG.
+  bPriv: `${P}bPriv`,           // PRIVATE, the owner's: hidden from ADMIN and STAFF_OWNED
+  bTeam: `${P}bTeam`,           // TEAM, the owner's: ADMIN may open it, STAFF_OWNED may not
+  bStaff: `${P}bStaff`,         // TEAM, STAFF_OWNED's
+  // Members created by the V1-89 bulk_status_change case only.
+  editOwned: `${P}editOwned`,   // STAFF of bizA, crm write + crm_edit owned
+  editNone: `${P}editNone`,     // STAFF of bizA, crm write + crm_edit none
+  // Created (and removed) by the V1-89 review-repair cases only.
+  eOwn: `${P}eOwn`,             // TEAM, editOwned's (SEC-V89-1)
+  aTeam: `${P}aTeam`,           // TEAM, the owner's, LEAD, AUDIT_TAG (SEC-V89-2)
+  aPriv: `${P}aPriv`,           // PRIVATE, the owner's, LEAD, AUDIT_TAG (SEC-V89-2)
+  vLead: `${P}vLead`,           // TEAM, the owner's, LEAD, VALIDATE_TAG (SEC-V89-3)
+  vClient: `${P}vClient`,       // TEAM, the owner's, CLIENT, VALIDATE_TAG (SEC-V89-3)
+  dPriv: `${P}dPriv`,           // PRIVATE, the owner's, with a company and an account (SEC-V89-4)
   stage: `${P}stage`,
   cfDef: `${P}cfDef`,
 };
@@ -106,6 +138,15 @@ const ABSENT = `${P}absent`;
 /** The twins' shared name (a duplicate cluster) and tag (a bulk_status_change filter). */
 const TWIN = { firstName: 'V84C Twin', lastName: 'Prospect', tag: 'v84c-bulk' };
 const FORGOTTEN = [ID.fTeamStaff, ID.fTeamOwner, ID.fPrivHidden, ID.fPrivOwner];
+/** The tag of the V1-89 bulk_status_change targets (no other contact carries it). */
+const BULK_TAG = 'v84c-bulk-scope';
+/** The tags of the V1-89 review-repair bulk_status_change cases (no other contact carries them). */
+const AUDIT_TAG = 'v84c-bulk-audit';
+const VALIDATE_TAG = 'v84c-bulk-validate';
+/** The company of the owner's PRIVATE contact dPriv, which createDeal copies onto its deal (SEC-V89-4). */
+const SECRET_COMPANY = 'v84c-secret-company-9z';
+/** Live contacts of bizA STAFF_OWNED may not open (crm_view 'owned'; it owns none of them). */
+const HIDDEN_FROM_STAFF_OWNED = [ID.cPriv, ID.tPriv, ID.hTeamOwner, ID.bPriv, ID.bTeam];
 
 const NOT_FOUND_BODY = { statusCode: 404, message: 'Contact not found', error: 'Not Found' };
 
@@ -126,10 +167,11 @@ const AI_REPLY = JSON.stringify({
   suggestedTags: [{ tag: 'v84c-tag', confidence: 0.9, reasoning: 'recorded' }],
   messages: [{ channel: 'email', body: 'v84c recorded draft' }],
 });
-const aiCalls: Array<{ businessId: string; feature: string }> = [];
+/** Each AI call, with its prompt (every message's content) so a case can read what the model was told. */
+const aiCalls: Array<{ businessId: string; feature: string; prompt: string }> = [];
 const aiGateway = {
-  callAi: async (args: { businessId: string; feature: string }) => {
-    aiCalls.push({ businessId: args.businessId, feature: args.feature });
+  callAi: async (args: { businessId: string; feature: string; messages?: Array<{ content: string }> }) => {
+    aiCalls.push({ businessId: args.businessId, feature: args.feature, prompt: (args.messages ?? []).map((m) => m.content).join('\n') });
     return { content: AI_REPLY, model: 'v84c-recorder', usage: { creditsUsed: 1 } };
   },
 };
@@ -141,6 +183,13 @@ const storageClient = {
   },
 };
 const serviceCalls: Array<{ service: string; method: string }> = [];
+/**
+ * The CRM stats and flow caches CrmService invalidates after a contact write
+ * (recorders: the bulk path's invalidation is observed, V1-89 SEC-V89-2).
+ */
+const cacheInvalidations: string[] = [];
+const statsCache = { invalidateCache: (businessId: string) => { cacheInvalidations.push(`stats:${businessId}`); } };
+const flowCache = { invalidateCache: (businessId: string) => { cacheInvalidations.push(`flow:${businessId}`); } };
 
 /** The real service behind a call recorder: every method a controller calls is seen. */
 function recorded<T extends object>(service: string, target: T): T {
@@ -175,6 +224,8 @@ function nextRateWindow() {
 let db: any;
 let app: any;
 let auditService: any;
+let dealsService: any;
+let runWithTenant: <T>(businessId: string, userId: string, fn: () => T) => T;
 let assertContactVisible: (prisma: any, businessId: string, contactId: string, actorUserId: string) => Promise<unknown>;
 
 async function cleanup() {
@@ -364,6 +415,9 @@ beforeAll(async () => {
   const { ContactPrivacyController } = await import('../src/modules/crm/privacy/contact-privacy.controller');
   const { ContactPrivacyService } = await import('../src/modules/crm/privacy/contact-privacy.service');
   const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
+  const { TenantInterceptor } = await import('../src/core/tenant/tenant.interceptor');
+  const { CrmService } = await import('../src/modules/crm/crm.service');
+  ({ runWithTenant } = await import('../src/core/tenant/tenant-context'));
   ({ assertContactVisible } = await import('../src/modules/crm/crm-permissions.helper') as any);
 
   // ---- the real services over the real client -----------------------------
@@ -372,11 +426,22 @@ beforeAll(async () => {
   const coreTimeline = new TimelineService(prisma);
   // EvidenceService and TaskAssignmentService: on no route here.
   const crmTimeline = new CrmTimelineService(prisma, events, coreTimeline, {} as any, {} as any);
+  auditService = new ContactAuditService(prisma);
+  // CrmService: the real contact writer bulk_status_change goes through (its
+  // audit, timeline and cache invalidation, V1-89 SEC-V89-2), with the real
+  // ContactAuditService and CrmTimelineService and recorders for the two
+  // caches. SubscriptionsService, EntityResolutionService and the custom
+  // field values: on no path here.
+  const crmService = new CrmService(
+    prisma, events, {} as any, crmTimeline, statsCache as any, new CrmListsService(prisma), flowCache as any, {} as any, auditService, {} as any,
+  );
   // CrmSequenceService: the real one (ai-reengagement lists the sequences).
-  const crmAi = new CrmAiService(prisma, aiGateway as any, new CrmSequenceService(prisma, crmTimeline), new CrmListsService(prisma), crmTimeline);
+  const crmAi = new CrmAiService(
+    prisma, aiGateway as any, new CrmSequenceService(prisma, crmTimeline), new CrmListsService(prisma), crmTimeline, crmService,
+  );
   const contactInsight = new ContactInsightService(prisma, aiGateway as any, new BestChannelService(prisma), events);
   const reasons = new WonLostReasonService(prisma);
-  auditService = new ContactAuditService(prisma);
+  dealsService = new CrmDealsService(prisma, events, crmTimeline, reasons);
   const privacy = new ContactPrivacyService(prisma, auditService);
   // The export's object storage: a recorder on the real instance (no S3 traffic).
   (privacy as any).s3Client = { client: storageClient, bucket: 'v84c-recorded-bucket' };
@@ -393,7 +458,7 @@ beforeAll(async () => {
       { provide: CrmAiService, useValue: recorded('crmAi', crmAi) },
       { provide: CrmJourneyService, useValue: recorded('journey', new CrmJourneyService(prisma)) },
       { provide: ContactInsightService, useValue: recorded('contactInsight', contactInsight) },
-      { provide: CrmDealsService, useValue: recorded('deals', new CrmDealsService(prisma, events, crmTimeline, reasons)) },
+      { provide: CrmDealsService, useValue: recorded('deals', dealsService) },
       { provide: DealForecastService, useValue: recorded('forecast', {}) },
       { provide: DealVelocityService, useValue: recorded('velocity', {}) },
       { provide: WonLostReasonService, useValue: recorded('reasons', reasons) },
@@ -417,6 +482,10 @@ beforeAll(async () => {
     }
     next();
   });
+  // The production pipeline's TenantInterceptor (a global APP_INTERCEPTOR in
+  // app.module.ts): it binds the request's member to the tenant BusinessGuard
+  // verified, which CrmDealsService.listDeals reads (V1-89).
+  app.useGlobalInterceptors(new TenantInterceptor(prisma));
   await app.init();
 
   await cleanup(); // in case a prior run aborted
@@ -468,6 +537,15 @@ beforeAll(async () => {
       data: {
         id, businessId: ID.bizA, firstName: TWIN.firstName, lastName: TWIN.lastName, visibility, ownerId,
         status: 'PROSPECT', leadScore: 80, tags: [TWIN.tag],
+        phone: `+1868556${String(1000 + n++)}`, email: `${P}${id.slice(P.length).toLowerCase()}@contacts.test`,
+      },
+    });
+  }
+
+  for (const [id, visibility, ownerId] of [[ID.bPriv, 'PRIVATE', ID.owner], [ID.bTeam, 'TEAM', ID.owner], [ID.bStaff, 'TEAM', ID.staffOwned]] as const) {
+    await db.contact.create({
+      data: {
+        id, businessId: ID.bizA, firstName: id, visibility, ownerId, status: 'LEAD', tags: [BULK_TAG],
         phone: `+1868556${String(1000 + n++)}`, email: `${P}${id.slice(P.length).toLowerCase()}@contacts.test`,
       },
     });
@@ -756,6 +834,45 @@ const contactState = async (contactId: string) =>
 const rowCount = async (table: string, contactId: string) =>
   Number((await q(`SELECT count(*)::int AS n FROM ${table} WHERE contact_id = '${contactId}'`))[0].n);
 
+/** The crm_edit 'owned' and 'none' members of bizA (V1-89 (d)), created on first use. */
+async function ensureEditScopeMembers() {
+  for (const [id, crmEdit] of [[ID.editOwned, 'owned'], [ID.editNone, 'none']] as const) {
+    await db.user.upsert({ where: { id }, update: {}, create: { id, email: `${P}${id.slice(P.length).toLowerCase()}@test.local`, role: 'USER' } });
+    await db.membership.upsert({
+      where: { userId_businessId: { userId: id, businessId: ID.bizA } },
+      update: {},
+      create: { id: `${P}m_${id.slice(P.length)}_bizA`, userId: id, businessId: ID.bizA, role: 'STAFF', permissionScopes: { crm: 'write', crm_edit: crmEdit } },
+    });
+  }
+}
+
+/** A contact of bizA created by a review-repair case (removed again by dropContacts). */
+let extraPhone = 0;
+const seedContact = (id: string, data: { visibility: string; ownerId: string; status?: string; tags?: string[]; companyName?: string; accountId?: string }) =>
+  db.contact.create({
+    data: {
+      id, businessId: ID.bizA, firstName: id, status: data.status ?? 'LEAD', tags: data.tags ?? [], visibility: data.visibility, ownerId: data.ownerId,
+      companyName: data.companyName ?? null, accountId: data.accountId ?? null,
+      phone: `+1868557${String(1000 + extraPhone++)}`, email: `${P}${id.slice(P.length).toLowerCase()}@contacts.test`,
+    },
+  });
+
+/** Hard-deletes contacts a review-repair case created, with every row it wrote for them, so later cases see the seeded fixture. */
+async function dropContacts(ids: string[]) {
+  const list = ids.map((id) => `'${id}'`).join(', ');
+  for (const sql of [
+    `DELETE FROM deals WHERE contact_id IN (${list})`,
+    `DELETE FROM contact_audit_entries WHERE contact_id IN (${list})`,
+    `DELETE FROM contact_notes WHERE contact_id IN (${list})`,
+    `DELETE FROM contact_tasks WHERE contact_id IN (${list})`,
+    `DELETE FROM contact_events WHERE contact_id IN (${list})`,
+    `DELETE FROM activities WHERE business_id = '${ID.bizA}' AND contact_id IN (${list})`,
+    `DELETE FROM contacts WHERE id IN (${list})`,
+  ]) {
+    try { await db.$executeRawUnsafe(sql); } catch { /* best-effort; afterAll removes every v84c_ row */ }
+  }
+}
+
 describe('ST-1 GET deals?contactId= holds the contacts/:contactId/deals rule', () => {
   it("STAFF_OWNED filtering on the owner's PRIVATE contact answers 404 like an unknown id; the deals service is not reached", async () => {
     resetRecorders();
@@ -780,9 +897,94 @@ describe('ST-1 GET deals?contactId= holds the contacts/:contactId/deals rule', (
     expect(owner.body.deals.map((d: { title: string }) => d.title)).toEqual([SECRET.deal]);
   });
 
+  it("V1-89 ST-1: the unfiltered GET deals lists a deal of a contact the member cannot open without that contact (contact and contactId null, no name); a contact it may open stays joined; the OWNER's list is unchanged", async () => {
+    const dealOf = (body: any, contactTail: string) => body.deals.find((d: { id: string }) => d.id === `${P}deal_${contactTail}`);
+    for (const actor of [ID.staffOwned, ID.admin]) {
+      resetRecorders();
+      const res = await send('get', 'deals', actor, '');
+      expect(res.status, `${actor}: ${res.text.slice(0, 200)}`).toBe(200);
+      expect(svcCalls(), actor).toEqual(['deals.listDeals']);
+      const hidden = dealOf(res.body, 'cPriv');
+      expect(hidden, `${actor}: the hidden contact's deal is still listed`).toBeDefined();
+      expect({ contact: hidden.contact, contactId: hidden.contactId }, actor).toEqual({ contact: null, contactId: null });
+      expect(res.text, `${actor}: the hidden contact's id or name`).not.toContain(ID.cPriv);
+      expect(res.text, `${actor}: the hidden contact's email`).not.toContain(`${P}cpriv@contacts.test`);
+      // cTeam is TEAM and STAFF_OWNED's: both may open it.
+      expect(dealOf(res.body, 'cTeam').contact, actor).toMatchObject({ id: ID.cTeam, firstName: ID.cTeam });
+      expect(dealOf(res.body, 'cTeam').contactId, actor).toBe(ID.cTeam);
+    }
+
+    const owner = await send('get', 'deals', ID.owner, '');
+    expect(owner.status).toBe(200);
+    expect(dealOf(owner.body, 'cPriv').contactId).toBe(ID.cPriv);
+    expect(dealOf(owner.body, 'cPriv').contact).toMatchObject({ id: ID.cPriv, firstName: ID.cPriv });
+  });
+
+  it('V1-89 ST-1: listDeals with no member bound to the call (a queue run, D-88) keeps the OWNER view: every deal carries its contact', async () => {
+    const result = await dealsService.listDeals({ businessId: ID.bizA });
+    const hidden = result.deals.find((d: { id: string }) => d.id === `${P}deal_cPriv`);
+    expect(hidden.contactId).toBe(ID.cPriv);
+    expect(hidden.contact).toMatchObject({ id: ID.cPriv });
+  });
+
+  it("V1-89 ST-1 SEC-V89-4: a deal of a contact the member cannot open is listed without the company name and account createDeal copied from that contact, and search= and accountId= do not match it; the OWNER's list, search and account filter are unchanged", async () => {
+    await seedContact(ID.dPriv, { visibility: 'PRIVATE', ownerId: ID.owner, companyName: SECRET_COMPANY, accountId: `${P}acct_priv` });
+    try {
+      const deal = await dealsService.createDeal({ businessId: ID.bizA, contactId: ID.dPriv, title: 'v84c copied deal', stageId: ID.stage, value: 10 });
+      expect({ companyName: deal.companyName, accountId: deal.accountId }, 'fixture: copied from the contact').toEqual({
+        companyName: SECRET_COMPANY, accountId: `${P}acct_priv`,
+      });
+      const ids = (res: { body: { deals: Array<{ id: string }> } }) => res.body.deals.map((d) => d.id);
+      for (const actor of [ID.staffOwned, ID.admin]) {
+        const list = await send('get', 'deals', actor, '');
+        expect(list.status, actor).toBe(200);
+        const row = list.body.deals.find((d: { id: string }) => d.id === deal.id);
+        expect(row, `${actor}: the deal is still listed`).toBeDefined();
+        expect({ contactId: row.contactId, contact: row.contact, companyName: row.companyName, accountId: row.accountId }, actor).toEqual({
+          contactId: null, contact: null, companyName: null, accountId: null,
+        });
+        expect(list.text, `${actor}: the hidden contact's company`).not.toContain(SECRET_COMPANY);
+        expect(list.text, `${actor}: the hidden contact's id`).not.toContain(ID.dPriv);
+
+        const search = await send('get', `deals?search=${SECRET_COMPANY}`, actor, '');
+        const noMatch = await send('get', 'deals?search=v84c-no-deal-has-this-text', actor, '');
+        expect(search.status, actor).toBe(200);
+        expect(search.text, `${actor}: search on the hidden company vs no match`).toBe(noMatch.text);
+
+        const byAccount = await send('get', `deals?accountId=${P}acct_priv`, actor, '');
+        expect(byAccount.status, actor).toBe(200);
+        expect(ids(byAccount), `${actor}: the account filter`).not.toContain(deal.id);
+      }
+
+      const owner = await send('get', 'deals', ID.owner, '');
+      expect(owner.body.deals.find((d: { id: string }) => d.id === deal.id)).toMatchObject({
+        contactId: ID.dPriv, companyName: SECRET_COMPANY, accountId: `${P}acct_priv`, contact: { id: ID.dPriv, companyName: SECRET_COMPANY },
+      });
+      expect(ids(await send('get', `deals?search=${SECRET_COMPANY}`, ID.owner, ''))).toEqual([deal.id]);
+      expect(ids(await send('get', `deals?accountId=${P}acct_priv`, ID.owner, ''))).toEqual([deal.id]);
+    } finally {
+      await dropContacts([ID.dPriv]);
+    }
+  });
+
+  it("V1-89 ST-1 SEC-V89-5 (D-37): listDeals filtered by a contact the bound member cannot open lists nothing, exactly as for an unknown id (the path KEY's deals_list takes); its own contact and the OWNER's list are unchanged", async () => {
+    const listFor = (userId: string, contactId: string) =>
+      runWithTenant(ID.bizA, userId, () => dealsService.listDeals({ businessId: ID.bizA, contactId }));
+    const hidden = await listFor(ID.staffOwned, ID.cPriv);
+    const absent = await listFor(ID.staffOwned, ABSENT);
+    expect(hidden).toEqual({ deals: [], total: 0, skip: 0, take: 50 });
+    expect(hidden).toEqual(absent);
+    expect(JSON.stringify(hidden)).not.toContain(SECRET.deal);
+
+    expect((await listFor(ID.staffOwned, ID.cTeam)).deals.map((d: { id: string }) => d.id)).toEqual([`${P}deal_cTeam`]);
+    const owner = await listFor(ID.owner, ID.cPriv);
+    expect(owner.deals.map((d: { title: string }) => d.title), 'the OWNER, unchanged').toEqual([SECRET.deal]);
+    expect(owner.total).toBe(1);
+  });
+
   it.todo(
-    "residual: the unfiltered GET deals still lists a deal of a contact the member cannot open, with that contact's name joined " +
-      '(CrmDealsService.listDeals takes no visibility clause and the deal board reads deal.contact unconditionally; deal visibility is outside this write set)',
+    "residual: GET deals/:dealId (CrmDealsService.getDeal), the deal velocity report and an account's deals still join the contact of a deal " +
+      'whose contact the member cannot open (outside the V1-89 write set, which holds listDeals only)',
   );
 });
 
@@ -829,30 +1031,204 @@ describe('ST-2 crm-ai: a contact id in the body and the business scans hold the 
     }
   });
 
-  it('POST ai-execute bulk_status_change: a non-owner member is refused 403 before the service (it rewrites contacts the member cannot open); the OWNER reaches it', async () => {
-    const before = await snapshot();
-    const twinBefore = await contactState(ID.tPriv);
-    for (const actor of [ID.staffOwned, ID.staffWrite, ID.admin]) {
-      resetRecorders();
-      const res = await send('post', 'ai-execute', actor, '', {
-        action: 'bulk_status_change', params: { fromStatus: 'PROSPECT', toStatus: 'LOST', filter: TWIN.tag },
-      });
-      expect({ status: res.status, message: res.body?.message }, actor).toEqual({
-        status: 403,
-        message: 'Bulk status change by AI command reaches every contact of the business, so it is limited to the business owner',
-      });
-      expect(svcCalls(), actor).toEqual([]);
+  it("V1-89 (d): POST ai-execute bulk_status_change changes only the matching contacts the member may open and edit (ADMIN, STAFF_OWNED, crm_edit 'owned'); a hidden match answers like no match; crm_edit 'none' is refused 403; the OWNER still reaches the PRIVATE one", async () => {
+    const bulk = (actor: string, fromStatus: string, toStatus: string, filter = BULK_TAG) =>
+      send('post', 'ai-execute', actor, '', { action: 'bulk_status_change', params: { fromStatus, toStatus, filter } });
+    const status = async (contactId: string) => (await contactState(contactId)).status;
+    const privBefore = await contactState(ID.bPriv);
+    const twinsBefore = [await contactState(ID.tPriv), await contactState(ID.tTeam)];
+
+    // ADMIN: crm admin by role, opens TEAM rows but not the owner's PRIVATE one.
+    resetRecorders();
+    const admin = await bulk(ID.admin, 'LEAD', 'PROSPECT');
+    expect({ status: admin.status, body: admin.body }).toEqual({
+      status: 201, body: { success: true, message: 'Changed 2 contacts from LEAD to PROSPECT', data: { count: 2 } },
+    });
+    expect(svcCalls()).toEqual(['crmAi.executeAiCommand']);
+    expect([await status(ID.bTeam), await status(ID.bStaff)]).toEqual(['PROSPECT', 'PROSPECT']);
+    expect(await contactState(ID.bPriv), 'the PRIVATE match is untouched').toEqual(privBefore);
+
+    // Only the hidden PRIVATE contact still matches LEAD: the answer is a no-match answer.
+    const hiddenOnly = await bulk(ID.admin, 'LEAD', 'LOST');
+    const noMatch = await bulk(ID.admin, 'LEAD', 'LOST', 'v84c-no-contact-has-this-tag');
+    expect({ status: hiddenOnly.status, body: hiddenOnly.body }).toEqual({
+      status: 201, body: { success: true, message: 'Changed 0 contacts from LEAD to LOST', data: { count: 0 } },
+    });
+    expect(hiddenOnly.text, 'body vs no match').toBe(noMatch.text);
+    expect(await contactState(ID.bPriv)).toEqual(privBefore);
+
+    // STAFF_OWNED (crm_view 'owned'): its own contact only.
+    const staff = await bulk(ID.staffOwned, 'PROSPECT', 'CLIENT');
+    expect({ status: staff.status, count: staff.body?.data?.count }).toEqual({ status: 201, count: 1 });
+    expect([await status(ID.bTeam), await status(ID.bStaff)]).toEqual(['PROSPECT', 'CLIENT']);
+
+    // crm_edit 'owned' opens the TEAM rows but may edit only its own; crm_edit 'none' may edit none.
+    await ensureEditScopeMembers();
+    const editOwned = await bulk(ID.editOwned, 'PROSPECT', 'LOST');
+    expect({ status: editOwned.status, count: editOwned.body?.data?.count }).toEqual({ status: 201, count: 0 });
+    expect(await status(ID.bTeam)).toBe('PROSPECT');
+    resetRecorders();
+    const editNone = await bulk(ID.editNone, 'PROSPECT', 'LOST');
+    expect({ status: editNone.status, message: editNone.body?.message }).toEqual({
+      status: 403, message: 'You do not have permission to edit contacts',
+    });
+    expect(svcCalls()).toEqual([]);
+    expect(await status(ID.bTeam)).toBe('PROSPECT');
+
+    // The OWNER reaches every matching contact, the PRIVATE one included.
+    const owner = await bulk(ID.owner, 'LEAD', 'LOST');
+    expect({ status: owner.status, count: owner.body?.data?.count }).toEqual({ status: 201, count: 1 });
+    expect(await status(ID.bPriv)).toBe('LOST');
+    expect([await contactState(ID.tPriv), await contactState(ID.tTeam)], 'the twins are untouched').toEqual(twinsBefore);
+  });
+
+  it("V1-89 (d) SEC-V89-1: POST ai-execute change_status and toggle_favorite hold PATCH contacts/:contactId's edit scope: crm_edit 'none' is refused 403 on any contact, crm_edit 'owned' 403 on a TEAM contact it does not own, 404 on a hidden one and 201 on its own; a refused contact is unchanged", async () => {
+    await ensureEditScopeMembers();
+    await seedContact(ID.eOwn, { visibility: 'TEAM', ownerId: ID.editOwned });
+    try {
+      const exec = (actor: string, action: string, contactId: string, params: Record<string, unknown>) =>
+        send('post', 'ai-execute', actor, '', { action, contactId, params });
+      for (const { action, params } of [{ action: 'change_status', params: { status: 'CLIENT' } }, { action: 'toggle_favorite', params: {} }]) {
+        // crm_edit 'none': refused before the contact is looked up, as PATCH refuses it (a TEAM contact it may open, a hidden one, an unknown id).
+        for (const contactId of [ID.hTeamOwner, ID.cPriv, ABSENT]) {
+          const before = await contactState(contactId);
+          resetRecorders();
+          const res = await exec(ID.editNone, action, contactId, params);
+          expect({ status: res.status, message: res.body?.message }, `${action} crm_edit none ${contactId}`).toEqual({
+            status: 403, message: 'You do not have permission to edit contacts',
+          });
+          expect(svcCalls(), `${action} crm_edit none ${contactId}`).toEqual([]);
+          expect(await contactState(contactId), `${action} crm_edit none ${contactId}`).toEqual(before);
+        }
+
+        // crm_edit 'owned': the owner's TEAM contact it may open but does not own is 403, as PATCH answers.
+        const teamBefore = await contactState(ID.hTeamOwner);
+        resetRecorders();
+        const notOwned = await exec(ID.editOwned, action, ID.hTeamOwner, params);
+        expect({ status: notOwned.status, message: notOwned.body?.message }, `${action} crm_edit owned, not its own`).toEqual({
+          status: 403, message: 'You can only edit contacts you own',
+        });
+        expect(svcCalls(), action).toEqual([]);
+        expect(await contactState(ID.hTeamOwner), action).toEqual(teamBefore);
+        // A contact it cannot open stays a 404 like an unknown id.
+        const hidden = await exec(ID.editOwned, action, ID.cPriv, params);
+        const absent = await exec(ID.editOwned, action, ABSENT, params);
+        expect(hidden.status, action).toBe(404);
+        expect(hidden.text, `${action}: body vs an unknown id`).toBe(absent.text);
+
+        // Its own contact.
+        resetRecorders();
+        const own = await exec(ID.editOwned, action, ID.eOwn, params);
+        expect({ status: own.status, success: own.body?.success }, `${action} crm_edit owned, its own`).toEqual({ status: 201, success: true });
+        expect(svcCalls()).toEqual(['crmAi.executeAiCommand']);
+      }
+      expect(await contactState(ID.eOwn)).toMatchObject({ status: 'CLIENT', tags: ['favorite'] });
+
+      // The OWNER is unchanged.
+      const owner = await exec(ID.owner, 'change_status', ID.eOwn, { status: 'PROSPECT' });
+      expect({ status: owner.status, success: owner.body?.success }).toEqual({ status: 201, success: true });
+      expect((await contactState(ID.eOwn)).status).toBe('PROSPECT');
+
+      // A note is a child row of the contact, not an edit of it: add_note keeps the rule of POST
+      // contacts/:contactId/notes (record visibility), which admits a crm_edit 'none' member.
+      const notesBefore = await rowCount('contact_notes', ID.hTeamOwner);
+      const note = await exec(ID.editNone, 'add_note', ID.hTeamOwner, { body: 'v84c note by crm_edit none' });
+      expect({ status: note.status, success: note.body?.success }).toEqual({ status: 201, success: true });
+      expect(await rowCount('contact_notes', ID.hTeamOwner)).toBe(notesBefore + 1);
+    } finally {
+      await dropContacts([ID.eOwn]);
+      await db.$executeRawUnsafe(`DELETE FROM contact_notes WHERE contact_id = '${ID.hTeamOwner}' AND body = 'v84c note by crm_edit none'`);
     }
-    expect(await contactState(ID.tPriv)).toEqual(twinBefore);
-    expect(await snapshot()).toEqual(before);
+  });
+
+  it("V1-89 (d) SEC-V89-2: POST ai-execute bulk_status_change writes through CrmService.bulkUpdateContacts as PATCH contacts/bulk does: each changed contact gets a 'bulk_updated' audit entry and a bulk.updated event naming the member (USER), and the CRM caches are invalidated; a hidden match gets neither", async () => {
+    await seedContact(ID.aTeam, { visibility: 'TEAM', ownerId: ID.owner, tags: [AUDIT_TAG] });
+    await seedContact(ID.aPriv, { visibility: 'PRIVATE', ownerId: ID.owner, tags: [AUDIT_TAG] });
+    try {
+      cacheInvalidations.length = 0;
+      const res = await send('post', 'ai-execute', ID.admin, '', { action: 'bulk_status_change', params: { fromStatus: 'LEAD', toStatus: 'PROSPECT', filter: AUDIT_TAG } });
+      expect({ status: res.status, body: res.body }).toEqual({
+        status: 201, body: { success: true, message: 'Changed 1 contacts from LEAD to PROSPECT', data: { count: 1 } },
+      });
+      expect([(await contactState(ID.aTeam)).status, (await contactState(ID.aPriv)).status]).toEqual(['PROSPECT', 'LEAD']);
+
+      const events = await q(`SELECT contact_id, type, actor_type, actor_id FROM contact_events WHERE contact_id IN ('${ID.aTeam}', '${ID.aPriv}')`);
+      expect(events).toEqual([{ contact_id: ID.aTeam, type: 'bulk.updated', actor_type: 'USER', actor_id: ID.admin }]);
+      // The audit entry is written once the write has committed (fire-and-forget, as CrmService writes it).
+      let audit: Array<{ contact_id: string; action: string; actor: unknown; after: unknown }> = [];
+      for (let i = 0; i < 40 && audit.length === 0; i++) {
+        audit = await q(`SELECT contact_id, action, actor, after FROM contact_audit_entries WHERE contact_id IN ('${ID.aTeam}', '${ID.aPriv}')`);
+        if (audit.length === 0) await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(audit).toEqual([{ contact_id: ID.aTeam, action: 'bulk_updated', actor: { type: 'USER', id: ID.admin }, after: { status: 'PROSPECT' } }]);
+      expect(cacheInvalidations).toEqual(expect.arrayContaining([`stats:${ID.bizA}`, `flow:${ID.bizA}`]));
+    } finally {
+      await dropContacts([ID.aTeam, ID.aPriv]);
+    }
+  });
+
+  it("V1-89 (d) SEC-V89-3: POST ai-execute bulk_status_change writes a toStatus from the contact status vocabulary only and takes fromStatus as one status and filter as one tag; anything else (an unknown status, an object as a Prisma operator) is refused and nothing is written", async () => {
+    await seedContact(ID.vLead, { visibility: 'TEAM', ownerId: ID.owner, tags: [VALIDATE_TAG] });
+    await seedContact(ID.vClient, { visibility: 'TEAM', ownerId: ID.owner, status: 'CLIENT', tags: [VALIDATE_TAG] });
+    try {
+      const bulk = (actor: string, params: Record<string, unknown>) => send('post', 'ai-execute', actor, '', { action: 'bulk_status_change', params });
+      const BOGUS = 'NOT_A_REAL_STATUS_v84c';
+      const refusals: Array<{ params: Record<string, unknown>; message: string }> = [
+        { params: { fromStatus: 'LEAD', toStatus: BOGUS, filter: VALIDATE_TAG }, message: 'toStatus must be one of LEAD, PROSPECT, CLIENT, LOST' },
+        { params: { fromStatus: 'LEAD', toStatus: { set: 'LOST' }, filter: VALIDATE_TAG }, message: 'toStatus must be one of LEAD, PROSPECT, CLIENT, LOST' },
+        { params: { fromStatus: { not: '__nope__' }, toStatus: 'LOST', filter: VALIDATE_TAG }, message: 'fromStatus must be one status' },
+        { params: { fromStatus: ['LEAD', 'CLIENT'], toStatus: 'LOST', filter: VALIDATE_TAG }, message: 'fromStatus must be one status' },
+        { params: { fromStatus: 'LEAD', toStatus: 'LOST', filter: { isEmpty: false } }, message: 'filter must be one tag' },
+      ];
+      for (const actor of [ID.owner, ID.admin]) {
+        for (const { params, message } of refusals) {
+          const before = [await contactState(ID.vLead), await contactState(ID.vClient)];
+          const res = await bulk(actor, params);
+          expect({ status: res.status, body: res.body }, `${actor} ${JSON.stringify(params)}`).toEqual({
+            status: 201, body: { success: false, message, data: null },
+          });
+          expect([await contactState(ID.vLead), await contactState(ID.vClient)], `${actor} ${JSON.stringify(params)}`).toEqual(before);
+        }
+      }
+      expect(Number((await q(`SELECT count(*)::int AS n FROM contacts WHERE status = '${BOGUS}'`))[0].n)).toBe(0);
+
+      // Control: a valid change still changes the matching contact only.
+      const ok = await bulk(ID.owner, { fromStatus: 'LEAD', toStatus: 'PROSPECT', filter: VALIDATE_TAG });
+      expect({ status: ok.status, count: ok.body?.data?.count }).toEqual({ status: 201, count: 1 });
+      expect([(await contactState(ID.vLead)).status, (await contactState(ID.vClient)).status]).toEqual(['PROSPECT', 'CLIENT']);
+    } finally {
+      await dropContacts([ID.vLead, ID.vClient]);
+    }
+  });
+
+  it("V1-89 ST-2: POST ai-analyze naming a contact the member cannot open answers 404 like an unknown id, before the AI is called; its own contact answers 201 with a prompt about the contacts it may open only", async () => {
+    const body = (contactIds: string[]) => ({ prompt: 'v84c analyse these contacts', contactIds });
+    resetRecorders();
+    const hidden = await send('post', 'ai-analyze', ID.staffOwned, '', body([ID.cPriv]));
+    const mixed = await send('post', 'ai-analyze', ID.staffOwned, '', body([ID.cTeam, ID.cPriv]));
+    const calls = svcCalls();
+    const ai = aiCalls.length;
+    const absent = await send('post', 'ai-analyze', ID.staffOwned, '', body([ABSENT]));
+
+    expect({ hidden: hidden.status, mixed: mixed.status }).toEqual({ hidden: 404, mixed: 404 });
+    expect(hidden.body).toEqual(NOT_FOUND_BODY);
+    expect(hidden.text, 'body vs an unknown id').toBe(absent.text);
+    expect(mixed.text, 'body vs an unknown id').toBe(absent.text);
+    expect({ services: calls, ai }).toEqual({ services: [], ai: 0 });
 
     resetRecorders();
-    const owner = await send('post', 'ai-execute', ID.owner, '', {
-      action: 'bulk_status_change', params: { fromStatus: 'PROSPECT', toStatus: 'LOST', filter: 'v84c-no-contact-has-this-tag' },
-    });
-    expect(owner.status).toBe(201);
-    expect(owner.body).toMatchObject({ success: true, data: { count: 0 } });
-    expect(svcCalls()).toEqual(['crmAi.executeAiCommand']);
+    const own = await send('post', 'ai-analyze', ID.staffOwned, '', body([ID.cTeam]));
+    expect(own.status, own.text.slice(0, 200)).toBe(201);
+    expect(svcCalls()).toEqual(['crmAi.analyzeContacts']);
+    expect(aiCalls).toHaveLength(1);
+    expect(aiCalls[0].prompt).toContain(ID.cTeam);
+    for (const id of HIDDEN_FROM_STAFF_OWNED) expect(aiCalls[0].prompt).not.toContain(id);
+    for (const secret of Object.values(SECRET)) expect(aiCalls[0].prompt).not.toContain(secret);
+
+    resetRecorders();
+    const owner = await send('post', 'ai-analyze', ID.owner, '', body([ID.cPriv]));
+    expect(owner.status, 'the OWNER, unchanged').toBe(201);
+    expect(aiCalls[0].prompt).toContain(ID.cPriv);
   });
 
   it("POST ai-analyze/execute: STAFF_OWNED's task on the owner's PRIVATE contact is not created and counts as failed, like one on an unknown id", async () => {
@@ -915,16 +1291,64 @@ describe('ST-2 crm-ai: a contact id in the body and the business scans hold the 
     });
   }
 
+  const PROMPTS: Array<{ name: string; method: Method; path: string; ok: number; feature: string; body?: Record<string, unknown> }> = [
+    { name: 'POST ai-command', method: 'post', path: 'ai-command', ok: 201, feature: 'crm_command', body: { command: 'v84c who should I call today' } },
+    { name: 'POST ai-analyze', method: 'post', path: 'ai-analyze', ok: 201, feature: 'crm_analysis', body: { prompt: 'v84c who should I call today' } },
+    { name: 'GET ai-churn-risk', method: 'get', path: 'ai-churn-risk', ok: 200, feature: 'churn_detection' },
+  ];
+  for (const route of PROMPTS) {
+    it(`V1-89 ST-2: ${route.name} builds the AI prompt from the contacts STAFF_OWNED may open only; the OWNER's prompt still names the PRIVATE twin`, async () => {
+      resetRecorders();
+      const staff = await send(route.method, route.path, ID.staffOwned, '', route.body);
+      expect(staff.status, `${route.name}: ${staff.text.slice(0, 200)}`).toBe(route.ok);
+      expect(aiCalls.map((c) => c.feature), route.name).toEqual([route.feature]);
+      const prompt = aiCalls[0].prompt;
+      expect(prompt, route.name).toContain(ID.tTeam);
+      for (const id of HIDDEN_FROM_STAFF_OWNED) expect(prompt, `${route.name} names ${id}`).not.toContain(id);
+      for (const secret of Object.values(SECRET)) expect(prompt, route.name).not.toContain(secret);
+
+      resetRecorders();
+      const owner = await send(route.method, route.path, ID.owner, '', route.body);
+      expect(owner.status, route.name).toBe(route.ok);
+      expect(aiCalls[0].prompt, `${route.name}: the OWNER, unchanged`).toContain(ID.tPriv);
+    });
+  }
+
+  it("V1-89 ST-2: the scans' aggregate counts count only the contacts STAFF_OWNED may open; the OWNER's count every live contact", async () => {
+    const live: Array<{ id: string; status: string }> = await q(
+      `SELECT id, status FROM contacts WHERE business_id = '${ID.bizA}' AND deleted_at IS NULL ORDER BY id`,
+    );
+    const visible: typeof live = [];
+    for (const row of live) if (await opensFor(ID.staffOwned, row.id)) visible.push(row);
+    expect(visible.length, 'fixture: some live contacts are hidden from STAFF_OWNED').toBeLessThan(live.length);
+    const clientsOrProspects = (rows: typeof live) => rows.filter((r) => r.status === 'CLIENT' || r.status === 'PROSPECT').length;
+    const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+
+    for (const [actor, rows] of [[ID.staffOwned, visible], [ID.owner, live]] as const) {
+      const quality = await send('get', 'ai-data-quality', actor, '');
+      expect(quality.status, actor).toBe(200);
+      // Every seeded contact lacks an industry and a job title, so each one has issues.
+      expect({ totalContacts: quality.body.totalContacts, contactsWithIssues: quality.body.contactsWithIssues }, `${actor} ai-data-quality`)
+        .toEqual({ totalContacts: rows.length, contactsWithIssues: rows.length });
+      const industry = quality.body.fieldBreakdown.find((f: { field: string }) => f.field === 'industry');
+      expect(industry, `${actor} ai-data-quality industry`).toEqual({ field: 'industry', missing: rows.length, percentage: 100 });
+
+      const duplicates = await send('get', 'ai-duplicates', actor, '');
+      expect(duplicates.body.totalContacts, `${actor} ai-duplicates`).toBe(rows.length);
+
+      const revenue = await send('get', 'ai-revenue-opportunities', actor, '');
+      expect(revenue.body.contactsAnalyzed, `${actor} ai-revenue-opportunities`).toBe(clientsOrProspects(rows));
+      expect(revenue.body.totalEstimatedRevenue, `${actor} ai-revenue-opportunities`)
+        .toBe(sum(revenue.body.opportunities.map((o: { estimatedValue: number }) => o.estimatedValue)));
+
+      const stale = await send('get', 'ai-reengagement', actor, '');
+      expect(stale.body.totalStale, `${actor} ai-reengagement`).toBe(stale.body.suggestions.length);
+    }
+  });
+
   it.todo(
-    'residual: the AI answers (ai-command, ai-analyze, ai-churn-risk) are generated from a prompt CrmAiService builds over every contact of the business, ' +
-      'so the model can still name a contact the member cannot open (scoping that context is a CrmAiService change outside this write set)',
-  );
-  it.todo(
-    "residual: the scans' aggregate counts (totalContacts, contactsWithIssues, averageCompleteness, fieldBreakdown, totalEstimatedRevenue, contactsAnalyzed) " +
-      'still count contacts the member cannot open (computed inside CrmAiService, outside this write set)',
-  );
-  it.todo(
-    'residual: bulk_status_change for a non-owner member narrowed to the contacts it may open and edit (refused 403 until CrmAiService.executeAiCommand can scope its updateMany)',
+    "residual: ai-command's prompt lists the business's sequences and contact lists with their enrollment and member counts, which still count " +
+      'contacts the member cannot open (CrmSequenceService.listSequences and CrmListsService.listContactLists, outside the V1-89 write set)',
   );
 });
 

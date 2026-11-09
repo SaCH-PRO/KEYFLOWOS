@@ -5041,9 +5041,20 @@ ${triage.standingContext}`;
         const maxContacts = Math.min(args.maxContacts ?? 20, 50);
         const titleTemplate = args.taskTitle ?? 'Follow up with {name}';
         const cutoff = new Date(Date.now() - staleDays * 86400000);
+        // W3-KEY-CRM-VISIBILITY (D-37; KEY-R3b residual): a member's queue covers only the stale
+        // leads their CRM view opens (visibilityClause, as segment_contacts and GET contacts): no
+        // task is written on, and no name returned of, any other. Unchanged with no principal (the
+        // OWNER's view, D-88's convention) or for the OWNER and a SUPER_ADMIN.
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
 
         const staleContacts = await this.prisma.client.contact.findMany({
-          where: { businessId, deletedAt: null, status: { in: ['LEAD', 'PROSPECT'] }, updatedAt: { lt: cutoff } },
+          where: {
+            businessId,
+            deletedAt: null,
+            status: { in: ['LEAD', 'PROSPECT'] },
+            updatedAt: { lt: cutoff },
+            ...(visible ? { AND: [visible] } : {}),
+          },
           select: { id: true, firstName: true, lastName: true, email: true },
           take: maxContacts,
           orderBy: { updatedAt: 'asc' },
@@ -6800,13 +6811,30 @@ ${triage.standingContext}`;
         return { id: sequence.id, name: sequence.name };
       }
       case 'sequence_enroll': {
+        // W3-KEY-CRM-VISIBILITY review SEC-W3CV-4 (D-37): a member enrols only contacts their CRM view
+        // opens (contactVisibilityFilter, the GET contacts/:id rule). One they may not open answers as
+        // an unknown contact does and nothing is enrolled, not even the others named with it.
+        // Unchanged with no principal (the OWNER's view; graphActionRequirement keeps it to the OWNER
+        // there) or for the OWNER and a SUPER_ADMIN.
+        const reader = await this.contactReadAccess(businessId, action);
+        if (reader && Array.isArray(args.contactIds)) {
+          const ids: unknown[] = args.contactIds;
+          const named = ids.filter((id): id is string => typeof id === 'string');
+          const canOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, named);
+          if (canOpen && ids.some((id) => typeof id !== 'string' || !canOpen(id))) throw new NotFoundException('Contact not found');
+        }
         const result = await this.getCrmSequences().enrollContacts(businessId, args.sequenceId, args.contactIds);
         return result;
       }
       case 'sequence_enroll_overdue': {
+        // W3-KEY-CRM-VISIBILITY (D-37; KEY-R3b residual): a member enrols only the overdue contacts
+        // their CRM view opens (the same visibilityClause, handed to the sequence service). Unchanged
+        // with no principal (the OWNER's view, D-88's convention) or for the OWNER and a SUPER_ADMIN.
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
         const result = await this.getCrmSequences().enrollOverdueContacts(businessId, args.sequenceId, {
           minDaysOverdue: args.minDaysOverdue,
           limit: args.limit,
+          ...(visible ? { contactWhere: visible } : {}),
         });
         return result;
       }

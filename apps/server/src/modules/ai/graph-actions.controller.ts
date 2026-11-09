@@ -217,6 +217,41 @@ export function graphActionReadsContacts(toolName: string): boolean {
   return scope?.module === 'crm' && scope.minLevel === 'read';
 }
 
+/**
+ * W3-KEY-CRM-VISIBILITY (D-37, D-88; KEY-R3b residuals): tools graphActionReadsContacts does not
+ * know whose dispatcher case still bounds the contacts it reads or writes by the principal's
+ * visibility clause (FlowOrchestratorService.contactReadAccess, directly or through
+ * calendarContactScope): fetch_client_health (an analytics read that counts and names contacts),
+ * sequence_enroll_overdue (a crm write that enrols every contact with an overdue invoice), and, since
+ * the packet's review, sequence_enroll (SEC-W3CV-4: the contacts it is handed) and the V1-84 calendar
+ * and booking reads calendar_list_events, calendar_check_conflicts, bookings_list_bookings and
+ * bookings_list_waitlist (SEC-W3CV-1: an event or booking on a contact, and its contact). Run with no
+ * principal they reach the OWNER's view: kept for a run with no member (D-88's convention; the Pro
+ * Auto monitor's client-health read; whether D-73 refuses them there is open, review SEC-W3CV-2), but
+ * a member's plan the queue runs or an approval hands on with no principal would reach contacts the
+ * member may not open, so there they are the OWNER's only, and their stored output (rows and count)
+ * is the OWNER's only, as a contact read's is. graph-action-visibility-bound.spec.ts derives this
+ * from the dispatcher: every case that reaches contactReadAccess must be in it or be a contact read.
+ */
+const GRAPH_ACTION_VISIBILITY_BOUND_TOOLS: ReadonlySet<string> = new Set([
+  'fetch_client_health',
+  'sequence_enroll_overdue',
+  'sequence_enroll',
+  'calendar_list_events',
+  'calendar_check_conflicts',
+  'bookings_list_bookings',
+  'bookings_list_waitlist',
+]);
+
+/**
+ * Whether `toolName`'s contact rows are bounded only by the principal's visibility clause: a contact
+ * read (graphActionReadsContacts) or one of GRAPH_ACTION_VISIBILITY_BOUND_TOOLS (W3-KEY-CRM-VISIBILITY,
+ * D-37). Run with no principal for a member, such a tool is the OWNER's only.
+ */
+export function graphActionBoundByContactVisibility(toolName: string): boolean {
+  return graphActionReadsContacts(toolName) || GRAPH_ACTION_VISIBILITY_BOUND_TOOLS.has(toolName);
+}
+
 /** What a member must hold to execute a stored step of `toolName` from this route. */
 export interface GraphActionRequirement {
   /** Every module scope, as ModuleScopeGuard reads it. */
@@ -252,8 +287,9 @@ export function graphActionRequirement(toolName: string): GraphActionRequirement
     requirement.ownerOnlyWithoutPrincipal = CONTACT_READ_NO_PRINCIPAL;
   } else if (Object.prototype.hasOwnProperty.call(GOVERNED_UNGRANTED, toolName)) {
     requirement.ownerOnly = GOVERNED_UNGRANTED[toolName];
-  } else if (graphActionReadsContacts(toolName)) {
-    // KEY-R3b review SEC-R3b-1: every other contact read, known by what the tool does.
+  } else if (graphActionBoundByContactVisibility(toolName)) {
+    // KEY-R3b review SEC-R3b-1: every other contact read, known by what the tool does; and
+    // (W3-KEY-CRM-VISIBILITY, D-37) every tool whose contacts only the principal's visibility bounds.
     requirement.ownerOnlyWithoutPrincipal = CONTACT_READ_NO_PRINCIPAL;
   }
   if (CRM_SUBPERMISSION_TOOLS.crm_delete.includes(toolName)) requirement.crmSubPermission = 'crm_delete';
@@ -385,10 +421,11 @@ export function planStepDispatchedTool(step: { toolName: string | null; action: 
  * unless it is itself a canonical module (a PlannerService step's module label, such as 'expenses'
  * or 'automations': no connector adapter has such a name, so nothing runs under it), which is
  * judged by that module's read. `stepOutput`: whether that step's stored output is shown
- * at all: not, to anyone but the OWNER or a SUPER_ADMIN, for a contact read (graphActionReadsContacts),
- * whose output the plan executor writes from a run with no principal (every contact, another member's
- * PRIVATE ones included). `seesEveryContact`: the OWNER and a SUPER_ADMIN, whom visibilityClause does
- * not restrict. `hiddenContacts` (D-74): the contacts among `ids` the viewer may not open (null when
+ * at all: not, to anyone but the OWNER or a SUPER_ADMIN, for a contact read or another tool whose
+ * contacts only the principal's visibility bounds (graphActionBoundByContactVisibility,
+ * W3-KEY-CRM-VISIBILITY), whose output the plan executor writes from a run with no principal (every
+ * contact, another member's PRIVATE ones included; their rows and their count). `seesEveryContact`:
+ * the OWNER and a SUPER_ADMIN, whom visibilityClause does not restrict. `hiddenContacts` (D-74): the contacts among `ids` the viewer may not open (null when
  * they open every contact), which visiblePlans withholds from every step input and output at read.
  */
 export interface GraphPlanReadScope {
@@ -454,8 +491,9 @@ export async function graphPlanReadScope(
       // scopes, as `step` holds it for a registry tool graphActionRequirement maps to nothing).
       return isCanonicalModule(module) && reads(module);
     },
-    // KEY-R3b review SEC-R3b-1: every contact read, known by what the tool does.
-    stepOutput: (toolName) => !graphActionReadsContacts(toolName),
+    // KEY-R3b review SEC-R3b-1: every contact read, known by what the tool does; and
+    // (W3-KEY-CRM-VISIBILITY, D-37) every tool whose contacts only the principal's visibility bounds.
+    stepOutput: (toolName) => !graphActionBoundByContactVisibility(toolName),
     seesEveryContact: !clause,
     hiddenContacts: clause ? (ids) => hiddenBusinessContacts(prisma, businessId, clause, ids) : null,
   };
