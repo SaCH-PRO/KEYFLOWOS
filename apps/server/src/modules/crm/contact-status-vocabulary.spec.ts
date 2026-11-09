@@ -59,6 +59,11 @@
  *     update_status; crm-adapter.service.spec.ts) and KEY's
  *     update_status_with_confirmation (CrmService.bulkUpdateContacts). Both
  *     store through canonicalContactStatus now and refuse a status with none.
+ *   - W5-D92-RESIDUALS (D-92 residuals): the KEY Cortex capability registry
+ *     offers exactly CONTACT_STATUSES (it offered churned and partner, which
+ *     the CRM adapter refuses), and the Google/Outlook contact-sync rules and
+ *     the connector form mapping store and apply an operator's defaultStatus
+ *     only through canonicalContactStatus (last describe block below).
  *
  * Pure: reads source files, imports constants and drives the readers over
  * in-memory stand-ins for Prisma; no database, no network.
@@ -707,5 +712,83 @@ describe("D-92: a stored legacy 'DORMANT' reads as CLIENT in every status reader
     const { assessment } = await new MaturityAssessmentService(prisma as any).assessBusiness('biz');
     // 11 contacts score 10 on their own; more than 10 customers add 10.
     expect((assessment as any).customerMaturity).toBe(20);
+  });
+});
+
+/**
+ * W5-D92-RESIDUALS (owner ruling D-92, the residuals W4-D92-DORMANT-AS-CLIENT
+ * recorded in crm.constants.ts): two more places offered or stored a status
+ * outside CONTACT_STATUSES.
+ *   - The KEY Cortex capability registry (key-cortex-capability-registry.service.ts)
+ *     offered the model 'lead', 'prospect', 'customer', 'churned' and 'partner'
+ *     for create_contact, update_contact, update_status and the list_contacts
+ *     and count_contacts filters, while the CRM adapter refuses churned and
+ *     partner (review CR-D92-1) and a filter matches a stored status exactly.
+ *     It now offers exactly CONTACT_STATUSES, and create_contact defaults to LEAD.
+ *   - The Google and Outlook contact-sync rules and the connector form mapping
+ *     (connect/*.service.ts) stored an operator's configured defaultStatus as
+ *     given and wrote it to every contact a sync or a form submission created.
+ *     They now store and apply it only through canonicalContactStatus, and the
+ *     setting answers 400 for a value with none. Behavioural proof over the
+ *     real controller: test/connect-default-status.e2e.test.ts. The Google
+ *     Forms mapping is not one of them: its defaultStatus is the quote status.
+ */
+describe('W5-D92-RESIDUALS (D-92): the KEY Cortex capability registry and the connector contact rules speak only CONTACT_STATUSES', () => {
+  type Param = { name: string; description: string; enumValues?: string[]; default?: unknown };
+  type Entry = { name: string; parameters: Param[] };
+  const CRM_STATUS_PARAMS: Array<['actions' | 'queries', string]> = [
+    ['actions', 'create_contact'],
+    ['actions', 'update_contact'],
+    ['actions', 'list_contacts'],
+    ['actions', 'update_status'],
+    ['queries', 'count_contacts'],
+  ];
+
+  it('D-92: every contact-status parameter the KEY Cortex capability registry offers is exactly CONTACT_STATUSES (no churned, partner or customer), and create_contact defaults to LEAD', async () => {
+    const { KeyCortexCapabilityRegistryService } = await import('../key-cortex/key-cortex-capability-registry.service');
+    const crm = new KeyCortexCapabilityRegistryService().getAllCapabilities().find((c) => c.module === 'crm');
+    expect(crm, 'the registry lists the crm module').toBeTruthy();
+    for (const [kind, name] of CRM_STATUS_PARAMS) {
+      const entry = (crm![kind] as Entry[]).find((x) => x.name === name);
+      expect(entry, `crm.${name} is registered`).toBeTruthy();
+      const status = entry!.parameters.find((p) => p.name === 'status');
+      expect(status?.enumValues, `crm.${name}.status`).toEqual([...CONTACT_STATUSES]);
+      if (name === 'create_contact') expect(status?.default, 'create_contact.status default').toBe('LEAD');
+    }
+    // Every other crm status parameter is a task's, not a contact's.
+    const others = ([...crm!.actions, ...crm!.queries] as Entry[])
+      .filter((x) => !CRM_STATUS_PARAMS.some(([, name]) => name === x.name))
+      .flatMap((x) => x.parameters.filter((p) => p.name === 'status').map((p) => `${x.name}: ${p.description}`));
+    expect(others).toEqual(['get_tasks: Task status']);
+    // Each value offered is one the CRM adapter stores as itself.
+    for (const [kind, name] of CRM_STATUS_PARAMS) {
+      const status = (crm![kind] as Entry[]).find((x) => x.name === name)!.parameters.find((p) => p.name === 'status')!;
+      for (const v of status.enumValues ?? []) expect(canonicalContactStatus(v), `crm.${name} offers ${v}`).toBe(v);
+    }
+  });
+
+  it('D-92: the connector contact-sync rules and the connector form mapping store and apply an operator default status only through canonicalContactStatus, and write no defaultStatus verbatim', () => {
+    for (const file of [
+      'modules/connect/google-contacts-sync.service.ts',
+      'modules/connect/outlook-contacts-sync.service.ts',
+      'modules/connect/connector-form-mapping.service.ts',
+    ]) {
+      const src = read(file);
+      expect(src, `${file}: takes canonicalContactStatus from crm.constants.ts`).toMatch(
+        /import \{[^}]*\bcanonicalContactStatus\b[^}]*\} from '\.\.\/crm\/crm\.constants'/,
+      );
+      expect(src, `${file}: a defaultStatus written to Contact.status verbatim`).not.toMatch(
+        /\bstatus\s*(?::|=)\s*(?:rules|mapping|input|prev)\.defaultStatus\b/,
+      );
+      expect(src, `${file}: a defaultStatus read back verbatim`).not.toMatch(
+        /defaultStatus:\s*typeof obj\.defaultStatus === 'string' \? obj\.defaultStatus/,
+      );
+    }
+    // The Google Forms mapping writes no Contact.status: its defaultStatus is the quote's.
+    const forms = read('modules/connect/google-forms-mapping.service.ts');
+    const createContact = forms.match(/this\.crm\.createContact\(\{([\s\S]*?)\}\);/);
+    expect(createContact, 'google-forms-mapping creates its contact through CrmService.createContact').not.toBeNull();
+    expect(createContact![1], 'google-forms-mapping names a contact status').not.toMatch(/\bstatus\b/);
+    expect(forms).toMatch(/status: \(opp\.defaultStatus as QuoteStatus \| undefined\) \?\? 'DRAFT'/);
   });
 });
