@@ -9,8 +9,8 @@
  * UNPAID order and counted the promo again. The key travels in the body
  * (`idempotencyKey`) and, since W3-CORS-IDEMPOTENCY-HEADER, in the
  * Idempotency-Key header too: the API's CORS preflight for the public
- * storefront routes allows that header from any origin (app-bootstrap.ts), and
- * the body field stays so a server without that change still dedupes.
+ * storefront routes allows that header from any origin (app-bootstrap.ts); the
+ * body field stays, with the same key, as the server's fallback.
  *
  *   CIK-01  one key per checkout: the same checkout asks again with the same
  *           key; a different checkout (cart, customer, method) gets a new one;
@@ -95,7 +95,7 @@ describe("storefront checkout retry key (G6PUB-RC2-4)", () => {
     expect(apiPost).toHaveBeenCalledTimes(2);
     for (const [{ path, body, init }] of apiPost.mock.calls as [{ path: string; body: Record<string, unknown>; init?: RequestInit }][]) {
       expect(path).toBe("/site/storefront/public/cik-store/checkout");
-      // The body field stays, so a server without the header allowance still dedupes.
+      // The body field stays, with the same key (the server's fallback when no header arrives).
       expect(body.idempotencyKey).toBe(key);
       expect(new Headers(init?.headers).get("Idempotency-Key"), "the header carries the body's key").toBe(key);
     }

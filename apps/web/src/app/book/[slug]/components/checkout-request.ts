@@ -8,10 +8,14 @@ import type { StoreOrderResponse } from "./types";
  * POST /site/storefront/public/:slug/checkout answers a retried checkout that
  * carries the first call's key with the order (and payment session) that call
  * created, so a second press of Place Order after an error, or a dropped
- * connection, writes no second UNPAID order and counts no promo twice. The key
- * travels in the body (`idempotencyKey`): the API is cross-origin and its CORS
- * preflight allows no Idempotency-Key header (server app-bootstrap.ts
- * allowedHeaders), which would fail the request before it was sent.
+ * connection, writes no second UNPAID order and counts no promo twice.
+ *
+ * W3-CORS-IDEMPOTENCY-HEADER: the key travels in the Idempotency-Key header
+ * (the API's CORS preflight for the public storefront routes allows it from any
+ * origin, server app-bootstrap.ts) and, with the same value, in the body
+ * (`idempotencyKey`). The server reads the header first and then the body
+ * (site.controller.ts checkoutIdempotencyKey), so a hop that drops the header
+ * still leaves the key, and the two can never disagree.
  */
 
 /** The checkout fields the server reads (site.controller.ts publicCheckout), without the key. */
@@ -67,7 +71,10 @@ export function createCheckoutKeyring(): CheckoutKeyring {
   };
 }
 
-/** The storefront checkout request, with its retry key in the body (none when `idempotencyKey` is null). */
+/**
+ * The storefront checkout request, with its retry key in the Idempotency-Key
+ * header and the body field (none when `idempotencyKey` is null).
+ */
 export async function postStorefrontCheckout(
   slug: string,
   payload: StorefrontCheckoutPayload,
@@ -76,6 +83,7 @@ export async function postStorefrontCheckout(
   const { data, error } = await apiPost<StoreOrderResponse>({
     path: `/site/storefront/public/${encodeURIComponent(slug)}/checkout`,
     body: idempotencyKey ? { ...payload, idempotencyKey } : payload,
+    init: idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : undefined,
   });
   if (error) throw new Error(error);
   return data ?? null;
