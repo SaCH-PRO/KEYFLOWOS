@@ -1508,10 +1508,15 @@ describe('the SEND_EMAIL action through the real transactional-email sender (no 
     return { entries: cap.entries, gmailCalls, runs, sent };
   }
 
-  /** Call the real sender directly (Prisma and Gmail stood in), every log surface recorded. */
+  /**
+   * Call the real sender directly (Prisma and Gmail stood in), every log surface
+   * recorded. With `gmailSend`, Gmail answers through it and the sender's retry
+   * wait is skipped.
+   */
   async function runSender(
     call: (sender: InstanceType<typeof Sender>) => Promise<unknown>,
     notificationLog: Record<string, unknown> = {},
+    opts: { gmailSend?: () => Promise<{ messageId: string }> } = {},
   ): Promise<{ entries: LogEntry[]; gmailCalls: number; result: unknown }> {
     let gmailCalls = 0;
     const prisma = {
@@ -1525,16 +1530,23 @@ describe('the SEND_EMAIL action through the real transactional-email sender (no 
       getGmailStatus: async () => ({ connected: true }),
       sendEmail: async () => {
         gmailCalls++;
-        return { messageId: `${P}msg` };
+        return opts.gmailSend ? opts.gmailSend() : { messageId: `${P}msg` };
       },
     };
     const sender = new Sender(prisma as never, gmail as never);
+    const wait = opts.gmailSend
+      ? vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void) => {
+          fn();
+          return 0;
+        }) as never)
+      : null;
     const cap = startCapture();
     let result: unknown;
     try {
       result = await call(sender);
     } finally {
       cap.stop();
+      wait?.mockRestore();
     }
     return { entries: cap.entries, gmailCalls, result };
   }
@@ -1707,6 +1719,46 @@ describe('the SEND_EMAIL action through the real transactional-email sender (no 
       { channel: 'Logger#log[TransactionalEmailService]', text: 'Queue drain: sent 1/1 queued notifications' },
     ]);
     expect(entriesContaining(drained.entries, [...CONTENT, ...emailForms(EMAIL)])).toEqual([]);
+  });
+
+  it('CR-1 (W3-C2b review, SEC-C2-1): a Gmail failure whose message is not a string still ends the send FAILED and writes its FAILED notification row; every line names the contact id and no recipient email', async () => {
+    // A provider error object as the thrown message: the redaction reads it as
+    // text (as it was interpolated before SEC-C2-1), so the send keeps its
+    // error contract ({status: 'FAILED'} and the FAILED row), never a TypeError.
+    const providerMessage = { code: 503, toString: () => `gmail 503 for ${EMAIL}` };
+    const rows: Array<{ status?: unknown }> = [];
+    const failed = await runSender(
+      (sender) =>
+        sender.send({
+          businessId: BIZ,
+          type: 'invoice_sent',
+          recipientEmail: EMAIL,
+          recipientName: RECIPIENT_NAME,
+          contactId: CONTACT_ID,
+          templateData: SEND_EMAIL_ACTION.templateData,
+        }),
+      {
+        create: async (args: { data: { status?: unknown } }) => {
+          rows.push(args.data);
+          return {};
+        },
+      },
+      {
+        gmailSend: async () => {
+          throw { message: providerMessage };
+        },
+      },
+    );
+    expect(failed.result).toEqual({ status: 'FAILED' });
+    expect(failed.gmailCalls).toBe(3);
+    expect(rows.map((r) => r.status)).toEqual(['FAILED']);
+    expect(senderLines(failed.entries)).toEqual([
+      { channel: 'Logger#warn[TransactionalEmailService]', text: `Attempt 1/3 failed for invoice_sent to contact ${CONTACT_ID}: gmail 503 for <address>` },
+      { channel: 'Logger#warn[TransactionalEmailService]', text: `Attempt 2/3 failed for invoice_sent to contact ${CONTACT_ID}: gmail 503 for <address>` },
+      { channel: 'Logger#warn[TransactionalEmailService]', text: `Attempt 3/3 failed for invoice_sent to contact ${CONTACT_ID}: gmail 503 for <address>` },
+      { channel: 'Logger#error[TransactionalEmailService]', text: `All 3 attempts failed for invoice_sent to contact ${CONTACT_ID}: gmail 503 for <address>` },
+    ]);
+    expect(entriesContaining(failed.entries, [...CONTENT, ...emailForms(EMAIL)])).toEqual([]);
   });
 });
 
@@ -2113,21 +2165,38 @@ describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
     }
     // The logged contact email is personal data, not a secret: IA-044 and CF-029 carry it (CF-011 is secrets only).
     for (const id of ['IA-044', 'CF-029']) expect(notes[id], id).toContain('automation-executor.service.ts:286');
-    // FOLLOW3-C2 review (SEC-C2-1, F1): the SEND_EMAIL sender's own lines stay OPEN
-    // (section 1c pins them), and CF-029 keeps the log calls outside these windows
-    // OPEN (SEC-C2-2).
+    // SEC-C2-1 (FOLLOW3-C2 review, F1) was closed by W3-C2b-EMAIL-LOG-LEAK:
+    // section 1c pins the SEND_EMAIL sender's lines (transactional-email.service.ts
+    // :760, :764, :771) naming the contact id, never the address. The census text
+    // that recorded them OPEN is outside that packet's write set, so it was
+    // reported for correction rather than edited (review SEC-C2b-1). Until it is
+    // corrected a note may still carry the OPEN wording; once corrected it says
+    // W3-C2b-EMAIL-LOG-LEAK closed them. Each note names the sender's three lines
+    // and records exactly one of the two states, so the correction lands without
+    // a change here. CF-029 keeps the log calls outside these windows OPEN (SEC-C2-2).
+    const SENDER_OPEN = "OPEN: the SEND_EMAIL action's sender";
+    const SENDER_CLOSED = "the SEND_EMAIL action's sender's lines were closed by W3-C2b-EMAIL-LOG-LEAK";
     for (const id of ['IA-044', 'CF-029']) {
-      for (const needle of ['OPEN: the SEND_EMAIL action\'s sender', 'transactional-email.service.ts:760', ':764', ':771']) {
+      for (const needle of ['transactional-email.service.ts:760', ':764', ':771']) {
         expect(notes[id], `${id} names ${needle}`).toContain(needle);
       }
+      expect(
+        [SENDER_OPEN, SENDER_CLOSED].filter((state) => notes[id].includes(state)),
+        `${id} records the SEND_EMAIL sender's lines in exactly one state (W3-C2b-EMAIL-LOG-LEAK, SEC-C2b-1)`,
+      ).toHaveLength(1);
     }
     for (const needle of ['outside the suite\'s windows', 'cross-module-agent.service.ts:355', 'system-email.service.ts:130', 'email-marketing.service.ts:428', 'key-cortex-phone.service.ts:296']) {
       expect(notes['CF-029'], `CF-029 names ${needle}`).toContain(needle);
     }
     const findings = readFileSync(FILE, 'utf8').replace(/\r\n/g, '\n').split('## 6.')[1] ?? '';
-    for (const needle of ['http-exception.filter.ts:65', 'chatwoot.controller.ts:14', 'whatsapp.controller.ts:234-237', 'automation-executor.service.ts:286', 'transactional-email.service.ts:760', 'the SEND_EMAIL sender\'s lines are OPEN', 'Validate control artifacts', 'self-modifiable']) {
+    for (const needle of ['http-exception.filter.ts:65', 'chatwoot.controller.ts:14', 'whatsapp.controller.ts:234-237', 'automation-executor.service.ts:286', 'transactional-email.service.ts:760', 'Validate control artifacts', 'self-modifiable']) {
       expect(findings, `section 6 names ${needle}`).toContain(needle);
     }
+    // Section 6 item 3 records the sender's lines in exactly one state, as the notes do (SEC-C2b-1).
+    expect(
+      ["the SEND_EMAIL sender's lines are OPEN", "the SEND_EMAIL sender's lines were closed by W3-C2b-EMAIL-LOG-LEAK"].filter((state) => findings.includes(state)),
+      "section 6 records the SEND_EMAIL sender's lines in exactly one state (W3-C2b-EMAIL-LOG-LEAK, SEC-C2b-1)",
+    ).toHaveLength(1);
     expect(findings).not.toMatch(/A non-draft pkt\/\* PR fails closed at the grant step/);
   });
 });

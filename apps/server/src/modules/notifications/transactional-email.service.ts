@@ -153,9 +153,14 @@ const ADDRESS_PATTERN = /[^\s<>"'`(),;:[\]]+@[^\s<>"'`(),;:[\]]+/g;
  * subject (when given) and every address-shaped token are replaced, so an
  * error that quotes the message cannot put its recipient or content in the
  * logs. The rest of the text stays: it is what an operator needs.
+ *
+ * Any value is read as text first (CR-1, W3-C2b review): a thrown value's
+ * message need not be a string, and a log line must never turn a failed send
+ * into a TypeError that skips its FAILED result and notification row.
  */
-function redactForLog(text: string, subject?: string): string {
-  const withoutSubject = subject ? text.split(subject).join('<subject>') : text;
+function redactForLog(text: unknown, subject?: string): string {
+  const asText = typeof text === 'string' ? text : String(text);
+  const withoutSubject = subject ? asText.split(subject).join('<subject>') : asText;
   return withoutSubject.replace(ADDRESS_PATTERN, '<address>');
 }
 
@@ -820,7 +825,7 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
     }
 
     this.logger.error(
-      `All ${MAX_RETRIES} attempts failed for ${params.type} to ${recipientForLog(params.contactId)}: ${redactForLog(lastError?.message ?? 'unknown error', rendered.subject)}`,
+      `All ${MAX_RETRIES} attempts failed for ${params.type} to ${recipientForLog(params.contactId)}: ${redactForLog(String(lastError?.message ?? 'unknown error'), rendered.subject)}`,
     );
     await this.logNotification({
       businessId: params.businessId,
