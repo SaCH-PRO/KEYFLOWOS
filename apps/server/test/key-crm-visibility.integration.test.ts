@@ -52,6 +52,15 @@
  * AgentTriggerService, DefaultTriggersService, JourneyOrchestratorService and MorningBriefingService
  * against this suite's rows; their planner and event emitter are stand-ins.
  *
+ * W5-JOURNEY-ROUTES (FOLLOW6; owner rulings D-73, D-74, D-93; review SEC-D93-1 residuals, recorded as
+ * it.todo CV-08k and CV-08n by W4-D93-NO-MEMBER-CONTACTS): GET businesses/:businessId/journeys/:instanceId
+ * handed getJourneyInstance no viewer, so every step's input and output was withheld from every reader,
+ * the OWNER included; it now hands the authenticated member, whom the plan read rule judges (D-74).
+ * POST businesses/:businessId/journeys/:key/trigger recorded no member, so the journey's plan ran
+ * memberless and D-73/D-93 refused its contact reads; it now records the requesting member, whose
+ * authority its steps are run under (D-73). Driven through the real AiController over this suite's
+ * real JourneyOrchestratorService.
+ *
  * WHAT IS REAL: PrismaService and the Prisma client against DATABASE_URL; AuthGuard, BusinessGuard,
  * CrmRateLimitGuard and GraphActionsController (POST .../execute: assertMayRunGraphAction, the step
  * claim, the step's stored outcome through PlannerService.updateStepStatus, AiExecutionLogService);
@@ -147,6 +156,8 @@ const plannedFor: Array<{ id?: string; objective: string; rawInput?: string; use
 
 /** W5-EXEC-LOGS-VISIBILITY: the real AiController (GET ai/execution-logs), started by its case. */
 let logsApp: any;
+/** W5-JOURNEY-ROUTES: the real AiController (the journey routes) over this suite's journey orchestrator, started by its cases. */
+let journeysApp: any;
 
 async function cleanup() {
   for (const sql of [
@@ -492,6 +503,7 @@ afterAll(async () => {
   if (db) await cleanup();
   if (app) await app.close();
   if (logsApp) await logsApp.close();
+  if (journeysApp) await journeysApp.close();
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -903,10 +915,10 @@ describe('W4-D93-NO-MEMBER-CONTACTS (D-93, D-73): the Pro Auto monitor and every
 
   // Residuals of review SEC-D93-1..3 outside this packet's write set (plan-step-authority, the default
   // triggers, the system plan creators' member field, the orchestrator's choice of the memberless view):
-  it.todo("CV-08k TODO (review SEC-D93-1 residual; D-74): GET businesses/:businessId/journeys/:instanceId hands getJourneyInstance its viewer (ai.controller.ts, outside W4-D93-NO-MEMBER-CONTACTS's write set), so the plan read rule answers each viewer what it may read; until then the route withholds every step's input and output from every reader");
+  // CV-08k (GET journeys/:instanceId hands its viewer) is live in W5-JOURNEY-ROUTES below.
   // CV-08l (GET ai/execution-logs) is live in W5-EXEC-LOGS-VISIBILITY below.
   it.todo("CV-08m TODO (review SEC-D93-3 residual): POST and PUT agent/triggers (agent.controller.ts, BusinessGuard only, outside this write set) let any member switch on a seeded default rule or write it word for word, and its plans run as the owner (D-93); who may switch on or write a system rule is that route's authority");
-  it.todo("CV-08n TODO (review SEC-D93-1 residual; D-73): POST businesses/:businessId/journeys/:key/trigger records the requesting member as the journey plan's member (ai.controller.ts, outside this write set), so the journey runs as that member rather than as no member");
+  // CV-08n (POST journeys/:key/trigger records the requesting member) is live in W5-JOURNEY-ROUTES below.
 });
 
 /**
@@ -1525,5 +1537,203 @@ describe('W4-PROPOSAL-PRINCIPAL review repairs (SEC-W4PP-1, CR-W4PP-1, SEC-W4PP-
     const manual = await run(filed('cv13f_manual', { userId: ownerC, approvedBy: ownerC }, { toolName: 'crm_list_contacts', inputPayload: { limit: 50 } }, bizC), ownerC);
     expect(manual.outcome.success, manual.outcome.error).toBe(true);
     expect((manual.outcome.result.contacts as Array<{ id: string }>).map((c) => c.id)).toEqual([`${P}c_c`]);
+  });
+});
+
+/**
+ * W5-JOURNEY-ROUTES (FOLLOW6; owner rulings D-73, D-74, D-93; review SEC-D93-1 residuals CV-08k and
+ * CV-08n): the journey routes of AiController (AuthGuard and BusinessGuard).
+ * GET businesses/:businessId/journeys/:instanceId handed JourneyOrchestratorService.getJourneyInstance
+ * no viewer, which since W4-D93-NO-MEMBER-CONTACTS withholds every step's input and output from a
+ * reader it cannot judge: every reader, the OWNER included, saw no step data. It now hands the
+ * authenticated member as the viewer, and the plan read rule (graphPlanReadScope + visiblePlanSteps,
+ * D-74) answers each viewer what they may read: the OWNER every step as stored; an ADMIN every
+ * journey, a contact read's output withheld and every other output without the OWNER's PRIVATE
+ * contact; a STAFF member only their own journeys, each output kept to their own book.
+ * POST businesses/:businessId/journeys/:key/trigger recorded no member, so the journey's plan ran
+ * memberless and D-73/D-93 refused its contact reads. It now records the requesting member as the
+ * journey plan's member (D-73: a trigger records its creator and the plans it fires run as that
+ * member), so each step is run under that member's authority: on the plan queue (no principal) a
+ * STAFF member's contact read is the OWNER's only, and approved as a plan-step proposal it runs with
+ * the member as principal, over their own book (bounded reads). Driven through the real AiController
+ * over this suite's real JourneyOrchestratorService (its planner records the member it is asked to).
+ */
+describe('W5-JOURNEY-ROUTES (D-73, D-74, D-93): the journey routes pass the viewer to the plan read rule and record the requesting member as the journey plan\'s member', () => {
+  /** A request to the journey routes of the real AiController as `actor` (`route` under ai/businesses/:businessId/). */
+  async function journeyRoute(actor: string, method: 'get' | 'post', route: string, body?: unknown) {
+    if (!journeysApp) {
+      const { Test } = await import('@nestjs/testing');
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { AuthGuard } = await import('../src/core/auth/auth.guard');
+      const { BusinessGuard } = await import('../src/core/auth/business.guard');
+      const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+      const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+      const { AiController } = await import('../src/modules/ai/ai.controller');
+      const { JourneyOrchestratorService } = await import('../src/modules/ai/journey-orchestrator.service');
+      const ref = await Test.createTestingModule({
+        controllers: [AiController],
+        providers: [
+          { provide: PrismaService, useValue: prisma },
+          AuthGuard,
+          BusinessGuard,
+          ModuleScopeGuard,
+          CrmRateLimitGuard,
+          { provide: JourneyOrchestratorService, useValue: journeys },
+          { provide: EventEmitter2, useValue: { emit: () => true } },
+        ],
+      })
+        .useMocker(() => ({}))
+        .compile();
+      journeysApp = ref.createNestApplication();
+      journeysApp.getHttpAdapter().getInstance().set('trust proxy', true);
+      journeysApp.use(attachTestUser);
+      await journeysApp.init();
+    }
+    const call = request(journeysApp.getHttpServer())[method](`/ai/businesses/${ID.biz}/${route}`)
+      .set('x-test-user', actor)
+      .set('x-forwarded-for', nextIp());
+    return body === undefined ? call : call.send(body as object);
+  }
+
+  /** What a follow-up queue over every stale lead stored (the OWNER's view: each contact named). */
+  const QUEUED = {
+    created: 3,
+    contacts: [
+      { contactId: ID.cPriv, contactName: `${NAME.priv} V89K` },
+      { contactId: ID.cTeam, contactName: `${NAME.team} V89K` },
+      { contactId: ID.cMine, contactName: `${NAME.mine} V89K` },
+    ],
+  };
+  /** What an invoice list over the business stored: one overdue invoice per contact, each naming its contact. */
+  const INVOICES = {
+    invoices: [
+      { id: `${P}inv_due_priv`, contactId: ID.cPriv, contactName: `${NAME.priv} V89K`, total: 200 },
+      { id: `${P}inv_due_team`, contactId: ID.cTeam, contactName: `${NAME.team} V89K`, total: 200 },
+      { id: `${P}inv_due_mine`, contactId: ID.cMine, contactName: `${NAME.mine} V89K`, total: 200 },
+    ],
+  };
+
+  /** A completed journey of `member` whose plan stored a follow-up queue and an invoice list (as above). */
+  async function seedJourney(tag: string, member: string) {
+    const planId = `${P}w5jr_${tag}`;
+    await db.aiPlan.create({
+      data: {
+        id: planId, businessId: ID.biz, userId: member, status: 'completed', objective: `Journey: v89k ${tag}`,
+        rawInput: `Auto-triggered by contact.created: v89k ${tag}`, scope: ['contact.created'],
+        steps: {
+          create: [
+            { id: `${planId}_s1`, order: 1, toolName: 'create_followup_queue', action: 'create_followup_queue', module: 'organize', status: 'completed', inputPayload: { contactId: ID.cMine }, outputResult: QUEUED },
+            { id: `${planId}_s2`, order: 2, toolName: 'commerce_list_invoices', action: 'commerce_list_invoices', module: 'commerce', status: 'completed', inputPayload: { limit: 20 }, outputResult: INVOICES },
+          ],
+        },
+      },
+    });
+    return db.journeyInstance.create({
+      data: { id: `${planId}_ji`, businessId: ID.biz, templateKey: 'new-lead', triggerEvent: 'contact.created', planId, steps: [] },
+    });
+  }
+
+  /** GET journeys/:instanceId as `actor`: the instance with its plan's steps as served. */
+  async function readJourney(actor: string, instanceId: string) {
+    const res = await journeyRoute(actor, 'get', `journeys/${instanceId}`);
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(200);
+    expect(res.body?.id).toBe(instanceId);
+    return res.body as { id: string; plan: { userId: string | null; steps: Array<{ toolName: string; inputPayload: unknown; outputResult: unknown }> } };
+  }
+
+  it("CV-08k RED-BEFORE (W5-JOURNEY-ROUTES; D-74, D-93; review SEC-D93-1 residual): GET businesses/:businessId/journeys/:instanceId hands getJourneyInstance its authenticated member as the viewer, so the plan read rule answers each what they may read: the OWNER reads the owner-run journey's step input and output as stored; an ADMIN reads it with the contact read's output withheld and the invoice list without the OWNER's PRIVATE contact; a STAFF member is served none of the OWNER's journey's steps, and their own journey's invoice list kept to their own contact (filtered, not withheld whole)", async () => {
+    const ownerJourney = await seedJourney('cv08k_owner', ID.owner);
+    const staffJourney = await seedJourney('cv08k_staff', ID.staffOwned);
+
+    // The OWNER: every step of the journey the system ran as them, as stored.
+    const owner = await readJourney(ID.owner, ownerJourney.id);
+    expect(owner.plan.steps.map((s) => s.toolName)).toEqual(['create_followup_queue', 'commerce_list_invoices']);
+    expect(owner.plan.steps.map((s) => s.inputPayload)).toEqual([{ contactId: ID.cMine }, { limit: 20 }]);
+    expect(owner.plan.steps.map((s) => s.outputResult)).toEqual([QUEUED, INVOICES]);
+    expect(JSON.stringify(owner.plan.steps)).toContain(NAME.priv);
+
+    // An ADMIN: every journey; the follow-up queue (a contact read) is the OWNER's only; the invoice
+    // list loses the OWNER's PRIVATE contact's row (D-74), keeping the TEAM contacts'.
+    const admin = await readJourney(ID.admin, ownerJourney.id);
+    expect(admin.plan.steps.map((s) => s.toolName)).toEqual(['create_followup_queue', 'commerce_list_invoices']);
+    expect(admin.plan.steps[0]).toMatchObject({ inputPayload: { contactId: ID.cMine }, outputResult: null });
+    expect(admin.plan.steps[1].outputResult).toEqual({ invoices: [INVOICES.invoices[1], INVOICES.invoices[2]] });
+    expectNoHidden(admin, ['priv']);
+
+    // A STAFF member kept to their own book: none of the OWNER's journey's steps.
+    const staffOnOwner = await readJourney(ID.staffOwned, ownerJourney.id);
+    expect(staffOnOwner.plan.steps).toEqual([]);
+    expectNoHidden(staffOnOwner);
+
+    // Their own journey: the follow-up queue's output withheld (the OWNER's only), the invoice list
+    // kept to their own contact.
+    const staffOwn = await readJourney(ID.staffOwned, staffJourney.id);
+    expect(staffOwn.plan.steps.map((s) => s.toolName)).toEqual(['create_followup_queue', 'commerce_list_invoices']);
+    expect(staffOwn.plan.steps[0]).toMatchObject({ inputPayload: { contactId: ID.cMine }, outputResult: null });
+    expect(staffOwn.plan.steps[1]).toMatchObject({ inputPayload: { limit: 20 }, outputResult: { invoices: [INVOICES.invoices[2]] } });
+    expectNoHidden(staffOwn);
+
+    // The OWNER reads the STAFF member's journey as stored.
+    expect((await readJourney(ID.owner, staffJourney.id)).plan.steps.map((s) => s.outputResult)).toEqual([QUEUED, INVOICES]);
+  });
+
+  it("CV-08n RED-BEFORE (W5-JOURNEY-ROUTES; D-73, D-93; review SEC-D93-1 residual): POST businesses/:businessId/journeys/:key/trigger records the requesting member as the journey plan's member: a STAFF member's new-lead journey runs as that member, not memberless: on the plan queue its create_followup_queue step is judged by their authority (a contact read with no principal is the OWNER's only: refused, nothing dispatched, no task), and approved as a plan-step proposal it runs with them as principal over their own book only (a task on their own stale lead, none on the OWNER's PRIVATE or TEAM contact, neither named); the OWNER's journey runs as the OWNER", async () => {
+    // The daily auto-action cap (autopilot settings DefaultTriggersService seeded in CV-08f) counts
+    // every run of this suite; it is not what this case is about.
+    await db.autopilotSettings.updateMany({ where: { businessId: ID.biz }, data: { maxDailyAutoActions: 100_000 } });
+    const tasksBefore = (await db.contactTask.findMany({ where: { businessId: ID.biz }, select: { id: true } })).map((t: { id: string }) => t.id);
+
+    // The STAFF member starts the new-lead journey: its plan records them (D-73), approved.
+    const from = plannedFor.length;
+    const res = await journeyRoute(ID.staffOwned, 'post', 'journeys/new-lead/trigger', { payload: { status: 'LEAD', contactId: ID.cMine, contactName: 'v89k cv08n' } });
+    expect(res.status, JSON.stringify(res.body).slice(0, 400)).toBe(201);
+    const planId: string = res.body?.planId;
+    expect(planId).toBeTruthy();
+    expect(plannedFor.slice(from).map((p) => p.userId ?? null)).toEqual([ID.staffOwned]);
+    expect(await db.aiPlan.findUnique({ where: { id: planId }, select: { userId: true, status: true, journeyInstanceId: true } })).toEqual({
+      userId: ID.staffOwned, status: 'approved', journeyInstanceId: res.body.journeyInstanceId,
+    });
+    const step = await db.aiPlanStep.findFirst({ where: { planId, toolName: 'create_followup_queue' }, select: { id: true, inputPayload: true } });
+    expect(step).toBeTruthy();
+
+    // The plan queue (no principal): judged as the STAFF member's step, not as a memberless plan's.
+    const authority = await planStepRunAuthority(prisma, ID.biz, planId, 'create_followup_queue');
+    expect(authority.memberId).toBe(ID.staffOwned);
+    expect(String(authority.refusal)).toMatch(/only for the business owner/);
+    expect(String(authority.refusal)).not.toMatch(/no member/);
+    await runQueueStep(planId, 'create_followup_queue', step.inputPayload, step.id);
+    expect(dispatched.filter((d) => d.planStepId === step.id)).toEqual([]);
+    const refused = await db.aiPlanStep.findUnique({ where: { id: step.id }, select: { status: true, errorMessage: true, outputResult: true } });
+    expect(refused.status).toBe('failed');
+    expect(String(refused.errorMessage)).toMatch(/^Refused: .*only for the business owner/);
+    expect(String(refused.errorMessage)).not.toMatch(/no member/);
+    expectNoHidden(refused.outputResult);
+    expect(await db.contactTask.count({ where: { businessId: ID.biz, id: { notIn: tasksBefore } } })).toBe(0);
+
+    // Approved by the ADMIN as a plan-step proposal (PlanExecutorService.createStepProposal's shape),
+    // it runs with the STAFF member as its principal: their own stale lead only.
+    const before = proposalDispatched.length;
+    const outcome = await proposalExecutor.execute(
+      ID.biz,
+      {
+        id: `${P}w5jr_cv08n_prop`, businessId: ID.biz, userId: null, sourceType: 'AI_PLAN', sourceId: planId, planId, planStepId: step.id,
+        title: 'Plan step: create_followup_queue', actionType: 'EXECUTE_TOOL', status: 'EXECUTING', requiresApproval: true, approvedBy: ID.admin,
+        payload: { toolName: 'create_followup_queue', inputPayload: step.inputPayload, planContext: { planId, planStepId: step.id } },
+      },
+      ID.admin,
+    );
+    expect(proposalDispatched.slice(before).map((d) => [d.surface, d.principal]), JSON.stringify(outcome).slice(0, 300)).toEqual([['PROPOSAL', ID.staffOwned]]);
+    expect(outcome.success, outcome.error).toBe(true);
+    expect(sortedIds(outcome.result.contacts)).toEqual([ID.cMine]);
+    expectNoHidden(outcome);
+    expect(sortedIds(await db.contactTask.findMany({ where: { businessId: ID.biz, id: { notIn: tasksBefore } }, select: { contactId: true } }))).toEqual([ID.cMine]);
+
+    // The OWNER starts one: it records the OWNER and runs as the OWNER (no refusal).
+    const fromOwner = plannedFor.length;
+    const ownerRes = await journeyRoute(ID.owner, 'post', 'journeys/new-lead/trigger', { payload: { status: 'LEAD', contactId: ID.cMine } });
+    expect(ownerRes.status, JSON.stringify(ownerRes.body).slice(0, 400)).toBe(201);
+    expect(plannedFor.slice(fromOwner).map((p) => p.userId ?? null)).toEqual([ID.owner]);
+    expect(await planStepRunAuthority(prisma, ID.biz, ownerRes.body.planId, 'create_followup_queue')).toMatchObject({ memberId: ID.owner, refusal: null });
   });
 });
