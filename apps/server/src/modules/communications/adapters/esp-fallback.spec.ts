@@ -32,14 +32,18 @@ describe('which adapter sends an email', () => {
     expect(a?.provider).toBe('GOOGLE');
   });
 
-  it('no connected account falls back to the platform ESP', () => {
+  // D-82 (2026-11-09) reverses the two cases below. They read "falls back to
+  // the platform ESP": business email now never relays through the platform
+  // sender, so a business with no usable Gmail gets no adapter and its delivery
+  // fails visibly (delivery-queue.business-mail.spec.ts).
+  it('[D-82] RED-BEFORE: no connected account does not fall back to the platform sender: no adapter', () => {
     const a = registry().resolveEmailFor(null);
-    expect(a?.provider).toBe('RESEND');
+    expect(a).toBeNull();
   });
 
-  it('a connection with no token falls back too — an expired account is not a usable one', () => {
+  it('[D-82] RED-BEFORE: a connection with no token (expired or disconnected) does not fall back either: no adapter', () => {
     const a = registry().resolveEmailFor({ provider: 'GOOGLE', token: null });
-    expect(a?.provider).toBe('RESEND');
+    expect(a).toBeNull();
   });
 
   it('non-email platforms are untouched', () => {
@@ -200,4 +204,43 @@ describe('the fallback adapter sends', () => {
     expect(result.outcomeCertainty).toBe('OUTCOME_UNKNOWN');
     expect(result.isTransient).toBe(true);
   });
+});
+
+describe('D-82: business email never relays through the platform sender', () => {
+  it('[D-82] RED-BEFORE: the registry never hands out the platform sender for business email, whatever the connection', () => {
+    const r = registry();
+    const connections = [
+      null,
+      undefined,
+      {},
+      { provider: 'GOOGLE', token: null },
+      { provider: 'GOOGLE', token: '' },
+      { provider: 'EMAIL', token: null },
+      { provider: 'RESEND', token: 're_live_looking_token' },
+      { provider: 'SMTP', token: 'smtp-token' },
+      { provider: 'WHATSAPP', token: 'wa-token' },
+    ];
+    for (const c of connections) {
+      expect(r.resolveEmailFor(c as never)?.provider, JSON.stringify(c)).not.toBe('RESEND');
+    }
+    expect(r.resolve('RESEND')).toBeNull();
+    expect(r.listProviders()).not.toContain('RESEND');
+    for (const platform of ['EMAIL', 'GOOGLE', 'RESEND', 'FACEBOOK', 'INSTAGRAM_BUSINESS', 'WHATSAPP']) {
+      expect(r.resolveByPlatform(platform)?.provider, platform).not.toBe('RESEND');
+    }
+  });
+
+  it('[D-82] a usable Gmail connection (GOOGLE or EMAIL provider with a token) still resolves to Gmail', () => {
+    const r = registry();
+    expect(r.resolveEmailFor({ provider: 'GOOGLE', token: 'ya29.token' })?.provider).toBe('GOOGLE');
+    expect(r.resolveEmailFor({ provider: 'EMAIL', token: 'ya29.token' })?.provider).toBe('GOOGLE');
+  });
+
+  // Outside this packet's write set (apps/server/src/modules/ai/): the AI
+  // message sender falls back to SystemEmailService.sendTransactional, the
+  // platform sender, when Gmail fails (ai-message-sender.service.ts:101-123,
+  // `// Fallback to Resend (system email)`), sending business email to the
+  // contact from the platform address. D-82 forbids it; the fix belongs to a
+  // packet that owns modules/ai.
+  it.todo('[D-82] OPEN (outside write set): AiMessageSenderService email to a contact fails visibly without Gmail instead of relaying through SystemEmailService (apps/server/src/modules/ai/ai-message-sender.service.ts:101-123)');
 });
