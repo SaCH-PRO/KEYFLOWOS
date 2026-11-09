@@ -324,21 +324,29 @@ export class KeyCortexGoalsController {
     return this.triggerService.listRules(businessId);
   }
 
+  /**
+   * KEY-R3b-PLAN-AUTHORITY (D-73): the rule records the authenticated member who creates it (a
+   * creator in the body's filterJson is dropped), and the plans it fires run as that member.
+   */
   @Post('triggers')
-  async createTriggerRule(@Body() dto: CreateTriggerRuleDto) {
+  async createTriggerRule(@Body() dto: CreateTriggerRuleDto, @CurrentUser() user?: AuthenticatedUser) {
     if (!dto.businessId || !dto.eventType) {
       throw new BadRequestException('businessId and eventType are required');
     }
-    return this.triggerService.createRule(dto);
+    const actor = requestActor(user);
+    return this.triggerService.createRule(dto, actor.id);
   }
 
+  /** D-73: the member who changes a rule is the member its plans run as from then on. */
   @Patch('triggers/:id')
   async updateTriggerRule(
     @Param('id') id: string,
     @Body() dto: UpdateTriggerRuleDto,
     @GuardedBusinessId() businessId: string,
+    @CurrentUser() user?: AuthenticatedUser,
   ) {
     if (!businessId) throw new BadRequestException('businessId is required');
-    return this.triggerService.updateRule(businessId, id, dto);
+    const actor = requestActor(user);
+    return this.triggerService.updateRule(businessId, id, dto, actor.id);
   }
 }

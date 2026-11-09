@@ -42,13 +42,16 @@
 import 'reflect-metadata';
 import path from 'path';
 import { config as loadEnv } from 'dotenv';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { ForbiddenException, Logger } from '@nestjs/common';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v87b_';
+
+// Each case runs plans end to end against the real database; under a parallel run 5 s is too short.
+vi.setConfig({ testTimeout: 30_000 });
 
 const ID = {
   owner: `${P}owner`, // OWNER membership of biz and Business.ownerId
@@ -266,7 +269,7 @@ beforeAll(async () => {
   const staffDefaults = defaultScopesForRole('STAFF');
   const adminDefaults = defaultScopesForRole('ADMIN');
   for (const [id, role] of [[ID.owner, 'USER'], [ID.admin, 'USER'], [ID.staff, 'USER'], [ID.staffBook, 'USER'], [ID.staffNoBook, 'USER'], [ID.staffCrmW, 'USER'], [ID.staffOwned, 'USER'], [ID.outsider, 'USER']] as const) {
-    await db.user.create({ data: { id, email: `${id}@test.local`, role } });
+    await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role } });
   }
   await db.business.create({ data: { id: ID.biz, name: 'V87B Biz', ownerId: ID.owner } });
   await db.business.create({ data: { id: ID.bizB, name: 'V87B Biz B', ownerId: ID.outsider } });

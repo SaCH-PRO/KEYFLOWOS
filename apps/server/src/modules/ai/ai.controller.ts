@@ -1516,8 +1516,12 @@ export class AiController {
   async executeAllBriefingCards(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.morningBriefingSvc.executeAllBriefingCards(businessId, planId);
+    // KEY-R3b-PLAN-AUTHORITY (D-73): the briefing runs as the member who asks, checked per step at run time.
+    const userId = req?.user?.id;
+    if (!userId) throw new UnauthorizedException('Authenticated user required');
+    return this.morningBriefingSvc.executeAllBriefingCards(businessId, planId, userId);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

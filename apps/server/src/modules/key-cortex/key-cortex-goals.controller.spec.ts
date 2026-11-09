@@ -227,18 +227,27 @@ describe('KeyCortexGoalsController', () => {
       expect(result).toEqual([]);
     });
 
-    it('creates a trigger rule', async () => {
+    // KEY-R3b-PLAN-AUTHORITY (D-73): a rule records the authenticated member who creates or changes
+    // it (the member its plans run as), so both handlers take the principal and pass it on.
+    it('creates a trigger rule, recording the authenticated member', async () => {
       const dto = { businessId: 'biz_1', eventType: 'invoice_overdue' };
-      const result = await controller.createTriggerRule(dto as any);
-      expect(triggerService.createRule).toHaveBeenCalledWith(dto);
+      const result = await controller.createTriggerRule(dto as any, { id: 'user_1' } as any);
+      expect(triggerService.createRule).toHaveBeenCalledWith(dto, 'user_1');
       expect(result).toEqual({ id: 'rule_1' });
     });
 
-    it('updates a trigger rule', async () => {
+    it('updates a trigger rule, recording the authenticated member', async () => {
       const dto = { businessId: 'biz_1', enabled: false };
-      const result = await controller.updateTriggerRule('rule_1', dto as any, 'biz_1');
-      expect(triggerService.updateRule).toHaveBeenCalledWith('biz_1', 'rule_1', dto);
+      const result = await controller.updateTriggerRule('rule_1', dto as any, 'biz_1', { id: 'user_1' } as any);
+      expect(triggerService.updateRule).toHaveBeenCalledWith('biz_1', 'rule_1', dto, 'user_1');
       expect(result).toEqual(expect.objectContaining({ enabled: false }));
+    });
+
+    it('creating or changing a trigger rule with no authenticated user is 401 and writes nothing', async () => {
+      await expect(controller.createTriggerRule({ businessId: 'biz_1', eventType: 'x' } as any)).rejects.toBeInstanceOf(UnauthorizedException);
+      await expect(controller.updateTriggerRule('rule_1', {} as any, 'biz_1')).rejects.toBeInstanceOf(UnauthorizedException);
+      expect(triggerService.createRule).not.toHaveBeenCalled();
+      expect(triggerService.updateRule).not.toHaveBeenCalled();
     });
   });
 });

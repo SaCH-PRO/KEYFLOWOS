@@ -248,7 +248,16 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.superAdmin, email: `${P}super@test.local`, role: 'SUPER_ADMIN' } });
   await db.business.create({ data: { id: ID.biz, name: 'V10A Biz', ownerId: ID.owner } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.biz, role: 'OWNER' } });
-  await db.membership.create({ data: { id: `${P}m_staff`, userId: ID.staff, businessId: ID.biz, role: 'STAFF' } });
+  // KEY-R3b-PLAN-AUTHORITY (D-71): a plan step needs the running member's scope for its module, so
+  // the STAFF member these cases run its own crm and communications steps as holds crm and content
+  // write (role defaults otherwise: revenue stays read, which KP-02 and KP-05 need).
+  const { defaultScopesForRole } = await import('../src/core/authority/module-vocabulary');
+  await db.membership.create({
+    data: {
+      id: `${P}m_staff`, userId: ID.staff, businessId: ID.biz, role: 'STAFF',
+      permissionScopes: { ...defaultScopesForRole('STAFF'), crm: 'write', content: 'write' },
+    },
+  });
   // Full autonomy, except the one action every case that pauses uses.
   await db.businessSetting.create({
     data: {

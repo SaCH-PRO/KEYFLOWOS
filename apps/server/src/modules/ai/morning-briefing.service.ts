@@ -1,4 +1,4 @@
-import { Injectable, Logger, Inject, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, Inject, OnModuleInit, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { CronSchedulerService } from './cron-scheduler.service';
@@ -177,7 +177,32 @@ export class MorningBriefingService implements OnModuleInit {
     return { success: true };
   }
 
-  async executeAllBriefingCards(businessId: string, planId: string): Promise<{ executed: number; failed: number }> {
+  /**
+   * KEY-R3b-PLAN-AUTHORITY (D-73, NOPRINCIPAL-SURFACES): POST briefing/:planId/execute-all approved
+   * the briefing's steps for no member (the daily briefing is written with no userId), so the plan
+   * queue ran them with no principal: a contact read read every contact. The plan must be of the
+   * business the route checked (it was read by id alone), and the member who runs it is recorded as
+   * the plan's member when it has none, so the plan queue checks every step against that member when
+   * it runs it (QueueService.processPlanStep). A plan another member already runs is that member's:
+   * only it, the business OWNER or an ADMIN executes it.
+   */
+  async executeAllBriefingCards(businessId: string, planId: string, userId?: string): Promise<{ executed: number; failed: number }> {
+    if (!userId) throw new ForbiddenException('A member runs the briefing');
+    const plan = await this.prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: { userId: true } });
+    if (!plan) throw new NotFoundException('Briefing not found');
+    if (!plan.userId) {
+      await this.prisma.client.aiPlan.updateMany({ where: { id: planId, businessId, userId: null }, data: { userId } });
+    }
+    const runsAs = (await this.prisma.client.aiPlan.findFirst({ where: { id: planId, businessId }, select: { userId: true } }))?.userId;
+    if (runsAs !== userId) {
+      const membership = await this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true },
+      });
+      if (membership?.role !== 'OWNER' && membership?.role !== 'ADMIN') {
+        throw new ForbiddenException('This briefing is run by another member; only that member, the business owner or an admin runs it');
+      }
+    }
     const steps = await this.prisma.client.aiPlanStep.findMany({
       where: { planId, status: 'pending' },
     });

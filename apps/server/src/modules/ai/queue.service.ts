@@ -230,6 +230,30 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    // KEY-R3b-PLAN-AUTHORITY (D-71, D-73; NOPRINCIPAL-SURFACES): the step runs as the plan's member,
+    // checked now, at run time, against the plan as stored (never the job's data): that member's
+    // module scopes and the no-principal rules (the dispatcher below is handed no principal), and for
+    // a plan with no member (a journey, an agent trigger, the daily briefing) no contact read and no
+    // money write. A refused step is recorded failed with the reason and nothing is dispatched; the
+    // job completes (asking again gets the same answer).
+    const { planStepRunRefusal } = await import('./plan-step-authority');
+    const refusal = await planStepRunRefusal(this.prisma, data.businessId, data.planId, data.toolName);
+    if (refusal) {
+      this.logger.warn(`Plan step ${data.stepId} (${data.toolName}) refused: ${refusal}`);
+      await this.prisma.client.aiPlanStep.update({
+        where: { id: data.stepId },
+        data: { status: 'failed', errorMessage: `Refused: ${refusal}`, completedAt: new Date() },
+      });
+      this.events.emit('action.failed', {
+        businessId: data.businessId,
+        toolName: data.toolName,
+        planId: data.planId,
+        planStepId: data.stepId,
+        error: `Refused: ${refusal}`,
+      });
+      return { refused: refusal };
+    }
+
     // Governance check
     const decision = await this.governance.evaluateAutoApproval(data.businessId, data.toolName, { confidence: 0.8, planStepId: data.planContext?.planStepId });
     if (!decision.autoApproved) {

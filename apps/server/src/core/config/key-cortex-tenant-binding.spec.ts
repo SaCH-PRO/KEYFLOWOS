@@ -315,7 +315,8 @@ describe('KEY cortex controllers bind the tenant BusinessGuard checked (R0-34b, 
       // The trailing Object is the @CurrentUser() principal (R0-09e-KEY-PLAN-ACTOR).
       createPlanFromGoal: ['String', 'CreatePlanFromGoalDto', 'String', 'Object'],
       createPlanFromCommand: ['CreatePlanFromCommandDto', 'String', 'Object'],
-      updateTriggerRule: ['String', 'UpdateTriggerRuleDto', 'String'],
+      // KEY-R3b-PLAN-AUTHORITY (D-73): the member who changes a rule is recorded, so it takes the principal too.
+      updateTriggerRule: ['String', 'UpdateTriggerRuleDto', 'String', 'Object'],
     });
   });
 

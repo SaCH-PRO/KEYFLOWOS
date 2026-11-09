@@ -22,7 +22,9 @@ function worker(dispatchResult: Record<string, unknown>) {
           update: vi.fn(async ({ data }: any) => void stepUpdates.push(data)),
           count: vi.fn().mockResolvedValue(1),
         },
-        aiPlan: { update: vi.fn() },
+        // KEY-R3b-PLAN-AUTHORITY: the worker reads the step's plan to check it at run time (D-71,
+        // D-73). A plan no member created, whose helpdesk step neither reads contacts nor writes money.
+        aiPlan: { update: vi.fn(), findFirst: vi.fn().mockResolvedValue({ userId: null }) },
       },
     },
     events: { emit: (name: string) => void emitted.push(name) },
