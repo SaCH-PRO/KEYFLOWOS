@@ -41,6 +41,8 @@
  *         contact of the business stays withheld from every member
  *         visibilityClause restricts (nothing to judge it by).
  *   ST-2, ST-3 are follow-ups outside the write set (it.todo, TS-13, TS-14).
+ *   TS-14 (ST-3) is live since W5-BRIEFING-SCOPE (D-63): the morning briefing
+ *   (AiController.morningBriefing) reads through the same rule.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * CrmRateLimitGuard, TimelineController, TimelineService, FlowController's
@@ -147,6 +149,8 @@ let app: any;
 async function cleanup() {
   for (const sql of [
     `DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    // W5-BRIEFING-SCOPE (TS-14): its invoices (Invoice.contact is NoAction).
+    `DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_shares WHERE contact_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM memberships WHERE id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
@@ -603,13 +607,174 @@ describe('V1-84 review CR-1: rows of a soft-deleted contact (TS-12)', () => {
   });
 });
 
-describe('V1-84 review follow-ups outside the write set (TS-13, TS-14)', () => {
+describe('V1-84 review follow-up outside the write set (TS-13)', () => {
   it.todo(
     "TS-13 (review ST-2): a row that names a contact only in its title / detail (KEY send_invoice 'Invoice <n> sent to <contactName>', module commerce, flow-orchestrator.service.ts; message_intake.approved, detail = plan summary, message-intake-orchestrator.service.ts) is served to a revenue / communications reader who may not open that contact. Closing it needs those writers to set contactId, outside V1-84's write set; timeline-visibility.spec.ts TV-07 lists them (TEXT_ONLY_CONTACT_WRITERS) and fails on any new one",
   );
-  it.todo(
-    "TS-14 (review ST-3): GET /ai/businesses/:businessId/briefing/morning (ai.controller.ts, AuthGuard + BusinessGuard, no module scope) serves the last 24h of SCHEDULED Activity rows, revenueImpact included, and revenueToday, unfiltered, so a STAFF member with revenue 'none' reads the rows /upcoming withholds. Outside V1-84's write set: follow-up packet to read them through filterVisibleActivity",
-  );
+});
+
+/**
+ * W5-BRIEFING-SCOPE (review ST-3 / SEC-W4TS-1, = evidence-feed EF-17; owner
+ * ruling D-63, the rule V1-84 built in timeline-visibility.ts): GET
+ * /ai/businesses/:businessId/briefing/morning (AiController.morningBriefing,
+ * AuthGuard + BusinessGuard, no module scope) served the last 24h of SCHEDULED
+ * Activity rows, revenueImpact included, revenueToday, openInvoices and
+ * activeLeads to every member, unfiltered. The real AiController is mounted on
+ * its own app over this suite's PrismaService and identity header; its other
+ * collaborators are empty stand-ins the route never calls. The case writes its
+ * own rows (SCHEDULED within the last day), invoices and lead scores, and
+ * removes them when it ends, so the cases above and below read what they did.
+ */
+describe('W5-BRIEFING-SCOPE (D-63): the morning briefing follows the timeline rule (TS-14)', () => {
+  let briefingApp: any;
+  afterAll(async () => {
+    if (briefingApp) await briefingApp.close();
+  });
+
+  async function briefing(user: string, biz = ID.bizA): Promise<request.Response> {
+    if (!briefingApp) {
+      const { Test } = await import('@nestjs/testing');
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { AuthGuard } = await import('../src/core/auth/auth.guard');
+      const { BusinessGuard } = await import('../src/core/auth/business.guard');
+      const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+      const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+      const { AiController } = await import('../src/modules/ai/ai.controller');
+      const ref = await Test.createTestingModule({
+        controllers: [AiController],
+        providers: [
+          { provide: PrismaService, useValue: app.get(PrismaService) },
+          AuthGuard,
+          BusinessGuard,
+          ModuleScopeGuard,
+          CrmRateLimitGuard,
+          { provide: EventEmitter2, useValue: { emit: () => true } },
+        ],
+      })
+        .useMocker(() => ({}))
+        .compile();
+      briefingApp = ref.createNestApplication();
+      // Identity attachment only, as the suite's app does. No guard is overridden.
+      briefingApp.use(async (req: any, _res: any, next: any) => {
+        const header = req.headers[HEADER];
+        const id = typeof header === 'string' ? header : undefined;
+        if (id && id.startsWith(P)) {
+          const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+          if (user) req.user = { id: user.id, email: user.email, role: user.role };
+        }
+        next();
+      });
+      briefingApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+      await briefingApp.init();
+    }
+    return request(briefingApp.getHttpServer()).get(`/ai/businesses/${biz}/briefing/morning`).set(HEADER, user);
+  }
+
+  it("TS-14 (review ST-3, SEC-W4TS-1, D-63, W5-BRIEFING-SCOPE, was it.todo): GET /ai/businesses/:businessId/briefing/morning serves each member only the SCHEDULED rows of the last day that the timeline rule serves them (module scope, revenue read for a money row, crm read and an openable contact for a row naming one, OWNER / ADMIN for an unmapped module), reports revenueToday and openInvoices 0 to a member without revenue read, and counts in activeLeads only the leads the member may list; the OWNER's briefing keeps every row and figure", async () => {
+    const brief = (key: string) => `${P}brf_${key}`;
+    const now = Date.now();
+    const ROWS: Array<Seed & { entityType?: string; entityId?: string }> = [
+      { key: 'pay', module: 'commerce', category: 'PAYMENT', revenueImpact: 90, title: 'Invoice v84a-INV-9 due: TTD 90' },
+      { key: 'finance', module: 'FINANCE', title: 'v84a-INV-8 posting due' },
+      { key: 'booking', module: 'bookings', category: 'BOOKING' },
+      { key: 'crmPriv', module: 'crm', contactId: ID.cPriv, title: 'v84a private contact follow-up' },
+      { key: 'crmTeam', module: 'crm', contactId: ID.cTeam },
+      { key: 'crmStaff', module: 'crm', contactId: ID.cStaff },
+      // ST-1: a row naming its contact by entityType 'contact' + entityId only.
+      { key: 'keyPriv', module: 'ai', entityType: 'contact', entityId: ID.cPriv, title: 'Message to v84a Secret Client scheduled' },
+      { key: 'ai', module: 'ai', category: 'AI' },
+      { key: 'unmapped', module: `${P}unmapped` },
+    ];
+    const LEADS = [ID.cPriv, ID.cTeam, ID.cStaff, ID.cDelTeam];
+    try {
+      await db.activity.createMany({
+        data: ROWS.map((s, i) => ({
+          id: brief(s.key),
+          businessId: ID.bizA,
+          module: s.module,
+          action: `${P}brf_${s.key}`,
+          entityType: s.entityType ?? 'v84a_entity',
+          entityId: s.entityId ?? null,
+          title: s.title ?? `v84a briefing ${s.key} row`,
+          category: s.category ?? null,
+          contactId: s.contactId ?? null,
+          revenueImpact: s.revenueImpact ?? null,
+          status: 'SCHEDULED',
+          startsAt: new Date(now + 7_200_000 + i * 60_000),
+          occurredAt: new Date(now - (i + 1) * 60_000),
+          createdAt: new Date(now - (i + 1) * 60_000),
+        })),
+      });
+      // A ledger day: one invoice paid within the last day (120), one open (30), one paid last week (500).
+      await db.invoice.createMany({
+        data: [
+          { id: `${P}inv_paid`, invoiceNumber: 'v84a-INV-8', status: 'PAID', subtotal: 120, total: 120, currency: 'TTD', paidAt: new Date(now - 3_600_000), businessId: ID.bizA, contactId: ID.cTeam },
+          { id: `${P}inv_open`, invoiceNumber: 'v84a-INV-9', status: 'SENT', subtotal: 30, total: 30, currency: 'TTD', businessId: ID.bizA, contactId: ID.cTeam },
+          { id: `${P}inv_old`, invoiceNumber: 'v84a-INV-7', status: 'PAID', subtotal: 500, total: 500, currency: 'TTD', paidAt: new Date(now - 7 * 86_400_000), businessId: ID.bizA, contactId: ID.cTeam },
+        ],
+      });
+      // Leads (leadScore >= 60): the owner's PRIVATE contact, the TEAM one, staffOwned's, and a soft-deleted TEAM one.
+      await db.$executeRawUnsafe(`UPDATE contacts SET lead_score = 75 WHERE id IN (${LEADS.map((id) => `'${id}'`).join(', ')})`);
+
+      const read = async (user: string) => {
+        const res = await briefing(user);
+        expect(res.status, `${user}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+        expect(Array.isArray(res.body.schedule)).toBe(true);
+        return {
+          rows: (res.body.schedule as Array<{ id: string }>).map((row) => row.id).sort(),
+          figures: { revenueToday: res.body.revenueToday, openInvoices: res.body.openInvoices, activeLeads: res.body.activeLeads },
+          text: JSON.stringify(res.body.schedule),
+        };
+      };
+      const only = (...keys: string[]) => keys.map(brief).sort();
+      const all = ROWS.map((s) => s.key);
+
+      // OWNER control: every row (oldest first, as before) and every figure.
+      const ownerRes = await briefing(ID.owner);
+      expect(ownerRes.status).toBe(200);
+      expect(ownerRes.body.schedule.map((row: { id: string }) => row.id)).toEqual([...all].reverse().map(brief));
+      const owner = await read(ID.owner);
+      expect(owner.figures).toEqual({ revenueToday: 120, openInvoices: 1, activeLeads: 3 });
+
+      const expected: Array<[string, string, string[], { revenueToday: number; openInvoices: number; activeLeads: number }]> = [
+        // view-all ADMIN: every row but those naming a PRIVATE contact it may not open (M7, ST-1).
+        ['admin', ID.admin, ['pay', 'finance', 'booking', 'crmTeam', 'ai', 'unmapped'], { revenueToday: 120, openInvoices: 1, activeLeads: 1 }],
+        // revenue 'none': no money row, no revenue figure.
+        ['staffRevNone', ID.staffRevNone, ['booking', 'crmTeam'], { revenueToday: 0, openInvoices: 0, activeLeads: 1 }],
+        // crm 'none': no row naming a contact, no lead; revenue read keeps the figures.
+        ['staffCrmNone', ID.staffCrmNone, ['pay', 'finance'], { revenueToday: 120, openInvoices: 1, activeLeads: 0 }],
+        // crm_view 'owned': only its own contact's row and lead.
+        ['staffOwned', ID.staffOwned, ['pay', 'finance', 'crmStaff'], { revenueToday: 120, openInvoices: 1, activeLeads: 1 }],
+        // STAFF role defaults (ai, settings, team none): no ai or unmapped row.
+        ['staffDefault', ID.staffDefault, ['pay', 'finance', 'booking', 'crmTeam'], { revenueToday: 120, openInvoices: 1, activeLeads: 1 }],
+        // crm and ai read, revenue absent (none): the ai row and the TEAM row, not the KEY row naming the PRIVATE contact.
+        ['staffAiCrm', ID.staffAiCrm, ['crmTeam', 'ai'], { revenueToday: 0, openInvoices: 0, activeLeads: 1 }],
+        // ai read, crm 'none': the ai row only.
+        ['staffAiOnly', ID.staffAiOnly, ['ai'], { revenueToday: 0, openInvoices: 0, activeLeads: 0 }],
+      ];
+      for (const [name, user, keys, figures] of expected) {
+        const got = await read(user);
+        expect(got.rows, `${name}: rows`).toEqual(only(...keys));
+        expect(got.figures, `${name}: figures`).toEqual(figures);
+        if (!keys.includes('pay')) expect(got.text, `${name}: the payment row's text`).not.toContain('TTD 90');
+        if (!keys.includes('crmPriv')) {
+          expect(got.text, `${name}: the PRIVATE contact`).not.toContain(ID.cPriv);
+          expect(got.text).not.toContain('Secret Client');
+        }
+      }
+
+      // Tenant control: B's member is refused A's briefing.
+      const refused = await briefing(ID.ownerB);
+      expect(refused.status).toBe(403);
+      expect(JSON.stringify(refused.body)).not.toContain(`${P}brf_`);
+    } finally {
+      await db.$executeRawUnsafe(`UPDATE contacts SET lead_score = NULL WHERE id IN (${LEADS.map((id) => `'${id}'`).join(', ')})`);
+      await db.$executeRawUnsafe(`DELETE FROM invoices WHERE id LIKE ${sqlLikePrefix(`${P}inv_`)}`);
+      await db.$executeRawUnsafe(`DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(`${P}brf_`)}`);
+    }
+  });
 });
 
 describe('V1-84: tenant control (TS-09) and cleanup (TS-10)', () => {

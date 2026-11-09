@@ -67,10 +67,11 @@ export class JourneyOrchestratorService implements OnModuleInit {
     payload: Record<string, any>,
     /**
      * W4-D93-NO-MEMBER-CONTACTS (D-93; review SEC-D93-1): the member the journey's plan records and
-     * runs as. handleEvent names the business owner for an event the system emitted. A caller that
-     * names none (POST journeys/:key/trigger, whose client body.payload becomes the steps' arguments)
-     * starts a journey a member's payload shapes, which is no system-created plan: it records no
-     * member, so the plan queue refuses its contact reads and money writes (D-73).
+     * runs as. handleEvent names the business owner for an event the system emitted.
+     * W5-JOURNEY-ROUTES (CV-08n; D-73): POST journeys/:key/trigger, whose client body.payload becomes
+     * the steps' arguments, names the requesting member, so the journey runs as that member. A caller
+     * that names none starts a journey that is no system-created plan: it records no member, so the
+     * plan queue refuses its contact reads and money writes (D-73).
      */
     options: { memberId?: string | null } = {},
   ): Promise<JourneyExecutionResult | null> {
@@ -234,8 +235,9 @@ export class JourneyOrchestratorService implements OnModuleInit {
    * business owner, so its steps' stored inputs and outputs are the owner's view (another member's
    * PRIVATE contacts named). The journey's plan is answered as every plan read route answers one
    * (graphPlanReadScope + visiblePlanSteps; GET ai/plans/:planId): to a `viewer` who does not see every
-   * plan, only their own plan's steps; each step shown as that viewer may read it. With no viewer to
-   * judge (GET journeys/:instanceId hands none), every step is answered without its input or output.
+   * plan, only their own plan's steps; each step shown as that viewer may read it (GET
+   * journeys/:instanceId hands the authenticated member since W5-JOURNEY-ROUTES, CV-08k). With no
+   * viewer to judge, every step is answered without its input or output.
    */
   async getJourneyInstance(
     instanceId: string,

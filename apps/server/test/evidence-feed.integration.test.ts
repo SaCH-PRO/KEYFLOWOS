@@ -90,11 +90,12 @@
  *   FlowController (its activity route and the real ActivityService) is
  *   mounted for the legacy route; its other collaborators are stubs that route
  *   never calls.
- *   EF-17 (it.todo, review SEC-W4TS-1, = timeline-scope TS-14): the scope is
- *   these four timeline reads, not every Activity reader. GET
- *   /ai/businesses/:id/briefing/morning (ai.controller.ts, outside this
- *   packet's write set) still serves the SCHEDULED rows, the `due` row's
- *   amount and contact included, and revenueToday, unfiltered.
+ *   EF-17 (was it.todo, review SEC-W4TS-1, = timeline-scope TS-14): the scope
+ *   was these four timeline reads, not every Activity reader. GET
+ *   /ai/businesses/:id/briefing/morning (ai.controller.ts, outside that
+ *   packet's write set) served the SCHEDULED rows, the `due` row's amount and
+ *   contact included, and revenueToday, unfiltered. Live since
+ *   W5-BRIEFING-SCOPE (D-63), below: the real AiController on its own app.
  *
  * V1-55-EVT-ACTIVITY-DEDUPE (M50; owner ruling D-08: Activity is the
  * user-visible feed, BusinessEvent the audit trail), on a third tenant C: each
@@ -1176,8 +1177,8 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
   // TimelineService writers, so they carry what those writers store).
   // Meanwhile the cockpit still does not read the feed for a member whom the
   // V1-47 snapshot reports without revenue or CRM read (BusinessActivityFeed,
-  // BT-06); these four timeline reads no longer rely on that. Other Activity
-  // readers do: the morning briefing (EF-17, it.todo; SEC-W4TS-1, TS-14).
+  // BT-06); these four timeline reads no longer rely on that. The morning
+  // briefing did too (SEC-W4TS-1, TS-14) until W5-BRIEFING-SCOPE (EF-17).
   const SC = {
     staffRevNone: `${P}${RUN}_staffRevNone`, // STAFF, revenue 'none', crm read (view-all)
     staffCrmNone: `${P}${RUN}_staffCrmNone`, // STAFF, crm 'none' with crm_view 'all' (CR-W4TS-1), revenue read
@@ -1419,15 +1420,152 @@ describe('V1-25-EVT-BUSINESS-FEED: the business feed the cockpit reads (real DB)
     expect(await idsOf(upcomingFeed(SC.staffCrmNone)), 'the due row names contact A').toEqual([rows.booking]);
   });
 
-  // Review SEC-W4TS-1 (confirmed on this fixture: AiController.morningBriefing,
-  // guards AuthGuard + BusinessGuard + the class CrmRateLimitGuard, answered
-  // the `due` row with category PAYMENT, revenueImpact 250, the invoice number
-  // and contact A, and revenueToday 250). The fix is in ai.controller.ts,
-  // outside W4-TIMELINE-SCOPE's write set; the same follow-up as
-  // timeline-scope.integration.test.ts TS-14.
-  it.todo(
-    "EF-17 (SEC-W4TS-1, D-63, follow-up = TS-14, outside W4-TIMELINE-SCOPE's write set): GET /ai/businesses/:businessId/briefing/morning (ai.controller.ts) reads its SCHEDULED Activity rows through filterVisibleActivity and withholds revenueToday from a member without revenue read, so staffRevNone and staffCrmNone get no `due` row (amount, revenueImpact, invoice number, contactId) there, as /upcoming answers them only [booking]; EF-14..EF-16 cover the four timeline reads only",
-  );
+  // W5-BRIEFING-SCOPE (review SEC-W4TS-1, = timeline-scope TS-14; owner ruling
+  // D-63, the rule V1-84 built in timeline-visibility.ts). Before it,
+  // AiController.morningBriefing (guards AuthGuard + BusinessGuard + the class
+  // CrmRateLimitGuard) answered every member the `due` row with category
+  // PAYMENT, revenueImpact 250, the invoice number and contact A, and
+  // revenueToday 250 (confirmed on this fixture). The real AiController is
+  // mounted on its own app over this suite's PrismaService and identity header;
+  // its other collaborators are empty stand-ins the route never calls.
+  let briefingApp: any;
+  afterAll(async () => {
+    if (briefingApp) await briefingApp.close();
+  });
+
+  /** GET /ai/businesses/:biz/briefing/morning as `user`, through the real AiController. */
+  async function morningBriefing(user: string, biz = ID.bizA): Promise<request.Response> {
+    if (!briefingApp) {
+      const { Test } = await import('@nestjs/testing');
+      const { EventEmitter2 } = await import('@nestjs/event-emitter');
+      const { GlobalHttpExceptionFilter } = await import('../src/core/filters/http-exception.filter');
+      const { PrismaService } = await import('../src/core/prisma/prisma.service');
+      const { AuthGuard } = await import('../src/core/auth/auth.guard');
+      const { BusinessGuard } = await import('../src/core/auth/business.guard');
+      const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+      const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+      const { AiController } = await import('../src/modules/ai/ai.controller');
+      const ref = await Test.createTestingModule({
+        controllers: [AiController],
+        providers: [
+          { provide: PrismaService, useValue: app.get(PrismaService) },
+          AuthGuard,
+          BusinessGuard,
+          ModuleScopeGuard,
+          CrmRateLimitGuard,
+          { provide: EventEmitter2, useValue: { emit: () => true } },
+        ],
+      })
+        .useMocker(() => ({}))
+        .compile();
+      briefingApp = ref.createNestApplication();
+      // Identity attachment only, as the suite's app does. No guard is overridden.
+      briefingApp.use(async (req: any, _res: any, next: any) => {
+        const header = req.headers[HEADER];
+        const id = typeof header === 'string' ? header : undefined;
+        if (id && id.startsWith(P)) {
+          const user = await db.user.findUnique({ where: { id }, select: { id: true, email: true, role: true } });
+          if (user) req.user = { id: user.id, email: user.email, role: user.role };
+        }
+        next();
+      });
+      briefingApp.useGlobalFilters(new GlobalHttpExceptionFilter());
+      await briefingApp.init();
+    }
+    return request(briefingApp.getHttpServer()).get(`/ai/businesses/${biz}/briefing/morning`).set(HEADER, user);
+  }
+
+  it("EF-17 (SEC-W4TS-1, D-63 / V1-84, W5-BRIEFING-SCOPE, was it.todo; = timeline-scope TS-14): GET /ai/businesses/:businessId/briefing/morning serves a member only the SCHEDULED rows the timeline rule lets them read (module scopes and contact visibility), as /upcoming does, withholds revenueToday and openInvoices from a member without revenue read and counts in activeLeads only the leads a member may list: staffRevNone and staffCrmNone get no `due` row (amount, revenueImpact, invoice number, contactId); the OWNER's briefing keeps every row and figure", async () => {
+    const rows = await scopeFixture();
+    // W5-BRIEFING-SCOPE fixture on A: two SCHEDULED rows naming the PRIVATE
+    // contacts (through the real TimelineService), one open invoice, and three
+    // leads (leadScore 80): a TEAM one, the owner's PRIVATE one, staffOwned's.
+    const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+    const timeline = app.get(TimelineService);
+    const later = new Date(Date.now() + 2 * 86_400_000);
+    const scheduled = async (key: string, contactId: string) => {
+      const row = await timeline.recordEvent({
+        businessId: ID.bizA, module: 'bookings', action: 'scheduled', entityType: 'booking', entityId: `${P}${RUN}_${key}`,
+        title: `K19a ${key} booking`, category: 'BOOKING', status: 'SCHEDULED', startsAt: later, contactId,
+      });
+      expect(row?.id, 'TimelineService wrote the row').toBeTruthy();
+      return row.id as string;
+    };
+    const schedPriv = await scheduled('bkPriv', SC.cPriv);
+    const schedOwn = await scheduled('bkOwn', SC.cOwn);
+    await db.invoice.create({
+      data: { id: `${P}${RUN}_invOpen`, invoiceNumber: `K19A-${RUN}-3`, status: 'SENT', subtotal: 40, total: 40, currency: 'TTD', businessId: ID.bizA, contactId: ID.contactA },
+    });
+    for (const [key, visibility, ownerId] of [['leadTeam', 'TEAM', null], ['leadPriv', 'PRIVATE', ID.ownerA], ['leadOwn', 'PRIVATE', SC.staffOwned]] as const) {
+      await db.contact.create({ data: { id: `${P}${RUN}_${key}`, businessId: ID.bizA, firstName: 'K19a', lastName: key, visibility, ownerId, leadScore: 80 } });
+    }
+
+    type Briefing = { schedule: any[]; revenueToday: number; openInvoices: number; activeLeads: number };
+    const read = async (user: string): Promise<Briefing> => {
+      const res = await morningBriefing(user);
+      expect(res.status, `${user}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+      expect(Array.isArray(res.body.schedule)).toBe(true);
+      return res.body;
+    };
+    const scheduleIds = (b: Briefing) => b.schedule.map((row) => row.id).sort();
+
+    // OWNER control: every SCHEDULED row of the last day and every figure.
+    const since = new Date(Date.now() - 86_400_000);
+    const allScheduled = (await db.activity.findMany({ where: { businessId: ID.bizA, status: 'SCHEDULED', occurredAt: { gte: since } }, select: { id: true } })).map((r: any) => r.id).sort();
+    expect(allScheduled).toEqual([rows.booking, rows.due, schedPriv, schedOwn].sort());
+    const owner = await read(ID.ownerA);
+    expect(scheduleIds(owner)).toEqual(allScheduled);
+    expect(owner.revenueToday, 'invoice A, settled by EF-02').toBe(INVOICE_A_TOTAL);
+    expect(owner.openInvoices, 'the open invoice').toBe(1);
+    expect(owner.activeLeads, 'the three leads').toBe(3);
+
+    // revenue 'none' (crm read, crm_view 'all'): no `due` row and no revenue figure.
+    const revNone = await read(SC.staffRevNone);
+    expect(scheduleIds(revNone)).toEqual([rows.booking]);
+    for (const row of revNone.schedule) {
+      expect(row.revenueImpact ?? null, `revenueImpact of ${row.id}`).toBeNull();
+      expect(['COMMERCE', 'PAYMENT', 'FINANCE']).not.toContain(String(row.category).toUpperCase());
+    }
+    const text = JSON.stringify(revNone.schedule);
+    for (const leak of [rows.due, ID.invA, `K19A-${RUN}-1`, ID.contactA, SC.cPriv, SC.cOwn]) {
+      expect(text.includes(leak), `the briefing mentions ${leak}`).toBe(false);
+    }
+    expect(revNone.revenueToday, 'revenueToday withheld').toBe(0);
+    expect(revNone.openInvoices, 'openInvoices withheld').toBe(0);
+    expect(revNone.activeLeads, 'the TEAM lead only').toBe(1);
+
+    // crm 'none' (crm_view 'all', revenue read): no row naming a contact (so no
+    // `due` row) and no lead; the revenue figures stay.
+    const crmNone = await read(SC.staffCrmNone);
+    expect(scheduleIds(crmNone)).toEqual([rows.booking]);
+    expect(crmNone.schedule.flatMap(contactsNamed)).toEqual([]);
+    expect(crmNone.revenueToday).toBe(INVOICE_A_TOTAL);
+    expect(crmNone.openInvoices).toBe(1);
+    expect(crmNone.activeLeads, 'crm none lists no contact').toBe(0);
+
+    // crm_view 'owned': only the row naming its own contact, and its own lead.
+    const owned = await read(SC.staffOwned);
+    expect(scheduleIds(owned)).toEqual([rows.booking, schedOwn].sort());
+    expect(owned.revenueToday).toBe(INVOICE_A_TOTAL);
+    expect(owned.activeLeads, 'its own lead only').toBe(1);
+
+    // ADMIN (view-all): every row but those naming a PRIVATE contact it may not open (M7).
+    const admin = await read(ID.adminA);
+    expect(scheduleIds(admin)).toEqual([rows.booking, rows.due].sort());
+    expect(admin.revenueToday).toBe(INVOICE_A_TOTAL);
+    expect(admin.openInvoices).toBe(1);
+    expect(admin.activeLeads, 'the TEAM lead only').toBe(1);
+
+    // The same rows /upcoming serves each member (every row here starts in the future).
+    for (const [user, briefing] of [[ID.ownerA, owner], [SC.staffRevNone, revNone], [SC.staffCrmNone, crmNone], [SC.staffOwned, owned], [ID.adminA, admin]] as const) {
+      expect(scheduleIds(briefing), `${user}: the briefing's rows are /upcoming's`).toEqual(await idsOf(upcomingFeed(user)));
+    }
+
+    // Tenant control: owner B on A's briefing is refused.
+    const refused = await morningBriefing(ID.ownerB);
+    expect(refused.status).toBe(403);
+    expect(JSON.stringify(refused.body)).not.toContain(rows.due);
+  });
 });
 
 describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through the feed writers the full app registers (real DB, tenant C)', () => {
