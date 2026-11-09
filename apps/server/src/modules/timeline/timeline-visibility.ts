@@ -1,5 +1,6 @@
 import { ForbiddenException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
+import { getContactEventCategory } from '@keyflow/shared';
 import type { PrismaService } from '../../core/prisma/prisma.service';
 import {
   CANONICAL_MODULES,
@@ -30,9 +31,11 @@ import { resolveCrmAccess, visibilityClause, type CrmAccess } from '../crm/crm-p
  *     set empty for every module written at head;
  *   - a row whose category is a revenue category (COMMERCE, PAYMENT, FINANCE)
  *     or that carries a revenueImpact also needs revenue read: it carries an
- *     amount; so does a row whose data carries an amount (MONEY_DATA_FIELDS),
- *     whatever its category (W5-FEED-CATEGORIES, SEC-FCC-1: copies stored as
- *     CONTACT before V55-13 / D-90, read without a backfill);
+ *     amount; so does a crm-scope row whose data carries an amount
+ *     (MONEY_DATA_FIELDS) or whose action is a sales_revenue type, whatever
+ *     its category (W5-FEED-CATEGORIES, SEC-FCC-1 / CR-W5FC-2: copies stored
+ *     as CONTACT before V55-13 / D-90, read without a backfill; rows of other
+ *     modules keep D-63's binding, SEC-W5FC-2 / CR-W5FC-1);
  *   - a row that names a contact also needs crm read, and the contact must be
  *     one the member may open (visibilityClause, M7, the rule GET contacts/:id
  *     applies). A row names the contact in its contactId, and the one in its
@@ -131,9 +134,8 @@ export const MONEY_DATA_FIELDS: readonly string[] = Object.freeze([
  * with (CONTACT, or none before categories existed) whatever they carry, e.g.
  * crm:invoice.payment_recorded:contact copies with the payment's amount; the
  * rule reads their data instead of a backfill (no data migration). Data stored
- * as a JSON string is read as the object it encodes. It holds for every
- * module, as the category and revenueImpact terms do: e.g. ExpensesService's
- * EXPENSE rows (data.amount) now also need revenue read.
+ * as a JSON string is read as the object it encodes. The rule applies it to
+ * crm-scope rows only (crmRowCarriesMoney; review SEC-W5FC-2 / CR-W5FC-1).
  */
 export function dataCarriesMoney(data: unknown): boolean {
   let fields: unknown = data;
@@ -147,6 +149,32 @@ export function dataCarriesMoney(data: unknown): boolean {
   if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return false;
   const record = fields as Record<string, unknown>;
   return MONEY_DATA_FIELDS.some((key) => record[key] !== null && record[key] !== undefined);
+}
+
+/**
+ * W5-FEED-CATEGORIES review (CR-W5FC-2, SEC-W5FC-2, CR-W5FC-1; owner rulings
+ * D-90 and D-63): whether a crm-scope row (its module maps to crm, D-63) is a
+ * money row whatever its stored category, by the rule V55-13 writes a CRM
+ * copy's category with today (crm-timeline.service.ts contactEventCopyCategory
+ * -> COMMERCE): its action or type is a sales_revenue ContactEvent type
+ * (@keyflow/shared getContactEventCategory; e.g. deal.created / won / lost,
+ * whose amount is data.value, a field not on the money list), or its data
+ * carries a MONEY_DATA_FIELDS field. So a copy stored as CONTACT (or with no
+ * category) before V55-13 / D-90 and today's copy of the same event get the
+ * same visibility.
+ *
+ * It reads crm-scope rows only: crm read grants no amount (the revenue scope
+ * does), whereas a row of a module with its own scope keeps D-63's binding,
+ * e.g. ExpensesService's EXPENSE rows carry data.amount and are read on
+ * expenses read, as GET /expenses serves the same amounts (no ruling gates
+ * them on revenue).
+ */
+export function crmRowCarriesMoney(row: ActivityRowLike): boolean {
+  if (activityModuleScope(row.module) !== 'crm') return false;
+  for (const eventType of [row.action, row.type]) {
+    if (typeof eventType === 'string' && getContactEventCategory(eventType.trim()) === 'sales_revenue') return true;
+  }
+  return dataCarriesMoney(row.data);
 }
 
 /** The canonical module an Activity.module maps to, case-folded; null when unmapped. */
@@ -165,7 +193,10 @@ export interface ActivityRowLike {
   entityType?: string | null;
   entityId?: string | null;
   revenueImpact?: unknown;
-  /** Activity.data: a row whose data carries an amount is a revenue row (W5-FEED-CATEGORIES). */
+  /** Activity.action and Activity.type: a crm-scope row of a sales_revenue type is a revenue row (W5-FEED-CATEGORIES review CR-W5FC-2). */
+  action?: string | null;
+  type?: string | null;
+  /** Activity.data: a crm-scope row whose data carries an amount is a revenue row (W5-FEED-CATEGORIES). */
   data?: unknown;
 }
 
@@ -250,10 +281,12 @@ export async function resolveTimelineViewer(prisma: PrismaService, businessId: s
  * data and whether it names a contact. Which contact it names is checked
  * separately (filterVisibleActivity), because that needs the contact rows.
  *
- * W5-FEED-CATEGORIES (SEC-FCC-1, D-90 / D-63): a row whose data carries an
- * amount (dataCarriesMoney) is a revenue row whatever its category, so a CRM
+ * W5-FEED-CATEGORIES (SEC-FCC-1, D-90 / D-63): a crm-scope row whose data
+ * carries an amount, or (review CR-W5FC-2) whose action is a sales_revenue
+ * type, is a revenue row whatever its category (crmRowCarriesMoney), so a CRM
  * copy stored as CONTACT before V55-13 / D-90 is not served, its amount
- * included, to a member without revenue read.
+ * included, to a member without revenue read. Rows of other modules keep
+ * D-63's binding (review SEC-W5FC-2 / CR-W5FC-1: EXPENSE rows on expenses).
  */
 export function canReadActivityRow(viewer: TimelineViewer, row: ActivityRowLike): boolean {
   const scope = activityModuleScope(row.module);
@@ -264,7 +297,7 @@ export function canReadActivityRow(viewer: TimelineViewer, row: ActivityRowLike)
   }
   const category = typeof row.category === 'string' ? row.category.trim().toLowerCase() : '';
   const carriesMoney =
-    REVENUE_CATEGORIES.has(category) || (row.revenueImpact !== null && row.revenueImpact !== undefined) || dataCarriesMoney(row.data);
+    REVENUE_CATEGORIES.has(category) || (row.revenueImpact !== null && row.revenueImpact !== undefined) || crmRowCarriesMoney(row);
   if (carriesMoney && !viewer.readable.has('revenue')) return false;
   if (namedContacts(row).length > 0 && !viewer.readable.has('crm')) return false;
   return true;
@@ -276,8 +309,8 @@ export function canReadActivityRow(viewer: TimelineViewer, row: ActivityRowLike)
  * contactId, or by entityType 'contact' and an entityId) for a member without
  * crm read, rows with a revenueImpact for a member without revenue read. They
  * never drop a row the rule would serve; the rule itself is canReadActivityRow
- * (which also withholds a row whose data carries an amount; that one is
- * judged per row, not here).
+ * (which also withholds a crm-scope row whose data carries an amount or whose
+ * action is a sales_revenue type; that one is judged per row, not here).
  */
 export function activityPrefilter(viewer: TimelineViewer): Array<Record<string, unknown>> {
   const terms: Array<Record<string, unknown>> = [];

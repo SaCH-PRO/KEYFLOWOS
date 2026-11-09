@@ -218,6 +218,17 @@
  *   V55-14b (CR-FCC-1) the FINANCE payment_recorded row is written with
  *     category PAYMENT and onBookingCreated's 'New booking' with BOOKING, so
  *     ?category= finds a manual payment's and a booking create's one row.
+ *   Review repairs (D-90, D-63 / V1-84):
+ *   V55-13c (CR-W5FC-2) a stored crm row whose action is a sales_revenue type
+ *     (deal.created / won / lost carry the deal amount as data.value, not on
+ *     the money field list) is a revenue row whatever its category, as
+ *     V55-13 writes today's copy of the same event as COMMERCE by its type.
+ *   V55-13d (SEC-W5FC-2 / CR-W5FC-1) the money-in-data and type terms read
+ *     crm-scope rows only (the CRM copies SEC-FCC-1 is about): an EXPENSE row
+ *     with data.amount keeps D-63's binding and is served on expenses read.
+ *   V55-13e it.todo (SEC-W5FC-1, outside the write set): GET
+ *     /crm/businesses/:b/contacts/:c/events serves the ContactEvent rows,
+ *     amounts included, on crm read alone.
  *
  * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
  *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
@@ -2310,6 +2321,173 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     const after = await db.activity.findMany({ where: { id: { in: moneyIds } }, select: { id: true, category: true } });
     expect(after.map((r: any) => [r.id, r.category]).sort()).toEqual(MONEY.map((r) => [r.id, r.category]).sort());
   });
+
+  // W5-FEED-CATEGORIES review CR-W5FC-2 (owner rulings D-90 and D-63, the
+  // V1-84 timeline rule): V55-13 writes every sales_revenue copy as COMMERCE by
+  // its type (crm-timeline.service.ts contactEventCopyCategory), whatever its
+  // data; the deal copies carry the deal amount as data.value, which is not on
+  // the V55-13 money field list. A stored crm row whose action is a
+  // sales_revenue type is read as a revenue row whatever its category, so an
+  // old copy and today's copy of one event get the same visibility.
+  it("V55-13c (CR-W5FC-2, D-90 / D-63, W5-FEED-CATEGORIES review): a CRM copy of a sales_revenue type already stored with category CONTACT or none (deal.created / deal.won / deal.lost, the deal amount in data.value) is not served to a member with crm read and revenue 'none' on /events, ?category=CONTACT, the day's summary or the legacy feed, as today's copy of the same event (COMMERCE) is not; the owner reads them all", async () => {
+    const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+    const timeline = app.get(CrmTimelineService);
+    const staff = `${P}${RUN}_staffC13c`;
+    const contactId = `${P}${RUN}_cTeamC13c`;
+    await db.user.create({ data: { id: staff, email: `${P}${RUN}_staffC13c@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}${RUN}_mC13c`, userId: staff, businessId: C.biz, role: 'STAFF', permissionScopes: { crm: 'read', revenue: 'none' } } });
+    await db.contact.create({ data: { id: contactId, businessId: C.biz, firstName: 'K19a', lastName: 'TeamC13c', visibility: 'TEAM', ownerId: C.owner } });
+
+    /** A CRM copy as CrmTimelineService.logEvent stored it before V55-13. */
+    const stored = (key: string, action: string, category: string | null, data: Record<string, unknown>) => ({
+      id: `${P}${RUN}_c13c_${key}`,
+      businessId: C.biz,
+      module: 'crm',
+      action,
+      entityType: 'contact',
+      entityId: contactId,
+      title: action,
+      detail: JSON.stringify(data),
+      contactId,
+      category,
+      type: action,
+      actorType: 'SYSTEM',
+      data,
+    });
+    const DEALS = [
+      // CrmDealsService's deal copies (crm-deals.service.ts): the amount is data.value.
+      stored('created', 'deal.created', 'CONTACT', { dealId: `${P}${RUN}_dealC13c`, title: 'K19a C13c deal', value: 4321.09 }),
+      stored('won', 'deal.won', 'CONTACT', { dealId: `${P}${RUN}_dealC13c`, title: 'K19a C13c deal', value: 5000.37, currency: 'TTD' }),
+      stored('lost', 'deal.lost', null, { dealId: `${P}${RUN}_dealC13c2`, title: 'K19a C13c deal 2', value: 777.77, currency: 'TTD', lossReason: 'price' }),
+    ];
+    const PLAIN = [stored('call', 'communication.call', 'CONTACT', { summary: 'K19a C13c call' })];
+    await db.activity.createMany({ data: [...DEALS, ...PLAIN] });
+    // Today's copy of deal.won, through the real writer: COMMERCE by its type.
+    await timeline.logEvent(C.biz, contactId, 'deal.won', { dealId: `${P}${RUN}_dealC13c3`, title: 'K19a C13c deal 3', value: 2468.13, currency: 'TTD' }, { source: 'crm' });
+    const live: Row[] = await waitFor(
+      () => db.activity.findMany({ where: { businessId: C.biz, module: 'crm', contactId, action: 'deal.won', NOT: { id: { startsWith: `${P}${RUN}_c13c_` } } } }),
+      (rows: any[]) => rows.length >= 1,
+      5_000,
+    );
+    expect(live.map((r) => r.category)).toEqual(['COMMERCE']);
+
+    const plainIds = PLAIN.map((r) => r.id).sort();
+    const everyId = [...DEALS.map((r) => r.id), ...plainIds, live[0].id].sort();
+    const LEAKS = ['4321.09', '5000.37', '777.77', '2468.13', '"value"'];
+    const expectNoAmount = (served: unknown, where: string) => {
+      const text = JSON.stringify(served);
+      for (const leak of LEAKS) expect(text.includes(leak), `${where} mentions ${leak}`).toBe(false);
+    };
+    const read = async (user: string, query = '') => {
+      const res = await agent().get(`/timeline/businesses/${C.biz}/events?limit=200&contactId=${contactId}${query}`).set(HEADER, user);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return res.body as Row[];
+    };
+    const ids = (rows: Row[]) => rows.map((r) => r.id).sort();
+
+    // crm read, revenue 'none': the plain copy only, no deal amount anywhere.
+    const served = await read(staff);
+    expect(ids(served)).toEqual(plainIds);
+    expectNoAmount(served, '/events');
+    const contactCategory = await read(staff, '&category=CONTACT');
+    expect(ids(contactCategory)).toEqual(plainIds);
+    expectNoAmount(contactCategory, '?category=CONTACT');
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T12:00:00`;
+    const day = await agent().get(`/timeline/businesses/${C.biz}/summary/${today}`).set(HEADER, staff);
+    expect(day.status, JSON.stringify(day.body).slice(0, 300)).toBe(200);
+    const dayOwn = (day.body.events as Row[]).filter((r) => r.contactId === contactId);
+    expect(ids(dayOwn)).toEqual(plainIds);
+    expectNoAmount(dayOwn, "the day's summary");
+    const legacy = await agent().get(`/api/flows/businesses/${C.biz}/activity?limit=200&module=crm`).set(HEADER, staff);
+    expect(legacy.status, JSON.stringify(legacy.body).slice(0, 300)).toBe(200);
+    const legacyOwn = (legacy.body as Row[]).filter((r) => r.contactId === contactId);
+    expect(ids(legacyOwn)).toEqual(plainIds);
+    expectNoAmount(legacyOwn, 'the legacy feed');
+
+    // The owner reads every copy, old and new.
+    const owner = await read(C.owner);
+    expect(ids(owner)).toEqual(everyId);
+    expect(cents((owner.find((r) => r.id === `${P}${RUN}_c13c_won`)!.data as any).value)).toBe(cents(5000.37));
+  });
+
+  // W5-FEED-CATEGORIES review SEC-W5FC-2 / CR-W5FC-1 (owner ruling D-63, the
+  // V1-84 timeline rule): the money-in-data term reads crm-scope rows only (the
+  // CRM copies SEC-FCC-1 is about), so a row of a module with its own scope
+  // keeps D-63's binding. ExpensesService writes every EXPENSE row with its
+  // amount in data (create / update / delete), and GET /expenses serves the
+  // same amounts on expenses read; no ruling gates those rows on revenue.
+  it("V55-13d (SEC-W5FC-2 / CR-W5FC-1, D-63, W5-FEED-CATEGORIES review): an EXPENSE row whose data carries its amount (as ExpensesService.create writes it) is served to a member with expenses read and revenue 'none' on /events, the day's summary and the legacy feed, as before the packet; a crm copy carrying an amount stays withheld from that member; the owner reads both", async () => {
+    const staff = `${P}${RUN}_staffC13d`;
+    const contactId = `${P}${RUN}_cTeamC13d`;
+    const expenseId = `${P}${RUN}_expC13d`;
+    await db.user.create({ data: { id: staff, email: `${P}${RUN}_staffC13d@test.local`, role: 'USER' } });
+    await db.membership.create({ data: { id: `${P}${RUN}_mC13d`, userId: staff, businessId: C.biz, role: 'STAFF', permissionScopes: { crm: 'read', expenses: 'read', revenue: 'none' } } });
+    await db.contact.create({ data: { id: contactId, businessId: C.biz, firstName: 'K19a', lastName: 'TeamC13d', visibility: 'TEAM', ownerId: C.owner } });
+    // As ExpensesService.create records it (expenses.service.ts): module EXPENSE, no category, data.amount.
+    const expenseRow = {
+      id: `${P}${RUN}_c13d_exp`,
+      businessId: C.biz,
+      module: 'EXPENSE',
+      action: 'created',
+      entityType: 'expense',
+      entityId: expenseId,
+      title: 'Expense created: K19a C13d supplies',
+      detail: 'TTD 12.5',
+      data: { amount: 12.5, currency: 'TTD', status: 'PAID', vendor: 'K19a C13d vendor' },
+    };
+    // A crm copy stored as CONTACT with an amount (SEC-FCC-1): still a revenue row.
+    const crmRow = {
+      id: `${P}${RUN}_c13d_crm`,
+      businessId: C.biz,
+      module: 'crm',
+      action: 'store_order.paid',
+      entityType: 'contact',
+      entityId: contactId,
+      title: 'store_order.paid',
+      detail: JSON.stringify({ orderId: `${P}${RUN}_orderC13d`, total: 13.57, currency: 'TTD' }),
+      contactId,
+      category: 'CONTACT',
+      type: 'store_order.paid',
+      actorType: 'SYSTEM',
+      data: { orderId: `${P}${RUN}_orderC13d`, total: 13.57, currency: 'TTD' },
+    };
+    await db.activity.createMany({ data: [expenseRow, crmRow] });
+    const mine = [expenseRow.id, crmRow.id];
+    const ids = (rows: Row[]) => rows.map((r) => r.id).filter((id) => mine.includes(id)).sort();
+    const events = async (user: string, query: string) => {
+      const res = await agent().get(`/timeline/businesses/${C.biz}/events?limit=200&${query}`).set(HEADER, user);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return res.body as Row[];
+    };
+
+    // expenses read, revenue 'none': the EXPENSE row with its amount; not the crm money copy.
+    const expenseRows = await events(staff, `entityType=expense&entityId=${expenseId}`);
+    expect(ids(expenseRows)).toEqual([expenseRow.id]);
+    expect(cents((expenseRows[0].data as any).amount)).toBe(cents(12.5));
+    expect(ids(await events(staff, `contactId=${contactId}`))).toEqual([]);
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const today = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T12:00:00`;
+    const day = await agent().get(`/timeline/businesses/${C.biz}/summary/${today}`).set(HEADER, staff);
+    expect(day.status, JSON.stringify(day.body).slice(0, 300)).toBe(200);
+    expect(ids(day.body.events as Row[])).toEqual([expenseRow.id]);
+    const legacyExpense = await agent().get(`/api/flows/businesses/${C.biz}/activity?limit=200&module=EXPENSE`).set(HEADER, staff);
+    expect(legacyExpense.status, JSON.stringify(legacyExpense.body).slice(0, 300)).toBe(200);
+    expect(ids(legacyExpense.body as Row[])).toEqual([expenseRow.id]);
+    const legacyCrm = await agent().get(`/api/flows/businesses/${C.biz}/activity?limit=200&module=crm`).set(HEADER, staff);
+    expect(legacyCrm.status, JSON.stringify(legacyCrm.body).slice(0, 300)).toBe(200);
+    expect(ids(legacyCrm.body as Row[])).toEqual([]);
+
+    // The owner reads both.
+    expect(ids(await events(C.owner, `entityType=expense&entityId=${expenseId}`))).toEqual([expenseRow.id]);
+    expect(ids(await events(C.owner, `contactId=${contactId}`))).toEqual([crmRow.id]);
+  });
+
+  it.todo(
+    "V55-13e (SEC-W5FC-1, D-90 / D-63, outside the write set): GET /crm/businesses/:b/contacts/:c/events (crm.controller.ts contactEvents, RequireModuleScope('crm', 'read')) returns the contact's ContactEvent rows with their full data through CrmTimelineService.listContactEvents, e.g. invoice.payment_recorded {amount, totalPaid, invoiceTotal}, which D-90 still writes (feedCopy false), so a member with crm read and revenue 'none' reads the amounts the feed withholds (V55-13 / V55-13b / V55-13c); closing it needs a follow-up packet that revenue-gates sales_revenue and money-carrying ContactEvents on that route (crm.controller.ts, crm-timeline.service.ts)",
+  );
 
   // W4-FEED-COPY-COMPLETE review CR-FCC-1 (D-90): the copies D-90 removed were
   // the only rows of a manual payment and of a booking create with a category

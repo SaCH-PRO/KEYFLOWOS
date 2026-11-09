@@ -586,6 +586,34 @@ describe('V1-84: every Activity.module written at head is mapped (D-63 census)',
     expect(canReadActivityRow(viewer(['ai']), { module: 'ai', entityType: 'key_command', entityId: 'k1' })).toBe(true);
   });
 
+  it("TV-09 (W5-FEED-CATEGORIES review SEC-W5FC-2 / CR-W5FC-1 / CR-W5FC-2; D-63, D-90): a crm-scope row whose data carries an amount, or whose action is a sales_revenue ContactEvent type, needs revenue read whatever its category; an EXPENSE row with data.amount keeps D-63's binding (expenses read)", async () => {
+    const { canReadActivityRow } = await visibility();
+    const viewer = (readable: string[]) => ({
+      businessId: 'b', userId: 'u', readsUnmapped: false, readable: new Set(readable) as any, crmAccess: {} as any,
+    });
+    // D-63: ExpensesService's rows (data.amount, no category) are governed by expenses, not revenue.
+    const expense = { module: 'EXPENSE', action: 'created', entityType: 'expense', entityId: 'e1', category: null, data: { amount: 12.5, currency: 'TTD' } };
+    expect(canReadActivityRow(viewer(['expenses']), expense)).toBe(true);
+    expect(canReadActivityRow(viewer(['expenses', 'revenue']), expense)).toBe(true);
+    expect(canReadActivityRow(viewer(['crm', 'revenue']), expense)).toBe(false);
+    // SEC-FCC-1: a crm copy stored as CONTACT (or none) carrying an amount, as an object or a JSON string.
+    const payment = { module: 'crm', action: 'invoice.payment_recorded', category: 'CONTACT', contactId: 'c1', data: { amount: 10, invoiceTotal: 20 } };
+    expect(canReadActivityRow(viewer(['crm']), payment)).toBe(false);
+    expect(canReadActivityRow(viewer(['crm', 'revenue']), payment)).toBe(true);
+    const order = { module: 'crm', action: 'store_order.paid', category: null, contactId: 'c1', data: JSON.stringify({ total: 9 }) };
+    expect(canReadActivityRow(viewer(['crm']), order)).toBe(false);
+    // D-63 (iii): communications rows are crm-scope rows too.
+    expect(canReadActivityRow(viewer(['crm']), { module: 'communications', action: 'sent', category: null, contactId: 'c1', data: { amount: 5 } })).toBe(false);
+    // CR-W5FC-2: a sales_revenue copy (the deal amount is data.value), by its action or its type.
+    const dealWon = { module: 'crm', action: 'deal.won', category: 'CONTACT', contactId: 'c1', data: { dealId: 'd1', value: 5000, currency: 'TTD' } };
+    expect(canReadActivityRow(viewer(['crm']), dealWon)).toBe(false);
+    expect(canReadActivityRow(viewer(['crm', 'revenue']), dealWon)).toBe(true);
+    expect(canReadActivityRow(viewer(['crm']), { module: 'CRM', action: 'logged', type: 'deal.lost', category: null, contactId: 'c1', data: { value: 1 } })).toBe(false);
+    // A crm copy with no amount and a type outside sales_revenue stays a crm row.
+    expect(canReadActivityRow(viewer(['crm']), { module: 'crm', action: 'communication.call', category: 'CONTACT', contactId: 'c1', data: { summary: 'x', amountNote: 1 } })).toBe(true);
+    expect(canReadActivityRow(viewer(['crm']), { module: 'crm', action: 'note.created', category: null, contactId: 'c1', data: { amount: null } })).toBe(true);
+  });
+
   it("TV-06: classification is case-folded: 'REVENUE', 'BOOKINGS' and 'EXPENSE' classify as their lower-case forms; an unmapped module classifies as null", async () => {
     const { activityModuleScope } = await visibility();
     expect(activityModuleScope('REVENUE')).toBe('revenue');
