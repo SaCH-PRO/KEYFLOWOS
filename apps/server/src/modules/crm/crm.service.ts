@@ -2323,6 +2323,8 @@ export class CrmService {
     actorType?: string;
     actorId?: string;
     source?: string;
+    /** W4-FEED-COPY-COMPLETE (D-90): passed through to CrmTimelineService.logContactEvent (false: no Activity copy). */
+    feedCopy?: boolean;
   }) {
     return this.timeline.logContactEvent(input);
   }

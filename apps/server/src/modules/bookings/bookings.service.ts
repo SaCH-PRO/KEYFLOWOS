@@ -1796,6 +1796,11 @@ export class BookingsService implements OnModuleInit, OnModuleDestroy {
         },
         actorType: 'SYSTEM',
         source: 'bookings',
+        // W4-FEED-COPY-COMPLETE (owner ruling D-90, on D-08; CR-V155b-1,
+        // V55-12b): the booking's one feed row is ActivityEventListener's
+        // 'New booking', from the booking.created emit above; this
+        // ContactEvent stays on the contact's timeline with no Activity copy.
+        feedCopy: false,
       });
     }
     return booking;

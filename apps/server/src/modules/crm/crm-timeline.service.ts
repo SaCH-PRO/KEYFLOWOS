@@ -446,12 +446,21 @@ export class CrmTimelineService {
     actorType?: string;
     actorId?: string;
     source?: string;
+    /**
+     * W4-FEED-COPY-COMPLETE (owner ruling D-90, on D-08): logEvent's
+     * meta.feedCopy (V1-55b), carried for callers that reach the timeline
+     * through CrmService.logContactEvent. false: another writer puts this
+     * event's feed row in Activity, so the ContactEvent (and its emit) is
+     * written and its Activity copy is not. Absent: copied, as before.
+     */
+    feedCopy?: boolean;
   }) {
     await this.assertContact(input.businessId, input.contactId);
     return this.logEvent(input.businessId, input.contactId, input.type, input.data, {
       actorType: input.actorType,
       actorId: input.actorId,
       source: input.source,
+      ...(input.feedCopy === false ? { feedCopy: false } : {}),
     });
   }
 
