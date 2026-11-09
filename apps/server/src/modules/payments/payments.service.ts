@@ -716,6 +716,19 @@ export class PaymentsService {
    * VOID, FAILED, PENDING or soft-deleted invoice reads as absent. Every
    * refusal is one 404 body, the one an unknown token gets, and nothing
    * downstream (no provider, no row) is reached.
+   *
+   * W4-CREDIT-AWARE-READERS (V1-44 review CR-V44-1, reader half; D-78): this
+   * gate stays SHAREABLE_INVOICE_STATUSES, not the credit-aware list the
+   * commerce share surfaces read (isCreditAwareShareableInvoiceStatus). A
+   * PARTIALLY_CREDITED invoice is shown on the token pay page with what its
+   * APPLIED credit notes leave owing, and takes the offline intent there
+   * (CommerceService), but the routes behind this gate do not net credits:
+   * the status poll serves a credit-unaware `remaining` (invoicePaymentStatus)
+   * and the provider checkouts charge invoice.total (assertInvoicePayable
+   * refuses a credited invoice). So a credited invoice reads as absent here,
+   * no gateway is offered for it and no provider is reached, rather than a
+   * false amount due or a checkout for the credited part
+   * (credit-note-reversal CN-32 / CN-35; the residual is that suite's it.todo).
    */
   private async payLinkInvoice(token: string): Promise<{ invoiceId: string; businessId: string }> {
     const link = await this.commerceService.getPaymentLinkByToken(token);

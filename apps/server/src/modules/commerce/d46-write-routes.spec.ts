@@ -55,8 +55,23 @@
  * @RequireModuleScope('settings') has no ModuleScopeGuard to enforce it), so a
  * non-member SUPER_ADMIN and a revenue:read STAFF member restore a soft-deleted
  * ACTIVE schedule, which then bills again. trash.controller.ts is outside the
- * W3-D46-CREATE-AND-RECURRING write set: D46-S09 keeps it visible as an
+ * W3-D46-CREATE-AND-RECURRING write set: D46-S09 kept it visible as an
  * it.todo for its follow-up packet.
+ *
+ * W4-TRASH-D46 (owner ruling D-46) makes D46-S09 live: TrashController's
+ * restore and permanent delete of a revenue model (recurringInvoice, invoice,
+ * quote) refuse a SUPER_ADMIN with no Membership in the business ('Not
+ * authorized to update this invoice|quote') and any caller whose Membership is
+ * below revenue:write (the guard's 'Insufficient permissions' message), after
+ * the Membership lookup alone; a refused call restores nothing, so a trashed
+ * schedule never bills again on their call. Every other trash model is
+ * unchanged. The HTTP half is d46-commerce-writes D46-S09a..e.
+ *
+ * W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read; D-46 rules writes
+ * only): listTrashed applies ModuleScopeGuard's revenue:read rule to the same
+ * three models (D46-S09f: a model filter naming one refuses a member below
+ * revenue:read; D46-S09g: the every-model listing leaves them out for that
+ * member). A SUPER_ADMIN keeps the guard's read admission, with no lookup.
  */
 import 'reflect-metadata';
 import { readdirSync } from 'fs';
@@ -412,8 +427,203 @@ describe('D-46 write-route census, the whole commerce module (review SEC-A1-2)',
   // came back {status ACTIVE, deletedAt null} (the commerce resume route answers
   // that SUPER_ADMIN 403), its DELETE .../recurringInvoice/:id answered 200 and
   // the row was gone, and a STAFF member holding revenue:'read' restored another
-  // schedule with 201. Outside this packet's write set (src/modules/trash).
-  it.todo(
-    "D46-S09 (D-46; review SEC-W3D46R-3; follow-up packet: D-46 plus module scope on trash for revenue models) TrashController restore and permanent delete of a recurringInvoice refuse a SUPER_ADMIN that is not a member of the business (403) and a member below revenue:write; a restored schedule never bills again on their call. Not implementable here: trash.controller.ts is outside the W3-D46-CREATE-AND-RECURRING write set",
-  );
+  // schedule with 201.
+  // W4-TRASH-D46 (D-46): the it.todo D46-S09 made live, below. TrashController's
+  // restore and permanent delete of a revenue model (invoice, quote,
+  // recurringInvoice; the trash holds no payment model) run D-46 and the
+  // revenue:write module scope first. The HTTP half (real guards, real rows, the
+  // real recurring run) is test/d46-commerce-writes.integration.test.ts D46-S09a..e.
+});
+
+describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController restore and permanent delete of revenue models', () => {
+  const TRASH_DEPS = ['prisma', 'catalog'];
+  const TRASH_REVENUE: Record<string, 'invoice' | 'quote'> = { recurringInvoice: 'invoice', invoice: 'invoice', quote: 'quote' };
+  let Trash: any;
+
+  beforeAll(async () => {
+    ({ TrashController: Trash } = await import('../trash/trash.controller'));
+  }, 120_000);
+
+  /** Calls TrashController[handler] for `model` as `user`, with the Membership lookup answering `membership`. */
+  async function trashCall(handler: 'restore' | 'permanentDelete', model: string, user: { id: string; role: string }, membership: unknown) {
+    const calls: Array<{ path: string; args: unknown[] }> = [];
+    const answers = { [MEMBERSHIP_LOOKUP]: async () => membership };
+    const controller = new Trash(...TRASH_DEPS.map((name) => recorder(name, calls, answers)));
+    const req = { user, headers: {}, params: { businessId: BIZ, model, id: `${model}_d46` }, body: {} };
+    const meta: Record<string, { index: number; data?: unknown }> = Reflect.getMetadata(ROUTE_ARGS_METADATA, Trash, handler) ?? {};
+    const args: unknown[] = [];
+    for (const [key, { index, data }] of Object.entries(meta)) {
+      const type = Number(key.split(':')[0]);
+      if (type === RouteParamtypes.REQUEST) args[index] = req;
+      else if (type === RouteParamtypes.PARAM) args[index] = data === 'businessId' ? BIZ : data === 'model' ? model : `${model}_d46`;
+      else args[index] = undefined;
+    }
+    let error: unknown = null;
+    try {
+      await controller[handler](...args);
+    } catch (err) {
+      error = err;
+    }
+    return { calls, error };
+  }
+
+  for (const handler of ['restore', 'permanentDelete'] as const) {
+    for (const [model, subject] of Object.entries(TRASH_REVENUE)) {
+      it(`D46-S09 TrashController.${handler} ${model} (D-46): a SUPER_ADMIN with no membership is refused 403 'Not authorized to update this ${subject}' after the Membership lookup alone`, async () => {
+        const { calls, error } = await trashCall(handler, model, { id: USER_ID, role: 'SUPER_ADMIN' }, null);
+        expect(error, String(error)).toBeInstanceOf(ForbiddenException);
+        expect((error as Error).message).toBe(`Not authorized to update this ${subject}`);
+        expect(calls.map((c) => c.path)).toEqual([MEMBERSHIP_LOOKUP]);
+        expect(calls[0]!.args[0]).toMatchObject({ where: { userId_businessId: { userId: USER_ID, businessId: BIZ } } });
+      });
+
+      it(`D46-S09 TrashController.${handler} ${model} (D-46, revenue:write): a member below revenue:write (SUPER_ADMIN STAFF, SUPER_ADMIN with an explicit revenue:'none', USER STAFF, USER with an explicit revenue:'read') is refused with the guard's message after the lookup alone; a USER with no membership gets 'Not a member of this business'`, async () => {
+        for (const [user, membership, level] of [
+          [{ id: USER_ID, role: 'SUPER_ADMIN' }, { role: 'STAFF', permissionScopes: null }, 'read'],
+          [{ id: USER_ID, role: 'SUPER_ADMIN' }, { role: 'ADMIN', permissionScopes: { revenue: 'none', crm: 'write' } }, 'none'],
+          [{ id: USER_ID, role: 'USER' }, { role: 'STAFF', permissionScopes: null }, 'read'],
+          [{ id: USER_ID, role: 'USER' }, { role: 'ADMIN', permissionScopes: { revenue: 'read' } }, 'read'],
+        ] as const) {
+          const { calls, error } = await trashCall(handler, model, user, membership);
+          expect(error, `${user.role} ${level}: ${String(error)}`).toBeInstanceOf(ForbiddenException);
+          expect((error as Error).message).toBe(`Insufficient permissions: revenue requires write access (you have ${level})`);
+          expect(calls.map((c) => c.path)).toEqual([MEMBERSHIP_LOOKUP]);
+        }
+        const none = await trashCall(handler, model, { id: USER_ID, role: 'USER' }, null);
+        expect(none.error, String(none.error)).toBeInstanceOf(ForbiddenException);
+        expect((none.error as Error).message).toBe('Not a member of this business');
+        expect(none.calls.map((c) => c.path)).toEqual([MEMBERSHIP_LOOKUP]);
+      });
+
+      it(`D46-S09 TrashController.${handler} ${model} (D-46): a revenue:write member (SUPER_ADMIN ADMIN, SUPER_ADMIN explicit write, USER OWNER) is admitted past the check and the handler goes on`, async () => {
+        for (const [user, membership] of [
+          [{ id: USER_ID, role: 'SUPER_ADMIN' }, { role: 'ADMIN', permissionScopes: null }],
+          [{ id: USER_ID, role: 'SUPER_ADMIN' }, { role: 'STAFF', permissionScopes: { revenue: 'write' } }],
+          [{ id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null }],
+        ] as const) {
+          const { calls, error } = await trashCall(handler, model, user, membership);
+          expect(error, String(error)).not.toBeInstanceOf(ForbiddenException);
+          expect(calls[0]?.path).toBe(MEMBERSHIP_LOOKUP);
+          expect(calls.length, 'the handler went on past the check').toBeGreaterThan(1);
+          expect(calls.slice(1).map((c) => c.path)).not.toContain(MEMBERSHIP_LOOKUP);
+        }
+      });
+    }
+
+    it(`D46-S09 TrashController.${handler} control: a model outside revenue (contact) is unchanged: no Membership lookup, even for a non-member SUPER_ADMIN`, async () => {
+      const { calls } = await trashCall(handler, 'contact', { id: USER_ID, role: 'SUPER_ADMIN' }, null);
+      expect(calls.map((c) => c.path)).not.toContain(MEMBERSHIP_LOOKUP);
+      expect(calls[0]?.path).toBe('prisma.client.contact.findFirst');
+    });
+  }
+
+  it('D46-S09 TrashController control: a model the trash does not hold (payment) is still a 400 before any lookup', async () => {
+    const { calls, error } = await trashCall('restore', 'payment', { id: USER_ID, role: 'SUPER_ADMIN' }, null);
+    expect(String(error)).toMatch(/not trashable/);
+    expect(calls).toEqual([]);
+  });
+
+  /**
+   * W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read; D-46 rules writes
+   * only): listTrashed ran behind BusinessGuard alone, so a member below
+   * revenue:read read the trash's invoice, quote and schedule rows. It now
+   * applies ModuleScopeGuard's revenue:read rule to those models (a SUPER_ADMIN
+   * is admitted to reads without a lookup, as the guard admits it). The HTTP
+   * half is d46-commerce-writes D46-S09f.
+   */
+  async function listCall(user: { id: string; role: string }, membership: unknown, model?: string) {
+    const calls: Array<{ path: string; args: unknown[] }> = [];
+    const answers = new Proxy({} as Record<string, (...args: unknown[]) => unknown>, {
+      get: (_target, path) => {
+        if (path === MEMBERSHIP_LOOKUP) return async () => membership;
+        if (typeof path === 'string' && path.endsWith('.findMany')) return async () => [];
+        if (typeof path === 'string' && path.endsWith('.count')) return async () => 0;
+        return undefined;
+      },
+    });
+    const controller = new Trash(...TRASH_DEPS.map((name) => recorder(name, calls, answers)));
+    const req = { user, headers: {}, params: { businessId: BIZ }, query: model ? { model } : {}, body: {} };
+    const meta: Record<string, { index: number; data?: unknown }> = Reflect.getMetadata(ROUTE_ARGS_METADATA, Trash, 'listTrashed') ?? {};
+    const args: unknown[] = [];
+    for (const [key, { index, data }] of Object.entries(meta)) {
+      const type = Number(key.split(':')[0]);
+      if (type === RouteParamtypes.REQUEST) args[index] = req;
+      else if (type === RouteParamtypes.PARAM) args[index] = BIZ;
+      else if (type === RouteParamtypes.QUERY) args[index] = data === 'model' ? model : data === 'limit' ? 50 : 0;
+      else args[index] = undefined;
+    }
+    let result: any = null;
+    let error: unknown = null;
+    try {
+      result = await controller.listTrashed(...args);
+    } catch (err) {
+      error = err;
+    }
+    return { calls, error, result };
+  }
+
+  const queried = (calls: Array<{ path: string }>) =>
+    calls.map((c) => c.path).filter((p) => p !== MEMBERSHIP_LOOKUP).map((p) => p.split('.')[2]);
+
+  for (const model of Object.keys(TRASH_REVENUE)) {
+    it(`D46-S09f TrashController.listTrashed ?model=${model} (SEC-TRASH-D46-1, revenue:read): a member below revenue:read (USER ADMIN with an explicit revenue:'none', SUPER_ADMIN is not one) is refused with the guard's 'requires read access' message after the lookup alone; a USER with no membership gets 'Not a member of this business'`, async () => {
+      for (const membership of [
+        { role: 'ADMIN', permissionScopes: { revenue: 'none', settings: 'admin', crm: 'write' } },
+        { role: 'STAFF', permissionScopes: { crm: 'write' } },
+      ]) {
+        const { calls, error } = await listCall({ id: USER_ID, role: 'USER' }, membership, model);
+        expect(error, String(error)).toBeInstanceOf(ForbiddenException);
+        expect((error as Error).message).toBe('Insufficient permissions: revenue requires read access (you have none)');
+        expect(calls.map((c) => c.path)).toEqual([MEMBERSHIP_LOOKUP]);
+        expect(calls[0]!.args[0]).toMatchObject({ where: { userId_businessId: { userId: USER_ID, businessId: BIZ } } });
+      }
+      const none = await listCall({ id: USER_ID, role: 'USER' }, null, model);
+      expect((none.error as Error)?.message).toBe('Not a member of this business');
+      expect(none.calls.map((c) => c.path)).toEqual([MEMBERSHIP_LOOKUP]);
+    });
+
+    it(`D46-S09f TrashController.listTrashed ?model=${model} control (SEC-TRASH-D46-1): a revenue:read member (USER STAFF default, USER explicit read) is admitted after the lookup; a SUPER_ADMIN, member or not, is admitted with no lookup (reads are not D-46 writes)`, async () => {
+      for (const membership of [{ role: 'STAFF', permissionScopes: null }, { role: 'ADMIN', permissionScopes: { revenue: 'read' } }]) {
+        const { calls, error, result } = await listCall({ id: USER_ID, role: 'USER' }, membership, model);
+        expect(error, String(error)).toBeNull();
+        expect(calls[0]?.path).toBe(MEMBERSHIP_LOOKUP);
+        expect(queried(calls)).toEqual([model, model]);
+        expect(result).toEqual({ items: [], total: 0, model });
+      }
+      for (const membership of [null, { role: 'ADMIN', permissionScopes: { revenue: 'none' } }]) {
+        const { calls, error } = await listCall({ id: USER_ID, role: 'SUPER_ADMIN' }, membership, model);
+        expect(error, String(error)).toBeNull();
+        expect(calls.map((c) => c.path)).not.toContain(MEMBERSHIP_LOOKUP);
+        expect(queried(calls)).toEqual([model, model]);
+      }
+    });
+  }
+
+  it('D46-S09f TrashController.listTrashed control (SEC-TRASH-D46-1): a model outside revenue (contact) costs no Membership lookup, whatever the caller', async () => {
+    const { calls, error } = await listCall({ id: USER_ID, role: 'USER' }, null, 'contact');
+    expect(error, String(error)).toBeNull();
+    expect(calls.map((c) => c.path)).toEqual(['prisma.client.contact.findMany', 'prisma.client.contact.count']);
+  });
+
+  it("D46-S09g TrashController.listTrashed every model (SEC-TRASH-D46-1, revenue:read): a member below revenue:read gets 200 and no invoice, quote or recurringInvoice query runs (one lookup); a revenue:read member and a SUPER_ADMIN (no lookup) get every model queried", async () => {
+    const below = await listCall({ id: USER_ID, role: 'USER' }, { role: 'ADMIN', permissionScopes: { revenue: 'none', settings: 'admin' } });
+    expect(below.error, String(below.error)).toBeNull();
+    expect(below.result).toEqual({ items: [], total: 0 });
+    expect(below.calls.filter((c) => c.path === MEMBERSHIP_LOOKUP)).toHaveLength(1);
+    const belowModels = queried(below.calls);
+    for (const model of Object.keys(TRASH_REVENUE)) expect(belowModels, model).not.toContain(model);
+    expect(belowModels).toContain('contact');
+    expect(belowModels).toContain('expense');
+
+    const reader = await listCall({ id: USER_ID, role: 'USER' }, { role: 'STAFF', permissionScopes: null });
+    expect(reader.error, String(reader.error)).toBeNull();
+    const sa = await listCall({ id: USER_ID, role: 'SUPER_ADMIN' }, null);
+    expect(sa.error, String(sa.error)).toBeNull();
+    expect(sa.calls.map((c) => c.path)).not.toContain(MEMBERSHIP_LOOKUP);
+    for (const { calls } of [reader, sa]) {
+      const models = queried(calls);
+      for (const model of Object.keys(TRASH_REVENUE)) expect(models, model).toContain(model);
+      expect(models).toHaveLength(belowModels.length + Object.keys(TRASH_REVENUE).length);
+    }
+  });
 });

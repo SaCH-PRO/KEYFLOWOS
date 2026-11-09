@@ -47,6 +47,26 @@ export function isShareableInvoiceStatus(status: string): boolean {
 }
 
 /**
+ * W4-CREDIT-AWARE-READERS (V1-44 review CR-V44-1, reader half; D-28, D-78):
+ * the statuses a customer-facing reader that nets the APPLIED credit notes
+ * (creditAwareBalance over appliedCreditsOf) may show: the shareable ones plus
+ * PARTIALLY_CREDITED, which still owes what its notes leave and stays
+ * PARTIALLY_CREDITED once that is paid (D-78). FULLY_CREDITED owes nothing and
+ * is not shown (it answers like an unknown id). The commerce share surfaces
+ * (the bare-id public view, the token pay page and token view) and the token
+ * offline intent read this list. SHAREABLE_INVOICE_STATUSES keeps
+ * PARTIALLY_CREDITED out while it has readers that do not net credits (the
+ * payment status poll and the token money routes in payments.service.ts, the
+ * public receipt in InvoiceReceiptBuilderService): those answer 404 for it
+ * rather than a false amount due.
+ */
+export const CREDIT_AWARE_SHAREABLE_INVOICE_STATUSES: ReadonlyArray<InvoiceStatus> = [...SHAREABLE_INVOICE_STATUSES, 'PARTIALLY_CREDITED'];
+
+export function isCreditAwareShareableInvoiceStatus(status: string): boolean {
+  return (CREDIT_AWARE_SHAREABLE_INVOICE_STATUSES as ReadonlyArray<string>).includes(status);
+}
+
+/**
  * Allowed transitions. Server-side enforcement; UI/clients can request
  * a transition but the workflow throws 409 ConflictException for anything
  * not in this map.
@@ -295,6 +315,55 @@ export function balanceOfStoredRows(
  */
 export function ownTenantPayments<T extends { businessId: string }>(invoice: { businessId: string; payments: T[] }): T[] {
   return invoice.payments.filter((p) => p.businessId === invoice.businessId);
+}
+
+/**
+ * W4-CREDIT-AWARE-READERS (V1-44 review CR-V44-1, reader half; D-13, D-78):
+ * the balance contract (computeBalance / balanceOfStoredRows) net of the
+ * invoice's APPLIED credit notes. `remaining` is what is still owed: the total
+ * less `credited` less the money received net of refunds, in integer cents and
+ * never below zero, which is what reconcileCreditedFromPayments accepts money
+ * up to (owed = total - credited). Every other figure is the balance's own:
+ * `paid`, `refunded` and `net` are what the payment rows did, and
+ * `isFullyPaid` says whether the rows alone settle the total (the paidAt rule
+ * of reconcileFromCredits). With nothing credited it is the balance unchanged.
+ */
+export interface CreditAwareBalance extends BalanceSummary {
+  /** The APPLIED credit notes netted (appliedCreditsOf), rounded to cents. */
+  credited: number;
+}
+
+export function creditAwareBalance(balance: BalanceSummary, credited: number): CreditAwareBalance {
+  const creditedCents = Math.max(0, toCents(Number(credited) || 0));
+  if (creditedCents === 0) return { ...balance, credited: 0 };
+  const owedCents = Math.max(0, toCents(balance.total) - creditedCents);
+  return {
+    ...balance,
+    credited: fromCents(creditedCents),
+    remaining: fromCents(Math.max(0, owedCents - toCents(balance.net))),
+  };
+}
+
+/**
+ * W4-CREDIT-AWARE-READERS (CR-V44-1 reader half; D-13, D-75): the sum of the
+ * invoice's APPLIED credit notes as the payment reconcile reads it
+ * (reconcileCreditedFromPayments), so a reader and the money decision agree:
+ * only for a credited invoice (PARTIALLY_CREDITED, FULLY_CREDITED; any other
+ * status reconciles from its payment rows alone, so 0), and only the notes of
+ * the invoice's own business (D-75: credit_notes.business_id is not tied to
+ * the invoice's, SEC-V44-6). Rounded to cents. `db` is the caller's client or
+ * transaction (the reconcile's lock holder reads through its own tx).
+ */
+export async function appliedCreditsOf(
+  db: Pick<Prisma.TransactionClient, 'creditNote'>,
+  invoice: { id: string; businessId: string; status: string },
+): Promise<number> {
+  if (!CREDITED_STATUSES.has(invoice.status as InvoiceStatus)) return 0;
+  const applied = await db.creditNote.aggregate({
+    where: { invoiceId: invoice.id, businessId: invoice.businessId, status: 'APPLIED' },
+    _sum: { amount: true },
+  });
+  return fromCents(Math.max(0, toCents(Number(applied._sum.amount ?? 0) || 0)));
 }
 
 /**
@@ -620,16 +689,44 @@ export class InvoiceWorkflowService {
    * higher reading, as isOverpaid). Money up to it is accepted: the payment,
    * its posting and its receivable reduction commit, and the status stays the
    * credited one, as deriveStatusAfterCredit holds it whatever was paid (D-28;
-   * V1-28's depositPosition reads the settlement from the rows). No write, no
-   * posting, no event. Money beyond it is a 409 under 'throw' (the caller's
+   * V1-28's depositPosition reads the settlement from the rows). No status
+   * write, no posting, no event (paidAt: below). Money beyond it is a 409 under 'throw' (the caller's
    * payment rolls back, nothing written) and kept under 'keep' (a refund): the
    * balance readers and mark-paid's remaining do not net credits, so an
    * over-settlement here would be an over-collection nobody sees. A fully
    * credited invoice owes nothing, so a payment on it is refused as on PAID.
+   *
+   * W4-CREDIT-REFUND-PAIDAT (review CRB-CR-1; CR-V44-2, D-14, D-78): paidAt
+   * follows the rule reconcileFromCredits uses for a credited status. The
+   * status is the credited one deriveStatusAfterCredit holds whatever was
+   * paid (D-78: a paid remainder stays PARTIALLY_CREDITED, and a payment moves
+   * no credit), so it is not written; the invoice is settled while its own
+   * payment rows net of refunds settle the total (CN-06), and otherwise it
+   * holds no paidAt. A refund that unsettles a credited invoice (in full, in
+   * part, or kept under 'keep' above what the credits leave owing) clears it
+   * here, as reconcileIn clears it on a refund's reopen (D-14), rather than
+   * at the next credit move, so a money position reached through the manual
+   * refund door and the credit moves ends with one paidAt whatever their
+   * order (CRB-CR-1 (e), CN-31). Nothing is stamped: a credited status is never
+   * PAID (D-78). The write is tenant-bound and compare-and-set,
+   * { id, businessId, status } as read (the invoice's own business, whose
+   * rows and notes were read); a writer that moved the status in between
+   * leaves it as it is (logged, as reconcileIn). No posting, no event, and
+   * changed stays false (it reports a status move).
+   *
+   * Not yet the provider refund webhooks (review SEC-CRP-1 / CR-REG-2, an
+   * it.todo in credit-note-reversal.integration.test.ts): processStripeRefund
+   * and processPaypalRefund (payments.service.ts, outside this packet)
+   * reconcile without 'keep', so a refund that still leaves more received
+   * than the credits leave owing is refused 409 above, before this rule. The
+   * webhook swallows it, the reconcile's own transaction rolls back, the
+   * refund row it committed earlier stays, and so does the paidAt, until the
+   * next credit move clears it (reconcileFromCredits, CN-29 / CN-31). A
+   * refund that leaves no more than is owed reaches the rule on every door.
    */
   private async reconcileCreditedFromPayments(
     db: Prisma.TransactionClient,
-    invoice: { id: string; businessId: string; total: unknown },
+    invoice: { id: string; businessId: string; total: unknown; paidAt?: Date | null },
     current: InvoiceStatus,
     balance: BalanceSummary,
     extra: { onIllegalTransition?: 'throw' | 'keep' },
@@ -642,13 +739,31 @@ export class InvoiceWorkflowService {
     const owedCents = Math.max(0, readTotalCents(Number(invoice.total)).maxCents - creditedCents);
     if (toCents(balance.net) > owedCents) {
       const detail = `net received ${balance.net} is above the ${fromCents(owedCents)} its credit notes leave owing of ${balance.total}`;
-      if (extra.onIllegalTransition === 'keep') {
-        this.logger.warn(`reconcileFromPayments: invoice ${invoice.id} kept at ${current}; ${detail}`);
-        return { status: current, balance, changed: false };
+      if (extra.onIllegalTransition !== 'keep') {
+        throw new ConflictException(
+          `Cannot record a payment beyond what a ${current} invoice still owes after its credit notes (${fromCents(owedCents)} owed)`,
+        );
       }
-      throw new ConflictException(
-        `Cannot record a payment beyond what a ${current} invoice still owes after its credit notes (${fromCents(owedCents)} owed)`,
-      );
+      this.logger.warn(`reconcileFromPayments: invoice ${invoice.id} kept at ${current}; ${detail}`);
+    }
+    // CRB-CR-1 (D-14, D-78): settled is the credited status while the payment rows settle the total.
+    if (invoice.paidAt && !balance.isFullyPaid) {
+      try {
+        await db.invoice.update({
+          where: { id: invoice.id, businessId: invoice.businessId, status: current },
+          data: { paidAt: null },
+        });
+      } catch (err) {
+        if ((err as { code?: string } | null)?.code !== 'P2025') throw err;
+        const now = await db.invoice.findFirst({
+          where: { id: invoice.id, businessId: invoice.businessId },
+          select: { status: true },
+        });
+        this.logger.warn(
+          `reconcileFromPayments: invoice ${invoice.id} moved from ${current} while its unsettled paidAt was being cleared (now ${now?.status ?? 'gone'}); left as it is`,
+        );
+        return { status: (now?.status ?? current) as InvoiceStatus, balance, changed: false };
+      }
     }
     return { status: current, balance, changed: false };
   }
@@ -898,9 +1013,12 @@ export class InvoiceWorkflowService {
    * settling the total keeps its paidAt, and so does its return to PAID once
    * the note is voided (CN-06); a return to PAID with none stamps it. This
    * covers credit moves only: the refund that unsettles a credited invoice
-   * goes through reconcileCreditedFromPayments, which writes nothing, so its
-   * paidAt stays until the next credit move (review CRB-CR-1, an it.todo in
-   * credit-note-reversal.integration.test.ts).
+   * goes through reconcileCreditedFromPayments, which clears its paidAt by the
+   * same rule (W4-CREDIT-REFUND-PAIDAT, review CRB-CR-1). The clears here still
+   * meet a stale paidAt: on rows refunded before that packet, and where a
+   * provider refund webhook's reconcile was refused 409 (review SEC-CRP-1 /
+   * CR-REG-2); CN-29 and CN-31 put one back after the refund to prove them
+   * (review CR-REG-1).
    */
   async reconcileFromCredits(
     invoiceId: string,
@@ -930,7 +1048,7 @@ export class InvoiceWorkflowService {
     const next = deriveStatusAfterCredit(current, Number(invoice.total), Number(applied._sum.amount ?? 0), balance);
     // CR-V44-2 (D-14, D-78): settled is PAID, or a credited status while the
     // payment rows still settle the total (CN-06). After a credit move,
-    // anything else holds no paidAt (the refund door's half is CRB-CR-1).
+    // anything else holds no paidAt (the refund door's half: reconcileCreditedFromPayments, CRB-CR-1).
     const settled = next === 'PAID' || (CREDITED_STATUSES.has(next) && balance.isFullyPaid);
     if (next === current) {
       // W3CRB-ST-1 (CR-V44-2): a credit move that leaves a credited invoice

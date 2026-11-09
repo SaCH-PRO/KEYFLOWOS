@@ -16,7 +16,7 @@ import { Service, Prisma, Payment, QuoteStatus as StoredQuoteStatus } from '@key
 import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
-import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isLegalTransition, isShareableInvoiceStatus, ownTenantPayments, roundMoney } from './invoice-workflow.service';
+import { InvoiceWorkflowService, InvoiceStatus, appliedCreditsOf, balanceOfStoredRows, computeBalance, creditAwareBalance, isCreditAwareShareableInvoiceStatus, isLegalTransition, ownTenantPayments, roundMoney } from './invoice-workflow.service';
 import { computeDocumentAmounts, fromCents, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
@@ -1534,8 +1534,12 @@ export class CommerceService {
     if (!invoice) return null;
 
     if (requireShareable) {
-      const shareableStatuses = ['SENT', 'PAID', 'OVERDUE', 'PARTIALLY_PAID'];
-      if (!shareableStatuses.includes(invoice.status)) {
+      // W4-CREDIT-AWARE-READERS (CR-V44-1, D-78): the credit-aware share gate.
+      // Its share readers (the token view with getPaymentLinkBalance, and the
+      // operator-viewer branch, which serves no amount due) net the APPLIED
+      // credit notes, so a PARTIALLY_CREDITED invoice is shown; FULLY_CREDITED
+      // is not (nothing is owed).
+      if (!isCreditAwareShareableInvoiceStatus(invoice.status)) {
         return null;
       }
     }
@@ -1775,13 +1779,24 @@ export class CommerceService {
     });
     if (!invoice) return null;
 
-    if (!isShareableInvoiceStatus(invoice.status)) return null;
+    // W4-CREDIT-AWARE-READERS (CR-V44-1, D-78): PARTIALLY_CREDITED is shown,
+    // with `remaining` net of its APPLIED credit notes (below).
+    if (!isCreditAwareShareableInvoiceStatus(invoice.status)) return null;
 
     // DEP-R3-OWN-ROW-READS (D-75): paid/remaining from the invoice's own-tenant
     // rows, as the intent this page posts decides from them (trial-N round 2
     // F1): a row of another business (M31) showed the customer nothing due on
     // an invoice the business has received nothing on (RC2-DEP-1).
-    const balance = balanceOfStoredRows(Number(invoice.total), ownTenantPayments(invoice), invoice.currency);
+    // W4-CREDIT-AWARE-READERS (CR-V44-1; D-13, D-75): `remaining` is also net
+    // of the invoice's own APPLIED credit notes (appliedCreditsOf, as the
+    // payment reconcile and the intent read them), so a part-credited invoice
+    // shows what it still owes, not the credited part again. `paid` is the
+    // money received, unchanged.
+    const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, invoice);
+    const balance = creditAwareBalance(
+      balanceOfStoredRows(Number(invoice.total), ownTenantPayments(invoice), invoice.currency),
+      credited,
+    );
     // Same legacy-row fallback as getInvoiceWithBusiness: older invoices stored
     // subtotal 0 with priced items.
     const subtotal =
@@ -1891,6 +1906,12 @@ export class CommerceService {
       if (!paid) throw new NotFoundException('Invoice not found');
       return paid;
     }
+    // W4-CREDIT-AWARE-READERS (CR-V44-1, D-28): a FULLY_CREDITED invoice owes
+    // nothing and is never PAID (only credit notes move it): refused before
+    // anything is written, as the payment reconcile refuses any money on it.
+    if (existingInvoice.status === 'FULLY_CREDITED') {
+      throw new ConflictException('Cannot mark a FULLY_CREDITED invoice paid: its credit notes leave nothing owing');
+    }
 
     // R0-PL-04 (G2, PL-F05): the remaining balance is recorded as a payment
     // through recordPayment, so the payment row, its ledger posting, the
@@ -1909,12 +1930,22 @@ export class CommerceService {
       where: { invoiceId, businessId: existingInvoice.businessId },
       select: { amount: true, status: true },
     });
-    const balance = computeBalance(Number(existingInvoice.total), rows, existingInvoice.currency);
+    // W4-CREDIT-AWARE-READERS (V1-44 review CR-V44-1, reader half; D-13, D-75,
+    // D-78): a PARTIALLY_CREDITED invoice owes what its own APPLIED credit
+    // notes leave (appliedCreditsOf; 0 for any other status, whose reconcile
+    // reads its payment rows alone). Mark-paid records exactly that, and the
+    // invoice stays PARTIALLY_CREDITED (D-78: no credited invoice is PAID).
+    const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, {
+      id: invoiceId,
+      businessId: existingInvoice.businessId,
+      status: existingInvoice.status,
+    });
+    const balance = creditAwareBalance(computeBalance(Number(existingInvoice.total), rows, existingInvoice.currency), credited);
     if (balance.remaining > 0) {
       // R0-PL-04 review (CR-PL04-1): a balance mark-paid can not settle
       // truthfully (a manual refund on the invoice) is refused here, before
       // anything is written (see markPaidRemaining).
-      const amount = CommerceService.markPaidRemaining(Number(existingInvoice.total), rows, existingInvoice.currency);
+      const amount = CommerceService.markPaidRemaining(Number(existingInvoice.total), rows, existingInvoice.currency, credited);
       try {
         await this.recordPayment(
           invoiceId,
@@ -1939,12 +1970,30 @@ export class CommerceService {
         // A payment that settled the invoice committed while this one waited
         // for the invoice lock: the invoice is PAID, which is what was asked,
         // and this call wrote nothing. Any other refusal is the answer.
+        // W4-CREDIT-AWARE-READERS (D-78): a part-credited invoice is settled
+        // while PARTIALLY_CREDITED with nothing left owing.
         if (err instanceof ConflictException) {
           const now = await reload();
           if (now?.status === 'PAID') return now;
+          if (now && (await this.isSettledPartiallyCredited(now))) return now;
         }
         throw err;
       }
+    } else if (existingInvoice.status === 'PARTIALLY_CREDITED') {
+      // W4-CREDIT-AWARE-READERS (CR-V44-1, D-78): its payments and APPLIED
+      // credit notes already cover the total. There is no PAID to move to (a
+      // credited invoice leaves its state only by a credit note), so it is
+      // returned as it is: nothing written, no invoice.paid entry.
+      // W4-CREDIT-AWARE-READERS review SEC-CAR-1 (D-78; ST-PL04-1 / CR-PL04-2):
+      // that decision came from the unlocked read above. A credit-note void
+      // that committed since can leave the reloaded invoice owing again
+      // (PARTIALLY_PAID), so the reloaded row is checked as the other two
+      // paths check it: 200 only for an invoice settled now (PAID, or
+      // PARTIALLY_CREDITED with nothing owing); anything else is the 409.
+      const settled = await reload();
+      if (!settled) throw new NotFoundException('Invoice not found');
+      if (settled.status === 'PAID' || (await this.isSettledPartiallyCredited(settled))) return settled;
+      throw new ConflictException(`Invoice is ${settled.status}, not PAID; reload it and try again`);
     } else {
       // Nothing left to collect (a zero-total invoice, or payment rows that
       // already cover the total): no payment is invented; only the status moves.
@@ -1964,6 +2013,13 @@ export class CommerceService {
     }
     const invoice = await reload();
     if (!invoice) throw new NotFoundException('Invoice not found');
+    // W4-CREDIT-AWARE-READERS (CR-V44-1, D-78): the remainder of a
+    // part-credited invoice was recorded and it stays PARTIALLY_CREDITED with
+    // nothing owing. That is a 200; it is not PAID, so no invoice.paid entry
+    // (the payment's own invoice.payment_recorded entry stands).
+    if (await this.isSettledPartiallyCredited(invoice)) {
+      return invoice;
+    }
     // R0-PL-04 review (ST-PL04-1 / CR-PL04-2): mark-paid answers 200 and logs
     // invoice.paid only for an invoice that is PAID now. Anything else (the
     // write left a balance, or a refund reopened the invoice before this read)
@@ -3729,7 +3785,10 @@ export class CommerceService {
           // R0-PL-04 review (CR-PL04-1): the refund guard runs again on the
           // rows under the lock, so a manual refund that committed in the gap
           // refuses this call rather than being counted twice.
-          const remaining = CommerceService.markPaidRemaining(Number(current?.total ?? 0), current?.payments ?? [], current?.currency);
+          // W4-CREDIT-AWARE-READERS (CR-V44-1): net of the APPLIED credit
+          // notes as they stand under the lock, as markInvoicePaid read them.
+          const credited = await appliedCreditsOf(txClient, { id: invoiceId, businessId, status: locked.status });
+          const remaining = CommerceService.markPaidRemaining(Number(current?.total ?? 0), current?.payments ?? [], current?.currency, credited);
           if (!moneyEquals(remaining, options.expectRemaining)) {
             throw new ConflictException('The invoice balance changed while it was being marked paid; reload it and try again');
           }
@@ -3873,6 +3932,23 @@ export class CommerceService {
   }
 
   /**
+   * W4-CREDIT-AWARE-READERS (CR-V44-1, D-78): a PARTIALLY_CREDITED invoice
+   * whose own payment rows (balanceOfStoredRows, as its reconcile reads them)
+   * and own APPLIED credit notes leave nothing owing: what mark-paid settles a
+   * part-credited invoice to. It stays PARTIALLY_CREDITED; no credited invoice
+   * is PAID.
+   */
+  private async isSettledPartiallyCredited(invoice: { id: string; businessId: string; status: string; total: number; currency: string }): Promise<boolean> {
+    if (invoice.status !== 'PARTIALLY_CREDITED') return false;
+    const rows = await this.prisma.client.payment.findMany({
+      where: { invoiceId: invoice.id, businessId: invoice.businessId },
+      select: { amount: true, status: true },
+    });
+    const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, invoice);
+    return creditAwareBalance(balanceOfStoredRows(Number(invoice.total), rows, invoice.currency), credited).remaining <= 0;
+  }
+
+  /**
    * R0-PL-04 review (CR-PL04-1): the amount mark-paid records, or a 409 when
    * no amount would be true. The amount is computeBalance's remaining, the
    * figure the reconcile settles against.
@@ -3892,15 +3968,32 @@ export class CommerceService {
    * its refund since the V1-29 review, CR-V29-4: balanceOfStoredRows. Mark-paid
    * keeps refusing it: settling legacy refunded invoices waits for the owner's
    * backfill decision.)
+   *
+   * W4-CREDIT-AWARE-READERS (V1-44 review CR-V44-1, reader half; D-13, D-78):
+   * `credited` is the invoice's own APPLIED credit notes (appliedCreditsOf,
+   * which reads them only for a credited invoice), and the amount is what they
+   * leave owing (creditAwareBalance): 100 with 30 credited and 20 paid records
+   * 50, the most reconcileCreditedFromPayments accepts. It recorded total -
+   * paid (80), which that reconcile refused 409 (CN-16). Both callers pass it:
+   * markInvoicePaid on its read and recordPayment under the invoice lock.
+   *
+   * W4-CREDIT-AWARE-READERS review CR-AR-1 (D-13, D-78; CR-PL04-1): with
+   * credits, `remaining` is (total - credited) - net, so the refund guard
+   * compares it with what the invoice owes (total - credited), not the total:
+   * refunds exceeding payments (net below zero) are refused on a credited
+   * invoice as on any other, never recorded as money beyond what is owed
+   * (20 paid, 40 refunded, 30 credited of 100 would have recorded 90).
    */
   private static markPaidRemaining(
     total: number,
     rows: Array<{ amount: number; status: string }>,
     currency?: string | null,
+    credited = 0,
   ): number {
     const flippedRefund = rows.some((r) => r.status === 'REFUNDED' && Number(r.amount) > 0);
-    const balance = computeBalance(total, rows, currency ?? undefined);
-    if (flippedRefund || toCents(balance.remaining) > toCents(balance.total)) {
+    const balance = creditAwareBalance(computeBalance(total, rows, currency ?? undefined), credited);
+    const owedCents = Math.max(0, toCents(balance.total) - toCents(balance.credited));
+    if (flippedRefund || toCents(balance.remaining) > owedCents) {
       throw new ConflictException(
         'Cannot mark an invoice paid after one of its payments was refunded; record the payment received instead',
       );
@@ -5607,7 +5700,15 @@ export class CommerceService {
       },
     });
     if (!invoice) return null;
-    const balance = balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency);
+    // W4-CREDIT-AWARE-READERS (CR-V44-1; D-13, D-75, D-78): `amountDue` is
+    // net of the invoice's own APPLIED credit notes, as the share gate admits a
+    // PARTIALLY_CREDITED invoice (getInvoiceWithBusiness).
+    const credited = await appliedCreditsOf(this.prisma.client as unknown as Prisma.TransactionClient, {
+      id: invoiceId,
+      businessId,
+      status: invoice.status,
+    });
+    const balance = creditAwareBalance(balanceOfStoredRows(Number(invoice.total), invoice.payments, invoice.currency), credited);
     return {
       amountPaid: Math.max(0, balance.net),
       amountDue: balance.remaining,
@@ -5717,8 +5818,13 @@ export class CommerceService {
    * and not settled. PAID answers 409; every other status (DRAFT, VOID,
    * FAILED, PENDING), a soft-deleted invoice and an unknown id answer the same
    * 404, because the public pay page cannot show them either.
+   *
+   * W4-CREDIT-AWARE-READERS (CR-V44-1, D-78): PARTIALLY_CREDITED too, as the
+   * pay page shows it (isCreditAwareShareableInvoiceStatus); the cap is what
+   * its APPLIED credit notes leave owing. FULLY_CREDITED owes nothing and is
+   * not shown, so it answers the 404.
    */
-  private static readonly INTENT_PAYABLE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID']);
+  private static readonly INTENT_PAYABLE_STATUSES: ReadonlySet<string> = new Set(['SENT', 'OVERDUE', 'PARTIALLY_PAID', 'PARTIALLY_CREDITED']);
 
   /**
    * A customer's anonymous "I will pay by <method>" from the public pay page.
@@ -5800,7 +5906,18 @@ export class CommerceService {
       // its payment plus its refund (balanceOfStoredRows, V1-29 review
       // CR-V29-4), so `remaining` no longer exceeds the total for it; an
       // intent still never asks for more than either.
-      const balance = balanceOfStoredRows(Number(current?.total ?? 0), current?.payments ?? [], current?.currency);
+      // W4-CREDIT-AWARE-READERS (CR-V44-1; D-13, D-75): and net of the
+      // invoice's own APPLIED credit notes, read under the lock (a credited
+      // invoice owes total - credited - net, as its reconcile accepts).
+      const credited = await appliedCreditsOf(tx as unknown as Prisma.TransactionClient, {
+        id: invoiceId,
+        businessId: invoice.businessId,
+        status: locked.status,
+      });
+      const balance = creditAwareBalance(
+        balanceOfStoredRows(Number(current?.total ?? 0), current?.payments ?? [], current?.currency),
+        credited,
+      );
       const remaining = Math.min(balance.remaining, balance.total);
       if (remaining <= 0) throw new ConflictException('Invoice is already paid');
 
