@@ -74,8 +74,17 @@ const MANUAL_REFUND_ID_PREFIX = 'manual_refund_';
  */
 const MANUAL_PAYMENT_ID_PREFIX = 'manual_';
 
-/** R0-20c: the Stripe event types the door records as a payment of an invoice or a storefront order. */
-const STRIPE_PAYMENT_EVENTS = new Set(['checkout.session.completed', 'charge.succeeded', 'payment_intent.succeeded']);
+/**
+ * R0-20c: the Stripe event types the door records as a payment of an invoice or a storefront order.
+ * R0-20c review (SEC-R020C-2): checkout.session.async_payment_succeeded is the one that settles a
+ * session completed with a delayed payment method (payment_status 'unpaid'), so it is bound too.
+ */
+const STRIPE_PAYMENT_EVENTS = new Set([
+  'checkout.session.completed',
+  'checkout.session.async_payment_succeeded',
+  'charge.succeeded',
+  'payment_intent.succeeded',
+]);
 /**
  * R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2, as the legacy route's
  * SEC-R020B-3): the webhook_events provider under which the door keeps a
@@ -94,6 +103,19 @@ type StripePaymentObject = {
   currency?: unknown;
   payment_link?: unknown;
 };
+
+/**
+ * R0-20c review (SEC-R020C-2): whether a Checkout Session has taken its money.
+ * A session completed with a delayed payment method arrives with payment_status
+ * 'unpaid' (the money is due, not taken) and is settled later by
+ * checkout.session.async_payment_succeeded ('paid') or failed by
+ * checkout.session.async_payment_failed. Stripe always sends payment_status on
+ * a session; a charge or payment intent event carries none and is taken by its
+ * type (succeeded).
+ */
+function stripeSessionTookMoney(obj: { payment_status?: unknown } | null | undefined): boolean {
+  return obj?.payment_status === undefined || obj.payment_status === 'paid';
+}
 
 @Injectable()
 export class PaymentsService {
@@ -842,9 +864,18 @@ export class PaymentsService {
     return this.underProviderEventClaim<WebhookAck>('stripe', event.id, async () => {
       switch (eventType) {
         case 'checkout.session.completed':
+        case 'checkout.session.async_payment_succeeded':
           // Note: Stripe Payment Links surface as `checkout.session.completed`
           // events with `payment_link` set on the session — there is no
           // separate `payment_link.completed` event in the Stripe API.
+          // R0-20c review (SEC-R020C-2): a session that has not taken its
+          // money (payment_status 'unpaid': a delayed payment method) records
+          // nothing; its async_payment_succeeded records it, and an
+          // async_payment_failed (acknowledged below) has nothing to undo.
+          if (!stripeSessionTookMoney(obj)) {
+            this.logger.log(`Stripe ${eventType} ${event.id ?? ''} is ${String(obj?.payment_status)}; nothing recorded until it is paid`);
+            return { ok: true, received: true };
+          }
           await this.processStripeChargeOrSession(eventType, obj, event.id);
           return { ok: true, received: true, processed: eventType };
         case 'charge.succeeded':
@@ -869,9 +900,10 @@ export class PaymentsService {
    * read exactly as processStripeChargeOrSession reads it.
    *
    * Invoice X (createStripeCheckout): the business is X's. metadata.businessId,
-   * when the event carries one, is X's business; a platform-signed Payment Link
-   * session, whose client_reference_id the payer chooses, must carry it; a
-   * delivery a tenant signed with its own secret speaks for that tenant only.
+   * when the event carries one, is X's business; a platform-signed event (a
+   * session, Payment Link or not, a charge or a payment intent) must carry it
+   * (R0-20c review SEC-R020C-1, as the legacy route); a delivery a tenant
+   * signed with its own secret speaks for that tenant only.
    * The currency is X's and the amount a positive number of minor units. The
    * amount recorded is the one the event carries (D-05, R0-20b review
    * CR-R020B-1), never a fallback to X's total.
@@ -901,9 +933,17 @@ export class PaymentsService {
       select: { businessId: true, currency: true },
     });
     if (invoice) {
+      // R0-20c review (SEC-R020C-1): a platform-signed event must name the
+      // invoice's business, as the legacy route demands of the same verified
+      // event (webhooks.controller.ts bindLegacyStripeEvent). Every session
+      // KeyFlow makes names it (createStripeCheckout, createStorePayment, a
+      // Payment Link's metadata), and Stripe does not copy a session's
+      // metadata onto its PaymentIntent or Charge, so one naming no business
+      // is not KeyFlow's: its client_reference_id or metadata.invoiceId is
+      // the payer's or another account's choice.
       const foreign =
         (signedForBusinessId !== null && signedForBusinessId !== invoice.businessId) ||
-        (namedBusiness != null ? namedBusiness !== invoice.businessId : signedForBusinessId === null && !!obj.payment_link);
+        (namedBusiness != null ? namedBusiness !== invoice.businessId : signedForBusinessId === null);
       const reason = foreign
         ? 'business'
         : currency === '' || currency !== normalizeCurrency(invoice.currency)

@@ -214,10 +214,13 @@ async function stripe(id: string, type: string, object: Record<string, unknown>,
   return paymentsSvc.handleStripeWebhook(raw, signature);
 }
 
-/** A PaymentIntent payment of `amount` (stored as pi_, its charge in reference). */
-function payByIntent(inv: string, n: string, amount: number, secret = SECRET_A) {
+/**
+ * A PaymentIntent payment of `amount` (stored as pi_, its charge in reference). `businessId`, when
+ * given, is named in its metadata, as a platform-signed payment event must (R0-20c review SEC-R020C-1).
+ */
+function payByIntent(inv: string, n: string, amount: number, secret = SECRET_A, businessId?: string) {
   return stripe(`evt_pi_${n}`, 'payment_intent.succeeded', {
-    id: `${P}pi_${n}`, amount_received: amount * 100, currency: 'ttd', latest_charge: `${P}ch_${n}`, metadata: { invoiceId: inv },
+    id: `${P}pi_${n}`, amount_received: amount * 100, currency: 'ttd', latest_charge: `${P}ch_${n}`, metadata: { invoiceId: inv, ...(businessId ? { businessId } : {}) },
   }, secret);
 }
 
@@ -724,7 +727,7 @@ describe('Review SEC-V29C-1: a refund verified by the deployment secret whose id
       }, SECRET_A);
       expect(await rowsOf(ID.invAmbig)).toEqual([`stripe:${P}cs_FAKE:SUCCESSFUL:1:${P}pi_AMB`]);
       // B's genuine payment, verified by the deployment's secret (after A's row: A's is the oldest match).
-      await payByIntent(ID.invAmbigVictim, 'AMB', 100, PLATFORM);
+      await payByIntent(ID.invAmbigVictim, 'AMB', 100, PLATFORM, ID.bizB);
       const victim = await paymentBy(`${P}pi_AMB`);
       expect(victim).toMatchObject({ businessId: ID.bizB, amount: 100, status: 'SUCCESSFUL' });
       const aBefore = await rowsOf(ID.invAmbig);
@@ -741,7 +744,7 @@ describe('Review SEC-V29C-1: a refund verified by the deployment secret whose id
       await expectLedgerAgrees(ID.invAmbig, 1);
 
       // Control: a platform-verified refund whose ids match one business only is recorded there.
-      await payByIntent(ID.invPlatformOk, 'PO', 100, PLATFORM);
+      await payByIntent(ID.invPlatformOk, 'PO', 100, PLATFORM, ID.bizA);
       await refundCreated('evt_re_PO', ID.invPlatformOk, 'PO', 're_PO', 30, PLATFORM);
       expect(await paymentBy(`${P}re_PO`)).toMatchObject({ businessId: ID.bizA, amount: -30, reference: `${P}pi_PO` });
       await expectLedgerAgrees(ID.invPlatformOk, 70);

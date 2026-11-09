@@ -119,8 +119,14 @@
  *   MP-06h a matching session through the door is recorded once (one SUCCESSFUL stripe payment,
  *          one posting, PAID; a redelivery on either endpoint writes nothing); the legacy route
  *          hands its verified event to the same door binding (it runs once, for that event)
- *   MP-06i DEFERRED it.todo: the door refusing an API-made platform-signed session that names no
- *          business at all (the legacy route refuses it, MP-06c 'nobiz')
+ *   MP-06i (R0-20c review SEC-R020C-1) a platform-signed payment event of an invoice that names no
+ *          business (an API-made session, a charge.succeeded, a payment_intent.succeeded) is refused
+ *          by the door as by the legacy route (MP-06c 'nobiz'): the two endpoints agree; KeyFlow's
+ *          own session (it names the business) still records once
+ *   MP-06j (R0-20c review SEC-R020C-2) a session completed with payment_status unpaid (a delayed
+ *          payment method) is acknowledged and records nothing on either endpoint; its
+ *          checkout.session.async_payment_succeeded records it once, bound like any payment event;
+ *          its async_payment_failed records nothing
  *   MP-06s the service shape markInvoicePaid(invoiceId) itself (no actor, no tenant) still takes
  *          the posted path; no production caller passes it any more (RA-G16-01 census in
  *          revenue-authorization.integration.test.ts)
@@ -238,6 +244,11 @@ const ID = {
   invDoorBound: `${P}invDoorBound`,
   invDoorBoundOk: `${P}invDoorBoundOk`,
   invDoorBoundLegacy: `${P}invDoorBoundLegacy`,
+  // R0-20c review repairs: a platform-signed event naming no business (MP-06i, SEC-R020C-1) and a
+  // session completed before its money was taken (MP-06j, SEC-R020C-2)
+  invDoorNoBiz: `${P}invDoorNoBiz`,
+  invDoorUnpaid: `${P}invDoorUnpaid`,
+  invDoorUnpaidLegacy: `${P}invDoorUnpaidLegacy`,
   // tenant B (R0-20 TENANT): a second business with its own owner; it owns no invoice
   ownerB: `${P}ownerB`,
   bizB: `${P}bizB`,
@@ -1881,13 +1892,98 @@ describe('R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR: the legacy POST /webhooks/stripe re
     expect(await doorRefusalsOf('door_legacy')).toHaveLength(0);
   });
 
-  // R0-20c: the legacy route refuses a session naming no business (MP-06c 'nobiz'); the door
-  // refuses it only when it came from a Payment Link (MP-06g 'door_link_nobiz').
-  it.todo(
-    'MP-06i (R0-20c, DEFERRED): the Stripe ledger door refuses an API-made platform-signed checkout session that names no business ' +
-      '(metadata.businessId absent). test/payments-webhooks.service.test.ts, outside the R0-20c-STRIPE-DOOR-BINDING write set, ' +
-      'pins such a session as recorded; follow-up packet.',
-  );
+  it('MP-06i (R0-20c review SEC-R020C-1): the Stripe ledger door refuses (400) a platform-signed payment event of an invoice that names no business (metadata.businessId absent): an API-made checkout session (no payment_link), a charge.succeeded and a payment_intent.succeeded; nothing recorded, no claim, one refusal row each; the legacy route refuses the same event, so the two endpoints agree; the session KeyFlow made for the invoice still records once', async () => {
+    const inv = ID.invDoorNoBiz;
+    // An API-made session (no payment_link) naming the invoice but no business.
+    await expectDoorRefused(sessionEvent('door_api_nobiz', inv, { amount_total: 100, metadata: {} }), 'door_api_nobiz', 'business');
+    const charge = JSON.stringify({
+      id: `${P}evt_door_charge_nobiz`,
+      object: 'event',
+      type: 'charge.succeeded',
+      data: { object: { id: `${P}ch_door_charge_nobiz`, object: 'charge', amount: 100, currency: 'ttd', metadata: { invoiceId: inv } } },
+    });
+    await expectDoorRefused(charge, 'door_charge_nobiz', 'business');
+    const intent = JSON.stringify({
+      id: `${P}evt_door_pi_nobiz`,
+      object: 'event',
+      type: 'payment_intent.succeeded',
+      data: { object: { id: `${P}pi_door_pi_nobiz`, object: 'payment_intent', amount_received: 100, currency: 'ttd', metadata: { invoice_id: inv } } },
+    });
+    await expectDoorRefused(intent, 'door_pi_nobiz', 'business');
+    // One verified event, both endpoints: each refuses it and keeps its own refusal row.
+    const both = sessionEvent('door_both_nobiz', inv, { metadata: { invoiceId: inv } });
+    await expectDoorRefused(both, 'door_both_nobiz', 'business');
+    await expectRefused(await legacy(both), 'door_both_nobiz', 'business');
+    await expectUntouched(inv, 'SENT');
+    expect(connectorEvents).toEqual([]);
+
+    // Control: the session createStripeCheckout made for the invoice (it names the business) is recorded once.
+    await expect(door(sessionEvent('door_nobiz_ok', inv))).resolves.toEqual({ ok: true, received: true, processed: 'checkout.session.completed' });
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(1);
+    expectStripeRow(rows[0], inv, 'door_nobiz_ok');
+    await expectPostedOnce(rows[0].id, INVOICE_TOTAL, null);
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    expect(await doorRefusalsOf('door_nobiz_ok')).toHaveLength(0);
+  });
+
+  it('MP-06j (R0-20c review SEC-R020C-2): a checkout.session.completed whose payment_status is unpaid (a delayed payment method, no money taken yet) is acknowledged and records nothing on either endpoint (no payment, no posting, status unchanged, no payment.received); the checkout.session.async_payment_succeeded of that session records it once (PAID); an async_payment_failed is acknowledged and records nothing', async () => {
+    const inv = ID.invDoorUnpaid;
+    const unpaid = sessionEvent('door_unpaid', inv, { payment_status: 'unpaid' });
+    await expect(door(unpaid)).resolves.toEqual({ ok: true, received: true });
+    await expectUntouched(inv, 'SENT');
+    expect(await doorRefusalsOf('door_unpaid')).toHaveLength(0);
+
+    const asyncEvent = (tag: string, type: string, payment_status: string, invoiceId = inv) => {
+      const event = JSON.parse(sessionEvent(tag, invoiceId, { payment_status }));
+      // The async events carry the session that completed unpaid (its id), now settled one way or the other.
+      event.data.object.id = `${P}cs_door_unpaid${invoiceId === inv ? '' : '_legacy'}`;
+      return JSON.stringify({ ...event, type });
+    };
+    const failed = asyncEvent('door_unpaid_failed', 'checkout.session.async_payment_failed', 'unpaid');
+    await expect(door(failed)).resolves.toEqual({ ok: true, received: true });
+    await expectUntouched(inv, 'SENT');
+
+    const settled = asyncEvent('door_unpaid_settled', 'checkout.session.async_payment_succeeded', 'paid');
+    await expect(door(settled)).resolves.toEqual({ ok: true, received: true, processed: 'checkout.session.async_payment_succeeded' });
+    const rows = await paymentsOf(inv);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: 'SUCCESSFUL', amount: INVOICE_TOTAL, provider: 'stripe', providerPaymentId: `${P}cs_door_unpaid` });
+    await expectPostedOnce(rows[0].id, INVOICE_TOTAL, null);
+    expect((await invoiceRow(inv)).status).toBe('PAID');
+    // Stripe's redelivery of either event writes nothing more.
+    await expect(door(settled)).resolves.toEqual({ ok: true, received: true });
+    await expect(door(unpaid)).resolves.toEqual({ ok: true, received: true });
+    expect((await paymentsOf(inv)).map((r) => r.id)).toEqual([rows[0].id]);
+    expect((await expectLedgerConverged(inv)).cashNet).toBe(INVOICE_TOTAL);
+
+    // The legacy route hands the same unpaid session to the door: acknowledged, nothing recorded, no payment.received.
+    const viaLegacy = ID.invDoorUnpaidLegacy;
+    const res = await legacy(sessionEvent('door_unpaid_legacy', viaLegacy, { payment_status: 'unpaid' }));
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({ ok: true, received: true, ...HINT });
+    expect(res.body).not.toHaveProperty('processed');
+    await expectUntouched(viaLegacy, 'SENT');
+    expect(await refusalsOf('door_unpaid_legacy')).toHaveLength(0);
+    expect(connectorEvents).toEqual([]);
+    // Its async_payment_succeeded through the legacy route reaches the same door binding and records once.
+    const legacySettled = await legacy(asyncEvent('door_unpaid_legacy_settled', 'checkout.session.async_payment_succeeded', 'paid', viaLegacy));
+    expect(legacySettled.status, JSON.stringify(legacySettled.body)).toBe(201);
+    expect(legacySettled.body).toMatchObject({ ok: true, received: true, processed: 'checkout.session.async_payment_succeeded', ...HINT });
+    const legacyRows = await paymentsOf(viaLegacy);
+    expect(legacyRows).toHaveLength(1);
+    expect(legacyRows[0]).toMatchObject({ status: 'SUCCESSFUL', amount: INVOICE_TOTAL, providerPaymentId: `${P}cs_door_unpaid_legacy` });
+    expect((await invoiceRow(viaLegacy)).status).toBe('PAID');
+
+    // The async success is bound like any payment event: one naming another business is refused.
+    const foreign = JSON.parse(asyncEvent('door_unpaid_foreign', 'checkout.session.async_payment_succeeded', 'paid'));
+    foreign.data.object.id = `${P}cs_door_unpaid_foreign`;
+    foreign.data.object.metadata = { invoiceId: inv, businessId: ID.bizB };
+    const outcome: any = await door(JSON.stringify(foreign)).catch((e: unknown) => e);
+    expect(outcome?.getStatus?.()).toBe(400);
+    expect(await doorRefusalsOf('door_unpaid_foreign')).toHaveLength(1);
+    expect((await paymentsOf(inv)).map((r) => r.id)).toEqual([rows[0].id]);
+  });
 });
 
 describe('R0-20 LEDGER: the ledger converges with the payment rows after every case', () => {
