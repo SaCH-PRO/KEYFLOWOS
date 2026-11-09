@@ -583,6 +583,11 @@
       "packet": "V1-81 (FOLLOW3-A7-MONEY-REPORTS)"
     },
     {
+      "prefix": "v82b_",
+      "owner": "apps/server/test/invoice-issued-amounts.integration.test.ts",
+      "packet": "V1-82 (FOLLOW3-B2-ISSUED-INVOICE-AMOUNTS)"
+    },
+    {
       "prefix": "v82c_",
       "owner": "apps/server/test/accrual-revenue-splits.integration.test.ts",
       "packet": "V1-82 (FOLLOW3-B3-ACCRUAL-SPLIT-DISCOUNT)"
