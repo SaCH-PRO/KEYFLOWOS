@@ -1,6 +1,8 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { canonicalContactStatus } from '../crm/crm.constants';
+import { settingDefaultContactStatus } from './google-contacts-sync.service';
 import { MicrosoftTokenHelper } from './microsoft-token.helper';
 
 interface MsContact {
@@ -32,6 +34,12 @@ const EMPTY_RULES: OutlookContactMappingRules = {
   defaultLifecycleStage: null,
 };
 
+/**
+ * D-92 (W5-D92-RESIDUALS): a rule is read, and so applied, through
+ * canonicalContactStatus, as the Google Contacts rules are: a rule stored
+ * before D-92 holding a legacy DORMANT or CUSTOMER reads as CLIENT, and one
+ * holding a value with no ContactStatus reads as none.
+ */
 function parseRules(raw: unknown): OutlookContactMappingRules {
   if (!raw || typeof raw !== 'object') return { ...EMPTY_RULES };
   const obj = raw as Record<string, unknown>;
@@ -41,7 +49,7 @@ function parseRules(raw: unknown): OutlookContactMappingRules {
           .filter((x) => typeof x === 'string' && (x as string).trim().length > 0)
           .map((x) => (x as string).trim())
       : [],
-    defaultStatus: typeof obj.defaultStatus === 'string' ? obj.defaultStatus : null,
+    defaultStatus: canonicalContactStatus(obj.defaultStatus as string | null | undefined),
     defaultOwnerId: typeof obj.defaultOwnerId === 'string' ? obj.defaultOwnerId : null,
     defaultLifecycleStage:
       typeof obj.defaultLifecycleStage === 'string' ? obj.defaultLifecycleStage : null,
@@ -81,7 +89,13 @@ export class OutlookContactsSyncService {
     businessId: string,
     rules: Partial<OutlookContactMappingRules>,
   ): Promise<OutlookContactMappingRules> {
-    const next = parseRules({ ...(await this.getMappingRules(businessId)), ...rules });
+    // D-92: refuse a status with no ContactStatus (400) before anything is read or written.
+    const defaultStatus = settingDefaultContactStatus(rules.defaultStatus);
+    const next = parseRules({
+      ...(await this.getMappingRules(businessId)),
+      ...rules,
+      ...(defaultStatus !== undefined ? { defaultStatus } : {}),
+    });
     const existing = await this.prisma.client.connectorStatus.findUnique({
       where: { businessId_connectorType: { businessId, connectorType: 'outlook_contacts' } },
       select: { metadata: true },
@@ -364,7 +378,8 @@ export class OutlookContactsSyncService {
               companyName: company,
               jobTitle,
               source: 'outlook_contacts',
-              status: rules.defaultStatus || 'LEAD',
+              // D-92: only a ContactStatus; a rule naming none creates a LEAD.
+              status: canonicalContactStatus(rules.defaultStatus) ?? 'LEAD',
               ...(rules.defaultLifecycleStage
                 ? { lifecycleStage: rules.defaultLifecycleStage }
                 : {}),

@@ -1,5 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ModuleName, ModuleCapability } from './key-cortex-connector.types';
+import { CONTACT_STATUSES } from '../crm/crm.constants';
+
+/**
+ * D-92 (W5-D92-RESIDUALS): the contact statuses KEY Cortex is offered, for a
+ * write and for a filter: exactly CONTACT_STATUSES, every stored status. The
+ * registry offered 'lead', 'prospect', 'customer', 'churned' and 'partner';
+ * the CRM adapter refuses churned and partner (D-92 review CR-D92-1), and a
+ * list or count filter matches a stored status exactly, so a lowercase value
+ * matched nothing.
+ */
+const CONTACT_STATUS_ENUM: string[] = [...CONTACT_STATUSES];
 
 /**
  * Central registry for every KeyFlowOS module capability exposed to KEY Cortex.
@@ -20,7 +31,7 @@ export class KeyCortexCapabilityRegistryService {
       actions: [
         {
           name: 'create_contact',
-          description: 'Create a new contact (lead, prospect, or customer).',
+          description: 'Create a new contact (a lead, prospect or client).',
           parameters: [
             { name: 'firstName', type: 'string', description: 'First name', required: true },
             { name: 'lastName', type: 'string', description: 'Last name', required: false },
@@ -28,10 +39,10 @@ export class KeyCortexCapabilityRegistryService {
             { name: 'phone', type: 'string', description: 'Phone number', required: false },
             { name: 'company', type: 'string', description: 'Company name', required: false },
             { name: 'tags', type: 'array', description: 'Tags to attach', required: false },
-            { name: 'status', type: 'enum', description: 'Contact status', enumValues: ['lead', 'prospect', 'customer', 'churned', 'partner'], required: false, default: 'lead' },
+            { name: 'status', type: 'enum', description: 'Contact status', enumValues: CONTACT_STATUS_ENUM, required: false, default: 'LEAD' },
           ],
           requiresApproval: false,
-          examples: ['Add a new lead named John Smith', 'Create contact for john@acme.com', 'Add customer Jane Doe from Acme Inc'],
+          examples: ['Add a new lead named John Smith', 'Create contact for john@acme.com', 'Add client Jane Doe from Acme Inc'],
         },
         {
           name: 'get_contact',
@@ -51,11 +62,11 @@ export class KeyCortexCapabilityRegistryService {
             { name: 'lastName', type: 'string', description: 'New last name', required: false },
             { name: 'email', type: 'string', description: 'New email', required: false },
             { name: 'phone', type: 'string', description: 'New phone', required: false },
-            { name: 'status', type: 'enum', description: 'Updated status', enumValues: ['lead', 'prospect', 'customer', 'churned', 'partner'], required: false },
+            { name: 'status', type: 'enum', description: 'Updated status', enumValues: CONTACT_STATUS_ENUM, required: false },
             { name: 'tags', type: 'array', description: 'Replace tags', required: false },
           ],
           requiresApproval: false,
-          examples: ['Update contact abc123 phone to 555-0199', 'Change John Smith status to customer'],
+          examples: ['Update contact abc123 phone to 555-0199', 'Change John Smith status to client'],
         },
         {
           name: 'delete_contact',
@@ -70,14 +81,14 @@ export class KeyCortexCapabilityRegistryService {
           name: 'list_contacts',
           description: 'List contacts with optional filtering.',
           parameters: [
-            { name: 'status', type: 'enum', description: 'Filter by status', enumValues: ['lead', 'prospect', 'customer', 'churned', 'partner'], required: false },
+            { name: 'status', type: 'enum', description: 'Filter by status', enumValues: CONTACT_STATUS_ENUM, required: false },
             { name: 'tag', type: 'string', description: 'Filter by tag', required: false },
             { name: 'search', type: 'string', description: 'Full-text search query', required: false },
             { name: 'limit', type: 'number', description: 'Page size', required: false, default: 50 },
             { name: 'offset', type: 'number', description: 'Page offset', required: false, default: 0 },
           ],
           requiresApproval: false,
-          examples: ['List all customers', 'Show me leads tagged VIP', 'Search contacts named John'],
+          examples: ['List all clients', 'Show me leads tagged VIP', 'Search contacts named John'],
         },
         {
           name: 'add_task',
@@ -129,11 +140,11 @@ export class KeyCortexCapabilityRegistryService {
           description: 'Change the pipeline status of a contact.',
           parameters: [
             { name: 'contactId', type: 'id', description: 'UUID of the contact', required: true },
-            { name: 'status', type: 'enum', description: 'New status', enumValues: ['lead', 'prospect', 'customer', 'churned', 'partner'], required: true },
+            { name: 'status', type: 'enum', description: 'New status', enumValues: CONTACT_STATUS_ENUM, required: true },
             { name: 'reason', type: 'string', description: 'Reason for change', required: false },
           ],
           requiresApproval: false,
-          examples: ['Move John to customer', 'Change status of abc123 to prospect'],
+          examples: ['Move John to client', 'Change status of abc123 to prospect'],
         },
         {
           name: 'log_event',
@@ -172,11 +183,11 @@ export class KeyCortexCapabilityRegistryService {
           name: 'count_contacts',
           description: 'Count contacts matching a filter.',
           parameters: [
-            { name: 'status', type: 'enum', description: 'Filter by status', enumValues: ['lead', 'prospect', 'customer', 'churned', 'partner'], required: false },
+            { name: 'status', type: 'enum', description: 'Filter by status', enumValues: CONTACT_STATUS_ENUM, required: false },
             { name: 'tag', type: 'string', description: 'Filter by tag', required: false },
           ],
           returns: 'number',
-          examples: ['How many customers do we have?', 'Count leads tagged VIP'],
+          examples: ['How many clients do we have?', 'Count leads tagged VIP'],
         },
         {
           name: 'get_tasks',

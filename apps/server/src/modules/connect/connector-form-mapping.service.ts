@@ -2,7 +2,9 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException } fr
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmService } from '../crm/crm.service';
+import { canonicalContactStatus } from '../crm/crm.constants';
 import type { CrmField, FieldMappingEntry } from './google-forms-mapping.service';
+import { settingDefaultContactStatus } from './google-contacts-sync.service';
 
 const SUPPORTED_SOURCES = ['typeform', 'jotform', 'webhook_form'] as const;
 export type ConnectorFormSource = (typeof SUPPORTED_SOURCES)[number];
@@ -130,7 +132,9 @@ export class ConnectorFormMappingService {
 
   async getMapping(businessId: string, source: ConnectorFormSource, externalFormId: string) {
     const meta = await this.readMetadata(businessId, source);
-    return meta.formMappings?.[externalFormId] ?? null;
+    const mapping = meta.formMappings?.[externalFormId];
+    // D-92: report the default status a backfill applies (see applyToSubmission).
+    return mapping ? { ...mapping, defaultStatus: canonicalContactStatus(mapping.defaultStatus) } : null;
   }
 
   async saveMapping(
@@ -140,6 +144,9 @@ export class ConnectorFormMappingService {
     input: Partial<PerFormMapping>,
   ): Promise<PerFormMapping> {
     if (!externalFormId) throw new BadRequestException('externalFormId required');
+    // D-92 (W5-D92-RESIDUALS): a default status is stored only as a ContactStatus;
+    // one with none is a 400 before anything is read or written.
+    const defaultStatus = settingDefaultContactStatus(input.defaultStatus);
     const cleaned = this.validateMappings(input.fieldMappings ?? []);
     const meta = await this.readMetadata(businessId, source);
     const prev = meta.formMappings?.[externalFormId] ?? { formId: externalFormId, fieldMappings: [] };
@@ -151,7 +158,7 @@ export class ConnectorFormMappingService {
         ? input.defaultTags.filter((s) => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim())
         : (prev.defaultTags ?? []),
       defaultStatus:
-        input.defaultStatus !== undefined ? input.defaultStatus : (prev.defaultStatus ?? null),
+        defaultStatus !== undefined ? defaultStatus : canonicalContactStatus(prev.defaultStatus),
       autoCreate: input.autoCreate ?? prev.autoCreate ?? true,
       processedSubmissionIds: prev.processedSubmissionIds ?? [],
       lastBackfillAt: prev.lastBackfillAt,
@@ -240,6 +247,10 @@ export class ConnectorFormMappingService {
     const data = (submission.data ?? {}) as Record<string, unknown>;
     const values: Partial<Record<CrmField, string>> = {};
     const tags: string[] = [...(mapping.defaultTags ?? [])];
+    // D-92 (W5-D92-RESIDUALS): a mapping stored before D-92 may hold any value,
+    // so it is applied through canonicalContactStatus: a legacy DORMANT or
+    // CUSTOMER is CLIENT, and a value with no ContactStatus writes no status.
+    const defaultStatus = canonicalContactStatus(mapping.defaultStatus);
 
     for (const entry of mapping.fieldMappings) {
       const v = data[entry.questionId];
@@ -255,7 +266,7 @@ export class ConnectorFormMappingService {
     if (submission.contactId) {
       // Existing contact already linked — merge (never replace) tags / status.
       try {
-        if (tags.length || mapping.defaultStatus) {
+        if (tags.length || defaultStatus) {
           const existing = await this.prisma.client.contact.findUnique({
             where: { id: submission.contactId },
             select: { tags: true },
@@ -267,7 +278,7 @@ export class ConnectorFormMappingService {
             where: { id: submission.contactId },
             data: {
               ...(tags.length ? { tags: { set: merged } } : {}),
-              ...(mapping.defaultStatus ? { status: mapping.defaultStatus } : {}),
+              ...(defaultStatus ? { status: defaultStatus } : {}),
             },
           });
         }
@@ -300,9 +311,9 @@ export class ConnectorFormMappingService {
       tags,
       custom: { externalFormId: mapping.formId, submissionId: submission.id },
     });
-    if (mapping.defaultStatus) {
+    if (defaultStatus) {
       await this.prisma.client.contact
-        .update({ where: { id: contact.id }, data: { status: mapping.defaultStatus } })
+        .update({ where: { id: contact.id }, data: { status: defaultStatus } })
         .catch(() => undefined);
     }
     await this.prisma.client.leadFormSubmission

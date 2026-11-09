@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CONTACT_STATUSES, canonicalContactStatus, type ContactStatus } from '../crm/crm.constants';
 import { GoogleTokenHelper } from './google-token.helper';
 
 interface PeopleConnection {
@@ -26,6 +27,35 @@ const EMPTY_RULES: ContactMappingRules = {
   defaultLifecycleStage: null,
 };
 
+/**
+ * D-92 (W5-D92-RESIDUALS): the default contact status an operator sets on a
+ * connector rule (the Google and Outlook contact-sync rules, the connector form
+ * mapping). Every stored Contact.status is one of CONTACT_STATUSES, so the
+ * setting stores a status only through canonicalContactStatus: the vocabulary
+ * in any case or padding as itself, the legacy CUSTOMER and DORMANT as CLIENT.
+ * A value with no ContactStatus ('partner', 'churned', ACTIVE, a non-string)
+ * is a 400 and nothing is stored. Undefined leaves the stored default as it
+ * is; null or a blank clears it. Before D-92 the setting stored the value as
+ * given, and every contact a sync or a form submission created took it.
+ */
+export function settingDefaultContactStatus(value: unknown): ContactStatus | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || (typeof value === 'string' && value.trim() === '')) return null;
+  const status = typeof value === 'string' ? canonicalContactStatus(value) : null;
+  if (!status) {
+    throw new BadRequestException(
+      `"${String(value)}" is not a contact status: use one of ${CONTACT_STATUSES.join(', ')}`,
+    );
+  }
+  return status;
+}
+
+/**
+ * D-92 (W5-D92-RESIDUALS): a rule is read, and so applied, through
+ * canonicalContactStatus, because a rule stored before D-92 may hold any value:
+ * a legacy DORMANT or CUSTOMER reads as CLIENT, and a value with no
+ * ContactStatus reads as none (no status is written for it).
+ */
 function parseRules(raw: unknown): ContactMappingRules {
   if (!raw || typeof raw !== 'object') return { ...EMPTY_RULES };
   const obj = raw as Record<string, unknown>;
@@ -35,7 +65,7 @@ function parseRules(raw: unknown): ContactMappingRules {
           .filter((x) => typeof x === 'string' && x.trim().length > 0)
           .map((x) => (x as string).trim())
       : [],
-    defaultStatus: typeof obj.defaultStatus === 'string' ? obj.defaultStatus : null,
+    defaultStatus: canonicalContactStatus(obj.defaultStatus as string | null | undefined),
     defaultOwnerId: typeof obj.defaultOwnerId === 'string' ? obj.defaultOwnerId : null,
     defaultLifecycleStage:
       typeof obj.defaultLifecycleStage === 'string' ? obj.defaultLifecycleStage : null,
@@ -85,7 +115,13 @@ export class GoogleContactsSyncService {
     businessId: string,
     rules: Partial<ContactMappingRules>,
   ): Promise<ContactMappingRules> {
-    const next = parseRules({ ...(await this.getMappingRules(businessId)), ...rules });
+    // D-92: refuse a status with no ContactStatus before anything is read or written.
+    const defaultStatus = settingDefaultContactStatus(rules.defaultStatus);
+    const next = parseRules({
+      ...(await this.getMappingRules(businessId)),
+      ...rules,
+      ...(defaultStatus !== undefined ? { defaultStatus } : {}),
+    });
     const existing = await this.prisma.client.connectorStatus.findUnique({
       where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
       select: { metadata: true },
@@ -193,7 +229,9 @@ export class GoogleContactsSyncService {
     if (rules.defaultTags.length > 0) {
       data.tags = { set: rules.defaultTags };
     }
-    if (rules.defaultStatus) data.status = rules.defaultStatus;
+    // D-92: only a ContactStatus is written; a rule naming none leaves the LEAD the contact was created with.
+    const defaultStatus = canonicalContactStatus(rules.defaultStatus);
+    if (defaultStatus) data.status = defaultStatus;
     if (rules.defaultLifecycleStage) data.lifecycleStage = rules.defaultLifecycleStage;
     if (rules.defaultOwnerId) data.ownerId = rules.defaultOwnerId;
     if (Object.keys(data).length === 0) return;
