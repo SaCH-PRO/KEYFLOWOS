@@ -643,9 +643,24 @@
       "packet": "V1-84 (FOLLOW3-D6-COMMERCE-CONTACT-BIND-VIS)"
     },
     {
+      "prefix": "v84g_",
+      "owner": "apps/server/test/key-contact-reads-visibility.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D7-KEY-CONTACT-READS-VIS)"
+    },
+    {
+      "prefix": "v84i_",
+      "owner": "apps/server/test/key-do-it-for-me-scope.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D9-DOITFORME-SCOPE)"
+    },
+    {
       "prefix": "v84j_",
       "owner": "apps/server/test/command-item-contact-visibility.integration.test.ts",
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
+    },
+    {
+      "prefix": "v84p_",
+      "owner": "apps/server/test/key-chat-ops-scope.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE)"
     },
     {
       "prefix": "v87a_",

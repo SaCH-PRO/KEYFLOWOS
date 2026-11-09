@@ -342,9 +342,11 @@ describe('fixture sanity (the leak source is real: the rows hold the data)', () 
       const plan = await db.keyCommand.findUnique({ where: { id } });
       expect(plan.groundedData.totalRevenue, id).toBe(PAID_TOTAL);
     }
-    // staffNone's own 'do' row was grounded business-wide too: it names contacts.
+    // FOLLOW3-D9: staffNone's own 'do' row holds only what staffNone may read (crm none): it names no
+    // contact. (Before D9 it was grounded business-wide and named both; key-do-it-for-me-scope pins the rule.)
     const staffDo = await db.keyCommand.findUnique({ where: { id: ROW.staffNoneDo } });
-    expect(JSON.stringify(staffDo.executionResult)).toContain(TEAM_NAME);
+    expect(JSON.stringify(staffDo.executionResult)).not.toContain(TEAM_NAME);
+    expect(JSON.stringify(staffDo.executionResult)).not.toContain(PRIVATE_NAME);
   });
 });
 
@@ -530,8 +532,10 @@ describe("SEC-V109b-2 the POST key/command 'do'/'draft' response is projected as
     const { body, persisted, listedRow } = await postAndList(ID.staffMine, CHASE, 'do');
     const text = JSON.stringify(body);
 
-    // The row still holds what generateDoItForMe found business-wide (the leak source is real).
-    expect(JSON.stringify(persisted.executionResult)).toContain(PRIVATE_NAME);
+    // FOLLOW3-D9: the row holds only what generateDoItForMe read for this member, no contact outside
+    // their book. (Before D9 it held what it found business-wide; key-do-it-for-me-scope pins the rule.)
+    expect(JSON.stringify(persisted.executionResult)).not.toContain(PRIVATE_NAME);
+    expect(JSON.stringify(persisted.executionResult)).not.toContain(TEAM_NAME);
 
     expect(text).not.toContain(PRIVATE_NAME);
     expect(text).not.toContain(TEAM_NAME);

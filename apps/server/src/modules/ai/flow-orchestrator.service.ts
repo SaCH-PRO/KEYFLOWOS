@@ -36,7 +36,8 @@ import { McpClientManagerService } from '../mcp/mcp-client-manager.service';
 import { isMcpToolName } from '../mcp/mcp.types';
 import { CodeExecutorService } from './code-executor.service';
 import type { JobRoleEnvelope } from '../structure/job-role-policy.service';
-import { JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
+import { CANONICAL_MODULE_TOOLS, JobRolePolicyService, NO_JOB_ROLE } from '../structure/job-role-policy.service';
+import { LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
 import { PayrollService } from '../payroll/payroll.service';
 import { StaffPerformanceService } from '../staff-performance/staff-performance.service';
 import { CrmSequenceService } from '../crm/crm-sequence.service';
@@ -179,7 +180,10 @@ export interface PendingConfirmation {
 interface GovernedToolCall {
   tc: FlowToolCall;
   decision: GovernanceDecision;
-  /** Context for the executor, when the action boundary prepared the call. */
+  /**
+   * Context for the executor: the surface's own (its member as principalUserId) for a tool the
+   * action boundary has not adopted, and the boundary's, with its action id, for one it prepared.
+   */
   action?: ActionContext;
   /** The boundary is waiting for the requester to confirm this id. */
   confirmationId?: string;
@@ -364,6 +368,19 @@ function readFlowBoundConfirmation(value: unknown): { bound: FlowBoundConfirmati
   if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
   return { bound: v as unknown as FlowBoundConfirmation, args: args as Record<string, unknown> };
 }
+
+/**
+ * V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE, owner ruling D-40). The level the routes require for a
+ * KEY tool CANONICAL_MODULE_TOOLS.operations lists (the command-centre items, procurement and the
+ * other operations routes); undefined for every other tool, which this rule leaves alone.
+ */
+function operationsLevelFor(toolName: string): 'read' | 'write' | 'admin' | undefined {
+  const tools = CANONICAL_MODULE_TOOLS.operations;
+  return Object.prototype.hasOwnProperty.call(tools, toolName) ? tools[toolName] : undefined;
+}
+
+/** The surfaces a member's own chat turn arrives on (E1 to E3); their principal is that member. */
+const MEMBER_CHAT_SURFACES: ReadonlySet<string> = new Set(['CHAT', 'CHAT_STREAM', 'CHAT_CONFIRM']);
 
 /** The page context without any position envelope a caller put in it (V1-21b review 7 ENV-FORGE). */
 function withoutClientEnvelope(ctx: FlowPageContext | undefined): FlowPageContext | undefined {
@@ -1529,6 +1546,8 @@ export class FlowOrchestratorService {
     crew: readonly BusinessRole[],
     contextText: string,
     envelope?: JobRoleEnvelope,
+    /** The member whose chat turn this is (member chat only; the staff bridge passes none). */
+    principalUserId?: string | null,
   ): Promise<ReturnType<typeof getOpenAiToolDefinitions>> {
     const all = getOpenAiToolDefinitions();
     let candidates: ReturnType<typeof getOpenAiToolDefinitions>;
@@ -1548,6 +1567,18 @@ export class FlowOrchestratorService {
       candidates = all.filter((t) => this.roleEngine.crewAllows(crew, t.function.name));
     } else {
       candidates = all;
+    }
+
+    // V1-84 (FOLLOW3-D16, owner ruling D-40): in a member's own chat, an operations tool is offered
+    // only when the member's operations level reaches the level its routes require, as
+    // ModuleScopeGuard would let them do the same work by hand. A position envelope already bounds
+    // a staff-bridge turn by its holder's membership (JobRolePolicyService), so it is left alone.
+    if (!envelope && principalUserId) {
+      const level = await this.memberOperationsLevel(businessId, principalUserId);
+      candidates = candidates.filter((t) => {
+        const required = operationsLevelFor(t.function.name);
+        return !required || rankOf(level) >= LEVEL_RANK[required];
+      });
     }
 
     // MCP IS DELIBERATELY NOT BRIDGED HERE. See the comment below — this is a
@@ -1868,6 +1899,7 @@ export class FlowOrchestratorService {
       crew,
       `${enrichedMessage}\n${pageContext?.route ?? ''}`,
       envelope,
+      userId,
     );
 
     let systemPrompt: string;
@@ -1999,8 +2031,14 @@ ${triage.standingContext}`;
               usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0, creditsUsed: 0 },
             };
           }
+          // It runs as the member who confirmed it (V1-84, D-37): the Flow binds only calls the
+          // action boundary has not adopted (issuePendingConfirmations), and for those the executor
+          // reads the principal only to apply that member's contact and calendar visibility.
+          const confirmedAction: ActionContext | undefined = this.getActionBoundary().adopts(pendingConfirmation.toolName)
+            ? undefined
+            : { surface: 'CHAT', principalUserId: confirmedBy, crew: claim.crew, sourceId: pendingConfirmation.toolCallId || null, sessionId: effectiveSessionId };
           // A call the provider sent with no id keeps the executor's own id (CR-2).
-          const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, pendingConfirmation.toolCallId || undefined, { planId: '', planStepId: '', role: claim.role ?? detectedRole ?? undefined, actorUserId: confirmedBy });
+          const result = await this.executeTool(businessId, pendingConfirmation.toolName, pendingConfirmation.toolArgs, pendingConfirmation.toolCallId || undefined, { planId: '', planStepId: '', role: claim.role ?? detectedRole ?? undefined, actorUserId: confirmedBy }, confirmedAction);
           await claim.settle(result.success ? 'completed' : 'failed', result.success ? undefined : (result.error ?? 'Unknown error'));
           return {
             reply: result.success
@@ -2312,6 +2350,7 @@ ${triage.standingContext}`;
       crew,
       `${enrichedMessage}\n${pageContext?.route ?? ''}`,
       envelope,
+      userId,
     );
 
     let systemPrompt: string;
@@ -2768,7 +2807,24 @@ ${triage.standingContext}`;
     ctx: ActionContext,
   ): Promise<GovernedToolCall> {
     const boundary = this.getActionBoundary();
-    if (!legacy.allowed || !boundary.adopts(tc.name)) return { tc, decision: legacy };
+    if (!legacy.allowed) return { tc, decision: legacy };
+    // V1-84 (FOLLOW3-D16, owner ruling D-40): a call the member's operations scope does not reach is
+    // neither proposed for confirmation nor filed for approval. It goes to the executor, which
+    // refuses it as a tool error before anything is written (operationsScopeRefusal), so the
+    // member and the model are told why.
+    if (await this.operationsScopeRefusal(businessId, tc.name, ctx)) {
+      return {
+        tc,
+        decision: { ...legacy, requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false },
+        action: ctx,
+      };
+    }
+    // V1-84 (FOLLOW3-D7, owner ruling D-37): a tool the boundary has not adopted still runs as the
+    // member this surface established, so the dispatcher's contact and calendar reads apply that
+    // member's visibility (contactReadAccess, calendar_list_events). The context used to be dropped
+    // here, and member chat read the whole business. A surface with no member (the staff bridge,
+    // the support desk) passes principalUserId null and keeps the business-wide read.
+    if (!boundary.adopts(tc.name)) return { tc, decision: legacy, action: ctx };
 
     const flags = { requiresQuickConfirm: false, requiresFormalApproval: false, requiresAdminApproval: false };
     try {
@@ -3161,6 +3217,10 @@ ${triage.standingContext}`;
     const actorUserId = planContext?.actorUserId;
     const startTime = Date.now();
     try {
+      // V1-84 (FOLLOW3-D16, D-40): read when the call runs, as the route reads it per request, so a
+      // confirmation issued before the member's operations scope was lowered runs nothing either.
+      const refusal = await this.operationsScopeRefusal(businessId, toolName, action);
+      if (refusal) throw new Error(refusal);
       this.validateToolInput(toolName, args);
       const rawResult = await this.executeToolAction(businessId, toolName, args, action);
       const envelope = wrapToolResult(toolName, rawResult);
@@ -3266,6 +3326,49 @@ ${triage.standingContext}`;
   }
 
   /**
+   * V1-84 (FOLLOW3-D16-KEY-CHAT-OPS-SCOPE, owner ruling D-40). The member's `operations` level, read
+   * exactly as ModuleScopeGuard reads it for the routes behind CANONICAL_MODULE_TOOLS.operations
+   * (the command-centre items, procurement and the other operations routes): a platform
+   * SUPER_ADMIN passes every requirement; else the membership's explicit permissionScopes map,
+   * where a missing key is none; else the role defaults (OWNER and ADMIN admin, STAFF read). No
+   * membership is none.
+   */
+  private async memberOperationsLevel(businessId: string, userId: string): Promise<string> {
+    const [user, membership] = await Promise.all([
+      this.prisma.client.user.findUnique({ where: { id: userId }, select: { role: true } }),
+      this.prisma.client.membership.findUnique({
+        where: { userId_businessId: { userId, businessId } },
+        select: { role: true, permissionScopes: true },
+      }),
+    ]);
+    if (user?.role === 'SUPER_ADMIN') return 'admin';
+    if (!membership) return 'none';
+    const scopes: Record<string, string> =
+      membership.permissionScopes && typeof membership.permissionScopes === 'object'
+        ? (membership.permissionScopes as Record<string, string>)
+        : defaultScopesForRole(membership.role);
+    return scopes.operations || 'none';
+  }
+
+  /**
+   * V1-84 (FOLLOW3-D16, D-40). Why a member's chat call may not run `toolName`, in the words
+   * ModuleScopeGuard answers the route with: an operations tool whose routes require a level above
+   * the member's operations level. null for every other tool, for a level that reaches it, and for
+   * a call with no member or from another surface: the staff bridge (whose issued envelope
+   * JobRolePolicyService already bounds by the holder's membership), the support desk and the
+   * system surfaces are unchanged. execute_custom_logic asks it for each inner api.callTool with
+   * the member's outer chat context (review SEC-D16-1), so a snippet reaches no further than the
+   * member's own calls do.
+   */
+  private async operationsScopeRefusal(businessId: string, toolName: string, action?: ActionContext): Promise<string | null> {
+    const required = operationsLevelFor(toolName);
+    if (!required || !action?.principalUserId || !MEMBER_CHAT_SURFACES.has(action.surface)) return null;
+    const level = await this.memberOperationsLevel(businessId, action.principalUserId);
+    if (rankOf(level) >= LEVEL_RANK[required]) return null;
+    return `Insufficient permissions: ${toolName} needs operations ${required} access (you have ${level})`;
+  }
+
+  /**
    * Trial-N repair round 2 (CONTACT-READ-ABORT, NEW-4-REST; D-37: KEY contact reads apply the
    * member's visibility). The CRM access of the principal a surface established for this call
    * (resolveCrmAccess, which refuses a non-member 403) and the clause GET contacts ANDs onto its
@@ -3283,6 +3386,31 @@ ${triage.standingContext}`;
     const access = await resolveCrmAccess(this.prisma, businessId, userId);
     const clause = visibilityClause(access, userId) as Prisma.ContactWhereInput | null;
     return clause ? { userId, access, clause } : null;
+  }
+
+  /**
+   * V1-84 (FOLLOW3-D7, D-37; review SEC-D7-3). The clause a member's calendar read ANDs onto `where`
+   * so no event on a contact their CRM view does not open is answered (contactVisibilityFilter, the
+   * GET contacts/:id rule; GET calendar events and GET calendar conflicts apply the same cascade
+   * through CalendarEvent.contactId). An event with no contact stays. null with no principal or for
+   * the OWNER and a SUPER_ADMIN: the read is unchanged.
+   */
+  private async calendarContactScope(
+    businessId: string,
+    action: ActionContext | undefined,
+    where: Prisma.CalendarEventWhereInput,
+  ): Promise<Prisma.CalendarEventWhereInput | null> {
+    const reader = await this.contactReadAccess(businessId, action);
+    if (!reader) return null;
+    const linked = await this.prisma.client.calendarEvent.findMany({
+      where: { ...where, contactId: { not: null } },
+      select: { contactId: true },
+      distinct: ['contactId'],
+    });
+    const ids = linked.map((e: { contactId: string | null }) => e.contactId);
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, ids);
+    if (!canOpen) return null;
+    return { OR: [{ contactId: null }, { contactId: { in: ids.filter((id): id is string => !!id && canOpen(id)) } }] };
   }
 
   /**
@@ -4049,7 +4177,16 @@ ${triage.standingContext}`;
           take: args.limit ?? 10,
           orderBy: { startTime: 'asc' },
         });
-        const bookings = rows.map((booking) => ownRelations(businessId, booking, ['contact', 'service']));
+        const owned = rows.map((booking) => ownRelations(businessId, booking, ['contact', 'service']));
+        // V1-84 (FOLLOW3-D7, D-37): the booking stays, but its contact is named only when the
+        // member may open it (contactVisibilityFilter, the GET contacts/:id rule); otherwise neither
+        // the relation nor its id is answered (review SEC-D7-2: the id alone opened the contact through
+        // fetch_client_health). Unchanged with no principal or for the OWNER.
+        const reader = await this.contactReadAccess(businessId, action);
+        const canOpen = reader
+          ? await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, owned.map((b) => b.contactId))
+          : null;
+        const bookings = canOpen ? owned.map((b) => (canOpen(b.contactId) ? b : { ...b, contactId: null, contact: null })) : owned;
         return { bookings, count: bookings.length };
       }
 
@@ -4158,12 +4295,25 @@ ${triage.standingContext}`;
       }
 
       case 'bookings_list_waitlist': {
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-4): as bookings_list_bookings, an entry stays but
+        // its contact (relation and id) is named only when the member may open it; a contactId
+        // filter naming a contact they may not open answers as an unknown contact does (none).
+        // Unchanged with no principal or for the OWNER.
+        const reader = await this.contactReadAccess(businessId, action);
+        if (reader && args.contactId) {
+          const mayOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, [args.contactId]);
+          if (mayOpen && !mayOpen(args.contactId)) return { items: [], total: 0 };
+        }
         const result = await this.getWaitlist().listWaitlist(businessId, {
           status: args.status,
           serviceId: args.serviceId,
           contactId: args.contactId,
         });
-        return { items: result.items, total: result.total };
+        const canOpen = reader
+          ? await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, result.items.map((e) => e.contactId))
+          : null;
+        const items = canOpen ? result.items.map((e) => (canOpen(e.contactId) ? e : { ...e, contactId: null, contact: null })) : result.items;
+        return { items, total: result.total };
       }
 
       case 'bookings_offer_waitlist_slot': {
@@ -4345,10 +4495,16 @@ ${triage.standingContext}`;
         const now = new Date();
         const fourteenDaysAgo = new Date(now.getTime() - 14 * 86400000);
         const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-2, SEC-D7-5): a member reads, counts and is named
+        // only the contacts their CRM view opens (visibilityClause, the rule GET contacts and GET
+        // contacts/:id apply); a contact they may not open answers as an unknown one. Unchanged with
+        // no principal or for the OWNER and a SUPER_ADMIN.
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
+        const scoped = visible ? { AND: [visible] } : {};
 
         if (args.contactId) {
           const contact = await this.prisma.client.contact.findFirst({
-            where: { id: args.contactId, businessId, deletedAt: null },
+            where: { id: args.contactId, businessId, deletedAt: null, ...scoped },
             select: { id: true, firstName: true, lastName: true, email: true, status: true, updatedAt: true, tags: true },
           });
           if (!contact) throw new Error('Contact not found');
@@ -4372,16 +4528,17 @@ ${triage.standingContext}`;
         }
 
         const [totalContacts, staleLeads, atRiskClients, topSpenders] = await Promise.all([
-          this.prisma.client.contact.count({ where: { businessId, deletedAt: null } }),
+          this.prisma.client.contact.count({ where: { businessId, deletedAt: null, ...scoped } }),
           this.prisma.client.contact.count({
-            where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: fourteenDaysAgo } },
+            where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: fourteenDaysAgo }, ...scoped },
           }),
           this.prisma.client.contact.count({
-            where: { businessId, deletedAt: null, status: 'CLIENT', updatedAt: { lt: thirtyDaysAgo } },
+            where: { businessId, deletedAt: null, status: 'CLIENT', updatedAt: { lt: thirtyDaysAgo }, ...scoped },
           }),
           this.prisma.client.invoice.groupBy({
             by: ['contactId'],
-            where: { businessId, deletedAt: null, status: 'PAID' },
+            // for a member, only the spend of contacts they may open is ranked (and so named)
+            where: { businessId, deletedAt: null, status: 'PAID', ...(visible ? { contact: { is: { businessId, deletedAt: null, ...scoped } } } : {}) },
             _sum: { total: true },
             orderBy: { _sum: { total: 'desc' } },
             take: 5,
@@ -4885,6 +5042,11 @@ ${triage.standingContext}`;
         const where: any = { businessId, deletedAt: null };
         if (args.status) where.status = args.status;
         if (args.tag) where.tags = { has: args.tag };
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-1): a segment is a contact list read, so a member's
+        // answers only the contacts their CRM view opens, as crm_list_contacts does. Unchanged with no
+        // principal or for the OWNER and a SUPER_ADMIN.
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
+        if (visible) where.AND = [visible];
 
         let contacts = await this.prisma.client.contact.findMany({
           where,
@@ -5639,6 +5801,10 @@ ${triage.standingContext}`;
         if (args.endDate) where.startAt = { ...(where.startAt ?? {}), lte: new Date(args.endDate) };
         if (args.module) where.module = args.module;
         if (args.status) where.status = args.status;
+        // V1-84 (FOLLOW3-D7, D-37): for a member, no event on a contact their CRM view does not
+        // open (calendarContactScope). An event with no contact stays.
+        const scope = await this.calendarContactScope(businessId, action, where);
+        if (scope) where.AND = [scope];
         const events = await this.prisma.client.calendarEvent.findMany({
           where,
           orderBy: { startAt: 'asc' },
@@ -5666,13 +5832,17 @@ ${triage.standingContext}`;
       case 'calendar_check_conflicts': {
         const startAt = new Date(args.startAt);
         const endAt = new Date(args.endAt);
+        const where: Prisma.CalendarEventWhereInput = {
+          businessId,
+          status: { not: 'CANCELLED' },
+          startAt: { lt: endAt },
+          endAt: { gt: startAt },
+        };
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-3): the events calendar_list_events leaves out for a
+        // member are left out here too, as GET calendar conflicts leaves them out (calendarContactScope).
+        const scope = await this.calendarContactScope(businessId, action, where);
         const conflicts = await this.prisma.client.calendarEvent.findMany({
-          where: {
-            businessId,
-            status: { not: 'CANCELLED' },
-            startAt: { lt: endAt },
-            endAt: { gt: startAt },
-          },
+          where: scope ? { ...where, AND: [scope] } : where,
           orderBy: { startAt: 'asc' },
           take: 10,
         });
@@ -6472,11 +6642,19 @@ ${triage.standingContext}`;
         return { invoiceId: (invoice as { id: string }).id };
       }
       case 'execute_custom_logic': {
+        // V1-84 (FOLLOW3-D16 review SEC-D16-1, D-40): every api.callTool the snippet makes is a call
+        // of the member whose chat turn ran it, so the operations scope that turn's own calls are
+        // held to (operationsScopeRefusal on this outer context) refuses it before it runs. The
+        // inner call itself still arrives on CUSTOM_LOGIC.
+        const withinMemberScope = async (bizId: string, name: string): Promise<void> => {
+          const refusal = await this.operationsScopeRefusal(bizId, name, action);
+          if (refusal) throw new Error(refusal);
+        };
         const result = await this.getCodeExecutor().execute({
           businessId,
           code: args.code,
           inputs: args.inputs,
-          innerToolExecutor: (bizId, name, toolArgs) => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC' }),
+          innerToolExecutor: (bizId, name, toolArgs) => withinMemberScope(bizId, name).then(() => this.executeToolByName(bizId, name, toolArgs, { surface: 'CUSTOM_LOGIC' })),
         });
         return result;
       }

@@ -810,9 +810,10 @@ describe('the operations gate over HTTP (real guards, real rows)', () => {
     for (const t of TOOLS) expect(CANONICAL_MODULE_TOOLS.operations[t], t).toBe(ROUTE_LEVEL[t]);
   });
 
-  it.todo(
-    "[OPS-T03] review SEC-R013g-3: KEY chat (POST /ai/businesses/:id/flow/chat) selects tools by the crew detected from the message (FlowOrchestratorService.selectToolsForRequest; RoleEngine ROLE_BASELINE_TOOLS gives every crew command_list_due_obligations and command_discharge_obligation, the operations crew procurement_*) with no member module scope, and POST /ai/businesses/:id/key/command (do, draft) reaches CommandService.create for any member — not done: pre-existing, in role-engine.service.ts, flow-orchestrator.service.ts and ai.controller.ts, outside this packet's write set; D-40 over KEY chat needs its own packet",
-  );
+  // [OPS-T03] (review SEC-R013g-3: KEY reached CommandService.create for any member) is done in two
+  // halves: member chat in FOLLOW3-D16-KEY-CHAT-OPS-SCOPE (test/key-chat-ops-scope.integration.test.ts)
+  // and POST /ai/businesses/:id/key/command do/auto/draft in FOLLOW3-D9-DOITFORME-SCOPE
+  // (test/key-do-it-for-me-scope.integration.test.ts: no item is filed below operations write).
 
   it.todo(
     "[OPS-T04] review SEC-R013g-4: the audit rows name the member who acted (command item approve, complete and dismiss record actorType USER with no actorId; procurement acknowledge, fulfill and invoice record neither) — not done: CommandService.approve/complete/dismiss and ProcurementService.acknowledgeVendor/markFulfilled/markInvoiced take no actor, so the controllers cannot pass one, and both services are outside this packet's write set",
