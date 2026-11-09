@@ -3642,7 +3642,20 @@ export class CommerceService {
     };
   }
 
-  /** List every payment row for a business, with rich filtering. */
+  /**
+   * List every payment row for a business, with rich filtering.
+   *
+   * V1-41c-MONEY-ROW-COUNTERS (V1-41b residual): a confirmed extracted row
+   * (status CONFIRMED, PaymentEvidenceService.CONFIRMED_EXTRACTED_PAYMENT_STATUS)
+   * is not listed, as listPayments leaves it out since V1-41b: it keeps its
+   * full amount beside the SUCCESSFUL payment the member recorded from it, so
+   * the payments page showed the same money twice. A status filter cannot
+   * bring it back. PENDING, FAILED and refund rows stay listed under their own
+   * status. Only rows of this tenant's own invoices are listed (Payment sits
+   * outside the tenant extension with no FK to Business, M31): a row carrying
+   * this businessId on another business's invoice disclosed that invoice and
+   * its customer here (ownTenantPayments reads it the same way).
+   */
   async listAllPayments(businessId: string, filters: {
     status?: string;
     method?: string;
@@ -3653,7 +3666,12 @@ export class CommerceService {
     from?: string | Date;
     to?: string | Date;
   } = {}) {
-    const where: Prisma.PaymentWhereInput = { businessId };
+    const where: Prisma.PaymentWhereInput = {
+      businessId,
+      // The literal avoids importing payment-evidence.service (see listPayments).
+      NOT: { status: 'CONFIRMED' },
+      invoice: { is: { businessId } },
+    };
     if (filters.status) where.status = filters.status;
     if (filters.method) where.method = filters.method;
     if (filters.provider) where.provider = filters.provider;
@@ -3670,7 +3688,7 @@ export class CommerceService {
       where.createdAt = createdAt;
     }
     if (filters.contactId) {
-      where.invoice = { is: { contactId: filters.contactId } };
+      where.invoice = { is: { businessId, contactId: filters.contactId } };
     }
 
     const payments = await this.prisma.client.payment.findMany({

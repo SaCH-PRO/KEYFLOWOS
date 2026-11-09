@@ -1,8 +1,10 @@
 import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { CommerceService } from './commerce.service';
+import { readStoredPayments } from './invoice-workflow.service';
 import { CatalogService } from '../catalog/catalog.service';
 import {
   buildCommerceCommandPrompt,
@@ -18,6 +20,33 @@ import {
   buildChurnRiskPrompt,
   buildRevenueJourneyPrompt,
 } from './prompts/innovation.prompt';
+
+/**
+ * V1-41c-MONEY-ROW-COUNTERS (V1-41 deviation, V1-41b residual): the Payment
+ * rows the balance contract reads as money, SUCCESSFUL and REFUNDED
+ * (balanceOfStoredRows ignores every other row). A PENDING row (a customer's
+ * offline intent, an extracted amount awaiting a member), a FAILED attempt and
+ * a CONFIRMED extracted row (kept beside the SUCCESSFUL payment the member
+ * recorded from it, V1-41b) are not payments; the counters below counted them.
+ * Spread it beside a businessId filter: Payment sits outside the tenant
+ * extension (M31), so a row carrying another tenant's id is not this tenant's.
+ */
+const MONEY_ROW_WHERE = { status: { in: ['SUCCESSFUL', 'REFUNDED'] } } satisfies Prisma.PaymentWhereInput;
+
+/**
+ * V1-41c: how many payments the rows hold, i.e. the SUCCESSFUL entries
+ * balanceOfStoredRows adds into `paid` (readStoredPayments). A refund row is
+ * not a payment; a pre-V1-29 flipped original (a positive REFUNDED row) is the
+ * payment it stood for plus its refund, so it counts once. A count, not an
+ * amount: money itself is read through balanceOfStoredRows.
+ */
+function paymentsReceived(rows: ReadonlyArray<{ amount: number | string; status: string }>): number {
+  let count = 0;
+  for (const entry of readStoredPayments(rows)) {
+    if (entry.status === 'SUCCESSFUL') count += 1;
+  }
+  return count;
+}
 
 @Injectable()
 export class CommerceAiService {
@@ -704,9 +733,10 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         select: { id: true, quoteNumber: true, status: true, total: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
       }),
+      // V1-41c: the money rows of this tenant only (MONEY_ROW_WHERE, paymentsReceived).
       this.db.payment.findMany({
-        where: { invoice: { contactId, businessId } },
-        select: { amount: true, createdAt: true },
+        where: { businessId, ...MONEY_ROW_WHERE, invoice: { contactId, businessId } },
+        select: { amount: true, status: true, createdAt: true },
         orderBy: { createdAt: 'desc' },
       }),
     ]);
@@ -785,7 +815,7 @@ Only include filters relevant to the query. Set irrelevant filters to null.`;
         dueDate: i.dueDate,
         paidAt: i.paidAt,
       })),
-      totalPayments: payments.length,
+      totalPayments: paymentsReceived(payments),
     };
   }
 
@@ -1326,9 +1356,10 @@ Items: ${(quote.items ?? []).map((i: any) => `${i.description} ($${i.total})`).j
         where: { businessId, deletedAt: null },
         select: { id: true, contactId: true, status: true, total: true, createdAt: true, paidAt: true },
       }),
+      // V1-41c: the money rows of this tenant only (MONEY_ROW_WHERE, paymentsReceived).
       this.db.payment.findMany({
-        where: { invoice: { businessId, deletedAt: null } },
-        select: { id: true, amount: true, invoiceId: true, createdAt: true },
+        where: { businessId, ...MONEY_ROW_WHERE, invoice: { businessId, deletedAt: null } },
+        select: { id: true, amount: true, status: true, invoiceId: true, createdAt: true },
       }),
     ]);
 
@@ -1355,7 +1386,7 @@ Contacts with quotes: ${contactsWithQuotes}
 Total quotes: ${quotes.length} (${quotes.filter(q => q.status === 'ACCEPTED').length} accepted, ${quotes.filter(q => q.status === 'REJECTED').length} rejected)
 Quotes converted to invoices: ${quotesConvertedToInvoice}
 Total invoices: ${invoices.length} (${paidInvoices.length} paid)
-Total payments: ${payments.length}
+Total payments: ${paymentsReceived(payments)}
 Total revenue: $${paidInvoices.reduce((s, i) => s + Number(i.total), 0)}
 Funnel rates: Contact→Quote ${funnel.contactToQuoteRate}%, Quote→Invoice ${funnel.quoteToInvoiceRate}%, Invoice→Payment ${funnel.invoiceToPaymentRate}%`;
 

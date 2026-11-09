@@ -1,5 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
+import { sumMoney } from '../commerce/money';
 
 export interface HealthAreaResult {
   area: string;
@@ -71,19 +73,26 @@ export class HealthScoreService {
 
     const [cashAccounts, overdueInvoices, upcomingBills, uncategorizedExpenses, taxLiabilities] = await Promise.all([
       this.prisma.client.financialAccount.findMany({ where: { businessId, isActive: true, type: { in: ['CASH', 'BANK'] } }, select: { currentBalance: true } }),
-      this.prisma.client.invoice.findMany({ where: { businessId, status: 'SENT', deletedAt: null, dueDate: { lt: now } }, select: { id: true, total: true } }),
+      this.prisma.client.invoice.findMany({
+        where: { businessId, status: 'SENT', deletedAt: null, dueDate: { lt: now } },
+        // V1-41c: this tenant's own rows (M31), read by the balance contract below.
+        select: { id: true, total: true, currency: true, payments: { where: { businessId }, select: { amount: true, status: true } } },
+      }),
       this.prisma.client.expense.findMany({ where: { businessId, status: 'BILL', dueDate: { gte: now, lte: new Date(now.getTime() + 30 * 86400000) } }, select: { amount: true } }),
       this.prisma.client.expense.findMany({ where: { businessId, categoryId: null, deletedAt: null }, select: { id: true } }),
       this.prisma.client.taxLiability.findMany({ where: { businessId, status: { in: ['OPEN', 'FILED'] } }, select: { amountDue: true, dueDate: true } }),
     ]);
 
     const cashBalance = cashAccounts.reduce((s, a) => s + Number(a.currentBalance ?? 0), 0);
-    const invoicePaymentSums = await Promise.all(
-      overdueInvoices.map(inv =>
-        this.prisma.client.payment.aggregate({ where: { invoiceId: inv.id }, _sum: { amount: true } }).then(r => Number(r._sum.amount ?? 0))
-      )
+    // V1-41c-MONEY-ROW-COUNTERS: what is left on each overdue invoice is the
+    // V1-36 balance contract (balanceOfStoredRows: SUCCESSFUL in, refunds
+    // out, integer cents) over the invoice's own-tenant rows. The status-blind
+    // sum of every row read a customer's PENDING intent, an extracted amount
+    // awaiting a member, a FAILED attempt and a CONFIRMED extracted row (kept
+    // beside the payment recorded from it) as money received.
+    const overdueReceivables = sumMoney(
+      overdueInvoices.map((inv) => balanceOfStoredRows(Number(inv.total ?? 0), inv.payments, inv.currency).remaining),
     );
-    const overdueReceivables = overdueInvoices.reduce((s, inv, i) => s + (Number(inv.total ?? 0) - invoicePaymentSums[i]), 0);
     const billsDue30 = upcomingBills.reduce((s, b) => s + Number(b.amount ?? 0), 0);
     const taxDueSoon = taxLiabilities.filter(t => t.dueDate && (new Date(t.dueDate).getTime() - now.getTime()) <= 14 * 86400000);
     const taxDueAmount = taxDueSoon.reduce((s, t) => s + Number(t.amountDue ?? 0), 0);
