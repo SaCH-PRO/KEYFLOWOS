@@ -45,7 +45,7 @@ function invoice(id: string, invoiceNumber: string, status: string): Invoice {
 
 type Skip = { id: string; invoiceStatus: string; reason: string };
 
-function installServer(answer: { updated: number; skipped: Skip[] }) {
+function installServer(answer: { updated: number; skipped: Skip[]; skippedCount?: number }) {
   const bodies: Array<Record<string, unknown>> = [];
   vi.stubGlobal(
     "fetch",
@@ -54,7 +54,12 @@ function installServer(answer: { updated: number; skipped: Skip[] }) {
       const method = (init?.method ?? "GET").toUpperCase();
       if (method === "PATCH" && url.pathname === BULK_PATH) {
         bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-        return jsonResponse(200, { updated: answer.updated, action: "delete", skipped: answer.skipped, skippedCount: answer.skipped.length });
+        return jsonResponse(200, {
+          updated: answer.updated,
+          action: "delete",
+          skipped: answer.skipped,
+          skippedCount: answer.skippedCount ?? answer.skipped.length,
+        });
       }
       return jsonResponse(200, {});
     }),
@@ -127,5 +132,19 @@ describe("W3-B6-WEB-BULK-SKIPPED (D-66, CR-B6-1) usePipelineActions bulk delete 
       expect(shown.some((s) => s.includes(reason)), `${number}'s reason is shown: ${JSON.stringify(shown)}`).toBe(true);
       expect(shown.some((s) => s.includes(number)), `${number} is named: ${JSON.stringify(shown)}`).toBe(true);
     }
+  });
+
+  it("D-66 CR-B6-1: a skippedCount above the refusals listed in skipped removes no row (which were kept is unknown) and says so", async () => {
+    const rows = [invoice("inv_draft", "INV-B6-021", "DRAFT"), invoice("inv_sent", "INV-B6-022", "SENT")];
+    installServer({ updated: 1, skipped: [], skippedCount: 1 });
+    const { result } = renderHook(() => useHarness(rows));
+
+    await act(async () => {
+      await result.current.actions.handleBulkDelete(new Set(rows.map((r) => r.id)));
+    });
+
+    expect(result.current.invoices.map((i) => i.id)).toEqual(["inv_draft", "inv_sent"]);
+    const shown = shownToasts();
+    expect(shown.some((s) => /1 more invoice\(s\) were not deleted/.test(s)), JSON.stringify(shown)).toBe(true);
   });
 });

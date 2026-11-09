@@ -56,7 +56,8 @@
  *                    shape refuses the same; no invoice of the business changes (Prisma drops
  *                    `id: { in: undefined }`, so a bulk delete naming no invoice deleted every clean DRAFT and
  *                    VOID invoice of the business, and null or [123] answered 500)
- *   CR-B6-1 it.todo  the web bulk-delete callers (apps/web, outside this packet's write set) read `skipped`
+ *   CR-B6-1          the web bulk-delete callers read `skipped`: closed by W3-B6-WEB-BULK-SKIPPED (web tests,
+ *                    see the comment after DL-10)
  *
  * Ledger invariant asserted after every case (booksAgree, over the invoices the
  * case created): for each live ACCRUAL invoice its own ledger AR equals
@@ -843,11 +844,11 @@ describe('V1-82 review SEC-B6-2: a bulk request names its invoices (real rows)',
   }, 90_000);
 });
 
-describe('V1-82 review CR-B6-1: the web bulk-delete callers (outside this packet\'s write set)', () => {
-  it.todo(
-    'CR-B6-1 (apps/web, outside the FOLLOW3-B6 write set): use-pipeline-actions.ts handleBulkStatusChange (delete) and invoices-panel.tsx handleBulkStatusChange must read `skipped` / `skippedCount` from PATCH invoices/bulk {action:"delete"}, remove only the ids that were deleted and show each skipped reason; today they toast "N invoice(s) updated" and drop every selected SENT / OVERDUE row the server refused (D-66) from the list',
-  );
-});
+// V1-82 review CR-B6-1 (D-66): the web bulk-delete callers read `skipped` / `skippedCount` from
+// PATCH invoices/bulk {action:"delete"}, remove only the ids that were deleted and show each
+// skipped invoice's reason. Closed by W3-B6-WEB-BULK-SKIPPED; proven by the web tests
+// apps/web/src/app/app/finance/hooks/__tests__/use-pipeline-actions-bulk-delete-skipped.test.tsx and
+// apps/web/src/app/app/commerce/invoices/__tests__/invoices-panel-bulk-delete-skipped.test.tsx.
 
 describe('V1-82 D-66: the books of both businesses agree over every invoice, deleted ones included (real rows)', () => {
   it('DL-07 RED-BEFORE: no deleted invoice of either business carries AR, income, cash or money received; every live ACCRUAL invoice\'s AR equals its remaining; the trial-balance AR is the live invoices\' AR', async () => {
