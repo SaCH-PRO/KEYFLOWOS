@@ -127,6 +127,13 @@ export const SITE_FULFILMENT_STATUSES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * G6PUB-R3-STORE-ORDER-DOORS review (CR-1): how many times completeCheckout
+ * resolves the order's contact before it answers that none could be resolved
+ * (a concurrent creation of the same contact refuses the first attempt).
+ */
+const CONTACT_RESOLVE_ATTEMPTS = 3;
+
+/**
  * Trial-N review (G6PUB-SEC-2): an order nothing more is collected for:
  * cancelled or refunded, in the site's uppercase vocabulary or the marketplace
  * fulfil route's lowercase one, or with its payment refunded. Offline
@@ -992,24 +999,39 @@ export class StoreOrderService {
 
     // Resolve customer contact OUTSIDE the tx so CRM dedup logic
     // (which has its own internal logic) doesn't expand the tx footprint.
+    //
+    // G6PUB-R3-STORE-ORDER-DOORS review (CR-1): the order's own
+    // store_order.created listener (CommerceIntegrationService.
+    // handleOrderCreated) resolves the same customer at the same time when an
+    // order is paid right after it is created (an order created paid, D-77).
+    // For a new customer both create the contact, and the one that loses on
+    // the contacts (business_id, email_normalized) unique index is refused
+    // (ConflictException), which answered this checkout 400 with the order left
+    // unpaid. The contact exists once the other creation has committed, so a
+    // failed resolution is tried again (CONTACT_RESOLVE_ATTEMPTS in all): the
+    // retry finds it.
     let contactId: string | null = null;
-    let referralCode: string | null = null;
-    try {
-      const meta = (order.metadata as Record<string, unknown> | null) ?? {};
-      referralCode = typeof meta.referralCode === 'string' ? meta.referralCode : null;
-      const nameParts = (order.customerName ?? '').trim().split(/\s+/);
-      const contact = await this.crm.findOrCreateContact(order.businessId, {
-        firstName: nameParts[0] ?? null,
-        lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
-        email: order.customerEmail,
-        phone: order.customerPhone,
-        source: 'storefront',
-        sourceDetail: `order:${order.orderNumber}`,
-        ...(referralCode ? { custom: { referralCode } } : {}),
-      });
-      contactId = contact?.id ?? null;
-    } catch (err: any) {
-      this.logger.warn(`[store-order] CRM resolve failed for order ${order.id}: ${(err as Error).message}`);
+    const meta = (order.metadata as Record<string, unknown> | null) ?? {};
+    const referralCode: string | null = typeof meta.referralCode === 'string' ? meta.referralCode : null;
+    const nameParts = (order.customerName ?? '').trim().split(/\s+/);
+    for (let attempt = 1; attempt <= CONTACT_RESOLVE_ATTEMPTS; attempt += 1) {
+      try {
+        const contact = await this.crm.findOrCreateContact(order.businessId, {
+          firstName: nameParts[0] ?? null,
+          lastName: nameParts.length > 1 ? nameParts.slice(1).join(' ') : null,
+          email: order.customerEmail,
+          phone: order.customerPhone,
+          source: 'storefront',
+          sourceDetail: `order:${order.orderNumber}`,
+          ...(referralCode ? { custom: { referralCode } } : {}),
+        });
+        contactId = contact?.id ?? null;
+        break; // resolved, or the CRM resolves no contact for this order: nothing to try again
+      } catch (err: any) {
+        this.logger.warn(
+          `[store-order] CRM resolve failed for order ${order.id} (attempt ${attempt} of ${CONTACT_RESOLVE_ATTEMPTS}): ${(err as Error).message}`,
+        );
+      }
     }
     if (!contactId) {
       // Invoice requires a contact. Surface this clearly rather than
@@ -1394,6 +1416,17 @@ export class StoreOrderService {
    *     recorded payment is refused (409): there is no money door to move.
    *   - The order flips to REFUNDED once (compare-and-set on the paymentStatus
    *     read), so a concurrent refund emits nothing a second time.
+   *
+   * G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-2): a STANDARD (marketplace)
+   * order created paid (D-77) has its money on a checkout invoice too
+   * (completeCheckout's INV-<orderNumber>, hasCheckoutInvoice), and is
+   * refunded on it the same way. Only the storefront's was: the D-77 order
+   * flipped to REFUNDED with its invoice PAID, its payment SUCCESSFUL and its
+   * posting on, and store_order.refunded named no invoice, so its listener
+   * booked an Expense as well. A STANDARD order with no checkout invoice (one
+   * marked paid by the marketplace 'mark_paid' action, which records no
+   * payment) is refunded as before: the listener books the refund as an
+   * Expense.
    */
   async refundOrder(orderId: string, businessId: string, actorId: string | null = null) {
     await this.assertMemberMayRecordPayments(businessId, actorId);
@@ -1409,9 +1442,9 @@ export class StoreOrderService {
       throw new ConflictException('Nothing was paid on this order, so there is nothing to refund; cancel it instead');
     }
 
-    const invoiceId = (order.type ?? '').toUpperCase() === 'STOREFRONT'
-      ? await this.refundCheckoutPayments(order, actorId)
-      : undefined;
+    const onCheckoutInvoice =
+      (order.type ?? '').toUpperCase() === 'STOREFRONT' || (await this.hasCheckoutInvoice(businessId, order.orderNumber));
+    const invoiceId = onCheckoutInvoice ? await this.refundCheckoutPayments(order, actorId) : undefined;
 
     const { count } = await this.prisma.client.marketplaceOrder.updateMany({
       where: { id: orderId, businessId, paymentStatus: order.paymentStatus },
@@ -1431,9 +1464,26 @@ export class StoreOrderService {
   }
 
   /**
+   * G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-1/2/3): whether the order's
+   * money is on its checkout invoice, INV-<orderNumber>, which only the paid
+   * door (completeCheckout) writes: every checked-out storefront order, and a
+   * STANDARD order created paid (D-77). Such an order's payment fields move
+   * only through the paid door and the refund door (refundOrder).
+   */
+  async hasCheckoutInvoice(businessId: string, orderNumber: string): Promise<boolean> {
+    if (!orderNumber) return false;
+    const invoice = await this.prisma.client.invoice.findFirst({
+      where: { businessId, invoiceNumber: `INV-${orderNumber}` },
+      select: { id: true },
+    });
+    return !!invoice;
+  }
+
+  /**
    * Trial-N recheck (G6PUB-RC1-3, D-14): refund the money a storefront order's
    * checkout recorded, through the D-14 refund door. Returns the invoice the
-   * refund is on.
+   * refund is on. G6PUB-R3-STORE-ORDER-DOORS review (SEC-R3-2): also a
+   * STANDARD order created paid (D-77), whose checkout invoice it is the same.
    */
   private async refundCheckoutPayments(
     order: { businessId: string; orderNumber: string },

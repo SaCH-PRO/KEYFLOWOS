@@ -272,7 +272,9 @@ export class MarketplaceController {
    * G6PUB-R3-STORE-ORDER-DOORS (recheck G6PUB-RC2-1): the 'refund' of a
    * STOREFRONT order is the D-14 refund door (StoreOrderService.refundOrder),
    * which takes a member with revenue write; the refunder is the authenticated
-   * member, never a body field.
+   * member, never a body field. Review (SEC-R3-1): so is the refund of an
+   * order created paid (D-77), and any other order's refund (an Expense) takes
+   * revenue write too (MarketplaceService.fulfillOrder).
    */
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/orders/:orderId/fulfill')

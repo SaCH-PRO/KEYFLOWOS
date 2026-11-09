@@ -75,17 +75,49 @@
  *           with revenue:read (403) and an order with no customer email or phone
  *           (400) write nothing. Control: an unpaid create stays placed / UNPAID
  *
+ * Review repairs (G6PUB-R3-STORE-ORDER-DOORS review, at the packet head
+ * 5c9f164c each of these was reproduced on this harness):
+ *
+ *   V87-10  SEC-R3-1: an order created paid (D-77) is refunded through the
+ *           marketplace fulfil route only by the D-14 refund door: a member
+ *           with revenue:read is refused (403), an amount other than the total
+ *           400, and PATCH .../status 'refunded' 400, all writing nothing; the
+ *           owner's refund is the D-14 refund on its invoice (no Expense)
+ *   V87-11  SEC-R3-1 remainder: the fulfil refund of an order with no payment
+ *           on the books (a STANDARD order marked paid by 'mark_paid') books
+ *           an Expense, so it takes revenue write (403) and an amount above 0
+ *           and up to the order total (400 otherwise); PATCH 'refunded' is 400
+ *   V87-12  SEC-R3-2: the site refund route refunds an order created paid on
+ *           its invoice (D-14): negative row, posting reversed, invoice SENT,
+ *           store_order.refunded naming the invoice, no Expense
+ *   V87-13  SEC-R3-3: the payment fields of an order created paid (status
+ *           'paid', paymentStatus, paymentMethod, paymentRef) do not move
+ *           through PATCH .../status (400, nothing written); its status alone
+ *           still moves, and an order with no payment on the books is unchanged
+ *   V87-14  SEC-R3-4: a create with a quantity that is not a whole positive
+ *           number, a negative fee, tax, duty or discount, or a discount above
+ *           the order is refused (400) before anything is written; an order
+ *           created paid needs a total above 0. Control: a valid discount and
+ *           fee are recorded at their total
+ *   V87-15  CR-1: an order created paid for a NEW customer (the real CRM: the
+ *           paid door and the store_order.created listener both create the
+ *           contact) is answered 201 paid / PAID, with one contact, its invoice
+ *           made out to it, and no placed order left behind
+ *
  * Nothing on the money path or the authorization boundary is mocked:
  * PrismaService, AuthGuard, BusinessGuard, ModuleScopeGuard, CrmRateLimitGuard,
  * PublicRateLimitGuard (real Redis, this suite's namespace), SiteService,
  * StoreOrderService, MarketplaceService, PaymentsService, CommerceService (the
  * D-14 door), InvoiceWorkflowService, RevenueAttributionService,
  * RevenuePostingService, ExpensePostingService, PostingService,
- * ChartOfAccountsSeederService and the listener CommerceIntegrationService
- * read and write real rows. The only identity stand-in is a test middleware
- * that reads `x-test-user` and attaches the seeded user, as AuthMiddleware does
- * after token verification. Stand-ins off the money path: CrmService (resolves
- * the seeded contact by email), PublicEventsService, PromoCodeService,
+ * ChartOfAccountsSeederService, the listener CommerceIntegrationService and
+ * CrmService (with EntityResolutionService and ContactAuditService: review
+ * CR-1, the contact the paid door and the store_order.created listener both
+ * resolve) read and write real rows. The only identity stand-in is a test
+ * middleware that reads `x-test-user` and attaches the seeded user, as
+ * AuthMiddleware does after token verification. Stand-ins off the money path:
+ * the CRM timeline, stats, lists, flow and custom-field caches,
+ * SubscriptionsService (contact limit allowed), PublicEventsService, PromoCodeService,
  * InventoryRiskService, TransactionalEmailService, the revenue-posting
  * timeline, ExpensesService (a recorder: store_order.refunded books one), and
  * MarketplaceService.autoRouteOrder (fulfilment routing, held so it writes
@@ -115,18 +147,22 @@ const PREVIOUS_ENV: Record<string, string | undefined> = Object.fromEntries(
 
 const ID = {
   owner: `${P}owner`, // OWNER of every business here
-  staffRead: `${P}staff_read`, // STAFF of bizA, revenue: read
+  staffRead: `${P}staff_read`, // STAFF of bizA and bizR, revenue: read
   bizA: `${P}biz_a`, // TTD, its own WiPay merchant pair
   bizNoWipay: `${P}biz_nowipay`, // TTD, no WiPay setting (and no platform pair in this run)
   bizUsd: `${P}biz_usd`, // USD, its own WiPay merchant pair
+  // TTD, the review-repair cases (V87-10..15): its own CrmRateLimitGuard buckets (ip:business:route, in memory, 60 s).
+  bizR: `${P}biz_r`,
   contactA: `${P}contact_a`,
   contactNoWipay: `${P}contact_nowipay`,
   contactUsd: `${P}contact_usd`,
+  contactR: `${P}contact_r`,
   prodA: `${P}prod_a`,
   prodNoWipay: `${P}prod_nowipay`,
   prodUsd: `${P}prod_usd`,
+  prodR: `${P}prod_r`,
 };
-const SLUG = { a: `${P}store-a`, noWipay: `${P}store-nowipay`, usd: `${P}store-usd` };
+const SLUG = { a: `${P}store-a`, noWipay: `${P}store-nowipay`, usd: `${P}store-usd`, r: `${P}store-r` };
 const WIPAY_KEY = `${P}wipay_api_key`;
 const WIPAY_ACCOUNT = `${P}wipay_account`;
 const PUBLIC_ORIGIN = 'https://shop.v87c.test';
@@ -169,6 +205,7 @@ async function cleanup() {
     `DELETE FROM idempotency_keys WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM notifications WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM marketplace_order_items WHERE order_id IN (SELECT id FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM marketplace_orders WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM products WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -310,8 +347,8 @@ async function expectOnePaidInvoice(order: { orderNumber: string }, businessId =
 }
 
 /** The D-14 refund of a checked-out order: original kept, one negative REFUNDED row by the refunder, posting reversed, invoice SENT. */
-async function expectD14Refund(order: { id: string; orderNumber: string }, refunder: string) {
-  const [invoice] = await invoicesOf(order);
+async function expectD14Refund(order: { id: string; orderNumber: string }, refunder: string, businessId = ID.bizA) {
+  const [invoice] = await invoicesOf(order, businessId);
   const rows = await paymentsOf([invoice.id]);
   expect(rows.map((p) => `${p.status}:${Number(p.amount)}`), 'the original kept, one negative refund row (D-14)').toEqual([
     `SUCCESSFUL:${ORDER_TOTAL}`,
@@ -323,7 +360,7 @@ async function expectD14Refund(order: { id: string; orderNumber: string }, refun
   expect(`${reopened.status}/${reopened.paidAt}`, 'a full refund reopens the invoice (D-14)').toBe('SENT/null');
   const balance = storedBalanceFn(Number(invoice.total), rows.map((p) => ({ amount: Number(p.amount), status: p.status })), invoice.currency);
   expect(balance.net, 'nothing net received').toBe(0);
-  const postings = await postingsOf(ID.bizA, [invoice.id, ...rows.map((p) => p.id)]);
+  const postings = await postingsOf(businessId, [invoice.id, ...rows.map((p) => p.id)]);
   expect(postings.length, 'the recording and exactly one reversal').toBe(2);
   for (const t of postings) expect(money(sum(t.entries, 'debit')), `${t.externalRef} balanced`).toBe(money(sum(t.entries, 'credit')));
   const depositNet = money(
@@ -333,7 +370,7 @@ async function expectD14Refund(order: { id: string; orderNumber: string }, refun
       .reduce((s: number, e: any) => s + Number(e.debit ?? 0) - Number(e.credit ?? 0), 0),
   );
   expect(depositNet, 'the money taken is given back on the ledger').toBe(0);
-  await expectTrialBalance(ID.bizA);
+  await expectTrialBalance(businessId);
   const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
   expect(stored.paymentStatus).toBe('REFUNDED');
 }
@@ -394,6 +431,13 @@ beforeAll(async () => {
   const { PaymentsService } = await import('../src/modules/payments/payments.service');
   const { AiUsageService } = await import('../src/modules/ai/ai-usage.service');
   const { CrmService } = await import('../src/modules/crm/crm.service');
+  const { EntityResolutionService } = await import('../src/core/connectors/entity-resolution.service');
+  const { ContactAuditService } = await import('../src/modules/crm/privacy/contact-audit.service');
+  const { CrmTimelineService } = await import('../src/modules/crm/crm-timeline.service');
+  const { CrmStatsService } = await import('../src/modules/crm/crm-stats.service');
+  const { CrmListsService } = await import('../src/modules/crm/crm-lists.service');
+  const { CrmFlowService } = await import('../src/modules/crm/crm-flow.service');
+  const { ContactCustomFieldValueService } = await import('../src/modules/crm/contact-custom-field-value.service');
   const { PublicEventsService } = await import('../src/modules/public-events/public-events.service');
   const workflowMod = await import('../src/modules/commerce/invoice-workflow.service');
   const { InventoryRiskService } = await import('../src/modules/commerce/inventory-risk.service');
@@ -418,13 +462,6 @@ beforeAll(async () => {
   Logger.overrideLogger(false);
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
-  const crmStub = {
-    findOrCreateContact: async (businessId: string, input: { email?: string | null }) =>
-      input?.email
-        ? db.contact.findFirst({ where: { businessId, emailNormalized: input.email.toLowerCase() }, select: { id: true } })
-        : null,
-    logContactEvent: async () => null,
-  };
   const stub = {};
 
   const moduleRef = await Test.createTestingModule({
@@ -453,7 +490,15 @@ beforeAll(async () => {
       PostingService,
       ChartOfAccountsSeederService,
       { provide: TimelineService, useValue: { recordEvent: async () => null } },
-      { provide: CrmService, useValue: crmStub },
+      // Review CR-1: the real CRM, so the contact the paid door resolves races the store_order.created listener's as in production.
+      CrmService,
+      EntityResolutionService,
+      ContactAuditService,
+      { provide: CrmTimelineService, useValue: { logEvent: async () => undefined, logContactEvent: async () => undefined } },
+      { provide: CrmStatsService, useValue: { invalidateCache: () => undefined } },
+      { provide: CrmListsService, useValue: {} },
+      { provide: CrmFlowService, useValue: { invalidateCache: () => undefined } },
+      { provide: ContactCustomFieldValueService, useValue: { setValuesForContact: async () => undefined } },
       {
         provide: PublicEventsService,
         useValue: { logStorefrontEvent: async () => null, upsertStorefrontContact: async () => null, backstitchVisitor: async () => null },
@@ -471,7 +516,7 @@ beforeAll(async () => {
       },
       { provide: TransactionalEmailService, useValue: { send: async () => undefined } },
       { provide: CommerceStatsService, useValue: { invalidateCache: () => undefined } },
-      { provide: SubscriptionsService, useValue: stub },
+      { provide: SubscriptionsService, useValue: { checkLimit: async () => ({ allowed: true }) } },
       { provide: CatalogService, useValue: stub },
       { provide: AiUsageService, useValue: stub },
       { provide: IntakeService, useValue: stub },
@@ -530,6 +575,7 @@ beforeAll(async () => {
     [ID.bizA, SLUG.a, 'TTD', pair],
     [ID.bizNoWipay, SLUG.noWipay, 'TTD', null],
     [ID.bizUsd, SLUG.usd, 'USD', pair],
+    [ID.bizR, SLUG.r, 'TTD', null],
   ] as const) {
     await db.business.create({
       data: { id, name: `V87C ${slug}`, slug, ownerId: ID.owner, currency, accountingBasis: 'CASH', storeEnabled: true, ...(metaData ? { metaData } : {}) },
@@ -540,12 +586,15 @@ beforeAll(async () => {
   await db.membership.create({
     data: { id: `${P}m_staff_a`, userId: ID.staffRead, businessId: ID.bizA, role: 'STAFF', permissionScopes: { revenue: 'read' } },
   });
-  for (const [id, businessId] of [[ID.contactA, ID.bizA], [ID.contactNoWipay, ID.bizNoWipay], [ID.contactUsd, ID.bizUsd]] as const) {
+  await db.membership.create({
+    data: { id: `${P}m_staff_r`, userId: ID.staffRead, businessId: ID.bizR, role: 'STAFF', permissionScopes: { revenue: 'read' } },
+  });
+  for (const [id, businessId] of [[ID.contactA, ID.bizA], [ID.contactNoWipay, ID.bizNoWipay], [ID.contactUsd, ID.bizUsd], [ID.contactR, ID.bizR]] as const) {
     await db.contact.create({
       data: { id, businessId, firstName: 'Vee', lastName: 'EightySeven', email: CUSTOMER_EMAIL, emailNormalized: CUSTOMER_EMAIL },
     });
   }
-  for (const [id, businessId, currency] of [[ID.prodA, ID.bizA, 'TTD'], [ID.prodNoWipay, ID.bizNoWipay, 'TTD'], [ID.prodUsd, ID.bizUsd, 'USD']] as const) {
+  for (const [id, businessId, currency] of [[ID.prodA, ID.bizA, 'TTD'], [ID.prodNoWipay, ID.bizNoWipay, 'TTD'], [ID.prodUsd, ID.bizUsd, 'USD'], [ID.prodR, ID.bizR, 'TTD']] as const) {
     await db.product.create({ data: { id, businessId, name: 'V87C Widget', price: UNIT_PRICE, currency, category: 'PRODUCT', isActive: true } });
   }
 }, 90_000);
@@ -883,5 +932,235 @@ describe('D-77 (G6PUB-RC1-5): a STANDARD order created paid goes through the pai
     expect(`${unpaid.body.status}/${unpaid.body.paymentStatus}`).toBe('placed/UNPAID');
     expect(await invoicesOf(unpaid.body)).toEqual([]);
     expect(storeEvents()).toEqual(['store_order.created']);
+  });
+});
+
+describe('G6PUB-R3-STORE-ORDER-DOORS review repairs: an order created paid (D-77) keeps its money on the doors', () => {
+  // These cases run in bizR: the marketplace routes' CrmRateLimitGuard counts per ip, business and route
+  // (create 20 and fulfil 10 a minute, in memory), and bizA's earlier cases already use part of bizA's.
+  const B = ID.bizR;
+  const paidBody = (over: Record<string, unknown> = {}) => ({
+    paymentOnCreation: true,
+    paymentMethod: 'CASH',
+    customerName: 'Vee EightySeven',
+    customerEmail: CUSTOMER_EMAIL,
+    currency: 'TTD',
+    items: [{ productId: ID.prodR, quantity: QUANTITY }],
+    ...over,
+  });
+
+  /** A STANDARD order the owner created paid: through the paid door (V87-09). */
+  async function createdPaid(over: Record<string, unknown> = {}) {
+    const res = await marketCreate(ID.owner, paidBody(over), B);
+    await settle();
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(`${res.body.type}/${res.body.status}/${res.body.paymentStatus}`).toBe('STANDARD/paid/PAID');
+    return res.body as { id: string; orderNumber: string; total: number };
+  }
+
+  it("V87-10 (SEC-R3-1) an order created paid is refunded through the fulfil route only by the D-14 refund door: revenue:read 403, an amount other than the total 400 and PATCH 'refunded' 400 write nothing; the owner refund is the D-14 refund on its invoice, with no Expense", async () => {
+    const order = await createdPaid();
+    await expectOnePaidInvoice(order, B);
+    const paid = await bookState(order, B);
+    const before = await counts(B);
+    seen = [];
+
+    // At 5c9f164c: 201 refunded/REFUNDED for the revenue:read member, the invoice PAID, the payment SUCCESSFUL and an Expense of 99999.
+    const staff = await fulfil(ID.staffRead, order.id, { action: 'refund', refundAmount: 99999 }, B);
+    expect(staff.status, JSON.stringify(staff.body)).toBe(403);
+    // At 5c9f164c: 200 and an Expense of the total, for any member.
+    for (const actor of [ID.staffRead, ID.owner]) {
+      const patched = await marketStatus(actor, order.id, { status: 'refunded' }, B);
+      expect(patched.status, `${actor}: ${JSON.stringify(patched.body)}`).toBe(400);
+    }
+    const over = await fulfil(ID.owner, order.id, { action: 'refund', refundAmount: 99999 }, B);
+    expect(over.status, JSON.stringify(over.body)).toBe(400);
+    await settle();
+    expect(await bookState(order, B), 'refused: the books as they were').toEqual(paid);
+    expect(await counts(B), 'refused: nothing written').toEqual(before);
+    expect(storeEvents(), 'refused: no store_order.refunded').toEqual([]);
+    expect(expenses, 'refused: no Expense').toEqual([]);
+
+    const res = await fulfil(ID.owner, order.id, { action: 'refund', refundAmount: ORDER_TOTAL, reason: 'v87c d77 full' }, B);
+    await settle();
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    await expectD14Refund(order, ID.owner, B);
+    const refunded = seen.filter((e) => e.name === 'store_order.refunded');
+    expect(refunded, 'one store_order.refunded').toHaveLength(1);
+    expect(refunded[0].payload.invoiceId, 'naming the invoice the refund is on').toBe((await invoicesOf(order, B))[0].id);
+    expect(expenses, 'no Expense: the refund is on the invoice').toEqual([]);
+  });
+
+  it("V87-11 (SEC-R3-1 remainder) the fulfil refund of an order with no payment on the books books an Expense, so it takes revenue write (403) and an amount above 0 up to the total (400); PATCH 'refunded' is 400; the owner's partial refund books that amount", async () => {
+    const created = await marketCreate(ID.owner, paidBody({ paymentOnCreation: false }), B);
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const order = created.body;
+    const markPaid = await fulfil(ID.owner, order.id, { action: 'mark_paid', paymentMethod: 'CASH' }, B);
+    await settle();
+    expect(markPaid.status, JSON.stringify(markPaid.body)).toBe(201);
+    expect(`${markPaid.body.status}/${markPaid.body.paymentStatus}`).toBe('paid/PAID');
+    expect((await invoicesOf(order, B)).map((i) => i.invoiceNumber), 'no checkout invoice: nothing paid through the paid door').not.toContain(
+      `INV-${order.orderNumber}`,
+    );
+    const before = await counts(B);
+    const state = await bookState(order, B);
+    seen = [];
+
+    // At 5c9f164c: 201 for the revenue:read member and an Expense of the client's amount (99999).
+    const staff = await fulfil(ID.staffRead, order.id, { action: 'refund', refundAmount: 99999 }, B);
+    expect(staff.status, JSON.stringify(staff.body)).toBe(403);
+    for (const refundAmount of [ORDER_TOTAL + 0.01, -5, 'abc']) {
+      const res = await fulfil(ID.owner, order.id, { action: 'refund', refundAmount }, B);
+      expect(res.status, `${refundAmount}: ${JSON.stringify(res.body)}`).toBe(400);
+    }
+    const patched = await marketStatus(ID.owner, order.id, { status: 'refunded' }, B);
+    expect(patched.status, JSON.stringify(patched.body)).toBe(400);
+    await settle();
+    expect(await bookState(order, B)).toEqual(state);
+    expect(await counts(B)).toEqual(before);
+    expect(storeEvents()).toEqual([]);
+    expect(expenses).toEqual([]);
+
+    const partial = await fulfil(ID.owner, order.id, { action: 'refund', refundAmount: 30, reason: 'v87c partial' }, B);
+    await settle();
+    expect(partial.status, JSON.stringify(partial.body)).toBe(201);
+    expect(`${partial.body.status}/${partial.body.paymentStatus}`).toBe('refunded/REFUNDED');
+    expect(expenses, 'the refund it records: an Expense of the amount refunded').toEqual([{ businessId: B, amount: 30, notes: `order:${order.id}` }]);
+  });
+
+  it('V87-12 (SEC-R3-2) the site refund route refunds an order created paid on its invoice (D-14): negative row, posting reversed, invoice SENT, store_order.refunded naming the invoice, no Expense', async () => {
+    const order = await createdPaid();
+    const { invoice } = await expectOnePaidInvoice(order, B);
+    const before = await counts(B);
+    seen = [];
+
+    const staff = await siteRefund(ID.staffRead, order.id, B);
+    expect(staff.status, JSON.stringify(staff.body)).toBe(403);
+    await settle();
+    expect(await counts(B)).toEqual(before);
+
+    // At 5c9f164c: 201 REFUNDED/REFUNDED with the invoice PAID, the payment SUCCESSFUL, no invoiceId and an Expense of 80.
+    const res = await siteRefund(ID.owner, order.id, B);
+    await settle();
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    await expectD14Refund(order, ID.owner, B);
+    const refunded = seen.filter((e) => e.name === 'store_order.refunded');
+    expect(refunded, 'one store_order.refunded').toHaveLength(1);
+    expect(refunded[0].payload.invoiceId).toBe(invoice.id);
+    expect(expenses, 'no Expense beside the refund on the invoice').toEqual([]);
+
+    const again = await siteRefund(ID.owner, order.id, B);
+    await settle();
+    expect(again.status, JSON.stringify(again.body)).toBe(400);
+    expect(expenses).toEqual([]);
+  });
+
+  it('V87-13 (SEC-R3-3) the payment fields of an order created paid do not move through PATCH .../status (400, nothing written, any member); its status alone still moves; an order with no payment on the books is unchanged', async () => {
+    const order = await createdPaid();
+    const paid = await bookState(order, B);
+    const before = await counts(B);
+    seen = [];
+
+    for (const [actor, body] of [
+      // At 5c9f164c: 200 placed/UNPAID with the invoice PAID and the payment SUCCESSFUL.
+      [ID.staffRead, { status: 'placed', paymentStatus: 'UNPAID' }],
+      [ID.owner, { status: 'placed', paymentStatus: 'UNPAID' }],
+      [ID.owner, { status: 'paid', paymentStatus: 'PAID', paymentRef: `${P}forged_ref` }],
+      [ID.owner, { status: 'awaiting_fulfillment', paymentMethod: 'WIPAY' }],
+      [ID.owner, { status: 'paid' }],
+    ] as const) {
+      const res = await marketStatus(actor, order.id, body, B);
+      expect(res.status, `${actor} ${JSON.stringify(body)}: ${JSON.stringify(res.body)}`).toBe(400);
+    }
+    await settle();
+    expect(await bookState(order, B), 'the order and its books as they were').toEqual(paid);
+    expect(await counts(B)).toEqual(before);
+    expect(storeEvents()).toEqual([]);
+    expect(expenses).toEqual([]);
+
+    // Controls: its status alone moves, and an order with no payment on the books still takes its payment fields.
+    const stored = await db.marketplaceOrder.findUnique({ where: { id: order.id } });
+    const moved = await marketStatus(ID.owner, order.id, { status: 'awaiting_fulfillment' }, B);
+    expect(moved.status, JSON.stringify(moved.body)).toBe(200);
+    expect(`${moved.body.status}/${moved.body.paymentStatus}/${moved.body.paymentRef}`).toBe(`awaiting_fulfillment/PAID/${stored.paymentRef}`);
+    const unpaid = await marketCreate(ID.owner, paidBody({ paymentOnCreation: false }), B);
+    expect(unpaid.status, JSON.stringify(unpaid.body)).toBe(201);
+    const legacy = await marketStatus(ID.owner, unpaid.body.id, { status: 'awaiting_payment', paymentMethod: 'BANK_TRANSFER' }, B);
+    expect(legacy.status, JSON.stringify(legacy.body)).toBe(200);
+    expect(`${legacy.body.status}/${legacy.body.paymentMethod}`).toBe('awaiting_payment/BANK_TRANSFER');
+  });
+
+  it('V87-14 (SEC-R3-4) a create with a quantity that is not a whole positive number, a negative or non-numeric fee, tax, duty or discount, or a discount above the order is refused (400) before anything is written; a paid create needs a total above 0; control: a valid discount and fee', async () => {
+    const { MarketplaceService } = await import('../src/modules/marketplace/marketplace.service');
+    const market = app.get(MarketplaceService);
+    const before = await counts(B);
+    seen = [];
+    const line = (quantity: unknown) => ({ items: [{ productId: ID.prodR, quantity }] });
+
+    // Through the route.
+    for (const over of [
+      // At 5c9f164c: 201 with an invoice PAID:-920 and a payment SUCCESSFUL:-920.
+      { discountAmount: 1000 },
+      // At 5c9f164c: 201 with an invoice PAID:-120 and a payment SUCCESSFUL:-120.
+      line(-3),
+      line(0),
+      { shippingFee: -5 },
+      { discountAmount: ORDER_TOTAL },
+      { paymentOnCreation: false, ...line(-3) },
+    ] as Array<Record<string, unknown>>) {
+      const res = await marketCreate(ID.owner, paidBody(over), B);
+      expect(res.status, `${JSON.stringify(over)}: ${JSON.stringify(res.body)}`).toBe(400);
+    }
+    // The same rule on the service the route calls (the route's rate limit is 20 creates a minute).
+    for (const over of [
+      line(1.5),
+      line('two'),
+      { taxAmount: -1 },
+      { dutyAmount: 'abc' },
+      { discountAmount: -10 },
+      { paymentOnCreation: false, discountAmount: 1000 },
+    ] as Array<Record<string, unknown>>) {
+      const refused = await market.createOrder(B, paidBody(over), ID.owner).then(
+        () => null,
+        (err: any) => err,
+      );
+      expect(refused?.getStatus?.(), `${JSON.stringify(over)}: ${refused?.message}`).toBe(400);
+    }
+    await settle();
+    expect(await counts(B), 'refused: nothing written').toEqual(before);
+    expect(storeEvents(), 'refused: no order event').toEqual([]);
+    expect(
+      await db.payment.count({ where: { businessId: B, status: 'SUCCESSFUL', amount: { lte: 0 } } }),
+      'no zero or negative SUCCESSFUL payment',
+    ).toBe(0);
+
+    // Control: a discount and a fee within the order are recorded at the order's total.
+    const order = await createdPaid({ discountAmount: 10, shippingFee: 5 });
+    const invoices = await invoicesOf(order, B);
+    expect(invoices.map((i) => `${i.invoiceNumber}:${i.status}:${Number(i.total)}`)).toEqual([`INV-${order.orderNumber}:PAID:75`]);
+    expect((await paymentsOf(invoices.map((i) => i.id))).map((p) => `${p.status}:${Number(p.amount)}`)).toEqual(['SUCCESSFUL:75']);
+    await expectTrialBalance(B);
+  });
+
+  it('V87-15 (CR-1) an order created paid for a new customer (the real CRM, raced by the store_order.created listener) is answered 201 paid / PAID every time, with one contact, its invoice made out to it, and no placed order left behind', async () => {
+    const results: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const email = `${P}new_customer_${i}_${Date.now()}@test.local`;
+      // At 5c9f164c: 400 "unable to resolve a contact" (the CRM's ConflictException), and the order left placed / UNPAID.
+      const res = await marketCreate(ID.owner, paidBody({ customerEmail: email, customerName: 'New Customer' }), B);
+      await settle();
+      const orders = await db.marketplaceOrder.findMany({ where: { businessId: B, customerEmail: email } });
+      const contacts = await db.contact.findMany({ where: { businessId: B, emailNormalized: email.toLowerCase() } });
+      const invoices = orders.length === 1 ? await invoicesOf(orders[0], B) : [];
+      results.push(
+        [
+          res.status,
+          orders.map((o: any) => `${o.status}/${o.paymentStatus}`).join(','),
+          `contacts=${contacts.length}`,
+          invoices.map((inv: any) => `${inv.status}:${inv.contactId === contacts[0]?.id}`).join(','),
+        ].join('|'),
+      );
+    }
+    expect(results).toEqual(Array(3).fill('201|paid/PAID|contacts=1|PAID:true'));
   });
 });
