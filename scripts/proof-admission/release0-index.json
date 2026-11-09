@@ -1,11 +1,12 @@
 {
   "indexVersion": 1,
   "packetId": "R0-35-EXIT-PROOF",
-  "description": "The Release 0 exit proof (BUILD-MAP-001 section (d), R0 exit gate): every Release 0 packet (the R0 rows of BUILD-MAP section (c)) with the apps/server suites its records name, the Release 0 manifests that bind each suite, issue #186's seven journey steps (section (b)), and an explanation for every skip and todo in those suites. apps/server/src/core/config/release0-proof-coverage.spec.ts checks it; `pnpm --filter server proof:release0` runs scripts/proof-admission/run-manifests.mjs over exactly `manifests`, then that spec.",
+  "description": "The Release 0 exit proof (BUILD-MAP-001 section (d), R0 exit gate): every Release 0 packet (the R0 rows of BUILD-MAP section (c)) with the apps/server suites its records name, the Release 0 manifests that bind each suite, issue #186's seven journey steps (section (b)), and an explanation, with its status, for every skip and todo in those suites. apps/server/src/core/config/release0-proof-coverage.spec.ts checks it; `pnpm --filter server proof:release0` (scripts/proof-admission/release0.mjs) runs scripts/proof-admission/run-manifests.mjs over exactly `manifests`, then that spec, then a runtime check of the run's report (a case not run must be explained), and answers MET (0), REJECTED (2) or NOT MET (3: everything proven, OPEN items remain, reported to the owner).",
   "derivation": [
     "A packet's suites are, from its own records: (1) the apps/server suites in its BUILD-QUEUE-001.json tests_first; (2) the suites its branch created (git log --diff-filter=A of pkt/<id>, its -repair, the pre-queue branch BUILD-MAP names for it: R0-05 = R0-AB-04, R0-15 = R0-CT-05, R0-17 = R0-PL-03, R0-03 = R0-CT-03, R0-04 = R0-PC-01, R0-11 = R0-PL-07, R0-20 = R0-PL-04; and the R0 follow-ups that landed under it: lettered ids R0-07a, R0-08c, R0-09b..g, R0-13b..g, R0-34b, and the families R0-ID-F* and R0-F24 under R0-05, R0-SEC-01/02 under R0-14, R0-SEC-03/04 under R0-32, R0-CMF1/2 under R0-11, R0-CMF3 under R0-04, R0-CMF4..6 under R0-07, R0-SEC2* under R0-09 (D-11), R0-D1..D7 and R0-QI-01 under R0-16 via release0-landed.json); (3) every suite a manifest with an R0 packageId binds, listed under the packet that packageId names.",
-    "A suite an R0 branch only edited, created before the queue or by a V1 packet, stays with its creator and is listed in editedOnly (it is not a Release 0 suite). A queue tests_first suite that never existed is listed in queueSuitesLandedAs with the suite that carries its proof.",
-    "The Release 0 manifests are every manifest whose packageId starts with 'R0-' (R0-35 added one per packet whose suites no manifest bound, packageId 'R0-35-EXIT-PROOF:<packet>', every passing case required) plus k12-self.json (R0-16 extends it)."
+    "A suite an R0 branch only edited (created before the queue or by a V1 packet) is a Release 0 suite too when the R0 packet authored cases in it (R0-35 review SEC-R035-3): it is listed under the R0 row its editor landed under and bound by release0-edited-suites.json (every passing case required). editedOnly keeps the record of who edited and created each such suite; one whose edit authored no case carries authoredNoCase and stays out. A queue tests_first suite that never existed is listed in queueSuitesLandedAs with the suite that carries its proof. A suite holding the proof that closes a Release 0 todo elsewhere is a Release 0 suite under the packet that parked the todo, bound by release0-closing-proofs.json (R0-35 review SEC-R035-2).",
+    "The Release 0 manifests are every manifest whose packageId starts with 'R0-' (R0-35 added one per packet whose suites no manifest bound, packageId 'R0-35-EXIT-PROOF:<packet>', every passing case required) plus k12-self.json (R0-16 extends it).",
+    "Every explanation has a status (R0-35 review SEC-R035-2, SEC-R035-4): CLOSED (fixed outside the suite; closedBy names a case a Release 0 manifest requires, a line a repo file holds, or a running web unit case), RULED or DEFERRED (an owner ruling of BUILD-MAP section (g)), V1-SCOPE (a V1 packet's residual in a suite an R0 packet only edited; followUp is that queued V1 packet), or OPEN (a Release 0 gap still open; proof:release0 lists it for the owner and answers NOT MET)."
   ],
   "manifests": [
     "commerce-payment-integrity.json",
@@ -37,6 +38,8 @@
     "quote-contact-tenant.json",
     "quote-detail-route.json",
     "quote-status-auth.json",
+    "release0-closing-proofs.json",
+    "release0-edited-suites.json",
     "release0-exit-proof.json",
     "release0-journey.json",
     "release0-landed.json",
@@ -47,6 +50,11 @@
     "worktree-isolation.json"
   ],
   "suites": {
+    "src/core/auth/auth.middleware.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
     "src/core/auth/public-surface.spec.ts": {
       "manifests": [
         "quote-detail-route.json"
@@ -138,6 +146,11 @@
         "optional-services-fail-visibly.json"
       ]
     },
+    "src/modules/approvals/approval.controller.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
     "src/modules/business-events/business-event.interceptor.spec.ts": {
       "manifests": [
         "evidence-feed.json"
@@ -163,14 +176,44 @@
         "commerce-payment-integrity.json"
       ]
     },
+    "src/modules/commerce/system-actor-authority.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
     "src/modules/connect/google-token.helper.spec.ts": {
       "manifests": [
         "gmail-connect-binding.json"
       ]
     },
+    "src/modules/crm/enrichment/contact-enrichment.service.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
+    "src/modules/finance/chart-of-accounts-seeder.service.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
     "src/modules/finance/finance-settings.service.spec.ts": {
       "manifests": [
         "finance-settings-owner.json"
+      ]
+    },
+    "src/modules/identity/identity-password.service.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
+    "src/modules/identity/team-scope-convergence.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
+    "src/modules/key-cortex/adapters/commerce-adapter.service.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
       ]
     },
     "src/modules/key-cortex/adapters/settings-adapter.service.spec.ts": {
@@ -203,9 +246,39 @@
         "optional-services-fail-visibly.json"
       ]
     },
+    "src/modules/key-cortex/key-cortex-ws-auth.service.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
     "src/modules/key-cortex/key-cortex.controller.spec.ts": {
       "manifests": [
         "key-cortex-actor-binding.json"
+      ]
+    },
+    "src/modules/key-cortex/key-cortex.gateway.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
+    "src/modules/onboarding-concierge/onboarding-concierge.service.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
+    "src/modules/risc/risc.service.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
+    "src/modules/structure/job-role-policy.service.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
+    "src/modules/structure/job-role-tool-families.spec.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
       ]
     },
     "src/modules/subscriptions/subscriptions.controller.spec.ts": {
@@ -219,11 +292,21 @@
         "optional-services-fail-visibly.json"
       ]
     },
+    "test/auth-callback-bootstrap.e2e.test.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
     "test/commerce-authorization.e2e.test.ts": {
       "manifests": [
         "invoice-create-contract.json",
         "quote-status-auth.json",
         "revenue-auth-001.json"
+      ]
+    },
+    "test/commerce-contact-bind-visibility.integration.test.ts": {
+      "manifests": [
+        "release0-closing-proofs.json"
       ]
     },
     "test/commerce-invoice-detail.integration.test.ts": {
@@ -338,6 +421,11 @@
         "gmail-connect-binding.json"
       ]
     },
+    "test/identity-bootstrap.service.test.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
     "test/identity-boundary.integration.test.ts": {
       "manifests": [
         "identity-boundary.json"
@@ -371,6 +459,11 @@
     "test/ledger-write-door.integration.test.ts": {
       "manifests": [
         "mark-paid-convergence.json"
+      ]
+    },
+    "test/money-reports.integration.test.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
       ]
     },
     "test/onboarding-manual-complete.integration.test.ts": {
@@ -418,6 +511,16 @@
         "portal-grant-tenant.json"
       ]
     },
+    "test/provider-refund-door.integration.test.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
+    "test/public-catalog-projection.integration.test.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
     "test/public-payment-intent.integration.test.ts": {
       "manifests": [
         "public-payment-intent.json"
@@ -426,6 +529,11 @@
     "test/quote-contact-tenant.integration.test.ts": {
       "manifests": [
         "quote-contact-tenant.json"
+      ]
+    },
+    "test/recurring-invoice-run.integration.test.ts": {
+      "manifests": [
+        "release0-closing-proofs.json"
       ]
     },
     "test/release0-journey.integration.test.ts": {
@@ -446,9 +554,19 @@
         "shadowed-routes-live.json"
       ]
     },
+    "test/stripe-ops-tenancy.integration.test.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
+      ]
+    },
     "test/subscriptions-authority.integration.test.ts": {
       "manifests": [
         "subscriptions-authority.json"
+      ]
+    },
+    "test/supabase-admin.service.test.ts": {
+      "manifests": [
+        "release0-edited-suites.json"
       ]
     },
     "test/tenant-interceptor-alignment.integration.test.ts": {
@@ -513,6 +631,34 @@
         {
           "path": "test/tenant-interceptor-alignment.integration.test.ts",
           "via": "R0-F24-TENANT-INTERCEPTOR-ALIGN: created by febe5f08"
+        },
+        {
+          "path": "src/core/auth/auth.middleware.spec.ts",
+          "via": "edited by R0-ID-F2-ADMIN-TOKEN-LOCAL-USER, R0-ID-F3-REVOCATION-IAT-CUTOFF, R0-ID-F4-LOGOUT-SUPABASE-SIGNOUT, R0-ID-F5-RESET-PASSWORD-RECOVERY (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "src/modules/identity/identity-password.service.spec.ts",
+          "via": "edited by R0-ID-F4-LOGOUT-SUPABASE-SIGNOUT, R0-ID-F5-RESET-PASSWORD-RECOVERY (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "src/modules/identity/team-scope-convergence.spec.ts",
+          "via": "edited by R0-ID-F1-ROLE-ROUTE-AUTHORITY (created by pre-queue (83b5f98d, AUTH effective authority resolver foundation)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "src/modules/key-cortex/key-cortex-ws-auth.service.spec.ts",
+          "via": "edited by R0-ID-F6-WS-ADMIN-TOKEN, R0-ID-F6b-WS-LIVE-REVOCATION (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "src/modules/key-cortex/key-cortex.gateway.spec.ts",
+          "via": "edited by R0-ID-F6b-WS-LIVE-REVOCATION (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "src/modules/risc/risc.service.spec.ts",
+          "via": "edited by R0-ID-F7-RISC-SIGNOUT-SHAPE (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "test/supabase-admin.service.test.ts",
+          "via": "edited by R0-ID-F4-LOGOUT-SUPABASE-SIGNOUT, R0-ID-F5-RESET-PASSWORD-RECOVERY, R0-ID-F7-RISC-SIGNOUT-SHAPE (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
         }
       ]
     },
@@ -595,6 +741,10 @@
         {
           "path": "test/payments-webhooks.service.test.ts",
           "via": "manifest revenue-auth-001.json"
+        },
+        {
+          "path": "test/public-catalog-projection.integration.test.ts",
+          "via": "edited by R0-SEC3-INVOICE-WRITE-PROJECTION (created by V1-23-PUB-PUBLIC-PROJECTIONS (9c4efe19)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
         }
       ]
     },
@@ -662,6 +812,14 @@
         {
           "path": "src/core/config/env.spec.ts",
           "via": "R0-SEC-02-VERIFYLOCAL-ISSUER: created by 580f2f2c"
+        },
+        {
+          "path": "test/auth-callback-bootstrap.e2e.test.ts",
+          "via": "edited by R0-SEC-01-BOOTSTRAP-TAKEOVER (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "test/identity-bootstrap.service.test.ts",
+          "via": "edited by R0-SEC-01-BOOTSTRAP-TAKEOVER (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
         }
       ]
     },
@@ -675,6 +833,14 @@
         {
           "path": "test/commerce-authorization.e2e.test.ts",
           "via": "R0-27: queue tests_first, manifest invoice-create-contract.json"
+        },
+        {
+          "path": "test/recurring-invoice-run.integration.test.ts",
+          "via": "closing proof of R0-27 review ST-27-1 (V1-12 review ST-12-3, its TENANT block); bound by release0-closing-proofs.json (R0-35 review SEC-R035-2)"
+        },
+        {
+          "path": "test/commerce-contact-bind-visibility.integration.test.ts",
+          "via": "closing proof of R0-27 review ST-27-5 (owner ruling D-64; FOLLOW3-D6, W3-D64-COMMERCE-CREATE); bound by release0-closing-proofs.json (R0-35 review SEC-R035-2)"
         }
       ]
     },
@@ -684,6 +850,10 @@
         {
           "path": "test/onboarding-manual-complete.integration.test.ts",
           "via": "R0-32: queue tests_first, created by 6a8690f1; extended by R0-SEC-03 and R0-SEC-04"
+        },
+        {
+          "path": "src/modules/onboarding-concierge/onboarding-concierge.service.spec.ts",
+          "via": "edited by R0-32-ONBOARD-COMPLETE-SERVER, R0-SEC-03-ONBOARD-COMPLETE-OWNER-ONLY, R0-SEC-04-ONBOARD-FOLLOWUPS (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
         }
       ]
     },
@@ -726,6 +896,22 @@
         {
           "path": "test/ops-scope-command-procurement.integration.test.ts",
           "via": "R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT (R0-13f's revived procurement routes, D-40): created by 3f81d016"
+        },
+        {
+          "path": "src/modules/approvals/approval.controller.spec.ts",
+          "via": "edited by R0-13f-ROUTE-SHADOWING-SIBLINGS (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "src/modules/crm/enrichment/contact-enrichment.service.spec.ts",
+          "via": "edited by R0-13d-CT-BULK-ENRICH-VISIBILITY (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "src/modules/structure/job-role-policy.service.spec.ts",
+          "via": "edited by R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT (created by V1-21b-JOBROLE-TOOL-FAMILIES (60bf17aa)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "src/modules/structure/job-role-tool-families.spec.ts",
+          "via": "edited by R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT, R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR (created by V1-21b-JOBROLE-TOOL-FAMILIES (60bf17aa)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
         }
       ]
     },
@@ -824,6 +1010,10 @@
         {
           "path": "src/modules/commerce/drive-intake-orchestrator.service.spec.ts",
           "via": "R0-CMF2-PAYMENT-ACTOR-GAPS: created by 9df05322"
+        },
+        {
+          "path": "src/modules/key-cortex/adapters/commerce-adapter.service.spec.ts",
+          "via": "edited by R0-PL-07-PAYMENT-ACTOR (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
         }
       ]
     },
@@ -865,6 +1055,10 @@
         {
           "path": "test/commerce-invoice-detail.integration.test.ts",
           "via": "manifest release0-landed.json (R0-QI-01-TENANT-INVOICE-DETAIL-ROUTE, created by d1d8a66d)"
+        },
+        {
+          "path": "src/modules/finance/chart-of-accounts-seeder.service.spec.ts",
+          "via": "edited by R0-D1-COA-SEED-RACE (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
         }
       ]
     },
@@ -989,6 +1183,26 @@
         {
           "path": "test/ledger-write-door.integration.test.ts",
           "via": "manifest mark-paid-convergence.json (R0-20c-STRIPE-DOOR-BINDING)"
+        },
+        {
+          "path": "src/modules/commerce/system-actor-authority.spec.ts",
+          "via": "edited by R0-PL-04-MARK-PAID-POSTS-LEDGER (created by pre-queue (adcb2aeb)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "src/modules/structure/job-role-tool-families.spec.ts",
+          "via": "edited by R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT, R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR (created by V1-21b-JOBROLE-TOOL-FAMILIES (60bf17aa)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "test/money-reports.integration.test.ts",
+          "via": "edited by R0-20c-STRIPE-DOOR-BINDING (created by FOLLOW3-A7-MONEY-REPORTS (046ca4be)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "test/provider-refund-door.integration.test.ts",
+          "via": "edited by R0-20c-STRIPE-DOOR-BINDING (created by V1-29c-REFUND-WRITE-DOOR (18b22c44)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
+        },
+        {
+          "path": "test/stripe-ops-tenancy.integration.test.ts",
+          "via": "edited by R0-20c-STRIPE-DOOR-BINDING (created by V1-15d-STRIPE-OPS-TENANCY (09ad9410)); bound by release0-edited-suites.json (R0-35 review SEC-R035-3)"
         }
       ],
       "queueSuitesLandedAs": [
@@ -1056,161 +1270,296 @@
       "kind": "it.todo",
       "titleStartsWith": "key-connector/key-connector.controller.ts reads @Query('businessId')",
       "reason": "OPEN. KeyConnectorController still takes businessId from the query string in 10 handlers behind BusinessGuard; R0-34b bound only the KEY cortex controllers (its write set) and parked this as a todo.",
-      "owner": "R0-34b-KEY-TENANT-BINDING (parked it); follow-up packet not yet queued in BUILD-MAP"
+      "owner": "R0-34b-KEY-TENANT-BINDING (parked it); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN"
     },
     {
       "suite": "src/main.listen.spec.ts",
       "kind": "it.todo",
       "titleStartsWith": "LISTEN_HOST is declared in .env.example",
       "reason": "DONE OUTSIDE THE SUITE: .env.example now declares LISTEN_HOST (lines 49-50). The todo is stale; main.listen.spec.ts is outside R0-35's write set, so the next packet that writes it turns the todo into a case.",
-      "owner": "R0-D6-LISTEN-IPV4-FALLBACK (bound by release0-landed.json under R0-16-PROOF-BINDING)"
+      "owner": "R0-D6-LISTEN-IPV4-FALLBACK (bound by release0-landed.json under R0-16-PROOF-BINDING)",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "file": ".env.example",
+          "contains": "LISTEN_HOST="
+        }
+      ]
     },
     {
       "suite": "test/ai-direct-provider-503.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "POST /commerce/businesses/:b/products/import/scan answers 503",
       "reason": "OPEN. CommerceVisionService.extractProductsFromImage still catches every error and returns [], so a keyless scan answers 2xx with no products instead of a visible 503; outside the R0-07a write set.",
-      "owner": "R0-07a-AI-DIRECT-503 (parked it, under R0-07-OPTIONAL-SVC-VISIBLE); follow-up packet not yet queued in BUILD-MAP"
+      "owner": "R0-07a-AI-DIRECT-503 (parked it, under R0-07-OPTIONAL-SVC-VISIBLE); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN"
     },
     {
       "suite": "test/ai-direct-provider-503.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "GET /ai/businesses/:b/agent/memory/search and POST .../agent/memory/backfill",
       "reason": "OPEN. SemanticMemoryService.search and backfillFromAiMemory swallow the missing-embeddings error and answer an empty 200; outside the R0-07a write set.",
-      "owner": "R0-07a-AI-DIRECT-503 (parked it, under R0-07-OPTIONAL-SVC-VISIBLE); follow-up packet not yet queued in BUILD-MAP"
+      "owner": "R0-07a-AI-DIRECT-503 (parked it, under R0-07-OPTIONAL-SVC-VISIBLE); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN"
     },
     {
       "suite": "test/commerce-invoice-errors.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "ST-27-1 (deferred, outside the R0-27 write set)",
       "reason": "DONE OUTSIDE THE SUITE: RecurringInvoiceService.assertContactInBusiness (V1-12 review ST-12-3, recurring-invoice.service.ts) refuses a foreign contact on schedule create, proven in test/recurring-invoice-run.integration.test.ts. The todo is stale; this suite is outside R0-35's write set.",
-      "owner": "V1-12-DM-RECURRING-GUARD (closed it, review ST-12-3); R0-27-REVENUE-CREATE-CONTRACT parked it"
+      "owner": "V1-12-DM-RECURRING-GUARD (closed it, review ST-12-3); R0-27-REVENUE-CREATE-CONTRACT parked it",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "manifest": "release0-closing-proofs.json",
+          "case": "TENANT: a schedule never binds or bills another business's contact (V1-12 review ST-12-3) create: a contact of another business is a 404 and nothing is written; an unknown id the same; a contact of the business is accepted"
+        },
+        {
+          "manifest": "release0-closing-proofs.json",
+          "case": "TENANT: a schedule never binds or bills another business's contact (V1-12 review ST-12-3) run (CASH business): a legacy schedule bound to another business's contact is not billed, its contact reaches no listener, and the failure is recorded; the business's own schedule is billed"
+        },
+        {
+          "manifest": "release0-closing-proofs.json",
+          "case": "TENANT: a schedule never binds or bills another business's contact (V1-12 review ST-12-3) run: the contact is checked again on the claimed row, inside the transaction (a schedule re-pointed to another business's contact after the scan is not billed)"
+        }
+      ]
     },
     {
       "suite": "test/commerce-invoice-errors.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "ST-27-5 (deferred, needs a decision)",
       "reason": "RULED AND DONE OUTSIDE THE SUITE: owner ruling D-64 (invoice and quote create, update and convert refuse a contact the member cannot open under CRM visibility), implemented by FOLLOW3-D6 / W3-D46-CREATE-AND-RECURRING (CommerceService.assertContactInBusiness takes the member clause). The todo is stale; this suite is outside R0-35's write set.",
-      "owner": "D-64 (ruling); R0-27-REVENUE-CREATE-CONTRACT parked it"
+      "owner": "D-64 (ruling); R0-27-REVENUE-CREATE-CONTRACT parked it",
+      "status": "CLOSED",
+      "ruling": "D-64",
+      "closedBy": [
+        {
+          "manifest": "release0-closing-proofs.json",
+          "case": "CB-01 STAFF (revenue:write, crm_view owned) binds the owner's PRIVATE contact: 404, nothing written, nothing disclosed (D-64) CB-01a POST businesses/A/invoices, with and without an Idempotency-Key: 404 Contact not found, no Invoice and no key slot written (D-64)"
+        },
+        {
+          "manifest": "release0-closing-proofs.json",
+          "case": "CTL controls (pass before and after) CTL-05 an unknown id and another tenant's contact keep their 404 'Contact not found' for STAFF and OWNER, and nothing is written"
+        }
+      ]
     },
     {
       "suite": "test/contacts-import-write-scope.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "FOLLOW-UP PACKET: POST crm/businesses/:businessId/google/import",
       "reason": "OPEN. CrmGoogleController.importFromGoogle still runs under AuthGuard and BusinessGuard only (no crm write scope) and importGoogleContacts passes no actor, so a crm read-only member can merge Google data into a PRIVATE contact; both files are outside the R0-13 write set.",
-      "owner": "R0-13-CT-PERSISTENCE-PROOF (parked it); follow-up packet not yet queued in BUILD-MAP"
+      "owner": "R0-13-CT-PERSISTENCE-PROOF (parked it); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN"
     },
     {
       "suite": "test/crm.e2e.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "KEY call_create_task records a member of the business as the caller",
       "reason": "OPEN. FlowOrchestratorService call_create_task still passes args.callerId through to CallLogService.createCallLog; the REST call-log route takes the caller from the session (V1-54), the KEY tool does not (review ST-4).",
-      "owner": "V1-54-CT-ROUTE-ORDER-CALLER (REST half done); KEY tool half: follow-up packet not yet queued in BUILD-MAP"
+      "owner": "V1-54-CT-ROUTE-ORDER-CALLER (REST half done); KEY tool half: follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN",
+      "followUp": "V1-54-CT-ROUTE-ORDER-CALLER"
     },
     {
       "suite": "test/d11-sibling-writes.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "REQUIRED (follow-up; identity.service.ts updateBusiness",
       "reason": "OPEN (review CR-1, true before R0-09b). When the OWNER changes Business.slug through PATCH /identity/businesses/:id, a presence draft keeping the old slug can put it back on the next publish; identity.service.ts is outside the R0-09b write set.",
-      "owner": "R0-09b-D11-SIBLING-WRITES (parked it, under R0-09-ID-HARDEN, D-11); follow-up packet not yet queued in BUILD-MAP"
+      "owner": "R0-09b-D11-SIBLING-WRITES (parked it, under R0-09-ID-HARDEN, D-11); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN",
+      "followUp": "D-11"
     },
     {
       "suite": "test/evidence-feed.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "V55-13e (SEC-W5FC-1, D-90 / D-63, outside the write set)",
       "reason": "OPEN at this head. GET /crm/businesses/:b/contacts/:c/events returns ContactEvent data with payment amounts to a member with crm read and revenue 'none', which the feed withholds under D-90 / D-63; the W6 (FOLLOW7) contact-events money packet is closing it in parallel.",
-      "owner": "D-90 / D-63 (rulings); W6 (FOLLOW7) contact-events money packet"
+      "owner": "D-90 / D-63 (rulings); W6 (FOLLOW7) contact-events money packet",
+      "status": "OPEN",
+      "followUp": "D-90"
     },
     {
       "suite": "test/identity-boundary.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "REQUIRED (fix packet; identity.controller.ts logout, supabase-admin.service.ts signOut",
       "reason": "CALL SHAPE FIXED, NOT OBSERVABLE HERE: R0-ID-F4 made SupabaseAdminService.signOut take the user's access JWT and refuse a user id (proven in test/supabase-admin.service.test.ts). This suite's child server has no Supabase admin (every SUPABASE_* key blank), so the global sign-out cannot be asserted here and the todo stays.",
-      "owner": "R0-ID-F4-LOGOUT-SUPABASE-SIGNOUT (under R0-05-ID-REALDB-TENANT-ALIGN)"
+      "owner": "R0-ID-F4-LOGOUT-SUPABASE-SIGNOUT (under R0-05-ID-REALDB-TENANT-ALIGN)",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "manifest": "release0-edited-suites.json",
+          "case": "CR-2 — the callers hand SupabaseAdminService.signOut the caller's JWT POST /identity/logout passes the caller's bearer access token — not the user id — to signOut with scope 'global'"
+        },
+        {
+          "manifest": "release0-edited-suites.json",
+          "case": "CR-2 — the callers hand SupabaseAdminService.signOut the caller's JWT POST /identity/logout end to end through the real SupabaseAdminService and the installed auth-js: GoTrue receives POST /logout?scope=global bearing the caller's JWT (recording fetch, no provider traffic)"
+        },
+        {
+          "manifest": "release0-edited-suites.json",
+          "case": "CR-2 — SupabaseAdminService.signOut takes the JWT auth-js admin.signOut expects refuses a value that is not a JWT — a bare user id, the CR-2 call shape — without calling auth-js, and reports failure"
+        }
+      ]
     },
     {
       "suite": "test/ops-scope-command-procurement.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "[OPS-T04] review SEC-R013g-4",
       "reason": "OPEN. Command-item approve/complete/dismiss and procurement acknowledge/fulfill/invoice audit rows do not name the acting member: CommandService and ProcurementService take no actor, outside the R0-13g write set.",
-      "owner": "R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT (parked it, under R0-13-CT-PERSISTENCE-PROOF, D-40); follow-up packet not yet queued in BUILD-MAP"
+      "owner": "R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT (parked it, under R0-13-CT-PERSISTENCE-PROOF, D-40); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN"
     },
     {
       "suite": "test/ops-scope-command-procurement.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "[OPS-T01] the cockpit snapshot",
       "reason": "REFERRED TO THE OWNER. Whether D-40's operations scope covers the cockpit snapshot: the journey (step 5) pins a STAFF member without operations reading it 200 and V1-47 projects each tile by the member's scopes.",
-      "owner": "D-40 (ruling); R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT parked it"
+      "owner": "D-40 (ruling); R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT parked it",
+      "status": "OPEN",
+      "followUp": "D-40"
     },
     {
       "suite": "test/ops-scope-command-procurement.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "[OPS-T02] the web hides the procurement nav entry",
       "reason": "OPEN, WEB. Hiding the procurement nav entry and disabling command-item actions for a member without operations is apps/web work (nav-config.ts, sidebar, command cards), outside the R0-13g write set; the server already refuses (403).",
-      "owner": "R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT (parked it, D-40); web follow-up not yet queued in BUILD-MAP"
+      "owner": "R0-13g-OPS-SCOPE-COMMAND-PROCUREMENT (parked it, D-40); web follow-up not yet queued in BUILD-MAP",
+      "status": "OPEN",
+      "followUp": "D-40"
     },
     {
       "suite": "test/optional-services-fail-visibly.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "ST-2: the state names the initiating user",
       "reason": "DONE OUTSIDE THE SUITE: R0-CMF5-GMAIL-CONNECT-BINDING binds the signed OAuth state to the initiating user and links nothing until that user confirms (gmail-connect-binding.json, 'R0-07 review ST-2 and ST-3'). The todo is stale; this suite is outside R0-35's write set.",
-      "owner": "R0-CMF5-GMAIL-CONNECT-BINDING (closed it, under R0-07-OPTIONAL-SVC-VISIBLE)"
+      "owner": "R0-CMF5-GMAIL-CONNECT-BINDING (closed it, under R0-07-OPTIONAL-SVC-VISIBLE)",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "manifest": "gmail-connect-binding.json",
+          "case": "R0-CMF5 starting a Gmail connection is OWNER only (ST-3, D-11) [R0-CMF5-A03] RED-BEFORE: the OWNER gets the Google URL; its state is HMAC-SHA256-signed with GOOGLE_STATE_SECRET and carries the owner's user id, the business id, a nonce, a 10-minute expiry and purpose gmail"
+        },
+        {
+          "manifest": "gmail-connect-binding.json",
+          "case": "R0-CMF5 a Gmail callback links nothing; the owner who started it confirms it (ST-2) [R0-CMF5-B01] RED-BEFORE: the review reproduction: the owner's auth URL completed with a stranger's Google account (callback in the stranger's request, then in one with no session) links no mailbox; it redirects gmail=pending and stores the exchanged tokens, encrypted, as one PENDING connection bound to the owner and the business"
+        },
+        {
+          "manifest": "gmail-connect-binding.json",
+          "case": "R0-CMF5 a Gmail callback links nothing; the owner who started it confirms it (ST-2) [R0-CMF5-B02] RED-BEFORE: nobody but the user the state names can confirm it: the stranger (403, BusinessGuard), a STAFF member and an ADMIN (403 GMAIL_OWNER_ONLY), a co-owner and a SUPER_ADMIN (404 GMAIL_PENDING_NOT_FOUND); nothing is linked and the pending connection stays"
+        }
+      ]
     },
     {
       "suite": "test/optional-services-fail-visibly.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "ST-3: GET /commerce/businesses/:b/gmail/auth-url requires the authority",
       "reason": "DONE OUTSIDE THE SUITE: R0-CMF5-GMAIL-CONNECT-BINDING makes gmail auth-url, confirm and disconnect OWNER only (403 GMAIL_OWNER_ONLY, D-11, D-42). The todo is stale; this suite is outside R0-35's write set.",
-      "owner": "R0-CMF5-GMAIL-CONNECT-BINDING (closed it, under R0-07-OPTIONAL-SVC-VISIBLE)"
+      "owner": "R0-CMF5-GMAIL-CONNECT-BINDING (closed it, under R0-07-OPTIONAL-SVC-VISIBLE)",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "manifest": "gmail-connect-binding.json",
+          "case": "R0-CMF5 starting a Gmail connection is OWNER only (ST-3, D-11) [R0-CMF5-A01] RED-BEFORE: a STAFF member with role-default scopes (revenue: read) asks for the auth URL: 403 GMAIL_OWNER_ONLY, no Google URL"
+        },
+        {
+          "manifest": "gmail-connect-binding.json",
+          "case": "R0-CMF5 starting a Gmail connection is OWNER only (ST-3, D-11) [R0-CMF5-A02] RED-BEFORE: an ADMIN (role defaults, revenue: admin) and a STAFF member granted revenue: admin are refused the auth URL the same way"
+        }
+      ]
     },
     {
       "suite": "test/optional-services-fail-visibly.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "ST-4 / R07-CR-1: the web client hands a GET 503",
       "reason": "DONE OUTSIDE THE SUITE (web): R0-07b-WEB-503-PASSTHROUGH makes apps/web/src/lib/fetch-with-retry.ts hand a structured provider 503 to its caller on the first response (bounded body read, review ST-1). A server suite cannot assert web behaviour, so the todo stays.",
-      "owner": "R0-07b-WEB-503-PASSTHROUGH (closed it, under R0-07-OPTIONAL-SVC-VISIBLE)"
+      "owner": "R0-07b-WEB-503-PASSTHROUGH (closed it, under R0-07-OPTIONAL-SVC-VISIBLE)",
+      "status": "CLOSED",
+      "closedBy": [
+        {
+          "webSuite": "apps/web/src/lib/__tests__/fetch-with-retry-503.test.ts",
+          "case": "a GET 503 {code: provider_not_configured, details.service: gmail} is requested once and returned with its body intact"
+        },
+        {
+          "webSuite": "apps/web/src/lib/__tests__/fetch-with-retry-503.test.ts",
+          "case": "a GET 503 {code: provider_unavailable, details.service: ai} is requested once and returned with its body intact"
+        }
+      ]
     },
     {
       "suite": "test/payments-actor.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "PA-16n (SEC-CMF1-3)",
       "reason": "OPEN per the todo. CommerceService.updateInvoice with no actor still acts as KEY_SYSTEM_ACTOR_ID instead of refusing; needs the KEY commerce_update_invoice tool to pass its actor first (flow-orchestrator.service.ts), outside the R0-CMF1 write set.",
-      "owner": "R0-CMF1-INVOICE-PATCH-ACTOR (parked it, under R0-11-PL07-PAYMENT-ACTOR); follow-up packet not yet queued in BUILD-MAP"
+      "owner": "R0-CMF1-INVOICE-PATCH-ACTOR (parked it, under R0-11-PL07-PAYMENT-ACTOR); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN"
     },
     {
       "suite": "test/payments-actor.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "PA-16o (SEC-CMF1-5)",
       "reason": "OPEN per the todo. On an ACCRUAL business the invoice_finalized posting and its reversal record createdById null instead of the member who issued and voided; needs the invoice workflow transition to carry the actor, outside the R0-CMF1 write set.",
-      "owner": "R0-CMF1-INVOICE-PATCH-ACTOR (parked it, under R0-11-PL07-PAYMENT-ACTOR); follow-up packet not yet queued in BUILD-MAP"
+      "owner": "R0-CMF1-INVOICE-PATCH-ACTOR (parked it, under R0-11-PL07-PAYMENT-ACTOR); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN"
     },
     {
       "suite": "test/payments-actor.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "PA-18e (SEC-CMF2-3)",
       "reason": "OPEN. DriveIntakeController.approve still runs under AuthGuard and BusinessGuard only, so a member with revenue read (or only crm read) can approve a plan whose record_payment step writes a payment; needs RequireModuleScope('revenue', 'write'), outside the R0-CMF2 write set.",
-      "owner": "R0-CMF2-PAYMENT-ACTOR-GAPS (parked it, under R0-11-PL07-PAYMENT-ACTOR); follow-up packet not yet queued in BUILD-MAP"
+      "owner": "R0-CMF2-PAYMENT-ACTOR-GAPS (parked it, under R0-11-PL07-PAYMENT-ACTOR); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN"
     },
     {
       "suite": "test/revenue-authorization.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "RA-G4-13: SUPER_ADMIN still passes",
       "reason": "RULED: owner ruling D-46 keeps a platform SUPER_ADMIN who is not a member refused on tenant invoice writes (no change). The todo records the matrix row the ruling closed without a code change; the guard half is pinned by cases in this suite.",
-      "owner": "D-46 (ruling); R0-02-REV-AUTH-CONFORM parked it"
+      "owner": "D-46 (ruling); R0-02-REV-AUTH-CONFORM parked it",
+      "status": "RULED",
+      "ruling": "D-46"
     },
     {
       "suite": "test/revenue-authorization.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "RR-SEC3-02 (SEC3-ST-2)",
       "reason": "OPEN per the todo. The KEY tool commerce_mark_invoice_paid returns markInvoicePaid's reload with the linked Booking and Contact rows to a revenue:write member without bookings or CRM scope; the fix is in FlowOrchestratorService, outside the R0-SEC3 write set.",
-      "owner": "R0-SEC3-INVOICE-WRITE-PROJECTION (parked it, under R0-02-REV-AUTH-CONFORM); follow-up packet not yet queued in BUILD-MAP"
+      "owner": "R0-SEC3-INVOICE-WRITE-PROJECTION (parked it, under R0-02-REV-AUTH-CONFORM); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN"
     },
     {
       "suite": "test/revenue-authorization.integration.test.ts",
       "kind": "it.todo",
       "titleStartsWith": "RA-G16-01 (service half)",
       "reason": "DEFERRED BY RULING: D-05 authorized the legacy /webhooks/stripe route through the audited mark-paid door (R0-20b); refusing a direct markInvoicePaid call with no actor and no tenant is a commerce.service.ts change no production caller needs (RA-G16-01 census), deferred to INGRESS-001 in the V1+ backlog.",
-      "owner": "D-05 (ruling); R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR parked it (under R0-20-MARKPAID-CONVERGENCE)"
+      "owner": "D-05 (ruling); R0-20b-LEGACY-STRIPE-WEBHOOK-DOOR parked it (under R0-20-MARKPAID-CONVERGENCE)",
+      "status": "DEFERRED",
+      "ruling": "D-05"
+    },
+    {
+      "suite": "test/supabase-admin.service.test.ts",
+      "kind": "it.todo",
+      "titleStartsWith": "R0-ID-F7 review F7-SEC-2 (residual, needs a follow-up packet",
+      "reason": "OPEN. A RISC account-disabled/hijacking event pauses the pre-event Supabase session (a 65-minute ban) and sets the 24h auth:revoked:user cutoff; it does not revoke the refresh token, so the hijacker's session works again once both lapse. Needs a durable cutoff AuthMiddleware reads or a GoTrue global logout under a server-minted user JWT, outside the R0-ID-F7 repair write set. Indexed now that this suite is a Release 0 suite (R0-35 review SEC-R035-3).",
+      "owner": "R0-ID-F7-RISC-SIGNOUT-SHAPE (parked it, under R0-05-ID-REALDB-TENANT-ALIGN); follow-up packet not yet queued in BUILD-MAP",
+      "status": "OPEN"
+    },
+    {
+      "suite": "test/stripe-ops-tenancy.integration.test.ts",
+      "kind": "it.todo",
+      "titleStartsWith": "SOT-10b: the refund of a payment recorded under its charge id",
+      "reason": "V1 SCOPE. payments-ops refundCharge writes the refund row unposted before Stripe's refund.created, which then posts nothing (money-state-writer-inventory: refundCharge 'unposted', owner V1-29-DM-REFUND-CONVENTION); routing it through the ledger door is V1 money work outside the V1-15d write set. The suite is V1-15d's; R0-20c only added SOT-01/02.",
+      "owner": "V1-15d-STRIPE-OPS-TENANCY (parked it); V1-29-DM-REFUND-CONVENTION owns the writer",
+      "status": "V1-SCOPE",
+      "followUp": "V1-29-DM-REFUND-CONVENTION"
+    },
+    {
+      "suite": "test/public-catalog-projection.integration.test.ts",
+      "kind": "it.todo",
+      "titleStartsWith": "qualification-recommend 404s a closed store and returns the product projection",
+      "reason": "V1 SCOPE. The public qualification-recommend route (qualification.service.ts scoreAndRecommend) lists a closed store's active products with executionMeta; whether executionMeta is public is an owner question. Public projections are V1-23's scope (review SEC-V123-3); R0-SEC3 only added the invoice-write projection cases to this suite.",
+      "owner": "V1-23-PUB-PUBLIC-PROJECTIONS (parked it, review SEC-V123-3)",
+      "status": "V1-SCOPE",
+      "followUp": "V1-23-PUB-PUBLIC-PROJECTIONS"
     }
   ],
   "editedOnly": [
@@ -1376,7 +1725,8 @@
       "editedBy": [
         "R0-00-WT-ISOLATION (fixture-prefix registry compliance)"
       ],
-      "createdBy": "V1-44-DM-CREDIT-NOTE"
+      "createdBy": "V1-44-DM-CREDIT-NOTE",
+      "authoredNoCase": "R0-00 only renamed this suite's fixture literals for the fixture-prefix registry (70f462cc: no hand-written LIKE, prefixed member emails); every case is V1-44's or a later V1 packet's, so it is not a Release 0 suite."
     }
   ]
 }
