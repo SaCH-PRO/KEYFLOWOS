@@ -35,6 +35,20 @@
  *         invoice. Invariant: never VOID with net received > 0. Either the void wins and the payment is
  *         refused 4xx with no SUCCESSFUL row, or the payment wins and the void answers 409. Recorded
  *         either way; not required to go red at the base (the compare-and-set already catches it there).
+ *   VN-07 the void's lock orders it against the doors that take the same invoice row lock, pinned
+ *         deterministically (review SEC-V82-1 / CR-B1-1 narrowed the claim to these doors):
+ *         (a) POST payment (recordPayment) sent while transition(VOID) holds the lock, after its payment
+ *             read: it is still waiting 1.5 s later, then answers 409 'Cannot record payment on a VOID
+ *             invoice'; the invoice ends VOID, net 0, ledger all 0 / REVERSED
+ *         (b) a transaction that takes the lock first (SELECT ... FOR NO KEY UPDATE, as
+ *             PaymentsService.lockInvoice) and records a SUCCESSFUL 40 with its posting: PATCH status/void
+ *             sent while it is open is still waiting 1.5 s later, then answers 409 naming the 40; after
+ *             reconcileFromPayments the invoice is PARTIALLY_PAID with AR 60 / income 100 / cash 40
+ *   VN-08 TODO (follow-up, outside this packet's write set): the provider settlement doors
+ *         (PaymentsService.createPaymentWithPosting: Stripe, PayPal webhook, WiPay, capturePaypalOrder)
+ *         take no invoice lock and do not re-check VOID in their transaction, so a provider payment that
+ *         commits while a void decides still ends VOID with net 40 (reproduced in the repair round:
+ *         {status VOID, net 40, ledger AR -40 / income 0 / cash 40 / REVERSED}).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed: the plan allows
@@ -80,6 +94,8 @@ let db: any;
 let app: any;
 let redis: any;
 let commerce: any;
+let workflow: any;
+let revenuePosting: any;
 let storedBalanceFn: (total: number, rows: Array<{ amount: number; status: string }>, currency?: string | null) => any;
 
 const emitted: Array<{ name: string; payload: any }> = [];
@@ -206,6 +222,38 @@ async function ledgerOf(biz: string, invoiceId: string) {
 
 function voidEventsFor(invoiceId: string) {
   return emitted.filter((e) => e.name === 'invoice.void' && e.payload?.invoice?.id === invoiceId);
+}
+
+/**
+ * The transaction client `tx`, with `hook` run once right after
+ * transition(VOID) has read the invoice's payments (assertNothingReceivedNet),
+ * while the void holds the invoice row lock and has not written VOID yet.
+ * Every other call goes to `tx` unchanged.
+ */
+function afterPaymentRead(tx: any, hook: () => Promise<void>) {
+  const bound = (target: any, key: PropertyKey) => {
+    const value = Reflect.get(target, key);
+    return typeof value === 'function' ? value.bind(target) : value;
+  };
+  let fired = false;
+  return new Proxy(tx, {
+    get(target, key) {
+      if (key !== 'payment') return bound(target, key);
+      return new Proxy(target.payment, {
+        get(delegate, k) {
+          if (k !== 'findMany') return bound(delegate, k);
+          return async (args: unknown) => {
+            const rows = await delegate.findMany(args);
+            if (!fired) {
+              fired = true;
+              await hook();
+            }
+            return rows;
+          };
+        },
+      });
+    },
+  });
 }
 
 /** A DRAFT invoice of 100 in the business's currency. Invoice numbers default to INV-<ms>: space the creates. */
@@ -364,6 +412,8 @@ beforeAll(async () => {
     ],
   }).compile();
   commerce = moduleRef.get(CommerceService);
+  workflow = moduleRef.get(workflowMod.InvoiceWorkflowService);
+  revenuePosting = moduleRef.get(RevenuePostingService);
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -596,4 +646,85 @@ describe('V1-82 no path voids an invoice that still holds money received net (re
     // Recorded for the packet evidence either way.
     console.log(`[v82a VN-06]\n${outcomes.join('\n')}`);
   });
+
+  describe('VN-07 the void is ordered against the doors that take the invoice row lock (review SEC-V82-1 / CR-B1-1)', () => {
+    it('(a) POST payment sent while transition(VOID) holds the lock, after its payment read, waits for the decision, then answers 409 on the VOID invoice; VOID, no payment row, net 0, ledger all 0 / REVERSED', async () => {
+      const id = await sent(ID.bizAcc);
+      let payment: Promise<any> | undefined;
+      let whileVoidDecides: unknown;
+      await db.$transaction(
+        async (tx: any) => {
+          await workflow.transition(id, 'VOID', {
+            tx: afterPaymentRead(tx, async () => {
+              payment = pay(ID.bizAcc, id, 40).then((r) => r);
+              whileVoidDecides = await Promise.race([
+                payment.then((r: any) => `answered ${r.status}`),
+                sleep(1500).then(() => 'waiting'),
+              ]);
+            }),
+          });
+        },
+        { timeout: 30_000 },
+      );
+      expect(whileVoidDecides, 'the payment door waits on the invoice row lock the void holds').toBe('waiting');
+
+      const res = await payment!;
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(res.body.message).toBe('Cannot record payment on a VOID invoice');
+      expect((await invoiceRow(id)).status).toBe('VOID');
+      expect(await paymentRows(id)).toEqual([]);
+      expect(await netReceived(id)).toBe(0);
+      expect(await ledgerOf(ID.bizAcc, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: 'REVERSED' });
+    });
+
+    it('(b) a payment transaction that took the lock first (as PaymentsService.lockInvoice) and holds an uncommitted SUCCESSFUL 40 with its posting: PATCH status/void waits for it, then answers 409 naming the 40; no invoice.void, and after reconcileFromPayments PARTIALLY_PAID with AR 60 / income 100 / cash 40', async () => {
+      const id = await sent(ID.bizAcc);
+      let voided: Promise<any> | undefined;
+      let whilePaymentOpen: unknown;
+      await db.$transaction(
+        async (tx: any) => {
+          await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${id} FOR NO KEY UPDATE`;
+          const row = await tx.payment.create({
+            data: {
+              provider: 'stripe',
+              providerPaymentId: `${P}pi_${id}`,
+              amount: 40,
+              currency: 'USD',
+              status: 'SUCCESSFUL',
+              invoiceId: id,
+              businessId: ID.bizAcc,
+            },
+          });
+          await revenuePosting.onPaymentRecorded(row.id, { tx });
+          voided = setStatus(ID.bizAcc, id, 'VOID').then((r) => r);
+          whilePaymentOpen = await Promise.race([
+            voided.then((r: any) => `answered ${r.status}`),
+            sleep(1500).then(() => 'waiting'),
+          ]);
+        },
+        { timeout: 30_000 },
+      );
+      expect(whilePaymentOpen, 'the void waits on the invoice row lock the payment holds').toBe('waiting');
+
+      const res = await voided!;
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expectNetReceivedRefusal(res.body.message);
+      expect(voidEventsFor(id)).toHaveLength(0);
+
+      await workflow.reconcileFromPayments(id);
+      expect((await invoiceRow(id)).status).toBe('PARTIALLY_PAID');
+      expect(await netReceived(id)).toBe(40);
+      await expectAccrualPartPaidLedger(id);
+    });
+  });
+
+  it.todo(
+    'VN-08 FOLLOW-UP (fix outside the V1-82 write set, in payments.service.ts): a SUCCESSFUL provider payment recorded through ' +
+      'PaymentsService.createPaymentWithPosting (Stripe charge / session webhook, PayPal capture webhook, WiPay callback, ' +
+      'capturePaypalOrder) while transition(VOID) decides never leaves the invoice VOID with money received net > 0. Today that ' +
+      "door takes no invoice lock and does not re-check VOID in its transaction, and its foreign-key check (FOR KEY SHARE) is not " +
+      "blocked by the void's FOR NO KEY UPDATE, so the payment commits and the invoice ends VOID, net 40, ledger AR -40 / income 0 / " +
+      'cash 40 / REVERSED (reproduced in the repair round, review SEC-V82-1 / CR-B1-1). Fix: those doors take ' +
+      'PaymentsService.lockInvoice and refuse (or flag) a VOID invoice inside their transaction, as VN-07 (b) models.',
+  );
 });
