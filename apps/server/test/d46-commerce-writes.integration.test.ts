@@ -1371,8 +1371,15 @@ describe('W4-TRASH-D46 (D-46, D46-S09): trash restore and permanent delete of re
  * trashed records only (a model the soft-delete extension rewrites to
  * deletedAt null answers live rows, which are not trash). Trashed opportunities
  * of A and B and a live one of A are the fixtures that tell the scoping apart.
+ *
+ * W5-TRASH-LIST-500 review repair SEC-TL500-2 (D46-S09i, below) closes the
+ * first defect too: ?model= lists trashed rows only, so ?model=invoice|quote
+ * lists none of A's live rows. The D46-S09 control below therefore no longer
+ * expects an invoice or quote row there: it asserted the live rows the defect
+ * listed (A's trashed invoice and quote stay unreadable, the D46-S09g
+ * follow-up it.todo).
  */
-const trashList = (actor: string, model?: string) => as(actor, agent().get(model ? `${TRASH}?model=${model}` : TRASH));
+const trashList =(actor: string, model?: string) => as(actor, agent().get(model ? `${TRASH}?model=${model}` : TRASH));
 const REVENUE_TRASH_MODELS = ['recurringInvoice', 'invoice', 'quote'] as const;
 
 /** W5-TRASH-LIST-500 (D46-S09g): an opportunity posted by `biz`, trashed unless `live`. */
@@ -1467,8 +1474,13 @@ describe('W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read): the trash l
         const res = await trashList(actor, model);
         expect(res.status, `${actor} ${model}: ${JSON.stringify(res.body)}`).toBe(200);
         expect(res.body.model, `${actor} ${model}`).toBe(model);
-        expect(res.body.items.length, `${actor} ${model}`).toBeGreaterThan(0);
-        expect(new Set(res.body.items.map((i: any) => i.businessId)), `${actor} ${model}`).toEqual(new Set([ID.bizA]));
+        // W5-TRASH-LIST-500 review repair SEC-TL500-2 (D46-S09i): every row listed is a trashed row of A.
+        // The non-empty check for invoice and quote is gone: the rows it found were A's LIVE invoices and
+        // quotes (the soft-delete defect described above); recurringInvoice keeps it below (the trashed schedule).
+        for (const item of res.body.items) {
+          expect(item.businessId, `${actor} ${model} ${item.id}`).toBe(ID.bizA);
+          expect(item.deletedAt, `${actor} ${model} ${item.id} is trash, not a live row`).not.toBeNull();
+        }
       }
       const schedules = await trashList(actor, 'recurringInvoice');
       expect(schedules.body.items.map((i: any) => i.id), actor).toContain(fx.recurringInvoice);
@@ -1482,4 +1494,159 @@ describe('W4-TRASH-D46 review repair SEC-TRASH-D46-1 (revenue:read): the trash l
       expect(res.body.message, String(model)).toBe('No access to this business');
     }
   });
+});
+
+/**
+ * W5-TRASH-LIST-500 review repair (owner ruling D-46 unchanged; review
+ * SEC-TL500-1, CR-TL500-1, SEC-TL500-2):
+ *
+ *   D46-S09h  D46-S09g lists A's trashed opportunities, but POST
+ *             trash/opportunity/:id/restore and DELETE trash/opportunity/:id
+ *             looked the row up with { id, businessId, deletedAt }, which
+ *             Opportunity does not have (posterBusinessId): 500 for every
+ *             caller and the row unchanged, while the web Trash page, which
+ *             ignores the error, dropped the row as if it were done. The lookup
+ *             now uses the listing's filter; it is the only tenant check, as the
+ *             write keys on the id alone.
+ *             RED-BEFORE: 500 on restore and delete. GREEN-AFTER: 201 / 200 on
+ *             A's trashed opportunity; 404 on B's (through A's trash) and on
+ *             A's live one, both unchanged.
+ *   D46-S09i  ?model= listed the LIVE rows of the models the client's
+ *             soft-delete extension covers (Contact, Invoice, Quote and eight
+ *             more): ?model=contact showed every live contact, PRIVATE ones of
+ *             other members included, to a member whose crm scope is 'none',
+ *             and restore and delete acted on those live rows (DELETE
+ *             soft-deleted a live contact or invoice). Every trash read and
+ *             lookup now carries a filter the extension cannot overwrite.
+ *             RED-BEFORE: the live rows listed (total counting them); DELETE
+ *             200 and the live row trashed. GREEN-AFTER: no live row listed;
+ *             404 'Trashed <model> not found' and the row unchanged.
+ */
+describe('W5-TRASH-LIST-500 review repair (D46-S09h, D46-S09i): an opportunity in the trash is restored and deleted, and the trash neither lists nor acts on a live row', () => {
+  /** USER, STAFF member of A whose crm, settings, expenses and revenue scopes are 'none'. */
+  const NO_SCOPE = `${P}noScopeA`;
+  const fx = { restoreA: '', deleteA: '', liveA: '', trashedB: '', privateContact: `${P}contact_s09i_private`, liveInvoice: '', liveQuote: '' };
+
+  beforeAll(async () => {
+    await db.user.create({ data: { id: NO_SCOPE, email: `${P}noscopea@test.local`, name: NO_SCOPE, role: 'USER' } });
+    await db.membership.create({
+      data: {
+        id: `${NO_SCOPE}_m`,
+        userId: NO_SCOPE,
+        businessId: ID.bizA,
+        role: 'STAFF',
+        permissionScopes: { crm: 'none', settings: 'none', expenses: 'none', revenue: 'none' },
+      },
+    });
+    fx.restoreA = await makeOpportunity(ID.bizA, 's09h_restoreA');
+    fx.deleteA = await makeOpportunity(ID.bizA, 's09h_deleteA');
+    fx.liveA = await makeOpportunity(ID.bizA, 's09h_liveA', true);
+    fx.trashedB = await makeOpportunity(ID.bizB, 's09h_trashedB');
+    await db.contact.create({
+      data: {
+        id: fx.privateContact,
+        businessId: ID.bizA,
+        firstName: 'V81a',
+        lastName: 'Private',
+        email: `${P}contact_s09i_private@test.local`,
+        ownerId: ID.ownerA,
+        visibility: 'PRIVATE',
+      },
+    });
+    fx.liveInvoice = await makeInvoice(ID.bizA, 's09i_live', 'SENT');
+    fx.liveQuote = await makeQuote(ID.bizA, 's09i_live');
+  });
+
+  /** The stored row as JSON, raw (the client hides a soft-deleted contact, invoice or quote; contacts carry a tsvector). */
+  const rowOf = async (table: string, id: string): Promise<any[]> => {
+    const rows: Array<{ j: string }> = await db.$queryRawUnsafe(`SELECT row_to_json(t)::text AS j FROM ${table} t WHERE t.id = $1`, id);
+    return rows.map((r) => JSON.parse(r.j));
+  };
+
+  it("D46-S09h (W5-TRASH-LIST-500 repair SEC-TL500-1, CR-TL500-1): owner A restores A's trashed opportunity (201, deletedAt cleared, out of the trash listing) and permanently deletes another (200, the row gone)", async () => {
+    const restored = await trashRestore(ID.ownerA, 'opportunity', fx.restoreA);
+    // RED-BEFORE: 500 (PrismaClientValidationError: Unknown argument `businessId`), the row still trashed.
+    expect(restored.status, JSON.stringify(restored.body).slice(0, 500)).toBe(201);
+    expect(restored.body).toMatchObject({ restored: true, model: 'opportunity', id: fx.restoreA });
+    const [row] = await rowOf('community_opportunities', fx.restoreA);
+    expect([row.deleted_at, row.poster_business_id]).toEqual([null, ID.bizA]);
+
+    const deleted = await trashDelete(ID.ownerA, 'opportunity', fx.deleteA);
+    // RED-BEFORE: 500, the row still there and trashed.
+    expect(deleted.status, JSON.stringify(deleted.body).slice(0, 500)).toBe(200);
+    expect(deleted.body).toEqual({ deleted: true, model: 'opportunity', id: fx.deleteA });
+    expect(await rowOf('community_opportunities', fx.deleteA)).toEqual([]);
+
+    for (const model of [undefined, 'opportunity']) {
+      const listed = await trashList(ID.ownerA, model);
+      expect(listed.status, String(model)).toBe(200);
+      const ids = listed.body.items.map((i: any) => i.id);
+      expect(ids, String(model)).not.toContain(fx.restoreA);
+      expect(ids, String(model)).not.toContain(fx.deleteA);
+    }
+  });
+
+  it("D46-S09h tenancy (W5-TRASH-LIST-500 repair SEC-TL500-1): through A's trash, owner A's restore and permanent delete of B's trashed opportunity and of A's live one answer 404 'Trashed opportunity not found'; both rows are unchanged", async () => {
+    const before = [await rowOf('community_opportunities', fx.trashedB), await rowOf('community_opportunities', fx.liveA)];
+    for (const id of [fx.trashedB, fx.liveA]) {
+      for (const call of [trashRestore, trashDelete]) {
+        const res = await call(ID.ownerA, 'opportunity', id);
+        // RED-BEFORE: 500 (the businessId lookup).
+        expect(res.status, `${id}: ${JSON.stringify(res.body).slice(0, 500)}`).toBe(404);
+        expect(res.body.message, id).toBe('Trashed opportunity not found');
+      }
+    }
+    expect([await rowOf('community_opportunities', fx.trashedB), await rowOf('community_opportunities', fx.liveA)]).toEqual(before);
+    expect(before[0][0].deleted_at).not.toBeNull();
+    expect(before[1][0].deleted_at).toBeNull();
+  });
+
+  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2): GET trash?model=contact by a STAFF member of A whose crm, settings, expenses and revenue scopes are 'none' answers 200 with no live contact (A's contact and owner A's PRIVATE contact are not listed) and a total that counts none", async () => {
+    const res = await trashList(NO_SCOPE, 'contact');
+    expect(res.status, JSON.stringify(res.body).slice(0, 500)).toBe(200);
+    const ids = res.body.items.map((i: any) => i.id);
+    // RED-BEFORE: [v81a_contactA (TEAM), v81a_contact_s09i_private (PRIVATE)], both live, total counting A's live contacts.
+    for (const id of [ID.contactA, fx.privateContact]) expect(ids, id).not.toContain(id);
+    for (const item of res.body.items) expect(item.deletedAt, item.id).not.toBeNull();
+    expect(res.body.total).toBe(res.body.items.length);
+  });
+
+  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2): owner A's GET trash?model=invoice|quote|contact lists none of A's live invoices, quotes or contacts, and its total counts none", async () => {
+    for (const [model, live] of [['invoice', fx.liveInvoice], ['quote', fx.liveQuote], ['contact', ID.contactA]] as const) {
+      const res = await trashList(ID.ownerA, model);
+      expect(res.status, `${model}: ${JSON.stringify(res.body).slice(0, 500)}`).toBe(200);
+      // RED-BEFORE: A's live rows listed as trash.
+      expect(res.body.items.map((i: any) => i.id), model).not.toContain(live);
+      for (const item of res.body.items) {
+        expect(item.businessId, `${model} ${item.id}`).toBe(ID.bizA);
+        expect(item.deletedAt, `${model} ${item.id} is trash, not a live row`).not.toBeNull();
+      }
+      expect(res.body.total, model).toBe(res.body.items.length);
+    }
+  });
+
+  it("D46-S09i (W5-TRASH-LIST-500 repair SEC-TL500-2): the trash does not act on a live row: that member's POST restore and DELETE of owner A's live PRIVATE contact, and owner A's POST restore and DELETE of A's live SENT invoice, answer 404 'Trashed contact|invoice not found'; both rows stay live and unchanged", async () => {
+    for (const [actor, model, table, id] of [
+      [NO_SCOPE, 'contact', 'contacts', fx.privateContact],
+      [ID.ownerA, 'invoice', 'invoices', fx.liveInvoice],
+    ] as const) {
+      const before = await rowOf(table, id);
+      expect(before[0].deleted_at, id).toBeNull();
+      for (const call of [trashRestore, trashDelete]) {
+        const res = await call(actor, model, id);
+        // RED-BEFORE: DELETE 200 and the live row soft-deleted (restore 201 on the live row).
+        expect(res.status, `${model} ${call === trashDelete ? 'delete' : 'restore'}: ${JSON.stringify(res.body).slice(0, 500)}`).toBe(404);
+        expect(res.body.message, model).toBe(`Trashed ${model} not found`);
+      }
+      expect(await rowOf(table, id), id).toEqual(before);
+    }
+  });
+
+  it.todo(
+    "SEC-TL500-3 follow-up (W5-TRASH-LIST-500 review repair): GET trash (every model and ?model=) holds each listed model's own module scope, " +
+      "or the declared settings scope, as SEC-TRASH-D46-1 does for revenue: a member with expenses and settings 'none' gets no trashed Expense " +
+      'row (amounts) and no trashed opportunity. Not done here: no ruling says which module governs each trash model (account, staffMember, ' +
+      'opportunity, community posts and comments, landing pages, ...), and enforcing settings (STAFF default none) would shut every STAFF member ' +
+      'out of the trash, against the D46-S09, D46-S09f and D46-S09g controls. Needs an owner ruling.',
+  );
 });

@@ -640,6 +640,24 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     Prisma.dmmf.datamodel.models.map((m) => [m.name.charAt(0).toLowerCase() + m.name.slice(1), new Set(m.fields.map((f) => f.name))]),
   );
 
+  /**
+   * `where` is `model`'s trash filter in BIZ: only columns the Prisma datamodel
+   * gives the model (RED-BEFORE D46-S09g: opportunity.businessId), :businessId
+   * on the model's own tenant column (Opportunity: posterBusinessId), and
+   * deletedAt set. W5-TRASH-LIST-500 review repair (SEC-TL500-2): the same
+   * deletedAt condition again under NOT, which the client's soft-delete
+   * extension leaves in place (it overwrites the top-level deletedAt with
+   * null), so a model it covers matches no row instead of its live rows.
+   */
+  function expectTrashedWhere(model: string, where: Record<string, unknown>, label: string) {
+    expect(FIELDS.has(model), label).toBe(true);
+    const columns = [...Object.keys(where).filter((key) => key !== 'NOT'), ...Object.keys((where.NOT ?? {}) as object)];
+    for (const column of columns) expect(FIELDS.get(model)!.has(column), `${label}: ${model}.${column}`).toBe(true);
+    expect(where.deletedAt, label).toEqual({ not: null });
+    expect(where.NOT, label).toEqual({ deletedAt: null });
+    expect(where[model === 'opportunity' ? 'posterBusinessId' : 'businessId'], label).toBe(BIZ);
+  }
+
   it("D46-S09g W5-TRASH-LIST-500 TrashController.listTrashed every model: each model's query filters only columns the Prisma datamodel gives it (Opportunity by posterBusinessId, it has no businessId), scoped to :businessId and to trashed rows; ?model=opportunity is scoped the same way", async () => {
     const owner = await listCall({ id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null });
     expect(owner.error, String(owner.error)).toBeNull();
@@ -647,19 +665,16 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     expect(reads.map((c) => c.path.split('.')[2])).toContain('opportunity');
     for (const { path, args } of reads) {
       const model = path.split('.')[2]!;
-      const where = (args[0] as { where: Record<string, unknown> }).where;
-      expect(FIELDS.has(model), model).toBe(true);
       // RED-BEFORE: opportunity.businessId (Prisma: Unknown argument `businessId`).
-      for (const column of Object.keys(where)) expect(FIELDS.get(model)!.has(column), `${model}.${column}`).toBe(true);
-      expect(where.deletedAt, model).toEqual({ not: null });
-      expect(where[model === 'opportunity' ? 'posterBusinessId' : 'businessId'], model).toBe(BIZ);
+      expectTrashedWhere(model, (args[0] as { where: Record<string, unknown> }).where, model);
     }
 
     const one = await listCall({ id: USER_ID, role: 'USER' }, null, 'opportunity');
     expect(one.error, String(one.error)).toBeNull();
     expect(one.calls.map((c) => c.path)).toEqual(['prisma.client.opportunity.findMany', 'prisma.client.opportunity.count']);
     for (const { args } of one.calls) {
-      expect((args[0] as { where: unknown }).where).toEqual({ posterBusinessId: BIZ, deletedAt: { not: null } });
+      // W5-TRASH-LIST-500 review repair (SEC-TL500-2): with the NOT clause.
+      expect((args[0] as { where: unknown }).where).toEqual({ posterBusinessId: BIZ, deletedAt: { not: null }, NOT: { deletedAt: null } });
     }
   });
 
@@ -677,5 +692,63 @@ describe('D46-S09 (W4-TRASH-D46, D-46; review SEC-W3D46R-3): TrashController res
     // RED-BEFORE: contact_live and invoice_live listed as trash (total 4).
     expect(result.items.map((i: any) => `${i._model}:${i.id}`)).toEqual(['opportunity:opp_trashed', 'contact:contact_trashed']);
     expect(result.total).toBe(2);
+  });
+
+  /** Every model the every-model listing reads, in its order (a SUPER_ADMIN reads them all). */
+  async function trashModels(): Promise<string[]> {
+    const { calls } = await listCall({ id: USER_ID, role: 'SUPER_ADMIN' }, null);
+    return queried(calls) as string[];
+  }
+
+  /**
+   * W5-TRASH-LIST-500 review repair SEC-TL500-1 / CR-TL500-1 (D46-S09h): D46-S09g
+   * lists trashed opportunities, but restore and permanent delete still looked
+   * the row up with { id, businessId, deletedAt }, which Opportunity does not
+   * have, so every Restore or Delete of a listed opportunity answered 500 (and
+   * the web page, which ignores the error, showed it done). The lookup now uses
+   * the listing's filter; it is the only tenant check before the write, which
+   * keys on the id alone. The HTTP half is d46-commerce-writes D46-S09h.
+   */
+  it('D46-S09h W5-TRASH-LIST-500 repair (SEC-TL500-1, CR-TL500-1) TrashController.restore and permanentDelete: every trashable model is looked up by :id with only columns the Prisma datamodel gives it, scoped to :businessId on its own tenant column (Opportunity by posterBusinessId) and to trashed rows', async () => {
+    const models = await trashModels();
+    expect(models).toContain('opportunity');
+    expect(models).toHaveLength(22);
+    for (const handler of ['restore', 'permanentDelete'] as const) {
+      for (const model of models) {
+        const { calls } = await trashCall(handler, model, { id: USER_ID, role: 'USER' }, { role: 'OWNER', permissionScopes: null });
+        const lookups = calls.filter((c) => c.path === `prisma.client.${model}.findFirst`);
+        expect(lookups, `${handler} ${model}`).toHaveLength(1);
+        const where = (lookups[0]!.args[0] as { where: Record<string, unknown> }).where;
+        // RED-BEFORE: opportunity.businessId (Prisma: Unknown argument `businessId`, a 500).
+        expectTrashedWhere(model, where, `${handler} ${model}`);
+        expect(where.id, `${handler} ${model}`).toBe(`${model}_d46`);
+      }
+    }
+  });
+
+  /**
+   * W5-TRASH-LIST-500 review repair SEC-TL500-2 (D46-S09i): ?model= listed the
+   * LIVE rows of every model the client's soft-delete extension covers (it
+   * overwrites the trash filter with deletedAt null), so ?model=contact showed
+   * every live contact, PRIVATE ones included, to a member with crm 'none'.
+   * Every model's ?model= read now carries the trash filter the extension
+   * cannot overwrite, on findMany and count alike, and a live row is never
+   * listed. The HTTP half is d46-commerce-writes D46-S09i.
+   */
+  it('D46-S09i W5-TRASH-LIST-500 repair (SEC-TL500-2) TrashController.listTrashed ?model=<every trashable model>: findMany and count carry the trash filter the soft-delete extension cannot overwrite, and a row answered with deletedAt null (a live record) is not listed', async () => {
+    const models = await trashModels();
+    expect(models).toHaveLength(22);
+    for (const model of models) {
+      const live = { id: `${model}_live`, businessId: BIZ, deletedAt: null };
+      const trashed = { id: `${model}_trashed`, businessId: BIZ, deletedAt: new Date('2026-11-01T00:00:00Z') };
+      const { calls, error, result } = await listCall({ id: USER_ID, role: 'SUPER_ADMIN' }, null, model, { [model]: [live, trashed] });
+      expect(error, `${model}: ${String(error)}`).toBeNull();
+      expect(calls.map((c) => c.path), model).toEqual([`prisma.client.${model}.findMany`, `prisma.client.${model}.count`]);
+      // RED-BEFORE: { businessId, deletedAt: { not: null } } alone, which the extension rewrites to deletedAt null.
+      for (const { path, args } of calls) expectTrashedWhere(model, (args[0] as { where: Record<string, unknown> }).where, path);
+      // RED-BEFORE: `${model}_live` listed as trash.
+      expect(result.items.map((i: any) => i.id), model).toEqual([`${model}_trashed`]);
+      expect(result.model, model).toBe(model);
+    }
   });
 });
