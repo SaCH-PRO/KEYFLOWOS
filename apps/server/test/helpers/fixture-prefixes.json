@@ -623,6 +623,11 @@
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
     },
     {
+      "prefix": "v87d_",
+      "owner": "apps/server/test/own-row-reads.integration.test.ts",
+      "packet": "V1-87 (DEP-R3-OWN-ROW-READS)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true
