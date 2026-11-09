@@ -100,6 +100,7 @@ let db: any;
 let app: any;
 let ValidationPipeClass: any;
 let UpdateBusinessDtoClass: any;
+let SiteServiceClass: any;
 
 async function cleanup() {
   for (const sql of [
@@ -176,6 +177,7 @@ beforeAll(async () => {
   const { BlueprintService } = await import('../src/modules/blueprint/blueprint.service');
   const { DefaultTriggersService } = await import('../src/modules/ai/default-triggers.service');
   ({ UpdateBusinessDto: UpdateBusinessDtoClass } = await import('../src/modules/identity/dto/update-business.dto'));
+  ({ SiteService: SiteServiceClass } = await import('../src/modules/site/site.service'));
 
   const moduleRef = await Test.createTestingModule({
     controllers: [IdentityController],
@@ -510,6 +512,72 @@ async function waitForBusinessLockWaiters(n: number) {
   }
 }
 
+/**
+ * FOLLOW3-D12: a PrismaService over the real client in which one armed
+ * `<model>.<op>` call (on the client, or on the client an interactive
+ * $transaction hands its callback) stops before it runs until the test
+ * releases it, so a writer can be held between its read and its write.
+ */
+function pausingPrisma(client: any) {
+  let armed: { model: string; op: string; reached: () => void; release: Promise<void> } | undefined;
+  const delegate = (d: any, model: string) => new Proxy(d, {
+    get(target, prop) {
+      const value = Reflect.get(target, prop);
+      if (typeof value !== 'function') return value;
+      return (...args: unknown[]) => {
+        const gate = armed;
+        if (gate && gate.model === model && gate.op === prop) {
+          armed = undefined;
+          gate.reached();
+          return gate.release.then(() => value.apply(target, args));
+        }
+        return value.apply(target, args);
+      };
+    },
+  });
+  const wrap = (c: any): any => new Proxy(c, {
+    get(target, prop) {
+      if (prop === 'business') return delegate(Reflect.get(target, prop), 'business');
+      if (prop === '$transaction') {
+        return (arg: any, opts?: any) => (typeof arg === 'function'
+          ? target.$transaction((tx: any) => arg(wrap(tx)), opts)
+          : target.$transaction(arg, opts));
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return {
+    service: { client: wrap(client) },
+    pauseNext(model: string, op: string) {
+      let reached!: () => void;
+      let release!: () => void;
+      const reachedP = new Promise<void>((r) => { reached = r; });
+      const releaseP = new Promise<void>((r) => { release = r; });
+      armed = { model, op, reached, release: releaseP };
+      return { reached: reachedP, release };
+    },
+    disarm() { armed = undefined; },
+  };
+}
+
+/** Wait until `p` has settled or a statement waits on a businesses row lock. */
+async function committedOrWaitingOnBusinessRow(p: Promise<unknown>) {
+  let settled = false;
+  p.then(() => { settled = true; }, () => { settled = true; });
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    if (settled) return 'committed';
+    const rows = await db.$queryRawUnsafe(
+      `SELECT count(*)::int AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock' AND position('businesses' in lower(query)) > 0`,
+    );
+    if (Number(rows[0]?.n ?? 0) > 0) return 'waiting';
+    if (Date.now() > deadline) throw new Error('the PATCH neither committed nor waited on the business row');
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 describe('R0-SEC2c concurrent metaData writers cannot undo a secret write (review SEC2c-ST-1)', () => {
   it('[SEC2c-C01] RED-BEFORE: the owner clears a secret while a co-owner\'s profile PATCH is in flight: the clear holds (no stale copy writes the secret back) and the co-owner\'s edit is kept', async () => {
     await reset(ID.bizP);
@@ -576,15 +644,44 @@ describe('R0-SEC2c concurrent metaData writers cannot undo a secret write (revie
     }
   });
 
-  // Review SEC2c-ST-1, the half outside this packet's write set: the public
-  // POST /site/businesses/:businessId/analytics/event (SiteService.trackEvent,
-  // apps/server/src/modules/site/site.service.ts) and about twenty other
-  // Business.metaData writers (gamification listeners, lead magnet, concierge
-  // and others) read the stored metaData without the row lock and write the
-  // whole value back, so one that read before an owner's clear or rotation and
-  // writes after it still writes the old secret back. The fix belongs to those
-  // writers (merge their own key in the database, jsonb_set or ||, as
-  // SEC2c-C02's concurrent writer does, or take the row lock the profile PATCH
-  // now takes); none of them is in R0-SEC2c's write set.
-  it.todo('[SEC2c-C03] a storefront event (SiteService.trackEvent) that read metaData before an owner\'s secret clear and writes after it does not write the cleared secret back (follow-up: the other metaData read-modify-write writers, outside the R0-SEC2c write set)');
+  // Review SEC2c-ST-1, the other half (FOLLOW3-D12-METADATA-LOCKED-WRITES):
+  // the public POST /site/businesses/:businessId/analytics/event
+  // (SiteService.trackEvent, apps/server/src/modules/site/site.service.ts, no
+  // authentication, 60 per minute) read the stored metaData without the row
+  // lock and wrote the whole value back, so an event that read before an
+  // owner's clear and wrote after it wrote the cleared secret back. It now takes
+  // the row lock the profile PATCH takes (lockBusinessMeta, core/prisma/
+  // business-meta.ts) before it reads. The interleaving is made by a
+  // PrismaService that stops trackEvent's business.update until released (see
+  // test/business-meta-writers.integration.test.ts, which covers the other
+  // converted writers; core/prisma/business-meta-writers.spec.ts is the census).
+  it('[SEC2c-C03] RED-BEFORE: a storefront event (SiteService.trackEvent) that has read metaData when the owner\'s PATCH clears stripeSecretKey: the clear holds (the secret is not stored again) and the event is recorded', async () => {
+    await reset(ID.bizP);
+    const pausing = pausingPrisma(db);
+    const site = new SiteServiceClass(pausing.service, {});
+    const pause = pausing.pauseNext('business', 'update');
+    try {
+      const tracking = site.trackEvent(ID.bizP, 'page_view');
+      const first = await Promise.race([
+        pause.reached.then(() => 'stopped at its write'),
+        tracking.then(() => 'finished without writing', (e: any) => `failed: ${e?.message ?? e}`),
+      ]);
+      expect(first, 'trackEvent reaches business.update after its read').toBe('stopped at its write');
+      const clear = patchBusiness(ID.owner, ID.bizP, { metaData: { stripeSecretKey: null } }).then((r: any) => r);
+      await committedOrWaitingOnBusinessRow(clear);
+      pause.release();
+      const [tracked, cleared] = await Promise.all([tracking, clear]);
+      expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+      expect(tracked).toEqual({ tracked: true });
+
+      const meta = await storedMeta(ID.bizP);
+      expect(Object.prototype.hasOwnProperty.call(meta, 'stripeSecretKey'), 'the cleared stripeSecretKey stored again').toBe(false);
+      expect((meta.storefrontEvents as Array<{ type: string }> | undefined)?.map((e) => e.type), 'the storefront event').toEqual(['page_view']);
+      for (const k of SECRET_KEYS.filter((s) => s !== 'stripeSecretKey')) expect(meta[k], `stored ${k}`).toBe(SECRET[k]);
+      for (const [k, v] of Object.entries(PUBLIC_META)) expect(meta[k], `stored ${k} kept`).toEqual(v);
+    } finally {
+      pausing.disarm();
+      await reset(ID.bizP);
+    }
+  });
 });
