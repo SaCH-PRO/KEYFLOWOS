@@ -458,6 +458,24 @@ export class WhatsAppService {
         const value = isKeptCredential(submitted[field]) ? stored[field] : submitted[field];
         if (typeof value === 'string' && value.length > 0) next[field] = value;
       }
+      // PR196-WHATSAPP-HEALTH (PR #196 4-D4): a save never marks the connector
+      // connected; only a verified check does (WhatsAppConnector.smokeTest).
+      // A save that changes the sending identity (provider, phoneNumberId,
+      // fromNumber, or any credential other than the kept stored one) resets
+      // an earlier verified status: it vouched for other credentials. The
+      // write runs on this transaction, so it lands with the config or not at
+      // all, and it records the sending number only, never the phoneNumberId
+      // (4-D1). No row is created: none already reads as not connected.
+      const same = (a: unknown, b: unknown) => (plain(a) || undefined) === (plain(b) || undefined);
+      const identityChanged = (['provider', 'phoneNumberId', 'fromNumber', ...SENSITIVE_FIELDS] as const).some(
+        (field) => !same(next[field], stored[field]),
+      );
+      if (identityChanged) {
+        await tx.connectorStatus.updateMany({
+          where: { businessId, connectorType: 'whatsapp' },
+          data: { status: 'disconnected', connectedAt: null, connectedAccount: next.fromNumber || null },
+        });
+      }
       await tx.business.update({
         where: { id: businessId },
         data: { metaData: { ...meta, whatsapp: encryptConfig(next) } },

@@ -49,11 +49,11 @@ import { encryptToken, isTokenEncrypted } from '../../crypto/token-crypto';
 // ── Secret canaries ─────────────────────────────────────────────────────────
 const BIZ = 'pr196wa_biz';
 const PNID = '170693417358209';
-const META_TOKEN = 'EAAGpr196METAaccessTOKENsecret7c1e9a42';
-const TWILIO_SID = 'ACpr196e3c9d1f2a4b6c8d0e1f3a5b7c9d1e2';
-const TWILIO_TOKEN = 'pr196TWILIOauthTOKENsecret5b8d3f61';
+const META_TOKEN = 'EAAGq7Zx2Lw9Rk4Tn8Vb3Jm6Hc1Yd5Pf0Qs';
+const TWILIO_SID = 'ACgkqzvwxmhnjrtwkyqzvxgmhjtnwrqkyz';
+const TWILIO_TOKEN = 'f3k9q2w8z7x1v6b4n5m0j2r7t9y3u8i1';
 const FROM = '+18685550199';
-const PLATFORM_TOKEN = 'EAAGpr196PLATFORMtokenSECRETd41c';
+const PLATFORM_TOKEN = 'EAAGw4Hs8Jd2Kq6Lz9Xc3Vb7Nm1Pt5Ry0';
 const PLATFORM_PNID = '980716254331470';
 
 const META_CONFIG: WhatsAppConfig = { provider: 'meta', phoneNumberId: PNID, fromNumber: FROM, accessToken: META_TOKEN };
@@ -504,7 +504,7 @@ describe('PR196-WHATSAPP-HEALTH: saveConfig keeps the connector status in step w
     h.db.setStatus({ ...h.db.status(), connectedAccount: PNID }); // a pre-packet row
     h.db.writes.length = 0;
 
-    await h.service.saveConfig(BIZ, { ...META_CONFIG, accessToken: 'EAAGpr196ROTATEDtoken0000aaaa' });
+    await h.service.saveConfig(BIZ, { ...META_CONFIG, accessToken: 'EAAGz5Yq1Wr8Ux3Kp7Hn2Mv6Bj9Cd4Lf' });
 
     expect(h.db.status()).toMatchObject({ status: 'disconnected', connectedAccount: FROM, connectedAt: null });
     const statusWrites = h.db.writes.filter((w) => w.op.startsWith('connectorStatus.'));
@@ -522,7 +522,7 @@ describe('PR196-WHATSAPP-HEALTH: saveConfig keeps the connector status in step w
     expect((await h.registry.smokeTestConnector('whatsapp', BIZ)).success).toBe(true);
     h.db.writes.length = 0;
 
-    await h.service.saveConfig(BIZ, { provider: 'meta', phoneNumberId: PNID, fromNumber: FROM, accessToken: '•••• 9a42' });
+    await h.service.saveConfig(BIZ, { provider: 'meta', phoneNumberId: PNID, fromNumber: FROM, accessToken: '•••• 5Pf0' });
 
     expect(h.db.writes.filter((w) => w.op.startsWith('connectorStatus.'))).toEqual([]);
     expect((await h.registry.getHealth('whatsapp', BIZ))?.status).toBe('connected');
