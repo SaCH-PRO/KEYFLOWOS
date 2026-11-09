@@ -1,0 +1,32 @@
+{
+  "manifestVersion": 1,
+  "packageId": "R0-35-EXIT-PROOF",
+  "proofScope": "release0-exit-proof-coverage",
+  "description": "The Release 0 exit proof is complete (BUILD-MAP-001 section (d), R0 exit gate): apps/server/src/core/config/release0-proof-coverage.spec.ts checks scripts/proof-admission/release0-index.json against BUILD-MAP-001 sections (b) and (c), BUILD-QUEUE-001.json tests_first and every manifest under scripts/proof-admission/manifests/: every Release 0 server suite is bound by a Release 0 manifest, no manifest names a missing suite, every skip and todo in a Release 0 suite is explained (the scanner also sees a skip after a modifier, the options form and a test context skip), every explanation carries its status (a CLOSED one names a proof a Release 0 manifest requires, R0-35 review SEC-R035-2; an OPEN one makes the gate answer NOT MET, SEC-R035-4), a suite an R0 packet only edited is a Release 0 suite unless it authored no case (SEC-R035-3), the index names exactly the R0 packets BUILD-MAP lists, and proof:release0 (scripts/proof-admission/release0.mjs) runs exactly the indexed manifests, keeps their report and fails on a case the run did not run that no explanation covers (SEC-R035-1), and its CI step fails on everything but NOT MET. Every case is required and allowAdditionalCases is false. Run from the repo root: pnpm --filter server proof:release0 (run-manifests over every Release 0 manifest, then this spec).",
+  "requireReportSuccess": true,
+  "allowAdditionalCases": false,
+  "suites": [
+    "src/core/config/release0-proof-coverage.spec.ts"
+  ],
+  "requiredCases": [
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-01] the index lists every R0 packet of BUILD-MAP section (c) exactly once and names no packet BUILD-MAP does not list",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-02] every packet either names its server suites or says why it has none, and every suite it names is a Release 0 suite of the index",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-03] every Release 0 packet's queue tests_first server suite is indexed under it, or recorded as landed under another indexed name",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-04] every suite the index names exists under apps/server",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-05] every Release 0 suite is bound by a Release 0 manifest, and the index names exactly the Release 0 manifests that bind it",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-06] the Release 0 manifests are every manifest with an R0 packageId plus those the index adds, each exists, is a case manifest, binds a Release 0 suite, and binds only indexed suites",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-07] no manifest names a suite that does not exist",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-08] no Release 0 suite has a skip or todo the index does not explain, none matches two explanations, and none is .only",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-09] every explanation names a Release 0 suite, its kind, a title prefix, its reason, the packet or ruling that owns it and its status; a CLOSED one names a proof proof:release0 runs, a RULED or DEFERRED one a BUILD-MAP ruling, a V1-SCOPE one a queued V1 packet (SEC-R035-2, SEC-R035-4)",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-10] an explained entry no longer present in its suite is reported, not failed (a later packet may close a todo first)",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-11] the journey: BUILD-MAP section (b)'s seven steps, each with a required case in the journey manifest, which binds the journey suite",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-12] a suite an R0 packet only edited is a Release 0 suite, bound and scanned like the others, unless the index records that the edit authored no case (SEC-R035-3, R035-CR-3)",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-13] proof:release0 runs release0.mjs: run-manifests.mjs over exactly the index manifests keeping its report, then this spec, then the runtime skip check on that report; CI runs it right after the manifest step and fails on everything but NOT MET",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-14] the gate fails on a case of a Release 0 suite the run skipped, left todo or pending (it.concurrent.skip, { skip: true }, ctx.skip()) unless the index explains it, and on a Release 0 suite missing from the run (SEC-R035-1)",
+    "R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suite [R035-15] an OPEN explanation is reported to the owner and the gate answers NOT MET (exit 3), never MET; a failure anywhere else is REJECTED (exit 2) (SEC-R035-4)",
+    "R0-35-EXIT-PROOF skip scanner [R035-S1] finds it.todo, it.skip, describe.skip, test.skip, skipIf and x-forms with their titles, concatenated titles included",
+    "R0-35-EXIT-PROOF skip scanner [R035-S2] a skip named in a comment, a string, a template literal or a regex is not a skip",
+    "R0-35-EXIT-PROOF skip scanner [R035-S3] finds a skip after a modifier (it.concurrent.skip, describe.concurrent.skip, test.sequential.todo, it.skip.each), the options form ({ skip: true }) and a test context skip (ctx.skip(), a destructured skip()) with their titles (R035-CR-2, SEC-R035-1)",
+    "R0-35-EXIT-PROOF skip scanner [R035-S4] findRunningTestTitles lists the cases that run and none that a chain or an options object skips (a web closing proof must be one of them)"
+  ]
+}

@@ -2112,8 +2112,19 @@ describe('ST-WS-R1 (fixed, R0-ID-F6b-WS-LIVE-REVOCATION) — a KEY Cortex socket
 
   /**
    * The required behaviour, for each socket: its next probe is refused and
-   * decides nothing; WS_CONFIRM_BOUND_MS later the probe is answered by an auth
-   * error and a disconnect. Never a decision in the tenant.
+   * decides nothing, and the refusal alone cuts nothing (a second probe inside
+   * the confirmation window is refused again, the socket still open);
+   * WS_CONFIRM_BOUND_MS after the refusal the socket is cut: key:auth_error,
+   * then the disconnect. Never a decision in the tenant.
+   *
+   * "Not cut on one refusal" is asserted INSIDE the window, before any check
+   * could confirm the refusal (review R035-CR-1). Once refusedAt +
+   * WS_CONFIRM_BOUND_MS has passed, the gateway's 5s schedule tick may run the
+   * confirming check before the probe does, and cutting the socket then is
+   * the required behaviour, not one refusal cutting it: asserting "not cut"
+   * after the window raced that tick. The confirming probe below accepts
+   * either path to the cut: the tick's (the socket is already closed) or its
+   * own.
    */
   async function expectCut(sessions: Array<[CortexSession, string]>) {
     const from = sessions.map(([s]) => s.frames.length);
@@ -2121,10 +2132,17 @@ describe('ST-WS-R1 (fixed, R0-ID-F6b-WS-LIVE-REVOCATION) — a KEY Cortex socket
       const first = await approveProbe(s);
       expect(first.startsWith(NOT_PERFORMED), `${label}: the first refused re-check refuses the action; got ${first}`).toBe(true);
     }
-    await sleep(WS_CONFIRM_BOUND_MS + 100);
+    // Each refusal started (server clock, same host) no later than its answer arrived, so from here on
+    // refusedAt + WS_CONFIRM_BOUND_MS is at most this far away for every socket.
+    const confirmAt = Date.now() + WS_CONFIRM_BOUND_MS + 100;
+    for (const [s, label] of sessions) {
+      const again = await approveProbe(s);
+      expect(again.startsWith(NOT_PERFORMED), `${label}: inside the window a refusal awaiting confirmation refuses again; got ${again}`).toBe(true);
+    }
     sessions.forEach(([s, label], i) => {
       expect(s.frames.slice(from[i]).some((f) => f.startsWith(AUTH_ERROR_FRAME)), `${label}: not cut on one refusal`).toBe(false);
     });
+    await sleep(confirmAt - Date.now());
     for (const [[s, label], i] of sessions.map((e, i) => [e, i] as const)) {
       expect(await approveProbe(s), `${label}: the confirming check`).toBe('closed');
       const after = s.frames.slice(from[i]);

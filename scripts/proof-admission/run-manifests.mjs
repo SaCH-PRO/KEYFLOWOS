@@ -47,6 +47,10 @@
  *                          (NOT-EXACT-HEAD: a report does not say which commit
  *                          it was produced at)
  *   --out <file>           also write every receipt as JSON
+ *   --keep-report <file>   also keep the vitest JSON report this run produced
+ *                          (proof:release0, scripts/proof-admission/release0.mjs,
+ *                          reads every case status from it); refused with
+ *                          --report and --plan, which produce none
  *   --skip-build           do not build dist/main.js (it must exist, and the
  *                          newest file under dist/ must be newer than every
  *                          apps/server/src file)
@@ -62,6 +66,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -90,7 +95,7 @@ const EXIT = Object.freeze({ SATISFIED: 0, REJECTED: 2, INCOMPLETE: 3 });
 function parseArgs(argv) {
   const args = { vitestArgs: [] };
   const flags = new Set(['--skip-build', '--plan', '--skip-file-check']);
-  const valued = new Set(['--only', '--manifests-dir', '--report', '--out', '--vitest-arg']);
+  const valued = new Set(['--only', '--manifests-dir', '--report', '--out', '--vitest-arg', '--keep-report']);
   for (let i = 0; i < argv.length; i += 1) {
     const raw = argv[i];
     if (raw === '--') continue; // pnpm <script> -- <args> may pass the separator through
@@ -324,6 +329,10 @@ function main() {
     process.exit(EXIT.REJECTED);
   }
 
+  if (args['keep-report'] && (args.report || args.plan)) {
+    console.error('run-manifests: --keep-report keeps the report this run produces; --report and --plan produce none');
+    process.exit(EXIT.REJECTED);
+  }
   const dir = resolve(args['manifests-dir'] ?? DEFAULT_MANIFESTS);
   const only = args.only ? args.only.split(',').map((s) => s.trim()).filter(Boolean) : null;
   // vitest silently drops a filter that names no file, so before a run every
@@ -422,6 +431,7 @@ function runAndJudge({ args, dir, entries, runnable, union, needsDist, head, wor
     console.error(`run-manifests: no report at ${reportPath}`);
     return EXIT.INCOMPLETE;
   }
+  if (args['keep-report']) copyFileSync(reportPath, resolve(args['keep-report']));
 
   const tree = sourceTreeState();
   const binding = headBinding({ reportGiven: Boolean(args.report), manifestsDir: dir, tree });
