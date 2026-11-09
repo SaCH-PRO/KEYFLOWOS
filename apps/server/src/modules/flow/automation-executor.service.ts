@@ -283,7 +283,8 @@ export class AutomationExecutorService {
                   ...(action.templateData ?? {}),
                 },
               });
-              this.logger.log(`Email sent to ${c.email} for playbook "${playbookName}"`);
+              // The contact by id: its email is personal data (IA-044, CF-029).
+              this.logger.log(`Email sent to contact ${context.contactId} for playbook "${playbookName}"`);
             }
           } catch (e) {
             this.logger.warn(`Failed to send email for playbook "${playbookName}": ${(e as Error).message}`);
@@ -355,7 +356,8 @@ export class AutomationExecutorService {
               },
             });
 
-            this.logger.log(`WhatsApp delivery queued for ${phone} in playbook "${playbookName}"`);
+            // The contact by id: its phone is personal data (IA-044, CF-029).
+            this.logger.log(`WhatsApp delivery queued for contact ${context.contactId} in playbook "${playbookName}"`);
           } catch (e) {
             this.logger.warn(`Failed to send WhatsApp for playbook "${playbookName}": ${(e as Error).message}`);
           }
@@ -494,30 +496,17 @@ export class AutomationExecutorService {
   /*
    * V1-55-EVT-ACTIVITY-DEDUPE (M50, D-08: Activity is the user-visible feed).
    * flow.module.ts registers ActivityEventListener next to this service, and
-   * it writes the feed row for contact.updated (a status change),
-   * booking.confirmed, invoice.paid, invoice.sent and invoice.overdue. The
-   * handlers below run the playbooks, flows and built-in rules on those events
-   * and write no second feed row for them.
-   * contact.created still writes its own row: log-redaction.integration.test.ts
-   * mounts this service alone and counts that row as proof its listener ran.
-   * booking.created still writes its own row (CR-V155-1): it is the only feed
-   * row with the booking's start time, because the listener's detail names
-   * booking.service, which no booking.created payload carries.
+   * it writes the feed row for contact.created, contact.updated (a status
+   * change), booking.created, booking.confirmed, invoice.paid, invoice.sent
+   * and invoice.overdue. The handlers below run the playbooks, flows and
+   * built-in rules on those events and write no second feed row for them.
+   * V1-55b-FEED-DEDUPE-REST: contact.created and booking.created joined the
+   * list (their 'New contact added' and 'New booking from <contact>' rows are
+   * gone): the listener's booking row now carries the start time (CR-V155-1),
+   * and log-redaction.integration.test.ts observes this listener's run itself.
    */
   @OnEvent('contact.created')
   async onContactCreated(payload: ContactCreatedPayload) {
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'crm',
-      action: 'created',
-      entityType: 'contact',
-      entityId: payload.contact.id,
-      title: 'New contact added',
-      detail: [payload.contact.firstName, payload.contact.lastName].filter(Boolean).join(' ') || payload.contact.email || 'Unknown',
-      icon: 'UserPlus',
-      tone: 'info',
-      contactId: payload.contact.id,
-    });
     await this.executePlaybooks(payload.businessId, 'contact.created', {
       contactId: payload.contact.id,
       trigger: 'contact.created',
@@ -598,23 +587,6 @@ export class AutomationExecutorService {
 
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
-    // V1-55 review (CR-V155-1): kept beside ActivityEventListener's row, which
-    // has no date or time; the feed shows when the booking is from this row.
-    const contactName = payload.contact
-      ? [payload.contact.firstName, payload.contact.lastName].filter(Boolean).join(' ') || 'Customer'
-      : 'Customer';
-    await this.activity.log({
-      businessId: payload.businessId,
-      module: 'bookings',
-      action: 'created',
-      entityType: 'booking',
-      entityId: payload.booking.id,
-      title: `New booking from ${contactName}`,
-      detail: new Date(payload.booking.startTime).toLocaleString(),
-      icon: 'Calendar',
-      tone: 'info',
-      contactId: payload.contact?.id,
-    });
     await this.executePlaybooks(payload.businessId, 'booking.created', {
       contactId: payload.contact?.id,
       bookingId: payload.booking.id,

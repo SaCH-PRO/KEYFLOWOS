@@ -27,6 +27,13 @@ function contactName(contact?: { firstName?: string | null; lastName?: string | 
   return name || contact.email || 'Someone';
 }
 
+/** A booking's start as the feed shows it, or null when absent or unreadable. */
+function bookingStart(startTime: unknown): string | null {
+  if (startTime == null || startTime === '') return null;
+  const at = new Date(startTime as string | number | Date);
+  return Number.isNaN(at.getTime()) ? null : at.toLocaleString();
+}
+
 @Injectable()
 export class ActivityEventListener {
   private readonly logger = new Logger(ActivityEventListener.name);
@@ -212,9 +219,28 @@ export class ActivityEventListener {
 
   // -- Bookings --
 
+  /**
+   * V1-55b-FEED-DEDUPE-REST (CR-V155-1): the only bookings created row for a
+   * new booking (AutomationExecutorService no longer writes a second, timed
+   * one), and it says when the booking is. No booking.created payload carries
+   * the service (BookingsService puts the booking row and its contact on the
+   * bus), so the start time is in the detail itself.
+   *
+   * It is NOT the feed's one row for the booking (CR-V155b-1, residual):
+   * BookingsService.createBooking also logs a booking.created ContactEvent,
+   * which CrmTimelineService copies into Activity (crm:booking.created:contact),
+   * and the cockpit reader (business-timeline.tsx feedRows) leaves out only
+   * invoice.payment_recorded copies. The cockpit shows that copy ('Booking
+   * created') beside this row: two rows, as at base, where its DOUBLE_WRITTEN
+   * rule already showed the listener/executor pair once. Closing it needs
+   * meta.feedCopy=false on that ContactEvent (bookings.service.ts) or the
+   * reader's MIRRORED_AS_OWN_ROW, both outside V1-55b's write set
+   * (evidence-feed.integration.test.ts V55-12 todo).
+   */
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
     const bk = payload.booking;
+    const when = bookingStart(bk.startTime);
     await this.activity.log({
       businessId: payload.businessId,
       module: 'bookings',
@@ -222,11 +248,11 @@ export class ActivityEventListener {
       entityType: 'booking',
       entityId: bk.id,
       title: `New booking`,
-      detail: `${contactName(payload.contact)} booked ${(bk as any).service?.name || 'an appointment'}`,
+      detail: `${contactName(payload.contact)} booked ${(bk as any).service?.name || 'an appointment'}${when ? ` for ${when}` : ''}`,
       icon: 'calendar',
       tone: 'info',
       data: { bookingId: bk.id, serviceId: bk.serviceId, startTime: bk.startTime },
-      contactId: bk.contactId || undefined,
+      contactId: bk.contactId || payload.contact?.id || undefined,
     });
   }
 
@@ -304,6 +330,16 @@ export class ActivityEventListener {
 
   // -- CRM --
 
+  /**
+   * V1-55b-FEED-DEDUPE-REST (V55-08): the only crm created row for a new
+   * contact (AutomationExecutorService no longer writes 'New contact added').
+   * It is NOT the feed's one row for the contact (CR-V155b-1, residual):
+   * CrmService.createContact also logs a contact.created ContactEvent whose
+   * Activity copy (crm:contact.created:contact) the cockpit shows beside this
+   * row ('Contact created'), as at base. crm-network.service.ts logs the same
+   * ContactEvent for a referral without this bus event, where the copy is the
+   * only row. See onBookingCreated and the V55-12 todo.
+   */
   @OnEvent('contact.created')
   async onContactCreated(payload: ContactCreatedPayload) {
     const c = payload.contact;
