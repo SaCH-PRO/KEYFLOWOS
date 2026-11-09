@@ -60,6 +60,11 @@
  *         (e) race: capturePaypalOrder, PayPal capturing while the void decides, waits on the lock, is
  *             refused 409, and PayPal's own capture webhook for it later is refused with no second notice;
  *         (f) control: a Stripe and a PayPal success for a SENT invoice record as before.
+ *         Review repairs: (g) / (h) SEC-VN08-1 (D-76: a refusal is kept insert-only): a WiPay refusal
+ *             before the claim, and a Stripe delivery with no event id, never rewrite a webhook_events
+ *             row another business holds under the key they chose;
+ *         (i) CR-VPR-1: PayPal's refund of a refused capture records no REFUNDED row on the VOID
+ *             invoice (net stays 0, ledger 0) and its event is kept refused:invoice_void.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed: the plan allows
@@ -1016,6 +1021,77 @@ describe('V1-82 no path voids an invoice that still holds money received net (re
       expect(await webhookRow('stripe', stripeEvt.id)).toMatchObject({ eventType: 'checkout.session.completed' });
       expect(await webhookRow('paypal', paypalEvt.id)).toMatchObject({ eventType: 'PAYMENT.CAPTURE.COMPLETED' });
       expect(await refusalNotices(ID.bizAcc, id)).toEqual([]);
+    });
+
+    /** A webhook_events row another business holds (as a delivery of its own left it). */
+    async function seedForeignWebhookRow(provider: string, providerEventId: string, eventType: string, businessId: string) {
+      await db.webhookEvent.create({ data: { provider, providerEventId, eventType, businessId } });
+      return { eventType, businessId };
+    }
+
+    it('VN-08 (g) review SEC-VN08-1 (D-76: the refusal is insert-only): a WiPay success for a VOID invoice whose transaction id another business\'s webhook_events row already holds is refused and records nothing, and that row is left as it was (no cross-tenant overwrite of its type or business)', async () => {
+      const transactionId = `${P}victim_wipay_g`;
+      const victim = await seedForeignWebhookRow('wipay', transactionId, 'refused:currency:USD', ID.bizAcc);
+      const id = await voided(ID.bizCash);
+
+      const res = await wipayCallback(id, transactionId, 100);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toMatchObject({ success: false, invoiceId: id });
+      expect(await paymentRows(id)).toEqual([]);
+      expect((await invoiceRow(id)).status).toBe('VOID');
+      expect(await netReceived(id)).toBe(0);
+      expect(await webhookRow('wipay', transactionId), 'another business\'s row is not taken over').toEqual(victim);
+    });
+
+    it('VN-08 (h) review SEC-VN08-1 (D-76: the refusal is insert-only): a Stripe delivery with no event id for a VOID invoice, signed with its business\'s own secret, whose session id another business\'s webhook_events row holds, is acked and records nothing, and that row is left as it was', async () => {
+      const victimEventId = `${P}evt_victim_h`;
+      const victim = await seedForeignWebhookRow('stripe', victimEventId, 'checkout.session.completed', ID.bizCash);
+      const id = await voided(ID.bizAcc);
+      // No top-level event id (the dedupe claim writes no row); the session id is the other business's event id.
+      const event: { id?: string; data: { object: { id: string } } } = stripeEvent(id, 40);
+      delete event.id;
+      event.data.object.id = victimEventId;
+
+      const res = await stripeDeliver(event);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(await paymentRows(id)).toEqual([]);
+      expect((await invoiceRow(id)).status).toBe('VOID');
+      expect(await netReceived(id)).toBe(0);
+      expect(await ledgerOf(ID.bizAcc, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: 'REVERSED' });
+      expect(await webhookRow('stripe', victimEventId), 'another business\'s row is not taken over').toEqual(victim);
+    });
+
+    it('VN-08 (i) review CR-VPR-1 (D-76 pattern, D-14): PayPal\'s refund of a capture refused for a VOID invoice (the refund the owner notice asks for, naming the invoice in custom_id) records nothing on it: no REFUNDED row, net 0, ledger all 0 / REVERSED; its event is kept refused:invoice_void with the invoice\'s business, no second owner notice, and a redelivery adds nothing', async () => {
+      const id = await voided(ID.bizAcc);
+      const captureId = `${P}cap_i`;
+      const capture = paypalCaptureEvent(id, captureId, 40);
+      const captured = await paypalDeliver(capture);
+      expect(captured.status, JSON.stringify(captured.body)).toBe(201);
+      await expectRefused(ID.bizAcc, id, 'paypal', capture.id, captureId);
+
+      const refundEvent = {
+        id: `${P}WH_refund_i`,
+        event_type: 'PAYMENT.CAPTURE.REFUNDED',
+        resource: {
+          id: `${P}RF_i`,
+          custom_id: id,
+          amount: { value: '40.00', currency_code: 'USD' },
+          supplementary_data: { related_ids: { capture_id: captureId } },
+        },
+      };
+      const res = await paypalDeliver(refundEvent);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect((await paymentRows(id)).map((p) => [p.status, p.amount]), 'no refund row without the payment it returns').toEqual([]);
+      expect((await invoiceRow(id)).status).toBe('VOID');
+      expect(await netReceived(id)).toBe(0);
+      expect(await ledgerOf(ID.bizAcc, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: 'REVERSED' });
+      expect(await webhookRow('paypal', refundEvent.id)).toEqual({ eventType: 'refused:invoice_void', businessId: ID.bizAcc });
+      expect(await refusalNotices(ID.bizAcc, id)).toHaveLength(1);
+
+      const again = await paypalDeliver(refundEvent);
+      expect(again.status, JSON.stringify(again.body)).toBe(201);
+      expect(await paymentRows(id)).toEqual([]);
+      expect(await refusalNotices(ID.bizAcc, id)).toHaveLength(1);
     });
   });
 });
