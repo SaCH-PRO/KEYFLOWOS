@@ -76,7 +76,12 @@
  *   V55-03 invoice send (PATCH .../status/sent): one commerce sent row
  *   V55-04 a partial manual payment: its FINANCE payment_recorded row, no paid row
  *   V55-05 the final manual payment: its FINANCE row and ONE commerce paid row
- *     for the settled invoice, ActivityEventListener's ('Payment received')
+ *     for the settled invoice, ActivityEventListener's ('Payment received');
+ *     since PR196-CRM-LIFECYCLE (D-81) the CRM RevenueEventListener moves the
+ *     invoice's LEAD contact to CLIENT through a real CrmService on the feed bus
+ *     (review CR-1: the stub had no such method and the move never ran here):
+ *     one 'Status changed' row and one follow-up task, which writes no row; the
+ *     executor's stage-change task request is pinned as characterization (CR-2)
  *   flows are still dispatched: one ACTIVE published flow per trigger
  *     (contact.created, invoice.sent, invoice.paid, booking.created,
  *     booking.confirmed) runs once, through the executor, with the step's ids
@@ -252,6 +257,9 @@ async function cleanup() {
     `DELETE FROM automation_flows WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM team_activity_logs WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    // PR196-CRM-LIFECYCLE (D-81): the follow-up task of tenant C's paid invoice and its assignment.
+    `DELETE FROM task_assignments WHERE task_id IN (SELECT id FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)})`,
+    `DELETE FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)} OR invoice_id LIKE ${sqlLikePrefix(P)}`,
@@ -1061,6 +1069,8 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
   let feedModule: any;
   let feedBus: any;
   let crm: any;
+  /** PR196-CRM-LIFECYCLE (D-81): the real CrmService the CRM RevenueEventListener moves a paid invoice's contact through, on the feed bus. */
+  let lifecycleCrm: any;
   let bookings: any;
 
   type Row = { id: string; module: string; action: string; entityType: string; entityId: string | null; title: string; detail: string | null; data: any; category: string | null; contactId: string | null };
@@ -1181,6 +1191,11 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
             contactDetail: async () => ({ contact: null }),
             updateContact: async () => undefined,
             logContactEvent: async () => undefined,
+            // PR196-CRM-LIFECYCLE review CR-1: RevenueEventListener.onInvoicePaid moves the paid
+            // invoice's LEAD/PROSPECT contact to CLIENT (D-81) through the real CrmService on this
+            // feed bus, as the full app does (a stub without the method throws a TypeError the
+            // listener swallows, and the move would never reach the feed writers here).
+            advanceToClientOnInvoicePaid: (input: unknown) => lifecycleCrm.advanceToClientOnInvoicePaid(input),
           },
         },
         { provide: TransactionalEmailService, useValue: {} },
@@ -1192,6 +1207,21 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     }).compile();
     await feedModule.init();
     feedBus = feedModule.get(EventEmitter2);
+    // D-81: the paid-invoice move, emitting contact.updated / contact_task.created on the feed bus.
+    // Real: Prisma and the compare-and-set, its ContactEvents and follow-up task rows; off the feed
+    // and stubbed: plan limits, caches, the contact audit write (a ContactAuditEntry, not Activity).
+    lifecycleCrm = new CrmService(
+      app.get(PrismaService),
+      feedBus,
+      { checkLimit: async () => ({ allowed: true }) } as never,
+      app.get(CrmTimelineService),
+      { invalidateCache: () => undefined } as never,
+      {} as never,
+      { invalidateCache: () => undefined } as never,
+      {} as never,
+      { write: async () => undefined } as never,
+      {} as never,
+    );
 
     // The real contact-create service call (the CRM controller is not mounted
     // in this harness); its collaborators off the contact row and its event
@@ -1350,19 +1380,36 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(cents(finance[0].data.amount)).toBe(20_000);
     // Every Activity row the settling payment wrote: no second paid row, and
     // (V1-55b, V55-07) no CRM contact-event copy of invoice.paid; the CRM copy of
-    // the payment's contact event is still written (V55-07b todo below).
+    // the payment's contact event is still written (V55-07b todo below). Since
+    // PR196-CRM-LIFECYCLE (D-81) the paid invoice also moves its LEAD contact
+    // (createContact's default status) to CLIENT, and that move writes ONE row,
+    // ActivityEventListener's status row on its contact.updated (D-08); its
+    // follow-up task writes none (review CR-1 / SEC-L81-1).
     expect(s.rows.map(kind).sort()).toEqual([
       'FINANCE:payment_recorded:payment',
       'commerce:paid:invoice',
       'crm:invoice.payment_recorded:contact',
+      'crm:updated:contact',
     ]);
+    const moved = s.rows.filter((r) => kind(r) === 'crm:updated:contact');
+    expect(moved[0]).toMatchObject({ entityId: SC.contactId, contactId: SC.contactId, title: 'Status changed' });
+    expect(moved[0].data).toMatchObject({ from: 'LEAD', to: 'CLIENT' });
+    const contactC = await db.contact.findUnique({ where: { id: SC.contactId }, select: { status: true, ownerId: true } });
+    expect(contactC.status).toBe('CLIENT');
+    const followUps = await db.contactTask.findMany({ where: { contactId: SC.contactId, source: 'lifecycle-automation' } });
+    expect(followUps.map((t: any) => [t.businessId, t.status, t.assigneeId]), 'one D-81 follow-up').toEqual([[C.biz, 'OPEN', contactC.ownerId]]);
 
     const runs = await runsOf('invoice.paid', 1);
     expect(runs.map((r) => [r.businessId, r.ctx.trigger, r.ctx.invoiceId, r.ctx.contactId, cents(r.ctx.total)])).toEqual([
       [C.biz, 'invoice.paid', SC.invoiceId, SC.contactId, cents(INVOICE_C_TOTAL)],
     ]);
-    // The executor's built-in invoice.paid rule still runs.
-    expect(crmTasks.map((t) => [t.businessId, t.contactId, t.title])).toEqual([[C.biz, SC.contactId, 'Send thank-you note']]);
+    // The executor's built-in invoice.paid rule still runs. CHARACTERIZATION (review CR-2, the
+    // packet's L-13 todo; an owner decision): its built-in stage-change rule also runs on the D-81
+    // move's contact.updated, as on every status change, asking for a second, unassigned task.
+    expect(crmTasks.map((t) => [t.businessId, t.contactId, t.title]).sort()).toEqual([
+      [C.biz, SC.contactId, 'Follow up after stage change'],
+      [C.biz, SC.contactId, 'Send thank-you note'],
+    ]);
 
     expect(await postingsFor(C.biz, SC.fullId!), 'Payment:<id>:payment_recorded posting').toHaveLength(1);
     expect(s.ledgerAfterDelivery).toEqual(s.ledgerBeforeDelivery);
