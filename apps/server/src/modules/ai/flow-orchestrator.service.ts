@@ -3301,6 +3301,31 @@ ${triage.standingContext}`;
   }
 
   /**
+   * V1-84 (FOLLOW3-D7, D-37; review SEC-D7-3). The clause a member's calendar read ANDs onto `where`
+   * so no event on a contact their CRM view does not open is answered (contactVisibilityFilter, the
+   * GET contacts/:id rule; GET calendar events and GET calendar conflicts apply the same cascade
+   * through CalendarEvent.contactId). An event with no contact stays. null with no principal or for
+   * the OWNER and a SUPER_ADMIN: the read is unchanged.
+   */
+  private async calendarContactScope(
+    businessId: string,
+    action: ActionContext | undefined,
+    where: Prisma.CalendarEventWhereInput,
+  ): Promise<Prisma.CalendarEventWhereInput | null> {
+    const reader = await this.contactReadAccess(businessId, action);
+    if (!reader) return null;
+    const linked = await this.prisma.client.calendarEvent.findMany({
+      where: { ...where, contactId: { not: null } },
+      select: { contactId: true },
+      distinct: ['contactId'],
+    });
+    const ids = linked.map((e: { contactId: string | null }) => e.contactId);
+    const canOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, ids);
+    if (!canOpen) return null;
+    return { OR: [{ contactId: null }, { contactId: { in: ids.filter((id): id is string => !!id && canOpen(id)) } }] };
+  }
+
+  /**
    * A contact id the model chose, refused unless it is a live contact of `businessId` (V1-21b
    * review 9 TD9-4). CommerceService.createInvoice / createQuote store contactId as given on this
    * base (R0-27's assertContactInBusiness is not on it): on the staff bridge, with no tenant
@@ -4066,13 +4091,14 @@ ${triage.standingContext}`;
         });
         const owned = rows.map((booking) => ownRelations(businessId, booking, ['contact', 'service']));
         // V1-84 (FOLLOW3-D7, D-37): the booking stays, but its contact is named only when the
-        // member may open it (contactVisibilityFilter, the GET contacts/:id rule); otherwise it reads
-        // as none, as a contact of another business does. Unchanged with no principal or for the OWNER.
+        // member may open it (contactVisibilityFilter, the GET contacts/:id rule); otherwise neither
+        // the relation nor its id is answered (review SEC-D7-2: the id alone opened the contact through
+        // fetch_client_health). Unchanged with no principal or for the OWNER.
         const reader = await this.contactReadAccess(businessId, action);
         const canOpen = reader
-          ? await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, owned.map((b) => (b.contact ? b.contactId : null)))
+          ? await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, owned.map((b) => b.contactId))
           : null;
-        const bookings = canOpen ? owned.map((b) => (b.contact && !canOpen(b.contactId) ? { ...b, contact: null } : b)) : owned;
+        const bookings = canOpen ? owned.map((b) => (canOpen(b.contactId) ? b : { ...b, contactId: null, contact: null })) : owned;
         return { bookings, count: bookings.length };
       }
 
@@ -4181,12 +4207,25 @@ ${triage.standingContext}`;
       }
 
       case 'bookings_list_waitlist': {
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-4): as bookings_list_bookings, an entry stays but
+        // its contact (relation and id) is named only when the member may open it; a contactId
+        // filter naming a contact they may not open answers as an unknown contact does (none).
+        // Unchanged with no principal or for the OWNER.
+        const reader = await this.contactReadAccess(businessId, action);
+        if (reader && args.contactId) {
+          const mayOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, [args.contactId]);
+          if (mayOpen && !mayOpen(args.contactId)) return { items: [], total: 0 };
+        }
         const result = await this.getWaitlist().listWaitlist(businessId, {
           status: args.status,
           serviceId: args.serviceId,
           contactId: args.contactId,
         });
-        return { items: result.items, total: result.total };
+        const canOpen = reader
+          ? await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, result.items.map((e) => e.contactId))
+          : null;
+        const items = canOpen ? result.items.map((e) => (canOpen(e.contactId) ? e : { ...e, contactId: null, contact: null })) : result.items;
+        return { items, total: result.total };
       }
 
       case 'bookings_offer_waitlist_slot': {
@@ -4368,10 +4407,16 @@ ${triage.standingContext}`;
         const now = new Date();
         const fourteenDaysAgo = new Date(now.getTime() - 14 * 86400000);
         const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-2, SEC-D7-5): a member reads, counts and is named
+        // only the contacts their CRM view opens (visibilityClause, the rule GET contacts and GET
+        // contacts/:id apply); a contact they may not open answers as an unknown one. Unchanged with
+        // no principal or for the OWNER and a SUPER_ADMIN.
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
+        const scoped = visible ? { AND: [visible] } : {};
 
         if (args.contactId) {
           const contact = await this.prisma.client.contact.findFirst({
-            where: { id: args.contactId, businessId, deletedAt: null },
+            where: { id: args.contactId, businessId, deletedAt: null, ...scoped },
             select: { id: true, firstName: true, lastName: true, email: true, status: true, updatedAt: true, tags: true },
           });
           if (!contact) throw new Error('Contact not found');
@@ -4395,16 +4440,17 @@ ${triage.standingContext}`;
         }
 
         const [totalContacts, staleLeads, atRiskClients, topSpenders] = await Promise.all([
-          this.prisma.client.contact.count({ where: { businessId, deletedAt: null } }),
+          this.prisma.client.contact.count({ where: { businessId, deletedAt: null, ...scoped } }),
           this.prisma.client.contact.count({
-            where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: fourteenDaysAgo } },
+            where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: fourteenDaysAgo }, ...scoped },
           }),
           this.prisma.client.contact.count({
-            where: { businessId, deletedAt: null, status: 'CLIENT', updatedAt: { lt: thirtyDaysAgo } },
+            where: { businessId, deletedAt: null, status: 'CLIENT', updatedAt: { lt: thirtyDaysAgo }, ...scoped },
           }),
           this.prisma.client.invoice.groupBy({
             by: ['contactId'],
-            where: { businessId, deletedAt: null, status: 'PAID' },
+            // for a member, only the spend of contacts they may open is ranked (and so named)
+            where: { businessId, deletedAt: null, status: 'PAID', ...(visible ? { contact: { is: { businessId, deletedAt: null, ...scoped } } } : {}) },
             _sum: { total: true },
             orderBy: { _sum: { total: 'desc' } },
             take: 5,
@@ -4908,6 +4954,11 @@ ${triage.standingContext}`;
         const where: any = { businessId, deletedAt: null };
         if (args.status) where.status = args.status;
         if (args.tag) where.tags = { has: args.tag };
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-1): a segment is a contact list read, so a member's
+        // answers only the contacts their CRM view opens, as crm_list_contacts does. Unchanged with no
+        // principal or for the OWNER and a SUPER_ADMIN.
+        const visible = (await this.contactReadAccess(businessId, action))?.clause;
+        if (visible) where.AND = [visible];
 
         let contacts = await this.prisma.client.contact.findMany({
           where,
@@ -5663,22 +5714,9 @@ ${triage.standingContext}`;
         if (args.module) where.module = args.module;
         if (args.status) where.status = args.status;
         // V1-84 (FOLLOW3-D7, D-37): for a member, no event on a contact their CRM view does not
-        // open (contactVisibilityFilter, the GET contacts/:id rule; the cascade GET calendar events
-        // applies through CalendarEvent.contactId). An event with no contact stays. Unchanged with
-        // no principal or for the OWNER and a SUPER_ADMIN (canOpen null).
-        const reader = await this.contactReadAccess(businessId, action);
-        if (reader) {
-          const linked = await this.prisma.client.calendarEvent.findMany({
-            where: { ...where, contactId: { not: null } },
-            select: { contactId: true },
-            distinct: ['contactId'],
-          });
-          const ids = linked.map((e: { contactId: string | null }) => e.contactId);
-          const canOpen = await contactVisibilityFilter(this.prisma, businessId, reader.access, reader.userId, ids);
-          if (canOpen) {
-            where.AND = [{ OR: [{ contactId: null }, { contactId: { in: ids.filter((id): id is string => !!id && canOpen(id)) } }] }];
-          }
-        }
+        // open (calendarContactScope). An event with no contact stays.
+        const scope = await this.calendarContactScope(businessId, action, where);
+        if (scope) where.AND = [scope];
         const events = await this.prisma.client.calendarEvent.findMany({
           where,
           orderBy: { startAt: 'asc' },
@@ -5706,13 +5744,17 @@ ${triage.standingContext}`;
       case 'calendar_check_conflicts': {
         const startAt = new Date(args.startAt);
         const endAt = new Date(args.endAt);
+        const where: Prisma.CalendarEventWhereInput = {
+          businessId,
+          status: { not: 'CANCELLED' },
+          startAt: { lt: endAt },
+          endAt: { gt: startAt },
+        };
+        // V1-84 (FOLLOW3-D7, D-37; review SEC-D7-3): the events calendar_list_events leaves out for a
+        // member are left out here too, as GET calendar conflicts leaves them out (calendarContactScope).
+        const scope = await this.calendarContactScope(businessId, action, where);
         const conflicts = await this.prisma.client.calendarEvent.findMany({
-          where: {
-            businessId,
-            status: { not: 'CANCELLED' },
-            startAt: { lt: endAt },
-            endAt: { gt: startAt },
-          },
+          where: scope ? { ...where, AND: [scope] } : where,
           orderBy: { startAt: 'asc' },
           take: 10,
         });

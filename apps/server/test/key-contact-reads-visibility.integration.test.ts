@@ -66,6 +66,12 @@ const ID = {
   bkPriv: `${P}bkPriv`, // booking for cPriv
   bkTeam: `${P}bkTeam`, // booking for cTeam
   bkMine: `${P}bkMine`, // booking for cMine
+  wlPriv: `${P}wlPriv`, // waitlist entry for cPriv
+  wlTeam: `${P}wlTeam`, // waitlist entry for cTeam
+  wlMine: `${P}wlMine`, // waitlist entry for cMine
+  invPriv: `${P}invPriv`, // PAID invoice for cPriv (the top spender)
+  invTeam: `${P}invTeam`, // PAID invoice for cTeam
+  invMine: `${P}invMine`, // PAID invoice for cMine
 };
 /** What the owner's PRIVATE contact must never disclose to a member who may not open it. */
 const PRIVATE = { firstName: 'V84GPrivate', email: `${P}private@test.local`, phone: '+18685550147' };
@@ -125,7 +131,9 @@ async function cleanup() {
   for (const sql of [
     `DELETE FROM idempotency_keys WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM ai_memories WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM booking_waitlist_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM bookings WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM services WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM calendar_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_shares WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -169,6 +177,32 @@ function onlyResult(body: any, name: string) {
   return r.result;
 }
 
+/**
+ * One member-chat turn that runs `name` to its result: when KEY asks the member to confirm it (a
+ * tier-2 tool such as segment_contacts), the member confirms it (POST flow/confirm) as KC-01g does.
+ */
+async function memberRuns(actor: string, name: string, args: Record<string, unknown>) {
+  const body = await chatTurn(actor, name, args);
+  if (!body.requiresConfirmation) return body;
+  const [pending] = body.pendingConfirmations;
+  const res = await request(app.getHttpServer())
+    .post(`/ai/businesses/${ID.bizA}/flow/confirm`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
+    .send({ toolCallId: pending.toolCallId, confirmed: true, confirmationId: pending.confirmationId })
+    .expect(201);
+  return { proposed: body, ...res.body };
+}
+
+/** The single (failed) tool result of a turn. */
+function onlyFailure(body: any, name: string) {
+  expect(body.toolResults, JSON.stringify(body).slice(0, 400)).toHaveLength(1);
+  const [r] = body.toolResults;
+  expect(r.name).toBe(name);
+  expect(r.success, JSON.stringify(r).slice(0, 400)).toBe(false);
+  return r.error as string;
+}
+
 const contactIds = (result: any) => (result.contacts as Array<{ id: string }>).map((c) => c.id).sort();
 
 /** The PRIVATE contact's identifying values, absent from the member's answer and from what the model was sent. */
@@ -197,6 +231,7 @@ beforeAll(async () => {
   const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
   const { KeyActionBoundaryService } = await import('../src/modules/key-autonomy/action-boundary/key-action-boundary.service');
   const { JobRolePolicyService } = await import('../src/modules/structure/job-role-policy.service');
+  const { BookingWaitlistService } = await import('../src/modules/bookings/booking-waitlist.service');
 
   Logger.overrideLogger(false);
   const prisma = new PrismaService();
@@ -212,6 +247,8 @@ beforeAll(async () => {
   };
   registry.set(KeyActionBoundaryService, new KeyActionBoundaryService(prisma as any, moduleRef as any));
   registry.set(JobRolePolicyService, jobRolePolicy);
+  // bookings_list_waitlist reads through the real service (its event bus is not consulted on a read).
+  registry.set(BookingWaitlistService, new BookingWaitlistService(prisma as any, { emit() { return true; } } as any));
 
   const quiet = { log() {}, warn() {}, error() {}, debug() {}, verbose() {} };
   // The real class: chat, streamChat, the confirmation claim, governToolCall, executeTool and
@@ -297,7 +334,10 @@ beforeAll(async () => {
   const start = new Date(Date.now() + 24 * 60 * 60 * 1000);
   const event = (id: string, contactId: string | null, title: string) =>
     db.calendarEvent.create({
-      data: { id, businessId: ID.bizA, title, type: 'BOOKING', module: 'BOOKINGS', startAt: start, visibility: 'TEAM', sourceType: 'test', sourceId: id, contactId },
+      data: {
+        id, businessId: ID.bizA, title, type: 'BOOKING', module: 'BOOKINGS', startAt: start, endAt: new Date(start.getTime() + 30 * 60_000),
+        visibility: 'TEAM', sourceType: 'test', sourceId: id, contactId,
+      },
     });
   await event(ID.evPriv, ID.cPriv, `Visit ${PRIVATE.firstName}`);
   await event(ID.evTeam, ID.cTeam, `Visit ${TEAM.firstName}`);
@@ -319,6 +359,20 @@ beforeAll(async () => {
   await booking(ID.bkPriv, ID.cPriv, 0);
   await booking(ID.bkTeam, ID.cTeam, 60);
   await booking(ID.bkMine, ID.cMine, 120);
+
+  const waitlist = (id: string, contactId: string) =>
+    db.bookingWaitlistEntry.create({ data: { id, businessId: ID.bizA, contactId, serviceId: ID.svc } });
+  await waitlist(ID.wlPriv, ID.cPriv);
+  await waitlist(ID.wlTeam, ID.cTeam);
+  await waitlist(ID.wlMine, ID.cMine);
+
+  const paid = (id: string, contactId: string, n: number, total: number) =>
+    db.invoice.create({
+      data: { id, businessId: ID.bizA, contactId, invoiceNumber: `V84G-000${n}`, status: 'PAID', subtotal: total, total, currency: 'TTD' },
+    });
+  await paid(ID.invPriv, ID.cPriv, 1, 9000);
+  await paid(ID.invTeam, ID.cTeam, 2, 500);
+  await paid(ID.invMine, ID.cMine, 3, 300);
 }, 120_000);
 
 afterAll(async () => {
@@ -444,6 +498,102 @@ describe('KC-02 member-chat calendar reads apply the member’s visibility', () 
       expect(JSON.stringify(body)).not.toContain(PRIVATE.email);
       expect(JSON.stringify(body)).not.toContain(PRIVATE.firstName);
     }
+  });
+
+  it("KC-02c RED-BEFORE (review SEC-D7-2): a booking whose contact the member may not open carries no contactId either, and fetch_client_health refuses that contact by id exactly as it refuses an unknown one: the ADMIN, the view-all STAFF member and the member kept to their own book cannot read the owner's PRIVATE contact through the booking's id", async () => {
+    const admin = await chatTurn(ID.admin, 'bookings_list_bookings', { limit: 50 });
+    const rows = onlyResult(admin, 'bookings_list_bookings').bookings as Array<{ id: string; contactId: string | null }>;
+    expect(Object.fromEntries(rows.map((b) => [b.id, b.contactId]))).toEqual({ [ID.bkPriv]: null, [ID.bkTeam]: ID.cTeam, [ID.bkMine]: ID.cMine });
+    expectNoPrivate(admin);
+
+    const unknown = onlyFailure(await chatTurn(ID.admin, 'fetch_client_health', { contactId: `${P}nope` }), 'fetch_client_health');
+    for (const actor of [ID.admin, ID.staffAll, ID.staffOwned]) {
+      gateway.toolMessages.length = 0;
+      const body = await chatTurn(actor, 'fetch_client_health', { contactId: ID.cPriv });
+      expect(onlyFailure(body, 'fetch_client_health')).toBe(unknown);
+      for (const value of [PRIVATE.firstName, PRIVATE.email]) {
+        expect(JSON.stringify(body), `${actor} answer discloses ${value}`).not.toContain(value);
+        expect(gateway.toolMessages.join('\n'), `model was sent ${value}`).not.toContain(value);
+      }
+    }
+    // A contact the member may open still answers.
+    const mine = onlyResult(await chatTurn(ID.staffOwned, 'fetch_client_health', { contactId: ID.cMine }), 'fetch_client_health');
+    expect(mine.contact.email).toBe(MINE.email);
+    const team = onlyResult(await chatTurn(ID.admin, 'fetch_client_health', { contactId: ID.cTeam }), 'fetch_client_health');
+    expect(team.contact.email).toBe(TEAM.email);
+  });
+
+  it("KC-02d RED-BEFORE (review SEC-D7-3): calendar_check_conflicts leaves out the events calendar_list_events hides: over the fixtures' window the ADMIN and the view-all STAFF member get no event on the owner's PRIVATE contact, and the member kept to their own book gets only their own contact's and the contactless event", async () => {
+    const window = await db.calendarEvent.findUnique({ where: { id: ID.evPriv }, select: { startAt: true } });
+    const args = {
+      startAt: new Date(window.startAt.getTime() - 60 * 60_000).toISOString(),
+      endAt: new Date(window.startAt.getTime() + 60 * 60_000).toISOString(),
+    };
+    const ids = (body: any) => (onlyResult(body, 'calendar_check_conflicts').conflicts as Array<{ id: string }>).map((e) => e.id).sort();
+    const admin = await memberRuns(ID.admin, 'calendar_check_conflicts', args);
+    expect(ids(admin)).toEqual([ID.evMine, ID.evNone, ID.evTeam].sort());
+    const staffAll = await memberRuns(ID.staffAll, 'calendar_check_conflicts', args);
+    expect(ids(staffAll)).toEqual([ID.evMine, ID.evNone, ID.evTeam].sort());
+    const owned = await memberRuns(ID.staffOwned, 'calendar_check_conflicts', args);
+    expect(ids(owned)).toEqual([ID.evMine, ID.evNone].sort());
+    expectNoPrivate([admin, staffAll, owned]);
+    // CONTROL: the OWNER's check is unchanged.
+    const owner = await memberRuns(ID.owner, 'calendar_check_conflicts', args);
+    expect(ids(owner)).toEqual([ID.evMine, ID.evNone, ID.evPriv, ID.evTeam].sort());
+  });
+
+  it("KC-02e RED-BEFORE (review SEC-D7-4): bookings_list_waitlist keeps every entry but names an entry's contact (relation and id) only when the member may open it; the OWNER's list is unchanged", async () => {
+    const named = (body: any) => {
+      const items = onlyResult(body, 'bookings_list_waitlist').items as Array<{ id: string; contactId: string | null; contact: { id: string } | null }>;
+      return Object.fromEntries(items.map((e) => [e.id, [e.contactId, e.contact?.id ?? null]]));
+    };
+    const owned = await memberRuns(ID.staffOwned, 'bookings_list_waitlist', {});
+    expect(named(owned)).toEqual({ [ID.wlPriv]: [null, null], [ID.wlTeam]: [null, null], [ID.wlMine]: [ID.cMine, ID.cMine] });
+    const admin = await memberRuns(ID.admin, 'bookings_list_waitlist', {});
+    expect(named(admin)).toEqual({ [ID.wlPriv]: [null, null], [ID.wlTeam]: [ID.cTeam, ID.cTeam], [ID.wlMine]: [ID.cMine, ID.cMine] });
+    // Filtering on a contact the member may not open answers as an unknown contact does.
+    const unknown = onlyResult(await memberRuns(ID.staffOwned, 'bookings_list_waitlist', { contactId: `${P}nope` }), 'bookings_list_waitlist');
+    expect(unknown).toEqual({ items: [], total: 0 });
+    const hidden = await memberRuns(ID.staffOwned, 'bookings_list_waitlist', { contactId: ID.cTeam });
+    expect(onlyResult(hidden, 'bookings_list_waitlist')).toEqual(unknown);
+    const adminPriv = await memberRuns(ID.admin, 'bookings_list_waitlist', { contactId: ID.cPriv });
+    expect(onlyResult(adminPriv, 'bookings_list_waitlist')).toEqual(unknown);
+    // (adminPriv echoes the id its own request named, so the disclosure check covers the other turns)
+    expectNoPrivate([owned, admin]);
+    const owner = await memberRuns(ID.owner, 'bookings_list_waitlist', {});
+    expect(named(owner)).toEqual({ [ID.wlPriv]: [ID.cPriv, ID.cPriv], [ID.wlTeam]: [ID.cTeam, ID.cTeam], [ID.wlMine]: [ID.cMine, ID.cMine] });
+  });
+});
+
+describe('KC-04 member-chat contact aggregates apply the member’s CRM visibility (review repairs)', () => {
+  it("KC-04a RED-BEFORE (review SEC-D7-1): segment_contacts, once the member confirms it, answers only the contacts the member's CRM view opens: the member kept to their own book gets their own and shared contacts, the ADMIN the TEAM contacts; the OWNER's segment is unchanged", async () => {
+    const segment = (body: any) => onlyResult(body, 'segment_contacts');
+    const owned = segment(await memberRuns(ID.staffOwned, 'segment_contacts', { name: 'all' }));
+    expect(contactIds(owned)).toEqual([ID.cMine, ID.cShared].sort());
+    expect(owned.matchedCount).toBe(2);
+    const admin = segment(await memberRuns(ID.admin, 'segment_contacts', { name: 'all' }));
+    expect(contactIds(admin)).toEqual([ID.cMine, ID.cTeam].sort());
+    const spenders = segment(await memberRuns(ID.admin, 'segment_contacts', { name: 'big', minSpend: 400 }));
+    expect(contactIds(spenders)).toEqual([ID.cTeam]);
+    expectNoPrivate([owned, admin, spenders]);
+    const owner = segment(await memberRuns(ID.owner, 'segment_contacts', { name: 'all' }));
+    expect(contactIds(owner)).toEqual([ID.cMine, ID.cPriv, ID.cShared, ID.cTeam].sort());
+  });
+
+  it("KC-04b RED-BEFORE (review SEC-D7-5): fetch_client_health with no contactId counts and names only the contacts the member's CRM view opens: the owner's PRIVATE top spender is neither named nor counted for the ADMIN or the member kept to their own book; the OWNER's summary is unchanged", async () => {
+    const health = (body: any) => onlyResult(body, 'fetch_client_health');
+    const top = (r: any) => (r.topSpenders as Array<{ contactId: string }>).map((s) => s.contactId);
+    const admin = health(await chatTurn(ID.admin, 'fetch_client_health', {}));
+    expect(top(admin)).toEqual([ID.cTeam, ID.cMine]);
+    expect(admin.totalContacts).toBe(2);
+    const owned = health(await chatTurn(ID.staffOwned, 'fetch_client_health', {}));
+    expect(top(owned)).toEqual([ID.cMine]);
+    expect(owned.totalContacts).toBe(2);
+    expectNoPrivate([admin, owned]);
+    const owner = health(await chatTurn(ID.owner, 'fetch_client_health', {}));
+    expect(top(owner)).toEqual([ID.cPriv, ID.cTeam, ID.cMine]);
+    expect(owner.totalContacts).toBe(4);
+    expect(JSON.stringify(owner.topSpenders)).toContain(PRIVATE.firstName);
   });
 });
 
