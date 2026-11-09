@@ -242,6 +242,24 @@ describe('the outbound email queue never relays business email through the platf
     expect(h.row.providerOutcome).toBe('OUTCOME_UNKNOWN');
   });
 
+  it('[D-82] a pre-D-82 platform send that is confirmed sent is not sent again through Gmail: only its local consequences are completed', async () => {
+    const connection = { id: 'connection_d82', provider: 'GOOGLE', token: 'ya29.test-token' };
+    const h = harness(boundToPlatformSend(connection, {
+      providerOutcome: 'SUCCEEDED_CONFIRMED',
+      consequenceState: 'INCOMPLETE',
+      externalPostId: 'platform_relay_0',
+      errorCode: null,
+    }));
+
+    await (h.service as any).executeDelivery({ ...h.row });
+
+    expect(resendSend).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(h.row.providerOutcome).toBe('SUCCEEDED_CONFIRMED');
+    expect(h.row.consequenceState).toBe('COMPLETE');
+    expect(h.row.externalPostId).toBe('platform_relay_0');
+  });
+
   it('[D-82] RED-BEFORE: manual retry of a pre-D-82 platform send with an unknown outcome is refused (400), not re-queued', async () => {
     const connection = { id: 'connection_d82', provider: 'GOOGLE', token: 'ya29.test-token' };
     const h = harness(boundToPlatformSend(connection, { status: 'Failed', errorCode: 'PROVIDER_OUTCOME_UNKNOWN_RECONCILIATION_REQUIRED' }));
