@@ -618,6 +618,11 @@
       "packet": "V1-84 (FOLLOW3-D7-KEY-CONTACT-READS-VIS)"
     },
     {
+      "prefix": "v84i_",
+      "owner": "apps/server/test/key-do-it-for-me-scope.integration.test.ts",
+      "packet": "V1-84 (FOLLOW3-D9-DOITFORME-SCOPE)"
+    },
+    {
       "prefix": "v84j_",
       "owner": "apps/server/test/command-item-contact-visibility.integration.test.ts",
       "packet": "V1-84 (FOLLOW3-D10-COMMAND-ITEM-CONTACT-VIS)"
