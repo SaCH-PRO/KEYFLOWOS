@@ -305,28 +305,82 @@ export class StripeConnector implements IConnector, IPaymentGatewayConnector {
    */
   async isOwnCharge(businessId: string, chargeId: string): Promise<boolean> {
     const { key, shared } = await this.resolveKey(businessId);
+    return this.chargeOwnedBy(businessId, chargeId, key, shared);
+  }
+
+  /**
+   * W3-PLATFORM-CHARGE-BIND (review CR-A3-1, owner ruling D-56; review
+   * repairs SEC-PCB-1, PCB-CR-1): of `businessIds`, the ones the platform
+   * account's own record of `chargeId` names. This is isOwnCharge's shared-key
+   * rule on the platform account itself, whatever key each business holds now.
+   * A business that saved a Stripe key of its own keeps the charges taken on
+   * the platform account for it (createStripeCheckout and the payment links
+   * chose the deployment's key while it had none, and a Checkout Session opened
+   * then can be paid, and its completion delivered, after the save), and
+   * isOwnCharge would read its own account for them. Here the charge is read
+   * once for all of them, with the deployment's STRIPE_SECRET_KEY, and only
+   * the tag the platform wrote (on the charge, else on the Checkout Session of
+   * its payment_intent) decides: no payment row is evidence, no business's own
+   * key is used, and a tag names one business at most. Empty for an id that is
+   * not a charge, one the platform account does not know (404), or an untagged
+   * charge; every other failure propagates.
+   */
+  async platformChargeOwners(chargeId: string, businessIds: string[]): Promise<Set<string>> {
+    const named = new Set<string>();
+    if (businessIds.length === 0) return named;
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) throw new Error('Stripe is not configured for the platform account');
+    const charge = await this.readTaggedCharge(key, chargeId);
+    const tag = charge?.tag ?? (charge?.pi ? await this.sessionTagOf(key, charge.pi) : null);
+    if (!tag) return named;
+    for (const businessId of businessIds) {
+      if ((await this.tagsNameBusiness(businessId, [tag]))[0]) named.add(businessId);
+    }
+    return named;
+  }
+
+  /** isOwnCharge's rule with `key`: `shared` when it is the platform account's (tags only), else the business's own. */
+  private async chargeOwnedBy(businessId: string, chargeId: string, key: string, shared: boolean): Promise<boolean> {
     if (!shared && (await this.ownRowNames(businessId, [chargeId]))) return true;
-    if (!/^(ch|py)_/.test(chargeId)) return false;
+    const charge = await this.readTaggedCharge(key, chargeId);
+    if (!charge) return false;
+    if (charge.tag) return (await this.tagsNameBusiness(businessId, [charge.tag]))[0];
+    if (!charge.pi) return false;
+    if (!shared && (await this.ownRowNames(businessId, [charge.pi]))) return true;
+    const sessionTag = await this.sessionTagOf(key, charge.pi);
+    return sessionTag ? (await this.tagsNameBusiness(businessId, [sessionTag]))[0] : false;
+  }
+
+  /**
+   * The charge `chargeId` on the account `key` opens: the owner tag on it and
+   * its payment_intent. Null for an id that is not a charge or one the account
+   * does not know (404); every other provider failure propagates.
+   */
+  private async readTaggedCharge(
+    key: string,
+    chargeId: string,
+  ): Promise<{ tag: StripeOwnerTag | null; pi: string | null } | null> {
+    if (!/^(ch|py)_/.test(chargeId)) return null;
     let charge: { metadata?: unknown; payment_intent?: unknown } | null;
     try {
       charge = (await this.stripeRequest(key, 'GET', `/charges/${encodeURIComponent(chargeId)}`)) as typeof charge;
     } catch (err) {
-      if (err instanceof StripeApiError && err.status === 404) return false;
+      if (err instanceof StripeApiError && err.status === 404) return null;
       throw err;
     }
-    const chargeTag = this.ownerTag(charge?.metadata);
-    if (chargeTag) return (await this.tagsNameBusiness(businessId, [chargeTag]))[0];
     const pi = typeof charge?.payment_intent === 'string' ? charge.payment_intent : null;
-    if (!pi) return false;
-    if (!shared && (await this.ownRowNames(businessId, [pi]))) return true;
+    return { tag: this.ownerTag(charge?.metadata), pi };
+  }
+
+  /** The owner tag on the Checkout Session that took `pi` on the account `key` opens, or null. */
+  private async sessionTagOf(key: string, pi: string): Promise<StripeOwnerTag | null> {
     const sessions = (await this.stripeRequest(
       key,
       'GET',
       `/checkout/sessions?payment_intent=${encodeURIComponent(pi)}&limit=1`,
     )) as { data?: Array<{ metadata?: unknown; client_reference_id?: unknown }> } | null;
     const session = sessions?.data?.[0];
-    const sessionTag = session ? this.ownerTag(session.metadata, session.client_reference_id) : null;
-    return sessionTag ? (await this.tagsNameBusiness(businessId, [sessionTag]))[0] : false;
+    return session ? this.ownerTag(session.metadata, session.client_reference_id) : null;
   }
 
   /**

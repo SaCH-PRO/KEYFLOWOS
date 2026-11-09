@@ -1,5 +1,5 @@
 import { Test } from '@nestjs/testing';
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, INestApplication, ValidationPipe } from '@nestjs/common';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 
@@ -45,7 +45,7 @@ class WebhooksPrismaMock {
   payments: any[] = [
     { providerPaymentId: 'sess_1', invoiceId: 'inv_1', businessId: 'biz_1', provider: 'stripe', status: 'SUCCESSFUL', amount: 250, currency: 'USD' },
   ];
-  // R0-20b review (SEC-R020B-3): refusal rows the legacy route keeps.
+  // R0-20b review (SEC-R020B-3); R0-20d: the route keeps no refusal row itself (the door binding keeps it).
   webhookEvents: any[] = [];
   businessAccess: BusinessAccess[] = [{ businessId: 'biz_1', ownerId: 'user_1' }];
   client: any;
@@ -209,7 +209,8 @@ describe('WebhooksController', () => {
     // ledger door, which records the payment; the anonymous, tenantless
     // markInvoicePaid(invoiceId) of the deprecated route is gone.
     expect(handleStripeWebhook).toHaveBeenCalledTimes(1);
-    expect(handleStripeWebhook).toHaveBeenCalledWith(JSON.stringify({ invoiceId: 'inv_1' }), 'test_sig');
+    // R0-20d (W3-STRIPE-LEGACY-BINDING): the door binds the event and keeps a refusal under the legacy label.
+    expect(handleStripeWebhook).toHaveBeenCalledWith(JSON.stringify({ invoiceId: 'inv_1' }), 'test_sig', { refusedProvider: 'stripe-legacy-refused' });
     expect(markInvoicePaid).not.toHaveBeenCalled();
     expect(res.body).toMatchObject({ received: true, processed: 'checkout.session.completed', deprecated: true, use: '/payments/stripe/webhook' });
   });
@@ -234,24 +235,28 @@ describe('WebhooksController', () => {
     expect(emitPaymentReceived).toHaveBeenCalledTimes(1);
   });
 
-  it('R0-20b review (SEC-R020B-3): a refused payment event is kept as one webhook_events refusal row and never reaches the door', async () => {
+  it('R0-20b review (SEC-R020B-3), R0-20d: the route keeps no binding of its own: a payment event the door binding refuses (it keeps the refusal under the legacy label stripe-legacy-refused) is answered 400 with no payment.received, and the route reads no invoice and writes no row itself', async () => {
     const constructEvent = (controller as unknown as { stripe: { webhooks: { constructEvent: ReturnType<typeof vi.fn> } } }).stripe.webhooks.constructEvent;
     constructEvent.mockReturnValueOnce({
       id: 'evt_foreign',
       type: 'checkout.session.completed',
       data: { object: { id: 'sess_foreign', metadata: { invoiceId: 'inv_1', businessId: 'biz_other' }, amount_total: 25000, currency: 'usd' } },
     });
+    // The door's binding (PaymentsService.bindStripePaymentEvent) refuses it; the real refusal row is proven in
+    // payments-mark-paid.integration.test.ts (MP-06c, MP-06d, MP-06h).
+    handleStripeWebhook.mockRejectedValueOnce(new BadRequestException('Stripe event does not match the invoice'));
+    const invoiceLookups = prismaMock.client.invoice.findUnique.mock.calls.length;
     const res = await request(app.getHttpServer())
       .post('/webhooks/stripe')
       .set('stripe-signature', 'test_sig')
       .send({ invoiceId: 'inv_1' })
       .expect(400);
     expect(res.body.message).toMatch(/does not match the invoice/);
-    expect(handleStripeWebhook).not.toHaveBeenCalled();
+    expect(handleStripeWebhook).toHaveBeenCalledTimes(1);
+    expect(handleStripeWebhook).toHaveBeenCalledWith(JSON.stringify({ invoiceId: 'inv_1' }), 'test_sig', { refusedProvider: 'stripe-legacy-refused' });
     expect(emitPaymentReceived).not.toHaveBeenCalled();
-    expect(prismaMock.webhookEvents).toEqual([
-      { provider: 'stripe-legacy-refused', providerEventId: 'evt_foreign', eventType: 'checkout.session.completed:business', businessId: 'biz_1' },
-    ]);
+    expect(prismaMock.client.invoice.findUnique.mock.calls.length, 'the route binds nothing itself').toBe(invoiceLookups);
+    expect(prismaMock.webhookEvents).toEqual([]);
   });
 
   it('rejects authenticated CRUD when no user is on the request', async () => {

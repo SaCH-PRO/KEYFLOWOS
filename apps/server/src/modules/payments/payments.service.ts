@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional, forwardRef } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException, Optional, forwardRef } from '@nestjs/common';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
@@ -93,6 +93,16 @@ const STRIPE_PAYMENT_EVENTS = new Set([
  * its event type. It is not the door's dedupe claim (provider 'stripe').
  */
 const STRIPE_REFUSED_PROVIDER = 'stripe-refused';
+/**
+ * R0-20d (W3-STRIPE-LEGACY-BINDING; R0-20b review SEC-R020B-3): the label the
+ * deprecated POST /webhooks/stripe keeps its refused payment events under.
+ * That route has no binding of its own any more: it hands its verified event
+ * to handleStripeWebhook with this label, so the door's binding is the only
+ * one and each endpoint still keeps its own refusal row for an event.
+ */
+export const STRIPE_LEGACY_REFUSED_PROVIDER = 'stripe-legacy-refused';
+/** R0-20d: the webhook_events provider a refused Stripe payment event is kept under, by endpoint. */
+export type StripeRefusedProvider = typeof STRIPE_REFUSED_PROVIDER | typeof STRIPE_LEGACY_REFUSED_PROVIDER;
 /** R0-20c: the fields of a Stripe session, charge or payment intent the door's binding reads. */
 type StripePaymentObject = {
   metadata?: Record<string, unknown> | null;
@@ -117,6 +127,20 @@ function stripeSessionTookMoney(obj: { payment_status?: unknown } | null | undef
   return obj?.payment_status === undefined || obj.payment_status === 'paid';
 }
 
+/**
+ * W3-VOID-PROVIDER-RACE (VN-08; the D-76 `refused:<reason>` mark): the event
+ * type a provider delivery's webhook_events row is kept under when its
+ * payment was not recorded because the invoice is VOID.
+ */
+const INVOICE_VOID_REFUSAL = 'refused:invoice_void';
+
+/**
+ * W3-VOID-PROVIDER-RACE review CR-VPR-1: createRefundWithPostingByInvoice's
+ * answer when it recorded nothing because the invoice is VOID and holds no
+ * payment the refund returns (its capture was refused, VN-08).
+ */
+const VOID_INVOICE_NOTHING_TO_REFUND = 'void_invoice_nothing_to_refund' as const;
+
 @Injectable()
 export class PaymentsService {
   private readonly logger = new Logger(PaymentsService.name);
@@ -138,9 +162,24 @@ export class PaymentsService {
    * the Payment row and posts the deposit-side ledger entries together;
    * returns the created row so callers can keep their existing logging.
    * Idempotency on (Payment, id, payment_recorded) means replay is safe.
+   *
+   * W3-VOID-PROVIDER-RACE (VN-08; review SEC-V82-1 / CR-B1-1): every provider
+   * settlement door (the Stripe charge / session webhook, the PayPal capture
+   * webhook, the WiPay callback, capturePaypalOrder) records here, so here the
+   * payment takes the invoice row lock (lockInvoice, the lock
+   * InvoiceWorkflowService.transition holds while a void decides) and reads the
+   * status under it. A void that holds the lock is waited for; a payment the
+   * lock finds the invoice VOID for is not written and null is returned (the
+   * caller keeps the event refused and tells the owner: refuseVoidInvoicePayment,
+   * the D-76 pattern). A void that comes after waits for this commit and then
+   * finds the money received (D-14: refund first). The insert's own foreign-key
+   * check (FOR KEY SHARE) was never blocked by the void's FOR NO KEY UPDATE.
    */
   private async createPaymentWithPosting(data: Prisma.PaymentUncheckedCreateInput) {
     return this.prisma.client.$transaction(async (tx) => {
+      await PaymentsService.lockInvoice(tx as unknown as Prisma.TransactionClient, data.invoiceId);
+      const invoice = await tx.invoice.findUnique({ where: { id: data.invoiceId }, select: { status: true } });
+      if (invoice?.status === 'VOID') return null;
       const created = await tx.payment.create({ data });
       if (created.status === 'SUCCESSFUL') {
         await this.revenuePosting.onPaymentRecorded(created.id, {
@@ -149,6 +188,133 @@ export class PaymentsService {
       }
       return created;
     });
+  }
+
+  /**
+   * W3-VOID-PROVIDER-RACE (VN-08), the pattern owner ruling D-76 set for a
+   * WiPay success the invoice cannot take: a provider reported a successful
+   * payment for an invoice that is VOID (voided before the payment arrived, or
+   * while the door waited on its lock). Nothing is recorded as money on it: no
+   * Payment row, no posting, no reconcile, no payment-received event. The
+   * delivery's webhook_events row (the claim its door made: Stripe's or
+   * PayPal's event id, WiPay's transaction id; capturePaypalOrder, which has
+   * none, keeps one under its capture id) is kept, marked
+   * `refused:invoice_void` with the invoice's business, so every redelivery
+   * is a no-op (keepInvoiceVoidRefusal: never another business's row, review
+   * SEC-VN08-1); and the business is told once per payment (a
+   * 'payment.refused' notification) to refund it or record it by hand. Best
+   * effort: a failure here is logged and the refusal stands.
+   */
+  private async refuseVoidInvoicePayment(input: {
+    provider: 'stripe' | 'paypal' | 'wipay';
+    providerPaymentId: string;
+    /**
+     * The webhook_events id this delivery's own dedupe claim wrote
+     * (assertNewProviderEvent returned true for it); absent when the delivery
+     * claimed none, and the refusal is then kept under the payment's id.
+     */
+    claimedEventId?: string;
+    invoiceId: string;
+    businessId: string;
+    amount: number;
+    currency: string;
+  }): Promise<void> {
+    const label = { stripe: 'Stripe', paypal: 'PayPal', wipay: 'WiPay' }[input.provider];
+    const currency = normalizeCurrency(input.currency) || input.currency;
+    this.logger.error(
+      `${label} payment ${input.providerPaymentId} for invoice ${input.invoiceId} not recorded: the invoice is VOID (VN-08, D-76 pattern)`,
+    );
+    await this.keepInvoiceVoidRefusal({
+      provider: input.provider,
+      claimedEventId: input.claimedEventId,
+      key: input.providerPaymentId,
+      businessId: input.businessId,
+      label,
+    });
+    try {
+      // Told once per payment: capturePaypalOrder and PayPal's own capture webhook refuse the same capture.
+      const told = await this.prisma.client.notification.findFirst({
+        where: {
+          businessId: input.businessId,
+          type: 'payment.refused',
+          AND: [
+            { data: { path: ['provider'], equals: input.provider } },
+            { data: { path: ['transactionId'], equals: input.providerPaymentId } },
+          ],
+        },
+        select: { id: true },
+      });
+      if (told) return;
+      await this.prisma.client.notification.create({
+        data: {
+          businessId: input.businessId,
+          type: 'payment.refused',
+          title: `${label} payment not recorded`,
+          body:
+            `${label} reported a successful payment (${input.providerPaymentId}) of ${currency} ${Number(input.amount).toFixed(2)} ` +
+            `for invoice ${input.invoiceId}, which is void, so it was not recorded. Check the payment in your ${label} ` +
+            'account and refund it or record it by hand.',
+          data: {
+            provider: input.provider,
+            transactionId: input.providerPaymentId,
+            payableType: 'invoice',
+            payableId: input.invoiceId,
+            currency,
+            amount: Number(input.amount),
+            reason: 'invoice_void',
+          },
+        },
+      });
+    } catch (e: unknown) {
+      this.logger.error(
+        `Could not notify business ${input.businessId} of refused ${label} payment ${input.providerPaymentId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  /**
+   * W3-VOID-PROVIDER-RACE review SEC-VN08-1 (owner ruling D-76: a refusal is
+   * kept insert-only, as refuseWipayCurrency and refuseStripePaymentEvent
+   * keep theirs): the webhook_events row a VOID-invoice refusal is kept as,
+   * never another business's. `claimedEventId` is the row this delivery's own
+   * dedupe claim wrote: it is re-marked `refused:invoice_void` with the
+   * invoice's business, and only while it names no business or that one. A
+   * delivery that claimed nothing (the WiPay refusal before the claim, a
+   * Stripe or PayPal event with no event id, capturePaypalOrder) only inserts
+   * its row under `key`. A row already there under that key (this payment's
+   * earlier refusal, or another business's delivery: the key is the caller's
+   * choice, a WiPay transaction id hashed with the business's own key or a
+   * Stripe object id signed with its own secret) is left exactly as it was.
+   * Best effort: a failure is logged and the refusal stands.
+   */
+  private async keepInvoiceVoidRefusal(input: {
+    provider: 'stripe' | 'paypal' | 'wipay';
+    claimedEventId?: string;
+    key: string;
+    businessId: string;
+    label: string;
+  }): Promise<void> {
+    const mark = { eventType: INVOICE_VOID_REFUSAL, businessId: input.businessId };
+    const providerEventId = input.claimedEventId ?? input.key;
+    try {
+      if (input.claimedEventId) {
+        const kept = await this.prisma.client.webhookEvent.updateMany({
+          where: {
+            provider: input.provider,
+            providerEventId: input.claimedEventId,
+            OR: [{ businessId: null }, { businessId: input.businessId }],
+          },
+          data: mark,
+        });
+        if (kept.count > 0) return;
+      }
+      await this.prisma.client.webhookEvent.create({ data: { provider: input.provider, providerEventId, ...mark } });
+    } catch (e: unknown) {
+      // P2002: a row is already kept under this key; whichever business holds it, it is not rewritten.
+      if ((e as { code?: string } | null)?.code !== 'P2002') {
+        this.logger.error(`Refusal of ${input.label} ${providerEventId} could not be kept: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
   }
 
   /**
@@ -274,6 +440,14 @@ export class PaymentsService {
    * invoice has none), and the refund row links to it (V1-29c: reference =
    * its providerPaymentId) and posts the amount refunded in the same commit,
    * never more than what is left of it (review SEC-V29C-2).
+   *
+   * W3-VOID-PROVIDER-RACE review CR-VPR-1 (the D-76 pattern VN-08 follows,
+   * D-14): a VOID invoice holding no SUCCESSFUL payment took none this refund
+   * can return (its capture was refused, VN-08, and the owner refunded it as
+   * the refusal notice asks). Read under the lock, nothing is written and
+   * VOID_INVOICE_NOTHING_TO_REFUND is answered, so the caller keeps the event
+   * refused; recording the full amount with no original would leave the VOID
+   * invoice at net -amount with a ledger that reads 0.
    */
   private async createRefundWithPostingByInvoice(
     invoice: { invoiceId: string; businessId: string },
@@ -301,6 +475,11 @@ export class PaymentsService {
           orderBy: { createdAt: 'desc' },
           select,
         }));
+      if (!original) {
+        // CR-VPR-1: nothing received to return on a VOID invoice; no row, no posting.
+        const current = await tx.invoice.findUnique({ where: { id: invoice.invoiceId }, select: { status: true } });
+        if (current?.status === 'VOID') return VOID_INVOICE_NOTHING_TO_REFUND;
+      }
       const amount = original
         ? this.cappedAtWhatIsLeft(requested, await PaymentsService.leftToRefundCents(txClient, original, []), original, refund)
         : requested;
@@ -787,6 +966,8 @@ export class PaymentsService {
   async handleStripeWebhook(
     rawPayload: string,
     signatureHeader: string | undefined,
+    /** R0-20d: the legacy POST /webhooks/stripe names its own refusal label; the door's endpoint keeps the default. */
+    opts: { refusedProvider?: StripeRefusedProvider } = {},
   ): Promise<{ ok: true; received?: boolean; processed?: string }> {
     if (!rawPayload) throw new BadRequestException('Missing Stripe webhook payload');
 
@@ -842,8 +1023,11 @@ export class PaymentsService {
     // R0-20c-STRIPE-DOOR-BINDING (review SEC-R020B-2): a payment event is bound
     // to the invoice or storefront order it names before the dedupe claim, so a
     // refused one writes nothing (no payment, no posting, no claim). The legacy
-    // POST /webhooks/stripe hands its verified events here too.
-    if (STRIPE_PAYMENT_EVENTS.has(eventType)) await this.bindStripePaymentEvent(event, signedForBusinessId);
+    // POST /webhooks/stripe hands its verified events here too, and since
+    // R0-20d this is its only binding (its refusals keep its own label).
+    if (STRIPE_PAYMENT_EVENTS.has(eventType)) {
+      await this.bindStripePaymentEvent(event, signedForBusinessId, opts.refusedProvider ?? STRIPE_REFUSED_PROVIDER);
+    }
 
     // Provider-event-id idempotency: if Stripe re-delivers this `evt_...`,
     // ack it as received but skip all side-effects. Belt-and-suspenders with
@@ -913,12 +1097,16 @@ export class PaymentsService {
    * metadata.businessId and carry exactly O's total in O's currency.
    *
    * Anything else is refused (400) before the dedupe claim, so nothing is
-   * written, and the refusal is kept as one webhook_events row. An id that is
-   * neither is left to the dispatch, which records nothing for it.
+   * written, and the refusal is kept as one webhook_events row under
+   * `refusedProvider` (R0-20d: stripe-legacy-refused when the legacy POST
+   * /webhooks/stripe handed the event over; this is that route's only
+   * binding). An id that is neither is left to the dispatch, which records
+   * nothing for it.
    */
   private async bindStripePaymentEvent(
     event: { id?: string; type?: string; data?: { object?: unknown } },
     signedForBusinessId: string | null,
+    refusedProvider: StripeRefusedProvider,
   ): Promise<void> {
     const obj = (event.data?.object ?? {}) as StripePaymentObject;
     const id: unknown = obj.metadata?.invoiceId || obj.client_reference_id || obj.metadata?.invoice_id;
@@ -934,8 +1122,8 @@ export class PaymentsService {
     });
     if (invoice) {
       // R0-20c review (SEC-R020C-1): a platform-signed event must name the
-      // invoice's business, as the legacy route demands of the same verified
-      // event (webhooks.controller.ts bindLegacyStripeEvent). Every session
+      // invoice's business (the legacy route's copy of this binding demanded
+      // it too; R0-20d removed that copy, both endpoints bind here). Every session
       // KeyFlow makes names it (createStripeCheckout, createStorePayment, a
       // Payment Link's metadata), and Stripe does not copy a session's
       // metadata onto its PaymentIntent or Charge, so one naming no business
@@ -951,7 +1139,7 @@ export class PaymentsService {
           : !positiveAmount
             ? 'amount'
             : null;
-      if (reason) await this.refuseStripePaymentEvent(event, { kind: 'invoice', id, businessId: invoice.businessId }, reason);
+      if (reason) await this.refuseStripePaymentEvent(event, { kind: 'invoice', id, businessId: invoice.businessId }, reason, refusedProvider);
       return;
     }
 
@@ -970,21 +1158,22 @@ export class PaymentsService {
             : !positiveAmount || amountMinor !== Math.round(Number(order.total) * 100)
               ? 'amount'
               : null;
-    if (reason) await this.refuseStripePaymentEvent(event, { kind: 'order', id, businessId: order.businessId }, reason);
+    if (reason) await this.refuseStripePaymentEvent(event, { kind: 'order', id, businessId: order.businessId }, reason, refusedProvider);
   }
 
-  /** R0-20c: keeps the refusal (one webhook_events row per event id), then refuses the delivery: 400, nothing recorded. */
+  /** R0-20c: keeps the refusal (one webhook_events row per event id and label), then refuses the delivery: 400, nothing recorded. */
   private async refuseStripePaymentEvent(
     event: { id?: string; type?: string },
     target: { kind: 'invoice' | 'order'; id: string; businessId: string },
     reason: string,
+    refusedProvider: StripeRefusedProvider,
   ): Promise<never> {
     this.logger.warn(`Stripe ${event.type} ${event.id ?? '(no event id)'} refused: its ${reason} does not match ${target.kind} ${target.id}`);
     if (event.id) {
       try {
         await this.prisma.client.webhookEvent.create({
           data: {
-            provider: STRIPE_REFUSED_PROVIDER,
+            provider: refusedProvider,
             providerEventId: event.id,
             eventType: `${event.type}:${reason}`,
             businessId: target.businessId,
@@ -1070,16 +1259,31 @@ export class PaymentsService {
       (typeof obj.latest_charge === 'string' ? obj.latest_charge : null) ||
       null;
 
-    await this.createPaymentWithPosting({
+    const recordedAmount = amount > 0 ? amount : expectedAmount;
+    const created = await this.createPaymentWithPosting({
       provider: 'stripe',
       providerPaymentId,
-      amount: amount > 0 ? amount : expectedAmount,
+      amount: recordedAmount,
       currency,
       status: 'SUCCESSFUL',
       invoiceId,
       businessId: invoice.businessId,
       reference,
     });
+    if (!created) {
+      // VN-08 (D-76 pattern): the invoice is VOID under its lock; the delivery is acked, its event kept refused.
+      await this.refuseVoidInvoicePayment({
+        provider: 'stripe',
+        providerPaymentId,
+        // SEC-VN08-1: event.id is this delivery's claim when Stripe sent one; with none, nothing was claimed.
+        claimedEventId: eventId,
+        invoiceId,
+        businessId: invoice.businessId,
+        amount: recordedAmount,
+        currency,
+      });
+      return;
+    }
     // Workflow recomputes the invoice balance from ALL payment rows and
     // decides PARTIALLY_PAID vs PAID. Single source of truth for state.
     await this.invoiceWorkflow.reconcileFromPayments(invoiceId).catch((e) => {
@@ -1288,18 +1492,30 @@ export class PaymentsService {
    *
    * Review SEC-A3-1/2, CR-A3-2: such an event is about a charge on the
    * platform account, so only a business that takes Stripe payments there (no
-   * Stripe key of its own, onPlatformAccount) is asked. For a business with
-   * its own key, isOwnCharge reads that business's own account with that key
-   * and counts that business's own rows (which a delivery it signs itself
-   * writes) as proof: its answer, or its failure, is never the platform's
-   * record, and asking it would let a tenant fail every delivery of another
-   * tenant's refund (an invalid key) or claim or block it (a self-signed row
-   * naming the charge). A business that saves a key of its own while it is
-   * being asked is treated the same: its answer does not count and its failed
-   * read does not fail the delivery. Residual (review CR-A3-1): a payment a
-   * business took on the platform account before it saved its own key is not
-   * bound either; the refund is refused and logged, as StripeConnector has no
-   * platform-account read for such a business.
+   * Stripe key of its own, onPlatformAccount) is asked through isOwnCharge.
+   * For a business with its own key, isOwnCharge reads that business's own
+   * account with that key and counts that business's own rows (which a
+   * delivery it signs itself writes) as proof: its answer, or its failure, is
+   * never the platform's record, and asking it would let a tenant fail every
+   * delivery of another tenant's refund (an invalid key) or claim or block it
+   * (a self-signed row naming the charge). A business that saves a key of its
+   * own while it is being asked is treated the same: its answer does not count
+   * and its failed read does not fail the delivery.
+   *
+   * W3-PLATFORM-CHARGE-BIND (review CR-A3-1, owner ruling D-56; review
+   * repairs SEC-PCB-1, PCB-CR-1): a business that holds a key of its own may
+   * still own a charge on the platform account: one taken there for it before
+   * it saved that key, whenever its payment row was recorded (a Checkout
+   * Session opened before the save can be paid, and its completion delivered
+   * or redelivered, after it). So every such business with a matching payment
+   * is answered by the platform account's own record
+   * (StripeConnector.platformChargeOwners: read once per charge with the
+   * deployment's key, the platform's tag only, no payment row as evidence, no
+   * business's own key), and that answer counts as the answer of a business on
+   * the platform account does. Whether the record is read for such a business
+   * depends on nothing it can move (when its business row was last written,
+   * when its payment row was recorded). A failed read fails the delivery
+   * (review PCB-CR-2): its claim is released and Stripe delivers it again.
    */
   private async platformRefundOriginal(
     eventType: string,
@@ -1333,15 +1549,26 @@ export class PaymentsService {
       }
       if (own) owners.push(businessId);
     }
+    // W3-PLATFORM-CHARGE-BIND (CR-A3-1, D-56; review SEC-PCB-1, PCB-CR-1): every
+    // business holding a key of its own is answered by the platform account's
+    // own record, read once per charge for all of them, whenever its payment was
+    // recorded. A failed read is not caught: the delivery fails (PCB-CR-2).
+    const ownKey = businesses.filter((b) => !onPlatform.has(b));
+    const unread = ownKey.filter((b) => !owns.has(`${b} ${charge} platform`));
+    if (unread.length > 0) {
+      const named = await connector.platformChargeOwners(charge, unread);
+      for (const b of unread) owns.set(`${b} ${charge} platform`, named.has(b));
+    }
+    const platformOwners = ownKey.filter((b) => owns.get(`${b} ${charge} platform`) === true);
     // An owner that saved a key of its own while it was asked answered from its own account.
     const stillOnPlatform = owners.length > 0 ? await this.onPlatformAccount(owners) : new Set<string>();
-    const confirmed = owners.filter((b) => stillOnPlatform.has(b));
+    const confirmed = [...owners.filter((b) => stillOnPlatform.has(b)), ...platformOwners];
     if (confirmed.length !== 1) {
-      const notAsked = businesses.filter((b) => !onPlatform.has(b) || (owners.includes(b) && !stillOnPlatform.has(b)));
+      const moved = owners.filter((b) => !stillOnPlatform.has(b));
       this.logger.warn(
         `Stripe ${eventType} for charge ${charge} (pi=${paymentIntent ?? 'none'}) matches payments of ${businesses.join(', ')}, ` +
           `but the platform account's record of the charge names ${confirmed.length ? `more than one of them (${confirmed.join(', ')})` : 'none of them'}` +
-          `${notAsked.length ? ` (not asked, as they hold a Stripe key of their own: ${notAsked.join(', ')})` : ''}; ` +
+          `${moved.length ? ` (not counted, as they saved a Stripe key of their own while they were asked: ${moved.join(', ')})` : ''}; ` +
           'refusing to record it',
       );
       return null;
@@ -1501,7 +1728,7 @@ export class PaymentsService {
     return this.underProviderEventClaim<WebhookAck>('paypal', event.id, async () => {
       switch (eventType) {
         case 'PAYMENT.CAPTURE.COMPLETED':
-          await this.processPaypalCaptureCompleted(resource);
+          await this.processPaypalCaptureCompleted(resource, event.id);
           return { ok: true, received: true, processed: eventType };
         case 'CHECKOUT.ORDER.COMPLETED':
           // For ORDER.COMPLETED, resource.id is the *order* id, not the
@@ -1509,11 +1736,11 @@ export class PaymentsService {
           // Persist a Payment row per capture so refund linkage (which keys on
           // capture id) keeps working, and idempotency stays intact even if
           // PAYMENT.CAPTURE.COMPLETED also arrives for the same capture.
-          await this.processPaypalOrderCompleted(resource);
+          await this.processPaypalOrderCompleted(resource, event.id);
           return { ok: true, received: true, processed: eventType };
         case 'PAYMENT.CAPTURE.REFUNDED':
         case 'PAYMENT.CAPTURE.REVERSED':
-          await this.processPaypalRefund(resource);
+          await this.processPaypalRefund(resource, event.id);
           return { ok: true, received: true, processed: eventType };
         default:
           return { ok: true, received: true };
@@ -1550,7 +1777,7 @@ export class PaymentsService {
    * resource.id is the order id (not a capture id), so persisting it
    * directly would create a row that refund events cannot link to.
    */
-  private async processPaypalOrderCompleted(resource: any): Promise<void> {
+  private async processPaypalOrderCompleted(resource: any, eventId?: string): Promise<void> {
     const orderId: string | undefined = resource?.id;
     const purchaseUnits: any[] = Array.isArray(resource?.purchase_units) ? resource.purchase_units : [];
     const captures: any[] = [];
@@ -1574,7 +1801,7 @@ export class PaymentsService {
       return;
     }
     for (const cap of captures) {
-      await this.processPaypalCaptureCompleted(cap);
+      await this.processPaypalCaptureCompleted(cap, eventId);
     }
   }
 
@@ -1608,7 +1835,7 @@ export class PaymentsService {
     return null;
   }
 
-  private async processPaypalCaptureCompleted(resource: any): Promise<void> {
+  private async processPaypalCaptureCompleted(resource: any, eventId?: string): Promise<void> {
     const captureId: string | undefined = resource?.id;
     if (!captureId) {
       this.logger.warn('PayPal capture completed event missing capture id');
@@ -1652,7 +1879,7 @@ export class PaymentsService {
     const amount = Number(resource?.amount?.value ?? invoice.total);
     const currency = (resource?.amount?.currency_code || invoice.currency || 'USD').toUpperCase();
 
-    await this.createPaymentWithPosting({
+    const created = await this.createPaymentWithPosting({
       provider: 'paypal',
       providerPaymentId: captureId,
       amount,
@@ -1662,6 +1889,20 @@ export class PaymentsService {
       businessId: invoice.businessId,
       reference: resource?.supplementary_data?.related_ids?.order_id ?? null,
     });
+    if (!created) {
+      // VN-08 (D-76 pattern): the invoice is VOID under its lock; the delivery is acked, its event kept refused.
+      await this.refuseVoidInvoicePayment({
+        provider: 'paypal',
+        providerPaymentId: captureId,
+        // SEC-VN08-1: event.id is this delivery's claim when PayPal sent one; with none, nothing was claimed.
+        claimedEventId: eventId,
+        invoiceId: invoice.id,
+        businessId: invoice.businessId,
+        amount,
+        currency,
+      });
+      return;
+    }
 
     await this.invoiceWorkflow.reconcileFromPayments(invoice.id).catch((e) => {
       this.logger.warn(`PayPal reconcile failed for invoice ${invoice.id}: ${e instanceof Error ? e.message : e}`);
@@ -1678,7 +1919,8 @@ export class PaymentsService {
     }).catch((e) => this.logger.warn(`PayPal connector event emission failed: ${e.message}`));
   }
 
-  private async processPaypalRefund(resource: any): Promise<void> {
+  /** `eventId`: the webhook_events id this delivery claimed (absent when PayPal sent none). */
+  private async processPaypalRefund(resource: any, eventId?: string): Promise<void> {
     const refundId: string | undefined = resource?.id;
     if (!refundId) {
       this.logger.warn('PayPal refund event missing refund id');
@@ -1731,6 +1973,20 @@ export class PaymentsService {
       ? this.createRefundWithPosting(captured, refund, async () => amount)
       : this.createRefundWithPostingByInvoice(target, refund, amount)
     ).catch(this.refundAlreadyRecorded('PayPal', refundId));
+    if (persisted === VOID_INVOICE_NOTHING_TO_REFUND) {
+      // W3-VOID-PROVIDER-RACE review CR-VPR-1 (D-76 pattern): the refund of a capture VN-08 refused; kept refused as that capture was.
+      this.logger.warn(
+        `PayPal refund ${refundId} for invoice ${target.invoiceId} not recorded: the invoice is VOID and holds no payment it returns (its capture was refused, VN-08)`,
+      );
+      await this.keepInvoiceVoidRefusal({
+        provider: 'paypal',
+        claimedEventId: eventId,
+        key: refundId,
+        businessId: target.businessId,
+        label: 'PayPal',
+      });
+      return;
+    }
     if (persisted) {
       await this.invoiceWorkflow.reconcileFromPayments(target.invoiceId).catch((e) => {
         this.logger.warn(`PayPal refund reconcile failed for invoice ${target.invoiceId}: ${e instanceof Error ? e.message : e}`);
@@ -2091,6 +2347,16 @@ export class PaymentsService {
       });
     }
 
+    // W3-VOID-PROVIDER-RACE (VN-08, the D-76 pattern): a verified success for a
+    // VOID invoice is not recorded as money on it. Refused before the claim (as
+    // D-76's currency refusal), so a repeat callback is refused the same way
+    // rather than answered 'Duplicate callback ignored'; a transaction already
+    // recorded before the void is left to the duplicate answer below.
+    // Review SEC-VN08-1: nothing is claimed yet, so the refusal only inserts its row (D-76).
+    if (invoice?.status === 'VOID' && !(await this.paymentRecorded(transaction_id))) {
+      return this.refuseWipayForVoidInvoice(invoice, transaction_id!, requestedTotal, false);
+    }
+
     // Provider-event-id idempotency. WiPay's transaction_id (verified above)
     // identifies a callback delivery; re-deliveries become no-ops.
     const wipayEventId = transaction_id!;
@@ -2135,7 +2401,7 @@ export class PaymentsService {
 
       if (!existingPayment) {
         // V1-05: the requested total the verified hash binds, never the callback's `total`.
-        await this.createPaymentWithPosting({
+        const created = await this.createPaymentWithPosting({
           provider: 'wipay',
           providerPaymentId: wipayEventId,
           amount: requestedTotal,
@@ -2144,6 +2410,8 @@ export class PaymentsService {
           invoiceId: order_id,
           businessId: invoice!.businessId,
         });
+        // VN-08: voided while this callback waited on the invoice lock; its claim is kept, marked refused.
+        if (!created) return this.refuseWipayForVoidInvoice(invoice!, wipayEventId, requestedTotal, true);
 
         await this.invoiceWorkflow.reconcileFromPayments(order_id).catch((e) => {
           this.logger.warn(`WiPay reconcile failed for invoice ${order_id}: ${e instanceof Error ? e.message : e}`);
@@ -2227,6 +2495,32 @@ export class PaymentsService {
       invoiceId: input.payableId,
       message: `WiPay takes ${PaymentsService.WIPAY_CURRENCY} only: this ${input.payableType} is in ${currency}, so the payment was not recorded`,
     };
+  }
+
+  /**
+   * W3-VOID-PROVIDER-RACE (VN-08, the D-76 pattern): a verified WiPay success
+   * for a VOID invoice records no money; its transaction is kept refused, the
+   * owner is told once (refuseVoidInvoicePayment) and the payer is answered
+   * { success: false }. `claimed`: this callback's own claim on the
+   * transaction id is written (assertNewProviderEvent); before it, the
+   * refusal only inserts its row (review SEC-VN08-1, D-76).
+   */
+  private async refuseWipayForVoidInvoice(
+    invoice: { id: string; businessId: string; currency: string },
+    transactionId: string,
+    total: number,
+    claimed: boolean,
+  ): Promise<{ success: boolean; invoiceId?: string; message: string }> {
+    await this.refuseVoidInvoicePayment({
+      provider: 'wipay',
+      providerPaymentId: transactionId,
+      claimedEventId: claimed ? transactionId : undefined,
+      invoiceId: invoice.id,
+      businessId: invoice.businessId,
+      amount: total,
+      currency: invoice.currency,
+    });
+    return { success: false, invoiceId: invoice.id, message: 'This invoice is void, so the payment was not recorded' };
   }
 
   async getPaypalClientToken(): Promise<{ clientToken: string }> {
@@ -2561,10 +2855,11 @@ export class PaymentsService {
       // abort (P2028 behind a lock, P2034 a deadlock) is retried; when the
       // retries are spent the capture is left to that delivery, whose claim a
       // failure releases, so PayPal's redelivery records it (V1-15c).
-      let recorded: 'here' | 'elsewhere' | 'not' = 'not';
+      // W3-VOID-PROVIDER-RACE (VN-08): 'refused' when the invoice was voided while PayPal captured.
+      let recorded: 'here' | 'elsewhere' | 'refused' | 'not' = 'not';
       for (let attempt = 1; recorded === 'not'; attempt += 1) {
         try {
-          await this.createPaymentWithPosting({
+          const created = await this.createPaymentWithPosting({
             provider: 'paypal',
             providerPaymentId: captureId,
             amount: invoice.total,
@@ -2573,7 +2868,7 @@ export class PaymentsService {
             invoiceId,
             businessId: invoice.businessId,
           });
-          recorded = 'here';
+          recorded = created ? 'here' : 'refused';
         } catch (e: unknown) {
           if (await this.paymentRecorded(captureId).catch(() => false)) {
             recorded = 'elsewhere';
@@ -2587,6 +2882,21 @@ export class PaymentsService {
           );
           break;
         }
+      }
+
+      if (recorded === 'refused') {
+        // VN-08 (D-76 pattern): PayPal took the money but the invoice is VOID; nothing is recorded on it.
+        await this.refuseVoidInvoicePayment({
+          provider: 'paypal',
+          providerPaymentId: captureId,
+          invoiceId,
+          businessId: invoice.businessId,
+          amount: Number(invoice.total),
+          currency: invoice.currency,
+        });
+        throw new ConflictException(
+          'This invoice was voided while PayPal took the payment, so it was not recorded; the business has been told to refund it or record it by hand',
+        );
       }
 
       if (recorded !== 'not') {
