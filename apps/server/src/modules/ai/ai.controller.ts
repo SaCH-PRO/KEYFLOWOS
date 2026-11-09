@@ -50,6 +50,8 @@ import { ProactiveSuggestionService } from './proactive-suggestion.service';
 import { WorkflowTemplateService } from './workflow-template.service';
 import { KeyAgentConfigService } from './key-agent-config.service';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
+import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
+import { contactWhereBase } from '../crm/crm.helpers';
 
 
 const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
@@ -1686,6 +1688,12 @@ export class AiController {
    * member's payload shapes is theirs: it records the requesting member as the journey plan's member
    * (D-73: a trigger records its creator and the plans it fires run as that member), so its steps run
    * under that member's authority, checked at run time (planStepRunAuthority).
+   *
+   * W5-JOURNEY-ROUTES review (SEC-W5JR-1; owner rulings D-64, D-37, D-71, D-73): recording the member
+   * makes them the proposer of a plan whose step arguments their payload wrote, and a journey with a
+   * tier-3 step stays an open plan whose stored steps POST actions/.../execute runs for its proposer.
+   * So a payload may name only contacts the member may open (assertJourneyContactsVisible): one they
+   * may not is refused 404, as D-64 refuses it to invoice and quote create, before any plan exists.
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/journeys/:key/trigger')
@@ -1700,7 +1708,39 @@ export class AiController {
     const { getJourneyTemplate } = await import('./journey-templates');
     const template = getJourneyTemplate(key);
     if (!template) throw new BadRequestException(`Unknown journey template: ${key}`);
-    return this.journeyOrchestrator.executeJourney(businessId, template, body.payload ?? {}, { memberId: member.id });
+    const payload = body?.payload ?? {};
+    await this.assertJourneyContactsVisible(businessId, member.id, payload);
+    return this.journeyOrchestrator.executeJourney(businessId, template, payload, { memberId: member.id });
+  }
+
+  /**
+   * W5-JOURNEY-ROUTES review (SEC-W5JR-1; owner rulings D-64, D-37, D-71): every contact a journey
+   * payload names (`contactId`, and the value of any other top-level key that names contacts:
+   * `targetContactId`, `contactIds`, ...) must be one `memberId` may open by the rule GET
+   * contacts/:contactId applies (the tenant predicate, deletedAt null and the member's CRM visibility
+   * clause: resolveCrmAccess + visibilityClause), so a STAFF member's own-contact rules and another
+   * member's PRIVATE contacts hold for the steps the payload shapes (D-71). A hidden contact answers
+   * exactly as an absent one, 404 'Contact not found' (D-64); a value that is not a contact id (not a
+   * string) is refused 400, since the templates copy it into the steps' arguments as written.
+   */
+  private async assertJourneyContactsVisible(businessId: string, memberId: string, payload: unknown): Promise<void> {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return;
+    const named = new Set<string>();
+    for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+      if (!/contact_?ids?$/i.test(key) || value === undefined || value === null) continue;
+      for (const id of Array.isArray(value) ? value : [value]) {
+        if (typeof id !== 'string') throw new BadRequestException(`${key} must name contacts by their id`);
+        named.add(id);
+      }
+    }
+    if (named.size === 0) return;
+    const access = await resolveCrmAccess(this.prisma, businessId, memberId);
+    const clause = visibilityClause(access, memberId);
+    const open = await this.prisma.client.contact.findMany({
+      where: { ...contactWhereBase(businessId), id: { in: [...named] }, ...(clause ? { AND: [clause as Prisma.ContactWhereInput] } : {}) },
+      select: { id: true },
+    });
+    if (open.length !== named.size) throw new NotFoundException('Contact not found');
   }
 
   // ── Morning Briefing (Phase 7) ──────────────────────────────────────────

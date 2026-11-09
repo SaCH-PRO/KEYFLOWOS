@@ -158,6 +158,8 @@ const plannedFor: Array<{ id?: string; objective: string; rawInput?: string; use
 let logsApp: any;
 /** W5-JOURNEY-ROUTES: the real AiController (the journey routes) over this suite's journey orchestrator, started by its cases. */
 let journeysApp: any;
+/** W5-JOURNEY-ROUTES review (SEC-W5JR-1): the same routes over a journey orchestrator whose tiers are the tool registry's. */
+let journeysTieredApp: any;
 
 async function cleanup() {
   for (const sql of [
@@ -504,6 +506,7 @@ afterAll(async () => {
   if (app) await app.close();
   if (logsApp) await logsApp.close();
   if (journeysApp) await journeysApp.close();
+  if (journeysTieredApp) await journeysTieredApp.close();
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -1559,38 +1562,72 @@ describe('W4-PROPOSAL-PRINCIPAL review repairs (SEC-W4PP-1, CR-W4PP-1, SEC-W4PP-
  * over this suite's real JourneyOrchestratorService (its planner records the member it is asked to).
  */
 describe('W5-JOURNEY-ROUTES (D-73, D-74, D-93): the journey routes pass the viewer to the plan read rule and record the requesting member as the journey plan\'s member', () => {
-  /** A request to the journey routes of the real AiController as `actor` (`route` under ai/businesses/:businessId/). */
-  async function journeyRoute(actor: string, method: 'get' | 'post', route: string, body?: unknown) {
-    if (!journeysApp) {
-      const { Test } = await import('@nestjs/testing');
-      const { EventEmitter2 } = await import('@nestjs/event-emitter');
-      const { PrismaService } = await import('../src/core/prisma/prisma.service');
-      const { AuthGuard } = await import('../src/core/auth/auth.guard');
-      const { BusinessGuard } = await import('../src/core/auth/business.guard');
-      const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
-      const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
-      const { AiController } = await import('../src/modules/ai/ai.controller');
-      const { JourneyOrchestratorService } = await import('../src/modules/ai/journey-orchestrator.service');
-      const ref = await Test.createTestingModule({
-        controllers: [AiController],
-        providers: [
-          { provide: PrismaService, useValue: prisma },
-          AuthGuard,
-          BusinessGuard,
-          ModuleScopeGuard,
-          CrmRateLimitGuard,
-          { provide: JourneyOrchestratorService, useValue: journeys },
-          { provide: EventEmitter2, useValue: { emit: () => true } },
-        ],
-      })
-        .useMocker(() => ({}))
-        .compile();
-      journeysApp = ref.createNestApplication();
-      journeysApp.getHttpAdapter().getInstance().set('trust proxy', true);
-      journeysApp.use(attachTestUser);
-      await journeysApp.init();
-    }
-    const call = request(journeysApp.getHttpServer())[method](`/ai/businesses/${ID.biz}/${route}`)
+  /** The real AiController (its journey routes) over `orchestrator`, as a started app. */
+  async function journeyRoutesApp(orchestrator: unknown) {
+    const { Test } = await import('@nestjs/testing');
+    const { EventEmitter2 } = await import('@nestjs/event-emitter');
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { AuthGuard } = await import('../src/core/auth/auth.guard');
+    const { BusinessGuard } = await import('../src/core/auth/business.guard');
+    const { ModuleScopeGuard } = await import('../src/core/auth/module-scope.guard');
+    const { CrmRateLimitGuard } = await import('../src/modules/crm/guards/rate-limit.guard');
+    const { AiController } = await import('../src/modules/ai/ai.controller');
+    const { JourneyOrchestratorService } = await import('../src/modules/ai/journey-orchestrator.service');
+    const ref = await Test.createTestingModule({
+      controllers: [AiController],
+      providers: [
+        { provide: PrismaService, useValue: prisma },
+        AuthGuard,
+        BusinessGuard,
+        ModuleScopeGuard,
+        CrmRateLimitGuard,
+        { provide: JourneyOrchestratorService, useValue: orchestrator },
+        { provide: EventEmitter2, useValue: { emit: () => true } },
+      ],
+    })
+      .useMocker(() => ({}))
+      .compile();
+    const started = ref.createNestApplication();
+    started.getHttpAdapter().getInstance().set('trust proxy', true);
+    started.use(attachTestUser);
+    await started.init();
+    return started;
+  }
+
+  /**
+   * W5-JOURNEY-ROUTES review (SEC-W5JR-1): a real JourneyOrchestratorService whose tiers are the tool
+   * registry's (AiOversightService.getToolTier), so a journey with a tier-3 step stays an open (draft)
+   * plan whose stored steps POST actions/.../execute runs, with a planner that writes the plan row as
+   * this suite's does (status draft, the member it is handed, recorded in plannedFor).
+   */
+  async function tieredJourneys() {
+    const { JourneyOrchestratorService } = await import('../src/modules/ai/journey-orchestrator.service');
+    const { AiOversightService } = await import('../src/modules/ai/ai-oversight.service');
+    let seq = 0;
+    const planner = {
+      createPlan: async (businessId: string, intent: { objective: string; rawInput?: string; scope?: string[] }, userId?: string) => {
+        seq += 1;
+        const id = `${P}w5jr_tiered_${seq}`;
+        plannedFor.push({ id, objective: intent.objective, rawInput: intent.rawInput, userId });
+        return db.aiPlan.create({
+          data: { id, businessId, userId: userId ?? null, objective: intent.objective, rawInput: intent.rawInput ?? null, scope: intent.scope ?? [], status: 'draft' },
+        });
+      },
+    };
+    const registryTiers = { getToolTier: (toolName: string) => (AiOversightService.prototype as any).getToolTier.call({}, toolName) };
+    return new JourneyOrchestratorService(prisma, { emit: () => true } as any, planner as any, registryTiers as any, {} as any, {} as any);
+  }
+
+  /**
+   * A request to the journey routes of the real AiController as `actor` (`route` under
+   * ai/businesses/:businessId/), over this suite's journey orchestrator or (`tiers: 'registry'`) one
+   * whose tiers are the tool registry's.
+   */
+  async function journeyRoute(actor: string, method: 'get' | 'post', route: string, body?: unknown, tiers: 'suite' | 'registry' = 'suite') {
+    if (tiers === 'suite' && !journeysApp) journeysApp = await journeyRoutesApp(journeys);
+    if (tiers === 'registry' && !journeysTieredApp) journeysTieredApp = await journeyRoutesApp(await tieredJourneys());
+    const target = tiers === 'suite' ? journeysApp : journeysTieredApp;
+    const call = request(target.getHttpServer())[method](`/ai/businesses/${ID.biz}/${route}`)
       .set('x-test-user', actor)
       .set('x-forwarded-for', nextIp());
     return body === undefined ? call : call.send(body as object);
@@ -1735,5 +1772,68 @@ describe('W5-JOURNEY-ROUTES (D-73, D-74, D-93): the journey routes pass the view
     expect(ownerRes.status, JSON.stringify(ownerRes.body).slice(0, 400)).toBe(201);
     expect(plannedFor.slice(fromOwner).map((p) => p.userId ?? null)).toEqual([ID.owner]);
     expect(await planStepRunAuthority(prisma, ID.biz, ownerRes.body.planId, 'create_followup_queue')).toMatchObject({ memberId: ID.owner, refusal: null });
+  });
+
+  it("SEC-W5JR-1 RED-BEFORE (W5-JOURNEY-ROUTES review; owner rulings D-64, D-37, D-71, D-73): POST businesses/:businessId/journeys/:key/trigger refuses (404, as an unknown contact) a payload naming a contact the requesting member may not open, so a member cannot make themselves the proposer of an open journey plan whose stored steps act on a contact hidden from them and run those steps through POST actions/businesses/:businessId/execute: a STAFF member kept to their own book and an ADMIN naming the OWNER's PRIVATE contact (as contactId or under another contact-id key) start no journey, no plan step names it and no task is written on it; a contact id that is not a string is refused 400; the same members naming a contact they may open start the journey, and its create_task step runs for them on that contact only; the OWNER may name any contact of the business", async () => {
+    // The daily auto-action cap (autopilot settings DefaultTriggersService seeded in CV-08f) counts
+    // every run of this suite; it is not what this case is about.
+    await db.autopilotSettings.updateMany({ where: { businessId: ID.biz }, data: { maxDailyAutoActions: 100_000 } });
+    const tasksOnPriv = () => db.contactTask.count({ where: { businessId: ID.biz, contactId: ID.cPriv } });
+    const privTasksBefore = await tasksOnPriv();
+    const instancesBefore = await db.journeyInstance.count({ where: { businessId: ID.biz } });
+    const plannedBefore = plannedFor.length;
+    // The no-show journey: its rebooking message is tier 3, so its plan stays open (draft) and POST
+    // actions/.../execute runs its stored create_task step for the plan's member (the review's probe).
+    const NO_SHOW = 'journeys/booking-no-show/trigger';
+
+    for (const actor of [ID.staffOwned, ID.admin]) {
+      // The OWNER's PRIVATE contact, as the contact the journey acts on or under another contact-id
+      // key, and an id no contact of the business has: 404, the answer GET contacts/:contactId gives.
+      for (const payload of [
+        { contactId: ID.cPriv, contactName: 'v89k sec-w5jr-1', bookingId: 'v89k' },
+        { contactId: ID.cMine, targetContactId: ID.cPriv, contactName: 'v89k sec-w5jr-1' },
+        { contactIds: [ID.cMine, ID.cPriv], contactName: 'v89k sec-w5jr-1' },
+        { contactId: `${P}c_absent`, contactName: 'v89k sec-w5jr-1' },
+      ]) {
+        const res = await journeyRoute(actor, 'post', NO_SHOW, { payload }, 'registry');
+        expect(res.status, `${actor} ${JSON.stringify(payload)}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(404);
+        expect(res.body.message).toBe('Contact not found');
+        expectNoHidden(res.body);
+      }
+      // A contact id that is not a string (it would reach the steps' arguments as written): 400.
+      const malformed = await journeyRoute(actor, 'post', NO_SHOW, { payload: { contactId: { not: ID.cMine } } }, 'registry');
+      expect(malformed.status, JSON.stringify(malformed.body).slice(0, 300)).toBe(400);
+      // Nothing is stored: no plan step of the member's names the contact, so POST actions/.../execute
+      // has no step of theirs on it to run.
+      expect(await db.aiPlanStep.count({ where: { plan: { businessId: ID.biz, userId: actor }, inputPayload: { path: ['contactId'], equals: ID.cPriv } } })).toBe(0);
+    }
+    expect(plannedFor.slice(plannedBefore)).toEqual([]);
+    expect(await db.journeyInstance.count({ where: { businessId: ID.biz } })).toBe(instancesBefore);
+    expect(await tasksOnPriv()).toBe(privTasksBefore);
+
+    // The control: the STAFF member naming their own contact starts the journey; its plan records them
+    // (D-73) and stays open, and its create_task step, run through POST actions/.../execute, writes the
+    // task on that contact only.
+    const own = await journeyRoute(ID.staffOwned, 'post', NO_SHOW, { payload: { contactId: ID.cMine, contactName: 'v89k sec-w5jr-1 own', bookingId: 'v89k' } }, 'registry');
+    expect(own.status, JSON.stringify(own.body).slice(0, 300)).toBe(201);
+    expect(await db.aiPlan.findUnique({ where: { id: own.body.planId }, select: { userId: true, status: true } })).toEqual({ userId: ID.staffOwned, status: 'draft' });
+    const ownStep = await db.aiPlanStep.findFirst({ where: { planId: own.body.planId, toolName: 'create_task' }, select: { id: true, inputPayload: true } });
+    expect(ownStep.inputPayload).toMatchObject({ contactId: ID.cMine, title: 'Rebook no-show: v89k sec-w5jr-1 own' });
+    const ran = await request(app.getHttpServer())
+      .post(`/actions/businesses/${ID.biz}/execute`)
+      .set('x-test-user', ID.staffOwned)
+      .set('x-forwarded-for', nextIp())
+      .send({ planId: own.body.planId, planStepId: ownStep.id });
+    expect(ran.status, JSON.stringify(ran.body).slice(0, 300)).toBe(201);
+    expect(sortedIds(await db.contactTask.findMany({ where: { businessId: ID.biz, title: { startsWith: 'Rebook no-show: v89k sec-w5jr-1' } }, select: { contactId: true } }))).toEqual([ID.cMine]);
+
+    // The ADMIN may open the OWNER's TEAM contact, and the OWNER every contact of the business, the
+    // PRIVATE one included: each starts the journey, recorded as its member.
+    const adminTeam = await journeyRoute(ID.admin, 'post', NO_SHOW, { payload: { contactId: ID.cTeam, contactName: 'v89k sec-w5jr-1 admin', bookingId: 'v89k' } }, 'registry');
+    expect(adminTeam.status, JSON.stringify(adminTeam.body).slice(0, 300)).toBe(201);
+    const ownerPriv = await journeyRoute(ID.owner, 'post', NO_SHOW, { payload: { contactId: ID.cPriv, contactName: 'v89k sec-w5jr-1 owner', bookingId: 'v89k' } }, 'registry');
+    expect(ownerPriv.status, JSON.stringify(ownerPriv.body).slice(0, 300)).toBe(201);
+    expect(plannedFor.slice(plannedBefore).map((p) => p.userId ?? null)).toEqual([ID.staffOwned, ID.admin, ID.owner]);
+    expect(await tasksOnPriv()).toBe(privTasksBefore);
   });
 });
