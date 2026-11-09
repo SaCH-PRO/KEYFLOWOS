@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { deepRedact, safeRedactedSnapshot, SENSITIVE_FIELD_PATTERNS } from './redaction';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { deepRedact, safeRedactedSnapshot, SENSITIVE_FIELD_PATTERNS, redactAddresses } from './redaction';
 
 const R = '***REDACTED***';
 
@@ -87,5 +89,54 @@ describe('safeRedactedSnapshot', () => {
     const snap = safeRedactedSnapshot(original);
     expect(snap).toEqual({ accessToken: R, name: 'keep' });
     expect(original.accessToken).toBe('secret'); // original untouched
+  });
+});
+
+/**
+ * W4-HOUSEKEEPING (9B-D2: a sender's log line carries no recipient address).
+ * SystemEmailService kept the address pattern in a private redactAddresses,
+ * and W3-C2b-EMAIL-LOG-LEAK repeated it in TransactionalEmailService because
+ * that file was outside its write set. Both senders now import the one helper
+ * from this module. BEFORE_PATTERN is the literal both files carried before
+ * the move: every input below redacts exactly as it did, and neither sender
+ * keeps its own copy.
+ */
+describe('redactAddresses: the one address redactor both email senders log through (9B-D2, W4-HOUSEKEEPING)', () => {
+  const BEFORE_PATTERN = /[^\s<>"'`(),;:[\]]+@[^\s<>"'`(),;:[\]]+/g;
+  const CASES: Array<[string, string]> = [
+    ['Resend rejected owner@example.test', 'Resend rejected <address>'],
+    ['gmail 503 for owner@example.test', 'gmail 503 for <address>'],
+    ['To: "Owner" <owner@example.test>, cc: second+tag@sub.example.test;', 'To: "Owner" <<address>>, cc: <address>;'],
+    ['mailto:owner@example.test', 'mailto:<address>'],
+    ["(owner@example.test) [team@example.test] 'a@b.example' `c@d.example`", "(<address>) [<address>] '<address>' `<address>`"],
+    ['x@y@z', '<address>'],
+    ['first@one.test\nsecond@two.test', '<address>\n<address>'],
+    ['no address here', 'no address here'],
+    ['@handle and user@ alone', '@handle and user@ alone'],
+    ['V40A template stand-in has no invoice for owner@example.test', 'V40A template stand-in has no invoice for <address>'],
+  ];
+
+  it('9B-D2 W4-HOUSEKEEPING: every address-shaped token becomes <address>, and the rest of the text stays', () => {
+    for (const [input, expected] of CASES) expect(redactAddresses(input), JSON.stringify(input)).toBe(expected);
+  });
+
+  it('9B-D2 W4-HOUSEKEEPING: the same inputs redact as under the pattern both senders carried before the move, call after call', () => {
+    for (let round = 0; round < 2; round++) {
+      for (const [input] of CASES) {
+        expect(redactAddresses(input), JSON.stringify(input)).toBe(input.replace(BEFORE_PATTERN, '<address>'));
+      }
+    }
+  });
+
+  it('9B-D2 W4-HOUSEKEEPING: SystemEmailService and TransactionalEmailService both import it and keep no copy of the pattern', () => {
+    const notifications = path.resolve(__dirname, '../../modules/notifications');
+    for (const file of ['system-email.service.ts', 'transactional-email.service.ts']) {
+      const src = readFileSync(path.join(notifications, file), 'utf8');
+      expect(src, `${file} imports redactAddresses from core/security/redaction`).toMatch(
+        /import\s*\{[^}]*\bredactAddresses\b[^}]*\}\s*from\s*'\.\.\/\.\.\/core\/security\/redaction'/,
+      );
+      expect(src.includes(BEFORE_PATTERN.source), `${file} carries no copy of the address pattern`).toBe(false);
+      expect(src, `${file} defines no local redactAddresses`).not.toMatch(/function\s+redactAddresses\b/);
+    }
   });
 });
