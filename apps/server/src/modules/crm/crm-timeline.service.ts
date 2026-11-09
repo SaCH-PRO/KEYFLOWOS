@@ -1,8 +1,9 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { normalizeContactEventType, getContactEventCategory } from '@keyflow/shared';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { TimelineService } from '../timeline/timeline.service';
+import { readVisibleActivityPage, resolveTimelineViewer } from '../timeline/timeline-visibility';
 import { EvidenceService } from '../evidence/evidence.service';
 import { TaskAssignmentService } from '../task-assignments/task-assignment.service';
 
@@ -179,13 +180,45 @@ export class CrmTimelineService {
     return created;
   }
 
-  async listContactEvents(params: { businessId: string; contactId: string; limit?: number }) {
+  /**
+   * The contact's ContactEvents, newest first, that the reading member
+   * (`viewerUserId`) may see.
+   *
+   * W6-CONTACT-EVENTS-MONEY (W5-FEED-CATEGORIES review SEC-W5FC-1; owner
+   * rulings D-90 and D-63, the V1-84 timeline rule): each event is judged as
+   * the feed judges its CRM copy (module crm, naming the contact; logEvent),
+   * by canReadActivityRow through readVisibleActivityPage
+   * (timeline-visibility.ts). So an event of a sales_revenue type, or whose
+   * data carries a MONEY_DATA_FIELDS field (crmRowCarriesMoney: e.g.
+   * invoice.payment_recorded, which D-90 still writes without a copy,
+   * invoice.paid, store_order.paid, a storefront booking.created's deposit),
+   * is withheld from a member without revenue read, and the page is filled
+   * from older events. Before it the route served every event, amounts
+   * included, on crm read alone. A read that names no member is refused: there
+   * is no one to judge the events for.
+   *
+   * This route only. The contact's sibling reads still serve the same events
+   * and amounts on crm read without this filter (review SEC-W6CEM-1,
+   * SEC-W6CEM-2, CR-W6CEM-1; it.todo V55-13f..h in
+   * test/evidence-feed.integration.test.ts): CrmStatsService.contactDetail,
+   * CrmJourneyService.getContactCrossJourney / getContactJourney and
+   * CrmRevenueService.getContactRevenueSummary.
+   */
+  async listContactEvents(params: { businessId: string; contactId: string; limit?: number; viewerUserId?: string | null }) {
     await this.assertContact(params.businessId, params.contactId);
-    return this.prisma.client.contactEvent.findMany({
-      where: { businessId: params.businessId, contactId: params.contactId },
-      orderBy: { createdAt: 'desc' },
-      take: params.limit ?? 20,
+    if (!params.viewerUserId) throw new ForbiddenException('Contact events are read for a member');
+    const viewer = await resolveTimelineViewer(this.prisma, params.businessId, params.viewerUserId);
+    const where = { businessId: params.businessId, contactId: params.contactId };
+    const page = await readVisibleActivityPage(this.prisma, viewer, params.limit ?? 20, async (skip, take) => {
+      const events = await this.prisma.client.contactEvent.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip,
+        take,
+      });
+      return events.map((event) => ({ module: 'crm', action: event.type, type: event.type, contactId: event.contactId, data: event.data, event }));
     });
+    return page.map((row) => row.event);
   }
 
   async listContactNotes(params: { businessId: string; contactId: string }) {

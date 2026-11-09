@@ -190,7 +190,8 @@ const SIBLING_READS: Array<{
   args: unknown[];
   direct: (controller: any, req: unknown) => unknown;
 }> = [
-  { route: 'events', collaborator: () => crmServiceMock.listContactEvents, args: [{ businessId: 'biz_1', contactId: 'contact_1' }], direct: (c, req) => c.contactEvents('biz_1', 'contact_1', req) },
+  // W6-CONTACT-EVENTS-MONEY (SEC-W5FC-1; D-90 / D-63): events also hands over the reading member, by whose revenue scope CrmTimelineService.listContactEvents withholds money events.
+  { route: 'events', collaborator: () => crmServiceMock.listContactEvents, args: [{ businessId: 'biz_1', contactId: 'contact_1', viewerUserId: 'user_1' }], direct: (c, req) => c.contactEvents('biz_1', 'contact_1', req) },
   { route: 'notes', collaborator: () => crmServiceMock.listContactNotes, args: [{ businessId: 'biz_1', contactId: 'contact_1' }], direct: (c, req) => c.contactNotes('biz_1', 'contact_1', req) },
   { route: 'journey', collaborator: () => journeyMock.getContactJourney, args: ['biz_1', 'contact_1'], direct: (c, req) => c.getContactJourney('biz_1', 'contact_1', req) },
   { route: 'cross-journey', collaborator: () => journeyMock.getContactCrossJourney, args: ['biz_1', 'contact_1'], direct: (c, req) => c.getContactCrossJourney('biz_1', 'contact_1', req) },

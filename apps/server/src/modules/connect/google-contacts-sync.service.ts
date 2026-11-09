@@ -1,8 +1,11 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@keyflow/db';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Prisma, type Contact } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { getTenantContext } from '../../core/tenant/tenant-context';
 import { CONTACT_STATUSES, canonicalContactStatus, type ContactStatus } from '../crm/crm.constants';
 import { resolveCrmAccess } from '../crm/crm-permissions.helper';
+import { CrmService } from '../crm/crm.service';
+import { ContactAuditService, type ContactAuditActor } from '../crm/privacy/contact-audit.service';
 import { GoogleTokenHelper } from './google-token.helper';
 
 interface PeopleConnection {
@@ -114,6 +117,161 @@ export async function memberDefaultOwnerId(
 }
 
 /**
+ * W6-CONNECT-TAG-MERGE (W5-D92-RESIDUALS review SEC-D92R-2; owner ruling
+ * D-93): the key, in a contact-sync connector_status row's metadata, of the
+ * member who last saved its rules (the configuring member). Only the server
+ * writes it (saveMappingRules), beside mappingRules, which a client's body is
+ * spread into, so a client cannot name it.
+ */
+export const RULES_CONFIGURED_BY = 'rulesConfiguredBy';
+
+/**
+ * W6-CONNECT-TAG-MERGE (SEC-D92R-2): the member a connector configuration save
+ * records as its configuring member: the member the caller names (the contact
+ * sync rules routes pass their caller), else the member the TenantInterceptor
+ * bound to this request for this business (the connector form mapping route
+ * does not pass its caller; read as CrmDealsService reads it, V1-89), else
+ * none.
+ */
+export function configuringMember(businessId: string, actorUserId?: string | null): string | null {
+  if (actorUserId) return actorUserId;
+  const ctx = getTenantContext();
+  return ctx?.userId && ctx.businessId === businessId ? ctx.userId : null;
+}
+
+/**
+ * W6-CONNECT-TAG-MERGE (SEC-D92R-2; D-93), review repair SEC-W6CTM-2: who a
+ * contact sync or a connector form backfill run writes contacts as.
+ *  - `actor`: the member every CRM write door the run uses checks, and the
+ *    member each contact it writes records (ContactAuditEntry, ContactEvent):
+ *    the member whose request starts the run (the TenantInterceptor binds them
+ *    to the request for this business; the sync, resync, sync-all and backfill
+ *    routes are AuthGuard + BusinessGuard only, so any member may start one).
+ *    Only a run no member's request starts (a system run) has no such member:
+ *    it runs as the configuring member its configuration records, else (a
+ *    configuration saved before W6, or never saved) as the business owner,
+ *    read when it runs (D-93: a system-run job runs with the business owner as
+ *    its member). Before this repair the owner fallback applied to a member's
+ *    request too, so a crm 'none' member's sync rewrote the owner's PRIVATE
+ *    contacts and the audit named the owner.
+ *  - `members`: every member each write must be allowed for: the actor and
+ *    the configuring member, whose configuration bounds every run whoever
+ *    starts it.
+ * A member who has since left the business is refused by every CRM door
+ * (resolveCrmAccess refuses a non-member), so such a run writes nothing. No
+ * actor and no members only for a business that does not exist.
+ */
+export interface SyncPrincipals {
+  actor: string | null;
+  members: string[];
+}
+
+export async function syncPrincipals(
+  prisma: PrismaService,
+  businessId: string,
+  configuredBy: unknown,
+): Promise<SyncPrincipals> {
+  const ctx = getTenantContext();
+  const requester = ctx?.userId && ctx.businessId === businessId ? ctx.userId : null;
+  const configured = typeof configuredBy === 'string' && configuredBy ? configuredBy : null;
+  let actor = requester ?? configured;
+  if (!actor) {
+    const business = await prisma.client.business.findUnique({
+      where: { id: businessId },
+      select: { ownerId: true },
+    });
+    actor = business?.ownerId ?? null;
+  }
+  const members = Array.from(new Set([actor, configured].filter((m): m is string => !!m)));
+  return { actor, members };
+}
+
+/**
+ * W6-CONNECT-TAG-MERGE (SEC-D92R-2): the existing contact a sync may write for
+ * every one of `members`, read through the CRM's own edit check
+ * (CrmService.assertCanEditContact, the check PATCH contacts/:contactId and the
+ * enrichment route make): a live contact of this business, which a member who
+ * is not the owner may write only when they can open it (the GET detail
+ * visibility clause) and their edit scope reaches it. Null when one of them
+ * may not, or when there is no member: the sync then leaves the contact
+ * exactly as it is and reports it skipped. A sync wrote every contact it
+ * matched before, the owner's PRIVATE ones and trashed ones included, and
+ * recorded no actor.
+ */
+export async function contactWritableBy(
+  prisma: PrismaService,
+  crm: CrmService,
+  businessId: string,
+  contactId: string,
+  members: readonly string[],
+): Promise<Contact | null> {
+  if (members.length === 0) return null;
+  try {
+    let reachable: Prisma.ContactWhereInput = {};
+    for (const member of members) {
+      ({ reachableWhere: reachable } = await crm.assertCanEditContact(businessId, contactId, member));
+    }
+    return await prisma.client.contact.findFirst({ where: reachable });
+  } catch (err) {
+    if (err instanceof NotFoundException || err instanceof ForbiddenException) return null;
+    throw err;
+  }
+}
+
+/**
+ * W6-CONNECT-TAG-MERGE review repair SEC-W6CTM-3: whether a run may create
+ * contacts: every one of `members` passes the CRM create door's own check
+ * (CrmService.assertCanCreateContacts: a member, and an edit scope other than
+ * 'none'). A run that may not creates nothing and reports the person skipped;
+ * before, the sync created the contact and its audit entry named a member the
+ * create door refuses. A run with no member (a business that does not exist)
+ * is not refused here.
+ */
+export async function membersMayCreateContacts(
+  crm: CrmService,
+  businessId: string,
+  members: readonly string[],
+): Promise<boolean> {
+  try {
+    for (const member of members) await crm.assertCanCreateContacts(businessId, member);
+    return true;
+  } catch (err) {
+    if (err instanceof ForbiddenException) return false;
+    throw err;
+  }
+}
+
+/**
+ * W6-CONNECT-TAG-MERGE review repair CR-CTM-3: true when writing `data` would
+ * change none of `row`'s fields (a value left undefined writes nothing). A
+ * sync that reads a person again (its provider token held back, see
+ * syncTokenAdvances) leaves a contact that already carries the person's
+ * values as it is, with no audit entry.
+ */
+export function syncWritesNothing(row: Record<string, unknown>, data: Record<string, unknown>): boolean {
+  return Object.entries(data).every(([key, value]) => value === undefined || row[key] === value);
+}
+
+/**
+ * W6-CONNECT-TAG-MERGE review repair CR-CTM-3: whether a run stores the
+ * provider's new sync token (People API nextSyncToken, Graph deltaLink). A
+ * provider sends a person again after that token only when they change
+ * remotely, so a run that refused a person (or tombstone) for its members
+ * keeps the token where it was: the next run, whoever starts it and whatever
+ * rules it runs under, reads them again. Before, the token advanced past them
+ * and they were never written or linked, even after an owner took the rules
+ * over. A person skipped for having no email or phone is not refused.
+ */
+export function syncTokenAdvances(refused: number): boolean {
+  return refused === 0;
+}
+
+/** W6-CONNECT-TAG-MERGE: the ContactAuditEntry actor of a contact a sync writes (SYSTEM only with no acting member). */
+export function syncAuditActor(actor: string | null): ContactAuditActor {
+  return actor ? { type: 'USER', id: actor } : { type: 'SYSTEM' };
+}
+
+/**
  * D-92 (W5-D92-RESIDUALS): a rule is read, and so applied, through
  * canonicalContactStatus, because a rule stored before D-92 may hold any value:
  * a legacy DORMANT or CUSTOMER reads as CLIENT, and a value with no
@@ -140,7 +298,11 @@ export class GoogleContactsSyncService {
   private readonly logger = new Logger(GoogleContactsSyncService.name);
   private readonly tokens: GoogleTokenHelper;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(ContactAuditService) private readonly audit: ContactAuditService,
+  ) {
     this.tokens = new GoogleTokenHelper(prisma);
   }
 
@@ -173,6 +335,15 @@ export class GoogleContactsSyncService {
     return parseRules(meta.mappingRules);
   }
 
+  /** W6-CONNECT-TAG-MERGE: the configuring member the stored rules record (saveMappingRules), or none. */
+  private async rulesConfiguredBy(businessId: string): Promise<unknown> {
+    const row = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
+      select: { metadata: true },
+    });
+    return ((row?.metadata ?? {}) as Record<string, unknown>)[RULES_CONFIGURED_BY];
+  }
+
   /** Persist mapping rules on the connector_status row metadata. */
   async saveMappingRules(
     businessId: string,
@@ -201,7 +372,10 @@ export class GoogleContactsSyncService {
       select: { metadata: true },
     });
     const meta = (existing?.metadata ?? {}) as Record<string, unknown>;
-    const merged = { ...meta, mappingRules: next };
+    // W6-CONNECT-TAG-MERGE (SEC-D92R-2): the member saving the rules is the
+    // member a sync writes existing contacts as, whoever runs it.
+    const configuredBy = configuringMember(businessId, actorUserId);
+    const merged = { ...meta, mappingRules: next, ...(configuredBy ? { [RULES_CONFIGURED_BY]: configuredBy } : {}) };
     await this.prisma.client.connectorStatus.upsert({
       where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
       create: {
@@ -294,11 +468,12 @@ export class GoogleContactsSyncService {
       .filter((x): x is NonNullable<typeof x> => x !== null);
   }
 
+  /** The new contact with the rule's defaults applied, or null when none applied. */
   private async applyDefaultsToNewContact(
     businessId: string,
     contactId: string,
     rules: ContactMappingRules,
-  ) {
+  ): Promise<Contact | null> {
     const data: Prisma.ContactUpdateInput = {};
     if (rules.defaultTags.length > 0) {
       data.tags = { set: rules.defaultTags };
@@ -308,10 +483,13 @@ export class GoogleContactsSyncService {
     if (defaultStatus) data.status = defaultStatus;
     if (rules.defaultLifecycleStage) data.lifecycleStage = rules.defaultLifecycleStage;
     if (rules.defaultOwnerId) data.ownerId = rules.defaultOwnerId;
-    if (Object.keys(data).length === 0) return;
-    await this.prisma.client.contact
+    if (Object.keys(data).length === 0) return null;
+    return this.prisma.client.contact
       .update({ where: { id: contactId }, data })
-      .catch((e) => this.logger.warn(`Apply defaults failed for ${contactId}: ${(e as Error).message}`));
+      .catch((e) => {
+        this.logger.warn(`Apply defaults failed for ${contactId}: ${(e as Error).message}`);
+        return null;
+      });
   }
 
   /**
@@ -363,10 +541,19 @@ export class GoogleContactsSyncService {
       !!rules.defaultStatus ||
       !!rules.defaultOwnerId ||
       !!rules.defaultLifecycleStage;
+    // W6-CONNECT-TAG-MERGE (SEC-D92R-2; D-93; review SEC-W6CTM-2): the member
+    // this sync writes as and records on every contact it writes (the member
+    // who starts it), and every member each write must be allowed for.
+    const principals = await syncPrincipals(this.prisma, businessId, await this.rulesConfiguredBy(businessId));
+    const actor = principals.actor;
+    // SEC-W6CTM-3: asked once, when the run first needs to create a contact.
+    let mayCreate: boolean | undefined;
 
     let imported = 0;
     let updated = 0;
     let skipped = 0;
+    // CR-CTM-3: the people skipped because the run's members may not write them.
+    let refused = 0;
     let pagesFetched = 0;
     let processed = 0;
     const startedAt = new Date().toISOString();
@@ -438,6 +625,7 @@ export class GoogleContactsSyncService {
 
         let contactId = mapping?.contactId;
         let isNew = false;
+        let createdRow: Contact | null = null;
         if (!contactId) {
           const existing = await this.prisma.client.contact.findFirst({
             where: {
@@ -453,20 +641,50 @@ export class GoogleContactsSyncService {
         }
 
         if (contactId) {
-          await this.prisma.client.contact.update({
-            where: { id: contactId },
-            data: {
-              firstName: firstName ?? undefined,
-              lastName: lastName ?? undefined,
-              email: email ?? undefined,
-              emailNormalized: emailNorm ?? undefined,
-              phone: phone ?? undefined,
-              phoneNormalized: phoneNorm ?? undefined,
-              companyName: company ?? undefined,
-            },
-          });
+          // W6-CONNECT-TAG-MERGE (SEC-D92R-2; review SEC-W6CTM-2): an existing
+          // contact is written only when every member of the run (the member
+          // who starts it and the configuring member) may write it; one they
+          // cannot open or edit is left as it is (not linked either) and
+          // reported skipped.
+          const before = await contactWritableBy(this.prisma, this.crm, businessId, contactId, principals.members);
+          if (!before) {
+            skipped += 1;
+            refused += 1;
+            continue;
+          }
+          const data = {
+            firstName: firstName ?? undefined,
+            lastName: lastName ?? undefined,
+            email: email ?? undefined,
+            emailNormalized: emailNorm ?? undefined,
+            phone: phone ?? undefined,
+            phoneNormalized: phoneNorm ?? undefined,
+            companyName: company ?? undefined,
+          };
           updated += 1;
+          // CR-CTM-3: a person read again whose values the contact already carries writes nothing.
+          if (!syncWritesNothing(before, data)) {
+            const after = await this.prisma.client.contact.update({ where: { id: contactId }, data });
+            await this.audit.write({
+              businessId,
+              contactId,
+              action: 'updated',
+              before,
+              after,
+              actor: syncAuditActor(actor),
+              reason: 'google_contacts sync',
+            });
+          }
         } else {
+          // SEC-W6CTM-3: a contact is created only when the CRM create door
+          // admits every member of the run; otherwise the person is skipped
+          // (not created, not linked), never created in a refused member's name.
+          mayCreate ??= await membersMayCreateContacts(this.crm, businessId, principals.members);
+          if (!mayCreate) {
+            skipped += 1;
+            refused += 1;
+            continue;
+          }
           const created = await this.prisma.client.contact.create({
             data: {
               businessId,
@@ -484,6 +702,7 @@ export class GoogleContactsSyncService {
           contactId = created.id;
           imported += 1;
           isNew = true;
+          createdRow = created;
         }
 
         if (!mapping) {
@@ -506,8 +725,17 @@ export class GoogleContactsSyncService {
             .catch(() => undefined);
         }
 
-        if (isNew && hasRules && contactId) {
-          await this.applyDefaultsToNewContact(businessId, contactId, rules);
+        if (isNew && contactId) {
+          const withDefaults = hasRules ? await this.applyDefaultsToNewContact(businessId, contactId, rules) : null;
+          // W6-CONNECT-TAG-MERGE: the contact a sync creates records the acting member too.
+          await this.audit.write({
+            businessId,
+            contactId,
+            action: 'created',
+            after: withDefaults ?? createdRow,
+            actor: syncAuditActor(actor),
+            reason: 'google_contacts sync',
+          });
         }
       }
 
@@ -528,7 +756,8 @@ export class GoogleContactsSyncService {
       where: { id: businessId },
       data: {
         contactsLastSyncAt: new Date(),
-        ...(nextSyncToken ? { contactsSyncToken: nextSyncToken } : {}),
+        // CR-CTM-3: a run that refused a person keeps the token where it was.
+        ...(nextSyncToken && syncTokenAdvances(refused) ? { contactsSyncToken: nextSyncToken } : {}),
       },
     });
     const totalGoogle = await this.prisma.client.contact.count({

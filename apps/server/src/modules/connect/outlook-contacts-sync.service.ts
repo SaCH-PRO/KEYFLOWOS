@@ -1,11 +1,23 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { canonicalContactStatus } from '../crm/crm.constants';
+import { contactWhereWithId } from '../crm/crm.helpers';
+import { CrmService } from '../crm/crm.service';
+import { ContactAuditService } from '../crm/privacy/contact-audit.service';
 import {
+  RULES_CONFIGURED_BY,
+  configuringMember,
+  contactWritableBy,
   memberDefaultOwnerId,
+  membersMayCreateContacts,
   settingDefaultContactStatus,
   settingDefaultOwnerId,
+  syncAuditActor,
+  syncPrincipals,
+  syncTokenAdvances,
+  syncWritesNothing,
+  type SyncPrincipals,
 } from './google-contacts-sync.service';
 import { MicrosoftTokenHelper } from './microsoft-token.helper';
 
@@ -65,7 +77,11 @@ export class OutlookContactsSyncService {
   private readonly logger = new Logger(OutlookContactsSyncService.name);
   private readonly tokens: MicrosoftTokenHelper;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(CrmService) private readonly crm: CrmService,
+    @Inject(ContactAuditService) private readonly audit: ContactAuditService,
+  ) {
     this.tokens = new MicrosoftTokenHelper(prisma);
   }
 
@@ -87,6 +103,15 @@ export class OutlookContactsSyncService {
     });
     const meta = (row?.metadata ?? {}) as Record<string, unknown>;
     return parseRules(meta.mappingRules);
+  }
+
+  /** W6-CONNECT-TAG-MERGE: the configuring member the stored rules record (saveMappingRules), or none. */
+  private async rulesConfiguredBy(businessId: string): Promise<unknown> {
+    const row = await this.prisma.client.connectorStatus.findUnique({
+      where: { businessId_connectorType: { businessId, connectorType: 'outlook_contacts' } },
+      select: { metadata: true },
+    });
+    return ((row?.metadata ?? {}) as Record<string, unknown>)[RULES_CONFIGURED_BY];
   }
 
   async saveMappingRules(
@@ -116,7 +141,10 @@ export class OutlookContactsSyncService {
       select: { metadata: true },
     });
     const meta = (existing?.metadata ?? {}) as Record<string, unknown>;
-    const merged = { ...meta, mappingRules: next };
+    // W6-CONNECT-TAG-MERGE (SEC-D92R-2): the member saving the rules is the
+    // member a sync writes existing contacts as, whoever runs it (as on Google).
+    const configuredBy = configuringMember(businessId, actorUserId);
+    const merged = { ...meta, mappingRules: next, ...(configuredBy ? { [RULES_CONFIGURED_BY]: configuredBy } : {}) };
     await this.prisma.client.connectorStatus.upsert({
       where: { businessId_connectorType: { businessId, connectorType: 'outlook_contacts' } },
       create: {
@@ -229,11 +257,20 @@ export class OutlookContactsSyncService {
       !!rules.defaultStatus ||
       !!rules.defaultOwnerId ||
       !!rules.defaultLifecycleStage;
+    // W6-CONNECT-TAG-MERGE (SEC-D92R-2; D-93; review SEC-W6CTM-2): the member
+    // this sync writes as and records on every contact it writes (the member
+    // who starts it), and every member each write must be allowed for.
+    const principals = await syncPrincipals(this.prisma, businessId, await this.rulesConfiguredBy(businessId));
+    const actor = principals.actor;
+    // SEC-W6CTM-3: asked once, when the run first needs to create a contact.
+    let mayCreate: boolean | undefined;
 
     let imported = 0;
     let updated = 0;
     let skipped = 0;
     let deleted = 0;
+    // CR-CTM-3: the people and tombstones skipped because the run's members may not write them.
+    let refused = 0;
 
     let nextUrl: string =
       business?.msContactsDeltaLink ||
@@ -274,9 +311,15 @@ export class OutlookContactsSyncService {
             },
           });
           if (map) {
-            await this.prisma.client.contact
-              .update({ where: { id: map.contactId }, data: { deletedAt: new Date() } })
-              .catch(() => undefined);
+            // W6-CONNECT-TAG-MERGE (SEC-D92R-2), review SEC-W6CTM-1 / CR-CTM-2:
+            // a tombstone deletes the linked contact only through the CRM's own
+            // delete door (deleteTombstoned); one the run's members may not
+            // delete is left as it is (and stays linked), reported skipped.
+            if (!(await this.deleteTombstoned(businessId, map.contactId, principals))) {
+              skipped += 1;
+              refused += 1;
+              continue;
+            }
             await this.prisma.client.contactExternalMapping
               .delete({ where: { id: map.id } })
               .catch(() => undefined);
@@ -334,31 +377,48 @@ export class OutlookContactsSyncService {
         }
 
         if (contactId) {
+          // W6-CONNECT-TAG-MERGE (SEC-D92R-2; review SEC-W6CTM-2): an existing
+          // contact is written only when every member of the run (the member
+          // who starts it and the configuring member) may write it; one they
+          // cannot open or edit is left as it is (not linked either) and
+          // reported skipped.
+          const local = await contactWritableBy(this.prisma, this.crm, businessId, contactId, principals.members);
+          if (!local) {
+            skipped += 1;
+            refused += 1;
+            continue;
+          }
           // Most-recent-write-wins: only overwrite if Graph's lastModifiedDateTime
           // is newer than our updatedAt.
-          const local = await this.prisma.client.contact.findUnique({
-            where: { id: contactId },
-            select: { updatedAt: true },
-          });
           const remoteTime = c.lastModifiedDateTime
             ? new Date(c.lastModifiedDateTime).getTime()
             : Date.now();
-          const localTime = local?.updatedAt ? new Date(local.updatedAt).getTime() : 0;
+          const localTime = local.updatedAt ? new Date(local.updatedAt).getTime() : 0;
           if (remoteTime >= localTime) {
-            await this.prisma.client.contact.update({
-              where: { id: contactId },
-              data: {
-                firstName: firstName ?? undefined,
-                lastName: lastName ?? undefined,
-                email: email ?? undefined,
-                emailNormalized: emailNorm ?? undefined,
-                phone: phone ?? undefined,
-                phoneNormalized: phoneNorm ?? undefined,
-                companyName: company ?? undefined,
-                jobTitle: jobTitle ?? undefined,
-              },
-            });
+            const data = {
+              firstName: firstName ?? undefined,
+              lastName: lastName ?? undefined,
+              email: email ?? undefined,
+              emailNormalized: emailNorm ?? undefined,
+              phone: phone ?? undefined,
+              phoneNormalized: phoneNorm ?? undefined,
+              companyName: company ?? undefined,
+              jobTitle: jobTitle ?? undefined,
+            };
             updated += 1;
+            // CR-CTM-3: a contact read again whose values it already carries is not written.
+            if (!syncWritesNothing(local, data)) {
+              const after = await this.prisma.client.contact.update({ where: { id: contactId }, data });
+              await this.audit.write({
+                businessId,
+                contactId,
+                action: 'updated',
+                before: local,
+                after,
+                actor: syncAuditActor(actor),
+                reason: 'outlook_contacts sync',
+              });
+            }
             await this.prisma.client.contactSyncAudit
               .create({
                 data: {
@@ -386,6 +446,15 @@ export class OutlookContactsSyncService {
               .catch(() => undefined);
           }
         } else {
+          // SEC-W6CTM-3: a contact is created only when the CRM create door
+          // admits every member of the run; otherwise the person is skipped
+          // (not created, not linked), never created in a refused member's name.
+          mayCreate ??= await membersMayCreateContacts(this.crm, businessId, principals.members);
+          if (!mayCreate) {
+            skipped += 1;
+            refused += 1;
+            continue;
+          }
           const created = await this.prisma.client.contact.create({
             data: {
               businessId,
@@ -409,6 +478,15 @@ export class OutlookContactsSyncService {
           });
           contactId = created.id;
           imported += 1;
+          // W6-CONNECT-TAG-MERGE: the contact a sync creates records the acting member too.
+          await this.audit.write({
+            businessId,
+            contactId,
+            action: 'created',
+            after: created,
+            actor: syncAuditActor(actor),
+            reason: 'outlook_contacts sync',
+          });
           await this.prisma.client.contactSyncAudit
             .create({
               data: {
@@ -444,7 +522,8 @@ export class OutlookContactsSyncService {
       where: { id: businessId },
       data: {
         msContactsLastSyncAt: new Date(),
-        ...(nextDeltaLink ? { msContactsDeltaLink: nextDeltaLink } : {}),
+        // CR-CTM-3: a run that refused a person or a tombstone keeps the delta link where it was.
+        ...(nextDeltaLink && syncTokenAdvances(refused) ? { msContactsDeltaLink: nextDeltaLink } : {}),
       },
     });
 
@@ -487,6 +566,51 @@ export class OutlookContactsSyncService {
       deleted,
       appliedRules: hasRules,
     };
+  }
+
+  /**
+   * W6-CONNECT-TAG-MERGE review repairs SEC-W6CTM-1 and CR-CTM-2: apply a
+   * Graph tombstone to the contact it is linked to. True when the tombstone is
+   * applied (the caller then drops the link and counts it deleted), false when
+   * the run's members may not delete the contact (it stays live and linked).
+   *  - A link to no live contact of this business (a contact already in the
+   *    trash) is applied without writing the contact: its trash date stays and
+   *    only the link goes, so a contact restored from the trash (D-95) pushes
+   *    to Outlook as a new contact instead of PATCHing the removed one. Before
+   *    this repair such a tombstone was refused and the link kept.
+   *  - A live contact is deleted only through the CRM's own delete door,
+   *    CrmService.softDeleteContact, as the member who runs the sync: the rule
+   *    DELETE contacts/:contactId applies (visibility, then delete scope:
+   *    'none' refuses every contact, 'owned' refuses one someone else owns),
+   *    with its contact.deleted ContactEvent and 'deleted' ContactAuditEntry
+   *    naming that member. Every other member of the run (the configuring
+   *    member) must be able to edit it too: their configuration bounds the run.
+   *    Before this repair the sync deleted any contact the member could edit,
+   *    so a crm write member (delete scope 'owned' by default) deleted contacts
+   *    DELETE contacts/:contactId refuses them.
+   */
+  private async deleteTombstoned(businessId: string, contactId: string, principals: SyncPrincipals): Promise<boolean> {
+    const live = await this.prisma.client.contact.findFirst({
+      where: contactWhereWithId(businessId, contactId),
+      select: { id: true },
+    });
+    if (!live) return true;
+    const { actor, members } = principals;
+    if (!actor) return false;
+    const others = members.filter((m) => m !== actor);
+    if (others.length > 0 && !(await contactWritableBy(this.prisma, this.crm, businessId, contactId, others))) {
+      return false;
+    }
+    try {
+      await this.crm.softDeleteContact(
+        { businessId, contactId, actorUserId: actor },
+        { actor: syncAuditActor(actor), reason: 'outlook_contacts sync' },
+      );
+      return true;
+    } catch (err) {
+      if (err instanceof ForbiddenException || err instanceof NotFoundException) return false;
+      throw err;
+    }
   }
 
   /**
