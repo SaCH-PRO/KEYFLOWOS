@@ -10,6 +10,7 @@ import { fromCents, subtractMoney, toCents } from '../commerce/money';
 import { WiPayConnector } from '../../core/connectors/implementations/wipay.connector';
 import { WIPAY_CURRENCY, resolveWipayMerchant, wipayMerchantComplete, wipayTakesCurrency } from '../../core/connectors/implementations/wipay-merchant';
 import { PayPalConnector } from '../../core/connectors/implementations/paypal.connector';
+import { StripeConnector } from '../../core/connectors/implementations/stripe.connector';
 import { StoreOrderService, isClosedStorefrontOrder } from '../site/store-order.service';
 import { CheckoutPaymentIntent, Client, Environment, LogLevel, OrdersController } from '@paypal/paypal-server-sdk';
 
@@ -66,6 +67,12 @@ type ProviderRefund = { providerPaymentId: string; provider: string; currency: s
 const SYNTHETIC_REFUND_ID_PREFIX = 're_synth_';
 /** The providerPaymentId prefix of a manual refund row (CommerceService.markPaymentRefunded). */
 const MANUAL_REFUND_ID_PREFIX = 'manual_refund_';
+/**
+ * FOLLOW3-A3-REFUND-DOOR-TENANCY: the providerPaymentId prefix of every
+ * hand-recorded payment (CommerceService.recordPayment: the manual payment
+ * route, KEY processPayment, the evidence confirm, mark-paid).
+ */
+const MANUAL_PAYMENT_ID_PREFIX = 'manual_';
 
 @Injectable()
 export class PaymentsService {
@@ -79,6 +86,8 @@ export class PaymentsService {
     @Optional() @Inject(WiPayConnector) private readonly wipayConnector?: WiPayConnector,
     @Optional() @Inject(PayPalConnector) private readonly paypalConnector?: PayPalConnector,
     @Optional() @Inject(forwardRef(() => StoreOrderService)) private readonly storeOrderService?: StoreOrderService,
+    // FOLLOW3-A3 (D-56): the provider read that binds a platform-signed refund to its business.
+    @Optional() @Inject(StripeConnector) private readonly stripeConnector?: StripeConnector,
   ) {}
 
   /**
@@ -972,6 +981,8 @@ export class PaymentsService {
       });
     }
 
+    // FOLLOW3-A3 (D-56): the provider's answer per business and charge, read once per event.
+    const ownsCharge = new Map<string, boolean>();
     for (const refund of refunds) {
       if (!refund.charge || (!refund.cumulative && !refund.id)) continue;
       const charge = refund.charge;
@@ -996,23 +1007,33 @@ export class PaymentsService {
       // tenant is not found, and nothing is written or reversed.
       // V1-29c: only a SUCCESSFUL payment is an original; a refund row
       // carries its original's id in reference and must never match.
+      // FOLLOW3-A3-REFUND-DOOR-TENANCY: a hand-recorded row (recordedBy set,
+      // or a manual_ id: the manual payment route, KEY processPayment, the
+      // evidence confirm, which store the method typed as provider and any
+      // reference) is no provider evidence (the V1-15d rule of payments-ops):
+      // it is never an original and never an ambiguity witness below, so a
+      // member who typed another tenant's charge or payment_intent can neither
+      // take that tenant's refund nor block it. Rows the provider's own
+      // deliveries wrote (recordedBy null, the provider's id) stay originals.
       const lookupIds = [charge, refund.paymentIntent].filter((v): v is string => !!v);
-      const originalWhere = {
+      const originalWhere: Prisma.PaymentWhereInput = {
         provider: 'stripe',
         status: 'SUCCESSFUL',
+        recordedBy: null,
+        NOT: { providerPaymentId: { startsWith: MANUAL_PAYMENT_ID_PREFIX } },
         ...(signedForBusinessId ? { businessId: signedForBusinessId } : {}),
         OR: [
           { providerPaymentId: { in: lookupIds } },
           { reference: { in: lookupIds } },
         ],
       };
-      const original = await this.prisma.client.payment.findFirst({
+      const found: RefundOriginal | null = await this.prisma.client.payment.findFirst({
         where: originalWhere,
         orderBy: { createdAt: 'asc' },
         select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
       }).catch(() => null);
 
-      if (!original) {
+      if (!found) {
         this.logger.warn(
           `Stripe ${eventType} could not locate original payment for charge ${charge} (pi=${refund.paymentIntent ?? 'none'})` +
             `${signedForBusinessId ? ` of business ${signedForBusinessId}, whose secret signed it` : ''}; skipping`,
@@ -1029,7 +1050,16 @@ export class PaymentsService {
       // tenant's refund into another tenant's books. Not caught: a failed
       // read fails the delivery (its claim is released) rather than letting
       // an ambiguous refund through.
-      if (!signedForBusinessId) {
+      // FOLLOW3-A3 (owner ruling D-56): with the Stripe connector (always, as
+      // the container builds this service) the provider's record binds the
+      // refund to its business instead (platformRefundOriginal), whether one
+      // business matches or several; the rule above holds for a service built
+      // without it.
+      const original = !signedForBusinessId && this.stripeConnector
+        ? await this.platformRefundOriginal(eventType, charge, refund.paymentIntent ?? null, originalWhere, ownsCharge)
+        : found;
+      if (!original) continue;
+      if (!signedForBusinessId && !this.stripeConnector) {
         const other = await this.prisma.client.payment.findFirst({
           where: { ...originalWhere, businessId: { not: original.businessId } },
           select: { id: true, businessId: true },
@@ -1068,6 +1098,61 @@ export class PaymentsService {
         });
       }
     }
+  }
+
+  /**
+   * FOLLOW3-A3-REFUND-DOOR-TENANCY (owner ruling D-56): the payment a Stripe
+   * refund event verified by the deployment's own secret refunds. Such an
+   * event carries no owner tag (a Refund object has no charge metadata;
+   * createStripeCheckout tags the Checkout Session, not the charge), and a
+   * row of another business can name its ids: a tenant records any
+   * payment_intent in the reference of a payment it signs for itself with its
+   * own secret, and Payment does not store which secret verified it. So the
+   * provider's record decides: StripeConnector.isOwnCharge reads the charge
+   * (then the Checkout Session of its payment_intent) and says whether the
+   * platform tagged it with a business. Of the businesses whose payments
+   * match (`originalWhere`), the one it names is the refund's, its oldest
+   * matching payment the original. When it names none of them, or more than
+   * one, nothing is written and the refusal is logged: a refund is never
+   * booked into, or blocked by, another tenant's self-signed row. A failed
+   * read is not caught: the delivery fails (its claim is released) and Stripe
+   * delivers it again. `owns` keeps the answer per business and charge, so a
+   * charge.refunded listing several refunds reads the provider once.
+   */
+  private async platformRefundOriginal(
+    eventType: string,
+    charge: string,
+    paymentIntent: string | null,
+    originalWhere: Prisma.PaymentWhereInput,
+    owns: Map<string, boolean>,
+  ): Promise<RefundOriginal | null> {
+    const connector = this.stripeConnector;
+    if (!connector) return null;
+    const matches = await this.prisma.client.payment.findMany({
+      where: originalWhere,
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
+    });
+    const businesses = [...new Set(matches.map((m) => m.businessId))];
+    const owners: string[] = [];
+    for (const businessId of businesses) {
+      const key = `${businessId} ${charge}`;
+      let own = owns.get(key);
+      if (own === undefined) {
+        own = await connector.isOwnCharge(businessId, charge);
+        owns.set(key, own);
+      }
+      if (own) owners.push(businessId);
+    }
+    if (owners.length !== 1) {
+      this.logger.warn(
+        `Stripe ${eventType} for charge ${charge} (pi=${paymentIntent ?? 'none'}) matches payments of ${businesses.join(', ')}, ` +
+          `but the provider's record of the charge names ${owners.length ? `more than one of them (${owners.join(', ')})` : 'none of them'}; ` +
+          'refusing to record it',
+      );
+      return null;
+    }
+    return matches.find((m) => m.businessId === owners[0]) ?? null;
   }
 
   // ---------------------------------------------------------------------------
