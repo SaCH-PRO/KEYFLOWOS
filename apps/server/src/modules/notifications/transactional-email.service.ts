@@ -196,6 +196,14 @@ const DEDUPE_CLAIM_PREFIX = 'transactional-email.dedupe:';
  * finishes well inside it.
  */
 const DEDUPE_CLAIM_STALE_MS = 15 * 60 * 1000;
+/**
+ * W3-D17b-REVIEW-SOLICIT-DEDUPE repair (SEC-D17b-1, CR-D17b-2): how long a keyed
+ * send that meets a live claim waits for the holder's outcome, re-reading every
+ * DEDUPE_CLAIM_POLL_MS. A live holder (three attempts, 1 s and 2 s apart)
+ * normally finishes well inside it.
+ */
+const DEDUPE_CLAIM_WAIT_MS = 30 * 1000;
+const DEDUPE_CLAIM_POLL_MS = 200;
 
 export interface TransactionalSendParams {
   businessId: string;
@@ -215,6 +223,11 @@ type BusinessContext = TemplateContext & { id: string; preferences: Notification
 export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TransactionalEmailService.name);
   private drainInterval: ReturnType<typeof setInterval> | null = null;
+  /**
+   * The bound a keyed send waits on a live dedupe claim (SEC-D17b-1). An
+   * instance field so the real-DB suite can shorten it to exercise the bound.
+   */
+  private dedupeClaimWaitMs = DEDUPE_CLAIM_WAIT_MS;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -437,12 +450,15 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
     // concurrent sends with one key both passed it and both reached the
     // provider. The claim makes the dedupe atomic: only one send holds the key
     // until its outcome row is written.
-    const claimId = await this.claimDedupeKey(params.businessId, dedupeKey);
+    let claimId = await this.claimDedupeKey(params.businessId, dedupeKey);
     if (!claimId) {
-      this.logger.debug(
-        `Skipping duplicate ${params.type} for ${recipientForLog(params.contactId)} (dedupeKey=${redactForLog(dedupeKey)}): a concurrent send holds it`,
-      );
-      return { status: 'QUEUED' };
+      // W3-D17b repair (SEC-D17b-1, CR-D17b-2): a concurrent send holds the
+      // key. Nothing is queued for this call, so it must not answer QUEUED
+      // (callers such as KEY's invoice_sent tool read QUEUED as "will be
+      // delivered"): it waits, bounded, for the holder's outcome.
+      const waited = await this.awaitDedupeHolder(params, dedupeKey);
+      if ('result' in waited) return waited.result;
+      claimId = waited.claimId;
     }
     try {
       // Read again under the claim: a holder that wrote its row and gave the
@@ -508,6 +524,48 @@ export class TransactionalEmailService implements OnModuleInit, OnModuleDestroy 
       // The holder is gone (given back, or taken over just now): claim again once.
     }
     return null;
+  }
+
+  /**
+   * W3-D17b-REVIEW-SOLICIT-DEDUPE repair (SEC-D17b-1, CR-D17b-2): a keyed send
+   * that met a live claim waits for the holder's outcome, re-reading every
+   * DEDUPE_CLAIM_POLL_MS up to dedupeClaimWaitMs. The holder's SENT, QUEUED or
+   * DRAINED row is the answer (the send was made, or is queued for the drain).
+   * When the holder gave the key back with no such row (its send FAILED), this
+   * send claims the key and goes itself, as it would have on its own. A claim
+   * still held at the bound answers FAILED: this call sent nothing and cannot
+   * vouch for the holder, so callers keep treating it as not sent.
+   */
+  private async awaitDedupeHolder(
+    params: TransactionalSendParams,
+    dedupeKey: string,
+  ): Promise<{ result: TransactionalSendResult } | { claimId: string }> {
+    const { businessId } = params;
+    const idempotencyKey = `${DEDUPE_CLAIM_PREFIX}${dedupeKey}`;
+    const deadline = Date.now() + this.dedupeClaimWaitMs;
+    for (;;) {
+      const settled = await this.dedupedSend(businessId, dedupeKey);
+      if (settled) {
+        this.logger.debug(
+          `Skipping duplicate ${params.type} for ${recipientForLog(params.contactId)} (dedupeKey=${redactForLog(dedupeKey)}): answered from the concurrent send's row`,
+        );
+        return { result: settled };
+      }
+      const held = await this.prisma.client.idempotencyKey.findUnique({
+        where: { businessId_idempotencyKey: { businessId, idempotencyKey } },
+        select: { id: true },
+      });
+      if (!held) {
+        const claimId = await this.claimDedupeKey(businessId, dedupeKey);
+        if (claimId) return { claimId };
+      }
+      if (Date.now() >= deadline) break;
+      await new Promise((r) => setTimeout(r, DEDUPE_CLAIM_POLL_MS));
+    }
+    this.logger.warn(
+      `${params.type} for ${recipientForLog(params.contactId)} not sent: a concurrent send still holds its dedupe key after ${this.dedupeClaimWaitMs} ms (dedupeKey=${redactForLog(dedupeKey)})`,
+    );
+    return { result: { status: 'FAILED' } };
   }
 
   /** Gives a dedupe claim back, fenced to this claim's own row. A failed release leaves a claim that goes stale. */

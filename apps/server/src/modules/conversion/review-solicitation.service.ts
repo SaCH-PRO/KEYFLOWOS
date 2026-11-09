@@ -145,11 +145,18 @@ export class ReviewSolicitationService implements OnModuleInit, OnModuleDestroy 
    * booking keeps its own key, so a contact's other purchases are each still
    * solicited. TransactionalEmailService claims the key before any effect, so
    * the two jobs reach the provider once even when two ticks run them at once.
+   *
+   * Review repair CR-D17b-1: an invoice job takes the booking key only when that
+   * booking's visit has happened (the booking is COMPLETED when the job runs).
+   * A deposit, or a final invoice drawn up and paid ahead, is usually solicited
+   * before the visit (its job is due 3 days after payment); under the booking
+   * key it took the slot of the post-visit request, which then never went out.
+   * Before the visit it keeps its own invoice key, as every job sent on base.
    */
   private async reviewDedupeKey(businessId: string, entityId: string, entityType: unknown): Promise<string> {
     if (entityType === 'invoice') {
       const booking = await this.prisma.client.booking.findFirst({
-        where: { businessId, OR: [{ invoiceId: entityId }, { depositInvoiceId: entityId }] },
+        where: { businessId, status: 'COMPLETED', OR: [{ invoiceId: entityId }, { depositInvoiceId: entityId }] },
         select: { id: true },
       });
       return booking ? `review-solicitation:booking:${booking.id}` : `review-solicitation:invoice:${entityId}`;

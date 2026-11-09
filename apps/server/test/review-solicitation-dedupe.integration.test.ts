@@ -21,12 +21,25 @@
  * so a contact's unrelated purchases are each still solicited), and makes the
  * sender's dedupe atomic with storage that already exists: before any effect a
  * keyed send inserts a claim row on idempotency_keys (unique on business and
- * key; no migration) under the slot `transactional-email.dedupe:<key>`. A
- * concurrent send with the same key meets the unique index and stands down
- * (QUEUED, no provider call). The claim is given back once the outcome row is
- * written, so the notification log stays the durable record: a FAILED send can
- * be retried and a QUEUED one is deduped by its row. A claim left by a send that
- * died mid-flight is taken over once older than the stale window (15 minutes).
+ * key; no migration) under the slot `transactional-email.dedupe:<key>`. The
+ * claim is given back once the outcome row is written, so the notification log
+ * stays the durable record: a FAILED send can be retried and a QUEUED one is
+ * deduped by its row. A claim left by a send that died mid-flight is taken over
+ * once older than the stale window (15 minutes).
+ *
+ * Review repairs (W3-D17b-REVIEW-SOLICIT-DEDUPE-repair):
+ *   - SEC-D17b-1 / CR-D17b-2: a concurrent send that meets a live claim no
+ *     longer answers QUEUED (nothing was queued for it, and callers such as
+ *     KEY's invoice_sent tool read QUEUED as "will be delivered"). It waits,
+ *     bounded, for the holder's outcome: it answers from the holder's
+ *     SENT/QUEUED row, or claims the key and sends itself when the holder
+ *     failed; a claim still held at the bound answers FAILED (not sent).
+ *   - SEC-D17b-2: the re-read under the claim (a holder that wrote its row and
+ *     gave the key back between a sender's first read and its claim) is pinned.
+ *   - CR-D17b-1: an invoice job takes the booking key only when that booking's
+ *     visit has happened (the booking is COMPLETED when the job runs). A deposit
+ *     or prepaid final invoice whose job runs before the visit keeps its own
+ *     invoice key, so the post-visit request still goes out.
  *
  * What runs for real against DATABASE_URL: PrismaService, ReviewSolicitationService
  * (its event handlers, which write the jobs, and processPendingJobs), and
@@ -112,8 +125,14 @@ const gmailStub = {
 /** The real sender over the real database, the provider stood in; every send's input and answer recorded. */
 type SendCall = { input: any; result: any };
 const sendCalls: SendCall[] = [];
-function sender() {
-  const real = new TransactionalEmailClass(prismaService, gmailStub);
+/**
+ * opts.prisma: a stand-in PrismaService (a client proxy over the real one);
+ * opts.claimWaitMs: shortens the bound a send waits on a live claim (SEC-D17b-1;
+ * 30 s in the service) so the bound itself can be exercised.
+ */
+function sender(opts: { prisma?: any; claimWaitMs?: number } = {}) {
+  const real = new TransactionalEmailClass(opts.prisma ?? prismaService, gmailStub);
+  if (opts.claimWaitMs !== undefined) real.dedupeClaimWaitMs = opts.claimWaitMs;
   return {
     real,
     send: async (input: any) => {
@@ -146,6 +165,48 @@ function narrowedPrisma() {
   return { client };
 }
 
+/**
+ * SEC-D17b-2: a Prisma client whose first idempotencyKey.create (the sender's
+ * claim) reports `entered` and is held until `open` resolves; everything else is
+ * the real client.
+ */
+function gatedClaimPrisma(gate: { entered: () => void; open: Promise<void> }) {
+  const realClient = prismaService.client;
+  let gated = false;
+  const keys = new Proxy(realClient.idempotencyKey, {
+    get(target, prop) {
+      if (prop === 'create') {
+        return async (args: any) => {
+          if (!gated) {
+            gated = true;
+            gate.entered();
+            await gate.open;
+          }
+          return target.create(args);
+        };
+      }
+      const value = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  const client = new Proxy(realClient, {
+    get(target, prop) {
+      if (prop === 'idempotencyKey') return keys;
+      const value = Reflect.get(target, prop);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return { client };
+}
+
+async function until(cond: () => Promise<boolean>, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await cond())) {
+    if (Date.now() > deadline) throw new Error(`${P} condition not met within ${timeoutMs} ms`);
+    await pause(20);
+  }
+}
+
 /** A runner instance (a server instance's hourly tick): the real service over a narrowed client and the real sender. */
 function runner() {
   return new ReviewSolicitationClass(narrowedPrisma(), sender());
@@ -162,7 +223,7 @@ async function invoice(id: string) {
   });
 }
 
-async function booking(id: string, opts: { invoiceId?: string; depositInvoiceId?: string } = {}) {
+async function booking(id: string, opts: { invoiceId?: string; depositInvoiceId?: string; status?: string } = {}) {
   const start = new Date(Date.UTC(2026, 9, 1, 13, 0, 0));
   return db.booking.create({
     data: {
@@ -172,7 +233,7 @@ async function booking(id: string, opts: { invoiceId?: string; depositInvoiceId?
       serviceId: ID.service,
       startTime: start,
       endTime: new Date(start.getTime() + 60 * 60_000),
-      status: 'COMPLETED',
+      status: opts.status ?? 'COMPLETED',
       invoiceId: opts.invoiceId ?? null,
       depositInvoiceId: opts.depositInvoiceId ?? null,
     },
@@ -214,6 +275,28 @@ function reviewInput(dedupeKey: string) {
     templateData: { productNames: ['your service'] },
     dedupeKey,
   };
+}
+
+/**
+ * The shape of KEY's invoice_sent tool's send (flow-orchestrator.service.ts),
+ * keyed `invoice_sent_<invoice>`. The total is a number here: the template's
+ * formatCurrency needs one (the tool's toFixed(2) string fails the render; a
+ * separate, pre-existing defect outside this packet).
+ */
+function invoiceSentInput(dedupeKey: string) {
+  return {
+    businessId: ID.biz,
+    type: 'invoice_sent',
+    recipientEmail: CONTACT_EMAIL,
+    recipientName: 'V89q Customer',
+    contactId: ID.contact,
+    templateData: { invoiceNumber: `${P}INV-RACE`, total: 100, currency: 'TTD', invoiceUrl: 'https://example.test/i/x' },
+    dedupeKey,
+  };
+}
+
+async function logRows(type: string) {
+  return db.customerNotificationLog.findMany({ where: { businessId: ID.biz, type }, orderBy: { createdAt: 'asc' } });
 }
 
 // ---------------------------------------------------------------------------
@@ -305,15 +388,17 @@ describe('W3-D17b-REVIEW-SOLICIT-DEDUPE: a booking is solicited for a review onc
 
     expect(providerSends).toHaveLength(1);
     expect(providerSends[0]).toMatchObject({ businessId: ID.biz, to: CONTACT_EMAIL });
-    // Both jobs ran their send, under one key; the one that met the held claim stood down.
+    // Both jobs ran their send, under one key; the one that met the held claim
+    // waited for the holder's outcome and answered from its SENT row (SEC-D17b-1:
+    // never QUEUED, nothing was queued for it).
     expect(sendCalls.map((c) => c.input.dedupeKey)).toEqual([bookingKey(bk.id), bookingKey(bk.id)]);
-    expect(sendCalls.map((c) => c.result.status).sort()).toEqual(['QUEUED', 'SENT']);
+    expect(sendCalls.map((c) => c.result.status)).toEqual(['SENT', 'SENT']);
     expect((await sentRows()).map((r: any) => r.messageId)).toEqual([bookingKey(bk.id)]);
     expect((await jobs()).map((j: any) => j.status)).toEqual(['COMPLETED', 'COMPLETED']);
     expect(await claimRows()).toEqual([]);
   }, 30_000);
 
-  it('RS-02: two concurrent sends with one dedupe key through the real transactional sender reach the provider once; the second stands down QUEUED on the held claim, and the claim is given back after the SENT row', async () => {
+  it('RS-02: two concurrent sends with one dedupe key through the real transactional sender reach the provider once; the second waits on the held claim and answers SENT from the holder\'s row (SEC-D17b-1, never QUEUED), and the claim is given back after the SENT row', async () => {
     const one = sender();
     const two = sender();
     statusGate = 2;
@@ -321,12 +406,14 @@ describe('W3-D17b-REVIEW-SOLICIT-DEDUPE: a booking is solicited for a review onc
     await Promise.all([one.send(reviewInput(bookingKey(`${P}bk_direct`))), two.send(reviewInput(bookingKey(`${P}bk_direct`)))]);
 
     expect(providerSends).toHaveLength(1);
-    expect(sendCalls.map((c) => c.result.status).sort()).toEqual(['QUEUED', 'SENT']);
+    expect(sendCalls.map((c) => c.result.status)).toEqual(['SENT', 'SENT']);
+    // The waiter's answer is the holder's row (its messageId is the key); the holder's is the provider's id.
+    expect(sendCalls.map((c) => c.result.messageId).sort()).toEqual([bookingKey(`${P}bk_direct`), `${P}provider_1`].sort());
     expect((await sentRows()).map((r: any) => r.messageId)).toEqual([bookingKey(`${P}bk_direct`)]);
     expect(await claimRows()).toEqual([]);
   }, 30_000);
 
-  it('RS-03: one runner tick over the booking and deposit-invoice solicitations of one booking sends once; the second answers from the SENT row under the booking key', async () => {
+  it('RS-03: one runner tick over the booking and deposit-invoice solicitations of one booking whose visit has happened (COMPLETED when the deposit job runs, CR-D17b-1) sends once; the second answers from the SENT row under the booking key', async () => {
     const dep = await invoice('inv_deposit');
     const bk = await booking('bk3', { depositInvoiceId: dep.id });
     const writer = runner();
@@ -393,13 +480,16 @@ describe('W3-D17b-REVIEW-SOLICIT-DEDUPE: the dedupe claim is given back with the
     expect(queuedRows.map((r: any) => r.status)).toEqual(['QUEUED']);
   }, 30_000);
 
-  it('RS-06: a claim held by a live send is respected (QUEUED, no provider call, the claim untouched); a claim left by a send that died over 15 minutes ago is taken over and the send goes out', async () => {
+  it('RS-06: a claim held by a live send is respected: the send waits for it up to its bound and, still held, answers FAILED (not sent, SEC-D17b-1: never QUEUED), no provider call, no log row, the claim untouched; a claim left by a send that died over 15 minutes ago is taken over and the send goes out', async () => {
     const liveKey = bookingKey(`${P}bk_live`);
     await db.idempotencyKey.create({ data: { id: `${P}claim_live`, businessId: ID.biz, idempotencyKey: claimSlot(liveKey), status: 'claimed' } });
 
-    const held = await sender().send(reviewInput(liveKey));
-    expect(held).toEqual({ status: 'QUEUED' });
+    const started = Date.now();
+    const held = await sender({ claimWaitMs: 600 }).send(reviewInput(liveKey));
+    expect(held).toEqual({ status: 'FAILED' });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(600); // it waited for the holder before answering
     expect(providerSends).toHaveLength(0);
+    expect(await logRows('review_request')).toEqual([]);
     expect((await claimRows()).map((r: any) => r.id)).toEqual([`${P}claim_live`]);
 
     const deadKey = bookingKey(`${P}bk_dead`);
@@ -413,5 +503,95 @@ describe('W3-D17b-REVIEW-SOLICIT-DEDUPE: the dedupe claim is given back with the
     expect(providerSends).toHaveLength(1);
     expect((await claimRows()).map((r: any) => r.id)).toEqual([`${P}claim_live`]);
     expect((await sentRows()).map((r: any) => r.messageId)).toEqual([deadKey]);
+  }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// RS-07..10: review repairs (W3-D17b-REVIEW-SOLICIT-DEDUPE-repair)
+// ---------------------------------------------------------------------------
+describe('W3-D17b-REVIEW-SOLICIT-DEDUPE repair: the post-visit request is not taken by an invoice paid before the visit (CR-D17b-1)', () => {
+  it('RS-07: CR-D17b-1: a deposit paid before the visit is solicited under its own invoice key, so the post-visit booking.completed request still goes out under the booking key (two sends, as on base)', async () => {
+    const dep = await invoice('inv_dep_early');
+    const bk = await booking('bk7', { depositInvoiceId: dep.id, status: 'CONFIRMED' });
+    const writer = runner();
+    await invoicePaid(writer, dep.id);
+    await makeJobsDue();
+    await runner().processPendingJobs(); // the deposit's job, due before the visit
+
+    expect(providerSends).toHaveLength(1);
+
+    await db.booking.update({ where: { id: bk.id }, data: { status: 'COMPLETED' } });
+    await bookingCompleted(writer, bk.id);
+    await makeJobsDue();
+    await runner().processPendingJobs(); // the visit's job
+
+    expect(providerSends).toHaveLength(2);
+    expect(sendCalls.map((c) => c.input.dedupeKey)).toEqual([invoiceKey(dep.id), bookingKey(bk.id)]);
+    expect(sendCalls.map((c) => c.result.status)).toEqual(['SENT', 'SENT']);
+    expect((await sentRows()).map((r: any) => r.messageId)).toEqual([invoiceKey(dep.id), bookingKey(bk.id)]);
+  }, 30_000);
+
+  it('RS-08: CR-D17b-1: a final invoice drawn up and paid before the visit (the Create-invoice button on a CONFIRMED booking) keeps its own invoice key too, so the post-visit request still goes out', async () => {
+    const inv = await invoice('inv_prepaid');
+    const bk = await booking('bk8', { invoiceId: inv.id, status: 'CONFIRMED' });
+    const writer = runner();
+    await invoicePaid(writer, inv.id);
+    await makeJobsDue();
+    await runner().processPendingJobs();
+
+    await db.booking.update({ where: { id: bk.id }, data: { status: 'COMPLETED' } });
+    await bookingCompleted(writer, bk.id);
+    await makeJobsDue();
+    await runner().processPendingJobs();
+
+    expect(providerSends).toHaveLength(2);
+    expect(sendCalls.map((c) => c.input.dedupeKey)).toEqual([invoiceKey(inv.id), bookingKey(bk.id)]);
+    expect((await sentRows()).map((r: any) => r.messageId)).toEqual([invoiceKey(inv.id), bookingKey(bk.id)]);
+  }, 30_000);
+});
+
+describe('W3-D17b-REVIEW-SOLICIT-DEDUPE repair: a send that meets a live claim answers the real outcome, never QUEUED (SEC-D17b-1, CR-D17b-2)', () => {
+  it('RS-09: SEC-D17b-1 / CR-D17b-2: when the claim holder fails at the provider, the concurrent send with its key waits, claims the key and sends itself (SENT, one provider send, a FAILED then a SENT row), for a review request and for KEY\'s invoice_sent send alike; no claim is left', async () => {
+    for (const input of [reviewInput(bookingKey(`${P}bk_holder_failed`)), invoiceSentInput(`invoice_sent_${P}inv_race`)]) {
+      providerSends.length = 0;
+      failProviderAttempts = 3; // every attempt of the holder (about 3 s through its 1 s and 2 s backoff)
+
+      const holder = sender().send(input);
+      await until(async () => (await claimRows()).length === 1); // the holder has claimed the key
+      const waiter = sender().send(input);
+      const [a, b] = await Promise.all([holder, waiter]);
+
+      expect(a).toEqual({ status: 'FAILED' });
+      expect(b.status).toBe('SENT'); // the packet head answered QUEUED here, with nothing queued
+      expect(providerSends).toHaveLength(1);
+      const rows = await logRows(input.type);
+      expect(rows.map((r: any) => [r.status, r.messageId])).toEqual([['FAILED', null], ['SENT', input.dedupeKey]]);
+      expect(await claimRows()).toEqual([]);
+    }
+  }, 30_000);
+});
+
+describe('W3-D17b-REVIEW-SOLICIT-DEDUPE repair: the dedupe read is repeated under the claim (SEC-D17b-2)', () => {
+  it('RS-10: SEC-D17b-2: a sender that read before the holder\'s SENT row existed and claims after the holder gave the key back answers SENT from the row under its claim; the provider is reached once', async () => {
+    const key = bookingKey(`${P}bk_reread`);
+    let entered!: () => void;
+    const enteredP = new Promise<void>((r) => { entered = r; });
+    let open!: () => void;
+    const openP = new Promise<void>((r) => { open = r; });
+    const late = sender({ prisma: gatedClaimPrisma({ entered, open: openP }) });
+
+    const lateSend = late.send(reviewInput(key));
+    await enteredP; // the late sender read (no row yet) and is about to claim
+
+    const first = await sender().send(reviewInput(key)); // claims, sends, writes SENT, gives the key back
+    expect(first.status).toBe('SENT');
+    expect(await claimRows()).toEqual([]);
+
+    open();
+    const second = await lateSend;
+    expect(second).toEqual({ status: 'SENT', messageId: key });
+    expect(providerSends).toHaveLength(1);
+    expect((await sentRows()).map((r: any) => r.messageId)).toEqual([key]);
+    expect(await claimRows()).toEqual([]);
   }, 30_000);
 });
