@@ -431,6 +431,9 @@ export class RevenuePostingService {
     // Review SEC-V55C-4 (PL07-ST-3): beside KEY only, the person its command
     // ran for is kept as data.initiatedBy, as the copy keeps it (audit data,
     // never authority; never a system actor itself).
+    // W5-FEED-CATEGORIES (CR-FCC-1, D-90): the row is written with category
+    // PAYMENT, so ?category= finds a payment's one feed row as it found the
+    // CRM invoice.payment_recorded copy D-90 removed (category CONTACT).
     const recordedBy = opts.createdById ?? null;
     const initiatedBy =
       isSystemActor(recordedBy) && opts.initiatedBy && !isSystemActor(opts.initiatedBy) ? opts.initiatedBy : null;
@@ -443,6 +446,7 @@ export class RevenuePostingService {
       title: `Payment recorded: ${payment.currency} ${gross}`,
       detail: `Invoice ${payment.invoice?.invoiceNumber ?? payment.invoiceId}`,
       contactId: payment.invoice?.contactId ?? undefined,
+      category: 'PAYMENT',
       data: { amount: gross, currency: payment.currency, provider: payment.provider, ...(initiatedBy ? { initiatedBy } : {}) },
       ...(recordedBy ? { actorType: isSystemActor(recordedBy) ? 'SYSTEM' as const : 'USER' as const, actorId: recordedBy } : {}),
       occurredAt: new Date(),
@@ -464,6 +468,7 @@ export class RevenuePostingService {
           title: entry.title,
           detail: entry.detail,
           contactId: entry.contactId,
+          category: entry.category,
           data: entry.data as Prisma.InputJsonValue,
           actorType: entry.actorType,
           actorId: entry.actorId,

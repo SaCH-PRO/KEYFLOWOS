@@ -4,6 +4,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SystemEmailService } from '../notifications/system-email.service';
 import { schedulersDisabled } from '../../core/config/env';
+import { redactAddresses } from '../../core/security/redaction';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 /** Its own flag, read when onModuleInit runs (NODE_ENV=test is handled by schedulersDisabled(), V1-24b). */
@@ -153,7 +154,9 @@ export class AiUsageAlertSchedulerService implements OnModuleInit, OnModuleDestr
           });
         }
       } catch (err: any) {
-        this.logger.warn(`Email notification failed for alert ${alert.id}: ${(err as Error).message}`);
+        // W5-SYSTEM-EMAIL-CALLERS (SEC-W4HK-1, 9B-D2): the sink's error text can
+        // quote the recipient, so the alert id stays and any address is redacted.
+        this.logger.warn(`Email notification failed for alert ${alert.id}: ${redactAddresses((err as Error).message)}`);
       }
     }
 

@@ -49,6 +49,40 @@ function isTrashableModel(value: string): value is TrashableModel {
   return TRASHABLE_MODELS.includes(value as TrashableModel);
 }
 
+/**
+ * W5-TRASH-LIST-500 (D46-S09g): the column a trashable model names its
+ * business by, where it is not businessId. Opportunity names its business
+ * posterBusinessId and has no businessId, so the listing's businessId filter
+ * made Prisma refuse queryModel('opportunity') and GET trash with no model
+ * answered 500 for every caller.
+ */
+const TENANT_COLUMN: Partial<Record<TrashableModel, 'posterBusinessId'>> = { opportunity: 'posterBusinessId' };
+
+/**
+ * The trash's filter for `model`: its trashed rows in `businessId`, on the
+ * model's own tenant column. The listing reads with it, and restore and
+ * permanent delete look the row up with it (W5-TRASH-LIST-500 review repair
+ * SEC-TL500-1 / CR-TL500-1): that lookup is the only tenant check, as the
+ * write keys on the id alone.
+ *
+ * W5-TRASH-LIST-500 review repair SEC-TL500-2: the client's soft-delete
+ * extension overwrites a top-level deletedAt with null for the models it
+ * covers (Contact, Invoice, Quote and eight more), so { deletedAt: { not: null } }
+ * alone matched their LIVE rows: ?model=contact listed every live contact,
+ * PRIVATE ones included, to any member, and restore and delete acted on live
+ * rows. The NOT clause carries the same condition where the extension leaves
+ * it, so such a model matches no row (its trashed rows stay unreadable here
+ * until packages/db offers an opt-out) instead of its live ones.
+ */
+function trashedWhere(model: TrashableModel, businessId: string): Record<string, unknown> {
+  return { [TENANT_COLUMN[model] ?? 'businessId']: businessId, deletedAt: { not: null }, NOT: { deletedAt: null } };
+}
+
+/** A row with deletedAt set: trash. A row without it is a live record, never listed or acted on here. */
+function isTrashed(row: { deletedAt?: unknown } | null | undefined): boolean {
+  return row != null && row.deletedAt != null;
+}
+
 @Controller('api/businesses/:businessId/trash')
 @UseGuards(BusinessGuard)
 export class TrashController {
@@ -59,6 +93,9 @@ export class TrashController {
 
   // W4-TRASH-D46 review repair SEC-TRASH-D46-1: a revenue model is listed only
   // to a caller revenueReadRefusal admits.
+  // W5-TRASH-LIST-500 (D46-S09g): each model is filtered on its own tenant
+  // column (trashedWhere), and the every-model listing lists trashed rows only.
+  // W5-TRASH-LIST-500 review repair SEC-TL500-2 (D46-S09i): so does ?model=.
   @Get()
   @RequireModuleScope('settings')
   async listTrashed(
@@ -68,8 +105,6 @@ export class TrashController {
     @Query('model') model?: string,
     @Req() req?: ActorRequest,
   ) {
-    const where: Record<string, unknown> = { businessId, deletedAt: { not: null } };
-
     if (model) {
       if (!isTrashableModel(model)) {
         throw new BadRequestException(`Model '${model}' is not trashable`);
@@ -78,7 +113,8 @@ export class TrashController {
         const refusal = await this.revenueReadRefusal(req, businessId);
         if (refusal) throw new ForbiddenException(refusal);
       }
-      const items = await this.queryModel(model, where, limit, offset);
+      const where = trashedWhere(model, businessId);
+      const items = (await this.queryModel(model, where, limit, offset)).filter(isTrashed);
       const total = await this.countModel(model, where);
       return { items, total, model };
     }
@@ -89,8 +125,16 @@ export class TrashController {
     const allItems: Array<Record<string, unknown>> = [];
     for (const m of TRASHABLE_MODELS) {
       if (REVENUE_TRASH_SUBJECT[m] && !mayReadRevenue) continue;
-      const items = await this.queryModel(m, where, 10, 0);
-      allItems.push(...items.map((item) => ({ ...item, _model: m })));
+      const items = await this.queryModel(m, trashedWhere(m, businessId), 10, 0);
+      // W5-TRASH-LIST-500 (D46-S09g): a row with no deletedAt is live, not
+      // trash. The client's soft-delete extension rewrites the filter to
+      // deletedAt null for the models it covers (Contact, Invoice, Quote and
+      // eight more), so those answer live rows here; none is listed as trash.
+      // (Since the review repair SEC-TL500-2 trashedWhere's NOT clause keeps
+      // them from answering any row; this check stays as the last word.)
+      for (const item of items) {
+        if (isTrashed(item)) allItems.push({ ...item, _model: m });
+      }
     }
     allItems.sort((a, b) => {
       const aDate = new Date((a.deletedAt as string) || 0).getTime();
@@ -180,6 +224,10 @@ export class TrashController {
   }
 
   // W4-TRASH-D46 (D-46): a revenue model runs assertMayWriteRevenue first.
+  // W5-TRASH-LIST-500 review repair SEC-TL500-1 / CR-TL500-1 (D46-S09h): the
+  // row is looked up with the listing's filter (trashedWhere), so a trashed
+  // opportunity (no businessId column) is restored instead of answering 500;
+  // SEC-TL500-2 (D46-S09i): a live row is never acted on.
   @Post(':model/:id/restore')
   @RequireModuleScope('settings')
   async restore(
@@ -192,8 +240,8 @@ export class TrashController {
       throw new BadRequestException(`Model '${model}' is not trashable`);
     }
     await this.assertMayWriteRevenue(req, businessId, model);
-    const existing = await this.findUnique(model, { id, businessId, deletedAt: { not: null } });
-    if (!existing) throw new NotFoundException(`Trashed ${model} not found`);
+    const existing = await this.findUnique(model, { id, ...trashedWhere(model, businessId) });
+    if (!isTrashed(existing)) throw new NotFoundException(`Trashed ${model} not found`);
 
     let restored: any;
     if (model === 'product') {
@@ -207,6 +255,9 @@ export class TrashController {
   }
 
   // W4-TRASH-D46 (D-46): a revenue model runs assertMayWriteRevenue first.
+  // W5-TRASH-LIST-500 review repair SEC-TL500-1 / CR-TL500-1 (D46-S09h): the
+  // row is looked up with the listing's filter (trashedWhere), as restore does;
+  // SEC-TL500-2 (D46-S09i): a live row is never deleted from here.
   @Delete(':model/:id')
   @RequireModuleScope('settings')
   async permanentDelete(
@@ -219,8 +270,8 @@ export class TrashController {
       throw new BadRequestException(`Model '${model}' is not trashable`);
     }
     await this.assertMayWriteRevenue(req, businessId, model);
-    const existing = await this.findUnique(model, { id, businessId, deletedAt: { not: null } });
-    if (!existing) throw new NotFoundException(`Trashed ${model} not found`);
+    const existing = await this.findUnique(model, { id, ...trashedWhere(model, businessId) });
+    if (!isTrashed(existing)) throw new NotFoundException(`Trashed ${model} not found`);
 
     if (model === 'product') {
       await this.catalog.deleteProduct(businessId, id);

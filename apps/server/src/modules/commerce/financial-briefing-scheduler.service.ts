@@ -4,6 +4,7 @@ import { FinancialCopilotService } from './financial-copilot.service';
 import { SystemEmailService } from '../notifications/system-email.service';
 import { safeInterval } from '../../core/scheduling/safe-interval';
 import { schedulersDisabled } from '../../core/config/env';
+import { redactAddresses } from '../../core/security/redaction';
 
 const CHECK_INTERVAL_MS = 60 * 1000;
 const TARGET_HOUR = 7;
@@ -260,13 +261,15 @@ export class FinancialBriefingSchedulerService implements OnModuleInit, OnModule
                   subject: `Weekly Financial Briefing — ${business.name}`,
                   html,
                 });
-                this.logger.log(`[FinancialBriefingScheduler] Email sent to ${owner.email} for ${business.name}`);
+                // W5-SYSTEM-EMAIL-CALLERS (SE-3, 9B-D2): the business id, never the owner's address.
+                this.logger.log(`[FinancialBriefingScheduler] Email sent for ${business.id}`);
               } else {
                 this.logger.warn(`[FinancialBriefingScheduler] No owner email for ${business.id} — email skipped`);
               }
             } catch (emailErr) {
+              // W5-SYSTEM-EMAIL-CALLERS (SEC-W4HK-1, 9B-D2): the sink's error text can quote the address.
               this.logger.error(
-                `[FinancialBriefingScheduler] Email send failed for ${business.id}: ${(emailErr as Error).message}`,
+                `[FinancialBriefingScheduler] Email send failed for ${business.id}: ${redactAddresses((emailErr as Error).message)}`,
               );
             }
           }

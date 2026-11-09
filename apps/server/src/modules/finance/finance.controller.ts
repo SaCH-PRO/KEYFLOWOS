@@ -39,6 +39,8 @@ import { AccountingPeriodService, type CreateAccountingPeriodInput, type CloseAc
 import { BankConnectionService, type CreateBankConnectionInput, type UpdateBankConnectionInput } from './bank-connection.service';
 import { ExchangeRateService, type CreateExchangeRateInput } from './exchange-rate.service';
 import { FixedAssetService, type CreateFixedAssetInput, type UpdateFixedAssetInput } from './fixed-asset.service';
+import { SystemEmailSendError } from '../notifications/system-email.service';
+import { redactAddresses } from '../../core/security/redaction';
 
 /**
  * FIN2 — read-only receivables endpoints.
@@ -1166,16 +1168,28 @@ export class FinanceController {
     if (Number.isNaN(periodStart.getTime()) || Number.isNaN(periodEnd.getTime())) {
       throw new BadRequestException('periodStart / periodEnd are not valid dates');
     }
-    return this.accountantExportEmail.send({
-      businessId,
-      periodStart,
-      periodEnd,
-      basis: body?.basis,
-      to: body?.to ?? null,
-      message: body?.message ?? null,
-      saveRecipient: Boolean(body?.saveRecipient),
-      userId: req.user.id,
-    });
+    try {
+      return await this.accountantExportEmail.send({
+        businessId,
+        periodStart,
+        periodEnd,
+        basis: body?.basis,
+        to: body?.to ?? null,
+        message: body?.message ?? null,
+        saveRecipient: Boolean(body?.saveRecipient),
+        userId: req.user.id,
+      });
+    } catch (err) {
+      // W5-SYSTEM-EMAIL-CALLERS (SEC-W4HK-1, 9B-D2): this error escapes to the
+      // global filter, whose 500 line logs its stack and whose error registry
+      // keeps its message. The sink's message can quote the recipient, so the
+      // same error class, outcome and provider code go on with any address
+      // redacted (and no cause attached). The 500 response is unchanged.
+      if (err instanceof SystemEmailSendError) {
+        throw new SystemEmailSendError(redactAddresses(err.message), err.outcome, err.providerCode);
+      }
+      throw err;
+    }
   }
 
   // ---------- Cash Reserve Buckets ----------
