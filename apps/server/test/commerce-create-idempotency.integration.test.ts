@@ -47,6 +47,13 @@
  *                   invoice, not PlanLimitGuard's 403 (H-06); another member of the business presenting
  *                   the same key and body is a 409, never the first member's document (H-08). See the
  *                   describe block at the end.
+ *   H-09 RED-BEFORE V1-45b review SEC-V45b-2: the invoice create body (a first create and a keyed
+ *                   replay) carries the contact projected as every other invoice write projects it
+ *                   (id, businessId, firstName, lastName, email), never the whole Contact row; the
+ *                   quote create twin already did (control)
+ *   H-10 (todo)     V1-45b review SEC-V45b-1 / CR-V45b-1: a replay (or a lost burst race) emits no
+ *                   second invoice.create / quote.create business event. Outside this packet's write
+ *                   set (BusinessEventInterceptor); see the it.todo.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed per business), TeamAuditInterceptor, CommerceService,
@@ -98,6 +105,8 @@ const ID = {
   contactH2: `${P}contactH2`,
   contactHB: `${P}contactHB`,
   contactL: `${P}contactL`,
+  // V1-45b review SEC-V45b-2: a contact with CRM-only fields, made PRIVATE mid-case (H-09).
+  contactHP: `${P}contactHP`,
 };
 
 /** The client keys. One string is reused across tenants on purpose (I-04). */
@@ -123,6 +132,8 @@ const HKEY = {
   limitNew: `${P}h-limit-new-6d35`,
   member: `${P}h-member-a7c0`,
   memberOwn: `${P}h-member-own-4f19`,
+  projection: `${P}h-projection-2e6b`,
+  projectionQuote: `${P}h-projection-quote-8c41`,
 };
 
 /** V1-45b (H-06): the businesses whose stubbed plan answers that the invoice limit is reached. */
@@ -373,6 +384,17 @@ beforeAll(async () => {
     }
     if (basis === 'ACCRUAL') await coa.ensureDefaults(biz);
   }
+  await db.contact.create({
+    data: {
+      id: ID.contactHP,
+      businessId: ID.bizH,
+      firstName: 'V45A',
+      lastName: 'Projected',
+      email: `${P}contactHP@test.local`,
+      phone: '+18685550100',
+      notesInternal: `${P}first internal note`,
+    },
+  });
   await db.user.create({ data: { id: ID.member, email: `${P}member@test.local`, role: 'USER' } });
   await db.membership.create({
     data: { id: `${ID.bizH}_m_member`, userId: ID.member, businessId: ID.bizH, role: 'STAFF', permissionScopes: { revenue: 'write' } },
@@ -780,4 +802,65 @@ describe('V1-45b create idempotency — the HTTP door (Idempotency-Key header, D
     expect(memberQuote.status).toBe(409);
     expect(JSON.stringify(memberQuote.body)).not.toContain(ownerQuote.body.id);
   });
+
+  // V1-45b review SEC-V45b-2 (the R28-ST-01 / SEC-CMF1-2 class): the service
+  // answers a create, and a keyed replay, with the whole Contact row as it
+  // stands now (`include: { contact: true }`), and the invoice route handed it
+  // back unprojected, so a revenue:write member with no CRM scope read a
+  // PRIVATE contact's internal notes, phone, owner and visibility.
+  it('H-09 RED-BEFORE (SEC-V45b-2): the invoice create body, first and replayed, carries only the projected contact; the quote create twin is the control', async () => {
+    const projected = { id: ID.contactHP, businessId: ID.bizH, firstName: 'V45A', lastName: 'Projected', email: `${P}contactHP@test.local` };
+    const body = httpInvoiceBody(ID.contactHP, { notes: 'v45a h-09' });
+    const first = await postInvoice(ID.bizH, body, { key: HKEY.projection, user: ID.member });
+    expect(first.status, JSON.stringify(first.body)).toBe(201);
+    expect(first.body.contact, 'a first create').toEqual(projected);
+    expect(first.body.contactId).toBe(ID.contactHP);
+    expect(first.body.items).toHaveLength(1);
+    expect(JSON.stringify(first.body)).not.toContain('first internal note');
+    expect(JSON.stringify(first.body)).not.toContain('+18685550100');
+
+    // The owner makes the contact PRIVATE and records CRM-only fields.
+    await db.contact.update({
+      where: { id: ID.contactHP },
+      data: { visibility: 'PRIVATE', ownerId: ID.owner, notesInternal: `${P}secret internal note`, phone: '+18685550123' },
+    });
+
+    const replay = await postInvoice(ID.bizH, body, { key: HKEY.projection, user: ID.member });
+    expect(replay.status, JSON.stringify(replay.body)).toBe(201);
+    expect(replay.body.id).toBe(first.body.id);
+    expect(replay.body.contact, 'a keyed replay').toEqual(projected);
+    for (const leaked of ['secret internal note', '+18685550123', 'PRIVATE', 'notesInternal', 'ownerId']) {
+      expect(JSON.stringify(replay.body), leaked).not.toContain(leaked);
+    }
+    // The same member's own read of the invoice discloses no more than that.
+    const read = await agent().get(`/commerce/businesses/${ID.bizH}/invoices/${first.body.id}`).set(HEADER, ID.member);
+    expect(read.status, JSON.stringify(read.body)).toBe(200);
+    expect(Object.keys(replay.body.contact)).toEqual(expect.arrayContaining(Object.keys(read.body.contact)));
+
+    // Control: the quote create twin already projects, first and replayed.
+    const quoteBody = httpQuoteBody(ID.contactHP, { notes: 'v45a h-09' });
+    const quote = await postQuote(ID.bizH, quoteBody, { key: HKEY.projectionQuote, user: ID.member });
+    expect(quote.status, JSON.stringify(quote.body)).toBe(201);
+    const quoteReplay = await postQuote(ID.bizH, quoteBody, { key: HKEY.projectionQuote, user: ID.member });
+    expect(quoteReplay.body.id).toBe(quote.body.id);
+    for (const res of [quote, quoteReplay]) {
+      expect(res.body.contact).toEqual(projected);
+      expect(JSON.stringify(res.body)).not.toContain('secret internal note');
+    }
+  }, 30_000);
+
+  // V1-45b review SEC-V45b-1 / CR-V45b-1 (confirmed by a probe with the
+  // production BusinessEventInterceptor installed globally: three keyed POSTs
+  // of one invoice emitted three invoice.create events, a Promise.all burst of
+  // three emitted three for one invoice, two keyed POST quotes emitted two
+  // quote.create). The global BusinessEventInterceptor (APP_INTERCEPTOR) has
+  // an isReplay rule only for the payment routes (R19-ST-1); the create routes
+  // need one too, and a lost burst race (whose startedAt precedes the winner's
+  // createdAt) needs the handler to mark its replay answer. That file, and a
+  // service-side replay mark, are outside the V1-45b write set (commerce
+  // controller, app-bootstrap, the service's request hash, TeamAuditInterceptor
+  // / PlanLimitGuard): a follow-up packet.
+  it.todo(
+    'H-10 (SEC-V45b-1 / CR-V45b-1): a keyed replay, or the losers of a concurrent burst, emit no second invoice.create / quote.create business event (outside the write set: BusinessEventInterceptor ROUTE_EVENT_RULES has no isReplay rule for the create routes; follow-up packet)',
+  );
 });

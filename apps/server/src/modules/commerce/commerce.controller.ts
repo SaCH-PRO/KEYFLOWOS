@@ -752,7 +752,7 @@ export class CommerceController {
     // ValidationPipe could not see), and only its declared fields are
     // forwarded. The service computes subtotal, tax, discount and total; the
     // tenant is the guarded path param, never a body field.
-    return this.commerce.createInvoice({
+    const invoice = await this.commerce.createInvoice({
       businessId,
       contactId: body.contactId,
       items: body.items.map(({ description, quantity, unitPrice, productId }) => ({ description, quantity, unitPrice, productId })),
@@ -764,6 +764,11 @@ export class CommerceController {
       notes: body.notes,
       ...idempotency,
     });
+    // V1-45b review SEC-V45b-2 (the SEC-CMF1-2 class): the service answers a
+    // create, and a keyed replay, with the whole Contact row as it stands now;
+    // the body carries only the projected contact, as every other invoice
+    // write does (the quote create twin uses toQuoteWriteResponse).
+    return toInvoiceWriteResponse(invoice);
   }
 
   /**
