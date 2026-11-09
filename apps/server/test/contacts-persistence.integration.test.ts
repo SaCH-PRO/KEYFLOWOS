@@ -80,6 +80,7 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { trackAsyncWrites } from './helpers/async-writes.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -108,6 +109,8 @@ const TARGET_EMAIL = `${P}target@test.local`;
 
 let db: any;
 let app: any;
+/** W4-FLAKE-HARDEN: the in-flight fire-and-forget writes (installed in beforeAll). */
+let asyncWrites: ReturnType<typeof trackAsyncWrites> | undefined;
 
 // ---- DTO validation metadata, derived from the controller source ---------
 const CONTROLLER_DIR = path.resolve(__dirname, '../src/modules/crm');
@@ -274,20 +277,30 @@ async function traceCounts() {
   };
 }
 
-/** Let any fire-and-forget write a request might have started reach the database. */
-const settle = () => new Promise((r) => setTimeout(r, 300));
+/**
+ * Wait until every fire-and-forget write a request started has landed (or
+ * failed): the ContactAuditEntry write (DEC-CONTACTS-002, ContactAuditService
+ * .write) and the team log the TeamAuditInterceptor writes after the response.
+ *
+ * W4-FLAKE-HARDEN: this was a fixed 300 ms sleep. Under load an earlier case's
+ * audit entry and team log landed after it, between a refused request's
+ * baseline and its after-count, and the refusal was charged with +1 audit and
+ * +1 team log. It now waits on the writes themselves (trackAsyncWrites, in
+ * beforeAll): both are started before the response is sent, so once a
+ * request has answered, its writes are in flight here and drain() awaits them.
+ */
+const settle = async () => {
+  if (!asyncWrites) throw new Error('settle(): the async-write tracker is not installed');
+  await asyncWrites.drain();
+};
 
-/** The ContactAuditEntry write is fire-and-forget (DEC-CONTACTS-002): wait for it to land. */
-async function auditEntries(contactId: string, action: string, timeoutMs = 5_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const rows = await db.contactAuditEntry.findMany({
-      where: { businessId: ID.bizA, contactId, action },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (rows.length > 0 || Date.now() > deadline) return rows;
-    await new Promise((r) => setTimeout(r, 50));
-  }
+/** The ContactAuditEntry write is fire-and-forget (DEC-CONTACTS-002): wait for it to land (W4-FLAKE-HARDEN: drained, then read). */
+async function auditEntries(contactId: string, action: string) {
+  await settle();
+  return db.contactAuditEntry.findMany({
+    where: { businessId: ID.bizA, contactId, action },
+    orderBy: { createdAt: 'asc' },
+  });
 }
 
 /** A refused write: the given status, and the target row plus every trace exactly as before. */
@@ -358,6 +371,13 @@ beforeAll(async () => {
   const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
   const { CreateContactDto } = await import('../src/modules/crm/dto/create-contact.dto');
   const { UpdateContactDto } = await import('../src/modules/crm/dto/update-contact.dto');
+
+  // ---- W4-FLAKE-HARDEN: track the two fire-and-forget writers, so settle()
+  // waits for their writes instead of sleeping (see settle above). ---------
+  asyncWrites = trackAsyncWrites([
+    [ContactAuditService.prototype, 'write'],
+    [TeamAuditInterceptor.prototype, 'record'],
+  ]);
 
   // ---- the parameter metadata tsc emits for the body-validated handlers,
   // derived from crm.controller.ts (see DTO VALIDATION IN-PROCESS above).
@@ -481,8 +501,10 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
+  if (asyncWrites) await asyncWrites.drain();
   if (app) await app.close();
   if (db) await cleanup();
+  asyncWrites?.restore();
 });
 
 describe('fixture sanity (real rows)', () => {

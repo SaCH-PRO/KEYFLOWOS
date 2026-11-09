@@ -107,6 +107,7 @@
 import 'reflect-metadata';
 import path from 'path';
 import { isDeepStrictEqual } from 'node:util';
+import { createRequire } from 'node:module';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -580,9 +581,47 @@ describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1
   const FLOOD = 200;
   const SEEDED_EVENTS = 1000; // the bound trackEvent keeps
 
+  /**
+   * W4-FLAKE-HARDEN (MW-06): under load this case failed with 'timeout exceeded
+   * when trying to connect'. The flood is serialized on the business row, so a
+   * request queued behind it waits for the pool about (queue length) x (one
+   * UPDATE); the pool gives up after connectionTimeoutMillis (5 s), and a loaded
+   * database makes one UPDATE slow enough to pass that. The case is about what
+   * each event holds (no row lock across round trips, no interactive
+   * transaction), not about how fast Postgres is, so for this case only the
+   * shared pool waits long enough for the whole queue. The flood size, the pool
+   * size (max 20) and every assertion are unchanged. The pre-D12 interactive
+   * transaction still fails here: Prisma's own $transaction maxWait/timeout,
+   * not the pool's, is what times its queued transactions out.
+   */
+  const FLOOD_POOL_WAIT_MS = 120_000;
+
+  /** The pg Pool behind @keyflow/db, read off the next connect() it serves (the package does not export it). */
+  async function sharedPool(): Promise<{ options: { connectionTimeoutMillis?: number; max?: number } }> {
+    const fromHere = createRequire(path.join(__dirname, 'business-meta-writers.integration.test.ts'));
+    const fromDb = createRequire(fromHere.resolve('@keyflow/db'));
+    const PgPool = createRequire(fromDb.resolve('pg'))('pg-pool');
+    const original = PgPool.prototype.connect;
+    let seen: any;
+    PgPool.prototype.connect = function (this: unknown, ...args: unknown[]) {
+      seen ??= this;
+      return original.apply(this, args);
+    };
+    try {
+      await db.$queryRawUnsafe('SELECT 1');
+    } finally {
+      PgPool.prototype.connect = original;
+    }
+    if (!seen?.options) throw new Error('W4-FLAKE-HARDEN: the @keyflow/db pool was not found');
+    return seen;
+  }
+
   it(`[MW-06] RED-BEFORE: ${FLOOD} concurrent storefront events on a business already holding ${SEEDED_EVENTS} events, sent with another tenant's read and the owner's PATCH clearing stripeSecretKey: every event is recorded (newest ${SEEDED_EVENTS} kept), none fails, the other tenant's read and the PATCH succeed and the clear holds`, async () => {
     const seeded = Array.from({ length: SEEDED_EVENTS }, (_, i) => ({ type: 'page_view', itemId: `${P}seed-${i}`, timestamp: '2026-11-01T00:00:00.000Z' }));
     await reset({ ...SEEDED_META, storefrontEvents: seeded });
+    const pool = await sharedPool();
+    const poolWaitBefore = pool.options.connectionTimeoutMillis;
+    pool.options.connectionTimeoutMillis = FLOOD_POOL_WAIT_MS;
     try {
       const events = Array.from({ length: FLOOD }, (_, i) => plainSite.trackEvent(ID.biz, 'item_view', `${P}flood-${i}`));
       const startedAt = Date.now();
@@ -613,9 +652,10 @@ describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1
       expect(stored.slice(0, SEEDED_EVENTS - FLOOD).map((e) => e.itemId), 'the oldest seeded events trimmed, in order')
         .toEqual(seeded.slice(FLOOD).map((e) => e.itemId));
     } finally {
+      pool.options.connectionTimeoutMillis = poolWaitBefore;
       await reset();
     }
-  }, 90_000);
+  }, 180_000);
 });
 
 describe('FOLLOW3-D12 controls (unchanged behaviour)', () => {

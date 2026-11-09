@@ -231,6 +231,7 @@ let paymentsSvc: any;
 let workflow: any;
 let revenueActions: any;
 let revenueEvents: any;
+let calendarListener: any;
 
 const WAIT = { timeout: 4_000, interval: 50 };
 
@@ -513,6 +514,7 @@ beforeAll(async () => {
   workflow = moduleRef.get(workflowMod.InvoiceWorkflowService);
   revenueActions = moduleRef.get(RevenueActionService);
   revenueEvents = moduleRef.get(RevenueEventListener);
+  calendarListener = moduleRef.get(CalendarCommerceListener);
 
   // Record every reason the insight listener marks a snapshot stale (the call itself is the real one).
   const insightListener = moduleRef.get(ContactInsightListener) as any;
@@ -1089,8 +1091,39 @@ describe('FOLLOW3-A9 review: the Send receipt action and the contact timeline fo
   it('A9-R2 (SEC-A9-1, RED before): the refund reopens the invoice after the paid handler\'s last status check and before its write -> the row it writes is removed by its own check after the write', async () => {
     const inv = ID.invA9RaceWrite;
     const svc = revenueActions as any;
+    const proto = Object.getPrototypeOf(svc);
+    const calendar = calendarListener as any;
     const inner: string[] = [];
     let reopenedInside = false;
+    // W4-FLAKE-HARDEN: each staged step is awaited on its real completion, not on a timed wait
+    // (under load the staged refund committed after the 4 s WAIT below had expired). Each deferred
+    // resolves with the run of a real handler for this invoice: the paid handler
+    // (generateForPaidInvoiceMissingReceipt: draft, check, write, check after the write), and the
+    // revenue-action and calendar handlers of the refund's invoice.reopened.
+    const deferred = () => {
+      let resolve!: (run: Promise<unknown>) => void;
+      const promise = new Promise<Promise<unknown>>((r) => { resolve = r; });
+      return { promise, resolve };
+    };
+    const paidHandled = deferred();
+    const reopenHandled = deferred();
+    const calendarReopened = deferred();
+    const isReopenOf = (payload: any) => payload?.eventName === 'invoice.reopened' && payload?.invoice?.id === inv;
+    svc.generateForPaidInvoiceMissingReceipt = (businessId: string, invoiceId: string) => {
+      const run = proto.generateForPaidInvoiceMissingReceipt.call(svc, businessId, invoiceId);
+      if (invoiceId === inv) paidHandled.resolve(run);
+      return run;
+    };
+    svc.onInvoiceReopened = (payload: any) => {
+      const run = proto.onInvoiceReopened.call(svc, payload);
+      if (isReopenOf(payload)) reopenHandled.resolve(run);
+      return run;
+    };
+    calendar.onInvoiceChanged = (payload: any) => {
+      const run = Object.getPrototypeOf(calendar).onInvoiceChanged.call(calendar, payload);
+      if (isReopenOf(payload)) calendarReopened.resolve(run);
+      return run;
+    };
     svc.upsertAction = async (input: any) => {
       if (input?.type === 'PAID_INVOICE_NO_RECEIPT' && input?.relatedId === inv && !reopenedInside) {
         reopenedInside = true;
@@ -1098,17 +1131,25 @@ describe('FOLLOW3-A9 review: the Send receipt action and the contact timeline fo
           // The full refund commits and its reopen handler runs (no row to remove yet) before this write.
           const payment = await db.payment.findFirst({ where: { invoiceId: inv, amount: { gt: 0 } } });
           const res = await refund(payment.id, 'mistaken payment');
-          if (res.status !== 201) inner.push(`refund ${res.status} ${JSON.stringify(res.body)}`);
+          if (res.status !== 201) {
+            inner.push(`refund ${res.status} ${JSON.stringify(res.body)}`);
+          } else {
+            // W4-FLAKE-HARDEN: the reopen's listeners have finished (was: a 4 s calendar wait, then 300 ms).
+            await (await reopenHandled.promise);
+            await (await calendarReopened.promise);
+          }
           await waitForCalendar('invoice', inv, (cal) => expect(cal).toMatchObject({ status: 'SCHEDULED' }));
-          await settle(300);
         } catch (e) {
           inner.push(String(e));
         }
       }
-      return Object.getPrototypeOf(svc).upsertAction.call(svc, input);
+      return proto.upsertAction.call(svc, input);
     };
     try {
       await paid(inv, 100, 'V42C-A9-R2');
+      // W4-FLAKE-HARDEN: the paid handler's whole run, with the staged refund inside its write.
+      await (await paidHandled.promise);
+      expect(inner, 'the staged refund inside the paid handler\'s write').toEqual([]);
       await vi.waitFor(() => expect(reopenedInside).toBe(true), WAIT);
       await vi.waitFor(async () => expect(await invoiceRow(inv)).toMatchObject({ status: 'SENT', paidAt: null }), WAIT);
       // The write happened (revenue_action.created) and its own check removed it.
@@ -1119,8 +1160,11 @@ describe('FOLLOW3-A9 review: the Send receipt action and the contact timeline fo
       expect(inner).toEqual([]);
     } finally {
       delete svc.upsertAction;
+      delete svc.onInvoiceReopened;
+      delete svc.generateForPaidInvoiceMissingReceipt;
+      delete calendar.onInvoiceChanged;
     }
-  }, 20_000);
+  }, 30_000);
 
   it('A9-R3 (SEC-A9-1 reverse window, RED before): a re-pay commits between the reopen handler\'s status read and its delete (its paid handler refreshes the row the delete then removes) -> the PAID invoice gets its Send receipt action back', async () => {
     const inv = ID.invA9RaceRepay;
