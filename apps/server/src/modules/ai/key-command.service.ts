@@ -937,10 +937,13 @@ export class KeyCommandService {
     ] = await Promise.all([
       // Stale contacts: no interaction in 14 days, not lost. (CF-49: 'DORMANT'
       // is a relationshipHealth value, not a status in the Contact.status
-      // vocabulary. Rows can still hold it: the CSV/link import copied a file's
-      // status column verbatim until V1-38c, so the old filter, which left
-      // out a DORMANT status, did exclude contacts imported as dormant. This
-      // brief lists them as stale like any other silent contact.)
+      // vocabulary. Rows can still hold it and be given it: the CSV/link
+      // import copied a file's status column verbatim until V1-38c and stores
+      // a DORMANT cell as DORMANT since (V1-38c review CR-V38c-1), and a
+      // playbook's update_status action can write it (review ST-38c-1). So
+      // the old filter, which left out a DORMANT status, did exclude contacts
+      // imported as dormant. This brief lists them as stale like any other
+      // silent contact.)
       !readsCrm ? nothing : (this.prisma.client as any).contact.findMany({
         where: {
           businessId,

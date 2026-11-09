@@ -3,19 +3,19 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 // V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary; a
 // row holding the legacy CLIENT spelling reads the same. V1-38c: that
 // spelling and the predicate are crm.constants.ts's.
-import { isClientStatus } from '../crm/crm.constants';
+import { isClientStatus, LEGACY_DORMANT_STATUS } from '../crm/crm.constants';
 
 /**
  * Dormancy is not a Contact.status in the vocabulary (CF-49: it is a
  * relationshipHealth value), and a canonical contact is Dormant or At Risk by
  * silence alone. But the CSV/link import (crm-import.service.ts) wrote a
- * status column of DORMANT verbatim until V1-38c, so rows hold it, and the
- * segments have always read that status: a contact imported as DORMANT is
+ * status column of DORMANT verbatim until V1-38c, and stores a DORMANT cell as
+ * DORMANT since (crm.constants.ts importedContactStatus, V1-38c review
+ * CR-V38c-1, pending an owner ruling); a playbook's update_status action can
+ * write it too (review ST-38c-1). So rows hold it and are still given it, and
+ * the segments have always read that status: a contact imported as DORMANT is
  * Dormant whatever its silence, and is not also At Risk (V1-38b review CR-1).
- * Since V1-38c the import stores the LEAD default for such a cell
- * (canonicalContactStatus), so only rows imported before hold it.
  */
-const LEGACY_DORMANT_STATUS = 'DORMANT';
 const isImportedDormant = (status: string | null | undefined): boolean => status === LEGACY_DORMANT_STATUS;
 
 export interface RelationshipHealth {
