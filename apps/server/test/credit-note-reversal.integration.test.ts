@@ -1589,8 +1589,10 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
     // RED-BEFORE (pkt/W4-TRASH-D46-repair c77fca7e): the credit-first path kept the paidAt of the payment partly refunded.
     expect({ status: rowE1.status, paidAt: rowE1.paidAt }, 'one money position, one paidAt').toEqual({ status: rowE2.status, paidAt: rowE2.paidAt });
 
-    // (f) Control: a reconcile that leaves the invoice's own payment settling the total keeps the paidAt; a
-    //     REFUNDED row tagged with another business is not this invoice's money (RC-DEP-2) and unsettles nothing.
+    // (f) Control: a reconcile under 'keep' (as the refund doors run it) that leaves the invoice's own payment
+    //     settling the total keeps the paidAt; a REFUNDED row tagged with another business is not this invoice's
+    //     money (RC-DEP-2) and unsettles nothing. (Without 'keep' this over-settled invoice, 100 received and 30
+    //     credited, is refused 409 as before: CN-16.)
     const f = await seedInvoice('rr_kept', 'PAID');
     const paidAtF = (await invoiceRow(f)).paidAt;
     const noteF = await createNote(f, 30);
@@ -1609,7 +1611,7 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
       },
     });
     emitted.length = 0;
-    await expect(workflow.reconcileFromPayments(f)).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+    await expect(workflow.reconcileFromPayments(f, { onIllegalTransition: 'keep' })).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
     expect(await invoiceRow(f), 'still settled by its own payment: paidAt kept').toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: paidAtF });
     expect(emitted.filter((ev) => ev.name.startsWith('invoice.')), 'no status move, no invoice event').toEqual([]);
     await expectBalanced(ID.biz);
