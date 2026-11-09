@@ -4,10 +4,22 @@ import { CrmJourneyService } from './crm-journey.service';
 import { ContactInsightService } from './contact-insight.service';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
+import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from './guards/feature-flag.guard';
 import { checkAiRateLimit } from './ai-rate-limit.util';
+import { assertContactVisible } from './crm-permissions.helper';
 
+/**
+ * Every route requires CRM module scope (ModuleScopeGuard): crm write where the
+ * handler writes a contact or business row (ai-score, ai-analyze/execute, POST
+ * ai-guidelines, ai-execute), crm read otherwise. A route that names a contact
+ * in its path answers only for a contact the caller may open by the GET crm
+ * contacts/:contactId rule (V1-08 assertContactVisible): a hidden contact gets
+ * the same 404 'Contact not found' as an unknown id, before the AI rate limit
+ * is counted and before any service runs (FOLLOW3-D3).
+ */
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
 export class CrmAiController {
@@ -15,68 +27,85 @@ export class CrmAiController {
     @Inject(CrmAiService) private readonly crmAi: CrmAiService,
     @Inject(CrmJourneyService) private readonly journey: CrmJourneyService,
     @Inject(ContactInsightService) private readonly contactInsight: ContactInsightService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/insight-card')
-  getInsightCard(
+  async getInsightCard(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     return this.contactInsight.getSnapshot(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/insight-card/recompute')
-  recomputeInsightCard(
+  async recomputeInsightCard(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     checkAiRateLimit(businessId);
     return this.contactInsight.recompute(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/ai-insight')
-  getAiInsight(
+  async getAiInsight(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     checkAiRateLimit(businessId);
     return this.journey.generateAiInsight(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/ai-tags')
-  aiSuggestTags(
+  async aiSuggestTags(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     checkAiRateLimit(businessId);
     return this.crmAi.suggestTags(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/ai-prep-brief')
-  aiPrepBrief(
+  async aiPrepBrief(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     checkAiRateLimit(businessId);
     return this.crmAi.generatePrepBrief(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-command')
@@ -94,7 +123,8 @@ export class CrmAiController {
     return this.crmAi.interpretCommand(businessId, body.command);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-analyze')
@@ -115,7 +145,8 @@ export class CrmAiController {
     return this.crmAi.analyzeContacts(businessId, body.prompt, body.contactIds);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'write')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-analyze/execute')
@@ -134,7 +165,8 @@ export class CrmAiController {
     return this.crmAi.executeTasks(businessId, userId, body.tasks);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/ai-guidelines')
@@ -142,7 +174,8 @@ export class CrmAiController {
     return this.crmAi.getGuidelines(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'write')
   @RequireFeature('ai_tools')
   @CrmRateLimit(30, 60_000)
   @Post('businesses/:businessId/ai-guidelines')
@@ -156,38 +189,46 @@ export class CrmAiController {
     return this.crmAi.saveGuidelines(businessId, body.guidelines);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/ai-summary')
-  aiContactSummary(
+  async aiContactSummary(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     checkAiRateLimit(businessId);
     return this.crmAi.summarizeContact(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'write')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/ai-score')
-  aiLeadScore(
+  async aiLeadScore(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     checkAiRateLimit(businessId);
     return this.crmAi.scoreContactWithAi(businessId, contactId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/ai-note-analysis')
-  aiNoteAnalysis(
+  async aiNoteAnalysis(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: { noteBody: string; noteId?: string },
+    @Req() req: { user: { id: string } },
   ) {
     if (!body.noteBody || typeof body.noteBody !== 'string') {
       throw new BadRequestException('noteBody is required');
@@ -195,11 +236,13 @@ export class CrmAiController {
     if (body.noteBody.length > 5000) {
       throw new BadRequestException('Note too long (max 5000 chars)');
     }
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     checkAiRateLimit(businessId);
     return this.crmAi.analyzeNote(businessId, contactId, body.noteBody, body.noteId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-churn-risk')
@@ -208,7 +251,8 @@ export class CrmAiController {
     return this.crmAi.detectChurnRisk(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-search')
@@ -226,7 +270,8 @@ export class CrmAiController {
     return this.crmAi.naturalLanguageSearch(businessId, body.query);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'write')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-execute')
@@ -246,7 +291,8 @@ export class CrmAiController {
     });
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-data-quality')
@@ -254,7 +300,8 @@ export class CrmAiController {
     return this.crmAi.dataQualityScan(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-duplicates')
@@ -262,7 +309,8 @@ export class CrmAiController {
     return this.crmAi.findDuplicatesAi(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-reengagement')
@@ -270,7 +318,8 @@ export class CrmAiController {
     return this.crmAi.bulkReengagementSuggestions(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-revenue-opportunities')
@@ -278,14 +327,17 @@ export class CrmAiController {
     return this.crmAi.revenueOpportunityScan(businessId);
   }
 
-  @UseGuards(AuthGuard, BusinessGuard, FeatureFlagGuard)
+  @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
+  @RequireModuleScope('crm', 'read')
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/contacts/:contactId/ai-follow-up-draft')
-  aiFollowUpDraft(
+  async aiFollowUpDraft(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     checkAiRateLimit(businessId);
     return this.crmAi.generateFollowUpDraft(businessId, contactId);
   }

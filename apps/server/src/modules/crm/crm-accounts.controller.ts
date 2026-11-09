@@ -1,15 +1,20 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { ModuleScopeGuard, RequireModuleScope } from '../../core/auth/module-scope.guard';
+import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
 import { CrmAccountsService } from './crm-accounts.service';
+import { assertContactVisible } from './crm-permissions.helper';
 import { ApplyAccountMergeDto, CreateAccountDto, UpdateAccountDto } from './dto/account.dto';
 
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
 export class CrmAccountsController {
-  constructor(@Inject(CrmAccountsService) private readonly accounts: CrmAccountsService) {}
+  constructor(
+    @Inject(CrmAccountsService) private readonly accounts: CrmAccountsService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+  ) {}
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
@@ -87,10 +92,15 @@ export class CrmAccountsController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(60, 60_000)
   @Get('businesses/:businessId/contacts/:contactId/account-suggestion')
-  suggestForContact(
+  async suggestForContact(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user: { id: string } },
   ) {
+    // FOLLOW3-D3: only for a contact the caller may open by the GET crm
+    // contacts/:contactId rule (V1-08); a hidden contact gets the same 404
+    // 'Contact not found' as an unknown id, before the service runs.
+    await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     return this.accounts.suggestForContact(businessId, contactId);
   }
 

@@ -428,7 +428,7 @@ beforeAll(async () => {
       data: {
         id, businessId, firstName: id, visibility, ownerId, accountId: accountId ?? null,
         phone: `+1868556${String(1000 + n++)}`,
-        email: `${id.slice(P.length).toLowerCase()}@v84c-contacts.test`,
+        email: `${P}${id.slice(P.length).toLowerCase()}@contacts.test`,
       },
     });
   await c(ID.cPriv, ID.bizA, 'PRIVATE', ID.owner, `${P}acct_priv`);
@@ -442,7 +442,7 @@ beforeAll(async () => {
   await c(ID.gOwner, ID.bizA, 'PRIVATE', ID.owner);
   await c(ID.cB, ID.bizB, 'TEAM', ID.other);
 
-  await db.dealStage.create({ data: { id: ID.stage, businessId: ID.bizA, name: 'V84C Open', slug: 'v84c-open' } });
+  await db.dealStage.create({ data: { id: ID.stage, businessId: ID.bizA, name: 'V84C Open', slug: `${P}open` } });
   await db.customFieldDefinition.create({ data: { id: ID.cfDef, businessId: ID.bizA, name: 'v84c field', label: 'V84C field', type: 'TEXT' } });
   for (const contactId of [ID.cPriv, ID.cTeam]) {
     const tail = contactId.slice(P.length);
@@ -619,6 +619,28 @@ describe("CS-04 a forgotten contact the member cannot open answers 404 on audit 
     expect(await auditActions(ID.fPrivHidden)).toEqual(auditBefore);
     expect(await auditActions(ID.fPrivHidden)).not.toContain('forget_cancelled');
     expect(await snapshot()).toEqual(before);
+  });
+
+  it("the OWNER of bizA on bizB's forgotten contact, through bizA's path: audit, export and forget/cancel answer 404 like an unknown id (the tenant term stays without deletedAt)", async () => {
+    nextRateWindow();
+    const forgotB = await request(app.getHttpServer())
+      .post(`/crm/businesses/${ID.bizB}/contacts/${ID.cB}/forget`).set('x-test-user', ID.other).send({});
+    expect(forgotB.status).toBe(201);
+    expect((await contactRow(ID.cB)).deleted_at).not.toBeNull();
+    resetRecorders();
+    const statuses: Record<string, number> = {};
+    for (const [method, routePath] of [['get', 'contacts/:c/audit'], ['post', 'contacts/:c/export'], ['post', 'contacts/:c/forget/cancel']] as const) {
+      const res = await send(method, routePath, ID.owner, ID.cB);
+      const absent = await send(method, routePath, ID.owner, ABSENT);
+      statuses[routePath] = res.status;
+      expect(res.body, routePath).toEqual(NOT_FOUND_BODY);
+      expect(res.text, `${routePath}: body vs an unknown id`).toBe(absent.text);
+    }
+    expect(statuses).toEqual({ 'contacts/:c/audit': 404, 'contacts/:c/export': 404, 'contacts/:c/forget/cancel': 404 });
+    expect(svcCalls()).toEqual([]);
+    expect(storagePuts).toEqual([]);
+    expect((await contactRow(ID.cB)).deleted_at).not.toBeNull();
+    expect((await forgetRequest(ID.cB)).status).toBe('requested');
   });
 });
 

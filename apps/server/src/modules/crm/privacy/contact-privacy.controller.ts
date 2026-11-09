@@ -9,6 +9,7 @@ import {
   Post,
   Query,
   Req,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import type { Request } from 'express';
@@ -18,6 +19,8 @@ import {
   ModuleScopeGuard,
   RequireModuleScope,
 } from '../../../core/auth/module-scope.guard';
+import { PrismaService } from '../../../core/prisma/prisma.service';
+import { assertContactVisible } from '../crm-permissions.helper';
 import { ContactAuditService } from './contact-audit.service';
 import { ContactPrivacyService } from './contact-privacy.service';
 
@@ -30,11 +33,30 @@ function clientMeta(req: Request) {
   return { ip, userAgent };
 }
 
+function actorUserId(req: { user?: { id?: string } }): string {
+  // ModuleScopeGuard already refuses a request without a user; this keeps the
+  // routes closed if it ever does not.
+  const id = req.user?.id;
+  if (!id) throw new UnauthorizedException('Authentication required');
+  return id;
+}
+
+/**
+ * The contact-scoped routes answer only for a contact the caller may open by
+ * the GET crm contacts/:contactId rule (V1-08 assertContactVisible): a hidden
+ * contact gets the same 404 'Contact not found' as an unknown id, before any
+ * service call (FOLLOW3-D3). A forget soft-deletes its contact for the grace
+ * period (D-25), so audit, export and forget/cancel apply that rule with
+ * `includeDeleted`: the tenant predicate and the caller's visibility, without
+ * the deletedAt filter, so the member who may open the contact keeps the
+ * cancel window. Forget acts on a live contact and keeps the GET detail rule.
+ */
 @Controller('crm')
 export class ContactPrivacyController {
   constructor(
     @Inject(ContactAuditService) private readonly audit: ContactAuditService,
     @Inject(ContactPrivacyService) private readonly privacy: ContactPrivacyService,
+    @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   // ----- Audit tab -----
@@ -42,9 +64,10 @@ export class ContactPrivacyController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'read')
   @Get('businesses/:businessId/contacts/:contactId/audit')
-  listAudit(
+  async listAudit(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
+    @Req() req: { user?: { id?: string } },
     @Query('action') action?: string,
     @Query('actorId') actorId?: string,
     @Query('since') since?: string,
@@ -52,6 +75,7 @@ export class ContactPrivacyController {
     @Query('limit') limit?: string,
     @Query('cursor') cursor?: string,
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, actorUserId(req), { includeDeleted: true });
     return this.audit.list({
       businessId,
       contactId,
@@ -69,11 +93,12 @@ export class ContactPrivacyController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'write')
   @Post('businesses/:businessId/contacts/:contactId/export')
-  export(
+  async export(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Req() req: Request & { user?: { id?: string; email?: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, actorUserId(req), { includeDeleted: true });
     const meta = clientMeta(req);
     return this.privacy.exportContact({
       businessId,
@@ -111,12 +136,13 @@ export class ContactPrivacyController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'write')
   @Post('businesses/:businessId/contacts/:contactId/forget')
-  forget(
+  async forget(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Body() body: { reason?: string } | undefined,
     @Req() req: Request & { user?: { id?: string; email?: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, actorUserId(req));
     const meta = clientMeta(req);
     return this.privacy.requestForget({
       businessId,
@@ -133,11 +159,12 @@ export class ContactPrivacyController {
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('crm', 'write')
   @Post('businesses/:businessId/contacts/:contactId/forget/cancel')
-  cancelForget(
+  async cancelForget(
     @Param('businessId') businessId: string,
     @Param('contactId') contactId: string,
     @Req() req: Request & { user?: { id?: string; email?: string } },
   ) {
+    await assertContactVisible(this.prisma, businessId, contactId, actorUserId(req), { includeDeleted: true });
     const meta = clientMeta(req);
     return this.privacy.cancelForget({
       businessId,
