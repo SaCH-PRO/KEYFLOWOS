@@ -46,6 +46,10 @@
  *   TS-15..TS-17 (W6-BRIEFINGS-SCOPE, D-63; reviews SEC-W5BS-1, SEC-W5BS-2,
  *   CR-W5BS-1): the end-of-day briefing and the daily briefing's cards follow
  *   it too, and the morning briefing fills its page past a batch of hidden rows.
+ *   TS-18, TS-19 (W6-BRIEFINGS-SCOPE review CR-W6BS-1, CR-W6BS-2, SEC-W6BS-3):
+ *   the end-of-day count is not cut at 1000 rows, and concurrent first reads
+ *   write one daily briefing. Two other briefing routes are follow-ups outside
+ *   that write set (it.todo, TS-20 SEC-W6BS-1, TS-21 SEC-W6BS-2).
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * CrmRateLimitGuard, TimelineController, TimelineService, FlowController's
@@ -801,15 +805,26 @@ describe('W5-BRIEFING-SCOPE (D-63): the morning briefing follows the timeline ru
  *   - TS-14 and EF-17 seed fewer rows than one batch, so nothing proved the
  *     morning briefing reads past a batch of hidden rows (readVisibleActivityPage,
  *     CR-W5BS-1).
+ * Review repairs (TS-18, TS-19):
+ *   - CR-W6BS-1 / CR-W6BS-2: the End of Day events count asked findMany for
+ *     5000 rows, @keyflow/db caps every findMany at 1000, and the short batch
+ *     read as the end of the day, so every member's count (the OWNER's
+ *     included, whose count was exact at base) stopped at 1000; the OWNER never
+ *     took the plain-count path (connect is 'none' for every role);
+ *   - SEC-W6BS-3: concurrent first reads of the day each wrote a daily briefing
+ *     plan and each emitted plan.approved.
  * The real AiController and the real MorningBriefingService run on their own
  * app over this suite's PrismaService and identity header. The briefing's tier
  * source is the real AiOversightService.getToolTier and its workload source
- * reports no one over or under capacity; every other collaborator is an empty
- * stand-in the three routes never call. Each case writes its own rows and
- * removes them when it ends, so the cases above and below read what they did.
+ * reports no one over or under capacity; the event emitter records what is
+ * emitted; every other collaborator is an empty stand-in the three routes never
+ * call. Each case writes its own rows and removes them when it ends, so the
+ * cases above and below read what they did.
  */
-describe('W6-BRIEFINGS-SCOPE (D-63): the end-of-day and daily briefings follow the timeline rule, and the morning briefing fills its page (TS-15..TS-17)', () => {
+describe('W6-BRIEFINGS-SCOPE (D-63): the end-of-day and daily briefings follow the timeline rule, and the morning briefing fills its page (TS-15..TS-19)', () => {
   let briefingApp: any;
+  /** What the briefing app emitted (TS-19: plan.approved once per daily briefing). */
+  const emitted: Array<{ name: string; payload: any }> = [];
   afterAll(async () => {
     if (briefingApp) await briefingApp.close();
   });
@@ -836,7 +851,7 @@ describe('W6-BRIEFINGS-SCOPE (D-63): the end-of-day and daily briefings follow t
           BusinessGuard,
           ModuleScopeGuard,
           CrmRateLimitGuard,
-          { provide: EventEmitter2, useValue: { emit: () => true } },
+          { provide: EventEmitter2, useValue: { emit: (name: string, payload: any) => { emitted.push({ name, payload }); return true; } } },
           MorningBriefingService,
           { provide: AiOversightService, useValue: { getToolTier: (tool: string) => AiOversightService.prototype.getToolTier.call({}, tool) } },
           { provide: WorkloadAggregatorService, useValue: { getWorkloadForBusiness: async () => ({ overloaded: [], underutilized: [] }) } },
@@ -861,7 +876,7 @@ describe('W6-BRIEFINGS-SCOPE (D-63): the end-of-day and daily briefings follow t
     return request(briefingApp.getHttpServer()).get(`/ai/businesses/${biz}/${path}`).set(HEADER, user);
   }
 
-  it("TS-15 (W6-BRIEFINGS-SCOPE, SEC-W5BS-1, D-63; V1-84 TS-04): GET /ai/businesses/:businessId/briefing/eod counts in events only the day's Activity rows the timeline rule serves the member (as /events serves them), reports revenueCollected 0 to a member without revenue read (a revenue-none STAFF member included), counts bookingsCompleted only for a bookings reader and contactsUpdated only over the contacts the member may list; the OWNER's report keeps every count and figure", async () => {
+  it("TS-15 (W6-BRIEFINGS-SCOPE, SEC-W5BS-1, D-63; V1-84 TS-04): GET /ai/businesses/:businessId/briefing/eod counts in events only the day's Activity rows the timeline rule serves the member (as /events serves them), reports revenueCollected 0 to a member without revenue read (a revenue-none STAFF member included), counts bookingsCompleted only for a bookings reader and contactsUpdated only over the contacts the member may list; the OWNER's report keeps every figure and counts every row /events serves them", async () => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
     try {
@@ -1054,6 +1069,93 @@ describe('W6-BRIEFINGS-SCOPE (D-63): the end-of-day and daily briefings follow t
       await db.$executeRawUnsafe(`DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(`${P}pf_`)}`);
     }
   });
+
+  it("TS-18 (W6-BRIEFINGS-SCOPE review CR-W6BS-1, CR-W6BS-2, D-63): GET /ai/businesses/:businessId/briefing/eod counts past 1000 rows: the OWNER's events are every one of the day's rows /events serves them, however many (one database count; the day's connect row left out, as /events leaves it out), and a member whose rows are judged one by one is counted over the day's first TIMELINE_SCAN_LIMIT rows, not the first 1000", async () => {
+    const { TIMELINE_SCAN_LIMIT } = await import('../src/modules/timeline/timeline-visibility');
+    const bulk = (i: number) => `${P}eod_${String(i).padStart(4, '0')}`;
+    const BULK = TIMELINE_SCAN_LIMIT + 50;
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    try {
+      // The day's first rows, before the main rows (DAY, local noon): BULK bookings rows (no contact, no
+      // amount), then one connect row (connect is 'none' for every role by default, D-63).
+      await db.activity.createMany({
+        data: Array.from({ length: BULK }, (_, i) => ({
+          id: bulk(i),
+          businessId: ID.bizA,
+          module: 'bookings',
+          category: 'BOOKING',
+          action: `${P}eod_bulk`,
+          entityType: 'v84a_entity',
+          title: `v84a eod bulk ${i}`,
+          occurredAt: new Date(start.getTime() + 1000 + i),
+        })),
+      });
+      await db.activity.create({
+        data: { id: `${P}eod_connect`, businessId: ID.bizA, module: 'connect', action: `${P}eod_connect`, entityType: 'v84a_entity', title: 'v84a eod connect', occurredAt: new Date(start.getTime() + 10_000) },
+      });
+
+      const events = async (user: string): Promise<number> => {
+        const res = await ai('briefing/eod', user);
+        expect(res.status, `${user}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(200);
+        return res.body.events;
+      };
+      // OWNER: the 17 main rows and every bulk row (more than TIMELINE_SCAN_LIMIT), not the connect row.
+      expect(await events(ID.owner), 'OWNER').toBe(ALL_MAIN.length + BULK);
+      // A view-all ADMIN (visibilityClause restricts them) and a revenue-none STAFF member: their rows are
+      // judged one by one, over the day's first TIMELINE_SCAN_LIMIT rows (all bookings rows they read).
+      expect(await events(ID.admin), 'ADMIN').toBe(TIMELINE_SCAN_LIMIT);
+      expect(await events(ID.staffRevNone), 'staffRevNone').toBe(TIMELINE_SCAN_LIMIT);
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM activities WHERE id LIKE ${sqlLikePrefix(`${P}eod_`)}`);
+    }
+  });
+
+  it('TS-19 (W6-BRIEFINGS-SCOPE review SEC-W6BS-3, D-93, D-63): concurrent first reads of the day of GET /ai/businesses/:businessId/briefing by three members write one daily briefing: every read answers its planId, the business holds one daily briefing plan, and plan.approved and briefing.generated are emitted once', async () => {
+    try {
+      // No briefing yet today (TS-16 removes its own); the suite's three live leads and the empty week give cards.
+      expect(await db.aiPlan.count({ where: { businessId: ID.bizA, objective: { startsWith: 'Daily Briefing — ' } } })).toBe(0);
+      emitted.length = 0;
+
+      // Three first reads at once (the route's limit is 10 a minute for the business; TS-16 used 7).
+      const answers = await Promise.all([ID.owner, ID.staffRevNone, ID.admin].map((user) => ai('briefing', user)));
+      for (const res of answers) expect(res.status, JSON.stringify(res.body).slice(0, 300)).toBe(200);
+      const planIds = new Set(answers.map((res) => res.body.planId));
+      expect(planIds.size, 'one planId answered').toBe(1);
+
+      const plans = await db.aiPlan.findMany({
+        where: { businessId: ID.bizA, objective: { startsWith: 'Daily Briefing — ' } },
+        select: { id: true, userId: true, steps: { select: { id: true } } },
+      });
+      expect(plans, 'one daily briefing plan').toHaveLength(1);
+      expect(plans[0]).toMatchObject({ id: [...planIds][0], userId: ID.owner });
+      // The OWNER's answer is the whole briefing; the others are filtered from the same plan.
+      expect(answers[0].body.totalCards).toBe(plans[0].steps.length);
+      expect(answers[1].body.totalCards).toBeLessThan(plans[0].steps.length);
+
+      expect(emitted.filter((e) => e.name === 'plan.approved'), 'plan.approved once').toHaveLength(1);
+      expect(emitted.filter((e) => e.name === 'briefing.generated'), 'briefing.generated once').toHaveLength(1);
+      expect(emitted.find((e) => e.name === 'plan.approved')?.payload).toMatchObject({ planId: plans[0].id, businessId: ID.bizA });
+    } finally {
+      await db.$executeRawUnsafe(`DELETE FROM ai_plans WHERE business_id = '${ID.bizA}'`);
+    }
+  });
+});
+
+/**
+ * W6-BRIEFINGS-SCOPE review follow-ups outside the packet's write set
+ * (AiController.endOfDayBriefing and getBriefing, MorningBriefingService
+ * generateBriefing): two more briefing routes do not yet serve only what their
+ * member may read. Reproduced at the packet head (a temporary harness, AiUsageService
+ * mocked, no provider traffic) and recorded here until a packet takes them.
+ */
+describe('W6-BRIEFINGS-SCOPE review follow-ups outside the write set (TS-20, TS-21)', () => {
+  it.todo(
+    "TS-20 (review SEC-W6BS-1, D-63): GET /ai/businesses/:businessId/ai/briefing (AiController.briefing -> AiAdvisorService.generateDailyBriefing, ai-advisor.service.ts; AuthGuard + BusinessGuard only; the web's fetchAiBriefing) answers every member the month's cashFlow {revenue, expenses, net} (a revenue-none STAFF member got revenue 777 for a PAID invoice of 777) and builds its LLM prompt from every recent Activity title (the prompt carried 'Payment recorded: TTD 150', a row that member cannot read on /events). Closing it needs AiAdvisorService to take the member as a viewer, outside this packet's write set. Weaker siblings, not run: POST commerce/businesses/:businessId/weekly-briefing (financial-copilot.controller.ts, AuthGuard + BusinessGuard only) and the revenue-intelligence briefing (membership check only)",
+  );
+  it.todo(
+    "TS-21 (review SEC-W6BS-2, D-73, KEY-R3b SEC-R3b-4): POST /ai/businesses/:businessId/briefing/:planId/skip (MorningBriefingService.skipBriefing) updates any plan by id alone, with no member check, no daily-briefing markers (BRIEFING_SCOPE, objective, raw input, as execute-all requires) and no audit row: a STAFF member with ai 'none' skipped the OWNER's pending non-briefing plan (201, plan completed, its step skipped). Closing it needs skipBriefing bound as executeAllBriefingCards is, outside this packet's write set",
+  );
 });
 
 describe('V1-84: tenant control (TS-09) and cleanup (TS-10)', () => {

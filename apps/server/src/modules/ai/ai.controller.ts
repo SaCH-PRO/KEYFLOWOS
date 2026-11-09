@@ -52,8 +52,15 @@ import { KeyAgentConfigService } from './key-agent-config.service';
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
 import { contactWhereBase } from '../crm/crm.helpers';
-import { activityPrefilter, readVisibleActivityPage, resolveTimelineViewer, TIMELINE_SCAN_LIMIT } from '../timeline/timeline-visibility';
-import { CANONICAL_MODULES } from '../../core/authority/module-vocabulary';
+import {
+  activityModuleScope,
+  activityPrefilter,
+  filterVisibleActivity,
+  readVisibleActivityPage,
+  resolveTimelineViewer,
+  TIMELINE_SCAN_LIMIT,
+  type TimelineViewer,
+} from '../timeline/timeline-visibility';
 
 
 const RESERVED_MEMORY_CATEGORIES = new Set(['settings']);
@@ -101,6 +108,14 @@ const EXECUTION_LOG_OUTPUT_FIELDS = ['outputSummary', 'toolResult', 'nextStepSug
  * plan:complete: no tool, no input or output, the plan's objective as their rationale).
  */
 const PLAN_RECORD_MODULE = 'planner';
+
+/**
+ * W6-BRIEFINGS-SCOPE review CR-W6BS-1 (owner ruling D-63): the most rows one findMany returns.
+ * @keyflow/db's defaultTakeExtension caps every findMany at 1000 rows whatever `take` asks, so a read
+ * that asks for more gets 1000 and cannot tell them from the end of the query. The End of Day count
+ * reads the day in batches of this size.
+ */
+const ACTIVITY_FIND_MANY_CAP = 1000;
 
 /**
  * W5-EXEC-LOGS-VISIBILITY review CR-EXL-2: the plan step a row is judged as (visiblePlanSteps). A
@@ -1647,9 +1662,9 @@ export class AiController {
    * contacts over the whole business, for every member (the control tower's End of Day report). Each
    * figure now follows what the member may read (filtered, not refused):
    *   - events: the day's rows the timeline rule serves them (canReadActivityRow and contact visibility,
-   *     filterVisibleActivity). A member the rule withholds nothing from (every module, the unmapped ones
-   *     and every contact) gets the plain count; any other member the count readVisibleActivityPage
-   *     serves from the day's first TIMELINE_SCAN_LIMIT rows, as a feed page reads them;
+   *     filterVisibleActivity), as /events serves them (countVisibleDayActivity). Review CR-W6BS-2: so the
+   *     OWNER's count, like their /events, leaves out the rows of a module they do not read (connect is
+   *     'none' for every role by default, D-63), and is one database count, not a capped row scan;
    *   - revenueCollected: a revenue figure, withheld (0, as V1-84 TS-04 reports a day's revenueImpact)
    *     from a member without revenue read;
    *   - bookingsCompleted: 0 without bookings read (GET bookings' module scope);
@@ -1664,22 +1679,9 @@ export class AiController {
     const readsCrm = viewer.readable.has('crm');
     const start = new Date();
     start.setHours(0, 0, 0, 0);
-    const dayWhere = { businessId, occurredAt: { gte: start } };
     const contactClause = visibilityClause(viewer.crmAccess, viewer.userId);
-    const seesEveryRow = viewer.readsUnmapped && !contactClause && CANONICAL_MODULES.every((m) => viewer.readable.has(m));
-    const prefilter = activityPrefilter(viewer);
     const [events, revenue, bookings, contactsUpdated] = await Promise.all([
-      seesEveryRow
-        ? this.prisma.client.activity.count({ where: dayWhere })
-        : readVisibleActivityPage(this.prisma, viewer, TIMELINE_SCAN_LIMIT, (skip, take) =>
-            this.prisma.client.activity.findMany({
-              where: { ...dayWhere, ...(prefilter.length ? { AND: prefilter } : {}) },
-              select: { id: true, module: true, category: true, contactId: true, entityType: true, entityId: true, revenueImpact: true, action: true, type: true, data: true },
-              orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
-              skip,
-              take,
-            }),
-          ).then((rows) => rows.length),
+      this.countVisibleDayActivity(viewer, start),
       viewer.readable.has('revenue')
         ? (this.prisma as any).client.invoice.aggregate({
             where: { businessId, deletedAt: null, status: 'PAID', paidAt: { gte: start } },
@@ -1707,6 +1709,47 @@ export class AiController {
       bookingsCompleted: bookings,
       contactsUpdated,
     };
+  }
+
+  /**
+   * W6-BRIEFINGS-SCOPE review CR-W6BS-1 / CR-W6BS-2 (owner ruling D-63): how many of the business's
+   * Activity rows since `start` the timeline rule serves `viewer` (filterVisibleActivity).
+   *   - A member who reads revenue and crm and whom visibilityClause does not restrict (OWNER,
+   *     SUPER_ADMIN) is withheld a row by its module only: canReadActivityRow's money and contact terms
+   *     need revenue and crm read, and hiddenContacts withholds no contact from them. Their count is one
+   *     database count per stored module value (groupBy), each module judged by activityModuleScope, so
+   *     it is exact for any number of rows (at base it was one COUNT of every row, every module
+   *     included; the packet's row scan stopped at 1000).
+   *   - Any other member's rows are judged one by one: the day is read in batches of
+   *     ACTIVITY_FIND_MANY_CAP (the most @keyflow/db's findMany returns; a larger take came back as 1000
+   *     rows and read as the end of the day, CR-W6BS-1), the database prefilter first, up to the day's
+   *     first TIMELINE_SCAN_LIMIT prefiltered rows, as a feed read examines at most that many.
+   */
+  private async countVisibleDayActivity(viewer: TimelineViewer, start: Date): Promise<number> {
+    const dayWhere = { businessId: viewer.businessId, occurredAt: { gte: start } };
+    if (viewer.readable.has('revenue') && viewer.readable.has('crm') && !visibilityClause(viewer.crmAccess, viewer.userId)) {
+      const byModule = await this.prisma.client.activity.groupBy({ by: ['module'], where: dayWhere, _count: { _all: true } });
+      return byModule.reduce((sum, group) => {
+        const scope = activityModuleScope(group.module);
+        const served = scope === null ? viewer.readsUnmapped : viewer.readable.has(scope);
+        return served ? sum + group._count._all : sum;
+      }, 0);
+    }
+    const prefilter = activityPrefilter(viewer);
+    let served = 0;
+    for (let skip = 0; skip < TIMELINE_SCAN_LIMIT; skip += ACTIVITY_FIND_MANY_CAP) {
+      const take = Math.min(ACTIVITY_FIND_MANY_CAP, TIMELINE_SCAN_LIMIT - skip);
+      const batch = await this.prisma.client.activity.findMany({
+        where: { ...dayWhere, ...(prefilter.length ? { AND: prefilter } : {}) },
+        select: { id: true, module: true, category: true, contactId: true, entityType: true, entityId: true, revenueImpact: true, action: true, type: true, data: true },
+        orderBy: [{ occurredAt: 'asc' }, { id: 'asc' }],
+        skip,
+        take,
+      });
+      served += (await filterVisibleActivity(this.prisma, viewer, batch)).length;
+      if (batch.length < take) break;
+    }
+    return served;
   }
 
   // ── Autopilot Rules (Phase 7 MD) ────────────────────────────────────────

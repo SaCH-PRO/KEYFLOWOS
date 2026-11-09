@@ -30,6 +30,14 @@ export const BRIEFING_OBJECTIVE_PREFIX = 'Daily Briefing — ';
 export const BRIEFING_RAW_INPUT = 'Morning briefing auto-generated scan';
 export const BRIEFING_SCOPE = 'briefing';
 
+/**
+ * W6-BRIEFINGS-SCOPE review SEC-W6BS-3 (owner rulings D-93, D-63): the advisory lock namespace that
+ * serializes the writing of a business's daily briefing (generateBriefing), and the transaction's
+ * bounds, as the plan-change and slot-claim transactions bound theirs.
+ */
+const BRIEFING_WRITE_LOCK_NAMESPACE = 'ai:daily-briefing:';
+const BRIEFING_WRITE_TX_OPTIONS = { maxWait: 5_000, timeout: 15_000 } as const;
+
 export interface BriefingResult {
   planId: string;
   date: string;
@@ -63,6 +71,14 @@ export class MorningBriefingService implements OnModuleInit {
    * W6-BRIEFINGS-SCOPE (review SEC-W5BS-2; owner ruling D-63): the daily briefing is the business's
    * (written once a day with every card, run as the owner, D-93); what it answers is the cards `viewer`
    * may read (forViewer). With no viewer (a system caller) it answers every card, as before.
+   *
+   * Review SEC-W6BS-3: the day's briefing is written once. The check for today's briefing and the
+   * write ran with nothing between concurrent first reads of the day, so each wrote its own briefing
+   * plan (run as the owner, D-93) and emitted plan.approved, and the plan queue ran each one's steps
+   * (payment reminders, tasks, campaign drafts) again. The write now takes a transaction-scoped
+   * advisory lock on the business and day and checks again under it, so a read that finds the
+   * briefing written meanwhile answers that one; only the read that writes it emits
+   * briefing.generated and plan.approved.
    */
   async generateBriefing(businessId: string, viewer?: TimelineViewer): Promise<BriefingResult | null> {
     const settings = await this.prisma.client.autopilotSettings.findUnique({ where: { businessId } });
@@ -75,8 +91,9 @@ export class MorningBriefingService implements OnModuleInit {
     const briefingModules = settings?.briefingModules ?? ['commerce', 'crm', 'bookings', 'projects'];
 
     // Check if briefing already exists for today
+    const todaysBriefing = { businessId, objective: { startsWith: `Daily Briefing — ${today}` } };
     const existing = await this.prisma.client.aiPlan.findFirst({
-      where: { businessId, objective: { startsWith: `Daily Briefing — ${today}` } },
+      where: todaysBriefing,
       include: { steps: true },
     });
     if (existing) {
@@ -118,36 +135,49 @@ export class MorningBriefingService implements OnModuleInit {
     // steps run as the owner on the plan queue, rather than as no member (D-73).
     const owner = await this.prisma.client.business.findUnique({ where: { id: businessId }, select: { ownerId: true } });
 
-    // Create plan with briefing cards as steps
-    const plan = await this.prisma.client.aiPlan.create({
-      data: {
-        businessId,
-        userId: owner?.ownerId ?? null,
-        objective: `${BRIEFING_OBJECTIVE_PREFIX}${today}`,
-        rawInput: BRIEFING_RAW_INPUT,
-        urgency: 'normal',
-        scope: [BRIEFING_SCOPE],
-        modules: [...new Set(topCards.map((c) => c.module))],
-        maxRiskTier: Math.max(...topCards.map((c) => this.governance.getToolTier(c.toolName))),
-        status: 'approved', // Briefings are pre-approved as plans
-        steps: {
-          create: topCards.map((card, idx) => ({
-            order: idx + 1,
-            status: 'pending',
-            toolName: card.toolName,
-            module: card.module,
-            action: card.title,
-            description: card.title,
-            riskTier: this.governance.getToolTier(card.toolName),
-            requiresApproval: !card.oneClickApprove,
-            dependsOn: [],
-            inputPayload: card.args as any,
-            role: card.role,
-          })),
+    // Create plan with briefing cards as steps: once a day (SEC-W6BS-3), under the business's lock for
+    // the day, after checking again for a briefing a concurrent read wrote meanwhile.
+    const lockKey = `${BRIEFING_WRITE_LOCK_NAMESPACE}${businessId}:${today}`;
+    const written = await this.prisma.client.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      const stored = await tx.aiPlan.findFirst({ where: todaysBriefing, include: { steps: true } });
+      if (stored) return { plan: stored, created: false };
+      const created = await tx.aiPlan.create({
+        data: {
+          businessId,
+          userId: owner?.ownerId ?? null,
+          objective: `${BRIEFING_OBJECTIVE_PREFIX}${today}`,
+          rawInput: BRIEFING_RAW_INPUT,
+          urgency: 'normal',
+          scope: [BRIEFING_SCOPE],
+          modules: [...new Set(topCards.map((c) => c.module))],
+          maxRiskTier: Math.max(...topCards.map((c) => this.governance.getToolTier(c.toolName))),
+          status: 'approved', // Briefings are pre-approved as plans
+          steps: {
+            create: topCards.map((card, idx) => ({
+              order: idx + 1,
+              status: 'pending',
+              toolName: card.toolName,
+              module: card.module,
+              action: card.title,
+              description: card.title,
+              riskTier: this.governance.getToolTier(card.toolName),
+              requiresApproval: !card.oneClickApprove,
+              dependsOn: [],
+              inputPayload: card.args as any,
+              role: card.role,
+            })),
+          },
         },
-      },
-      include: { steps: true },
-    });
+        include: { steps: true },
+      });
+      return { plan: created, created: true };
+    }, BRIEFING_WRITE_TX_OPTIONS);
+    // A concurrent read wrote today's briefing first: answer that one, and emit nothing (it did).
+    if (!written.created) {
+      return this.forViewer(this.formatBriefingResult(written.plan), viewer);
+    }
+    const plan = written.plan;
 
     const result: BriefingResult = {
       planId: plan.id,
