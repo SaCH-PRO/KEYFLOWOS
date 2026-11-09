@@ -1662,16 +1662,31 @@ export class AiController {
     return { instances };
   }
 
+  /**
+   * W5-JOURNEY-ROUTES (CV-08k; owner rulings D-74, D-93; review SEC-D93-1 residual): this handed
+   * getJourneyInstance no viewer, which since W4-D93-NO-MEMBER-CONTACTS withholds every step's input
+   * and output from a reader it cannot judge, so every reader (the OWNER included) saw no step data.
+   * It now hands the authenticated member as the viewer, and the plan read rule (graphPlanReadScope +
+   * visiblePlanSteps, as GET ai/plans/:planId) answers each what they may read (D-74).
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/journeys/:instanceId')
   @CrmRateLimit(30, 60_000)
   async getJourneyInstance(
     @Param('businessId') businessId: string,
     @Param('instanceId') instanceId: string,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.journeyOrchestrator.getJourneyInstance(instanceId, businessId);
+    return this.journeyOrchestrator.getJourneyInstance(instanceId, businessId, this.planViewer(req));
   }
 
+  /**
+   * W5-JOURNEY-ROUTES (CV-08n; owner rulings D-73, D-93; review SEC-D93-1 residual): this recorded no
+   * member, so the journey's plan ran memberless and D-73/D-93 refused its contact reads. A journey a
+   * member's payload shapes is theirs: it records the requesting member as the journey plan's member
+   * (D-73: a trigger records its creator and the plans it fires run as that member), so its steps run
+   * under that member's authority, checked at run time (planStepRunAuthority).
+   */
   @UseGuards(AuthGuard, BusinessGuard)
   @Post('businesses/:businessId/journeys/:key/trigger')
   @CrmRateLimit(10, 60_000)
@@ -1679,11 +1694,13 @@ export class AiController {
     @Param('businessId') businessId: string,
     @Param('key') key: string,
     @Body() body: { payload?: Record<string, any> },
+    @Req() req: AuthenticatedRequest,
   ) {
+    const member = this.planViewer(req);
     const { getJourneyTemplate } = await import('./journey-templates');
     const template = getJourneyTemplate(key);
     if (!template) throw new BadRequestException(`Unknown journey template: ${key}`);
-    return this.journeyOrchestrator.executeJourney(businessId, template, body.payload ?? {});
+    return this.journeyOrchestrator.executeJourney(businessId, template, body.payload ?? {}, { memberId: member.id });
   }
 
   // ── Morning Briefing (Phase 7) ──────────────────────────────────────────
