@@ -748,6 +748,11 @@
       "packet": "V1-89 (W3-D17b-REVIEW-SOLICIT-DEDUPE)"
     },
     {
+      "prefix": "v92d_",
+      "owner": "apps/server/test/identity-rekey-creator.integration.test.ts",
+      "packet": "V1-92 (W6-IDENTITY-REKEY-CREATOR)"
+    },
+    {
       "prefix": "zz_credit_",
       "owner": "apps/server/test/ai-credit-billing.integration.test.ts",
       "legacy": true

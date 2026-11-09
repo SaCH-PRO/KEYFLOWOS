@@ -169,6 +169,9 @@ function makePrismaMock() {
     $transaction: vi.fn(async (fn: any) => fn(client)),
     // The row lock adoptInvitePlaceholder takes (SELECT ... FOR UPDATE).
     $queryRaw: vi.fn(async () => []),
+    // W6-IDENTITY-REKEY-CREATOR (D-73): reconcileUserId's re-point of the trigger rules' recorded
+    // creator (no trigger rows modelled here; test/identity-rekey-creator.integration.test.ts proves it).
+    $executeRaw: vi.fn(async () => 0),
   };
 
   return {
