@@ -12,12 +12,11 @@
  *
  * Pinned here, with the listeners wired the way the full app wires them (each
  * handler found by its @OnEvent metadata, both writing to one feed recorder):
- *   AE-01 one feed row per event for the five deduped events both classes
+ *   AE-01 one feed row per event for the seven deduped events both classes
  *     listen to, and it is ActivityEventListener's row
- *   AE-02 the census: the events both classes listen to are exactly those five
- *     plus contact.created (AE-07) and booking.created (AE-08), and the
- *     executor's only other feed event is post.published (a new double writer
- *     fails this)
+ *   AE-02 the census: the events both classes listen to are exactly those
+ *     seven, and the executor's only other feed event is post.published (a new
+ *     double writer fails this)
  *   AE-03 contact.updated without a status change: the listener writes nothing,
  *     so the executor keeps the one 'Contact updated' row
  *   AE-04 post.published: the executor is the only writer and keeps its row
@@ -25,19 +24,16 @@
  *     deduped event (the dedupe removes the feed write only)
  *   AE-06 a playbook's own run row (automation:executed:playbook) is not a feed
  *     duplicate and is still written
- *   AE-07 contact.created is NOT deduped (CHARACTERIZATION + it.todo): the
- *     executor's 'New contact added' row is the liveness signal
- *     log-redaction.integration.test.ts:758-762 counts with the executor
- *     mounted alone; removing it needs that test changed (outside V1-55's
- *     write set)
- *   AE-08 booking.created is NOT deduped (review repair CR-V155-1): the feed
- *     must show when the booking is. bookings.service.ts puts the booking row
- *     and its contact on the bus, never the service, so the listener's row
- *     reads 'New booking / <contact> booked an appointment' with no date or
- *     time; only the executor's row ('New booking from <contact>', detail the
- *     start time) carries it. That row is kept (behaviour test + it.todo: one
- *     row needs activity-event.listener.ts, outside the write set, to put the
- *     start time in its detail)
+ *   AE-07 contact.created (V1-55b-FEED-DEDUPE-REST, was it.todo): one feed row,
+ *     the listener's 'New contact'; the executor's 'New contact added' is gone
+ *     (log-redaction.integration.test.ts now observes the executor's run
+ *     itself, not a feed row, as proof its listener ran)
+ *   AE-08 booking.created (V1-55b, was it.todo; review repair CR-V155-1): one
+ *     feed row, the listener's, and it says when the booking is.
+ *     bookings.service.ts puts the booking row and its contact on the bus,
+ *     never the service, so the listener's detail now carries the start time
+ *     itself (the executor's removed 'New booking from <contact>' row was the
+ *     only one that did)
  *   AE-09 booking.confirmed stays deduped: the executor's removed row was
  *     'Booking confirmed' with no detail, so the listener's row carries all it
  *     did (title, booking, contact) and no start time is lost
@@ -151,8 +147,20 @@ function harness(opts: { playbooks?: unknown[] } = {}) {
   return { feed, activity, prisma, crm, flowRunner, executor, listener, emit };
 }
 
-/** The five events both classes wrote a feed row for and V1-55 dedupes, with the listener's row (the one the feed keeps). */
+/** The seven events both classes wrote a feed row for and V1-55 / V1-55b dedupe, with the listener's row (the one the feed keeps). */
 const DEDUPED: Array<{ event: string; payload: Record<string, unknown>; row: Partial<FeedRow> }> = [
+  {
+    // AE-07 (V1-55b): the executor's removed row was 'New contact added' (detail the name); the listener's names the contact too.
+    event: 'contact.created',
+    payload: { businessId: BIZ, contact: CONTACT },
+    row: { module: 'crm', action: 'created', entityType: 'contact', entityId: CONTACT.id, title: 'New contact', detail: 'Ada Lovelace added to CRM', contactId: CONTACT.id },
+  },
+  {
+    // AE-08 (V1-55b): the listener's row carries the start time (see the AE-08 case for its detail).
+    event: 'booking.created',
+    payload: BOOKING_CREATED,
+    row: { module: 'bookings', action: 'created', entityType: 'booking', entityId: BOOKING.id, title: 'New booking', contactId: CONTACT.id },
+  },
   {
     event: 'contact.updated',
     payload: { businessId: BIZ, contact: CONTACT, fromStatus: 'LEAD', toStatus: 'CUSTOMER' },
@@ -198,57 +206,49 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: AutomationExecutorService writes no second 
     });
   }
 
-  it("AE-02 census: the events both classes listen to are exactly the five above plus contact.created (AE-07) and booking.created (AE-08), and the executor's only other feed event is post.published", () => {
+  it("AE-02 census: the events both classes listen to are exactly the seven above, and the executor's only other feed event is post.published", () => {
     const executorEvents = eventsOf(AutomationExecutorService);
     const listenerEvents = new Set(eventsOf(ActivityEventListener));
-    expect(executorEvents.filter((e) => listenerEvents.has(e))).toEqual([...DEDUPED.map((d) => d.event), 'contact.created', 'booking.created'].sort());
+    expect(executorEvents.filter((e) => listenerEvents.has(e))).toEqual(DEDUPED.map((d) => d.event).sort());
     expect(executorEvents.filter((e) => !listenerEvents.has(e))).toEqual(['post.published']);
   });
 
-  it("AE-07 CHARACTERIZATION contact.created: still two feed rows for the contact, the listener's 'New contact' and the executor's 'New contact added' (kept, see the todo below); its playbooks and flows are dispatched", async () => {
+  it("AE-07 contact.created (V1-55b, was it.todo): one emit, one feed row for the contact, ActivityEventListener's 'New contact'; the executor writes none and still dispatches the contact.created playbooks and flows", async () => {
     const h = harness();
     await h.emit('contact.created', { businessId: BIZ, contact: CONTACT });
     const rows = h.feed.filter(sameEntity({ module: 'crm', action: 'created', entityType: 'contact', entityId: CONTACT.id }));
-    expect(rows.map((r) => r.title).sort()).toEqual(['New contact', 'New contact added']);
-    expect(h.flowRunner.runFlow.mock.calls.map((c: any[]) => [c[1], c[2]?.trigger])).toEqual([[flowFor('contact.created'), 'contact.created']]);
+    expect(rows.map((r) => r.title)).toEqual(['New contact']);
+    expect(rows[0]).toMatchObject({ businessId: BIZ, detail: 'Ada Lovelace added to CRM', contactId: CONTACT.id, icon: 'user-plus' });
+    expect(h.feed, 'no other feed row').toHaveLength(1);
+    expect(h.prisma.client.automation.findMany).toHaveBeenCalledWith({ where: { businessId: BIZ, trigger: 'contact.created', enabled: true, deletedAt: null } });
+    expect(h.flowRunner.runFlow.mock.calls.map((c: any[]) => [c[1], c[2]?.trigger, c[2]?.contactId])).toEqual([[flowFor('contact.created'), 'contact.created', CONTACT.id]]);
   });
 
-  it.todo(
-    "AE-07 contact.created: one emit, one feed row ('New contact', ActivityEventListener's): AutomationExecutorService.onContactCreated's row is kept because " +
-      'log-redaction.integration.test.ts:758-762 (outside V1-55\'s write set) mounts the executor without ActivityEventListener and counts exactly that row ' +
-      'as proof its contact.created listener ran; removing it needs that test to mount ActivityEventListener (or read another signal)',
-  );
-
-  it("AE-08 booking.created (CR-V155-1): with the payload bookings.service.ts puts on the bus (the booking row and its contact, no service), the feed shows when the booking is: a row for the booking carries its start time as its detail, and it names the contact", async () => {
+  it("AE-08 booking.created (V1-55b, was it.todo; CR-V155-1): with the payload bookings.service.ts puts on the bus (the booking row and its contact, no service), one emit writes ONE feed row for the booking, ActivityEventListener's, and it says when the booking is: its detail names the contact and carries the start time", async () => {
     const h = harness();
     await h.emit('booking.created', BOOKING_CREATED);
     const rows = h.feed.filter(sameEntity({ module: 'bookings', action: 'created', entityType: 'booking', entityId: BOOKING.id }));
     const when = new Date(BOOKING.startTime).toLocaleString();
-    const timed = rows.filter((r) => r.detail === when);
-    expect(timed, `a bookings created row whose detail is the start time (${when})`).toHaveLength(1);
-    expect(timed[0]).toMatchObject({ businessId: BIZ, title: 'New booking from Ada Lovelace', contactId: CONTACT.id, icon: 'Calendar', tone: 'info' });
+    expect(rows.map((r) => r.title), 'bookings created rows for the booking').toEqual(['New booking']);
+    expect(rows[0]).toMatchObject({ businessId: BIZ, contactId: CONTACT.id, detail: `Ada Lovelace booked an appointment for ${when}` });
+    expect(rows[0].data).toMatchObject({ bookingId: BOOKING.id, startTime: BOOKING.startTime });
+    expect(h.feed, 'no other feed row').toHaveLength(1);
+    expect(h.flowRunner.runFlow.mock.calls.map((c: any[]) => [c[1], c[2]?.trigger, c[2]?.bookingId, c[2]?.contactId])).toEqual([
+      [flowFor('booking.created'), 'booking.created', BOOKING.id, CONTACT.id],
+    ]);
   });
 
-  it("AE-08 CHARACTERIZATION booking.created: two feed rows for the booking, the listener's 'New booking' (no date or time: its detail names the service, which the payload never carries) and the executor's 'New booking from <contact>' with the start time (kept, see the todo below); its playbooks and flows are dispatched", async () => {
-    const h = harness();
-    await h.emit('booking.created', BOOKING_CREATED);
-    const rows = h.feed.filter(sameEntity({ module: 'bookings', action: 'created', entityType: 'booking', entityId: BOOKING.id }));
-    expect(rows.map((r) => [r.title, r.detail]).sort()).toEqual(
-      [
-        ['New booking', 'Ada Lovelace booked an appointment'],
-        ['New booking from Ada Lovelace', new Date(BOOKING.startTime).toLocaleString()],
-      ].sort(),
-    );
-    expect(h.feed).toHaveLength(2);
-    expect(h.flowRunner.runFlow.mock.calls.map((c: any[]) => [c[1], c[2]?.trigger, c[2]?.bookingId])).toEqual([[flowFor('booking.created'), 'booking.created', BOOKING.id]]);
-  });
+  it('AE-08b booking.created: a booking that carries its service names it beside the start time; a booking with no readable start time keeps the plain detail (no "Invalid Date")', async () => {
+    const withService = harness();
+    await withService.emit('booking.created', { ...BOOKING_CREATED, booking: { ...BOOKING_CREATED.booking, service: { name: 'Haircut' } } });
+    expect(withService.feed.map((r) => r.detail)).toEqual([`Ada Lovelace booked Haircut for ${new Date(BOOKING.startTime).toLocaleString()}`]);
 
-  it.todo(
-    "AE-08 booking.created: one emit, one feed row that carries the start time: AutomationExecutorService.onBookingCreated's row is kept because it is the only " +
-      "feed row with the booking's date and time; ActivityEventListener.onBookingCreated (activity-event.listener.ts:225, outside V1-55's write set) builds its " +
-      'detail from booking.service?.name, which no booking.created payload carries (bookings.service.ts createBooking and publicCreateBooking); removing the ' +
-      'executor row needs that listener to put the start time in its detail',
-  );
+    for (const startTime of [null, undefined, 'not a date']) {
+      const h = harness();
+      await h.emit('booking.created', { ...BOOKING_CREATED, booking: { ...BOOKING_CREATED.booking, startTime } });
+      expect(h.feed.map((r) => [r.title, r.detail]), String(startTime)).toEqual([['New booking', 'Ada Lovelace booked an appointment']]);
+    }
+  });
 
   it('AE-03 contact.updated without a status change: the listener writes nothing, so the executor keeps the one "Contact updated" row', async () => {
     for (const payload of [
@@ -271,7 +271,7 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: AutomationExecutorService writes no second 
     expect(h.feed[0]).toMatchObject({ businessId: BIZ, module: 'social', action: 'published', entityType: 'post', entityId: 'post_v155', title: 'Social post published' });
   });
 
-  for (const { event, payload } of [...DEDUPED, { event: 'booking.created', payload: BOOKING_CREATED }]) {
+  for (const { event, payload } of DEDUPED) {
     it(`AE-05 ${event}: playbooks and flows are still dispatched on the event (the dedupe removes the feed write only)`, async () => {
       const h = harness();
       await h.emit(event, payload);

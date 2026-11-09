@@ -332,6 +332,14 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
   const windows: Record<string, { entries: LogEntry[]; status: number[] }> = {};
   /** The contact each contact-create window created. */
   const windowContacts: Record<string, string> = {};
+  /**
+   * V1-55b-FEED-DEDUPE-REST: every run of the real AutomationExecutorService's
+   * contact.created listener (it writes no feed row any more, so its run is
+   * observed itself): the payload it was handed and the promise of its run.
+   */
+  const contactCreatedRuns: Array<{ businessId: string; contactId: string; run: Promise<unknown> }> = [];
+  /** The contact.created listener runs each contact-create window saw finish inside it. */
+  const runsFinishedInWindow: Record<string, number> = {};
   let providerPaymentId = '';
 
   async function cleanup() {
@@ -604,6 +612,17 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
     await app.init();
     // main.ts installs the tenant context provider before the app serves.
     setTenantContextProvider({ getCurrentBusinessId });
+    // V1-55b: record each run of the real contact.created listener. The
+    // event-emitter loader calls instance[methodKey] at emit time, so wrapping
+    // the instance's method (after init, the subscription already made) sees
+    // every delivery and still runs the real handler.
+    const executor = moduleRef.get(AutomationExecutorService);
+    const realOnContactCreated = executor.onContactCreated.bind(executor);
+    executor.onContactCreated = (payload: Parameters<typeof realOnContactCreated>[0]) => {
+      const run = realOnContactCreated(payload);
+      contactCreatedRuns.push({ businessId: payload?.businessId, contactId: payload?.contact?.id, run });
+      return run;
+    };
 
     await cleanup(); // in case a prior run aborted
     await clearRateLimits();
@@ -673,8 +692,12 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       const contactId = created.body?.id;
       if (contactId) {
         await until(async () => (await db.contactAuditEntry.count({ where: { businessId: ID.biz, contactId } })) > 0);
-        // The real contact.created listener writes its activity row: it ran inside the window.
-        await until(async () => (await db.activity.count({ where: { businessId: ID.biz, entityType: 'contact', entityId: contactId } })) > 0);
+        // The real contact.created listener ran, and finished, inside the window
+        // (V1-55b: observed as its run, since it writes no feed row any more).
+        await until(async () => contactCreatedRuns.some((r) => r.contactId === contactId));
+        const runs = contactCreatedRuns.filter((r) => r.contactId === contactId);
+        await Promise.all(runs.map((r) => r.run));
+        runsFinishedInWindow.contactCreate = runs.length;
         windowContacts.contactCreate = contactId;
       }
       return [created.status, duplicate.status];
@@ -801,10 +824,17 @@ describe('log redaction: no contact email, bearer token or providerPaymentId in 
       expect(leaks, describeLeaks(leaks)).toEqual([]);
     });
 
-    it('the real contact.created listener ran inside the window (its activity row landed), with no playbook configured', async () => {
+    it('the real contact.created listener ran inside the window (its run finished there), with no playbook configured', async () => {
       const contactId = windowContacts.contactCreate;
       expect(contactId).toBeTruthy();
-      expect(await db.activity.count({ where: { businessId: ID.biz, entityType: 'contact', entityId: contactId, module: 'crm', action: 'created' } })).toBe(1);
+      // V1-55b-FEED-DEDUPE-REST: AutomationExecutorService writes no feed row for
+      // contact.created (ActivityEventListener, not mounted here, writes the one
+      // row), so the proof is its run itself: handed this contact once, and
+      // finished inside the window.
+      expect(contactCreatedRuns.filter((r) => r.contactId === contactId).map((r) => r.businessId)).toEqual([ID.biz]);
+      expect(runsFinishedInWindow.contactCreate).toBe(1);
+      // No playbook ran for it (none was configured yet): no automation feed row names the contact.
+      expect(await db.activity.count({ where: { businessId: ID.biz, module: 'automation', contactId } })).toBe(0);
     });
   });
 
