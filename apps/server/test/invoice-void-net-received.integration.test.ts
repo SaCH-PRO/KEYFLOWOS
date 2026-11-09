@@ -44,15 +44,27 @@
  *             PaymentsService.lockInvoice) and records a SUCCESSFUL 40 with its posting: PATCH status/void
  *             sent while it is open is still waiting 1.5 s later, then answers 409 naming the 40; after
  *             reconcileFromPayments the invoice is PARTIALLY_PAID with AR 60 / income 100 / cash 40
- *   VN-08 TODO (follow-up, outside this packet's write set): the provider settlement doors
- *         (PaymentsService.createPaymentWithPosting: Stripe, PayPal webhook, WiPay, capturePaypalOrder)
- *         take no invoice lock and do not re-check VOID in their transaction, so a provider payment that
- *         commits while a void decides still ends VOID with net 40 (reproduced in the repair round:
- *         {status VOID, net 40, ledger AR -40 / income 0 / cash 40 / REVERSED}).
+ *   VN-08 W3-VOID-PROVIDER-RACE (FOLLOW4; the todo SEC-V82-1 / CR-B1-1 left; the D-76 pattern): the
+ *         provider settlement doors (PaymentsService.createPaymentWithPosting: the Stripe charge / session
+ *         webhook, the PayPal capture webhook, the WiPay callback, capturePaypalOrder) took no invoice
+ *         lock and did not re-check VOID in their transaction, so a provider payment that arrived after
+ *         the void, or committed while the void decided, ended on the VOID invoice (net 40, ledger
+ *         AR -40 / income 0 / cash 40 / REVERSED). Pinned now: each door takes PaymentsService.lockInvoice
+ *         inside its transaction and re-reads the status; a VOID invoice's payment is not recorded as money
+ *         on it (no Payment row, no posting), the delivery's webhook_events row is kept marked
+ *         'refused:invoice_void' with the invoice's business (a redelivery is a no-op), and the owner gets
+ *         one 'payment.refused' notification per payment to settle it by hand.
+ *         (a) serial Stripe, (b) serial PayPal webhook, (c) serial WiPay (CASH/TTD) after the void;
+ *         (d) race: a Stripe delivery sent while transition(VOID) holds the lock waits on it (nothing
+ *             committed while the void decides) and is then refused;
+ *         (e) race: capturePaypalOrder, PayPal capturing while the void decides, waits on the lock, is
+ *             refused 409, and PayPal's own capture webhook for it later is refused with no second notice;
+ *         (f) control: a Stripe and a PayPal success for a SENT invoice record as before.
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed: the plan allows
- * invoices), CommerceController, CommerceService, InvoiceWorkflowService,
+ * invoices), PublicRateLimitGuard (real Redis, keys namespaced to this run),
+ * CommerceController, PaymentsController, PaymentsService, CommerceService, InvoiceWorkflowService,
  * RevenuePostingService, PostingService and ChartOfAccountsSeederService write
  * real rows behind the production GlobalHttpExceptionFilter, ValidationPipe and
  * TenantInterceptor. Identity attachment is the one stand-in: a test middleware
@@ -61,6 +73,11 @@
  * The event bus is a recorder; the contact timeline, TimelineService, stats
  * cache and the AI / Gmail / Drive services are stubs off the boundary;
  * ExpensePostingService (COGS on PAID) is a no-op stub (no line is a product).
+ * VN-08's provider edges are the stand-ins (no provider traffic): Stripe
+ * deliveries are signed with the ACCRUAL business's own webhook secret, WiPay's
+ * hash is computed as WiPay computes it with the CASH business's own key,
+ * PayPal's signature verification (a network call) is stubbed, and the PayPal
+ * SDK client is stubbed at getPaypalClient.
  *
  * Fixtures: prefix `v82a_` (registered in test/helpers/fixture-prefixes.json);
  * hard-deleted by raw SQL with sqlLikePrefix() in dependency order in beforeAll
@@ -69,15 +86,20 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { createHash, createHmac } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v82a_';
 const HEADER = 'x-v82a-user';
+/** VN-08: the ACCRUAL business's own Stripe webhook secret and the CASH business's own WiPay key (business.metaData). */
+const STRIPE_SECRET = `whsec_${P}stripe`;
+const WIPAY_KEY = `${P}wipay_key`;
+const PREVIOUS_RATE_LIMIT_NS = process.env.RATE_LIMIT_KEY_NAMESPACE;
 
 const ID = {
   owner: `${P}owner`,
@@ -96,6 +118,7 @@ let redis: any;
 let commerce: any;
 let workflow: any;
 let revenuePosting: any;
+let payments: any;
 let storedBalanceFn: (total: number, rows: Array<{ amount: number; status: string }>, currency?: string | null) => any;
 
 const emitted: Array<{ name: string; payload: any }> = [];
@@ -118,6 +141,8 @@ async function cleanup() {
     `DELETE FROM ledger_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM financial_transactions WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payments WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM webhook_events WHERE provider_event_id LIKE ${sqlLikePrefix(P)} OR business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM notifications WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM payment_links WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -337,6 +362,8 @@ async function expectAccrualPartPaidLedger(id: string) {
 }
 
 beforeAll(async () => {
+  // This run's own rate-limit keys (PublicRateLimitGuard reads it in NODE_ENV=test).
+  process.env.RATE_LIMIT_KEY_NAMESPACE = `${P}${Date.now()}`;
   const dbMod = await import('@keyflow/db');
   db = dbMod.db;
 
@@ -373,12 +400,14 @@ beforeAll(async () => {
   const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
   const { ExpensePostingService } = await import('../src/modules/finance/expense-posting.service');
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
+  const { PaymentsController } = await import('../src/modules/payments/payments.controller');
+  const { PaymentsService } = await import('../src/modules/payments/payments.service');
   storedBalanceFn = workflowMod.balanceOfStoredRows;
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController],
+    controllers: [CommerceController, PaymentsController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -389,6 +418,8 @@ beforeAll(async () => {
       TeamAuditInterceptor,
       { provide: REDIS_CLIENT, useValue: redis },
       CommerceService,
+      // VN-08: the provider settlement doors (the Stripe and PayPal webhooks, the WiPay callback, capturePaypalOrder).
+      PaymentsService,
       workflowMod.InvoiceWorkflowService,
       InvoiceReceiptBuilderService,
       // Real ledger chain: the recognition, the payment postings and every reversal are real rows.
@@ -414,8 +445,12 @@ beforeAll(async () => {
   commerce = moduleRef.get(CommerceService);
   workflow = moduleRef.get(workflowMod.InvoiceWorkflowService);
   revenuePosting = moduleRef.get(RevenuePostingService);
+  payments = moduleRef.get(PaymentsService);
+  // PayPal's verify-webhook-signature is a network call: the provider edge is stubbed.
+  vi.spyOn(payments, 'verifyPaypalSignature').mockResolvedValue(true);
 
-  app = moduleRef.createNestApplication();
+  // rawBody: the Stripe and PayPal webhooks read the raw payload, as in app-bootstrap.
+  app = moduleRef.createNestApplication({ rawBody: true });
   // Identity attachment only. No guard is overridden.
   app.use(async (req: any, _res: any, next: any) => {
     const header = req.headers[HEADER];
@@ -436,11 +471,27 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
   // ACCRUAL/USD: issuing posts the recognition (Dr AR / Cr revenue), a payment clears AR.
   await db.business.create({
-    data: { id: ID.bizAcc, name: 'V82A Accrual', slug: `${P}biz_acc`, ownerId: ID.owner, currency: 'USD', accountingBasis: 'ACCRUAL' },
+    data: {
+      id: ID.bizAcc,
+      name: 'V82A Accrual',
+      slug: `${P}biz_acc`,
+      ownerId: ID.owner,
+      currency: 'USD',
+      accountingBasis: 'ACCRUAL',
+      metaData: { stripeWebhookSecret: STRIPE_SECRET },
+    },
   });
   // CASH/TTD: issuing posts nothing, a payment posts Dr cash / Cr revenue.
   await db.business.create({
-    data: { id: ID.bizCash, name: 'V82A Cash', slug: `${P}biz_cash`, ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' },
+    data: {
+      id: ID.bizCash,
+      name: 'V82A Cash',
+      slug: `${P}biz_cash`,
+      ownerId: ID.owner,
+      currency: 'TTD',
+      accountingBasis: 'CASH',
+      metaData: { wipayApiKey: WIPAY_KEY },
+    },
   });
   for (const biz of [ID.bizAcc, ID.bizCash]) {
     await db.membership.create({ data: { id: `${P}m_${biz}`, userId: ID.owner, businessId: biz, role: 'OWNER' } });
@@ -452,9 +503,12 @@ beforeAll(async () => {
 }, 180_000);
 
 afterAll(async () => {
+  vi.restoreAllMocks();
   if (app) await app.close();
   if (db) await cleanup();
   if (redis) await redis.quit();
+  if (PREVIOUS_RATE_LIMIT_NS === undefined) delete process.env.RATE_LIMIT_KEY_NAMESPACE;
+  else process.env.RATE_LIMIT_KEY_NAMESPACE = PREVIOUS_RATE_LIMIT_NS;
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -718,13 +772,250 @@ describe('V1-82 no path voids an invoice that still holds money received net (re
     });
   });
 
-  it.todo(
-    'VN-08 FOLLOW-UP (fix outside the V1-82 write set, in payments.service.ts): a SUCCESSFUL provider payment recorded through ' +
-      'PaymentsService.createPaymentWithPosting (Stripe charge / session webhook, PayPal capture webhook, WiPay callback, ' +
-      'capturePaypalOrder) while transition(VOID) decides never leaves the invoice VOID with money received net > 0. Today that ' +
-      "door takes no invoice lock and does not re-check VOID in its transaction, and its foreign-key check (FOR KEY SHARE) is not " +
-      "blocked by the void's FOR NO KEY UPDATE, so the payment commits and the invoice ends VOID, net 40, ledger AR -40 / income 0 / " +
-      'cash 40 / REVERSED (reproduced in the repair round, review SEC-V82-1 / CR-B1-1). Fix: those doors take ' +
-      'PaymentsService.lockInvoice and refuse (or flag) a VOID invoice inside their transaction, as VN-07 (b) models.',
-  );
+  describe('VN-08 W3-VOID-PROVIDER-RACE: a provider payment for a VOID invoice is not recorded as money on it (the D-76 pattern; review SEC-V82-1 / CR-B1-1)', () => {
+    let seq = 0;
+    const next = () => (seq += 1);
+
+    /** A Stripe checkout.session.completed that took `amount` for `invoiceId` (a session the ACCRUAL business made). */
+    function stripeEvent(invoiceId: string, amount: number) {
+      const n = next();
+      return {
+        id: `${P}evt_${n}`,
+        type: 'checkout.session.completed',
+        data: {
+          object: {
+            id: `${P}cs_${n}`,
+            object: 'checkout.session',
+            payment_status: 'paid',
+            amount_total: Math.round(amount * 100),
+            currency: 'usd',
+            payment_intent: `${P}pi_${n}`,
+            metadata: { invoiceId, businessId: ID.bizAcc },
+          },
+        },
+      };
+    }
+    /** A Stripe delivery of `event`, signed with the ACCRUAL business's own webhook secret as Stripe signs it. */
+    function stripeDeliver(event: Record<string, unknown>) {
+      const raw = JSON.stringify(event);
+      const t = Math.floor(Date.now() / 1000);
+      const signature = `t=${t},v1=${createHmac('sha256', STRIPE_SECRET).update(`${t}.${raw}`).digest('hex')}`;
+      return agent().post('/payments/stripe/webhook').set('content-type', 'application/json').set('stripe-signature', signature).send(raw);
+    }
+    /** PayPal's PAYMENT.CAPTURE.COMPLETED for `captureId` on `invoiceId`. */
+    function paypalCaptureEvent(invoiceId: string, captureId: string, amount: number) {
+      const n = next();
+      return {
+        id: `${P}WH_${n}`,
+        event_type: 'PAYMENT.CAPTURE.COMPLETED',
+        resource: { id: captureId, custom_id: invoiceId, amount: { value: amount.toFixed(2), currency_code: 'USD' } },
+      };
+    }
+    /** A PayPal delivery of `event` (its signature verification, a network call, is stubbed). */
+    function paypalDeliver(event: Record<string, unknown>) {
+      return agent().post('/payments/paypal/webhook').set('content-type', 'application/json').send(JSON.stringify(event));
+    }
+    /** A WiPay success callback, hashed as WiPay hashes it: md5(transaction_id + the requested total + the CASH business's key). */
+    function wipayCallback(invoiceId: string, transactionId: string, total: number) {
+      const hash = createHash('md5').update(`${transactionId}${total.toFixed(2)}${WIPAY_KEY}`).digest('hex');
+      return agent()
+        .get('/payments/wipay/callback')
+        .query({ order_id: invoiceId, status: 'success', transaction_id: transactionId, total: total.toFixed(2), hash });
+    }
+    /**
+     * The PayPal SDK client, stubbed at getPaypalClient: the order is this
+     * invoice's (100 USD) and PayPal captures it as `captureId`.
+     */
+    function stubPaypalClient(invoiceId: string, orderId: string, captureId: string) {
+      return vi.spyOn(payments, 'getPaypalClient').mockReturnValue({
+        client: {},
+        ordersController: {
+          getOrder: async () => ({ result: { purchaseUnits: [{ customId: invoiceId, amount: { value: '100.00', currencyCode: 'USD' } }] } }),
+          captureOrder: async () => ({
+            result: { id: orderId, status: 'COMPLETED', purchaseUnits: [{ payments: { captures: [{ id: captureId }] } }], payer: {} },
+          }),
+        },
+      });
+    }
+
+    async function webhookRow(provider: string, providerEventId: string) {
+      return db.webhookEvent.findFirst({ where: { provider, providerEventId }, select: { eventType: true, businessId: true } });
+    }
+
+    /** The 'payment.refused' notifications `biz` got for `invoiceId`. */
+    async function refusalNotices(biz: string, invoiceId: string): Promise<any[]> {
+      const rows: any[] = await db.notification.findMany({ where: { businessId: biz, type: 'payment.refused' }, orderBy: { createdAt: 'asc' } });
+      return rows.filter((r) => r.data?.payableId === invoiceId);
+    }
+
+    /**
+     * What a refused provider payment leaves: no payment row, the invoice VOID
+     * with nothing received net, the delivery's webhook_events row kept marked
+     * refused:invoice_void with the invoice's business, and exactly one owner
+     * notification for the payment telling them to settle it by hand.
+     */
+    async function expectRefused(biz: string, id: string, provider: string, eventId: string, providerPaymentId: string) {
+      expect(await paymentRows(id)).toEqual([]);
+      expect((await invoiceRow(id)).status).toBe('VOID');
+      expect(await netReceived(id)).toBe(0);
+      expect(await webhookRow(provider, eventId)).toEqual({ eventType: 'refused:invoice_void', businessId: biz });
+      const notices = await refusalNotices(biz, id);
+      expect(notices).toHaveLength(1);
+      expect(notices[0].data).toMatchObject({
+        provider,
+        transactionId: providerPaymentId,
+        payableType: 'invoice',
+        payableId: id,
+        reason: 'invoice_void',
+      });
+      expect(notices[0].body).toMatch(/void/i);
+      expect(notices[0].body).toMatch(/by hand/i);
+    }
+
+    /** A SENT invoice of 100, voided (200). */
+    async function voided(biz: string) {
+      const id = await sent(biz);
+      const res = await setStatus(biz, id, 'VOID');
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return id;
+    }
+
+    it('VN-08 (a) serial, Stripe: a checkout.session.completed for 40 delivered after the void is acked 201 and records nothing (no payment row, VOID, net 0, ledger all 0 / REVERSED); its event is kept refused:invoice_void and the owner is told once; a redelivery is a duplicate and adds nothing', async () => {
+      const id = await voided(ID.bizAcc);
+      const event = stripeEvent(id, 40);
+
+      const res = await stripeDeliver(event);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).toMatchObject({ ok: true, received: true });
+      await expectRefused(ID.bizAcc, id, 'stripe', event.id, event.data.object.id);
+      expect(await ledgerOf(ID.bizAcc, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: 'REVERSED' });
+
+      const again = await stripeDeliver(event);
+      expect(again.status, JSON.stringify(again.body)).toBe(201);
+      await expectRefused(ID.bizAcc, id, 'stripe', event.id, event.data.object.id);
+    });
+
+    it('VN-08 (b) serial, PayPal: a PAYMENT.CAPTURE.COMPLETED for 40 delivered after the void is acked 201 and records nothing; its event is kept refused:invoice_void and the owner is told once', async () => {
+      const id = await voided(ID.bizAcc);
+      const captureId = `${P}cap_b`;
+      const event = paypalCaptureEvent(id, captureId, 40);
+
+      const res = await paypalDeliver(event);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).toMatchObject({ ok: true, received: true });
+      await expectRefused(ID.bizAcc, id, 'paypal', event.id, captureId);
+      expect(await ledgerOf(ID.bizAcc, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: 'REVERSED' });
+    });
+
+    it('VN-08 (c) serial, WiPay (CASH/TTD): a verified success callback after the void answers { success: false } naming the void and records nothing; the transaction is kept refused:invoice_void, the owner is told once, and a repeat callback is refused the same way with no second notice', async () => {
+      const id = await voided(ID.bizCash);
+      const transactionId = `${P}wipay_c`;
+
+      const res = await wipayCallback(id, transactionId, 100);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toMatchObject({ success: false, invoiceId: id });
+      expect(res.body.message).toMatch(/void/i);
+      await expectRefused(ID.bizCash, id, 'wipay', transactionId, transactionId);
+      expect(await ledgerOf(ID.bizCash, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: null });
+
+      const again = await wipayCallback(id, transactionId, 100);
+      expect(again.status, JSON.stringify(again.body)).toBe(200);
+      expect(again.body).toMatchObject({ success: false, invoiceId: id });
+      await expectRefused(ID.bizCash, id, 'wipay', transactionId, transactionId);
+    });
+
+    it('VN-08 (d) race, Stripe: a delivery sent while transition(VOID) holds the invoice lock (after its payment read) commits no payment while the void decides and waits on the lock; once the void commits it is acked 201 and refused: VOID, net 0, ledger all 0 / REVERSED, event refused:invoice_void, one owner notice', async () => {
+      const id = await sent(ID.bizAcc);
+      const event = stripeEvent(id, 40);
+      let delivery: Promise<any> | undefined;
+      let whileVoidDecides: unknown;
+      let committedWhileVoidDecides: unknown;
+      await db.$transaction(
+        async (tx: any) => {
+          await workflow.transition(id, 'VOID', {
+            tx: afterPaymentRead(tx, async () => {
+              delivery = stripeDeliver(event).then((r) => r);
+              whileVoidDecides = await Promise.race([
+                delivery.then((r: any) => `answered ${r.status}`),
+                sleep(1500).then(() => 'waiting'),
+              ]);
+              committedWhileVoidDecides = (await paymentRows(id)).map((p) => [p.status, p.amount]);
+            }),
+          });
+        },
+        { timeout: 30_000 },
+      );
+      expect(committedWhileVoidDecides, 'no provider payment commits on the invoice while the void decides').toEqual([]);
+      expect(whileVoidDecides, 'the Stripe door waits on the invoice row lock the void holds').toBe('waiting');
+
+      const res = await delivery!;
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(voidEventsFor(id)).toHaveLength(1);
+      await expectRefused(ID.bizAcc, id, 'stripe', event.id, event.data.object.id);
+      expect(await ledgerOf(ID.bizAcc, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: 'REVERSED' });
+    });
+
+    it('VN-08 (e) race, capturePaypalOrder: PayPal captures while transition(VOID) decides; recording the capture waits on the invoice lock, then is refused 409 naming the void: VOID, net 0, ledger all 0 / REVERSED, the capture kept refused:invoice_void, one owner notice; PayPal\'s own capture webhook for it later is refused too with no second notice', async () => {
+      const id = await sent(ID.bizAcc);
+      const orderId = `${P}order_e`;
+      const captureId = `${P}cap_e`;
+      const client = stubPaypalClient(id, orderId, captureId);
+      try {
+        let capture: Promise<{ ok?: unknown; error?: any }> | undefined;
+        let whileVoidDecides: unknown;
+        let committedWhileVoidDecides: unknown;
+        await db.$transaction(
+          async (tx: any) => {
+            await workflow.transition(id, 'VOID', {
+              tx: afterPaymentRead(tx, async () => {
+                capture = payments.capturePaypalOrder(orderId, id).then(
+                  (ok: unknown) => ({ ok }),
+                  (error: unknown) => ({ error }),
+                );
+                whileVoidDecides = await Promise.race([capture!.then(() => 'answered'), sleep(1500).then(() => 'waiting')]);
+                committedWhileVoidDecides = (await paymentRows(id)).map((p) => [p.status, p.amount]);
+              }),
+            });
+          },
+          { timeout: 30_000 },
+        );
+        expect(committedWhileVoidDecides, 'no captured payment commits on the invoice while the void decides').toEqual([]);
+        expect(whileVoidDecides, 'recording the capture waits on the invoice row lock the void holds').toBe('waiting');
+
+        const outcome = await capture!;
+        expect(outcome.error, `capture answered ${JSON.stringify(outcome.ok ?? null)}`).toBeDefined();
+        expect(outcome.error.getStatus?.()).toBe(409);
+        expect(outcome.error.message).toMatch(/void/i);
+        await expectRefused(ID.bizAcc, id, 'paypal', captureId, captureId);
+        expect(await ledgerOf(ID.bizAcc, id)).toEqual({ ar: 0, income: 0, cash: 0, finalized: 'REVERSED' });
+
+        const event = paypalCaptureEvent(id, captureId, 100);
+        const res = await paypalDeliver(event);
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        await expectRefused(ID.bizAcc, id, 'paypal', event.id, captureId);
+      } finally {
+        client.mockRestore();
+      }
+    });
+
+    it('VN-08 (f) control: a Stripe success (40) and a PayPal capture webhook (40) for a SENT invoice record as before: [SUCCESSFUL 40, SUCCESSFUL 40], PARTIALLY_PAID, AR 20 / income 100 / cash 80, their events kept under their own type, no owner notice', async () => {
+      const id = await sent(ID.bizAcc);
+      const stripeEvt = stripeEvent(id, 40);
+      const stripeRes = await stripeDeliver(stripeEvt);
+      expect(stripeRes.status, JSON.stringify(stripeRes.body)).toBe(201);
+      const paypalEvt = paypalCaptureEvent(id, `${P}cap_f`, 40);
+      const paypalRes = await paypalDeliver(paypalEvt);
+      expect(paypalRes.status, JSON.stringify(paypalRes.body)).toBe(201);
+
+      expect((await paymentRows(id)).map((p) => [p.status, p.amount])).toEqual([
+        ['SUCCESSFUL', 40],
+        ['SUCCESSFUL', 40],
+      ]);
+      expect((await invoiceRow(id)).status).toBe('PARTIALLY_PAID');
+      expect(await ledgerOf(ID.bizAcc, id)).toEqual({ ar: 20, income: 100, cash: 80, finalized: 'POSTED' });
+      expect(await webhookRow('stripe', stripeEvt.id)).toMatchObject({ eventType: 'checkout.session.completed' });
+      expect(await webhookRow('paypal', paypalEvt.id)).toMatchObject({ eventType: 'PAYMENT.CAPTURE.COMPLETED' });
+      expect(await refusalNotices(ID.bizAcc, id)).toEqual([]);
+    });
+  });
 });
