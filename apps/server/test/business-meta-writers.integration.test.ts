@@ -92,7 +92,11 @@
  * routes with nothing changed, the OWNER connects, syncs and disconnects
  * (MW-27); the rule's other arms (an OWNER membership without
  * Business.ownerId, the distinguished owner whose membership is not OWNER,
- * SUPER_ADMIN) are admitted (MW-28).
+ * SUPER_ADMIN) are admitted (MW-28). Review SEC-D94-1 (MW-29): the rule is
+ * bound to the route's business: the owner of another business, by OWNER
+ * membership or by Business.ownerId, who is only STAFF or ADMIN here is
+ * refused here (403, nothing changed) and admitted on the business they own.
+ * The suite seeds that second business (`v84l_d12b_r_xt_other_biz`) for it.
  *
  * FIXTURES: every user, business and membership id has the `v84l_` prefix
  * (registered in test/helpers/fixture-prefixes.json), every unique column
@@ -1339,6 +1343,13 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
   const ADMIN = `${R}admin`;
   const CO_OWNER = `${R}coowner`;
   const SUPER = `${R}superadmin`;
+  // W4-D94-SEO-OWNER review SEC-D94-1 (D-94; MW-29): owners of another
+  // business who are only members of this one, one per arm of the owner rule.
+  // XT_BIZ is owned (Business.ownerId) by XT_DIST_OWNER, who holds no
+  // membership in it; XT_MEMBER_OWNER holds its OWNER membership.
+  const XT_BIZ = `${R}xt_other_biz`;
+  const XT_MEMBER_OWNER = `${R}xt_owner_membership`; // OWNER membership of XT_BIZ (not its ownerId); STAFF here
+  const XT_DIST_OWNER = `${R}xt_owner_distinguished`; // Business.ownerId of XT_BIZ (no membership there); ADMIN here
   let ga4Svc: any;
   let gscSvc: any;
 
@@ -1348,6 +1359,13 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
       await db.membership.create({ data: { id: `${P}m_${id.slice(P.length)}_biz`, userId: id, businessId: ID.biz, role } });
     }
     await db.user.create({ data: { id: SUPER, email: emailOf(SUPER), name: SUPER, role: 'SUPER_ADMIN', referralCode: `${SUPER}_ref` } });
+    for (const id of [XT_MEMBER_OWNER, XT_DIST_OWNER]) {
+      await db.user.create({ data: { id, email: emailOf(id), name: id, role: 'USER', referralCode: `${id}_ref` } });
+    }
+    await db.business.create({ data: { id: XT_BIZ, name: `${XT_BIZ}-name`, ownerId: XT_DIST_OWNER, currency: 'TTD' } });
+    for (const [id, businessId, role] of [[XT_MEMBER_OWNER, XT_BIZ, 'OWNER'], [XT_MEMBER_OWNER, ID.biz, 'STAFF'], [XT_DIST_OWNER, ID.biz, 'ADMIN']] as const) {
+      await db.membership.create({ data: { id: `${P}m_${id.slice(P.length)}_${businessId.slice(P.length)}`, userId: id, businessId, role } });
+    }
     ga4Svc = app.get(SeoGa4);
     gscSvc = app.get(SeoGsc);
   });
@@ -1474,11 +1492,14 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
   type SeoRoute = 'connect ga4' | 'sync ga4' | 'disconnect ga4' | 'connect gsc' | 'sync gsc' | 'disconnect gsc';
   /** The six D-94 routes: connect, sync and disconnect, for GA4 and Search Console. */
   const SEO_ROUTES: SeoRoute[] = ['connect ga4', 'sync ga4', 'disconnect ga4', 'connect gsc', 'sync gsc', 'disconnect gsc'];
-  const callRoute = (actor: string, which: SeoRoute, body: Record<string, unknown> = {}) => {
+  /** One of the six routes on `businessId`'s path (MW-29 calls them on another business too). */
+  const callRouteOn = (businessId: string, actor: string, which: SeoRoute, body: Record<string, unknown> = {}) => {
     const [verb, kind] = which.split(' ') as ['connect' | 'sync' | 'disconnect', 'ga4' | 'gsc'];
-    if (verb === 'disconnect') return request(app.getHttpServer()).delete(route(kind)).set('x-test-user', actor);
-    return postAs(actor, route(verb === 'sync' ? `${kind}/sync` : kind), body);
+    const url = `/seo/businesses/${businessId}/connectors/${verb === 'sync' ? `${kind}/sync` : kind}`;
+    if (verb === 'disconnect') return request(app.getHttpServer()).delete(url).set('x-test-user', actor);
+    return postAs(actor, url, body);
   };
+  const callRoute = (actor: string, which: SeoRoute, body: Record<string, unknown> = {}) => callRouteOn(ID.biz, actor, which, body);
   /** A route's answer in one word: its status and what it reports (or its error code). */
   const outcome = (r: any) => {
     const b = r.body ?? {};
@@ -1599,6 +1620,63 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
         `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} page`,
       ];
       expect(google.handed).toEqual([...ONE_ROUND, ...ONE_ROUND, ...ONE_ROUND]);
+    } finally {
+      google.restore();
+      await reset();
+    }
+  });
+
+  // W4-D94-SEO-OWNER review SEC-D94-1 (owner ruling D-94): the owner rule is
+  // the route business's own. Every member MW-27 refuses owns no other
+  // business, so a rule that only asked whether the caller owns some business
+  // (an OWNER membership, or Business.ownerId, anywhere) would still pass
+  // MW-25..MW-28, and would let the owner of another business who is a member
+  // here connect, sync and disconnect this business's Google connections.
+  // MW-29 adds one such actor per arm of the rule: the OWNER (by membership)
+  // of another business who is STAFF here, and the distinguished owner
+  // (Business.ownerId) of another business who is ADMIN here. Each is refused
+  // here and admitted on the business they own, so the refusal is the
+  // business binding, not a fixture that owns nothing.
+  it('[MW-29] RED-BEFORE (W4-D94-SEO-OWNER, owner ruling D-94; review SEC-D94-1): the owner rule is the route business\'s own: the OWNER (by membership) of another business who is STAFF here and the distinguished owner (Business.ownerId) of another business who is ADMIN here each get 403 SEO_CONNECTOR_OWNER_ONLY on the six routes with nothing changed (the stored connections as before; Google handed nothing), while each connects and disconnects GA4 and Search Console on the business they own', async () => {
+    await reset(SEO_META);
+    const google = stubGoogle();
+    const OWNERS_ELSEWHERE = [
+      [XT_MEMBER_OWNER, 'OWNER membership of another business, STAFF here'],
+      [XT_DIST_OWNER, 'Business.ownerId of another business, ADMIN here'],
+    ] as const;
+    try {
+      const before = JSON.stringify(await storedMeta());
+      // What they would send: a property or site of their own, with their own tokens.
+      const OWN_BODY: Partial<Record<SeoRoute, Record<string, unknown>>> = {
+        'connect ga4': { propertyId: `${R}xt_property`, accessToken: `${R}xt_ga4_ACCESS`, refreshToken: `${R}xt_ga4_REFRESH` },
+        'connect gsc': { siteUrl: `https://${R}xt-site.test.local/`, accessToken: `${R}xt_gsc_ACCESS`, refreshToken: `${R}xt_gsc_REFRESH` },
+      };
+      const answered: Record<string, string> = {};
+      for (const [actor, label] of OWNERS_ELSEWHERE) {
+        for (const which of SEO_ROUTES) answered[`${label}: ${which}`] = outcome(await callRoute(actor, which, OWN_BODY[which]));
+      }
+      // The data first, so a RED run names what the other businesses' owners did here.
+      expect(google.handed, 'Google calls (token, target) the other businesses\' owners made on this business').toEqual([]);
+      const after = await storedMeta();
+      const changed: string[] = [];
+      for (const [key, stored] of [['ga4', SEO_GA4], ['gsc', SEO_GSC]] as const) {
+        if (!isDeepStrictEqual(after[key], stored)) changed.push(`metaData.${key} now ${JSON.stringify(after[key])}`);
+      }
+      expect(changed, 'stored SEO connections changed by the owner of another business').toEqual([]);
+      expect(JSON.stringify(after), 'the stored metaData after the refused requests').toBe(before);
+      expect(answered).toEqual(Object.fromEntries(OWNERS_ELSEWHERE.flatMap(([, label]) => SEO_ROUTES.map((which) => [`${label}: ${which}`, `403 ${SEO_OWNER_ONLY}`]))));
+
+      // On the business each owns, the same actor is admitted: connects, then disconnects, both connectors.
+      const own: Record<string, string[]> = {};
+      for (const [actor, label] of OWNERS_ELSEWHERE) {
+        own[label] = [];
+        for (const which of ['connect ga4', 'connect gsc', 'disconnect ga4', 'disconnect gsc'] as const) {
+          own[label].push(outcome(await callRouteOn(XT_BIZ, actor, which, OWN_BODY[which])));
+        }
+      }
+      expect(own).toEqual(Object.fromEntries(OWNERS_ELSEWHERE.map(([, label]) => [label, ['201 connected', '201 connected', '200 disconnected', '200 disconnected']])));
+      expect(JSON.stringify(await storedMeta()), 'this business\'s metaData after their own business\'s connects').toBe(before);
+      expect(google.handed).toEqual([]);
     } finally {
       google.restore();
       await reset();
