@@ -1050,6 +1050,16 @@ Raised by the FOLLOW3 wave-2 packets' recorded residuals. All accepted as recomm
 | D-90 | The finance payment row in the feed names who recorded the payment, and the CRM `invoice.payment_recorded` Activity copy is no longer written: one feed row per payment (D-08). | W3 V1-55c (V55-07b). |
 | D-91 | D-59 is amended to the shipped shape: completion keeps V1-28's contract (201, booking COMPLETED, invoicing FAILED with `DEPOSIT_CURRENCY_MISMATCH`, no invoice written); POST create-invoice answers 409; the operator settles by hand. | No change (FOLLOW3-A10 as built). |
 
+### Owner rulings, 2026-11-09 (wave-3 residuals)
+
+Raised by the wave-3 (FOLLOW4) packets' recorded residuals. All accepted as recommended.
+
+| Id | Ruling | Effect on the queue |
+|---|---|---|
+| D-92 | An imported (or legacy) DORMANT contact status is stored as CLIENT: every stored status is one of LEAD, PROSPECT, CLIENT, LOST, and "dormant" is always worked out from inactivity (the Dormant segment shows clients with no recent activity). | W4 follow-up to V1-38c (CR-V38c-1): import, automation update_status writer, readers that honour a stored DORMANT. |
+| D-93 | D-73 stands as written: a KEY plan with no member principal reads no contacts (and writes no money or invoices). The Pro Auto monitor and any other system-created plan run with the business owner as their member, so they keep working and their reads are attributed. D-88's "no member uses the OWNER's view" is narrowed to D-88's own writes, which D-73 already refuses to a memberless plan. | W4: plan-step authority, Pro Auto monitor principal, KEY CRM visibility CV-08b/CV-08c. |
+| D-94 | Only the business owner may connect, sync or disconnect Google Analytics and Search Console (as Gmail, GMAIL_OWNER_ONLY); anyone else gets 403. | W4: SEO controller (MW-27). |
+
 ---
 
 ## (h) Judge dispositions
