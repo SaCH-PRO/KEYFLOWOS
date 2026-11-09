@@ -64,8 +64,15 @@
  *     address (IPv6 bracketed, IPv4-mapped or NAT64 too) and a localhost name
  *     are refused with 400 before anything is fetched or an import is
  *     recorded, and a redirect is followed only to a URL that passes the same
- *     check. A DNS name that resolves to a private address is not caught yet
- *     (follow-up packet).
+ *     check.
+ *   - ST-38c-2, second half (W4-IMPORT-SSRF-PIN): a DNS name is resolved once
+ *     and refused with 400, before anything is fetched or recorded, when any
+ *     address it resolves to is not public (127.0.0.1.nip.io, *.localtest.me,
+ *     a name for 10.x, the metadata address, ::1, an IPv4-mapped loopback, a
+ *     unique-local address) or when it does not resolve; a public name is
+ *     fetched through a dispatcher pinned to exactly the address checked, so a
+ *     second (rebound) answer is never used; a redirect target is resolved and
+ *     checked the same way.
  *
  * Nothing on the HTTP or persistence path of the import is mocked:
  * PrismaService, the rows, CrmRateLimitGuard, AuthGuard, BusinessGuard,
@@ -78,6 +85,10 @@
  * user row as AuthMiddleware would), the timeline service's side channels, the
  * caches, the plan limit and the vision model (never called here). The readers
  * (RelationshipHealthService, HealthScoreService) run on the real client.
+ * import/link's outbound edges are stood in: global fetch (per describe, for
+ * fixed URLs) and the resolver (node:dns promises lookup, for the fixed names
+ * in RESOLVER below), each throwing for anything else, so no request or lookup
+ * leaves the process.
  *
  * Requires DATABASE_URL. Every seeded row carries the `v86e_` prefix (rows
  * created through the API are deleted by their business id) and is
@@ -85,6 +96,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { promises as dnsPromises } from 'node:dns';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -303,6 +315,52 @@ afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
 });
+
+/**
+ * W4-IMPORT-SSRF-PIN (ST-38c-2): import/link resolves a link's host name
+ * before it fetches it. The resolver it calls (node:dns promises lookup) is
+ * stood in for the names below and throws for any other name, so no lookup
+ * leaves the process. A name maps to its answers, or to a function of how many
+ * times it was looked up before (DNS rebinding: a later answer differs).
+ */
+type ResolverAnswer = { address: string; family: 4 | 6 };
+const PUBLIC_V4 = '93.184.215.14';
+const PUBLIC_V6 = '2606:4700:4700::1111';
+const enotfound = (hostname: string) => Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' });
+const RESOLVER: Record<string, ResolverAnswer[] | ((before: number) => ResolverAnswer[])> = {
+  'v86e-import.example.test': [{ address: PUBLIC_V4, family: 4 }],
+  'v86e-public.example.test': [{ address: PUBLIC_V4, family: 4 }],
+  'v86e-public6.example.test': [{ address: PUBLIC_V6, family: 6 }],
+  // A public first answer, then the loopback address: a fetch that resolved the name again would reach 127.0.0.1.
+  'v86e-rebind.example.test': (before) => [{ address: before === 0 ? PUBLIC_V4 : '127.0.0.1', family: 4 }],
+  '127.0.0.1.nip.io': [{ address: '127.0.0.1', family: 4 }],
+  'v86e.localtest.me': [{ address: '127.0.0.1', family: 4 }],
+  'v86e-private.example.test': [{ address: '10.20.30.40', family: 4 }],
+  'v86e-metadata.example.test': [{ address: '169.254.169.254', family: 4 }],
+  'v86e-loopback6.example.test': [{ address: '::1', family: 6 }],
+  'v86e-mapped.example.test': [{ address: '::ffff:127.0.0.1', family: 6 }],
+  'v86e-ula.example.test': [{ address: 'fd00::1', family: 6 }],
+  'v86e-mixed.example.test': [{ address: PUBLIC_V4, family: 4 }, { address: '10.0.0.1', family: 4 }],
+  'v86e-nxdomain.example.test': () => { throw enotfound('v86e-nxdomain.example.test'); },
+};
+let lookupSpy: ReturnType<typeof vi.spyOn>;
+const lookedUp = new Map<string, number>();
+
+beforeAll(() => {
+  lookupSpy = vi.spyOn(dnsPromises, 'lookup').mockImplementation((async (hostname: string, options?: { all?: boolean }) => {
+    const entry = RESOLVER[hostname];
+    if (!entry) throw new Error(`unexpected outbound lookup in a test: ${hostname}`);
+    const before = lookedUp.get(hostname) ?? 0;
+    lookedUp.set(hostname, before + 1);
+    const answers = typeof entry === 'function' ? entry(before) : entry;
+    return options?.all ? answers : answers[0];
+  }) as any);
+});
+
+afterAll(() => lookupSpy?.mockRestore());
+
+/** The names import/link looked up since the spy was last cleared, in order. */
+const lookedUpNames = () => lookupSpy.mock.calls.map((call: unknown[]) => String(call[0]));
 
 /** The contact ids of one people-flow segment, sorted; [] when the segment is empty. */
 async function segmentIds(segmentId: string): Promise<string[]> {
@@ -754,5 +812,150 @@ describe('ST-38c-2 (V1-38c review): import/link fetches only a public address, a
     expect(fetchSpy.mock.calls.length).toBeGreaterThan(1);
     expect(fetchSpy.mock.calls.length).toBeLessThanOrEqual(6);
     expect(await importsOf(LOOP)).toEqual([{ status: 'FAILED', records: 0 }]);
+  });
+});
+
+/**
+ * ST-38c-2, second half (W4-IMPORT-SSRF-PIN): the check above passed any DNS
+ * name, so a name that resolves to a loopback, private, link-local, metadata
+ * or unique-local address (127.0.0.1.nip.io, *.localtest.me) was fetched, and
+ * checking a name and then letting fetch resolve it again would be open to DNS
+ * rebinding. import/link now resolves the host once (RESOLVER above stands in
+ * for DNS), refuses it when any address is not public or none comes back, and
+ * fetches through a dispatcher pinned to the address it checked (SNI and Host
+ * stay the name; outbound-address.spec.ts proves the pinned connection on a
+ * local server). A redirect target is resolved and checked the same way.
+ * Global fetch stands in for the servers: a private name is answered with an
+ * "internal" file, as the internal service would answer, so a private name
+ * that reached fetch would be imported rather than refused; each fetch's init
+ * is recorded, its dispatcher naming the address it is pinned to.
+ */
+describe('ST-38c-2 (W4-IMPORT-SSRF-PIN): import/link resolves a link host once, refuses it if any address is not public, and fetches only from the address it checked', () => {
+  const PRIVATE: Array<[string, string]> = [
+    ['127.0.0.1 (nip.io)', 'http://127.0.0.1.nip.io/contacts.csv'],
+    ['127.0.0.1 (localtest.me)', 'http://v86e.localtest.me/contacts.csv'],
+    ['10.20.30.40', 'http://v86e-private.example.test/contacts.csv'],
+    ['169.254.169.254 (the metadata address)', 'http://v86e-metadata.example.test/latest/meta-data/'],
+    ['::1', 'http://v86e-loopback6.example.test/contacts.csv'],
+    ['::ffff:127.0.0.1 (IPv4-mapped loopback)', 'http://v86e-mapped.example.test/contacts.csv'],
+    ['fd00::1 (unique local)', 'http://v86e-ula.example.test/contacts.csv'],
+    ['a public and a private address', 'http://v86e-mixed.example.test/contacts.csv'],
+  ];
+  const NXDOMAIN = 'https://v86e-nxdomain.example.test/contacts.csv';
+  const PUBLIC_URL = 'https://v86e-public.example.test/contacts.csv';
+  const PUBLIC6_URL = 'http://v86e-public6.example.test/contacts.csv';
+  const REBIND_URL = 'https://v86e-rebind.example.test/contacts.csv';
+  const TO_PRIVATE_NAME = 'https://v86e-public.example.test/to-private-name.csv';
+  const TO_PUBLIC6 = 'https://v86e-public.example.test/to-public6.csv';
+  const INTERNAL_EMAIL = `${P}w4pin-internal@test.local`;
+  const emailFor = (url: string) => `${P}w4pin-${new URL(url).hostname.split('.')[0]}@test.local`;
+  const csv = (first: string, email: string) => ['first_name,email,status', `${first},${email},Client`].join('\n');
+  const PRIVATE_HOSTS = new Set(PRIVATE.map(([, url]) => new URL(url).hostname));
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeAll(() => {
+    fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: any) => {
+      const url = typeof input === 'string' ? input : String(input?.href ?? input?.url);
+      const ok = (body: string) => new Response(body, { status: 200, headers: { 'content-type': 'text/csv' } });
+      const redirect = (status: number, location: string) => new Response(null, { status, headers: { location } });
+      if (PRIVATE_HOSTS.has(new URL(url).hostname)) return ok(csv(`${P}W4PinInternal`, INTERNAL_EMAIL));
+      if (url === TO_PRIVATE_NAME) return redirect(302, 'http://v86e-metadata.example.test/latest/meta-data/');
+      if (url === TO_PUBLIC6) return redirect(301, PUBLIC6_URL);
+      if (url === PUBLIC_URL || url === PUBLIC6_URL || url === REBIND_URL) return ok(csv(`${P}W4Pin`, emailFor(url)));
+      throw new Error(`unexpected outbound fetch in a test: ${url}`);
+    }) as any);
+  });
+
+  afterAll(() => fetchSpy.mockRestore());
+
+  function clearSpies() {
+    fetchSpy.mockClear();
+    lookupSpy.mockClear();
+  }
+
+  const fetchedUrls = () => fetchSpy.mock.calls.map((call: unknown[]) => String(call[0]));
+  /** The address each fetch's dispatcher is pinned to (undefined when a fetch was given none). */
+  const pinnedTargets = () =>
+    (fetchSpy.mock.calls as unknown[][]).map((call) => (call[1] as { dispatcher?: { target?: unknown } } | undefined)?.dispatcher?.target);
+
+  /** The import jobs recorded for a source URL in bizB, and how many rows each recorded. */
+  async function importsOf(url: string): Promise<Array<{ status: string; records: number }>> {
+    return db.$queryRawUnsafe(
+      `SELECT i.status, (SELECT count(*)::int FROM contact_import_contacts r WHERE r.import_id = i.id) AS records
+         FROM contact_imports i WHERE i.business_id = $1 AND i.source_url = $2`,
+      ID.bizB, url,
+    );
+  }
+
+  it.each(PRIVATE)('ST-38c-2 (W4-IMPORT-SSRF-PIN): a link whose name resolves to %s is refused with 400 after one lookup, nothing is fetched, and no import is recorded', async (_answer, url) => {
+    clearSpies();
+    const res = await linkImport(ID.owner, url, ID.bizB);
+    expect(res.status).toBe(400);
+    expect(lookedUpNames()).toEqual([new URL(url).hostname]);
+    expect(lookupSpy).toHaveBeenCalledWith(new URL(url).hostname, expect.objectContaining({ all: true }));
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await importsOf(url)).toEqual([]);
+    expect(await storedStatus(ID.bizB, INTERNAL_EMAIL), 'the internal file was imported').toBeUndefined();
+  });
+
+  it('ST-38c-2 (W4-IMPORT-SSRF-PIN): a link whose name does not resolve is refused with 400, nothing is fetched, and no import is recorded', async () => {
+    clearSpies();
+    const res = await linkImport(ID.owner, NXDOMAIN, ID.bizB);
+    expect(res.status).toBe(400);
+    expect(lookedUpNames()).toEqual(['v86e-nxdomain.example.test']);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await importsOf(NXDOMAIN)).toEqual([]);
+  });
+
+  it.each([
+    [PUBLIC_V4, PUBLIC_URL, 4],
+    [PUBLIC_V6, PUBLIC6_URL, 6],
+  ] as const)('ST-38c-2 (W4-IMPORT-SSRF-PIN): a link whose name resolves to the public address %s is fetched once, through a dispatcher pinned to exactly that address, and the file is imported', async (address, url, family) => {
+    clearSpies();
+    const res = await linkImport(ID.owner, url, ID.bizB);
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: 1, processedRows: 1 });
+    const hostname = new URL(url).hostname;
+    expect(lookedUpNames()).toEqual([hostname]);
+    expect(fetchedUrls()).toEqual([url]);
+    expect(pinnedTargets()).toEqual([{ hostname, address, family }]);
+    expect((fetchSpy.mock.calls[0][1] as RequestInit | undefined)?.redirect, 'fetch must not follow a redirect unchecked').toBe('manual');
+    expect(await storedStatus(ID.bizB, emailFor(url))).toBe('CLIENT');
+  });
+
+  it('ST-38c-2 (W4-IMPORT-SSRF-PIN): DNS rebinding: the name is resolved once, and the fetch stays pinned to that public answer though the next answer would be 127.0.0.1', async () => {
+    clearSpies();
+    const res = await linkImport(ID.owner, REBIND_URL, ID.bizB);
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: 1, processedRows: 1 });
+    expect(lookedUpNames()).toEqual(['v86e-rebind.example.test']);
+    expect(pinnedTargets()).toEqual([{ hostname: 'v86e-rebind.example.test', address: PUBLIC_V4, family: 4 }]);
+    expect(await storedStatus(ID.bizB, emailFor(REBIND_URL))).toBe('CLIENT');
+  });
+
+  it('ST-38c-2 (W4-IMPORT-SSRF-PIN): a redirect to a name resolving to the metadata address is refused with 400, its target is never fetched, and the import is FAILED with no row', async () => {
+    clearSpies();
+    const res = await linkImport(ID.owner, TO_PRIVATE_NAME, ID.bizB);
+    expect(res.status).toBe(400);
+    expect(fetchedUrls()).toEqual([TO_PRIVATE_NAME]);
+    expect(lookedUpNames()).toEqual(['v86e-public.example.test', 'v86e-metadata.example.test']);
+    expect(await importsOf(TO_PRIVATE_NAME)).toEqual([{ status: 'FAILED', records: 0 }]);
+    expect(await storedStatus(ID.bizB, INTERNAL_EMAIL), 'the internal file was imported').toBeUndefined();
+  });
+
+  it("ST-38c-2 (W4-IMPORT-SSRF-PIN): a redirect to a public name is resolved again and fetched through a dispatcher pinned to that name's own checked address", async () => {
+    clearSpies();
+    const res = await linkImport(ID.owner, TO_PUBLIC6, ID.bizB);
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: 1, processedRows: 1 });
+    expect(fetchedUrls()).toEqual([TO_PUBLIC6, PUBLIC6_URL]);
+    expect(lookedUpNames()).toEqual(['v86e-public.example.test', 'v86e-public6.example.test']);
+    expect(pinnedTargets()).toEqual([
+      { hostname: 'v86e-public.example.test', address: PUBLIC_V4, family: 4 },
+      { hostname: 'v86e-public6.example.test', address: PUBLIC_V6, family: 6 },
+    ]);
+    for (const call of fetchSpy.mock.calls as unknown[][]) {
+      expect((call[1] as RequestInit | undefined)?.redirect, 'fetch must not follow a redirect unchecked').toBe('manual');
+    }
   });
 });
