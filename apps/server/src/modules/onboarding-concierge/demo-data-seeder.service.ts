@@ -43,6 +43,16 @@ function toDemoSeedResult(seeded: DemoSeedResult): DemoSeedResult {
   return { contactId: seeded.contactId, invoiceId: seeded.invoiceId, invoiceNumber: seeded.invoiceNumber };
 }
 
+/** 409 DEMO_SEED_CONFLICT: a live contact that is not the demo contact holds the sample email. */
+class SampleEmailTakenException extends ConflictException {
+  constructor() {
+    super({
+      code: DEMO_SEED_CONFLICT,
+      message: `The demo data could not be added: another contact already uses ${SAMPLE_EMAIL}.`,
+    });
+  }
+}
+
 /**
  * Seeds a single, clearly-labeled sample contact + invoice into a brand-new
  * workspace so the Command Center is not empty the first time the user arrives.
@@ -53,7 +63,9 @@ function toDemoSeedResult(seeded: DemoSeedResult): DemoSeedResult {
  * Two doors: onboarding completion seeds inside its own owner-only transaction
  * (seedDemoData with its tx; completion records the actor), and POST
  * .../seed-demo seeds through seedDemoDataAsOwner (owner only, audited; owner
- * ruling D-84). There is no other seeding route.
+ * ruling D-84). There is no other seeding route. Both doors run the same seed
+ * (seedWithTx): it queues on the business row and checks the sample email
+ * before writing, so neither door answers 500 on it (review SDO-SEC-1, CR-1).
  */
 @Injectable()
 export class DemoDataSeederService {
@@ -88,28 +100,49 @@ export class DemoDataSeederService {
    * owner and the demo contact and invoice (the actor row completion writes).
    *
    * A repeated seed answers the existing demo data with alreadySeeded true and
-   * writes nothing. Concurrent seeds race on the live (business_id,
-   * email_normalized) unique: the loser's P2002 is retried and answers the
-   * winner's rows. A unique violation that persists (the sample email held by
-   * a live contact that is not the demo contact) answers 409
-   * DEMO_SEED_CONFLICT, never 500.
+   * writes nothing. Concurrent seeds (and a seed racing completion) queue on
+   * the business row, so the later one answers the earlier one's rows. The
+   * sample email held by a live contact that is not the demo contact answers
+   * 409 DEMO_SEED_CONFLICT before anything is written, never 500.
    */
   async seedDemoDataAsOwner(businessId: string, actor: DemoSeedActor | undefined): Promise<OwnerDemoSeedResult> {
     const actorId = await this.resolveSeedOwner(businessId, actor);
     return this.seedInOwnTransaction(businessId, actorId);
   }
 
-  async seedDemoData(businessId: string, tx?: PrismaTx): Promise<DemoSeedResult> {
+  /**
+   * Onboarding completion's door (with its tx), or an actor-less seed in a
+   * transaction of its own (without one, which answers 409 as seed-demo does).
+   *
+   * Review SDO-SEC-1 / CR-1: the demo data never blocks completion. When a
+   * live contact that is not the demo contact holds the sample email (any
+   * member with crm:write, or an import, can write one), the completion door
+   * writes nothing and answers null, and completion completes without demo
+   * data. Before, the contact create's P2002 aborted the completion
+   * transaction and the owner's /complete answered 500 on every retry. The
+   * refusal comes from a read, so the caller's transaction is intact.
+   */
+  seedDemoData(businessId: string): Promise<DemoSeedResult>;
+  seedDemoData(businessId: string, tx: PrismaTx): Promise<DemoSeedResult | null>;
+  async seedDemoData(businessId: string, tx?: PrismaTx): Promise<DemoSeedResult | null> {
     if (tx) {
-      return toDemoSeedResult(await this.seedWithTx(tx, businessId));
+      try {
+        return toDemoSeedResult(await this.seedWithTx(tx, businessId));
+      } catch (err) {
+        if (!(err instanceof SampleEmailTakenException)) throw err;
+        this.logger.warn(`Demo data not added for ${businessId}: a live contact already uses the sample email`);
+        return null;
+      }
     }
     return toDemoSeedResult(await this.seedInOwnTransaction(businessId));
   }
 
   /**
-   * The seed in a transaction of its own, retried on a unique violation (a
-   * concurrent seed won the race; the retry reads its rows). A violation left
-   * after the last attempt is not a race: 409 DEMO_SEED_CONFLICT.
+   * The seed in a transaction of its own. Seeds queue on the business row
+   * (seedWithTx), so a P2002 here comes from a writer outside the seed (a
+   * contact create of the sample email committing between the check and the
+   * insert): it is retried, and the retry's check answers 409
+   * DEMO_SEED_CONFLICT. A violation left after the last attempt is 409 too.
    */
   private async seedInOwnTransaction(businessId: string, actorId?: string): Promise<OwnerDemoSeedResult> {
     const maxAttempts = 3;
@@ -125,10 +158,7 @@ export class DemoDataSeederService {
           this.logger.warn(`Demo seed race detected for ${businessId}, retrying (${attempt}/${maxAttempts})`);
           continue;
         }
-        throw new ConflictException({
-          code: DEMO_SEED_CONFLICT,
-          message: `The demo data could not be added: another contact already uses ${SAMPLE_EMAIL}.`,
-        });
+        throw new SampleEmailTakenException();
       }
     }
 
@@ -158,7 +188,20 @@ export class DemoDataSeederService {
     });
   }
 
+  /**
+   * The seed both doors run. It locks the business row first (FOR NO KEY
+   * UPDATE, the lock completion's claim already holds in its transaction), so
+   * seed-demo and completion, or two seed-demos, queue instead of racing on
+   * the sample email's unique: the later one's reads below see the earlier
+   * one's demo rows (review SDO-SEC-1 / CR-1: a seed-demo racing /complete
+   * made /complete answer 500). Then, before any write, a live contact that is
+   * not the demo contact holding the sample email refuses the seed
+   * (SampleEmailTakenException): a read, where the create's P2002 would abort
+   * the caller's transaction.
+   */
   private async seedWithTx(tx: PrismaTx, businessId: string, actorId?: string): Promise<OwnerDemoSeedResult> {
+    await tx.$queryRaw`SELECT id FROM businesses WHERE id = ${businessId} FOR NO KEY UPDATE`;
+
     const existing = await tx.contact.findFirst({
       where: { businessId, source: 'demo' },
       select: { id: true },
@@ -178,6 +221,15 @@ export class DemoDataSeederService {
         alreadySeeded: true,
       };
     }
+
+    // No demo contact exists (above), so a live holder of the sample email is
+    // another contact; the live (business_id, email_normalized) unique would
+    // refuse the create.
+    const holder = await tx.contact.findFirst({
+      where: { businessId, emailNormalized: SAMPLE_EMAIL, deletedAt: null },
+      select: { id: true },
+    });
+    if (holder) throw new SampleEmailTakenException();
 
     const business = await tx.business.findUnique({
       where: { id: businessId },
