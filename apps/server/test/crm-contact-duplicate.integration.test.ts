@@ -1083,15 +1083,31 @@ describe('V1-17 review repairs CR-1 / V117-ST-2 (FOLLOW3-D8) — cancelling a GD
     expect(again.status).toBe(400);
   });
 
-  it("CONTROL (PF-04) — two concurrent POST .../forget on one live contact both answer 2xx (never 500) and leave exactly one ContactForgetRequest row, 'requested' (the native upsert on the unique contactId)", async () => {
+  it("CONTROL (PF-04) — two concurrent POST .../forget on one live contact never answer 5xx: each is 2xx or 404 'Contact not found' (the live-only visibility check, when the other forget committed first), at least one is 2xx, and exactly one ContactForgetRequest row is left, 'requested' (the native upsert on the unique contactId); a later forget answers 404 the same way", async () => {
     const w = await post(ID.owner, BIZ, { firstName: `${P}Twice`, email: `${P}twice@test.local` });
     expect(w.status).toBe(201);
     const [a, b] = await Promise.all([forget(ID.owner, w.body.id), forget(ID.owner, w.body.id)]);
+    // Which outcome the second call gets depends on whether it passes the
+    // controller's live-only assertContactVisible before or after the first
+    // forget's transaction commits: before, both reach the service and the
+    // upsert keeps one row (2xx twice); after, the contact is soft-deleted and
+    // the second call is a 404. Both orders are correct; a 5xx never is.
+    const isOkOrGone = (res: { status: number; body?: { message?: unknown } }) =>
+      (res.status >= 200 && res.status < 300) ||
+      (res.status === 404 && res.body?.message === 'Contact not found');
     for (const res of [a, b]) {
-      expect(res.status, JSON.stringify(res.body)).toBeGreaterThanOrEqual(200);
-      expect(res.status, JSON.stringify(res.body)).toBeLessThan(300);
+      expect(res.status, JSON.stringify(res.body)).toBeLessThan(500);
+      expect(isOkOrGone(res), JSON.stringify(res.body)).toBe(true);
     }
+    expect([a, b].some((res) => res.status >= 200 && res.status < 300), JSON.stringify([a.body, b.body])).toBe(true);
     expect(await forgetRequests(w.body.id)).toEqual([{ status: 'requested', cancelled_at: null }]);
     expect(await deletedAt(w.body.id)).not.toBeNull();
+
+    // Deterministic cover of the 404 branch: once a forget has committed, a
+    // further forget is refused by the live-only check, and nothing changes.
+    const late = await forget(ID.owner, w.body.id);
+    expect(late.status, JSON.stringify(late.body)).toBe(404);
+    expect(late.body.message).toBe('Contact not found');
+    expect(await forgetRequests(w.body.id)).toEqual([{ status: 'requested', cancelled_at: null }]);
   });
 });
