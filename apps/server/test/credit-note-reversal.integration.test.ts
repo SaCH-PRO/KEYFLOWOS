@@ -1726,6 +1726,15 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
       return { inv, original };
     }
 
+    /**
+     * D-78 (W5-REFUND-DOORS-KEEP review SEC-W5RDK-1 / CR-RDK-1): a credited status is kept, so the door moves no status
+     * and emits no invoice event. Asserted at the end of each door's sub-case: the next providerPaidAndCredited (and
+     * seedInvoice) clears the recorder, so a single check after the last door would see only that door's events.
+     */
+    function expectNoInvoiceEvent(door: string) {
+      expect(emitted.filter((ev) => ev.name.startsWith('invoice.')), `${door}: a credited status is kept, no status move, no invoice event`).toEqual([]);
+    }
+
     /** The refund row the door committed: -10, REFUNDED, linked to the original (V1-29c). */
     async function expectRefundRow(inv: string, original: any) {
       const refunds = await db.payment.findMany({ where: { invoiceId: inv, status: 'REFUNDED' } });
@@ -1744,6 +1753,7 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
     await expectRefundRow(a.inv, a.original);
     // RED-BEFORE (base db5656e7): PARTIALLY_CREDITED still carrying the refunded payment's paidAt (the reconcile refused 409, swallowed).
     expect(await invoiceRow(a.inv), "Stripe door, kept under 'keep': credited status kept (D-78), no paidAt (D-14)").toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+    expectNoInvoiceEvent('(a) Stripe refund.created on PARTIALLY_CREDITED');
 
     // (b) PayPal refund naming its capture, the same position.
     const b = await providerPaidAndCredited('crp_paypal_part', 'paypal', 30);
@@ -1756,6 +1766,7 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
     await expectRefundRow(b.inv, b.original);
     // RED-BEFORE (base db5656e7): PARTIALLY_CREDITED with the stale paidAt.
     expect(await invoiceRow(b.inv), "PayPal door (by capture), kept under 'keep': no paidAt").toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+    expectNoInvoiceEvent('(b) PayPal refund by capture on PARTIALLY_CREDITED');
 
     // (c) Stripe charge.refunded with no refunds.data (the charge's cumulative amount_refunded) on FULLY_CREDITED: 90 net, 0 owed.
     const c = await providerPaidAndCredited('crp_stripe_full', 'stripe', TOTAL);
@@ -1767,6 +1778,7 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
     await expectRefundRow(c.inv, c.original);
     // RED-BEFORE (base db5656e7): FULLY_CREDITED with the stale paidAt.
     expect(await invoiceRow(c.inv), "Stripe door (cumulative), over-settled FULLY_CREDITED kept under 'keep': no paidAt").toMatchObject({ status: 'FULLY_CREDITED', paidAt: null });
+    expectNoInvoiceEvent('(c) Stripe charge.refunded on FULLY_CREDITED');
 
     // (d) PayPal refund naming no capture (createRefundWithPostingByInvoice, resolved by custom_id) on FULLY_CREDITED.
     const d = await providerPaidAndCredited('crp_paypal_full', 'paypal', TOTAL);
@@ -1774,14 +1786,15 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
     await expectRefundRow(d.inv, d.original);
     // RED-BEFORE (base db5656e7): FULLY_CREDITED with the stale paidAt.
     expect(await invoiceRow(d.inv), "PayPal door (by invoice), over-settled FULLY_CREDITED kept under 'keep': no paidAt").toMatchObject({ status: 'FULLY_CREDITED', paidAt: null });
-
-    expect(emitted.filter((ev) => ev.name.startsWith('invoice.')), 'a credited status is kept: no status move, no invoice event').toEqual([]);
+    expectNoInvoiceEvent('(d) PayPal refund by invoice on FULLY_CREDITED');
 
     // (e) One money position (paid 100, credited 30, 10 back), three doors: the manual door ends it as the provider doors do.
     const m = await seedInvoice('crp_manual', 'PAID');
     const noteM = await createNote(m, 30);
     expect((await applyNote(noteM.id)).status).toBe(201);
+    emitted.length = 0;
     await expect(refundPayment(m, 10, 'rf_ten')).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+    expectNoInvoiceEvent('(e) manual refund door on PARTIALLY_CREDITED');
     const rowM = await invoiceRow(m);
     for (const [door, inv] of [['Stripe', a.inv], ['PayPal', b.inv]] as const) {
       const row = await invoiceRow(inv);
@@ -1789,9 +1802,11 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
     }
 
     // A redelivery records nothing more and moves nothing (the door's dedupe on the refund id).
+    emitted.length = 0;
     await paymentsSvc.processPaypalRefund(paypalPartRefund);
     await expectRefundRow(b.inv, b.original);
     expect(await invoiceRow(b.inv)).toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+    expectNoInvoiceEvent('PayPal redelivery');
     await expectBalanced(ID.biz);
   });
 });
