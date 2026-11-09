@@ -16,7 +16,8 @@
     "test:e2e": "vitest run -c vitest.e2e.config.ts",
     "test:ci": "vitest run",
     "proof:k12": "node -e \"require('fs').mkdirSync('.proof',{recursive:true})\" && vitest run src/core/config/proof-admission.spec.ts src/core/config/proof-resource-admission.spec.ts --reporter=json --outputFile=.proof/k12-vitest.json && node ../../scripts/proof-admission/evaluate.mjs --manifest ../../scripts/proof-admission/manifests/k12-self.json --report .proof/k12-vitest.json",
-    "proof:manifests": "node ../../scripts/proof-admission/run-manifests.mjs"
+    "proof:manifests": "node ../../scripts/proof-admission/run-manifests.mjs",
+    "proof:release0": "node -e \"const {spawnSync: run} = require('child_process'); const a = process.argv.slice(1); if (a.some((x) => /^--(only|manifests-dir|report)(=|$)/.test(x))) { console.error('proof:release0: the manifests come from scripts/proof-admission/release0-index.json; --only, --manifests-dir and --report are refused'); process.exit(2); } const m = require('../../scripts/proof-admission/release0-index.json').manifests; let r = run(process.execPath, ['../../scripts/proof-admission/run-manifests.mjs', '--only', m.join(','), ...a], {stdio: 'inherit'}); if (r.status !== 0) process.exit(r.status ?? 2); r = run('vitest', ['run', 'src/core/config/release0-proof-coverage.spec.ts'], {stdio: 'inherit'}); process.exit(r.status ?? 2);\" --"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1041.0",

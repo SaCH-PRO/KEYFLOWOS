@@ -525,6 +525,12 @@ describe('R0-35-EXIT-PROOF release0-index.json binds every Release 0 server suit
     );
     expect(only, '.only silently skips every other case of its suite; it is never explained').toEqual([]);
     expect(ambiguous, 'skips more than one explanation matches').toEqual([]);
+    if (unexplained.length > 0) {
+      // The whole title, which the assertion diff below may cut: what an explanation's titleStartsWith matches.
+      console.error(
+        `release0-index.json does not explain:\n${unexplained.map((u) => JSON.stringify({ suite: u.suite, line: u.line, kind: u.kind, title: u.title })).join('\n')}`,
+      );
+    }
     expect(
       unexplained.map((u) => `${u.suite}:${u.line} ${u.kind}(${JSON.stringify(u.title)})`),
       'skips and todos in Release 0 suites that release0-index.json does not explain',

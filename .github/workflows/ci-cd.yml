@@ -759,6 +759,16 @@ jobs:
       - name: Evaluate every proof manifest at this head
         run: node scripts/proof-admission/run-manifests.mjs --skip-build
 
+      # R0-35-EXIT-PROOF. The Release 0 exit gate (BUILD-MAP-001 section (d)):
+      # run-manifests over exactly the Release 0 manifests that
+      # scripts/proof-admission/release0-index.json lists (each SATISFIED at
+      # this head), then release0-proof-coverage.spec.ts: every Release 0
+      # server suite is bound by one of them, no manifest names a missing
+      # suite, and every skip or todo in those suites is explained. Exits
+      # non-zero on any failure. --skip-build: "Build server" built dist/.
+      - name: Release 0 exit proof (proof:release0)
+        run: pnpm --filter server proof:release0 --skip-build
+
       # The one-command local runner (scripts/test-local.sh) runs in a sandbox
       # with stand-ins for docker and pnpm: plan order, resource admission
       # refusals, step selection. It touches no database.
