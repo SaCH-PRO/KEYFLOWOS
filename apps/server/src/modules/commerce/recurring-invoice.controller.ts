@@ -27,14 +27,25 @@ const SCHEDULE_WRITE_CONTACT_KEYS: readonly ScheduleWriteContactKey[] = [
 
 /**
  * W3-D46-CREATE-AND-RECURRING (D-64; FOLLOW3-D6 review SEC-D6-2): the HTTP
- * body of a schedule write. RecurringInvoiceService answers every write with
- * the whole Contact row (`include: { contact: true }`, which the
+ * body of a schedule. RecurringInvoiceService answers every write with the
+ * whole Contact row (`include: { contact: true }`, which the
  * recurring_invoice.* listeners read), and the routes handed it back: a
  * revenue:write member received the contact's internal notes, phone, owner and
  * visibility. The body now carries only SCHEDULE_WRITE_CONTACT_KEYS, as the
  * invoice writes do; a schedule without a loaded contact passes through.
+ *
+ * Review SEC-W3D46R-1 (D-64): the two reads (list and :id) loaded the same
+ * whole row and handed it to any revenue:read member, a crm_view 'owned' STAFF
+ * member included, for a schedule the OWNER bound to a PRIVATE contact. They
+ * answer through this projection too, so every schedule route discloses of its
+ * contact what the operator invoice read discloses of its customer
+ * (OPERATOR_INVOICE_CONTACT_SELECT) and nothing more. An unknown :id (no
+ * schedule) passes through as before. Proven by
+ * test/commerce-contact-bind-visibility.integration.test.ts CB-01g, CB-04a
+ * (reads) and CB-04b (PATCH, pause, resume, DELETE; review SEC-W3D46R-2), and
+ * d46-commerce-writes D46-S07a..e's admitted controls.
  */
-function toScheduleWriteResponse<S extends { contact?: Record<ScheduleWriteContactKey, unknown> | null }>(schedule: S) {
+function toScheduleResponse<S extends { contact?: Record<ScheduleWriteContactKey, unknown> | null }>(schedule: S) {
   const contact = schedule.contact;
   if (!contact) return schedule;
   return {
@@ -94,18 +105,21 @@ export class RecurringInvoiceController {
     }
   }
 
+  // Review SEC-W3D46R-1 (D-64): each schedule's contact is projected
+  // (toScheduleResponse), as on every schedule write.
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/recurring-invoices')
-  list(@Param('businessId') businessId: string) {
-    return this.service.listRecurringInvoices(businessId);
+  async list(@Param('businessId') businessId: string) {
+    return (await this.service.listRecurringInvoices(businessId)).map((schedule) => toScheduleResponse(schedule));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
   @RequireModuleScope('revenue', 'read')
   @Get('businesses/:businessId/recurring-invoices/:id')
-  get(@Param('businessId') businessId: string, @Param('id') id: string) {
-    return this.service.getRecurringInvoice(businessId, id);
+  async get(@Param('businessId') businessId: string, @Param('id') id: string) {
+    const schedule = await this.service.getRecurringInvoice(businessId, id);
+    return schedule ? toScheduleResponse(schedule) : schedule;
   }
 
   // W3-D46-CREATE-AND-RECURRING: D-46 first; D-64: the acting member is
@@ -136,7 +150,7 @@ export class RecurringInvoiceController {
     await this.assertSuperAdminMayWriteRevenue(req, businessId);
     // The actor is set after the body spread: the inline body type is not
     // validated or whitelisted, so a body field can never name it.
-    return toScheduleWriteResponse(await this.service.createRecurringInvoice({ ...body, businessId, actorUserId: req?.user?.id }));
+    return toScheduleResponse(await this.service.createRecurringInvoice({ ...body, businessId, actorUserId: req?.user?.id }));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -163,7 +177,7 @@ export class RecurringInvoiceController {
     @Req() req?: ActorRequest,
   ) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId);
-    return toScheduleWriteResponse(await this.service.updateRecurringInvoice({ ...body, id, businessId }));
+    return toScheduleResponse(await this.service.updateRecurringInvoice({ ...body, id, businessId }));
   }
 
   // The recurring panel's history drawer has always called this path; it was
@@ -182,7 +196,7 @@ export class RecurringInvoiceController {
   @Post('businesses/:businessId/recurring-invoices/:id/pause')
   async pause(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req?: ActorRequest) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId);
-    return toScheduleWriteResponse(await this.service.pauseRecurringInvoice(businessId, id));
+    return toScheduleResponse(await this.service.pauseRecurringInvoice(businessId, id));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -192,7 +206,7 @@ export class RecurringInvoiceController {
   @Post('businesses/:businessId/recurring-invoices/:id/resume')
   async resume(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req?: ActorRequest) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId);
-    return toScheduleWriteResponse(await this.service.resumeRecurringInvoice(businessId, id));
+    return toScheduleResponse(await this.service.resumeRecurringInvoice(businessId, id));
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard)
@@ -202,6 +216,6 @@ export class RecurringInvoiceController {
   @Delete('businesses/:businessId/recurring-invoices/:id')
   async cancel(@Param('businessId') businessId: string, @Param('id') id: string, @Req() req?: ActorRequest) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId);
-    return toScheduleWriteResponse(await this.service.cancelRecurringInvoice(businessId, id));
+    return toScheduleResponse(await this.service.cancelRecurringInvoice(businessId, id));
   }
 }

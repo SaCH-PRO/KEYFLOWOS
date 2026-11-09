@@ -47,6 +47,16 @@
  *             test/d46-commerce-writes.integration.test.ts D46-S07a..e.
  *   D46-S08   (unit half) createInvoice is GUARDED, so D46-S02..S05 run on
  *             it; the HTTP half is d46-commerce-writes D46-S08.
+ *
+ * The census reads src/modules/commerce only, so D46-S06b's "no OPEN entry"
+ * holds inside that module. Review SEC-W3D46R-3 found the schedule rows
+ * written outside it: TrashController (src/modules/trash) restores and
+ * permanently deletes recurringInvoice rows behind BusinessGuard alone (its
+ * @RequireModuleScope('settings') has no ModuleScopeGuard to enforce it), so a
+ * non-member SUPER_ADMIN and a revenue:read STAFF member restore a soft-deleted
+ * ACTIVE schedule, which then bills again. trash.controller.ts is outside the
+ * W3-D46-CREATE-AND-RECURRING write set: D46-S09 keeps it visible as an
+ * it.todo for its follow-up packet.
  */
 import 'reflect-metadata';
 import { readdirSync } from 'fs';
@@ -394,4 +404,16 @@ describe('D-46 write-route census, the whole commerce module (review SEC-A1-2)',
     expect(EXEMPT).not.toHaveProperty('createInvoice');
     expect(pathOf('createInvoice')).toBe('businesses/:businessId/invoices');
   });
+
+  // W3-D46-CREATE-AND-RECURRING review SEC-W3D46R-3 (D-46): reproduced on the
+  // repair branch with a real-database probe (TrashController, real
+  // BusinessGuard): the non-member SUPER_ADMIN's POST
+  // api/businesses/A/trash/recurringInvoice/:id/restore answered 201 and the row
+  // came back {status ACTIVE, deletedAt null} (the commerce resume route answers
+  // that SUPER_ADMIN 403), its DELETE .../recurringInvoice/:id answered 200 and
+  // the row was gone, and a STAFF member holding revenue:'read' restored another
+  // schedule with 201. Outside this packet's write set (src/modules/trash).
+  it.todo(
+    "D46-S09 (D-46; review SEC-W3D46R-3; follow-up packet: D-46 plus module scope on trash for revenue models) TrashController restore and permanent delete of a recurringInvoice refuse a SUPER_ADMIN that is not a member of the business (403) and a member below revenue:write; a restored schedule never bills again on their call. Not implementable here: trash.controller.ts is outside the W3-D46-CREATE-AND-RECURRING write set",
+  );
 });

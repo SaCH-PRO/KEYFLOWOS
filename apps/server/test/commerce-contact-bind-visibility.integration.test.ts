@@ -52,6 +52,12 @@
  *          written, the contact unchanged.
  *   CB-03  (review CR-D6-3) POST invoices answers the same with and without an
  *          Idempotency-Key: the bind does not depend on an optional header.
+ *   CB-04  (W3-D46-CREATE-AND-RECURRING review SEC-W3D46R-1/-2, D-64) the
+ *          schedule reads (GET recurring-invoices, GET .../:id) and the four
+ *          other schedule writes (PATCH, pause, resume, DELETE) answer the
+ *          contact projected as CB-01g's create does. RED-BEFORE (reads): a
+ *          revenue:read STAFF member with crm_view 'owned' read the PRIVATE
+ *          contact's whole row off the OWNER's schedule.
  *   KEY    (D-88) KEY acts as the member: the flow dispatcher
  *          (FlowOrchestratorService.executeToolDirectly, the entry the plan
  *          queue's ActionDispatcher calls, over executeTool and the
@@ -128,6 +134,7 @@ const CANARY = 'V84F_PRIV_';
 const ID = {
   owner: `${P}owner`, // OWNER of bizA
   staff: `${P}staff`, // STAFF of bizA: revenue write, crm read, crm_view owned
+  staffRead: `${P}staffRead`, // STAFF of bizA: revenue read, crm read, crm_view owned (CB-04, review SEC-W3D46R-1)
   admin: `${P}admin`, // ADMIN of bizA, role defaults (sees TEAM and SHARED, not another member's PRIVATE)
   ownerB: `${P}ownerB`, // OWNER of bizB
   bizA: `${P}bizA`,
@@ -144,6 +151,9 @@ const TEAM = { firstName: 'V84fTeam', lastName: 'Staffbook', email: `${P}team@te
 const SHARED = { firstName: 'V84fShared', lastName: 'Shared', email: `${P}shared@test.local` };
 
 const STAFF_SCOPES = { revenue: 'write', crm: 'read', crm_view: 'owned' };
+const STAFF_READ_SCOPES = { revenue: 'read', crm: 'read', crm_view: 'owned' };
+/** The contact keys every schedule response carries (the invoice write projection; D-64, CB-01g, CB-04). */
+const SCHEDULE_CONTACT_KEYS = ['businessId', 'email', 'firstName', 'id', 'lastName'];
 const ITEMS = [{ description: 'V84F line', quantity: 2, unitPrice: 10 }];
 
 let db: any;
@@ -462,13 +472,14 @@ beforeAll(async () => {
 
   await cleanup(); // in case a prior run aborted
 
-  for (const id of [ID.owner, ID.staff, ID.admin, ID.ownerB]) {
+  for (const id of [ID.owner, ID.staff, ID.staffRead, ID.admin, ID.ownerB]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V84F Biz A', slug: ID.bizA, ownerId: ID.owner, currency: 'TTD', accountingBasis: 'CASH' } });
   await db.business.create({ data: { id: ID.bizB, name: 'V84F Biz B', slug: ID.bizB, ownerId: ID.ownerB, currency: 'TTD', accountingBasis: 'CASH' } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.bizA, role: 'OWNER' } });
   await db.membership.create({ data: { id: `${P}m_staff`, userId: ID.staff, businessId: ID.bizA, role: 'STAFF', permissionScopes: STAFF_SCOPES } });
+  await db.membership.create({ data: { id: `${P}m_staffRead`, userId: ID.staffRead, businessId: ID.bizA, role: 'STAFF', permissionScopes: STAFF_READ_SCOPES } });
   await db.membership.create({ data: { id: `${P}m_admin`, userId: ID.admin, businessId: ID.bizA, role: 'ADMIN' } });
   await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.ownerB, businessId: ID.bizB, role: 'OWNER' } });
 
@@ -620,7 +631,7 @@ describe('CB-01 STAFF (revenue:write, crm_view owned) binds the owner\'s PRIVATE
     // Controls: the STAFF member's own TEAM contact and the OWNER on the PRIVATE
     // contact bind (201), and the body carries the contact projected to the
     // invoice write's fields: no phone, notes, owner or visibility.
-    const projected = ['businessId', 'email', 'firstName', 'id', 'lastName'];
+    const projected = SCHEDULE_CONTACT_KEYS;
     const team = await postSchedule(ID.staff, ID.cTeam, 'v84f schedule team');
     expect(team.status, JSON.stringify(team.body)).toBe(201);
     expect(team.body.contactId).toBe(ID.cTeam);
@@ -660,6 +671,75 @@ describe('CB-02 a PATCH that sends back the stored contactId is not re-judged (r
     const res = await patchQuote(ID.admin, quoteId, ID.cPriv);
     expectRefused(res, unknown, 'ADMIN PATCH quotes/:id');
     expect((await db.quote.findUnique({ where: { id: quoteId } })).contactId).toBe(ID.cTeam);
+  });
+});
+
+/**
+ * W3-D46-CREATE-AND-RECURRING review repairs (D-64). CB-01g projects the
+ * contact on schedule create only, and nothing proved the other routes:
+ *   SEC-W3D46R-1  GET recurring-invoices and GET recurring-invoices/:id
+ *                 answered `include: { contact: true }` unprojected, so any
+ *                 revenue:read member (a crm_view 'owned' STAFF included) read
+ *                 the PRIVATE contact's phone, notes, owner and visibility off
+ *                 a schedule the OWNER bound to it. RED-BEFORE: 80+ contact
+ *                 keys and the canary phone.
+ *   SEC-W3D46R-2  PATCH, pause, resume and DELETE answer the projected contact
+ *                 (toScheduleResponse) with no case proving it: unwrapping it
+ *                 on all four left every suite green.
+ * The reads disclose what the operator invoice read discloses of its customer
+ * (OPERATOR_INVOICE_CONTACT_SELECT) and nothing more; which schedules a member
+ * may list is unchanged (revenue:read).
+ */
+describe('CB-04 every schedule route answers the projected contact (D-64; review SEC-W3D46R-1, SEC-W3D46R-2)', () => {
+  const projectedPriv = () => ({ id: ID.cPriv, businessId: ID.bizA, firstName: PRIV.firstName, lastName: PRIV.lastName, email: PRIV.email });
+  const SCHEDULES = `/commerce/businesses/${ID.bizA}/recurring-invoices`;
+
+  it("CB-04a (D-64; review SEC-W3D46R-1) GET recurring-invoices and GET recurring-invoices/:id answer each schedule's contact projected to id, businessId, firstName, lastName and email: a STAFF member with revenue:read and crm_view 'owned' reading the OWNER's schedule on the PRIVATE contact gets no phone, notes, owner or visibility; so do the revenue:write STAFF member and the OWNER", async () => {
+    const created = await postSchedule(ID.owner, ID.cPriv, 'v84f schedule cb04a');
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const scheduleId = created.body.id;
+    for (const actor of [ID.staffRead, ID.staff, ID.owner]) {
+      const list = await as(actor, agent().get(SCHEDULES));
+      expect(list.status, `${actor} list: ${JSON.stringify(list.body).slice(0, 300)}`).toBe(200);
+      const row = list.body.find((s: any) => s.id === scheduleId);
+      expect(row, `${actor} list: the OWNER's schedule is listed`).toBeTruthy();
+      // RED-BEFORE: the whole Contact row (phone, notesInternal, ownerId, visibility 'PRIVATE', ...).
+      expect(row.contact, `${actor} list`).toEqual(projectedPriv());
+      for (const s of list.body) expect(Object.keys(s.contact).sort(), `${actor} list: schedule ${s.id}`).toEqual(SCHEDULE_CONTACT_KEYS);
+      expect(JSON.stringify(list.body), `${actor} list`).not.toContain(PRIV.phone);
+
+      const one = await as(actor, agent().get(`${SCHEDULES}/${scheduleId}`));
+      expect(one.status, `${actor} :id: ${JSON.stringify(one.body).slice(0, 300)}`).toBe(200);
+      expect(one.body).toMatchObject({ id: scheduleId, contactId: ID.cPriv, generatedInvoices: [] });
+      expect(one.body.contact, `${actor} :id`).toEqual(projectedPriv());
+      expect(JSON.stringify(one.body), `${actor} :id`).not.toContain(PRIV.phone);
+    }
+    // An unknown id keeps its answer (no schedule, nothing to project): not a 500.
+    const missing = await as(ID.owner, agent().get(`${SCHEDULES}/${P}rec_unknown`));
+    expect([200, 404], JSON.stringify(missing.body)).toContain(missing.status);
+    expect(JSON.stringify(missing.body ?? {})).not.toContain(CANARY);
+  });
+
+  it("CB-04b (D-64; review SEC-W3D46R-2) PATCH recurring-invoices/:id, POST .../pause, POST .../resume and DELETE recurring-invoices/:id on the OWNER's schedule on the PRIVATE contact answer its contact projected to id, businessId, firstName, lastName and email, for the revenue:write STAFF member and the OWNER", async () => {
+    for (const actor of [ID.staff, ID.owner]) {
+      const created = await postSchedule(ID.owner, ID.cPriv, `v84f schedule cb04b ${actor.slice(P.length)}`);
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const at = `${SCHEDULES}/${created.body.id}`;
+      const writes: Array<[string, () => request.Test, number, string]> = [
+        ['PATCH', () => as(actor, agent().patch(at)).send({ name: `v84f cb04b renamed ${actor.slice(P.length)}` }), 200, 'ACTIVE'],
+        ['pause', () => as(actor, agent().post(`${at}/pause`)).send({}), 201, 'PAUSED'],
+        ['resume', () => as(actor, agent().post(`${at}/resume`)).send({}), 201, 'ACTIVE'],
+        ['DELETE', () => as(actor, agent().delete(at)), 200, 'CANCELLED'],
+      ];
+      for (const [label, call, okStatus, status] of writes) {
+        const res = await call();
+        expect(res.status, `${actor} ${label}: ${JSON.stringify(res.body).slice(0, 300)}`).toBe(okStatus);
+        expect(res.body.status, `${actor} ${label}`).toBe(status);
+        // RED (toScheduleResponse unwrapped): the whole PRIVATE Contact row.
+        expect(res.body.contact, `${actor} ${label}`).toEqual(projectedPriv());
+        expect(JSON.stringify(res.body), `${actor} ${label}`).not.toContain(PRIV.phone);
+      }
+    }
   });
 });
 

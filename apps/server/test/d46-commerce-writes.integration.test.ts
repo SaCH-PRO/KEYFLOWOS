@@ -60,7 +60,9 @@
  *             for a SUPER_ADMIN member below revenue:write; A byte-identical
  *             (schedules included) and no BusinessEvent.
  *   controls  owner A and the SUPER_ADMIN ADMIN member of A keep 201/200 and
- *             the write; owner B (a non-member USER) keeps BusinessGuard's 403;
+ *             the write, and each schedule write answers the contact projected
+ *             to id, businessId, firstName, lastName and email (review
+ *             SEC-W3D46R-2, D-64); owner B (a non-member USER) keeps BusinessGuard's 403;
  *             the recurring run (the scheduler, which acts as the system and
  *             never as a SUPER_ADMIN) still bills a schedule the SUPER_ADMIN
  *             member created.
@@ -988,6 +990,17 @@ async function scheduleOf(id: string): Promise<any> {
 
 const SCHEDULES = `/commerce/businesses/${ID.bizA}/recurring-invoices`;
 
+/**
+ * W3-D46-CREATE-AND-RECURRING review SEC-W3D46R-2 (D-64): every schedule
+ * write answers the contact projected to these keys (toScheduleResponse);
+ * the whole Contact row has 80+.
+ */
+const SCHEDULE_CONTACT_KEYS = ['businessId', 'email', 'firstName', 'id', 'lastName'];
+function expectProjectedContact(res: request.Response) {
+  expect(Object.keys(res.body.contact ?? {}).sort(), 'the schedule write answers the projected contact (review SEC-W3D46R-2)').toEqual(SCHEDULE_CONTACT_KEYS);
+  expect(res.body.contact.id).toBe(ID.contactA);
+}
+
 const LATE_CASES: WriteCase[] = [
   {
     id: 'D46-S08',
@@ -1024,6 +1037,7 @@ const LATE_CASES: WriteCase[] = [
     admitted: async (fx, res) => {
       const rows = await db.recurringInvoice.findMany({ where: { businessId: ID.bizA, name: fx.name } });
       expect(rows.map((r: any) => [r.id, r.status, r.contactId])).toEqual([[res.body.id, 'ACTIVE', ID.contactA]]);
+      expectProjectedContact(res);
     },
   },
   {
@@ -1033,8 +1047,9 @@ const LATE_CASES: WriteCase[] = [
     okStatus: 200,
     prepare: async (tag) => ({ rec: await makeSchedule(`s07b_${tag}`), name: `${P}s07b_renamed_${tag}` }),
     call: (actor, fx) => as(actor, agent().patch(`${SCHEDULES}/${fx.rec}`)).send({ name: fx.name }),
-    admitted: async (fx) => {
+    admitted: async (fx, res) => {
       expect((await scheduleOf(fx.rec)).name).toBe(fx.name);
+      expectProjectedContact(res);
     },
   },
   {
@@ -1044,8 +1059,9 @@ const LATE_CASES: WriteCase[] = [
     okStatus: 201,
     prepare: async (tag) => ({ rec: await makeSchedule(`s07c_${tag}`) }),
     call: (actor, fx) => as(actor, agent().post(`${SCHEDULES}/${fx.rec}/pause`)).send({}),
-    admitted: async (fx) => {
+    admitted: async (fx, res) => {
       expect((await scheduleOf(fx.rec)).status).toBe('PAUSED');
+      expectProjectedContact(res);
     },
   },
   {
@@ -1055,8 +1071,9 @@ const LATE_CASES: WriteCase[] = [
     okStatus: 201,
     prepare: async (tag) => ({ rec: await makeSchedule(`s07d_${tag}`, 'PAUSED') }),
     call: (actor, fx) => as(actor, agent().post(`${SCHEDULES}/${fx.rec}/resume`)).send({}),
-    admitted: async (fx) => {
+    admitted: async (fx, res) => {
       expect((await scheduleOf(fx.rec)).status).toBe('ACTIVE');
+      expectProjectedContact(res);
     },
   },
   {
@@ -1066,8 +1083,9 @@ const LATE_CASES: WriteCase[] = [
     okStatus: 200,
     prepare: async (tag) => ({ rec: await makeSchedule(`s07e_${tag}`) }),
     call: (actor, fx) => as(actor, agent().delete(`${SCHEDULES}/${fx.rec}`)),
-    admitted: async (fx) => {
+    admitted: async (fx, res) => {
       expect((await scheduleOf(fx.rec)).status).toBe('CANCELLED');
+      expectProjectedContact(res);
     },
   },
 ];
