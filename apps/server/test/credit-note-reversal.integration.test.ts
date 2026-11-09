@@ -1988,10 +1988,121 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
     expect(await db.payment.count({ where: { invoiceId: F.inv } }), 'nothing written').toBe(0);
   });
 
+  it('CN-36 SEC-CAR-1 W4-CREDIT-AWARE-READERS (D-78; ST-PL04-1 / CR-PL04-2): a credit-note void that commits between mark-paid reading a settled PARTIALLY_CREDITED invoice and its reload is answered 409, not 200 for an invoice that owes again; nothing written, and the retry collects what is owed', async () => {
+    const { CommerceService } = await import('../src/modules/commerce/commerce.service');
+    const inv = await seedInvoice('car1_race', 'SENT');
+    expect((await recordPaymentRoute(inv, 70, 'car1_race_pay')).status).toBe(201);
+    const note = await createNote(inv, 30);
+    expect((await applyNote(note.id)).status).toBe(201);
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'PARTIALLY_CREDITED' });
+    expect((await publicView(inv)).body, '70 paid + 30 credited: nothing owing').toMatchObject({ paid: 70, remaining: 0 });
+
+    // The race, made deterministic: mark-paid's first invoice read (select) sees the settled
+    // PARTIALLY_CREDITED row; its reload (the first findUnique carrying `include`) runs only after
+    // a void of the APPLIED note has committed through the credit-note route.
+    const svc: any = commerceApp.get(CommerceService);
+    const realPrisma = svc.prisma;
+    const realClient = realPrisma.client;
+    let voided: any = null;
+    const invoiceDelegate = new Proxy(realClient.invoice, {
+      get(target: any, prop: string | symbol) {
+        const value = Reflect.get(target, prop);
+        if (prop !== 'findUnique') return typeof value === 'function' ? value.bind(target) : value;
+        return async (args: any) => {
+          if (!voided && args?.include) voided = await voidNote(note.id);
+          return value.call(target, args);
+        };
+      },
+    });
+    const client = new Proxy(realClient, {
+      get(target: any, prop: string | symbol) {
+        if (prop === 'invoice') return invoiceDelegate;
+        const value = Reflect.get(target, prop);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    svc.prisma = new Proxy(realPrisma, {
+      get(target: any, prop: string | symbol) {
+        return prop === 'client' ? client : Reflect.get(target, prop);
+      },
+    });
+    const paymentsBefore = await paymentsOf(inv);
+    let res: any;
+    try {
+      res = await markPaid(inv);
+    } finally {
+      svc.prisma = realPrisma;
+    }
+    expect(voided?.status, 'the void committed inside the window').toBe(201);
+    expect((await noteRow(note.id)).status).toBe('VOID');
+
+    // Packet head (1d863ecb): 200 with body.status PARTIALLY_PAID, the invoice owing 30 again.
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(JSON.stringify(res.body)).toContain('Invoice is PARTIALLY_PAID, not PAID; reload it and try again');
+    expect((await paymentsOf(inv)).map((p) => p.id), 'nothing written').toEqual(paymentsBefore.map((p) => p.id));
+    expect(await invoiceRow(inv)).toMatchObject({ status: 'PARTIALLY_PAID', paidAt: null });
+    expect((await publicView(inv)).body).toMatchObject({ status: 'PARTIALLY_PAID', paid: 70, remaining: 30 });
+    expect(emitted.filter((e) => e.name === 'invoice.paid'), 'no invoice.paid').toEqual([]);
+
+    // Reloaded and asked again, mark-paid collects the 30 the void put back and the invoice is PAID.
+    const retry = await markPaid(inv);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(200);
+    expect(retry.body.status).toBe('PAID');
+    const added = (await paymentsOf(inv)).filter((p) => !paymentsBefore.some((b) => b.id === p.id));
+    expect(added.map((p) => [Number(p.amount), p.status])).toEqual([[30, 'SUCCESSFUL']]);
+    await expectBalanced(ID.biz);
+  });
+
+  it('CN-37 CR-AR-1 W4-CREDIT-AWARE-READERS (D-13, D-78; CR-PL04-1): mark-paid refuses a credited invoice whose refunds exceed its payments (net below zero) as it refuses an uncredited one: 409, nothing recorded beyond what the invoice owes', async () => {
+    // Legacy or out-of-band rows (refundableOf caps the refunds today's writers make): 20 received,
+    // 40 refunded, so the money received nets to -20. Written raw, as such rows would stand.
+    const seedRows = async (inv: string, key: string) => {
+      await db.payment.create({
+        data: { id: `${P}pay_${key}_in`, amount: 20, currency: 'TTD', status: 'SUCCESSFUL', provider: 'cash', method: 'cash', providerPaymentId: `${P}pp_${key}_in`, businessId: ID.biz, invoiceId: inv },
+      });
+      await db.payment.create({
+        data: { id: `${P}pay_${key}_out`, amount: -40, currency: 'TTD', status: 'REFUNDED', provider: 'cash', method: 'cash', providerPaymentId: `${P}pp_${key}_out`, businessId: ID.biz, invoiceId: inv },
+      });
+    };
+    const refusal = 'Cannot mark an invoice paid after one of its payments was refunded';
+
+    // Control: the same rows on an uncredited invoice are refused (the guard as it stood).
+    const plain = await seedInvoice('car_ar1_plain', 'SENT');
+    await seedRows(plain, 'car_ar1_plain');
+    const control = await markPaid(plain);
+    expect(control.status, JSON.stringify(control.body)).toBe(409);
+    expect(JSON.stringify(control.body)).toContain(refusal);
+
+    const inv = await seedInvoice('car_ar1', 'SENT');
+    await seedRows(inv, 'car_ar1');
+    const note = await createNote(inv, 30);
+    expect((await applyNote(note.id)).status).toBe(201);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_CREDITED');
+    const counts = await ledgerCounts(ID.biz);
+
+    // Packet head (1d863ecb): 200 with a 90 mark-paid payment, 20 more than the 70 the credit leaves owing.
+    const res = await markPaid(inv);
+    expect(res.status, JSON.stringify(res.body)).toBe(409);
+    expect(JSON.stringify(res.body)).toContain(refusal);
+    expect((await paymentsOf(inv)).map((p) => [Number(p.amount), p.status]), 'nothing recorded').toEqual([
+      [20, 'SUCCESSFUL'],
+      [-40, 'REFUNDED'],
+    ]);
+    expect(await ledgerCounts(ID.biz), 'nothing posted').toEqual(counts);
+    expect((await invoiceRow(inv)).status).toBe('PARTIALLY_CREDITED');
+  });
+
   // Outside the W4-CREDIT-AWARE-READERS write set (payments.service.ts beyond payLinkInvoice,
   // invoice-receipt-builder.service.ts): SHAREABLE_INVOICE_STATUSES keeps PARTIALLY_CREDITED out, so
   // these credit-unaware readers answer 404 rather than a false amount due (CN-32).
   it.todo(
     'CR-V44-1 (reader half, residual) W4-CREDIT-AWARE-READERS: the token and bare-id status poll (payments.service.ts invoicePaymentStatus) and the public receipt (invoice-receipt-builder.service.ts buildPublicReceipt) net the APPLIED credit notes (creditAwareBalance) and serve a PARTIALLY_CREDITED invoice, and the provider checkouts behind payLinkInvoice charge the remainder net of credits instead of invoice.total (assertInvoicePayable refuses PARTIALLY_CREDITED until then); then SHAREABLE_INVOICE_STATUSES admits PARTIALLY_CREDITED and payLinkInvoice opens the token money routes for it',
+  );
+
+  // W4-CREDIT-AWARE-READERS review CR-AR-2: outside this packet's write set (apps/web). The server half is
+  // pinned by CN-34: once settled the invoice stays PARTIALLY_CREDITED (D-78) with remaining / amountDue 0
+  // and the intent answers 409. Both web pages decide "settled" by status === 'PAID' and show no credited figure.
+  it.todo(
+    "CR-AR-2 W4-CREDIT-AWARE-READERS CR-V44-1 (D-78), web half: the customer pages treat a PARTIALLY_CREDITED invoice with nothing owing as settled: /pay/link/[token] (apps/web/src/app/pay/link/[token]/page.tsx, gate `!paid && invoice?.status !== 'PAID'`) stops offering 'Choose Payment Method' at remaining 0 instead of posting an intent the server refuses 409 'Invoice is already paid', and /public/invoice/[token] (isPaid = status === 'PAID') stops offering Pay at amountDue 0; both show the credited amount so total, paid, credited and due add up (the server projections carry no credited figure yet), and the receipt button waits for the receipt residual above (buildPublicReceipt still 404s PARTIALLY_CREDITED)",
   );
 });
