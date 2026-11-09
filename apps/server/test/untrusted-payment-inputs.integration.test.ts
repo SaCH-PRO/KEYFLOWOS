@@ -87,6 +87,31 @@
  *              failed before retiring the row) hands the audit emitter nothing;
  *              its answer carries the retired row CONFIRMED too.
  *
+ * V1-41c-MONEY-ROW-COUNTERS (V1-41 deviation, V1-41b residual): the business
+ * payments page and the payment counters read money rows only. A third tenant
+ * (bizC) holds exactly the rows below, built through the real doors where one
+ * exists: an evidence-extracted 40 confirmed (CONFIRMED + SUCCESSFUL) then
+ * refunded (REFUNDED -40), a second extracted 20 still PENDING; a FAILED card
+ * attempt, a customer intent PENDING and a SUCCESSFUL row carrying bizB's id
+ * on bizC's invoice (Payment has no FK to Business, M31); a member-recorded
+ * 100 on a third invoice.
+ *   V41C-01    GET /commerce/businesses/:b/payments (listAllPayments) hides the
+ *              CONFIRMED row as listPayments does since V1-41b, also under
+ *              ?status=CONFIRMED; PENDING, FAILED and refund rows stay listed
+ *              under their own status; the CONFIRMED row itself is kept.
+ *   V41C-02    a member of another business: 403 on bizC's list, and its own
+ *              list carries no row of a bizC invoice (the bizB-carrying row
+ *              disclosed bizC's invoice and customer).
+ *   V41C-03    commerce-ai clientPaymentIntelligence.totalPayments and the
+ *              revenue journey's "Total payments" count the payments received
+ *              (the SUCCESSFUL entries balanceOfStoredRows adds into `paid`)
+ *              of this tenant only; another tenant gets 404 for the contact.
+ *   V41C-04    the money health score's overdueReceivables and the overdue
+ *              invoice scan's remaining are the V1-36 balance contract
+ *              (balanceOfStoredRows over this tenant's rows), equal to the
+ *              balance the reconcile derives the status from
+ *              (InvoiceWorkflowService.getBalance, ownTenantPayments).
+ *
  * Nothing on the authorization or money boundary is mocked: PrismaService,
  * AuthGuard, BusinessGuard, ModuleScopeGuard, CommerceService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService, the chart of
@@ -159,6 +184,23 @@ const ID = {
   invRouteAudit: `${P}invRouteAudit`,
   invRouteReplay: `${P}invRouteReplay`,
 };
+
+/**
+ * V1-41c: a third tenant whose only payment rows are the V41C fixtures, so the
+ * whole-tenant counters are exact. Kept out of ID: the global seed and V41-00
+ * cover ID's invoices only.
+ */
+const C = {
+  biz: `${P}bizC`, // ID.owner is its OWNER; ownerB is not a member
+  contact: `${P}contactC`,
+  // evidence 40 confirmed then refunded, a second extracted 20 PENDING; SENT, overdue
+  invRefunded: `${P}c_invRefunded`,
+  // a FAILED attempt, a customer intent PENDING, a SUCCESSFUL row carrying bizB's id; SENT, overdue
+  invAttempts: `${P}c_invAttempts`,
+  // one member-recorded payment of the whole total; PAID, no due date
+  invPaid: `${P}c_invPaid`,
+};
+const C_CONTACT_EMAIL = `${P}cc@test.local`;
 
 /** V1-41b (DISC-V41-6): contactA's private fields, which no invoice write answer may carry. */
 const CONTACT_A_PHONE = '+18685550141';
@@ -1205,5 +1247,212 @@ describe('V1-41b review repairs: the confirm is audited as the payment it record
     expect(statusesOf(stored)).toEqual({ [pendingId]: 'CONFIRMED', [first.payment.id]: 'SUCCESSFUL' });
     expect(statusesOf(res.body.invoice.payments)).toEqual(statusesOf(stored));
     expect(await paymentPostingsOf(ID.invRouteReplay)).toHaveLength(1);
+  });
+});
+
+describe('V1-41c: the payments page and the payment counters read money rows only (RED before V1-41c: the CONFIRMED row listed; PENDING, FAILED, CONFIRMED and foreign rows counted as payments)', () => {
+  const OVERDUE_DUE_DATE = new Date(Date.now() - 10 * 86_400_000);
+  let prisma: any;
+  let workflow: any;
+  /** The retired extracted row of invRefunded (filled in beforeAll). */
+  let confirmedRowId = '';
+
+  /** [invoiceId, status, amount] rows, sorted, as the list answers them. */
+  function listed(rows: any[]) {
+    return rows
+      .map((p) => [p.invoiceId, p.status, p.amount])
+      .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  }
+
+  /** CommerceAiService on the real PrismaService; the LLM boundary records its prompt and answers non-JSON. */
+  async function commerceAi() {
+    const { CommerceAiService } = await import('../src/modules/commerce/commerce-ai.service');
+    const prompts: string[] = [];
+    const aiUsage = {
+      callAi: async (input: any) => {
+        prompts.push(input.messages.map((m: any) => m.content).join('\n'));
+        return { content: 'v41c: not json' };
+      },
+    };
+    return { ai: new CommerceAiService(prisma, aiUsage as any, {} as any, {} as any, {} as any), prompts };
+  }
+
+  /** The money health score and the overdue scan on the real PrismaService (signals recorded, actions stubbed). */
+  async function intelligence() {
+    const { HealthScoreService } = await import('../src/modules/intelligence/health-score.service');
+    const { ScheduledScansService } = await import('../src/modules/intelligence/scheduled-scans.service');
+    const health: any = new HealthScoreService(prisma);
+    const signals: Array<{ entityId: string; value: number }> = [];
+    const scans: any = new ScheduledScansService(
+      prisma,
+      {} as any,
+      {
+        upsertSignal: async (_biz: string, key: any, data: any) => {
+          signals.push({ entityId: key.entityId, value: data.value });
+          return null;
+        },
+      } as any,
+      { bridge: async () => null } as any,
+      health,
+    );
+    return { health, scans, signals };
+  }
+
+  beforeAll(async () => {
+    const { PrismaService } = await import('../src/core/prisma/prisma.service');
+    const { ChartOfAccountsSeederService } = await import('../src/modules/finance/chart-of-accounts-seeder.service');
+    const { InvoiceWorkflowService } = await import('../src/modules/commerce/invoice-workflow.service');
+    prisma = app.get(PrismaService);
+    workflow = app.get(InvoiceWorkflowService);
+
+    await db.business.create({ data: { id: C.biz, name: 'V41C Biz C', ownerId: ID.owner, currency: 'TTD' } });
+    await db.membership.create({ data: { id: `${P}m_ownerC`, userId: ID.owner, businessId: C.biz, role: 'OWNER' } });
+    await db.contact.create({ data: { id: C.contact, businessId: C.biz, firstName: 'Vfc', lastName: 'Customer', email: C_CONTACT_EMAIL } });
+    await app.get(ChartOfAccountsSeederService).ensureDefaults(C.biz);
+    let n = 0;
+    for (const [id, dueDate] of [[C.invRefunded, OVERDUE_DUE_DATE], [C.invAttempts, OVERDUE_DUE_DATE], [C.invPaid, null]] as const) {
+      n += 1;
+      await db.invoice.create({
+        data: {
+          id,
+          invoiceNumber: `V41C-${String(n).padStart(3, '0')}`,
+          status: 'SENT',
+          subtotal: INVOICE_TOTAL,
+          total: INVOICE_TOTAL,
+          currency: 'TTD',
+          businessId: C.biz,
+          contactId: C.contact,
+          dueDate,
+          items: { create: [{ id: `${id}_item1`, description: `V41C item ${n}`, quantity: 1, unitPrice: INVOICE_TOTAL, total: INVOICE_TOTAL }] },
+        },
+      });
+    }
+
+    // invRefunded, through the real doors: an extracted 40 confirmed by the
+    // owner (CONFIRMED + SUCCESSFUL), the money then refunded (REFUNDED -40,
+    // back to SENT), and a second extracted 20 left PENDING.
+    const extracted = await evidencePayment(ID.owner, C.biz, C.invRefunded, 40, 'v41c-refunded.pdf');
+    confirmedRowId = extracted.payment.id;
+    const confirmed = await confirmRouteAs(ID.owner, C.biz, C.invRefunded, confirmedRowId, { amount: 40 });
+    expect(confirmed.status, JSON.stringify(confirmed.body)).toBe(201);
+    const refund = await agent()
+      .post(`/commerce/businesses/${C.biz}/payments/${confirmed.body.payment.id}/refund`)
+      .set(HEADER, ID.owner)
+      .send({ reason: 'v41c refund' });
+    expect(refund.status, JSON.stringify(refund.body)).toBe(201);
+    await evidencePayment(ID.owner, C.biz, C.invRefunded, 20, 'v41c-pending.pdf');
+
+    // invAttempts: a FAILED card attempt and a customer's offline intent
+    // (PENDING), neither of them money, and a SUCCESSFUL row that carries
+    // bizB's id on bizC's invoice (not bizC's money, and not bizB's to see).
+    await db.payment.createMany({
+      data: [
+        { amount: 15, currency: 'TTD', status: 'FAILED', provider: 'stripe', method: 'card', providerPaymentId: `${P}c_failed_attempt`, businessId: C.biz, invoiceId: C.invAttempts },
+        { amount: 25, currency: 'TTD', status: 'PENDING', provider: 'bank_transfer', method: 'bank_transfer', providerPaymentId: `${P}c_intent_bank_transfer`, businessId: C.biz, invoiceId: C.invAttempts },
+        { amount: 50, currency: 'TTD', status: 'SUCCESSFUL', provider: 'cash', method: 'cash', providerPaymentId: `${P}c_foreign_row`, businessId: ID.bizB, invoiceId: C.invAttempts },
+      ],
+    });
+
+    // invPaid: one member-recorded payment of the whole total.
+    const paid = await agent()
+      .post(`/commerce/businesses/${C.biz}/invoices/${C.invPaid}/payments`)
+      .set(HEADER, ID.owner)
+      .send({ amount: INVOICE_TOTAL, method: 'cash', reference: `${P}c_slip` });
+    expect(paid.status, JSON.stringify(paid.body)).toBe(201);
+  }, 60_000);
+
+  it('V41C-00: fixture sanity: the rows and balances bizC holds (the per-invoice balance contract already reads money rows only)', async () => {
+    const refundedRows = await paymentsOf(C.invRefunded);
+    expect(refundedRows.map((r) => [r.status, r.amount])).toEqual([
+      ['CONFIRMED', 40], ['SUCCESSFUL', 40], ['REFUNDED', -40], ['PENDING', 20],
+    ]);
+    expect(refundedRows[0].id).toBe(confirmedRowId);
+    expect(await invoiceStatus(C.invRefunded)).toBe('SENT');
+    expect(await invoiceStatus(C.invAttempts)).toBe('SENT');
+    expect(await invoiceStatus(C.invPaid)).toBe('PAID');
+    // The own-tenant balance the reconcile derives the status from (balanceOfStoredRows over ownTenantPayments).
+    const balance = async (id: string) => {
+      const b = await workflow.getBalance(id);
+      return { net: b.net, remaining: b.remaining };
+    };
+    expect(await balance(C.invRefunded)).toEqual({ net: 0, remaining: 100 });
+    expect(await balance(C.invAttempts)).toEqual({ net: 0, remaining: 100 });
+    expect(await balance(C.invPaid)).toEqual({ net: 100, remaining: 0 });
+  });
+
+  it('V41C-01: GET /commerce/businesses/:b/payments lists the money once: the CONFIRMED row is hidden (also under ?status=CONFIRMED), PENDING, FAILED and refund rows are listed under their own status, and the CONFIRMED row is kept in the table', async () => {
+    const expected = listed([
+      { invoiceId: C.invRefunded, status: 'SUCCESSFUL', amount: 40 },
+      { invoiceId: C.invRefunded, status: 'REFUNDED', amount: -40 },
+      { invoiceId: C.invRefunded, status: 'PENDING', amount: 20 },
+      { invoiceId: C.invAttempts, status: 'FAILED', amount: 15 },
+      { invoiceId: C.invAttempts, status: 'PENDING', amount: 25 },
+      { invoiceId: C.invPaid, status: 'SUCCESSFUL', amount: 100 },
+    ]);
+    const all = await agent().get(`/commerce/businesses/${C.biz}/payments`).set(HEADER, ID.owner);
+    expect(all.status, JSON.stringify(all.body)).toBe(200);
+    expect(listed(all.body)).toEqual(expected);
+    expect(all.body.map((p: any) => p.id)).not.toContain(confirmedRowId);
+
+    const byContact = await agent().get(`/commerce/businesses/${C.biz}/payments`).query({ contactId: C.contact }).set(HEADER, ID.owner);
+    expect(byContact.status).toBe(200);
+    expect(listed(byContact.body)).toEqual(expected);
+
+    const confirmedOnly = await agent().get(`/commerce/businesses/${C.biz}/payments`).query({ status: 'CONFIRMED' }).set(HEADER, ID.owner);
+    expect(confirmedOnly.status).toBe(200);
+    expect(confirmedOnly.body).toEqual([]);
+
+    const pendingOnly = await agent().get(`/commerce/businesses/${C.biz}/payments`).query({ status: 'PENDING' }).set(HEADER, ID.owner);
+    expect(pendingOnly.status).toBe(200);
+    expect(listed(pendingOnly.body)).toEqual(listed([
+      { invoiceId: C.invRefunded, status: 'PENDING', amount: 20 },
+      { invoiceId: C.invAttempts, status: 'PENDING', amount: 25 },
+    ]));
+
+    // Kept: what was extracted, and by whom (V1-41b); only the list leaves it out.
+    expect((await db.payment.findUnique({ where: { id: confirmedRowId } })).status).toBe('CONFIRMED');
+  });
+
+  it('V41C-02: a member of another business sees none of it: 403 on bizC\'s list, and its own list carries no row of a bizC invoice and nothing of bizC\'s customer', async () => {
+    const denied = await agent().get(`/commerce/businesses/${C.biz}/payments`).set(HEADER, ID.ownerB);
+    expect(denied.status).toBe(403);
+
+    const own = await agent().get(`/commerce/businesses/${ID.bizB}/payments`).set(HEADER, ID.ownerB);
+    expect(own.status, JSON.stringify(own.body)).toBe(200);
+    const bizCInvoices = [C.invRefunded, C.invAttempts, C.invPaid];
+    expect(own.body.filter((p: any) => bizCInvoices.includes(p.invoiceId))).toEqual([]);
+    const text = JSON.stringify(own.body);
+    expect(text).not.toContain(C_CONTACT_EMAIL);
+    expect(text).not.toContain('V41C-');
+  });
+
+  it('V41C-03: commerce-ai counts payments received only: clientPaymentIntelligence.totalPayments and the revenue journey\'s "Total payments" are 2 (the 40 later refunded and the 100), never the CONFIRMED, PENDING, FAILED, refund or bizB-carrying rows; another business gets 404 for bizC\'s contact', async () => {
+    const { ai, prompts } = await commerceAi();
+
+    const intel = await ai.clientPaymentIntelligence(C.biz, C.contact);
+    expect(intel.totalPayments).toBe(2);
+
+    await ai.revenueJourney(C.biz);
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('Total payments: 2\n');
+
+    expect(await outcomeOf(ai.clientPaymentIntelligence(ID.bizB, C.contact))).toBe(404);
+  });
+
+  it('V41C-04: the money health score\'s overdueReceivables and the overdue-invoice scan read the balance contract over bizC\'s own rows: 100 left on each overdue invoice, as the reconcile\'s balance (InvoiceWorkflowService.getBalance) has it', async () => {
+    const { health, scans, signals } = await intelligence();
+    const contract = (await workflow.getBalance(C.invRefunded)).remaining + (await workflow.getBalance(C.invAttempts)).remaining;
+    expect(contract).toBe(200);
+
+    expect((await health.calculateMoneyHealth(C.biz)).metrics.overdueReceivables).toBe(contract);
+
+    await scans.evaluateRules(C.biz);
+    // The overdue-invoice rule's signals (the other system rules signal on other entities).
+    const invoiceIds: string[] = [C.invRefunded, C.invAttempts, C.invPaid];
+    const overdueSignals = signals.filter((s) => invoiceIds.includes(s.entityId));
+    expect(overdueSignals.map((s) => [s.entityId, s.value]).sort()).toEqual([
+      [C.invAttempts, 100],
+      [C.invRefunded, 100],
+    ]);
   });
 });
