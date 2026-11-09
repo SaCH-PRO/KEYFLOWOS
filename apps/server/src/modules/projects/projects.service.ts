@@ -23,6 +23,23 @@ function assertPosition(position: unknown): void {
   }
 }
 
+/** What PATCH .../tasks/:taskId (and the status, reorder and plan-event doors through it) may change on a task. */
+type TaskUpdateBody = {
+  title?: string;
+  description?: string;
+  isCompleted?: boolean;
+  priority?: string;
+  dueDate?: string | null;
+  sortOrder?: number;
+  assigneeId?: string | null;
+  estimatedHours?: number | null;
+  trackedHours?: number;
+  evidenceIds?: string[];
+  /** The Kanban column. When given it decides completion: DONE completes, any other reopens. */
+  status?: string;
+  position?: number;
+};
+
 /** Who besides a member holding projects:write approves or deletes a project plan (D-85). */
 const PLAN_GOVERNOR_ROLES: ReadonlySet<string> = new Set(['OWNER', 'ADMIN']);
 
@@ -238,14 +255,37 @@ export class ProjectsService {
     throw new NotFoundException('Assignee not found');
   }
 
-  /** The evidence gate on completing a task that requires evidence (Phase 2). */
-  private async assertCompletionEvidence(taskId: string, evidenceIds?: string[]) {
-    const check = await this.evidence.checkTaskEvidence('ProjectTask', taskId);
-    if (!check.hasEvidence && (!evidenceIds || evidenceIds.length === 0)) {
+  /**
+   * The evidence gate on completing a task (Phase 2), and the evidence ids the completion names.
+   * Review SEC-V88C-2 (PR196-PROJECTS-SERVER): any non-empty evidenceIds passed the gate unchecked,
+   * so `evidenceIds: ['anything']` completed a task that requires evidence with none, and
+   * project_task.completed carried the made-up ids; the stored-evidence check did not name the
+   * business either. Now a task that requires evidence needs evidence filed on it in this business,
+   * and every id a completion names must be one of those rows. Anything else is 400 before anything
+   * is written. Returns the ids project_task.completed carries.
+   */
+  private async resolveCompletionEvidence(
+    businessId: string,
+    taskId: string,
+    evidenceRequired: boolean,
+    evidenceIds?: unknown,
+  ): Promise<string[]> {
+    if (evidenceIds !== undefined && evidenceIds !== null
+      && (!Array.isArray(evidenceIds) || evidenceIds.some((id) => typeof id !== 'string'))) {
+      throw new BadRequestException('evidenceIds must be an array of evidence ids');
+    }
+    const named = (evidenceIds ?? []) as string[];
+    if (!evidenceRequired && named.length === 0) return [];
+    const filed = new Set((await this.evidence.getForObject('ProjectTask', taskId, businessId)).map((e) => e.id));
+    if (named.some((id) => !filed.has(id))) {
+      throw new BadRequestException('evidenceIds must name evidence filed on this task');
+    }
+    if (evidenceRequired && filed.size === 0) {
       throw new BadRequestException(
         `This task requires evidence before completion. Please submit proof (photo, file, note, etc.) and try again.`
       );
     }
+    return named;
   }
 
   async addTask(businessId: string, projectId: string, body: {
@@ -312,21 +352,22 @@ export class ProjectsService {
     return task;
   }
 
-  async updateTask(businessId: string, taskId: string, body: {
-    title?: string;
-    description?: string;
-    isCompleted?: boolean;
-    priority?: string;
-    dueDate?: string | null;
-    sortOrder?: number;
-    assigneeId?: string | null;
-    estimatedHours?: number | null;
-    trackedHours?: number;
-    evidenceIds?: string[];
-    /** The Kanban column. When given it decides completion: DONE completes, any other reopens. */
-    status?: string;
-    position?: number;
-  }, actorId?: string | null) {
+  async updateTask(businessId: string, taskId: string, body: TaskUpdateBody, actorId?: string | null) {
+    // Review CR-2: a write of status or completion is conditional on the row it was decided from.
+    // A request that loses that race (a double click, a second tab) decides again from the row as
+    // the winner left it, so it neither completes the task a second time nor records a move that
+    // did not happen.
+    const task = (await this.applyTaskUpdate(businessId, taskId, body, actorId))
+      ?? (await this.applyTaskUpdate(businessId, taskId, body, actorId));
+    if (!task) throw new ConflictException('The task changed while it was being updated; try again');
+    return task;
+  }
+
+  /**
+   * One attempt of updateTask. Returns null, having written nothing, when the task's status or
+   * completion changed between the read this attempt decided from and its write.
+   */
+  private async applyTaskUpdate(businessId: string, taskId: string, body: TaskUpdateBody, actorId?: string | null) {
     const existing = await this.prisma.client.projectTask.findFirst({
       where: { id: taskId, businessId },
     });
@@ -348,10 +389,11 @@ export class ProjectsService {
       ? await this.assignableTypeInBusiness(businessId, body.assigneeId, actorId)
       : null;
 
-    // Phase 2: Check evidence requirement before marking complete
-    if (isCompleted === true && !existing.isCompleted && existing.evidenceRequired) {
-      await this.assertCompletionEvidence(taskId, body.evidenceIds);
-    }
+    // Phase 2: the evidence gate before marking complete (SEC-V88C-2: the ids are resolved)
+    const becameCompleted = isCompleted === true && !existing.isCompleted;
+    const evidenceIds = becameCompleted
+      ? await this.resolveCompletionEvidence(businessId, taskId, existing.evidenceRequired, body.evidenceIds)
+      : [];
 
     // Named fields only. The controller's body is an inline type, which ValidationPipe does not
     // strip, and spreading it wrote any key it carried: {businessId} or {projectId} moved the task
@@ -369,11 +411,23 @@ export class ProjectsService {
       ...(body.status !== undefined && { status: body.status }),
       ...(body.position !== undefined && { position: body.position }),
     };
+    // CR-2: the status and completion this write decides from are the ones it writes over.
+    const writesState = 'status' in data || 'isCompleted' in data;
     const task = await this.prisma.client.$transaction(async (tx) => {
-      const updated = await tx.projectTask.update({
-        where: { id: taskId, businessId },
-        data: data as Prisma.ProjectTaskUncheckedUpdateInput,
-      });
+      let updated;
+      if (writesState) {
+        const won = await tx.projectTask.updateMany({
+          where: { id: taskId, businessId, status: existing.status, isCompleted: existing.isCompleted },
+          data: data as Prisma.ProjectTaskUncheckedUpdateManyInput,
+        });
+        if (won.count !== 1) return null;
+        updated = await tx.projectTask.findFirstOrThrow({ where: { id: taskId, businessId } });
+      } else {
+        updated = await tx.projectTask.update({
+          where: { id: taskId, businessId },
+          data: data as Prisma.ProjectTaskUncheckedUpdateInput,
+        });
+      }
 
       // Phase 3: update polymorphic assignment when assignee changes (atomic), naming the member
       // who made it (WPD-09)
@@ -403,6 +457,7 @@ export class ProjectsService {
 
       return updated;
     });
+    if (!task) return null;
 
     const actor = actorId ?? undefined;
     this.events.emit('project_task.updated', { task, businessId, actorId: actor });
@@ -411,12 +466,11 @@ export class ProjectsService {
     if (body.dueDate !== undefined && prevDue !== newDue) {
       this.events.emit('project_task.rescheduled', { task, businessId, actorId: actor });
     }
-    const becameCompleted = isCompleted === true && !existing.isCompleted;
     if (becameCompleted) {
-      this.events.emit('project_task.completed', { task, businessId, evidenceIds: body.evidenceIds ?? [], actorId: actor });
+      this.events.emit('project_task.completed', { task, businessId, evidenceIds, actorId: actor });
     }
     // WPD-08: the feed names who completed, reopened or moved the task.
-    if (task.status !== existing.status || task.isCompleted !== existing.isCompleted) {
+    if (writesState && (task.status !== existing.status || task.isCompleted !== existing.isCompleted)) {
       await this.timeline.recordEvent({
         businessId,
         module: 'PROJECT',
@@ -474,7 +528,7 @@ export class ProjectsService {
     for (const update of updates) {
       const task = byId.get(update.taskId)!;
       if (update.status === 'DONE' && !task.isCompleted && task.evidenceRequired) {
-        await this.assertCompletionEvidence(task.id);
+        await this.resolveCompletionEvidence(businessId, task.id, true);
       }
     }
 
@@ -795,13 +849,23 @@ export class ProjectsService {
       throw new NotFoundException('Event not found');
     }
 
-    const data: any = { ...body };
-    if (body.estimatedStart !== undefined) {
-      data.estimatedStart = body.estimatedStart ? new Date(body.estimatedStart) : null;
-    }
-    if (body.estimatedEnd !== undefined) {
-      data.estimatedEnd = body.estimatedEnd ? new Date(body.estimatedEnd) : null;
-    }
+    // Review SEC-V88C-4 (PR196-PROJECTS-SERVER): named fields only. UpdatePlanEventDto is an
+    // interface, so ValidationPipe strips nothing, and spreading the body wrote any key it carried.
+    // ProjectPlanEvent has no businessId for the tenant extension to scope, so {planId} moved the
+    // event into another business's plan (which its approve then materialized), and {projectTaskId}
+    // pointed the event at any task, which completing the event then marked DONE.
+    const data: Prisma.ProjectPlanEventUncheckedUpdateInput = {
+      ...(body.title !== undefined && { title: body.title }),
+      ...(body.description !== undefined && { description: body.description }),
+      ...(body.executionContext !== undefined && { executionContext: body.executionContext }),
+      ...(body.autoExecute !== undefined && { autoExecute: body.autoExecute }),
+      ...(body.estimatedHours !== undefined && { estimatedHours: body.estimatedHours }),
+      ...(body.estimatedStart !== undefined && { estimatedStart: body.estimatedStart ? new Date(body.estimatedStart) : null }),
+      ...(body.estimatedEnd !== undefined && { estimatedEnd: body.estimatedEnd ? new Date(body.estimatedEnd) : null }),
+      ...(body.dependsOn !== undefined && { dependsOn: body.dependsOn }),
+      ...(body.requiredRoles !== undefined && { requiredRoles: body.requiredRoles }),
+      ...(body.estimatedCost !== undefined && { estimatedCost: body.estimatedCost }),
+    };
 
     return this.prisma.client.projectPlanEvent.update({
       where: { id: eventId },
@@ -846,6 +910,55 @@ export class ProjectsService {
     if (PLAN_STATUSES_SET_BY_APPROVAL.includes(status)) {
       throw new BadRequestException(`A plan becomes ${status} only through POST .../plans/:planId/approve`);
     }
+  }
+
+  /**
+   * Review SEC-V88C-1 (PR196-PROJECTS-SERVER): the status write of PATCH .../plans/:planId and
+   * POST .../reject. approvePlan holds a plan from its claim (status 'approved', no project yet)
+   * until materializePlan links the Project. Those routes wrote the status unconditionally, so a
+   * write landing in that window took the plan out of 'approved', a second approve claimed it again
+   * from there, and the plan got two Projects. The write is now one conditional statement that
+   * leaves a held plan alone (409); another business's plan is 404. Returns the plan row.
+   */
+  async changePlanStatus(businessId: string, planId: string, status: string) {
+    const changed = await this.prisma.client.projectPlan.updateMany({
+      where: { id: planId, businessId, NOT: { status: 'approved', projectId: null } },
+      data: { status },
+    });
+    const plan = await this.prisma.client.projectPlan.findFirst({ where: { id: planId, businessId } });
+    if (!plan) throw new NotFoundException('Plan not found');
+    if (changed.count !== 1) {
+      throw new ConflictException('This plan is being approved; its status cannot change until the approval finishes');
+    }
+    return plan;
+  }
+
+  /**
+   * Review SEC-V88C-3 (PR196-PROJECTS-SERVER): POST .../plans/:planId/events/:eventId/complete.
+   * ProjectPlanExecutorService.completeOutAppEvent writes { status: 'DONE', isCompleted: true } on
+   * the event's materialized task directly: no evidence gate (materializePlan copies
+   * manualEvidenceRequired into evidenceRequired), no project_task.completed, no actor. The task is
+   * now completed through updateTask's door first, as the member; a refusal there (the evidence
+   * gate, a task that is not this business's) writes nothing, the event included. `complete` (the
+   * executor's event write) runs after, and its task write then changes nothing. The event must be
+   * this plan's, in this business.
+   */
+  async completePlanEvent<T>(
+    businessId: string,
+    planId: string,
+    eventId: string,
+    actorId: string | null | undefined,
+    complete: () => Promise<T>,
+  ): Promise<T> {
+    const event = await this.prisma.client.projectPlanEvent.findFirst({
+      where: { id: eventId, planId, plan: { businessId } },
+      select: { executionContext: true, projectTaskId: true },
+    });
+    if (!event) throw new NotFoundException('Event not found');
+    if (event.executionContext === 'OUT_APP' && event.projectTaskId) {
+      await this.updateTask(businessId, event.projectTaskId, { status: 'DONE' }, actorId);
+    }
+    return complete();
   }
 
   /**

@@ -291,7 +291,7 @@ export class ProjectsController {
   }
 
   @Patch('businesses/:businessId/plans/:planId')
-  updatePlan(
+  async updatePlan(
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
     @Body() body: {
@@ -306,8 +306,12 @@ export class ProjectsController {
     },
   ) {
     // 'approved' and 'materialized' are written only by the approve door (WPD-12, D-85).
-    this.projects.assertPlanPatchStatus(body?.status);
-    return this.planner.updatePlan(businessId, planId, body);
+    const { status, ...fields } = body ?? {};
+    this.projects.assertPlanPatchStatus(status);
+    // Review SEC-V88C-1: the status is written only while no approve holds the plan (else 409,
+    // and nothing in the body is written); the other fields as before.
+    if (status !== undefined) await this.projects.changePlanStatus(businessId, planId, status);
+    return this.planner.updatePlan(businessId, planId, fields);
   }
 
   // PR196-PROJECTS-SERVER (WPD-12, D-85, D-46): OWNER/ADMIN or projects:write, a compare-and-set
@@ -328,7 +332,8 @@ export class ProjectsController {
     @Param('businessId') businessId: string,
     @Param('planId') planId: string,
   ) {
-    return this.planner.updatePlan(businessId, planId, { status: 'rejected' });
+    // Review SEC-V88C-1: not while an approve holds the plan (409).
+    return this.projects.changePlanStatus(businessId, planId, 'rejected');
   }
 
   // PR196-PROJECTS-SERVER (WPD-14, D-85, D-46): only a draft plan, by OWNER/ADMIN or
@@ -383,9 +388,15 @@ export class ProjectsController {
   @Post('businesses/:businessId/plans/:planId/events/:eventId/complete')
   completeOutAppEvent(
     @Param('businessId') businessId: string,
+    @Param('planId') planId: string,
     @Param('eventId') eventId: string,
     @Body() body: { evidence?: string },
+    @Req() req: ActorRequest,
   ) {
-    return this.executor.completeOutAppEvent(businessId, eventId, body.evidence);
+    // Review SEC-V88C-3: the event's task completes through updateTask's door (the evidence gate,
+    // project_task.completed, the member on the feed) before the event is marked completed.
+    return this.projects.completePlanEvent(businessId, planId, eventId, req?.user?.id ?? null, () =>
+      this.executor.completeOutAppEvent(businessId, eventId, body?.evidence),
+    );
   }
 }
