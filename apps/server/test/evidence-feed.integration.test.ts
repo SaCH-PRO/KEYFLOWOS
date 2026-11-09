@@ -112,6 +112,15 @@
  *   Not in this packet: the CRM ContactEvent copy of contact.created,
  *     invoice.created, booking.created and booking.confirmed is still written
  *     beside the listener's row (crm:<event>:contact, pinned per step below)
+ *   RESIDUAL (review CR-V155b-1), so V1-55b does NOT close "one feed row per
+ *     event" for contact create or booking create: V55-08 / V55-11 count one
+ *     row of the listener's kind, but the feed also holds the CRM copy, and the
+ *     cockpit reader (web business-timeline.tsx feedRows) leaves out only
+ *     invoice.payment_recorded copies. It shows 'New contact' + 'Contact
+ *     created' and 'New booking' + 'Booking created': two rows each, the same
+ *     count as at base, where its DOUBLE_WRITTEN rule already showed the
+ *     listener/executor pair once. What V1-55b changes there: the booking row
+ *     always carries the start time. V55-06 pins the copies; V55-12 is the todo
  *
  * CHARACTERIZATION ONLY in EF-01 / EF-02: the Activity rows each payment writes
  *   in the R0-19 harness, whose bus is a recorder (no listener runs there; the
@@ -1460,14 +1469,16 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     const rows: Row[] = res.body;
     expect(rows.every((r: any) => r.businessId === C.biz)).toBe(true);
     const count = (k: string, entityId: string | undefined) => rows.filter((r) => kind(r) === k && r.entityId === entityId).length;
-    // V1-55b (V55-08): contact create shows once.
+    // V1-55b (V55-08): one crm created row for the contact (its CRM copy is
+    // pinned below: CR-V155b-1 residual).
     expect(count('crm:created:contact', SC.contactId), 'contact created').toBe(1);
     expect(count('commerce:created:invoice', SC.invoiceId), 'invoice created').toBe(1);
     expect(count('commerce:sent:invoice', SC.invoiceId), 'invoice sent').toBe(1);
     expect(count('commerce:paid:invoice', SC.invoiceId), 'invoice paid').toBe(1);
     expect(count('FINANCE:payment_recorded:payment', SC.partialId), 'partial payment').toBe(1);
     expect(count('FINANCE:payment_recorded:payment', SC.fullId), 'final payment').toBe(1);
-    // V1-55b (V55-11): booking create shows once, and that row carries the start time.
+    // V1-55b (V55-11): one bookings created row for the booking, and that row
+    // carries the start time (its CRM copy is pinned below: CR-V155b-1 residual).
     expect(count('bookings:created:booking', SC.bookingId), 'booking created').toBe(1);
     expect(
       rows.filter((r) => kind(r) === 'bookings:created:booking' && r.entityId === SC.bookingId && String(r.detail).includes(new Date(BOOKING_C.start).toLocaleString())),
@@ -1476,6 +1487,15 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
     expect(count('bookings:confirmed:booking', SC.bookingId), 'booking confirmed').toBe(1);
     // V1-55b (V55-07): no CRM contact-event copy of the settlement.
     expect(rows.filter((r) => r.module === 'crm' && r.action === 'invoice.paid')).toEqual([]);
+    // CR-V155b-1 RESIDUAL (V55-12 todo): beside each of the two rows above, the
+    // feed still holds the CRM ContactEvent copy of the same event, in the shape
+    // the cockpit reader keeps (module crm, entity the contact, title = action;
+    // business-timeline.tsx leaves out only invoice.payment_recorded copies). So
+    // the cockpit shows contact create and booking create twice each, as at base.
+    for (const event of ['contact.created', 'booking.created']) {
+      const copies = rows.filter((r) => kind(r) === `crm:${event}:contact` && r.entityId === SC.contactId);
+      expect(copies.map((r) => [r.title, r.contactId]), `${event}: its CRM copy, shown beside the listener's row`).toEqual([[event, SC.contactId]]);
+    }
 
     expect(flowRuns.map((r) => r.flowId).sort()).toEqual(FLOW_TRIGGERS.map(flowId).sort());
 
@@ -1501,4 +1521,7 @@ describe('V1-55-EVT-ACTIVITY-DEDUPE: one Activity feed row per event, through th
 
   // V55-07, V55-08 and V55-11 (V1-55 todos) are cases above, after the step
   // each one pins (V1-55b-FEED-DEDUPE-REST).
+
+  // V55-12, the CR-V155b-1 residual, outside this packet's write set.
+  it.todo("V55-12 (CR-V155b-1): contact create and booking create show ONE row each in the cockpit: today the feed holds the listener's row and the CRM ContactEvent copy (crm:contact.created:contact, crm:booking.created:contact; V55-06 pins both), and business-timeline.tsx feedRows leaves out only invoice.payment_recorded copies, so the cockpit shows 'New contact' + 'Contact created' and 'New booking' + 'Booking created', as at base: needs meta.feedCopy=false on the ContactEvent CrmService.createContact and BookingsService.createBooking log (crm.service.ts, bookings.service.ts; crm-network.service.ts's referral, which emits no contact.created, keeps its copy as its only row) or those events in the reader's MIRRORED_AS_OWN_ROW (business-timeline.tsx), all outside V1-55b's write set");
 });
