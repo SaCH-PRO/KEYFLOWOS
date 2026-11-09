@@ -15,14 +15,27 @@
  * the cell verbatim (buildContactInput), and CrmService.findOrCreateContact ->
  * createContact writes it (status: input.status ?? 'LEAD').
  *
+ * W3-V1-38c-IMPORT-STATUS (CF-49, V1-38b residuals) fixed that writer: the
+ * import now stores the status column as a ContactStatus (crm.constants.ts
+ * canonicalContactStatus), so it writes no dialect. Rows it wrote before
+ * V1-38c keep theirs, and the readers keep reading them.
+ *
  * What this suite proves, on rows the real import route wrote:
- *   - WRITER (characterization): an owner's CSV import stores the file's status
- *     column verbatim, so 'DORMANT' and 'CUSTOMER' rows exist after V1-38.
+ *   - WRITER (V1-38c): an owner's CSV import stores CLIENT for a CUSTOMER cell
+ *     and the LEAD default for a DORMANT cell. The rows the readers below read
+ *     are then given back the spelling the import wrote before V1-38c (raw
+ *     SQL), as rows held from before it.
  *   - CR-1: people-flow puts a contact imported as 'DORMANT' in Dormant whatever
  *     its silence and leaves it out of At Risk, as before V1-38b; a canonical
  *     CLIENT is segmented by silence alone, as before.
  *   - CR-2: the readers count an imported 'CUSTOMER' as a CLIENT: people-flow's
  *     High-Value Customers and the people health score's dormant customers.
+ *   - V1-38c: the CSV and link imports store every status cell as a
+ *     ContactStatus: canonical values in the vocabulary's spelling, the legacy
+ *     CUSTOMER as CLIENT (the readers' mapping), and DORMANT, INACTIVE, an
+ *     unknown or a blank cell as the LEAD default, the import's convention for
+ *     a cell it does not recognise (as for age group). Those rows go to a
+ *     second business, so the reader cases above count only their own.
  *
  * Nothing on the HTTP or persistence path of the import is mocked:
  * PrismaService, the rows, CrmRateLimitGuard, AuthGuard, BusinessGuard,
@@ -52,8 +65,9 @@ loadEnv({ path: path.resolve(__dirname, '../../../.env') });
 
 const P = 'v86e_';
 const ID = {
-  owner: `${P}owner`, // OWNER of bizA
+  owner: `${P}owner`, // OWNER of bizA and bizB
   bizA: `${P}bizA`,
+  bizB: `${P}bizB`, // V1-38c: the import normalisation rows, kept out of bizA's reader counts
 };
 
 /** The imported rows: one per case, keyed by a short name. */
@@ -96,13 +110,30 @@ async function cleanup() {
   }
 }
 
-function csvFile(actor: string, content: string) {
+function csvFile(actor: string, content: string, businessId: string = ID.bizA) {
   return request(app.getHttpServer())
-    .post(`/crm/businesses/${ID.bizA}/import/file`)
+    .post(`/crm/businesses/${businessId}/import/file`)
     .query({ type: 'csv' })
     .set('x-test-user', actor)
     .set('x-forwarded-for', nextIp())
     .attach('file', Buffer.from(content, 'utf8'), { filename: `${P}contacts.csv`, contentType: 'text/csv' });
+}
+
+function linkImport(actor: string, url: string, businessId: string) {
+  return request(app.getHttpServer())
+    .post(`/crm/businesses/${businessId}/import/link`)
+    .set('x-test-user', actor)
+    .set('x-forwarded-for', nextIp())
+    .send({ url });
+}
+
+/** The live contact's stored status for an email in a business, or undefined. */
+async function storedStatus(businessId: string, email: string): Promise<string | undefined> {
+  const rows: Array<{ status: string }> = await db.$queryRawUnsafe(
+    'SELECT status FROM contacts WHERE business_id = $1 AND email_normalized = $2 AND deleted_at IS NULL', businessId, email,
+  );
+  expect(rows.length, `${email}: at most one live contact`).toBeLessThanOrEqual(1);
+  return rows[0]?.status;
 }
 
 beforeAll(async () => {
@@ -220,6 +251,8 @@ beforeAll(async () => {
   await db.user.create({ data: { id: ID.owner, email: `${P}owner@test.local`, role: 'USER' } });
   await db.business.create({ data: { id: ID.bizA, name: 'V86E Biz A', ownerId: ID.owner } });
   await db.membership.create({ data: { id: `${P}m_owner`, userId: ID.owner, businessId: ID.bizA, role: 'OWNER' } });
+  await db.business.create({ data: { id: ID.bizB, name: 'V86E Biz B', ownerId: ID.owner } });
+  await db.membership.create({ data: { id: `${P}m_ownerB`, userId: ID.owner, businessId: ID.bizB, role: 'OWNER' } });
 }, 120_000);
 
 afterAll(async () => {
@@ -236,8 +269,14 @@ async function segmentIds(segmentId: string): Promise<string[]> {
 
 const idsOf = (...keys: RowKey[]) => keys.map((k) => contactId[k]!).sort();
 
-describe('WRITER: the CSV import still writes a file status column into Contact.status verbatim', () => {
-  it("an owner's CSV import with a status column stores DORMANT, CUSTOMER and CLIENT exactly as written (so the dialects are not only rows from before V1-38)", async () => {
+/**
+ * V1-38c: what the import stores for each file status above. Before V1-38c it
+ * stored the cell verbatim; the rows below are given that spelling back by SQL.
+ */
+const STORED_SINCE_V1_38C: Record<string, string> = { DORMANT: 'LEAD', CUSTOMER: 'CLIENT', CLIENT: 'CLIENT' };
+
+describe('WRITER (V1-38c): the CSV import no longer writes a status dialect; rows it wrote before V1-38c still hold one', () => {
+  it("V1-38c: an owner's CSV import stores CLIENT for a CUSTOMER cell, the LEAD default for a DORMANT cell and CLIENT as written; the rows the readers below read are given back their pre-V1-38c spelling by SQL", async () => {
     const keys = Object.keys(ROWS) as RowKey[];
     const content = ['first_name,email,status', ...keys.map((k) => `${ROWS[k].first},${ROWS[k].email},${ROWS[k].status}`)].join('\n');
     const res = await csvFile(ID.owner, content);
@@ -249,8 +288,15 @@ describe('WRITER: the CSV import still writes a file status column into Contact.
         'SELECT id, status FROM contacts WHERE business_id = $1 AND email_normalized = $2 AND deleted_at IS NULL', ID.bizA, ROWS[k].email,
       );
       expect(rows, `${k}: one live contact`).toHaveLength(1);
-      expect(rows[0].status, `${k}: the status column, verbatim`).toBe(ROWS[k].status);
+      expect(rows[0].status, `${k}: the status column ${ROWS[k].status}, in the vocabulary`).toBe(STORED_SINCE_V1_38C[ROWS[k].status]);
       contactId[k] = rows[0].id;
+    }
+
+    // Rows the import wrote before V1-38c hold the file's spelling. The
+    // readers keep reading it, so the cases below read such rows.
+    for (const k of keys) {
+      if (ROWS[k].status === STORED_SINCE_V1_38C[ROWS[k].status]) continue;
+      await db.$executeRawUnsafe(`UPDATE contacts SET status = $2 WHERE id = $1`, contactId[k], ROWS[k].status);
     }
 
     // Silence per row, and every customer row untouched for 90 days (the
@@ -285,5 +331,122 @@ describe("CR-2: the readers count an imported 'CUSTOMER' as a CLIENT", () => {
     const people = await (new HealthScoreService({ client: db } as any) as any).calculatePeopleHealth(ID.bizA);
     expect(people.metrics.totalContacts).toBe(Object.keys(ROWS).length);
     expect(people.metrics.dormantCustomers).toBe(3);
+  });
+});
+
+/**
+ * V1-38c: the status cells the import is given, and the ContactStatus each must
+ * be stored as. `kind` groups them by the case that asserts them.
+ */
+const V38C_FILE_ROWS = [
+  { key: 'lead', cell: 'LEAD', stored: 'LEAD', kind: 'canonical' },
+  { key: 'prospect', cell: 'PROSPECT', stored: 'PROSPECT', kind: 'canonical' },
+  { key: 'client', cell: 'CLIENT', stored: 'CLIENT', kind: 'canonical' },
+  { key: 'lost', cell: 'LOST', stored: 'LOST', kind: 'canonical' },
+  { key: 'prospect-lower', cell: 'prospect', stored: 'PROSPECT', kind: 'spelled' },
+  { key: 'client-mixed', cell: 'Client', stored: 'CLIENT', kind: 'spelled' },
+  { key: 'lost-lower', cell: 'lost', stored: 'LOST', kind: 'spelled' },
+  { key: 'customer', cell: 'CUSTOMER', stored: 'CLIENT', kind: 'legacy' },
+  { key: 'customer-lower', cell: 'customer', stored: 'CLIENT', kind: 'legacy' },
+  { key: 'dormant', cell: 'DORMANT', stored: 'LEAD', kind: 'unrecognised' },
+  { key: 'inactive', cell: 'INACTIVE', stored: 'LEAD', kind: 'unrecognised' },
+  { key: 'vip', cell: 'VIP', stored: 'LEAD', kind: 'unrecognised' },
+  { key: 'stage', cell: 'Negotiation', stored: 'LEAD', kind: 'unrecognised' },
+  { key: 'blank', cell: '', stored: 'LEAD', kind: 'unrecognised' },
+] as const;
+type V38cKind = (typeof V38C_FILE_ROWS)[number]['kind'];
+const v38cEmail = (via: 'file' | 'link', key: string) => `${P}v38c-${via}-${key}@test.local`;
+
+/** The link import does not trim cells, so a padded cell reaches the normaliser as written. */
+const V38C_LINK_ROWS = [
+  { key: 'customer-padded', cell: ' customer ', stored: 'CLIENT' },
+  { key: 'prospect-title', cell: 'Prospect', stored: 'PROSPECT' },
+  { key: 'lost', cell: 'LOST', stored: 'LOST' },
+  { key: 'dormant', cell: 'DORMANT', stored: 'LEAD' },
+  { key: 'stage', cell: 'Qualified', stored: 'LEAD' },
+] as const;
+const V38C_LINK_URL = 'https://v86e-import.example.test/status.csv';
+
+describe('V1-38c (W3-V1-38c-IMPORT-STATUS, CF-49): the CSV and link imports store the status column as a ContactStatus', () => {
+  let fileImportId: string | undefined;
+
+  async function expectStored(kind: V38cKind) {
+    expect(fileImportId, 'the V1-38c CSV import case ran').toBeTruthy();
+    const rows = V38C_FILE_ROWS.filter((r) => r.kind === kind);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const r of rows) {
+      expect(await storedStatus(ID.bizB, v38cEmail('file', r.key)), `status cell '${r.cell}'`).toBe(r.stored);
+    }
+  }
+
+  it("V1-38c: an owner's CSV import of canonical, legacy, unrecognised and blank status cells completes, every row CREATED with no error", async () => {
+    const content = [
+      'first_name,email,status',
+      ...V38C_FILE_ROWS.map((r) => `${P}V38c ${r.key},${v38cEmail('file', r.key)},${r.cell}`),
+    ].join('\n');
+    const res = await csvFile(ID.owner, content, ID.bizB);
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: V38C_FILE_ROWS.length, processedRows: V38C_FILE_ROWS.length });
+    fileImportId = res.body.id;
+    const records: Array<{ status: string; error: string | null }> = await db.$queryRawUnsafe(
+      'SELECT status, error FROM contact_import_contacts WHERE import_id = $1', fileImportId,
+    );
+    expect(records).toHaveLength(V38C_FILE_ROWS.length);
+    for (const r of records) expect(r).toEqual({ status: 'CREATED', error: null });
+  });
+
+  it('V1-38c: a canonical status cell (LEAD, PROSPECT, CLIENT, LOST) is stored as written', async () => {
+    await expectStored('canonical');
+  });
+
+  it("V1-38c: a canonical status in another case ('prospect', 'Client', 'lost') is stored in the vocabulary's spelling", async () => {
+    await expectStored('spelled');
+  });
+
+  it('V1-38c: the legacy CLIENT spelling CUSTOMER, in any case, is stored as CLIENT, as the status readers read it (isClientStatus)', async () => {
+    await expectStored('legacy');
+  });
+
+  it('V1-38c: DORMANT, INACTIVE, an unknown word and a blank status cell are dropped as the import drops any cell it does not recognise, so the contact takes the LEAD default', async () => {
+    await expectStored('unrecognised');
+  });
+
+  it('V1-38c: no contact the CSV import wrote holds a status outside CONTACT_STATUSES', async () => {
+    const { CONTACT_STATUSES } = await import('../src/modules/crm/crm.constants');
+    expect(fileImportId, 'the V1-38c CSV import case ran').toBeTruthy();
+    const rows: Array<{ status: string }> = await db.$queryRawUnsafe(
+      'SELECT c.status FROM contacts c JOIN contact_import_contacts r ON r.contact_id = c.id WHERE r.import_id = $1', fileImportId,
+    );
+    expect(rows).toHaveLength(V38C_FILE_ROWS.length);
+    const outside = rows.map((r) => r.status).filter((s) => !(CONTACT_STATUSES as readonly string[]).includes(s));
+    expect(outside, 'statuses outside the vocabulary').toEqual([]);
+  });
+
+  describe('import/link (global fetch stood in for one fixed URL)', () => {
+    let fetchSpy: ReturnType<typeof vi.spyOn>;
+    const served = [
+      'first_name,email,status',
+      ...V38C_LINK_ROWS.map((r) => `${P}V38cLink ${r.key},${v38cEmail('link', r.key)},${r.cell}`),
+    ].join('\n');
+
+    beforeAll(() => {
+      fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: any) => {
+        const url = typeof input === 'string' ? input : String(input?.href ?? input?.url);
+        if (url === V38C_LINK_URL) return new Response(served, { status: 200, headers: { 'content-type': 'text/csv' } });
+        throw new Error(`unexpected outbound fetch in a test: ${url}`);
+      }) as any);
+    });
+
+    afterAll(() => fetchSpy.mockRestore());
+
+    it("V1-38c: the link import stores the same: a padded ' customer ' as CLIENT, 'Prospect' as PROSPECT, LOST as written, DORMANT and an unknown stage as the LEAD default", async () => {
+      const res = await linkImport(ID.owner, V38C_LINK_URL, ID.bizB);
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject({ status: 'COMPLETED', totalRows: V38C_LINK_ROWS.length, processedRows: V38C_LINK_ROWS.length });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      for (const r of V38C_LINK_ROWS) {
+        expect(await storedStatus(ID.bizB, v38cEmail('link', r.key)), `status cell '${r.cell}'`).toBe(r.stored);
+      }
+    });
   });
 });
