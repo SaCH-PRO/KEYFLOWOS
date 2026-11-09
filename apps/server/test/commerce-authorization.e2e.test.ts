@@ -949,14 +949,33 @@ describe('Commerce authorization e2e (L1: real guards, mocked service)', () => {
       for (const item of forwarded.items as Array<Record<string, unknown>>) expect(item).not.toHaveProperty('total');
     });
 
-    it('CC-FORWARD (control): a valid body from revenue:write, OWNER and SUPER_ADMIN is forwarded with the path tenant and the declared fields', async () => {
+    it('CC-FORWARD (control): a valid body from revenue:write, OWNER and a SUPER_ADMIN member is forwarded with the path tenant and the declared fields; a non-member SUPER_ADMIN is refused 403 before the service (D-46)', async () => {
       const full = { ...valid(), currency: 'TTD', dueDate: '2026-12-01', taxRate: 10, discountType: 'FIXED', discountValue: 2, notes: 'k27b notes' };
-      for (const actor of [ID.staffWriteA, ID.ownerA, ID.superAdmin]) {
+      for (const actor of [ID.staffWriteA, ID.ownerA]) {
         const res = await create(actor, full);
         expect(res.status, actor).toBe(201);
         expect(res.body).toMatchObject({ id: `${P}invNew`, status: 'DRAFT' });
         // W3-D64-COMMERCE-CREATE (D-64): forwarded with the acting member, whose CRM view judges the contact.
         expect(commerceMock.createInvoice).toHaveBeenLastCalledWith({ businessId: ID.bizA, ...full, actorUserId: actor });
+      }
+      // W3-D46-CREATE-AND-RECURRING (owner ruling D-46): a platform SUPER_ADMIN who is
+      // not a member of the business stays refused on tenant invoice writes. This
+      // case pinned that SUPER_ADMIN's create at 201; it is now the helper's 403,
+      // and nothing reaches the service.
+      const refused = await create(ID.superAdmin, full);
+      expect(refused.status).toBe(403);
+      expect(refused.body.message).toBe('Not authorized to update this invoice');
+      expect(commerceMock.createInvoice).toHaveBeenCalledTimes(2);
+      // D-46 control: the same SUPER_ADMIN as an ADMIN member of A (revenue:write by
+      // role default) keeps 201 and is forwarded as the acting member.
+      const membership = { userId: ID.superAdmin, businessId: ID.bizA, role: 'ADMIN' };
+      prisma.memberships.push(membership);
+      try {
+        const res = await create(ID.superAdmin, full);
+        expect(res.status, JSON.stringify(res.body)).toBe(201);
+        expect(commerceMock.createInvoice).toHaveBeenLastCalledWith({ businessId: ID.bizA, ...full, actorUserId: ID.superAdmin });
+      } finally {
+        prisma.memberships.splice(prisma.memberships.indexOf(membership), 1);
       }
       expect(commerceMock.createInvoice).toHaveBeenCalledTimes(3);
     });

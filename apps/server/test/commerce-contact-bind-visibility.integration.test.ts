@@ -37,9 +37,14 @@
  *          are aligned (commerce-authorization.e2e CC-STRIP/CC-FORWARD/CC-BOUND,
  *          commerce-quote-errors RR-PROJECT-CREATE, commerce-create-idempotency
  *          H-09, quote-chain-finish QCF-07).
- *            g POST recurring-invoices: RecurringInvoiceService checks the
- *            tenant only and answers the whole Contact row (review SEC-D6-2);
- *            outside this packet's write set, its own packet (it.todo).
+ *            g POST recurring-invoices: RecurringInvoiceService checked the
+ *            tenant only and the route answered the whole Contact row (review
+ *            SEC-D6-2). W3-D46-CREATE-AND-RECURRING (V1-89, D-64) closes it:
+ *            the route forwards the acting member, the service applies the
+ *            same visibility rule (resolveCrmAccess + visibilityClause), and
+ *            every schedule write answers the contact projected to id,
+ *            businessId, firstName, lastName and email (the invoice write
+ *            projection). RED-BEFORE: 201 with the whole PRIVATE row.
  *   CB-02  (review CR-D6-2) a PATCH that sends back the contactId the document
  *          already holds is not re-judged: STAFF and ADMIN edit notes on a
  *          quote, and STAFF on an invoice, already bound to the PRIVATE
@@ -182,6 +187,7 @@ async function cleanup() {
     `UPDATE quotes SET invoice_id = NULL WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM recurring_invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM quote_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_shares WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -217,6 +223,22 @@ function convert(actor: string, quoteId: string) {
 }
 function fromTime(actor: string, projectId: string, contactId: string) {
   return as(actor, agent().post(`/commerce/businesses/${ID.bizA}/invoices/from-time`)).send({ projectId, contactId });
+}
+/** W3-D46-CREATE-AND-RECURRING (CB-01g): a monthly schedule of bizA bound to `contactId`, first run in a month. */
+function postSchedule(actor: string, contactId: string, name = 'v84f schedule') {
+  return as(actor, agent().post(`/commerce/businesses/${ID.bizA}/recurring-invoices`)).send({
+    contactId,
+    name,
+    frequency: 'MONTHLY',
+    amount: 20,
+    startDate: '2026-01-01T00:00:00Z',
+    nextRunDate: new Date(Date.now() + 30 * 24 * 3600_000).toISOString(),
+  });
+}
+/** Every recurring schedule of bizA. */
+async function scheduleCount(): Promise<number> {
+  const [row] = await db.$queryRawUnsafe('SELECT count(*)::int AS n FROM recurring_invoices WHERE business_id = $1', ID.bizA);
+  return row.n;
 }
 
 let docSeq = 0;
@@ -362,11 +384,14 @@ beforeAll(async () => {
   const { CodeExecutorService } = await import('../src/modules/ai/code-executor.service');
   const { KeyCortexActionExecutorPlugin } = await import('../src/modules/key-cortex/key-cortex-action-executor.plugin');
   const { KeyCortexEfferentBridgeService } = await import('../src/modules/key-cortex/key-cortex-efferent-bridge.service');
+  const { RecurringInvoiceController } = await import('../src/modules/commerce/recurring-invoice.controller');
+  const { RecurringInvoiceService } = await import('../src/modules/commerce/recurring-invoice.service');
 
-  redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
+  redis =new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController],
+    // W3-D46-CREATE-AND-RECURRING: RecurringInvoiceController too (CB-01g).
+    controllers: [CommerceController, RecurringInvoiceController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -377,6 +402,7 @@ beforeAll(async () => {
       TeamAuditInterceptor,
       { provide: REDIS_CLIENT, useValue: redis },
       CommerceService,
+      RecurringInvoiceService,
       InvoiceWorkflowService,
       InvoiceReceiptBuilderService,
       RevenuePostingService,
@@ -577,17 +603,35 @@ describe('CB-01 STAFF (revenue:write, crm_view owned) binds the owner\'s PRIVATE
     expect(await db.timeEntry.findUnique({ where: { id: entryId } })).toMatchObject({ billed: false, invoiceId: null });
   });
 
-  // Review SEC-D6-2: RecurringInvoiceService.createRecurringInvoice checks the
+  // Review SEC-D6-2: RecurringInvoiceService.createRecurringInvoice checked the
   // contact against the tenant only (its own private assertContactInBusiness)
-  // and answers the schedule with `include: { contact: true }`, which
-  // RecurringInvoiceController returns unprojected (notesInternal, phone,
+  // and answered the schedule with `include: { contact: true }`, which
+  // RecurringInvoiceController returned unprojected (notesInternal, phone,
   // ownerId, visibility, every CRM field). Every invoice the schedule issues is
-  // bound to that contact. recurring-invoice.service.ts and
-  // recurring-invoice.controller.ts are outside this packet's write set.
-  it.todo(
-    'CB-01g POST businesses/A/recurring-invoices { contactId: PRIVATE }: 404 Contact not found, no schedule written, and the ' +
-      'schedule write answers a projected contact (BLOCKED: RecurringInvoiceService/Controller outside this write set; its own packet)',
-  );
+  // bound to that contact. W3-D46-CREATE-AND-RECURRING (D-64) closes it with the
+  // rule the other binds use (the it.todo FOLLOW3-D6 left, made live).
+  it('CB-01g POST businesses/A/recurring-invoices { contactId: PRIVATE }: 404 Contact not found, no schedule written, nothing of the contact disclosed; a schedule write answers only the projected contact (D-64; review SEC-D6-2)', async () => {
+    const unknown = await postSchedule(ID.staff, ID.unknown);
+    const before = await scheduleCount();
+    const res = await postSchedule(ID.staff, ID.cPriv);
+    expectRefused(res, unknown, 'POST recurring-invoices');
+    expect(await scheduleCount(), 'POST recurring-invoices: no schedule').toBe(before);
+
+    // Controls: the STAFF member's own TEAM contact and the OWNER on the PRIVATE
+    // contact bind (201), and the body carries the contact projected to the
+    // invoice write's fields: no phone, notes, owner or visibility.
+    const projected = ['businessId', 'email', 'firstName', 'id', 'lastName'];
+    const team = await postSchedule(ID.staff, ID.cTeam, 'v84f schedule team');
+    expect(team.status, JSON.stringify(team.body)).toBe(201);
+    expect(team.body.contactId).toBe(ID.cTeam);
+    expect(Object.keys(team.body.contact).sort()).toEqual(projected);
+    const owner = await postSchedule(ID.owner, ID.cPriv, 'v84f schedule owner');
+    expect(owner.status, JSON.stringify(owner.body)).toBe(201);
+    expect(owner.body.contact).toEqual({ id: ID.cPriv, businessId: ID.bizA, firstName: PRIV.firstName, lastName: PRIV.lastName, email: PRIV.email });
+    // RED-BEFORE: the whole Contact row, its phone, ownerId and visibility included.
+    expect(JSON.stringify(owner.body)).not.toContain(PRIV.phone);
+    expect(await scheduleCount()).toBe(before + 2);
+  });
 });
 
 describe('CB-02 a PATCH that sends back the stored contactId is not re-judged (review CR-D6-2)', () => {

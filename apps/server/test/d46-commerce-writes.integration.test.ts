@@ -44,6 +44,27 @@
  *                 ADMIN member and owner A are admitted; the non-member
  *                 SUPER_ADMIN keeps 'Not authorized to update this ...'.
  *
+ * W3-D46-CREATE-AND-RECURRING (V1-89, owner ruling D-46): the two writes
+ * FOLLOW3-A1 left out (its census it.todo D46-S07 and D46-S08).
+ *   D46-S08   POST invoices (createInvoice, EXEMPT in FOLLOW3-A1: CC-FORWARD
+ *             pinned a non-member SUPER_ADMIN's create at 201).
+ *   D46-S07a..e  POST recurring-invoices, PATCH recurring-invoices/:id, POST
+ *             recurring-invoices/:id/pause, POST .../resume, DELETE
+ *             recurring-invoices/:id (RecurringInvoiceController, OPEN in
+ *             FOLLOW3-A1: neither it nor its service checked a SUPER_ADMIN's
+ *             Membership, so a non-member SUPER_ADMIN wrote an ACTIVE schedule
+ *             the scheduler turns into real invoices).
+ *             RED-BEFORE: 201/200 and the invoice or schedule written in A.
+ *             GREEN-AFTER: 403 'Not authorized to update this invoice' for the
+ *             non-member SUPER_ADMIN, the guard's 'Insufficient permissions'
+ *             for a SUPER_ADMIN member below revenue:write; A byte-identical
+ *             (schedules included) and no BusinessEvent.
+ *   controls  owner A and the SUPER_ADMIN ADMIN member of A keep 201/200 and
+ *             the write; owner B (a non-member USER) keeps BusinessGuard's 403;
+ *             the recurring run (the scheduler, which acts as the system and
+ *             never as a SUPER_ADMIN) still bills a schedule the SUPER_ADMIN
+ *             member created.
+ *
  * Item 3 (V1-15d residual, D-55): recordPayment wrote provider = method, so a
  * hand-recorded payment with method 'stripe' and a reference naming another
  * tenant's PaymentIntent stored a SUCCESSFUL provider 'stripe' row. The Stripe
@@ -127,6 +148,8 @@ let paymentsSvc: any;
 let commerceSvc: any;
 let keyAdapter: any;
 let keyActorId: string;
+/** W3-D46-CREATE-AND-RECURRING: the real recurring runner, its due scan scoped to one business of this suite. */
+let recurringRunner: (businessId: string) => any;
 let storedBalanceFn: (total: number, rows: Array<{ amount: number; status: string }>, currency?: string) => any;
 
 const eventStub = {
@@ -188,6 +211,7 @@ async function cleanup() {
     `UPDATE quotes SET invoice_id = NULL WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM recurring_invoices WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM quote_items WHERE quote_id IN (SELECT id FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM quotes WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contacts WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -258,10 +282,12 @@ function recordPaymentCall(actor: string | null, biz: string, invoiceId: string,
 async function stateOf(businessId: string) {
   await settle();
   const byId = { orderBy: { id: 'asc' as const } };
-  const [invoices, quotes, payments, links, txns, entries, activities, events] = await Promise.all([
+  const [invoices, quotes, schedules, payments, links, txns, entries, activities, events] = await Promise.all([
     // Raw: the client hides soft-deleted invoices and quotes, and a delete must show.
     db.$queryRawUnsafe('SELECT * FROM invoices WHERE business_id = $1 ORDER BY id', businessId),
     db.$queryRawUnsafe('SELECT * FROM quotes WHERE business_id = $1 ORDER BY id', businessId),
+    // W3-D46-CREATE-AND-RECURRING: the recurring writes (D46-S07a..e) show here too.
+    db.$queryRawUnsafe('SELECT * FROM recurring_invoices WHERE business_id = $1 ORDER BY id', businessId),
     db.payment.findMany({ where: { businessId }, ...byId }),
     db.paymentLink.findMany({ where: { businessId }, ...byId }),
     db.financialTransaction.findMany({ where: { businessId }, ...byId }),
@@ -269,7 +295,7 @@ async function stateOf(businessId: string) {
     db.activity.findMany({ where: { businessId }, ...byId }),
     db.businessEvent.findMany({ where: { businessId }, ...byId }),
   ]);
-  return JSON.parse(JSON.stringify({ invoices, quotes, payments, links, txns, entries, activities, events }));
+  return JSON.parse(JSON.stringify({ invoices, quotes, schedules, payments, links, txns, entries, activities, events }));
 }
 
 /** A Stripe delivery signed with the deployment's own webhook secret (platform-verified, no tenant binding). */
@@ -392,13 +418,16 @@ beforeAll(async () => {
   const { TimelineService } = await import('../src/modules/timeline/timeline.service');
   const { PaymentsService } = await import('../src/modules/payments/payments.service');
   const { CommerceAdapterService } = await import('../src/modules/key-cortex/adapters/commerce-adapter.service');
+  const { RecurringInvoiceController } = await import('../src/modules/commerce/recurring-invoice.controller');
+  const { RecurringInvoiceService } = await import('../src/modules/commerce/recurring-invoice.service');
   storedBalanceFn = workflowMod.balanceOfStoredRows;
   keyActorId = KEY_SYSTEM_ACTOR_ID;
 
   redis = new IORedis(process.env.REDIS_URL ?? 'redis://localhost:6379', { maxRetriesPerRequest: 2, lazyConnect: false });
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [CommerceController],
+    // W3-D46-CREATE-AND-RECURRING: RecurringInvoiceController too (D46-S07a..e).
+    controllers: [CommerceController, RecurringInvoiceController],
     providers: [
       PrismaService,
       AuthGuard,
@@ -409,6 +438,7 @@ beforeAll(async () => {
       TeamAuditInterceptor,
       { provide: REDIS_CLIENT, useValue: redis },
       CommerceService,
+      RecurringInvoiceService,
       workflowMod.InvoiceWorkflowService,
       InvoiceReceiptBuilderService,
       RevenuePostingService,
@@ -448,6 +478,28 @@ beforeAll(async () => {
     moduleRef.get(RevenuePostingService),
   );
   keyAdapter = new CommerceAdapterService(commerce);
+  // The real recurring runner over the real workflow (as commerce-document-numbering composes it);
+  // its due scan is scoped to one of this suite's businesses so a run never bills another suite's schedules.
+  const workflowSvc = moduleRef.get(workflowMod.InvoiceWorkflowService);
+  recurringRunner = (businessId: string) => {
+    const scoped = new Proxy(db, {
+      get(target: any, prop: string | symbol) {
+        if (prop === 'recurringInvoice') {
+          const delegate = Reflect.get(target, prop);
+          return new Proxy(delegate, {
+            get(d: any, method: string | symbol) {
+              const orig = Reflect.get(d, method);
+              if (method !== 'findMany' || typeof orig !== 'function') return typeof orig === 'function' ? orig.bind(d) : orig;
+              return (args: any = {}) => orig.call(d, { ...args, where: { AND: [args.where ?? {}, { businessId }] } });
+            },
+          });
+        }
+        const v = Reflect.get(target, prop);
+        return typeof v === 'function' ? v.bind(target) : v;
+      },
+    });
+    return new RecurringInvoiceService({ client: scoped } as any, eventStub as any, workflowSvc);
+  };
 
   app = moduleRef.createNestApplication();
   // Identity attachment only. No guard is overridden.
@@ -902,5 +954,185 @@ describe('Item 3 (D-55): a hand-recorded payment never poses as a gateway paymen
       expect(await depositAccountOf(row.id), row.method).toBe('PAYMENT_PROCESSOR');
     }
     await expectLedgerAgrees(inv, methods.length);
+  });
+});
+
+/**
+ * W3-D46-CREATE-AND-RECURRING (V1-89, owner ruling D-46): the writes
+ * FOLLOW3-A1 left out of the helper (census it.todo D46-S07 and D46-S08), as
+ * WriteCase rows over the same fixtures. Schedules are seeded with a future
+ * nextRunDate, so no run bills them unless a case asks.
+ */
+async function makeSchedule(tag: string, status = 'ACTIVE'): Promise<string> {
+  const id = `${P}rec_${tag}`;
+  await db.recurringInvoice.create({
+    data: {
+      id,
+      businessId: ID.bizA,
+      contactId: ID.contactA,
+      name: `V81A schedule ${tag}`,
+      frequency: 'MONTHLY',
+      amount: TOTAL,
+      currency: 'TTD',
+      startDate: new Date('2026-01-01T00:00:00Z'),
+      nextRunDate: new Date(Date.now() + 30 * 24 * 3600_000),
+      status,
+    },
+  });
+  return id;
+}
+
+async function scheduleOf(id: string): Promise<any> {
+  return db.recurringInvoice.findUnique({ where: { id } });
+}
+
+const SCHEDULES = `/commerce/businesses/${ID.bizA}/recurring-invoices`;
+
+const LATE_CASES: WriteCase[] = [
+  {
+    id: 'D46-S08',
+    what: 'POST invoices {contactId, items}',
+    subject: 'invoice',
+    okStatus: 201,
+    prepare: async (tag) => ({ notes: `${P}s08_${tag}` }),
+    call: (actor, fx) =>
+      as(actor, agent().post(`/commerce/businesses/${ID.bizA}/invoices`)).send({
+        contactId: ID.contactA,
+        items: [{ description: 'V81A S08 line', quantity: 1, unitPrice: TOTAL }],
+        notes: fx.notes,
+      }),
+    admitted: async (fx, res) => {
+      const rows = await db.invoice.findMany({ where: { businessId: ID.bizA, notes: fx.notes } });
+      expect(rows.map((r: any) => [r.id, r.status, r.contactId, Number(r.total)])).toEqual([[res.body.id, 'DRAFT', ID.contactA, TOTAL]]);
+    },
+  },
+  {
+    id: 'D46-S07a',
+    what: 'POST recurring-invoices {contactId, name, frequency, amount, dates}',
+    subject: 'invoice',
+    okStatus: 201,
+    prepare: async (tag) => ({ name: `${P}s07a_${tag}` }),
+    call: (actor, fx) =>
+      as(actor, agent().post(SCHEDULES)).send({
+        contactId: ID.contactA,
+        name: fx.name,
+        frequency: 'MONTHLY',
+        amount: TOTAL,
+        startDate: '2026-01-01T00:00:00Z',
+        nextRunDate: new Date(Date.now() + 30 * 24 * 3600_000).toISOString(),
+      }),
+    admitted: async (fx, res) => {
+      const rows = await db.recurringInvoice.findMany({ where: { businessId: ID.bizA, name: fx.name } });
+      expect(rows.map((r: any) => [r.id, r.status, r.contactId])).toEqual([[res.body.id, 'ACTIVE', ID.contactA]]);
+    },
+  },
+  {
+    id: 'D46-S07b',
+    what: 'PATCH recurring-invoices/:id {name}',
+    subject: 'invoice',
+    okStatus: 200,
+    prepare: async (tag) => ({ rec: await makeSchedule(`s07b_${tag}`), name: `${P}s07b_renamed_${tag}` }),
+    call: (actor, fx) => as(actor, agent().patch(`${SCHEDULES}/${fx.rec}`)).send({ name: fx.name }),
+    admitted: async (fx) => {
+      expect((await scheduleOf(fx.rec)).name).toBe(fx.name);
+    },
+  },
+  {
+    id: 'D46-S07c',
+    what: 'POST recurring-invoices/:id/pause',
+    subject: 'invoice',
+    okStatus: 201,
+    prepare: async (tag) => ({ rec: await makeSchedule(`s07c_${tag}`) }),
+    call: (actor, fx) => as(actor, agent().post(`${SCHEDULES}/${fx.rec}/pause`)).send({}),
+    admitted: async (fx) => {
+      expect((await scheduleOf(fx.rec)).status).toBe('PAUSED');
+    },
+  },
+  {
+    id: 'D46-S07d',
+    what: 'POST recurring-invoices/:id/resume',
+    subject: 'invoice',
+    okStatus: 201,
+    prepare: async (tag) => ({ rec: await makeSchedule(`s07d_${tag}`, 'PAUSED') }),
+    call: (actor, fx) => as(actor, agent().post(`${SCHEDULES}/${fx.rec}/resume`)).send({}),
+    admitted: async (fx) => {
+      expect((await scheduleOf(fx.rec)).status).toBe('ACTIVE');
+    },
+  },
+  {
+    id: 'D46-S07e',
+    what: 'DELETE recurring-invoices/:id',
+    subject: 'invoice',
+    okStatus: 200,
+    prepare: async (tag) => ({ rec: await makeSchedule(`s07e_${tag}`) }),
+    call: (actor, fx) => as(actor, agent().delete(`${SCHEDULES}/${fx.rec}`)),
+    admitted: async (fx) => {
+      expect((await scheduleOf(fx.rec)).status).toBe('CANCELLED');
+    },
+  },
+];
+
+describe('W3-D46-CREATE-AND-RECURRING (D-46): POST invoices and the recurring-invoice writes refuse a SUPER_ADMIN that is not a member of A, and nothing is written', () => {
+  for (const c of LATE_CASES) {
+    it(`${c.id}: ${c.what} by the non-member SUPER_ADMIN answers 403 'Not authorized to update this ${c.subject}'; A's invoices, schedules, payments, postings, ledger, Activity and BusinessEvent rows are byte-identical (D-46)`, async () => {
+      const fx = await c.prepare('saNon');
+      const before = await stateOf(ID.bizA);
+      const jobsBefore = auditJobs.length;
+      const res = await c.call(ID.saNon, fx);
+      // RED-BEFORE: 201/200 and the invoice or schedule written in A.
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body.message).toBe(`Not authorized to update this ${c.subject}`);
+      expect(await stateOf(ID.bizA)).toEqual(before);
+      expect(auditJobs.slice(jobsBefore)).toEqual([]);
+    });
+
+    it(`${c.id} (A2 rule, D-46): a SUPER_ADMIN whose membership in A holds revenue:read (STAFF default) or an explicit revenue:'none' gets the guard's 403 'Insufficient permissions'; A is byte-identical`, async () => {
+      for (const [actor, level] of BELOW_WRITE) {
+        const fx = await c.prepare(actor.slice(P.length));
+        const before = await stateOf(ID.bizA);
+        const res = await c.call(actor, fx);
+        expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(403);
+        expect(res.body.message, actor).toBe(`Insufficient permissions: revenue requires write access (you have ${level})`);
+        expect(await stateOf(ID.bizA), actor).toEqual(before);
+      }
+    });
+
+    it(`${c.id} control: owner A and a SUPER_ADMIN that is an ADMIN member of A are admitted (${c.okStatus}) and do the write`, async () => {
+      for (const actor of [ID.ownerA, ID.saAdminA]) {
+        const fx = await c.prepare(`ok_${actor.slice(P.length)}`);
+        const res = await c.call(actor, fx);
+        expect(res.status, `${actor}: ${JSON.stringify(res.body)}`).toBe(c.okStatus);
+        await c.admitted(fx, res);
+      }
+    });
+
+    it(`${c.id} control: a non-member USER (owner B on A) is refused by BusinessGuard (403 No access to this business); A is byte-identical`, async () => {
+      const fx = await c.prepare('ownerB');
+      const before = await stateOf(ID.bizA);
+      const res = await c.call(ID.ownerB, fx);
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body.message).toBe('No access to this business');
+      expect(await stateOf(ID.bizA)).toEqual(before);
+    });
+  }
+
+  it('D46-S07 control (D-46): the recurring run acts as the system, not as a SUPER_ADMIN: a due schedule the SUPER_ADMIN ADMIN member of A created over HTTP is billed (one SENT invoice in A on its contact) and advances', async () => {
+    const due = new Date(Date.now() - 60_000);
+    const res = await as(ID.saAdminA, agent().post(SCHEDULES)).send({
+      contactId: ID.contactA,
+      name: `${P}s07_run`,
+      frequency: 'MONTHLY',
+      amount: 75,
+      startDate: '2026-01-01T00:00:00Z',
+      nextRunDate: due.toISOString(),
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const result = await recurringRunner(ID.bizA).processRecurringInvoices();
+    expect(result.map((r: any) => r.recurringId)).toEqual([res.body.id]);
+    const billed = await db.invoice.findMany({ where: { recurringInvoiceId: res.body.id }, select: { businessId: true, contactId: true, status: true, total: true } });
+    expect(billed.map((i: any) => [i.businessId, i.contactId, i.status, Number(i.total)])).toEqual([[ID.bizA, ID.contactA, 'SENT', 75]]);
+    const schedule = await scheduleOf(res.body.id);
+    expect(schedule.generatedCount).toBe(1);
+    expect(schedule.nextRunDate.getTime()).toBeGreaterThan(due.getTime());
   });
 });
