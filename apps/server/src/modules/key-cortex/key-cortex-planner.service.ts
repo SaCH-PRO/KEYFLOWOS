@@ -732,9 +732,14 @@ export class KeyCortexPlannerService {
     });
   }
 
-  async getPlan(planId: string) {
-    return this.prisma.client.aiPlan.findUnique({
-      where: { id: planId },
+  /**
+   * KEY-R3a-PLAN-READS (KEY-CORTEX-PLAN-READ): the plan `planId` of `businessId` only. It was read
+   * by id alone, so GET cortex/plans/:planId answered another business's plan to a member naming
+   * their own. businessId is required, so a caller cannot read a plan by id alone.
+   */
+  async getPlan(planId: string, businessId: string) {
+    return this.prisma.client.aiPlan.findFirst({
+      where: { id: planId, businessId },
       include: { steps: true, result: true, goal: true },
     });
   }

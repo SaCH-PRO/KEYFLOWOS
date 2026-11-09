@@ -14,6 +14,7 @@ import {
   graphPlanReadScope,
   planStepDispatchedTool,
   visiblePlanSteps,
+  visiblePlans,
 } from './graph-actions.controller';
 import { AiMemoryService, MemoryCategory } from './ai-memory.service';
 import { StrategicIntelligenceService } from './strategic-intelligence.service';
@@ -326,6 +327,11 @@ export class AiController {
    * holds at read; and a contact read's output (written by the plan executor from a run with no
    * principal) to the OWNER or a SUPER_ADMIN only (visiblePlanSteps). Another member's plan is
    * answered exactly as an unknown id.
+   *
+   * KEY-R3a-PLAN-READS (D-74): the same rule as every plan read route (the queue, GET
+   * cortex/plans/:planId): a KEY-cortex step with no tool is judged by its module (its crm reads'
+   * output is the OWNER's only), and every step output is filtered by the viewer's contact
+   * visibility at read, whoever approved the step (visiblePlans).
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('businesses/:businessId/ai/plans')
@@ -338,7 +344,7 @@ export class AiController {
     const viewer = this.planViewer(req);
     const mayRead = await graphPlanReadScope(this.prisma, businessId, viewer);
     const plans = await this.planner.listPlans(businessId, status, safeInt(limit, 20), mayRead.seesEveryPlan ? undefined : viewer.id);
-    return plans.map((p) => ({ ...p, steps: visiblePlanSteps(p.steps, mayRead) }));
+    return visiblePlans(plans, mayRead);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -355,7 +361,7 @@ export class AiController {
     ]);
     if (!proposer || (!mayRead.seesEveryPlan && proposer.userId !== viewer.id)) return null;
     const plan = await this.planner.getPlan(planId, businessId);
-    return plan ? { ...plan, steps: visiblePlanSteps(plan.steps, mayRead) } : null;
+    return plan ? { ...plan, steps: await visiblePlanSteps(plan.steps, mayRead) } : null;
   }
 
   private planViewer(req: AuthenticatedRequest): { id: string; role?: string } {

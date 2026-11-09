@@ -30,7 +30,9 @@ import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
 import { ActionExecutedPayload, ActionBlockedPayload } from '../../core/event-bus/events.types';
 import { CanonicalModule, LEVEL_RANK, defaultScopesForRole, rankOf } from '../../core/authority/module-vocabulary';
-import { resolveCrmAccess } from '../crm/crm-permissions.helper';
+import type { Prisma } from '@prisma/client';
+import { resolveCrmAccess, visibilityClause } from '../crm/crm-permissions.helper';
+import { KEY_PLAN_MODULE_SCOPES, planStepReadsContacts } from '../key-cortex/key-cortex-plan-authority';
 import {
   CANONICAL_MODULE_TOOLS,
   CRM_ROW_VISIBILITY_TOOLS,
@@ -369,71 +371,264 @@ export function planStepDispatchedTool(step: { toolName: string | null; action: 
 
 /**
  * What a viewer may read of the business's KEY plans: QUEUE-READ (trial-N repair round 2) for GET
- * actions/.../queue, and the same rule for GET ai/plans and GET ai/plans/:planId (recheck
- * AI-PLANS-READ). `seesEveryPlan`: every member's plans (the OWNER, an ADMIN, a SUPER_ADMIN), else
- * only the viewer's own. `step`: whether a step of `toolName` is shown (every step for the OWNER and
- * a SUPER_ADMIN; otherwise a step whose tool graphActionRequirement maps, with each of its module
- * scopes held at read as ModuleScopeGuard computes them). `stepOutput`: whether that step's stored
- * output is shown: not, to anyone but the OWNER or a SUPER_ADMIN, for a contact read
- * (graphActionReadsContacts), whose output the plan executor writes from a run with no
- * principal (every contact, another member's PRIVATE ones included).
+ * actions/.../queue, the same rule for GET ai/plans and GET ai/plans/:planId (recheck
+ * AI-PLANS-READ), and, since KEY-R3a-PLAN-READS (D-74), for GET cortex/plans/:planId: one rule for
+ * every plan read route (visiblePlans / visiblePlanSteps apply it).
+ * `seesEveryPlan`: every member's plans (the OWNER, an ADMIN, a SUPER_ADMIN), else only the viewer's
+ * own. `step`: whether a step of `toolName` is shown (every step for the OWNER and a SUPER_ADMIN;
+ * otherwise a step whose tool graphActionRequirement maps, with each of its module scopes held at
+ * read as ModuleScopeGuard computes them). `cortexStep`: the same for a KEY-cortex step stored as
+ * module.action with no tool (KeyCortexPlannerService), by its module (KEY_PLAN_MODULE_SCOPES; the
+ * settings adapter's module is 'settings'). `stepOutput`: whether that step's stored output is shown
+ * at all: not, to anyone but the OWNER or a SUPER_ADMIN, for a contact read (graphActionReadsContacts),
+ * whose output the plan executor writes from a run with no principal (every contact, another member's
+ * PRIVATE ones included). `seesEveryContact`: the OWNER and a SUPER_ADMIN, whom visibilityClause does
+ * not restrict. `hiddenContacts` (D-74): the contacts among `ids` the viewer may not open (null when
+ * they open every contact), which visiblePlans withholds from every step output at read.
  */
 export interface GraphPlanReadScope {
   seesEveryPlan: boolean;
   step: (toolName: string | null | undefined) => boolean;
+  cortexStep: (module: string) => boolean;
   stepOutput: (toolName: string) => boolean;
+  seesEveryContact: boolean;
+  hiddenContacts: ((ids: Iterable<string>) => Promise<ReadonlySet<string>>) | null;
 }
+
+/** The ids one contact lookup of hiddenContacts reads at most (bind parameters stay well under Postgres' limit). */
+const HIDDEN_CONTACT_LOOKUP_CHUNK = 5000;
 
 export async function graphPlanReadScope(
   prisma: PrismaService,
   businessId: string,
   viewer: { id: string; role?: string },
 ): Promise<GraphPlanReadScope> {
-  const everything: GraphPlanReadScope = { seesEveryPlan: true, step: () => true, stepOutput: () => true };
+  const everything: GraphPlanReadScope = {
+    seesEveryPlan: true,
+    step: () => true,
+    cortexStep: () => true,
+    stepOutput: () => true,
+    seesEveryContact: true,
+    hiddenContacts: null,
+  };
   if (viewer.role === 'SUPER_ADMIN') return everything;
   const membership = await prisma.client.membership.findUnique({
     where: { userId_businessId: { userId: viewer.id, businessId } },
     select: { role: true, permissionScopes: true },
   });
-  if (!membership) return { seesEveryPlan: false, step: () => false, stepOutput: () => false };
+  if (!membership) {
+    return {
+      seesEveryPlan: false,
+      step: () => false,
+      cortexStep: () => false,
+      stepOutput: () => false,
+      seesEveryContact: false,
+      hiddenContacts: async (ids) => new Set(ids),
+    };
+  }
   if (membership.role === 'OWNER') return everything;
   const scopes: Record<string, string> = isJsonObject(membership.permissionScopes)
     ? (membership.permissionScopes as Record<string, string>)
     : defaultScopesForRole(membership.role);
+  const reads = (module: string) => rankOf(scopes[module] || 'none') >= LEVEL_RANK.read;
+  // D-74 / D-37: the contacts the viewer may open, by the rule GET contacts/:id applies
+  // (resolveCrmAccess + visibilityClause; an ADMIN does not open another member's PRIVATE contact).
+  const clause = visibilityClause(await resolveCrmAccess(prisma, businessId, viewer.id), viewer.id) as Prisma.ContactWhereInput | null;
   return {
     seesEveryPlan: PLAN_APPROVER_ROLES.has(membership.role),
     step: (toolName) => {
       if (!toolName) return false;
       const requirement = graphActionRequirement(toolName);
       if (!requirement || 'refused' in requirement) return false;
-      return requirement.scopes.every(({ module }) => rankOf(scopes[module] || 'none') >= LEVEL_RANK.read);
+      return requirement.scopes.every(({ module }) => reads(module));
+    },
+    cortexStep: (module) => {
+      const scope = Object.prototype.hasOwnProperty.call(KEY_PLAN_MODULE_SCOPES, module) ? KEY_PLAN_MODULE_SCOPES[module] : null;
+      if (!scope) return true;
+      return reads(scope === 'adapter' ? 'settings' : scope);
     },
     // KEY-R3b review SEC-R3b-1: every contact read, known by what the tool does.
     stepOutput: (toolName) => !graphActionReadsContacts(toolName),
+    seesEveryContact: !clause,
+    hiddenContacts: clause ? (ids) => hiddenBusinessContacts(prisma, businessId, clause, ids) : null,
   };
 }
 
 /**
- * A plan's steps as `scope` lets its viewer read them, each judged by the tool the executor
- * dispatches for it (planStepDispatchedTool: a step with no toolName whose action names a tool is
- * that tool). A step that dispatches nothing (an 'analyze' step) is shown with its plan. A step
- * whose output the viewer may not read is shown with outputResult null.
+ * The contacts of the business among `ids` that `clause` does not admit (D-74). Each lookup goes
+ * through the business's `contacts` relation, as timeline-visibility's hiddenContacts does: the
+ * soft-delete extension adds deletedAt null only to a top-level Contact read, so a soft-deleted
+ * contact is judged by its visibility too. An id that is no contact of the business is not one.
  */
-export function visiblePlanSteps<S extends { toolName: string | null; action: string | null; outputResult?: unknown }>(
-  steps: readonly S[],
-  scope: GraphPlanReadScope,
-): S[] {
-  const out: S[] = [];
-  for (const step of steps) {
-    const tool = planStepDispatchedTool(step);
-    if (tool === null) {
-      out.push(step);
-      continue;
-    }
-    if (!scope.step(tool)) continue;
-    out.push(scope.stepOutput(tool) ? step : { ...step, outputResult: null });
+async function hiddenBusinessContacts(
+  prisma: PrismaService,
+  businessId: string,
+  clause: Prisma.ContactWhereInput,
+  ids: Iterable<string>,
+): Promise<ReadonlySet<string>> {
+  const all = [...new Set(ids)];
+  const hidden = new Set<string>();
+  for (let i = 0; i < all.length; i += HIDDEN_CONTACT_LOOKUP_CHUNK) {
+    const chunk = all.slice(i, i + HIDDEN_CONTACT_LOOKUP_CHUNK);
+    const [named, open] = await Promise.all([
+      prisma.client.business.findFirst({
+        where: { id: businessId },
+        select: { contacts: { where: { id: { in: chunk } }, select: { id: true } } },
+      }),
+      prisma.client.business.findFirst({
+        where: { id: businessId },
+        select: { contacts: { where: { id: { in: chunk }, AND: [clause] }, select: { id: true } } },
+      }),
+    ]);
+    const visible = new Set((open?.contacts ?? []).map((c: { id: string }) => c.id));
+    for (const c of named?.contacts ?? []) if (!visible.has(c.id)) hidden.add(c.id);
   }
-  return out;
+  return hidden;
+}
+
+/** A stored plan step as the plan read routes answer it. */
+export interface PlanStepView {
+  toolName: string | null;
+  action: string | null;
+  module?: string | null;
+  inputPayload?: unknown;
+  outputResult?: unknown;
+}
+
+/** The step type of a plan read with its steps. */
+type PlanStepsOf<T> = T extends { steps?: readonly (infer S)[] | null } ? S : never;
+
+/** Separates an id from the text around it inside a string ('Updated contact <id>', a URL). */
+const ID_TOKEN_SEPARATOR = /[^A-Za-z0-9_-]+/;
+/** The shortest token of a longer string that is looked up as a contact id (cuid, uuid and test ids are longer). */
+const MIN_EMBEDDED_ID_LENGTH = 8;
+/** The longest string looked up whole as a contact id (Contact.id is a cuid). */
+const MAX_WHOLE_ID_LENGTH = 191;
+
+function stringTokens(value: string): string[] {
+  return value.split(ID_TOKEN_SEPARATOR).filter((t) => t.length >= MIN_EMBEDDED_ID_LENGTH && t.length <= MAX_WHOLE_ID_LENGTH);
+}
+
+/** Every string of `value` (and every object key) that might be a contact id, whole or as a token. */
+function collectIdCandidates(value: unknown, into: Set<string>): void {
+  if (typeof value === 'string') {
+    if (value.length > 0 && value.length <= MAX_WHOLE_ID_LENGTH) into.add(value);
+    for (const t of stringTokens(value)) into.add(t);
+  } else if (Array.isArray(value)) {
+    for (const v of value) collectIdCandidates(v, into);
+  } else if (isJsonObject(value)) {
+    for (const [k, v] of Object.entries(value)) {
+      collectIdCandidates(k, into);
+      collectIdCandidates(v, into);
+    }
+  }
+}
+
+function stringNamesHidden(value: string, hidden: ReadonlySet<string>): boolean {
+  return hidden.has(value) || stringTokens(value).some((t) => hidden.has(t));
+}
+
+function namesHiddenContact(value: unknown, hidden: ReadonlySet<string>): boolean {
+  if (typeof value === 'string') return stringNamesHidden(value, hidden);
+  if (Array.isArray(value)) return value.some((v) => namesHiddenContact(v, hidden));
+  if (isJsonObject(value)) return Object.entries(value).some(([k, v]) => stringNamesHidden(k, hidden) || namesHiddenContact(v, hidden));
+  return false;
+}
+
+const WITHHELD_ROW: unique symbol = Symbol('withheld row');
+
+/**
+ * `value` without the rows that name a hidden contact (D-74): an array element that names one is
+ * dropped, an object key that names one is dropped with its value, and an object that names one in
+ * any other place is itself such a row (WITHHELD_ROW: dropped by the nearest array that holds it, or
+ * the whole output withheld when no array holds it).
+ */
+function withholdHiddenRows(value: unknown, hidden: ReadonlySet<string>): unknown {
+  if (typeof value === 'string') return stringNamesHidden(value, hidden) ? WITHHELD_ROW : value;
+  if (Array.isArray(value)) return value.map((v) => withholdHiddenRows(v, hidden)).filter((v) => v !== WITHHELD_ROW);
+  if (isJsonObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (stringNamesHidden(k, hidden)) continue;
+      const kept = withholdHiddenRows(v, hidden);
+      if (kept === WITHHELD_ROW) return WITHHELD_ROW;
+      out[k] = kept;
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Whether `scope` shows a step, and its stored output, before D-74's row filter. A step is judged by
+ * the tool the executor dispatches for it (planStepDispatchedTool: a step with no toolName whose
+ * action names a tool is that tool). A KEY-cortex step with no tool (module.action, the step
+ * KeyCortexPlannerService runs) is judged by its module, and its output, when it reads contacts
+ * (planStepReadsContacts: every crm read), is the OWNER's and a SUPER_ADMIN's only, as a registry
+ * contact read's is (KEY-R3a, PLANREAD-TOOLLESS-OUTPUT). A step that dispatches nothing and names
+ * no KEY module (an 'analyze' step) is shown with its plan.
+ */
+function planStepReadRule(step: PlanStepView, scope: GraphPlanReadScope): { shown: boolean; output: boolean } {
+  const tool = planStepDispatchedTool(step);
+  if (tool !== null) {
+    return scope.step(tool) ? { shown: true, output: scope.stepOutput(tool) } : { shown: false, output: false };
+  }
+  const module = step.module;
+  if (module && Object.prototype.hasOwnProperty.call(KEY_PLAN_MODULE_SCOPES, module)) {
+    if (!scope.cortexStep(module)) return { shown: false, output: false };
+    return { shown: true, output: scope.seesEveryContact || !planStepReadsContacts(module, step.action ?? '') };
+  }
+  return { shown: true, output: true };
+}
+
+/**
+ * Plans as `scope` lets its viewer read them (KEY-R3a-PLAN-READS: the rule of every plan read route).
+ * Each plan keeps the steps planStepReadRule shows; a step whose output the viewer may not read is
+ * shown with outputResult null. D-74: a step output is then filtered by the viewer's CRM visibility
+ * at read time, whatever tool or module.action produced it and whoever approved the step: the output
+ * of a step whose input names a contact the viewer may not open is withheld (null: it is about that
+ * row, even when it names no contact itself, as a note's text), and every other output loses the rows
+ * that name such a contact (withholdHiddenRows; null when the output itself is such a row). One
+ * contact lookup serves every plan.
+ */
+export async function visiblePlans<T extends { steps?: readonly PlanStepView[] | null }>(
+  plans: readonly T[],
+  scope: GraphPlanReadScope,
+): Promise<Array<T & { steps: Array<PlanStepsOf<T>> }>> {
+  const judged: PlanStepView[][] = plans.map((plan) =>
+    (plan.steps ?? [])
+      .map((step) => ({ step, rule: planStepReadRule(step, scope) }))
+      .filter(({ rule }) => rule.shown)
+      .map(({ step, rule }) => (rule.output ? step : { ...step, outputResult: null })),
+  );
+  let hidden: ReadonlySet<string> = new Set();
+  if (scope.hiddenContacts) {
+    const candidates = new Set<string>();
+    for (const steps of judged) {
+      for (const step of steps) {
+        if (step.outputResult === null || step.outputResult === undefined) continue;
+        collectIdCandidates(step.inputPayload, candidates);
+        collectIdCandidates(step.outputResult, candidates);
+      }
+    }
+    if (candidates.size > 0) hidden = await scope.hiddenContacts(candidates);
+  }
+  return plans.map((plan, i) => ({
+    ...plan,
+    steps: judged[i].map((step) => {
+      if (hidden.size === 0 || step.outputResult === null || step.outputResult === undefined) return step;
+      if (namesHiddenContact(step.inputPayload, hidden)) return { ...step, outputResult: null };
+      if (!namesHiddenContact(step.outputResult, hidden)) return step;
+      const kept = withholdHiddenRows(step.outputResult, hidden);
+      return { ...step, outputResult: kept === WITHHELD_ROW ? null : kept };
+    }) as Array<PlanStepsOf<T>>,
+  }));
+}
+
+/** One plan's steps as `scope` lets its viewer read them (visiblePlans). */
+export async function visiblePlanSteps<S extends PlanStepView>(steps: readonly S[], scope: GraphPlanReadScope): Promise<S[]> {
+  const [plan] = await visiblePlans([{ steps }], scope);
+  return plan.steps;
 }
 
 /**
@@ -774,6 +969,9 @@ export class GraphActionsController {
    * with its stored planId and planStepId, for a viewer who may run that step (the rule POST
    * .../execute applies: assertMayRunGraphAction). The control tower's Run action posts exactly
    * those ids to POST .../execute, which runs the stored step once with no re-planning.
+   *
+   * KEY-R3a-PLAN-READS (D-74): the plans are read for the viewer in the query (QUEUE-PLAN-WINDOW)
+   * and answered by the rule of every plan read route (visiblePlans).
    */
   @UseGuards(AuthGuard, BusinessGuard)
   @Get('actions/businesses/:businessId/queue')
@@ -788,16 +986,19 @@ export class GraphActionsController {
     const viewer = { id: user.id, role: user.role };
     const take = safeInt(limit, 30);
 
-    const [pendingApprovals, recentLogs, listedPlans, approvedItems, mayRead] = await Promise.all([
+    // KEY-R3a (QUEUE-PLAN-WINDOW): the plans are read for the viewer, as GET ai/plans reads them
+    // (only their own unless they see every plan), so a member's plans do not fall out of the
+    // newest `take` plans of the business when other members have newer ones.
+    const mayRead = await graphPlanReadScope(this.prisma, businessId, viewer);
+    const [pendingApprovals, recentLogs, listedPlans, approvedItems] = await Promise.all([
       this.governance.getPendingApprovals(businessId, take),
       this.executionLog.getHistory(businessId, {}, take, 0),
-      this.planner.listPlans(businessId, status || undefined, take),
+      this.planner.listPlans(businessId, status || undefined, take, mayRead.seesEveryPlan ? undefined : viewer.id),
       this.prisma.client.aiApprovalItem.findMany({
         where: { businessId, status: 'approved', planStepId: { not: null } },
         orderBy: { resolvedAt: 'desc' },
         take,
       }),
-      graphPlanReadScope(this.prisma, businessId, viewer),
     ]);
 
     // Who proposed each plan a pending approval item names (the listed plans, else one read).
@@ -810,11 +1011,10 @@ export class GraphActionsController {
     }
     const isOwn = (requesterId: string | null | undefined) => mayRead.seesEveryPlan || (!!requesterId && requesterId === viewer.id);
 
-    // Recheck AI-PLANS-READ: each step judged by the tool the executor dispatches for it, and a
-    // contact read's output withheld from all but the OWNER (visiblePlanSteps).
-    const activePlans = (listedPlans ?? [])
-      .filter((p) => isOwn(p.userId))
-      .map((p) => ({ ...p, steps: visiblePlanSteps(p.steps ?? [], mayRead) }));
+    // Recheck AI-PLANS-READ and KEY-R3a (D-74): each step judged by the tool the executor dispatches
+    // for it (or its KEY-cortex module), a contact read's output withheld from all but the OWNER,
+    // and every other output filtered by the viewer's contact visibility (visiblePlans).
+    const activePlans = await visiblePlans((listedPlans ?? []).filter((p) => isOwn(p.userId)), mayRead);
 
     const pending = pendingApprovals
       .filter((a) => mayRead.step(a.toolName) && isOwn(a.planId ? proposerOf.get(a.planId) : a.userId))

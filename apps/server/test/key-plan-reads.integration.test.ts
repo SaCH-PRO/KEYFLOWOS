@@ -67,6 +67,7 @@ const ID = {
   // PLANREAD-TOOLLESS-OUTPUT / KEY-CORTEX-PLAN-READ: the OWNER's KEY-cortex plan
   planCxOwner: `${P}planCxOwner`,
   sCxOwnerList: `${P}sCxOwnerList`, // crm.list_contacts, toolName null; output names cPriv and cTeam
+  sCxOwnerBookings: `${P}sCxOwnerBookings`, // bookings.list_bookings, toolName null; rows naming cPriv and cTeam (D-74 row filter)
   // the STAFF member's own KEY-cortex plan (run by the OWNER)
   planCxStaff: `${P}planCxStaff`,
   sCxStaffSearch: `${P}sCxStaffSearch`, // crm.search_contacts, toolName null; output names cPriv and cTeam
@@ -126,6 +127,11 @@ function identity() {
 
 const PRIV_ROW = { id: ID.cPriv, firstName: 'V87a', lastName: 'Private', email: PRIV_EMAIL };
 const TEAM_ROW = { id: ID.cTeam, firstName: 'V87a', lastName: 'Team', email: `${P}team@test.local` };
+const BOOKING_ROWS = [
+  { id: `${P}bk_priv`, contactId: ID.cPriv, title: 'v87a private booking' },
+  { id: `${P}bk_text`, summary: `Rescheduled for contact ${ID.cPriv} (v87a)` },
+  { id: `${P}bk_team`, contactId: ID.cTeam, title: 'v87a team booking' },
+];
 
 beforeAll(async () => {
   const dbMod = await import('@keyflow/db');
@@ -162,6 +168,11 @@ beforeAll(async () => {
   // The finding's repro: an OWNER's KEY-cortex plan step, stored as module.action with no toolName.
   await plan(ID.planCxOwner, ID.owner);
   await step(ID.sCxOwnerList, ID.planCxOwner, 1, { toolName: null, module: 'crm', action: 'list_contacts', inputPayload: { limit: 50 }, outputResult: [PRIV_ROW, TEAM_ROW] });
+  // Not a contact read: its rows name contacts, by id or inside a string, so D-74 filters them by row.
+  await step(ID.sCxOwnerBookings, ID.planCxOwner, 2, {
+    toolName: null, module: 'bookings', action: 'list_bookings', inputPayload: {},
+    outputResult: { bookings: BOOKING_ROWS, byContact: { [ID.cPriv]: 1, [ID.cTeam]: 1 }, total: 3 },
+  });
 
   // The STAFF member's own KEY-cortex plan, run by the OWNER (so its reads saw every contact).
   await plan(ID.planCxStaff, ID.staff);
@@ -327,7 +338,7 @@ const stepOf = (plan: PlanView | null, stepId: string) => plan?.steps.find((s) =
 describe('KEY-R3a-PLAN-READS: one visible-step rule on every plan read route (D-74, D-37)', () => {
   it('fixture sanity (real rows): the plans and steps are seeded', async () => {
     expect(await db.aiPlan.count({ where: { businessId: ID.biz } })).toBe(8);
-    expect(await db.aiPlanStep.count({ where: { plan: { businessId: ID.biz } } })).toBe(7);
+    expect(await db.aiPlanStep.count({ where: { plan: { businessId: ID.biz } } })).toBe(8);
   });
 
   it('PR-01 (PLANREAD-TOOLLESS-OUTPUT) the output of a KEY-cortex crm.list_contacts step (toolName null) names no PRIVATE contact to an ADMIN on any route; the step is shown', async () => {
@@ -367,6 +378,16 @@ describe('KEY-R3a-PLAN-READS: one visible-step rule on every plan read route (D-
         for (const hidden of [PRIV_EMAIL, PRIV_NOTES, PRIV_NOTE_BODY, `${P}note_priv`]) expect(text, `${where} ${hidden}`).not.toContain(hidden);
         expect(stepOf(plan, ID.sRvTeam)?.outputResult, where).toEqual(TEAM_ROW);
       }
+    }
+  });
+
+  it('PR-05 (D-74) the output of a step that is not a contact read keeps the rows the viewer may see and loses each row naming a contact they may not open (by id, inside a string, or as a key), for an ADMIN on every route', async () => {
+    for (const { route, plan, status } of await planOnEveryRoute(ID.admin, ID.planCxOwner)) {
+      expect(status, route).toBe(200);
+      expect(stepOf(plan, ID.sCxOwnerBookings)?.outputResult, route).toEqual({ bookings: [BOOKING_ROWS[2]], byContact: { [ID.cTeam]: 1 }, total: 3 });
+    }
+    for (const { route, plan } of await planOnEveryRoute(ID.owner, ID.planCxOwner)) {
+      expect(stepOf(plan, ID.sCxOwnerBookings)?.outputResult, route).toEqual({ bookings: BOOKING_ROWS, byContact: { [ID.cPriv]: 1, [ID.cTeam]: 1 }, total: 3 });
     }
   });
 
