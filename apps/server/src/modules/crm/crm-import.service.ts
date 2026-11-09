@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
+import { BlockList, isIP } from 'node:net';
 import type { Prisma } from '@prisma/client';
 import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
@@ -11,6 +12,7 @@ import { contactWhereBase } from './crm.helpers';
 import {
   CONTACT_AGE_GROUPS,
   CONTACT_AGE_GROUP_LABELS,
+  importedContactStatus,
   type ContactAgeGroup,
 } from './crm.constants';
 
@@ -26,6 +28,47 @@ const AGE_GROUP_LABEL_TO_CODE: Record<string, ContactAgeGroup> = (() => {
   }
   return map;
 })();
+
+/**
+ * V1-38c review ST-38c-2: the address ranges import/link may not fetch when
+ * its host is an IP literal. BlockList checks an IPv4-mapped IPv6 address
+ * (::ffff:a.b.c.d) against the IPv4 ranges.
+ */
+const NON_PUBLIC_ADDRESSES: BlockList = (() => {
+  const list = new BlockList();
+  const ipv4: Array<[string, number]> = [
+    ['0.0.0.0', 8], // this network
+    ['10.0.0.0', 8],
+    ['100.64.0.0', 10], // shared address space
+    ['127.0.0.0', 8], // loopback
+    ['169.254.0.0', 16], // link-local, the cloud metadata address
+    ['172.16.0.0', 12],
+    ['192.0.0.0', 24],
+    ['192.168.0.0', 16],
+    ['198.18.0.0', 15], // benchmarking
+    ['224.0.0.0', 4], // multicast
+    ['240.0.0.0', 4], // reserved, broadcast
+  ];
+  const ipv6: Array<[string, number]> = [
+    ['::', 96], // unspecified, loopback, IPv4-compatible
+    ['64:ff9b::', 96], // NAT64: an IPv4 address behind a translator
+    ['64:ff9b:1::', 48], // local-use NAT64
+    ['100::', 64], // discard
+    ['2001::', 32], // Teredo
+    ['2001:db8::', 32], // documentation
+    ['2002::', 16], // 6to4
+    ['fc00::', 7], // unique local
+    ['fe80::', 10], // link-local
+    ['fec0::', 10], // site-local
+    ['ff00::', 8], // multicast
+  ];
+  for (const [network, prefix] of ipv4) list.addSubnet(network, prefix, 'ipv4');
+  for (const [network, prefix] of ipv6) list.addSubnet(network, prefix, 'ipv6');
+  return list;
+})();
+
+/** ST-38c-2: the redirects import/link follows, each target checked first. */
+const MAX_IMPORT_REDIRECTS = 5;
 
 function normalizeAgeGroupValue(raw: string): ContactAgeGroup | null {
   const trimmed = raw.trim();
@@ -333,6 +376,17 @@ export class CrmImportService {
     }
   }
 
+  /**
+   * V1-38c review ST-38c-2 (pre-existing): import/link fetches only a public
+   * address. WHATWG URL gives an IPv6 host in brackets and keeps a trailing
+   * dot, so the old literal list missed [::ffff:127.0.0.1], the IPv4-mapped
+   * metadata address and [fd00::1]; it also missed 127.0.0.0/8 beyond
+   * 127.0.0.1. An IP literal is now checked against NON_PUBLIC_ADDRESSES (an
+   * IPv4-mapped IPv6 address against the IPv4 ranges). A DNS name is checked
+   * by name only: one that resolves to a private address (127.0.0.1.nip.io)
+   * is not caught here, which needs the resolved address pinned for the fetch
+   * (follow-up packet).
+   */
   private validateImportUrl(url: string): void {
     let parsed: URL;
     try {
@@ -345,29 +399,41 @@ export class CrmImportService {
       throw new BadRequestException('URL must use http or https');
     }
 
-    const hostname = parsed.hostname.toLowerCase();
+    const hostname = parsed.hostname.toLowerCase().replace(/^\[(.*)\]$/, '$1').replace(/\.$/, '');
 
-    // Block private IP ranges and localhost
-    const blocked = [
-      'localhost',
-      '127.0.0.1',
-      '0.0.0.0',
-      '::1',
-      '[::1]',
-    ];
-    if (blocked.includes(hostname)) {
+    if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
       throw new BadRequestException('Private addresses are not allowed');
     }
 
-    // Block IPv4 private ranges
-    const ipv4Private = /^(10\.|172\.(1[6-9]|2[0-9]|3[01])\.|192\.168\.|169\.254\.)/;
-    if (ipv4Private.test(hostname)) {
+    const family = isIP(hostname);
+    if (family !== 0 && NON_PUBLIC_ADDRESSES.check(hostname, family === 6 ? 'ipv6' : 'ipv4')) {
       throw new BadRequestException('Private IP ranges are not allowed');
     }
+  }
 
-    // Block IPv6 loopback / link-local
-    if (hostname.startsWith('fc') || hostname.startsWith('fd') || hostname.startsWith('fe80:')) {
-      throw new BadRequestException('Private IP ranges are not allowed');
+  /**
+   * ST-38c-2: fetch the link without letting fetch follow a redirect on its
+   * own. Each redirect target passes validateImportUrl before it is fetched,
+   * and at most MAX_IMPORT_REDIRECTS are followed.
+   */
+  private async fetchImportLink(sourceUrl: string): Promise<Response> {
+    let url = sourceUrl;
+    for (let hops = 0; ; hops++) {
+      const response = await fetch(url, { redirect: 'manual' });
+      const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
+      if (!location) return response;
+      await response.body?.cancel().catch(() => undefined);
+      if (hops >= MAX_IMPORT_REDIRECTS) {
+        throw new BadRequestException('Too many redirects');
+      }
+      let next: string;
+      try {
+        next = new URL(location, url).toString();
+      } catch {
+        throw new BadRequestException('Invalid redirect URL');
+      }
+      this.validateImportUrl(next);
+      url = next;
     }
   }
 
@@ -385,7 +451,7 @@ export class CrmImportService {
     });
 
     try {
-      const response = await fetch(params.sourceUrl);
+      const response = await this.fetchImportLink(params.sourceUrl);
       if (!response.ok) {
         throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
       }
@@ -725,9 +791,10 @@ Only return the JSON object, no markdown or explanation.`,
 
   private buildContactInput(row: ParsedRow, mapping: FieldMapping) {
     const contact: Record<string, unknown> = {};
-    const stringFields: (keyof Omit<FieldMapping, 'custom' | 'tags' | 'marketingOptIn' | 'doNotContact'>)[] = [
+    // 'status' is not copied verbatim: it is normalised below (V1-38c).
+    const stringFields: (keyof Omit<FieldMapping, 'custom' | 'tags' | 'marketingOptIn' | 'doNotContact' | 'status'>)[] = [
       'firstName', 'lastName', 'displayName', 'email', 'secondaryEmail',
-      'phone', 'secondaryPhone', 'whatsappNumber', 'status',
+      'phone', 'secondaryPhone', 'whatsappNumber',
       'addressLine1', 'addressLine2', 'city', 'state', 'postalCode',
       'country', 'timezone', 'companyName', 'jobTitle', 'department',
       'industry', 'segment', 'preferredChannel', 'language',
@@ -767,6 +834,18 @@ Only return the JSON object, no markdown or explanation.`,
         const code = normalizeAgeGroupValue(raw);
         if (code) contact.ageGroup = code;
       }
+    }
+    // V1-38c (CF-49): the status, stage or pipeline_stage column is never
+    // stored verbatim (crm.constants.ts importedContactStatus): the vocabulary
+    // in any case, and the legacy CUSTOMER as CLIENT, the mapping the status
+    // readers use. A DORMANT cell in any case keeps the legacy DORMANT the
+    // people-flow segments read as imported dormant (review CR-V38c-1, pending
+    // an owner ruling). Any other cell (INACTIVE, an unknown stage) is
+    // dropped, as an unrecognised age group or flag is, so a new contact takes
+    // createContact's LEAD default.
+    if (mapping.status) {
+      const status = importedContactStatus(row[mapping.status]);
+      if (status) contact.status = status;
     }
     if (mapping.custom?.length) {
       const custom: Record<string, string | null> = {};

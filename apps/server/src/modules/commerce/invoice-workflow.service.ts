@@ -875,38 +875,94 @@ export class InvoiceWorkflowService {
    * compare-and-set on the status read, as transition() (V1-42). No posting
    * (the note's is the caller's) and no event: no listener reads a credit move,
    * and an invoice returning to PAID was paid already (no second invoice.paid,
-   * receipt or COGS). paidAt is kept; a return to PAID with none stamps it.
+   * receipt or COGS).
+   *
+   * W3-CREDIT-RECONCILE-BIND (V1-44 review SEC-V44-6, function half): the
+   * invoice is locked and read by { id, businessId }, the business the caller
+   * acts in. The schema does not tie credit_notes.business_id to the
+   * invoice's, so a lookup by id alone let a note naming another tenant's
+   * invoice move it (CN-21 refuses that at the caller; CN-30 here). Another
+   * business's invoice is a 404 with nothing locked or written. The lock is
+   * the one every money door takes; the caller already holds it, and a row
+   * lock its own transaction holds is granted again at once.
+   *
+   * W3-CREDIT-RECONCILE-BIND (V1-44b todo CR-V44-2; D-14, D-78): paidAt says
+   * when the invoice was settled, and the credit move clears it whenever the
+   * status it leaves is not PAID and the payment rows no longer settle the
+   * invoice: a credited invoice whose money went back, returned by the void
+   * of its note to SENT or PARTIALLY_PAID (as reconcileFromPayments clears it
+   * on a refund's reopen, D-14), or credited further once nothing settles it
+   * (a credited status is never PAID, D-78), including a move that leaves it
+   * in the credited status it holds (review W3CRB-ST-1, CN-31). It only ever
+   * stamped paidAt before. A PAID invoice credited with its payment rows still
+   * settling the total keeps its paidAt, and so does its return to PAID once
+   * the note is voided (CN-06); a return to PAID with none stamps it. This
+   * covers credit moves only: the refund that unsettles a credited invoice
+   * goes through reconcileCreditedFromPayments, which writes nothing, so its
+   * paidAt stays until the next credit move (review CRB-CR-1, an it.todo in
+   * credit-note-reversal.integration.test.ts).
    */
   async reconcileFromCredits(
     invoiceId: string,
-    extra: { tx: Prisma.TransactionClient },
+    extra: { tx: Prisma.TransactionClient; businessId: string },
   ): Promise<{ status: InvoiceStatus; changed: boolean }> {
     const db = extra.tx;
-    const invoice = await db.invoice.findUnique({
-      where: { id: invoiceId },
+    const { businessId } = extra;
+    // SEC-V44-6: the lock decides; no row in this business, nothing is read or written.
+    if (!businessId) throw new NotFoundException('Invoice not found');
+    const locked = await db.$queryRaw<Array<{ id: string }>>`SELECT id FROM invoices WHERE id = ${invoiceId} AND business_id = ${businessId} FOR NO KEY UPDATE`;
+    if (locked.length === 0) throw new NotFoundException('Invoice not found');
+    const invoice = await db.invoice.findFirst({
+      where: { id: invoiceId, businessId },
       select: { id: true, businessId: true, status: true, total: true, currency: true, paidAt: true },
     });
     if (!invoice) throw new NotFoundException('Invoice not found');
     const payments = await db.payment.findMany({
-      where: { invoiceId, businessId: invoice.businessId },
+      where: { invoiceId, businessId },
       select: { amount: true, status: true },
     });
     const applied = await db.creditNote.aggregate({
-      where: { invoiceId, businessId: invoice.businessId, status: 'APPLIED' },
+      where: { invoiceId, businessId, status: 'APPLIED' },
       _sum: { amount: true },
     });
     const balance = balanceOfStoredRows(Number(invoice.total), payments, invoice.currency);
     const current = invoice.status as InvoiceStatus;
     const next = deriveStatusAfterCredit(current, Number(invoice.total), Number(applied._sum.amount ?? 0), balance);
-    if (next === current) return { status: current, changed: false };
+    // CR-V44-2 (D-14, D-78): settled is PAID, or a credited status while the
+    // payment rows still settle the total (CN-06). After a credit move,
+    // anything else holds no paidAt (the refund door's half is CRB-CR-1).
+    const settled = next === 'PAID' || (CREDITED_STATUSES.has(next) && balance.isFullyPaid);
+    if (next === current) {
+      // W3CRB-ST-1 (CR-V44-2): a credit move that leaves a credited invoice
+      // in its credited status (a second partial note, or one of two voided)
+      // still clears a paidAt nothing settles, so one money position ends
+      // with one paidAt whatever the path (CN-31). The status is not
+      // written, and changed stays false (it reports a status move). A
+      // status the credits leave as it is and is not credited (no APPLIED
+      // note) belongs to the payment doors and is left alone.
+      if (CREDITED_STATUSES.has(current) && !settled && invoice.paidAt) {
+        await compareAndSet(
+          () => db.invoice.update({ where: { id: invoiceId, status: invoice.status }, data: { paidAt: null } }),
+          `Invoice status changed while ${current} was being reconciled; reload it and try again`,
+        );
+      }
+      return { status: current, changed: false };
+    }
     if (!isLegalCreditTransition(current, next)) {
       throw new ConflictException(`Illegal invoice status transition for a credit note: ${current} -> ${next}`);
     }
+    const paidAt = settled
+      ? next === 'PAID' && !invoice.paidAt
+        ? { paidAt: new Date() }
+        : {}
+      : invoice.paidAt
+        ? { paidAt: null }
+        : {};
     await compareAndSet(
       () =>
         db.invoice.update({
           where: { id: invoiceId, status: invoice.status },
-          data: { status: next, ...(next === 'PAID' && !invoice.paidAt ? { paidAt: new Date() } : {}) },
+          data: { status: next, ...paidAt },
         }),
       `Invoice status changed while ${current} -> ${next} was in flight; reload it and try again`,
     );

@@ -944,8 +944,10 @@ describe('V1-44 InvoiceWorkflowService.reconcileFromCredits (fakes)', () => {
   function build(invoice: Inv, applied: number | null, payments: Array<{ amount: number; status: string }> = []) {
     const row = { id: 'inv_1', businessId: 'biz_1', currency: 'TTD', ...invoice };
     const tx = {
+      // W3-CREDIT-RECONCILE-BIND (SEC-V44-6): the invoice is locked and read by { id, businessId }.
+      $queryRaw: vi.fn(async () => [{ id: row.id }]),
       invoice: {
-        findUnique: vi.fn(async () => row),
+        findFirst: vi.fn(async () => row),
         update: vi.fn(async ({ data }: { data: Record<string, unknown> }) => ({ ...row, ...data })),
       },
       payment: { findMany: vi.fn(async () => payments) },
@@ -969,7 +971,7 @@ describe('V1-44 InvoiceWorkflowService.reconcileFromCredits (fakes)', () => {
 
   it('CR-01 SENT with 40 of 100 applied: one compare-and-set write to PARTIALLY_CREDITED through tx; reads the APPLIED notes and the business payment rows', async () => {
     const h = build({ status: 'SENT', total: 100, paidAt: null }, 40);
-    const result = await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never });
+    const result = await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' });
     expect(result).toEqual({ status: 'PARTIALLY_CREDITED', changed: true });
     expect(h.tx.invoice.update).toHaveBeenCalledTimes(1);
     expect(h.tx.invoice.update.mock.calls[0][0]).toMatchObject({ where: { id: 'inv_1', status: 'SENT' }, data: { status: 'PARTIALLY_CREDITED' } });
@@ -981,7 +983,7 @@ describe('V1-44 InvoiceWorkflowService.reconcileFromCredits (fakes)', () => {
   it('CR-02 FULLY_CREDITED, the last note voided, paid in full: back to PAID; paidAt kept; no COGS, no invoice.paid', async () => {
     const paidAt = new Date('2026-10-01T12:00:00Z');
     const h = build({ status: 'FULLY_CREDITED', total: 100, paidAt }, null, [{ amount: 100, status: 'SUCCESSFUL' }]);
-    const result = await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never });
+    const result = await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' });
     expect(result).toEqual({ status: 'PAID', changed: true });
     expect(h.tx.invoice.update.mock.calls[0][0]).toMatchObject({ where: { id: 'inv_1', status: 'FULLY_CREDITED' } });
     expect(h.tx.invoice.update.mock.calls[0][0].data).toEqual({ status: 'PAID' });
@@ -990,14 +992,14 @@ describe('V1-44 InvoiceWorkflowService.reconcileFromCredits (fakes)', () => {
 
   it('CR-03 PARTIALLY_CREDITED, the last note voided, nothing paid: SENT', async () => {
     const h = build({ status: 'PARTIALLY_CREDITED', total: 100, paidAt: null }, 0);
-    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never })).toEqual({ status: 'SENT', changed: true });
+    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).toEqual({ status: 'SENT', changed: true });
     expect(h.tx.invoice.update.mock.calls[0][0].data).toEqual({ status: 'SENT' });
     h.quiet();
   });
 
   it('CR-04 still part-credited (a second partial note, or one of two voided): no write, changed false', async () => {
     const h = build({ status: 'PARTIALLY_CREDITED', total: 100, paidAt: null }, 70);
-    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never })).toEqual({ status: 'PARTIALLY_CREDITED', changed: false });
+    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).toEqual({ status: 'PARTIALLY_CREDITED', changed: false });
     expect(h.tx.invoice.update).not.toHaveBeenCalled();
     h.quiet();
   });
@@ -1005,7 +1007,7 @@ describe('V1-44 InvoiceWorkflowService.reconcileFromCredits (fakes)', () => {
   for (const status of ['DRAFT', 'VOID']) {
     it(`CR-05 a credit on a ${status} invoice: 409 from the credit table, nothing written`, async () => {
       const h = build({ status, total: 100, paidAt: null }, 10);
-      await expect(h.service.reconcileFromCredits('inv_1', { tx: h.tx as never })).rejects.toBeInstanceOf(ConflictException);
+      await expect(h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).rejects.toBeInstanceOf(ConflictException);
       expect(h.tx.invoice.update).not.toHaveBeenCalled();
       h.quiet();
     });
@@ -1014,7 +1016,42 @@ describe('V1-44 InvoiceWorkflowService.reconcileFromCredits (fakes)', () => {
   it('CR-06 a status moved by another writer between the read and the write (P2025): 409, the caller rolls back', async () => {
     const h = build({ status: 'SENT', total: 100, paidAt: null }, 40);
     h.tx.invoice.update.mockRejectedValueOnce(Object.assign(new Error('Record to update not found.'), { code: 'P2025' }));
-    await expect(h.service.reconcileFromCredits('inv_1', { tx: h.tx as never })).rejects.toBeInstanceOf(ConflictException);
+    await expect(h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).rejects.toBeInstanceOf(ConflictException);
+    h.quiet();
+  });
+
+  it('CR-07 W3CRB-ST-1 CR-V44-2 still part-credited with a paidAt and nothing paid net: one compare-and-set write of paidAt null, no status written, changed false', async () => {
+    const paidAt = new Date('2026-10-01T12:00:00Z');
+    const h = build({ status: 'PARTIALLY_CREDITED', total: 100, paidAt }, 50, [
+      { amount: 100, status: 'SUCCESSFUL' },
+      { amount: -100, status: 'REFUNDED' },
+    ]);
+    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).toEqual({ status: 'PARTIALLY_CREDITED', changed: false });
+    expect(h.tx.invoice.update).toHaveBeenCalledTimes(1);
+    expect(h.tx.invoice.update.mock.calls[0][0]).toEqual({ where: { id: 'inv_1', status: 'PARTIALLY_CREDITED' }, data: { paidAt: null } });
+    h.quiet();
+  });
+
+  it('CR-08 W3CRB-ST-1 CR-V44-2 still part-credited with a paidAt its payment settles (CN-06): no write', async () => {
+    const paidAt = new Date('2026-10-01T12:00:00Z');
+    const h = build({ status: 'PARTIALLY_CREDITED', total: 100, paidAt }, 50, [{ amount: 100, status: 'SUCCESSFUL' }]);
+    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).toEqual({ status: 'PARTIALLY_CREDITED', changed: false });
+    expect(h.tx.invoice.update).not.toHaveBeenCalled();
+    h.quiet();
+  });
+
+  it('CR-09 W3CRB-ST-1 a status the credits leave as it is and is not credited (no APPLIED note) keeps its paidAt: the payment doors own it', async () => {
+    const paidAt = new Date('2026-10-01T12:00:00Z');
+    const h = build({ status: 'SENT', total: 100, paidAt }, null);
+    expect(await h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).toEqual({ status: 'SENT', changed: false });
+    expect(h.tx.invoice.update).not.toHaveBeenCalled();
+    h.quiet();
+  });
+
+  it('CR-10 W3CRB-ST-1 the paidAt clear is compare-and-set too: a status moved in between (P2025) is a 409', async () => {
+    const h = build({ status: 'PARTIALLY_CREDITED', total: 100, paidAt: new Date('2026-10-01T12:00:00Z') }, 50);
+    h.tx.invoice.update.mockRejectedValueOnce(Object.assign(new Error('Record to update not found.'), { code: 'P2025' }));
+    await expect(h.service.reconcileFromCredits('inv_1', { tx: h.tx as never, businessId: 'biz_1' })).rejects.toBeInstanceOf(ConflictException);
     h.quiet();
   });
 });

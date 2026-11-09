@@ -2,17 +2,10 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 import { sumMoney } from '../commerce/money';
-import type { ContactStatus } from '../crm/crm.constants';
-
-/**
- * V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary
- * (crm.constants.ts). A row may still hold the legacy status CUSTOMER, and not
- * only from before V1-38 (the Shopify adapter): the CSV/link import copies a
- * file's status column verbatim (crm-import.service.ts), so it is still
- * written. It counts as CLIENT while any writer can produce it or a row holds it.
- */
-const CLIENT_STATUS: ContactStatus = 'CLIENT';
-const LEGACY_CLIENT_STATUS = 'CUSTOMER';
+// V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary; a
+// row holding the legacy CLIENT spelling counts the same. V1-38c: that
+// spelling is crm.constants.ts's.
+import { CLIENT_STATUS, LEGACY_CLIENT_STATUS } from '../crm/crm.constants';
 
 export interface HealthAreaResult {
   area: string;

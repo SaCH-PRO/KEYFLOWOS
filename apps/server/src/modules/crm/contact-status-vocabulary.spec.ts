@@ -29,6 +29,20 @@
  *     At Risk, as it did before V1-38b (CR-1 of the V1-38b review). Real-DB
  *     proof of the writer and the readers:
  *     test/contact-status-readers-import.integration.test.ts.
+ *   - W3-V1-38c-IMPORT-STATUS (V1-38b residuals): the import stores the status
+ *     column as a ContactStatus (importedContactStatus: the vocabulary in any
+ *     case, the legacy CUSTOMER as CLIENT), so the import writes no CUSTOMER.
+ *     A DORMANT cell keeps the legacy DORMANT the people-flow segments read
+ *     (review CR-V38c-1: the LEAD default would move a contact imported as
+ *     dormant between segments, and no owner ruling covers that); anything
+ *     else takes the LEAD default. The import is not the only writer outside
+ *     the DTOs: CrmService.createContact and updateContact store a status
+ *     verbatim, and a playbook's update_status action hands updateContact
+ *     'ACTIVE' or whatever status the action names (review ST-38c-1, a
+ *     follow-up packet), so a dialect can still be written. The readers keep
+ *     reading the legacy spellings, through one legacy CLIENT spelling, one
+ *     legacy dormant spelling and one predicate (LEGACY_CLIENT_STATUS,
+ *     LEGACY_DORMANT_STATUS, isClientStatus) in crm.constants.ts.
  *
  * Pure: reads source files, imports constants and drives the readers over
  * in-memory stand-ins for Prisma; no database, no network.
@@ -36,7 +50,16 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CONTACT_STATUSES, contactStatusForExternalCustomer, isContactStatus } from './crm.constants';
+import {
+  CONTACT_STATUSES,
+  LEGACY_CLIENT_STATUS,
+  LEGACY_DORMANT_STATUS,
+  canonicalContactStatus,
+  contactStatusForExternalCustomer,
+  importedContactStatus,
+  isClientStatus,
+  isContactStatus,
+} from './crm.constants';
 import { FLOW_TOOLS, getToolByName } from '../ai/flow-tool-registry';
 import { LeadScoringScheduler } from './lead-scoring.scheduler';
 import { HealthScoreService } from '../intelligence/health-score.service';
@@ -91,7 +114,7 @@ const PACKET_WRITERS = [
 const LEGACY_DIALECT_READERS: Record<string, { hits: number; why: string }> = {
   'modules/ai/key-tool-registry.service.ts': {
     hits: 1,
-    why: "status: { not: 'DORMANT' } filter: excludes a contact the CSV/link import wrote as DORMANT (a file's status column is copied verbatim)",
+    why: "status: { not: 'DORMANT' } filter: excludes a contact the CSV/link import wrote as DORMANT (verbatim before V1-38c; a DORMANT cell still, review CR-V38c-1) or a playbook's update_status action wrote (review ST-38c-1)",
   },
   'modules/ai/flow-orchestrator.service.ts': { hits: 1, why: "an Automation's ACTIVE/INACTIVE, not Contact.status (scanner false positive)" },
 };
@@ -99,10 +122,12 @@ const LEGACY_DIALECT_READERS: Record<string, { hits: number; why: string }> = {
 /**
  * V1-38b (CR-1): the readers that counted only 'CUSTOMER' as a customer. Each
  * now reads CLIENT, the canonical status, and counts a legacy 'CUSTOMER' row
- * the same. Such a row is not only historical: the Shopify adapter wrote it
- * before V1-38, and the CSV/link import still writes a file's status column
- * verbatim. The legacy spelling may go only once no writer can produce it and
- * no row holds it.
+ * the same. The Shopify adapter wrote such a row before V1-38, and the CSV/link
+ * import copied a file's status column verbatim until V1-38c. The import
+ * stores CLIENT for it now (V1-38c), but a playbook's update_status action can
+ * still write it (review ST-38c-1, follow-up packet), and rows hold it: the
+ * legacy spelling may go only once no writer can produce it and no row holds
+ * it. V1-38c: the readers take it, and the predicate, from crm.constants.ts.
  */
 const STATUS_READERS = [
   'modules/crm/lead-scoring.scheduler.ts',
@@ -199,14 +224,106 @@ describe('Contact.status vocabulary (CF-49)', () => {
     },
   );
 
+  it('V1-38c: the legacy CLIENT spelling and isClientStatus are declared once, in crm.constants.ts, and the four status readers import them and declare neither', () => {
+    const constants = read('modules/crm/crm.constants.ts');
+    expect(constants.match(/\bexport const LEGACY_CLIENT_STATUS = 'CUSTOMER';/g) ?? [], 'one LEGACY_CLIENT_STATUS in crm.constants.ts').toHaveLength(1);
+    expect(constants, 'crm.constants.ts exports isClientStatus').toMatch(/\bexport function isClientStatus\(/);
+    for (const file of STATUS_READERS) {
+      const src = read(file);
+      expect(src, `${file}: a local LEGACY_CLIENT_STATUS`).not.toMatch(/\bconst LEGACY_CLIENT_STATUS\b/);
+      expect(src, `${file}: a local isClientStatus`).not.toMatch(/\b(?:const|function) isClientStatus\b/);
+      expect(src, `${file}: a 'CUSTOMER' literal`).not.toMatch(/['"`]CUSTOMER['"`]/);
+      expect(src, `${file}: takes the legacy helper from crm.constants.ts`).toMatch(
+        /import \{[^}]*\b(?:isClientStatus|LEGACY_CLIENT_STATUS)\b[^}]*\} from '\.{1,2}\/(?:crm\/)?crm\.constants'/,
+      );
+    }
+    // No other file declares its own copy.
+    const copies = sourceFiles(SRC)
+      .filter((f) => /\bconst LEGACY_CLIENT_STATUS\b/.test(readFileSync(f, 'utf8')))
+      .map(rel);
+    expect(copies).toEqual(['modules/crm/crm.constants.ts']);
+    expect(LEGACY_CLIENT_STATUS).toBe('CUSTOMER');
+    expect(isClientStatus('CLIENT')).toBe(true);
+    expect(isClientStatus(LEGACY_CLIENT_STATUS)).toBe(true);
+    for (const s of ['LEAD', 'PROSPECT', 'LOST', 'DORMANT', 'client', 'customer', '', null, undefined]) {
+      expect(isClientStatus(s), String(s)).toBe(false);
+    }
+  });
+
+  it('V1-38c: canonicalContactStatus reads a written value as a ContactStatus: the vocabulary in any case or padding as itself, the legacy CUSTOMER as CLIENT, and DORMANT, INACTIVE, an unknown or a blank value as none', () => {
+    for (const s of CONTACT_STATUSES) {
+      expect(canonicalContactStatus(s)).toBe(s);
+      expect(canonicalContactStatus(s.toLowerCase())).toBe(s);
+      expect(canonicalContactStatus(` ${s[0]}${s.slice(1).toLowerCase()} `)).toBe(s);
+    }
+    for (const v of ['CUSTOMER', 'customer', ' Customer ']) {
+      expect(canonicalContactStatus(v), v).toBe('CLIENT');
+      // The mapping the readers use: what they count as CLIENT, the import stores as CLIENT.
+      expect(isClientStatus(canonicalContactStatus(v))).toBe(true);
+    }
+    for (const v of [...DIALECTS.filter((d) => d !== LEGACY_CLIENT_STATUS), 'dormant', 'VIP', 'Negotiation', 'CLIENTS', 'C L I E N T', '', '   ', null, undefined]) {
+      expect(canonicalContactStatus(v), String(v)).toBeNull();
+    }
+  });
+
   it("CR-1 (V1-38b review): people-flow relationship health reads a Contact.status 'DORMANT' only through one documented legacy constant", () => {
     const src = read('modules/people-flow/relationship-health.service.ts');
     // relationship-health has no relationshipHealth 'DORMANT' literal, so every
-    // 'DORMANT' literal in it is a Contact.status spelling.
-    const dormantLiterals = src.match(/['"`]DORMANT['"`]/g) ?? [];
-    const legacyDeclarations = src.match(/\bconst LEGACY_DORMANT_STATUS = 'DORMANT';/g) ?? [];
-    expect(legacyDeclarations.length, 'one documented LEGACY_DORMANT_STATUS').toBe(1);
-    expect(dormantLiterals.length, "a 'DORMANT' literal other than const LEGACY_DORMANT_STATUS").toBe(1);
+    // 'DORMANT' literal in it would be a Contact.status spelling. Since the V1-38c
+    // review (CR-V38c-1) the one documented constant is crm.constants.ts's, which
+    // the import writes and the segments read: relationship-health imports it and
+    // spells no 'DORMANT' of its own.
+    expect(src.match(/['"`]DORMANT['"`]/g) ?? [], "relationship-health: a 'DORMANT' literal of its own").toEqual([]);
+    expect(src, 'relationship-health takes LEGACY_DORMANT_STATUS from crm.constants.ts').toMatch(
+      /import \{[^}]*\bLEGACY_DORMANT_STATUS\b[^}]*\} from '\.\.\/crm\/crm\.constants'/,
+    );
+    const constants = read('modules/crm/crm.constants.ts');
+    expect(constants.match(/\bexport const LEGACY_DORMANT_STATUS = 'DORMANT';/g) ?? [], 'one documented LEGACY_DORMANT_STATUS').toHaveLength(1);
+    expect(constants.match(/['"`]DORMANT['"`]/g) ?? [], "crm.constants.ts: a 'DORMANT' literal other than LEGACY_DORMANT_STATUS").toHaveLength(1);
+    const copies = sourceFiles(SRC)
+      .filter((f) => /\bconst LEGACY_DORMANT_STATUS\b/.test(readFileSync(f, 'utf8')))
+      .map(rel);
+    expect(copies).toEqual(['modules/crm/crm.constants.ts']);
+    expect(LEGACY_DORMANT_STATUS).toBe('DORMANT');
+  });
+
+  it("V1-38c (review CR-V38c-1): importedContactStatus, what the CSV/link import stores, is canonicalContactStatus but for a DORMANT cell in any case or padding, which keeps the legacy DORMANT the people-flow segments read; INACTIVE, an unknown and a blank value are none", () => {
+    for (const s of CONTACT_STATUSES) {
+      expect(importedContactStatus(s)).toBe(s);
+      expect(importedContactStatus(` ${s.toLowerCase()} `)).toBe(s);
+    }
+    for (const v of ['CUSTOMER', 'customer', ' Customer ']) expect(importedContactStatus(v), v).toBe('CLIENT');
+    for (const v of ['DORMANT', 'dormant', ' Dormant ']) {
+      expect(importedContactStatus(v), v).toBe(LEGACY_DORMANT_STATUS);
+      // Not a ContactStatus: the vocabulary itself does not grow.
+      expect(canonicalContactStatus(v), v).toBeNull();
+      expect(isContactStatus(importedContactStatus(v)), v).toBe(false);
+    }
+    for (const v of ['INACTIVE', 'inactive', 'VIP', 'Negotiation', 'DORMANTS', 'D O R M A N T', '', '   ', null, undefined]) {
+      expect(importedContactStatus(v), String(v)).toBeNull();
+    }
+  });
+
+  it('V1-38c: the CSV/link import stores its status cell through importedContactStatus, and copies no status cell verbatim', () => {
+    const src = read('modules/crm/crm-import.service.ts');
+    expect(src).toMatch(/importedContactStatus\(row\[mapping\.status\]\)/);
+    const stringFields = src.match(/const stringFields[^=]*= \[([^\]]*)\]/);
+    expect(stringFields, 'buildContactInput lists the cells it copies verbatim').not.toBeNull();
+    expect(stringFields![1]).not.toMatch(/'status'/);
+  });
+
+  it("ST-38c-1 (V1-38c review, characterization for a follow-up packet): a playbook's update_status action still hands CrmService.updateContact a status outside the vocabulary - 'ACTIVE' by default, or the CUSTOMER or DORMANT the action names - so the legacy spellings can still be written", async () => {
+    const { AutomationExecutorService } = await import('../flow/automation-executor.service');
+    const written: Array<string | undefined> = [];
+    const self = {
+      crm: { updateContact: async (input: { status?: string }) => { written.push(input.status); return {}; } },
+      logger: { warn: () => undefined, log: () => undefined, error: () => undefined },
+    };
+    const executeAction = (AutomationExecutorService.prototype as any).executeAction as (...args: unknown[]) => Promise<unknown>;
+    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status' }, { contactId: 'c1' });
+    await executeAction.call(self, 'biz', 'playbook', { type: 'update_status', status: 'CUSTOMER' }, { contactId: 'c2' });
+    await executeAction.call(self, 'biz', 'playbook', { type: 'UPDATE_STATUS', value: 'DORMANT' }, { contactId: 'c3' });
+    expect(written).toEqual(['ACTIVE', 'CUSTOMER', 'DORMANT']);
   });
 
   it('an external store buyer maps into the vocabulary: orders make a CLIENT, none a LEAD', () => {
@@ -241,7 +358,7 @@ function matchesWhere(row: Record<string, unknown>, where: Record<string, unknow
   });
 }
 
-describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a legacy 'CUSTOMER' row (still written by the CSV/link import) the same", () => {
+describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a legacy 'CUSTOMER' row (written by the CSV/link import until V1-38c) the same", () => {
   const DAY = 86_400_000;
   const ago = (days: number) => new Date(Date.now() - days * DAY);
 
@@ -331,8 +448,9 @@ describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a 
   });
 
   it("people-flow segments (V1-38b review CR-1): a contact imported as status 'DORMANT' is Dormant and not At Risk, whatever its silence, as before V1-38b; canonical rows are unchanged", async () => {
-    // The CSV/link import copies a file's status column verbatim, so a
-    // 'DORMANT' row is written today (real-DB proof:
+    // The CSV/link import copied a file's status column verbatim until V1-38c,
+    // and stores a DORMANT cell as DORMANT since (review CR-V38c-1), so
+    // 'DORMANT' rows are held and written (real-DB proof:
     // test/contact-status-readers-import.integration.test.ts).
     const contact = (id: string, status: string, daysSilent: number) => ({
       id, firstName: id, lastName: null, email: null, status, lastInteractionAt: ago(daysSilent), leadScore: 40,

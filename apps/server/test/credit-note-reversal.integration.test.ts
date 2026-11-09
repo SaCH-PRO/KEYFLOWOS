@@ -82,8 +82,7 @@
  *   CN-23 CR-V44-4 an invoice the AI undo returned to DRAFT with two notes applied: each note is
  *         voided (201), its posting reversed, the invoice left DRAFT (a credit note never moves a
  *         DRAFT or VOID invoice)
- *   it.todo CR-V44-2: reconcileFromCredits clears no paidAt on a credited return to SENT or
- *         PARTIALLY_PAID (invoice-workflow.service.ts, outside this write set)
+ *   (CR-V44-2, outside this write set: now CN-29 below)
  *
  * V1-44b review repairs:
  *   CN-20 (amended by SEC-V44b-R2) the placeholders are refused 403 BEFORE the claim: no note,
@@ -100,6 +99,26 @@
  *         was read, with nothing written; at the note's amount it applies
  *   CN-28 SEC-V44b-R3 the reads (list, detail, and the PATCH and DELETE answers) never disclose
  *         another tenant's invoice through a note's invoiceId: `invoice: null`
+ *
+ * W3-CREDIT-RECONCILE-BIND (the two V1-44b todos in invoice-workflow.service.ts):
+ *   CN-29 CR-V44-2 (D-14, D-78) reconcileFromCredits clears paidAt whenever the status it writes
+ *         is not PAID and the payment rows no longer settle the invoice: a PAID invoice credited,
+ *         refunded and then its note voided returns to SENT or PARTIALLY_PAID with no paidAt; one
+ *         credited in full after its money went back holds none either. A PAID invoice
+ *         part-credited with its payment in place keeps it (CN-06), and a return to PAID keeps it
+ *         or, with none, stamps it
+ *   CN-30 SEC-V44-6 (function half) reconcileFromCredits takes the businessId and reads and locks
+ *         the invoice by { id, businessId }: another business's invoice is refused 404 and left
+ *         as it is; its own business reconciles it; the call holds the row lock itself
+ *
+ * W3-CREDIT-RECONCILE-BIND review repairs:
+ *   CN-31 W3CRB-ST-1 CR-V44-2 a credit move (apply or void) that leaves a credited invoice in its
+ *         credited status still clears a paidAt nothing settles, so one money position (credited 50
+ *         of 100, the 100 refunded) ends with paidAt null whatever the path; with its payment in
+ *         place a second partial note keeps the paidAt (CN-06)
+ *   it.todo CRB-CR-1 the refund half of CR-V44-2: a refund that unsettles a credited invoice writes
+ *         nothing (reconcileCreditedFromPayments, outside this write set), so the paidAt stays until
+ *         the next credit move
  *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor, FinanceController (credit-note routes), CreditNoteService,
@@ -1353,11 +1372,167 @@ describe('V1-44b: the credit-note routes carry the revenue scope, void names its
     expect((await invoiceRow(foreignInv)).status, "B's invoice untouched").toBe('SENT');
   });
 
-  // Outside the V1-44b write set (invoice-workflow.service.ts):
+  // W3-CREDIT-RECONCILE-BIND: the two V1-44b todos (invoice-workflow.service.ts, outside the V1-44b write set).
+
+  /**
+   * A refund as the refund doors write it (D-14): a negative REFUNDED row
+   * linked to the invoice's seeded payment, its posting, and the reconcile
+   * under 'keep', in one transaction under the invoice lock.
+   */
+  async function refundPayment(invoiceId: string, amount: number, key: string) {
+    const paymentId = `${invoiceId}_pay`;
+    const id = `${invoiceId}_${key}`;
+    return db.$transaction(async (tx: any) => {
+      await tx.$queryRawUnsafe(`SELECT id FROM invoices WHERE id = $1 FOR NO KEY UPDATE`, invoiceId);
+      const original = await tx.payment.findUnique({ where: { id: paymentId } });
+      await tx.payment.create({
+        data: {
+          id,
+          amount: -amount,
+          currency: 'TTD',
+          status: 'REFUNDED',
+          provider: 'cash',
+          method: 'cash',
+          providerPaymentId: `${id}_pp`,
+          reference: original.providerPaymentId,
+          businessId: ID.biz,
+          invoiceId,
+        },
+      });
+      await revenuePosting.onPaymentRefunded(paymentId, { tx, createdById: ID.owner, refund: { paymentId: id, amount } });
+      return workflow.reconcileFromPayments(invoiceId, { tx, eventBuffer: [], onIllegalTransition: 'keep' });
+    });
+  }
+
+  it('CN-29 CR-V44-2 (D-14, D-78): reconcileFromCredits clears paidAt once the status it writes is not PAID and the payment rows no longer settle the invoice; a PAID invoice part-credited with its payment in place keeps it, and a return to PAID keeps or stamps it', async () => {
+    // (a) Paid, part-credited, refunded in full, the note voided: SENT, owed afresh, no paidAt.
+    const a = await seedInvoice('rc_sent', 'PAID');
+    const paidAtA = (await invoiceRow(a)).paidAt;
+    expect(paidAtA).not.toBeNull();
+    const noteA = await createNote(a, 30);
+    expect((await applyNote(noteA.id)).status).toBe(201);
+    expect(await invoiceRow(a), 'part-credited with its payment in place: paidAt kept (CN-06)').toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: paidAtA });
+    await expect(refundPayment(a, TOTAL, 'rf_all')).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+    expect((await voidNote(noteA.id)).status).toBe(201);
+    // RED-BEFORE (W3 base ca12b6f5): SENT, still carrying the paidAt of the payment that went back.
+    expect(await invoiceRow(a), 'reopened to SENT: no paidAt (D-14)').toMatchObject({ status: 'SENT', paidAt: null });
+
+    // (b) Paid, part-credited, half refunded, the note voided: PARTIALLY_PAID, no paidAt.
+    const b = await seedInvoice('rc_part', 'PAID');
+    const noteB = await createNote(b, 30);
+    expect((await applyNote(noteB.id)).status).toBe(201);
+    await expect(refundPayment(b, 50, 'rf_half')).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+    expect((await voidNote(noteB.id)).status).toBe(201);
+    // RED-BEFORE (W3 base ca12b6f5): PARTIALLY_PAID with the stale paidAt.
+    expect(await invoiceRow(b), 'reopened to PARTIALLY_PAID: no paidAt (D-14)').toMatchObject({ status: 'PARTIALLY_PAID', paidAt: null });
+
+    // (c) D-78: a credited status is not PAID. Once the money went back, crediting the rest leaves no paidAt either.
+    const c = await seedInvoice('rc_full', 'PAID');
+    const noteC30 = await createNote(c, 30);
+    expect((await applyNote(noteC30.id)).status).toBe(201);
+    await expect(refundPayment(c, TOTAL, 'rf_all')).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+    const noteC70 = await createNote(c, 70);
+    expect((await applyNote(noteC70.id)).status).toBe(201);
+    // RED-BEFORE (W3 base ca12b6f5): FULLY_CREDITED with the paidAt of the refunded payment.
+    expect(await invoiceRow(c), 'FULLY_CREDITED, nothing received net: no paidAt').toMatchObject({ status: 'FULLY_CREDITED', paidAt: null });
+    expect((await voidNote(noteC70.id)).status).toBe(201);
+    expect(await invoiceRow(c)).toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+    expect((await voidNote(noteC30.id)).status).toBe(201);
+    expect(await invoiceRow(c)).toMatchObject({ status: 'SENT', paidAt: null });
+
+    // (d) Control: a return to PAID stamps a paidAt the row lacks (a legacy FULLY_CREDITED row, as CN-04b seeds).
+    const d = await seedInvoice('rc_legacy', 'PAID');
+    const legacyNote = `${P}cn_rc_legacy`;
+    await db.creditNote.create({
+      data: { id: legacyNote, businessId: ID.biz, invoiceId: d, creditNoteNumber: `${P}CN-RC-LEGACY`, status: 'APPLIED', amount: TOTAL, appliedAt: new Date() },
+    });
+    await db.invoice.update({ where: { id: d }, data: { status: 'FULLY_CREDITED', paidAt: null } });
+    expect((await voidNote(legacyNote)).status).toBe(201);
+    const back = await invoiceRow(d);
+    expect(back.status).toBe('PAID');
+    expect(back.paidAt, 'a return to PAID with none stamps it').not.toBeNull();
+    expect(emitted.filter((e) => e.name.startsWith('invoice.')), 'a credit move emits no invoice event').toEqual([]);
+    await expectBalanced(ID.biz);
+  });
+
+  it("CN-30 SEC-V44-6 (function half): reconcileFromCredits takes the businessId and reads and locks the invoice by { id, businessId }: another business's invoice is refused 404 and left as it is; the call holds the row lock itself", async () => {
+    const foreignInv = await seedInvoice('rc_xtenant', 'SENT', { businessId: ID.bizF, contactId: ID.contactF });
+    // B's invoice in a credited state with no APPLIED note of its own: any reconcile would move it to SENT.
+    await db.invoice.update({ where: { id: foreignInv }, data: { status: 'FULLY_CREDITED' } });
+    const reconcileAs = (businessId: string, invoiceId: string) =>
+      db.$transaction((tx: any) => workflow.reconcileFromCredits(invoiceId, { tx, businessId }));
+
+    // RED-BEFORE (W3 base ca12b6f5): resolved { status: 'SENT', changed: true }, B's invoice moved for A.
+    await expect(reconcileAs(ID.biz, foreignInv)).rejects.toMatchObject({ status: 404 });
+    expect((await invoiceRow(foreignInv)).status, "B's invoice untouched").toBe('FULLY_CREDITED');
+    // Its own business reconciles it (no APPLIED note, nothing paid: SENT).
+    await expect(reconcileAs(ID.bizF, foreignInv)).resolves.toEqual({ status: 'SENT', changed: true });
+    expect((await invoiceRow(foreignInv)).status).toBe('SENT');
+
+    // The lock is its own: a reconcile that moves nothing still holds the row until its transaction ends.
+    const own = await seedInvoice('rc_lock', 'SENT');
+    const note = await createNote(own, 40);
+    expect((await applyNote(note.id)).status).toBe(201);
+    await db.$transaction(async (tx: any) => {
+      await expect(workflow.reconcileFromCredits(own, { tx, businessId: ID.biz })).resolves.toEqual({ status: 'PARTIALLY_CREDITED', changed: false });
+      await expect(
+        db.$queryRawUnsafe(`SELECT id FROM invoices WHERE id = $1 FOR NO KEY UPDATE NOWAIT`, own),
+        'the row is locked by the reconcile',
+      ).rejects.toThrow(/55P03|could not obtain lock/);
+    });
+  });
+
+  it('CN-31 W3CRB-ST-1 CR-V44-2 (D-14, D-78): a credit move that leaves a credited invoice in its credited status still clears a paidAt nothing settles, so one money position ends with one paidAt whatever the path; with its payment in place the paidAt is kept', async () => {
+    // Path A: paid, part-credited 30, refunded in full, then credited 20 more: PARTIALLY_CREDITED -> PARTIALLY_CREDITED.
+    const a = await seedInvoice('rc_same_a', 'PAID');
+    const noteA30 = await createNote(a, 30);
+    expect((await applyNote(noteA30.id)).status).toBe(201);
+    await expect(refundPayment(a, TOTAL, 'rf_all')).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+    const noteA20 = await createNote(a, 20);
+    expect((await applyNote(noteA20.id)).status).toBe(201);
+    // RED-BEFORE (pkt/W3-CREDIT-RECONCILE-BIND f38160e9): the status did not move, so the early return kept the refunded payment's paidAt.
+    expect(await invoiceRow(a), 'apply, status unchanged, nothing settles: no paidAt').toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+
+    // Path B: the same money position (credited 50 of 100, the 100 refunded) reached through FULLY_CREDITED.
+    const b = await seedInvoice('rc_same_b', 'PAID');
+    const noteB30 = await createNote(b, 30);
+    expect((await applyNote(noteB30.id)).status).toBe(201);
+    await expect(refundPayment(b, TOTAL, 'rf_all')).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+    const noteB70 = await createNote(b, 70);
+    expect((await applyNote(noteB70.id)).status).toBe(201);
+    expect((await voidNote(noteB70.id)).status).toBe(201);
+    const noteB20 = await createNote(b, 20);
+    expect((await applyNote(noteB20.id)).status).toBe(201);
+    const rowA = await invoiceRow(a);
+    const rowB = await invoiceRow(b);
+    expect(rowB, 'path B').toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+    expect({ status: rowA.status, paidAt: rowA.paidAt }, 'one money position, one paidAt').toEqual({ status: rowB.status, paidAt: rowB.paidAt });
+
+    // A void that leaves the invoice PARTIALLY_CREDITED clears it the same way.
+    const c = await seedInvoice('rc_same_c', 'PAID');
+    const noteC30 = await createNote(c, 30);
+    expect((await applyNote(noteC30.id)).status).toBe(201);
+    const noteC20 = await createNote(c, 20);
+    expect((await applyNote(noteC20.id)).status).toBe(201);
+    await expect(refundPayment(c, TOTAL, 'rf_all')).resolves.toMatchObject({ status: 'PARTIALLY_CREDITED', changed: false });
+    expect((await voidNote(noteC20.id)).status).toBe(201);
+    // RED-BEFORE (pkt/W3-CREDIT-RECONCILE-BIND f38160e9): PARTIALLY_CREDITED with the refunded payment's paidAt.
+    expect(await invoiceRow(c), 'void, status unchanged, nothing settles: no paidAt').toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+
+    // Control (CN-06): the payment still settles the total, so a second partial note keeps the paidAt.
+    const d = await seedInvoice('rc_same_kept', 'PAID');
+    const paidAtD = (await invoiceRow(d)).paidAt;
+    const noteD30 = await createNote(d, 30);
+    expect((await applyNote(noteD30.id)).status).toBe(201);
+    const noteD20 = await createNote(d, 20);
+    expect((await applyNote(noteD20.id)).status).toBe(201);
+    expect(await invoiceRow(d), 'settled by its payment: paidAt kept').toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: paidAtD });
+    expect(emitted.filter((e) => e.name.startsWith('invoice.')), 'a credit move emits no invoice event').toEqual([]);
+    await expectBalanced(ID.biz);
+  });
+
+  // CRB-CR-1: the refund door's half of CR-V44-2, outside this write set (invoice-workflow.service.ts, reconcileFromCredits only).
   it.todo(
-    'CR-V44-2: reconcileFromCredits clears paidAt when a credited invoice returns to SENT or PARTIALLY_PAID (as reconcileIn does, D-14); it only ever stamps paidAt on a return to PAID (invoice-workflow.service.ts, outside the V1-44b write set; CreditNoteService writes no Invoice column, CN-12)',
-  );
-  it.todo(
-    "SEC-V44-6 (function half): InvoiceWorkflowService.reconcileFromCredits takes the businessId and looks the invoice up by { id, businessId } (invoice-workflow.service.ts, outside the V1-44b write set; its one caller, CreditNoteService, locks and reads the invoice in the note's business before calling it, CN-21)",
+    'CRB-CR-1 CR-V44-2 (D-14, D-78), refund half: a refund that unsettles a credited invoice clears its paidAt (a PAID invoice part-credited 30, then refunded in full, stays PARTIALLY_CREDITED and keeps the refunded payment\'s paidAt until a later apply or void, CN-31). reconcileCreditedFromPayments (invoice-workflow.service.ts) writes nothing; outside the W3-CREDIT-RECONCILE-BIND write set (reconcileFromCredits only)',
   );
 });

@@ -1,27 +1,21 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
-import type { ContactStatus } from '../crm/crm.constants';
-
-/**
- * V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary
- * (crm.constants.ts). A row may still hold the legacy status CUSTOMER, and not
- * only from before V1-38 (the Shopify adapter): the CSV/link import copies a
- * file's status column verbatim (crm-import.service.ts), so it is still
- * written. It reads as CLIENT while any writer can produce it or a row holds it.
- */
-const CLIENT_STATUS: ContactStatus = 'CLIENT';
-const LEGACY_CLIENT_STATUS = 'CUSTOMER';
-const isClientStatus = (status: string | null | undefined): boolean => status === CLIENT_STATUS || status === LEGACY_CLIENT_STATUS;
+// V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary; a
+// row holding the legacy CLIENT spelling reads the same. V1-38c: that
+// spelling and the predicate are crm.constants.ts's.
+import { isClientStatus, LEGACY_DORMANT_STATUS } from '../crm/crm.constants';
 
 /**
  * Dormancy is not a Contact.status in the vocabulary (CF-49: it is a
  * relationshipHealth value), and a canonical contact is Dormant or At Risk by
- * silence alone. But the same import writes a status column of DORMANT
- * verbatim, and the segments have always read that status: a contact imported
- * as DORMANT is Dormant whatever its silence, and is not also At Risk
- * (V1-38b review CR-1).
+ * silence alone. But the CSV/link import (crm-import.service.ts) wrote a
+ * status column of DORMANT verbatim until V1-38c, and stores a DORMANT cell as
+ * DORMANT since (crm.constants.ts importedContactStatus, V1-38c review
+ * CR-V38c-1, pending an owner ruling); a playbook's update_status action can
+ * write it too (review ST-38c-1). So rows hold it and are still given it, and
+ * the segments have always read that status: a contact imported as DORMANT is
+ * Dormant whatever its silence, and is not also At Risk (V1-38b review CR-1).
  */
-const LEGACY_DORMANT_STATUS = 'DORMANT';
 const isImportedDormant = (status: string | null | undefined): boolean => status === LEGACY_DORMANT_STATUS;
 
 export interface RelationshipHealth {
