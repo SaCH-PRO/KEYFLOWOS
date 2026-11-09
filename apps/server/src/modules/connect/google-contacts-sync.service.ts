@@ -1,6 +1,8 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@keyflow/db';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { CONTACT_STATUSES, canonicalContactStatus, type ContactStatus } from '../crm/crm.constants';
+import { resolveCrmAccess } from '../crm/crm-permissions.helper';
 import { GoogleTokenHelper } from './google-token.helper';
 
 interface PeopleConnection {
@@ -26,6 +28,97 @@ const EMPTY_RULES: ContactMappingRules = {
   defaultLifecycleStage: null,
 };
 
+/**
+ * D-92 (W5-D92-RESIDUALS): the default contact status an operator sets on a
+ * connector rule (the Google and Outlook contact-sync rules, the connector form
+ * mapping). Every stored Contact.status is one of CONTACT_STATUSES, so the
+ * setting stores a status only through canonicalContactStatus: the vocabulary
+ * in any case or padding as itself, the legacy CUSTOMER and DORMANT as CLIENT.
+ * A value with no ContactStatus ('partner', 'churned', ACTIVE, a non-string)
+ * is a 400 and nothing is stored. Undefined leaves the stored default as it
+ * is; null or a blank clears it. Before D-92 the setting stored the value as
+ * given, and every contact a sync or a form submission created took it.
+ */
+export function settingDefaultContactStatus(value: unknown): ContactStatus | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || (typeof value === 'string' && value.trim() === '')) return null;
+  const status = typeof value === 'string' ? canonicalContactStatus(value) : null;
+  if (!status) {
+    throw new BadRequestException(
+      `"${String(value)}" is not a contact status: use one of ${CONTACT_STATUSES.join(', ')}`,
+    );
+  }
+  return status;
+}
+
+/** A user holding a membership of `businessId`: the check CrmService.assertNewOwnerIsMember makes. */
+async function isBusinessMember(prisma: PrismaService, businessId: string, userId: string): Promise<boolean> {
+  const membership = await prisma.client.membership.findUnique({
+    where: { userId_businessId: { userId, businessId } },
+    select: { id: true },
+  });
+  return !!membership;
+}
+
+/**
+ * W5-D92-RESIDUALS review SEC-D92R-3: the default owner an operator sets on a
+ * contact-sync rule (Google and Outlook) is the owner of every contact a sync
+ * creates, so it is an assignment and takes the checks the CRM create, PATCH
+ * and reassign paths make (R0-13d): naming a member other than yourself needs
+ * crm_reassign (or OWNER / SUPER_ADMIN), 403 otherwise, and the owner must be
+ * a member of this business (CrmService.assertNewOwnerIsMember), 400 for
+ * another tenant's user, an unknown id or a non-string. Both are checked before
+ * anything is written. The setting stored any id as given before.
+ *
+ * Undefined leaves the stored owner as it is, and null or a blank clears it.
+ * The stored owner sent back unchanged (the web settings re-send every field
+ * on each save) assigns no one and is kept without the checks; a sync applies
+ * it only while it is a member (memberDefaultOwnerId).
+ */
+export async function settingDefaultOwnerId(
+  prisma: PrismaService,
+  businessId: string,
+  value: unknown,
+  storedOwnerId: string | null | undefined,
+  actorUserId: string | undefined,
+): Promise<string | null | undefined> {
+  if (value === undefined) return undefined;
+  if (value === null || (typeof value === 'string' && value.trim() === '')) return null;
+  const ownerId = typeof value === 'string' ? value.trim() : null;
+  if (ownerId !== null && ownerId === storedOwnerId) return ownerId;
+  if (ownerId !== null && actorUserId && ownerId !== actorUserId) {
+    const access = await resolveCrmAccess(prisma, businessId, actorUserId);
+    if (!access.isOwner && !access.isSuperAdmin && !access.reassign) {
+      throw new ForbiddenException('You do not have permission to assign contacts to another member');
+    }
+  }
+  if (ownerId === null || !(await isBusinessMember(prisma, businessId, ownerId))) {
+    throw new BadRequestException('defaultOwnerId must belong to a member of this business');
+  }
+  return ownerId;
+}
+
+/**
+ * SEC-D92R-3: the owner a sync gives the contacts it creates: the rule's
+ * default owner while they are a member of this business, else none. A rule
+ * stored before the setting checked it may name anyone, and a member may have
+ * left since it was set.
+ */
+export async function memberDefaultOwnerId(
+  prisma: PrismaService,
+  businessId: string,
+  ownerId: string | null | undefined,
+): Promise<string | null> {
+  if (!ownerId) return null;
+  return (await isBusinessMember(prisma, businessId, ownerId)) ? ownerId : null;
+}
+
+/**
+ * D-92 (W5-D92-RESIDUALS): a rule is read, and so applied, through
+ * canonicalContactStatus, because a rule stored before D-92 may hold any value:
+ * a legacy DORMANT or CUSTOMER reads as CLIENT, and a value with no
+ * ContactStatus reads as none (no status is written for it).
+ */
 function parseRules(raw: unknown): ContactMappingRules {
   if (!raw || typeof raw !== 'object') return { ...EMPTY_RULES };
   const obj = raw as Record<string, unknown>;
@@ -35,7 +128,7 @@ function parseRules(raw: unknown): ContactMappingRules {
           .filter((x) => typeof x === 'string' && x.trim().length > 0)
           .map((x) => (x as string).trim())
       : [],
-    defaultStatus: typeof obj.defaultStatus === 'string' ? obj.defaultStatus : null,
+    defaultStatus: canonicalContactStatus(obj.defaultStatus as string | null | undefined),
     defaultOwnerId: typeof obj.defaultOwnerId === 'string' ? obj.defaultOwnerId : null,
     defaultLifecycleStage:
       typeof obj.defaultLifecycleStage === 'string' ? obj.defaultLifecycleStage : null,
@@ -84,8 +177,25 @@ export class GoogleContactsSyncService {
   async saveMappingRules(
     businessId: string,
     rules: Partial<ContactMappingRules>,
+    actorUserId?: string,
   ): Promise<ContactMappingRules> {
-    const next = parseRules({ ...(await this.getMappingRules(businessId)), ...rules });
+    // D-92: refuse a status with no ContactStatus before anything is read or written.
+    const defaultStatus = settingDefaultContactStatus(rules.defaultStatus);
+    const current = await this.getMappingRules(businessId);
+    // SEC-D92R-3: a default owner is a member, and naming another needs crm_reassign.
+    const defaultOwnerId = await settingDefaultOwnerId(
+      this.prisma,
+      businessId,
+      rules.defaultOwnerId,
+      current.defaultOwnerId,
+      actorUserId,
+    );
+    const next = parseRules({
+      ...current,
+      ...rules,
+      ...(defaultStatus !== undefined ? { defaultStatus } : {}),
+      ...(defaultOwnerId !== undefined ? { defaultOwnerId } : {}),
+    });
     const existing = await this.prisma.client.connectorStatus.findUnique({
       where: { businessId_connectorType: { businessId, connectorType: 'google_contacts' } },
       select: { metadata: true },
@@ -193,7 +303,9 @@ export class GoogleContactsSyncService {
     if (rules.defaultTags.length > 0) {
       data.tags = { set: rules.defaultTags };
     }
-    if (rules.defaultStatus) data.status = rules.defaultStatus;
+    // D-92: only a ContactStatus is written; a rule naming none leaves the LEAD the contact was created with.
+    const defaultStatus = canonicalContactStatus(rules.defaultStatus);
+    if (defaultStatus) data.status = defaultStatus;
     if (rules.defaultLifecycleStage) data.lifecycleStage = rules.defaultLifecycleStage;
     if (rules.defaultOwnerId) data.ownerId = rules.defaultOwnerId;
     if (Object.keys(data).length === 0) return;
@@ -240,7 +352,12 @@ export class GoogleContactsSyncService {
       where: { id: businessId },
       select: { contactsSyncToken: true },
     });
-    const rules = await this.getMappingRules(businessId);
+    const stored = await this.getMappingRules(businessId);
+    // SEC-D92R-3: the default owner is applied only while they are a member of this business.
+    const rules: ContactMappingRules = {
+      ...stored,
+      defaultOwnerId: await memberDefaultOwnerId(this.prisma, businessId, stored.defaultOwnerId),
+    };
     const hasRules =
       rules.defaultTags.length > 0 ||
       !!rules.defaultStatus ||

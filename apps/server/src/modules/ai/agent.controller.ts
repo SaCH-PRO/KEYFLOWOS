@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Put, Query, Req, UseGuards, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
 import { BusinessGuard } from '../../core/auth/business.guard';
 import { Request } from 'express';
@@ -10,9 +10,17 @@ import { CalendarIntelligenceService } from './calendar-intelligence.service';
 import { DocumentIntelligenceService } from './document-intelligence.service';
 import { SemanticMemoryService } from './semantic-memory.service';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { createAgentTrigger, updateAgentTrigger } from './agent-trigger.service';
 
 interface AuthenticatedRequest extends Request {
   user?: { id: string; email?: string; role?: string };
+}
+
+/** W5-AGENT-TRIGGERS-AUTHORITY (D-73): the authenticated member who writes an agent trigger. */
+function triggerWriter(req: AuthenticatedRequest): string {
+  const id = req.user?.id;
+  if (!id) throw new UnauthorizedException('Authentication required');
+  return id;
 }
 
 @Controller('ai')
@@ -152,18 +160,11 @@ export class AgentController {
       autoExecute?: boolean;
       maxRiskTier?: number;
     },
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.prisma.client.agentTrigger.create({
-      data: {
-        businessId,
-        name: body.name,
-        eventPattern: body.eventPattern,
-        condition: (body.condition ?? undefined) as any,
-        objective: body.objective,
-        autoExecute: body.autoExecute ?? false,
-        maxRiskTier: body.maxRiskTier ?? 2,
-      },
-    });
+    // W5-AGENT-TRIGGERS-AUTHORITY (D-73, D-93; CV-08m): the rule records the member who created it,
+    // and its plans run as them; a member's word-for-word copy of a default rule is theirs, not the system's.
+    return createAgentTrigger(this.prisma, businessId, triggerWriter(req), body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)
@@ -179,12 +180,17 @@ export class AgentController {
       enabled: boolean;
       autoExecute: boolean;
       maxRiskTier: number;
+      schedule: string | null;
     }>,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.prisma.client.agentTrigger.update({
-      where: { id: triggerId, businessId },
-      data: body as any,
-    });
+    // W5-AGENT-TRIGGERS-AUTHORITY (D-93, D-73; CV-08m; review SEC-W5AT-1..3, CR-W5AT-1): only the
+    // business owner switches on, switches off or edits a default rule that runs as the owner (403
+    // AGENT_TRIGGER_OWNER_ONLY), schedules a rule or changes a scheduled one (403
+    // AGENT_TRIGGER_SCHEDULE_OWNER_ONLY); a rule a member created is theirs and the owner's to write (403
+    // AGENT_TRIGGER_CREATOR_ONLY) and keeps its creator, whoever writes it. Only the member-writable
+    // fields of the body are written.
+    return updateAgentTrigger(this.prisma, businessId, triggerId, triggerWriter(req), body);
   }
 
   @UseGuards(AuthGuard, BusinessGuard)

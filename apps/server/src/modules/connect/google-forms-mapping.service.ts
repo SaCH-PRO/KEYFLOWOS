@@ -118,6 +118,41 @@ function parseFieldMappings(value: Prisma.JsonValue | null | undefined): FieldMa
   return out;
 }
 
+/**
+ * W5-D92-RESIDUALS review SEC-D92R-1: the status of the quote (opportunity) a
+ * form response creates. A new quote is a DRAFT, as CommerceService.createQuote
+ * creates every quote; it is sent, decided and converted only through the quote
+ * doors and their transition table (quote-workflow.ts QUOTE_TRANSITIONS). This
+ * path wrote opportunityDefaults.defaultStatus as given, so a mapping could
+ * create quotes already ACCEPTED, PAID or CONVERTED around that table (the
+ * defect class SEC-3 / SEC-V50-4 closed on the commerce AI route).
+ */
+const FORM_QUOTE_STATUS: QuoteStatus = 'DRAFT';
+
+/**
+ * SEC-D92R-1: the setting stores only DRAFT (in any case or padding); null or
+ * no status is DRAFT; any other value is a 400 and nothing is stored.
+ */
+function settingFormQuoteStatus(value: unknown): QuoteStatus {
+  if (value === undefined || value === null) return FORM_QUOTE_STATUS;
+  if (typeof value === 'string' && (value.trim() === '' || value.trim().toUpperCase() === FORM_QUOTE_STATUS)) {
+    return FORM_QUOTE_STATUS;
+  }
+  throw new BadRequestException(
+    `"${String(value)}" is not a status a form creates a quote with: a form creates a ${FORM_QUOTE_STATUS} quote`,
+  );
+}
+
+/**
+ * The opportunity defaults as stored; SEC-D92R-1: the quote status reads as
+ * DRAFT whatever a mapping stored before holds, so what a read reports is what
+ * a backfill creates.
+ */
+function draftOpportunityDefaults(value: Prisma.JsonValue | null): Prisma.JsonValue | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  return { ...(value as Prisma.JsonObject), defaultStatus: FORM_QUOTE_STATUS };
+}
+
 function parseOpportunityDefaults(
   value: Prisma.JsonValue | null | undefined,
 ): OpportunityDefaults | null {
@@ -129,8 +164,8 @@ function parseOpportunityDefaults(
     defaultBudget: typeof obj.defaultBudget === 'number' ? obj.defaultBudget : undefined,
     defaultCurrency:
       typeof obj.defaultCurrency === 'string' ? obj.defaultCurrency : undefined,
-    defaultStatus:
-      typeof obj.defaultStatus === 'string' ? obj.defaultStatus : undefined,
+    // SEC-D92R-1: a stored value is never applied; the quote is a DRAFT.
+    defaultStatus: FORM_QUOTE_STATUS,
   };
 }
 
@@ -169,9 +204,11 @@ export class GoogleFormsMappingService {
   }
 
   async getMapping(businessId: string, formId: string) {
-    return this.prisma.client.googleFormMapping.findUnique({
+    const record = await this.prisma.client.googleFormMapping.findUnique({
       where: { businessId_formId: { businessId, formId } },
     });
+    // SEC-D92R-1: report the quote status a backfill creates (DRAFT).
+    return record ? { ...record, opportunityDefaults: draftOpportunityDefaults(record.opportunityDefaults) } : null;
   }
 
   async listForBusiness(businessId: string) {
@@ -191,8 +228,12 @@ export class GoogleFormsMappingService {
   }) {
     const cleaned = this.validateMappings(input.fieldMappings);
     const fieldJson = cleaned as unknown as Prisma.InputJsonValue;
+    // SEC-D92R-1: the quote a response creates is a DRAFT; any other status is a 400 before anything is written.
     const oppJson: Prisma.InputJsonValue | typeof Prisma.JsonNull = input.opportunityDefaults
-      ? (input.opportunityDefaults as unknown as Prisma.InputJsonValue)
+      ? ({
+          ...input.opportunityDefaults,
+          defaultStatus: settingFormQuoteStatus(input.opportunityDefaults.defaultStatus),
+        } as unknown as Prisma.InputJsonValue)
       : Prisma.JsonNull;
 
     return this.prisma.client.googleFormMapping.upsert({
@@ -347,7 +388,8 @@ export class GoogleFormsMappingService {
               businessId: mapping.businessId,
               contactId,
               quoteNumber,
-              status: (opp.defaultStatus as QuoteStatus | undefined) ?? 'DRAFT',
+              // SEC-D92R-1: a DRAFT, never the stored opportunityDefaults.defaultStatus.
+              status: FORM_QUOTE_STATUS,
               subtotal: budget || 0,
               total: budget || 0,
               currency: opp.defaultCurrency ?? 'TTD',

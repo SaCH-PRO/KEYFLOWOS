@@ -9,6 +9,7 @@ import {
   Post,
   Put,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '../../core/auth/auth.guard';
@@ -244,12 +245,16 @@ export class ConnectController {
     return this.contacts.getMappingRules(businessId);
   }
 
+  // W5-D92-RESIDUALS review SEC-D92R-3: the member saving the rules is the
+  // actor its default-owner checks run for (naming another member needs
+  // crm_reassign, as on the CRM create, PATCH and reassign paths).
   @Put('businesses/:businessId/contacts/mapping-rules')
   saveContactsRules(
     @Param('businessId') businessId: string,
     @Body() body: Partial<ContactMappingRules>,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.contacts.saveMappingRules(businessId, body ?? {});
+    return this.contacts.saveMappingRules(businessId, body ?? {}, req?.user?.id);
   }
 
   // ----- Outlook Contacts -----
@@ -276,12 +281,14 @@ export class ConnectController {
     return this.outlook.getMappingRules(businessId);
   }
 
+  // SEC-D92R-3: as the Google Contacts rules above.
   @Put('businesses/:businessId/outlook-contacts/mapping-rules')
   saveOutlookRules(
     @Param('businessId') businessId: string,
     @Body() body: Partial<OutlookContactMappingRules>,
+    @Req() req: { user?: { id?: string } },
   ) {
-    return this.outlook.saveMappingRules(businessId, body ?? {});
+    return this.outlook.saveMappingRules(businessId, body ?? {}, req?.user?.id);
   }
 
   // ----- Cross-Source Contact Sync -----
