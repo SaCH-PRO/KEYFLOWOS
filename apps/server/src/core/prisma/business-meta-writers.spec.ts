@@ -42,15 +42,24 @@
  * into the written metaData (`{ ...meta, key }`) is the `.metaData` of that
  * call's result (directly, through a local initialised from it, or through a
  * pass-through normaliser: a top-level function of the same file, of one
- * parameter, whose every `return` is that parameter or `{}`, such as
- * `parseMetaData`): the copy written back is the one read under the lock
- * (FOLLOW3-D13). The written metaData may also be that locked copy itself,
- * changed in place (`delete meta.ga4`), or a local initialised with an object
- * literal over it; neither may be reassigned or `Object.assign`ed into. A private method whose write's client and spread values are its
- * parameters (CaseStudyService.saveMeta) is LOCKED when it is reached only by
- * direct `this.<method>(...)` calls in its class, and every such call passes a
+ * parameter, whose every `return` is that parameter or `{}` and which only
+ * tests its parameter otherwise (`raw && typeof raw === 'object'`), never
+ * writes into it or hands it on, such as `parseMetaData`): the copy written
+ * back is the one read under the lock (FOLLOW3-D13). The written metaData may
+ * also be that locked copy itself, changed in place (`delete meta.ga4`), or a
+ * local initialised with an object literal over it. No name the copy passes
+ * through may be reassigned, `Object.assign`ed (or `Reflect.set`) into, or
+ * written or deleted under a computed key (`meta[k] = stale[k]`): those copy
+ * keys the reader cannot name (review CR-D13-1). A private method whose
+ * write's client and spread values are its parameters
+ * (CaseStudyService.saveMeta) is LOCKED when it is reached only by direct
+ * `this.<method>(...)` calls in its class, and every such call passes a
  * client its calling function locked first (lockBusinessMeta) and the
- * metaData read under that lock. IdentityService.updateBusiness
+ * metaData read under that lock. Any other reference to a member of that
+ * name, anywhere in its file or in any other source file (`probe.<method>(`
+ * on an `any`-typed instance, `this['<method>']`, a destructuring), fails it
+ * (review D13-ST-1); a `this.<method>` in another class that declares its
+ * own member of that name is that class's own. IdentityService.updateBusiness
  * takes the same lock inline (INLINE_LOCK_OWNERS); it must still run the
  * `FOR NO KEY UPDATE` statement on the same client before its write. A raw
  * write is LOCKED (and ATOMIC) only when its writer is in
@@ -215,6 +224,10 @@ export interface MetaWriter {
   raw: boolean;
   /** A registered single-statement writer of the checked shape (locked by its own UPDATE). */
   atomic?: boolean;
+  /** Locked by its callers: the private write helper's member name (D13-ST-1: checked in every other file too). */
+  helper?: string;
+  /** D13-ST-1: `<file>:<line>` of a reference outside the helper's file that reaches it. */
+  stray?: string;
 }
 
 function propName(name: ts.PropertyName | ts.MemberName | undefined): string | null {
@@ -426,10 +439,22 @@ function isAssignment(kind: ts.SyntaxKind): boolean {
   return kind >= ts.SyntaxKind.FirstAssignment && kind <= ts.SyntaxKind.LastAssignment;
 }
 
+/** Calls that write into their first argument. */
+const WRITING_CALLS = new Set(['Object.assign', 'Object.defineProperty', 'Object.defineProperties', 'Reflect.set', 'Reflect.defineProperty', 'Reflect.deleteProperty']);
+
+function literalKey(e: ts.Expression): boolean {
+  const k = unwrap(e);
+  return ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k) || ts.isNumericLiteral(k);
+}
+
 /**
  * Whether the name `name` (seen from `at`) is reassigned (`name = ...`,
- * `name ??= ...`) or has values `Object.assign`ed into it anywhere in the
- * outermost function enclosing `at`. Any same-named variable there counts.
+ * `name ??= ...`), has values `Object.assign`ed (or `Reflect.set`, ...) into
+ * it, or is written or deleted under a computed key (`name[k] = stale[k]`,
+ * `delete name[k]`: review CR-D13-1, keys the reader cannot name) anywhere in
+ * the outermost function enclosing `at`. Any same-named variable there counts.
+ * A literal key (`name.ga4 = ...`, `name['ga4'] = ...`) is the writer's own
+ * key, as in `{ ...name, ga4 }`.
  */
 function overwritten(name: string, at: ts.Node): boolean {
   const fns = functionsOf(at);
@@ -437,37 +462,87 @@ function overwritten(name: string, at: ts.Node): boolean {
   if (!outer?.body) return false;
   let hit = false;
   const named = (e: ts.Expression | undefined) => !!e && ts.isIdentifier(unwrap(e)) && (unwrap(e) as ts.Identifier).text === name;
+  const computedOn = (e: ts.Expression) => {
+    const x = unwrap(e);
+    return ts.isElementAccessExpression(x) && named(x.expression) && !literalKey(x.argumentExpression);
+  };
   const visit = (n: ts.Node) => {
     if (hit) return;
-    if (ts.isBinaryExpression(n) && isAssignment(n.operatorToken.kind) && named(n.left)) hit = true;
-    else if (ts.isCallExpression(n) && unwrap(n.expression).getText() === 'Object.assign' && named(n.arguments[0])) hit = true;
+    if (ts.isBinaryExpression(n) && isAssignment(n.operatorToken.kind) && (named(n.left) || computedOn(n.left))) hit = true;
+    else if (ts.isDeleteExpression(n) && computedOn(n.expression)) hit = true;
+    else if (ts.isCallExpression(n) && WRITING_CALLS.has(unwrap(n.expression).getText()) && named(n.arguments[0])) hit = true;
     ts.forEachChild(n, visit);
   };
   visit(outer.body);
   return hit;
 }
 
+function isWrapper(n: ts.Node): boolean {
+  return ts.isParenthesizedExpression(n) || ts.isAsExpression(n) || ts.isNonNullExpression(n) || ts.isTypeAssertionExpression(n) || ts.isSatisfiesExpression(n);
+}
+
+const COMPARISONS = new Set([
+  ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsToken, ts.SyntaxKind.InstanceOfKeyword, ts.SyntaxKind.InKeyword,
+]);
+const LOGICAL = new Set([ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]);
+
+/**
+ * Whether the reference `id` only tests the value or returns it: `return id`,
+ * `typeof id`, a comparison operand, `Array.isArray(id)`, `!id`, or (through
+ * `&&` / `||` / `??`) an if, while or `?:` condition. Anything else (a write
+ * into it, `Object.assign(id, ...)`, a call it is handed to, an alias) may
+ * change the value or let it be changed.
+ */
+function testsOrReturns(id: ts.Identifier): boolean {
+  let n: ts.Node = id;
+  const climb = () => { while (n.parent && isWrapper(n.parent)) n = n.parent; };
+  climb();
+  let p = n.parent;
+  if (!p) return false;
+  if (ts.isReturnStatement(p) || ts.isTypeOfExpression(p)) return true;
+  if (ts.isBinaryExpression(p) && COMPARISONS.has(p.operatorToken.kind)) return true;
+  if (ts.isCallExpression(p) && p.expression.getText() === 'Array.isArray' && p.arguments.length === 1 && p.arguments[0] === n) return true;
+  for (;;) {
+    if (ts.isPrefixUnaryExpression(p) && p.operator === ts.SyntaxKind.ExclamationToken) return true;
+    if ((ts.isIfStatement(p) || ts.isWhileStatement(p) || ts.isDoStatement(p)) && p.expression === n) return true;
+    if (ts.isConditionalExpression(p) && p.condition === n) return true;
+    if (!ts.isBinaryExpression(p) || !LOGICAL.has(p.operatorToken.kind)) return false;
+    n = p;
+    climb();
+    if (!n.parent) return false;
+    p = n.parent;
+  }
+}
+
 /**
  * Whether `name` is a pass-through normaliser of the file holding `at`
- * (FOLLOW3-D13: `parseMetaData`): a top-level function of one parameter,
- * never reassigned, whose every `return` (nested functions aside) is that
- * parameter or `{}`. Its result is its argument or an empty bag, never
- * another copy.
+ * (FOLLOW3-D13: `parseMetaData`): a top-level function of one parameter whose
+ * every `return` (nested functions aside) is that parameter or `{}`, and whose
+ * every other mention of the parameter only tests it (testsOrReturns; none in
+ * a nested function). Review CR-D13-1: a write into the parameter
+ * (`Object.assign(raw, stale)`, `raw[k] = ...`), a call it is handed to or an
+ * alias of it may fill it with another copy, so the function is not one. Its
+ * result is its argument unchanged or an empty bag, never another copy.
  */
 function passThrough(name: string, at: ts.Node): boolean {
   const fn = at.getSourceFile().statements.find((s): s is ts.FunctionDeclaration => ts.isFunctionDeclaration(s) && s.name?.text === name);
   if (!fn?.body || fn.parameters.length !== 1 || !ts.isIdentifier(fn.parameters[0].name)) return false;
   const param = fn.parameters[0].name.text;
   const returns: ts.ReturnStatement[] = [];
-  let assigned = false;
-  const visit = (n: ts.Node) => {
-    if (ts.isFunctionLike(n)) return;
-    if (ts.isReturnStatement(n)) returns.push(n);
-    if (ts.isBinaryExpression(n) && isAssignment(n.operatorToken.kind) && ts.isIdentifier(unwrap(n.left)) && (unwrap(n.left) as ts.Identifier).text === param) assigned = true;
-    ts.forEachChild(n, visit);
+  let other = false;
+  const visit = (n: ts.Node, nested: boolean) => {
+    if (other) return;
+    if (ts.isReturnStatement(n) && !nested) returns.push(n);
+    if (ts.isIdentifier(n) && n.text === param) {
+      const p = n.parent;
+      const isName = (ts.isPropertyAccessExpression(p) && p.name === n) || (ts.isPropertyAssignment(p) && p.name === n);
+      if (!isName && (nested || !testsOrReturns(n))) other = true;
+    }
+    ts.forEachChild(n, (c) => visit(c, nested || ts.isFunctionLike(c)));
   };
-  ts.forEachChild(fn.body, visit);
-  return !assigned && returns.length > 0 && returns.every((r) => {
+  ts.forEachChild(fn.body, (c) => visit(c, ts.isFunctionLike(c)));
+  return !other && returns.length > 0 && returns.every((r) => {
     const v = r.expression ? unwrap(r.expression) : undefined;
     return !!v && ((ts.isIdentifier(v) && v.text === param) || (ts.isObjectLiteralExpression(v) && v.properties.length === 0));
   });
@@ -546,7 +621,8 @@ function atomicStatement(lit: ts.Node, sf: ts.SourceFile): boolean {
  * whose every spread is the locked read; or (FOLLOW3-D13) the locked copy
  * itself, changed in place (`delete meta.ga4; ... metaData: meta`); or a local
  * initialised with such an object literal (later `name.key = ...` adds keys).
- * A name reassigned or `Object.assign`ed into is not.
+ * A name reassigned, `Object.assign`ed into or written under a computed key
+ * (`meta[k] = stale[k]`, review CR-D13-1) is not (overwritten).
  */
 function spreadsLockedRead(meta: ts.Expression | undefined, at: ts.Node, locks: ts.CallExpression[], depth = 0): boolean {
   if (!meta || depth > 4) return false;
@@ -558,14 +634,66 @@ function spreadsLockedRead(meta: ts.Expression | undefined, at: ts.Node, locks: 
   return !!init && ts.isObjectLiteralExpression(unwrap(init)) && spreadsLockedRead(init, at, locks, depth + 1);
 }
 
+/** The class `this` is bound to at `n` (an arrow function sees through; a `function` or an object-literal method rebinds it), or undefined. */
+function thisClass(n: ts.Node): ts.ClassLikeDeclaration | undefined {
+  for (let p = n.parent; p; p = p.parent) {
+    if (ts.isArrowFunction(p)) continue;
+    if (ts.isFunctionDeclaration(p) || ts.isFunctionExpression(p)) return undefined;
+    if (ts.isMethodDeclaration(p) || ts.isConstructorDeclaration(p) || ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p) || ts.isPropertyDeclaration(p) || ts.isClassStaticBlockDeclaration(p)) {
+      return ts.isClassLike(p.parent) ? p.parent : undefined;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Review D13-ST-1: every reference in the whole file `sf` to a member named
+ * `name`. `calls` are the direct `this.<name>(...)` calls whose `this` is
+ * `cls`. `stray` holds the line of every other reference that may reach the
+ * member (TS `private` does not hold against an `any`-typed value): any other
+ * receiver (`probe.<name>(`, `(this as any).<name>`), `x['<name>']`, a
+ * destructuring, `this.<name>` of `cls` not called, or `this.<name>` in a
+ * class (or function) without a member of that name of its own. A
+ * `this.<name>` in another class that declares its own `name` member is that
+ * class's own and not counted. With no `cls` (another file), every reference
+ * but those is stray.
+ */
+export function memberReferences(sf: ts.SourceFile, name: string, cls?: ts.ClassLikeDeclaration): { calls: ts.CallExpression[]; stray: number[] } {
+  const calls: ts.CallExpression[] = [];
+  const stray: number[] = [];
+  const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+  const ownMember = (c: ts.ClassLikeDeclaration) => c.members.some((m) => propName(m.name) === name);
+  const visit = (n: ts.Node) => {
+    if (ts.isPropertyAccessExpression(n) && n.name.text === name) {
+      if (n.expression.kind !== ts.SyntaxKind.ThisKeyword) stray.push(lineOf(n));
+      else {
+        const c = thisClass(n);
+        if (c && c === cls) {
+          if (ts.isCallExpression(n.parent) && n.parent.expression === n) calls.push(n.parent);
+          else stray.push(lineOf(n));
+        } else if (!c || !ownMember(c)) stray.push(lineOf(n));
+      }
+    } else if (ts.isElementAccessExpression(n) && ts.isStringLiteralLike(n.argumentExpression) && n.argumentExpression.text === name) {
+      stray.push(lineOf(n));
+    } else if (ts.isBindingElement(n) && (propName(n.propertyName) ?? (ts.isIdentifier(n.name) ? n.name.text : null)) === name) {
+      stray.push(lineOf(n));
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return { calls, stray };
+}
+
 /**
  * FOLLOW3-D13 (CaseStudyService.saveMeta): whether the write in the private
  * method `fn`, whose client `rx` and every value spread into the written
  * metaData are `fn`'s parameters, is locked by its callers. `fn` must be
- * reached only by direct `this.<name>(...)` calls in its class (at least one;
- * any other reference fails), and each call must pass a client its calling
- * function locked first (lockBusinessMeta on it, before the call) and, for
- * each spread parameter, the metaData read under that lock.
+ * reached only by direct `this.<name>(...)` calls in its class (at least
+ * one). Any other reference to a member of that name anywhere in the file
+ * fails it (memberReferences, review D13-ST-1); references in other files
+ * are checked by helperReachedElsewhere. Each call must pass a client its
+ * calling function locked first (lockBusinessMeta on it, before the call)
+ * and, for each spread parameter, the metaData read under that lock.
  */
 function lockedByCallers(fn: ts.FunctionLikeDeclaration, rx: string, meta: ts.Expression | undefined, sf: ts.SourceFile): boolean {
   if (!ts.isMethodDeclaration(fn) || !meta) return false;
@@ -585,20 +713,9 @@ function lockedByCallers(fn: ts.FunctionLikeDeclaration, rx: string, meta: ts.Ex
     spreadAt.push(i);
   }
   const cls = fn.parent;
-  if (!ts.isClassDeclaration(cls) && !ts.isClassExpression(cls)) return false;
-  const calls: ts.CallExpression[] = [];
-  let stray = false;
-  const visit = (n: ts.Node) => {
-    if (ts.isPropertyAccessExpression(n) && n.name.text === name) {
-      if (n.expression.kind === ts.SyntaxKind.ThisKeyword && ts.isCallExpression(n.parent) && n.parent.expression === n) calls.push(n.parent);
-      else stray = true;
-    } else if (ts.isElementAccessExpression(n) && ts.isStringLiteralLike(n.argumentExpression) && n.argumentExpression.text === name) {
-      stray = true;
-    }
-    ts.forEachChild(n, visit);
-  };
-  visit(cls);
-  if (stray || calls.length === 0) return false;
+  if (!ts.isClassLike(cls)) return false;
+  const { calls, stray } = memberReferences(sf, name, cls);
+  if (stray.length > 0 || calls.length === 0) return false;
   return calls.every((call) => {
     const client = call.arguments[clientAt] ? unwrap(call.arguments[clientAt]) : undefined;
     const caller = functionsOf(call)[0];
@@ -650,14 +767,18 @@ export function scanMetaWrites(rel: string, source: string, atomicOwners: Record
           const rx = receiverText(callee.expression, sf);
           const pos = n.getStart(sf);
           let locked = false;
+          let helper: string | undefined;
           if (fn && keys.has('metaData')) {
             const locks = lockCallsBefore(fn, rx, pos, sf);
             const meta = metaValue(dataExpr, n);
             locked = locks.length > 0 && spreadsLockedRead(meta, n, locks);
             if (!locked && INLINE_LOCK_OWNERS[key]) locked = inlineLockBefore(fn, rx, pos, sf);
-            if (!locked) locked = lockedByCallers(fn, rx, meta, sf);
+            if (!locked && lockedByCallers(fn, rx, meta, sf)) {
+              locked = true;
+              helper = propName((fn as ts.MethodDeclaration).name) ?? undefined;
+            }
           }
-          found.push({ key, line: lineOf(n), locked, opaque: !keys.has('metaData'), raw: false });
+          found.push({ key, line: lineOf(n), locked, opaque: !keys.has('metaData'), raw: false, ...(helper ? { helper } : {}) });
         }
       }
     } else if (ts.isPropertyAssignment(n) && propName(n.name) === 'business') {
@@ -686,6 +807,31 @@ export function scanMetaWrites(rel: string, source: string, atomicOwners: Record
   return found.sort((a, b) => a.key.localeCompare(b.key) || a.line - b.line);
 }
 
+/**
+ * Review D13-ST-1: a private write helper is locked by its callers only while
+ * nothing outside its file reaches it either (TS `private` does not hold
+ * against an `any`-typed instance, which can pass an unlocked client and a
+ * stale copy). Returns `writes` with each helper-locked writer that another
+ * source file references (memberReferences, no class) marked unlocked, with
+ * `stray` naming the first such reference. A `#private` name cannot be
+ * reached from another file.
+ */
+export function helperReachedElsewhere(writes: MetaWriter[], sources: { rel: string; source: string }[]): MetaWriter[] {
+  const parsed = new Map<string, ts.SourceFile>();
+  return writes.map((w) => {
+    if (!w.helper || !w.locked || w.helper.startsWith('#')) return w;
+    const file = w.key.split('#')[0];
+    for (const { rel, source } of sources) {
+      if (rel === file || !source.includes(w.helper)) continue;
+      let sf = parsed.get(rel);
+      if (!sf) parsed.set(rel, (sf = ts.createSourceFile(rel, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)));
+      const { stray } = memberReferences(sf, w.helper);
+      if (stray.length > 0) return { ...w, locked: false, stray: `${rel}:${stray[0]}` };
+    }
+    return w;
+  });
+}
+
 /** Census findings, as messages naming the writer. */
 export function censusProblems(writes: MetaWriter[], allowlist: Record<string, Entry>, opaqueNotMeta: Record<string, Entry>): string[] {
   const problems: string[] = [];
@@ -698,7 +844,11 @@ export function censusProblems(writes: MetaWriter[], allowlist: Record<string, E
   }
   for (const [key, w] of unlocked) {
     if (!allowlist[key]) {
-      const how = w.raw ? 'with raw SQL' : 'without lockBusinessMeta on its client before the write (or spreads a metaData copy not read under it)';
+      const how = w.raw
+        ? 'with raw SQL'
+        : w.stray
+          ? `through a private write helper that ${w.stray} also reaches (only direct this-calls from callers that lock first may)`
+          : 'without lockBusinessMeta on its client before the write (or spreads a metaData copy not read under it)';
       problems.push(`${key} (${key.split('#')[0]}:${w.line}) writes Business.metaData ${how}`);
     }
   }
@@ -723,7 +873,8 @@ function sourceFiles(dir: string): string[] {
 }
 
 const FILES = sourceFiles(SRC);
-const WRITES = FILES.flatMap((f) => scanMetaWrites(relative(SRC, f).split(sep).join('/'), readFileSync(f, 'utf8')));
+const SOURCES = FILES.map((f) => ({ rel: relative(SRC, f).split(sep).join('/'), source: readFileSync(f, 'utf8') }));
+const WRITES = helperReachedElsewhere(SOURCES.flatMap(({ rel, source }) => scanMetaWrites(rel, source)), SOURCES);
 
 describe('FOLLOW3-D12 Business.metaData writers take the business row lock (census)', () => {
   it('reads the server source and finds the profile PATCH writer (this gate is not vacuous)', () => {
@@ -934,6 +1085,40 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
       '  private async writeBagStale(tx: any, id: string, meta: Record<string, unknown>) {',
       "    await tx.business.update({ where: { id }, data: { metaData: { ...meta, k: 10 } } });",
       '  }',
+      // Review CR-D13-1: a "normaliser" that fills its argument with a stale
+      // copy, and computed-key copies of a stale bag into the locked copy
+      // (written in place, or spread); a literal own key still passes.
+      '  async normalisedStale(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = keepStale(business?.metaData);',
+      "      await tx.business.update({ where: { id }, data: { metaData: { ...meta, k: 11 } } });",
+      '    });',
+      '  }',
+      '  async inPlaceStale(db: any, id: string, stale: any) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = (business?.metaData as Record<string, unknown> | null) ?? {};',
+      '      for (const k of Object.keys(stale)) meta[k] = stale[k];',
+      "      await tx.business.update({ where: { id }, data: { metaData: meta } });",
+      '    });',
+      '  }',
+      '  async spreadStaleFilled(db: any, id: string, stale: any) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = (business?.metaData as Record<string, unknown> | null) ?? {};',
+      '      Object.keys(stale).forEach((k) => { meta[k] = stale[k]; });',
+      "      await tx.business.update({ where: { id }, data: { metaData: { ...meta, k: 12 } } });",
+      '    });',
+      '  }',
+      '  async inPlaceOwnKey(db: any, id: string) {',
+      '    await db.$transaction(async (tx: any) => {',
+      '      const business = await lockBusinessMeta(tx, id);',
+      '      const meta = (business?.metaData as Record<string, unknown> | null) ?? {};',
+      "      meta['k'] = 13;",
+      "      await tx.business.update({ where: { id }, data: { metaData: meta } });",
+      '    });',
+      '  }',
       '}',
       'function asBag(raw: unknown) {',
       "  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;",
@@ -941,6 +1126,10 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
       '}',
       'function cached(raw: unknown) {',
       '  return raw ? CACHE : {};',
+      '}',
+      'function keepStale(raw: any) {',
+      '  Object.assign(raw, (globalThis as any).staleCopy);',
+      '  return raw;',
       '}',
     ].join('\n');
     const row = (w: MetaWriter) => `${w.key.split('#')[1]} ${w.line} ${w.locked ? 'locked' : 'unlocked'}${w.opaque ? ' opaque' : ''}${w.raw ? ' raw' : ''}${w.atomic ? ' atomic' : ''}`;
@@ -950,6 +1139,8 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
       'RogueMeta.atomicAfterRead 52 unlocked raw',
       'RogueMeta.atomicMerge 48 unlocked raw',
       'RogueMeta.inPlace 76 locked',
+      'RogueMeta.inPlaceOwnKey 143 locked',
+      'RogueMeta.inPlaceStale 127 unlocked',
       'RogueMeta.localMergedStale 93 unlocked',
       'RogueMeta.localOverLocked 85 locked',
       'RogueMeta.locked 39 locked',
@@ -957,9 +1148,11 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
       'RogueMeta.lockedStaleCopy 23 unlocked',
       'RogueMeta.nested 30 unlocked',
       'RogueMeta.normalised 61 locked',
+      'RogueMeta.normalisedStale 119 unlocked',
       'RogueMeta.notPassThrough 68 unlocked',
       'RogueMeta.opaque 27 unlocked opaque',
       'RogueMeta.raw 33 unlocked raw',
+      'RogueMeta.spreadStaleFilled 135 unlocked',
       'RogueMeta.unlocked 6 unlocked',
       'RogueMeta.viaVariable 11 unlocked',
       'RogueMeta.writeBag 103 locked',
@@ -968,11 +1161,16 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
     // Findings the injection adds (independent of what the tree holds today).
     const baseline = new Set(censusProblems(WRITES, D13_ALLOWLIST, OPAQUE_NOT_META));
     const added = censusProblems([...WRITES, ...scanned], D13_ALLOWLIST, OPAQUE_NOT_META).filter((p) => !baseline.has(p));
-    expect(added).toHaveLength(13);
+    expect(added).toHaveLength(16);
     // FOLLOW3-D13 forms that must still fail: a one-argument call that is not
     // a pass-through, a local the stale copy is Object.assign'ed into, and a
-    // private helper whose caller passes a copy read before its lock.
-    for (const [method, line] of [['notPassThrough', 68], ['localMergedStale', 93], ['writeBagStale', 113]] as const) {
+    // private helper whose caller passes a copy read before its lock; review
+    // CR-D13-1: a "normaliser" that Object.assigns a stale copy into its
+    // argument, and a stale bag copied key by key into the locked copy.
+    for (const [method, line] of [
+      ['notPassThrough', 68], ['localMergedStale', 93], ['writeBagStale', 113],
+      ['normalisedStale', 119], ['inPlaceStale', 127], ['spreadStaleFilled', 135],
+    ] as const) {
       expect(added).toContain(`${rel}#RogueMeta.${method} (${rel}:${line}) writes Business.metaData without lockBusinessMeta on its client before the write (or spreads a metaData copy not read under it)`);
     }
     expect(added).toContain(`${rel}#RogueMeta.unlocked (${rel}:6) writes Business.metaData without lockBusinessMeta on its client before the write (or spreads a metaData copy not read under it)`);
@@ -996,7 +1194,22 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
       'RogueMeta.atomicMerge 48 locked raw atomic',
       'RogueMeta.raw 33 unlocked raw',
     ]);
-    expect(censusProblems([...WRITES, ...withReviewed], D13_ALLOWLIST, OPAQUE_NOT_META).filter((p) => !baseline.has(p))).toHaveLength(12);
+    expect(censusProblems([...WRITES, ...withReviewed], D13_ALLOWLIST, OPAQUE_NOT_META).filter((p) => !baseline.has(p))).toHaveLength(15);
+
+    // Review CR-D13-1: a normaliser is a pass-through only while it does no
+    // more than test its argument and return it (or {}): a write into it, a
+    // call it is handed to or an alias of it fails the writer that uses it.
+    const asBagGuard = "  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;";
+    const normalisedRow = (prefix: string) =>
+      scanMetaWrites(rel, injected.replace(asBagGuard, `${prefix}\n${asBagGuard}`)).filter((w) => w.key.endsWith('#RogueMeta.normalised')).map((w) => w.locked);
+    expect([
+      '  if (!raw) return {};',
+      '  Object.assign(raw as object, STALE);',
+      '  (raw as any).k = STALE;',
+      '  (raw as any)[KEY] = STALE;',
+      '  fill(raw);',
+      '  const alias: any = raw;',
+    ].map(normalisedRow)).toEqual([[true], [false], [false], [false], [false], [false]]);
 
     // A private write helper is locked by its callers only while every
     // reference to it is a direct call from a caller that locked first: one
@@ -1012,6 +1225,50 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
     );
     const notPrivate = injected.replace('  private async writeBag(', '  async writeBag(');
     expect([helperRow(injected), helperRow(unlockedCaller), helperRow(asValue), helperRow(notPrivate)]).toEqual([[true], [false], [false], [false]]);
+
+    // Review D13-ST-1: every reference in the file counts, not only those in
+    // the helper's class. TS `private` does not hold against an `any`-typed
+    // instance: another class that passes an unlocked client and a stale copy
+    // fails the helper, as do `(this as any).writeBag`, a destructuring and a
+    // `this.writeBag` in a plain function. Another class's own `writeBag`
+    // called on its own `this` is not a reference to this one.
+    const outsideCaller = [
+      'class Outsider {',
+      '  async run(probe: any, db: any, id: string) {',
+      "    const stale = await db.business.findUnique({ where: { id }, select: { metaData: true } });",
+      '    await probe.writeBag(db, id, stale.metaData);',
+      '  }',
+      '}',
+    ].join('\n');
+    const ownWriteBag = [
+      'class Neighbour {',
+      '  async run(db: any) { await this.writeBag(db); }',
+      '  private async writeBag(db: any) { return db; }',
+      '}',
+    ].join('\n');
+    const withMethod = (method: string) => injected.replace('  private async writeBag(', `${method}\n  private async writeBag(`);
+    expect([
+      helperRow(`${injected}\n${outsideCaller}`),
+      helperRow(withMethod('  async anyThis(db: any, id: string) { await (this as any).writeBag(db, id, {}); }')),
+      helperRow(withMethod('  async destructured(db: any, id: string) { const { writeBag } = this as any; await writeBag(db, id, {}); }')),
+      helperRow(`${injected}\nfunction loose(this: any, db: any, id: string) { return this.writeBag(db, id, {}); }`),
+      helperRow(`${injected}\n${ownWriteBag}`),
+    ]).toEqual([[false], [false], [false], [false], [true]]);
+
+    // ... and every other source file counts too (the census passes every
+    // file under src to helperReachedElsewhere): a caller there fails the
+    // helper and the census names it; a class there with its own member of
+    // the same name does not.
+    const other = 'modules/other/other.service.ts';
+    const elsewhere = (source: string) =>
+      helperReachedElsewhere(scanned, [{ rel, source: injected }, { rel: other, source }]).filter((w) => w.key.endsWith('#RogueMeta.writeBag'));
+    const reached = elsewhere(outsideCaller);
+    expect(reached.map((w) => `${w.locked ? 'locked' : 'unlocked'} ${w.stray ?? ''}`)).toEqual([`unlocked ${other}:4`]);
+    expect(censusProblems([...WRITES, ...reached], D13_ALLOWLIST, OPAQUE_NOT_META).filter((p) => !baseline.has(p))).toEqual([
+      `${rel}#RogueMeta.writeBag (${rel}:103) writes Business.metaData through a private write helper that ${other}:4 also reaches (only direct this-calls from callers that lock first may)`,
+    ]);
+    expect(elsewhere(ownWriteBag).map((w) => w.locked)).toEqual([true]);
+    expect(elsewhere('export const unrelated = 1;').map((w) => w.locked)).toEqual([true]);
 
     // A stale allow-list entry fails too: the list shrinks with the code.
     const first = Object.keys(D13_ALLOWLIST)[0];
