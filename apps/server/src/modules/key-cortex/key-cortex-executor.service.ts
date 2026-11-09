@@ -106,6 +106,16 @@ export interface ExecuteOptions {
   sourceInfo?: Record<string, unknown>;
 }
 
+/**
+ * The autonomy authority's answer for one command (FOLLOW3-D14), asked once:
+ * by execute() itself, or by executeBatch() for every command before any runs.
+ * `failedClosed` marks an answer the authority could not give (a throw or an
+ * unusable verdict), which refuses a whole batch (review SEC-D14-1).
+ */
+type AutonomyGateOutcome =
+  | { refused: true; failedClosed: boolean; reason: string }
+  | { refused: false; clearsSkipApproval: boolean; forcesApproval: boolean };
+
 export interface ExecutionRecord {
   id: string;
   command: ConnectorCommand;
@@ -221,8 +231,9 @@ export class KeyCortexExecutorService {
    * Execute a single ConnectorCommand with full lifecycle management:
    *   0. Ask the autonomy authority once (fail closed: a throw, a deny or an
    *      unusable verdict refuses, audited; FOLLOW3-D14 applies V1-02
-   *      isUsableAutonomyVerdict). A verdict that asks for approval or whose
-   *      tier is manual sends the command to approval.
+   *      isUsableAutonomyVerdict). A verdict whose tier is manual sends the
+   *      command to approval; one that asks for approval clears the caller's
+   *      skipApproval, so the business policy decides (review D14-CR-1).
    *   1. Resolve the approval policy for this business + user.
    *   2. If approval required → delegate to executeWithApproval().
    *   3. Otherwise → call connector.execute() with timeout & error wrapping.
@@ -236,6 +247,20 @@ export class KeyCortexExecutorService {
   async execute(
     command: ConnectorCommand,
     options: ExecuteOptions = {},
+  ): Promise<ExecutionRecord> {
+    return this.executeGated(command, options);
+  }
+
+  /**
+   * execute() itself. `asked` is the autonomy answer executeBatch already
+   * obtained for this command (FOLLOW3-D14 review SEC-D14-1), so the authority
+   * is still asked once per command; without it the authority is asked here.
+   * Private: no caller outside this service can hand in an answer.
+   */
+  private async executeGated(
+    command: ConnectorCommand,
+    options: ExecuteOptions,
+    asked?: AutonomyGateOutcome,
   ): Promise<ExecutionRecord> {
     const traceId = options.traceId ?? this.generateTraceId();
     const startedAt = new Date();
@@ -266,122 +291,17 @@ export class KeyCortexExecutorService {
       });
     }
 
-    // ── Unified Autonomy Orchestrator: canonical verdict ───────────────────────
-    // FOLLOW3-D14 (V1-31c CX-09): set when a usable verdict asks for approval
-    // or its tier is manual; the command then goes to approval whatever the
-    // caller's skipApproval or the business policy says.
-    let verdictRequiresApproval = false;
-    try {
-      if (this.autonomyOrchestrator) {
-        const verdict = await this.autonomyOrchestrator.evaluateAction(
-          command.businessId,
-          `${command.module}.${command.action}`,
-          command.parameters,
-          { proposedBy: command.userId },
-        );
-
-        // FOLLOW3-D14 (V1-02 isUsableAutonomyVerdict, as the legacy gate, the
-        // query pipeline and flows/:id/execute apply it): a verdict that does
-        // not state a boolean allowed, a boolean requiresApproval and a known
-        // tier is not an answer, so the command fails closed, audited. This is
-        // the same single evaluation; nothing asks the authority twice.
-        // (Imported at call time: key-cortex-actions.service reaches this file
-        // again through ai/key-tool-registry -> ... -> flow-orchestrator ->
-        // key-cortex-planner, and a load-time import changes the module order
-        // so the built server fails to boot: ActionDispatcherService's
-        // AiOversightService is undefined when its metadata is emitted.)
-        const { isUsableAutonomyVerdict } = await import('./key-cortex-actions.service');
-        if (!isUsableAutonomyVerdict(verdict)) {
-          const reason = `Unusable autonomy verdict for ${command.module}.${command.action}; execution blocked for safety.`;
-          this.logger.error(`[execute] ${reason}`);
-          return this.audited({
-            id: randomUUID(),
-            command,
-            result: {
-              success: false,
-              error: reason,
-              executionTimeMs: 0,
-              command,
-            },
-            startedAt,
-            finishedAt: new Date(),
-            durationMs: 0,
-            traceId,
-            rolledBack: false,
-          });
-        }
-
-        if (!verdict.allowed) {
-          const reason = verdict.reason || 'Blocked by autonomy orchestrator';
-          this.logger.warn(`[execute] Autonomy orchestrator BLOCKED ${command.module}.${command.action}: ${reason}`);
-          return this.audited({
-            id: randomUUID(),
-            command,
-            result: {
-              success: false,
-              error: reason,
-              executionTimeMs: 0,
-              command,
-            },
-            startedAt,
-            finishedAt: new Date(),
-            durationMs: 0,
-            traceId,
-            rolledBack: false,
-          });
-        }
-
-        // FOLLOW3-D14: the verdict's approval answer is read as every other
-        // V1-02 gate reads it (requiresApproval, or a manual tier).
-        if (verdict.requiresApproval || verdict.tier === 'manual') {
-          verdictRequiresApproval = true;
-        }
-      } else {
-        // Legacy fallback: KEY Genome autonomy gate
-        const gate = await this.autonomyGate.checkGate({
-          businessId: command.businessId,
-          actionType: `${command.module}.${command.action}`,
-          affectedDomains: command.module ? [command.module as any] : undefined,
-          payload: command.parameters,
-          proposedBy: command.userId ?? null,
-        });
-
-        if (gate.decision === 'BLOCK') {
-          const reason =
-            gate.blockingReasons?.join('; ') ||
-            'Blocked by KEY Genome autonomy gate.';
-          this.logger.warn(`[execute] Autonomy gate BLOCKED ${command.module}.${command.action}: ${reason}`);
-          return this.audited({
-            id: randomUUID(),
-            command,
-            result: {
-              success: false,
-              error: reason,
-              executionTimeMs: 0,
-              command,
-            },
-            startedAt,
-            finishedAt: new Date(),
-            durationMs: 0,
-            traceId,
-            rolledBack: false,
-          });
-        }
-
-        if (gate.decision === 'ALLOW_WITH_APPROVAL' && options.skipApproval) {
-          options = { ...options, skipApproval: false };
-        }
-      }
-    } catch (gateErr) {
-      this.logger.error(
-        `[execute] Autonomy gate error for ${command.module}.${command.action}: ${(gateErr as Error).message}`,
-      );
+    // ── Autonomy authority: one answer per command ───────────────────────────
+    // FOLLOW3-D14: asked here, or already asked by executeBatch before any
+    // command of the batch ran (review SEC-D14-1); never asked twice.
+    const gate = asked ?? (await this.evaluateAutonomyGate(command));
+    if (gate.refused) {
       return this.audited({
         id: randomUUID(),
         command,
         result: {
           success: false,
-          error: 'Autonomy gate unavailable; execution blocked for safety.',
+          error: gate.reason,
           executionTimeMs: 0,
           command,
         },
@@ -391,6 +311,14 @@ export class KeyCortexExecutorService {
         traceId,
         rolledBack: false,
       });
+    }
+    // A verdict that asks for approval (or a legacy ALLOW_WITH_APPROVAL) clears
+    // the caller's skipApproval, so the business policy decides, as before
+    // FOLLOW3-D14 (review D14-CR-1: the real orchestrator answers
+    // requiresApproval:true at the supervised tier for every action of a
+    // business at the default level 2).
+    if (gate.clearsSkipApproval && options.skipApproval) {
+      options = { ...options, skipApproval: false };
     }
 
     // ── Emit START event ─────────────────────────────────────────────────────
@@ -403,9 +331,9 @@ export class KeyCortexExecutorService {
     }
 
     // ── 1. Approval check ────────────────────────────────────────────────────
-    // A verdict that asks for approval, or whose tier is manual, is never
-    // skipped (FOLLOW3-D14); otherwise the business policy decides.
-    const needsApproval = verdictRequiresApproval
+    // A usable verdict whose tier is manual is never skipped (FOLLOW3-D14);
+    // otherwise the business policy decides unless the caller skips it.
+    const needsApproval = gate.forcesApproval
       || (options.skipApproval ? false : await this.requiresApproval(command));
 
     if (needsApproval) {
@@ -522,6 +450,87 @@ export class KeyCortexExecutorService {
     return record;
   }
 
+  /**
+   * Ask the autonomy authority once for one command (the canonical
+   * orchestrator, else the legacy KEY Genome gate). Fail closed: a throw or an
+   * unusable verdict refuses with `failedClosed` (FOLLOW3-D14 applies V1-02
+   * isUsableAutonomyVerdict, as the legacy gate, the query pipeline and
+   * flows/:id/execute do); a usable deny or a legacy BLOCK refuses that command.
+   */
+  private async evaluateAutonomyGate(command: ConnectorCommand): Promise<AutonomyGateOutcome> {
+    const actionKey = `${command.module}.${command.action}`;
+    try {
+      if (this.autonomyOrchestrator) {
+        const verdict = await this.autonomyOrchestrator.evaluateAction(
+          command.businessId,
+          actionKey,
+          command.parameters,
+          { proposedBy: command.userId },
+        );
+
+        // A verdict that does not state a boolean allowed, a boolean
+        // requiresApproval and a known tier is not an answer.
+        // (Imported at call time: key-cortex-actions.service reaches this file
+        // again through ai/key-tool-registry -> ... -> flow-orchestrator ->
+        // key-cortex-planner, and a load-time import changes the module order
+        // so the built server fails to boot: ActionDispatcherService's
+        // AiOversightService is undefined when its metadata is emitted.)
+        const { isUsableAutonomyVerdict } = await import('./key-cortex-actions.service');
+        if (!isUsableAutonomyVerdict(verdict)) {
+          const reason = `Unusable autonomy verdict for ${actionKey}; execution blocked for safety.`;
+          this.logger.error(`[execute] ${reason}`);
+          return { refused: true, failedClosed: true, reason };
+        }
+
+        if (!verdict.allowed) {
+          const reason = verdict.reason || 'Blocked by autonomy orchestrator';
+          this.logger.warn(`[execute] Autonomy orchestrator BLOCKED ${actionKey}: ${reason}`);
+          return { refused: true, failedClosed: false, reason };
+        }
+
+        // Review D14-CR-1: only a manual tier forces approval; requiresApproval
+        // keeps its pre-D14 meaning (it clears skipApproval, the policy decides).
+        return {
+          refused: false,
+          clearsSkipApproval: verdict.requiresApproval,
+          forcesApproval: verdict.tier === 'manual',
+        };
+      }
+
+      // Legacy fallback: KEY Genome autonomy gate
+      const gate = await this.autonomyGate.checkGate({
+        businessId: command.businessId,
+        actionType: actionKey,
+        affectedDomains: command.module ? [command.module as any] : undefined,
+        payload: command.parameters,
+        proposedBy: command.userId ?? null,
+      });
+
+      if (gate.decision === 'BLOCK') {
+        const reason =
+          gate.blockingReasons?.join('; ') ||
+          'Blocked by KEY Genome autonomy gate.';
+        this.logger.warn(`[execute] Autonomy gate BLOCKED ${actionKey}: ${reason}`);
+        return { refused: true, failedClosed: false, reason };
+      }
+
+      return {
+        refused: false,
+        clearsSkipApproval: gate.decision === 'ALLOW_WITH_APPROVAL',
+        forcesApproval: false,
+      };
+    } catch (gateErr) {
+      this.logger.error(
+        `[execute] Autonomy gate error for ${actionKey}: ${(gateErr as Error).message}`,
+      );
+      return {
+        refused: true,
+        failedClosed: true,
+        reason: 'Autonomy gate unavailable; execution blocked for safety.',
+      };
+    }
+  }
+
   // ════════════════════════════════════════════════════════════════════════════
   // SECTION 4 — executeBatch()
   // ════════════════════════════════════════════════════════════════════════════
@@ -529,6 +538,9 @@ export class KeyCortexExecutorService {
    * Execute multiple commands in sequence.
    *
    * Behaviour:
+   *   • Ask the autonomy authority for every command (once each) before any
+   *     runs; a throw or an unusable verdict refuses the whole batch, each
+   *     command on record (FOLLOW3-D14 review SEC-D14-1).
    *   • Process commands in the given order.
    *   • If a command fails and stopOnFailure !== false, halt the batch.
    *   • If stopOnFailure === false, continue executing remaining commands.
@@ -587,7 +599,51 @@ export class KeyCortexExecutorService {
     let rolledBackCount = 0;
     let stoppedEarly = false;
 
+    // FOLLOW3-D14 (review SEC-D14-1): every command is put to the autonomy
+    // authority, once each, before any of them runs, as the legacy gate
+    // (V1-02b executeActions), the query pipeline (V1-02) and
+    // flows/:id/execute do. The batch is atomic on an answer the authority
+    // could not give: one evaluation that throws or returns an unusable
+    // verdict refuses every command of the batch, each on record, so nothing
+    // reaches the connector and no approval is created (the commands after it
+    // are not asked). A usable deny refuses its own command only, and approval
+    // stays per command.
+    const gates: AutonomyGateOutcome[] = [];
+    let failedClosedAt = -1;
     for (let i = 0; i < commands.length; i++) {
+      const gate = await this.evaluateAutonomyGate(commands[i]);
+      gates.push(gate);
+      if (gate.refused && gate.failedClosed) {
+        failedClosedAt = i;
+        break;
+      }
+    }
+    if (failedClosedAt >= 0) {
+      const failing = commands[failedClosedAt];
+      const failingGate = gates[failedClosedAt] as Extract<AutonomyGateOutcome, { refused: true }>;
+      const batchReason =
+        `Batch failed closed; execution blocked for safety: step ${failedClosedAt + 1} ` +
+        `(${failing.module}.${failing.action}): ${failingGate.reason}`;
+      this.logger.error(
+        `[executeBatch] Autonomy check failed closed at step ${failedClosedAt + 1}: 0/${commands.length} commands run trace=${traceId}`,
+      );
+      for (let i = 0; i < commands.length; i++) {
+        const refusal: AutonomyGateOutcome = i === failedClosedAt
+          ? failingGate
+          : { refused: true, failedClosed: true, reason: batchReason };
+        results.push(
+          await this.executeGated(
+            commands[i],
+            { ...options, traceId: `${traceId}_step${i + 1}`, emitEvents: false },
+            refusal,
+          ),
+        );
+        failedCount++;
+      }
+      stoppedEarly = true;
+    }
+
+    for (let i = 0; failedClosedAt < 0 && i < commands.length; i++) {
       const cmd = commands[i];
       const cmdTraceId = `${traceId}_step${i + 1}`;
 
@@ -595,11 +651,12 @@ export class KeyCortexExecutorService {
         `[executeBatch] Step ${i + 1}/${commands.length}: ${cmd.module}.${cmd.action}`,
       );
 
-      const record = await this.execute(cmd, {
+      // The authority's answer for this command was asked above (once).
+      const record = await this.executeGated(cmd, {
         ...options,
         traceId: cmdTraceId,
         emitEvents: false, // we'll emit one aggregated event
-      });
+      }, gates[i]);
 
       results.push(record);
 

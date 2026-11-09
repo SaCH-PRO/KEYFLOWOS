@@ -270,7 +270,7 @@ const connectorCalls: Array<{ module: unknown; action: unknown; businessId: unkn
 const cortexAutonomyCalls: Array<{ businessId: unknown; actionKey: unknown; proposedBy: unknown }> = [];
 /** Every call the sandbox the controller holds received (no case may reach it). */
 const sandboxCalls: string[] = [];
-/** What the autonomy stand-in answers: a fully stated allow unless a case sets another verdict or 'throw'. */
+/** What the autonomy stand-in answers: a fully stated allow unless a case sets another verdict, 'throw', or a function of the command's parameters. */
 const ALLOW = { allowed: true, requiresApproval: false, tier: 'full', reason: 'v31c allows' };
 let cortexVerdict: unknown = ALLOW;
 /** The parameters each verdict request carried, in the order of cortexAutonomyCalls (review SEC-V131c-4 / CRR-2). */
@@ -741,6 +741,8 @@ beforeAll(async () => {
     evaluateAction: async (businessId: unknown, actionKey: unknown, params: unknown, opts?: { proposedBy?: unknown }) => {
       cortexAutonomyCalls.push({ businessId, actionKey, proposedBy: opts?.proposedBy });
       cortexGateParams.push({ actionKey, parameters: params });
+      // FOLLOW3-D14 review SEC-D14-1: a case may answer per command (a function of the parameters; it may throw).
+      if (typeof cortexVerdict === 'function') return (cortexVerdict as (p: unknown) => unknown)(params);
       if (cortexVerdict === 'throw') throw new Error('v31c: the autonomy orchestrator is down');
       if (JSON.stringify(params ?? {}).includes(DEALBREAKER)) {
         return { allowed: false, requiresApproval: false, tier: 'manual', reason: 'v31c: a dealbreaker term' };
@@ -2033,21 +2035,24 @@ describe('V1-31c CX: POST execute and POST batch run a member-initiated command 
    * KeyCortexExecutorService.execute, whose single autonomy gate read only verdict.allowed and
    * verdict.requiresApproval, so a verdict that did not state requiresApproval or a tier ran the command.
    * The gate now applies V1-02 isUsableAutonomyVerdict (as the legacy gate, the query pipeline and
-   * flows/:id/execute do): an unusable verdict fails closed with one audit row, and a usable one goes to
-   * approval when it asks for it or its tier is manual. Still one evaluateAction per command.
+   * flows/:id/execute do): an unusable verdict fails closed with one audit row, and a usable one whose tier
+   * is manual goes to approval. A usable verdict that asks for approval at a supervised tier keeps its
+   * pre-D14 meaning (review D14-CR-1): it clears the caller's skipApproval and the business policy decides.
+   * POST batch asks every command's verdict before any command runs and fails closed as a whole on an
+   * unusable answer (review SEC-D14-1). Still one evaluateAction per command.
    */
   /** POST execute or a one-command POST batch for cxStaffW (projects write) under `verdict`: what the route answered, ran and wrote. */
-  async function cx09Run(route: 'execute' | 'batch', verdict: unknown, name: string) {
+  async function cx09Run(route: 'execute' | 'batch', verdict: unknown, name: string, extra: Record<string, unknown> = {}) {
     const before = { connector: connectorCalls.length, autonomy: cortexAutonomyCalls.length };
     const audit = await cxAuditIds();
     cortexVerdict = verdict;
     let res: any;
     try {
       res = route === 'execute'
-        ? await cortex('execute', ID.cxStaffW, structuredCmd('projects', 'create_project', { name }))
+        ? await cortex('execute', ID.cxStaffW, structuredCmd('projects', 'create_project', { name, ...extra }))
         : await cortex('batch', ID.cxStaffW, {
           businessId: ID.cxBiz,
-          commands: [{ type: 'structured', module: 'projects', action: 'create_project', parameters: { name } }],
+          commands: [{ type: 'structured', module: 'projects', action: 'create_project', parameters: { name, ...extra } }],
         });
     } finally {
       cortexVerdict = ALLOW;
@@ -2110,22 +2115,117 @@ describe('V1-31c CX: POST execute and POST batch run a member-initiated command 
     }
   });
 
-  it("CX-09c (FOLLOW3-D14) a usable verdict whose tier is manual ({allowed:true, requiresApproval:false, tier:'manual'}), or which asks for approval, is sent to approval on POST execute and batch and not executed", async () => {
-    for (const verdict of [
-      { allowed: true, requiresApproval: false, tier: 'manual' },
-      { allowed: true, requiresApproval: true, tier: 'supervised', reason: 'v31c approve first' },
-    ]) {
-      for (const route of ['execute', 'batch'] as const) {
-        const run = await cx09Run(route, verdict, `v31c approval ${route}`);
-        expect(run.connector, run.label).toEqual([]);
-        expect(run.result, run.label).toMatchObject({ success: false, error: 'Approval pending', data: { approvalStatus: 'pending' } });
-        expect(run.autonomy, run.label).toEqual([cx09GateCall()]);
-        expect(run.rows, run.label).toHaveLength(1);
-        expect(run.rows[0], run.label).toMatchObject({
-          userId: ID.cxStaffW, actor: 'user', module: 'projects', action: 'create_project', success: false, errorMessage: 'Approval pending',
+  it("CX-09c (FOLLOW3-D14) a usable verdict whose tier is manual ({allowed:true, requiresApproval:false, tier:'manual'}) is sent to approval on POST execute and batch and not executed", async () => {
+    const verdict = { allowed: true, requiresApproval: false, tier: 'manual' };
+    for (const route of ['execute', 'batch'] as const) {
+      const run = await cx09Run(route, verdict, `v31c approval ${route}`);
+      expect(run.connector, run.label).toEqual([]);
+      expect(run.result, run.label).toMatchObject({ success: false, error: 'Approval pending', data: { approvalStatus: 'pending' } });
+      expect(run.autonomy, run.label).toEqual([cx09GateCall()]);
+      expect(run.rows, run.label).toHaveLength(1);
+      expect(run.rows[0], run.label).toMatchObject({
+        userId: ID.cxStaffW, actor: 'user', module: 'projects', action: 'create_project', success: false, errorMessage: 'Approval pending',
+      });
+    }
+  });
+
+  /*
+   * Review D14-CR-1: {allowed:true, requiresApproval:true, tier:'supervised'} is what the real
+   * AutonomyOrchestratorService answers for every action of a business with no autonomy settings (the default
+   * level 2). FOLLOW3-D14 must not turn that into "every command waits for approval": as before D14 the verdict
+   * clears the route's skipApproval (POST execute and batch skip approval unless the body asks for it) and the
+   * business approval policy decides (no settings: supervised, spending threshold 1000).
+   */
+  it("CX-09e (FOLLOW3-D14 review D14-CR-1) a usable verdict that asks for approval at a supervised tier (the real orchestrator's default-tenant answer) is not forced to approval: the business policy decides on POST execute and batch", async () => {
+    const supervised = { allowed: true, requiresApproval: true, tier: 'supervised', reason: 'All gates passed' };
+    for (const route of ['execute', 'batch'] as const) {
+      // Under the policy an ordinary create runs, once, for the member.
+      const run = await cx09Run(route, supervised, `v31c supervised ${route}`);
+      expect(run.result, run.label).toMatchObject({ success: true });
+      expect(run.connector, run.label).toEqual([
+        { module: 'projects', action: 'create_project', businessId: ID.cxBiz, userId: ID.cxStaffW, parameters: { name: `v31c supervised ${route}` } },
+      ]);
+      expect(run.autonomy, run.label).toEqual([cx09GateCall()]);
+      expect(run.rows, run.label).toHaveLength(1);
+      expect(run.rows[0], run.label).toMatchObject({ userId: ID.cxStaffW, actor: 'user', module: 'projects', action: 'create_project', success: true });
+
+      // Over the policy's spending threshold the policy asks for approval although the route skips approval
+      // by default: the verdict's requiresApproval brought the policy back.
+      const over = await cx09Run(route, supervised, `v31c supervised over ${route}`, { budget: 5000 });
+      expect(over.connector, over.label).toEqual([]);
+      expect(over.result, over.label).toMatchObject({ success: false, error: 'Approval pending', data: { approvalStatus: 'pending' } });
+      expect(over.autonomy, over.label).toEqual([cx09GateCall()]);
+      expect(over.rows, over.label).toHaveLength(1);
+      expect(over.rows[0], over.label).toMatchObject({ userId: ID.cxStaffW, success: false, errorMessage: 'Approval pending' });
+
+      // The same spend under a full-tier verdict that does not ask for approval keeps the route's skipApproval.
+      const full = await cx09Run(route, ALLOW, `v31c full over ${route}`, { budget: 5000 });
+      expect(full.result, full.label).toMatchObject({ success: true });
+      expect(full.connector, full.label).toHaveLength(1);
+    }
+  });
+
+  /*
+   * Review SEC-D14-1: POST batch is atomic on an answer the authority could not give. Every command's verdict
+   * is asked (once each) before any command runs, as the legacy gate (V1-02b failBatchClosed), the query
+   * pipeline (V1-02) and flows/:id/execute do, so a command ahead of the one whose verdict is unusable, or
+   * whose evaluation throws, never reaches the connector. A usable deny stays that command's answer only.
+   */
+  it('CX-09d (FOLLOW3-D14 review SEC-D14-1) POST batch fails closed as a whole when one command\'s verdict is unusable or its evaluation throws: no command reaches the connector and every command is refused on record', async () => {
+    const first = 'v31c batch first';
+    for (const [second, answer, pattern] of [
+      ['v31c batch unusable', () => ({ allowed: true }), /unusable autonomy verdict for projects\.create_project.*blocked for safety/i],
+      ['v31c batch throws', () => { throw new Error('v31c: the authority failed on one command'); }, /autonomy gate unavailable.*blocked for safety/i],
+    ] as const) {
+      const before = { connector: connectorCalls.length, autonomy: cortexAutonomyCalls.length };
+      const audit = await cxAuditIds();
+      cortexVerdict = (params: any) => (params?.name === second ? answer() : ALLOW);
+      let res: any;
+      try {
+        res = await cortex('batch', ID.cxStaffW, {
+          businessId: ID.cxBiz,
+          commands: [
+            { type: 'structured', module: 'projects', action: 'create_project', parameters: { name: first } },
+            { type: 'structured', module: 'projects', action: 'create_project', parameters: { name: second } },
+          ],
         });
+      } finally {
+        cortexVerdict = ALLOW;
+      }
+      const label = `${second} ${JSON.stringify(res.body)}`;
+      expect(res.status, label).toBe(200);
+      expect(res.body.summary, label).toMatchObject({ total: 2, succeeded: 0, failed: 2 });
+      expect(connectorCalls.slice(before.connector), label).toEqual([]);
+      // One evaluateAction per command, all of them before any command ran.
+      expect(cortexAutonomyCalls.slice(before.autonomy), label).toEqual([cx09GateCall(), cx09GateCall()]);
+      expect(res.body.results[0], label).toMatchObject({ success: false });
+      expect(String(res.body.results[0].error), label).toMatch(/batch failed closed/i);
+      expect(String(res.body.results[0].error), label).toMatch(pattern);
+      expect(res.body.results[1], label).toMatchObject({ success: false });
+      expect(String(res.body.results[1].error), label).toMatch(pattern);
+      for (const r of res.body.results) expect(r.error, label).not.toBe('Approval pending');
+      const rows = (await cxAuditSince(audit)).filter((r: any) => r.module !== 'batch');
+      expect(rows, label).toHaveLength(2);
+      for (const row of rows) {
+        expect(row, label).toMatchObject({ businessId: ID.cxBiz, userId: ID.cxStaffW, actor: 'user', module: 'projects', action: 'create_project', success: false });
+        expect(String(row.errorMessage), label).toMatch(pattern);
       }
     }
+
+    // A usable deny of one command refuses that command only (the legacy gate's 'blocked', the pipeline's 'denied').
+    const before = { connector: connectorCalls.length, autonomy: cortexAutonomyCalls.length };
+    const res = await cortex('batch', ID.cxStaffW, {
+      businessId: ID.cxBiz,
+      commands: [
+        { type: 'structured', module: 'projects', action: 'create_project', parameters: { name: 'v31c batch kept' } },
+        { type: 'structured', module: 'projects', action: 'create_project', parameters: { name: `v31c ${DEALBREAKER}` } },
+      ],
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.summary).toMatchObject({ total: 2, succeeded: 1, failed: 1 });
+    expect(connectorCalls.slice(before.connector).map((c) => c.parameters)).toEqual([{ name: 'v31c batch kept' }]);
+    expect(cortexAutonomyCalls.length - before.autonomy).toBe(2);
+    expect(res.body.results[1]).toMatchObject({ success: false, error: 'v31c: a dealbreaker term' });
   });
 });
 
