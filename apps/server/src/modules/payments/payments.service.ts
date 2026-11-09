@@ -1118,6 +1118,21 @@ export class PaymentsService {
    * read is not caught: the delivery fails (its claim is released) and Stripe
    * delivers it again. `owns` keeps the answer per business and charge, so a
    * charge.refunded listing several refunds reads the provider once.
+   *
+   * Review SEC-A3-1/2, CR-A3-2: such an event is about a charge on the
+   * platform account, so only a business that takes Stripe payments there (no
+   * Stripe key of its own, onPlatformAccount) is asked. For a business with
+   * its own key, isOwnCharge reads that business's own account with that key
+   * and counts that business's own rows (which a delivery it signs itself
+   * writes) as proof: its answer, or its failure, is never the platform's
+   * record, and asking it would let a tenant fail every delivery of another
+   * tenant's refund (an invalid key) or claim or block it (a self-signed row
+   * naming the charge). A business that saves a key of its own while it is
+   * being asked is treated the same: its answer does not count and its failed
+   * read does not fail the delivery. Residual (review CR-A3-1): a payment a
+   * business took on the platform account before it saved its own key is not
+   * bound either; the refund is refused and logged, as StripeConnector has no
+   * platform-account read for such a business.
    */
   private async platformRefundOriginal(
     eventType: string,
@@ -1134,25 +1149,54 @@ export class PaymentsService {
       select: { id: true, providerPaymentId: true, invoiceId: true, businessId: true, currency: true, amount: true },
     });
     const businesses = [...new Set(matches.map((m) => m.businessId))];
+    const onPlatform = await this.onPlatformAccount(businesses);
     const owners: string[] = [];
     for (const businessId of businesses) {
+      if (!onPlatform.has(businessId)) continue;
       const key = `${businessId} ${charge}`;
       let own = owns.get(key);
       if (own === undefined) {
-        own = await connector.isOwnCharge(businessId, charge);
+        own = await connector.isOwnCharge(businessId, charge).catch(async (err: unknown) => {
+          // A read on the platform account failed: the delivery fails. A read
+          // on a key the business saved meanwhile is no answer at all.
+          if ((await this.onPlatformAccount([businessId])).has(businessId)) throw err;
+          return false;
+        });
         owns.set(key, own);
       }
       if (own) owners.push(businessId);
     }
-    if (owners.length !== 1) {
+    // An owner that saved a key of its own while it was asked answered from its own account.
+    const stillOnPlatform = owners.length > 0 ? await this.onPlatformAccount(owners) : new Set<string>();
+    const confirmed = owners.filter((b) => stillOnPlatform.has(b));
+    if (confirmed.length !== 1) {
+      const notAsked = businesses.filter((b) => !onPlatform.has(b) || (owners.includes(b) && !stillOnPlatform.has(b)));
       this.logger.warn(
         `Stripe ${eventType} for charge ${charge} (pi=${paymentIntent ?? 'none'}) matches payments of ${businesses.join(', ')}, ` +
-          `but the provider's record of the charge names ${owners.length ? `more than one of them (${owners.join(', ')})` : 'none of them'}; ` +
+          `but the platform account's record of the charge names ${confirmed.length ? `more than one of them (${confirmed.join(', ')})` : 'none of them'}` +
+          `${notAsked.length ? ` (not asked, as they hold a Stripe key of their own: ${notAsked.join(', ')})` : ''}; ` +
           'refusing to record it',
       );
       return null;
     }
-    return matches.find((m) => m.businessId === owners[0]) ?? null;
+    return matches.find((m) => m.businessId === confirmed[0]) ?? null;
+  }
+
+  /**
+   * Review SEC-A3-1: of `businessIds`, the ones that take Stripe payments on
+   * the platform account, i.e. hold no Stripe key of their own (the rule by
+   * which StripeConnector.resolveKey, createStripeCheckout and the gateway
+   * list choose the deployment's STRIPE_SECRET_KEY).
+   */
+  private async onPlatformAccount(businessIds: string[]): Promise<Set<string>> {
+    if (businessIds.length === 0) return new Set();
+    const rows = await this.prisma.client.business.findMany({
+      where: { id: { in: businessIds } },
+      select: { id: true, metaData: true },
+    });
+    return new Set(
+      rows.filter((b) => !(b.metaData as Record<string, unknown> | null)?.stripeSecretKey).map((b) => b.id),
+    );
   }
 
   // ---------------------------------------------------------------------------
