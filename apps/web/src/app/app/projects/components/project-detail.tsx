@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -27,7 +27,6 @@ import {
   ProjectMilestone,
   updateProject,
   deleteProject,
-  createProjectTask,
   updateProjectTask,
   updateProjectTaskStatus,
   deleteProjectTask,
@@ -35,6 +34,14 @@ import {
   updateProjectMilestone,
   deleteProjectMilestone,
 } from "@/lib/client";
+import {
+  createProjectTaskFor,
+  reorderProjectTasks,
+  setProjectTaskAssignee,
+  setProjectTaskPosition,
+  type ProjectBoardTask,
+  type TaskMove,
+} from "@/lib/api/projects";
 import { toast } from "sonner";
 import { TabNav } from "@/components/ui/tab-nav";
 import { TaskContinuityHeader } from "@/components/ui/task-continuity-header";
@@ -179,15 +186,31 @@ export function ProjectDetail({
     setMenuOpen(false);
   };
 
-  const handleAddTask = useCallback(async (projectId: string, title: string, dueDate?: string) => {
+  // PR196-PROJECTS-WEB: task writes that can follow one another before the parent re-renders (a
+  // Kanban move, then the positions of the cards it landed above) apply to the latest project,
+  // not to the one this render closed over, so the second does not undo the first.
+  const latestProject = useRef(project);
+  useEffect(() => {
+    latestProject.current = project;
+  }, [project]);
+  const commitTasks = useCallback((change: (tasks: ProjectTask[]) => ProjectTask[]) => {
+    const current = latestProject.current;
+    const next = { ...current, tasks: change(current.tasks ?? []) };
+    latestProject.current = next;
+    onProjectUpdate(next);
+  }, [onProjectUpdate]);
+
+  const handleAddTask = useCallback(async (projectId: string, title: string, dueDate?: string, assigneeId?: string) => {
     if (!businessId || !title) return;
-    try {
-      const res = await createProjectTask(businessId, projectId, { title, dueDate });
-      if (res.data) {
-        onProjectUpdate({ ...project, tasks: [...(project.tasks || []), res.data] });
-      }
-    } catch { toast.error("Failed to add task"); }
-  }, [businessId, project, onProjectUpdate]);
+    // WPD-10 / D-87: the new task may name a member or a booking staff member as its assignee.
+    const res = await createProjectTaskFor(businessId, projectId, { title, dueDate, ...(assigneeId ? { assigneeId } : {}) });
+    if (res.data) {
+      const created = res.data;
+      commitTasks((tasks) => [...tasks, created]);
+    } else {
+      toast.error(res.error ?? "Failed to add task");
+    }
+  }, [businessId, commitTasks]);
 
   const handleToggleTask = useCallback(async (projectId: string, task: ProjectTask) => {
     if (!businessId) return;
@@ -200,9 +223,76 @@ export function ProjectDetail({
           ...project,
           tasks: project.tasks.map((t) => (t.id === task.id ? res.data! : t)),
         });
+      } else if (res.error) {
+        toast.error(res.error);
       }
     } catch { toast.error("Failed to update task"); }
   }, [businessId, project, onProjectUpdate]);
+
+  /**
+   * WPD-05 / WPD-07: a Kanban move to another column goes through the server's status door
+   * (PATCH .../tasks/:taskId/status, PR196-PROJECTS-SERVER: the evidence gate, the completion
+   * event, the member as actor). false tells the board to put the card back.
+   */
+  const handleUpdateTaskStatus = useCallback(async (projectId: string, taskId: string, status: string, position: number) => {
+    if (!businessId) return false;
+    const res = await updateProjectTaskStatus(businessId, taskId, { status, position });
+    if (!res.data) {
+      toast.error(res.error ?? "Failed to move the task");
+      return false;
+    }
+    const moved = res.data;
+    commitTasks((tasks) => tasks.map((t) => (t.id === taskId ? { ...t, ...moved } : t)));
+    return true;
+  }, [businessId, commitTasks]);
+
+  /**
+   * WPD-06: a column reorder saves every moved task's position. A reorder never changes a task's
+   * status or completion (a move to another column is the status door's). The reorder route
+   * (POST .../tasks/reorder) writes a position alone only when the status it is sent is the task's
+   * stored status and that status agrees with its completion; otherwise it sends the task through
+   * updateTask as a status change (review SEC-W196-1, CR-W1: reordering other cards reopened a task
+   * completed by the checkbox or KEY, in the member's name). Such a task's position is saved alone
+   * (PATCH .../tasks/:taskId {position}).
+   */
+  const handleReorderTasks = useCallback(async (projectId: string, updates: TaskMove[]) => {
+    if (!businessId || updates.length === 0) return true;
+    const stored = new Map((latestProject.current.tasks ?? []).map((t) => [t.id, t as ProjectBoardTask]));
+    const keepsStatus = (u: TaskMove) => {
+      const t = stored.get(u.taskId);
+      return !!t && u.status === t.status && (t.status === "DONE") === !!t.isCompleted;
+    };
+    const moves = updates.filter(keepsStatus);
+    const positionsOnly = updates.filter((u) => !keepsStatus(u));
+
+    if (moves.length > 0) {
+      const res = await reorderProjectTasks(businessId, projectId, moves);
+      if (res.error) {
+        toast.error(res.error);
+        return false;
+      }
+    }
+    const results = await Promise.all(positionsOnly.map((u) => setProjectTaskPosition(businessId, u.taskId, u.position)));
+    const refused = results.find((r) => r.error);
+    if (refused) {
+      toast.error(refused.error ?? "Failed to save the order");
+      return false;
+    }
+    const positions = new Map(updates.map((u) => [u.taskId, u.position]));
+    commitTasks((tasks) => tasks.map((t) => (positions.has(t.id) ? ({ ...t, position: positions.get(t.id)! } as ProjectTask) : t)));
+    return true;
+  }, [businessId, commitTasks]);
+
+  /** WPD-10 / D-87: the assignee write, a member or a booking staff member; null unassigns. */
+  const handleAssignTask = useCallback(async (projectId: string, taskId: string, assigneeId: string | null) => {
+    if (!businessId) return;
+    const res = await setProjectTaskAssignee(businessId, taskId, assigneeId);
+    if (res.error) {
+      toast.error(res.error);
+      return;
+    }
+    commitTasks((tasks) => tasks.map((t) => (t.id === taskId ? { ...t, assigneeId: assigneeId ?? undefined } : t)));
+  }, [businessId, commitTasks]);
 
   const handleDeleteTask = useCallback(async (projectId: string, taskId: string) => {
     if (!businessId) return;
@@ -459,10 +549,14 @@ export function ProjectDetail({
           <TasksTab
             tasks={project.tasks ?? []}
             projectId={project.id}
+            businessId={businessId}
             onAddTask={handleAddTask}
             onToggleTask={handleToggleTask}
             onDeleteTask={handleDeleteTask}
             onUpdateTask={handleUpdateTask}
+            onAssignTask={handleAssignTask}
+            onUpdateTaskStatus={handleUpdateTaskStatus}
+            onReorderTasks={handleReorderTasks}
           />
         )}
         {activeTab === "milestones" && (

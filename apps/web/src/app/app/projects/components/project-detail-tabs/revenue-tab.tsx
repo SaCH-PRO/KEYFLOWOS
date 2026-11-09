@@ -16,6 +16,7 @@ import {
   Paperclip,
 } from "lucide-react";
 import { fetchInvoices, fetchExpensesByProject, type Expense, type Invoice } from "@/lib/client";
+import { BudgetAccessDenied, ProjectBudgetView } from "../project-budget-view";
 
 interface RevenueTabProps {
   invoiceId?: string;
@@ -27,6 +28,9 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
   const [projectExpenses, setProjectExpenses] = useState<Expense[]>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
   const [expenseError, setExpenseError] = useState<string | null>(null);
+  // Review SEC-W196-2: whether the project's expense list answered this member. The budget card
+  // waits for it and shows its costs only when the list was not refused (403).
+  const [costAccess, setCostAccess] = useState<"pending" | "allowed" | "refused">("pending");
   const [linkedInvoice, setLinkedInvoice] = useState<Invoice | null>(null);
   const [loadingInvoice, setLoadingInvoice] = useState(false);
 
@@ -36,12 +40,15 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
     async function loadExpenses() {
       setLoadingExpenses(true);
       setExpenseError(null);
+      setCostAccess("pending");
       try {
         const res = await fetchExpensesByProject(businessId!, projectId!);
+        if (!cancelled) setCostAccess((res as { status?: number }).status === 403 ? "refused" : "allowed");
         if (!cancelled && res.data) {
           setProjectExpenses(res.data.expenses);
         }
       } catch (err) {
+        if (!cancelled) setCostAccess("allowed");
         if (!cancelled) {
           setExpenseError("Failed to load project expenses. Please try again.");
           console.error("[RevenueTab] expense fetch error:", err);
@@ -99,6 +106,21 @@ export function RevenueTab({ invoiceId, businessId, projectId }: RevenueTabProps
 
   return (
     <div className="space-y-4">
+      {/* PR196-PROJECTS-WEB (F7b): the project's budget and hours burn, read through the API client. */}
+      {businessId && projectId && (
+        <div className="rounded-xl border border-border/40 bg-card p-4">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            Budget & Hours Burn
+          </h4>
+          {costAccess === "allowed" ? (
+            <ProjectBudgetView businessId={businessId} projectId={projectId} />
+          ) : costAccess === "refused" ? (
+            <BudgetAccessDenied />
+          ) : (
+            <div className="p-8 text-center text-sm text-muted-foreground">Loading budget...</div>
+          )}
+        </div>
+      )}
       {invoiceId ? (
         <div className="rounded-xl border border-border/40 bg-card p-4">
           {loadingInvoice ? (
