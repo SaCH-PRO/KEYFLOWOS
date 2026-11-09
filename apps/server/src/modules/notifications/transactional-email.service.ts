@@ -36,6 +36,8 @@ import {
   quoteSentTemplate,
 } from './email-templates';
 import { schedulersDisabled } from '../../core/config/env';
+// W4-HOUSEKEEPING (9B-D2): the one address redactor, shared with SystemEmailService.
+import { redactAddresses } from '../../core/security/redaction';
 
 export type NotificationType =
   | 'booking_confirmed'
@@ -145,14 +147,13 @@ function recipientForLog(contactId?: string | null): string {
   return contactId ? `contact ${contactId}` : 'a recipient with no contact';
 }
 
-/** Anything shaped like an email address: the pattern SystemEmailService redacts (9B-D2). */
-const ADDRESS_PATTERN = /[^\s<>"'`(),;:[\]]+@[^\s<>"'`(),;:[\]]+/g;
-
 /**
  * Error text from Gmail, a template or a lookup, for a log line: the message's
  * subject (when given) and every address-shaped token are replaced, so an
  * error that quotes the message cannot put its recipient or content in the
- * logs. The rest of the text stays: it is what an operator needs.
+ * logs. The rest of the text stays: it is what an operator needs. The address
+ * part is redactAddresses, the one copy SystemEmailService uses too (9B-D2,
+ * W4-HOUSEKEEPING).
  *
  * Any value is read as text first (CR-1, W3-C2b review): a thrown value's
  * message need not be a string, and a log line must never turn a failed send
@@ -161,7 +162,7 @@ const ADDRESS_PATTERN = /[^\s<>"'`(),;:[\]]+@[^\s<>"'`(),;:[\]]+/g;
 function redactForLog(text: unknown, subject?: string): string {
   const asText = typeof text === 'string' ? text : String(text);
   const withoutSubject = subject ? asText.split(subject).join('<subject>') : asText;
-  return withoutSubject.replace(ADDRESS_PATTERN, '<address>');
+  return redactAddresses(withoutSubject);
 }
 
 /**

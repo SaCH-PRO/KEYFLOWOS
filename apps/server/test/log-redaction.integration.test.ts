@@ -2199,4 +2199,30 @@ describe('Release 0 trust census (RELEASE0-TRUST-CENSUS-001)', () => {
     ).toHaveLength(1);
     expect(findings).not.toMatch(/A non-draft pkt\/\* PR fails closed at the grant step/);
   });
+
+  it('CF-029 scopes the platform sender\'s closure (9B-D2, D-82) to its own lines and keeps the lines one hop up OPEN (SEC-W4HK-1)', () => {
+    // W4-HOUSEKEEPING review SEC-W4HK-1: SystemEmailService redacts addresses
+    // on its own lines only. The SystemEmailSendError it throws still carries
+    // the provider text (system-email.service.ts:125, :144), and its callers log
+    // that text or the recipient themselves; system-email.log-redaction.spec.ts
+    // pins that boundary by CHARACTERIZATION. The callers are outside
+    // W4-HOUSEKEEPING's write set, so the census must not record the recipient
+    // leak as closed: it names the sink-only scope and lists those lines OPEN.
+    const note = rows('CF').find((r) => r.id === 'CF-029')?.cells[CF_COL.evidence] ?? '';
+    const SCOPE = "that closure covers the sink's own lines only";
+    expect(note, `CF-029 says "${SCOPE}"`).toContain(SCOPE);
+    const after = note.slice(note.indexOf(SCOPE));
+    expect(after).toContain("OPEN: the platform sender's callers");
+    for (const needle of [
+      'system-email.service.ts:125',
+      ':144',
+      'identity-signup.service.ts:185, :266',
+      'ai-usage-alert-scheduler.service.ts:156',
+      'financial-briefing-scheduler.service.ts:269',
+      'accountant-export-email.service.ts:103',
+      'http-exception.filter.ts:71',
+    ]) {
+      expect(after, `CF-029 names ${needle} under the sink-only scope`).toContain(needle);
+    }
+  });
 });

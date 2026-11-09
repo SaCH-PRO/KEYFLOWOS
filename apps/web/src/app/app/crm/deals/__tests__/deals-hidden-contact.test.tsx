@@ -8,8 +8,14 @@
  *
  * The components render for real; only the Next router and the toaster are
  * stubbed. Nothing here fetches: the add-deal and reason modals stay closed.
+ *
+ * W4-HOUSEKEEPING (V1-89 ST-1 residual): the web Deal type said contactId was
+ * always a string, so the fixture above needed a cast. Deal.contactId is now
+ * string | null and Deal.contact may be null, as listDeals answers: a deal
+ * listed without its contact is a Deal with no cast, and web tsc checks every
+ * reader against it.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, expectTypeOf, vi, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
 import { DealsBoardView } from "../deals-board-view";
 import { DealsListView } from "../deals-list-view";
@@ -44,10 +50,10 @@ const BASE = {
   businessId: "biz_v89", currency: "TTD", stageId: STAGE.id, stage: STAGE, status: "OPEN" as const,
   tags: [], createdAt: AT, updatedAt: AT,
 };
-/** What listDeals answers for a deal whose contact the member cannot open. */
-const HIDDEN = {
+/** What listDeals answers for a deal whose contact the member cannot open (a Deal, no cast: W4-HOUSEKEEPING). */
+const HIDDEN: Deal = {
   ...BASE, id: "deal_hidden", title: "V89 hidden-contact deal", value: 1200, contactId: null, contact: null,
-} as unknown as Deal;
+};
 const SHOWN: Deal = {
   ...BASE, id: "deal_shown", title: "V89 shown-contact deal", value: 800, contactId: "c_team",
   contact: { id: "c_team", firstName: "Team", lastName: "Contact", displayName: null, email: "team@v89.test" },
@@ -82,5 +88,31 @@ describe("V1-89 ST-1 deal views render a deal listed without its contact", () =>
     expect(screen.getByText("Team Contact")).toBeInTheDocument();
     expect(contactLinks(container)).toEqual(["/app/crm?contactId=c_team"]);
     expect(container.innerHTML).not.toContain("contactId=null");
+  });
+
+  it("W4-HOUSEKEEPING (V1-89 ST-1): Deal.contactId is string | null and Deal.contact admits null, and a deal typed Deal with contactId null renders on both deal views with no contact link", () => {
+    expectTypeOf<Deal["contactId"]>().toEqualTypeOf<string | null>();
+    expectTypeOf<null>().toMatchTypeOf<Deal["contact"]>();
+    const NULL_CONTACT: Deal = {
+      ...BASE, id: "deal_w4_null", title: "W4 null-contact deal", value: 300, contactId: null, contact: null,
+    };
+
+    const board = render(
+      <DealsBoardView businessId="biz_v89" deals={[NULL_CONTACT]} stages={[STAGE]} reasons={[]} onChanged={vi.fn()} />,
+    );
+    expect(screen.getByText("W4 null-contact deal")).toBeInTheDocument();
+    expect(contactLinks(board.container)).toEqual([]);
+    expect(board.container.innerHTML).not.toContain("contactId=null");
+    board.unmount();
+
+    const list = render(
+      <DealsListView businessId="biz_v89" loading={false} deals={[NULL_CONTACT]} stages={[STAGE]} reasons={[]} onChanged={vi.fn()} />,
+    );
+    const row = screen.getByText("W4 null-contact deal").closest("tr");
+    expect(row).not.toBeNull();
+    expect(row!.querySelector("a")).toBeNull();
+    expect(row!.textContent).toContain("—");
+    expect(contactLinks(list.container)).toEqual([]);
+    expect(list.container.innerHTML).not.toContain("contactId=null");
   });
 });

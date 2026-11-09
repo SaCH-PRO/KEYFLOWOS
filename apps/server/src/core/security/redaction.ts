@@ -63,6 +63,25 @@ export function deepRedact<T>(value: T): T {
 }
 
 /**
+ * Anything shaped like an email address: a run of characters with no
+ * whitespace, angle bracket, quote, backtick, parenthesis, comma, semicolon,
+ * colon or square bracket on each side of an `@`.
+ */
+const ADDRESS_PATTERN = /[^\s<>"'`(),;:[\]]+@[^\s<>"'`(),;:[\]]+/g;
+
+/**
+ * Replace every address-shaped token in free text with `<address>`, for a log
+ * line (9B-D2: a sender's log line carries no recipient address). The rest of
+ * the text stays, since it is what an operator needs. W4-HOUSEKEEPING: the one
+ * copy both email senders use (SystemEmailService kept it private and
+ * TransactionalEmailService repeated it since W3-C2b-EMAIL-LOG-LEAK).
+ * String.replace resets a global pattern's lastIndex, so calls share no state.
+ */
+export function redactAddresses(text: string): string {
+  return text.replace(ADDRESS_PATTERN, '<address>');
+}
+
+/**
  * Structured-clone a value (dropping functions/cycles) and deep-redact it.
  * Returns undefined for non-object inputs so callers can skip empty snapshots.
  */

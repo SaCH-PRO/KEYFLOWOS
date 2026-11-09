@@ -82,9 +82,21 @@
  * masked read back cannot replace a stored connection (MW-24; CR-D12b-1,
  * D12b-ST-1). Through the real SeoController (D12b-ST-2), a connection save
  * keeps the stored entry, tokens included, only for the same property id or
- * site URL, so a member who sends only another target no longer points the
- * stored Google tokens at it (MW-25, MW-26); who may save, sync or disconnect
- * is open (MW-27, it.todo).
+ * site URL, so a save that sends only another target no longer points the
+ * stored Google tokens at it (MW-25, MW-26).
+ *
+ * W4-D94-SEO-OWNER (owner ruling D-94; cases MW-27, MW-28, values tagged
+ * `v84l_d12b_r_`): only the business owner may connect, sync or disconnect
+ * Google Analytics and Search Console, as for Gmail (GMAIL_OWNER_ONLY): an
+ * ADMIN and a STAFF member get 403 SEO_CONNECTOR_OWNER_ONLY on each of the six
+ * routes with nothing changed, the OWNER connects, syncs and disconnects
+ * (MW-27); the rule's other arms (an OWNER membership without
+ * Business.ownerId, the distinguished owner whose membership is not OWNER,
+ * SUPER_ADMIN) are admitted (MW-28). Review SEC-D94-1 (MW-29): the rule is
+ * bound to the route's business: the owner of another business, by OWNER
+ * membership or by Business.ownerId, who is only STAFF or ADMIN here is
+ * refused here (403, nothing changed) and admitted on the business they own.
+ * The suite seeds that second business (`v84l_d12b_r_xt_other_biz`) for it.
  *
  * FIXTURES: every user, business and membership id has the `v84l_` prefix
  * (registered in test/helpers/fixture-prefixes.json), every unique column
@@ -95,6 +107,7 @@
 import 'reflect-metadata';
 import path from 'path';
 import { isDeepStrictEqual } from 'node:util';
+import { createRequire } from 'node:module';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -568,11 +581,130 @@ describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1
   const FLOOD = 200;
   const SEEDED_EVENTS = 1000; // the bound trackEvent keeps
 
+  /**
+   * W4-FLAKE-HARDEN review repair (SEC-FH-1, CR-FH-1): this case runs on the
+   * shared pool exactly as packages/db/src/client.ts builds it (20
+   * connections, 5 s to wait for one) and changes nothing about it: a flood
+   * that exhausts that pool is what the case exists to catch. (The first
+   * W4-FLAKE-HARDEN commit raised the pool's wait to 120 s for this case. With
+   * that, the D12-ST-1 shape, an interactive transaction holding the row lock
+   * and a pooled connection across its round trips, passed once Prisma's
+   * maxWait and timeout were raised too, and another tenant's read that waited
+   * past the production 5 s passed.)
+   *
+   * The pool's verdict depends on how fast Postgres runs the flood, so the
+   * case also checks directly what each event holds, which does not:
+   *  - the client trackEvent runs on records every $transaction it is handed,
+   *    and the flood hands it none (D12: one atomic statement per event);
+   *  - while the flood runs, a sampler on a connection of its own (outside the
+   *    shared pool, so it neither queues behind the flood nor takes one of its
+   *    connections) records every transaction of this process's pool seen
+   *    idle in transaction while another of the pool's backends waits on a lock
+   *    it holds: a lock and a pooled connection held across a round trip. The
+   *    owner's PATCH locks the row by design (IdentityService.updateBusiness),
+   *    so at most that one transaction may be seen;
+   *  - another tenant's read on the shared pool answers within the pool's own
+   *    connection wait (an explicit bound, not only "did not fail").
+   * The flood size, the pool and every earlier assertion are unchanged.
+   */
+  const POOL = { max: 20, connectionTimeoutMillis: 5_000 }; // packages/db/src/client.ts
+
+  /** require() as @keyflow/db resolves it (its pg and pg-pool). */
+  function requireFromDb(): NodeRequire {
+    const fromHere = createRequire(path.join(__dirname, 'business-meta-writers.integration.test.ts'));
+    return createRequire(fromHere.resolve('@keyflow/db'));
+  }
+
+  /** The pg Pool behind @keyflow/db, read off the next connect() it serves (the package does not export it). */
+  async function sharedPool(): Promise<{ options: { connectionTimeoutMillis?: number; max?: number }; _clients: Array<{ processID: number | null }> }> {
+    const fromDb = requireFromDb();
+    const PgPool = createRequire(fromDb.resolve('pg'))('pg-pool');
+    const original = PgPool.prototype.connect;
+    let seen: any;
+    PgPool.prototype.connect = function (this: unknown, ...args: unknown[]) {
+      seen ??= this;
+      return original.apply(this, args);
+    };
+    try {
+      await db.$queryRawUnsafe('SELECT 1');
+    } finally {
+      PgPool.prototype.connect = original;
+    }
+    if (!seen?.options || !Array.isArray(seen._clients)) throw new Error('W4-FLAKE-HARDEN: the @keyflow/db pool was not found');
+    return seen;
+  }
+
+  /**
+   * Sample, every ~10 ms on a connection of its own, the transactions of the
+   * pool's backends seen idle in transaction while another of the pool's
+   * backends waits on a lock they hold (pg_blocking_pids). Only this process's
+   * backends are looked at, so another suite's work on the same database is
+   * not counted. stop() ends the sampling (and rethrows a sampling error) and
+   * answers the distinct transactions seen (backend pid @ transaction start:
+   * its last statement) and the number of samples taken.
+   */
+  async function sampleIdleLockHolders(pool: { _clients: Array<{ processID: number | null }> }) {
+    const { Client } = requireFromDb()('pg');
+    const sampler = new Client({ connectionString: process.env.DATABASE_URL });
+    await sampler.connect();
+    const seen = new Map<string, string>();
+    let samples = 0;
+    let running = true;
+    const loop = (async () => {
+      while (running) {
+        const pids = pool._clients.map((c) => c.processID).filter((pid): pid is number => typeof pid === 'number');
+        const { rows } = await sampler.query(
+          `SELECT h.pid, h.xact_start::text AS xs, left(h.query, 100) AS query
+             FROM pg_stat_activity h
+            WHERE h.pid = ANY ($1::int[])
+              AND h.state IN ('idle in transaction', 'idle in transaction (aborted)')
+              AND EXISTS (SELECT 1 FROM pg_stat_activity w
+                           WHERE w.pid = ANY ($1::int[]) AND h.pid = ANY (pg_blocking_pids(w.pid)))`,
+          [pids],
+        );
+        samples += 1;
+        for (const r of rows) seen.set(`${r.pid}@${r.xs}`, String(r.query));
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    })();
+    let stopped: Promise<{ samples: number; holders: string[] }> | undefined;
+    return {
+      stop() {
+        running = false;
+        stopped ??= loop
+          .finally(() => sampler.end())
+          .then(() => ({ samples, holders: [...seen].map(([tx, query]) => `${tx}: ${query}`) }));
+        return stopped;
+      },
+    };
+  }
+
   it(`[MW-06] RED-BEFORE: ${FLOOD} concurrent storefront events on a business already holding ${SEEDED_EVENTS} events, sent with another tenant's read and the owner's PATCH clearing stripeSecretKey: every event is recorded (newest ${SEEDED_EVENTS} kept), none fails, the other tenant's read and the PATCH succeed and the clear holds`, async () => {
     const seeded = Array.from({ length: SEEDED_EVENTS }, (_, i) => ({ type: 'page_view', itemId: `${P}seed-${i}`, timestamp: '2026-11-01T00:00:00.000Z' }));
     await reset({ ...SEEDED_META, storefrontEvents: seeded });
+    // W4-FLAKE-HARDEN review repair (SEC-FH-1, CR-FH-1): the production pool, unchanged.
+    const pool = await sharedPool();
+    expect({ max: pool.options.max, connectionTimeoutMillis: pool.options.connectionTimeoutMillis }, 'the shared pool as packages/db/src/client.ts builds it')
+      .toEqual(POOL);
+    // trackEvent's client, recording every $transaction it is handed (D12-ST-1).
+    const transactions: string[] = [];
+    const recorded = new Proxy(db, {
+      get(target, prop) {
+        if (prop === '$transaction') {
+          return (arg: unknown, opts?: unknown) => {
+            transactions.push(typeof arg === 'function' ? 'interactive $transaction' : 'batch $transaction');
+            return target.$transaction(arg, opts);
+          };
+        }
+        const value = Reflect.get(target, prop);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    const floodSite = new plainSite.constructor({ client: recorded }, {});
+    const sampler = await sampleIdleLockHolders(pool);
+    let sampled: { samples: number; holders: string[] } | undefined;
     try {
-      const events = Array.from({ length: FLOOD }, (_, i) => plainSite.trackEvent(ID.biz, 'item_view', `${P}flood-${i}`));
+      const events = Array.from({ length: FLOOD }, (_, i) => floodSite.trackEvent(ID.biz, 'item_view', `${P}flood-${i}`));
       const startedAt = Date.now();
       const otherTenant = db.user.findFirst({ where: { NOT: { id: { startsWith: P } } }, select: { id: true } })
         .then(() => Date.now() - startedAt);
@@ -582,12 +714,21 @@ describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1
         otherTenant.then((ms: number) => ({ ok: true as const, ms }), (e: any) => ({ ok: false as const, error: String(e?.message ?? e).slice(0, 160) })),
         clear,
       ]);
+      sampled = await sampler.stop();
 
       const failures = [...new Set(settled.flatMap((s) => (s.status === 'rejected' ? [String((s.reason as any)?.message ?? s.reason).slice(0, 160)] : [])))];
       expect(failures, `failed storefront events (${settled.filter((s) => s.status === 'rejected').length} of ${FLOOD})`).toEqual([]);
       expect(settled.every((s) => s.status === 'fulfilled' && (s.value as any)?.tracked === true), 'every event answers { tracked: true }').toBe(true);
       expect(other, 'another tenant\'s query on the shared pool during the flood').toMatchObject({ ok: true });
+      expect((other as { ms: number }).ms, 'another tenant\'s read answered within the shared pool\'s connection wait (ms)')
+        .toBeLessThan(POOL.connectionTimeoutMillis);
       expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+
+      // What each event holds (W4-FLAKE-HARDEN review repair: SEC-FH-1, CR-FH-1).
+      expect(transactions, 'the storefront events open no transaction (D12-ST-1: one atomic statement each)').toEqual([]);
+      expect(sampled.samples, 'the sampler ran while the flood was in flight').toBeGreaterThan(1);
+      expect(sampled.holders.length, `transactions seen idle in transaction holding a lock another pooled backend waited on (only the owner's PATCH may be): ${JSON.stringify(sampled.holders)}`)
+        .toBeLessThanOrEqual(1);
 
       const meta = await storedMeta();
       expect(has(meta, 'stripeSecretKey'), 'the cleared stripeSecretKey stored again').toBe(false);
@@ -601,6 +742,7 @@ describe('FOLLOW3-D12 the public storefront event under a flood (review D12-ST-1
       expect(stored.slice(0, SEEDED_EVENTS - FLOOD).map((e) => e.itemId), 'the oldest seeded events trimmed, in order')
         .toEqual(seeded.slice(FLOOD).map((e) => e.itemId));
     } finally {
+      if (!sampled) await sampler.stop().catch(() => undefined); // a failure before the flood settled
       await reset();
     }
   }, 90_000);
@@ -1317,18 +1459,43 @@ describe('W3-D12b-SEO-SECRET-MASK Business reads never serve the GA4 or Search C
 // their choosing and sync it (the owner's access token sent for it, the data
 // readable on the SEO pages). A connection save now keeps the stored entry
 // only for the same property id or site URL; a new target stores only what
-// the request sends. Who may save, sync or disconnect is open (MW-27).
+// the request sends. W4-D94-SEO-OWNER (owner ruling D-94) then closed who may
+// save, sync or disconnect: the business owner only (MW-27, MW-28), so MW-25
+// proves the save rule with the OWNER as the actor.
 // ---------------------------------------------------------------------------
 
 describe('W3-D12b review repair: a connection save never points the stored Google tokens at another property or site (D12b-ST-2)', () => {
   const R = `${D12B}r_`;
   const STAFF = `${R}staff`;
+  // W4-D94-SEO-OWNER (D-94): an ADMIN member (refused, MW-27), and the owner
+  // rule's other arms (MW-28): an OWNER membership that is not Business.ownerId,
+  // and a SUPER_ADMIN with no membership.
+  const ADMIN = `${R}admin`;
+  const CO_OWNER = `${R}coowner`;
+  const SUPER = `${R}superadmin`;
+  // W4-D94-SEO-OWNER review SEC-D94-1 (D-94; MW-29): owners of another
+  // business who are only members of this one, one per arm of the owner rule.
+  // XT_BIZ is owned (Business.ownerId) by XT_DIST_OWNER, who holds no
+  // membership in it; XT_MEMBER_OWNER holds its OWNER membership.
+  const XT_BIZ = `${R}xt_other_biz`;
+  const XT_MEMBER_OWNER = `${R}xt_owner_membership`; // OWNER membership of XT_BIZ (not its ownerId); STAFF here
+  const XT_DIST_OWNER = `${R}xt_owner_distinguished`; // Business.ownerId of XT_BIZ (no membership there); ADMIN here
   let ga4Svc: any;
   let gscSvc: any;
 
   beforeAll(async () => {
-    await db.user.create({ data: { id: STAFF, email: emailOf(STAFF), name: STAFF, role: 'USER', referralCode: `${STAFF}_ref` } });
-    await db.membership.create({ data: { id: `${P}m_${STAFF.slice(P.length)}_biz`, userId: STAFF, businessId: ID.biz, role: 'STAFF' } });
+    for (const [id, role] of [[STAFF, 'STAFF'], [ADMIN, 'ADMIN'], [CO_OWNER, 'OWNER']] as const) {
+      await db.user.create({ data: { id, email: emailOf(id), name: id, role: 'USER', referralCode: `${id}_ref` } });
+      await db.membership.create({ data: { id: `${P}m_${id.slice(P.length)}_biz`, userId: id, businessId: ID.biz, role } });
+    }
+    await db.user.create({ data: { id: SUPER, email: emailOf(SUPER), name: SUPER, role: 'SUPER_ADMIN', referralCode: `${SUPER}_ref` } });
+    for (const id of [XT_MEMBER_OWNER, XT_DIST_OWNER]) {
+      await db.user.create({ data: { id, email: emailOf(id), name: id, role: 'USER', referralCode: `${id}_ref` } });
+    }
+    await db.business.create({ data: { id: XT_BIZ, name: `${XT_BIZ}-name`, ownerId: XT_DIST_OWNER, currency: 'TTD' } });
+    for (const [id, businessId, role] of [[XT_MEMBER_OWNER, XT_BIZ, 'OWNER'], [XT_MEMBER_OWNER, ID.biz, 'STAFF'], [XT_DIST_OWNER, ID.biz, 'ADMIN']] as const) {
+      await db.membership.create({ data: { id: `${P}m_${id.slice(P.length)}_${businessId.slice(P.length)}`, userId: id, businessId, role } });
+    }
     ga4Svc = app.get(SeoGa4);
     gscSvc = app.get(SeoGsc);
   });
@@ -1358,24 +1525,29 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
     };
   }
 
-  it('[MW-25] RED-BEFORE (W3-D12b review D12b-ST-2): a STAFF member who sends only another property id to POST /seo/businesses/:businessId/connectors/ga4, or only another site URL to .../gsc, no longer points the stored Google tokens at it: the saved entry keeps nothing of the old connection (no token, no lastSync), both connectors read not connected, and the STAFF member\'s syncs hand Google no token', async () => {
+  // W4-D94-SEO-OWNER: D-94 refuses a STAFF member at the route before anything
+  // is read (MW-27), so the save rule this case proves (a save naming another
+  // target carries nothing of the stored connection over) is proven with the
+  // OWNER, the only actor who still reaches saveConnection; the connector
+  // status read stays open to members (STAFF reads it below).
+  it('[MW-25] RED-BEFORE (W3-D12b review D12b-ST-2; the OWNER as the actor since D-94, W4-D94-SEO-OWNER): a save that sends only another property id to POST /seo/businesses/:businessId/connectors/ga4, or only another site URL to .../gsc, no longer points the stored Google tokens at it: the saved entry keeps nothing of the old connection (no token, no lastSync), both connectors read not connected, and the syncs that follow hand Google no token', async () => {
     await reset(SEO_META);
     const google = stubGoogle();
     try {
       const OTHER_PROPERTY = `${R}victim-other-property-999`;
       const OTHER_SITE = `https://${R}another-site-the-owner-verified.test.local/`;
       const saves = [
-        await postAs(STAFF, route('ga4'), { propertyId: OTHER_PROPERTY }),
-        await postAs(STAFF, route('gsc'), { siteUrl: OTHER_SITE }),
+        await postAs(ID.owner, route('ga4'), { propertyId: OTHER_PROPERTY }),
+        await postAs(ID.owner, route('gsc'), { siteUrl: OTHER_SITE }),
       ];
-      const syncs = [await postAs(STAFF, route('ga4/sync')), await postAs(STAFF, route('gsc/sync'))];
-      // The data first, so a RED run names what the owner's tokens were used for.
-      expect(google.handed, 'Google calls (token, target) the STAFF member\'s syncs made').toEqual([]);
+      const syncs = [await postAs(ID.owner, route('ga4/sync')), await postAs(ID.owner, route('gsc/sync'))];
+      // The data first, so a RED run names what the stored tokens were used for.
+      expect(google.handed, 'Google calls (token, target) the syncs after the save made').toEqual([]);
       const meta = await storedMeta();
-      expect(seoTokensIn(meta), 'the owner\'s GA4/GSC tokens stored beside the STAFF member\'s property or site').toEqual([]);
+      expect(seoTokensIn(meta), 'the stored GA4/GSC tokens kept beside the newly saved property or site').toEqual([]);
       expect(meta.ga4).toEqual({ propertyId: OTHER_PROPERTY, connectedAt: expect.any(String) });
       expect(meta.gsc).toEqual({ siteUrl: OTHER_SITE, connectedAt: expect.any(String) });
-      // Still admitted (who may save is open: MW-27); the syncs report not connected.
+      // Admitted (the owner, D-94); the syncs report not connected.
       expect(saves.map((r) => r.status), JSON.stringify(saves.map((r) => r.body))).toEqual([201, 201]);
       expect(syncs.map((r) => r.status)).toEqual([201, 201]);
       expect(syncs.map((r) => r.body.synced)).toEqual([false, false]);
@@ -1438,11 +1610,206 @@ describe('W3-D12b review repair: a connection save never points the stored Googl
     }
   });
 
-  // Review D12b-ST-2, the authority half: SeoController guards its connector
-  // routes with AuthGuard, SeoAdminGuard and BusinessGuard only, so any member
-  // (STAFF included) can still replace the stored connection with their own
-  // tokens, sync it or disconnect it. Which role or scope may (OWNER, OWNER and
-  // ADMIN, or a connect/seo write scope) is an authority decision no owner
-  // ruling covers, and seo.controller.ts is outside the W3-D12b write set.
-  it.todo('[MW-27] OPEN (W3-D12b review D12b-ST-2 follow-up: needs an owner ruling on who may connect, sync or disconnect the SEO connectors; seo.controller.ts is outside the W3-D12b write set): POST and DELETE /seo/businesses/:businessId/connectors/ga4 and .../gsc, and their /sync, are refused to a member without that authority, with the stored connection unchanged');
+  // Review D12b-ST-2, the authority half, closed by W4-D94-SEO-OWNER (owner
+  // ruling D-94): SeoController guarded its connector routes with AuthGuard,
+  // SeoAdminGuard and BusinessGuard only, so any member (STAFF included) could
+  // replace the stored connection with their own tokens, sync it or disconnect
+  // it. Only the business owner may now, by the Gmail owner rule (an OWNER
+  // membership, Business.ownerId, or SUPER_ADMIN; GMAIL_OWNER_ONLY): anyone
+  // else gets 403 SEO_CONNECTOR_OWNER_ONLY before anything is read or written.
+  // The connector status reads (GET .../ga4, .../gsc) stay open to members.
+  const SEO_OWNER_ONLY = 'SEO_CONNECTOR_OWNER_ONLY';
+  type SeoRoute = 'connect ga4' | 'sync ga4' | 'disconnect ga4' | 'connect gsc' | 'sync gsc' | 'disconnect gsc';
+  /** The six D-94 routes: connect, sync and disconnect, for GA4 and Search Console. */
+  const SEO_ROUTES: SeoRoute[] = ['connect ga4', 'sync ga4', 'disconnect ga4', 'connect gsc', 'sync gsc', 'disconnect gsc'];
+  /** One of the six routes on `businessId`'s path (MW-29 calls them on another business too). */
+  const callRouteOn = (businessId: string, actor: string, which: SeoRoute, body: Record<string, unknown> = {}) => {
+    const [verb, kind] = which.split(' ') as ['connect' | 'sync' | 'disconnect', 'ga4' | 'gsc'];
+    const url = `/seo/businesses/${businessId}/connectors/${verb === 'sync' ? `${kind}/sync` : kind}`;
+    if (verb === 'disconnect') return request(app.getHttpServer()).delete(url).set('x-test-user', actor);
+    return postAs(actor, url, body);
+  };
+  const callRoute = (actor: string, which: SeoRoute, body: Record<string, unknown> = {}) => callRouteOn(ID.biz, actor, which, body);
+  /** A route's answer in one word: its status and what it reports (or its error code). */
+  const outcome = (r: any) => {
+    const b = r.body ?? {};
+    const said = b.connected === true ? 'connected' : b.synced === true ? 'synced' : b.disconnected === true ? 'disconnected' : (b.code ?? JSON.stringify(b).slice(0, 80));
+    return `${r.status} ${said}`;
+  };
+
+  it('[MW-27] RED-BEFORE (W4-D94-SEO-OWNER, owner ruling D-94; review D12b-ST-2): POST and DELETE /seo/businesses/:businessId/connectors/ga4 and .../gsc, and their /sync, answer an ADMIN and a STAFF member 403 SEO_CONNECTOR_OWNER_ONLY with nothing changed (the stored connections, tokens and lastSync as before; Google handed nothing), the connector status stays readable to them, and the OWNER syncs, connects and disconnects both', async () => {
+    await reset(SEO_META);
+    const google = stubGoogle();
+    try {
+      const before = JSON.stringify(await storedMeta());
+      // What a member would send: a property or site of their own, with their own tokens.
+      const MEMBER_BODY: Partial<Record<SeoRoute, Record<string, unknown>>> = {
+        'connect ga4': { propertyId: `${R}member-property`, accessToken: `${R}member_ga4_ACCESS`, refreshToken: `${R}member_ga4_REFRESH` },
+        'connect gsc': { siteUrl: `https://${R}member-site.test.local/`, accessToken: `${R}member_gsc_ACCESS`, refreshToken: `${R}member_gsc_REFRESH` },
+      };
+      const MEMBERS = [[ADMIN, 'ADMIN'], [STAFF, 'STAFF']] as const;
+      const answered: Record<string, string> = {};
+      for (const [actor, role] of MEMBERS) {
+        for (const which of SEO_ROUTES) answered[`${role} ${which}`] = outcome(await callRoute(actor, which, MEMBER_BODY[which]));
+      }
+      // The data first, so a RED run names what the members changed.
+      expect(google.handed, 'Google calls (token, target) the members\' syncs made').toEqual([]);
+      const after = await storedMeta();
+      const changed: string[] = [];
+      for (const [key, stored] of [['ga4', SEO_GA4], ['gsc', SEO_GSC]] as const) {
+        if (!isDeepStrictEqual(after[key], stored)) changed.push(`metaData.${key} now ${JSON.stringify(after[key])}`);
+      }
+      expect(changed, 'stored SEO connections changed by an ADMIN or STAFF member').toEqual([]);
+      expect(JSON.stringify(after), 'the stored metaData after the refused requests').toBe(before);
+      expect(answered).toEqual(Object.fromEntries(MEMBERS.flatMap(([, role]) => SEO_ROUTES.map((which) => [`${role} ${which}`, `403 ${SEO_OWNER_ONLY}`]))));
+
+      // D-94 covers connect, sync and disconnect only: members still read the status.
+      for (const [actor] of MEMBERS) {
+        const status = [await getAs(actor, route('ga4')), await getAs(actor, route('gsc'))];
+        expect(status.map((r) => [r.status, r.body])).toEqual([
+          [200, { connected: true, propertyId: SEO_GA4.propertyId, lastSync: SEO_GA4.lastSync }],
+          [200, { connected: true, siteUrl: SEO_GSC.siteUrl, lastSync: null }],
+        ]);
+      }
+
+      // The OWNER: syncs with the stored tokens, connects new ones, disconnects.
+      const synced = [await callRoute(ID.owner, 'sync ga4'), await callRoute(ID.owner, 'sync gsc')];
+      expect(synced.map((r) => [r.status, r.body])).toEqual([
+        [201, { synced: true, pagesUpdated: 0 }],
+        [201, { synced: true, queriesUpdated: 0, pagesUpdated: 0 }],
+      ]);
+      expect(google.handed, 'the owner\'s syncs hand Google the stored access tokens').toEqual([
+        `ga4 ${SEO_GA4.accessToken} ${SEO_GA4.propertyId}`,
+        `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} query`,
+        `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} page`,
+      ]);
+      const OWNER_GA4 = { propertyId: `${R}owner-property-2`, accessToken: `${R}owner_ga4_ACCESS_2`, refreshToken: `${R}owner_ga4_REFRESH_2` };
+      const OWNER_GSC = { siteUrl: `https://${R}owner-site-2.test.local/`, accessToken: `${R}owner_gsc_ACCESS_2`, refreshToken: `${R}owner_gsc_REFRESH_2` };
+      const connected = [await callRoute(ID.owner, 'connect ga4', OWNER_GA4), await callRoute(ID.owner, 'connect gsc', OWNER_GSC)];
+      expect(connected.map((r) => [r.status, r.body])).toEqual([
+        [201, { connected: true, propertyId: OWNER_GA4.propertyId }],
+        [201, { connected: true, siteUrl: OWNER_GSC.siteUrl }],
+      ]);
+      let meta = await storedMeta();
+      expect(meta.ga4, 'the owner\'s GA4 connection').toEqual({ ...OWNER_GA4, connectedAt: expect.any(String) });
+      expect(meta.gsc, 'the owner\'s Search Console connection').toEqual({ ...OWNER_GSC, connectedAt: expect.any(String) });
+      const disconnected = [await callRoute(ID.owner, 'disconnect ga4'), await callRoute(ID.owner, 'disconnect gsc')];
+      expect(disconnected.map((r) => [r.status, r.body])).toEqual([[200, { disconnected: true }], [200, { disconnected: true }]]);
+      meta = await storedMeta();
+      expect(meta, 'metaData.ga4 after the owner\'s disconnect').not.toHaveProperty('ga4');
+      expect(meta, 'metaData.gsc after the owner\'s disconnect').not.toHaveProperty('gsc');
+      expect(meta.stripeSecretKey).toBe(STRIPE_SECRET);
+      expect(meta.bankName).toBe(SEEDED_META.bankName);
+      expect(meta.otherKey).toBe(SEEDED_META.otherKey);
+    } finally {
+      google.restore();
+      await reset();
+    }
+  });
+
+  it('[MW-28] CONTROL (W4-D94-SEO-OWNER, owner ruling D-94; the Gmail owner rule\'s arms): an OWNER membership that is not Business.ownerId, the distinguished owner (Business.ownerId) whose membership is ADMIN, and a SUPER_ADMIN with no membership each connect, sync and disconnect GA4 and Search Console', async () => {
+    const google = stubGoogle();
+    const OWNER_MEMBERSHIP = `${P}m_owner_biz`;
+    const ADMITTED = [
+      [CO_OWNER, 'co-owner (OWNER membership, not Business.ownerId)'],
+      [ID.owner, 'distinguished owner (Business.ownerId, membership ADMIN)'],
+      [SUPER, 'SUPER_ADMIN (no membership)'],
+    ] as const;
+    try {
+      const answered: Record<string, string[]> = {};
+      const kept: Record<string, boolean> = {};
+      for (const [actor, label] of ADMITTED) {
+        await reset(SEO_META);
+        if (actor === ID.owner) await db.membership.update({ where: { id: OWNER_MEMBERSHIP }, data: { role: 'ADMIN' } });
+        try {
+          // A re-save of the connected property and site keeps the stored tokens (MW-26), so the syncs run.
+          const results = [
+            await callRoute(actor, 'connect ga4', { propertyId: SEO_GA4.propertyId }),
+            await callRoute(actor, 'sync ga4'),
+            await callRoute(actor, 'connect gsc', { siteUrl: SEO_GSC.siteUrl }),
+            await callRoute(actor, 'sync gsc'),
+          ];
+          const resaved = await storedMeta();
+          kept[label] = resaved.ga4?.accessToken === SEO_GA4.accessToken && resaved.gsc?.accessToken === SEO_GSC.accessToken;
+          results.push(await callRoute(actor, 'disconnect ga4'), await callRoute(actor, 'disconnect gsc'));
+          answered[label] = results.map(outcome);
+          const meta = await storedMeta();
+          expect(meta, `${label}: metaData.ga4 after the disconnect`).not.toHaveProperty('ga4');
+          expect(meta, `${label}: metaData.gsc after the disconnect`).not.toHaveProperty('gsc');
+          expect(meta.stripeSecretKey).toBe(STRIPE_SECRET);
+        } finally {
+          if (actor === ID.owner) await db.membership.update({ where: { id: OWNER_MEMBERSHIP }, data: { role: 'OWNER' } });
+        }
+      }
+      const ALL = ['201 connected', '201 synced', '201 connected', '201 synced', '200 disconnected', '200 disconnected'];
+      expect(answered).toEqual(Object.fromEntries(ADMITTED.map(([, label]) => [label, ALL])));
+      expect(kept, 'the same-target re-save kept the stored tokens').toEqual(Object.fromEntries(ADMITTED.map(([, label]) => [label, true])));
+      const ONE_ROUND = [
+        `ga4 ${SEO_GA4.accessToken} ${SEO_GA4.propertyId}`,
+        `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} query`,
+        `gsc ${SEO_GSC.accessToken} ${SEO_GSC.siteUrl} page`,
+      ];
+      expect(google.handed).toEqual([...ONE_ROUND, ...ONE_ROUND, ...ONE_ROUND]);
+    } finally {
+      google.restore();
+      await reset();
+    }
+  });
+
+  // W4-D94-SEO-OWNER review SEC-D94-1 (owner ruling D-94): the owner rule is
+  // the route business's own. Every member MW-27 refuses owns no other
+  // business, so a rule that only asked whether the caller owns some business
+  // (an OWNER membership, or Business.ownerId, anywhere) would still pass
+  // MW-25..MW-28, and would let the owner of another business who is a member
+  // here connect, sync and disconnect this business's Google connections.
+  // MW-29 adds one such actor per arm of the rule: the OWNER (by membership)
+  // of another business who is STAFF here, and the distinguished owner
+  // (Business.ownerId) of another business who is ADMIN here. Each is refused
+  // here and admitted on the business they own, so the refusal is the
+  // business binding, not a fixture that owns nothing.
+  it('[MW-29] RED-BEFORE (W4-D94-SEO-OWNER, owner ruling D-94; review SEC-D94-1): the owner rule is the route business\'s own: the OWNER (by membership) of another business who is STAFF here and the distinguished owner (Business.ownerId) of another business who is ADMIN here each get 403 SEO_CONNECTOR_OWNER_ONLY on the six routes with nothing changed (the stored connections as before; Google handed nothing), while each connects and disconnects GA4 and Search Console on the business they own', async () => {
+    await reset(SEO_META);
+    const google = stubGoogle();
+    const OWNERS_ELSEWHERE = [
+      [XT_MEMBER_OWNER, 'OWNER membership of another business, STAFF here'],
+      [XT_DIST_OWNER, 'Business.ownerId of another business, ADMIN here'],
+    ] as const;
+    try {
+      const before = JSON.stringify(await storedMeta());
+      // What they would send: a property or site of their own, with their own tokens.
+      const OWN_BODY: Partial<Record<SeoRoute, Record<string, unknown>>> = {
+        'connect ga4': { propertyId: `${R}xt_property`, accessToken: `${R}xt_ga4_ACCESS`, refreshToken: `${R}xt_ga4_REFRESH` },
+        'connect gsc': { siteUrl: `https://${R}xt-site.test.local/`, accessToken: `${R}xt_gsc_ACCESS`, refreshToken: `${R}xt_gsc_REFRESH` },
+      };
+      const answered: Record<string, string> = {};
+      for (const [actor, label] of OWNERS_ELSEWHERE) {
+        for (const which of SEO_ROUTES) answered[`${label}: ${which}`] = outcome(await callRoute(actor, which, OWN_BODY[which]));
+      }
+      // The data first, so a RED run names what the other businesses' owners did here.
+      expect(google.handed, 'Google calls (token, target) the other businesses\' owners made on this business').toEqual([]);
+      const after = await storedMeta();
+      const changed: string[] = [];
+      for (const [key, stored] of [['ga4', SEO_GA4], ['gsc', SEO_GSC]] as const) {
+        if (!isDeepStrictEqual(after[key], stored)) changed.push(`metaData.${key} now ${JSON.stringify(after[key])}`);
+      }
+      expect(changed, 'stored SEO connections changed by the owner of another business').toEqual([]);
+      expect(JSON.stringify(after), 'the stored metaData after the refused requests').toBe(before);
+      expect(answered).toEqual(Object.fromEntries(OWNERS_ELSEWHERE.flatMap(([, label]) => SEO_ROUTES.map((which) => [`${label}: ${which}`, `403 ${SEO_OWNER_ONLY}`]))));
+
+      // On the business each owns, the same actor is admitted: connects, then disconnects, both connectors.
+      const own: Record<string, string[]> = {};
+      for (const [actor, label] of OWNERS_ELSEWHERE) {
+        own[label] = [];
+        for (const which of ['connect ga4', 'connect gsc', 'disconnect ga4', 'disconnect gsc'] as const) {
+          own[label].push(outcome(await callRouteOn(XT_BIZ, actor, which, OWN_BODY[which])));
+        }
+      }
+      expect(own).toEqual(Object.fromEntries(OWNERS_ELSEWHERE.map(([, label]) => [label, ['201 connected', '201 connected', '200 disconnected', '200 disconnected']])));
+      expect(JSON.stringify(await storedMeta()), 'this business\'s metaData after their own business\'s connects').toBe(before);
+      expect(google.handed).toEqual([]);
+    } finally {
+      google.restore();
+      await reset();
+    }
+  });
 });

@@ -138,10 +138,18 @@ import path from 'path';
 import { createHmac } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
+
+// W4-FLAKE-HARDEN: every case here is a chain of real HTTP writes, postings and
+// ledger reads against Postgres (D46-C09 alone: a checkout payment, a KEY
+// payment, a platform-signed refund and four ledger reads). Under a loaded
+// database D46-C09 ran past vitest's 5 s default and was reported as a failure
+// although nothing it asserts had gone wrong. An explicit bound for every case
+// (and the cleanup hook below): a slow database is not a red result.
+vi.setConfig({ testTimeout: 60_000 });
 
 const P = 'v81a_';
 const HEADER = 'x-v81a-user';
@@ -591,7 +599,7 @@ afterAll(async () => {
     expect(left).toEqual([{ businesses: 0, users: 0, payments: 0, webhooks: 0 }]);
   }
   if (redis) await redis.quit();
-});
+}, 60_000);
 
 /**
  * One of the seven writes: its fixture (made fresh per actor, so every actor

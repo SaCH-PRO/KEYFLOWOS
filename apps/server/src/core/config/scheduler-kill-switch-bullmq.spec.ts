@@ -448,6 +448,15 @@ describe.skipIf(!REDIS_URL)('CR-V124b-1 on real BullMQ (REDIS_URL): the 6-hourly
  * below sweep the destroy across that window; the file-level recorder above
  * counts the rejections.
  */
+/**
+ * W4-FLAKE-HARDEN: the explicit bound of a 100-cycle case. Each destroy may wait
+ * up to the services' READY_BEFORE_CLOSE_MS (2 s) for a worker whose connection
+ * is slow to become ready, so under a loaded Redis (reproduced with 1 connect in
+ * 10 held 2.3 s) 100 cycles ran past the old 60 s bound although every assertion
+ * held. The bound covers 100 such waits; the assertions are unchanged.
+ */
+const CYCLES_TIMEOUT_MS = 240_000;
+
 async function initDestroyCycles(make: (conn: IORedis) => { onModuleInit(): Promise<void>; onModuleDestroy(): Promise<void> }, cycles = 100) {
   for (let i = 0; i < cycles; i++) {
     const conn = new IORedis(REDIS_URL!, { maxRetriesPerRequest: null, showFriendlyErrorStack: true });
@@ -584,14 +593,14 @@ describe.skipIf(!REDIS_URL)('FOLLOW3-C3 on real BullMQ (REDIS_URL): a service de
     });
     expect(cronWorkers, 'schedulers on: every cycle closes a cron worker too').toBe(100);
     expect(unhandledRejections.slice(before).map(rejectionText), 'unhandled rejections from QueueService.onModuleDestroy (CR-C3-1)').toEqual([]);
-  }, 60_000);
+  }, CYCLES_TIMEOUT_MS);
 
   it('TemporalFlowMemoryQueueService, 100 init -> destroy cycles at 0-9 ms: no unhandled rejection', async () => {
     setSwitches({ NODE_ENV: 'test' });
     const before = unhandledRejections.length;
     await initDestroyCycles((conn) => memoryQueue(conn));
     expect(unhandledRejections.slice(before).map(rejectionText), 'unhandled rejections from TemporalFlowMemoryQueueService.onModuleDestroy').toEqual([]);
-  }, 60_000);
+  }, CYCLES_TIMEOUT_MS);
 
   it('QueueService.onModuleDestroy settles with Redis unreachable (production client options): its workers never become ready, and it does not wait for them forever', async () => {
     setSwitches({ NODE_ENV: 'production' });

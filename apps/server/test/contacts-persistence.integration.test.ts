@@ -80,6 +80,7 @@ import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
+import { trackAsyncWrites } from './helpers/async-writes.js';
 
 // Load repo-root .env BEFORE importing anything that reads DATABASE_URL.
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -108,6 +109,8 @@ const TARGET_EMAIL = `${P}target@test.local`;
 
 let db: any;
 let app: any;
+/** W4-FLAKE-HARDEN: the in-flight fire-and-forget writes (installed in beforeAll). */
+let asyncWrites: ReturnType<typeof trackAsyncWrites> | undefined;
 
 // ---- DTO validation metadata, derived from the controller source ---------
 const CONTROLLER_DIR = path.resolve(__dirname, '../src/modules/crm');
@@ -274,20 +277,30 @@ async function traceCounts() {
   };
 }
 
-/** Let any fire-and-forget write a request might have started reach the database. */
-const settle = () => new Promise((r) => setTimeout(r, 300));
+/**
+ * Wait until every fire-and-forget write a request started has landed (or
+ * failed): the ContactAuditEntry write (DEC-CONTACTS-002, ContactAuditService
+ * .write) and the team log the TeamAuditInterceptor writes after the response.
+ *
+ * W4-FLAKE-HARDEN: this was a fixed 300 ms sleep. Under load an earlier case's
+ * audit entry and team log landed after it, between a refused request's
+ * baseline and its after-count, and the refusal was charged with +1 audit and
+ * +1 team log. It now waits on the writes themselves (trackAsyncWrites, in
+ * beforeAll): both are started before the response is sent, so once a
+ * request has answered, its writes are in flight here and drain() awaits them.
+ */
+const settle = async () => {
+  if (!asyncWrites) throw new Error('settle(): the async-write tracker is not installed');
+  await asyncWrites.drain();
+};
 
-/** The ContactAuditEntry write is fire-and-forget (DEC-CONTACTS-002): wait for it to land. */
-async function auditEntries(contactId: string, action: string, timeoutMs = 5_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const rows = await db.contactAuditEntry.findMany({
-      where: { businessId: ID.bizA, contactId, action },
-      orderBy: { createdAt: 'asc' },
-    });
-    if (rows.length > 0 || Date.now() > deadline) return rows;
-    await new Promise((r) => setTimeout(r, 50));
-  }
+/** The ContactAuditEntry write is fire-and-forget (DEC-CONTACTS-002): wait for it to land (W4-FLAKE-HARDEN: drained, then read). */
+async function auditEntries(contactId: string, action: string) {
+  await settle();
+  return db.contactAuditEntry.findMany({
+    where: { businessId: ID.bizA, contactId, action },
+    orderBy: { createdAt: 'asc' },
+  });
 }
 
 /** A refused write: the given status, and the target row plus every trace exactly as before. */
@@ -358,6 +371,13 @@ beforeAll(async () => {
   const { ContactInsightService } = await import('../src/modules/crm/contact-insight.service');
   const { CreateContactDto } = await import('../src/modules/crm/dto/create-contact.dto');
   const { UpdateContactDto } = await import('../src/modules/crm/dto/update-contact.dto');
+
+  // ---- W4-FLAKE-HARDEN: track the two fire-and-forget writers, so settle()
+  // waits for their writes instead of sleeping (see settle above). ---------
+  asyncWrites = trackAsyncWrites([
+    [ContactAuditService.prototype, 'write'],
+    [TeamAuditInterceptor.prototype, 'record'],
+  ]);
 
   // ---- the parameter metadata tsc emits for the body-validated handlers,
   // derived from crm.controller.ts (see DTO VALIDATION IN-PROCESS above).
@@ -481,8 +501,10 @@ beforeAll(async () => {
 }, 120_000);
 
 afterAll(async () => {
+  if (asyncWrites) await asyncWrites.drain();
   if (app) await app.close();
   if (db) await cleanup();
+  asyncWrites?.restore();
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -804,4 +826,78 @@ describe('REGRESSION CONTROL: an owner DELETE then a refresh', () => {
     expect(tracesAfter.contacts).toBe(tracesBefore.contacts + 1);
     expect(tracesAfter.live).toBe(tracesBefore.live + 1);
   });
+});
+
+/**
+ * W4-FLAKE-HARDEN review CR-FH-2: hold `tables` in EXCLUSIVE mode (inserts
+ * wait, reads do not) from a test transaction until release() is called or
+ * `ms` has passed, whichever is first. The transaction is the simulated slow
+ * database, not a fixture wrapper. `locked` resolves once the lock is held.
+ */
+function holdTables(tables: string[], ms: number) {
+  let release!: () => void;
+  const released = new Promise<void>((r) => { release = r; });
+  const timer = setTimeout(() => release(), ms);
+  let ready!: () => void;
+  const lockTaken = new Promise<void>((r) => { ready = r; });
+  const done: Promise<void> = db.$transaction(async (tx: any) => {
+    await tx.$executeRawUnsafe(`LOCK TABLE ${tables.join(', ')} IN EXCLUSIVE MODE`);
+    ready();
+    await released;
+  }, { maxWait: 10_000, timeout: ms + 30_000 });
+  const locked = Promise.race([
+    lockTaken,
+    done.then(() => { throw new Error('holdTables: the transaction ended before it held the lock'); }),
+  ]);
+  return {
+    locked,
+    done,
+    release() {
+      clearTimeout(timer);
+      release();
+    },
+  };
+}
+
+describe('W4-FLAKE-HARDEN review CR-FH-2: a refusal is not charged with an earlier write\'s late audit entry and team log', () => {
+  // The load flake this packet fixed (a), reproduced inside the suite (it took
+  // an outside load harness before): the owner's create is answered while its
+  // fire-and-forget audit entry (DEC-CONTACTS-002) and team log still wait on
+  // the held audit and team-log tables. The tables are released after
+  // LATE_MS, and at the latest just before the refused request is sent.
+  // settle() waits for those writes, so they land before the refusal's
+  // baseline. With the fixed 300 ms sleep settle() used to be, the baseline
+  // was read while they still waited: red, checked by putting the sleep back.
+  const LATE_MS = 1_500;
+
+  it('[CP-FH-01] the owner creates a contact while the audit and team-log tables are held, so its audit entry and team log land late: settle() waits for them, and the POST by STAFF with crm_edit none that follows answers 403 with every trace count unchanged', async () => {
+    await settle();
+    const hold = holdTables(['contact_audit_entries', 'team_activity_logs'], LATE_MS);
+    try {
+      await hold.locked;
+      const atStart = await traceCounts();
+      const created = await post(ID.owner, { firstName: `${P}LateAudit`, email: `${P}late-audit@test.local` });
+      expect(created.status, JSON.stringify(created.body)).toBe(201);
+      const answered = await traceCounts();
+      expect({ audits: answered.audits, teamLogs: answered.teamLogs }, 'the create answered before its audit entry and team log landed')
+        .toEqual({ audits: atStart.audits, teamLogs: atStart.teamLogs });
+      expect(asyncWrites!.inFlight(), 'its audit entry and team log are still in flight').toBeGreaterThan(0);
+
+      await settle();
+      const tracesBefore = await traceCounts();
+      expect({ audits: tracesBefore.audits, teamLogs: tracesBefore.teamLogs }, 'settle() waited for the late audit entry and team log')
+        .toEqual({ audits: atStart.audits + 1, teamLogs: atStart.teamLogs + 1 });
+
+      hold.release(); // never later than the refused request
+      const res = await post(ID.staffNoEdit, { firstName: `${P}DeniedLate`, email: `${P}denied-late@test.local` });
+      expect(res.status).toBe(403);
+      expect(res.body.statusCode).toBe(403);
+      expect(res.body).not.toHaveProperty('id');
+      await settle();
+      expect(await traceCounts(), 'the refusal wrote no contact, event, audit entry or team log').toEqual(tracesBefore);
+    } finally {
+      hold.release();
+      await hold.done.catch(() => undefined);
+    }
+  }, 30_000);
 });
