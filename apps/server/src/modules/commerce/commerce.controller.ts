@@ -756,6 +756,8 @@ export class CommerceController {
     @Req() req?: { user?: { id?: string; role?: string } },
   ) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId, 'invoice');
+    // FOLLOW3-D6 (D-64): the acting member, so the contact must be one they may open.
+    const actorUserId = req?.user?.id;
     return this.timeEntries.invoiceUnbilledTime(businessId, {
       projectId: body.projectId,
       contactId: body.contactId,
@@ -763,7 +765,7 @@ export class CommerceController {
       dueDate: body.dueDate,
       taxRate: body.taxRate,
       notes: body.notes,
-      createInvoice: (args) => this.commerce.createInvoice(args),
+      createInvoice: (args) => this.commerce.createInvoice({ ...args, actorUserId }),
     });
   }
 
@@ -1180,7 +1182,8 @@ export class CommerceController {
   ) {
     await this.assertSuperAdminMayWriteRevenue(req, businessId, 'quote');
     // V1-53 review (SEC-V53-1): the 200 body's contact is projected.
-    const quote = await this.commerce.updateQuote({ ...body, quoteId, businessId });
+    // FOLLOW3-D6 (D-64): a new contactId must be one the acting member may open.
+    const quote = await this.commerce.updateQuote({ ...body, quoteId, businessId, actorUserId: req?.user?.id });
     return toQuoteWriteResponse(quote);
   }
 

@@ -17,12 +17,14 @@
  *
  *   CB-01  STAFF (revenue:write, crm:read, crm_view:owned) on the owner's
  *          PRIVATE contact:
- *            a POST invoices (with and without an Idempotency-Key)
- *            b POST quotes
- *            c PATCH quotes/:id { contactId }
- *            d PATCH invoices/:id { contactId }
- *            e POST quotes/:id/convert of an ACCEPTED quote bound to it
- *            f POST invoices/from-time { contactId }
+ *            a POST invoices (with an Idempotency-Key)
+ *            b PATCH quotes/:id { contactId }
+ *            c PATCH invoices/:id { contactId }
+ *            d POST invoices/from-time { contactId }
+ *          and, BLOCKED outside this packet's write set (it.todo, each
+ *          naming the existing case that pins the pre-D-64 answer):
+ *            POST invoices without an Idempotency-Key, POST quotes,
+ *            POST quotes/:id/convert of an ACCEPTED quote bound to it
  *          RED-BEFORE: 201/200, the body carries the contact's firstName and
  *          email (from-time: the stored invoice is bound to it).
  *          GREEN-AFTER: 404 'Contact not found', the same body an unknown id
@@ -373,13 +375,27 @@ describe('fixture sanity (real rows)', () => {
 });
 
 describe('CB-01 STAFF (revenue:write, crm_view owned) binds the owner\'s PRIVATE contact: 404, nothing written, nothing disclosed (D-64)', () => {
-  it('CB-01a POST businesses/A/invoices (no Idempotency-Key): 404 Contact not found, no Invoice written', async () => {
-    const unknown = await postInvoice(ID.staff, ID.unknown);
-    const before = await documentCounts();
-    const res = await postInvoice(ID.staff, ID.cPriv);
-    expectRefused(res, unknown, 'POST invoices');
-    expect(await documentCounts()).toEqual(before);
-  });
+  // BLOCKED outside this packet's write set. CommerceService.createInvoice
+  // applies D-64 whenever it is given the member (actorUserId), and the route
+  // forwards the member only with an Idempotency-Key (createIdempotency), so
+  // CB-01a2 below is green. Forwarding it without a key is one line in
+  // CommerceController.createInvoice (`actorUserId: req.user?.id,` before
+  // `...idempotency`), and with it this case is green (verified locally), but
+  // three cases of test/commerce-authorization.e2e.test.ts (CC-STRIP,
+  // CC-FORWARD, CC-BOUND; manifests invoice-create-contract and
+  // revenue-auth-001) assert the exact object the route forwards, so they fail
+  // until their expected object gains `actorUserId: <actor>`. That file is
+  // not in this packet's write set. Restore this body as an `it` with that fix:
+  //   const unknown = await postInvoice(ID.staff, ID.unknown);
+  //   const before = await documentCounts();
+  //   const res = await postInvoice(ID.staff, ID.cPriv);
+  //   expectRefused(res, unknown, 'POST invoices');
+  //   expect(await documentCounts()).toEqual(before);
+  it.todo(
+    'CB-01a POST businesses/A/invoices (no Idempotency-Key): 404 Contact not found, no Invoice written ' +
+      '(BLOCKED: the route forwards the member only with a key; forwarding it always breaks the exact-forward ' +
+      'assertions CC-STRIP/CC-FORWARD/CC-BOUND in test/commerce-authorization.e2e.test.ts, outside the write set)',
+  );
 
   it('CB-01a2 POST businesses/A/invoices with an Idempotency-Key: 404 Contact not found, no Invoice and no key slot written', async () => {
     const unknown = await postInvoice(ID.staff, ID.unknown, `${P}key-inv-unknown`);
@@ -395,13 +411,26 @@ describe('CB-01 STAFF (revenue:write, crm_view owned) binds the owner\'s PRIVATE
     expect(slots).toEqual([]);
   });
 
-  it('CB-01b POST businesses/A/quotes: 404 Contact not found, no Quote written', async () => {
-    const unknown = await postQuote(ID.staff, ID.unknown);
-    const before = await documentCounts();
-    const res = await postQuote(ID.staff, ID.cPriv);
-    expectRefused(res, unknown, 'POST quotes');
-    expect(await documentCounts()).toEqual(before);
-  });
+  // BLOCKED outside this packet's write set. Passing the member to
+  // assertContactInBusiness in CommerceService.createQuote (and forwarding
+  // `actorUserId: req.user?.id` from CommerceController.createQuote) makes
+  // this case green (verified locally), but two existing cases assert the
+  // pre-D-64 answer, 201 with the projected contact, for a member who cannot
+  // open the contact: test/commerce-quote-errors.integration.test.ts
+  // RR-PROJECT-CREATE (STAFF crm:none on a PRIVATE contact) and
+  // test/commerce-create-idempotency.integration.test.ts H-09 (its quote twin,
+  // keyed, after the contact is made PRIVATE). Under D-64 both become 404 (no
+  // disclosure at all), which their files must be changed to expect. Restore
+  // this body as an `it` with that change:
+  //   const unknown = await postQuote(ID.staff, ID.unknown);
+  //   const before = await documentCounts();
+  //   const res = await postQuote(ID.staff, ID.cPriv);
+  //   expectRefused(res, unknown, 'POST quotes');
+  //   expect(await documentCounts()).toEqual(before);
+  it.todo(
+    'CB-01b POST businesses/A/quotes: 404 Contact not found, no Quote written (BLOCKED: ' +
+      'commerce-quote-errors RR-PROJECT-CREATE and commerce-create-idempotency H-09 pin 201 for a member who cannot open the contact)',
+  );
 
   it('CB-01c PATCH businesses/A/quotes/:id { contactId: PRIVATE }: 404 Contact not found, the quote keeps its contact', async () => {
     const quoteId = await seedQuote('cb01c', ID.cTeam);
@@ -425,19 +454,30 @@ describe('CB-01 STAFF (revenue:write, crm_view owned) binds the owner\'s PRIVATE
     expect(JSON.parse(JSON.stringify(after))).toEqual(JSON.parse(JSON.stringify(before)));
   });
 
-  it('CB-01e POST businesses/A/quotes/:id/convert of an ACCEPTED quote bound to the PRIVATE contact: 404 Contact not found, no Invoice, the quote stays unconverted', async () => {
-    const quoteId = await seedQuote('cb01e', ID.cPriv, 'ACCEPTED');
-    const unknownQuote = await seedQuote('cb01e_unknown', ID.cTeam, 'ACCEPTED');
-    // A stored contact outside the tenant (a legacy row) answers the convert re-check's 404 (R0-27 ST-27-2).
-    await db.$executeRawUnsafe('UPDATE quotes SET contact_id = $1 WHERE id = $2', ID.cB, unknownQuote);
-    const unknown = await convert(ID.staff, unknownQuote);
-    const before = await documentCounts();
-    const res = await convert(ID.staff, quoteId);
-    expectRefused(res, unknown, 'POST quotes/:id/convert');
-    expect(await documentCounts()).toEqual(before);
-    const quote = await db.quote.findUnique({ where: { id: quoteId } });
-    expect(quote).toMatchObject({ status: 'ACCEPTED', invoiceId: null, contactId: ID.cPriv });
-  });
+  // BLOCKED outside this packet's write set. Passing the member to the
+  // convert re-check (assertContactInBusiness(quote.contactId, ...)) in
+  // CommerceService.convertQuoteToInvoice, forwarded from
+  // CommerceController.convertQuoteToInvoice, makes this case green (verified
+  // locally), but test/quote-chain-finish.integration.test.ts QCF-07 asserts
+  // the pre-D-64 answer: a revenue:write, crm:none member converting a quote on
+  // a PRIVATE contact gets 201 with the projected contact. Under D-64 it is
+  // 404, which that file must be changed to expect. Restore this body as an
+  // `it` with that change:
+  //   const quoteId = await seedQuote('cb01e', ID.cPriv, 'ACCEPTED');
+  //   const unknownQuote = await seedQuote('cb01e_unknown', ID.cTeam, 'ACCEPTED');
+  //   // A stored contact outside the tenant (a legacy row) answers the convert re-check's 404 (R0-27 ST-27-2).
+  //   await db.$executeRawUnsafe('UPDATE quotes SET contact_id = $1 WHERE id = $2', ID.cB, unknownQuote);
+  //   const unknown = await convert(ID.staff, unknownQuote);
+  //   const before = await documentCounts();
+  //   const res = await convert(ID.staff, quoteId);
+  //   expectRefused(res, unknown, 'POST quotes/:id/convert');
+  //   expect(await documentCounts()).toEqual(before);
+  //   const quote = await db.quote.findUnique({ where: { id: quoteId } });
+  //   expect(quote).toMatchObject({ status: 'ACCEPTED', invoiceId: null, contactId: ID.cPriv });
+  it.todo(
+    'CB-01e POST businesses/A/quotes/:id/convert of an ACCEPTED quote bound to the PRIVATE contact: 404 Contact not found, ' +
+      'no Invoice, the quote stays unconverted (BLOCKED: quote-chain-finish QCF-07 pins 201 for a crm:none member)',
+  );
 
   it('CB-01f POST businesses/A/invoices/from-time { contactId: PRIVATE }: 404 Contact not found, no Invoice, the hour stays unbilled', async () => {
     const unknownHour = await seedBillableHour('cb01f_unknown');
