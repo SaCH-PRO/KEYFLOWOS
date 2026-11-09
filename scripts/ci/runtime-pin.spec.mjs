@@ -57,26 +57,48 @@
  *      NODE_TEST_CONTEXT, NODE_OPTIONS or BASH_ENV. NODE_TEST_CONTEXT=child
  *      alone makes `node --test` skip every file and exit 0, and
  *      NODE_OPTIONS=--test-skip-pattern=.* skips every case.
- *   7. While any workflow boots apps/server/dist/main.js on a Node where
+ *   7. ci-cd.yml's "Verify the server gets past module loading" step fails
+ *      closed (PIN-R3, reviews RC2-1 and RC2-3). It boots
+ *      apps/server/dist/main.js once, under `timeout`, with a probe preloaded
+ *      (--require "$PROBE") that replaces NestFactory.create. main.ts calls
+ *      NestFactory.create(AppModule) only after it has imported AppModule, so
+ *      the probe prints the load marker and exits 0 at the point where the
+ *      whole module graph has loaded, before anything reaches the database.
+ *      The step passes only when the boot exits 0 AND printed the marker on a
+ *      line of its own. Any other outcome fails it and prints the boot output:
+ *      a load error of any kind, an exit before AppModule reaches
+ *      NestFactory.create, a hang killed by the timeout, a root module other
+ *      than AppModule, or the marker followed by a non-zero exit. The check
+ *      it replaces grepped the boot output for a list of error codes and
+ *      passed whatever the list did not name: an ESM-only dependency that
+ *      imports a named export its dependency lacks (SyntaxError),
+ *      ERR_PACKAGE_PATH_NOT_EXPORTED and a SyntaxError in a dependency all
+ *      reported success (RC2-1), and its exit code was never read. The step's
+ *      text is read strictly: the boot line captures stdout and stderr into
+ *      OUT, STATUS is read from the boot on the next line, the decision on the
+ *      next reads both, and the failure branch prints OUT and ends in exit 1
+ *      (RC2-3: flipping exit 1 to exit 0, dropping stderr or grepping
+ *      anything but "$OUT" each fails this spec). The step is also RUN,
+ *      verbatim, with the running Node, against generated server graphs that
+ *      fail each of those ways and graphs that load. The step sets a
+ *      DATABASE_URL: main.ts exits at env validation before it imports
+ *      AppModule, so without one the check only ever loaded main.ts's own
+ *      imports. While any workflow boots the server on a Node where
  *      require(esm) is not unflagged (below 20.19.0, 21.x, 22 below 22.12.0,
- *      or a Node this guard cannot read), ci-cd.yml's "Verify the server gets
- *      past module loading" step runs node with --no-experimental-require-module,
- *      so an ESM-only server dependency fails ci-cd the way it would kill that
- *      workflow's server at boot (ERR_REQUIRE_ESM). Once no workflow does, the
- *      flag must go (review CR-V139-2): every workflow that boots the server
- *      (native-dast.yml, e2e-live.yml) runs the pin, so the step runs without
- *      it. The step sets a DATABASE_URL: main.ts
- *      exits at env validation before it imports AppModule, so without one
- *      the check only ever loaded main.ts's own imports. Every grep the step
- *      runs on the boot output (the one that decides and the one that prints
- *      the error) matches each way Node dies loading the graph. With
- *      require(esm) on, an ESM-only dependency that uses top-level await dies
- *      with ERR_REQUIRE_ASYNC_MODULE and one required inside an import cycle
- *      with ERR_REQUIRE_CYCLE_MODULE, not ERR_REQUIRE_ESM (review RP-R1-1):
- *      the step's exit code cannot tell, since the unreachable database fails
- *      the boot anyway. The running Node is probed for what it prints.
+ *      or a Node this guard cannot read), the boot runs node with
+ *      --no-experimental-require-module, so an ESM-only server dependency
+ *      fails ci-cd the way it would kill that workflow's server
+ *      (ERR_REQUIRE_ESM). Once no workflow does, the flag must go (review
+ *      CR-V139-2): native-dast.yml and e2e-live.yml run the pin.
  *   8. Negative controls: each way found in review to let a different Node
  *      ship, or to skip the guard, is applied to the real files and rejected.
+ *   9. Stale wording (PIN-R3): no comment in ci-cd.yml or in the packages/api
+ *      crm.contact-detail spec header says /trpc is mounted (D-68: the server
+ *      serves /trpc only when TRPC_ENABLED=1; review TRPC-R1-02), and no
+ *      markdown doc tells anyone to add HawkScan to the required checks (V1-30,
+ *      owner ruling D-22: the required DAST gate is DAST (Native); HawkScan is
+ *      manual-only and, with no pull_request trigger, would never report;
+ *      review RC2-2).
  *
  * Known exceptions (recorded, not edited):
  *   - agent-control-autopilot.yml and agent-control-worker-proof.yml pin
@@ -144,23 +166,24 @@ const BOOT_JOB = 'build-server';
 const BOOT_STEP = 'Verify the server gets past module loading';
 const NO_REQUIRE_ESM = '--no-experimental-require-module';
 /**
- * How Node dies while loading the server's module graph: one first error line
- * per code, in Node 22.23.4's wording. The module-loading check must catch
- * each (case 7). With require(esm) on, top-level await in an ESM-only
- * dependency gives ERR_REQUIRE_ASYNC_MODULE and an import cycle through one
- * gives ERR_REQUIRE_CYCLE_MODULE, never ERR_REQUIRE_ESM (review RP-R1-1).
+ * Case 7. The probe prints this, on a line of its own, when main.ts hands
+ * AppModule to NestFactory.create: the module graph has loaded.
  */
-const MODULE_LOAD_FAILURES = {
-  ERR_REQUIRE_ESM: 'Error [ERR_REQUIRE_ESM]: require() of ES Module /app/node_modules/dep/index.js from /app/dist/main.js not supported.',
-  ERR_REQUIRE_ASYNC_MODULE:
-    'Error [ERR_REQUIRE_ASYNC_MODULE]: require() cannot be used on an ESM graph with top-level await. Use import() instead.',
-  ERR_REQUIRE_CYCLE_MODULE:
-    'Error [ERR_REQUIRE_CYCLE_MODULE]: Cannot require() ES Module /app/node_modules/dep/index.js in a cycle. (from /app/dist/main.js)',
-  ERR_MODULE_NOT_FOUND: "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'dep' imported from /app/node_modules/other/index.js",
-  ERR_UNSUPPORTED_DIR_IMPORT:
-    "Error [ERR_UNSUPPORTED_DIR_IMPORT]: Directory import '/app/node_modules/dep/lib' is not supported resolving ES modules imported from /app/node_modules/other/index.js",
-  'Cannot find module': "Error: Cannot find module 'dep'",
-};
+const BOOT_MARKER = 'KEYFLOW_MODULE_GRAPH_LOADED';
+/** The one line that boots the server: under a timeout, stdout and stderr into OUT. Group 1: node's options. */
+const BOOT_LINE = /^OUT=\$\(timeout [1-9]\d* node (.+?) apps\/server\/dist\/main\.js 2>&1\)$/;
+/** node's options on the boot line: the probe, and the legacy flag while a workflow needs it. */
+const PROBE_OPTION = '--require "$PROBE"';
+const BOOT_OPTIONS = [PROBE_OPTION, `${NO_REQUIRE_ESM} ${PROBE_OPTION}`];
+/** The line after the boot: its exit code, before any other command can replace $?. */
+const BOOT_STATUS = 'STATUS=$?';
+/** The line after that: the step fails unless the boot exited 0 AND printed the marker. */
+const BOOT_DECISION = `if [ "$STATUS" -ne 0 ] || ! echo "$OUT" | grep -qxF "${BOOT_MARKER}"; then`;
+/** In the failure branch: the boot output, so the log says what the server died of. */
+const BOOT_REPORT = 'echo "$OUT" | tail -n 40';
+/** The boot command as ci-cd.yml runs it, and with the legacy flag (CR-V139-2). */
+const BOOT = `timeout 45 node ${PROBE_OPTION} apps/server/dist/main.js`;
+const FLAGGED_BOOT = `timeout 45 node ${NO_REQUIRE_ESM} ${PROBE_OPTION} apps/server/dist/main.js`;
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 const workflow = (name) => read(path.join('.github', 'workflows', name));
@@ -632,43 +655,49 @@ function runnerStepProblems(source) {
   return problems;
 }
 
-/** Every grep in a step's script, read as `grep -<flags> "<pattern>"`. */
-const grepsOf = (run) => [...run.matchAll(/\bgrep\s+-([A-Za-z]+)\s+"([^"]*)"/g)].map(([, flags, pattern]) => ({ flags, pattern }));
-
 /**
- * Case 7: every grep the module-loading check runs on the boot output, the
- * one that decides and the one that prints the error, is an -E alternation
- * that matches each way Node dies loading the module graph. A grep this guard
- * cannot read fails closed. (ERE alternation of literals reads the same as a
- * JavaScript RegExp.)
+ * Case 7, read: the module-loading step decides on the boot's exit code AND
+ * the load marker, both read from the boot itself, and fails with exit 1.
+ * `lines` are the step's shell lines, trimmed, blank and comment lines
+ * dropped (readJob). Any departure from this shape fails closed; what the
+ * shape does is proven by running the step (bootBehaviourProblems).
  */
-function moduleLoadGrepProblems(run) {
+function bootStepShapeProblems(lines) {
+  const at = lines.findIndex((l) => BOOTS_SERVER.test(l));
+  const boot = BOOT_LINE.exec(lines[at] ?? '');
+  if (!boot) {
+    return [
+      `'${BOOT_STEP}' must boot the server as OUT=$(timeout <seconds> node ${PROBE_OPTION} apps/server/dist/main.js 2>&1): under a timeout, with the load probe, stdout and stderr captured; found ${JSON.stringify(lines[at])}`,
+    ];
+  }
   const problems = [];
-  const greps = grepsOf(run);
-  const all = (run.match(/\bgrep\b/g) ?? []).length;
-  if (all !== greps.length) problems.push(`'${BOOT_STEP}': every grep must read grep -<flags> "<pattern>" (${all} greps, ${greps.length} readable)`);
-  if (!greps.some((g) => g.flags.includes('q'))) problems.push(`'${BOOT_STEP}' must decide with grep -q on the boot output`);
-  for (const { flags, pattern } of greps) {
-    if (!flags.includes('E')) {
-      problems.push(`'${BOOT_STEP}': grep -${flags} "${pattern}" must be an -E alternation of the module-loading errors`);
-      continue;
-    }
-    let re;
-    try {
-      re = new RegExp(pattern);
-    } catch {
-      problems.push(`'${BOOT_STEP}': grep -${flags} "${pattern}" is not a pattern this guard reads`);
-      continue;
-    }
-    const missed = Object.entries(MODULE_LOAD_FAILURES).filter(([, line]) => !re.test(line)).map(([code]) => code);
-    if (missed.length) {
-      problems.push(`'${BOOT_STEP}': grep -${flags} "${pattern}" misses ${missed.join(', ')}: a server that dies that way passes ci-cd`);
-    }
+  if (!BOOT_OPTIONS.includes(boot[1])) {
+    problems.push(`'${BOOT_STEP}': node's options must be exactly ${BOOT_OPTIONS.map((o) => JSON.stringify(o)).join(' or ')}, found ${JSON.stringify(boot[1])}`);
+  }
+  if (lines[at + 1] !== BOOT_STATUS) {
+    problems.push(`'${BOOT_STEP}' must read the boot's exit code on the next line (${BOOT_STATUS}), found ${JSON.stringify(lines[at + 1])}`);
+  }
+  if (lines[at + 2] !== BOOT_DECISION) {
+    problems.push(`'${BOOT_STEP}' must fail unless the boot exited 0 AND printed ${BOOT_MARKER}: expected ${JSON.stringify(BOOT_DECISION)}, found ${JSON.stringify(lines[at + 2])}`);
+  }
+  const fi = lines.indexOf('fi', at + 3);
+  const branch = fi < 0 ? [] : lines.slice(at + 3, fi);
+  if (branch.at(-1) !== 'exit 1' || branch.slice(0, -1).some((l) => /\b(?:exit|return)\b/.test(l))) {
+    problems.push(`'${BOOT_STEP}': when the boot fails, the step must end with exit 1 (found ${JSON.stringify(branch)})`);
+  }
+  if (!branch.includes(BOOT_REPORT)) problems.push(`'${BOOT_STEP}': when the boot fails, the step must print the boot output (${BOOT_REPORT})`);
+  const after = fi < 0 ? [] : lines.slice(fi + 1);
+  if (after.some((l) => !/^echo "[^"$`\\]*"$/.test(l))) {
+    problems.push(`'${BOOT_STEP}' may only print a fixed message after its decision, found ${JSON.stringify(after)}`);
+  }
+  const markers = lines.filter((l) => l.includes(BOOT_MARKER));
+  if (markers.length !== 2 || !markers.includes(`console.log('${BOOT_MARKER}');`)) {
+    problems.push(`'${BOOT_STEP}': ${BOOT_MARKER} must appear exactly twice, printed by the probe (console.log('${BOOT_MARKER}');) and read by the decision; found ${JSON.stringify(markers)}`);
   }
   return problems;
 }
 
-/** Case 7: the module-loading check keeps catching ESM-only dependencies while a workflow boots the server without require(esm). */
+/** Case 7: the module-loading check fails closed, and keeps catching ESM-only dependencies while a workflow boots the server without require(esm). */
 function bootCheckProblems(sources) {
   const problems = [];
   const legacy = [];
@@ -690,8 +719,8 @@ function bootCheckProblems(sources) {
   if (!/^postgres(?:ql)?:\/\//.test(found[0].env.DATABASE_URL ?? '')) {
     problems.push(`'${BOOT_STEP}' must set a DATABASE_URL, or main.ts exits before it loads the AppModule graph`);
   }
-  problems.push(...moduleLoadGrepProblems(found[0].run ?? ''));
-  const flag =new RegExp(String.raw`(?:^|\s)node\s+${NO_REQUIRE_ESM}\s+apps/server/dist/main\.js\b`).test(boots[0]);
+  problems.push(...bootStepShapeProblems((found[0].run ?? '').split('\n')));
+  const flag = boots[0].split(/\s+/).includes(NO_REQUIRE_ESM);
   if (legacy.length && !flag) {
     problems.push(
       `${legacy.join(', ')} boot apps/server/dist/main.js on a Node without require(esm): '${BOOT_STEP}' must run node ${NO_REQUIRE_ESM}, or an ESM-only dependency passes ci-cd and dies there with ERR_REQUIRE_ESM`,
@@ -701,6 +730,179 @@ function bootCheckProblems(sources) {
     problems.push(`no workflow boots the server on a Node without require(esm) any more: drop ${NO_REQUIRE_ESM} from '${BOOT_STEP}'`);
   }
   return problems;
+}
+
+/**
+ * Case 7, run: the module-loading step's `run:` block exactly as GitHub hands
+ * it to bash (a literal block scalar: its lines dedented by the first line's
+ * indent, comment and blank lines kept, one trailing newline), and its env.
+ */
+function bootStep(source) {
+  const job = jobText(source, BOOT_JOB);
+  assert.ok(job, `ci-cd.yml has no ${BOOT_JOB} job`);
+  const step = readJob(job).steps.find((s) => s.name === BOOT_STEP);
+  assert.ok(step, `ci-cd.yml has no '${BOOT_STEP}' step`);
+  const lines = job.split('\n');
+  const head = lines.findIndex((l) => l === `      - name: ${BOOT_STEP}`);
+  assert.ok(head >= 0, `'${BOOT_STEP}' must be written as '      - name: ${BOOT_STEP}'`);
+  let i = head + 1;
+  while (i < lines.length && !/^ {8}run: \|$/.test(lines[i])) {
+    assert.ok(lines[i].trim() === '' || indentOf(lines[i]) >= 8, `'${BOOT_STEP}' has no 'run: |' block this guard reads`);
+    i += 1;
+  }
+  assert.ok(i < lines.length, `'${BOOT_STEP}' has no 'run: |' block this guard reads`);
+  const body = [];
+  for (i += 1; i < lines.length && (lines[i].trim() === '' || indentOf(lines[i]) >= 10); i += 1) body.push(lines[i]);
+  while (body.length && body.at(-1).trim() === '') body.pop();
+  const indent = indentOf(body.find((l) => l.trim() !== '') ?? '');
+  return { run: `${body.map((l) => l.slice(indent)).join('\n')}\n`, env: step.env };
+}
+
+/**
+ * Case 7: server graphs to run the module-loading step against, built once.
+ * Each case is apps/server/dist/{main,app.module}.js under one shared
+ * node_modules. main.js does what tsc emits for main.ts: env validation (it
+ * exits without DATABASE_URL), then require('./app.module') inside a promise,
+ * then NestFactory.create(AppModule). The @nestjs/core stand-in's create()
+ * fails the way the real one does against the step's unreachable database
+ * (P1001), so only the probe can make a graph pass. Every failing case names
+ * what the step's output must show; esmOnly loads with require(esm) and dies
+ * with ERR_REQUIRE_ESM under --no-experimental-require-module.
+ */
+let bootFixtureCache = null;
+function bootFixtures() {
+  if (bootFixtureCache) return bootFixtureCache;
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-pin-boot-'));
+  process.on('exit', () => fs.rmSync(root, { recursive: true, force: true }));
+  const write = (rel, text) => {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), text);
+  };
+  const pkg = (name, manifest, files) => {
+    write(`node_modules/${name}/package.json`, JSON.stringify({ name, ...manifest }));
+    for (const [file, text] of Object.entries(files)) write(`node_modules/${name}/${file}`, text);
+  };
+  const cjs = { main: './index.js' };
+  const esm = { type: 'module', exports: './index.js' };
+  pkg('@nestjs/core', cjs, {
+    'index.js': "exports.NestFactory = { async create() { throw new Error(\"PrismaClientInitializationError: P1001: Can't reach database server at 127.0.0.1:1\"); } };\n",
+  });
+  pkg('cjs-dep', cjs, { 'index.js': 'module.exports = { yes: 1 };\n' });
+  pkg('plain-esm', esm, { 'index.js': 'export const x = 1;\n' });
+  pkg('tla-dep', esm, { 'index.js': 'await Promise.resolve();\nexport const x = 1;\n' });
+  pkg('cycle-dep', esm, { 'index.js': "import './back.cjs';\nexport const x = 1;\n", 'back.cjs': "require('./index.js');\n" });
+  pkg('esm-named', esm, { 'index.js': "import { nope } from 'cjs-dep';\nexport const x = nope;\n" });
+  pkg('deep-dep', { exports: { '.': './index.js' } }, { 'index.js': 'module.exports = 1;\n', 'v4.js': 'module.exports = 4;\n' });
+  pkg('bad-syntax', cjs, { 'index.js': 'module.exports = { a: 1 ;\n' });
+  pkg('esm-missing', esm, { 'index.js': "import 'no-such-esm-dep';\nexport const x = 1;\n" });
+  pkg('dir-import', esm, { 'index.js': "import './lib';\nexport const x = 1;\n", 'lib/index.js': 'export const y = 1;\n' });
+  pkg('throws-dep', cjs, { 'index.js': "throw new Error('module-load fixture: thrown while loading');\n" });
+  pkg('exits-early', cjs, { 'index.js': "console.error('module-load fixture: exited before the app was created');\nprocess.exit(0);\n" });
+  pkg('exit-hook', cjs, {
+    'index.js': "process.on('exit', (code) => {\n  if (code === 0) {\n    console.error('module-load fixture: exit hook failed');\n    process.exitCode = 1;\n  }\n});\n",
+  });
+  const MAIN = [
+    "'use strict';",
+    "const core_1 = require('@nestjs/core');",
+    'async function bootstrap() {',
+    '  if (!process.env.DATABASE_URL) {',
+    "    console.error('[FATAL] DATABASE_URL is required');",
+    '    process.exit(1);',
+    '  }',
+    "  const { AppModule } = await Promise.resolve().then(() => require('./app.module'));",
+    '  await core_1.NestFactory.create(AppModule, { rawBody: true });',
+    "  console.log('[boot] API ready');",
+    '}',
+    'bootstrap();',
+    '',
+  ].join('\n');
+  const graph = (dir, dep, rootName = 'AppModule') => {
+    write(`${dir}/apps/server/dist/main.js`, MAIN);
+    write(`${dir}/apps/server/dist/app.module.js`, `'use strict';\nrequire(${JSON.stringify(dep)});\nexports.AppModule = class ${rootName} {};\n`);
+    return path.join(root, dir);
+  };
+  fs.mkdirSync(path.join(root, 'tmp'));
+  bootFixtureCache = {
+    root,
+    cases: [
+      { label: 'a graph that loads', dir: graph('loads', 'cjs-dep'), loads: true },
+      { label: 'an ESM-only dependency', dir: graph('esm-only', 'plain-esm'), esmOnly: true, shows: 'ERR_REQUIRE_ESM' },
+      { label: 'an ESM-only dependency with top-level await', dir: graph('tla', 'tla-dep'), shows: 'ERR_REQUIRE_ASYNC_MODULE' },
+      { label: 'an ESM-only dependency in an import cycle', dir: graph('cycle', 'cycle-dep'), shows: 'ERR_REQUIRE_CYCLE_MODULE' },
+      { label: 'an ESM-only dependency importing a named export its CommonJS dependency lacks', dir: graph('named', 'esm-named'), shows: "does not provide an export named 'nope'" },
+      { label: "a deep import a dependency's exports map does not allow", dir: graph('subpath', 'deep-dep/v4'), shows: 'ERR_PACKAGE_PATH_NOT_EXPORTED' },
+      { label: 'a dependency with a syntax error', dir: graph('syntax', 'bad-syntax'), shows: 'SyntaxError' },
+      { label: 'a dependency that is not installed', dir: graph('missing', 'no-such-dep'), shows: "Cannot find module 'no-such-dep'" },
+      { label: 'an ESM-only dependency importing a package that is not installed', dir: graph('esm-missing', 'esm-missing'), shows: 'ERR_MODULE_NOT_FOUND' },
+      { label: 'an ESM-only dependency importing a directory', dir: graph('dir-import', 'dir-import'), shows: 'ERR_UNSUPPORTED_DIR_IMPORT' },
+      { label: 'a dependency that throws while it loads', dir: graph('throws', 'throws-dep'), shows: 'module-load fixture: thrown while loading' },
+      { label: 'a dependency that exits 0 before AppModule reaches NestFactory.create', dir: graph('exits-early', 'exits-early'), shows: 'module-load fixture: exited before the app was created' },
+      { label: 'a root module other than AppModule', dir: graph('not-app-module', 'cjs-dep', 'StubModule'), shows: 'not AppModule' },
+      { label: 'the load marker, then a non-zero exit', dir: graph('exit-hook', 'exit-hook'), shows: 'module-load fixture: exit hook failed' },
+    ],
+  };
+  return bootFixtureCache;
+}
+
+/**
+ * Case 7, run: runs the step's script with bash, as GitHub does (bash -e),
+ * on the running Node, in each fixture graph. A graph that loads must pass;
+ * every other must fail AND the step's output must show what it died of.
+ * `firstOnly` stops at the first problem (the negative controls).
+ */
+let bootRuns = 0;
+function bootBehaviourProblems({ run, env: stepEnv }, { firstOnly = false } = {}) {
+  if (run.includes('${{')) return [`'${BOOT_STEP}' uses a \${{ }} expression: this guard runs the step with bash and cannot expand it`];
+  const { root, cases } = bootFixtures();
+  bootRuns += 1;
+  const script = path.join(root, `step-${bootRuns}.sh`);
+  fs.writeFileSync(script, run);
+  const flagged = run.split('\n').some((l) => BOOTS_SERVER.test(l) && l.split(/\s+/).includes(NO_REQUIRE_ESM));
+  const env = {
+    ...process.env,
+    ...stepEnv,
+    PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}`,
+    TMPDIR: path.join(root, 'tmp'),
+  };
+  for (const name of ['NODE_OPTIONS', 'NODE_TEST_CONTEXT', 'BASH_ENV', 'ENV']) delete env[name];
+  const problems = [];
+  for (const c of cases) {
+    const loads = c.esmOnly ? !flagged && process.features.require_module === true : c.loads === true;
+    const r = spawnSync('bash', ['--noprofile', '--norc', '-e', script], { cwd: c.dir, env, encoding: 'utf8', timeout: 120000 });
+    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    const shown = `\n--- step output (exit ${r.status}${r.signal ? `, ${r.signal}` : ''}) ---\n${out.split('\n').slice(-30).join('\n')}`;
+    if (loads && r.status !== 0) problems.push(`${c.label}: the step fails a server whose module graph loads${shown}`);
+    if (!loads && r.status === 0) problems.push(`${c.label}: the step passes a server that cannot boot${shown}`);
+    if (!loads && r.status !== 0 && !out.includes(c.shows)) {
+      problems.push(`${c.label}: the step fails without printing what the boot died of (${JSON.stringify(c.shows)})${shown}`);
+    }
+    if (firstOnly && problems.length) break;
+  }
+  return problems;
+}
+
+/** Comment and doc prose, comment markers dropped and whitespace folded, so a phrase split across lines still reads as one. */
+const prose = (text) =>
+  text
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:#+|\/\*\*?|\*\/?|\/\/)\s?/, ''))
+    .join(' ')
+    .replace(/\s+/g, ' ');
+
+/** Case 9: every markdown file in the checkout (no dependencies, build output or VCS metadata). */
+function markdownDocs() {
+  const skip = new Set(['node_modules', '.git', 'dist', '.next', '.turbo', 'coverage', '.claude']);
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (skip.has(entry.name)) continue;
+      const at = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(at);
+      else if (entry.isFile() && entry.name.endsWith('.md')) found.push(path.relative(ROOT, at));
+    }
+  };
+  walk(ROOT);
+  return found.sort();
 }
 
 /** Applies one text edit, failing loudly when the anchor is gone (a mutation that no longer applies proves nothing). */
@@ -777,58 +979,52 @@ describe('V1-39 runtime pin: one declared Node runtime (D-21)', () => {
     assert.deepEqual(bootCheckProblems(allWorkflows()), []);
   });
 
-  // RP-R1-1: what the running Node (in CI, the pin) actually prints when a
-  // CommonJS entry cannot load a dependency, against the step's own greps.
-  it('the module-loading check catches how this Node dies loading a dependency (top-level await, import cycle, missing)', () => {
-    const job = jobText(workflow('ci-cd.yml'), BOOT_JOB);
-    assert.ok(job, `ci-cd.yml has no ${BOOT_JOB} job`);
-    const step = readJob(job).steps.find((s) => s.name === BOOT_STEP);
-    assert.ok(step, `ci-cd.yml has no '${BOOT_STEP}' step`);
-    const greps = grepsOf(step.run ?? '');
-    assert.ok(greps.length > 0, `'${BOOT_STEP}' runs no grep this guard reads`);
+  // RC2-1 (PIN-R3): the step itself, run verbatim on the running Node (in CI,
+  // the pin), against graphs that fail each way and graphs that load. The
+  // grep-list check it replaces passed the named-export, exports-map,
+  // syntax-error, throw, early-exit, wrong-root and exit-hook graphs.
+  it('the module-loading step fails every server graph that cannot boot, prints why, and passes one that loads', () => {
+    assert.deepEqual(bootBehaviourProblems(bootStep(workflow('ci-cd.yml'))), []);
+  });
 
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runtime-pin-'));
-    const pkg = (name, files) => {
-      const at = path.join(dir, 'node_modules', name);
-      fs.mkdirSync(at, { recursive: true });
-      fs.writeFileSync(path.join(at, 'package.json'), JSON.stringify({ name, type: 'module', exports: './index.js' }));
-      for (const [file, text] of Object.entries(files)) fs.writeFileSync(path.join(at, file), text);
-    };
-    const env = { ...process.env };
-    delete env.NODE_OPTIONS;
-    delete env.NODE_TEST_CONTEXT;
-    const load = (dep, flags = []) => {
-      const entry = path.join(dir, `${dep}.cjs`);
-      fs.writeFileSync(entry, `require(${JSON.stringify(dep)});\n`);
-      const r = spawnSync(process.execPath, [...flags, entry], { cwd: dir, env, encoding: 'utf8', timeout: 20000 });
-      return { status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
-    };
-    try {
-      pkg('tla-dep', { 'index.js': 'await Promise.resolve();\nexport const x = 1;\n' });
-      pkg('cycle-dep', { 'index.js': "import './back.cjs';\nexport const x = 1;\n", 'back.cjs': "require('./index.js');\n" });
-      pkg('plain-esm', { 'index.js': 'export const x = 1;\n' });
-      const dies = [
-        ['an ESM-only dependency with top-level await', 'tla-dep', []],
-        ['an ESM-only dependency in an import cycle', 'cycle-dep', []],
-        ['a dependency that is not installed', 'no-such-dep', []],
-        [`an ESM-only dependency under ${NO_REQUIRE_ESM}`, 'plain-esm', [NO_REQUIRE_ESM]],
-      ];
-      for (const [label, dep, flags] of dies) {
-        const { status, out } = load(dep, flags);
-        assert.notEqual(status, 0, `${label}: node ${process.version} loaded it`);
-        for (const { flags: f, pattern } of greps) {
-          assert.match(out, new RegExp(pattern), `${label}: grep -${f} "${pattern}" misses what node ${process.version} prints:\n${out}`);
-        }
+  // The legacy path (case 7): while a workflow boots on a Node without
+  // require(esm), the boot runs with the flag, and an ESM-only dependency
+  // must then fail the step with ERR_REQUIRE_ESM.
+  it(`the module-loading step with ${NO_REQUIRE_ESM} fails an ESM-only dependency (ERR_REQUIRE_ESM)`, () => {
+    const source = workflow('ci-cd.yml');
+    const flagged = source.includes(FLAGGED_BOOT) ? source : mutate(source, BOOT, FLAGGED_BOOT);
+    assert.deepEqual(bootBehaviourProblems(bootStep(flagged)), []);
+  });
+});
+
+describe('PIN-R3: CI comments and operator docs match D-68 and V1-30', () => {
+  // TRPC-R1-02: since D-68 the server serves /trpc only when TRPC_ENABLED=1.
+  const MOUNTED = /(?:\/trpc|\btrpc\b|\bthe router)\s+is\s+mounted\b/i;
+  for (const file of ['.github/workflows/ci-cd.yml', 'packages/api/src/routers/crm.contact-detail.spec.ts']) {
+    it(`${file}: no comment says /trpc is mounted, and it names TRPC_ENABLED=1 (D-68)`, () => {
+      const text = prose(read(file));
+      assert.doesNotMatch(text, MOUNTED, `${file} says tRPC is mounted; D-68 unmounts it unless TRPC_ENABLED=1`);
+      assert.ok(text.includes('TRPC_ENABLED=1'), `${file} must say /trpc is served only when TRPC_ENABLED=1 (D-68)`);
+    });
+  }
+
+  // RC2-2: HawkScan has no pull_request trigger, so as a required check it
+  // never reports and blocks every merge. workflow-integrity.spec.mjs holds
+  // the setup doc and the roadmap; this holds every markdown doc.
+  it('no markdown doc tells anyone to add HawkScan to the required checks (V1-30, D-22)', () => {
+    const REQUIRE_HAWKSCAN = /\badd\s+`?HawkScan`?\s+to\s+(?:`?main`?'s\s+|the\s+)?required\b/i;
+    const SOFT_TO_REQUIRED = /soft\s*(?:→|->|then)\s*required/i;
+    const docs = markdownDocs();
+    assert.ok(docs.includes('docs/SECURITY_DAST_SETUP.md') && docs.includes('docs/PLUGIN_INTEGRATION_ROADMAP.md'), 'the doc walk missed the DAST docs');
+    const offending = [];
+    for (const doc of docs) {
+      const text = read(doc);
+      if (REQUIRE_HAWKSCAN.test(prose(text))) offending.push(`${doc}: tells operators to add HawkScan to the required checks`);
+      for (const paragraph of text.split(/\r?\n\s*\r?\n/)) {
+        if (/hawkscan|stackhawk|\bDAST\b/i.test(paragraph) && SOFT_TO_REQUIRED.test(paragraph)) offending.push(`${doc}: describes a soft-then-required DAST gate`);
       }
-      // Control: a graph that loads is not reported (require(esm) on).
-      if (process.features.require_module) {
-        const { status, out } = load('plain-esm');
-        assert.equal(status, 0, `control: node ${process.version} could not require an ESM-only dependency:\n${out}`);
-        for (const { flags: f, pattern } of greps) assert.doesNotMatch(out, new RegExp(pattern), `control: grep -${f} flags a graph that loads`);
-      }
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
     }
+    assert.deepEqual(offending, []);
   });
 });
 
@@ -949,8 +1145,6 @@ describe('V1-39 negative controls: review mutations are rejected', () => {
   }
 
   // CR-V139-2: the flag follows the workflows that boot the server.
-  const BOOT = 'timeout 45 node apps/server/dist/main.js';
-  const FLAGGED_BOOT = `timeout 45 node ${NO_REQUIRE_ESM} apps/server/dist/main.js`;
   for (const file of SERVER_BOOTS) {
     it(`module-loading check: rejects no flag while ${file} boots on 20.18.1`, () => {
       const sources = allWorkflows();
@@ -977,33 +1171,35 @@ describe('V1-39 negative controls: review mutations are rejected', () => {
     const source = mutate(read('AGENTS.md'), `, ${AGENTS_GATE}`, '');
     assert.notDeepEqual(agentsExceptionProblems(source), []);
   });
-  // RP-R1-1: with require(esm) on, top-level await or an import cycle in an
-  // ESM-only dependency kills the boot with its own code, not ERR_REQUIRE_ESM.
-  // Dropping either code from either grep must fail case 7.
-  const dropFromGrep = (source, grep, code) => {
-    const line = source.split('\n').find((l) => l.includes(grep));
-    assert.ok(line?.includes(`|${code}`), `mutation anchor not found: ${grep} with ${code}`);
-    return mutate(source, line, line.replace(`|${code}`, ''));
-  };
-  for (const code of ['ERR_REQUIRE_ASYNC_MODULE', 'ERR_REQUIRE_CYCLE_MODULE']) {
-    for (const grep of ['grep -qE', 'grep -aE']) {
-      it(`module-loading check: rejects ${grep} without ${code}`, () => {
-        const sources = allWorkflows();
-        sources['ci-cd.yml'] = dropFromGrep(sources['ci-cd.yml'], grep, code);
-        assert.notDeepEqual(bootCheckProblems(sources), []);
-      });
-    }
+  // RC2-3 (PIN-R3): one-line edits that disabled the old check while this
+  // spec stayed 60/60 green (M1-M3), and their kin on the new decision. Each
+  // must fail the read (bootCheckProblems) AND make the step itself pass a
+  // server that cannot boot, fail one that loads, or fail silently
+  // (bootBehaviourProblems). A dropped timeout only shows on a hang, which
+  // the run does not wait out (45 s), so the read alone holds it.
+  const RUN_INDENT = ' '.repeat(10);
+  const bootMutations = [
+    ['exit 1 -> exit 0 in the failure branch (RC2-3 M1)', `${RUN_INDENT}  exit 1\n${RUN_INDENT}fi\n`, `${RUN_INDENT}  exit 0\n${RUN_INDENT}fi\n`],
+    ['stderr dropped: 2>&1 -> 2>/dev/null (RC2-3 M2)', 'apps/server/dist/main.js 2>&1)', 'apps/server/dist/main.js 2>/dev/null)'],
+    ['the marker grep reads nothing: echo "$OUT" -> echo "" (RC2-3 M3)', '! echo "$OUT" | grep -qxF', '! echo "" | grep -qxF'],
+    ['the exit code ignored', 'if [ "$STATUS" -ne 0 ] || ! echo', 'if ! echo'],
+    ['the exit code read from another command', `2>&1)\n${RUN_INDENT}STATUS=$?`, `2>&1)\n${RUN_INDENT}echo "boot finished"\n${RUN_INDENT}STATUS=$?`],
+    ["the boot's failure swallowed (|| true)", 'apps/server/dist/main.js 2>&1)', 'apps/server/dist/main.js 2>&1 || true)'],
+    ['the marker not required (a grep that matches any line)', `grep -qxF "${BOOT_MARKER}"`, 'grep -q ""'],
+    ['the probe not loaded', `node ${PROBE_OPTION} apps/server`, 'node apps/server'],
+    ['the probe printing the marker as soon as it loads', `${RUN_INDENT}const path = require('node:path');\n`, `${RUN_INDENT}console.log('${BOOT_MARKER}');\n${RUN_INDENT}const path = require('node:path');\n`],
+    ['the boot not under a timeout', `OUT=$(timeout 45 node ${PROBE_OPTION}`, `OUT=$(node ${PROBE_OPTION}`, 'read only'],
+  ];
+  for (const [name, from, to, readOnly] of bootMutations) {
+    it(`module-loading check: rejects ${name}`, () => {
+      const sources = allWorkflows();
+      sources['ci-cd.yml'] = mutate(sources['ci-cd.yml'], from, to);
+      assert.notDeepEqual(bootCheckProblems(sources), [], 'the read of the step accepts it');
+      if (!readOnly) {
+        assert.notDeepEqual(bootBehaviourProblems(bootStep(sources['ci-cd.yml']), { firstOnly: true }), [], 'the step still passes what loads and fails, loudly, what does not');
+      }
+    });
   }
-  it('module-loading check: rejects a grep this guard cannot read (grep -q -E)', () => {
-    const sources = allWorkflows();
-    sources['ci-cd.yml'] = mutate(sources['ci-cd.yml'], 'grep -qE "', 'grep -q -E "');
-    assert.notDeepEqual(bootCheckProblems(sources), []);
-  });
-  it('module-loading check: rejects a step that only prints (no grep -q decides)', () => {
-    const sources = allWorkflows();
-    sources['ci-cd.yml'] = mutate(sources['ci-cd.yml'], 'grep -qE "', 'grep -cE "');
-    assert.notDeepEqual(bootCheckProblems(sources), []);
-  });
 
   it('module-loading check: rejects a step with no DATABASE_URL (it stops before the AppModule graph)', () => {
     const sources = allWorkflows();
