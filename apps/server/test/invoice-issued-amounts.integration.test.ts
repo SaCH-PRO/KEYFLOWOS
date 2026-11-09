@@ -73,6 +73,17 @@
  *          invoice (M31: Payment has no FK to Business): PATCH items to 30 -> 200 (the foreign row is not
  *          this invoice's money, D-75); to 10 -> 409 'holds TTD 20.00'
  *
+ * D-89 review repairs:
+ *
+ *   IA-09d SEC-D89-1: 1000 FAILED payment rows on the invoice whose ids sort before a cuid, under another
+ *          business (M31) and then under its own: paid 60, undone: PATCH items to 10 -> 409 'holds TTD
+ *          60.00', nothing written; to 60 -> 200 (was 200 at 10: the db client's default take of 1000 capped
+ *          the guard's findMany, inside the transaction too, and the payment row was never read)
+ *   IA-09e CR-D89-1: paid 120 on 100 (overpaid, recordPayment allows it), undone: the web form restating
+ *          its items with a note, {taxRate:0}, items to 110 and to 130 -> 200 (none lowers the stored
+ *          total, so none brings it below the money held); from 110, items to 100 or a FIXED discount of 5
+ *          -> 409 'holds TTD 120.00', nothing written (was 409 on every items or tax edit)
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * ModuleScopeGuard, PlanLimitGuard (plan answer stubbed: the plan allows
  * invoices), CommerceController, CommerceService, InvoiceWorkflowService,
@@ -886,5 +897,62 @@ describe('D-89: an invoice edit that would bring its total below the money it ho
     emitted.length = 0;
     const short = await patchInvoice(ID.cash, id, line('IA-09c', 10));
     await expectRefused(short, HELD_REFUSED('20.00'), before, id, [...emitted]);
+  }, 60_000);
+
+  it('IA-09d D-89 review repair (SEC-D89-1): 1000 FAILED payment rows on the invoice, under another business or its own, do not hide the money it holds from the guard: paid 60, undone, PATCH items to 10 -> 409; to 60 -> 200', async () => {
+    for (const [tag, rowsBusiness] of [['foreign', ID.acc], ['own', ID.cash]] as const) {
+      const id = await sent100(ID.cash, `IA-09d ${tag}`);
+      // Planted before the payment, with ids that sort before a cuid: a capped
+      // read (the db client's default take of 1000) returned only these. Not
+      // money: FAILED rows (and another tenant's rows, M31, D-75) hold nothing.
+      await db.$executeRawUnsafe(
+        `INSERT INTO payments (id, amount, currency, status, provider, method, provider_payment_id, business_id, invoice_id)
+         SELECT $1 || lpad(n::text, 4, '0'), 1, 'TTD', 'FAILED', 'cash', 'cash', $1 || lpad(n::text, 4, '0'), $2, $3
+           FROM generate_series(1, 1000) AS n`,
+        `a0_${P}pay_09d_${tag}_`, rowsBusiness, id,
+      );
+      await pay(ID.cash, id, 60);
+      const before = await undo(id);
+
+      emitted.length = 0;
+      const short = await patchInvoice(ID.cash, id, line(`IA-09d ${tag}`, 10));
+      await expectRefused(short, HELD_REFUSED('60.00'), before, id, [...emitted]);
+
+      const at60 = await patchInvoice(ID.cash, id, line(`IA-09d ${tag}`, 60));
+      expect(at60.status, `${tag}: ${JSON.stringify(at60.body)}`).toBe(200);
+      expect(at60.body.total).toBe(60);
+    }
+  }, 120_000);
+
+  it('IA-09e D-89 review repair (CR-D89-1): an edit that does not lower the total of an invoice already holding more than its total does not bring it below: paid 120 on 100, undone: the web form restating its items with a note, {taxRate:0}, items to 110 and to 130 -> 200; items back to 100 or a FIXED discount on 110 -> 409', async () => {
+    const id = await sent100(ID.cash, 'IA-09e');
+    await pay(ID.cash, id, 120);
+    expect((await snapshot(id)).status, 'an overpayment is recorded as received (recordPayment allows it)').toBe('PAID');
+    const undone = await undo(id);
+    expect(undone.total).toBe(100);
+
+    // The web edit form sends the items with every edit (invoices-panel.tsx).
+    const restated = await patchInvoice(ID.cash, id, { ...line('IA-09e', 100), notes: 'V82B IA-09e note' });
+    expect(restated.status, `a restated total of 100 is not brought below the 120 held: ${JSON.stringify(restated.body)}`).toBe(200);
+    expect({ total: restated.body.total, notes: restated.body.notes }).toEqual({ total: 100, notes: 'V82B IA-09e note' });
+    const taxOnly = await patchInvoice(ID.cash, id, { taxRate: 0 });
+    expect(taxOnly.status, JSON.stringify(taxOnly.body)).toBe(200);
+    expect(taxOnly.body.total).toBe(100);
+    const raised = await patchInvoice(ID.cash, id, line('IA-09e', 110));
+    expect(raised.status, `raising the total toward the money held: ${JSON.stringify(raised.body)}`).toBe(200);
+    expect(raised.body.total).toBe(110);
+
+    const before = await snapshot(id);
+    for (const body of [line('IA-09e', 100), { discountType: 'FIXED', discountValue: 5 }]) {
+      emitted.length = 0;
+      const lowered = await patchInvoice(ID.cash, id, body);
+      await expectRefused(lowered, HELD_REFUSED('120.00'), before, id, [...emitted]);
+    }
+
+    const above = await patchInvoice(ID.cash, id, line('IA-09e', 130));
+    expect(above.status, JSON.stringify(above.body)).toBe(200);
+    expect(above.body.total).toBe(130);
+    const row = await snapshot(id);
+    expect({ status: row.status, total: row.total }).toEqual({ status: 'DRAFT', total: 130 });
   }, 60_000);
 });

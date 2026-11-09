@@ -17,7 +17,7 @@ import { CrmService } from '../crm/crm.service';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CommerceStatsService } from './commerce-stats.service';
 import { InvoiceWorkflowService, InvoiceStatus, balanceOfStoredRows, computeBalance, isLegalTransition, isShareableInvoiceStatus, ownTenantPayments, roundMoney } from './invoice-workflow.service';
-import { computeDocumentAmounts, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
+import { computeDocumentAmounts, fromCents, lineAmount, moneyEquals, overpaidMoney, percentOf, remainingMoney, subtractMoney, sumMoney, toCents } from './money';
 import { CatalogService } from '../catalog/catalog.service';
 import { PublicEventsService } from '../public-events/public-events.service';
 import { RevenuePostingService } from '../finance/revenue-posting.service';
@@ -5049,35 +5049,53 @@ export class CommerceService {
    * W3-D89-OVERPAID-EDIT (owner ruling D-89): an edit may not bring the
    * invoice's total below the money it holds, received net of refunds
    * (balanceOfStoredRows, the balance contract every reader uses, D-14) over
-   * its own tenant's Payment rows only (ownTenantPayments, D-75: Payment has
-   * no FK to Business, M31), compared in integer cents (D-13: isOverpaid). The
-   * FOLLOW3-B2 residual: a CASH invoice holding payments, returned to DRAFT by
-   * the AI undo, holds no invoice-sourced posting, so D-60 (holdsIssuedMoney)
-   * leaves its amounts editable, and an edit to 50 of an invoice holding 60
-   * left it overpaid with nothing to refund it. Called by every write of a new
-   * total in updateInvoice (the items edit and the tax/discount edit; an
-   * issued invoice changes no total, D-60), on the edit's transaction under
-   * the invoice row lock every money door takes, so a payment or refund
-   * committed before the edit is counted and one after it waits. A total
-   * equal to the money held passes. Refused 409 before anything is written.
+   * its own tenant's Payment rows only (D-75: Payment has no FK to Business,
+   * M31), compared in integer cents (D-13: isOverpaid). The FOLLOW3-B2
+   * residual: a CASH invoice holding payments, returned to DRAFT by the AI
+   * undo, holds no invoice-sourced posting, so D-60 (holdsIssuedMoney) leaves
+   * its amounts editable, and an edit to 50 of an invoice holding 60 left it
+   * overpaid with nothing to refund it. Called by every write of a new total
+   * in updateInvoice (the items edit and the tax/discount edit; an issued
+   * invoice changes no total, D-60), on the edit's transaction under the
+   * invoice row lock every money door takes, so a payment or refund committed
+   * before the edit is counted and one after it waits. A total equal to the
+   * money held passes. Refused 409 before anything is written.
+   *
+   * D-89 review repairs:
+   *  - CR-D89-1: only an edit that lowers the stored total can bring it below
+   *    the money held. An invoice already holding more than its total (an
+   *    overpayment, which recordPayment records on purpose) keeps its total
+   *    on a restatement (the web edit form sends the items with every edit,
+   *    D-60 reads that as no change) and may raise it; lowering it further is
+   *    refused. So the floor is the lower of the stored total and the money
+   *    held.
+   *  - SEC-D89-1: the money held is read raw, filtered in the database to the
+   *    invoice's own business and to the rows that count (SUCCESSFUL and
+   *    REFUNDED; PENDING and FAILED are not money), with no row cap. A
+   *    findMany is capped at 1000 rows by the db client's default take, also
+   *    inside a transaction, so 1000 FAILED rows, or another tenant's rows
+   *    filtered out only in memory, sorted before the payment hid it and let
+   *    the edit through.
    */
   private static async assertTotalCoversHeldMoney(
     tx: Prisma.TransactionClient,
-    invoice: { id: string; businessId: string; currency: string | null },
-    total: number,
+    invoice: { id: string; businessId: string; currency: string | null; total: number },
+    newTotal: number,
   ): Promise<void> {
-    const payments = await tx.payment.findMany({
-      where: { invoiceId: invoice.id },
-      select: { amount: true, status: true, businessId: true },
-    });
-    const own = ownTenantPayments({ businessId: invoice.businessId, payments });
-    const balance = balanceOfStoredRows(total, own, invoice.currency);
+    const storedCents = toCents(Number(invoice.total));
+    if (toCents(newTotal) >= storedCents) return;
+    const rows = await tx.$queryRaw<Array<{ amount: number; status: string }>>`
+      SELECT amount, status FROM payments
+      WHERE invoice_id = ${invoice.id} AND business_id = ${invoice.businessId}
+        AND status IN ('SUCCESSFUL', 'REFUNDED')`;
+    const balance = balanceOfStoredRows(newTotal, rows, invoice.currency);
     if (!balance.isOverpaid) return;
     const currency = normalizeCurrency(invoice.currency);
     const held = `${currency} ${balance.net.toFixed(2)}`;
+    const floor = fromCents(Math.min(storedCents, toCents(balance.net)));
     throw new ConflictException(
       `Cannot set the total of this invoice below the money it holds: it holds ${held} received net of refunds, ` +
-        `and the edit would make its total ${currency} ${balance.total.toFixed(2)}; refund the difference first, or keep the total at ${held} or more`,
+        `and the edit would make its total ${currency} ${balance.total.toFixed(2)}; refund the difference first, or keep the total at ${currency} ${floor.toFixed(2)} or more`,
     );
   }
 
