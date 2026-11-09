@@ -17,8 +17,9 @@
  *   MC-22  any unrelated open task suppressed the follow-up, and check-then-create
  *          raced: the follow-up is gated by the compare-and-set itself, so exactly
  *          one is created for the move whatever other tasks exist
- *   MC-23 (nit, real part) the follow-up wrote no task_added audit: it goes through
- *          CrmService.addTask, assigned to the contact's owner (D-81)
+ *   MC-23 (nit, real part) the follow-up wrote no task_added audit: CrmService writes it
+ *          in the move's transaction with its SYSTEM task.created entry and records its
+ *          task_added audit, assigned to the contact's owner (D-81) while they are a member
  * D-81 narrows the PR: only invoice.paid moves a contact (not booking.confirmed,
  * store_order.paid, payment.received or quote.*), only LEAD/PROSPECT -> CLIENT,
  * forward-only (a refund's invoice.reopened never moves it back), lifecycleStage
@@ -45,6 +46,17 @@
  *   L-10 CTL         another tenant's event naming this tenant's invoice changes nothing, both ways
  *   L-11 RED-BEFORE  a payload naming another tenant's contact moves only the invoice's own
  *                    contact, in the invoice's business
+ *
+ * Review repairs (PR196-CRM-LIFECYCLE review; RED before the repair):
+ *   SEC-L81-1 (every move case, in expectMovedOnce) the follow-up's task.created ContactEvent
+ *                    names SYSTEM (source lifecycle-automation, no actor id), as its task_added
+ *                    audit does; CrmTimelineService.addTask recorded it as a USER with a null id
+ *                    and mirrored that USER row into the Activity feed. The move now writes ONE
+ *                    Activity row of its own, the status row (D-08): no task.created feed row
+ *   L-14 (SEC-L81-2) a contact whose owner is no longer a member of the business (a removed
+ *                    member keeps Contact.ownerId) or is a member of another business only: the
+ *                    contact moves and its one follow-up stays in the business, unassigned, with
+ *                    no TaskAssignment naming the outsider
  *
  * Nothing on the event path is mocked: PrismaService, the user, business,
  * membership, contact, invoice and task rows, the real EventEmitter2
@@ -92,6 +104,9 @@ const ID = {
   cRefund: `${P}cRefund`,
   cTenantA: `${P}cTenantA`, // L-10 / L-11: bizA's LEAD
   cTenantB: `${P}cTenantB`, // L-10 / L-11: bizB's LEAD
+  gone: `${P}gone`, // L-14: was a STAFF member of bizA, removed (membership deleted)
+  cGoneOwner: `${P}cGoneOwner`, // L-14: bizA's LEAD owned by the removed member
+  cForeignOwner: `${P}cForeignOwner`, // L-14: bizA's PROSPECT owned by bizB's owner (no bizA membership)
 };
 
 /** The follow-up's source (as PR #196 named it). */
@@ -110,6 +125,7 @@ async function cleanup() {
   // Hard-delete via raw SQL (bypasses the soft-delete extension), children first.
   for (const sql of [
     `DELETE FROM task_assignments WHERE assignable_id LIKE ${sqlLikePrefix(P)}`,
+    `DELETE FROM task_assignments WHERE task_id IN (SELECT id FROM contact_tasks WHERE business_id LIKE ${sqlLikePrefix(P)})`,
     `DELETE FROM activities WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_audit_entries WHERE business_id LIKE ${sqlLikePrefix(P)}`,
     `DELETE FROM contact_events WHERE business_id LIKE ${sqlLikePrefix(P)}`,
@@ -230,7 +246,14 @@ function expectMovedOnce(s: Awaited<ReturnType<typeof lifecycleOf>>, from: strin
   // MC-15 / D-08: the Activity feed shows the move at most once (once, with its feed writer mounted).
   expect(s.statusFeed, 'one status feed row').toHaveLength(1);
   expect(s.statusFeed[0].data).toMatchObject({ from, to: 'CLIENT' });
-  expect(s.taskFeed.length, 'at most one feed row for the follow-up').toBeLessThanOrEqual(1);
+  // SEC-L81-1 / D-08: the move writes ONE crm feed row of its own, the status row: no task.created
+  // mirror (CrmTimelineService.addTask's, which named a USER with a null id). The crm invoice.* rows
+  // are the invoice events' own contact-timeline mirrors (L-12), not the move's.
+  expect(s.taskFeed, 'no task.created feed row').toEqual([]);
+  expect(
+    s.feed.filter((r: any) => r.module === 'crm' && !String(r.action).startsWith('invoice.')).map((r: any) => `${r.action}:${r.entityType}`),
+    "the move's crm feed rows",
+  ).toEqual(['updated:contact']);
 
   // MC-21 / MC-22 / MC-23 / D-81: exactly one follow-up, OPEN (canonical), for the contact's owner, audited.
   expect(s.followUps, 'one follow-up task').toHaveLength(1);
@@ -243,9 +266,16 @@ function expectMovedOnce(s: Awaited<ReturnType<typeof lifecycleOf>>, from: strin
   expect(taskAudits, 'one task_added audit').toHaveLength(1);
   expect(taskAudits[0]).toMatchObject({ entityType: 'task', entityId: task.id });
   expect(taskAudits[0].actor).toMatchObject({ type: 'SYSTEM' });
-  if (owner) {
-    expect(s.assignments.map((a: any) => [a.assignableType, a.assignableId])).toEqual([['User', owner]]);
-  }
+  expect(taskAudits[0].after.title).toBe(task.title);
+  expect(taskAudits[0].after.assigneeId ?? null, 'the audited assignee').toBe(owner); // the audit diff drops a null
+  // SEC-L81-1: the follow-up's contact-timeline entry names SYSTEM too, with no actor id, and the task.
+  const taskEvents = s.events.filter((e: any) => e.type === 'task.created');
+  expect(taskEvents, 'one task.created ContactEvent').toHaveLength(1);
+  expect(taskEvents[0]).toMatchObject({ businessId: s.contact.businessId, actorType: 'SYSTEM', actorId: null, source: FOLLOW_UP_SOURCE });
+  expect(taskEvents[0].data).toMatchObject({ taskId: task.id, title: task.title, assigneeId: owner });
+  expect(invoiceIds).toContain(taskEvents[0].data.invoiceId);
+  // The assignment: the owner (a member of the contact's business), or none (SEC-L81-2).
+  expect(s.assignments.map((a: any) => [a.assignableType, a.assignableId, a.assignedBy])).toEqual(owner ? [['User', owner, 'system']] : []);
 }
 
 beforeAll(async () => {
@@ -308,7 +338,7 @@ beforeAll(async () => {
   await cleanup(); // in case a prior run aborted
 
   // ---- identities, tenants, memberships -------------------------------------
-  for (const id of [ID.owner, ID.rep, ID.ownerB]) {
+  for (const id of [ID.owner, ID.rep, ID.ownerB, ID.gone]) {
     await db.user.create({ data: { id, email: `${P}${id.slice(P.length)}@test.local`, role: 'USER' } });
   }
   await db.business.create({ data: { id: ID.bizA, name: 'V88E Biz A', ownerId: ID.owner, currency: 'TTD' } });
@@ -342,6 +372,14 @@ beforeAll(async () => {
   await contact(ID.cRefund, ID.bizA, 'LEAD');
   await contact(ID.cTenantA, ID.bizA, 'LEAD');
   await contact(ID.cTenantB, ID.bizB, 'LEAD');
+
+  // L-14: a STAFF member who owned a contact and was then removed from bizA (the membership row is
+  // deleted, as IdentityService.removeTeamMember does; Contact.ownerId stays); and a bizA contact
+  // owned by bizB's owner, who has no bizA membership.
+  await db.membership.create({ data: { id: `${P}m_gone`, userId: ID.gone, businessId: ID.bizA, role: 'STAFF' } });
+  await contact(ID.cGoneOwner, ID.bizA, 'LEAD', { ownerId: ID.gone });
+  await db.membership.delete({ where: { id: `${P}m_gone` } });
+  await contact(ID.cForeignOwner, ID.bizA, 'PROSPECT', { ownerId: ID.ownerB });
 }, 120_000);
 
 afterAll(async () => {
@@ -491,8 +529,30 @@ describe('PR196-CRM-LIFECYCLE: a paid invoice moves its contact LEAD/PROSPECT ->
     expect(s.audits.every((a: any) => a.businessId === ID.bizB)).toBe(true);
   });
 
+  it("L-14 (review SEC-L81-2, RED before the repair): a contact whose owner is no longer a member of the business, or is a member of another business only, still moves; its one follow-up stays in the business, unassigned, with no TaskAssignment naming the outsider", async () => {
+    expect(await db.membership.findFirst({ where: { userId: ID.gone, businessId: ID.bizA } }), 'the removed member has no bizA membership').toBeNull();
+    expect(await db.membership.findFirst({ where: { userId: ID.ownerB, businessId: ID.bizA } }), "bizB's owner has no bizA membership").toBeNull();
+    const a = await paidInvoice(ID.bizA, ID.cGoneOwner);
+    const b = await paidInvoice(ID.bizA, ID.cForeignOwner);
+    bus.emit('invoice.paid', paidEvent(a));
+    bus.emit('invoice.paid', paidEvent(b));
+    await settle([ID.cGoneOwner, ID.cForeignOwner]);
+
+    for (const [contactId, from, inv, outsider] of [
+      [ID.cGoneOwner, 'LEAD', a, ID.gone],
+      [ID.cForeignOwner, 'PROSPECT', b, ID.ownerB],
+    ] as const) {
+      const s = await lifecycleOf(contactId);
+      expectMovedOnce(s, from, [inv.id], null);
+      expect(s.contact.ownerId, 'the contact keeps its owner (reassigning is a human decision)').toBe(outsider);
+      expect(s.followUps[0].businessId).toBe(ID.bizA);
+      expect(await db.taskAssignment.findMany({ where: { assignableId: outsider, taskId: s.followUps[0].id } })).toEqual([]);
+    }
+  });
+
   // Found while writing L-10 / L-11, outside D-81's move (no status, task, audit or status row is
   // written across tenants, which is what L-10 / L-11 pin).
   it.todo("L-12 (found here, outside this packet): RevenueEventListener.log() writes every event's timeline entry (a ContactEvent and its Activity mirror) for the payload's contactId under the payload's businessId without checking the contact is in that business, so L-10 / L-11's foreign payloads still put an invoice.paid entry on the other tenant's contact (ActivityEventListener's commerce paid row likewise takes the payload's contactId); binding log() to the business changes all its handlers and the revenue-event.listener.spec.ts cases whose contact mock answers null: a separate packet");
   it.todo("L-13 (found here, outside this packet's write set): in the full app AutomationExecutorService.onContactUpdated runs its built-in stage-change rule on this move's contact.updated, as on every status change: an unassigned 'Follow up after stage change' task (source autopilot) and a tags update with its own feed rows, beside the one D-81 follow-up for the owner; folding them needs automation-executor.service.ts");
+  it.todo("L-15 (review SEC-L81-3, outside this packet's write set, pre-existing): GET crm/businesses/:businessId/tasks/due (crm.controller.ts dueTasks, crm:read only, no actor) returns CrmTimelineService.dueTasks's rows with include { contact: true } and no visibilityClause, so a PRIVATE or unshared contact's full row (notesInternal, email, phone) reaches every crm:read member through any task due within the window. The D-81 follow-up (due in 7 days) is one such task; AutomationExecutorService's 'Send thank-you note' (due in 1 day) already put every paid invoice's contact there before this packet. Scoping the route to the actor's visibility and selecting a contact summary needs crm.controller.ts and crm-timeline.service.ts: a separate packet");
 });

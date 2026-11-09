@@ -9,7 +9,7 @@ import {
 } from '../../core/event-bus/events.types';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { sanitize } from '../../core/utils/sanitize';
-import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, TASK_PRIORITY, type ContactStatus } from './crm.constants';
+import { BULK_LIMIT, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, TASK_PRIORITY, TASK_STATUS, type ContactStatus } from './crm.constants';
 import { SubscriptionsService } from '../subscriptions/subscriptions.service';
 import { CrmTimelineService } from './crm-timeline.service';
 import { ContactCustomFieldValueService } from './contact-custom-field-value.service';
@@ -156,6 +156,9 @@ function contactIdentityViolation(err: unknown): 'email' | 'phone' | null {
 const PAID_INVOICE_MOVES_FROM: readonly ContactStatus[] = ['LEAD', 'PROSPECT'];
 /** The source of the D-81 status event and follow-up task (as PR #196 named it). */
 const LIFECYCLE_SOURCE = 'lifecycle-automation';
+/** The D-81 follow-up task: its title (as PR #196 named it) and when it is due (7 days after the move). */
+const LIFECYCLE_FOLLOW_UP_TITLE = 'Post-payment customer check-in & follow-up';
+const LIFECYCLE_FOLLOW_UP_DUE_MS = 7 * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class CrmService {
@@ -1134,18 +1137,25 @@ export class CrmService {
    * The write is a compare-and-set on the status read here (PR #196 MC-14): a
    * concurrent or replayed delivery, a human edit or a merge that changed the
    * status first leaves this call with no row, and it writes nothing else. Only
-   * the call that moved the contact records:
-   *   - a status.changed ContactEvent naming the invoice, in the same
-   *     transaction. It is written here, not through CrmTimelineService.logEvent,
-   *     whose Activity mirror would show the move in the feed a second time: the
-   *     feed row is ActivityEventListener's on contact.updated (D-08, MC-15);
-   *   - a ContactAuditEntry by SYSTEM naming the invoice (D-25, MC-16);
-   *   - contact.updated with fromStatus/toStatus (automations, webhooks, sync; MC-16);
-   *   - one follow-up task through addTask (task_added audit, the canonical OPEN
-   *     status), assigned to the contact's owner. It is gated by the
-   *     compare-and-set, never by the contact's other tasks (MC-21, MC-22, MC-23).
-   * Tenant-bound: the contact is read and written only in `businessId`.
-   * Returns the moved contact, or null when nothing moved.
+   * the call that moved the contact writes, in the same transaction as the move:
+   *   - a status.changed ContactEvent naming the invoice, by SYSTEM;
+   *   - one follow-up task (the canonical OPEN status) with its task.created
+   *     ContactEvent by SYSTEM (review SEC-L81-1: CrmTimelineService.addTask
+   *     records every task as a USER's), assigned to the contact's owner only
+   *     while the owner is a member of `businessId` (review SEC-L81-2: a removed
+   *     member keeps Contact.ownerId, so their follow-up is left unassigned). It
+   *     is gated by the compare-and-set, never by the contact's other tasks
+   *     (MC-21, MC-22), and cannot be lost after the move commits.
+   * Neither ContactEvent is mirrored into the Activity feed (as
+   * CrmTimelineService.logEvent would): the move's one feed row is
+   * ActivityEventListener's on contact.updated (D-08, MC-15). After the commit:
+   * a ContactAuditEntry by SYSTEM naming the invoice (D-25, MC-16), the
+   * follow-up's task_added audit (MC-23), contact.updated with
+   * fromStatus/toStatus (automations, webhooks, sync; MC-16) and
+   * contact_task.created (the calendar projection).
+   * Tenant-bound: the contact, its owner's membership and the task are read and
+   * written only in `businessId`. Returns the moved contact, or null when
+   * nothing moved.
    */
   async advanceToClientOnInvoicePaid(input: {
     businessId: string;
@@ -1160,25 +1170,76 @@ export class CrmService {
     if (!current || !(PAID_INVOICE_MOVES_FROM as readonly string[]).includes(current.status)) return null;
     const from = current.status;
     const to: ContactStatus = 'CLIENT';
+    const trigger = { trigger: 'invoice.paid', invoiceId, invoiceNumber };
+    const dueDate = new Date(Date.now() + LIFECYCLE_FOLLOW_UP_DUE_MS);
 
-    const moved = await this.prisma.client.$transaction(async (tx) => {
+    const result = await this.prisma.client.$transaction(async (tx) => {
       const rows = await tx.contact.updateManyAndReturn({ where: { ...where, status: from }, data: { status: to } });
       if (rows.length !== 1) return null;
+      const contact = rows[0];
       await tx.contactEvent.create({
         data: {
           businessId,
           contactId,
           type: CONTACT_EVENT.STATUS_CHANGED,
-          data: { from, to, trigger: 'invoice.paid', invoiceId, invoiceNumber },
+          data: { from, to, ...trigger },
           actorType: 'SYSTEM',
           source: LIFECYCLE_SOURCE,
         },
       });
-      return rows[0];
-    });
-    if (!moved) return null;
 
-    const audit: AuditContext = { actor: { type: 'SYSTEM', label: LIFECYCLE_SOURCE } };
+      // SEC-L81-2: the owner gets the follow-up only while they are a member of this business.
+      const ownerMembership = contact.ownerId
+        ? await tx.membership.findUnique({
+            where: { userId_businessId: { userId: contact.ownerId, businessId } },
+            select: { id: true },
+          })
+        : null;
+      const assigneeId = ownerMembership ? contact.ownerId : null;
+      const task = await tx.contactTask.create({
+        data: {
+          businessId,
+          contactId,
+          title: LIFECYCLE_FOLLOW_UP_TITLE,
+          dueDate,
+          priority: TASK_PRIORITY.NORMAL,
+          status: TASK_STATUS.OPEN,
+          assigneeId,
+          source: LIFECYCLE_SOURCE,
+        },
+      });
+      if (assigneeId) {
+        await tx.taskAssignment.create({
+          data: {
+            taskType: 'ContactTask',
+            taskId: task.id,
+            assignableType: 'User',
+            assignableId: assigneeId,
+            assignedBy: 'system',
+            reason: 'task_created',
+          },
+        });
+      }
+      // SEC-L81-1: the task's timeline entry names SYSTEM, as its audit does.
+      const taskEvent = await tx.contactEvent.create({
+        data: {
+          businessId,
+          contactId,
+          type: CONTACT_EVENT.TASK_CREATED,
+          data: { taskId: task.id, title: task.title, dueDate: dueDate.toISOString(), priority: task.priority, assigneeId, ...trigger },
+          actorType: 'SYSTEM',
+          source: LIFECYCLE_SOURCE,
+        },
+      });
+      return { contact, task, taskEvent, ownerNotMember: Boolean(contact.ownerId) && !ownerMembership };
+    });
+    if (!result) return null;
+    const { contact: moved, task, taskEvent } = result;
+    if (result.ownerNotMember) {
+      this.logger.warn(`[CRM] D-81 follow-up for contact=${contactId} left unassigned: its owner is not a member of business=${businessId}`);
+    }
+
+    const actor: ContactAuditActor = { type: 'SYSTEM', label: LIFECYCLE_SOURCE };
     await this.contactAudit.write({
       businessId,
       contactId,
@@ -1187,27 +1248,34 @@ export class CrmService {
       entityId: invoiceId,
       before: { status: from },
       after: { status: to },
-      actor: audit.actor,
+      actor,
       reason: `invoice.paid ${invoiceNumber ?? invoiceId}: ${from} -> ${to} (D-81)`,
+    });
+    await this.contactAudit.write({
+      businessId,
+      contactId,
+      action: 'task_added',
+      entityType: 'task',
+      entityId: task.id,
+      after: { title: task.title, dueDate: dueDate.toISOString(), priority: task.priority, assigneeId: task.assigneeId },
+      actor,
+      reason: `invoice.paid ${invoiceNumber ?? invoiceId}: follow-up (D-81)`,
     });
     const payload: ContactUpdatedPayload = { contact: moved, businessId, fromStatus: from, toStatus: to };
     this.events.emit('contact.updated', payload);
+    this.events.emit('contact_task.created', { task, businessId });
+    // As CrmTimelineService.logEvent announces each contact event it writes (insight, best channel, attribution).
+    this.events.emit('crm.contact_event.logged', {
+      businessId,
+      contactId,
+      type: taskEvent.type,
+      eventId: taskEvent.id,
+      source: LIFECYCLE_SOURCE,
+      actorType: 'SYSTEM',
+      data: taskEvent.data,
+    });
     this.stats.invalidateCache(businessId);
     this.flow.invalidateCache(businessId);
-
-    try {
-      await this.addTask({
-        businessId,
-        contactId,
-        title: 'Post-payment customer check-in & follow-up',
-        dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-        priority: TASK_PRIORITY.NORMAL,
-        assigneeId: moved.ownerId ?? null,
-        source: LIFECYCLE_SOURCE,
-      }, audit);
-    } catch (err) {
-      this.logger.warn(`[CRM] D-81 follow-up task failed for contact=${contactId}: ${(err as Error).message}`);
-    }
     return moved;
   }
 

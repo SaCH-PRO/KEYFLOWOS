@@ -62,7 +62,9 @@
  *   A9-CRM  a full manual refund (PAID -> SENT): the contact timeline (real ContactEvent rows through
  *           RevenueEventListener and CrmTimelineService) gets one invoice.reopened entry { invoiceId,
  *           invoiceNumber, previousStatus PAID, status SENT } after its invoice.paid; the contact
- *           insight snapshot is marked stale with reason 'invoice.reopened' (ContactInsightListener)
+ *           insight snapshot is marked stale with reason 'invoice.reopened' (ContactInsightListener);
+ *           since PR196-CRM-LIFECYCLE (D-81) its paid invoice also asks CrmService, once, to move the
+ *           invoice row's contact (recorded stub; review CR-1)
  *   A9-HOOK a full manual refund: one invoice.reopened delivery to each active webhook of the business
  *           subscribed to invoice.paid (owner ruling D-58) or to invoice.reopened, signed with that
  *           webhook's secret like the paid delivery; none to a webhook on other events; another
@@ -205,6 +207,14 @@ const sign = (secret: string, body: string) => createHmac('sha256', secret).upda
 
 /** Every reason ContactInsightListener marked a contact's insight snapshot stale with (its safeMarkStale `source`). */
 const insightMarks: Array<{ businessId: string; contactId: string; reason: string }> = [];
+
+/**
+ * PR196-CRM-LIFECYCLE (D-81, review CR-1): every paid-invoice contact move RevenueEventListener asks
+ * CrmService for (recorded; the move itself, its rows and events, is proven on a real CrmService by
+ * crm-lifecycle-paid-invoice.integration.test.ts). Without the method the stub threw a TypeError the
+ * listener swallowed, and this suite could not see the call.
+ */
+const lifecycleMoves: Array<{ businessId: string; contactId: string; invoiceId: string; invoiceNumber?: string | null }> = [];
 
 const STATUS_OF: Record<string, string> = {
   [ID.invRemindOverdue]: 'OVERDUE',
@@ -477,6 +487,10 @@ beforeAll(async () => {
             timeline.push({ type: e.type, contactId: e.contactId, data: e.data });
             return null;
           },
+          advanceToClientOnInvoicePaid: async (m: { businessId: string; contactId: string; invoiceId: string; invoiceNumber?: string | null }) => {
+            lifecycleMoves.push(m);
+            return null;
+          },
         },
       },
       { provide: EvidenceService, useValue: {} },
@@ -588,6 +602,7 @@ beforeEach(() => {
   timeline.length = 0;
   hookDeliveries.length = 0;
   insightMarks.length = 0;
+  lifecycleMoves.length = 0;
 });
 
 describe('fixture sanity (real rows)', () => {
@@ -821,6 +836,9 @@ describe('VR-05: a refund that reopens an invoice emits a status event its liste
     const invoiceNumber = (await invoiceRow(inv)).invoiceNumber;
     await vi.waitFor(async () => expect((await contactTimeline(inv)).map((e) => e.type)).toEqual(['invoice.paid']), WAIT);
     await vi.waitFor(() => expect(insightMarks.filter((m) => m.contactId === contactId).map((m) => m.reason)).toContain('invoice.paid'), WAIT);
+    // PR196-CRM-LIFECYCLE (D-81, review CR-1): the paid invoice asks CrmService, once, to move the
+    // invoice row's own contact in the invoice's business.
+    await vi.waitFor(() => expect(lifecycleMoves).toEqual([{ businessId: ID.biz, contactId, invoiceId: inv, invoiceNumber }]), WAIT);
     await settle();
     // The paid invalidation is done: the snapshot reads fresh again before the refund.
     await db.contactInsightSnapshot.update({ where: { contactId }, data: { stale: false } });
