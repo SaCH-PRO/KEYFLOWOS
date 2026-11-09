@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { CrmAiService } from './crm-ai.service';
 import { CrmJourneyService } from './crm-journey.service';
 import { ContactInsightService } from './contact-insight.service';
@@ -9,7 +9,7 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { CrmRateLimitGuard, CrmRateLimit } from './guards/rate-limit.guard';
 import { FeatureFlagGuard, RequireFeature } from './guards/feature-flag.guard';
 import { checkAiRateLimit } from './ai-rate-limit.util';
-import { assertContactVisible } from './crm-permissions.helper';
+import { assertContactVisible, contactVisibilityFilter, resolveCrmAccess } from './crm-permissions.helper';
 
 /**
  * Every route requires CRM module scope (ModuleScopeGuard): crm write where the
@@ -19,6 +19,19 @@ import { assertContactVisible } from './crm-permissions.helper';
  * contacts/:contactId rule (V1-08 assertContactVisible): a hidden contact gets
  * the same 404 'Contact not found' as an unknown id, before the AI rate limit
  * is counted and before any service runs (FOLLOW3-D3).
+ *
+ * The routes that take a contact id in the body hold the same rule (review
+ * ST-2): ai-execute answers 404 for a hidden contactId before the action runs,
+ * and ai-analyze/execute creates tasks only for the contacts the caller may
+ * open, counting a hidden contact as failed exactly like an unknown one.
+ * ai-execute's bulk_status_change rewrites every matching contact of the
+ * business, which the service cannot narrow to a member's visible rows, so it
+ * is refused (403) to a caller whose CRM visibility is restricted. The
+ * deterministic business scans (ai-data-quality, ai-duplicates,
+ * ai-reengagement, ai-revenue-opportunities, ai-search) drop each entry that
+ * names a contact the caller cannot open. Residual (CrmAiService, outside this
+ * write set): the AI routes' prompt context and the scans' aggregate counts
+ * are still built over every contact of the business.
  */
 @Controller('crm')
 @UseGuards(CrmRateLimitGuard)
@@ -162,7 +175,15 @@ export class CrmAiController {
       throw new BadRequestException('Maximum 100 tasks per request');
     }
     const userId = req.user?.id ?? req.user?.sub ?? 'system';
-    return this.crmAi.executeTasks(businessId, userId, body.tasks);
+    const canOpen = await this.visibleContacts(businessId, req.user.id, body.tasks.map((t) => t?.contactId));
+    if (!canOpen) return this.crmAi.executeTasks(businessId, userId, body.tasks);
+    // A task on a contact the caller cannot open is not created and counts as
+    // failed, exactly like a task on an unknown contact id.
+    const visible = body.tasks.filter((t) => typeof t?.contactId === 'string' && canOpen(t.contactId));
+    const hidden = body.tasks.length - visible.length;
+    if (visible.length === 0) return { created: 0, failed: hidden };
+    const result = await this.crmAi.executeTasks(businessId, userId, visible);
+    return { created: result.created, failed: result.failed + hidden };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
@@ -256,9 +277,10 @@ export class CrmAiController {
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Post('businesses/:businessId/ai-search')
-  aiNaturalLanguageSearch(
+  async aiNaturalLanguageSearch(
     @Param('businessId') businessId: string,
     @Body() body: { query: string },
+    @Req() req: { user: { id: string } },
   ) {
     if (!body.query || typeof body.query !== 'string') {
       throw new BadRequestException('query is required');
@@ -267,7 +289,11 @@ export class CrmAiController {
       throw new BadRequestException('Query too long (max 500 chars)');
     }
     checkAiRateLimit(businessId);
-    return this.crmAi.naturalLanguageSearch(businessId, body.query);
+    const result = await this.crmAi.naturalLanguageSearch(businessId, body.query);
+    const canOpen = await this.visibleContacts(businessId, req.user.id, result.contacts.map((c) => c.id));
+    if (!canOpen) return result;
+    const contacts = result.contacts.filter((c) => canOpen(c.id));
+    return { ...result, contacts, totalResults: contacts.length };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
@@ -283,6 +309,17 @@ export class CrmAiController {
     if (!body.action || typeof body.action !== 'string') {
       throw new BadRequestException('action is required');
     }
+    if (body.contactId !== undefined && body.contactId !== null && body.contactId !== '') {
+      await assertContactVisible(this.prisma, businessId, String(body.contactId), req.user.id);
+    }
+    if (body.action === 'bulk_status_change') {
+      const access = await resolveCrmAccess(this.prisma, businessId, req.user.id);
+      if (!access.isOwner && !access.isSuperAdmin) {
+        throw new ForbiddenException(
+          'Bulk status change by AI command reaches every contact of the business, so it is limited to the business owner',
+        );
+      }
+    }
     const userId = req.user?.id ?? req.user?.sub ?? 'system';
     return this.crmAi.executeAiCommand(businessId, userId, {
       action: body.action,
@@ -296,8 +333,11 @@ export class CrmAiController {
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-data-quality')
-  aiDataQuality(@Param('businessId') businessId: string) {
-    return this.crmAi.dataQualityScan(businessId);
+  async aiDataQuality(@Param('businessId') businessId: string, @Req() req: { user: { id: string } }) {
+    const scan = await this.crmAi.dataQualityScan(businessId);
+    const canOpen = await this.visibleContacts(businessId, req.user.id, scan.topIssues.map((i) => i.contactId));
+    if (!canOpen) return scan;
+    return { ...scan, topIssues: scan.topIssues.filter((i) => canOpen(i.contactId)) };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
@@ -305,8 +345,24 @@ export class CrmAiController {
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-duplicates')
-  aiFindDuplicates(@Param('businessId') businessId: string) {
-    return this.crmAi.findDuplicatesAi(businessId);
+  async aiFindDuplicates(@Param('businessId') businessId: string, @Req() req: { user: { id: string } }) {
+    const result = await this.crmAi.findDuplicatesAi(businessId);
+    const canOpen = await this.visibleContacts(
+      businessId,
+      req.user.id,
+      result.duplicateClusters.flatMap((cluster) => cluster.contacts.map((c) => c.id)),
+    );
+    if (!canOpen) return result;
+    // A cluster keeps the contacts the caller may open, and is a cluster only
+    // while two of them remain.
+    const duplicateClusters = result.duplicateClusters
+      .map((cluster) => ({ ...cluster, contacts: cluster.contacts.filter((c) => canOpen(c.id)) }))
+      .filter((cluster) => cluster.contacts.length > 1);
+    return {
+      ...result,
+      duplicateClusters,
+      estimatedDuplicates: duplicateClusters.reduce((sum, cluster) => sum + cluster.contacts.length - 1, 0),
+    };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
@@ -314,8 +370,12 @@ export class CrmAiController {
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-reengagement')
-  aiReengagement(@Param('businessId') businessId: string) {
-    return this.crmAi.bulkReengagementSuggestions(businessId);
+  async aiReengagement(@Param('businessId') businessId: string, @Req() req: { user: { id: string } }) {
+    const result = await this.crmAi.bulkReengagementSuggestions(businessId);
+    const canOpen = await this.visibleContacts(businessId, req.user.id, result.suggestions.map((s) => s.contactId));
+    if (!canOpen) return result;
+    const suggestions = result.suggestions.filter((s) => canOpen(s.contactId));
+    return { ...result, suggestions, totalStale: suggestions.length };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
@@ -323,8 +383,11 @@ export class CrmAiController {
   @RequireFeature('ai_tools')
   @CrmRateLimit(10, 60_000)
   @Get('businesses/:businessId/ai-revenue-opportunities')
-  aiRevenueOpportunities(@Param('businessId') businessId: string) {
-    return this.crmAi.revenueOpportunityScan(businessId);
+  async aiRevenueOpportunities(@Param('businessId') businessId: string, @Req() req: { user: { id: string } }) {
+    const result = await this.crmAi.revenueOpportunityScan(businessId);
+    const canOpen = await this.visibleContacts(businessId, req.user.id, result.opportunities.map((o) => o?.contactId));
+    if (!canOpen) return result;
+    return { ...result, opportunities: result.opportunities.filter((o) => o != null && canOpen(o.contactId)) };
   }
 
   @UseGuards(AuthGuard, BusinessGuard, ModuleScopeGuard, FeatureFlagGuard)
@@ -340,5 +403,19 @@ export class CrmAiController {
     await assertContactVisible(this.prisma, businessId, contactId, req.user.id);
     checkAiRateLimit(businessId);
     return this.crmAi.generateFollowUpDraft(businessId, contactId);
+  }
+
+  /**
+   * Which of `contactIds` the caller may open, by the GET contacts/:contactId
+   * rule (contactVisibilityFilter); null when nothing is hidden from the caller
+   * (OWNER, SUPER_ADMIN), whose answers are left exactly as they were.
+   */
+  private async visibleContacts(
+    businessId: string,
+    actorUserId: string,
+    contactIds: Iterable<string | null | undefined>,
+  ): Promise<((contactId: string) => boolean) | null> {
+    const access = await resolveCrmAccess(this.prisma, businessId, actorUserId);
+    return contactVisibilityFilter(this.prisma, businessId, access, actorUserId, contactIds);
   }
 }

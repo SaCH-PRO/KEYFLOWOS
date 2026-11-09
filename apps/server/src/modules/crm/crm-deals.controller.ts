@@ -214,7 +214,8 @@ export class CrmDealsController {
   @RequireModuleScope('crm', 'read')
   @CrmRateLimit(120, 60_000)
   @Get('businesses/:businessId/deals')
-  listDeals(
+  async listDeals(
+    @Req() req: { user: { id: string } },
     @Param('businessId') businessId: string,
     @Query('stageIds') stageIds?: string | string[],
     @Query('ownerId') ownerId?: string,
@@ -230,6 +231,13 @@ export class CrmDealsController {
     @Query('skip') skip?: string,
     @Query('take') take?: string,
   ) {
+    // Filtered to one contact, this is GET contacts/:contactId/deals under
+    // another path: it answers only for a contact the caller may open, and a
+    // hidden contact gets the same 404 'Contact not found' as an unknown id,
+    // before the service runs (FOLLOW3-D3 review ST-1).
+    if (contactId !== undefined && contactId !== '') {
+      await assertContactVisible(this.prisma, businessId, String(contactId), req.user.id);
+    }
     const toArr = (v?: string | string[]) => (Array.isArray(v) ? v : v ? v.split(',').filter(Boolean) : undefined);
     const validStatus = ['OPEN', 'WON', 'LOST', 'ALL'];
     return this.deals.listDeals({
