@@ -921,6 +921,16 @@ export class CommerceIntegrationService {
     };
   }
 
+  /**
+   * V1-84 (FOLLOW3-D17-JOB-RUNNER-CLAIMS): the V1-35 claim, unchanged. These
+   * job types are also run by the cross-module poller, and this runner is
+   * reachable by any member (POST marketplace/businesses/:b/post-purchase/process),
+   * so each job is claimed before any effect by a compare-and-set on the version
+   * read (this business, PENDING, same updatedAt, still due; count === 1). A
+   * failed execution marks the row FAILED only while it is still this claim's.
+   * A claim that throws leaves the row PENDING and ends the call. `processed`
+   * counts the jobs this call claimed.
+   */
   async processPostPurchaseJobs(businessId: string) {
     const now = new Date();
     const dueJobs = await this.prisma.client.scheduledAgentJob.findMany({
@@ -933,7 +943,15 @@ export class CommerceIntegrationService {
       take: 20,
     });
 
+    let processed = 0;
     for (const job of dueJobs) {
+      const claimedAt = new Date();
+      const claim = await this.prisma.client.scheduledAgentJob.updateMany({
+        where: { id: job.id, businessId, status: 'PENDING', updatedAt: job.updatedAt, scheduledFor: { lte: claimedAt } },
+        data: { status: 'COMPLETED', executedAt: claimedAt },
+      });
+      if (claim.count !== 1) continue; // taken by another claimant, cancelled, or re-armed after the read
+      processed += 1;
       try {
         const p = job.payload as any;
         if (job.jobType === 'post_purchase_review_request') {
@@ -953,20 +971,20 @@ export class CommerceIntegrationService {
               `Follow up for reorder — order ${p.orderNumber ?? p.orderId}`);
           }
         }
-        await this.prisma.client.scheduledAgentJob.update({
-          where: { id: job.id },
-          data: { status: 'COMPLETED', executedAt: new Date() },
-        });
       } catch (e) {
         this.logger.error(`[CommerceIntegration] Failed to process post-purchase job ${job.id} (${job.jobType}): ${(e as Error).message}`);
-        await this.prisma.client.scheduledAgentJob.update({
-          where: { id: job.id },
+        // Fenced to this claim: a row its writer re-armed during the execution keeps its new run.
+        const failed = await this.prisma.client.scheduledAgentJob.updateMany({
+          where: { id: job.id, businessId, status: 'COMPLETED', executedAt: claimedAt },
           data: { status: 'FAILED' },
-        });
+        }).catch(() => null);
+        if (failed && failed.count !== 1) {
+          this.logger.warn(`[CommerceIntegration] Post-purchase job ${job.id} changed during its failed execution; left as its writer set it`);
+        }
       }
     }
 
-    return { processed: dueJobs.length };
+    return { processed };
   }
 
   private async addCrmTaskIfAbsent(businessId: string, contactId: string, _dedupeKey: string, title: string) {
