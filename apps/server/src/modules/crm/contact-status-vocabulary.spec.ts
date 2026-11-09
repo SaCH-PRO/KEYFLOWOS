@@ -284,6 +284,21 @@ describe("V1-38b (CR-1): the status readers count a CLIENT as a customer, and a 
     expect(ids('at-risk')).toEqual(['client-silent']);
     expect(ids('dormant')).toEqual(['client-silent']);
     expect(segments.find((s) => s.id === 'dormant')?.criteria, 'the criteria names no status the CRM cannot hold').not.toMatch(/DORMANT/);
+    // Every segment's criteria names only statuses the CRM can hold (one
+    // contact per segment, so listSegments returns all five).
+    const everyone = [
+      { ...contact('hot', 'LEAD', 1), leadScore: 80 },
+      contact('stale', 'LEAD', 20),
+      contact('client', 'CLIENT', 1),
+      contact('silent', 'CLIENT', 100),
+    ];
+    const all = await new RelationshipHealthService({ client: { contact: { findMany: async () => everyone } } } as any).listSegments('biz');
+    expect(all.map((s) => s.id).sort()).toEqual(['at-risk', 'dormant', 'high-value', 'hot-leads', 'stale-leads']);
+    for (const s of all) {
+      for (const [, named] of s.criteria.matchAll(/\bstatus ([A-Z_]+)/gi)) {
+        expect(CONTACT_STATUSES as readonly string[], `${s.id}: "${s.criteria}"`).toContain(named);
+      }
+    }
   });
 
   it('relationship health signals: a CLIENT with no bookings in 90 days is flagged, a legacy CUSTOMER the same, a PROSPECT is not', async () => {

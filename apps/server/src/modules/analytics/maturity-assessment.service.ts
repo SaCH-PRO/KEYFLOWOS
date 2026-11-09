@@ -1,5 +1,15 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { ContactStatus } from '../crm/crm.constants';
+
+/**
+ * V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary
+ * (crm.constants.ts). A row written before V1-38 may still hold the Shopify
+ * adapter's legacy status CUSTOMER; it counts as CLIENT until it is repaired.
+ */
+const CLIENT_STATUS: ContactStatus = 'CLIENT';
+const LEGACY_CLIENT_STATUS = 'CUSTOMER';
+const isClientStatus = (status: string | null | undefined): boolean => status === CLIENT_STATUS || status === LEGACY_CLIENT_STATUS;
 
 interface DimensionScore {
   dimension: string;
@@ -151,7 +161,7 @@ export class MaturityAssessmentService {
       (c: any) => c.status === 'LEAD'
     ).length;
     const customers = business.contacts.filter(
-      (c: any) => c.status === 'CUSTOMER'
+      (c: any) => isClientStatus(c.status)
     ).length;
 
     let score = 0;

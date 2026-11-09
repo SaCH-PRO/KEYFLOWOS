@@ -1,5 +1,17 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { ContactStatus } from '../crm/crm.constants';
+
+/**
+ * V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary
+ * (crm.constants.ts). A row written before V1-38 may still hold the Shopify
+ * adapter's legacy status CUSTOMER; it reads as CLIENT until it is repaired.
+ * Dormancy is not a status (CF-49): it is a relationshipHealth value, so the
+ * segments below decide it by silence alone, as they always did in practice.
+ */
+const CLIENT_STATUS: ContactStatus = 'CLIENT';
+const LEGACY_CLIENT_STATUS = 'CUSTOMER';
+const isClientStatus = (status: string | null | undefined): boolean => status === CLIENT_STATUS || status === LEGACY_CLIENT_STATUS;
 
 export interface RelationshipHealth {
   contactId: string;
@@ -132,7 +144,7 @@ export class RelationshipHealthService {
     if (daysSinceInteraction > 30) signals.push(`No interaction in ${daysSinceInteraction} days`);
     if (overdueInvoiceCount > 0) signals.push(`${overdueInvoiceCount} overdue invoice${overdueInvoiceCount > 1 ? 's' : ''}`);
     if (outstandingBalance > 0) signals.push(`${currency} ${outstandingBalance.toLocaleString()} outstanding`);
-    if (bookingsLast90 === 0 && contact.status === 'CUSTOMER') signals.push('No bookings in 90 days');
+    if (bookingsLast90 === 0 && isClientStatus(contact.status)) signals.push('No bookings in 90 days');
     if (deals.some((d: any) => d.status === 'OPEN')) signals.push('Active deal in pipeline');
 
     return {
@@ -175,28 +187,28 @@ export class RelationshipHealthService {
       {
         id: 'stale-leads',
         name: 'Stale Leads',
-        criteria: 'No interaction in 14+ days, not dormant',
+        criteria: 'No interaction in 14+ days',
         count: 0,
         contacts: [],
       },
       {
         id: 'high-value',
         name: 'High-Value Customers',
-        criteria: 'Status CUSTOMER with high engagement',
+        criteria: 'Status CLIENT with high engagement',
         count: 0,
         contacts: [],
       },
       {
         id: 'at-risk',
         name: 'At Risk',
-        criteria: 'No interaction in 30+ days or status AT_RISK',
+        criteria: 'No interaction in 30+ days',
         count: 0,
         contacts: [],
       },
       {
         id: 'dormant',
         name: 'Dormant',
-        criteria: 'Status DORMANT or no interaction in 90+ days',
+        criteria: 'No interaction in 90+ days',
         count: 0,
         contacts: [],
       },
@@ -213,19 +225,19 @@ export class RelationshipHealthService {
         segments[0].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
       // Stale leads
-      if ((contact.status === 'LEAD' || contact.status === 'PROSPECT') && daysSince >= 14 && contact.status !== 'DORMANT') {
+      if ((contact.status === 'LEAD' || contact.status === 'PROSPECT') && daysSince >= 14) {
         segments[1].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
       // High-value customers
-      if (contact.status === 'CUSTOMER' && daysSince < 30) {
+      if (isClientStatus(contact.status) && daysSince < 30) {
         segments[2].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
       // At risk
-      if (daysSince >= 30 && contact.status !== 'DORMANT') {
+      if (daysSince >= 30) {
         segments[3].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
       // Dormant
-      if (contact.status === 'DORMANT' || daysSince >= 90) {
+      if (daysSince >= 90) {
         segments[4].contacts.push({ id: contact.id, name, email: contact.email, healthScore });
       }
     }

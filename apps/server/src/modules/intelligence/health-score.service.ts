@@ -1,5 +1,14 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import type { ContactStatus } from '../crm/crm.constants';
+
+/**
+ * V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary
+ * (crm.constants.ts). A row written before V1-38 may still hold the Shopify
+ * adapter's legacy status CUSTOMER; it counts as CLIENT until it is repaired.
+ */
+const CLIENT_STATUS: ContactStatus = 'CLIENT';
+const LEGACY_CLIENT_STATUS = 'CUSTOMER';
 
 export interface HealthAreaResult {
   area: string;
@@ -140,7 +149,7 @@ export class HealthScoreService {
     const [totalContacts, staleLeads, dormantCustomers, missingInfo] = await Promise.all([
       this.prisma.client.contact.count({ where: { businessId, deletedAt: null } }),
       this.prisma.client.contact.count({ where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: new Date(now.getTime() - 14 * 86400000) } } }),
-      this.prisma.client.contact.count({ where: { businessId, deletedAt: null, status: 'CUSTOMER', updatedAt: { lt: new Date(now.getTime() - 60 * 86400000) } } }),
+      this.prisma.client.contact.count({ where: { businessId, deletedAt: null, status: { in: [CLIENT_STATUS, LEGACY_CLIENT_STATUS] }, updatedAt: { lt: new Date(now.getTime() - 60 * 86400000) } } }),
       this.prisma.client.contact.count({ where: { businessId, deletedAt: null, OR: [{ email: null }, { phone: null }] } }),
     ]);
 
