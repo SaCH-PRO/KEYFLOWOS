@@ -150,6 +150,22 @@
  *   CN-35 a FULLY_CREDITED invoice stays unpayable: mark-paid 409 with nothing written; the
  *         share surfaces, the intent and the token money routes answer 404 (not shareable)
  *
+ * W5-CREDIT-AWARE-PAY (the two W4-CREDIT-AWARE-READERS todos: CR-V44-1 rest, CR-AR-2 server half;
+ * D-13, D-75, D-78), providers stubbed at the network edge (no real provider traffic):
+ *   CN-32 (amended) the token status poll, closed 404 for a credited invoice until now, states the
+ *         same 50 due and the 30 credited from the own-tenant rows and notes
+ *   CAP-01 RED-BEFORE the token and bare-id status polls and the public receipt state 50 due and 30
+ *         credited; the Stripe, WiPay and PayPal checkouts ask for 50 (not invoice.total); foreign
+ *         rows move nothing (D-75); a checkout records and posts nothing
+ *   CAP-02 RED-BEFORE the WiPay callback verified over the 50 requested records 50, the invoice stays
+ *         PARTIALLY_CREDITED (D-78), its redelivery is a duplicate; then 0 due, 30 credited, and every
+ *         checkout of the settled invoice is 409 with no provider called
+ *   CAP-03 RED-BEFORE the token PayPal capture takes only the order for the 50 and records 50; an
+ *         order for the 100 total is refused 400 before PayPal captures
+ *   CAP-04 RED-BEFORE control: an uncredited part-paid invoice's Stripe checkout asks for its remainder
+ *   CAP-05 RED-BEFORE FULLY_CREDITED stays unpayable: the token routes, the receipt and the bare-id
+ *         status 404; the bare-id checkout 409 with no provider called
+ *
  * Nothing on the boundary is mocked: PrismaService, AuthGuard, BusinessGuard,
  * TenantInterceptor, FinanceController (credit-note routes), CreditNoteService,
  * InvoiceWorkflowService, RevenuePostingService, PostingService,
@@ -171,9 +187,10 @@
 import 'reflect-metadata';
 import path from 'path';
 import { readFileSync } from 'fs';
+import { createHash } from 'crypto';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { sqlLikePrefix } from './helpers/sql-like.js';
 
 loadEnv({ path: path.resolve(__dirname, '../../../.env') });
@@ -1988,7 +2005,7 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
 
   let A: { inv: string; token: string };
 
-  it("CN-32 RED-BEFORE W4-CREDIT-AWARE-READERS CR-V44-1 (D-13, D-75): a 100 invoice with 20 paid and 30 credited shows 50 due on the bare-id public view, the token pay page and the token view; another business's APPLIED note and payment on it move nothing; the credit-unaware token money routes stay closed 404", async () => {
+  it("CN-32 RED-BEFORE W4-CREDIT-AWARE-READERS CR-V44-1 (D-13, D-75): a 100 invoice with 20 paid and 30 credited shows 50 due on the bare-id public view, the token pay page and the token view; another business's APPLIED note and payment on it move nothing; W5-CREDIT-AWARE-PAY: the token status poll states the same 50 due and the 30 credited", async () => {
     A = await seedCreditedWithLink('cr_readers', 20, 30);
     expect((await invoiceRow(A.inv)).status).toBe('PARTIALLY_CREDITED');
 
@@ -2034,12 +2051,12 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
     expect((await payPage(A.token)).body).toMatchObject({ paid: 20, remaining: 50 });
     expect((await tokenView(A.token)).body.balance).toEqual({ amountPaid: 20, amountDue: 50, paidAt: null });
 
-    // The token money routes behind payLinkInvoice stay closed: the status poll reads a credit-unaware
-    // balance and the provider checkouts charge invoice.total (payments.service.ts, outside this write
-    // set; it.todo below). One 404 body, as an unknown token; no provider is reached.
-    for (const res of [await tokenStatus(A.token), await tokenGateways(A.token), await tokenCheckout(A.token)]) {
-      expect(res.status, JSON.stringify(res.body)).toBe(404);
-    }
+    // W5-CREDIT-AWARE-PAY (CR-V44-1 rest; D-13, D-75): the token status poll behind payLinkInvoice was
+    // closed 404 for a credited invoice (its reader was credit-unaware). It now states the figures the
+    // share views state, from the own-tenant rows and notes only. The checkouts: the describe below.
+    const poll = await tokenStatus(A.token);
+    expect(poll.status, JSON.stringify(poll.body)).toBe(200);
+    expect(poll.body).toMatchObject({ status: 'PARTIALLY_CREDITED', paid: 20, remaining: 50, credited: 30, currency: 'TTD' });
     expect(await db.payment.count({ where: { invoiceId: A.inv, businessId: ID.biz } }), 'only the operator payment').toBe(1);
   });
 
@@ -2224,17 +2241,258 @@ describe('W4-CREDIT-AWARE-READERS CR-V44-1 reader half (D-13, D-75, D-78): the s
     expect((await invoiceRow(inv)).status).toBe('PARTIALLY_CREDITED');
   });
 
-  // Outside the W4-CREDIT-AWARE-READERS write set (payments.service.ts beyond payLinkInvoice,
-  // invoice-receipt-builder.service.ts): SHAREABLE_INVOICE_STATUSES keeps PARTIALLY_CREDITED out, so
-  // these credit-unaware readers answer 404 rather than a false amount due (CN-32).
-  it.todo(
-    'CR-V44-1 (reader half, residual) W4-CREDIT-AWARE-READERS: the token and bare-id status poll (payments.service.ts invoicePaymentStatus) and the public receipt (invoice-receipt-builder.service.ts buildPublicReceipt) net the APPLIED credit notes (creditAwareBalance) and serve a PARTIALLY_CREDITED invoice, and the provider checkouts behind payLinkInvoice charge the remainder net of credits instead of invoice.total (assertInvoicePayable refuses PARTIALLY_CREDITED until then); then SHAREABLE_INVOICE_STATUSES admits PARTIALLY_CREDITED and payLinkInvoice opens the token money routes for it',
-  );
+  /**
+   * W5-CREDIT-AWARE-PAY (the two W4-CREDIT-AWARE-READERS todos: CR-V44-1 rest and CR-AR-2's server half;
+   * D-13, D-75, D-78): the token money routes behind payLinkInvoice (status poll, gateway list, checkout,
+   * PayPal capture), the public receipt and every provider checkout read what the share views read: the
+   * invoice's own-tenant payment rows net of its own APPLIED credit notes (creditAwareBalance over
+   * appliedCreditsOf), in integer cents. A PARTIALLY_CREDITED invoice is payable for exactly its remainder
+   * through every provider (the amount a provider is asked for is that remainder, never invoice.total),
+   * the status poll and the receipt state the credit beside the remainder, and paying the remainder
+   * leaves it PARTIALLY_CREDITED (D-78). A FULLY_CREDITED invoice stays closed on the token routes (404)
+   * and every checkout door that reaches the payable gate refuses it 409 with no provider called.
+   *
+   * The providers are stubbed at the network edge as pay-link-token-gate stubs them: global fetch answers
+   * Stripe's checkout-session endpoint and WiPay's gateway and refuses every other host, and the PayPal
+   * SDK client is replaced on the PaymentsService instance; nothing leaves the process.
+   */
+  describe('W5-CREDIT-AWARE-PAY CR-V44-1 rest, CR-AR-2 (D-13, D-75, D-78): the token pay link, the status poll, the public receipt and every provider checkout net the APPLIED credit notes', () => {
+    const PROVIDER_ENV: Record<string, string> = {
+      STRIPE_SECRET_KEY: `${P}stripe_secret_fake`,
+      STRIPE_PUBLISHABLE_KEY: `${P}stripe_publishable_fake`,
+      STRIPE_WEBHOOK_SECRET: `${P}stripe_webhook_fake`,
+      PUBLIC_URL_ALLOWLIST: 'https://pay.v44a.test',
+      WIPAY_API_KEY: `${P}wipay_key_fake`,
+      WIPAY_ACCOUNT_NUMBER: '4400000000',
+      PAYPAL_CLIENT_ID: `${P}paypal_client_fake`,
+      PAYPAL_CLIENT_SECRET: `${P}paypal_secret_fake`,
+    };
+    const previousEnv: Record<string, string | undefined> = {};
+    const RETURN_URL = 'https://pay.v44a.test/pay/link/return';
+    const STRIPE_BODY = { gateway: 'stripe', successUrl: `${RETURN_URL}?stripe=success`, cancelUrl: `${RETURN_URL}?stripe=cancel` };
+    const WIPAY_BODY = { gateway: 'wipay', returnUrl: RETURN_URL };
+    const PAYPAL_BODY = { gateway: 'paypal' };
+    const realFetch = globalThis.fetch;
+    const providerCalls: Array<{ url: string; body: string }> = [];
+    let seq = 0;
+    const paypalOrderBook = new Map<string, any[]>();
+    const paypalOrders = {
+      createOrder: vi.fn(async (req: any) => {
+        const id = `${P}order_${++seq}`;
+        paypalOrderBook.set(id, req?.body?.purchaseUnits ?? []);
+        return { result: { id } };
+      }),
+      getOrder: vi.fn(async (req: { id: string }) => {
+        const purchaseUnits = paypalOrderBook.get(req.id);
+        if (!purchaseUnits) throw new Error(`V44A: the PayPal stub has no order ${req.id}`);
+        return { result: { id: req.id, status: 'APPROVED', purchaseUnits } };
+      }),
+      captureOrder: vi.fn(async (req: { id: string }) => ({
+        result: { id: req.id, status: 'COMPLETED', purchaseUnits: [{ payments: { captures: [{ id: `${P}cap_${req.id}` }] } }], payer: {} },
+      })),
+    };
+    let paypalSpy: any;
 
-  // W4-CREDIT-AWARE-READERS review CR-AR-2: outside this packet's write set (apps/web). The server half is
-  // pinned by CN-34: once settled the invoice stays PARTIALLY_CREDITED (D-78) with remaining / amountDue 0
-  // and the intent answers 409. Both web pages decide "settled" by status === 'PAID' and show no credited figure.
-  it.todo(
-    "CR-AR-2 W4-CREDIT-AWARE-READERS CR-V44-1 (D-78), web half: the customer pages treat a PARTIALLY_CREDITED invoice with nothing owing as settled: /pay/link/[token] (apps/web/src/app/pay/link/[token]/page.tsx, gate `!paid && invoice?.status !== 'PAID'`) stops offering 'Choose Payment Method' at remaining 0 instead of posting an intent the server refuses 409 'Invoice is already paid', and /public/invoice/[token] (isPaid = status === 'PAID') stops offering Pay at amountDue 0; both show the credited amount so total, paid, credited and due add up (the server projections carry no credited figure yet), and the receipt button waits for the receipt residual above (buildPublicReceipt still 404s PARTIALLY_CREDITED)",
-  );
+    async function providerFetch(input: any, init?: any): Promise<Response> {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      providerCalls.push({ url, body: typeof init?.body === 'string' ? init.body : '' });
+      const { host, pathname } = new URL(url);
+      if (host === 'api.stripe.com' && pathname === '/v1/checkout/sessions') {
+        return new Response(JSON.stringify({ id: `${P}cs_${++seq}`, url: 'https://checkout.v44a.test/stripe' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (host.endsWith('wipayfinancial.com')) return new Response(null, { status: 302, headers: { location: 'https://checkout.v44a.test/wipay' } });
+      throw new Error(`V44A: no network in this suite (refused ${url})`);
+    }
+
+    beforeAll(async () => {
+      for (const [k, v] of Object.entries(PROVIDER_ENV)) {
+        previousEnv[k] = process.env[k];
+        process.env[k] = v;
+      }
+      globalThis.fetch = providerFetch as typeof fetch;
+      const { PaymentsService } = await import('../src/modules/payments/payments.service');
+      paypalSpy = vi.spyOn(commerceApp.get(PaymentsService) as any, 'getPaypalClient').mockImplementation(() => ({ client: {}, ordersController: paypalOrders }));
+    });
+
+    afterAll(() => {
+      globalThis.fetch = realFetch;
+      paypalSpy?.mockRestore();
+      for (const [k, v] of Object.entries(previousEnv)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    });
+
+    beforeEach(async () => {
+      await clearRateLimits();
+    });
+
+    const checkout = (token: string, body: Record<string, unknown>) =>
+      c().post(`/payments/public/invoice-link/${encodeURIComponent(token)}/checkout`).send(body);
+    const capture = (token: string, orderId: string) =>
+      c().post(`/payments/public/invoice-link/${encodeURIComponent(token)}/paypal/capture/${encodeURIComponent(orderId)}`).send({});
+    const receipt = (token: string) => c().get(`/commerce/public/invoice-link/${encodeURIComponent(token)}/receipt`);
+    const bareStatus = (inv: string) => c().get(`/payments/invoice/${encodeURIComponent(inv)}/status`);
+    const bareCheckout = (inv: string) => c().post('/payments/create-checkout').send({ payableType: 'invoice', payableId: inv, ...STRIPE_BODY });
+    const wipayCallback = (inv: string, txn: string, requested: number) =>
+      c()
+        .get('/payments/wipay/callback')
+        .query({
+          transaction_id: txn,
+          order_id: inv,
+          status: 'success',
+          total: requested.toFixed(2),
+          // WiPay's keyed proof: md5(transaction_id + the total this server requested + the API key) (V1-05, D-19).
+          hash: createHash('md5').update(`${txn}${requested.toFixed(2)}${PROVIDER_ENV.WIPAY_API_KEY}`).digest('hex'),
+        });
+    const lastCall = (match: (url: string) => boolean) => providerCalls.filter((p) => match(p.url)).at(-1)!;
+    const stripeAmount = () => new URLSearchParams(lastCall((u) => u.startsWith('https://api.stripe.com/')).body).get('line_items[0][price_data][unit_amount]');
+    const wipayTotal = () => new URLSearchParams(lastCall((u) => u.includes('wipayfinancial.com')).body).get('total');
+
+    it("CAP-01 RED-BEFORE W5-CREDIT-AWARE-PAY CR-V44-1 (D-13, D-75): a 100 invoice with 20 paid and 30 credited: the token status poll, the bare-id status poll and the receipt state 50 due and the 30 credited; the gateway list answers; the Stripe, WiPay and PayPal checkouts ask for 50, not 100; another business's note and payment on it move nothing; a checkout records nothing", async () => {
+      const X = await seedCreditedWithLink('cap_due', 20, 30);
+      expect((await invoiceRow(X.inv)).status).toBe('PARTIALLY_CREDITED');
+      // D-75: another business's APPLIED note and SUCCESSFUL payment naming this invoice are not its money.
+      await db.creditNote.create({
+        data: { id: `${P}cn_foreign_cap_due`, businessId: ID.bizF, invoiceId: X.inv, creditNoteNumber: `${P}CN-F-CAP`, status: 'APPLIED', amount: 10, appliedAt: new Date() },
+      });
+      await db.payment.create({
+        data: { id: `${P}pay_foreign_cap_due`, amount: 10, currency: 'TTD', status: 'SUCCESSFUL', provider: 'cash', method: 'cash', providerPaymentId: `${P}pp_foreign_cap_due`, businessId: ID.bizF, invoiceId: X.inv },
+      });
+      const ledgerBefore = await ledgerCounts(ID.biz);
+
+      // Base (pkt/W5-REFUND-DOORS-KEEP-repair 693501ca): 404 on every token money route, 404 on the bare-id status poll and the receipt.
+      const poll = await tokenStatus(X.token);
+      expect(poll.status, JSON.stringify(poll.body)).toBe(200);
+      expect(Object.keys(poll.body).sort()).toEqual(['credited', 'currency', 'lastPaymentAt', 'paid', 'remaining', 'status']);
+      expect(poll.body).toMatchObject({ status: 'PARTIALLY_CREDITED', paid: 20, remaining: 50, credited: 30, currency: 'TTD' });
+      const bare = await bareStatus(X.inv);
+      expect(bare.status, JSON.stringify(bare.body)).toBe(200);
+      expect(bare.body).toMatchObject({ status: 'PARTIALLY_CREDITED', paid: 20, remaining: 50, credited: 30 });
+      const rc = await receipt(X.token);
+      expect(rc.status, JSON.stringify(rc.body)).toBe(200);
+      expect(rc.body).toMatchObject({ status: 'PARTIALLY_CREDITED', total: TOTAL, amountPaid: 20, credited: 30, amountDue: 50, paidAt: null });
+
+      const gateways = await tokenGateways(X.token);
+      expect(gateways.status, JSON.stringify(gateways.body)).toBe(200);
+      expect(gateways.body.map((g: { id: string }) => g.id).sort()).toEqual(['paypal', 'stripe', 'wipay']);
+
+      const stripe = await checkout(X.token, STRIPE_BODY);
+      expect(stripe.status, JSON.stringify(stripe.body)).toBe(201);
+      expect(stripeAmount(), 'Stripe is asked for the remainder net of credits, in cents').toBe('5000');
+      const wipay = await checkout(X.token, WIPAY_BODY);
+      expect(wipay.status, JSON.stringify(wipay.body)).toBe(201);
+      expect(wipayTotal()).toBe('50.00');
+      const paypal = await checkout(X.token, PAYPAL_BODY);
+      expect(paypal.status, JSON.stringify(paypal.body)).toBe(201);
+      expect(paypalOrderBook.get(paypal.body.orderId)).toEqual([expect.objectContaining({ customId: X.inv, amount: { currencyCode: 'TTD', value: '50.00' } })]);
+
+      // A checkout records nothing: the provider's callback or the capture does.
+      expect((await paymentsOf(X.inv)).filter((p) => p.businessId === ID.biz).map((p) => [Number(p.amount), p.status])).toEqual([[20, 'SUCCESSFUL']]);
+      expect(await invoiceRow(X.inv)).toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+      expect(await ledgerCounts(ID.biz), 'a checkout posts nothing').toEqual(ledgerBefore);
+    });
+
+    it('CAP-02 RED-BEFORE W5-CREDIT-AWARE-PAY CR-V44-1 (D-78): the WiPay callback for the 50 it was asked for records 50 and leaves the invoice PARTIALLY_CREDITED; its redelivery is a duplicate; then the poll and the receipt state 0 due beside the 30 credited, and every checkout of the settled invoice answers 409 with no provider called', async () => {
+      const X = await seedCreditedWithLink('cap_wipay', 20, 30);
+      const txn = `${P}wipay_tx_cap`;
+      // Base: 400 'Invalid WiPay callback signature' (the proof was checked over the 100 total).
+      const res = await wipayCallback(X.inv, txn, 50);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toMatchObject({ success: true, invoiceId: X.inv, message: 'Payment successful' });
+      expect((await paymentsOf(X.inv)).map((p) => [Number(p.amount), p.status, p.provider])).toEqual([
+        [20, 'SUCCESSFUL', 'cash'],
+        [50, 'SUCCESSFUL', 'wipay'],
+      ]);
+      expect(await invoiceRow(X.inv), 'D-78: paying the remainder leaves it PARTIALLY_CREDITED').toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+      expect(emitted.filter((e) => e.name === 'invoice.paid'), 'no invoice.paid').toEqual([]);
+      expect(await ledgerOf(X.inv)).toEqual({ receivable: 0, revenue: 70, credited: 30 });
+
+      const again = await wipayCallback(X.inv, txn, 50);
+      expect(again.body, 'the redelivery verifies against the same 50 and is deduplicated').toMatchObject({ success: true, message: 'Duplicate callback ignored' });
+      expect(await db.payment.count({ where: { invoiceId: X.inv } })).toBe(2);
+
+      expect((await tokenStatus(X.token)).body).toMatchObject({ status: 'PARTIALLY_CREDITED', paid: 70, remaining: 0, credited: 30 });
+      expect((await receipt(X.token)).body).toMatchObject({ status: 'PARTIALLY_CREDITED', amountPaid: 70, credited: 30, amountDue: 0 });
+
+      const calls = providerCalls.length;
+      const orders = paypalOrders.createOrder.mock.calls.length;
+      for (const body of [STRIPE_BODY, WIPAY_BODY, PAYPAL_BODY]) {
+        await clearRateLimits();
+        const settled = await checkout(X.token, body);
+        expect(settled.status, `${body.gateway}: ${JSON.stringify(settled.body)}`).toBe(409);
+        expect(settled.body.message).toBe('Invoice is already paid');
+      }
+      expect(providerCalls.length, 'no provider is called for a settled invoice').toBe(calls);
+      expect(paypalOrders.createOrder.mock.calls.length).toBe(orders);
+      await expectBalanced(ID.biz);
+    });
+
+    it("CAP-03 RED-BEFORE W5-CREDIT-AWARE-PAY CR-V44-1 (D-78): the token PayPal capture captures only the order made for the 50 the credits leave owing and records 50 (never invoice.total); an order for the whole 100 is refused 400 before PayPal captures anything", async () => {
+      const X = await seedCreditedWithLink('cap_paypal', 20, 30);
+      const whole = `${P}order_whole_total`;
+      paypalOrderBook.set(whole, [{ customId: X.inv, referenceId: X.inv, amount: { currencyCode: 'TTD', value: TOTAL.toFixed(2) } }]);
+      const captures = paypalOrders.captureOrder.mock.calls.length;
+      const refused = await capture(X.token, whole);
+      expect(refused.status, JSON.stringify(refused.body)).toBe(400);
+      expect(refused.body.message).toBe('This PayPal order does not belong to this invoice');
+      expect(paypalOrders.captureOrder.mock.calls.length, 'PayPal captured nothing').toBe(captures);
+
+      await clearRateLimits();
+      const order = await checkout(X.token, PAYPAL_BODY);
+      expect(order.status, JSON.stringify(order.body)).toBe(201);
+      await clearRateLimits();
+      const res = await capture(X.token, order.body.orderId);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(res.body).toMatchObject({ id: order.body.orderId, status: 'COMPLETED' });
+      expect((await paymentsOf(X.inv)).map((p) => [Number(p.amount), p.status, p.provider])).toEqual([
+        [20, 'SUCCESSFUL', 'cash'],
+        [50, 'SUCCESSFUL', 'paypal'],
+      ]);
+      expect((await paymentsOf(X.inv)).find((p) => p.provider === 'paypal')!.providerPaymentId).toBe(`${P}cap_${order.body.orderId}`);
+      expect(await invoiceRow(X.inv)).toMatchObject({ status: 'PARTIALLY_CREDITED', paidAt: null });
+      expect(await ledgerOf(X.inv)).toEqual({ receivable: 0, revenue: 70, credited: 30 });
+      await expectBalanced(ID.biz);
+    });
+
+    it('CAP-04 RED-BEFORE W5-CREDIT-AWARE-PAY (D-13) control: an uncredited invoice part-paid 40 of 100 is asked for its 60 remainder by the Stripe checkout (the remainder, never invoice.total); the poll carries no credited key', async () => {
+      const inv = await seedInvoice('cap_partial', 'SENT');
+      const link = await createLink(inv);
+      expect(link.status, JSON.stringify(link.body)).toBe(201);
+      expect((await recordPaymentRoute(inv, 40, 'cap_partial_pay')).status).toBe(201);
+      expect((await invoiceRow(inv)).status).toBe('PARTIALLY_PAID');
+
+      const poll = await tokenStatus(link.body.token);
+      expect(Object.keys(poll.body).sort(), 'no credit, no credited key (the five keys)').toEqual(['currency', 'lastPaymentAt', 'paid', 'remaining', 'status']);
+      expect(poll.body).toMatchObject({ status: 'PARTIALLY_PAID', paid: 40, remaining: 60 });
+      const res = await checkout(link.body.token, STRIPE_BODY);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      // Base: 10000 (the whole total, though 40 had been received).
+      expect(stripeAmount()).toBe('6000');
+    });
+
+    it('CAP-05 RED-BEFORE W5-CREDIT-AWARE-PAY CR-V44-1: a FULLY_CREDITED invoice stays unpayable: the token routes and the receipt answer 404, the bare-id status poll 404, and the bare-id checkout, which reaches the payable gate, answers 409 with no provider called and nothing written', async () => {
+      const F = await seedCreditedWithLink('cap_full', 0, TOTAL);
+      expect((await invoiceRow(F.inv)).status).toBe('FULLY_CREDITED');
+      const calls = providerCalls.length;
+      for (const res of [await tokenStatus(F.token), await tokenGateways(F.token), await checkout(F.token, STRIPE_BODY), await receipt(F.token), await bareStatus(F.inv)]) {
+        expect(res.status, JSON.stringify(res.body)).toBe(404);
+      }
+      // Base: 400 'Invoice ... is not in a payable state (FULLY_CREDITED)'.
+      const bare = await bareCheckout(F.inv);
+      expect(bare.status, JSON.stringify(bare.body)).toBe(409);
+      expect(bare.body.message).toBe('Invoice is fully credited; nothing is owed');
+      expect(providerCalls.length, 'no provider called').toBe(calls);
+      expect(await db.payment.count({ where: { invoiceId: F.inv } }), 'nothing written').toBe(0);
+      expect(await invoiceRow(F.inv)).toMatchObject({ status: 'FULLY_CREDITED', paidAt: null });
+    });
+  });
+
+  // W4-CREDIT-AWARE-READERS review CR-AR-2, web half (apps/web): the customer pages treat a settled
+  // PARTIALLY_CREDITED invoice as paid and show its credit (W5-CREDIT-AWARE-PAY): pinned by
+  // apps/web/src/app/pay/link/__tests__/pay-link-provider-return.test.tsx (W-PL-13, W-PL-14) and
+  // apps/web/src/app/public/invoice/__tests__/public-invoice-projection.test.tsx (W-10, W-11).
 });

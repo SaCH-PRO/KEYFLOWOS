@@ -30,6 +30,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import PaymentLinkPage from "../[token]/page";
+import { formatPrice } from "@/lib/format";
 
 const TOKEN = "cv46wabcdefghij0123456789";
 const PAY_PATH = `/commerce/public/invoice-link/${TOKEN}/pay`;
@@ -332,5 +333,63 @@ describe("V1-46b review (CR-V46B-02): the page's payment calls are the token rou
     expect(captures[0].path.endsWith(`${TOKEN_PAYMENTS}/paypal/capture/ORDER-V46W`)).toBe(true);
     expect(captures[0].body).toEqual({});
     expect(requested.some((p) => p.startsWith("/payments/paypal/capture/") || p.includes("/api/payments/paypal/capture/"))).toBe(false);
+  });
+});
+
+/**
+ * W5-CREDIT-AWARE-PAY (W4-CREDIT-AWARE-READERS review CR-AR-2, web half; D-78): paying the remainder of a
+ * part-credited invoice leaves it PARTIALLY_CREDITED, so the page cannot decide "settled" by status ===
+ * 'PAID': it offered 'Choose Payment Method' at remaining 0 (an intent the server refuses 409) and the
+ * Stripe return polled for a PAID that never comes. The credited figure is the server's (the token status
+ * poll's `credited`); the pay button asks for the remainder, what every provider checkout now charges.
+ */
+describe("W5-CREDIT-AWARE-PAY CR-AR-2 (D-78): a part-credited invoice on the token pay page", () => {
+  const credited = (paid: number, remaining: number) => ({
+    status: "PARTIALLY_CREDITED", paid, remaining, credited: 30, currency: "TTD", lastPaymentAt: null,
+  });
+
+  it("W-PL-13 W5-CREDIT-AWARE-PAY CR-AR-2: a settled PARTIALLY_CREDITED invoice (70 paid, 30 credited, 0 due) reads as paid: the paid view with the server's Credited 30 and Total Paid 70, and no 'Choose Payment Method'", async () => {
+    const requested = stubApi(
+      [[200, view({ status: "PARTIALLY_CREDITED", remaining: 0, paid: 70 })]],
+      undefined,
+      { status: [[200, credited(70, 0)]], gateways: [[200, GATEWAYS]] },
+    );
+    render(<PaymentLinkPage />);
+
+    expect(await screen.findByRole("heading", { name: /payment complete/i })).toBeInTheDocument();
+    expect(await screen.findByTestId("pay-link-credited")).toHaveTextContent(formatPrice(30, "TTD"));
+    expect(screen.getByTestId("pay-link-total-paid")).toHaveTextContent(formatPrice(70, "TTD"));
+    expect(screen.queryByText(/choose payment method/i)).toBeNull();
+    expect(requested.filter((p) => p.endsWith(STATUS_PATH))).toHaveLength(1);
+    expect(requested.posted, "no intent or checkout posted").toEqual([]);
+  });
+
+  it("W-PL-14 W5-CREDIT-AWARE-PAY CR-AR-2: a PARTIALLY_CREDITED invoice still owing (20 paid, 30 credited, 50 due) offers the methods, shows Credited 30 and Amount due 50, and the provider Pay button asks for 50, not the 100 total", async () => {
+    stubApi(
+      [[200, view({ status: "PARTIALLY_CREDITED", remaining: 50, paid: 20 })]],
+      undefined,
+      { status: [[200, credited(20, 50)]], gateways: [[200, GATEWAYS]] },
+    );
+    render(<PaymentLinkPage />);
+
+    expect(await screen.findByText(/choose payment method/i)).toBeInTheDocument();
+    expect(await screen.findByTestId("pay-link-credited")).toHaveTextContent(formatPrice(30, "TTD"));
+    expect(screen.getByTestId("pay-link-amount-due")).toHaveTextContent(formatPrice(50, "TTD"));
+    fireEvent.click(screen.getByText("Pay with Stripe").closest("button")!);
+    expect(payButton()).toHaveTextContent(formatPrice(50, "TTD"));
+    expect(payButton()).not.toHaveTextContent(formatPrice(100, "TTD"));
+  });
+
+  it("W-PL-15 W5-CREDIT-AWARE-PAY CR-AR-2: a Stripe success return whose poll finds the invoice PARTIALLY_CREDITED with 0 remaining shows the paid view (it no longer waits for a PAID that a part-credited invoice never reaches)", async () => {
+    search = new URLSearchParams("stripe=success");
+    stubApi(
+      [[200, view({ status: "PARTIALLY_CREDITED", remaining: 50, paid: 20 })], [200, view({ status: "PARTIALLY_CREDITED", remaining: 0, paid: 70 })]],
+      undefined,
+      { status: [[200, credited(70, 0)]] },
+    );
+    render(<PaymentLinkPage />);
+
+    expect(await screen.findByRole("heading", { name: /payment complete/i })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /payment submitted/i })).toBeNull();
   });
 });
