@@ -58,6 +58,13 @@
  * qualification config. A new case asserts the data first and that the
  * concurrent write waited last, so a RED run names the lost write.
  *
+ * W3-D13b-META-WRITERS (MW-03h; cases MW-16..MW-19 and MW-C04, values tagged
+ * `v84l_d13b_`) proves the same for the last four writers the census
+ * allow-listed (SalesTeamService.setCommissionRate, CrmAiService.saveGuidelines,
+ * GamificationService.awardXp and updateStreak): each, stopped after its read,
+ * does not undo the owner's PATCH that clears stripeSecretKey and changes the
+ * bank name (other metaData keys), and the PATCH waits for its row lock.
+ *
  * FIXTURES: every user, business and membership id has the `v84l_` prefix
  * (registered in test/helpers/fixture-prefixes.json), every unique column
  * written here (User.email, User.referralCode) contains it, and every row is
@@ -109,6 +116,11 @@ let qualification: any;
 let SeoGa4: any;
 let SeoGsc: any;
 const D13 = `${P}f3d13_`; // FOLLOW3-D13 values carry this tag inside the suite's prefix
+// W3-D13b-META-WRITERS writers, over the pausing PrismaService.
+let salesTeam: any;
+let crmAi: any;
+let gamificationSvc: any;
+const D13B = `${P}d13b_`; // W3-D13b-META-WRITERS values carry this tag inside the suite's prefix
 
 async function cleanup() {
   for (const sql of [
@@ -324,6 +336,9 @@ beforeAll(async () => {
   const { QualificationService } = await import('../src/modules/site/qualification.service');
   ({ SeoGoogleAnalyticsService: SeoGa4 } = await import('../src/modules/seo/seo-ga4.service'));
   ({ SeoGoogleSearchConsoleService: SeoGsc } = await import('../src/modules/seo/seo-gsc.service'));
+  const { SalesTeamService } = await import('../src/modules/conversion/sales-team.service');
+  const { CrmAiService } = await import('../src/modules/crm/crm-ai.service');
+  const { GamificationService } = await import('../src/modules/gamification/gamification.service');
 
   // The owner's PATCH: the real IdentityController, IdentityService, guards and
   // PrismaService (as test/payment-secrets-write-only composes it).
@@ -379,6 +394,11 @@ beforeAll(async () => {
   caseStudy = new CaseStudyService(prisma);
   plainCaseStudy = new CaseStudyService({ client: db } as any);
   qualification = new QualificationService(prisma, {} as any, {} as any);
+  // W3-D13b-META-WRITERS writers. CrmAiService's other collaborators (AI
+  // usage, sequences, lists, timeline) are not on saveGuidelines' path.
+  salesTeam = new SalesTeamService(prisma);
+  crmAi = new CrmAiService(prisma, {} as any, {} as any, {} as any, {} as any);
+  gamificationSvc = new GamificationService(prisma);
 
   await cleanup(); // in case a prior run aborted
 
@@ -842,6 +862,160 @@ describe('FOLLOW3-D13 controls (unchanged behaviour)', () => {
       await expect(ga4.saveConnection(NO, GA4)).rejects.toThrow('Business not found');
       expect(await ga4.disconnectGa4(NO)).toEqual({ disconnected: true });
       await expect(caseStudy.publish(NO, 'cs_c', { consent: true })).rejects.toThrow('Business not found');
+      expect(await db.business.count({ where: { id: NO } })).toBe(0);
+    } finally {
+      await reset();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// W3-D13b-META-WRITERS (MW-03h; values tagged `v84l_d13b_`)
+// ---------------------------------------------------------------------------
+
+/**
+ * The owner's PATCH writes that a writer's stale copy undid: the bank name it
+ * changed and the stripeSecretKey it cleared (other metaData keys than the
+ * writer's own).
+ */
+function patchWritesLost(meta: Record<string, any>, bank: string): string[] {
+  const lost: string[] = [];
+  if (meta.bankName !== bank) lost.push('PATCH bankName');
+  if (has(meta, 'stripeSecretKey')) lost.push('PATCH clear (stripeSecretKey stored again)');
+  return lost;
+}
+
+const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000).toISOString();
+
+describe('W3-D13b-META-WRITERS the last four allow-listed metaData writers read and write under the business row lock (MW-03h)', () => {
+  it('[MW-16] RED-BEFORE (W3-D13b-META-WRITERS): a commission rate save (SalesTeamService.setCommissionRate) that has read metaData when the owner\'s PATCH clears stripeSecretKey and changes the bank name: the clear, the bank name and the new rate all persist, and the stored rates and sales settings are kept', async () => {
+    const salesConfig = { commissionRates: { [`${D13B}staff_a`]: 0.1 }, payoutDay: `${D13B}friday` };
+    await reset({ ...SEEDED_META, salesConfig });
+    const BANK = `${D13B}Scotiabank`;
+    try {
+      const { writerResult, concurrentResult: patched, order } = await interleave(
+        () => salesTeam.setCommissionRate(ID.biz, `${D13B}staff_b`, 0.25),
+        () => patchBusiness({ metaData: { stripeSecretKey: null, bankName: BANK } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      expect(writerResult).toBeUndefined();
+      const meta = await storedMeta();
+      const lost = patchWritesLost(meta, BANK);
+      if (meta.salesConfig?.commissionRates?.[`${D13B}staff_b`] !== 0.25) lost.push('commission rate (metaData.salesConfig)');
+      expect(lost, 'writes lost to the interleaving').toEqual([]);
+      expect(meta.salesConfig).toEqual({ commissionRates: { [`${D13B}staff_a`]: 0.1, [`${D13B}staff_b`]: 0.25 }, payoutDay: `${D13B}friday` });
+      expect(meta.otherKey).toBe(SEEDED_META.otherKey);
+      expect(order, 'the PATCH waited for the commission rate save\'s row lock (held from its read to its commit)').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-17] RED-BEFORE (W3-D13b-META-WRITERS): a CRM AI guidelines save (CrmAiService.saveGuidelines) that has read metaData when the owner\'s PATCH clears stripeSecretKey and changes the bank name: the clear, the bank name and the guidelines all persist', async () => {
+    await reset();
+    const BANK = `${D13B}RBC`;
+    const GUIDELINES = [`${D13B}follow up within 48 hours`, `${D13B}offer a quote after the second visit`];
+    try {
+      const { writerResult, concurrentResult: patched, order } = await interleave(
+        () => crmAi.saveGuidelines(ID.biz, GUIDELINES),
+        () => patchBusiness({ metaData: { stripeSecretKey: null, bankName: BANK } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      expect(writerResult).toBeUndefined();
+      const meta = await storedMeta();
+      const lost = patchWritesLost(meta, BANK);
+      if (JSON.stringify(meta.aiGuidelines?.guidelines) !== JSON.stringify(GUIDELINES)) lost.push('CRM AI guidelines (metaData.aiGuidelines)');
+      expect(lost, 'writes lost to the interleaving').toEqual([]);
+      expect(meta.aiGuidelines).toEqual({ guidelines: GUIDELINES, generatedAt: expect.any(String) });
+      expect(meta.otherKey).toBe(SEEDED_META.otherKey);
+      expect(order, 'the PATCH waited for the guidelines save\'s row lock (held from its read to its commit)').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-18] RED-BEFORE (W3-D13b-META-WRITERS): an XP award (GamificationService.awardXp) that has read metaData when the owner\'s PATCH clears stripeSecretKey and changes the bank name: the clear, the bank name and the XP gain all persist, newest first over the stored gains', async () => {
+    const SEEDED_GAIN = { action: `${D13B}seeded`, xp: 5, timestamp: '2026-11-01T00:00:00.000Z' };
+    await reset({ ...SEEDED_META, recentXpGains: [SEEDED_GAIN] });
+    const BANK = `${D13B}FirstCitizens`;
+    try {
+      const { concurrentResult: patched, order } = await interleave(
+        () => gamificationSvc.awardXp(ID.biz, `${D13B}first-invoice`, 75),
+        () => patchBusiness({ metaData: { stripeSecretKey: null, bankName: BANK } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      const meta = await storedMeta();
+      const lost = patchWritesLost(meta, BANK);
+      if (meta.recentXpGains?.[0]?.action !== `${D13B}first-invoice`) lost.push('XP gain (metaData.recentXpGains)');
+      expect(lost, 'writes lost to the interleaving').toEqual([]);
+      expect(meta.recentXpGains).toEqual([{ action: `${D13B}first-invoice`, xp: 75, timestamp: expect.any(String) }, SEEDED_GAIN]);
+      expect(typeof meta.lastActivityAt).toBe('string');
+      expect(meta.otherKey).toBe(SEEDED_META.otherKey);
+      expect(order, 'the PATCH waited for the XP award\'s row lock (held from its read to its commit)').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+
+  it('[MW-19] RED-BEFORE (W3-D13b-META-WRITERS): a streak update (GamificationService.updateStreak) that has read metaData when the owner\'s PATCH clears stripeSecretKey and changes the bank name: the clear, the bank name and the streak all persist', async () => {
+    // Last active three days ago: the streak restarts at 1 (a write, whatever the time zone).
+    const LAST_ACTIVE = daysAgo(3);
+    await reset({ ...SEEDED_META, streakDays: 6, lastActivityAt: LAST_ACTIVE });
+    const BANK = `${D13B}Republic`;
+    try {
+      const { writerResult, concurrentResult: patched, order } = await interleave(
+        () => gamificationSvc.updateStreak(ID.biz),
+        () => patchBusiness({ metaData: { stripeSecretKey: null, bankName: BANK } }).then((r: any) => r),
+        { assertWaited: false },
+      );
+      expect(patched.status, JSON.stringify(patched.body)).toBe(200);
+      expect(writerResult).toBe(1);
+      const meta = await storedMeta();
+      const lost = patchWritesLost(meta, BANK);
+      if (meta.streakDays !== 1 || meta.lastActivityAt === LAST_ACTIVE) lost.push('streak (metaData.streakDays, lastActivityAt)');
+      expect(lost, 'writes lost to the interleaving').toEqual([]);
+      expect(meta.otherKey).toBe(SEEDED_META.otherKey);
+      expect(order, 'the PATCH waited for the streak update\'s row lock (held from its read to its commit)').toBe('waiting');
+    } finally {
+      await reset();
+    }
+  });
+});
+
+describe('W3-D13b-META-WRITERS controls (unchanged behaviour)', () => {
+  it('[MW-C04] CONTROL (W3-D13b-META-WRITERS): each converted writer on its own writes its key and keeps every other metaData key; a second streak update the same day writes nothing; an unknown business answers as before, with nothing written', async () => {
+    await reset();
+    try {
+      expect(await gamificationSvc.updateStreak(ID.biz)).toBe(1);
+      const afterStreak = JSON.stringify(await storedMeta());
+      expect(await gamificationSvc.updateStreak(ID.biz), 'same day: the streak stands').toBe(1);
+      expect(JSON.stringify(await storedMeta()), 'a same-day streak update writes nothing').toBe(afterStreak);
+      await gamificationSvc.awardXp(ID.biz, `${D13B}first-quote`, 50);
+      await salesTeam.setCommissionRate(ID.biz, `${D13B}staff_c`, 0.15);
+      const GUIDELINES = [`${D13B}reply the same day`];
+      await crmAi.saveGuidelines(ID.biz, GUIDELINES);
+      expect(await crmAi.getGuidelines(ID.biz)).toEqual({ guidelines: GUIDELINES, generatedAt: expect.any(String) });
+
+      const meta = await storedMeta();
+      for (const [k, v] of Object.entries(SEEDED_META)) expect(meta[k], `metaData.${k} kept`).toEqual(v);
+      expect(meta).toMatchObject({
+        streakDays: 1,
+        lastActivityAt: expect.any(String),
+        recentXpGains: [{ action: `${D13B}first-quote`, xp: 50, timestamp: expect.any(String) }],
+        salesConfig: { commissionRates: { [`${D13B}staff_c`]: 0.15 } },
+        aiGuidelines: { guidelines: GUIDELINES, generatedAt: expect.any(String) },
+      });
+
+      // An unknown business: the XP award and the streak write nothing; the
+      // rate and guidelines saves fail as before (no row to update).
+      const NO = `${P}no-such-business`;
+      await expect(gamificationSvc.awardXp(NO, `${D13B}nothing`, 10)).resolves.toBeUndefined();
+      await expect(gamificationSvc.updateStreak(NO)).resolves.toBe(0);
+      await expect(salesTeam.setCommissionRate(NO, `${D13B}staff_c`, 0.15)).rejects.toMatchObject({ code: 'P2025' });
+      await expect(crmAi.saveGuidelines(NO, GUIDELINES)).rejects.toMatchObject({ code: 'P2025' });
       expect(await db.business.count({ where: { id: NO } })).toBe(0);
     } finally {
       await reset();

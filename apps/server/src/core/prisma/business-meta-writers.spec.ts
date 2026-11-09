@@ -133,6 +133,26 @@ export const D13_ALLOWLIST: Record<string, Entry> = {
 /** The allow-list size after FOLLOW3-D13 (24 at FOLLOW3-D12). It only goes down. */
 export const ALLOWLIST_CEILING = 4;
 
+/**
+ * W3-D13b-META-WRITERS (MW-03h): the four writers FOLLOW3-D13 left on the
+ * allow-list, converted in D12's shape (lockBusinessMeta on the writer's own
+ * transaction client, the write left in the writer). Each must write metaData
+ * under the row lock, and none may stay on the allow-list.
+ */
+const D13B_CONVERTED = [
+  'modules/conversion/sales-team.service.ts#SalesTeamService.setCommissionRate',
+  'modules/crm/crm-ai.service.ts#CrmAiService.saveGuidelines',
+  'modules/gamification/gamification.service.ts#GamificationService.awardXp',
+  'modules/gamification/gamification.service.ts#GamificationService.updateStreak',
+];
+
+/** The W3-D13b-META-WRITERS write-set files: none of them may carry an unlocked metaData writer. */
+const D13B_WRITE_SET = [
+  'modules/conversion/sales-team.service.ts',
+  'modules/crm/crm-ai.service.ts',
+  'modules/gamification/gamification.service.ts',
+];
+
 /** The FOLLOW3-D13 write-set files: none of them may carry an unlocked metaData writer. */
 const D13_WRITE_SET = [
   'modules/gamification/gamification.listener.ts',
@@ -901,11 +921,19 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
   });
 
   // FOLLOW3-D13's proof asks for an empty allow-list. Four writers this census
-  // found (FOLLOW3-D12) are in files outside FOLLOW3-D13's write set
+  // found (FOLLOW3-D12) were in files outside FOLLOW3-D13's write set
   // (conversion/sales-team.service.ts, crm/crm-ai.service.ts,
-  // gamification/gamification.service.ts): a follow-up packet converts them,
-  // then sets ALLOWLIST_CEILING to 0 and turns this into a test.
-  it.todo('[MW-03h] the allow-list is empty: SalesTeamService.setCommissionRate, CrmAiService.saveGuidelines, GamificationService.awardXp and updateStreak write under the lock (outside the FOLLOW3-D13 write set)');
+  // gamification/gamification.service.ts); W3-D13b-META-WRITERS converts them
+  // and sets ALLOWLIST_CEILING to 0. Behaviour: MW-16..MW-19 of
+  // test/business-meta-writers.integration.test.ts.
+  it('[MW-03h] RED-BEFORE (W3-D13b-META-WRITERS): the allow-list is empty (ALLOWLIST_CEILING 0), no W3-D13b write-set file writes Business.metaData unlocked, and SalesTeamService.setCommissionRate, CrmAiService.saveGuidelines, GamificationService.awardXp and updateStreak write it under the lock', () => {
+    const unlocked = WRITES.filter((w) => D13B_WRITE_SET.includes(w.key.split('#')[0]) && !w.locked).map((w) => `${w.key} (line ${w.line})`);
+    expect(unlocked, 'W3-D13b write-set writers without the row lock').toEqual([]);
+    const locked = new Set(WRITES.filter((w) => w.locked).map((w) => w.key));
+    expect(D13B_CONVERTED.filter((writer) => !locked.has(writer)), 'converted writers not found writing metaData under the row lock').toEqual([]);
+    expect(Object.keys(D13_ALLOWLIST), 'D13_ALLOWLIST').toEqual([]);
+    expect(ALLOWLIST_CEILING, 'ALLOWLIST_CEILING').toBe(0);
+  });
 
   it('[MW-03b] RED-BEFORE: no D12 write-set file writes Business.metaData unlocked (SiteService, MarketplaceService, WhatsAppService), and each still writes it under the lock', () => {
     const unlocked = WRITES.filter((w) => D12_WRITE_SET.includes(w.key.split('#')[0]) && !w.locked).map((w) => `${w.key} (line ${w.line})`);
@@ -1270,10 +1298,13 @@ describe('FOLLOW3-D12 Business.metaData writers take the business row lock (cens
     expect(elsewhere(ownWriteBag).map((w) => w.locked)).toEqual([true]);
     expect(elsewhere('export const unrelated = 1;').map((w) => w.locked)).toEqual([true]);
 
-    // A stale allow-list entry fails too: the list shrinks with the code.
-    const first = Object.keys(D13_ALLOWLIST)[0];
-    const fewer = WRITES.filter((w) => w.key !== first);
-    const stale = censusProblems(fewer, D13_ALLOWLIST, OPAQUE_NOT_META).filter((p) => !baseline.has(p));
-    expect(stale).toEqual([`${first} no longer writes Business.metaData unlocked: remove it from D13_ALLOWLIST and lower ALLOWLIST_CEILING`]);
+    // A stale allow-list entry fails too: the list shrinks with the code. The
+    // list is empty since W3-D13b-META-WRITERS, so the stale entry is a writer
+    // that already writes under the lock (one FOLLOW3-D13 converted) added to it.
+    const converted = D13_CONVERTED[0];
+    expect(WRITES.some((w) => w.key === converted && w.locked), `${converted} writes under the lock`).toBe(true);
+    const staleList = { ...D13_ALLOWLIST, [converted]: { why: 'self-test: a converted writer left on the list' } };
+    const stale = censusProblems(WRITES, staleList, OPAQUE_NOT_META).filter((p) => !baseline.has(p));
+    expect(stale).toEqual([`${converted} no longer writes Business.metaData unlocked: remove it from D13_ALLOWLIST and lower ALLOWLIST_CEILING`]);
   });
 });
