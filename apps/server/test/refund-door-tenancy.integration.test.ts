@@ -68,9 +68,16 @@
  *           invalid one) and a self-signed row naming A's ids neither fails A's
  *           delivery (RDT-08), blocks it (RDT-09) nor takes it (RDT-10); B
  *           saving a key while the door reads the provider for A changes
- *           nothing (RDT-11 its answer, RDT-12 its failed read). RDT-13 pins
- *           the residual: a payment A took on the platform account before it
- *           saved its own key is refused and logged (RDT-13b todo)
+ *           nothing (RDT-11 its answer, RDT-12 its failed read).
+ *   RDT-13..13c (W3-PLATFORM-CHARGE-BIND, review CR-A3-1, owner ruling D-56)
+ *           a payment A took on the platform account before it saved a Stripe
+ *           key of its own is bound by the platform account's own record
+ *           (StripeConnector.isOwnPlatformCharge, read with the deployment's
+ *           key, never A's): its platform-signed refund is booked into A
+ *           (RDT-13, refund.created; RDT-13b, charge.refunded with B's older
+ *           self-signed row naming the same payment_intent), and a row A
+ *           self-signed before saving its key does not take another business's
+ *           pre-key charge (RDT-13c, refused and logged)
  *   RDT-07  every v81c_ row is gone after cleanup
  *
  * Nothing on the boundary is mocked: PrismaService, PaymentsService (built by
@@ -166,8 +173,12 @@ const ID = {
   invA12: `${P}invA12`,
   invB12: `${P}invB12`,
   invA13: `${P}invA13`,
+  invA13b: `${P}invA13b`,
+  invB13b: `${P}invB13b`,
+  invA13c: `${P}invA13c`,
+  invB13c: `${P}invB13c`,
 };
-const TENANT_B_INVOICES = new Set([ID.invB1, ID.invB2, ID.invB3, ID.invB6, ID.invB6e, ID.invB7, ID.invB8, ID.invB9, ID.invB10, ID.invB11, ID.invB12]);
+const TENANT_B_INVOICES = new Set([ID.invB1, ID.invB2, ID.invB3, ID.invB6, ID.invB6e, ID.invB7, ID.invB8, ID.invB9, ID.invB10, ID.invB11, ID.invB12, ID.invB13b, ID.invB13c]);
 
 /** Stripe-shaped ids (the prefix inside, so every globally unique value carries it). */
 const S = {
@@ -184,6 +195,8 @@ const S = {
   csA11: `cs_${P}A11`, piA11: `pi_${P}A11`, chA11: `ch_${P}A11`, reA11: `re_${P}A11`, csBforged11: `cs_${P}Bforged11`,
   csA12: `cs_${P}A12`, piA12: `pi_${P}A12`, chA12: `ch_${P}A12`, reA12: `re_${P}A12`, csBforged12: `cs_${P}Bforged12`,
   csA13: `cs_${P}A13`, piA13: `pi_${P}A13`, chA13: `ch_${P}A13`, reA13: `re_${P}A13`,
+  csA13b: `cs_${P}A13b`, piA13b: `pi_${P}A13b`, chA13b: `ch_${P}A13b`, reA13b: `re_${P}A13b`, csBforged13b: `cs_${P}Bforged13b`,
+  csB13c: `cs_${P}B13c`, piB13c: `pi_${P}B13c`, chB13c: `ch_${P}B13c`, reB13c: `re_${P}B13c`, csAforged13c: `cs_${P}Aforged13c`,
 };
 
 const TOTAL = 100;
@@ -236,13 +249,14 @@ const now = () => Math.floor(Date.now() / 1000);
 /**
  * A's customer paid A's invoice through createStripeCheckout on the platform
  * account: the session carries the platform's tag (metadata invoiceId +
- * businessId, client_reference_id), the charge carries none.
+ * businessId, client_reference_id), the charge carries none. `businessId`
+ * names another business whose customer paid its own invoice there (RDT-13c).
  */
-function checkoutOnPlatform(invoiceId: string, cs: string, pi: string, ch: string, amountMinor: number) {
+function checkoutOnPlatform(invoiceId: string, cs: string, pi: string, ch: string, amountMinor: number, businessId: string = ID.bizA) {
   const acct = accounts[PLATFORM_KEY];
   acct.sessions.push({
     id: cs, object: 'checkout.session', status: 'complete', payment_intent: pi, client_reference_id: invoiceId,
-    metadata: { invoiceId, businessId: ID.bizA }, created: now(),
+    metadata: { invoiceId, businessId }, created: now(),
   });
   acct.charges.push({ id: ch, object: 'charge', amount: amountMinor, currency: 'ttd', payment_intent: pi, metadata: {} });
 }
@@ -888,32 +902,98 @@ describe('review SEC-A3-1/2, CR-A3-1/2: only a business that takes payments on t
     }
   }, 60_000);
 
-  it("RDT-13 (CR-A3-1, pinned residual): A took a payment on the platform account, then saved a Stripe key of its own: a platform-signed refund of that payment is refused and logged, with no provider call and nothing written", async () => {
+  it("RDT-13 (CR-A3-1, D-56): A took a payment on the platform account, then saved a Stripe key of its own: a platform-signed refund.created of that payment is booked into A by the platform account's record, read with the deployment's key (A's own key never used), and the redelivery writes nothing", async () => {
     try {
       checkoutOnPlatform(ID.invA13, S.csA13, S.piA13, S.chA13, 10000);
       await paySession('A13', ID.invA13, S.csA13, S.piA13, 100);
+      const a = await paymentBy(S.csA13);
+      await setStripeSettings(ID.bizA, A_OWN_KEY);
+      const bBefore = await booksOf(ID.bizB);
+
+      const mark = calls.length;
+      expect(await refundCreated('re_A13', S.reA13, S.chA13, S.piA13, 40)).toEqual(PROCESSED);
+      expect(await refundCreated('re_A13', S.reA13, S.chA13, S.piA13, 40)).toEqual({ ok: true, received: true });
+      // RED-BEFORE (the residual the W3-STRIPE-LEGACY-BINDING head pinned here): A, holding a key of its own, was not asked; refused and logged, no row, no provider call.
+      expect(await paymentBy(S.reA13)).toMatchObject({ businessId: ID.bizA, invoiceId: ID.invA13, status: 'REFUNDED', amount: -40, reference: S.csA13 });
+      expect(await rowsOf(ID.invA13)).toEqual([`stripe:${S.csA13}:SUCCESSFUL:100:${S.piA13}`, `stripe:${S.reA13}:REFUNDED:-40:${S.csA13}`]);
+      expect(await postingsOf(a.id)).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:40']);
+      expect((await invoiceRow(ID.invA13)).status).toBe('PARTIALLY_PAID');
+      await expectLedgerAgrees(ID.invA13, 60);
+      expect(await booksOf(ID.bizB)).toEqual(bBefore);
+      // The platform account, with the deployment's key: the charge, then the Checkout Session of its payment_intent. A's own (empty) account is never read.
+      expect(callsSince(mark)).toEqual([`GET api.stripe.com /v1/charges/${S.chA13}`, 'GET api.stripe.com /v1/checkout/sessions']);
+      expect(keysSince(mark)).toEqual([PLATFORM, PLATFORM]);
+    } finally {
+      await setStripeSettings(ID.bizA, null);
+    }
+  }, 60_000);
+
+  it("RDT-13b (CR-A3-1 follow-up, D-56): B's older self-signed row and A's own Checkout row both name pi_A13b, and A saved a Stripe key of its own after taking that payment on the platform account: a platform-signed charge.refunded is booked into A by the platform account's record (one -30 row linked to cs_A13b), and B is unchanged", async () => {
+    try {
+      checkoutOnPlatform(ID.invA13b, S.csA13b, S.piA13b, S.chA13b, 10000);
+      // B (no key of its own), with the webhook secret it set for itself, records a session on its own invoice naming A's payment_intent.
+      await stripe('cs_Bforged13b', 'checkout.session.completed', {
+        id: S.csBforged13b, client_reference_id: ID.invB13b, amount_total: 10000, currency: 'ttd', payment_intent: S.piA13b, metadata: { invoiceId: ID.invB13b },
+      }, SECRET_B);
+      expect(await paymentBy(S.csBforged13b)).toMatchObject({ businessId: ID.bizB, reference: S.piA13b, status: 'SUCCESSFUL', recordedBy: null });
+      await paySession('A13b', ID.invA13b, S.csA13b, S.piA13b, 100);
+      const a = await paymentBy(S.csA13b);
+      await setStripeSettings(ID.bizA, A_OWN_KEY);
+      const bBefore = await booksOf(ID.bizB);
+
+      const mark = calls.length;
+      expect(await stripe('chr_A13b', 'charge.refunded', {
+        id: S.chA13b, object: 'charge', payment_intent: S.piA13b, amount: 10000, amount_refunded: 3000, currency: 'ttd', metadata: {},
+        refunds: { data: [{ id: S.reA13b, amount: 3000, currency: 'ttd', charge: S.chA13b, payment_intent: S.piA13b, status: 'succeeded' }] },
+      })).toEqual({ ok: true, received: true, processed: 'charge.refunded' });
+      // RED-BEFORE: B (on the platform account) was asked and is not the owner; A (a key of its own) was not asked; refused, no re_A13b row.
+      expect(await rowsOf(ID.invA13b)).toEqual([`stripe:${S.csA13b}:SUCCESSFUL:100:${S.piA13b}`, `stripe:${S.reA13b}:REFUNDED:-30:${S.csA13b}`]);
+      expect(await postingsOf(a.id)).toEqual(['INCOME:POSTED:100', 'REFUND:POSTED:30']);
+      await expectLedgerAgrees(ID.invA13b, 70);
+      expect(await booksOf(ID.bizB)).toEqual(bBefore);
+      // B (its row is the older) through isOwnCharge, then A through the platform-account read: both on the platform account.
+      expect(callsSince(mark)).toEqual([
+        `GET api.stripe.com /v1/charges/${S.chA13b}`, 'GET api.stripe.com /v1/checkout/sessions',
+        `GET api.stripe.com /v1/charges/${S.chA13b}`, 'GET api.stripe.com /v1/checkout/sessions',
+      ]);
+      expect(keysSince(mark)).toEqual([PLATFORM, PLATFORM, PLATFORM, PLATFORM]);
+    } finally {
+      await setStripeSettings(ID.bizA, null);
+    }
+  }, 60_000);
+
+  it("RDT-13c (control, D-56): A self-signed a row naming B's pi_B13c before it saved a Stripe key of its own, and B took that payment on the platform account: a platform-signed refund.created of B's charge is not booked into A (refused and logged, nothing written in either tenant), and A's own key is never used", async () => {
+    try {
+      // B's customer paid B's invoice on the platform account: the session the platform tagged names B.
+      checkoutOnPlatform(ID.invB13c, S.csB13c, S.piB13c, S.chB13c, 10000, ID.bizB);
+      // A, with the webhook secret it set for itself, records a session on its own invoice naming B's payment_intent, then saves a key of its own.
+      await stripe('cs_Aforged13c', 'checkout.session.completed', {
+        id: S.csAforged13c, client_reference_id: ID.invA13c, amount_total: 10000, currency: 'ttd', payment_intent: S.piB13c, metadata: { invoiceId: ID.invA13c },
+      }, SECRET_A);
+      const forged = await paymentBy(S.csAforged13c);
+      expect(forged).toMatchObject({ businessId: ID.bizA, reference: S.piB13c, status: 'SUCCESSFUL', recordedBy: null });
       await setStripeSettings(ID.bizA, A_OWN_KEY);
       const aBefore = await booksOf(ID.bizA);
+      const bBefore = await booksOf(ID.bizB);
 
       const mark = calls.length;
       const warned = warnings.length;
-      expect(await refundCreated('re_A13', S.reA13, S.chA13, S.piA13, 40)).toEqual(PROCESSED);
-      expect(await paymentBy(S.reA13)).toBeNull();
-      expect(await rowsOf(ID.invA13)).toEqual([`stripe:${S.csA13}:SUCCESSFUL:100:${S.piA13}`]);
+      expect(await refundCreated('re_B13c', S.reB13c, S.chB13c, S.piB13c, 40)).toEqual(PROCESSED);
+      expect(await paymentBy(S.reB13c)).toBeNull();
+      expect(await rowsOf(ID.invA13c)).toEqual([`stripe:${S.csAforged13c}:SUCCESSFUL:100:${S.piB13c}`]);
+      expect(await postingsOf(forged.id)).toEqual(['INCOME:POSTED:100']);
+      expect(await rowsOf(ID.invB13c)).toEqual([]);
       expect(await booksOf(ID.bizA)).toEqual(aBefore);
-      // e70f235b read A's own (empty) account: GET /v1/charges/ch_A13 with A's key, 404, refused.
-      expect(callsSince(mark)).toEqual([]);
-      const refusal = warnedSince(warned, S.chA13);
+      expect(await booksOf(ID.bizB)).toEqual(bBefore);
+      // Only the platform account may be read (its record names B); A's own account never.
+      expect(keysSince(mark).every((k) => k === PLATFORM), 'every provider read uses the deployment key').toBe(true);
+      const refusal = warnedSince(warned, S.chB13c);
       expect(refusal, 'the refusal is logged').toHaveLength(1);
       expect(refusal[0]).toContain(ID.bizA);
     } finally {
       await setStripeSettings(ID.bizA, null);
     }
   }, 60_000);
-
-  it.todo(
-    "RDT-13b (CR-A3-1 residual, follow-up): a platform-signed refund of a payment A took on the platform account before it saved a Stripe key of its own is booked into A (base 9f09d6c8 booked it with no provider read). Needs a platform-account read in StripeConnector (isOwnCharge always resolves the business's own key), which is outside this packet's write set; until then the door refuses and logs it (RDT-13)",
-  );
 });
 
 describe('fixtures', () => {
