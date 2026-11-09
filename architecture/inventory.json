@@ -8208,9 +8208,9 @@
         "./blueprint-onboarding.service",
         "vitest"
       ],
-      "lines": 126,
+      "lines": 129,
       "path": "apps/server/src/modules/ai/onboarding-state-cache.spec.ts",
-      "size_bytes": 5515
+      "size_bytes": 6398
     },
     {
       "exports": [
@@ -63731,6 +63731,6 @@
     "scanner": "codebase-architect/inventory.py",
     "source_files": 3477,
     "total_files": 4472,
-    "total_lines": 1156891
+    "total_lines": 1156894
   }
 }

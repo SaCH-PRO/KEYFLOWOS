@@ -93,15 +93,18 @@ describe('the onboarding state cache is bounded', () => {
     expect(cache.has('biz_0'), 'a recently used entry must not be evicted first').toBe(true);
   });
 
-  it('tracks all 10 Business Genome sections including legal, registration, tax, and ownership', async () => {
+  it('tracks all Business Genome sections including legal, registration, tax, and ownership', async () => {
     const getBlueprint = vi.fn(async () => ({
-      identity: { legalName: 'KeyFlow Ltd' },
-      offering: { coreServices: ['Consulting'] },
-      customer: { idealClient: 'SMBs' },
-      operations: { deliveryModel: 'Remote' },
-      growth: { primaryChannel: 'Referral' },
-      finance: { baseCurrency: 'TTD' },
-      legalProfile: { entityType: 'LLC' },
+      identity: { name: 'KeyFlow Ltd', archetype: 'B2B', industry: 'SaaS', tagline: 'OS', oneLiner: 'Business OS', mission: 'Grow' },
+      founderProfile: { founderName: 'Alex', background: 'Tech', skills: ['Product'], weeklyAvailabilityHours: 40, riskTolerance: 'moderate', visionStatement: 'Scale' },
+      operatingModel: { revenueModel: 'Subscription', deliveryMode: 'Cloud', serviceArea: 'Caribbean', channels: ['Direct'], teamSize: 5 },
+      marketProfile: { targetGeography: 'TT', marketCategory: 'Software', marketStage: 'Growth', demandSignals: ['Inbound'], trends: ['AI'], barriersToEntry: ['Domain'] },
+      constraints: { budgetRange: '$5k', timeCommitment: 'Full-time', riskTolerance: 'Moderate' },
+      goals: { northStar: '$1M ARR', ninetyDayGoals: ['Launch'], twelveMonthGoals: ['Expand'], priorities: ['Retention'] },
+      brand: { voice: 'Clear', tone: 'Warm', valueProps: ['Speed'] },
+      customerModel: { idealCustomer: 'SMBs', segments: ['Services'], painPoints: ['Admin'] },
+      financials: { currency: 'TTD', pricingModel: 'Tiered', avgTicket: 500, monthlyTarget: 50000 },
+      legalProfile: { country: 'TT', recommendedEntityType: 'LLC', regulatedIndustry: 'no' },
       registrationProfile: {},
       taxProfile: {},
       ownershipProfile: {},
