@@ -10,70 +10,65 @@ export function isContactStatus(value: unknown): value is ContactStatus {
 }
 
 /**
- * V1-38c (CF-49, V1-38b residuals): the one legacy spelling of a ContactStatus,
+ * V1-38c (CF-49, V1-38b residuals): the legacy spellings of a ContactStatus,
  * and the predicate the status readers (lead scoring, the people health score,
  * people-flow relationship health, the maturity assessment) count a customer
  * by. The Shopify adapter wrote CUSTOMER for a buyer before V1-38, and the
  * CSV/link import (crm-import.service.ts) copied a file's status column
- * verbatim until V1-38c, so rows may hold it. The import stores CLIENT for it
- * now (importedContactStatus below), but it is not the only writer outside the
- * CRM DTOs: CrmService.createContact and updateContact store a status as they
- * are given it, and a playbook's update_status action hands updateContact
- * 'ACTIVE' or whatever status the action names (automation-executor.service.ts;
- * a playbook can run on the contact.created event the import emits). So a row
- * can still be given CUSTOMER today (V1-38c review ST-38c-1; that writer is a
- * follow-up packet). A row that holds it counts as CLIENT, and the spelling
- * may go only once no writer can produce it and no row holds it.
+ * verbatim until V1-38c, so rows may hold it.
+ *
+ * D-92 (owner ruling, W4-D92-DORMANT-AS-CLIENT): an imported (or legacy)
+ * DORMANT status is stored as CLIENT, so every stored status is one of
+ * CONTACT_STATUSES, and "dormant" is always worked out from inactivity (the
+ * Dormant segment shows clients with no recent activity). Before D-92 the
+ * CSV/link import stored a DORMANT cell as DORMANT (V1-38c review CR-V38c-1)
+ * and a playbook's update_status action stored 'ACTIVE' or whatever status it
+ * named (automation-executor.service.ts, review ST-38c-1). Both now store a
+ * status only through canonicalContactStatus below, which reads CUSTOMER and
+ * DORMANT as CLIENT. Rows are not migrated: a row that still holds either
+ * spelling counts as CLIENT, and the spellings may go only once no row holds
+ * them.
+ *
+ * CrmService.createContact, updateContact and bulkUpdateContacts store a
+ * status as they are given it, so each caller outside the CRM DTOs (which
+ * admit only CONTACT_STATUSES) holds the invariant itself:
+ *   - through canonicalContactStatus: the CSV/link import, a playbook's
+ *     update_status, KEY Cortex's CRM adapter (create_contact, update_contact,
+ *     update_status; key-cortex/adapters/crm-adapter.service.ts) and KEY's
+ *     update_status_with_confirmation (ai/flow-orchestrator.service.ts). The
+ *     last two stored the status verbatim until D-92 review CR-D92-1, so a row
+ *     may hold a lowercase spelling ('dormant', 'customer', 'lead'); the
+ *     readers do not count one (isClientStatus is exact), and such rows are
+ *     not migrated.
+ *   - through the tool schema: KEY's crm_create_contact and crm_update_contact
+ *     (status enum CONTACT_STATUSES, checked before the call) and KEY's
+ *     bulk_status_change (isContactStatus).
+ *   - residual, outside W4-D92-DORMANT-AS-CLIENT: the Google and Outlook
+ *     contact-sync rules and the connector form mapping store an operator's
+ *     configured defaultStatus as given (connect/*.service.ts).
  */
 export const CLIENT_STATUS: ContactStatus = 'CLIENT';
 export const LEGACY_CLIENT_STATUS = 'CUSTOMER';
+export const LEGACY_DORMANT_STATUS = 'DORMANT';
 
 export function isClientStatus(status: string | null | undefined): boolean {
-  return status === CLIENT_STATUS || status === LEGACY_CLIENT_STATUS;
+  return status === CLIENT_STATUS || status === LEGACY_CLIENT_STATUS || status === LEGACY_DORMANT_STATUS;
 }
 
 /**
- * V1-38c review CR-V38c-1: the Contact.status people-flow reads as "imported
- * as dormant" (relationship-health.service.ts: in Dormant whatever its
- * silence, never in At Risk or Stale Leads; V1-38b review CR-1). Dormancy has
- * no ContactStatus (CF-49: it is a relationshipHealth value), so
- * canonicalContactStatus has none for it. The import still stores it for a
- * DORMANT cell (importedContactStatus): storing the LEAD default instead puts
- * a contact imported as dormant in Stale Leads and At Risk and, once it has a
- * recent interaction, takes it out of Dormant, a segment change no owner
- * ruling covers. It stays until an owner ruling settles where dormancy is
- * written. The playbook update_status writer above can also write it.
- */
-export const LEGACY_DORMANT_STATUS = 'DORMANT';
-
-/**
- * V1-38c: the ContactStatus a value written from outside the CRM DTOs reads
- * as. A ContactStatus in any case or padding is that status, and the legacy
- * CLIENT spelling is CLIENT, the mapping isClientStatus reads rows by.
- * Anything else is null: DORMANT (dormancy is a relationshipHealth value,
- * CF-49), INACTIVE and any other word have no ContactStatus, and the caller
- * treats the value as it treats any cell it does not recognise.
+ * V1-38c, D-92: the ContactStatus a value written from outside the CRM DTOs
+ * reads as, and the one helper such a writer stores a status through (the
+ * CSV/link import, a playbook's update_status). A ContactStatus in any case or
+ * padding is that status, and the legacy CLIENT spellings (CUSTOMER and, D-92,
+ * DORMANT) are CLIENT, the mapping isClientStatus reads rows by. Anything else
+ * is null: INACTIVE, ACTIVE and any other word have no ContactStatus, and the
+ * caller treats the value as it treats any cell it does not recognise.
  */
 export function canonicalContactStatus(value: string | null | undefined): ContactStatus | null {
   if (typeof value !== 'string') return null;
   const spelled = value.trim().toUpperCase();
   if (isContactStatus(spelled)) return spelled;
-  return spelled === LEGACY_CLIENT_STATUS ? CLIENT_STATUS : null;
-}
-
-/**
- * V1-38c: what the CSV/link import stores for its status, stage or
- * pipeline_stage cell. The cell's ContactStatus (canonicalContactStatus), else,
- * for a DORMANT cell in any case or padding, the legacy dormant status the
- * people-flow segments read (LEGACY_DORMANT_STATUS, review CR-V38c-1), else
- * null, and the import drops the cell.
- */
-export function importedContactStatus(
-  value: string | null | undefined,
-): ContactStatus | typeof LEGACY_DORMANT_STATUS | null {
-  const status = canonicalContactStatus(value);
-  if (status) return status;
-  return typeof value === 'string' && value.trim().toUpperCase() === LEGACY_DORMANT_STATUS ? LEGACY_DORMANT_STATUS : null;
+  return isClientStatus(spelled) ? CLIENT_STATUS : null;
 }
 
 /**

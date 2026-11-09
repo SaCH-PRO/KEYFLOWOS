@@ -3,6 +3,7 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../core/prisma/prisma.service';
 import { ActivityService } from './activity.service';
 import { CrmService } from '../crm/crm.service';
+import { canonicalContactStatus } from '../crm/crm.constants';
 import { TransactionalEmailService } from '../notifications/transactional-email.service';
 import { AdapterRegistryService } from '../communications/adapters/adapter-registry.service';
 import { FlowRunnerService } from './flow-runner.service';
@@ -246,11 +247,21 @@ export class AutomationExecutorService {
       case 'update_status':
       case 'UPDATE_STATUS': {
         if (context.contactId) {
+          // D-92 (V1-38c review ST-38c-1): store only a ContactStatus, through
+          // the helper the CSV/link import uses: DORMANT and CUSTOMER in any
+          // case are CLIENT. ACTIVE (the old default, when the action named
+          // none), INACTIVE or any other word has no ContactStatus, so the
+          // action writes nothing and the contact keeps its status.
+          const status = canonicalContactStatus(action.status || action.value);
+          if (!status) {
+            this.logger.warn(`Playbook "${playbookName}" update_status names no contact status, skipping`);
+            break;
+          }
           try {
             await this.crm.updateContact({
               businessId,
               contactId: context.contactId,
-              status: action.status || action.value || 'ACTIVE',
+              status,
             });
           } catch (e) {
             this.logger.warn(`Failed to update status: ${(e as Error).message}`);

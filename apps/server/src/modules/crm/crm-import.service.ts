@@ -1,18 +1,25 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
-import { BlockList, isIP } from 'node:net';
+import { isIP } from 'node:net';
 import type { Prisma } from '@prisma/client';
 import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
 import { AiUsageService } from '../ai/ai-usage.service';
 import pdfParse from 'pdf-parse';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import {
+  isNonPublicAddress,
+  OutboundAddressRefusedError,
+  PinnedDispatcher,
+  resolvePublicAddress,
+  type CheckedAddress,
+} from '../../core/security/outbound-address';
 import { CrmService } from './crm.service';
 import { resolveCrmAccess, visibilityClause } from './crm-permissions.helper';
 import { contactWhereBase } from './crm.helpers';
 import {
   CONTACT_AGE_GROUPS,
   CONTACT_AGE_GROUP_LABELS,
-  importedContactStatus,
+  canonicalContactStatus,
   type ContactAgeGroup,
 } from './crm.constants';
 
@@ -27,44 +34,6 @@ const AGE_GROUP_LABEL_TO_CODE: Record<string, ContactAgeGroup> = (() => {
     }
   }
   return map;
-})();
-
-/**
- * V1-38c review ST-38c-2: the address ranges import/link may not fetch when
- * its host is an IP literal. BlockList checks an IPv4-mapped IPv6 address
- * (::ffff:a.b.c.d) against the IPv4 ranges.
- */
-const NON_PUBLIC_ADDRESSES: BlockList = (() => {
-  const list = new BlockList();
-  const ipv4: Array<[string, number]> = [
-    ['0.0.0.0', 8], // this network
-    ['10.0.0.0', 8],
-    ['100.64.0.0', 10], // shared address space
-    ['127.0.0.0', 8], // loopback
-    ['169.254.0.0', 16], // link-local, the cloud metadata address
-    ['172.16.0.0', 12],
-    ['192.0.0.0', 24],
-    ['192.168.0.0', 16],
-    ['198.18.0.0', 15], // benchmarking
-    ['224.0.0.0', 4], // multicast
-    ['240.0.0.0', 4], // reserved, broadcast
-  ];
-  const ipv6: Array<[string, number]> = [
-    ['::', 96], // unspecified, loopback, IPv4-compatible
-    ['64:ff9b::', 96], // NAT64: an IPv4 address behind a translator
-    ['64:ff9b:1::', 48], // local-use NAT64
-    ['100::', 64], // discard
-    ['2001::', 32], // Teredo
-    ['2001:db8::', 32], // documentation
-    ['2002::', 16], // 6to4
-    ['fc00::', 7], // unique local
-    ['fe80::', 10], // link-local
-    ['fec0::', 10], // site-local
-    ['ff00::', 8], // multicast
-  ];
-  for (const [network, prefix] of ipv4) list.addSubnet(network, prefix, 'ipv4');
-  for (const [network, prefix] of ipv6) list.addSubnet(network, prefix, 'ipv6');
-  return list;
 })();
 
 /** ST-38c-2: the redirects import/link follows, each target checked first. */
@@ -381,13 +350,20 @@ export class CrmImportService {
    * address. WHATWG URL gives an IPv6 host in brackets and keeps a trailing
    * dot, so the old literal list missed [::ffff:127.0.0.1], the IPv4-mapped
    * metadata address and [fd00::1]; it also missed 127.0.0.0/8 beyond
-   * 127.0.0.1. An IP literal is now checked against NON_PUBLIC_ADDRESSES (an
-   * IPv4-mapped IPv6 address against the IPv4 ranges). A DNS name is checked
-   * by name only: one that resolves to a private address (127.0.0.1.nip.io)
-   * is not caught here, which needs the resolved address pinned for the fetch
-   * (follow-up packet).
+   * 127.0.0.1. A localhost name is refused by name, and an IP literal is
+   * checked against the shared outbound-address guard (core/security; an
+   * IPv4-mapped IPv6 address against the IPv4 ranges).
+   *
+   * W4-IMPORT-SSRF-PIN (ST-38c-2, second half): a DNS name was checked by name
+   * only, so one that resolves to a private address (127.0.0.1.nip.io,
+   * *.localtest.me) was fetched. The host is now resolved once, here, every
+   * address asked for, and refused with 400 when any address is not public or
+   * when it does not resolve. The addresses given back are the only ones the
+   * fetch is pinned to (fetchImportLink), so a second DNS answer is never
+   * used; every checked address is kept, not only the first (review CR-PIN-1),
+   * so a dual-stack link whose first answer is unreachable still imports.
    */
-  private validateImportUrl(url: string): void {
+  private async checkImportUrl(url: string): Promise<CheckedAddress> {
     let parsed: URL;
     try {
       parsed = new URL(url);
@@ -405,21 +381,43 @@ export class CrmImportService {
       throw new BadRequestException('Private addresses are not allowed');
     }
 
-    const family = isIP(hostname);
-    if (family !== 0 && NON_PUBLIC_ADDRESSES.check(hostname, family === 6 ? 'ipv6' : 'ipv4')) {
+    if (isIP(hostname) !== 0 && isNonPublicAddress(hostname)) {
       throw new BadRequestException('Private IP ranges are not allowed');
+    }
+
+    try {
+      return await resolvePublicAddress(hostname);
+    } catch (err) {
+      if (err instanceof OutboundAddressRefusedError) {
+        throw new BadRequestException(
+          err.reason === 'non_public' ? 'Private IP ranges are not allowed' : 'The link host could not be resolved',
+        );
+      }
+      throw err;
     }
   }
 
   /**
    * ST-38c-2: fetch the link without letting fetch follow a redirect on its
-   * own. Each redirect target passes validateImportUrl before it is fetched,
-   * and at most MAX_IMPORT_REDIRECTS are followed.
+   * own, at most MAX_IMPORT_REDIRECTS of them. W4-IMPORT-SSRF-PIN: each fetch
+   * goes through a dispatcher pinned to the addresses its host was checked
+   * at, so the connection is made only to those addresses, tried in turn (the
+   * URL's name stays the Host and the TLS server name); a redirect target is
+   * checked and resolved the same way (checkImportUrl) before it is fetched
+   * through its own pinned dispatcher.
    */
-  private async fetchImportLink(sourceUrl: string): Promise<Response> {
+  private async fetchImportLink(sourceUrl: string, checked: CheckedAddress): Promise<Response> {
     let url = sourceUrl;
+    let target = checked;
     for (let hops = 0; ; hops++) {
-      const response = await fetch(url, { redirect: 'manual' });
+      const dispatcher = new PinnedDispatcher(target);
+      let response: Response;
+      try {
+        response = await fetch(url, { redirect: 'manual', dispatcher } as RequestInit);
+      } finally {
+        // close() lets the request in flight finish, its body included, then ends the connection.
+        dispatcher.close().catch(() => undefined);
+      }
       const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null;
       if (!location) return response;
       await response.body?.cancel().catch(() => undefined);
@@ -432,14 +430,14 @@ export class CrmImportService {
       } catch {
         throw new BadRequestException('Invalid redirect URL');
       }
-      this.validateImportUrl(next);
+      target = await this.checkImportUrl(next);
       url = next;
     }
   }
 
   async createLinkImport(params: { businessId: string; sourceUrl: string; actorUserId?: string }) {
     await this.assertImportAllowed(params.businessId, params.actorUserId);
-    this.validateImportUrl(params.sourceUrl);
+    const target = await this.checkImportUrl(params.sourceUrl);
 
     const importRecord = await this.prisma.client.contactImport.create({
       data: {
@@ -451,7 +449,7 @@ export class CrmImportService {
     });
 
     try {
-      const response = await this.fetchImportLink(params.sourceUrl);
+      const response = await this.fetchImportLink(params.sourceUrl, target);
       if (!response.ok) {
         throw new Error(`Failed to fetch URL: ${response.status} ${response.statusText}`);
       }
@@ -835,16 +833,16 @@ Only return the JSON object, no markdown or explanation.`,
         if (code) contact.ageGroup = code;
       }
     }
-    // V1-38c (CF-49): the status, stage or pipeline_stage column is never
-    // stored verbatim (crm.constants.ts importedContactStatus): the vocabulary
-    // in any case, and the legacy CUSTOMER as CLIENT, the mapping the status
-    // readers use. A DORMANT cell in any case keeps the legacy DORMANT the
-    // people-flow segments read as imported dormant (review CR-V38c-1, pending
-    // an owner ruling). Any other cell (INACTIVE, an unknown stage) is
-    // dropped, as an unrecognised age group or flag is, so a new contact takes
-    // createContact's LEAD default.
+    // V1-38c (CF-49), D-92: the status, stage or pipeline_stage column is never
+    // stored verbatim (crm.constants.ts canonicalContactStatus): the
+    // vocabulary in any case, and the legacy CUSTOMER and DORMANT in any case
+    // as CLIENT, the mapping the status readers use. D-92: dormancy is worked
+    // out from inactivity, never stored (before D-92 a DORMANT cell kept the
+    // legacy DORMANT, review CR-V38c-1). Any other cell (INACTIVE, an unknown
+    // stage) is dropped, as an unrecognised age group or flag is, so a new
+    // contact takes createContact's LEAD default.
     if (mapping.status) {
-      const status = importedContactStatus(row[mapping.status]);
+      const status = canonicalContactStatus(row[mapping.status]);
       if (status) contact.status = status;
     }
     if (mapping.custom?.length) {

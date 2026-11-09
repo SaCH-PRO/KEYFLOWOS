@@ -3,9 +3,11 @@ import { PrismaService } from '../../core/prisma/prisma.service';
 import { balanceOfStoredRows } from '../commerce/invoice-workflow.service';
 import { sumMoney } from '../commerce/money';
 // V1-38b (CR-1): a customer is Contact.status CLIENT, the one vocabulary; a
-// row holding the legacy CLIENT spelling counts the same. V1-38c: that
-// spelling is crm.constants.ts's.
-import { CLIENT_STATUS, LEGACY_CLIENT_STATUS } from '../crm/crm.constants';
+// row holding a legacy CLIENT spelling counts the same. V1-38c: those
+// spellings are crm.constants.ts's. D-92: a row still holding the legacy
+// DORMANT (stored before D-92, not migrated) is a CLIENT too, and a dormant
+// customer only by its age, as any client.
+import { CLIENT_STATUS, LEGACY_CLIENT_STATUS, LEGACY_DORMANT_STATUS } from '../crm/crm.constants';
 
 export interface HealthAreaResult {
   area: string;
@@ -153,7 +155,7 @@ export class HealthScoreService {
     const [totalContacts, staleLeads, dormantCustomers, missingInfo] = await Promise.all([
       this.prisma.client.contact.count({ where: { businessId, deletedAt: null } }),
       this.prisma.client.contact.count({ where: { businessId, deletedAt: null, status: 'LEAD', updatedAt: { lt: new Date(now.getTime() - 14 * 86400000) } } }),
-      this.prisma.client.contact.count({ where: { businessId, deletedAt: null, status: { in: [CLIENT_STATUS, LEGACY_CLIENT_STATUS] }, updatedAt: { lt: new Date(now.getTime() - 60 * 86400000) } } }),
+      this.prisma.client.contact.count({ where: { businessId, deletedAt: null, status: { in: [CLIENT_STATUS, LEGACY_CLIENT_STATUS, LEGACY_DORMANT_STATUS] }, updatedAt: { lt: new Date(now.getTime() - 60 * 86400000) } } }),
       this.prisma.client.contact.count({ where: { businessId, deletedAt: null, OR: [{ email: null }, { phone: null }] } }),
     ]);
 

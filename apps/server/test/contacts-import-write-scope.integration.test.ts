@@ -65,7 +65,11 @@
  * timeline service's side channels, the caches, the plan limit, the vision
  * model behind AiUsageService.trackVision (import/scan; no provider traffic)
  * and global fetch for two fixed import/link URLs (any other URL throws, so no
- * request leaves the process).
+ * request leaves the process). Since W4-IMPORT-SSRF-PIN (ST-38c-2) import/link
+ * resolves the link's host before it fetches; the resolver (node:dns promises
+ * lookup) is stood in for the one link host, k13b-import.example.test, as a
+ * public address, and throws for any other name, so no lookup leaves the
+ * process either.
  *
  * The import routes are rate limited to 5 calls a minute per client IP,
  * handler and business. The app trusts the proxy header as app-bootstrap.ts
@@ -78,6 +82,7 @@
  */
 import 'reflect-metadata';
 import path from 'path';
+import { promises as dnsPromises } from 'node:dns';
 import { config as loadEnv } from 'dotenv';
 import request from 'supertest';
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
@@ -451,6 +456,19 @@ afterAll(async () => {
   if (app) await app.close();
   if (db) await cleanup();
 });
+
+// W4-IMPORT-SSRF-PIN (ST-38c-2): the link host resolves to a public address
+// (the import then fetches through a dispatcher pinned to it, which the global
+// fetch stand-ins below ignore); any other lookup throws.
+let lookupSpy: ReturnType<typeof vi.spyOn>;
+beforeAll(() => {
+  lookupSpy = vi.spyOn(dnsPromises, 'lookup').mockImplementation((async (hostname: string, options?: { all?: boolean }) => {
+    if (hostname !== 'k13b-import.example.test') throw new Error(`unexpected outbound lookup in a test: ${hostname}`);
+    const answer = { address: '93.184.215.14', family: 4 };
+    return options?.all ? [answer] : answer;
+  }) as any);
+});
+afterAll(() => lookupSpy?.mockRestore());
 
 describe('fixture sanity (real rows)', () => {
   it('seeded one tenant with an owner, four STAFF members and eight live contacts, and no import traces', async () => {
