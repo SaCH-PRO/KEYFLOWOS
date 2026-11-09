@@ -1021,6 +1021,24 @@ All accepted as recommended, in one batch, by the owner directly (the FOLLOW3 re
 | D-78 | Paying the remainder of a part-credited invoice leaves it PARTIALLY_CREDITED, not PAID. | Kept as built (V1-44). |
 | D-79 | Numbering continues from a business's highest existing number, legacy INV-<timestamp> numbers included; a scanned invoice number already in use falls back to the next sequence number. | Kept as built (V1-43). |
 
+
+### Owner rulings, 2026-11-09
+
+Raised by the review of PR #196 (`feat/core-journeys-and-foundation-completion`, built on main without this branch). All accepted as recommended. The PR is not merged; its new parts are rebuilt here as tested packets (PR196-*).
+
+| Id | Ruling | Effect on the queue |
+|---|---|---|
+| D-80 | At booking completion an unpaid deposit is netted at its billed amount and stays owed on its own invoice (as built by V1-28). | No change. |
+| D-81 | The system may move a contact only from LEAD or PROSPECT to CLIENT, when an invoice of that contact is paid: forward-only, through an audited CrmService compare-and-set (ContactAuditEntry, contact.updated), lifecycleStage untouched; one follow-up task goes to the contact's owner. | PR196-CRM-LIFECYCLE. |
+| D-82 | A KEY inbox reply without Gmail connected does not fall back to the platform email sender: it fails visibly. Platform relays of business mail elsewhere follow the same rule. | PR196-SYSTEM-EMAIL. |
+| D-83 | Outbound webhook delivery logs stay in memory for now; a later dedicated table keys them by host and webhook id and never stores the URL. They are never Activity rows (D-08). | No port. |
+| D-84 | There is no separate sample-contact seeding route; the existing demo seed is OWNER-only and audited. | PR196-SEED-DEMO-OWNER. |
+| D-85 | Approving or deleting a project plan needs OWNER/ADMIN or projects:write; the actor is recorded; only draft plans may be deleted. | PR196-PROJECTS-SERVER. |
+| D-86 | Waitlisted customers get no public accept link yet: staff are notified and the offered slot is held for a fixed 120 minutes. | PR196-WAITLIST-EXPIRY. |
+| D-87 | A project task's assignee may be a member of the business or one of its booking staff. | PR196-PROJECTS-SERVER, PR196-PROJECTS-WEB. |
+
+**D-59 as built (FOLLOW3-A10).** The booking status route keeps V1-28's contract: completion with a live deposit in another currency than the final invoice answers 201, the booking is COMPLETED, and its `invoicing` result is `{ status: FAILED, code: DEPOSIT_CURRENCY_MISMATCH }` with no invoice written or netted. POST create-invoice for that booking answers 409 `DEPOSIT_CURRENCY_MISMATCH`. The operator settles by hand (D-13). Still open: the commerce PATCH accepts a currency switch on a netted DRAFT deposit or on the DRAFT final (SEC-A10-1, follow-up).
+
 ---
 
 ## (h) Judge dispositions
