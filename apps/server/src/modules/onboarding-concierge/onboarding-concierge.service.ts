@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { AiUsageService } from '../ai/ai-usage.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { BlueprintService } from '../blueprint/blueprint.service';
@@ -548,11 +549,15 @@ export class OnboardingConciergeService {
         results.businessHoursSet = true;
       }
 
+      // FOLLOW3-D13: metaData is read under the business row lock
+      // (lockBusinessMeta) and written in this transaction, so a metaData
+      // write that commits meanwhile is not undone by this one's copy.
+      const locked = await lockBusinessMeta(tx, businessId);
       const business = await tx.business.findUnique({
         where: { id: businessId },
-        select: { name: true, metaData: true, slug: true, storeEnabled: true },
+        select: { name: true, slug: true, storeEnabled: true },
       });
-      const meta = parseMetaData(business?.metaData);
+      const meta = parseMetaData(locked?.metaData as Prisma.JsonValue | undefined);
 
       const metaUpdates: BusinessMetaData = { ...meta };
 
@@ -1113,80 +1118,94 @@ EXTRACTED: archetype=service_provider`;
     }
 
     if (nudges.length > 0) {
-      const updatedHistory: Record<string, string> = { ...nudgeHistory };
-      for (const nudge of nudges) {
-        updatedHistory[nudge.id] = now.toISOString();
-      }
-      await this.prisma.client.business.update({
-        where: { id: businessId },
-        data: {
-          metaData: { ...meta, nudgeHistory: updatedHistory } as Prisma.InputJsonValue,
-        },
+      // FOLLOW3-D13: the nudges were chosen from the read above; their
+      // timestamps are merged into the metaData read under the business row
+      // lock (lockBusinessMeta), so a metaData write that committed meanwhile
+      // is not undone by this one's copy.
+      await this.prisma.client.$transaction(async (tx) => {
+        const locked = await lockBusinessMeta(tx, businessId);
+        const current = parseMetaData(locked?.metaData as Prisma.JsonValue | undefined);
+        const updatedHistory: Record<string, string> = {
+          ...((current.nudgeHistory as Record<string, string> | undefined) || {}),
+        };
+        for (const nudge of nudges) {
+          updatedHistory[nudge.id] = now.toISOString();
+        }
+        await tx.business.update({
+          where: { id: businessId },
+          data: {
+            metaData: { ...current, nudgeHistory: updatedHistory } as Prisma.InputJsonValue,
+          },
+        });
       });
     }
 
     return nudges;
   }
 
+  /**
+   * FOLLOW3-D13: snooze, dismiss and resume read and write metaData under the
+   * business row lock (lockBusinessMeta), so a metaData write that commits
+   * meanwhile (an owner's cleared payment secret) is not undone by this one's
+   * copy (RED-before MW-14: the cleared secret was stored again).
+   */
   async snoozeNudge(businessId: string, nudgeId: string, days: number = 3) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
-
-    const meta = parseMetaData(business?.metaData);
-    const snoozedNudges = (meta.snoozedNudges as Record<string, string> | undefined) || {};
     const snoozeUntil = new Date();
     snoozeUntil.setDate(snoozeUntil.getDate() + days);
 
-    snoozedNudges[nudgeId] = snoozeUntil.toISOString();
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: { ...meta, snoozedNudges } as Prisma.InputJsonValue,
-      },
+      const meta = parseMetaData(business?.metaData as Prisma.JsonValue | undefined);
+      const snoozedNudges = (meta.snoozedNudges as Record<string, string> | undefined) || {};
+
+      snoozedNudges[nudgeId] = snoozeUntil.toISOString();
+
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: { ...meta, snoozedNudges } as Prisma.InputJsonValue,
+        },
+      });
     });
 
     return { snoozed: true, until: snoozeUntil.toISOString() };
   }
 
   async dismissConcierge(businessId: string) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    const meta = parseMetaData(business?.metaData);
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: {
-          ...meta,
-          conciergeDismissed: true,
-          conciergeDismissedAt: new Date().toISOString(),
-        } as Prisma.InputJsonValue,
-      },
+      const meta = parseMetaData(business?.metaData as Prisma.JsonValue | undefined);
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: {
+            ...meta,
+            conciergeDismissed: true,
+            conciergeDismissedAt: new Date().toISOString(),
+          } as Prisma.InputJsonValue,
+        },
+      });
     });
 
     return { dismissed: true };
   }
 
   async resumeConcierge(businessId: string) {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
-    });
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
 
-    const meta = parseMetaData(business?.metaData);
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: {
-        metaData: {
-          ...meta,
-          conciergeDismissed: false,
-        } as Prisma.InputJsonValue,
-      },
+      const meta = parseMetaData(business?.metaData as Prisma.JsonValue | undefined);
+      await tx.business.update({
+        where: { id: businessId },
+        data: {
+          metaData: {
+            ...meta,
+            conciergeDismissed: false,
+          } as Prisma.InputJsonValue,
+        },
+      });
     });
 
     return { resumed: true };
@@ -1428,23 +1447,24 @@ EXTRACTED: archetype=service_provider`;
     }
   }
 
+  /**
+   * FOLLOW3-D13: runs in its caller's transaction (auto-configure, the
+   * completion claim) and reads metaData under the business row lock
+   * (lockBusinessMeta) before it writes the milestone back.
+   */
   private async awardSetupMilestone(
     businessId: string,
     milestone: string,
-    tx?: PrismaTx,
+    tx: PrismaTx,
   ) {
     try {
-      const client = tx ?? this.prisma.client;
-      const business = await client.business.findUnique({
-        where: { id: businessId },
-        select: { metaData: true },
-      });
-      const meta = parseMetaData(business?.metaData);
+      const business = await lockBusinessMeta(tx, businessId);
+      const meta = parseMetaData(business?.metaData as Prisma.JsonValue | undefined);
       const milestones = (Array.isArray(meta.setupMilestones) ? meta.setupMilestones : []) as string[];
 
       if (!milestones.includes(milestone)) {
         milestones.push(milestone);
-        await client.business.update({
+        await tx.business.update({
           where: { id: businessId },
           data: {
             metaData: {

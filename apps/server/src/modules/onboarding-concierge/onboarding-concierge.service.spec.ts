@@ -69,12 +69,17 @@ function makeService(overrides: {
   claimCount?: number;
 } = {}) {
   const tx = {
+    // FOLLOW3-D13: metaData writers lock the business row first
+    // (lockBusinessMeta: $queryRaw, then business.findFirst selecting metaData).
+    $queryRaw: vi.fn().mockResolvedValue([]),
     product: {
       count: vi.fn().mockResolvedValue(overrides.productCount ?? 0),
     },
     business: {
       findUnique: vi.fn().mockResolvedValue(overrides.business ?? {}),
-      findFirst: vi.fn().mockResolvedValue(null),
+      // The locked metaData read answers the business; the slug-uniqueness
+      // lookup (generateUniqueSlug) still finds no other business.
+      findFirst: vi.fn(async (args?: { select?: { metaData?: boolean } }) => (args?.select?.metaData ? (overrides.business ?? {}) : null)),
       update: vi.fn().mockResolvedValue({}),
       updateMany: vi.fn().mockResolvedValue({ count: overrides.claimCount ?? 1 }),
     },
@@ -535,20 +540,22 @@ describe('OnboardingConciergeService', () => {
   });
 
   describe('nudge lifecycle', () => {
+    // FOLLOW3-D13: the nudge and concierge writes run in a transaction under
+    // the business row lock, so they are made on the transaction client.
     it('snoozes a nudge by updating metadata', async () => {
-      const { service, prisma } = makeService({
+      const { service, tx } = makeService({
         business: { metaData: { conciergeNudges: [{ id: 'n1', snoozed: false }] } },
       });
       const result = await service.snoozeNudge('biz_1', 'n1', 7);
       expect(result.snoozed).toBe(true);
-      expect(prisma.client.business.update).toHaveBeenCalled();
+      expect(tx.business.update).toHaveBeenCalled();
     });
 
     it('dismisses concierge via metadata', async () => {
-      const { service, prisma } = makeService();
+      const { service, tx } = makeService();
       const result = await service.dismissConcierge('biz_1');
       expect(result.dismissed).toBe(true);
-      expect(prisma.client.business.update).toHaveBeenCalledWith(
+      expect(tx.business.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             metaData: expect.objectContaining({ conciergeDismissed: true }),
@@ -558,10 +565,10 @@ describe('OnboardingConciergeService', () => {
     });
 
     it('resumes concierge via metadata', async () => {
-      const { service, prisma } = makeService({ business: { metaData: { conciergeDismissed: true } } });
+      const { service, tx } = makeService({ business: { metaData: { conciergeDismissed: true } } });
       const result = await service.resumeConcierge('biz_1');
       expect(result.resumed).toBe(true);
-      expect(prisma.client.business.update).toHaveBeenCalledWith(
+      expect(tx.business.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({
             metaData: expect.objectContaining({ conciergeDismissed: false }),

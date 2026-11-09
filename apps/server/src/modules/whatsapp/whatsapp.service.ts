@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EntityResolutionService } from '../../core/connectors/entity-resolution.service';
 import { encryptToken, decryptToken, isTokenEncrypted } from '../../core/crypto/token-crypto';
@@ -436,10 +437,11 @@ export class WhatsAppService {
       if (phoneNumberId) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${PHONE_NUMBER_ID_LOCK_NAMESPACE + phoneNumberId}))`;
       }
-      const business = await tx.business.findUnique({
-        where: { id: businessId },
-        select: { metaData: true },
-      });
+      // FOLLOW3-D12: the business row is locked (after the phone-number-id
+      // lock) before metaData is read, so a metaData write that commits
+      // meanwhile (the owner's PATCH clearing a payment secret) is neither
+      // undone by this write nor undoes it.
+      const business = await lockBusinessMeta(tx, businessId);
       const meta = (business?.metaData as Record<string, unknown> | null) ?? {};
       const stored = (meta.whatsapp as Partial<WhatsAppConfig> | undefined) ?? {};
       if (phoneNumberId && phoneNumberId !== plain(stored.phoneNumberId)) {

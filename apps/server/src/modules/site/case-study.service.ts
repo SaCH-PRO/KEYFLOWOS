@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta, type BusinessMetaTx } from '../../core/prisma/business-meta';
 
 /**
  * Consent-gated case-study generator (S5).
@@ -29,8 +30,29 @@ export class CaseStudyService {
     return { caseStudies, meta };
   }
 
-  private async saveMeta(businessId: string, meta: Record<string, unknown>, caseStudies: CaseStudy[]) {
-    await this.prisma.client.business.update({
+  /**
+   * FOLLOW3-D13: change the case studies under the business row lock
+   * (lockBusinessMeta). metaData is read, changed by `change` and written back
+   * in one transaction, so a metaData write that commits meanwhile (another
+   * publish, an owner's cleared payment secret) is neither undone by this one
+   * nor undoes it (RED-before MW-13: one of two concurrent publishes was lost).
+   * What `change` throws (a missing study) rolls the transaction back.
+   */
+  private async changeCaseStudies<T>(businessId: string, change: (caseStudies: CaseStudy[]) => T): Promise<T> {
+    return this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
+      if (!business) throw new NotFoundException('Business not found');
+      const meta = (business.metaData as Record<string, unknown> | null) ?? {};
+      const caseStudies = Array.isArray(meta.caseStudies) ? [...(meta.caseStudies as CaseStudy[])] : [];
+      const result = change(caseStudies);
+      await this.saveMeta(tx, businessId, meta, caseStudies);
+      return result;
+    });
+  }
+
+  /** Writes `caseStudies` over `meta`: the metaData changeCaseStudies read under the row lock on `tx`. */
+  private async saveMeta(tx: BusinessMetaTx, businessId: string, meta: Record<string, unknown>, caseStudies: CaseStudy[]) {
+    await tx.business.update({
       where: { id: businessId },
       data: { metaData: { ...meta, caseStudies } as never },
     });
@@ -149,22 +171,22 @@ export class CaseStudyService {
       publishedAt: null,
     };
 
-    const { caseStudies, meta } = await this.loadMeta(businessId);
-    const idx = caseStudies.findIndex((c) => c.id === draft.id);
-    if (idx >= 0) {
-      // Preserve consent state if a previous version was already approved
-      // by the business owner — re-generation keeps the publication live.
-      draft.consent = caseStudies[idx].consent ?? false;
-      draft.consentedAt = caseStudies[idx].consentedAt ?? null;
-      draft.consentedBy = caseStudies[idx].consentedBy ?? null;
-      draft.status = caseStudies[idx].status === 'published' ? 'published' : 'draft';
-      draft.publishedAt = caseStudies[idx].publishedAt ?? null;
-      caseStudies[idx] = draft;
-    } else {
-      caseStudies.push(draft);
-    }
-    await this.saveMeta(businessId, meta, caseStudies);
-    return draft;
+    return this.changeCaseStudies(businessId, (caseStudies) => {
+      const idx = caseStudies.findIndex((c) => c.id === draft.id);
+      if (idx >= 0) {
+        // Preserve consent state if a previous version was already approved
+        // by the business owner — re-generation keeps the publication live.
+        draft.consent = caseStudies[idx].consent ?? false;
+        draft.consentedAt = caseStudies[idx].consentedAt ?? null;
+        draft.consentedBy = caseStudies[idx].consentedBy ?? null;
+        draft.status = caseStudies[idx].status === 'published' ? 'published' : 'draft';
+        draft.publishedAt = caseStudies[idx].publishedAt ?? null;
+        caseStudies[idx] = draft;
+      } else {
+        caseStudies.push(draft);
+      }
+      return draft;
+    });
   }
 
   async list(businessId: string) {
@@ -176,28 +198,28 @@ export class CaseStudyService {
     if (!opts.consent) {
       throw new ForbiddenException('Explicit consent is required before publishing a case study.');
     }
-    const { caseStudies, meta } = await this.loadMeta(businessId);
-    const idx = caseStudies.findIndex((c) => c.id === caseStudyId);
-    if (idx < 0) throw new NotFoundException('Case study not found');
-    caseStudies[idx] = {
-      ...caseStudies[idx],
-      consent: true,
-      consentedAt: new Date().toISOString(),
-      consentedBy: opts.userId ?? null,
-      status: 'published',
-      publishedAt: new Date().toISOString(),
-    };
-    await this.saveMeta(businessId, meta, caseStudies);
-    return caseStudies[idx];
+    return this.changeCaseStudies(businessId, (caseStudies) => {
+      const idx = caseStudies.findIndex((c) => c.id === caseStudyId);
+      if (idx < 0) throw new NotFoundException('Case study not found');
+      caseStudies[idx] = {
+        ...caseStudies[idx],
+        consent: true,
+        consentedAt: new Date().toISOString(),
+        consentedBy: opts.userId ?? null,
+        status: 'published',
+        publishedAt: new Date().toISOString(),
+      };
+      return caseStudies[idx];
+    });
   }
 
   async unpublish(businessId: string, caseStudyId: string) {
-    const { caseStudies, meta } = await this.loadMeta(businessId);
-    const idx = caseStudies.findIndex((c) => c.id === caseStudyId);
-    if (idx < 0) throw new NotFoundException('Case study not found');
-    caseStudies[idx] = { ...caseStudies[idx], status: 'draft', publishedAt: null };
-    await this.saveMeta(businessId, meta, caseStudies);
-    return caseStudies[idx];
+    return this.changeCaseStudies(businessId, (caseStudies) => {
+      const idx = caseStudies.findIndex((c) => c.id === caseStudyId);
+      if (idx < 0) throw new NotFoundException('Case study not found');
+      caseStudies[idx] = { ...caseStudies[idx], status: 'draft', publishedAt: null };
+      return caseStudies[idx];
+    });
   }
 
   /** Public surface — only published, consent-approved studies are returned. */

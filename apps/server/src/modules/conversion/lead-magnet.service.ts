@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 
 export interface LeadMagnetConfig {
   id: string;
@@ -16,23 +17,27 @@ export interface LeadMagnetConfig {
 export class LeadMagnetService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
+  /**
+   * FOLLOW3-D13: metaData is read and written under the business row lock
+   * (lockBusinessMeta), so a metaData write that commits meanwhile (the
+   * autopilot settings, another lead magnet) is not undone by this one's copy.
+   */
   async createLeadMagnet(businessId: string, data: Omit<LeadMagnetConfig, 'id'>): Promise<LeadMagnetConfig> {
-    const business = await this.prisma.client.business.findUnique({
-      where: { id: businessId },
-      select: { metaData: true },
+    return this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId);
+      const meta = (business?.metaData as Record<string, any>) ?? {};
+      const magnets = [...(meta.leadMagnets as LeadMagnetConfig[] ?? [])];
+      const newMagnet: LeadMagnetConfig = {
+        ...data,
+        id: `lm_${Date.now()}`,
+      };
+      magnets.push(newMagnet);
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: { ...meta, leadMagnets: magnets } },
+      });
+      return newMagnet;
     });
-    const meta = (business?.metaData as Record<string, any>) ?? {};
-    const magnets = [...(meta.leadMagnets as LeadMagnetConfig[] ?? [])];
-    const newMagnet: LeadMagnetConfig = {
-      ...data,
-      id: `lm_${Date.now()}`,
-    };
-    magnets.push(newMagnet);
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { metaData: { ...meta, leadMagnets: magnets } },
-    });
-    return newMagnet;
   }
 
   async listLeadMagnets(businessId: string): Promise<LeadMagnetConfig[]> {

@@ -1,5 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../core/prisma/prisma.service';
+import { lockBusinessMeta } from '../../core/prisma/business-meta';
 import { SeoService } from './seo.service';
 
 @Injectable()
@@ -26,47 +28,52 @@ export class SeoGoogleAnalyticsService {
     };
   }
 
+  /**
+   * FOLLOW3-D13 (review D12-ST-2: metaData.ga4 holds the Google OAuth tokens):
+   * the connection save, the disconnect and the sync's lastSync stamp read and
+   * write metaData under the business row lock (lockBusinessMeta), so none of
+   * them writes back a copy that undoes another metaData write (a disconnect,
+   * an owner's cleared payment secret) committed meanwhile.
+   */
   async saveConnection(businessId: string, data: {
     propertyId: string;
     accessToken?: string;
     refreshToken?: string;
   }) {
-    const business = await this.prisma.client.business.findFirst({
-      where: { id: businessId, deletedAt: null },
-      select: { metaData: true },
-    });
-    if (!business) throw new Error('Business not found');
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId, { live: true });
+      if (!business) throw new Error('Business not found');
 
-    const meta = (business.metaData as Record<string, any>) ?? {};
-    const ga4 = {
-      ...(meta.ga4 ?? {}),
-      propertyId: data.propertyId,
-      ...(data.accessToken ? { accessToken: data.accessToken } : {}),
-      ...(data.refreshToken ? { refreshToken: data.refreshToken } : {}),
-      connectedAt: new Date().toISOString(),
-    };
+      const meta = (business.metaData as Record<string, any>) ?? {};
+      const ga4 = {
+        ...(meta.ga4 ?? {}),
+        propertyId: data.propertyId,
+        ...(data.accessToken ? { accessToken: data.accessToken } : {}),
+        ...(data.refreshToken ? { refreshToken: data.refreshToken } : {}),
+        connectedAt: new Date().toISOString(),
+      };
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { metaData: { ...meta, ga4 } },
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: { ...meta, ga4 } },
+      });
     });
 
     return { connected: true, propertyId: data.propertyId };
   }
 
   async disconnectGa4(businessId: string) {
-    const business = await this.prisma.client.business.findFirst({
-      where: { id: businessId, deletedAt: null },
-      select: { metaData: true },
-    });
-    if (!business) return { disconnected: true };
+    await this.prisma.client.$transaction(async (tx) => {
+      const business = await lockBusinessMeta(tx, businessId, { live: true });
+      if (!business) return;
 
-    const meta = (business.metaData as Record<string, any>) ?? {};
-    delete meta.ga4;
+      const meta = (business.metaData as Record<string, any>) ?? {};
+      delete meta.ga4;
 
-    await this.prisma.client.business.update({
-      where: { id: businessId },
-      data: { metaData: meta },
+      await tx.business.update({
+        where: { id: businessId },
+        data: { metaData: meta },
+      });
     });
 
     return { disconnected: true };
@@ -100,14 +107,24 @@ export class SeoGoogleAnalyticsService {
 
       const result = await this.seo.ingestAnalyticsData(businessId, { rows });
 
-      await this.prisma.client.business.update({
-        where: { id: businessId },
-        data: {
-          metaData: {
-            ...meta,
-            ga4: { ...ga4, lastSync: new Date().toISOString() },
+      // FOLLOW3-D13: the copy read above is stale after the Google fetch (no
+      // lock is held across it). Stamp lastSync on the metaData read under the
+      // row lock now, and only while GA4 is still connected: a disconnect that
+      // committed meanwhile stays disconnected (its tokens are not restored).
+      await this.prisma.client.$transaction(async (tx) => {
+        const current = await lockBusinessMeta(tx, businessId, { live: true });
+        const fresh = (current?.metaData as Record<string, unknown> | null) ?? {};
+        const connected = fresh.ga4 as Record<string, unknown> | undefined;
+        if (!current || !connected) return;
+        await tx.business.update({
+          where: { id: businessId },
+          data: {
+            metaData: {
+              ...fresh,
+              ga4: { ...connected, lastSync: new Date().toISOString() },
+            } as Prisma.InputJsonValue,
           },
-        },
+        });
       });
 
       return {

@@ -5,8 +5,19 @@ import { PrismaService } from '../src/core/prisma/prisma.service';
 class PrismaMock implements Partial<PrismaService> {
   private meta: Record<string, any> = {};
   client: any = {
+    // FOLLOW3-D13: the listener writes in a transaction after locking the row
+    // (lockBusinessMeta: $queryRaw, then business.findFirst); the transaction
+    // client here is this same mock.
+    $transaction: vi.fn((cb: (tx: any) => unknown) => cb(this.client)),
+    $queryRaw: vi.fn(async () => []),
     business: {
       findUnique: vi.fn(({ where }: any) => {
+        if (this.meta[where.id]) {
+          return { metaData: this.meta[where.id] };
+        }
+        return null;
+      }),
+      findFirst: vi.fn(({ where }: any) => {
         if (this.meta[where.id]) {
           return { metaData: this.meta[where.id] };
         }
