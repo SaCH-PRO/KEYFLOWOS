@@ -226,18 +226,18 @@ export class ActivityEventListener {
    * the service (BookingsService puts the booking row and its contact on the
    * bus), so the start time is in the detail itself.
    *
-   * It is NOT the feed's one row for the booking (CR-V155b-1, residual):
-   * BookingsService.createBooking also logs a booking.created ContactEvent,
-   * which CrmTimelineService copies into Activity (crm:booking.created:contact),
-   * and the cockpit reader (business-timeline.tsx feedRows) leaves out only
-   * invoice.payment_recorded copies. The cockpit shows that copy ('Booking
-   * created') beside this row: two rows, as at base, where its DOUBLE_WRITTEN
-   * rule already showed the listener/executor pair once. Closing it needs
-   * meta.feedCopy=false on that ContactEvent (bookings.service.ts), which
-   * reaches CrmTimelineService only through CrmService.logContactEvent ->
-   * CrmTimelineService.logContactEvent, and that forwards no feedCopy yet
-   * (crm-timeline.service.ts, outside W3-V1-55c's write set;
-   * evidence-feed.integration.test.ts V55-12b todo).
+   * Since W4-FEED-COPY-COMPLETE (owner ruling D-90, V55-12b) it is also the
+   * feed's one row for the booking create: BookingsService.createBooking logs
+   * its booking.created ContactEvent with meta.feedCopy=false, which
+   * CrmService.logContactEvent -> CrmTimelineService.logContactEvent now
+   * carries, so no Activity copy (crm:booking.created:contact) is written
+   * beside this row; the ContactEvent stays on the contact's own timeline.
+   * (The storefront booking's copy, PublicEventsService.logStorefrontEvent,
+   * and booking confirm's copy are not in D-90 and stay.)
+   *
+   * W5-FEED-CATEGORIES (CR-FCC-1, D-90): being the one row, it carries category
+   * BOOKING, so ?category= finds the booking create as it found the copy D-90
+   * removed (category CONTACT), as onContactCreated keeps CONTACT (V55-12a).
    */
   @OnEvent('booking.created')
   async onBookingCreated(payload: BookingCreatedPayload) {
@@ -255,6 +255,7 @@ export class ActivityEventListener {
       tone: 'info',
       data: { bookingId: bk.id, serviceId: bk.serviceId, startTime: bk.startTime },
       contactId: bk.contactId || payload.contact?.id || undefined,
+      category: 'BOOKING',
     });
   }
 
