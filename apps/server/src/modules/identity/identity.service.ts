@@ -18,6 +18,16 @@ import {
 import { membershipApprovalTier } from '../../core/authority/approval-tier';
 import { resolveCrmAccess, type CrmAccess } from '../crm/crm-permissions.helper';
 
+/**
+ * W6-IDENTITY-REKEY-CREATOR (D-73): the reserved key a trigger rule records its creator under,
+ * TRIGGER_RULE_CREATOR_KEY of key-cortex-trigger.service (AgentTrigger.condition and
+ * KeyCortexTriggerRule.filterJson). Restated, not imported: that module's imports reach this one
+ * (through the KEY cortex settings adapter), so importing it would close a cycle.
+ * test/identity-rekey-creator.integration.test.ts writes its rules with the real writers, so a
+ * renamed key fails there.
+ */
+const TRIGGER_CREATOR_KEY = '$createdBy';
+
 /** The three inputs that make up a membership's authority. */
 type AuthorityEnvelope = { role: string; permissionScopes: unknown; maxApprovalTier: number | null };
 
@@ -1212,6 +1222,19 @@ export class IdentityService {
         // integrity still matters): Business.ownerId, TeamActivityLog.userId.
         await tx.business.updateMany({ where: { ownerId: oldId }, data: { ownerId: newId } });
         await tx.teamActivityLog.updateMany({ where: { userId: oldId }, data: { userId: newId } });
+
+        // W6-IDENTITY-REKEY-CREATOR (owner ruling D-73): the member a trigger rule records as its
+        // creator, whose plans it fires run as, kept in the rule's own JSON config:
+        // AgentTrigger.condition (W5-AGENT-TRIGGERS-AUTHORITY) and KeyCortexTriggerRule.filterJson
+        // (KEY-R3b-PLAN-AUTHORITY). Left on the old id, the rule fires a plan for a deleted user whose
+        // ai_plans insert fails on the user foreign key. jsonb_set changes that one key in place, in
+        // every business, and leaves the rule's own filter as it is.
+        await tx.$executeRaw`UPDATE agent_triggers
+          SET condition = jsonb_set(condition, ARRAY[${TRIGGER_CREATOR_KEY}::text], to_jsonb(${newId}::text))
+          WHERE condition ->> ${TRIGGER_CREATOR_KEY}::text = ${oldId}::text`;
+        await tx.$executeRaw`UPDATE key_cortex_trigger_rules
+          SET filter_json = jsonb_set(filter_json, ARRAY[${TRIGGER_CREATOR_KEY}::text], to_jsonb(${newId}::text))
+          WHERE filter_json ->> ${TRIGGER_CREATOR_KEY}::text = ${oldId}::text`;
 
         await tx.user.delete({ where: { id: oldId } });
         return newUser;
